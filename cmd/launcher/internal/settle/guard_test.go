@@ -2,20 +2,11 @@ package settle
 
 import "testing"
 
-// TestMatchedGuardPaths_HitReturnsMatchedFiles verifies that a changed path
-// matching one of the comma-separated MERGE_GUARD_PATHS globs is reported.
-func TestMatchedGuardPaths_HitReturnsMatchedFiles(t *testing.T) {
-	got := matchedGuardPaths(".github/**,**/CLAUDE.md", []string{"src/main.go", ".github/workflows/ci.yml"})
-	want := []string{".github/workflows/ci.yml"}
-	if len(got) != len(want) || got[0] != want[0] {
-		t.Errorf("matchedGuardPaths = %v, want %v", got, want)
-	}
-}
-
-// TestMatchedGuardPaths covers the acceptance-criteria matrix: match,
-// no-match, a deleted file's (still-reported) path, a nested CLAUDE.md, and
-// the empty-string opt-out that disables the guard entirely.
-func TestMatchedGuardPaths(t *testing.T) {
+// Internal seam: a pure glob-matching matrix; the Settle table pins the guard
+// hit and miss wiring, so each glob shape is cheaper to check directly.
+// It covers match, no-match, a deleted file's (still-reported) path, a nested
+// CLAUDE.md, and the empty-string opt-out that disables the guard entirely.
+func TestInternalSeam_MatchedGuardPaths(t *testing.T) {
 	const defaultPaths = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**"
 
 	cases := []struct {

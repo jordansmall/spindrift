@@ -22,7 +22,8 @@ func recordingClock() (*[]time.Duration, dispatch.Clock) {
 // before retry N. The trailing MergePollInterval sleep comes from
 // rewaitAfterForcePush's gateToGreen confirm-poll, which since issue #2502
 // sleeps through the same injected s.clock rather than a real time.Sleep.
-func TestPreflightStaleBaseRebasePushBackoff_SucceedsAfterRetries(t *testing.T) {
+// Internal seam: calls prLander.mergeImmediate directly to pin the backoff schedule without a full landing.
+func TestInternalSeam_PreflightStaleBaseRebasePushBackoff_SucceedsAfterRetries(t *testing.T) {
 	c := baseConfig()
 	c.Policy = retry.Policy{Unit: 2 * time.Second, Jitter: 1 * time.Second}
 	c.MaxRebaseAttempts = 3
@@ -66,7 +67,8 @@ func TestPreflightStaleBaseRebasePushBackoff_SucceedsAfterRetries(t *testing.T) 
 // This covers the reactive rebase-retry loop inside mergeImmediate, which is a
 // separate loop from preflightStaleBase. Exhausting the budget must still
 // return forge.ErrTransientPushFailure, not a summary error that hides it.
-func TestMergeImmediateRebasePushBackoff_ExhaustsWithOriginalError(t *testing.T) {
+// Internal seam: calls prLander.mergeImmediate directly to pin the backoff schedule without a full landing.
+func TestInternalSeam_MergeImmediateRebasePushBackoff_ExhaustsWithOriginalError(t *testing.T) {
 	c := baseConfig()
 	c.Policy = retry.Policy{Unit: 2 * time.Second, Jitter: 1 * time.Second}
 	c.MaxRebaseAttempts = 3
@@ -102,7 +104,8 @@ func TestMergeImmediateRebasePushBackoff_ExhaustsWithOriginalError(t *testing.T)
 
 // The backoff only fires between retries, never before the first attempt, so a
 // non-transient rebase failure records no sleeps.
-func TestRebasePushBackoff_NoRetryNoSleep(t *testing.T) {
+// Internal seam: calls prLander.mergeImmediate directly to pin the backoff schedule without a full landing.
+func TestInternalSeam_RebasePushBackoff_NoRetryNoSleep(t *testing.T) {
 	c := baseConfig()
 	c.Policy = retry.Policy{Unit: 2 * time.Second, Jitter: 1 * time.Second}
 	c.MaxRebaseAttempts = 2
@@ -125,7 +128,8 @@ func TestRebasePushBackoff_NoRetryNoSleep(t *testing.T) {
 	}
 }
 
-func TestRebasePushBackoff_ZeroMaxRebaseAttemptsNoSleep(t *testing.T) {
+// Internal seam: calls prLander.mergeImmediate directly to pin the backoff schedule without a full landing.
+func TestInternalSeam_RebasePushBackoff_ZeroMaxRebaseAttemptsNoSleep(t *testing.T) {
 	c := baseConfig()
 	c.Policy = retry.Policy{Unit: 2 * time.Second, Jitter: 1 * time.Second}
 	c.MaxRebaseAttempts = 0
@@ -150,7 +154,8 @@ func TestRebasePushBackoff_ZeroMaxRebaseAttemptsNoSleep(t *testing.T) {
 
 // Merge transient retries share the retry loop, so retry N waits
 // Policy.Unit*N + Policy.Jitter in total (the loop sleeps in 1s slices).
-func TestMergeImmediateTransientBackoff_SucceedsAfterRetries(t *testing.T) {
+// Internal seam: calls prLander.mergeImmediate directly to pin the backoff schedule without a full landing.
+func TestInternalSeam_MergeImmediateTransientBackoff_SucceedsAfterRetries(t *testing.T) {
 	c := baseConfig()
 	c.Policy = retry.Policy{Max: 3, Unit: 2 * time.Second, Jitter: 1 * time.Second}
 	var slept time.Duration
@@ -171,7 +176,8 @@ func TestMergeImmediateTransientBackoff_SucceedsAfterRetries(t *testing.T) {
 
 // An operator stop during a merge-transient backoff abandons the landing
 // instead of sleeping out the wait and merging again.
-func TestMergeImmediateTransientBackoff_StopMidBackoffAbandons(t *testing.T) {
+// Internal seam: calls prLander.mergeImmediate directly to pin the backoff schedule without a full landing.
+func TestInternalSeam_MergeImmediateTransientBackoff_StopMidBackoffAbandons(t *testing.T) {
 	c := baseConfig()
 	c.Policy = retry.Policy{Max: 3, Unit: 5 * time.Second}
 	var s *Settle
@@ -195,7 +201,8 @@ func TestMergeImmediateTransientBackoff_StopMidBackoffAbandons(t *testing.T) {
 
 // The merge-transient budget spans the whole mergeImmediate call: a checks-
 // blocked wait between two transients does not refill it.
-func TestMergeImmediateTransientBackoff_BudgetSpansChecksBlockedWaits(t *testing.T) {
+// Internal seam: calls prLander.mergeImmediate directly to pin the backoff schedule without a full landing.
+func TestInternalSeam_MergeImmediateTransientBackoff_BudgetSpansChecksBlockedWaits(t *testing.T) {
 	c := baseConfig()
 	c.Policy = retry.Policy{Max: 1, Unit: time.Second}
 	c.MaxRebaseAttempts = 2

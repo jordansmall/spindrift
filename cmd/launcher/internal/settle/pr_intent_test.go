@@ -8,10 +8,12 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
+// Internal seam: a pure body-text matrix; the Settle draft-PR rows pin only the
+// append and already-closed cases.
 // Only non-local (GitHub-shaped) trackers get a "Closes #<num>" reference. A
 // LandingRecorder-shaped (local) tracker closes issues through its own axis
 // (ADR 0029), never through GitHub's auto-close-on-merge keyword.
-func TestEnsureClosesReference(t *testing.T) {
+func TestInternalSeam_EnsureClosesReference(t *testing.T) {
 	tests := []struct {
 		name    string
 		body    string
@@ -97,12 +99,14 @@ func TestEnsureClosesReference(t *testing.T) {
 	}
 }
 
+// Internal seam: a pure keyword matrix over commit subjects, too wide to drive
+// through Settle row by row.
 // A Box-authored string embedded verbatim in a reconstructed PR body (issue
 // #2447) must never carry a live GitHub closing-keyword reference: a
 // prompt-injected Box controls its own commit subjects, and a subject shaped
 // like "fix: closes #999" would otherwise auto-close an unrelated issue #999
 // on merge.
-func TestDefuseClosingKeywords(t *testing.T) {
+func TestInternalSeam_DefuseClosingKeywords(t *testing.T) {
 	tests := []struct {
 		name    string
 		subject string

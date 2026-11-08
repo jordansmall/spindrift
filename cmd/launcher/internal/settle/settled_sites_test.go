@@ -80,6 +80,10 @@ func TestSettlePatch_SettlesNoRecord(t *testing.T) {
 	}
 }
 
+// flushLatched latches testPR and flushes the settled op for reason straight into a
+// stamped dispatch log. The merge_commit field lands only in that op, so the
+// internal-seam tests below call flushSettled directly: reaching it through
+// Settle would need a full landing driven to each reason just to vary one field.
 func flushLatched(t *testing.T, fc *forge.Fake, reason string) []dispatchrecord.Record {
 	t.Helper()
 	c := baseConfig()
@@ -94,7 +98,8 @@ func flushLatched(t *testing.T, fc *forge.Fake, reason string) []dispatchrecord.
 	return logRecords(t, path)
 }
 
-func TestFlushSettled_MergedCarriesMergeCommit(t *testing.T) {
+// Internal seam: see flushLatched.
+func TestInternalSeam_FlushSettled_MergedCarriesMergeCommit(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetMergeCommit(testPR, "deadbeef")
 	records := flushLatched(t, fc, dispatchrecord.ReasonMerged)
@@ -103,7 +108,8 @@ func TestFlushSettled_MergedCarriesMergeCommit(t *testing.T) {
 	}
 }
 
-func TestFlushSettled_NotMergedOmitsMergeCommit(t *testing.T) {
+// Internal seam: see flushLatched.
+func TestInternalSeam_FlushSettled_NotMergedOmitsMergeCommit(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetMergeCommit(testPR, "deadbeef")
 	records := flushLatched(t, fc, dispatchrecord.ReasonCIRed)
@@ -114,7 +120,8 @@ func TestFlushSettled_NotMergedOmitsMergeCommit(t *testing.T) {
 
 // A failed merge-commit read warns and leaves the field empty, but the settled
 // op still lands with the unchanged outcome.
-func TestFlushSettled_MergeCommitReadErrorKeepsOutcome(t *testing.T) {
+// Internal seam: see flushLatched.
+func TestInternalSeam_FlushSettled_MergeCommitReadErrorKeepsOutcome(t *testing.T) {
 	fc := forge.NewFake()
 	fc.MergeCommitErr = errors.New("boom")
 	var records []dispatchrecord.Record

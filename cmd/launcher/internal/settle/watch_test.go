@@ -86,7 +86,9 @@ type watchPollCase struct {
 	wantCallCount  int
 }
 
-func TestWatchPoll(t *testing.T) {
+// Internal seam: the poll matrix (interval, deadline, registration window, state
+// sequence) is cheaper to drive on watch.poll than through a landing per row.
+func TestInternalSeam_WatchPoll(t *testing.T) {
 	cases := []watchPollCase{
 		{
 			// Flooring a zero pollInterval to 1 keeps elapsed advancing, so the

@@ -39,10 +39,10 @@ var testDispatchLabels = forge.DispatchLabels{
 	Failed:       "agent-failed",
 }
 
-// TestGateToGreen pins that gateToGreen never swaps a label itself. selfHeal
+// TestInternalSeam_GateToGreen pins that gateToGreen never swaps a label itself. selfHeal
 // owns agent-complete and swaps it only once the landing path settles (issue
-// #757).
-func TestGateToGreen(t *testing.T) {
+// #757). Internal seam: gateToGreen is unreachable on its own through Settle.
+func TestInternalSeam_GateToGreen(t *testing.T) {
 	cases := []struct {
 		name                string
 		timeout             int
