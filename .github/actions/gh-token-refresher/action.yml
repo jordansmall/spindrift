@@ -2,7 +2,7 @@ name: GH token refresher
 description: >-
   Starts a background loop that re-mints a fresh GitHub App installation
   token every 45 minutes for the rest of the job and writes it to a file,
-  exporting GH_TOKEN_REFRESH_FILE so the launcher (via its
+  exporting GH_APP_TOKEN_FILE so the launcher (via its
   --gh-token-refresh-file flag) can poll the file and keep GH_TOKEN current
   past the ~1h installation-token lifetime (issue #1027). GH_TOKEN in
   GITHUB_ENV stays the initial token, so later shell steps must re-read the
@@ -47,7 +47,7 @@ runs:
 
         token_file="$RUNNER_TEMP/gh-token-refresh"
         printf '%s' "$INITIAL_TOKEN" > "$token_file"
-        echo "GH_TOKEN_REFRESH_FILE=$token_file" >> "$GITHUB_ENV"
+        echo "GH_APP_TOKEN_FILE=$token_file" >> "$GITHUB_ENV"
 
         key_file="$RUNNER_TEMP/gh-app-private-key.pem"
         printf '%s\n' "$APP_PRIVATE_KEY" > "$key_file"

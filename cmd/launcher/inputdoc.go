@@ -1,8 +1,8 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -80,11 +80,13 @@ func resolveBoxEnvVar(name string) string {
 	return schemaDefault(name)
 }
 
-// warnAmbientKnobEnv prints one deprecation warning per non-secret schema knob
-// found in the environment (ADR 0020 staging: warn this release, error the
-// next). It must run before parseFlags mutates the environment via os.Setenv,
-// or a flag-set value looks like an ambient one.
-func warnAmbientKnobEnv(w io.Writer) {
+// ambientKnobEnvError rejects every non-secret schema knob found in the
+// environment (ADR 0020: the knob env var is gone, the document and flags carry
+// the value). It must run before parseFlags mutates the environment via
+// os.Setenv, or a flag-set value looks like an ambient one. Secrets and
+// non-knob plumbing are not inputdoc.SchemaFlags rows, so they pass.
+func ambientKnobEnvError() error {
+	var lines []string
 	for _, e := range inputdoc.SchemaFlags {
 		v, ok := ambientSetting(e.Env)
 		if !ok {
@@ -104,6 +106,10 @@ func warnAmbientKnobEnv(w io.Writer) {
 		if v == "" {
 			v = `""`
 		}
-		fmt.Fprintf(w, "%s=%s set in environment — knob env overrides are deprecated; use %s\n", e.Env, v, equiv)
+		lines = append(lines, fmt.Sprintf("%s=%s set in environment — knob env vars are not read; use %s", e.Env, v, equiv))
 	}
+	if len(lines) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(lines, "\n"))
 }

@@ -7,9 +7,8 @@ Consumer-tunable knobs live under `perSystem.spindrift.*`, grouped by
 domain (ADR 0037); domains with no consumer-tunable knobs are omitted.
 
 Precedence at runtime: CLI flag > flake setting (via the Launcher input
-document, ADR 0020) > baked default. A knob env var still wins over the
-flake setting this release, but is deprecated and warns; env configures
-only secrets and internal plumbing going forward.
+document, ADR 0020) > baked default. A knob env var is rejected with exit 6;
+env configures only secrets and internal plumbing.
 See [`docs/reference.md`](reference.md) for the full option surface and runtime vars.
 
 ## Agents (`perSystem.spindrift.agents`)

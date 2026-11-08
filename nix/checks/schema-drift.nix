@@ -1316,7 +1316,7 @@ checkedMerge {
   # generated flag table (cmd/launcher/internal/inputdoc/flagtable_gen.go)
   # from the prose it is meant to source (issue #3698). Two more asserts cover
   # separate invariants the same axis implies: a launcherIgnores knob must
-  # also set flakeOption, since its settings path is all warnAmbientKnobEnv
+  # also set flakeOption, since its settings path is all ambientKnobEnvError
   # has left to suggest, and must not be secret, since inputdoc.IsDaemonOnly
   # reads the axis off SchemaFlags, which has no row for a secret knob.
   # The remaining asserts pin docs/reference.md's `### Advanced tuning` table
@@ -1345,7 +1345,7 @@ checkedMerge {
       names = attrNames schema;
       missingAxis = sort builtins.lessThan (filter (n: docSet n && !axisSet n) names);
       staleAxis = sort builtins.lessThan (filter (n: axisSet n && !docSet n) names);
-      # warnAmbientKnobEnv points a launcherIgnores knob at its settings path
+      # ambientKnobEnvError points a launcherIgnores knob at its settings path
       # alone, so a knob without a flake option would leave it with nothing to
       # suggest (cmd/launcher/inputdoc.go).
       noFlakeOption = sort builtins.lessThan (
@@ -1397,7 +1397,7 @@ checkedMerge {
     assert assertMsg (staleAxis == [ ])
       "lib/env-schema.nix: knob(s) [ ${concatStringsSep " " staleAxis} ] set launcherIgnores = true but their doc no longer says \"${clause}\" (issue #3698)";
     assert assertMsg (noFlakeOption == [ ])
-      "lib/env-schema.nix: knob(s) [ ${concatStringsSep " " noFlakeOption} ] set launcherIgnores = true without flakeOption = true, leaving warnAmbientKnobEnv no settings path to suggest in place of the inert flag (issue #3698)";
+      "lib/env-schema.nix: knob(s) [ ${concatStringsSep " " noFlakeOption} ] set launcherIgnores = true without flakeOption = true, leaving ambientKnobEnvError no settings path to suggest in place of the inert flag (issue #3698)";
     assert assertMsg (secretAxis == [ ])
       "lib/env-schema.nix: secret knob(s) [ ${concatStringsSep " " secretAxis} ] set launcherIgnores = true, but SchemaFlags has no row for a secret knob, so inputdoc.IsDaemonOnly would never see the axis";
     assert assertMsg sectionFound

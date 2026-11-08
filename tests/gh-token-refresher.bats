@@ -273,7 +273,7 @@ EOF
   ) || rc=$?
 
   [ "$rc" -eq 0 ]
-  [ "$(cat "$GITHUB_ENV")" = "GH_TOKEN_REFRESH_FILE=$BATS_TEST_TMPDIR/gh-token-refresh" ]
+  [ "$(cat "$GITHUB_ENV")" = "GH_APP_TOKEN_FILE=$BATS_TEST_TMPDIR/gh-token-refresh" ]
   [ "$(cat "$BATS_TEST_TMPDIR/gh-token-refresh")" = "initial" ]
 
   # The loop removes the key file on exit, so check it while the loop sleeps.

@@ -20,6 +20,9 @@ set -euo pipefail
 
 : "${GH_LOG:?GH_LOG must point at a log file}"
 printf '%s\n' "$*" >>"$GH_LOG"
+# The token each call ran with, so tests/harness-env.bats can pin which
+# source (environment or a sourced file) won without echoing it into GH_LOG.
+printf '%s\n' "${GH_TOKEN-}" >>"$GH_LOG.token"
 
 # Per-test state (issue number -> lifecycle label, pr-draft-N -> isDraft), kept
 # beside the log so it is isolated per test yet persists across gh calls.

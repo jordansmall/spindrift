@@ -27,7 +27,7 @@ func TestRunNixBuild_InvokesNixRunBuildInPwd(t *testing.T) {
 	}
 
 	pwd := t.TempDir()
-	if _, err := RunNixBuild(pwd); err != nil {
+	if _, err := RunNixBuild(pwd, nil, nil); err != nil {
 		t.Fatalf("RunNixBuild: %v", err)
 	}
 
@@ -60,7 +60,7 @@ func TestRunNixBuild_ScriptedFailure_SurfacesStderr(t *testing.T) {
 		return exec.Command(script, args...)
 	}
 
-	_, err := RunNixBuild(t.TempDir())
+	_, err := RunNixBuild(t.TempDir(), nil, nil)
 	if err == nil {
 		t.Fatal("expected an error from a scripted build failure, got nil")
 	}
@@ -101,7 +101,7 @@ func TestRunNixBuild_CapturesOutput_NeverTouchesRealStdio(t *testing.T) {
 	os.Stderr = errW
 	t.Cleanup(func() { os.Stderr = origStderr })
 
-	output, err := RunNixBuild(t.TempDir())
+	output, err := RunNixBuild(t.TempDir(), nil, nil)
 
 	os.Stdout = origStdout
 	outW.Close()
@@ -153,7 +153,7 @@ func TestRunNixBuild_CapsOutputSize(t *testing.T) {
 		return exec.Command(script, args...)
 	}
 
-	output, err := RunNixBuild(t.TempDir())
+	output, err := RunNixBuild(t.TempDir(), nil, nil)
 	if err != nil {
 		t.Fatalf("RunNixBuild: %v", err)
 	}
@@ -162,5 +162,34 @@ func TestRunNixBuild_CapsOutputSize(t *testing.T) {
 	}
 	if !strings.Contains(output, "END-OF-BUILD") {
 		t.Errorf("output = %q, want it to retain the tail (most recent bytes written)", output)
+	}
+}
+
+// The Console's child launcher takes the caller's knob flags after `build` and
+// only the caller's env, so a knob parseFlags put in the parent's environment
+// cannot reach it.
+func TestRunNixBuild_PassesArgsAndEnvVerbatim(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fake-nix")
+	body := "#!/bin/sh\nprintf '%s\\n' \"$*\"\nexport -p\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+	t.Setenv("MAX_PARALLEL", "9")
+
+	out, err := RunNixBuild(t.TempDir(), []string{"--max-parallel", "2"}, []string{"KEEP=1"})
+	if err != nil {
+		t.Fatalf("RunNixBuild: %v", err)
+	}
+	if first, _, _ := strings.Cut(out, "\n"); first != "run .# -- build --max-parallel 2" {
+		t.Errorf("argv = %q", first)
+	}
+	if !strings.Contains(out, `KEEP="1"`) || strings.Contains(out, "MAX_PARALLEL") {
+		t.Errorf("child env = %q, want only the passed env", out)
 	}
 }

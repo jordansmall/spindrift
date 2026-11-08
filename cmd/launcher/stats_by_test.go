@@ -288,7 +288,7 @@ func TestStats_ByRejectsBadDimension(t *testing.T) {
 	} {
 		t.Run(tc.by, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			if code := mainRun([]string{"stats", "--by", tc.by}, &stdout, &stderr); code != 1 {
+			if code := mainRunT(t, []string{"stats", "--by", tc.by}, &stdout, &stderr); code != 1 {
 				t.Fatalf("code = %d, want 1", code)
 			}
 			if !strings.Contains(stderr.String(), tc.want) || !strings.Contains(stderr.String(), "usage: spindrift stats") {

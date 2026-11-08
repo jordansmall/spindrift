@@ -398,7 +398,7 @@ in
               options = lib.mapAttrs mkSectionOption sectionKnobs;
             };
             default = { };
-            description = "Non-secret run defaults baked into the generated `run` command, grouped by section. A matching env var wins at runtime.";
+            description = "Non-secret run defaults baked into the generated `run` command, grouped by section. A matching env var exits 6 (config-invalid); use the matching `--flag` instead.";
           };
         };
       in

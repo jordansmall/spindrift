@@ -140,7 +140,8 @@ Every other knob still treats an empty env value as unset.
 
 ## Amendment (architecture review 2026-11-07): staging completes, artifacts are typed
 
-Decided, not yet landed. Three changes close the gaps the #813 amendment
+Decided; the first change landed in issue #6623 and the env-first artifact
+lookup went in issue #6611. Three changes close the gaps the #813 amendment
 recorded:
 
 - **Release N+1 arrives.** The warning has run since v0.5.0. An ambient

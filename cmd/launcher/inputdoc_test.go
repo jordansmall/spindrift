@@ -89,10 +89,10 @@ func setArtifact(t *testing.T, key, value string) {
 	t.Cleanup(func() { loadedDoc = prev })
 }
 
-// ADR 0020 requires the warning to say where the knob belongs, so for a
+// ADR 0020 requires the error to say where the knob belongs, so for a
 // flakeOption-backed knob it names the variable, its flag, and its domain-tree
 // path (the knob's derived flake path, ADR 0037 Pass 2).
-func TestWarnAmbientKnobEnv_WarnsWithFlagAndSettingsEquivalent(t *testing.T) {
+func TestAmbientKnobEnvError_NamesFlagAndSettingsEquivalent(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("BASE_BRANCH") })
 	orig := inputdoc.SchemaFlags
 	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
@@ -101,20 +101,18 @@ func TestWarnAmbientKnobEnv_WarnsWithFlagAndSettingsEquivalent(t *testing.T) {
 	}
 	os.Setenv("BASE_BRANCH", "develop")
 
-	var buf bytes.Buffer
-	warnAmbientKnobEnv(&buf)
+	out := ambientKnobEnvErrorText()
 
-	out := buf.String()
 	for _, want := range []string{"BASE_BRANCH", "--base-branch", "git.baseBranch"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("warning = %q, want it to mention %q", out, want)
+			t.Errorf("error = %q, want it to mention %q", out, want)
 		}
 	}
 }
 
 // A knob with no flakeOption behind it has no settings equivalent, so the
-// fixture leaves settingsPath empty and the warning names only the flag.
-func TestWarnAmbientKnobEnv_NoSettingsPath_FlagOnly(t *testing.T) {
+// fixture leaves settingsPath empty and the error names only the flag.
+func TestAmbientKnobEnvError_NoSettingsPath_FlagOnly(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("ISSUE_NUMBER") })
 	orig := inputdoc.SchemaFlags
 	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
@@ -123,21 +121,19 @@ func TestWarnAmbientKnobEnv_NoSettingsPath_FlagOnly(t *testing.T) {
 	}
 	os.Setenv("ISSUE_NUMBER", "42")
 
-	var buf bytes.Buffer
-	warnAmbientKnobEnv(&buf)
+	out := ambientKnobEnvErrorText()
 
-	out := buf.String()
 	if !strings.Contains(out, "--issue-number") {
-		t.Errorf("warning = %q, want it to mention --issue-number", out)
+		t.Errorf("error = %q, want it to mention --issue-number", out)
 	}
 	if strings.Contains(out, " or ") {
-		t.Errorf("warning = %q, want just the flag (no second migration target) for a non-flakeOption knob", out)
+		t.Errorf("error = %q, want just the flag (no second migration target) for a non-flakeOption knob", out)
 	}
 }
 
-// A launcherIgnores knob's flag is inert (see inputdoc.FlagEntry), so the warning must
+// A launcherIgnores knob's flag is inert (see inputdoc.FlagEntry), so the error must
 // name only the settings path (issue #3698).
-func TestWarnAmbientKnobEnv_LauncherIgnores_SettingsPathOnly(t *testing.T) {
+func TestAmbientKnobEnvError_LauncherIgnores_SettingsPathOnly(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("DAEMON_IDLE_FLOOR") })
 	orig := inputdoc.SchemaFlags
 	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
@@ -146,24 +142,22 @@ func TestWarnAmbientKnobEnv_LauncherIgnores_SettingsPathOnly(t *testing.T) {
 	}
 	os.Setenv("DAEMON_IDLE_FLOOR", "99h")
 
-	var buf bytes.Buffer
-	warnAmbientKnobEnv(&buf)
+	out := ambientKnobEnvErrorText()
 
-	out := buf.String()
 	for _, want := range []string{"DAEMON_IDLE_FLOOR", "dispatch.daemonIdleFloor"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("warning = %q, want it to mention %q", out, want)
+			t.Errorf("error = %q, want it to mention %q", out, want)
 		}
 	}
 	if strings.Contains(out, "--daemon-idle-floor") {
-		t.Errorf("warning = %q, want no flag suggestion for a launcher-ignored knob", out)
+		t.Errorf("error = %q, want no flag suggestion for a launcher-ignored knob", out)
 	}
 	if strings.Contains(out, " or ") {
-		t.Errorf("warning = %q, want just the settings path (no flag alternative)", out)
+		t.Errorf("error = %q, want just the settings path (no flag alternative)", out)
 	}
 }
 
-func TestWarnAmbientKnobEnv_UnsetKnob_NoWarning(t *testing.T) {
+func TestAmbientKnobEnvError_UnsetKnob_Passes(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("MAX_PARALLEL") })
 	os.Unsetenv("MAX_PARALLEL")
 	orig := inputdoc.SchemaFlags
@@ -172,17 +166,16 @@ func TestWarnAmbientKnobEnv_UnsetKnob_NoWarning(t *testing.T) {
 		{Env: "MAX_PARALLEL", Flag: "max-parallel", SettingsPath: "dispatch.maxParallel"},
 	}
 
-	var buf bytes.Buffer
-	warnAmbientKnobEnv(&buf)
+	out := ambientKnobEnvErrorText()
 
-	if buf.String() != "" {
-		t.Errorf("warning = %q, want empty for an unset knob", buf.String())
+	if out != "" {
+		t.Errorf("error = %q, want empty for an unset knob", out)
 	}
 }
 
 // A bool knob's explicit off is set-but-empty (ambientSetting), and it
-// overrides the document's value, so it owes the same ADR 0020 warning.
-func TestWarnAmbientKnobEnv_SetButEmptyBoolKnob_Warns(t *testing.T) {
+// overrides the document's value, so it owes the same ADR 0020 error.
+func TestAmbientKnobEnvError_SetButEmptyBoolKnob_Errors(t *testing.T) {
 	orig := inputdoc.SchemaFlags
 	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
 	inputdoc.SchemaFlags = []inputdoc.FlagEntry{
@@ -190,20 +183,18 @@ func TestWarnAmbientKnobEnv_SetButEmptyBoolKnob_Warns(t *testing.T) {
 	}
 	t.Setenv("AUTO_FORMAT", "")
 
-	var buf bytes.Buffer
-	warnAmbientKnobEnv(&buf)
+	out := ambientKnobEnvErrorText()
 
-	out := buf.String()
 	for _, want := range []string{`AUTO_FORMAT=""`, "agents.format.enable"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("warning = %q, want it to mention %q", out, want)
+			t.Errorf("error = %q, want it to mention %q", out, want)
 		}
 	}
 }
 
 // An emptyDisables string knob's "" is a real setting (it disables the limit),
-// so it owes the ADR 0020 warning like a bool knob's explicit off.
-func TestWarnAmbientKnobEnv_EmptyDisablesKnobSetEmpty_Warns(t *testing.T) {
+// so it owes the ADR 0020 error like a bool knob's explicit off.
+func TestAmbientKnobEnvError_EmptyDisablesKnobSetEmpty_Errors(t *testing.T) {
 	orig := inputdoc.SchemaFlags
 	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
 	inputdoc.SchemaFlags = []inputdoc.FlagEntry{
@@ -211,18 +202,16 @@ func TestWarnAmbientKnobEnv_EmptyDisablesKnobSetEmpty_Warns(t *testing.T) {
 	}
 	t.Setenv("MEMORY_LIMIT", "")
 
-	var buf bytes.Buffer
-	warnAmbientKnobEnv(&buf)
+	out := ambientKnobEnvErrorText()
 
-	out := buf.String()
 	for _, want := range []string{`MEMORY_LIMIT=""`, "box.memoryLimit"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("warning = %q, want it to mention %q", out, want)
+			t.Errorf("error = %q, want it to mention %q", out, want)
 		}
 	}
 }
 
-func TestWarnAmbientKnobEnv_SetButEmptyNonBoolKnob_NoWarning(t *testing.T) {
+func TestAmbientKnobEnvError_SetButEmptyNonBoolKnob_Passes(t *testing.T) {
 	orig := inputdoc.SchemaFlags
 	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
 	inputdoc.SchemaFlags = []inputdoc.FlagEntry{
@@ -230,11 +219,10 @@ func TestWarnAmbientKnobEnv_SetButEmptyNonBoolKnob_NoWarning(t *testing.T) {
 	}
 	t.Setenv("MAX_PARALLEL", "")
 
-	var buf bytes.Buffer
-	warnAmbientKnobEnv(&buf)
+	out := ambientKnobEnvErrorText()
 
-	if buf.String() != "" {
-		t.Errorf("warning = %q, want empty for a set-but-empty non-bool knob", buf.String())
+	if out != "" {
+		t.Errorf("error = %q, want empty for a set-but-empty non-bool knob", out)
 	}
 }
 
@@ -339,7 +327,7 @@ func TestMainRun_AmbientDriverMismatch_WarnsOnceAndBakedWins(t *testing.T) {
 	run := func(ambient string) string {
 		t.Setenv("DRIVER", ambient)
 		var stdout, stderr bytes.Buffer
-		mainRun([]string{"--input", docPath, "research"}, &stdout, &stderr)
+		mainRunT(t, []string{"--input", docPath, "research"}, &stdout, &stderr)
 		return stderr.String()
 	}
 
@@ -378,7 +366,7 @@ func TestMainRun_AmbientDriverMismatch_WarnedMarkerSuppresses(t *testing.T) {
 			t.Setenv("DRIVER", tc.ambient)
 			t.Setenv(inputdoc.DriverWarnedEnv, tc.marker)
 			var stdout, stderr bytes.Buffer
-			mainRun(append([]string{"--input", docPath}, tc.verb...), &stdout, &stderr)
+			mainRunT(t, append([]string{"--input", docPath}, tc.verb...), &stdout, &stderr)
 			if n := strings.Count(stderr.String(), "using the baked Driver"); n != tc.wantWarnings {
 				t.Errorf("%d warnings in stderr, want %d: %q", n, tc.wantWarnings, stderr.String())
 			}
@@ -421,5 +409,22 @@ func TestResolveBoxEnvVar_NeverReadsGitConfig(t *testing.T) {
 	}
 	if len(*calls) != 0 {
 		t.Errorf("gitConfigLookup called with %v, want no calls", *calls)
+	}
+}
+
+func ambientKnobEnvErrorText() string {
+	if err := ambientKnobEnvError(); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// Secrets and non-knob plumbing are not inputdoc.SchemaFlags rows, so they stay legal
+// ambient input.
+func TestAmbientKnobEnvError_SecretAndPlumbing_Pass(t *testing.T) {
+	t.Setenv("GH_TOKEN", "secret")
+	t.Setenv("DRIVER", "claude")
+	if out := ambientKnobEnvErrorText(); out != "" {
+		t.Errorf("error = %q, want empty for a secret and a non-knob variable", out)
 	}
 }

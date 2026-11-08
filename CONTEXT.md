@@ -688,8 +688,8 @@ generated wrapper to the launcher through a single `--input` store path: a
 `settings` section (the resolved knob values after the Consumer flake's
 `settings` are applied) and an `artifacts` section (built references — image
 archive, agent files, driver name, …). Knob precedence is document < explicit
-CLI flag; ambient env no longer configures knobs (staged: warn, then error)
-and remains only for secrets and launcher→Box plumbing. The document is the
+CLI flag; a knob env var exits 6 (`config-invalid`); ambient env
+remains only for secrets and launcher→Box plumbing. The document is the
 Consumer flake's voice, flags are the operator's per-run voice, env is
 secrets. Decided 2026-07-13 (ADR 0020), replacing the exported
 `VAR="${VAR:-baked}"` run preamble whose env-wins fallback let ambient

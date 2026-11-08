@@ -558,7 +558,7 @@ rec {
         | `packages`  | `${path "packages" structuralPaths}` | shared         | `pkgs -> [pkg]`             | `[]`               | project build/test tools baked into the image (the toolchain surface)|
         | `prefetch`  | `${path "prefetch" structuralPaths}` | shared         | shell snippet               | `""`               | runs in the work tree after the clone, to warm dependency caches; failures are non-fatal |
         | `prompt`    | `${path "prompt" structuralPaths}` | shared         | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`spindrift build`). The SPINDRIFT_OUTCOME contract is harness-owned: `spindrift build` appends it automatically if a custom `prompt` omits it (idempotent — a prompt that already has it is untouched) |
-        | `scoutPrompt` / `reviewPrompt` / `filerPrompt` | — | **`mkHarness` only** | string | bundled starters | system prompts for the read-only scout and reviewer subagents and the opt-in filer subagent (see [Filer](#filer)); not settable on `perSystem.spindrift.*` — override at runtime via `SPINDRIFT_PROMPT_DIR` regardless of which caller baked the image |
+        | `scoutPrompt` / `reviewPrompt` / `filerPrompt` | — | **`mkHarness` only** | string | bundled starters | system prompts for the read-only scout and reviewer subagents and the opt-in filer subagent (see [Filer](#filer)); not settable on `perSystem.spindrift.*` — override at runtime via `--prompt-dir` regardless of which caller baked the image |
         | `skills`    | `${path "skills" structuralPaths}` | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at the fixed `/agent/skills` path alongside the harness-owned skills (e.g. `auto-format`, `auto-lint`, `check-hygiene`, `code-comments`, baked regardless of this list), each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body; the name must match `${skillNamePattern}` and not be `.` or `..`, else evaluation fails, issue #5022) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); the `box` binary copies both into the Driver's actual runtime skills dir at box startup, then copies `SPINDRIFT_SKILLS_DIR` (staged at `/operator-skills`) over the top so runtime overrides win without erasing the baked set (issue #2489) |
         | `settings`  | — | **flake-module only** | submodule, grouped by section (see below) | `{}` | **deprecated** compat shim (ADR 0037): every schema-generated knob is now a first-class option in the domain tree below; this submodule still works pre-1.0 (forwards with an eval warning) but new config should use the domain paths directly |
         | `runtime`   | `${path "runtime" structuralPaths}` | shared         | ${runtimeCells.type} | ${runtimeCells.default} | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime (`rancher` is an alias for Rancher Desktop's containerd mode, driven via `nerdctl`), or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
@@ -2460,9 +2460,8 @@ rec {
     + "domain (ADR 0037); domains with no consumer-tunable knobs are omitted.\n"
     + "\n"
     + "Precedence at runtime: CLI flag > flake setting (via the Launcher input\n"
-    + "document, ADR 0020) > baked default. A knob env var still wins over the\n"
-    + "flake setting this release, but is deprecated and warns; env configures\n"
-    + "only secrets and internal plumbing going forward.\n"
+    + "document, ADR 0020) > baked default. A knob env var is rejected with exit 6;\n"
+    + "env configures only secrets and internal plumbing.\n"
     + "See [`docs/reference.md`](reference.md) for the full option surface and runtime vars.\n"
     + "\n"
     + concatStrings (map renderSection domainOrder)
@@ -2832,8 +2831,7 @@ rec {
         local bundle. The agent CLI is a swappable Driver \(em Claude Code,
         opencode, or pi. Every runtime knob is set by flag, by the Consumer
         flake's settings, or by baked default, in that precedence order; a knob
-        env var still wins over the flake setting this release, deprecated and
-        warned on (ADR 0020). Secrets are read from the environment or from a
+        env var is rejected with exit 6 (ADR 0020). Secrets are read from the environment or from a
         gitignored
         .I harness.env
         in the working directory.
@@ -2848,8 +2846,7 @@ rec {
         .SH OPTIONS
         Flags take precedence over the Consumer flake's settings (carried by the
         Launcher input document, ADR 0020), which take precedence over baked
-        defaults. A knob env var still wins over the flake setting this release,
-        deprecated and warned on; the next release makes it an error.
+        defaults. A knob env var is rejected with exit 6 (ADR 0020).
         ${concatStrings (map groupSection groupOrder)}.SH ENVIRONMENT
         Secret knobs are never exposed as value flags; they are read from the
         environment, from a file via their

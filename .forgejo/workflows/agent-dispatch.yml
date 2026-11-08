@@ -34,12 +34,11 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 180
     env:
-      # Select the forgejo backend on both axes; the launcher reads these from
-      # the environment. FORGEJO_BASE_URL falls back to Codeberg when the repo
-      # variable is unset (ADR 0038).
-      ISSUE_TRACKER: forgejo
-      CODE_FORGE: forgejo
-      FORGEJO_BASE_URL: ${{ vars.FORGEJO_BASE_URL || 'https://codeberg.org' }}
+      # The backend and base URL reach the launcher as flags: a knob env var
+      # such as FORGEJO_BASE_URL exits 6 (ADR 0020), hence the plumbing name.
+      # The base URL falls back to Codeberg when the repo variable is unset
+      # (ADR 0038).
+      FORGEJO_URL: ${{ vars.FORGEJO_BASE_URL || 'https://codeberg.org' }}
       FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
     steps:
       # Checkout must precede the local composite steps below: Forgejo resolves
@@ -59,7 +58,7 @@ jobs:
       - name: Claim the issue
         uses: ./.github/actions/forgejo-label-swap
         with:
-          base-url: ${{ env.FORGEJO_BASE_URL }}
+          base-url: ${{ env.FORGEJO_URL }}
           token: ${{ secrets.FORGEJO_TOKEN }}
           repo: ${{ github.repository }}
           issue-number: ${{ github.event.issue.number }}
@@ -93,6 +92,9 @@ jobs:
       - name: Dispatch the labeled issue
         run: |
           nix run . -- dispatch \
+            --tracker forgejo \
+            --forge-backend forgejo \
+            --forgejo-base-url "$FORGEJO_URL" \
             --box-forge-and-issue-access read-write \
             --issue-number "${{ github.event.issue.number }}" \
             --label agent-in-progress \
@@ -136,7 +138,7 @@ jobs:
         if: always() && steps.blocked.outputs.blocked == 'true'
         uses: ./.github/actions/forgejo-label-swap
         with:
-          base-url: ${{ env.FORGEJO_BASE_URL }}
+          base-url: ${{ env.FORGEJO_URL }}
           token: ${{ secrets.FORGEJO_TOKEN }}
           repo: ${{ github.repository }}
           issue-number: ${{ github.event.issue.number }}
