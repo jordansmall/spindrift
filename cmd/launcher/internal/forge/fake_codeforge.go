@@ -92,6 +92,7 @@ func (cf *CodeForgeFake) SetBranchProtectedErr(branch string, err error) {
 }
 
 func (cf *CodeForgeFake) Merge(url string) error {
+	cf.Fire("Merge")
 	cf.mu.Lock()
 	defer cf.mu.Unlock()
 	cf.LandingCallLog = append(cf.LandingCallLog, "Merge:"+url)
@@ -114,6 +115,7 @@ func (cf *CodeForgeFake) Merge(url string) error {
 }
 
 func (cf *CodeForgeFake) Rebase(url string) error {
+	cf.Fire("Rebase")
 	cf.mu.Lock()
 	defer cf.mu.Unlock()
 	cf.RebasedURLs = append(cf.RebasedURLs, url)

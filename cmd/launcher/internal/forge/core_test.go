@@ -4,15 +4,18 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+
+	"spindrift.dev/launcher/internal/fakehook"
 )
 
-// TestCoreFieldShape asserts that core holds exactly the five members
+// TestCoreFieldShape asserts that core holds exactly the six members
 // admitted under the "writers in two different capabilities" rule (issue
-// #2358): mu, prStates, LandingCallLog, ProbeErr, and ProbeRepo — no more,
+// #2358): mu, Hooks, prStates, LandingCallLog, ProbeErr, and ProbeRepo — no more,
 // no fewer, with these exact names and types.
 func TestCoreFieldShape(t *testing.T) {
 	want := map[string]reflect.Type{
 		"mu":             reflect.TypeOf(sync.Mutex{}),
+		"Hooks":          reflect.TypeOf(fakehook.Hooks{}),
 		"prStates":       reflect.TypeOf(map[string]PRState{}),
 		"LandingCallLog": reflect.TypeOf([]string{}),
 		"ProbeErr":       reflect.TypeOf((*error)(nil)).Elem(),

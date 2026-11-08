@@ -11,7 +11,6 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
-	"spindrift.dev/launcher/internal/terminate"
 )
 
 // assertNoTransitionOrComment fails t if TransitionState, Comment, or
@@ -90,9 +89,8 @@ func TestMergeImmediate_TerminatedDuringRewaitAfterStaleBasePreflight(t *testing
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetNeedsUpdate(testPR, true)
-	tf := &terminatingForge{Fake: fc, num: "1"}
-	s := newTestSettle(c, tf, tf)
-	tf.reg = s.Registry()
+	s := newTestSettle(c, fc, fc)
+	fc.On("Rebase", func(int) { s.Registry().Mark("1") })
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
@@ -165,27 +163,6 @@ func TestMergeImmediate_TerminatedBeforeStaleBasePreflightSkipsRebase(t *testing
 	}
 }
 
-// terminatingAfterPolls wraps a forge.Fake so its CheckState call marks num
-// terminated from the markAfter-th call onward (Mark is idempotent, so every
-// call from then on re-marking is harmless), simulating a signal landing
-// mid-poll rather than before the wait even starts (issue #3523).
-type terminatingAfterPolls struct {
-	*forge.Fake
-	reg       *terminate.Registry
-	num       string
-	markAfter int
-	calls     int
-}
-
-func (f *terminatingAfterPolls) CheckState(url string) (forge.RollupState, error) {
-	f.calls++
-	state, err := f.Fake.CheckState(url)
-	if f.calls >= f.markAfter {
-		f.reg.Mark(f.num)
-	}
-	return state, err
-}
-
 // A termination marked mid-poll — after the loop has already made a few
 // CheckState calls, unlike TestGateToGreen_TerminatedAbandonsWithoutTransition
 // above which marks before the first poll — must abandon at the very next
@@ -202,9 +179,13 @@ func TestGateToGreen_TerminatedMidPollAbandonsPromptly(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	const markAfterCall = 5
-	tf := &terminatingAfterPolls{Fake: fc, num: "1", markAfter: markAfterCall}
-	s := newTestSettle(c, tf, tf)
-	tf.reg = s.Registry()
+	s := newTestSettle(c, fc, fc)
+	// Mark is idempotent, so every poll from the markAfterCall-th on re-marking is harmless.
+	fc.On("CheckState", func(n int) {
+		if n >= markAfterCall {
+			s.Registry().Mark("1")
+		}
+	})
 
 	got, _ := s.gateToGreen("1", 0, testPR, false)
 
@@ -239,21 +220,6 @@ func TestGateToGreen_NeverTerminatedRunsFullDeadline(t *testing.T) {
 	}
 }
 
-// terminatingForge wraps a forge.Fake so its Rebase call marks num terminated
-// after returning, simulating Terminate reaping the settle goroutine while a
-// force-push is in flight.
-type terminatingForge struct {
-	*forge.Fake
-	reg *terminate.Registry
-	num string
-}
-
-func (f terminatingForge) Rebase(url string) error {
-	err := f.Fake.Rebase(url)
-	f.reg.Mark(f.num)
-	return err
-}
-
 // A termination landing between a successful rebase force-push and
 // rewaitAfterForcePush's CI poll must be reported as errAbandoned, not wrapped
 // into errLandingNeverGreen, the gap issue #805 closes. Without the fix,
@@ -265,9 +231,8 @@ func TestMergeImmediate_TerminatedDuringRewaitAfterPlainRebase(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
-	tf := &terminatingForge{Fake: fc, num: "1"}
-	s := newTestSettle(c, tf, tf)
-	tf.reg = s.Registry()
+	s := newTestSettle(c, fc, fc)
+	fc.On("Rebase", func(int) { s.Registry().Mark("1") })
 
 	err := s.mergeImmediate("1", 0, testPR, dispatch.NewFake())
 
@@ -282,22 +247,6 @@ func TestMergeImmediate_TerminatedDuringRewaitAfterPlainRebase(t *testing.T) {
 	}
 }
 
-// terminatingConflictResolver wraps a dispatch.Fake so its ResolveConflict call
-// marks num terminated after returning, simulating Terminate reaping the settle
-// goroutine right after a successful agent-assisted conflict resolve, before the
-// post-force-push CI re-wait runs.
-type terminatingConflictResolver struct {
-	*dispatch.Fake
-	reg *terminate.Registry
-	num string
-}
-
-func (d terminatingConflictResolver) ResolveConflict(pr string) error {
-	err := d.Fake.ResolveConflict(pr)
-	d.reg.Mark(d.num)
-	return err
-}
-
 // Termination lands between a successful agent conflict-resolve and
 // rewaitAfterForcePush's CI poll (in mergeImmediate's conflict-retry branch), so
 // mergeImmediate must report errAbandoned rather than errLandingNeverGreen.
@@ -310,7 +259,8 @@ func TestMergeImmediate_TerminatedDuringRewaitAfterConflictResolve(t *testing.T)
 	fc.RebaseErr = forge.ErrMergeConflict
 	s := newTestSettle(c, fc, fc)
 	reg := s.Registry()
-	d := terminatingConflictResolver{Fake: dispatch.NewFake(), reg: reg, num: "1"}
+	d := dispatch.NewFake()
+	d.On("ResolveConflict", func(int) { reg.Mark("1") })
 
 	err := s.mergeImmediate("1", 0, testPR, d)
 
@@ -328,22 +278,6 @@ func TestMergeImmediate_TerminatedDuringRewaitAfterConflictResolve(t *testing.T)
 	}
 }
 
-// terminatingDispatcher wraps a dispatch.Fake so its Fix call marks num
-// terminated after returning, simulating Terminate reaping the fix-pass Box
-// mid-flight: the caller sees Fix's own failure result, then notices the
-// termination on its next loop iteration.
-type terminatingDispatcher struct {
-	*dispatch.Fake
-	reg *terminate.Registry
-	num string
-}
-
-func (d terminatingDispatcher) Fix(pass int, ciFailureSummary string) dispatch.Disposition {
-	res := d.Fake.Fix(pass, ciFailureSummary)
-	d.reg.Mark(d.num)
-	return res
-}
-
 // A termination landing while a fix-pass Box is running stops selfHeal from
 // dispatching a second fix pass or re-polling CI. selfHeal abandons on the very
 // next checkpoint instead of continuing the attempt loop.
@@ -358,7 +292,8 @@ func TestSelfHeal_TerminatedDuringFixPass_StopsRetryLoop(t *testing.T) {
 	})
 	s := newTestSettle(c, fc, fc)
 	reg := s.Registry()
-	d := terminatingDispatcher{Fake: dispatch.NewFake(), reg: reg, num: "1"}
+	d := dispatch.NewFake()
+	d.On("Fix", func(int) { reg.Mark("1") })
 
 	_, _, err := s.selfHeal(d, "1", 0, testPR, nil)
 
@@ -382,9 +317,8 @@ func TestSelfHeal_TerminatedDuringRewaitAfterForcePush_ReportsAbandoned(t *testi
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
-	tf := &terminatingForge{Fake: fc, num: "1"}
-	s := newTestSettle(c, tf, tf)
-	tf.reg = s.Registry()
+	s := newTestSettle(c, fc, fc)
+	fc.On("Rebase", func(int) { s.Registry().Mark("1") })
 
 	_, _, err := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
@@ -408,9 +342,9 @@ func TestSelfHeal_TerminatedFixPassReaped_ReportsAbandonedNotFailed(t *testing.T
 	fk.FixResult = dispatch.Failed(dispatch.Result{})
 	s := newTestSettle(c, fc, fc)
 	reg := s.Registry()
-	d := terminatingDispatcher{Fake: fk, reg: reg, num: "1"}
+	fk.On("Fix", func(int) { reg.Mark("1") })
 
-	_, _, err := s.selfHeal(d, "1", 0, testPR, nil)
+	_, _, err := s.selfHeal(fk, "1", 0, testPR, nil)
 
 	if !errors.Is(err, errAbandoned) {
 		t.Errorf("selfHeal err = %v, want errAbandoned", err)
@@ -449,9 +383,8 @@ func TestSelfHeal_TerminatedGateTerminal_ReportsAbandonedNotFailed(t *testing.T)
 	c.MergePollTimeout = 0
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	tf := &terminatingAfterPolls{Fake: fc, num: "1", markAfter: 1}
-	s := newTestSettle(c, tf, tf)
-	tf.reg = s.Registry()
+	s := newTestSettle(c, fc, fc)
+	fc.On("CheckState", func(int) { s.Registry().Mark("1") })
 
 	_, _, err := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
@@ -469,9 +402,8 @@ func TestSelfHeal_TerminatedRedRetryFixExhausted_ReportsAbandonedNotFailed(t *te
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
-	tf := &terminatingAfterPolls{Fake: fc, num: "1", markAfter: 1}
-	s := newTestSettle(c, tf, tf)
-	tf.reg = s.Registry()
+	s := newTestSettle(c, fc, fc)
+	fc.On("CheckState", func(int) { s.Registry().Mark("1") })
 
 	d := dispatch.NewFake()
 	_, _, err := s.selfHeal(d, "1", 0, testPR, nil)
@@ -498,7 +430,8 @@ func TestSelfHeal_TerminatedFixPassSucceeded_SkipsRelay(t *testing.T) {
 	cf := fc.AsGithubReadOnly()
 	s := newTestSettle(c, fc, cf)
 	reg := s.Registry()
-	d := terminatingDispatcher{Fake: dispatch.NewFake(), reg: reg, num: "1"}
+	d := dispatch.NewFake()
+	d.On("Fix", func(int) { reg.Mark("1") })
 
 	_, _, err := s.selfHeal(d, "1", 0, testPR, nil)
 
@@ -601,9 +534,9 @@ func TestMergeImmediate_ConflictResolveBoxReaped_ReportsAbandonedNotNeverGreen(t
 	fk.ResolveConflictErr = errors.New("exit status 137")
 	s := newTestSettle(c, fc, fc)
 	reg := s.Registry()
-	d := terminatingConflictResolver{Fake: fk, reg: reg, num: "1"}
+	fk.On("ResolveConflict", func(int) { reg.Mark("1") })
 
-	err := s.mergeImmediate("1", 0, testPR, d)
+	err := s.mergeImmediate("1", 0, testPR, fk)
 
 	if !errors.Is(err, errAbandoned) {
 		t.Errorf("mergeImmediate err = %v, want errAbandoned", err)
@@ -631,9 +564,9 @@ func TestSelfHeal_ConflictResolveBoxReaped_ReportsAbandonedNotFailed(t *testing.
 	fk.ResolveConflictErr = errors.New("exit status 137")
 	s := newTestSettle(c, fc, fc)
 	reg := s.Registry()
-	d := terminatingConflictResolver{Fake: fk, reg: reg, num: "1"}
+	fk.On("ResolveConflict", func(int) { reg.Mark("1") })
 
-	_, _, err := s.selfHeal(d, "1", 0, testPR, nil)
+	_, _, err := s.selfHeal(fk, "1", 0, testPR, nil)
 
 	if !errors.Is(err, errAbandoned) {
 		t.Errorf("selfHeal err = %v, want errAbandoned", err)
@@ -655,9 +588,9 @@ func TestMergeImmediate_ConflictResolveBoxReapedDuringStaleBasePreflight_Reports
 	fk.ResolveConflictErr = errors.New("exit status 137")
 	s := newTestSettle(c, fc, fc)
 	reg := s.Registry()
-	d := terminatingConflictResolver{Fake: fk, reg: reg, num: "1"}
+	fk.On("ResolveConflict", func(int) { reg.Mark("1") })
 
-	err := s.mergeImmediate("1", 0, testPR, d)
+	err := s.mergeImmediate("1", 0, testPR, fk)
 
 	if !errors.Is(err, errAbandoned) {
 		t.Errorf("mergeImmediate err = %v, want errAbandoned", err)
@@ -699,23 +632,6 @@ func TestSelfHeal_TerminatedDuringSuccessConfirmSleep_ManualMode_ReportsAbandone
 	assertNoPRWriteAfterTermination(t, fc)
 }
 
-// terminatingMarkReady wraps a forge.Fake so its MarkReady call marks num
-// terminated after returning, simulating Terminate reaping the settle
-// goroutine during the MarkReady round-trip itself — the window the
-// top-of-arm gateGreen guard alone does not cover, since that guard runs
-// before MarkReady is ever called (issue #3523).
-type terminatingMarkReady struct {
-	*forge.Fake
-	reg *terminate.Registry
-	num string
-}
-
-func (f terminatingMarkReady) MarkReady(prURL string) error {
-	err := f.Fake.MarkReady(prURL)
-	f.reg.Mark(f.num)
-	return err
-}
-
 // Pins completeLanding: a mark landing inside MarkReady's own round-trip is
 // invisible to the top-of-arm guard (already past by the time MarkReady
 // returns), so only the per-commit-site check catches it before the final
@@ -726,9 +642,8 @@ func TestSelfHeal_TerminatedDuringMarkReady_ReportsAbandoned(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-	tf := &terminatingMarkReady{Fake: fc, num: "1"}
-	s := newTestSettle(c, tf, tf)
-	tf.reg = s.Registry()
+	s := newTestSettle(c, fc, fc)
+	fc.On("MarkReady", func(int) { s.Registry().Mark("1") })
 
 	_, _, err := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
@@ -736,21 +651,6 @@ func TestSelfHeal_TerminatedDuringMarkReady_ReportsAbandoned(t *testing.T) {
 		t.Errorf("selfHeal err = %v, want errAbandoned", err)
 	}
 	assertNoTransitionOrComment(t, fc)
-}
-
-// terminatingListPRFiles wraps a forge.Fake so its ListPRFiles call marks num
-// terminated after returning, simulating Terminate reaping the settle
-// goroutine during mergeGuardHit's own round-trip.
-type terminatingListPRFiles struct {
-	*forge.Fake
-	reg *terminate.Registry
-	num string
-}
-
-func (f terminatingListPRFiles) ListPRFiles(prURL string) ([]string, error) {
-	files, err := f.Fake.ListPRFiles(prURL)
-	f.reg.Mark(f.num)
-	return files, err
 }
 
 // The merge-guard-hit exit is its own Complete commit site (ready.go's second
@@ -769,9 +669,8 @@ func TestSelfHeal_TerminatedDuringMergeGuardHit_ReportsAbandoned(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.SetPRFiles(testPR, []string{".github/workflows/ci.yml"})
-	tf := &terminatingListPRFiles{Fake: fc, num: "1"}
-	s := newTestSettle(c, tf, tf)
-	tf.reg = s.Registry()
+	s := newTestSettle(c, fc, fc)
+	fc.On("ListPRFiles", func(int) { s.Registry().Mark("1") })
 
 	_, _, err := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
@@ -867,19 +766,6 @@ func TestSelfHeal_LandPushOnly_TerminatedDuringMergeBackoff_ReportsAbandoned(t *
 	}
 }
 
-// markDuringMerge marks "1" inside the forge's Merge call, the window between
-// applyMergeMode's last termination check and landPushOnly's Complete commit.
-// Embedding the CodeForge interface keeps the wrapped forge push-only.
-type markDuringMerge struct {
-	forge.CodeForge
-	s *Settle
-}
-
-func (m *markDuringMerge) Merge(url string) error {
-	m.s.Registry().Mark("1")
-	return m.CodeForge.Merge(url)
-}
-
 // A mark landing inside Merge itself is past every checkpoint ahead of the
 // merge, so only completeLanding's re-check stops landPushOnly committing
 // Complete (issue #4879). The merge already happened, so its bundle is
@@ -903,9 +789,8 @@ func TestSelfHeal_LandPushOnly_TerminatedDuringMerge_ReportsAbandoned(t *testing
 			fc := forge.NewFake(testDispatchLabels)
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 			fc.MergeErr = tc.mergeErr
-			wrapper := &markDuringMerge{CodeForge: fc.AsPushOnly()}
-			s := newTestSettle(c, fc, wrapper)
-			wrapper.s = s
+			s := newTestSettle(c, fc, fc.AsPushOnly())
+			fc.On("Merge", func(int) { s.Registry().Mark("1") })
 
 			_, err := s.landPushOnly("1", 0, "agent/issue-1", nil)
 
@@ -920,20 +805,6 @@ func TestSelfHeal_LandPushOnly_TerminatedDuringMerge_ReportsAbandoned(t *testing
 	}
 }
 
-// markDuringRelay marks "1" inside the forge's RelayBundle call and then
-// relays for real, so the mark lands after the relay's own stop checks but
-// before applyMergeMode runs. It re-exposes RelayBundle, which embedding the
-// CodeForge interface would otherwise hide.
-type markDuringRelay struct {
-	forge.CodeForge
-	s *Settle
-}
-
-func (m *markDuringRelay) RelayBundle(outboxDir, ref string) error {
-	m.s.Registry().Mark("1")
-	return m.CodeForge.(forge.BundleRelay).RelayBundle(outboxDir, ref)
-}
-
 // A mark landing inside a relay that then succeeds must abandon before Merge,
 // not merge and commit Complete for an issue Terminate already released
 // (issue #4879, #3523).
@@ -945,9 +816,8 @@ func TestSelfHeal_LandPushOnly_TerminatedDuringRelay_ReportsAbandoned(t *testing
 	c.OutboxDir = func(string) string { return outbox }
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	wrapper := &markDuringRelay{CodeForge: fc.AsLocal()}
-	s := newTestSettle(c, fc, wrapper)
-	wrapper.s = s
+	s := newTestSettle(c, fc, fc.AsLocal())
+	fc.On("RelayBundle", func(int) { s.Registry().Mark("1") })
 
 	_, err := s.landPushOnly("1", 0, "agent/issue-1", nil)
 
@@ -971,9 +841,8 @@ func TestSettle_PushOnlyAbandonedSkipsUsageComment(t *testing.T) {
 	c.MergeMode = "immediate"
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	wrapper := &markDuringMerge{CodeForge: fc.AsPushOnly()}
-	s := newTestSettle(c, fc, wrapper)
-	wrapper.s = s
+	s := newTestSettle(c, fc, fc.AsPushOnly())
+	fc.On("Merge", func(int) { s.Registry().Mark("1") })
 
 	s.Settle(dispatch.NewFake(), "1", 0, dispatch.Result{
 		Resolved: outcome.Resolved{

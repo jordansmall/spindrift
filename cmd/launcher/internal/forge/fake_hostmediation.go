@@ -13,11 +13,6 @@ type HostMediationFake struct {
 	// RelayBundle calls one error each (nil succeeds); later calls fall back to
 	// RelayBundleErr. It lets a test fail a relay N times then succeed.
 	RelayBundleErrs []error
-	// RelayBundleOnCall, if non-nil, runs on every RelayBundle call with its
-	// 1-based attempt number, after the call is recorded and outside the
-	// fake's lock. A test uses it to mark a stop inside a given relay attempt
-	// rather than in a backoff between two.
-	RelayBundleOnCall func(attempt int)
 	// RelayBundleErr, if non-nil, fails every RelayBundle call, scripting
 	// CODE_FORGE=local's missing or malformed bundle failure (ADR 0033).
 	// Only AsLocal() and AsGithubReadOnly() reach it.
@@ -110,19 +105,15 @@ type PostIssueCall struct {
 
 // relayBundle backs the optional BundleRelay interface (ADR 0033).
 func (hm *HostMediationFake) relayBundle(outboxDir, ref string) error {
+	hm.Fire("RelayBundle")
 	hm.mu.Lock()
 	hm.RelayBundleCalls = append(hm.RelayBundleCalls, RelayBundleCall{OutboxDir: outboxDir, Ref: ref})
-	attempt := len(hm.RelayBundleCalls)
-	onCall := hm.RelayBundleOnCall
 	err := hm.RelayBundleErr
 	if len(hm.RelayBundleErrs) > 0 {
 		err = hm.RelayBundleErrs[0]
 		hm.RelayBundleErrs = hm.RelayBundleErrs[1:]
 	}
 	hm.mu.Unlock()
-	if onCall != nil {
-		onCall(attempt)
-	}
 	return err
 }
 

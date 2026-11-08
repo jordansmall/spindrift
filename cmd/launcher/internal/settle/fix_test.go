@@ -351,11 +351,11 @@ func TestSelfHeal_ReadOnlyFixPassRelayMarkedDuringFinalAttemptAbandons(t *testin
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateFailure})
 	fc.SetHeadCommitSHAs(testPR, []string{"sha-1", "sha-1", "sha-1", "sha-1"})
 	fc.RelayBundleErr = errors.New("ssh auth blip")
-	fc.RelayBundleOnCall = func(attempt int) {
+	fc.On("RelayBundle", func(attempt int) {
 		if attempt == c.Policy.Max+1 {
 			s.term.Mark("1")
 		}
-	}
+	})
 	s = newTestSettle(c, fc, fc.AsGithubReadOnly())
 	gen := s.term.Begin("1")
 
