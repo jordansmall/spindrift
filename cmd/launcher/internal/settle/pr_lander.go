@@ -74,11 +74,22 @@ func (s prLander) latchOpenPR(num string) {
 }
 
 // settleReportedMerge verifies the merge against the PR on the agent branch,
-// resolved host-side (issue #1955); PRForBranch gives a full PR URL.
+// resolved host-side (issue #1955); PRForBranch gives a full PR URL. Only a
+// lookup that succeeds and finds no PR demotes the issue: one that still fails
+// after its retries proves nothing, so it leaves the issue as it stands, as
+// verifyMerged does for its own reads.
 func (s prLander) settleReportedMerge(num string) {
 	branch := s.cfForNum(num).AgentBranch(num)
-	pr, ok, err := s.pr.PRForBranch(branch)
-	if err != nil || !ok {
+	var pr string
+	var ok bool
+	if !s.retryVerifyRead(num, branch, func() error {
+		var err error
+		pr, ok, err = s.pr.PRForBranch(branch)
+		return err
+	}) {
+		return
+	}
+	if !ok {
 		const reason = "no PR found on branch to verify merge"
 		s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusFailed, Detail: "!! " + reason})
 		s.transitionState(num, ForReason(dispatchrecord.ReasonNoPR), reason)
@@ -881,20 +892,15 @@ func rewaitGateResultErr(g gateResult, reason, pr string) error {
 func (s prLander) verifyMerged(num, pr string) {
 	var prState forge.PRState
 	var iss forge.Issue
-	err := s.retryVerifyRead(num, pr, func() error {
+	if !s.retryVerifyRead(num, pr, func() error {
 		var err error
 		prState, err = s.pr.PRState(pr)
 		return err
-	})
-	if err == nil {
-		err = s.retryVerifyRead(num, pr, func() error {
-			var err error
-			iss, err = s.it.Issue(num)
-			return err
-		})
-	}
-	if err != nil {
-		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeUnverifiedReadError, Detail: fmt.Sprintf("!! %v", err)})
+	}) || !s.retryVerifyRead(num, pr, func() error {
+		var err error
+		iss, err = s.it.Issue(num)
+		return err
+	}) {
 		return
 	}
 	if prState == forge.PRMerged && containsLabel(iss.Labels, s.cfg.CompleteLabel) {
@@ -914,19 +920,21 @@ func (s prLander) verifyMerged(num, pr string) {
 }
 
 // retryVerifyRead runs read, retrying a failure up to Policy.Max times with
-// backoff.
-func (s prLander) retryVerifyRead(num, pr string, read func() error) error {
+// backoff, and reports whether it succeeded. It reports a read that still
+// fails as StatusMergeUnverifiedReadError itself, so a caller just returns.
+func (s prLander) retryVerifyRead(num, landing string, read func() error) bool {
 	attempts := 0
 	for {
 		err := read()
 		if err == nil {
-			return nil
+			return true
 		}
 		if attempts >= s.cfg.Policy.Max {
-			return err
+			s.cfg.Progress.Step(Step{Key: num, Landing: landing, Status: StatusMergeUnverifiedReadError, Detail: fmt.Sprintf("!! %v", err)})
+			return false
 		}
 		attempts++
-		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeUnverifiedReadRetry,
+		s.cfg.Progress.Step(Step{Key: num, Landing: landing, Status: StatusMergeUnverifiedReadRetry,
 			Detail: fmt.Sprintf("attempt=%d/%d  !! %v", attempts, s.cfg.Policy.Max, err)})
 		s.transientBackoff().Do(attempts)
 	}

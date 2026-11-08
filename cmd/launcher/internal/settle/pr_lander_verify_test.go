@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
 )
@@ -58,8 +59,8 @@ func verifyCases() []prCase {
 			noFailedTransition(t, fc)
 		}
 	}
-	retry := func(n int, err string) Step {
-		return stepAt(testPR, StatusMergeUnverifiedReadRetry, fmt.Sprintf("attempt=%d/2  !! %s", n, err))
+	retry := func(landing string, n int, err string) Step {
+		return stepAt(landing, StatusMergeUnverifiedReadRetry, fmt.Sprintf("attempt=%d/2  !! %s", n, err))
 	}
 	blip := errors.New("blip")
 	down := errors.New("api down")
@@ -76,6 +77,11 @@ func verifyCases() []prCase {
 			func(fc *forge.Fake) { fc.IssueErr = down }},
 	}
 
+	mergedReport := &dispatch.Result{Resolved: outcome.Resolved{
+		Found:   true,
+		Outcome: outcome.Outcome{Issue: "1", Landing: "ignored", Status: "merged", Note: "ok"},
+	}}
+
 	var cases []prCase
 	for _, r := range reads {
 		cases = append(cases,
@@ -85,7 +91,7 @@ func verifyCases() []prCase {
 				entry: entryAdopted, checks: registered, setup: bundled, afterMerge: r.transient,
 				want: merged, wantLabels: complete, wantNoLabels: failed, wantMerged: testPR, wantCalls: []string{"MarkReady:" + testPR, "Merge:" + testPR},
 				wantStatuses: []Status{StatusAdopted, StatusMergeUnverifiedReadRetry, StatusVerifiedMerged},
-				wantSteps:    []Step{retry(1, "blip"), stepAt(testPR, StatusVerifiedMerged, "")}, check: bundle(false),
+				wantSteps:    []Step{retry(testPR, 1, "blip"), stepAt(testPR, StatusVerifiedMerged, "")}, check: bundle(false),
 			},
 			// The issue keeps the Complete that completeLanding latched and the
 			// bundle stays, rather than be demoted or closed.
@@ -94,7 +100,7 @@ func verifyCases() []prCase {
 				entry: entryAdopted, checks: registered, setup: bundled, afterMerge: r.persistent,
 				want: merged, wantLabels: complete, wantNoLabels: failed, wantMerged: testPR, wantCalls: []string{"MarkReady:" + testPR, "Merge:" + testPR},
 				wantStatuses: []Status{StatusAdopted, StatusMergeUnverifiedReadRetry, StatusMergeUnverifiedReadRetry, StatusMergeUnverifiedReadError},
-				wantSteps:    []Step{retry(1, "api down"), retry(2, "api down"), stepAt(testPR, StatusMergeUnverifiedReadError, "!! api down")},
+				wantSteps:    []Step{retry(testPR, 1, "api down"), retry(testPR, 2, "api down"), stepAt(testPR, StatusMergeUnverifiedReadError, "!! api down")},
 				check:        bundle(true),
 			},
 			// The off-script status=merged arm verifies a PR whose completeLanding
@@ -103,10 +109,7 @@ func verifyCases() []prCase {
 			prCase{
 				name:  "a merged self-report whose " + r.name + " read keeps failing leaves the issue in progress",
 				shape: shapeReadOnly, labels: []string{"agent-in-progress", "agent-complete"},
-				result: &dispatch.Result{Resolved: outcome.Resolved{
-					Found:   true,
-					Outcome: outcome.Outcome{Issue: "1", Landing: "ignored", Status: "merged", Note: "ok"},
-				}},
+				result: mergedReport,
 				setup: func(_ *testing.T, fc *forge.Fake, c *Config) {
 					c.ReadOnly = true
 					c.Policy.Max = 2
@@ -115,7 +118,7 @@ func verifyCases() []prCase {
 				},
 				wantLabels: []string{"agent-in-progress"}, wantNoLabels: failed, wantCalls: []string{}, wantPRClosed: true, // the self-report names a merged PR; there is no settlement to leave it open
 				wantStatuses: []Status{detailOnly, StatusMergeUnverifiedReadRetry, StatusMergeUnverifiedReadRetry, StatusMergeUnverifiedReadError},
-				wantSteps:    []Step{retry(1, "api down"), retry(2, "api down"), stepAt(testPR, StatusMergeUnverifiedReadError, "!! api down")},
+				wantSteps:    []Step{retry(testPR, 1, "api down"), retry(testPR, 2, "api down"), stepAt(testPR, StatusMergeUnverifiedReadError, "!! api down")},
 				check: func(t *testing.T, fc *forge.Fake, d *dispatch.Fake) {
 					t.Helper()
 					if len(fc.CloseMergedIssueCalls) != 0 {
@@ -126,6 +129,67 @@ func verifyCases() []prCase {
 			},
 		)
 	}
+
+	// The branch lookup that finds the PR to verify is itself a read: an error
+	// from it proves nothing about whether a PR exists, so it must not demote.
+	branch := forge.NewFake().AgentBranch("1")
+	cases = append(cases,
+		prCase{
+			name:  "a merged self-report whose PRForBranch lookup keeps failing leaves the issue in progress",
+			shape: shapeReadOnly, labels: []string{"agent-in-progress", "agent-complete"},
+			result: mergedReport,
+			setup: func(_ *testing.T, fc *forge.Fake, c *Config) {
+				c.ReadOnly = true
+				c.Policy.Max = 2
+				fc.PRForBranchErr = down
+			},
+			wantLabels: []string{"agent-in-progress"}, wantNoLabels: failed, wantCalls: []string{}, wantPRClosed: true,
+			wantStatuses: []Status{detailOnly, StatusMergeUnverifiedReadRetry, StatusMergeUnverifiedReadRetry, StatusMergeUnverifiedReadError},
+			wantSteps: []Step{
+				retry(branch, 1, "api down"),
+				retry(branch, 2, "api down"),
+				stepAt(branch, StatusMergeUnverifiedReadError, "!! api down"),
+			},
+			check: func(t *testing.T, fc *forge.Fake, _ *dispatch.Fake) {
+				t.Helper()
+				if len(fc.TransitionStateCalls) != 0 || len(fc.CloseMergedIssueCalls) != 0 {
+					t.Errorf("TransitionStateCalls = %v, CloseMergedIssueCalls = %v, want neither", fc.TransitionStateCalls, fc.CloseMergedIssueCalls)
+				}
+			},
+		},
+		prCase{
+			name:  "a merged self-report whose PRForBranch lookup fails once retries, then verifies",
+			shape: shapeReadOnly, labels: []string{"agent-in-progress", "agent-complete"},
+			result: mergedReport,
+			setup: func(_ *testing.T, fc *forge.Fake, c *Config) {
+				c.ReadOnly = true
+				c.Policy.Max = 2
+				fc.SetPRState(testPR, forge.PRMerged)
+				fc.PRForBranchErrs = []error{blip}
+			},
+			wantLabels: []string{"agent-in-progress"}, wantNoLabels: failed, wantCalls: []string{}, wantPRClosed: true,
+			wantStatuses: []Status{detailOnly, StatusMergeUnverifiedReadRetry, StatusVerifiedMerged},
+			wantSteps:    []Step{retry(branch, 1, "blip"), stepAt(testPR, StatusVerifiedMerged, "")},
+			check: func(t *testing.T, fc *forge.Fake, _ *dispatch.Fake) {
+				t.Helper()
+				if len(fc.CloseMergedIssueCalls) != 1 {
+					t.Errorf("CloseMergedIssueCalls = %v, want 1", fc.CloseMergedIssueCalls)
+				}
+				noFailedTransition(t, fc)
+			},
+		},
+		// A lookup that succeeds and finds nothing is the one case that demotes.
+		prCase{
+			name:  "a merged self-report with no PR on the branch demotes to agent-failed",
+			shape: shapeReadOnly, labels: []string{"agent-in-progress", "agent-complete"},
+			result: mergedReport, noPR: true,
+			want:       Settlement{Verdict: ForReason(dispatchrecord.ReasonNoPR), Note: "no PR found on branch to verify merge"},
+			setup:      func(_ *testing.T, _ *forge.Fake, c *Config) { c.ReadOnly = true },
+			wantLabels: []string{"agent-failed"}, wantCalls: []string{}, wantPRClosed: true,
+			wantStatuses: []Status{detailOnly, StatusFailed},
+			wantSteps:    []Step{stepAt(branch, StatusFailed, "!! no PR found on branch to verify merge")},
+		},
+	)
 	return cases
 }
 
