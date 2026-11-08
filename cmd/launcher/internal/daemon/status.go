@@ -17,14 +17,14 @@ import (
 
 // statusFileName is the well-known status file name within a checkout's git
 // dir, beside checkoutLockFileName. It is advisory data, not liveness truth
-// — see ReadStatus. The Dashboard mirrors it
-// (nix/checks/dashboard-constant-parity.nix).
+// — see ReadStatus. The Dashboard mirrors it; the contract fixture
+// (dashboard/testdata/contract) pins it.
 const statusFileName = "spindrift-daemon.status"
 
 // statusSchema is the status file's top-level "schema". Bump it only on a
 // breaking change — a rename, a removal, or a changed meaning; adding a
 // field never bumps it (issue #4713). The Dashboard mirrors this value; bump
-// dashboard/status.go with it (nix/checks/dashboard-constant-parity.nix).
+// dashboard/status.go with it; the contract fixture pins it.
 const statusSchema = 1
 
 // Status is the daemon's published state, written by StatusWriter and read
@@ -244,7 +244,7 @@ const (
 	// runnable: a slot is between iterations, about to check the queue.
 	StateChecking State = "checking"
 	// StateHalted means the pool has halted; Status.Reason says why. The
-	// Dashboard mirrors it (nix/checks/dashboard-constant-parity.nix).
+	// Dashboard mirrors it; the contract fixture pins it.
 	StateHalted State = "halted"
 )
 

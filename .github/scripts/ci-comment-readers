@@ -27,11 +27,3 @@ lib/structural-paths.nix
 nix/checks/equivalence.nix
 nix/dogfood-defaults.nix
 nix/fixtures.nix
-# dashboard-constant-parity builds these paths by concatenation, which the
-# guard cannot see.
-cmd/launcher/internal/daemon/events_file.go
-cmd/launcher/internal/daemon/halt.go
-cmd/launcher/internal/daemon/status.go
-cmd/launcher/internal/report/report.go
-dashboard/history.go
-dashboard/status.go
