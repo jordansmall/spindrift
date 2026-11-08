@@ -180,7 +180,7 @@ let
       # emptyDisables is string-knobs-only and nothing else enforces that: on a
       # bool knob it is redundant with the bool rule, and on an
       # int/float/secret/hostDerived knob flagEmptyDisables still emits it, so
-      # flagEntry.emptyIsSetting would drive the deprecation warning and
+      # FlagEntry.EmptyIsSetting would drive the deprecation warning and
       # resolveBoxEnvVar while the schemaConfig loaderLine cascade
       # (lib/renderers.nix) loads that knob without consulting an empty value.
       emptyDisablesOnNonString = filter (
@@ -920,24 +920,6 @@ checkedMerge {
       "backend-registry-quickstart-guard: renderBackendRegistryGo must reject these malformed quickstart blocks: ${builtins.concatStringsSep ", " wronglyAccepted}";
     pkgs.runCommand "backend-registry-quickstart-guard" { } "touch $out";
 
-  # Regenerate with `nix run .#regen` when lib/env-schema.nix's bool or
-  # emptyDisables knobs change (issue #4617).
-  empty-is-setting-gen-go = mkGofmtDriftCheck {
-    name = "empty-is-setting-gen-go";
-    rendered = renderers.renderEmptyIsSettingGo schema;
-    committedPath = "cmd/launcher/internal/inputdoc/emptyissetting_gen.go";
-    source = "lib/env-schema.nix";
-  };
-
-  # Regenerate with `nix run .#regen` when a non-secret knob's default in
-  # lib/env-schema.nix changes (issue #4592).
-  schema-defaults-gen-go = mkGofmtDriftCheck {
-    name = "schema-defaults-gen-go";
-    rendered = renderers.renderSchemaDefaultsGo schema;
-    committedPath = "cmd/launcher/internal/inputdoc/schemadefaults_gen.go";
-    source = "lib/env-schema.nix";
-  };
-
   # Regenerate with `nix run .#regen` when a knob's launcherIgnores in
   # lib/env-schema.nix changes (issue #4644).
   daemon-only-knobs-gen-go = mkGofmtDriftCheck {
@@ -1341,7 +1323,7 @@ checkedMerge {
   # itself ignores it" clause must agree exactly, in both directions: a
   # daemon-only knob whose doc states the fact but forgot the axis, or an
   # axis-bearing knob whose doc no longer states it, would desync the
-  # generated flag table (cmd/launcher/flagtable_gen.go) from the prose it is
+  # generated flag table (cmd/launcher/internal/inputdoc/flagtable_gen.go) from the prose it is
   # meant to source (issue #3698). A third assert covers a separate invariant
   # the same axis implies: a launcherIgnores knob must also set flakeOption,
   # since its settings path is all warnAmbientKnobEnv has left to suggest.
@@ -1503,14 +1485,12 @@ checkedMerge {
         "host"
       ]
     ) "lib/env-schema.nix: networkMode.choices must be [ open no-host-loopback none host ]";
-    assert assertMsg
-      (
-        schema.signalCarrier.choices or [ ] == [
-          "log"
-          "socket"
-        ]
-      )
-      "lib/env-schema.nix: signalCarrier.choices must be [ log socket ] — cmd/launcher/daemon/main.go's validateSignalCarrier hand-copies this list and must change with it (issue #3727)";
+    assert assertMsg (
+      schema.signalCarrier.choices or [ ] == [
+        "log"
+        "socket"
+      ]
+    ) "lib/env-schema.nix: signalCarrier.choices must be [ log socket ] (issue #3727)";
     pkgs.runCommand "schema-choices" { } "touch $out";
 
   # Regression guard (issue #2519): injects a tenth synthetic choices-bearing
@@ -1793,11 +1773,11 @@ checkedMerge {
     pkgs.runCommand "launcher-flag-table"
       {
         inherit generated;
-        committed = ../../cmd/launcher/flagtable_gen.go;
+        committed = ../../cmd/launcher/internal/inputdoc/flagtable_gen.go;
       }
       ''
         diff "$generated" "$committed" \
-          || { echo "cmd/launcher/flagtable_gen.go is out of sync with lib/env-schema.nix or lib/renderers.nix's groupOrder — regenerate it" >&2; exit 1; }
+          || { echo "cmd/launcher/internal/inputdoc/flagtable_gen.go is out of sync with lib/env-schema.nix or lib/renderers.nix's groupOrder — regenerate it" >&2; exit 1; }
         touch $out
       '';
 

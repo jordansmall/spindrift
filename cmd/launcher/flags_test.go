@@ -28,15 +28,15 @@ import (
 func TestSchemaFlags_DefaultModelsMatchFixture(t *testing.T) {
 	for env, want := range expectedDefaultModels {
 		t.Run(env, func(t *testing.T) {
-			for _, e := range schemaFlags {
-				if e.env == env {
-					if e.dflt != want {
-						t.Errorf("%s default = %q, want %q", env, e.dflt, want)
+			for _, e := range inputdoc.SchemaFlags {
+				if e.Env == env {
+					if e.Dflt != want {
+						t.Errorf("%s default = %q, want %q", env, e.Dflt, want)
 					}
 					return
 				}
 			}
-			t.Fatalf("%s entry not found in schemaFlags", env)
+			t.Fatalf("%s entry not found in inputdoc.SchemaFlags", env)
 		})
 	}
 }
@@ -44,30 +44,30 @@ func TestSchemaFlags_DefaultModelsMatchFixture(t *testing.T) {
 // Issue #2145 slice A made bwrap-unshare-net a presence-style bool, not a
 // string.
 func TestSchemaFlags_BwrapUnshareNetIsBool(t *testing.T) {
-	for _, e := range schemaFlags {
-		if e.flag == "bwrap-unshare-net" {
-			if e.kind != "bool" {
-				t.Errorf("bwrap-unshare-net kind = %q, want %q", e.kind, "bool")
+	for _, e := range inputdoc.SchemaFlags {
+		if e.Flag == "bwrap-unshare-net" {
+			if e.Kind != "bool" {
+				t.Errorf("bwrap-unshare-net kind = %q, want %q", e.Kind, "bool")
 			}
 			return
 		}
 	}
-	t.Fatal("bwrap-unshare-net entry not found in schemaFlags")
+	t.Fatal("bwrap-unshare-net entry not found in inputdoc.SchemaFlags")
 }
 
 // The settingsPath comes from spindriftPromptDir in lib/env-schema.nix,
 // which declares flakeOption = true with nixSubPath = "promptDir" (issue
 // #2200 slice 1).
 func TestSchemaFlags_PromptDirSettingsPath(t *testing.T) {
-	for _, e := range schemaFlags {
-		if e.env == "SPINDRIFT_PROMPT_DIR" {
-			if e.settingsPath != "agents.promptDir" {
-				t.Errorf("SPINDRIFT_PROMPT_DIR settingsPath = %q, want %q", e.settingsPath, "agents.promptDir")
+	for _, e := range inputdoc.SchemaFlags {
+		if e.Env == "SPINDRIFT_PROMPT_DIR" {
+			if e.SettingsPath != "agents.promptDir" {
+				t.Errorf("SPINDRIFT_PROMPT_DIR settingsPath = %q, want %q", e.SettingsPath, "agents.promptDir")
 			}
 			return
 		}
 	}
-	t.Fatal("SPINDRIFT_PROMPT_DIR entry not found in schemaFlags")
+	t.Fatal("SPINDRIFT_PROMPT_DIR entry not found in inputdoc.SchemaFlags")
 }
 
 // A Driver-valued knob's settingsPath is its placed path (lib/driver-map.nix
@@ -75,15 +75,15 @@ func TestSchemaFlags_PromptDirSettingsPath(t *testing.T) {
 // (issue #6141).
 func TestSchemaFlags_ModelSettingsPathIsPlaced(t *testing.T) {
 	const want = "agents.drivers.<name>.models.default"
-	for _, e := range schemaFlags {
-		if e.env == "MODEL" {
-			if e.settingsPath != want {
-				t.Errorf("MODEL settingsPath = %q, want %q", e.settingsPath, want)
+	for _, e := range inputdoc.SchemaFlags {
+		if e.Env == "MODEL" {
+			if e.SettingsPath != want {
+				t.Errorf("MODEL settingsPath = %q, want %q", e.SettingsPath, want)
 			}
 			return
 		}
 	}
-	t.Fatal("MODEL entry not found in schemaFlags")
+	t.Fatal("MODEL entry not found in inputdoc.SchemaFlags")
 }
 
 // Issue #2146 slice 1 converted these five knobs from strings to
@@ -99,15 +99,15 @@ func TestSchemaFlags_GenericBoolsAreBool(t *testing.T) {
 	for _, env := range envs {
 		env := env
 		t.Run(env, func(t *testing.T) {
-			for _, e := range schemaFlags {
-				if e.env == env {
-					if e.kind != "bool" {
-						t.Errorf("%s kind = %q, want %q", env, e.kind, "bool")
+			for _, e := range inputdoc.SchemaFlags {
+				if e.Env == env {
+					if e.Kind != "bool" {
+						t.Errorf("%s kind = %q, want %q", env, e.Kind, "bool")
 					}
 					return
 				}
 			}
-			t.Fatalf("%s entry not found in schemaFlags", env)
+			t.Fatalf("%s entry not found in inputdoc.SchemaFlags", env)
 		})
 	}
 }
@@ -115,18 +115,18 @@ func TestSchemaFlags_GenericBoolsAreBool(t *testing.T) {
 // Issue #2147 slice 1 made CONTINUOUS_DISPATCH a presence-style bool with
 // --continuous as a schema alias.
 func TestSchemaFlags_ContinuousDispatchIsBoolAlias(t *testing.T) {
-	for _, e := range schemaFlags {
-		if e.env == "CONTINUOUS_DISPATCH" {
-			if e.kind != "bool" {
-				t.Errorf("CONTINUOUS_DISPATCH kind = %q, want %q", e.kind, "bool")
+	for _, e := range inputdoc.SchemaFlags {
+		if e.Env == "CONTINUOUS_DISPATCH" {
+			if e.Kind != "bool" {
+				t.Errorf("CONTINUOUS_DISPATCH kind = %q, want %q", e.Kind, "bool")
 			}
-			if e.alias != "continuous" {
-				t.Errorf("CONTINUOUS_DISPATCH alias = %q, want %q", e.alias, "continuous")
+			if e.Alias != "continuous" {
+				t.Errorf("CONTINUOUS_DISPATCH alias = %q, want %q", e.Alias, "continuous")
 			}
 			return
 		}
 	}
-	t.Fatalf("CONTINUOUS_DISPATCH entry not found in schemaFlags")
+	t.Fatalf("CONTINUOUS_DISPATCH entry not found in inputdoc.SchemaFlags")
 }
 
 // A later slice of issue #2520 sources a generic Go guard from this choices
@@ -134,15 +134,15 @@ func TestSchemaFlags_ContinuousDispatchIsBoolAlias(t *testing.T) {
 // schema's enum verbatim.
 func TestSchemaFlags_MergeModeChoices(t *testing.T) {
 	want := []string{"immediate", "auto", "manual"}
-	for _, e := range schemaFlags {
-		if e.env == "MERGE_MODE" {
-			if !slices.Equal(e.choices, want) {
-				t.Errorf("MERGE_MODE choices = %v, want %v", e.choices, want)
+	for _, e := range inputdoc.SchemaFlags {
+		if e.Env == "MERGE_MODE" {
+			if !slices.Equal(e.Choices, want) {
+				t.Errorf("MERGE_MODE choices = %v, want %v", e.Choices, want)
 			}
 			return
 		}
 	}
-	t.Fatal("MERGE_MODE entry not found in schemaFlags")
+	t.Fatal("MERGE_MODE entry not found in inputdoc.SchemaFlags")
 }
 
 func TestExtractInputFlag_Present(t *testing.T) {
@@ -408,9 +408,9 @@ func TestDoctorFlagArgs(t *testing.T) {
 // the schema-generated flag table (ADR 0019).
 func TestSchemaFlags_ExcludesRemovedDepsKnobs(t *testing.T) {
 	for _, removed := range []string{"DEPS_POLL_SECS", "DEPS_WAIT_SECS"} {
-		for _, entry := range schemaFlags {
-			if entry.env == removed {
-				t.Errorf("removed knob %s must not appear in schemaFlags", removed)
+		for _, entry := range inputdoc.SchemaFlags {
+			if entry.Env == removed {
+				t.Errorf("removed knob %s must not appear in inputdoc.SchemaFlags", removed)
 			}
 		}
 	}
@@ -419,9 +419,9 @@ func TestSchemaFlags_ExcludesRemovedDepsKnobs(t *testing.T) {
 func TestParseFlags_SecretsExcluded(t *testing.T) {
 	secrets := []string{"GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}
 	for _, env := range secrets {
-		for _, entry := range schemaFlags {
-			if entry.env == env {
-				t.Errorf("secret knob %s must not appear in schemaFlags (would expose secrets in ps output)", env)
+		for _, entry := range inputdoc.SchemaFlags {
+			if entry.Env == env {
+				t.Errorf("secret knob %s must not appear in inputdoc.SchemaFlags (would expose secrets in ps output)", env)
 			}
 		}
 	}
@@ -753,15 +753,15 @@ func TestPrintHelpFull_GroupsFlags(t *testing.T) {
 	}
 }
 
-// A knob whose group is absent from groupOrder drops out of the full
+// A knob whose group is absent from inputdoc.GroupOrder drops out of the full
 // reference silently.
 func TestPrintHelpFull_CoversEverySchemaFlag(t *testing.T) {
 	var buf bytes.Buffer
 	printHelpFull(&buf)
 	out := buf.String()
-	for _, e := range schemaFlags {
-		if !strings.Contains(out, "--"+e.flag) {
-			t.Errorf("full help output missing flag --%s (group %q not rendered?)", e.flag, e.group)
+	for _, e := range inputdoc.SchemaFlags {
+		if !strings.Contains(out, "--"+e.Flag) {
+			t.Errorf("full help output missing flag --%s (group %q not rendered?)", e.Flag, e.Group)
 		}
 	}
 }
@@ -791,22 +791,22 @@ func TestPrintHelpFull_BoolFlagNoValuePlaceholder(t *testing.T) {
 
 // The full help and the man page group flags by this field.
 func TestSchemaFlags_AllHaveGroup(t *testing.T) {
-	for _, e := range schemaFlags {
-		if e.group == "" {
-			t.Errorf("flag --%s has no group; add `group = ...` to its lib/env-schema.nix entry", e.flag)
+	for _, e := range inputdoc.SchemaFlags {
+		if e.Group == "" {
+			t.Errorf("flag --%s has no group; add `group = ...` to its lib/env-schema.nix entry", e.Flag)
 		}
 	}
 }
 
-// printHelpFull drops the flags of any group missing from groupOrder.
+// printHelpFull drops the flags of any group missing from inputdoc.GroupOrder.
 func TestGroupOrder_CoversEverySchemaGroup(t *testing.T) {
 	known := map[string]bool{}
-	for _, g := range groupOrder {
+	for _, g := range inputdoc.GroupOrder {
 		known[g] = true
 	}
-	for _, e := range schemaFlags {
-		if e.group != "" && !known[e.group] {
-			t.Errorf("flag --%s has group %q missing from groupOrder", e.flag, e.group)
+	for _, e := range inputdoc.SchemaFlags {
+		if e.Group != "" && !known[e.Group] {
+			t.Errorf("flag --%s has group %q missing from inputdoc.GroupOrder", e.Flag, e.Group)
 		}
 	}
 }
@@ -1644,7 +1644,7 @@ func TestParseFlags_GlobalSecretCmd_SkipsBoxGhToken(t *testing.T) {
 	}
 }
 
-// ANTHROPIC_API_KEY sorts before CLAUDE_CODE_OAUTH_TOKEN in secretKnobs, so
+// ANTHROPIC_API_KEY sorts before CLAUDE_CODE_OAUTH_TOKEN in inputdoc.SecretKnobs, so
 // the fallback pass must see every per-secret resolution parseFlags already
 // made before it decides the pair is unsatisfied.
 func TestParseFlags_GlobalSecretCmd_ExplicitClaudeCmdPreemptsAnthropicFallback(t *testing.T) {
@@ -2631,33 +2631,21 @@ func TestDoctorFlagArgs_Research(t *testing.T) {
 }
 
 // TestDaemonOnlyKnobsParityWithInputdoc keeps inputdoc's generated daemon-only
-// set in sync with flagEntry.launcherIgnores, and every member a real
+// set in sync with inputdoc.FlagEntry.LauncherIgnores, and every member a real
 // flag-table entry (issue #4644). Both render from the same schema predicate,
 // so this only catches a hand-edited generated file; it stays because the
-// daemon cannot import the flag table to check that itself, the same reason
-// TestEmptyIsSettingParityWithInputdoc exists.
+// daemon-only set is still a separate generated file from the flag table.
 func TestDaemonOnlyKnobsParityWithInputdoc(t *testing.T) {
 	inTable := map[string]bool{}
-	for _, e := range schemaFlags {
-		inTable[e.env] = true
-		if got := inputdoc.IsDaemonOnly(e.env); got != e.launcherIgnores {
-			t.Errorf("%s: inputdoc IsDaemonOnly = %v, flagEntry.launcherIgnores = %v", e.env, got, e.launcherIgnores)
+	for _, e := range inputdoc.SchemaFlags {
+		inTable[e.Env] = true
+		if got := inputdoc.IsDaemonOnly(e.Env); got != e.LauncherIgnores {
+			t.Errorf("%s: inputdoc IsDaemonOnly = %v, inputdoc.FlagEntry.LauncherIgnores = %v", e.Env, got, e.LauncherIgnores)
 		}
 	}
 	for _, k := range inputdoc.DaemonOnlyKnobs() {
 		if !inTable[k] {
 			t.Errorf("%s: in inputdoc.DaemonOnlyKnobs but not in the flag table", k)
-		}
-	}
-}
-
-// TestEmptyIsSettingParityWithInputdoc keeps inputdoc.Document.Setting's
-// generated set in sync with flagEntry.emptyIsSetting.
-func TestEmptyIsSettingParityWithInputdoc(t *testing.T) {
-	for _, e := range schemaFlags {
-		doc := &inputdoc.Document{Settings: map[string]string{e.env: ""}}
-		if _, ok := doc.Setting(e.env); ok != e.emptyIsSetting() {
-			t.Errorf("%s: inputdoc Setting(empty) ok = %v, flagEntry.emptyIsSetting() = %v", e.env, ok, e.emptyIsSetting())
 		}
 	}
 }

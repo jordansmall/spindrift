@@ -13,8 +13,8 @@ func TestDispatchStamp_KnobsCarryEffectiveValuesAndNeverSecrets(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = nil
 	t.Setenv("BASE_BRANCH", "release")
-	for _, s := range secretKnobs {
-		t.Setenv(s.env, "s3cret-value")
+	for _, s := range inputdoc.SecretKnobs {
+		t.Setenv(s.Env, "s3cret-value")
 	}
 
 	st := dispatchStamp("")
@@ -22,12 +22,12 @@ func TestDispatchStamp_KnobsCarryEffectiveValuesAndNeverSecrets(t *testing.T) {
 	if got := st.Knobs["BASE_BRANCH"]; got != "release" {
 		t.Errorf("Knobs[BASE_BRANCH] = %q, want release", got)
 	}
-	if len(st.Knobs) != len(schemaFlags) {
-		t.Errorf("Knobs has %d entries, want one per schemaFlags (%d)", len(st.Knobs), len(schemaFlags))
+	if len(st.Knobs) != len(inputdoc.SchemaFlags) {
+		t.Errorf("Knobs has %d entries, want one per inputdoc.SchemaFlags (%d)", len(st.Knobs), len(inputdoc.SchemaFlags))
 	}
-	for _, s := range secretKnobs {
-		if v, ok := st.Knobs[s.env]; ok {
-			t.Errorf("secret knob %s leaked into Knobs (%q)", s.env, v)
+	for _, s := range inputdoc.SecretKnobs {
+		if v, ok := st.Knobs[s.Env]; ok {
+			t.Errorf("secret knob %s leaked into Knobs (%q)", s.Env, v)
 		}
 	}
 	for k, v := range st.Knobs {
@@ -106,8 +106,8 @@ func TestDispatchStamp_RedactsURLUserinfo(t *testing.T) {
 func TestDispatchConfig_StampExcludesSecretsAndTracksReviewModel(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = nil
-	for _, s := range secretKnobs {
-		t.Setenv(s.env, "s3cret-value")
+	for _, s := range inputdoc.SecretKnobs {
+		t.Setenv(s.Env, "s3cret-value")
 	}
 	t.Setenv("BASE_BRANCH", "release")
 	t.Setenv("REVIEW_MODEL", "haiku")
@@ -117,9 +117,9 @@ func TestDispatchConfig_StampExcludesSecretsAndTracksReviewModel(t *testing.T) {
 	if got := cfg.Stamp.Knobs["BASE_BRANCH"]; got != "release" {
 		t.Errorf("Stamp.Knobs[BASE_BRANCH] = %q, want release", got)
 	}
-	for _, s := range secretKnobs {
-		if _, ok := cfg.Stamp.Knobs[s.env]; ok {
-			t.Errorf("secret knob %s present in Stamp.Knobs", s.env)
+	for _, s := range inputdoc.SecretKnobs {
+		if _, ok := cfg.Stamp.Knobs[s.Env]; ok {
+			t.Errorf("secret knob %s present in Stamp.Knobs", s.Env)
 		}
 	}
 	if cfg.ReviewModelOverride != "haiku" || cfg.Stamp.RoleModels["reviewer"] != cfg.ReviewModelOverride {

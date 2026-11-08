@@ -15,6 +15,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/launcherchecks"
 )
 
@@ -83,7 +84,7 @@ func parseIssuePositionals(args []string) issueArgs {
 
 // extractInputFlag pulls "--input <path>", the Launcher input document's
 // store path, out of args (ADR 0020). It is not a schema knob, so it bypasses
-// schemaFlags and os.Setenv. An invocation with no document leaves args alone.
+// inputdoc.SchemaFlags and os.Setenv. An invocation with no document leaves args alone.
 func extractInputFlag(args []string) (path string, remaining []string, err error) {
 	for i := 0; i < len(args); i++ {
 		if args[i] != "--input" {
@@ -97,62 +98,6 @@ func extractInputFlag(args []string) (path string, remaining []string, err error
 		i++
 	}
 	return path, remaining, nil
-}
-
-// flagEntry maps a runtime knob to its CLI flag. nix/regen.nix generates the
-// schemaFlags table from lib/env-schema.nix, via lib/renderers.nix's
-// renderFlagTableGo.
-type flagEntry struct {
-	env   string // SCREAMING_SNAKE_CASE
-	flag  string // kebab-case, no leading dashes
-	alias string // kebab-case, no leading dashes; empty when absent
-	kind  string // "string", "int", or "bool"
-	doc   string
-	dflt  string // empty when there is none
-	group string
-	// canonical placed flake path, e.g. git.merge.policy (Driver-valued knobs:
-	// agents.drivers.<name>.*); empty for a non-flakeOption knob
-	settingsPath    string
-	deprecatedAlias string // empty unless the canonical flag was renamed (ADR 0037 Pass 2)
-	choices         []string
-	// launcherIgnores marks a knob the launcher generates a flag for (1:1
-	// flake-option/flag parity, #3567) but never itself reads; only
-	// cmd/launcher/daemon consumes it, via the input document (#3698).
-	launcherIgnores bool
-	// emptyDisables marks a string knob whose doc gives "" its own meaning
-	// (e.g. disables the limit); see emptyIsSetting.
-	emptyDisables bool
-	// boxHostDerived marks a knob the schema declares both hostDerived and
-	// boxEnv (issue #5329). A test-only parity marker: no production path
-	// reads it; TestDispatchConfig_ResolveEnv_EveryBoxHostDerivedKnobGetsSnapshot
-	// pins it, and runtime forwarding reads BOX_ENV_VARS. Schema-drift's
-	// hostGitConfigKeyMismatch makes it equivalent to hostGitConfigKey != "";
-	// it stays as defence in depth, so that test still catches a keyless
-	// host-derived row in a regen that never ran schema-drift.
-	boxHostDerived bool
-	// hostGitConfigKey is the host git config key (git config --get) a
-	// boxHostDerived knob falls back to; read by hostGitConfigField.
-	hostGitConfigKey string
-}
-
-// emptyIsSetting is the one rule for whether an empty env value is a real
-// setting rather than "unset" (which falls back to the default): true iff the
-// knob is bool kind (parseFlags encodes a bool's explicit off as set-but-empty)
-// or emptyDisables. Read env through ambientSetting; never re-derive this.
-// inputdoc.Document.Setting applies the same rule to a document value.
-func (e flagEntry) emptyIsSetting() bool {
-	return e.kind == "bool" || e.emptyDisables
-}
-
-// secretKnob is a knob the schema marks secret = true, so it gets no inline
-// value flag: callers supply it through the environment, --<fileFlag>, or
-// --<cmdFlag>. nix/regen.nix generates secretKnobs from lib/env-schema.nix,
-// via lib/renderers.nix's renderFlagTableGo.
-type secretKnob struct {
-	env      string
-	doc      string
-	fileFlag string // kebab-case, no leading dashes
-	cmdFlag  string // kebab-case, no leading dashes
 }
 
 // toKebab mirrors lib/renderers.nix's toKebab, so --secret-cmd's {name}
@@ -218,21 +163,21 @@ func resolveSecretCmd(env, cmd string) (string, error) {
 	return trimmed, nil
 }
 
-// validateChoice checks a resolved value against the schemaFlags row's
+// validateChoice checks a resolved value against the inputdoc.SchemaFlags row's
 // declared choices (issue #2520 slice 2). A missing row or a row with no
 // choices is a no-op.
 func validateChoice(env, value string) error {
-	for _, e := range schemaFlags {
-		if e.env != env {
+	for _, e := range inputdoc.SchemaFlags {
+		if e.Env != env {
 			continue
 		}
-		if len(e.choices) == 0 {
+		if len(e.Choices) == 0 {
 			return nil
 		}
-		if slices.Contains(e.choices, value) {
+		if slices.Contains(e.Choices, value) {
 			return nil
 		}
-		return fmt.Errorf("%s=%q is not valid; must be %s", env, value, launcherchecks.JoinOxford(e.choices))
+		return fmt.Errorf("%s=%q is not valid; must be %s", env, value, launcherchecks.JoinOxford(e.Choices))
 	}
 	return nil
 }
@@ -322,44 +267,44 @@ func lookupCliFlag(arg string, remaining []string) *cliFlag {
 // flag > document > schema default precedence (ADR 0020). An unrecognised
 // --flag is an error; non-flag args and everything after "--" pass through.
 func parseFlags(args []string) ([]string, error) {
-	byFlag := make(map[string]*flagEntry, len(schemaFlags)*2)
-	byBool := make(map[string]*flagEntry, 2)
-	for i := range schemaFlags {
-		if schemaFlags[i].kind == "bool" {
-			byBool["--"+schemaFlags[i].flag] = &schemaFlags[i]
-			if schemaFlags[i].alias != "" {
-				byBool["--"+schemaFlags[i].alias] = &schemaFlags[i]
+	byFlag := make(map[string]*inputdoc.FlagEntry, len(inputdoc.SchemaFlags)*2)
+	byBool := make(map[string]*inputdoc.FlagEntry, 2)
+	for i := range inputdoc.SchemaFlags {
+		if inputdoc.SchemaFlags[i].Kind == "bool" {
+			byBool["--"+inputdoc.SchemaFlags[i].Flag] = &inputdoc.SchemaFlags[i]
+			if inputdoc.SchemaFlags[i].Alias != "" {
+				byBool["--"+inputdoc.SchemaFlags[i].Alias] = &inputdoc.SchemaFlags[i]
 			}
-			if schemaFlags[i].deprecatedAlias != "" {
-				byBool["--"+schemaFlags[i].deprecatedAlias] = &schemaFlags[i]
+			if inputdoc.SchemaFlags[i].DeprecatedAlias != "" {
+				byBool["--"+inputdoc.SchemaFlags[i].DeprecatedAlias] = &inputdoc.SchemaFlags[i]
 			}
 			continue
 		}
-		byFlag["--"+schemaFlags[i].flag] = &schemaFlags[i]
-		if schemaFlags[i].alias != "" {
-			byFlag["--"+schemaFlags[i].alias] = &schemaFlags[i]
+		byFlag["--"+inputdoc.SchemaFlags[i].Flag] = &inputdoc.SchemaFlags[i]
+		if inputdoc.SchemaFlags[i].Alias != "" {
+			byFlag["--"+inputdoc.SchemaFlags[i].Alias] = &inputdoc.SchemaFlags[i]
 		}
-		if schemaFlags[i].deprecatedAlias != "" {
-			byFlag["--"+schemaFlags[i].deprecatedAlias] = &schemaFlags[i]
+		if inputdoc.SchemaFlags[i].DeprecatedAlias != "" {
+			byFlag["--"+inputdoc.SchemaFlags[i].DeprecatedAlias] = &inputdoc.SchemaFlags[i]
 		}
 	}
 
-	byFileFlag := make(map[string]*secretKnob, len(secretKnobs))
-	byCmdFlag := make(map[string]*secretKnob, len(secretKnobs))
-	for i := range secretKnobs {
-		if secretKnobs[i].fileFlag != "" {
-			byFileFlag["--"+secretKnobs[i].fileFlag] = &secretKnobs[i]
+	byFileFlag := make(map[string]*inputdoc.SecretKnob, len(inputdoc.SecretKnobs))
+	byCmdFlag := make(map[string]*inputdoc.SecretKnob, len(inputdoc.SecretKnobs))
+	for i := range inputdoc.SecretKnobs {
+		if inputdoc.SecretKnobs[i].FileFlag != "" {
+			byFileFlag["--"+inputdoc.SecretKnobs[i].FileFlag] = &inputdoc.SecretKnobs[i]
 		}
-		if secretKnobs[i].cmdFlag != "" {
-			byCmdFlag["--"+secretKnobs[i].cmdFlag] = &secretKnobs[i]
+		if inputdoc.SecretKnobs[i].CmdFlag != "" {
+			byCmdFlag["--"+inputdoc.SecretKnobs[i].CmdFlag] = &inputdoc.SecretKnobs[i]
 		}
 	}
 
 	// The scan below fills these without acting on them, so parseFlags can
 	// reject a conflicting file/cmd pair before either side effect runs,
 	// whichever flag came first on the command line.
-	filePaths := make(map[string]string, len(secretKnobs))
-	cmdStrings := make(map[string]string, len(secretKnobs))
+	filePaths := make(map[string]string, len(inputdoc.SecretKnobs))
+	cmdStrings := make(map[string]string, len(inputdoc.SecretKnobs))
 
 	// Reset so repeated calls in one process (tests) see no stale value.
 	globalSecretCmdTemplate = ""
@@ -417,7 +362,7 @@ func parseFlags(args []string) ([]string, error) {
 			if on {
 				setTo = "1"
 			}
-			if err := os.Setenv(entry.env, setTo); err != nil {
+			if err := os.Setenv(entry.Env, setTo); err != nil {
 				return nil, err
 			}
 			i++
@@ -428,7 +373,7 @@ func parseFlags(args []string) ([]string, error) {
 			if i >= len(args) {
 				return nil, fmt.Errorf("flag %s requires a value", arg)
 			}
-			if err := os.Setenv(entry.env, args[i]); err != nil {
+			if err := os.Setenv(entry.Env, args[i]); err != nil {
 				return nil, err
 			}
 			i++
@@ -439,7 +384,7 @@ func parseFlags(args []string) ([]string, error) {
 			if i >= len(args) {
 				return nil, fmt.Errorf("flag %s requires a path", arg)
 			}
-			filePaths[knob.env] = args[i]
+			filePaths[knob.Env] = args[i]
 			i++
 			continue
 		}
@@ -448,33 +393,33 @@ func parseFlags(args []string) ([]string, error) {
 			if i >= len(args) {
 				return nil, fmt.Errorf("flag %s requires a command", arg)
 			}
-			cmdStrings[knob.env] = args[i]
+			cmdStrings[knob.Env] = args[i]
 			i++
 			continue
 		}
 		return nil, fmt.Errorf("unknown flag: %s", arg)
 	}
 
-	for i := range secretKnobs {
-		knob := &secretKnobs[i]
-		_, hasFileFlag := filePaths[knob.env]
-		_, hasCmdFlag := cmdStrings[knob.env]
+	for i := range inputdoc.SecretKnobs {
+		knob := &inputdoc.SecretKnobs[i]
+		_, hasFileFlag := filePaths[knob.Env]
+		_, hasCmdFlag := cmdStrings[knob.Env]
 		if hasFileFlag && hasCmdFlag {
-			return nil, fmt.Errorf("--%s and --%s are mutually exclusive", knob.cmdFlag, knob.fileFlag)
+			return nil, fmt.Errorf("--%s and --%s are mutually exclusive", knob.CmdFlag, knob.FileFlag)
 		}
 
 		var value string
 		var err error
 		switch {
 		case hasCmdFlag:
-			value, err = resolveSecretCmd(knob.env, cmdStrings[knob.env])
-		case os.Getenv(knob.env+"_CMD") != "":
-			value, err = resolveSecretCmd(knob.env, os.Getenv(knob.env+"_CMD"))
+			value, err = resolveSecretCmd(knob.Env, cmdStrings[knob.Env])
+		case os.Getenv(knob.Env+"_CMD") != "":
+			value, err = resolveSecretCmd(knob.Env, os.Getenv(knob.Env+"_CMD"))
 		case hasFileFlag:
 			var data []byte
-			data, err = os.ReadFile(filePaths[knob.env])
+			data, err = os.ReadFile(filePaths[knob.Env])
 			if err != nil {
-				return nil, fmt.Errorf("--%s: cannot read file %s: %w", knob.fileFlag, filePaths[knob.env], err)
+				return nil, fmt.Errorf("--%s: cannot read file %s: %w", knob.FileFlag, filePaths[knob.Env], err)
 			}
 			value = strings.TrimRight(string(data), "\r\n")
 		default:
@@ -483,7 +428,7 @@ func parseFlags(args []string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := os.Setenv(knob.env, value); err != nil {
+		if err := os.Setenv(knob.Env, value); err != nil {
 			return nil, err
 		}
 	}
@@ -512,18 +457,18 @@ func applySecretCmdFallback() error {
 		return nil
 	}
 	rules, models := activeCredentialRules()
-	for i := range secretKnobs {
-		knob := &secretKnobs[i]
-		if os.Getenv(knob.env) != "" || !secretRequiredThisRun(knob.env, rules) {
+	for i := range inputdoc.SecretKnobs {
+		knob := &inputdoc.SecretKnobs[i]
+		if os.Getenv(knob.Env) != "" || !secretRequiredThisRun(knob.Env, rules) {
 			continue
 		}
 		// A Driver rule's variables are one unit: any one satisfies validate(),
 		// so an OAuth-only vault must not abort on a missing ANTHROPIC_API_KEY
 		// item (Claude's pair). The non-first variables defer to the rule's first.
-		envs := []string{knob.env}
-		rule, isRuleVar := credentialRuleFor(rules, knob.env)
+		envs := []string{knob.Env}
+		rule, isRuleVar := credentialRuleFor(rules, knob.Env)
 		if isRuleVar {
-			if knob.env != rule.Env[0] {
+			if knob.Env != rule.Env[0] {
 				continue
 			}
 			envs = rule.Env
@@ -716,51 +661,51 @@ func printHelpFull(w io.Writer) {
 	fmt.Fprintln(w, "Flags (flag > flake setting > default precedence; a knob env var still")
 	fmt.Fprintln(w, "wins this release but is deprecated and warns — ADR 0020):")
 
-	byGroup := make(map[string][]flagEntry, len(groupOrder))
-	for _, e := range schemaFlags {
-		byGroup[e.group] = append(byGroup[e.group], e)
+	byGroup := make(map[string][]inputdoc.FlagEntry, len(inputdoc.GroupOrder))
+	for _, e := range inputdoc.SchemaFlags {
+		byGroup[e.Group] = append(byGroup[e.Group], e)
 	}
-	for _, g := range groupOrder {
+	for _, g := range inputdoc.GroupOrder {
 		entries := byGroup[g]
 		if len(entries) == 0 {
 			continue
 		}
 		fmt.Fprintf(w, "\n  %s:\n", g)
 		for _, e := range entries {
-			dflt := e.dflt
+			dflt := e.Dflt
 			if dflt == "" {
 				dflt = "(none)"
 			}
-			flagCol := e.flag
-			if e.alias != "" {
-				flagCol = flagCol + ", --" + e.alias
+			flagCol := e.Flag
+			if e.Alias != "" {
+				flagCol = flagCol + ", --" + e.Alias
 			}
-			if e.deprecatedAlias != "" {
-				flagCol = flagCol + ", --" + e.deprecatedAlias + " (deprecated)"
+			if e.DeprecatedAlias != "" {
+				flagCol = flagCol + ", --" + e.DeprecatedAlias + " (deprecated)"
 			}
 			fmt.Fprintf(w, "    --%-30s  %-6s  default=%-20s  %s\n",
-				flagCol, e.kind, dflt, e.doc)
+				flagCol, e.Kind, dflt, e.Doc)
 		}
 	}
-	if len(secretKnobs) > 0 {
+	if len(inputdoc.SecretKnobs) > 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "Env-only (secret; never a value flag):")
-		for _, s := range secretKnobs {
-			fmt.Fprintf(w, "  %-32s  env-only  %s\n", s.env, s.doc)
+		for _, s := range inputdoc.SecretKnobs {
+			fmt.Fprintf(w, "  %-32s  env-only  %s\n", s.Env, s.Doc)
 		}
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "Secret file flags (read value from file; takes precedence over env):")
-		for _, s := range secretKnobs {
-			if s.fileFlag != "" {
-				fmt.Fprintf(w, "  --%-30s  path  %s\n", s.fileFlag, s.doc)
+		for _, s := range inputdoc.SecretKnobs {
+			if s.FileFlag != "" {
+				fmt.Fprintf(w, "  --%-30s  path  %s\n", s.FileFlag, s.Doc)
 			}
 		}
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "Secret command flags (fetch value from a command's stdout; sibling <NAME>_CMD")
 		fmt.Fprintln(w, "env var; highest precedence — preferred for external-vault sourcing):")
-		for _, s := range secretKnobs {
-			if s.cmdFlag != "" {
-				fmt.Fprintf(w, "  --%-30s  cmd   %s\n", s.cmdFlag, s.doc)
+		for _, s := range inputdoc.SecretKnobs {
+			if s.CmdFlag != "" {
+				fmt.Fprintf(w, "  --%-30s  cmd   %s\n", s.CmdFlag, s.Doc)
 			}
 		}
 		fmt.Fprintln(w)

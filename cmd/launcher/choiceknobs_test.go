@@ -5,20 +5,21 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/runner"
 )
 
 func TestNetworkModes_MatchSchemaChoices(t *testing.T) {
 	var choices []string
 	found := false
-	for _, f := range schemaFlags {
-		if f.env == "NETWORK_MODE" {
-			choices, found = f.choices, true
+	for _, f := range inputdoc.SchemaFlags {
+		if f.Env == "NETWORK_MODE" {
+			choices, found = f.Choices, true
 			break
 		}
 	}
 	if !found {
-		t.Fatal("NETWORK_MODE not found in schemaFlags")
+		t.Fatal("NETWORK_MODE not found in inputdoc.SchemaFlags")
 	}
 	modes := runner.NetworkModes()
 	got := make([]string, len(modes))
@@ -83,10 +84,10 @@ func TestChoiceKnobRegistry_OnlyBoxForgeAndIssueAccessIsAfterCrossKnobChecks(t *
 	}
 }
 
-// A knob dropped from the registry, or renamed to an Env that schemaFlags no
+// A knob dropped from the registry, or renamed to an Env that inputdoc.SchemaFlags no
 // longer recognizes, goes unvalidated by both validate() and validateConfig()
 // while the rest of the suite stays green, because validateChoice is a no-op
-// for an Env absent from schemaFlags. Only full membership catches that.
+// for an Env absent from inputdoc.SchemaFlags. Only full membership catches that.
 func TestChoiceKnobRegistry_HasSevenExpectedRows(t *testing.T) {
 	want := []string{
 		"MERGE_MODE",
@@ -156,8 +157,8 @@ func TestValidateChoiceKnobsErrors_CollectsAll(t *testing.T) {
 
 // AC3: a 7th row appended to choiceKnobRegistry reaches both validate() and
 // validateConfig() with no edits to either function. The row uses CODE_FORGE, a
-// real schemaFlags env with choices that is not already in the registry,
-// because validateChoice returns nil for any env absent from schemaFlags and a
+// real inputdoc.SchemaFlags env with choices that is not already in the registry,
+// because validateChoice returns nil for any env absent from inputdoc.SchemaFlags and a
 // made-up name could never prove the injected row was walked.
 func TestChoiceKnobRegistry_InjectedRowReachesBothValidators(t *testing.T) {
 	withChoiceKnobRegistry(t, append(append([]choiceKnobRow{}, choiceKnobRegistry...), choiceKnobRow{

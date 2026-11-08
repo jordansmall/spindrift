@@ -57,8 +57,6 @@ let
   defaultModelFixture = import ../lib/default-model-fixture.nix;
   defaultModelFixtureGo = renderers.renderDefaultModelFixtureGo defaultModelFixture;
   daemonKnobDefaultsGo = renderers.renderDaemonKnobDefaultsGo schema;
-  emptyIsSettingGo = renderers.renderEmptyIsSettingGo schema;
-  schemaDefaultsGo = renderers.renderSchemaDefaultsGo schema;
   daemonOnlyKnobsGo = renderers.renderDaemonOnlyKnobsGo schema;
   legacySettingsSection = import ../lib/legacy-settings-section.nix;
   legacySettingsMappingDoc = renderers.renderLegacySettingsMappingDoc legacySettingsSection schema;
@@ -174,7 +172,7 @@ pkgs.writeShellApplication {
     ${writeBetweenShellFn}
 
     ${writeGenerated "templates/default/harness.env.example" envExample}
-    ${writeGenerated "cmd/launcher/flagtable_gen.go" flagTable}
+    ${writeGenerated "cmd/launcher/internal/inputdoc/flagtable_gen.go" flagTable}
     ${writeGenerated "cmd/launcher/schemaconfig_gen.go" schemaConfigFile}
     gofmt -w "$root/cmd/launcher/schemaconfig_gen.go"
     ${writeGenerated "docs/flake-options.md" flakeOptionsDoc}
@@ -207,10 +205,6 @@ pkgs.writeShellApplication {
     gofmt -w "$root/cmd/launcher/defaultmodels_gen_test.go"
     ${writeGenerated "cmd/launcher/internal/daemon/shippeddefaults_gen_test.go" daemonKnobDefaultsGo}
     gofmt -w "$root/cmd/launcher/internal/daemon/shippeddefaults_gen_test.go"
-    ${writeGenerated "cmd/launcher/internal/inputdoc/emptyissetting_gen.go" emptyIsSettingGo}
-    gofmt -w "$root/cmd/launcher/internal/inputdoc/emptyissetting_gen.go"
-    ${writeGenerated "cmd/launcher/internal/inputdoc/schemadefaults_gen.go" schemaDefaultsGo}
-    gofmt -w "$root/cmd/launcher/internal/inputdoc/schemadefaults_gen.go"
     ${writeGenerated "cmd/launcher/internal/inputdoc/daemononlyknobs_gen.go" daemonOnlyKnobsGo}
     gofmt -w "$root/cmd/launcher/internal/inputdoc/daemononlyknobs_gen.go"
     ${concatStrings (map regenRowScript documentedFacts)}

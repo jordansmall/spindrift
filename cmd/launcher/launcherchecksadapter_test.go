@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/inputdoc"
 )
 
 // TestLauncherCheckDeps_BackendBindsValidatorToConfig proves the Backend
@@ -88,12 +89,12 @@ func TestLauncherCheckDeps_NoExtraCrossKnobRow(t *testing.T) {
 
 // TestLauncherCredentialsCoverDriverRules fails when a Driver's credential
 // rule names an env var the adapter never fills into Credentials, or one with
-// no secretKnobs row for the --secret-cmd fallback to fetch.
+// no inputdoc.SecretKnobs row for the --secret-cmd fallback to fetch.
 func TestLauncherCredentialsCoverDriverRules(t *testing.T) {
 	creds := launcherCredentials(config{})
 	knobs := map[string]bool{}
-	for _, k := range secretKnobs {
-		knobs[k.env] = true
+	for _, k := range inputdoc.SecretKnobs {
+		knobs[k.Env] = true
 	}
 	for _, name := range driver.Names() {
 		rules, _ := driver.CredentialRules(name)
@@ -103,7 +104,7 @@ func TestLauncherCredentialsCoverDriverRules(t *testing.T) {
 					t.Errorf("driver %s: rule var %s has no launcherCredentials entry", name, env)
 				}
 				if !knobs[env] {
-					t.Errorf("driver %s: rule var %s has no secretKnobs row", name, env)
+					t.Errorf("driver %s: rule var %s has no inputdoc.SecretKnobs row", name, env)
 				}
 			}
 		}

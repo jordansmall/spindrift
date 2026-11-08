@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/dispatchrecord"
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/recordstats"
 )
 
@@ -41,12 +42,12 @@ func (b statsBy) String() string {
 // statsKnobNames lists the knobs a dispatch_start stamp records: every schema
 // knob except the secret ones.
 func statsKnobNames() (names, secret []string) {
-	for _, s := range secretKnobs {
-		secret = append(secret, s.env)
+	for _, s := range inputdoc.SecretKnobs {
+		secret = append(secret, s.Env)
 	}
-	for _, e := range schemaFlags {
-		if !slices.Contains(secret, e.env) {
-			names = append(names, e.env)
+	for _, e := range inputdoc.SchemaFlags {
+		if !slices.Contains(secret, e.Env) {
+			names = append(names, e.Env)
 		}
 	}
 	return names, secret

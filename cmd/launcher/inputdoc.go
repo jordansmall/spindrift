@@ -85,25 +85,25 @@ func resolveBoxEnvVar(name string) string {
 // next). It must run before parseFlags mutates the environment via os.Setenv,
 // or a flag-set value looks like an ambient one.
 func warnAmbientKnobEnv(w io.Writer) {
-	for _, e := range schemaFlags {
-		v, ok := ambientSetting(e.env)
+	for _, e := range inputdoc.SchemaFlags {
+		v, ok := ambientSetting(e.Env)
 		if !ok {
 			continue
 		}
-		// A launcherIgnores knob's flag is inert (see flagEntry), so its
+		// A launcherIgnores knob's flag is inert (see inputdoc.FlagEntry), so its
 		// settings path is the only real migration target;
 		// nix/checks/schema-drift.nix pins flakeOption = true on every such
 		// knob, which lib/renderers.nix turns into a settings path (#3698).
-		equiv := e.settingsPath
-		if !e.launcherIgnores {
-			equiv = "--" + e.flag
-			if e.settingsPath != "" {
-				equiv += " or " + e.settingsPath
+		equiv := e.SettingsPath
+		if !e.LauncherIgnores {
+			equiv = "--" + e.Flag
+			if e.SettingsPath != "" {
+				equiv += " or " + e.SettingsPath
 			}
 		}
 		if v == "" {
 			v = `""`
 		}
-		fmt.Fprintf(w, "%s=%s set in environment — knob env overrides are deprecated; use %s\n", e.env, v, equiv)
+		fmt.Fprintf(w, "%s=%s set in environment — knob env overrides are deprecated; use %s\n", e.Env, v, equiv)
 	}
 }

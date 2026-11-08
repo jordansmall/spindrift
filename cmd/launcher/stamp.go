@@ -7,23 +7,24 @@ import (
 	"os"
 
 	"spindrift.dev/launcher/internal/hostop"
+	"spindrift.dev/launcher/internal/inputdoc"
 )
 
 // dispatchStamp is the deployment facts every Pass log's dispatch_start
 // carries (issue #4783). Knobs holds the effective value of every non-secret
-// schema knob, with any URL userinfo stripped; secretKnobs never enter
-// schemaFlags, and the explicit skip keeps that true if the generator ever
+// schema knob, with any URL userinfo stripped; inputdoc.SecretKnobs never enter
+// inputdoc.SchemaFlags, and the explicit skip keeps that true if the generator ever
 // changes. reviewModel is the dispatch-time REVIEW_MODEL, the same value
 // dispatchConfig hands ReviewModelOverride.
 func dispatchStamp(reviewModel string) hostop.DispatchStart {
-	secret := make(map[string]bool, len(secretKnobs))
-	for _, s := range secretKnobs {
-		secret[s.env] = true
+	secret := make(map[string]bool, len(inputdoc.SecretKnobs))
+	for _, s := range inputdoc.SecretKnobs {
+		secret[s.Env] = true
 	}
-	knobs := make(map[string]string, len(schemaFlags))
-	for _, e := range schemaFlags {
-		if !secret[e.env] {
-			knobs[e.env] = redactUserinfo(getenvSchema(e.env))
+	knobs := make(map[string]string, len(inputdoc.SchemaFlags))
+	for _, e := range inputdoc.SchemaFlags {
+		if !secret[e.Env] {
+			knobs[e.Env] = redactUserinfo(getenvSchema(e.Env))
 		}
 	}
 	return hostop.DispatchStart{

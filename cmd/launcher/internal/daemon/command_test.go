@@ -466,7 +466,7 @@ func TestChildCommandStripsAmbientReportFD(t *testing.T) {
 }
 
 // TestChildCommandCarriesSignalCarrier pins the knob's whole reason for
-// being env-only (see flagtable_gen.go): BOX_SIGNAL_CARRIER never lands in
+// being env-only (see inputdoc/flagtable_gen.go): BOX_SIGNAL_CARRIER never lands in
 // the Launcher input document's settings map, so it is never a Knobs entry
 // and withoutKeys never strips it — it rides s.Env straight through. The
 // "beside a stripped knob" case is the one that exercises the strip path:

@@ -265,7 +265,7 @@ func atoiNonneg(s string, def int) int {
 
 // schemaDefault returns key's resolved default: the loaded Launcher input
 // document's settings value (ADR 0020) when --input loaded one carrying key,
-// else the generated schemaFlags table, or "" when the knob has none. Every
+// else the generated inputdoc.SchemaFlags table, or "" when the knob has none. Every
 // getenvSchema/atoiSchema/atoiNonnegSchema call resolves through this, so
 // document precedence applies to all of them (issue #625).
 func schemaDefault(key string) string {
@@ -274,20 +274,7 @@ func schemaDefault(key string) string {
 			return v
 		}
 	}
-	if e, ok := schemaFlag(key); ok {
-		return e.dflt
-	}
-	return ""
-}
-
-// schemaFlag returns the schema entry whose env key is key.
-func schemaFlag(key string) (flagEntry, bool) {
-	for _, e := range schemaFlags {
-		if e.env == key {
-			return e, true
-		}
-	}
-	return flagEntry{}, false
+	return inputdoc.SchemaDefault(key)
 }
 
 // intSchemaDefault parses key's schema default as an int; a non-numeric or
@@ -298,11 +285,11 @@ func intSchemaDefault(key string) int {
 }
 
 // ambientSetting reports key's ambient env value and whether it counts as
-// set: non-empty, or set-but-empty when flagEntry.emptyIsSetting says so.
+// set: non-empty, or set-but-empty when inputdoc.FlagEntry.EmptyIsSetting says so.
 func ambientSetting(key string) (string, bool) {
 	v, ok := os.LookupEnv(key)
-	e, _ := schemaFlag(key)
-	return v, ok && (v != "" || e.emptyIsSetting())
+	e, _ := inputdoc.SchemaFlag(key)
+	return v, ok && (v != "" || e.EmptyIsSetting())
 }
 
 // getenvSchema reads key from the environment, falling back to its schema
@@ -356,8 +343,8 @@ func hostGitConfigField(env string) string {
 	if v := getenvSchema(env); v != "" {
 		return v
 	}
-	if e, ok := schemaFlag(env); ok && e.hostGitConfigKey != "" {
-		return gitConfigLookup(e.hostGitConfigKey)
+	if e, ok := inputdoc.SchemaFlag(env); ok && e.HostGitConfigKey != "" {
+		return gitConfigLookup(e.HostGitConfigKey)
 	}
 	return ""
 }
