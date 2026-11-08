@@ -1,0 +1,8 @@
+# bench.sh arms: <name> <flake app> [dispatch flags...]
+# Coordinator effort head-to-head: the current dogfood harness, pinned to one
+# main commit, varying only the coordinator's dispatch-time --effort. The
+# review pass is pinned to dogfood's own opus-5-5/high so a roster change can't
+# move it. Run with BENCH_ARMS_FILE=bench/arms-coord-effort. The first arm is
+# the summary's delta baseline.
+dogfood-coh git+file:///home/jsmall/dev/src/ai/spindrift?rev=ba628cfd645147698ecf6f6a484cc2c1a88ccdf3# --model claude-opus-5-5 --effort high --review-model claude-opus-5-5 --review-effort high
+dogfood-com git+file:///home/jsmall/dev/src/ai/spindrift?rev=ba628cfd645147698ecf6f6a484cc2c1a88ccdf3# --model claude-opus-5-5 --effort medium --review-model claude-opus-5-5 --review-effort high
