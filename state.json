@@ -1,20 +1,15 @@
 {
-  "lastSwept": "58744e82b786f131dc3014b652bd2def6dc66c7f",
-  "cursor": "cmd/launcher/testdata/golden/stats-by-revision-events.txt",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-11-08T02:17:43.825795314-05:00"
-  },
+  "lastSwept": "b7c1080834da87bc9db099e7294af4cf6bc81f33",
+  "cursor": "dashboard/links_test.go",
+  "phase": "done",
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 86,
+    "output_tokens": 10506,
+    "cache_read_input_tokens": 2687292,
+    "cache_creation_input_tokens": 87490,
+    "total_cost_usd": 1.4478424,
+    "duration_ms": 114527,
+    "duration_api_ms": 110479,
+    "num_turns": 46
   }
 }
