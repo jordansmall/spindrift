@@ -73,7 +73,7 @@ func mustArtifacts(m map[string]string) inputdoc.Artifacts {
 // key needs the runner family already selected (setRunner first).
 func setArtifact(t *testing.T, key, value string) {
 	t.Helper()
-	prev := loadedDoc
+	prev := testDoc
 	doc := &inputdoc.Document{}
 	if prev != nil {
 		*doc = *prev
@@ -90,8 +90,8 @@ func setArtifact(t *testing.T, key, value string) {
 }
 
 // The wrapper no longer pre-populates env (ADR 0020), so a boxEnv knob like
-// MODEL reaches the Box with its baked value only through these fallbacks: the
-// document's settings first, then the schema default table.
+// MODEL reaches the Box with its baked value only through the knob tiers: the
+// document first, then the schema default table.
 func TestResolveBoxEnvVar_FallsBackToDocumentThenSchemaDefault(t *testing.T) {
 	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{"MODEL": "from-settings"},
@@ -108,6 +108,24 @@ func TestResolveBoxEnvVar_FallsBackToDocumentThenSchemaDefault(t *testing.T) {
 	useDoc(t, nil)
 	if got := resolveBoxEnvVar("LABEL"); got != "ready-for-agent" {
 		t.Errorf("LABEL = %q, want ready-for-agent (schema default, no doc loaded)", got)
+	}
+}
+
+// A name that is not a schema knob is a secret, read live from env: the
+// --secret-cmd fallback exports secrets after Resolve, so a value set after
+// useDoc must still reach the Box, and a document setting under that name must
+// not.
+func TestResolveBoxEnvVar_SecretsReadLiveAndIgnoreDocumentSettings(t *testing.T) {
+	useDoc(t, &inputdoc.Document{
+		Settings: map[string]string{"GH_TOKEN": "from-settings"},
+	})
+	t.Setenv("GH_TOKEN", "from-env")
+	if got := resolveBoxEnvVar("GH_TOKEN"); got != "from-env" {
+		t.Errorf("GH_TOKEN = %q, want from-env (set after Resolve)", got)
+	}
+	t.Setenv("GH_TOKEN", "")
+	if got := resolveBoxEnvVar("GH_TOKEN"); got != "" {
+		t.Errorf("GH_TOKEN = %q, want empty (a document setting is not a secret)", got)
 	}
 }
 
@@ -164,15 +182,14 @@ func TestResolveChoreCatalog_AbsentVersusEmpty(t *testing.T) {
 	}
 }
 
-// bakedDriverDocT writes an --input document baking Driver claude, clears
-// loadedDoc on cleanup, and returns the document path.
+// bakedDriverDocT writes an --input document baking Driver claude
+// and returns the document path.
 func bakedDriverDocT(t *testing.T) string {
 	t.Helper()
 	docPath := filepath.Join(t.TempDir(), "input.json")
 	if err := os.WriteFile(docPath, []byte(`{"settings":{},"artifacts":{"DRIVER":"claude"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { loadedDoc = nil })
 	return docPath
 }
 

@@ -1169,7 +1169,7 @@ func TestToKebab_ReplacesUnderscoresAndLowercases(t *testing.T) {
 }
 
 // resolveGlobalSecretCmd runs the same two-step sequence main() runs.
-// applySecretCmdFallback must run after loadedDoc is in place, so it is not
+// applySecretCmdFallback must run after launcherInput is in place, so it is not
 // folded into parseFlags. Callers that need a document must useDoc it first.
 func resolveGlobalSecretCmd(t *testing.T, args []string) error {
 	t.Helper()
@@ -1460,12 +1460,11 @@ func TestParseFlags_GlobalSecretCmd_RequirednessKeysOffTokenEnvVar(t *testing.T)
 }
 
 // CODE_FORGE and ISSUE_TRACKER may be set only through the Consumer flake's
-// settings (ADR 0020), which reach the launcher as loadedDoc rather than env
+// settings (ADR 0020), which reach the launcher as the document rather than env
 // or flag. A fallback reading only the ambient default misses a secret the
 // run needs, JIRA_TOKEN here.
 func TestApplySecretCmdFallback_UsesDocumentSettings(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{Settings: map[string]string{"ISSUE_TRACKER": "jira"}}
+	useDoc(t, &inputdoc.Document{Settings: map[string]string{"ISSUE_TRACKER": "jira"}})
 
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1492,11 +1491,10 @@ func TestApplySecretCmdFallback_UsesDocumentSettings(t *testing.T) {
 // secretRequiredThisRun trusts the forwarded artifact only when Settings
 // still matches the resolved pairing (ADR 0020; issue #2527 review).
 func TestApplySecretCmdFallback_SkipsGhTokenWhenDocumentIsFullyLocal(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{
+	useDoc(t, &inputdoc.Document{
 		Settings:  map[string]string{"CODE_FORGE": "local", "ISSUE_TRACKER": "local"},
 		Artifacts: mustArtifacts(map[string]string{"FULLY_LOCAL": "true"}),
-	}
+	})
 
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1519,7 +1517,6 @@ func TestApplySecretCmdFallback_SkipsGhTokenWhenDocumentIsFullyLocal(t *testing.
 // A pure-Forgejo run never reaches GitHub, so the global template must not
 // look up GH_TOKEN there; any pairing that still reaches GitHub must (#3325).
 func TestSecretRequiredThisRun_GhTokenFollowsPairing(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
 	for _, tc := range []struct {
 		name, forge, tracker string
 		want                 bool
@@ -1547,7 +1544,6 @@ func TestSecretRequiredThisRun_GhTokenFollowsPairing(t *testing.T) {
 // as its TokenEnvVar, however novel the name: the default arm reads the rows,
 // not a list of known tokens.
 func TestSecretRequiredThisRun_NovelRowTokenFollowsSelection(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
 	row := fakeGitlabRow()
 	row.TokenEnvVar = "NOVEL_FORGE_TOKEN"
 	withExtraStrategies(t, row)

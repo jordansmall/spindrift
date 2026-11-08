@@ -1,7 +1,8 @@
 // Package main is the spindrift launcher: it orchestrates open issues into
 // disposable containers. Nix-computed config reaches the binary as one
 // Launcher input document via --input (ADR 0020); a CLI flag overrides the
-// document, and an ambient knob env var exits config-invalid (6). Secrets and BOX_ENV_VARS plumbing stay env-only.
+// document, and an ambient knob env var exits config-invalid (6).
+// Box env forwarding answers from that resolved input; secrets stay env-only.
 package main
 
 import (
@@ -297,14 +298,22 @@ type capabilitySignals struct {
 	fullyLocal              bool
 }
 
+// documentPairing reports whether the document baked the pairing in effect, so
+// its artifacts describe it; a runtime override, or no document, does not match.
+func documentPairing(codeForge, issueTracker string) bool {
+	docForge, forgeOK := launcherInput.Setting("CODE_FORGE")
+	docTracker, trackerOK := launcherInput.Setting("ISSUE_TRACKER")
+	return forgeOK && trackerOK && codeForge == docForge && issueTracker == docTracker
+}
+
 // resolveCapabilitySignals returns the capability signals for the pairing in
 // effect this run. The document's artifacts describe the pairing baked in at
 // build time, so a runtime override, or no document, falls back to a registry
 // lookup on the resolved names. The trust branch needs all four keys, so a
 // partial render falls back too (issue #2527).
 func resolveCapabilitySignals(codeForge, issueTracker string) capabilitySignals {
-	if loadedDoc != nil && codeForge == loadedDoc.Settings["CODE_FORGE"] && issueTracker == loadedDoc.Settings["ISSUE_TRACKER"] {
-		a := loadedDoc.Artifacts.Shared
+	if documentPairing(codeForge, issueTracker) {
+		a := launcherInput.Artifacts.Shared
 		hostMediatedRemote, hostMediatedRemotePresent := a.HostMediatedRemote.LookupBool()
 		outboxRelayCapable, outboxRelayCapablePresent := a.OutboxRelayCapable.LookupBool()
 		inBoxUnreachableTracker, inBoxUnreachableTrackerPresent := a.InBoxUnreachableTracker.LookupBool()
@@ -336,8 +345,8 @@ func resolveCapabilitySignals(codeForge, issueTracker string) capabilitySignals 
 // ISSUE_TRACKER/CODE_FORGE at dispatch time, away from what the document baked
 // in at image-build time (issue #2527, issue #2533).
 func resolveTrackerAndForgeSignals(codeForge, issueTracker string) (read, write, filer, forge string) {
-	if loadedDoc != nil && codeForge == loadedDoc.Settings["CODE_FORGE"] && issueTracker == loadedDoc.Settings["ISSUE_TRACKER"] {
-		a := loadedDoc.Artifacts.Shared
+	if documentPairing(codeForge, issueTracker) {
+		a := launcherInput.Artifacts.Shared
 		readV, readOK := a.TrackerAxisRead.Lookup()
 		writeV, writeOK := a.TrackerAxisWrite.Lookup()
 		filerV, filerOK := a.TrackerAxisFiler.Lookup()
@@ -379,25 +388,23 @@ func resolveAgentPresenceSignals(driverName string) agentPresence {
 		workerProvisioned = workerModel != ""
 	}
 	scoutProvisioned = scoutModel != ""
-	if loadedDoc != nil {
-		a := loadedDoc.Artifacts.Shared
-		filerV, filerOK := a.FilerEnabled.LookupBool()
-		workerV, workerOK := a.WorkerProvisioned.LookupBool()
-		if filerOK && workerOK {
-			// Both are fixed eval-time bakes of the roster, so a dispatch-time
-			// FILER_MODEL/WORKER_MODEL override cannot change the roster the box
-			// actually gets. Trust them whenever present, without checking the
-			// live models against the document's baked Settings.
-			filerEnabled = filerV
-			workerProvisioned = workerV
-		}
-		// Its own gate, not folded into filerOK/workerOK: a document baked
-		// before issue #3157 carries the roster pair but no SCOUT_PROVISIONED
-		// key, and that skew must fall back for scout alone rather than defeat
-		// trust in the still-present pair.
-		if scoutV, scoutOK := a.ScoutProvisioned.LookupBool(); scoutOK {
-			scoutProvisioned = scoutV
-		}
+	a := launcherInput.Artifacts.Shared
+	filerV, filerOK := a.FilerEnabled.LookupBool()
+	workerV, workerOK := a.WorkerProvisioned.LookupBool()
+	if filerOK && workerOK {
+		// Both are fixed eval-time bakes of the roster, so a dispatch-time
+		// FILER_MODEL/WORKER_MODEL override cannot change the roster the box
+		// actually gets. Trust them whenever present, without checking the
+		// live models against the document's baked Settings.
+		filerEnabled = filerV
+		workerProvisioned = workerV
+	}
+	// Its own gate, not folded into filerOK/workerOK: a document baked
+	// before issue #3157 carries the roster pair but no SCOUT_PROVISIONED
+	// key, and that skew must fall back for scout alone rather than defeat
+	// trust in the still-present pair.
+	if scoutV, scoutOK := a.ScoutProvisioned.LookupBool(); scoutOK {
+		scoutProvisioned = scoutV
 	}
 
 	return agentPresence{
@@ -2263,15 +2270,14 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		printHelp(stdout)
 		return 0
 	}
+	var doc *inputdoc.Document
 	if inputPath != "" {
-		doc, err := inputdoc.Load(inputPath)
-		if err != nil {
+		if doc, err = inputdoc.Load(inputPath); err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
 		}
-		loadedDoc = doc
 	}
-	resolved, err := inputdoc.Resolve(schemaArgs, loadedDoc, processEnv())
+	resolved, err := inputdoc.Resolve(schemaArgs, doc, processEnv())
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		if errors.Is(err, inputdoc.ErrConfigInvalid) {

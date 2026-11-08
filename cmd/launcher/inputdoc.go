@@ -8,29 +8,18 @@ import (
 	"spindrift.dev/launcher/internal/inputdoc"
 )
 
-// loadedDoc is populated once by inputdoc.Load, before loadConfig runs. It
-// stays nil when the binary runs without --input (tests, manual debugging), and
-// every artifact then reads as empty (DRIVER alone falls back to the env, see
-// resolveDriver).
-var loadedDoc *inputdoc.Document
-
 // resolveDriver reads DRIVER, the one artifact with an ambient env fallback,
 // used only when no document bakes one (ADR 0064).
 func resolveDriver() (driver, warning string) {
 	return inputdoc.ResolveDriver(docArtifacts().Shared.Driver.String(), os.Getenv("DRIVER"), inputdoc.DriverWarned())
 }
 
-// docArtifacts returns the loaded document's artifacts, or the zero value
-// (every key absent) when no document is loaded. Artifacts are nix-resolved
+// docArtifacts returns launcherInput's artifacts, or the zero value (every key
+// absent) when no document is loaded. Artifacts are nix-resolved
 // (capability, tracker/forge, agent presence, image and store references), so
 // they are read strictly from the document, never from os.Getenv: a stray
 // ambient env var must never override what nix baked in (issues #2527, #6611).
-func docArtifacts() inputdoc.Artifacts {
-	if loadedDoc == nil {
-		return inputdoc.Artifacts{}
-	}
-	return loadedDoc.Artifacts
-}
+func docArtifacts() inputdoc.Artifacts { return launcherInput.Artifacts }
 
 // resolveChoreCatalog reads the CHORE_CATALOG artifact (lib/preambles.nix's
 // runArtifacts) for butlerPreflight's prompt-exists check.
@@ -57,8 +46,7 @@ var gitConfigLookup = func(key string) string {
 
 // launcherInput is the one inputdoc.Resolve result, set by mainRun after the
 // document loads. Its zero value resolves every knob to its schema default,
-// which is what a test or direct caller sees before any Resolve. A global like
-// loadedDoc until #6627 threads both through.
+// which is what a test or direct caller sees before any Resolve.
 var launcherInput inputdoc.Resolved
 
 // resolvedKnob reads a schema knob through the flag > document > schema
@@ -66,26 +54,16 @@ var launcherInput inputdoc.Resolved
 // (ADR 0020).
 func resolvedKnob(key string) string { return launcherInput.Source().String(key) }
 
-// resolveBoxEnvVar resolves one BOX_ENV_VARS forwarding name: a schema knob
-// through launcherInput (flag, then document, then schema default, because the
-// wrapper no longer pre-populates env with baked defaults, ADR 0020), anything
-// else from a non-empty environment value, then the document's settings. The
-// host-derived commit identity is not resolved here: hostGitConfigResolver
-// answers it from the launcher's startup snapshot, not re-read per dispatch,
-// so Box and host commits carry one identity for the process's lifetime
-// (issue #5333).
-// Secrets such as GH_TOKEN have no entry, so this reduces to os.Getenv (#625).
+// resolveBoxEnvVar resolves one BOX_ENV_VARS forwarding name from
+// launcherInput: a schema knob through its tiers (the wrapper no longer
+// pre-populates env with baked defaults, ADR 0020), anything else as a secret
+// read live from env, because the --secret-cmd fallback exports secrets after
+// Resolve. The host-derived commit identity is not resolved here:
+// hostGitConfigResolver answers it from the launcher's startup snapshot, not
+// re-read per dispatch, so Box and host commits carry one identity for the
+// process's lifetime (issue #5333).
 func resolveBoxEnvVar(name string) string {
-	if _, ok := inputdoc.SchemaFlag(name); ok {
-		return resolvedKnob(name)
-	}
-	if v := os.Getenv(name); v != "" {
-		return v
-	}
-	if loadedDoc != nil {
-		return loadedDoc.Settings[name]
-	}
-	return ""
+	return inputdoc.BoxEnv(launcherKnobSource{launcherInput.Source()}, name)
 }
 
 // processEnv is os.Environ as a map, the form inputdoc.Resolve takes.

@@ -1,11 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -224,11 +227,14 @@ func mustInitCheckout(t *testing.T, dir, branch string) {
 // schema default, the tier the knob env vars used to occupy.
 var testFlagArgs []string
 
-// Re-resolves launcherInput from testFlagArgs and loadedDoc; every helper that
+// testDoc is the document tier a test built with useDoc; nil is no document.
+var testDoc *inputdoc.Document
+
+// Re-resolves launcherInput from testFlagArgs and testDoc; every helper that
 // changes either goes through it so the two never drift.
 func resolveTestInput(t *testing.T) {
 	t.Helper()
-	r, err := inputdoc.Resolve(testFlagArgs, loadedDoc, nil)
+	r, err := inputdoc.Resolve(testFlagArgs, testDoc, nil)
 	if err != nil {
 		t.Fatalf("inputdoc.Resolve(%v): %v", testFlagArgs, err)
 	}
@@ -238,8 +244,8 @@ func resolveTestInput(t *testing.T) {
 // Restores the package-level Launcher input state when the calling test ends.
 func restoreLauncherInput(t *testing.T) {
 	t.Helper()
-	prevArgs, prevDoc, prevInput := testFlagArgs, loadedDoc, launcherInput
-	t.Cleanup(func() { testFlagArgs, loadedDoc, launcherInput = prevArgs, prevDoc, prevInput })
+	prevArgs, prevDoc, prevInput := testFlagArgs, testDoc, launcherInput
+	t.Cleanup(func() { testFlagArgs, testDoc, launcherInput = prevArgs, prevDoc, prevInput })
 }
 
 // The one seam tests configure a non-secret schema knob through.
@@ -254,20 +260,32 @@ func setKnob(t *testing.T, env, value string) {
 	resolveTestInput(t)
 }
 
-// Points the package-level loadedDoc at doc for the calling test only, so no
+// Points the document tier at doc for the calling test only, so no
 // test's document leaks into the next.
 func useDoc(t *testing.T, doc *inputdoc.Document) {
 	t.Helper()
 	restoreLauncherInput(t)
-	loadedDoc = doc
+	testDoc = doc
 	resolveTestInput(t)
 }
 
 // mainRunT is mainRun with the Launcher input state it sets rolled back at
-// test end.
+// test end. A useDoc document reaches mainRun the way a real one does, through
+// --input, unless argv already names one.
 func mainRunT(t *testing.T, argv []string, stdout, stderr io.Writer) int {
 	t.Helper()
 	restoreLauncherInput(t)
+	if testDoc != nil && !slices.ContainsFunc(argv, func(a string) bool { return a == "--input" || strings.HasPrefix(a, "--input=") }) {
+		raw, err := json.Marshal(testDoc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(t.TempDir(), "input.json")
+		if err := os.WriteFile(path, raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		argv = append([]string{"--input", path}, argv...)
+	}
 	return mainRun(argv, stdout, stderr)
 }
 
