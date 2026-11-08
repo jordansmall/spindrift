@@ -89,143 +89,6 @@ func setArtifact(t *testing.T, key, value string) {
 	t.Cleanup(func() { loadedDoc = prev })
 }
 
-// ADR 0020 requires the error to say where the knob belongs, so for a
-// flakeOption-backed knob it names the variable, its flag, and its domain-tree
-// path (the knob's derived flake path, ADR 0037 Pass 2).
-func TestAmbientKnobEnvError_NamesFlagAndSettingsEquivalent(t *testing.T) {
-	t.Cleanup(func() { os.Unsetenv("BASE_BRANCH") })
-	orig := inputdoc.SchemaFlags
-	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
-	inputdoc.SchemaFlags = []inputdoc.FlagEntry{
-		{Env: "BASE_BRANCH", Flag: "base-branch", SettingsPath: "git.baseBranch"},
-	}
-	os.Setenv("BASE_BRANCH", "develop")
-
-	out := ambientKnobEnvErrorText()
-
-	for _, want := range []string{"BASE_BRANCH", "--base-branch", "git.baseBranch"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("error = %q, want it to mention %q", out, want)
-		}
-	}
-}
-
-// A knob with no flakeOption behind it has no settings equivalent, so the
-// fixture leaves settingsPath empty and the error names only the flag.
-func TestAmbientKnobEnvError_NoSettingsPath_FlagOnly(t *testing.T) {
-	t.Cleanup(func() { os.Unsetenv("ISSUE_NUMBER") })
-	orig := inputdoc.SchemaFlags
-	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
-	inputdoc.SchemaFlags = []inputdoc.FlagEntry{
-		{Env: "ISSUE_NUMBER", Flag: "issue-number"},
-	}
-	os.Setenv("ISSUE_NUMBER", "42")
-
-	out := ambientKnobEnvErrorText()
-
-	if !strings.Contains(out, "--issue-number") {
-		t.Errorf("error = %q, want it to mention --issue-number", out)
-	}
-	if strings.Contains(out, " or ") {
-		t.Errorf("error = %q, want just the flag (no second migration target) for a non-flakeOption knob", out)
-	}
-}
-
-// A launcherIgnores knob's flag is inert (see inputdoc.FlagEntry), so the error must
-// name only the settings path (issue #3698).
-func TestAmbientKnobEnvError_LauncherIgnores_SettingsPathOnly(t *testing.T) {
-	t.Cleanup(func() { os.Unsetenv("DAEMON_IDLE_FLOOR") })
-	orig := inputdoc.SchemaFlags
-	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
-	inputdoc.SchemaFlags = []inputdoc.FlagEntry{
-		{Env: "DAEMON_IDLE_FLOOR", Flag: "daemon-idle-floor", SettingsPath: "dispatch.daemonIdleFloor", LauncherIgnores: true},
-	}
-	os.Setenv("DAEMON_IDLE_FLOOR", "99h")
-
-	out := ambientKnobEnvErrorText()
-
-	for _, want := range []string{"DAEMON_IDLE_FLOOR", "dispatch.daemonIdleFloor"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("error = %q, want it to mention %q", out, want)
-		}
-	}
-	if strings.Contains(out, "--daemon-idle-floor") {
-		t.Errorf("error = %q, want no flag suggestion for a launcher-ignored knob", out)
-	}
-	if strings.Contains(out, " or ") {
-		t.Errorf("error = %q, want just the settings path (no flag alternative)", out)
-	}
-}
-
-func TestAmbientKnobEnvError_UnsetKnob_Passes(t *testing.T) {
-	t.Cleanup(func() { os.Unsetenv("MAX_PARALLEL") })
-	os.Unsetenv("MAX_PARALLEL")
-	orig := inputdoc.SchemaFlags
-	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
-	inputdoc.SchemaFlags = []inputdoc.FlagEntry{
-		{Env: "MAX_PARALLEL", Flag: "max-parallel", SettingsPath: "dispatch.maxParallel"},
-	}
-
-	out := ambientKnobEnvErrorText()
-
-	if out != "" {
-		t.Errorf("error = %q, want empty for an unset knob", out)
-	}
-}
-
-// A bool knob's explicit off is set-but-empty (ambientSetting), and it
-// overrides the document's value, so it owes the same ADR 0020 error.
-func TestAmbientKnobEnvError_SetButEmptyBoolKnob_Errors(t *testing.T) {
-	orig := inputdoc.SchemaFlags
-	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
-	inputdoc.SchemaFlags = []inputdoc.FlagEntry{
-		{Env: "AUTO_FORMAT", Flag: "auto-format", Kind: "bool", SettingsPath: "agents.format.enable"},
-	}
-	t.Setenv("AUTO_FORMAT", "")
-
-	out := ambientKnobEnvErrorText()
-
-	for _, want := range []string{`AUTO_FORMAT=""`, "agents.format.enable"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("error = %q, want it to mention %q", out, want)
-		}
-	}
-}
-
-// An emptyDisables string knob's "" is a real setting (it disables the limit),
-// so it owes the ADR 0020 error like a bool knob's explicit off.
-func TestAmbientKnobEnvError_EmptyDisablesKnobSetEmpty_Errors(t *testing.T) {
-	orig := inputdoc.SchemaFlags
-	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
-	inputdoc.SchemaFlags = []inputdoc.FlagEntry{
-		{Env: "MEMORY_LIMIT", Flag: "memory-limit", SettingsPath: "box.memoryLimit", EmptyDisables: true},
-	}
-	t.Setenv("MEMORY_LIMIT", "")
-
-	out := ambientKnobEnvErrorText()
-
-	for _, want := range []string{`MEMORY_LIMIT=""`, "box.memoryLimit"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("error = %q, want it to mention %q", out, want)
-		}
-	}
-}
-
-func TestAmbientKnobEnvError_SetButEmptyNonBoolKnob_Passes(t *testing.T) {
-	orig := inputdoc.SchemaFlags
-	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
-	inputdoc.SchemaFlags = []inputdoc.FlagEntry{
-		{Env: "MAX_PARALLEL", Flag: "max-parallel", SettingsPath: "dispatch.maxParallel"},
-	}
-	t.Setenv("MAX_PARALLEL", "")
-
-	out := ambientKnobEnvErrorText()
-
-	if out != "" {
-		t.Errorf("error = %q, want empty for a set-but-empty non-bool knob", out)
-	}
-}
-
 // The wrapper no longer pre-populates env (ADR 0020), so a boxEnv knob like
 // MODEL reaches the Box with its baked value only through these fallbacks: the
 // document's settings first, then the schema default table.
@@ -412,19 +275,18 @@ func TestResolveBoxEnvVar_NeverReadsGitConfig(t *testing.T) {
 	}
 }
 
-func ambientKnobEnvErrorText() string {
-	if err := ambientKnobEnvError(); err != nil {
-		return err.Error()
-	}
-	return ""
-}
-
-// Secrets and non-knob plumbing are not inputdoc.SchemaFlags rows, so they stay legal
-// ambient input.
-func TestAmbientKnobEnvError_SecretAndPlumbing_Pass(t *testing.T) {
+// The wrapper reads the real process environment; the message and rule cases
+// live in internal/inputdoc's AmbientKnobError tests.
+func TestAmbientKnobEnvError_ReadsProcessEnv(t *testing.T) {
 	t.Setenv("GH_TOKEN", "secret")
 	t.Setenv("DRIVER", "claude")
-	if out := ambientKnobEnvErrorText(); out != "" {
-		t.Errorf("error = %q, want empty for a secret and a non-knob variable", out)
+	if err := ambientKnobEnvError(); err != nil {
+		t.Errorf("error = %v, want nil for a secret and a non-knob variable", err)
+	}
+
+	t.Setenv("BASE_BRANCH", "develop")
+	err := ambientKnobEnvError()
+	if err == nil || !strings.Contains(err.Error(), "BASE_BRANCH") {
+		t.Errorf("error = %v, want it to name BASE_BRANCH", err)
 	}
 }
