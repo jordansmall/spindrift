@@ -11,27 +11,37 @@ import (
 	"spindrift.dev/launcher/internal/passmanifest"
 )
 
-func TestSituationFor_UnreviewedFollowsSelfReportAndPasses(t *testing.T) {
-	s := newTestSettle(baseConfig(), forge.NewFake(testDispatchLabels), forge.NewFake(testDispatchLabels))
-	ready := outcome.Resolved{SelfReportFound: true, SelfReport: outcome.SelfReport{Status: outcome.StatusReady}}
+// Whether Recover declines a run as unreviewed follows its self-report and
+// where the loop stopped (issues #5973, #5984); a declined run never reaches
+// Begin.
+func TestRecover_UnreviewedFollowsSelfReportAndPasses(t *testing.T) {
+	ready := readyReport()
+	blocked := outcome.Resolved{SelfReportFound: true, SelfReport: outcome.SelfReport{Status: outcome.StatusBlocked}}
 	cases := []struct {
-		name   string
-		result dispatch.Result
-		want   bool
+		name     string
+		resolved outcome.Resolved
+		passes   []passmanifest.Entry
+		want     bool
 	}{
-		{"success with implement source", dispatch.Result{Resolved: ready, Passes: implementReadyPasses()}, true},
-		{"success with land source", dispatch.Result{Resolved: ready, Passes: []passmanifest.Entry{{Pass: 1, Kind: "land", OutcomeFound: true}}}, false},
-		{"success without passes", dispatch.Result{Resolved: ready}, false},
-		{"no success self-report, implement last", dispatch.Result{Passes: implementReadyPasses()}, true},
-		{"no success self-report, fix last", dispatch.Result{Passes: fixLastPasses()}, true},
-		{"no success self-report, land last", dispatch.Result{Passes: landLastNoOutcomePasses()}, false},
-		{"no success self-report, no passes", dispatch.Result{}, false},
-		{"blocked self-report, implement last", dispatch.Result{Resolved: outcome.Resolved{SelfReportFound: true, SelfReport: outcome.SelfReport{Status: outcome.StatusBlocked}}, Passes: implementReadyPasses()}, true},
+		{"success with implement source", ready, implementReadyPasses(), true},
+		{"success with land source", ready, []passmanifest.Entry{{Pass: 1, Kind: "land", OutcomeFound: true}}, false},
+		{"success without passes", ready, nil, false},
+		{"no success self-report, implement last", outcome.Resolved{}, implementReadyPasses(), true},
+		{"no success self-report, fix last", outcome.Resolved{}, fixLastPasses(), true},
+		{"no success self-report, land last", outcome.Resolved{}, landLastNoOutcomePasses(), false},
+		{"no success self-report, no passes", outcome.Resolved{}, nil, false},
+		{"blocked self-report, implement last", blocked, implementReadyPasses(), true},
 	}
+	unreviewed := Settlement{Verdict: ForReason(dispatchrecord.ReasonUnreviewed), Note: dispatchrecord.UnreviewedNote}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := s.situationFor("1", false, tc.result).Unreviewed; got != tc.want {
-				t.Errorf("Unreviewed = %v, want %v", got, tc.want)
+			e := newRecoverEnv(t, true)
+			st, err := e.s.Recover(e.in("", tc.resolved, tc.passes, false))
+			if declined := err == nil && st == unreviewed; declined != tc.want {
+				t.Errorf("Recover = %+v, %v; unreviewed decline = %v, want %v", st, err, declined, tc.want)
+			}
+			if (e.begins == 0) != tc.want {
+				t.Errorf("Begin called %d times; want it skipped exactly when declined (%v)", e.begins, tc.want)
 			}
 		})
 	}

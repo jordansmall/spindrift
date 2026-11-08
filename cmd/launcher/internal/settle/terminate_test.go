@@ -62,7 +62,8 @@ func TestDocComments_NoHardcodedLineNumbers(t *testing.T) {
 // through the handle any caller took is the mark the settle checkpoints read
 // (#3522): before this, a second caller could install a registry of its own
 // and strand the first caller's marks where nothing checks them.
-func TestRegistry_StableHandleIsWhatCheckpointsRead(t *testing.T) {
+// Internal seam: asserts the checkpoint through prLander.gateToGreen, the narrowest reader of the registry mark.
+func TestInternalSeam_Registry_StableHandleIsWhatCheckpointsRead(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})

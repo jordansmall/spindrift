@@ -10,6 +10,8 @@ import (
 // rewaitAfterForcePush's gateResult-to-error mapping names gateTerminal and
 // gateRedRetry explicitly rather than folding them into a catch-all default
 // (issue #1175).
+// Internal seam: rewaitGateResultErr is a pure mapping; reaching each variant
+// through Settle would take a force-push landing per gateResult.
 func TestInternalSeam_RewaitGateResultErr_ExplicitCases(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -46,6 +48,7 @@ func TestInternalSeam_RewaitGateResultErr_ExplicitCases(t *testing.T) {
 // A gateResult outside the four known variants panics rather than silently
 // mapping to errLandingNeverGreen, so a new variant must be handled explicitly
 // (issue #1175).
+// Internal seam: an out-of-range gateResult cannot be produced through Settle.
 func TestInternalSeam_RewaitGateResultErr_UnhandledVariantPanics(t *testing.T) {
 	defer func() {
 		if recover() == nil {
@@ -72,6 +75,8 @@ var (
 
 // With several merge-by-hand rows the unreadable issue's Chore is unknown, so
 // the precaution comment names them all.
+// Internal seam: naming several merge-by-hand rows needs a multi-row catalog
+// swap that the Settle table does not set up.
 func TestInternalSeam_HoldCheckErrorComment_JoinsEveryRow(t *testing.T) {
 	other := chore.Row{Name: "other", FindingLabel: "agent-other-finding", MergeByHand: true}
 	want := "synthetic/other provenance: could not read the closing issue (boom) — downgrading to manual as a precaution; review and merge by hand"

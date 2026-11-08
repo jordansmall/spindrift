@@ -21,7 +21,8 @@ import (
 
 // A terminal transitionState call only latches num's decision (issue #3627):
 // nothing reaches the pipe until flushSettled pops it.
-func TestSettle_TransitionState_Terminal_LatchesWithoutEmittingUntilFlush(t *testing.T) {
+// Internal seam: the latch is popped inside Settle, so only a direct call sees the pre-flush state.
+func TestInternalSeam_TransitionState_Terminal_LatchesWithoutEmittingUntilFlush(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 
 	fc := forge.NewFake()
@@ -38,7 +39,8 @@ func TestSettle_TransitionState_Terminal_LatchesWithoutEmittingUntilFlush(t *tes
 // flushSettled emits the latched terminal decision exactly once, carrying the
 // note passed to transitionState, whether or not the tracker write itself
 // succeeded (see transitionState's comment for why).
-func TestSettle_FlushSettled_EmitsLatchedRecordOnce(t *testing.T) {
+// Internal seam: Settle flushes once per call, so a repeat flush is reachable only directly.
+func TestInternalSeam_FlushSettled_EmitsLatchedRecordOnce(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 
 	fc := forge.NewFake()
@@ -62,7 +64,8 @@ func TestSettle_FlushSettled_EmitsLatchedRecordOnce(t *testing.T) {
 // Two terminal transitionState calls for the same issue latch last-write-wins
 // (issue #3627): flushSettled must report only the second (tracker's final)
 // decision, never both.
-func TestSettle_TransitionState_SecondTerminalCallOverwritesLatch(t *testing.T) {
+// Internal seam: Settle never makes two terminal transitions in one landing.
+func TestInternalSeam_TransitionState_SecondTerminalCallOverwritesLatch(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 
 	fc := forge.NewFake()
@@ -86,7 +89,8 @@ func TestSettle_TransitionState_SecondTerminalCallOverwritesLatch(t *testing.T) 
 // #3627): the record is an operator-visible statement of intent, not a
 // confirmation the label landed. The warning names the tracker's error, so a
 // stuck issue is diagnosable from the log (issue #6067).
-func TestSettle_TransitionState_Terminal_EmitsRecordEvenOnTrackerError(t *testing.T) {
+// Internal seam: the injected tracker error is read back from the latch, not from a Settle outcome.
+func TestInternalSeam_TransitionState_Terminal_EmitsRecordEvenOnTrackerError(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 
 	fc := forge.NewFake()
@@ -229,7 +233,8 @@ func TestResearchSettle_Recommend_EmitsSettledRecordWithVerdictNote(t *testing.T
 }
 
 // A PR latched for num rides the settled record flushSettled emits.
-func TestSettle_FlushSettled_CarriesLatchedPR(t *testing.T) {
+// Internal seam: the PR latch is internal state; Settle exposes only the record it flushes.
+func TestInternalSeam_FlushSettled_CarriesLatchedPR(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 
 	fc := forge.NewFake()
@@ -248,7 +253,8 @@ func TestSettle_FlushSettled_CarriesLatchedPR(t *testing.T) {
 }
 
 // No PR latched leaves the record's PRURL empty.
-func TestSettle_FlushSettled_NoPRWhenNoneLatched(t *testing.T) {
+// Internal seam: the PR latch is internal state; Settle exposes only the record it flushes.
+func TestInternalSeam_FlushSettled_NoPRWhenNoneLatched(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 
 	fc := forge.NewFake()
@@ -266,7 +272,8 @@ func TestSettle_FlushSettled_NoPRWhenNoneLatched(t *testing.T) {
 
 // A latched PR with no terminal state emits nothing, and the flush clears it so
 // it does not leak into a later record.
-func TestSettle_FlushSettled_UnsettledLatchedPRDoesNotLeak(t *testing.T) {
+// Internal seam: a leaked latch shows only across two flushes, which Settle never makes.
+func TestInternalSeam_FlushSettled_UnsettledLatchedPRDoesNotLeak(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 
 	fc := forge.NewFake()
@@ -509,7 +516,8 @@ func TestRecoverOpenPR_SettledRecordCarriesPR(t *testing.T) {
 // flushSettled settles the Dispatch's Record in the store from the primary Pass
 // log and stamps the same Record ID on the settled report; a second flush finds
 // the latch popped and reports nothing more.
-func TestSettle_FlushSettled_SettlesRecordFromPrimaryLog(t *testing.T) {
+// Internal seam: the primary-log append is a flushSettled step not visible in a Settle result.
+func TestInternalSeam_FlushSettled_SettlesRecordFromPrimaryLog(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 	logPath := rootLogPath(t, "issue-9.log")
 	if err := os.WriteFile(logPath, []byte(startLine("work:9@t", "")), 0o644); err != nil {
@@ -543,7 +551,8 @@ func TestSettle_FlushSettled_SettlesRecordFromPrimaryLog(t *testing.T) {
 
 // A Dispatch that never minted a Record, or a log that does not exist, has
 // nothing to settle: no op is appended and no log is created.
-func TestSettle_FlushSettled_SkipsAppendWithoutRecordOrLog(t *testing.T) {
+// Internal seam: the primary-log append is a flushSettled step not visible in a Settle result.
+func TestInternalSeam_FlushSettled_SkipsAppendWithoutRecordOrLog(t *testing.T) {
 	testutil.InstallPipeReporter(t)
 	logPath := filepath.Join(t.TempDir(), "issue-9.log")
 
@@ -570,7 +579,8 @@ func TestSettle_FlushSettled_SkipsAppendWithoutRecordOrLog(t *testing.T) {
 // JIRA_LIFECYCLE=status (issue #6353): a workflow that offers no transition to
 // the mapped status applies no label, so settle tells the card's readers why
 // and latches the distinct reason; the tracker-side state is unchanged.
-func TestSettle_TransitionState_Refused_CommentsAndLatchesDistinctReason(t *testing.T) {
+// Internal seam: the latched reason is internal; Settle rows pin the refusal only by its tracker comment.
+func TestInternalSeam_TransitionState_Refused_CommentsAndLatchesDistinctReason(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "9"})
 	refused := &forge.TransitionRefusedError{Issue: "9", From: "In Review", To: "Done", Offered: []string{"Blocked", "To Do"}}
@@ -597,7 +607,8 @@ func TestSettle_TransitionState_Refused_CommentsAndLatchesDistinctReason(t *test
 	}
 }
 
-func TestSettle_TransitionState_GenericError_KeepsCallerReasonAndPostsNoComment(t *testing.T) {
+// Internal seam: the latched reason is internal; a Settle row cannot force a non-refusal tracker error.
+func TestInternalSeam_TransitionState_GenericError_KeepsCallerReasonAndPostsNoComment(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "9"})
 	fc.TransitionStateErr = fmt.Errorf("boom")
@@ -615,7 +626,8 @@ func TestSettle_TransitionState_GenericError_KeepsCallerReasonAndPostsNoComment(
 	}
 }
 
-func TestSettle_LatchUnrecorded_KeepsTerminalLatch(t *testing.T) {
+// Internal seam: latchUnrecorded is an unexported latch step with no Settle entry.
+func TestInternalSeam_LatchUnrecorded_KeepsTerminalLatch(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "9"})
 	s := New(Config{}, fc, fc)

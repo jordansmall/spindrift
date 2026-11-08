@@ -11,9 +11,11 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 )
 
+// Internal seam: the draft-PR rows use one-line bodies, so only a direct parse
+// shows multi-paragraph bodies survive.
 // The title/body split consumes only the first "\n" and the blank line right
 // after it, so newlines further into the body must survive untouched.
-func TestParsePRIntent_PreservesInternalNewlinesInBody(t *testing.T) {
+func TestInternalSeam_ParsePRIntentPreservesInternalNewlinesInBody(t *testing.T) {
 	body := "First paragraph of the summary.\n\nSecond paragraph with more detail.\n- a bullet\n- another bullet"
 	result := dispatch.Result{
 		PRIntentFound: true,
@@ -932,18 +934,6 @@ func TestSettle_GithubReadOnly_MergedStatus_HostileLandingIgnored_UsesAgentBranc
 	if bad := (Step{Key: issNum, Landing: hostileLanding, Status: StatusVerifiedMerged}); slices.Contains(rec.Steps(), bad) {
 		t.Fatalf("verifyMerged must never verify against the hostile landing=%s; got: %+v", hostileLanding, rec.Steps())
 	}
-}
-
-// issueComments returns the bodies of fc's comments, dropping the usage report
-// postUsageComment adds after a blocked hand-off (empty under dispatch.NewFake).
-func issueComments(fc *forge.Fake) []string {
-	var bodies []string
-	for _, c := range fc.CommentCalls {
-		if c.Body != "" {
-			bodies = append(bodies, c.Body)
-		}
-	}
-	return bodies
 }
 
 // A wiring error from Mediation.Open (here Config.OutboxDir unset) preserves
