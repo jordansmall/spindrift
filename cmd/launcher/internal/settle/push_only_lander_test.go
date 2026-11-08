@@ -63,7 +63,8 @@ type pushOnlyCase struct {
 	arm       func(*pushOnlyEnv)                 // once e.s exists, ahead of Settle
 
 	want         Settlement
-	abandoned    bool // the stop left the released issue untouched
+	abandoned    bool // a stop or a decline left the issue untouched
+	declined     bool // Recover returns its Settlement before Begin claims the issue
 	wantSteps    []Step
 	wantLabels   []string
 	wantNoLabels []string
@@ -535,6 +536,8 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			want: adoptedMerged, wantLabels: complete, wantNoLabels: noFailed, wantMerged: pushOnlyBranch,
 		},
 	}
+	cases = append(cases, pushOnlyUnreviewedCases()...)
+
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := baseConfig()
@@ -589,12 +592,14 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			res.Passes = env.passes
 			var got Settlement
 			var stderr string
+			begins := 0
+			begin := func() (dispatch.Dispatcher, error) { begins++; return dispatch.NewFake(), nil }
 			run := func() {
 				switch tc.entry {
 				case entryRelayed:
 					st, err := env.s.Recover(RecoverInput{
 						Num: "1", Resolved: res.Resolved, Passes: res.Passes,
-						Begin: func() (dispatch.Dispatcher, error) { return dispatch.NewFake(), nil },
+						Begin: begin,
 					})
 					got = st
 					if err != nil {
@@ -603,7 +608,7 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 				case entryAdopted:
 					st, err := env.s.Recover(RecoverInput{
 						Num: "1", OpenPR: pushOnlyBranch,
-						Begin: func() (dispatch.Dispatcher, error) { return dispatch.NewFake(), nil },
+						Begin: begin,
 					})
 					got = st
 					if err != nil {
@@ -620,6 +625,9 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			}
 
 			iss, _ := fc.Issue("1")
+			if tc.entry != entrySettle && (begins == 0) != tc.declined {
+				t.Errorf("Begin called %d times; want it skipped exactly when declined (%v)", begins, tc.declined)
+			}
 			if got != tc.want {
 				t.Errorf("Settle = %+v, want %+v", got, tc.want)
 			}
