@@ -18,10 +18,10 @@ func launcherCheckConfig(c config) launcherchecks.Config {
 		researchDispatch = true
 	}
 	return launcherchecks.Config{
-		RepoSlug:     c.repoSlug,
-		GitUserName:  c.gitUserName,
-		GitUserEmail: c.gitUserEmail,
-		GHToken:      c.ghToken,
+		RepoSlug:     c.RepoSlug,
+		GitUserName:  c.GitUserName,
+		GitUserEmail: c.GitUserEmail,
+		GHToken:      c.GhToken,
 
 		Driver: c.driver,
 		// The per-tier models are read from getenvSchema, as the --secret-cmd
@@ -29,14 +29,14 @@ func launcherCheckConfig(c config) launcherchecks.Config {
 		// tiers can select a credential-gated Provider.
 		Models: modelTiers(func(env string) string {
 			if env == "MODEL" {
-				return c.model
+				return c.Model
 			}
 			return getenvSchema(env)
 		}),
 		Credentials: launcherCredentials(c),
 
-		IssueTracker: c.issueTracker,
-		CodeForge:    c.codeForge,
+		IssueTracker: c.IssueTracker,
+		CodeForge:    c.CodeForge,
 
 		ResearchDispatch: researchDispatch,
 		SelfContained:    c.selfContained,
@@ -48,17 +48,17 @@ func launcherCheckConfig(c config) launcherchecks.Config {
 // name needs an entry (TestLauncherCredentialsCoverDriverRules).
 func launcherCredentials(c config) map[string]string {
 	return map[string]string{
-		"CLAUDE_CODE_OAUTH_TOKEN": c.claudeOAuthToken,
-		"ANTHROPIC_API_KEY":       c.anthropicAPIKey,
-		"OPENCODE_AUTH_CONTENT":   c.opencodeAuthContent,
-		"PI_AUTH_CONTENT":         c.piAuthContent,
-		"OPENAI_API_KEY":          c.openaiAPIKey,
-		"GEMINI_API_KEY":          c.geminiAPIKey,
-		"OPENROUTER_API_KEY":      c.openrouterAPIKey,
-		"GROQ_API_KEY":            c.groqAPIKey,
-		"XAI_API_KEY":             c.xaiAPIKey,
-		"MISTRAL_API_KEY":         c.mistralAPIKey,
-		"DEEPSEEK_API_KEY":        c.deepseekAPIKey,
+		"CLAUDE_CODE_OAUTH_TOKEN": c.ClaudeOAuthToken,
+		"ANTHROPIC_API_KEY":       c.AnthropicAPIKey,
+		"OPENCODE_AUTH_CONTENT":   c.OpencodeAuthContent,
+		"PI_AUTH_CONTENT":         c.PiAuthContent,
+		"OPENAI_API_KEY":          c.OpenaiAPIKey,
+		"GEMINI_API_KEY":          c.GeminiAPIKey,
+		"OPENROUTER_API_KEY":      c.OpenrouterAPIKey,
+		"GROQ_API_KEY":            c.GroqAPIKey,
+		"XAI_API_KEY":             c.XaiAPIKey,
+		"MISTRAL_API_KEY":         c.MistralAPIKey,
+		"DEEPSEEK_API_KEY":        c.DeepseekAPIKey,
 	}
 }
 

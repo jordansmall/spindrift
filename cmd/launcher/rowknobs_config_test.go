@@ -4,24 +4,26 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/inputdoc"
 )
 
 // The launcher's config carries no field specific to one row (ADR 0068
-// decision 3): row-owned knobs travel in rowKnobs, keyed by env name, and the
+// decision 3): row-owned knobs travel in Knobs.RowKnobs, keyed by env name, and the
 // row packages read them through their generated ReadKnobs. The row-owned set
-// is the rowKnobs keys loadSchemaConfig fills, so a knob a row gains later is
+// is the RowKnobs keys loadSchemaConfig fills, so a knob a row gains later is
 // checked without editing this test.
 func TestSchemaConfigHasNoRowKnobFields(t *testing.T) {
-	rowOwned := loadSchemaConfig().rowKnobs
+	rowOwned := loadSchemaConfig().RowKnobs
 	if len(rowOwned) == 0 {
-		t.Fatal("loadSchemaConfig fills no rowKnobs; the guard has nothing to check")
+		t.Fatal("loadSchemaConfig fills no RowKnobs; the guard has nothing to check")
 	}
-	typ := reflect.TypeOf(schemaConfig{})
-	if _, ok := typ.FieldByName("rowKnobs"); !ok {
-		t.Error("schemaConfig has no rowKnobs map")
+	typ := reflect.TypeOf(inputdoc.Knobs{})
+	if _, ok := typ.FieldByName("RowKnobs"); !ok {
+		t.Error("inputdoc.Knobs has no RowKnobs map")
 	}
-	// Field names are camelCase, so fold case and underscores to match
-	// initialisms (FORGEJO_BASE_URL against forgejoBaseURL).
+	// Field names are CamelCase, so fold case and underscores to match
+	// initialisms (FORGEJO_BASE_URL against ForgejoBaseURL).
 	fold := func(s string) string { return strings.ToLower(strings.ReplaceAll(s, "_", "")) }
 	owned := make(map[string]string, len(rowOwned))
 	for env := range rowOwned {
@@ -29,7 +31,7 @@ func TestSchemaConfigHasNoRowKnobFields(t *testing.T) {
 	}
 	for i := 0; i < typ.NumField(); i++ {
 		if env, ok := owned[fold(typ.Field(i).Name)]; ok {
-			t.Errorf("schemaConfig has field %s, which the row knob %s owns", typ.Field(i).Name, env)
+			t.Errorf("inputdoc.Knobs has field %s, which the row knob %s owns", typ.Field(i).Name, env)
 		}
 	}
 	if _, ok := owned[fold("forgejoBaseURL")]; !ok {
@@ -43,19 +45,19 @@ func TestLoadSchemaConfigFillsRowKnobsWithDefaults(t *testing.T) {
 	}
 	t.Setenv("JIRA_TOKEN", "jt")
 	sc := loadSchemaConfig()
-	if got := sc.rowKnobs["FORGEJO_BASE_URL"]; got != "https://codeberg.org" {
+	if got := sc.RowKnobs["FORGEJO_BASE_URL"]; got != "https://codeberg.org" {
 		t.Errorf("FORGEJO_BASE_URL = %q, want the schema default", got)
 	}
-	if got := sc.rowKnobs["JIRA_TOKEN"]; got != "jt" {
+	if got := sc.RowKnobs["JIRA_TOKEN"]; got != "jt" {
 		t.Errorf("JIRA_TOKEN = %q, want it read from the environment", got)
 	}
-	if got := sc.rowKnobs["JIRA_INCLUDE_COMMENTS"]; got != "" {
+	if got := sc.RowKnobs["JIRA_INCLUDE_COMMENTS"]; got != "" {
 		t.Errorf("JIRA_INCLUDE_COMMENTS = %q, want empty", got)
 	}
-	if v, ok := (config{schemaConfig: sc}).knobLookup("LOCAL_ISSUES_DIR"); !ok || v == "" {
+	if v, ok := (config{Knobs: sc}).knobLookup("LOCAL_ISSUES_DIR"); !ok || v == "" {
 		t.Errorf("LOCAL_ISSUES_DIR = %q, %v, want the schema default, set", v, ok)
 	}
-	if _, ok := (config{schemaConfig: sc}).knobLookup("NOT_A_KNOB"); ok {
+	if _, ok := (config{Knobs: sc}).knobLookup("NOT_A_KNOB"); ok {
 		t.Error("knobLookup reported an unknown env as set")
 	}
 }

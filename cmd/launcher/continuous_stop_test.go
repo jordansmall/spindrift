@@ -72,9 +72,9 @@ func TestRunExitCode_ContinuousDispatch_SignalledStop_WinsOverEmptyQueue(t *test
 	withClosedStopSignal(t)
 
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels) // no open issues
 	lc := &launchContext{
@@ -99,15 +99,15 @@ func TestRunExitCode_ContinuousDispatch_SignalledStop_WinsOverAllBlocked(t *test
 	withClosedStopSignal(t)
 
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{
 		Number: "1",
 		Body:   "## Blocked by\n- #2",
-		Labels: []string{c.label},
+		Labels: []string{c.Label},
 	})
 	fc.SetIssue(forge.Issue{Number: "2", State: "OPEN"}) // blocker, not yet complete
 	lc := &launchContext{
@@ -134,9 +134,9 @@ func TestRunExitCode_ContinuousDispatch_SignalledAbort_ExitsSameCodeAsStop(t *te
 	withClosedAbortSignal(t)
 
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels) // no open issues
 	lc := &launchContext{

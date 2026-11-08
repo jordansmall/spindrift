@@ -95,7 +95,7 @@ func TestLauncherChecks_GroupOrder(t *testing.T) {
 // must fail with validate()'s exact text.
 func TestLauncherChecks_RepoSlug_Fails(t *testing.T) {
 	c := minimalValidConfig()
-	c.repoSlug = ""
+	c.RepoSlug = ""
 	ch := checkByName(t, launcherChecks(c), "repo-slug")
 	_, err := ch.Probe()
 	if err == nil {
@@ -118,9 +118,9 @@ func TestLauncherChecks_RepoSlug_Passes(t *testing.T) {
 // Mirrors TestValidate_FullyLocalExemptsRepoSlugAndGhToken.
 func TestLauncherChecks_RepoSlug_FullyLocalExempt(t *testing.T) {
 	c := minimalValidLocalConfig()
-	c.issueTracker = "local"
-	c.repoSlug = ""
-	c.ghToken = ""
+	c.IssueTracker = "local"
+	c.RepoSlug = ""
+	c.GhToken = ""
 	ch := checkByName(t, launcherChecks(c), "repo-slug")
 	if _, err := ch.Probe(); err != nil {
 		t.Errorf("repo-slug Probe() should exempt REPO_SLUG for fully-local pairing: %v", err)
@@ -131,9 +131,9 @@ func TestLauncherChecks_RepoSlug_FullyLocalExempt(t *testing.T) {
 func TestLauncherChecks_RepoSlug_SelfContainedResearchExempt(t *testing.T) {
 	c := applyDispatchKind(minimalValidConfig(), dispatchkind.Research)
 	c.selfContained = true
-	c.issueTracker = "local"
-	c.repoSlug = ""
-	c.ghToken = ""
+	c.IssueTracker = "local"
+	c.RepoSlug = ""
+	c.GhToken = ""
 	ch := checkByName(t, launcherChecks(c), "repo-slug")
 	if _, err := ch.Probe(); err != nil {
 		t.Errorf("repo-slug Probe() should exempt REPO_SLUG for self-contained research with a local issue tracker: %v", err)
@@ -145,7 +145,7 @@ func TestLauncherChecks_RepoSlug_SelfContainedResearchExempt(t *testing.T) {
 func TestLauncherChecks_RepoSlug_SelfContainedResearchGithubTrackerStillFails(t *testing.T) {
 	c := applyDispatchKind(minimalValidConfig(), dispatchkind.Research)
 	c.selfContained = true
-	c.repoSlug = ""
+	c.RepoSlug = ""
 	ch := checkByName(t, launcherChecks(c), "repo-slug")
 	if _, err := ch.Probe(); err == nil {
 		t.Fatal("repo-slug Probe() must still require REPO_SLUG for self-contained research with a github issue tracker")
@@ -177,7 +177,7 @@ func TestLauncherCheckConfig_ResearchDispatch_TracksResearchTracker(t *testing.T
 
 func TestLauncherChecks_GitUserName_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
-	c.gitUserName = ""
+	c.GitUserName = ""
 	ch := checkByName(t, launcherChecks(c), "git-user-name")
 	_, err := ch.Probe()
 	if err == nil || err.Error() != "set GIT_USER_NAME, or configure git user.name on the host" {
@@ -193,7 +193,7 @@ func TestLauncherChecks_GitUserName_FailsAndPasses(t *testing.T) {
 
 func TestLauncherChecks_GitUserEmail_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
-	c.gitUserEmail = ""
+	c.GitUserEmail = ""
 	ch := checkByName(t, launcherChecks(c), "git-user-email")
 	_, err := ch.Probe()
 	if err == nil || err.Error() != "set GIT_USER_EMAIL, or configure git user.email on the host" {
@@ -209,7 +209,7 @@ func TestLauncherChecks_GitUserEmail_FailsAndPasses(t *testing.T) {
 
 func TestLauncherChecks_GhToken_Fails(t *testing.T) {
 	c := minimalValidConfig()
-	c.ghToken = ""
+	c.GhToken = ""
 	ch := checkByName(t, launcherChecks(c), "gh-token")
 	_, err := ch.Probe()
 	if err == nil || err.Error() != ch.Remedy {
@@ -242,14 +242,14 @@ func TestLauncherChecks_GhToken_ByPairing(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := minimalValidConfig()
-			c.issueTracker = tc.issueTracker
-			c.codeForge = tc.codeForge
+			c.IssueTracker = tc.issueTracker
+			c.CodeForge = tc.codeForge
 			c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 			c.setRowKnob("FORGEJO_TOKEN", "tok")
 			c.setRowKnob("JIRA_BASE_URL", "https://example.atlassian.net")
 			c.setRowKnob("JIRA_PROJECT_KEY", "PROJ")
 			c.setRowKnob("JIRA_TOKEN", "tok")
-			c.ghToken = ""
+			c.GhToken = ""
 			ch := checkByName(t, launcherChecks(c), "gh-token")
 			_, err := ch.Probe()
 			if tc.wantRequired && (err == nil || err.Error() != ch.Remedy) {
@@ -265,9 +265,9 @@ func TestLauncherChecks_GhToken_ByPairing(t *testing.T) {
 // The gh-token row shares repo-slug's fully-local exemption.
 func TestLauncherChecks_GhToken_FullyLocalExempt(t *testing.T) {
 	c := minimalValidLocalConfig()
-	c.issueTracker = "local"
-	c.repoSlug = ""
-	c.ghToken = ""
+	c.IssueTracker = "local"
+	c.RepoSlug = ""
+	c.GhToken = ""
 	ch := checkByName(t, launcherChecks(c), "gh-token")
 	if _, err := ch.Probe(); err != nil {
 		t.Errorf("gh-token Probe() should exempt GH_TOKEN for fully-local pairing: %v", err)
@@ -284,18 +284,18 @@ func TestLauncherChecks_DriverCredentials_AdapterFeedsConfig(t *testing.T) {
 		mutate  func(c *config)
 		wantErr bool
 	}{
-		{name: "no claude credential", mutate: func(c *config) { c.claudeOAuthToken = ""; c.anthropicAPIKey = "" }, wantErr: true},
-		{name: "claude oauth token", mutate: func(c *config) { c.anthropicAPIKey = "" }},
-		{name: "anthropic api key", mutate: func(c *config) { c.claudeOAuthToken = ""; c.anthropicAPIKey = "sk-ant-x" }},
+		{name: "no claude credential", mutate: func(c *config) { c.ClaudeOAuthToken = ""; c.AnthropicAPIKey = "" }, wantErr: true},
+		{name: "claude oauth token", mutate: func(c *config) { c.AnthropicAPIKey = "" }},
+		{name: "anthropic api key", mutate: func(c *config) { c.ClaudeOAuthToken = ""; c.AnthropicAPIKey = "sk-ant-x" }},
 		{name: "opencode copilot without auth content", mutate: func(c *config) {
 			c.driver = "opencode"
-			c.model = "github-copilot/claude-opus-4-8"
-			c.opencodeAuthContent = ""
+			c.Model = "github-copilot/claude-opus-4-8"
+			c.OpencodeAuthContent = ""
 		}, wantErr: true},
 		{name: "opencode copilot with auth content", mutate: func(c *config) {
 			c.driver = "opencode"
-			c.model = "github-copilot/claude-opus-4-8"
-			c.opencodeAuthContent = "gho_test"
+			c.Model = "github-copilot/claude-opus-4-8"
+			c.OpencodeAuthContent = "gho_test"
 		}},
 		{name: "unregistered driver", mutate: func(c *config) { c.driver = "bogus" }, wantErr: true},
 	}
@@ -333,7 +333,7 @@ func TestLauncherChecks_Runtime_FailsAndPasses(t *testing.T) {
 // as TestValidate_JiraRequiresBaseURLProjectKeyToken does.
 func TestLauncherChecks_IssueTracker_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
-	c.issueTracker = "not-a-real-tracker"
+	c.IssueTracker = "not-a-real-tracker"
 	ch := checkByName(t, launcherChecks(c), "issue-tracker-config")
 	_, err := ch.Probe()
 	if err == nil || !strings.Contains(err.Error(), "ISSUE_TRACKER") {
@@ -341,7 +341,7 @@ func TestLauncherChecks_IssueTracker_FailsAndPasses(t *testing.T) {
 	}
 
 	c = minimalValidConfig()
-	c.issueTracker = "jira"
+	c.IssueTracker = "jira"
 	c.setRowKnob("JIRA_BASE_URL", "https://example.atlassian.net")
 	ch = checkByName(t, launcherChecks(c), "issue-tracker-config")
 	if _, err := ch.Probe(); err == nil {
@@ -441,7 +441,7 @@ func TestDoctorExtraChecks_NeverIncludesBwrapCapabilityRows(t *testing.T) {
 // forgejo as TestValidate_ForgejoCodeForge does.
 func TestLauncherChecks_CodeForge_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "not-a-real-forge"
+	c.CodeForge = "not-a-real-forge"
 	ch := checkByName(t, launcherChecks(c), "code-forge-config")
 	_, err := ch.Probe()
 	if err == nil || !strings.Contains(err.Error(), "CODE_FORGE") {
@@ -449,7 +449,7 @@ func TestLauncherChecks_CodeForge_FailsAndPasses(t *testing.T) {
 	}
 
 	c = minimalValidConfig()
-	c.codeForge = "forgejo"
+	c.CodeForge = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	ch = checkByName(t, launcherChecks(c), "code-forge-config")
 	if _, err := ch.Probe(); err == nil {
@@ -527,7 +527,7 @@ func TestLauncherChecks_RegistryProxyRoutes_RetiredKnobFailsEvenWithValidRoutesF
 	t.Setenv("REGISTRY_PROXY_CREDENTIAL_ENV", "SOME_ENV_VAR")
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SOME_ENV_VAR" }
@@ -562,7 +562,7 @@ func TestLauncherChecks_RegistryProxyRoutes_ValidFileWithPeekableCredentialPasse
 	t.Setenv(envVar, "s3cr3t-value")
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "`+envVar+`" }
@@ -582,14 +582,14 @@ credential = { env = "`+envVar+`" }
 
 func TestLauncherChecks_RegistryProxyRoutes_MissingFileIsError(t *testing.T) {
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = filepath.Join(t.TempDir(), "does-not-exist.toml")
+	c.RegistryProxyRoutesFile = filepath.Join(t.TempDir(), "does-not-exist.toml")
 	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
 	_, err := ch.Probe()
 	if err == nil {
 		t.Fatal("Probe() must fail when REGISTRY_PROXY_ROUTES_FILE names a nonexistent file")
 	}
-	if !strings.Contains(err.Error(), "REGISTRY_PROXY_ROUTES_FILE") || !strings.Contains(err.Error(), c.registryProxyRoutesFile) {
-		t.Errorf("Probe() error %q must name REGISTRY_PROXY_ROUTES_FILE and the path %q", err.Error(), c.registryProxyRoutesFile)
+	if !strings.Contains(err.Error(), "REGISTRY_PROXY_ROUTES_FILE") || !strings.Contains(err.Error(), c.RegistryProxyRoutesFile) {
+		t.Errorf("Probe() error %q must name REGISTRY_PROXY_ROUTES_FILE and the path %q", err.Error(), c.RegistryProxyRoutesFile)
 	}
 }
 
@@ -597,7 +597,7 @@ func TestLauncherChecks_RegistryProxyRoutes_MissingFileIsError(t *testing.T) {
 // must reach the caller through the row's Probe.
 func TestLauncherChecks_RegistryProxyRoutes_DuplicateMatchHostIsError(t *testing.T) {
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SOME_ENV" }
@@ -618,7 +618,7 @@ credential = { env = "OTHER_ENV" }
 
 func TestLauncherChecks_RegistryProxyRoutes_UnknownAuthSchemeIsError(t *testing.T) {
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 auth-scheme = "digest"
@@ -636,7 +636,7 @@ credential = { env = "SOME_ENV" }
 
 func TestLauncherChecks_RegistryProxyRoutes_CredentialTwoSourcesIsError(t *testing.T) {
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SOME_ENV", file = "/some/file" }
@@ -659,7 +659,7 @@ func TestLauncherChecks_RegistryProxyRoutes_UnpeekableCredentialNamesMatchHost(t
 	os.Unsetenv(envVar)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "`+envVar+`" }
@@ -678,7 +678,7 @@ credential = { env = "`+envVar+`" }
 // (issue #3140 slice 6).
 func TestLauncherChecks_RegistryProxyRoutes_ExecResolvingPasses(t *testing.T) {
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { exec = ["/bin/sh", "-c", "echo tok-exec"] }
@@ -705,7 +705,7 @@ func TestLauncherChecks_RegistryProxyRoutes_ExecFailingNamesRouteAndNeverLeaksSe
 	}
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { exec = ["`+script+`"] }
@@ -727,7 +727,7 @@ func TestLauncherChecks_RegistryProxyRoutes_NpmrcResolvingPasses(t *testing.T) {
 	npmrcPath := writeTempFile(t, "npmrc", "//registry.example.com/:_authToken=tok-npmrc\n")
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { npmrc = "`+npmrcPath+`" }
@@ -749,7 +749,7 @@ func TestLauncherChecks_RegistryProxyRoutes_NpmrcMissingHostFailsNamingHostAndNe
 	npmrcPath := writeTempFile(t, "npmrc", "//other.example.com/:_authToken="+otherToken+"\n")
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { npmrc = "`+npmrcPath+`" }
@@ -771,7 +771,7 @@ func TestLauncherChecks_RegistryProxyRoutes_GradlePropertiesResolvingPasses(t *t
 	propsPath := writeTempFile(t, "gradle.properties", "registryToken=tok-gradle\n")
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { gradle-properties = "`+propsPath+`", key = "registryToken" }
@@ -793,7 +793,7 @@ func TestLauncherChecks_RegistryProxyRoutes_GradlePropertiesMissingKeyFailsNamin
 	propsPath := writeTempFile(t, "gradle.properties", "otherKey="+otherValue+"\n")
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { gradle-properties = "`+propsPath+`", key = "registryToken" }
@@ -817,7 +817,7 @@ func TestLauncherChecks_DriverCredentials_AdapterFeedsPerTierModels(t *testing.T
 	t.Setenv("REVIEW_MODEL", "github-copilot/gpt-5")
 	c := minimalValidConfig()
 	c.driver = "opencode"
-	c.model = "anthropic/claude-sonnet-5"
+	c.Model = "anthropic/claude-sonnet-5"
 	if _, err := checkByName(t, launcherChecks(c), "driver-credentials").Probe(); err == nil {
 		t.Error("driver-credentials Probe() = nil, want an error for the copilot REVIEW_MODEL")
 	}
@@ -829,11 +829,11 @@ func TestLauncherChecks_BlankRepoSlugFailsOnlyRepoSlugRow(t *testing.T) {
 	for _, name := range []string{"github", "forgejo"} {
 		t.Run(name, func(t *testing.T) {
 			c := minimalValidConfig()
-			c.issueTracker = name
-			c.codeForge = name
+			c.IssueTracker = name
+			c.CodeForge = name
 			c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 			c.setRowKnob("FORGEJO_TOKEN", "tok")
-			c.repoSlug = ""
+			c.RepoSlug = ""
 			var failed []string
 			for _, ch := range launcherChecks(c) {
 				if _, err := ch.Probe(); err != nil {
@@ -851,10 +851,10 @@ func TestLauncherChecks_BlankRepoSlugFailsOnlyRepoSlugRow(t *testing.T) {
 // fail issue-tracker-config alongside a blank slug.
 func TestLauncherChecks_BlankRepoSlugKeepsForgejoTokenError(t *testing.T) {
 	c := minimalValidConfig()
-	c.issueTracker = "forgejo"
-	c.codeForge = "forgejo"
+	c.IssueTracker = "forgejo"
+	c.CodeForge = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
-	c.repoSlug = ""
+	c.RepoSlug = ""
 	for _, ch := range launcherChecks(c) {
 		if ch.Name != "issue-tracker-config" {
 			continue

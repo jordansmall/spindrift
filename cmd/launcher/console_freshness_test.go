@@ -174,7 +174,7 @@ func TestNewConsoleFreshness_UsesBoxArtifactNotRuntime(t *testing.T) {
 	c := baseConfig()
 	c.boxArtifact = "store-closure"
 	c.runtime = "podman"
-	c.baseBranch = "main"
+	c.BaseBranch = "main"
 	c.imageTag = outPath // bare store path with no colon, bwrap's own tag shape
 	eval := &freshness.Fake{OutPath: outPath}
 
@@ -201,7 +201,7 @@ func TestNewConsoleFreshness_NeverWiresLauncherDimension(t *testing.T) {
 
 	c := baseConfig()
 	c.boxArtifact = "oci-image"
-	c.baseBranch = "main"
+	c.BaseBranch = "main"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-image"
 	c.imageTag = "spindrift:" + imageHash
 	c.flakeLauncherAttr = ".#packages.x86_64-linux.launcher"

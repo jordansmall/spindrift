@@ -21,10 +21,10 @@ import (
 // rows is the registered Strategies to resolve over: production passes
 // ecosystem.Registered(), tests a synthetic Strategy.
 func buildRegistryProxyRoutes(c config, rows []ecosystem.Strategy) ([]registryproxy.Route, error) {
-	if c.registryProxyRoutesFile == "" {
+	if c.RegistryProxyRoutesFile == "" {
 		return nil, nil
 	}
-	routes, err := resolveRegistryRoutesFromFile(c.registryProxyRoutesFile, rows)
+	routes, err := resolveRegistryRoutesFromFile(c.RegistryProxyRoutesFile, rows)
 	if err != nil {
 		return nil, err
 	}
@@ -69,18 +69,18 @@ func resolveHostRootedUpstreams(c config, routes []registryproxy.Route, rows []e
 	return resolved, nil
 }
 
-// deriveHostRootedPathSets keys on c.codeForge's HostMediatedRemote row rather
-// than comparing c.codeForge against "local", which a future host-mediated
+// deriveHostRootedPathSets keys on c.CodeForge's HostMediatedRemote row rather
+// than comparing c.CodeForge against "local", which a future host-mediated
 // backend would miss. Such a forge derives from the Accumulation repo's
 // baseBranch ref (issue #3310), the one snapshot no in-Box agent can widen, and
 // skips checkoutIsTargetRepo, whose contract is remote-based identity.
 func deriveHostRootedPathSets(c config, hostRootedHosts []string, rows []ecosystem.Strategy) ([]registrypathset.HostPathSet, error) {
-	row, _ := backendkit.ByName(c.codeForge)
+	row, _ := backendkit.ByName(c.CodeForge)
 	if row.HostMediatedRemote {
 		accumDir := c.hostRepoDir()
-		sets, err := registrypathset.DeriveFromGitRef(accumDir, c.baseBranch, rows)
+		sets, err := registrypathset.DeriveFromGitRef(accumDir, c.BaseBranch, rows)
 		if err != nil {
-			return nil, fmt.Errorf("registry proxy: host-rooted route(s) %s need the Accumulation repo's %q branch to derive their enforced path-set, and deriving it from %q failed: %w", strings.Join(hostRootedHosts, ", "), c.baseBranch, accumDir, err)
+			return nil, fmt.Errorf("registry proxy: host-rooted route(s) %s need the Accumulation repo's %q branch to derive their enforced path-set, and deriving it from %q failed: %w", strings.Join(hostRootedHosts, ", "), c.BaseBranch, accumDir, err)
 		}
 		return sets, nil
 	}

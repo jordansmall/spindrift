@@ -122,19 +122,19 @@ type choreCatalog struct {
 // in promptassembly.choreSection, leaving the claim standing for the full
 // claim timeout (issue #3905).
 func butlerPreflight(cfg config, choreName string, filerEnabled bool, hostFiler forge.HostPostedIssueFiler, catalog choreCatalog) ([]chore.Chore, error) {
-	row, ok := backendkit.ByName(cfg.codeForge)
+	row, ok := backendkit.ByName(cfg.CodeForge)
 	if !ok || row.NewLedger == nil {
-		return nil, fmt.Errorf("butler: CODE_FORGE=%q cannot host a butler Ledger (supported: %s)", cfg.codeForge, strings.Join(ledgerCapableNames(), ", "))
+		return nil, fmt.Errorf("butler: CODE_FORGE=%q cannot host a butler Ledger (supported: %s)", cfg.CodeForge, strings.Join(ledgerCapableNames(), ", "))
 	}
 	if choreName != "" && !promptassembly.ValidChoreName(choreName) {
 		return nil, fmt.Errorf("butler: chore %q: invalid name format: %s", choreName, promptassembly.ChoreNameRule)
 	}
 	chores, err := chore.Load(chore.Knobs{
-		Chores:           cfg.butlerChores,
-		Every:            cfg.butlerEvery,
-		Classes:          cfg.butlerChoreClasses,
-		PatchClasses:     cfg.butlerPatchClasses,
-		MaxPatchesPerDay: cfg.butlerMaxPatchesPerDay,
+		Chores:           cfg.ButlerChores,
+		Every:            cfg.ButlerEvery,
+		Classes:          cfg.ButlerChoreClasses,
+		PatchClasses:     cfg.ButlerPatchClasses,
+		MaxPatchesPerDay: cfg.ButlerMaxPatchesPerDay,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("butler: %w", err)
@@ -144,7 +144,7 @@ func butlerPreflight(cfg config, choreName string, filerEnabled bool, hostFiler 
 	}
 	if choreName != "" {
 		if !slices.ContainsFunc(chores, func(c chore.Chore) bool { return c.Name == choreName }) {
-			return nil, fmt.Errorf("butler: chore %q is not enabled (BUTLER_CHORES=%q)", choreName, cfg.butlerChores)
+			return nil, fmt.Errorf("butler: chore %q is not enabled (BUTLER_CHORES=%q)", choreName, cfg.ButlerChores)
 		}
 	} else if len(chores) == 0 {
 		return nil, fmt.Errorf("butler: %w", chore.ErrNoChores)
@@ -154,9 +154,9 @@ func butlerPreflight(cfg config, choreName string, filerEnabled bool, hostFiler 
 	// to the baked catalog instead of silently skipping both.
 	var missingPrompt func(c string) error
 	switch {
-	case runner.IsDir(cfg.spindriftPromptDir):
+	case runner.IsDir(cfg.SpindriftPromptDir):
 		missingPrompt = func(c string) error {
-			path := filepath.Join(cfg.spindriftPromptDir, "chores", c+".md")
+			path := filepath.Join(cfg.SpindriftPromptDir, "chores", c+".md")
 			if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
 				return nil
 			}
@@ -179,7 +179,7 @@ func butlerPreflight(cfg config, choreName string, filerEnabled bool, hostFiler 
 		}
 	}
 	if hostFiler == nil {
-		return nil, fmt.Errorf("butler: ISSUE_TRACKER=%q has no host-side issue filing, so the Filer's relayed findings would be lost", cfg.issueTracker)
+		return nil, fmt.Errorf("butler: ISSUE_TRACKER=%q has no host-side issue filing, so the Filer's relayed findings would be lost", cfg.IssueTracker)
 	}
 	if !filerEnabled {
 		return nil, fmt.Errorf("butler: needs a provisioned Filer to relay findings (set FILER_MODEL)")
@@ -211,12 +211,12 @@ func checkRecordsDigests(rows []chore.Row) error {
 // build from, so the two never drift.
 func butlerBudgets(cfg config) chore.Budgets {
 	return chore.Budgets{
-		MaxSweepsPerDay:     cfg.butlerMaxSweepsPerDay,
-		MaxFindingsPerDay:   cfg.butlerMaxFindingsPerDay,
-		MaxFindingsPerSweep: cfg.butlerMaxFindingsPerSweep,
-		DailyTokenCeiling:   cfg.butlerDailyTokenCeiling,
-		MaxPromotionsPerDay: cfg.butlerMaxPromotionsPerDay,
-		MaxPatchesPerDay:    cfg.butlerMaxPatchesPerDay,
+		MaxSweepsPerDay:     cfg.ButlerMaxSweepsPerDay,
+		MaxFindingsPerDay:   cfg.ButlerMaxFindingsPerDay,
+		MaxFindingsPerSweep: cfg.ButlerMaxFindingsPerSweep,
+		DailyTokenCeiling:   cfg.ButlerDailyTokenCeiling,
+		MaxPromotionsPerDay: cfg.ButlerMaxPromotionsPerDay,
+		MaxPatchesPerDay:    cfg.ButlerMaxPatchesPerDay,
 	}
 }
 
@@ -237,7 +237,7 @@ func resolveButlerSettings(cfg config, caps forge.Capabilities, choreName string
 	if err != nil {
 		return butlerSettings{}, err
 	}
-	claimTimeout, err := parseButlerClaimTimeout(cfg.butlerClaimTimeout)
+	claimTimeout, err := parseButlerClaimTimeout(cfg.ButlerClaimTimeout)
 	if err != nil {
 		return butlerSettings{}, err
 	}
@@ -248,7 +248,7 @@ func resolveButlerSettings(cfg config, caps forge.Capabilities, choreName string
 			return butlerSettings{}, fmt.Errorf("butler: %w", err)
 		}
 	}
-	window, err := daemon.ParseWindow(cfg.daemonAwakeWindow)
+	window, err := daemon.ParseWindow(cfg.DaemonAwakeWindow)
 	if err != nil {
 		return butlerSettings{}, err
 	}
@@ -337,7 +337,7 @@ func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
 		return int(exitcode.Failed)
 	}
 	// butlerPreflight already checked row.NewLedger != nil for this CODE_FORGE.
-	row, _ := backendkit.ByName(lc.config.codeForge)
+	row, _ := backendkit.ByName(lc.config.CodeForge)
 	backend, tree, ledgerCleanup, err := ledgerFor(lc.config, row)
 	if err != nil {
 		fmt.Fprintf(stderr, "butler: %v\n", err)
@@ -359,19 +359,19 @@ func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
 	}
 
 	policy := butler.Policy{
-		Branch:            lc.config.baseBranch,
+		Branch:            lc.config.BaseBranch,
 		Host:              host,
 		Chores:            settings.chores,
 		ClaimTimeout:      settings.claimTimeout,
 		Budgets:           budgets,
 		Zone:              settings.window.Location(),
-		PromotionMaxFiles: lc.config.butlerPromotionMaxFiles,
+		PromotionMaxFiles: lc.config.ButlerPromotionMaxFiles,
 		PromotionLabel:    lc.config.workLabel,
 		FindingLabel:      lc.config.dispatchKind.FindingLabel,
 		PatchLabel:        lc.config.dispatchKind.PatchLabel,
-		PatchPaths:        lc.config.butlerPatchPaths,
-		PatchMaxFiles:     lc.config.butlerPatchMaxFiles,
-		PatchMaxLines:     lc.config.butlerPatchMaxLines,
+		PatchPaths:        lc.config.ButlerPatchPaths,
+		PatchMaxFiles:     lc.config.ButlerPatchMaxFiles,
+		PatchMaxLines:     lc.config.ButlerPatchMaxLines,
 		RecordsRoot:       lc.pwd,
 		Knobs:             lc.config.knobLookup,
 	}

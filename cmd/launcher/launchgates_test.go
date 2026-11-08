@@ -225,8 +225,8 @@ func TestGateRegistry_EnforceOrderEqualsReportOrder(t *testing.T) {
 	f.ProbeRepo = "owner/repo"
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 	c := minimalValidConfig()
-	c.boxForgeAndIssueAccess = "read-only"
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 
 	var reportBuf bytes.Buffer
@@ -326,9 +326,9 @@ func TestGateRegistry_TokenGatesInapplicableUnderReadWrite(t *testing.T) {
 // of the two backends active, so neither reaches it.
 func TestGateRegistry_TokenGatesInapplicableWhenNeitherBackendMatches(t *testing.T) {
 	c := minimalValidConfig()
-	c.boxForgeAndIssueAccess = "read-only"
-	c.codeForge = "local"
-	c.issueTracker = "local"
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.CodeForge = "local"
+	c.IssueTracker = "local"
 
 	var buf bytes.Buffer
 	if err := walkGateRegistry(gateRegistry, c, &buf, doctor.NewReporter(&buf, true), true); err != nil {
@@ -349,9 +349,9 @@ func TestGateRegistry_TokenGatesInapplicableWhenNeitherBackendMatches(t *testing
 // backends use the other token.
 func TestGateRegistry_GitHubTokenGateInapplicableOnPureForgejo(t *testing.T) {
 	c := minimalValidConfig()
-	c.boxForgeAndIssueAccess = "read-only"
-	c.codeForge = "forgejo"
-	c.issueTracker = "forgejo"
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.CodeForge = "forgejo"
+	c.IssueTracker = "forgejo"
 	c.setRowKnob("FORGEJO_TOKEN", "launcher-forgejo-token")
 	t.Setenv("BOX_FORGEJO_TOKEN", "box-forgejo-token")
 
@@ -375,9 +375,9 @@ func TestGateRegistry_ForgejoTokenGateInapplicableOnPureGitHub(t *testing.T) {
 	})
 
 	c := minimalValidConfig()
-	c.boxForgeAndIssueAccess = "read-only"
-	c.codeForge = "github"
-	c.issueTracker = "github"
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.CodeForge = "github"
+	c.IssueTracker = "github"
 	t.Setenv("BOX_GH_TOKEN", "box-gh-token-distinct-from-launcher-token")
 
 	var buf bytes.Buffer
@@ -410,9 +410,9 @@ func TestGateRegistry_TokenGateAppliesAndChecksWhenBackendSharesTokenEnvVarUnder
 	})
 
 	c := minimalValidConfig()
-	c.boxForgeAndIssueAccess = "read-only"
-	c.codeForge = "custom-github"
-	c.issueTracker = "local"
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.CodeForge = "custom-github"
+	c.IssueTracker = "local"
 	t.Setenv("BOX_GH_TOKEN", "")
 
 	var buf bytes.Buffer
@@ -490,19 +490,19 @@ func TestReadOnlyTokenGates_OneGatePerRowWithBoxToken(t *testing.T) {
 
 	t.Setenv("BOX_FAKE_TOKEN", "box-token")
 	c := minimalValidConfig()
-	c.boxForgeAndIssueAccess = "read-only"
+	c.BoxForgeAndIssueAccess = "read-only"
 	if err := g.Check(c, io.Discard); err != nil || calls != 1 {
 		t.Errorf("Check() err = %v, calls = %d, want the row's hook invoked once", err, calls)
 	}
 
 	withExtraStrategies(t, fake, plain)
 
-	c.codeForge = "fake"
-	c.issueTracker = "local"
+	c.CodeForge = "fake"
+	c.IssueTracker = "local"
 	if !g.Applicable(c) {
 		t.Error("Applicable under read-only with the fake forge = false, want true")
 	}
-	c.boxForgeAndIssueAccess = "read-write"
+	c.BoxForgeAndIssueAccess = "read-write"
 	if g.Applicable(c) {
 		t.Error("Applicable under read-write = true, want false")
 	}
@@ -522,9 +522,9 @@ func TestGateRegistry_TokenGatesApplicablePerDistinctActiveBackend(t *testing.T)
 	for _, tc := range cases {
 		t.Run(tc.tracker+"+"+tc.forge, func(t *testing.T) {
 			c := minimalValidConfig()
-			c.boxForgeAndIssueAccess = "read-only"
-			c.issueTracker = tc.tracker
-			c.codeForge = tc.forge
+			c.BoxForgeAndIssueAccess = "read-only"
+			c.IssueTracker = tc.tracker
+			c.CodeForge = tc.forge
 			_, network := splitGateRegistryByNetwork(gateRegistry)
 			var got []string
 			for _, g := range network {
@@ -564,10 +564,10 @@ func TestGateRegistry_FullWalkChecksEachActiveBackendOnce(t *testing.T) {
 			})
 
 			c := minimalValidConfig()
-			c.boxForgeAndIssueAccess = "read-only"
-			c.issueTracker = tc.tracker
-			c.codeForge = tc.forge
-			c.ghToken = "launcher-gh-tok"
+			c.BoxForgeAndIssueAccess = "read-only"
+			c.IssueTracker = tc.tracker
+			c.CodeForge = tc.forge
+			c.GhToken = "launcher-gh-tok"
 			c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
 			t.Setenv("BOX_GH_TOKEN", "box-gh-tok")
 			t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")

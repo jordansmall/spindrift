@@ -576,8 +576,8 @@ func TestMainRun_AmbientKnobEnv_WarnsAndStillHonored(t *testing.T) {
 	// Still honored this release: loadConfig() resolves MAX_JOBS=5 from the
 	// same ambient env the warning just reported on.
 	c := loadConfig()
-	if c.maxJobs != 5 {
-		t.Errorf("maxJobs = %d, want 5 (ambient env still honored)", c.maxJobs)
+	if c.MaxJobs != 5 {
+		t.Errorf("maxJobs = %d, want 5 (ambient env still honored)", c.MaxJobs)
 	}
 }
 
@@ -896,7 +896,7 @@ func TestResolveCapabilitySignals_LocalTracker_InBoxUnreachable(t *testing.T) {
 	t.Setenv("ISSUE_TRACKER", "local")
 
 	c := loadConfig()
-	sig := resolveCapabilitySignals(c.codeForge, c.issueTracker)
+	sig := resolveCapabilitySignals(c.CodeForge, c.IssueTracker)
 
 	if !sig.inBoxUnreachableTracker {
 		t.Errorf("inBoxUnreachableTracker = %v, want true for ISSUE_TRACKER=local", sig.inBoxUnreachableTracker)
@@ -1019,7 +1019,7 @@ func TestNewIssueTracker_Jira(t *testing.T) {
 	defer srv.Close()
 
 	c := minimalValidConfig()
-	c.issueTracker = "jira"
+	c.IssueTracker = "jira"
 	c.setRowKnob("JIRA_BASE_URL", srv.URL)
 	c.setRowKnob("JIRA_PROJECT_KEY", "PROJ")
 	c.setRowKnob("JIRA_TOKEN", "tok")
@@ -1044,10 +1044,10 @@ func TestNewIssueTracker_Forgejo(t *testing.T) {
 	defer srv.Close()
 
 	c := minimalValidConfig()
-	c.issueTracker = "forgejo"
+	c.IssueTracker = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", srv.URL)
 	c.setRowKnob("FORGEJO_TOKEN", "tok")
-	c.repoSlug = "owner/repo"
+	c.RepoSlug = "owner/repo"
 
 	it := newIssueTracker(c)
 	slug, err := it.Probe()
@@ -1069,17 +1069,17 @@ func TestApplyDispatchKind_Research_SetsResearchLabelFamily(t *testing.T) {
 	if c.dispatchKind != dispatchkind.Research {
 		t.Errorf("dispatchKind = %v, want %v", c.dispatchKind, dispatchkind.Research)
 	}
-	if c.label != rl.Dispatchable {
-		t.Errorf("label = %q, want %q", c.label, rl.Dispatchable)
+	if c.Label != rl.Dispatchable {
+		t.Errorf("label = %q, want %q", c.Label, rl.Dispatchable)
 	}
-	if c.inProgressLabel != rl.InProgress {
-		t.Errorf("inProgressLabel = %q, want %q", c.inProgressLabel, rl.InProgress)
+	if c.InProgressLabel != rl.InProgress {
+		t.Errorf("inProgressLabel = %q, want %q", c.InProgressLabel, rl.InProgress)
 	}
-	if c.failedLabel != rl.Failed {
-		t.Errorf("failedLabel = %q, want %q", c.failedLabel, rl.Failed)
+	if c.FailedLabel != rl.Failed {
+		t.Errorf("failedLabel = %q, want %q", c.FailedLabel, rl.Failed)
 	}
-	if c.completeLabel != "" {
-		t.Errorf("completeLabel = %q, want empty (verdict carries Complete instead)", c.completeLabel)
+	if c.CompleteLabel != "" {
+		t.Errorf("completeLabel = %q, want empty (verdict carries Complete instead)", c.CompleteLabel)
 	}
 }
 
@@ -1087,27 +1087,27 @@ func TestApplyDispatchKind_Research_SetsResearchLabelFamily(t *testing.T) {
 // LABEL/*_LABEL knobs stay untouched.
 func TestApplyDispatchKind_Work_LeavesConfiguredLabelsAlone(t *testing.T) {
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.completeLabel, c.failedLabel = "custom-ready", "custom-wip", "custom-done", "custom-broken"
+	c.Label, c.InProgressLabel, c.CompleteLabel, c.FailedLabel = "custom-ready", "custom-wip", "custom-done", "custom-broken"
 
 	got := applyDispatchKind(c, dispatchkind.Work)
 
 	if got.dispatchKind != dispatchkind.Work {
 		t.Errorf("dispatchKind = %v, want %v", got.dispatchKind, dispatchkind.Work)
 	}
-	if got.label != "custom-ready" || got.inProgressLabel != "custom-wip" || got.completeLabel != "custom-done" || got.failedLabel != "custom-broken" {
+	if got.Label != "custom-ready" || got.InProgressLabel != "custom-wip" || got.CompleteLabel != "custom-done" || got.FailedLabel != "custom-broken" {
 		t.Errorf("applyDispatchKind(work) mutated configured labels: %+v", got)
 	}
 }
 
-// config's by-value embed of schemaConfig means applyDispatchKind mutates
+// config's by-value embed of inputdoc.Knobs means applyDispatchKind mutates
 // only the returned copy, leaving the caller's original untouched. A pointer
 // embed would let the label swap alias and corrupt the caller's struct.
 func TestApplyDispatchKind_ValueEmbed_DoesNotAliasOriginal(t *testing.T) {
-	orig := config{schemaConfig: schemaConfig{
-		label:           "orig-label",
-		inProgressLabel: "orig-in-progress",
-		completeLabel:   "orig-complete",
-		failedLabel:     "orig-failed",
+	orig := config{Knobs: inputdoc.Knobs{
+		Label:           "orig-label",
+		InProgressLabel: "orig-in-progress",
+		CompleteLabel:   "orig-complete",
+		FailedLabel:     "orig-failed",
 	}}
 	origCopy := orig
 
@@ -1117,7 +1117,7 @@ func TestApplyDispatchKind_ValueEmbed_DoesNotAliasOriginal(t *testing.T) {
 	if !reflect.DeepEqual(orig, origCopy) {
 		t.Errorf("applyDispatchKind mutated the caller's original config: got %+v, want unchanged %+v", orig, origCopy)
 	}
-	if got.label != rl.Dispatchable || got.inProgressLabel != rl.InProgress || got.failedLabel != rl.Failed || got.completeLabel != "" {
+	if got.Label != rl.Dispatchable || got.InProgressLabel != rl.InProgress || got.FailedLabel != rl.Failed || got.CompleteLabel != "" {
 		t.Errorf("returned copy does not carry the research label family: %+v", got)
 	}
 }
@@ -1132,8 +1132,8 @@ func TestApplyDispatchKind_Butler_PreservesConfiguredWorkLabel(t *testing.T) {
 	if c.workLabel != "agent-go" {
 		t.Errorf("workLabel = %q, want %q", c.workLabel, "agent-go")
 	}
-	if c.label != "" {
-		t.Errorf("label = %q, want empty (butler's label-less family)", c.label)
+	if c.Label != "" {
+		t.Errorf("label = %q, want empty (butler's label-less family)", c.Label)
 	}
 }
 
@@ -1156,7 +1156,7 @@ body
 	}
 
 	c := minimalValidConfig()
-	c.issueTracker = "local"
+	c.IssueTracker = "local"
 	c.setRowKnob("LOCAL_ISSUES_DIR", dir)
 	c = applyDispatchKind(c, dispatchkind.Research)
 
@@ -1173,7 +1173,7 @@ body
 	}
 }
 
-// A custom RESEARCH_VERDICTS override (c.researchVerdicts) reaches
+// A custom RESEARCH_VERDICTS override (c.ResearchVerdicts) reaches
 // newIssueTracker end to end: the "approve" verdict applies the configured
 // "agent-research-approve" label instead of any compiled default (ADR 0022,
 // issue #2201).
@@ -1192,10 +1192,10 @@ body
 	}
 
 	c := minimalValidConfig()
-	c.issueTracker = "local"
+	c.IssueTracker = "local"
 	c.setRowKnob("LOCAL_ISSUES_DIR", dir)
 	c = applyDispatchKind(c, dispatchkind.Research)
-	c.researchVerdicts = `[{"verdict":"approve","label":"agent-research-approve","description":"looks good"}]`
+	c.ResearchVerdicts = `[{"verdict":"approve","label":"agent-research-approve","description":"looks good"}]`
 
 	it := newIssueTracker(c)
 	if err := it.CompleteVerdict("42", forge.Verdict("approve")); err != nil {
@@ -1231,8 +1231,8 @@ func TestMaxParallelEdgeCases(t *testing.T) {
 	for _, tc := range cases {
 		t.Setenv("MAX_PARALLEL", tc.env)
 		c := loadConfig()
-		if c.maxParallel != tc.want {
-			t.Errorf("MAX_PARALLEL=%q: got %d, want %d", tc.env, c.maxParallel, tc.want)
+		if c.MaxParallel != tc.want {
+			t.Errorf("MAX_PARALLEL=%q: got %d, want %d", tc.env, c.MaxParallel, tc.want)
 		}
 	}
 }
@@ -1253,8 +1253,8 @@ func TestMaxJobsEdgeCases(t *testing.T) {
 	for _, tc := range cases {
 		t.Setenv("MAX_JOBS", tc.env)
 		c := loadConfig()
-		if c.maxJobs != tc.want {
-			t.Errorf("MAX_JOBS=%q: got %d, want %d", tc.env, c.maxJobs, tc.want)
+		if c.MaxJobs != tc.want {
+			t.Errorf("MAX_JOBS=%q: got %d, want %d", tc.env, c.MaxJobs, tc.want)
 		}
 	}
 }
@@ -1278,8 +1278,8 @@ func TestLoadConfig_LabelDefaultComesFromSchemaTable(t *testing.T) {
 	withSchemaFlags(t, patched)
 
 	c := loadConfig()
-	if c.label != "custom-default-from-table" {
-		t.Errorf("label should come from inputdoc.SchemaFlags table, got %q", c.label)
+	if c.Label != "custom-default-from-table" {
+		t.Errorf("label should come from inputdoc.SchemaFlags table, got %q", c.Label)
 	}
 }
 
@@ -1299,11 +1299,11 @@ func TestLoadConfig_SpindriftDirsDefaultComesFromSchemaTable(t *testing.T) {
 	})
 
 	c := loadConfig()
-	if c.spindriftPromptDir != "custom-prompt-default" {
-		t.Errorf("spindriftPromptDir should come from inputdoc.SchemaFlags table, got %q", c.spindriftPromptDir)
+	if c.SpindriftPromptDir != "custom-prompt-default" {
+		t.Errorf("spindriftPromptDir should come from inputdoc.SchemaFlags table, got %q", c.SpindriftPromptDir)
 	}
-	if c.spindriftSkillsDir != "custom-skills-default" {
-		t.Errorf("spindriftSkillsDir should come from inputdoc.SchemaFlags table, got %q", c.spindriftSkillsDir)
+	if c.SpindriftSkillsDir != "custom-skills-default" {
+		t.Errorf("spindriftSkillsDir should come from inputdoc.SchemaFlags table, got %q", c.SpindriftSkillsDir)
 	}
 }
 
@@ -1320,11 +1320,11 @@ func TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable(t *testing.T) {
 	})
 
 	c := loadConfig()
-	if c.spindriftPromptDir != "from-env-prompt" {
-		t.Errorf("spindriftPromptDir = %q, want from-env-prompt", c.spindriftPromptDir)
+	if c.SpindriftPromptDir != "from-env-prompt" {
+		t.Errorf("spindriftPromptDir = %q, want from-env-prompt", c.SpindriftPromptDir)
 	}
-	if c.spindriftSkillsDir != "from-env-skills" {
-		t.Errorf("spindriftSkillsDir = %q, want from-env-skills", c.spindriftSkillsDir)
+	if c.SpindriftSkillsDir != "from-env-skills" {
+		t.Errorf("spindriftSkillsDir = %q, want from-env-skills", c.SpindriftSkillsDir)
 	}
 }
 
@@ -1341,11 +1341,11 @@ func TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable_Mixed(t *testing.T) {
 	})
 
 	c := loadConfig()
-	if c.spindriftPromptDir != "from-env-prompt" {
-		t.Errorf("spindriftPromptDir = %q, want from-env-prompt", c.spindriftPromptDir)
+	if c.SpindriftPromptDir != "from-env-prompt" {
+		t.Errorf("spindriftPromptDir = %q, want from-env-prompt", c.SpindriftPromptDir)
 	}
-	if c.spindriftSkillsDir != "custom-skills-default" {
-		t.Errorf("spindriftSkillsDir = %q, want custom-skills-default", c.spindriftSkillsDir)
+	if c.SpindriftSkillsDir != "custom-skills-default" {
+		t.Errorf("spindriftSkillsDir = %q, want custom-skills-default", c.SpindriftSkillsDir)
 	}
 }
 
@@ -1369,15 +1369,15 @@ func TestLoadConfig_EmptyDisablesLimit(t *testing.T) {
 		want         string
 		getGot       func(c config) string
 	}{
-		{name: "pidsLimit unset falls back to schema default", env: "PIDS_LIMIT", useRealTable: true, setEnv: false, want: "512", getGot: func(c config) string { return c.pidsLimit }},
-		{name: "pidsLimit empty override disables the limit", env: "PIDS_LIMIT", setEnv: true, envVal: "", dflt: "512", want: "", getGot: func(c config) string { return c.pidsLimit }},
-		{name: "pidsLimit non-empty override passes through verbatim", env: "PIDS_LIMIT", setEnv: true, envVal: "4096", dflt: "512", want: "4096", getGot: func(c config) string { return c.pidsLimit }},
-		{name: "mergeGuardPaths unset falls back to schema default", env: "MERGE_GUARD_PATHS", useRealTable: true, setEnv: false, want: ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**", getGot: func(c config) string { return c.mergeGuardPaths }},
-		{name: "mergeGuardPaths empty override disables the guard", env: "MERGE_GUARD_PATHS", useRealTable: true, setEnv: true, envVal: "", want: "", getGot: func(c config) string { return c.mergeGuardPaths }},
-		{name: "mergeGuardPaths non-empty override passes through verbatim", env: "MERGE_GUARD_PATHS", useRealTable: true, setEnv: true, envVal: "docs/**", want: "docs/**", getGot: func(c config) string { return c.mergeGuardPaths }},
-		{name: "memoryLimit unset falls back to schema default", env: "MEMORY_LIMIT", useRealTable: true, setEnv: false, want: "5g", getGot: func(c config) string { return c.memoryLimit }},
-		{name: "memoryLimit empty override disables the limit", env: "MEMORY_LIMIT", setEnv: true, envVal: "", dflt: "5g", want: "", getGot: func(c config) string { return c.memoryLimit }},
-		{name: "memoryLimit non-empty override passes through verbatim", env: "MEMORY_LIMIT", setEnv: true, envVal: "8g", dflt: "5g", want: "8g", getGot: func(c config) string { return c.memoryLimit }},
+		{name: "pidsLimit unset falls back to schema default", env: "PIDS_LIMIT", useRealTable: true, setEnv: false, want: "512", getGot: func(c config) string { return c.PidsLimit }},
+		{name: "pidsLimit empty override disables the limit", env: "PIDS_LIMIT", setEnv: true, envVal: "", dflt: "512", want: "", getGot: func(c config) string { return c.PidsLimit }},
+		{name: "pidsLimit non-empty override passes through verbatim", env: "PIDS_LIMIT", setEnv: true, envVal: "4096", dflt: "512", want: "4096", getGot: func(c config) string { return c.PidsLimit }},
+		{name: "mergeGuardPaths unset falls back to schema default", env: "MERGE_GUARD_PATHS", useRealTable: true, setEnv: false, want: ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**", getGot: func(c config) string { return c.MergeGuardPaths }},
+		{name: "mergeGuardPaths empty override disables the guard", env: "MERGE_GUARD_PATHS", useRealTable: true, setEnv: true, envVal: "", want: "", getGot: func(c config) string { return c.MergeGuardPaths }},
+		{name: "mergeGuardPaths non-empty override passes through verbatim", env: "MERGE_GUARD_PATHS", useRealTable: true, setEnv: true, envVal: "docs/**", want: "docs/**", getGot: func(c config) string { return c.MergeGuardPaths }},
+		{name: "memoryLimit unset falls back to schema default", env: "MEMORY_LIMIT", useRealTable: true, setEnv: false, want: "5g", getGot: func(c config) string { return c.MemoryLimit }},
+		{name: "memoryLimit empty override disables the limit", env: "MEMORY_LIMIT", setEnv: true, envVal: "", dflt: "5g", want: "", getGot: func(c config) string { return c.MemoryLimit }},
+		{name: "memoryLimit non-empty override passes through verbatim", env: "MEMORY_LIMIT", setEnv: true, envVal: "8g", dflt: "5g", want: "8g", getGot: func(c config) string { return c.MemoryLimit }},
 	}
 
 	for _, tc := range cases {
@@ -1549,23 +1549,23 @@ func TestGitIdentityField_FallsBackToHostGitConfig(t *testing.T) {
 }
 
 // loadSchemaConfig fills every hostGitConfigKey member from the host git
-// config, and hostGitConfigValue answers exactly those members' env names from
+// config, and HostGitConfigValue answers exactly those members' env names from
 // the loaded fields (issue #5372).
 func TestLoadSchemaConfig_HostGitConfigMembersLoadFromHostGitConfig(t *testing.T) {
 	unsetEnvForTest(t, "GIT_USER_NAME", "GIT_USER_EMAIL")
 	fakeHostGitConfig(t, map[string]string{"user.name": "Host Name", "user.email": "host@example.com"})
 	sc := loadSchemaConfig()
 
-	if sc.gitUserName != "Host Name" || sc.gitUserEmail != "host@example.com" {
-		t.Errorf("loadSchemaConfig identity = %q/%q, want the host git config values", sc.gitUserName, sc.gitUserEmail)
+	if sc.GitUserName != "Host Name" || sc.GitUserEmail != "host@example.com" {
+		t.Errorf("loadSchemaConfig identity = %q/%q, want the host git config values", sc.GitUserName, sc.GitUserEmail)
 	}
 	for _, e := range inputdoc.SchemaFlags {
-		got, ok := sc.hostGitConfigValue(e.Env)
+		got, ok := sc.HostGitConfigValue(e.Env)
 		if ok != (e.HostGitConfigKey != "") {
-			t.Errorf("%s: hostGitConfigValue ok = %v, hostGitConfigKey = %q", e.Env, ok, e.HostGitConfigKey)
+			t.Errorf("%s: HostGitConfigValue ok = %v, hostGitConfigKey = %q", e.Env, ok, e.HostGitConfigKey)
 		}
 		if ok && got != hostGitConfigField(e.Env) {
-			t.Errorf("%s: hostGitConfigValue = %q, want %q", e.Env, got, hostGitConfigField(e.Env))
+			t.Errorf("%s: HostGitConfigValue = %q, want %q", e.Env, got, hostGitConfigField(e.Env))
 		}
 	}
 }
@@ -1595,8 +1595,8 @@ func TestLoadConfig_DocumentSettingBeatsSchemaDefault(t *testing.T) {
 	loadedDoc = &inputdoc.Document{Settings: map[string]string{"BASE_BRANCH": "from-document"}}
 
 	c := loadConfig()
-	if c.baseBranch != "from-document" {
-		t.Errorf("baseBranch = %q, want from-document", c.baseBranch)
+	if c.BaseBranch != "from-document" {
+		t.Errorf("baseBranch = %q, want from-document", c.BaseBranch)
 	}
 }
 
@@ -1611,8 +1611,8 @@ func TestLoadConfig_EnvBeatsDocument(t *testing.T) {
 	t.Setenv("BASE_BRANCH", "from-env")
 
 	c := loadConfig()
-	if c.baseBranch != "from-env" {
-		t.Errorf("baseBranch = %q, want from-env", c.baseBranch)
+	if c.BaseBranch != "from-env" {
+		t.Errorf("baseBranch = %q, want from-env", c.BaseBranch)
 	}
 }
 
@@ -1648,8 +1648,8 @@ func TestLoadConfig_PromptDirDocumentSettingBeatsSchemaDefault(t *testing.T) {
 	loadedDoc = &inputdoc.Document{Settings: map[string]string{"SPINDRIFT_PROMPT_DIR": "from-document-prompt"}}
 
 	c := loadConfig()
-	if c.spindriftPromptDir != "from-document-prompt" {
-		t.Errorf("spindriftPromptDir = %q, want from-document-prompt", c.spindriftPromptDir)
+	if c.SpindriftPromptDir != "from-document-prompt" {
+		t.Errorf("spindriftPromptDir = %q, want from-document-prompt", c.SpindriftPromptDir)
 	}
 }
 
@@ -1662,8 +1662,8 @@ func TestLoadConfig_PromptDirEnvBeatsDocument(t *testing.T) {
 	t.Setenv("SPINDRIFT_PROMPT_DIR", "from-env-prompt")
 
 	c := loadConfig()
-	if c.spindriftPromptDir != "from-env-prompt" {
-		t.Errorf("spindriftPromptDir = %q, want from-env-prompt", c.spindriftPromptDir)
+	if c.SpindriftPromptDir != "from-env-prompt" {
+		t.Errorf("spindriftPromptDir = %q, want from-env-prompt", c.SpindriftPromptDir)
 	}
 }
 
@@ -1707,7 +1707,7 @@ func TestLoadConfig_ArtifactsFromDocument(t *testing.T) {
 // ${REPO_SLUG:-}.
 func TestValidate_RepoSlugRequired(t *testing.T) {
 	c := minimalValidConfig()
-	c.repoSlug = ""
+	c.RepoSlug = ""
 	err := validate(c)
 	if err == nil {
 		t.Fatal("validate() must require REPO_SLUG when empty")
@@ -2236,9 +2236,9 @@ func TestResolveAgentPresenceSignals_ScoutNoDocumentOpencodeDriverFallsBackToSco
 // rather than a directly-set, tautological config field.
 func TestValidate_FullyLocalExemptsRepoSlugAndGhToken(t *testing.T) {
 	c := minimalValidLocalConfig()
-	c.issueTracker = "local"
-	c.repoSlug = ""
-	c.ghToken = ""
+	c.IssueTracker = "local"
+	c.RepoSlug = ""
+	c.GhToken = ""
 	if err := validate(c); err != nil {
 		t.Errorf("validate() should exempt REPO_SLUG/GH_TOKEN when CODE_FORGE and ISSUE_TRACKER are both local: %v", err)
 	}
@@ -2260,9 +2260,9 @@ func TestValidate_OverrideAwayFromBakedGithubDocumentExemptsRepoSlugAndGhToken(t
 	}
 
 	c := minimalValidLocalConfig()
-	c.issueTracker = "local"
-	c.repoSlug = ""
-	c.ghToken = ""
+	c.IssueTracker = "local"
+	c.RepoSlug = ""
+	c.GhToken = ""
 	if err := validate(c); err != nil {
 		t.Errorf("validate() should exempt REPO_SLUG/GH_TOKEN on an override away from a github-baked document: %v", err)
 	}
@@ -2283,8 +2283,8 @@ func TestValidate_OverrideBackToGithubFromFullyLocalDocumentRequiresRepoSlugAndG
 	}
 
 	c := minimalValidConfig()
-	c.repoSlug = ""
-	c.ghToken = ""
+	c.RepoSlug = ""
+	c.GhToken = ""
 	if err := validate(c); err == nil {
 		t.Error("validate() must require REPO_SLUG/GH_TOKEN on an override back to github from a fully-local-baked document")
 	}
@@ -2295,26 +2295,26 @@ func TestValidate_OverrideBackToGithubFromFullyLocalDocumentRequiresRepoSlugAndG
 func TestValidate_MixedLocalStillRequiresRepoSlugAndGhToken(t *testing.T) {
 	// CODE_FORGE=local, ISSUE_TRACKER=github (default).
 	c := minimalValidLocalConfig()
-	c.repoSlug = ""
+	c.RepoSlug = ""
 	if err := validate(c); err == nil {
 		t.Error("validate() must still require REPO_SLUG when only CODE_FORGE is local")
 	}
 	c = minimalValidLocalConfig()
-	c.ghToken = ""
+	c.GhToken = ""
 	if err := validate(c); err == nil {
 		t.Error("validate() must still require GH_TOKEN when only CODE_FORGE is local")
 	}
 
 	// CODE_FORGE=github (default), ISSUE_TRACKER=local.
 	c = minimalValidConfig()
-	c.issueTracker = "local"
-	c.repoSlug = ""
+	c.IssueTracker = "local"
+	c.RepoSlug = ""
 	if err := validate(c); err == nil {
 		t.Error("validate() must still require REPO_SLUG when only ISSUE_TRACKER is local")
 	}
 	c = minimalValidConfig()
-	c.issueTracker = "local"
-	c.ghToken = ""
+	c.IssueTracker = "local"
+	c.GhToken = ""
 	if err := validate(c); err == nil {
 		t.Error("validate() must still require GH_TOKEN when only ISSUE_TRACKER is local")
 	}
@@ -2326,8 +2326,8 @@ func TestValidate_MixedLocalStillRequiresRepoSlugAndGhToken(t *testing.T) {
 // cross-knob checks ahead, so the wrong error surfaced.
 func TestValidate_ChoiceErrorsPrecedeCrossKnobErrors(t *testing.T) {
 	c := minimalValidLocalConfig()
-	c.issueTracker = "local"
-	c.mergeMode = "bogus"
+	c.IssueTracker = "local"
+	c.MergeMode = "bogus"
 
 	err := validate(c)
 	if err == nil {
@@ -2348,7 +2348,7 @@ func TestValidate_ChoiceErrorsPrecedeCrossKnobErrors(t *testing.T) {
 func TestValidate_ChoiceErrorsPrecedeRegistryProxyRoutesRetirementError(t *testing.T) {
 	t.Setenv("REGISTRY_PROXY_UPSTREAM_URL", "https://registry.example.com")
 	c := minimalValidConfig()
-	c.mergeMode = "bogus"
+	c.MergeMode = "bogus"
 
 	err := validate(c)
 	if err == nil {
@@ -2367,7 +2367,7 @@ func TestValidate_ChoiceErrorsPrecedeRegistryProxyRoutesRetirementError(t *testi
 // accepts both declared values.
 func TestValidate_RejectsOutOfEnumSignalCarrier(t *testing.T) {
 	c := minimalValidConfig()
-	c.signalCarrier = "bogus"
+	c.SignalCarrier = "bogus"
 
 	err := validate(c)
 	if err == nil {
@@ -2381,7 +2381,7 @@ func TestValidate_RejectsOutOfEnumSignalCarrier(t *testing.T) {
 func TestValidate_AcceptsBothSignalCarrierValues(t *testing.T) {
 	for _, v := range []string{"log", "socket"} {
 		c := minimalValidConfig()
-		c.signalCarrier = v
+		c.SignalCarrier = v
 		if err := validate(c); err != nil {
 			t.Errorf("validate() with BOX_SIGNAL_CARRIER=%q = %v, want nil", v, err)
 		}
@@ -2396,7 +2396,7 @@ func TestValidate_AcceptsBothSignalCarrierValues(t *testing.T) {
 func TestValidate_RegistryProxyRoutesRetirementErrorPrecedesBoxForgeAndIssueAccessChoiceError(t *testing.T) {
 	t.Setenv("REGISTRY_PROXY_UPSTREAM_URL", "https://registry.example.com")
 	c := minimalValidConfig()
-	c.boxForgeAndIssueAccess = "read-only-ish"
+	c.BoxForgeAndIssueAccess = "read-only-ish"
 
 	err := validate(c)
 	if err == nil {
@@ -2416,9 +2416,9 @@ func TestValidate_RegistryProxyRoutesRetirementErrorPrecedesBoxForgeAndIssueAcce
 func TestValidate_ResearchSelfContainedExemptsRepoSlugAndGhToken(t *testing.T) {
 	c := applyDispatchKind(minimalValidConfig(), dispatchkind.Research)
 	c.selfContained = true
-	c.issueTracker = "local"
-	c.repoSlug = ""
-	c.ghToken = ""
+	c.IssueTracker = "local"
+	c.RepoSlug = ""
+	c.GhToken = ""
 	if err := validate(c); err != nil {
 		t.Errorf("validate() should exempt REPO_SLUG/GH_TOKEN for self-contained research with a local issue tracker: %v", err)
 	}
@@ -2430,7 +2430,7 @@ func TestValidate_ResearchSelfContainedExemptsRepoSlugAndGhToken(t *testing.T) {
 func TestValidate_ResearchSelfContainedGithubTrackerStillRequiresRepoSlug(t *testing.T) {
 	c := applyDispatchKind(minimalValidConfig(), dispatchkind.Research)
 	c.selfContained = true
-	c.repoSlug = ""
+	c.RepoSlug = ""
 	err := validate(c)
 	if err == nil {
 		t.Fatal("validate() must still require REPO_SLUG for self-contained research with a github issue tracker")
@@ -2458,7 +2458,7 @@ func TestValidate_SelfContainedRejectedOutsideResearch(t *testing.T) {
 // without --self-contained still requires it like any other kind.
 func TestValidate_ResearchWithoutSelfContainedStillRequiresRepoSlug(t *testing.T) {
 	c := applyDispatchKind(minimalValidConfig(), dispatchkind.Research)
-	c.repoSlug = ""
+	c.RepoSlug = ""
 	if err := validate(c); err == nil {
 		t.Error("validate() must still require REPO_SLUG for research without --self-contained")
 	}
@@ -2466,7 +2466,7 @@ func TestValidate_ResearchWithoutSelfContainedStillRequiresRepoSlug(t *testing.T
 
 func TestValidateMergeMode_RejectsUnknown(t *testing.T) {
 	c := minimalValidConfig()
-	c.mergeMode = "turbo"
+	c.MergeMode = "turbo"
 	if err := validate(c); err == nil {
 		t.Fatal("validate() should reject unrecognised MERGE_MODE")
 	}
@@ -2476,7 +2476,7 @@ func TestValidateMergeMode_RejectsUnknown(t *testing.T) {
 // fields missing, rather than deferring to a runtime Jira API error.
 func TestValidate_JiraRequiresBaseURLProjectKeyToken(t *testing.T) {
 	base := minimalValidConfig()
-	base.issueTracker = "jira"
+	base.IssueTracker = "jira"
 	base.setRowKnob("JIRA_BASE_URL", "https://example.atlassian.net")
 	base.setRowKnob("JIRA_PROJECT_KEY", "PROJ")
 	base.setRowKnob("JIRA_TOKEN", "tok")
@@ -2514,7 +2514,7 @@ func TestValidate_JiraFieldsOptionalForGitHub(t *testing.T) {
 // ISSUE_TRACKER=forgejo, and accepts a fully configured forgejo config.
 func TestValidate_ForgejoRequiresBaseURLAndToken(t *testing.T) {
 	base := minimalValidConfig()
-	base.issueTracker = "forgejo"
+	base.IssueTracker = "forgejo"
 	base.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	base.setRowKnob("FORGEJO_TOKEN", "tok")
 
@@ -2547,7 +2547,7 @@ func TestValidate_ForgejoRequiresBaseURLAndToken(t *testing.T) {
 // CODE_FORGE=forgejo, and accepts a fully configured forgejo code forge.
 func TestValidate_ForgejoCodeForge(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "forgejo"
+	c.CodeForge = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	c.setRowKnob("FORGEJO_TOKEN", "tok")
 
@@ -2581,11 +2581,11 @@ func TestValidate_ForgejoCodeForge(t *testing.T) {
 // must not demand GH_TOKEN (#3325).
 func TestValidate_PureForgejoNeedsNoGHToken(t *testing.T) {
 	c := minimalValidConfig()
-	c.issueTracker = "forgejo"
-	c.codeForge = "forgejo"
+	c.IssueTracker = "forgejo"
+	c.CodeForge = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	c.setRowKnob("FORGEJO_TOKEN", "tok")
-	c.ghToken = ""
+	c.GhToken = ""
 
 	if err := validate(c); err != nil {
 		t.Fatalf("pure-forgejo config without GH_TOKEN should validate: %v", err)
@@ -2599,35 +2599,35 @@ func TestValidate_PureForgejoNeedsNoGHToken(t *testing.T) {
 func TestValidate_OpencodeCopilotCredential(t *testing.T) {
 	c := minimalValidConfig()
 	c.driver = "opencode"
-	c.model = "github-copilot/claude-opus-4-8"
-	c.opencodeAuthContent = ""
+	c.Model = "github-copilot/claude-opus-4-8"
+	c.OpencodeAuthContent = ""
 	if err := validate(c); err == nil {
 		t.Fatal("validate() should require OPENCODE_AUTH_CONTENT for the github-copilot Provider")
 	}
 
 	c = minimalValidConfig()
 	c.driver = "opencode"
-	c.model = "github-copilot/claude-opus-4-8"
-	c.opencodeAuthContent = "gho_test"
-	c.claudeOAuthToken = ""
-	c.anthropicAPIKey = ""
+	c.Model = "github-copilot/claude-opus-4-8"
+	c.OpencodeAuthContent = "gho_test"
+	c.ClaudeOAuthToken = ""
+	c.AnthropicAPIKey = ""
 	if err := validate(c); err != nil {
 		t.Errorf("validate() should not require claude credentials under the opencode Driver: %v", err)
 	}
 
 	c = minimalValidConfig()
 	c.driver = "opencode"
-	c.model = "anthropic/claude-opus-4-8"
-	c.opencodeAuthContent = ""
-	c.claudeOAuthToken = ""
-	c.anthropicAPIKey = ""
+	c.Model = "anthropic/claude-opus-4-8"
+	c.OpencodeAuthContent = ""
+	c.ClaudeOAuthToken = ""
+	c.AnthropicAPIKey = ""
 	if err := validate(c); err != nil {
 		t.Errorf("validate() should only require OPENCODE_AUTH_CONTENT for the github-copilot Provider: %v", err)
 	}
 
 	c = minimalValidConfig()
-	c.claudeOAuthToken = ""
-	c.anthropicAPIKey = ""
+	c.ClaudeOAuthToken = ""
+	c.AnthropicAPIKey = ""
 	if err := validate(c); err == nil {
 		t.Fatal("validate() should still require a claude credential under the default (claude) Driver")
 	}
@@ -2636,7 +2636,7 @@ func TestValidate_OpencodeCopilotCredential(t *testing.T) {
 func TestValidateMergeMode_AcceptsKnown(t *testing.T) {
 	for _, mode := range []string{"immediate", "auto", "manual"} {
 		c := minimalValidConfig()
-		c.mergeMode = mode
+		c.MergeMode = mode
 		if err := validate(c); err != nil {
 			t.Errorf("validate() rejected valid MERGE_MODE %q: %v", mode, err)
 		}
@@ -2645,7 +2645,7 @@ func TestValidateMergeMode_AcceptsKnown(t *testing.T) {
 
 func TestValidateMergeMethod_RejectsUnknown(t *testing.T) {
 	c := minimalValidConfig()
-	c.mergeMethod = "fast-forward"
+	c.MergeMethod = "fast-forward"
 	if err := validate(c); err == nil {
 		t.Fatal("validate() should reject unrecognised MERGE_METHOD")
 	}
@@ -2654,7 +2654,7 @@ func TestValidateMergeMethod_RejectsUnknown(t *testing.T) {
 func TestValidateMergeMethod_AcceptsKnown(t *testing.T) {
 	for _, method := range []string{"merge", "squash", "rebase"} {
 		c := minimalValidConfig()
-		c.mergeMethod = method
+		c.MergeMethod = method
 		if err := validate(c); err != nil {
 			t.Errorf("validate() rejected valid MERGE_METHOD %q: %v", method, err)
 		}
@@ -2663,7 +2663,7 @@ func TestValidateMergeMethod_AcceptsKnown(t *testing.T) {
 
 func TestValidateSyncMethod_RejectsUnknown(t *testing.T) {
 	c := minimalValidConfig()
-	c.syncMethod = "fast-forward"
+	c.SyncMethod = "fast-forward"
 	if err := validate(c); err == nil {
 		t.Fatal("validate() should reject unrecognised SYNC_METHOD")
 	}
@@ -2672,7 +2672,7 @@ func TestValidateSyncMethod_RejectsUnknown(t *testing.T) {
 func TestValidateSyncMethod_AcceptsKnown(t *testing.T) {
 	for _, method := range []string{"rebase", "merge"} {
 		c := minimalValidConfig()
-		c.syncMethod = method
+		c.SyncMethod = method
 		if err := validate(c); err != nil {
 			t.Errorf("validate() rejected valid SYNC_METHOD %q: %v", method, err)
 		}
@@ -2681,7 +2681,7 @@ func TestValidateSyncMethod_AcceptsKnown(t *testing.T) {
 
 func TestValidateOverlapGate_RejectsUnknown(t *testing.T) {
 	c := minimalValidConfig()
-	c.overlapGate = "yolo"
+	c.OverlapGate = "yolo"
 	if err := validate(c); err == nil {
 		t.Fatal("validate() should reject unrecognised OVERLAP_GATE")
 	}
@@ -2690,7 +2690,7 @@ func TestValidateOverlapGate_RejectsUnknown(t *testing.T) {
 func TestValidateOverlapGate_AcceptsKnown(t *testing.T) {
 	for _, mode := range []string{"defer", "off"} {
 		c := minimalValidConfig()
-		c.overlapGate = mode
+		c.OverlapGate = mode
 		if err := validate(c); err != nil {
 			t.Errorf("validate() rejected valid OVERLAP_GATE %q: %v", mode, err)
 		}
@@ -2719,7 +2719,7 @@ func TestValidateDriver_AcceptsKnownAndEmpty(t *testing.T) {
 
 func TestValidateIssueTracker_RejectsUnknown(t *testing.T) {
 	c := minimalValidConfig()
-	c.issueTracker = "jira"
+	c.IssueTracker = "jira"
 	if err := validate(c); err == nil {
 		t.Fatal("validate() should reject unrecognised ISSUE_TRACKER")
 	}
@@ -2728,7 +2728,7 @@ func TestValidateIssueTracker_RejectsUnknown(t *testing.T) {
 func TestValidateIssueTracker_AcceptsKnown(t *testing.T) {
 	for _, tracker := range []string{"github", "local"} {
 		c := minimalValidConfig()
-		c.issueTracker = tracker
+		c.IssueTracker = tracker
 		if err := validate(c); err != nil {
 			t.Errorf("validate() rejected valid ISSUE_TRACKER %q: %v", tracker, err)
 		}
@@ -2752,9 +2752,9 @@ body
 	}
 
 	c := minimalValidConfig()
-	c.issueTracker = "local"
+	c.IssueTracker = "local"
 	c.setRowKnob("LOCAL_ISSUES_DIR", dir)
-	c.label = "ready-for-agent"
+	c.Label = "ready-for-agent"
 
 	it := newIssueTracker(c)
 	issues, err := it.ListIssues(forge.Dispatchable)
@@ -2768,7 +2768,7 @@ body
 
 func TestValidateCodeForge_RejectsUnknown(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "gitlab"
+	c.CodeForge = "gitlab"
 	if err := validate(c); err == nil {
 		t.Fatal("validate() should reject unrecognised CODE_FORGE")
 	}
@@ -2782,7 +2782,7 @@ func TestValidateCodeForge_RejectsUnknown(t *testing.T) {
 // (issue #2886).
 func TestValidateCodeForge_RejectsUnknown_ExactMessage(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "gitlab"
+	c.CodeForge = "gitlab"
 	err := validate(c)
 	if err == nil {
 		t.Fatal("validate() should reject unrecognised CODE_FORGE")
@@ -2799,7 +2799,7 @@ func TestValidateCodeForge_RejectsUnknown_ExactMessage(t *testing.T) {
 // its Check.Name identifies exactly which row failed (issue #2886).
 func TestValidateCodeForge_RejectsUnknown_RecoversRemedyErrorViaErrorsAs(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "gitlab"
+	c.CodeForge = "gitlab"
 	err := validate(c)
 
 	var remedyErr *doctor.RemedyError
@@ -2817,8 +2817,8 @@ func TestValidateCodeForge_RejectsUnknown_RecoversRemedyErrorViaErrorsAs(t *test
 // repeats-the-error-text suppression rule does not eat the remedy line.
 func TestValidate_RequiredKnobFailure_IncludesRemedy(t *testing.T) {
 	c := minimalValidConfig()
-	c.claudeOAuthToken = ""
-	c.anthropicAPIKey = ""
+	c.ClaudeOAuthToken = ""
+	c.AnthropicAPIKey = ""
 
 	err := validate(c)
 	if err == nil {
@@ -2836,7 +2836,7 @@ func TestValidate_RequiredKnobFailure_IncludesRemedy(t *testing.T) {
 // travels a path internal/launcherchecks' rows do not.
 func TestValidate_RegistryProxyRoutesFailure_IncludesRemedy(t *testing.T) {
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = filepath.Join(t.TempDir(), "absent-routes.toml")
+	c.RegistryProxyRoutesFile = filepath.Join(t.TempDir(), "absent-routes.toml")
 
 	err := validate(c)
 	if err == nil {
@@ -2852,7 +2852,7 @@ func TestValidate_RegistryProxyRoutesFailure_IncludesRemedy(t *testing.T) {
 // git Code Forge has nothing to clone from or push to without one.
 func TestValidateCodeForge_Git_RequiresRemoteURL(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "git"
+	c.CodeForge = "git"
 	c.setRowKnob("CODE_FORGE_REMOTE_URL", "")
 	err := validate(c)
 	if err == nil {
@@ -2865,13 +2865,13 @@ func TestValidateCodeForge_Git_RequiresRemoteURL(t *testing.T) {
 
 func TestValidateCodeForge_AcceptsKnown(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "github"
+	c.CodeForge = "github"
 	if err := validate(c); err != nil {
 		t.Errorf("validate() rejected CODE_FORGE=github: %v", err)
 	}
 
 	c = minimalValidConfig()
-	c.codeForge = "git"
+	c.CodeForge = "git"
 	c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/owner/repo.git")
 	if err := validate(c); err != nil {
 		t.Errorf("validate() rejected valid CODE_FORGE=git config: %v", err)
@@ -2900,7 +2900,7 @@ func TestValidateCodeForge_Local_AcceptsUnsetAccumulationRepoDir(t *testing.T) {
 func TestValidateCodeForge_Local_RequiresImmediateMergeMode(t *testing.T) {
 	for _, mode := range []string{"manual", "auto"} {
 		c := minimalValidLocalConfig()
-		c.mergeMode = mode
+		c.MergeMode = mode
 		if err := validate(c); err == nil {
 			t.Errorf("validate() should reject CODE_FORGE=local with MERGE_MODE=%s", mode)
 		}
@@ -2914,7 +2914,7 @@ func TestValidateCodeForge_Local_RequiresImmediateMergeMode(t *testing.T) {
 
 func TestValidateBoxForgeAndIssueAccess_RejectsUnknown(t *testing.T) {
 	c := minimalValidConfig()
-	c.boxForgeAndIssueAccess = "read-only-ish"
+	c.BoxForgeAndIssueAccess = "read-only-ish"
 	if err := validate(c); err == nil {
 		t.Fatal("validate() should reject unrecognised BOX_FORGE_AND_ISSUE_ACCESS")
 	}
@@ -2923,7 +2923,7 @@ func TestValidateBoxForgeAndIssueAccess_RejectsUnknown(t *testing.T) {
 func TestValidateBoxForgeAndIssueAccess_AcceptsKnown(t *testing.T) {
 	for _, mode := range []string{"read-write", "read-only"} {
 		c := minimalValidLocalConfig()
-		c.boxForgeAndIssueAccess = mode
+		c.BoxForgeAndIssueAccess = mode
 		if err := validate(c); err != nil {
 			t.Errorf("validate() rejected valid BOX_FORGE_AND_ISSUE_ACCESS %q: %v", mode, err)
 		}
@@ -2934,7 +2934,7 @@ func TestValidateBoxForgeAndIssueAccess_AcceptsKnown(t *testing.T) {
 // PRForge methods at all, instead of the github gh-exec adapter.
 func TestNewCodeForge_Git_ReturnsPushOnlyAdapter(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "git"
+	c.CodeForge = "git"
 	c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/owner/repo.git")
 
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
@@ -2950,7 +2950,7 @@ func TestNewCodeForge_Git_ReturnsPushOnlyAdapter(t *testing.T) {
 // seam.
 func TestNewCodeForge_Forgejo_IsPRForge(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "forgejo"
+	c.CodeForge = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	c.setRowKnob("FORGEJO_TOKEN", "tok")
 
@@ -2969,7 +2969,7 @@ func TestNewCodeForge_Forgejo_IsPRForge(t *testing.T) {
 // path needs (ADR 0033); neither the git nor the github adapter does.
 func TestNewCodeForge_Local_ReturnsBundleRelayAdapter(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "local"
+	c.CodeForge = "local"
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", filepath.Join(t.TempDir(), "repo.git"))
 
 	cf := newCodeForge(c, local.ResolveParent("1694", ""), nil)
@@ -2989,7 +2989,7 @@ func TestNewCodeForge_Local_ReturnsBundleRelayAdapter(t *testing.T) {
 // PRForge.
 func TestNewCodeForge_Github_ImplementsPRForge(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "github"
+	c.CodeForge = "github"
 
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
@@ -3004,8 +3004,8 @@ func TestNewCodeForge_Github_ImplementsPRForge(t *testing.T) {
 // looks for by type assertion.
 func TestNewCodeForge_GithubReadOnly_ImplementsBundleRelay(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "github"
-	c.boxForgeAndIssueAccess = "read-only"
+	c.CodeForge = "github"
+	c.BoxForgeAndIssueAccess = "read-only"
 
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
@@ -3022,8 +3022,8 @@ func TestNewCodeForge_GithubReadOnly_ImplementsBundleRelay(t *testing.T) {
 // (ready.go) would try to relay a bundle a read-write Box never wrote.
 func TestNewCodeForge_GithubReadWrite_DoesNotImplementBundleRelay(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "github"
-	c.boxForgeAndIssueAccess = "read-write"
+	c.CodeForge = "github"
+	c.BoxForgeAndIssueAccess = "read-write"
 
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
@@ -3039,8 +3039,8 @@ func TestNewCodeForge_GithubReadWrite_DoesNotImplementBundleRelay(t *testing.T) 
 // still called to prove it constructs for this config.
 func TestNewCodeForge_GithubReadOnly_SatisfiesCapabilityGate(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "github"
-	c.boxForgeAndIssueAccess = "read-only"
+	c.CodeForge = "github"
+	c.BoxForgeAndIssueAccess = "read-only"
 	_ = newCodeForge(c, local.SanitizedParent{}, nil)
 
 	if err := checkReadOnlyCapabilityGate(c); err != nil {
@@ -3054,10 +3054,10 @@ func TestNewCodeForge_GithubReadOnly_SatisfiesCapabilityGate(t *testing.T) {
 // second full-parity PRForge backend (issue #1964).
 func TestNewCodeForge_ForgejoReadOnly_SatisfiesBundleRelayAndDraftPRCreator(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "forgejo"
+	c.CodeForge = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	c.setRowKnob("FORGEJO_TOKEN", "tok")
-	c.boxForgeAndIssueAccess = "read-only"
+	c.BoxForgeAndIssueAccess = "read-only"
 
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
@@ -3075,10 +3075,10 @@ func TestNewCodeForge_ForgejoReadOnly_SatisfiesBundleRelayAndDraftPRCreator(t *t
 // otherwise try to relay a bundle a read-write Box never wrote.
 func TestNewCodeForge_ForgejoReadWrite_HostPRButNoBundleRelay(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "forgejo"
+	c.CodeForge = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	c.setRowKnob("FORGEJO_TOKEN", "tok")
-	c.boxForgeAndIssueAccess = "read-write"
+	c.BoxForgeAndIssueAccess = "read-write"
 
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
@@ -3110,8 +3110,8 @@ func TestResolveCapabilities_HostCanOpenPR(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.forge+" "+tc.access, func(t *testing.T) {
 			c := minimalValidConfig()
-			c.codeForge = tc.forge
-			c.boxForgeAndIssueAccess = tc.access
+			c.CodeForge = tc.forge
+			c.BoxForgeAndIssueAccess = tc.access
 			c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 			c.setRowKnob("FORGEJO_TOKEN", "tok")
 			c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/owner/repo.git")
@@ -3134,9 +3134,9 @@ func TestResolveCapabilities_HostCanOpenPR(t *testing.T) {
 // forgejo, which swap in a dedicated wrapper.
 func TestNewCodeForge_LocalReadOnly_ReturnsPlainAdapter(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "local"
+	c.CodeForge = "local"
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", filepath.Join(t.TempDir(), "repo.git"))
-	c.boxForgeAndIssueAccess = "read-only"
+	c.BoxForgeAndIssueAccess = "read-only"
 
 	cf := newCodeForge(c, local.ResolveParent("1694", ""), nil)
 
@@ -3156,9 +3156,9 @@ func TestNewCodeForge_LocalReadOnly_ReturnsPlainAdapter(t *testing.T) {
 // push-only adapter as read-write.
 func TestNewCodeForge_GitReadOnly_ReturnsPlainAdapter(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "git"
+	c.CodeForge = "git"
 	c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/owner/repo.git")
-	c.boxForgeAndIssueAccess = "read-only"
+	c.BoxForgeAndIssueAccess = "read-only"
 
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
@@ -3211,10 +3211,10 @@ func TestDispatchCompletionBanner_AllDelivered(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			c := minimalValidConfig()
-			c.codeForge = tc.codeForge
-			c.repoSlug = "owner/repo"
+			c.CodeForge = tc.codeForge
+			c.RepoSlug = "owner/repo"
 			c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/owner/repo.git")
-			c.mergeMode = "immediate"
+			c.MergeMode = "immediate"
 
 			if got := dispatchCompletionBanner(c, tc.outcomes); got != tc.want {
 				t.Errorf("dispatchCompletionBanner(%s) = %q, want %q", tc.codeForge, got, tc.want)
@@ -3238,8 +3238,8 @@ func TestDispatchCompletionBanner_AdviseOnlyKindsUseDescriptorWording(t *testing
 		for _, codeForge := range []string{"github", "forgejo", "git", "local"} {
 			t.Run(tc.kind.Name+"/"+codeForge, func(t *testing.T) {
 				c := applyDispatchKind(minimalValidConfig(), tc.kind)
-				c.codeForge = codeForge
-				c.repoSlug = "owner/repo"
+				c.CodeForge = codeForge
+				c.RepoSlug = "owner/repo"
 				outcomes := []settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: complete, Reason: tc.reason}}
 				if got := dispatchCompletionBanner(c, outcomes); got != tc.want {
 					t.Errorf("dispatchCompletionBanner = %q, want %q", got, tc.want)
@@ -3323,10 +3323,10 @@ func TestDispatchCompletionBanner_NamesDispatchesThatDidNotDeliver(t *testing.T)
 	for _, codeForge := range []string{"github", "git", "forgejo", "local"} {
 		t.Run(codeForge, func(t *testing.T) {
 			c := minimalValidConfig()
-			c.codeForge = codeForge
-			c.repoSlug = "owner/repo"
+			c.CodeForge = codeForge
+			c.RepoSlug = "owner/repo"
 			c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/owner/repo.git")
-			c.mergeMode = "immediate"
+			c.MergeMode = "immediate"
 
 			got := dispatchCompletionBanner(c, mixedOutcomes())
 
@@ -3475,8 +3475,8 @@ func TestDispatchConfig_ForwardsSignalCarrierAndNetworkMode(t *testing.T) {
 	cf := forge.NewFake()
 	it := forge.NewFake()
 	c := minimalValidConfig()
-	c.signalCarrier = "socket"
-	c.networkMode = "no-host-loopback"
+	c.SignalCarrier = "socket"
+	c.NetworkMode = "no-host-loopback"
 
 	cfg := dispatchConfig(c, it, testWired(it), cf, forge.Capabilities{})
 
@@ -3557,10 +3557,10 @@ func TestDispatchConfig_BoxForgeAndIssueAccess_ButlerForcedReadOnly(t *testing.T
 			cf := forge.NewFake()
 			it := forge.NewFake()
 			c := applyDispatchKind(minimalValidConfig(), tc.kind)
-			c.boxForgeAndIssueAccess = tc.knob
+			c.BoxForgeAndIssueAccess = tc.knob
 			caps := githubCaps
 			if tc.forgejo {
-				c.codeForge = "forgejo"
+				c.CodeForge = "forgejo"
 				c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 				c.setRowKnob("FORGEJO_TOKEN", "tok")
 				caps = forgejoCaps
@@ -3649,7 +3649,7 @@ func TestDispatchConfig_PRForge_WiresOpenPRForIssue(t *testing.T) {
 // zero-exit rate-limited retry proceeds unguarded rather than erroring.
 func TestDispatchConfig_NonPRForge_OpenPRForIssueAlwaysReportsNotFound(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "git"
+	c.CodeForge = "git"
 	c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://example.com/repo.git")
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 	if _, ok := cf.(forge.PRForge); ok {
@@ -3678,8 +3678,8 @@ func TestDispatchConfig_NonPRForge_OpenPRForIssueAlwaysReportsNotFound(t *testin
 // parent falls back to its own number.
 func TestDispatchConfig_Local_ResolveEnv_ForwardsIntegrationBranchAsBaseBranch(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "local"
-	c.baseBranch = "main"
+	c.CodeForge = "local"
+	c.BaseBranch = "main"
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "42"})
 	fc.SetBranchExists("integration/42", true)
@@ -3697,8 +3697,8 @@ func TestDispatchConfig_Local_ResolveEnv_ForwardsIntegrationBranchAsBaseBranch(t
 // onto a single Integration branch.
 func TestDispatchConfig_Local_ResolveEnv_UsesEachIssuesOwnParent(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "local"
-	c.baseBranch = "main"
+	c.CodeForge = "local"
+	c.BaseBranch = "main"
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "10", Parent: "Calc Engine"})
 	fc.SetIssue(forge.Issue{Number: "11", Parent: "Render Pipeline"})
@@ -3723,8 +3723,8 @@ func TestDispatchConfig_Local_ResolveEnv_UsesEachIssuesOwnParent(t *testing.T) {
 // falls back to the operator's base branch until BranchExists confirms it.
 func TestDispatchConfig_Local_ResolveEnv_FallsBackToBaseBranchBeforeFirstLand(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "local"
-	c.baseBranch = "main"
+	c.CodeForge = "local"
+	c.BaseBranch = "main"
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "42"})
 	fc.SetBranchExists("integration/42", false)
@@ -3744,8 +3744,8 @@ func TestDispatchConfig_Local_ResolveEnv_FallsBackToBaseBranchBeforeFirstLand(t 
 // says so loudly on stdout rather than silently seeding bare base.
 func TestDispatchConfig_Local_ResolveEnv_LoudlyFallsBackWhenBlockedSeamMissesIntegrationBranch(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "local"
-	c.baseBranch = "main"
+	c.CodeForge = "local"
+	c.BaseBranch = "main"
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "42"})
 	fc.SetBranchExists("integration/42", false)
@@ -3772,8 +3772,8 @@ func TestDispatchConfig_Local_ResolveEnv_LoudlyFallsBackWhenBlockedSeamMissesInt
 // branch, since there is nothing wrong to report.
 func TestDispatchConfig_Local_ResolveEnv_SilentlyFallsBackWhenBlockerFreeSeamMissesIntegrationBranch(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "local"
-	c.baseBranch = "main"
+	c.CodeForge = "local"
+	c.BaseBranch = "main"
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "42"})
 	fc.SetBranchExists("integration/42", false)
@@ -3801,8 +3801,8 @@ func TestDispatchConfig_Local_ResolveEnv_SilentlyFallsBackWhenBlockerFreeSeamMis
 // blocker-free one.
 func TestDispatchConfig_Local_ResolveEnv_LoudlyFallsBackWhenBlockerLookupErrors(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "local"
-	c.baseBranch = "main"
+	c.CodeForge = "local"
+	c.BaseBranch = "main"
 	fc := forge.NewFake()
 	// Deliberately do NOT SetIssue("42"): DepsOf then returns an
 	// "issue 42 not found" error, while ResolveParent falls back to the
@@ -3830,7 +3830,7 @@ func TestDispatchConfig_Local_ResolveEnv_LoudlyFallsBackWhenBlockerLookupErrors(
 // cf.BranchExists, unlike the CODE_FORGE=local cases above.
 func TestDispatchConfig_NonLocal_ResolveEnv_PassesThroughUnchanged(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "github"
+	c.CodeForge = "github"
 	cf := forge.NewFake()
 
 	t.Setenv("BASE_BRANCH", "release")
@@ -3878,8 +3878,8 @@ func TestDispatchConfig_ResolveEnv_ExplicitGitIdentitySkipsHostGitConfig(t *test
 	loadedDoc = &inputdoc.Document{Settings: map[string]string{"GIT_USER_EMAIL": "doc@example.com"}}
 	snap := loadConfig()
 	c := minimalValidConfig()
-	c.codeForge = "github"
-	c.gitUserName, c.gitUserEmail = snap.gitUserName, snap.gitUserEmail
+	c.CodeForge = "github"
+	c.GitUserName, c.GitUserEmail = snap.GitUserName, snap.GitUserEmail
 	cf := forge.NewFake()
 	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf, forge.Capabilities{})
 
@@ -3952,8 +3952,8 @@ func snapshotGitIdentityConfig(t *testing.T, vals map[string]string) (config, *[
 	snap := loadConfig()
 	*calls = nil
 	c := minimalValidConfig()
-	c.codeForge = "github"
-	c.gitUserName, c.gitUserEmail = snap.gitUserName, snap.gitUserEmail
+	c.CodeForge = "github"
+	c.GitUserName, c.GitUserEmail = snap.GitUserName, snap.GitUserEmail
 	return c, calls
 }
 
@@ -3962,7 +3962,7 @@ func snapshotGitIdentityConfig(t *testing.T, vals map[string]string) (config, *[
 // ambient GH_TOKEN stays untouched for its own host-side forge calls.
 func TestDispatchConfig_ResolveEnv_BoxGHTokenOverridesGHToken(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "github"
+	c.CodeForge = "github"
 	t.Setenv("GH_TOKEN", "launcher-token")
 	t.Setenv("BOX_GH_TOKEN", "box-token")
 	cf := forge.NewFake()
@@ -3981,7 +3981,7 @@ func TestDispatchConfig_ResolveEnv_BoxGHTokenOverridesGHToken(t *testing.T) {
 // launcher's own ambient GH_TOKEN unchanged.
 func TestDispatchConfig_ResolveEnv_GHTokenPassthroughWhenBoxGHTokenUnset(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "github"
+	c.CodeForge = "github"
 	t.Setenv("GH_TOKEN", "launcher-token")
 	cf := forge.NewFake()
 
@@ -3997,7 +3997,7 @@ func TestDispatchConfig_ResolveEnv_GHTokenPassthroughWhenBoxGHTokenUnset(t *test
 // that withholds a forgejo write credential from a read-only Box.
 func TestDispatchConfig_ResolveEnv_BoxForgejoTokenOverridesForgejoToken(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "forgejo"
+	c.CodeForge = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("FORGEJO_TOKEN", "launcher-fj-tok")
@@ -4015,7 +4015,7 @@ func TestDispatchConfig_ResolveEnv_BoxForgejoTokenOverridesForgejoToken(t *testi
 // the launcher's own ambient FORGEJO_TOKEN unchanged.
 func TestDispatchConfig_ResolveEnv_BoxForgejoTokenUnsetFallsThrough(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "forgejo"
+	c.CodeForge = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("FORGEJO_TOKEN", "launcher-fj-tok")
@@ -4033,7 +4033,7 @@ func TestDispatchConfig_ResolveEnv_BoxForgejoTokenUnsetFallsThrough(t *testing.T
 // set in the environment must not leak into GH_TOKEN or any other name.
 func TestDispatchConfig_ResolveEnv_BoxForgejoTokenDoesNotAffectOtherNames(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "forgejo"
+	c.CodeForge = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("GH_TOKEN", "launcher-gh-tok")
@@ -4053,7 +4053,7 @@ func TestDispatchConfig_ResolveEnv_BoxForgejoTokenDoesNotAffectOtherNames(t *tes
 // tracker-only.
 func TestDispatchConfig_ResolveEnv_JiraTokenFallsThroughUntouched(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "github"
+	c.CodeForge = "github"
 	t.Setenv("JIRA_TOKEN", "launcher-jira-tok")
 	cf := forge.NewFake()
 
@@ -4069,8 +4069,8 @@ func TestDispatchConfig_ResolveEnv_JiraTokenFallsThroughUntouched(t *testing.T) 
 // local-only Integration-branch substitution.
 func TestDispatchConfig_Local_ResolveEnv_BoxGHTokenOverridesGHToken(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "local"
-	c.baseBranch = "main"
+	c.CodeForge = "local"
+	c.BaseBranch = "main"
 	t.Setenv("GH_TOKEN", "launcher-token")
 	t.Setenv("BOX_GH_TOKEN", "box-token")
 	fc := forge.NewFake()
@@ -4090,8 +4090,8 @@ func TestDispatchConfig_Local_ResolveEnv_BoxGHTokenOverridesGHToken(t *testing.T
 // return instead of exists=false.
 func TestDispatchConfig_Local_ResolveEnv_FallsBackToBaseBranchOnBranchExistsError(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "local"
-	c.baseBranch = "main"
+	c.CodeForge = "local"
+	c.BaseBranch = "main"
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "42"})
 	fc.BranchExistsErr = errors.New("repo path unreadable")
@@ -4120,14 +4120,14 @@ func createIntegrationBranchForTest(t *testing.T, bare, fromBranch, newBranch st
 	return sha
 }
 
-// settleConfig's ReadOnly field mirrors c.boxForgeAndIssueAccess (issue
+// settleConfig's ReadOnly field mirrors c.BoxForgeAndIssueAccess (issue
 // #1917): "read-only" threads true and the "read-write" default threads false,
 // so settle.Settle's blocked-note relay gate sees the mode directly.
 func TestSettleConfig_ReadOnlyThreadsFromBoxForgeAndIssueAccess(t *testing.T) {
 	fc := forge.NewFake()
 
 	c := minimalValidConfig()
-	c.boxForgeAndIssueAccess = "read-only"
+	c.BoxForgeAndIssueAccess = "read-only"
 	sc := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc, forge.Capabilities{})
 	if !sc.ReadOnly {
 		t.Error("settleConfig(read-only).ReadOnly = false, want true")
@@ -4149,18 +4149,18 @@ func TestSettleConfig_ButlerKindForcesUnclaimed(t *testing.T) {
 	fc := forge.NewFake()
 
 	c := minimalValidConfig()
-	c.maxFixAttempts = 3
+	c.MaxFixAttempts = 3
 	sc := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc, forge.Capabilities{})
 	if sc.MaxFixAttempts != 3 || sc.Unclaimed {
 		t.Errorf("settleConfig(work kind) = {MaxFixAttempts: %d, Unclaimed: %v}, want {3, false}", sc.MaxFixAttempts, sc.Unclaimed)
 	}
 
 	cb := minimalValidConfig()
-	cb.maxFixAttempts = 3
-	cb.label = "ready-for-agent"
-	cb.inProgressLabel = "agent-in-progress"
-	cb.completeLabel = "agent-complete"
-	cb.failedLabel = "agent-failed"
+	cb.MaxFixAttempts = 3
+	cb.Label = "ready-for-agent"
+	cb.InProgressLabel = "agent-in-progress"
+	cb.CompleteLabel = "agent-complete"
+	cb.FailedLabel = "agent-failed"
 	cb = applyDispatchKind(cb, dispatchkind.Butler)
 	scb := settleConfig(cb, localloop.Wire(localloopConfig(cb), fc), fc, forge.Capabilities{})
 	if !scb.Unclaimed {
@@ -4184,13 +4184,13 @@ func TestSettleConfig_ButlerKindForcesUnclaimed(t *testing.T) {
 // hand-built settle.Config (issue #4076).
 func TestButlerPatchGate_GreenImmediateMergeCompletesIssue(t *testing.T) {
 	c := minimalValidConfig()
-	c.mergeMode = "immediate"
-	c.maxRebaseAttempts = 0
-	c.mergePollTimeout = 100
-	c.label = "ready-for-agent"
-	c.inProgressLabel = "agent-in-progress"
-	c.completeLabel = "agent-complete"
-	c.failedLabel = "agent-failed"
+	c.MergeMode = "immediate"
+	c.MaxRebaseAttempts = 0
+	c.MergePollTimeout = 100
+	c.Label = "ready-for-agent"
+	c.InProgressLabel = "agent-in-progress"
+	c.CompleteLabel = "agent-complete"
+	c.FailedLabel = "agent-failed"
 	c = applyDispatchKind(c, dispatchkind.Butler)
 
 	fc := forge.NewFake(dispatchLabels(c))
@@ -4223,28 +4223,28 @@ func TestButlerPatchGate_GreenImmediateMergeCompletesIssue(t *testing.T) {
 	}
 }
 
-// settleConfig's BaseBranch mirrors c.baseBranch (issue #1919): settle's
+// settleConfig's BaseBranch mirrors c.BaseBranch (issue #1919): settle's
 // hostMediateDraftPR needs the target branch for a read-only Box's
 // host-mediated draft PR, the same base an in-box `gh pr create` would pass.
 func TestSettleConfig_BaseBranchThreadsFromConfig(t *testing.T) {
 	fc := forge.NewFake()
 
 	c := minimalValidConfig()
-	c.baseBranch = "main"
+	c.BaseBranch = "main"
 	sc := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc, forge.Capabilities{})
 	if sc.BaseBranch != "main" {
 		t.Errorf("settleConfig(baseBranch=main).BaseBranch = %q, want %q", sc.BaseBranch, "main")
 	}
 }
 
-// wavesConfig threads c.transientRetryMax and c.transientBackoffSecs into
+// wavesConfig threads c.TransientRetryMax and c.TransientBackoffSecs into
 // waves.Config's Policy field (issues #2866, #2928): the same launcher-wide
 // knobs dispatch's exit-retry path and settleConfig thread, now reaching
 // RunContinuous's rate-limited re-discover retry loop too.
 func TestWavesConfig_WiresTransientRetryKnobs(t *testing.T) {
 	c := minimalValidConfig()
-	c.transientRetryMax = 5
-	c.transientBackoffSecs = 10
+	c.TransientRetryMax = 5
+	c.TransientBackoffSecs = 10
 
 	wc := wavesConfig(c)
 	if wc.Policy.Max != 5 {
@@ -4260,9 +4260,9 @@ func TestWavesConfig_WiresTransientRetryKnobs(t *testing.T) {
 // passing raw seconds through as nanoseconds (issue #2928).
 func TestRetryPolicy_ConvertsSecondsToDuration(t *testing.T) {
 	c := minimalValidConfig()
-	c.transientRetryMax = 7
-	c.transientBackoffSecs = 11
-	c.holdJitterSecs = 13
+	c.TransientRetryMax = 7
+	c.TransientBackoffSecs = 11
+	c.HoldJitterSecs = 13
 
 	p := retryPolicy(c)
 	if p.Max != 7 {
@@ -4283,7 +4283,7 @@ func TestRetryPolicy_ConvertsSecondsToDuration(t *testing.T) {
 func TestNewSettle_ResearchReadOnly_RelaysVerdictComment(t *testing.T) {
 	c := minimalValidConfig()
 	c.dispatchKind = dispatchkind.Research
-	c.boxForgeAndIssueAccess = "read-only"
+	c.BoxForgeAndIssueAccess = "read-only"
 
 	fc := forge.NewFake(forge.ResearchDispatchLabels())
 	fc.VerdictLabels = forge.ResearchVerdictLabels()
@@ -4343,7 +4343,7 @@ func TestNewSettle_Research_FilesFindingWithResearchLabel(t *testing.T) {
 		t.Run(access, func(t *testing.T) {
 			c := minimalValidConfig()
 			c.dispatchKind = dispatchkind.Research
-			c.boxForgeAndIssueAccess = access
+			c.BoxForgeAndIssueAccess = access
 
 			fc := forge.NewFake(forge.ResearchDispatchLabels())
 			fc.VerdictLabels = forge.ResearchVerdictLabels()
@@ -4380,7 +4380,7 @@ func TestNewSettle_ResearchJiraFilerOff_MissingCommentFails(t *testing.T) {
 	t.Setenv("FILER_MODEL", "")
 	c := minimalValidConfig()
 	c.dispatchKind = dispatchkind.Research
-	c.issueTracker = "jira"
+	c.IssueTracker = "jira"
 
 	fc := forge.NewFake(forge.ResearchDispatchLabels())
 	fc.VerdictLabels = forge.ResearchVerdictLabels()
@@ -4415,7 +4415,7 @@ func TestSettleConfig_Local_CodeForgeForIssueResolvesEachIssuesOwnParent(t *test
 	repo := forgetest.NewGitRepoFixture(t, "main")
 	c := minimalValidLocalConfig()
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repo.Bare)
-	c.baseBranch = "main"
+	c.BaseBranch = "main"
 
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "10", Parent: "Calc Engine"})
@@ -4484,13 +4484,13 @@ func TestSettleConfig_CapabilitiesThreadsFromReadContext(t *testing.T) {
 // minimalValidLocalConfig wires minimalValidConfig() for a valid
 // CODE_FORGE=local run, so local-specific tests override only the field under
 // test. validate() derives its capability signals fresh via
-// resolveCapabilitySignals (issue #2527 review), so setting c.codeForge and
-// c.issueTracker to "local" is enough.
+// resolveCapabilitySignals (issue #2527 review), so setting c.CodeForge and
+// c.IssueTracker to "local" is enough.
 func minimalValidLocalConfig() config {
 	c := minimalValidConfig()
-	c.codeForge = "local"
+	c.CodeForge = "local"
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", ".spindrift/accum.git")
-	c.mergeMode = "immediate"
+	c.MergeMode = "immediate"
 	return c
 }
 
@@ -4499,21 +4499,21 @@ func minimalValidLocalConfig() config {
 func minimalValidConfig() config {
 	return config{
 		runtime: "echo", // echo is always on PATH
-		schemaConfig: schemaConfig{
-			repoSlug:               "owner/repo",
-			gitUserName:            "bot",
-			gitUserEmail:           "bot@example.com",
-			ghToken:                "ghp_test",
-			claudeOAuthToken:       "tok",
-			mergeMode:              "manual",
-			mergeMethod:            "rebase",
-			syncMethod:             "rebase",
-			issueTracker:           "github",
-			codeForge:              "github",
-			overlapGate:            "defer",
-			boxForgeAndIssueAccess: "read-write",
-			networkMode:            "open",
-			signalCarrier:          "log",
+		Knobs: inputdoc.Knobs{
+			RepoSlug:               "owner/repo",
+			GitUserName:            "bot",
+			GitUserEmail:           "bot@example.com",
+			GhToken:                "ghp_test",
+			ClaudeOAuthToken:       "tok",
+			MergeMode:              "manual",
+			MergeMethod:            "rebase",
+			SyncMethod:             "rebase",
+			IssueTracker:           "github",
+			CodeForge:              "github",
+			OverlapGate:            "defer",
+			BoxForgeAndIssueAccess: "read-write",
+			NetworkMode:            "open",
+			SignalCarrier:          "log",
 		},
 	}
 }
@@ -4531,9 +4531,9 @@ func TestRunDoctor_WiresDoctorReportChecksIntoOutput(t *testing.T) {
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.gitUserName = "" // fails exactly doctorExtraChecks' "git-user-name" row
+	c.GitUserName = "" // fails exactly doctorExtraChecks' "git-user-name" row
 
 	var buf bytes.Buffer
 	_, report := doctorCheckSets(c)
@@ -4559,7 +4559,7 @@ func TestRunDoctor_WiresBwrapCapabilityChecksIntoOutput(t *testing.T) {
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 	c.runnerKind = runner.KindBwrap
 
@@ -4683,7 +4683,7 @@ func TestDoctor_AuthFailure_Jira(t *testing.T) {
 	f.ProbeErr = forge.ErrAuthFailure
 
 	var buf bytes.Buffer
-	c := config{schemaConfig: schemaConfig{issueTracker: "jira"}}
+	c := config{Knobs: inputdoc.Knobs{IssueTracker: "jira"}}
 	_, report := doctorCheckSets(c)
 	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err == nil {
@@ -4718,7 +4718,7 @@ func TestDoctor_AuthFailure_Forgejo(t *testing.T) {
 	f.ProbeErr = forge.ErrAuthFailure
 
 	var buf bytes.Buffer
-	c := config{schemaConfig: schemaConfig{issueTracker: "forgejo"}}
+	c := config{Knobs: inputdoc.Knobs{IssueTracker: "forgejo"}}
 	_, report := doctorCheckSets(c)
 	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err == nil {
@@ -4739,7 +4739,7 @@ func TestDoctor_RepoNotFound_Forgejo(t *testing.T) {
 	f.ProbeErr = forge.ErrRepoNotFound
 
 	var buf bytes.Buffer
-	c := config{schemaConfig: schemaConfig{issueTracker: "forgejo"}}
+	c := config{Knobs: inputdoc.Knobs{IssueTracker: "forgejo"}}
 	_, report := doctorCheckSets(c)
 	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err == nil {
@@ -4762,7 +4762,7 @@ func TestDoctor_AuthFailure_Local(t *testing.T) {
 	f.ProbeErr = forge.ErrAuthFailure
 
 	var buf bytes.Buffer
-	c := config{schemaConfig: schemaConfig{issueTracker: "local"}}
+	c := config{Knobs: inputdoc.Knobs{IssueTracker: "local"}}
 	_, report := doctorCheckSets(c)
 	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err == nil {
@@ -4775,20 +4775,20 @@ func TestDoctor_AuthFailure_Local(t *testing.T) {
 
 func defaultLabelConfig() config {
 	return config{
-		schemaConfig: schemaConfig{
-			label:           "ready-for-agent",
-			inProgressLabel: "agent-in-progress",
-			failedLabel:     "agent-failed",
-			completeLabel:   "agent-complete",
-			codeForge:       "github",
-			issueTracker:    "github",
-			baseBranch:      "main",
+		Knobs: inputdoc.Knobs{
+			Label:           "ready-for-agent",
+			InProgressLabel: "agent-in-progress",
+			FailedLabel:     "agent-failed",
+			CompleteLabel:   "agent-complete",
+			CodeForge:       "github",
+			IssueTracker:    "github",
+			BaseBranch:      "main",
 			// mergeMode "manual" keeps the branch-protection row (issue
 			// #2570) Advisory rather than Required: these tests exercise
 			// label, runtime and token-gate behavior, and their forge.Fake
 			// instances rarely script SetBranchProtected, so "main" would
 			// otherwise report a spurious Required failure.
-			mergeMode: "manual",
+			MergeMode: "manual",
 		},
 		// "echo" is always on PATH, so the doctor runtime row prints "ok"
 		// without a real container runtime and unrelated tests do not trip it.
@@ -5275,25 +5275,25 @@ func TestDoctor_TTY_Confirm_RenamedLifecycleLabel_UsesCorrectMeta(t *testing.T) 
 	}{
 		{
 			role:      "Dispatchable",
-			renameCfg: func(cfg *config, renamed string) { cfg.label = renamed },
+			renameCfg: func(cfg *config, renamed string) { cfg.Label = renamed },
 			otherLive: []string{"agent-in-progress", "agent-failed", "agent-complete"},
 			wantMeta:  doctor.MetaDispatchable,
 		},
 		{
 			role:      "InProgress",
-			renameCfg: func(cfg *config, renamed string) { cfg.inProgressLabel = renamed },
+			renameCfg: func(cfg *config, renamed string) { cfg.InProgressLabel = renamed },
 			otherLive: []string{"ready-for-agent", "agent-failed", "agent-complete"},
 			wantMeta:  doctor.MetaInProgress,
 		},
 		{
 			role:      "Failed",
-			renameCfg: func(cfg *config, renamed string) { cfg.failedLabel = renamed },
+			renameCfg: func(cfg *config, renamed string) { cfg.FailedLabel = renamed },
 			otherLive: []string{"ready-for-agent", "agent-in-progress", "agent-complete"},
 			wantMeta:  doctor.MetaFailed,
 		},
 		{
 			role:      "Complete",
-			renameCfg: func(cfg *config, renamed string) { cfg.completeLabel = renamed },
+			renameCfg: func(cfg *config, renamed string) { cfg.CompleteLabel = renamed },
 			otherLive: []string{"ready-for-agent", "agent-in-progress", "agent-failed"},
 			wantMeta:  doctor.MetaComplete,
 		},
@@ -6454,8 +6454,8 @@ func TestDoctor_ReadOnlyTokenGate_ReadWriteReportsNoOp(t *testing.T) {
 	f.ProbeRepo = "owner/repo"
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 	c := defaultLabelConfig()
-	c.boxForgeAndIssueAccess = "read-write"
-	c.issueTracker = "forgejo"
+	c.BoxForgeAndIssueAccess = "read-write"
+	c.IssueTracker = "forgejo"
 
 	var buf bytes.Buffer
 	_, report := doctorCheckSets(c)
@@ -6481,8 +6481,8 @@ func TestDoctor_ReadOnlyTokenGate_MissingBoxTokenFails(t *testing.T) {
 	f.ProbeRepo = "owner/repo"
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 	c := defaultLabelConfig()
-	c.boxForgeAndIssueAccess = "read-only"
-	c.ghToken = "launcher-token"
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.GhToken = "launcher-token"
 	t.Setenv("BOX_GH_TOKEN", "")
 
 	var buf bytes.Buffer
@@ -6502,9 +6502,9 @@ func TestDoctor_ReadOnlyTokenGate_NonIntrospectableTokenDoesNotClaimVerified(t *
 	f.ProbeRepo = "owner/repo"
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 	c := defaultLabelConfig()
-	c.boxForgeAndIssueAccess = "read-only"
-	c.ghToken = "launcher-token"
-	c.repoSlug = "owner/repo"
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.GhToken = "launcher-token"
+	c.RepoSlug = "owner/repo"
 	t.Setenv("BOX_GH_TOKEN", "github_pat_boxtoken")
 
 	var buf bytes.Buffer
@@ -6530,9 +6530,9 @@ func TestDoctor_ReadOnlyForgejoTokenGate_MissingBoxTokenFails(t *testing.T) {
 	f.ProbeRepo = "owner/repo"
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 	c := defaultLabelConfig()
-	c.codeForge = "forgejo"
-	c.issueTracker = "forgejo"
-	c.boxForgeAndIssueAccess = "read-only"
+	c.CodeForge = "forgejo"
+	c.IssueTracker = "forgejo"
+	c.BoxForgeAndIssueAccess = "read-only"
 	c.setRowKnob("FORGEJO_TOKEN", "launcher-token")
 	t.Setenv("BOX_FORGEJO_TOKEN", "")
 
@@ -6553,9 +6553,9 @@ func TestDoctor_ReadOnlyForgejoTokenGate_DistinctTokenWarns(t *testing.T) {
 	f.ProbeRepo = "owner/repo"
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 	c := defaultLabelConfig()
-	c.codeForge = "forgejo"
-	c.issueTracker = "forgejo"
-	c.boxForgeAndIssueAccess = "read-only"
+	c.CodeForge = "forgejo"
+	c.IssueTracker = "forgejo"
+	c.BoxForgeAndIssueAccess = "read-only"
 	c.setRowKnob("FORGEJO_TOKEN", "launcher-token")
 	t.Setenv("BOX_FORGEJO_TOKEN", "box-token")
 
@@ -6586,11 +6586,11 @@ func TestDoctor_ReadOnlyTokenGates_BothBackendsActiveOnDifferentAxes(t *testing.
 	cf.ProbeRepo = "owner/repo"
 
 	c := defaultLabelConfig()
-	c.codeForge = "github"
-	c.issueTracker = "forgejo"
-	c.boxForgeAndIssueAccess = "read-only"
-	c.ghToken = "launcher-token"
-	c.repoSlug = "owner/repo"
+	c.CodeForge = "github"
+	c.IssueTracker = "forgejo"
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.GhToken = "launcher-token"
+	c.RepoSlug = "owner/repo"
 	c.setRowKnob("FORGEJO_TOKEN", "forgejo-launcher-token")
 	t.Setenv("BOX_GH_TOKEN", "box-gh-token")
 	t.Setenv("BOX_FORGEJO_TOKEN", "box-forgejo-token")
@@ -6743,8 +6743,8 @@ func TestMainRun_ResearchDispatchParity_SameBootstrapErrorSameExitCode(t *testin
 // failure, would award exitcode.ConfigInvalid to dispatch, recover and console.
 func TestBootstrapExitCode_ReadOnlyTokenGateMisconfigured_ExitsOne(t *testing.T) {
 	c := minimalValidConfig()
-	c.boxForgeAndIssueAccess = "read-only"
-	c.repoSlug = "owner/repo"
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.RepoSlug = "owner/repo"
 	t.Setenv("BOX_GH_TOKEN", "")
 
 	introspect := func(token, repoSlug string) (backendkit.TokenIntrospection, error) {
@@ -6768,10 +6768,10 @@ func TestBootstrapExitCode_ReadOnlyTokenGateMisconfigured_ExitsOne(t *testing.T)
 // rather than exitcode.ConfigInvalid.
 func TestBootstrapExitCode_ReadOnlyForgejoTokenGateMisconfigured_ExitsOne(t *testing.T) {
 	c := minimalValidConfig()
-	c.boxForgeAndIssueAccess = "read-only"
-	c.codeForge = "forgejo"
-	c.issueTracker = "forgejo"
-	c.repoSlug = "owner/repo"
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.CodeForge = "forgejo"
+	c.IssueTracker = "forgejo"
+	c.RepoSlug = "owner/repo"
 	t.Setenv("BOX_FORGEJO_TOKEN", "")
 
 	var buf bytes.Buffer
@@ -6851,8 +6851,8 @@ func unsetEnv(t *testing.T, key string) {
 func TestLoadConfig_SignalCarrierDefaultsToSocket(t *testing.T) {
 	unsetEnv(t, "BOX_SIGNAL_CARRIER")
 	c := loadConfig()
-	if c.signalCarrier != "socket" {
-		t.Fatalf("loadConfig().signalCarrier with knob unset = %q, want %q", c.signalCarrier, "socket")
+	if c.SignalCarrier != "socket" {
+		t.Fatalf("loadConfig().signalCarrier with knob unset = %q, want %q", c.SignalCarrier, "socket")
 	}
 	found := false
 	for _, row := range choiceKnobRegistry {
@@ -6902,7 +6902,7 @@ func TestDispatchConfig_SignalCarrierBoxEnv(t *testing.T) {
 
 func TestLoadConfig_SignalCarrierExplicitLogKept(t *testing.T) {
 	t.Setenv("BOX_SIGNAL_CARRIER", "log")
-	if got := loadConfig().signalCarrier; got != "log" {
+	if got := loadConfig().SignalCarrier; got != "log" {
 		t.Errorf("loadConfig().signalCarrier with BOX_SIGNAL_CARRIER=log = %q, want %q", got, "log")
 	}
 }
@@ -6945,12 +6945,12 @@ func TestGetenvSchema_EmptyStringKnobStillFallsBack(t *testing.T) {
 // earlier work halt must not read as settled (issue #4888).
 func TestSettledLabels_ByKind(t *testing.T) {
 	work := minimalValidConfig()
-	work.completeLabel, work.failedLabel = "agent-complete", "agent-failed"
-	if got, want := settledLabels(work), []string{work.completeLabel, work.failedLabel, "agent-ambiguous-spec"}; !slices.Equal(got, want) {
+	work.CompleteLabel, work.FailedLabel = "agent-complete", "agent-failed"
+	if got, want := settledLabels(work), []string{work.CompleteLabel, work.FailedLabel, "agent-ambiguous-spec"}; !slices.Equal(got, want) {
 		t.Errorf("work settledLabels = %v, want %v", got, want)
 	}
 	research := applyDispatchKind(minimalValidConfig(), dispatchkind.Research)
-	wantResearch := []string{research.failedLabel, "agent-research-recommend", "agent-research-reject", "agent-research-unclear"}
+	wantResearch := []string{research.FailedLabel, "agent-research-recommend", "agent-research-reject", "agent-research-unclear"}
 	if got := settledLabels(research); !slices.Equal(got, wantResearch) {
 		t.Errorf("research settledLabels = %v, want %v", got, wantResearch)
 	}
@@ -6958,8 +6958,8 @@ func TestSettledLabels_ByKind(t *testing.T) {
 	// Configured RESEARCH_VERDICTS labels flow through, and a verdict label
 	// colliding with the failed label is not listed twice.
 	custom := research
-	custom.researchVerdicts = `[{"verdict":"recommend","label":"r-yes"},{"verdict":"reject","label":"agent-research-failed"}]`
-	wantCustom := []string{custom.failedLabel, "r-yes"}
+	custom.ResearchVerdicts = `[{"verdict":"recommend","label":"r-yes"},{"verdict":"reject","label":"agent-research-failed"}]`
+	wantCustom := []string{custom.FailedLabel, "r-yes"}
 	if got := settledLabels(custom); !slices.Equal(got, wantCustom) {
 		t.Errorf("custom RESEARCH_VERDICTS settledLabels = %v, want %v", got, wantCustom)
 	}

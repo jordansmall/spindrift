@@ -15,7 +15,7 @@ import (
 // error through the adapted zero-arg closure.
 func TestLauncherCheckDeps_BackendBindsValidatorToConfig(t *testing.T) {
 	c := minimalValidConfig()
-	c.issueTracker = "forgejo"
+	c.IssueTracker = "forgejo"
 
 	deps := launcherCheckDeps(c)
 	b, ok := deps.Backend("forgejo")

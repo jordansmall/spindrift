@@ -45,7 +45,7 @@ func recoverQueueOne(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 	}
 	failed, err := it.ListIssues(forge.Failed)
 	if err != nil {
-		return fmt.Errorf("recover: list %s issues: %w", c.failedLabel, err)
+		return fmt.Errorf("recover: list %s issues: %w", c.FailedLabel, err)
 	}
 	for _, fi := range failed {
 		if waves.SignalledStopAlready(stopCh, abortCh) {
@@ -57,7 +57,7 @@ func recoverQueueOne(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 		}
 		return err
 	}
-	fmt.Fprintf(stdout, "recover: no %s issue has a landable bundle and a genuine ready self-report\n", c.failedLabel)
+	fmt.Fprintf(stdout, "recover: no %s issue has a landable bundle and a genuine ready self-report\n", c.FailedLabel)
 	return errQueueEmpty
 }
 
@@ -82,7 +82,7 @@ func finishQueueSettle(c config, it forge.IssueTracker, pwd, num string, rec rec
 // (nil): an issue was tried, so the run exits 0, unless the record cannot be
 // saved or the park itself fails (the issue would sit on agent-in-progress,
 // which queue mode never revisits); either or both are returned, after the park
-// is attempted. Only the attempt that reaches c.maxRecoverAttempts, or fails for
+// is attempted. Only the attempt that reaches c.MaxRecoverAttempts, or fails for
 // a Workflows-permission refusal a retry cannot fix (issue #5411), comments,
 // once, saying auto-recover gave up (issue #4655); earlier failures stay
 // silent and are retried after a backoff. The comment names the last attempt's
@@ -102,7 +102,7 @@ func parkQueueFailure(c config, it forge.IssueTracker, num string, rec recoverre
 	if settleErr != nil {
 		rec.WorkflowPermissionDenied = workflowDenied
 	}
-	if rec.Count >= c.maxRecoverAttempts || workflowDenied {
+	if rec.Count >= c.MaxRecoverAttempts || workflowDenied {
 		giveUpRecover(&rec, it, num, stderr)
 	}
 	// Without the record the next pass would retry with no backoff and no bound.
@@ -110,7 +110,7 @@ func parkQueueFailure(c config, it forge.IssueTracker, num string, rec recoverre
 	var parkErr error
 	v, note, err := settle.Transition(it, num, forge.InProgress, settle.ForReason(dispatchrecord.ReasonRelayFailed), note)
 	if err != nil {
-		parkErr = fmt.Errorf("recover: park #%s on %s: %w", num, c.failedLabel, err)
+		parkErr = fmt.Errorf("recover: park #%s on %s: %w", num, c.FailedLabel, err)
 	}
 	// Emitted here, not through the settler's latch: a landing that returns
 	// false never reaches a terminal transition there, so nothing else reports

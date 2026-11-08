@@ -66,7 +66,7 @@ func TestWriteGithubOutput_NoopWhenUnset(t *testing.T) {
 func TestCmdRecover_RunsCleanupOnEveryExit(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	// No PR is registered for the branch, so recoverByNumber returns an error.
 	dir := tempLogDir(t)
 	called := false
@@ -103,7 +103,7 @@ func TestCmdRecover_WritesReasonToGithubOutput(t *testing.T) {
 
 	c := reconcileConfig()
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	// No PR is registered for the branch, so recoverByNumber returns an error.
 	dir := tempLogDir(t)
 	lc := &launchContext{
@@ -141,9 +141,9 @@ func TestCmdRecover_AdoptedPRSucceeds(t *testing.T) {
 
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.branchPrefix
+	fc.BranchPrefix = c.BranchPrefix
 
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := fc.AgentBranch("42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 	// A leading PENDING proves this run's own checks registered. Issue #1652's
@@ -202,7 +202,7 @@ func TestCmdDispatchSelective_RunsCleanupOnEveryExit(t *testing.T) {
 
 func TestCmdDispatch_RunsCleanupOnEveryExit(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
+	c.Label = "ready-for-agent"
 	dir := tempLogDir(t)
 	called := false
 	fc := forge.NewFake()

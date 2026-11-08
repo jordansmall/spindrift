@@ -4,193 +4,101 @@ package main
 import (
 	"os"
 	"strconv"
+
+	"spindrift.dev/launcher/internal/inputdoc"
 )
 
-// schemaConfig is the generated counterpart to config's schema-derived
-// members (issue #2364, #2365): one field per host-config schema member
-// (lib/env-schema.nix — not secret and not boxEnvOnly, or hostConfig
-// overridden), except the knobs a registry row owns: those live in
-// rowKnobs, keyed by env name, so config names no one backend's setting.
-// Embedded by value in config so a copy-and-mutate helper like
-// applyDispatchKind can never alias the caller's config through this
-// struct; rowKnobs is a map, so a helper that edits it must copy it first
-// (see schemaConfig.setRowKnob).
-type schemaConfig struct {
-	anthropicAPIKey           string
-	baseBranch                string
-	boxForgeAndIssueAccess    string
-	branchPrefix              string
-	butlerChoreClasses        string
-	butlerChores              string
-	butlerClaimTimeout        string
-	butlerDailyTokenCeiling   int
-	butlerEvery               string
-	butlerMaxFindingsPerDay   int
-	butlerMaxFindingsPerSweep int
-	butlerMaxPatchesPerDay    int
-	butlerMaxPromotionsPerDay int
-	butlerMaxSweepsPerDay     int
-	butlerPatchClasses        string
-	butlerPatchMaxFiles       int
-	butlerPatchMaxLines       int
-	butlerPatchPaths          string
-	butlerPromotionMaxFiles   int
-	claudeOAuthToken          string
-	codeForge                 string
-	completeLabel             string
-	continuousDispatch        bool
-	daemonApp                 string
-	daemonAwakeWindow         string
-	daemonBreakerThreshold    int
-	daemonBreakerWindow       string
-	daemonFailureBackoff      string
-	daemonIdleCap             string
-	daemonIdleFloor           string
-	daemonProbeInterval       string
-	daemonSelfApp             string
-	deepseekAPIKey            string
-	failedLabel               string
-	geminiAPIKey              string
-	ghToken                   string
-	ghTokenRefreshFile        string
-	gitUserEmail              string
-	gitUserName               string
-	groqAPIKey                string
-	holdJitterSecs            int
-	inProgressLabel           string
-	issueNumber               string
-	issueTracker              string
-	label                     string
-	maxBudgetTokens           int
-	maxBudgetUSD              float64
-	maxFixAttempts            int
-	maxJobs                   int
-	maxParallel               int
-	maxRebaseAttempts         int
-	maxRecoverAttempts        int
-	memoryLimit               string
-	mergeGuardPaths           string
-	mergeMethod               string
-	mergeMode                 string
-	mergePollInterval         int
-	mergePollTimeout          int
-	mistralAPIKey             string
-	model                     string
-	networkMode               string
-	openaiAPIKey              string
-	opencodeAuthContent       string
-	openrouterAPIKey          string
-	overlapGate               string
-	piAuthContent             string
-	piModelsContent           string
-	piSettingsContent         string
-	pidsLimit                 string
-	preflightStaleBase        bool
-	registryProxyRoutesFile   string
-	repoSlug                  string
-	researchReservation       int
-	researchVerdicts          string
-	signalCarrier             string
-	spindriftPromptDir        string
-	spindriftSkillsDir        string
-	syncMethod                string
-	transientBackoffSecs      int
-	transientRetryMax         int
-	xaiAPIKey                 string
-	rowKnobs                  map[string]string
-}
-
-// loadSchemaConfig reads schemaConfig's fields from the environment.
-// hostDerived members without a hostGitConfigKey get a struct field above
+// loadSchemaConfig reads inputdoc.Knobs's fields from the environment.
+// hostDerived members without a hostGitConfigKey get a struct field there
 // but no loader line here — their loader is hand-written elsewhere.
 // Secret members read the environment directly, never through the
 // schema-default helper (a document-first path would open a
 // Launcher-input secret-injection channel that does not exist today).
 // Regenerate with `nix run .#regen` after editing lib/env-schema.nix.
-func loadSchemaConfig() schemaConfig {
-	return schemaConfig{
-		anthropicAPIKey:           os.Getenv("ANTHROPIC_API_KEY"),
-		baseBranch:                getenvSchema("BASE_BRANCH"),
-		boxForgeAndIssueAccess:    getenvSchema("BOX_FORGE_AND_ISSUE_ACCESS"),
-		branchPrefix:              getenvSchema("BRANCH_PREFIX"),
-		butlerChoreClasses:        getenvSchema("BUTLER_CHORE_CLASSES"),
-		butlerChores:              getenvSchema("BUTLER_CHORES"),
-		butlerClaimTimeout:        getenvSchema("BUTLER_CLAIM_TIMEOUT"),
-		butlerDailyTokenCeiling:   atoiNonnegSchema("BUTLER_DAILY_TOKEN_CEILING"),
-		butlerEvery:               getenvSchema("BUTLER_EVERY"),
-		butlerMaxFindingsPerDay:   atoiNonnegSchema("BUTLER_MAX_FINDINGS_PER_DAY"),
-		butlerMaxFindingsPerSweep: atoiNonnegSchema("BUTLER_MAX_FINDINGS_PER_SWEEP"),
-		butlerMaxPatchesPerDay:    atoiNonnegSchema("BUTLER_MAX_PATCHES_PER_DAY"),
-		butlerMaxPromotionsPerDay: atoiNonnegSchema("BUTLER_MAX_PROMOTIONS_PER_DAY"),
-		butlerMaxSweepsPerDay:     atoiNonnegSchema("BUTLER_MAX_SWEEPS_PER_DAY"),
-		butlerPatchClasses:        getenvSchema("BUTLER_PATCH_CLASSES"),
-		butlerPatchMaxFiles:       atoiSchema("BUTLER_PATCH_MAX_FILES"),
-		butlerPatchMaxLines:       atoiSchema("BUTLER_PATCH_MAX_LINES"),
-		butlerPatchPaths:          getenvSchema("BUTLER_PATCH_PATHS"),
-		butlerPromotionMaxFiles:   atoiSchema("BUTLER_PROMOTION_MAX_FILES"),
-		claudeOAuthToken:          os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"),
-		codeForge:                 getenvSchema("CODE_FORGE"),
-		completeLabel:             getenvSchema("COMPLETE_LABEL"),
-		continuousDispatch:        getenvSchema("CONTINUOUS_DISPATCH") != "",
-		daemonApp:                 getenvSchema("DAEMON_APP"),
-		daemonAwakeWindow:         getenvSchema("DAEMON_AWAKE_WINDOW"),
-		daemonBreakerThreshold:    atoiSchema("DAEMON_BREAKER_THRESHOLD"),
-		daemonBreakerWindow:       getenvSchema("DAEMON_BREAKER_WINDOW"),
-		daemonFailureBackoff:      getenvSchema("DAEMON_FAILURE_BACKOFF"),
-		daemonIdleCap:             getenvSchema("DAEMON_IDLE_CAP"),
-		daemonIdleFloor:           getenvSchema("DAEMON_IDLE_FLOOR"),
-		daemonProbeInterval:       getenvSchema("DAEMON_PROBE_INTERVAL"),
-		daemonSelfApp:             getenvSchema("DAEMON_SELF_APP"),
-		deepseekAPIKey:            os.Getenv("DEEPSEEK_API_KEY"),
-		failedLabel:               getenvSchema("FAILED_LABEL"),
-		geminiAPIKey:              os.Getenv("GEMINI_API_KEY"),
-		ghToken:                   os.Getenv("GH_TOKEN"),
-		ghTokenRefreshFile:        getenvSchema("GH_TOKEN_REFRESH_FILE"),
-		gitUserEmail:              hostGitConfigField("GIT_USER_EMAIL"),
-		gitUserName:               hostGitConfigField("GIT_USER_NAME"),
-		groqAPIKey:                os.Getenv("GROQ_API_KEY"),
-		holdJitterSecs:            atoiNonnegSchema("HOLD_JITTER_SECS"),
-		inProgressLabel:           getenvSchema("IN_PROGRESS_LABEL"),
-		issueNumber:               getenvSchema("ISSUE_NUMBER"),
-		issueTracker:              getenvSchema("ISSUE_TRACKER"),
-		label:                     getenvSchema("LABEL"),
-		maxBudgetTokens:           atoiNonnegSchema("MAX_BUDGET_TOKENS"),
-		maxBudgetUSD:              floatNonnegSchema("MAX_BUDGET_USD"),
-		maxFixAttempts:            atoiNonnegSchema("MAX_FIX_ATTEMPTS"),
-		maxJobs:                   atoiNonnegSchema("MAX_JOBS"),
-		maxParallel:               atoiSchema("MAX_PARALLEL"),
-		maxRebaseAttempts:         atoiNonnegSchema("MAX_REBASE_ATTEMPTS"),
-		maxRecoverAttempts:        atoiSchema("MAX_RECOVER_ATTEMPTS"),
-		memoryLimit:               getenvSchema("MEMORY_LIMIT"),
-		mergeGuardPaths:           getenvSchema("MERGE_GUARD_PATHS"),
-		mergeMethod:               getenvSchema("MERGE_METHOD"),
-		mergeMode:                 getenvSchema("MERGE_MODE"),
-		mergePollInterval:         atoiNonnegSchema("MERGE_POLL_INTERVAL"),
-		mergePollTimeout:          atoiNonnegSchema("MERGE_POLL_TIMEOUT"),
-		mistralAPIKey:             os.Getenv("MISTRAL_API_KEY"),
-		model:                     getenvSchema("MODEL"),
-		networkMode:               getenvSchema("NETWORK_MODE"),
-		openaiAPIKey:              os.Getenv("OPENAI_API_KEY"),
-		opencodeAuthContent:       os.Getenv("OPENCODE_AUTH_CONTENT"),
-		openrouterAPIKey:          os.Getenv("OPENROUTER_API_KEY"),
-		overlapGate:               getenvSchema("OVERLAP_GATE"),
-		piAuthContent:             os.Getenv("PI_AUTH_CONTENT"),
-		piModelsContent:           os.Getenv("PI_MODELS_CONTENT"),
-		piSettingsContent:         os.Getenv("PI_SETTINGS_CONTENT"),
-		pidsLimit:                 getenvSchema("PIDS_LIMIT"),
-		preflightStaleBase:        getenvSchema("PREFLIGHT_STALE_BASE") != "",
-		registryProxyRoutesFile:   getenvSchema("REGISTRY_PROXY_ROUTES_FILE"),
-		repoSlug:                  getenvSchema("REPO_SLUG"),
-		researchReservation:       atoiNonnegSchema("RESEARCH_RESERVATION"),
-		researchVerdicts:          getenvSchema("RESEARCH_VERDICTS"),
-		signalCarrier:             getenvSchema("BOX_SIGNAL_CARRIER"),
-		spindriftPromptDir:        getenvSchema("SPINDRIFT_PROMPT_DIR"),
-		spindriftSkillsDir:        getenvSchema("SPINDRIFT_SKILLS_DIR"),
-		syncMethod:                getenvSchema("SYNC_METHOD"),
-		transientBackoffSecs:      atoiSchema("TRANSIENT_BACKOFF_SECS"),
-		transientRetryMax:         atoiSchema("TRANSIENT_RETRY_MAX"),
-		xaiAPIKey:                 os.Getenv("XAI_API_KEY"),
-		rowKnobs: map[string]string{
+func loadSchemaConfig() inputdoc.Knobs {
+	return inputdoc.Knobs{
+		AnthropicAPIKey:           os.Getenv("ANTHROPIC_API_KEY"),
+		BaseBranch:                getenvSchema("BASE_BRANCH"),
+		BoxForgeAndIssueAccess:    getenvSchema("BOX_FORGE_AND_ISSUE_ACCESS"),
+		BranchPrefix:              getenvSchema("BRANCH_PREFIX"),
+		ButlerChoreClasses:        getenvSchema("BUTLER_CHORE_CLASSES"),
+		ButlerChores:              getenvSchema("BUTLER_CHORES"),
+		ButlerClaimTimeout:        getenvSchema("BUTLER_CLAIM_TIMEOUT"),
+		ButlerDailyTokenCeiling:   atoiNonnegSchema("BUTLER_DAILY_TOKEN_CEILING"),
+		ButlerEvery:               getenvSchema("BUTLER_EVERY"),
+		ButlerMaxFindingsPerDay:   atoiNonnegSchema("BUTLER_MAX_FINDINGS_PER_DAY"),
+		ButlerMaxFindingsPerSweep: atoiNonnegSchema("BUTLER_MAX_FINDINGS_PER_SWEEP"),
+		ButlerMaxPatchesPerDay:    atoiNonnegSchema("BUTLER_MAX_PATCHES_PER_DAY"),
+		ButlerMaxPromotionsPerDay: atoiNonnegSchema("BUTLER_MAX_PROMOTIONS_PER_DAY"),
+		ButlerMaxSweepsPerDay:     atoiNonnegSchema("BUTLER_MAX_SWEEPS_PER_DAY"),
+		ButlerPatchClasses:        getenvSchema("BUTLER_PATCH_CLASSES"),
+		ButlerPatchMaxFiles:       atoiSchema("BUTLER_PATCH_MAX_FILES"),
+		ButlerPatchMaxLines:       atoiSchema("BUTLER_PATCH_MAX_LINES"),
+		ButlerPatchPaths:          getenvSchema("BUTLER_PATCH_PATHS"),
+		ButlerPromotionMaxFiles:   atoiSchema("BUTLER_PROMOTION_MAX_FILES"),
+		ClaudeOAuthToken:          os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"),
+		CodeForge:                 getenvSchema("CODE_FORGE"),
+		CompleteLabel:             getenvSchema("COMPLETE_LABEL"),
+		ContinuousDispatch:        getenvSchema("CONTINUOUS_DISPATCH") != "",
+		DaemonApp:                 getenvSchema("DAEMON_APP"),
+		DaemonAwakeWindow:         getenvSchema("DAEMON_AWAKE_WINDOW"),
+		DaemonBreakerThreshold:    atoiSchema("DAEMON_BREAKER_THRESHOLD"),
+		DaemonBreakerWindow:       getenvSchema("DAEMON_BREAKER_WINDOW"),
+		DaemonFailureBackoff:      getenvSchema("DAEMON_FAILURE_BACKOFF"),
+		DaemonIdleCap:             getenvSchema("DAEMON_IDLE_CAP"),
+		DaemonIdleFloor:           getenvSchema("DAEMON_IDLE_FLOOR"),
+		DaemonProbeInterval:       getenvSchema("DAEMON_PROBE_INTERVAL"),
+		DaemonSelfApp:             getenvSchema("DAEMON_SELF_APP"),
+		DeepseekAPIKey:            os.Getenv("DEEPSEEK_API_KEY"),
+		FailedLabel:               getenvSchema("FAILED_LABEL"),
+		GeminiAPIKey:              os.Getenv("GEMINI_API_KEY"),
+		GhToken:                   os.Getenv("GH_TOKEN"),
+		GhTokenRefreshFile:        getenvSchema("GH_TOKEN_REFRESH_FILE"),
+		GitUserEmail:              hostGitConfigField("GIT_USER_EMAIL"),
+		GitUserName:               hostGitConfigField("GIT_USER_NAME"),
+		GroqAPIKey:                os.Getenv("GROQ_API_KEY"),
+		HoldJitterSecs:            atoiNonnegSchema("HOLD_JITTER_SECS"),
+		InProgressLabel:           getenvSchema("IN_PROGRESS_LABEL"),
+		IssueNumber:               getenvSchema("ISSUE_NUMBER"),
+		IssueTracker:              getenvSchema("ISSUE_TRACKER"),
+		Label:                     getenvSchema("LABEL"),
+		MaxBudgetTokens:           atoiNonnegSchema("MAX_BUDGET_TOKENS"),
+		MaxBudgetUSD:              floatNonnegSchema("MAX_BUDGET_USD"),
+		MaxFixAttempts:            atoiNonnegSchema("MAX_FIX_ATTEMPTS"),
+		MaxJobs:                   atoiNonnegSchema("MAX_JOBS"),
+		MaxParallel:               atoiSchema("MAX_PARALLEL"),
+		MaxRebaseAttempts:         atoiNonnegSchema("MAX_REBASE_ATTEMPTS"),
+		MaxRecoverAttempts:        atoiSchema("MAX_RECOVER_ATTEMPTS"),
+		MemoryLimit:               getenvSchema("MEMORY_LIMIT"),
+		MergeGuardPaths:           getenvSchema("MERGE_GUARD_PATHS"),
+		MergeMethod:               getenvSchema("MERGE_METHOD"),
+		MergeMode:                 getenvSchema("MERGE_MODE"),
+		MergePollInterval:         atoiNonnegSchema("MERGE_POLL_INTERVAL"),
+		MergePollTimeout:          atoiNonnegSchema("MERGE_POLL_TIMEOUT"),
+		MistralAPIKey:             os.Getenv("MISTRAL_API_KEY"),
+		Model:                     getenvSchema("MODEL"),
+		NetworkMode:               getenvSchema("NETWORK_MODE"),
+		OpenaiAPIKey:              os.Getenv("OPENAI_API_KEY"),
+		OpencodeAuthContent:       os.Getenv("OPENCODE_AUTH_CONTENT"),
+		OpenrouterAPIKey:          os.Getenv("OPENROUTER_API_KEY"),
+		OverlapGate:               getenvSchema("OVERLAP_GATE"),
+		PiAuthContent:             os.Getenv("PI_AUTH_CONTENT"),
+		PiModelsContent:           os.Getenv("PI_MODELS_CONTENT"),
+		PiSettingsContent:         os.Getenv("PI_SETTINGS_CONTENT"),
+		PidsLimit:                 getenvSchema("PIDS_LIMIT"),
+		PreflightStaleBase:        getenvSchema("PREFLIGHT_STALE_BASE") != "",
+		RegistryProxyRoutesFile:   getenvSchema("REGISTRY_PROXY_ROUTES_FILE"),
+		RepoSlug:                  getenvSchema("REPO_SLUG"),
+		ResearchReservation:       atoiNonnegSchema("RESEARCH_RESERVATION"),
+		ResearchVerdicts:          getenvSchema("RESEARCH_VERDICTS"),
+		SignalCarrier:             getenvSchema("BOX_SIGNAL_CARRIER"),
+		SpindriftPromptDir:        getenvSchema("SPINDRIFT_PROMPT_DIR"),
+		SpindriftSkillsDir:        getenvSchema("SPINDRIFT_SKILLS_DIR"),
+		SyncMethod:                getenvSchema("SYNC_METHOD"),
+		TransientBackoffSecs:      atoiSchema("TRANSIENT_BACKOFF_SECS"),
+		TransientRetryMax:         atoiSchema("TRANSIENT_RETRY_MAX"),
+		XaiAPIKey:                 os.Getenv("XAI_API_KEY"),
+		RowKnobs: map[string]string{
 			"BUTLER_TUNING_COOLDOWN":           getenvSchema("BUTLER_TUNING_COOLDOWN"),
 			"BUTLER_TUNING_DIGEST_BYTES":       strconv.Itoa(atoiSchema("BUTLER_TUNING_DIGEST_BYTES")),
 			"BUTLER_TUNING_MIN_RECORDS":        strconv.Itoa(atoiSchema("BUTLER_TUNING_MIN_RECORDS")),
@@ -212,17 +120,4 @@ func loadSchemaConfig() schemaConfig {
 			"PODMAN_NETWORK":                   getenvSchema("PODMAN_NETWORK"),
 		},
 	}
-}
-
-// hostGitConfigValue returns the loaded value of the member whose env name is
-// env, for the members that declare a hostGitConfigKey; ok is false for any
-// other name.
-func (s schemaConfig) hostGitConfigValue(env string) (string, bool) {
-	switch env {
-	case "GIT_USER_EMAIL":
-		return s.gitUserEmail, true
-	case "GIT_USER_NAME":
-		return s.gitUserName, true
-	}
-	return "", false
 }

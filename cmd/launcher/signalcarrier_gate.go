@@ -18,11 +18,11 @@ const signalSocketNoneModeReason = "BOX_SIGNAL_CARRIER=socket is unsupported und
 // config value, so it lives in the Dispatch-level gate startSignalSocket
 // applies (internal/dispatch/signal_socket.go) instead.
 func checkSignalCarrierNetworkModeGate(c config) error {
-	if c.signalCarrier != "socket" {
+	if c.SignalCarrier != "socket" {
 		return nil
 	}
 	if c.runnerNetworkMode() != runner.NetworkModeNone {
 		return nil
 	}
-	return newLaunchGateConfigError(signalSocketNoneModeReason+"; use BOX_SIGNAL_CARRIER=log or a different NETWORK_MODE", c.networkMode)
+	return newLaunchGateConfigError(signalSocketNoneModeReason+"; use BOX_SIGNAL_CARRIER=log or a different NETWORK_MODE", c.NetworkMode)
 }

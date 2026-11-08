@@ -15,11 +15,11 @@ import (
 // Preview is read-only, so it must make no mutating Forge calls.
 func TestPreviewIssues_ListsIssuesAndRepo(t *testing.T) {
 	c := baseConfig()
-	c.repoSlug = "owner/repo"
-	c.label = "ready-for-agent"
+	c.RepoSlug = "owner/repo"
+	c.Label = "ready-for-agent"
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "10", Title: "first issue", Labels: []string{c.label}})
-	fc.SetIssue(forge.Issue{Number: "20", Title: "second issue", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "10", Title: "first issue", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "20", Title: "second issue", Labels: []string{c.Label}})
 
 	var buf bytes.Buffer
 	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, nil, t.TempDir(), nil); err != nil {
@@ -47,9 +47,9 @@ func TestPreviewIssues_ListsIssuesAndRepo(t *testing.T) {
 // The operator needs to see which merge mode is armed before dispatching.
 func TestPreviewIssues_PrintsMergeMode(t *testing.T) {
 	c := baseConfig()
-	c.repoSlug = "owner/repo"
-	c.label = "ready-for-agent"
-	c.mergeMode = "immediate"
+	c.RepoSlug = "owner/repo"
+	c.Label = "ready-for-agent"
+	c.MergeMode = "immediate"
 	fc := forge.NewFake()
 
 	var buf bytes.Buffer
@@ -67,10 +67,10 @@ func TestPreviewIssues_PrintsMergeMode(t *testing.T) {
 // "repo: " line for it (issue #1895).
 func TestPreviewIssues_FullyLocal_OmitsBareRepoLine(t *testing.T) {
 	c := baseConfig()
-	c.repoSlug = ""
-	c.issueTracker = "local"
-	c.label = "ready-for-agent"
-	c.mergeMode = "immediate"
+	c.RepoSlug = ""
+	c.IssueTracker = "local"
+	c.Label = "ready-for-agent"
+	c.MergeMode = "immediate"
 	fc := forge.NewFake()
 
 	var buf bytes.Buffer
@@ -128,8 +128,8 @@ func TestPrintHelp_ShowsPreview(t *testing.T) {
 
 func TestPreviewIssues_EmptyQueue(t *testing.T) {
 	c := baseConfig()
-	c.repoSlug = "owner/repo"
-	c.label = "ready-for-agent"
+	c.RepoSlug = "owner/repo"
+	c.Label = "ready-for-agent"
 	fc := forge.NewFake()
 
 	var buf bytes.Buffer
@@ -148,10 +148,10 @@ func TestPreviewIssues_EmptyQueue(t *testing.T) {
 
 func TestPreviewIssues_EmptyQueue_NamesCrossFamilyHeldIssue(t *testing.T) {
 	c := applyDispatchKind(baseConfig(), dispatchkind.Work)
-	c.repoSlug = "owner/repo"
-	c.label = "ready-for-agent"
+	c.RepoSlug = "owner/repo"
+	c.Label = "ready-for-agent"
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.label, "agent-research-in-progress"}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.Label, "agent-research-in-progress"}})
 
 	var buf bytes.Buffer
 	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, nil, t.TempDir(), nil); err != nil {
@@ -175,11 +175,11 @@ func TestPreviewIssues_EmptyQueue_NamesCrossFamilyHeldIssue(t *testing.T) {
 
 func TestPreviewIssues_NamesHeldIssueAlongsideDispatchable(t *testing.T) {
 	c := applyDispatchKind(baseConfig(), dispatchkind.Work)
-	c.repoSlug = "owner/repo"
-	c.label = "ready-for-agent"
+	c.RepoSlug = "owner/repo"
+	c.Label = "ready-for-agent"
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.label, "agent-research-in-progress"}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.Label, "agent-research-in-progress"}})
 
 	var buf bytes.Buffer
 	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, nil, t.TempDir(), nil); err != nil {
@@ -199,8 +199,8 @@ func TestPreviewIssues_NamesHeldIssueAlongsideDispatchable(t *testing.T) {
 // reads it; internal/freshness's own tests cover that.
 func TestPreviewIssues_PrintsFreshnessLine(t *testing.T) {
 	c := baseConfig()
-	c.repoSlug = "owner/repo"
-	c.label = "ready-for-agent"
+	c.RepoSlug = "owner/repo"
+	c.Label = "ready-for-agent"
 	c.runtime = "podman"
 	c.boxArtifact = "store-closure"
 	fc := forge.NewFake()
@@ -228,10 +228,10 @@ func TestPreviewIssues_Bwrap_PrintsRealFreshnessLine(t *testing.T) {
 	const freshHash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 	c := baseConfig()
-	c.repoSlug = "owner/repo"
-	c.label = "ready-for-agent"
+	c.RepoSlug = "owner/repo"
+	c.Label = "ready-for-agent"
 	c.boxArtifact = "store-closure"
-	c.baseBranch = "main"
+	c.BaseBranch = "main"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + staleHash + "-agent-closure"
 	fc := forge.NewFake()
@@ -258,8 +258,8 @@ func TestPreviewIssues_Bwrap_PrintsRealFreshnessLine(t *testing.T) {
 // the freshness line.
 func TestPreviewIssues_PrintsLauncherCurrencyLine(t *testing.T) {
 	c := baseConfig()
-	c.repoSlug = "owner/repo"
-	c.label = "ready-for-agent"
+	c.RepoSlug = "owner/repo"
+	c.Label = "ready-for-agent"
 	c.flakeLauncherAttr = ".#packages.x86_64-linux.launcher-currency"
 	fc := forge.NewFake()
 
@@ -283,8 +283,8 @@ func TestPreviewIssues_PrintsLauncherCurrencyLine(t *testing.T) {
 // non-empty res.Message.
 func TestPreviewIssues_PrintsLauncherCurrencyPlaceholderWhenUnset(t *testing.T) {
 	c := baseConfig()
-	c.repoSlug = "owner/repo"
-	c.label = "ready-for-agent"
+	c.RepoSlug = "owner/repo"
+	c.Label = "ready-for-agent"
 	c.flakeLauncherAttr = ""
 	fc := forge.NewFake()
 
@@ -305,11 +305,11 @@ func TestPreviewIssues_PrintsLauncherCurrencyPlaceholderWhenUnset(t *testing.T) 
 // Bare preview here means preview with no positional issue numbers.
 func TestPreviewIssues_BareAnnotatesBlockers(t *testing.T) {
 	c := baseConfig()
-	c.repoSlug = "owner/repo"
-	c.label = "ready-for-agent"
+	c.RepoSlug = "owner/repo"
+	c.Label = "ready-for-agent"
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "99", Title: "blocker issue", Labels: []string{c.label}})
-	fc.SetIssue(forge.Issue{Number: "15", Title: "dependent", Labels: []string{c.label},
+	fc.SetIssue(forge.Issue{Number: "99", Title: "blocker issue", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "15", Title: "dependent", Labels: []string{c.Label},
 		Body: "## Blocked by\n- #99\n"})
 
 	var buf bytes.Buffer
@@ -340,13 +340,13 @@ func TestPreviewIssues_BareAnnotatesBlockers(t *testing.T) {
 // another.
 func TestPreviewIssues_MixedBatchAnnotatesEachSource(t *testing.T) {
 	c := baseConfig()
-	c.repoSlug = "owner/repo"
-	c.label = "ready-for-agent"
+	c.RepoSlug = "owner/repo"
+	c.Label = "ready-for-agent"
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "50", Title: "native blocker", Labels: []string{c.label}})
-	fc.SetIssue(forge.Issue{Number: "60", Title: "body blocker", Labels: []string{c.label}})
-	fc.SetIssue(forge.Issue{Number: "10", Title: "native dependent", Labels: []string{c.label}})
-	fc.SetIssue(forge.Issue{Number: "20", Title: "body dependent", Labels: []string{c.label},
+	fc.SetIssue(forge.Issue{Number: "50", Title: "native blocker", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "60", Title: "body blocker", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "10", Title: "native dependent", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "20", Title: "body dependent", Labels: []string{c.Label},
 		Body: "## Blocked by\n- #60\n"})
 	fc.NativeDeps = map[string][]string{"10": {"50"}}
 
@@ -369,11 +369,11 @@ func TestPreviewIssues_MixedBatchAnnotatesEachSource(t *testing.T) {
 // from both a zero-blocker issue and a blocked-by annotation.
 func TestPreviewIssues_DepsOfCheckFailure_AnnotatesDistinctly(t *testing.T) {
 	c := baseConfig()
-	c.repoSlug = "owner/repo"
-	c.label = "ready-for-agent"
+	c.RepoSlug = "owner/repo"
+	c.Label = "ready-for-agent"
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "12", Title: "deps-of-failed", Labels: []string{c.label}})
-	fc.SetIssue(forge.Issue{Number: "15", Title: "clean", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "12", Title: "deps-of-failed", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "15", Title: "clean", Labels: []string{c.Label}})
 
 	it := failDepsOf{Fake: fc, num: "12"}
 

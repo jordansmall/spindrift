@@ -11,8 +11,8 @@ import (
 // than silently fall back to the log carrier.
 func TestSignalCarrierNetworkModeGate_SocketUnderNoneFails(t *testing.T) {
 	c := minimalValidConfig()
-	c.signalCarrier = "socket"
-	c.networkMode = "none"
+	c.SignalCarrier = "socket"
+	c.NetworkMode = "none"
 
 	err := checkSignalCarrierNetworkModeGate(c)
 	if err == nil {
@@ -36,8 +36,8 @@ func TestSignalCarrierNetworkModeGate_SocketUnderOtherModesIsNoOp(t *testing.T) 
 	for _, mode := range cases {
 		t.Run(mode, func(t *testing.T) {
 			c := minimalValidConfig()
-			c.signalCarrier = "socket"
-			c.networkMode = mode
+			c.SignalCarrier = "socket"
+			c.NetworkMode = mode
 
 			if err := checkSignalCarrierNetworkModeGate(c); err != nil {
 				t.Errorf("checkSignalCarrierNetworkModeGate() with networkMode=%q = %v, want nil", mode, err)
@@ -50,8 +50,8 @@ func TestSignalCarrierNetworkModeGate_SocketUnderOtherModesIsNoOp(t *testing.T) 
 // string "socket"), so NETWORK_MODE has nothing to say about it.
 func TestSignalCarrierNetworkModeGate_LogCarrierUnderNoneIsNoOp(t *testing.T) {
 	c := minimalValidConfig()
-	c.signalCarrier = "log"
-	c.networkMode = "none"
+	c.SignalCarrier = "log"
+	c.NetworkMode = "none"
 
 	if err := checkSignalCarrierNetworkModeGate(c); err != nil {
 		t.Errorf("checkSignalCarrierNetworkModeGate() with signalCarrier=log = %v, want nil", err)
@@ -62,8 +62,8 @@ func TestSignalCarrierNetworkModeGate_LogCarrierUnderNoneIsNoOp(t *testing.T) {
 // text keeps the rendered operator output unchanged.
 func TestSignalCarrierNetworkModeGate_SocketUnderNoneRendersSharedReason(t *testing.T) {
 	c := minimalValidConfig()
-	c.signalCarrier = "socket"
-	c.networkMode = "none"
+	c.SignalCarrier = "socket"
+	c.NetworkMode = "none"
 
 	err := checkSignalCarrierNetworkModeGate(c)
 	if err == nil {
@@ -80,8 +80,8 @@ func TestSignalCarrierNetworkModeGate_SocketUnderNoneRendersSharedReason(t *test
 func TestSignalCarrierNetworkModeGate_UnsetKnobUnderNoneFailsNamingLogRemedy(t *testing.T) {
 	unsetEnv(t, "BOX_SIGNAL_CARRIER")
 	c := minimalValidConfig()
-	c.signalCarrier = loadConfig().signalCarrier
-	c.networkMode = "none"
+	c.SignalCarrier = loadConfig().SignalCarrier
+	c.NetworkMode = "none"
 
 	err := checkSignalCarrierNetworkModeGate(c)
 	if err == nil {

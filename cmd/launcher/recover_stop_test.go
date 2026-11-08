@@ -36,7 +36,7 @@ func TestCmdRecover_SignalledStop_NoFailedLabel(t *testing.T) {
 
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 
 	dir := tempLogDir(t)
 	var cleaned bool
@@ -62,7 +62,7 @@ func TestCmdRecover_SignalledStop_NoFailedLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fc.Issue(42): %v", err)
 	}
-	if containsLabel(iss.Labels, c.failedLabel) {
+	if containsLabel(iss.Labels, c.FailedLabel) {
 		t.Errorf("issue #42 labels = %v, want no failed label", iss.Labels)
 	}
 	if _, err := os.Stat(outputPath); err == nil {
@@ -82,7 +82,7 @@ func TestCmdRecover_SignalledAbort_NoFailedLabel(t *testing.T) {
 
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 
 	dir := tempLogDir(t)
 	var cleaned bool
@@ -108,7 +108,7 @@ func TestCmdRecover_SignalledAbort_NoFailedLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fc.Issue(42): %v", err)
 	}
-	if containsLabel(iss.Labels, c.failedLabel) {
+	if containsLabel(iss.Labels, c.FailedLabel) {
 		t.Errorf("issue #42 labels = %v, want no failed label", iss.Labels)
 	}
 	if _, err := os.Stat(outputPath); err == nil {
@@ -156,8 +156,8 @@ func TestRecoverByNumber_MidFlightAbort_ReclaimsToDispatchable(t *testing.T) {
 
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.branchPrefix
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.BranchPrefix = c.BranchPrefix
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := fc.AgentBranch("42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 
@@ -179,10 +179,10 @@ func TestRecoverByNumber_MidFlightAbort_ReclaimsToDispatchable(t *testing.T) {
 	if ierr != nil {
 		t.Fatalf("fc.Issue(42): %v", ierr)
 	}
-	if !containsLabel(iss.Labels, c.label) {
-		t.Errorf("issue #42 labels = %v, want dispatchable label %q (reaped and reclaimed)", iss.Labels, c.label)
+	if !containsLabel(iss.Labels, c.Label) {
+		t.Errorf("issue #42 labels = %v, want dispatchable label %q (reaped and reclaimed)", iss.Labels, c.Label)
 	}
-	for _, terminal := range []string{c.completeLabel, c.failedLabel} {
+	for _, terminal := range []string{c.CompleteLabel, c.FailedLabel} {
 		if containsLabel(iss.Labels, terminal) {
 			t.Errorf("issue #42 labels = %v, want no terminal label %q", iss.Labels, terminal)
 		}
@@ -204,8 +204,8 @@ func TestRecoverByNumber_MidFlightAbort_ParkedFailedLabelStillReaped(t *testing.
 
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.branchPrefix
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.failedLabel}})
+	fc.BranchPrefix = c.BranchPrefix
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.FailedLabel}})
 	fc.SetPR(fc.AgentBranch("42"), forge.PR{URL: testReconcilePR})
 
 	dir := tempLogDir(t)
@@ -341,8 +341,8 @@ func TestRecoverByNumber_AbortAfterSettleAdopted_NoReclaim(t *testing.T) {
 
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.branchPrefix
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.BranchPrefix = c.BranchPrefix
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := fc.AgentBranch("42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 
@@ -362,11 +362,11 @@ func TestRecoverByNumber_AbortAfterSettleAdopted_NoReclaim(t *testing.T) {
 	if ierr != nil {
 		t.Fatalf("fc.Issue(42): %v", ierr)
 	}
-	if !containsLabel(iss.Labels, c.completeLabel) {
-		t.Errorf("issue #42 labels = %v, want completeLabel %q (settle's own decision, untouched by the late abort)", iss.Labels, c.completeLabel)
+	if !containsLabel(iss.Labels, c.CompleteLabel) {
+		t.Errorf("issue #42 labels = %v, want completeLabel %q (settle's own decision, untouched by the late abort)", iss.Labels, c.CompleteLabel)
 	}
-	if containsLabel(iss.Labels, c.label) {
-		t.Errorf("issue #42 labels = %v, want no dispatchable label %q (must not be reclaimed after settling)", iss.Labels, c.label)
+	if containsLabel(iss.Labels, c.Label) {
+		t.Errorf("issue #42 labels = %v, want no dispatchable label %q (must not be reclaimed after settling)", iss.Labels, c.Label)
 	}
 	for _, comment := range fc.CommentsFor["42"] {
 		if strings.Contains(comment.Body, terminate.CommentSuffix) {
@@ -390,8 +390,8 @@ func TestRecoverByNumber_AbortAfterSettleRelayed_ExitsStopWithoutRecoverFailed(t
 
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.branchPrefix
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.BranchPrefix = c.BranchPrefix
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 
 	dir := tempLogDir(t)
 	fk := settle.NewFake()
@@ -410,8 +410,8 @@ func TestRecoverByNumber_AbortAfterSettleRelayed_ExitsStopWithoutRecoverFailed(t
 	if ierr != nil {
 		t.Fatalf("fc.Issue(42): %v", ierr)
 	}
-	if containsLabel(iss.Labels, c.failedLabel) {
-		t.Errorf("issue #42 labels = %v, want no %q (recoverFailed must not run)", iss.Labels, c.failedLabel)
+	if containsLabel(iss.Labels, c.FailedLabel) {
+		t.Errorf("issue #42 labels = %v, want no %q (recoverFailed must not run)", iss.Labels, c.FailedLabel)
 	}
 }
 
@@ -421,8 +421,8 @@ func TestRecoverByNumber_AbortAfterSettleRelayed_ExitsStopWithoutRecoverFailed(t
 func TestRecoverByNumber_OwnerSettling_Skips(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.branchPrefix
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.BranchPrefix = c.BranchPrefix
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	fc.SetPR(fc.AgentBranch("42"), forge.PR{URL: testReconcilePR})
 
 	dir := tempLogDir(t)
@@ -469,8 +469,8 @@ func TestRecoverByNumber_OwnerSettling_Skips(t *testing.T) {
 func TestRecoverByNumber_IssueClaimedElsewhere_Skips(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.branchPrefix
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.BranchPrefix = c.BranchPrefix
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := fc.AgentBranch("42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 
@@ -527,7 +527,7 @@ func TestRecoverByNumber_IssueClaimedElsewhere_Skips(t *testing.T) {
 	if ierr != nil {
 		t.Fatalf("fc.Issue(42): %v", ierr)
 	}
-	if !containsLabel(iss.Labels, c.inProgressLabel) {
+	if !containsLabel(iss.Labels, c.InProgressLabel) {
 		t.Errorf("issue #42 labels = %v, want still in-progress (unsettled)", iss.Labels)
 	}
 }
@@ -580,8 +580,8 @@ func TestRecoverByNumber_MidFlightAbort_OwnFailedSettleSpared(t *testing.T) {
 
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.branchPrefix
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.BranchPrefix = c.BranchPrefix
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	fc.SetPR(fc.AgentBranch("42"), forge.PR{URL: testReconcilePR})
 
 	dir := tempLogDir(t)
@@ -598,8 +598,8 @@ func TestRecoverByNumber_MidFlightAbort_OwnFailedSettleSpared(t *testing.T) {
 	if ierr != nil {
 		t.Fatalf("fc.Issue(42): %v", ierr)
 	}
-	if !containsLabel(iss.Labels, c.failedLabel) || containsLabel(iss.Labels, c.label) {
-		t.Errorf("issue #42 labels = %v, want %q kept and no dispatchable %q", iss.Labels, c.failedLabel, c.label)
+	if !containsLabel(iss.Labels, c.FailedLabel) || containsLabel(iss.Labels, c.Label) {
+		t.Errorf("issue #42 labels = %v, want %q kept and no dispatchable %q", iss.Labels, c.FailedLabel, c.Label)
 	}
 	select {
 	case name := <-rf.killed:

@@ -24,7 +24,7 @@ import (
 //     "advisory: RUNTIME not set — skipping runtime check" line
 //     doctor.Run emits (cmd/launcher/internal/doctor/doctor.go) rather than a
 //     PATH-dependent "ok: runtime ... found on PATH" one.
-//   - c.boxForgeAndIssueAccess stays "read-write" (minimalValidConfig's
+//   - c.BoxForgeAndIssueAccess stays "read-write" (minimalValidConfig's
 //     default), so runDoctor prints the fixed token-gate no-op line
 //     (cmd/launcher/doctor.go) and skips every read-only-token gate, which
 //     would otherwise make a live network call.
@@ -68,10 +68,10 @@ func TestRunDoctor_HealthyReport_Golden(t *testing.T) {
 // line. The goldens were captured before the gates moved onto the backend rows.
 func TestRunDoctor_ReadOnlyGitHub_Golden(t *testing.T) {
 	f, c := healthyGoldenFixture()
-	c.boxForgeAndIssueAccess = "read-only"
-	c.codeForge = "github"
-	c.issueTracker = "github"
-	c.ghToken = "launcher-gh-tok"
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.CodeForge = "github"
+	c.IssueTracker = "github"
+	c.GhToken = "launcher-gh-tok"
 	t.Setenv("BOX_GH_TOKEN", "box-gh-tok")
 
 	swapIntrospector(t, "github", func(string, string) (backendkit.TokenIntrospection, error) {
@@ -83,9 +83,9 @@ func TestRunDoctor_ReadOnlyGitHub_Golden(t *testing.T) {
 
 func TestRunDoctor_ReadOnlyForgejo_Golden(t *testing.T) {
 	f, c := healthyGoldenFixture()
-	c.boxForgeAndIssueAccess = "read-only"
-	c.codeForge = "forgejo"
-	c.issueTracker = "forgejo"
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.CodeForge = "forgejo"
+	c.IssueTracker = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
@@ -136,9 +136,9 @@ func TestRunDoctor_HealthyReport_Quiet_PrintsNothing(t *testing.T) {
 // IntrospectToken hook, so it is the cheaper fixture for pinning this.
 func TestDoctorReport_ReadOnlyForgejo_Healthy_QuietSuppressesTokenGateWarning(t *testing.T) {
 	f, c := healthyGoldenFixture()
-	c.boxForgeAndIssueAccess = "read-only"
-	c.codeForge = "forgejo"
-	c.issueTracker = "forgejo"
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.CodeForge = "forgejo"
+	c.IssueTracker = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
@@ -175,12 +175,12 @@ func healthyGoldenFixture() (*forge.Fake, config) {
 	f.SetBranchProtected("main", true)
 
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.baseBranch = "main"
+	c.BaseBranch = "main"
 	c.runtime = ""
 
-	f.Labels = append([]string{c.label, c.inProgressLabel, c.failedLabel, c.completeLabel},
+	f.Labels = append([]string{c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel},
 		doctor.AdvisoryLabelNames()...)
 
 	return f, c

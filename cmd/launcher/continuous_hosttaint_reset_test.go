@@ -20,13 +20,13 @@ func TestRunContinuousDispatch_CleanSuccessPreservesHostTaintGuard_Halts(t *test
 	const staleHash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" // 32 chars, distinct
 
 	c := baseConfig()
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runtime = "podman"
-	c.baseBranch = "main"
-	c.label = "ready-for-agent"
-	c.issueTracker = "local"
-	c.codeForge = "local"
+	c.BaseBranch = "main"
+	c.Label = "ready-for-agent"
+	c.IssueTracker = "local"
+	c.CodeForge = "local"
 	c.flakeImageAttr = ".#image"
 	c.imageTag = "spindrift:" + freshHash // the loaded image
 
@@ -36,7 +36,7 @@ func TestRunContinuousDispatch_CleanSuccessPreservesHostTaintGuard_Halts(t *test
 	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
-	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 	cf := it // fully-local: the same fake stands in for both seams
 
 	fr := runner.NewFake()

@@ -70,7 +70,7 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, caps)
 	cfg.Stop = stopCh
 	cfg.Abort = abortCh
-	claimer := waves.NewLabelClaimer(it, c.label, c.inProgressLabel)
+	claimer := waves.NewLabelClaimer(it, c.Label, c.InProgressLabel)
 	terminated := registryFor(s)
 	return waves.Dispatch(cfg, &waves.Session{Terminated: terminated}, it, cf, pwd, f, s, in, claimer)
 }
@@ -93,7 +93,7 @@ func fetchSelectiveIssues(c config, it forge.IssueTracker, nums []string) (issue
 		}
 		seen[fi.Number] = true
 		issues = append(issues, newIssue(fi))
-		if !containsLabel(fi.Labels, c.label) {
+		if !containsLabel(fi.Labels, c.Label) {
 			unlabeled = append(unlabeled, fi.Number)
 		}
 	}

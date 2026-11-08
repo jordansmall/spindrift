@@ -9,7 +9,7 @@ import (
 func TestNetworkModeRuntimeGate_OtherFamilysRawKnobFails(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = "bwrap"
-	c.networkMode = "none"
+	c.NetworkMode = "none"
 	c.setRowKnob("PODMAN_NETWORK", "host")
 
 	err := checkNetworkModeRuntimeGate(c)

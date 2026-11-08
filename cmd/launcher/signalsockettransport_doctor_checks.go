@@ -16,7 +16,7 @@ const signalSocketTransportCheckName = "signal-socket-transport"
 // all, unlike registryProxyTransportCheck's always-present not-configured
 // arm.
 func signalSocketTransportChecks(c config) []doctor.Check {
-	if c.signalCarrier != "socket" {
+	if c.SignalCarrier != "socket" {
 		return nil
 	}
 	return []doctor.Check{signalSocketTransportCheck(c)}
@@ -37,7 +37,7 @@ func signalSocketTransportCheck(c config) doctor.Check {
 				// checkSignalCarrierNetworkModeGate already refuses the pairing
 				// at launch, and probing would cost a runtime round trip for a
 				// configuration that can never run.
-				return nil, fmt.Errorf(signalSocketNoneModeReason+": %w", c.networkMode, doctor.ErrDegraded)
+				return nil, fmt.Errorf(signalSocketNoneModeReason+": %w", c.NetworkMode, doctor.ErrDegraded)
 			}
 			endpoint, err := registryProxyTransportFn(c)
 			if err != nil {
@@ -56,7 +56,7 @@ func signalSocketTransportCheck(c config) doctor.Check {
 					// here: under no-host-loopback it errors before its TCP
 					// sub-probe, landing in the probe-error arm above, and the
 					// probe cache refuses to replay one (#3775). Kept as a backstop.
-					return nil, fmt.Errorf("BOX_SIGNAL_CARRIER=socket has no usable transport under NETWORK_MODE=%s -- this runtime can only reach the Signal socket over its TCP fallback, which this mode blocks: %w", c.networkMode, doctor.ErrDegraded)
+					return nil, fmt.Errorf("BOX_SIGNAL_CARRIER=socket has no usable transport under NETWORK_MODE=%s -- this runtime can only reach the Signal socket over its TCP fallback, which this mode blocks: %w", c.NetworkMode, doctor.ErrDegraded)
 				}
 				return "tcp", nil
 			default:

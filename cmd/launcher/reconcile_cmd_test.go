@@ -22,10 +22,10 @@ import (
 )
 
 // testCapabilities resolves capabilities the same way newReadContext does in
-// production, keyed to c.codeForge and c.issueTracker (issue #2946, issue #3064).
+// production, keyed to c.CodeForge and c.IssueTracker (issue #2946, issue #3064).
 func testCapabilities(t *testing.T, c config, cf forge.CodeForge, it forge.IssueTracker) forge.Capabilities {
 	t.Helper()
-	return forge.ResolveCapabilities(cf, it, mustDescriptor(t, c.codeForge), mustDescriptor(t, c.issueTracker))
+	return forge.ResolveCapabilities(cf, it, mustDescriptor(t, c.CodeForge), mustDescriptor(t, c.IssueTracker))
 }
 
 func mustDescriptor(t *testing.T, name string) backend.Descriptor {
@@ -62,7 +62,7 @@ var _ reconcile.LivenessProbe = fakeLiveness{}
 
 func TestRunReconcile_ClosesMergedLandingIssue(t *testing.T) {
 	c := baseConfig()
-	c.issueTracker = "local"
+	c.IssueTracker = "local"
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
@@ -88,7 +88,7 @@ func TestRunReconcile_ClosesMergedLandingIssue(t *testing.T) {
 // abandoned, distinct from a closed issue (ADR 0029).
 func TestRunReconcile_ReportsAbandonedIssue(t *testing.T) {
 	c := baseConfig()
-	c.issueTracker = "local"
+	c.IssueTracker = "local"
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRClosed)
@@ -106,7 +106,7 @@ func TestRunReconcile_ReportsAbandonedIssue(t *testing.T) {
 // fixture still holds a merged landing PR so an accidental sweep would show up.
 func TestRunReconcile_NonLocalTrackerIsClearNoOp(t *testing.T) {
 	c := baseConfig()
-	c.issueTracker = "github"
+	c.IssueTracker = "github"
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
@@ -125,7 +125,7 @@ func TestRunReconcile_NonLocalTrackerIsClearNoOp(t *testing.T) {
 
 func TestRunReconcile_ReportsResetIssue(t *testing.T) {
 	c := baseConfig()
-	c.issueTracker = "local"
+	c.IssueTracker = "local"
 	labels := forge.DispatchLabels{Dispatchable: "dispatchable", InProgress: "in-progress"}
 	f := forge.NewFake(labels)
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Labels: []string{"in-progress"}})
@@ -142,7 +142,7 @@ func TestRunReconcile_ReportsResetIssue(t *testing.T) {
 
 func TestReconcileAfterDispatch_LocalTracker_ClosesMergedLanding(t *testing.T) {
 	c := baseConfig()
-	c.issueTracker = "local"
+	c.IssueTracker = "local"
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
@@ -165,7 +165,7 @@ func TestReconcileAfterDispatch_LocalTracker_ClosesMergedLanding(t *testing.T) {
 // the standalone `spindrift reconcile` verb's explicit refusal message.
 func TestReconcileAfterDispatch_NonLocalTracker_SilentNoOp(t *testing.T) {
 	c := baseConfig()
-	c.issueTracker = "github"
+	c.IssueTracker = "github"
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
@@ -183,7 +183,7 @@ func TestReconcileAfterDispatch_NonLocalTracker_SilentNoOp(t *testing.T) {
 }
 
 // Pins issue #3064 for both reconcile entry points: the guard must read
-// caps.TrackerDescriptor, not look c.issueTracker up again. The fixture
+// caps.TrackerDescriptor, not look c.IssueTracker up again. The fixture
 // deliberately disagrees with itself, naming a non-local tracker in c while
 // forcing caps.TrackerDescriptor to "local", so a guard reading c alone would
 // say "no-op" and the sweep would not run.
@@ -198,7 +198,7 @@ func TestReconcileGuards_ReadTrackerDescriptorFromCaps(t *testing.T) {
 	for _, tt := range reconcileFuncs {
 		t.Run(tt.name, func(t *testing.T) {
 			c := baseConfig()
-			c.issueTracker = "github"
+			c.IssueTracker = "github"
 			f := forge.NewFake()
 			f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 			f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
@@ -275,8 +275,8 @@ func newSurfaceFixture(t *testing.T, parent, codeForge string) surfaceFixture {
 	writeSeamIssue(t, issuesDir, "seam-2", parent, true)
 
 	c := baseConfig()
-	c.codeForge = codeForge
-	c.issueTracker = "local"
+	c.CodeForge = codeForge
+	c.IssueTracker = "local"
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repo.Bare)
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 	lw := localloop.Wire(localloopConfig(c), it)
@@ -324,8 +324,8 @@ func TestSurfaceAfterDispatch_UsesPassedWiredInstance(t *testing.T) {
 	writeSeamIssue(t, issuesDir, "seam-1", parent, true)
 
 	c := baseConfig()
-	c.codeForge = "local"
-	c.issueTracker = "local"
+	c.CodeForge = "local"
+	c.IssueTracker = "local"
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", decoy.Bare)
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 	lw := localloop.Wire(localloop.Config{AccumulationRepoDir: real.Bare}, it)
@@ -361,8 +361,8 @@ func TestSurfaceAfterDispatch_OpenSeamRemains_PrintsHeldVerdict(t *testing.T) {
 	writeSeamIssue(t, issuesDir, "seam-2", parent, false)
 
 	c := baseConfig()
-	c.codeForge = "local"
-	c.issueTracker = "local"
+	c.CodeForge = "local"
+	c.IssueTracker = "local"
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repo.Bare)
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 	lw := localloop.Wire(localloopConfig(c), it)
@@ -389,8 +389,8 @@ func TestSurfaceAfterDispatch_NonLocalCodeForge_NoOp(t *testing.T) {
 	writeSeamIssue(t, issuesDir, "seam-1", parent, true)
 
 	c := baseConfig()
-	c.codeForge = "github"
-	c.issueTracker = "local"
+	c.CodeForge = "github"
+	c.IssueTracker = "local"
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 	lw := localloop.Wire(localloopConfig(c), it)
 
@@ -404,17 +404,17 @@ func TestSurfaceAfterDispatch_NonLocalCodeForge_NoOp(t *testing.T) {
 }
 
 // Pins issue #3064: the auto-surface guard must read caps.ForgeDescriptor, not
-// look c.codeForge up again. The fixture names a non-local codeForge in c
+// look c.CodeForge up again. The fixture names a non-local codeForge in c
 // while forcing caps.ForgeDescriptor to "local", so a guard reading c alone
 // would say "no-op" instead of surfacing the Integration branch.
 func TestSurfaceAfterDispatch_ReadsForgeDescriptorFromCaps(t *testing.T) {
 	const parent = "1700"
 	fx := newSurfaceFixture(t, parent, "github")
 
-	// The Accumulation repo path comes from c.codeForge's Strategy, so
+	// The Accumulation repo path comes from c.CodeForge's Strategy, so
 	// wire the loop from a local-forge copy; the guard still sees github in c.
 	localC := fx.c
-	localC.codeForge = "local"
+	localC.CodeForge = "local"
 	fx.lw = localloop.Wire(localloopConfig(localC), fx.it)
 
 	caps := forge.ResolveCapabilities(nil, fx.it, localDescriptor(t), backend.Descriptor{})
@@ -452,8 +452,8 @@ func TestSurfaceAfterDispatch_MixedParentBatch_SurfacesOnlyCompletedTickets(t *t
 	writeSeamIssue(t, issuesDir, "seam-b2", "broad-b", false)
 
 	c := baseConfig()
-	c.codeForge = "local"
-	c.issueTracker = "local"
+	c.CodeForge = "local"
+	c.IssueTracker = "local"
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repo.Bare)
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 	lw := localloop.Wire(localloopConfig(c), it)
@@ -491,8 +491,8 @@ func TestSurfaceAfterDispatch_OneParentErrors_StillAttemptsTheOthers(t *testing.
 	writeSeamIssue(t, issuesDir, "seam-b1", "broad-b", true)
 
 	c := baseConfig()
-	c.codeForge = "local"
-	c.issueTracker = "local"
+	c.CodeForge = "local"
+	c.IssueTracker = "local"
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repo.Bare)
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 	lw := localloop.Wire(localloopConfig(c), it)
@@ -539,8 +539,8 @@ func TestRunReconcile_ClosingLastSeamSurfacesIntegrationBranch(t *testing.T) {
 	mustInitCheckout(t, pwd, "main")
 
 	c := baseConfig()
-	c.issueTracker = "local"
-	c.codeForge = "local"
+	c.IssueTracker = "local"
+	c.CodeForge = "local"
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repo.Bare)
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 
@@ -578,8 +578,8 @@ func TestSurfaceAfterDispatch_ManyNeverLandedParents_CollapsesIntoOneSummaryLine
 	writeSeamIssue(t, issuesDir, "9003", "", true)
 
 	c := baseConfig()
-	c.codeForge = "local"
-	c.issueTracker = "local"
+	c.CodeForge = "local"
+	c.IssueTracker = "local"
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repo.Bare)
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 	lw := localloop.Wire(localloopConfig(c), it)
@@ -612,8 +612,8 @@ func TestSurfaceAfterDispatch_NeverLandedAndCheckedOut_OnlyNeverLandedCollapses(
 	writeSeamIssue(t, issuesDir, "9010", "", true)
 
 	c := baseConfig()
-	c.codeForge = "local"
-	c.issueTracker = "local"
+	c.CodeForge = "local"
+	c.IssueTracker = "local"
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repo.Bare)
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 	lw := localloop.Wire(localloopConfig(c), it)
@@ -669,7 +669,7 @@ func lateMergeFixture(t *testing.T) (root, idA string, f *forge.Fake, c config) 
 	f.SetPRState(prA, forge.PRMerged)
 	f.SetPRState(prB, forge.PRClosed)
 	c = baseConfig()
-	c.issueTracker = "github"
+	c.IssueTracker = "github"
 	return root, idA, f, c
 }
 
@@ -798,7 +798,7 @@ func brokenStatsFixture(t *testing.T) (root string, f *forge.Fake, c config) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
 	c = baseConfig()
-	c.issueTracker = "local"
+	c.IssueTracker = "local"
 	return root, f, c
 }
 
@@ -830,7 +830,7 @@ func TestReconcileAfterDispatch_LocalTracker_LateMergeFailureWarnsAndStillCloses
 
 func TestReconcileAfterDispatch_NonLocalTracker_LateMergeFailureWarnsOnly(t *testing.T) {
 	root, f, c := brokenStatsFixture(t)
-	c.issueTracker = "github"
+	c.IssueTracker = "github"
 
 	var buf bytes.Buffer
 	if err := reconcileAfterDispatch(c, f, f, fakeLiveness{}, testCapabilities(t, c, f, f), root, &buf); err != nil {

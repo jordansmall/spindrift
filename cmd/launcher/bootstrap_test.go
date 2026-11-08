@@ -439,9 +439,9 @@ func TestSeedAccumulationRepoIfHostMediated_Local_SeedsFromPwd(t *testing.T) {
 
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 	c := baseConfig()
-	c.codeForge = "local"
+	c.CodeForge = "local"
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
-	c.baseBranch = "main"
+	c.BaseBranch = "main"
 
 	lock, err := seedAccumulationRepoIfHostMediated(c, checkout)
 	if err != nil {
@@ -460,7 +460,7 @@ func TestSeedAccumulationRepoIfHostMediated_Local_SeedsFromPwd(t *testing.T) {
 // proves the no-op.
 func TestSeedAccumulationRepoIfHostMediated_NonLocal_NoOp(t *testing.T) {
 	c := baseConfig()
-	c.codeForge = "github"
+	c.CodeForge = "github"
 
 	lock, err := seedAccumulationRepoIfHostMediated(c, "/nonexistent/pwd")
 	if err != nil {
@@ -480,10 +480,10 @@ func TestSeedAccumulationRepoIfHostMediated_ResearchKind_SeedsFromPwd(t *testing
 
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 	c := baseConfig()
-	c.codeForge = "local"
+	c.CodeForge = "local"
 	c.dispatchKind = dispatchkind.Research
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
-	c.baseBranch = "main"
+	c.BaseBranch = "main"
 
 	lock, err := seedAccumulationRepoIfHostMediated(c, checkout)
 	if err != nil {
@@ -504,11 +504,11 @@ func TestSeedAccumulationRepoIfHostMediated_ResearchKind_SeedsFromPwd(t *testing
 // invoked, so a nil error proves the no-op.
 func TestSeedAccumulationRepoIfHostMediated_ResearchSelfContained_NoOp(t *testing.T) {
 	c := baseConfig()
-	c.codeForge = "local"
+	c.CodeForge = "local"
 	c.dispatchKind = dispatchkind.Research
 	c.selfContained = true
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", filepath.Join(t.TempDir(), "accum.git"))
-	c.baseBranch = "main"
+	c.BaseBranch = "main"
 
 	lock, err := seedAccumulationRepoIfHostMediated(c, "/nonexistent/pwd")
 	if err != nil {
@@ -528,9 +528,9 @@ func TestSeedAccumulationRepoIfHostMediated_ConcurrentCallSameRepo_FailsUntilRel
 	checkout := mustSeedableCheckout(t)
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 	c := baseConfig()
-	c.codeForge = "local"
+	c.CodeForge = "local"
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
-	c.baseBranch = "main"
+	c.BaseBranch = "main"
 
 	firstLock, err := seedAccumulationRepoIfHostMediated(c, checkout)
 	if err != nil {
@@ -575,9 +575,9 @@ func TestSeedAccumulationRepoIfHostMediated_SeedFailure_ReleasesLock(t *testing.
 
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 	c := baseConfig()
-	c.codeForge = "local"
+	c.CodeForge = "local"
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
-	c.baseBranch = "main"
+	c.BaseBranch = "main"
 
 	lock, err := seedAccumulationRepoIfHostMediated(c, checkout)
 	if err == nil {
@@ -978,7 +978,7 @@ body
 	}
 
 	c := baseConfig()
-	c.issueTracker = "local"
+	c.IssueTracker = "local"
 	c.setRowKnob("LOCAL_ISSUES_DIR", issuesDir)
 	dir := tempLogDir(t)
 	lc := &launchContext{

@@ -33,8 +33,8 @@ func TestNewGatedContext_CleanConfig_SucceedsAndPopulatesFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newGatedContext() = %v, want nil error for a clean config", err)
 	}
-	if gc.config.issueTracker != "local" {
-		t.Errorf("gc.config.issueTracker = %q, want %q", gc.config.issueTracker, "local")
+	if gc.config.IssueTracker != "local" {
+		t.Errorf("gc.config.issueTracker = %q, want %q", gc.config.IssueTracker, "local")
 	}
 	if gc.issueTracker == nil {
 		t.Error("gc.issueTracker = nil, want a non-nil IssueTracker")
@@ -68,8 +68,8 @@ func TestNewGatedContext_ResearchKind_AppliesKindAndLabel(t *testing.T) {
 	if gc.config.dispatchKind != dispatchkind.Research {
 		t.Errorf("gc.config.dispatchKind = %v, want %v", gc.config.dispatchKind, dispatchkind.Research)
 	}
-	if want := forge.ResearchDispatchLabels().Dispatchable; gc.config.label != want {
-		t.Errorf("gc.config.label = %q, want %q (forge.ResearchDispatchLabels().Dispatchable)", gc.config.label, want)
+	if want := forge.ResearchDispatchLabels().Dispatchable; gc.config.Label != want {
+		t.Errorf("gc.config.label = %q, want %q (forge.ResearchDispatchLabels().Dispatchable)", gc.config.Label, want)
 	}
 }
 

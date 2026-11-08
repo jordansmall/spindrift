@@ -176,8 +176,8 @@ func TestJiraNewIssueTrackerMalformedStatusMapping(t *testing.T) {
 	if row.NewIssueTracker == nil {
 		t.Fatal("jira row.NewIssueTracker is nil")
 	}
-	c := config{schemaConfig: schemaConfig{
-		rowKnobs: map[string]string{
+	c := config{Knobs: inputdoc.Knobs{
+		RowKnobs: map[string]string{
 			"JIRA_BASE_URL":       "https://example.atlassian.net",
 			"JIRA_PROJECT_KEY":    "PROJ",
 			"JIRA_TOKEN":          "tok",
@@ -239,8 +239,8 @@ func TestJiraIncludeCommentsIsNoOp(t *testing.T) {
 		t.Fatal("backendkit.ByName(\"jira\") ok=false")
 	}
 	for _, include := range []bool{false, true} {
-		c := config{schemaConfig: schemaConfig{
-			rowKnobs: map[string]string{
+		c := config{Knobs: inputdoc.Knobs{
+			RowKnobs: map[string]string{
 				"JIRA_BASE_URL":         srv.URL,
 				"JIRA_PROJECT_KEY":      "PROJ",
 				"JIRA_TOKEN":            "tok",
@@ -341,17 +341,17 @@ func TestJiraStatusMappingAppliesToWorkTrackerOnly(t *testing.T) {
 			srv := httptest.NewServer(fake)
 			defer srv.Close()
 
-			c := applyDispatchKind(config{schemaConfig: schemaConfig{
-				rowKnobs: map[string]string{
+			c := applyDispatchKind(config{Knobs: inputdoc.Knobs{
+				RowKnobs: map[string]string{
 					"JIRA_BASE_URL":       srv.URL,
 					"JIRA_PROJECT_KEY":    "PROJ",
 					"JIRA_TOKEN":          "tok",
 					"JIRA_STATUS_MAPPING": mapping,
 				},
-				label:           "ready-for-agent",
-				inProgressLabel: "agent-in-progress",
-				completeLabel:   "agent-complete",
-				failedLabel:     "agent-failed",
+				Label:           "ready-for-agent",
+				InProgressLabel: "agent-in-progress",
+				CompleteLabel:   "agent-complete",
+				FailedLabel:     "agent-failed",
 			}}, tc.kind)
 			tracker := mustBuild(row.NewIssueTracker(backendShared(c), c.knobLookup))
 
@@ -397,7 +397,7 @@ func TestBlankInputDocumentKnobs_ForgejoRejectedLocalRedefaults(t *testing.T) {
 		"LOCAL_ISSUES_DIR": "",
 	}}
 	c := minimalValidConfig()
-	c.schemaConfig = loadSchemaConfig()
+	c.Knobs = loadSchemaConfig()
 	c.setRowKnob(backend.Forgejo.TokenEnvVar, "tok")
 	fjBase, _ := c.knobLookup("FORGEJO_BASE_URL")
 	localDir, _ := c.knobLookup("LOCAL_ISSUES_DIR")
@@ -429,7 +429,7 @@ func TestBlankInputDocumentKnobs_ForgejoRejectedLocalRedefaults(t *testing.T) {
 		t.Error("local validateTracker non-nil; a blank LOCAL_ISSUES_DIR must not fail closed")
 	}
 	t.Chdir(t.TempDir())
-	c.issueTracker = "local"
+	c.IssueTracker = "local"
 	probe, ok := mustBuild(local.NewIssueTracker(backendShared(c), c.knobLookup)).(interface{ Probe() (string, error) })
 	if !ok {
 		t.Fatal("local tracker has no Probe")
@@ -457,7 +457,7 @@ func TestUnregisteredBackendNameFailsWithoutGithubFallback(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := minimalValidConfig()
-			c.issueTracker, c.codeForge = tc.tracker, tc.cf
+			c.IssueTracker, c.CodeForge = tc.tracker, tc.cf
 
 			if err := validate(c); err == nil || !strings.Contains(err.Error(), tc.wantContains) {
 				t.Errorf("validate() = %v, want error containing %q", err, tc.wantContains)
@@ -469,7 +469,7 @@ func TestUnregisteredBackendNameFailsWithoutGithubFallback(t *testing.T) {
 	}
 
 	c := minimalValidConfig()
-	c.issueTracker = "nope"
+	c.IssueTracker = "nope"
 	assertPanics := func(name string, f func()) {
 		t.Helper()
 		defer func() {
@@ -480,7 +480,7 @@ func TestUnregisteredBackendNameFailsWithoutGithubFallback(t *testing.T) {
 		f()
 	}
 	assertPanics("newIssueTracker", func() { newIssueTracker(c) })
-	c.codeForge = "nope"
+	c.CodeForge = "nope"
 	assertPanics("newCodeForge", func() { newCodeForge(c, forge.SanitizedParent{}, forge.NewFake()) })
 }
 
@@ -498,7 +498,7 @@ func TestNewReadContext_UnregisteredBackendIsAnError(t *testing.T) {
 // other name falls back to the environment.
 func TestHostTokenValue(t *testing.T) {
 	c := minimalValidConfig()
-	c.ghToken = "ghp_core"
+	c.GhToken = "ghp_core"
 	c.setRowKnob(backend.Forgejo.TokenEnvVar, "fj_knob")
 	t.Setenv(backend.GitHub.TokenEnvVar, "env_gh")
 	t.Setenv(backend.Forgejo.TokenEnvVar, "env_fj")
@@ -518,11 +518,11 @@ func TestHostTokenValue(t *testing.T) {
 // setRowKnob stores a row knob's resolved value, as a test fixture would set
 // it. It copies the map first so a config copied by value never shares writes
 // with the original.
-func (c *schemaConfig) setRowKnob(env, value string) {
-	m := make(map[string]string, len(c.rowKnobs)+1)
-	for k, v := range c.rowKnobs {
+func (c *config) setRowKnob(env, value string) {
+	m := make(map[string]string, len(c.RowKnobs)+1)
+	for k, v := range c.RowKnobs {
 		m[k] = v
 	}
 	m[env] = value
-	c.rowKnobs = m
+	c.RowKnobs = m
 }

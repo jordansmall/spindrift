@@ -113,9 +113,9 @@ func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor
 	// A run that outlives the minter's token lifetime would otherwise 401 at the
 	// terminal gh calls (merge, label edits, final comment), so poll the file
 	// the minter rewrites in place (issue #1027). No-op when unset.
-	if c.ghTokenRefreshFile != "" {
+	if c.GhTokenRefreshFile != "" {
 		panicguard.Go(func() {
-			tokenrefresh.Watch(c.ghTokenRefreshFile, tokenrefresh.Interval, nil, func(v string) error {
+			tokenrefresh.Watch(c.GhTokenRefreshFile, tokenrefresh.Interval, nil, func(v string) error {
 				return os.Setenv("GH_TOKEN", v)
 			})
 		})
@@ -190,7 +190,7 @@ func (lc *launchContext) patchGate() butler.PatchGate {
 // the /repo mount, and host-side landing then fails (issue #1726); research
 // needs the seed too unless it is self-contained (issue #2439).
 func seedAccumulationRepoIfHostMediated(c config, pwd string) (*local.AccumulationLock, error) {
-	row, _ := backendkit.ByName(c.codeForge)
+	row, _ := backendkit.ByName(c.CodeForge)
 	if !row.HostMediatedRemote || c.selfContained {
 		return nil, nil
 	}
@@ -199,7 +199,7 @@ func seedAccumulationRepoIfHostMediated(c config, pwd string) (*local.Accumulati
 	if err != nil {
 		return nil, err
 	}
-	if err := local.SeedAccumulationRepo(repoDir, pwd, c.baseBranch); err != nil {
+	if err := local.SeedAccumulationRepo(repoDir, pwd, c.BaseBranch); err != nil {
 		_ = lock.Release()
 		return nil, err
 	}

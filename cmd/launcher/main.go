@@ -54,7 +54,7 @@ type config struct {
 	// One field per lib/env-schema.nix host-config entry (issue #2364, #2365),
 	// loaded by loadSchemaConfig. Embedded by value so a copy-and-mutate helper
 	// like applyDispatchKind can never alias the caller's config through it.
-	schemaConfig
+	inputdoc.Knobs
 
 	// artifacts is the Launcher input document's artifacts section, handed whole
 	// to the selected runner family, which reads only its own part.
@@ -101,7 +101,7 @@ type config struct {
 	driverSessionCacheDir string
 
 	// registryProxyRoutes is the resolved registry-proxy route table (ADR 0045,
-	// issue #3139). schemaConfig's registryProxyRoutesFile carries only a TOML
+	// issue #3139). inputdoc.Knobs's RegistryProxyRoutesFile carries only a TOML
 	// path, never a credential value; bootstrap resolves it exactly once via
 	// buildRegistryProxyRoutes. Nil when the registry proxy is off entirely.
 	registryProxyRoutes []registryproxy.Route
@@ -118,7 +118,7 @@ type config struct {
 	dispatchKind *dispatchkind.Descriptor
 
 	// workLabel is the operator's configured work LABEL, captured by
-	// applyDispatchKind before its swap blanks c.label for a label-less
+	// applyDispatchKind before its swap blanks c.Label for a label-less
 	// family (butler, ADR 0056). Butler promotion reads it (issue #4054).
 	// It is the configured LABEL only when applyDispatchKind runs on a fresh
 	// loadConfig(); a second application captures the prior kind's label.
@@ -151,13 +151,13 @@ func (c config) kind() *dispatchkind.Descriptor {
 
 // effectiveBoxForgeAndIssueAccess is the effective BOX_FORGE_AND_ISSUE_ACCESS
 // handed to dispatch: the raw knob, forced "read-only" for a ReadOnlyBox kind
-// (issue #3906). c.boxForgeAndIssueAccess itself stays raw for the
+// (issue #3906). c.BoxForgeAndIssueAccess itself stays raw for the
 // token/settle gates that key off the operator's actual knob.
 func (c config) effectiveBoxForgeAndIssueAccess() string {
 	if c.kind().ReadOnlyBox {
 		return "read-only"
 	}
-	return c.boxForgeAndIssueAccess
+	return c.BoxForgeAndIssueAccess
 }
 
 // artifact resolves c.boxArtifact to the freshness adapter that owns how the
@@ -177,10 +177,10 @@ func (c config) artifact() (freshness.Artifact, error) {
 	return freshness.LookupArtifact(name)
 }
 
-// runnerNetworkMode is c.networkMode as runner's typed NETWORK_MODE;
-// schemaconfig_gen.go keeps the generated field a plain string.
+// runnerNetworkMode is c.NetworkMode as runner's typed NETWORK_MODE;
+// inputdoc.Knobs keeps the generated field a plain string.
 func (c config) runnerNetworkMode() runner.NetworkMode {
-	return runner.NetworkMode(c.networkMode)
+	return runner.NetworkMode(c.NetworkMode)
 }
 
 // applyDispatchKind sets c's dispatchKind and swaps the four lifecycle label
@@ -191,29 +191,29 @@ func (c config) runnerNetworkMode() runner.NetworkMode {
 // configuredWork is captured before the swap overwrites it, since the other
 // family's in-progress label (issue #3541) may be the configured one; it also
 // becomes c.workLabel, so a label-less family (butler) still has the
-// configured work label available after its own c.label goes blank. An
+// configured work label available after its own c.Label goes blank. An
 // UnclaimedGate kind keeps the configured completeLabel: its merged patch PR
 // completes the finding like any work PR (ADR 0057, issue #4076).
 func applyDispatchKind(c config, kind *dispatchkind.Descriptor) config {
 	c.dispatchKind = kind
 	configuredWork := forge.DispatchLabels{
-		Dispatchable: c.label,
-		InProgress:   c.inProgressLabel,
-		Complete:     c.completeLabel,
-		Failed:       c.failedLabel,
+		Dispatchable: c.Label,
+		InProgress:   c.InProgressLabel,
+		Complete:     c.CompleteLabel,
+		Failed:       c.FailedLabel,
 	}
 
 	c.workLabel = configuredWork.Dispatchable
 
 	ownFamily := c.kind().Labels
 	own := forge.FamilyLabels(ownFamily, configuredWork)
-	c.label = own.Dispatchable
-	c.inProgressLabel = own.InProgress
-	c.completeLabel = own.Complete
-	c.failedLabel = own.Failed
+	c.Label = own.Dispatchable
+	c.InProgressLabel = own.InProgress
+	c.CompleteLabel = own.Complete
+	c.FailedLabel = own.Failed
 
 	if c.kind().UnclaimedGate {
-		c.completeLabel = configuredWork.Complete
+		c.CompleteLabel = configuredWork.Complete
 	}
 
 	c.otherFamilyInProgressLabels = nil
@@ -364,8 +364,8 @@ func loadConfig() config {
 	driver, _ := resolveDriver()
 
 	cfg := config{
-		schemaConfig: sc,
-		artifacts:    art,
+		Knobs:     sc,
+		artifacts: art,
 
 		flakeLauncherAttr:  shared.FlakeLauncherAttr.String(),
 		loadedLauncherHash: shared.LauncherCurrencyHash.String(),
@@ -534,7 +534,7 @@ func validate(c config) error {
 	if err := validateChoiceKnobsFailFast(c, after); err != nil {
 		return err
 	}
-	if _, err := forge.ParseResearchVerdicts(c.researchVerdicts); err != nil {
+	if _, err := forge.ParseResearchVerdicts(c.ResearchVerdicts); err != nil {
 		return err
 	}
 	return nil
@@ -565,7 +565,7 @@ func validateConfigChecks(c config, checks []doctor.Check) error {
 		}
 	}
 	errs = append(errs, validateChoiceKnobsErrors(c, choiceKnobRegistry)...)
-	if _, err := forge.ParseResearchVerdicts(c.researchVerdicts); err != nil {
+	if _, err := forge.ParseResearchVerdicts(c.ResearchVerdicts); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
@@ -575,10 +575,10 @@ func validateConfigChecks(c config, checks []doctor.Check) error {
 // print at the top of a dispatch. The repo segment is omitted when repoSlug is
 // empty, the fully-local case where no target repo exists.
 func repoBanner(c config) string {
-	if c.repoSlug == "" {
-		return fmt.Sprintf("merge-mode: %s", c.mergeMode)
+	if c.RepoSlug == "" {
+		return fmt.Sprintf("merge-mode: %s", c.MergeMode)
 	}
-	return fmt.Sprintf("repo: %s  merge-mode: %s", c.repoSlug, c.mergeMode)
+	return fmt.Sprintf("repo: %s  merge-mode: %s", c.RepoSlug, c.MergeMode)
 }
 
 // dispatchLabels builds the DispatchLabels mapping from loaded config.
@@ -588,10 +588,10 @@ func repoBanner(c config) string {
 // fixed too, since issue #2275 does not ask for it to be configurable.
 func dispatchLabels(c config) forge.DispatchLabels {
 	return forge.DispatchLabels{
-		Dispatchable: c.label,
-		InProgress:   c.inProgressLabel,
-		Complete:     c.completeLabel,
-		Failed:       c.failedLabel,
+		Dispatchable: c.Label,
+		InProgress:   c.InProgressLabel,
+		Complete:     c.CompleteLabel,
+		Failed:       c.FailedLabel,
 		Recoverable:  "agent-recoverable",
 		Ambiguous:    "agent-ambiguous-spec",
 	}
@@ -622,7 +622,7 @@ func settledLabels(c config) []string {
 func researchVerdictLabels(c config) forge.VerdictLabels {
 	switch c.kind().Tracker {
 	case dispatchkind.TrackerResearch:
-		vl, err := forge.ParseResearchVerdicts(c.researchVerdicts)
+		vl, err := forge.ParseResearchVerdicts(c.ResearchVerdicts)
 		if err != nil {
 			// validate() already rejects a malformed set before this is
 			// reached; fall back to the compiled default set.
@@ -638,9 +638,9 @@ func researchVerdictLabels(c config) forge.VerdictLabels {
 // (ADR 0022). An unregistered name or a Strategy with no constructor is
 // unreachable post-validate, and there is no fallback: it panics.
 func newIssueTracker(c config) forge.IssueTracker {
-	s, ok := backendkit.ByName(c.issueTracker)
+	s, ok := backendkit.ByName(c.IssueTracker)
 	if !ok || s.NewIssueTracker == nil {
-		panic(fmt.Sprintf("newIssueTracker: ISSUE_TRACKER=%q is not a registered tracker (validate should have rejected it)", c.issueTracker))
+		panic(fmt.Sprintf("newIssueTracker: ISSUE_TRACKER=%q is not a registered tracker (validate should have rejected it)", c.IssueTracker))
 	}
 	return mustBuild(s.NewIssueTracker(backendShared(c), c.knobLookup))
 }
@@ -652,11 +652,11 @@ func newIssueTracker(c config) forge.IssueTracker {
 // every other forge ignores it. An unregistered name is unreachable
 // post-validate, and there is no fallback: it panics.
 func newCodeForge(c config, parent local.SanitizedParent, it forge.IssueTracker) forge.CodeForge {
-	s, ok := backendkit.ByName(c.codeForge)
+	s, ok := backendkit.ByName(c.CodeForge)
 	if !ok || s.NewCodeForge == nil {
-		panic(fmt.Sprintf("newCodeForge: CODE_FORGE=%q is not a registered code forge (validate should have rejected it)", c.codeForge))
+		panic(fmt.Sprintf("newCodeForge: CODE_FORGE=%q is not a registered code forge (validate should have rejected it)", c.CodeForge))
 	}
-	if c.boxForgeAndIssueAccess == "read-only" && s.NewReadOnlyCodeForge != nil {
+	if c.BoxForgeAndIssueAccess == "read-only" && s.NewReadOnlyCodeForge != nil {
 		return mustBuild(s.NewReadOnlyCodeForge(backendShared(c), c.knobLookup, parent, it))
 	}
 	return mustBuild(s.NewCodeForge(backendShared(c), c.knobLookup, parent, it))
@@ -698,12 +698,12 @@ func dispatchCompletionBanner(c config, outcomes []settle.DispatchOutcome) strin
 
 // forgeLandedLine is the all-delivered banner for a kind that lands code.
 func forgeLandedLine(c config) string {
-	s, ok := backendkit.ByName(c.codeForge)
+	s, ok := backendkit.ByName(c.CodeForge)
 	if !ok || s.LandedBanner == nil {
-		// validate restricts c.codeForge to a registered Code Forge, so a
+		// validate restricts c.CodeForge to a registered Code Forge, so a
 		// backend missing its banner fails loud here rather than printing a
 		// blank clause.
-		panic(fmt.Sprintf("no landed banner for CODE_FORGE=%q", c.codeForge))
+		panic(fmt.Sprintf("no landed banner for CODE_FORGE=%q", c.CodeForge))
 	}
 	return fmt.Sprintf("==> all agents finished — %s.\n", s.LandedBanner(backendShared(c)))
 }
@@ -731,16 +731,16 @@ func delivered(o settle.DispatchOutcome) bool {
 // `run` and `build` entry points; build never calls Run, so leaving
 // PromptDir/SkillsDir populated is harmless there.
 func runnerConfig(c config) runner.Config {
-	sig := resolveCapabilitySignals(c.codeForge, c.issueTracker)
+	sig := resolveCapabilitySignals(c.CodeForge, c.IssueTracker)
 	return runner.Config{
 		Runtime:     c.runtime,
 		NetworkMode: c.runnerNetworkMode(),
-		PidsLimit:   c.pidsLimit,
-		MemoryLimit: c.memoryLimit,
-		MaxParallel: c.maxParallel,
+		PidsLimit:   c.PidsLimit,
+		MemoryLimit: c.MemoryLimit,
+		MaxParallel: c.MaxParallel,
 		MountParams: runner.MountParams{
-			PromptDir:             c.spindriftPromptDir,
-			SkillsDir:             c.spindriftSkillsDir,
+			PromptDir:             c.SpindriftPromptDir,
+			SkillsDir:             c.SpindriftSkillsDir,
 			DriverSessionCacheDir: c.driverSessionCacheDir,
 			HostMediatedRemote:    sig.hostMediatedRemote,
 			AccumulationRepoDir:   c.hostRepoDir(),
@@ -785,7 +785,7 @@ func newDriver(c config) driver.Driver {
 // CODE_FORGE=local it forwards BASE_BRANCH as the seam's Integration branch
 // (integration/<parent>, ADR 0033) once cf.BranchExists confirms it, so a Box
 // builds on whatever has landed so far (issue #1700). That ref only appears
-// once some seam lands, so it falls back to c.baseBranch until then.
+// once some seam lands, so it falls back to c.BaseBranch until then.
 func localBaseBranchResolver(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) func(num, name string) string {
 	if !caps.ForgeDescriptor.HostMediatedRemote {
 		return func(_, name string) string { return resolveBoxEnvVar(name) }
@@ -803,7 +803,7 @@ func localBaseBranchResolver(c config, it forge.IssueTracker, lw *localloop.Wire
 			case err == nil && exists:
 				return integrationBranch
 			case err != nil:
-				fmt.Printf("!! BASE_BRANCH: checking %s: %v; falling back to %s\n", integrationBranch, err, c.baseBranch)
+				fmt.Printf("!! BASE_BRANCH: checking %s: %v; falling back to %s\n", integrationBranch, err, c.BaseBranch)
 			default:
 				// A blocker-free seam legitimately seeds from base on first
 				// dispatch, so stay silent for it. A seam that HAS blockers
@@ -813,9 +813,9 @@ func localBaseBranchResolver(c config, it forge.IssueTracker, lw *localloop.Wire
 				deps, derr := it.DepsOf(num)
 				switch {
 				case derr != nil:
-					fmt.Printf("!! BASE_BRANCH: seam #%s: checking blockers: %v; integration branch %s does not exist, falling back to %s -- cannot confirm the #2130 readiness gate held a blocked seam\n", num, derr, integrationBranch, c.baseBranch)
+					fmt.Printf("!! BASE_BRANCH: seam #%s: checking blockers: %v; integration branch %s does not exist, falling back to %s -- cannot confirm the #2130 readiness gate held a blocked seam\n", num, derr, integrationBranch, c.BaseBranch)
 				case len(deps) > 0:
-					fmt.Printf("!! BASE_BRANCH: seam #%s has %d blocker(s) but its integration branch %s does not exist; falling back to %s -- the #2130 readiness gate should have held this seam rather than seeding it onto bare base\n", num, len(deps), integrationBranch, c.baseBranch)
+					fmt.Printf("!! BASE_BRANCH: seam #%s has %d blocker(s) but its integration branch %s does not exist; falling back to %s -- the #2130 readiness gate should have held this seam rather than seeding it onto bare base\n", num, len(deps), integrationBranch, c.BaseBranch)
 				}
 			}
 		}
@@ -831,7 +831,7 @@ func localBaseBranchResolver(c config, it forge.IssueTracker, lw *localloop.Wire
 // An empty snapshot stays empty, so the Box's GIT_USER_NAME guard still fires.
 func hostGitConfigResolver(c config, next func(num, name string) string) func(num, name string) string {
 	return func(num, name string) string {
-		if v, ok := c.hostGitConfigValue(name); ok {
+		if v, ok := c.HostGitConfigValue(name); ok {
 			return v
 		}
 		return next(num, name)
@@ -863,9 +863,9 @@ func boxTokenResolver(next func(num, name string) string) func(num, name string)
 // same three ints (issue #2928).
 func retryPolicy(c config) retry.Policy {
 	return retry.Policy{
-		Max:    c.transientRetryMax,
-		Unit:   time.Duration(c.transientBackoffSecs) * time.Second,
-		Jitter: time.Duration(c.holdJitterSecs) * time.Second,
+		Max:    c.TransientRetryMax,
+		Unit:   time.Duration(c.TransientBackoffSecs) * time.Second,
+		Jitter: time.Duration(c.HoldJitterSecs) * time.Second,
 	}
 }
 
@@ -874,7 +874,7 @@ func retryPolicy(c config) retry.Policy {
 // path; an --input document that contradicts the registry is an accepted gap
 // (#3062, #2947).
 func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) dispatch.Config {
-	trackerAxisRead, trackerAxisWrite, trackerAxisFiler, forgeBackend := resolveTrackerAndForgeSignals(c.codeForge, c.issueTracker)
+	trackerAxisRead, trackerAxisWrite, trackerAxisFiler, forgeBackend := resolveTrackerAndForgeSignals(c.CodeForge, c.IssueTracker)
 	presence := resolveAgentPresenceSignals(c.driver)
 	reviewModel := os.Getenv("REVIEW_MODEL")
 	return dispatch.Config{
@@ -903,7 +903,7 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 		DriverSessionCacheDir:    c.driverSessionCacheDir,
 		RegistryProxyRoutes:      c.registryProxyRoutes,
 		RegistryProxyRewriteRows: ecosystem.ResponseRewriteRows(ecosystem.Registered()),
-		SignalCarrier:            c.signalCarrier,
+		SignalCarrier:            c.SignalCarrier,
 		NetworkMode:              c.runnerNetworkMode(),
 		// forge.ResolveOpenPR (issue #565) keeps a zero-exit rate-limited retry
 		// from re-running a box whose work already landed a PR.
@@ -937,24 +937,24 @@ func newDispatchFactory(c config, pwd string, r runner.Runner, it forge.IssueTra
 func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) settle.Config {
 	return settle.Config{
 		Capabilities:      caps,
-		MergeMode:         c.mergeMode,
-		MergeGuardPaths:   c.mergeGuardPaths,
-		CompleteLabel:     c.completeLabel,
+		MergeMode:         c.MergeMode,
+		MergeGuardPaths:   c.MergeGuardPaths,
+		CompleteLabel:     c.CompleteLabel,
 		DispatchLabel:     c.workLabel,
-		MergePollInterval: c.mergePollInterval,
-		MergePollTimeout:  c.mergePollTimeout,
-		MaxFixAttempts:    c.maxFixAttempts,
+		MergePollInterval: c.MergePollInterval,
+		MergePollTimeout:  c.MergePollTimeout,
+		MaxFixAttempts:    c.MaxFixAttempts,
 		Unclaimed:         c.kind().UnclaimedGate,
 		FindingLabel:      c.kind().FindingLabel,
-		MaxRebaseAttempts: c.maxRebaseAttempts,
+		MaxRebaseAttempts: c.MaxRebaseAttempts,
 		// Policy reuses dispatch's transient-retry tuning rather than a second
 		// knob pair (issue #2095, #2325, #2928); it covers the rebase-push
 		// backoff and the merge-transient retry cap, which is not
 		// MaxRebaseAttempts, a merge-conflict budget. settle.New fills Clock.
 		Policy:             retryPolicy(c),
-		MaxBudgetTokens:    c.maxBudgetTokens,
-		MaxBudgetUSD:       c.maxBudgetUSD,
-		PreflightStaleBase: c.preflightStaleBase,
+		MaxBudgetTokens:    c.MaxBudgetTokens,
+		MaxBudgetUSD:       c.MaxBudgetUSD,
+		PreflightStaleBase: c.PreflightStaleBase,
 		OutboxDir:          lw.OutboxDir,
 		LogPath:            primaryLogPath,
 		CodeForgeForIssue: func(num string) forge.CodeForge {
@@ -963,8 +963,8 @@ func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge, caps forge.
 			}
 			return lw.CodeForgeForIssue(num)
 		},
-		ReadOnly:   c.boxForgeAndIssueAccess == "read-only",
-		BaseBranch: c.baseBranch,
+		ReadOnly:   c.BoxForgeAndIssueAccess == "read-only",
+		BaseBranch: c.BaseBranch,
 	}
 }
 
@@ -974,10 +974,10 @@ func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge, caps forge.
 func localloopConfig(c config) localloop.Config {
 	return localloop.Config{
 		AccumulationRepoDir: c.hostRepoDir(),
-		BaseBranch:          c.baseBranch,
-		GitUserName:         c.gitUserName,
-		GitUserEmail:        c.gitUserEmail,
-		BranchPrefix:        c.branchPrefix,
+		BaseBranch:          c.BaseBranch,
+		GitUserName:         c.GitUserName,
+		GitUserEmail:        c.GitUserEmail,
+		BranchPrefix:        c.BranchPrefix,
 	}
 }
 
@@ -990,8 +990,8 @@ func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.Co
 	switch c.kind().Settle {
 	case dispatchkind.SettleVerdict:
 		vl := researchVerdictLabels(c)
-		verdictRelayed := backend.ResearchVerdictRelayed(c.issueTracker, resolveAgentPresenceSignals(c.driver).filerEnabled)
-		if c.boxForgeAndIssueAccess == "read-only" {
+		verdictRelayed := backend.ResearchVerdictRelayed(c.IssueTracker, resolveAgentPresenceSignals(c.driver).filerEnabled)
+		if c.BoxForgeAndIssueAccess == "read-only" {
 			return settle.NewResearchSettleReadOnly(it, vl, verdictRelayed, c.kind().FindingLabel)
 		}
 		return settle.NewResearchSettle(it, vl, verdictRelayed, c.kind().FindingLabel)
@@ -1003,11 +1003,11 @@ func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.Co
 // needs.
 func wavesConfig(c config) waves.Config {
 	return waves.Config{
-		MaxParallel:    c.maxParallel,
-		MaxJobs:        c.maxJobs,
-		OverlapGate:    c.overlapGate,
+		MaxParallel:    c.MaxParallel,
+		MaxJobs:        c.MaxJobs,
+		OverlapGate:    c.OverlapGate,
 		SettledLabels:  settledLabels(c),
-		FailedLabel:    c.failedLabel,
+		FailedLabel:    c.FailedLabel,
 		IgnoreBlockers: c.kind().AdviseOnly,
 		Verb:           c.kind().Verb,
 		// The same tuning dispatch's exit-retry path and settleConfig thread
@@ -1055,18 +1055,18 @@ func build() error {
 // checkAutoMergePreflight verifies that the repo allows the forge's native
 // auto-merge when MERGE_MODE=auto. It is a no-op for other modes.
 func checkAutoMergePreflight(c config, caps forge.Capabilities) error {
-	if c.mergeMode != "auto" {
+	if c.MergeMode != "auto" {
 		return nil
 	}
 	if caps.PRForge == nil {
-		return fmt.Errorf("MERGE_MODE=auto requires CODE_FORGE=%s (got %q) — auto-merge is a native PR-forge feature with no meaning off a PR forge; switch to MERGE_MODE=manual or immediate", backendkit.AutoMergeForges(backendkit.Strategies()), c.codeForge)
+		return fmt.Errorf("MERGE_MODE=auto requires CODE_FORGE=%s (got %q) — auto-merge is a native PR-forge feature with no meaning off a PR forge; switch to MERGE_MODE=manual or immediate", backendkit.AutoMergeForges(backendkit.Strategies()), c.CodeForge)
 	}
 	canAuto, err := caps.PRForge.CanAutoMerge()
 	if err != nil {
 		return fmt.Errorf("MERGE_MODE=auto: auto-merge capability check failed: %w", err)
 	}
 	if !canAuto {
-		s, _ := backendkit.ByName(c.codeForge)
+		s, _ := backendkit.ByName(c.CodeForge)
 		return fmt.Errorf("MERGE_MODE=auto: the repo does not allow auto-merge%s; or switch to MERGE_MODE=manual", s.AutoMergeRemedyClause(backendShared(c)))
 	}
 	return nil
@@ -1101,22 +1101,22 @@ func newLaunchGateConfigError(format string, args ...any) error {
 // mkHarness's readOnlyCapabilityOk assert (issue #2526) already proves this at
 // build time, so this gate only backstops a runtime override of those knobs.
 func checkReadOnlyCapabilityGate(c config) error {
-	if c.boxForgeAndIssueAccess != "read-only" {
+	if c.BoxForgeAndIssueAccess != "read-only" {
 		return nil
 	}
-	forgeRow, ok := backendkit.ByName(c.codeForge)
+	forgeRow, ok := backendkit.ByName(c.CodeForge)
 	if !ok {
-		return newLaunchGateConfigError("BOX_FORGE_AND_ISSUE_ACCESS=read-only: CODE_FORGE=%q is not a registered backend", c.codeForge)
+		return newLaunchGateConfigError("BOX_FORGE_AND_ISSUE_ACCESS=read-only: CODE_FORGE=%q is not a registered backend", c.CodeForge)
 	}
 	if !forgeRow.RelayCapable {
-		return newLaunchGateConfigError("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected CODE_FORGE=%q does not implement bundle-relay for the Box's finished branch hand-off", c.codeForge)
+		return newLaunchGateConfigError("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected CODE_FORGE=%q does not implement bundle-relay for the Box's finished branch hand-off", c.CodeForge)
 	}
-	trackerRow, ok := backendkit.ByName(c.issueTracker)
+	trackerRow, ok := backendkit.ByName(c.IssueTracker)
 	if !ok {
-		return newLaunchGateConfigError("BOX_FORGE_AND_ISSUE_ACCESS=read-only: ISSUE_TRACKER=%q is not a registered backend", c.issueTracker)
+		return newLaunchGateConfigError("BOX_FORGE_AND_ISSUE_ACCESS=read-only: ISSUE_TRACKER=%q is not a registered backend", c.IssueTracker)
 	}
 	if !trackerRow.HostPostingCapable {
-		return newLaunchGateConfigError("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected ISSUE_TRACKER=%q does not implement host-posted comments and issue-filing", c.issueTracker)
+		return newLaunchGateConfigError("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected ISSUE_TRACKER=%q does not implement host-posted comments and issue-filing", c.IssueTracker)
 	}
 	return nil
 }
@@ -1157,7 +1157,7 @@ func checkNetworkModeRuntimeGate(c config) error {
 		rawKnobs = append(rawKnobs, names...)
 	}
 	if len(rawKnobs) > 0 {
-		return newLaunchGateConfigError("NETWORK_MODE=%s is set alongside raw network knob(s) %s -- there is no precedence rule between a runtime-overridden NETWORK_MODE and a raw knob; set only one", c.networkMode, strings.Join(rawKnobs, ", "))
+		return newLaunchGateConfigError("NETWORK_MODE=%s is set alongside raw network knob(s) %s -- there is no precedence rule between a runtime-overridden NETWORK_MODE and a raw knob; set only one", c.NetworkMode, strings.Join(rawKnobs, ", "))
 	}
 	return nil
 }
@@ -1185,11 +1185,11 @@ func containsLabel(labels []string, target string) bool {
 	return false
 }
 
-// resolveOrigin is the one place c.issueNumber is read as the claimed-single
+// resolveOrigin is the one place c.IssueNumber is read as the claimed-single
 // versus discovered-batch sentinel; every other call site reads the derived
 // Origin instead of re-checking the sentinel.
 func resolveOrigin(c config) waves.Origin {
-	if c.issueNumber != "" {
+	if c.IssueNumber != "" {
 		return waves.OriginClaimed
 	}
 	return waves.OriginDiscovered
@@ -1245,14 +1245,14 @@ func emptyQueueLine(label string, held []heldIssue, nothing string) string {
 func discoverIssues(c config, it forge.IssueTracker, stdout io.Writer) ([]issue, []heldIssue, waves.Origin, error) {
 	origin := resolveOrigin(c)
 	if origin == waves.OriginClaimed {
-		fmt.Fprintf(stdout, "==> targeting claimed issue #%s in %s\n", c.issueNumber, c.repoSlug)
-		fi, err := it.Issue(c.issueNumber)
+		fmt.Fprintf(stdout, "==> targeting claimed issue #%s in %s\n", c.IssueNumber, c.RepoSlug)
+		fi, err := it.Issue(c.IssueNumber)
 		if err != nil {
 			return nil, nil, origin, err
 		}
 		return []issue{newIssue(fi)}, nil, origin, nil
 	}
-	fmt.Fprintf(stdout, "==> querying open '%s' issues in %s\n", c.label, c.repoSlug)
+	fmt.Fprintf(stdout, "==> querying open '%s' issues in %s\n", c.Label, c.RepoSlug)
 	issues, held, err := queryOpenIssues(c, it)
 	return issues, held, origin, err
 }
@@ -1306,7 +1306,7 @@ func readinessFor(it forge.IssueTracker, issues []issue) (waves.Batch, error) {
 // those.
 func logDiscoveryPoll(c config, issues []issue, first bool, seen map[string]bool, stdout io.Writer) {
 	if first {
-		fmt.Fprintf(stdout, "==> querying open '%s' issues in %s\n", c.label, c.repoSlug)
+		fmt.Fprintf(stdout, "==> querying open '%s' issues in %s\n", c.Label, c.RepoSlug)
 	} else {
 		var newNums []string
 		for _, iss := range issues {
@@ -1315,7 +1315,7 @@ func logDiscoveryPoll(c config, issues []issue, first bool, seen map[string]bool
 			}
 		}
 		if len(newNums) > 0 {
-			fmt.Fprintf(stdout, "==> querying open '%s' issues in %s — new: #%s\n", c.label, c.repoSlug, strings.Join(newNums, ", #"))
+			fmt.Fprintf(stdout, "==> querying open '%s' issues in %s — new: #%s\n", c.Label, c.RepoSlug, strings.Join(newNums, ", #"))
 		}
 	}
 	for _, iss := range issues {
@@ -1423,10 +1423,10 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 	}
 	defer release()
 	branch := cf.AgentBranch(iss.number)
-	backoff := retry.LinearBackoff{Unit: time.Duration(c.transientBackoffSecs) * time.Second, Clock: retry.RealClock()}
+	backoff := retry.LinearBackoff{Unit: time.Duration(c.TransientBackoffSecs) * time.Second, Clock: retry.RealClock()}
 	// transientRetryMax counts retries everywhere else, so the first attempt
 	// sits on top of it: maxAttempts = retries + 1.
-	res, prErr := forge.ResolveOpenPRWithRetry(cf, iss.number, backoff, c.transientRetryMax+1)
+	res, prErr := forge.ResolveOpenPRWithRetry(cf, iss.number, backoff, c.TransientRetryMax+1)
 	if prErr != nil {
 		return failBeforeLabelClaim(fmt.Errorf("issue %s: resolve PR: %w", issueNum, prErr))
 	}
@@ -1482,13 +1482,13 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 			}
 			rec = recoverrecord.Load(pwd, iss.number, bundleID)
 			now := time.Now()
-			if !rec.Due(now, c.maxRecoverAttempts, backoff.Unit) {
+			if !rec.Due(now, c.MaxRecoverAttempts, backoff.Unit) {
 				if !rec.GaveUp {
 					fmt.Fprintf(stdout, "    #%s  status=skipped  note=backing off after %d failed attempts\n", issueNum, rec.Count)
 				}
 				return errRecoverIneligible
 			}
-			if rec.Exhausted(c.maxRecoverAttempts) {
+			if rec.Exhausted(c.MaxRecoverAttempts) {
 				// Count reaches here unposted when the bound was lowered
 				// below it, or when parkQueueFailure's comment failed.
 				giveUpRecover(&rec, it, issueNum, stderr)
@@ -1512,15 +1512,15 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 			// window rather than closing it.
 			fresh, err := it.ListIssues(forge.Failed)
 			if err != nil {
-				return fmt.Errorf("recover: re-list %s issues for #%s: %w", c.failedLabel, issueNum, err)
+				return fmt.Errorf("recover: re-list %s issues for #%s: %w", c.FailedLabel, issueNum, err)
 			}
 			if !slices.ContainsFunc(fresh, func(f forge.Issue) bool { return f.Number == iss.number }) {
-				fmt.Fprintf(stdout, "    #%s  status=skipped  note=no longer wears %s\n", issueNum, c.failedLabel)
+				fmt.Fprintf(stdout, "    #%s  status=skipped  note=no longer wears %s\n", issueNum, c.FailedLabel)
 				return errRecoverIneligible
 			}
 			if err := it.TransitionState(iss.number, forge.Failed, forge.InProgress); err != nil {
 				if errors.Is(err, forge.ErrAlreadyClaimed) {
-					fmt.Fprintf(stdout, "    #%s  status=skipped  note=another actor already moved this issue off %s\n", issueNum, c.failedLabel)
+					fmt.Fprintf(stdout, "    #%s  status=skipped  note=another actor already moved this issue off %s\n", issueNum, c.FailedLabel)
 					return errRecoverIneligible
 				}
 				return fmt.Errorf("recover: claim #%s: %w", issueNum, err)
@@ -1539,7 +1539,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 				// Reported even if the restore failed, as transitionState does.
 				recoverSettled(iss.number, v, note)
 				if restoreErr != nil {
-					return fmt.Errorf("recover: restore #%s to %s: %w", issueNum, c.failedLabel, restoreErr)
+					return fmt.Errorf("recover: restore #%s to %s: %w", issueNum, c.FailedLabel, restoreErr)
 				}
 				return waves.ErrSignalledStop
 			}
@@ -1675,7 +1675,7 @@ func run(lc *launchContext, stdout, stderr io.Writer) error {
 	// no liveness signal, so it cannot be told apart from one a live runner is
 	// committing to right now (#600). The only adopt path is the explicit
 	// `spindrift recover <n>`.
-	if resolveOrigin(c) == waves.OriginDiscovered && c.continuousDispatch {
+	if resolveOrigin(c) == waves.OriginDiscovered && c.ContinuousDispatch {
 		return runContinuousDispatch(c, it, cf, pwd, f, s, runner.NixEvaluator{}, runner.NixRealizer{}, lp, stdout, stderr)
 	}
 
@@ -1701,7 +1701,7 @@ func run(lc *launchContext, stdout, stderr io.Writer) error {
 		if waves.SignalledStopAlready(stopCh, abortCh) {
 			return waves.ErrSignalledStop
 		}
-		fmt.Fprintln(stdout, emptyQueueLine(c.label, held, "nothing to do"))
+		fmt.Fprintln(stdout, emptyQueueLine(c.Label, held, "nothing to do"))
 		if err := reconcileAfterDispatch(c, it, cf, lp, caps, pwd, stdout); err != nil {
 			return err
 		}
@@ -1717,7 +1717,7 @@ func run(lc *launchContext, stdout, stderr io.Writer) error {
 	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, caps)
 	cfg.Stop = stopCh
 	cfg.Abort = abortCh
-	claimer := waves.NewLabelClaimer(it, c.label, c.inProgressLabel)
+	claimer := waves.NewLabelClaimer(it, c.Label, c.InProgressLabel)
 	terminated := registryFor(s)
 	tally := &settle.Tally{}
 	defer settle.InstallTally(tally)()
@@ -1775,8 +1775,8 @@ func continuousDispatchErr(err, firstQueryErr error) error {
 func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, eval freshness.Evaluator, realize freshness.Realizer, lp reconcile.LivenessProbe, stdout, stderr io.Writer) error {
 	// Resolved fresh rather than threaded in (issue #2946): unlike run's
 	// lc.capabilities, this argument list carries no aggregate context.
-	forgeDesc, _ := backend.ByName(c.codeForge)
-	trackerDesc, _ := backend.ByName(c.issueTracker)
+	forgeDesc, _ := backend.ByName(c.CodeForge)
+	trackerDesc, _ := backend.ByName(c.IssueTracker)
 	caps := forge.ResolveCapabilities(cf, it, forgeDesc, trackerDesc)
 	art, err := c.artifact()
 	if err != nil {
@@ -1839,7 +1839,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		res := freshness.Probe(freshness.ProbeSpec{
 			Artifact:           art,
 			Pwd:                pwd,
-			BaseBranch:         c.baseBranch,
+			BaseBranch:         c.BaseBranch,
 			FlakeImageAttr:     c.flakeImageAttr,
 			ImageTag:           currentImageTag,
 			FlakeLauncherAttr:  c.flakeLauncherAttr,
@@ -1866,7 +1866,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			swapClassified = true
 			swapHostTainted = disposition == freshness.HostTainted
 			if swapHostTainted {
-				fmt.Fprintln(stdout, art.HostTaintDiagnostic(c.baseBranch, res.Rev, c.flakeImageAttr, res.TipTag, currentImageTag))
+				fmt.Fprintln(stdout, art.HostTaintDiagnostic(c.BaseBranch, res.Rev, c.flakeImageAttr, res.TipTag, currentImageTag))
 				return drain()
 			}
 			if err := freshness.RealizeSync(realize, pwd, res, c.flakeImageAttr); err != nil {
@@ -1900,7 +1900,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			gen := runner.NewAgentGeneration(res.TipTag)
 			f.SetAgentGeneration(&gen)
 			currentImageTag = res.TipTag
-			fmt.Fprintf(stdout, "==> %s hot-swap: swapped in agent %s to %s tip %s (%s)\n", art.Name, art.Noun, c.baseBranch, res.Rev, res.TipTag)
+			fmt.Fprintf(stdout, "==> %s hot-swap: swapped in agent %s to %s tip %s (%s)\n", art.Name, art.Noun, c.BaseBranch, res.Rev, res.TipTag)
 			return res.Applicable, true, res.Message
 		}
 
@@ -1944,7 +1944,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		}
 		return waves.CountReady(cfg, it, cf, batch, claimed), nil
 	}
-	queue := waves.NewHeadlessQueue(discover, waves.NewLabelClaimer(it, c.label, c.inProgressLabel), pending, pwd)
+	queue := waves.NewHeadlessQueue(discover, waves.NewLabelClaimer(it, c.Label, c.InProgressLabel), pending, pwd)
 	terminated := registryFor(s)
 	tally := &settle.Tally{}
 	defer settle.InstallTally(tally)()
@@ -1970,7 +1970,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			if !swapClassified {
 				hostTainted = guard.Classify(staleResult) == freshness.HostTainted
 				if hostTainted {
-					fmt.Fprintln(stdout, art.HostTaintDiagnostic(c.baseBranch, staleResult.Rev, c.flakeImageAttr, staleResult.TipTag, currentImageTag))
+					fmt.Fprintln(stdout, art.HostTaintDiagnostic(c.BaseBranch, staleResult.Rev, c.flakeImageAttr, staleResult.TipTag, currentImageTag))
 				}
 			}
 			if hostTainted {
@@ -1988,7 +1988,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		// RunContinuous returns ErrOpenNoneDispatchable solely when nothing was
 		// ever dispatched.
 		if errors.Is(err, waves.ErrOpenNoneDispatchable) && firstQueryEmpty {
-			fmt.Fprintln(stdout, emptyQueueLine(c.label, firstHeld, "nothing to do"))
+			fmt.Fprintln(stdout, emptyQueueLine(c.Label, firstHeld, "nothing to do"))
 			if err := reconcileAfterDispatch(c, it, cf, lp, caps, pwd, stdout); err != nil {
 				return err
 			}
@@ -2034,7 +2034,7 @@ func cmdConsole(lc *launchContext, stdin io.Reader, stdout, stderr io.Writer) in
 	// same lines from the pass log anyway (issue #1583).
 	lc.factory.SetHeartbeatOut(io.Discard)
 	fresh, rebuild, err := newConsoleFreshness(lc.config, lc.pwd, runner.NixEvaluator{},
-		func() (string, string, error) { return consoleGitSync(lc.pwd, lc.config.baseBranch) },
+		func() (string, string, error) { return consoleGitSync(lc.pwd, lc.config.BaseBranch) },
 		func() (string, error) { return consoleNixBuild(lc.pwd) })
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
@@ -2049,8 +2049,8 @@ func cmdConsole(lc *launchContext, stdin io.Reader, stdout, stderr io.Writer) in
 		ResearchTracker: researchTracker,
 		ResearchFactory: researchFactory,
 		ResearchSettle:  researchSettle,
-		MaxParallel:     lc.config.maxParallel,
-		FailedLabel:     lc.config.failedLabel,
+		MaxParallel:     lc.config.MaxParallel,
+		FailedLabel:     lc.config.FailedLabel,
 		Fresh:           fresh,
 		RebuildFn:       rebuild,
 		RecoverFn: func(issueNum string) error {

@@ -12,13 +12,13 @@ import (
 	"spindrift.dev/launcher/internal/tuning"
 )
 
-// Every rowKnobs key must be an env some backend, Chore, or runner row's
+// Every RowKnobs key must be an env some backend, Chore, or runner row's
 // generated ReadKnobs looks up, and ReadKnobs over the config's lookup must
 // succeed: for the backend rows, the latter pins mustBuild's claim that its
 // error is unreachable.
 func TestRowKnobsKeysAreDeclaredByARow(t *testing.T) {
 	c := minimalValidConfig()
-	c.schemaConfig = loadSchemaConfig()
+	c.Knobs = loadSchemaConfig()
 	seen := map[string]bool{}
 	rec := func(env string) (string, bool) {
 		seen[env] = true
@@ -45,9 +45,9 @@ func TestRowKnobsKeysAreDeclaredByARow(t *testing.T) {
 	if _, err := bwrap.ReadKnobs(rec); err != nil {
 		t.Errorf("bwrap.ReadKnobs: %v", err)
 	}
-	for key := range c.rowKnobs {
+	for key := range c.RowKnobs {
 		if !seen[key] {
-			t.Errorf("rowKnobs key %q is not declared by any row", key)
+			t.Errorf("RowKnobs key %q is not declared by any row", key)
 		}
 	}
 }

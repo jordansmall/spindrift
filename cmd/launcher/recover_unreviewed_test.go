@@ -115,8 +115,8 @@ func TestCmdRecover_UnreviewedReadyWithOpenPRIsNotAdopted(t *testing.T) {
 	if !strings.Contains(out, "status=skipped") || !strings.Contains(out, "land pass") {
 		t.Errorf("stdout = %q, want a skipped note naming the land pass", out)
 	}
-	if containsLabel(x.labels(t, "42"), x.c.completeLabel) {
-		t.Errorf("labels = %v, want no %s", x.labels(t, "42"), x.c.completeLabel)
+	if containsLabel(x.labels(t, "42"), x.c.CompleteLabel) {
+		t.Errorf("labels = %v, want no %s", x.labels(t, "42"), x.c.CompleteLabel)
 	}
 }
 
@@ -201,8 +201,8 @@ func TestCmdRecover_NoReportStoppedBeforeLandNoOpenPRNamesUnreviewed(t *testing.
 			if x.fc.Merged != "" || len(x.fc.RelayBundleCalls) != 0 {
 				t.Errorf("Merged = %q, relays = %v, want nothing landed", x.fc.Merged, x.fc.RelayBundleCalls)
 			}
-			if !containsLabel(x.labels(t, "42"), x.c.failedLabel) || containsLabel(x.labels(t, "42"), x.c.completeLabel) {
-				t.Errorf("labels = %v, want %s and not %s", x.labels(t, "42"), x.c.failedLabel, x.c.completeLabel)
+			if !containsLabel(x.labels(t, "42"), x.c.FailedLabel) || containsLabel(x.labels(t, "42"), x.c.CompleteLabel) {
+				t.Errorf("labels = %v, want %s and not %s", x.labels(t, "42"), x.c.FailedLabel, x.c.CompleteLabel)
 			}
 		})
 	}

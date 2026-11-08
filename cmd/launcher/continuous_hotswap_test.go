@@ -53,14 +53,14 @@ func TestRunContinuousDispatch_StoreClosureImageOnlyStale_HotSwapsAndKeepsRefill
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct from loadedHash
 
 	c := baseConfig()
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runnerKind = runner.KindBwrap
 	c.boxArtifact = "store-closure"
-	c.baseBranch = "main"
-	c.label = "ready-for-agent"
-	c.issueTracker = "local"
-	c.codeForge = "local"
+	c.BaseBranch = "main"
+	c.Label = "ready-for-agent"
+	c.IssueTracker = "local"
+	c.CodeForge = "local"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
 	// The swap branch requires the launcher dimension to have been genuinely
@@ -74,7 +74,7 @@ func TestRunContinuousDispatch_StoreClosureImageOnlyStale_HotSwapsAndKeepsRefill
 	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
-	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 	cf := it
 
 	fr := runner.NewFake()
@@ -134,14 +134,14 @@ func TestRunContinuousDispatch_StoreClosureBothStale_DrainsAsLauncherStale(t *te
 	const staleLauncherHash = "44444444444444444444444444444444"  // 32 chars, distinct
 
 	c := baseConfig()
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runnerKind = runner.KindBwrap
 	c.boxArtifact = "store-closure"
-	c.baseBranch = "main"
-	c.label = "ready-for-agent"
-	c.issueTracker = "local"
-	c.codeForge = "local"
+	c.BaseBranch = "main"
+	c.Label = "ready-for-agent"
+	c.IssueTracker = "local"
+	c.CodeForge = "local"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedImageHash + "-agent-closure"
 	c.flakeLauncherAttr = ".#launcher-currency"
@@ -190,13 +190,13 @@ func TestRunContinuousDispatch_OCIImageOnlyStale_StillDrains(t *testing.T) {
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct
 
 	c := baseConfig()
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runtime = "podman"
-	c.baseBranch = "main"
-	c.label = "ready-for-agent"
-	c.issueTracker = "local"
-	c.codeForge = "local"
+	c.BaseBranch = "main"
+	c.Label = "ready-for-agent"
+	c.IssueTracker = "local"
+	c.CodeForge = "local"
 	c.flakeImageAttr = ".#image"
 	c.imageTag = "spindrift:" + loadedHash
 	// c.runnerKind is left at its zero value (""), which reads as OCI, matching
@@ -205,7 +205,7 @@ func TestRunContinuousDispatch_OCIImageOnlyStale_StillDrains(t *testing.T) {
 	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
-	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 	cf := it
 
 	fr := runner.NewFake()
@@ -235,14 +235,14 @@ func TestRunContinuousDispatch_BwrapRunnerOCIArtifact_StillDrains(t *testing.T) 
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct
 
 	c := baseConfig()
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runnerKind = runner.KindBwrap
 	c.boxArtifact = "oci-image"
-	c.baseBranch = "main"
-	c.label = "ready-for-agent"
-	c.issueTracker = "local"
-	c.codeForge = "local"
+	c.BaseBranch = "main"
+	c.Label = "ready-for-agent"
+	c.IssueTracker = "local"
+	c.CodeForge = "local"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
 	c.flakeLauncherAttr = ".#launcher-currency"
@@ -251,7 +251,7 @@ func TestRunContinuousDispatch_BwrapRunnerOCIArtifact_StillDrains(t *testing.T) 
 	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
-	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 	cf := it
 
 	fr := runner.NewFake()
@@ -284,14 +284,14 @@ func TestRunContinuousDispatch_StoreClosureRealizeFails_FallsBackToDrain(t *test
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct
 
 	c := baseConfig()
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runnerKind = runner.KindBwrap
 	c.boxArtifact = "store-closure"
-	c.baseBranch = "main"
-	c.label = "ready-for-agent"
-	c.issueTracker = "local"
-	c.codeForge = "local"
+	c.BaseBranch = "main"
+	c.Label = "ready-for-agent"
+	c.IssueTracker = "local"
+	c.CodeForge = "local"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
 	// flakeLauncherAttr is configured and genuinely fresh. See
@@ -306,7 +306,7 @@ func TestRunContinuousDispatch_StoreClosureRealizeFails_FallsBackToDrain(t *test
 	// A dispatchable issue is present so a successful swap, the bug this test
 	// guards against, would reach dispatch. That makes "zero RunCalls" below a
 	// meaningful assertion rather than a vacuous one from an empty queue.
-	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 	cf := it
 
 	fr := runner.NewFake()
@@ -346,14 +346,14 @@ func TestRunContinuousDispatch_StoreClosureNonConvergingSwap_HaltsHostTainted(t 
 	const loadedLauncherHash = "44444444444444444444444444444444" // 32 chars, the fixed, always-fresh launcher
 
 	c := baseConfig()
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runnerKind = runner.KindBwrap
 	c.boxArtifact = "store-closure"
-	c.baseBranch = "main"
-	c.label = "ready-for-agent"
-	c.issueTracker = "local"
-	c.codeForge = "local"
+	c.BaseBranch = "main"
+	c.Label = "ready-for-agent"
+	c.IssueTracker = "local"
+	c.CodeForge = "local"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
 	// flakeLauncherAttr is configured and fresh on both fresh() calls. See
@@ -365,8 +365,8 @@ func TestRunContinuousDispatch_StoreClosureNonConvergingSwap_HaltsHostTainted(t 
 	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
-	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
-	it.SetIssue(forge.Issue{Number: "2", Labels: []string{c.label}})
+	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	it.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
 	cf := it
 
 	fr := runner.NewFake()
@@ -431,14 +431,14 @@ func runNixInBoxSwapTo(t *testing.T, nixInBox bool, lookup func(string) (runner.
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct from loadedHash
 
 	c := baseConfig()
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runnerKind = runner.KindBwrap
 	c.boxArtifact = "store-closure"
-	c.baseBranch = "main"
-	c.label = "ready-for-agent"
-	c.issueTracker = "local"
-	c.codeForge = "local"
+	c.BaseBranch = "main"
+	c.Label = "ready-for-agent"
+	c.IssueTracker = "local"
+	c.CodeForge = "local"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
 	bwrapArt := &inputdoc.BwrapArtifacts{PasswdFile: inputdoc.ValueOf("/nix/store/passwd-fixture")}
@@ -461,7 +461,7 @@ func runNixInBoxSwapTo(t *testing.T, nixInBox bool, lookup func(string) (runner.
 	it := forge.NewFake(testDispatchLabels)
 	// A dispatchable issue is present so a swap that wrongly binds would reach
 	// dispatch, making "zero RunCalls" meaningful rather than vacuous.
-	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 
 	fr := runner.NewFake()
 	f := testFactory(t, dir, fr)
@@ -640,14 +640,14 @@ func TestRunContinuousDispatch_StoreClosureLauncherUnconfigured_FallsBackToDrain
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct
 
 	c := baseConfig()
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runnerKind = runner.KindBwrap
 	c.boxArtifact = "store-closure"
-	c.baseBranch = "main"
-	c.label = "ready-for-agent"
-	c.issueTracker = "local"
-	c.codeForge = "local"
+	c.BaseBranch = "main"
+	c.Label = "ready-for-agent"
+	c.IssueTracker = "local"
+	c.CodeForge = "local"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
 	// c.flakeLauncherAttr is deliberately left unset (baseConfig's zero value).
@@ -658,7 +658,7 @@ func TestRunContinuousDispatch_StoreClosureLauncherUnconfigured_FallsBackToDrain
 	// A dispatchable issue is present so a successful swap, the bug this test
 	// guards against, would reach dispatch. That makes "zero RunCalls" below a
 	// meaningful assertion rather than a vacuous one from an empty queue.
-	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 	cf := it
 
 	fr := runner.NewFake()
@@ -691,14 +691,14 @@ func TestRunContinuousDispatch_StoreClosureEmptyTipTag_FallsBackToDrain(t *testi
 	const loadedLauncherHash = "44444444444444444444444444444444" // 32 chars, the loaded launcher
 
 	c := baseConfig()
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runnerKind = runner.KindBwrap
 	c.boxArtifact = "store-closure"
-	c.baseBranch = "main"
-	c.label = "ready-for-agent"
-	c.issueTracker = "local"
-	c.codeForge = "local"
+	c.BaseBranch = "main"
+	c.Label = "ready-for-agent"
+	c.IssueTracker = "local"
+	c.CodeForge = "local"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
 	c.flakeLauncherAttr = ".#launcher-currency"
@@ -707,7 +707,7 @@ func TestRunContinuousDispatch_StoreClosureEmptyTipTag_FallsBackToDrain(t *testi
 	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
-	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 	cf := it
 
 	fr := runner.NewFake()
@@ -740,11 +740,11 @@ func TestRunContinuousDispatch_StoreClosureEmptyTipTag_FallsBackToDrain(t *testi
 // launches, rather than fall back to the OCI comparison.
 func TestRunContinuousDispatch_UnknownBoxArtifactIsAnError(t *testing.T) {
 	c := baseConfig()
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.boxArtifact = "bogus"
-	c.issueTracker = "local"
-	c.codeForge = "local"
+	c.IssueTracker = "local"
+	c.CodeForge = "local"
 
 	dir, _ := newStaleProbeRepo(t)
 	it := forge.NewFake(testDispatchLabels)

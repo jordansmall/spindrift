@@ -33,7 +33,7 @@ const readOnlyTrustNotice = "read-only trusts that it was provisioned with read-
 // default. verified is true only when introspection confirmed the token has no
 // write scopes, and is always false when err is non-nil.
 func checkReadOnlyTokenGate(c config, row backendkit.Strategy, w io.Writer) (verified bool, err error) {
-	if c.boxForgeAndIssueAccess != "read-only" {
+	if c.BoxForgeAndIssueAccess != "read-only" {
 		return false, nil
 	}
 	boxEnv, hostEnv := row.BoxTokenEnvVar, row.TokenEnvVar
@@ -50,7 +50,7 @@ func checkReadOnlyTokenGate(c config, row backendkit.Strategy, w io.Writer) (ver
 		fmt.Fprintf(w, "WARNING: the %s backend cannot introspect a token's scopes (no IntrospectToken hook), so %s's write capability could not be determined. "+readOnlyTrustNotice+"\n", row.DisplayName, boxEnv)
 		return false, nil
 	}
-	result, err := row.IntrospectToken(boxToken, c.repoSlug)
+	result, err := row.IntrospectToken(boxToken, c.RepoSlug)
 	if err != nil {
 		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only: introspecting %s failed: %w", doctor.ErrConnectivity, boxEnv, err)
 	}

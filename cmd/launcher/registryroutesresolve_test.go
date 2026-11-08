@@ -13,6 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
 	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/registrypathset"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/registryvocab"
@@ -176,7 +177,7 @@ mirror-path = "/other"
 	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = origRemote })
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = path
+	c.RegistryProxyRoutesFile = path
 	routes, err := buildRegistryProxyRoutes(c, resolveRows)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
@@ -242,7 +243,7 @@ match-host = "host.example.com"
 	registryRouteDriftRepoDirFn = func() (string, error) { return "", nil }
 	t.Cleanup(func() { registryRouteDriftRepoDirFn = orig })
 
-	c := config{schemaConfig: schemaConfig{registryProxyRoutesFile: path}}
+	c := config{Knobs: inputdoc.Knobs{RegistryProxyRoutesFile: path}}
 	routes, err := buildRegistryProxyRoutes(c, resolveRows)
 	if err == nil {
 		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: no Target-repo checkout is available")
@@ -255,7 +256,7 @@ match-host = "host.example.com"
 	}
 }
 
-// c.codeForge is left unset, so checkoutIsTargetRepo hits its default case and
+// c.CodeForge is left unset, so checkoutIsTargetRepo hits its default case and
 // refuses to identify the resolved checkout as the Target repo. The route must
 // fail closed, the same "treat as absent" gate the doctor drift row uses.
 func TestBuildRegistryProxyRoutes_HostRooted_NotTargetRepo_FailsClosed(t *testing.T) {
@@ -268,7 +269,7 @@ match-host = "host.example.com"
 	registryRouteDriftRepoDirFn = func() (string, error) { return t.TempDir(), nil }
 	t.Cleanup(func() { registryRouteDriftRepoDirFn = orig })
 
-	c := config{schemaConfig: schemaConfig{registryProxyRoutesFile: path}}
+	c := config{Knobs: inputdoc.Knobs{RegistryProxyRoutesFile: path}}
 	_, err := buildRegistryProxyRoutes(c, resolveRows)
 	if err == nil {
 		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: the resolved checkout is not the Target repo")
@@ -298,7 +299,7 @@ match-host = "host.example.com"
 `)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = path
+	c.RegistryProxyRoutesFile = path
 	_, err := buildRegistryProxyRoutes(c, resolveRows)
 	if err == nil {
 		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: the repo declares no registry on host.example.com")
@@ -325,7 +326,7 @@ match-host = "host.example.com"
 `)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = path
+	c.RegistryProxyRoutesFile = path
 	routes, err := buildRegistryProxyRoutes(c, resolveRows)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
@@ -364,7 +365,7 @@ match-host = "host.example.com"
 `)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = path
+	c.RegistryProxyRoutesFile = path
 	if _, err := buildRegistryProxyRoutes(c, resolveRows); err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil: a GH_HOST-matching origin must derive routes", err)
 	}
@@ -391,7 +392,7 @@ allow = ["/dl"]
 `)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = path
+	c.RegistryProxyRoutesFile = path
 	routes, err := buildRegistryProxyRoutes(c, resolveRows)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
@@ -439,7 +440,7 @@ credential = { env = "SPINDRIFT_TEST_ALLOW_LOOP_CRED" }
 `)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = path
+	c.RegistryProxyRoutesFile = path
 	routes, err := buildRegistryProxyRoutes(c, resolveRows)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
@@ -501,7 +502,7 @@ match-host = "host.example.com"
 `)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = path
+	c.RegistryProxyRoutesFile = path
 	routes, err := buildRegistryProxyRoutes(c, resolveRows)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
@@ -798,7 +799,7 @@ path = "/mirror"
 `)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = path
+	c.RegistryProxyRoutesFile = path
 	routes, err := buildRegistryProxyRoutes(c, resolveRows)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
@@ -842,7 +843,7 @@ path = "/mirror"
 `)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = path
+	c.RegistryProxyRoutesFile = path
 	_, err := buildRegistryProxyRoutes(c, resolveRows)
 	if err == nil {
 		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: no other ecosystem's config is discoverable on this host")
@@ -947,7 +948,7 @@ mirror-path = "/keyed"
 `)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = path
+	c.RegistryProxyRoutesFile = path
 	routes, err := buildRegistryProxyRoutes(c, threeRows)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
@@ -1242,9 +1243,9 @@ func mustLocalAccumulationRepo(t *testing.T, relPath, registryConfig string) str
 // resolveHostRootedUpstreams' host-mediated branch reads from.
 func minimalValidLocalConfigForRoutes(accumRepo string) config {
 	c := minimalValidConfig()
-	c.codeForge = "local"
+	c.CodeForge = "local"
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", accumRepo)
-	c.baseBranch = "main"
+	c.BaseBranch = "main"
 	return c
 }
 
@@ -1269,7 +1270,7 @@ func TestBuildRegistryProxyRoutes_HostRooted_Local_DerivesFromAccumulationRepo(t
 match-host = "host.example.com"
 `)
 	c := minimalValidLocalConfigForRoutes(accumRepo)
-	c.registryProxyRoutesFile = path
+	c.RegistryProxyRoutesFile = path
 
 	routes, err := buildRegistryProxyRoutes(c, resolveRows)
 	if err != nil {
@@ -1307,7 +1308,7 @@ func TestBuildRegistryProxyRoutes_HostRooted_Local_CheckoutOnlyConfigIgnored(t *
 match-host = "host.example.com"
 `)
 	c := minimalValidLocalConfigForRoutes(accumRepo)
-	c.registryProxyRoutesFile = path
+	c.RegistryProxyRoutesFile = path
 
 	_, err := buildRegistryProxyRoutes(c, resolveRows)
 	if err == nil {
@@ -1327,7 +1328,7 @@ func TestBuildRegistryProxyRoutes_HostRooted_Local_MissingAccumulationRepo_Fails
 match-host = "host.example.com"
 `)
 	c := minimalValidLocalConfigForRoutes(filepath.Join(t.TempDir(), "does-not-exist.git"))
-	c.registryProxyRoutesFile = path
+	c.RegistryProxyRoutesFile = path
 
 	_, err := buildRegistryProxyRoutes(c, resolveRows)
 	if err == nil {
@@ -1349,7 +1350,7 @@ func TestBuildRegistryProxyRoutes_HostRooted_Local_NoMatchingHost_FailsClosed(t 
 match-host = "host.example.com"
 `)
 	c := minimalValidLocalConfigForRoutes(accumRepo)
-	c.registryProxyRoutesFile = path
+	c.RegistryProxyRoutesFile = path
 
 	_, err := buildRegistryProxyRoutes(c, resolveRows)
 	if err == nil {
@@ -1382,7 +1383,7 @@ upstream-origin = "https://host.example.com:8443"
 `)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = path
+	c.RegistryProxyRoutesFile = path
 	routes, err := buildRegistryProxyRoutes(c, resolveRows)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
@@ -1425,7 +1426,7 @@ upstream-origin = "http://host.example.com:8081"
 `)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = path
+	c.RegistryProxyRoutesFile = path
 	routes, err := buildRegistryProxyRoutes(c, resolveRows)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil: upstream-origin alone establishes the route", err)
@@ -1466,7 +1467,7 @@ path = "/declared"
 `)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = path
+	c.RegistryProxyRoutesFile = path
 	routes, err := buildRegistryProxyRoutes(c, resolveRows)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
@@ -1503,7 +1504,7 @@ match-host = "host.example.com"
 `)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = path
+	c.RegistryProxyRoutesFile = path
 	_, err := buildRegistryProxyRoutes(c, resolveRows)
 	if err == nil {
 		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: nothing establishes this route's upstream origin")

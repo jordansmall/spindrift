@@ -465,8 +465,8 @@ func TestRealOCIStrategy_PodmanMachineMemoryClassify(t *testing.T) {
 			fakePodmanMachine(t, tc.memMiB)
 			c := minimalValidConfig()
 			c.runtime = tc.runtime
-			c.memoryLimit = "5g"
-			c.maxParallel = 2
+			c.MemoryLimit = "5g"
+			c.MaxParallel = 2
 
 			classify, _ := doctorCheckSets(c)
 			err := validateConfigChecks(c, classify)

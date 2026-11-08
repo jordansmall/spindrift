@@ -23,11 +23,11 @@ func doctorCheckSets(c config) (classify, report []doctor.Check) {
 	var perRoute, advisory []doctor.Check
 	// A config that declares no routes gets no route rows at all, not an
 	// empty-routes report (issue #3145).
-	if c.registryProxyRoutesFile != "" {
+	if c.RegistryProxyRoutesFile != "" {
 		extra = replaceCheckByName(extra, registryProxyRoutesCheckName, registryProxyRoutesCheck(c, false))
 		// One parse feeds both row families. A read or parse failure
 		// yields nil for both, leaving the failure to registryProxyRoutesCheck.
-		if routes, err := loadRegistryRoutes(c.registryProxyRoutesFile, ecosystem.Registered()); err == nil {
+		if routes, err := loadRegistryRoutes(c.RegistryProxyRoutesFile, ecosystem.Registered()); err == nil {
 			perRoute = routeChecksFor(routes)
 			advisory = registryRouteDriftCheckForRoutes(c, routes, ecosystem.Registered())
 			advisory = append(advisory, registryRouteProfileCheckForRoutes(c, routes, ecosystem.Registered())...)

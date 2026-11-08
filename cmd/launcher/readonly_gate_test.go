@@ -11,9 +11,9 @@ import (
 // rather than a gate that happens to pass.
 func TestReadOnlyCapabilityGate_ReadWriteIsNoOp(t *testing.T) {
 	c := minimalValidConfig()
-	c.boxForgeAndIssueAccess = "read-write"
-	c.codeForge = "git"
-	c.issueTracker = "jira"
+	c.BoxForgeAndIssueAccess = "read-write"
+	c.CodeForge = "git"
+	c.IssueTracker = "jira"
 	if err := checkReadOnlyCapabilityGate(c); err != nil {
 		t.Errorf("checkReadOnlyCapabilityGate() with read-write = %v, want nil", err)
 	}
@@ -154,9 +154,9 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := minimalValidConfig()
-			c.boxForgeAndIssueAccess = tc.access
-			c.codeForge = tc.codeForge
-			c.issueTracker = tc.issueTracker
+			c.BoxForgeAndIssueAccess = tc.access
+			c.CodeForge = tc.codeForge
+			c.IssueTracker = tc.issueTracker
 
 			err := checkReadOnlyCapabilityGate(c)
 			if tc.wantErr {
@@ -189,9 +189,9 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 // doctorExitCodeFor keeps classifying the exit code.
 func TestReadOnlyCapabilityGate_ErrorTextHasNoSentinelPrefix(t *testing.T) {
 	c := minimalValidConfig()
-	c.boxForgeAndIssueAccess = "read-only"
-	c.codeForge = "git"
-	c.issueTracker = "github"
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.CodeForge = "git"
+	c.IssueTracker = "github"
 
 	err := checkReadOnlyCapabilityGate(c)
 	if err == nil {
