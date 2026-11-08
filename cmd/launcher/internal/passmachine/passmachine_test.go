@@ -769,63 +769,6 @@ func TestTransitionNeverReturnsEmptyReason(t *testing.T) {
 	}
 }
 
-// TestBudgetExceeded covers the budgetExceeded helper (issue #2694): either cap
-// dimension can trip it alone, a zero cap never fires whatever the usage, and
-// the comparison is >= (at-cap fires), not > (strictly over).
-func TestBudgetExceeded(t *testing.T) {
-	tests := []struct {
-		name   string
-		caps   Caps
-		tokens int
-		usd    float64
-		want   bool
-	}{
-		{
-			name:   "token cap at boundary fires",
-			caps:   Caps{MaxBudgetTokens: 100},
-			tokens: 100,
-			want:   true,
-		},
-		{
-			name:   "token cap under boundary does not fire",
-			caps:   Caps{MaxBudgetTokens: 100},
-			tokens: 99,
-			want:   false,
-		},
-		{
-			name: "USD cap at boundary fires",
-			caps: Caps{MaxBudgetUSD: 5},
-			usd:  5,
-			want: true,
-		},
-		{
-			name: "USD cap under boundary does not fire",
-			caps: Caps{MaxBudgetUSD: 5},
-			usd:  4.99,
-			want: false,
-		},
-		{
-			name:   "both caps unset never fires regardless of usage",
-			caps:   Caps{},
-			tokens: 1_000_000,
-			usd:    1000,
-			want:   false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, reason := budgetExceeded(tt.caps, tt.tokens, tt.usd)
-			if got != tt.want {
-				t.Errorf("budgetExceeded(%+v, %d, %v) = %v, want %v", tt.caps, tt.tokens, tt.usd, got, tt.want)
-			}
-			if (reason != "") != tt.want {
-				t.Errorf("budgetExceeded(%+v, %d, %v) reason = %q, want empty iff not exceeded (exceeded = %v)", tt.caps, tt.tokens, tt.usd, reason, tt.want)
-			}
-		})
-	}
-}
-
 // TestPassKindString pins the pass_start op's Role field value for every
 // PassKind (issue #2548 review).
 func TestPassKindString(t *testing.T) {

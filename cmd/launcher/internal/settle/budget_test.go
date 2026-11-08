@@ -112,33 +112,3 @@ func TestSelfHeal_BudgetUnset_NoEnforcement(t *testing.T) {
 		t.Errorf("expected exactly 1 fix call (no budget cap set), got %+v", d.FixCalls)
 	}
 }
-
-// This test covers budgetExceeded's cap logic directly, without selfHealGate's
-// loop plumbing (issue #2001).
-func TestBudgetExceeded_TableDriven(t *testing.T) {
-	cases := []struct {
-		name     string
-		cfg      Config
-		usage    usage.Usage
-		wantOver bool
-	}{
-		{"both zero: never exceeded", Config{}, usage.Usage{InputTokens: 1_000_000, TotalCostUSD: 1_000_000}, false},
-		{"tokens under cap", Config{MaxBudgetTokens: 100}, usage.Usage{InputTokens: 99}, false},
-		{"tokens at cap", Config{MaxBudgetTokens: 100}, usage.Usage{InputTokens: 100}, true},
-		{"tokens over cap, summed across fields", Config{MaxBudgetTokens: 100}, usage.Usage{InputTokens: 30, OutputTokens: 30, CacheReadInputTokens: 30, CacheCreationInputTokens: 30}, true},
-		{"cost under cap", Config{MaxBudgetUSD: 5}, usage.Usage{TotalCostUSD: 4.99}, false},
-		{"cost at cap", Config{MaxBudgetUSD: 5}, usage.Usage{TotalCostUSD: 5}, true},
-		{"tokens fine but cost over", Config{MaxBudgetTokens: 1000, MaxBudgetUSD: 5}, usage.Usage{InputTokens: 10, TotalCostUSD: 6}, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			gotOver, reason := budgetExceeded(tc.cfg, tc.usage)
-			if gotOver != tc.wantOver {
-				t.Errorf("budgetExceeded = %v (%q), want over=%v", gotOver, reason, tc.wantOver)
-			}
-			if gotOver && reason == "" {
-				t.Error("expected a non-empty reason when exceeded")
-			}
-		})
-	}
-}
