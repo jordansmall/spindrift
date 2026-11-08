@@ -71,18 +71,17 @@ func TestSettle_DispatchRecordSeam(t *testing.T) {
 				fc.SetCheckStates(testPR, tc.checkStates)
 			}
 			cfg := baseConfig()
+			cfg.Progress = &ProgressRecorder{}
 			cfg.MaxFixAttempts = tc.maxFix
 			cfg.LogPath = func(n string) string { return dispatch.LogPathFor(root, n) }
 			s := newTestSettle(cfg, fc, fc)
 
-			testutil.CaptureStdout(t, func() {
-				disp := d.Run()
-				res := dispatch.Route(disp,
-					func() dispatch.Result { t.Fatal("dispatch skipped"); return dispatch.Result{} },
-					func(r dispatch.Result) dispatch.Result { return r },
-					func(r dispatch.Result) dispatch.Result { return r })
-				s.Settle(d, num, 0, res)
-			})
+			disp := d.Run()
+			res := dispatch.Route(disp,
+				func() dispatch.Result { t.Fatal("dispatch skipped"); return dispatch.Result{} },
+				func(r dispatch.Result) dispatch.Result { return r },
+				func(r dispatch.Result) dispatch.Result { return r })
+			s.Settle(d, num, 0, res)
 
 			recs := storedRecords(t, root)
 			if len(recs) != 1 {
@@ -231,10 +230,11 @@ func TestRecoverOpenPR_FixPassContinuesPriorRecord(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
 	cfg := baseConfig()
 	cfg.MaxFixAttempts = 1
+	cfg.Progress = &ProgressRecorder{}
 	cfg.LogPath = func(n string) string { return dispatch.LogPathFor(root, n) }
 	s := newTestSettle(cfg, fc, fc)
 
-	testutil.CaptureStdout(t, func() { recoverOpenPR(t, s, d, num, testPR) })
+	recoverOpenPR(t, s, d, num, testPR)
 
 	if d.RecordID() != prior {
 		t.Fatalf("Dispatch RecordID = %q, want the prior Record %q", d.RecordID(), prior)
@@ -281,19 +281,17 @@ func settleSeamComplete(t *testing.T, root, num string) (report.Record, string) 
 	fc.SetPR(fc.AgentBranch(num), forge.PR{URL: testPR})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	cfg := baseConfig()
+	cfg.Progress = &ProgressRecorder{}
 	cfg.LogPath = func(n string) string { return dispatch.LogPathFor(root, n) }
 	s := newTestSettle(cfg, fc, fc)
 
-	var stderr string
-	testutil.CaptureStdout(t, func() {
-		stderr = testutil.CaptureStderr(t, func() {
-			disp := d.Run()
-			res := dispatch.Route(disp,
-				func() dispatch.Result { t.Fatal("dispatch skipped"); return dispatch.Result{} },
-				func(r dispatch.Result) dispatch.Result { return r },
-				func(r dispatch.Result) dispatch.Result { return r })
-			s.Settle(d, num, 0, res)
-		})
+	stderr := testutil.CaptureStderr(t, func() {
+		disp := d.Run()
+		res := dispatch.Route(disp,
+			func() dispatch.Result { t.Fatal("dispatch skipped"); return dispatch.Result{} },
+			func(r dispatch.Result) dispatch.Result { return r },
+			func(r dispatch.Result) dispatch.Result { return r })
+		s.Settle(d, num, 0, res)
 	})
 	var settled []report.Record
 	for _, rec := range readRecords() {
@@ -352,7 +350,7 @@ func TestSettled_ConcurrentSettlesAllLand(t *testing.T) {
 		fr := runner.NewFake()
 		fr.RunFunc = seamBoxRun(num, "implement", "a"+num, "2026-05-01T09:00:00Z", "ready", "box-said-so")
 		d := seamDispatch(t, root, num, fr)
-		testutil.CaptureStdout(t, func() { d.Run() })
+		d.Run()
 		slots[i] = slot{d, num}
 	}
 

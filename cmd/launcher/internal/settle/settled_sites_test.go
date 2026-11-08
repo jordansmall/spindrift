@@ -65,6 +65,7 @@ func TestResearchSettle_FailAppendsSettled(t *testing.T) {
 // the settle leaves no Record in the store.
 func TestSettlePatch_SettlesNoRecord(t *testing.T) {
 	c := baseConfig()
+	c.Progress = &ProgressRecorder{}
 	_, path := stampedFake(t, "work:1@old")
 	c.LogPath = func(string) string { return path }
 	fc := forge.NewFake(testDispatchLabels)
@@ -72,7 +73,7 @@ func TestSettlePatch_SettlesNoRecord(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
 	s := newTestSettle(c, fc, fc)
 
-	testutil.CaptureStdout(t, func() { s.SettlePatch(patchOwner, "1", testPR) })
+	s.SettlePatch(patchOwner, "1", testPR)
 
 	if recs := logRecords(t, path); len(recs) != 0 {
 		t.Errorf("stored records = %+v, want none for a nil Dispatcher", recs)
@@ -82,15 +83,14 @@ func TestSettlePatch_SettlesNoRecord(t *testing.T) {
 func flushLatched(t *testing.T, fc *forge.Fake, reason string) []dispatchrecord.Record {
 	t.Helper()
 	c := baseConfig()
+	c.Progress = &ProgressRecorder{}
 	d, path := stampedFake(t, "work:9@x")
 	c.LogPath = func(string) string { return path }
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	s := newTestSettle(c, fc, fc)
 	s.latchPR("9", testPR)
-	testutil.CaptureStdout(t, func() {
-		s.transitionState("9", ForReason(reason), "")
-		s.flushSettled(d, "9")
-	})
+	s.transitionState("9", ForReason(reason), "")
+	s.flushSettled(d, "9")
 	return logRecords(t, path)
 }
 
