@@ -2,44 +2,44 @@ package settle
 
 import (
 	"sync"
-	"sync/atomic"
 
 	"spindrift.dev/launcher/internal/dispatchkey"
 )
 
-// DispatchOutcome is one Dispatch's record this run: its terminal state as
-// settled, or InProgress for a Dispatch that never settled (a merge-blocked
-// handoff or an off-script Box status).
+// DispatchOutcome pairs a Settlement with the Dispatch it settled.
 type DispatchOutcome struct {
-	Key                  dispatchkey.Key
-	State, Reason, PRURL string
+	Key dispatchkey.Key
+	Settlement
 }
 
-// Tally collects the terminal records Settled emits during one run, plus the
-// InProgress records of Dispatches that never settle (blockHandoff's
-// merge-blocks and Settle's off-script-status arm). Wave
-// goroutines settle concurrently, so it is mutex-guarded. The zero value is
-// ready to use.
+// Tally folds the Settlements a run's settles return, one outcome per Key. Wave
+// goroutines record concurrently, so it is mutex-guarded. The zero value is
+// ready to use; Record on a nil *Tally folds nothing.
 type Tally struct {
 	mu    sync.Mutex
 	order []dispatchkey.Key
 	byKey map[dispatchkey.Key]DispatchOutcome
 }
 
-func (t *Tally) record(o DispatchOutcome) {
+// Record folds st under key: the last write wins, keeping the key's
+// first-recorded position. The zero Settlement (no decision) is ignored.
+func (t *Tally) Record(key dispatchkey.Key, st Settlement) {
+	if t == nil || st == (Settlement{}) {
+		return
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.byKey == nil {
 		t.byKey = map[dispatchkey.Key]DispatchOutcome{}
 	}
-	if _, seen := t.byKey[o.Key]; !seen {
-		t.order = append(t.order, o.Key)
+	if _, seen := t.byKey[key]; !seen {
+		t.order = append(t.order, key)
 	}
-	t.byKey[o.Key] = o
+	t.byKey[key] = DispatchOutcome{Key: key, Settlement: st}
 }
 
 // Outcomes returns a copy of the recorded outcomes, one per Key (the last
-// write wins), in first-settled order.
+// write wins), in first-recorded order.
 func (t *Tally) Outcomes() []DispatchOutcome {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -48,20 +48,4 @@ func (t *Tally) Outcomes() []DispatchOutcome {
 		out = append(out, t.byKey[k])
 	}
 	return out
-}
-
-var installed atomic.Pointer[Tally]
-
-// InstallTally makes t the tally Settled feeds and returns a func restoring
-// the previous one. Process-wide, like report.Install.
-func InstallTally(t *Tally) (restore func()) {
-	prev := installed.Swap(t)
-	return func() { installed.Store(prev) }
-}
-
-// tallyOutcome records o on the installed tally, if any.
-func tallyOutcome(o DispatchOutcome) {
-	if t := installed.Load(); t != nil {
-		t.record(o)
-	}
 }

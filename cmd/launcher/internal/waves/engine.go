@@ -25,7 +25,8 @@ import (
 // call site, "" where none exists; v carries that site's status= class and
 // the state it fixes. Unlike settle.Settle's method of the same name it takes
 // d first and always settles d's Record directly rather than latching.
-func transitionState(d dispatch.Dispatcher, it forge.IssueTracker, num string, v settle.Verdict, note string) {
+// It returns the Settlement it recorded.
+func transitionState(d dispatch.Dispatcher, it forge.IssueTracker, num string, v settle.Verdict, note string) settle.Settlement {
 	v, note, err := settle.Transition(it, num, forge.InProgress, v, note)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %s: %v\n", num, v.State(), err)
@@ -33,7 +34,7 @@ func transitionState(d dispatch.Dispatcher, it forge.IssueTracker, num string, v
 	// Same failed-write-still-reports rule as settle.Settle.transitionState
 	// (issue #3627): the record is what the host decided, not whether the
 	// tracker write landed.
-	settle.SettledBy(d, dispatchkey.Issue(num), v, note)
+	return settle.SettledBy(d, dispatchkey.Issue(num), v, note)
 }
 
 // blockedMarker is the file under .spindrift/logs/ that tells the dispatching
@@ -79,14 +80,14 @@ func writeMarker(pwd, text string) error {
 // shutdown RunContinuous has (#3522), via shutdown.Gate rather than a
 // hand-rolled copy of RunContinuous's own latch: a Stop closes off further
 // launches from the batch while in-flight Boxes finish normally, and an
-// Abort additionally reclaims them. terminated is nil only when Dispatch's
-// session, or its Terminated, is nil (tests only; see Session.Terminated),
-// meaning no registry is shared with a caller outside this wave;
-// dispatchWave substitutes a fresh one itself, before building the
-// Gate, so the wave's own result switch below and the Gate it hands to every
-// goroutine provably share the same registry (#3522 review finding: reading
-// the pre-substitution terminated here lost every abort mark the Gate's own
-// fresh registry recorded). dispatchWave reports whether either stage fired,
+// Abort additionally reclaims them. session, or its Terminated, is nil only
+// in tests (see Session.Terminated), meaning no registry is shared with a
+// caller outside this wave; dispatchWave substitutes a fresh one itself, before
+// building the Gate, so the wave's own result switch below and the Gate it
+// hands to every goroutine provably share the same registry (#3522 review
+// finding: reading the pre-substitution terminated here lost every abort mark
+// the Gate's own fresh registry recorded). Each settle's Settlement folds into
+// session.Tally. dispatchWave reports whether either stage fired,
 // so the caller can return ErrSignalledStop.
 //
 // Who owns an issue's in-progress claim decides what a declining Gate may
@@ -97,7 +98,11 @@ func writeMarker(pwd, text string) error {
 // (that origin therefore calls Hold twice, which is idempotent). Miss that
 // second, up-front case and a decline at the pre-claim checkpoint strands the
 // issue in-progress with no release path (#3522 review finding).
-func dispatchWave(cfg Config, it forge.IssueTracker, cf forge.CodeForge, f *dispatch.Factory, s settle.Settler, batch []Issue, origin Origin, claimer Claimer, terminated *terminate.Registry) bool {
+func dispatchWave(cfg Config, it forge.IssueTracker, cf forge.CodeForge, f *dispatch.Factory, s settle.Settler, batch []Issue, origin Origin, claimer Claimer, session *Session) bool {
+	var terminated *terminate.Registry
+	if session != nil {
+		terminated = session.Terminated
+	}
 	if terminated == nil {
 		terminated = terminate.NewRegistry()
 	}
@@ -156,12 +161,12 @@ func dispatchWave(cfg Config, it forge.IssueTracker, cf forge.CodeForge, f *disp
 					func(result dispatch.Result) struct{} {
 						fmt.Printf("    !! #%s FAILED (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
 						result.ReportFailureReason(iss.Number)
-						transitionState(d, it, iss.Number, settle.ForReason(dispatchrecord.ReasonBoxFailed), result.FailureNote())
+						session.record(iss.Number, transitionState(d, it, iss.Number, settle.ForReason(dispatchrecord.ReasonBoxFailed), result.FailureNote()))
 						return struct{}{}
 					},
 					func(result dispatch.Result) struct{} {
 						fmt.Printf("    <- #%s done  (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
-						s.Settle(d, iss.Number, iss.Generation, result)
+						session.record(iss.Number, s.Settle(d, iss.Number, iss.Generation, result))
 						return struct{}{}
 					})
 			}
@@ -210,7 +215,7 @@ func printSelectiveRerunHint(cfg Config, held []Issue) {
 // cfg.MaxJobs == 0 is uncapped. Blocked issues are skipped rather than waited
 // on, so no slot goes to a dependency that hasn't merged yet. NewPlan has
 // already cycle-checked the in-batch dependency graph.
-func drainMaxJobs(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, issues []Issue, edges map[string][]string, sources Sources, depsOfFailed map[string]bool, origin Origin, claimer Claimer, terminated *terminate.Registry) error {
+func drainMaxJobs(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, issues []Issue, edges map[string][]string, sources Sources, depsOfFailed map[string]bool, origin Origin, claimer Claimer, session *Session) error {
 	checkOverlap := waveOverlapCheck(cfg, it, cf)
 	// Resolved once for the whole drain so unreadyBlockers does not re-derive
 	// it on every blocker check (#2946). Zero-value backend.Descriptor rows are
@@ -303,7 +308,7 @@ outer:
 		return nil
 	}
 	fmt.Printf("==> draining %d unblocked issue(s) (MAX_JOBS=%d)\n", len(selected), cfg.MaxJobs)
-	signalled := dispatchWave(cfg, it, cf, f, s, selected, origin, claimer, terminated)
+	signalled := dispatchWave(cfg, it, cf, f, s, selected, origin, claimer, session)
 	if held := heldIssues(issues, selected); len(held) > 0 {
 		// A signalled stop still genuinely holds this remainder for a later
 		// invocation (#3522), so the rerun hint/remaining-count lines below
@@ -332,11 +337,7 @@ func run(cfg Config, session *Session, it forge.IssueTracker, cf forge.CodeForge
 	if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
 		return err
 	}
-	var terminated *terminate.Registry
-	if session != nil {
-		terminated = session.Terminated
-	}
-	return drainMaxJobs(cfg, it, cf, pwd, f, s, plan.Issues, plan.Edges, plan.Sources, plan.Failed, plan.Origin, claimer, terminated)
+	return drainMaxJobs(cfg, it, cf, pwd, f, s, plan.Issues, plan.Edges, plan.Sources, plan.Failed, plan.Origin, claimer, session)
 }
 
 // SignalledStopAlready is a non-blocking read of a stop/abort channel pair:

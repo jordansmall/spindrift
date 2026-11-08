@@ -232,7 +232,6 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// empty: o.Status is Box-controlled and the banner prints only
 		// host-derived values.
 		s.latchUnrecorded(num, Verdict{state: forge.InProgress}, "")
-		tallyOutcome(DispatchOutcome{Key: s.keyFor(num), State: forge.InProgress.String()})
 		s.postUsageComment(num, d)
 	}
 	return
@@ -456,7 +455,6 @@ func Settled(key dispatchkey.Key, logPath string, v Verdict, ds hostop.DispatchS
 	ds.State, ds.Reason = v.State().String(), v.Reason()
 	dispatchrecord.RecordSettled(os.Stderr, key.String(), logPath, ds)
 	report.Settled(key, ds.State, ds.Note, ds.PRURL, ds.RecordID)
-	tallyOutcome(DispatchOutcome{Key: key, State: ds.State, Reason: ds.Reason, PRURL: ds.PRURL})
 	return Settlement{Verdict: v, PRURL: ds.PRURL, Note: ds.Note}
 }
 

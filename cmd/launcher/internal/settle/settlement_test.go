@@ -179,3 +179,10 @@ func TestResearchSettle_MissingOutcomeReturnsResearchFailed(t *testing.T) {
 		t.Fatalf("Settle verdict = %+v, want research-failed", got.Verdict)
 	}
 }
+
+func settleReadyResult(num, branch string) dispatch.Result {
+	return dispatch.Result{Resolved: outcome.Resolved{
+		Found:   true,
+		Outcome: outcome.Outcome{Issue: num, Landing: branch, Status: "ready", Note: "ok"},
+	}}
+}

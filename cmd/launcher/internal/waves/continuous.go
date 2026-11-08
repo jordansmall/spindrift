@@ -506,13 +506,13 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 					func(result dispatch.Result) struct{} {
 						fmt.Printf("    !! #%s FAILED (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
 						result.ReportFailureReason(iss.Number)
-						transitionState(d, it, iss.Number, settle.ForReason(dispatchrecord.ReasonBoxFailed), result.FailureNote())
+						session.record(iss.Number, transitionState(d, it, iss.Number, settle.ForReason(dispatchrecord.ReasonBoxFailed), result.FailureNote()))
 						s.Fail(iss.Number, iss.Generation, result)
 						return struct{}{}
 					},
 					func(result dispatch.Result) struct{} {
 						fmt.Printf("    <- #%s done  (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
-						s.Settle(d, iss.Number, iss.Generation, result)
+						session.record(iss.Number, s.Settle(d, iss.Number, iss.Generation, result))
 						return struct{}{}
 					})
 			}

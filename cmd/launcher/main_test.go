@@ -3177,7 +3177,6 @@ func TestNewCodeForge_GitReadOnly_ReturnsPlainAdapter(t *testing.T) {
 // branch since each seam resolves its own from its own parent frontmatter
 // (issue #1734).
 func TestDispatchCompletionBanner_AllDelivered(t *testing.T) {
-	complete := forge.Complete.String()
 	tests := []struct {
 		name      string
 		codeForge string
@@ -3187,24 +3186,24 @@ func TestDispatchCompletionBanner_AllDelivered(t *testing.T) {
 		{
 			"github", "github",
 			[]settle.DispatchOutcome{
-				{Key: dispatchkey.Issue("11"), State: complete, Reason: dispatchrecord.ReasonMerged, PRURL: "https://github.com/owner/repo/pull/1"},
-				{Key: dispatchkey.Issue("12"), State: complete, Reason: dispatchrecord.ReasonManual, PRURL: "https://github.com/owner/repo/pull/2"},
+				settledOutcome("11", dispatchrecord.ReasonMerged, "https://github.com/owner/repo/pull/1"),
+				settledOutcome("12", dispatchrecord.ReasonManual, "https://github.com/owner/repo/pull/2"),
 			},
 			"==> all agents finished — branches pushed and PRs opened on owner/repo.\n",
 		},
 		{
 			"git", "git",
-			[]settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: complete, Reason: dispatchrecord.ReasonMerged}},
+			[]settle.DispatchOutcome{settledOutcome("11", dispatchrecord.ReasonMerged, "")},
 			"==> all agents finished — branches pushed on owner/repo.\n",
 		},
 		{
 			"forgejo", "forgejo",
-			[]settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: complete, Reason: dispatchrecord.ReasonMerged}},
+			[]settle.DispatchOutcome{settledOutcome("11", dispatchrecord.ReasonMerged, "")},
 			"==> all agents finished — branches pushed on owner/repo.\n",
 		},
 		{
 			"local", "local",
-			[]settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: complete, Reason: dispatchrecord.ReasonMerged}},
+			[]settle.DispatchOutcome{settledOutcome("11", dispatchrecord.ReasonMerged, "")},
 			"==> all agents finished — seams landed host-side into their own Integration branches in the Accumulation repo.\n",
 		},
 	}
@@ -3226,7 +3225,6 @@ func TestDispatchCompletionBanner_AllDelivered(t *testing.T) {
 // An advise-only kind's Complete gets its wording from its descriptor, never the
 // Code Forge's landing claim, on every forge (issue #5164).
 func TestDispatchCompletionBanner_AdviseOnlyKindsUseDescriptorWording(t *testing.T) {
-	complete := forge.Complete.String()
 	for _, tc := range []struct {
 		kind   *dispatchkind.Descriptor
 		reason string
@@ -3240,7 +3238,7 @@ func TestDispatchCompletionBanner_AdviseOnlyKindsUseDescriptorWording(t *testing
 				c := applyDispatchKind(minimalValidConfig(), tc.kind)
 				c.CodeForge = codeForge
 				c.RepoSlug = "owner/repo"
-				outcomes := []settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: complete, Reason: tc.reason}}
+				outcomes := []settle.DispatchOutcome{settledOutcome("11", tc.reason, "")}
 				if got := dispatchCompletionBanner(c, outcomes); got != tc.want {
 					t.Errorf("dispatchCompletionBanner = %q, want %q", got, tc.want)
 				}
@@ -3251,55 +3249,55 @@ func TestDispatchCompletionBanner_AdviseOnlyKindsUseDescriptorWording(t *testing
 
 func TestDispatchCompletionBanner_ResearchFailureStillNamed(t *testing.T) {
 	c := applyDispatchKind(minimalValidConfig(), dispatchkind.Research)
-	outcomes := []settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: forge.Failed.String(), Reason: dispatchrecord.ReasonResearchFailed}}
+	outcomes := []settle.DispatchOutcome{settledOutcome("11", dispatchrecord.ReasonResearchFailed, "")}
 	want := "==> all agents finished — 1 of 1 dispatches did not deliver: #11 (research-failed).\n"
 	if got := dispatchCompletionBanner(c, outcomes); got != want {
 		t.Errorf("dispatchCompletionBanner = %q, want %q", got, want)
 	}
 }
 
+// settledOutcome is the DispatchOutcome of a Dispatch that settled with reason
+// (a dispatchrecord.Reason* const), working prURL.
+func settledOutcome(key, reason, prURL string) settle.DispatchOutcome {
+	return settle.DispatchOutcome{
+		Key:        dispatchkey.Issue(key),
+		Settlement: settle.Settlement{Verdict: settle.ForReason(reason), PRURL: prURL},
+	}
+}
+
 // mixedOutcomes is one delivered dispatch plus a representative mix of ways a
-// dispatch can fail to deliver, each shaped as settle really records it: an
-// InProgress merge-blocked
-// record with no PR (a read-only github draft-PR create failure, blockHandoff),
-// a Complete merge-blocked record with no PR (a push-only landing failure,
-// landPushOnly), relay-failed, a Failed ci-red that still has its PR open,
-// already-resolved, blocked, ambiguous, a Chore key, and an empty Reason (the
-// State stands in).
+// dispatch can fail to deliver, each shaped as settle really records it: a
+// Complete merge-blocked record with no PR (a read-only github draft-PR create
+// failure, blockHandoff, or a push-only landing failure, landPushOnly),
+// relay-failed, a Failed ci-red that still has its PR open, already-resolved,
+// blocked, ambiguous, and a Chore key.
 func mixedOutcomes() []settle.DispatchOutcome {
-	complete, failed := forge.Complete.String(), forge.Failed.String()
 	return []settle.DispatchOutcome{
-		{Key: dispatchkey.Issue("11"), State: complete, Reason: dispatchrecord.ReasonMerged, PRURL: "https://github.com/owner/repo/pull/11"},
-		{Key: dispatchkey.Issue("12"), State: forge.InProgress.String(), Reason: dispatchrecord.ReasonMergeBlocked},
-		{Key: dispatchkey.Issue("13"), State: complete, Reason: dispatchrecord.ReasonMergeBlocked},
-		{Key: dispatchkey.Issue("14"), State: failed, Reason: dispatchrecord.ReasonRelayFailed},
-		{Key: dispatchkey.Issue("15"), State: failed, Reason: dispatchrecord.ReasonCIRed, PRURL: "https://github.com/owner/repo/pull/15"},
-		{Key: dispatchkey.Issue("16"), State: complete, Reason: dispatchrecord.ReasonAlreadyResolved},
-		{Key: dispatchkey.Issue("17"), State: failed, Reason: dispatchrecord.ReasonBlocked},
-		{Key: dispatchkey.Issue("18"), State: forge.Ambiguous.String(), Reason: dispatchrecord.ReasonAmbiguous},
-		{Key: dispatchkey.Chore("docs-drift"), State: complete, Reason: dispatchrecord.ReasonMergeBlocked},
-		{Key: dispatchkey.Issue("19"), State: failed},
+		settledOutcome("11", dispatchrecord.ReasonMerged, "https://github.com/owner/repo/pull/11"),
+		settledOutcome("12", dispatchrecord.ReasonMergeBlocked, ""),
+		settledOutcome("13", dispatchrecord.ReasonMergeBlocked, ""),
+		settledOutcome("14", dispatchrecord.ReasonRelayFailed, ""),
+		settledOutcome("15", dispatchrecord.ReasonCIRed, "https://github.com/owner/repo/pull/15"),
+		settledOutcome("16", dispatchrecord.ReasonAlreadyResolved, ""),
+		settledOutcome("17", dispatchrecord.ReasonBlocked, ""),
+		settledOutcome("18", dispatchrecord.ReasonAmbiguous, ""),
+		{Key: dispatchkey.Chore("docs-drift"), Settlement: settle.Settlement{Verdict: settle.ForReason(dispatchrecord.ReasonMergeBlocked)}},
 	}
 }
 
 func TestDelivered(t *testing.T) {
-	complete, failed := forge.Complete.String(), forge.Failed.String()
 	tests := []struct {
 		name string
 		o    settle.DispatchOutcome
 		want bool
 	}{
-		{"merged with PR", settle.DispatchOutcome{State: complete, Reason: dispatchrecord.ReasonMerged, PRURL: "u"}, true},
-		{"merge-blocked without PR", settle.DispatchOutcome{State: complete, Reason: dispatchrecord.ReasonMergeBlocked}, false},
-		{"merge-blocked with PR", settle.DispatchOutcome{State: complete, Reason: dispatchrecord.ReasonMergeBlocked, PRURL: "u"}, true},
-		{"already-resolved", settle.DispatchOutcome{State: complete, Reason: dispatchrecord.ReasonAlreadyResolved}, false},
-		{"relay-failed", settle.DispatchOutcome{State: failed, Reason: dispatchrecord.ReasonRelayFailed}, false},
-		{"ci-red with PR", settle.DispatchOutcome{State: failed, Reason: dispatchrecord.ReasonCIRed, PRURL: "u"}, false},
-		{"push-only manual without PR", settle.DispatchOutcome{State: complete, Reason: dispatchrecord.ReasonManual}, true},
-		{"in-progress merge-blocked", settle.DispatchOutcome{State: forge.InProgress.String(), Reason: dispatchrecord.ReasonMergeBlocked}, false},
-		{"transition-refused complete", settle.DispatchOutcome{State: complete, Reason: dispatchrecord.ReasonTransitionRefused}, true},
-		{"unknown reason complete", settle.DispatchOutcome{State: complete, Reason: "no-such-reason"}, true},
-		{"empty reason complete", settle.DispatchOutcome{State: complete}, true},
+		{"merged with PR", settledOutcome("1", dispatchrecord.ReasonMerged, "u"), true},
+		{"merge-blocked without PR", settledOutcome("1", dispatchrecord.ReasonMergeBlocked, ""), false},
+		{"merge-blocked with PR", settledOutcome("1", dispatchrecord.ReasonMergeBlocked, "u"), true},
+		{"already-resolved", settledOutcome("1", dispatchrecord.ReasonAlreadyResolved, ""), false},
+		{"relay-failed", settledOutcome("1", dispatchrecord.ReasonRelayFailed, ""), false},
+		{"ci-red with PR", settledOutcome("1", dispatchrecord.ReasonCIRed, "u"), false},
+		{"push-only manual without PR", settledOutcome("1", dispatchrecord.ReasonManual, ""), true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3316,10 +3314,10 @@ func TestDelivered(t *testing.T) {
 // failure, a forgejo draft-create failure), so "pushed no branch" could be
 // false (issue #5145).
 func TestDispatchCompletionBanner_NamesDispatchesThatDidNotDeliver(t *testing.T) {
-	want := "==> all agents finished — 9 of 10 dispatches did not deliver: " +
+	want := "==> all agents finished — 8 of 9 dispatches did not deliver: " +
 		"#12 (merge-blocked), #13 (merge-blocked), #14 (relay-failed), #15 (ci-red), " +
 		"#16 (already-resolved), #17 (blocked), #18 (ambiguous), " +
-		"butler-docs-drift (merge-blocked), #19 (failed).\n"
+		"butler-docs-drift (merge-blocked).\n"
 	for _, codeForge := range []string{"github", "git", "forgejo", "local"} {
 		t.Run(codeForge, func(t *testing.T) {
 			c := minimalValidConfig()

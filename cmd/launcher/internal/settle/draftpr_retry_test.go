@@ -58,9 +58,10 @@ func TestRetryingDraftPR_NilInnerStaysNil(t *testing.T) {
 func TestSettle_GithubReadOnly_DraftPRCreateRetriesTransientFailureThenOpens(t *testing.T) {
 	s, fc, result := draftPRRetryFixture(t, 3, dispatch.Clock{})
 	fc.CreateDraftPRErrs = []error{errDraftPR504, nil}
-	tally := installGreenCIAndTally(t, fc)
+	greenCI(t, fc)
 
-	stdout := captureStdout(t, func() { s.Settle(dispatch.NewFake(), "5146", 0, result) })
+	var got Settlement
+	stdout := captureStdout(t, func() { got = s.Settle(dispatch.NewFake(), "5146", 0, result) })
 
 	if len(fc.CreateDraftPRCalls) != 2 {
 		t.Errorf("CreateDraftPR calls = %d, want 2", len(fc.CreateDraftPRCalls))
@@ -68,7 +69,7 @@ func TestSettle_GithubReadOnly_DraftPRCreateRetriesTransientFailureThenOpens(t *
 	if !strings.Contains(stdout, "status=draft-pr-retry  attempt=1/3") || !strings.Contains(stdout, "504 Gateway Timeout") {
 		t.Errorf("stdout must log the retry attempt and error, got:\n%s", stdout)
 	}
-	assertDraftPRHandedOff(t, fc, tally, stdout)
+	assertDraftPRHandedOff(t, fc, got, stdout)
 }
 
 // A gateway timeout can fire after the forge made the PR: the retry must adopt
@@ -80,9 +81,10 @@ func TestSettle_GithubReadOnly_DraftPRCreateTimeoutThatCreatedIsAdopted(t *testi
 	fc.CreateDraftPROnCall = func(head string) {
 		fc.SetPR(head, forge.PR{URL: draftPRRetryURL})
 	}
-	tally := installGreenCIAndTally(t, fc)
+	greenCI(t, fc)
 
-	stdout := captureStdout(t, func() { s.Settle(dispatch.NewFake(), "5146", 0, result) })
+	var got Settlement
+	stdout := captureStdout(t, func() { got = s.Settle(dispatch.NewFake(), "5146", 0, result) })
 
 	if len(fc.CreateDraftPRCalls) != 1 || fc.CreateDraftPRCalls[0].Head != branch {
 		t.Errorf("CreateDraftPR calls = %+v, want exactly 1", fc.CreateDraftPRCalls)
@@ -90,7 +92,7 @@ func TestSettle_GithubReadOnly_DraftPRCreateTimeoutThatCreatedIsAdopted(t *testi
 	if !strings.Contains(stdout, "status=draft-pr-adopted") {
 		t.Errorf("stdout must log the adoption, got:\n%s", stdout)
 	}
-	assertDraftPRHandedOff(t, fc, tally, stdout)
+	assertDraftPRHandedOff(t, fc, got, stdout)
 }
 
 func TestRetryingDraftPR_AdoptsOpenPRBeforeRecreating(t *testing.T) {
@@ -295,9 +297,10 @@ func TestSettle_GithubReadOnly_ReconstructedDraftPRAdoptedAfterTimeoutIsAnnounce
 	result = withoutPRIntent(fc, result)
 	fc.CreateDraftPRErrs = []error{errDraftPR504}
 	fc.CreateDraftPROnCall = func(head string) { fc.SetPR(head, forge.PR{URL: draftPRRetryURL}) }
-	tally := installGreenCIAndTally(t, fc)
+	greenCI(t, fc)
 
-	stdout := captureStdout(t, func() { s.Settle(dispatch.NewFake(), "5146", 0, result) })
+	var got Settlement
+	stdout := captureStdout(t, func() { got = s.Settle(dispatch.NewFake(), "5146", 0, result) })
 
 	if !strings.Contains(stdout, "status=reconstructed") {
 		t.Errorf("stdout must carry status=reconstructed, got:\n%s", stdout)
@@ -305,7 +308,7 @@ func TestSettle_GithubReadOnly_ReconstructedDraftPRAdoptedAfterTimeoutIsAnnounce
 	if n := reconstructedComments(fc); n != 1 {
 		t.Errorf("reconstructed comments = %d, want 1: %+v", n, fc.CommentCalls)
 	}
-	assertDraftPRHandedOff(t, fc, tally, stdout)
+	assertDraftPRHandedOff(t, fc, got, stdout)
 }
 
 // Same, when the lookup fails and the adapter's already-exists backstop adopts
@@ -317,9 +320,10 @@ func TestSettle_GithubReadOnly_ReconstructedDraftPRAdoptedByBackstopIsAnnounced(
 	fc.OpenPRForBranchErrs = []error{errors.New("lookup blip")}
 	fc.CreateDraftPRAdoptHead = fc.AgentBranch("5146")
 	fc.CreateDraftPRAdoptedURL = draftPRRetryURL
-	tally := installGreenCIAndTally(t, fc)
+	greenCI(t, fc)
 
-	stdout := captureStdout(t, func() { s.Settle(dispatch.NewFake(), "5146", 0, result) })
+	var got Settlement
+	stdout := captureStdout(t, func() { got = s.Settle(dispatch.NewFake(), "5146", 0, result) })
 
 	if !strings.Contains(stdout, "status=reconstructed") {
 		t.Errorf("stdout must carry status=reconstructed, got:\n%s", stdout)
@@ -327,7 +331,7 @@ func TestSettle_GithubReadOnly_ReconstructedDraftPRAdoptedByBackstopIsAnnounced(
 	if n := reconstructedComments(fc); n != 1 {
 		t.Errorf("reconstructed comments = %d, want 1: %+v", n, fc.CommentCalls)
 	}
-	assertDraftPRHandedOff(t, fc, tally, stdout)
+	assertDraftPRHandedOff(t, fc, got, stdout)
 }
 
 // A PR-intent hand-off adopted after a retry has nothing to announce.
@@ -335,7 +339,7 @@ func TestSettle_GithubReadOnly_PRIntentDraftPRAdoptedAfterTimeoutIsNotAnnounced(
 	s, fc, result := draftPRRetryFixture(t, 3, dispatch.Clock{})
 	fc.CreateDraftPRErrs = []error{errDraftPR504}
 	fc.CreateDraftPROnCall = func(head string) { fc.SetPR(head, forge.PR{URL: draftPRRetryURL}) }
-	installGreenCIAndTally(t, fc)
+	greenCI(t, fc)
 
 	stdout := captureStdout(t, func() { s.Settle(dispatch.NewFake(), "5146", 0, result) })
 
@@ -379,22 +383,18 @@ func TestRetryingDraftPR_OnAdoptOwnFiresOnlyAfterAFailedAttempt(t *testing.T) {
 	})
 }
 
-// installGreenCIAndTally scripts green CI on the opened PR and installs a
-// process-wide Tally hook (restored on cleanup), so a successful hand-off
-// reaches the merge gate's Complete instead of a CI-timeout failure that would
-// mask a spurious failed or merge-blocked write.
-func installGreenCIAndTally(t *testing.T, fc *forge.Fake) *Tally {
+// greenCI scripts green CI on the opened PR, so a successful hand-off reaches
+// the merge gate's Complete instead of a CI-timeout failure that would mask a
+// spurious failed or merge-blocked outcome.
+func greenCI(t *testing.T, fc *forge.Fake) {
 	t.Helper()
 	fc.SetCheckStates(draftPRRetryURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-	tally := &Tally{}
-	t.Cleanup(InstallTally(tally))
-	return tally
 }
 
 // assertDraftPRHandedOff pins that the hand-off proceeded on the opened PR (the
 // merge gate's lines name its URL) and settled clean: no failed transition, the
-// last transition Complete, and a tally holding only that Complete entry.
-func assertDraftPRHandedOff(t *testing.T, fc *forge.Fake, tally *Tally, stdout string) {
+// last transition Complete, and the returned Settlement Complete.
+func assertDraftPRHandedOff(t *testing.T, fc *forge.Fake, got Settlement, stdout string) {
 	t.Helper()
 	if !strings.Contains(stdout, "landing="+draftPRRetryURL) || strings.Contains(stdout, "status=draft-pr-failed") {
 		t.Errorf("hand-off must proceed on %s without parking; stdout:\n%s", draftPRRetryURL, stdout)
@@ -415,9 +415,7 @@ func assertDraftPRHandedOff(t *testing.T, fc *forge.Fake, tally *Tally, stdout s
 	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Complete {
 		t.Errorf("last transition To=%v, want Complete", last.To)
 	}
-	// Tally keeps the last write per key, so a lone Complete entry also proves
-	// no merge-blocked or failed record survives.
-	if outs := tally.Outcomes(); len(outs) != 1 || outs[0].State != forge.Complete.String() {
-		t.Errorf("tally = %+v, want exactly one Complete entry", outs)
+	if got.State() != forge.Complete {
+		t.Errorf("Settlement = %+v, want Complete", got)
 	}
 }

@@ -1,6 +1,10 @@
 package waves
 
-import "spindrift.dev/launcher/internal/terminate"
+import (
+	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/terminate"
+)
 
 // Session carries the state a caller shares with Dispatch and RunContinuous
 // (#1547). Only the Console sets Limiter; every production caller sets
@@ -24,4 +28,16 @@ type Session struct {
 	// a signalled abort's Reclaim can still mark, so an issue can still come
 	// back terminated.
 	Terminated *terminate.Registry
+
+	// Tally folds the Settlement each of this session's settles returns,
+	// keyed by issue. Nil folds nothing.
+	Tally *settle.Tally
+}
+
+// record folds st into the session's Tally under issue num; nil-safe on both
+// the Session and its Tally.
+func (s *Session) record(num string, st settle.Settlement) {
+	if s != nil {
+		s.Tally.Record(dispatchkey.Issue(num), st)
+	}
 }
