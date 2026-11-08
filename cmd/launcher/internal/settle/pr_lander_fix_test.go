@@ -14,6 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/retry"
+	"spindrift.dev/launcher/internal/usage"
 )
 
 // fixPassStep is the progress step announcing fix pass n of of.
@@ -84,6 +85,26 @@ func fixCases() []prCase {
 	var sleeps *[]time.Duration
 	var pollInterval time.Duration
 
+	// budgeted caps the run's tokens and USD and scripts the cumulative usage
+	// the fix-pass gate reads (issue #2001): a zero cap leaves that dimension off.
+	budgeted := func(c prCase, maxTokens int, maxUSD float64, used usage.Usage) prCase {
+		c.setup = func(_ *testing.T, _ *forge.Fake, cfg *Config) {
+			cfg.MaxBudgetTokens, cfg.MaxBudgetUSD = maxTokens, maxUSD
+		}
+		c.dsetup = func(d *dispatch.Fake, _ *forge.Fake) { d.CumulativeUsageResult = used }
+		return c
+	}
+	// overBudget is a red run whose usage met a cap: no fix pass is dispatched
+	// although MAX_FIX_ATTEMPTS would still allow one.
+	overBudget := func(c prCase, reason string) prCase {
+		c.maxFix, c.checks = 3, []forge.RollupState{red}
+		c.prClosed, c.wantLabels, c.wantNoLabels = true, failed, complete
+		c.want = settledAs(dispatchrecord.ReasonBudgetExhausted, "budget-exhausted: "+reason)
+		c.wantStepsLike = []Step{prStep(StatusBudgetExhausted, "!! "+reason)}
+		c.wantComments = []string{"budget exhausted (" + reason + ") — stopping self-heal before another fix pass"}
+		return c
+	}
+
 	return []prCase{
 		{
 			name: "a green first poll draws no fix pass", maxFix: 3,
@@ -133,6 +154,18 @@ func fixCases() []prCase {
 			wantLabels: failed, wantNoLabels: complete,
 			wantComments: []string{"landing failed: ci-timeout: CI-watch deadline reached after 0s"},
 		},
+		overBudget(budgeted(prCase{name: "exhausted tokens stop before a fix pass"}, 100, 0, usage.Usage{InputTokens: 150}),
+			"150 tokens >= cap 100"),
+		overBudget(budgeted(prCase{name: "exhausted USD stops before a fix pass with tokens uncapped"}, 0, 1.00, usage.Usage{TotalCostUSD: 4.44}),
+			"$4.4400 >= cap $1.0000"),
+		budgeted(prCase{
+			name: "a run under both caps dispatches its fix pass", maxFix: 3, checks: redGreen,
+			want: merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge, wantFixes: 1,
+		}, 1000, 10.00, usage.Usage{InputTokens: 100, TotalCostUSD: 0.50}),
+		budgeted(prCase{
+			name: "unset caps never stop a fix pass whatever the usage", maxFix: 2, checks: redGreen,
+			want: merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge, wantFixes: 1,
+		}, 0, 0, usage.Usage{InputTokens: 999999999, TotalCostUSD: 999999.0}),
 		{
 			name: "a failed fix pass stops without re-polling the unchanged head", maxFix: 3, checks: reds,
 			dsetup: func(d *dispatch.Fake, _ *forge.Fake) { d.FixResult = dispatch.Failed(dispatch.Result{}) },
@@ -300,20 +333,4 @@ func fixCases() []prCase {
 			},
 		},
 	}
-}
-
-// fixConfig is baseConfig with maxFixAttempts fix passes allowed.
-func fixConfig(maxFixAttempts int) Config {
-	c := baseConfig()
-	c.MaxFixAttempts = maxFixAttempts
-	return c
-}
-
-// fixPasses extracts the 1-based pass numbers recorded on a Fake Dispatcher.
-func fixPasses(d *dispatch.Fake) []int {
-	var passes []int
-	for _, call := range d.FixCalls {
-		passes = append(passes, call.Pass)
-	}
-	return passes
 }

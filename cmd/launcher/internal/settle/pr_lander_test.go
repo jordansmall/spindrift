@@ -8,8 +8,10 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -83,7 +85,8 @@ type prCase struct {
 	wantComments   []string // substring of each issue comment, in order; none when nil
 	wantPRComments []string // substring of each PR comment, in order; unchecked when nil
 	wantPRExact    string   // the sole PR comment, byte for byte
-	abandoned      bool     // a stop left the released issue untouched; want is the zero Settlement
+	abandoned      bool     // a stop or a decline left the issue untouched
+	declined       bool     // Recover returns its Settlement before Begin claims the issue
 	prClosed       bool     // the settled reason leaves no open PR although nothing merged
 	wantFixes      int      // fix passes dispatched
 	wantResolves   int      // conflict-resolve Boxes dispatched
@@ -94,6 +97,8 @@ type prCase struct {
 	wantNoErr      []error  // an entryRelayed Recover's error must wrap none of these
 	wantClosed     []string // MergeCloser's CloseMergedIssueCalls; unchecked when nil, non-nil empty means none
 	wantStepsLike  []Step   // steps by Key, Landing, Status and a Detail substring
+	runURLs        []string // the CI run URL each successive check poll reports; non-nil makes the forge a run URL reporter
+	wantCIWaits    []string // RunURL of each ci_wait record, in order; the records are unobserved when nil
 }
 
 // prSettlement is the Settlement a PR landing of testPR settles with.
@@ -293,6 +298,8 @@ func TestSettle_PRLander(t *testing.T) {
 	cases = append(cases, adoptCases()...)
 	cases = append(cases, closeCases()...)
 	cases = append(cases, entryCases()...)
+	cases = append(cases, unreviewedCases()...)
+	cases = append(cases, ciWaitCases()...)
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -307,6 +314,16 @@ func TestSettle_PRLander(t *testing.T) {
 			rec := &ProgressRecorder{}
 			c.Progress = rec
 			fc := forge.NewFake(testDispatchLabels)
+			var runURLForge *forge.RunURLFake
+			if tc.runURLs != nil {
+				runURLForge = forge.NewRunURLFake(testDispatchLabels)
+				fc = runURLForge.Fake
+				runURLForge.SetRunURLs(testPR, tc.runURLs)
+			}
+			var readRecords func() []report.Record
+			if tc.wantCIWaits != nil {
+				readRecords = testutil.InstallPipeReporter(t)
+			}
 			labels := []string{"agent-in-progress"}
 			if tc.labels != nil {
 				labels = tc.labels
@@ -338,6 +355,9 @@ func TestSettle_PRLander(t *testing.T) {
 				tc.setup(t, fc, &c)
 			}
 			tracker, cf := tc.shape.build(fc)
+			if runURLForge != nil {
+				cf = runURLForge
+			}
 			if tc.afterMerge != nil {
 				cf = readErrAfterMerge{fc, tc.afterMerge}
 			}
@@ -348,7 +368,8 @@ func TestSettle_PRLander(t *testing.T) {
 			if tc.entry == entrySettle {
 				gen = s.term.Begin("1")
 			}
-			begin := func() (dispatch.Dispatcher, error) { return d, nil }
+			begins := 0
+			begin := func() (dispatch.Dispatcher, error) { begins++; return d, nil }
 
 			if tc.wire != nil {
 				tc.wire(fc, d, func() { s.term.Mark("1") })
@@ -398,6 +419,9 @@ func TestSettle_PRLander(t *testing.T) {
 
 			fc.IssueErr = nil
 			iss, _ := fc.Issue("1")
+			if tc.entry != entrySettle && (begins == 0) != tc.declined {
+				t.Errorf("Begin called %d times; want it skipped exactly when declined (%v)", begins, tc.declined)
+			}
 			if got != tc.want {
 				t.Errorf("Settle = %+v, want %+v", got, tc.want)
 			}
@@ -430,6 +454,21 @@ func TestSettle_PRLander(t *testing.T) {
 			for _, w := range tc.wantNoStderr {
 				if strings.Contains(stderr, w) {
 					t.Errorf("stderr = %q, want it free of %q", stderr, w)
+				}
+			}
+			if readRecords != nil {
+				var waits []string
+				for _, r := range readRecords() {
+					if r.Event != report.EventCIWait {
+						continue
+					}
+					if r.Key != dispatchkey.Issue("1") || r.PRURL != testPR {
+						t.Errorf("ci_wait record = %+v, want issue=1 PRURL=%s", r, testPR)
+					}
+					waits = append(waits, r.RunURL)
+				}
+				if !slices.Equal(waits, tc.wantCIWaits) {
+					t.Errorf("ci_wait run URLs = %q, want %q", waits, tc.wantCIWaits)
 				}
 			}
 			if missing := containsSteps(rec.Steps(), tc.wantSteps); len(missing) > 0 {
