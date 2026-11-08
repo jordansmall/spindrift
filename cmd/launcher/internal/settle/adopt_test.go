@@ -189,26 +189,6 @@ func TestSettleAdopted_StaleSuccessStillTimesOutWithinWindow(t *testing.T) {
 	}
 }
 
-// The landingMerged case must guard verifyMerged against a push-only forge's
-// nil s.pr (issue #697), mirroring gate.go's "ready" case: silent skip, no
-// logging.
-func TestSettleAdopted_PushOnlyForgeSkipsVerify(t *testing.T) {
-	const branch = "agent/issue-1"
-
-	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-
-	c := baseConfig()
-	s := newTestSettle(c, fc, fc.AsPushOnly())
-
-	s.SettleAdopted(dispatch.NewFake(), "1", 0, branch)
-
-	iss, _ := fc.Issue("1")
-	if containsLabel(iss.Labels, "agent-failed") {
-		t.Errorf("issue 1 must NOT have agent-failed; got labels=%v", iss.Labels)
-	}
-}
-
 func TestSettleAdopted_GreenMergesAndCompletes(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake(testDispatchLabels)

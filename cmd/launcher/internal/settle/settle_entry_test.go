@@ -828,7 +828,7 @@ func TestSettle_RecordLandingPass_LaterBlockedRunDoesNotOverwriteLandedPass(t *t
 		},
 		Passes: []passmanifest.Entry{{Pass: 2, Kind: "land", OutcomeFound: true}},
 	}
-	sit := s.situationFor(hostLandedIssue, false, landed)
+	sit := s.SituationFor(hostLandedIssue, false, landed)
 	if _, got, err := s.SettleRelayedBranch(dispatch.NewFake(), hostLandedIssue, 0, sit, landed); !got || err != nil {
 		t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
 	}
@@ -858,31 +858,6 @@ func TestSettle_RecordLandingPass_LaterBlockedRunDoesNotOverwriteLandedPass(t *t
 	}
 	if len(fc.RecordLandingCalls) != landings {
 		t.Errorf("blocked run must not record a landing, got %+v", fc.RecordLandingCalls)
-	}
-}
-
-// SettleAdopted has no pass evidence, so on a push-only forge it records the
-// placeholder landing and clears the recorded pass rather than leaving an
-// earlier run's attached (issue #5189).
-func TestSettleAdopted_PushOnlyLanding_ClearsRecordedPass(t *testing.T) {
-	c := baseConfig()
-	c.MergeMode = "manual"
-	c.OutboxDir = func(num string) string { return "/outbox/" + num }
-	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	branch := fc.AgentBranch("1")
-	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsLocal())
-
-	captureStdout(t, func() { s.SettleAdopted(dispatch.NewFake(), "1", 0, branch) })
-
-	wantLanding := []forge.RecordLandingCall{{Num: "1", Landing: branch}}
-	if !reflect.DeepEqual(fc.RecordLandingCalls, wantLanding) {
-		t.Errorf("RecordLanding calls = %+v, want %+v", fc.RecordLandingCalls, wantLanding)
-	}
-	wantPass := []forge.RecordLandingPassCall{{Num: "1", Pass: 0, Kind: ""}}
-	if !reflect.DeepEqual(fc.RecordLandingPassCalls, wantPass) {
-		t.Errorf("RecordLandingPass calls = %+v, want %+v", fc.RecordLandingPassCalls, wantPass)
 	}
 }
 

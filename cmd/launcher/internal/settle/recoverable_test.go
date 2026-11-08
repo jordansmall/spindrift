@@ -350,64 +350,6 @@ func TestSettle_LocalPushOnly_CleanFailureBundlePresentFallsBackToFailed(t *test
 	}
 }
 
-// Slice C's positive case for ADR 0039's `spindrift recover` local push-only
-// landing arm: a Recoverable issue's relayed branch (bundle in the outbox,
-// genuine success self-report) must land via RelayBundle plus merge in
-// landRelayedBranchPushOnly/landPushOnly, rather than fall through to
-// adoptAndGate's PR-shaped path, which always fails for local.
-func TestSettle_SettleRelayedBranch_LocalPushOnlyLandsRelayedBranch(t *testing.T) {
-	const issNum = "1"
-	outbox := t.TempDir()
-	writeBundle(t, outbox)
-
-	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-recoverable"}})
-
-	d := dispatch.NewFake()
-	result := dispatch.Result{
-		Resolved: outcome.Resolved{
-			SelfReportFound: true,
-			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
-		},
-	}
-
-	c := baseConfig()
-	c.MergeMode = "immediate"
-	c.OutboxDir = func(num string) string { return outbox }
-	s := newTestSettle(c, fc, fc.AsLocal())
-
-	sit := s.situationFor(issNum, false, result)
-	_, got, err := s.SettleRelayedBranch(d, issNum, 0, sit, result)
-	if err != nil {
-		t.Fatalf("SettleRelayedBranch err = %v, want nil", err)
-	}
-	if !got {
-		t.Fatalf("SettleRelayedBranch = false, want true")
-	}
-	if fc.Merged != branch {
-		t.Errorf("expected Merge(%q) to have run; fc.Merged=%q", branch, fc.Merged)
-	}
-
-	found := false
-	for _, call := range fc.TransitionStateCalls {
-		if call.Num == issNum && call.To == forge.Complete {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected a TransitionState(..., Complete) call; TransitionStateCalls=%+v", fc.TransitionStateCalls)
-	}
-	iss, _ := fc.Issue(issNum)
-	if !containsLabel(iss.Labels, "agent-complete") {
-		t.Errorf("issue must carry agent-complete after a landed relayed branch; labels=%v", iss.Labels)
-	}
-	if containsLabel(iss.Labels, "agent-failed") {
-		t.Errorf("issue must not carry agent-failed after a landed relayed branch; labels=%v", iss.Labels)
-	}
-}
-
 // Slice C's regression check that a plain git push-only forge (s.pr == nil,
 // but not a forge.BundleRelay) still falls through to adoptAndGate unchanged:
 // adoptRelayedBranch's DraftPRCreator assertion still fails it, so
@@ -442,63 +384,6 @@ func TestSettle_SettleRelayedBranch_GitPushOnlyStillReturnsFalse(t *testing.T) {
 	}
 	if fc.Merged != "" {
 		t.Errorf("expected no merge to have run; fc.Merged=%q", fc.Merged)
-	}
-}
-
-// Slice 4's positive case for the recover-time bundle-alone leniency (issue
-// #2378): recover is a separate, later process with no access to the original
-// run's in-memory KilledBySignal bit, so a signal-killed Box leaves it no
-// self-report evidence on disk. A bundle in the outbox is the precondition
-// tryMarkRecoverable already required, so it alone must land the relayed branch.
-func TestSettle_SettleRelayedBranch_LocalPushOnlyBundleAloneLandsRelayedBranch(t *testing.T) {
-	const issNum = "1"
-	outbox := t.TempDir()
-	writeBundle(t, outbox)
-
-	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-recoverable"}})
-
-	d := dispatch.NewFake()
-	result := dispatch.Result{
-		Resolved: outcome.Resolved{
-			SelfReportFound: false,
-		},
-	}
-
-	c := baseConfig()
-	c.MergeMode = "immediate"
-	c.OutboxDir = func(num string) string { return outbox }
-	s := newTestSettle(c, fc, fc.AsLocal())
-
-	sit := s.situationFor(issNum, false, result)
-	_, got, err := s.SettleRelayedBranch(d, issNum, 0, sit, result)
-	if err != nil {
-		t.Fatalf("SettleRelayedBranch err = %v, want nil", err)
-	}
-	if !got {
-		t.Fatalf("SettleRelayedBranch = false, want true")
-	}
-	if fc.Merged != branch {
-		t.Errorf("expected Merge(%q) to have run; fc.Merged=%q", branch, fc.Merged)
-	}
-
-	found := false
-	for _, call := range fc.TransitionStateCalls {
-		if call.Num == issNum && call.To == forge.Complete {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected a TransitionState(..., Complete) call; TransitionStateCalls=%+v", fc.TransitionStateCalls)
-	}
-	iss, _ := fc.Issue(issNum)
-	if !containsLabel(iss.Labels, "agent-complete") {
-		t.Errorf("issue must carry agent-complete after a landed relayed branch; labels=%v", iss.Labels)
-	}
-	if containsLabel(iss.Labels, "agent-failed") {
-		t.Errorf("issue must not carry agent-failed after a landed relayed branch; labels=%v", iss.Labels)
 	}
 }
 

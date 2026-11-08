@@ -11,6 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/retry"
 )
@@ -29,6 +30,14 @@ type pushOnlyEnv struct {
 	landing string // the landing= the Box printed
 }
 
+type pushOnlyEntry int
+
+const (
+	entrySettle pushOnlyEntry = iota
+	entryRelayed
+	entryAdopted
+)
+
 type bundleFate int
 
 const (
@@ -42,13 +51,18 @@ const (
 // the side effects the Lander owns on the forge fake.
 type pushOnlyCase struct {
 	name      string
-	local     bool               // BundleRelay + LandingRef shape (CODE_FORGE=local); else git
-	mergeMode string             // default immediate
-	bundle    bool               // seed seam.bundle in the outbox
-	setup     func(*pushOnlyEnv) // before the Settle exists
-	arm       func(*pushOnlyEnv) // once e.s exists, ahead of Settle
+	entry     pushOnlyEntry                      // which public entry reaches the landing
+	labels    []string                           // the issue's labels going in; default agent-in-progress
+	shaped    bool                               // wrap the tracker as LocalShaped even with no passes
+	result    func(*pushOnlyEnv) dispatch.Result // default: a ready outcome, or a ready self-report for SettleRelayedBranch
+	local     bool                               // BundleRelay + LandingRef shape (CODE_FORGE=local); else git
+	mergeMode string                             // default immediate
+	bundle    bool                               // seed seam.bundle in the outbox
+	setup     func(*pushOnlyEnv)                 // before the Settle exists
+	arm       func(*pushOnlyEnv)                 // once e.s exists, ahead of Settle
 
 	want         Settlement
+	wantRelayed  bool // SettleRelayedBranch's relayed return
 	abandoned    bool // the stop left the released issue untouched
 	wantSteps    []Step
 	wantLabels   []string
@@ -61,6 +75,13 @@ type pushOnlyCase struct {
 	wantLandings []forge.RecordLandingCall
 	wantPasses   []forge.RecordLandingPassCall
 	check        func(*testing.T, *pushOnlyEnv)
+}
+
+func selfReportReady() dispatch.Result {
+	return dispatch.Result{Resolved: outcome.Resolved{
+		SelfReportFound: true,
+		SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
+	}}
 }
 
 func pushOnlyStep(status Status, detail string) Step {
@@ -98,6 +119,13 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 	errTransientMerge := forge.ErrMergeTransient.Error()
 	placeholder := []forge.RecordLandingCall{{Num: "1", Landing: pushOnlyBranch}}
 	refUpgrade := []forge.RecordLandingCall{{Num: "1", Landing: pushOnlyBranch}, {Num: "1", Landing: "integration/1694@abc123"}}
+	// Recover records the landing once itself and again in landPushOnly.
+	twice := func(l []forge.RecordLandingCall) []forge.RecordLandingCall {
+		return append(append([]forge.RecordLandingCall(nil), l...), l...)
+	}
+	// SettleAdopted names the branch as the Settlement's PRURL.
+	adoptedManual := Settlement{Verdict: manual.Verdict, PRURL: pushOnlyBranch}
+	adoptedMerged := Settlement{Verdict: merged.Verdict, PRURL: pushOnlyBranch}
 	markNow := func(e *pushOnlyEnv) { e.s.Registry().Mark("1") }
 	markDuring := func(method string) func(*pushOnlyEnv) {
 		return func(e *pushOnlyEnv) { e.fc.On(method, func(int) { e.s.Registry().Mark("1") }) }
@@ -432,6 +460,52 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 				assertOutboxParked(t, e.fc, "1")
 			},
 		},
+		// recover and adopt reach the same landing through their own entries
+		{
+			name: "relayed local self-report success lands the relayed branch", entry: entryRelayed, local: true,
+			labels: []string{"agent-recoverable"}, wantRelayed: true,
+			want: merged, wantLabels: complete, wantNoLabels: noFailed, wantMerged: pushOnlyBranch, wantRelays: 1,
+			wantSteps: []Step{pushOnlyStep(StatusAdopted, "note=genuine success self-report; relayed branch landed")},
+		},
+		{
+			name: "relayed local bundle alone lands the relayed branch and drops the bundle", entry: entryRelayed, local: true, bundle: true,
+			labels: []string{"agent-recoverable"}, wantRelayed: true,
+			result: func(*pushOnlyEnv) dispatch.Result { return dispatch.Result{} },
+			want:   merged, wantLabels: complete, wantNoLabels: noFailed, wantMerged: pushOnlyBranch, wantRelays: 1, wantBundle: bundleDropped,
+			wantSteps: []Step{pushOnlyStep(StatusAdopted, "note=bundle present in outbox; relayed branch landed")},
+		},
+		{
+			name: "relayed local land-last run without a report still lands", entry: entryRelayed, local: true, bundle: true,
+			labels: []string{"agent-failed"}, wantRelayed: true,
+			setup:  func(e *pushOnlyEnv) { e.passes = landLastNoOutcomePasses() },
+			result: func(*pushOnlyEnv) dispatch.Result { return dispatch.Result{} },
+			want:   merged, wantMerged: pushOnlyBranch, wantRelays: 1, wantBundle: bundleDropped,
+			wantLandings: twice(placeholder),
+			wantSteps:    []Step{pushOnlyStep(StatusAdopted, "note=bundle present in outbox; relayed branch landed")},
+		},
+		{
+			name: "relayed local manual records the run's pass", entry: entryRelayed, local: true, mergeMode: "manual",
+			setup: func(e *pushOnlyEnv) { e.passes = implementThenLandPasses() }, wantRelayed: true,
+			want: manual, wantRelays: 1, wantLandings: twice(placeholder),
+			wantPasses: []forge.RecordLandingPassCall{{Num: "1", Pass: 2, Kind: "land"}, {Num: "1", Pass: 2, Kind: "land"}},
+		},
+		{
+			name: "relayed local manual without passes clears the recorded pass", entry: entryRelayed, local: true, mergeMode: "manual",
+			shaped: true, wantRelayed: true,
+			want: manual, wantRelays: 1, wantLandings: twice(placeholder),
+			wantPasses: []forge.RecordLandingPassCall{{Num: "1"}, {Num: "1"}},
+		},
+		{
+			name: "adopted local manual records the landing and clears the recorded pass", entry: entryAdopted, local: true, mergeMode: "manual",
+			shaped: true,
+			want:   adoptedManual, wantRelays: 1, wantLandings: placeholder,
+			wantPasses: []forge.RecordLandingPassCall{{Num: "1"}},
+		},
+		{
+			// verifyMerged needs a PR the push-only forge lacks, so the adopted merge must skip it.
+			name: "adopted git push-only merge skips PR verification", entry: entryAdopted,
+			want: adoptedMerged, wantLabels: complete, wantNoLabels: noFailed, wantMerged: pushOnlyBranch,
+		},
 	}
 	runPushOnlyCases(t, cases)
 }
@@ -446,7 +520,11 @@ func runPushOnlyCases(t *testing.T, cases []pushOnlyCase) {
 			}
 			fc := forge.NewFake(testDispatchLabels)
 			fc.BranchPrefix = "agent/issue-"
-			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+			labels := []string{"agent-in-progress"}
+			if tc.labels != nil {
+				labels = tc.labels
+			}
+			fc.SetIssue(forge.Issue{Number: "1", Labels: labels})
 			sleeps, clock := recordingClock()
 			c.Clock = clock
 			env := &pushOnlyEnv{c: c, fc: fc, outbox: t.TempDir(), sleeps: sleeps, landing: pushOnlyBranch}
@@ -460,7 +538,7 @@ func runPushOnlyCases(t *testing.T, cases []pushOnlyCase) {
 				tc.setup(env)
 			}
 			var tracker forge.IssueTracker = fc
-			if env.passes != nil {
+			if env.passes != nil || tc.shaped {
 				tracker = fc.AsLocalShaped()
 			}
 			cf := fc.AsPushOnly()
@@ -475,9 +553,30 @@ func runPushOnlyCases(t *testing.T, cases []pushOnlyCase) {
 				tc.arm(env)
 			}
 
-			res := settleReadyResult("1", env.landing)
+			var res dispatch.Result
+			switch {
+			case tc.result != nil:
+				res = tc.result(env)
+			case tc.entry == entryRelayed:
+				res = selfReportReady()
+			default:
+				res = settleReadyResult("1", env.landing)
+			}
 			res.Passes = env.passes
-			got := env.s.Settle(dispatch.NewFake(), "1", gen, res)
+			var got Settlement
+			switch tc.entry {
+			case entryRelayed:
+				sit := env.s.SituationFor("1", false, res)
+				st, relayed, err := env.s.SettleRelayedBranch(dispatch.NewFake(), "1", gen, sit, res)
+				got = st
+				if relayed != tc.wantRelayed || err != nil {
+					t.Errorf("SettleRelayedBranch relayed, err = %v, %v; want %v, nil", relayed, err, tc.wantRelayed)
+				}
+			case entryAdopted:
+				got = env.s.SettleAdopted(dispatch.NewFake(), "1", gen, pushOnlyBranch)
+			default:
+				got = env.s.Settle(dispatch.NewFake(), "1", gen, res)
+			}
 
 			iss, _ := fc.Issue("1")
 			if got != tc.want {
