@@ -17,9 +17,10 @@ import (
 type prShape int
 
 const (
-	shapeGithub  prShape = iota // the bare fake: a PR forge plus every optional tracker capability
-	shapeForgejo                // forgejo's tracker (no LandingRecorder) over a PR forge
-	shapeLocalPR                // local's tracker (LandingRecorder) paired with a PR forge
+	shapeGithub   prShape = iota // the bare fake: a PR forge plus every optional tracker capability
+	shapeForgejo                 // forgejo's tracker (no LandingRecorder) over a PR forge
+	shapeLocalPR                 // local's tracker (LandingRecorder) paired with a PR forge
+	shapeReadOnly                // the bare tracker over a read-only Box's PR forge, which relays a bundle in
 )
 
 func (sh prShape) build(fc *forge.Fake) (forge.IssueTracker, forge.CodeForge) {
@@ -28,6 +29,8 @@ func (sh prShape) build(fc *forge.Fake) (forge.IssueTracker, forge.CodeForge) {
 		return fc.AsForgejoShaped(), fc
 	case shapeLocalPR:
 		return fc.AsLocalShaped(), fc
+	case shapeReadOnly:
+		return fc, fc.AsGithubReadOnly()
 	}
 	return fc, fc
 }
@@ -46,6 +49,16 @@ type prCase struct {
 	files     []string           // the PR's changed files; default src/main.go
 	setup     func(*testing.T, *forge.Fake, *Config)
 
+	maxRebase  int                               // MAX_REBASE_ATTEMPTS
+	maxFix     int                               // MAX_FIX_ATTEMPTS
+	checks     []forge.RollupState               // successive CI rollups; default green twice
+	mergeErrs  []error                           // successive Merge results, consumed before it succeeds
+	rebaseErr  error                             // what Rebase returns
+	mergeable  forge.MergeableState              // what the forge reports for the PR's mergeability
+	resolveErr error                             // what the conflict-resolve Box returns
+	dsetup     func(*dispatch.Fake, *forge.Fake) // scripts the dispatcher beyond resolveErr
+	check      func(*testing.T, *forge.Fake, *dispatch.Fake)
+
 	want           Settlement
 	wantSteps      []Step
 	wantLabels     []string
@@ -55,6 +68,16 @@ type prCase struct {
 	wantComments   []string // substring of each issue comment, in order; none when nil
 	wantPRComments []string // substring of each PR comment, in order; unchecked when nil
 	wantPRExact    string   // the sole PR comment, byte for byte
+	abandoned      bool     // a stop left the released issue untouched; want is the zero Settlement
+	prClosed       bool     // the settled reason leaves no open PR although nothing merged
+	wantFixes      int      // fix passes dispatched
+	wantResolves   int      // conflict-resolve Boxes dispatched
+	wantRebases    int      // Rebase calls on the forge
+}
+
+// prSettlement is the Settlement a PR landing of testPR settles with.
+func prSettlement(reason string) Settlement {
+	return Settlement{Verdict: ForReason(reason), PRURL: testPR}
 }
 
 func guardWording(path string) string {
@@ -237,6 +260,9 @@ func TestSettle_PRLander(t *testing.T) {
 		}
 	}
 
+	cases = append(cases, healCases()...)
+	cases = append(cases, handOffCases()...)
+
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := baseConfig()
@@ -245,6 +271,8 @@ func TestSettle_PRLander(t *testing.T) {
 				c.MergeMode = tc.mergeMode
 			}
 			c.MergeGuardPaths = tc.guard
+			c.MaxRebaseAttempts = tc.maxRebase
+			c.MaxFixAttempts = tc.maxFix
 			rec := &ProgressRecorder{}
 			c.Progress = rec
 			fc := forge.NewFake(testDispatchLabels)
@@ -260,6 +288,19 @@ func TestSettle_PRLander(t *testing.T) {
 				files = tc.files
 			}
 			fc.SetPRFiles(testPR, files)
+			if tc.checks != nil {
+				fc.SetCheckStates(testPR, tc.checks)
+			}
+			fc.MergeErrs = tc.mergeErrs
+			fc.RebaseErr = tc.rebaseErr
+			if tc.mergeable != "" {
+				fc.SetMergeableState(testPR, tc.mergeable)
+			}
+			d := dispatch.NewFake()
+			d.ResolveConflictErr = tc.resolveErr
+			if tc.dsetup != nil {
+				tc.dsetup(d, fc)
+			}
 			if tc.setup != nil {
 				tc.setup(t, fc, &c)
 			}
@@ -268,15 +309,30 @@ func TestSettle_PRLander(t *testing.T) {
 			s.cfg.Capabilities.TrackerDescriptor = tc.tracker
 			gen := s.term.Begin("1")
 
-			got := s.Settle(dispatch.NewFake(), "1", gen, settleReadyResult("1", testPR))
+			got := s.Settle(d, "1", gen, settleReadyResult("1", testPR))
 
 			fc.IssueErr = nil
 			iss, _ := fc.Issue("1")
 			if got != tc.want {
 				t.Errorf("Settle = %+v, want %+v", got, tc.want)
 			}
-			if open := dispatchrecord.ReasonLeavesPROpen(got.Reason()); open != (tc.wantMerged == "") {
-				t.Errorf("reason %q leaves the PR open = %v, want %v", got.Reason(), open, tc.wantMerged == "")
+			if tc.abandoned {
+				assertNoTransitionOrComment(t, fc)
+				assertClaimUntouched(t, fc)
+			} else if open := dispatchrecord.ReasonLeavesPROpen(got.Reason()); open != (tc.wantMerged == "" && !tc.prClosed) {
+				t.Errorf("reason %q leaves the PR open = %v, want %v", got.Reason(), open, !open)
+			}
+			if len(d.FixCalls) != tc.wantFixes {
+				t.Errorf("fix passes = %+v, want %d", d.FixCalls, tc.wantFixes)
+			}
+			if len(d.ResolveConflictCalls) != tc.wantResolves {
+				t.Errorf("conflict-resolves = %+v, want %d", d.ResolveConflictCalls, tc.wantResolves)
+			}
+			if len(fc.RebasedURLs) != tc.wantRebases {
+				t.Errorf("Rebase calls = %v, want %d", fc.RebasedURLs, tc.wantRebases)
+			}
+			if tc.check != nil {
+				tc.check(t, fc, d)
 			}
 			if missing := containsSteps(rec.Steps(), tc.wantSteps); len(missing) > 0 {
 				t.Errorf("progress steps = %+v, missing %+v", rec.Steps(), missing)
