@@ -300,6 +300,7 @@ func TestSettle_PRLander(t *testing.T) {
 	cases = append(cases, entryCases()...)
 	cases = append(cases, unreviewedCases()...)
 	cases = append(cases, ciWaitCases()...)
+	cases = append(cases, ciStateCases()...)
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
