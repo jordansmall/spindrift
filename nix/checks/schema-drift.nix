@@ -181,7 +181,7 @@ let
       # bool knob it is redundant with the bool rule, and on an
       # int/float/secret/hostDerived knob flagEmptyDisables still emits it, so
       # FlagEntry.EmptyIsSetting would drive the deprecation warning and
-      # resolveBoxEnvVar while the loadSchemaConfig loaderLine cascade
+      # resolveBoxEnvVar while the LoadKnobs loaderLine cascade
       # (lib/renderers.nix) loads that knob without consulting an empty value.
       emptyDisablesOnNonString = filter (
         e:
@@ -1142,9 +1142,9 @@ checkedMerge {
       '';
 
   # Forward: every lib/env-schema.nix knob appears as a literal in main.go,
-  # backend.go, or schemaconfig_gen.go (presence only; pinning values is
-  # refactor-brittle). Kept off the whole tree so a knob cannot be satisfied
-  # by a literal only a generated or internal file carries. Reverse: every
+  # backend.go, loadknobs_gen.go, or registry_gen.go (presence only; pinning
+  # values is refactor-brittle). Kept to those files, not the whole tree, so a
+  # knob cannot be satisfied by a stray literal elsewhere. Reverse: every
   # env var read anywhere in non-test cmd/launcher source must be a schema
   # knob, a document artifact, a Box env name (promptassembly-boxenv.nix), or
   # in nonKnobEnvNames, so a new os.Getenv in an internal package cannot go
@@ -1169,15 +1169,15 @@ checkedMerge {
       # splitString's regex has no `.*` wrapper, so it does not recurse per byte.
       containsLiteral = needle: haystack: builtins.length (splitString needle haystack) > 1;
       launcherDir = ../../cmd/launcher;
-      # schemaconfig_gen.go carries the env-var literal of every knob that
-      # loadSchemaConfig loads into inputdoc.Knobs (issue #2364).
+      # loadknobs_gen.go carries the env-var literal of every knob that
+      # LoadKnobs loads into inputdoc.Knobs (issue #2364).
       # registry_gen.go carries each backend row's BoxTokenEnvVar, which the
       # launcher reads through the row rather than a literal (issue #5642).
       forwardGoSrc = concatStringsSep "\n" (
         map (name: builtins.readFile (launcherDir + "/${name}")) [
           "main.go"
           "backend.go"
-          "schemaconfig_gen.go"
+          "internal/inputdoc/loadknobs_gen.go"
           "internal/backend/registry_gen.go"
         ]
       );
@@ -1272,7 +1272,7 @@ checkedMerge {
       deadNonKnobs = subtractLists goEnvNames nonKnobEnvNames;
     in
     assert pkgs.lib.assertMsg (missingFromGo == [ ])
-      "schema knobs absent from main.go/backend.go/schemaconfig_gen.go/registry_gen.go: ${concatStringsSep ", " missingFromGo}";
+      "schema knobs absent from main.go/backend.go/loadknobs_gen.go/registry_gen.go: ${concatStringsSep ", " missingFromGo}";
     assert pkgs.lib.assertMsg (extraInGo == [ ])
       "cmd/launcher reads env vars absent from schema/Box env/nonKnobEnvNames: ${concatStringsSep ", " extraInGo}";
     assert pkgs.lib.assertMsg (
@@ -1799,14 +1799,14 @@ checkedMerge {
   # Regenerate with `nix run .#regen` when a host-config schema member
   # changes. The raw renderer output is intentionally unaligned: gofmt owns
   # the composite-literal column alignment (issue #2364).
-  launcher-schema-config =
+  launcher-load-knobs =
     let
       schema = import ../../lib/env-schema.nix;
     in
     mkGofmtDriftCheck {
-      name = "launcher-schema-config";
-      rendered = renderers.renderSchemaConfigGo schema;
-      committedPath = "cmd/launcher/schemaconfig_gen.go";
+      name = "launcher-load-knobs";
+      rendered = renderers.renderLoadKnobsGo schema;
+      committedPath = "cmd/launcher/internal/inputdoc/loadknobs_gen.go";
       source = "lib/env-schema.nix";
     };
 

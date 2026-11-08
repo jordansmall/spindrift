@@ -113,3 +113,16 @@ func ambientKnobEnvError() error {
 	}
 	return errors.New(strings.Join(lines, "\n"))
 }
+
+// envKnobSource is the env-backed KnobSource until the launcher switches to
+// inputdoc.Resolve.
+type envKnobSource struct{}
+
+func (envKnobSource) String(env string) string        { return getenvSchema(env) }
+func (envKnobSource) PositiveInt(env string) int      { return atoiSchema(env) }
+func (envKnobSource) NonnegInt(env string) int        { return atoiNonnegSchema(env) }
+func (envKnobSource) NonnegFloat(env string) float64  { return floatNonnegSchema(env) }
+func (envKnobSource) Secret(env string) string        { return os.Getenv(env) }
+func (envKnobSource) HostGitConfig(env string) string { return hostGitConfigField(env) }
+
+func loadSchemaConfig() inputdoc.Knobs { return inputdoc.LoadKnobs(envKnobSource{}) }

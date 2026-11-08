@@ -25,7 +25,7 @@ let
   envExample = renderers.renderHarnessEnvExample schema;
   flagTable = renderers.renderFlagTableGo schema;
   knobsFile = renderers.renderKnobsGo schema;
-  schemaConfigFile = renderers.renderSchemaConfigGo schema;
+  loadKnobsFile = renderers.renderLoadKnobsGo schema;
   flakeOptionsDoc =
     renderers.renderFlakeOptionsDocFull schema structuralOptionsDoc structuralPaths
       extraOptionPaths;
@@ -175,8 +175,8 @@ pkgs.writeShellApplication {
     ${writeGenerated "cmd/launcher/internal/inputdoc/flagtable_gen.go" flagTable}
     ${writeGenerated "cmd/launcher/internal/inputdoc/knobs_gen.go" knobsFile}
     gofmt -w "$root/cmd/launcher/internal/inputdoc/knobs_gen.go"
-    ${writeGenerated "cmd/launcher/schemaconfig_gen.go" schemaConfigFile}
-    gofmt -w "$root/cmd/launcher/schemaconfig_gen.go"
+    ${writeGenerated "cmd/launcher/internal/inputdoc/loadknobs_gen.go" loadKnobsFile}
+    gofmt -w "$root/cmd/launcher/internal/inputdoc/loadknobs_gen.go"
     ${writeGenerated "docs/flake-options.md" flakeOptionsDoc}
     ${writeGenerated "cmd/launcher/internal/driver/descriptor_gen.go" driverDescriptorsFile}
     gofmt -w "$root/cmd/launcher/internal/driver/descriptor_gen.go"
