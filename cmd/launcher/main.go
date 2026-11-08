@@ -677,7 +677,7 @@ func dispatchCompletionBanner(c config, outcomes []settle.DispatchOutcome) strin
 	}
 	var missed []string
 	for _, o := range outcomes {
-		if delivered(o) {
+		if o.Delivered() {
 			continue
 		}
 		label := o.Key.String()
@@ -706,25 +706,6 @@ func forgeLandedLine(c config) string {
 		panic(fmt.Sprintf("no landed banner for CODE_FORGE=%q", c.CodeForge))
 	}
 	return fmt.Sprintf("==> all agents finished — %s.\n", s.LandedBanner(backendShared(c)))
-}
-
-// delivered reports whether o earns the all-delivered banner line. Only a
-// Complete counts, so a Failed dispatch with its PR open (ci-red etc.) is still
-// named; a merge-blocked Complete counts only if its PR opened (push-only
-// forges never latch a PR URL, so their clean Completes count). An
-// already-resolved Complete opened nothing, so it is named too.
-func delivered(o settle.DispatchOutcome) bool {
-	if o.State() != forge.Complete {
-		return false
-	}
-	switch dispatchrecord.ReasonDelivery(o.Reason()) {
-	case dispatchrecord.DeliversNothing:
-		return false
-	case dispatchrecord.DeliversWithPR:
-		return o.PRURL != ""
-	default:
-		return true
-	}
 }
 
 // runnerConfig builds the runner.Config a runner adapter needs. Shared by the

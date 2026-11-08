@@ -186,3 +186,28 @@ func settleReadyResult(num, branch string) dispatch.Result {
 		Outcome: outcome.Outcome{Issue: num, Landing: branch, Status: "ready", Note: "ok"},
 	}}
 }
+
+func TestSettlement_Delivered(t *testing.T) {
+	tests := []struct {
+		name string
+		s    Settlement
+		want bool
+	}{
+		{"merged with PR", Settlement{Verdict: ForReason(dispatchrecord.ReasonMerged), PRURL: "u"}, true},
+		{"merge-blocked without PR", Settlement{Verdict: ForReason(dispatchrecord.ReasonMergeBlocked)}, false},
+		{"merge-blocked with PR", Settlement{Verdict: ForReason(dispatchrecord.ReasonMergeBlocked), PRURL: "u"}, true},
+		{"already-resolved", Settlement{Verdict: ForReason(dispatchrecord.ReasonAlreadyResolved)}, false},
+		{"relay-failed", Settlement{Verdict: ForReason(dispatchrecord.ReasonRelayFailed)}, false},
+		{"ci-red with PR", Settlement{Verdict: ForReason(dispatchrecord.ReasonCIRed), PRURL: "u"}, false},
+		{"push-only manual without PR", Settlement{Verdict: ForReason(dispatchrecord.ReasonManual)}, true},
+		{"transition-refused complete", Settlement{Verdict: refused(ForReason(dispatchrecord.ReasonMerged))}, true},
+		{"in-progress off-script", Settlement{Verdict: InProgress}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.s.Delivered(); got != tc.want {
+				t.Errorf("%+v.Delivered() = %v, want %v", tc.s, got, tc.want)
+			}
+		})
+	}
+}
