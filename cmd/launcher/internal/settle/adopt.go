@@ -33,13 +33,7 @@ func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, pr
 		// Another actor owns the issue's comment and state.
 		return
 	}
-	switch landing {
-	case landingMerged:
-		// A push-only Code Forge has no PR state for verifyMerged to read.
-		if s.pr != nil {
-			s.verifyMerged(num, prURL)
-		}
-	case landingFailed:
+	if landing == landingFailed {
 		s.cfg.Progress.Step(Step{Key: num, Landing: prURL, Status: StatusFailed, Detail: "!! " + reason})
 	}
 	return

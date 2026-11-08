@@ -136,7 +136,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// A read-only PR-shaped Code Forge never opens its own PR in-box (issue
 		// #1919), so o.Landing carries the branch name, not a PR URL, and
 		// selfHeal cannot watch CI on it. Push-only forges (s.pr == nil) need
-		// no such step: landPushOnly's own RelayBundle call covers them.
+		// no such step: the push-only Lander's own RelayBundle call covers them.
 		if s.readOnly && s.pr != nil {
 			var handoffErr error
 			pr, handoffErr = s.hostMediateDraftPR(num, gen, result)
@@ -161,16 +161,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			// noise.
 			return
 		}
-		switch landing {
-		case landingMerged:
-			// verifyMerged reads PR state, which a push-only Code Forge does
-			// not have. pr, not o.Landing, so a host-mediated landing verifies
-			// against the PR settle just created rather than the Box's
-			// placeholder branch-name landing= value.
-			if s.pr != nil {
-				s.verifyMerged(num, pr)
-			}
-		case landingFailed:
+		if landing == landingFailed {
 			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusFailed, Detail: "!! " + reason})
 		}
 		s.postUsageComment(num, d)

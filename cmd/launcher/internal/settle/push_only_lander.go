@@ -1,0 +1,126 @@
+package settle
+
+import (
+	"errors"
+	"fmt"
+
+	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchrecord"
+	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/passmanifest"
+)
+
+// pushOnlyLander lands a push-only Code Forge. It embeds Settle for config,
+// tracker and Code Forge access but never reads the PR forge.
+type pushOnlyLander struct{ *Settle }
+
+// land lands a push-only forge, where there is no PR or CI to watch, so
+// the issue goes Complete once MERGE_MODE has applied straight against the
+// forge's Merge and Rebase. Complete commits after the merge, through
+// completeLanding, so a mark landing during the merge's retry backoff abandons
+// instead of committing tracker state (issue #4879). A merge failure leaves
+// the issue Complete with a merge-blocked note (unless Unclaimed, which has no
+// state to move), never demoted to Failed (ADR 0012). A relay that fails with
+// its bundle still in the outbox parks the issue Failed instead (issue #4651)
+// and returns landingFailed, the transition and comment already done. An
+// immediate merge drops the landed bundle here, since only the PR Lander
+// runs verifyMerged.
+func (s pushOnlyLander) land(_ dispatch.Dispatcher, num string, gen uint64, branch string, _ bool, passes []passmanifest.Entry) (landingResult, string, error) {
+	// No CI watch here, so this is the only checkpoint before landing —
+	// an aborted run must not merge or commit Complete (issue #3523).
+	if s.terminated(num, gen) {
+		return landingFailed, "", errAbandoned
+	}
+	// Merge needs the ref to exist as a branch, but the read-only Box bundled it
+	// instead of pushing, so relay it in first (ADR 0033). It runs ahead of the
+	// Complete commit because a stop during the relay's retry backoff (issue
+	// #4649) has already released num (issue #3523). branch is re-derived from
+	// cf.AgentBranch, never trusted from the Agent-controlled outcome line
+	// (#1949).
+	relayedRef, relayErr := s.relayBoxBundle(num, gen)
+	if relayedRef != "" {
+		branch = relayedRef
+		// Host-derived placeholder the post-merge LandingRef upgrades, so
+		// reconcile can still report a merge-blocked branch stuck (#1809).
+		s.recordLanding(num, relayedRef, passes)
+	}
+	if errors.Is(relayErr, errAbandoned) {
+		return landingFailed, "", errAbandoned
+	}
+	if relayFailureParkable(relayErr) {
+		s.parkRelayFailure(num, branch, relayErr)
+		return landingFailed, "", nil
+	}
+	err := relayErr
+	mergeReason := dispatchrecord.ReasonMergeBlocked
+	if err == nil {
+		mergeReason, err = s.applyMode(num, gen, branch)
+	}
+	if errors.Is(err, errAbandoned) {
+		return landingFailed, "", errAbandoned
+	}
+	if err != nil {
+		if _, cerr := s.completeLanding(num, gen, landingManual, dispatchrecord.ReasonMergeBlocked); cerr != nil {
+			return landingFailed, "", cerr
+		}
+		s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusMergeBlocked, Detail: fmt.Sprintf("!! %v", err)})
+		s.it.Comment(num, fmt.Sprintf("landing blocked: %v", err))
+		return landingManual, "", nil
+	}
+	landed := mergedLanding(mergeReason)
+	if landed != landingMerged {
+		landing, err := s.completeLanding(num, gen, landed, mergeReason)
+		return landing, "", err
+	}
+	// Ahead of the re-check: the merge happened and the outbox bundle is
+	// not tracker state, so an abandoned landing must still drop it.
+	s.removeLandedBundle(num)
+	if _, cerr := s.completeLanding(num, gen, landed, mergeReason); cerr != nil {
+		return landingFailed, "", cerr
+	}
+	// CODE_FORGE=local needs the resolved Integration ref and commit sha
+	// (ADR 0029/0033), not the placeholder agent branch recorded above, so
+	// overwrite it now that Merge has landed. Best-effort: a resolution
+	// failure must never turn a successful land into a failure.
+	if lr, ok := s.cfForNum(num).(forge.LandingRef); ok {
+		if landing, err := lr.LandingRef(); err == nil {
+			// Re-recording passes is deliberate: it keeps the pair with the
+			// upgraded landing.
+			s.recordLanding(num, landing, passes)
+		} else {
+			s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusLandingRefUnresolved, Detail: fmt.Sprintf("!! %v", err)})
+		}
+	}
+	return landed, "", nil
+}
+
+// applyMode is applyMergeMode for a push-only forge. It has no auto arm: there
+// is no PR to enqueue, and `spindrift recover` skips the startup preflight that
+// rejects MERGE_MODE=auto off a PR forge, so the error is raised here too.
+func (s pushOnlyLander) applyMode(num string, gen uint64, branch string) (string, error) {
+	switch s.cfg.MergeMode {
+	case "immediate":
+		if err := s.merge(num, gen, branch); err != nil {
+			return "", err
+		}
+		return dispatchrecord.ReasonMerged, nil
+	case "auto":
+		return "", fmt.Errorf("MERGE_MODE=auto requires a Code Forge with PR support (got a push-only forge)")
+	case "manual":
+		s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusAgentComplete, Detail: "merge-mode=" + s.cfg.MergeMode})
+		return dispatchrecord.ReasonManual, nil
+	default:
+		return "", fmt.Errorf("unrecognised MERGE_MODE: %q", s.cfg.MergeMode)
+	}
+}
+
+// merge merges branch, rebasing on conflict. No Dispatcher reaches a push-only
+// landing, so a rebase that conflicts fails outright.
+func (s pushOnlyLander) merge(num string, gen uint64, branch string) error {
+	var budget rebaseBudget
+	cf := s.cfForNum(num)
+	return s.mergeLoop(num, gen, branch, cf, func(conflictErr error) error {
+		_, err := s.rebaseOnConflict(num, branch, cf, conflictErr, &budget, nil)
+		return err
+	})
+}

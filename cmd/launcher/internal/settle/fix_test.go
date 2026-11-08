@@ -77,7 +77,9 @@ func TestSelfHeal_EmptyFailureDetailFallsBackWithNoError(t *testing.T) {
 func TestSelfHeal_SuccessFirstTry(t *testing.T) {
 	c := fixConfig(3)
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	// CompleteLabel: verifyMerged runs inside prLander.land and would otherwise
+	// demote the issue.
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress", c.CompleteLabel}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, fc)
 
@@ -128,7 +130,7 @@ func TestSelfHeal_GenuineRedMaxZero(t *testing.T) {
 func TestSelfHeal_GenuineRedFixSucceeds(t *testing.T) {
 	c := fixConfig(3)
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress", c.CompleteLabel}})
 	// First poll is FAILURE, then SUCCESS after the fix box, plus the
 	// confirmation poll.
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})

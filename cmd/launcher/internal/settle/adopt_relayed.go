@@ -98,14 +98,7 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 		// Another actor owns the issue, so a usage comment here would be noise.
 		return true, nil
 	}
-	switch landing {
-	case landingMerged:
-		// recover runs read-write, so s.pr may be nil here for a push-only Code
-		// Forge even though tryAdoptRelayedBranch guarantees it is not.
-		if s.pr != nil {
-			s.verifyMerged(num, pr)
-		}
-	case landingFailed:
+	if landing == landingFailed {
 		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusFailed, Detail: "!! " + reason})
 	}
 	s.postUsageComment(num, d)

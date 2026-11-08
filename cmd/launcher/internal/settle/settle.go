@@ -161,7 +161,12 @@ type Settle struct {
 	cfg Config
 	it  forge.IssueTracker
 	cf  forge.CodeForge
-	// pr is nil for the push-only git adapter; callers branch on pr == nil.
+	// lander is chosen once in New: prLander when the Code Forge has a PR forge,
+	// else pushOnlyLander.
+	lander lander
+	// pr is nil for the push-only git adapter. The lander keeps it out of the
+	// landing tail; the gate's merged arm and read-only delivery, and the
+	// relayed-branch adopt paths, still check it directly.
 	pr forge.PRForge
 	// landing is nil for github/jira, which do not implement it (ADR 0029).
 	landing forge.LandingRecorder
@@ -257,5 +262,11 @@ func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	if clock.Sleep == nil {
 		clock = dispatch.RealClock()
 	}
-	return &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, landingPass: landingPass, ciRun: ciRun, readOnly: cfg.ReadOnly, cfForNum: cfForNum, clock: clock, term: terminate.NewRegistry()}
+	s := &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, landingPass: landingPass, ciRun: ciRun, readOnly: cfg.ReadOnly, cfForNum: cfForNum, clock: clock, term: terminate.NewRegistry()}
+	if pr != nil {
+		s.lander = prLander{s}
+	} else {
+		s.lander = pushOnlyLander{s}
+	}
+	return s
 }

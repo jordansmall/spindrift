@@ -491,8 +491,8 @@ amendment, issue #517). The `github` and `forgejo` adapters implement it; caller
 discover it with a type assertion — `pr, ok := cf.(forge.PRForge)` — the
 standard Go optional-interface pattern, rather than a `PushOnly()` capability
 flag. `internal/settle` is the primary consumer: it resolves `PRForge` once at
-construction and branches on its presence to skip the CI-wait/merge-gate
-entirely for a push-only forge.
+construction and, when it is absent, picks the push-only Lander, which skips
+the CI-wait/merge-gate entirely.
 _Was_: a `PushOnly()` bool on the combined Code Forge interface, plus six
 stubbed methods on the `git` adapter.
 _Avoid_: PR client, GitHub-only interface.
