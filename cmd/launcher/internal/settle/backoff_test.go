@@ -44,7 +44,7 @@ func TestPreflightStaleBaseRebasePushBackoff_SucceedsAfterRetries(t *testing.T) 
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if err != nil {
 		t.Fatalf("mergeImmediate: unexpected error: %v", err)
@@ -81,7 +81,7 @@ func TestMergeImmediateRebasePushBackoff_ExhaustsWithOriginalError(t *testing.T)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if !errors.Is(err, forge.ErrTransientPushFailure) {
 		t.Fatalf("mergeImmediate: err = %v, want forge.ErrTransientPushFailure", err)
@@ -115,7 +115,7 @@ func TestRebasePushBackoff_NoRetryNoSleep(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if err == nil {
 		t.Fatal("mergeImmediate: want error on a non-transient rebase failure, got nil")
@@ -138,7 +138,7 @@ func TestRebasePushBackoff_ZeroMaxRebaseAttemptsNoSleep(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if err == nil {
 		t.Fatal("mergeImmediate: want error when MaxRebaseAttempts is 0, got nil")
@@ -161,7 +161,7 @@ func TestMergeImmediateTransientBackoff_SucceedsAfterRetries(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	if err := s.mergeImmediate("1", 0, testPR, nil); err != nil {
+	if err := (prLander{s}).mergeImmediate("1", 0, testPR, nil); err != nil {
 		t.Fatalf("mergeImmediate: unexpected error: %v", err)
 	}
 	if want := 8 * time.Second; slept != want {
@@ -183,7 +183,7 @@ func TestMergeImmediateTransientBackoff_StopMidBackoffAbandons(t *testing.T) {
 	s = newTestSettle(c, fc, fc)
 	gen := s.term.Begin("1")
 
-	err := s.mergeImmediate("1", gen, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", gen, testPR, nil)
 
 	if !errors.Is(err, errAbandoned) || !errors.Is(err, forge.ErrMergeTransient) {
 		t.Errorf("err = %v, want it to wrap both errAbandoned and the transient error", err)
@@ -208,7 +208,7 @@ func TestMergeImmediateTransientBackoff_BudgetSpansChecksBlockedWaits(t *testing
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if !errors.Is(err, forge.ErrMergeTransient) {
 		t.Errorf("err = %v, want the second transient returned once the budget is spent", err)

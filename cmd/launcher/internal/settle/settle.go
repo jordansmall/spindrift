@@ -198,7 +198,7 @@ type Settle struct {
 	// transition, last write wins. One issue's own settle path can reach
 	// transitionState twice for two different terminal states — e.g. a green
 	// completeLanding (Complete) that verifyMerged then demotes to Failed
-	// after a merge re-check (adopt.go) — and only the tracker's final
+	// after a merge re-check (pr_lander.go) — and only the tracker's final
 	// decision should ever reach the daemon as a settled record, once
 	// (issue #3627).
 	settledLatch map[string]settledLatch

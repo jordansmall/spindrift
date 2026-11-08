@@ -217,7 +217,7 @@ func TestGateToGreen(t *testing.T) {
 			}
 			s := newTestSettle(c, fc, fc)
 
-			obs, reason := s.gateToGreen("1", 0, testPR, tc.requireRegistration)
+			obs, reason := prLander{s}.gateToGreen("1", 0, testPR, tc.requireRegistration)
 
 			if obs.outcome != tc.want {
 				t.Errorf("gateToGreen = %v, want %v", obs.outcome, tc.want)

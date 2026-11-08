@@ -121,7 +121,7 @@ type Result struct {
 //     in dispatchWithRetry and by ErrIssueClaimed from ClaimIssue in Run.
 //  2. ResolveConflict's error return, which can be runner.ErrAlreadyRunning;
 //     callers must errors.Is it ahead of their generic error arm (settle's
-//     ready.go does).
+//     pr_lander.go does).
 //  3. ErrIssueClaimed from a direct ClaimIssue caller, such as recoverIssue
 //     in cmd/launcher/main.go (issue #4364).
 type Disposition struct {

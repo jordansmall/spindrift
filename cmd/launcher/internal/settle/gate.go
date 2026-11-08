@@ -179,7 +179,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 				s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusFailed, Detail: "!! " + reason})
 				s.transitionState(num, ForReason(dispatchrecord.ReasonNoPR), reason)
 			} else {
-				s.verifyMerged(num, pr)
+				prLander{s}.verifyMerged(num, pr)
 			}
 		} else {
 			// A push-only Code Forge has no PR state to verify. Print the
@@ -361,7 +361,7 @@ func (s *Settle) transitionState(num string, v Verdict, note string) {
 	// Latched, not emitted, here (issue #3627): one issue's settle path can
 	// reach a second, contradicting terminal transition on the same run — a
 	// green completeLanding (Complete) that verifyMerged then demotes to
-	// Failed after re-checking PR state (adopt.go) — so emitting per call
+	// Failed after re-checking PR state (pr_lander.go) — so emitting per call
 	// would let a stale Complete race a real Failed to the daemon. Last write
 	// wins: it is always the tracker's own final decision, checked in
 	// call order. The mutex exists because dispatchWave goroutines settle
