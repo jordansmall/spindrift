@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 )
 
-// The Dashboard mirrors both names; nix/checks/dashboard-constant-parity.nix
-// pins them.
+// The Dashboard mirrors both names; the contract fixture
+// (dashboard/testdata/contract) pins them.
 const (
 	eventsFileName = "spindrift-daemon.events"
 
