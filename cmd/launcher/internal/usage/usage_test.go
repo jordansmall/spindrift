@@ -140,3 +140,34 @@ func TestModelUsage_Fields(t *testing.T) {
 		t.Errorf("CacheWrite1hTokens = %d, want 5", got.CacheWrite1hTokens)
 	}
 }
+
+// TestBudgetExceeded covers the shared cap rule (issues #2001, #2694, #6617):
+// either dimension can trip alone, a zero cap never fires whatever the usage,
+// the comparison is >= (at-cap fires), and the reason names every tripped cap.
+func TestBudgetExceeded(t *testing.T) {
+	tests := []struct {
+		name       string
+		tokens     int
+		usd        float64
+		capTokens  int
+		capUSD     float64
+		wantOver   bool
+		wantReason string
+	}{
+		{"both caps unset never fires", 1_000_000, 1_000_000, 0, 0, false, ""},
+		{"tokens under cap", 99, 0, 100, 0, false, ""},
+		{"tokens at cap", 100, 0, 100, 0, true, "100 tokens >= cap 100"},
+		{"usd under cap", 0, 4.99, 0, 5, false, ""},
+		{"usd at cap", 0, 5, 0, 5, true, "$5.0000 >= cap $5.0000"},
+		{"tokens fine but usd over", 10, 6, 1000, 5, true, "$6.0000 >= cap $5.0000"},
+		{"both over names both", 200, 6, 100, 5, true, "200 tokens >= cap 100; $6.0000 >= cap $5.0000"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			over, reason := usage.BudgetExceeded(tt.tokens, tt.usd, tt.capTokens, tt.capUSD)
+			if over != tt.wantOver || reason != tt.wantReason {
+				t.Errorf("BudgetExceeded = (%v, %q), want (%v, %q)", over, reason, tt.wantOver, tt.wantReason)
+			}
+		})
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/usage"
 )
 
 // errAbandoned marks a Terminate (ADR 0024, issue #649) that landed mid-retry,
@@ -229,7 +230,8 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 	// knobs unset skips the check, so the no-cap path never pays
 	// CumulativeUsage's disk stat and parse over every pass log.
 	if s.cfg.MaxBudgetTokens > 0 || s.cfg.MaxBudgetUSD > 0 {
-		if exceeded, reason := budgetExceeded(s.cfg, d.CumulativeUsage()); exceeded {
+		cum := d.CumulativeUsage()
+		if exceeded, reason := usage.BudgetExceeded(cum.TotalTokens(), cum.TotalCostUSD, s.cfg.MaxBudgetTokens, s.cfg.MaxBudgetUSD); exceeded {
 			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusBudgetExhausted, Detail: "!! " + reason})
 			s.it.Comment(num, fmt.Sprintf("budget exhausted (%s) — stopping self-heal before another fix pass", reason))
 			note := fmt.Sprintf("budget-exhausted: %s", reason)

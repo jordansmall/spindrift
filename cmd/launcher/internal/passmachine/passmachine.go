@@ -6,10 +6,8 @@
 package passmachine
 
 import (
-	"fmt"
-	"strings"
-
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/usage"
 )
 
 // PassKind names which pass shape just finished, or which one runs next.
@@ -373,30 +371,12 @@ func implementFixTransition(in Input) Decision {
 	return Decision{Continue: true, Reason: "no cap fired, entering review pass", NextPass: KindReview}
 }
 
-// budgetExceeded reports whether tokens or usd reached either budget cap, and
-// a reason naming which dimensions tripped. Duplicated from settle's own
-// budgetExceeded (cmd/launcher/internal/settle/budget.go), same message
-// format, rather than imported, to keep this package free of that dependency.
-func budgetExceeded(caps Caps, tokens int, usd float64) (bool, string) {
-	var reasons []string
-	if caps.MaxBudgetTokens > 0 && tokens >= caps.MaxBudgetTokens {
-		reasons = append(reasons, fmt.Sprintf("%d tokens >= cap %d", tokens, caps.MaxBudgetTokens))
-	}
-	if caps.MaxBudgetUSD > 0 && usd >= caps.MaxBudgetUSD {
-		reasons = append(reasons, fmt.Sprintf("$%.4f >= cap $%.4f", usd, caps.MaxBudgetUSD))
-	}
-	if len(reasons) == 0 {
-		return false, ""
-	}
-	return true, strings.Join(reasons, "; ")
-}
-
 // reviewTransition is the review loop's decision after a review pass. Every
 // branch continues by design: a review pass alone never stops the run.
 func reviewTransition(in Input) Decision {
 	var d Decision
 	alreadyCommitted := in.LandPhase == LandPhaseTerminalCommitted
-	budgetHit, budgetReason := budgetExceeded(in.Caps, in.CumulativeTokens, in.CumulativeUSD)
+	budgetHit, budgetReason := usage.BudgetExceeded(in.CumulativeTokens, in.CumulativeUSD, in.Caps.MaxBudgetTokens, in.Caps.MaxBudgetUSD)
 	switch {
 	case in.Verdict == VerdictNone:
 		d = Decision{
@@ -502,12 +482,10 @@ func deltaReviewTransition(in Input) Decision {
 // implement/fix/review loop. pass counts the settled land pass too, and the
 // reused StopReasons let a caller match a cap here against Transition's.
 func ExtraPassAllowed(caps Caps, pass int, cumulativeTokens int, cumulativeUSD float64) (bool, CapReason) {
-	switch {
-	case caps.MaxSlices > 0 && pass >= caps.MaxSlices:
+	if caps.MaxSlices > 0 && pass >= caps.MaxSlices {
 		return false, StopMaxSlicesReached
-	case caps.MaxBudgetTokens > 0 && cumulativeTokens >= caps.MaxBudgetTokens:
-		return false, StopBudgetExceeded
-	case caps.MaxBudgetUSD > 0 && cumulativeUSD >= caps.MaxBudgetUSD:
+	}
+	if exceeded, _ := usage.BudgetExceeded(cumulativeTokens, cumulativeUSD, caps.MaxBudgetTokens, caps.MaxBudgetUSD); exceeded {
 		return false, StopBudgetExceeded
 	}
 	return true, StopNone

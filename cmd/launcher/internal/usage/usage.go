@@ -1,9 +1,13 @@
-// Package usage holds Driver-agnostic usage-report types and formatting.
+// Package usage holds Driver-agnostic usage-report types and formatting,
+// plus BudgetExceeded, the shared fix-pass budget rule.
 // Each Driver parses a Box log into a Report behind its ExtractUsage method
 // (ADR 0009); this package never reads a log itself.
 package usage
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // FormatDuration renders a millisecond count as "Xh Ym Zs", "Xm Ys", or "Xs".
 func FormatDuration(ms int64) string {
@@ -136,4 +140,23 @@ type Report struct {
 	// HasEventSpan is false when the log carried no usable event timestamp
 	// at all, in which case EarliestEventMs and LatestEventMs are zero.
 	HasEventSpan bool
+}
+
+// BudgetExceeded reports whether tokens or usd has reached either cap, naming
+// the cap or caps that tripped. A zero cap means no cap on that dimension
+// (issue #2001). The two dimensions are independent, so either can trip
+// first. Settle's fix-pass loop and the pass machine share this one rule
+// (issue #6617).
+func BudgetExceeded(tokens int, usd float64, capTokens int, capUSD float64) (bool, string) {
+	var reasons []string
+	if capTokens > 0 && tokens >= capTokens {
+		reasons = append(reasons, fmt.Sprintf("%d tokens >= cap %d", tokens, capTokens))
+	}
+	if capUSD > 0 && usd >= capUSD {
+		reasons = append(reasons, fmt.Sprintf("$%.4f >= cap $%.4f", usd, capUSD))
+	}
+	if len(reasons) == 0 {
+		return false, ""
+	}
+	return true, strings.Join(reasons, "; ")
 }
