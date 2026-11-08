@@ -43,7 +43,6 @@ func healCases() []prCase {
 	wentRed := "CI went red after force-push on " + testPR
 	conflicted := []string{"MarkReady:" + testPR, "Merge:" + testPR, "MarkDraft:" + testPR}
 	mergedAfterFix := append(append([]string(nil), conflicted...), "MarkReady:"+testPR, "Merge:"+testPR)
-	fixPass := func(n, of int) Step { return prStep("", fmt.Sprintf("fix-pass=%d/%d", n, of)) }
 
 	// Snapshot the labels as the conflict-resolve Box starts: the swap to
 	// agent-complete waits for the landing path to settle (issue #757).
@@ -93,7 +92,7 @@ func healCases() []prCase {
 			maxRebase: 3, maxFix: 2, mergeErrs: []error{errConflict},
 			checks: []forge.RollupState{green, green, red, green, green},
 			want:   merged, wantLabels: complete, wantNoLabels: failed, wantMerged: testPR, wantCalls: mergedAfterFix,
-			wantSteps: []Step{prStep(StatusPostForcePushRed, ""), fixPass(1, 2)},
+			wantSteps: []Step{prStep(StatusPostForcePushRed, ""), fixPassStep(1, 2)},
 			wantFixes: 1, wantRebases: 1,
 		},
 		{
@@ -101,7 +100,7 @@ func healCases() []prCase {
 			maxRebase: 3, maxFix: 2, mergeErrs: []error{errConflict}, rebaseErr: errConflict,
 			checks: []forge.RollupState{green, green, red, green, green},
 			want:   merged, wantLabels: complete, wantMerged: testPR, wantCalls: mergedAfterFix,
-			wantSteps:    []Step{prStep(StatusConflictResolve, ""), prStep(StatusPostForcePushRed, ""), fixPass(1, 2)},
+			wantSteps:    []Step{prStep(StatusConflictResolve, ""), prStep(StatusPostForcePushRed, ""), fixPassStep(1, 2)},
 			wantResolves: 1, wantFixes: 1, wantRebases: 1,
 		},
 		{
@@ -139,7 +138,7 @@ func healCases() []prCase {
 			checks: []forge.RollupState{green, green, red, green, green, green, green},
 			want:   merged, wantLabels: complete, wantNoLabels: failed, wantMerged: testPR,
 			wantCalls: []string{"MarkReady:" + testPR, "MarkReady:" + testPR, "MarkReady:" + testPR, "Merge:" + testPR},
-			wantSteps: []Step{prStep(StatusStaleBaseRebase, "attempt=1/3"), prStep(StatusPostForcePushRed, ""), fixPass(1, 2)},
+			wantSteps: []Step{prStep(StatusStaleBaseRebase, "attempt=1/3"), prStep(StatusPostForcePushRed, ""), fixPassStep(1, 2)},
 			wantFixes: 1, wantRebases: 2,
 		},
 		{

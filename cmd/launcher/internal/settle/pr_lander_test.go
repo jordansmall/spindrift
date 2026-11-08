@@ -10,6 +10,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // prShape picks the capability shape the tracker and Code Forge fakes take,
@@ -58,6 +59,7 @@ type prCase struct {
 	resolveErr error                             // what the conflict-resolve Box returns
 	dsetup     func(*dispatch.Fake, *forge.Fake) // scripts the dispatcher beyond resolveErr
 	check      func(*testing.T, *forge.Fake, *dispatch.Fake)
+	wire       func(fc *forge.Fake, d *dispatch.Fake, mark func()) // runs once Settle exists; mark is the operator's Terminate landing mid-call
 
 	want           Settlement
 	wantSteps      []Step
@@ -73,6 +75,7 @@ type prCase struct {
 	wantFixes      int      // fix passes dispatched
 	wantResolves   int      // conflict-resolve Boxes dispatched
 	wantRebases    int      // Rebase calls on the forge
+	wantStderr     []string // substring each of stderr must hold; non-nil empty means silent; stderr uncaptured when nil
 }
 
 // prSettlement is the Settlement a PR landing of testPR settles with.
@@ -262,6 +265,7 @@ func TestSettle_PRLander(t *testing.T) {
 
 	cases = append(cases, healCases()...)
 	cases = append(cases, handOffCases()...)
+	cases = append(cases, fixCases()...)
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -309,7 +313,17 @@ func TestSettle_PRLander(t *testing.T) {
 			s.cfg.Capabilities.TrackerDescriptor = tc.tracker
 			gen := s.term.Begin("1")
 
-			got := s.Settle(d, "1", gen, settleReadyResult("1", testPR))
+			if tc.wire != nil {
+				tc.wire(fc, d, func() { s.term.Mark("1") })
+			}
+			var got Settlement
+			settle := func() { got = s.Settle(d, "1", gen, settleReadyResult("1", testPR)) }
+			var stderr string
+			if tc.wantStderr != nil {
+				stderr = testutil.CaptureStderr(t, settle)
+			} else {
+				settle()
+			}
 
 			fc.IssueErr = nil
 			iss, _ := fc.Issue("1")
@@ -333,6 +347,14 @@ func TestSettle_PRLander(t *testing.T) {
 			}
 			if tc.check != nil {
 				tc.check(t, fc, d)
+			}
+			if tc.wantStderr != nil && len(tc.wantStderr) == 0 && stderr != "" {
+				t.Errorf("stderr = %q, want it silent", stderr)
+			}
+			for _, w := range tc.wantStderr {
+				if !strings.Contains(stderr, w) {
+					t.Errorf("stderr = %q, want it to contain %q", stderr, w)
+				}
 			}
 			if missing := containsSteps(rec.Steps(), tc.wantSteps); len(missing) > 0 {
 				t.Errorf("progress steps = %+v, missing %+v", rec.Steps(), missing)
