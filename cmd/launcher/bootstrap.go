@@ -7,7 +7,6 @@ import (
 	"os"
 
 	"spindrift.dev/launcher/internal/backendkit"
-	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/ecosystem"
@@ -40,12 +39,16 @@ type launchContext struct {
 	// reconcileAfterDispatch's callers need not each re-resolve it.
 	capabilities forge.Capabilities
 	factory      *dispatch.Factory
-	settle       settle.Settler
-	// terminated is the one registry the work settler checks at its checkpoints
-	// and every marker writes: the Console's Terminate, the waves, and an abort's
-	// Reclaim. An abort and a settle goroutine already polling CI then agree on
-	// an issue's fate (#3521), and a Console recover gesture cannot replace it
-	// and strand later marks where no settle looks (#3522).
+	// merge settles work, recover and the Butler (whose SettleLedger falls to the
+	// merge gate); verdict settles research. newSettlers sets exactly one.
+	merge   settle.MergeSettler
+	verdict *settle.ResearchSettle
+	// terminated is the merge settler's own registry, and every marker writes
+	// it: the Console's Terminate, the waves, and an abort's Reclaim. An abort
+	// and a settle goroutine already polling CI then agree on an issue's fate
+	// (#3521), and a Console recover gesture cannot replace it and strand later
+	// marks where no settle looks (#3522). Under research no settler reads it
+	// (the verdict arm mints a fresh one); the Console and waves still mark it.
 	terminated *terminate.Registry
 	cleanup    func()
 }
@@ -142,9 +145,15 @@ func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor
 	}
 
 	lw := localloop.Wire(localloopConfig(c), it)
+	mergeSettle, verdict, terminated, err := newSettlers(c.kind().Settle, c, it, lw, cf, gc.capabilities)
+	if err != nil {
+		return nil, err
+	}
 	f := newDispatchFactory(c, pwd, r, it, lw, cf, gc.capabilities)
-	terminated := terminate.NewRegistry()
-	s := newSettle(c, it, lw, cf, gc.capabilities, terminated)
+	var merge settle.MergeSettler
+	if mergeSettle != nil {
+		merge = mergeSettle
+	}
 
 	return &launchContext{
 		config:       c,
@@ -154,7 +163,8 @@ func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor
 		codeForge:    cf,
 		capabilities: gc.capabilities,
 		factory:      f,
-		settle:       s,
+		merge:        merge,
+		verdict:      verdict,
 		terminated:   terminated,
 		cleanup: func() {
 			f.Cleanup()
@@ -169,28 +179,14 @@ func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor
 	}, nil
 }
 
-// workSettle asserts that lc.settle satisfies settle.WorkSettler. Both callers
-// bootstrap with dispatchkind.Work, so a clear panic beats a generic interface
-// conversion one if that invariant is ever broken.
-func (lc *launchContext) workSettle() settle.WorkSettler {
-	ws, ok := lc.settle.(settle.WorkSettler)
-	if !ok {
-		panic("lc.settle does not implement settle.WorkSettler (bootstrap wiring bug)")
+// settler is the Settler the generic waves path (work and research dispatch)
+// drives. It tests the concrete verdict pointer so a nil one never becomes a
+// non-nil interface.
+func (lc *launchContext) settler() settle.Settler {
+	if lc.verdict != nil {
+		return lc.verdict
 	}
-	return ws
-}
-
-// patchGate asserts that lc.settle satisfies butler.PatchGate, the merge gate
-// cmdButler hands a landed patch PR to (issue #4076). Only cmdButler
-// bootstraps with dispatchkind.Butler, whose newSettle falls through to
-// settle.New configured Unclaimed, so a clear panic beats a generic interface
-// conversion one if that invariant is ever broken.
-func (lc *launchContext) patchGate() butler.PatchGate {
-	pg, ok := lc.settle.(butler.PatchGate)
-	if !ok {
-		panic("lc.settle does not implement butler.PatchGate (bootstrap wiring bug)")
-	}
-	return pg
+	return lc.merge
 }
 
 // seedAccumulationRepoIfHostMediated seeds the bare Accumulation repo (ADR 0033)
@@ -223,14 +219,18 @@ func seedAccumulationRepoIfHostMediated(c config, pwd string) (*local.Accumulati
 // start a second GH_TOKEN refresh watcher and repeat the readiness check. The
 // returned Factory owns its own driver-cache root, so the caller must call its
 // Cleanup.
-func researchLaunchStack(lc *launchContext) (forge.IssueTracker, *dispatch.Factory, settle.Settler) {
+func researchLaunchStack(lc *launchContext) (forge.IssueTracker, *dispatch.Factory, *settle.ResearchSettle, error) {
 	rc := applyDispatchKind(lc.config, dispatchkind.Research)
 	it := newIssueTracker(rc)
 	lw := localloop.Wire(localloopConfig(rc), it)
 	f := newDispatchFactory(rc, lc.pwd, lc.runner, it, lw, lc.codeForge, lc.capabilities)
 
-	// newSettle takes the dispatchkind.SettleVerdict branch here, and that branch
-	// never reads its caps argument, so there is nothing worth resolving.
-	s := newSettle(rc, it, lw, lc.codeForge, forge.Capabilities{}, nil)
-	return it, f, s
+	// The SettleVerdict arm never reads its caps argument, so there is nothing
+	// worth resolving.
+	_, verdict, _, err := newSettlers(rc.kind().Settle, rc, it, lw, lc.codeForge, forge.Capabilities{})
+	if err != nil {
+		f.Cleanup()
+		return nil, nil, nil, err
+	}
+	return it, f, verdict, nil
 }

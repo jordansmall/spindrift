@@ -83,7 +83,7 @@ func (x *queueRecoverFixture) run(t *testing.T) (int, string) {
 func (x *queueRecoverFixture) runWith(t *testing.T, caps forge.Capabilities) (int, string) {
 	t.Helper()
 	var out strings.Builder
-	ws := newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf)
+	ws := testNewSettle(x.c, x.tracker, testWired(x.tracker), x.cf)
 	err := recoverQueueOne(x.c, x.tracker, x.cf, caps, x.dir, testFactory(t, x.dir, nil), ws, ws.Registry(), &out, io.Discard)
 	return exitCodeFor(err), out.String()
 }
@@ -344,7 +344,7 @@ func (x *queueRecoverFixture) runOn(t *testing.T, it forge.IssueTracker, cf forg
 	t.Helper()
 	// A real runner, not nil: an abort whose watcher wins the race reaps
 	// through the factory's runner.Kill.
-	s := newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf)
+	s := testNewSettle(x.c, x.tracker, testWired(x.tracker), x.cf)
 	err := recoverQueueOne(x.c, it, cf, caps, x.dir, testFactory(t, x.dir, runner.NewFake()), s, s.Registry(), io.Discard, io.Discard)
 	return exitCodeFor(err)
 }
@@ -399,7 +399,7 @@ func TestRecoverQueueOne_AbortDuringFailedSettleReclaimsAndDoesNotPark(t *testin
 		}
 	})
 
-	ws := newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf)
+	ws := testNewSettle(x.c, x.tracker, testWired(x.tracker), x.cf)
 	err := recoverQueueOne(x.c, x.fc, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, rf), ws, ws.Registry(), io.Discard, io.Discard)
 	code := exitCodeFor(err)
 
@@ -772,7 +772,7 @@ func queueLaunchContext(t *testing.T, x *queueRecoverFixture, cleaned *bool) *la
 		codeForge:    x.cf,
 		capabilities: capsFor(x.tracker, x.cf),
 		factory:      testFactory(t, x.dir, nil),
-		settle:       st,
+		merge:        st,
 		terminated:   st.Registry(),
 		cleanup:      func() { *cleaned = true },
 	}
@@ -954,7 +954,7 @@ func TestRecoverIssue_HandRunWorkflowPermissionNoteCarriesRemedy(t *testing.T) {
 	stopCh, abortCh := make(chan struct{}), make(chan struct{})
 	var out strings.Builder
 
-	ws := newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf)
+	ws := testNewSettle(x.c, x.tracker, testWired(x.tracker), x.cf)
 	err := recoverIssue(stopCh, abortCh, false, x.c, x.tracker, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, nil), ws, ws.Registry(), "42", &out, io.Discard)
 
 	if err == nil {
@@ -1134,7 +1134,7 @@ func TestCmdRecover_RelayFailureReportsCauseNotNoOpenPR(t *testing.T) {
 		issueTracker: x.fc,
 		codeForge:    x.cf,
 		factory:      testFactory(t, x.dir, nil),
-		settle:       st,
+		merge:        st,
 		terminated:   st.Registry(),
 		cleanup:      func() {},
 	}
@@ -1260,7 +1260,7 @@ func TestRecoverByNumber_IgnoresAttemptRecord(t *testing.T) {
 	}
 	x.fc.SetIssue(forge.Issue{Number: "42", Labels: []string{x.c.InProgressLabel}})
 
-	ws := newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf)
+	ws := testNewSettle(x.c, x.tracker, testWired(x.tracker), x.cf)
 	err = recoverByNumber(x.c, x.tracker, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, nil), ws, ws.Registry(), "42", io.Discard, io.Discard)
 
 	if err != nil {

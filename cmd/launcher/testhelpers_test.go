@@ -115,14 +115,28 @@ func testWired(it forge.IssueTracker) *localloop.Wired {
 // Resolves Capabilities from it and cf the same way newReadContext does, so a
 // test gets correct pr/landing behavior for whatever fake shape it passes
 // without wiring Capabilities by hand.
-// The assertion to *settle.Settle always succeeds because every caller goes
-// through dispatchkind.Work; the concrete type lets a test hand the same
-// Settle's Registry() to the entry point under test, as bootstrap does.
+// The concrete type lets a test hand the same Settle's Registry() to the entry
+// point under test, as bootstrap does.
 func testNewSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) *settle.Settle {
 	forgeDesc, _ := backend.ByName(c.CodeForge)
 	trackerDesc, _ := backend.ByName(c.IssueTracker)
 	caps := forge.ResolveCapabilities(cf, it, forgeDesc, trackerDesc)
-	return newSettle(c, it, lw, cf, caps, nil).(*settle.Settle)
+	return settle.New(settleConfig(c, lw, cf, caps), it, cf)
+}
+
+// testSettlers is newSettlers for the strategy c's kind names, failing the
+// test on an unhandled one.
+func testSettlers(t *testing.T, c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) (settle.MergeSettler, *settle.ResearchSettle) {
+	t.Helper()
+	mergeSettle, verdict, _, err := newSettlers(c.kind().Settle, c, it, lw, cf, caps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var merge settle.MergeSettler
+	if mergeSettle != nil {
+		merge = mergeSettle
+	}
+	return merge, verdict
 }
 
 // Resolves Capabilities the way newReadContext does (issue #2946), so a test

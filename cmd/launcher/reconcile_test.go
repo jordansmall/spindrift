@@ -10,8 +10,6 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/localloop"
-	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -22,10 +20,6 @@ func reconcileConfig() config {
 	c.BranchPrefix = "agent/issue-"
 	c.MaxFixAttempts = 3
 	return c
-}
-
-func newWorkSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) *settle.Settle {
-	return testNewSettle(c, it, lw, cf)
 }
 
 // recoverByNumber is the sole adopt-and-gate path (#600). reconcileStranded,
@@ -47,7 +41,7 @@ func TestRecoverByNumber_GreenMergesAndCompletes(t *testing.T) {
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 
 	dir := tempLogDir(t)
-	ws := newWorkSettle(c, fc, testWired(fc), fc)
+	ws := testNewSettle(c, fc, testWired(fc), fc)
 	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), ws, ws.Registry(), "42", io.Discard, io.Discard)
 
 	if err != nil {
@@ -81,7 +75,7 @@ func TestRecoverByNumber_RetriesTransientPRLookupError(t *testing.T) {
 	fc.OpenPRForBranchErrs = []error{errors.New("HTTP 502: Bad Gateway"), nil}
 
 	dir := tempLogDir(t)
-	ws := newWorkSettle(c, fc, testWired(fc), fc)
+	ws := testNewSettle(c, fc, testWired(fc), fc)
 	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), ws, ws.Registry(), "42", io.Discard, io.Discard)
 
 	if err != nil {
@@ -109,7 +103,7 @@ func TestRecoverByNumber_RetryMaxOneStillRetriesOnce(t *testing.T) {
 	fc.OpenPRForBranchErrs = []error{errors.New("HTTP 502: Bad Gateway"), nil}
 
 	dir := tempLogDir(t)
-	ws := newWorkSettle(c, fc, testWired(fc), fc)
+	ws := testNewSettle(c, fc, testWired(fc), fc)
 	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), ws, ws.Registry(), "42", io.Discard, io.Discard)
 
 	if err != nil {
@@ -136,7 +130,7 @@ func TestRecoverByNumber_AdoptedPRAlwaysCallsMarkReadyThenMergesAndCompletes(t *
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 
 	dir := tempLogDir(t)
-	ws := newWorkSettle(c, fc, testWired(fc), fc)
+	ws := testNewSettle(c, fc, testWired(fc), fc)
 	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), ws, ws.Registry(), "42", io.Discard, io.Discard)
 
 	if err != nil {
@@ -185,7 +179,7 @@ func TestRecoverByNumber_RelayedBranchAdoptedMergesAndCompletes(t *testing.T) {
 	}
 
 	cf := fc.AsGithubReadOnly()
-	ws := newWorkSettle(c, fc, testWired(fc), cf)
+	ws := testNewSettle(c, fc, testWired(fc), cf)
 	err := recoverByNumber(c, fc, cf, capsFor(fc, cf), dir, testFactory(t, dir, nil), ws, ws.Registry(), "42", io.Discard, io.Discard)
 
 	if err != nil {
@@ -221,7 +215,7 @@ func TestRecoverByNumber_NoPRNoSelfReportStillNoOps(t *testing.T) {
 	// dispatch.ResolveFromLogs finds nothing.
 
 	dir := tempLogDir(t)
-	ws := newWorkSettle(c, fc, testWired(fc), fc)
+	ws := testNewSettle(c, fc, testWired(fc), fc)
 	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), ws, ws.Registry(), "42", io.Discard, io.Discard)
 
 	if err == nil {
@@ -246,7 +240,7 @@ func TestRecoverByNumber_NoPRSkipped(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 
 	dir := tempLogDir(t)
-	ws := newWorkSettle(c, fc, testWired(fc), fc)
+	ws := testNewSettle(c, fc, testWired(fc), fc)
 	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), ws, ws.Registry(), "42", io.Discard, io.Discard)
 
 	if err == nil {
@@ -275,7 +269,7 @@ func TestRecoverByNumber_NoPRRestoresPriorComplete(t *testing.T) {
 	fc.PriorClaimStates = map[string]forge.DispatchState{"42": forge.Complete}
 
 	dir := tempLogDir(t)
-	ws := newWorkSettle(c, fc, testWired(fc), fc)
+	ws := testNewSettle(c, fc, testWired(fc), fc)
 	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), ws, ws.Registry(), "42", io.Discard, io.Discard)
 
 	if err != nil {
@@ -308,7 +302,7 @@ func TestRecoverByNumber_NoPRPriorFailedStillErrors(t *testing.T) {
 	fc.PriorClaimStates = map[string]forge.DispatchState{"42": forge.Failed}
 
 	dir := tempLogDir(t)
-	ws := newWorkSettle(c, fc, testWired(fc), fc)
+	ws := testNewSettle(c, fc, testWired(fc), fc)
 	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), ws, ws.Registry(), "42", io.Discard, io.Discard)
 
 	if err == nil {
@@ -335,7 +329,7 @@ func TestRecoverByNumber_RedFollowsSelfHeal(t *testing.T) {
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateFailure})
 
 	dir := tempLogDir(t)
-	ws := newWorkSettle(c, fc, testWired(fc), fc)
+	ws := testNewSettle(c, fc, testWired(fc), fc)
 	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), ws, ws.Registry(), "42", io.Discard, io.Discard)
 
 	if err != nil {
@@ -367,7 +361,7 @@ func TestRecoverByNumber_ReportLines(t *testing.T) {
 		// Settle prints to the process stdout; os.Stdout inside the closure is
 		// the captured pipe, so recover's own lines stay in order with it.
 		return testutil.CaptureStdout(t, func() {
-			ws := newWorkSettle(c, fc, testWired(fc), fc)
+			ws := testNewSettle(c, fc, testWired(fc), fc)
 			_ = recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), ws, ws.Registry(), "42", os.Stdout, io.Discard)
 		})
 	}

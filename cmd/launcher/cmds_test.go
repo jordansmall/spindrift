@@ -78,7 +78,7 @@ func TestCmdRecover_RunsCleanupOnEveryExit(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       st,
+		merge:        st,
 		terminated:   st.Registry(),
 		cleanup:      func() { called = true },
 	}
@@ -116,7 +116,7 @@ func TestCmdRecover_WritesReasonToGithubOutput(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       st,
+		merge:        st,
 		terminated:   st.Registry(),
 		cleanup:      func() {},
 	}
@@ -163,7 +163,7 @@ func TestCmdRecover_AdoptedPRSucceeds(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       st,
+		merge:        st,
 		terminated:   st.Registry(),
 		cleanup:      func() {},
 	}
@@ -193,7 +193,7 @@ func TestCmdDispatchSelective_RunsCleanupOnEveryExit(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 		cleanup:      func() { called = true },
 	}
@@ -220,7 +220,7 @@ func TestCmdDispatch_RunsCleanupOnEveryExit(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 		cleanup:      func() { called = true },
 	}
@@ -254,7 +254,7 @@ func TestCmdConsole_RunsCleanupOnEveryExit(t *testing.T) {
 		// orphanDetectCmd calls Factory.OrphanedIssues, which calls
 		// f.runner.ListRunning on startup and panics on a nil runner.
 		factory:    testFactory(t, dir, runner.NewFake()),
-		settle:     settle.NewFake(),
+		merge:      settle.NewFake(),
 		terminated: terminate.NewRegistry(),
 		cleanup:    func() { called = true },
 	}
@@ -294,7 +294,7 @@ func TestCmdConsole_HoldsStopSignalRegistrationThroughCleanup(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, runner.NewFake()),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 		// lc.cleanup is the last teardown to run before stopCleanup, so a hold
 		// seen here also covers launch.Wait and researchFactory.Cleanup.
@@ -329,7 +329,7 @@ func TestCmdConsole_SetsHeartbeatOutToDiscard(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, runner.NewFake()),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 		cleanup:      func() {},
 	}

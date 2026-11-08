@@ -16,7 +16,6 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
-	"spindrift.dev/launcher/internal/terminate"
 )
 
 // blockComments holds every tracker Comment until the returned channel closes,
@@ -41,14 +40,12 @@ func newTermTestLauncher(t *testing.T) (launch *Launcher, fc *forge.Fake, fr *ru
 
 	factory, fr, dir := newTermFactory(t)
 
-	reg := terminate.NewRegistry()
 	s := settle.New(settle.Config{
-		Terminated:    reg,
 		MergeMode:     "manual",
 		CompleteLabel: "agent-complete",
 		Capabilities:  forge.ResolveCapabilities(fc, fc, backend.Descriptor{}, backend.Descriptor{}),
 	}, fc, fc)
-	launch = &Launcher{CodeForge: fc, Factory: factory, Settle: s, Terminated: reg, queue: NewQueue()}
+	launch = &Launcher{CodeForge: fc, Factory: factory, Settle: s, Terminated: s.Registry(), queue: NewQueue()}
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 	return launch, fc, fr, dir
 }
@@ -127,14 +124,12 @@ func TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel(t *testing.T) {
 		t.Fatalf("dispatch.NewFactory: %v", err)
 	}
 	t.Cleanup(factory.Cleanup)
-	reg := terminate.NewRegistry()
 	s := settle.New(settle.Config{
-		Terminated:    reg,
 		MergeMode:     "manual",
 		CompleteLabel: "agent-complete",
 		Capabilities:  forge.ResolveCapabilities(fc, fc, backend.Descriptor{}, backend.Descriptor{}),
 	}, fc, fc)
-	launch := &Launcher{CodeForge: fc, Factory: factory, Settle: s, Terminated: reg, queue: NewQueue()}
+	launch := &Launcher{CodeForge: fc, Factory: factory, Settle: s, Terminated: s.Registry(), queue: NewQueue()}
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 	if err := launch.Terminate(fc, "42"); err != nil {
@@ -260,9 +255,7 @@ func TestLauncher_TerminateThenRepick_NoOutcomeReportsBlocked(t *testing.T) {
 		t.Fatalf("dispatch.NewFactory: %v", err)
 	}
 	t.Cleanup(factory.Cleanup)
-	reg := terminate.NewRegistry()
 	s := settle.New(settle.Config{
-		Terminated:        reg,
 		MergeMode:         "immediate",
 		CompleteLabel:     "agent-complete",
 		MergePollInterval: 0,
@@ -270,7 +263,7 @@ func TestLauncher_TerminateThenRepick_NoOutcomeReportsBlocked(t *testing.T) {
 		Capabilities:      forge.ResolveCapabilities(fc, fc, backend.Descriptor{}, backend.Descriptor{}),
 	}, fc, fc)
 
-	launch := &Launcher{CodeForge: fc, Factory: factory, Settle: s, Terminated: reg, queue: NewQueue()}
+	launch := &Launcher{CodeForge: fc, Factory: factory, Settle: s, Terminated: s.Registry(), queue: NewQueue()}
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 	if err := launch.Terminate(fc, "42"); err != nil {
@@ -440,9 +433,8 @@ func TestLauncher_terminating_LazilyConstructsMap(t *testing.T) {
 // anywhere else never reaches an in-flight settle, and it drives the reclaimed
 // issue to agent-complete out from under the reclaim (#3522).
 func TestLauncher_registry_IsTerminated(t *testing.T) {
-	reg := terminate.NewRegistry()
-	st := settle.New(settle.Config{Terminated: reg}, forge.NewFake(), forge.NewFake())
-	launch := &Launcher{Settle: st, Terminated: reg}
+	st := settle.New(settle.Config{}, forge.NewFake(), forge.NewFake())
+	launch := &Launcher{Settle: st, Terminated: st.Registry()}
 
 	if launch.registry() != launch.Terminated || launch.Terminated != st.Registry() {
 		t.Fatal("registry() must return Terminated, the settler's own registry")

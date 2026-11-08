@@ -56,7 +56,7 @@ type Fake struct {
 }
 
 var _ Settler = (*Fake)(nil)
-var _ WorkSettler = (*Fake)(nil)
+var _ MergeSettler = (*Fake)(nil)
 
 // NewFake returns an empty Fake.
 func NewFake() *Fake {
