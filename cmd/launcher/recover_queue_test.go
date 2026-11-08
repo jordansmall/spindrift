@@ -38,9 +38,9 @@ type queueRecoverFixture struct {
 func newQueueRecoverFixture(t *testing.T) *queueRecoverFixture {
 	t.Helper()
 	c := reconcileConfig()
-	c.maxRecoverAttempts = 3
+	c.MaxRecoverAttempts = 3
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.branchPrefix
+	fc.BranchPrefix = c.BranchPrefix
 	fc.CreateDraftPRURL = testReconcilePR
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 	dir := tempLogDir(t)
@@ -52,7 +52,7 @@ func newQueueRecoverFixture(t *testing.T) *queueRecoverFixture {
 // An empty report writes no log at all.
 func (x *queueRecoverFixture) addFailed(t *testing.T, num, report string) {
 	t.Helper()
-	x.fc.SetIssue(forge.Issue{Number: num, Labels: []string{x.c.failedLabel}})
+	x.fc.SetIssue(forge.Issue{Number: num, Labels: []string{x.c.FailedLabel}})
 	outbox := dispatch.OutboxDirFor(x.dir, num)
 	if err := os.MkdirAll(outbox, 0o755); err != nil {
 		t.Fatal(err)
@@ -145,8 +145,8 @@ func TestRecoverQueueOne_ReadyBundleNoPRMergesAndCompletes(t *testing.T) {
 				t.Errorf("Merged = %q, want %q", x.fc.Merged, testReconcilePR)
 			}
 			got := x.labels(t, "42")
-			if !slices.Contains(got, x.c.completeLabel) || slices.Contains(got, x.c.failedLabel) || slices.Contains(got, x.c.inProgressLabel) {
-				t.Errorf("labels = %v, want %q only of the lifecycle labels", got, x.c.completeLabel)
+			if !slices.Contains(got, x.c.CompleteLabel) || slices.Contains(got, x.c.FailedLabel) || slices.Contains(got, x.c.InProgressLabel) {
+				t.Errorf("labels = %v, want %q only of the lifecycle labels", got, x.c.CompleteLabel)
 			}
 			if len(x.fc.TransitionStateCalls) == 0 {
 				t.Fatalf("no tracker transitions recorded, want a 42 Failed->InProgress claim first")
@@ -178,7 +178,7 @@ func TestRecoverQueueOne_IneligibleIssuesAreLeftUntouched(t *testing.T) {
 		}},
 		{"not labelled agent-failed", func(t *testing.T, x *queueRecoverFixture) {
 			x.addFailed(t, "42", "ready")
-			x.fc.SetIssue(forge.Issue{Number: "42", Labels: []string{x.c.completeLabel}})
+			x.fc.SetIssue(forge.Issue{Number: "42", Labels: []string{x.c.CompleteLabel}})
 		}},
 	}
 	for _, tc := range cases {
@@ -236,8 +236,8 @@ func TestRecoverQueueOne_RelayFailureEndsAgentFailed(t *testing.T) {
 		t.Errorf("comments = %v, want none for an intermediate failure", x.fc.CommentCalls)
 	}
 	got := x.labels(t, "42")
-	if !slices.Contains(got, x.c.failedLabel) || slices.Contains(got, x.c.inProgressLabel) || slices.Contains(got, x.c.completeLabel) {
-		t.Errorf("labels = %v, want %q only of the lifecycle labels", got, x.c.failedLabel)
+	if !slices.Contains(got, x.c.FailedLabel) || slices.Contains(got, x.c.InProgressLabel) || slices.Contains(got, x.c.CompleteLabel) {
+		t.Errorf("labels = %v, want %q only of the lifecycle labels", got, x.c.FailedLabel)
 	}
 }
 
@@ -252,7 +252,7 @@ func TestRecoverQueueOne_StopSignalExitsSevenWithoutParking(t *testing.T) {
 		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 	x.assertUntouched(t)
-	if got := x.labels(t, "42"); !slices.Contains(got, x.c.failedLabel) {
+	if got := x.labels(t, "42"); !slices.Contains(got, x.c.FailedLabel) {
 		t.Errorf("labels = %v, want agent-failed kept", got)
 	}
 }
@@ -398,8 +398,8 @@ func TestRecoverQueueOne_StopDuringFailedSettleParksAndExitsSeven(t *testing.T) 
 		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 	got := x.labels(t, "42")
-	if !slices.Contains(got, x.c.failedLabel) || slices.Contains(got, x.c.inProgressLabel) {
-		t.Errorf("labels = %v, want %q and not %q", got, x.c.failedLabel, x.c.inProgressLabel)
+	if !slices.Contains(got, x.c.FailedLabel) || slices.Contains(got, x.c.InProgressLabel) {
+		t.Errorf("labels = %v, want %q and not %q", got, x.c.FailedLabel, x.c.InProgressLabel)
 	}
 	id, err := recoverrecord.BundleID(x.dir, "42")
 	if err != nil {
@@ -445,10 +445,10 @@ func TestRecoverQueueOne_AbortDuringFailedSettleReclaimsAndDoesNotPark(t *testin
 		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 	got := x.labels(t, "42")
-	if !slices.Contains(got, x.c.label) {
-		t.Errorf("labels = %v, want dispatchable %q", got, x.c.label)
+	if !slices.Contains(got, x.c.Label) {
+		t.Errorf("labels = %v, want dispatchable %q", got, x.c.Label)
 	}
-	for _, unwanted := range []string{x.c.failedLabel, x.c.inProgressLabel} {
+	for _, unwanted := range []string{x.c.FailedLabel, x.c.InProgressLabel} {
 		if slices.Contains(got, unwanted) {
 			t.Errorf("labels = %v, want no %q", got, unwanted)
 		}
@@ -492,18 +492,18 @@ func TestRecoverQueueOne_AbortAfterFailedSettleDoesNotStrandInProgress(t *testin
 		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 	got := x.labels(t, "42")
-	if slices.Contains(got, x.c.inProgressLabel) {
-		t.Errorf("labels = %v, want no %q", got, x.c.inProgressLabel)
+	if slices.Contains(got, x.c.InProgressLabel) {
+		t.Errorf("labels = %v, want no %q", got, x.c.InProgressLabel)
 	}
 	id, err := recoverrecord.BundleID(x.dir, "42")
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := 0
-	if slices.Contains(got, x.c.failedLabel) {
+	if slices.Contains(got, x.c.FailedLabel) {
 		want = 1
-	} else if !slices.Contains(got, x.c.label) {
-		t.Errorf("labels = %v, want parked %q or dispatchable %q", got, x.c.failedLabel, x.c.label)
+	} else if !slices.Contains(got, x.c.Label) {
+		t.Errorf("labels = %v, want parked %q or dispatchable %q", got, x.c.FailedLabel, x.c.Label)
 	}
 	if rec := recoverrecord.Load(x.dir, "42", id); rec.Count != want {
 		t.Errorf("attempt count = %d, want %d (labels %v)", rec.Count, want, got)
@@ -563,7 +563,7 @@ func TestRecoverQueueOne_StopDuringEligibilityReadsExitsSeven(t *testing.T) {
 	if x.fc.Merged != "" {
 		t.Errorf("Merged = %q, want none", x.fc.Merged)
 	}
-	if got := x.labels(t, "42"); !slices.Contains(got, x.c.failedLabel) {
+	if got := x.labels(t, "42"); !slices.Contains(got, x.c.FailedLabel) {
 		t.Errorf("labels = %v, want agent-failed kept", got)
 	}
 }
@@ -585,7 +585,7 @@ func TestRecoverQueueOne_StopAfterClaimRestoresAgentFailed(t *testing.T) {
 		t.Errorf("comments = %v, want none", x.fc.CommentCalls)
 	}
 	got := x.labels(t, "42")
-	if !slices.Contains(got, x.c.failedLabel) || slices.Contains(got, x.c.inProgressLabel) {
+	if !slices.Contains(got, x.c.FailedLabel) || slices.Contains(got, x.c.InProgressLabel) {
 		t.Errorf("labels = %v, want agent-failed and not agent-in-progress", got)
 	}
 }
@@ -608,7 +608,7 @@ func TestRecoverQueueOne_StopAfterClaimFailedRestoreExitsOne(t *testing.T) {
 		t.Errorf("exit = %d, want 1", code)
 	}
 	got := x.labels(t, "42")
-	if !slices.Contains(got, x.c.inProgressLabel) || slices.Contains(got, x.c.failedLabel) {
+	if !slices.Contains(got, x.c.InProgressLabel) || slices.Contains(got, x.c.FailedLabel) {
 		t.Errorf("labels = %v, want agent-in-progress and not agent-failed", got)
 	}
 	if rec := recoverrecord.Load(x.dir, "42", id); rec.Count != 0 {
@@ -715,7 +715,7 @@ func (n nativeFailed) Issue(num string) (forge.Issue, error) {
 func TestRecoverQueueOne_NativeFailedStatusIsNotSkipped(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
-	x.tracker = nativeFailed{IssueTracker: x.fc, failed: x.c.failedLabel}
+	x.tracker = nativeFailed{IssueTracker: x.fc, failed: x.c.FailedLabel}
 
 	code, out := x.run(t)
 
@@ -799,7 +799,7 @@ func TestRecoverQueueOne_PreClaimErrorFailsWithoutTransition(t *testing.T) {
 			x.assertUntouched(t)
 			x.fc.IssueErr = nil // labels() Fatalf's on a lookup error; clear the issue-lookup case's injected error
 			got := x.labels(t, "42")
-			if !slices.Contains(got, x.c.failedLabel) || slices.Contains(got, x.c.completeLabel) {
+			if !slices.Contains(got, x.c.FailedLabel) || slices.Contains(got, x.c.CompleteLabel) {
 				t.Errorf("labels = %v, want agent-failed and not agent-complete", got)
 			}
 		})
@@ -872,7 +872,7 @@ func TestCmdRecoverQueue_ExitCodesAndCleanup(t *testing.T) {
 
 func TestRecoverQueueOne_InsideBackoffWindowIsSkipped(t *testing.T) {
 	x := newQueueRecoverFixture(t)
-	x.c.transientBackoffSecs = 3600
+	x.c.TransientBackoffSecs = 3600
 	x.addFailed(t, "42", "ready")
 	x.seedRecord(t, "42", recoverrecord.Record{Count: 1, Last: time.Now()})
 
@@ -892,7 +892,7 @@ func TestRecoverQueueOne_InsideBackoffWindowIsSkipped(t *testing.T) {
 
 func TestRecoverQueueOne_OutsideBackoffWindowIsAttempted(t *testing.T) {
 	x := newQueueRecoverFixture(t)
-	x.c.transientBackoffSecs = 3600
+	x.c.TransientBackoffSecs = 3600
 	x.addFailed(t, "42", "ready")
 	x.seedRecord(t, "42", recoverrecord.Record{Count: 1, Last: time.Now().Add(-24 * time.Hour)})
 
@@ -1033,7 +1033,7 @@ func TestRecoverQueueOne_GiveUpCommentNamesDraftPRFailure(t *testing.T) {
 // a long backoff, the second run must not touch the issue at all.
 func TestRecoverQueueOne_FailedAttemptBacksOffTheNextRun(t *testing.T) {
 	x := newQueueRecoverFixture(t)
-	x.c.transientBackoffSecs = 3600
+	x.c.TransientBackoffSecs = 3600
 	x.addFailed(t, "42", "ready")
 	x.fc.RelayBundleErr = errors.New("relay: boom")
 
@@ -1220,7 +1220,7 @@ func TestRecoverQueueOne_GaveUpRecordStaysIneligibleAfterRaisedBound(t *testing.
 	x.addFailed(t, "42", "ready")
 	x.fc.RelayBundleErr = errors.New("relay: boom")
 	x.seedRecord(t, "42", recoverrecord.Record{Count: 3, Last: time.Now().Add(-time.Hour), GaveUp: true})
-	x.c.maxRecoverAttempts = 4
+	x.c.MaxRecoverAttempts = 4
 
 	if code, _ := x.run(t); code != 2 {
 		t.Fatalf("exit = %d, want 2", code)
@@ -1242,7 +1242,7 @@ func TestRecoverQueueOne_GiveUpSaveFailureExitsOne(t *testing.T) {
 	}
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
-	x.seedRecord(t, "42", recoverrecord.Record{Count: x.c.maxRecoverAttempts, Last: time.Now().Add(-time.Hour)})
+	x.seedRecord(t, "42", recoverrecord.Record{Count: x.c.MaxRecoverAttempts, Last: time.Now().Add(-time.Hour)})
 	path := recoverrecord.Path(x.dir, "42")
 	if err := os.Chmod(path, 0o444); err != nil {
 		t.Fatal(err)
@@ -1291,13 +1291,13 @@ func TestRecoverQueueOne_SuccessRemovesRecord(t *testing.T) {
 func TestRecoverByNumber_IgnoresAttemptRecord(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
-	x.c.transientBackoffSecs = 3600
+	x.c.TransientBackoffSecs = 3600
 	x.seedRecord(t, "42", recoverrecord.Record{Count: 3, Last: time.Now()})
 	before, err := os.ReadFile(recoverrecord.Path(x.dir, "42"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	x.fc.SetIssue(forge.Issue{Number: "42", Labels: []string{x.c.inProgressLabel}})
+	x.fc.SetIssue(forge.Issue{Number: "42", Labels: []string{x.c.InProgressLabel}})
 
 	err = recoverByNumber(x.c, x.tracker, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, nil), newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), "42", io.Discard, io.Discard)
 
@@ -1391,8 +1391,8 @@ func TestRecoverQueueOne_AbortAfterOwnFailedSettleSpared(t *testing.T) {
 		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 	got := x.labels(t, "42")
-	if !slices.Contains(got, x.c.failedLabel) || slices.Contains(got, x.c.label) {
-		t.Errorf("labels = %v, want %q kept and no dispatchable %q", got, x.c.failedLabel, x.c.label)
+	if !slices.Contains(got, x.c.FailedLabel) || slices.Contains(got, x.c.Label) {
+		t.Errorf("labels = %v, want %q kept and no dispatchable %q", got, x.c.FailedLabel, x.c.Label)
 	}
 	select {
 	case name := <-rf.killed:

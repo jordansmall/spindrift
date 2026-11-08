@@ -211,7 +211,7 @@ func TestParseFlags_MergeGuardPathsEmptyDisablesGuard(t *testing.T) {
 	if _, err := parseFlags([]string{"--merge-guard-paths", ""}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := loadConfig().mergeGuardPaths; got != "" {
+	if got := loadConfig().MergeGuardPaths; got != "" {
 		t.Errorf("mergeGuardPaths = %q, want empty (guard disabled)", got)
 	}
 }

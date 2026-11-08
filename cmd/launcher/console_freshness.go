@@ -30,12 +30,12 @@ func newConsoleFreshness(c config, pwd string, eval freshness.Evaluator, pull fu
 		return freshness.Probe(freshness.ProbeSpec{
 			Artifact:       art,
 			Pwd:            pwd,
-			BaseBranch:     c.baseBranch,
+			BaseBranch:     c.BaseBranch,
 			FlakeImageAttr: c.flakeImageAttr,
 			ImageTag:       c.imageTag,
 		}, eval)
 	}
-	fresh, rebuild := newConsoleFreshnessChecker(c.baseBranch, probe, pull, build)
+	fresh, rebuild := newConsoleFreshnessChecker(c.BaseBranch, probe, pull, build)
 	return fresh, rebuild, nil
 }
 

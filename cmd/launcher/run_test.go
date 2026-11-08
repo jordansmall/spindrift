@@ -22,7 +22,7 @@ import (
 // fake-populated launchContext with no ISSUE_NUMBER and no dispatchable issues.
 func TestRun_EmptyQueue_ReturnsErrQueueEmpty(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
+	c.Label = "ready-for-agent"
 	dir := tempLogDir(t)
 	fc := forge.NewFake()
 	lc := &launchContext{
@@ -45,7 +45,7 @@ func TestRun_EmptyQueue_ReturnsErrQueueEmpty(t *testing.T) {
 // inline, against a fake-populated launchContext with no bootstrap.
 func TestRunExitCode_EmptyQueue_ReturnsExitCode2(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
+	c.Label = "ready-for-agent"
 	dir := tempLogDir(t)
 	fc := forge.NewFake()
 	lc := &launchContext{
@@ -66,7 +66,7 @@ func TestRunExitCode_EmptyQueue_ReturnsExitCode2(t *testing.T) {
 // without it a bare exit 2 reads as a failure.
 func TestRunExitCode_EmptyQueue_SaysNothingToDo(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
+	c.Label = "ready-for-agent"
 	dir := tempLogDir(t)
 	fc := forge.NewFake()
 	lc := &launchContext{
@@ -91,10 +91,10 @@ func TestRunExitCode_EmptyQueue_SaysNothingToDo(t *testing.T) {
 // must name it (#3584), while the exit code stays 2.
 func TestRun_EmptyQueue_NamesCrossFamilyHeldIssue(t *testing.T) {
 	c := applyDispatchKind(baseConfig(), dispatchkind.Work)
-	c.label = "ready-for-agent"
+	c.Label = "ready-for-agent"
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.label, "agent-research-in-progress"}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.Label, "agent-research-in-progress"}})
 	lc := &launchContext{
 		config:       c,
 		pwd:          dir,
@@ -125,12 +125,12 @@ func TestRun_EmptyQueue_NamesCrossFamilyHeldIssue(t *testing.T) {
 // per-issue line must come from discovery itself (#3584).
 func TestRun_OneShot_NamesHeldIssueWhenRestBlocked(t *testing.T) {
 	c := applyDispatchKind(baseConfig(), dispatchkind.Work)
-	c.label = "ready-for-agent"
+	c.Label = "ready-for-agent"
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Body: "## Blocked by\n- #2", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "1", Body: "## Blocked by\n- #2", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "2", State: "OPEN"})
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.label, "agent-research-in-progress"}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.Label, "agent-research-in-progress"}})
 	lc := &launchContext{
 		config:       c,
 		pwd:          dir,
@@ -157,12 +157,12 @@ func TestRun_OneShot_NamesHeldIssueWhenRestBlocked(t *testing.T) {
 // just because the run went on to dispatch (#3584).
 func TestRun_OneShot_NamesHeldIssueAlongsideDispatchable(t *testing.T) {
 	c := applyDispatchKind(baseConfig(), dispatchkind.Work)
-	c.label = "ready-for-agent"
+	c.Label = "ready-for-agent"
 	c.runnerKind = "bwrap"
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.label, "agent-research-in-progress"}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.Label, "agent-research-in-progress"}})
 	lc := &launchContext{
 		config:       c,
 		pwd:          dir,
@@ -186,13 +186,13 @@ func TestRun_OneShot_NamesHeldIssueAlongsideDispatchable(t *testing.T) {
 // A batch with nothing currently dispatchable exits straight to code 3.
 func TestRunExitCode_QueueMaxJobsZero_NoneDispatchable_ReturnsExitCode3(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
+	c.Label = "ready-for-agent"
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{
 		Number: "1",
 		Body:   "## Blocked by\n- #2",
-		Labels: []string{c.label},
+		Labels: []string{c.Label},
 	})
 	fc.SetIssue(forge.Issue{Number: "2", State: "OPEN"}) // blocker, not yet complete
 	lc := &launchContext{
@@ -215,21 +215,21 @@ func TestRunExitCode_QueueMaxJobsZero_NoneDispatchable_ReturnsExitCode3(t *testi
 // error uses.
 func TestSelectiveDispatchExitCode_ZeroSelected_ReturnsExitCode3(t *testing.T) {
 	c := baseConfig()
-	c.label = "agent-trigger"
-	c.overlapGate = "defer"
+	c.Label = "agent-trigger"
+	c.OverlapGate = "defer"
 	dir := tempLogDir(t)
 
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{
 		Number: "10",
 		Body:   "## Touches\n- lib/env-schema.nix",
-		Labels: []string{c.label},
+		Labels: []string{c.Label},
 	})
 	fc.SetIssue(forge.Issue{
 		Number: "20",
 		Body:   "## Touches\n- lib/env-schema.nix",
 		State:  "OPEN",
-		Labels: []string{c.inProgressLabel},
+		Labels: []string{c.InProgressLabel},
 	})
 
 	lc := &launchContext{
@@ -252,7 +252,7 @@ func TestSelectiveDispatchExitCode_NonTTYUnlabeled_AbortsWithoutDispatch(t *test
 	withStdinTTY(t, false)
 
 	c := baseConfig()
-	c.label = "ready-for-agent"
+	c.Label = "ready-for-agent"
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "15", Labels: []string{}})
@@ -282,9 +282,9 @@ func TestSelectiveDispatchExitCode_NonTTYUnlabeled_AbortsWithoutDispatch(t *test
 // queue exits the same way whether or not continuous mode is enabled.
 func TestRunExitCode_ContinuousDispatch_EmptyQueue_ReturnsExitCode2(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	dir := tempLogDir(t)
 	fc := forge.NewFake()
 	lc := &launchContext{
@@ -308,9 +308,9 @@ func TestRunExitCode_ContinuousDispatch_EmptyQueue_ReturnsExitCode2(t *testing.T
 // later, mid-run discover failure.
 func TestRun_ContinuousDispatch_StartupQueryError_Propagates(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	dir := tempLogDir(t)
 	fc := forge.NewFake()
 	fc.ListIssuesErr = boxErr
@@ -338,15 +338,15 @@ func TestRun_ContinuousDispatch_StartupQueryError_Propagates(t *testing.T) {
 // that both cases route through the same waves.RunContinuous call.
 func TestRunExitCode_ContinuousDispatch_AllBlocked_ReturnsExitCode3(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{
 		Number: "1",
 		Body:   "## Blocked by\n- #2",
-		Labels: []string{c.label},
+		Labels: []string{c.Label},
 	})
 	fc.SetIssue(forge.Issue{Number: "2", State: "OPEN"}) // blocker, not yet complete
 	lc := &launchContext{
@@ -368,14 +368,14 @@ func TestRunExitCode_ContinuousDispatch_AllBlocked_ReturnsExitCode3(t *testing.T
 // issue launches and the run exits 0.
 func TestRunExitCode_ContinuousDispatch_Fresh_DispatchesAndReturns0(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runnerKind = "bwrap"
 	dir := tempLogDir(t)
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 
 	fr := runner.NewFake()
 	lc := &launchContext{
@@ -401,14 +401,14 @@ func TestRunExitCode_ContinuousDispatch_Fresh_DispatchesAndReturns0(t *testing.T
 // before the first Box launched. Removing the precheck leaves exactly one.
 func TestRunExitCode_ContinuousDispatch_QueriesTrackerOnceBeforeFirstDispatch(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runnerKind = "bwrap"
 	dir := tempLogDir(t)
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 
 	fr := runner.NewFake()
 	lc := &launchContext{
@@ -439,19 +439,19 @@ func TestRunExitCode_ContinuousDispatch_QueriesTrackerOnceBeforeFirstDispatch(t 
 // must not repeat the baseline "querying open" line.
 func TestRunExitCode_ContinuousDispatch_RefillAnnouncesOnlyNewIssue(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runnerKind = "bwrap"
 	dir := tempLogDir(t)
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 
 	fr := runner.NewFake()
 	fr.RunFunc = func(box runner.Box) error {
 		if box.Issue == "1" {
-			fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.label}})
+			fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
 		}
 		return nil
 	}
@@ -483,15 +483,15 @@ func TestRunExitCode_ContinuousDispatch_RefillAnnouncesOnlyNewIssue(t *testing.T
 // fake forge here, and this run must leave that issue's PR and labels untouched.
 func TestRun_DoesNotAdoptLiveRunnersInProgressIssue(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.branchPrefix = "agent/issue-"
+	c.Label = "ready-for-agent"
+	c.BranchPrefix = "agent/issue-"
 	dir := tempLogDir(t)
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = c.branchPrefix
+	fc.BranchPrefix = c.BranchPrefix
 	// Issue #5 is another runner's live work: agent-in-progress with an open PR
 	// and no explicit recovery signal.
-	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{c.InProgressLabel}})
 	fc.SetPR(fc.AgentBranch("5"), forge.PR{URL: "https://github.com/owner/repo/pull/5"})
 
 	sf := settle.NewFake()
@@ -525,11 +525,11 @@ func TestRun_DoesNotAdoptLiveRunnersInProgressIssue(t *testing.T) {
 // fetch-failure path, so the fixture must be a genuine repo to still land here.
 func TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runtime = "podman"
-	c.baseBranch = "main"
+	c.BaseBranch = "main"
 	dir := tempLogDir(t)
 	if err := runGit(dir, "init"); err != nil {
 		t.Fatalf("git init: %v", err)
@@ -539,7 +539,7 @@ func TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4(t *testing.T
 	}
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 
 	fr := runner.NewFake()
 	lc := &launchContext{
@@ -566,11 +566,11 @@ func TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4(t *testing.T
 // still exit 4, still no Box. Precedence itself is pinned by the tests below.
 func TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDiscoverError_ReturnsExitCode4(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runtime = "podman"
-	c.baseBranch = "main"
+	c.BaseBranch = "main"
 	dir := tempLogDir(t)
 	if err := runGit(dir, "init"); err != nil {
 		t.Fatalf("git init: %v", err)
@@ -580,7 +580,7 @@ func TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDisc
 	}
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 	fc.ListIssuesErr = boxErr
 
 	fr := runner.NewFake()
@@ -609,11 +609,11 @@ func TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDisc
 // refill. The pre-fix bug reported heldBack=2; this pins the fixed value, 1.
 func TestRunExitCode_ContinuousDispatch_ImageStaleHeldBackExcludesBlockedIssue(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runtime = "podman"
-	c.baseBranch = "main"
+	c.BaseBranch = "main"
 	dir := tempLogDir(t)
 	if err := runGit(dir, "init"); err != nil {
 		t.Fatalf("git init: %v", err)
@@ -623,11 +623,11 @@ func TestRunExitCode_ContinuousDispatch_ImageStaleHeldBackExcludesBlockedIssue(t
 	}
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{
 		Number: "2",
 		Body:   "## Blocked by\n- #9",
-		Labels: []string{c.label},
+		Labels: []string{c.Label},
 	})
 	fc.SetIssue(forge.Issue{Number: "9", State: "OPEN"}) // #2's blocker, unmet
 
@@ -728,12 +728,12 @@ func TestContinuousDispatchErr_SignalledStopWinsOverFirstQueryErr(t *testing.T) 
 // same batch still dispatches.
 func TestRun_DepsOfCheckFailure_HoldsIssueNotDispatched(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
+	c.Label = "ready-for-agent"
 	dir := tempLogDir(t)
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
 
 	fr := runner.NewFake()
 	lc := &launchContext{
@@ -757,7 +757,7 @@ func TestRun_DepsOfCheckFailure_HoldsIssueNotDispatched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue(1): %v", err)
 	}
-	if containsLabel(iss1.Labels, c.failedLabel) {
+	if containsLabel(iss1.Labels, c.FailedLabel) {
 		t.Errorf("issue 1 must NOT be cascade-failed on a DepsOf check failure; labels=%v", iss1.Labels)
 	}
 }
@@ -768,15 +768,15 @@ func TestRun_DepsOfCheckFailure_HoldsIssueNotDispatched(t *testing.T) {
 // sibling still dispatches.
 func TestRunExitCode_ContinuousDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.continuousDispatch = true
-	c.maxParallel = 2
+	c.Label = "ready-for-agent"
+	c.ContinuousDispatch = true
+	c.MaxParallel = 2
 	c.runnerKind = "bwrap"
 	dir := tempLogDir(t)
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
 
 	fr := runner.NewFake()
 	lc := &launchContext{
@@ -799,7 +799,7 @@ func TestRunExitCode_ContinuousDispatch_DepsOfCheckFailure_HoldsIssueNotDispatch
 	if err != nil {
 		t.Fatalf("Issue(1): %v", err)
 	}
-	if containsLabel(iss1.Labels, c.failedLabel) {
+	if containsLabel(iss1.Labels, c.FailedLabel) {
 		t.Errorf("issue 1 must NOT be cascade-failed on a DepsOf check failure; labels=%v", iss1.Labels)
 	}
 }
@@ -809,14 +809,14 @@ func TestRunExitCode_ContinuousDispatch_DepsOfCheckFailure_HoldsIssueNotDispatch
 // terminal line rather than "no open" (#3584). Exit stays 2.
 func TestRunExitCode_ContinuousDispatch_AllHeld_NamesHeldIssue(t *testing.T) {
 	c := applyDispatchKind(baseConfig(), dispatchkind.Work)
-	c.label = "ready-for-agent"
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runnerKind = "bwrap"
 	dir := tempLogDir(t)
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.label, "agent-research-in-progress"}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.Label, "agent-research-in-progress"}})
 
 	lc := &launchContext{
 		config:       c,
@@ -850,15 +850,15 @@ func TestRunExitCode_ContinuousDispatch_AllHeld_NamesHeldIssue(t *testing.T) {
 // announced a second time (#3584).
 func TestRunExitCode_ContinuousDispatch_RefillDoesNotRepeatHeldAnnouncement(t *testing.T) {
 	c := applyDispatchKind(baseConfig(), dispatchkind.Work)
-	c.label = "ready-for-agent"
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runnerKind = "bwrap"
 	dir := tempLogDir(t)
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.label, "agent-research-in-progress"}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label, "agent-research-in-progress"}})
 	tracker := &pollCountingTracker{IssueTracker: fc}
 
 	lc := &launchContext{

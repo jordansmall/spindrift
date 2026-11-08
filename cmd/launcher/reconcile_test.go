@@ -19,8 +19,8 @@ const testReconcilePR = "https://github.com/owner/repo/pull/77"
 
 func reconcileConfig() config {
 	c := baseConfig()
-	c.branchPrefix = "agent/issue-"
-	c.maxFixAttempts = 3
+	c.BranchPrefix = "agent/issue-"
+	c.MaxFixAttempts = 3
 	return c
 }
 
@@ -39,9 +39,9 @@ func newWorkSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forg
 func TestRecoverByNumber_GreenMergesAndCompletes(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.branchPrefix
+	fc.BranchPrefix = c.BranchPrefix
 
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := fc.AgentBranch("42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 	// The leading PENDING proves this run's own checks registered. Issue
@@ -70,12 +70,12 @@ func TestRecoverByNumber_GreenMergesAndCompletes(t *testing.T) {
 // than propagate the transient error (#2323).
 func TestRecoverByNumber_RetriesTransientPRLookupError(t *testing.T) {
 	c := reconcileConfig()
-	c.transientRetryMax = 2
-	c.transientBackoffSecs = 0
+	c.TransientRetryMax = 2
+	c.TransientBackoffSecs = 0
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.branchPrefix
+	fc.BranchPrefix = c.BranchPrefix
 
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := fc.AgentBranch("42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
@@ -97,12 +97,12 @@ func TestRecoverByNumber_RetriesTransientPRLookupError(t *testing.T) {
 // of 1 must still allow one retry rather than degrade to none.
 func TestRecoverByNumber_RetryMaxOneStillRetriesOnce(t *testing.T) {
 	c := reconcileConfig()
-	c.transientRetryMax = 1
-	c.transientBackoffSecs = 0
+	c.TransientRetryMax = 1
+	c.TransientBackoffSecs = 0
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.branchPrefix
+	fc.BranchPrefix = c.BranchPrefix
 
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := fc.AgentBranch("42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
@@ -125,9 +125,9 @@ func TestRecoverByNumber_RetryMaxOneStillRetriesOnce(t *testing.T) {
 func TestRecoverByNumber_AdoptedPRAlwaysCallsMarkReadyThenMergesAndCompletes(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.branchPrefix
+	fc.BranchPrefix = c.BranchPrefix
 
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := fc.AgentBranch("42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 	// The leading PENDING proves this run's own checks registered. Issue
@@ -161,9 +161,9 @@ func TestRecoverByNumber_AdoptedPRAlwaysCallsMarkReadyThenMergesAndCompletes(t *
 func TestRecoverByNumber_RelayedBranchAdoptedMergesAndCompletes(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.branchPrefix
+	fc.BranchPrefix = c.BranchPrefix
 
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := fc.AgentBranch("42")
 	// No PR is registered for the branch, so forge.ResolveOpenPR reports
 	// res.Found=false and the adopt arm fires.
@@ -211,9 +211,9 @@ func TestRecoverByNumber_RelayedBranchAdoptedMergesAndCompletes(t *testing.T) {
 func TestRecoverByNumber_NoPRNoSelfReportStillNoOps(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake()
-	fc.BranchPrefix = c.branchPrefix
+	fc.BranchPrefix = c.BranchPrefix
 
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	// No PR and no log written, so tempLogDir's dir stays empty and
 	// dispatch.ResolveFromLogs finds nothing.
 
@@ -237,9 +237,9 @@ func TestRecoverByNumber_NoPRNoSelfReportStillNoOps(t *testing.T) {
 func TestRecoverByNumber_NoPRSkipped(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake()
-	fc.BranchPrefix = c.branchPrefix
+	fc.BranchPrefix = c.BranchPrefix
 
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 
 	dir := tempLogDir(t)
 	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), newWorkSettle(c, fc, testWired(fc), fc), "42", io.Discard, io.Discard)
@@ -262,9 +262,9 @@ func TestRecoverByNumber_NoPRSkipped(t *testing.T) {
 func TestRecoverByNumber_NoPRRestoresPriorComplete(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.branchPrefix
+	fc.BranchPrefix = c.BranchPrefix
 
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	// No PR and no log written, so tempLogDir's dir stays empty and
 	// dispatch.ResolveFromLogs finds nothing.
 	fc.PriorClaimStates = map[string]forge.DispatchState{"42": forge.Complete}
@@ -279,11 +279,11 @@ func TestRecoverByNumber_NoPRRestoresPriorComplete(t *testing.T) {
 	if issErr != nil {
 		t.Fatalf("fc.Issue(42): %v", issErr)
 	}
-	if !containsLabel(iss.Labels, c.completeLabel) {
-		t.Errorf("expected issue to carry %q after restore; got labels %v", c.completeLabel, iss.Labels)
+	if !containsLabel(iss.Labels, c.CompleteLabel) {
+		t.Errorf("expected issue to carry %q after restore; got labels %v", c.CompleteLabel, iss.Labels)
 	}
-	if containsLabel(iss.Labels, c.failedLabel) {
-		t.Errorf("expected issue to not carry %q after restore; got labels %v", c.failedLabel, iss.Labels)
+	if containsLabel(iss.Labels, c.FailedLabel) {
+		t.Errorf("expected issue to not carry %q after restore; got labels %v", c.FailedLabel, iss.Labels)
 	}
 	if len(fc.CommentCalls) < 1 {
 		t.Error("expected an explanatory comment to be posted")
@@ -296,9 +296,9 @@ func TestRecoverByNumber_NoPRRestoresPriorComplete(t *testing.T) {
 func TestRecoverByNumber_NoPRPriorFailedStillErrors(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.branchPrefix
+	fc.BranchPrefix = c.BranchPrefix
 
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	fc.PriorClaimStates = map[string]forge.DispatchState{"42": forge.Failed}
 
 	dir := tempLogDir(t)
@@ -311,18 +311,18 @@ func TestRecoverByNumber_NoPRPriorFailedStillErrors(t *testing.T) {
 	if issErr != nil {
 		t.Fatalf("fc.Issue(42): %v", issErr)
 	}
-	if containsLabel(iss.Labels, c.completeLabel) {
-		t.Errorf("expected issue to not carry %q; got labels %v", c.completeLabel, iss.Labels)
+	if containsLabel(iss.Labels, c.CompleteLabel) {
+		t.Errorf("expected issue to not carry %q; got labels %v", c.CompleteLabel, iss.Labels)
 	}
 }
 
 func TestRecoverByNumber_RedFollowsSelfHeal(t *testing.T) {
 	c := reconcileConfig()
-	c.maxFixAttempts = 0
+	c.MaxFixAttempts = 0
 	fc := forge.NewFake()
-	fc.BranchPrefix = c.branchPrefix
+	fc.BranchPrefix = c.BranchPrefix
 
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := fc.AgentBranch("42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateFailure})
@@ -349,8 +349,8 @@ func TestRecoverByNumber_ReportLines(t *testing.T) {
 	run := func(t *testing.T, withPR bool) string {
 		c := reconcileConfig()
 		fc := forge.NewFake(dispatchLabels(c))
-		fc.BranchPrefix = c.branchPrefix
-		fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+		fc.BranchPrefix = c.BranchPrefix
+		fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 		if withPR {
 			fc.SetPR(fc.AgentBranch("42"), forge.PR{URL: testReconcilePR})
 			fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})

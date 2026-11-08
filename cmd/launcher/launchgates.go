@@ -33,8 +33,8 @@ type launchGate struct {
 // a desc with a non-empty TokenEnvVar; a token-less desc (backend.Local,
 // backend.Git) would match every lookup miss, since both sides are empty.
 func tokenGateApplicable(c config, desc backend.Descriptor) bool {
-	forgeRow, _ := backendkit.ByName(c.codeForge)
-	trackerRow, _ := backendkit.ByName(c.issueTracker)
+	forgeRow, _ := backendkit.ByName(c.CodeForge)
+	trackerRow, _ := backendkit.ByName(c.IssueTracker)
 	return forgeRow.TokenEnvVar == desc.TokenEnvVar || trackerRow.TokenEnvVar == desc.TokenEnvVar
 }
 
@@ -56,7 +56,7 @@ func readOnlyTokenGates(rows []backendkit.Strategy) []launchGate {
 		gates = append(gates, launchGate{
 			Name: readOnlyTokenGatePrefix + r.Name,
 			Applicable: func(c config) bool {
-				return c.boxForgeAndIssueAccess == "read-only" && tokenGateApplicable(c, r.Descriptor)
+				return c.BoxForgeAndIssueAccess == "read-only" && tokenGateApplicable(c, r.Descriptor)
 			},
 			Network: true,
 			Check: func(c config, w io.Writer) error {

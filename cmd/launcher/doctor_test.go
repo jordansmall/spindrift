@@ -60,9 +60,9 @@ func TestDoctorReport_ConfigErr_ExitsTwoAndStillRunsDoctor(t *testing.T) {
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.mergeMode = "bogus"
+	c.MergeMode = "bogus"
 
 	var stdout, stderr bytes.Buffer
 	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), doctorOptions{interactive: false, verbose: true})
@@ -90,10 +90,10 @@ func TestDoctorReport_ConfigInvalid_NamesEveryBrokenKnob(t *testing.T) {
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.mergeMode = "bogus"
-	c.gitUserName = ""
+	c.MergeMode = "bogus"
+	c.GitUserName = ""
 
 	var stdout, stderr bytes.Buffer
 	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), doctorOptions{interactive: false, verbose: true})
@@ -119,7 +119,7 @@ func TestDoctorReport_RuntimeNotReady_StaysAdvisory(t *testing.T) {
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 	c.runtime = "not-a-real-runtime-binary"
 
@@ -161,7 +161,7 @@ func TestDoctorReport_ErrRequiredLabelsMissing_ExitsFour(t *testing.T) {
 	f.Labels = []string{"ready-for-agent"} // three missing
 
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 
 	var stdout, stderr bytes.Buffer
@@ -186,9 +186,9 @@ func TestDoctorReport_ReadOnlyTokenGate_UnsetBoxToken_ExitsTwo(t *testing.T) {
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.boxForgeAndIssueAccess = "read-only"
+	c.BoxForgeAndIssueAccess = "read-only"
 	t.Setenv("BOX_GH_TOKEN", "")
 
 	var stdout, stderr bytes.Buffer
@@ -211,10 +211,10 @@ func TestDoctorReport_ReadOnlyTokenGate_BoxTokenEqualsLauncherToken_ExitsTwo(t *
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.boxForgeAndIssueAccess = "read-only"
-	c.ghToken = "shared-token"
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.GhToken = "shared-token"
 	t.Setenv("BOX_GH_TOKEN", "shared-token")
 
 	var stdout, stderr bytes.Buffer
@@ -237,7 +237,7 @@ func TestDoctorReport_ConfigAndRunBothBroken_ConfigErrWinsExitCodeButBothReport(
 	f.ProbeErr = forge.ErrAuthFailure
 
 	c := minimalValidConfig()
-	c.mergeMode = "bogus"
+	c.MergeMode = "bogus"
 
 	var stdout, stderr bytes.Buffer
 	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), doctorOptions{interactive: false, verbose: true})
@@ -262,7 +262,7 @@ func TestDoctorReport_Healthy_ExitsZeroStderrEmpty(t *testing.T) {
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 
 	var stdout, stderr bytes.Buffer
@@ -285,7 +285,7 @@ func TestDoctorReport_Butler_OptInValidatesButlerConfig(t *testing.T) {
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 
 	var stdoutNoButler, stderrNoButler bytes.Buffer
@@ -317,11 +317,11 @@ func TestDoctorReport_Butler_TrackerCannotFileExitsConfigInvalid(t *testing.T) {
 	f.ProbeRepo = "owner/repo"
 	f.Labels = append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, doctor.ButlerLabelNames()...)
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.codeForge = "github"
-	c.butlerChores = "bugs"
-	c.butlerClaimTimeout = "15m"
+	c.CodeForge = "github"
+	c.ButlerChores = "bugs"
+	c.ButlerClaimTimeout = "15m"
 	c.setRowKnob("BUTLER_TUNING_COOLDOWN", schemaDefault("BUTLER_TUNING_COOLDOWN"))
 
 	rc := doctorReadContext(c, f)
@@ -348,11 +348,11 @@ func TestDoctorReport_Butler_MisconfigExitsConfigInvalid(t *testing.T) {
 		t.Helper()
 		t.Setenv("FILER_MODEL", "claude-haiku-4-5-20251001")
 		c := minimalValidConfig()
-		c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+		c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 			"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-		c.codeForge = "github" // ledger-capable (the Strategy's NewLedger != nil)
-		c.butlerChores = "bugs"
-		c.butlerClaimTimeout = "15m" // parseButlerClaimTimeout rejects "" outright
+		c.CodeForge = "github" // ledger-capable (the Strategy's NewLedger != nil)
+		c.ButlerChores = "bugs"
+		c.ButlerClaimTimeout = "15m" // parseButlerClaimTimeout rejects "" outright
 		c.setRowKnob("BUTLER_TUNING_COOLDOWN", schemaDefault("BUTLER_TUNING_COOLDOWN"))
 		return c
 	}
@@ -384,61 +384,61 @@ func TestDoctorReport_Butler_MisconfigExitsConfigInvalid(t *testing.T) {
 		{
 			name: "non-ledger CODE_FORGE",
 			mutate: func(t *testing.T, c *config) {
-				c.codeForge = "git"
+				c.CodeForge = "git"
 			},
 			wantErr: "cannot host a butler Ledger",
 		},
 		{
 			name: "malformed BUTLER_CHORE_CLASSES",
 			mutate: func(t *testing.T, c *config) {
-				c.butlerChoreClasses = "bugs" // missing "=chore" pairing
+				c.ButlerChoreClasses = "bugs" // missing "=chore" pairing
 			},
 			wantErr: "BUTLER_CHORE_CLASSES",
 		},
 		{
 			name: "patch rung off ignores a malformed BUTLER_PATCH_CLASSES",
 			mutate: func(t *testing.T, c *config) {
-				c.butlerPatchClasses = "bugs" // missing "=chore" pairing; BUTLER_MAX_PATCHES_PER_DAY stays 0
+				c.ButlerPatchClasses = "bugs" // missing "=chore" pairing; BUTLER_MAX_PATCHES_PER_DAY stays 0
 			},
 			wantErr: "",
 		},
 		{
 			name: "patch class outside the promotion classes rejected",
 			mutate: func(t *testing.T, c *config) {
-				c.butlerChoreClasses = "bugs=error-handling"
-				c.butlerPatchClasses = "bugs=resource-leak"
-				c.butlerMaxPatchesPerDay = 1
+				c.ButlerChoreClasses = "bugs=error-handling"
+				c.ButlerPatchClasses = "bugs=resource-leak"
+				c.ButlerMaxPatchesPerDay = 1
 			},
 			wantErr: "BUTLER_PATCH_CLASSES",
 		},
 		{
 			name: "patch class entry for a not-enabled chore rejected",
 			mutate: func(t *testing.T, c *config) {
-				c.butlerChoreClasses = "bugs=error-handling"
-				c.butlerPatchClasses = "docs-drift=stale-reference"
-				c.butlerMaxPatchesPerDay = 1
+				c.ButlerChoreClasses = "bugs=error-handling"
+				c.ButlerPatchClasses = "docs-drift=stale-reference"
+				c.ButlerMaxPatchesPerDay = 1
 			},
 			wantErr: "BUTLER_PATCH_CLASSES",
 		},
 		{
 			name: "sweep cap above day cap",
 			mutate: func(t *testing.T, c *config) {
-				c.butlerMaxFindingsPerSweep = 6
-				c.butlerMaxFindingsPerDay = 5
+				c.ButlerMaxFindingsPerSweep = 6
+				c.ButlerMaxFindingsPerDay = 5
 			},
 			wantErr: "exceeds",
 		},
 		{
 			name: "malformed BUTLER_EVERY",
 			mutate: func(t *testing.T, c *config) {
-				c.butlerEvery = "not-a-duration"
+				c.ButlerEvery = "not-a-duration"
 			},
 			wantErr: "BUTLER_EVERY",
 		},
 		{
 			name: "malformed BUTLER_CLAIM_TIMEOUT",
 			mutate: func(t *testing.T, c *config) {
-				c.butlerClaimTimeout = "not-a-duration"
+				c.ButlerClaimTimeout = "not-a-duration"
 			},
 			wantErr: "BUTLER_CLAIM_TIMEOUT",
 		},
@@ -452,7 +452,7 @@ func TestDoctorReport_Butler_MisconfigExitsConfigInvalid(t *testing.T) {
 		{
 			name: "malformed DAEMON_AWAKE_WINDOW",
 			mutate: func(t *testing.T, c *config) {
-				c.daemonAwakeWindow = "not-a-window"
+				c.DaemonAwakeWindow = "not-a-window"
 			},
 			wantErr: "DAEMON_AWAKE_WINDOW",
 		},
@@ -505,7 +505,7 @@ func TestDoctorGateRegistryReport_FailingGate_ErrorPropagatesAndPriorGatesReport
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 
 	var buf bytes.Buffer
@@ -547,7 +547,7 @@ func TestDoctorGateRegistryReport_CollectAll_ReportsEveryFailingNonNetworkGate(t
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 
 	var buf bytes.Buffer
@@ -573,7 +573,7 @@ func TestRunDoctor_ReadWrite_PrintsExplicitTokenGateNoOpLine(t *testing.T) {
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	c := minimalValidConfig() // boxForgeAndIssueAccess: read-write, codeForge/issueTracker: github
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 
 	var buf bytes.Buffer
@@ -603,9 +603,9 @@ func TestRunDoctor_ReadOnly_OmitsReadWriteNoOpLine(t *testing.T) {
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	c := minimalValidConfig() // codeForge/issueTracker: github
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.boxForgeAndIssueAccess = "read-only"
+	c.BoxForgeAndIssueAccess = "read-only"
 	t.Setenv("BOX_GH_TOKEN", "")
 
 	var buf bytes.Buffer
@@ -626,9 +626,9 @@ func TestRunDoctor_InvalidBoxForgeAndIssueAccess_OmitsReadWriteNoOpLine(t *testi
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	c := minimalValidConfig() // codeForge/issueTracker: github
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.boxForgeAndIssueAccess = "banana"
+	c.BoxForgeAndIssueAccess = "banana"
 
 	var buf bytes.Buffer
 	_, report := doctorCheckSets(c)
@@ -650,11 +650,11 @@ func TestDoctorReport_ReadOnlyCapabilityGate_GitCodeForge_ExitsTwoAndNamesBundle
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.codeForge = "git"
+	c.CodeForge = "git"
 	c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://example.com/repo.git")
-	c.boxForgeAndIssueAccess = "read-only"
+	c.BoxForgeAndIssueAccess = "read-only"
 
 	var stdout, stderr bytes.Buffer
 	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), doctorOptions{interactive: false, verbose: true})
@@ -678,9 +678,9 @@ func TestDoctorReport_ConfigErr_CarriesFailingRowRemedy(t *testing.T) {
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.claudeOAuthToken, c.anthropicAPIKey = "", ""
+	c.ClaudeOAuthToken, c.AnthropicAPIKey = "", ""
 
 	wantRemedy := checkByName(t, doctorExtraChecks(c), "driver-credentials").Remedy
 
@@ -709,11 +709,11 @@ func TestRequiredLabels(t *testing.T) {
 	}
 	mk := func(tracker, access, driver string, patches int, caps forge.Capabilities, chores ...string) readContext {
 		var c config
-		c.butlerChores = strings.Join(chores, " ")
-		c.issueTracker = tracker
-		c.boxForgeAndIssueAccess = access
+		c.ButlerChores = strings.Join(chores, " ")
+		c.IssueTracker = tracker
+		c.BoxForgeAndIssueAccess = access
 		c.driver = driver
-		c.butlerMaxPatchesPerDay = patches
+		c.ButlerMaxPatchesPerDay = patches
 		return readContext{config: c, codeForge: cf, capabilities: caps}
 	}
 	for _, tc := range []struct {
@@ -731,7 +731,7 @@ func TestRequiredLabels(t *testing.T) {
 		{"research", doctorOptions{research: true}, mk("github", "read-write", "", 0, patchCaps), doctor.ResearchLabelNames()},
 		{"research, custom verdicts", doctorOptions{research: true}, func() readContext {
 			rc := mk("github", "read-write", "", 0, patchCaps)
-			rc.config.researchVerdicts = `[{"verdict":"go","label":"research-go"},{"verdict":"nogo","label":"research-nogo"}]`
+			rc.config.ResearchVerdicts = `[{"verdict":"go","label":"research-go"},{"verdict":"nogo","label":"research-nogo"}]`
 			return rc
 		}(), []string{"agent-research", "agent-research-in-progress", "agent-research-failed", "research-go", "research-nogo", "agent-research-finding"}},
 		{"butler patches on and read-only", doctorOptions{butler: true}, mk("github", "read-only", "claude", 1, patchCaps), []string{"agent-butler-finding", "agent-butler-patch", "agent-review-finding"}},
@@ -762,13 +762,13 @@ func TestDoctorReport_NoLabelRegistryTracker_SkipsLabelCheck(t *testing.T) {
 			f.ProbeRepo = "owner/repo"
 
 			c := minimalValidConfig()
-			c.issueTracker = tracker
+			c.IssueTracker = tracker
 			if tracker == "jira" {
 				c.setRowKnob("JIRA_BASE_URL", "https://example.atlassian.net")
 				c.setRowKnob("JIRA_PROJECT_KEY", "PROJ")
 				c.setRowKnob("JIRA_TOKEN", "tok")
 			}
-			c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+			c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 				"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 
 			// Quiet is what the daemon preflight runs; the skip row is a
@@ -821,9 +821,9 @@ func TestRunDoctor_ReportsRecoverKind(t *testing.T) {
 			f.ProbeRepo = "owner/repo"
 			f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 			c := minimalValidConfig()
-			c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+			c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 				"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-			c.codeForge, c.boxForgeAndIssueAccess, c.maxRecoverAttempts = tc.codeForge, tc.access, 3
+			c.CodeForge, c.BoxForgeAndIssueAccess, c.MaxRecoverAttempts = tc.codeForge, tc.access, 3
 			t.Setenv("BOX_GH_TOKEN", "")
 
 			var buf bytes.Buffer

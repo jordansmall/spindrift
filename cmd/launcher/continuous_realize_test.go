@@ -46,13 +46,13 @@ func TestRunContinuousDispatch_StaleRealizesTipInBackground(t *testing.T) {
 	const staleHash = "dddddddddddddddddddddddddddddddd"  // 32 chars, distinct, so it never matches loadedHash
 
 	c := baseConfig()
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runtime = "podman"
-	c.baseBranch = "main"
-	c.label = "ready-for-agent"
-	c.issueTracker = "local"
-	c.codeForge = "local"
+	c.BaseBranch = "main"
+	c.Label = "ready-for-agent"
+	c.IssueTracker = "local"
+	c.CodeForge = "local"
 	c.flakeImageAttr = ".#image"
 	c.imageTag = "spindrift:" + loadedHash
 
@@ -122,13 +122,13 @@ func TestRunContinuousDispatch_FailedRealizeDoesNotChangeOutcome(t *testing.T) {
 	const staleHash = "ffffffffffffffffffffffffffffffff"  // 32 chars, distinct, so it never matches loadedHash
 
 	c := baseConfig()
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runtime = "podman"
-	c.baseBranch = "main"
-	c.label = "ready-for-agent"
-	c.issueTracker = "local"
-	c.codeForge = "local"
+	c.BaseBranch = "main"
+	c.Label = "ready-for-agent"
+	c.IssueTracker = "local"
+	c.CodeForge = "local"
 	c.flakeImageAttr = ".#image"
 	c.imageTag = "spindrift:" + loadedHash
 
@@ -179,14 +179,14 @@ func TestRunContinuousDispatch_StoreClosure_StaleClosure_HotSwapsThenReachesEmpt
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct, so it never matches loadedHash
 
 	c := baseConfig()
-	c.continuousDispatch = true
-	c.maxParallel = 1
+	c.ContinuousDispatch = true
+	c.MaxParallel = 1
 	c.runnerKind = "bwrap"
 	c.boxArtifact = "store-closure"
-	c.baseBranch = "main"
-	c.label = "ready-for-agent"
-	c.issueTracker = "local"
-	c.codeForge = "local"
+	c.BaseBranch = "main"
+	c.Label = "ready-for-agent"
+	c.IssueTracker = "local"
+	c.CodeForge = "local"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
 	// The swap branch requires the launcher dimension to have really been

@@ -94,14 +94,14 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := minimalValidConfig()
-			c.boxForgeAndIssueAccess = tc.access
-			c.ghToken = tc.launcherToken
-			c.repoSlug = "owner/repo"
+			c.BoxForgeAndIssueAccess = tc.access
+			c.GhToken = tc.launcherToken
+			c.RepoSlug = "owner/repo"
 			if tc.codeForge != "" {
-				c.codeForge = tc.codeForge
+				c.CodeForge = tc.codeForge
 			}
 			if tc.issueTracker != "" {
-				c.issueTracker = tc.issueTracker
+				c.IssueTracker = tc.issueTracker
 			}
 			t.Setenv("BOX_GH_TOKEN", tc.boxToken)
 
@@ -138,8 +138,8 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 			if gotWarning != tc.wantWarning {
 				t.Errorf("warning printed = %v, want %v (output: %q)", gotWarning, tc.wantWarning, buf.String())
 			}
-			if tc.expectIntrospectCall && (gotToken != tc.boxToken || gotRepoSlug != c.repoSlug) {
-				t.Errorf("introspect(%q, %q), want (%q, %q)", gotToken, gotRepoSlug, tc.boxToken, c.repoSlug)
+			if tc.expectIntrospectCall && (gotToken != tc.boxToken || gotRepoSlug != c.RepoSlug) {
+				t.Errorf("introspect(%q, %q), want (%q, %q)", gotToken, gotRepoSlug, tc.boxToken, c.RepoSlug)
 			}
 		})
 	}
@@ -151,8 +151,8 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 // that case.
 func TestCheckReadOnlyTokenGate_NonIntrospectableWarningDoesNotClaimFineGrainedPAT(t *testing.T) {
 	c := minimalValidConfig()
-	c.boxForgeAndIssueAccess = "read-only"
-	c.ghToken = "launcher-token"
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.GhToken = "launcher-token"
 	t.Setenv("BOX_GH_TOKEN", "box-token")
 	introspect := func(token, repoSlug string) (backendkit.TokenIntrospection, error) {
 		return backendkit.TokenIntrospection{Introspectable: false}, nil
@@ -167,7 +167,7 @@ func TestCheckReadOnlyTokenGate_NonIntrospectableWarningDoesNotClaimFineGrainedP
 	}
 }
 
-// Before the fix, checkReadOnlyTokenGate compared c.codeForge to the literal
+// Before the fix, checkReadOnlyTokenGate compared c.CodeForge to the literal
 // string "github" and returned (false, nil), so the gate reported itself
 // Applicable yet enforced nothing and accepted a missing BOX_GH_TOKEN. The
 // fake "custom-github" row shares backend.GitHub's TokenEnvVar and feeds only
@@ -184,10 +184,10 @@ func TestCheckReadOnlyTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferen
 	})
 
 	c := minimalValidConfig()
-	c.boxForgeAndIssueAccess = "read-only"
-	c.codeForge = "custom-github"
-	c.issueTracker = "local"
-	c.repoSlug = "owner/repo"
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.CodeForge = "custom-github"
+	c.IssueTracker = "local"
+	c.RepoSlug = "owner/repo"
 	t.Setenv("BOX_GH_TOKEN", "")
 
 	if !tokenGateApplicable(c, backend.GitHub) {
@@ -282,7 +282,7 @@ func TestCheckReadOnlyTokenGate_Forgejo(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := minimalValidConfig()
-			c.boxForgeAndIssueAccess = tc.access
+			c.BoxForgeAndIssueAccess = tc.access
 			c.setRowKnob("FORGEJO_TOKEN", tc.launcherToken)
 			t.Setenv("BOX_FORGEJO_TOKEN", tc.boxToken)
 
@@ -322,7 +322,7 @@ func TestCheckReadOnlyTokenGate_StubBackendWithoutHookWarns(t *testing.T) {
 		BoxTokenEnvVar: "BOX_STUB_TOKEN",
 	}}
 	c := minimalValidConfig()
-	c.boxForgeAndIssueAccess = "read-only"
+	c.BoxForgeAndIssueAccess = "read-only"
 	t.Setenv("BOX_STUB_TOKEN", "box-token")
 
 	var buf bytes.Buffer
@@ -351,7 +351,7 @@ func TestCheckReadOnlyTokenGate_StubBackendIdenticalTokenFails(t *testing.T) {
 		BoxTokenEnvVar: "BOX_STUB_TOKEN",
 	}}
 	c := minimalValidConfig()
-	c.boxForgeAndIssueAccess = "read-only"
+	c.BoxForgeAndIssueAccess = "read-only"
 	t.Setenv("STUB_TOKEN", "same-token")
 	t.Setenv("BOX_STUB_TOKEN", "same-token")
 
@@ -373,8 +373,8 @@ func TestCheckReadOnlyTokenGate_NonIntrospectableWarningUsesHookReason(t *testin
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := minimalValidConfig()
-			c.boxForgeAndIssueAccess = "read-only"
-			c.ghToken = "launcher-token"
+			c.BoxForgeAndIssueAccess = "read-only"
+			c.GhToken = "launcher-token"
 			t.Setenv("BOX_GH_TOKEN", "box-token")
 			introspect := func(string, string) (backendkit.TokenIntrospection, error) {
 				return backendkit.TokenIntrospection{Introspectable: false, Reason: tc.reason}, nil
@@ -403,8 +403,8 @@ func TestCheckReadOnlyTokenGate_ProductionGitHubHookWarnsOnFineGrainedPAT(t *tes
 		t.Fatal("github row introspectToken = nil, want the Strategy's IntrospectToken hook")
 	}
 	c := minimalValidConfig()
-	c.boxForgeAndIssueAccess = "read-only"
-	c.ghToken = "launcher-token"
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.GhToken = "launcher-token"
 	t.Setenv("BOX_GH_TOKEN", "github_pat_boxtoken")
 
 	var buf bytes.Buffer

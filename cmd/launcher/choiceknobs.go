@@ -19,15 +19,15 @@ type choiceKnobRow struct {
 // this list that rides its own environment into a child itself
 // (validateSignalCarrier, cmd/launcher/daemon/main.go).
 var choiceKnobRegistry = []choiceKnobRow{
-	{Env: "MERGE_MODE", Value: func(c config) string { return c.mergeMode }},
-	{Env: "MERGE_METHOD", Value: func(c config) string { return c.mergeMethod }},
-	{Env: "SYNC_METHOD", Value: func(c config) string { return c.syncMethod }},
-	{Env: "OVERLAP_GATE", Value: func(c config) string { return c.overlapGate }},
-	{Env: "NETWORK_MODE", Value: func(c config) string { return c.networkMode }},
-	{Env: "BOX_SIGNAL_CARRIER", Value: func(c config) string { return c.signalCarrier }},
+	{Env: "MERGE_MODE", Value: func(c config) string { return c.MergeMode }},
+	{Env: "MERGE_METHOD", Value: func(c config) string { return c.MergeMethod }},
+	{Env: "SYNC_METHOD", Value: func(c config) string { return c.SyncMethod }},
+	{Env: "OVERLAP_GATE", Value: func(c config) string { return c.OverlapGate }},
+	{Env: "NETWORK_MODE", Value: func(c config) string { return c.NetworkMode }},
+	{Env: "BOX_SIGNAL_CARRIER", Value: func(c config) string { return c.SignalCarrier }},
 	{
 		Env:                  "BOX_FORGE_AND_ISSUE_ACCESS",
-		Value:                func(c config) string { return c.boxForgeAndIssueAccess },
+		Value:                func(c config) string { return c.BoxForgeAndIssueAccess },
 		AfterCrossKnobChecks: true,
 	},
 }

@@ -46,7 +46,7 @@ func registryProxyTransportCheck(c config) doctor.Check {
 		Tier:   doctor.Advisory,
 		Remedy: runtimeReachableRemedy + " -- only an indeterminate probe needs action here, since both a unix socket and a TCP transport are working outcomes",
 		Probe: func() (any, error) {
-			if c.registryProxyRoutesFile == "" {
+			if c.RegistryProxyRoutesFile == "" {
 				return "not configured", nil
 			}
 			endpoint, err := registryProxyTransportFn(c)

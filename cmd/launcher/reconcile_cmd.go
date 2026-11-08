@@ -47,7 +47,7 @@ func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconc
 // below reads caps.TrackerDescriptor and is a no-op (issues #2946, #3064).
 func reconcileIssues(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, caps forge.Capabilities, pwd string, w io.Writer) error {
 	if !caps.TrackerDescriptor.InBoxUnreachableTracker {
-		fmt.Fprintf(w, "reconcile: issue bookkeeping is an in-box-unreachable-tracker concern (ISSUE_TRACKER=%q) — no issues to close.\n", c.issueTracker)
+		fmt.Fprintf(w, "reconcile: issue bookkeeping is an in-box-unreachable-tracker concern (ISSUE_TRACKER=%q) — no issues to close.\n", c.IssueTracker)
 		return nil
 	}
 	lw := localloop.Wire(localloopConfig(c), it)

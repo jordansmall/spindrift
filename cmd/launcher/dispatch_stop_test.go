@@ -27,11 +27,11 @@ func TestRunExitCode_SignalledStop_NoBoxLaunched(t *testing.T) {
 	withClosedStopSignal(t)
 
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.MaxParallel = 1
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 	lc := &launchContext{
 		config:       c,
 		pwd:          dir,
@@ -56,7 +56,7 @@ func TestRunExitCode_SignalledStop_WinsOverEmptyQueue(t *testing.T) {
 	withClosedStopSignal(t)
 
 	c := baseConfig()
-	c.label = "ready-for-agent"
+	c.Label = "ready-for-agent"
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels) // no open issues
 	lc := &launchContext{
@@ -80,14 +80,14 @@ func TestRunExitCode_SignalledStop_WinsOverAllBlocked(t *testing.T) {
 	withClosedStopSignal(t)
 
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.MaxParallel = 1
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{
 		Number: "1",
 		Body:   "## Blocked by\n- #2",
-		Labels: []string{c.label},
+		Labels: []string{c.Label},
 	})
 	fc.SetIssue(forge.Issue{Number: "2", State: "OPEN"}) // blocker, not yet complete
 	lc := &launchContext{
@@ -115,10 +115,10 @@ func TestRunExitCode_SignalledStop_WinsOverClaimedBlocked(t *testing.T) {
 	withClosedStopSignal(t)
 
 	c := baseConfig()
-	c.issueNumber = "42"
+	c.IssueNumber = "42"
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}, Body: "## Blocked by\n- #7"})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}, Body: "## Blocked by\n- #7"})
 	fc.SetIssue(forge.Issue{Number: "7", State: "OPEN"})
 	lc := &launchContext{
 		config:       c,
@@ -147,7 +147,7 @@ func TestRunExitCode_SignalledAbort_ExitsSameCodeAsStop(t *testing.T) {
 	withClosedAbortSignal(t)
 
 	c := baseConfig()
-	c.label = "ready-for-agent"
+	c.Label = "ready-for-agent"
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels) // no open issues
 	lc := &launchContext{
@@ -170,7 +170,7 @@ func TestRunExitCode_AbortOnly_WinsOverEmptyQueue(t *testing.T) {
 	withAbortOnlySignal(t)
 
 	c := baseConfig()
-	c.label = "ready-for-agent"
+	c.Label = "ready-for-agent"
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels) // no open issues
 	lc := &launchContext{
@@ -195,11 +195,11 @@ func TestRunExitCode_AbortOnly_NoBoxLaunched(t *testing.T) {
 	withAbortOnlySignal(t)
 
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.MaxParallel = 1
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 	fr := runner.NewFake()
 	lc := &launchContext{
 		config:       c,
@@ -229,11 +229,11 @@ func TestSelectiveDispatchExitCode_SignalledStop(t *testing.T) {
 	withClosedStopSignal(t)
 
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.MaxParallel = 1
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 	lc := &launchContext{
 		config:       c,
 		pwd:          dir,
@@ -260,8 +260,8 @@ func TestSelectiveDispatchExitCode_SignalledStop_BeatsNonTTYUnlabeledAbort(t *te
 	withStdinTTY(t, false)
 
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.MaxParallel = 1
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{}})
@@ -291,11 +291,11 @@ func TestSelectiveDispatchExitCode_SignalledAbort(t *testing.T) {
 	withClosedAbortSignal(t)
 
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.MaxParallel = 1
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 	lc := &launchContext{
 		config:       c,
 		pwd:          dir,
@@ -317,7 +317,7 @@ func TestCmdDispatch_SignalledStop_StillRunsCleanup(t *testing.T) {
 	withClosedStopSignal(t)
 
 	c := baseConfig()
-	c.label = "ready-for-agent"
+	c.Label = "ready-for-agent"
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels)
 	var cleaned bool
@@ -344,11 +344,11 @@ func TestCmdDispatchSelective_SignalledStop_StillRunsCleanup(t *testing.T) {
 	withClosedStopSignal(t)
 
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.maxParallel = 1
+	c.Label = "ready-for-agent"
+	c.MaxParallel = 1
 	dir := tempLogDir(t)
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 	var cleaned bool
 	lc := &launchContext{
 		config:       c,
@@ -423,12 +423,12 @@ func TestSelectiveListDispatch_ResearchAbort_ReclaimsOntoResearchFamily(t *testi
 	t.Cleanup(func() { installStopSignal = orig })
 
 	c := applyDispatchKind(baseConfig(), dispatchkind.Research)
-	c.maxParallel = 1
+	c.MaxParallel = 1
 	dir := tempLogDir(t)
 
 	rl := forge.ResearchDispatchLabels()
 	fc := forge.NewFake(rl)
-	fc.SetIssue(forge.Issue{Number: "1", Title: "first", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "1", Title: "first", Labels: []string{c.Label}})
 
 	started := make(chan struct{})
 	release := make(chan struct{})

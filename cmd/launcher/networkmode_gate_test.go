@@ -17,7 +17,7 @@ import (
 func TestNetworkModeRuntimeGate_BwrapNoHostLoopbackFails(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = "bwrap"
-	c.networkMode = "no-host-loopback"
+	c.NetworkMode = "no-host-loopback"
 
 	err := checkNetworkModeRuntimeGate(c)
 	if err == nil {
@@ -37,7 +37,7 @@ func TestNetworkModeRuntimeGate_EveryListedModePasses(t *testing.T) {
 			t.Run(f.Name+"/"+mode, func(t *testing.T) {
 				c := minimalValidConfig()
 				c.runnerKind = f.Name
-				c.networkMode = mode
+				c.NetworkMode = mode
 				c.setRowKnob("PODMAN_NETWORK", "")
 				c.setRowKnob("BWRAP_UNSHARE_NET", "")
 				if err := checkNetworkModeRuntimeGate(c); err != nil {
@@ -56,7 +56,7 @@ func TestNetworkModeRuntimeGate_BwrapRunnerKindWithPodmanRuntimeFails(t *testing
 	c := minimalValidConfig()
 	c.runnerKind = "bwrap"
 	c.runtime = "podman"
-	c.networkMode = "no-host-loopback"
+	c.NetworkMode = "no-host-loopback"
 
 	if err := checkNetworkModeRuntimeGate(c); err == nil {
 		t.Fatal("checkNetworkModeRuntimeGate() with runnerKind=bwrap, runtime=podman = nil, want an error (runnerKind selects the bwrap adapter regardless of runtime)")
@@ -70,7 +70,7 @@ func TestNetworkModeRuntimeGate_BwrapRuntimeWithOCIRunnerKindIsNoOp(t *testing.T
 	c := minimalValidConfig()
 	c.runtime = "bwrap"
 	c.runnerKind = "oci"
-	c.networkMode = "no-host-loopback"
+	c.NetworkMode = "no-host-loopback"
 
 	if err := checkNetworkModeRuntimeGate(c); err != nil {
 		t.Errorf("checkNetworkModeRuntimeGate() with runtime=bwrap, runnerKind=oci = %v, want nil", err)
@@ -82,7 +82,7 @@ func TestNetworkModeRuntimeGate_BwrapRuntimeWithOCIRunnerKindIsNoOp(t *testing.T
 func TestNetworkModeRuntimeGate_NonBwrapRunnerKindIsNoOp(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = "oci"
-	c.networkMode = "no-host-loopback"
+	c.NetworkMode = "no-host-loopback"
 
 	if err := checkNetworkModeRuntimeGate(c); err != nil {
 		t.Errorf("checkNetworkModeRuntimeGate() with runnerKind=oci = %v, want nil", err)
@@ -92,7 +92,7 @@ func TestNetworkModeRuntimeGate_NonBwrapRunnerKindIsNoOp(t *testing.T) {
 func TestNetworkModeRuntimeGate_OpenModeIsNoOp(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = "bwrap"
-	c.networkMode = "open"
+	c.NetworkMode = "open"
 
 	if err := checkNetworkModeRuntimeGate(c); err != nil {
 		t.Errorf("checkNetworkModeRuntimeGate() with networkMode=open = %v, want nil", err)
@@ -135,7 +135,7 @@ func TestNetworkModeRuntimeGate_ModeAndRawKnobCoherence(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := minimalValidConfig()
-			c.networkMode = tc.networkMode
+			c.NetworkMode = tc.networkMode
 			c.setRowKnob("PODMAN_NETWORK", tc.podmanNet)
 			c.setRowKnob("BWRAP_UNSHARE_NET", boolKnob(tc.unshareNet))
 
@@ -186,7 +186,7 @@ func TestNetworkModeRuntimeGate_RawKnobAloneIsNoOp(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := minimalValidConfig()
-			c.networkMode = tc.networkMode
+			c.NetworkMode = tc.networkMode
 			c.setRowKnob("PODMAN_NETWORK", tc.podmanNet)
 			c.setRowKnob("BWRAP_UNSHARE_NET", boolKnob(tc.unshareNet))
 
@@ -205,7 +205,7 @@ func TestNetworkModeRuntimeGate_RawKnobAloneIsNoOp(t *testing.T) {
 func TestNetworkModeRuntimeGate_ErrorTextHasNoSentinelPrefix(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = "bwrap"
-	c.networkMode = "no-host-loopback"
+	c.NetworkMode = "no-host-loopback"
 
 	err := checkNetworkModeRuntimeGate(c)
 	if err == nil {

@@ -32,8 +32,8 @@ func profileRow(t *testing.T, decls, routesDoc string) doctor.Check {
 	withDriftRepoDir(t, repoDir)
 	withDriftMatchingRemote(t)
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, routesDoc)
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, routesDoc)
+	routes := mustLoadRoutes(t, c.RegistryProxyRoutesFile, driftRows)
 	checks := registryRouteProfileCheckForRoutes(c, routes, driftRows)
 	if len(checks) != 1 {
 		t.Fatalf("registryRouteProfileCheckForRoutes() returned %d rows, want 1", len(checks))
@@ -235,7 +235,7 @@ func TestDoctorCheckSets_WiresRegistryRouteProfileRowIntoReportOnly(t *testing.T
 	withDriftMatchingRemote(t)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_PROFILE_WIRING" }

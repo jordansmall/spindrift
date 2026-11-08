@@ -17,11 +17,11 @@ import (
 // fixture is such a decoy, stranded by an earlier crash.
 func TestDiscoverIssues_ByNumber(t *testing.T) {
 	c := baseConfig()
-	c.label = c.inProgressLabel
-	c.issueNumber = "152"
+	c.Label = c.InProgressLabel
+	c.IssueNumber = "152"
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "152", Title: "the claimed one", Labels: []string{c.inProgressLabel}})
-	fc.SetIssue(forge.Issue{Number: "99", Title: "a stranded run", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "152", Title: "the claimed one", Labels: []string{c.InProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "99", Title: "a stranded run", Labels: []string{c.InProgressLabel}})
 
 	issues, _, origin, err := discoverIssues(c, fc, io.Discard)
 	if err != nil {
@@ -42,9 +42,9 @@ func TestDiscoverIssues_ByNumber(t *testing.T) {
 // carries the discovery label.
 func TestDiscoverIssues_ByLabel(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
+	c.Label = "ready-for-agent"
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Title: "ready", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "1", Title: "ready", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "2", Title: "not ready", Labels: []string{"backlog"}})
 
 	issues, _, origin, err := discoverIssues(c, fc, io.Discard)
@@ -63,10 +63,10 @@ func TestDiscoverIssues_ByLabel(t *testing.T) {
 // order they are inserted into the fake store.
 func TestDiscoverIssues_OldestFirst(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
+	c.Label = "ready-for-agent"
 	fc := forge.NewFake(testDispatchLabels)
 	for _, n := range []string{"3", "1", "2"} {
-		fc.SetIssue(forge.Issue{Number: n, Title: "issue " + n, Labels: []string{c.label}})
+		fc.SetIssue(forge.Issue{Number: n, Title: "issue " + n, Labels: []string{c.Label}})
 	}
 
 	issues, _, _, err := discoverIssues(c, fc, io.Discard)
@@ -89,9 +89,9 @@ func TestDiscoverIssues_OldestFirst(t *testing.T) {
 // priority sort can read it.
 func TestDiscoverIssues_PriorityPropagatesToWaveIssues(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
+	c.Label = "ready-for-agent"
 	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "1", Title: "critical one", Labels: []string{c.label, "agent-priority-critical"}})
+	fc.SetIssue(forge.Issue{Number: "1", Title: "critical one", Labels: []string{c.Label, "agent-priority-critical"}})
 
 	issues, _, _, err := discoverIssues(c, fc, io.Discard)
 	if err != nil {
@@ -125,10 +125,10 @@ func TestQueryOpenIssues(t *testing.T) {
 			setup: func() (config, *forge.Fake) {
 				c := baseConfig()
 				c = applyDispatchKind(c, dispatchkind.Work)
-				c.label = "ready-for-agent"
+				c.Label = "ready-for-agent"
 				fc := forge.NewFake(testDispatchLabels)
-				fc.SetIssue(forge.Issue{Number: "1", Title: "researcher has this one", Labels: []string{c.label, "agent-research-in-progress"}})
-				fc.SetIssue(forge.Issue{Number: "2", Title: "free", Labels: []string{c.label}})
+				fc.SetIssue(forge.Issue{Number: "1", Title: "researcher has this one", Labels: []string{c.Label, "agent-research-in-progress"}})
+				fc.SetIssue(forge.Issue{Number: "2", Title: "free", Labels: []string{c.Label}})
 				return c, fc
 			},
 			want:     []string{"2"},
@@ -137,16 +137,16 @@ func TestQueryOpenIssues(t *testing.T) {
 		{
 			// Uses the configured work in-progress label rather than a
 			// hardcoded "agent-in-progress" — proves applyDispatchKind
-			// captures c.inProgressLabel before swapping it for the
+			// captures c.InProgressLabel before swapping it for the
 			// research family's.
 			name: "research skips work in progress",
 			setup: func() (config, *forge.Fake) {
 				c := baseConfig()
-				c.inProgressLabel = "custom-work-in-progress"
+				c.InProgressLabel = "custom-work-in-progress"
 				c = applyDispatchKind(c, dispatchkind.Research)
 				fc := forge.NewFake(forge.ResearchDispatchLabels())
-				fc.SetIssue(forge.Issue{Number: "1", Title: "worker has this one", Labels: []string{c.label, "custom-work-in-progress"}})
-				fc.SetIssue(forge.Issue{Number: "2", Title: "free", Labels: []string{c.label}})
+				fc.SetIssue(forge.Issue{Number: "1", Title: "worker has this one", Labels: []string{c.Label, "custom-work-in-progress"}})
+				fc.SetIssue(forge.Issue{Number: "2", Title: "free", Labels: []string{c.Label}})
 				return c, fc
 			},
 			want:     []string{"2"},
@@ -158,10 +158,10 @@ func TestQueryOpenIssues(t *testing.T) {
 			name: "everything filtered yields nil",
 			setup: func() (config, *forge.Fake) {
 				c := baseConfig()
-				workInProgress := c.inProgressLabel
+				workInProgress := c.InProgressLabel
 				c = applyDispatchKind(c, dispatchkind.Research)
 				fc := forge.NewFake(forge.ResearchDispatchLabels())
-				fc.SetIssue(forge.Issue{Number: "1", Title: "worker has this one", Labels: []string{c.label, workInProgress}})
+				fc.SetIssue(forge.Issue{Number: "1", Title: "worker has this one", Labels: []string{c.Label, workInProgress}})
 				return c, fc
 			},
 			want:     nil,
@@ -175,10 +175,10 @@ func TestQueryOpenIssues(t *testing.T) {
 			setup: func() (config, *forge.Fake) {
 				c := baseConfig()
 				c = applyDispatchKind(c, dispatchkind.Work)
-				c.label = "ready-for-agent"
+				c.Label = "ready-for-agent"
 				fc := forge.NewFake(testDispatchLabels)
-				fc.SetIssue(forge.Issue{Number: "1", Title: "one", Labels: []string{c.label}})
-				fc.SetIssue(forge.Issue{Number: "2", Title: "two", Labels: []string{c.label}})
+				fc.SetIssue(forge.Issue{Number: "1", Title: "one", Labels: []string{c.Label}})
+				fc.SetIssue(forge.Issue{Number: "2", Title: "two", Labels: []string{c.Label}})
 				return c, fc
 			},
 			want: []string{"1", "2"},
@@ -192,10 +192,10 @@ func TestQueryOpenIssues(t *testing.T) {
 			setup: func() (config, *forge.Fake) {
 				c := baseConfig()
 				c = applyDispatchKind(c, dispatchkind.Work)
-				c.label = "ready-for-agent"
+				c.Label = "ready-for-agent"
 				fc := forge.NewFake(testDispatchLabels)
-				fc.SetIssue(forge.Issue{Number: "1", Title: "already claimed by a worker", Labels: []string{c.inProgressLabel}})
-				fc.SetIssue(forge.Issue{Number: "2", Title: "free", Labels: []string{c.label}})
+				fc.SetIssue(forge.Issue{Number: "1", Title: "already claimed by a worker", Labels: []string{c.InProgressLabel}})
+				fc.SetIssue(forge.Issue{Number: "2", Title: "free", Labels: []string{c.Label}})
 				return c, fc
 			},
 			want: []string{"2"},
@@ -227,8 +227,8 @@ func TestQueryOpenIssues(t *testing.T) {
 // (#1645).
 func TestLogDiscoveryPoll_First_AlwaysAnnounces(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.repoSlug = "owner/repo"
+	c.Label = "ready-for-agent"
+	c.RepoSlug = "owner/repo"
 	seen := map[string]bool{}
 
 	var buf bytes.Buffer
@@ -244,8 +244,8 @@ func TestLogDiscoveryPoll_First_AlwaysAnnounces(t *testing.T) {
 // must stay silent. This is the steady-state noise #1666 quieted.
 func TestLogDiscoveryPoll_RepeatNoNewIssues_Silent(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.repoSlug = "owner/repo"
+	c.Label = "ready-for-agent"
+	c.RepoSlug = "owner/repo"
 	seen := map[string]bool{"1": true}
 
 	var buf bytes.Buffer
@@ -261,8 +261,8 @@ func TestLogDiscoveryPoll_RepeatNoNewIssues_Silent(t *testing.T) {
 // the log can tell what changed, and must not re-name the ones already seen.
 func TestLogDiscoveryPoll_NewIssueAppears_NamesIt(t *testing.T) {
 	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.repoSlug = "owner/repo"
+	c.Label = "ready-for-agent"
+	c.RepoSlug = "owner/repo"
 	seen := map[string]bool{"1": true}
 
 	var buf bytes.Buffer

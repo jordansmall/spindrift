@@ -181,7 +181,7 @@ let
       # bool knob it is redundant with the bool rule, and on an
       # int/float/secret/hostDerived knob flagEmptyDisables still emits it, so
       # FlagEntry.EmptyIsSetting would drive the deprecation warning and
-      # resolveBoxEnvVar while the schemaConfig loaderLine cascade
+      # resolveBoxEnvVar while the loadSchemaConfig loaderLine cascade
       # (lib/renderers.nix) loads that knob without consulting an empty value.
       emptyDisablesOnNonString = filter (
         e:
@@ -1169,9 +1169,8 @@ checkedMerge {
       # splitString's regex has no `.*` wrapper, so it does not recurse per byte.
       containsLiteral = needle: haystack: builtins.length (splitString needle haystack) > 1;
       launcherDir = ../../cmd/launcher;
-      # schemaconfig_gen.go is listed before loadConfig embeds schemaConfig, so
-      # the later slice wiring it in does not fail this check for knobs whose
-      # env-var literal lives only in the generated file (issue #2364).
+      # schemaconfig_gen.go carries the env-var literal of every knob that
+      # loadSchemaConfig loads into inputdoc.Knobs (issue #2364).
       # registry_gen.go carries each backend row's BoxTokenEnvVar, which the
       # launcher reads through the row rather than a literal (issue #5642).
       forwardGoSrc = concatStringsSep "\n" (
@@ -1779,7 +1778,17 @@ checkedMerge {
 
   # Regenerate with `nix run .#regen` when a host-config schema member
   # changes. The raw renderer output is intentionally unaligned: gofmt owns
-  # the struct and composite-literal column alignment (issue #2364).
+  # the struct column alignment (issue #2364).
+  launcher-knobs = mkGofmtDriftCheck {
+    name = "launcher-knobs";
+    rendered = renderers.renderKnobsGo schema;
+    committedPath = "cmd/launcher/internal/inputdoc/knobs_gen.go";
+    source = "lib/env-schema.nix";
+  };
+
+  # Regenerate with `nix run .#regen` when a host-config schema member
+  # changes. The raw renderer output is intentionally unaligned: gofmt owns
+  # the composite-literal column alignment (issue #2364).
   launcher-schema-config =
     let
       schema = import ../../lib/env-schema.nix;

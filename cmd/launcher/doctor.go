@@ -52,7 +52,7 @@ type doctorOptions struct {
 // researchVerdictLabels is zero outside the research kind, which doctor's
 // read context has no notion of.
 func doctorResearchVerdicts(c config) forge.VerdictLabels {
-	vl, err := forge.ParseResearchVerdicts(c.researchVerdicts)
+	vl, err := forge.ParseResearchVerdicts(c.ResearchVerdicts)
 	if err != nil {
 		// validateConfigChecks already reports the parse error.
 		return forge.ResearchVerdictLabels()
@@ -90,7 +90,7 @@ func requiredLabels(opts doctorOptions, rc readContext) []string {
 	// local and jira have no label registry to list or create from, so doctor.Run
 	// skips the label section there (NoLabelRegistry, issue #5460); adding none
 	// keeps this answer honest for any caller that reads it directly.
-	if row, _ := backendkit.ByName(c.issueTracker); !row.LabelRegistry {
+	if row, _ := backendkit.ByName(c.IssueTracker); !row.LabelRegistry {
 		return nil
 	}
 	var labels []string
@@ -102,16 +102,16 @@ func requiredLabels(opts doctorOptions, rc readContext) []string {
 		labels = append(labels, butlerKind.FindingLabel)
 		// The patch rung never applies its label while the daily cap is 0 or
 		// while this tracker/forge pair cannot land patches at all.
-		if c.butlerMaxPatchesPerDay > 0 && butlerPatchForge(rc.codeForge, rc.capabilities) != nil {
+		if c.ButlerMaxPatchesPerDay > 0 && butlerPatchForge(rc.codeForge, rc.capabilities) != nil {
 			labels = append(labels, butlerKind.PatchLabel)
 		}
 		// Read from the catalog, not chore.Load: Load errors on unrelated knob
 		// faults and would silently drop the requirement.
-		labels = append(labels, chore.FindingLabels(c.butlerChores)...)
+		labels = append(labels, chore.FindingLabels(c.ButlerChores)...)
 	}
 	// A read-only work Box relays review findings for the host to file, so the
 	// label is part of what the work kind needs whichever flags are set.
-	if c.boxForgeAndIssueAccess == "read-only" && resolveAgentPresenceSignals(c.driver).filerEnabled {
+	if c.BoxForgeAndIssueAccess == "read-only" && resolveAgentPresenceSignals(c.driver).filerEnabled {
 		labels = append(labels, dispatchkind.Default.FindingLabel)
 	}
 	return labels
@@ -202,22 +202,22 @@ func doctorExitCodeFor(configErr, runErr error) int {
 // bypassing the Reporter (issue #3777). The two params stay distinct since
 // only one of them is the report stream.
 func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.Reporter, checkW io.Writer, stdin io.Reader, interactive bool, extraChecks []doctor.Check, requiredLabels ...string) error {
-	row, _ := backendkit.ByName(c.issueTracker)
+	row, _ := backendkit.ByName(c.IssueTracker)
 	if err := doctor.Run(it, cf, doctor.Config{
-		IssueTracker:     c.issueTracker,
+		IssueTracker:     c.IssueTracker,
 		NoLabelRegistry:  !row.LabelRegistry,
 		RequiredLabels:   requiredLabels,
 		ResearchVerdicts: doctorResearchVerdicts(c),
 		TokenHint:        row.DoctorTokenHint,
 		SlugHint:         row.DoctorSlugHint,
-		Label:            c.label,
-		InProgressLabel:  c.inProgressLabel,
-		FailedLabel:      c.failedLabel,
-		CompleteLabel:    c.completeLabel,
+		Label:            c.Label,
+		InProgressLabel:  c.InProgressLabel,
+		FailedLabel:      c.FailedLabel,
+		CompleteLabel:    c.CompleteLabel,
 		Runtime:          c.runtime,
 		RuntimeProbe:     runtimePrerequisiteProbe(c),
-		MergePolicy:      c.mergeMode,
-		BaseBranch:       c.baseBranch,
+		MergePolicy:      c.MergeMode,
+		BaseBranch:       c.BaseBranch,
 	}, rep, bufio.NewScanner(stdin), interactive, extraChecks); err != nil {
 		return err
 	}
@@ -226,7 +226,7 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.
 	// read-write would never mention the token gate. It stays doctor-only:
 	// printing it from gatedContext would add stdout noise to preview and
 	// bootstrap, which must stay quiet.
-	if c.boxForgeAndIssueAccess == "read-write" {
+	if c.BoxForgeAndIssueAccess == "read-write" {
 		rep.Success("BOX_FORGE_AND_ISSUE_ACCESS=read-write — read-only token gate is a no-op")
 	}
 	// Kinds are picked by the same Enablement row and backend.RelaysOutbox
@@ -235,10 +235,10 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.
 	for _, d := range dispatchkind.All {
 		switch d.Enablement {
 		case dispatchkind.EnabledByOutboxRelay:
-			if backend.RelaysOutbox(c.codeForge, c.boxForgeAndIssueAccess) {
-				rep.Success("%s kind: on — CODE_FORGE=%s relays a read-only Box's outbox bundle", d.Name, c.codeForge)
+			if backend.RelaysOutbox(c.CodeForge, c.BoxForgeAndIssueAccess) {
+				rep.Success("%s kind: on — CODE_FORGE=%s relays a read-only Box's outbox bundle", d.Name, c.CodeForge)
 			} else {
-				rep.Success("%s kind: off — CODE_FORGE=%s with BOX_FORGE_AND_ISSUE_ACCESS=%s relays no outbox bundle; run `spindrift %s <n>` by hand", d.Name, c.codeForge, c.boxForgeAndIssueAccess, d.Verb)
+				rep.Success("%s kind: off — CODE_FORGE=%s with BOX_FORGE_AND_ISSUE_ACCESS=%s relays no outbox bundle; run `spindrift %s <n>` by hand", d.Name, c.CodeForge, c.BoxForgeAndIssueAccess, d.Verb)
 			}
 		}
 	}

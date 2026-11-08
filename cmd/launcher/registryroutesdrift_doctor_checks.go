@@ -48,7 +48,7 @@ func checkoutIsTargetRepo(root string, c config) bool {
 	if remote == "" {
 		return false
 	}
-	row, ok := backendkit.ByName(c.codeForge)
+	row, ok := backendkit.ByName(c.CodeForge)
 	return ok && row.RemoteMatch != nil && row.RemoteMatch(backendShared(c), c.knobLookup, remote)
 }
 
@@ -77,20 +77,20 @@ type targetRepoSource struct {
 	dir, ref string
 }
 
-// resolveTargetRepoSource keys on backendkit.ByName(c.codeForge).HostMediatedRemote,
+// resolveTargetRepoSource keys on backendkit.ByName(c.CodeForge).HostMediatedRemote,
 // not a codeForge == "local" compare a future host-mediated backend would
 // break. A host-mediated forge reads the bare Accumulation repo at
-// c.baseBranch, the same snapshot the launch itself derives host-rooted routes
+// c.BaseBranch, the same snapshot the launch itself derives host-rooted routes
 // from. Only ResolveRef runs eagerly, and it materializes nothing, so a
 // fail-fast run that never reaches a Probe leaks no snapshot dir. ok is false
 // when no Target repo resolves.
 func resolveTargetRepoSource(c config) (src targetRepoSource, ok bool) {
-	row, _ := backendkit.ByName(c.codeForge)
+	row, _ := backendkit.ByName(c.CodeForge)
 	if row.HostMediatedRemote {
-		if err := registrydiscover.ResolveRef(c.hostRepoDir(), c.baseBranch); err != nil {
+		if err := registrydiscover.ResolveRef(c.hostRepoDir(), c.BaseBranch); err != nil {
 			return targetRepoSource{}, false
 		}
-		return targetRepoSource{dir: c.hostRepoDir(), ref: c.baseBranch}, true
+		return targetRepoSource{dir: c.hostRepoDir(), ref: c.BaseBranch}, true
 	}
 
 	repoDir, err := registryRouteDriftRepoDirFn()

@@ -51,7 +51,7 @@ func TestRouteChecksFor_ValidFileYieldsTwoRowsPerRouteNamedByMatchHost(t *testin
 	t.Setenv(envVar, "s3cr3t-value")
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry-a.example.com"
 credential = { env = "`+envVar+`" }
@@ -61,7 +61,7 @@ match-host = "registry-b.example.com"
 credential = { env = "`+envVar+`" }
 `)
 
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, ecosystem.Registered())
+	routes := mustLoadRoutes(t, c.RegistryProxyRoutesFile, ecosystem.Registered())
 	checks := routeChecksFor(routes)
 	if len(checks) != 4 {
 		t.Fatalf("routeChecksFor() returned %d rows, want 4", len(checks))
@@ -89,13 +89,13 @@ credential = { env = "`+envVar+`" }
 // registry-proxy-routes row already uses for its own per-route Peek.
 func TestRouteChecksFor_UnresolvableCredentialFailsNamingRouteAndField(t *testing.T) {
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_UNSET" }
 `)
 
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, ecosystem.Registered())
+	routes := mustLoadRoutes(t, c.RegistryProxyRoutesFile, ecosystem.Registered())
 	checks := routeChecksFor(routes)
 	ch := checkByName(t, checks, "registry-route-credential[registry.example.com]")
 	_, err := ch.Probe()
@@ -190,7 +190,7 @@ func TestRouteChecksFor_DerivedOriginRowPasses(t *testing.T) {
 // report half for a configured routes file.
 func TestDoctorCheckSets_WiresPerRouteRows(t *testing.T) {
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_WIRING" }
@@ -212,9 +212,9 @@ func TestDoctorReport_ExecCredentialPeekedOncePerInvocation(t *testing.T) {
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { exec = ["/bin/sh", "-c", "echo x >> `+counterFile+`; echo tok"] }
@@ -245,9 +245,9 @@ func TestDoctorReport_UnresolvableRouteCredentialExitsTwo(t *testing.T) {
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	c := minimalValidConfig()
-	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_DOCTOR_REPORT_UNRESOLVABLE_ROUTE_CREDENTIAL" }
@@ -271,7 +271,7 @@ credential = { env = "SPINDRIFT_TEST_DOCTOR_REPORT_UNRESOLVABLE_ROUTE_CREDENTIAL
 // the doctor report path.
 func TestDoctorCheckSets_UnresolvableCredentialFailsOnlyPerRouteRow(t *testing.T) {
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_DEDUP_UNSET" }
@@ -301,7 +301,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_DEDUP_UNSET" }
 // launch proceed with a broken route credential (issue #3144 review finding).
 func TestRegistryProxyRoutesCheck_PeekCredentialsTrueStillFailsOnUnresolvable(t *testing.T) {
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_LAUNCH_GATE_UNSET" }
@@ -323,7 +323,7 @@ func TestRouteChecksFor_CredentialDetailDistinguishesPassThroughFromResolved(t *
 	t.Setenv(envVar, "s3cr3t-value")
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry-passthrough.example.com"
 
@@ -332,7 +332,7 @@ match-host = "registry-resolved.example.com"
 credential = { env = "`+envVar+`" }
 `)
 
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, ecosystem.Registered())
+	routes := mustLoadRoutes(t, c.RegistryProxyRoutesFile, ecosystem.Registered())
 	checks := routeChecksFor(routes)
 
 	passthroughCh := checkByName(t, checks, "registry-route-credential[registry-passthrough.example.com]")

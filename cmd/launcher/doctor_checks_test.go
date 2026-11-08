@@ -90,7 +90,7 @@ func TestDoctorCheckSets_ClassifyExcludesBwrapGatesAndDriftRowsButIncludesPerRou
 
 	c := minimalValidConfig()
 	c.runnerKind = runner.KindBwrap
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_DOCTOR_CHECK_SETS_SPLIT" }

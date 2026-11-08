@@ -39,8 +39,8 @@ func newReadContext(kind *dispatchkind.Descriptor, selfContained bool) (readCont
 
 	// CODE_FORGE and ISSUE_TRACKER select their backend.Descriptor rows
 	// independently (ADR 0013).
-	forgeDesc, _ := backend.ByName(c.codeForge)
-	trackerDesc, _ := backend.ByName(c.issueTracker)
+	forgeDesc, _ := backend.ByName(c.CodeForge)
+	trackerDesc, _ := backend.ByName(c.IssueTracker)
 	caps := forge.ResolveCapabilities(cf, it, forgeDesc, trackerDesc)
 
 	return readContext{

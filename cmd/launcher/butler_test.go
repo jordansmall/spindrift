@@ -297,7 +297,7 @@ func TestButlerPatchForge(t *testing.T) {
 // touching the factory or issue tracker.
 func TestCmdButler_RejectsChoreNotEnabled(t *testing.T) {
 	lc := &launchContext{
-		config:  config{schemaConfig: schemaConfig{codeForge: "local", butlerChores: "other-chore"}},
+		config:  config{Knobs: inputdoc.Knobs{CodeForge: "local", ButlerChores: "other-chore"}},
 		cleanup: func() {},
 	}
 	code := cmdButler(lc, "bugs", io.Discard)
@@ -326,17 +326,17 @@ func assertNoButlerLedgerClaims(t *testing.T, repo string) {
 func testButlerLaunchContext(t *testing.T, repo, butlerChores string) *launchContext {
 	t.Helper()
 	return &launchContext{
-		config: config{schemaConfig: schemaConfig{
-			codeForge: "local",
-			rowKnobs: map[string]string{
+		config: config{Knobs: inputdoc.Knobs{
+			CodeForge: "local",
+			RowKnobs: map[string]string{
 				"CODE_FORGE_ACCUMULATION_REPO_DIR": repo,
 				"BUTLER_TUNING_COOLDOWN":           schemaDefault("BUTLER_TUNING_COOLDOWN"),
 			},
-			butlerChores:       butlerChores,
-			butlerEvery:        schemaDefault("BUTLER_EVERY"),
-			butlerClaimTimeout: schemaDefault("BUTLER_CLAIM_TIMEOUT"),
-			daemonAwakeWindow:  schemaDefault("DAEMON_AWAKE_WINDOW"),
-			baseBranch:         schemaDefault("BASE_BRANCH"),
+			ButlerChores:       butlerChores,
+			ButlerEvery:        schemaDefault("BUTLER_EVERY"),
+			ButlerClaimTimeout: schemaDefault("BUTLER_CLAIM_TIMEOUT"),
+			DaemonAwakeWindow:  schemaDefault("DAEMON_AWAKE_WINDOW"),
+			BaseBranch:         schemaDefault("BASE_BRANCH"),
 		}},
 		factory:      testFactory(t, t.TempDir(), runner.NewFake()),
 		capabilities: forge.Capabilities{HostPostedIssueFiler: testHostFiler(t)},
@@ -414,12 +414,12 @@ func TestCmdButler_RejectsMalformedButlerSettings(t *testing.T) {
 	}{
 		{
 			name:       "BUTLER_EVERY",
-			set:        func(cfg *config) { cfg.butlerEvery = "not-a-duration" },
+			set:        func(cfg *config) { cfg.ButlerEvery = "not-a-duration" },
 			wantSubstr: "BUTLER_EVERY",
 		},
 		{
 			name:       "BUTLER_CLAIM_TIMEOUT",
-			set:        func(cfg *config) { cfg.butlerClaimTimeout = "not-a-duration" },
+			set:        func(cfg *config) { cfg.ButlerClaimTimeout = "not-a-duration" },
 			wantSubstr: "BUTLER_CLAIM_TIMEOUT",
 		},
 		{
@@ -429,7 +429,7 @@ func TestCmdButler_RejectsMalformedButlerSettings(t *testing.T) {
 		},
 		{
 			name:       "DAEMON_AWAKE_WINDOW",
-			set:        func(cfg *config) { cfg.daemonAwakeWindow = "not-a-window" },
+			set:        func(cfg *config) { cfg.DaemonAwakeWindow = "not-a-window" },
 			wantSubstr: "DAEMON_AWAKE_WINDOW",
 		},
 	}
@@ -457,7 +457,7 @@ func TestCmdButler_RejectsMalformedButlerSettings(t *testing.T) {
 func TestCmdButler_RejectsOverrideForChoreNotEnabled(t *testing.T) {
 	t.Setenv("FILER_MODEL", "test-model")
 	lc := &launchContext{
-		config:  config{schemaConfig: schemaConfig{codeForge: "local", butlerChores: "bugs", butlerEvery: "6h bgus=1h"}},
+		config:  config{Knobs: inputdoc.Knobs{CodeForge: "local", ButlerChores: "bugs", ButlerEvery: "6h bgus=1h"}},
 		cleanup: func() {},
 	}
 	var stderr bytes.Buffer
@@ -474,7 +474,7 @@ func TestCmdButler_RejectsOverrideForChoreNotEnabled(t *testing.T) {
 // #3876: only local, github, and forgejo have one).
 func TestCmdButler_RejectsForgeWithNoLedger(t *testing.T) {
 	lc := &launchContext{
-		config:  config{schemaConfig: schemaConfig{codeForge: "git", butlerChores: "bugs"}},
+		config:  config{Knobs: inputdoc.Knobs{CodeForge: "git", ButlerChores: "bugs"}},
 		cleanup: func() {},
 	}
 	code := cmdButler(lc, "bugs", io.Discard)
@@ -494,7 +494,7 @@ func TestCmdButler_FreshConsumerNeverStartsRun(t *testing.T) {
 	for _, choreName := range []string{"bugs", "refactor", "docs-drift"} {
 		t.Run(choreName, func(t *testing.T) {
 			lc := &launchContext{
-				config:  config{schemaConfig: schemaConfig{codeForge: "local", butlerChores: schemaDefault("BUTLER_CHORES")}},
+				config:  config{Knobs: inputdoc.Knobs{CodeForge: "local", ButlerChores: schemaDefault("BUTLER_CHORES")}},
 				cleanup: func() {},
 			}
 			code := cmdButler(lc, choreName, io.Discard)
@@ -520,7 +520,7 @@ func testHostFiler(t *testing.T) forge.HostPostedIssueFiler {
 // capability, never a backend name, so a fake gaining PostIssue passes and a
 // bare one is refused.
 func TestButlerPreflight_TrackerCapability(t *testing.T) {
-	cfg := config{schemaConfig: schemaConfig{codeForge: "local", issueTracker: "jira", butlerChores: "bugs"}}
+	cfg := config{Knobs: inputdoc.Knobs{CodeForge: "local", IssueTracker: "jira", ButlerChores: "bugs"}}
 	bare := forge.NewFake()
 	caps := forge.ResolveCapabilities(bare, bare, backend.Descriptor{}, backend.Descriptor{})
 	_, err := butlerPreflight(cfg, "bugs", true, caps.HostPostedIssueFiler, choreCatalog{})
@@ -589,14 +589,14 @@ func TestButlerPreflight(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := config{schemaConfig: schemaConfig{
-				codeForge:                 tc.codeForge,
-				butlerChores:              tc.butlerChores,
-				butlerChoreClasses:        tc.butlerChoreClasses,
-				butlerMaxFindingsPerSweep: tc.butlerMaxPerSweep,
-				butlerMaxFindingsPerDay:   tc.butlerMaxPerDay,
-				butlerPatchClasses:        tc.butlerPatchClasses,
-				butlerMaxPatchesPerDay:    tc.butlerMaxPatchesPerDay,
+			cfg := config{Knobs: inputdoc.Knobs{
+				CodeForge:                 tc.codeForge,
+				ButlerChores:              tc.butlerChores,
+				ButlerChoreClasses:        tc.butlerChoreClasses,
+				ButlerMaxFindingsPerSweep: tc.butlerMaxPerSweep,
+				ButlerMaxFindingsPerDay:   tc.butlerMaxPerDay,
+				ButlerPatchClasses:        tc.butlerPatchClasses,
+				ButlerMaxPatchesPerDay:    tc.butlerMaxPatchesPerDay,
 			}}
 			catalog := choreCatalog{names: tc.catalogNames, known: tc.catalogKnown}
 			_, err := butlerPreflight(cfg, tc.chore, tc.filerEnabled, testHostFiler(t), catalog)
@@ -622,10 +622,10 @@ func TestButlerPreflight(t *testing.T) {
 // (issue #3905).
 func TestButlerPreflight_PromptDirOverride(t *testing.T) {
 	cfgWith := func(promptDir string) config {
-		return config{schemaConfig: schemaConfig{
-			codeForge:          "local",
-			butlerChores:       "bugs",
-			spindriftPromptDir: promptDir,
+		return config{Knobs: inputdoc.Knobs{
+			CodeForge:          "local",
+			ButlerChores:       "bugs",
+			SpindriftPromptDir: promptDir,
 		}}
 	}
 	// A catalog that would reject "bugs" on its own, to prove the override
@@ -768,11 +768,11 @@ func TestButlerPromotionKnobsParseFromSchema(t *testing.T) {
 	t.Setenv("BUTLER_MAX_PROMOTIONS_PER_DAY", "7")
 	t.Setenv("BUTLER_PROMOTION_MAX_FILES", "9")
 	cfg := loadSchemaConfig()
-	if cfg.butlerMaxPromotionsPerDay != 7 {
-		t.Errorf("butlerMaxPromotionsPerDay = %d, want 7", cfg.butlerMaxPromotionsPerDay)
+	if cfg.ButlerMaxPromotionsPerDay != 7 {
+		t.Errorf("butlerMaxPromotionsPerDay = %d, want 7", cfg.ButlerMaxPromotionsPerDay)
 	}
-	if cfg.butlerPromotionMaxFiles != 9 {
-		t.Errorf("butlerPromotionMaxFiles = %d, want 9", cfg.butlerPromotionMaxFiles)
+	if cfg.ButlerPromotionMaxFiles != 9 {
+		t.Errorf("butlerPromotionMaxFiles = %d, want 9", cfg.ButlerPromotionMaxFiles)
 	}
 }
 
@@ -805,11 +805,11 @@ func TestButlerPatchKnobsParseFromSchema(t *testing.T) {
 	t.Setenv("BUTLER_MAX_PATCHES_PER_DAY", "4")
 	t.Setenv("BUTLER_PATCH_CLASSES", "bugs=error-handling")
 	cfg := loadSchemaConfig()
-	if cfg.butlerMaxPatchesPerDay != 4 {
-		t.Errorf("butlerMaxPatchesPerDay = %d, want 4", cfg.butlerMaxPatchesPerDay)
+	if cfg.ButlerMaxPatchesPerDay != 4 {
+		t.Errorf("butlerMaxPatchesPerDay = %d, want 4", cfg.ButlerMaxPatchesPerDay)
 	}
-	if cfg.butlerPatchClasses != "bugs=error-handling" {
-		t.Errorf("butlerPatchClasses = %q, want %q", cfg.butlerPatchClasses, "bugs=error-handling")
+	if cfg.ButlerPatchClasses != "bugs=error-handling" {
+		t.Errorf("butlerPatchClasses = %q, want %q", cfg.ButlerPatchClasses, "bugs=error-handling")
 	}
 }
 
@@ -860,14 +860,14 @@ func TestButlerPatchBoundKnobsParseFromSchema(t *testing.T) {
 	t.Setenv("BUTLER_PATCH_MAX_FILES", "5")
 	t.Setenv("BUTLER_PATCH_MAX_LINES", "40")
 	cfg := loadSchemaConfig()
-	if cfg.butlerPatchPaths != "docs/**,!docs/adr/**" {
-		t.Errorf("butlerPatchPaths = %q, want %q", cfg.butlerPatchPaths, "docs/**,!docs/adr/**")
+	if cfg.ButlerPatchPaths != "docs/**,!docs/adr/**" {
+		t.Errorf("butlerPatchPaths = %q, want %q", cfg.ButlerPatchPaths, "docs/**,!docs/adr/**")
 	}
-	if cfg.butlerPatchMaxFiles != 5 {
-		t.Errorf("butlerPatchMaxFiles = %d, want 5", cfg.butlerPatchMaxFiles)
+	if cfg.ButlerPatchMaxFiles != 5 {
+		t.Errorf("butlerPatchMaxFiles = %d, want 5", cfg.ButlerPatchMaxFiles)
 	}
-	if cfg.butlerPatchMaxLines != 40 {
-		t.Errorf("butlerPatchMaxLines = %d, want 40", cfg.butlerPatchMaxLines)
+	if cfg.ButlerPatchMaxLines != 40 {
+		t.Errorf("butlerPatchMaxLines = %d, want 40", cfg.ButlerPatchMaxLines)
 	}
 }
 
@@ -927,18 +927,18 @@ func promotableRunFunc(class string) func(runner.Box) error {
 
 // butlerTestSchemaConfig is the schedule, claim, and promotion-budget config
 // the cmdButler tests share; adjust sets the rest per test.
-func butlerTestSchemaConfig(chores, codeForge string, knobs map[string]string, adjust func(*schemaConfig)) schemaConfig {
+func butlerTestSchemaConfig(chores, codeForge string, knobs map[string]string, adjust func(*inputdoc.Knobs)) inputdoc.Knobs {
 	knobs["BUTLER_TUNING_COOLDOWN"] = schemaDefault("BUTLER_TUNING_COOLDOWN")
-	sc := schemaConfig{
-		codeForge:                 codeForge,
-		rowKnobs:                  knobs,
-		butlerChores:              chores,
-		butlerEvery:               schemaDefault("BUTLER_EVERY"),
-		butlerClaimTimeout:        schemaDefault("BUTLER_CLAIM_TIMEOUT"),
-		daemonAwakeWindow:         schemaDefault("DAEMON_AWAKE_WINDOW"),
-		baseBranch:                schemaDefault("BASE_BRANCH"),
-		butlerMaxPromotionsPerDay: 1,
-		butlerPromotionMaxFiles:   3,
+	sc := inputdoc.Knobs{
+		CodeForge:                 codeForge,
+		RowKnobs:                  knobs,
+		ButlerChores:              chores,
+		ButlerEvery:               schemaDefault("BUTLER_EVERY"),
+		ButlerClaimTimeout:        schemaDefault("BUTLER_CLAIM_TIMEOUT"),
+		DaemonAwakeWindow:         schemaDefault("DAEMON_AWAKE_WINDOW"),
+		BaseBranch:                schemaDefault("BASE_BRANCH"),
+		ButlerMaxPromotionsPerDay: 1,
+		ButlerPromotionMaxFiles:   3,
 	}
 	adjust(&sc)
 	return sc
@@ -962,9 +962,9 @@ func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
 	fr.RunFunc = promotableRunFunc("error-handling")
 
 	lc := &launchContext{
-		config: config{schemaConfig: butlerTestSchemaConfig("bugs", "local", map[string]string{
+		config: config{Knobs: butlerTestSchemaConfig("bugs", "local", map[string]string{
 			"CODE_FORGE_ACCUMULATION_REPO_DIR": repo,
-		}, func(sc *schemaConfig) { sc.butlerChoreClasses = "bugs=error-handling" }), workLabel: "agent-go", dispatchKind: dispatchkind.Butler},
+		}, func(sc *inputdoc.Knobs) { sc.ButlerChoreClasses = "bugs=error-handling" }), workLabel: "agent-go", dispatchKind: dispatchkind.Butler},
 		factory:      testFactory(t, t.TempDir(), fr),
 		issueTracker: fc.AsIssueFiler(),
 		capabilities: forge.Capabilities{HostPostedIssueFiler: testHostFiler(t)},
@@ -992,8 +992,8 @@ func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
 }
 
 func TestLoadSchemaConfig_ButlerTuningKnobs(t *testing.T) {
-	tuningKnobs := func(cfg schemaConfig) string {
-		return cfg.rowKnobs["BUTLER_TUNING_MIN_RECORDS"] + "/" + cfg.rowKnobs["BUTLER_TUNING_MIN_SAMPLE"] + "/" + cfg.rowKnobs["BUTLER_TUNING_DIGEST_BYTES"]
+	tuningKnobs := func(cfg inputdoc.Knobs) string {
+		return cfg.RowKnobs["BUTLER_TUNING_MIN_RECORDS"] + "/" + cfg.RowKnobs["BUTLER_TUNING_MIN_SAMPLE"] + "/" + cfg.RowKnobs["BUTLER_TUNING_DIGEST_BYTES"]
 	}
 	if got := tuningKnobs(loadSchemaConfig()); got != "20/15/49152" {
 		t.Errorf("tuning defaults = %s, want 20/15/49152", got)
@@ -1006,7 +1006,7 @@ func TestLoadSchemaConfig_ButlerTuningKnobs(t *testing.T) {
 	}
 	// A malformed int falls back to its default, as the field loader did.
 	t.Setenv("BUTLER_TUNING_MIN_SAMPLE", "lots")
-	if got := loadSchemaConfig().rowKnobs["BUTLER_TUNING_MIN_SAMPLE"]; got != "15" {
+	if got := loadSchemaConfig().RowKnobs["BUTLER_TUNING_MIN_SAMPLE"]; got != "15" {
 		t.Errorf("malformed BUTLER_TUNING_MIN_SAMPLE = %q, want the default 15", got)
 	}
 }
@@ -1020,7 +1020,7 @@ func TestButlerPreflight_RecordsDigest(t *testing.T) {
 		t.Fatalf("checkRecordsDigests err = %v, want it to name chore nodigest", err)
 	}
 
-	cfg := config{schemaConfig: schemaConfig{codeForge: "local", butlerChores: "tuning"}}
+	cfg := config{Knobs: inputdoc.Knobs{CodeForge: "local", ButlerChores: "tuning"}}
 	if _, err := butlerPreflight(cfg, "tuning", true, testHostFiler(t), choreCatalog{}); err != nil {
 		t.Fatalf("butlerPreflight with the stock tuning Chore: %v", err)
 	}
@@ -1030,7 +1030,7 @@ func TestButlerPreflight_RecordsDigest(t *testing.T) {
 // value set on the config reaches the Digest's own reader unchanged.
 func TestConfigServesTuningKnobsToTheDigest(t *testing.T) {
 	c := minimalValidConfig()
-	c.schemaConfig = loadSchemaConfig()
+	c.Knobs = loadSchemaConfig()
 	c.setRowKnob("BUTLER_TUNING_MIN_SAMPLE", "3")
 	c.setRowKnob("BUTLER_TUNING_DIGEST_BYTES", "1000")
 	c.setRowKnob("BUTLER_TUNING_COOLDOWN", "36h")
@@ -1042,7 +1042,7 @@ func TestConfigServesTuningKnobsToTheDigest(t *testing.T) {
 	if got != want {
 		t.Errorf("Knobs = %+v, want %+v", got, want)
 	}
-	if v, ok := c.knobLookup(chore.MinRecordsKnob("tuning")); !ok || v != c.rowKnobs["BUTLER_TUNING_MIN_RECORDS"] {
+	if v, ok := c.knobLookup(chore.MinRecordsKnob("tuning")); !ok || v != c.RowKnobs["BUTLER_TUNING_MIN_RECORDS"] {
 		t.Errorf("min-records knob = %q, %v, want the config's", v, ok)
 	}
 }
@@ -1089,19 +1089,19 @@ func TestCmdButler_PatchFindingCarriesPatchLabel(t *testing.T) {
 	}
 
 	lc := &launchContext{
-		config: config{schemaConfig: butlerTestSchemaConfig("docs-drift", "forgejo", map[string]string{
+		config: config{Knobs: butlerTestSchemaConfig("docs-drift", "forgejo", map[string]string{
 			"FORGEJO_BASE_URL": "http://forgejo.test",
 			"FORGEJO_TOKEN":    "tok",
-		}, func(sc *schemaConfig) {
-			sc.repoSlug = "owner/repo"
-			sc.butlerChoreClasses = schemaDefault("BUTLER_CHORE_CLASSES")
-			sc.butlerPatchClasses = schemaDefault("BUTLER_PATCH_CLASSES")
-			sc.butlerPatchPaths = schemaDefault("BUTLER_PATCH_PATHS")
-			sc.butlerPatchMaxFiles = 3
-			sc.butlerPatchMaxLines = 20
-			sc.butlerMaxPatchesPerDay = 1
-			sc.gitUserName = "Test Bot"
-			sc.gitUserEmail = "bot@example.com"
+		}, func(sc *inputdoc.Knobs) {
+			sc.RepoSlug = "owner/repo"
+			sc.ButlerChoreClasses = schemaDefault("BUTLER_CHORE_CLASSES")
+			sc.ButlerPatchClasses = schemaDefault("BUTLER_PATCH_CLASSES")
+			sc.ButlerPatchPaths = schemaDefault("BUTLER_PATCH_PATHS")
+			sc.ButlerPatchMaxFiles = 3
+			sc.ButlerPatchMaxLines = 20
+			sc.ButlerMaxPatchesPerDay = 1
+			sc.GitUserName = "Test Bot"
+			sc.GitUserEmail = "bot@example.com"
 		}), dispatchKind: dispatchkind.Butler},
 		factory:      testFactory(t, t.TempDir(), fr),
 		issueTracker: fc.AsIssueFiler(),

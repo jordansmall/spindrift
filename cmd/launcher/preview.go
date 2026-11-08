@@ -24,7 +24,7 @@ func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, caps for
 	res := freshness.Probe(freshness.ProbeSpec{
 		Artifact:           art,
 		Pwd:                pwd,
-		BaseBranch:         c.baseBranch,
+		BaseBranch:         c.BaseBranch,
 		FlakeImageAttr:     c.flakeImageAttr,
 		ImageTag:           c.imageTag,
 		FlakeLauncherAttr:  c.flakeLauncherAttr,
@@ -50,7 +50,7 @@ func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, caps for
 		for _, h := range held {
 			fmt.Fprintln(w, heldLine(h))
 		}
-		fmt.Fprintln(w, emptyQueueLine(c.label, held, "nothing to dispatch"))
+		fmt.Fprintln(w, emptyQueueLine(c.Label, held, "nothing to dispatch"))
 		return nil
 	}
 	result, err := waves.NewReadiness(it, toWaveIssues(issues))

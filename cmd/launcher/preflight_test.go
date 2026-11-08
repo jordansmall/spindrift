@@ -107,10 +107,10 @@ func TestAutoMergePreflight(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			c := baseConfig()
-			c.mergeMode = tc.mergeMode
-			c.mergeMethod = tc.mergeMethod
+			c.MergeMode = tc.mergeMode
+			c.MergeMethod = tc.mergeMethod
 			if tc.codeForge != "" {
-				c.codeForge = tc.codeForge
+				c.CodeForge = tc.codeForge
 			}
 			fc := forge.NewFake()
 			fc.AutoMergeAllowed = tc.autoMergeAllowed

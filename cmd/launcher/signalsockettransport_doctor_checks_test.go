@@ -18,7 +18,7 @@ func TestSignalSocketTransportCheck_UnixSocketReportsUnixTransport(t *testing.T)
 	withRegistryProxyTransportFake(t, fake)
 
 	c := minimalValidConfig()
-	c.signalCarrier = "socket"
+	c.SignalCarrier = "socket"
 
 	check := signalSocketTransportCheck(c)
 	output, err := check.Probe()
@@ -38,8 +38,8 @@ func TestSignalSocketTransportCheck_TCPUnderPermissiveModeReportsTCPTransport(t 
 	withRegistryProxyTransportFake(t, fake)
 
 	c := minimalValidConfig()
-	c.signalCarrier = "socket"
-	c.networkMode = string(runner.NetworkModeHost)
+	c.SignalCarrier = "socket"
+	c.NetworkMode = string(runner.NetworkModeHost)
 
 	check := signalSocketTransportCheck(c)
 	output, err := check.Probe()
@@ -61,8 +61,8 @@ func TestSignalSocketTransportCheck_TCPUnderNoHostLoopbackWrapsErrDegraded(t *te
 	withRegistryProxyTransportFake(t, fake)
 
 	c := minimalValidConfig()
-	c.signalCarrier = "socket"
-	c.networkMode = string(runner.NetworkModeNoHostLoopback)
+	c.SignalCarrier = "socket"
+	c.NetworkMode = string(runner.NetworkModeNoHostLoopback)
 
 	check := signalSocketTransportCheck(c)
 	_, err := check.Probe()
@@ -88,8 +88,8 @@ func TestSignalSocketTransportCheck_NetworkModeNoneWithUnixEndpointWrapsErrDegra
 	withRegistryProxyTransportFake(t, fake)
 
 	c := minimalValidConfig()
-	c.signalCarrier = "socket"
-	c.networkMode = string(runner.NetworkModeNone)
+	c.SignalCarrier = "socket"
+	c.NetworkMode = string(runner.NetworkModeNone)
 
 	check := signalSocketTransportCheck(c)
 	_, err := check.Probe()
@@ -112,8 +112,8 @@ func TestSignalSocketTransportCheck_NetworkModeNoneWithTCPEndpointWrapsErrDegrad
 	withRegistryProxyTransportFake(t, fake)
 
 	c := minimalValidConfig()
-	c.signalCarrier = "socket"
-	c.networkMode = string(runner.NetworkModeNone)
+	c.SignalCarrier = "socket"
+	c.NetworkMode = string(runner.NetworkModeNone)
 
 	check := signalSocketTransportCheck(c)
 	_, err := check.Probe()
@@ -135,7 +135,7 @@ func TestSignalSocketTransportCheck_ZeroEndpointWrapsErrDegraded(t *testing.T) {
 	withRegistryProxyTransportFake(t, fake)
 
 	c := minimalValidConfig()
-	c.signalCarrier = "socket"
+	c.SignalCarrier = "socket"
 
 	check := signalSocketTransportCheck(c)
 	_, err := check.Probe()
@@ -151,7 +151,7 @@ func TestSignalSocketTransportCheck_ProbeErrorWrapsErrDegraded(t *testing.T) {
 	withRegistryProxyTransportFake(t, fake)
 
 	c := minimalValidConfig()
-	c.signalCarrier = "socket"
+	c.SignalCarrier = "socket"
 
 	check := signalSocketTransportCheck(c)
 	_, err := check.Probe()
@@ -168,7 +168,7 @@ func TestDoctorCheckSets_LogCarrierOmitsSignalSocketTransportRowWithoutProbing(t
 	withRegistryProxyTransportFake(t, fake)
 
 	c := minimalValidConfig()
-	c.signalCarrier = "log"
+	c.SignalCarrier = "log"
 
 	classify, report := doctorCheckSets(c)
 	for _, ch := range append(append([]doctor.Check{}, classify...), report...) {
@@ -190,7 +190,7 @@ func TestDoctorCheckSets_SocketCarrierWiresSignalSocketTransportCheckToReportOnl
 	withRegistryProxyTransportFake(t, fake)
 
 	c := minimalValidConfig()
-	c.signalCarrier = "socket"
+	c.SignalCarrier = "socket"
 
 	classify, report := doctorCheckSets(c)
 	checkByName(t, report, signalSocketTransportCheckName)
@@ -208,7 +208,7 @@ func TestDoctorCheckSets_SocketCarrierWiresSignalSocketTransportCheckToReportOnl
 // alongside the knob fix.
 func TestSignalSocketTransportCheck_RemedyNamesBothTheKnobAndTheRuntimeFix(t *testing.T) {
 	c := minimalValidConfig()
-	c.signalCarrier = "socket"
+	c.SignalCarrier = "socket"
 
 	remedy := signalSocketTransportCheck(c).Remedy
 	for _, want := range []string{"BOX_SIGNAL_CARRIER=log", "NETWORK_MODE", "indeterminate"} {
@@ -222,8 +222,8 @@ func TestSignalSocketTransportCheck_RemedyNamesBothTheKnobAndTheRuntimeFix(t *te
 // text keeps the rendered operator output unchanged.
 func TestSignalSocketTransportCheck_NetworkModeNoneRendersSharedReason(t *testing.T) {
 	c := minimalValidConfig()
-	c.signalCarrier = "socket"
-	c.networkMode = string(runner.NetworkModeNone)
+	c.SignalCarrier = "socket"
+	c.NetworkMode = string(runner.NetworkModeNone)
 
 	_, err := signalSocketTransportCheck(c).Probe()
 	if err == nil {
@@ -245,7 +245,7 @@ func TestDoctorCheckSets_UnsetCarrierIncludesSignalSocketTransportRow(t *testing
 
 	unsetEnv(t, "BOX_SIGNAL_CARRIER")
 	c := minimalValidConfig()
-	c.signalCarrier = loadConfig().signalCarrier
+	c.SignalCarrier = loadConfig().SignalCarrier
 
 	classify, report := doctorCheckSets(c)
 	checkByName(t, report, signalSocketTransportCheckName)

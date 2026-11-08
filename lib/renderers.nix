@@ -1930,14 +1930,14 @@ rec {
     + "var GroupOrder = []string{${renderGoStringSlice groupOrder}}\n";
 
   # Which schema members the launcher's host config holds: not secret and not
-  # boxEnvOnly, or explicitly hostConfig-overridden. renderSchemaConfigGo and its
-  # drift check both call this, so struct membership cannot drift from the check.
+  # boxEnvOnly, or explicitly hostConfig-overridden. knobsModel is its only
+  # caller, so the struct and the loader share one membership.
   isHostConfigMember =
     e: ((!(e.secret or false)) && !(e.boxEnvOnly or false)) || (e.hostConfig or false);
 
   isFloatTyped = e: builtins.isFloat (e.default or null);
 
-  # renderSchemaConfigGo's goType, loaderLine and rowLoaderLine all dispatch
+  # knobsModel's goType, loaderLine and rowLoaderLine all dispatch
   # on this rather than repeating the bool/int/float/string cascade, so they
   # cannot drift apart.
   typeClass =
@@ -1956,14 +1956,16 @@ rec {
   # becoming so must not silently mismatch its os.Getenv loader.
   goTypeClass = e: if e.secret or false then "string" else typeClass e;
 
-  # cmd/launcher/schemaconfig_gen.go content: an unexported schemaConfig struct
-  # plus its loader, one field and loader line per host-config member (issue
-  # #2364, embedded by value in config per issue #2365). Knobs a registry row
-  # owns (lib/row-knob-registries.nix) get no field of their own: they are held
-  # in one rowKnobs map keyed by env name, which the row packages read
-  # through their generated ReadKnobs (ADR 0068 decision 3). Emits unaligned
-  # Go; gofmt owns column alignment.
-  renderSchemaConfigGo =
+  # The shared model behind renderKnobsGo and renderSchemaConfigGo: the
+  # Knobs struct (cmd/launcher/internal/inputdoc/knobs_gen.go) and the
+  # main-package loader that fills it (cmd/launcher/schemaconfig_gen.go) are
+  # one field and one loader line per host-config member (issue #2364, held
+  # by value in config per issue #2365), so both read the same member split
+  # and exported field names. Knobs a registry row owns
+  # (lib/row-knob-registries.nix) get no field of their own: they are held in
+  # one RowKnobs map keyed by env name, which the row packages read through
+  # their generated ReadKnobs (ADR 0068 decision 3).
+  knobsModel =
     schema:
     let
       rowOwnedKeys = builtins.concatMap (
@@ -1974,33 +1976,32 @@ rec {
       members = filterAttrs (key: e: !(isRowOwned key e)) allMembers;
       rowMembers = filterAttrs isRowOwned allMembers;
       goType = e: if goTypeClass e == "float" then "float64" else goTypeClass e;
-      fieldLine = key: e: "\t${key} ${goType e}\n";
+      fieldLine = key: e: "\t${upperFirst key} ${goType e}\n";
       fields = concatStrings (mapAttrsToList fieldLine members);
       loaderLine =
         key: e:
+        let
+          load = expr: "\t\t${upperFirst key}: ${expr},\n";
+        in
         if e ? hostGitConfigKey then
           if (e.secret or false) || typeClass e != "string" then
             throw "renderSchemaConfigGo: ${key} carries hostGitConfigKey but is secret or non-string; hostGitConfigField only loads plain string knobs"
           else
-            "\t\t${key}: hostGitConfigField(\"${e.env}\"),\n"
+            load "hostGitConfigField(\"${e.env}\")"
         else if e.hostDerived or false then
           ""
         else if e.secret or false then
-          "\t\t${key}: os.Getenv(\"${e.env}\"),\n"
+          load "os.Getenv(\"${e.env}\")"
         else if typeClass e == "bool" then
-          "\t\t${key}: getenvSchema(\"${e.env}\") != \"\",\n"
+          load "getenvSchema(\"${e.env}\") != \"\""
         else if typeClass e == "int" then
-          "\t\t${key}: ${
-            if e.intKind == "positive" then "atoiSchema" else "atoiNonnegSchema"
-          }(\"${e.env}\"),\n"
+          load "${if e.intKind == "positive" then "atoiSchema" else "atoiNonnegSchema"}(\"${e.env}\")"
         else if typeClass e == "float" then
-          "\t\t${key}: floatNonnegSchema(\"${e.env}\"),\n"
+          load "floatNonnegSchema(\"${e.env}\")"
         else
-          "\t\t${key}: getenvSchema(\"${e.env}\"),\n";
-      loaderLines = concatStrings (mapAttrsToList loaderLine members);
+          load "getenvSchema(\"${e.env}\")";
       gitKeyMembers = filterAttrs (_: e: e ? hostGitConfigKey) members;
-      hostGitConfigCase = key: e: "\tcase \"${e.env}\":\n\t\treturn s.${key}, true\n";
-      hostGitConfigCases = concatStrings (mapAttrsToList hostGitConfigCase gitKeyMembers);
+      hostGitConfigCase = key: e: "\tcase \"${e.env}\":\n\t\treturn k.${upperFirst key}, true\n";
       # A row knob's value stays a string whatever its kind: the row's
       # ReadKnobs parses it. A bool passes through as-is (its reader is
       # presence-style); an int is normalised the way the field loader read it
@@ -2018,62 +2019,87 @@ rec {
           else
             "getenvSchema(\"${e.env}\")"
         },\n";
-      rowLoaderLines = concatStrings (mapAttrsToList (_: rowLoaderLine) rowMembers);
       usesOs = builtins.any (e: e.secret or false) (
         builtins.attrValues members ++ builtins.attrValues rowMembers
       );
       usesStrconv = builtins.any (e: !(e.secret or false) && typeClass e == "int") (
         builtins.attrValues rowMembers
       );
-      imports = (if usesOs then [ "os" ] else [ ]) ++ (if usesStrconv then [ "strconv" ] else [ ]);
+    in
+    {
+      inherit fields usesOs usesStrconv;
+      loaderLines = concatStrings (mapAttrsToList loaderLine members);
+      rowLoaderLines = concatStrings (mapAttrsToList (_: rowLoaderLine) rowMembers);
+      hostGitConfigCases = concatStrings (mapAttrsToList hostGitConfigCase gitKeyMembers);
+    };
+
+  # cmd/launcher/internal/inputdoc/knobs_gen.go content: the exported Knobs
+  # struct and its HostGitConfigValue accessor. Emits unaligned Go; gofmt owns
+  # column alignment.
+  renderKnobsGo =
+    schema:
+    let
+      m = knobsModel schema;
+    in
+    "// Code generated by nix/regen.nix from lib/env-schema.nix. DO NOT EDIT.\n"
+    + "package inputdoc\n"
+    + "\n"
+    + "// Knobs is the generated Launcher input: one field per host-config schema\n"
+    + "// member (issue #2364, #2365; lib/env-schema.nix — not secret and not\n"
+    + "// boxEnvOnly, or hostConfig overridden), except the knobs a registry row\n"
+    + "// owns: those live in RowKnobs, keyed by env name, so no one backend's\n"
+    + "// setting is named here. cmd/launcher's config embeds it by value so a\n"
+    + "// copy-and-mutate helper like applyDispatchKind can never alias the\n"
+    + "// caller's config through this struct; RowKnobs is a map, so a helper that\n"
+    + "// edits it must copy it first (see setRowKnob in cmd/launcher's tests).\n"
+    + "type Knobs struct {\n"
+    + m.fields
+    + "\tRowKnobs map[string]string\n"
+    + "}\n"
+    + "\n"
+    + "// HostGitConfigValue returns the loaded value of the member whose env name is\n"
+    + "// env, for the members that declare a hostGitConfigKey; ok is false for any\n"
+    + "// other name.\n"
+    + "func (k Knobs) HostGitConfigValue(env string) (string, bool) {\n"
+    + "\tswitch env {\n"
+    + m.hostGitConfigCases
+    + "\t}\n"
+    + "\treturn \"\", false\n"
+    + "}\n";
+
+  # cmd/launcher/schemaconfig_gen.go content: loadSchemaConfig, the
+  # main-package loader that fills inputdoc.Knobs. It stays in package main
+  # because its helpers read main's document global and environment. Emits
+  # unaligned Go; gofmt owns column alignment.
+  renderSchemaConfigGo =
+    schema:
+    let
+      m = knobsModel schema;
+      imports = (if m.usesOs then [ "os" ] else [ ]) ++ (if m.usesStrconv then [ "strconv" ] else [ ]);
       importBlock =
-        if imports == [ ] then
-          ""
-        else
-          "\nimport (\n" + concatStrings (map (i: "\t\"${i}\"\n") imports) + ")\n";
+        "\nimport (\n"
+        + concatStrings (map (i: "\t\"${i}\"\n") imports)
+        + (if imports == [ ] then "" else "\n")
+        + "\t\"spindrift.dev/launcher/internal/inputdoc\"\n)\n";
     in
     "// Code generated by nix/regen.nix from lib/env-schema.nix. DO NOT EDIT.\n"
     + "package main\n"
     + importBlock
     + "\n"
-    + "// schemaConfig is the generated counterpart to config's schema-derived\n"
-    + "// members (issue #2364, #2365): one field per host-config schema member\n"
-    + "// (lib/env-schema.nix — not secret and not boxEnvOnly, or hostConfig\n"
-    + "// overridden), except the knobs a registry row owns: those live in\n"
-    + "// rowKnobs, keyed by env name, so config names no one backend's setting.\n"
-    + "// Embedded by value in config so a copy-and-mutate helper like\n"
-    + "// applyDispatchKind can never alias the caller's config through this\n"
-    + "// struct; rowKnobs is a map, so a helper that edits it must copy it first\n"
-    + "// (see schemaConfig.setRowKnob).\n"
-    + "type schemaConfig struct {\n"
-    + fields
-    + "\trowKnobs map[string]string\n"
-    + "}\n"
-    + "\n"
-    + "// loadSchemaConfig reads schemaConfig's fields from the environment.\n"
-    + "// hostDerived members without a hostGitConfigKey get a struct field above\n"
+    + "// loadSchemaConfig reads inputdoc.Knobs's fields from the environment.\n"
+    + "// hostDerived members without a hostGitConfigKey get a struct field there\n"
     + "// but no loader line here — their loader is hand-written elsewhere.\n"
     + "// Secret members read the environment directly, never through the\n"
     + "// schema-default helper (a document-first path would open a\n"
     + "// Launcher-input secret-injection channel that does not exist today).\n"
     + "// Regenerate with `nix run .#regen` after editing lib/env-schema.nix.\n"
-    + "func loadSchemaConfig() schemaConfig {\n"
-    + "\treturn schemaConfig{\n"
-    + loaderLines
-    + "\t\trowKnobs: map[string]string{\n"
-    + rowLoaderLines
+    + "func loadSchemaConfig() inputdoc.Knobs {\n"
+    + "\treturn inputdoc.Knobs{\n"
+    + m.loaderLines
+    + "\t\tRowKnobs: map[string]string{\n"
+    + m.rowLoaderLines
     + "\t\t},\n"
     + "\t}\n"
-    + "}\n"
-    + "\n"
-    + "// hostGitConfigValue returns the loaded value of the member whose env name is\n"
-    + "// env, for the members that declare a hostGitConfigKey; ok is false for any\n"
-    + "// other name.\n"
-    + "func (s schemaConfig) hostGitConfigValue(env string) (string, bool) {\n"
-    + "\tswitch env {\n"
-    + hostGitConfigCases
-    + "\t}\n"
-    + "\treturn \"\", false\n"
     + "}\n";
 
   # A typed knob reader for one row (ADR 0068 decision 3, issue #5636): a

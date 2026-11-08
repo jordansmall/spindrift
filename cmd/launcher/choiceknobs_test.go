@@ -109,9 +109,9 @@ func TestChoiceKnobRegistry_HasSevenExpectedRows(t *testing.T) {
 // test pins which rows were evaluated, not just the returned error.
 func TestValidateChoiceKnobsFailFast_ReturnsFirstError(t *testing.T) {
 	var calls []string
-	c := config{schemaConfig: schemaConfig{mergeMode: "bogus"}}
+	c := config{Knobs: inputdoc.Knobs{MergeMode: "bogus"}}
 	rows := []choiceKnobRow{
-		{Env: "MERGE_MODE", Value: func(c config) string { calls = append(calls, "MERGE_MODE"); return c.mergeMode }},
+		{Env: "MERGE_MODE", Value: func(c config) string { calls = append(calls, "MERGE_MODE"); return c.MergeMode }},
 		{Env: "OVERLAP_GATE", Value: func(c config) string { calls = append(calls, "OVERLAP_GATE"); return "defer" }},
 		{Env: "UNREACHABLE_ROW", Value: func(c config) string { calls = append(calls, "UNREACHABLE_ROW"); return "also-bogus" }},
 	}
@@ -133,11 +133,11 @@ func TestValidateChoiceKnobsFailFast_ReturnsFirstError(t *testing.T) {
 }
 
 func TestValidateChoiceKnobsErrors_CollectsAll(t *testing.T) {
-	c := config{schemaConfig: schemaConfig{mergeMode: "bogus", overlapGate: "bogus"}}
+	c := config{Knobs: inputdoc.Knobs{MergeMode: "bogus", OverlapGate: "bogus"}}
 	rows := []choiceKnobRow{
-		{Env: "MERGE_MODE", Value: func(c config) string { return c.mergeMode }},
+		{Env: "MERGE_MODE", Value: func(c config) string { return c.MergeMode }},
 		{Env: "MERGE_METHOD", Value: func(c config) string { return "rebase" }},
-		{Env: "OVERLAP_GATE", Value: func(c config) string { return c.overlapGate }},
+		{Env: "OVERLAP_GATE", Value: func(c config) string { return c.OverlapGate }},
 	}
 
 	errs := validateChoiceKnobsErrors(c, rows)

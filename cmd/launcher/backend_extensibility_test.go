@@ -73,8 +73,8 @@ func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 	}
 
 	c := minimalValidConfig()
-	c.issueTracker = "gitlab"
-	c.codeForge = "gitlab"
+	c.IssueTracker = "gitlab"
+	c.CodeForge = "gitlab"
 	if err := validate(c); err != nil {
 		t.Errorf("validate() with ISSUE_TRACKER=CODE_FORGE=gitlab = %v, want nil", err)
 	}
@@ -98,7 +98,7 @@ func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 	}
 
 	// This backendkit.ByName call is the lookup runDoctor uses for its hints.
-	hintRow, ok := backendkit.ByName(c.issueTracker)
+	hintRow, ok := backendkit.ByName(c.IssueTracker)
 	if !ok {
 		t.Fatal("backendkit.ByName(c.issueTracker) ok = false, want true")
 	}
@@ -130,7 +130,7 @@ func TestValidateIssueTracker_InvalidMessageListsRuntimeRegisteredBackend(t *tes
 	withExtraStrategies(t, fakeGitlabRow())
 
 	c := minimalValidConfig()
-	c.issueTracker = "not-a-real-tracker"
+	c.IssueTracker = "not-a-real-tracker"
 	err := validate(c)
 	if err == nil {
 		t.Fatal("validate() should reject an unrecognised ISSUE_TRACKER")

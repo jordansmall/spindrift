@@ -101,7 +101,7 @@ func TestRegistryProxyTransportCheck_UnsetFileReportsNotConfiguredWithoutProbing
 	withRegistryProxyTransportFake(t, fake)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = ""
+	c.RegistryProxyRoutesFile = ""
 
 	check := registryProxyTransportCheck(c)
 	output, err := check.Probe()
@@ -123,7 +123,7 @@ func TestRegistryProxyTransportCheck_UnixSocketReportsUnixTransport(t *testing.T
 	withRegistryProxyTransportFake(t, fake)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = "routes.toml"
+	c.RegistryProxyRoutesFile = "routes.toml"
 
 	check := registryProxyTransportCheck(c)
 	output, err := check.Probe()
@@ -147,7 +147,7 @@ func TestRegistryProxyTransportCheck_TCPReportsTCPTransportWithoutError(t *testi
 	withRegistryProxyTransportFake(t, fake)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = "routes.toml"
+	c.RegistryProxyRoutesFile = "routes.toml"
 
 	check := registryProxyTransportCheck(c)
 	output, err := check.Probe()
@@ -168,7 +168,7 @@ func TestRegistryProxyTransportCheck_ProbeErrorWrapsErrDegraded(t *testing.T) {
 	withRegistryProxyTransportFake(t, fake)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = "routes.toml"
+	c.RegistryProxyRoutesFile = "routes.toml"
 
 	check := registryProxyTransportCheck(c)
 	_, err := check.Probe()
@@ -184,7 +184,7 @@ func TestRegistryProxyTransportCheck_ZeroEndpointWrapsErrDegraded(t *testing.T) 
 	withRegistryProxyTransportFake(t, fake)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = "routes.toml"
+	c.RegistryProxyRoutesFile = "routes.toml"
 
 	check := registryProxyTransportCheck(c)
 	_, err := check.Probe()
@@ -204,7 +204,7 @@ func TestDoctorCheckSets_WiresRegistryProxyTransportCheck(t *testing.T) {
 	withRegistryProxyTransportFake(t, fake)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_DOCTOR_CHECK_SETS_WIRES_TRANSPORT" }
@@ -213,7 +213,7 @@ credential = { env = "SPINDRIFT_TEST_DOCTOR_CHECK_SETS_WIRES_TRANSPORT" }
 	checkByName(t, checks, registryProxyTransportCheckName)
 
 	c = minimalValidConfig()
-	c.registryProxyRoutesFile = ""
+	c.RegistryProxyRoutesFile = ""
 	_, checks = doctorCheckSets(c)
 	unconfigured := checkByName(t, checks, registryProxyTransportCheckName)
 	if _, err := unconfigured.Probe(); err != nil {

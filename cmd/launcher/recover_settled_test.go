@@ -138,7 +138,7 @@ func TestRecoverQueueOne_LandedAppendsSettledFromStamp(t *testing.T) {
 func TestRecoverFailed_DeclinedAppendsSettled(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	fc.PriorClaimStates = map[string]forge.DispatchState{"42": forge.Complete}
 	dir := tempLogDir(t)
 	t.Chdir(dir)
@@ -179,7 +179,7 @@ func TestParkQueueFailure_RefusedParkCommentsAndSettlesDistinctReason(t *testing
 func TestRecoverFailed_RefusedRestoreCommentsRefusal(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	fc.PriorClaimStates = map[string]forge.DispatchState{"42": forge.Complete}
 	fc.TransitionStateErr = &forge.TransitionRefusedError{Issue: "42", From: "In Progress", To: "Done"}
 	orig := errors.New("no change")

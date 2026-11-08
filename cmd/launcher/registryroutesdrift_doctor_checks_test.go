@@ -106,13 +106,13 @@ func TestRegistryRouteDriftCheckForRoutes_UncoveredHostFailsNamingHostAndRemedy(
 	withDriftMatchingRemote(t)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_UNCOVERED" }
 `)
 
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
+	routes := mustLoadRoutes(t, c.RegistryProxyRoutesFile, driftRows)
 	checks := registryRouteDriftCheckForRoutes(c, routes, driftRows)
 	if len(checks) != 1 {
 		t.Fatalf("registryRouteDriftCheckForRoutes() returned %d rows, want 1", len(checks))
@@ -143,13 +143,13 @@ func TestRegistryRouteDriftCheckForRoutes_FullyCoveredRepoPasses(t *testing.T) {
 	withDriftMatchingRemote(t)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "covered.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_COVERED" }
 `)
 
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
+	routes := mustLoadRoutes(t, c.RegistryProxyRoutesFile, driftRows)
 	checks := registryRouteDriftCheckForRoutes(c, routes, driftRows)
 	if len(checks) != 1 {
 		t.Fatalf("registryRouteDriftCheckForRoutes() returned %d rows, want 1", len(checks))
@@ -178,7 +178,7 @@ func TestRegistryRouteDriftCheckForRoutes_BlockGrammarRouteParsesAndReportsNoDri
 	withDriftMatchingRemote(t)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "covered.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_BLOCK_GRAMMAR" }
@@ -187,7 +187,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_BLOCK_GRAMMAR" }
 mirror-path = "/synthetic-mirror"
 `)
 
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
+	routes := mustLoadRoutes(t, c.RegistryProxyRoutesFile, driftRows)
 	checks := registryRouteDriftCheckForRoutes(c, routes, driftRows)
 	if len(checks) != 1 {
 		t.Fatalf("registryRouteDriftCheckForRoutes() returned %d rows, want 1", len(checks))
@@ -213,12 +213,12 @@ func TestRegistryRouteDriftCheckForRoutes_NoCheckoutAvailable_ReturnsNil(t *test
 	t.Cleanup(func() { registryRouteDriftRepoDirFn = orig })
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_NO_CHECKOUT" }
 `)
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
+	routes := mustLoadRoutes(t, c.RegistryProxyRoutesFile, driftRows)
 
 	if got := registryRouteDriftCheckForRoutes(c, routes, driftRows); got != nil {
 		t.Errorf("registryRouteDriftCheckForRoutes() = %#v, want nil when no repo checkout is available", got)
@@ -235,12 +235,12 @@ func TestRegistryRouteDriftCheckForRoutes_EmptyRepoDirReturnsNil(t *testing.T) {
 	t.Cleanup(func() { registryRouteDriftRepoDirFn = orig })
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_EMPTY_REPO_DIR" }
 `)
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
+	routes := mustLoadRoutes(t, c.RegistryProxyRoutesFile, driftRows)
 
 	if got := registryRouteDriftCheckForRoutes(c, routes, driftRows); got != nil {
 		t.Errorf("registryRouteDriftCheckForRoutes() = %#v, want nil when no checkout is resolved", got)
@@ -257,7 +257,7 @@ func TestDoctorCheckSets_UnreadableRoutesFileExcludesRegistryRouteDriftRow(t *te
 	withDriftMatchingRemote(t)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = filepath.Join(t.TempDir(), "does-not-exist.toml")
+	c.RegistryProxyRoutesFile = filepath.Join(t.TempDir(), "does-not-exist.toml")
 
 	_, report := doctorCheckSets(c)
 	assertNoDriftRow(t, report, "for an unreadable routes file")
@@ -272,7 +272,7 @@ func TestDoctorCheckSets_UnparsableRoutesFileExcludesRegistryRouteDriftRow(t *te
 	withDriftMatchingRemote(t)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `not valid toml [[[`)
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `not valid toml [[[`)
 
 	_, report := doctorCheckSets(c)
 	assertNoDriftRow(t, report, "for an unparsable routes file")
@@ -400,12 +400,12 @@ func TestRegistryRouteDriftCheckForRoutes_NonTargetCheckoutReturnsNil(t *testing
 	withDriftRepoDir(t, repoDir)
 
 	c := minimalValidConfig() // codeForge: "github", repoSlug: "owner/repo"
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_NON_TARGET" }
 `)
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
+	routes := mustLoadRoutes(t, c.RegistryProxyRoutesFile, driftRows)
 
 	if got := registryRouteDriftCheckForRoutes(c, routes, driftRows); got != nil {
 		t.Errorf("registryRouteDriftCheckForRoutes() = %#v, want nil when the checkout's origin remote does not match the configured Target repo", got)
@@ -432,12 +432,12 @@ func TestRegistryRouteDriftCheckForRoutes_LocalForgeReadsFromAccumulationRepo(t 
 	t.Run("drift", func(t *testing.T) {
 		accumRepo := mustLocalAccumulationRepo(t, synthetic.Strategy.InTreeConfigPath, "reg = https://uncovered.example.com/\n")
 		c := minimalValidLocalConfigForRoutes(accumRepo)
-		c.registryProxyRoutesFile = writeRoutesFile(t, `
+		c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_UNCOVERED" }
 `)
-		routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
+		routes := mustLoadRoutes(t, c.RegistryProxyRoutesFile, driftRows)
 
 		checks := registryRouteDriftCheckForRoutes(c, routes, driftRows)
 		if len(checks) != 1 {
@@ -455,12 +455,12 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_UNCOVERED" }
 	t.Run("no drift", func(t *testing.T) {
 		accumRepo := mustLocalAccumulationRepo(t, synthetic.Strategy.InTreeConfigPath, "reg = https://covered.example.com/\n")
 		c := minimalValidLocalConfigForRoutes(accumRepo)
-		c.registryProxyRoutesFile = writeRoutesFile(t, `
+		c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "covered.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_COVERED" }
 `)
-		routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
+		routes := mustLoadRoutes(t, c.RegistryProxyRoutesFile, driftRows)
 
 		checks := registryRouteDriftCheckForRoutes(c, routes, driftRows)
 		if len(checks) != 1 {
@@ -477,12 +477,12 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_COVERED" }
 // available, never a false "no drift".
 func TestRegistryRouteDriftCheckForRoutes_LocalForgeMissingAccumulationRepo_ReturnsNil(t *testing.T) {
 	c := minimalValidLocalConfigForRoutes(filepath.Join(t.TempDir(), "does-not-exist.git"))
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_MISSING_ACCUM" }
 `)
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
+	routes := mustLoadRoutes(t, c.RegistryProxyRoutesFile, driftRows)
 
 	if got := registryRouteDriftCheckForRoutes(c, routes, driftRows); got != nil {
 		t.Errorf("registryRouteDriftCheckForRoutes() = %#v, want nil when the Accumulation repo does not exist", got)
@@ -495,13 +495,13 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_MISSING_ACCUM" }
 func TestRegistryRouteDriftCheckForRoutes_LocalForgeUnresolvableRef_ReturnsNil(t *testing.T) {
 	accumRepo := mustLocalAccumulationRepo(t, synthetic.Strategy.InTreeConfigPath, "reg = https://uncovered.example.com/\n")
 	c := minimalValidLocalConfigForRoutes(accumRepo)
-	c.baseBranch = "does-not-exist"
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.BaseBranch = "does-not-exist"
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_BAD_REF" }
 `)
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
+	routes := mustLoadRoutes(t, c.RegistryProxyRoutesFile, driftRows)
 
 	if got := registryRouteDriftCheckForRoutes(c, routes, driftRows); got != nil {
 		t.Errorf("registryRouteDriftCheckForRoutes() = %#v, want nil when baseBranch names a ref the Accumulation repo does not have", got)
@@ -513,7 +513,7 @@ func TestDoctorCheckSets_WiresRegistryRouteDriftRow(t *testing.T) {
 	withDriftMatchingRemote(t)
 
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_WIRING" }
@@ -595,7 +595,7 @@ func TestCheckoutIsTargetRepo_Github_FollowsGHHost(t *testing.T) {
 
 func TestCheckoutIsTargetRepo_GitMatch(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "git"
+	c.CodeForge = "git"
 	c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/team/proj.git")
 
 	for _, remoteURL := range []string{
@@ -613,7 +613,7 @@ func TestCheckoutIsTargetRepo_GitMatch(t *testing.T) {
 
 func TestCheckoutIsTargetRepo_GitMismatch(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "git"
+	c.CodeForge = "git"
 	c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/team/proj.git")
 	dir := newGitCheckoutWithRemote(t, "https://git.example.com/team/other.git")
 	if checkoutIsTargetRepo(dir, c) {
@@ -626,7 +626,7 @@ func TestCheckoutIsTargetRepo_GitMismatch(t *testing.T) {
 // come from the gitremote.ParseHostSlug fallback.
 func TestCheckoutIsTargetRepo_GitMatch_DifferentRemoteForms(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "git"
+	c.CodeForge = "git"
 	c.setRowKnob("CODE_FORGE_REMOTE_URL", "ssh://git@host/owner/repo.git")
 	dir := newGitCheckoutWithRemote(t, "git@host:owner/repo.git")
 	if !checkoutIsTargetRepo(dir, c) {
@@ -639,7 +639,7 @@ func TestCheckoutIsTargetRepo_GitMatch_DifferentRemoteForms(t *testing.T) {
 // an EqualFold("", "") && EqualFold("", "") comparison falsely matches them.
 func TestCheckoutIsTargetRepo_GitLocalPathMismatch(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "git"
+	c.CodeForge = "git"
 	c.setRowKnob("CODE_FORGE_REMOTE_URL", "/srv/git/target.git")
 	dir := newGitCheckoutWithRemote(t, "/srv/git/consumer.git")
 	if checkoutIsTargetRepo(dir, c) {
@@ -649,9 +649,9 @@ func TestCheckoutIsTargetRepo_GitLocalPathMismatch(t *testing.T) {
 
 func TestCheckoutIsTargetRepo_ForgejoMatch(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "forgejo"
+	c.CodeForge = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
-	c.repoSlug = "owner/repo"
+	c.RepoSlug = "owner/repo"
 	dir := newGitCheckoutWithRemote(t, "git@codeberg.org:owner/repo.git")
 	if !checkoutIsTargetRepo(dir, c) {
 		t.Errorf("checkoutIsTargetRepo(%q, c) = false, want true for a matching forgejo host+slug", dir)
@@ -661,9 +661,9 @@ func TestCheckoutIsTargetRepo_ForgejoMatch(t *testing.T) {
 // The forgejo branch compares both host and slug case-insensitively.
 func TestCheckoutIsTargetRepo_ForgejoMatch_CaseInsensitive(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "forgejo"
+	c.CodeForge = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
-	c.repoSlug = "owner/repo"
+	c.RepoSlug = "owner/repo"
 	dir := newGitCheckoutWithRemote(t, "git@CODEBERG.ORG:Owner/Repo.git")
 	if !checkoutIsTargetRepo(dir, c) {
 		t.Errorf("checkoutIsTargetRepo(%q, c) = false, want true for a forgejo host+slug differing only in case", dir)
@@ -673,9 +673,9 @@ func TestCheckoutIsTargetRepo_ForgejoMatch_CaseInsensitive(t *testing.T) {
 // The slug matches here, so only the host difference can reject.
 func TestCheckoutIsTargetRepo_ForgejoHostMismatch(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "forgejo"
+	c.CodeForge = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
-	c.repoSlug = "owner/repo"
+	c.RepoSlug = "owner/repo"
 	dir := newGitCheckoutWithRemote(t, "git@git.example.com:owner/repo.git")
 	if checkoutIsTargetRepo(dir, c) {
 		t.Errorf("checkoutIsTargetRepo(%q, c) = true, want false for a remote on a different forgejo host", dir)
@@ -694,7 +694,7 @@ func TestCheckoutIsTargetRepo_NoOriginRemote(t *testing.T) {
 // the checkout does have an origin remote.
 func TestCheckoutIsTargetRepo_LocalCodeForgeNeverMatches(t *testing.T) {
 	c := minimalValidConfig()
-	c.codeForge = "local"
+	c.CodeForge = "local"
 	dir := newGitCheckoutWithRemote(t, "git@github.com:owner/repo.git")
 	if checkoutIsTargetRepo(dir, c) {
 		t.Errorf("checkoutIsTargetRepo(%q, c) = true, want false for codeForge=local", dir)

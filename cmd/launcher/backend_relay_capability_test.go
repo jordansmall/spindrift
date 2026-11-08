@@ -22,8 +22,8 @@ func relayCapabilityViolations() []string {
 			continue
 		}
 		c := minimalValidConfig()
-		c.codeForge = row.Name
-		c.boxForgeAndIssueAccess = "read-only"
+		c.CodeForge = row.Name
+		c.BoxForgeAndIssueAccess = "read-only"
 		cf := newCodeForge(c, local.SanitizedParent{}, forge.NewFake())
 
 		_, relay := cf.(forge.BundleRelay)

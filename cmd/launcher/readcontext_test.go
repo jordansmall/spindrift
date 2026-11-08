@@ -14,7 +14,7 @@ import (
 // reaches (issue #2941 AC2).
 func TestReadContext_ReconcileLivenessProbe_LocalTracker_ReturnsNonNil(t *testing.T) {
 	c := baseConfig()
-	c.issueTracker = "local"
+	c.IssueTracker = "local"
 	rc := readContext{config: c, capabilities: forge.Capabilities{TrackerDescriptor: backend.Local}}
 
 	lp, err := rc.reconcileLivenessProbe(t.TempDir())
@@ -29,7 +29,7 @@ func TestReadContext_ReconcileLivenessProbe_LocalTracker_ReturnsNonNil(t *testin
 
 func TestReadContext_ReconcileLivenessProbe_UnknownRunnerKind_ReturnsError(t *testing.T) {
 	c := baseConfig()
-	c.issueTracker = "local"
+	c.IssueTracker = "local"
 	c.runnerKind = "nope"
 	rc := readContext{config: c, capabilities: forge.Capabilities{TrackerDescriptor: backend.Local}}
 
@@ -47,7 +47,7 @@ func TestReadContext_ReconcileLivenessProbe_UnknownRunnerKind_ReturnsError(t *te
 // github/jira "nothing to do" refusal (issue #2941 AC2).
 func TestReadContext_ReconcileLivenessProbe_GithubTracker_ReturnsNil(t *testing.T) {
 	c := baseConfig()
-	c.issueTracker = "github"
+	c.IssueTracker = "github"
 	rc := readContext{config: c}
 
 	lp, err := rc.reconcileLivenessProbe(t.TempDir())
@@ -78,8 +78,8 @@ func TestNewReadContext_FullyLocal_ConstructsClean(t *testing.T) {
 		t.Fatalf("newReadContext: %v", err)
 	}
 
-	if rc.config.issueTracker != "local" {
-		t.Errorf("rc.config.issueTracker = %q, want %q", rc.config.issueTracker, "local")
+	if rc.config.IssueTracker != "local" {
+		t.Errorf("rc.config.issueTracker = %q, want %q", rc.config.IssueTracker, "local")
 	}
 	if rc.issueTracker == nil {
 		t.Error("rc.issueTracker = nil, want a non-nil IssueTracker")
@@ -123,7 +123,7 @@ func TestNewReadContext_FullyLocal_ResolvesCapabilities(t *testing.T) {
 // cover (issue #2941 AC4).
 func TestReadContext_ConstructibleAgainstForgeFake(t *testing.T) {
 	c := baseConfig()
-	c.issueTracker = "local"
+	c.IssueTracker = "local"
 	fake := forge.NewFake()
 	rc := readContext{config: c, issueTracker: fake, codeForge: fake, capabilities: forge.Capabilities{TrackerDescriptor: backend.Local}}
 
@@ -163,7 +163,7 @@ func TestNewReadContext_InvalidConfig_ConstructsCleanly(t *testing.T) {
 // remedy, naming the knob to fix (issue #2992).
 func TestReadContext_Validation_InvalidConfig_ReturnsConfigErrNamingBrokenKnob(t *testing.T) {
 	c := minimalValidConfig()
-	c.gitUserName = ""
+	c.GitUserName = ""
 	rc := readContext{config: c}
 
 	v := rc.validation()
@@ -197,7 +197,7 @@ func TestReadContext_Validation_ReportSharesClassifyMemoizedProbe(t *testing.T) 
 	const envName = "SPINDRIFT_TEST_READCONTEXT_VALIDATION_SHARED_PROBE"
 	t.Setenv(envName, "resolvable")
 	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `
+	c.RegistryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "`+envName+`" }

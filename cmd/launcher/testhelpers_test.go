@@ -47,15 +47,15 @@ func setFullyLocalEnv(t *testing.T) {
 // Returns a config suitable for merge-gate-adjacent tests (preflight, wiring
 // through settle).
 func baseConfig() config {
-	return config{schemaConfig: schemaConfig{
-		inProgressLabel:   "agent-in-progress",
-		failedLabel:       "agent-failed",
-		completeLabel:     "agent-complete",
-		mergePollInterval: 0,   // no sleep in tests
-		mergePollTimeout:  100, // large enough for multi-poll tests
-		mergeMode:         "immediate",
-		codeForge:         "github",
-		issueTracker:      "github",
+	return config{Knobs: inputdoc.Knobs{
+		InProgressLabel:   "agent-in-progress",
+		FailedLabel:       "agent-failed",
+		CompleteLabel:     "agent-complete",
+		MergePollInterval: 0,   // no sleep in tests
+		MergePollTimeout:  100, // large enough for multi-poll tests
+		MergeMode:         "immediate",
+		CodeForge:         "github",
+		IssueTracker:      "github",
 	}}
 }
 
@@ -116,8 +116,8 @@ func testWired(it forge.IssueTracker) *localloop.Wired {
 // test gets correct pr/landing behavior for whatever fake shape it passes
 // without wiring Capabilities by hand.
 func testNewSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) settle.Settler {
-	forgeDesc, _ := backend.ByName(c.codeForge)
-	trackerDesc, _ := backend.ByName(c.issueTracker)
+	forgeDesc, _ := backend.ByName(c.CodeForge)
+	trackerDesc, _ := backend.ByName(c.IssueTracker)
 	caps := forge.ResolveCapabilities(cf, it, forgeDesc, trackerDesc)
 	return newSettle(c, it, lw, cf, caps)
 }
