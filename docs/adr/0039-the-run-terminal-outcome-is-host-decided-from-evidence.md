@@ -96,7 +96,7 @@ Concretely:
 
 - **`Recoverable` is a first-class lifecycle state.** Reconcile **skips** it
   (never resets it toward `Dispatchable`, so it is never silently
-  re-dispatched); `spindrift recover` (`SettleRelayedBranch`, #2225) is what
+  re-dispatched); `spindrift recover` (`Recover`, #2225) is what
   lands it; `spindrift doctor` and the Console surface a count. The operator's
   action becomes *recover*, not *restart*. A local push-only run is **not**
   auto-fast-forwarded on an unauthenticated `SelfReport`: unlike a github
@@ -140,7 +140,7 @@ Concretely:
   what changes.
 - A new `Recoverable` state joins the `local` issue lifecycle (ADR 0029): a
   Reconcile skip arm, a `recover` landing arm (built on #2225's
-  `SettleRelayedBranch`), and a doctor/Console surface. ADR 0017's
+  `Recover`), and a doctor/Console surface. ADR 0017's
   "lifecycle stays call-site transitions" extends to it — the transition is
   minted at the settle call site, not inferred.
 - #2224's auto-adopt arm broadens from synthetic-`blocked`-only to include the
@@ -192,7 +192,7 @@ the same run's `runner.Run` error, never persisted to disk. `spindrift
 recover`'s later, separate invocation has no way to re-derive it the way it
 re-derives self-report from `dispatch.ResolveFromLogs`. Rather than invent a
 new on-disk artifact just to carry a boolean forward, `recover`'s local
-push-only landing arm (`SettleRelayedBranch`) instead trusts the same bundle
+push-only landing arm (`Recover`) instead trusts the same bundle
 presence check the push-only Lander's `salvage` already required as a hard
 precondition: once an issue reaches `Recoverable`, recovering it needs no
 independent proof
@@ -210,7 +210,7 @@ such entry at all (legacy loop, older manifests). #2363's bundle came
 from a land pass, which had already cleared review, so it still
 qualifies. A bundle from a run killed before review approved is the
 same unreviewed work #5973 refuses to land behind a stale ready, and a
-missing self-report makes it no more trustworthy. `SettleRelayedBranch`
+missing self-report makes it no more trustworthy. `Recover`
 declines such a run, so a hand-run `spindrift recover` lands nothing; the
 push-only Lander's `salvage` reads the same `Situation.Unreviewed` and fails it
 `unreviewed` rather than marking it `Recoverable`.

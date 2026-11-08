@@ -7141,7 +7141,7 @@ a mismatched pairing — e.g. `ISSUE_TRACKER=forgejo` with `CODE_FORGE=github`
 
 A patch PR that did open lands through the work merge gate once the Done
 commit is in (or once it is lost, below): the host hands it to the gate's
-adopt entry point (`settle.SettleAdopted`) with no Dispatcher, and the
+adopt entry point (`settle.SettlePatch`) with no Dispatcher, and the
 butler kind's settle config sets `settle.Config.Unclaimed`, which forces
 `MaxFixAttempts` to `0` (issue #4076). The gate polls CI to green, marks
 the PR ready, applies the usual merge guard (`MERGE_GUARD_PATHS` downgrades

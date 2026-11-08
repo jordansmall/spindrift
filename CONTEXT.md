@@ -1275,7 +1275,7 @@ unauthenticated signal (a local fast-forward has no draft-PR review catch,
 unlike the PR-shaped forge that auto-adopts) nor lost to the `Failed` triage
 queue. [[Reconcile]] skips it — never resets it toward `Dispatchable`, so it is
 never silently re-dispatched — and `spindrift recover` (the
-`SettleRelayedBranch` arm, issue #2225) is what lands it; `doctor` and the
+`Recover` entry point, issue #2225) is what lands it; `doctor` and the
 Console surface a count. The operator's action becomes *recover*, not
 *restart*. _Avoid_: stranded, salvageable, failed-recoverable (it is a state of
 its own, not a flavor of `Failed`).
