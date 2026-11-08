@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/passmachine"
 	"spindrift.dev/launcher/internal/passmanifest"
@@ -100,7 +101,7 @@ func streamJSONResultLine(inputTokens, outputTokens int, costUSD float64) string
 // driver name degrades to the zero usage.Usage rather than panicking or
 // propagating an error the caller has no way to handle mid-loop.
 func TestPassReportDegradesOnUnresolvableDriver(t *testing.T) {
-	got := passReport(filepath.Join(t.TempDir(), "stream.log"), "not-a-real-driver").Totals
+	got := testPassReport(filepath.Join(t.TempDir(), "stream.log"), "not-a-real-driver", "").Totals
 	if got != (usage.Usage{}) {
 		t.Errorf("passReport().Totals = %+v, want the zero value for an unresolvable driver name", got)
 	}
@@ -111,7 +112,7 @@ func TestPassReportDegradesOnUnresolvableDriver(t *testing.T) {
 // written, an ordinary outcome for a pass cut short, degrades to the zero
 // usage.Usage silently, the same as an unresolvable driver name.
 func TestPassReportDegradesOnMissingLog(t *testing.T) {
-	got := passReport(filepath.Join(t.TempDir(), "never-written.log"), "claude").Totals
+	got := testPassReport(filepath.Join(t.TempDir(), "never-written.log"), "claude", "").Totals
 	if got != (usage.Usage{}) {
 		t.Errorf("passReport().Totals = %+v, want the zero value for a log that was never written", got)
 	}
@@ -121,7 +122,7 @@ func TestPassReportDegradesOnMissingLog(t *testing.T) {
 // not-found path (issue #3156), mirroring passReport's: a log path that was
 // never written degrades to the zero hostop.PassUsage silently.
 func TestAgentUsagePayloadDegradesOnMissingLog(t *testing.T) {
-	got := agentUsagePayload(passReport(filepath.Join(t.TempDir(), "never-written.log"), "claude"))
+	got := agentUsagePayload(testPassReport(filepath.Join(t.TempDir(), "never-written.log"), "claude", ""))
 	if !reflect.DeepEqual(got, hostop.PassUsage{}) {
 		t.Errorf("agentUsagePayload(passReport(...)) = %+v, want the zero value for a log that was never written", got)
 	}
@@ -146,7 +147,7 @@ func TestAgentUsagePayloadSumsAgentRows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := agentUsagePayload(passReport(logPath, "claude"))
+	got := agentUsagePayload(testPassReport(logPath, "claude", ""))
 
 	want := hostop.PassUsage{
 		APICalls:                 2,
@@ -180,7 +181,7 @@ func TestAgentUsagePayloadOpencodeCarriesAPICalls(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := agentUsagePayload(passReport(logPath, "opencode"))
+	got := agentUsagePayload(testPassReport(logPath, "opencode", ""))
 
 	want := hostop.PassUsage{
 		APICalls:                 2,
@@ -6589,4 +6590,100 @@ exit 0
 		strings.Index(out, `"outcome reached"`) < strings.Index(out, `"pass":2,`) {
 		t.Errorf("stdout = %q, want no outcome-reached stop before pass 2", out)
 	}
+}
+
+// resumedFixPassLog is a log holding one fix pass's result: the resumed
+// session's cumulative figures (opus 160, haiku 30 output) after an earlier
+// pass left it at opus 120 / haiku 30, with no subagent spawned this pass.
+const resumedFixPassLog = `{"type":"assistant","session_id":"sess-main","message":{"id":"msg_c","model":"claude-opus-4-8","content":[],"usage":{"input_tokens":4,"output_tokens":40}}}` + "\n" + `{"type":"result","session_id":"sess-main","total_cost_usd":1.75,"duration_api_ms":1800,"usage":{"input_tokens":4,"output_tokens":40},"modelUsage":{"claude-opus-4-8":{"outputTokens":160},"claude-haiku-4-5-20251001":{"outputTokens":30}}}` + "\n"
+
+func subagentOutput(r usage.Report) int {
+	for _, a := range r.SummedByAgent {
+		if a.Agent == usage.SubagentsAgent {
+			return a.OutputTokens
+		}
+	}
+	return 0
+}
+
+// TestPassReportRebasesResumedSessionAgainstBaselineFile pins issue #6706: a
+// fix pass that --resumes a session sees the session's cumulative modelUsage,
+// so passReport must subtract the baseline an earlier pass (possibly an
+// earlier Box) left in the file, or the earlier subagent output re-books as a
+// phantom (subagents) row.
+func TestPassReportRebasesResumedSessionAgainstBaselineFile(t *testing.T) {
+	dir := t.TempDir()
+	baselineFile := filepath.Join(dir, "baselines.json")
+	seed := `{"sess-main":{"cost_usd":1.0,"duration_api_ms":1000,"model_output":{"claude-opus-4-8":120,"claude-haiku-4-5-20251001":30}}}`
+	if err := os.WriteFile(baselineFile, []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	if err := os.WriteFile(logPath, []byte(resumedFixPassLog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := testPassReport(logPath, "claude", baselineFile)
+
+	if got := subagentOutput(r); got != 0 {
+		t.Errorf("(subagents) output = %d, want 0 (the prior pass's subagent output is baseline)", got)
+	}
+	if got := agentUsagePayload(r).OutputTokens; got != 40 {
+		t.Errorf("payload OutputTokens = %d, want 40 (this query's own)", got)
+	}
+	raw, err := os.ReadFile(baselineFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var after driverkit.SessionBaselines
+	if err := json.Unmarshal(raw, &after); err != nil {
+		t.Fatal(err)
+	}
+	if got := after["sess-main"].ModelOutput["claude-opus-4-8"]; got != 160 {
+		t.Errorf("baseline file opus = %d, want 160 (advanced past this pass)", got)
+	}
+}
+
+// TestPassReportThreadsBaselineBetweenPasses runs two passes of one session
+// through one baseline file that starts absent: the second result's
+// cumulative modelUsage must book only its increment.
+func TestPassReportThreadsBaselineBetweenPasses(t *testing.T) {
+	dir := t.TempDir()
+	baselineFile := filepath.Join(dir, "baselines.json")
+	logPath := filepath.Join(dir, "stream.log")
+	first := `{"type":"assistant","session_id":"sess-main","message":{"id":"msg_a","model":"claude-opus-4-8","content":[{"type":"tool_use","id":"toolu_scout","name":"Agent","input":{"subagent_type":"scout"}}],"usage":{"input_tokens":10,"output_tokens":100}}}` + "\n" + `{"type":"assistant","session_id":"sess-main","parent_tool_use_id":"toolu_scout","message":{"id":"msg_b","model":"claude-haiku-4-5-20251001","content":[],"usage":{"input_tokens":5,"output_tokens":30}}}` + "\n" + `{"type":"result","session_id":"sess-main","total_cost_usd":1.0,"duration_api_ms":1000,"usage":{"input_tokens":10,"output_tokens":100},"modelUsage":{"claude-opus-4-8":{"outputTokens":120},"claude-haiku-4-5-20251001":{"outputTokens":30}}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := subagentOutput(testPassReport(logPath, "claude", baselineFile)); got != 50 {
+		t.Fatalf("first pass (subagents) output = %d, want 50", got)
+	}
+	if err := os.WriteFile(logPath, []byte(resumedFixPassLog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := subagentOutput(testPassReport(logPath, "claude", baselineFile)); got != 0 {
+		t.Errorf("resumed pass (subagents) output = %d, want 0", got)
+	}
+}
+
+// TestPassReportSurvivesCorruptBaselineFile keeps passReport best-effort: an
+// unreadable baseline file degrades to no baseline, never to a zero report.
+func TestPassReportSurvivesCorruptBaselineFile(t *testing.T) {
+	dir := t.TempDir()
+	baselineFile := filepath.Join(dir, "baselines.json")
+	if err := os.WriteFile(baselineFile, []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	if err := os.WriteFile(logPath, []byte(resumedFixPassLog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if r := testPassReport(logPath, "claude", baselineFile); !r.Found {
+		t.Errorf("passReport = %+v, want the pass's report despite a corrupt baseline file", r)
+	}
+}
+
+func testPassReport(logPath, driverName, baselineFile string) usage.Report {
+	return config{logPath: logPath, driver: driverName, usageBaselineFile: baselineFile}.passReport()
 }

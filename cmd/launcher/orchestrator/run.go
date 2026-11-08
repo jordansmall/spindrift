@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -47,6 +48,9 @@ type config struct {
 	// stateFile is the run-state handoff artifact (issue #1997). Empty
 	// disables reading and writing it.
 	stateFile string
+	// usageBaselineFile persists each session's last cumulative result figures
+	// across passes and Boxes (issue #6706). Empty disables it.
+	usageBaselineFile string
 	// scoutBriefPath and passSummaryPath reach the run-state artifact as
 	// paths, never inlined content.
 	scoutBriefPath  string
@@ -267,7 +271,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		// The next pass truncates cfg.logPath, so this pass's usage must be
 		// read back now or never (issue #2694). One scan feeds both
 		// passUsageTotals and the pass_usage op below.
-		report := passReport(cfg.logPath, cfg.driver)
+		report := cfg.passReport()
 		passUsageTotals := report.Totals
 		// No Role: this loop's pass_start op carries none either, since it
 		// never distinguishes pass kinds.
@@ -418,7 +422,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		passOut, hasOutcome := scanPassOutcome(cfg.logPath, cfg.driver)
 		// Folded in before the next driver-exec invocation truncates
 		// cfg.logPath (issue #2694). One scan feeds both values below.
-		report := passReport(cfg.logPath, cfg.driver)
+		report := cfg.passReport()
 		passUsageTotals := report.Totals
 		cumulativeTokens += passUsageTotals.TotalTokens()
 		cumulativeUSD += passUsageTotals.TotalCostUSD
@@ -515,7 +519,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		reviewVerdict, findings := scanReviewLog(cfg.logPath, cfg.driver)
 		// Folded in before the next invocation truncates cfg.logPath (issue
 		// #2694), same as the block above. One scan feeds both values below.
-		reviewReport := passReport(cfg.logPath, cfg.driver)
+		reviewReport := cfg.passReport()
 		reviewUsageTotals := reviewReport.Totals
 		cumulativeTokens += reviewUsageTotals.TotalTokens()
 		cumulativeUSD += reviewUsageTotals.TotalCostUSD
@@ -641,7 +645,7 @@ func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *lan
 	}
 
 	deltaVerdict, deltaFindings := scanReviewLog(deltaCfg.logPath, cfg.driver)
-	deltaReport := passReport(deltaCfg.logPath, cfg.driver)
+	deltaReport := deltaCfg.passReport()
 	deltaUsageTotals := deltaReport.Totals
 	*cumulativeTokens += deltaUsageTotals.TotalTokens()
 	*cumulativeUSD += deltaUsageTotals.TotalCostUSD
@@ -901,28 +905,89 @@ func scanReviewLog(logPath, driverName string) (verdict, findings string) {
 	return string(res.Verdict), findings
 }
 
-// passReport extracts logPath's usage.Report (issue #2694), best-effort: an
-// unresolvable driver name, an ExtractUsage error, or a log with no result
+// passReport extracts cfg.logPath's usage.Report (issue #2694), best-effort: an
+// unresolvable driver name, an ExtractUsageAfter error, or a log with no result
 // event all give the zero Report rather than aborting the run. Call it once
 // per pass, right after that pass's log is scanned, because the orchestrator
-// reuses one log path and the next pass truncates it.
-func passReport(logPath, driverName string) usage.Report {
-	d, err := driver.New(driverName)
+// reuses one log path and the next pass truncates it. cfg.usageBaselineFile
+// carries each session's last cumulative result across passes and Boxes, so a
+// resumed session's pass books only its increment (issue #6706); empty
+// disables it.
+func (cfg config) passReport() usage.Report {
+	d, err := driver.New(cfg.driver)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: budget usage: resolve driver:", err)
 		return usage.Report{}
 	}
-	r, err := d.ExtractUsage(logPath)
+	base := loadUsageBaselines(cfg.usageBaselineFile)
+	r, after, err := d.ExtractUsageAfter(cfg.logPath, base)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: budget usage: extract usage:", err)
 		return usage.Report{}
 	}
+	saveUsageBaselines(cfg.usageBaselineFile, after)
 	if !r.Found {
 		// No result event is ordinary for a pass cut short, not an error, so
 		// degrade silently rather than log.
 		return usage.Report{}
 	}
 	return r
+}
+
+// loadUsageBaselines reads path's baselines; a missing file is the ordinary
+// first pass and gives nil silently, an unreadable one warns and gives nil.
+func loadUsageBaselines(path string) driverkit.SessionBaselines {
+	if path == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	var base driverkit.SessionBaselines
+	if err == nil {
+		err = json.Unmarshal(raw, &base)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchestrator: budget usage: read baselines:", err)
+		return nil
+	}
+	return base
+}
+
+// saveUsageBaselines writes base to path via a temp file and rename, warning
+// rather than failing: a lost baseline only risks a double-booked pass.
+func saveUsageBaselines(path string, base driverkit.SessionBaselines) {
+	if path == "" {
+		return
+	}
+	if err := writeUsageBaselines(path, base); err != nil {
+		fmt.Fprintln(os.Stderr, "orchestrator: budget usage: write baselines:", err)
+	}
+}
+
+func writeUsageBaselines(path string, base driverkit.SessionBaselines) error {
+	raw, err := json.Marshal(base)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".usage-baselines-*.json.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // agentUsagePayload turns r into the pass_usage op's payload (issue #3156).

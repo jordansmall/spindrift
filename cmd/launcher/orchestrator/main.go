@@ -34,6 +34,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	sessionFile := fs.String("session-file", "", "path to pre-rendered session pin/resume flags, empty for none")
 	logPath := fs.String("log-path", "", "path to tee the raw Driver stream to, for outcome extraction (required)")
 	stateFile := fs.String("state-file", "/tmp/run-state.json", "path to the run-state handoff artifact (issue #1997); empty disables it")
+	usageBaselineFile := fs.String("usage-baseline-file", "", "path to the per-session cumulative-usage baselines (issue #6706), so a resumed session's pass books only its increment; empty disables it")
 	scoutBriefPath := fs.String("scout-brief-path", defaultScoutBriefPath, "path to the scout brief, recorded into the run-state artifact")
 	passSummaryPath := fs.String("pass-summary-path", "/tmp/pass-summary.md", "path to the most recent pass's own summary, recorded into the run-state artifact")
 	dispositionsPath := fs.String("dispositions-path", passmachine.DispositionsPath, "path to the most recent fix pass's own per-finding dispositions file, recorded into the run-state artifact")
@@ -96,23 +97,24 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 
 	rc, err := run(config{
-		driver:           handoff.Driver,
-		handoffFile:      *handoffFile,
-		promptFile:       *promptFile,
-		sessionFile:      *sessionFile,
-		logPath:          *logPath,
-		stateFile:        *stateFile,
-		scoutBriefPath:   *scoutBriefPath,
-		passSummaryPath:  *passSummaryPath,
-		dispositionsPath: *dispositionsPath,
-		decisionsPath:    *decisionsPath,
-		manifestPath:     *manifestPath,
-		advisoryReviewer: handoff.AdvisoryReviewer,
-		maxReviewRounds:  handoff.Caps.MaxReviewRounds,
-		maxSlices:        handoff.Caps.MaxSlices,
-		maxBudgetTokens:  maxBudgetTokens,
-		maxBudgetUSD:     maxBudgetUSD,
-		reviewPromptFile: handoff.ReviewPromptFile,
+		driver:            handoff.Driver,
+		handoffFile:       *handoffFile,
+		promptFile:        *promptFile,
+		sessionFile:       *sessionFile,
+		logPath:           *logPath,
+		stateFile:         *stateFile,
+		usageBaselineFile: *usageBaselineFile,
+		scoutBriefPath:    *scoutBriefPath,
+		passSummaryPath:   *passSummaryPath,
+		dispositionsPath:  *dispositionsPath,
+		decisionsPath:     *decisionsPath,
+		manifestPath:      *manifestPath,
+		advisoryReviewer:  handoff.AdvisoryReviewer,
+		maxReviewRounds:   handoff.Caps.MaxReviewRounds,
+		maxSlices:         handoff.Caps.MaxSlices,
+		maxBudgetTokens:   maxBudgetTokens,
+		maxBudgetUSD:      maxBudgetUSD,
+		reviewPromptFile:  handoff.ReviewPromptFile,
 	}, stdout)
 	if err != nil {
 		fmt.Fprintln(stderr, "orchestrator:", err)
