@@ -81,7 +81,7 @@ func TestRecoverQueueOne_IneligibleScanReportsNothing(t *testing.T) {
 // flags after; the flags must be consumed before the handler picks queue mode,
 // not read as an issue number.
 func TestMainRun_Recover_DaemonChildArgvReachesQueueMode(t *testing.T) {
-	t.Setenv("REPO_SLUG", "")
+	setKnob(t, "REPO_SLUG", "")
 	cmd, err := daemon.ChildCommand(daemon.ChildSpec{
 		RepoPath: "/repo", AppAttr: ".#", Revision: strings.Repeat("a", 40), Kind: daemon.KindOf(dispatchkind.Recover),
 	})

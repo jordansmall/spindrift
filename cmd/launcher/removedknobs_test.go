@@ -26,8 +26,7 @@ func TestRemovedKnobsCheck_RejectsEnv(t *testing.T) {
 }
 
 func TestRemovedKnobsCheck_RejectsInputDocumentSetting(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{Settings: map[string]string{"ORCHESTRATOR_ENABLED": "true"}}
+	useDoc(t, &inputdoc.Document{Settings: map[string]string{"ORCHESTRATOR_ENABLED": "true"}})
 	_, err := removedKnobsCheck().Probe()
 	assertRemovedOrchestratorErr(t, err)
 }

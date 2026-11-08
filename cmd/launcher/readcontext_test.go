@@ -64,13 +64,13 @@ func TestReadContext_ReconcileLivenessProbe_GithubTracker_ReturnsNil(t *testing.
 // reconcile_cmd.go's cmdReconcile now share instead of each building its own
 // copy inline (issue #2941).
 func TestNewReadContext_FullyLocal_ConstructsClean(t *testing.T) {
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
-	t.Setenv("MERGE_MODE", "immediate")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", t.TempDir())
-	t.Setenv("GIT_USER_NAME", "bot")
-	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
+	setKnob(t, "ISSUE_TRACKER", "local")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "LOCAL_ISSUES_DIR", t.TempDir())
+	setKnob(t, "MERGE_MODE", "immediate")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", t.TempDir())
+	setKnob(t, "GIT_USER_NAME", "bot")
+	setKnob(t, "GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
 
 	rc, err := newReadContext(dispatchkind.Work, false)
@@ -143,7 +143,7 @@ func TestReadContext_ConstructibleAgainstForgeFake(t *testing.T) {
 // rc.validation() call reports that the config is invalid.
 func TestNewReadContext_InvalidConfig_ConstructsCleanly(t *testing.T) {
 	setFullyLocalEnv(t)
-	t.Setenv("GIT_USER_NAME", "")
+	setKnob(t, "GIT_USER_NAME", "")
 
 	rc, err := newReadContext(dispatchkind.Work, false)
 	if err != nil {

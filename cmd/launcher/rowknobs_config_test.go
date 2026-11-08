@@ -40,9 +40,10 @@ func TestSchemaConfigHasNoRowKnobFields(t *testing.T) {
 }
 
 func TestLoadSchemaConfigFillsRowKnobsWithDefaults(t *testing.T) {
-	for _, env := range []string{"FORGEJO_BASE_URL", "FORGEJO_TOKEN", "JIRA_INCLUDE_COMMENTS", "LOCAL_ISSUES_DIR"} {
-		t.Setenv(env, "")
+	for _, env := range []string{"FORGEJO_BASE_URL", "JIRA_INCLUDE_COMMENTS", "LOCAL_ISSUES_DIR"} {
+		setKnob(t, env, "")
 	}
+	t.Setenv("FORGEJO_TOKEN", "")
 	t.Setenv("JIRA_TOKEN", "jt")
 	sc := loadSchemaConfig()
 	if got := sc.RowKnobs["FORGEJO_BASE_URL"]; got != "https://codeberg.org" {

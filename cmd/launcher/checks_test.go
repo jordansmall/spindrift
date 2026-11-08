@@ -814,7 +814,7 @@ credential = { gradle-properties = "`+propsPath+`", key = "registryToken" }
 // The probe reads the per-tier models the --secret-cmd fallback reads, so a
 // github-copilot REVIEW_MODEL needs the credential even when MODEL does not.
 func TestLauncherChecks_DriverCredentials_AdapterFeedsPerTierModels(t *testing.T) {
-	t.Setenv("REVIEW_MODEL", "github-copilot/gpt-5")
+	setKnob(t, "REVIEW_MODEL", "github-copilot/gpt-5")
 	c := minimalValidConfig()
 	c.driver = "opencode"
 	c.Model = "anthropic/claude-sonnet-5"

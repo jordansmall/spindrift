@@ -55,7 +55,7 @@ func TestRowKnobsKeysAreDeclaredByARow(t *testing.T) {
 // PODMAN_NETWORK is a row knob: it reaches the oci runner through knobLookup,
 // not runner.Config.
 func TestKnobLookup_ServesPodmanNetwork(t *testing.T) {
-	t.Setenv("PODMAN_NETWORK", "pasta")
+	setKnob(t, "PODMAN_NETWORK", "pasta")
 
 	if v, _ := loadConfig().knobLookup("PODMAN_NETWORK"); v != "pasta" {
 		t.Errorf("PODMAN_NETWORK knob = %q, want pasta", v)

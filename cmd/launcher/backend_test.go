@@ -389,13 +389,12 @@ func TestJiraStatusMappingAppliesToWorkTrackerOnly(t *testing.T) {
 // re-default it: a blank FORGEJO_BASE_URL must still fail closed rather
 // than send a self-hosted FORGEJO_TOKEN to codeberg.
 func TestBlankInputDocumentKnobs_ForgejoRejectedLocalRedefaults(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	t.Setenv("FORGEJO_BASE_URL", "")
-	t.Setenv("LOCAL_ISSUES_DIR", "")
-	loadedDoc = &inputdoc.Document{Settings: map[string]string{
+	setKnob(t, "FORGEJO_BASE_URL", "")
+	setKnob(t, "LOCAL_ISSUES_DIR", "")
+	useDoc(t, &inputdoc.Document{Settings: map[string]string{
 		"FORGEJO_BASE_URL": "",
 		"LOCAL_ISSUES_DIR": "",
-	}}
+	}})
 	c := minimalValidConfig()
 	c.Knobs = loadSchemaConfig()
 	c.setRowKnob(backend.Forgejo.TokenEnvVar, "tok")
@@ -486,7 +485,7 @@ func TestUnregisteredBackendNameFailsWithoutGithubFallback(t *testing.T) {
 
 func TestNewReadContext_UnregisteredBackendIsAnError(t *testing.T) {
 	setFullyLocalEnv(t)
-	t.Setenv("CODE_FORGE", "nope")
+	setKnob(t, "CODE_FORGE", "nope")
 
 	if _, err := newReadContext(dispatchkind.Work, false); err == nil || !strings.Contains(err.Error(), `CODE_FORGE="nope" is not valid`) {
 		t.Errorf("newReadContext err = %v, want the unregistered CODE_FORGE rejected", err)
