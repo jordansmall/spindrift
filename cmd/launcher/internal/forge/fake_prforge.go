@@ -45,6 +45,15 @@ type PRForgeFake struct {
 	// PRFilesErr, if non-nil, is returned by every ListPRFiles call.
 	PRFilesErr error
 
+	// PRForBranchErr, if non-nil, is returned by every PRForBranch call once
+	// PRForBranchErrs is drained: a lookup failure, distinct from "no PR on the
+	// branch".
+	PRForBranchErr error
+
+	// PRForBranchErrs is a per-call queue drained before PRForBranchErr is
+	// checked. A nil entry falls through to the normal branch lookup.
+	PRForBranchErrs []error
+
 	// OpenPRForBranchErr, if non-nil, is returned by every OpenPRForBranch call
 	// once OpenPRForBranchErrs is drained. It models a transient lookup
 	// failure, which is distinct from "no open PR yet".
@@ -264,6 +273,15 @@ func (pf *PRForgeFake) OpenPRForBranch(branch string) (PR, bool, error) {
 func (pf *PRForgeFake) PRForBranch(branch string) (string, bool, error) {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
+	if len(pf.PRForBranchErrs) > 0 {
+		err := pf.PRForBranchErrs[0]
+		pf.PRForBranchErrs = pf.PRForBranchErrs[1:]
+		if err != nil {
+			return "", false, err
+		}
+	} else if pf.PRForBranchErr != nil {
+		return "", false, pf.PRForBranchErr
+	}
 	url, ok := pf.branchPRs[branch]
 	if !ok {
 		return "", false, nil
