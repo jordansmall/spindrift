@@ -209,34 +209,17 @@ func TestSettle_BlockedHandOffKeepsBundle(t *testing.T) {
 	}
 }
 
-// Recover's adopt arm lands through the same gate and drops the bundle too.
-func TestSettle_SettleRelayedBranch_RemovesBundleAfterMerge(t *testing.T) {
-	const issNum = "2225"
-	const prURL = "https://github.com/owner/repo/pull/2225"
-	outbox := t.TempDir()
-	writeBundle(t, outbox)
-	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
-	fc.CreateDraftPRURL = prURL
-	fc.SetCheckStates(prURL, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
-	result := dispatch.Result{Resolved: outcome.Resolved{
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
-	}}
-	c := baseConfig()
-	c.OutboxDir = func(string) string { return outbox }
-	c.BaseBranch = "main"
-	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
-
-	sit := s.situationFor(issNum, false, result)
-	if _, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result); !got || err != nil {
-		t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
+// Recover's relay arm lands through the same gate and drops the bundle too.
+func TestRecover_RemovesBundleAfterMerge(t *testing.T) {
+	e := newRecoverEnv(t, true)
+	e.fc.SetCheckStates(recoverPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
+	if _, err := e.s.Recover(e.in("", readyReport(), nil, false)); err != nil {
+		t.Fatalf("Recover err = %v, want nil", err)
 	}
-	if fc.Merged != prURL {
-		t.Fatalf("fc.Merged = %q, want %q", fc.Merged, prURL)
+	if e.fc.Merged != recoverPR {
+		t.Fatalf("fc.Merged = %q, want %q", e.fc.Merged, recoverPR)
 	}
-	if bundleExists(t, outbox) {
+	if bundleExists(t, e.outbox) {
 		t.Errorf("recover's landed issue must not keep its bundle")
 	}
 }

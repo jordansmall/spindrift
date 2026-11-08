@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -351,47 +352,35 @@ func TestSettle_LocalPushOnly_CleanFailureBundlePresentFallsBackToFailed(t *test
 	}
 }
 
-// Slice C's regression check that a plain git push-only forge (s.pr == nil,
-// but not a forge.BundleRelay) still falls through to adoptAndGate unchanged:
-// adoptRelayedBranch's DraftPRCreator assertion still fails it, so
-// SettleRelayedBranch must return false rather than route it into the
-// local-shaped landing arm.
-func TestSettle_SettleRelayedBranch_GitPushOnlyStillReturnsFalse(t *testing.T) {
+// A plain git push-only forge (not a forge.BundleRelay) has no landing arm of
+// its own, so Recover relays nothing for it rather than routing it into the
+// local-shaped landing.
+func TestRecover_GitPushOnlyRelaysNothing(t *testing.T) {
 	const issNum = "1"
 
 	fc := forge.NewFake(testDispatchLabels)
 	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
-	d := dispatch.NewFake()
-	result := dispatch.Result{
-		Resolved: outcome.Resolved{
-			SelfReportFound: true,
-			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
-		},
-	}
-
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return t.TempDir() }
 	s := newTestSettle(c, fc, fc.AsPushOnly())
 
-	sit := s.situationFor(issNum, false, result)
-	_, got, err := s.SettleRelayedBranch(d, issNum, 0, sit, result)
-	if err != nil {
-		t.Fatalf("SettleRelayedBranch err = %v, want nil for a git-shaped push-only forge", err)
-	}
-	if got {
-		t.Fatalf("SettleRelayedBranch = true, want false for a git-shaped push-only forge")
+	_, err := s.Recover(RecoverInput{
+		Num: issNum, Resolved: readyReport(),
+		Begin: func() (dispatch.Dispatcher, error) { return dispatch.NewFake(), nil },
+	})
+	if !errors.Is(err, ErrNothingToRecover) {
+		t.Fatalf("Recover err = %v, want ErrNothingToRecover for a git-shaped push-only forge", err)
 	}
 	if fc.Merged != "" {
 		t.Errorf("expected no merge to have run; fc.Merged=%q", fc.Merged)
 	}
 }
 
-// Slice 4's true-negative regression: local push-only with neither a bundle in
-// the outbox nor a self-report has no evidence to recover from, so
-// SettleRelayedBranch must return false and no merge may run.
-func TestSettle_SettleRelayedBranch_LocalPushOnlyNoBundleNoSelfReportReturnsFalse(t *testing.T) {
+// Local push-only with neither a bundle in the outbox nor a self-report has no
+// evidence to recover from, so no merge may run.
+func TestRecover_LocalPushOnlyNoBundleNoSelfReportRelaysNothing(t *testing.T) {
 	const issNum = "1"
 	outbox := t.TempDir() // no bundle written
 
@@ -399,24 +388,16 @@ func TestSettle_SettleRelayedBranch_LocalPushOnlyNoBundleNoSelfReportReturnsFals
 	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
-	d := dispatch.NewFake()
-	result := dispatch.Result{
-		Resolved: outcome.Resolved{
-			SelfReportFound: false,
-		},
-	}
-
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return outbox }
 	s := newTestSettle(c, fc, fc.AsLocal())
 
-	sit := s.situationFor(issNum, false, result)
-	_, got, err := s.SettleRelayedBranch(d, issNum, 0, sit, result)
-	if err != nil {
-		t.Fatalf("SettleRelayedBranch err = %v, want nil", err)
-	}
-	if got {
-		t.Fatalf("SettleRelayedBranch = true, want false with neither a bundle nor a self-report")
+	_, err := s.Recover(RecoverInput{
+		Num:   issNum,
+		Begin: func() (dispatch.Dispatcher, error) { return dispatch.NewFake(), nil },
+	})
+	if !errors.Is(err, ErrNothingToRecover) {
+		t.Fatalf("Recover err = %v, want ErrNothingToRecover with neither a bundle nor a self-report", err)
 	}
 	if fc.Merged != "" {
 		t.Errorf("expected no merge to have run; fc.Merged=%q", fc.Merged)

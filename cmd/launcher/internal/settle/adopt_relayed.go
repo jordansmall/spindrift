@@ -13,25 +13,6 @@ import (
 	"spindrift.dev/launcher/internal/seambundle"
 )
 
-// SettleRelayedBranch is spindrift recover's adopt-a-relayed-branch arm
-// (#2225); sit comes from the caller (#2501). Recover is read-write, so it
-// needs neither synthetic provenance nor a read-only Box. An open PR is
-// SettleAdopted's job, so sit.OpenPRFound returns false; every production
-// caller passes false today, so this guard only protects a future caller.
-// The Lander lands the relayed branch: a PR forge opens a PR on it, while
-// local push-only has no PR to open (ADR 0039, #2254), where a bundle alone
-// is evidence (#2378). The error is non-nil only when relaying the branch or
-// opening its draft PR failed.
-func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (st Settlement, relayed bool, err error) {
-	defer func() { st = s.flushSettled(d, num) }()
-	// An unreviewed run is not adoption evidence, push-only included (issues #5973, #5984).
-	if sit.OpenPRFound || sit.Unreviewed {
-		return Settlement{}, false, nil
-	}
-	relayed, err = s.lander.landRelayed(d, num, gen, sit, result)
-	return Settlement{}, relayed, err
-}
-
 // bundlePresent reports whether num's outbox holds a relayable bundle file. It
 // stats rather than calling RelayBundle: detecting Recoverable must never
 // import or land anything.

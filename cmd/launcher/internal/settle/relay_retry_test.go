@@ -566,9 +566,10 @@ func TestSelfHeal_FixPassRelayStoppedDuringBackoff_AbandonsWithoutConfirmSleep(t
 }
 
 // stoppedRelayFixture builds a read-only Settle over fc whose relay always
-// fails and whose first backoff marks num terminated (issue #3523). It returns
-// the Settle and the generation num was begun at.
-func stoppedRelayFixture(t *testing.T, num string, tracker func(*forge.Fake) forge.CodeForge) (*Settle, *forge.Fake, uint64) {
+// fails and whose first backoff marks num terminated (issue #3523). The caller
+// Begins num itself, or not: Recover settles at generation 0, which a stop
+// marks when no Begin bumped it.
+func stoppedRelayFixture(t *testing.T, num string, tracker func(*forge.Fake) forge.CodeForge) (*Settle, *forge.Fake) {
 	t.Helper()
 	var s *Settle
 	fc := forge.NewFake(testDispatchLabels)
@@ -583,7 +584,7 @@ func stoppedRelayFixture(t *testing.T, num string, tracker func(*forge.Fake) for
 	c.BaseBranch = "main"
 	_, c.Clock = stopOnRelayBackoff(&s, fc, num)
 	s = newTestSettle(c, fc.AsNoLandingRecorder(), tracker(fc))
-	return s, fc, s.term.Begin(num)
+	return s, fc
 }
 
 func assertNoStoppedIssueWrites(t *testing.T, fc *forge.Fake) {
@@ -602,7 +603,8 @@ func assertNoStoppedIssueWrites(t *testing.T, fc *forge.Fake) {
 // comment on the issue the operator stopped.
 func TestSettle_GithubReadOnly_ReadyRelayStoppedDuringBackoff_PostsNothing(t *testing.T) {
 	const issNum = "4649"
-	s, fc, gen := stoppedRelayFixture(t, issNum, (*forge.Fake).AsGithubReadOnly)
+	s, fc := stoppedRelayFixture(t, issNum, (*forge.Fake).AsGithubReadOnly)
+	gen := s.term.Begin(issNum)
 	result := dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
@@ -617,27 +619,22 @@ func TestSettle_GithubReadOnly_ReadyRelayStoppedDuringBackoff_PostsNothing(t *te
 	assertNoStoppedIssueWrites(t, fc)
 }
 
-// Pins issue #4649 against issue #3523 on the adopt path: a stop during the
-// relay's backoff counts as handled, so the caller's blocked handling never
-// comments on or transitions the stopped issue.
-func TestSettle_SettleRelayedBranch_RelayStoppedDuringBackoff_HandledWithoutWrites(t *testing.T) {
+// Pins issue #4649 against issue #3523 on the recover path: a stop during the
+// relay's backoff abandons the landing without an error, so main's failure
+// handling never comments on or transitions the stopped issue.
+func TestRecover_RelayStoppedDuringBackoff_AbandonedWithoutWrites(t *testing.T) {
 	const issNum = "4649"
-	s, fc, gen := stoppedRelayFixture(t, issNum, (*forge.Fake).AsGithubReadOnly)
-	result := dispatch.Result{Resolved: outcome.Resolved{
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
-	}}
-	sit := s.situationFor(issNum, false, result)
-
-	var got bool
+	s, fc := stoppedRelayFixture(t, issNum, (*forge.Fake).AsGithubReadOnly)
+	var st Settlement
 	var err error
-	captureStdout(t, func() { _, got, err = s.SettleRelayedBranch(dispatch.NewFake(), issNum, gen, sit, result) })
-	if err != nil {
-		t.Errorf("SettleRelayedBranch err = %v, want nil", err)
-	}
-
-	if !got {
-		t.Errorf("SettleRelayedBranch = false, want true (handled; the stop owns the issue)")
+	captureStdout(t, func() {
+		st, err = s.Recover(RecoverInput{
+			Num: issNum, Resolved: readyReport(),
+			Begin: func() (dispatch.Dispatcher, error) { return dispatch.NewFake(), nil },
+		})
+	})
+	if err != nil || st != (Settlement{}) {
+		t.Errorf("Recover = %+v, %v; want zero, nil (the stop owns the issue)", st, err)
 	}
 	assertNoStoppedIssueWrites(t, fc)
 }
@@ -652,7 +649,8 @@ func TestRelayBlockedWork_StoppedDuringBackoff_LogsAbandonedNotFailure(t *testin
 	for name, shape := range cases {
 		t.Run(name, func(t *testing.T) {
 			const issNum = "4649"
-			s, fc, gen := stoppedRelayFixture(t, issNum, shape)
+			s, fc := stoppedRelayFixture(t, issNum, shape)
+			gen := s.term.Begin(issNum)
 			result := dispatch.Result{
 				Resolved: outcome.Resolved{
 					Found:   true,
@@ -691,7 +689,8 @@ func TestSettle_ReadOnlyBlocked_RelayStoppedDuringBackoff_PostsNoComment(t *test
 	for name, shape := range cases {
 		t.Run(name, func(t *testing.T) {
 			const issNum = "4649"
-			s, fc, gen := stoppedRelayFixture(t, issNum, shape)
+			s, fc := stoppedRelayFixture(t, issNum, shape)
+			gen := s.term.Begin(issNum)
 			result := dispatch.Result{
 				Resolved: outcome.Resolved{
 					Found:   true,

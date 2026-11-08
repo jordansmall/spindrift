@@ -54,7 +54,7 @@ type pushOnlyCase struct {
 	entry     pushOnlyEntry                      // which public entry reaches the landing
 	labels    []string                           // the issue's labels going in; default agent-in-progress
 	shaped    bool                               // wrap the tracker as LocalShaped even with no passes
-	result    func(*pushOnlyEnv) dispatch.Result // default: a ready outcome, or a ready self-report for SettleRelayedBranch
+	result    func(*pushOnlyEnv) dispatch.Result // default: a ready outcome, or a ready self-report for Recover
 	local     bool                               // BundleRelay + LandingRef shape (CODE_FORGE=local); else git
 	mergeMode string                             // default immediate
 	bundle    bool                               // seed seam.bundle in the outbox

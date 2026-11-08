@@ -622,8 +622,8 @@ func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 // ADR 0039's local push-only recovery path (issue #2254): a Box that emitted
 // no parseable outcome line but left a success self-report and a real bundle
 // must not park agent-failed. The push-only Lander's salvage promotes it to
-// Recoverable, and only SettleRelayedBranch, the method recoverByNumber
-// drives, actually lands the bundle.
+// Recoverable, and only Recover, which spindrift recover drives, lands the
+// bundle.
 func TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands(t *testing.T) {
 	setGitIdentityEnv(t)
 	operatorDir := newOperatorCheckout(t)
@@ -687,13 +687,15 @@ func TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands(t *testing.T) 
 		t.Fatalf("issue %s labels = %v, must NOT carry %s yet -- the branch has not landed until recover runs", num, iss.Labels, testLabels.Complete)
 	}
 
-	// The recover path drives the same Settler method and dispatch.Result shape
-	// recoverByNumber (main.go) builds from the driver's last self-report in
-	// the pass logs.
-	recoverResult := dispatch.Result{Resolved: outcome.Resolved{SelfReport: outcome.SelfReport{Status: "ready"}, SelfReportFound: true}}
-	sit := s.SituationFor(num, false, recoverResult)
-	if _, got, err := s.SettleRelayedBranch(dispatch.NewFake(), num, 0, sit, recoverResult); !got || err != nil {
-		t.Fatalf("SettleRelayedBranch(%s) = %v, %v; want true, nil", num, got, err)
+	// The recover path hands Recover the driver's last self-report from the
+	// pass logs, as main does.
+	recovered := outcome.Resolved{SelfReport: outcome.SelfReport{Status: "ready"}, SelfReportFound: true}
+	if _, err := s.Recover(settle.RecoverInput{
+		Num:      num,
+		Resolved: recovered,
+		Begin:    func() (dispatch.Dispatcher, error) { return dispatch.NewFake(), nil },
+	}); err != nil {
+		t.Fatalf("Recover(%s) err = %v, want nil", num, err)
 	}
 
 	iss, err = it.Issue(num)
