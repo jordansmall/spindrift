@@ -155,7 +155,6 @@ func (s *Settle) blockHandoff(num, branch string, err error) {
 	// Never transitions, so Settled never sees this Dispatch, yet the
 	// all-finished banner must not count it delivered (issue #5145).
 	s.latchUnrecorded(num, ForReason(dispatchrecord.ReasonMergeBlocked), "")
-	tallyOutcome(DispatchOutcome{Key: s.keyFor(num), State: forge.InProgress.String(), Reason: dispatchrecord.ReasonMergeBlocked})
 }
 
 // parkRelayFailure fails an issue whose bundle relay failed (issue #4651).

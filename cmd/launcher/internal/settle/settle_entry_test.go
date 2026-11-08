@@ -632,7 +632,6 @@ func hostLandedPassFixtureOver(t *testing.T, fc *forge.Fake, tracker forge.Issue
 	fc.SetIssue(forge.Issue{Number: hostLandedIssue, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = draftPRRetryURL
 	fc.SetCheckStates(draftPRRetryURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-	t.Cleanup(InstallTally(&Tally{}))
 
 	c := baseConfig()
 	c.ReadOnly = true

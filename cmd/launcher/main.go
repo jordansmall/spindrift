@@ -667,8 +667,8 @@ func newCodeForge(c config, parent local.SanitizedParent, it forge.IssueTracker)
 // any settled dispatch did not deliver, it names those dispatches in a
 // forge-neutral line: a merge-blocked dispatch may or may not have pushed a
 // branch or opened a PR, so only its status says what happened (issue #5145).
-// Dispatches the tally never sees (reclaimed mid-run or abandoned) are not
-// counted. A kind whose descriptor sets CompleteBanner uses that wording
+// Dispatches whose settle reached no decision (reclaimed mid-run or abandoned)
+// are not counted. A kind whose descriptor sets CompleteBanner uses that wording
 // rather than the Code Forge's landing claim (issue #5164).
 func dispatchCompletionBanner(c config, outcomes []settle.DispatchOutcome) string {
 	allLandedLine := forgeLandedLine(c)
@@ -684,9 +684,9 @@ func dispatchCompletionBanner(c config, outcomes []settle.DispatchOutcome) strin
 		if !o.Key.IsChore() {
 			label = "#" + label
 		}
-		status := o.Reason
+		status := o.Reason()
 		if status == "" {
-			status = o.State
+			status = o.State().String()
 		}
 		missed = append(missed, fmt.Sprintf("%s (%s)", label, status))
 	}
@@ -714,10 +714,10 @@ func forgeLandedLine(c config) string {
 // forges never latch a PR URL, so their clean Completes count). An
 // already-resolved Complete opened nothing, so it is named too.
 func delivered(o settle.DispatchOutcome) bool {
-	if o.State != forge.Complete.String() {
+	if o.State() != forge.Complete {
 		return false
 	}
-	switch dispatchrecord.ReasonDelivery(o.Reason) {
+	switch dispatchrecord.ReasonDelivery(o.Reason()) {
 	case dispatchrecord.DeliversNothing:
 		return false
 	case dispatchrecord.DeliversWithPR:
@@ -1720,8 +1720,7 @@ func run(lc *launchContext, stdout, stderr io.Writer) error {
 	claimer := waves.NewLabelClaimer(it, c.Label, c.InProgressLabel)
 	terminated := registryFor(s)
 	tally := &settle.Tally{}
-	defer settle.InstallTally(tally)()
-	if err := waves.Dispatch(cfg, &waves.Session{Terminated: terminated}, it, cf, pwd, f, s, in, claimer); err != nil {
+	if err := waves.Dispatch(cfg, &waves.Session{Terminated: terminated, Tally: tally}, it, cf, pwd, f, s, in, claimer); err != nil {
 		return err
 	}
 
@@ -1947,8 +1946,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	queue := waves.NewHeadlessQueue(discover, waves.NewLabelClaimer(it, c.Label, c.InProgressLabel), pending, pwd)
 	terminated := registryFor(s)
 	tally := &settle.Tally{}
-	defer settle.InstallTally(tally)()
-	if err := waves.RunContinuous(cfg, &waves.Session{Terminated: terminated}, it, cf, f, s, queue, fresh); err != nil {
+	if err := waves.RunContinuous(cfg, &waves.Session{Terminated: terminated, Tally: tally}, it, cf, f, s, queue, fresh); err != nil {
 		// No reachable path leaves both err and firstQueryErr non-nil: #2780
 		// proved a genuine first-discover error cannot reach a later staleness
 		// detection, and #2777 moved the heldBack query onto queue.Pending,
