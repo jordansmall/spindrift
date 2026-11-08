@@ -14,6 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/retry"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 const pushOnlyBranch = "agent/issue-1"
@@ -33,9 +34,9 @@ type pushOnlyEnv struct {
 type pushOnlyEntry int
 
 const (
-	entrySettle pushOnlyEntry = iota
-	entryRelayed
-	entryAdopted
+	entrySettle  pushOnlyEntry = iota
+	entryRelayed               // Recover without an open PR: lands the relayed branch
+	entryAdopted               // Recover with an open PR: adopts it
 )
 
 type bundleFate int
@@ -70,6 +71,8 @@ type pushOnlyCase struct {
 	wantRelays   int
 	wantRebases  int
 	wantComments []string // substring of each comment, in order
+	wantStderr   []string // substring each of stderr must hold; stderr uncaptured when this and wantNoStderr are nil
+	wantNoStderr []string // substring stderr must not hold
 	wantBundle   bundleFate
 	wantLandings []forge.RecordLandingCall
 	wantPasses   []forge.RecordLandingPassCall
@@ -466,6 +469,25 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 				assertOutboxParked(t, e.fc, "1")
 			},
 		},
+		{
+			// The blocked outcome is recorded ahead of the relay, so the stop only
+			// withholds the blocked note and logs an abandon, not a relay failure (#4649).
+			name: "local stop during a blocked hand-off's relay backoff logs abandoned, not a failure", local: true,
+			result: func(*pushOnlyEnv) dispatch.Result {
+				return dispatch.Result{Resolved: outcome.Resolved{
+					Found:   true,
+					Outcome: outcome.Outcome{Issue: "1", Landing: pushOnlyBranch, Status: "blocked", Note: "stuck"},
+				}}
+			},
+			setup: func(e *pushOnlyEnv) {
+				e.c.ReadOnly = true
+				e.c.Policy = retry.Policy{Max: 3, Unit: time.Second}
+				e.fc.RelayBundleErr = errBlip
+				_, e.c.Clock = stopOnRelayBackoff(&e.s, e.fc, "1")
+			},
+			want: Settlement{Verdict: ForReason(dispatchrecord.ReasonBlocked), Note: "stuck"}, wantLabels: []string{"agent-failed"},
+			wantRelays: 1, wantStderr: []string{"blocked-hand-off relay abandoned"}, wantNoStderr: []string{"could not relay", "?? #"},
+		},
 		// recover and adopt reach the same landing through their own entries
 		{
 			name: "relayed local self-report success lands the relayed branch", entry: entryRelayed, local: true,
@@ -566,27 +588,35 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			}
 			res.Passes = env.passes
 			var got Settlement
-			switch tc.entry {
-			case entryRelayed:
-				st, err := env.s.Recover(RecoverInput{
-					Num: "1", Resolved: res.Resolved, Passes: res.Passes,
-					Begin: func() (dispatch.Dispatcher, error) { return dispatch.NewFake(), nil },
-				})
-				got = st
-				if err != nil {
-					t.Errorf("Recover err = %v, want nil", err)
+			var stderr string
+			run := func() {
+				switch tc.entry {
+				case entryRelayed:
+					st, err := env.s.Recover(RecoverInput{
+						Num: "1", Resolved: res.Resolved, Passes: res.Passes,
+						Begin: func() (dispatch.Dispatcher, error) { return dispatch.NewFake(), nil },
+					})
+					got = st
+					if err != nil {
+						t.Errorf("Recover err = %v, want nil", err)
+					}
+				case entryAdopted:
+					st, err := env.s.Recover(RecoverInput{
+						Num: "1", OpenPR: pushOnlyBranch,
+						Begin: func() (dispatch.Dispatcher, error) { return dispatch.NewFake(), nil },
+					})
+					got = st
+					if err != nil {
+						t.Errorf("Recover err = %v, want nil", err)
+					}
+				default:
+					got = env.s.Settle(dispatch.NewFake(), "1", gen, res)
 				}
-			case entryAdopted:
-				st, err := env.s.Recover(RecoverInput{
-					Num: "1", OpenPR: pushOnlyBranch,
-					Begin: func() (dispatch.Dispatcher, error) { return dispatch.NewFake(), nil },
-				})
-				got = st
-				if err != nil {
-					t.Errorf("Recover err = %v, want nil", err)
-				}
-			default:
-				got = env.s.Settle(dispatch.NewFake(), "1", gen, res)
+			}
+			if tc.wantStderr != nil || tc.wantNoStderr != nil {
+				stderr = testutil.CaptureStderr(t, run)
+			} else {
+				run()
 			}
 
 			iss, _ := fc.Issue("1")
@@ -632,6 +662,16 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 					if !strings.Contains(bodies[i], w) {
 						t.Errorf("comment %d = %q, want it to contain %q", i, bodies[i], w)
 					}
+				}
+			}
+			for _, w := range tc.wantStderr {
+				if !strings.Contains(stderr, w) {
+					t.Errorf("stderr = %q, want it to contain %q", stderr, w)
+				}
+			}
+			for _, w := range tc.wantNoStderr {
+				if strings.Contains(stderr, w) {
+					t.Errorf("stderr = %q, want it free of %q", stderr, w)
 				}
 			}
 			if tc.bundle {

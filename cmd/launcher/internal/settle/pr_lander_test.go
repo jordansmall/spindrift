@@ -42,6 +42,7 @@ func (sh prShape) build(fc *forge.Fake) (forge.IssueTracker, forge.CodeForge) {
 type prCase struct {
 	name      string
 	entry     pushOnlyEntry    // which public entry reaches the landing; default Settle
+	noPR      bool             // no PR on the agent branch going in: the Box's hand-off opens it
 	result    *dispatch.Result // the Box outcome Settle is handed; default a ready outcome on testPR
 	shape     prShape
 	tracker   backend.Descriptor // the tracker row Settle reasons about; zero when the row doesn't care
@@ -66,7 +67,8 @@ type prCase struct {
 
 	want           Settlement
 	wantSteps      []Step
-	wantNoSteps    []Step // steps Settle must not have recorded
+	wantNoSteps    []Step   // steps Settle must not have recorded
+	wantNoStatus   []Status // statuses Settle must not have recorded, whatever their detail
 	wantLabels     []string
 	wantNoLabels   []string
 	wantMerged     string   // the PR Merge was called on
@@ -80,6 +82,9 @@ type prCase struct {
 	wantResolves   int      // conflict-resolve Boxes dispatched
 	wantRebases    int      // Rebase calls on the forge
 	wantStderr     []string // substring each of stderr must hold; non-nil empty means silent; stderr uncaptured when nil
+	wantNoStderr   []string // substring stderr must not hold
+	wantErr        error    // the error an entryRelayed Recover returns, matched by errors.Is; nil means none
+	wantStepsLike  []Step   // steps by Key, Landing, Status and a Detail substring
 }
 
 // prSettlement is the Settlement a PR landing of testPR settles with.
@@ -273,6 +278,9 @@ func TestSettle_PRLander(t *testing.T) {
 	cases = append(cases, mergeCases()...)
 	cases = append(cases, verifyCases()...)
 	cases = append(cases, terminateCases()...)
+	cases = append(cases, relayCases()...)
+	cases = append(cases, draftPRCases()...)
+	cases = append(cases, bundleCases()...)
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -292,7 +300,9 @@ func TestSettle_PRLander(t *testing.T) {
 				labels = tc.labels
 			}
 			fc.SetIssue(forge.Issue{Number: "1", Labels: labels, Body: tc.body})
-			fc.SetPR(fc.AgentBranch("1"), forge.PR{URL: testPR})
+			if !tc.noPR {
+				fc.SetPR(fc.AgentBranch("1"), forge.PR{URL: testPR})
+			}
 			fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 			files := []string{"src/main.go"}
 			if tc.files != nil {
@@ -323,34 +333,42 @@ func TestSettle_PRLander(t *testing.T) {
 			s.cfg.Capabilities.TrackerDescriptor = tc.tracker
 			// Recover settles at RecoverGen and takes no Begin, so a stop marks that generation.
 			gen := RecoverGen
-			if tc.entry != entryAdopted {
+			if tc.entry == entrySettle {
 				gen = s.term.Begin("1")
 			}
+			begin := func() (dispatch.Dispatcher, error) { return d, nil }
 
 			if tc.wire != nil {
 				tc.wire(fc, d, func() { s.term.Mark("1") })
 			}
 			var got Settlement
 			result := settleReadyResult("1", testPR)
+			if tc.entry == entryRelayed {
+				result = selfReportReady()
+			}
 			if tc.result != nil {
 				result = *tc.result
 			}
 			settle := func() {
-				if tc.entry == entryAdopted {
-					st, err := s.Recover(RecoverInput{
-						Num: "1", OpenPR: testPR,
-						Begin: func() (dispatch.Dispatcher, error) { return d, nil },
-					})
+				switch tc.entry {
+				case entryAdopted:
+					st, err := s.Recover(RecoverInput{Num: "1", OpenPR: testPR, Begin: begin})
 					got = st
 					if err != nil {
 						t.Errorf("Recover err = %v, want nil", err)
 					}
-					return
+				case entryRelayed:
+					st, err := s.Recover(RecoverInput{Num: "1", Resolved: result.Resolved, Passes: result.Passes, Begin: begin})
+					got = st
+					if !errors.Is(err, tc.wantErr) {
+						t.Errorf("Recover err = %v, want %v", err, tc.wantErr)
+					}
+				default:
+					got = s.Settle(d, "1", gen, result)
 				}
-				got = s.Settle(d, "1", gen, result)
 			}
 			var stderr string
-			if tc.wantStderr != nil {
+			if tc.wantStderr != nil || tc.wantNoStderr != nil {
 				stderr = testutil.CaptureStderr(t, settle)
 			} else {
 				settle()
@@ -387,8 +405,25 @@ func TestSettle_PRLander(t *testing.T) {
 					t.Errorf("stderr = %q, want it to contain %q", stderr, w)
 				}
 			}
+			for _, w := range tc.wantNoStderr {
+				if strings.Contains(stderr, w) {
+					t.Errorf("stderr = %q, want it free of %q", stderr, w)
+				}
+			}
 			if missing := containsSteps(rec.Steps(), tc.wantSteps); len(missing) > 0 {
 				t.Errorf("progress steps = %+v, missing %+v", rec.Steps(), missing)
+			}
+			for _, w := range tc.wantStepsLike {
+				if !slices.ContainsFunc(rec.Steps(), func(g Step) bool {
+					return g.Key == w.Key && g.Landing == w.Landing && g.Status == w.Status && strings.Contains(g.Detail, w.Detail)
+				}) {
+					t.Errorf("progress steps = %+v, missing one like %+v", rec.Steps(), w)
+				}
+			}
+			for _, st := range tc.wantNoStatus {
+				if slices.ContainsFunc(rec.Steps(), func(g Step) bool { return g.Status == st }) {
+					t.Errorf("progress steps = %+v, want none with status %q", rec.Steps(), st)
+				}
 			}
 			for _, st := range tc.wantNoSteps {
 				if slices.Contains(rec.Steps(), st) {
