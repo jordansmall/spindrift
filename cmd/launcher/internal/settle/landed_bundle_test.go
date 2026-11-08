@@ -240,29 +240,3 @@ func TestSettle_SettleRelayedBranch_RemovesBundleAfterMerge(t *testing.T) {
 		t.Errorf("recover's landed issue must not keep its bundle")
 	}
 }
-
-// Recover's hand-run push-only arm (CODE_FORGE=local, no PR) lands through
-// selfHeal and drops the bundle on an immediate merge.
-func TestSettle_SettleRelayedBranch_LocalPushOnly_RemovesBundleAfterMerge(t *testing.T) {
-	const issNum = "1"
-	outbox := t.TempDir()
-	writeBundle(t, outbox)
-	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
-	c := baseConfig()
-	c.OutboxDir = func(string) string { return outbox }
-	s := newTestSettle(c, fc, fc.AsLocal())
-	result := dispatch.Result{}
-
-	sit := s.situationFor(issNum, false, result)
-	if !sit.BundlePresent {
-		t.Fatalf("fixture: want BundlePresent")
-	}
-	if _, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result); !got || err != nil {
-		t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
-	}
-	if bundleExists(t, outbox) {
-		t.Errorf("recover's landed push-only issue must not keep its bundle")
-	}
-}

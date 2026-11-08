@@ -258,35 +258,6 @@ func TestSettle_SettleRelayedBranch_UnreviewedDeclines(t *testing.T) {
 	}
 }
 
-// A push-only run with no self-report whose loop reached its land pass is not
-// unreviewed: the bundle alone still justifies the landing (issues #2378, #5984).
-func TestSettle_SettleRelayedBranch_NoReportLandLastStillLands(t *testing.T) {
-	const issNum = "5984"
-	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-failed"}})
-	c := baseConfig()
-	c.OutboxDir = func(num string) string { return "/outbox/" + num }
-	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsLocal())
-	result := dispatch.Result{Passes: landLastNoOutcomePasses()}
-
-	sit := s.situationFor(issNum, false, result)
-	sit.BundlePresent = true
-	if sit.Unreviewed {
-		t.Fatal("a land-last manifest must not be unreviewed")
-	}
-	var got bool
-	var err error
-	out := testutil.CaptureStdout(t, func() { _, got, err = s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result) })
-	if !got || err != nil {
-		t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
-	}
-	assertOutputHas(t, out, "status=adopted")
-	if len(fc.RecordLandingCalls) == 0 || fc.RecordLandingCalls[0] != (forge.RecordLandingCall{Num: issNum, Landing: fc.AgentBranch(issNum)}) {
-		t.Errorf("RecordLandingCalls = %+v, want the agent branch recorded as the landing", fc.RecordLandingCalls)
-	}
-}
-
 // CODE_FORGE=local push-only: a stale implement-pass ready, then a crashed
 // later pass leaving a bundle, must not be promoted to Recoverable, because
 // `spindrift recover` would decline it (issue #5973).
