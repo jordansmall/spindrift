@@ -460,12 +460,18 @@ func TestMergeImmediate_RewaitsAfterForcePush(t *testing.T) {
 	fc := forge.NewFake()
 	fc.MergeErrs = []error{forge.ErrMergeConflict, nil}
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	rec := &ProgressRecorder{}
+	c.Progress = rec
 	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
 	if err == nil {
 		t.Fatal("mergeImmediate: want error when CI never reaches green after force-push, got nil")
+	}
+	want := Step{Key: "1", Landing: testPR, Status: StatusPostForcePushWait}
+	if !slices.Contains(rec.Steps(), want) {
+		t.Errorf("progress steps = %+v, want one %+v", rec.Steps(), want)
 	}
 	if fc.Merged != "" {
 		t.Errorf("Merge must not succeed while the post-force-push CI wait never confirmed green; fc.Merged=%q", fc.Merged)
