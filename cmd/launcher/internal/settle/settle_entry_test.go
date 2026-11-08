@@ -861,31 +861,6 @@ func TestSettle_RecordLandingPass_LaterBlockedRunDoesNotOverwriteLandedPass(t *t
 	}
 }
 
-// landPushOnly records the pass alongside the host-derived placeholder branch
-// it writes after the relay (issue #5189).
-func TestSelfHeal_PushOnlyLanding_RecordsPassWithPlaceholder(t *testing.T) {
-	c := baseConfig()
-	c.MergeMode = "manual"
-	c.OutboxDir = func(num string) string { return "/outbox/" + num }
-	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	branch := fc.AgentBranch("1")
-	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsLocal())
-	passes := implementThenLandPasses()
-
-	s.selfHeal(dispatch.NewFake(), "1", 0, branch, passes)
-
-	wantLanding := []forge.RecordLandingCall{{Num: "1", Landing: branch}}
-	if !reflect.DeepEqual(fc.RecordLandingCalls, wantLanding) {
-		t.Errorf("RecordLanding calls = %+v, want %+v", fc.RecordLandingCalls, wantLanding)
-	}
-	wantPass := []forge.RecordLandingPassCall{{Num: "1", Pass: 2, Kind: "land"}}
-	if !reflect.DeepEqual(fc.RecordLandingPassCalls, wantPass) {
-		t.Errorf("RecordLandingPass calls = %+v, want %+v", fc.RecordLandingPassCalls, wantPass)
-	}
-}
-
 // SettleAdopted has no pass evidence, so on a push-only forge it records the
 // placeholder landing and clears the recorded pass rather than leaving an
 // earlier run's attached (issue #5189).

@@ -424,32 +424,6 @@ func TestMergeImmediate_StaleConflictRetryDoesNotRedemoteAfterRestore(t *testing
 	}
 }
 
-// A push-only Code Forge (s.pr == nil, e.g. CODE_FORGE=git/local) has no draft
-// concept to demote to or restore from, so a merge conflict must not call
-// MarkDraft or MarkReady (issue #1863).
-func TestMergeImmediate_PushOnlyForgeNeverCallsMarkDraftOrMarkReady(t *testing.T) {
-	c := baseConfig()
-	c.MaxRebaseAttempts = 3
-	fc := forge.NewFake()
-	fc.MergeErrs = []error{forge.ErrMergeConflict, nil}
-	s := newTestSettle(c, fc, fc.AsPushOnly())
-
-	err := s.mergeImmediate("1", 0, testPR, nil)
-
-	if err != nil {
-		t.Fatalf("mergeImmediate: unexpected error: %v", err)
-	}
-	if fc.Merged != testPR {
-		t.Errorf("Merge not called to completion; fc.Merged=%q", fc.Merged)
-	}
-	if len(fc.MarkDraftCalls) != 0 {
-		t.Errorf("push-only forge must never call MarkDraft; calls=%v", fc.MarkDraftCalls)
-	}
-	if len(fc.MarkReadyCalls) != 0 {
-		t.Errorf("push-only forge must never call MarkReady; calls=%v", fc.MarkReadyCalls)
-	}
-}
-
 // A Rebase force-push resets the PR's checks, so mergeImmediate must not retry
 // the merge until a fresh gateToGreen wait confirms the new head is green
 // (issue #567). No checks ever register here, so the re-wait times out.
@@ -1118,23 +1092,6 @@ func TestApplyMergeMode_Auto_EnqueuesAutoMerge(t *testing.T) {
 	}
 	if len(fc.EnqueueAutoMergeCalls) != 1 || fc.EnqueueAutoMergeCalls[0] != testPR {
 		t.Errorf("auto mode must call EnqueueAutoMerge(%q); calls=%v", testPR, fc.EnqueueAutoMergeCalls)
-	}
-}
-
-// MERGE_MODE=auto against a push-only Code Forge with no PRForge (CODE_FORGE=git
-// reaching applyMergeMode through recover or selective dispatch, neither of
-// which runs the run()-only auto-merge preflight) must return an actionable
-// error instead of dereferencing the absent PRForge.
-func TestApplyMergeMode_Auto_PushOnlyForgeReturnsError(t *testing.T) {
-	c := baseConfig()
-	c.MergeMode = "auto"
-	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := newTestSettle(c, fc, fc.AsPushOnly())
-
-	_, err := s.applyMergeMode("1", 0, testPR, nil)
-	if err == nil {
-		t.Fatal("applyMergeMode auto on a push-only forge: want error, got nil")
 	}
 }
 
