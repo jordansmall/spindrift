@@ -62,7 +62,6 @@ type pushOnlyCase struct {
 	arm       func(*pushOnlyEnv)                 // once e.s exists, ahead of Settle
 
 	want         Settlement
-	wantRelayed  bool // SettleRelayedBranch's relayed return
 	abandoned    bool // the stop left the released issue untouched
 	wantSteps    []Step
 	wantLabels   []string
@@ -470,20 +469,20 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 		// recover and adopt reach the same landing through their own entries
 		{
 			name: "relayed local self-report success lands the relayed branch", entry: entryRelayed, local: true,
-			labels: []string{"agent-recoverable"}, wantRelayed: true,
-			want: merged, wantLabels: complete, wantNoLabels: noFailed, wantMerged: pushOnlyBranch, wantRelays: 1,
+			labels: []string{"agent-recoverable"},
+			want:   merged, wantLabels: complete, wantNoLabels: noFailed, wantMerged: pushOnlyBranch, wantRelays: 1,
 			wantSteps: []Step{pushOnlyStep(StatusAdopted, "note=genuine success self-report; relayed branch landed")},
 		},
 		{
 			name: "relayed local bundle alone lands the relayed branch and drops the bundle", entry: entryRelayed, local: true, bundle: true,
-			labels: []string{"agent-recoverable"}, wantRelayed: true,
+			labels: []string{"agent-recoverable"},
 			result: func(*pushOnlyEnv) dispatch.Result { return dispatch.Result{} },
 			want:   merged, wantLabels: complete, wantNoLabels: noFailed, wantMerged: pushOnlyBranch, wantRelays: 1, wantBundle: bundleDropped,
 			wantSteps: []Step{pushOnlyStep(StatusAdopted, "note=bundle present in outbox; relayed branch landed")},
 		},
 		{
 			name: "relayed local land-last run without a report still lands", entry: entryRelayed, local: true, bundle: true,
-			labels: []string{"agent-failed"}, wantRelayed: true,
+			labels: []string{"agent-failed"},
 			setup:  func(e *pushOnlyEnv) { e.passes = landLastNoOutcomePasses() },
 			result: func(*pushOnlyEnv) dispatch.Result { return dispatch.Result{} },
 			want:   merged, wantMerged: pushOnlyBranch, wantRelays: 1, wantBundle: bundleDropped,
@@ -491,15 +490,15 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			wantSteps:    []Step{pushOnlyStep(StatusAdopted, "note=bundle present in outbox; relayed branch landed")},
 		},
 		{
-			name: "relayed local manual records the run's pass", entry: entryRelayed, local: true, mergeMode: "manual",
-			setup: func(e *pushOnlyEnv) { e.passes = implementThenLandPasses() }, wantRelayed: true,
-			want: manual, wantRelays: 1, wantLandings: twice(placeholder),
-			wantPasses: []forge.RecordLandingPassCall{{Num: "1", Pass: 2, Kind: "land"}, {Num: "1", Pass: 2, Kind: "land"}},
+			name: "relayed local manual clears the recorded pass despite the run's passes", entry: entryRelayed, local: true, mergeMode: "manual",
+			setup: func(e *pushOnlyEnv) { e.passes = implementThenLandPasses() },
+			want:  manual, wantRelays: 1, wantLandings: twice(placeholder),
+			wantPasses: []forge.RecordLandingPassCall{{Num: "1"}, {Num: "1"}},
 		},
 		{
 			name: "relayed local manual without passes clears the recorded pass", entry: entryRelayed, local: true, mergeMode: "manual",
-			shaped: true, wantRelayed: true,
-			want: manual, wantRelays: 1, wantLandings: twice(placeholder),
+			shaped: true,
+			want:   manual, wantRelays: 1, wantLandings: twice(placeholder),
 			wantPasses: []forge.RecordLandingPassCall{{Num: "1"}, {Num: "1"}},
 		},
 		{
@@ -569,11 +568,13 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			var got Settlement
 			switch tc.entry {
 			case entryRelayed:
-				sit := env.s.SituationFor("1", false, res)
-				st, relayed, err := env.s.SettleRelayedBranch(dispatch.NewFake(), "1", gen, sit, res)
+				st, err := env.s.Recover(RecoverInput{
+					Num: "1", Resolved: res.Resolved, Passes: res.Passes,
+					Begin: func() (dispatch.Dispatcher, error) { return dispatch.NewFake(), nil },
+				})
 				got = st
-				if relayed != tc.wantRelayed || err != nil {
-					t.Errorf("SettleRelayedBranch relayed, err = %v, %v; want %v, nil", relayed, err, tc.wantRelayed)
+				if err != nil {
+					t.Errorf("Recover err = %v, want nil", err)
 				}
 			case entryAdopted:
 				got = env.s.SettleAdopted(dispatch.NewFake(), "1", gen, pushOnlyBranch)
