@@ -152,15 +152,18 @@ func SchemaDefault(key string) string {
 // IsDaemonOnly reports whether key is a knob only the daemon reads
 // (launcherIgnores in lib/env-schema.nix).
 func IsDaemonOnly(key string) bool {
-	return daemonOnlyKnobs[key]
+	e, _ := SchemaFlag(key)
+	return e.LauncherIgnores
 }
 
 // DaemonOnlyKnobs returns the daemon-only knob env names, sorted, for the
 // daemon's guard tests to walk.
 func DaemonOnlyKnobs() []string {
-	out := make([]string, 0, len(daemonOnlyKnobs))
-	for k := range daemonOnlyKnobs {
-		out = append(out, k)
+	var out []string
+	for _, e := range SchemaFlags {
+		if e.LauncherIgnores {
+			out = append(out, e.Env)
+		}
 	}
 	sort.Strings(out)
 	return out

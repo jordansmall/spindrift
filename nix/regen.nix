@@ -57,7 +57,6 @@ let
   defaultModelFixture = import ../lib/default-model-fixture.nix;
   defaultModelFixtureGo = renderers.renderDefaultModelFixtureGo defaultModelFixture;
   daemonKnobDefaultsGo = renderers.renderDaemonKnobDefaultsGo schema;
-  daemonOnlyKnobsGo = renderers.renderDaemonOnlyKnobsGo schema;
   legacySettingsSection = import ../lib/legacy-settings-section.nix;
   legacySettingsMappingDoc = renderers.renderLegacySettingsMappingDoc legacySettingsSection schema;
   promptAssemblyBoxEnv = import ../lib/promptassembly-boxenv.nix;
@@ -205,8 +204,6 @@ pkgs.writeShellApplication {
     gofmt -w "$root/cmd/launcher/defaultmodels_gen_test.go"
     ${writeGenerated "cmd/launcher/internal/daemon/shippeddefaults_gen_test.go" daemonKnobDefaultsGo}
     gofmt -w "$root/cmd/launcher/internal/daemon/shippeddefaults_gen_test.go"
-    ${writeGenerated "cmd/launcher/internal/inputdoc/daemononlyknobs_gen.go" daemonOnlyKnobsGo}
-    gofmt -w "$root/cmd/launcher/internal/inputdoc/daemononlyknobs_gen.go"
     ${concatStrings (map regenRowScript documentedFacts)}
     ${writeBetweenGenerated "MIGRATING.md"
       "<!-- BEGIN GENERATED LEGACY SETTINGS MAPPING -- nix run .#regen -- DO NOT EDIT -->"

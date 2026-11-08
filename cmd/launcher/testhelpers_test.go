@@ -59,8 +59,10 @@ func baseConfig() config {
 	}}
 }
 
-// Installs flags as the package-level inputdoc.SchemaFlags table for the duration of t.
-// A caller that reassigns inputdoc.SchemaFlags again within t (e.g. per-subcase) still
+// Installs flags as the package-level inputdoc.SchemaFlags table for the
+// duration of t. Everything that reads the table sees the swap, including
+// inputdoc's Document.Setting, SchemaDefault and IsDaemonOnly. A caller that
+// reassigns inputdoc.SchemaFlags again within t (e.g. per-subcase) still
 // restores to the same pre-call value once t finishes.
 func withSchemaFlags(t *testing.T, flags []inputdoc.FlagEntry) {
 	t.Helper()

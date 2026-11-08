@@ -920,15 +920,6 @@ checkedMerge {
       "backend-registry-quickstart-guard: renderBackendRegistryGo must reject these malformed quickstart blocks: ${builtins.concatStringsSep ", " wronglyAccepted}";
     pkgs.runCommand "backend-registry-quickstart-guard" { } "touch $out";
 
-  # Regenerate with `nix run .#regen` when a knob's launcherIgnores in
-  # lib/env-schema.nix changes (issue #4644).
-  daemon-only-knobs-gen-go = mkGofmtDriftCheck {
-    name = "daemon-only-knobs-gen-go";
-    rendered = renderers.renderDaemonOnlyKnobsGo schema;
-    committedPath = "cmd/launcher/internal/inputdoc/daemononlyknobs_gen.go";
-    source = "lib/env-schema.nix";
-  };
-
   # Regenerate with `nix run .#regen` when lib/labels.nix changes (issue
   # #2528).
   label-registry-gen =
@@ -1323,10 +1314,12 @@ checkedMerge {
   # itself ignores it" clause must agree exactly, in both directions: a
   # daemon-only knob whose doc states the fact but forgot the axis, or an
   # axis-bearing knob whose doc no longer states it, would desync the
-  # generated flag table (cmd/launcher/internal/inputdoc/flagtable_gen.go) from the prose it is
-  # meant to source (issue #3698). A third assert covers a separate invariant
-  # the same axis implies: a launcherIgnores knob must also set flakeOption,
-  # since its settings path is all warnAmbientKnobEnv has left to suggest.
+  # generated flag table (cmd/launcher/internal/inputdoc/flagtable_gen.go)
+  # from the prose it is meant to source (issue #3698). Two more asserts cover
+  # separate invariants the same axis implies: a launcherIgnores knob must
+  # also set flakeOption, since its settings path is all warnAmbientKnobEnv
+  # has left to suggest, and must not be secret, since inputdoc.IsDaemonOnly
+  # reads the axis off SchemaFlags, which has no row for a secret knob.
   # The remaining asserts pin docs/reference.md's `### Advanced tuning` table
   # to the same axis, in both directions, and require the inert-flag aside on
   # every clause-bearing row, so a hand-edited row can't drift from the schema
@@ -1359,6 +1352,7 @@ checkedMerge {
       noFlakeOption = sort builtins.lessThan (
         filter (n: axisSet n && !(schema.${n}.flakeOption or false)) names
       );
+      secretAxis = sort builtins.lessThan (filter (n: axisSet n && (schema.${n}.secret or false)) names);
 
       # docs/reference.md's `### Advanced tuning` table, sliced from that
       # heading to the next one (any level) — a renamed heading trips the
@@ -1405,6 +1399,8 @@ checkedMerge {
       "lib/env-schema.nix: knob(s) [ ${concatStringsSep " " staleAxis} ] set launcherIgnores = true but their doc no longer says \"${clause}\" (issue #3698)";
     assert assertMsg (noFlakeOption == [ ])
       "lib/env-schema.nix: knob(s) [ ${concatStringsSep " " noFlakeOption} ] set launcherIgnores = true without flakeOption = true, leaving warnAmbientKnobEnv no settings path to suggest in place of the inert flag (issue #3698)";
+    assert assertMsg (secretAxis == [ ])
+      "lib/env-schema.nix: secret knob(s) [ ${concatStringsSep " " secretAxis} ] set launcherIgnores = true, but SchemaFlags has no row for a secret knob, so inputdoc.IsDaemonOnly would never see the axis";
     assert assertMsg sectionFound
       "docs/reference.md: could not find the \"${heading}\" section — has it been renamed or removed (issue #3855)?";
     assert assertMsg (sharedEnvs == [ ])
