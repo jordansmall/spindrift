@@ -507,8 +507,8 @@ func TestRun_DoesNotAdoptLiveRunnersInProgressIssue(t *testing.T) {
 	if err := run(lc, io.Discard, io.Discard); !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("run(lc) = %v, want errQueueEmpty (no other issue dispatchable)", err)
 	}
-	if len(sf.SettleAdoptedCalls) != 0 {
-		t.Errorf("expected no SettleAdopted calls on a bare in-progress issue; got %v", sf.SettleAdoptedCalls)
+	if len(sf.RecoverCalls) != 0 {
+		t.Errorf("expected no Recover calls on a bare in-progress issue; got %v", sf.RecoverCalls)
 	}
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("expected no label churn on issue #5; got %v", fc.TransitionStateCalls)
