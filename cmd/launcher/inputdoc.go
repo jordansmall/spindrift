@@ -1,8 +1,6 @@
 package main
 
 import (
-	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -81,37 +79,16 @@ func resolveBoxEnvVar(name string) string {
 }
 
 // ambientKnobEnvError rejects every non-secret schema knob found in the
-// environment (ADR 0020: the knob env var is gone, the document and flags carry
-// the value). It must run before parseFlags mutates the environment via
-// os.Setenv, or a flag-set value looks like an ambient one. Secrets and
-// non-knob plumbing are not inputdoc.SchemaFlags rows, so they pass.
+// process environment (ADR 0020). It must run before parseFlags mutates the
+// environment via os.Setenv, or a flag-set value looks like an ambient one.
 func ambientKnobEnvError() error {
-	var lines []string
-	for _, e := range inputdoc.SchemaFlags {
-		v, ok := ambientSetting(e.Env)
-		if !ok {
-			continue
+	env := map[string]string{}
+	for _, kv := range os.Environ() {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			env[k] = v
 		}
-		// A launcherIgnores knob's flag is inert (see inputdoc.FlagEntry), so its
-		// settings path is the only real migration target;
-		// nix/checks/schema-drift.nix pins flakeOption = true on every such
-		// knob, which lib/renderers.nix turns into a settings path (#3698).
-		equiv := e.SettingsPath
-		if !e.LauncherIgnores {
-			equiv = "--" + e.Flag
-			if e.SettingsPath != "" {
-				equiv += " or " + e.SettingsPath
-			}
-		}
-		if v == "" {
-			v = `""`
-		}
-		lines = append(lines, fmt.Sprintf("%s=%s set in environment — knob env vars are not read; use %s", e.Env, v, equiv))
 	}
-	if len(lines) == 0 {
-		return nil
-	}
-	return errors.New(strings.Join(lines, "\n"))
+	return inputdoc.AmbientKnobError(env)
 }
 
 // envKnobSource is the env-backed KnobSource until the launcher switches to
