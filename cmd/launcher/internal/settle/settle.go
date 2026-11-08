@@ -119,7 +119,7 @@ type Settler interface {
 	// launched under, so a re-pick's later generation is never mistaken for it.
 	// Generation 0 is that of an issue no Begin has bumped, so a caller that
 	// never calls Begin (recover, headless waves) still matches a Mark on it.
-	Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result)
+	Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) Settlement
 
 	// Fail records a Box that ran and exited non-zero. The caller already
 	// transitioned the issue to Failed, so this runs no merge-gate machinery;
@@ -133,17 +133,18 @@ type Settler interface {
 type WorkSettler interface {
 	// SettleAdopted runs the same merge gate as Settle for an already-open PR
 	// (draft or not) with no outcome line, the recover entry point.
-	SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string)
+	SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) Settlement
 
-	// SettleRelayedBranch adopts a relayed branch (issue #2225). It returns
-	// false when sit.OpenPRFound is true, since that shape is SettleAdopted's
-	// job, and false when result carries no relayable success evidence, leaving
-	// the caller's own "no open PR" handling unchanged. Otherwise it relays the
-	// branch, opens a PR, and runs the same merge gate. The error is non-nil
-	// only when relaying the branch or creating its draft PR failed (wrapping
-	// that failure); every other false return, including a Code Forge that
-	// cannot relay, carries nil.
-	SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (bool, error)
+	// SettleRelayedBranch adopts a relayed branch (issue #2225). It returns the
+	// Settlement of the drive (zero when it settled nothing) and whether the
+	// branch was relayed. relayed is false when sit.OpenPRFound is true, since
+	// that shape is SettleAdopted's job, and when result carries no relayable
+	// success evidence, leaving the caller's own "no open PR" handling
+	// unchanged. Otherwise it relays the branch, opens a PR, and runs the same
+	// merge gate. The error is non-nil only when relaying the branch or creating
+	// its draft PR failed (wrapping that failure); every other relayed=false
+	// return, including a Code Forge that cannot relay, carries nil.
+	SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (Settlement, bool, error)
 
 	// SituationFor computes num's adoption-evidence Situation (issue #2501) so
 	// main.go's recoverIssue (shared by `recover <n>` and queue mode) can

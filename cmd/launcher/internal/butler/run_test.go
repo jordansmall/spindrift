@@ -1585,11 +1585,12 @@ type fakePatchGate struct {
 	onCall func(num, prURL string)
 }
 
-func (g *fakePatchGate) SettlePatch(owner dispatchkey.Key, num, prURL string) {
+func (g *fakePatchGate) SettlePatch(owner dispatchkey.Key, num, prURL string) settle.Settlement {
 	if g.onCall != nil {
 		g.onCall(num, prURL)
 	}
 	g.calls = append(g.calls, fakePatchGateCall{owner: owner, num: num, prURL: prURL})
+	return settle.Settlement{}
 }
 
 // patchTestPolicy builds a Policy with both the promotion and patch rungs on
@@ -2304,14 +2305,15 @@ type snapshotGate struct {
 	before, after ledger.State
 }
 
-func (g *snapshotGate) SettlePatch(owner dispatchkey.Key, num, prURL string) {
+func (g *snapshotGate) SettlePatch(owner dispatchkey.Key, num, prURL string) settle.Settlement {
 	if tip, err := g.backend.Read(g.chore); err == nil {
 		g.before = tip.State
 	}
-	g.gate.SettlePatch(owner, num, prURL)
+	st := g.gate.SettlePatch(owner, num, prURL)
 	if tip, err := g.backend.Read(g.chore); err == nil {
 		g.after = tip.State
 	}
+	return st
 }
 
 // sameLabelSet compares two label sets order-insensitively.

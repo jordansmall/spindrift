@@ -830,7 +830,7 @@ func TestSettle_RecordLandingPass_LaterBlockedRunDoesNotOverwriteLandedPass(t *t
 		Passes: []passmanifest.Entry{{Pass: 2, Kind: "land", OutcomeFound: true}},
 	}
 	sit := s.situationFor(hostLandedIssue, false, landed)
-	if got, err := s.SettleRelayedBranch(dispatch.NewFake(), hostLandedIssue, 0, sit, landed); !got || err != nil {
+	if _, got, err := s.SettleRelayedBranch(dispatch.NewFake(), hostLandedIssue, 0, sit, landed); !got || err != nil {
 		t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
 	}
 	landings, passWrites := len(fc.RecordLandingCalls), len(fc.RecordLandingPassCalls)

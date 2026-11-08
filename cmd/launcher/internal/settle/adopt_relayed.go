@@ -120,26 +120,27 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 // Local push-only has no PR to open (ADR 0039, #2254), where a bundle alone
 // is evidence (#2378). The error is non-nil only when relaying the branch or
 // opening its draft PR failed.
-func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (bool, error) {
-	defer s.flushSettled(d, num)
+func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (st Settlement, relayed bool, err error) {
+	defer func() { st = s.flushSettled(d, num) }()
 	// An unreviewed run is not adoption evidence, push-only included (issues #5973, #5984).
 	if sit.OpenPRFound || sit.Unreviewed {
-		return false, nil
+		return Settlement{}, false, nil
 	}
 	cf := s.cfForNum(num)
 	if _, ok := cf.(forge.BundleRelay); ok && s.pr == nil {
 		if sit.SelfReportSuccess {
-			return s.landRelayedBranchPushOnly(d, num, gen, "genuine success self-report; relayed branch landed", result.Passes), nil
+			return Settlement{}, s.landRelayedBranchPushOnly(d, num, gen, "genuine success self-report; relayed branch landed", result.Passes), nil
 		}
 		if sit.BundlePresent {
-			return s.landRelayedBranchPushOnly(d, num, gen, "bundle present in outbox; relayed branch landed", result.Passes), nil
+			return Settlement{}, s.landRelayedBranchPushOnly(d, num, gen, "bundle present in outbox; relayed branch landed", result.Passes), nil
 		}
-		return false, nil
+		return Settlement{}, false, nil
 	}
 	if !sit.SelfReportSuccess {
-		return false, nil
+		return Settlement{}, false, nil
 	}
-	return s.adoptAndGate(d, num, gen, result, "genuine success self-report; PR opened on relayed branch")
+	relayed, err = s.adoptAndGate(d, num, gen, result, "genuine success self-report; PR opened on relayed branch")
+	return Settlement{}, relayed, err
 }
 
 // landRelayedBranchPushOnly lands num's relayed branch directly, the local

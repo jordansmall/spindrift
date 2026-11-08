@@ -242,7 +242,10 @@ func TestSettle_SettleRelayedBranch_UnreviewedDeclines(t *testing.T) {
 				if !sit.Unreviewed {
 					t.Fatal("fixture must be unreviewed")
 				}
-				got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, rc.result)
+				st, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, rc.result)
+				if st != (Settlement{}) {
+					t.Errorf("Settlement = %+v, want the zero Settlement for a decline", st)
+				}
 				if got || err != nil {
 					t.Fatalf("SettleRelayedBranch = %v, %v; want false, nil", got, err)
 				}
@@ -274,7 +277,7 @@ func TestSettle_SettleRelayedBranch_NoReportLandLastStillLands(t *testing.T) {
 	}
 	var got bool
 	var err error
-	out := testutil.CaptureStdout(t, func() { got, err = s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result) })
+	out := testutil.CaptureStdout(t, func() { _, got, err = s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result) })
 	if !got || err != nil {
 		t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
 	}

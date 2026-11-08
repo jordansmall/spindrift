@@ -16,8 +16,8 @@ import (
 // no-outcome path, which reports status=blocked (issue #1654). The head SHA
 // may not come from this process, so the gate waits for evidence the rollup
 // registered (issue #1652), bounded by registrationWindowPolls (#2475).
-func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
-	defer s.flushSettled(d, num)
+func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) (st Settlement) {
+	defer func() { st = s.flushSettled(d, num) }()
 	// Host-discovered, so it names the record even if the gate never gets a
 	// CheckState answer.
 	s.latchPR(num, prURL)
@@ -39,6 +39,7 @@ func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, pr
 	case landingAbandoned:
 		// See landingAbandoned: another actor owns the issue's comment and state.
 	}
+	return
 }
 
 // SettlePatch is the butler patch gate's entry (ADR 0057). It reports under
@@ -46,14 +47,14 @@ func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, pr
 // records as chore-keyed (issue #4966). The owner is latched per num and
 // cleared by SettleAdopted's deferred flushSettled, so a num must not be gated
 // twice concurrently; adoptLandings gates each finding issue once, in turn.
-func (s *Settle) SettlePatch(owner dispatchkey.Key, num, prURL string) {
+func (s *Settle) SettlePatch(owner dispatchkey.Key, num, prURL string) Settlement {
 	s.settledMu.Lock()
 	if s.reportKey == nil {
 		s.reportKey = make(map[string]dispatchkey.Key)
 	}
 	s.reportKey[num] = owner
 	s.settledMu.Unlock()
-	s.SettleAdopted(nil, num, 0, prURL)
+	return s.SettleAdopted(nil, num, 0, prURL)
 }
 
 // verifyMerged confirms a PR reported merged carries both a MERGED state and

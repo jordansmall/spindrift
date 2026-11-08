@@ -726,7 +726,7 @@ func TestSettle_SettleRelayedBranch_RelayStoppedDuringBackoff_HandledWithoutWrit
 
 	var got bool
 	var err error
-	captureStdout(t, func() { got, err = s.SettleRelayedBranch(dispatch.NewFake(), issNum, gen, sit, result) })
+	captureStdout(t, func() { _, got, err = s.SettleRelayedBranch(dispatch.NewFake(), issNum, gen, sit, result) })
 	if err != nil {
 		t.Errorf("SettleRelayedBranch err = %v, want nil", err)
 	}

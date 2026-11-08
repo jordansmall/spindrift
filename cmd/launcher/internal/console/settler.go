@@ -32,15 +32,16 @@ type queueSettler struct {
 // unless num was terminated in flight. gen is the terminate.Registry generation
 // (waves.Issue.Generation, issue #743) this dispatch launched under, so a
 // re-pick's later generation cannot clear the mark under a stale settle.
-func (qs queueSettler) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
-	qs.Settler.Settle(d, num, gen, result)
+func (qs queueSettler) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) settle.Settlement {
+	st := qs.Settler.Settle(d, num, gen, result)
 	if qs.terminated.Marked(num, gen) {
-		return
+		return st
 	}
 	qs.q.setState(num, qs.rowKind(), PickSettled, "")
 	if qs.notify != nil {
 		qs.notify()
 	}
+	return st
 }
 
 // Fail delegates to the wrapped Settler, then marks num failed and notifies

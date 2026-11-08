@@ -154,7 +154,7 @@ func TestSettle_SettleRelayedBranch_OpenPRFoundReturnsFalse(t *testing.T) {
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	sit := Situation{OpenPRFound: true, SelfReportSuccess: true}
-	got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
+	_, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
 	if err != nil {
 		t.Fatalf("SettleRelayedBranch err = %v, want nil", err)
 	}

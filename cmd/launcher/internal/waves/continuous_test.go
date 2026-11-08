@@ -2979,9 +2979,10 @@ type settleSignal struct {
 	settled chan string
 }
 
-func (s *settleSignal) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
-	s.Fake.Settle(d, num, gen, result)
+func (s *settleSignal) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) settle.Settlement {
+	st := s.Fake.Settle(d, num, gen, result)
 	s.settled <- num
+	return st
 }
 
 // waitOn fails the test if ch does not receive within 2s, the same timeout
@@ -3670,24 +3671,22 @@ const awaitingSettleSpinDeadline = 10 * time.Second
 // receive because terminate.Registry exposes no notification seam
 // (Begin/Mark/Marked only), and adding one would be production code grown
 // solely for this test's need.
-func (a *awaitingSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
+func (a *awaitingSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) settle.Settlement {
 	a.started <- num
 	deadline := time.Now().Add(awaitingSettleSpinDeadline)
 	for {
 		if a.reg.Marked(num, gen) {
 			a.recordOutcome(num, "marked")
-			a.Fake.Settle(d, num, gen, result)
-			return
+			return a.Fake.Settle(d, num, gen, result)
 		}
 		select {
 		case <-a.release:
 			a.recordOutcome(num, "released")
-			a.Fake.Settle(d, num, gen, result)
-			return
+			return a.Fake.Settle(d, num, gen, result)
 		default:
 			if time.Now().After(deadline) {
 				a.recordOutcome(num, "spin-deadline-exceeded")
-				return
+				return settle.Settlement{}
 			}
 			runtime.Gosched()
 		}

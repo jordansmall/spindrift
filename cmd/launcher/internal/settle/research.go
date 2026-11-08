@@ -73,17 +73,15 @@ func (r *ResearchSettle) WithProgress(p Progress) *ResearchSettle {
 // transitions num to Failed so crash-retry and verdict-review stay separate
 // human queues. Under the comment relay a missing SPINDRIFT_COMMENT block
 // counts as a missing outcome line.
-func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
+func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) Settlement {
 	RecordSettleWarnings(d, num, "", result)
 	if !result.Resolved.Found {
-		r.fail(d, num, "no verdict outcome line")
-		return
+		return r.fail(d, num, "no verdict outcome line")
 	}
 	o := result.Resolved.Outcome
 	verdict, ok := r.verdicts.Parse(o.Status)
 	if !ok {
-		r.fail(d, num, o.Note)
-		return
+		return r.fail(d, num, o.Note)
 	}
 	backlink := fmt.Sprintf("Filed from research on #%s", num)
 	filed := fileIssueIntentsDetailed(r.progress, r.it, num, result, r.findingLabel, backlink)
@@ -103,15 +101,14 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 		}
 		if err := r.it.Comment(num, body); err != nil {
 			r.progress.Step(Step{Key: num, Status: StatusCommentPostFailed, Detail: fmt.Sprintf("!! %v", err)})
-			return
+			return Settlement{}
 		}
 	} else if r.landing != nil || r.readOnly || r.verdictRelayed {
-		r.fail(d, num, commentFailureNote(result.CommentRejected))
-		return
+		return r.fail(d, num, commentFailureNote(result.CommentRejected))
 	}
 	if err := r.it.CompleteVerdict(num, verdict); err != nil {
 		r.progress.Step(Step{Key: num, Landing: o.Landing, Status: StatusVerdictApplyFailed, Detail: fmt.Sprintf("!! %v", err)})
-		return
+		return Settlement{}
 	}
 	// State stays DispatchState-only (forge.Complete); the verdict itself
 	// (recommend/reject/unclear, ADR 0022) rides in the note, since the report
@@ -122,8 +119,9 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 	// state twice for one issue (completeLanding's Complete, then
 	// verifyMerged's demotion). Every ResearchSettle path reaches exactly one,
 	// so inline is already "once".
-	SettledBy(d, dispatchkey.Issue(num), ForReason(dispatchrecord.ReasonVerdict), "verdict "+string(verdict))
+	st := SettledBy(d, dispatchkey.Issue(num), ForReason(dispatchrecord.ReasonVerdict), "verdict "+string(verdict))
 	r.progress.Step(Step{Key: num, Landing: o.Landing, Status: Status(o.Status), Detail: "note=" + o.Note})
+	return st
 }
 
 // commentFailureNote distinguishes "the Box never emitted a comment line" from
@@ -139,7 +137,7 @@ func commentFailureNote(rejected outcome.Rejections) string {
 }
 
 // fail transitions num from InProgress to Failed (agent-research-failed).
-func (r *ResearchSettle) fail(d dispatch.Dispatcher, num, note string) {
+func (r *ResearchSettle) fail(d dispatch.Dispatcher, num, note string) Settlement {
 	if err := r.it.TransitionState(num, forge.InProgress, forge.Failed); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to failed: %v\n", num, err)
 	}
@@ -150,8 +148,9 @@ func (r *ResearchSettle) fail(d dispatch.Dispatcher, num, note string) {
 	// Inline, not through the transitionState/flushSettled latch (see the
 	// comment at ResearchSettle's other Settled call above): this path also
 	// reaches exactly one terminal state per issue.
-	SettledBy(d, dispatchkey.Issue(num), ForReason(dispatchrecord.ReasonResearchFailed), note)
+	st := SettledBy(d, dispatchkey.Issue(num), ForReason(dispatchrecord.ReasonResearchFailed), note)
 	r.progress.Step(Step{Key: num, Status: StatusFailed, Detail: "note=" + note})
+	return st
 }
 
 // Fail is a no-op but is reachable: under CONTINUOUS_DISPATCH this Settler runs

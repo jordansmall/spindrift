@@ -4,9 +4,22 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/terminate"
 )
+
+func TestQueueSettler_Settle_ReturnsInnerSettlement(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", State: PickRunning})
+	inner := settle.NewFake()
+	inner.Settlement = settle.Settlement{Verdict: settle.ForReason(dispatchrecord.ReasonMerged), PRURL: "https://example.test/pr/42"}
+	qs := queueSettler{Settler: inner, q: q}
+
+	if got := qs.Settle(nil, "42", 0, dispatch.Result{}); got != inner.Settlement {
+		t.Errorf("Settle = %+v, want %+v", got, inner.Settlement)
+	}
+}
 
 // Pins #646 AC4: a launched pick's row moves from running to settled, and the
 // wrapped Settler still runs.

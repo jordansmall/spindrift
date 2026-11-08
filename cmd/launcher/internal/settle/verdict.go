@@ -10,7 +10,8 @@ import (
 // Verdict is a terminal transition's Settle reason and the state it records.
 // The state comes from the reason table, never from the caller, so a reason
 // cannot be written with the wrong state; only Transition's refusal keeps a
-// displaced state (issue #6609).
+// displaced state (issue #6609), and the off-script-status arm leaves the
+// Dispatch in progress with no reason.
 type Verdict struct {
 	state  forge.DispatchState
 	reason string
