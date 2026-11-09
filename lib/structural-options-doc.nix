@@ -20,7 +20,7 @@ in
   };
 
   prompt = {
-    doc = "Agent prompt template baked into the image; changing it requires an image rebuild. Set SPINDRIFT_PROMPT_DIR at runtime to override without a rebuild.";
+    doc = "Agent prompt template baked into the image; changing it requires an image rebuild. Pass `--prompt-dir` (or set `agents.promptDir`) to override without a rebuild.";
     docType = "string";
     docDefault = "bundled starter";
   };
