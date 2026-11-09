@@ -595,6 +595,102 @@ func TestMainRun_AmbientKnobEnv_StopsEveryEarlyPath(t *testing.T) {
 	}
 }
 
+// A stray knob stops doctor with its own config-invalid code, not the
+// dispatch-space ConfigInvalid, wherever doctor sits among the flags (#6716).
+func TestMainRun_AmbientKnobEnv_DoctorExitsDoctorConfigInvalid(t *testing.T) {
+	t.Setenv("MAX_JOBS", "5")
+
+	for _, argv := range [][]string{
+		{"doctor"},
+		{"doctor", "--verbose"},
+		{"doctor", "--butler"},
+		{"--no-build", "doctor"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := mainRunT(t, argv, &stdout, &stderr)
+		if code != int(exitcode.DoctorConfigInvalid) {
+			t.Errorf("mainRun(%v) code = %d, want %d", argv, code, int(exitcode.DoctorConfigInvalid))
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("mainRun(%v) stdout = %q, want empty", argv, stdout.String())
+		}
+		if !strings.Contains(stderr.String(), "MAX_JOBS=5 set in environment") {
+			t.Errorf("mainRun(%v) stderr = %q, want a MAX_JOBS error", argv, stderr.String())
+		}
+	}
+
+	// Help in any spelling or position is help, not a doctor run: it keeps
+	// the dispatch code.
+	for _, argv := range [][]string{
+		{"doctor", "--help"},
+		{"doctor", "-h"},
+		{"doctor", "--", "--help"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := mainRunT(t, argv, &stdout, &stderr); code != int(exitcode.ConfigInvalid) {
+			t.Errorf("mainRun(%v) code = %d, want %d", argv, code, int(exitcode.ConfigInvalid))
+		}
+	}
+}
+
+func TestPreDispatchVerb(t *testing.T) {
+	for _, tc := range []struct {
+		argv []string
+		want string
+	}{
+		{[]string{"doctor"}, "doctor"},
+		{[]string{"doctor", "--verbose"}, "doctor"},
+		{[]string{"--no-build", "doctor"}, "doctor"},
+		{[]string{"--input", "x", "doctor"}, "doctor"},
+		{[]string{"research"}, "research"},
+		{nil, ""},
+		{[]string{"--help"}, ""},
+		{[]string{"doctor", "--help"}, ""},
+		{[]string{"doctor", "-h"}, ""},
+		{[]string{"doctor", "--", "--help"}, ""},
+		{[]string{"doctor", "--max-jobs"}, ""},
+		{[]string{"--not-a-real-flag", "doctor"}, ""},
+		{[]string{"doctor", "--input"}, ""},
+	} {
+		if got := preDispatchVerb(tc.argv); got != tc.want {
+			t.Errorf("preDispatchVerb(%v) = %q, want %q", tc.argv, got, tc.want)
+		}
+	}
+}
+
+func TestConfigErrorCode(t *testing.T) {
+	const dispatch = 99
+	for verb, want := range map[string]int{
+		"doctor":   int(exitcode.DoctorConfigInvalid),
+		"research": dispatch,
+		"":         dispatch,
+	} {
+		if got := configErrorCode(verb, dispatch); got != want {
+			t.Errorf("configErrorCode(%q, %d) = %d, want %d", verb, dispatch, got, want)
+		}
+	}
+}
+
+// A malformed --input document is a config error for doctor only; every other
+// verb keeps exit 1.
+func TestMainRun_MalformedInputDocument_DoctorExitsDoctorConfigInvalid(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "input.json")
+	if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for verb, want := range map[string]int{"doctor": int(exitcode.DoctorConfigInvalid), "research": 1} {
+		var stdout, stderr bytes.Buffer
+		code := mainRunT(t, []string{"--input", path, verb}, &stdout, &stderr)
+		if code != want {
+			t.Errorf("mainRun(--input malformed %s) code = %d, want %d; stderr=%s", verb, code, want, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "parse input document") {
+			t.Errorf("mainRun(--input malformed %s) stderr = %q, want a parse error", verb, stderr.String())
+		}
+	}
+}
+
 // A flag setting a knob is the sanctioned route: it must not read as ambient,
 // and it reaches loadConfig through launcherInput without ever entering the
 // process environment.

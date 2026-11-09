@@ -2220,6 +2220,38 @@ var mainRunIntercepts = map[string]string{
 	"--version": "version",
 }
 
+// configErrorCode is the exit code for a configuration error found before the
+// verb dispatches: dispatchCode, except for doctor, whose own exit-code table
+// reports config problems as DoctorConfigInvalid (issue #6716).
+func configErrorCode(verb string, dispatchCode int) int {
+	if verb == "doctor" {
+		return int(exitcode.DoctorConfigInvalid)
+	}
+	return dispatchCode
+}
+
+// preDispatchVerb is the verb argv names, found without acting on any of it,
+// for the ambient-knob check that runs before mainRun parses anything. argv
+// that mainRun treats as help (decided by mainRunIntercepts, at any position),
+// fails to parse, or names no verb yields "".
+func preDispatchVerb(argv []string) string {
+	for _, a := range argv {
+		if mainRunIntercepts[a] == "help" {
+			return ""
+		}
+	}
+	_, argv, err := extractInputFlag(argv)
+	if err != nil {
+		return ""
+	}
+	sc, err := scanFlags(argv)
+	if err != nil || inputdoc.CheckSchemaFlags(sc.schemaArgs) != nil {
+		return ""
+	}
+	verb, _ := splitVerb(sc.remaining)
+	return verb
+}
+
 // mainRun parses argv and dispatches to the selected subcommand, returning the
 // process exit code. stdout and stderr are injected so tests can assert on
 // help and error output without touching the real process streams.
@@ -2244,7 +2276,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// repeats the check for the verbs.
 	if err := ambientKnobEnvError(); err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
-		return int(exitcode.ConfigInvalid)
+		return configErrorCode(preDispatchVerb(argv), int(exitcode.ConfigInvalid))
 	}
 	if help {
 		if helpAll {
@@ -2270,18 +2302,21 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		printHelp(stdout)
 		return 0
 	}
+	// Pass-through booleans such as --no-build may precede the verb (issue
+	// #3784), so args[0] is not necessarily it.
+	verb, rest := splitVerb(args)
 	var doc *inputdoc.Document
 	if inputPath != "" {
 		if doc, err = inputdoc.Load(inputPath); err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
-			return 1
+			return configErrorCode(verb, 1)
 		}
 	}
 	resolved, err := inputdoc.Resolve(schemaArgs, doc, processEnv())
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		if errors.Is(err, inputdoc.ErrConfigInvalid) {
-			return int(exitcode.ConfigInvalid)
+			return configErrorCode(verb, int(exitcode.ConfigInvalid))
 		}
 		return 1
 	}
@@ -2294,9 +2329,6 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 	_, driverWarning := resolveDriver()
 	fmt.Fprint(stderr, driverWarning)
-	// Pass-through booleans such as --no-build may precede the verb (issue
-	// #3784), so args[0] is not necessarily it.
-	verb, rest := splitVerb(args)
 	if verb == "" {
 		fmt.Fprint(stderr, "missing subcommand\n\n")
 		printHelp(stderr)
