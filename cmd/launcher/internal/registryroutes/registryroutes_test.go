@@ -1169,6 +1169,9 @@ func TestParse_UpstreamOriginInvalidIsError(t *testing.T) {
 		{"relative", "artifactory.example.com"},
 		{"non-http scheme", "ftp://artifactory.example.com"},
 		{"empty host", "https://"},
+		{"port-only host", "http://:8080"},
+		{"empty query", "https://artifactory.example.com?"},
+		{"empty fragment", "https://artifactory.example.com#"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			doc := `
@@ -1192,18 +1195,27 @@ credential = { netrc = "~/.netrc" }
 }
 
 func TestParse_UpstreamOriginWithUserinfoDoesNotEcho(t *testing.T) {
-	const doc = `
+	for _, origin := range []string{
+		"https://user:s3cr3t@artifactory.example.com",
+		"http://user:s3cr3t@:8080",
+		"https://user:s3cr3t@",
+		"user:s3cr3t@artifactory.example.com",
+	} {
+		t.Run(origin, func(t *testing.T) {
+			doc := `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-origin = "https://user:s3cr3t@artifactory.example.com"
+upstream-origin = "` + origin + `"
 credential = { netrc = "~/.netrc" }
 `
-	_, err := parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for upstream-origin with userinfo, got nil")
-	}
-	if strings.Contains(err.Error(), "s3cr3t") {
-		t.Errorf("error must not echo userinfo, got: %v", err)
+			_, err := parse([]byte(doc))
+			if err == nil {
+				t.Fatal("expected error for upstream-origin with userinfo, got nil")
+			}
+			if strings.Contains(err.Error(), "s3cr3t") {
+				t.Errorf("error must not echo userinfo, got: %v", err)
+			}
+		})
 	}
 }
 
