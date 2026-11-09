@@ -675,6 +675,54 @@ so the Box and `driver-exec` never link settle, tuning or the Records store
 (ADR 0070). _Avoid_: host-side bundle (that is the git bundle a read-only
 Box's branch is relayed in), butler bundle.
 
+**Connector**:
+A backend's or Driver's host half, built as a WebAssembly module and shipped
+with its Nix row from its own subflake, and treated as untrusted whoever wrote
+it (ADR 0073, proposed). A network backend's Connector translates between the
+canonical types and its backend's API through the one [[Host call]] it is
+granted; a Driver's Connector decodes Pass-log lines and is granted none.
+_Avoid_: plugin, adapter, extension.
+
+**Connector host**:
+The runtime embedded in each binary that loads Connectors, grants their Host
+calls, enforces their [[Route table]]s, brokers credentials, and fails closed
+when a Connector traps, overruns its budget or returns output that fails its
+schema (ADR 0073). _Avoid_: plugin host, sandbox (that is the Box's runner).
+
+**Host call**:
+A function the Connector host exposes to a Connector, and the only way a
+Connector can affect anything: `http_request` for network Connectors, and
+logging (ADR 0073). _Avoid_: syscall, import, callback.
+
+**Route table**:
+The host, method and path patterns a Connector's row declares. The Connector
+host refuses any `http_request` outside it, unsent, and attaches the
+credential only on a match, so the table is the Connector's permissions
+manifest (ADR 0073). _Avoid_: allowlist, scopes.
+
+**Built-in backend**:
+A backend that stays native in core because it needs capabilities Connectors
+are denied: `local` (filesystem) and `git` (git operations) (ADR 0073).
+_Avoid_: bundled backend (every first-party backend is bundled), core adapter.
+
+**Shadow mode**:
+A migration stage in which the native implementation stays authoritative and
+its Connector processes the same inputs alongside, with every divergence
+recorded; a Connector cuts over after 20 consecutive dogfood runs with none
+(ADR 0073). _Avoid_: canary, dry run.
+
+**Connector protocol**:
+The versioned contract between the Connector host and Connectors: the
+handshake, the Host calls and the canonical types. It is semver `0.y.z`,
+independent of spindrift's release version; core supports the current and
+previous `0.y` (ADR 0073). _Avoid_: SDK (the Go convenience over it), ABI.
+
+**Batteries flake** / **core flake**:
+The root `spindrift` flake, which Consumers import and which composes core
+with the first-party Connectors; and core alone, imported as
+`github:jordansmall/spindrift?dir=core` by anyone who wants it without them
+(ADR 0073). _Avoid_: distro, full flake.
+
 **Row-owned knob**:
 A knob declared on the registry row of the one adapter it configures — a
 backend's base URL, a runner's network flag, a Driver-only timeout — rather
