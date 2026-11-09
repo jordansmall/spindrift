@@ -272,8 +272,7 @@ type flagScan struct {
 // scanFlags splits args into verb arguments, schema-flag tokens and the
 // secret --*-file/--*-cmd values, without acting on any of them. It touches
 // nothing outside its return value (no environment, files, commands or package
-// state), so mainRun can ask which verb an invocation names before parseFlags
-// runs.
+// state), so preDispatchVerb can ask which verb an invocation names.
 func scanFlags(args []string) (flagScan, error) {
 	byFileFlag := make(map[string]*inputdoc.SecretKnob, len(inputdoc.SecretKnobs))
 	byCmdFlag := make(map[string]*inputdoc.SecretKnob, len(inputdoc.SecretKnobs))
