@@ -1,5 +1,10 @@
 # An out-of-tree Driver crosses a process seam, once a trigger fires
 
+> **Superseded by [ADR 0073](0073-backends-and-drivers-are-trust-no-one-wasm-connectors.md).**
+> The out-of-tree seam is built for Drivers and backends together, as an
+> in-process WebAssembly module rather than a process, and as a deliberate
+> platform decision rather than on a trigger. All or none (point 5) stands.
+
 Status: proposed
 
 ## Context
@@ -82,3 +87,15 @@ The shape is decided now; the split is not built until a trigger fires.
   is accepted in principle and measured when the seam is built.
 - Canonical events becoming a test-only wire format under ADR 0066 is the
   only step taken toward the seam now.
+
+## Amendment (ADR 0073): the seam is WASM, built now
+
+ADR 0073 supersedes points 1, 3 and 4. A trust-no-one posture needs a seam
+that strips a Driver's ambient powers on macOS as well as Linux, which a
+process cannot do, so the seam is a WebAssembly module run in-process. A
+Driver Connector is granted no Host calls. The triggers are replaced: the seam
+is built now as a platform bet, with `claude` proven first in shadow mode on
+dogfood (spec #6751). Point 2's rejection of Nix-time Go composition stands,
+for the same vendor-hash reason and because no Consumer would get cached
+binaries. Point 5 stands: core's test fake Driver becomes a Connector, and
+native Strategies live only through a migration window.

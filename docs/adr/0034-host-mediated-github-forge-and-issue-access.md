@@ -1,5 +1,9 @@
 # `github` joins the host-mediated write model, behind an opt-in switch
 
+> **Amended by [ADR 0073](0073-backends-and-drivers-are-trust-no-one-wasm-connectors.md):**
+> the end state is a Box with no forge credential; `read-only` becomes the
+> default on the way.
+>
 > **Superseded in part by [ADR 0052](0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md).**
 > The `SPINDRIFT_PR_INTENT` stdout line (the #1938 amendment below) gains a
 > socket carrier with explicit `title` and `body` fields, selected by
@@ -274,3 +278,11 @@ forge/label checks — a no-op line under `read-write`, and under `read-only`
 either the same success/warning the gate prints at dispatch time or its
 fail-closed error, so a misconfigured deployment fails `doctor` the same way
 it would fail a live dispatch at bootstrap.
+
+## Amendment (ADR 0073): the Box ends with no forge credential
+
+`read-only` becomes the default after a deprecation window. Every in-box forge
+read an agent needs becomes a Signal-socket verb, answered by core through the
+backend. Once the github read path has crossed the Connector seam, the Box
+token, in-box CLIs, in-box CLI setup and credential helper are removed, and
+then `read-write` itself. Each step is a versioned break (spec #6757).
