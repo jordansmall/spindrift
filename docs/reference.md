@@ -498,8 +498,8 @@ post-green [merge policy](#how-a-run-works)
 guard](#merge-guard)'s glob list, downgrading a green PR to manual
 regardless of `git.merge.policy` when it touches a guarded path;
 `agents.drivers.<name>.models.default` is the model the in-container
-implementor agent runs, threaded into the container as `MODEL` so `MODEL=...`
-switches models at runtime with no image rebuild. `agents.drivers.<name>.models.scout`/
+implementor agent runs, threaded into the container as `MODEL` so `--model ...`
+switches models at dispatch time with no image rebuild. `agents.drivers.<name>.models.scout`/
 `agents.drivers.<name>.models.review` tier the read-only scout and reviewer
 subagents, but are baked into the image (a change needs a rebuild; only the
 code-owned review pass has a per-run override, see [In-box
@@ -1282,8 +1282,8 @@ What the Driver carries:
   renders no `reasoningEffort` line), so the level is never doubled. The role's
   effort must still be a valid level. A trailing colon segment that is not a
   level (`ollama/llama:8b`) is part of the model id and still takes the effort
-  suffix. A dispatch-time `REVIEW_MODEL` ending in one of those levels
-  (`REVIEW_MODEL=github-copilot/some-model:low`) reaches pi as is, suffix
+  suffix. A dispatch-time `--review-model` ending in one of those levels
+  (`--review-model github-copilot/some-model:low`) reaches pi as is, suffix
   included, and its level wins over the baked reviewer `reasoningEffort` and
   the coordinator `EFFORT` fallback, so the review pass's `--thinking` agrees
   with it. Unlike a baked role's effort, which always yields to a suffix, an
@@ -2528,10 +2528,10 @@ catalog — `opencode models`, filtered to the `github-copilot` provider —
 rather than copying a literal id that will rot. The launcher's
 `validate()` (and `doctor`'s `driver-credentials` row, the same check)
 requires `OPENCODE_AUTH_CONTENT` only when `DRIVER=opencode` *and* some
-model tier (`MODEL`, `REVIEW_MODEL`, `WORKER_MODEL`, `SCOUT_MODEL`,
-`FILER_MODEL`) carries the `github-copilot/` prefix, so a config that
-points only a subagent tier (e.g. `REVIEW_MODEL=github-copilot/…`) at the
-Provider is still caught. A tier baked into the image is invisible to the
+model tier (the knobs `MODEL`, `REVIEW_MODEL`, `WORKER_MODEL`, `SCOUT_MODEL`,
+`FILER_MODEL`, each set by its `--<flag>` or setting, never the env var)
+carries the `github-copilot/` prefix, so a config that points only a subagent
+tier (e.g. `--review-model github-copilot/…`) at the Provider is still caught. A tier baked into the image is invisible to the
 launcher, so set the credential whenever *any* selected tier resolves to
 `github-copilot`. Under the opencode Driver, the claude
 credentials (`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`) are not
@@ -2605,10 +2605,11 @@ PI_MODELS_CONTENT='{"providers":{"llm":{"api":"openai-completions","apiKey":"dum
 ```
 
 Then name the Provider in a model tier as `<provider>/<model>`, e.g.
-`MODEL=llm/my-model`. The JSON is operator-controlled host-side
-content and is never read from the Target repo. Editing it takes effect on
-the next dispatch with no image rebuild. Unset, nothing is written and
-preflight is unchanged.
+`--model llm/my-model` for one dispatch, or
+`agents.drivers.pi.models.default = "llm/my-model"` to keep it. The JSON is
+operator-controlled host-side content and is never read from the Target repo.
+Editing it takes effect on the next dispatch with no image rebuild. Unset,
+nothing is written and preflight is unchanged.
 
 A Provider declared here under a name no credential rule matches needs no key
 at preflight; one that reuses a known Provider name (`openai`, `openrouter`,
