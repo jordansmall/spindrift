@@ -732,15 +732,19 @@ func ValidateUpstreamOrigin(raw string) error {
 		}
 		return fmt.Errorf("upstream-origin is malformed: %w", err)
 	}
-	if u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return fmt.Errorf("upstream-origin %q must be an absolute http(s) URL", raw)
-	}
+	// Userinfo runs first and the next error omits raw: a value like
+	// "user:s3cr3t@host" (opaque, scheme-less) or "http://u:p@:8080" (no
+	// hostname) can carry a credential past the later checks, and no error
+	// may echo one back.
 	if u.User != nil {
-		// raw is omitted here, unlike the errors above: it may embed a
-		// credential, and this error must not echo one back.
 		return errors.New("upstream-origin must not contain userinfo")
 	}
-	if (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+	if u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return errors.New("upstream-origin must be an absolute http(s) URL with a host")
+	}
+	// Checks raw, not u.RawQuery/u.Fragment: url.Parse records a bare
+	// trailing "?" only as ForceQuery and a bare "#" in no field at all.
+	if (u.Path != "" && u.Path != "/") || strings.ContainsAny(raw, "?#") {
 		return fmt.Errorf("upstream-origin %q must be a bare origin (scheme://host[:port]) with no path, query, or fragment", raw)
 	}
 	return nil
