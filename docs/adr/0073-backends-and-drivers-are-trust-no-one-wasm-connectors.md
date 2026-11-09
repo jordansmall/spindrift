@@ -82,6 +82,11 @@ The question was grilled on 2026-11-09. Specs #6750–#6759 carry the work.
      deprecation window.
    - Every in-box forge read an agent needs becomes a Signal-socket verb,
      answered by core through the backend.
+   - The code plane becomes host-seeded on every forge, generalising ADR 0033:
+     the Launcher fetches host-side with its own credentials and gives the Box
+     a read-only mirror to clone from, and the Box hands back a bundle. Each
+     fix pass gets a fresh seed. Today the Box clones github and forgejo
+     directly with the Box token, so this has to land before the token goes.
    - The Box token, in-box CLIs, in-box CLI setup and the credential helper are
      then removed, but only after the github read path has crossed.
 
@@ -125,6 +130,29 @@ The question was grilled on 2026-11-09. Specs #6750–#6759 carry the work.
 
     In shadow mode the native path stays authoritative and divergences are
     recorded. Each shadow cuts over after 20 consecutive clean dogfood runs.
+14. **Two layers before anyone else's code runs.** The Launcher runs on the
+    host, not in a container: as the operator's user locally, and on the CI
+    runner VM in CI. A wazero escape inside it would be arbitrary code with:
+    - the operator's home directory, including SSH keys and the vault or
+      password-manager CLIs the `_CMD` knobs call;
+    - the container runtime's control socket;
+    - every Launcher credential.
+
+    WebAssembly isolation is the only layer while every Connector is
+    first-party and reviewed, hardened from the first Connector:
+    - pin wazero and track its security releases;
+    - fuzz the Host-call boundary;
+    - prefer wazero's interpreter to its compiler, unless the per-line cost
+      measured in the claude proof rules it out.
+
+    Before any third-party Connector can run, the Connector host moves into a
+    **Connector sandbox**: an empty container started by the same runner that
+    starts Boxes, with no mounts, no network and no credentials. On macOS that
+    means a container in the runner's VM, not a weaker process sandbox.
+    `http_request` crosses back to the Launcher over the Launcher socket
+    transport (ADR 0052), and the Launcher still checks routes, attaches
+    credentials and audits. The protocol does not change, so Connectors do not
+    notice.
 
 ### Layout evidence
 
@@ -169,6 +197,16 @@ A spike on 2026-11-09 tested each layout in a throwaway repository under Lix
   problem there is not yet.
 - **Keeping a Box-side forge path.** Rejected: it doubles every Connector's
   surface and leaves a credential beside the agent.
+- **WebAssembly isolation as the only layer, permanently.** Rejected: a
+  runtime escape would land with the operator's full user privileges. It is
+  accepted only while every Connector is first-party.
+- **A bwrap helper process for the Connector host.** Rejected: there is no
+  bwrap on macOS, and `sandbox-exec` is deprecated. The runner already
+  isolates on both platforms.
+- **The Connector sandbox from the first proof.** Close. It was deferred
+  because a runtime escape during the proofs would need both a malicious
+  first-party Connector and a wazero bug, and the sandbox adds a container
+  start per run.
 
 ## Consequences
 
@@ -191,3 +229,9 @@ A spike on 2026-11-09 tested each layout in a throwaway repository under Lix
   knobs are versioned breaks with migration notes.
 - GitHub App token refresh is honoured by the Connector host. Dogfood does not
   use the App yet; its setup is separate work.
+- The Connector sandbox is a hard gate on the protocol's first outside
+  release (spec #6763). Once it lands, each run pays a container
+  start and each Host call pays a local socket hop.
+- With the code plane host-seeded, the Box's mounts include a read-only mirror
+  on every forge, not only `local`. That widens ADR 0033's documented
+  exception to sharing no host filesystem from one forge to all of them.
