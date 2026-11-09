@@ -283,6 +283,10 @@ it would fail a live dispatch at bootstrap.
 
 `read-only` becomes the default after a deprecation window. Every in-box forge
 read an agent needs becomes a Signal-socket verb, answered by core through the
-backend. Once the github read path has crossed the Connector seam, the Box
-token, in-box CLIs, in-box CLI setup and credential helper are removed, and
-then `read-write` itself. Each step is a versioned break (spec #6757).
+backend. The code plane becomes host-seeded on every forge: the Launcher
+fetches with its own credentials and the Box clones a read-only mirror, as ADR
+0033 already does for `local`, because today the Box clones github and forgejo
+directly with the Box token. Once the github read path has crossed the
+Connector seam, the Box token, in-box CLIs, in-box CLI setup and credential
+helper are removed, and then `read-write` itself. Each step is a versioned
+break (spec #6757).

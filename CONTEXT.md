@@ -689,6 +689,13 @@ calls, enforces their [[Route table]]s, brokers credentials, and fails closed
 when a Connector traps, overruns its budget or returns output that fails its
 schema (ADR 0073). _Avoid_: plugin host, sandbox (that is the Box's runner).
 
+**Connector sandbox**:
+An empty container, started by the runner that starts Boxes, that hosts the
+Connector host so a runtime escape lands with nothing to steal: no mounts, no
+network, no credentials. `http_request` crosses back to the Launcher, which
+still enforces the Route table. Required before any third-party Connector runs
+(ADR 0073). _Avoid_: Box (that is the agent's container), plugin jail.
+
 **Host call**:
 A function the Connector host exposes to a Connector, and the only way a
 Connector can affect anything: `http_request` for network Connectors, and
