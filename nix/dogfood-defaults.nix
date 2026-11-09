@@ -144,9 +144,9 @@ in
     # (issue #712); native Linux shares host RAM with the container, so no cap
     # is needed there (issue #2379).
     memoryLimit = if isLinux then "" else "5g";
-    # Sweep bugs and docs-drift on idle Daemon slots (ADR 0056), and
-    # let a few allow-listed, reviewer-backed findings self-promote.
-    butlerChores = "bugs docs-drift";
+    # Butler paused: an empty list drops the butler kind from a bare daemon.
+    # Restore "bugs docs-drift" to resume; the caps below are inert until then.
+    butlerChores = "";
     butlerMaxPromotionsPerDay = 5;
     # Let the host land up to five docs-drift patch PRs a day (ADR 0057), on
     # the default patch classes and paths; mergeMode = "immediate" merges
