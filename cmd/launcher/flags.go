@@ -651,7 +651,7 @@ func printHelpFull(w io.Writer) {
 	printCliFlags(w)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Flags (flag > flake setting > default precedence; a knob env var is")
-	fmt.Fprintln(w, "rejected with exit 6 — ADR 0020):")
+	fmt.Fprintln(w, "rejected with exit 6, doctor exits 2 — ADR 0020):")
 
 	byGroup := make(map[string][]inputdoc.FlagEntry, len(inputdoc.GroupOrder))
 	for _, e := range inputdoc.SchemaFlags {

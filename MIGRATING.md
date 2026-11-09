@@ -5,9 +5,11 @@
 ADR 0020's staging is complete. The warning that named an ambient knob env var
 (a forgotten shell export, a line in `harness.env`, CI env) while still letting
 it win over the flake setting is now an error: `spindrift` and every verb,
-`--help` included, exit 6 (`config-invalid`) before doing any work when a
-non-secret knob is set in the launcher's environment. Only `--version` still
-answers. The message is one line per knob, for example:
+`--help` included, exit 6 (`config-invalid`; `doctor` exits 2) before doing
+any work when a non-secret knob is set in the launcher's environment. Only
+`--version` still answers. (`spindrift --input <document> doctor` likewise
+exits 2, not 1, when the document cannot be read or parsed; other verbs keep
+1.) The message is one line per knob, for example:
 
 ```
 MAX_JOBS=5 set in environment — knob env vars are not read; use --max-jobs or dispatch.maxJobs

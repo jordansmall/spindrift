@@ -2452,8 +2452,8 @@ rec {
     + "domain (ADR 0037); domains with no consumer-tunable knobs are omitted.\n"
     + "\n"
     + "Precedence at runtime: CLI flag > flake setting (via the Launcher input\n"
-    + "document, ADR 0020) > baked default. A knob env var is rejected with exit 6;\n"
-    + "env configures only secrets and internal plumbing.\n"
+    + "document, ADR 0020) > baked default. A knob env var is rejected with exit 6\n"
+    + "(`doctor` exits 2); env configures only secrets and internal plumbing.\n"
     + "See [`docs/reference.md`](reference.md) for the full option surface and runtime vars.\n"
     + "\n"
     + concatStrings (map renderSection domainOrder)
@@ -2823,7 +2823,7 @@ rec {
         local bundle. The agent CLI is a swappable Driver \(em Claude Code,
         opencode, or pi. Every runtime knob is set by flag, by the Consumer
         flake's settings, or by baked default, in that precedence order; a knob
-        env var is rejected with exit 6 (ADR 0020). Secrets are read from the environment or from a
+        env var is rejected with exit 6 (doctor exits 2; ADR 0020). Secrets are read from the environment or from a
         gitignored
         .I harness.env
         in the working directory.
@@ -2838,7 +2838,7 @@ rec {
         .SH OPTIONS
         Flags take precedence over the Consumer flake's settings (carried by the
         Launcher input document, ADR 0020), which take precedence over baked
-        defaults. A knob env var is rejected with exit 6 (ADR 0020).
+        defaults. A knob env var is rejected with exit 6 (doctor exits 2; ADR 0020).
         ${concatStrings (map groupSection groupOrder)}.SH ENVIRONMENT
         Secret knobs are never exposed as value flags; they are read from the
         environment, from a file via their
