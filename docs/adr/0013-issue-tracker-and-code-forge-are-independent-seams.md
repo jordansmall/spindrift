@@ -1,5 +1,9 @@
 # Issue Tracker and Code Forge are independent seams
 
+> **Amended by [ADR 0073](0073-backends-and-drivers-are-trust-no-one-wasm-connectors.md):**
+> across the Connector seam the contract is translation primitives, and
+> optional interfaces become handshake capabilities.
+
 ## Context
 
 The original `forge.Client` interface (`cmd/launcher/internal/forge`) conflated
@@ -144,3 +148,13 @@ that reads only config-time descriptor facts (`dispatch.Config`, issue
 resolved value instead of the whole thing — the same rows unwrapped one
 level, not a second, competing shape. What binds is that the rows come from
 the single `ResolveCapabilities` result rather than being re-derived.
+
+## Amendment (ADR 0073): the contract is primitives, capabilities cross the handshake
+
+Both axes stay independent and freely combinable. Across the Connector seam, a
+method belongs to the contract only if answering it needs the backend's API.
+Branch naming, dependency and touched-file parsing, record rendering and
+transient classification are core policy. The optional interfaces become
+capabilities a Connector declares in its handshake, and
+`ResolveCapabilities` stays core's single resolved value. Interfaces only
+Built-in backends implement never enter the protocol.

@@ -1,5 +1,9 @@
 # Backends are Strategy literals with row-owned knobs
 
+> **Amended by [ADR 0073](0073-backends-and-drivers-are-trust-no-one-wasm-connectors.md):**
+> network backends' Strategies move into Connectors; `local` and `git` keep
+> theirs as Built-in backends.
+
 Status: proposed
 
 ## Context
@@ -127,3 +131,15 @@ package, and its Nix row owns its knobs.
   versioned break (VERSIONING.md lists template variable names).
 - The runner and Driver registries inherit row-owned knobs and the
   per-adapter derivation helper from this decision.
+
+## Amendment (ADR 0073): network Strategies become Connectors
+
+A network backend's Strategy moves into a WebAssembly Connector reached
+through the Connector host, and its row gains a Route table. `local` and `git`
+remain native Strategies registered by the Bundle, as Built-in backends,
+because they need filesystem and git capabilities Connectors are denied. After
+the migration window the Bundle registers no native network backend.
+Row-owned knobs (point 2) extend across Connectors through the module system.
+Point 5's in-box fields (CLI package, `ConfigureCLI`) retire with the Box's
+forge credential (spec #6757). Point 7's per-adapter derivations become
+per-Connector subflake checks.

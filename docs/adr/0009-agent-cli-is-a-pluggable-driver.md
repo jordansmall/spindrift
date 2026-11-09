@@ -1,5 +1,9 @@
 # The agent CLI is a pluggable Driver; opencode joins claude behind it
 
+> **Amended by [ADR 0073](0073-backends-and-drivers-are-trust-no-one-wasm-connectors.md):**
+> the registry opens through the module system, and a Driver's host half
+> becomes a WebAssembly Connector.
+>
 > **Amended by [ADR 0064](0064-a-consumer-flake-declares-its-drivers-side-by-side.md):**
 > a Consumer flake may declare several Drivers side by side, still one Driver
 > per image, each with its own apps and Driver-suffixed image outputs.
@@ -641,3 +645,13 @@ a row (the fifth identical call) calls `process.exit(1)`. It is not
 json-mode turn; a nonzero exit is what makes a subagent result fail for its
 coordinator, with the bridge's stderr line in that result, and settles a
 looping coordinator as a failed run.
+
+## Amendment (ADR 0073): the registry opens
+
+The closed registry opens. A Driver row may come from outside core: a
+Connector ships a flake-parts module contributing to
+`spindrift.connectors.<name>`, and the module system's merge is the registry,
+so a duplicate name or env knob fails at evaluation. External row facts reach
+the binaries in the Launcher input document, with the generated Driver
+Descriptor as the fallback. A Driver's host half becomes a Connector; its
+in-box half stays row data.
