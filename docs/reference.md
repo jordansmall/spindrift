@@ -120,15 +120,22 @@ row.
 
 **Launch-gate registry rows**
 
-Doctor renders the ordered launch-gate registry (issue #2942) as five
-`ok: <name>` / `MISSING: <name>: <error>` pass/fail rows —
-`read-only-capability`, `network-mode-runtime`,
+Doctor renders the ordered launch-gate registry (issue #2942) as
+`ok: <name>` / `MISSING: <name>: <error>` pass/fail rows; like every
+`ok:` row, a passing gate prints only under `--verbose`. Three always
+apply — `read-only-capability`, `network-mode-runtime`, and
 `signal-carrier-network-mode` (the gate that refuses
 `--box-signal-carrier socket` — or the flag left unset, which now means
 `socket` — under `NETWORK_MODE=none`, the one pairing the socket carrier
 can never work under; see [Signal
-socket](#signal-socket-box_signal_carriersocket)),
-`read-only-token-github`, `read-only-token-forgejo` — the same gates
+socket](#signal-socket-box_signal_carriersocket)). A
+`read-only-token-<backend>` row applies only under
+`BOX_FORGE_AND_ISSUE_ACCESS=read-only`, and only for a backend whose
+token `CODE_FORGE` or `ISSUE_TRACKER` uses — normally one. Token rows
+come last, and a failing one stops the walk, so any later token row
+never renders. Under `read-write` no token row applies; doctor instead
+reports `ok: BOX_FORGE_AND_ISSUE_ACCESS=read-write — read-only token
+gate is a no-op` earlier in the report. These are the same gates
 `dispatch`'s bootstrap and `preview` enforce before launching a Box.
 
 **Registry-proxy rows**
