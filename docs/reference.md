@@ -268,7 +268,7 @@ each other, so the collision is not a conflict to resolve.
 |------|---------|
 | 0    | healthy — required checks passed; advisory findings (missing research/priority/ambiguous-spec/butler labels unless promoted by `--research`/`--butler`, runtime not ready, etc.) are allowed, and their rows print only under `--verbose`/`-v` — except the advisory labels re-listed above the interactive create-label prompt and the still-missing-after-creation lines, which print either way (see [`spindrift doctor` checks](#spindrift-doctor-checks)) |
 | 1    | reserved for internal/unclassified errors |
-| 2    | configuration invalid — the same required-knob/driver/cross-knob validation `dispatch` gates on, minus runtime readiness (advisory here, per exit 0 above, even though `dispatch` itself still requires it before launching a Box); also fires when `podman-machine-memory` fails (the podman machine is undersized for `MEMORY_LIMIT` × `MAX_PARALLEL`, issue #3544), since that row is classified alongside the required-knob checks |
+| 2    | configuration invalid — a non-secret knob set in `doctor`'s environment (every other verb exits 6 on it), an `--input` document that cannot be read or parsed (other verbs exit 1), or the same required-knob/driver/cross-knob validation `dispatch` gates on, minus runtime readiness (advisory here, per exit 0 above, even though `dispatch` itself still requires it before launching a Box); also fires when `podman-machine-memory` fails (the podman machine is undersized for `MEMORY_LIMIT` × `MAX_PARALLEL`, issue #3544), since that row is classified alongside the required-knob checks |
 | 3    | auth or connectivity — the issue tracker or code forge could not be reached, or a Required label's create call failed (the work tier, or a tier promoted by `--butler`/`--research`; an advisory-tier label create failure does not fail the check and still exits 0; its row prints only under `--verbose`/`-v`) |
 | 4    | required checks failed or declined — one or more required labels are missing and were not created (the four triage labels, plus any label the run requires: the `--butler`/`--research` tiers, or `agent-review-finding` on a read-only Filer deployment), whether declined at the interactive prompt, missing in non-interactive (CI) mode, or still missing after a create attempt |
 
@@ -303,12 +303,12 @@ Every runtime knob is also a `--flag`. Precedence is **flag > flake `settings`
 image/agent-file artifacts) into one Launcher input document, passed to the
 binary via `--input`; an explicit flag overrides it. A knob env var is no
 longer read: the launcher (every verb, `--help` included; only `--version`
-still answers) exits 6 (`config-invalid`) before doing any work when a
-non-secret knob is set in its environment, one line per knob naming the flag
-and settings path to use instead (issue #6623, finishing the staging ADR 0020
-began with a warning). Env carries only secrets and internal launcher→Box
-plumbing (`DRIVER`, the `SPINDRIFT_*` internals); see
-[`MIGRATING.md`](../MIGRATING.md).
+still answers) exits 6 (`config-invalid`; `doctor` exits 2)
+before doing any work when a non-secret knob is set in its
+environment, one line per knob naming the flag and settings path to use
+instead (issue #6623, finishing the staging ADR 0020 began with a warning).
+Env carries only secrets and internal launcher→Box plumbing (`DRIVER`, the
+`SPINDRIFT_*` internals); see [`MIGRATING.md`](../MIGRATING.md).
 A set-but-empty bool knob (e.g. `--auto-format=false`) is an explicit off that
 beats a document value of on. One rule decides it, and it also decides which
 empty env values trip the exit-6 check above: a knob's empty value counts as
@@ -1171,10 +1171,10 @@ only one Driver needs (its provider key, `OPENCODE_AUTH_CONTENT`) in the
 Driver's own file, and keep shared secrets (forge tokens, `*_CMD` credential
 commands) in `harness.env`. The wrapper exports whatever the files assign, so
 a non-secret knob in either one, such as `MODEL` or `EFFORT`, makes the
-launcher exit 6 (`config-invalid`) before it does any work; the Driver-valued
-knobs (the `driverValued` rows in `lib/env-schema.nix`) belong in each
-Driver's own `agents.drivers.<name>` settings, or on the command line as
-`--model` / `--effort`.
+launcher exit 6 (`config-invalid`; `doctor` exits 2) before it does any
+work; the Driver-valued knobs (the `driverValued` rows in
+`lib/env-schema.nix`) belong in each Driver's own `agents.drivers.<name>`
+settings, or on the command line as `--model` / `--effort`.
 
 With a single Driver (the `agents.driver` shorthand or a one-entry
 `agents.drivers`) no Driver file is read, even if present.
@@ -2318,10 +2318,10 @@ baked as Nix options — so one image drives any Target repo without a rebuild
 (ADR 0001). Secrets stay **runtime env** (`harness.env` or your shell, never
 the flake); every other knob below is a flake `settings.*` value or a
 `--flag` (ADR 0020) — the env var column only names the knob: setting one in
-the launcher's environment exits 6 (`config-invalid`; issue #6623). When you
-build several Drivers from one flake, each Driver's apps also read an optional
-`harness.<driver>.env` after `harness.env`; see [Several Drivers side by
-side](#several-drivers-side-by-side).
+the launcher's environment exits 6 (`config-invalid`; `doctor` exits 2;
+issue #6623). When you build several Drivers from one flake, each Driver's
+apps also read an optional `harness.<driver>.env` after `harness.env`; see
+[Several Drivers side by side](#several-drivers-side-by-side).
 
 A secret knob is any knob declared `secret = true` in `lib/env-schema.nix`
 or on a backend row in `lib/backends/` — `GH_TOKEN`, `BOX_GH_TOKEN`,
@@ -2458,7 +2458,7 @@ Every `settings`-baked knob above can be re-pointed at dispatch time with its
 image's subagent roster and need a rebuild (on an image with no loaded input
 document, a dispatch-time value still steers which subagent prompt fragments
 render, so they can disagree with the baked roster); a knob env var is not
-read and exits 6 (ADR 0020, issue #6623) — see
+read and exits 6 (`doctor` exits 2; ADR 0020, issue #6623) — see
 [`MIGRATING.md`](../MIGRATING.md) for the flag/settings equivalents. `(baked)` marks knobs whose defaults are baked into the Launcher
 input document via `settings`; `(not bakeable)` marks knobs deliberately kept
 off the flake surface (secrets, per-run overrides, and dev-iteration host-path
@@ -2700,7 +2700,7 @@ takes four things:
   the daemon's own host is not. Reaching that one takes `host` mode, which
   gives up the Box's network isolation. Bake it as `infra.network.mode`
   (`defaults.networkMode` in `mkHarness`); a `NETWORK_MODE` line in
-  `harness.env` exits 6 (`config-invalid`). See [Network mode](#network-mode-network_mode) and [Reaching a
+  `harness.env` exits 6 (`config-invalid`; `doctor` exits 2). See [Network mode](#network-mode-network_mode) and [Reaching a
   local/self-hosted model server under egress
   restriction](#reaching-a-localself-hosted-model-server-under-egress-restriction).
 
@@ -2711,8 +2711,8 @@ These knobs are rarely changed. All except `SPINDRIFT_SKILLS_DIR` and
 [Option surface](#option-surface)); all except the daemon-only knobs below —
 every row whose meaning says the launcher itself ignores it — can
 additionally be overridden at dispatch time via `--flag` (a knob env var
-exits 6 — ADR 0020, issue #6623). The launcher does generate a
-`--flag` for those daemon-only knobs as well, to hold the 1:1
+exits 6, `doctor` exits 2 — ADR 0020, issue #6623). The launcher does
+generate a `--flag` for those daemon-only knobs as well, to hold the 1:1
 flake-option/flag parity (issue #3567), but never reads the value — passing
 one is accepted and silently inert. Set them through `settings` /
 `perSystem.spindrift.dispatch.*` instead, which the daemon resolves for
