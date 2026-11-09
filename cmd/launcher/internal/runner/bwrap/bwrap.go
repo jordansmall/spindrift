@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -632,9 +633,10 @@ func resolvedRunEnv(boxEnv map[string]string) []string {
 
 // cgroupDirForName computes the per-Box cgroup v2 directory provisionCgroup
 // creates, anchored at the outermost ancestor that delegates the controllers this
-// adapter's limits need. Creation-time only: IsRunning/ListRunning read back
-// via findCgroupDir instead, since a Box's creating process and the process later
-// polling it are often launcher invocations with different anchors.
+// adapter's limits need. Creation-time only: IsRunning and ListRunning both read
+// back via ListRunning's whole-tree walk instead, since a Box's creating process
+// and the process later polling it are often launcher invocations with
+// different anchors.
 func (a *bwrapAdapter) cgroupDirForName(name string) (string, error) {
 	parent, err := cgroupParentDir(a.cgroupControllers())
 	if err != nil {
@@ -765,32 +767,6 @@ func cgroupParentDir(want []string) (string, error) {
 		return dir, nil
 	}
 	return filepath.Join(cgroupFSRoot, self), nil
-}
-
-// findCgroupDir searches the whole cgroupFSRoot tree, not just the calling
-// process's own self-cgroup subtree, for a directory named "spindrift-"+name at
-// any depth. That width is the point: a Box created under one invocation's
-// anchor stays discoverable from another with a different self-cgroup path. A
-// missing root, a walk error, or no match all degrade to ("", false).
-func findCgroupDir(name string) (dir string, ok bool) {
-	want := "spindrift-" + name
-	_ = filepath.WalkDir(cgroupFSRoot, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return nil // skip this entry, keep walking the rest of the tree
-		}
-		if path == cgroupFSRoot {
-			return nil
-		}
-		if !entry.IsDir() {
-			return nil
-		}
-		if entry.Name() != want {
-			return nil
-		}
-		dir, ok = path, true
-		return filepath.SkipAll
-	})
-	return dir, ok
 }
 
 // removeCgroupDir removes a per-Box delegated cgroup v2 directory created by
@@ -1175,21 +1151,15 @@ func (a *bwrapAdapter) Kill(name string) error {
 	return nil
 }
 
-// IsRunning reports whether name's per-Box cgroup still has a resident PID in
-// its cgroup.procs, resolving the dir via findCgroupDir so a Box created by a
-// different launcher invocation is found too. No cgroup tree and no dir both
-// degrade to false. IsRunning itself never warns, since a poll loop calling it
-// repeatedly would be noisy; provisionCgroup already warns once at launch.
+// IsRunning reports whether name has a live per-Box cgroup, answered from
+// ListRunning so an empty leftover dir under another anchor cannot mask a live
+// one and the two predicates agree by construction. No cgroup tree, no dir, and
+// a ListRunning error all degrade to false. IsRunning itself never warns, since a poll loop
+// calling it repeatedly would be noisy; provisionCgroup already warns once at
+// launch.
 func (a *bwrapAdapter) IsRunning(name string) bool {
-	dir, ok := findCgroupDir(name)
-	if !ok {
-		return false
-	}
-	procs, err := os.ReadFile(filepath.Join(dir, "cgroup.procs"))
-	if err != nil {
-		return false
-	}
-	return len(strings.TrimSpace(string(procs))) > 0
+	names, _ := a.ListRunning()
+	return slices.Contains(names, name)
 }
 
 // ListRunning enumerates every spindrift-* cgroup dir anywhere under
