@@ -10825,24 +10825,25 @@ a file without `schema` predates the field and reads as schema 1.
 ## Shell completion
 
 `spindrift` ships bash, fish, and zsh tab-completion, generated from the same
-schema as `--help` and the man page: subcommands (`dispatch`, `research`,
-`preview`, `build`, `recover`, `doctor`) complete as the first word, every
-flag (including the `--issue` alias and the secret `--*-file` flags) completes
-anywhere after it, a `--*-file` flag's argument completes as a filesystem path,
-and an enumerable flag's argument (`--merge-policy`, `--forge-backend`,
-`--tracker`, `--overlap-gate`) completes to its fixed set of legal values
-(e.g. `--merge-policy <TAB>` offers `immediate auto manual`).
+schema as `--help` and the man page: every subcommand in `lib/subcommands.nix`
+completes as the first word, every flag (including the `--issue` alias and the
+secret `--*-file` and `--*-cmd` flags) completes anywhere after it, a
+`--*-file` flag's argument completes as a filesystem path, and the argument of
+every non-secret knob declaring `choices` in `lib/env-schema.nix` (such as
+`--merge-policy`, `--tracker`, or `--box-access`) completes to its fixed set of
+legal values (e.g. `--merge-policy <TAB>` offers `immediate auto manual`).
 
 `dispatch`, `preview`, and `recover` additionally complete their positional
 issue-number argument dynamically: `spindrift dispatch <TAB>` queries the
 configured issue tracker (honoring the effective `LABEL`, `REPO_SLUG`, and
 `ISSUE_TRACKER`) and offers the numbers currently in the dispatchable queue —
 zsh and fish annotate each with its title, bash offers the bare numbers.
-`build` and `doctor` take no issue argument and complete none. The query goes
-through a hidden `spindrift __complete-issues` sub-verb (not a documented
-subcommand — it exists solely for the completion scripts to shell out to) and
-is bounded by a short timeout: a slow, offline, or erroring tracker yields no
-candidates instead of blocking or erroring your shell mid-`<TAB>`.
+Every other subcommand completes no issue numbers, `research` included: it
+drains a different queue. The query goes through a hidden `spindrift
+__complete-issues` sub-verb (not a documented subcommand — it exists solely
+for the completion scripts to shell out to) and is bounded by a short timeout:
+a slow, offline, or erroring tracker yields no candidates instead of blocking
+or erroring your shell mid-`<TAB>`.
 
 **bash.** `nix develop` puts the completion script on
 `share/bash-completion/completions` under `spindrift`'s store path; source it
