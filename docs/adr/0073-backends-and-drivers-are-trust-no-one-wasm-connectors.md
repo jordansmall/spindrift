@@ -1,0 +1,193 @@
+# Backends and Drivers are trust-no-one WASM Connectors
+
+Status: proposed
+
+## Context
+
+spindrift began as one opinionated workflow and is now a platform: five
+backends, three Drivers, and contributors about to add support functions of
+their own. Every backend and Driver lives in core. ADR 0068 and ADR 0066 made
+each one a Strategy literal behind a Bundle, and core's Go tests already run on
+the forge fake, so adding one in-tree is a row, a package and a fragment
+folder. What remains in-tree is the cost a contributor cannot avoid: editing
+core, running core's pipeline, sharing core's release cadence.
+
+ADR 0067 decided the shape of an out-of-tree Driver, a process seam, and
+deferred building it until a second party needed it: "a versioned contract with
+no second party is a cost with no reader". This ADR builds the seam anyway, for
+backends and Drivers together, as a deliberate platform bet. Pipeline speed is
+not the reason. The 2026-10-20 profiling put each per-adapter check at 4–8s,
+with evaluation and cache staleness as the real cost, so that is a separate
+campaign.
+
+A backend adapter runs in the Launcher's trusted half and holds the real forge
+token. The github adapter shells out to `gh`, which holds it too. A Connector
+from outside core, or a first-party one compromised through a flake update,
+would sit next to the most powerful credential in the system. Security is the
+constraint this design is ranked by.
+
+The question was grilled on 2026-11-09. Specs #6750–#6759 carry the work.
+
+## Decision
+
+1. **Trust no one.** Every Connector is treated as hostile, first-party
+   included. A Connector is a WebAssembly module, run in-process by an embedded
+   runtime (wazero: pure Go, no cgo, the same on macOS and Linux). A module has
+   no filesystem, environment, sockets, subprocesses or clock except what the
+   Connector host grants. Isolation comes from the format, not the operating
+   system, which a process seam cannot offer on macOS.
+2. **One Host call for network Connectors.** A backend Connector is granted
+   `http_request` (and logging). The Connector host:
+   - checks each request against the row's **Route table** (host, method and
+     path pattern, validated like registry routes, ADR 0045/0047);
+   - attaches the credential itself;
+   - sends the request;
+   - records an audit entry;
+   - refuses anything else unsent.
+
+   A Driver Connector is granted no Host calls: it only transforms the
+   Pass-log lines it is given. A Connector never holds a credential.
+3. **The Route table is a permissions manifest.** Doctor lists it, and a
+   Connector update that widens it surfaces as a diff. Nix's lockfile already
+   pins a Connector's content.
+4. **Outputs are untrusted.** Every result is schema-checked and size-capped,
+   and text is handled like issue comments. A Connector that traps, exhausts its
+   budget or exceeds its memory fails closed with a named error.
+5. **The contract is translation primitives; core owns policy.** A method
+   enters the Connector protocol only if answering it needs the backend's API.
+   Moving into core:
+   - branch naming (`AgentBranch`);
+   - dependency and touched-file parsing (`DepsOf`, `TouchesOf`);
+   - record and verdict rendering;
+   - the github-tracker marker;
+   - transient-versus-permanent classification.
+
+   Local-only interfaces never enter the protocol. Optional interfaces become
+   handshake capabilities. The tracker axis is designed from jira and the forge
+   axis from forgejo, beneath the Settle Lander (#6568).
+6. **Git stays in core.** Clone, push, rebase and bundle relay run in core's
+   trusted git plumbing, which attaches its own credentials. A Connector
+   computes URLs and refs, never with a token embedded.
+7. **Built-in backends.** `local` and `git` stay native. The line is principled:
+   built-ins are exactly the backends needing capabilities Connectors are
+   denied (filesystem, git). Core's shared test Fake and test fake Driver are
+   Connectors, so every core test crosses the real seam (ADR 0067's all or
+   none). Native network adapters and native Driver Strategies may coexist with
+   Connectors only during a migration window, which closes when github's merge
+   crosses.
+8. **Drivers cross in the same campaign. Runners never do**, because they are
+   the sandbox.
+9. **The Box ends with no forge credential.**
+   - The `BOX_FORGE_AND_ISSUE_ACCESS` default flips to `read-only` after a
+     deprecation window.
+   - Every in-box forge read an agent needs becomes a Signal-socket verb,
+     answered by core through the backend.
+   - The Box token, in-box CLIs, in-box CLI setup and the credential helper are
+     then removed, but only after the github read path has crossed.
+
+   A Connector's in-box half is prompt fragments only; today's in-box path is
+   core-owned legacy.
+10. **Connector protocol versioning.** Semver `0.y.z`, independent of
+    spindrift's release version. A `0.y` bump is breaking and `0.y.z` is
+    additive. Core supports the current and previous `0.y`. The handshake
+    returns `{protocolVersion, capabilities}` and refuses an out-of-range
+    Connector with an error naming both versions. A Go SDK hides the encoding;
+    the protocol, not the SDK, is the contract.
+11. **One repository, three flake roles.**
+    - The root flake is the batteries flake and keeps the `spindrift` name and
+      URL, with github still the default.
+    - Core is a subflake, imported alone as
+      `github:jordansmall/spindrift?dir=core`, as a thin wrapper reading the
+      source tree in place.
+    - Each Connector is a subflake under the Connector directory.
+
+    The root plain-imports core and the Connectors, with no flake inputs
+    between in-repo pieces. A Connector exports `lib.connector { core }`, and
+    the batteries flake always passes its own core. The registry is the module
+    system: each Connector ships a flake-parts module contributing to
+    `spindrift.connectors.<name>`, so duplicate names and duplicate knobs fail
+    at evaluation. Each Connector carries its own release-please package and
+    CODEOWNERS entry.
+
+    A guard forbids Connector Nix from reaching outside its own directory. A CI
+    tripwire evaluates the layout under Lix and CppNix. A physical split later
+    is a mechanical history filter, and never needed.
+12. **CI gating.** A PR touching the contract (SDK, canonical types, Host calls,
+    protocol schema) requires every first-party Connector's conformance suite.
+    Other PRs run none.
+13. **Proof order.**
+    1. `claude` in shadow mode: the plumbing proof.
+    2. github reads in sampled shadow mode: the TNO proof.
+    3. jira, full cut-over: the first writes.
+    4. forgejo: the forge axis.
+    5. `opencode` and `pi`.
+    6. github writes, merge last, which closes the window.
+
+    In shadow mode the native path stays authoritative and divergences are
+    recorded. Each shadow cuts over after 20 consecutive clean dogfood runs.
+
+### Layout evidence
+
+A spike on 2026-11-09 tested each layout in a throwaway repository under Lix
+2.95.4 and CppNix 2.35.3:
+
+| layout | Lix | CppNix |
+|---|---|---|
+| `path:` inputs between in-repo subflakes | fails: copies only the subdir, so `../` escapes to `/nix/store` | works |
+| relative `git+file:.?dir=…` inputs | stale: the lock pins a past commit of the same repo | stale |
+| plain imports at the root, thin subflake wrappers | works, edits seen immediately | works |
+| `?dir=core` standalone, reading `../` | works | works |
+| Connector subflake with core overridden to the local tree, no lock write | works | works |
+
+## Considered Options
+
+- **A process seam (ADR 0067), with JSON-RPC over stdio and credential
+  brokering.** Keeps the token out of the process, but a process keeps every
+  ambient power the operating system grants it, and macOS has no bwrap to take
+  them away. Rejected: TNO holds on both platforms only with WASM.
+- **Go composition per Consumer** (the xcaddy model). Rejected:
+  - every composition is a distinct binary, so no Consumer gets cached
+    binaries;
+  - Go's vendor hash is fixed per composition;
+  - core's internal interfaces would become public API;
+  - Connectors would be Go-only.
+- **First-party Connectors compiled in, third-party ones over the seam.**
+  Rejected: an in-tree path would be a privileged second contract that never
+  tests the real one.
+- **Strict all-or-none, with `local` and `git` as Connectors.** Rejected: it
+  would grant filesystem and git Host calls for two backends, against TNO.
+- **Mirroring today's 57 seam methods, or mirroring now and redesigning
+  later.** Rejected: it freezes accidents into a versioned API, and it leaves
+  policy inside untrusted code.
+- **Separate repositories immediately.** Rejected while the protocol churns at
+  `0.y`: every contract change would become a multi-repository update. The
+  subflake layout delivers the ownership, versioning and CI separation now.
+- **A root core flake with batteries in a subdirectory.** Rejected: it breaks
+  every Consumer URL.
+- **Lockstep or per-capability versioning.** Rejected: lockstep breaks every
+  Connector on every core major, and per-capability negotiation solves a
+  problem there is not yet.
+- **Keeping a Box-side forge path.** Rejected: it doubles every Connector's
+  surface and leaves a credential beside the agent.
+
+## Consequences
+
+- ADR 0067 is superseded on the seam's shape and its triggers. ADR 0009's
+  closed registry opens through the module system. ADR 0068's network Backend
+  Strategies move into Connectors, and the built-ins keep theirs. ADR 0013's
+  contract becomes primitives with handshake capabilities. ADR 0034 gains the
+  credential-free Box as its end state.
+- The github Connector runs on REST, so the host no longer needs `gh`.
+- A Connector can still misreport what its backend said, and can still do
+  anything its Route table allows. TNO bounds that and makes it visible; it
+  does not prevent it. Core, the batteries flake and the Consumer's selection
+  of Connectors remain the root of trust.
+- `?dir=core` fetches the whole repository, so separation holds at evaluation,
+  not download.
+- Reading above the subflake's own directory depends on how both evaluators
+  handle sources today. The tripwire turns an evaluator change into a CI
+  failure. Moving core sources under the core directory is the fallback.
+- Flipping the Box default, removing `read-write` and removing the Box-token
+  knobs are versioned breaks with migration notes.
+- GitHub App token refresh is honoured by the Connector host. Dogfood does not
+  use the App yet; its setup is separate work.
