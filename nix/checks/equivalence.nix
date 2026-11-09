@@ -1956,12 +1956,12 @@ in
     assert assertMsg (!(harness.packages ? run)) "packages.run must not exist (removed, issue #613)";
     pkgs.runCommand "run-build-aliases-removed" { } "touch $out";
 
-  # Ties the `agent-closure` package name lib/preambles.nix bakes into
-  # FLAKE_IMAGE_ATTR back to the name lib/mkHarness.nix registers under
-  # `packages`: renaming it, or inverting the `runnerRow.artifact ==
-  # "store-closure"` / `"oci-image"` gate, would leave every other check green
-  # while Probe fell back to the isImageAttrMissing path, restoring the bug
-  # #2667 fixes.
+  # Ties the FLAKE_IMAGE_ATTR lib/preambles.nix bakes from a bwrap harness's
+  # default `imageAttrName` (lib/runners/bwrap.nix, `agent-closure`) to the
+  # package mkHarness.nix registers under that name. The first assert trips
+  # on a rename of that row's `imageAttrName`; the shell compare trips when
+  # the baked name drifts from the registered one, which would leave Probe on
+  # the isImageAttrMissing path, restoring the bug #2667 fixes.
   mkharness-agent-closure-package =
     let
       inherit (pkgs.lib) assertMsg;
