@@ -2688,6 +2688,44 @@ func TestBwrapIsRunning_TrueAcrossDifferentLauncherInvocations(t *testing.T) {
 	}
 }
 
+// Issue #6597: leftover empty dirs are not reclaimed across anchors, so an
+// empty spindrift-<name> dir must not mask a live one under another anchor,
+// whichever sorts first in the walk. IsRunning and ListRunning must agree.
+func TestBwrapIsRunning_EmptyLeftoverDoesNotMaskLiveDirUnderOtherAnchor(t *testing.T) {
+	for _, tc := range []struct{ name, emptyAnchor, liveAnchor string }{
+		{"empty sorts first", "a-anchor", "b-anchor"},
+		{"live sorts first", "b-anchor", "a-anchor"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			origRoot := cgroupFSRoot
+			t.Cleanup(func() { cgroupFSRoot = origRoot })
+			cgroupFSRoot = t.TempDir()
+
+			for anchor, procs := range map[string]string{tc.emptyAnchor: "", tc.liveAnchor: "12345\n"} {
+				dir := filepath.Join(cgroupFSRoot, anchor, "spindrift-test-box")
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte(procs), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			a := &bwrapAdapter{}
+			if !a.IsRunning("test-box") {
+				t.Error("IsRunning: got false, want true when a live dir exists under another anchor")
+			}
+			names, err := a.ListRunning()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := []string{"test-box"}; !reflect.DeepEqual(names, want) {
+				t.Errorf("ListRunning: got %v, want %v", names, want)
+			}
+		})
+	}
+}
+
 // ListRunning must surface a Box created under a different self-cgroup path
 // than the calling invocation reports, matching IsRunning's cross-invocation
 // fix above.
