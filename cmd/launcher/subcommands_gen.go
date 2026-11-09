@@ -4,7 +4,7 @@ package main
 // subcommandRegistry is the subcommand table derived from lib/subcommands.nix.
 // Regenerate with `nix run .#regen` after editing lib/subcommands.nix.
 var subcommandRegistry = []subcommandEntry{
-	{name: "console", usage: "", doc: "browse the open backlog interactively (read-only)"},
+	{name: "console", usage: "", doc: "browse the open backlog interactively and dispatch picked issues"},
 	{name: "dispatch", usage: "[--no-build] [--yes] [--continuous] [issue...]", doc: "dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)"},
 	{name: "research", usage: "[--no-build] [--yes] [--continuous] [--self-contained] [issue...]", doc: "advise-only research dispatch: drains agent-research (or an issue list) and posts a verdict comment; never merges, never promotes"},
 	{name: "butler", usage: "[--chore <name>] [--no-build]", doc: "one-shot butler sweep of the first due opted-in Chore (BUTLER_CHORES order), or only the one named by --chore, else no work: claims its Ledger, runs one read-only Box, and files findings; promotes a finding or opens a patch PR for it only through opt-in host-side gates (both off by default)"},

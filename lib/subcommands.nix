@@ -8,7 +8,7 @@
   {
     name = "console";
     usage = "";
-    doc = "browse the open backlog interactively (read-only)";
+    doc = "browse the open backlog interactively and dispatch picked issues";
   }
   {
     name = "dispatch";
