@@ -9,6 +9,50 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.31.0 — 2026-11-08
+
+Your flake is now the only place settings come from: the launcher stops
+reading knobs and image names out of the environment. Plus correct usage
+figures for resumed sessions.
+
+**⚠ Breaking changes** this release: knob env vars stop the launcher, and
+exported artifact names like `IMAGE` no longer take effect.
+
+- **⚠ Breaking: knob env vars are now an error.** A non-secret knob such as
+  `MERGE_MODE`, `MAX_JOBS` or `SPINDRIFT_PROMPT_DIR` set in the launcher's
+  environment (exported, or assigned in `harness.env` or
+  `harness.<driver>.env`) used to print a warning and still win. Now every
+  command exits 6 before doing any work, with one line per knob naming the
+  `--flag` and settings path to use instead. Move each value into your
+  flake's settings or pass the flag; secrets and `DRIVER` are unaffected. A
+  daemon started with a stray knob export halts its pool, so clear those
+  first (`BOX_SIGNAL_CARRIER` on the daemon still works). If your workflows
+  use the `gh-token-refresher` action, it now exports `GH_APP_TOKEN_FILE`
+  instead of `GH_TOKEN_REFRESH_FILE`; pass it to the launcher with
+  `--gh-token-refresh-file`. `MIGRATING.md` maps every knob.
+- **⚠ Breaking: exporting `IMAGE` no longer swaps the image.** The same goes
+  for `IMAGE_TAG`, `AGENT_FILES` and the other build artifact names: the
+  launcher runs only what the flake built. To run a different image, change
+  the flake's image and rebuild. `DRIVER` still falls back to the
+  environment for a bare launcher run with no input document.
+- **Usage numbers for resumed sessions add up.** A fix pass resumes the
+  implement session, and its usage was counting that session's earlier
+  cost, API time and model output a second time. Run usage comments and
+  pass reports overstated it, sometimes showing tripled subagent output or
+  a subagent row on fix passes that ran no subagents. Each pass now counts
+  only what it added.
+- **A flaky forge no longer fails a merged PR.** When a run reported a
+  merge, one transient forge error while looking up its PR marked the issue
+  `agent-failed` with a misleading "no PR" note. The lookup now retries,
+  and if it still can't get an answer it logs the error and leaves the
+  issue as it stands.
+- **Typo'd fragment gates fail at build time.** If you supply your own
+  prompt fragments, a row naming a gate spindrift doesn't know now stops
+  evaluation with a message naming the gate and the fragment, instead of
+  the gate quietly reading as off.
+
+---
+
 ## 0.30.2 — 2026-11-07
 
 Jira grows up: it can file issues, drive the work lifecycle by status alone,
