@@ -297,6 +297,7 @@ func TestNew_MalformedUpstream(t *testing.T) {
 		"not-even-a-url no scheme",
 		"",
 		"/just/a/path",
+		"http://:8080",
 	}
 	for _, upstream := range cases {
 		t.Run(upstream, func(t *testing.T) {
@@ -304,6 +305,18 @@ func TestNew_MalformedUpstream(t *testing.T) {
 				t.Errorf("New(%q) = nil error, want error", upstream)
 			}
 		})
+	}
+}
+
+// An absolute upstream with no hostname is rejected, and the error names the
+// route rather than echoing the value, which may carry userinfo.
+func TestNew_HostlessUpstreamErrorOmitsUserinfo(t *testing.T) {
+	_, err := New(AssignPrefixes([]Route{plainRoute("http://user:s3cr3t@:8080")}), nil)
+	if err == nil {
+		t.Fatal("New = nil error, want error")
+	}
+	if strings.Contains(err.Error(), "s3cr3t") {
+		t.Errorf("error leaks userinfo: %v", err)
 	}
 }
 
