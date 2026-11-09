@@ -219,7 +219,7 @@ func splitVerb(args []string) (verb string, rest []string) {
 	return args[i], rest
 }
 
-// verbSoFar returns the verb parseFlags has accumulated into remaining so
+// verbSoFar returns the verb scanFlags has accumulated into remaining so
 // far, or "" if none has appeared yet.
 func verbSoFar(remaining []string) string {
 	if i := verbIndex(remaining); i >= 0 {
@@ -260,16 +260,21 @@ func lookupCliFlag(arg string, remaining []string) *cliFlag {
 	return nil
 }
 
-// parseFlags splits args into the verb arguments and the schema-flag tokens.
-// Schema flags are never written to the environment: they are returned in
-// order (a value flag's token and its value, a bool's single token) for
-// inputdoc.Resolve, which ranks them over the document and schema default
-// (ADR 0020). Only tokens classified here reach Resolve, so a verb flag's
-// value or anything after "--" is never mistaken for a knob (#6707). The
-// secret --*-file/--*-cmd flags are the exception: secrets are read from the
-// process environment by design, so those still land there. An unrecognised
-// --flag is an error; non-flag args and everything after "--" pass through.
-func parseFlags(args []string) (remaining, schemaArgs []string, err error) {
+// flagScan is what scanFlags classified without acting on any of it.
+// filePaths and cmdStrings map a secret knob's env name to its --*-file path
+// or --*-cmd command.
+type flagScan struct {
+	remaining, schemaArgs []string
+	filePaths, cmdStrings map[string]string
+	secretCmdTemplate     string
+}
+
+// scanFlags splits args into verb arguments, schema-flag tokens and the
+// secret --*-file/--*-cmd values, without acting on any of them. It touches
+// nothing outside its return value (no environment, files, commands or package
+// state), so mainRun can ask which verb an invocation names before parseFlags
+// runs.
+func scanFlags(args []string) (flagScan, error) {
 	byFileFlag := make(map[string]*inputdoc.SecretKnob, len(inputdoc.SecretKnobs))
 	byCmdFlag := make(map[string]*inputdoc.SecretKnob, len(inputdoc.SecretKnobs))
 	for i := range inputdoc.SecretKnobs {
@@ -284,22 +289,21 @@ func parseFlags(args []string) (remaining, schemaArgs []string, err error) {
 	// The scan below fills these without acting on them, so parseFlags can
 	// reject a conflicting file/cmd pair before either side effect runs,
 	// whichever flag came first on the command line.
-	filePaths := make(map[string]string, len(inputdoc.SecretKnobs))
-	cmdStrings := make(map[string]string, len(inputdoc.SecretKnobs))
+	sc := flagScan{
+		remaining:  make([]string, 0, len(args)),
+		filePaths:  make(map[string]string, len(inputdoc.SecretKnobs)),
+		cmdStrings: make(map[string]string, len(inputdoc.SecretKnobs)),
+	}
 
-	// Reset so repeated calls in one process (tests) see no stale value.
-	globalSecretCmdTemplate = ""
-
-	remaining = make([]string, 0, len(args))
 	i := 0
 	for i < len(args) {
 		arg := args[i]
 		if arg == "--" {
-			remaining = append(remaining, args[i+1:]...)
+			sc.remaining = append(sc.remaining, args[i+1:]...)
 			break
 		}
 		if !strings.HasPrefix(arg, "--") {
-			remaining = append(remaining, arg)
+			sc.remaining = append(sc.remaining, arg)
 			i++
 			continue
 		}
@@ -307,36 +311,36 @@ func parseFlags(args []string) (remaining, schemaArgs []string, err error) {
 		// verb's own subcommand flag and must follow it on the command line;
 		// anywhere else it falls through to the unknown-flag error below
 		// (issues #3777, #3920, #3795).
-		if f := lookupCliFlag(arg, remaining); f != nil {
+		if f := lookupCliFlag(arg, sc.remaining); f != nil {
 			i++
 			if f.flag == "secret-cmd" {
 				if i >= len(args) {
-					return nil, nil, fmt.Errorf("flag --secret-cmd requires a command")
+					return flagScan{}, fmt.Errorf("flag --secret-cmd requires a command")
 				}
-				globalSecretCmdTemplate = args[i]
+				sc.secretCmdTemplate = args[i]
 				i++
 				continue
 			}
-			remaining = append(remaining, arg)
+			sc.remaining = append(sc.remaining, arg)
 			// A missing value is left for the verb's own parser to report.
 			if f.arg != "" && !strings.Contains(arg, "=") && i < len(args) {
-				remaining = append(remaining, args[i])
+				sc.remaining = append(sc.remaining, args[i])
 				i++
 			}
 			continue
 		}
 		name, _, _ := strings.Cut(arg, "=")
 		if entry, ok := inputdoc.LookupSchemaFlag(name); ok && entry.Kind == "bool" {
-			schemaArgs = append(schemaArgs, arg)
+			sc.schemaArgs = append(sc.schemaArgs, arg)
 			i++
 			continue
 		}
 		if _, ok := inputdoc.LookupSchemaFlag(arg); ok {
 			i++
-			schemaArgs = append(schemaArgs, arg)
-			// A missing value is reported by CheckSchemaFlags below.
+			sc.schemaArgs = append(sc.schemaArgs, arg)
+			// A missing value is reported by CheckSchemaFlags in parseFlags.
 			if i < len(args) {
-				schemaArgs = append(schemaArgs, args[i])
+				sc.schemaArgs = append(sc.schemaArgs, args[i])
 				i++
 			}
 			continue
@@ -344,23 +348,46 @@ func parseFlags(args []string) (remaining, schemaArgs []string, err error) {
 		if knob, ok := byFileFlag[arg]; ok {
 			i++
 			if i >= len(args) {
-				return nil, nil, fmt.Errorf("flag %s requires a path", arg)
+				return flagScan{}, fmt.Errorf("flag %s requires a path", arg)
 			}
-			filePaths[knob.Env] = args[i]
+			sc.filePaths[knob.Env] = args[i]
 			i++
 			continue
 		}
 		if knob, ok := byCmdFlag[arg]; ok {
 			i++
 			if i >= len(args) {
-				return nil, nil, fmt.Errorf("flag %s requires a command", arg)
+				return flagScan{}, fmt.Errorf("flag %s requires a command", arg)
 			}
-			cmdStrings[knob.Env] = args[i]
+			sc.cmdStrings[knob.Env] = args[i]
 			i++
 			continue
 		}
-		return nil, nil, fmt.Errorf("unknown flag: %s", arg)
+		return flagScan{}, fmt.Errorf("unknown flag: %s", arg)
 	}
+	return sc, nil
+}
+
+// parseFlags splits args into the verb arguments and the schema-flag tokens.
+// Schema flags are never written to the environment: they are returned in
+// order (a value flag's token and its value, a bool's single token) for
+// inputdoc.Resolve, which ranks them over the document and schema default
+// (ADR 0020). Only tokens classified here reach Resolve, so a verb flag's
+// value or anything after "--" is never mistaken for a knob (#6707). The
+// secret --*-file/--*-cmd flags are the exception: secrets are read from the
+// process environment by design, so those still land there. An unrecognised
+// --flag is an error; non-flag args and everything after "--" pass through.
+func parseFlags(args []string) (remaining, schemaArgs []string, err error) {
+	sc, err := scanFlags(args)
+	// Always overwrites the global (empty with no --secret-cmd or on a failed
+	// scan), so repeated calls in one process see no stale value.
+	globalSecretCmdTemplate = sc.secretCmdTemplate
+	if err != nil {
+		return nil, nil, err
+	}
+	remaining, schemaArgs = sc.remaining, sc.schemaArgs
+	filePaths, cmdStrings := sc.filePaths, sc.cmdStrings
+
 	// Before any --*-cmd runs, so a malformed flag never executes a secret command.
 	if err := inputdoc.CheckSchemaFlags(schemaArgs); err != nil {
 		return nil, nil, err
