@@ -306,8 +306,11 @@ func New(routes []Route, rewriteRows []registryvocab.RewriteRow) (http.Handler, 
 		if err != nil {
 			return nil, fmt.Errorf("registryproxy: parse upstream URL %q: %w", route.Upstream, err)
 		}
-		if u.Scheme == "" || u.Host == "" {
-			return nil, fmt.Errorf("registryproxy: upstream URL %q must be absolute", route.Upstream)
+		// An upstream query is deliberately not rejected here (unlike
+		// registryroutes.ValidateUpstreamOrigin): Rewrite merges it with the
+		// inbound query, pinned by TestNew_CombinesUpstreamAndInboundQueryStrings.
+		if u.Scheme == "" || u.Hostname() == "" {
+			return nil, fmt.Errorf("registryproxy: route %q: Upstream must be an absolute URL with a host", route.MatchHost)
 		}
 		if u.Path != "" {
 			// Checked here rather than left to the Rewrite hook's join to
