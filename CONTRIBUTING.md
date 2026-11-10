@@ -83,6 +83,11 @@ changed `*.nix` files and `shellcheck path/to/file.sh` for changed shell
 files. Both tools are baked into the Box and complement, but do not replace,
 a gate run (or full `nix flake check`) before opening a PR.
 
+To iterate on a Connector, run `nix run .#connector-dev -- <connector>
+<nix-args...>`. It builds or checks the Connector against your local core tree
+instead of the published core it pins, and never writes its `flake.lock`. See
+[Connector subflake shape](docs/reference.md#connector-subflake-shape).
+
 ### Seam tests
 
 Seam tests are Go tests behind the `integration` build tag that read the

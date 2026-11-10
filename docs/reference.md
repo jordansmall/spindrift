@@ -2288,6 +2288,23 @@ issue #6751. The worked example is the fixture Connector in
   point and passes its own `core`, so a Consumer never evaluates two cores.
   The root's list of Connector directories is `connectorDirs` in
   [`flake.nix`](../flake.nix), empty until the first Connector (issue #6751).
+- **Iterating.** Build or check a Connector against the local core with
+  `nix run .#connector-dev -- <connector> <nix-args...>`. `<connector>` is a
+  path if it contains `/` or is `.` or `..`; any other word is a bare name
+  under `connectors/`, never a directory of the same name in your working
+  directory. The wrapper runs `nix` from inside the Connector and overrides
+  its `core` input with your checkout, so the Connector never silently tests
+  against the published core it pins; a `core` override of your own is
+  superseded by the wrapper's. It never writes the Connector's `flake.lock`.
+  For example, on the fixture:
+
+  ```sh
+  nix run .#connector-dev -- nix/fixtures/connector flake check -L >"$TMPDIR/connector.log" 2>&1; echo "exit=$?"
+  grep -nE 'error|FAIL' "$TMPDIR/connector.log" || tail -n 40 "$TMPDIR/connector.log"
+  ```
+
+  The override is a `git+file` flake, so it sees tracked files only: `git add`
+  a new core file before the first run that needs it.
 
 `nix/checks/connectors.nix` pins the registry: the fixture's row registers,
 its knob reaches `spindrift.envSchema`, a Consumer without a Connector
