@@ -126,7 +126,8 @@ let
     // (import ./eval-probe.nix common)
     // (import ./core-entry.nix (common // { inherit rootFlakeModule; }))
     // (import ./connectors.nix common)
-    // (import ./connector-escape-guard.nix common);
+    // (import ./connector-escape-guard.nix common)
+    // (import ./connector-ownership.nix common);
 
   imageChecks = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux (import ./image.nix common);
 
@@ -218,6 +219,8 @@ let
     # Reads no docs, but scans every Connector's *.nix as text, which a
     # comment-only edit can reach.
     "connector-escape-guard"
+    # Reads .release-please-manifest.json, on the docs allowlist.
+    "connector-ownership"
     "driver-map"
     "event-stream-parity"
     "go"
