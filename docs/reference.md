@@ -2307,6 +2307,10 @@ issue #6751. The worked example is the fixture Connector in
 
   The override is a `git+file` flake, so it sees tracked files only: `git add`
   a new core file before the first run that needs it.
+- **Release and ownership.** Each Connector is its own release-please package
+  with its own CODEOWNERS entry, enforced by the `connector-ownership` check.
+  The "Adding a Connector" checklist in
+  [CONTRIBUTING.md](../CONTRIBUTING.md#adding-a-connector) lists the pieces.
 
 `nix/checks/connectors.nix` pins the registry: the fixture's row registers,
 its knob reaches `spindrift.envSchema`, a Consumer without a Connector
