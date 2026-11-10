@@ -70,6 +70,9 @@ type Strategy struct {
 	// agents finished — ", for a backend that is a Code Forge. Nil on a
 	// tracker-only backend.
 	LandedBanner func(Shared) string
+	// IssueScope names where the tracker's issues live, for the discovery
+	// lines. Nil means the scope is the Code Forge repo slug.
+	IssueScope func(Shared, Lookup) string
 	// AutoMergeRemedy is the fix to name when the repo does not allow
 	// auto-merge. Nil means the backend has no native auto-merge, so the
 	// preflight names no remedy and leaves the backend out of its
@@ -178,6 +181,15 @@ func (s Strategy) AutoMergeRemedyClause(sh Shared) string {
 		return ""
 	}
 	return " — " + s.AutoMergeRemedy(sh)
+}
+
+// IssueScopeText is the tracker's issue scope, or the repo slug without the
+// hook.
+func (s Strategy) IssueScopeText(sh Shared, l Lookup) string {
+	if s.IssueScope == nil {
+		return sh.RepoSlug
+	}
+	return s.IssueScope(sh, l)
 }
 
 // registry keeps registration order: the Bundle's order is the launcher's
