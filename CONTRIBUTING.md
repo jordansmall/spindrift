@@ -39,13 +39,16 @@ docs files (and gofmt, nixfmt and the Go tests). A comment edit still runs the
 full matrix when it touches a directive (`//go:build`, `//nolint`, a
 shellcheck or `GENERATED` marker) or a file listed in
 `.github/scripts/ci-comment-readers`, whose text a check outside that set
-reads. The `ci-ok` job is the one required status check either way. The
-x86_64-linux leg also posts an eval-cost table (function calls, CPU time,
-heap, marginal instance cost) to its job summary, compared against the latest
-green `main` run; it is for review and never fails the run. For a
+reads. A PR whose non-docs paths all sit under `connectors/<name>/` skips the
+matrix and runs the docs checks plus, per touched Connector,
+`nix run .#connector-dev -- <name> flake check` against the PR's own core with
+no lock write; a PR touching core and a Connector runs the matrix and that
+Connector's check. The `ci-ok` job is the one required status check either
+way. The x86_64-linux leg also posts an eval-cost table (function calls, CPU
+time, heap, marginal instance cost) to its job summary, compared against the
+latest green `main` run; it is for review and never fails the run. For a
 self-time breakdown, label the PR `eval-profile` or dispatch
-`.github/workflows/eval-profile.yml`. **Before
-opening a PR,
+`.github/workflows/eval-profile.yml`. **Before opening a PR,
 `nix flake check` must be green**, and new behavior needs a test — a bats case
 for bash changes, a Go test for launcher and `box` changes, or a nix fixture
 check for the declarative surface.
