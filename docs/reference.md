@@ -2258,9 +2258,11 @@ issue #6751. The worked example is the fixture Connector in
   `core.flakeModules.default` (the module system dedups by path, so a Consumer
   that imports the same core is unaffected) and contributes rows to
   `spindrift.connectors.<name>`. The module system's merge is the registry,
-  and one row name registered by two modules fails evaluation. Each row is
-  `types.unique`, so a Consumer cannot adjust a Connector's row additively;
-  overriding it is `lib.mkForce` on the whole row.
+  and one row name registered by two modules fails evaluation with a one-line
+  `perSystem.spindrift.connectors.<name> is registered twice` error naming both
+  modules' files. Each row takes a single definition, so a Consumer cannot
+  adjust a Connector's row additively; overriding it is `lib.mkForce` on the
+  whole row.
 - **Row-owned knobs.** A row's `knobs` attrset has the shape of a core row's
   (ADR 0068), keyed by env-schema key with an env-schema entry as value. The
   knobs fold into `spindrift.envSchema` on top of lib/env-schema.nix. Only that

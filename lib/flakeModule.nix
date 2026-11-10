@@ -390,33 +390,30 @@ in
   options.spindrift = {
     connectors = mkOption {
       type = types.attrsOf (
-        # `unique` makes a second module registering the same row name fail
-        # instead of the submodule merge silently combining their knobs.
-        types.unique
-          {
-            message = "a Connector row name may be registered by only one module";
-          }
-          (
-            types.submodule (
-              { name, ... }:
-              {
-                freeformType = types.lazyAttrsOf types.raw;
-                options = {
-                  name = mkOption {
-                    type = types.str;
-                    default = name;
-                    readOnly = true;
-                    description = "The Connector row's name, its attr name in `spindrift.connectors`.";
-                  };
-                  knobs = mkOption {
-                    type = types.lazyAttrsOf types.raw;
-                    default = { };
-                    description = "Env-schema entries this row owns, keyed by env-schema key (lib/row-knobs.nix).";
-                  };
+        let
+          row = types.submodule (
+            { name, ... }:
+            {
+              freeformType = types.lazyAttrsOf types.raw;
+              options = {
+                name = mkOption {
+                  type = types.str;
+                  default = name;
+                  readOnly = true;
+                  description = "The Connector row's name, its attr name in `spindrift.connectors`.";
                 };
-              }
-            )
-          )
+                knobs = mkOption {
+                  type = types.lazyAttrsOf types.raw;
+                  default = { };
+                  description = "Env-schema entries this row owns, keyed by env-schema key (lib/row-knobs.nix).";
+                };
+              };
+            }
+          );
+        in
+        # A second module registering the same row name fails instead of the
+        # submodule merge silently combining their knobs.
+        (import ./connector-names.nix).uniqueRow row
       );
       default = { };
       description = "Connector rows registered by Connectors' flake-parts modules.";
