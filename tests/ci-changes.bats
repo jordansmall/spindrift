@@ -141,8 +141,11 @@ repo_with_base() {
   cd "$BATS_TEST_TMPDIR" && git init -q repo && cd repo
   git config user.email t@example.com
   git config user.name t
-  mkdir -p "$(dirname "$1")"
-  printf '%s' "$2" >"$1"
+  while [ "$#" -ge 2 ]; do
+    mkdir -p "$(dirname "$1")"
+    printf '%s' "$2" >"$1"
+    shift 2
+  done
   commit base
 }
 
@@ -444,4 +447,218 @@ true
 true
 '
   [ "$output" = code ]
+}
+
+# Connector lane: connectors/<name>/** is its own lane, with no docs, ADR, or
+# comment-only exemption. `--connectors` names the Connectors a diff touches.
+# A path only counts when connectors/<name>/flake.nix exists at the new
+# revision, so the synthetic diffs below run against a repo whose `head` holds
+# `foo` and `bar`.
+connector_repo() {
+  repo_with_base connectors/foo/flake.nix '{ }'
+  mkdir -p connectors/bar
+  printf '{ }' >connectors/bar/flake.nix
+  commit head
+}
+
+# A Connector edit needs foo's flake.nix at both revisions, so it is committed
+# in base.
+connector_edit() {
+  repo_with_base connectors/foo/flake.nix '{ }' "$1" "$2"
+  printf '%s' "$3" >"$1"
+  commit head
+  classify_revs
+}
+
+classify_at() {
+  run bash "$CI_CHANGES_SH" base head
+  [ "$status" -eq 0 ]
+}
+
+connector_names() {
+  run bash "$CI_CHANGES_SH" --connectors base head
+  [ "$status" -eq 0 ]
+}
+
+@test "connector: a single Connector classifies as connector and is named" {
+  connector_repo
+  diff='M	connectors/foo/default.nix
+A	connectors/foo/main.go
+'
+  classify_at <<<"$diff"
+  [ "$output" = connector ]
+  connector_names <<<"$diff"
+  [ "$output" = '["foo"]' ]
+}
+
+@test "connector: a git-quoted non-ASCII Connector path still counts" {
+  connector_repo
+  diff='A	"connectors/foo/\303\261.md"
+'
+  classify_at <<<"$diff"
+  [ "$output" = connector ]
+  connector_names <<<"$diff"
+  [ "$output" = '["foo"]' ]
+}
+
+@test "connector: two Connectors classify as connector and are named sorted" {
+  connector_repo
+  diff='M	connectors/foo/a.go
+M	connectors/bar/b.go
+M	connectors/foo/c.go
+'
+  classify_at <<<"$diff"
+  [ "$output" = connector ]
+  connector_names <<<"$diff"
+  [ "$output" = '["bar","foo"]' ]
+}
+
+@test "connector: a core path beside a Connector classifies as code, the Connector still named" {
+  connector_repo
+  diff='M	cmd/launcher/main.go
+M	connectors/foo/a.go
+'
+  classify_at <<<"$diff"
+  [ "$output" = code ]
+  connector_names <<<"$diff"
+  [ "$output" = '["foo"]' ]
+}
+
+@test "connector: a docs path beside a Connector classifies as connector" {
+  connector_repo
+  classify_at <<'EOT'
+M	docs/reference.md
+M	connectors/foo/a.go
+EOT
+  [ "$output" = connector ]
+}
+
+@test "connector: a docs-only diff stays docs and names no Connector" {
+  connector_repo
+  diff='M	docs/reference.md
+M	README.md
+'
+  classify_at <<<"$diff"
+  [ "$output" = docs ]
+  connector_names <<<"$diff"
+  [ "$output" = '[]' ]
+}
+
+@test "connector: an empty diff classifies as code and names no Connector" {
+  connector_repo
+  classify_at </dev/null
+  [ "$output" = code ]
+  connector_names </dev/null
+  [ "$output" = '[]' ]
+}
+
+@test "connector: a rename across two Connectors names both" {
+  connector_repo
+  diff='R100	connectors/foo/a.go	connectors/bar/a.go
+'
+  classify_at <<<"$diff"
+  [ "$output" = connector ]
+  connector_names <<<"$diff"
+  [ "$output" = '["bar","foo"]' ]
+}
+
+@test "connector: a rename out of a Connector into core classifies as code" {
+  connector_repo
+  diff='R100	connectors/foo/a.go	cmd/a.go
+'
+  classify_at <<<"$diff"
+  [ "$output" = code ]
+  connector_names <<<"$diff"
+  [ "$output" = '["foo"]' ]
+}
+
+@test "connector: a markdown file directly under connectors/ is core" {
+  connector_repo
+  diff='M	connectors/README.md
+'
+  classify_at <<<"$diff"
+  [ "$output" = code ]
+  connector_names <<<"$diff"
+  [ "$output" = '[]' ]
+}
+
+@test "connector: a malformed Connector name is core and not named" {
+  connector_repo
+  diff='M	connectors/Bad.Name/x
+M	connectors/_x/y
+'
+  classify_at <<<"$diff"
+  [ "$output" = code ]
+  connector_names <<<"$diff"
+  [ "$output" = '[]' ]
+}
+
+@test "connector: markdown under a Connector gets no docs exemption" {
+  connector_repo
+  classify_at <<'EOT'
+M	connectors/foo/docs/x.md
+EOT
+  [ "$output" = connector ]
+}
+
+@test "connector: an ADR-shaped path under a Connector gets no ADR rule" {
+  connector_repo
+  classify_at <<'EOT'
+A	connectors/foo/docs/adr/0001-x.md
+D	connectors/foo/old.go
+EOT
+  [ "$output" = connector ]
+}
+
+@test "connector: a comment-only Nix edit under a Connector is connector, not docs" {
+  connector_edit connectors/foo/default.nix "$NIX_OLD" "${NIX_OLD/Builds the probe./Builds it.}"
+  [ "$output" = connector ]
+}
+
+@test "connector: a comment-only Go edit under a Connector is connector, not docs" {
+  connector_edit connectors/foo/main.go "$GO_OLD" "${GO_OLD/twice n./n doubled.}"
+  [ "$output" = connector ]
+}
+
+@test "connector: deleting a whole Connector classifies as code and names nothing" {
+  connector_repo
+  diff='D	connectors/gone/flake.nix
+D	connectors/gone/a.go
+'
+  classify_at <<<"$diff"
+  [ "$output" = code ]
+  connector_names <<<"$diff"
+  [ "$output" = '[]' ]
+}
+
+@test "connector: renaming a Connector directory away names only the survivor" {
+  connector_repo
+  diff='R100	connectors/gone/a.go	connectors/foo/a.go
+'
+  classify_at <<<"$diff"
+  [ "$output" = code ]
+  connector_names <<<"$diff"
+  [ "$output" = '["foo"]' ]
+}
+
+@test "connector: unrecognised status letters are skipped when naming Connectors" {
+  connector_repo
+  diff='X	whatever
+U	connectors/bar/a.go
+M	connectors/foo/a.go
+'
+  classify_at <<<"$diff"
+  [ "$output" = code ]
+  connector_names <<<"$diff"
+  [ "$output" = '["foo"]' ]
+}
+
+@test "connector: without revisions nothing is a Connector path" {
+  diff='M	connectors/foo/a.go
+'
+  classify <<<"$diff"
+  [ "$output" = code ]
+  run bash "$CI_CHANGES_SH" --connectors <<<"$diff"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[]' ]
 }

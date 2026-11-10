@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Classifies a PR diff for CI (issue #5155). Reads `git diff --name-status -M`
-# on stdin and prints `docs` when every path is on the docs allowlist, else
-# `code`. A `docs` verdict skips CI's heavy matrix, so anything unrecognised
-# falls to `code`.
+# on stdin and prints `docs` when every path is on the docs allowlist,
+# `connector` when the rest are all Connector paths, else `code`. A `docs`
+# or `connector` verdict skips CI's heavy matrix, so anything unrecognised falls
+# to `code`.
 #
 # The allowlist is docs/**, root *.md, and the release-please manifest.
 # Prompt templates and skills are prompt inputs and never qualify. Adding,
@@ -15,9 +16,28 @@
 # no changed line carries a directive or marker, and no check outside the
 # docs lane reads its text (ci-comment-readers). Anything that fails to parse
 # or build is code.
+#
+# A Connector path is connectors/<name>/**, <name> matching [a-z0-9][a-z0-9_-]*,
+# and connectors/<name>/flake.nix exists at the new revision. Git's quoted form
+# of a path ("connectors/...") counts too. Without revisions nothing
+# qualifies. So a deleted or renamed-away Connector is core, and the full
+# matrix checks what still references it. A Connector path is judged before
+# the docs and comment-only exemptions, so no edit under it is ever docs: the
+# connector-escape guard reads its Nix text. Any other path under connectors/
+# is core, hence code. Connector and docs paths only give `connector`; one
+# core path gives `code`.
+#
+# `--connectors OLD NEW` instead prints the sorted, unique Connector names any
+# path in the diff touches (both sides of a rename or copy) as a JSON array,
+# core paths or not. The name regex makes plain quoting safe, so no jq.
 set -euo pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+mode=classify
+if [ "${1:-}" = --connectors ]; then
+  mode=connectors
+  shift
+fi
 old_rev=${1:-}
 new_rev=${2:-}
 
@@ -31,6 +51,33 @@ is_docs_path() {
     docs/*) return 0 ;;
     */*) return 1 ;;
     *.md | .release-please-manifest.json) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Sets connector_name for a Connector path; fails for any other path. Sets a
+# global, not stdout, so the per-name flake.nix lookup cache survives.
+declare -A has_flake=()
+connector_of() {
+  [ -n "$new_rev" ] || return 1
+  [[ $1 =~ ^\"?connectors/([a-z0-9][a-z0-9_-]*)/. ]] || return 1
+  connector_name=${BASH_REMATCH[1]}
+  if [ -z "${has_flake[$connector_name]:-}" ]; then
+    if git cat-file -e "$new_rev:connectors/$connector_name/flake.nix" 2>/dev/null; then
+      has_flake[$connector_name]=1
+    else
+      has_flake[$connector_name]=0
+    fi
+  fi
+  [ "${has_flake[$connector_name]}" = 1 ]
+}
+
+# Sets paths to the paths a name-status line touches; fails on an unknown
+# status letter.
+diff_paths() {
+  case $1 in
+    M | T | A | D) paths=("$2") ;;
+    R[0-9]* | C[0-9]*) paths=("$2" "${3:-}") ;;
     *) return 1 ;;
   esac
 }
@@ -81,16 +128,36 @@ is_comment_only() {
   ! grep -qE "^[-+].*($functional_re)" <<<"$diff"
 }
 
+if [ "$mode" = connectors ]; then
+  names=()
+  while IFS=$'\t' read -r status path new_path; do
+    diff_paths "$status" "$path" "${new_path:-}" || continue
+    for p in "${paths[@]}"; do
+      if connector_of "$p"; then names+=("$connector_name"); fi
+    done
+  done
+  out=
+  if [ "${#names[@]}" -gt 0 ]; then
+    while IFS= read -r name; do out+=${out:+,}\"$name\"; done < <(printf '%s\n' "${names[@]}" | sort -u)
+  fi
+  echo "[$out]"
+  exit 0
+fi
+
 seen=0
+connector_seen=0
 while IFS=$'\t' read -r status path new_path; do
   [ -n "$status" ] || continue
   seen=1
-  case $status in
-    M | T | A | D) paths=("$path") ;;
-    R[0-9]* | C[0-9]*) paths=("$path" "${new_path:-}") ;;
-    *) echo code; exit 0 ;;
-  esac
+  if ! diff_paths "$status" "$path" "${new_path:-}"; then
+    echo code
+    exit 0
+  fi
   for p in "${paths[@]}"; do
+    if connector_of "$p"; then
+      connector_seen=1
+      continue
+    fi
     if [ -n "$p" ] && is_docs_path "$p"; then
       if [ "$status" != M ] && [ "$status" != T ] && [[ $p == docs/adr/* ]]; then
         echo code
@@ -108,6 +175,8 @@ done
 
 if [ "$seen" -eq 0 ]; then
   echo code
+elif [ "$connector_seen" -eq 1 ]; then
+  echo connector
 else
   echo docs
 fi
