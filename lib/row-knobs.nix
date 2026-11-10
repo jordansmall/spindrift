@@ -2,9 +2,10 @@
 # decision 2, issue #5634). Builtins only: lib/env-schema.nix has no `lib` in
 # scope. Generic over registries -- a registry is `{ source; rows; }` where
 # `source` is the repo path of the directory holding one `<row.name>.nix` per
-# row. A row's optional `knobs` attrset is keyed by env-schema key (the key is
-# the identity, and doubles as the generated Go field name) and each value is
-# an env-schema entry.
+# row, or `{ sourceOf; rows; }` where `sourceOf` is a row-name -> source
+# function for rows that are not files. A row's optional `knobs` attrset is
+# keyed by env-schema key (the key is the identity, and doubles as the
+# generated Go field name) and each value is an env-schema entry.
 #
 # Two declarations of one env name or one key are a collision, reported with
 # both sources. `collisions` is a pure list of messages because
@@ -28,7 +29,7 @@ let
         builtins.concatMap (
           row:
           map (key: {
-            source = "${registry.source}/${row.name}.nix";
+            source = (registry.sourceOf or (name: "${registry.source}/${name}.nix")) row.name;
             kind = "knob";
             inherit key;
             env = row.knobs.${key}.env or null;
