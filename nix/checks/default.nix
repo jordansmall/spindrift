@@ -58,6 +58,8 @@ let
       goCheckEnv
       imageNixCores
       imageNixMaxJobs
+      dotDotPath
+      dotPath
       ;
   };
   sourceChecks =
@@ -123,7 +125,8 @@ let
     // (import ./backend-name-guard.nix common)
     // (import ./eval-probe.nix common)
     // (import ./core-entry.nix (common // { inherit rootFlakeModule; }))
-    // (import ./connectors.nix common);
+    // (import ./connectors.nix common)
+    // (import ./connector-escape-guard.nix common);
 
   imageChecks = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux (import ./image.nix common);
 
@@ -212,6 +215,9 @@ let
     # add a trailing-comment comparison it flags.
     "backend-name-guard"
     "changelog"
+    # Reads no docs, but scans every Connector's *.nix as text, which a
+    # comment-only edit can reach.
+    "connector-escape-guard"
     "driver-map"
     "event-stream-parity"
     "go"
