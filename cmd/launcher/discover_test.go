@@ -322,3 +322,68 @@ func TestLogHeldIssues_AnnouncesEachIssueOncePerRun(t *testing.T) {
 		t.Errorf("new-issue call printed %q, want %q", next, want)
 	}
 }
+
+// With ISSUE_TRACKER=jira the discovery lines name the Jira project, not the
+// Code Forge repo slug the query never touches (#6774).
+func TestDiscovery_JiraNamesProjectNotRepoSlug(t *testing.T) {
+	c := baseConfig()
+	c.IssueTracker = "jira"
+	c.Label = "ready-for-agent"
+	c.RepoSlug = "owner/repo"
+	c.RowKnobs = map[string]string{
+		"JIRA_BASE_URL":    "https://example.atlassian.net",
+		"JIRA_PROJECT_KEY": "BLKSMTH",
+	}
+	const scope = "Jira project BLKSMTH (https://example.atlassian.net)"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "BLKSMTH-12", Title: "t", Labels: []string{c.Label}})
+
+	var buf bytes.Buffer
+	if _, _, _, err := discoverIssues(c, fc, &buf); err != nil {
+		t.Fatalf("discoverIssues: %v", err)
+	}
+	logDiscoveryPoll(c, []issue{{number: "1"}}, true, map[string]bool{}, &buf)
+	logDiscoveryPoll(c, []issue{{number: "2"}}, false, map[string]bool{}, &buf)
+
+	c.IssueNumber = "BLKSMTH-12"
+	c.Label = c.InProgressLabel
+	if _, _, _, err := discoverIssues(c, fc, &buf); err != nil {
+		t.Fatalf("discoverIssues claimed: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"==> querying open 'ready-for-agent' issues in " + scope + "\n",
+		"==> querying open 'ready-for-agent' issues in " + scope + " — new: #2\n",
+		"==> targeting claimed issue #BLKSMTH-12 in " + scope + "\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "owner/repo") {
+		t.Errorf("output names the repo slug under jira:\n%s", out)
+	}
+}
+
+// Forgejo and GitHub leave Strategy.IssueScope nil, so their discovery lines
+// stay the repo slug; Jira with no project key falls back to it too.
+func TestIssueScope_FallsBackToRepoSlug(t *testing.T) {
+	for _, tc := range []struct {
+		name, tracker string
+		knobs         map[string]string
+	}{
+		{"github", "github", nil},
+		{"forgejo", "forgejo", nil},
+		{"jira without project key", "jira", map[string]string{"JIRA_BASE_URL": "https://example.atlassian.net"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := baseConfig()
+			c.IssueTracker = tc.tracker
+			c.RepoSlug = "owner/repo"
+			c.RowKnobs = tc.knobs
+			if got := issueScope(c); got != "owner/repo" {
+				t.Errorf("issueScope = %q, want owner/repo", got)
+			}
+		})
+	}
+}

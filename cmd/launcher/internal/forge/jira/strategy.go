@@ -1,6 +1,8 @@
 package jira
 
 import (
+	"fmt"
+
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -16,6 +18,13 @@ var Strategy = backendkit.Strategy{
 			return err
 		}
 		return ValidateJiraEnv(k.JiraBaseURL, k.JiraProjectKey, k.JiraToken, k.JiraStatusMapping, k.JiraLifecycle)
+	},
+	IssueScope: func(sh backendkit.Shared, l backendkit.Lookup) string {
+		k, err := ReadKnobs(l)
+		if err != nil || k.JiraProjectKey == "" {
+			return sh.RepoSlug
+		}
+		return fmt.Sprintf("Jira project %s (%s)", k.JiraProjectKey, k.JiraBaseURL)
 	},
 	NewIssueTracker: func(s backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, error) {
 		k, err := ReadKnobs(l)

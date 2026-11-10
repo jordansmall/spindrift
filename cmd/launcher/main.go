@@ -544,6 +544,15 @@ func newIssueTracker(c config) forge.IssueTracker {
 	return mustBuild(s.NewIssueTracker(backendShared(c), c.knobLookup))
 }
 
+// issueScope names where the tracker's issues live for the discovery lines:
+// the tracker's own scope when its Strategy has one, else the repo slug.
+func issueScope(c config) string {
+	if s, ok := backendkit.ByName(c.IssueTracker); ok {
+		return s.IssueScopeText(backendShared(c), c.knobLookup)
+	}
+	return c.RepoSlug
+}
+
 // newCodeForge returns the CodeForge adapter selected by CODE_FORGE: "github"
 // (open PR, watch CI, merge), "git" (push-only, no merge gate), or "local"
 // (host-mediated landing onto the Accumulation repo's Integration branch, ADR
@@ -1137,14 +1146,14 @@ func emptyQueueLine(label string, held []heldIssue, nothing string) string {
 func discoverIssues(c config, it forge.IssueTracker, stdout io.Writer) ([]issue, []heldIssue, waves.Origin, error) {
 	origin := resolveOrigin(c)
 	if origin == waves.OriginClaimed {
-		fmt.Fprintf(stdout, "==> targeting claimed issue #%s in %s\n", c.IssueNumber, c.RepoSlug)
+		fmt.Fprintf(stdout, "==> targeting claimed issue #%s in %s\n", c.IssueNumber, issueScope(c))
 		fi, err := it.Issue(c.IssueNumber)
 		if err != nil {
 			return nil, nil, origin, err
 		}
 		return []issue{newIssue(fi)}, nil, origin, nil
 	}
-	fmt.Fprintf(stdout, "==> querying open '%s' issues in %s\n", c.Label, c.RepoSlug)
+	fmt.Fprintf(stdout, "==> querying open '%s' issues in %s\n", c.Label, issueScope(c))
 	issues, held, err := queryOpenIssues(c, it)
 	return issues, held, origin, err
 }
@@ -1198,7 +1207,7 @@ func readinessFor(it forge.IssueTracker, issues []issue) (waves.Batch, error) {
 // those.
 func logDiscoveryPoll(c config, issues []issue, first bool, seen map[string]bool, stdout io.Writer) {
 	if first {
-		fmt.Fprintf(stdout, "==> querying open '%s' issues in %s\n", c.Label, c.RepoSlug)
+		fmt.Fprintf(stdout, "==> querying open '%s' issues in %s\n", c.Label, issueScope(c))
 	} else {
 		var newNums []string
 		for _, iss := range issues {
@@ -1207,7 +1216,7 @@ func logDiscoveryPoll(c config, issues []issue, first bool, seen map[string]bool
 			}
 		}
 		if len(newNums) > 0 {
-			fmt.Fprintf(stdout, "==> querying open '%s' issues in %s — new: #%s\n", c.Label, c.RepoSlug, strings.Join(newNums, ", #"))
+			fmt.Fprintf(stdout, "==> querying open '%s' issues in %s — new: #%s\n", c.Label, issueScope(c), strings.Join(newNums, ", #"))
 		}
 	}
 	for _, iss := range issues {
