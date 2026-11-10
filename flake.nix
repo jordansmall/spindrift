@@ -113,6 +113,7 @@
                   checksAt
                   ;
                 baselineChecks = checksResult.checks;
+                rootFlakeModule = inputs.self.flakeModules.default;
                 fixtures = fixturesAt root;
                 nixpkgs = nixpkgsShared;
               };

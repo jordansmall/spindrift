@@ -646,7 +646,10 @@ let
     inherit nixpkgs system;
     packages = p: [ p.hello ];
   };
-  moduleConsumer =
+  # Parameterised on the module so core-entry.nix can evaluate the one
+  # unchanged config through two entry points (issue #6765).
+  moduleConsumerVia =
+    module:
     flake-parts.lib.mkFlake
       {
         inputs = {
@@ -658,9 +661,10 @@ let
       }
       {
         systems = [ system ];
-        imports = [ ../lib/flakeModule.nix ];
+        imports = [ module ];
         perSystem.spindrift.packages = p: [ p.hello ];
       };
+  moduleConsumer = moduleConsumerVia ../lib/flakeModule.nix;
   consumerPkgs = moduleConsumer.packages.${system};
   consumerFormatter = moduleConsumer.formatter.${system};
 
@@ -735,6 +739,7 @@ in
     skillsHarness
     noSkillsHarness
     minimalDirect
+    moduleConsumerVia
     consumerPkgs
     consumerFormatter
     templatePkgs
