@@ -9,7 +9,14 @@
   ...
 }:
 let
-  inherit (pkgs.lib) assertMsg filterAttrs isDerivation;
+  inherit (pkgs.lib)
+    assertMsg
+    filterAttrs
+    hasInfix
+    hasPrefix
+    isDerivation
+    ;
+  connectorNames = import ../../lib/connector-names.nix;
   coreSchema = import ../../lib/env-schema.nix;
   core = import ../../core;
   fixtureConnector = (import ../fixtures/connector).lib.connector { inherit core; };
@@ -35,11 +42,6 @@ let
       boxEnv = false;
     };
   };
-  duplicateRow = fixtures.connectorConsumerVia [
-    coreModule
-    (knobModule "dup" "a" "DUP_A")
-    (knobModule "dup" "b" "DUP_B")
-  ];
   envClash = fixtures.connectorConsumerVia [
     coreModule
     (knobModule "clash" "clashing" "LABEL")
@@ -136,7 +138,35 @@ in
     pkgs.runCommand "connectors-env-collision-names-connector" { } "touch $out";
 
   connectors-duplicate-name-fails =
-    assert assertMsg (fails (configOf duplicateRow)
+    let
+      sourced = file: mod: mod // { _file = file; };
+      message = connectorNames.duplicateError "dup" [
+        { file = "a.nix"; }
+        { file = "b.nix"; }
+      ];
+      twoModules = fixtures.connectorConsumerVia [
+        coreModule
+        (sourced "a.nix" (knobModule "dup" "a" "DUP_A"))
+        (sourced "b.nix" (knobModule "dup" "b" "DUP_B"))
+      ];
+      oneModule = fixtures.connectorConsumerVia [
+        coreModule
+        (sourced "a.nix" (knobModule "dup" "a" "DUP_A"))
+      ];
+    in
+    assert assertMsg (
+      message == "perSystem.spindrift.connectors.dup is registered twice: by a.nix and by b.nix"
+    ) "the duplicate-name message must name the option path and both sources; got ${toString message}";
+    assert assertMsg (
+      hasPrefix "perSystem.spindrift." message && !(hasInfix "\n" message)
+    ) "the duplicate-name message must start with perSystem.spindrift. and be one line";
+    assert assertMsg (
+      connectorNames.duplicateError "dup" [ { file = "a.nix"; } ] == null
+    ) "a single definition must not be reported as a duplicate";
+    assert assertMsg (
+      (configOf oneModule).connectors.dup.knobs.a.env == "DUP_A"
+    ) "control: one module registering the row must evaluate";
+    assert assertMsg (fails (configOf twoModules)
       .connectors.dup) "two modules registering one Connector row name must fail to evaluate, not merge";
     pkgs.runCommand "connectors-duplicate-name-fails" { } "touch $out";
 }
