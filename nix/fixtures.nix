@@ -646,10 +646,8 @@ let
     inherit nixpkgs system;
     packages = p: [ p.hello ];
   };
-  # Parameterised on the module so core-entry.nix can evaluate the one
-  # unchanged config through two entry points (issue #6765).
-  moduleConsumerVia =
-    module:
+  consumerVia =
+    extra: modules:
     flake-parts.lib.mkFlake
       {
         inputs = {
@@ -659,12 +657,21 @@ let
           };
         };
       }
-      {
-        systems = [ system ];
-        imports = [ module ];
-        perSystem.spindrift.packages = p: [ p.hello ];
-      };
+      (
+        {
+          systems = [ system ];
+          imports = modules;
+          perSystem.spindrift.packages = p: [ p.hello ];
+        }
+        // extra
+      );
+  # Parameterised on the module so core-entry.nix can evaluate the one
+  # unchanged config through two entry points (issue #6765).
+  moduleConsumerVia = module: consumerVia { } [ module ];
   moduleConsumer = moduleConsumerVia ../lib/flakeModule.nix;
+  # `debug = true` exposes the flake-level config (`.debug.config`) that the
+  # plain outputs hide, for checks reading Connector registrations (#6766).
+  connectorConsumerVia = consumerVia { debug = true; };
   consumerPkgs = moduleConsumer.packages.${system};
   consumerFormatter = moduleConsumer.formatter.${system};
 
@@ -739,7 +746,9 @@ in
     skillsHarness
     noSkillsHarness
     minimalDirect
+    moduleConsumer
     moduleConsumerVia
+    connectorConsumerVia
     consumerPkgs
     consumerFormatter
     templatePkgs

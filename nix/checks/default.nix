@@ -122,7 +122,8 @@ let
     // (import ./bare-bang-guard.nix common)
     // (import ./backend-name-guard.nix common)
     // (import ./eval-probe.nix common)
-    // (import ./core-entry.nix (common // { inherit rootFlakeModule; }));
+    // (import ./core-entry.nix (common // { inherit rootFlakeModule; }))
+    // (import ./connectors.nix common);
 
   imageChecks = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux (import ./image.nix common);
 
