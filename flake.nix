@@ -231,6 +231,13 @@
                 program = "${import ./nix/gate.nix { inherit pkgs system; }}/bin/gate";
               };
 
+              # Builds or checks a Connector subflake with core overridden to this
+              # checkout and the lock never written (issue #6769).
+              connector-dev = {
+                type = "app";
+                program = "${import ./nix/connector-dev.nix { inherit pkgs; }}/bin/connector-dev";
+              };
+
               # Rewrites the opencode session-store fixture from the baked
               # opencode (issue #5492); nix/checks/opencode-session-schema.nix
               # pins it to the derivation built here.

@@ -92,6 +92,9 @@ let
     # tests/gate.bats (issue #5862) runs the parallel-eval gate script against
     # stubbed nix-eval-jobs/nix.
     GATE_SH = ../../nix/gate.sh;
+    # tests/connector-dev.bats (issue #6769) runs the Connector dev wrapper
+    # against a stubbed nix.
+    CONNECTOR_DEV_SH = ../../nix/connector-dev.sh;
     PROMPTS_DIR = ../../templates/default/prompts;
     # The rendered contracts, driver/agent-paths preambles and Claude
     # settings.json the bats harness reads (tests/entrypoint-shim.bats,
@@ -186,6 +189,7 @@ in
           ${../../.github/scripts/eval-stats-render.sh} \
           ${../../.github/scripts/eval-probe.sh} \
           ${../../nix/gate.sh} \
+          ${../../nix/connector-dev.sh} \
           ${../../.github/scripts/eval-profile-top.sh} \
           ${../../tests/fakes/runtime} \
           ${../../tests/fakes/gh} \
