@@ -2295,6 +2295,17 @@ evaluates as before, the fixture takes the core it is handed, a row name
 registered twice fails, and a knob that reuses a core env fails naming the
 Connector.
 
+`nix/checks/connector-escape-guard.nix` keeps a Connector self-contained. It
+fails when any `*.nix` under `connectors/<name>/` or the fixture Connector
+holds a relative path that resolves outside that Connector's directory,
+naming the file and the reference. A first-party Connector therefore reaches
+core only through the `core` argument, as a third-party one must. The guard
+scans every directory under `connectors/` with no per-Connector edit. It is
+text-based, so a `../` in a comment or string counts too. It does not see
+absolute paths (an absolute flake `path:/…` input included), `<nixpkgs>`
+lookups, a path after `/` or `}` (an interpolation tail or URL), paths built
+with `+`, or symlinks that point outside the Connector.
+
 ### Targeting repos that define their own devShell toolchain
 
 If the Target repos define their own build toolchain in a `flake.nix` devShell,
