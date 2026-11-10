@@ -2237,6 +2237,64 @@ pass `mkHarness` runs on every roster before handing it to a Driver (issue
 the explicit `""` sentinel, the step `mkHarness` runs after `normalizeRoster`
 and right before handing the roster to a Driver.
 
+### Connector subflake shape
+
+A Connector (ADR 0073) is a subflake that adds backend or Driver rows from
+outside core. This section covers only the Nix shape. The root flake
+registers no Connector yet, and what a registered row means at runtime is
+issue #6751. The worked example is the fixture Connector in
+[`nix/fixtures/connector/`](../nix/fixtures/connector/).
+
+- **Entry point.** `default.nix` is a plain-Nix file that exports
+  `lib.connector`, a `callPackage`-style function. It takes `{ core }` and
+  returns the Connector's `flakeModule`, so one Connector evaluates against
+  whichever core the caller holds:
+
+  ```nix
+  { lib.connector = { core }: { flakeModule = import ./module.nix { inherit core; }; }; }
+  ```
+
+- **Module.** `module.nix` is a flake-parts module. It imports
+  `core.flakeModules.default` (the module system dedups by path, so a Consumer
+  that imports the same core is unaffected) and contributes rows to
+  `spindrift.connectors.<name>`. The module system's merge is the registry,
+  and one row name registered by two modules fails evaluation. Each row is
+  `types.unique`, so a Consumer cannot adjust a Connector's row additively;
+  overriding it is `lib.mkForce` on the whole row.
+- **Row-owned knobs.** A row's `knobs` attrset has the shape of a core row's
+  (ADR 0068), keyed by env-schema key with an env-schema entry as value. The
+  knobs fold into `spindrift.envSchema` on top of lib/env-schema.nix. Only that
+  schema sees them for now: the perSystem options, Go codegen, and generated
+  docs still read lib/env-schema.nix (issue #6751). A knob
+  that reuses an env name or key already claimed by core or another Connector
+  fails when `spindrift.envSchema` is evaluated, and the message names both
+  sources.
+
+  ```nix
+  spindrift.connectors.fixture.knobs.fixtureGreeting = {
+    env = "FIXTURE_GREETING";
+    group = "dispatch";
+    default = "hello";
+    doc = "...";
+    flakeOption = false;
+    boxEnv = false;
+  };
+  ```
+
+- **`flake.nix`.** The Connector's own flake pins core with
+  `inputs.core.url = "github:jordansmall/spindrift?dir=core"` and exposes the
+  module as `flakeModules.default`. That pin is for building the Connector
+  standalone only. The batteries root plain-imports each Connector's entry
+  point and passes its own `core`, so a Consumer never evaluates two cores.
+  The root's list of Connector directories is `connectorDirs` in
+  [`flake.nix`](../flake.nix), empty until the first Connector (issue #6751).
+
+`nix/checks/connectors.nix` pins the registry: the fixture's row registers,
+its knob reaches `spindrift.envSchema`, a Consumer without a Connector
+evaluates as before, the fixture takes the core it is handed, a row name
+registered twice fails, and a knob that reuses a core env fails naming the
+Connector.
+
 ### Targeting repos that define their own devShell toolchain
 
 If the Target repos define their own build toolchain in a `flake.nix` devShell,
