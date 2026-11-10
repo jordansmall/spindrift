@@ -36,6 +36,14 @@
     let
       core = import ./core;
 
+      # ADR 0073: each Connector subflake is plain-imported here and handed
+      # this root's own core, never its pinned one. Empty until the first
+      # Connector lands (#6751).
+      connectorDirs = [ ];
+      connectorModules = map (
+        dir: ((import dir).lib.connector { inherit core; }).flakeModule
+      ) connectorDirs;
+
       # Every mkHarness call handed this wrapped input shares one lazy nixpkgs
       # instantiation per system instead of paying its own fixed-point evaluation
       # (lib/nixpkgs-shared.nix); the checkset alone makes ~100 such calls per
@@ -58,7 +66,7 @@
 
         # Dogfood the declarative options: our own packages and apps come from
         # the flake-parts shim, not a direct mkHarness call.
-        imports = [ core.flakeModules.default ];
+        imports = [ core.flakeModules.default ] ++ connectorModules;
 
         flake = { inherit (core) lib flakeModules; };
 
