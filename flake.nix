@@ -34,6 +34,8 @@
       ...
     }:
     let
+      core = import ./core;
+
       # Every mkHarness call handed this wrapped input shares one lazy nixpkgs
       # instantiation per system instead of paying its own fixed-point evaluation
       # (lib/nixpkgs-shared.nix); the checkset alone makes ~100 such calls per
@@ -56,24 +58,9 @@
 
         # Dogfood the declarative options: our own packages and apps come from
         # the flake-parts shim, not a direct mkHarness call.
-        imports = [ ./lib/flakeModule.nix ];
+        imports = [ core.flakeModules.default ];
 
-        flake.lib.mkHarness = import ./lib/mkHarness.nix;
-
-        # Roster helpers (issue #2560). normalizeRosterResult stays internal
-        # test-support machinery, so it is deliberately not exported here.
-        flake.lib.rosterLib =
-          args:
-          let
-            roster = import ./lib/roster.nix args;
-          in
-          {
-            inherit (roster) normalizeRoster dropOptedOut defaultRoster;
-          };
-
-        # The flake-parts shim, for Consumer flakes that want the declarative
-        # options (ADR 0001).
-        flake.flakeModules.default = ./lib/flakeModule.nix;
+        flake = { inherit (core) lib flakeModules; };
 
         # The dogfood above consumes this same templates/default toolchain and
         # prompt, so an edit here changes both.
