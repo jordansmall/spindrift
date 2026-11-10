@@ -427,25 +427,9 @@ in
     };
   };
 
-  config.spindrift.envSchema =
-    let
-      staticRegistries = import ./row-knob-registries.nix;
-      staticKnobKeys = lib.concatMap (
-        registry: lib.concatMap (row: lib.attrNames (row.knobs or { })) registry.rows
-      ) staticRegistries;
-    in
-    (import ./row-knobs.nix).fold {
-      # `schema` is already folded over the static registries; strip their
-      # knobs so the fold reports a clash against the real core row file.
-      shared = removeAttrs schema staticKnobKeys;
-      sharedSource = "lib/env-schema.nix";
-      registries = staticRegistries ++ [
-        {
-          sourceOf = name: "spindrift.connectors.${name}";
-          rows = lib.attrValues config.spindrift.connectors;
-        }
-      ];
-    };
+  config.spindrift.envSchema = (import ./row-knobs.nix).fold (
+    import ./connector-knobs.nix (lib.attrValues config.spindrift.connectors)
+  );
 
   options.perSystem = flake-parts-lib.mkPerSystemOption {
     options.spindrift =
