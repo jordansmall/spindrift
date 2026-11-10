@@ -3,6 +3,7 @@
 # the outputs stay byte-identical to a direct mkHarness call.
 {
   lib,
+  config,
   flake-parts-lib,
   inputs,
   self,
@@ -383,6 +384,72 @@ let
   ) structuralOptions;
 in
 {
+  # Flake-level, not perSystem: a Connector's flake-parts module registers its
+  # row here (ADR 0073). The registry is purely declarative so far; no row fact
+  # reaches mkHarness yet.
+  options.spindrift = {
+    connectors = mkOption {
+      type = types.attrsOf (
+        # `unique` makes a second module registering the same row name fail
+        # instead of the submodule merge silently combining their knobs.
+        types.unique
+          {
+            message = "a Connector row name may be registered by only one module";
+          }
+          (
+            types.submodule (
+              { name, ... }:
+              {
+                freeformType = types.lazyAttrsOf types.raw;
+                options = {
+                  name = mkOption {
+                    type = types.str;
+                    default = name;
+                    readOnly = true;
+                    description = "The Connector row's name, its attr name in `spindrift.connectors`.";
+                  };
+                  knobs = mkOption {
+                    type = types.lazyAttrsOf types.raw;
+                    default = { };
+                    description = "Env-schema entries this row owns, keyed by env-schema key (lib/row-knobs.nix).";
+                  };
+                };
+              }
+            )
+          )
+      );
+      default = { };
+      description = "Connector rows registered by Connectors' flake-parts modules.";
+    };
+
+    envSchema = mkOption {
+      type = types.lazyAttrsOf types.raw;
+      readOnly = true;
+      internal = true;
+      description = "lib/env-schema.nix with every Connector row's knobs folded in as a core row's are.";
+    };
+  };
+
+  config.spindrift.envSchema =
+    let
+      staticRegistries = import ./row-knob-registries.nix;
+      staticKnobKeys = lib.concatMap (
+        registry: lib.concatMap (row: lib.attrNames (row.knobs or { })) registry.rows
+      ) staticRegistries;
+    in
+    (import ./row-knobs.nix).fold {
+      # `schema` is already folded over the static registries; strip their
+      # knobs so the fold reports a clash against the real core row file.
+      shared = removeAttrs schema staticKnobKeys;
+      sharedSource = "lib/env-schema.nix";
+      registries = staticRegistries ++ [
+        {
+          sourceOf = name: "spindrift.connectors.${name}";
+          rows = lib.attrValues config.spindrift.connectors;
+        }
+      ];
+    };
+
   options.perSystem = flake-parts-lib.mkPerSystemOption {
     options.spindrift =
       let
