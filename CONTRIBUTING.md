@@ -418,6 +418,33 @@ fixes with a security dimension so they surface in the notes. Cutting a release
 is a single human gate: merge the release PR release-please opens; it tags and
 publishes. Don't hand-tag or `gh release create`.
 
+## Adding a Connector
+
+A Connector is a subflake under `connectors/<name>/` that adds backend or
+Driver rows from outside core; its shape is in
+[Connector subflake shape](docs/reference.md#connector-subflake-shape). It
+releases and is owned separately from core, so wire these besides the code:
+
+1. A release-please package: add
+   `"connectors/<name>": { "component": "<name>" }` under `packages` in
+   `.release-please-config.json`. It inherits the top-level settings; the
+   `component` gives it its own `<name>-v…` tag series, not the root's bare
+   `v…`.
+2. A starting version: add `"connectors/<name>": "0.1.0"` to
+   `.release-please-manifest.json`.
+3. An owner: add a `/connectors/<name>/ @owner...` line to
+   `.github/CODEOWNERS`, after the `*` line (the last matching pattern wins).
+   The check recognises only a `/connectors/<name>/` or `/connectors/<name>/**`
+   line as last to cover `*`, `connectors/`, or the Connector; it cannot see
+   an extension pattern like `*.nix @other`, so do not add one after it.
+4. A flake entry: add the directory to `connectorDirs` in `flake.nix` so the
+   root plain-imports its entry point.
+
+The root package's `exclude-paths` keeps a commit that touches only
+`connectors/` out of a core release. The `connector-ownership` check names any
+Connector missing its release-please package, manifest version, or CODEOWNERS
+line; it does not cover `connectorDirs`.
+
 ## Reporting security issues
 
 See [SECURITY.md](SECURITY.md) — please report privately, not in a public issue.
