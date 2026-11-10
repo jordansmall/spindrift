@@ -186,6 +186,12 @@ type and default. To add spindrift to an existing flake by hand, add
 The template's [`flake.nix`](templates/default/flake.nix) is a complete
 example. Pin the input in `flake.lock` so every run uses the same version.
 
+To build against core alone, without the root flake's dogfood inputs, use
+`spindrift.url = "github:jordansmall/spindrift?dir=core";`. It exports the
+same `lib.mkHarness`, `lib.rosterLib` and `flakeModules.default`, so the
+`imports` line stays the same. The root URL above keeps working unchanged,
+and it is still what most Consumers want.
+
 ## Before you deploy
 
 1. **Protect the base branch.** The token that pushes `agent/issue-N` branches
