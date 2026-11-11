@@ -6,3 +6,6 @@ import "context"
 func (c *Connector) Call(ctx context.Context, method string, params, result any) error {
 	return c.call(ctx, method, params, result)
 }
+
+// GuestEvents exposes the unexported guestEvents to the external tests.
+var GuestEvents = guestEvents
