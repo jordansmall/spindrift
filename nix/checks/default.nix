@@ -128,6 +128,7 @@ let
     // (import ./connectors.nix common)
     // (import ./connector-driver-rows.nix common)
     // (import ./connector-escape-guard.nix common)
+    // (import ./wazero-pin-guard.nix common)
     // (import ./connector-ownership.nix common);
 
   imageChecks = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux (import ./image.nix common);
