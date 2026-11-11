@@ -199,6 +199,8 @@
               # The fixtures directory the Go seam tests build on demand
               # (issue #4280).
               seam-fixtures = fixtures.seamFixtures;
+              # The fixture Connector .wasm files core's fake Driver loads (issue #6794).
+              connector-wasm-fixtures = fixtures.connectorWasm;
             }
             # A bwrap harness bakes FLAKE_IMAGE_ATTR as
             # `.#packages.<system>.<imageAttrName>` (issue #2672), agent-closure
