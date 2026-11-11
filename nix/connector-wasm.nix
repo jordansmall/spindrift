@@ -28,4 +28,6 @@ pkgs.runCommand "connector-wasm-fixtures" { nativeBuildInputs = [ pkgs.go ]; } '
   build future.wasm -ldflags=-X=${versionSymbol}=0.2.0 ./handshake
   build probe.wasm ./probe
   build call.wasm ./call
+  build seamtest-driver.wasm ./seamtest-driver
+  build driver.wasm ./driver
 ''
