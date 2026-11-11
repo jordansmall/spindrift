@@ -293,3 +293,12 @@ use the generated Driver Descriptor. `mkHarness` refuses a row without a
 module, a core-named row whose facts differ from core's, and a credential env
 outside the set generated from the core rows. The hooks column stays core-only,
 so an outside Driver has no per-Driver guard hook rows yet.
+
+## Amendment (issue #6797): shadow mode for the claude Connector
+
+The shadow switch is the row option `spindrift.connectors.<name>.shadow`, not an
+env knob, since a Connector row's knobs reach no flake option or Box env yet.
+The comparator runs after each Pass in `driver-exec`, against the native
+Strategy that stays authoritative, and its records are `shadow_divergence` and
+`shadow_summary` host ops in the Pass log, which CI already uploads. The
+cut-over count and its recipe are in the reference's Shadow mode section.
