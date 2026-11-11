@@ -20,7 +20,7 @@ const connectorWasmEnv = "SPINDRIFT_DRIVER_CONNECTOR_WASM"
 
 // connectorWasm returns the compiled claude Connector's path, skipping t when
 // it is unset.
-func connectorWasm(t *testing.T) string {
+func connectorWasm(t testing.TB) string {
 	t.Helper()
 	wasm := os.Getenv(connectorWasmEnv)
 	if wasm == "" {
