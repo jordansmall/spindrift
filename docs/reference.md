@@ -2502,6 +2502,27 @@ This is protocol version **0.1.0**. The host is
   is proven the same way by `drivers-claude-go-test`, which sets
   `SPINDRIFT_DRIVER_CONNECTOR_WASM`.
 
+#### Pinned wazero
+
+The sandbox is only as sound as wazero, so `cmd/launcher/go.mod` pins
+`github.com/tetratelabs/wazero` to an exact release `vX.Y.Z`, and the
+`wazero-pin-guard` check fails on a pseudo-version, a pre-release, an
+indirect-only requirement, or a `replace` or `exclude` that names it.
+
+- **Tracking security releases.** Watch the wazero repository's releases and
+  security advisories on GitHub (Watch, Custom, Releases and Security
+  alerts), and run `nix run .#govulncheck`. It scans the launcher module's
+  dependencies, wazero included, against the Go vulnerability database and
+  passes extra flags through (`-show verbose`); it exits 3 when it finds a
+  vulnerability your code calls.
+- **Why an app, not a check.** The database is a live feed at vuln.go.dev
+  that a Nix build cannot reach, and a pinned snapshot would only know what
+  was known at the last lock bump.
+- **Bumping the pin.** Run `go get github.com/tetratelabs/wazero@vX.Y.Z` then
+  `go mod tidy` in `cmd/launcher`, refresh the vendor hashes in
+  `lib/build-constants.nix` (each `*VendorHash`: set it to `lib.fakeHash`,
+  build, copy the hash Nix reports), and run the gate.
+
 ### Targeting repos that define their own devShell toolchain
 
 If the Target repos define their own build toolchain in a `flake.nix` devShell,
