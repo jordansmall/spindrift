@@ -2329,6 +2329,52 @@ absolute paths (an absolute flake `path:/…` input included), `<nixpkgs>`
 lookups, a path after `/` or `}` (an interpolation tail or URL), paths built
 with `+`, or symlinks that point outside the Connector.
 
+### Connector protocol
+
+The protocol, not the SDK, is the contract between core and a Connector
+([ADR 0073](adr/0073-backends-and-drivers-are-trust-no-one-wasm-connectors.md)).
+This is protocol version **0.1.0**. The host is
+[`connectorhost`](../cmd/launcher/internal/connectorhost/connectorhost.go).
+
+- **Module.** A Connector is a WebAssembly reactor module built with the
+  stock Go toolchain (no TinyGo):
+  `GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared`. The host runs its
+  `_initialize` export, which runs package inits, and never `_start` or
+  `main`.
+- **Sandbox.** The host runs the module on wazero's interpreter and grants it
+  nothing. It satisfies only the `wasi_snapshot_preview1` imports Go's wasip1
+  runtime needs: no preopened directories, an empty environment and argument
+  list, no stdio, a fake clock and a deterministic random source. There are no
+  sockets or subprocesses. Core grants no host calls beyond WASI yet: the
+  allow-list is empty, so a module that imports anything else is refused at
+  load with the handshake error.
+- **Handshake.** The module exports `connector_handshake`, which takes no
+  parameters and returns one `i64`, `ptr << 32 | len`, locating the result
+  bytes in the module's memory export named `memory`. The result is:
+
+  ```json
+  {"protocolVersion": "0.1.0", "capabilities": []}
+  ```
+
+  `capabilities` is an array of strings, `[]` when empty.
+- **Encoding.** Arguments and results cross the boundary as bytes, UTF-8
+  JSON.
+- **Versioning.** The protocol version is `0.y.z` and independent of
+  spindrift's release version. A `0.y` bump is breaking; a `0.y.z` bump is
+  additive. Core accepts its current `0.y` and the one before it, so today
+  0.1.z and 0.0.z. Any other version is refused at load with
+  `connector protocol "<version>" is outside core's supported range 0.0.x to 0.1.x (core speaks 0.1.0)`,
+  naming the Connector's version, core's range and core's own version. A
+  module that is not valid wasm, imports something ungranted, lacks the export
+  or the `memory` export, has the wrong signature, returns malformed JSON or
+  runs past the caller's context deadline fails the handshake instead.
+- **Go SDK.** Module `spindrift.dev/sdk` under [`sdk/`](../sdk/), separate
+  from the launcher module. A Connector calls `connector.Register(capabilities...)`
+  from `init()`. Package `event` is a published copy of the canonical event
+  vocabulary ([ADR 0065](adr/0065-drivers-decode-pass-logs-into-canonical-events.md)),
+  kept in parity with driverkit by `sdk/event/parity_test.go` (the
+  `sdk-go-test` check).
+
 ### Targeting repos that define their own devShell toolchain
 
 If the Target repos define their own build toolchain in a `flake.nix` devShell,
