@@ -235,3 +235,48 @@ A spike on 2026-11-09 tested each layout in a throwaway repository under Lix
 - With the code plane host-seeded, the Box's mounts include a read-only mirror
   on every forge, not only `local`. That widens ADR 0033's documented
   exception to sharing no host filesystem from one forge to all of them.
+
+## Amendment (issue #6798): the launcher keeps the interpreter
+
+The per-line cost measured in the claude proof does not rule the interpreter
+out, so the launcher's `connectorhost.Load` stays on wazero's interpreter and
+decision 14's interpreter rule stands as written. Test binaries keep
+`LoadCompiled`.
+
+Measured with `BenchmarkConnectorDecode`, `BenchmarkConnectorHeartbeat` and
+`BenchmarkConnectorLoad` (medians of 5; Linux amd64, Ryzen 9 5950X, go1.26.8,
+wazero v1.11.0; the 4.38 MB claude Connector, stock Go `GOOS=wasip1`; a
+corpus of 769 lines, 560,290 bytes, from 11 `pass.jsonl`):
+
+| bench | native | interpreter | compiler |
+|---|---|---|---|
+| Decode, per line | 24.2 µs | 15.3 ms | 2.0 ms |
+| Heartbeat (97-byte chunks through `NewHeartbeatWriter`), per line | 27.7 µs | 16.1 ms | 2.2 ms |
+| Load (wasm bytes to ready Strategy) | n/a | 175 ms | 1.14 s |
+
+The interpreter is about 630x native per line and the compiler about 83x, so
+the compiler is about 7.6x faster per line but costs about 6.5x more to Load
+without a cache. Heartbeat framing adds 5 to 15 percent over bare decode,
+about 5 percent under the interpreter. The numbers are host-relative; the ratios are what matter.
+
+What the live heartbeat needs is far below the interpreter's rate. The
+densest real pass in the corpus emits about 2.8 lines/s (61 lines in 21.9 s,
+`real-conflict-resolve-error`); the interpreter sustains about 62 lines/s
+through the heartbeat, roughly 20x headroom, and about 5 percent of one core
+at the real rate.
+
+The compiler would add surface for a gain the heartbeat does not need. It
+generates native code in the launcher's process from an untrusted module, so
+a compiler bug becomes a host memory-safety escape, beyond the interpreter's
+"wazero escape" surface. Its 1.1 s cold Load is worth paying only with an
+on-disk compilation cache, and that cache holds native code, so it must be
+per-user (`seamtest/strategy.go`) or another user could plant code in it.
+
+Where the interpreter is weaker: re-decoding a whole log, such as reading
+back a 332-line pass, takes seconds, not milliseconds. Revisit if a Connector
+decodes at a much higher line rate, for example partial-message streaming, or
+a whole-log path becomes interactive.
+
+To re-run, use the command in the header of
+`cmd/launcher/internal/driver/claude/connector_bench_test.go` with `-count 5`,
+the wasm built as `nix/checks/go.nix`'s `setupFor` builds it.
