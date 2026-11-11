@@ -3,6 +3,8 @@
 // checks every observable output against the goldens beside each log. It takes
 // the Strategy and a directory, never the Driver registry or another Driver's
 // package, so a Driver proves itself over its own corpus alone (issue #5506).
+// RunConnector takes the compiled Connector (.wasm) form of a Driver instead,
+// so one corpus proves a Driver whether it is native or WASM.
 //
 // A corpus directory holds one subdirectory per case, each with a pass.jsonl,
 // an optional render.json ({"topLevelRole": "..."}), and the *.golden.* files
@@ -12,6 +14,7 @@ package conformance
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -23,6 +26,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/driver/corpus"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/golden"
@@ -36,6 +40,27 @@ const (
 	// splits land both mid-line and across line ends.
 	maxChunk = 97
 )
+
+// RunConnector loads the Driver Connector compiled at wasmPath, builds its
+// Strategy, and runs the same suite as Run over corpusDir. A load failure
+// fails t.
+func RunConnector(t *testing.T, wasmPath string, corpusDir string) {
+	t.Helper()
+	wasm, err := os.ReadFile(wasmPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := connectorhost.Load(context.Background(), wasm)
+	if err != nil {
+		t.Fatalf("load %s: %v", wasmPath, err)
+	}
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
+	s, err := c.DriverStrategy()
+	if err != nil {
+		t.Fatalf("%s: %v", wasmPath, err)
+	}
+	Run(t, s, corpusDir)
+}
 
 type modelCall struct {
 	Model string `json:"model"`

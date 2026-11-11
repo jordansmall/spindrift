@@ -143,6 +143,7 @@ let
   # stale list fails the build loudly. Never the registry root internal/driver
   # or another Driver's directory (internal/driver/closure_test.go).
   driverGoTestShared = map (p: ../../cmd/launcher/internal + "/${p}") [
+    "connectorhost"
     "dispatchkey"
     "dispatchkind"
     "driver/corpus"
