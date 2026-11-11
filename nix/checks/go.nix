@@ -615,6 +615,7 @@ let
         exit 1
       fi
       ${goTestPrologueWith (vendorFor files)}
+      export SPINDRIFT_CONNECTOR_FIXTURES_DIR=${fixtures.connectorWasm}
       go test ${corePkgs}
       touch $out
     '';
