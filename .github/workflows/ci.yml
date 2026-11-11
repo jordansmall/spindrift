@@ -338,12 +338,75 @@ jobs:
         run: |
           nix run .#connector-dev -- "$CONNECTOR" flake check --print-build-logs
 
+  # Evaluator tripwire (issue #6772, ADR 0073): the core subflake reads the
+  # source tree above core/, which holds only because of how Lix and CppNix
+  # copy flake sources today. This evaluates core via ?dir=core and the
+  # batteries root under each, so an evaluator change fails here, not in a
+  # Consumer. If it ever fires, the documented fallback is to move core's
+  # sources physically under core/ (ADR 0073, "Consequences").
+  #
+  # A CI job, not a check: two evaluators over flakes do not fit one sandboxed
+  # derivation. Each evaluator is pinned by flake.lock's nixpkgs and runs as a
+  # client of the installed daemon; how flake sources are copied is decided
+  # client-side, so the daemon's own version does not matter.
+  evaluators:
+    name: evaluator tripwire (${{ matrix.evaluator }})
+    needs: changes
+    if: needs.changes.outputs.kind == 'code'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - evaluator: lix
+            attr: lixPackageSets.lix_2_95.lix
+          - evaluator: cppnix
+            attr: nixVersions.nix_2_35
+    steps:
+      # The flake refs below are git+file://; full history keeps Nix from
+      # rejecting the checkout as shallow.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
+
+      - name: Restore the nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-x86_64-linux-${{ github.sha }}
+          restore-prefixes-first-match: nix-x86_64-linux-
+          save: false
+
+      - name: Fetch the pinned evaluator
+        env:
+          ATTR: ${{ matrix.attr }}
+        run: |
+          nix build --inputs-from . "nixpkgs#$ATTR" --out-link "$RUNNER_TEMP/evaluator" --print-build-logs
+          "$RUNNER_TEMP/evaluator/bin/nix" --version
+
+      # lib.mkHarness is `import ../lib/mkHarness.nix`, so forcing it reads
+      # above core/; a subdir-only copy fails with a pure-eval access error.
+      - name: Evaluate the core subflake via ?dir=core
+        run: |
+          is_function=$("$RUNNER_TEMP/evaluator/bin/nix" --extra-experimental-features 'nix-command flakes' \
+            eval "git+file://$GITHUB_WORKSPACE?dir=core#lib.mkHarness" --apply builtins.isFunction)
+          [ "$is_function" = true ]
+
+      # The batteries root plain-imports core; the dogfood package goes through
+      # its flake module and mkHarness.
+      - name: Evaluate the batteries root
+        run: |
+          "$RUNNER_TEMP/evaluator/bin/nix" --extra-experimental-features 'nix-command flakes' \
+            eval "git+file://$GITHUB_WORKSPACE#packages.x86_64-linux.spindrift.drvPath"
+
   # The single required status check (issue #5155): branch protection names
   # this job alone, so it runs whatever the change kind and passes only when
   # the lane that kind requires succeeded and nothing failed or was cancelled.
   ci-ok:
     name: ci-ok
-    needs: [changes, check, check-macos, docs, connector]
+    needs: [changes, check, check-macos, docs, connector, evaluators]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -375,9 +438,9 @@ jobs:
           elif [ "$KIND" = connector ]; then
             required=(changes docs connector)
           elif [ "$ON_MAIN" = true ]; then
-            required=(changes check check-macos)
+            required=(changes check check-macos evaluators)
           else
-            required=(changes check)
+            required=(changes check evaluators)
           fi
           # Fails closed: a missing or malformed output makes the lane required.
           if [ "$KIND" != connector ] && [ "$CONNECTORS" != '[]' ]; then
