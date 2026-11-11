@@ -15,6 +15,9 @@ type Driver struct{ s Strategy }
 // New returns the Driver that runs s.
 func New(s Strategy) Driver { return Driver{s} }
 
+// Strategy returns the Strategy d runs.
+func (d Driver) Strategy() Strategy { return d.s }
+
 // usageByModel and usageByAgent are the one seam for tests to simulate an I/O
 // error without a real filesystem race against the usage aggregation scan.
 var (
