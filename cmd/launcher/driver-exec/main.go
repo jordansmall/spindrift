@@ -4,15 +4,18 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"spindrift.dev/launcher/internal/driver"
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/driver/driverrows"
+	"spindrift.dev/launcher/internal/driver/shadow"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/promptassembly"
 )
@@ -147,7 +150,49 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	return resolveExit(d, rc, *logPath)
+	exit := resolveExit(d, rc, *logPath)
+	runShadow(handoff.Driver, *logPath, rc, stdout)
+	return exit
+}
+
+// shadowReplay is a seam for tests that stub the wasm replay to observe what
+// runShadow hands it.
+var shadowReplay = shadow.Run
+
+// shadowBudget bounds what the shadow replay adds to every Pass, which the
+// orchestrator waits on before it sees the exit code. A replay that runs out is
+// a summary error, never a clean run.
+const shadowBudget = 2 * time.Minute
+
+// runShadow replays the Pass log through the Connector shadowing the named
+// native Driver, if a Driver row declared one, writing the comparison onto
+// stdout as spindrift ops. It never alters the run: the native result stays
+// authoritative, and a Connector that cannot be read, or a shadow row that was
+// skipped as malformed, is a summary, not an error. rawExit is the CLI's own
+// code, not the resolved one: the comparator resolves it once per side.
+func runShadow(name, logPath string, rawExit int, stdout io.Writer) {
+	emit := func(op hostop.SpindriftOp) { fmt.Fprint(stdout, hostop.EncodeSpindriftOp(op)) }
+	resolved := driver.ResolveName(name)
+	if reason, ok := driver.ShadowSkipped(name); ok {
+		emit(hostop.SpindriftOp{Op: hostop.OpShadowSummary, ShadowSummary: &hostop.ShadowSummary{Driver: resolved, Error: reason}})
+		return
+	}
+	module, ok := driver.ShadowModule(name)
+	if !ok {
+		return
+	}
+	native, ok := driver.NativeStrategy(name)
+	if !ok {
+		return
+	}
+	wasm, err := os.ReadFile(module)
+	if err != nil {
+		emit(hostop.SpindriftOp{Op: hostop.OpShadowSummary, ShadowSummary: &hostop.ShadowSummary{Driver: resolved, Error: err.Error()}})
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), shadowBudget)
+	defer cancel()
+	shadowReplay(ctx, native, wasm, logPath, rawExit, emit)
 }
 
 func main() {

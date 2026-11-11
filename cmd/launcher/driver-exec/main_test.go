@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -509,5 +511,162 @@ func TestMainRunAppliesHandoffDriverRows(t *testing.T) {
 	rc := mainRun([]string{"-handoff-file", handoffPath, "-log-path", filepath.Join(dir, "stream.log")}, &stdout, &stderr)
 	if rc != 0 {
 		t.Fatalf("mainRun exit code = %d, want 0 (stderr: %q)", rc, stderr.String())
+	}
+}
+
+// shadowRun drives mainRun for the claude Driver over a fake CLI exiting rc,
+// with rows (empty for none) as the handoff's Driver rows file, and returns the
+// exit code and stdout.
+func shadowRun(t *testing.T, rows string, rc int) (int, string) {
+	t.Helper()
+	return shadowRunDriver(t, "", rows, `{"type":"system","subtype":"init"}`, rc)
+}
+
+// shadowRunDriver is shadowRun for the named Driver, whose fake CLI writes
+// logLine and exits rc.
+func shadowRunDriver(t *testing.T, name, rows, logLine string, rc int) (int, string) {
+	t.Helper()
+	drivertest.Isolate(t)
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	writeTestFile(t, promptFile, "run the task")
+	h := promptassembly.Handoff{
+		PromptFile: promptFile,
+		Driver:     name,
+		DriverBin:  writeFakeDriver(t, dir, "fake-driver", `printf '%s\n' '`+logLine+`'; exit `+strconv.Itoa(rc)+"\n"),
+		ArgvShape:  claudeArgvShape,
+	}
+	if rows != "" {
+		h.DriverRowsFile = filepath.Join(dir, "rows.json")
+		writeTestFile(t, h.DriverRowsFile, rows)
+	}
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"-handoff-file", writeHandoffFile(t, h), "-log-path", filepath.Join(dir, "stream.log")}, &stdout, &stderr)
+	return got, stdout.String()
+}
+
+func claudeShadowRow(t *testing.T, module string) string {
+	t.Helper()
+	return shadowRow(t, "claude", module)
+}
+
+func shadowRow(t *testing.T, name, module string) string {
+	t.Helper()
+	desc, ok := driver.DescriptorFor(name)
+	if !ok {
+		t.Fatalf("%s has no Descriptor", name)
+	}
+	b, err := json.Marshal(struct {
+		driver.Descriptor
+		Module string `json:"module"`
+		Shadow bool   `json:"shadow"`
+	}{desc, module, true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return "[" + string(b) + "]"
+}
+
+func TestMainRunWithoutShadowRowEmitsNoShadowOps(t *testing.T) {
+	rc, out := shadowRun(t, "", 3)
+	if rc != 3 {
+		t.Errorf("exit code = %d, want 3", rc)
+	}
+	if strings.Contains(out, "shadow_") {
+		t.Errorf("stdout carries a shadow op without a shadow row: %q", out)
+	}
+}
+
+func shadowOps(t *testing.T, out string) (divs []hostop.ShadowDivergence, sum hostop.ShadowSummary) {
+	t.Helper()
+	var last hostop.SpindriftOp
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, `"shadow_`) {
+			continue
+		}
+		if last.Op == hostop.OpShadowSummary {
+			t.Fatalf("op after the shadow_summary: %s", line)
+		}
+		var ev hostop.Event
+		if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.SpindriftOp == nil {
+			t.Fatalf("decode %q: %v", line, err)
+		}
+		last = *ev.SpindriftOp
+		if last.Op == hostop.OpShadowDivergence {
+			divs = append(divs, *last.Divergence)
+		}
+	}
+	if last.Op != hostop.OpShadowSummary || last.ShadowSummary == nil {
+		t.Fatalf("no shadow_summary in stdout: %q", out)
+	}
+	return divs, *last.ShadowSummary
+}
+
+func TestMainRunShadowReportsDivergenceAndKeepsNativeExit(t *testing.T) {
+	dir := os.Getenv("SPINDRIFT_CONNECTOR_FIXTURES_DIR")
+	if dir == "" {
+		t.Skip("SPINDRIFT_CONNECTOR_FIXTURES_DIR is unset")
+	}
+	rc, out := shadowRun(t, claudeShadowRow(t, filepath.Join(dir, "driver.wasm")), 3)
+	if rc != 3 {
+		t.Errorf("exit code = %d, want the native 3", rc)
+	}
+	divs, sum := shadowOps(t, out)
+	if !sum.Loaded || sum.Error != "" || sum.Driver != "claude" || sum.Compared == 0 {
+		t.Errorf("summary = %+v, want a clean claude replay", sum)
+	}
+	if len(divs) == 0 || divs[0].Line == "" || len(divs[0].Native) == 0 || len(divs[0].Shadow) == 0 {
+		t.Errorf("divergences = %+v, want line with native and shadow results", divs)
+	}
+}
+
+func TestMainRunShadowLoadFailureIsSummarisedNotFatal(t *testing.T) {
+	garbage := filepath.Join(t.TempDir(), "garbage.wasm")
+	writeTestFile(t, garbage, "not wasm")
+	for name, module := range map[string]string{"missing": filepath.Join(t.TempDir(), "absent.wasm"), "garbage": garbage} {
+		rc, out := shadowRun(t, claudeShadowRow(t, module), 3)
+		if rc != 3 {
+			t.Errorf("%s: exit code = %d, want 3", name, rc)
+		}
+		if _, sum := shadowOps(t, out); sum.Loaded || sum.Error == "" {
+			t.Errorf("%s: summary = %+v, want Loaded=false with an Error", name, sum)
+		}
+	}
+}
+
+func TestMainRunMalformedShadowRowIsSummarisedNotFatal(t *testing.T) {
+	rc, out := shadowRun(t, claudeShadowRow(t, ""), 3)
+	if rc != 3 {
+		t.Errorf("exit code = %d, want 3", rc)
+	}
+	_, sum := shadowOps(t, out)
+	if sum.Loaded || !strings.Contains(sum.Error, "shadow row skipped") {
+		t.Errorf("summary = %+v, want Loaded=false naming the skipped row", sum)
+	}
+	if sum.Driver != "claude" {
+		t.Errorf("summary Driver = %q, want the defaulted name claude", sum.Driver)
+	}
+}
+
+// The comparator's resolveExit check applies each side's correction to the
+// CLI's raw code; handing it the already-corrected code would hide a Connector
+// that does not port the correction.
+func TestMainRunShadowHandsTheComparatorTheRawExitCode(t *testing.T) {
+	module := filepath.Join(t.TempDir(), "driver.wasm")
+	writeTestFile(t, module, "unused: the replay is stubbed")
+	var got []int
+	prev := shadowReplay
+	shadowReplay = func(_ context.Context, _ driverkit.Strategy, _ []byte, _ string, exitCode int, _ func(hostop.SpindriftOp)) {
+		got = append(got, exitCode)
+	}
+	t.Cleanup(func() { shadowReplay = prev })
+
+	// opencode exits 0 after a mid-run error, which its ResolveExit turns into 1.
+	rc, _ := shadowRunDriver(t, "opencode", shadowRow(t, "opencode", module), `{"type":"error","error":"boom"}`, 0)
+	if rc != 1 {
+		t.Fatalf("exit code = %d, want the native-corrected 1", rc)
+	}
+	if len(got) != 1 || got[0] != 0 {
+		t.Errorf("comparator exit codes = %v, want the CLI's raw [0]", got)
 	}
 }
