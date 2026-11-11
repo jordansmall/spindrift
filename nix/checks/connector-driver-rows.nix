@@ -5,6 +5,7 @@
 # generated list would silently disagree with it.
 {
   pkgs,
+  config,
   fixtures,
   nixpkgs,
   system,
@@ -244,4 +245,19 @@ in
       programOf shadowed != programOf (consumerWith [ ])
     ) "`shadow` on the claude Connector must reach mkHarness";
     pkgs.runCommand "connector-driver-rows-flake-module-shadow-option" { } "touch $out";
+
+  # Issue #6797: the dogfood really shadows claude. The real flake's default
+  # app (flake.nix's `spindrift.connectors` through the module) must equal the
+  # direct mirror's, whose Box rows file carries `shadow`; the app program
+  # embeds that file, so dropping flake.nix's shadow wiring changes it. The
+  # mirror alone would not notice: it reads nix/dogfood-shadow.nix itself.
+  connector-driver-rows-dogfood-shadows-claude =
+    assert assertMsg (config.apps.default.program == fixtures.harness.apps.default.program)
+      "flake.nix must shadow the nix/dogfood-shadow.nix Connectors: the dogfood app differs from the mirror (fixtures.harness)";
+    pkgs.runCommand "connector-driver-rows-dogfood-shadows-claude" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        jq -e 'any(.[]; .name == "claude" and .shadow == true)' \
+          ${fixtures.harness.internals.driverRowsFile}
+        touch $out
+      '';
 }

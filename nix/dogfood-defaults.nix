@@ -133,6 +133,8 @@ in
       # mirrors the pins (issue #4974).
       "nix/dogfood-defaults.nix"
       "lib/default-model-fixture.nix"
+      # Which Connectors dogfood shadows (issue #6797).
+      "nix/dogfood-shadow.nix"
     ];
     autoFormat = true;
     autoLint = true;

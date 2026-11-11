@@ -2271,6 +2271,14 @@ is the fixture Connector in
   modules' files. Each row takes a single definition, so a Consumer cannot
   adjust a Connector's row additively; overriding it is `lib.mkForce` on the
   whole row.
+  The one exception is `shadow` (issue #6797): a definition that sets only
+  `spindrift.connectors.<name>.shadow = true` is a Consumer's switch on the
+  registered row, not a second registration. With it on, the native Strategy of
+  the same name stays authoritative while the Box replays each Pass log through
+  the row's Driver `module` and records divergences; the row must name a core
+  Driver and carry a `module`. spindrift's own dogfood is a pinned exception to
+  mimicking a new Consumer: it shadows the Connectors in
+  `nix/dogfood-shadow.nix` until cut-over.
 - **Row-owned knobs.** A row's `knobs` attrset has the shape of a core row's
   (ADR 0068), keyed by env-schema key with an env-schema entry as value. The
   knobs fold into `spindrift.envSchema` on top of lib/env-schema.nix. Only that
