@@ -77,6 +77,12 @@ type SpindriftOp struct {
 	// Settled carries a Dispatch's terminal state on a "dispatch_settled" op;
 	// nil on every other op kind.
 	Settled *DispatchSettled `json:"dispatch_settled,omitempty"`
+	// Divergence carries one shadow-mode mismatch on a "shadow_divergence" op;
+	// nil on every other op kind.
+	Divergence *ShadowDivergence `json:"shadow_divergence,omitempty"`
+	// ShadowSummary carries a shadow run's totals on a "shadow_summary" op; nil
+	// on every other op kind.
+	ShadowSummary *ShadowSummary `json:"shadow_summary,omitempty"`
 }
 
 // PromptHashes is the payload of a "prompt_hashes" SpindriftOp (issue #4786),
@@ -123,6 +129,11 @@ const (
 	OpPromptHashes = "prompt_hashes"
 	// OpDispatchSettled is the host's terminal-state record.
 	OpDispatchSettled = "dispatch_settled"
+	// OpShadowDivergence records one place a Connector's Strategy disagreed
+	// with the native one during a shadow run.
+	OpShadowDivergence = "shadow_divergence"
+	// OpShadowSummary closes a shadow run with its totals.
+	OpShadowSummary = "shadow_summary"
 )
 
 // DispatchSettled is the payload of a "dispatch_settled" SpindriftOp (issue
@@ -192,4 +203,37 @@ func EncodeSpindriftOp(op SpindriftOp) string {
 		return ""
 	}
 	return string(b) + "\n"
+}
+
+// ShadowDivergence is the payload of a "shadow_divergence" SpindriftOp: the
+// Box replays a Pass log through the native Strategy and a Connector's, and
+// reports each mismatch. Like PromptHashes it is Box-reported, so a consumer
+// must treat it as untrusted. Check is "events" (the decoded events of one
+// line), "resolveExit" or "resultEvent". Neither of the last two has a LineNo,
+// so line_no is absent from the op; resolveExit has no Line either, while
+// resultEvent's Line is the native result text it encoded. Native and Shadow
+// are each side's result, JSON-encoded.
+type ShadowDivergence struct {
+	Driver string          `json:"driver"`
+	Check  string          `json:"check"`
+	LineNo int             `json:"line_no,omitempty"`
+	Line   string          `json:"line,omitempty"`
+	Native json.RawMessage `json:"native,omitempty"`
+	Shadow json.RawMessage `json:"shadow,omitempty"`
+}
+
+// ShadowSummary is the payload of a "shadow_summary" SpindriftOp, the last op
+// of a shadow run and Box-reported (see ShadowDivergence). Loaded is false
+// when the Connector never loaded; Error set with Loaded true means it failed
+// closed mid-run and the counts are those so far. Diverged counts every
+// mismatch, Recorded only the ones emitted as shadow_divergence ops.
+type ShadowSummary struct {
+	Driver          string `json:"driver"`
+	Loaded          bool   `json:"loaded"`
+	Error           string `json:"error,omitempty"`
+	Compared        int    `json:"compared"`
+	Diverged        int    `json:"diverged"`
+	Recorded        int    `json:"recorded"`
+	NativeNsPerLine int64  `json:"native_ns_per_line"`
+	ShadowNsPerLine int64  `json:"shadow_ns_per_line"`
 }

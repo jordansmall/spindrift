@@ -704,3 +704,18 @@ func TestExtractUsageAnchorsOnEarliestEventWithoutStart(t *testing.T) {
 		t.Errorf("report = %+v", r)
 	}
 }
+
+func TestHeartbeatWriterSkipsShadowDivergenceKeepsSummary(t *testing.T) {
+	table := map[string][]Event{
+		"d": {{Kind: KindHostOp, HostOp: &hostop.SpindriftOp{Op: hostop.OpShadowDivergence}}},
+		"s": {{Kind: KindHostOp, HostOp: &hostop.SpindriftOp{Op: hostop.OpShadowSummary, ShadowSummary: &hostop.ShadowSummary{Driver: "claude", Loaded: true}}}},
+	}
+	var raw, out bytes.Buffer
+	w := NewHeartbeatWriter(&raw, "7", &out, fakeDecoder(table), "top")
+	if _, err := w.Write([]byte("d\nd\ns\n")); err != nil {
+		t.Fatal(err)
+	}
+	if want := "#7 \xe2\x97\x8b shadow claude: compared 0, diverged 0\n"; out.String() != want {
+		t.Errorf("out = %q, want %q", out.String(), want)
+	}
+}

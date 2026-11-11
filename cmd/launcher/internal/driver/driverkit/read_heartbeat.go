@@ -154,8 +154,9 @@ func (w *HeartbeatWriter) parseLine(line string) {
 			w.emit()
 		case KindHostOp:
 			// pass_model is not a heartbeat line: a Driver's decoder consumes it
-			// itself, so the writer skips it.
-			if ev.HostOp != nil && ev.HostOp.Op != hostop.OpPassModel {
+			// itself, so the writer skips it. shadow_divergence can run to a
+			// hundred a Pass and lives in the log; shadow_summary is the one line.
+			if ev.HostOp != nil && ev.HostOp.Op != hostop.OpPassModel && ev.HostOp.Op != hostop.OpShadowDivergence {
 				fmt.Fprintln(w.out, FormatSpindriftOp(w.issue, *ev.HostOp))
 			}
 		}

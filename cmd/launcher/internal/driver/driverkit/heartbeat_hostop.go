@@ -107,6 +107,19 @@ func FormatSpindriftOp(issue string, op hostop.SpindriftOp) string {
 		default:
 			fmt.Fprintf(&sb, "run-state %s failed: %s", SanitizeLine(op.Phase), SanitizeLine(op.Error))
 		}
+	case hostop.OpShadowSummary:
+		var s hostop.ShadowSummary
+		if op.ShadowSummary != nil {
+			s = *op.ShadowSummary
+		}
+		if s.Loaded {
+			fmt.Fprintf(&sb, "shadow %s: compared %d, diverged %d", SanitizeLine(s.Driver), s.Compared, s.Diverged)
+		} else {
+			fmt.Fprintf(&sb, "shadow %s: not loaded", SanitizeLine(s.Driver))
+		}
+		if s.Error != "" {
+			fmt.Fprintf(&sb, ", error: %s", SanitizeLine(s.Error))
+		}
 	default:
 		sb.WriteString(SanitizeLine(op.Op))
 	}
