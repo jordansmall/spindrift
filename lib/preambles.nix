@@ -264,8 +264,17 @@ rec {
   # nix-computed plumbing. mkHarness.nix writes it to a store path and the
   # generated wrapper passes it via a single `--input` flag.
   renderInputDocumentJSON =
-    { settings, artifacts }:
-    builtins.toJSON {
-      inherit settings artifacts;
-    };
+    {
+      settings,
+      artifacts,
+      drivers ? [ ],
+    }:
+    builtins.toJSON (
+      {
+        inherit settings artifacts;
+      }
+      # Absent when no Connector declares an outside Driver, so an existing
+      # document stays byte-identical.
+      // (if drivers == [ ] then { } else { inherit drivers; })
+    );
 }
