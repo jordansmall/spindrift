@@ -123,6 +123,13 @@
   # outside the core registry is carried to the host and Box binaries; `driver`
   # may select one.
   driverRows ? { },
+  # Names of core Drivers whose Connector row (a `driverRows` entry carrying
+  # `module`) runs in shadow mode (ADR 0073, issue #6797): the native Strategy
+  # stays authoritative while the Box replays each Pass log through the
+  # module and records divergences. Only the Harness's own `driver` gets its
+  # shadow row, so another Driver's image never bakes the wasm. Set by
+  # lib/flakeModule.nix from `spindrift.connectors.<name>.shadow`.
+  shadowDrivers ? [ ],
   # Set by lib/flakeModule.nix when more than one Driver is declared (ADR 0064,
   # issue #5053): the wrapper then layers harness.<driver>.env over harness.env.
   multiDriver ? false,
@@ -490,15 +497,36 @@ let
   checkedRows = lib.mapAttrs checkConnectorRow driverRows;
   # Forced whole, so every row is checked whichever Driver the Harness selects.
   connectorEntries = builtins.deepSeq checkedRows checkedRows;
+  # A shadow replays through the row's module and compares against the native
+  # Strategy of the same name, so it needs both a core Driver and a module.
+  checkShadow =
+    name:
+    if !(connectorEntries ? ${name}) then
+      throw "mkHarness: shadowDrivers names '${name}' but driverRows has no such Connector row"
+    else if !(driverRegistry.entries ? ${name}) then
+      throw "mkHarness: shadowDrivers names '${name}', which is outside the core registry and has no native Strategy to compare against"
+    else if !(connectorEntries.${name} ? module) then
+      throw "mkHarness: shadowDrivers names '${name}' but its Connector row carries no `module`"
+    else
+      name;
+  checkedShadows = map checkShadow shadowDrivers;
+  # Forced whole, like checkedRows, whichever Driver the Harness selects.
+  shadowNames = builtins.deepSeq checkedShadows checkedShadows;
+  shadowActive = lib.elem driver shadowNames;
   driverEntries = driverRegistry.entries // connectorEntries;
   outsideRows = removeAttrs connectorEntries (lib.attrNames driverRegistry.entries);
   # The rows the launcher input document and the Box's rows file carry: the
   # Descriptor facts plus the wasm path. `p` supplies the module's pkgs, the
-  # host's for the document and the Box's own for the image.
-  docDriverRows =
+  # host's for the document and the Box's own for the image. The document
+  # carries outside rows only: the host never runs a shadow, and on a macOS
+  # host the wasm is not built.
+  rowOf = p: r: driverRegistry.descriptorFacts r // { module = r.module p; };
+  docDriverRows = p: lib.mapAttrsToList (_: rowOf p) outsideRows;
+  boxDriverRows =
     p:
-    lib.mapAttrsToList (_: r: driverRegistry.descriptorFacts r // { module = r.module p; }) outsideRows;
-  driverRowsFile = pkgs.writeText "driver-rows.json" (builtins.toJSON (docDriverRows pkgs));
+    docDriverRows p
+    ++ lib.optional shadowActive (rowOf p connectorEntries.${driver} // { shadow = true; });
+  driverRowsFile = pkgs.writeText "driver-rows.json" (builtins.toJSON (boxDriverRows pkgs));
   driverEntry =
     driverEntries.${driver}
       or (throw "mkHarness: unknown driver '${driver}'; known drivers: ${lib.concatStringsSep ", " (lib.attrNames driverEntries)}");
@@ -791,11 +819,13 @@ let
   # shared between the image preamble and the bats harness file (issue #433)
   # so neither can drift from the other.
   # DRIVER_ROWS_FILE is appended here, not rendered by the registry, because
-  # only a Connector's outside rows have a rows file; its string context pulls
-  # the file and the wasm into the image closure.
+  # only a Connector's outside or shadow rows have a rows file; its string context
+  # pulls the file and the wasm into the image closure.
   driverPreamble =
     driverRegistry.renderPreamble driverEntry
-    + lib.optionalString (outsideRows != { }) "DRIVER_ROWS_FILE=${lib.escapeShellArg driverRowsFile}\n";
+    + lib.optionalString (
+      outsideRows != { } || shadowActive
+    ) "DRIVER_ROWS_FILE=${lib.escapeShellArg driverRowsFile}\n";
 
   # The baked /agent/* path literals and their fallback-preserving preamble
   # (issue #2531). lib/image.nix's agentFiles copy destinations read the same

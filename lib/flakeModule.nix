@@ -48,6 +48,8 @@ let
   connectorDriverRows = lib.mapAttrs (_: r: r.driver) (
     lib.filterAttrs (_: r: r.driver != null) config.spindrift.connectors
   );
+  # Connectors whose row asks for shadow mode (ADR 0073, issue #6797).
+  shadowConnectors = lib.attrNames (lib.filterAttrs (_: r: r.shadow) config.spindrift.connectors);
 
   sectionKnobs = lib.foldl' (
     acc: knobName:
@@ -428,6 +430,20 @@ in
                     Driver.
                   '';
                 };
+                shadow = mkOption {
+                  type = types.bool;
+                  default = false;
+                  description = ''
+                    Run this Connector in shadow mode: the native Strategy of
+                    the same name stays authoritative, and the Box replays each
+                    Pass log through the row's Driver `module`, recording any
+                    divergence from the native decode. Needs `driver` to name
+                    a core Driver and carry a `module`; mkHarness throws
+                    otherwise. Only the Harness running that Driver bakes the
+                    module. Off by default, which leaves the Consumer's
+                    outputs byte-identical.
+                  '';
+                };
               };
             }
           );
@@ -574,6 +590,7 @@ in
       }
       // structuralArgs
       // lib.optionalAttrs (connectorDriverRows != { }) { driverRows = connectorDriverRows; }
+      // lib.optionalAttrs (shadowConnectors != [ ]) { shadowDrivers = shadowConnectors; }
       // lib.optionalAttrs (byNameModels != null) { byName = byNameModels; }
       // lib.optionalAttrs (runDefaults != { }) { defaults = runDefaults; };
       # A set removed knob (lib/removed-knobs.nix), by its flake path or its
