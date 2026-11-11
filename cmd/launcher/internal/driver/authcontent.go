@@ -19,12 +19,12 @@ const oauthEntryType = "oauth"
 // the Box: that is safe only for a Provider whose refresh token never rotates.
 type AuthContent struct {
 	// Env is the env var holding the auth store.
-	Env string
+	Env string `json:"env"`
 	// OAuthProviders are the Provider ids allowed an OAuth entry.
-	OAuthProviders []string
+	OAuthProviders []string `json:"oauthProviders"`
 	// APIKeyProviderFor maps an OAuth Provider id to the differently named
 	// Provider its API key is under, so a rejection can name the variable.
-	APIKeyProviderFor map[string]string
+	APIKeyProviderFor map[string]string `json:"apiKeyProviders,omitempty"`
 }
 
 // AuthContentFor returns the named Driver's auth-store constraint from its

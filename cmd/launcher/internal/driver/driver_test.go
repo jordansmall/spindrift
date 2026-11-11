@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
 // TestNewUnknownDriverErrors verifies that an unrecognized DRIVER value is
@@ -158,5 +160,34 @@ func TestCredentialRulesEmptyNameIsClaude(t *testing.T) {
 func TestCredentialRulesUnknownDriver(t *testing.T) {
 	if rules, ok := CredentialRules("nope"); ok || rules != nil {
 		t.Errorf("CredentialRules(nope) = %v, %v; want nil, false", rules, ok)
+	}
+}
+
+func TestRegisterPanicsOnLazyDuplicate(t *testing.T) {
+	t.Cleanup(Snapshot())
+	RegisterConnector("lazydup", nil)
+	defer func() {
+		if recover() == nil {
+			t.Error("Register of a lazily registered name did not panic")
+		}
+	}()
+	Register(driverkit.Strategy{Name: "lazydup"})
+}
+
+func TestSnapshotRestoresRegistryAndDescriptors(t *testing.T) {
+	restore := Snapshot()
+	Register(driverkit.Strategy{Name: "snapshotted"})
+	RegisterConnector("snapshotlazy", nil)
+	UseDescriptor(Descriptor{Name: "claude", ProviderNamespacedModels: true})
+	UseDescriptor(Descriptor{Name: "snapshotadded"})
+	restore()
+	if Has("snapshotted") || Has("snapshotlazy") {
+		t.Error("restore left a registered Driver")
+	}
+	if ProviderNamespacedModels("claude") {
+		t.Error("restore left the replaced claude Descriptor")
+	}
+	if _, ok := descriptor("snapshotadded"); ok {
+		t.Error("restore left an added Descriptor")
 	}
 }
