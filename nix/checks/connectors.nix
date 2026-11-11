@@ -26,6 +26,12 @@ let
     fixtureConnector.flakeModule
   ];
   withNone = fixtures.connectorConsumerVia [ coreModule ];
+  claudeConnector = (import ../../connectors/claude).lib.connector { inherit core; };
+  withClaude = fixtures.connectorConsumerVia [
+    coreModule
+    claudeConnector.flakeModule
+  ];
+  drivers = import ../../lib/drivers { inherit (pkgs) lib; };
   withTemplate = fixtures.connectorConsumerVia [
     coreModule
     template.flakeModules.default
@@ -104,6 +110,21 @@ in
       ((configOf withTemplate).connectors.fixture or { }).knobs or null == fixtureKnob
     ) "the copyable flake.nix template's flakeModules.default must register the same fixture row";
     pkgs.runCommand "connectors-fixture-row-registered" { } "touch $out";
+
+  # Issue #6796: the claude Connector contributes claude's row, so the
+  # Descriptor facts and the in-box preamble it renders match core's.
+  connectors-claude-contributes-driver-row =
+    let
+      row = (configOf withClaude).connectors.claude.driver or null;
+    in
+    assert assertMsg (row != null) "the claude Connector must contribute a Driver row";
+    assert assertMsg (
+      drivers.descriptorFacts row == drivers.descriptorFacts drivers.entries.claude
+    ) "the claude Connector's row must carry core's claude Descriptor facts";
+    assert assertMsg (
+      drivers.renderPreamble row == drivers.renderPreamble drivers.entries.claude
+    ) "the claude Connector's row must render core's claude preamble";
+    pkgs.runCommand "connectors-claude-contributes-driver-row" { } "touch $out";
 
   connectors-fixture-knob-in-env-schema =
     assert assertMsg (

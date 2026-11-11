@@ -7,6 +7,10 @@
   # through `core`, never a relative path out of its own directory.
   lib.sdkSrc = ../sdk;
 
+  # The core Driver rows (ADR 0073): a Connector contributes its Driver's row
+  # through `core`, never a relative path out of its own directory.
+  lib.driverEntries = { lib }: (import ../lib/drivers { inherit lib; }).entries;
+
   # Roster helpers (issue #2560). normalizeRosterResult stays internal
   # test-support machinery, so it is deliberately not exported here.
   lib.rosterLib =
