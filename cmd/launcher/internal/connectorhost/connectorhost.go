@@ -3,12 +3,14 @@
 package connectorhost
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -34,6 +36,11 @@ var (
 	// signature, no memory export, malformed handshake JSON or a context
 	// deadline that passed.
 	ErrHandshake = errors.New("connector handshake failed")
+	// ErrCall marks a failed connector_call: the module lacks the call exports, a
+	// guest call trapped, the exchange was malformed or oversized, the Connector
+	// answered with an error, or its result failed host validation (an unknown
+	// pattern reason, a ResolveExit answer that breaks the Driver invariant).
+	ErrCall = errors.New("connector call failed")
 )
 
 // ProtocolError is a Connector protocol version outside core's window.
@@ -68,16 +75,92 @@ func canonical(p string) bool {
 	return p == "0" || (p != "" && p[0] != '0' && strings.Trim(p, "0123456789") == "")
 }
 
+// maxResponse caps a call response so a misbehaving Connector cannot make the
+// host copy out arbitrary amounts of guest memory.
+const maxResponse = 64 << 20
+
 // Connector is a loaded Connector that completed the handshake.
 type Connector struct {
 	ProtocolVersion string
 	Capabilities    []string
 
-	rt wazero.Runtime
+	rt  wazero.Runtime
+	mem api.Memory
+	// alloc and callFn are nil when the module lacks the call exports.
+	alloc, callFn api.Function
+	// mu serializes guest calls: a wazero module instance is not safe for
+	// concurrent use.
+	mu sync.Mutex
 }
 
 // Close releases the Connector's runtime.
 func (c *Connector) Close(ctx context.Context) error { return c.rt.Close(ctx) }
+
+// call sends one request through connector_call and decodes the response's
+// result into result, which may be nil to ignore it. A Connector-reported
+// error comes back wrapping ErrCall.
+func (c *Connector) call(ctx context.Context, method string, params, result any) error {
+	fail := func(err error) error { return fmt.Errorf("%w: %s: %w", ErrCall, method, err) }
+	if c.alloc == nil || c.callFn == nil {
+		return fail(errors.New("module does not export connector_alloc and connector_call"))
+	}
+	req, err := json.Marshal(struct {
+		Method string `json:"method"`
+		Params any    `json:"params"`
+	}{method, params})
+	if err != nil {
+		return fail(err)
+	}
+	raw, err := c.exchange(ctx, req)
+	if err != nil {
+		return fail(err)
+	}
+	var resp struct {
+		Result json.RawMessage `json:"result"`
+		Error  *string         `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return fail(fmt.Errorf("malformed response: %w", err))
+	}
+	if resp.Error != nil {
+		return fail(errors.New(*resp.Error))
+	}
+	if result == nil {
+		return nil
+	}
+	if err := json.Unmarshal(resp.Result, result); err != nil {
+		return fail(fmt.Errorf("decode result: %w", err))
+	}
+	return nil
+}
+
+// exchange writes req into guest memory and returns a copy of the response;
+// the guest may reuse its buffer on the next call.
+func (c *Connector) exchange(ctx context.Context, req []byte) ([]byte, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	res, err := c.alloc.Call(ctx, uint64(len(req)))
+	if err != nil {
+		return nil, err
+	}
+	ptr := uint32(res[0])
+	if !c.mem.Write(ptr, req) {
+		return nil, errors.New("connector_alloc points outside module memory")
+	}
+	res, err = c.callFn.Call(ctx, uint64(ptr), uint64(len(req)))
+	if err != nil {
+		return nil, err
+	}
+	rptr, n := uint32(res[0]>>32), uint32(res[0])
+	if n > maxResponse {
+		return nil, fmt.Errorf("response of %d bytes exceeds the %d byte limit", n, maxResponse)
+	}
+	raw, ok := c.mem.Read(rptr, n)
+	if !ok {
+		return nil, errors.New("response points outside module memory")
+	}
+	return bytes.Clone(raw), nil
+}
 
 type handshake struct {
 	ProtocolVersion string   `json:"protocolVersion"`
@@ -95,19 +178,21 @@ func Load(ctx context.Context, wasm []byte) (*Connector, error) {
 	// The interpreter, not wazero's compiler: whether the compiler earns its
 	// complexity is decided later from measured per-line cost.
 	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfigInterpreter().WithCloseOnContextDone(true))
-	h, err := handshakeOf(ctx, rt, wasm)
+	c, err := instantiate(ctx, rt, wasm)
 	if err == nil {
-		err = CheckProtocol(h.ProtocolVersion)
+		err = CheckProtocol(c.ProtocolVersion)
 	}
 	if err != nil {
 		_ = rt.Close(ctx)
 		return nil, err
 	}
-	return &Connector{ProtocolVersion: h.ProtocolVersion, Capabilities: h.Capabilities, rt: rt}, nil
+	return c, nil
 }
 
-func handshakeOf(ctx context.Context, rt wazero.Runtime, wasm []byte) (*handshake, error) {
-	fail := func(err error) (*handshake, error) { return nil, fmt.Errorf("%w: %w", ErrHandshake, err) }
+// instantiate runs the module's start function and handshake and returns the
+// Connector holding its module state.
+func instantiate(ctx context.Context, rt wazero.Runtime, wasm []byte) (*Connector, error) {
+	fail := func(err error) (*Connector, error) { return nil, fmt.Errorf("%w: %w", ErrHandshake, err) }
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
 		return fail(err)
 	}
@@ -146,5 +231,12 @@ func handshakeOf(ctx context.Context, rt wazero.Runtime, wasm []byte) (*handshak
 	if err := json.Unmarshal(raw, &h); err != nil {
 		return fail(err)
 	}
-	return &h, nil
+	return &Connector{
+		ProtocolVersion: h.ProtocolVersion,
+		Capabilities:    h.Capabilities,
+		rt:              rt,
+		mem:             mem,
+		alloc:           mod.ExportedFunction("connector_alloc"),
+		callFn:          mod.ExportedFunction("connector_call"),
+	}, nil
 }
