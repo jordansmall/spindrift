@@ -717,6 +717,24 @@ let
     export GOFLAGS=
     cd src
   '';
+  # sdk/ is a standalone, dependency-free module, so GOFLAGS=-mod=vendor
+  # (goCheckEnv) would fail on it. The parity test reads driverkit's source at
+  # ../../cmd/launcher/internal/driver/driverkit, so the source tree holds both
+  # at their repo-relative layout.
+  sdkSrc = fs.toSource {
+    root = ../..;
+    fileset = fs.unions [
+      ../../sdk
+      ../../cmd/launcher/internal/driver/driverkit
+    ];
+  };
+  sdkPrologue = ''
+    cp -r ${sdkSrc} src
+    chmod -R +w src
+    ${goCheckEnv}
+    export GOFLAGS=
+    cd src/sdk
+  '';
 in
 driverGoTests
 // backendGoTests
@@ -845,6 +863,32 @@ driverGoTests
       }
       ''
         ${dashboardPrologue}
+        go test ./...
+        touch $out
+      '';
+
+  sdk-go-fmt = pkgs.runCommand "sdk-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
+    ${gofmtCheck ../../sdk}
+    touch $out
+  '';
+
+  sdk-go-vet = pkgs.runCommand "sdk-go-vet" { nativeBuildInputs = [ pkgs.go ]; } ''
+    ${sdkPrologue}
+    go vet ./...
+    GOOS=wasip1 GOARCH=wasm go vet ./...
+    touch $out
+  '';
+
+  sdk-go-test =
+    pkgs.runCommand "sdk-go-test"
+      {
+        nativeBuildInputs = [
+          pkgs.go
+          pkgs.git
+        ];
+      }
+      ''
+        ${sdkPrologue}
         go test ./...
         touch $out
       '';
