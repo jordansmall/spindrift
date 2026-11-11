@@ -1,0 +1,4 @@
+go test fuzz v1
+[]byte("{\"result\":[{\"Kind\":\"text\",\"Role\":\"\",\"InSubagent\":false,\"Synthetic\":false,\"MessageID\":\"\",\"Timestamp\":0,\"Text\":\"1:4\",\"Model\":\"\",\"Effort\":\"\",\"ToolID\":\"\",\"ToolName\":\"\",\"ToolInput\":null,\"IsError\":false,\"ToolTarget\":\"\",\"ToolOutput\":\"\",\"Subagent\":\"\",\"Tokens\":{\"Input\":0,\"Output\":0,\"CacheRead\":0,\"CacheWrite5m\":0,\"CacheWrite1h\":0,\"CostUSD\":0},\"ResetAt\":null,\"SessionID\":\"\",\"DurationMs\":0,\"DurationAPIMs\":0,\"NumTurns\":0,\"Models\":null,\"ModelOutput\":null,\"NoTotals\":false,\"NoTurns\":false}]}")
+uint32(0)
+uint32(479)

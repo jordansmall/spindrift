@@ -1,0 +1,4 @@
+go test fuzz v1
+[]byte("{\"result\":{\"name\":\"x\",\"terminalPatterns\":[{\"substr\":\"s\",\"reason\":\"bogus\"}]}}")
+uint32(0)
+uint32(76)

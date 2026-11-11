@@ -26,6 +26,47 @@ type wirePattern struct {
 	Reason string `json:"reason"`
 }
 
+// The result shapes the Driver Strategy decodes from the guest.
+type (
+	describeResult struct {
+		Name              string        `json:"name"`
+		TransientPatterns []wirePattern `json:"transientPatterns"`
+		TerminalPatterns  []wirePattern `json:"terminalPatterns"`
+		WriteTool         string        `json:"writeTool"`
+		Classify          struct {
+			ChunkOversized bool `json:"chunkOversized"`
+			FirstMatch     bool `json:"firstMatch"`
+		} `json:"classify"`
+		Totals              string            `json:"totals"`
+		DefaultTopLevelRole string            `json:"defaultTopLevelRole"`
+		Result              string            `json:"result"`
+		KindOrder           []string          `json:"kindOrder"`
+		KindPlurals         map[string]string `json:"kindPlurals"`
+	}
+	resultEventResult struct {
+		Event string `json:"event"`
+	}
+	sessionFlagsResult struct {
+		Flags string `json:"flags"`
+	}
+	resolveExitResult struct {
+		ExitCode int `json:"exitCode"`
+	}
+	newDecoderResult struct {
+		Decoder uint32 `json:"decoder"`
+	}
+	toolPhaseResult struct {
+		Phase string `json:"phase"`
+	}
+	toolKindResult struct {
+		Kind string `json:"kind"`
+	}
+	modelFamilyResult struct {
+		Label string `json:"label"`
+		Rank  int    `json:"rank"`
+	}
+)
+
 // guestKinds are the kinds a guest decoder may emit. KindHostOp is core's own
 // grammar and never crosses the boundary.
 var guestKinds = []driverkit.Kind{
@@ -46,21 +87,7 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 		return driverkit.Strategy{}, fmt.Errorf("%w: capabilities %v lack \"driver\"", ErrNotDriver, c.Capabilities)
 	}
 	ctx := context.Background()
-	var d struct {
-		Name              string        `json:"name"`
-		TransientPatterns []wirePattern `json:"transientPatterns"`
-		TerminalPatterns  []wirePattern `json:"terminalPatterns"`
-		WriteTool         string        `json:"writeTool"`
-		Classify          struct {
-			ChunkOversized bool `json:"chunkOversized"`
-			FirstMatch     bool `json:"firstMatch"`
-		} `json:"classify"`
-		Totals              string            `json:"totals"`
-		DefaultTopLevelRole string            `json:"defaultTopLevelRole"`
-		Result              string            `json:"result"`
-		KindOrder           []string          `json:"kindOrder"`
-		KindPlurals         map[string]string `json:"kindPlurals"`
-	}
+	var d describeResult
 	if err := c.call(ctx, "driver.describe", struct{}{}, &d); err != nil {
 		return driverkit.Strategy{}, err
 	}
@@ -97,16 +124,12 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 		DefaultTopLevelRole: d.DefaultTopLevelRole,
 		Heartbeat:           driverkit.HeartbeatTracking{KindOrder: d.KindOrder, KindPlurals: d.KindPlurals},
 		ResultEvent: func(text string) ([]byte, error) {
-			var r struct {
-				Event string `json:"event"`
-			}
+			var r resultEventResult
 			err := c.call(ctx, "driver.resultEvent", map[string]any{"text": text}, &r)
 			return []byte(r.Event), err
 		},
 		SessionFlags: func(mode, repoSlug, issue, home string) string {
-			var r struct {
-				Flags string `json:"flags"`
-			}
+			var r sessionFlagsResult
 			err := c.call(ctx, "driver.sessionFlags",
 				map[string]any{"mode": mode, "repoSlug": repoSlug, "issue": issue, "home": home}, &r)
 			if err != nil {
@@ -128,9 +151,7 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 			if err != nil {
 				return exitCode, err
 			}
-			var r struct {
-				ExitCode int `json:"exitCode"`
-			}
+			var r resolveExitResult
 			if err := c.call(ctx, resolveExitMethod, resolveExitParams(log, exitCode), &r); err != nil {
 				return exitCode, err
 			}
@@ -146,9 +167,7 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 	// as its own label at the last rank.
 	if slices.Contains(c.Capabilities, "driver.toolPhase") {
 		s.Heartbeat.Phase = func(tool string, input json.RawMessage) string {
-			var r struct {
-				Phase string `json:"phase"`
-			}
+			var r toolPhaseResult
 			if c.call(ctx, "driver.toolPhase", map[string]any{"tool": tool, "input": input}, &r) != nil {
 				return ""
 			}
@@ -157,9 +176,7 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 	}
 	if slices.Contains(c.Capabilities, "driver.toolKind") {
 		s.Heartbeat.Kind = func(tool string) string {
-			var r struct {
-				Kind string `json:"kind"`
-			}
+			var r toolKindResult
 			if c.call(ctx, "driver.toolKind", map[string]any{"tool": tool}, &r) != nil {
 				return ""
 			}
@@ -168,10 +185,7 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 	}
 	if slices.Contains(c.Capabilities, "driver.modelFamily") {
 		s.Heartbeat.Family = func(model string) (string, int) {
-			var r struct {
-				Label string `json:"label"`
-				Rank  int    `json:"rank"`
-			}
+			var r modelFamilyResult
 			if c.call(ctx, "driver.modelFamily", map[string]any{"model": model}, &r) != nil {
 				return model, math.MaxInt
 			}
@@ -198,9 +212,7 @@ type decoderHandle struct{ id uint32 }
 
 func (c *Connector) newDecoder() driverkit.Decoder {
 	ctx := context.Background()
-	var r struct {
-		Decoder uint32 `json:"decoder"`
-	}
+	var r newDecoderResult
 	h := &decoderHandle{}
 	// A Decoder has no error return, so a failed guest call yields a single
 	// KindUnparsed event carrying the line: the classifier then still sees it
