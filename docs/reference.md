@@ -2386,6 +2386,108 @@ absolute paths (an absolute flake `path:/…` input included), `<nixpkgs>`
 lookups, a path after `/` or `}` (an interpolation tail or URL), paths built
 with `+`, or symlinks that point outside the Connector.
 
+#### Shadow mode
+
+A Connector can run beside the native code it will replace before it replaces
+it (ADR 0073 point 13). In shadow mode the native Strategy stays
+authoritative: the run's exit code, result text and every decision come from
+it, and the Connector's answer is only compared and recorded. The switch is
+the row option `spindrift.connectors.<name>.shadow`, set `true` as a bare
+definition by whoever owns the flake that evaluates the row (see **Module**).
+It is not an env knob, because a Connector row's knobs reach no flake option or
+Box env yet. `mkHarness` takes the shadowed names as `shadowDrivers` and
+refuses one with no `module` or no core Driver of that name. Only a Box
+running the shadowed Driver replays anything, and the Box rows file carries the
+flag to `driver-exec`. spindrift's own dogfood shadows the Connectors listed in
+`nix/dogfood-shadow.nix`, a pinned exception to mimicking a new Consumer.
+
+After each Pass, `driver-exec` replays the Pass log through the Connector and
+compares it with the native Strategy on three things:
+
+- `events`: the decoded events of each line, canonically encoded. `ResetAt` is
+  compared by presence only, since the Connector's clock is a fixed epoch and
+  never matches the native one.
+- `resolveExit`: the exit code each side resolves from the log and the native
+  exit.
+- `resultEvent`: the result text, with the native `ReadResult` as the
+  Connector's input.
+
+Records are `spindrift_op` lines on `driver-exec`'s stdout, so they land in the
+Pass log, `.spindrift/logs/issue-<n>.log`, with the other host ops, and CI
+uploads that directory as an artifact (see the `dispatch_start` stamp under
+[Stats](#stats)).
+
+**`shadow_divergence`**, one per mismatch, under `shadow_divergence`: `driver`,
+`check` (`events`, `resolveExit` or `resultEvent`), `line_no` and `line` (the
+Pass log line for `events`; for `resultEvent`, the result text, with `line_no`
+absent on both `resolveExit` and `resultEvent`),
+and `native` and `shadow`, each side's
+result, JSON-encoded. A Pass records at most 100 divergences, and each side is
+clipped to 8 KiB; the summary's `diverged` still counts every mismatch.
+
+**`shadow_summary`**, one per Pass, under `shadow_summary`: `driver`, `loaded`,
+`error`, `compared` (lines compared), `diverged`, `recorded` (divergence ops
+emitted), and `native_ns_per_line` and `shadow_ns_per_line`, the mean cost of
+decoding one line on each side. A run spans several Passes, so its totals are
+the sum over the summaries in its Pass logs. The Connector runs on wazero's
+interpreter, as in production; ADR 0073's interpreter-unless-measured
+decision means these cost fields are the measurement that decides whether a
+Connector needs the compiler.
+
+Shadow mode never fails a run. A Connector that cannot be loaded gives a
+summary with `loaded: false` and an `error`. One that fails closed mid-run
+(a trap, a budget overrun, a response that does not decode) or panics gives a
+summary with `loaded: true`, the `error`, and the counts up to that point.
+A Connector that answers with malformed events, or events a Connector may
+not emit, does not fail closed: the line decodes as an unparsed event, which
+counts as a divergence against the native decode.
+The replay as a whole, load included, is capped at 2 minutes per Pass: a run
+that hits the cap is aborted mid-call and gives a summary with that `error`
+and the counts up to that point, so a slow Connector cannot delay the Pass's
+exit code by more than 2 minutes. None of these runs is clean.
+
+A run is **clean** when its Pass logs hold one `shadow_summary` for the shadowed
+Driver per `pass_start` op, and every summary has `loaded: true`, no `error`,
+`compared` above zero and `diverged` zero. A Pass that never emitted a summary,
+such as one whose replay hit an early error, therefore makes the run not clean,
+as does a run where the shadow never ran. `pass_start` does not name its
+Driver, but a Box runs one Driver and its log's `dispatch_start` stamp does, so
+the recipe skips a log whose stamp names another Driver (dogfood also runs
+opencode). Each shadow cuts over after 20 consecutive clean dogfood runs. The
+recipe counts them from the newest log back, with `logs` the directory of Pass
+logs (`.spindrift/logs`, or a directory of artifacts fetched with `gh run
+download <run-id> -n agent-logs-<issue> -D logs`). It orders logs by the
+`started` time in each log's `dispatch_start` stamp, not by file time, which
+`gh run download` resets:
+
+```sh
+logs=.spindrift/logs
+driver=claude
+for f in "$logs"/issue-*.log; do
+  [ -e "$f" ] || continue
+  jq -Rrs --arg driver "$driver" '
+    [split("\n")[] | fromjson? | objects | select(.type == "spindrift_op") | .spindrift_op] as $ops
+    | ([$ops[] | select(.op == "dispatch_start") | .dispatch_start][0] // {}) as $start
+    | [$ops[] | select(.op == "shadow_summary") | .shadow_summary | select(.driver == $driver)] as $sums
+    | ([$ops[] | select(.op == "pass_start")] | length) as $passes
+    | (if $passes == 0 or ($start.driver // $driver) != $driver then "skip"
+       elif ($sums | length) == $passes
+         and all($sums[]; .loaded and (.error // "") == "" and .compared > 0 and .diverged == 0)
+       then "clean" else "dirty" end) as $verdict
+    | "\($start.started // "")\t\($verdict)"' "$f"
+done | sort -r | awk -F'\t' '
+  $2 == "skip" { next }
+  $2 != "clean" { exit }
+  { n++ }
+  END { print n + 0, "consecutive clean runs (cut-over bar: 20)" }'
+```
+
+Pass logs mix Driver JSON with host ops and may hold lines that are not JSON;
+`fromjson?` drops those. A log with no `pass_start` op, such as one a Box
+never reached, ran no Pass and is skipped rather than counted or treated as a
+break. A log of the shadowed Driver with Passes and a missing summary breaks the
+count.
+
 ### Connector protocol
 
 The protocol, not the SDK, is the contract between core and a Connector
