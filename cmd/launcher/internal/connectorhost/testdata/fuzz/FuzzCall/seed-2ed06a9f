@@ -1,0 +1,4 @@
+go test fuzz v1
+[]byte("{\"result\":{\"event\":\"result done\\n\"}}")
+uint32(0)
+uint32(36)

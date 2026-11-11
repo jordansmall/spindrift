@@ -1,0 +1,4 @@
+go test fuzz v1
+[]byte("{\"result\":{\"name\":\"fixture\",\"transientPatterns\":[{\"substr\":\"slow down\",\"reason\":\"rateLimit\"}],\"terminalPatterns\":[{\"substr\":\"bad flag\",\"reason\":\"unsupportedFlag\"}],\"writeTool\":\"Put\"}}")
+uint32(0)
+uint32(183)

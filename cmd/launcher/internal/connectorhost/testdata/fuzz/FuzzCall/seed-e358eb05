@@ -1,0 +1,4 @@
+go test fuzz v1
+[]byte("{\"error\":\"unknown method \\\"nope\\\"\"}")
+uint32(0)
+uint32(35)

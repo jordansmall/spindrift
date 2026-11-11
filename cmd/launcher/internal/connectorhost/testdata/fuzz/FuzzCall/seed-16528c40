@@ -1,0 +1,4 @@
+go test fuzz v1
+[]byte("{\"result\":{\"exitCode\":0}}")
+uint32(0)
+uint32(25)

@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"protocolVersion\":\"0.2.0\",\"capabilities\":[\"fixture.alpha\",\"fixture.beta\"]}")

@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"protocolVersion\":\"0.1.0\",\"capabilities\":[\"probe\",\"rand:dfd79b4d76429b61\"]}")
