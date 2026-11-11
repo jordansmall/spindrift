@@ -148,6 +148,7 @@ let
     "dispatchkind"
     "driver/corpus"
     "driver/driverkit"
+    "driver/shadow"
     "golden"
     "hostop"
     "landdelta"
