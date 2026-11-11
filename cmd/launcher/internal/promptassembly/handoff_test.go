@@ -23,6 +23,7 @@ func TestLoadHandoffFileRoundTrip(t *testing.T) {
 		Effort:           "high",
 		Driver:           "claude",
 		DriverBin:        "/usr/bin/claude",
+		DriverRowsFile:   "/nix/store/x-rows.json",
 		DriverFlags:      "--flag-x",
 		Devshell:         true,
 		DevshellName:     "default",

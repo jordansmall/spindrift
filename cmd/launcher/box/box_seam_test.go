@@ -229,7 +229,7 @@ func seamBoxArgs(t *testing.T, workDir, outboxDir, skillsDir string) []string {
 		"--argv-prompt-style=flag", "--argv-prompt-flag=-p", "--argv-model-flag=--model",
 		"--argv-model-omit-empty=0", "--argv-agents-flag=--agents", "--argv-effort-flag=--effort",
 		"--argv-order=prompt model agents session driverFlags effort",
-		"--model=", "--effort=", "--driver=claude", "--driver-bin=claude", "--driver-flags=",
+		"--model=", "--effort=", "--driver=claude", "--driver-bin=claude", "--driver-flags=", "--driver-rows-file=",
 		"--heartbeat-log=", "--max-budget-tokens=0", "--max-budget-usd=0",
 		"--driver-session-cache-dir=", "--driver-env-files=", "--branch-prefix=agent/issue-",
 		"--driver-bash-timeout-ms=", "--driver-bash-timeout-env=",
