@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/hostop"
 )
 
 // This test pins the "can't read" contract appendHeartbeat and appendActivity
@@ -62,7 +63,7 @@ func TestTailer_ReadAppended_AdvancesOffsetByBytesRead(t *testing.T) {
 func TestTailer_ReadAppended_ShowsHostOpLines(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "issue-9.log")
-	log := `{"Kind":"host_op","HostOp":{"op":"pass_start","pass":1,"role":"implement"}}` + "\n"
+	log := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpPassStart, Pass: 1, Role: "implement"})
 	if err := os.WriteFile(path, []byte(log), 0o644); err != nil {
 		t.Fatal(err)
 	}

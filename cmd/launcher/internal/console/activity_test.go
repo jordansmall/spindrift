@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/hostop"
 )
 
 // ActivityFeed replays the Dispatch's most-recent pass log through drv's
@@ -446,7 +447,7 @@ func TestActivityFeed_ShowsHostOpLines(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	log := `{"Kind":"host_op","HostOp":{"op":"pass_start","pass":1,"role":"implement"}}` + "\n"
+	log := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpPassStart, Pass: 1, Role: "implement"})
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-9.log"), []byte(log), 0o644); err != nil {
 		t.Fatal(err)
 	}

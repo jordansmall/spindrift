@@ -13,18 +13,7 @@ import (
 )
 
 func TestStrategyCorpus(t *testing.T) {
-	conformance.Run(t, Strategy, filepath.Join("testdata", "corpus"))
-}
-
-// The compiled Connector form of the same Driver must pass the same corpus
-// against the same goldens as the native Strategy.
-func TestConnectorStrategyCorpus(t *testing.T) {
-	const env = "SPINDRIFT_CONNECTOR_FIXTURES_DIR"
-	dir := os.Getenv(env)
-	if dir == "" {
-		t.Skipf("%s is unset; it names the dir holding the fixture Connector .wasm files", env)
-	}
-	conformance.RunConnector(t, filepath.Join(dir, "seamtest-driver.wasm"), filepath.Join("testdata", "corpus"))
+	conformance.Run(t, Strategy(), filepath.Join("testdata", "corpus"))
 }
 
 func TestStrategyDecodesOneEventPerKind(t *testing.T) {
@@ -42,7 +31,7 @@ func TestStrategyDecodesOneEventPerKind(t *testing.T) {
 	if len(lines) != len(kinds) {
 		t.Fatalf("fixture has %d lines, want one per kind (%d)", len(lines), len(kinds))
 	}
-	decode := Strategy.NewDecoder()
+	decode := Strategy().NewDecoder()
 	for i, line := range lines {
 		evs := decode(line)
 		if len(evs) != 1 || evs[0].Kind != kinds[i] {
@@ -58,7 +47,7 @@ func TestStrategyDecodesOneEventPerKind(t *testing.T) {
 }
 
 func TestStrategyResultEventRoundTrips(t *testing.T) {
-	d := driverkit.New(Strategy)
+	d := driverkit.New(Strategy())
 	ev, err := d.ResultEvent("STATUS: ok")
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +87,7 @@ func TestRegisterDriverInstallsStrategyWithoutBundle(t *testing.T) {
 
 func TestStrategyDecodesHostOpLine(t *testing.T) {
 	line := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpPassStart, Pass: 2, Role: "review"})
-	evs := Strategy.NewDecoder()(line)
+	evs := Strategy().NewDecoder()(line)
 	if len(evs) != 1 || evs[0].Kind != driverkit.KindHostOp || evs[0].HostOp == nil {
 		t.Fatalf("host op line decoded to %+v, want one host_op event", evs)
 	}
@@ -113,14 +102,14 @@ func TestLineRoundTripsThroughTheDecoder(t *testing.T) {
 	if !strings.HasSuffix(line, "\n") {
 		t.Fatalf("Line %q has no trailing newline", line)
 	}
-	got := Strategy.NewDecoder()(line)
+	got := Strategy().NewDecoder()(line)
 	if len(got) != 1 || got[0].Kind != want.Kind || got[0].MessageID != want.MessageID || got[0].Model != want.Model || got[0].Timestamp != want.Timestamp {
 		t.Errorf("decoded %+v, want %+v", got, want)
 	}
 }
 
 func TestRegisterStrategyKeepsAnExistingName(t *testing.T) {
-	first := Strategy
+	first := Strategy()
 	first.Name = "seam-register-strategy"
 	RegisterStrategy(first)
 	second := first

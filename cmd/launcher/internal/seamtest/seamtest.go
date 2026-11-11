@@ -17,6 +17,13 @@
 // Box-facing fields mirror work's. A new kind or runtime distinction in the
 // document earns a new case there, and TestSeamSmokeCatchesDroppedKnob keeps
 // the matrix honest by asserting a dropped document knob fails a check.
+//
+// # Fake Driver
+//
+// Strategy is core's fake Driver. Its log grammar is the canonical Event
+// itself, one JSON-encoded line each (see Line), plus the host-written
+// spindrift_op lines every Pass log carries. It proves the shared readers work
+// over the canonical grammar only, not the real claude decoder.
 package seamtest
 
 import (

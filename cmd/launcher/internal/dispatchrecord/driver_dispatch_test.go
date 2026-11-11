@@ -11,7 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/seamtest"
 )
 
-// altDriver names a second registration of the seamtest Strategy. A stamp
+// altDriver names a second registration of the seamtest Strategy(). A stamp
 // naming it proves the stamped Driver, not the default, reads the log.
 const altDriver = "seam-alt"
 

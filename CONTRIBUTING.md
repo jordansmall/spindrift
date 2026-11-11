@@ -118,6 +118,18 @@ variable, and `tests/helper.bash` reads the contracts and preambles from that
 directory, so bats and Go test one set of bytes. See [Seam
 tests](docs/reference.md#seam-tests) for the fixture list and its drift guard.
 
+Separately, core tests run against a compiled fake Driver Connector
+(`seamtest.Strategy()`, ADR 0067), so a plain `go test` with no integration tag
+in any package that uses `seamtest` also needs its `.wasm` files. They resolve
+from the directory named by `SPINDRIFT_CONNECTOR_FIXTURES_DIR`, falling back to
+`nix build .#connector-wasm-fixtures`. Unlike the seam-fixtures tests, these do
+not skip when neither works: they panic, since no core test may skip the seam.
+
+```sh
+SPINDRIFT_CONNECTOR_FIXTURES_DIR=$(nix build --no-link --print-out-paths ../..#connector-wasm-fixtures) \
+  go test ./...
+```
+
 The `piseam` package (issue #5478) runs the locked `pi` binary against a stub
 OpenAI-compatible Provider. It takes `pi` from `SPINDRIFT_PI_BIN`, else builds
 `nixpkgs#pi-coding-agent` from the flake's locked inputs, and skips when

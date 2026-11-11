@@ -1,53 +1,80 @@
 package seamtest
 
 import (
+	"context"
 	"encoding/json"
-	"strings"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
-	"spindrift.dev/launcher/internal/hostop"
+)
+
+const (
+	// connectorEnvVar names the dir holding the fixture Connector .wasm files.
+	connectorEnvVar = "SPINDRIFT_CONNECTOR_FIXTURES_DIR"
+	// connectorFlakeAttr is the flake package that builds that dir.
+	connectorFlakeAttr = "connector-wasm-fixtures"
 )
 
 // fakeDriverName is the name the fake CLI is invoked under, so the Strategy
 // must be registered under it for the launcher to find a Driver for it.
 const fakeDriverName = "claude"
 
-// Strategy declares a Driver whose log grammar is the canonical Event itself:
-// one JSON-encoded driverkit.Event per line, plus the host-written spindrift_op
-// lines every Pass log carries. It proves the shared readers work over the
-// canonical grammar only, not the real claude decoder, and is read-only by
-// convention like every Strategy.
-var Strategy = driverkit.Strategy{
-	Name:         fakeDriverName,
-	NewDecoder:   newDecoder,
-	Totals:       driverkit.PerCallTotals,
-	WriteTool:    "Write",
-	Result:       driverkit.ResultEvents,
-	ResultEvent:  resultEvent,
-	SessionFlags: func(mode, repoSlug, issue, home string) string { return "" },
+// Strategy is the fake Driver: the compiled Connector seamtest-driver.wasm
+// loaded through connectorhost, so every core test crosses the real Connector
+// seam (see the package doc's Fake Driver section for its log grammar).
+//
+// The Connector loads once per test binary and is never closed: compiling the
+// module is the expensive part. Each call returns a copy of the Strategy, so a
+// caller may override host-only fields (Totals, Heartbeat, ...) without
+// affecting others; every copy still shares the one loaded Connector, its
+// mutex and funcs. It panics when the Connector cannot be loaded, because a
+// TestMain caller has no testing.TB and no core test may skip the seam (ADR
+// 0067).
+func Strategy() driverkit.Strategy {
+	s, err := loadStrategy()
+	if err != nil {
+		panic(fmt.Sprintf("seamtest: fake Driver Connector: %v", err))
+	}
+	return s
 }
 
-func newDecoder() driverkit.Decoder {
-	return func(line string) []driverkit.Event {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			return nil
+var loadStrategy = sync.OnceValues(func() (driverkit.Strategy, error) {
+	dir := os.Getenv(connectorEnvVar)
+	if dir == "" {
+		built, skip, err := ResolveBuild(connectorEnvVar, "a directory of fixture Connector .wasm files", func(root string) []string {
+			return []string{root + "#" + connectorFlakeAttr}
+		})
+		if skip != "" {
+			return driverkit.Strategy{}, errors.New(skip)
 		}
-		var op hostop.Event
-		if json.Unmarshal([]byte(line), &op) == nil && op.Type == hostop.TypeSpindriftOp && op.SpindriftOp != nil {
-			return []driverkit.Event{{Kind: driverkit.KindHostOp, HostOp: op.SpindriftOp}}
+		if err != nil {
+			return driverkit.Strategy{}, err
 		}
-		var ev driverkit.Event
-		if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Kind == "" {
-			return []driverkit.Event{{Kind: driverkit.KindUnparsed, Text: line}}
-		}
-		return []driverkit.Event{ev}
+		dir = built
 	}
-}
+	wasm, err := os.ReadFile(filepath.Join(dir, "seamtest-driver.wasm"))
+	if err != nil {
+		return driverkit.Strategy{}, err
+	}
+	// Per-user, not os.TempDir: another user must not plant native code here.
+	cacheDir, err := os.UserCacheDir()
+	if err == nil {
+		cacheDir = filepath.Join(cacheDir, "spindrift", "wazero")
+	}
+	c, err := connectorhost.LoadCompiled(context.Background(), wasm, cacheDir)
+	if err != nil {
+		return driverkit.Strategy{}, err
+	}
+	return c.DriverStrategy()
+})
 
 // Line is ev as the Strategy's log line: one JSON-encoded Event and a newline.
 func Line(ev driverkit.Event) string {
@@ -68,34 +95,34 @@ func Millis(rfc3339 string) int64 {
 	return t.UnixMilli()
 }
 
-func resultEvent(text string) ([]byte, error) {
-	b, err := json.Marshal(driverkit.Event{Kind: driverkit.KindResult, Text: text})
-	if err != nil {
-		return nil, err
-	}
-	return append(b, '\n'), nil
-}
-
 var registerMu sync.Mutex
 
-// RegisterDriver installs Strategy as the "claude" Driver when none is
+// registerIfAbsent registers the Strategy build returns under name unless a
+// Driver of that name is registered. build runs only then, so a linked bundle
+// never loads the Connector. The registry panics on a duplicate name and is not
+// synchronized: registerMu orders concurrent registrations only, so callers
+// register before any parallel test reads the registry.
+func registerIfAbsent(name string, build func() driverkit.Strategy) {
+	registerMu.Lock()
+	defer registerMu.Unlock()
+	if _, err := driver.New(name); err == nil {
+		return
+	}
+	driver.Register(build())
+}
+
+// RegisterDriver installs Strategy() as the "claude" Driver when none is
 // registered, and does nothing when one is (a test binary that links the
-// bundle keeps the real Driver). The registry panics on a duplicate name and
-// is not synchronized: the lock only orders concurrent RegisterDriver calls,
-// so call it before any parallel test reads the registry.
+// bundle keeps the real Driver). Call it before any parallel test reads the
+// registry.
 func RegisterDriver(tb testing.TB) {
 	tb.Helper()
-	RegisterStrategy(Strategy)
+	registerIfAbsent(fakeDriverName, Strategy)
 }
 
 // RegisterStrategy installs s under its own Name when no Driver of that name
 // is registered, and does nothing when one is. It takes no testing.TB so a
 // TestMain can call it; the same ordering caveat as RegisterDriver applies.
 func RegisterStrategy(s driverkit.Strategy) {
-	registerMu.Lock()
-	defer registerMu.Unlock()
-	if _, err := driver.New(s.Name); err == nil {
-		return
-	}
-	driver.Register(s)
+	registerIfAbsent(s.Name, func() driverkit.Strategy { return s })
 }

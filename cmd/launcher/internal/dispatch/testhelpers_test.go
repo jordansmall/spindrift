@@ -67,7 +67,7 @@ func writeOutcomeOnFinalCall(fr *runner.Fake, errs []error, line []byte) {
 // the canonical grammar leaves out: tool calls tally on the heartbeat under
 // their lowercased name, and the top-level role defaults to implement.
 var testStrategy = func() driverkit.Strategy {
-	s := seamtest.Strategy
+	s := seamtest.Strategy()
 	s.Heartbeat = driverkit.HeartbeatTracking{Kind: strings.ToLower}
 	s.DefaultTopLevelRole = driverkit.ImplementorRole
 	return s

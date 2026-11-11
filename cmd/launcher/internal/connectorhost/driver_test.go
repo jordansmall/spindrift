@@ -1,19 +1,20 @@
 package connectorhost_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sync"
 	"testing"
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
-	"spindrift.dev/launcher/internal/seamtest"
 )
 
 func strategy(t *testing.T, name string) driverkit.Strategy {
@@ -170,61 +171,6 @@ func TestDriverConcurrentDecoders(t *testing.T) {
 	wg.Wait()
 }
 
-// seamtest-driver.wasm is seamtest.Strategy compiled as a Connector: both must
-// decode every line alike.
-func TestSeamtestDriverMatchesNativeStrategy(t *testing.T) {
-	guest := strategy(t, "seamtest-driver.wasm")
-	native := seamtest.Strategy
-	if guest.Name != native.Name || guest.WriteTool != native.WriteTool {
-		t.Errorf("guest Name, WriteTool = %q, %q, want %q, %q", guest.Name, guest.WriteTool, native.Name, native.WriteTool)
-	}
-	if guest.ResolveExit != nil {
-		t.Error("guest ResolveExit is set, but the native Strategy has none")
-	}
-	lines := []string{
-		"",
-		"  \n",
-		"stderr noise\n",
-		`{"Kind":"text","Text":"hi","MessageID":"m1","Timestamp":5}` + "\n",
-		`{"Kind":"tool_call","ToolName":"Write","ToolInput":{"file_path":"a"}}` + "\n",
-		`{"Kind":"usage","Tokens":{"Input":1,"Output":2}}` + "\n",
-		`{"Text":"no kind"}` + "\n",
-		hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
-	}
-	g, n := guest.NewDecoder(), native.NewDecoder()
-	// An absent ToolInput is nil from a native decoder's own events but the
-	// bytes "null" over the wire; both mean absent.
-	absent := func(evs []driverkit.Event) []driverkit.Event {
-		for i := range evs {
-			if string(evs[i].ToolInput) == "null" {
-				evs[i].ToolInput = nil
-			}
-		}
-		return evs
-	}
-	for _, l := range lines {
-		if got, want := absent(g(l)), absent(n(l)); !reflect.DeepEqual(got, want) {
-			t.Errorf("decode(%q) = %+v, want %+v", l, got, want)
-		}
-	}
-	// The one deliberate divergence: a guest may not emit host_op, so the
-	// canonical event line decodes natively to KindHostOp but to Unparsed here.
-	const forged = `{"Kind":"host_op","HostOp":{"op":"pass_start","pass":1}}`
-	if evs := native.NewDecoder()(forged); len(evs) != 1 || evs[0].Kind != driverkit.KindHostOp {
-		t.Fatalf("native decode(host_op) = %+v, want one host_op event", evs)
-	}
-	want := []driverkit.Event{{Kind: driverkit.KindUnparsed, Text: forged}}
-	if got := guest.NewDecoder()(forged); !reflect.DeepEqual(got, want) {
-		t.Errorf("guest decode(host_op) = %+v, want %+v", got, want)
-	}
-	gb, _ := guest.ResultEvent("done")
-	nb, _ := native.ResultEvent("done")
-	// Bytes differ only by the native Event's HostOp:null field, which the SDK copy omits.
-	if !reflect.DeepEqual(native.NewDecoder()(string(nb)), guest.NewDecoder()(string(gb))) {
-		t.Errorf("ResultEvent = %q, want %q", gb, nb)
-	}
-}
-
 func TestDriverStrategyRefusesUnknownPatternReason(t *testing.T) {
 	for _, field := range []string{"transientPatterns", "terminalPatterns"} {
 		t.Run(field, func(t *testing.T) {
@@ -295,5 +241,30 @@ func TestDriverResolveExitRefusesZeroForFailure(t *testing.T) {
 	}
 	if got, err := s.ResolveExit(log, 0); got != 0 || err != nil {
 		t.Errorf("ResolveExit(0) = %d, %v, want 0 and no error", got, err)
+	}
+}
+
+func TestLoadCompiledDecodesLikeLoad(t *testing.T) {
+	interp := strategy(t, "driver.wasm")
+	cacheDir := t.TempDir()
+	c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
+	compiled, err := c.DriverStrategy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Off amd64 and arm64 wazero has no compiler: it interprets and caches nothing.
+	hasCompiler := runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64"
+	if ents, err := os.ReadDir(cacheDir); hasCompiler && (err != nil || len(ents) == 0) {
+		t.Errorf("compilation cache dir holds %d entries (err %v), want the compiled module", len(ents), err)
+	}
+	a, b := interp.NewDecoder(), compiled.NewDecoder()
+	for _, line := range []string{"x", "", "not json {", "y", hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1})} {
+		if got, want := b(line), a(line); !reflect.DeepEqual(got, want) {
+			t.Errorf("compiled decode(%q) = %+v, interpreted %+v", line, got, want)
+		}
 	}
 }

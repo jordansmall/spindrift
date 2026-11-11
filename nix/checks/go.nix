@@ -247,6 +247,7 @@ let
       "agentpaths"
       "backend"
       "backendkit"
+      "connectorhost"
       "dedupmarker"
       "dispatchkey"
       "dispatchkind"
