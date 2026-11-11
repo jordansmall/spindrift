@@ -232,6 +232,13 @@
                 program = "${import ./nix/gate.nix { inherit pkgs system; }}/bin/gate";
               };
 
+              # Scans the launcher module's dependencies, wazero included, against
+              # the live Go vulnerability database (issue #6792).
+              govulncheck = {
+                type = "app";
+                program = "${import ./nix/govulncheck.nix { inherit pkgs; }}/bin/govulncheck";
+              };
+
               # Builds or checks a Connector subflake with core overridden to this
               # checkout and the lock never written (issue #6769).
               connector-dev = {
