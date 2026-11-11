@@ -67,6 +67,12 @@
         # the flake-parts shim, not a direct mkHarness call.
         imports = [ core.flakeModules.default ] ++ connectorModules;
 
+        # Pinned dogfood exception: shadow the Connectors listed in
+        # nix/dogfood-shadow.nix (the native Strategy stays authoritative).
+        spindrift.connectors = nixpkgs.lib.genAttrs (import ./nix/dogfood-shadow.nix) (_: {
+          shadow = true;
+        });
+
         flake = { inherit (core) lib flakeModules; };
 
         # The dogfood above consumes this same templates/default toolchain and

@@ -18,6 +18,8 @@ let
 
   rosterLib = import ../lib/roster.nix { inherit (pkgs) lib; };
 
+  dogfoodShadow = import ./dogfood-shadow.nix;
+
   # Shared with flake.nix's `spindrift` module config the same way (issue #486).
   dogfoodSkills = import ./dogfood-skills.nix {
     inherit caveman matt-skills jordan-skills;
@@ -95,6 +97,13 @@ let
     # renders the default Harness with harness.<driver>.env layering on.
     # dogfoodBwrapHarness inherits it, so `.#dogfood-bwrap` layers too.
     multiDriver = true;
+    # The Connector module's work, done by hand: flake.nix registers claude's
+    # row and shadows it (nix/dogfood-shadow.nix), so the module path hands
+    # mkHarness both.
+    driverRows.claude =
+      ((import ../connectors/claude).lib.connector { core = import ../core; }).driverRow
+        pkgs.lib;
+    shadowDrivers = dogfoodShadow;
   };
 
   # The dogfood as a direct call, mirroring the `spindrift = { ... }` module
