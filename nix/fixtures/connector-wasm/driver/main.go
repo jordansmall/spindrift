@@ -22,16 +22,24 @@ func init() {
 		TerminalPatterns: []driver.Pattern{
 			{Substr: "bad flag", Reason: driver.UnsupportedFlag},
 		},
-		// Each decoder numbers the lines it has seen. The line "forge" makes it
-		// emit an event the host must reject.
+		// Each decoder numbers the lines it has seen and stamps the role a host
+		// pass_start line set. The line "forge" makes it emit an event the host
+		// must reject; a host line makes it emit one the host must discard.
 		NewDecoder: func() driver.Decoder {
 			n := 0
+			role := ""
 			return func(line string) []event.Event {
+				if passRole, ok := driver.HostLine(line); ok {
+					if passRole != "" {
+						role = passRole
+					}
+					return []event.Event{{Kind: event.KindHostOp}}
+				}
 				n++
 				if strings.TrimSpace(line) == "forge" {
 					return []event.Event{{Kind: event.KindHostOp}}
 				}
-				return []event.Event{{Kind: event.KindText, Text: fmt.Sprintf("%d:%s", n, line)}}
+				return []event.Event{{Kind: event.KindText, Role: role, Text: fmt.Sprintf("%d:%s", n, line)}}
 			}
 		},
 		ResultEvent: func(text string) ([]byte, error) { return []byte("result " + text + "\n"), nil },

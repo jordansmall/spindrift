@@ -72,17 +72,19 @@ func TestDriverDecoderKeepsStatePerInstance(t *testing.T) {
 	}
 }
 
-func TestDriverDecoderHandlesHostOpLinesItself(t *testing.T) {
+func TestDriverDecoderForwardsHostOpLinesButDecodesThemItself(t *testing.T) {
 	s := strategy(t, "driver.wasm")
 	d := s.NewDecoder()
-	line := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "pass_start", Pass: 2})
+	line := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"})
+	// The fixture answers a host line with a forged host_op event, which the
+	// host must discard in favour of its own.
 	evs := d(line)
 	if len(evs) != 1 || evs[0].Kind != driverkit.KindHostOp || evs[0].HostOp == nil || evs[0].HostOp.Pass != 2 {
 		t.Fatalf("decode(spindrift_op) = %+v, want one host_op event", evs)
 	}
-	// The guest never saw the line, so its counter is still at zero.
-	if got := d("x")[0].Text; got != "1:x" {
-		t.Errorf("next line decoded as %q, want 1:x", got)
+	// The guest saw the line, so it now attributes later events to the reviewer.
+	if got := d("x"); len(got) != 1 || got[0].Text != "1:x" || got[0].Role != driverkit.ReviewerRole {
+		t.Errorf("next line decoded as %+v, want text 1:x with role %q", got, driverkit.ReviewerRole)
 	}
 }
 

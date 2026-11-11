@@ -3,8 +3,9 @@
 // the Connector protocol. The host builds a driverkit.Strategy from those
 // exports.
 //
-// spindrift_op host lines never reach a Decoder: the host decodes its own
-// lines, so a Driver's decoder sees only its CLI's output.
+// The host also passes its spindrift_op lines to a Decoder so its state can
+// follow passes (see HostLine). It decodes their meaning itself and discards
+// the Decoder's output for them.
 package driver
 
 import (

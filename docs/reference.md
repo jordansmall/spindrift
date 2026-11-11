@@ -2440,8 +2440,10 @@ This is protocol version **0.1.0**. The host is
 
   The decode output is the canonical event schema of [ADR
   0065](adr/0065-drivers-decode-pass-logs-into-canonical-events.md).
-  `spindrift_op` host lines never reach the Driver: core decodes them itself,
-  and a guest cannot emit that kind. The host decodes guest events strictly
+  `spindrift_op` host lines are passed to `driver.decode` so a decoder's state
+  can follow passes (the SDK's `driver.HostLine` parses one); core decodes them
+  itself and discards the guest's answer, and a guest cannot emit that kind.
+  The host decodes guest events strictly
   (an unknown field or kind rejects the batch), and a rejected or failed
   `driver.decode` becomes one `unparsed` event carrying the line, so the
   classifier still sees it. `driver.resolveExit` gets the Pass log's content,

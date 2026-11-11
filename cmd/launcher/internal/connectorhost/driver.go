@@ -218,10 +218,15 @@ func (c *Connector) newDecoder() driverkit.Decoder {
 	}
 	return func(line string) []driverkit.Event {
 		// spindrift_op lines are core's own grammar, host-written into every
-		// Pass log; the guest never sees them.
+		// Pass log. The guest sees them so its state can follow passes, but
+		// core stays their only decoder: whatever the guest answers, or fails
+		// with, is discarded.
 		var op hostop.Event
 		if t := strings.TrimSpace(line); t != "" &&
 			json.Unmarshal([]byte(t), &op) == nil && op.Type == hostop.TypeSpindriftOp && op.SpindriftOp != nil {
+			if err == nil {
+				_ = c.call(ctx, "driver.decode", map[string]any{"decoder": h.id, "line": line}, nil)
+			}
 			return []driverkit.Event{{Kind: driverkit.KindHostOp, HostOp: op.SpindriftOp}}
 		}
 		if err != nil {
