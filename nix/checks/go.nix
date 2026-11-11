@@ -223,6 +223,18 @@ let
       prefix = "drivers";
       pkgFor = name: "internal/driver/${name}";
       sharedFor = _: driverGoTestShared;
+      # A Driver with a Connector under connectors/<name> also runs its
+      # conformance test against that Connector, built from the batteries core.
+      setupFor =
+        name:
+        let
+          dir = ../../connectors + "/${name}";
+        in
+        pkgs.lib.optionalString (builtins.pathExists dir) ''
+          export SPINDRIFT_DRIVER_CONNECTOR_WASM=${
+            ((import dir).lib.connector { core = import ../../core; }).package pkgs
+          }/${name}.wasm
+        '';
     };
   driverGoTests = driverGoTestsFor {
     files = launcherDir;
@@ -740,6 +752,43 @@ let
     export GOFLAGS=
     cd src/sdk
   '';
+  # Every Connector under connectors/<name> is a Go module that replaces the
+  # SDK with ../../sdk, so gofmt and a wasip1 vet run in that repo-relative
+  # layout (the host build of a Connector is not meaningful: it is a reactor).
+  connectorsDir = ../../connectors;
+  connectorNames = builtins.attrNames (
+    pkgs.lib.filterAttrs (_: t: t == "directory") (builtins.readDir connectorsDir)
+  );
+  connectorGoChecks = pkgs.lib.listToAttrs (
+    pkgs.lib.concatMap (
+      name:
+      let
+        src = fs.toSource {
+          root = ../..;
+          fileset = fs.unions [
+            ../../sdk
+            (fs.fileFilter (f: f.hasExt "go" || f.name == "go.mod") (connectorsDir + "/${name}"))
+          ];
+        };
+        mk = suffix: script: {
+          name = "connector-${name}-go-${suffix}";
+          value = pkgs.runCommand "connector-${name}-go-${suffix}" { nativeBuildInputs = [ pkgs.go ]; } ''
+            cp -r ${src} src
+            chmod -R +w src
+            ${goCheckEnv}
+            export GOFLAGS=-mod=mod
+            cd src/connectors/${name}
+            ${script}
+            touch $out
+          '';
+        };
+      in
+      [
+        (mk "fmt" (gofmtCheck "."))
+        (mk "vet" "GOOS=wasip1 GOARCH=wasm go vet ./...")
+      ]
+    ) connectorNames
+  );
 in
 driverGoTests
 // backendGoTests
@@ -1283,3 +1332,4 @@ driverGoTests
     touch $out
   '';
 }
+// connectorGoChecks

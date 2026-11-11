@@ -3,6 +3,10 @@
 {
   lib.mkHarness = import ../lib/mkHarness.nix;
 
+  # The SDK's Go source (ADR 0073): a compiled Connector builds against it
+  # through `core`, never a relative path out of its own directory.
+  lib.sdkSrc = ../sdk;
+
   # Roster helpers (issue #2560). normalizeRosterResult stays internal
   # test-support machinery, so it is deliberately not exported here.
   lib.rosterLib =
