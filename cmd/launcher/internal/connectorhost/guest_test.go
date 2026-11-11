@@ -86,6 +86,9 @@ const (
 // handshake serves caps from offset 0, connector_alloc always returns alloc,
 // and connector_call always returns ret, a packed ptr<<32|len.
 func connectorFns(caps []string, alloc, ret int64) ([]byte, []guestFn) {
+	if caps == nil {
+		caps = []string{} // the handshake requires capabilities, as [] when empty
+	}
 	hs, _ := json.Marshal(map[string]any{"protocolVersion": connectorhost.ProtocolVersion, "capabilities": caps})
 	return hs, []guestFn{
 		{"connector_handshake", nil, []byte{i64}, i64Const(int64(len(hs)))},
@@ -93,6 +96,13 @@ func connectorFns(caps []string, alloc, ret int64) ([]byte, []guestFn) {
 		{"connector_call", []byte{i32, i32}, []byte{i64}, i64Const(ret)},
 	}
 }
+
+// The positions of the call exports in connectorFns's result.
+const (
+	fnHandshake = iota
+	fnAlloc
+	fnCall
+)
 
 // answeringGuest is a Connector whose every call returns the fixed JSON resp.
 func answeringGuest(caps []string, resp string) []byte {

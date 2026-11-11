@@ -89,15 +89,21 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 	}
 	if slices.Contains(c.Capabilities, "driver.resolveExit") {
 		s.ResolveExit = func(logPath string, exitCode int) (int, error) {
-			// A Connector has no filesystem, so the host reads the log.
-			log, err := os.ReadFile(logPath)
+			// A Connector has no filesystem, so the host reads the log. Refusing
+			// one whose request passes maxRequest would silently turn resolveExit
+			// off, and a resolver judges the end of the log, so send its tail.
+			raw, err := os.ReadFile(logPath)
+			if err != nil {
+				return exitCode, err
+			}
+			log, err := logWindow(raw, exitCode)
 			if err != nil {
 				return exitCode, err
 			}
 			var r struct {
 				ExitCode int `json:"exitCode"`
 			}
-			if err := c.call(ctx, "driver.resolveExit", map[string]any{"log": string(log), "exitCode": exitCode}, &r); err != nil {
+			if err := c.call(ctx, resolveExitMethod, resolveExitParams(log, exitCode), &r); err != nil {
 				return exitCode, err
 			}
 			// driver.Driver's invariant: a failing exit is never resolved to success.
@@ -186,4 +192,59 @@ func guestEvents(raw json.RawMessage) ([]driverkit.Event, bool) {
 		return nil, true // a native decoder returns nil for a line with no events
 	}
 	return evs, true
+}
+
+const resolveExitMethod = "driver.resolveExit"
+
+// resolveExitParams is the one shape of a resolveExit request, so logWindow
+// measures exactly the bytes the call sends.
+func resolveExitParams(log string, exitCode int) map[string]any {
+	return map[string]any{"log": log, "exitCode": exitCode}
+}
+
+// logWindow returns the newest lines of log whose resolveExit request fits under
+// maxRequest. A line too large to fit on its own is skipped and the walk
+// continues behind it, as the native resolvers skip an oversized line, so an
+// unrecovered error before it still reaches the resolver; the walk stops at the
+// first line that fits alone but not on top of those kept. Splitting at '\n' is
+// safe for sizing: it is ASCII, so each line escapes on its own and the sizes
+// add up.
+func logWindow(log []byte, exitCode int) (string, error) {
+	if len(log) <= maxRequest { // raw length is a lower bound on the encoded size
+		req, err := encodeRequest(resolveExitMethod, resolveExitParams(string(log), exitCode))
+		if err != nil || len(req) <= maxRequest {
+			return string(log), err
+		}
+	}
+	empty, err := encodeRequest(resolveExitMethod, resolveExitParams("", exitCode))
+	if err != nil {
+		return "", err
+	}
+	lineMax := maxRequest - len(empty)
+	room := lineMax
+	var kept []string // newest first
+	start := len(log)
+	for start > 0 {
+		from := bytes.LastIndexByte(log[:start-1], '\n') + 1
+		seg := log[from:start]
+		start = from
+		if len(seg) > lineMax {
+			continue
+		}
+		enc, err := encodeRequest(resolveExitMethod, resolveExitParams(string(seg), exitCode))
+		if err != nil {
+			return "", err
+		}
+		n := len(enc) - len(empty)
+		if n > lineMax {
+			continue
+		}
+		if n > room {
+			break
+		}
+		room -= n
+		kept = append(kept, string(seg))
+	}
+	slices.Reverse(kept)
+	return strings.Join(kept, ""), nil
 }
