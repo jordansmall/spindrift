@@ -25,6 +25,11 @@ import (
 type Document struct {
 	Settings  map[string]string `json:"settings"`
 	Artifacts Artifacts         `json:"artifacts"`
+	// Drivers holds the Driver rows from Connectors (ADR 0020, ADR 0073), kept
+	// raw so this package stays a leaf; the driverrows package decodes them.
+	// Absent when the Harness declares none, then the generated Descriptors
+	// are the fallback.
+	Drivers json.RawMessage `json:"drivers,omitempty"`
 }
 
 // Load reads and parses the Launcher input document at path.

@@ -30,6 +30,7 @@ import (
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
+	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/launcherchecks"
@@ -816,6 +817,9 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 
 	doc, err := inputdoc.Load(args.InputPath)
 	if err != nil {
+		return refuse(err)
+	}
+	if err := driverrows.Use(doc.Drivers); err != nil {
 		return refuse(err)
 	}
 

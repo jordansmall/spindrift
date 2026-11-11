@@ -4795,3 +4795,26 @@ func TestCapRollbackReason(t *testing.T) {
 func claudeArtifacts() inputdoc.Artifacts {
 	return inputdoc.Artifacts{Shared: inputdoc.SharedArtifacts{Driver: inputdoc.ValueOf("claude")}}
 }
+
+// The daemon applies the document's Driver rows right after loading it, so a
+// malformed rows value refuses the start before any slot, claim or Box.
+func TestMainRun_InvalidDriverRowsFailStartup(t *testing.T) {
+	clearKnobEnvT(t)
+	data, err := json.Marshal(inputdoc.Document{
+		Settings: maps.Clone(shippedKnobDefaults),
+		Drivers:  json.RawMessage(`"nope"`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	docPath := filepath.Join(t.TempDir(), "in.json")
+	writeFileT(t, docPath, string(data))
+
+	var stdout, stderr bytes.Buffer
+	if got := mainRun([]string{"--input", docPath, "dispatch"}, &stdout, &stderr); got != 1 {
+		t.Fatalf("mainRun() = %d, want 1; stderr=%s", got, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "driver rows") {
+		t.Errorf("stderr = %q, want the driver rows error", stderr.String())
+	}
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -26,6 +27,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/forge"
@@ -6818,5 +6820,49 @@ func TestConfigArtifact_EmptyBoxArtifactFollowsRunnerFamily(t *testing.T) {
 		if got.Name != tc.want.Name {
 			t.Errorf("runnerKind %q: artifact() = %q, want %q", tc.runnerKind, got.Name, tc.want.Name)
 		}
+	}
+}
+
+// A document's Driver rows are applied to the registry before any verb runs,
+// so a Connector-backed Driver is resolvable by name for the whole process.
+func TestMainRun_InputDocument_AppliesDriverRows(t *testing.T) {
+	dir := os.Getenv("SPINDRIFT_CONNECTOR_FIXTURES_DIR")
+	if dir == "" {
+		t.Skip("SPINDRIFT_CONNECTOR_FIXTURES_DIR is unset")
+	}
+	rows, err := json.Marshal([]map[string]any{{
+		"name":        "fixture",
+		"module":      filepath.Join(dir, "driver.wasm"),
+		"credentials": []map[string]any{{"env": []string{"FIXTURE_KEY"}, "modelPrefix": "fx/", "remedy": "set FIXTURE_KEY"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	docPath := filepath.Join(t.TempDir(), "input.json")
+	if err := os.WriteFile(docPath, []byte(`{"settings":{},"artifacts":{},"drivers":`+string(rows)+`}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	mainRunT(t, []string{"--input", docPath, "research"}, &stdout, &stderr)
+	if _, ok := driver.CredentialRules("fixture"); !ok {
+		t.Errorf("driver.CredentialRules(fixture) not registered after the document's rows applied; stderr=%s", stderr.String())
+	}
+	if _, err := driver.New("fixture"); err != nil {
+		t.Errorf("driver.New(fixture): %v", err)
+	}
+}
+
+func TestMainRun_InputDocument_InvalidDriverRowsAreConfigInvalid(t *testing.T) {
+	docPath := filepath.Join(t.TempDir(), "input.json")
+	if err := os.WriteFile(docPath, []byte(`{"settings":{},"artifacts":{},"drivers":"nope"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := mainRunT(t, []string{"--input", docPath, "research"}, &stdout, &stderr)
+	if code != int(exitcode.ConfigInvalid) {
+		t.Errorf("mainRun code = %d, want %d; stderr=%s", code, int(exitcode.ConfigInvalid), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "driver rows") {
+		t.Errorf("stderr = %q, want the driver rows error", stderr.String())
 	}
 }

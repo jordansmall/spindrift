@@ -1,6 +1,7 @@
 package inputdoc
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -61,6 +62,9 @@ type Resolved struct {
 	// with the caller's parser.
 	Args []string
 
+	// Drivers is the document's raw Driver rows, nil when it carries none.
+	Drivers json.RawMessage
+
 	src knobResolver
 }
 
@@ -81,11 +85,12 @@ func Resolve(args []string, doc *Document, env map[string]string) (Resolved, err
 	}
 	var settings map[string]string
 	var artifacts Artifacts
+	var drivers json.RawMessage
 	if doc != nil {
-		settings, artifacts = doc.Settings, doc.Artifacts
+		settings, artifacts, drivers = doc.Settings, doc.Artifacts, doc.Drivers
 	}
 	src := knobResolver{explicit: explicit, settings: settings, env: env}
-	return Resolved{Knobs: LoadKnobs(src), Artifacts: artifacts, Args: rest, src: src}, nil
+	return Resolved{Knobs: LoadKnobs(src), Artifacts: artifacts, Args: rest, Drivers: drivers, src: src}, nil
 }
 
 // Source is the KnobSource Resolve loaded Knobs from, for a caller that wraps
