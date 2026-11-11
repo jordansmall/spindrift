@@ -1,0 +1,252 @@
+package main
+
+import (
+	"encoding/json"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"spindrift.dev/sdk/driver"
+)
+
+// resetsAtRe matches the JSON field "resetsAt":UNIX_TIMESTAMP (integer).
+var resetsAtRe = regexp.MustCompile(`"resetsAt"\s*:\s*(\d+)`)
+
+// resetsTextRe matches the reset suffix claude emits on plain-text rate-limit
+// messages, e.g. "resets 6:30pm (UTC)" or "resets Mon 12:00am (UTC)". The
+// optional weekday is a 3-letter prefix plus any remaining letters of the full
+// weekday name.
+var resetsTextRe = regexp.MustCompile(`resets\s+(?:([A-Za-z]{3})\w*\s+)?(\d{1,2}):(\d{2})(am|pm)\s*\(UTC\)`)
+
+// staleGraceWindow bounds how stale a bare-form (no weekday) reset-time
+// candidate can be and still be returned as-is instead of rolled a day
+// forward. dispatch/retry.go's hold path already clamps a past ResetAt's wait
+// to Policy.Jitter, so a trivially stale candidate (clock skew, or a limit that
+// refreshed moments ago) retries almost immediately instead of waiting ~24h.
+const staleGraceWindow = 5 * time.Minute
+
+var weekdayAbbrs = map[string]time.Weekday{
+	"sun": time.Sunday,
+	"mon": time.Monday,
+	"tue": time.Tuesday,
+	"wed": time.Wednesday,
+	"thu": time.Thursday,
+	"fri": time.Friday,
+	"sat": time.Saturday,
+}
+
+// TransientPatterns is claude's ordered API-error marker list, checked before the
+// shared baseTransientPatterns network suffix. The patterns are
+// specific so they do not match ordinary log content that happens to contain
+// digit sequences (issue numbers, byte counts, port numbers).
+var TransientPatterns = []driver.Pattern{
+	{Substr: "rate_limit_error", Reason: driver.RateLimit},
+	{Substr: "overloaded_error", Reason: driver.Overloaded},
+	{Substr: "usage_limit_reached", Reason: driver.RateLimit},
+	{Substr: "server_error", Reason: driver.Overloaded},
+	{Substr: "429 Too Many Requests", Reason: driver.RateLimit},
+	{Substr: "529 Overloaded", Reason: driver.Overloaded},
+	{Substr: "Claude Code usage limit reached", Reason: driver.RateLimit},
+	{Substr: "hit your session limit", Reason: driver.RateLimit},
+	{Substr: "hit your weekly limit", Reason: driver.RateLimit},
+	{Substr: "hit your Opus limit", Reason: driver.RateLimit},
+	{Substr: "Overloaded", Reason: driver.Overloaded},
+	{Substr: "net/http: request canceled", Reason: driver.Network},
+}
+
+// TerminalPatterns holds markers for non-retryable failures worth naming to the
+// operator. These run through the same self-poison guard as TransientPatterns, so
+// a box editing this string in its own content is not blamed (issues #579, #818).
+var TerminalPatterns = []driver.Pattern{
+	// A claude-code build predating the --agents flag rejects it outright
+	// (issue #1552). Naming that instead of the generic TaskFailed bucket tells
+	// the operator to bump claude-code (the Consumer's nixpkgs input), or blank
+	// every subagent model knob (agents.drivers.<name>.models.scout/review/
+	// filer/worker, or the roster) in the Consumer config and rebuild the image,
+	// rather than retry.
+	{Substr: "unknown option '--agents'", Reason: driver.UnsupportedFlag},
+}
+
+// matchMarker classifies one log line, preferring a transient API or network
+// marker over a terminal CLI-usage one.
+func matchMarker(line string) (driver.Reason, bool) {
+	for _, ps := range [][]driver.Pattern{TransientPatterns, baseTransientPatterns, TerminalPatterns} {
+		for _, p := range ps {
+			if strings.Contains(line, p.Substr) {
+				return p.Reason, true
+			}
+		}
+	}
+	return "", false
+}
+
+// baseTransientPatterns is the network suffix core's driverkit appends to
+// every Driver's transient markers; copied because a Connector cannot import
+// driverkit.
+var baseTransientPatterns = []driver.Pattern{
+	{Substr: "connection refused", Reason: driver.Network},
+	{Substr: "connection reset", Reason: driver.Network},
+	{Substr: "dial tcp", Reason: driver.Network},
+	{Substr: "context deadline exceeded", Reason: driver.Network},
+	{Substr: "no such host", Reason: driver.Network},
+}
+
+// ClassifyOptions are claude's driver.ClassifyOptions.
+//
+// FirstMatch: within one line a transient marker beats a terminal one, but
+// across lines a terminal marker seen first latches Terminal; safe for the
+// --agents case, which aborts before any API call. ChunkOversized scans an
+// oversized line in chunks, so a chunk of an oversized agent-content line
+// fails the whole-chunk JSON parse in parseTopLevel and is scanned as normal
+// (known gap, issue #579 review).
+var ClassifyOptions = driver.ClassifyOptions{ChunkOversized: true, FirstMatch: true}
+
+// syntheticModelSentinel is the claude CLI's message.model value on its
+// synthetic terminator event for a mid-stream API error (issue #815). No
+// official doc records this literal (issue #1203), so it is a runtime contract
+// with the CLI: if a future version changes it, classifyTurn's guard
+// silently stops matching (issue #820).
+const syntheticModelSentinel = "<synthetic>"
+
+// classifyTurn splits an assistant or user stream-json line into agent
+// content (an assistant message, or a user message: the Claude API returns
+// tool results as a user-role turn) and the CLI's synthetic terminator
+// (issue #815). A nil top (a line that is not a JSON object) and other types
+// are neither.
+func classifyTurn(top *topLevel) (content, synthetic bool) {
+	if top == nil {
+		return false, false
+	}
+	var msg struct {
+		Model string `json:"model"`
+	}
+	if !decodeField(top.Message, &msg) {
+		return false, false
+	}
+	if top.Type == "assistant" && msg.Model == syntheticModelSentinel && errorPresent(top.Error) {
+		return false, true
+	}
+	return top.Type == "assistant" || top.Type == "user", false
+}
+
+// errorPresent reports whether a top-level "error" value is set. The CLI's
+// value is normally a string, but any other JSON type must not fail the
+// envelope parse (issue #5453). A missing field, null, or the JSON empty
+// string count as unset; any other value is present.
+func errorPresent(raw json.RawMessage) bool {
+	s := string(raw)
+	return s != "" && s != "null" && s != `""`
+}
+
+// isAgentContentEvent reports whether chunk is a stream-json line carrying
+// agent-authored content. Markers inside it are the agent's own work product,
+// so they must not be scanned. Non-JSON lines, other types, and the CLI's
+// synthetic terminator (issue #815) fall through. It is the test seam over
+// classifyTurn, which decoder.decodeLine calls on the live path.
+func isAgentContentEvent(chunk string) bool {
+	content, _ := classifyTurn(parseTopLevel(chunk))
+	return content
+}
+
+// extractResetsAt parses the first "resetsAt":UNIX_TIMESTAMP in content as a
+// UTC time, falling back to parseResetsAtText when that field is absent or its
+// value is not an integer. It returns nil if neither form matches.
+func extractResetsAt(content string, now time.Time) *time.Time {
+	if m := resetsAtRe.FindStringSubmatch(content); m != nil {
+		if secs, err := strconv.ParseInt(m[1], 10, 64); err == nil {
+			t := time.Unix(secs, 0).UTC()
+			return &t
+		}
+	}
+	return parseResetsAtText(content, now)
+}
+
+// parseResetsAtText parses claude's "resets [Weekday] <clock-time> (UTC)"
+// suffix into the occurrence of that clock-time today, or on the next matching
+// weekday. It returns nil only when the suffix is absent or unparseable, never
+// merely because the occurrence is stale. It never calls time.Now(); the caller
+// supplies now.
+func parseResetsAtText(content string, now time.Time) *time.Time {
+	m := resetsTextRe.FindStringSubmatch(content)
+	if m == nil {
+		return nil
+	}
+
+	weekdayAbbr, hourStr, minuteStr, meridiem := m[1], m[2], m[3], m[4]
+
+	hour, err := strconv.Atoi(hourStr)
+	if err != nil || hour < 1 || hour > 12 {
+		return nil
+	}
+	minute, err := strconv.Atoi(minuteStr)
+	if err != nil || minute < 0 || minute > 59 {
+		return nil
+	}
+
+	switch meridiem {
+	case "am":
+		if hour == 12 {
+			hour = 0
+		}
+	case "pm":
+		if hour != 12 {
+			hour += 12
+		}
+	default:
+		return nil
+	}
+
+	now = now.UTC()
+
+	isWeekdayForm := weekdayAbbr != ""
+
+	var candidate time.Time
+	if !isWeekdayForm {
+		candidate = time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.UTC)
+	} else {
+		wantWeekday, ok := weekdayAbbrs[strings.ToLower(weekdayAbbr)]
+		if !ok {
+			return nil
+		}
+		candidate = time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.UTC)
+		daysUntil := (int(wantWeekday) - int(candidate.Weekday()) + 7) % 7
+		candidate = candidate.AddDate(0, 0, daysUntil)
+	}
+
+	if candidate.After(now) {
+		return &candidate
+	}
+
+	if isWeekdayForm {
+		// A weekly-cadence marker off by even minutes still means next week,
+		// and a short generic backoff on a weekly-scale reset is worse than one
+		// correct week-long hold, so there is no grace window here (issue #2443).
+		candidate = candidate.AddDate(0, 0, 7)
+		return &candidate
+	}
+
+	if now.Sub(candidate) <= staleGraceWindow {
+		// The candidate is only trivially stale, so return it unchanged and
+		// still in the past, letting the caller's past-ResetAt clamp retry
+		// almost immediately.
+		return &candidate
+	}
+
+	candidate = candidate.AddDate(0, 0, 1)
+	return &candidate
+}
+
+// ResultEvent encodes text as one newline-terminated stream-json result event,
+// the inverse of the Driver's ResultText: a synthetic final result the
+// orchestrator appends to the stream log (issue #4406).
+func ResultEvent(text string) ([]byte, error) {
+	b, err := json.Marshal(struct {
+		Type   string `json:"type"`
+		Result string `json:"result"`
+	}{"result", text})
+	if err != nil {
+		return nil, err
+	}
+	return append(b, '\n'), nil
+}
