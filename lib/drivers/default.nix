@@ -33,6 +33,9 @@ let
   # `packageLinks` (home-relative path -> path inside the Driver's package):
   # lib/image.nix symlinks each into the home layout, failing the build when the
   # package has no such path.
+  # module (a function of pkgs returning the Driver Connector's wasm file path,
+  # ADR 0073) is carried only by a Connector's row (lib/flakeModule.nix's
+  # spindrift.connectors.<name>.driver); a core row has a native Strategy.
   # Every optional attribute is listed in optionalAttrs below.
   requiredAttrs = [
     "name"
@@ -58,6 +61,7 @@ let
     "effortOnModelLevels"
     "envCommon"
     "envFiles"
+    "module"
     "packageLinks"
     "providerNamespacedModels"
     "sessionCacheDirRelative"
@@ -274,6 +278,9 @@ let
           else
             "a ${builtins.typeOf entry.sessionCacheDirRelative}"
         }"
+        ++
+          lib.optional (entry ? module && !builtins.isFunction entry.module)
+            "Driver '${driverName}' module must be a function of pkgs returning the Connector wasm file path, got a ${builtins.typeOf entry.module}"
         ++ envFilesErrors
         ++ authContentErrs
         ++ lib.optionals (!(lib.elem "credentials" missing)) credentialsErrors;
@@ -355,12 +362,27 @@ let
     else
       throw "Driver '${driverName}' has an invalid argvShape: ${lib.concatStringsSep "; " errors}";
 
+  # A row validated as the core entries are: shape, then argv shape.
+  assertRow = driverName: entry: assertArgvShape driverName (assertShape driverName entry);
+
+  # The row facts the Go Descriptor carries, under the keys its JSON tags read
+  # (cmd/launcher/internal/driver/descriptor.go): the fields
+  # renderDriverDescriptorsGo renders. Absent optional facts stay absent.
+  descriptorFacts =
+    row:
+    {
+      inherit (row) name credentials;
+    }
+    // lib.getAttrs (lib.filter (k: row ? ${k}) [
+      "providerNamespacedModels"
+      "effortOnModelLevels"
+      "authContent"
+    ]) row;
+
   entries = {
-    claude = assertArgvShape "claude" (assertShape "claude" (import ./claude.nix { inherit lib; }));
-    opencode = assertArgvShape "opencode" (
-      assertShape "opencode" (import ./opencode.nix { inherit lib; })
-    );
-    pi = assertArgvShape "pi" (assertShape "pi" (import ./pi.nix { inherit lib; }));
+    claude = assertRow "claude" (import ./claude.nix { inherit lib; });
+    opencode = assertRow "opencode" (import ./opencode.nix { inherit lib; });
+    pi = assertRow "pi" (import ./pi.nix { inherit lib; });
   };
 
   # Names rendered into the preamble are interpolated into shell, so each must
@@ -495,6 +517,8 @@ in
     entries
     assertShape
     assertArgvShape
+    assertRow
+    descriptorFacts
     requiredAttrs
     renderPreamble
     renderEnvFiles

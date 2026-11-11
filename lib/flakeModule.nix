@@ -41,6 +41,14 @@ let
   driversPath = driverMap.optionPaths.drivers;
   defaultDriverPath = driverMap.optionPaths.defaultDriver;
 
+  # The Driver rows Connectors register, keyed by Connector name: the names
+  # are already unique, and mkHarness refuses a row whose Driver name differs
+  # from its key. Read from the flake-level `config` here: the perSystem
+  # lambda below shadows it.
+  connectorDriverRows = lib.mapAttrs (_: r: r.driver) (
+    lib.filterAttrs (_: r: r.driver != null) config.spindrift.connectors
+  );
+
   sectionKnobs = lib.foldl' (
     acc: knobName:
     let
@@ -385,8 +393,8 @@ let
 in
 {
   # Flake-level, not perSystem: a Connector's flake-parts module registers its
-  # row here (ADR 0073). The registry is purely declarative so far; no row fact
-  # reaches mkHarness yet.
+  # row here (ADR 0073). A row's `knobs` fold into the env schema; its `driver`
+  # reaches every mkHarness call as `driverRows`.
   options.spindrift = {
     connectors = mkOption {
       type = types.attrsOf (
@@ -406,6 +414,19 @@ in
                   type = types.lazyAttrsOf types.raw;
                   default = { };
                   description = "Env-schema entries this row owns, keyed by env-schema key (lib/row-knobs.nix).";
+                };
+                driver = mkOption {
+                  type = types.nullOr types.raw;
+                  default = null;
+                  description = ''
+                    The Connector's Driver row, in the lib/drivers/*.nix shape
+                    (its `name` is the Driver's name and must equal this
+                    Connector's name; mkHarness throws otherwise). A Driver outside the
+                    core registry also sets `module`, a function of pkgs
+                    returning the Driver Connector's wasm file path, e.g.
+                    `module = pkgs: "''${drv}/driver.wasm";`. Null declares no
+                    Driver.
+                  '';
                 };
               };
             }
@@ -552,6 +573,7 @@ in
         revision = self.shortRev or self.dirtyShortRev or "unknown";
       }
       // structuralArgs
+      // lib.optionalAttrs (connectorDriverRows != { }) { driverRows = connectorDriverRows; }
       // lib.optionalAttrs (byNameModels != null) { byName = byNameModels; }
       // lib.optionalAttrs (runDefaults != { }) { defaults = runDefaults; };
       # A set removed knob (lib/removed-knobs.nix), by its flake path or its

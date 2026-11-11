@@ -117,6 +117,12 @@
   # the lib/drivers/ registry, baked into the image (in-box half) and threaded
   # to the Go launcher as DRIVER (host-side half). "claude", "opencode" and "pi".
   driver ? "claude",
+  # Driver rows Connectors declare (lib/flakeModule.nix's
+  # spindrift.connectors.<name>.driver), keyed by Connector name, in the
+  # lib/drivers/ row shape plus `module = pkgs: <wasm file path>`. A row
+  # outside the core registry is carried to the host and Box binaries; `driver`
+  # may select one.
+  driverRows ? { },
   # Set by lib/flakeModule.nix when more than one Driver is declared (ADR 0064,
   # issue #5053): the wrapper then layers harness.<driver>.env over harness.env.
   multiDriver ? false,
@@ -452,9 +458,50 @@ let
   # binary and flags, agent-config rendering, skill wiring, and outcome
   # extraction, baked into the image below.
   driverRegistry = import ./drivers/default.nix { inherit lib; };
+
+  # Driver rows a Connector declares (ADR 0073), checked as the core entries
+  # are. The Go fallback reads the generated Descriptors and the generated
+  # credential lists cover core rows only, so a row that would make either
+  # disagree with the Nix side fails here instead of in a live Box.
+  checkConnectorRow =
+    name: row:
+    let
+      shaped = driverRegistry.assertRow name row;
+      core = driverRegistry.entries.${name} or null;
+      # From `shaped`, so a row missing `credentials` fails with assertRow's
+      # shape message rather than a raw missing-attribute error.
+      credentialEnvNames =
+        lib.concatMap (rule: rule.env) shaped.credentials ++ map (f: f.env) (shaped.envFiles or [ ]);
+      foreign = lib.filter (e: !(lib.elem e driverRegistry.credentialEnv)) credentialEnvNames;
+    in
+    if row.name != name then
+      throw "mkHarness: driverRows.${name} has name '${row.name}'; the two must match"
+    else if core != null then
+      if driverRegistry.descriptorFacts row == driverRegistry.descriptorFacts core then
+        shaped
+      else
+        throw "mkHarness: driverRows.${name} names a core Driver but its descriptor facts differ from lib/drivers/${name}.nix; the Go registry would disagree with Nix"
+    else if !(row ? module) then
+      throw "mkHarness: driverRows.${name} is outside the core registry and must carry a `module` (its Connector wasm)"
+    else if foreign != [ ] then
+      throw "mkHarness: driverRows.${name} names credential env(s) outside the core registry's generated set: ${lib.concatStringsSep ", " foreign}; the Box scrub list and runner off-argv set are generated from core rows only"
+    else
+      shaped;
+  checkedRows = lib.mapAttrs checkConnectorRow driverRows;
+  # Forced whole, so every row is checked whichever Driver the Harness selects.
+  connectorEntries = builtins.deepSeq checkedRows checkedRows;
+  driverEntries = driverRegistry.entries // connectorEntries;
+  outsideRows = removeAttrs connectorEntries (lib.attrNames driverRegistry.entries);
+  # The rows the launcher input document and the Box's rows file carry: the
+  # Descriptor facts plus the wasm path. `p` supplies the module's pkgs, the
+  # host's for the document and the Box's own for the image.
+  docDriverRows =
+    p:
+    lib.mapAttrsToList (_: r: driverRegistry.descriptorFacts r // { module = r.module p; }) outsideRows;
+  driverRowsFile = pkgs.writeText "driver-rows.json" (builtins.toJSON (docDriverRows pkgs));
   driverEntry =
-    driverRegistry.entries.${driver}
-      or (throw "mkHarness: unknown driver '${driver}'; known drivers: ${lib.concatStringsSep ", " (lib.attrNames driverRegistry.entries)}");
+    driverEntries.${driver}
+      or (throw "mkHarness: unknown driver '${driver}'; known drivers: ${lib.concatStringsSep ", " (lib.attrNames driverEntries)}");
 
   # The OCI image name, scoped to the selected Driver (issue #262). The claude
   # Driver keeps the historical `spindrift` name so existing tags and bats
@@ -743,7 +790,12 @@ let
   # agent/entrypoint.sh's DRIVER_* vars and function definitions (ADR 0009),
   # shared between the image preamble and the bats harness file (issue #433)
   # so neither can drift from the other.
-  driverPreamble = driverRegistry.renderPreamble driverEntry;
+  # DRIVER_ROWS_FILE is appended here, not rendered by the registry, because
+  # only a Connector's outside rows have a rows file; its string context pulls
+  # the file and the wasm into the image closure.
+  driverPreamble =
+    driverRegistry.renderPreamble driverEntry
+    + lib.optionalString (outsideRows != { }) "DRIVER_ROWS_FILE=${lib.escapeShellArg driverRowsFile}\n";
 
   # The baked /agent/* path literals and their fallback-preserving preamble
   # (issue #2531). lib/image.nix's agentFiles copy destinations read the same
@@ -1293,6 +1345,7 @@ let
     preambles.renderInputDocumentJSON {
       settings = documentSettings;
       artifacts = runArtifacts;
+      drivers = docDriverRows hostPkgs;
     }
   );
 
