@@ -982,8 +982,9 @@ driverGoTests
   # the bundle's own tests, the registry root's cross-Driver guard tests and the
   # forge package's contract guard, which needs every backend directory, and
   # the host-profile advisory guard, which needs package main's
-  # route-resolution file; the whole tree is copied, so a Driver edit reruns
-  # this. It also gofmts and vets those packages (not the adapters', which
+  # route-resolution file, and the seamtest guard that no package outside the
+  # Drivers builds a native Strategy; the whole tree is copied, so a Driver edit
+  # reruns this. It also gofmts and vets those packages (not the adapters', which
   # their own go-test does), so launcher-go-fmt and launcher-go-vet need not
   # see them. Each full-tree guard must run and print its PASS line: go test
   # exits 0 with "[no tests to run]" when -run matches nothing (a renamed guard).
@@ -1023,6 +1024,7 @@ driverGoTests
         }
         SPINDRIFT_CONTRACT_GUARD_FULL_TREE=1 guard ./internal/forge TestEveryBackendRunsItsContracts
         SPINDRIFT_HOSTPROFILE_GUARD_FULL_TREE=1 guard ./internal/hostprofile TestAdvisoryBoundaryHoldsOnRealTree
+        guard ./internal/seamtest TestNoNativeStrategyOutsideDrivers
         touch $out
       '';
 
