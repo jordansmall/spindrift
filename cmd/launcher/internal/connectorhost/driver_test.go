@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 
@@ -144,6 +145,32 @@ func TestDriverResolveExitReadsLog(t *testing.T) {
 	}
 }
 
+// A log whose request would pass the cap still resolves: the host sends the
+// newest whole lines that fit, skipping any single line too large to fit alone.
+func TestDriverResolveExitSendsTheTailOfAnOversizedLog(t *testing.T) {
+	c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
+	s, err := c.DriverStrategy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fixture answers exitCode plus the newlines it received. A line is 98
+	// ASCII bytes and a newline that encodes as 2, so each costs 100 request bytes.
+	line := strings.Repeat("x", 98) + "\n"
+	fit := (connectorhost.MaxRequest - envelope) / 100
+	path := filepath.Join(t.TempDir(), "pass.log")
+	if err := os.WriteFile(path, []byte(strings.Repeat(line, fit+fit/8)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ResolveExit(path, 1)
+	if err != nil || got != 1+fit {
+		t.Errorf("ResolveExit = %d, %v, want %d: the %d newest lines that fit", got, err, 1+fit, fit)
+	}
+}
+
 func TestDriverWithoutResolveExit(t *testing.T) {
 	s := strategy(t, "seamtest-driver.wasm")
 	if s.ResolveExit != nil {
@@ -266,5 +293,50 @@ func TestLoadCompiledDecodesLikeLoad(t *testing.T) {
 		if got, want := b(line), a(line); !reflect.DeepEqual(got, want) {
 			t.Errorf("compiled decode(%q) = %+v, interpreted %+v", line, got, want)
 		}
+	}
+}
+
+// envelope is the size of a resolveExit request carrying an empty log.
+const envelope = len(`{"method":"driver.resolveExit","params":{"exitCode":1,"log":""}}`)
+
+func TestLogWindow(t *testing.T) {
+	room := connectorhost.MaxRequest - envelope
+	window := func(log string) string {
+		t.Helper()
+		got, err := connectorhost.LogWindow([]byte(log), 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := window("a\nb\n"); got != "a\nb\n" {
+		t.Errorf("a log that fits = %q, want it unchanged", got)
+	}
+	// A final line with no newline counts as a line.
+	big := strings.Repeat("x", room-4)
+	if got := window("old\n" + big + "\nend"); got != "end" {
+		t.Errorf("window = %d bytes, want the final line alone", len(got))
+	}
+	// A quote doubles in the encoding, so the two lines below fill the cap and "ab\n"
+	// before them does not fit, though their raw length would.
+	quotes := strings.Repeat(`"`, room/4-1) + "\n"
+	if got := window("ab\n" + quotes + quotes); got != quotes+quotes {
+		t.Errorf("window = %d bytes, want the two escaped lines", len(got))
+	}
+	// A line too big to fit alone is skipped, not the end of the walk: older
+	// lines behind it (an unrecovered error) still reach the resolver.
+	if got := window("a\n" + strings.Repeat("x", room) + "\n"); got != "a\n" {
+		t.Errorf("window over a final line too big alone = %q, want the line before it", got)
+	}
+	// Control bytes escape to 6 bytes, so this line passes the cap though its raw
+	// length does not.
+	huge := strings.Repeat("\x01", connectorhost.MaxRequest/6+1) + "\n"
+	if got := window("error\n" + huge + "ok\n"); got != "error\nok\n" {
+		t.Errorf("window = %d bytes, want the error and ok lines around the skipped one", len(got))
+	}
+	// A skipped line does not extend the window: a line that fits alone but not
+	// cumulatively still ends the walk.
+	if got := window("ab\n" + quotes + huge + quotes); got != quotes+quotes {
+		t.Errorf("window = %d bytes, want the two escaped lines", len(got))
 	}
 }
