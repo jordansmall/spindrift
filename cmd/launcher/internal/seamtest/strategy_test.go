@@ -16,6 +16,17 @@ func TestStrategyCorpus(t *testing.T) {
 	conformance.Run(t, Strategy, filepath.Join("testdata", "corpus"))
 }
 
+// The compiled Connector form of the same Driver must pass the same corpus
+// against the same goldens as the native Strategy.
+func TestConnectorStrategyCorpus(t *testing.T) {
+	const env = "SPINDRIFT_CONNECTOR_FIXTURES_DIR"
+	dir := os.Getenv(env)
+	if dir == "" {
+		t.Skipf("%s is unset; it names the dir holding the fixture Connector .wasm files", env)
+	}
+	conformance.RunConnector(t, filepath.Join(dir, "seamtest-driver.wasm"), filepath.Join("testdata", "corpus"))
+}
+
 func TestStrategyDecodesOneEventPerKind(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("testdata", "corpus", "canonical", "pass.jsonl"))
 	if err != nil {
