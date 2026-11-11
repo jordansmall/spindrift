@@ -72,7 +72,8 @@ func TestDescribe(t *testing.T) {
 	_, m := handlers(countingStrategy())
 	got := marshal(t, call(t, m, "driver.describe", "null"))
 	want := `{"name":"fake","transientPatterns":[{"substr":"429","reason":"rateLimit"}],` +
-		`"terminalPatterns":[{"substr":"bad flag","reason":"unsupportedFlag"}],"writeTool":"write_file"}`
+		`"terminalPatterns":[{"substr":"bad flag","reason":"unsupportedFlag"}],"writeTool":"write_file",` +
+		`"classify":{"chunkOversized":false,"firstMatch":false},"totals":"perCall","result":"events"}`
 	if got != want {
 		t.Fatalf("describe = %s\nwant %s", got, want)
 	}
@@ -201,5 +202,89 @@ func TestRequiredFields(t *testing.T) {
 			mutate(&s)
 			Register(s)
 		})
+	}
+}
+
+func TestDescribeCarriesStrategyData(t *testing.T) {
+	s := countingStrategy()
+	s.Classify = ClassifyOptions{ChunkOversized: true, FirstMatch: true}
+	s.Totals = SessionTotals
+	s.Result = LastMessage
+	s.DefaultTopLevelRole = "lead"
+	s.Heartbeat.KindOrder = []string{"read", "edit"}
+	s.Heartbeat.KindPlurals = map[string]string{"search": "searches"}
+	_, m := handlers(s)
+	got := marshal(t, call(t, m, "driver.describe", "null"))
+	for _, want := range []string{
+		`"classify":{"chunkOversized":true,"firstMatch":true}`,
+		`"totals":"session"`,
+		`"result":"lastMessage"`,
+		`"defaultTopLevelRole":"lead"`,
+		`"kindOrder":["read","edit"]`,
+		`"kindPlurals":{"search":"searches"}`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("describe = %s\nmissing %s", got, want)
+		}
+	}
+}
+
+func TestDescribeZeroValuesAreDefaults(t *testing.T) {
+	_, m := handlers(countingStrategy())
+	got := marshal(t, call(t, m, "driver.describe", "null"))
+	for _, want := range []string{
+		`"classify":{"chunkOversized":false,"firstMatch":false}`, `"totals":"perCall"`, `"result":"events"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("describe = %s\nmissing %s", got, want)
+		}
+	}
+	for _, absent := range []string{"defaultTopLevelRole", "kindOrder", "kindPlurals"} {
+		if strings.Contains(got, absent) {
+			t.Errorf("describe = %s\nunexpected %s", got, absent)
+		}
+	}
+}
+
+func TestHeartbeatCapabilities(t *testing.T) {
+	s := countingStrategy()
+	s.Heartbeat.Kind = func(tool string) string { return "k:" + tool }
+	caps, m := handlers(s)
+	if want := []string{"driver", "driver.toolKind"}; !reflect.DeepEqual(caps, want) {
+		t.Fatalf("caps = %v, want %v", caps, want)
+	}
+	for _, name := range []string{"driver.toolPhase", "driver.modelFamily"} {
+		if _, ok := m[name]; ok {
+			t.Errorf("%s registered without its func", name)
+		}
+	}
+	s.Heartbeat.Phase = func(string, json.RawMessage) string { return "" }
+	s.Heartbeat.Family = func(string) (string, int) { return "", 0 }
+	caps, _ = handlers(s)
+	want := []string{"driver", "driver.toolPhase", "driver.toolKind", "driver.modelFamily"}
+	if !reflect.DeepEqual(caps, want) {
+		t.Fatalf("caps = %v, want %v", caps, want)
+	}
+}
+
+func TestHeartbeatMethods(t *testing.T) {
+	s := countingStrategy()
+	s.Heartbeat.Phase = func(tool string, input json.RawMessage) string { return tool + ":" + string(input) }
+	s.Heartbeat.Kind = func(tool string) string { return "k:" + tool }
+	s.Heartbeat.Family = func(model string) (string, int) { return "f:" + model, len(model) }
+	_, m := handlers(s)
+	if got := marshal(t, call(t, m, "driver.toolPhase", `{"tool":"Task","input":{"a":1}}`)); got != `{"phase":"Task:{\"a\":1}"}` {
+		t.Errorf("toolPhase = %s", got)
+	}
+	if got := marshal(t, call(t, m, "driver.toolKind", `{"tool":"Read"}`)); got != `{"kind":"k:Read"}` {
+		t.Errorf("toolKind = %s", got)
+	}
+	if got := marshal(t, call(t, m, "driver.modelFamily", `{"model":"opus"}`)); got != `{"label":"f:opus","rank":4}` {
+		t.Errorf("modelFamily = %s", got)
+	}
+	for _, name := range []string{"driver.toolPhase", "driver.toolKind", "driver.modelFamily"} {
+		if _, err := m[name](json.RawMessage(`[`)); err == nil {
+			t.Errorf("%s accepted malformed params", name)
+		}
 	}
 }
