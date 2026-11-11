@@ -289,6 +289,9 @@ and in the in-box `box` program; the only bash left is the generated shim that
   on core internals. It carries a published copy of the event vocabulary,
   kept in parity with driverkit by `sdk/event/parity_test.go`. Fixture
   Connectors live under `nix/fixtures/connector-wasm`.
+- **`connectors/`** — shipped Connector subflakes. `connectors/claude` is the
+  claude Driver's host half, its own Go module (`spindrift.dev/connector/claude`)
+  built to a wasip1 reactor by its own `package.nix`.
 - **`agent/`** — `entrypoint.sh`, the generated shim, and the Driver's hook
   scripts. The shim has no logic: `lib/image.nix` renders the preambles ahead
   of one `exec box` line, and `box` (`cmd/launcher/box`) does the rest
