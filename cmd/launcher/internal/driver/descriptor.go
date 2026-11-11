@@ -27,7 +27,7 @@ type Descriptor struct {
 
 // CredentialRule is one way a Driver is authenticated. It is plain data
 // (ADR 0066 decision 7) so it can travel in the launcher input document
-// (ADR 0020) should the registry ever open.
+// (ADR 0020), as a Connector's Driver row does.
 type CredentialRule struct {
 	// Env lists the env vars that satisfy the rule, either-or, in fetch order.
 	Env []string `json:"env"`

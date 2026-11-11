@@ -280,3 +280,16 @@ a whole-log path becomes interactive.
 To re-run, use the command in the header of
 `cmd/launcher/internal/driver/claude/connector_bench_test.go` with `-count 5`,
 the wasm built as `nix/checks/go.nix`'s `setupFor` builds it.
+
+## Amendment (issue #6796): a Connector's Driver row reaches the binaries
+
+`spindrift.connectors.<name>.driver` carries a Driver row, and the flake module
+passes it to `mkHarness` as `driverRows`. A row outside the core registry also
+carries the Driver Connector's wasm `module`; its Descriptor facts and module
+path travel in the launcher input document's `drivers` section and in a rows
+file the Box hands to the orchestrator and driver-exec. A native Strategy
+still wins over a row of the same name, and with no outside rows the binaries
+use the generated Driver Descriptor. `mkHarness` refuses a row without a
+module, a core-named row whose facts differ from core's, and a credential env
+outside the set generated from the core rows. The hooks column stays core-only,
+so an outside Driver has no per-Driver guard hook rows yet.
