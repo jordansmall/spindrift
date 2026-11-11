@@ -467,7 +467,8 @@ releases and is owned separately from core, so wire these besides the code:
 The root package's `exclude-paths` keeps a commit that touches only
 `connectors/` out of a core release. The `connector-ownership` check names any
 Connector missing its release-please package, manifest version, or CODEOWNERS
-line; it does not cover `connectorDirs`.
+line, or whose `component` is not its own name; it does not cover
+`connectorDirs`.
 
 ## Reporting security issues
 

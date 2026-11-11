@@ -95,12 +95,11 @@ let
           !(config.packages ? ${path})
         ) "Connector ${name}: no packages.\"${path}\" in .release-please-config.json"
         ++
-          optional
-            (
-              config.packages ? ${path}
-              && (component == "" || builtins.length (filter (c: c == component) components) > 1)
-            )
-            "Connector ${name}: packages.\"${path}\" needs a \"component\" unique to it, so it gets its own ${name}-v… tag series instead of sharing another package's"
+          optional (config.packages ? ${path} && component != name)
+            "Connector ${name}: packages.\"${path}\" needs \"component\": \"${name}\", so it gets its own ${name}-v… tag series"
+        ++
+          optional (config.packages ? ${path} && builtins.length (filter (c: c == component) components) > 1)
+            "Connector ${name}: packages.\"${path}\" component \"${component}\" is shared with another package"
         ++ optional (
           !(manifest ? ${path})
         ) "Connector ${name}: no \"${path}\" version in .release-please-manifest.json"
@@ -219,31 +218,39 @@ in
     assert rejects "a CODEOWNERS pattern with no owner" "Connector demo: no owned" (
       wired // { codeowners = "/connectors/demo/\n"; }
     );
-    assert rejects "a package with no component" "needs a \"component\" unique" (withPackages {
+    assert rejects "a package with no component" "needs \"component\": \"demo\"" (withPackages {
       "connectors/demo" = { };
     });
-    assert rejects "a component shared with the root" "needs a \"component\" unique" (withPackages {
-      "." = wiredConfig.packages."." // {
-        component = "demo";
-      };
-    });
-    assert rejects "a component shared between Connectors" "Connector two: packages" (
-      withPackages {
-        "connectors/one".component = "x";
-        "connectors/two".component = "x";
-      }
-      // {
-        names = [
-          "one"
-          "two"
-        ];
-        manifest = wiredManifest // {
-          "connectors/one" = "0.1.0";
-          "connectors/two" = "0.1.0";
+    assert rejects "a component not named after the Connector" "needs \"component\": \"demo\""
+      (withPackages {
+        "connectors/demo".component = "connector-demo";
+      });
+    assert rejects "a component shared with the root"
+      "component \"demo\" is shared with another package"
+      (withPackages {
+        "." = wiredConfig.packages."." // {
+          component = "demo";
         };
-        codeowners = "* @root\n/connectors/one/ @o\n/connectors/two/ @o\n";
-      }
-    );
+      });
+    assert rejects "a component shared between Connectors"
+      "component \"x\" is shared with another package"
+      (
+        withPackages {
+          "connectors/one".component = "x";
+          "connectors/two".component = "x";
+        }
+        // {
+          names = [
+            "one"
+            "two"
+          ];
+          manifest = wiredManifest // {
+            "connectors/one" = "0.1.0";
+            "connectors/two" = "0.1.0";
+          };
+          codeowners = "* @root\n/connectors/one/ @o\n/connectors/two/ @o\n";
+        }
+      );
     assert rejects "a Connector line before the catch-all" "Connector demo: no owned" (
       wired // { codeowners = "/connectors/demo/ @owner\n* @root\n"; }
     );
