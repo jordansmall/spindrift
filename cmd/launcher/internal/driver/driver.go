@@ -8,7 +8,10 @@ package driver
 import (
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"sort"
+	"sync"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/usage"
@@ -101,10 +104,44 @@ var registry = map[string]Driver{}
 // panics on a duplicate name, which is a programming error rather than a
 // runtime condition.
 func Register(s driverkit.Strategy) {
-	if _, exists := registry[s.Name]; exists {
+	if Has(s.Name) {
 		panic("driver: duplicate registration for " + s.Name)
 	}
 	registry[s.Name] = driverkit.New(s)
+}
+
+// lazyDrivers holds the Drivers loaded on first use rather than linked in,
+// keyed by name; New resolves them and Names lists them (ADR 0073).
+var lazyDrivers = map[string]func() (Driver, error){}
+
+// RegisterConnector adds a Driver that load builds on first use, keyed on name.
+// load runs at most once, so a Connector is compiled only when a run selects
+// it. It panics on a duplicate name, as Register does.
+func RegisterConnector(name string, load func() (driverkit.Strategy, error)) {
+	if Has(name) {
+		panic("driver: duplicate registration for " + name)
+	}
+	lazyDrivers[name] = sync.OnceValues(func() (Driver, error) {
+		s, err := load()
+		if err != nil {
+			return nil, fmt.Errorf("DRIVER %q: %w", name, err)
+		}
+		return driverkit.New(s), nil
+	})
+}
+
+// HasNative reports whether a Strategy linked into the binary holds name.
+func HasNative(name string) bool {
+	_, native := registry[name]
+	return native
+}
+
+// Has reports whether a Driver is registered under name, linked in or lazily
+// loaded, without loading it.
+func Has(name string) bool {
+	_, native := registry[name]
+	_, lazy := lazyDrivers[name]
+	return native || lazy
 }
 
 var _ Driver = driverkit.Driver{}
@@ -125,11 +162,42 @@ func orDefault(name string) string {
 // to "claude".
 func New(name string) (Driver, error) {
 	name = orDefault(name)
-	d, ok := registry[name]
-	if !ok {
-		return nil, fmt.Errorf("unknown DRIVER %q; known drivers: %v", name, Names())
+	if d, ok := registry[name]; ok {
+		return d, nil
 	}
-	return d, nil
+	if load, ok := lazyDrivers[name]; ok {
+		return load()
+	}
+	return nil, fmt.Errorf("unknown DRIVER %q; known drivers: %v", name, Names())
+}
+
+// UseDescriptor makes d the Descriptor of the Driver it names, replacing the
+// generated one or adding a row the generated set lacks (the launcher input
+// document opens the registry at runtime, ADR 0020).
+func UseDescriptor(d Descriptor) {
+	for i := range descriptors {
+		if descriptors[i].Name == d.Name {
+			descriptors[i] = d
+			return
+		}
+	}
+	descriptors = append(descriptors, d)
+}
+
+// Snapshot captures the registry and the Descriptors and returns the function
+// that restores them, for a test that registers Drivers or applies rows in the
+// process-global registry.
+func Snapshot() (restore func()) {
+	reg, lazy, descs := maps.Clone(registry), maps.Clone(lazyDrivers), slices.Clone(descriptors)
+	return func() {
+		registry, lazyDrivers, descriptors = reg, lazy, descs
+	}
+}
+
+// DescriptorFor returns the Descriptor in force for an exact Driver name: the
+// generated one, or the row UseDescriptor replaced it with.
+func DescriptorFor(name string) (Descriptor, bool) {
+	return descriptor(name)
 }
 
 // descriptor returns the generated Descriptor for an exact Driver name.
@@ -173,6 +241,9 @@ func CredentialRules(name string) (rules []CredentialRule, ok bool) {
 func Names() []string {
 	names := make([]string, 0, len(registry))
 	for name := range registry {
+		names = append(names, name)
+	}
+	for name := range lazyDrivers {
 		names = append(names, name)
 	}
 	sort.Strings(names)

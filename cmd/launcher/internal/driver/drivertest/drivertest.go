@@ -20,3 +20,11 @@ func RequireBundled(t testing.TB) {
 		t.Error(`driver.New("no-such-driver") succeeded, want an unknown-DRIVER error`)
 	}
 }
+
+// Isolate restores the Driver registry and Descriptors when t ends, so a test
+// may register Drivers and apply Driver rows without leaking them to the tests
+// that follow.
+func Isolate(t testing.TB) {
+	t.Helper()
+	t.Cleanup(driver.Snapshot())
+}

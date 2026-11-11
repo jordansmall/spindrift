@@ -9,20 +9,20 @@ import (
 // facts, rendered into descriptor_gen.go by `nix run .#regen` (issue #5503).
 type Descriptor struct {
 	// Name is the Driver identifier, the key of the Nix registry row.
-	Name string
+	Name string `json:"name"`
 	// ProviderNamespacedModels is set when the Driver's model ids are
 	// <provider>/<model>.
-	ProviderNamespacedModels bool
+	ProviderNamespacedModels bool `json:"providerNamespacedModels,omitempty"`
 	// EffortOnModelLevels are the levels a model id's `:<level>` suffix may
 	// carry, as the Driver reads effort from it; nil when effort does not ride
 	// on the model.
-	EffortOnModelLevels []string
+	EffortOnModelLevels []string `json:"effortOnModelLevels,omitempty"`
 	// Credentials are the rules by which the Driver is authenticated; a run
 	// is authenticated when every rule that applies to its models is met.
-	Credentials []CredentialRule
+	Credentials []CredentialRule `json:"credentials,omitempty"`
 	// AuthContent constrains the Provider-keyed auth store a Driver reads from
 	// an env var; nil when the Driver has none.
-	AuthContent *AuthContent
+	AuthContent *AuthContent `json:"authContent,omitempty"`
 }
 
 // CredentialRule is one way a Driver is authenticated. It is plain data
@@ -30,22 +30,22 @@ type Descriptor struct {
 // (ADR 0020) should the registry ever open.
 type CredentialRule struct {
 	// Env lists the env vars that satisfy the rule, either-or, in fetch order.
-	Env []string
+	Env []string `json:"env"`
 	// ModelPrefix gates the rule to runs using a model with this prefix;
 	// empty means the rule always applies.
-	ModelPrefix string
+	ModelPrefix string `json:"modelPrefix,omitempty"`
 	// Remedy is shown when the rule is unmet.
-	Remedy string
+	Remedy string `json:"remedy"`
 	// SetupCommand is the argv that obtains the credential for Env[0]; empty
 	// when the Driver offers none.
-	SetupCommand []string
+	SetupCommand []string `json:"setupCommand,omitempty"`
 	// Labels is the human label quickstart's fallback prompt shows for an env
 	// var after Env[0], keyed by name; a var without one is prompted as
 	// "Value for NAME".
-	Labels map[string]string
+	Labels map[string]string `json:"labels,omitempty"`
 	// SetupHint is a short note shown beside the setup command offer, e.g. how
 	// it authenticates; empty when none.
-	SetupHint string
+	SetupHint string `json:"setupHint,omitempty"`
 }
 
 // Satisfied reports whether any of the rule's env vars has a non-empty value
