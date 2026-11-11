@@ -2345,9 +2345,10 @@ This is protocol version **0.1.0**. The host is
   nothing. It satisfies only the `wasi_snapshot_preview1` imports Go's wasip1
   runtime needs: no preopened directories, an empty environment and argument
   list, no stdio, a fake clock and a deterministic random source. There are no
-  sockets or subprocesses. Core grants no host calls beyond WASI yet: the
+  sockets or subprocesses. Core grants no Host calls beyond WASI yet: the
   allow-list is empty, so a module that imports anything else is refused at
-  load with the handshake error.
+  load with the handshake error. A Driver Connector is granted no Host calls
+  at all, so one importing anything beyond WASI is refused the same way.
 - **Handshake.** The module exports `connector_handshake`, which takes no
   parameters and returns one `i64`, `ptr << 32 | len`, locating the result
   bytes in the module's memory export named `memory`. The result is:
@@ -2359,6 +2360,46 @@ This is protocol version **0.1.0**. The host is
   `capabilities` is an array of strings, `[]` when empty.
 - **Encoding.** Arguments and results cross the boundary as bytes, UTF-8
   JSON.
+- **Calls.** A Connector that serves methods exports
+  `connector_alloc(size i32) -> i32`, which returns a buffer for the request,
+  and `connector_call(ptr i32, len i32) -> i64`, which returns the response
+  as `ptr << 32 | len`. The request is `{"method": "...", "params": {...}}`;
+  the response is `{"result": ...}` or `{"error": "..."}`, and an unknown
+  method is an `error`. The host wraps any failed call in `ErrCall`, refuses a
+  response over 64 MiB, and makes one call at a time per Connector.
+- **Driver capabilities.** Part of 0.1.0. A Driver Connector advertises
+  capability `"driver"`, meaning it serves the first six methods below, and
+  optionally `"driver.resolveExit"`. The host's `DriverStrategy` builds a
+  `driverkit.Strategy` from them, so everything above the Strategy is
+  unchanged. It calls only `driver.describe` when building the Strategy; the
+  rest are called at first use, which is where a missing or failing one
+  surfaces.
+
+  | Method | Params | Result |
+  |---|---|---|
+  | `driver.describe` | `{}` | `{name, transientPatterns, terminalPatterns, writeTool}`; a pattern is `{substr, reason}` |
+  | `driver.newDecoder` | `{}` | `{decoder}`, an opaque handle |
+  | `driver.decode` | `{decoder, line}` | an array of canonical events |
+  | `driver.freeDecoder` | `{decoder}` | `null` |
+  | `driver.resultEvent` | `{text}` | `{event}`, one log line |
+  | `driver.sessionFlags` | `{mode, repoSlug, issue, home}` | `{flags}` |
+  | `driver.resolveExit` (optional) | `{log, exitCode}` | `{exitCode}` |
+
+  The decode output is the canonical event schema of [ADR
+  0065](adr/0065-drivers-decode-pass-logs-into-canonical-events.md).
+  `spindrift_op` host lines never reach the Driver: core decodes them itself,
+  and a guest cannot emit that kind. The host decodes guest events strictly
+  (an unknown field or kind rejects the batch), and a rejected or failed
+  `driver.decode` becomes one `unparsed` event carrying the line, so the
+  classifier still sees it. `driver.resolveExit` gets the Pass log's content,
+  not a path: the host reads the file, because a Connector has no filesystem.
+  The log crosses as a JSON string, so invalid UTF-8 in it reaches the guest
+  as U+FFFD and the content is not byte-exact. The host refuses an answer
+  that turns a non-zero exit into 0, keeping the original exit code and
+  returning an `ErrCall` error: a failing exit is never resolved to success.
+  What does not cross in 0.1.0: `Classify` options, `Totals`, `Heartbeat`
+  tracking, `DefaultTopLevelRole`, the `Result` reader and the stream filter.
+  They stay at driverkit's zero values.
 - **Versioning.** The protocol version is `0.y.z` and independent of
   spindrift's release version. A `0.y` bump is breaking; a `0.y.z` bump is
   additive. Core accepts its current `0.y` and the one before it, so today
@@ -2370,10 +2411,18 @@ This is protocol version **0.1.0**. The host is
   runs past the caller's context deadline fails the handshake instead.
 - **Go SDK.** Module `spindrift.dev/sdk` under [`sdk/`](../sdk/), separate
   from the launcher module. A Connector calls `connector.Register(capabilities...)`
-  from `init()`. Package `event` is a published copy of the canonical event
-  vocabulary ([ADR 0065](adr/0065-drivers-decode-pass-logs-into-canonical-events.md)),
+  from `init()` and serves methods with `connector.Handle(method, fn)`. A
+  Driver instead calls `driver.Register(driver.Strategy{...})`, which
+  registers its capabilities and every method above. Package `event` is a
+  published copy of the canonical event vocabulary ([ADR 0065](adr/0065-drivers-decode-pass-logs-into-canonical-events.md)),
   kept in parity with driverkit by `sdk/event/parity_test.go` (the
   `sdk-go-test` check).
+- **Conformance.** `conformance.RunConnector(t, wasmPath, corpusDir)`
+  (`cmd/launcher/internal/driver/driverkit/conformance`) loads a compiled
+  Driver Connector and runs the same suite over the same corpus as
+  `conformance.Run` does for a native Strategy. The seamtest fake Driver is
+  proven this way, from
+  [`nix/fixtures/connector-wasm/seamtest-driver`](../nix/fixtures/connector-wasm/seamtest-driver).
 
 ### Targeting repos that define their own devShell toolchain
 
