@@ -672,6 +672,10 @@ let
   # `debug = true` exposes the flake-level config (`.debug.config`) that the
   # plain outputs hide, for checks reading Connector registrations (#6766).
   connectorConsumerVia = consumerVia { debug = true; };
+
+  # Fixture Connectors built as wasip1 reactors for the Connector host tests.
+  connectorWasm = import ./connector-wasm.nix { inherit pkgs; };
+
   consumerPkgs = moduleConsumer.packages.${system};
   consumerFormatter = moduleConsumer.formatter.${system};
 
@@ -699,6 +703,7 @@ in
     batsHarness
     multiDriverBatsHarness
     seamFixtures
+    connectorWasm
     harness
     dogfoodBwrapHarness
     dogfoodOpencodeHarness
