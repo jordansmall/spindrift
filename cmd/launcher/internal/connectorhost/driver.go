@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"runtime"
 	"slices"
@@ -13,6 +14,7 @@ import (
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
+	"spindrift.dev/launcher/internal/logscan"
 )
 
 // ErrNotDriver marks a Connector that does not advertise the "driver"
@@ -35,8 +37,7 @@ var guestKinds = []driverkit.Kind{
 
 // DriverStrategy builds a driverkit.Strategy from a Driver Connector, so
 // everything above the Strategy is unchanged. Only the fields that cross the
-// protocol are set: classification, totals, heartbeat and stream-filter
-// tuning stay at their zero values.
+// protocol are set: the stream filter stays at its zero value.
 //
 // Strategy funcs carry no context or error return, so every guest call runs
 // under context.Background() and the funcs fail closed, as documented on each.
@@ -50,6 +51,15 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 		TransientPatterns []wirePattern `json:"transientPatterns"`
 		TerminalPatterns  []wirePattern `json:"terminalPatterns"`
 		WriteTool         string        `json:"writeTool"`
+		Classify          struct {
+			ChunkOversized bool `json:"chunkOversized"`
+			FirstMatch     bool `json:"firstMatch"`
+		} `json:"classify"`
+		Totals              string            `json:"totals"`
+		DefaultTopLevelRole string            `json:"defaultTopLevelRole"`
+		Result              string            `json:"result"`
+		KindOrder           []string          `json:"kindOrder"`
+		KindPlurals         map[string]string `json:"kindPlurals"`
 	}
 	if err := c.call(ctx, "driver.describe", struct{}{}, &d); err != nil {
 		return driverkit.Strategy{}, err
@@ -62,12 +72,30 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 	if err != nil {
 		return driverkit.Strategy{}, err
 	}
+	// An absent name is the zero value, so a guest built before it existed stays valid.
+	totals, ok := map[string]driverkit.TotalsSource{"": driverkit.PerCallTotals, "perCall": driverkit.PerCallTotals, "session": driverkit.SessionTotals}[d.Totals]
+	if !ok {
+		return driverkit.Strategy{}, fmt.Errorf("%w: unknown totals %q", ErrCall, d.Totals)
+	}
+	result, ok := map[string]driverkit.ResultReader{"": driverkit.ResultEvents, "events": driverkit.ResultEvents, "lastMessage": driverkit.LastMessage}[d.Result]
+	if !ok {
+		return driverkit.Strategy{}, fmt.Errorf("%w: unknown result %q", ErrCall, d.Result)
+	}
+	oversized := logscan.SkipOversized
+	if d.Classify.ChunkOversized {
+		oversized = logscan.ChunkOversized
+	}
 	s := driverkit.Strategy{
-		Name:              d.Name,
-		NewDecoder:        c.newDecoder,
-		TransientPatterns: transient,
-		TerminalPatterns:  terminal,
-		WriteTool:         d.WriteTool,
+		Name:                d.Name,
+		NewDecoder:          c.newDecoder,
+		TransientPatterns:   transient,
+		TerminalPatterns:    terminal,
+		WriteTool:           d.WriteTool,
+		Classify:            driverkit.ClassifyOptions{Oversized: oversized, FirstMatch: d.Classify.FirstMatch},
+		Totals:              totals,
+		Result:              result,
+		DefaultTopLevelRole: d.DefaultTopLevelRole,
+		Heartbeat:           driverkit.HeartbeatTracking{KindOrder: d.KindOrder, KindPlurals: d.KindPlurals},
 		ResultEvent: func(text string) ([]byte, error) {
 			var r struct {
 				Event string `json:"event"`
@@ -111,6 +139,43 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 				return exitCode, fmt.Errorf("%w: driver.resolveExit resolved exit %d to 0", ErrCall, exitCode)
 			}
 			return r.ExitCode, nil
+		}
+	}
+	// These funcs have no error return. A failed call leaves the heartbeat
+	// uninformative rather than wrong: no phase, no kind, and the model id
+	// as its own label at the last rank.
+	if slices.Contains(c.Capabilities, "driver.toolPhase") {
+		s.Heartbeat.Phase = func(tool string, input json.RawMessage) string {
+			var r struct {
+				Phase string `json:"phase"`
+			}
+			if c.call(ctx, "driver.toolPhase", map[string]any{"tool": tool, "input": input}, &r) != nil {
+				return ""
+			}
+			return r.Phase
+		}
+	}
+	if slices.Contains(c.Capabilities, "driver.toolKind") {
+		s.Heartbeat.Kind = func(tool string) string {
+			var r struct {
+				Kind string `json:"kind"`
+			}
+			if c.call(ctx, "driver.toolKind", map[string]any{"tool": tool}, &r) != nil {
+				return ""
+			}
+			return r.Kind
+		}
+	}
+	if slices.Contains(c.Capabilities, "driver.modelFamily") {
+		s.Heartbeat.Family = func(model string) (string, int) {
+			var r struct {
+				Label string `json:"label"`
+				Rank  int    `json:"rank"`
+			}
+			if c.call(ctx, "driver.modelFamily", map[string]any{"model": model}, &r) != nil {
+				return model, math.MaxInt
+			}
+			return r.Label, r.Rank
 		}
 	}
 	return s, nil

@@ -1,9 +1,10 @@
 // Command driver is the fixture Driver Connector exercising every Driver
-// capability: patterns, a write tool, a stateful decoder, session flags and
-// ResolveExit.
+// capability: patterns, a write tool, a stateful decoder, session flags,
+// ResolveExit, classification, totals, result and heartbeat tuning.
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -42,6 +43,25 @@ func init() {
 				return 0, fmt.Errorf("empty log")
 			}
 			return exitCode + strings.Count(string(log), "\n"), nil
+		},
+		Classify:            driver.ClassifyOptions{ChunkOversized: true, FirstMatch: true},
+		Totals:              driver.SessionTotals,
+		Result:              driver.LastMessage,
+		DefaultTopLevelRole: "lead",
+		Heartbeat: driver.Heartbeat{
+			// Echoing the raw input proves it crosses as JSON, not as a string.
+			Phase: func(tool string, input json.RawMessage) string {
+				return tool + "@" + string(input)
+			},
+			Kind:        func(tool string) string { return strings.ToLower(tool) },
+			KindOrder:   []string{"read", "edit"},
+			KindPlurals: map[string]string{"search": "searches"},
+			Family: func(model string) (string, int) {
+				if strings.Contains(model, "opus") {
+					return "opus", 0
+				}
+				return model, 3
+			},
 		},
 	})
 }

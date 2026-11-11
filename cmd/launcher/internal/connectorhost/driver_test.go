@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,6 +17,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
+	"spindrift.dev/launcher/internal/logscan"
 )
 
 func strategy(t *testing.T, name string) driverkit.Strategy {
@@ -338,5 +340,86 @@ func TestLogWindow(t *testing.T) {
 	// cumulatively still ends the walk.
 	if got := window("ab\n" + quotes + huge + quotes); got != quotes+quotes {
 		t.Errorf("window = %d bytes, want the two escaped lines", len(got))
+	}
+}
+
+func TestDriverStrategyCarriesTuning(t *testing.T) {
+	s := strategy(t, "driver.wasm")
+	if want := (driverkit.ClassifyOptions{Oversized: logscan.ChunkOversized, FirstMatch: true}); s.Classify != want {
+		t.Errorf("Classify = %+v, want %+v", s.Classify, want)
+	}
+	if s.Totals != driverkit.SessionTotals {
+		t.Errorf("Totals = %v, want SessionTotals", s.Totals)
+	}
+	if s.Result != driverkit.LastMessage {
+		t.Errorf("Result = %v, want LastMessage", s.Result)
+	}
+	if s.DefaultTopLevelRole != "lead" {
+		t.Errorf("DefaultTopLevelRole = %q, want lead", s.DefaultTopLevelRole)
+	}
+	h := s.Heartbeat
+	if want := []string{"read", "edit"}; !reflect.DeepEqual(h.KindOrder, want) {
+		t.Errorf("KindOrder = %v, want %v", h.KindOrder, want)
+	}
+	if want := map[string]string{"search": "searches"}; !reflect.DeepEqual(h.KindPlurals, want) {
+		t.Errorf("KindPlurals = %v, want %v", h.KindPlurals, want)
+	}
+	if h.Phase == nil || h.Kind == nil || h.Family == nil {
+		t.Fatalf("heartbeat funcs = %v %v %v, want all wired from their capabilities", h.Phase == nil, h.Kind == nil, h.Family == nil)
+	}
+	if got := h.Phase("Task", json.RawMessage(`{"a":1}`)); got != `Task@{"a":1}` {
+		t.Errorf("Phase = %q", got)
+	}
+	if got := h.Kind("Read"); got != "read" {
+		t.Errorf("Kind = %q, want read", got)
+	}
+	if l, r := h.Family("claude-opus-4"); l != "opus" || r != 0 {
+		t.Errorf("Family(opus) = %q, %d", l, r)
+	}
+	if l, r := h.Family("gpt"); l != "gpt" || r != 3 {
+		t.Errorf("Family(gpt) = %q, %d", l, r)
+	}
+}
+
+func TestDriverWithoutTuningStaysAtZeroValues(t *testing.T) {
+	s := strategy(t, "seamtest-driver.wasm")
+	if s.Classify != (driverkit.ClassifyOptions{}) || s.Totals != driverkit.PerCallTotals ||
+		s.Result != driverkit.ResultEvents || s.DefaultTopLevelRole != "" {
+		t.Errorf("tuning = %+v %v %v %q, want zero values", s.Classify, s.Totals, s.Result, s.DefaultTopLevelRole)
+	}
+	h := s.Heartbeat
+	if h.Phase != nil || h.Kind != nil || h.Family != nil || h.KindOrder != nil || h.KindPlurals != nil {
+		t.Errorf("Heartbeat = %+v, want zero", h)
+	}
+}
+
+func TestDriverStrategyRefusesUnknownEnum(t *testing.T) {
+	for _, field := range []string{"totals", "result"} {
+		t.Run(field, func(t *testing.T) {
+			c := loadWasm(t, answeringGuest([]string{"driver"},
+				`{"result":{"name":"x","`+field+`":"bogus"}}`))
+			if _, err := c.DriverStrategy(); !errors.Is(err, connectorhost.ErrCall) {
+				t.Fatalf("err = %v, want ErrCall", err)
+			}
+		})
+	}
+}
+
+func TestDriverHeartbeatFuncsFailClosedWhenCallFails(t *testing.T) {
+	c := loadWasm(t, answeringGuest([]string{"driver", "driver.toolPhase", "driver.toolKind", "driver.modelFamily"},
+		`{"result":{"name":"x"}}`))
+	s, err := c.DriverStrategy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = c.Close(t.Context())
+	if got := s.Heartbeat.Phase("Task", nil); got != "" {
+		t.Errorf("Phase = %q, want empty", got)
+	}
+	if got := s.Heartbeat.Kind("Task"); got != "" {
+		t.Errorf("Kind = %q, want empty", got)
+	}
+	if l, r := s.Heartbeat.Family("m"); l != "m" || r != math.MaxInt {
+		t.Errorf("Family = %q, %d, want the id at the last rank", l, r)
 	}
 }

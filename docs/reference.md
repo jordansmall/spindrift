@@ -2417,7 +2417,9 @@ This is protocol version **0.1.0**. The host is
   calls with `ErrUnusable`.
 - **Driver capabilities.** Part of 0.1.0. A Driver Connector advertises
   capability `"driver"`, meaning it serves the first six methods below, and
-  optionally `"driver.resolveExit"`. The host's `DriverStrategy` builds a
+  optionally `"driver.resolveExit"`, `"driver.toolPhase"`, `"driver.toolKind"`
+  and `"driver.modelFamily"`, each serving the method of the same name. The
+  host's `DriverStrategy` builds a
   `driverkit.Strategy` from them, so everything above the Strategy is
   unchanged. It calls only `driver.describe` when building the Strategy; the
   rest are called at first use, which is where a missing or failing one
@@ -2425,13 +2427,16 @@ This is protocol version **0.1.0**. The host is
 
   | Method | Params | Result |
   |---|---|---|
-  | `driver.describe` | `{}` | `{name, transientPatterns, terminalPatterns, writeTool}`; a pattern is `{substr, reason}` |
+  | `driver.describe` | `{}` | `{name, transientPatterns, terminalPatterns, writeTool, classify, totals, defaultTopLevelRole, result, kindOrder, kindPlurals}`; a pattern is `{substr, reason}`, `classify` is `{chunkOversized, firstMatch}`, `totals` is `"perCall"` or `"session"`, `result` is `"events"` or `"lastMessage"`, and `kindOrder` and `kindPlurals` are the count line's kind vocabulary |
   | `driver.newDecoder` | `{}` | `{decoder}`, an opaque handle |
   | `driver.decode` | `{decoder, line}` | an array of canonical events |
   | `driver.freeDecoder` | `{decoder}` | `null` |
   | `driver.resultEvent` | `{text}` | `{event}`, one log line |
   | `driver.sessionFlags` | `{mode, repoSlug, issue, home}` | `{flags}` |
   | `driver.resolveExit` (optional) | `{log, exitCode}` | `{exitCode}` |
+  | `driver.toolPhase` (optional) | `{tool, input}`, `input` the call's raw JSON | `{phase}` |
+  | `driver.toolKind` (optional) | `{tool}` | `{kind}` |
+  | `driver.modelFamily` (optional) | `{model}` | `{label, rank}` |
 
   The decode output is the canonical event schema of [ADR
   0065](adr/0065-drivers-decode-pass-logs-into-canonical-events.md).
@@ -2449,9 +2454,14 @@ This is protocol version **0.1.0**. The host is
   The host refuses an answer that turns a non-zero exit into 0, keeping the
   original exit code and returning an `ErrCall` error: a failing exit is never
   resolved to success.
-  What does not cross in 0.1.0: `Classify` options, `Totals`, `Heartbeat`
-  tracking, `DefaultTopLevelRole`, the `Result` reader and the stream filter.
-  They stay at driverkit's zero values.
+  Every `describe` field after `writeTool` is optional: an absent one is the
+  zero value, and an unknown `totals` or `result` name is refused with
+  `ErrCall`. The heartbeat's `Phase`, `Kind` and `Family` are set only when
+  their capability is advertised. They have no error return, so a failed call
+  yields an empty phase, an empty kind, or the model id as its own label at
+  the last rank.
+  What does not cross in 0.1.0: the stream filter, which stays at driverkit's
+  zero value.
 - **Versioning.** The protocol version is `0.y.z` and independent of
   spindrift's release version. A `0.y` bump is breaking; a `0.y.z` bump is
   additive. Core accepts its current `0.y` and the one before it, so today
