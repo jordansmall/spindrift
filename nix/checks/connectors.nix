@@ -189,6 +189,14 @@ in
       # The type the module system rebuilds through substSubModules; a lost
       # override would merge two definitions instead of throwing.
       rewrapped = (connectorNames.uniqueRow (pkgs.lib.types.submodule { })).substSubModules [ ];
+      shadowable = connectorNames.uniqueRow (
+        pkgs.lib.types.submodule {
+          options.shadow = pkgs.lib.mkOption {
+            type = pkgs.lib.types.bool;
+            default = false;
+          };
+        }
+      );
       mergeFrom =
         files:
         rewrapped.merge [ "connectors" "dup" ] (
@@ -215,6 +223,26 @@ in
     assert assertMsg (
       !(fails (mergeFrom [ "a.nix" ]))
     ) "control: uniqueRow after substSubModules must merge a single definition";
+    # A Consumer's `spindrift.connectors.<name>.shadow = true` is a switch on
+    # the registered row, not a second registration.
+    assert assertMsg (
+      !(fails (
+        shadowable.merge
+          [ "connectors" "dup" ]
+          [
+            {
+              file = "a.nix";
+              value = { };
+            }
+            {
+              file = "b.nix";
+              value = {
+                shadow = true;
+              };
+            }
+          ]
+      ))
+    ) "a definition setting only `shadow` must not count as a second registration";
     assert assertMsg (
       (configOf oneModule).connectors.dup.knobs.a.env == "DUP_A"
     ) "control: one module registering the row must evaluate";

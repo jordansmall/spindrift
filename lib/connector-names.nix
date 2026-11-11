@@ -1,7 +1,9 @@
 # The error for a Connector row name registered by more than one module
 # (ADR 0073). Pure so nix/checks/connectors.nix can pin the text:
 # builtins.tryEval cannot see thrown messages. `defs` is the module system's
-# definition list; each carries the `file` of the module that wrote it.
+# definition list; each carries the `file` of the module that wrote it. A def
+# that sets nothing but `shadow` is a Consumer's switch on a registered row
+# (issue #6797), not a second registration.
 rec {
   duplicateError =
     name: defs:
@@ -26,7 +28,10 @@ rec {
       merge =
         loc: defs:
         let
-          err = duplicateError (builtins.elemAt loc (builtins.length loc - 1)) defs;
+          switchOnly = d: builtins.isAttrs d.value && builtins.attrNames d.value == [ "shadow" ];
+          err = duplicateError (builtins.elemAt loc (builtins.length loc - 1)) (
+            builtins.filter (d: !(switchOnly d)) defs
+          );
         in
         if err != null then throw err else type.merge loc defs;
       substSubModules = m: uniqueRow (type.substSubModules m);
