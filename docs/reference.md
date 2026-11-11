@@ -2358,7 +2358,8 @@ This is protocol version **0.1.0**. The host is
   {"protocolVersion": "0.1.0", "capabilities": []}
   ```
 
-  `capabilities` is an array of strings, `[]` when empty.
+  `capabilities` is an array of strings, `[]` when empty; both fields are
+  required, and a handshake missing either (or `null`) is malformed.
 - **Encoding.** Arguments and results cross the boundary as bytes, UTF-8
   JSON.
 - **Calls.** A Connector that serves methods exports
@@ -2366,8 +2367,54 @@ This is protocol version **0.1.0**. The host is
   and `connector_call(ptr i32, len i32) -> i64`, which returns the response
   as `ptr << 32 | len`. The request is `{"method": "...", "params": {...}}`;
   the response is `{"result": ...}` or `{"error": "..."}`, and an unknown
-  method is an `error`. The host wraps any failed call in `ErrCall`, refuses a
-  response over 64 MiB, and makes one call at a time per Connector.
+  method is an `error`. A module with neither export still loads; a call to
+  it fails with `ErrExport`. A Connector is safe for concurrent use: the host
+  makes one call at a time into the module. Every failed call wraps `ErrCall`
+  and, for a guest failure, the specific error under Limits too, so
+  `errors.Is` matches both. A Connector-reported `error` is an answer: it
+  wraps `ErrCall` alone and the Connector stays usable.
+- **Limits.** Every call into the module runs under a wall-clock budget:
+  30 seconds for `_initialize`, 5 seconds for the handshake, and one budget
+  shared by a call's `connector_alloc` and `connector_call`. Module memory is
+  capped: a declared minimum above 64 MiB is refused at load, and growth past
+  the cap fails the call. A method call's limits grow with its request, since
+  a correct Connector's time, memory and output grow with its input: its
+  budget is 5 seconds plus 60 seconds per MiB of request, its memory cap
+  64 MiB plus 16 bytes per request byte, and its response cap 8 MiB plus 6
+  bytes per request byte (a `\u00XX` escape is the most one byte becomes).
+  The handshake sends no request and gets these bases. The host encodes a
+  request without HTML escaping and refuses one over 8 MiB with
+  `ErrRequestTooLarge` before the guest sees it, so the scaled limits top out
+  at 5 seconds plus 8 minutes, 192 MiB of memory and 56 MiB of response. That
+  ceiling is a fixed bound, reached only by a request at the 8 MiB cap, and a
+  correct Connector needs it (decode runs at 4 to 11 s per MiB under the
+  interpreter). The Connector stays usable: a Driver's `decode` line over the
+  cap becomes an unparsed event, and a `resolveExit` log whose request would
+  pass it is cut to the newest whole lines that fit, skipping any single line
+  too large to fit alone and keeping older lines behind it. The memory cap
+  never drops: a call is allowed the highest cap any call so far had, since
+  grown memory stays grown. The sizes a module declares
+  are capped too, and checked at load before the module is compiled: table
+  minimums total at most 65536 entries, a function frame (parameters,
+  declared locals and the most operands its stack holds, read off its
+  instructions) takes at most 2048 slots, the module declares at most
+  1,048,576 locals, and a vector count larger than the bytes left in its
+  section is refused. The reference-types, SIMD and multi-value proposals are
+  off, so a module that uses any of their instructions does not compile. The
+  handshake result and a call response are each checked against their cap
+  before the bytes are read, and must be valid UTF-8 JSON. Each failure has
+  its own error: `ErrBudget`, `ErrTrap`, `ErrMemoryCap` (memory only),
+  `ErrDeclaredSize` (a declared size over its cap, refused at load),
+  `ErrOutputTooLarge`, `ErrRequestTooLarge` (the request, over 8 MiB),
+  `ErrMalformedOutput` (a pointer outside module memory, invalid UTF-8 or
+  JSON, a response that is not a `{result, error}` envelope, or a result that
+  does not decode into the caller's value) and `ErrExport` (an export, the
+  `memory` export included, that is missing or has the wrong signature, or a
+  start section, which would run unbudgeted at load: init goes in
+  `_initialize`). A load failure wraps `ErrHandshake` and a call failure
+  wraps `ErrCall`. After any failed guest call, `ErrExport` and
+  `ErrRequestTooLarge` aside, the Connector is closed and refuses further
+  calls with `ErrUnusable`.
 - **Driver capabilities.** Part of 0.1.0. A Driver Connector advertises
   capability `"driver"`, meaning it serves the first six methods below, and
   optionally `"driver.resolveExit"`. The host's `DriverStrategy` builds a
@@ -2395,9 +2442,13 @@ This is protocol version **0.1.0**. The host is
   classifier still sees it. `driver.resolveExit` gets the Pass log's content,
   not a path: the host reads the file, because a Connector has no filesystem.
   The log crosses as a JSON string, so invalid UTF-8 in it reaches the guest
-  as U+FFFD and the content is not byte-exact. The host refuses an answer
-  that turns a non-zero exit into 0, keeping the original exit code and
-  returning an `ErrCall` error: a failing exit is never resolved to success.
+  as U+FFFD and the content is not byte-exact. A log whose request would pass
+  8 MiB is cut to the newest whole lines that fit, since a resolver judges the
+  end of the log. A single line too large to fit alone is skipped, as the
+  native resolvers skip an oversized line, and older lines behind it are kept.
+  The host refuses an answer that turns a non-zero exit into 0, keeping the
+  original exit code and returning an `ErrCall` error: a failing exit is never
+  resolved to success.
   What does not cross in 0.1.0: `Classify` options, `Totals`, `Heartbeat`
   tracking, `DefaultTopLevelRole`, the `Result` reader and the stream filter.
   They stay at driverkit's zero values.
@@ -2407,9 +2458,11 @@ This is protocol version **0.1.0**. The host is
   0.1.z and 0.0.z. Any other version is refused at load with
   `connector protocol "<version>" is outside core's supported range 0.0.x to 0.1.x (core speaks 0.1.0)`,
   naming the Connector's version, core's range and core's own version. A
-  module that is not valid wasm, imports something ungranted, lacks the export
-  or the `memory` export, has the wrong signature, returns malformed JSON or
-  runs past the caller's context deadline fails the handshake instead.
+  module that is not valid wasm, imports something ungranted, declares sizes
+  over the caps above, lacks the export or the `memory` export, has the wrong
+  signature, returns malformed JSON or runs past its time budget or the
+  caller's context deadline fails the handshake instead, and the error also
+  matches `ErrHandshake`.
 - **Go SDK.** Module `spindrift.dev/sdk` under [`sdk/`](../sdk/), separate
   from the launcher module. A Connector calls `connector.Register(capabilities...)`
   from `init()` and serves methods with `connector.Handle(method, fn)`. A
