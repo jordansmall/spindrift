@@ -278,16 +278,22 @@ func signature(params, results []api.ValueType) string {
 	return "(" + names(params) + ") -> (" + names(results) + ")"
 }
 
-// output reads the ptr<<32|len result of a guest call: the length is checked
+// memoryReader is the slice of api.Memory readOutput needs, so tests can fuzz
+// it against a fake memory.
+type memoryReader interface {
+	Read(offset, byteCount uint32) ([]byte, bool)
+}
+
+// readOutput reads the ptr<<32|len result of a guest call: the length is checked
 // before the read, the bytes must be valid UTF-8 JSON, and the copy is the
 // caller's since the guest may reuse its buffer on the next call.
-func (c *Connector) output(name string, packed, limit uint64) ([]byte, error) {
+func readOutput(mem memoryReader, name string, packed, limit uint64) ([]byte, error) {
 	ptr, n := uint32(packed>>32), uint32(packed)
 	// Before mem.Read: the length is the guest's to choose.
 	if uint64(n) > limit {
 		return nil, fmt.Errorf("%s: %w: %d bytes, cap %d", name, ErrOutputTooLarge, n, limit)
 	}
-	raw, ok := c.mem.Read(ptr, n)
+	raw, ok := mem.Read(ptr, n)
 	if !ok {
 		return nil, fmt.Errorf("%s: %w: result points outside module memory", name, ErrMalformedOutput)
 	}
@@ -379,10 +385,8 @@ func (c *Connector) call(ctx context.Context, method string, params, result any)
 		return fail(err)
 	}
 	resp, err := c.exchange(ctx, alloc, call, req)
-	if err == nil && resp.Error == nil && result != nil {
-		if uerr := json.Unmarshal(resp.Result, result); uerr != nil {
-			err = fmt.Errorf("decode result: %w: %w", ErrMalformedOutput, uerr)
-		}
+	if err == nil {
+		err = decodeResult(resp, result)
 	}
 	if err != nil {
 		c.dead = true
@@ -430,15 +434,32 @@ func (c *Connector) exchange(ctx context.Context, alloc, call api.Function, req 
 	if err != nil {
 		return nil, err
 	}
-	raw, err := c.output("connector_call", res[0], lim.output)
+	raw, err := readOutput(c.mem, "connector_call", res[0], lim.output)
 	if err != nil {
 		return nil, err
 	}
+	return decodeResponse(raw)
+}
+
+// decodeResponse decodes the {result, error} envelope connector_call returned.
+func decodeResponse(raw []byte) (*response, error) {
 	var resp response
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return nil, fmt.Errorf("connector_call: %w: malformed response: %w", ErrMalformedOutput, err)
 	}
 	return &resp, nil
+}
+
+// decodeResult decodes a successful response's result into result; a
+// Connector-reported error or a nil result has nothing to decode.
+func decodeResult(resp *response, result any) error {
+	if resp.Error != nil || result == nil {
+		return nil
+	}
+	if err := json.Unmarshal(resp.Result, result); err != nil {
+		return fmt.Errorf("decode result: %w: %w", ErrMalformedOutput, err)
+	}
+	return nil
 }
 
 type handshake struct {
@@ -552,18 +573,28 @@ func (c *Connector) load(ctx context.Context, wasm []byte) (*handshake, error) {
 	if err != nil {
 		return fail(err)
 	}
-	raw, err := c.output("connector_handshake", res[0], lim.output)
+	raw, err := readOutput(c.mem, "connector_handshake", res[0], lim.output)
 	if err != nil {
 		return fail(err)
 	}
+	h, err := decodeHandshake(raw)
+	if err != nil {
+		return fail(err)
+	}
+	return h, nil
+}
+
+// decodeHandshake decodes the handshake result; protocolVersion and
+// capabilities are both required.
+func decodeHandshake(raw []byte) (*handshake, error) {
 	var h handshake
 	if err := json.Unmarshal(raw, &h); err != nil {
-		return fail(fmt.Errorf("connector_handshake: %w: %w", ErrMalformedOutput, err))
+		return nil, fmt.Errorf("connector_handshake: %w: %w", ErrMalformedOutput, err)
 	}
-	// null and {} decode cleanly. Both fields are required, capabilities as [] when
-	// empty (the SDK always emits it so).
+	// null and {} decode cleanly, so check the fields; capabilities is [] when
+	// empty because the SDK always emits it.
 	if h.ProtocolVersion == "" || h.Capabilities == nil {
-		return fail(fmt.Errorf("connector_handshake: %w: protocolVersion and capabilities are required", ErrMalformedOutput))
+		return nil, fmt.Errorf("connector_handshake: %w: protocolVersion and capabilities are required", ErrMalformedOutput)
 	}
 	return &h, nil
 }
