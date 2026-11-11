@@ -460,14 +460,15 @@ type handshake struct {
 // a wall-clock budget. A call's budget, memory cap and output cap each grow with
 // the size of its request (limitsFor), from the bases above.
 func Load(ctx context.Context, wasm []byte) (*Connector, error) {
-	// The interpreter, not wazero's compiler: #6798 tracks whether the launcher
-	// should adopt LoadCompiled, which tests already use.
+	// The interpreter, not wazero's compiler: its per-line cost is well inside
+	// the heartbeat's line rate (ADR 0073, amendment for #6798).
 	return loadWith(ctx, wasm, wazero.NewRuntimeConfigInterpreter(), nil)
 }
 
 // LoadCompiled is Load under wazero's compiler where the platform has one,
 // trading a slower load for much cheaper guest calls. It is for test binaries
-// that push many lines through one Connector; the launcher uses Load (#6798).
+// that push many lines through one Connector; the launcher uses Load (ADR 0073,
+// amendment for #6798).
 // A non-empty cacheDir keeps the compiled module on disk, shared across
 // processes; "" disables it.
 func LoadCompiled(ctx context.Context, wasm []byte, cacheDir string) (*Connector, error) {
