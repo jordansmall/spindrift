@@ -202,3 +202,10 @@ and every `envFiles` env. A file-backed env can carry a literal secret without
 a credential rule naming it, as pi's `PI_MODELS_CONTENT` can through an
 `apiKey` in `models.json`. The render stays sorted and deduplicated, and the
 credential-rule envs it already held are unchanged.
+
+## Amendment (issue #6796): the rules travel in the input document
+
+Item 7's "should the registry ever open" has happened (ADR 0073). A
+Connector's Driver row renders its Descriptor facts, credential rules
+included, into the launcher input document's `drivers` section, and the
+generated Descriptor is the fallback when a binary has no document or rows.

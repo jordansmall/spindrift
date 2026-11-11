@@ -56,7 +56,9 @@ adapter, spec, profile, plugin.
 The Driver facts the host needs outside the Pass log — its name, whether its
 model ids are Provider-namespaced, and its credential rules — generated from
 the Driver's Nix row, as the backend Descriptor is from its backend's row
-(ADR 0066). _Avoid_: driver config, driver metadata.
+(ADR 0066). A Driver row a Connector contributes from outside core travels in
+the launcher input document; the generated Descriptor is the fallback.
+_Avoid_: driver config, driver metadata.
 
 **Credential rule**:
 One way a Driver can be authenticated: one entry in a Driver row's

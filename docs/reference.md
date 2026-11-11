@@ -300,7 +300,8 @@ patch rung is on: the tracker and `CODE_FORGE` must be a matching
 
 Every runtime knob is also a `--flag`. Precedence is **flag > flake `settings`
 > baked default** (ADR 0020): nix renders the resolved `settings` values (plus
-image/agent-file artifacts) into one Launcher input document, passed to the
+image/agent-file artifacts, and any Connector Driver rows) into one Launcher
+input document, passed to the
 binary via `--input`; an explicit flag overrides it. A knob env var is no
 longer read: the launcher (every verb, `--help` included; only `--version`
 still answers) exits 6 (`config-invalid`; `doctor` exits 2)
@@ -2241,10 +2242,12 @@ and right before handing the roster to a Driver.
 ### Connector subflake shape
 
 A Connector (ADR 0073) is a subflake that adds backend or Driver rows from
-outside core. This section covers only the Nix shape. The root flake
-registers one Connector, `connectors/claude`, and what a registered row
-means at runtime is issue #6751. The worked example is the fixture
-Connector in [`nix/fixtures/connector/`](../nix/fixtures/connector/).
+outside core. This section covers the Nix shape and, under [Driver rows on a
+Connector](#driver-rows-on-a-connector), how a Driver row reaches the
+binaries. The root flake registers one Connector, `connectors/claude`; what
+the other registered facts mean at runtime is issue #6751. The worked example
+is the fixture Connector in
+[`nix/fixtures/connector/`](../nix/fixtures/connector/).
 
 - **Entry point.** `default.nix` is a plain-Nix file that exports
   `lib.connector`, a `callPackage`-style function. It takes `{ core }` and
@@ -2319,11 +2322,50 @@ Connector in [`nix/fixtures/connector/`](../nix/fixtures/connector/).
   The "Adding a Connector" checklist in
   [CONTRIBUTING.md](../CONTRIBUTING.md#adding-a-connector) lists the pieces.
 
+#### Driver rows on a Connector
+
+A Connector row may carry `driver`, a Driver row in the `lib/drivers/*.nix`
+shape (its `name` is the Driver's name and must equal the Connector's name;
+`mkHarness` throws otherwise), and a Harness selects it as its
+Driver like any core one (`agents.drivers.<name>` keeps working). The flake
+module hands every such row to `mkHarness` as `driverRows`, keyed by
+Connector name. A Driver outside the core registry also sets `module`, a
+function of `pkgs` returning its Driver Connector's wasm file
+(`module = pkgs: "${drv}/driver.wasm";`).
+
+`mkHarness` renders the rows outside the core registry (the Descriptor facts
+plus the module path) into the Launcher input document's `drivers` section and
+into a rows file the Box entrypoint passes as `--driver-rows-file`
+(`DRIVER_ROWS_FILE` in the driver preamble); the handoff carries it on to the
+orchestrator and driver-exec. In the binaries, the `driverrows` package
+overlays those rows on the generated Driver Descriptors, and a row's Driver
+loads lazily through the Connector host. A native Strategy always wins, so
+`claude`'s stays authoritative even though its Connector contributes a row
+(without a `module` yet). With no outside rows nothing changes, and a binary
+with no rows to read falls back to the generated Descriptors
+(`descriptor_gen.go`); Quickstart has no input document and always uses that
+fallback.
+
+`mkHarness` fails evaluation on a row that:
+
+- is outside the core registry and has no `module`;
+- shares a core Driver's name but whose Descriptor facts differ from core's,
+  since the Go registry would then disagree with Nix;
+- names a credential env (in `credentials` or `envFiles`) outside the set
+  generated from the core rows, because the Box's scrub list and the
+  runner's off-argv set render from core rows only.
+
+The `hooks` column (`lib/bash-hooks.nix`) is core-only, so an outside Driver
+gets no per-Driver guard hook rows yet. Runners stay outside the Connector
+seam (ADR 0073 point 8).
+
 `nix/checks/connectors.nix` pins the registry: the fixture's row registers,
 its knob reaches `spindrift.envSchema`, a Consumer without a Connector
 evaluates as before, the fixture takes the core it is handed, a row name
 registered twice fails, and a knob that reuses a core env fails naming the
-Connector.
+Connector. `nix/checks/connector-driver-rows.nix` pins the Driver rows: the
+fixture's row reaches the input document and the Box rows file, and each
+refusal above fails evaluation.
 
 `nix/checks/connector-escape-guard.nix` keeps a Connector self-contained. It
 fails when any `*.nix` under `connectors/<name>/` or the fixture Connector

@@ -98,4 +98,7 @@ is built now as a platform bet, with `claude` proven first in shadow mode on
 dogfood (spec #6751). Point 2's rejection of Nix-time Go composition stands,
 for the same vendor-hash reason and because no Consumer would get cached
 binaries. Point 5 stands: core's test fake Driver becomes a Connector, and
-native Strategies live only through a migration window.
+native Strategies live only through a migration window. Point 3's route for a
+Consumer row's facts, the launcher input document with the generated
+Descriptor as fallback, is how a Connector's Driver row reaches the binaries
+(issue #6796).

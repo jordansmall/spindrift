@@ -163,3 +163,9 @@ recorded:
   document only: the env-first lookup is gone (shipped in issue #6611). With
   the struct, a typo in an artifact key becomes a compile error instead of a
   silently empty value.
+
+## Amendment (issue #6796): a `drivers` section
+
+The input document may carry a `drivers` section: the Descriptor facts and
+wasm module path of each Driver row a Connector contributes from outside the
+core registry (ADR 0073). It is absent when there are none.
