@@ -242,3 +242,20 @@ func TestLoadHonoursDeadline(t *testing.T) {
 		t.Fatalf("Load took %v past a 100ms deadline", d)
 	}
 }
+
+// A Driver Connector is granted no Host calls (ADR 0073 rule 2): a module
+// advertising "driver" and importing one fails to link.
+func TestLoadRefusesHostCallImport(t *testing.T) {
+	hs, fns := connectorFns([]string{"driver"}, allocOff, 0)
+	wasm := guestModule([][2]string{{"spindrift", "http_request"}}, []dataSeg{{0, hs}}, fns...)
+	c, err := connectorhost.Load(context.Background(), wasm)
+	if c != nil {
+		_ = c.Close(context.Background())
+	}
+	if !errors.Is(err, connectorhost.ErrHandshake) {
+		t.Fatalf("err = %v, want ErrHandshake", err)
+	}
+	if !strings.Contains(err.Error(), "spindrift") {
+		t.Errorf("error %q does not name the import module", err)
+	}
+}

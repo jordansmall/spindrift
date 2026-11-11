@@ -193,6 +193,8 @@ func Load(ctx context.Context, wasm []byte) (*Connector, error) {
 // Connector holding its module state.
 func instantiate(ctx context.Context, rt wazero.Runtime, wasm []byte) (*Connector, error) {
 	fail := func(err error) (*Connector, error) { return nil, fmt.Errorf("%w: %w", ErrHandshake, err) }
+	// WASI is the only host module. A Driver Connector must stay granted no
+	// Host calls (ADR 0073 rule 2) when backend Host calls arrive.
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
 		return fail(err)
 	}
