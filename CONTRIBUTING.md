@@ -271,6 +271,12 @@ and in the in-box `box` program; the only bash left is the generated shim that
   Its own Go module (own `go.mod`, stdlib only), kept outside the
   Daemon/launcher filesets so a Dashboard commit never moves the Daemon's
   store path; `nix/dashboard.nix` builds it.
+- **`sdk/`** — the Connector Go SDK
+  ([ADR 0073](docs/adr/0073-backends-and-drivers-are-trust-no-one-wasm-connectors.md)).
+  Its own Go module (`spindrift.dev/sdk`), so Connector authors do not depend
+  on core internals. It carries a published copy of the event vocabulary,
+  kept in parity with driverkit by `sdk/event/parity_test.go`. Fixture
+  Connectors live under `nix/fixtures/connector-wasm`.
 - **`agent/`** — `entrypoint.sh`, the generated shim, and the Driver's hook
   scripts. The shim has no logic: `lib/image.nix` renders the preambles ahead
   of one `exec box` line, and `box` (`cmd/launcher/box`) does the rest
