@@ -11,17 +11,19 @@ permissions:
   actions: write
 
 jobs:
-  # Classifies the PR diff as `docs` or `code` (issue #5155). The heavy jobs
-  # skip on `docs` here, inside the workflow, never via `paths-ignore`: a
-  # commit with no checks reads rollup state NONE, which the launcher's CI
-  # watcher waits out until its deadline, so a docs-only agent PR would never
-  # land. Pushes to main always run the full matrix, which also keeps main's
-  # nix store cache whole.
+  # Classifies the PR diff as `docs`, `connector` (only docs and
+  # connectors/<name>/ paths changed) or `code` (issue #5155), and lists the
+  # Connectors it touches. The heavy jobs skip on `docs` and `connector` here,
+  # inside the workflow, never via `paths-ignore`: a commit with no checks
+  # reads rollup state NONE, which the launcher's CI watcher waits out until
+  # its deadline, so a docs-only agent PR would never land. Pushes to main
+  # always run the full matrix, which also keeps main's nix store cache whole.
   changes:
     name: classify changes
     runs-on: ubuntu-latest
     outputs:
       kind: ${{ steps.classify.outputs.kind }}
+      connectors: ${{ steps.classify.outputs.connectors }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -83,13 +85,16 @@ jobs:
           MERGE_BASE: ${{ steps.diff.outputs.merge-base }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          # A push is an empty diff: `code`, and no Connector lane.
+          diff=/dev/null
           if [ "$EVENT" = pull_request ]; then
-            kind=$(bash .github/scripts/ci-changes.sh "$MERGE_BASE" "$HEAD_SHA" <"$RUNNER_TEMP/diff")
-          else
-            kind=code
+            diff=$RUNNER_TEMP/diff
           fi
+          kind=$(bash .github/scripts/ci-changes.sh "$MERGE_BASE" "$HEAD_SHA" <"$diff")
+          connectors=$(bash .github/scripts/ci-changes.sh --connectors "$MERGE_BASE" "$HEAD_SHA" <"$diff")
           echo "kind=$kind" >>"$GITHUB_OUTPUT"
-          echo "change kind: $kind"
+          echo "connectors=$connectors" >>"$GITHUB_OUTPUT"
+          echo "change kind: $kind; Connectors: $connectors"
 
   check:
     name: flake check + image realize (${{ matrix.nix-system }})
@@ -275,11 +280,12 @@ jobs:
 
   # The docs-only lane (issue #5155): one Linux runner building the checks
   # that read docs files, in place of the matrix above. aarch64 because its
-  # runner finishes the same work faster than the x86_64 one.
+  # runner finishes the same work faster than the x86_64 one. A Connector-only
+  # PR runs it too, since its docs edits have no other lane.
   docs:
     name: docs checks (aarch64-linux)
     needs: changes
-    if: needs.changes.outputs.kind == 'docs'
+    if: needs.changes.outputs.kind == 'docs' || needs.changes.outputs.kind == 'connector'
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
@@ -297,12 +303,47 @@ jobs:
       - name: Build the docs checks
         run: nix build .#packages.aarch64-linux.checks-docs --print-build-logs
 
+  # One leg per Connector the diff touches, checked through connector-dev
+  # against the PR's own core tree with no lock write, so a core-and-Connector
+  # contract change lands as one atomic PR (issue #6771).
+  connector:
+    name: connector ${{ matrix.connector }} (x86_64-linux)
+    needs: changes
+    if: needs.changes.outputs.connectors != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        connector: ${{ fromJSON(needs.changes.outputs.connectors) }}
+    steps:
+      # connector-dev passes the checkout to Nix as a git+file:// input; full
+      # history keeps Nix from rejecting it as shallow.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
+
+      - name: Restore the nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-x86_64-linux-${{ github.sha }}
+          restore-prefixes-first-match: nix-x86_64-linux-
+          save: false
+
+      - name: Check the Connector against this PR's core
+        env:
+          CONNECTOR: ${{ matrix.connector }}
+        run: |
+          nix run .#connector-dev -- "$CONNECTOR" flake check --print-build-logs
+
   # The single required status check (issue #5155): branch protection names
   # this job alone, so it runs whatever the change kind and passes only when
   # the lane that kind requires succeeded and nothing failed or was cancelled.
   ci-ok:
     name: ci-ok
-    needs: [changes, check, check-macos, docs]
+    needs: [changes, check, check-macos, docs, connector]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -326,13 +367,20 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
           KIND: ${{ needs.changes.outputs.kind }}
+          CONNECTORS: ${{ needs.changes.outputs.connectors }}
           ON_MAIN: ${{ github.ref == 'refs/heads/main' }}
         run: |
           if [ "$KIND" = docs ]; then
             required=(changes docs)
+          elif [ "$KIND" = connector ]; then
+            required=(changes docs connector)
           elif [ "$ON_MAIN" = true ]; then
             required=(changes check check-macos)
           else
             required=(changes check)
+          fi
+          # Fails closed: a missing or malformed output makes the lane required.
+          if [ "$KIND" != connector ] && [ "$CONNECTORS" != '[]' ]; then
+            required+=(connector)
           fi
           bash .github/scripts/ci-ok.sh "${required[@]}" <<<"$NEEDS"
