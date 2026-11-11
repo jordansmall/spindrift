@@ -13,7 +13,9 @@ import (
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/driver/driverkit/conformance"
+	"spindrift.dev/launcher/internal/driver/shadow"
 	"spindrift.dev/launcher/internal/golden"
+	"spindrift.dev/launcher/internal/hostop"
 )
 
 const connectorWasmEnv = "SPINDRIFT_DRIVER_CONNECTOR_WASM"
@@ -148,5 +150,36 @@ func TestConnectorResultEvent(t *testing.T) {
 		if !bytes.Equal(got, want) {
 			t.Errorf("ResultEvent(%q) = %q; want %q", text, got, want)
 		}
+	}
+}
+
+// A shadow run of the real Connector over every corpus Pass log is the clean
+// baseline: a divergence here is a bug in the port, and would be noise in a
+// live shadow run.
+func TestConnectorShadowRunIsClean(t *testing.T) {
+	wasm, err := os.ReadFile(connectorWasm(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs, err := filepath.Glob(filepath.Join("testdata", "corpus", "*", "pass.jsonl"))
+	if err != nil || len(logs) == 0 {
+		t.Fatalf("corpus Pass logs = %v, err = %v", logs, err)
+	}
+	for _, log := range logs {
+		t.Run(filepath.Base(filepath.Dir(log)), func(t *testing.T) {
+			var summary *hostop.ShadowSummary
+			shadow.Run(context.Background(), claude.Strategy, wasm, log, 0, func(op hostop.SpindriftOp) {
+				switch {
+				case op.Divergence != nil:
+					d := op.Divergence
+					t.Errorf("%s divergence at line %d: %s\n native: %s\n shadow: %s", d.Check, d.LineNo, d.Line, d.Native, d.Shadow)
+				case op.ShadowSummary != nil:
+					summary = op.ShadowSummary
+				}
+			})
+			if summary == nil || !summary.Loaded || summary.Error != "" || summary.Compared == 0 {
+				t.Errorf("summary = %+v, want a loaded, error-free run that compared lines", summary)
+			}
+		})
 	}
 }
