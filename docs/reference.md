@@ -2242,9 +2242,9 @@ and right before handing the roster to a Driver.
 
 A Connector (ADR 0073) is a subflake that adds backend or Driver rows from
 outside core. This section covers only the Nix shape. The root flake
-registers no Connector yet, and what a registered row means at runtime is
-issue #6751. The worked example is the fixture Connector in
-[`nix/fixtures/connector/`](../nix/fixtures/connector/).
+registers one Connector, `connectors/claude`, and what a registered row
+means at runtime is issue #6751. The worked example is the fixture
+Connector in [`nix/fixtures/connector/`](../nix/fixtures/connector/).
 
 - **Entry point.** `default.nix` is a plain-Nix file that exports
   `lib.connector`, a `callPackage`-style function. It takes `{ core }` and
@@ -2254,6 +2254,10 @@ issue #6751. The worked example is the fixture Connector in
   ```nix
   { lib.connector = { core }: { flakeModule = import ./module.nix { inherit core; }; }; }
   ```
+
+  A Connector that compiles to wasm also exports `package`, a function of the
+  caller's `pkgs` returning the build (`connectors/claude` returns
+  `$out/claude.wasm`).
 
 - **Module.** `module.nix` is a flake-parts module. It imports
   `core.flakeModules.default` (the module system dedups by path, so a Consumer
@@ -2290,7 +2294,9 @@ issue #6751. The worked example is the fixture Connector in
   standalone only. The batteries root plain-imports each Connector's entry
   point and passes its own `core`, so a Consumer never evaluates two cores.
   The root's list of Connector directories is `connectorDirs` in
-  [`flake.nix`](../flake.nix), empty until the first Connector (issue #6751).
+  [`flake.nix`](../flake.nix); `connectors/claude` is the first, and it builds
+  `package` (the compiled wasm) from the SDK source core exports as `lib.sdkSrc`,
+  not a path out of its directory.
 - **Iterating.** Build or check a Connector against the local core with
   `nix run .#connector-dev -- <connector> <nix-args...>`. `<connector>` is a
   path if it contains `/` or is `.` or `..`; any other word is a bare name
@@ -2492,7 +2498,9 @@ This is protocol version **0.1.0**. The host is
   and `seamtest.Strategy()` loads it as the one Driver every core test runs
   against; no native twin exists. Test binaries load it under wazero's compiler
   with a per-user compilation cache (`connectorhost.LoadCompiled`), while the
-  launcher stays on the interpreter.
+  launcher stays on the interpreter. The claude Connector (`connectors/claude`)
+  is proven the same way by `drivers-claude-go-test`, which sets
+  `SPINDRIFT_DRIVER_CONNECTOR_WASM`.
 
 ### Targeting repos that define their own devShell toolchain
 

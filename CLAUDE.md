@@ -163,7 +163,7 @@ row in `lib/drivers/default.nix`; `nix/checks/go.nix` generates its
 
 The Go version floor is `cmd/launcher/go.mod`'s `go` directive; Go comes from
 the locked `nixpkgs` input, so a bump only needs that input's `go.version` to
-meet it. Bump `dashboard/go.mod`, `sdk/go.mod`, and
+meet it. Bump `dashboard/go.mod`, `sdk/go.mod`, `connectors/claude/go.mod`, and
 `nix/fixtures/connector-wasm/go.mod` alongside.
 
 ## Shell edits
