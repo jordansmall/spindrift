@@ -19,6 +19,7 @@ import (
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/experimental"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
+	"github.com/tetratelabs/wazero/sys"
 )
 
 // ProtocolVersion is the Connector protocol core speaks.
@@ -209,6 +210,18 @@ type Connector struct {
 	// concurrent use, and guards dead.
 	mu   sync.Mutex
 	dead bool // a call failed or Close ran: the module is gone
+	// err is the failure that killed the module; nil after a plain Close.
+	err error
+}
+
+// Err returns the call failure that made the Connector unusable, nil while it
+// is usable or after only Close. It exists for callers whose guest-facing API
+// has no error return, such as a Decoder, which degrades a failed call to an
+// unparsed event.
+func (c *Connector) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.err
 }
 
 // Close releases the Connector's runtime and compilation cache; later calls
@@ -222,6 +235,15 @@ func (c *Connector) Close(ctx context.Context) error {
 		err = errors.Join(err, c.cache.Close(ctx))
 	}
 	return err
+}
+
+// Abort kills the module without taking mu, so it ends a call another goroutine
+// is inside; Close cannot, since call holds mu for the whole exchange. wazero,
+// built WithCloseOnContextDone, stops a running guest once its module closes,
+// and that call then fails and marks the Connector dead as any other failure.
+// mod is set once, in load, so reading it here without mu is safe.
+func (c *Connector) Abort() {
+	_ = c.mod.CloseWithExitCode(context.Background(), sys.ExitCodeContextCanceled)
 }
 
 // applyLimits returns ctx under l's wall-clock budget and raises the memory
@@ -390,9 +412,10 @@ func (c *Connector) call(ctx context.Context, method string, params, result any)
 	}
 	if err != nil {
 		c.dead = true
+		c.err = fail(err)
 		// Not ctx: a cancelled caller must not stop the module being released.
 		_ = c.rt.Close(context.WithoutCancel(ctx))
-		return fail(err)
+		return c.err
 	}
 	if resp.Error != nil {
 		return fail(errors.New(*resp.Error))
