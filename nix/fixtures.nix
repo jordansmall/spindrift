@@ -676,6 +676,38 @@ let
   # Fixture Connectors built as wasip1 reactors for the Connector host tests.
   connectorWasm = import ./connector-wasm.nix { inherit pkgs; };
 
+  # Issue #6796: a Consumer importing the fixture Driver Connector, and the
+  # artifacts its row renders for the launcher (input document) and the Box
+  # (rows file). The Go tests read these instead of hand-written rows. The
+  # document comes from the Consumer's own launcher app; the rows file from a
+  # harness built on the row the Consumer's config holds. `module.wasm` links
+  # the Connector's wasm so it stays in the closure the tests run against.
+  driverConnectorConsumer = connectorConsumerVia [
+    ../lib/flakeModule.nix
+    ((import ./fixtures/connector).lib.connector { core = import ../core; }).flakeModule
+  ];
+  # Shell that sets `doc` to the launcher-run-input document an app program
+  # references.
+  runInputDocOf = program: ''
+    doc=$(grep -o '/nix/store/[a-z0-9]*-launcher-run-input.json' ${program} | head -n 1)
+  '';
+  driverConnectorArtifacts =
+    let
+      row = driverConnectorConsumer.debug.config.spindrift.connectors.fixture.driver;
+      boxHarness = import ../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        driverRows.fixture = row;
+      };
+    in
+    pkgs.runCommand "driver-connector-artifacts" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      mkdir $out
+      ${runInputDocOf driverConnectorConsumer.apps.${system}.default.program}
+      cp "$doc" $out/input.json
+      cp ${boxHarness.internals.driverRowsFile} $out/box-rows.json
+      ln -s "$(jq -r '.drivers[0].module' "$doc")" $out/module.wasm
+    '';
+
   consumerPkgs = moduleConsumer.packages.${system};
   consumerFormatter = moduleConsumer.formatter.${system};
 
@@ -754,6 +786,9 @@ in
     moduleConsumer
     moduleConsumerVia
     connectorConsumerVia
+    driverConnectorConsumer
+    driverConnectorArtifacts
+    runInputDocOf
     consumerPkgs
     consumerFormatter
     templatePkgs

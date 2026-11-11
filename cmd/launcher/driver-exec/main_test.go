@@ -11,6 +11,7 @@ import (
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/driver/drivertest"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/promptassembly"
 )
@@ -483,20 +484,18 @@ func TestMainRunRoutesVerbs(t *testing.T) {
 }
 
 // TestMainRunAppliesHandoffDriverRows pins that driver-exec resolves the
-// handoff's Driver after applying the rows file the handoff names.
+// handoff's Driver after applying the rows file the handoff names. The file is
+// the one the Nix renders for the fixture Driver Connector's row, so the
+// Connector's row reaches an in-box binary through the real artifact.
 func TestMainRunAppliesHandoffDriverRows(t *testing.T) {
-	fixtures := os.Getenv("SPINDRIFT_CONNECTOR_FIXTURES_DIR")
-	if fixtures == "" {
-		t.Skip("SPINDRIFT_CONNECTOR_FIXTURES_DIR is unset")
+	drivertest.Isolate(t)
+	rows := os.Getenv("SPINDRIFT_FIXTURE_DRIVER_ROWS_FILE")
+	if rows == "" {
+		t.Skip("SPINDRIFT_FIXTURE_DRIVER_ROWS_FILE is unset")
 	}
 	dir := t.TempDir()
-	rows := filepath.Join(dir, "rows.json")
-	doc := `[{"name":"fixture","credentials":[],"module":"` + filepath.Join(fixtures, "driver.wasm") + `"}]`
-	if err := os.WriteFile(rows, []byte(doc), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	promptFile := filepath.Join(dir, "prompt.txt")
-	if err := os.WriteFile(promptFile, []byte("go"), 0o600); err != nil {
+	if err := os.WriteFile(promptFile, []byte("run the fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	handoffPath := writeHandoffFile(t, promptassembly.Handoff{

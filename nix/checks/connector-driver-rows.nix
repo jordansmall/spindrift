@@ -22,38 +22,12 @@ let
       }
       // extra
     );
-  # An outside row is a full lib/drivers row plus `module`. Its credential env
-  # must already be one the generated scrub lists know (core's set).
-  fixtureRow = {
-    name = "fixture";
-    package = p: p.hello;
-    bin = "fixture-cli";
-    flagsCommon = "--fixture";
-    skillsDirRelative = ".fixture/skills";
-    agentsJsonTemplate = _: "{}";
-    agentFilesTemplate = _: { };
-    argvShape = {
-      promptStyle = "flag";
-      promptFlag = "-p";
-      modelFlag = "--model";
-      modelOmitEmpty = false;
-      effortFlag = "--effort";
-      order = [
-        "prompt"
-        "model"
-        "session"
-        "driverFlags"
-        "effort"
-      ];
-    };
-    credentials = [
-      {
-        env = [ "ANTHROPIC_API_KEY" ];
-        remedy = "set ANTHROPIC_API_KEY";
-      }
-    ];
-    module = p: "${fixtures.connectorWasm}/driver.wasm";
-  };
+  # The fixture Driver Connector's own row: a full lib/drivers row plus
+  # `module`, with a credential env already in core's generated scrub set.
+  fixtureConnector = (import ../fixtures/connector).lib.connector { core = import ../../core; };
+  fixtureRow =
+    (import ../fixtures/connector/module.nix { core = import ../../core; })
+    .spindrift.connectors.fixture.driver;
   withRows = rows: mkHarness { driverRows = rows; };
   withFixture = mkHarness {
     driver = "fixture";
@@ -139,7 +113,7 @@ in
         # No Connector Driver rows: no `drivers` key and no preamble line, so
         # existing documents and images stay byte-identical.
         jq -e 'has("drivers") | not' ${plainDoc}
-        ! grep -q DRIVER_ROWS_FILE ${plain.internals.driverPreambleFile}
+        if grep -q DRIVER_ROWS_FILE ${plain.internals.driverPreambleFile}; then exit 1; fi
         touch $out
       '';
 
@@ -148,7 +122,7 @@ in
   connector-driver-rows-flake-module-forwards-row =
     let
       consumerWith = modules: fixtures.connectorConsumerVia ([ ../../lib/flakeModule.nix ] ++ modules);
-      withRow = consumerWith [ { spindrift.connectors.fixture.driver = fixtureRow; } ];
+      withRow = consumerWith [ fixtureConnector.flakeModule ];
       without = consumerWith [ ];
       programOf = c: c.apps.${system}.default.program;
     in
@@ -158,7 +132,7 @@ in
     pkgs.runCommand "connector-driver-rows-flake-module-forwards-row"
       { nativeBuildInputs = [ pkgs.jq ]; }
       ''
-        doc=$(grep -o '/nix/store/[a-z0-9]*-launcher-run-input.json' ${programOf withRow} | head -n 1)
+        ${fixtures.runInputDocOf (programOf withRow)}
         jq -e '.drivers | length == 1 and .[0].name == "fixture"' "$doc"
         touch $out
       '';

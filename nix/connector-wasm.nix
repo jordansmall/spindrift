@@ -13,6 +13,12 @@ let
       ./fixtures/connector-wasm
     ];
   };
+  # The fixture Driver is built by the fixture Connector itself, the one source
+  # of its wasm; it keeps its place here for the tests that read driver.wasm.
+  driverWasm = import ./fixtures/connector/package.nix {
+    inherit pkgs;
+    core = import ../core;
+  };
   versionSymbol = "spindrift.dev/sdk/connector.protocolVersion";
 in
 pkgs.runCommand "connector-wasm-fixtures" { nativeBuildInputs = [ pkgs.go ]; } ''
@@ -29,7 +35,7 @@ pkgs.runCommand "connector-wasm-fixtures" { nativeBuildInputs = [ pkgs.go ]; } '
   build probe.wasm ./probe
   build call.wasm ./call
   build seamtest-driver.wasm ./seamtest-driver
-  build driver.wasm ./driver
+  cp ${driverWasm}/driver.wasm $out/driver.wasm
   for mode in trap loop memory oversize malformed invalid; do
     build hostile-$mode.wasm -ldflags=-X=main.mode=$mode ./hostile
   done
