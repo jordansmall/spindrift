@@ -1,5 +1,5 @@
-// Package connector is the Connector author's side of the Connector ABI
-// (protocol 0.1.0, ADR 0073): it hides the wasm export plumbing and the JSON
+// Package connector is the Connector author's side of the Connector protocol
+// (version 0.1.0, ADR 0073): it hides the wasm export plumbing and the JSON
 // encoding so an author only declares capabilities.
 //
 // A Connector is built as a wasip1 reactor
@@ -8,7 +8,10 @@
 // registers from init().
 package connector
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strconv"
+)
 
 // protocolVersion is a var, not a const, so a test fixture can override it
 // with -ldflags=-X spindrift.dev/sdk/connector.protocolVersion=0.2.0.
@@ -38,4 +41,60 @@ func handshakeJSON() ([]byte, error) {
 // uint64 a wasmexport returns: ptr<<32 | len.
 func pack(ptr, length uint32) uint64 {
 	return uint64(ptr)<<32 | uint64(length)
+}
+
+var handlers map[string]func(json.RawMessage) (any, error)
+
+// Handle registers fn as the handler for method, called through the host's
+// connector_call export. Call it from init(); registering a method twice
+// panics.
+func Handle(method string, fn func(params json.RawMessage) (any, error)) {
+	if _, dup := handlers[method]; dup {
+		panic("connector: duplicate handler for method " + strconv.Quote(method))
+	}
+	if handlers == nil {
+		handlers = map[string]func(json.RawMessage) (any, error){}
+	}
+	handlers[method] = fn
+}
+
+type callRequest struct {
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params"`
+}
+
+type errorBody struct {
+	Error string `json:"error"`
+}
+
+// call runs one request and returns the response JSON: {"result": ...} on
+// success, {"error": "..."} on any failure.
+func call(req []byte) []byte {
+	var r callRequest
+	if err := json.Unmarshal(req, &r); err != nil {
+		return errorResponse("malformed request: " + err.Error())
+	}
+	fn, ok := handlers[r.Method]
+	if !ok {
+		return errorResponse("unknown method " + strconv.Quote(r.Method))
+	}
+	res, err := fn(r.Params)
+	if err != nil {
+		return errorResponse(err.Error())
+	}
+	out, err := json.Marshal(struct {
+		Result any `json:"result"`
+	}{res})
+	if err != nil {
+		return errorResponse("encode result: " + err.Error())
+	}
+	return out
+}
+
+func errorResponse(msg string) []byte {
+	out, err := json.Marshal(errorBody{msg})
+	if err != nil {
+		panic(err) // a string cannot fail to marshal
+	}
+	return out
 }
