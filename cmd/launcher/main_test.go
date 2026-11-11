@@ -28,6 +28,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/drivertest"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/forge"
@@ -6825,21 +6826,28 @@ func TestConfigArtifact_EmptyBoxArtifactFollowsRunnerFamily(t *testing.T) {
 
 // A document's Driver rows are applied to the registry before any verb runs,
 // so a Connector-backed Driver is resolvable by name for the whole process.
+// The rows are the `drivers` section of the input document the Nix renders for
+// a Consumer importing the fixture Driver Connector. Only that section is
+// taken: the real document's settings drive a research run this test does not
+// want.
 func TestMainRun_InputDocument_AppliesDriverRows(t *testing.T) {
-	dir := os.Getenv("SPINDRIFT_CONNECTOR_FIXTURES_DIR")
-	if dir == "" {
-		t.Skip("SPINDRIFT_CONNECTOR_FIXTURES_DIR is unset")
+	drivertest.Isolate(t)
+	realDoc := os.Getenv("SPINDRIFT_FIXTURE_DRIVER_DOC")
+	if realDoc == "" {
+		t.Skip("SPINDRIFT_FIXTURE_DRIVER_DOC is unset")
 	}
-	rows, err := json.Marshal([]map[string]any{{
-		"name":        "fixture",
-		"module":      filepath.Join(dir, "driver.wasm"),
-		"credentials": []map[string]any{{"env": []string{"FIXTURE_KEY"}, "modelPrefix": "fx/", "remedy": "set FIXTURE_KEY"}},
-	}})
+	raw, err := os.ReadFile(realDoc)
 	if err != nil {
 		t.Fatal(err)
 	}
+	var parsed struct {
+		Drivers json.RawMessage `json:"drivers"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Drivers) == 0 {
+		t.Fatalf("the Nix-rendered document carries no drivers section (err=%v): %s", err, raw)
+	}
 	docPath := filepath.Join(t.TempDir(), "input.json")
-	if err := os.WriteFile(docPath, []byte(`{"settings":{},"artifacts":{},"drivers":`+string(rows)+`}`), 0o644); err != nil {
+	if err := os.WriteFile(docPath, []byte(`{"settings":{},"artifacts":{},"drivers":`+string(parsed.Drivers)+`}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer

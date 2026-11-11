@@ -1729,6 +1729,7 @@ else
         checkContractFile
         researchOutcomeContractFile
         driverPreambleFile
+        driverRowsFile
         agentPathsPreambleFile
         runInputDocumentFile
         backendBundleDirs
