@@ -50,12 +50,12 @@ func TestBindFlagsRegistersExactlyTheSharedSet(t *testing.T) {
 		"agents-prompt-files", "argv-agents-flag", "argv-effort-flag", "argv-model-flag",
 		"argv-model-omit-empty", "argv-order", "argv-prompt-flag", "argv-prompt-style",
 		"check-contract-file", "comms-contract-file", "driver", "driver-agent-files-dir",
-		"driver-bin", "driver-flags", "effort", "heartbeat-log", "max-budget-tokens",
+		"driver-bin", "driver-flags", "driver-rows-file", "effort", "heartbeat-log", "max-budget-tokens",
 		"max-budget-usd", "model", "outcome-contract-file", "prompts-dir", "registry",
 		"research-outcome-contract-file", "validate-markers-registry",
 	}
-	if len(want) != 24 {
-		t.Fatalf("test table has %d names, want 24", len(want))
+	if len(want) != 25 {
+		t.Fatalf("test table has %d names, want 25", len(want))
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("registered flags = %v, want %v", got, want)
@@ -71,7 +71,7 @@ func TestBindFlagsParsesValues(t *testing.T) {
 		"--argv-prompt-style=positional", "--argv-prompt-flag=-p",
 		"--argv-model-flag=-m", "--argv-agents-flag=--agents", "--argv-effort-flag=-e",
 		"--model=opus", "--effort=high", "--driver=opencode", "--driver-bin=/bin/oc",
-		"--driver-flags=--x", "--heartbeat-log=/hb",
+		"--driver-flags=--x", "--driver-rows-file=/rows.json", "--heartbeat-log=/hb",
 	)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -87,12 +87,13 @@ func TestBindFlagsParsesValues(t *testing.T) {
 		OutcomeContractFile:         "o",
 		ResearchOutcomeContractFile: "ro",
 		Passthrough: Passthrough{
-			Model:        "opus",
-			Effort:       "high",
-			Driver:       "opencode",
-			DriverBin:    "/bin/oc",
-			DriverFlags:  "--x",
-			HeartbeatLog: "/hb",
+			Model:          "opus",
+			Effort:         "high",
+			Driver:         "opencode",
+			DriverBin:      "/bin/oc",
+			DriverFlags:    "--x",
+			DriverRowsFile: "/rows.json",
+			HeartbeatLog:   "/hb",
 			ArgvShape: ArgvShape{
 				PromptStyle: "positional",
 				PromptFlag:  "-p",

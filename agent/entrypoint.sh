@@ -39,6 +39,7 @@ exec box \
   --model "${MODEL:-}" \
   --effort "${EFFORT:-}" \
   --driver "$DRIVER_NAME" \
+  --driver-rows-file "${DRIVER_ROWS_FILE:-}" \
   --driver-bin "$DRIVER_BIN" \
   --driver-flags "$DRIVER_FLAGS_COMMON" \
   --heartbeat-log "${HEARTBEAT_LOG:-}" \

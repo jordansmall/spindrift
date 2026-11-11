@@ -12,6 +12,7 @@ import (
 	"os"
 
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
+	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/passmachine"
 	"spindrift.dev/launcher/internal/promptassembly"
 )
@@ -50,6 +51,10 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 	handoff, err := promptassembly.LoadHandoffFile(*handoffFile)
 	if err != nil {
+		fmt.Fprintln(stderr, "orchestrator:", err)
+		return 1
+	}
+	if err := driverrows.UseFile(handoff.DriverRowsFile); err != nil {
 		fmt.Fprintln(stderr, "orchestrator:", err)
 		return 1
 	}

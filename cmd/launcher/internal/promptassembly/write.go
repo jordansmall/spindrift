@@ -15,16 +15,17 @@ import (
 // them on once Assemble and Validate both succeed (issue #2975). Issue is not
 // here -- it comes from Env.IssueNumber (issue #2979).
 type Passthrough struct {
-	Model        string
-	Effort       string
-	Driver       string
-	DriverBin    string
-	DriverFlags  string
-	Devshell     bool
-	DevshellName string
-	HeartbeatLog string
-	ArgvShape    ArgvShape
-	Caps         Caps
+	Model          string
+	Effort         string
+	Driver         string
+	DriverBin      string
+	DriverFlags    string
+	DriverRowsFile string
+	Devshell       bool
+	DevshellName   string
+	HeartbeatLog   string
+	ArgvShape      ArgvShape
+	Caps           Caps
 }
 
 // OutputPaths names the files WriteAssembly writes. ReviewPrompt and
@@ -87,6 +88,7 @@ func WriteAssembly(env Env, reg Registry, markers []ValidateMarkerRow, p Passthr
 	}
 	result.Handoff.DriverBin = p.DriverBin
 	result.Handoff.DriverFlags = p.DriverFlags
+	result.Handoff.DriverRowsFile = p.DriverRowsFile
 	result.Handoff.Devshell = p.Devshell
 	result.Handoff.DevshellName = p.DevshellName
 	result.Handoff.Issue = env.IssueNumber

@@ -58,17 +58,18 @@ func (r *boxRun) conflictPass() (string, error) {
 	// the main run re-decides once the rebase is done.
 	p := r.in.Assembly.Passthrough
 	handoff, err := json.Marshal(promptassembly.Handoff{
-		Model:        p.Model,
-		Effort:       p.Effort,
-		Driver:       p.Driver,
-		DriverBin:    p.DriverBin,
-		DriverFlags:  p.DriverFlags,
-		Devshell:     p.Devshell,
-		DevshellName: p.DevshellName,
-		Issue:        r.env.IssueNumber,
-		HeartbeatLog: p.HeartbeatLog,
-		ArgvShape:    p.ArgvShape,
-		Caps:         p.Caps,
+		Model:          p.Model,
+		Effort:         p.Effort,
+		Driver:         p.Driver,
+		DriverBin:      p.DriverBin,
+		DriverFlags:    p.DriverFlags,
+		DriverRowsFile: p.DriverRowsFile,
+		Devshell:       p.Devshell,
+		DevshellName:   p.DevshellName,
+		Issue:          r.env.IssueNumber,
+		HeartbeatLog:   p.HeartbeatLog,
+		ArgvShape:      p.ArgvShape,
+		Caps:           p.Caps,
 	})
 	if err != nil {
 		return "", fmt.Errorf("marshal handoff: %w", err)

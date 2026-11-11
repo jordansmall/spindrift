@@ -53,6 +53,7 @@ func (a *AssemblyFlags) BindFlags(fs *flag.FlagSet) {
 	fs.StringVar(&p.Driver, "driver", "claude", "Handoff.Driver")
 	fs.StringVar(&p.DriverBin, "driver-bin", "", "Handoff.DriverBin")
 	fs.StringVar(&p.DriverFlags, "driver-flags", "", "Handoff.DriverFlags")
+	fs.StringVar(&p.DriverRowsFile, "driver-rows-file", "", "Handoff.DriverRowsFile: baked Driver rows JSON, empty for none")
 	fs.StringVar(&p.HeartbeatLog, "heartbeat-log", "", "Handoff.HeartbeatLog")
 	fs.Var((*budgetTokensValue)(&p.Caps.MaxBudgetTokens), "max-budget-tokens", "Handoff.Caps.MaxBudgetTokens")
 	fs.Var((*budgetUSDValue)(&p.Caps.MaxBudgetUSD), "max-budget-usd", "Handoff.Caps.MaxBudgetUSD")

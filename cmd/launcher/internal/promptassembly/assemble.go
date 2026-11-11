@@ -126,6 +126,9 @@ type Handoff struct {
 	Driver      string
 	DriverBin   string
 	DriverFlags string
+	// DriverRowsFile is the baked Driver-rows JSON the in-box binaries apply
+	// before resolving Driver; empty when the Harness has no outside Driver.
+	DriverRowsFile string
 	// Devshell and DevshellName gate whether the Driver runs inside a Nix
 	// devShell wrapper, and which one.
 	Devshell     bool

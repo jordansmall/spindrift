@@ -481,3 +481,34 @@ func TestMainRunRoutesVerbs(t *testing.T) {
 		})
 	}
 }
+
+// TestMainRunAppliesHandoffDriverRows pins that driver-exec resolves the
+// handoff's Driver after applying the rows file the handoff names.
+func TestMainRunAppliesHandoffDriverRows(t *testing.T) {
+	fixtures := os.Getenv("SPINDRIFT_CONNECTOR_FIXTURES_DIR")
+	if fixtures == "" {
+		t.Skip("SPINDRIFT_CONNECTOR_FIXTURES_DIR is unset")
+	}
+	dir := t.TempDir()
+	rows := filepath.Join(dir, "rows.json")
+	doc := `[{"name":"fixture","credentials":[],"module":"` + filepath.Join(fixtures, "driver.wasm") + `"}]`
+	if err := os.WriteFile(rows, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("go"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	handoffPath := writeHandoffFile(t, promptassembly.Handoff{
+		PromptFile:     promptFile,
+		Driver:         "fixture",
+		DriverRowsFile: rows,
+		DriverBin:      writeFakeDriver(t, dir, "fake-driver", "exit 0\n"),
+		ArgvShape:      claudeArgvShape,
+	})
+	var stdout, stderr bytes.Buffer
+	rc := mainRun([]string{"-handoff-file", handoffPath, "-log-path", filepath.Join(dir, "stream.log")}, &stdout, &stderr)
+	if rc != 0 {
+		t.Fatalf("mainRun exit code = %d, want 0 (stderr: %q)", rc, stderr.String())
+	}
+}

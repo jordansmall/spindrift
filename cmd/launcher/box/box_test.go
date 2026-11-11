@@ -1507,7 +1507,7 @@ func allFlags() []string {
 		"--argv-prompt-style=flag", "--argv-prompt-flag=-p", "--argv-model-flag=--model",
 		"--argv-model-omit-empty=0", "--argv-agents-flag=--agents", "--argv-effort-flag=--effort",
 		"--argv-order=prompt model agents", "--model=opus", "--effort=high",
-		"--driver=claude", "--driver-bin=claude", "--driver-flags=--verbose", "--heartbeat-log=/hb",
+		"--driver=claude", "--driver-bin=claude", "--driver-flags=--verbose", "--driver-rows-file=", "--heartbeat-log=/hb",
 		"--max-budget-tokens=1000", "--max-budget-usd=2.5",
 		"--driver-session-cache-dir=/session-cache", "--driver-env-files=A=.a/x B=y", "--branch-prefix=agent/issue-",
 		"--driver-bash-timeout-ms=600000", "--driver-bash-timeout-env=A B",
