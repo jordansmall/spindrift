@@ -144,6 +144,41 @@ func Has(name string) bool {
 	return native || lazy
 }
 
+// NativeStrategy returns the Strategy linked in under name, which an empty name
+// defaults to "claude" for; ok is false for a lazily loaded or unknown Driver.
+func NativeStrategy(name string) (driverkit.Strategy, bool) {
+	d, ok := registry[orDefault(name)].(driverkit.Driver)
+	return d.Strategy(), ok
+}
+
+// shadowRow is what a Driver row declared as the shadow of a native Driver: the
+// Connector module the Box replays each Pass log through to compare, while the
+// native Strategy stays the Driver, or why the row was skipped, which the Box
+// reports instead of failing the run. Exactly one of the two is set.
+type shadowRow struct{ module, skip string }
+
+var shadows = map[string]shadowRow{}
+
+// UseShadow records module as the Connector shadowing the native Driver name.
+func UseShadow(name, module string) { shadows[name] = shadowRow{module: module} }
+
+// SkipShadow records why the shadow row for name was not applied.
+func SkipShadow(name, reason string) { shadows[name] = shadowRow{skip: reason} }
+
+// ShadowSkipped returns why the shadow row for name was skipped, which an empty
+// name defaults to "claude" for.
+func ShadowSkipped(name string) (reason string, ok bool) {
+	row := shadows[orDefault(name)]
+	return row.skip, row.skip != ""
+}
+
+// ShadowModule returns the module shadowing name, which an empty name defaults
+// to "claude" for.
+func ShadowModule(name string) (module string, ok bool) {
+	row := shadows[orDefault(name)]
+	return row.module, row.module != ""
+}
+
 var _ Driver = driverkit.Driver{}
 
 // defaultName is the Driver an empty name selects, matching the nix side's
@@ -157,6 +192,9 @@ func orDefault(name string) string {
 	}
 	return name
 }
+
+// ResolveName returns name, or the default Driver's name when name is empty.
+func ResolveName(name string) string { return orDefault(name) }
 
 // New returns the registered Driver strategy for name. An empty name defaults
 // to "claude".
@@ -188,9 +226,9 @@ func UseDescriptor(d Descriptor) {
 // that restores them, for a test that registers Drivers or applies rows in the
 // process-global registry.
 func Snapshot() (restore func()) {
-	reg, lazy, descs := maps.Clone(registry), maps.Clone(lazyDrivers), slices.Clone(descriptors)
+	reg, lazy, descs, shad := maps.Clone(registry), maps.Clone(lazyDrivers), slices.Clone(descriptors), maps.Clone(shadows)
 	return func() {
-		registry, lazyDrivers, descriptors = reg, lazy, descs
+		registry, lazyDrivers, descriptors, shadows = reg, lazy, descs, shad
 	}
 }
 

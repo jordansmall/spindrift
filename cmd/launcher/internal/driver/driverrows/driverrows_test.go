@@ -209,3 +209,81 @@ func TestUseRejectsDuplicateRowNames(t *testing.T) {
 		t.Error("a duplicate document registered a Driver")
 	}
 }
+
+func TestShadowRowRecordsModuleAndKeepsNativeDriver(t *testing.T) {
+	drivertest.Isolate(t)
+	driver.Register(driverkit.Strategy{Name: "nat"})
+	if _, ok := driver.ShadowModule("nat"); ok {
+		t.Fatal("nat has a shadow before any row")
+	}
+	if err := driverrows.Use(json.RawMessage(`[{"name":"nat","module":"/m/nat.wasm","shadow":true}]`)); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := driver.ShadowModule("nat"); !ok || got != "/m/nat.wasm" {
+		t.Errorf("ShadowModule(nat) = %q, %v, want /m/nat.wasm", got, ok)
+	}
+	after, err := driver.New("nat")
+	if _, native := driver.NativeStrategy("nat"); err != nil || !native || after.Name() != "nat" {
+		t.Errorf("driver.New(nat) = %v, %v, want the native Driver", after, err)
+	}
+}
+
+func TestShadowRowWithoutNativeDriverOrModuleIsSkippedNotFatal(t *testing.T) {
+	drivertest.Isolate(t)
+	driver.Register(driverkit.Strategy{Name: "nat"})
+	driver.RegisterConnector("lazy", func() (driverkit.Strategy, error) { return driverkit.Strategy{Name: "lazy"}, nil })
+	for name, tc := range map[string]struct{ raw, driver string }{
+		"unknown":    {`[{"name":"nope","module":"/x.wasm","shadow":true}]`, "nope"},
+		"connector":  {`[{"name":"lazy","module":"/x.wasm","shadow":true}]`, "lazy"},
+		"moduleless": {`[{"name":"nat","shadow":true}]`, "nat"},
+	} {
+		if err := driverrows.Use(json.RawMessage(tc.raw)); err != nil {
+			t.Errorf("%s: Use = %v, want the shadow skipped", name, err)
+		}
+		if reason, ok := driver.ShadowSkipped(tc.driver); !ok || reason == "" {
+			t.Errorf("%s: ShadowSkipped = %q, %v, want a reason", name, reason, ok)
+		}
+		if _, ok := driver.ShadowModule(tc.driver); ok {
+			t.Errorf("%s: a skipped row left a shadow behind", name)
+		}
+	}
+	if driver.Has("nope") {
+		t.Error("a skipped shadow row registered a Driver")
+	}
+}
+
+// A shadow row is never worth failing the run over: one that disagrees with the
+// native Descriptor or repeats a shadow row is skipped with a reason.
+func TestMalformedShadowRowsAreSkippedNotFatal(t *testing.T) {
+	for name, raw := range map[string]string{
+		"descriptor": `[{"name":"nat","module":"/x.wasm","shadow":true,"providerNamespacedModels":true}]`,
+		"duplicate":  `[{"name":"nat","module":"/x.wasm","shadow":true},{"name":"nat","module":"/y.wasm","shadow":true}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			drivertest.Isolate(t)
+			driver.Register(driverkit.Strategy{Name: "nat"})
+			driver.UseDescriptor(driver.Descriptor{Name: "nat"})
+			if err := driverrows.Use(json.RawMessage(raw)); err != nil {
+				t.Errorf("Use = %v, want the shadow skipped", err)
+			}
+			if reason, ok := driver.ShadowSkipped("nat"); !ok || reason == "" {
+				t.Errorf("ShadowSkipped = %q, %v, want a reason", reason, ok)
+			}
+			if _, ok := driver.ShadowModule("nat"); ok {
+				t.Error("a skipped row left a shadow behind")
+			}
+		})
+	}
+}
+
+func TestShadowRowBesideNativeRowOfSameNameIsFine(t *testing.T) {
+	drivertest.Isolate(t)
+	driver.Register(driverkit.Strategy{Name: "nat"})
+	driver.UseDescriptor(driver.Descriptor{Name: "nat"})
+	if err := driverrows.Use(json.RawMessage(`[{"name":"nat"},{"name":"nat","module":"/m.wasm","shadow":true}]`)); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := driver.ShadowModule("nat"); !ok || got != "/m.wasm" {
+		t.Errorf("ShadowModule(nat) = %q, %v, want /m.wasm", got, ok)
+	}
+}
