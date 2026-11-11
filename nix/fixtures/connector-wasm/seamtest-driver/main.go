@@ -1,6 +1,6 @@
-// Command seamtest-driver is cmd/launcher/internal/seamtest's fake Driver
-// Strategy compiled as a Connector: one JSON-encoded event per line. Keep it
-// in step with that Strategy.
+// Command seamtest-driver is core's fake Driver, compiled as a Connector:
+// cmd/launcher/internal/seamtest loads it as the Strategy every core test
+// runs against. Its log grammar is one JSON-encoded event per line.
 package main
 
 import (

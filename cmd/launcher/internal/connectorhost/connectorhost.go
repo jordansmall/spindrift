@@ -84,8 +84,11 @@ type Connector struct {
 	ProtocolVersion string
 	Capabilities    []string
 
-	rt  wazero.Runtime
-	mem api.Memory
+	rt wazero.Runtime
+	// cache is the compilation cache LoadCompiled configured, nil for Load. Its
+	// compiled engine outlives rt.Close, so Close releases it too.
+	cache wazero.CompilationCache
+	mem   api.Memory
 	// alloc and callFn are nil when the module lacks the call exports.
 	alloc, callFn api.Function
 	// mu serializes guest calls: a wazero module instance is not safe for
@@ -93,8 +96,14 @@ type Connector struct {
 	mu sync.Mutex
 }
 
-// Close releases the Connector's runtime.
-func (c *Connector) Close(ctx context.Context) error { return c.rt.Close(ctx) }
+// Close releases the Connector's runtime and compilation cache.
+func (c *Connector) Close(ctx context.Context) error {
+	err := c.rt.Close(ctx)
+	if c.cache != nil {
+		err = errors.Join(err, c.cache.Close(ctx))
+	}
+	return err
+}
 
 // call sends one request through connector_call and decodes the response's
 // result into result, which may be nil to ignore it. A Connector-reported
@@ -175,17 +184,45 @@ type handshake struct {
 // source, and WASI is the only host module instantiated, so a Connector
 // importing anything else fails to link.
 func Load(ctx context.Context, wasm []byte) (*Connector, error) {
-	// The interpreter, not wazero's compiler: whether the compiler earns its
-	// complexity is decided later from measured per-line cost.
-	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfigInterpreter().WithCloseOnContextDone(true))
+	// The interpreter, not wazero's compiler: #6798 tracks whether the launcher
+	// should adopt LoadCompiled, which tests already use.
+	return load(ctx, wasm, wazero.NewRuntimeConfigInterpreter().WithCloseOnContextDone(true), nil)
+}
+
+// LoadCompiled is Load under wazero's compiler where the platform has one,
+// trading a slower load for much cheaper guest calls. It is for test binaries
+// that push many lines through one Connector; the launcher uses Load (#6798).
+// A non-empty cacheDir keeps the compiled module on disk, shared across
+// processes; "" disables it.
+func LoadCompiled(ctx context.Context, wasm []byte, cacheDir string) (*Connector, error) {
+	cfg := wazero.NewRuntimeConfig().WithCloseOnContextDone(true)
+	var cache wazero.CompilationCache
+	if cacheDir != "" {
+		// The cache only speeds up the load, so a failure to build one is not
+		// a load failure.
+		if cc, err := wazero.NewCompilationCacheWithDir(cacheDir); err == nil {
+			cache = cc
+			cfg = cfg.WithCompilationCache(cache)
+		}
+	}
+	return load(ctx, wasm, cfg, cache)
+}
+
+// load takes ownership of cache, which may be nil.
+func load(ctx context.Context, wasm []byte, cfg wazero.RuntimeConfig, cache wazero.CompilationCache) (*Connector, error) {
+	rt := wazero.NewRuntimeWithConfig(ctx, cfg)
 	c, err := instantiate(ctx, rt, wasm)
 	if err == nil {
 		err = CheckProtocol(c.ProtocolVersion)
 	}
 	if err != nil {
 		_ = rt.Close(ctx)
+		if cache != nil {
+			_ = cache.Close(ctx)
+		}
 		return nil, err
 	}
+	c.cache = cache
 	return c, nil
 }
 

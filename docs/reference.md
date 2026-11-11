@@ -1620,10 +1620,11 @@ one shared implementation, `driverkit.Driver`, which satisfies
 `driver.Driver`, so an author writes a literal and never calls a reader. The
 registry package imports no Driver: only the binaries (launcher, box, driver-exec,
 orchestrator, quickstart and daemon) import the bundle. A library test that
-needs a Driver either calls `seamtest.RegisterDriver`, which registers seamtest's
-canonical-event `Strategy` under the `claude` name unless the bundle is
-linked, or registers that `Strategy` itself once from a `TestMain` via
-`driver.Register`; it never imports the bundle or a Driver.
+needs a Driver either calls `seamtest.RegisterDriver`, which registers
+seamtest's compiled-Connector `Strategy()` (the fake Driver) under the `claude`
+name unless the bundle is linked, or registers that `Strategy()` itself once
+from a `TestMain` via `driver.Register`; it never imports the bundle or a
+Driver.
 `TestOnlyBinariesReachTheBundle` fails on any package outside the binaries
 and the `seamtest/bundled` fixture whose tests reach the bundle, a Driver,
 or a backend adapter other than `git` and `local` (which core keeps), which
@@ -2421,8 +2422,12 @@ This is protocol version **0.1.0**. The host is
   (`cmd/launcher/internal/driver/driverkit/conformance`) loads a compiled
   Driver Connector and runs the same suite over the same corpus as
   `conformance.Run` does for a native Strategy. The seamtest fake Driver is
-  proven this way, from
-  [`nix/fixtures/connector-wasm/seamtest-driver`](../nix/fixtures/connector-wasm/seamtest-driver).
+  compiled from
+  [`nix/fixtures/connector-wasm/seamtest-driver`](../nix/fixtures/connector-wasm/seamtest-driver),
+  and `seamtest.Strategy()` loads it as the one Driver every core test runs
+  against; no native twin exists. Test binaries load it under wazero's compiler
+  with a per-user compilation cache (`connectorhost.LoadCompiled`), while the
+  launcher stays on the interpreter.
 
 ### Targeting repos that define their own devShell toolchain
 

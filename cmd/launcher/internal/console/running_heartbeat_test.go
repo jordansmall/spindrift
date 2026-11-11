@@ -108,7 +108,7 @@ func TestRunningHeartbeat_LogEndsOnScoutCountLine_ReturnsRoleContext(t *testing.
 	// Count lines exist only when Heartbeat.Kind is set, and in this log only
 	// a Phase change flushes; the registered canonical Strategy sets neither,
 	// so this local copy sets both (Phase is the tool name).
-	s := seamtest.Strategy
+	s := seamtest.Strategy()
 	s.Heartbeat.Kind = func(string) string { return "tool" }
 	s.Heartbeat.Phase = func(tool string, _ json.RawMessage) string { return tool }
 	drv := driverkit.New(s)
