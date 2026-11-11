@@ -1,6 +1,7 @@
 package hostop_test
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -26,6 +27,10 @@ func TestEncodeSpindriftOpWireFormat(t *testing.T) {
 			"{\"type\":\"spindrift_op\",\"spindrift_op\":{\"op\":\"pass_usage\",\"pass\":2,\"usage\":{\"api_calls\":3,\"uncached_input_tokens\":4,\"output_tokens\":5,\"cache_read_input_tokens\":6,\"cache_creation_input_tokens\":7,\"agents\":[{\"Agent\":\"\",\"APICalls\":0,\"UncachedInputTokens\":0,\"OutputTokens\":0,\"CacheReadInputTokens\":0,\"CacheCreationInputTokens\":0}]}}}\n"},
 		{"prompt_hashes", hostop.SpindriftOp{Op: "prompt_hashes", PromptHashes: &hostop.PromptHashes{RecordID: "r1", Roles: map[string]string{"implement": "h"}}},
 			"{\"type\":\"spindrift_op\",\"spindrift_op\":{\"op\":\"prompt_hashes\",\"prompt_hashes\":{\"record_id\":\"r1\",\"roles\":{\"implement\":\"h\"}}}}\n"},
+		{"shadow_divergence", hostop.SpindriftOp{Op: hostop.OpShadowDivergence, Divergence: &hostop.ShadowDivergence{Driver: "claude", Check: "events", LineNo: 3, Line: "l", Native: json.RawMessage(`[1]`), Shadow: json.RawMessage(`[2]`)}},
+			"{\"type\":\"spindrift_op\",\"spindrift_op\":{\"op\":\"shadow_divergence\",\"shadow_divergence\":{\"driver\":\"claude\",\"check\":\"events\",\"line_no\":3,\"line\":\"l\",\"native\":[1],\"shadow\":[2]}}}\n"},
+		{"shadow_summary", hostop.SpindriftOp{Op: hostop.OpShadowSummary, ShadowSummary: &hostop.ShadowSummary{Driver: "claude", Loaded: true, Error: "e", Compared: 4, Diverged: 2, Recorded: 1, NativeNsPerLine: 5, ShadowNsPerLine: 6}},
+			"{\"type\":\"spindrift_op\",\"spindrift_op\":{\"op\":\"shadow_summary\",\"shadow_summary\":{\"driver\":\"claude\",\"loaded\":true,\"error\":\"e\",\"compared\":4,\"diverged\":2,\"recorded\":1,\"native_ns_per_line\":5,\"shadow_ns_per_line\":6}}}\n"},
 		{"land_delta", hostop.SpindriftOp{Op: "land_delta", Delta: &landdelta.Delta{}},
 			"{\"type\":\"spindrift_op\",\"spindrift_op\":{\"op\":\"land_delta\",\"delta\":{\"known\":false}}}\n"},
 	}
@@ -54,6 +59,8 @@ func TestWireConstants(t *testing.T) {
 		{"OpDispatchStart", hostop.OpDispatchStart, "dispatch_start"},
 		{"OpPromptHashes", hostop.OpPromptHashes, "prompt_hashes"},
 		{"OpDispatchSettled", hostop.OpDispatchSettled, "dispatch_settled"},
+		{"OpShadowDivergence", hostop.OpShadowDivergence, "shadow_divergence"},
+		{"OpShadowSummary", hostop.OpShadowSummary, "shadow_summary"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

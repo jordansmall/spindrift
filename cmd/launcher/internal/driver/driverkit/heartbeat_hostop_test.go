@@ -371,3 +371,22 @@ func TestFormatSpindriftOpSignal(t *testing.T) {
 		t.Errorf("FormatSpindriftOp = %q, want no byte count or hash on a read", gotRead)
 	}
 }
+
+func TestFormatSpindriftOpShadowSummary(t *testing.T) {
+	for name, tc := range map[string]struct {
+		sum  hostop.ShadowSummary
+		want string
+	}{
+		"clean":      {hostop.ShadowSummary{Driver: "claude", Loaded: true, Compared: 40, Diverged: 2}, "#7 \xe2\x97\x8b shadow claude: compared 40, diverged 2"},
+		"not loaded": {hostop.ShadowSummary{Driver: "claude", Error: "open x: no such file\nnext"}, "#7 \xe2\x97\x8b shadow claude: not loaded, error: open x: no such filenext"},
+		"mid-run":    {hostop.ShadowSummary{Driver: "claude", Loaded: true, Compared: 3, Error: "trap"}, "#7 \xe2\x97\x8b shadow claude: compared 3, diverged 0, error: trap"},
+	} {
+		got := FormatSpindriftOp("7", hostop.SpindriftOp{Op: hostop.OpShadowSummary, ShadowSummary: &tc.sum})
+		if got != tc.want {
+			t.Errorf("%s: FormatSpindriftOp = %q, want %q", name, got, tc.want)
+		}
+	}
+	if got := FormatSpindriftOp("7", hostop.SpindriftOp{Op: hostop.OpShadowSummary}); !strings.Contains(got, "not loaded") {
+		t.Errorf("nil payload = %q, want it to render not loaded", got)
+	}
+}
