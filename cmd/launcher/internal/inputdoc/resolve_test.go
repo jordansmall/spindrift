@@ -3,6 +3,8 @@ package inputdoc
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -468,5 +470,41 @@ func TestLookupSchemaFlag(t *testing.T) {
 	}
 	if e, _ := LookupSchemaFlag("--auto-format"); e.Kind != "bool" {
 		t.Errorf("Kind = %q, want bool", e.Kind)
+	}
+}
+
+// The Driver rows ride the document raw; Resolve hands them to the caller
+// untouched and a document without the key (or no document) yields nil.
+func TestResolve_ExposesDocumentDriverRows(t *testing.T) {
+	raw := json.RawMessage(`[{"name":"x"}]`)
+	for name, tc := range map[string]struct {
+		doc  *Document
+		want json.RawMessage
+	}{
+		"rows":   {&Document{Drivers: raw}, raw},
+		"absent": {&Document{}, nil},
+		"no doc": {nil, nil},
+	} {
+		got, err := Resolve(nil, tc.doc, map[string]string{})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !reflect.DeepEqual(got.Drivers, tc.want) {
+			t.Errorf("%s: Drivers = %s, want %s", name, got.Drivers, tc.want)
+		}
+	}
+}
+
+func TestLoad_ParsesDriversKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "doc.json")
+	if err := os.WriteFile(path, []byte(`{"drivers":[{"name":"x"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(doc.Drivers) != `[{"name":"x"}]` {
+		t.Errorf("Drivers = %s", doc.Drivers)
 	}
 }

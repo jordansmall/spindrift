@@ -1061,6 +1061,7 @@ driverGoTests
             p: pkgs.lib.removePrefix "${toString launcherDir}/" (toString p)
           ) (bundleBinaryDirs ++ [ bundleDir ])
         )}
+        export SPINDRIFT_CONNECTOR_FIXTURES_DIR=${fixtures.connectorWasm}
         go vet ${binaryPkgs}
         go test ${binaryPkgs}
         guard() {

@@ -24,6 +24,7 @@ import (
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers, backends, and runner families
+	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/forge"
@@ -2328,6 +2329,10 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 			return configErrorCode(verb, int(exitcode.ConfigInvalid))
 		}
 		return 1
+	}
+	if err := driverrows.Use(resolved.Drivers); err != nil {
+		fmt.Fprintf(stderr, "%s\n", err)
+		return configErrorCode(verb, int(exitcode.ConfigInvalid))
 	}
 	launcherInput = resolved
 	// Runs after launcherInput is in place: CODE_FORGE and ISSUE_TRACKER may be
