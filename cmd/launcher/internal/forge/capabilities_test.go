@@ -245,3 +245,16 @@ func TestResolveCapabilities_WrappedCodeForge(t *testing.T) {
 		}
 	})
 }
+
+func TestResolveCodeForge_FillsOnlyCodeForgeSide(t *testing.T) {
+	c := ResolveCodeForge(wrapForge{NewFake().AsLocal()})
+	if c.BundleRelay == nil || c.LandingRef == nil {
+		t.Errorf("wrapped local forge lost capabilities: %+v", c)
+	}
+	if c.PRForge != nil {
+		t.Errorf("PRForge = %v, want nil: the local forge has none", c.PRForge)
+	}
+	if c.IssueCloser != nil || c.BlockersLister != nil {
+		t.Errorf("tracker fields filled: %+v", c)
+	}
+}

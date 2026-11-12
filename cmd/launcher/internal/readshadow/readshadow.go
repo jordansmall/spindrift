@@ -395,8 +395,8 @@ func (t *trackerLayer) Issue(num string) (forge.Issue, error) {
 // CodeForge layers the shadow over native's PR reads. A native with no PRForge
 // has nothing to shadow and is returned unchanged.
 func (s *Shadow) CodeForge(native forge.CodeForge) forge.CodeForge {
-	pr, ok := forge.AsCodeForge[forge.PRForge](native)
-	if !ok {
+	pr := forge.ResolveCodeForge(native).PRForge
+	if pr == nil {
 		return native
 	}
 	return &prLayer{CodeForge: native, PRForge: pr, s: s}

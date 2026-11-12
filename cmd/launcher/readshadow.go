@@ -229,7 +229,7 @@ func shadowSides(conn *connectorhost.Connector, row backendrows.Row, c config, i
 		tracker = t
 		errs = append(errs, err)
 	}
-	if pr, ok := forge.AsCodeForge[forge.PRForge](cf); ok {
+	if pr := forge.ResolveCodeForge(cf).PRForge; pr != nil {
 		p, err := connectorforge.New(conn, pr, connectorforge.Target{API: api, Repo: c.RepoSlug}, webHost)
 		prReads = p
 		errs = append(errs, err)

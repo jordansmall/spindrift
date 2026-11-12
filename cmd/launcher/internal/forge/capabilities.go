@@ -56,9 +56,10 @@ type Capabilities struct {
 	TrackerDescriptor backend.Descriptor
 }
 
-// ResolveCapabilities resolves cf (AsCodeForge) and it (As) against every
-// optional interface once and folds in the two descriptor rows.
-func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc backend.Descriptor) Capabilities {
+// ResolveCodeForge resolves only the CodeForge-side fields, for callers that
+// hold just a CodeForge and no run-wide Capabilities. Tracker fields and
+// descriptors stay zero.
+func ResolveCodeForge(cf CodeForge) Capabilities {
 	var c Capabilities
 
 	c.BundleRelay, _ = AsCodeForge[BundleRelay](cf)
@@ -73,6 +74,14 @@ func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc b
 	c.BranchProtectionForge, _ = AsCodeForge[BranchProtectionForge](cf)
 	c.BundleCommitSubjects, _ = AsCodeForge[BundleCommitSubjects](cf)
 	c.MergeCommitReader, _ = AsCodeForge[MergeCommitReader](cf)
+
+	return c
+}
+
+// ResolveCapabilities resolves cf (ResolveCodeForge) and it (As) against every
+// optional interface once and folds in the two descriptor rows.
+func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc backend.Descriptor) Capabilities {
+	c := ResolveCodeForge(cf)
 
 	c.BlockersLister, _ = As[BlockersLister](it)
 	c.HostPostedCommenter, _ = As[HostPostedCommenter](it)

@@ -82,7 +82,7 @@ func (s pushOnlyLander) land(_ dispatch.Dispatcher, num string, gen uint64, bran
 	// (ADR 0029/0033), not the placeholder agent branch recorded above, so
 	// overwrite it now that Merge has landed. Best-effort: a resolution
 	// failure must never turn a successful land into a failure.
-	if lr, ok := forge.AsCodeForge[forge.LandingRef](s.cfForNum(num)); ok {
+	if lr := forge.ResolveCodeForge(s.cfForNum(num)).LandingRef; lr != nil {
 		if landing, err := lr.LandingRef(); err == nil {
 			// Re-recording passes is deliberate: it keeps the pair with the
 			// upgraded landing.
@@ -144,7 +144,7 @@ func (s pushOnlyLander) settleReportedMerge(num string) {
 // landRelayed lands a relayed branch from a bundle alone (ADR 0039, #2254,
 // #2378). A forge without forge.BundleRelay has no relayed branch to land.
 func (s pushOnlyLander) landRelayed(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (bool, error) {
-	if _, ok := forge.AsCodeForge[forge.BundleRelay](s.cfForNum(num)); !ok {
+	if forge.ResolveCodeForge(s.cfForNum(num)).BundleRelay == nil {
 		return false, nil
 	}
 	if sit.SelfReportSuccess {
@@ -178,7 +178,7 @@ func (s pushOnlyLander) landRelayedBranch(d dispatch.Dispatcher, num string, gen
 func (s pushOnlyLander) salvage(d dispatch.Dispatcher, num string, _ uint64, result dispatch.Result) bool {
 	cf := s.cfForNum(num)
 	selfReportOK := result.Resolved.SelfReportFound && isSuccessSelfReport(result.Resolved.SelfReport.Status)
-	if _, ok := forge.AsCodeForge[forge.BundleRelay](cf); !ok ||
+	if forge.ResolveCodeForge(cf).BundleRelay == nil ||
 		(!selfReportOK && !result.KilledBySignal) ||
 		!s.bundlePresent(num) {
 		return false
