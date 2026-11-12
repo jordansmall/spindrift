@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,17 +24,19 @@ import (
 const signalUsageReportTimeout = 5 * time.Second
 
 // runSignal posts one signal to the Box's Signal socket (ADR 0052, issue
-// #3724): `signal comment|pr-intent|issue-intent|status`. The kind is the
-// route, so it is a word rather than a flag, and no flag names a destination
-// -- an issue number, label, branch or target is unrepresentable here, not
-// merely ignored.
+// #3724): `signal comment|pr-intent|issue-intent|status`, or reads one with
+// `signal issue <ref>`. The kind is the route, so it is a word rather than a
+// flag, and no flag names a destination -- an issue number, label, branch or
+// target is unrepresentable here, not merely ignored. `issue` is the one read
+// that takes a positional: the ref names what to read, never where to write,
+// and the host refuses any ref outside the Dispatch's own tracker.
 //
 // Bodies arrive on stdin or via -body-file, never on argv: a 64 KiB Markdown
 // body would blow the argv cap, and argv is world-readable through /proc.
 // -title and -type are short closed-vocabulary fields and stay flags.
 func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 	if len(args) == 0 {
-		return signalUsageFailure(stdout, "", "want one of comment, pr-intent, issue-intent, status")
+		return signalUsageFailure(stdout, "", "want one of comment, pr-intent, issue-intent, issue, status")
 	}
 	kind, rest := args[0], args[1:]
 
@@ -145,6 +148,20 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 			Patch:       patch,
 		}))
 
+	case signalwire.IssueRoute:
+		fs := signalFlagSet(kind, stdout)
+		if !parseSignalFlagValues(fs, rest, kind, stdout) {
+			return 1
+		}
+		if fs.NArg() != 1 {
+			return signalUsageFailure(stdout, kind, "want exactly one issue ref: signal issue <ref>")
+		}
+		client, base, secret, err := signalclient.Target()
+		if err != nil {
+			return signalFail(stdout, err)
+		}
+		return getSignalIssue(stdout, client, base, secret, fs.Arg(0))
+
 	case "status":
 		fs := signalFlagSet(kind, stdout)
 		if !parseSignalFlags(fs, rest, kind, stdout) {
@@ -157,7 +174,7 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		return getSignalStatus(stdout, client, base, secret)
 	}
 
-	return signalUsageFailure(stdout, "", "unknown signal kind; want one of comment, pr-intent, issue-intent, status")
+	return signalUsageFailure(stdout, "", "unknown signal kind; want one of comment, pr-intent, issue-intent, issue, status")
 }
 
 // classListViolation returns why class is not acceptable against the Chore's
@@ -184,11 +201,7 @@ func classListViolation(class string, classes []string) string {
 // has already written its own error and usage dump to stdout, while a
 // leftover argument gets only the rejected line.
 func parseSignalFlags(fs *flag.FlagSet, rest []string, kind string, stdout io.Writer) (ok bool) {
-	if err := fs.Parse(rest); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return false
-		}
-		signalUsageFailure(stdout, kind, err.Error())
+	if !parseSignalFlagValues(fs, rest, kind, stdout) {
 		return false
 	}
 	if fs.NArg() > 0 {
@@ -199,6 +212,18 @@ func parseSignalFlags(fs *flag.FlagSet, rest []string, kind string, stdout io.Wr
 			reason += "; quote a multi-word flag value"
 		}
 		signalUsageFailure(stdout, kind, reason)
+		return false
+	}
+	return true
+}
+
+// parseSignalFlagValues is the parse half of parseSignalFlags, for a verb that
+// takes positional arguments and checks their count itself.
+func parseSignalFlagValues(fs *flag.FlagSet, rest []string, kind string, stdout io.Writer) (ok bool) {
+	if err := fs.Parse(rest); err != nil {
+		if !errors.Is(err, flag.ErrHelp) {
+			signalUsageFailure(stdout, kind, err.Error())
+		}
 		return false
 	}
 	return true
@@ -449,6 +474,38 @@ func getSignalStatus(stdout io.Writer, client *http.Client, base, secret string)
 	}
 	for _, r := range receipts {
 		fmt.Fprintf(stdout, "%s %d bytes, %s, sequence %d\n", r.Kind, r.Bytes, r.Hash, r.Sequence)
+	}
+	return 0
+}
+
+// getSignalIssue prints the snapshot in the shape of the subject issue's ISSUE
+// TEXT, so an agent reads a referenced issue the way it reads its own.
+func getSignalIssue(stdout io.Writer, client *http.Client, base, secret, ref string) int {
+	snap, rej, err := signalclient.FetchIssue(client, base, secret, ref)
+	if err != nil {
+		return signalFail(stdout, err)
+	}
+	if rej != nil {
+		return printReject(stdout, signalwire.IssueRoute, *rej)
+	}
+	// A bare number reads as #N; a Jira key is already its own display form.
+	head := snap.Ref
+	if _, err := strconv.Atoi(head); err == nil {
+		head = "#" + head
+	}
+	fmt.Fprintf(stdout, "%s %s\nstate: %s\n", head, snap.Title, snap.State)
+	if len(snap.Labels) > 0 {
+		fmt.Fprintf(stdout, "labels: %s\n", strings.Join(snap.Labels, ", "))
+	}
+	fmt.Fprintf(stdout, "\n%s\n", snap.Body)
+	if len(snap.Comments) > 0 {
+		fmt.Fprint(stdout, "\n## Comments\n")
+		for _, c := range snap.Comments {
+			fmt.Fprintf(stdout, "\n%s (%s): %s\n", c.Author, c.CreatedAt, c.Body)
+		}
+	}
+	if snap.Truncated {
+		fmt.Fprintf(stdout, "\n[truncated: issue exceeded %dKB or its comments could not be read]\n", signalwire.MaxIssueReplyBytes/1024)
 	}
 	return 0
 }

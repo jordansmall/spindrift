@@ -119,3 +119,69 @@ func TestDecodeReject_NonSocketReply(t *testing.T) {
 		t.Error("DecodeReject(empty reply) has no reason")
 	}
 }
+
+func issueServer(t *testing.T, gotRef *string, reply func(w http.ResponseWriter)) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/issue" || r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		*gotRef = r.URL.Query().Get("ref")
+		reply(w)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestFetchIssue_EncodesTheRefAndDecodesTheSnapshot(t *testing.T) {
+	const ref = "owner/repo#5&x=1 y"
+	var gotRef string
+	srv := issueServer(t, &gotRef, func(w http.ResponseWriter) {
+		_ = json.NewEncoder(w).Encode(signalwire.IssueSnapshot{Ref: ref, Title: "t", State: "open", Truncated: true})
+	})
+
+	snap, rej, err := signalclient.FetchIssue(srv.Client(), srv.URL, secret, ref)
+	if err != nil || rej != nil {
+		t.Fatalf("FetchIssue = (%v, %v), want success", rej, err)
+	}
+	if gotRef != ref {
+		t.Errorf("ref on the wire = %q, want %q intact", gotRef, ref)
+	}
+	if snap.Ref != ref || snap.Title != "t" || !snap.Truncated {
+		t.Errorf("snapshot = %+v, want the decoded reply", snap)
+	}
+}
+
+func TestFetchIssue_RejectComesBackAsAReject(t *testing.T) {
+	var gotRef string
+	srv := issueServer(t, &gotRef, func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(signalwire.Reject{Status: "foreign_ref", Reason: "nope"})
+	})
+
+	_, rej, err := signalclient.FetchIssue(srv.Client(), srv.URL, secret, "1")
+	if err != nil {
+		t.Fatalf("FetchIssue: %v", err)
+	}
+	if rej == nil || rej.Status != "foreign_ref" {
+		t.Fatalf("reject = %+v, want foreign_ref", rej)
+	}
+}
+
+func TestFetchIssue_OversizedReplyIsAnErrorNotATruncatedDecode(t *testing.T) {
+	var gotRef string
+	srv := issueServer(t, &gotRef, func(w http.ResponseWriter) {
+		// A prefix that is valid JSON up to the limit would decode if the
+		// client cut the reply silently; the padding makes the cut visible.
+		_, _ = w.Write([]byte(`{"ref":"1","title":"` + strings.Repeat("x", 2<<20) + `"}`))
+	})
+
+	_, rej, err := signalclient.FetchIssue(srv.Client(), srv.URL, secret, "1")
+	if err == nil || rej != nil {
+		t.Fatalf("FetchIssue = (%v, %v), want an error", rej, err)
+	}
+	if !strings.Contains(err.Error(), "limit") {
+		t.Errorf("error = %v, want it to name the reply limit", err)
+	}
+}
