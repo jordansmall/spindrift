@@ -3050,8 +3050,8 @@ This is protocol version **0.3.0**. The host is
 - **Tracker capabilities.** A tracker Connector advertises `"tracker"`,
   meaning it serves `tracker.listIssues` and `tracker.issue`, and optionally
   `"tracker.comments"`, `"tracker.nativeDeps"`, `"tracker.blocks"`,
-  `"tracker.probe"`, `"tracker.statuses"`, `"tracker.createMeta"` and
-  `"tracker.count"`, serving
+  `"tracker.probe"`, `"tracker.statuses"`, `"tracker.createMeta"`,
+  `"tracker.count"` and `"tracker.searchIssues"`, serving
   the method of the same name, and `"tracker.ids.projectKey"` (see **Issue
   ids**). Advertising `"tracker.comments"` attests that each comment's
   `minimized` and `minimizedReason` are faithful; a Connector whose API cannot
@@ -3075,6 +3075,7 @@ This is protocol version **0.3.0**. The host is
   | `tracker.createMeta` (optional) | `{target, issueType}` | `{issueTypes, fields}`: every issue type the project offers, and the create fields (`{fieldId, name, required, hasDefaultValue}`) of `issueType`, none when it is not offered |
   | `tracker.count` (optional) | `{target, label, status}`, selecting as `tracker.listIssues` does | `{count}`, possibly approximate |
   | `tracker.countInterval` (with `tracker.count`) | `{}` | `{seconds}`, at least 1: how often core re-asks `tracker.count` |
+  | `tracker.searchIssues` (optional) | `{target, text, state, label, limit}`, `label` `""` for any | `{issues}`, in match order |
 
   An issue is `{number, title, body, state, labels, closedAt, closedNotPlanned,
   dedupMarker}`. `number` is a string id and `state` is `"open"` or `"closed"`.
@@ -7260,6 +7261,26 @@ The work, research and scout issue-read fragments instruct it for every
 tracker with a host-side issue read (github, forgejo, jira) under the
 `socket` carrier; under `log` there is no socket, so they render their
 `*-unreadable` sibling, and `local` keeps its host-injected linked issues.
+
+`driver-exec signal issue-search [-state open|closed] [-label <label>]
+<text...>` is the matching search (issue #6895), for a dedup check before
+filing: it prints one `#<number> [<state>] <title> (labels: ...)` line per
+hit, `no matching issues` when nothing matches, and a final
+`[results capped ...]` line when the 20-result cap or the title cap cut
+something. `-state` defaults to `open`; the remaining arguments are joined
+with single spaces as the text, so quoting is optional. `-label` takes only
+one of `agent-review-finding`, `agent-research-reject`,
+`agent-research-finding` and `agent-butler-finding`; the host refuses any
+other value, `-state` value or query key (`signal issue-search rejected
+(invalid_query): ...`), and the client pre-validates none of it. The search
+is scoped to the Dispatch's own tracker with no repo or owner parameter, and
+the text reaches GitHub quoted, so a qualifier such as `repo:x/y` cannot
+widen it. It is served on GitHub and Forgejo trackers, and through a tracker
+Connector that advertises `tracker.searchIssues` (otherwise the native
+adapter answers); a tracker that cannot search answers `501 unsupported`,
+and a Connector's Route table that does not allow the search answers `403
+refused`. The audit log records it as a read, with the reply's hash and
+size. Empty text is a usage failure reported on `/issue-search/usage`.
 
 The prompts instruct the verb under `socket` (issue #3726): prompt assembly
 picks each of the three signal fragments — the research verdict comment, the

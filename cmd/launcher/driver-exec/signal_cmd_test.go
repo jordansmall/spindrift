@@ -17,6 +17,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/signalclient"
 	"spindrift.dev/launcher/internal/signalsocket"
@@ -65,13 +66,20 @@ func startSignalServer(t *testing.T, transport string, cfg signalsocket.Config) 
 // answered by issues.
 func startSignalServerWithIssues(t *testing.T, transport string, cfg signalsocket.Config, issues signalsocket.IssueReader) *signalServer {
 	t.Helper()
+	return startSignalServerFull(t, transport, cfg, issues, nil)
+}
+
+// startSignalServerFull is startSignalServerWithIssues with the issue-search
+// verb answered by search as well.
+func startSignalServerFull(t *testing.T, transport string, cfg signalsocket.Config, issues signalsocket.IssueReader, search signalsocket.IssueSearcher) *signalServer {
+	t.Helper()
 	buf := signalsocket.New(cfg)
 	log := &syncBuffer{}
 
 	srv := &signalServer{buf: buf, log: log}
 	switch transport {
 	case "unix":
-		l := &signalsocket.Listener{Handler: signalsocket.NewHandler(buf, log, issues, nil)}
+		l := &signalsocket.Listener{Handler: signalsocket.NewHandler(buf, log, issues, search)}
 		t.Cleanup(func() { _ = l.Close() })
 		// A name shorter than the helper's own "probe.sock" probe, so its
 		// sun_path check stays conservative for this socket too.
@@ -86,7 +94,7 @@ func startSignalServerWithIssues(t *testing.T, transport string, cfg signalsocke
 		if err != nil {
 			t.Fatalf("NewSecret: %v", err)
 		}
-		gh, err := signalsocket.NewGatedHandler(buf, log, secret, issues, nil)
+		gh, err := signalsocket.NewGatedHandler(buf, log, secret, issues, search)
 		if err != nil {
 			t.Fatalf("NewGatedHandler: %v", err)
 		}
@@ -1015,12 +1023,12 @@ func TestRunSignal_UsageFailureRejectedLine(t *testing.T) {
 		{
 			name: "no args",
 			args: nil,
-			want: "signal rejected (usage): want one of comment, pr-intent, issue-intent, issue, status",
+			want: "signal rejected (usage): want one of comment, pr-intent, issue-intent, issue, issue-search, status",
 		},
 		{
 			name: "unrecognised kind",
 			args: []string{"nope"},
-			want: "signal rejected (usage): unknown signal kind; want one of comment, pr-intent, issue-intent, issue, status",
+			want: "signal rejected (usage): unknown signal kind; want one of comment, pr-intent, issue-intent, issue, issue-search, status",
 		},
 	}
 	for _, tc := range cases {
@@ -1442,6 +1450,141 @@ func TestRunSignal_IssueArgumentCountIsAUsageFailure(t *testing.T) {
 			}
 			if log := srv.log.String(); !strings.Contains(log, `"kind":"issue"`) || !strings.Contains(log, "usage") {
 				t.Fatalf("mirror = %q, want a usage report under kind issue", log)
+			}
+		})
+	}
+}
+
+// fakeIssueSearcher answers SearchIssues from a canned reply or reject and
+// records the query it was asked.
+type fakeIssueSearcher struct {
+	mu    sync.Mutex
+	reply signalwire.IssueSearchReply
+	rej   *signalwire.Reject
+	calls []searchCall
+}
+
+type searchCall struct {
+	text  string
+	state forge.IssueState
+	label string
+}
+
+func (f *fakeIssueSearcher) SearchIssues(text string, state forge.IssueState, label string, _ int) (signalwire.IssueSearchReply, *signalwire.Reject) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, searchCall{text, state, label})
+	return f.reply, f.rej
+}
+
+func startSearchServer(t *testing.T, transport string, search signalsocket.IssueSearcher) *signalServer {
+	t.Helper()
+	return startSignalServerFull(t, transport, signalsocket.Config{Consumes: allKinds()}, nil, search)
+}
+
+func TestRunSignal_IssueSearchPrintsHitsAndSendsTheQuery(t *testing.T) {
+	forEachTransport(t, func(t *testing.T, transport string) {
+		s := &fakeIssueSearcher{reply: signalwire.IssueSearchReply{Issues: []signalwire.IssueSearchResult{
+			{Number: "12", Title: "Flaky login", State: "open", Labels: []string{"agent-review-finding", "bug"}},
+			{Number: "9", Title: "Other", State: "open", Labels: []string{}},
+		}}}
+		startSearchServer(t, transport, s)
+
+		rc, out := runVerb(t, "", "issue-search", "flaky", "repo:x/y")
+		if rc != 0 {
+			t.Fatalf("exit = %d, want 0 (out=%q)", rc, out)
+		}
+		want := "#12 [open] Flaky login (labels: agent-review-finding, bug)\n#9 [open] Other\n"
+		if out != want {
+			t.Fatalf("output =\n%q\nwant\n%q", out, want)
+		}
+		if len(s.calls) != 1 || s.calls[0] != (searchCall{"flaky repo:x/y", forge.IssueOpen, ""}) {
+			t.Fatalf("searcher saw %+v, want one open search for the joined text with no label", s.calls)
+		}
+	})
+}
+
+func TestRunSignal_IssueSearchFlagsAndQuotedText(t *testing.T) {
+	s := &fakeIssueSearcher{}
+	startSearchServer(t, "unix", s)
+
+	rc, out := runVerb(t, "", "issue-search", "-state", "closed", "-label", "agent-research-reject", "two words")
+	if rc != 0 {
+		t.Fatalf("exit = %d, want 0 (out=%q)", rc, out)
+	}
+	if len(s.calls) != 1 || s.calls[0] != (searchCall{"two words", forge.IssueClosed, "agent-research-reject"}) {
+		t.Fatalf("searcher saw %+v, want a closed, labelled search", s.calls)
+	}
+}
+
+func TestRunSignal_IssueSearchNoHitsAndTruncated(t *testing.T) {
+	s := &fakeIssueSearcher{}
+	startSearchServer(t, "unix", s)
+
+	if rc, out := runVerb(t, "", "issue-search", "x"); rc != 0 || out != "no matching issues\n" {
+		t.Fatalf("no hits: exit = %d out = %q, want the single no-match line", rc, out)
+	}
+
+	s.reply = signalwire.IssueSearchReply{Issues: []signalwire.IssueSearchResult{{Number: "1", Title: "t", State: "open"}}, Truncated: true}
+	rc, out := runVerb(t, "", "issue-search", "x")
+	if rc != 0 {
+		t.Fatalf("exit = %d, want 0 (out=%q)", rc, out)
+	}
+	if !strings.HasPrefix(out, "#1 [open] t\n") || !strings.Contains(lastNonEmptyLine(out), "capped") {
+		t.Fatalf("output = %q, want the hit then a capped line", out)
+	}
+}
+
+func TestRunSignal_IssueSearchRejectPassesThrough(t *testing.T) {
+	startSearchServer(t, "unix", &fakeIssueSearcher{
+		rej: &signalwire.Reject{Status: "tracker_error", Reason: "tracker unavailable", Code: http.StatusBadGateway},
+	})
+	rc, out := runVerb(t, "", "issue-search", "x")
+	if rc == 0 {
+		t.Fatalf("exit = 0, want non-zero (out=%q)", out)
+	}
+	if got, want := lastNonEmptyLine(out), "signal issue-search rejected (tracker_error): tracker unavailable"; got != want {
+		t.Fatalf("last line = %q, want %q", got, want)
+	}
+
+	// A label outside the fixed set is refused by the server, not pre-checked
+	// by the client, so its reason is what the agent sees.
+	rc, out = runVerb(t, "", "issue-search", "-label", "agent-trigger", "x")
+	if rc == 0 || !strings.Contains(lastNonEmptyLine(out), "signal issue-search rejected (invalid_query)") {
+		t.Fatalf("exit = %d out = %q, want the server's invalid_query reject", rc, out)
+	}
+}
+
+func TestRunSignal_IssueSearchUnsupportedWithoutASearcher(t *testing.T) {
+	startSearchServer(t, "unix", nil)
+	rc, out := runVerb(t, "", "issue-search", "x")
+	if rc == 0 || !strings.Contains(out, "signal issue-search rejected (unsupported)") {
+		t.Fatalf("exit = %d out = %q, want an unsupported reject", rc, out)
+	}
+}
+
+func TestRunSignal_IssueSearchUsageFailures(t *testing.T) {
+	for name, args := range map[string][]string{
+		"no text":    {"issue-search"},
+		"blank text": {"issue-search", " "},
+		"stray flag": {"issue-search", "-x", "foo"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := &fakeIssueSearcher{}
+			srv := startSearchServer(t, "unix", s)
+
+			rc, out := runVerb(t, "", args...)
+			if rc != 1 {
+				t.Fatalf("exit = %d, want 1 (out=%q)", rc, out)
+			}
+			if last := lastNonEmptyLine(out); !strings.HasPrefix(last, "signal issue-search rejected (usage): ") {
+				t.Fatalf("last line = %q, want the usage rejected line", last)
+			}
+			if len(s.calls) != 0 {
+				t.Fatalf("searcher was called with %+v, want no search on a usage failure", s.calls)
+			}
+			if log := srv.log.String(); !strings.Contains(log, `"kind":"issue-search"`) || !strings.Contains(log, "usage") {
+				t.Fatalf("mirror = %q, want a usage report under kind issue-search", log)
 			}
 		})
 	}

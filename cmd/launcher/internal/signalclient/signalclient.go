@@ -203,3 +203,31 @@ func FetchIssue(client *http.Client, base, secret, ref string) (signalwire.Issue
 	}
 	return snap, nil, nil
 }
+
+// FetchIssueSearch is FetchIssue for the issue-search verb: GET
+// base+"/issue-search" with text and state always sent and label only when
+// set. The free text goes through url.Values because it can carry '&', '#'
+// and tracker qualifiers like repo:x/y, which must stay one value.
+func FetchIssueSearch(client *http.Client, base, secret, text, state, label string) (signalwire.IssueSearchReply, *signalwire.Reject, error) {
+	q := url.Values{"text": {text}, "state": {state}}
+	if label != "" {
+		q.Set("label", label)
+	}
+	req, err := http.NewRequest(http.MethodGet, base+"/"+signalwire.IssueSearchRoute+"?"+q.Encode(), nil)
+	if err != nil {
+		return signalwire.IssueSearchReply{}, nil, err
+	}
+	code, reply, err := Do(client, req, secret)
+	if err != nil {
+		return signalwire.IssueSearchReply{}, nil, err
+	}
+	if code < 200 || code > 299 {
+		rej := DecodeReject(code, reply)
+		return signalwire.IssueSearchReply{}, &rej, nil
+	}
+	var res signalwire.IssueSearchReply
+	if err := json.Unmarshal(reply, &res); err != nil {
+		return signalwire.IssueSearchReply{}, nil, fmt.Errorf("decode issue search: %w", err)
+	}
+	return res, nil, nil
+}
