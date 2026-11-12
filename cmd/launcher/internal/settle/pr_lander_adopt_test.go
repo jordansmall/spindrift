@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
@@ -134,6 +135,7 @@ func adoptCases() []prCase {
 		},
 		adopts(prCase{
 			name:         "a synthetic blocked outcome with a success self-report is adopted from the box's PR intent",
+			tracker:      backend.GitHub,
 			wantStatuses: []Status{detailOnly, StatusAdopted, StatusVerifiedMerged},
 			result:       boxRun(true, synthetic, ready, adoptIntent),
 			check:        allOf(g.relayedBundle(), openedDraftPR("feat: add widget", "Adds a widget."+closes)),
@@ -147,6 +149,7 @@ func adoptCases() []prCase {
 		}),
 		adopts(prCase{
 			name:         "a missing outcome line with a success self-report is adopted",
+			tracker:      backend.GitHub,
 			wantStatuses: []Status{StatusAdopted, StatusVerifiedMerged},
 			result:       boxRun(false, "", ready, adoptIntent),
 			check:        allOf(g.relayedBundle(), openedDraftPR("feat: add widget", "Adds a widget."+closes)),
@@ -154,6 +157,7 @@ func adoptCases() []prCase {
 		}),
 		adopts(prCase{
 			name:         "an adoption without a PR intent opens the PR from the issue's title",
+			tracker:      backend.GitHub,
 			wantStatuses: []Status{detailOnly, StatusAdopted, StatusVerifiedMerged},
 			result:       boxRun(true, synthetic, ready, ""),
 			setup: g.readOnly(0, func(_ *testing.T, fc *forge.Fake, _ *Config) {

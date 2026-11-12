@@ -1,8 +1,10 @@
 package settle
 
 import (
+	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
@@ -68,3 +70,17 @@ func (o openAfterMerge) Merge(url string) error {
 	o.SetPRState(url, forge.PROpen)
 	return nil
 }
+
+// row resolves a backend row by name, failing the test on an unknown name.
+func row(t *testing.T, name string) backend.Descriptor {
+	t.Helper()
+	d, ok := backend.ByName(name)
+	if !ok {
+		t.Fatalf("no backend row %q", name)
+	}
+	return d
+}
+
+// githubTrackerRow is the real github row, so the github-shaped fixtures
+// (AsNoLandingRecorder) track every tracker-row fact settle reads.
+var githubTrackerRow, _ = backend.ByName("github")

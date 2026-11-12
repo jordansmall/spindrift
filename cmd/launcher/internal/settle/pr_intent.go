@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
@@ -205,12 +206,12 @@ func hasClosingReference(body, num string) bool {
 }
 
 // ensureClosesReference appends "Closes #<num>" to body so a merge auto-closes
-// the issue, unless body already closes it. The tracker check is a positive
-// allow-list for GithubTracker (issue #2341), not "anything but local": a
-// forgejo tracker also fails a LandingRecorder check, and its issue numbers
-// are a foreign namespace, so a Closes keyword would hit an unrelated issue.
-func ensureClosesReference(body, num string, it forge.IssueTracker) string {
-	if _, ok := forge.As[forge.GithubTracker](it); !ok {
+// the issue, unless body already closes it. The tracker row's ClosesRefTracker
+// is a positive allow-list (issue #2341), not "anything but local": a forgejo
+// tracker's issue numbers are a foreign namespace, so a Closes keyword would
+// hit an unrelated GitHub issue.
+func ensureClosesReference(body, num string, tracker backend.Descriptor) string {
+	if !tracker.ClosesRefTracker {
 		return body
 	}
 	if hasClosingReference(body, num) {

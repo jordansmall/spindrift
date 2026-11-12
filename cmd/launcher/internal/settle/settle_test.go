@@ -45,6 +45,6 @@ func TestNew_ReadsPRForgeAndLandingRecorderFromConfigCapabilities(t *testing.T) 
 // forge.ResolveCapabilities call production code uses, so tests that only care
 // about pr/landing behavior need not wire Capabilities by hand.
 func newTestSettle(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
-	cfg.Capabilities = forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
+	cfg.Capabilities = forge.ResolveCapabilities(cf, it, backend.Descriptor{}, githubTrackerRow)
 	return New(cfg, it, cf)
 }
