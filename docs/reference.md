@@ -6567,6 +6567,10 @@ the Launcher to apply with its own, separately-scoped write token:
 | post a comment     | `gh issue comment`       | a single nonce-guarded `SPINDRIFT_COMMENT` line; the Launcher verifies the nonce, decodes it, and posts it host-side (ADR 0032's mechanism, reused) |
 | file an issue (Filer, opt-in) | `gh label create` / `gh issue create` | one nonce-guarded, base64-encoded `SPINDRIFT_ISSUE_INTENT` stdout line per issue; the Launcher files each one host-side (issue #2018) — see [Filer](#filer) |
 
+Every way the shipped prompts still tell a Box to run a forge CLI, and which of
+them a `read-only` Box reaches, is inventoried in [In-Box forge CLI
+uses](in-box-forge-cli.md).
+
 The three `SPINDRIFT_*` stdout lines in the table are the `log` carrier's
 form. By default (`BOX_SIGNAL_CARRIER` unset, i.e. `socket`) the same
 signals cross the seam over the [Signal
