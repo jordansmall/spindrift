@@ -73,10 +73,21 @@ auth switch, auth config, secret spec.
 
 **Conformance kit**:
 The shared test runner a Driver's own package calls to prove its Strategy
-against its corpus: the goldens, the chunked heartbeat replay and the
-credential guard, so each Driver's tests stand alone (ADR 0066). The Driver
+against its corpus: the goldens, the chunked heartbeat replay, the
+[[Stream filter]] check and the credential guard, so each Driver's tests stand
+alone (ADR 0066). `RunStreamFilter` runs only the stream-filter check and the
+credential guard, for a Driver whose corpus has no Pass-log goldens. The Driver
 seam's counterpart of the forge Conformance contract. _Avoid_: corpus test,
 driver test suite.
+
+**Stream filter**:
+A Driver's rewrite of its CLI's raw stdout on the way to the Pass log, built
+per stream by a Strategy's `NewStreamFilter` and flushed when the stream ends
+(an absent one is the identity). A Connector Driver backs it with guest calls
+(`driver.newStreamFilter`, `streamWrite`, `streamFlush`) and fails closed on the
+first error. The [[Conformance kit]] replays each case's `stdout.raw` whole and
+in arbitrary chunkings against `stream.golden.txt`. _Avoid_: log filter,
+stdout rewriter.
 
 **driverkit**:
 The shared leaf package under the Driver seam's host-side half (ADR 0009,
