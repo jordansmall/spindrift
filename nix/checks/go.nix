@@ -155,6 +155,7 @@ let
     "logscan"
     "outcome"
     "passmachine"
+    "registryvocab"
     "report"
     "testutil"
     "usage"

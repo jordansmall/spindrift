@@ -43,3 +43,11 @@ func LimitsFor(requestBytes int) (budget time.Duration, memory, output uint64) {
 
 // LogWindow exposes the unexported logWindow to the external tests.
 var LogWindow = logWindow
+
+// Do exposes the unexported do to the external tests.
+func (n *Network) Do(ctx context.Context, raw []byte, maxBody int) (int, []byte, error) {
+	return n.do(ctx, raw, maxBody)
+}
+
+// MaxHTTPResponse is the response cap, exposed so the tests probe it.
+const MaxHTTPResponse = maxHTTPResponse
