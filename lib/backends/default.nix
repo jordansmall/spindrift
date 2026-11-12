@@ -73,6 +73,8 @@
 # inBoxGHCredentialHelper marks a CODE_FORGE whose Box clone runs
 # `gh auth setup-git`; github and git (its remote URL may be github.com), not
 # forgejo (token URL, ADR 0038) or local (filesystem mount, ADR 0033; issue #4452).
+# A Box cloning the host-seeded mirror (BOX_HOST_SEEDED_MIRROR) skips it whatever
+# the forge, since the clone reads /repo and needs no credential (issue #6897).
 
 # A row may also carry `knobs`: an attrset keyed by env-schema key, each value
 # an env-schema entry. lib/row-knobs.nix folds them into lib/env-schema.nix, so

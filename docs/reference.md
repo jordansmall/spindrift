@@ -6965,10 +6965,26 @@ the Launcher to apply with its own, separately-scoped write token:
 
 | write            | `read-write` (default)  | `read-only`                          |
 | ---------------- | ------------------------ | ------------------------------------- |
+| get the code (not a write) | clone the Target repo in-box | clone the read-only `/repo` mirror the Launcher fetched host-side for this Pass; the clone needs no forge credential |
 | land the branch   | `git push`               | `seam.bundle` written to the outbox; the Launcher relays it (ADR 0033's mechanism, reused) |
 | open the PR       | `gh pr create --draft`   | a nonce-guarded, base64-encoded `SPINDRIFT_PR_INTENT` stdout line; the Launcher opens the draft PR host-side |
 | post a comment     | `gh issue comment`       | a single nonce-guarded `SPINDRIFT_COMMENT` line; the Launcher verifies the nonce, decodes it, and posts it host-side (ADR 0032's mechanism, reused) |
 | file an issue (Filer, opt-in) | `gh label create` / `gh issue create` | one nonce-guarded, base64-encoded `SPINDRIFT_ISSUE_INTENT` stdout line per issue; the Launcher files each one host-side (issue #2018) — see [Filer](#filer) |
+
+On `github` and `forgejo` a `read-only` Box does not clone the forge at all.
+Before every Pass the Launcher fetches the Target repo host-side with its own
+credential (the clone the bundle relay already uses) into a fresh per-Pass
+`.spindrift/mirror/pass-*/repo.git`, mounts it read-only at `/repo` on both
+runners, forwards `BOX_HOST_SEEDED_MIRROR=1`, and removes it once that Pass's
+Box exits. The Box clones `/repo`, so the clone runs no `gh auth setup-git` and
+takes no forge URL, and a private repo works. The clone keeps a credential-free
+`forge` remote beside `origin` (the mount) so `gh` and `fj` still resolve the
+repo, and makes it the push default so `gh` finds the current branch's PR. A
+failed fetch fails the Pass
+(`seed mirror: host-side fetch of the <forge> Target repo: ...`) before the Box
+starts. `local` already works this way, its Accumulation repo being the mirror,
+and so does a `read-only` `git` Box, over one mirror re-seeded per Pass.
+`read-write` keeps its direct in-box clone.
 
 Every way the shipped prompts still tell a Box to run a forge CLI, and which of
 them a `read-only` Box reaches, is inventoried in [In-Box forge CLI
@@ -7434,13 +7450,14 @@ issues on the host.
 ### Read-only Box token
 
 Under [`BOX_FORGE_AND_ISSUE_ACCESS=read-only`](#read-only-box-box_forge_and_issue_accessread-only)
-the Box's `GH_TOKEN` drops to the smallest scope that still lets it clone the
-repo and read the issue — it never opens a PR, pushes a branch, or posts a
+the Box's `GH_TOKEN` drops to the smallest scope that still lets it read the
+repo and the issue through `gh` (the clone itself no longer needs it: the Box
+clones the host-fetched mirror) — it never opens a PR, pushes a branch, or posts a
 comment, so it needs none of the write permissions the table above grants:
 
 | permission | level | why                                       |
 | ---------- | ----- | ------------------------------------------ |
-| Contents   | Read  | clone the repo — never push                |
+| Contents   | Read  | read the repo in-box — never push          |
 | Issues     | Read  | read the issue and its comments — never write |
 | Metadata   | Read  | mandatory baseline, auto-selected          |
 
