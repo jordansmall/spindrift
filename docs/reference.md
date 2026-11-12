@@ -3069,11 +3069,13 @@ indirect-only requirement, or a `replace` or `exclude` that names it.
   `go mod tidy` in `cmd/launcher`, refresh the vendor hashes in
   `lib/build-constants.nix` (each `*VendorHash`: set it to `lib.fakeHash`,
   build, copy the hash Nix reports), and run the gate.
-- **Fuzzing the host.** Three targets in `cmd/launcher/internal/connectorhost`
+- **Fuzzing the host.** Four targets in `cmd/launcher/internal/connectorhost`
   cover what the host takes from a guest; run them after bumping the pin,
   since wazero decodes and compiles every module the host loads.
-  `FuzzHandshake` and `FuzzCall`
-  (`fuzz_test.go`) feed the handshake result and `connector_call` responses.
+  `FuzzHandshake`, `FuzzCall` and `FuzzStreamFilterResult` (`fuzz_test.go`) feed
+  the handshake result, `connector_call` responses, and the base64 `data` a
+  guest stream filter returns (it must decode to exactly those bytes or fail
+  with `ErrMalformedOutput`).
   `FuzzLoad` (`load_fuzz_test.go`) feeds arbitrary module bytes through `Load`
   (declared-size pre-scan, compile, instantiate, `_initialize`, handshake) on
   the interpreter; every input must load or fail with `ErrHandshake` or
