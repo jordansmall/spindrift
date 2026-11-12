@@ -63,7 +63,7 @@ func (s prLander) latchOpenPR(num string) {
 	if s.readOnly {
 		return
 	}
-	res, err := forge.ResolveOpenPR(s.cf, num)
+	res, err := forge.ResolveOpenPR(s.cf, s.cf.AgentBranch(num))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not resolve PR for settled record: %v\n", num, err)
 		return

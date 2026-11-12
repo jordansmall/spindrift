@@ -97,7 +97,7 @@ func Reclaim(tracker forge.IssueTracker, cf forge.CodeForge, reaper Reaper, reg 
 	danglingNote := "no open branch/PR found"
 	if cf != nil {
 		branch := cf.AgentBranch(num)
-		if res, err := forge.ResolveOpenPR(cf, num); err == nil && res.Found {
+		if res, err := forge.ResolveOpenPR(cf, branch); err == nil && res.Found {
 			danglingNote = res.URL
 		} else if branch != "" {
 			danglingNote = fmt.Sprintf("no open PR found; branch=%s", branch)

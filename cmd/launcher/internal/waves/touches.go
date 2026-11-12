@@ -12,7 +12,7 @@ import (
 // to inspect; anywhere else, when num has no open PR, or when the fetch fails,
 // it returns nil and the caller falls back to the declared touches alone.
 func prTouchesOf(cf forge.CodeForge, num string) []string {
-	files, err := forge.ResolveOpenPRFiles(cf, num)
+	files, err := forge.ResolveOpenPRFiles(cf, cf.AgentBranch(num))
 	if err != nil {
 		return nil
 	}
