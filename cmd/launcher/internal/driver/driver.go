@@ -87,6 +87,12 @@ type Driver interface {
 	// scans.
 	SessionBaselinesAfter(logPath string, base driverkit.SessionBaselines) (driverkit.SessionBaselines, error)
 
+	// Decode decodes the Pass log at logPath once, for a caller that reads it
+	// several ways: each PassLog reader answers as the matching path-based
+	// method above does, without decoding the log again. A missing log decodes
+	// to an empty PassLog.
+	Decode(logPath string) (driverkit.PassLog, error)
+
 	// SessionFlags renders the CLI's session flags for mode. "initial" pins the
 	// session, "resume" resumes it (rendering nothing when the Driver's session
 	// store lacks it and its CLI cannot create one), and any other mode renders

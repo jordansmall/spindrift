@@ -155,6 +155,10 @@ func (d fakeDriver) SessionBaselinesAfter(logPath string, base driverkit.Session
 	return d.base().SessionBaselinesAfter(logPath, base)
 }
 
+func (d fakeDriver) Decode(logPath string) (driverkit.PassLog, error) {
+	return d.base().Decode(logPath)
+}
+
 func (d fakeDriver) SessionFlags(mode, repoSlug, issue, home string) string {
 	return d.base().SessionFlags(mode, repoSlug, issue, home)
 }
