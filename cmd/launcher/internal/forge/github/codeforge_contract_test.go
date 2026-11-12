@@ -49,7 +49,7 @@ func newCodeForgeHarness(t *testing.T) *codeforgeHarness {
 		repo:   repo,
 		prsDir: prsDir,
 		base:   "main",
-		cf:     NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-"),
+		cf:     NewExecClient("owner/repo", forge.DispatchLabels{}),
 		srv:    srv,
 	}
 }
@@ -57,7 +57,7 @@ func newCodeForgeHarness(t *testing.T) *codeforgeHarness {
 func (h *codeforgeHarness) Forge() forge.CodeForge { return h.cf }
 
 func (h *codeforgeHarness) Unreachable() forge.CodeForge {
-	return NewExecClient("owner/does-not-exist", forge.DispatchLabels{}, "agent/issue-")
+	return NewExecClient("owner/does-not-exist", forge.DispatchLabels{})
 }
 
 func (h *codeforgeHarness) BranchPrefix() string { return "agent/issue-" }

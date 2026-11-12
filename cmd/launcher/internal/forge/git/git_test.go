@@ -18,14 +18,14 @@ import (
 )
 
 func TestGitClient_ImplementsCodeForge(t *testing.T) {
-	var _ forge.CodeForge = NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
+	var _ forge.CodeForge = NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com")
 }
 
 // The git Code Forge deliberately implements no PR, CI, or auto-merge calls.
 // A failed type assertion against forge.PRForge is what callers check for, in
 // place of the removed PushOnly() flag.
 func TestGitClient_NoPRForgeConcept(t *testing.T) {
-	g := NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com")
 	if _, ok := g.(forge.PRForge); ok {
 		t.Error("gitClient satisfies forge.PRForge, want it to implement forge.CodeForge only")
 	}
@@ -62,7 +62,7 @@ func newBareRemoteWithBranches(t *testing.T) string {
 // Merge is how MERGE_MODE=immediate lands work on a push-only forge.
 func TestGitClient_Merge_PushOnlyLanding(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
 
 	if err := g.Merge("agent/issue-1"); err != nil {
 		t.Fatalf("Merge: %v", err)
@@ -120,7 +120,7 @@ func TestGitClient_Merge_ConflictReturnsErrMergeConflict(t *testing.T) {
 			testutil.GitRun(t, work, "add", "shared.txt")
 		})
 
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
 	if err := g.Merge("agent/issue-1"); !errors.Is(err, forge.ErrMergeConflict) {
 		t.Fatalf("Merge: want forge.ErrMergeConflict, got: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestGitClient_Merge_ModifyDeleteConflictReturnsErrMergeConflict(t *testing.
 			testutil.GitRun(t, work, "add", "shared.txt")
 		})
 
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
 	if err := g.Merge("agent/issue-1"); !errors.Is(err, forge.ErrMergeConflict) {
 		t.Fatalf("Merge: want forge.ErrMergeConflict, got: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestGitClient_Merge_RenameRenameConflictReturnsErrMergeConflict(t *testing.
 		func(work string) { testutil.GitRun(t, work, "mv", "x.txt", "z.txt") },
 		func(work string) { testutil.GitRun(t, work, "mv", "x.txt", "y.txt") })
 
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
 	if err := g.Merge("agent/issue-1"); !errors.Is(err, forge.ErrMergeConflict) {
 		t.Fatalf("Merge: want forge.ErrMergeConflict, got: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestGitClient_Rebase_ForcePushesRebasedBranch(t *testing.T) {
 	testutil.GitRun(t, work, "commit", "-m", "later main commit")
 	testutil.GitRun(t, work, "push", "origin", "main")
 
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
 	if err := g.Rebase("agent/issue-1"); err != nil {
 		t.Fatalf("Rebase: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestGitClient_Rebase_ForcePushesRebasedBranch(t *testing.T) {
 // boundary, so Merge must reject the ref rather than pass it on.
 func TestGitClient_Merge_RejectsFlagLikeRef(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
 
 	canary := filepath.Join(t.TempDir(), "pwned")
 	err := g.Merge("--upload-pack=touch " + canary)
@@ -223,7 +223,7 @@ func TestGitClient_Merge_RejectsFlagLikeRef(t *testing.T) {
 // which carries the full rationale.
 func TestGitClient_Rebase_RejectsFlagLikeRef(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
 
 	if err := g.Rebase("--upload-pack=touch /tmp/should-not-run"); err == nil {
 		t.Fatal("Rebase: want error for a flag-like ref, got nil")
@@ -235,7 +235,7 @@ func TestGitClient_Rebase_RejectsFlagLikeRef(t *testing.T) {
 // on its throwaway clone.
 func TestGitClient_Merge_SetsCommitIdentityOnTempClone(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
-	g := NewGitClient(bare, "main", "Spindrift Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(bare, "main", "Spindrift Bot", "bot@example.com")
 
 	if err := g.Merge("agent/issue-1"); err != nil {
 		t.Fatalf("Merge: %v", err)
@@ -290,7 +290,7 @@ func TestUnreachableRemoteURL_PointsToClosedPort(t *testing.T) {
 // without a credential helper (docs/reference.md).
 func TestGitClient_Merge_CloneFailureDoesNotLeakCredentials(t *testing.T) {
 	const secret = "sometoken123"
-	g := NewGitClient(unreachableRemoteURL(t, secret), "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(unreachableRemoteURL(t, secret), "main", "Test Bot", "bot@example.com")
 
 	err := g.Merge("agent/issue-1")
 	if err == nil {
@@ -333,7 +333,7 @@ func TestGitClient_Merge_HookOutputDoesNotLeakCredentials(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
 	installLeakingHook(t, "pre-merge-commit", secret)
 
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
 	err := g.Merge("agent/issue-1")
 	if err == nil {
 		t.Fatal("Merge: want error from failing pre-commit hook, got nil")
@@ -352,12 +352,12 @@ func TestGitClient_Merge_HookOutputDoesNotLeakCredentials(t *testing.T) {
 func TestGitClient_Probe(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
 
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
 	if _, err := g.Probe(); err != nil {
 		t.Errorf("Probe on reachable remote: %v", err)
 	}
 
-	bad := NewGitClient(filepath.Join(t.TempDir(), "does-not-exist.git"), "main", "Test Bot", "bot@example.com", "agent/issue-")
+	bad := NewGitClient(filepath.Join(t.TempDir(), "does-not-exist.git"), "main", "Test Bot", "bot@example.com")
 	if _, err := bad.Probe(); err == nil {
 		t.Error("Probe on unreachable remote: want error, got nil")
 	}
@@ -371,7 +371,7 @@ func TestGitClient_BranchExists(t *testing.T) {
 	// Matches the qualified pattern under `*/`, so ls-remote exits 0 and only
 	// the exact-line filter rejects it.
 	testutil.GitRun(t, bare, "update-ref", "refs/heads/x/refs/heads/agent/issue-2", "refs/heads/agent/issue-1")
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
 
 	exists, err := g.BranchExists("agent/issue-1")
 	if err != nil {
@@ -404,7 +404,7 @@ func TestGitClient_BranchExists(t *testing.T) {
 // remoteURL stays redacted the same way Merge's and Rebase's do.
 func TestGitClient_Probe_DoesNotLeakCredentials(t *testing.T) {
 	const secret = "sometoken123"
-	g := NewGitClient(unreachableRemoteURL(t, secret), "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(unreachableRemoteURL(t, secret), "main", "Test Bot", "bot@example.com")
 
 	_, err := g.Probe()
 	if err == nil {
@@ -423,7 +423,7 @@ func TestGitClient_Probe_SuccessDoesNotLeakCredentials(t *testing.T) {
 	const secret = "sometoken123"
 	bare := newBareRemoteWithBranches(t)
 	remote := "file://oauth2:" + secret + "@/" + bare
-	g := NewGitClient(remote, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(remote, "main", "Test Bot", "bot@example.com")
 
 	got, err := g.Probe()
 	if err != nil {
@@ -476,7 +476,7 @@ func hangingRemoteURL(t *testing.T, secret string) string {
 // so without the timeout Merge blocks forever.
 func TestGitClient_Merge_CloneTimesOutOnHangingRemote(t *testing.T) {
 	const secret = "sometoken123"
-	g := NewGitClient(hangingRemoteURL(t, secret), "main", "Test Bot", "bot@example.com", "agent/issue-",
+	g := NewGitClient(hangingRemoteURL(t, secret), "main", "Test Bot", "bot@example.com",
 		WithCloneTimeout(200*time.Millisecond))
 
 	start := time.Now()
@@ -502,7 +502,7 @@ func TestGitClient_Merge_CloneTimesOutOnHangingRemote(t *testing.T) {
 // same cloneToTemp helper.
 func TestGitClient_Rebase_CloneTimesOutOnHangingRemote(t *testing.T) {
 	const secret = "sometoken123"
-	g := NewGitClient(hangingRemoteURL(t, secret), "main", "Test Bot", "bot@example.com", "agent/issue-",
+	g := NewGitClient(hangingRemoteURL(t, secret), "main", "Test Bot", "bot@example.com",
 		WithCloneTimeout(200*time.Millisecond))
 
 	start := time.Now()
@@ -527,7 +527,7 @@ func TestGitClient_Rebase_CloneTimesOutOnHangingRemote(t *testing.T) {
 // same hanging remote must not block it forever.
 func TestGitClient_Probe_TimesOutOnHangingRemote(t *testing.T) {
 	const secret = "sometoken123"
-	g := NewGitClient(hangingRemoteURL(t, secret), "main", "Test Bot", "bot@example.com", "agent/issue-",
+	g := NewGitClient(hangingRemoteURL(t, secret), "main", "Test Bot", "bot@example.com",
 		WithOpTimeout(200*time.Millisecond))
 
 	start := time.Now()
@@ -567,7 +567,7 @@ func newBareRemoteWithHangingPush(t *testing.T) string {
 // fetch, merge, push) too, not just the clone.
 func TestGitClient_Merge_TimesOutOnHangingPush(t *testing.T) {
 	bare := newBareRemoteWithHangingPush(t)
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-",
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com",
 		WithOpTimeout(200*time.Millisecond))
 
 	start := time.Now()
@@ -631,7 +631,7 @@ func installHangingGitShim(t *testing.T, subcommand string) {
 func TestGitClient_Merge_TimesOutOnHangingMerge(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
 	installHangingGitShim(t, "merge")
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-",
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com",
 		WithOpTimeout(200*time.Millisecond))
 
 	start := time.Now()
@@ -659,7 +659,7 @@ func TestGitClient_Merge_SucceedsWhenGrandchildHoldsOutputPipe(t *testing.T) {
 	// The grandchild outlives the ceiling below by a wide margin: Merge's own
 	// clone, fetch, WaitDelay, and push take seconds on a loaded CI builder.
 	installGitShim(t, "merge", "sleep 60 &")
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
 
 	start := time.Now()
 	err := g.Merge("agent/issue-1")
@@ -685,7 +685,7 @@ func TestGitClient_Merge_SucceedsWhenGrandchildHoldsOutputPipe(t *testing.T) {
 func TestGitClient_Rebase_TimesOutOnHangingRebase(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
 	installHangingGitShim(t, "rebase")
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-",
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com",
 		WithOpTimeout(200*time.Millisecond))
 
 	start := time.Now()
@@ -734,7 +734,7 @@ func TestGitClient_Rebase_TimesOutOnHangingPush(t *testing.T) {
 	// Every step gets its own op timeout, so it must outlast the local clone
 	// and rebase on a loaded CI runner: 200ms once expired mid-rebase there,
 	// failing before the push this test targets.
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-",
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com",
 		WithOpTimeout(2*time.Second))
 
 	start := time.Now()
@@ -769,7 +769,7 @@ func TestGitClient_Rebase_ContentConflictReturnsErrMergeConflict(t *testing.T) {
 			testutil.GitRun(t, w, "add", "shared.txt")
 		})
 
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
 	if err := g.Rebase("agent/issue-1"); !errors.Is(err, forge.ErrMergeConflict) {
 		t.Fatalf("Rebase: want forge.ErrMergeConflict, got: %v", err)
 	}
@@ -783,7 +783,7 @@ func TestGitClient_Rebase_ModifyDeleteConflictReturnsErrMergeConflict(t *testing
 		},
 		func(w string) { testutil.GitRun(t, w, "rm", "shared.txt") })
 
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
 	if err := g.Rebase("agent/issue-1"); !errors.Is(err, forge.ErrMergeConflict) {
 		t.Fatalf("Rebase: want forge.ErrMergeConflict, got: %v", err)
 	}
@@ -796,7 +796,7 @@ func TestGitClient_Rebase_RenameConflictReturnsErrMergeConflict(t *testing.T) {
 		func(w string) { testutil.GitRun(t, w, "mv", "shared.txt", "feature-name.txt") },
 		func(w string) { testutil.GitRun(t, w, "mv", "shared.txt", "main-name.txt") })
 
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
 	if err := g.Rebase("agent/issue-1"); !errors.Is(err, forge.ErrMergeConflict) {
 		t.Fatalf("Rebase: want forge.ErrMergeConflict, got: %v", err)
 	}
@@ -809,7 +809,7 @@ func TestGitClient_Rebase_MissingBaseIsNotConflict(t *testing.T) {
 	// git translates its messages; the assertion below needs the C locale.
 	t.Setenv("LC_ALL", "C")
 	bare := newBareRemoteWithBranches(t)
-	g := NewGitClient(bare, "no-such-base", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(bare, "no-such-base", "Test Bot", "bot@example.com")
 
 	err := g.Rebase("agent/issue-1")
 	if err == nil {
@@ -842,7 +842,7 @@ func TestGitClient_Rebase_HookOutputDoesNotLeakCredentials(t *testing.T) {
 		})
 	installLeakingHook(t, "pre-rebase", secret)
 
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
 	err := g.Rebase("agent/issue-1")
 	if err == nil {
 		t.Fatal("Rebase: want error from failing pre-rebase hook, got nil")

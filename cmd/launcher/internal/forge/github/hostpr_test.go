@@ -20,7 +20,7 @@ pr-create)
 esac
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	url, created, err := c.CreateDraftPR("feat: add widget", "Adds a widget.", "main", "agent/issue-42")
 	if err != nil {
 		t.Fatalf("CreateDraftPR: %v", err)
@@ -53,7 +53,7 @@ pr-create)
 esac
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	_, _, err := c.CreateDraftPR("feat: add widget", "body", "main", "agent/issue-42")
 	if err == nil {
 		t.Fatal("CreateDraftPR with a failing gh pr create: got nil error, want one")
@@ -77,7 +77,7 @@ func TestExecClient_PushBranch_CreatesRemoteBranch(t *testing.T) {
 	forgetest.Run(t, src, "commit", "-m", "feature")
 	wantSHA := forgetest.RevParse(t, src, "work")
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	branch := "agent/issue-9001"
 	if err := c.PushBranch(src, "work", branch, "main"); err != nil {
 		t.Fatalf("PushBranch: %v", err)
@@ -94,7 +94,7 @@ func TestExecClient_PushBranch_CreatesRemoteBranch(t *testing.T) {
 func TestExecClient_PushBranch_RefusesExistingBranch(t *testing.T) {
 	repo := newRelayHarness(t)
 	branch := "agent/issue-9002"
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 
 	src1 := t.TempDir()
 	forgetest.Run(t, "", "clone", repo.Bare, src1)
@@ -138,7 +138,7 @@ func TestExecClient_PushBranch_HookRejectionSurfacesStderr(t *testing.T) {
 	forgetest.Run(t, src, "add", "feature.txt")
 	forgetest.Run(t, src, "commit", "-m", "feature")
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	err := c.PushBranch(src, "work", "agent/issue-9003", "main")
 	if err == nil {
 		t.Fatal("PushBranch rejected by a pre-receive hook: got nil error, want one")
@@ -152,7 +152,7 @@ func TestExecClient_PushBranch_HookRejectionSurfacesStderr(t *testing.T) {
 func TestExecClient_DeleteBranch_IssuesGhApiDelete(t *testing.T) {
 	dir := prependFakeGH(t, "")
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	if err := c.DeleteBranch("agent/issue-9004", "main"); err != nil {
 		t.Fatalf("DeleteBranch: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestExecClient_DeleteBranch_Errors(t *testing.T) {
 exit 1
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	err := c.DeleteBranch("agent/issue-9005", "main")
 	if err == nil {
 		t.Fatal("DeleteBranch with a failing gh api: got nil error, want one")
@@ -198,7 +198,7 @@ func TestExecClient_DeleteBranch_RefusesBeforeAnyGhCall(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := prependFakeGH(t, "")
 
-			c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+			c := NewExecClient("owner/repo", testLabels)
 			err := c.DeleteBranch(tc.branch, tc.base)
 			if err == nil {
 				t.Fatal("DeleteBranch with an invalid arg: got nil error, want one")

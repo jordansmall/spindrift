@@ -25,16 +25,16 @@ var Strategy = backendkit.Strategy{
 	},
 	AcquireToken: acquireToken,
 	NewIssueTracker: func(s backendkit.Shared, _ backendkit.Lookup) (forge.IssueTracker, error) {
-		return NewExecClient(s.RepoSlug, s.Labels, s.BranchPrefix, WithVerdictLabels(s.VerdictLabels)), nil
+		return NewExecClient(s.RepoSlug, s.Labels, WithVerdictLabels(s.VerdictLabels)), nil
 	},
 	NewCodeForge: func(s backendkit.Shared, _ backendkit.Lookup, _ forge.SanitizedParent, _ forge.IssueTracker) (forge.CodeForge, error) {
-		return NewExecClient(s.RepoSlug, s.Labels, s.BranchPrefix, codeForgeOpts(s)...), nil
+		return NewExecClient(s.RepoSlug, s.Labels, codeForgeOpts(s)...), nil
 	},
 	NewReadOnlyCodeForge: func(s backendkit.Shared, _ backendkit.Lookup, _ forge.SanitizedParent, _ forge.IssueTracker) (forge.CodeForge, error) {
-		return NewReadOnlyCodeForge(s.RepoSlug, s.Labels, s.BranchPrefix, codeForgeOpts(s)...), nil
+		return NewReadOnlyCodeForge(s.RepoSlug, s.Labels, codeForgeOpts(s)...), nil
 	},
 	OpenPRForBranch: func(repoSlug, branch string) (bool, error) {
-		_, open, err := NewExecClient(repoSlug, forge.DispatchLabels{}, "").OpenPRForBranch(branch)
+		_, open, err := NewExecClient(repoSlug, forge.DispatchLabels{}).OpenPRForBranch(branch)
 		return open, err
 	},
 	NewLedger: func(s backendkit.Shared, _ backendkit.Lookup) (backendkit.LedgerSite, error) {

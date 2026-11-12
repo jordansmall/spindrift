@@ -59,7 +59,7 @@ func newPRForgeHarness(t *testing.T) *prforgeHarness {
 		repo:     repo,
 		stateDir: stateDir,
 		base:     "main",
-		cf:       NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-"),
+		cf:       NewExecClient("owner/repo", forge.DispatchLabels{}),
 	}
 }
 

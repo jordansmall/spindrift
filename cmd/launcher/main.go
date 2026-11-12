@@ -907,7 +907,6 @@ func localloopConfig(c config) localloop.Config {
 		BaseBranch:          c.BaseBranch,
 		GitUserName:         c.GitUserName,
 		GitUserEmail:        c.GitUserEmail,
-		BranchPrefix:        c.BranchPrefix,
 	}
 }
 

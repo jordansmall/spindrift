@@ -37,13 +37,12 @@ func newReadOnlyRelayHarness(t *testing.T) (*forgetest.GitRepoFixture, forge.Cod
 	fake := newFakeForgejo(t)
 
 	cf := forgejo.NewReadOnlyForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      fake.URL(),
-		Repo:         "owner/repo",
-		Token:        "tok",
-		BaseBranch:   "main",
-		UserName:     "Test Bot",
-		UserEmail:    "bot@example.com",
-		BranchPrefix: "agent/issue-",
+		BaseURL:    fake.URL(),
+		Repo:       "owner/repo",
+		Token:      "tok",
+		BaseBranch: "main",
+		UserName:   "Test Bot",
+		UserEmail:  "bot@example.com",
 	}, nil, repo.Bare)
 	return repo, cf
 }

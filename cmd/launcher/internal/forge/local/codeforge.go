@@ -16,9 +16,9 @@ func IntegrationBranch(parent SanitizedParent) string {
 // 0033), delegating to the git adapter with repoPath where a remote URL would
 // go. baseBranch is the seed branch RelayBundle creates integration/<parent>
 // from on the parent's first seam.
-func NewLocalCodeForge(repoPath, baseBranch string, parent SanitizedParent, userName, userEmail, branchPrefix string, opts ...git.Option) forge.CodeForge {
+func NewLocalCodeForge(repoPath, baseBranch string, parent SanitizedParent, userName, userEmail string, opts ...git.Option) forge.CodeForge {
 	return &localCodeForge{
-		CodeForge:  git.NewGitClient(repoPath, IntegrationBranch(parent), userName, userEmail, branchPrefix, opts...),
+		CodeForge:  git.NewGitClient(repoPath, IntegrationBranch(parent), userName, userEmail, opts...),
 		repoPath:   repoPath,
 		baseBranch: baseBranch,
 		parent:     parent,

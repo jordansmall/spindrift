@@ -19,8 +19,8 @@ type readOnlyCodeForge struct {
 // NewReadOnlyCodeForge returns the gh-exec adapter for
 // BOX_FORGE_AND_ISSUE_ACCESS=read-only. It adds the host-mediated bundle
 // hand-off to NewExecClient, which a Box that cannot push needs (issue #1918).
-func NewReadOnlyCodeForge(repo string, labels forge.DispatchLabels, branchPrefix string, opts ...ExecOption) forge.CodeForge {
-	return &readOnlyCodeForge{execClient: NewExecClient(repo, labels, branchPrefix, opts...)}
+func NewReadOnlyCodeForge(repo string, labels forge.DispatchLabels, opts ...ExecOption) forge.CodeForge {
+	return &readOnlyCodeForge{execClient: NewExecClient(repo, labels, opts...)}
 }
 
 // RelayBundle imports ref from the bundle in outboxDir into a fresh clone and

@@ -46,10 +46,9 @@ type ForgejoCodeForgeConfig struct {
 	Repo    string // owner/repo slug
 	Token   string
 
-	BaseBranch   string // target branch Merge merges onto / Rebase rebases onto for MERGE_MODE=immediate
-	UserName     string // commit identity for Rebase's throwaway clone
-	UserEmail    string
-	BranchPrefix string // unused; agent branch naming is core policy
+	BaseBranch string // target branch Merge merges onto / Rebase rebases onto for MERGE_MODE=immediate
+	UserName   string // commit identity for Rebase's throwaway clone
+	UserEmail  string
 
 	// MergeMethod is the value Forgejo's merge endpoint wants in its "Do"
 	// field: "merge", "squash", or "rebase". Empty resolves to "rebase".
@@ -145,7 +144,7 @@ func newForgejoCodeForge(cfg ForgejoCodeForgeConfig, tracker forge.IssueTracker,
 		restCli = rest.New(baseURL, rest.TokenAuth{Scheme: "token", Token: cfg.Token}, "forgejo", forgejoStatusMap(), hc)
 	}
 
-	gitCF := git.NewGitClient(remote, cfg.BaseBranch, cfg.UserName, cfg.UserEmail, cfg.BranchPrefix)
+	gitCF := git.NewGitClient(remote, cfg.BaseBranch, cfg.UserName, cfg.UserEmail)
 	return &forgejoCodeForge{rest: restCli, repo: cfg.Repo, git: gitCF, mergeMethod: cfg.MergeMethod, remote: remote, mergeRecheckDelay: defaultMergeRecheckDelay}
 }
 

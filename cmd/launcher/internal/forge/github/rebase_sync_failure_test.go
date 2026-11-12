@@ -71,7 +71,7 @@ func TestRebase_SyncFailureClassification(t *testing.T) {
 	for _, method := range []string{"rebase", "merge"} {
 		t.Run(method+"/modify-delete conflict", func(t *testing.T) {
 			h := newCodeForgeHarness(t)
-			h.cf = NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-", WithSyncMethod(method))
+			h.cf = NewExecClient("owner/repo", forge.DispatchLabels{}, WithSyncMethod(method))
 			url := seedModifyDeleteConflict(t, h, "1")
 
 			err := h.cf.Rebase(url)
@@ -82,7 +82,7 @@ func TestRebase_SyncFailureClassification(t *testing.T) {
 
 		t.Run(method+"/missing identity is not a conflict", func(t *testing.T) {
 			h := newCodeForgeHarness(t)
-			h.cf = NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-", WithSyncMethod(method))
+			h.cf = NewExecClient("owner/repo", forge.DispatchLabels{}, WithSyncMethod(method))
 			url := seedDivergedIdentityless(t, h, "2")
 
 			err := h.cf.Rebase(url)
@@ -101,7 +101,7 @@ func TestRebase_SyncFailureClassification(t *testing.T) {
 
 		t.Run(method+"/commit identity option lets an identity-less host sync", func(t *testing.T) {
 			h := newCodeForgeHarness(t)
-			h.cf = NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-", WithSyncMethod(method),
+			h.cf = NewExecClient("owner/repo", forge.DispatchLabels{}, WithSyncMethod(method),
 				WithCommitIdentity("Spindrift Bot", "bot@example.com"))
 			url := seedDivergedIdentityless(t, h, "3")
 

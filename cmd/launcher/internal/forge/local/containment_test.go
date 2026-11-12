@@ -25,7 +25,7 @@ func TestLocalCodeForge_LandingContained_IntegrationRef_TrueAfterCleanLand(t *te
 	branch := "agent/issue-1698"
 	seedBundleBranch(t, repo.Bare, IntegrationBranch(parent), outbox, branch, "1698")
 
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	br := cf.(forge.BundleRelay)
 	lr := cf.(forge.LandingRef)
 	query, ok := cf.(forge.LandingContainmentQuery)
@@ -65,7 +65,7 @@ func TestLocalCodeForge_LandingContained_PRURL_ReturnsFalseNil(t *testing.T) {
 
 	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	query := cf.(forge.LandingContainmentQuery)
 
 	scope := forge.NewSeedScope(parent.String(), IntegrationBranch(parent))
@@ -86,7 +86,7 @@ func TestLocalCodeForge_LandingContained_IntegrationRef_UnknownSHA(t *testing.T)
 
 	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	query := cf.(forge.LandingContainmentQuery)
 
 	scope := forge.NewSeedScope(parent.String(), IntegrationBranch(parent))
@@ -109,7 +109,7 @@ func TestLocalCodeForge_LandingContained_IntegrationRef_DashPrefixedSHA(t *testi
 
 	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	query := cf.(forge.LandingContainmentQuery)
 
 	scope := forge.NewSeedScope(parent.String(), IntegrationBranch(parent))
@@ -132,12 +132,12 @@ func TestLocalCodeForge_LandingContained_IntegrationRef_InstanceAgnostic(t *test
 	parent1 := ResolveParent("1694", "")
 	parent2 := ResolveParent("2200", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent1))
-	cf1 := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent1), parent1, "Test Bot", "bot@example.com", "agent/issue-")
+	cf1 := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent1), parent1, "Test Bot", "bot@example.com")
 
 	// parent2's Integration branch doesn't exist yet, so cf2's RelayBundle
 	// creates it from cf1's Integration branch tip (ensureIntegrationBranch),
 	// like a second broad ticket's first seam landing in the same run.
-	cf2 := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent1), parent2, "Test Bot", "bot@example.com", "agent/issue-")
+	cf2 := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent1), parent2, "Test Bot", "bot@example.com")
 	outbox := t.TempDir()
 	branch := "agent/issue-2201"
 	seedBundleBranch(t, repo.Bare, IntegrationBranch(parent1), outbox, branch, "2201")
@@ -180,7 +180,7 @@ func TestLocalCodeForge_LandingContained_IntegrationRef_FalseForOtherParent(t *t
 	branch := "agent/issue-1698"
 	seedBundleBranch(t, repo.Bare, IntegrationBranch(parentA), outbox, branch, "1698")
 
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parentA), parentA, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parentA), parentA, "Test Bot", "bot@example.com")
 	br := cf.(forge.BundleRelay)
 	if err := br.RelayBundle(outbox, branch); err != nil {
 		t.Fatalf("RelayBundle: %v", err)
@@ -218,7 +218,7 @@ func TestLocalCodeForge_LandingContained_IntegrationRef_ErrorsOnGenuineGitFailur
 
 	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	query := cf.(forge.LandingContainmentQuery)
 	sha := testutil.GitOutput(t, repo.Bare, "rev-parse", "refs/heads/"+IntegrationBranch(parent))
 
@@ -242,7 +242,7 @@ func TestLocalCodeForge_LandingContained_BranchRef_FalseBeforeMerge(t *testing.T
 	branch := "agent/issue-1698"
 	seedBundleBranch(t, repo.Bare, IntegrationBranch(parent), outbox, branch, "1698")
 
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	br := cf.(forge.BundleRelay)
 	query, ok := cf.(forge.LandingContainmentQuery)
 	if !ok {
@@ -275,7 +275,7 @@ func TestLocalCodeForge_LandingContained_BranchRef_TrueAfterMerge(t *testing.T) 
 	branch := "agent/issue-1698"
 	seedBundleBranch(t, repo.Bare, IntegrationBranch(parent), outbox, branch, "1698")
 
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	br := cf.(forge.BundleRelay)
 	query := cf.(forge.LandingContainmentQuery)
 	if err := br.RelayBundle(outbox, branch); err != nil {
@@ -304,7 +304,7 @@ func TestLocalCodeForge_LandingContained_BranchRef_FalseForNonexistentBranch(t *
 
 	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	query := cf.(forge.LandingContainmentQuery)
 
 	scope := forge.NewSeedScope(parent.String(), IntegrationBranch(parent))
@@ -331,7 +331,7 @@ func TestLocalCodeForge_LandingContained_BranchRef_TrueForRebasedLanding(t *test
 	branch := "agent/issue-1698"
 	seedBundleBranch(t, repo.Bare, IntegrationBranch(parent), outbox, branch, "1698")
 
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	br := cf.(forge.BundleRelay)
 	query := cf.(forge.LandingContainmentQuery)
 	if err := br.RelayBundle(outbox, branch); err != nil {
@@ -422,7 +422,7 @@ func TestLocalCodeForge_LandingContained_BranchRef_TrueForMultiCommitRebasedLand
 		t.Fatalf("refs/heads/%s = %s, want unchanged %s", branch, got, preLandSHA)
 	}
 
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	query := cf.(forge.LandingContainmentQuery)
 
 	scope := forge.NewSeedScope(parent.String(), IntegrationBranch(parent))
@@ -475,7 +475,7 @@ func TestLocalCodeForge_LandingContained_BranchRef_FalseWhenLaterCommitNeverLand
 	testutil.GitRun(t, partial, "cherry-pick", oldestSHA)
 	testutil.GitRun(t, partial, "push", "origin", "HEAD:refs/heads/"+IntegrationBranch(parent))
 
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	query := cf.(forge.LandingContainmentQuery)
 
 	scope := forge.NewSeedScope(parent.String(), IntegrationBranch(parent))
@@ -497,7 +497,7 @@ func TestLocalCodeForge_LandingContained_BranchRef_ErrorsOnGenuineGitFailure(t *
 
 	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	query := cf.(forge.LandingContainmentQuery)
 
 	scope := forge.NewSeedScope(parent.String(), IntegrationBranch(parent))

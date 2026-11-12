@@ -30,14 +30,14 @@ func newGitCodeForgeHarness(t *testing.T) *gitCodeForgeHarness {
 	return &gitCodeForgeHarness{
 		t:    t,
 		repo: repo,
-		cf:   NewGitClient(repo.Bare, "main", "Test Bot", "bot@example.com", "agent/issue-"),
+		cf:   NewGitClient(repo.Bare, "main", "Test Bot", "bot@example.com"),
 	}
 }
 
 func (h *gitCodeForgeHarness) Forge() forge.CodeForge { return h.cf }
 
 func (h *gitCodeForgeHarness) Unreachable() forge.CodeForge {
-	return NewGitClient(filepath.Join(h.t.TempDir(), "does-not-exist.git"), "main", "Test Bot", "bot@example.com", "agent/issue-")
+	return NewGitClient(filepath.Join(h.t.TempDir(), "does-not-exist.git"), "main", "Test Bot", "bot@example.com")
 }
 
 func (h *gitCodeForgeHarness) BranchPrefix() string { return "agent/issue-" }

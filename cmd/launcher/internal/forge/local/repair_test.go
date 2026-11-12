@@ -67,9 +67,9 @@ func TestLocalCodeForge_IntegrationTip_ResolvesNamedParentsBranch(t *testing.T) 
 
 	parent1, parent2 := ResolveParent("1694", ""), ResolveParent("2200", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent1))
-	cf1 := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent1), parent1, "Test Bot", "bot@example.com", "agent/issue-")
+	cf1 := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent1), parent1, "Test Bot", "bot@example.com")
 
-	cf2 := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent1), parent2, "Test Bot", "bot@example.com", "agent/issue-")
+	cf2 := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent1), parent2, "Test Bot", "bot@example.com")
 	outbox := t.TempDir()
 	branch := "agent/issue-2201"
 	seedBundleBranch(t, repo.Bare, IntegrationBranch(parent1), outbox, branch, "2201")

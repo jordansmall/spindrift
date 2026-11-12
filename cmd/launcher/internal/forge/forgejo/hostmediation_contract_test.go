@@ -84,13 +84,12 @@ func newHostMediationHarness(t *testing.T) *hostMediationHarness {
 	t.Cleanup(h.srv.Close)
 
 	h.cf = forgejo.NewReadOnlyForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      h.srv.URL,
-		Repo:         "owner/repo",
-		Token:        "tok",
-		BaseBranch:   "main",
-		UserName:     "Test Bot",
-		UserEmail:    "bot@example.com",
-		BranchPrefix: "agent/issue-",
+		BaseURL:    h.srv.URL,
+		Repo:       "owner/repo",
+		Token:      "tok",
+		BaseBranch: "main",
+		UserName:   "Test Bot",
+		UserEmail:  "bot@example.com",
 	}, nil, repo.Bare)
 	h.tr = forgejo.NewForgejoClient(forgejo.ForgejoConfig{
 		BaseURL: h.srv.URL,

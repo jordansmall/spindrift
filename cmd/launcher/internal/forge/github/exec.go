@@ -76,7 +76,6 @@ type execClient struct {
 	repo          string // owner/repo slug
 	labels        forge.DispatchLabels
 	verdictLabels forge.VerdictLabels
-	branchPrefix  string
 	mergeMethod   string // "", "merge", "squash", or "rebase"; "" behaves as "rebase" (mergeMethodFlag)
 	syncMethod    string // "", "rebase", or "merge"; "" behaves as "rebase"
 	userName      string // committer identity Rebase sets on its clone; empty keeps ambient git config
@@ -120,8 +119,8 @@ func WithCommitIdentity(name, email string) ExecOption {
 // instance implements IssueTracker, CodeForge, and PRForge, so a caller may
 // use it for every seam it needs or construct one per seam. labels maps
 // canonical DispatchState values to GitHub label names.
-func NewExecClient(repo string, labels forge.DispatchLabels, branchPrefix string, opts ...ExecOption) *execClient {
-	e := &execClient{repo: repo, labels: labels, branchPrefix: branchPrefix}
+func NewExecClient(repo string, labels forge.DispatchLabels, opts ...ExecOption) *execClient {
+	e := &execClient{repo: repo, labels: labels}
 	for _, opt := range opts {
 		opt(e)
 	}

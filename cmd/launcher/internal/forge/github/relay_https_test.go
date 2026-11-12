@@ -183,7 +183,7 @@ func TestReadOnlyCodeForge_RelayBundle_AuthenticatesOverHTTPSNotSSH(t *testing.T
 	branch := "agent/issue-4647"
 	wantSHA := forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
 
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
 	if err := cf.(forge.BundleRelay).RelayBundle(outbox, branch); err != nil {
 		t.Fatalf("RelayBundle: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestReadOnlyCodeForge_CommitSubjects_AuthenticatesOverHTTPSNotSSH(t *testin
 	branch := "agent/issue-4647"
 	forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
 
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
 	subjects, err := cf.(forge.BundleCommitSubjects).CommitSubjects(outbox, "main", branch)
 	if err != nil {
 		t.Fatalf("CommitSubjects: %v", err)
@@ -234,7 +234,7 @@ func TestExecClient_PushBranch_AuthenticatesOverHTTPSNotSSH(t *testing.T) {
 	forgetest.Run(t, src, "commit", "-m", "feature")
 	wantSHA := forgetest.RevParse(t, src, "work")
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	branch := "agent/issue-4647"
 	if err := c.PushBranch(src, "work", branch, "main"); err != nil {
 		t.Fatalf("PushBranch: %v", err)
@@ -274,7 +274,7 @@ func TestExecClient_Rebase_AuthenticatesOverHTTPSNotSSH(t *testing.T) {
 // invocation, not a token captured when the relay was constructed.
 func TestReadOnlyCodeForge_RelayBundle_HonoursRefreshedGHToken(t *testing.T) {
 	repo, srv := newRelayHTTPSHarness(t)
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
 	relay := func(branch string) error {
 		outbox := t.TempDir()
 		forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
@@ -328,7 +328,7 @@ func TestReadOnlyCodeForge_RelayBundle_IgnoresAmbientSSHRewrite(t *testing.T) {
 			branch := "agent/issue-4665"
 			wantSHA := forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
 
-			cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+			cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
 			if err := cf.(forge.BundleRelay).RelayBundle(outbox, branch); err != nil {
 				t.Fatalf("RelayBundle: %v", err)
 			}

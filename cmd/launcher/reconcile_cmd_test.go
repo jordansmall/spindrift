@@ -520,7 +520,7 @@ func TestRunReconcile_ClosingLastSeamSurfacesIntegrationBranch(t *testing.T) {
 	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(sanitizedParent))
 	repo.SeedBranch("agent/issue-42", "42")
 
-	cf := local.NewLocalCodeForge(repo.Bare, local.IntegrationBranch(sanitizedParent), sanitizedParent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := local.NewLocalCodeForge(repo.Bare, local.IntegrationBranch(sanitizedParent), sanitizedParent, "Test Bot", "bot@example.com")
 	if err := cf.Merge("agent/issue-42"); err != nil {
 		t.Fatalf("Merge: %v", err)
 	}

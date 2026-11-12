@@ -20,7 +20,7 @@ func TestOpenPRForBranch_PRListFailureSurfacesStderr(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	_, _, err := c.OpenPRForBranch("agent/issue-1")
 	if err == nil {
 		t.Fatal("want error, got nil")
@@ -39,7 +39,7 @@ func TestOpenPRForBranch_ErrorEmptyStderrNoTrailingColon(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	_, _, err := c.OpenPRForBranch("agent/issue-1")
 	if err == nil {
 		t.Fatal("OpenPRForBranch: want error, got nil")
@@ -58,7 +58,7 @@ func TestBranchExists_APIFailureSurfacesStderr(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	_, err := c.BranchExists("agent/issue-1")
 	if err == nil {
 		t.Fatal("BranchExists: want error, got nil")
@@ -76,7 +76,7 @@ func TestPRForBranch_PRListFailureSurfacesStderr(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	_, _, err := c.PRForBranch("agent/issue-1")
 	if err == nil {
 		t.Fatal("PRForBranch: want error, got nil")
@@ -95,7 +95,7 @@ func TestCheckState_GraphQLFailureSurfacesStderr(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	_, err := c.CheckState("https://github.com/owner/repo/pull/42")
 	if err == nil {
 		t.Fatal("CheckState: want error, got nil")
@@ -116,7 +116,7 @@ func TestMerge_TransientFailureSurfacesStderr(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	err := c.Merge("https://github.com/owner/repo/pull/42")
 	if err == nil {
 		t.Fatal("Merge: want error, got nil")
@@ -138,7 +138,7 @@ func TestMerge_GenericFailureSurfacesStderr(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	err := c.Merge("https://github.com/owner/repo/pull/42")
 	if err == nil {
 		t.Fatal("Merge: want error, got nil")
@@ -161,7 +161,7 @@ func TestProbe_AuthFailureSurfacesStderr(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	_, err := c.Probe()
 	if err == nil {
 		t.Fatal("Probe: want error, got nil")
@@ -186,7 +186,7 @@ func TestEnqueueAutoMerge_FailureSurfacesStderr(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	err := c.EnqueueAutoMerge("https://github.com/owner/repo/pull/42")
 	if err == nil {
 		t.Fatal("EnqueueAutoMerge: want error, got nil")
@@ -205,7 +205,7 @@ func TestMarkReady_FailureSurfacesStderr(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	err := c.MarkReady("https://github.com/owner/repo/pull/42")
 	if err == nil {
 		t.Fatal("MarkReady: want error, got nil")
@@ -225,7 +225,7 @@ func TestCreateLabel_FailureSurfacesStderr(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	err := c.CreateLabel("bug", "a bug", "ff0000")
 	if err == nil {
 		t.Fatal("CreateLabel: want error, got nil")
@@ -253,7 +253,7 @@ printf 'unexpected argv: %s\n' "$*" >&2
 exit 1
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	got, err := c.ListLabels()
 	if err != nil {
 		t.Fatalf("ListLabels: %v", err)
@@ -274,7 +274,7 @@ func TestListLabels_FailureSurfacesStderr(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	_, err := c.ListLabels()
 	if err == nil {
 		t.Fatal("ListLabels: want error, got nil")
@@ -314,7 +314,7 @@ fi
 exit 1
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	pr, ok, err := c.OpenPRForBranch("agent/issue-1")
 	if err != nil {
 		t.Fatalf("OpenPRForBranch: %v", err)
@@ -347,7 +347,7 @@ func TestProbe_RateLimitedSurfacesErrRateLimit(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	_, err := c.Probe()
 	if err == nil {
 		t.Fatal("Probe: want error, got nil")
@@ -372,7 +372,7 @@ func TestProbe_AuthRateLimitedSurfacesErrRateLimit(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	_, err := c.Probe()
 	if err == nil {
 		t.Fatal("Probe: want error, got nil")
@@ -403,7 +403,7 @@ func TestCheckRun_ReturnsActionsRunURLWithJobSuffixTrimmed(t *testing.T) {
 {"__typename":"CheckRun","detailsUrl":"https://github.com/owner/repo/actions/runs/123/job/456"},
 {"__typename":"CheckRun","detailsUrl":"https://github.com/owner/repo/actions/runs/123/job/789"}]}}`))
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	state, runURL, err := c.CheckRun(checkRunPRURL)
 	if err != nil {
 		t.Fatalf("CheckRun: %v", err)
@@ -419,7 +419,7 @@ func TestCheckRun_ReturnsActionsRunURLWithJobSuffixTrimmed(t *testing.T) {
 func TestCheckRun_NoChecksReturnsNoneAndNoURL(t *testing.T) {
 	prependFakeGH(t, graphQLRollupGH(`{}`))
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	state, runURL, err := c.CheckRun(checkRunPRURL)
 	if err != nil {
 		t.Fatalf("CheckRun: %v", err)
@@ -433,7 +433,7 @@ func TestCheckRun_NonActionsDetailsURLYieldsNoURL(t *testing.T) {
 	prependFakeGH(t, graphQLRollupGH(`{"state":"SUCCESS","contexts":{"nodes":[
 {"__typename":"CheckRun","detailsUrl":"https://ci.example.com/builds/9"}]}}`))
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	state, runURL, err := c.CheckRun(checkRunPRURL)
 	if err != nil {
 		t.Fatalf("CheckRun: %v", err)
@@ -444,7 +444,7 @@ func TestCheckRun_NonActionsDetailsURLYieldsNoURL(t *testing.T) {
 }
 
 func TestCheckRun_InvalidPRURL(t *testing.T) {
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	if _, _, err := c.CheckRun("not-a-pr-url"); err == nil {
 		t.Fatal("CheckRun: want invalid PR URL error, got nil")
 	}
@@ -457,7 +457,7 @@ func TestCheckRun_GraphQLFailureSurfacesStderr(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	_, _, err := c.CheckRun(checkRunPRURL)
 	if err == nil || !strings.Contains(err.Error(), "HTTP 403: Forbidden") {
 		t.Fatalf("CheckRun error must surface gh's stderr; got: %v", err)
@@ -471,7 +471,7 @@ func TestCheckRun_PrefersRunNotYetCompleted(t *testing.T) {
 {"__typename":"CheckRun","status":"COMPLETED","detailsUrl":"https://github.com/owner/repo/actions/runs/1/job/10"},
 {"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"https://github.com/owner/repo/actions/runs/2/job/20"}]}}`))
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	_, runURL, err := c.CheckRun(checkRunPRURL)
 	if err != nil {
 		t.Fatalf("CheckRun: %v", err)
@@ -486,7 +486,7 @@ func TestCheckRun_FallsBackToFirstRunWhenAllCompleted(t *testing.T) {
 {"__typename":"CheckRun","status":"COMPLETED","detailsUrl":"https://github.com/owner/repo/actions/runs/1/job/10"},
 {"__typename":"CheckRun","status":"COMPLETED","detailsUrl":"https://github.com/owner/repo/actions/runs/2/job/20"}]}}`))
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	_, runURL, err := c.CheckRun(checkRunPRURL)
 	if err != nil {
 		t.Fatalf("CheckRun: %v", err)
@@ -503,7 +503,7 @@ func TestCheckRun_IgnoresRunsOutsideThePRsRepo(t *testing.T) {
 {"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"https://github.com/other/repo/actions/runs/2"},
 {"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"https://github.com/owner/other/actions/runs/3"}]}}`))
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	_, runURL, err := c.CheckRun(checkRunPRURL)
 	if err != nil {
 		t.Fatalf("CheckRun: %v", err)
@@ -543,7 +543,7 @@ fi
 exit 1
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	got, err := c.MergeCommit("https://github.com/owner/repo/pull/7")
 	if err != nil {
 		t.Fatalf("MergeCommit: %v", err)
@@ -565,7 +565,7 @@ func TestMergeCommit_FailureSurfacesStderr(t *testing.T) {
 exit 1
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	_, err := c.MergeCommit("https://github.com/owner/repo/pull/7")
 	if err == nil || !strings.Contains(err.Error(), "HTTP 502: Bad Gateway") {
 		t.Fatalf("MergeCommit error = %v, want gh's stderr", err)
@@ -574,7 +574,7 @@ exit 1
 
 func TestCommentPR_PostsBodyOnPR(t *testing.T) {
 	dir := prependFakeGH(t, "exit 0\n")
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	if err := c.CommentPR("https://github.com/owner/repo/pull/42", "held for review"); err != nil {
 		t.Fatalf("CommentPR: %v", err)
 	}
@@ -594,7 +594,7 @@ func TestCommentPR_FailureSurfacesStderr(t *testing.T) {
   exit 1
 fi
 `)
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	err := c.CommentPR("https://github.com/owner/repo/pull/42", "x")
 	if err == nil || !strings.Contains(err.Error(), "HTTP 404: Not Found") {
 		t.Fatalf("CommentPR error must surface gh's stderr; got: %v", err)

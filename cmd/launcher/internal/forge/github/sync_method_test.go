@@ -73,7 +73,7 @@ fi
 exit 0
 `)
 
-			c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-", tc.opts...)
+			c := NewExecClient("owner/repo", forge.DispatchLabels{}, tc.opts...)
 			if err := c.Rebase("https://github.com/owner/repo/pull/42"); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
