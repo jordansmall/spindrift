@@ -147,3 +147,26 @@ func TestForEachLineUntil_StopsWhenFnReturnsFalse(t *testing.T) {
 		t.Fatalf("got %v, want [one two]", got)
 	}
 }
+
+func TestForEachLineFlagged_ReportsOversizedLineOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"short lines", writeLog(t, "a", "b"), false},
+		{"oversized line", writeBigLog(t, 5*1024*1024), true},
+	} {
+		var lines []string
+		oversized, err := logscan.ForEachLineFlagged(tc.path, logscan.SkipOversized, func(l string) { lines = append(lines, l) })
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if oversized != tc.want {
+			t.Errorf("%s: oversized = %v, want %v", tc.name, oversized, tc.want)
+		}
+		if tc.want && len(lines) != 0 {
+			t.Errorf("%s: SkipOversized yielded %d lines, want 0", tc.name, len(lines))
+		}
+	}
+}

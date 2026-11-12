@@ -37,6 +37,21 @@ func ForEachLine(path string, policy Policy, fn func(line string)) error {
 // ForEachLineUntil is ForEachLine for a caller that needs only a log's leading
 // lines: it stops reading once fn returns false.
 func ForEachLineUntil(path string, policy Policy, fn func(line string) bool) error {
+	return forEachLine(path, policy, fn, nil)
+}
+
+// ForEachLineFlagged is ForEachLine that also reports whether the log held a
+// line longer than bufSize, so a caller that scanned it once can tell whether
+// another Policy would have seen different lines.
+func ForEachLineFlagged(path string, policy Policy, fn func(line string)) (oversized bool, err error) {
+	err = forEachLine(path, policy, func(line string) bool {
+		fn(line)
+		return true
+	}, func() { oversized = true })
+	return oversized, err
+}
+
+func forEachLine(path string, policy Policy, fn func(line string) bool, onOversized func()) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -46,6 +61,9 @@ func ForEachLineUntil(path string, policy Policy, fn func(line string) bool) err
 	br := bufio.NewReaderSize(f, bufSize)
 	for {
 		line, isPrefix, err := br.ReadLine()
+		if err == nil && isPrefix && onOversized != nil {
+			onOversized()
+		}
 		if err == nil && (!isPrefix || policy == ChunkOversized) && !fn(string(line)) {
 			return nil
 		}
