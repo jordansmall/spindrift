@@ -1107,7 +1107,7 @@ var clauseContracts = []clauseContract{
 	{
 		fragment: "fragments/ci-failure.md",
 		clause:   "The launcher captured this from the failing PR checks",
-		reason:   "a fix pass must say the summary came from the launcher's PR-check capture, so the agent reads the failing job's log rather than treating the summary as the failure (issue #2354).",
+		reason:   "a fix pass must say the summary came from the launcher's PR-check capture (issues #2354, #6893).",
 	},
 
 	// local/research-verdict-relay.md
@@ -1582,25 +1582,15 @@ var clauseContracts = []clauseContract{
 	},
 	{
 		fragment: "github/fix-ci-read.md",
-		clause:   "gh pr view",
-		reason:   "a GitHub fix pass reads CI through gh (issue #1963).",
-	},
-	{
-		fragment: "github/fix-ci-read.md",
-		clause:   "fj pr status",
+		pattern:  regexp.MustCompile(`\b(gh|fj) (pr|run)|curl|/api/v1`),
 		absent:   true,
-		reason:   "fj does not exist against a GitHub remote (issue #1963).",
+		reason:   "the fix pass gets the failing job's log tail from CI FAILURE, so the CI-read step must not instruct a forge CLI or API call (issue #6893).",
 	},
 	{
 		fragment: "forgejo/fix-ci-read.md",
-		clause:   "fj pr status",
-		reason:   "a Forgejo fix pass reads CI through fj (issue #1963).",
-	},
-	{
-		fragment: "forgejo/fix-ci-read.md",
-		clause:   "gh pr view",
+		pattern:  regexp.MustCompile(`\b(gh|fj) (pr|run)|curl|/api/v1`),
 		absent:   true,
-		reason:   "the gh CI commands do not exist against a Forgejo remote (issue #1963).",
+		reason:   "the fix pass gets the failing job's log tail from CI FAILURE, so the CI-read step must not instruct a forge CLI or API call (issue #6893).",
 	},
 	{
 		fragment: "open-pr-create-outbox.md",
@@ -2839,8 +2829,8 @@ var clauseContracts = []clauseContract{
 	// ci-failure.md: a fix-pass step no golden cell renders, so checked as raw source
 	{
 		fragment: "fragments/ci-failure.md",
-		clause:   "failure itself",
-		reason:   "the summary only names which checks failed, so the step must frame it as a pointer and send the agent to the job log rather than present it as the failure.",
+		clause:   "a capped tail of the failing job's log",
+		reason:   "the host injects the job log tail, so the step must say the excerpt is in CI FAILURE rather than send the agent to fetch the log (issue #6893).",
 	},
 	{
 		fragment: "fragments/ci-failure.md",
@@ -2852,7 +2842,7 @@ var clauseContracts = []clauseContract{
 		fragment: "fix-prompt.md",
 		clause:   "skip anything CI FAILURE",
 		absent:   true,
-		reason:   "the CI FAILURE summary does not replace reading the failing job's log, so the template must not say to skip anything on its account.",
+		reason:   "a check with no log excerpt still has to be reproduced locally, so the template must not say to skip anything on CI FAILURE's account.",
 	},
 
 	// issue-read.md

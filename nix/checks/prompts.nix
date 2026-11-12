@@ -1226,9 +1226,7 @@ in
   # Grep pin (issue #1653): the launcher gates on CI green itself before
   # flipping the PR ready and merging (issue #1651), so the WATCH CI GraphQL
   # query must not appear in any prompt source file.
-  # fragments/github/fix-ci-read.md legitimately references the unrelated
-  # `statusCheckRollup` JSON field, so the query body, not the field name, is
-  # the pin.
+  # The query body, not the `statusCheckRollup` field name, is the pin.
   prompt-source-statusCheckRollup-query-absent =
     pkgs.runCommand "prompt-source-statusCheckRollup-query-absent" { }
       ''
@@ -1933,21 +1931,18 @@ in
         touch $out
       '';
 
-  # The fix-pass CONTEXT CI-read step forks on CODE_FORGE (issue #1963,
-  # FIX_CI_READ_GH/FIX_CI_READ_FORGEJO computed in promptassembly): the github
-  # fragment keeps `gh pr view` and never invokes `fj pr status`, and the
-  # forgejo fragment the reverse.
-  fix-ci-read-fragments-fork-forge = pkgs.runCommand "fix-ci-read-fragments-fork-forge" { } ''
-    grep -q 'gh pr view' ${../../templates/default/prompts/fragments/github/fix-ci-read.md}
-    ! grep -q 'fj pr status' ${../../templates/default/prompts/fragments/github/fix-ci-read.md} || {
-      echo "github/fix-ci-read.md invokes fj pr status (issue #1963)" >&2
-      exit 1
-    }
-    grep -q 'fj pr status' ${../../templates/default/prompts/fragments/forgejo/fix-ci-read.md}
-    ! grep -q 'gh pr view' ${../../templates/default/prompts/fragments/forgejo/fix-ci-read.md} || {
-      echo "forgejo/fix-ci-read.md invokes gh pr view (issue #1963)" >&2
-      exit 1
-    }
+  # The fix pass gets each failing job's log tail from the host's CI FAILURE
+  # (issue #6893), so neither fix-ci-read fragment nor ci-failure.md may
+  # instruct a forge CLI or API call to read CI.
+  fix-ci-read-fragments-no-forge-cli = pkgs.runCommand "fix-ci-read-fragments-no-forge-cli" { } ''
+    for f in ${../../templates/default/prompts/fragments/github/fix-ci-read.md} \
+      ${../../templates/default/prompts/fragments/forgejo/fix-ci-read.md} \
+      ${../../templates/default/prompts/fragments/ci-failure.md}; do
+      ! grep -qE '\b(gh|fj) |curl|/api/v1' "$f" || {
+        echo "$f instructs a forge CLI or API call (issue #6893)" >&2
+        exit 1
+      }
+    done
     touch $out
   '';
 

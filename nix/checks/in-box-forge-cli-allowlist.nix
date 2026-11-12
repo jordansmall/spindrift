@@ -130,7 +130,6 @@ let
       ];
     in
     both "filer-dedup"
-    ++ both "fix-ci-read"
     ++ both "open-pr-create"
     ++ both "if-blocked-pr"
     ++ both "research-verdict"

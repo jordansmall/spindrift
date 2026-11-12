@@ -109,8 +109,8 @@ let
     BOX_PUSH_READ_WRITE = "a writable Box pushes its branch itself";
     HOST_MEDIATED_PUSH = "the launcher lands the branch host-side";
     OUTBOX_PUSH_READ_ONLY = "a read-only Box pushes through the outbox";
-    FIX_CI_READ_GH = "the fix pass reads CI with gh";
-    FIX_CI_READ_FORGEJO = "the fix pass reads CI with fj";
+    FIX_CI_READ_GH = "the fix pass on a github forge works from the host's CI FAILURE";
+    FIX_CI_READ_FORGEJO = "the fix pass on a forgejo forge works from the host's CI FAILURE";
   };
 
   entries =

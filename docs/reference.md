@@ -954,10 +954,12 @@ PR's head commit (`forge.PRForge.FailureDetail`), and forwards it into the fix
 box as `CI_FAILURE_SUMMARY`. On GitHub that is the check runs' summaries and
 the commit statuses' descriptions, read off the same fine-grained-PAT-safe
 GraphQL `statusCheckRollup` root `CheckState` reads; on Forgejo it is the
-commit statuses' descriptions. No job logs are fetched, and a GitHub Actions
-check-run summary is usually empty. `fix-prompt.md` renders it as a
-`# CI FAILURE` section ahead of `# CONTEXT`, so the fix agent knows which
-checks failed and reads their CI logs before its local re-run — which alone
+commit statuses' descriptions. Each failing Actions job's log is also fetched
+and its tail (capped at `MaxLogExcerptBytes`, with a notice when trimmed) is
+appended, since a GitHub Actions check-run summary is usually empty.
+`fix-prompt.md` renders it as a `# CI FAILURE` section ahead of `# CONTEXT`,
+so the fix agent sees which checks failed and why without calling a forge CLI
+or API, then re-runs locally — which alone
 misses CI-only failures (flaky, environment-specific, or checks the repo's
 local CHECK step doesn't run). The fetch is best-effort: a failure
 to fetch it never blocks the fix pass, and `CI_FAILURE_SUMMARY` unset or empty
@@ -5009,14 +5011,12 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   log, which is re-scanned for outcome lines.
 - **The fix box is told which checks failed, not left to guess.** At the
   moment genuine-red is declared, `selfHeal` fetches each failing check's name,
-  its conclusion or state, and its check-run summary or status description for
-  the PR's head commit (no job logs; a GitHub Actions summary is usually empty)
-  and forwards it into the fix box as `CI_FAILURE_SUMMARY`. The summary is a
-  pointer to which checks failed, not the failure itself: the fix prompt's
-  CI-log read step (`gh run view --log-failed` on GitHub, the Actions UI or
-  REST API on Forgejo) is how the fix box reaches the failing log lines. The
-  fetch is best-effort — a fetch failure never blocks the fix pass, it just
-  leaves the summary empty.
+  its conclusion or state, its check-run summary or status description, and a
+  capped tail of each failing Actions job's log for the PR's head commit, and
+  forwards it into the fix box as `CI_FAILURE_SUMMARY`. The fix box reads
+  the failure from that excerpt and calls no forge CLI or API; a check with
+  no excerpt it reproduces locally. The fetch is best-effort — a fetch
+  failure never blocks the fix pass, it just leaves the summary empty.
 - **`agent-complete` also covers an already-resolved issue, closed as
   completed where the tracker can close it.** When a Box finds, after scouting, that the issue's change is
   already on the fetched default branch, it prints `status=already-resolved`

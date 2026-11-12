@@ -1,6 +1,4 @@
-- `fj pr status` — the open PR's mergeability and CI rollup on the Forgejo
-  instance.
-- For the failing job's log, open the run from the PR's checks in the Forgejo
-  Actions UI, or curl the REST API against
-  `${FORGEJO_BASE_URL:-https://codeberg.org}/api/v1/repos/${REPO_SLUG}/...` —
-  the actual failure, not a guess.
+- CI is not yours to fetch: the CI FAILURE section above, when the launcher
+  captured one, carries each failing check and a tail of its job's log. Run no
+  forge CLI or API call for CI. A check with no log excerpt only names what
+  failed — reproduce it locally by running that check.

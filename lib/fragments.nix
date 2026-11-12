@@ -538,9 +538,9 @@ let
       var = "CI_FAILURE_STEP";
       extraSubstVars = [ "CI_FAILURE_SUMMARY" ];
     }
-    # The fix-pass CI-read step forks on CODE_FORGE (issue #1963): the
-    # `gh run list` family does not exist against a Forgejo remote, so a
-    # forgejo fix pass reads CI via `fj pr status`. Exactly one gate is on, so
+    # The fix-pass CI-read step forks on CODE_FORGE (issue #1963): each forge's
+    # fix-ci-read fragment points the agent at the host-injected CI FAILURE
+    # section instead of a forge CLI. Exactly one gate is on, so
     # fix-prompt.md concatenates both vars and only the active one renders.
     # One slot (issue #5647, ADR 0068): the forge's folder carries the file.
     {
