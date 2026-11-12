@@ -6,6 +6,7 @@
 # cmd/launcher/stats_test.go, cmd/launcher/stats_by_test.go,
 # cmd/launcher/stats_reverts_test.go, cmd/launcher/stats_churn_test.go,
 # cmd/launcher/internal/driver/<driver>/corpus_test.go,
+# cmd/launcher/internal/driver/claude/dogfood_corpus_gen_test.go,
 # cmd/launcher/internal/driver/bundle/referencedocs_test.go,
 # cmd/launcher/internal/ecosystem/<ecosystem>/corpus_test.go,
 # cmd/launcher/internal/ecosystemtest/ecosystemtest_test.go,
@@ -132,6 +133,12 @@ pkgs.writeShellApplication {
     rm -rf "$scratch/src/$jira_goldens"
     ln -s "$root/$jira_goldens" "$scratch/src/$jira_goldens"
 
+    # TestDogfoodCorpusRegenerates rewrites the claude Driver's dogfood-sized
+    # Pass logs, which sit outside testdata/corpus (no goldens, no TestCorpus).
+    dogfood=cmd/launcher/internal/driver/claude/testdata/dogfood
+    rm -rf "$scratch/src/$dogfood"
+    ln -s "$root/$dogfood" "$scratch/src/$dogfood"
+
     ${import ./checks/go-check-env.nix}
     export SPINDRIFT_SEAM_FIXTURES_DIR=${fixtures.seamFixtures}
     export UPDATE_GOLDENS=1
@@ -148,6 +155,7 @@ pkgs.writeShellApplication {
     go test -count=1 -run '^TestRunReplaysCorpusIntoGoldens$' ./internal/digestkit
     go test -count=1 -run '^TestCorpus$' "''${eco_pkgs[@]}"
     go test -count=1 -run '^TestToWikiMarkup_Goldens$' ./internal/forge/jira
+    go test -count=1 -run '^TestDogfoodCorpusRegenerates$' ./internal/driver/claude
     go test -count=1 -run '^TestContractFixture$' ./internal/daemon
     # Rewrites the generated spans in docs/reference.md (the docs link above).
     go test -count=1 -run '^TestReferenceDocs_GeneratedSpans$' ./internal/driver/bundle
