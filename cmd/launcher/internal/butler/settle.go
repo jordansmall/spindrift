@@ -138,7 +138,13 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	settle.RecordSettleWarnings(d, num, "", result)
 
 	if !result.Resolved.Found {
-		s.fail(d, num, "no ready outcome line")
+		// A Pass that failed before its Box ran (a seed-mirror error, say)
+		// carries the reason in Err; without it the note hides the cause.
+		note := result.FailureNote()
+		if note == "" {
+			note = "no ready outcome line"
+		}
+		s.fail(d, num, note)
 		return settled{}
 	}
 	o := result.Resolved.Outcome

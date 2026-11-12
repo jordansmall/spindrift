@@ -2006,3 +2006,20 @@ func TestSettleRun_FilingStepsGoToProgressSink(t *testing.T) {
 	}
 	t.Errorf("steps = %+v, want one carrying the filed= tally", rec.Steps())
 }
+
+// A Pass that failed before its Box ran carries the reason in Result.Err; the
+// settled note and status line must name it, not the generic crash note.
+func TestSettleRun_PreBoxFailure_NamesErrInNote(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	var out strings.Builder
+	s := newSettleRun(forge.NewFake().AsIssueFiler(), backend, "bugs", claim, chore.Scope{}, func() time.Time { return start }, chore.Room{}, promotion{}, patchRung{}, testKindLabels, &out)
+
+	s.settle(dispatch.NewFake(), dispatch.Result{Err: errors.New("seed mirror: host-side fetch failed")})
+
+	if got := out.String(); !strings.Contains(got, "note=seed mirror: host-side fetch failed") || strings.Contains(got, "no ready outcome line") {
+		t.Errorf("status line = %q, want the seed error as the note", got)
+	}
+}
