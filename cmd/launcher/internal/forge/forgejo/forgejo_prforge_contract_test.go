@@ -32,6 +32,8 @@ func newPRForgeHarness(t *testing.T) *prforgeHarness {
 func (h *prforgeHarness) Forge() forge.PRForge       { return h.cf.(forge.PRForge) }
 func (h *prforgeHarness) CodeForge() forge.CodeForge { return h.cf }
 
+func (h *prforgeHarness) BranchPrefix() string { return "agent/issue-" }
+
 func TestForgejoCodeForge_PRForgeContract(t *testing.T) {
 	forgetest.RunPRForgeContract(t, newPRForgeHarness(t))
 }

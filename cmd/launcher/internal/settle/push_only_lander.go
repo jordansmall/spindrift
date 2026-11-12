@@ -35,7 +35,7 @@ func (s pushOnlyLander) land(_ dispatch.Dispatcher, num string, gen uint64, bran
 	// instead of pushing, so relay it in first (ADR 0033). It runs ahead of the
 	// Complete commit because a stop during the relay's retry backoff (issue
 	// #4649) has already released num (issue #3523). branch is re-derived from
-	// cf.AgentBranch, never trusted from the Agent-controlled outcome line
+	// forge.AgentBranchName, never trusted from the Agent-controlled outcome line
 	// (#1949).
 	relayedRef, relayErr := s.relayBoxBundle(num, gen)
 	if relayedRef != "" {

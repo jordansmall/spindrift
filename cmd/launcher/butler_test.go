@@ -135,7 +135,6 @@ type pushDraftForge struct {
 // does.
 func TestButlerPatchForge(t *testing.T) {
 	cf := forge.NewFake()
-	cf.BranchPrefix = "agent/issue-"
 
 	t.Run("neither capability", func(t *testing.T) {
 		if pf := butlerPatchForge(forge.Capabilities{}); pf != nil {

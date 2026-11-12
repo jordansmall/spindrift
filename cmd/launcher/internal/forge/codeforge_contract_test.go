@@ -37,7 +37,6 @@ type fakeCodeForgeHarness struct {
 
 func newFakeCodeForgeHarness() *fakeCodeForgeHarness {
 	f := forge.NewFake(testLabels)
-	f.BranchPrefix = "agent/issue-"
 	f.ProbeRepo = "owner/repo"
 	return &fakeCodeForgeHarness{f: f, cf: &trackingCodeForge{CodeForge: f, rebasedOK: map[string]bool{}}}
 }
@@ -46,25 +45,24 @@ func (h *fakeCodeForgeHarness) Forge() forge.CodeForge { return h.cf }
 
 func (h *fakeCodeForgeHarness) Unreachable() forge.CodeForge {
 	f := forge.NewFake(testLabels)
-	f.BranchPrefix = h.f.BranchPrefix
 	f.ProbeErr = forge.ErrRepoNotFound
 	return f
 }
 
-func (h *fakeCodeForgeHarness) BranchPrefix() string { return h.f.BranchPrefix }
+func (h *fakeCodeForgeHarness) BranchPrefix() string { return "agent/issue-" }
 
 func (h *fakeCodeForgeHarness) SeedLandable(num string) string {
-	return h.f.AgentBranch(num)
+	return forge.AgentBranchName(h.BranchPrefix(), num)
 }
 
 func (h *fakeCodeForgeHarness) AdvanceBase() {}
 
 func (h *fakeCodeForgeHarness) Landed(num string) bool {
-	return h.f.Merged == h.f.AgentBranch(num)
+	return h.f.Merged == forge.AgentBranchName(h.BranchPrefix(), num)
 }
 
 func (h *fakeCodeForgeHarness) Rebased(num string) bool {
-	return h.cf.rebasedOK[h.f.AgentBranch(num)]
+	return h.cf.rebasedOK[forge.AgentBranchName(h.BranchPrefix(), num)]
 }
 
 // FailNextMerge/FailNextRebase queue a scripted conflict on the Fake's
@@ -96,7 +94,6 @@ func newFakePushOnlyCodeForgeHarness() *fakePushOnlyCodeForgeHarness {
 
 func (h *fakePushOnlyCodeForgeHarness) Unreachable() forge.CodeForge {
 	f := forge.NewFake(testLabels)
-	f.BranchPrefix = h.f.BranchPrefix
 	f.ProbeErr = forge.ErrRepoNotFound
 	return f.AsPushOnly()
 }
@@ -125,7 +122,6 @@ type fakeLocalCodeForgeHarness struct {
 
 func newFakeLocalCodeForgeHarness(t *testing.T) *fakeLocalCodeForgeHarness {
 	f := forge.NewFake(testLabels)
-	f.BranchPrefix = "agent/issue-"
 	f.ProbeRepo = "owner/repo"
 	return &fakeLocalCodeForgeHarness{
 		t:      t,
@@ -156,25 +152,24 @@ func (h *fakeLocalCodeForgeHarness) Forge() forge.CodeForge { return localTracki
 
 func (h *fakeLocalCodeForgeHarness) Unreachable() forge.CodeForge {
 	f := forge.NewFake(testLabels)
-	f.BranchPrefix = h.f.BranchPrefix
 	f.ProbeErr = forge.ErrRepoNotFound
 	return f.AsLocal()
 }
 
-func (h *fakeLocalCodeForgeHarness) BranchPrefix() string { return h.f.BranchPrefix }
+func (h *fakeLocalCodeForgeHarness) BranchPrefix() string { return "agent/issue-" }
 
 func (h *fakeLocalCodeForgeHarness) SeedLandable(num string) string {
-	return h.f.AgentBranch(num)
+	return forge.AgentBranchName(h.BranchPrefix(), num)
 }
 
 func (h *fakeLocalCodeForgeHarness) AdvanceBase() {}
 
 func (h *fakeLocalCodeForgeHarness) Landed(num string) bool {
-	return h.f.Merged == h.f.AgentBranch(num)
+	return h.f.Merged == forge.AgentBranchName(h.BranchPrefix(), num)
 }
 
 func (h *fakeLocalCodeForgeHarness) Rebased(num string) bool {
-	return h.cf.rebasedOK[h.f.AgentBranch(num)]
+	return h.cf.rebasedOK[forge.AgentBranchName(h.BranchPrefix(), num)]
 }
 
 func (h *fakeLocalCodeForgeHarness) FailNextMerge(_ string) {
@@ -202,7 +197,7 @@ func (h *fakeLocalCodeForgeHarness) Scope() forge.SeedScope {
 // once Merge lands the branch onto the Integration branch.
 func (h *fakeLocalCodeForgeHarness) MarkLanded(num string) string {
 	h.t.Helper()
-	branch := h.f.AgentBranch(num)
+	branch := forge.AgentBranchName(h.BranchPrefix(), num)
 	if err := h.cf.Merge(branch); err != nil {
 		h.t.Fatalf("Merge(%q): %v", branch, err)
 	}

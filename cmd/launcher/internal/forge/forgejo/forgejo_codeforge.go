@@ -49,7 +49,7 @@ type ForgejoCodeForgeConfig struct {
 	BaseBranch   string // target branch Merge merges onto / Rebase rebases onto for MERGE_MODE=immediate
 	UserName     string // commit identity for Rebase's throwaway clone
 	UserEmail    string
-	BranchPrefix string // baked into AgentBranch's output
+	BranchPrefix string // unused; agent branch naming is core policy
 
 	// MergeMethod is the value Forgejo's merge endpoint wants in its "Do"
 	// field: "merge", "squash", or "rebase". Empty resolves to "rebase".
@@ -103,7 +103,7 @@ func (f *forgejoCodeForge) repoPath() string {
 }
 
 // NewForgejoCodeForge returns a forge.CodeForge backed by a Forgejo repo: REST
-// for Probe and Merge, git plumbing for AgentBranch, BranchExists and Rebase.
+// for Probe and Merge, git plumbing for BranchExists and Rebase.
 // When tracker is a Forgejo IssueTracker from NewForgejoClient, this CodeForge
 // reuses its *rest.Client; any other tracker, nil included, gets a fresh one.
 func NewForgejoCodeForge(cfg ForgejoCodeForgeConfig, tracker forge.IssueTracker) forge.CodeForge {
@@ -148,8 +148,6 @@ func newForgejoCodeForge(cfg ForgejoCodeForgeConfig, tracker forge.IssueTracker,
 	gitCF := git.NewGitClient(remote, cfg.BaseBranch, cfg.UserName, cfg.UserEmail, cfg.BranchPrefix)
 	return &forgejoCodeForge{rest: restCli, repo: cfg.Repo, git: gitCF, mergeMethod: cfg.MergeMethod, remote: remote, mergeRecheckDelay: defaultMergeRecheckDelay}
 }
-
-func (f *forgejoCodeForge) AgentBranch(num string) string { return f.git.AgentBranch(num) }
 
 func (f *forgejoCodeForge) BranchExists(branch string) (bool, error) {
 	return f.git.BranchExists(branch)

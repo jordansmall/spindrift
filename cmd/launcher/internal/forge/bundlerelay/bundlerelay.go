@@ -199,7 +199,7 @@ func cloneScratch(backend, op string, clone func(dir string) error) (dir string,
 // clone, and fetch ref into refs/heads/ref. On any error it has already
 // cleaned up, so callers defer the returned cleanup only once err is nil.
 func prepareBundleFetch(backend, outboxDir, ref string, clone func(dir string) error) (dir string, gitIn func(args ...string) *exec.Cmd, cleanup func(), err error) {
-	// Defense in depth: callers derive ref from cf.AgentBranch(num) host-side,
+	// Defense in depth: callers derive ref from forge.AgentBranchName host-side,
 	// but it still interpolates into a refspec and, for CommitSubjects, a `git
 	// log` revision range, so guard it regardless of that holding upstream.
 	if invalidArg(ref) {

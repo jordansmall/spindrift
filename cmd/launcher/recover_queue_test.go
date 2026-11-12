@@ -41,7 +41,6 @@ func newQueueRecoverFixture(t *testing.T) *queueRecoverFixture {
 	c := reconcileConfig()
 	c.MaxRecoverAttempts = 3
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.BranchPrefix
 	fc.CreateDraftPRURL = testReconcilePR
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 	dir := tempLogDir(t)

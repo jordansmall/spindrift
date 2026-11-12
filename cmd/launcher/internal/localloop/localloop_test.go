@@ -255,7 +255,7 @@ func TestWire_ComposedLoop_HappyPath(t *testing.T) {
 		t.Fatalf("ResolveParent(%s) = %q, want %q (parentless seam is its own broad ticket)", num, parent, num)
 	}
 	cf := lw.CodeForgeForIssue(num)
-	branch := cf.AgentBranch(num)
+	branch := forge.AgentBranchName("agent/issue-", num)
 
 	fixtureSHA := bundleFixtureCommit(t, accumDir, testBaseBranch, branch, num, lw.OutboxDir(num))
 
@@ -346,7 +346,7 @@ func TestWire_ComposedLoop_EmptyTitleSanitizesToSlug(t *testing.T) {
 
 	parent := lw.ResolveParent(num)
 	cf := lw.CodeForgeForIssue(num)
-	branch := cf.AgentBranch(num)
+	branch := forge.AgentBranchName("agent/issue-", num)
 	bundleFixtureCommit(t, accumDir, testBaseBranch, branch, num, lw.OutboxDir(num))
 
 	cfg := settle.Config{
@@ -422,7 +422,7 @@ func TestWire_ComposedLoop_GarbageParentUsesTitleNaming(t *testing.T) {
 		t.Fatalf("ResolveParent(%s) = %q, want %q (a garbage parent: is its own broad ticket)", num, parent, num)
 	}
 	cf := lw.CodeForgeForIssue(num)
-	branch := cf.AgentBranch(num)
+	branch := forge.AgentBranchName("agent/issue-", num)
 	bundleFixtureCommit(t, accumDir, testBaseBranch, branch, num, lw.OutboxDir(num))
 
 	cfg := settle.Config{
@@ -497,7 +497,7 @@ func TestWire_ComposedLoop_HealsStuckBranchRefLanding(t *testing.T) {
 
 	parent := lw.ResolveParent(num)
 	cf := lw.CodeForgeForIssue(num)
-	branch := cf.AgentBranch(num)
+	branch := forge.AgentBranchName("agent/issue-", num)
 	bundleFixtureCommit(t, accumDir, testBaseBranch, branch, num, lw.OutboxDir(num))
 
 	// Relay and merge directly through cf, standing in for settle's
@@ -566,7 +566,7 @@ func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 	}, it)
 	parent := lw.ResolveParent(num)
 	cf := lw.CodeForgeForIssue(num)
-	branch := cf.AgentBranch(num)
+	branch := forge.AgentBranchName("agent/issue-", num)
 
 	// No bundleFixtureCommit call: the outbox stays empty, standing in for an
 	// Agent that produced no code-out.
@@ -653,7 +653,7 @@ func TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands(t *testing.T) 
 
 	parent := lw.ResolveParent(num)
 	cf := lw.CodeForgeForIssue(num)
-	branch := cf.AgentBranch(num)
+	branch := forge.AgentBranchName("agent/issue-", num)
 
 	// The fixture stands in for a Box that finished its work and relayed it to
 	// the outbox, but whose final print was cut short and left no parseable
@@ -765,7 +765,7 @@ func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
 	}
 
 	cf := lw.CodeForgeForIssue(landedNum)
-	branch := cf.AgentBranch(landedNum)
+	branch := forge.AgentBranchName("agent/issue-", landedNum)
 	bundleFixtureCommit(t, accumDir, testBaseBranch, branch, landedNum, lw.OutboxDir(landedNum))
 
 	cfg := settle.Config{
@@ -861,7 +861,7 @@ func TestWire_ComposedLoop_BroadTicketIssueExcludedFromOwnSeams(t *testing.T) {
 			}
 
 			cf := lw.CodeForgeForIssue(seamNum)
-			branch := cf.AgentBranch(seamNum)
+			branch := forge.AgentBranchName("agent/issue-", seamNum)
 			bundleFixtureCommit(t, accumDir, testBaseBranch, branch, seamNum, lw.OutboxDir(seamNum))
 
 			cfg := settle.Config{
@@ -958,7 +958,7 @@ func TestWire_ComposedLoop_StuckBroadTicketLandingSurfacesAnyway(t *testing.T) {
 
 	// The seam lands normally: bundle it, then settle.
 	seamCF := lw.CodeForgeForIssue(seamNum)
-	seamBranch := seamCF.AgentBranch(seamNum)
+	seamBranch := forge.AgentBranchName("agent/issue-", seamNum)
 	bundleFixtureCommit(t, accumDir, testBaseBranch, seamBranch, seamNum, lw.OutboxDir(seamNum))
 	settle.New(cfg, it, seamCF).Settle(dispatch.NewFake(), seamNum, 0, dispatch.Result{
 		Resolved: outcome.Resolved{
@@ -971,7 +971,7 @@ func TestWire_ComposedLoop_StuckBroadTicketLandingSurfacesAnyway(t *testing.T) {
 	// so the outbox stays empty and settle's relay fails (mirrors
 	// TestWire_ComposedLoop_MissingBundleBlocksNotFailed).
 	broadCF := lw.CodeForgeForIssue(parent)
-	broadBranch := broadCF.AgentBranch(parent)
+	broadBranch := forge.AgentBranchName("agent/issue-", parent)
 	settle.New(cfg, it, broadCF).Settle(dispatch.NewFake(), parent, 0, dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
@@ -1035,7 +1035,7 @@ func TestWire_ComposedLoop_DegenerateAllMembersCollide_KeepsBothMembers(t *testi
 	// SanitizeParent maps any run of non-[a-z0-9] to a single dash, so these
 	// two distinct issue files land on the same key and each becomes the
 	// other's whole group. The underscore replaces the docs' illustrative
-	// space because AgentBranch appends num unsanitized and git rejects a ref
+	// space because AgentBranchName appends num unsanitized and git rejects a ref
 	// containing a space.
 	const numA = "foo_bar"
 	const numB = "foo-bar"
@@ -1071,7 +1071,7 @@ func TestWire_ComposedLoop_DegenerateAllMembersCollide_KeepsBothMembers(t *testi
 
 	// Land numA only. With numB still open, the group must gate on numB rather
 	// than surfacing on a wrongly emptied member list.
-	branchA := cf.AgentBranch(numA)
+	branchA := forge.AgentBranchName("agent/issue-", numA)
 	bundleFixtureCommit(t, accumDir, testBaseBranch, branchA, numA, lw.OutboxDir(numA))
 	s.Settle(dispatch.NewFake(), numA, 0, dispatch.Result{
 		Resolved: outcome.Resolved{Found: true, Outcome: outcome.Outcome{Issue: numA, Landing: branchA, Status: "ready"}},
@@ -1099,7 +1099,7 @@ func TestWire_ComposedLoop_DegenerateAllMembersCollide_KeepsBothMembers(t *testi
 
 	// Closing numB too shows the guard kept both members: the group is
 	// satisfied only once both colliding members close.
-	branchB := cf.AgentBranch(numB)
+	branchB := forge.AgentBranchName("agent/issue-", numB)
 	bundleFixtureCommit(t, accumDir, testBaseBranch, branchB, numB, lw.OutboxDir(numB))
 	s.Settle(dispatch.NewFake(), numB, 0, dispatch.Result{
 		Resolved: outcome.Resolved{Found: true, Outcome: outcome.Outcome{Issue: numB, Landing: branchB, Status: "ready"}},
@@ -1157,7 +1157,7 @@ func TestWire_ComposedLoop_BroadTicketIssuePresent_OpenSeamNamesSeam(t *testing.
 	}, it)
 
 	cf := lw.CodeForgeForIssue(landedNum)
-	branch := cf.AgentBranch(landedNum)
+	branch := forge.AgentBranchName("agent/issue-", landedNum)
 	bundleFixtureCommit(t, accumDir, testBaseBranch, branch, landedNum, lw.OutboxDir(landedNum))
 
 	cfg := settle.Config{
@@ -1286,7 +1286,7 @@ func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.
 	}
 
 	cfA, cfB := lw.CodeForgeForIssue(numA), lw.CodeForgeForIssue(numB)
-	branchA, branchB := cfA.AgentBranch(numA), cfB.AgentBranch(numB)
+	branchA, branchB := forge.AgentBranchName("agent/issue-", numA), forge.AgentBranchName("agent/issue-", numB)
 	fixtureShaA := bundleFixtureCommit(t, accumDir, testBaseBranch, branchA, numA, lw.OutboxDir(numA))
 	fixtureShaB := bundleFixtureCommit(t, accumDir, testBaseBranch, branchB, numB, lw.OutboxDir(numB))
 
@@ -1384,7 +1384,7 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 	}, it)
 
 	cf01 := lw.CodeForgeForIssue(blockerNum)
-	branch01 := cf01.AgentBranch(blockerNum)
+	branch01 := forge.AgentBranchName("agent/issue-", blockerNum)
 	sha01 := bundleFixtureCommit(t, accumDir, testBaseBranch, branch01, blockerNum, lw.OutboxDir(blockerNum))
 
 	cfg01 := settle.Config{
@@ -1479,7 +1479,7 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 		t.Fatalf("seed branch %s does not exist -- want it to carry the blocker's landed commit", seedBase)
 	}
 
-	branch02 := cf02.AgentBranch(dependentNum)
+	branch02 := forge.AgentBranchName("agent/issue-", dependentNum)
 	sha02 := bundleFixtureCommit(t, accumDir, seedBase, branch02, dependentNum, lw.OutboxDir(dependentNum))
 
 	cfg02 := settle.Config{
@@ -1598,7 +1598,7 @@ func TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly(t *testing.T) {
 	// Land only the blocker, onto its own parent's Integration branch, which
 	// the dependent (parent "Beta Engine") never seeds from.
 	cf11 := lw.CodeForgeForIssue(blockerNum)
-	branch11 := cf11.AgentBranch(blockerNum)
+	branch11 := forge.AgentBranchName("agent/issue-", blockerNum)
 	sha11 := bundleFixtureCommit(t, accumDir, testBaseBranch, branch11, blockerNum, lw.OutboxDir(blockerNum))
 
 	cfg11 := settle.Config{

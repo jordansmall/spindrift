@@ -176,7 +176,6 @@ type pushOnlyForge struct{ f *Fake }
 // AsPushOnly returns f wrapped so it satisfies CodeForge but not PRForge.
 func (f *Fake) AsPushOnly() CodeForge { return pushOnlyForge{f} }
 
-func (p pushOnlyForge) AgentBranch(num string) string            { return p.f.AgentBranch(num) }
 func (p pushOnlyForge) Merge(url string) error                   { return p.f.Merge(url) }
 func (p pushOnlyForge) Rebase(url string) error                  { return p.f.Rebase(url) }
 func (p pushOnlyForge) Probe() (string, error)                   { return p.f.Probe() }

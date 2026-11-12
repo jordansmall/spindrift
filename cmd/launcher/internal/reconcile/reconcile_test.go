@@ -335,7 +335,6 @@ func TestRun_LeavesLocalLandingOpenWhenNotVerifiedMerged(t *testing.T) {
 // Reconcile prints a loud, branch-naming stuck verdict, never a silent no-op.
 func TestRun_PrintsStuckVerdictForUnmergedBranchRefLanding(t *testing.T) {
 	f := forge.NewFake()
-	f.BranchPrefix = "agent/issue-"
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
 	f.SetLandingContained("agent/issue-42", "42", false, nil)
 	cf := f.AsLocal()
@@ -367,7 +366,6 @@ func TestRun_PrintsStuckVerdictForUnmergedBranchRefLanding(t *testing.T) {
 // gate without redoing the containment check Run just performed.
 func TestRun_ReportsStuckBranchRefInResult(t *testing.T) {
 	f := forge.NewFake()
-	f.BranchPrefix = "agent/issue-"
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
 	f.SetLandingContained("agent/issue-42", "42", false, nil)
 	cf := f.AsLocal()
@@ -387,7 +385,6 @@ func TestRun_ReportsStuckBranchRefInResult(t *testing.T) {
 // and closes the seam through the normal close path.
 func TestRun_HealsBranchRefLandingWhenAncestorOfIntegration(t *testing.T) {
 	f := forge.NewFake()
-	f.BranchPrefix = "agent/issue-"
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
 	f.SetLandingContained("agent/issue-42", "42", true, nil)
 	f.SetIntegrationTip("42", "integration/42@abc123")
@@ -421,7 +418,6 @@ func TestRun_HealsBranchRefLandingWhenAncestorOfIntegration(t *testing.T) {
 // adapter-agnostic.
 func TestRun_UsesInjectedParentResolverForBranchRef(t *testing.T) {
 	f := forge.NewFake()
-	f.BranchPrefix = "agent/issue-"
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
 	f.SetLandingContained("agent/issue-42", "custom-parent", true, nil)
 	f.SetIntegrationTip("custom-parent", "integration/custom-parent@abc123")
@@ -492,7 +488,6 @@ func TestRun_SilentlyLeavesLocalIssueOpenWhenDiscoveredBranchNotContained(t *tes
 func TestRun_DiscoversLocalLandingByBranchAndCloses(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
-	f.BranchPrefix = "agent/issue-"
 	branch := forge.AgentBranchName(testPrefix, "42")
 	f.SetLandingContained(branch, "42", true, nil)
 	f.SetIntegrationTip("42", "integration/42@abc123")
@@ -809,7 +804,6 @@ func TestRun_NeverMergesOrPushes(t *testing.T) {
 func TestRun_BranchLandingWithNoPRDoesNotAbortSweep(t *testing.T) {
 	labels := forge.DispatchLabels{Dispatchable: "dispatchable", InProgress: "in-progress"}
 	f := forge.NewFake(labels)
-	f.BranchPrefix = "agent/issue-"
 	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen, Landing: "agent/issue-41"})
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
@@ -842,7 +836,6 @@ func TestRun_BranchLandingWithNoPRDoesNotAbortSweep(t *testing.T) {
 // lookup, heals the record to the PR URL, and closes on merge.
 func TestRun_BranchLandingResolvesMergedPRAndCloses(t *testing.T) {
 	f := forge.NewFake()
-	f.BranchPrefix = "agent/issue-"
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
 	f.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/o/r/pull/7"})
 	f.SetPRState("https://github.com/o/r/pull/7", forge.PRMerged)
@@ -890,7 +883,6 @@ func TestRun_IntegrationRefLandingIsUnverifiableOnPRForge(t *testing.T) {
 // step is skipped rather than dereferencing a nil seam.
 func TestRun_BranchLandingResolvesWithoutLandingRecorder(t *testing.T) {
 	f := forge.NewFake()
-	f.BranchPrefix = "agent/issue-"
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
 	f.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/o/r/pull/7"})
 	f.SetPRState("https://github.com/o/r/pull/7", forge.PRMerged)
@@ -915,7 +907,6 @@ func TestRun_BranchLandingResolvesWithoutLandingRecorder(t *testing.T) {
 // issue abandoned.
 func TestRun_BranchLandingWithClosedPRIsUnverifiableAndNotRecorded(t *testing.T) {
 	f := forge.NewFake()
-	f.BranchPrefix = "agent/issue-"
 	f.SetPR("agent/issue-41", forge.PR{URL: "https://github.com/o/r/pull/7"})
 	f.SetPRState("https://github.com/o/r/pull/7", forge.PRClosed)
 	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen, Landing: "agent/issue-41"})
@@ -948,7 +939,6 @@ func TestRun_BranchLandingWithClosedPRIsUnverifiableAndNotRecorded(t *testing.T)
 // recorded and the issue is left open and unflagged.
 func TestRun_BranchLandingWithOpenPRRecordsAndLeavesIssueOpen(t *testing.T) {
 	f := forge.NewFake()
-	f.BranchPrefix = "agent/issue-"
 	f.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/o/r/pull/7"})
 	f.SetPRState("https://github.com/o/r/pull/7", forge.PROpen)
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
@@ -970,7 +960,6 @@ func TestRun_BranchLandingWithOpenPRRecordsAndLeavesIssueOpen(t *testing.T) {
 // resolves the branch afresh.
 func TestRun_BranchResolvedLandingRecordsNothingWhenPRStateFails(t *testing.T) {
 	f := forge.NewFake()
-	f.BranchPrefix = "agent/issue-"
 	f.SetPR("agent/issue-41", forge.PR{URL: "https://github.com/o/r/pull/7"})
 	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen, Landing: "agent/issue-41"})
 	f.PRStateErr = errors.New("boom")
@@ -988,7 +977,6 @@ func TestRun_BranchResolvedLandingRecordsNothingWhenPRStateFails(t *testing.T) {
 // PR already merged) must not close this issue.
 func TestRun_BranchLandingNamingForeignBranchIsUnverifiableOnPRForge(t *testing.T) {
 	f := forge.NewFake()
-	f.BranchPrefix = "agent/issue-"
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-7"})
 	f.SetPR("agent/issue-7", forge.PR{URL: "https://github.com/o/r/pull/7"})
 	f.SetPRState("https://github.com/o/r/pull/7", forge.PRMerged)
@@ -1022,7 +1010,6 @@ func TestRun_BranchLandingNamingForeignBranchIsUnverifiableOnLocalForge(t *testi
 	for _, branch := range []string{"integration/42", "agent/issue-7"} {
 		t.Run(branch, func(t *testing.T) {
 			f := forge.NewFake()
-			f.BranchPrefix = "agent/issue-"
 			f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: branch})
 			f.SetLandingContained(branch, "42", true, nil)
 			f.SetIntegrationTip("42", "integration/42@abc123")
@@ -1074,7 +1061,6 @@ func TestRun_DiscoveryPassClearFailureStillCloses(t *testing.T) {
 func TestRun_LocalDiscoveryPassClearFailureStillCloses(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
-	f.BranchPrefix = "agent/issue-"
 	f.SetLandingContained(forge.AgentBranchName(testPrefix, "42"), "42", true, nil)
 	f.SetIntegrationTip("42", "integration/42@abc123")
 	f.RecordLandingPassErr = errors.New("disk full")

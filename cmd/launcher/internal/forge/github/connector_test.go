@@ -375,8 +375,6 @@ type mergeStandIn struct {
 	h *connectorHarness
 }
 
-func (mergeStandIn) AgentBranch(num string) string { return "agent/issue-" + num }
-
 func (m mergeStandIn) Merge(ref string) error {
 	m.h.mutatePR(prNum(ref), func(p *restPR) { p.merged = true })
 	return nil
@@ -454,6 +452,8 @@ func (h *connectorHarness) Tracker() forge.IssueTracker { return h.tr }
 
 func (h *connectorHarness) Forge() forge.PRForge       { return h.pf }
 func (h *connectorHarness) CodeForge() forge.CodeForge { return mergeStandIn{h: h} }
+
+func (h *connectorHarness) BranchPrefix() string { return "agent/issue-" }
 
 func (h *connectorHarness) mutatePR(num string, f func(*restPR)) {
 	n, _ := strconv.Atoi(num)

@@ -11,13 +11,15 @@ import (
 // cases drive, so a read-only Connector-backed PRForge can run them alone via
 // RunPRForgeReadContract. In a read-only run CodeForge may be a stand-in whose
 // Merge marks the scripted backend's PR merged, since merging is a native
-// write the Connector cannot perform; the read cases need only AgentBranch and
-// that Merge.
+// write the Connector cannot perform; the read cases need only that Merge.
 type PRForgeReadHarness interface {
 	Forge() forge.PRForge
 	// CodeForge returns the same adapter as the statically-typed handle
 	// callers hold before discovering PRForge via cf.(forge.PRForge).
 	CodeForge() forge.CodeForge
+	// BranchPrefix returns the prefix forge.AgentBranchName prepends to an
+	// issue number.
+	BranchPrefix() string
 	// SeedOpenPR returns the PR's URL, the ref every PRForge method takes.
 	SeedOpenPR(num string) string
 	// SeedDraftPR seeds a PR whose backend draft state is true, so IsDraft
@@ -106,7 +108,7 @@ func testOptionalInterfaceDiscovery(t *testing.T, h PRForgeHarness) {
 
 func testPRForBranchResolution(t *testing.T, h PRForgeReadHarness) {
 	const num = "201"
-	branch := h.CodeForge().AgentBranch(num)
+	branch := forge.AgentBranchName(h.BranchPrefix(), num)
 	wantURL := h.SeedOpenPR(num)
 
 	pr, ok, err := h.Forge().OpenPRForBranch(branch)
@@ -138,7 +140,7 @@ func testPRForBranchResolution(t *testing.T, h PRForgeReadHarness) {
 // adoptable as a ready one, on every PRForge-capable adapter.
 func testOpenPRForBranchAdoptsDraft(t *testing.T, h PRForgeReadHarness) {
 	const num = "202"
-	branch := h.CodeForge().AgentBranch(num)
+	branch := forge.AgentBranchName(h.BranchPrefix(), num)
 	wantURL := h.SeedDraftPR(num)
 
 	pr, ok, err := h.Forge().OpenPRForBranch(branch)
@@ -161,7 +163,7 @@ func testOpenPRForBranchAdoptsDraft(t *testing.T, h PRForgeReadHarness) {
 // on the Fake the merge half does not prove MarkReady unblocked a merge.
 func testMarkReadyClearsAdoptedDraftThenMerges(t *testing.T, h PRForgeHarness) {
 	const num = "214"
-	branch := h.CodeForge().AgentBranch(num)
+	branch := forge.AgentBranchName(h.BranchPrefix(), num)
 	wantURL := h.SeedDraftPR(num)
 
 	pr, ok, err := h.Forge().OpenPRForBranch(branch)

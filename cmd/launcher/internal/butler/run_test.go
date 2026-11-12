@@ -1640,7 +1640,7 @@ func TestSweep_NoPatchForgeOmitsPatchClassesFromBox(t *testing.T) {
 
 // (r) A patch-eligible finding lands as a draft PR (ADR 0057, issue #4074):
 // filed with agent-butler-finding + agent-butler-patch and no dispatch
-// label, pushed to the Consumer's own AgentBranch, and opened as a draft PR
+// label, pushed to the Consumer's own agent branch, and opened as a draft PR
 // onto the policy branch whose body closes the finding issue and quotes the
 // reviewer's concurrence. The Ledger done commit records the PR URL in
 // Patched, not Promoted.

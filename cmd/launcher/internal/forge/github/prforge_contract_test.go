@@ -66,6 +66,8 @@ func newPRForgeHarness(t *testing.T) *prforgeHarness {
 func (h *prforgeHarness) Forge() forge.PRForge       { return h.cf.(forge.PRForge) }
 func (h *prforgeHarness) CodeForge() forge.CodeForge { return h.cf }
 
+func (h *prforgeHarness) BranchPrefix() string { return "agent/issue-" }
+
 func (h *prforgeHarness) branchName(num string) string { return "agent/issue-" + num }
 
 func (h *prforgeHarness) prURL(num string) string {

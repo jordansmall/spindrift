@@ -61,7 +61,6 @@ func newFakeForge(t *testing.T, nums ...string) *forge.Fake {
 	t.Helper()
 	labels := forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"}
 	fc := forge.NewFake(labels)
-	fc.BranchPrefix = "agent/issue-"
 	for _, num := range nums {
 		fc.SetIssue(forge.Issue{Number: num, Title: "issue " + num, Labels: []string{"agent-in-progress"}})
 	}
@@ -273,7 +272,6 @@ func TestAbort_ResearchReclaimsIssueWithPriorVerdict(t *testing.T) {
 	d := forge.ResearchDispatchLabels()
 	fc := forge.NewFake(d)
 	fc.VerdictLabels = forge.ResearchVerdictLabels()
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "1", Title: "issue 1", Labels: []string{d.Dispatchable, "agent-research-unclear"}})
 	if err := fc.TransitionState("1", forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatalf("claim: %v", err)

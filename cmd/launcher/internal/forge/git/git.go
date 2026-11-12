@@ -84,11 +84,6 @@ func NewGitClient(remoteURL, baseBranch, userName, userEmail, branchPrefix strin
 	return g
 }
 
-// AgentBranch returns forge.AgentBranchName(branchPrefix, num).
-func (g *gitClient) AgentBranch(num string) string {
-	return forge.AgentBranchName(g.branchPrefix, num)
-}
-
 // validateGitRef rejects a ref git would parse as an option. Merge and Rebase
 // take branch names from the Box's untrusted SPINDRIFT_OUTCOME line, so without
 // this check a value like "--upload-pack=<cmd>" runs arbitrary commands on the

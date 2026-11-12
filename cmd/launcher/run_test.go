@@ -504,7 +504,6 @@ func TestRun_DoesNotAdoptLiveRunnersInProgressIssue(t *testing.T) {
 	dir := tempLogDir(t)
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = c.BranchPrefix
 	// Issue #5 is another runner's live work: agent-in-progress with an open PR
 	// and no explicit recovery signal.
 	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{c.InProgressLabel}})

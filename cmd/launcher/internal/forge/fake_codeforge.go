@@ -10,10 +10,6 @@ var _ BranchProtectionForge = (*CodeForgeFake)(nil)
 type CodeForgeFake struct {
 	*core
 
-	// BranchPrefix's zero value "" yields bare-number branch names (see
-	// AgentBranchName); set it to the BRANCH_PREFIX default "agent/issue-" to
-	// match an unconfigured launcher.
-	BranchPrefix string
 	branchExists map[string]bool
 	// BranchExistsErr, if non-nil, is returned by every BranchExists call.
 	BranchExistsErr error
@@ -36,13 +32,6 @@ type CodeForgeFake struct {
 	RebaseErrs []error
 	// RebasedURLs records every URL passed to Rebase, in order.
 	RebasedURLs []string
-}
-
-// AgentBranch returns AgentBranchName(BranchPrefix, num).
-func (cf *CodeForgeFake) AgentBranch(num string) string {
-	cf.mu.Lock()
-	defer cf.mu.Unlock()
-	return AgentBranchName(cf.BranchPrefix, num)
 }
 
 // BranchExists returns BranchExistsErr if set, else the result scripted by

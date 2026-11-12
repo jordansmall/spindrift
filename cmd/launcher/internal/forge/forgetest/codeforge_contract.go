@@ -14,7 +14,8 @@ type CodeForgeHarness interface {
 	Forge() forge.CodeForge
 	// Unreachable returns a CodeForge pointed at a backend Probe cannot reach.
 	Unreachable() forge.CodeForge
-	// BranchPrefix returns the prefix AgentBranch prepends to an issue number.
+	// BranchPrefix returns the prefix forge.AgentBranchName prepends to an
+	// issue number.
 	BranchPrefix() string
 	// SeedLandable creates a landable artifact for issue num, one commit ahead
 	// of the current base tip and carrying a marker unique to num, and returns
@@ -65,7 +66,6 @@ type LandingHarness interface {
 // Every adapter package calls it from its own test file with its own
 // scripted-backend harness.
 func RunCodeForgeContract(t *testing.T, h CodeForgeHarness) {
-	t.Run("AgentBranchNaming", func(t *testing.T) { testAgentBranchNaming(t, h) })
 	t.Run("MergeLandsRef", func(t *testing.T) { testMergeLandsRef(t, h) })
 	t.Run("MergeConflict", func(t *testing.T) { testMergeConflict(t, h) })
 	t.Run("RebaseIncorporatesBase", func(t *testing.T) { testRebaseIncorporatesBase(t, h) })
@@ -121,16 +121,6 @@ func testLandingContainment(t *testing.T, h CodeForgeHarness) {
 	}
 	if tip != landingStr {
 		t.Fatalf("IntegrationTip(%q) = %q, want %q (the Integration branch's tip is unchanged since the merge)", lh.Parent(), tip, landingStr)
-	}
-}
-
-// testAgentBranchNaming pins the seam as the single owner of the branch-prefix
-// rule (issue #444).
-func testAgentBranchNaming(t *testing.T, h CodeForgeHarness) {
-	got := h.Forge().AgentBranch("909")
-	want := h.BranchPrefix() + "909"
-	if got != want {
-		t.Fatalf("AgentBranch(909) = %q, want %q", got, want)
 	}
 }
 
@@ -207,7 +197,7 @@ func testPushOnlyMergeModeMapping(t *testing.T, h CodeForgeHarness) {
 	}
 	const num = "905"
 	ref := h.SeedLandable(num)
-	if want := h.Forge().AgentBranch(num); ref != want {
+	if want := forge.AgentBranchName(h.BranchPrefix(), num); ref != want {
 		t.Fatalf("SeedLandable(%s) = %q, want the raw agent branch %q — manual mode lands the feature branch directly, not a PR indirection", num, ref, want)
 	}
 	// The identity above pins only a name. Merging proves the branch is the

@@ -17,17 +17,17 @@ type fakePRForgeHarness struct {
 
 func newFakePRForgeHarness() *fakePRForgeHarness {
 	f := forge.NewFake(testLabels)
-	f.BranchPrefix = "agent/issue-"
 	return &fakePRForgeHarness{f: f}
 }
 
 func (h *fakePRForgeHarness) Forge() forge.PRForge       { return h.f }
 func (h *fakePRForgeHarness) CodeForge() forge.CodeForge { return h.f }
+func (h *fakePRForgeHarness) BranchPrefix() string       { return "agent/issue-" }
 
 func (h *fakePRForgeHarness) PushOnlyCodeForge() forge.CodeForge { return h.f.AsPushOnly() }
 
 func (h *fakePRForgeHarness) SeedOpenPR(num string) string {
-	branch := h.f.AgentBranch(num)
+	branch := forge.AgentBranchName(h.BranchPrefix(), num)
 	url := "https://github.com/owner/repo/pull/" + num
 	h.f.SetPR(branch, forge.PR{URL: url})
 	return url

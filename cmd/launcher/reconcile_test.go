@@ -31,7 +31,6 @@ func reconcileConfig() config {
 func TestRecoverByNumber_GreenMergesAndCompletes(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.BranchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := forge.AgentBranchName(c.BranchPrefix, "42")
@@ -66,7 +65,6 @@ func TestRecoverByNumber_RetriesTransientPRLookupError(t *testing.T) {
 	c.TransientRetryMax = 2
 	c.TransientBackoffSecs = 0
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.BranchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := forge.AgentBranchName(c.BranchPrefix, "42")
@@ -94,7 +92,6 @@ func TestRecoverByNumber_RetryMaxOneStillRetriesOnce(t *testing.T) {
 	c.TransientRetryMax = 1
 	c.TransientBackoffSecs = 0
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.BranchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := forge.AgentBranchName(c.BranchPrefix, "42")
@@ -120,7 +117,6 @@ func TestRecoverByNumber_RetryMaxOneStillRetriesOnce(t *testing.T) {
 func TestRecoverByNumber_AdoptedPRAlwaysCallsMarkReadyThenMergesAndCompletes(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.BranchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := forge.AgentBranchName(c.BranchPrefix, "42")
@@ -157,7 +153,6 @@ func TestRecoverByNumber_AdoptedPRAlwaysCallsMarkReadyThenMergesAndCompletes(t *
 func TestRecoverByNumber_RelayedBranchAdoptedMergesAndCompletes(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.BranchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := forge.AgentBranchName(c.BranchPrefix, "42")
@@ -208,7 +203,6 @@ func TestRecoverByNumber_RelayedBranchAdoptedMergesAndCompletes(t *testing.T) {
 func TestRecoverByNumber_NoPRNoSelfReportStillNoOps(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake()
-	fc.BranchPrefix = c.BranchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	// No PR and no log written, so tempLogDir's dir stays empty and
@@ -235,7 +229,6 @@ func TestRecoverByNumber_NoPRNoSelfReportStillNoOps(t *testing.T) {
 func TestRecoverByNumber_NoPRSkipped(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake()
-	fc.BranchPrefix = c.BranchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 
@@ -261,7 +254,6 @@ func TestRecoverByNumber_NoPRSkipped(t *testing.T) {
 func TestRecoverByNumber_NoPRRestoresPriorComplete(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.BranchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	// No PR and no log written, so tempLogDir's dir stays empty and
@@ -296,7 +288,6 @@ func TestRecoverByNumber_NoPRRestoresPriorComplete(t *testing.T) {
 func TestRecoverByNumber_NoPRPriorFailedStillErrors(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.BranchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	fc.PriorClaimStates = map[string]forge.DispatchState{"42": forge.Failed}
@@ -321,7 +312,6 @@ func TestRecoverByNumber_RedFollowsSelfHeal(t *testing.T) {
 	c := reconcileConfig()
 	c.MaxFixAttempts = 0
 	fc := forge.NewFake()
-	fc.BranchPrefix = c.BranchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := forge.AgentBranchName(c.BranchPrefix, "42")
@@ -351,7 +341,6 @@ func TestRecoverByNumber_ReportLines(t *testing.T) {
 	run := func(t *testing.T, withPR bool) string {
 		c := reconcileConfig()
 		fc := forge.NewFake(dispatchLabels(c))
-		fc.BranchPrefix = c.BranchPrefix
 		fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 		if withPR {
 			fc.SetPR(forge.AgentBranchName(c.BranchPrefix, "42"), forge.PR{URL: testReconcilePR})

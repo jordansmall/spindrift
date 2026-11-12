@@ -146,7 +146,7 @@ func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 		case forge.LandingPRURL:
 			landing = parsed.URL
 		case forge.LandingBranchRef:
-			// The host only ever records cf.AgentBranch as a bare branch, but a
+			// The host only ever records the agent branch as a bare branch, but a
 			// record from before issue #5005 may carry a Box-supplied one, so
 			// trust it only when it names this issue's own agent branch.
 			if !ownsAgentBranch(p.branchPrefix, iss, parsed.Branch) {

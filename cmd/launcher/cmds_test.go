@@ -146,7 +146,6 @@ func TestCmdRecover_AdoptedPRSucceeds(t *testing.T) {
 
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.BranchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := forge.AgentBranchName(c.BranchPrefix, "42")
