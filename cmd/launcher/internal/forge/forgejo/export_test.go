@@ -14,3 +14,8 @@ func SetNow(t forge.IssueTracker, now func() time.Time) { t.(*forgejoClient).now
 func SetMergeRecheckDelay(cf forge.CodeForge, d time.Duration) {
 	cf.(*forgejoCodeForge).mergeRecheckDelay = d
 }
+
+// RelayClone exposes the clone closure PushBranch, Relay and CommitSubjects share.
+func RelayClone(cf forge.CodeForge, op string) func(dir string) error {
+	return cf.(*forgejoCodeForge).relayClone(op)
+}

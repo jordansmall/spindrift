@@ -37,7 +37,7 @@ func invalidArg(s string) bool {
 // malformed bundle is an error, never a silent no-op: an absent bundle file
 // returns forge.ErrBundleNotFound, the benign "Box wrote nothing" case, and an
 // unreadable or unverifiable one returns a generic error (issue #2096).
-func Relay(backend, outboxDir, ref string, clone func(dir string) error) error {
+func Relay(backend, outboxDir, ref string, cred gitexec.Credential, clone func(dir string) error) error {
 	dir, gitIn, cleanup, err := prepareBundleFetch(backend, outboxDir, ref, clone)
 	if err != nil {
 		return err
@@ -52,7 +52,7 @@ func Relay(backend, outboxDir, ref string, clone func(dir string) error) error {
 	// ref came from a bundle fetch, so refs/heads/ref is fresh in this clone
 	// and has no upstream for a bare force-with-lease to target. The
 	// destination must be explicit, first push or retried force-update alike.
-	return gitplumbing.GitForcePush(ctx, dir, gitexec.Credential{}, "-u", "origin", ref)
+	return gitplumbing.GitForcePush(ctx, dir, cred, "-u", "origin", ref)
 }
 
 // PushBranch fetches localRef from the git repo at srcDir into a fresh clone
@@ -62,7 +62,7 @@ func Relay(backend, outboxDir, ref string, clone func(dir string) error) error {
 // repo. It refuses branch == base up front, and any branch that already
 // exists on origin at push time: its one caller, the butler patch rung, only
 // ever publishes a just-filed finding's fresh agent branch.
-func PushBranch(backend, srcDir, localRef, branch, base string, clone func(dir string) error) error {
+func PushBranch(backend, srcDir, localRef, branch, base string, cred gitexec.Credential, clone func(dir string) error) error {
 	// Defense in depth, as prepareBundleFetch's ref guard: srcDir, localRef,
 	// and branch reach git as positional args, where a leading "-" would
 	// parse as an option. base never reaches git, but an empty or
@@ -108,7 +108,7 @@ func PushBranch(backend, srcDir, localRef, branch, base string, clone func(dir s
 	// this ref it overrides the bare --force-with-lease's clone-relative
 	// lease, which covers only the clone-to-push window (issue #4104).
 	lease := "--force-with-lease=refs/heads/" + branch + ":"
-	if err := gitplumbing.GitForcePush(ctx, dir, gitexec.Credential{}, lease, "-u", "origin", branch); err != nil {
+	if err := gitplumbing.GitForcePush(ctx, dir, cred, lease, "-u", "origin", branch); err != nil {
 		// "stale info" is git's lease-mismatch marker, here only ever an
 		// existing branch; a timeout or hook rejection passes through as is.
 		if !strings.Contains(err.Error(), "stale info") {

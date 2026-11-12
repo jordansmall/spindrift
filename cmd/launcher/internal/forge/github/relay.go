@@ -3,6 +3,7 @@ package github
 import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/bundlerelay"
+	"spindrift.dev/launcher/internal/gitexec"
 )
 
 // readOnlyCodeForge exists so that only the read-only constructor satisfies
@@ -30,7 +31,7 @@ func NewReadOnlyCodeForge(repo string, labels forge.DispatchLabels, opts ...Exec
 // nothing" case; a bundle that is present but unreadable or fails `git bundle
 // verify` returns an error so a broken hand-off blocks the seam (issue #2096).
 func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
-	return bundlerelay.Relay("github", outboxDir, ref, c.httpsClone("relay bundle"))
+	return bundlerelay.Relay("github", outboxDir, ref, gitexec.Credential{}, c.httpsClone("relay bundle"))
 }
 
 // CommitSubjects returns the bundle's one-line commit subjects for ref

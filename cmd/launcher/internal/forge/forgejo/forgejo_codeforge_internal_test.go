@@ -6,36 +6,37 @@ import (
 	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/gitexec"
 )
 
-// The token must be embedded as the URL's userinfo, the only shape `git clone`
-// and `git push` accept for HTTP(S) auth.
-func TestForgejoGitRemoteURL_EmbedsTokenAsUserinfo(t *testing.T) {
-	got := GitRemoteURL("https://codeberg.org", "owner/repo", "tok")
-	want := "https://tok@codeberg.org/owner/repo.git"
+// The git remote carries no userinfo: the token travels out of band as a
+// gitexec.Credential, so no git argv, config or error text ever holds it.
+func TestForgejoGitRemoteURL_CarriesNoUserinfo(t *testing.T) {
+	got := GitRemoteURL("https://codeberg.org", "owner/repo")
+	want := "https://codeberg.org/owner/repo.git"
 	if got != want {
 		t.Fatalf("GitRemoteURL(...) = %q, want %q", got, want)
 	}
 }
 
-// The embedded token must be exactly what forge.RedactURLCredentials strips, so
-// a log line built from this URL (a clone failure, say) never leaks it.
-func TestForgejoGitRemoteURL_RedactedStripsToken(t *testing.T) {
-	remote := GitRemoteURL("https://codeberg.org", "owner/repo", "tok")
-	redacted := forge.RedactURLCredentials(remote)
-	if strings.Contains(redacted, "tok") {
-		t.Fatalf("RedactURLCredentials(%q) = %q, still contains the token", remote, redacted)
+// An unparseable base takes the concatenating fallback, which must stay
+// credential-free too.
+func TestForgejoGitRemoteURL_FallbackCarriesNoUserinfo(t *testing.T) {
+	got := GitRemoteURL("https://forge.test\x7f", "owner/repo")
+	if strings.Contains(got, "@") {
+		t.Fatalf("GitRemoteURL(...) = %q, want no userinfo", got)
+	}
+	if want := "https://forge.test\x7f/owner/repo.git"; got != want {
+		t.Fatalf("GitRemoteURL(...) = %q, want %q", got, want)
 	}
 }
 
-// The control character in the base URL is what makes url.Parse fail, taking
-// the fallback branch. That branch must keep the token rather than yield an
-// anonymous remote that would fail to push.
-func TestForgejoGitRemoteURL_FallbackKeepsToken(t *testing.T) {
-	got := GitRemoteURL("https://forge.test\x7f", "owner/repo", "tok")
-	if !strings.Contains(got, "tok@") {
-		t.Fatalf("GitRemoteURL(...) = %q, want it to contain %q (token as userinfo)", got, "tok@")
+func TestGitCredential(t *testing.T) {
+	if got, want := GitCredential("tok"), (gitexec.Credential{Username: "oauth2", Password: "tok"}); got != want {
+		t.Errorf("GitCredential(tok) = %+v, want %+v", got, want)
+	}
+	if got := GitCredential(""); got != (gitexec.Credential{}) {
+		t.Errorf("GitCredential(\"\") = %+v, want the zero Credential", got)
 	}
 }
 

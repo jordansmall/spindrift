@@ -55,7 +55,7 @@ var Strategy = backendkit.Strategy{
 		if err != nil {
 			return backendkit.LedgerSite{}, err
 		}
-		return backendkit.LedgerSite{URL: GitRemoteURL(k.ForgejoBaseURL, s.RepoSlug, k.ForgejoToken)}, nil
+		return backendkit.LedgerSite{URL: GitRemoteURL(k.ForgejoBaseURL, s.RepoSlug), Credential: GitCredential(k.ForgejoToken)}, nil
 	},
 	// Hand-built rather than GitRemoteURL: this mirrors the Box's former shell
 	// clone exactly, including the schemeless-base case GitRemoteURL handles

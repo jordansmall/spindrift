@@ -13,6 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/bundlerelay"
 	"spindrift.dev/launcher/internal/forge/git"
 	"spindrift.dev/launcher/internal/forge/rest"
+	"spindrift.dev/launcher/internal/gitexec"
 )
 
 // defaultForgejoHTTPTimeout bounds every Forgejo REST call so a hung instance
@@ -21,23 +22,29 @@ import (
 // client rather than building a second one (issue #2256).
 const defaultForgejoHTTPTimeout = 30 * time.Second
 
-// GitRemoteURL builds a token-authenticated clone URL for repo (an
-// owner/repo slug), carrying the token as the URL's userinfo with no password
-// half. If baseURL fails to parse, it concatenates the token in as userinfo, so
-// the fallback remote can still push instead of being anonymous.
-func GitRemoteURL(baseURL, repo, token string) string {
+// GitRemoteURL builds the clone URL for repo (an owner/repo slug). It carries
+// no userinfo: git authenticates with GitCredential, out of band, so the token
+// never reaches an argv, a persisted remote or an error string. If baseURL
+// fails to parse, it concatenates the slug onto the raw base.
+func GitRemoteURL(baseURL, repo string) string {
 	u, err := url.Parse(baseURL)
 	if err != nil {
-		base := strings.TrimSuffix(baseURL, "/")
-		slug := strings.Trim(repo, "/")
-		if i := strings.Index(base, "://"); i >= 0 {
-			return base[:i+3] + token + "@" + base[i+3:] + "/" + slug + ".git"
-		}
-		return token + "@" + base + "/" + slug + ".git"
+		return strings.TrimSuffix(baseURL, "/") + "/" + strings.Trim(repo, "/") + ".git"
 	}
-	u.User = url.User(token)
 	u.Path = "/" + strings.Trim(repo, "/") + ".git"
 	return u.String()
+}
+
+// GitCredential is the credential git presents to a Forgejo instance for
+// token. Forgejo/Gitea basic auth takes a non-empty password as an access
+// token, so the username is a placeholder, the same oauth2:<token> shape the
+// git backend documents. An empty token yields the zero (anonymous)
+// Credential.
+func GitCredential(token string) gitexec.Credential {
+	if token == "" {
+		return gitexec.Credential{}
+	}
+	return gitexec.Credential{Username: "oauth2", Password: token}
 }
 
 // ForgejoCodeForgeConfig configures the Forgejo CodeForge adapter.
@@ -85,9 +92,11 @@ type forgejoCodeForge struct {
 	repo        string // owner/repo slug, for repoPath
 	git         forge.CodeForge
 	mergeMethod string
-	// remote is the token-authenticated clone/push URL the git adapter uses, kept
-	// here so the read-only wrapper can clone it directly for RelayBundle.
+	// remote is the credential-free clone/push URL the git adapter uses, kept
+	// here with its cred so the read-only wrapper can clone it directly for
+	// RelayBundle.
 	remote string
+	cred   gitexec.Credential
 	// mergeRecheckDelay is the pause before Merge re-reads a pull that
 	// reported mergeable=false after a refusal.
 	mergeRecheckDelay time.Duration
@@ -125,7 +134,10 @@ func newForgejoCodeForge(cfg ForgejoCodeForgeConfig, tracker forge.IssueTracker,
 
 	remote := gitRemoteURL
 	if remote == "" {
-		remote = GitRemoteURL(baseURL, cfg.Repo, cfg.Token)
+		remote = GitRemoteURL(baseURL, cfg.Repo)
+	} else {
+		// GitCredential(cfg.Token) below stays the one credential.
+		remote, _ = gitexec.SplitCredential(remote)
 	}
 
 	hc := cfg.HTTPClient
@@ -144,8 +156,9 @@ func newForgejoCodeForge(cfg ForgejoCodeForgeConfig, tracker forge.IssueTracker,
 		restCli = rest.New(baseURL, rest.TokenAuth{Scheme: "token", Token: cfg.Token}, "forgejo", forgejoStatusMap(), hc)
 	}
 
-	gitCF := git.NewGitClient(remote, cfg.BaseBranch, cfg.UserName, cfg.UserEmail)
-	return &forgejoCodeForge{rest: restCli, repo: cfg.Repo, git: gitCF, mergeMethod: cfg.MergeMethod, remote: remote, mergeRecheckDelay: defaultMergeRecheckDelay}
+	cred := GitCredential(cfg.Token)
+	gitCF := git.NewGitClient(remote, cfg.BaseBranch, cfg.UserName, cfg.UserEmail, git.WithCredential(cred))
+	return &forgejoCodeForge{rest: restCli, repo: cfg.Repo, git: gitCF, mergeMethod: cfg.MergeMethod, remote: remote, cred: cred, mergeRecheckDelay: defaultMergeRecheckDelay}
 }
 
 func (f *forgejoCodeForge) BranchExists(branch string) (bool, error) {
@@ -276,12 +289,11 @@ func (f *forgejoCodeForge) BranchProtected(branch string) (bool, error) {
 
 // relayClone builds the `git clone` closure bundlerelay's Relay,
 // CommitSubjects, and PushBranch all take as their clone step: op names the
-// caller for the wrapped error's description. f.remote carries the token as
-// userinfo, so the clone's CombinedOutput stays out of the error: git's
-// diagnostics echo the tokened URL back.
+// caller for the wrapped error's description. The token rides f.cred, never
+// f.remote, and the clone's CombinedOutput stays out of the error anyway.
 func (f *forgejoCodeForge) relayClone(op string) func(dir string) error {
 	return func(dir string) error {
-		if _, err := exec.Command("git", "clone", "--no-single-branch", f.remote, dir).CombinedOutput(); err != nil {
+		if _, err := f.cred.Apply(exec.Command("git", "clone", "--no-single-branch", f.remote, dir)).CombinedOutput(); err != nil {
 			return fmt.Errorf("forgejo: %s: git clone %s: %w", op, forge.RedactURLCredentials(f.remote), err)
 		}
 		return nil
@@ -292,7 +304,7 @@ func (f *forgejoCodeForge) relayClone(op string) func(dir string) error {
 // at srcDir, with the launcher's own token (issue #4071, ADR 0057); refuses if
 // branch already exists, or is base (issue #4104).
 func (f *forgejoCodeForge) PushBranch(srcDir, localRef, branch, base string) error {
-	return bundlerelay.PushBranch("forgejo", srcDir, localRef, branch, base, f.relayClone("push branch"))
+	return bundlerelay.PushBranch("forgejo", srcDir, localRef, branch, base, f.cred, f.relayClone("push branch"))
 }
 
 // DeleteBranch deletes branch from the target repo with the launcher's own

@@ -634,7 +634,7 @@ func (e *execClient) httpsClone(op string) func(dir string) error {
 // at srcDir, over HTTPS through the gh credential helper (issue #4071, ADR
 // 0057); refuses if branch already exists, or is base (issue #4104).
 func (e *execClient) PushBranch(srcDir, localRef, branch, base string) error {
-	return bundlerelay.PushBranch("github", srcDir, localRef, branch, base, e.httpsClone("push branch"))
+	return bundlerelay.PushBranch("github", srcDir, localRef, branch, base, gitexec.Credential{}, e.httpsClone("push branch"))
 }
 
 // DeleteBranch deletes branch from the target repo with the launcher's own

@@ -11,6 +11,7 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/seambundle"
 )
 
@@ -69,7 +70,7 @@ func TestRelay_PushesRefToOrigin(t *testing.T) {
 	branch := "agent/issue-2212"
 	wantSHA := forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
 
-	if err := Relay("test", outbox, branch, localClone(repo.Bare)); err != nil {
+	if err := Relay("test", outbox, branch, gitexec.Credential{}, localClone(repo.Bare)); err != nil {
 		t.Fatalf("Relay: %v", err)
 	}
 
@@ -84,7 +85,7 @@ func TestRelay_InvalidRefErrorsBeforeFilesystemWork(t *testing.T) {
 	for _, ref := range []string{"", "-x"} {
 		t.Run(ref, func(t *testing.T) {
 			called := false
-			err := Relay("test", "/nonexistent/outbox/dir", ref, func(dir string) error {
+			err := Relay("test", "/nonexistent/outbox/dir", ref, gitexec.Credential{}, func(dir string) error {
 				called = true
 				return nil
 			})
@@ -123,7 +124,7 @@ func TestPushBranch_InvalidArgsErrorBeforeFilesystemWork(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			called := false
-			err := PushBranch("test", tc.srcDir, tc.localRef, tc.branch, tc.base, func(dir string) error {
+			err := PushBranch("test", tc.srcDir, tc.localRef, tc.branch, tc.base, gitexec.Credential{}, func(dir string) error {
 				called = true
 				return nil
 			})
@@ -147,7 +148,7 @@ func TestPushBranch_FetchFailureErrors(t *testing.T) {
 	src := t.TempDir()
 	forgetest.Run(t, "", "clone", repo.Bare, src)
 
-	err := PushBranch("test", src, "nonexistent-ref", "agent/issue-4071", "main", localClone(repo.Bare))
+	err := PushBranch("test", src, "nonexistent-ref", "agent/issue-4071", "main", gitexec.Credential{}, localClone(repo.Bare))
 	if err == nil {
 		t.Fatal("PushBranch with a localRef missing from srcDir: got nil error, want one")
 	}
@@ -167,7 +168,7 @@ func TestPushBranch_CheckoutFailureErrors(t *testing.T) {
 	forgetest.Run(t, src, "add", "feature.txt")
 	forgetest.Run(t, src, "commit", "-m", "feature")
 
-	err := PushBranch("test", src, "work", "bad..name", "main", localClone(repo.Bare))
+	err := PushBranch("test", src, "work", "bad..name", "main", gitexec.Credential{}, localClone(repo.Bare))
 	if err == nil {
 		t.Fatal("PushBranch with an invalid branch ref name: got nil error, want one")
 	}
@@ -191,7 +192,7 @@ func TestPushBranch_CreatesFreshBranch(t *testing.T) {
 	forgetest.Run(t, src, "commit", "-m", "v1")
 	wantSHA := forgetest.RevParse(t, src, "work")
 
-	if err := PushBranch("test", src, "work", "agent/issue-4104", "main", localClone(repo.Bare)); err != nil {
+	if err := PushBranch("test", src, "work", "agent/issue-4104", "main", gitexec.Credential{}, localClone(repo.Bare)); err != nil {
 		t.Fatalf("PushBranch onto a fresh branch: %v", err)
 	}
 
@@ -234,7 +235,7 @@ func TestPushBranch_ExistingBranchRefusesAndLeavesRemoteUnchanged(t *testing.T) 
 			forgetest.Run(t, src, "add", "feature.txt")
 			forgetest.Run(t, src, "commit", "-m", "v1")
 
-			err := PushBranch("test", src, "test-payload", branch, "trunk", localClone(repo.Bare))
+			err := PushBranch("test", src, "test-payload", branch, "trunk", gitexec.Credential{}, localClone(repo.Bare))
 			if err == nil {
 				t.Fatalf("PushBranch onto existing branch %q: got nil error, want one", branch)
 			}
@@ -274,7 +275,7 @@ func TestPushBranch_FastForwardOntoExistingBranchRefused(t *testing.T) {
 	forgetest.Run(t, src, "add", "feature.txt")
 	forgetest.Run(t, src, "commit", "-m", "v1")
 
-	err := PushBranch("test", src, branch, branch, "trunk", localClone(repo.Bare))
+	err := PushBranch("test", src, branch, branch, "trunk", gitexec.Credential{}, localClone(repo.Bare))
 	if err == nil {
 		t.Fatal("PushBranch fast-forwarding an existing branch: got nil error, want one")
 	}
@@ -291,7 +292,7 @@ func TestRelay_MissingBundleErrors(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := t.TempDir()
 
-	err := Relay("test", outbox, "agent/issue-2212", localClone(repo.Bare))
+	err := Relay("test", outbox, "agent/issue-2212", gitexec.Credential{}, localClone(repo.Bare))
 	if err == nil {
 		t.Fatal("Relay with no bundle file present: got nil error, want one")
 	}
@@ -306,7 +307,7 @@ func TestRelay_MissingOutboxDirErrors(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := filepath.Join(t.TempDir(), "does-not-exist")
 
-	err := Relay("test", outbox, "agent/issue-2212", localClone(repo.Bare))
+	err := Relay("test", outbox, "agent/issue-2212", gitexec.Credential{}, localClone(repo.Bare))
 	if err == nil {
 		t.Fatal("Relay with no outbox dir present: got nil error, want one")
 	}
@@ -322,7 +323,7 @@ func TestRelay_MalformedBundleErrors(t *testing.T) {
 	outbox := t.TempDir()
 	forgetest.WriteFile(t, filepath.Join(outbox, seambundle.FileName), "not a bundle")
 
-	err := Relay("test", outbox, "agent/issue-2212", localClone(repo.Bare))
+	err := Relay("test", outbox, "agent/issue-2212", gitexec.Credential{}, localClone(repo.Bare))
 	if err == nil {
 		t.Fatal("Relay with a malformed bundle file: got nil error, want one")
 	}
@@ -337,7 +338,7 @@ func TestRelay_CloneErrorPropagatesVerbatim(t *testing.T) {
 	forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, "agent/issue-2212")
 
 	sentinel := errors.New("sentinel clone failure")
-	err := Relay("test", outbox, "agent/issue-2212", func(dir string) error {
+	err := Relay("test", outbox, "agent/issue-2212", gitexec.Credential{}, func(dir string) error {
 		return sentinel
 	})
 	if !errors.Is(err, sentinel) {

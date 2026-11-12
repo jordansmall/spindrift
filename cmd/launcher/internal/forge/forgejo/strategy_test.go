@@ -148,3 +148,18 @@ func TestStrategyValidateRejectsBlankBaseURL(t *testing.T) {
 		}
 	}
 }
+
+func TestStrategyLedgerSiteCarriesCredentialNotUserinfo(t *testing.T) {
+	const token = "tok-6860"
+	l := mapLookup(map[string]string{"FORGEJO_BASE_URL": "https://forge.example", "FORGEJO_TOKEN": token})
+	site, err := forgejo.Strategy.NewLedger(backendkit.Shared{RepoSlug: "o/r"}, l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(site.URL, "@") || strings.Contains(site.URL, token) {
+		t.Errorf("URL = %q, want no userinfo and no token", site.URL)
+	}
+	if site.Credential != forgejo.GitCredential(token) {
+		t.Errorf("Credential does not match GitCredential(token)")
+	}
+}
