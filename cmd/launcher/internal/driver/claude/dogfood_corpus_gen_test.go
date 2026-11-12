@@ -39,6 +39,9 @@ var dogfoodFragments = []string{
 	"drwxr-xr-x 4 agent agent 4096 Oct 13 05:24 internal\n-rw-r--r-- 1 agent agent 1873 Oct 13 05:24 go.mod\n-rw-r--r-- 1 agent agent 9210 Oct 13 05:24 main.go\n",
 }
 
+// dogfoodPad, dogfoodMarshal and dogfoodID also build the Connector
+// benchmark's sized lines (sizedLine in connector_bench_test.go).
+//
 // dogfoodPad returns about n bytes of source-like text.
 func dogfoodPad(rng *rand.Rand, n int) string {
 	var b strings.Builder
