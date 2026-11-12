@@ -29,6 +29,10 @@ func realGuardsDeps() guardsDeps {
 	return guardsDeps{Install: readonlyguards.Install, Setenv: os.Setenv}
 }
 
+// readonlyDecoyName is the basename of the bare decoy repo that the guarded
+// remotes' pushurls point at.
+const readonlyDecoyName = "readonly-push-guard.git"
+
 // readonlyShimDir is where box installs the read-only command shims. $HOME
 // rather than the work dir's parent, which in production is the root-owned `/`
 // while the Box runs as uid 1000.
@@ -63,17 +67,23 @@ func (r *boxRun) installReadonlyGuards() error {
 		// real push targets the branch already checked out there, so a pushurl
 		// pointing at it would resolve as "Everything up-to-date" and exit 0
 		// without firing a hook. The work dir gets the hook too, catching a push
-		// to an explicit URL that bypasses origin's pushurl.
+		// to an explicit URL that bypasses the remotes' pushurls.
 		tmp, err := os.MkdirTemp("", "")
 		if err != nil {
 			return err
 		}
-		decoy = filepath.Join(tmp, "readonly-push-guard.git")
+		decoy = filepath.Join(tmp, readonlyDecoyName)
 		if err := d.Git(r.in.WorkDir, "init", "--bare", "-q", decoy); err != nil {
 			return fmt.Errorf("init decoy repo: %w", err)
 		}
-		if err := d.Git(r.in.WorkDir, "config", "remote.origin.pushurl", decoy); err != nil {
-			return fmt.Errorf("point origin's pushurl at the decoy: %w", err)
+		remotes, err := r.guardedRemotes()
+		if err != nil {
+			return err
+		}
+		for _, name := range remotes {
+			if err := d.Git(r.in.WorkDir, "config", "remote."+name+".pushurl", decoy); err != nil {
+				return fmt.Errorf("point remote %s's pushurl at the decoy: %w", name, err)
+			}
 		}
 		cfg.RepoDir = decoy
 		cfg.ExtraRepoDirs = []string{r.in.WorkDir}
@@ -99,10 +109,10 @@ func (r *boxRun) installReadonlyGuards() error {
 // verifyReadonlyGuards asserts the guards are in place and in force before the
 // Driver can run, rather than trusting the install sequence: each installed
 // shim must be what its argv0 now resolves to on PATH, and an installed hook
-// must exist and run in every repo it was written to, with origin's pushurl
-// still pointing at the decoy. Each shim must also actually run, not just
-// carry an exec bit. LookPath resolves against the process PATH the preceding
-// Setenv updated.
+// must exist and run in every repo it was written to, with every remote's
+// pushurl still pointing at the decoy. Each shim must also actually run, not
+// just carry an exec bit. LookPath resolves against the process PATH the
+// preceding Setenv updated.
 func (r *boxRun) verifyReadonlyGuards(res readonlyguards.Result, shimDir string, cfg readonlyguards.Config, decoy string) error {
 	d := r.d
 	for _, argv0 := range res.Shims {
@@ -138,14 +148,38 @@ func (r *boxRun) verifyReadonlyGuards(res readonlyguards.Result, shimDir string,
 	if decoy == "" {
 		return nil
 	}
-	got, err := d.GitOutput(r.in.WorkDir, "config", "--get", "remote.origin.pushurl")
+	remotes, err := r.guardedRemotes()
 	if err != nil {
-		return fmt.Errorf("read origin's pushurl: %w", err)
+		return err
 	}
-	if got = strings.TrimSpace(got); got != decoy {
-		return fmt.Errorf("origin's pushurl is %q, not the decoy %s", got, decoy)
+	for _, name := range remotes {
+		got, err := d.GitOutput(r.in.WorkDir, "config", "--get", "remote."+name+".pushurl")
+		if err != nil {
+			return fmt.Errorf("read remote %s's pushurl: %w", name, err)
+		}
+		if got = strings.TrimSpace(got); got != decoy {
+			return fmt.Errorf("remote %s's pushurl is %q, not the decoy %s", name, got, decoy)
+		}
 	}
 	return nil
+}
+
+// guardedRemotes is origin plus every remote the work dir lists. Every one
+// takes the decoy pushurl: the mirror clone's remote.pushDefault names a
+// remote other than origin, and a push naming none goes there.
+func (r *boxRun) guardedRemotes() ([]string, error) {
+	d := r.d
+	out, err := d.GitOutput(r.in.WorkDir, "remote")
+	if err != nil {
+		return nil, fmt.Errorf("list remotes: %w", err)
+	}
+	remotes := []string{"origin"}
+	for _, name := range strings.Fields(out) {
+		if name != "origin" {
+			remotes = append(remotes, name)
+		}
+	}
+	return remotes, nil
 }
 
 // probeTimeout bounds one runnable probe; a var so a test can shrink it.

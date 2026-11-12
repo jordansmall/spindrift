@@ -1,6 +1,7 @@
-// Package boxclone is the Box's repository clone: it picks the clone URL for
-// the configured code forge, wires git credentials, clones into Config.WorkDir
-// and leaves the clone with a repo-local identity and fresh remote refs.
+// Package boxclone is the Box's repository clone: it picks the clone source
+// (the host-seeded mirror mount, else the configured code forge's URL), wires
+// git credentials for a forge URL, clones into Config.WorkDir and leaves the
+// clone with a repo-local identity and fresh remote refs.
 package boxclone
 
 import (
@@ -21,10 +22,10 @@ type Config struct {
 	// GHCredentialHelper runs `gh auth setup-git` before cloning. See
 	// backend.Descriptor.InBoxGHCredentialHelper for which forges want it.
 	GHCredentialHelper bool
-	// HostSeededMirror marks this Box as cloning the host-seeded mirror mounted
-	// at RepoMountDir (backend.ClonesFromMirror), not the forge's remote: the
-	// clone trusts the mount and work dir globally (#1720) and needs no forge
-	// credential, so it skips GHCredentialHelper.
+	// HostSeededMirror is BOX_HOST_SEEDED_MIRROR: the launcher mounted a
+	// host-seeded mirror at RepoMountDir, so the Box clones it with no forge
+	// credential (no gh helper, no CloneURL) and trusts the mount and work dir
+	// globally (#1720).
 	HostSeededMirror bool
 	RepoSlug         string
 	// Lookup serves the knobs the CODE_FORGE backend's Strategy reads.
@@ -82,6 +83,11 @@ func Clone(cfg Config, stdout, stderr io.Writer) error {
 	if err := run(stdout, stderr, "", "git", "clone", url, cfg.WorkDir); err != nil {
 		return err
 	}
+	if cfg.HostSeededMirror {
+		if err := addForgeRemote(cfg, stdout, stderr); err != nil {
+			return err
+		}
+	}
 	// Identity is repo-local, not global (#404): CI's hermetic check
 	// environment has no global git config, so a global identity here would
 	// let git-shelling tests observe config the Box has but CI doesn't.
@@ -89,6 +95,36 @@ func Clone(cfg Config, stdout, stderr io.Writer) error {
 		{"config", "user.name", cfg.GitUserName},
 		{"config", "user.email", cfg.GitUserEmail},
 		{"fetch", "origin"},
+	} {
+		if err := run(stdout, stderr, cfg.WorkDir, "git", args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// addForgeRemote gives a mirror clone a credential-free "forge" remote: gh and
+// fj resolve the repo from the clone's remotes, and origin is the mount path.
+// skipFetchAll keeps `git fetch --all` off the forge, which the Box holds no
+// credential for. remote.pushDefault is repo-wide: every branch without its own
+// pushRemote pushes to forge, which gh uses to find a PR and branch recovery
+// would otherwise leave on origin. A push naming no remote then goes to forge;
+// when the Box is host-mediated or outbox-relay capable, the read-only guard
+// points forge's pushurl at the decoy. A forge with no web URL (local, git) gets no
+// remote.
+func addForgeRemote(cfg Config, stdout, stderr io.Writer) error {
+	s, ok := backendkit.ByName(cfg.CodeForge)
+	if !ok || s.WebURL == nil {
+		return nil
+	}
+	url := s.WebURL(backendkit.Shared{RepoSlug: cfg.RepoSlug}, cfg.Lookup)
+	if url == "" {
+		return nil
+	}
+	for _, args := range [][]string{
+		{"remote", "add", "forge", url},
+		{"config", "remote.forge.skipFetchAll", "true"},
+		{"config", "remote.pushDefault", "forge"},
 	} {
 		if err := run(stdout, stderr, cfg.WorkDir, "git", args...); err != nil {
 			return err

@@ -231,11 +231,12 @@ func newFixture(t *testing.T) *fixture {
 		Registry: newRegFake().deps(),
 		// An empty registry installs nothing, so the read-only cases need no
 		// real git and leave the test process's PATH alone.
-		Guards: guardsDeps{Install: readonlyguards.Install, Setenv: func(string, string) error { return nil }},
-		Git:    func(string, ...string) error { return nil },
-		Getenv: func(k string) string { return f.knobs[k] },
-		Stdout: &f.out,
-		Stderr: &f.errb,
+		Guards:    guardsDeps{Install: readonlyguards.Install, Setenv: func(string, string) error { return nil }},
+		Git:       func(string, ...string) error { return nil },
+		GitOutput: func(string, ...string) (string, error) { return "", nil },
+		Getenv:    func(k string) string { return f.knobs[k] },
+		Stdout:    &f.out,
+		Stderr:    &f.errb,
 	}
 	return f
 }
