@@ -86,19 +86,23 @@ func TestUseRefusesInvalidRowsNamingTheBackend(t *testing.T) {
 		want      []string
 		routeless bool
 	}{
-		"empty name":    {rows(t, []backendrows.Row{row("", getRepos)}), []string{"no name"}, true},
-		"repeated name": {rows(t, []backendrows.Row{row("dup", getRepos), row("dup", getRepos)}), []string{"dup", "more than one row"}, true},
-		"empty module":  {rows(t, []backendrows.Row{{Name: "nomod", Routes: []connectorhost.Route{getRepos}, CredentialEnv: "T"}}), []string{"nomod", "module"}, true},
-		"empty cred":    {rows(t, []backendrows.Row{{Name: "nocred", Module: "/m.wasm", Routes: []connectorhost.Route{getRepos}}}), []string{"nocred", "credentialEnv"}, true},
-		"no routes":     {rows(t, []backendrows.Row{{Name: "noroutes", Module: "/m.wasm", CredentialEnv: "T"}}), []string{"noroutes", "route"}, true},
-		"core local":    {rows(t, []backendrows.Row{row("local", getRepos)}), []string{"local", "built in"}, true},
-		"core git":      {rows(t, []backendrows.Row{row("git", getRepos)}), []string{"git", "built in"}, true},
-		"unknown key":   {json.RawMessage(`[{"name":"x","bogus":1}]`), []string{"backend rows", "bogus"}, true},
-		"unknown route": {json.RawMessage(`[{"name":"x","routes":[{"method":"GET","host":"h","path":"/","bogus":1}]}]`), []string{"bogus"}, true},
-		"not an array":  {json.RawMessage(`"nope"`), []string{"backend rows"}, true},
-		"root path":     {rows(t, []backendrows.Row{row("broad", connectorhost.Route{Method: "GET", Host: "h.test", Path: "/"})}), []string{"broad", "GET h.test /"}, false},
-		"non-canonical": {rows(t, []backendrows.Row{row("messy", connectorhost.Route{Method: "GET", Host: "h.test", Path: "/a/"})}), []string{"messy", "GET h.test /a/"}, false},
-		"relative":      {rows(t, []backendrows.Row{row("rel", connectorhost.Route{Method: "GET", Host: "h.test", Path: "a"})}), []string{"rel", "GET h.test a"}, false},
+		"empty name":      {rows(t, []backendrows.Row{row("", getRepos)}), []string{"no name"}, true},
+		"repeated name":   {rows(t, []backendrows.Row{row("dup", getRepos), row("dup", getRepos)}), []string{"dup", "more than one row"}, true},
+		"empty module":    {rows(t, []backendrows.Row{{Name: "nomod", Routes: []connectorhost.Route{getRepos}, CredentialEnv: "T"}}), []string{"nomod", "module"}, true},
+		"empty cred":      {rows(t, []backendrows.Row{{Name: "nocred", Module: "/m.wasm", Routes: []connectorhost.Route{getRepos}}}), []string{"nocred", "credentialEnv"}, true},
+		"no routes":       {rows(t, []backendrows.Row{{Name: "noroutes", Module: "/m.wasm", CredentialEnv: "T"}}), []string{"noroutes", "route"}, true},
+		"core local":      {rows(t, []backendrows.Row{row("local", getRepos)}), []string{"local", "built in"}, true},
+		"core git":        {rows(t, []backendrows.Row{row("git", getRepos)}), []string{"git", "built in"}, true},
+		"unknown key":     {json.RawMessage(`[{"name":"x","bogus":1}]`), []string{"backend rows", "bogus"}, true},
+		"unknown route":   {json.RawMessage(`[{"name":"x","routes":[{"method":"GET","host":"h","path":"/","bogus":1}]}]`), []string{"bogus"}, true},
+		"not an array":    {json.RawMessage(`"nope"`), []string{"backend rows"}, true},
+		"unknown scheme":  {rows(t, []backendrows.Row{withScheme(row("odd", getRepos), "digest", "")}), []string{"odd", "digest", "credentialScheme"}, true},
+		"basic no id":     {rows(t, []backendrows.Row{withScheme(row("nobasic", getRepos), "basic", "")}), []string{"nobasic", "identityEnv"}, true},
+		"bearer with id":  {rows(t, []backendrows.Row{withScheme(row("bearid", getRepos), "bearer", "EMAIL")}), []string{"bearid", "identityEnv"}, true},
+		"default with id": {rows(t, []backendrows.Row{withScheme(row("defid", getRepos), "", "EMAIL")}), []string{"defid", "identityEnv"}, true},
+		"root path":       {rows(t, []backendrows.Row{row("broad", connectorhost.Route{Method: "GET", Host: "h.test", Path: "/"})}), []string{"broad", "GET h.test /"}, false},
+		"non-canonical":   {rows(t, []backendrows.Row{row("messy", connectorhost.Route{Method: "GET", Host: "h.test", Path: "/a/"})}), []string{"messy", "GET h.test /a/"}, false},
+		"relative":        {rows(t, []backendrows.Row{row("rel", connectorhost.Route{Method: "GET", Host: "h.test", Path: "a"})}), []string{"rel", "GET h.test a"}, false},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -279,6 +283,74 @@ func TestLoadFailsClosedWithoutTheCredential(t *testing.T) {
 	err = c.Call(context.Background(), "fetch", map[string]string{"url": srv.URL + "/repos/x", "method": "GET"}, new(fetched))
 	if err == nil || !errors.Is(err, connectorhost.ErrCall) {
 		t.Fatalf("err = %v, want a failed call", err)
+	}
+}
+
+func withScheme(r backendrows.Row, scheme, identityEnv string) backendrows.Row {
+	r.CredentialScheme, r.IdentityEnv = scheme, identityEnv
+	return r
+}
+
+func loadBasic(t *testing.T, srv *httptest.Server, env map[string]string, audit *bytes.Buffer) *connectorhost.Connector {
+	t.Helper()
+	r := backendrows.Row{
+		Name: "fixture-network", Module: fixtureWasm(t), CredentialEnv: "FIXTURE_TOKEN",
+		CredentialScheme: "basic", IdentityEnv: "FIXTURE_EMAIL",
+		Routes: []connectorhost.Route{{Method: "GET", Host: srv.Listener.Addr().String(), Path: "/repos"}},
+	}
+	c, err := backendrows.Load(context.Background(), r, backendrows.Options{
+		Getenv: func(k string) string { return env[k] }, Audit: audit, Client: srv.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
+	return c
+}
+
+func TestLoadSendsBasicAuthFromTheIdentityAndCredential(t *testing.T) {
+	var got []string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Header.Get("Authorization"))
+		fmt.Fprint(w, "ok")
+	}))
+	t.Cleanup(srv.Close)
+	c := loadBasic(t, srv, map[string]string{"FIXTURE_EMAIL": "me@example.com", "FIXTURE_TOKEN": "tok-123"}, &bytes.Buffer{})
+	if err := c.Call(context.Background(), "fetch", map[string]string{"url": srv.URL + "/repos/x", "method": "GET"}, new(fetched)); err != nil {
+		t.Fatal(err)
+	}
+	// base64("me@example.com:tok-123")
+	if want := "Basic bWVAZXhhbXBsZS5jb206dG9rLTEyMw=="; len(got) != 1 || got[0] != want {
+		t.Fatalf("backend saw %q, want one request carrying %q", got, want)
+	}
+}
+
+func TestLoadBasicFailsClosedWithoutIdentityOrCredential(t *testing.T) {
+	cases := map[string]map[string]string{
+		"no identity":   {"FIXTURE_TOKEN": "tok-123"},
+		"no credential": {"FIXTURE_EMAIL": "me@example.com"},
+	}
+	for name, env := range cases {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Error("request reached the backend without full Basic credentials")
+			}))
+			t.Cleanup(srv.Close)
+			var audit bytes.Buffer
+			c := loadBasic(t, srv, env, &audit)
+			err := c.Call(context.Background(), "fetch", map[string]string{"url": srv.URL + "/repos/x", "method": "GET"}, new(fetched))
+			if err == nil || !errors.Is(err, connectorhost.ErrCall) {
+				t.Fatalf("err = %v, want a failed call", err)
+			}
+			// The guest receives the send failure as text, so the sentinel is matched by message.
+			if !strings.Contains(err.Error(), connectorhost.ErrHTTPSend.Error()) {
+				t.Errorf("err = %v, want the %q failure", err, connectorhost.ErrHTTPSend)
+			}
+			lines := strings.Split(strings.TrimSpace(audit.String()), "\n")
+			if len(lines) != 1 || !strings.Contains(lines[0], `"failed"`) {
+				t.Errorf("audit = %q, want exactly one failed entry", audit.String())
+			}
+		})
 	}
 }
 
