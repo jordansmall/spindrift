@@ -109,6 +109,8 @@
 # issuesWearLabels marks a tracker whose issue labels are reliable
 # provenance, registry or not: jira sets it though it omits labelRegistry
 # (issue #6347). local omits it: a body marker can stand in for its labels.
+# closesRefTracker marks a tracker whose issue numbers a PR body's `Closes #N`
+# auto-closes; only github sets it (issues #2341, #6880).
 [
   (import ./github.nix)
   (import ./git.nix)
