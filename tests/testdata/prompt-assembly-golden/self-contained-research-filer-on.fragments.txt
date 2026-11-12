@@ -1,7 +1,7 @@
 caveman-default-research.md
+filer-dedup-unwritable.md
 filer-file-relay.md
 filer-label-relay-research.md
-github/filer-dedup.md
 research-file-issues-relay.md
 research-issue-read-unreadable.md
 research-outcome-landing-relayed.md

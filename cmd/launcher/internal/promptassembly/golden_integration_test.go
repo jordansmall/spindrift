@@ -452,9 +452,17 @@ func goldenCells() []goldenCell {
 			c.forgejoTracker()
 			c.filerOn()
 		}},
+		{name: "forgejo-orchestrator-filer-on-signal-socket", mode: modeInitial, setup: func(c *cellInputs) {
+			// The Forgejo dedup search is the socket's issue-search verb (issue
+			// #6895); under the log carrier the Filer runs no search.
+			c.forgejoForge()
+			c.forgejoTracker()
+			c.filerOn()
+			c.export("BOX_SIGNAL_CARRIER", "socket")
+		}},
 		{name: "forgejo-readonly-orchestrator-filer-on", mode: modeInitial, review: true, setup: func(c *cellInputs) {
-			// A relay Filer still reads through the tracker: the Forgejo dedup
-			// search renders even though the write mechanism is the relay.
+			// A relay Filer reads through the tracker too; under the log
+			// carrier this cell renders the no-search dedup arm.
 			c.forgejoForge()
 			c.forgejoTracker()
 			c.filerOn()

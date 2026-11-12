@@ -396,43 +396,51 @@ let
       fragment = "filer-label-relay-butler-records.md";
       var = "FILER_LABEL_RELAY_BUTLER_RECORDS_STEP";
     }
-    # Step 2's tracker search commands fork on the read axis (issue #5127),
-    # not FILER_FILE_DIRECT_GH: a relay Filer still reads through the tracker.
-    # jira declares no read axis (lib/backends/jira.nix, no trackerAxisRead),
-    # so it would ride github's search arm, but it has no in-Box client, so it
-    # takes the unwritable arm (issue #6354): no search, the host's dedup over
+    # Step 2's tracker searches fork on whether a search reaches the Box, not
+    # on FILER_FILE_DIRECT_GH: a relay Filer still searches through the tracker.
+    # The search is the Signal socket's issue-search verb (issue #6895), so
+    # github and forgejo run it under the socket carrier and local keeps its
+    # folder search. jira (no searcher, issue #6354) and any tracker under the
+    # log carrier (no socket) take the no-search arm: the host's dedup over
     # relayed intents is the whole check. The two arms share a var, like the
     # issue-read arms below.
     # One slot (issue #5647, ADR 0068): each backend's search commands differ
     # in more than its name, so each folder carries its own file.
     {
       axis = "tracker";
-      gate = "ISSUE_TRACKER_WRITABLE";
+      gate = "ISSUE_TRACKER_SEARCHABLE";
       fragment = "filer-dedup.md";
       var = "FILER_DEDUP_STEP";
     }
     {
-      gate = "ISSUE_TRACKER_UNWRITABLE";
-      inverseOf = "ISSUE_TRACKER_WRITABLE";
+      gate = "ISSUE_TRACKER_UNSEARCHABLE";
+      inverseOf = "ISSUE_TRACKER_SEARCHABLE";
       fragment = "filer-dedup-unwritable.md";
       var = "FILER_DEDUP_STEP";
     }
-    # Deprecation-window fills for override prompts still naming the old vars.
+    # Deprecation-window fills for override prompts still naming the old vars;
+    # like the issue-read fills they render verb wording only where the verb
+    # exists.
     {
-      gate = "ISSUE_TRACKER_GITHUB_WRITABLE";
+      gate = "ISSUE_TRACKER_GITHUB_SEARCHABLE";
       fragment = "github/filer-dedup.md";
       legacyFragment = "filer-dedup-search.md";
       var = "FILER_DEDUP_SEARCH_STEP";
     }
     {
-      gate = "ISSUE_TRACKER_UNWRITABLE";
+      gate = "ISSUE_TRACKER_GITHUB_UNSEARCHABLE";
       fragment = "filer-dedup-unwritable.md";
       var = "FILER_DEDUP_SEARCH_STEP";
     }
     {
-      gate = "ISSUE_TRACKER_FORGEJO";
+      gate = "ISSUE_TRACKER_FORGEJO_SEARCHABLE";
       fragment = "forgejo/filer-dedup.md";
       legacyFragment = "filer-dedup-search-forgejo.md";
+      var = "FILER_DEDUP_SEARCH_FORGEJO_STEP";
+    }
+    {
+      gate = "ISSUE_TRACKER_FORGEJO_UNSEARCHABLE";
+      fragment = "filer-dedup-unwritable.md";
       var = "FILER_DEDUP_SEARCH_FORGEJO_STEP";
     }
     {

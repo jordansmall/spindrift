@@ -9,10 +9,10 @@ coordinator-scout-brief.md
 coordinator.md
 file-issues-relay.md
 file-issues-triage-recap.md
+filer-dedup-unwritable.md
 filer-file-relay.md
 filer-label-relay.md
 filer-relay-reason-readonly.md
-forgejo/filer-dedup.md
 if-blocked-outcome-landing-outbox.md
 if-blocked-pr-outbox.md
 if-blocked-push-outbox.md

@@ -70,12 +70,23 @@ func trackerGates(e Env) map[string]bool {
 	g["ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE"] = itRead == "GITHUB" && !verb
 	g["ISSUE_TRACKER_FORGEJO_LINKS_READABLE"] = itRead == "FORGEJO" && verb
 	g["ISSUE_TRACKER_FORGEJO_LINKS_UNREADABLE"] = itRead == "FORGEJO" && !verb
+	// The Signal socket's issue-search (issue #6895) answers for github and
+	// forgejo; jira has no searcher and local keeps its own folder search. The
+	// Filer's dedup step forks on whether a search reaches the Box, so jira and
+	// every tracker under the log carrier take the no-search arm.
+	searchVerb := verb && !unwritable
+	g["ISSUE_TRACKER_SEARCHABLE"] = searchVerb || itRead == "LOCAL"
+	g["ISSUE_TRACKER_UNSEARCHABLE"] = !g["ISSUE_TRACKER_SEARCHABLE"]
+	// The deprecated per-backend dedup rows, as for the issue read above.
+	g["ISSUE_TRACKER_GITHUB_SEARCHABLE"] = itRead == "GITHUB" && searchVerb
+	g["ISSUE_TRACKER_GITHUB_UNSEARCHABLE"] = itRead == "GITHUB" && !searchVerb
+	g["ISSUE_TRACKER_FORGEJO_SEARCHABLE"] = itRead == "FORGEJO" && searchVerb
+	g["ISSUE_TRACKER_FORGEJO_UNSEARCHABLE"] = itRead == "FORGEJO" && !searchVerb
 	// InBoxUnwritableTracker (not local, which also lacks an in-Box client but
-	// takes the writable arm) picks the Filer's no-search dedup step and the
-	// FILER_RELAY_REASON fragment in every access mode (issue #6354).
+	// takes the writable arm) picks the FILER_RELAY_REASON fragment in every
+	// access mode (issue #6354).
 	g["ISSUE_TRACKER_WRITABLE"] = !unwritable
 	g["ISSUE_TRACKER_UNWRITABLE"] = unwritable
-	g["ISSUE_TRACKER_GITHUB_WRITABLE"] = itRead == "GITHUB" && !unwritable
 	g["ISSUE_TRACKER_GITHUB_READWRITE"] = itWrite == "GITHUB" && e.BoxWriteEnabled && !researchForceRelay && !unwritable
 	g["ISSUE_TRACKER_UNWRITABLE_READWRITE"] = unwritable && e.BoxWriteEnabled && !researchForceRelay
 	g["ISSUE_TRACKER_GITHUB_READONLY"] = itWrite == "GITHUB" && (!e.BoxWriteEnabled || researchForceRelay)

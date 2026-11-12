@@ -1263,25 +1263,26 @@ in
 
   # Grep pin (issue #908): the filer's dedup step must search open issues
   # beyond the `agent-review-finding` label, or it stops catching human-filed
-  # duplicates. Re-adding a `--label` flag to the `--state open` line slips
-  # past both other pins (issue #921), so count that line's `--label`
-  # occurrences too. `[ "$n" -eq 0 ] ||`, since `set -e` exempts `!` (#887).
+  # duplicates. Adding a `-label` flag to an open search slips past the other
+  # pins (issue #921), so count that line's occurrences too. Since issue #6895
+  # the search is the Signal socket's issue-search verb, never a forge CLI.
+  # `[ "$n" -eq 0 ] ||`, since `set -e` exempts `!` (#887).
   filer-prompt-dedup-searches-all-open-issues =
     pkgs.runCommand "filer-prompt-dedup-searches-all-open-issues" { }
       ''
-        grep -q -- '--state open' ${../../templates/default/prompts/fragments/github/filer-dedup.md}
-        old=$(grep -c -- '--label agent-review-finding --state all' \
-          ${../../templates/default/prompts/fragments/github/filer-dedup.md} || true)
-        [ "$old" -eq 0 ] || {
-          echo "expected the old --label agent-review-finding --state all query gone, found $old occurrence(s)" >&2
-          exit 1
-        }
-        bad=$(grep -- '--state open' ${../../templates/default/prompts/fragments/github/filer-dedup.md} \
-          | grep -c -- '--label' || true)
-        [ "$bad" -eq 0 ] || {
-          echo "expected the --state open dedup search to carry no --label flag, $bad line(s) did" >&2
-          exit 1
-        }
+        for f in ${../../templates/default/prompts/fragments/github/filer-dedup.md} \
+          ${../../templates/default/prompts/fragments/forgejo/filer-dedup.md}; do
+          grep -q -- 'driver-exec signal issue-search -state open' "$f"
+          if grep -qE '(^|[^a-z])gh |curl|_TOKEN' "$f"; then
+            echo "$f: the dedup search must not call a forge CLI, curl or a token" >&2
+            exit 1
+          fi
+          bad=$(grep -- 'issue-search -state open' "$f" | grep -c -- '-label' || true)
+          [ "$bad" -eq 0 ] || {
+            echo "expected the open dedup searches to carry no -label flag, $bad line(s) did" >&2
+            exit 1
+          }
+        done
         touch $out
       '';
 
@@ -1333,69 +1334,42 @@ in
   # Grep pin (issue #908): the filer's dedup must also treat closed
   # `agent-research-reject` issues as suppressing matches, the same triage
   # class as a closed `agent-review-finding`. Anchored to the full
-  # `--label ... --state closed` command, since a bare-token match would pass
+  # `-state closed -label ...` command, since a bare-token match would pass
   # on an unrelated prose mention (issue #922, sibling of #921 above).
   filer-prompt-dedup-names-research-reject =
     pkgs.runCommand "filer-prompt-dedup-names-research-reject" { }
       ''
-        grep -q -- '--label agent-research-reject --state closed' ${../../templates/default/prompts/fragments/github/filer-dedup.md}
+        grep -q -- 'issue-search -state closed -label agent-research-reject' ${../../templates/default/prompts/fragments/github/filer-dedup.md}
         touch $out
       '';
 
-  # Grep pins for the Forgejo sibling of the filer dedup step (issue #5127):
-  # same bullet structure as github/filer-dedup.md, over the REST issue
-  # search. The all-open search must carry no `labels=` (it covers
-  # human-filed issues), all four provenance labels must be searched closed,
-  # and `gh` must never appear (it would query the wrong tracker).
+  # Grep pins for the Forgejo sibling of the filer dedup step (issues #5127,
+  # #6895): same bullet structure as github/filer-dedup.md, through the same
+  # verb. The two open searches carry no `-label` (they cover human-filed
+  # issues), all four provenance labels are searched closed, and no forge CLI,
+  # REST call or token appears (the host runs the search).
   filer-prompt-dedup-forgejo-searches = pkgs.runCommand "filer-prompt-dedup-forgejo-searches" { } ''
     f=${../../templates/default/prompts/fragments/forgejo/filer-dedup.md}
-    # Each search spans several lines, so judge it as one curl..jq block: emit
-    # one "<state> <labels> <jq> [sel]" record per curl, flushed at its jq line
-    # (or at the next curl / EOF when the jq pipe is missing). "sel" marks a
-    # jq filter that selects on the search's own label name, pinned in full so
-    # a bare comparison that filters nothing cannot pass: Forgejo drops an
-    # undefined labels= name, so only that filter keeps the search label-scoped.
-    awk '
-      function flush() {
-        if (!on) return
-        s = (b ~ /state=open/) ? "open" : (b ~ /state=closed/) ? "closed" : "none"
-        l = match(b, /labels=[a-z-]+/) ? substr(b, RSTART + 7, RLENGTH - 7) : "-"
-        sel = (l != "-" && index(b, "select(any(.labels[]?; .name == \"" l "\"))")) ? " sel" : ""
-        print s, l, ((b ~ /jq -r/) ? "jq" : "nojq") sel
-        on = 0; b = ""
-      }
-      /curl /{flush(); on = 1}
-      on {b = b $0}
-      /jq -r/{flush()}
-      END{flush()}
-    ' "$f" >blocks
-    total=$(wc -l <blocks)
+    total=$(grep -c 'driver-exec signal issue-search ' "$f" || true)
     [ "$total" -eq 6 ] || {
-      echo "expected 6 curl searches (site key, all-open, 4 closed), found $total" >&2
+      echo "expected 6 issue-search commands (site key, all-open, 4 closed), found $total" >&2
       exit 1
     }
-    if grep -qvE ' jq( sel)?$' blocks; then
-      echo "expected every curl search to pipe through jq -r" >&2
-      exit 1
-    fi
-    # The site-key and all-open searches are open and carry no labels= filter
-    # (the latter covers human-filed issues).
-    open=$(grep -c '^open - ' blocks || true)
+    open=$(grep -c 'issue-search -state open ' "$f" || true)
     [ "$open" -eq 2 ] || {
-      echo "expected 2 open searches without labels=, found $open" >&2
+      echo "expected 2 open searches, found $open" >&2
       exit 1
     }
     for l in agent-review-finding agent-research-reject agent-research-finding agent-butler-finding; do
-      grep -q "^closed $l jq sel\$" blocks || {
-        echo "expected a closed-issue dedup search for labels=$l whose jq filter is select(any(.labels[]?; .name == \"$l\"))" >&2
+      grep -q "issue-search -state closed -label $l " "$f" || {
+        echo "expected a closed-issue dedup search for -label $l" >&2
         exit 1
       }
     done
-    gh=$(grep -c 'gh issue' "$f" || true)
-    [ "$gh" -eq 0 ] || {
-      echo "expected no gh issue command in the Forgejo dedup fragment, found $gh" >&2
+    if grep -qE '(^|[^a-z])gh |curl|FORGEJO_TOKEN' "$f"; then
+      echo "expected no forge CLI, curl or token in the Forgejo dedup fragment" >&2
       exit 1
-    }
+    fi
     touch $out
   '';
 
@@ -1421,9 +1395,14 @@ in
             exit 1
           fi
         done
+        jq -r '.filer.prompt // empty' "$g/forgejo-orchestrator-filer-on-signal-socket.agents.json" >socket.txt
+        grep -q 'signal issue-search -state open' socket.txt || {
+          echo "forgejo-orchestrator-filer-on-signal-socket: filer prompt lost its issue-search dedup (issue #6895)" >&2
+          exit 1
+        }
         for cell in forgejo-orchestrator-filer-on forgejo-readonly-orchestrator-filer-on; do
-          grep -q 'state=open' "$cell.txt" || {
-            echo "$cell: filer prompt lost its REST dedup search" >&2
+          grep -q 'No tracker search reaches this Box' "$cell.txt" || {
+            echo "$cell: forgejo filer prompt under the log carrier lost its no-search dedup arm (issue #6895)" >&2
             exit 1
           }
         done

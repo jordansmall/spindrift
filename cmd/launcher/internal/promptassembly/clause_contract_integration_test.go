@@ -2566,14 +2566,31 @@ var clauseContracts = []clauseContract{
 	},
 	{
 		fragment: "github/filer-dedup.md",
-		clause:   "gh issue list --state open --search",
-		reason:   "a github Filer searches open issues before filing, so a finding already tracked is not refiled.",
+		clause:   "driver-exec signal issue-search -state open",
+		reason:   "a github Filer searches open issues through the Signal socket verb before filing, so a finding already tracked is not refiled (issue #6895).",
 	},
 	{
 		fragment: "github/filer-dedup.md",
-		clause:   "run no tracker search at all",
+		clause:   "gh issue list",
 		absent:   true,
-		reason:   "the no-search arm belongs to trackers with no in-Box client.",
+		reason:   "the Filer's dedup runs through the Signal socket verb, never a forge CLI (issue #6895).",
+	},
+	{
+		fragment: "github/filer-dedup.md",
+		clause:   "run none",
+		absent:   true,
+		reason:   "the no-search arm belongs to trackers the verb does not cover.",
+	},
+	{
+		fragment: "forgejo/filer-dedup.md",
+		clause:   "driver-exec signal issue-search -state open",
+		reason:   "a forgejo Filer searches open issues through the Signal socket verb before filing (issue #6895).",
+	},
+	{
+		fragment: "forgejo/filer-dedup.md",
+		clause:   "curl",
+		absent:   true,
+		reason:   "the Filer's dedup runs through the Signal socket verb, never a REST call with the Forgejo token (issue #6895).",
 	},
 	{
 		fragment: "filer-relay-reason-readonly.md",
@@ -2599,8 +2616,8 @@ var clauseContracts = []clauseContract{
 	},
 	{
 		fragment: "filer-dedup-unwritable.md",
-		clause:   "run no tracker search at all",
-		reason:   "a tracker with no in-Box client has nothing to search, and gh would query the wrong tracker.",
+		clause:   "No tracker search reaches this Box",
+		reason:   "jira (no search verb) and any tracker under the log carrier (no socket) have nothing to search, and gh would query the wrong tracker.",
 	},
 	{
 		fragment: "filer-dedup-unwritable.md",

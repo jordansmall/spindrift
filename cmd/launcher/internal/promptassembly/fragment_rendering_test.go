@@ -317,25 +317,31 @@ func TestAssembleGitForgeBlockedSelection(t *testing.T) {
 	})
 }
 
-// The Filer's own prompt files and dedups through the tracker's client when
-// the Box may write, and through the host-relayed intent when it may not; a
-// tracker with no client runs no search at all (issue #5233).
+// The Filer's own prompt files through the tracker's client when the Box may
+// write, and through the host-relayed intent when it may not. Its dedup
+// follows whether a search reaches the Box: the socket's issue-search verb on
+// github and forgejo, local's own folder search; jira and every tracker under
+// the log carrier run no search at all (issues #5233, #6895).
 func TestAssembleFilerPromptSelection(t *testing.T) {
 	assertSelection(t, []gatedRow{
 		{"FILER_FILE_DIRECT_GH", "FILE_GITHUB"},
 		{"FILER_FILE_DIRECT_FORGEJO", "FILE_FORGEJO"},
 		{"FILER_FILE_RELAY_LOG", "FILE_RELAY_LOG"},
 		{"FILER_FILE_RELAY_SOCKET", "FILE_RELAY_SOCKET"},
-		{"ISSUE_TRACKER_GITHUB_WRITABLE", "DEDUP_GITHUB"},
-		{"ISSUE_TRACKER_FORGEJO", "DEDUP_FORGEJO"},
+		{"ISSUE_TRACKER_GITHUB_SEARCHABLE", "DEDUP_GITHUB"},
+		{"ISSUE_TRACKER_FORGEJO_SEARCHABLE", "DEDUP_FORGEJO"},
 		{"ISSUE_TRACKER_LOCAL", "DEDUP_LOCAL"},
-		{"ISSUE_TRACKER_UNWRITABLE", "DEDUP_UNWRITABLE"},
+		{"ISSUE_TRACKER_UNSEARCHABLE", "DEDUP_NONE"},
 	}, targetFiler, []selectionCase{
-		{"github read-write", nil, []string{"FILE_GITHUB", "DEDUP_GITHUB"}},
-		{"github read-only", []func(*Env){fragReadOnly}, []string{"FILE_RELAY_LOG", "DEDUP_GITHUB"}},
+		{"github read-write", []func(*Env){fragSocket}, []string{"FILE_GITHUB", "DEDUP_GITHUB"}},
+		{"github read-write log", nil, []string{"FILE_GITHUB", "DEDUP_NONE"}},
+		{"github read-only", []func(*Env){fragReadOnly}, []string{"FILE_RELAY_LOG", "DEDUP_NONE"}},
 		{"github read-only socket", []func(*Env){fragReadOnly, fragSocket}, []string{"FILE_RELAY_SOCKET", "DEDUP_GITHUB"}},
-		{"forgejo read-write", []func(*Env){fragForgejoTracker}, []string{"FILE_FORGEJO", "DEDUP_FORGEJO"}},
-		{"jira", []func(*Env){fragJiraTracker}, []string{"FILE_RELAY_LOG", "DEDUP_UNWRITABLE"}},
+		{"forgejo read-write", []func(*Env){fragForgejoTracker, fragSocket}, []string{"FILE_FORGEJO", "DEDUP_FORGEJO"}},
+		{"forgejo read-write log", []func(*Env){fragForgejoTracker}, []string{"FILE_FORGEJO", "DEDUP_NONE"}},
+		{"jira", []func(*Env){fragJiraTracker}, []string{"FILE_RELAY_LOG", "DEDUP_NONE"}},
+		{"jira socket", []func(*Env){fragJiraTracker, fragSocket}, []string{"FILE_RELAY_SOCKET", "DEDUP_NONE"}},
+		{"local", []func(*Env){fragLocalTracker}, []string{"FILE_GITHUB", "DEDUP_LOCAL"}},
 	})
 }
 
