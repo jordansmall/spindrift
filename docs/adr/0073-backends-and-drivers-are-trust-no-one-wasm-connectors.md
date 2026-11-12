@@ -318,3 +318,17 @@ rows. Binding a module to its Route table and attaching the credential
 host-side happen once a Connector backend is selected as the tracker or forge,
 which is later work (issues #6807 and #6810). A backend without a row is still
 built from the generated registry.
+
+## Amendment (issue #6806): the diff is against a baseline in the Consumer flake
+
+Decision 3's diff is taken against `spindrift-connector-routes.json` at the
+Consumer flake's root, a Connector-name-keyed list of accepted routes. The file
+is read from the flake's own source, not an option, so a Connector's module
+cannot accept its own routes. A missing file or key accepts nothing, so a
+Connector arriving through a flake-lock bump shows every route as added. A live
+route is covered when an accepted route has the same method and host and its
+path equals the accepted path or lies beneath it; a narrowing is not flagged.
+`spindrift doctor` prints the table and the added routes as Advisory rows, a
+report that never fails configuration validation; accepting a widening is a
+reviewed commit to the file. The reference's Reviewing a widened Route table
+has the procedure.
