@@ -318,8 +318,8 @@ let
       pkgFor = name: "internal/forge/${name}";
       sharedFor = backendGoTestSharedFor;
       # A backend with a Connector under connectors/<name> also runs its tracker
-      # read conformance against that Connector (the wasm, and the Route table
-      # the test points at its scripted backend).
+      # and PRForge read conformance against that Connector (the wasm, and the
+      # Route table the test points at its scripted backend).
       setupFor =
         name:
         let
@@ -331,8 +331,8 @@ let
           cp ${../.. + "/${f}"} src/${f}
         '') ((rowFor name).goTestRepoFiles or [ ])
         + pkgs.lib.optionalString (builtins.pathExists dir) ''
-          export SPINDRIFT_TRACKER_CONNECTOR_WASM=${connector.package pkgs}/${name}.wasm
-          export SPINDRIFT_TRACKER_CONNECTOR_ROUTES=${pkgs.lib.escapeShellArg (builtins.toJSON connector.routes)}
+          export SPINDRIFT_BACKEND_CONNECTOR_WASM=${connector.package pkgs}/${name}.wasm
+          export SPINDRIFT_BACKEND_CONNECTOR_ROUTES=${pkgs.lib.escapeShellArg (builtins.toJSON connector.routes)}
         '';
       nativeBuildInputs = goTestInputs;
     };
