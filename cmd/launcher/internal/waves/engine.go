@@ -239,7 +239,7 @@ outer:
 		}
 		var unready []string
 		if !cfg.IgnoreBlockers {
-			unready = unreadyBlockers(it, cf, caps, iss.Number, edges, cfg.SeedScopeOf)
+			unready = unreadyBlockers(it, caps, cfg.BranchPrefix, iss.Number, edges, cfg.SeedScopeOf)
 		}
 		switch {
 		// agent-failed is recoverable (agent-recover retries it), so a blocker
@@ -277,7 +277,7 @@ outer:
 					}
 					fmt.Printf("==> #%s blocker check failed; wrote .spindrift/logs/%s for the pipeline to release the claim\n", num, blockedMarker)
 				default:
-					if blockers := unreadyBlockers(it, cf, caps, num, edges, cfg.SeedScopeOf); len(blockers) > 0 {
+					if blockers := unreadyBlockers(it, caps, cfg.BranchPrefix, num, edges, cfg.SeedScopeOf); len(blockers) > 0 {
 						if err := writeBlockedMarker(pwd, blockers, sources[num]); err != nil {
 							return err
 						}

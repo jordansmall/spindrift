@@ -1429,6 +1429,7 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 	cf02 := lw.CodeForgeForIssue(dependentNum)
 	wcfg := waves.Config{
 		FailedLabel:   testLabels.Failed,
+		BranchPrefix:  "agent/issue-",
 		SettledLabels: testLabels.SettledLabels(),
 		SeedScopeOf:   func(num string) forge.SeedScope { return localloop.SeedScopeOf(it, num) },
 	}
@@ -1439,7 +1440,7 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 	// instance.
 	caps02 := forge.ResolveCapabilities(cf02, it, backend.Descriptor{}, backend.Descriptor{})
 	output := captureStdout(t, func() {
-		ready, failed, unready = rdy.Status(wcfg, it, cf02, caps02, dependentNum)
+		ready, failed, unready = rdy.Status(wcfg, it, caps02, dependentNum)
 	})
 	if !ready {
 		t.Errorf("waves.Readiness.Status(%s) ready = false, want true (blocker's landing already reaches this seam's own %s)", dependentNum, integ)
@@ -1641,6 +1642,7 @@ func TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly(t *testing.T) {
 	cf12 := lw.CodeForgeForIssue(dependentNum)
 	wcfg := waves.Config{
 		FailedLabel:   testLabels.Failed,
+		BranchPrefix:  "agent/issue-",
 		SettledLabels: testLabels.SettledLabels(),
 		SeedScopeOf:   func(num string) forge.SeedScope { return localloop.SeedScopeOf(it, num) },
 	}
@@ -1652,7 +1654,7 @@ func TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly(t *testing.T) {
 	// instance.
 	caps12 := forge.ResolveCapabilities(cf12, it, backend.Descriptor{}, backend.Descriptor{})
 	output := captureStdout(t, func() {
-		ready, failed, unready = rdy.Status(wcfg, it, cf12, caps12, dependentNum)
+		ready, failed, unready = rdy.Status(wcfg, it, caps12, dependentNum)
 	})
 
 	if ready {

@@ -432,7 +432,7 @@ func TestEvictUnmetBlockers_EvictsExternalUnmet(t *testing.T) {
 	issues := []issue{{number: "15", title: "needs 99"}}
 	edges := map[string][]string{"15": {"99"}}
 
-	kept, notices := evictUnmetBlockers(fc, fc, capsFor(fc, fc), waves.Readiness{Edges: edges}, issues)
+	kept, notices := evictUnmetBlockers(fc, capsFor(fc, fc), "agent/issue-", waves.Readiness{Edges: edges}, issues)
 
 	if len(kept) != 0 {
 		t.Errorf("kept = %v, want empty (issue should be evicted)", kept)
@@ -457,7 +457,7 @@ func TestEvictUnmetBlockers_NoticeAnnotatesSource(t *testing.T) {
 	edges := map[string][]string{"15": {"99"}}
 	sources := waves.Sources{"15": {"99": forge.DepSourceNative}}
 
-	_, notices := evictUnmetBlockers(fc, fc, capsFor(fc, fc), waves.Readiness{Edges: edges, Sources: sources}, issues)
+	_, notices := evictUnmetBlockers(fc, capsFor(fc, fc), "agent/issue-", waves.Readiness{Edges: edges, Sources: sources}, issues)
 
 	if len(notices) != 1 {
 		t.Fatalf("notices = %v, want 1 notice", notices)
@@ -478,7 +478,7 @@ func TestEvictUnmetBlockers_KeepsInListBlocker(t *testing.T) {
 	}
 	edges := map[string][]string{"15": {"10"}}
 
-	kept, notices := evictUnmetBlockers(fc, fc, capsFor(fc, fc), waves.Readiness{Edges: edges}, issues)
+	kept, notices := evictUnmetBlockers(fc, capsFor(fc, fc), "agent/issue-", waves.Readiness{Edges: edges}, issues)
 
 	if len(kept) != 2 {
 		t.Errorf("kept = %v, want 2 issues (both should survive)", kept)
@@ -497,7 +497,7 @@ func TestEvictUnmetBlockers_KeepsMergedBlocker(t *testing.T) {
 	issues := []issue{{number: "15", title: "needs 99"}}
 	edges := map[string][]string{"15": {"99"}}
 
-	kept, notices := evictUnmetBlockers(fc, fc, capsFor(fc, fc), waves.Readiness{Edges: edges}, issues)
+	kept, notices := evictUnmetBlockers(fc, capsFor(fc, fc), "agent/issue-", waves.Readiness{Edges: edges}, issues)
 
 	if len(kept) != 1 {
 		t.Errorf("kept = %v, want [#15] (closed blocker satisfies edge)", kept)
@@ -524,7 +524,7 @@ func TestEvictUnmetBlockers_LocalForge_SameParentBlockerLandingReleases(t *testi
 	issues := []issue{{number: "15", title: "needs 99"}}
 	edges := map[string][]string{"15": {"99"}}
 
-	kept, notices := evictUnmetBlockers(fc, cf, capsFor(fc, cf), waves.Readiness{Edges: edges}, issues)
+	kept, notices := evictUnmetBlockers(fc, capsFor(fc, cf), "agent/issue-", waves.Readiness{Edges: edges}, issues)
 
 	if len(kept) != 1 {
 		t.Errorf("kept = %v, want [#15] (blocker's landing reached the dependent's own seed branch)", kept)
@@ -549,7 +549,7 @@ func TestEvictUnmetBlockers_LocalForge_CrossParentBlockerLandingHolds(t *testing
 	issues := []issue{{number: "15", title: "needs 99"}}
 	edges := map[string][]string{"15": {"99"}}
 
-	kept, notices := evictUnmetBlockers(fc, cf, capsFor(fc, cf), waves.Readiness{Edges: edges}, issues)
+	kept, notices := evictUnmetBlockers(fc, capsFor(fc, cf), "agent/issue-", waves.Readiness{Edges: edges}, issues)
 
 	if len(kept) != 0 {
 		t.Errorf("kept = %v, want empty (blocker's landing never reached #15's own seed branch)", kept)
@@ -578,7 +578,7 @@ func TestEvictUnmetBlockers_CascadingEviction(t *testing.T) {
 		"10": {"99"},
 	}
 
-	kept, notices := evictUnmetBlockers(fc, fc, capsFor(fc, fc), waves.Readiness{Edges: edges}, issues)
+	kept, notices := evictUnmetBlockers(fc, capsFor(fc, fc), "agent/issue-", waves.Readiness{Edges: edges}, issues)
 
 	if len(kept) != 0 {
 		t.Errorf("kept = %v, want empty (both should cascade-evict)", kept)

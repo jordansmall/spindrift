@@ -47,7 +47,7 @@ func TestRunContinuous_DrainsScriptedQueue_LaunchesOneDispatchEndToEnd(t *testin
 	qs := queueSettler{Settler: inner, q: q}
 
 	discover := func() (waves.Batch, error) {
-		return q.Discover(f, f, "", KindWork)
+		return q.Discover(f, f, "", "agent/issue-", KindWork)
 	}
 	fresh := func() (bool, bool, string) { return false, true, "" }
 
@@ -200,7 +200,7 @@ func TestQueue_Discover_HeldPickLaunchesOnceBlockerClears(t *testing.T) {
 	qs := queueSettler{Settler: inner, q: q}
 
 	discover := func() (waves.Batch, error) {
-		return q.Discover(f, f, "agent-failed", KindWork)
+		return q.Discover(f, f, "agent-failed", "agent/issue-", KindWork)
 	}
 	fresh := func() (bool, bool, string) { return false, true, "" }
 
@@ -267,7 +267,7 @@ func setupForgeQueueFactory(t *testing.T) (f *forge.Fake, dir string, factory *d
 	qs = queueSettler{Settler: inner, q: q}
 
 	discover = func() (waves.Batch, error) {
-		return q.Discover(f, f, "", KindWork)
+		return q.Discover(f, f, "", "agent/issue-", KindWork)
 	}
 	fresh = func() (bool, bool, string) { return false, true, "" }
 
@@ -315,7 +315,7 @@ func TestQueue_Discover_AlreadyInProgressPick_NeverLaunches(t *testing.T) {
 	qs := queueSettler{Settler: inner, q: q}
 
 	discover := func() (waves.Batch, error) {
-		return q.Discover(f, f, "", KindWork)
+		return q.Discover(f, f, "", "agent/issue-", KindWork)
 	}
 	fresh := func() (bool, bool, string) { return false, true, "" }
 
@@ -378,7 +378,7 @@ func TestQueue_Discover_AlreadyCompletePick_NeverLaunches(t *testing.T) {
 	qs := queueSettler{Settler: inner, q: q}
 
 	discover := func() (waves.Batch, error) {
-		return q.Discover(f, f, "", KindWork)
+		return q.Discover(f, f, "", "agent/issue-", KindWork)
 	}
 	fresh := func() (bool, bool, string) { return false, true, "" }
 

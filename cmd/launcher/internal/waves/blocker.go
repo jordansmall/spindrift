@@ -83,8 +83,8 @@ func NewReadiness(it forge.IssueTracker, issues []Issue) (Readiness, error) {
 // cascade the dependent to Failed (#1984). A satisfied blocker never holds,
 // whatever its labels (#4911), so failed lists only unready blockers wearing
 // cfg.FailedLabel; it drives Reason, unready drives BlockedBy (#755).
-func (r Readiness) Status(cfg Config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, num string) (ready bool, failed, unready []string) {
-	return blockerStatus(cfg, it, cf, caps, num, r.Edges)
+func (r Readiness) Status(cfg Config, it forge.IssueTracker, caps forge.Capabilities, num string) (ready bool, failed, unready []string) {
+	return blockerStatus(cfg, it, caps, num, r.Edges)
 }
 
 // Ready reports whether a single blocker ref is satisfied. The ref need not be
@@ -92,8 +92,8 @@ func (r Readiness) Status(cfg Config, it forge.IssueTracker, cf forge.CodeForge,
 // the batch r was resolved from. A nil caps.PRForge falls straight to the
 // issue-closed check; a zero scope (no parent) skips the containment check, so
 // an IntegrationRef-landed blocker stays unready until it closes (#2130).
-func (r Readiness) Ready(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, dep string, scope forge.SeedScope) bool {
-	ready, _ := blockerReady(it, cf, caps, dep, scope)
+func (r Readiness) Ready(it forge.IssueTracker, caps forge.Capabilities, branchPrefix, dep string, scope forge.SeedScope) bool {
+	ready, _ := blockerReady(it, caps, branchPrefix, dep, scope)
 	return ready
 }
 
@@ -178,12 +178,12 @@ func cycleMember(edges map[string][]string, indegree map[string]int, inBatch map
 // is nil when a merged or open PR, or a PRState error, settled readiness without
 // calling it.Issue (a closed-unmerged PR defers to the issue's state, #4893), so
 // blockerStatus can tell "no fetch happened" from "fetched and still open".
-// Both optional handles come from caps, not a type assertion on cf (#2946); a
-// zero scope (no parent) keeps an IntegrationRef-landed blocker unready (#2130).
-func blockerReady(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, dep string, scope forge.SeedScope) (ready bool, fi *forge.Issue) {
+// Both optional handles come from caps (#2946); a zero scope (no parent) keeps
+// an IntegrationRef-landed blocker unready (#2130).
+func blockerReady(it forge.IssueTracker, caps forge.Capabilities, branchPrefix, dep string, scope forge.SeedScope) (ready bool, fi *forge.Issue) {
 	closedReason, mergedReason := "no discoverable PR", "no discoverable agent branch"
 	if pr := caps.PRForge; pr != nil {
-		branch := cf.AgentBranch(dep)
+		branch := forge.AgentBranchName(branchPrefix, dep)
 		prURL, found, err := pr.PRForBranch(branch)
 		if err == nil && found {
 			state, stateErr := pr.PRState(prURL)
@@ -240,14 +240,14 @@ func containsLabel(labels []string, target string) bool {
 // unreadyBlockers returns num's declared blockers that are not yet satisfied,
 // in edge order. A nil scopeOf yields a zero scope, which skips the seed-branch
 // containment check, so an IntegrationRef-landed blocker stays unready (#2130).
-func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, num string, edges map[string][]string, scopeOf func(num string) forge.SeedScope) []string {
+func unreadyBlockers(it forge.IssueTracker, caps forge.Capabilities, branchPrefix, num string, edges map[string][]string, scopeOf func(num string) forge.SeedScope) []string {
 	var scope forge.SeedScope
 	if scopeOf != nil {
 		scope = scopeOf(num)
 	}
 	var out []string
 	for _, dep := range edges[num] {
-		if ready, _ := blockerReady(it, cf, caps, dep, scope); !ready {
+		if ready, _ := blockerReady(it, caps, branchPrefix, dep, scope); !ready {
 			out = append(out, dep)
 		}
 	}
@@ -255,13 +255,13 @@ func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capab
 }
 
 // blockerStatus is Readiness.Status's logic against an arbitrary edges map.
-func blockerStatus(cfg Config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, num string, edges map[string][]string) (ready bool, failed, unready []string) {
+func blockerStatus(cfg Config, it forge.IssueTracker, caps forge.Capabilities, num string, edges map[string][]string) (ready bool, failed, unready []string) {
 	var scope forge.SeedScope
 	if cfg.SeedScopeOf != nil {
 		scope = cfg.SeedScopeOf(num)
 	}
 	for _, dep := range edges[num] {
-		depReady, fi := blockerReady(it, cf, caps, dep, scope)
+		depReady, fi := blockerReady(it, caps, cfg.BranchPrefix, dep, scope)
 		if depReady {
 			continue
 		}

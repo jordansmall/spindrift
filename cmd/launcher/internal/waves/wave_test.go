@@ -474,7 +474,7 @@ func TestDispatchWave_MalformedOutcomeOnOneIssueDoesNotMaskAnothersVerification(
 	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
-	fc.SetPR(fc.AgentBranch("2"), forge.PR{URL: prURL})
+	fc.SetPR(forge.AgentBranchName(c.BranchPrefix, "2"), forge.PR{URL: prURL})
 	fc.SetPRState(prURL, forge.PRMerged)
 
 	fr := runner.NewFake()
