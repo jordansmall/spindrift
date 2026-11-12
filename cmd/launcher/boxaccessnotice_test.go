@@ -26,15 +26,17 @@ func TestWarnBoxAccessDefault(t *testing.T) {
 			t.Errorf("stderr = %q, want %q", got, want)
 		}
 	})
-	t.Run("explicit flag is silent", func(t *testing.T) {
-		useDeprecatedDefaultDoc(t)
-		setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-write")
-		var buf bytes.Buffer
-		warnBoxAccessDefault(minimalValidConfig(), &buf)
-		if buf.Len() != 0 {
-			t.Errorf("stderr = %q, want silence for an explicit setting", buf.String())
-		}
-	})
+	for _, access := range []string{"read-write", "read-only"} {
+		t.Run("explicit "+access+" flag is silent", func(t *testing.T) {
+			useDeprecatedDefaultDoc(t)
+			setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", access)
+			var buf bytes.Buffer
+			warnBoxAccessDefault(minimalValidConfig(), &buf)
+			if buf.Len() != 0 {
+				t.Errorf("stderr = %q, want silence for an explicit setting", buf.String())
+			}
+		})
+	}
 	t.Run("document without the entry is silent", func(t *testing.T) {
 		useDoc(t, &inputdoc.Document{})
 		var buf bytes.Buffer
@@ -51,6 +53,15 @@ func TestWarnBoxAccessDefault(t *testing.T) {
 		warnBoxAccessDefault(c, &buf)
 		if buf.Len() != 0 {
 			t.Errorf("stderr = %q, want silence for a forced read-only Box", buf.String())
+		}
+	})
+	t.Run("a daemon-spawned child is silent", func(t *testing.T) {
+		useDeprecatedDefaultDoc(t)
+		t.Setenv(inputdoc.DefaultNoticeDecidedEnv, "1")
+		var buf bytes.Buffer
+		warnBoxAccessDefault(minimalValidConfig(), &buf)
+		if buf.Len() != 0 {
+			t.Errorf("stderr = %q, want silence: the daemon already decided", buf.String())
 		}
 	})
 }

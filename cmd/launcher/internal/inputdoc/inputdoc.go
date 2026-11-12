@@ -195,6 +195,16 @@ const DriverWarnedEnv = "SPINDRIFT_DRIVER_WARNED"
 // exemption for a non-knob read.
 func DriverWarned() string { return os.Getenv(DriverWarnedEnv) }
 
+// DefaultNoticeDecidedEnv names the marker env var a daemon sets on its children
+// and doctor preflight: it already decided the deprecated-default notice for
+// its kinds, printing it or deliberately withholding it (a butler-only daemon),
+// so none of them repeats it (issue #6891).
+const DefaultNoticeDecidedEnv = "SPINDRIFT_DEFAULT_NOTICE_DECIDED"
+
+// DefaultNoticeDecided reads the DefaultNoticeDecidedEnv marker here for the same
+// reason as DriverWarned.
+func DefaultNoticeDecided() bool { return os.Getenv(DefaultNoticeDecidedEnv) != "" }
+
 // DriverMarker is the DriverWarnedEnv value for an (ambient, baked) pair. It
 // names both so a child baking a different Driver than the daemon still warns.
 func DriverMarker(ambient, baked string) string { return ambient + "/" + baked }

@@ -91,6 +91,7 @@ func bootstrapWith(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descri
 	if err := validate(seedConfig); err != nil {
 		return nil, fmt.Errorf("%w: %w", errConfigInvalid, err)
 	}
+	warnBoxAccessDefault(seedConfig, os.Stderr)
 
 	// One-time relocation (issue #2138): fold a legacy top-level logs/ into
 	// .spindrift/logs before anything reads or creates a log path this run.

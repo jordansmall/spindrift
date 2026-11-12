@@ -3749,6 +3749,41 @@ func TestMainRun_DriverMismatch_WarnsOnceAndMarksChildren(t *testing.T) {
 	}
 }
 
+// The doctor preflight and every dispatch child carry the decided marker so
+// none repeats the deprecated-default notice the daemon already decided
+// (issue #6891).
+func TestMainRun_MarksChildrenDefaultNoticeDecided(t *testing.T) {
+	path := capturedEnvFixtureArtifactsT(t, map[string]string{"DAEMON_BREAKER_THRESHOLD": "1"}, claudeArtifacts())
+
+	origDoctor := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = origDoctor })
+	var doctorCmd *exec.Cmd
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		doctorCmd = exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
+		return doctorCmd
+	}
+	origExec := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = origExec })
+	var childCmd *exec.Cmd
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		childCmd = exec.Command("/bin/sh", "-c", "exit 1")
+		return childCmd
+	}
+
+	var stdout, stderr bytes.Buffer
+	mainRun([]string{"--input", path, "dispatch"}, &stdout, &stderr)
+
+	for label, cmd := range map[string]*exec.Cmd{"doctor": doctorCmd, "dispatch child": childCmd} {
+		if cmd == nil {
+			t.Errorf("%s command was never built", label)
+			continue
+		}
+		if !slices.Contains(cmd.Env, inputdoc.DefaultNoticeDecidedEnv+"=1") {
+			t.Errorf("%s env lacks %s=1", label, inputdoc.DefaultNoticeDecidedEnv)
+		}
+	}
+}
+
 func TestMainRun_DriverMatch_NoWarningNoMarker(t *testing.T) {
 	path := capturedEnvFixtureArtifactsT(t, nil, claudeArtifacts())
 	t.Setenv("DRIVER", "claude")
@@ -4840,4 +4875,36 @@ func TestMainRun_InvalidBackendRowsFailStartup(t *testing.T) {
 	if !strings.Contains(stderr.String(), "backend rows") {
 		t.Errorf("stderr = %q, want the backend rows error", stderr.String())
 	}
+}
+
+func TestBoxAccessNotice(t *testing.T) {
+	const msg = "spindrift: BOX_FORGE_AND_ISSUE_ACCESS defaults to read-write (test notice)"
+	defaulted := &inputdoc.Document{DeprecatedDefaults: map[string]string{"BOX_FORGE_AND_ISSUE_ACCESS": msg}}
+	work, butler := daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Butler)
+	cases := []struct {
+		name  string
+		doc   *inputdoc.Document
+		kinds []daemon.Kind
+		want  string
+	}{
+		{"defaulted with a work kind", defaulted, []daemon.Kind{work}, msg},
+		{"defaulted with work and butler", defaulted, []daemon.Kind{butler, work}, msg},
+		{"butler-only daemon", defaulted, []daemon.Kind{butler}, ""},
+		{"no entry", &inputdoc.Document{}, []daemon.Kind{work}, ""},
+		{"nil document", nil, []daemon.Kind{work}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := boxAccessNotice(tc.doc, tc.kinds); got != tc.want {
+				t.Errorf("boxAccessNotice() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	// An in-place restart re-execs with the marker its predecessor set.
+	t.Run("decided by a prior run", func(t *testing.T) {
+		t.Setenv(inputdoc.DefaultNoticeDecidedEnv, "1")
+		if got := boxAccessNotice(defaulted, []daemon.Kind{work}); got != "" {
+			t.Errorf("boxAccessNotice() = %q, want no repeat notice", got)
+		}
+	})
 }

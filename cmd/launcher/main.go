@@ -159,6 +159,26 @@ func (c config) effectiveBoxForgeAndIssueAccess() string {
 	return c.BoxForgeAndIssueAccess
 }
 
+// boxAccessDefaultNotice is the document's deprecation notice for a
+// BOX_FORGE_AND_ISSUE_ACCESS the Consumer left unset (issue #6757). A
+// ReadOnlyBox kind is skipped: its Box is forced read-only whatever the
+// default is. Under the daemon the decision was already made for every kind
+// it runs (issue #6891), so a child or preflight stays quiet.
+func boxAccessDefaultNotice(c config) (string, bool) {
+	if c.kind().ReadOnlyBox || inputdoc.DefaultNoticeDecided() {
+		return "", false
+	}
+	return launcherInput.DeprecatedDefault("BOX_FORGE_AND_ISSUE_ACCESS")
+}
+
+// warnBoxAccessDefault prints the notice to stderr, not the run's stdout: the
+// notice is advisory and stdout is the run's product.
+func warnBoxAccessDefault(c config, stderr io.Writer) {
+	if msg, ok := boxAccessDefaultNotice(c); ok {
+		fmt.Fprintln(stderr, msg)
+	}
+}
+
 // artifact resolves c.boxArtifact to the freshness adapter that owns how the
 // Box artifact is identified, named, and diagnosed. An unset BOX_ARTIFACT takes
 // the runner family's artifact, so a RUNNER_KIND=bwrap run without the key is

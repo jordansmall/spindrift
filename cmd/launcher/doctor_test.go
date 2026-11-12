@@ -904,3 +904,68 @@ func TestKindForDoctorFlag(t *testing.T) {
 	}()
 	kindForDoctorFlag("--no-such-flag")
 }
+
+func runDoctorWithAccess(t *testing.T, access string) (string, error) {
+	t.Helper()
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	c := minimalValidConfig()
+	c.BoxForgeAndIssueAccess = access
+	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
+		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
+	var buf bytes.Buffer
+	_, report := doctorCheckSets(c)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, false), &buf, strings.NewReader(""), false, report)
+	return buf.String(), err
+}
+
+func runDoctorReadWrite(t *testing.T) string {
+	t.Helper()
+	out, err := runDoctorWithAccess(t, "read-write")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return out
+}
+
+func TestRunDoctor_DefaultedBoxAccess_PrintsDeprecationNotice(t *testing.T) {
+	useDeprecatedDefaultDoc(t)
+	want := testBoxAccessNotice + "\n"
+	if out := runDoctorReadWrite(t); !strings.Contains(out, want) {
+		t.Errorf("runDoctor() output = %q, want it to contain %q", out, want)
+	}
+}
+
+func TestRunDoctor_ExplicitBoxAccess_NoDeprecationNotice(t *testing.T) {
+	useDeprecatedDefaultDoc(t)
+	setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-write")
+	if out := runDoctorReadWrite(t); strings.Contains(out, testBoxAccessNotice) {
+		t.Errorf("runDoctor() output = %q, want no notice for an explicit setting", out)
+	}
+}
+
+func TestRunDoctor_ExplicitReadOnlyBoxAccess_NoDeprecationNotice(t *testing.T) {
+	useDeprecatedDefaultDoc(t)
+	setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
+	t.Setenv("BOX_GH_TOKEN", "")
+	// The fixture has no distinct BOX_GH_TOKEN, so the read-only token gate
+	// refuses; the notice must still be absent from what was printed before it.
+	out, err := runDoctorWithAccess(t, "read-only")
+	if err == nil || !strings.Contains(err.Error(), "read-only token gate misconfigured") {
+		t.Fatalf("runDoctor() error = %v, want the read-only token gate refusal", err)
+	}
+	if strings.Contains(out, testBoxAccessNotice) {
+		t.Errorf("runDoctor() output = %q, want no notice for an explicit read-only setting", out)
+	}
+}
+
+// The daemon's startup preflight (issue #6891): a butler-only daemon withholds
+// the notice, and a daemon with a work kind has already printed it.
+func TestRunDoctor_UnderDaemon_NoDeprecationNotice(t *testing.T) {
+	useDeprecatedDefaultDoc(t)
+	t.Setenv(inputdoc.DefaultNoticeDecidedEnv, "1")
+	if out := runDoctorReadWrite(t); strings.Contains(out, testBoxAccessNotice) {
+		t.Errorf("runDoctor() output = %q, want no notice under the daemon", out)
+	}
+}
