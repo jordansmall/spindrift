@@ -387,3 +387,50 @@ func TestIssueScope_FallsBackToRepoSlug(t *testing.T) {
 		})
 	}
 }
+
+// The Signal socket's issue reader takes its scope from resolved config: the
+// repo slug for github/forgejo, the project key for Jira, and none (never the
+// slug) for a tracker without one. The scope is not exposed, so each case
+// probes it: an own-scope ref reads, a foreign one is refused.
+func TestIssueReader_ScopeFromConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name, tracker string
+		knobs         map[string]string
+		own, foreign  string
+		wantReader    bool
+		wantWarn      bool
+	}{
+		{"github", "github", nil, "owner/repo#5", "other/repo#5", true, false},
+		{"forgejo", "forgejo", nil, "owner/repo#5", "other/repo#5", true, false},
+		{"jira with project key", "jira", map[string]string{"JIRA_PROJECT_KEY": "PROJ"}, "PROJ-5", "OTHER-5", true, false},
+		{"jira without project key", "jira", nil, "", "", false, true},
+		{"local", "local", nil, "", "", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := baseConfig()
+			c.IssueTracker = tc.tracker
+			c.RepoSlug = "owner/repo"
+			c.RowKnobs = tc.knobs
+			fc := forge.NewFake()
+			fc.SetIssue(forge.Issue{Number: "5"})
+			fc.SetIssue(forge.Issue{Number: "PROJ-5"})
+			var warn bytes.Buffer
+			r := issueReader(c, fc, &warn)
+			if (r != nil) != tc.wantReader {
+				t.Fatalf("issueReader non-nil = %v, want %v", r != nil, tc.wantReader)
+			}
+			if got := warn.Len() > 0; got != tc.wantWarn {
+				t.Errorf("warn = %q, want a warning: %v", warn.String(), tc.wantWarn)
+			}
+			if r == nil {
+				return
+			}
+			if _, rej := r.ReadIssue(tc.own); rej != nil {
+				t.Errorf("own-scope ref %q refused: %+v", tc.own, rej)
+			}
+			if _, rej := r.ReadIssue(tc.foreign); rej == nil || rej.Status != "foreign_ref" {
+				t.Errorf("foreign ref %q: got %+v, want foreign_ref", tc.foreign, rej)
+			}
+		})
+	}
+}

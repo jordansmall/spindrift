@@ -26,6 +26,13 @@ var Strategy = backendkit.Strategy{
 		}
 		return fmt.Sprintf("Jira project %s (%s)", k.JiraProjectKey, k.JiraBaseURL)
 	},
+	IssueReadScope: func(_ backendkit.Shared, l backendkit.Lookup) string {
+		k, err := ReadKnobs(l)
+		if err != nil {
+			return ""
+		}
+		return k.JiraProjectKey
+	},
 	NewIssueTracker: func(s backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, error) {
 		k, err := ReadKnobs(l)
 		if err != nil {

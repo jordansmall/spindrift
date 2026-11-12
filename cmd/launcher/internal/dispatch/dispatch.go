@@ -226,6 +226,11 @@ type Config struct {
 	// buildBoxEnv's doc).
 	IssueTextFor func(number string) (string, error)
 
+	// IssueReader answers the Signal socket's issue read verb from this
+	// Dispatch's tracker (issue #6894). Nil, as for a tracker with no
+	// resolvable scope, makes the route answer unsupported.
+	IssueReader signalsocket.IssueReader
+
 	// HeartbeatOut is the human-facing sink for every Box's heartbeat writer
 	// and each dispatch-start announce line (issue #1829). Nil defaults to
 	// os.Stdout in box.go. The console entry point sets io.Discard: Bubble Tea

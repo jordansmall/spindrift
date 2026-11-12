@@ -73,6 +73,11 @@ type Strategy struct {
 	// IssueScope names where the tracker's issues live, for the discovery
 	// lines. Nil means the scope is the Code Forge repo slug.
 	IssueScope func(Shared, Lookup) string
+	// IssueReadScope is the scope the Signal socket's issue read verb
+	// accepts refs under: the repo slug, or a Jira project key. Nil or ""
+	// means this Dispatch has no host issue reader; it is never guessed from
+	// the repo slug, which a tracker with its own scope would misname.
+	IssueReadScope func(Shared, Lookup) string
 	// AutoMergeRemedy is the fix to name when the repo does not allow
 	// auto-merge. Nil means the backend has no native auto-merge, so the
 	// preflight names no remedy and leaves the backend out of its
@@ -190,6 +195,14 @@ func (s Strategy) IssueScopeText(sh Shared, l Lookup) string {
 		return sh.RepoSlug
 	}
 	return s.IssueScope(sh, l)
+}
+
+// IssueReadScopeOf is IssueReadScope, or "" without the hook.
+func (s Strategy) IssueReadScopeOf(sh Shared, l Lookup) string {
+	if s.IssueReadScope == nil {
+		return ""
+	}
+	return s.IssueReadScope(sh, l)
 }
 
 // registry keeps registration order: the Bundle's order is the launcher's

@@ -19,6 +19,7 @@ var Strategy = backendkit.Strategy{
 	LandedBanner: func(s backendkit.Shared) string {
 		return "branches pushed on " + s.RepoSlug
 	},
+	IssueReadScope: func(s backendkit.Shared, _ backendkit.Lookup) string { return s.RepoSlug },
 	AutoMergeRemedy: func(s backendkit.Shared) string {
 		return fmt.Sprintf(`enable the %q merge style (MERGE_METHOD) in the repo's settings, or change MERGE_METHOD`, MergeStyle(s.MergeMethod))
 	},
