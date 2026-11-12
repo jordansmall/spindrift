@@ -108,7 +108,7 @@ func TestDispatchConfig_StampExcludesSecretsAndTracksReviewModel(t *testing.T) {
 	setKnob(t, "BASE_BRANCH", "release")
 	setKnob(t, "REVIEW_MODEL", "haiku")
 
-	cfg := dispatchConfig(config{}, nil, nil, nil, forge.Capabilities{})
+	cfg := dispatchConfig(config{}, "", nil, nil, nil, forge.Capabilities{})
 
 	if got := cfg.Stamp.Knobs["BASE_BRANCH"]; got != "release" {
 		t.Errorf("Stamp.Knobs[BASE_BRANCH] = %q, want release", got)

@@ -493,6 +493,15 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		}
 	}
 
+	var mirrorDir string
+	if d.cfg.SeedMirror != nil {
+		dir, err := d.cfg.SeedMirror()
+		if err != nil {
+			return fmt.Errorf("seed mirror: %w", err)
+		}
+		mirrorDir = dir
+	}
+
 	// The per-Box registry-credential proxy (ADR 0044, issue #2849) lives
 	// exactly as long as this Run call, never shared across Boxes the way
 	// the runner.Runner adapter is. An empty RegistryProxyRoutes leaves the
@@ -661,6 +670,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		Output:            d.driver.NewHeartbeatWriter(boxLog.stream(), d.number, d.humanOut(), renderOpts),
 		DriverCacheDir:    driverCacheDir,
 		OutboxDir:         outboxDir,
+		MirrorDir:         mirrorDir,
 		RegistryProxy:     registryProxyLocation,
 		Sockets:           boxSockets,
 		SignalSocket:      signalSocketLocation,

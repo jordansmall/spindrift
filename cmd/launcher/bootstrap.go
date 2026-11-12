@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/dispatch"
@@ -217,14 +218,19 @@ func (lc *launchContext) settler() settle.Settler {
 	return lc.merge
 }
 
-// seedAccumulationRepoIfHostSeeded seeds the bare Accumulation repo (ADR 0033)
-// from pwd's checkout before any Box runs, holding an exclusive lock on it for
-// the caller (issue #2441). A missing repo makes candidateMount silently skip
-// the /repo mount, and host-side landing then fails (issue #1726); research
-// needs the seed too unless it is self-contained (issue #2439).
-func seedAccumulationRepoIfHostSeeded(c config, pwd string) (*local.AccumulationLock, error) {
+// hostSeedsMirror reports whether c's runs mount a host-seeded mirror at
+// /repo. Research needs it too, unless it is self-contained (issue #2439).
+func hostSeedsMirror(c config) bool {
 	row, _ := backendkit.ByName(c.CodeForge)
-	if !row.HostSeededMirror || c.selfContained {
+	return row.HostSeededMirror && !c.selfContained
+}
+
+// seedAccumulationRepoIfHostSeeded makes the bare Accumulation repo (ADR 0033)
+// from pwd's checkout at launch, holding an exclusive lock on it for the
+// caller (issue #2441). Host-side landing needs the repo before any Box runs
+// (issue #1726); each Pass then re-seeds the mirror through seedMirrorHook.
+func seedAccumulationRepoIfHostSeeded(c config, pwd string) (*local.AccumulationLock, error) {
+	if !hostSeedsMirror(c) {
 		return nil, nil
 	}
 	repoDir := c.hostRepoDir()
@@ -237,6 +243,28 @@ func seedAccumulationRepoIfHostSeeded(c config, pwd string) (*local.Accumulation
 		return nil, err
 	}
 	return lock, nil
+}
+
+// seedMirrorMu serialises every in-process Pass's force-push of the one base
+// ref, across parallel Boxes and across the work and research factories.
+var seedMirrorMu sync.Mutex
+
+// seedMirrorHook is dispatch.Config.SeedMirror: it re-seeds the Accumulation
+// repo from pwd's base branch before each Pass and returns the dir to mount at
+// /repo, so a Box clones the base as it stands now rather than as of launch
+// (issue #6896). Nil when c has no host-seeded mirror. It does not take the
+// Accumulation lock: bootstrap's flock stays held for the whole run, and a
+// second open file would conflict with it.
+func seedMirrorHook(c config, pwd string) func() (string, error) {
+	if !hostSeedsMirror(c) {
+		return nil
+	}
+	repoDir := c.hostRepoDir()
+	return func() (string, error) {
+		seedMirrorMu.Lock()
+		defer seedMirrorMu.Unlock()
+		return repoDir, local.SeedAccumulationRepo(repoDir, pwd, c.BaseBranch)
+	}
 }
 
 // researchLaunchStack builds the research-kind tracker, dispatch factory, and

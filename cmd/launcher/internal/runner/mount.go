@@ -19,6 +19,10 @@ const operatorSkillsDir = "/operator-skills"
 // name this in-box path in REGISTRY_PROXY_MANIFEST, not the host-side source.
 const RegistryProxySocketTarget = "/registry-proxy.sock"
 
+// MirrorTarget is the in-box path Box.MirrorDir mounts read-only onto; the
+// Box clones from it.
+const MirrorTarget = "/repo"
+
 // SignalSocketTarget is the in-box path the Signal socket's unix socket
 // mounts onto (issue #3725); the listener expects it there, so it is not
 // configurable. Mirrors RegistryProxySocketTarget above.
@@ -52,14 +56,6 @@ type MountParams struct {
 	PromptDir             string
 	SkillsDir             string
 	DriverSessionCacheDir string
-
-	// HostMediatedRemote reports whether this run's CODE_FORGE has no writable
-	// remote to push to in-box (ADR 0033: CODE_FORGE=local). It gates the
-	// read-only /repo mount.
-	HostMediatedRemote bool
-	// AccumulationRepoDir is the host path to the bare Accumulation repo
-	// (issue #1726), mounted read-only at /repo under HostMediatedRemote.
-	AccumulationRepoDir string
 }
 
 // IsDir reports whether path names an existing directory, following
@@ -110,10 +106,8 @@ func BuildMountSpecs(p MountParams, box Box) []MountSpec {
 		specs = append(specs, spec)
 	}
 
-	if p.HostMediatedRemote {
-		if spec, ok := candidateMount(p.AccumulationRepoDir, "/repo", true); ok {
-			specs = append(specs, spec)
-		}
+	if spec, ok := candidateMount(box.MirrorDir, MirrorTarget, true); ok {
+		specs = append(specs, spec)
 	}
 	// No access or kind gate here: dispatch's needsOutbox already decided by
 	// setting box.OutboxDir, and a second copy of that rule could disagree.

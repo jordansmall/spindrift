@@ -39,7 +39,7 @@ type Descriptor struct {
 	HostMediatedRemote bool
 
 	// HostSeededMirror is true for a backend whose Box clones from a mirror the
-	// host seeds before any Box runs and mounts at /repo (ADR 0033: "local"),
+	// host seeds fresh before each Pass and mounts at /repo (ADR 0033: "local"),
 	// not from a network remote. The Box trusts the mount as a git
 	// safe.directory.
 	HostSeededMirror bool

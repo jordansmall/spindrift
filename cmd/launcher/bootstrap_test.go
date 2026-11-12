@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
@@ -1008,5 +1009,66 @@ body
 	}
 	if s == nil {
 		t.Error("researchLaunchStack settle = nil, want a *settle.ResearchSettle")
+	}
+}
+
+// The mirror is re-seeded for every Pass (issue #6896): a commit the operator
+// lands on the base branch between two Passes must be in the mirror the second
+// Pass mounts, not just the one bootstrap seeded at launch.
+func TestSeedMirrorHook_Local_ReseedsBaseAdvanceBetweenPasses(t *testing.T) {
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+	c := baseConfig()
+	c.CodeForge = "local"
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	c.BaseBranch = "main"
+
+	hook := seedMirrorHook(c, checkout)
+	if hook == nil {
+		t.Fatal("seedMirrorHook(CODE_FORGE=local) = nil, want a per-Pass seed")
+	}
+	dir, err := hook()
+	if err != nil {
+		t.Fatalf("first seed: %v", err)
+	}
+	if dir != repoPath {
+		t.Errorf("seed dir = %q, want %q", dir, repoPath)
+	}
+	first := testutil.GitOutput(t, repoPath, "rev-parse", "refs/heads/main")
+
+	testutil.WriteFixture(t, checkout, "later.txt", "later")
+	testutil.GitRun(t, checkout, "add", "later.txt")
+	testutil.GitRun(t, checkout, "commit", "-m", "later")
+	advanced := testutil.GitOutput(t, checkout, "rev-parse", "HEAD")
+
+	if _, err := hook(); err != nil {
+		t.Fatalf("second seed: %v", err)
+	}
+	got := testutil.GitOutput(t, repoPath, "rev-parse", "refs/heads/main")
+	if got == first || got != advanced {
+		t.Errorf("mirror refs/heads/main = %s, want the advanced base %s (was %s)", got, advanced, first)
+	}
+}
+
+// No hook means no mirror dir on the Box, so no /repo mount: every backend
+// that does not host-seed a mirror (github, forgejo, git) clones from its
+// remote, and self-contained research never clones.
+func TestSeedMirrorHook_NoMirror_Nil(t *testing.T) {
+	cases := map[string]func(*config){
+		"self-contained research": func(c *config) { c.CodeForge = "local"; c.selfContained = true },
+	}
+	for _, d := range backend.Registry {
+		if !d.HostSeededMirror {
+			cases[d.Name] = func(c *config) { c.CodeForge = d.Name }
+		}
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := baseConfig()
+			mutate(&c)
+			if hook := seedMirrorHook(c, "/nonexistent/pwd"); hook != nil {
+				t.Errorf("seedMirrorHook = non-nil, want nil (no host-seeded mirror)")
+			}
+		})
 	}
 }

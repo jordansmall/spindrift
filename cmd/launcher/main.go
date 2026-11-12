@@ -638,7 +638,6 @@ func forgeLandedLine(c config) string {
 // `run` and `build` entry points; build never calls Run, so leaving
 // PromptDir/SkillsDir populated is harmless there.
 func runnerConfig(c config) runner.Config {
-	sig := resolveCapabilitySignals(c.CodeForge, c.IssueTracker)
 	return runner.Config{
 		Runtime:     c.runtime,
 		NetworkMode: c.runnerNetworkMode(),
@@ -649,8 +648,6 @@ func runnerConfig(c config) runner.Config {
 			PromptDir:             c.SpindriftPromptDir,
 			SkillsDir:             c.SpindriftSkillsDir,
 			DriverSessionCacheDir: c.driverSessionCacheDir,
-			HostMediatedRemote:    sig.hostMediatedRemote,
-			AccumulationRepoDir:   c.hostRepoDir(),
 		},
 	}
 }
@@ -780,7 +777,7 @@ func retryPolicy(c config) retry.Policy {
 // arrives pre-resolved, so this skips resolveCapabilitySignals's loaded-doc
 // path; an --input document that contradicts the registry is an accepted gap
 // (#3062, #2947).
-func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) dispatch.Config {
+func dispatchConfig(c config, pwd string, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) dispatch.Config {
 	trackerAxisRead, trackerAxisWrite, trackerAxisFiler, forgeBackend := resolveTrackerAndForgeSignals(c.CodeForge, c.IssueTracker)
 	presence := resolveAgentPresenceSignals(c.driver)
 	reviewModel, _ := launcherInput.Flag("REVIEW_MODEL")
@@ -812,6 +809,7 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 		RegistryProxyRoutes:      c.registryProxyRoutes,
 		RegistryProxyRewriteRows: ecosystem.ResponseRewriteRows(ecosystem.Registered()),
 		SignalCarrier:            c.SignalCarrier,
+		SeedMirror:               seedMirrorHook(c, pwd),
 		NetworkMode:              c.runnerNetworkMode(),
 		// forge.ResolveOpenPR (issue #565) keeps a zero-exit rate-limited retry
 		// from re-running a box whose work already landed a PR.
@@ -830,7 +828,8 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 // cold-start) rather than failing the dispatch: the cache is a resume
 // optimization, not a correctness requirement (issue #427).
 func newDispatchFactory(c config, pwd string, r runner.Runner, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) *dispatch.Factory {
-	f, err := dispatch.NewFactory(dispatchConfig(c, it, lw, cf, caps), pwd, r, newDriver(c), dispatch.RealClock())
+	cfg := dispatchConfig(c, pwd, it, lw, cf, caps)
+	f, err := dispatch.NewFactory(cfg, pwd, r, newDriver(c), dispatch.RealClock())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "==> driver cache unavailable (%v) -- fix boxes will cold-start\n", err)
 	}

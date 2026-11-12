@@ -35,7 +35,7 @@ func TestMountSpecs_RenderedByBwrap(t *testing.T) {
 
 // ADR 0033, issue #1697: the Accumulation-repo and outbox mounts must reach
 // the bwrap backend the same way the other mounts do.
-func TestLocalCodeForgeMounts_RenderedByBwrap(t *testing.T) {
+func TestMirrorAndOutboxMounts_RenderedByBwrap(t *testing.T) {
 	repoDir := t.TempDir()
 	outboxDir := t.TempDir()
 
@@ -43,13 +43,12 @@ func TestLocalCodeForgeMounts_RenderedByBwrap(t *testing.T) {
 		agentFiles:    t.TempDir(),
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		mountParams:   runner.MountParams{HostMediatedRemote: true, AccumulationRepoDir: repoDir},
 	}
-	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir, MirrorDir: repoDir}
 
 	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box, bwrap.snapshotDirFor(box)), " ")
 
-	if !strings.Contains(bwrapArgs, "--ro-bind "+repoDir+" /repo") {
+	if !strings.Contains(bwrapArgs, "--ro-bind "+repoDir+" "+runner.MirrorTarget) {
 		t.Errorf("bwrap missing read-only /repo mount in args: %s", bwrapArgs)
 	}
 	if !strings.Contains(bwrapArgs, "--bind "+outboxDir+" /outbox") {
@@ -59,7 +58,7 @@ func TestLocalCodeForgeMounts_RenderedByBwrap(t *testing.T) {
 
 // Issue #3957: the writable /outbox mount reaches the bwrap backend whenever
 // Box.OutboxDir is set, whatever MountParams says, with no /repo mount since
-// HostMediatedRemote is unset here.
+// MirrorDir is unset here.
 func TestOutboxMount_RenderedByBwrap(t *testing.T) {
 	outboxDir := t.TempDir()
 
@@ -75,28 +74,24 @@ func TestOutboxMount_RenderedByBwrap(t *testing.T) {
 	if !strings.Contains(bwrapArgs, "--bind "+outboxDir+" /outbox") {
 		t.Errorf("bwrap missing writable /outbox mount in args: %s", bwrapArgs)
 	}
-	if strings.Contains(bwrapArgs, "/repo") {
-		t.Errorf("unexpected /repo mount for HostMediatedRemote=false: bwrap=%s", bwrapArgs)
+	if strings.Contains(bwrapArgs, " "+runner.MirrorTarget) {
+		t.Errorf("unexpected /repo mount for empty MirrorDir: bwrap=%s", bwrapArgs)
 	}
 }
 
-// The Accumulation-repo dir is present on purpose, so this pins that the
-// adapter does not leak the /repo mount through its own render path when
-// HostMediatedRemote is false.
-func TestLocalCodeForgeMounts_AbsentOnNonLocalBwrap(t *testing.T) {
-	repoDir := t.TempDir()
-
+// A Box with no MirrorDir (every non-local forge's) must not get a /repo
+// mount through the adapter's own render path.
+func TestMirrorMount_AbsentWithoutMirrorDir_Bwrap(t *testing.T) {
 	bwrap := &bwrapAdapter{
 		agentFiles:    t.TempDir(),
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		mountParams:   runner.MountParams{AccumulationRepoDir: repoDir},
 	}
 	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 
 	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box, bwrap.snapshotDirFor(box)), " ")
 
-	if strings.Contains(bwrapArgs, "--ro-bind "+repoDir+" /repo") {
-		t.Errorf("bwrap must not mount /repo with HostMediatedRemote=false: %s", bwrapArgs)
+	if strings.Contains(bwrapArgs, " "+runner.MirrorTarget) {
+		t.Errorf("bwrap must not mount /repo without a MirrorDir: %s", bwrapArgs)
 	}
 }
