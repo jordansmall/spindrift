@@ -4818,3 +4818,26 @@ func TestMainRun_InvalidDriverRowsFailStartup(t *testing.T) {
 		t.Errorf("stderr = %q, want the driver rows error", stderr.String())
 	}
 }
+
+// The daemon applies the document's backend rows next to its Driver rows, so a
+// row that fails validation refuses the start.
+func TestMainRun_InvalidBackendRowsFailStartup(t *testing.T) {
+	clearKnobEnvT(t)
+	data, err := json.Marshal(inputdoc.Document{
+		Settings: maps.Clone(shippedKnobDefaults),
+		Backends: json.RawMessage(`[{"name":"local","module":"/m.wasm","credentialEnv":"T","routes":[{"method":"GET","host":"h.test","path":"/x"}]}]`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	docPath := filepath.Join(t.TempDir(), "in.json")
+	writeFileT(t, docPath, string(data))
+
+	var stdout, stderr bytes.Buffer
+	if got := mainRun([]string{"--input", docPath, "dispatch"}, &stdout, &stderr); got != 1 {
+		t.Fatalf("mainRun() = %d, want 1; stderr=%s", got, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "backend rows") {
+		t.Errorf("stderr = %q, want the backend rows error", stderr.String())
+	}
+}

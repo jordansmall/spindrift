@@ -30,6 +30,11 @@ type Document struct {
 	// Absent when the Harness declares none, then the generated Descriptors
 	// are the fallback.
 	Drivers json.RawMessage `json:"drivers,omitempty"`
+	// Backends holds the backend rows from network Connectors (ADR 0073, issue
+	// #6805): module, Route table and credential knob. Raw for the same reason;
+	// the backendrows package decodes them. Absent when none are declared, then
+	// the generated backend registry is the fallback.
+	Backends json.RawMessage `json:"backends,omitempty"`
 }
 
 // Load reads and parses the Launcher input document at path.

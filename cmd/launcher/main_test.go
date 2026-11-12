@@ -6874,3 +6874,18 @@ func TestMainRun_InputDocument_InvalidDriverRowsAreConfigInvalid(t *testing.T) {
 		t.Errorf("stderr = %q, want the driver rows error", stderr.String())
 	}
 }
+
+func TestMainRun_InputDocument_InvalidBackendRowsAreConfigInvalid(t *testing.T) {
+	docPath := filepath.Join(t.TempDir(), "input.json")
+	if err := os.WriteFile(docPath, []byte(`{"settings":{},"artifacts":{},"backends":"nope"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := mainRunT(t, []string{"--input", docPath, "research"}, &stdout, &stderr)
+	if code != int(exitcode.ConfigInvalid) {
+		t.Errorf("mainRun code = %d, want %d; stderr=%s", code, int(exitcode.ConfigInvalid), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "backend rows") {
+		t.Errorf("stderr = %q, want the backend rows error", stderr.String())
+	}
+}

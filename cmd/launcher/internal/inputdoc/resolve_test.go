@@ -508,3 +508,38 @@ func TestLoad_ParsesDriversKey(t *testing.T) {
 		t.Errorf("Drivers = %s", doc.Drivers)
 	}
 }
+
+// The backend rows ride the document raw, like the Driver rows.
+func TestResolve_ExposesDocumentBackendRows(t *testing.T) {
+	raw := json.RawMessage(`[{"name":"x"}]`)
+	for name, tc := range map[string]struct {
+		doc  *Document
+		want json.RawMessage
+	}{
+		"rows":   {&Document{Backends: raw}, raw},
+		"absent": {&Document{}, nil},
+		"no doc": {nil, nil},
+	} {
+		got, err := Resolve(nil, tc.doc, map[string]string{})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !reflect.DeepEqual(got.Backends, tc.want) {
+			t.Errorf("%s: Backends = %s, want %s", name, got.Backends, tc.want)
+		}
+	}
+}
+
+func TestLoad_ParsesBackendsKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "doc.json")
+	if err := os.WriteFile(path, []byte(`{"backends":[{"name":"x"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(doc.Backends) != `[{"name":"x"}]` {
+		t.Errorf("Backends = %s", doc.Backends)
+	}
+}
