@@ -1,12 +1,14 @@
 // Package tokenrefresh keeps GH_TOKEN current across a launcher run that
 // outlives a GitHub App installation token's ~1h lifetime (issue #1027). An
-// external minter rewrites a file in place with a fresh token, and the
-// launcher polls that file instead of the value it captured at startup.
+// external minter replaces a file with a fresh token, and the launcher reads
+// that file instead of the value it captured at startup. The minter replaces
+// the file by rename on each rotation, so a read sees a whole token.
 package tokenrefresh
 
 import (
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -27,6 +29,26 @@ func ReadIfChanged(path, prev string) (next string, changed bool) {
 		return prev, false
 	}
 	return token, true
+}
+
+// Follow returns a func yielding the current token. With path empty it always
+// returns static and reads nothing. Otherwise every call re-reads path, so the
+// next request after a rotation carries the new token; static is returned until
+// the file first holds a token, and the last good token is kept thereafter. The
+// returned func is safe for concurrent use.
+func Follow(static, path string) func() string {
+	if path == "" {
+		return func() string { return static }
+	}
+	var last atomic.Pointer[string]
+	last.Store(&static)
+	return func() string {
+		// No lock across the read, so concurrent requests do not serialise. A
+		// racing store can leave an older fallback, harmless as every call re-reads.
+		next, _ := ReadIfChanged(path, *last.Load())
+		last.Store(&next)
+		return next
+	}
 }
 
 // Watch polls path every interval and calls setenv on each change, checking once
