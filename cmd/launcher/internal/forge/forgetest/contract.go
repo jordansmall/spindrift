@@ -64,6 +64,21 @@ type StateSeeder interface {
 	SeedState(num string, state forge.DispatchState)
 }
 
+// IDMinter is implemented by harnesses whose tracker's ids are not bare
+// decimals (jira keys such as PROJ-7). The read cases spell every issue id
+// they seed or compare through it; a harness without it gets the id unchanged.
+type IDMinter interface {
+	// ID spells the case's decimal id n as the tracker's own id.
+	ID(n string) string
+}
+
+func id(h Harness, n string) string {
+	if m, ok := h.(IDMinter); ok {
+		return m.ID(n)
+	}
+	return n
+}
+
 // seedState puts issue num, already seeded via SeedIssue, into state.
 func seedState(t *testing.T, h Harness, num string, state forge.DispatchState) {
 	t.Helper()
@@ -201,8 +216,8 @@ func testDepsOf(t *testing.T, h Harness) {
 		// local has no native concept and uses its own body grammar: a
 		// slug-bullet "## Blocked by" section, not github/Fake's inline
 		// "blocked by #N" prose.
-		h.SeedIssue(forge.Issue{Number: "301", Body: "## Blocked by\n- 7\n"})
-		deps, err := forge.DepsOf(h.Tracker(), "301")
+		h.SeedIssue(forge.Issue{Number: id(h, "301"), Body: "## Blocked by\n- 7\n"})
+		deps, err := forge.DepsOf(h.Tracker(), id(h, "301"))
 		if err != nil {
 			t.Fatalf("DepsOf: %v", err)
 		}
@@ -214,13 +229,13 @@ func testDepsOf(t *testing.T, h Harness) {
 	}
 
 	t.Run("NativeWins", func(t *testing.T) {
-		h.SeedIssue(forge.Issue{Number: "302", Body: "Blocked by #7"})
-		nc.SeedNativeDeps("302", []string{"999"})
-		deps, err := forge.DepsOf(h.Tracker(), "302")
+		h.SeedIssue(forge.Issue{Number: id(h, "302"), Body: "Blocked by #7"})
+		nc.SeedNativeDeps(id(h, "302"), []string{id(h, "999")})
+		deps, err := forge.DepsOf(h.Tracker(), id(h, "302"))
 		if err != nil {
 			t.Fatalf("DepsOf: %v", err)
 		}
-		want := []forge.Dependency{{ID: "999", Source: forge.DepSourceNative}}
+		want := []forge.Dependency{{ID: id(h, "999"), Source: forge.DepSourceNative}}
 		if !equalDeps(deps, want) {
 			t.Fatalf("DepsOf = %v, want %v (native must win over body, never merge)", deps, want)
 		}
@@ -310,7 +325,7 @@ func testResearchVerdictTerminals(t *testing.T, h Harness) {
 // matches insertion order in a scripted backend.
 func testDispatchOrder(t *testing.T, h Harness) {
 	tr := h.Tracker()
-	want := []string{"501", "502", "503"}
+	want := []string{id(h, "501"), id(h, "502"), id(h, "503")}
 	for _, num := range want {
 		h.SeedIssue(forge.Issue{Number: num, Title: "order"})
 		seedState(t, h, num, forge.Dispatchable)
@@ -321,7 +336,10 @@ func testDispatchOrder(t *testing.T, h Harness) {
 		t.Fatalf("ListIssues(Dispatchable): %v", err)
 	}
 	var got []string
-	inWant := map[string]bool{"501": true, "502": true, "503": true}
+	inWant := map[string]bool{}
+	for _, n := range want {
+		inWant[n] = true
+	}
 	for _, iss := range issues {
 		if inWant[iss.Number] {
 			got = append(got, iss.Number)
@@ -346,8 +364,8 @@ func testLabelToPriority(t *testing.T, h Harness) {
 	tr := h.Tracker()
 	_, capable := h.(PriorityCapable)
 
-	h.SeedIssue(forge.Issue{Number: "601", Title: "unlabeled"})
-	requirePriority(t, tr, "601", forge.PriorityNormal)
+	h.SeedIssue(forge.Issue{Number: id(h, "601"), Title: "unlabeled"})
+	requirePriority(t, tr, id(h, "601"), forge.PriorityNormal)
 
 	cases := []struct {
 		num    string
@@ -360,12 +378,12 @@ func testLabelToPriority(t *testing.T, h Harness) {
 		{"605", []string{"agent-priority-low", "agent-priority-critical"}, forge.PriorityCritical},
 	}
 	for _, tc := range cases {
-		h.SeedIssue(forge.Issue{Number: tc.num, Title: "labeled", Labels: tc.labels})
+		h.SeedIssue(forge.Issue{Number: id(h, tc.num), Title: "labeled", Labels: tc.labels})
 		want := forge.PriorityNormal
 		if capable {
 			want = tc.want
 		}
-		requirePriority(t, tr, tc.num, want)
+		requirePriority(t, tr, id(h, tc.num), want)
 	}
 }
 
@@ -441,15 +459,15 @@ func testComments(t *testing.T, h Harness) {
 		t.Fatalf("tracker %T is a forge.CommentLister: %v; harness %T is CommentCapable: %v; the two must agree", h.Tracker(), lists, h, capable)
 	}
 
-	h.SeedIssue(forge.Issue{Number: "701", Title: "threaded"})
+	h.SeedIssue(forge.Issue{Number: id(h, "701"), Title: "threaded"})
 	want := []forge.Comment{
 		{Author: "alice", CreatedAt: "2026-01-02T03:04:05Z", Body: "first"},
 		{Author: "bob", CreatedAt: "2026-01-03T04:05:06Z", Body: "second"},
 		{Author: "carol", CreatedAt: "2026-01-04T05:06:07Z", Body: "third"},
 	}
-	ch.SeedComments("701", want)
+	ch.SeedComments(id(h, "701"), want)
 
-	got, err := lister.Comments("701")
+	got, err := lister.Comments(id(h, "701"))
 	if err != nil {
 		t.Fatalf("Comments(701): %v", err)
 	}
@@ -462,8 +480,8 @@ func testComments(t *testing.T, h Harness) {
 		}
 	}
 
-	h.SeedIssue(forge.Issue{Number: "702", Title: "silent"})
-	empty, err := lister.Comments("702")
+	h.SeedIssue(forge.Issue{Number: id(h, "702"), Title: "silent"})
+	empty, err := lister.Comments(id(h, "702"))
 	if err != nil {
 		t.Fatalf("Comments(702): %v", err)
 	}
