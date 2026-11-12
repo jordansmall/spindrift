@@ -291,6 +291,7 @@ let
       "report"
       "retry"
       "seambundle"
+      "fixturebuild"
       "seamtest"
       "testutil"
       "unixsocket"

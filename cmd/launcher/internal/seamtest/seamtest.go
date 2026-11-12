@@ -29,15 +29,13 @@ package seamtest
 import (
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
+
+	"spindrift.dev/launcher/internal/fixturebuild"
 )
 
 // EnvVar names the directory holding the nix-rendered fixture files.
@@ -60,95 +58,6 @@ var fixtureNames = func() []string {
 	return names
 }()
 
-// resolver carries the environment lookups resolve needs, so tests can
-// drive the decision logic without real nix.
-type resolver struct {
-	lookPath func(string) (string, error)
-	// build runs nix build with args and returns the resulting store path.
-	build func(args ...string) (string, error)
-	// flakeRoot locates the flake to build from.
-	flakeRoot func() (string, error)
-}
-
-// resolve builds the output args names from the flake root, or returns a
-// non-empty skipReason when nix is unavailable (not a failure). The env
-// override named envVar is the caller's concern; hint completes the skip
-// message's "set <envVar> to ...".
-func (r resolver) resolve(envVar, hint string, args func(root string) []string) (path, skipReason string, err error) {
-	if _, lerr := r.lookPath("nix"); lerr != nil {
-		return "", fmt.Sprintf("%s is unset and nix is not on PATH; set %s to %s", envVar, envVar, hint), nil
-	}
-	root, err := r.flakeRoot()
-	if err != nil {
-		return "", "", err
-	}
-	out, err := r.build(args(root)...)
-	if err != nil {
-		return "", "", fmt.Errorf("nix build: %w", err)
-	}
-	return out, "", nil
-}
-
-// resolveDir returns the fixtures directory, or a non-empty skipReason when
-// nix is unavailable.
-func (r resolver) resolveDir() (dir, skipReason string, err error) {
-	return r.resolve(EnvVar, "a directory of rendered fixtures", func(root string) []string {
-		return []string{root + "#" + flakeAttr}
-	})
-}
-
-// ResolveBuild builds a flake output with nix from the checkout above the
-// working directory, for tests whose subject is a nix-built artifact other
-// than the fixtures. args maps the flake root to nix build's arguments. It
-// returns a non-empty skipReason, never an error, when nix is absent; the
-// caller checks its own env override first (naming envVar) and should cache
-// the result, since the build is slow.
-func ResolveBuild(envVar, hint string, args func(root string) []string) (path, skipReason string, err error) {
-	return resolver{lookPath: exec.LookPath, build: nixBuild, flakeRoot: workingDirFlakeRoot}.resolve(envVar, hint, args)
-}
-
-func workingDirFlakeRoot() (string, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	return findFlakeRoot(wd)
-}
-
-// findFlakeRoot returns the nearest ancestor of start (inclusive) holding a
-// flake.nix. go test runs each package with its own directory as cwd.
-func findFlakeRoot(start string) (string, error) {
-	for dir := start; ; {
-		if _, err := os.Stat(filepath.Join(dir, "flake.nix")); err == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", fmt.Errorf("no flake.nix found above %s", start)
-		}
-		dir = parent
-	}
-}
-
-// nixBuild runs `nix build --no-link --print-out-paths` with args and returns
-// the single resulting store path.
-func nixBuild(args ...string) (string, error) {
-	cmd := exec.Command("nix", append([]string{"build", "--no-link", "--print-out-paths"}, args...)...)
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("%w\n%s", err, strings.TrimSpace(stderr.String()))
-	}
-	// A multi-output derivation prints one path per line; the fixtures
-	// derivations built here have a single output.
-	path := strings.TrimSpace(string(out))
-	if path == "" || strings.Contains(path, "\n") {
-		return "", errors.New("nix build printed no single store path: " + path)
-	}
-	return path, nil
-}
-
 type buildResult struct {
 	dir, skipReason string
 	err             error
@@ -157,8 +66,10 @@ type buildResult struct {
 // buildOnce caches the nix-build resolution for the test binary's
 // lifetime: the nix build is slow and its answer cannot change mid-run.
 var buildOnce = sync.OnceValue(func() buildResult {
-	r := resolver{lookPath: exec.LookPath, build: nixBuild, flakeRoot: workingDirFlakeRoot}
-	dir, skip, err := r.resolveDir()
+
+	dir, skip, err := fixturebuild.ResolveBuild(EnvVar, "a directory of rendered fixtures", func(root string) []string {
+		return []string{root + "#" + flakeAttr}
+	})
 	return buildResult{dir, skip, err}
 })
 

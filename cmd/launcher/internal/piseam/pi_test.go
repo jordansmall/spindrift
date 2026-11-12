@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"spindrift.dev/launcher/internal/seamtest"
+	"spindrift.dev/launcher/internal/fixturebuild"
 )
 
 const (
@@ -41,7 +41,7 @@ type piBin struct {
 
 var lockedPi = sync.OnceValue(func() piBin {
 	// --inputs-from pins nixpkgs to the flake's lock, not the registry's.
-	out, skip, err := seamtest.ResolveBuild(BinEnv, "a pi binary", func(root string) []string {
+	out, skip, err := fixturebuild.ResolveBuild(BinEnv, "a pi binary", func(root string) []string {
 		return []string{"--inputs-from", root, "nixpkgs#pi-coding-agent"}
 	})
 	if err != nil || skip != "" {
