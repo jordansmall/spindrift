@@ -27,6 +27,14 @@ in
     ) "escapeRegex must leave a string with no regex metacharacters unchanged, got: ${out}";
     pkgs.runCommand "builtins-compat-escape-regex-leaves-plain-characters-untouched" { } "touch $out";
 
+  builtins-compat-has-infix-treats-needle-literally =
+    assert assertMsg (builtinsCompat.hasInfix "a.b" "xa.by")
+      "hasInfix must match a metacharacter needle literally";
+    assert assertMsg (
+      !(builtinsCompat.hasInfix "a.b" "xaXby")
+    ) "hasInfix must not read a needle's metacharacters as regex";
+    pkgs.runCommand "builtins-compat-has-infix-treats-needle-literally" { } "touch $out";
+
   builtins-compat-one-line-collapses-whitespace-runs =
     let
       out = builtinsCompat.oneLine "a\n    b\t\tc  d\n\ne";
