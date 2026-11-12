@@ -18,11 +18,16 @@ func New(s Strategy) Driver { return Driver{s} }
 // Strategy returns the Strategy d runs.
 func (d Driver) Strategy() Strategy { return d.s }
 
-// usageByModel and usageByAgent are the one seam for tests to simulate an I/O
-// error without a real filesystem race against the usage aggregation scan.
+// usageByModel and usageByAgent are a test seam: production never fails them
+// (the Log is already decoded), so tests swap them to reach extractUsage's
+// WARNING branches.
 var (
-	usageByModel = UsageByModel
-	usageByAgent = UsageByAgent
+	usageByModel = func(l *Log, family ModelFamily, src TotalsSource) ([]usage.ModelUsage, error) {
+		return l.usageByModel(family, src), nil
+	}
+	usageByAgent = func(l *Log, src TotalsSource) ([]usage.AgentUsage, error) {
+		return l.usageByAgent(src), nil
+	}
 )
 
 func (d Driver) Name() string { return d.s.Name }
@@ -72,28 +77,20 @@ func (d Driver) ExtractUsage(logPath string) (usage.Report, error) {
 // result seeded from base (earlier logs of a resumed session). It also returns
 // the baselines after this log, to seed the next one.
 func (d Driver) ExtractUsageAfter(logPath string, base SessionBaselines) (usage.Report, SessionBaselines, error) {
-	rebased := RebaseResults(d.s.NewDecoder, base)
-	byModel := func(p string) ([]usage.ModelUsage, error) {
-		return usageByModel(p, rebased, d.s.Heartbeat.Family, d.s.Totals)
-	}
-	byAgent := func(p string) ([]usage.AgentUsage, error) {
-		return usageByAgent(p, rebased, d.s.Totals)
-	}
-	report, err := ExtractUsage(logPath, rebased, d.s.Totals, byModel, byAgent)
+	p, err := d.Decode(logPath)
 	if err != nil {
 		return usage.Report{}, nil, err
 	}
-	// A second scan: each report reader builds its own rebasing decoder from
-	// base, so none of them ends holding the log's final baselines.
-	after, err := d.SessionBaselinesAfter(logPath, base)
-	if err != nil {
-		return usage.Report{}, nil, err
-	}
+	report, after := p.ExtractUsageAfter(base)
 	return report, after, nil
 }
 
 func (d Driver) RenderTranscript(logPath string, opts RenderOptions) (string, error) {
-	return RenderTranscript(logPath, d.s.NewDecoder, opts.TopLevelRole)
+	p, err := d.Decode(logPath)
+	if err != nil {
+		return "", err
+	}
+	return p.RenderTranscript(opts), nil
 }
 
 func (d Driver) ResolveExit(logPath string, exitCode int) (int, error) {
@@ -112,11 +109,19 @@ func (d Driver) ResultEvent(text string) ([]byte, error) {
 }
 
 func (d Driver) ReadPasses(logPath, trackWrite string, base SessionBaselines, visit func(PassLine)) ([]PassTally, error) {
-	return ReadPasses(logPath, PassOptions{NewDecoder: RebaseResults(d.s.NewDecoder, base), Totals: d.s.Totals, WriteTool: d.s.WriteTool}, trackWrite, visit)
+	p, err := d.Decode(logPath)
+	if err != nil {
+		return nil, err
+	}
+	return p.ReadPasses(trackWrite, base, visit), nil
 }
 
 func (d Driver) SessionBaselinesAfter(logPath string, base SessionBaselines) (SessionBaselines, error) {
-	return SessionBaselinesAfter(logPath, d.s.NewDecoder, base)
+	p, err := d.Decode(logPath)
+	if err != nil {
+		return nil, err
+	}
+	return p.SessionBaselinesAfter(base), nil
 }
 
 func (d Driver) SessionFlags(mode, repoSlug, issue, home string) string {

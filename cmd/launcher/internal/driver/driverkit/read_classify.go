@@ -35,38 +35,67 @@ type ClassifyOptions struct {
 // own (see opts.FirstMatch), and only a RateLimit classification keeps it.
 func Classify(logPath string, newDecoder func() Decoder, transientExtras, terminalExtras []Pattern, opts ClassifyOptions) (Classification, error) {
 	decode := newDecoder()
+	c := &classifier{transientExtras: transientExtras, terminalExtras: terminalExtras, opts: opts}
+	cl, found, err := ClassifyScan(logPath, opts.Oversized, func(chunk string) ScanDecision {
+		return c.decide(decode(chunk))
+	}, transientExtras, terminalExtras)
+	return c.finish(cl, found, err)
+}
+
+// classify is Classify over an already decoded Log, exact only when the Log's
+// lines are the ones opts.Oversized would scan (see PassLog.ClassifyTransient).
+func (l *Log) classify(transientExtras, terminalExtras []Pattern, opts ClassifyOptions) (Classification, error) {
+	c := &classifier{transientExtras: transientExtras, terminalExtras: terminalExtras, opts: opts}
+	cl, found, err := classifyDecisions(func(visit func(ScanDecision)) error {
+		for _, line := range l.lines {
+			visit(c.decide(line.events))
+		}
+		return nil
+	}, transientExtras, terminalExtras)
+	return c.finish(cl, found, err)
+}
+
+// classifier turns each line's events into a ScanDecision, carrying resetAt
+// across lines.
+type classifier struct {
+	transientExtras, terminalExtras []Pattern
+	opts                            ClassifyOptions
 	// By default resetAt moves only with the latch: it is replaced by an error
 	// that matches a transient marker and cleared by progress.
-	var resetAt *time.Time
-	cl, found, err := ClassifyScan(logPath, opts.Oversized, func(chunk string) ScanDecision {
-		d := ScanDecision{Skip: true}
-		for _, ev := range decode(chunk) {
-			if IsProgress(ev.Kind) {
-				if ev.Synthetic {
-					continue
-				}
-				resetAt = nil
-				d = ScanDecision{Reset: true, Skip: true}
+	resetAt *time.Time
+}
+
+func (c *classifier) decide(evs []Event) ScanDecision {
+	d := ScanDecision{Skip: true}
+	for _, ev := range evs {
+		if IsProgress(ev.Kind) {
+			if ev.Synthetic {
 				continue
 			}
-			switch ev.Kind {
-			case KindError:
-				if opts.FirstMatch {
-					if resetAt == nil {
-						resetAt = ev.ResetAt
-					}
-				} else if _, ok := MatchTransient(ev.Text, transientExtras); ok {
-					resetAt = ev.ResetAt
+			c.resetAt = nil
+			d = ScanDecision{Reset: true, Skip: true}
+			continue
+		}
+		switch ev.Kind {
+		case KindError:
+			if c.opts.FirstMatch {
+				if c.resetAt == nil {
+					c.resetAt = ev.ResetAt
 				}
-				d = ScanDecision{Reset: d.Reset, Text: ev.Text, Overwrite: !opts.FirstMatch}
-			case KindUnparsed:
-				if _, ok := MatchExtras(ev.Text, terminalExtras); ok && d.Skip {
-					d = ScanDecision{Reset: d.Reset, Text: ev.Text}
-				}
+			} else if _, ok := MatchTransient(ev.Text, c.transientExtras); ok {
+				c.resetAt = ev.ResetAt
+			}
+			d = ScanDecision{Reset: d.Reset, Text: ev.Text, Overwrite: !c.opts.FirstMatch}
+		case KindUnparsed:
+			if _, ok := MatchExtras(ev.Text, c.terminalExtras); ok && d.Skip {
+				d = ScanDecision{Reset: d.Reset, Text: ev.Text}
 			}
 		}
-		return d
-	}, transientExtras, terminalExtras)
+	}
+	return d
+}
+
+func (c *classifier) finish(cl Classification, found bool, err error) (Classification, error) {
 	if err != nil {
 		return Classification{}, err
 	}
@@ -74,7 +103,7 @@ func Classify(logPath string, newDecoder func() Decoder, transientExtras, termin
 		return Classification{Class: Terminal, Reason: TaskFailed}, nil
 	}
 	if cl.Reason == RateLimit {
-		cl.ResetAt = resetAt
+		cl.ResetAt = c.resetAt
 	}
 	return cl, nil
 }

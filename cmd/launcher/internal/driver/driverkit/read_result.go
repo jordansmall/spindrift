@@ -17,11 +17,17 @@ import "strings"
 // log is "" with no error. It is separate from ResultText, which
 // gathers every result event rather than only the last message.
 func LastMessageText(logPath string, newDecoder func() Decoder) (string, error) {
-	var m lastMessage
-	if err := scanEvents(logPath, newDecoder, m.apply); err != nil {
+	l, err := DecodeLog(logPath, newDecoder)
+	if err != nil {
 		return "", err
 	}
-	return m.String(), nil
+	return l.lastMessageText(), nil
+}
+
+func (l *Log) lastMessageText() string {
+	var m lastMessage
+	l.Each(m.apply)
+	return m.String()
 }
 
 // lastMessage accumulates the last assistant message under LastMessageText's
@@ -61,15 +67,20 @@ func (m *lastMessage) String() string { return m.b.String() }
 // "result") | .result // empty'`. An empty Text is dropped, as jq's `// empty`
 // drops it; a missing log is "" with no error.
 func ResultText(logPath string, newDecoder func() Decoder) (string, error) {
+	l, err := DecodeLog(logPath, newDecoder)
+	if err != nil {
+		return "", err
+	}
+	return l.resultText(), nil
+}
+
+func (l *Log) resultText() string {
 	var b strings.Builder
-	err := scanEvents(logPath, newDecoder, func(ev Event) {
+	l.Each(func(ev Event) {
 		if ev.Kind == KindResult && ev.Text != "" {
 			b.WriteString(ev.Text)
 			b.WriteByte('\n')
 		}
 	})
-	if err != nil {
-		return "", err
-	}
-	return b.String(), nil
+	return b.String()
 }
