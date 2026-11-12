@@ -147,6 +147,39 @@ func TestUseAppliesNothingWhenAnyRowIsInvalid(t *testing.T) {
 	}
 }
 
+func TestUseValidatesAcceptedRoutesWhenPresent(t *testing.T) {
+	withAccepted := func(name string, accepted ...connectorhost.Route) backendrows.Row {
+		r := row(name, getRepos)
+		r.AcceptedRoutes = accepted
+		return r
+	}
+	t.Run("blanket path is refused and applies nothing", func(t *testing.T) {
+		isolate(t)
+		blanket := connectorhost.Route{Method: "GET", Host: "api.fixture.test", Path: "/"}
+		err := backendrows.Use(rows(t, []backendrows.Row{row("good", getRepos), withAccepted("broad", blanket)}))
+		if err == nil {
+			t.Fatal("Use() = nil, want an error")
+		}
+		for _, w := range []string{"backend rows: ", "broad", "accepted routes", "GET api.fixture.test /"} {
+			if !strings.Contains(err.Error(), w) {
+				t.Errorf("err = %q, want it to contain %q", err, w)
+			}
+		}
+		if !errors.Is(err, connectorhost.ErrRouteTable) {
+			t.Errorf("err = %v, want ErrRouteTable", err)
+		}
+		if _, ok := backendrows.Lookup("good"); ok {
+			t.Error("good row stored although the document was refused")
+		}
+	})
+	t.Run("empty and valid baselines pass", func(t *testing.T) {
+		isolate(t)
+		if err := backendrows.Use(rows(t, []backendrows.Row{withAccepted("none"), withAccepted("some", getRepos)})); err != nil {
+			t.Fatalf("Use() = %v", err)
+		}
+	})
+}
+
 func TestCoreBackendsAreRegistered(t *testing.T) {
 	for _, n := range []string{"local", "git"} {
 		if _, ok := backend.ByName(n); !ok {
@@ -252,5 +285,60 @@ func TestLoadReportsAnUnreadableModule(t *testing.T) {
 	r.Module = filepath.Join(t.TempDir(), "absent.wasm")
 	if _, err := backendrows.Load(context.Background(), r, backendrows.Options{Audit: &bytes.Buffer{}}); err == nil || !strings.Contains(err.Error(), "gone") {
 		t.Fatalf("err = %v, want a read error naming the backend", err)
+	}
+}
+
+func TestWidening(t *testing.T) {
+	r := func(method, host, path string) connectorhost.Route {
+		return connectorhost.Route{Method: method, Host: host, Path: path}
+	}
+	cases := []struct {
+		name     string
+		live     []connectorhost.Route
+		accepted []connectorhost.Route
+		want     []connectorhost.Route
+	}{
+		{"unchanged", []connectorhost.Route{getRepos}, []connectorhost.Route{getRepos}, nil},
+		{"no baseline counts every route as added", []connectorhost.Route{getRepos}, nil, []connectorhost.Route{getRepos}},
+		{"new host", []connectorhost.Route{getRepos, r("GET", "evil.test", "/repos")}, []connectorhost.Route{getRepos},
+			[]connectorhost.Route{r("GET", "evil.test", "/repos")}},
+		{"new method", []connectorhost.Route{getRepos, r("POST", "api.fixture.test", "/repos")}, []connectorhost.Route{getRepos},
+			[]connectorhost.Route{r("POST", "api.fixture.test", "/repos")}},
+		{"new path", []connectorhost.Route{getRepos, r("GET", "api.fixture.test", "/users")}, []connectorhost.Route{getRepos},
+			[]connectorhost.Route{r("GET", "api.fixture.test", "/users")}},
+		{"sibling sharing a prefix is not a subtree", []connectorhost.Route{r("GET", "api.fixture.test", "/reposx")}, []connectorhost.Route{getRepos},
+			[]connectorhost.Route{r("GET", "api.fixture.test", "/reposx")}},
+		{"broadened pattern", []connectorhost.Route{getRepos}, []connectorhost.Route{r("GET", "api.fixture.test", "/repos/x")},
+			[]connectorhost.Route{getRepos}},
+		{"narrowed pattern", []connectorhost.Route{r("GET", "api.fixture.test", "/repos/x")}, []connectorhost.Route{getRepos}, nil},
+		{"host is compared literally", []connectorhost.Route{r("GET", "API.fixture.test", "/repos")}, []connectorhost.Route{getRepos},
+			[]connectorhost.Route{r("GET", "API.fixture.test", "/repos")}},
+		{"dropped route is no widening", nil, []connectorhost.Route{getRepos}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := backendrows.Row{Routes: tc.live, AcceptedRoutes: tc.accepted}.Widening()
+			if fmt.Sprint(got) != fmt.Sprint(tc.want) {
+				t.Errorf("Widening() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUseAcceptsAcceptedRoutesAndAllListsByName(t *testing.T) {
+	isolate(t)
+	raw := json.RawMessage(`[` +
+		`{"name":"zeta","module":"/x/z.wasm","routes":[{"method":"GET","host":"h","path":"/a"}],"credentialEnv":"T","acceptedRoutes":[]},` +
+		`{"name":"alpha","module":"/x/a.wasm","routes":[{"method":"GET","host":"h","path":"/a"}],"credentialEnv":"T",` +
+		`"acceptedRoutes":[{"method":"GET","host":"h","path":"/a"}]}]`)
+	if err := backendrows.Use(raw); err != nil {
+		t.Fatal(err)
+	}
+	all := backendrows.All()
+	if len(all) != 2 || all[0].Name != "alpha" || all[1].Name != "zeta" {
+		t.Fatalf("All() = %+v, want alpha then zeta", all)
+	}
+	if len(all[0].AcceptedRoutes) != 1 || len(all[1].AcceptedRoutes) != 0 {
+		t.Errorf("AcceptedRoutes not decoded: %+v", all)
 	}
 }

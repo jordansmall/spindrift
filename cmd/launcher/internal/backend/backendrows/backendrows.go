@@ -15,9 +15,12 @@ import (
 	"maps"
 	"net/http"
 	"os"
+	"slices"
+	"strings"
 	"sync"
 
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // Row is one backend row of the input document.
@@ -30,6 +33,32 @@ type Row struct {
 	// CredentialEnv names the host env var holding the bearer token the host
 	// attaches to each admitted request. The Connector never sees it.
 	CredentialEnv string `json:"credentialEnv"`
+	// CredentialKnob is the Consumer knob that names CredentialEnv; doctor shows it.
+	CredentialKnob string `json:"credentialKnob,omitempty"`
+	// AcceptedRoutes is the Consumer's accepted baseline of Routes, which doctor
+	// diffs Routes against. Unlike Routes it may be empty or absent: nothing
+	// accepted yet, so every live route counts as added.
+	AcceptedRoutes []connectorhost.Route `json:"acceptedRoutes,omitempty"`
+}
+
+// Widening returns the live Routes no accepted Route covers. An accepted Route
+// covers one with the same method and host, compared literally, and a path
+// equal to or inside the accepted path's subtree; so a new host, method or
+// path, or a broader path pattern, is a widening and a narrower one is not.
+// The subtree test is PathSet.Admits' request-path match, sound here because Use
+// validates both tables as canonical patterns (no blanket "/").
+func (r Row) Widening() []connectorhost.Route {
+	var added []connectorhost.Route
+	for _, live := range r.Routes {
+		covered := slices.ContainsFunc(r.AcceptedRoutes, func(a connectorhost.Route) bool {
+			return a.Method == live.Method && a.Host == live.Host &&
+				registryvocab.PathSet{a.Path}.Admits(live.Path)
+		})
+		if !covered {
+			added = append(added, live)
+		}
+	}
+	return added
 }
 
 // coreBackends are the built-in backends a row may not replace. It mirrors the
@@ -45,7 +74,8 @@ var (
 // earlier call applied; empty raw applies none, so it clears them. A row with
 // no name, a repeated name, a row missing its module, credentialEnv or
 // routes, a name that is a built-in backend and an invalid Route table are
-// errors. Rows are validated whole before any is stored.
+// errors, as is an invalid non-empty accepted baseline. Rows are validated
+// whole before any is stored.
 func Use(raw json.RawMessage) error {
 	var rows []Row
 	if len(bytes.TrimSpace(raw)) != 0 {
@@ -90,6 +120,11 @@ func validate(row Row, seen map[string]bool) error {
 	if err := connectorhost.ValidateRoutes(row.Routes); err != nil {
 		return fmt.Errorf("backend %q: %w", row.Name, err)
 	}
+	if len(row.AcceptedRoutes) != 0 {
+		if err := connectorhost.ValidateRoutes(row.AcceptedRoutes); err != nil {
+			return fmt.Errorf("backend %q: accepted routes: %w", row.Name, err)
+		}
+	}
 	return nil
 }
 
@@ -101,6 +136,15 @@ func Lookup(name string) (Row, bool) {
 	defer mu.RUnlock()
 	row, ok := applied[name]
 	return row, ok
+}
+
+// All returns every applied row, sorted by name.
+func All() []Row {
+	mu.RLock()
+	defer mu.RUnlock()
+	rows := slices.Collect(maps.Values(applied))
+	slices.SortFunc(rows, func(a, b Row) int { return strings.Compare(a.Name, b.Name) })
+	return rows
 }
 
 // Options is what Load takes from its host process.
