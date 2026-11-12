@@ -417,7 +417,7 @@ func TestUnexportedMemoryIsRefusedWithoutPanic(t *testing.T) {
 
 // withTable inserts a table section (one funcref table with the given minimum)
 // after the function section of a wasmModule built without imports.
-func withTable(t *testing.T, w []byte, minimum uint32) []byte {
+func withTable(t testing.TB, w []byte, minimum uint32) []byte {
 	t.Helper()
 	funcSection := []byte{3, 2, 1, 0}
 	i := bytes.Index(w, funcSection)
@@ -550,7 +550,7 @@ func TestMemoryCapRefusalDoesNotColourALaterTrap(t *testing.T) {
 // withFunctions rewrites the function and code sections of a module built by
 // handshakeModule to hold len(locals) functions, function k declaring locals[k]
 // i32 locals. Function 0 keeps the handshake body; the rest return 0.
-func withFunctions(t *testing.T, w []byte, locals ...uint32) []byte {
+func withFunctions(t testing.TB, w []byte, locals ...uint32) []byte {
 	t.Helper()
 	decl := func(n uint32) []byte {
 		if n == 0 {
