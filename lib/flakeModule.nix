@@ -517,6 +517,34 @@ in
                     refused.
                   '';
                 };
+                routes = mkOption {
+                  type = types.listOf (
+                    types.submodule {
+                      options = {
+                        method = mkOption {
+                          type = types.str;
+                          description = "HTTP method, matched exactly (uppercase).";
+                        };
+                        host = mkOption {
+                          type = types.str;
+                          description = "Host, matched exactly (host or host:port).";
+                        };
+                        path = mkOption {
+                          type = types.str;
+                          description = "Path, a subtree root; `{repo}` stands for the tracker's owner/name slug.";
+                        };
+                      };
+                    }
+                  );
+                  default = [ ];
+                  description = ''
+                    A network Connector's Route table: the only HTTP traffic
+                    its http_request Host call may send. Method is exact
+                    uppercase, host an exact host[:port], and path a subtree
+                    root; `{repo}` in a path is the tracker's owner/name slug.
+                    A backend row carries its own table in `backend.routes`.
+                  '';
+                };
                 shadow = mkOption {
                   type = types.bool;
                   default = false;
