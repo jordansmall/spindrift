@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +34,14 @@ type Response struct {
 	Body   []byte
 }
 
+// respBuf is the one buffer the host writes responses into. A fresh
+// MaxHTTPResponse buffer per call is never reclaimed by the guest's heap and
+// exhausts the host's memory cap after about 120 requests. Reuse is safe
+// because a guest runs one call at a time and the host call does not yield;
+// Body is copied out so a caller holding an earlier Response is never
+// overwritten.
+var respBuf []byte
+
 // hostCall is the http_request Host call, swapped by tests. It writes the
 // answer into resp and returns the host's status<<32 | n.
 var hostCall = hostHTTPRequest
@@ -49,7 +58,10 @@ func HTTPRequest(req Request) (Response, error) {
 	if err != nil {
 		return Response{}, fmt.Errorf("connector: encode request: %w", err)
 	}
-	buf := make([]byte, MaxHTTPResponse)
+	if respBuf == nil {
+		respBuf = make([]byte, MaxHTTPResponse)
+	}
+	buf := respBuf
 	packed, err := hostCall(raw, buf)
 	if err != nil {
 		return Response{}, err
@@ -61,5 +73,5 @@ func HTTPRequest(req Request) (Response, error) {
 	if status == 0 {
 		return Response{}, errors.New(string(buf[:n]))
 	}
-	return Response{Status: status, Body: buf[:n]}, nil
+	return Response{Status: status, Body: bytes.Clone(buf[:n])}, nil
 }

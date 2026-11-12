@@ -62,3 +62,18 @@ func TestHTTPRequestOutsideWasip1HasNoHost(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNoHost", err)
 	}
 }
+
+func TestHTTPRequestBodyIsNotOverwrittenByALaterCall(t *testing.T) {
+	fakeHost(t, 200, "first", nil)
+	first, err := HTTPRequest(Request{Method: "GET", URL: "https://h/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fakeHost(t, 200, "second", nil)
+	if _, err := HTTPRequest(Request{Method: "GET", URL: "https://h/"}); err != nil {
+		t.Fatal(err)
+	}
+	if string(first.Body) != "first" {
+		t.Errorf("earlier Body = %q after a later call, want first", first.Body)
+	}
+}

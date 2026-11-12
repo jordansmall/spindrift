@@ -176,3 +176,22 @@ func TestNetworkFixtureSendFailureShowsTheGuestOnlyAFixedReason(t *testing.T) {
 		t.Errorf("audit = %+v, want the detail kept in the audit reason", lines)
 	}
 }
+
+// The SDK's HTTPRequest must not grow the guest's heap per call: a Connector
+// serves far more requests than the host's memory cap has room for response
+// buffers.
+func TestNetworkFixtureServesManyRequestsUnderTheMemoryCap(t *testing.T) {
+	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "scripted "+r.URL.Path) })
+	n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+	c := loadNetWith(t, netLoaders["compiled"], fixture(t, "network.wasm"), n)
+	params := map[string]string{"url": b.URL + "/repos/x", "method": "GET"}
+	for i := range 400 {
+		var out fetched
+		if err := c.Call(context.Background(), "fetch", params, &out); err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+		if out.Body != "scripted /repos/x" {
+			t.Fatalf("request %d: body %q", i, out.Body)
+		}
+	}
+}
