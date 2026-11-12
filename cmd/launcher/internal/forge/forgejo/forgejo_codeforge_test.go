@@ -53,13 +53,12 @@ func newForgejoCodeForgeHarness(t *testing.T) *forgejoCodeForgeHarness {
 	fake := newFakeForgejo(t)
 
 	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      fake.URL(),
-		Repo:         "owner/repo",
-		Token:        "tok",
-		BaseBranch:   "main",
-		UserName:     "Test Bot",
-		UserEmail:    "bot@example.com",
-		BranchPrefix: "agent/issue-",
+		BaseURL:    fake.URL(),
+		Repo:       "owner/repo",
+		Token:      "tok",
+		BaseBranch: "main",
+		UserName:   "Test Bot",
+		UserEmail:  "bot@example.com",
 	}, nil, repo.Bare)
 	forgejo.SetMergeRecheckDelay(cf, 0)
 	h := &forgejoCodeForgeHarness{t: t, repo: repo, fake: fake, cf: cf}
@@ -75,13 +74,12 @@ func (h *forgejoCodeForgeHarness) Unreachable() forge.CodeForge {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	srv.Close()
 	return forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      srv.URL,
-		Repo:         "owner/repo",
-		Token:        "tok",
-		BaseBranch:   "main",
-		UserName:     "Test Bot",
-		UserEmail:    "bot@example.com",
-		BranchPrefix: "agent/issue-",
+		BaseURL:    srv.URL,
+		Repo:       "owner/repo",
+		Token:      "tok",
+		BaseBranch: "main",
+		UserName:   "Test Bot",
+		UserEmail:  "bot@example.com",
 	}, nil, filepath.Join(h.t.TempDir(), "does-not-exist.git"))
 }
 

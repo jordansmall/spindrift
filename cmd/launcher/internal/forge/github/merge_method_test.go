@@ -27,7 +27,7 @@ func TestMerge_MergeMethod(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := prependFakeGH(t, "exit 0")
 
-			c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-", tc.opts...)
+			c := NewExecClient("owner/repo", forge.DispatchLabels{}, tc.opts...)
 			if err := c.Merge("https://github.com/owner/repo/pull/42"); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -69,7 +69,7 @@ func TestEnqueueAutoMerge_MergeMethod(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := prependFakeGH(t, "exit 0")
 
-			c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-", tc.opts...)
+			c := NewExecClient("owner/repo", forge.DispatchLabels{}, tc.opts...)
 			if err := c.EnqueueAutoMerge("https://github.com/owner/repo/pull/42"); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

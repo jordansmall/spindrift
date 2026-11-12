@@ -164,10 +164,6 @@ type CommandRunner interface {
 	Run(name string, args ...string) error
 }
 
-// defaultBranchPrefix matches the launcher's own BRANCH_PREFIX default
-// (inputdoc/flagtable_gen.go); Quickstart doesn't prompt for it.
-const defaultBranchPrefix = "agent/issue-"
-
 // defaultBaseBranch and defaultMergePolicy match the launcher's own
 // BASE_BRANCH/MERGE_MODE defaults. The generated flake.nix sets neither, so
 // doctor.Run below must probe these rather than the Config zero value.
@@ -290,7 +286,6 @@ func quickstartShared(repoSlug, gitUserName, gitUserEmail string) backendkit.Sha
 	return backendkit.Shared{
 		RepoSlug:     repoSlug,
 		Labels:       defaultDispatchLabels,
-		BranchPrefix: defaultBranchPrefix,
 		GitUserName:  gitUserName,
 		GitUserEmail: gitUserEmail,
 	}

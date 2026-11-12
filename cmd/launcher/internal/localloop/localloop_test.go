@@ -247,7 +247,6 @@ func TestWire_ComposedLoop_HappyPath(t *testing.T) {
 		BaseBranch:          testBaseBranch,
 		GitUserName:         "Test Bot",
 		GitUserEmail:        "bot@example.com",
-		BranchPrefix:        "agent/issue-",
 	}, it)
 
 	parent := lw.ResolveParent(num)
@@ -341,7 +340,6 @@ func TestWire_ComposedLoop_EmptyTitleSanitizesToSlug(t *testing.T) {
 		BaseBranch:          testBaseBranch,
 		GitUserName:         "Test Bot",
 		GitUserEmail:        "bot@example.com",
-		BranchPrefix:        "agent/issue-",
 	}, it)
 
 	parent := lw.ResolveParent(num)
@@ -414,7 +412,6 @@ func TestWire_ComposedLoop_GarbageParentUsesTitleNaming(t *testing.T) {
 		BaseBranch:          testBaseBranch,
 		GitUserName:         "Test Bot",
 		GitUserEmail:        "bot@example.com",
-		BranchPrefix:        "agent/issue-",
 	}, it)
 
 	parent := lw.ResolveParent(num)
@@ -492,7 +489,6 @@ func TestWire_ComposedLoop_HealsStuckBranchRefLanding(t *testing.T) {
 		BaseBranch:          testBaseBranch,
 		GitUserName:         "Test Bot",
 		GitUserEmail:        "bot@example.com",
-		BranchPrefix:        "agent/issue-",
 	}, it)
 
 	parent := lw.ResolveParent(num)
@@ -562,7 +558,6 @@ func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 		BaseBranch:          testBaseBranch,
 		GitUserName:         "Test Bot",
 		GitUserEmail:        "bot@example.com",
-		BranchPrefix:        "agent/issue-",
 	}, it)
 	parent := lw.ResolveParent(num)
 	cf := lw.CodeForgeForIssue(num)
@@ -648,7 +643,6 @@ func TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands(t *testing.T) 
 		BaseBranch:          testBaseBranch,
 		GitUserName:         "Test Bot",
 		GitUserEmail:        "bot@example.com",
-		BranchPrefix:        "agent/issue-",
 	}, it)
 
 	parent := lw.ResolveParent(num)
@@ -757,7 +751,6 @@ func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
 		BaseBranch:          testBaseBranch,
 		GitUserName:         "Test Bot",
 		GitUserEmail:        "bot@example.com",
-		BranchPrefix:        "agent/issue-",
 	}, it)
 	sanitizedParent := lw.ResolveParent(landedNum)
 	if got := sanitizedParent.String(); got != parent {
@@ -854,7 +847,6 @@ func TestWire_ComposedLoop_BroadTicketIssueExcludedFromOwnSeams(t *testing.T) {
 				BaseBranch:          testBaseBranch,
 				GitUserName:         "Test Bot",
 				GitUserEmail:        "bot@example.com",
-				BranchPrefix:        "agent/issue-",
 			}, it)
 			if got := lw.ResolveParent(seamNum).String(); got != parent {
 				t.Fatalf("ResolveParent(%s) = %q, want %q", seamNum, got, parent)
@@ -944,7 +936,6 @@ func TestWire_ComposedLoop_StuckBroadTicketLandingSurfacesAnyway(t *testing.T) {
 		BaseBranch:          testBaseBranch,
 		GitUserName:         "Test Bot",
 		GitUserEmail:        "bot@example.com",
-		BranchPrefix:        "agent/issue-",
 	}, it)
 
 	cfg := settle.Config{
@@ -1049,7 +1040,6 @@ func TestWire_ComposedLoop_DegenerateAllMembersCollide_KeepsBothMembers(t *testi
 		BaseBranch:          testBaseBranch,
 		GitUserName:         "Test Bot",
 		GitUserEmail:        "bot@example.com",
-		BranchPrefix:        "agent/issue-",
 	}, it)
 	if got := lw.ResolveParent(numA).String(); got != wantParent {
 		t.Fatalf("ResolveParent(%s) = %q, want %q", numA, got, wantParent)
@@ -1153,7 +1143,6 @@ func TestWire_ComposedLoop_BroadTicketIssuePresent_OpenSeamNamesSeam(t *testing.
 		BaseBranch:          testBaseBranch,
 		GitUserName:         "Test Bot",
 		GitUserEmail:        "bot@example.com",
-		BranchPrefix:        "agent/issue-",
 	}, it)
 
 	cf := lw.CodeForgeForIssue(landedNum)
@@ -1231,7 +1220,6 @@ func TestWire_ComposedLoop_ThreeLevelChain_MiddleIssueGatesGrandparent(t *testin
 		BaseBranch:          testBaseBranch,
 		GitUserName:         "Test Bot",
 		GitUserEmail:        "bot@example.com",
-		BranchPrefix:        "agent/issue-",
 	}, it)
 
 	cf := lw.CodeForgeForIssue(middle)
@@ -1276,7 +1264,6 @@ func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.
 		BaseBranch:          testBaseBranch,
 		GitUserName:         "Test Bot",
 		GitUserEmail:        "bot@example.com",
-		BranchPrefix:        "agent/issue-",
 	}, it)
 
 	for num, want := range map[string]string{numA: "calc-engine", numB: "render-pipeline"} {
@@ -1380,7 +1367,6 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 		BaseBranch:          testBaseBranch,
 		GitUserName:         "Test Bot",
 		GitUserEmail:        "bot@example.com",
-		BranchPrefix:        "agent/issue-",
 	}, it)
 
 	cf01 := lw.CodeForgeForIssue(blockerNum)
@@ -1592,7 +1578,6 @@ func TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly(t *testing.T) {
 		BaseBranch:          testBaseBranch,
 		GitUserName:         "Test Bot",
 		GitUserEmail:        "bot@example.com",
-		BranchPrefix:        "agent/issue-",
 	}, it)
 
 	// Land only the blocker, onto its own parent's Integration branch, which
@@ -1725,7 +1710,6 @@ func TestWire_ComposedLoop_AlreadyResolvedClosesIssue(t *testing.T) {
 		BaseBranch:          testBaseBranch,
 		GitUserName:         "Test Bot",
 		GitUserEmail:        "bot@example.com",
-		BranchPrefix:        "agent/issue-",
 	}, it)
 
 	parent := lw.ResolveParent(num)

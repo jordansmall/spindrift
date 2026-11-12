@@ -93,7 +93,7 @@ func TestInternalSeam_RetryingRelay_RealRelayFailingEveryAttemptLeavesBundleUnto
 		t.Fatal(err)
 	}
 	parent := local.ResolveParent("7", "")
-	inner := local.NewLocalCodeForge(seed.Bare, "main", parent, "Test Bot", "bot@example.com", "agent/issue-").(forge.BundleRelay)
+	inner := local.NewLocalCodeForge(seed.Bare, "main", parent, "Test Bot", "bot@example.com").(forge.BundleRelay)
 	rec := &ProgressRecorder{}
 	r := &retryingBundleRelay{
 		retryLoop: retryLoop{

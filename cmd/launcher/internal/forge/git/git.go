@@ -43,7 +43,6 @@ type gitClient struct {
 	baseBranch   string
 	userName     string
 	userEmail    string
-	branchPrefix string
 	cloneTimeout time.Duration
 	opTimeout    time.Duration
 }
@@ -68,13 +67,12 @@ func WithOpTimeout(d time.Duration) Option {
 // userName and userEmail set the commit identity on Merge's throwaway clone,
 // because ambient host git config may be unset on a bare CI runner and a merge
 // commit needs a committer.
-func NewGitClient(remoteURL, baseBranch, userName, userEmail, branchPrefix string, opts ...Option) forge.CodeForge {
+func NewGitClient(remoteURL, baseBranch, userName, userEmail string, opts ...Option) forge.CodeForge {
 	g := &gitClient{
 		remoteURL:    remoteURL,
 		baseBranch:   baseBranch,
 		userName:     userName,
 		userEmail:    userEmail,
-		branchPrefix: branchPrefix,
 		cloneTimeout: defaultCloneTimeout,
 		opTimeout:    defaultOpTimeout,
 	}

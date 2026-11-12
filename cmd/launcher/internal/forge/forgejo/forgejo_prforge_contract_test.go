@@ -20,11 +20,10 @@ func newPRForgeHarness(t *testing.T) *prforgeHarness {
 	t.Helper()
 	f := newFakeForgejo(t)
 	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      f.URL(),
-		Repo:         "owner/repo",
-		Token:        "tok",
-		BaseBranch:   "main",
-		BranchPrefix: "agent/issue-",
+		BaseURL:    f.URL(),
+		Repo:       "owner/repo",
+		Token:      "tok",
+		BaseBranch: "main",
 	}, nil, "unused")
 	return &prforgeHarness{fakeForgejo: f, cf: cf}
 }

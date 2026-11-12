@@ -33,7 +33,7 @@ func TestLocalCodeForge_Merge_ProducesNoMergeCommit(t *testing.T) {
 	branch := "agent/issue-1698"
 	seedBundleBranch(t, repo.Bare, IntegrationBranch(parent), outbox, branch, "1698")
 
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	br := cf.(forge.BundleRelay)
 	if err := br.RelayBundle(outbox, branch); err != nil {
 		t.Fatalf("RelayBundle: %v", err)
@@ -55,7 +55,7 @@ func TestLocalCodeForge_TwoSeamChain_LandsLinearWithNoMergeCommits(t *testing.T)
 
 	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	br := cf.(forge.BundleRelay)
 
 	// Seam 2's bundle is built off the pre-seam-1 integration tip, mirroring a

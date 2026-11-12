@@ -29,7 +29,6 @@ type Lookup = func(env string) (value string, ok bool)
 type Shared struct {
 	RepoSlug      string
 	BaseBranch    string
-	BranchPrefix  string
 	GitUserName   string
 	GitUserEmail  string
 	Labels        forge.DispatchLabels

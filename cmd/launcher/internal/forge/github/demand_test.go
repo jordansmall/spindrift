@@ -181,7 +181,7 @@ func TestCountReady_LabelWithSpace(t *testing.T) {
 	h := newGithubHarness(t)
 	labels := testLabels
 	labels.Dispatchable = "ready for agent"
-	h.tr = NewExecClient("owner/repo", labels, "agent/issue-")
+	h.tr = NewExecClient("owner/repo", labels)
 	seedReady(t, h, "1")
 	if got := countReady(t, h, false); got != 1 {
 		t.Fatalf("CountReady = %d, want 1", got)

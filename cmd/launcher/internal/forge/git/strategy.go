@@ -32,7 +32,7 @@ var Strategy = backendkit.Strategy{
 		if err != nil {
 			return nil, err
 		}
-		return NewGitClient(k.CodeForgeRemoteURL, s.BaseBranch, s.GitUserName, s.GitUserEmail, s.BranchPrefix), nil
+		return NewGitClient(k.CodeForgeRemoteURL, s.BaseBranch, s.GitUserName, s.GitUserEmail), nil
 	},
 	CloneURL: func(_ backendkit.Shared, l backendkit.Lookup, _ string) (string, error) {
 		k, err := ReadKnobs(l)

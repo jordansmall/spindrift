@@ -60,7 +60,7 @@ func newGithubHarness(t *testing.T) *githubHarness {
 
 	return &githubHarness{
 		issuesDir: issuesDir,
-		tr:        NewExecClient("owner/repo", testLabels, "agent/issue-", WithVerdictLabels(forge.ResearchVerdictLabels())),
+		tr:        NewExecClient("owner/repo", testLabels, WithVerdictLabels(forge.ResearchVerdictLabels())),
 	}
 }
 

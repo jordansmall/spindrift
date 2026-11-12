@@ -143,14 +143,13 @@ func validate(axis string) func(backendkit.Shared, backendkit.Lookup) error {
 
 func codeForgeConfig(s backendkit.Shared, k Knobs) ForgejoCodeForgeConfig {
 	return ForgejoCodeForgeConfig{
-		BaseURL:      k.ForgejoBaseURL,
-		Repo:         s.RepoSlug,
-		Token:        k.ForgejoToken,
-		BaseBranch:   s.BaseBranch,
-		UserName:     s.GitUserName,
-		UserEmail:    s.GitUserEmail,
-		BranchPrefix: s.BranchPrefix,
-		MergeMethod:  s.MergeMethod,
+		BaseURL:     k.ForgejoBaseURL,
+		Repo:        s.RepoSlug,
+		Token:       k.ForgejoToken,
+		BaseBranch:  s.BaseBranch,
+		UserName:    s.GitUserName,
+		UserEmail:   s.GitUserEmail,
+		MergeMethod: s.MergeMethod,
 	}
 }
 

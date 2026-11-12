@@ -19,11 +19,10 @@ func newMergeTestForge(t *testing.T, mergeMethod string, handler http.HandlerFun
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      srv.URL,
-		Repo:         "owner/repo",
-		Token:        "tok",
-		BranchPrefix: "agent/issue-",
-		MergeMethod:  mergeMethod,
+		BaseURL:     srv.URL,
+		Repo:        "owner/repo",
+		Token:       "tok",
+		MergeMethod: mergeMethod,
 	}, nil, "unused")
 	forgejo.SetMergeRecheckDelay(cf, 0)
 	return cf
@@ -329,13 +328,12 @@ func TestRebase_ResolvesHeadBranchAndRebases(t *testing.T) {
 	defer srv.Close()
 
 	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      srv.URL,
-		Repo:         "owner/repo",
-		Token:        "tok",
-		BaseBranch:   "main",
-		UserName:     "Test Bot",
-		UserEmail:    "bot@example.com",
-		BranchPrefix: "agent/issue-",
+		BaseURL:    srv.URL,
+		Repo:       "owner/repo",
+		Token:      "tok",
+		BaseBranch: "main",
+		UserName:   "Test Bot",
+		UserEmail:  "bot@example.com",
 	}, nil, repo.Bare)
 
 	if err := cf.Rebase("https://forge.test/owner/repo/pulls/206"); err != nil {

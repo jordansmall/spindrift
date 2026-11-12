@@ -70,7 +70,6 @@ func backendShared(c config) backendkit.Shared {
 	return backendkit.Shared{
 		RepoSlug:      c.RepoSlug,
 		BaseBranch:    c.BaseBranch,
-		BranchPrefix:  c.BranchPrefix,
 		GitUserName:   c.GitUserName,
 		GitUserEmail:  c.GitUserEmail,
 		Labels:        dispatchLabels(c),

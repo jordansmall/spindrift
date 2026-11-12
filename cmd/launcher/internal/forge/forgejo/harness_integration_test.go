@@ -516,14 +516,13 @@ func TestForgejoIntegration_DispatchLifecycle(t *testing.T) {
 		VerdictLabels: forge.ResearchVerdictLabels(),
 	})
 	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      baseURL,
-		Repo:         repo,
-		Token:        token,
-		BaseBranch:   "main",
-		UserName:     "Harness",
-		UserEmail:    "harness@harness.local",
-		BranchPrefix: "agent/issue-",
-		MergeMethod:  "rebase",
+		BaseURL:     baseURL,
+		Repo:        repo,
+		Token:       token,
+		BaseBranch:  "main",
+		UserName:    "Harness",
+		UserEmail:   "harness@harness.local",
+		MergeMethod: "rebase",
 	}, nil)
 	prf, ok := cf.(forge.PRForge)
 	if !ok {

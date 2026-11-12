@@ -52,8 +52,8 @@ func newHostMediationHarness(t *testing.T) *hostMediationHarness {
 		repo:       repo,
 		stateDir:   stateDir,
 		base:       "main",
-		cf:         NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-"),
-		tr:         NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-"),
+		cf:         NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}),
+		tr:         NewExecClient("owner/repo", forge.DispatchLabels{}),
 		relayedSHA: map[string]string{},
 	}
 }

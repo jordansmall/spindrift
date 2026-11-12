@@ -36,7 +36,7 @@ var Strategy = backendkit.Strategy{
 		if err != nil {
 			return nil, err
 		}
-		return NewLocalCodeForge(dir, s.BaseBranch, parent, s.GitUserName, s.GitUserEmail, s.BranchPrefix), nil
+		return NewLocalCodeForge(dir, s.BaseBranch, parent, s.GitUserName, s.GitUserEmail), nil
 	},
 	NewLedger: func(_ backendkit.Shared, l backendkit.Lookup) (backendkit.LedgerSite, error) {
 		dir, err := resolveAccumulationRepoDir(l)

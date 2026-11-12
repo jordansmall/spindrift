@@ -57,7 +57,7 @@ func TestLocalCodeForge_RelayBundle_ImportsBranchIntoRepo(t *testing.T) {
 	branch := "agent/issue-1698"
 	wantSHA := seedBundleBranch(t, repo.Bare, IntegrationBranch(parent), outbox, branch, "1698")
 
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	br, ok := cf.(forge.BundleRelay)
 	if !ok {
 		t.Fatal("local CodeForge does not implement forge.BundleRelay")
@@ -81,7 +81,7 @@ func TestLocalCodeForge_RelayBundle_MissingBundleErrors(t *testing.T) {
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	outbox := t.TempDir()
 
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	br := cf.(forge.BundleRelay)
 
 	err := br.RelayBundle(outbox, "agent/issue-1698")
@@ -105,7 +105,7 @@ func TestLocalCodeForge_RelayBundle_MalformedBundleErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	br := cf.(forge.BundleRelay)
 
 	err := br.RelayBundle(outbox, "agent/issue-1698")
@@ -134,7 +134,7 @@ func TestLocalCodeForge_RelayBundle_UnreadableBundleErrors(t *testing.T) {
 	}
 	outbox := filepath.Join(blocker, "outbox")
 
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	br := cf.(forge.BundleRelay)
 
 	err := br.RelayBundle(outbox, "agent/issue-1698")
@@ -160,7 +160,7 @@ func TestLocalCodeForge_RelayBundle_ReRelayOverwritesDivergedRef(t *testing.T) {
 	branch := "agent/issue-1698"
 	seedBundleBranch(t, repo.Bare, IntegrationBranch(parent), outbox, branch, "1698")
 
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	br := cf.(forge.BundleRelay)
 	if err := br.RelayBundle(outbox, branch); err != nil {
 		t.Fatalf("RelayBundle (first attempt): %v", err)
@@ -213,7 +213,7 @@ func TestLocalCodeForge_FirstSeam_CreatesIntegrationBranchFromBase(t *testing.T)
 	// seam has landed for this parent yet, so that ref cannot exist.
 	seedBundleBranch(t, repoPath, "main", outbox, branch, "1698")
 
-	cf := NewLocalCodeForge(repoPath, "main", parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repoPath, "main", parent, "Test Bot", "bot@example.com")
 	br := cf.(forge.BundleRelay)
 
 	if err := br.RelayBundle(outbox, branch); err != nil {
@@ -242,7 +242,7 @@ func TestLocalCodeForge_LandBundle_EndToEnd(t *testing.T) {
 	branch := "agent/issue-1698"
 	seedBundleBranch(t, repo.Bare, IntegrationBranch(parent), outbox, branch, "1698")
 
-	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com")
 	br := cf.(forge.BundleRelay)
 	lr := cf.(forge.LandingRef)
 

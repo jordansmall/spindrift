@@ -22,7 +22,7 @@ func mustStrategy(t *testing.T, name string) backendkit.Strategy {
 }
 
 func TestBuildForge_GithubTracker_BuildsBothSeams(t *testing.T) {
-	sh := backendkit.Shared{RepoSlug: "owner/repo", Labels: defaultDispatchLabels, BranchPrefix: defaultBranchPrefix}
+	sh := backendkit.Shared{RepoSlug: "owner/repo", Labels: defaultDispatchLabels}
 	it, cf, err := buildForge(mustStrategy(t, "github"), sh, knobLookup(nil, "", ""))
 	if err != nil {
 		t.Fatalf("buildForge: %v", err)
@@ -85,7 +85,7 @@ func TestBuildForge_CodeForgeStrategy_FollowsForgeAxis(t *testing.T) {
 			},
 		}
 	}
-	sh := backendkit.Shared{RepoSlug: "owner/repo", Labels: defaultDispatchLabels, BranchPrefix: defaultBranchPrefix}
+	sh := backendkit.Shared{RepoSlug: "owner/repo", Labels: defaultDispatchLabels}
 
 	if _, _, err := buildForge(stub("tracker-only", axisTracker), sh, knobLookup(nil, "", "")); err != nil {
 		t.Fatalf("buildForge: %v", err)

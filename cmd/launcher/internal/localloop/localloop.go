@@ -28,8 +28,6 @@ type Config struct {
 	// GitUserName and GitUserEmail are the identity on the merge commits a local
 	// Code Forge's Merge creates.
 	GitUserName, GitUserEmail string
-	// BranchPrefix is the prefix of each per-issue agent branch (forge.AgentBranchName).
-	BranchPrefix string
 }
 
 // Wired is one Config and IssueTracker's resolved local-loop wiring.
@@ -115,7 +113,7 @@ func (w *Wired) cached(num string, resolve func() local.SanitizedParent) local.S
 // parent's Integration branch (ADR 0033, issue #1734), so a mixed-parent batch
 // merges each seam through its own instance and never a single shared one.
 func (w *Wired) CodeForgeForIssue(num string) forge.CodeForge {
-	return local.NewLocalCodeForge(w.cfg.AccumulationRepoDir, w.cfg.BaseBranch, w.ResolveParent(num), w.cfg.GitUserName, w.cfg.GitUserEmail, w.cfg.BranchPrefix)
+	return local.NewLocalCodeForge(w.cfg.AccumulationRepoDir, w.cfg.BaseBranch, w.ResolveParent(num), w.cfg.GitUserName, w.cfg.GitUserEmail)
 }
 
 // OutboxDir resolves num to its Box's writable outbox directory. It reads

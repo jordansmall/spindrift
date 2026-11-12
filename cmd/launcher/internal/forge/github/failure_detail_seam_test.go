@@ -40,7 +40,7 @@ func TestFailureDetailSeam(t *testing.T) {
 			for k, v := range seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{Record: filepath.Join(t.TempDir(), "gh.rec"), PRs: []seamtest.GhPR{tt.pr}}) {
 				t.Setenv(k, v)
 			}
-			got, err := NewExecClient("o/r", testLabels, "agent/issue-").FailureDetail(url)
+			got, err := NewExecClient("o/r", testLabels).FailureDetail(url)
 			if err != nil {
 				t.Fatalf("FailureDetail: %v", err)
 			}

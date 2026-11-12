@@ -24,11 +24,10 @@ func newPRForgeTestForgeWithMethod(t *testing.T, mergeMethod string, handler htt
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      srv.URL,
-		Repo:         "owner/repo",
-		Token:        "tok",
-		BranchPrefix: "agent/issue-",
-		MergeMethod:  mergeMethod,
+		BaseURL:     srv.URL,
+		Repo:        "owner/repo",
+		Token:       "tok",
+		MergeMethod: mergeMethod,
 	}, nil, "unused")
 	pr, ok := cf.(forge.PRForge)
 	if !ok {
@@ -107,7 +106,7 @@ func TestPRMethods_RefuseForeignRepoURLWithoutRequest(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 			cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-				BaseURL: srv.URL, Repo: "owner/repo", Token: "tok", BranchPrefix: "agent/issue-",
+				BaseURL: srv.URL, Repo: "owner/repo", Token: "tok",
 			}, nil, "unused")
 			f, ok := cf.(prAndMerge)
 			if !ok {

@@ -28,14 +28,14 @@ var testLabels = forge.DispatchLabels{
 
 // The github forge opens PRs and watches CI, unlike the push-only git adapter.
 func TestExecClient_ImplementsPRForge(t *testing.T) {
-	var _ forge.PRForge = NewExecClient("owner/repo", testLabels, "agent/issue-")
+	var _ forge.PRForge = NewExecClient("owner/repo", testLabels)
 }
 
 // GitHub issues close through the forge's own auto-close mechanism (ADR 0029),
 // so there is no landing ref to persist. Only the local adapter implements
 // forge.LandingRecorder.
 func TestExecClient_DoesNotImplementLandingRecorder(t *testing.T) {
-	var it forge.IssueTracker = NewExecClient("owner/repo", testLabels, "agent/issue-")
+	var it forge.IssueTracker = NewExecClient("owner/repo", testLabels)
 	if _, ok := it.(forge.LandingRecorder); ok {
 		t.Error("ExecClient satisfies forge.LandingRecorder, want it hidden")
 	}
@@ -44,7 +44,7 @@ func TestExecClient_DoesNotImplementLandingRecorder(t *testing.T) {
 // PickIssue's double-box guard (#1742) relies on forge.LabeledTracker to skip a
 // ListIssues round-trip for a state the tracker's label family leaves unmapped.
 func TestExecClient_ImplementsLabeledTracker(t *testing.T) {
-	var _ forge.LabeledTracker = NewExecClient("owner/repo", testLabels, "agent/issue-")
+	var _ forge.LabeledTracker = NewExecClient("owner/repo", testLabels)
 }
 
 // prependFakeGH puts a counting-wrapper gh script on PATH and returns its dir.
@@ -87,7 +87,7 @@ func TestExecClient_DepsOf_NativeWins(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	deps, err := forge.DepsOf(c, "10")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
@@ -108,7 +108,7 @@ func TestExecClient_DepsOf_FallsBackOnEmptyNative(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	deps, err := forge.DepsOf(c, "10")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
@@ -130,7 +130,7 @@ func TestExecClient_DepsOf_FallsBackOnNativeError(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	deps, err := forge.DepsOf(c, "10")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
@@ -152,7 +152,7 @@ func TestExecClient_DepsOf_NativeErrorSurfacesStderr(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	out := testutil.CaptureStderr(t, func() {
 		if _, err := forge.DepsOf(c, "10"); err != nil {
 			t.Fatalf("DepsOf: %v", err)
@@ -173,7 +173,7 @@ func TestExecClient_DepsOf_NativeErrorEmptyStderrNoTrailingColon(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	_, err := c.NativeDepsOf("10")
 	if err == nil {
 		t.Fatal("NativeDepsOf: want error, got nil")
@@ -195,7 +195,7 @@ func TestExecClient_DepsOf_WarnsOnStderr(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	out := testutil.CaptureStderr(t, func() {
 		if _, err := forge.DepsOf(c, "10"); err != nil {
 			t.Fatalf("DepsOf: %v", err)
@@ -218,7 +218,7 @@ func TestExecClient_DepsOf_NativeIgnoresBody(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	deps, err := forge.DepsOf(c, "10")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
@@ -239,7 +239,7 @@ func TestExecClient_DepsOf_NativeDeduplicates(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	deps, err := forge.DepsOf(c, "10")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
@@ -254,7 +254,7 @@ esac`)
 // relationship, so the reverse direction is one more native call rather than a
 // whole-backlog scan (issue #1744).
 func TestExecClient_ImplementsBlockersLister(t *testing.T) {
-	var _ forge.BlockersLister = NewExecClient("owner/repo", testLabels, "agent/issue-")
+	var _ forge.BlockersLister = NewExecClient("owner/repo", testLabels)
 }
 
 // Every result is DepSourceNative because there is no body-text fallback here:
@@ -269,7 +269,7 @@ func TestExecClient_BlocksOf_ReturnsNativeBlocking(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	blocks, err := c.BlocksOf("7")
 	if err != nil {
 		t.Fatalf("BlocksOf: %v", err)
@@ -290,7 +290,7 @@ func TestExecClient_BlocksOf_PropagatesNativeError(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	_, err := c.BlocksOf("7")
 	if err == nil {
 		t.Fatal("BlocksOf: want error, got nil")
@@ -304,7 +304,7 @@ esac`)
 // forge.PriorClaimStateReader is how recover learns the issue's terminal state
 // immediately before its most recent claim (issue #2477).
 func TestExecClient_ImplementsPriorClaimStateReader(t *testing.T) {
-	var _ forge.PriorClaimStateReader = NewExecClient("owner/repo", testLabels, "agent/issue-")
+	var _ forge.PriorClaimStateReader = NewExecClient("owner/repo", testLabels)
 }
 
 // The fake gh script stands in for the already-filtered output of
@@ -319,7 +319,7 @@ func TestExecClient_PriorClaimState_FindsComplete(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	state, ok, err := c.PriorClaimState("10")
 	if err != nil {
 		t.Fatalf("PriorClaimState: %v", err)
@@ -345,7 +345,7 @@ func TestExecClient_PriorClaimState_MostRecentWins(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	state, ok, err := c.PriorClaimState("10")
 	if err != nil {
 		t.Fatalf("PriorClaimState: %v", err)
@@ -369,7 +369,7 @@ func TestExecClient_PriorClaimState_NoTerminalLabelReturnsNotFound(t *testing.T)
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	_, ok, err := c.PriorClaimState("10")
 	if err != nil {
 		t.Fatalf("PriorClaimState: %v", err)
@@ -388,7 +388,7 @@ func TestExecClient_PriorClaimState_GenuineFailureSurfaced(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	_, _, err := c.PriorClaimState("10")
 	if err == nil {
 		t.Fatal("PriorClaimState: want error, got nil")
@@ -410,7 +410,7 @@ func TestExecClient_PriorClaimState_UsesTimelineEndpointPaginated(t *testing.T) 
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	if _, _, err := c.PriorClaimState("10"); err != nil {
 		t.Fatalf("PriorClaimState: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestExecClient_BranchExists_ExactMatch(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	exists, err := c.BranchExists("agent/issue-1")
 	if err != nil {
 		t.Fatalf("BranchExists: %v", err)
@@ -457,7 +457,7 @@ func TestExecClient_BranchExists_RejectsPrefixMatch(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	exists, err := c.BranchExists("agent/issue-1")
 	if err != nil {
 		t.Fatalf("BranchExists: %v", err)
@@ -477,7 +477,7 @@ func TestExecClient_BranchExists_NoMatch(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	exists, err := c.BranchExists("agent/issue-1")
 	if err != nil {
 		t.Fatalf("BranchExists: %v", err)
@@ -492,7 +492,7 @@ esac`)
 func TestExecClient_BranchExists_RejectsEmptyBranch(t *testing.T) {
 	dir := prependFakeGH(t, `exit 1`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	if _, err := c.BranchExists(""); err == nil {
 		t.Error("BranchExists(\"\"): want error, got nil")
 	}
@@ -511,7 +511,7 @@ func TestExecClient_BranchProtected_Protected(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	protected, err := c.BranchProtected("main")
 	if err != nil {
 		t.Fatalf("BranchProtected: %v", err)
@@ -537,7 +537,7 @@ func TestExecClient_BranchProtected_NotProtected(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	protected, err := c.BranchProtected("main")
 	if err != nil {
 		t.Fatalf("BranchProtected: want nil error for the 'not protected' 404, got %v", err)
@@ -564,7 +564,7 @@ func TestExecClient_BranchProtected_RulesetOnly(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	protected, err := c.BranchProtected("main")
 	if err != nil {
 		t.Fatalf("BranchProtected: %v", err)
@@ -593,7 +593,7 @@ func TestExecClient_BranchProtected_DocumentedTokenFallsThroughOn403(t *testing.
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	protected, err := c.BranchProtected("main")
 	if err != nil {
 		t.Fatalf("BranchProtected: want nil error for the documented-token 403 fallthrough, got %v", err)
@@ -643,7 +643,7 @@ func TestExecClient_BranchProtected_HTTP403ZeroRuleset(t *testing.T) {
 	;;
 esac`, tc.classicStderr))
 
-			c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+			c := NewExecClient("owner/repo", forge.DispatchLabels{})
 			protected, err := c.BranchProtected("main")
 			if err == nil {
 				t.Fatal("BranchProtected: want error for a 403 with zero applicable rulesets, got nil")
@@ -678,7 +678,7 @@ func TestExecClient_BranchProtected_RulesetProbeFailure(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	protected, err := c.BranchProtected("main")
 	if err == nil {
 		t.Fatal("BranchProtected: want error for a ruleset probe failure, got nil")
@@ -701,7 +701,7 @@ func TestExecClient_BranchProtected_ProbeFailure(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	protected, err := c.BranchProtected("main")
 	if err == nil {
 		t.Fatal("BranchProtected: want error for a non-404 probe failure, got nil")
@@ -727,7 +727,7 @@ func TestExecClient_BranchProtected_GenericNotFound(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	protected, err := c.BranchProtected("main")
 	if err == nil {
 		t.Fatal("BranchProtected: want error for a generic 404, got nil")
@@ -752,7 +752,7 @@ func TestExecClient_BranchProtected_GenericFailureEmptyStderr(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	protected, err := c.BranchProtected("main")
 	if err == nil {
 		t.Fatal("BranchProtected: want error for a generic failure, got nil")
@@ -768,7 +768,7 @@ esac`)
 func TestExecClient_BranchProtected_RejectsEmptyBranch(t *testing.T) {
 	dir := prependFakeGH(t, `exit 1`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	if _, err := c.BranchProtected(""); err == nil {
 		t.Error("BranchProtected(\"\"): want error, got nil")
 	}
@@ -778,7 +778,7 @@ func TestExecClient_BranchProtected_RejectsEmptyBranch(t *testing.T) {
 }
 
 func TestExecClient_ImplementsBranchProtectionForge(t *testing.T) {
-	var _ forge.BranchProtectionForge = NewExecClient("owner/repo", testLabels, "agent/issue-")
+	var _ forge.BranchProtectionForge = NewExecClient("owner/repo", testLabels)
 }
 
 // TouchesOf needs the full body via `gh issue view`, since ListIssues' --json
@@ -791,7 +791,7 @@ func TestExecClient_TouchesOf_FetchesFullIssueBody(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	touches, err := forge.TouchesOf(c, "10")
 	if err != nil {
 		t.Fatalf("TouchesOf: %v", err)
@@ -810,7 +810,7 @@ func TestExecClient_Issue_ErrorSurfacesStderr(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	_, err := c.Issue("10")
 	if err == nil {
 		t.Fatal("Issue: want error, got nil")
@@ -830,7 +830,7 @@ func TestExecClient_ListOpenIssues_NoLabelFilterIncludesLabels(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	issues, err := c.ListOpenIssues()
 	if err != nil {
 		t.Fatalf("ListOpenIssues: %v", err)
@@ -867,7 +867,7 @@ func TestExecClient_ListOpenIssues_ErrorSurfacesStderr(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	_, err := c.ListOpenIssues()
 	if err == nil {
 		t.Fatal("ListOpenIssues: want error, got nil")
@@ -887,7 +887,7 @@ func TestExecClient_ListIssues_ErrorSurfacesStderr(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	_, err := c.ListIssues(forge.Dispatchable)
 	if err == nil {
 		t.Fatal("ListIssues: want error, got nil")
@@ -904,7 +904,7 @@ func TestExecClient_ListIssues_ErrorEmptyStderrNoTrailingColon(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	_, err := c.ListIssues(forge.Dispatchable)
 	if err == nil {
 		t.Fatal("ListIssues: want error, got nil")
@@ -923,7 +923,7 @@ func TestExecClient_IssueLabels_ErrorSurfacesStderr(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	_, err := c.issueLabels("10")
 	if err == nil {
 		t.Fatal("issueLabels: want error, got nil")
@@ -939,7 +939,7 @@ esac`)
 func TestExecClient_CompleteVerdict_UnconfiguredErrorsWithoutShellingOut(t *testing.T) {
 	dir := prependFakeGH(t, "")
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	if err := c.CompleteVerdict("10", forge.Recommend); err == nil {
 		t.Fatal("want error for unconfigured VerdictLabels, got nil")
 	}
@@ -959,7 +959,7 @@ func TestExecClient_CompleteVerdict_MissingInProgressErrorsWithoutEditing(t *tes
 esac
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-", WithVerdictLabels(forge.ResearchVerdictLabels()))
+	c := NewExecClient("owner/repo", testLabels, WithVerdictLabels(forge.ResearchVerdictLabels()))
 	err := c.CompleteVerdict("10", forge.Recommend)
 	if err == nil {
 		t.Fatal("want error when issue lacks InProgress label, got nil")
@@ -995,7 +995,7 @@ func TestExecClient_CompleteVerdict_InProgressPresentEditsIssue(t *testing.T) {
 esac
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-", WithVerdictLabels(forge.ResearchVerdictLabels()))
+	c := NewExecClient("owner/repo", testLabels, WithVerdictLabels(forge.ResearchVerdictLabels()))
 	if err := c.CompleteVerdict("10", forge.Recommend); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1032,7 +1032,7 @@ func TestExecClient_TransitionState_GenuineFailureSurfaced(t *testing.T) {
 	prependFakeGH(t, `printf 'HTTP 403: Resource not accessible by integration\n' >&2
 exit 1`)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	err := c.TransitionState("10", forge.Dispatchable, forge.InProgress)
 	if err == nil {
 		t.Fatal("TransitionState: want error, got nil")
@@ -1055,7 +1055,7 @@ func TestExecClient_CompleteVerdict_GenuineEditFailureSurfaced(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-", WithVerdictLabels(forge.ResearchVerdictLabels()))
+	c := NewExecClient("owner/repo", testLabels, WithVerdictLabels(forge.ResearchVerdictLabels()))
 	err := c.CompleteVerdict("10", forge.Recommend)
 	if err == nil {
 		t.Fatal("CompleteVerdict: want error, got nil")
@@ -1074,7 +1074,7 @@ func TestExecClient_TransitionState_ClaimStripsStaleLabels(t *testing.T) {
 		t.Run(label, func(t *testing.T) {
 			dir := prependFakeGH(t, fakeGHClaimPrecondition)
 
-			c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+			c := NewExecClient("owner/repo", testLabels)
 			if err := c.TransitionState("10", forge.Dispatchable, forge.InProgress); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -1099,7 +1099,7 @@ func TestExecClient_TransitionState_ClaimStripsStaleLabels(t *testing.T) {
 func TestExecClient_TransitionState_NonClaimTransitionUnchanged(t *testing.T) {
 	dir := prependFakeGH(t, "")
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	if err := c.TransitionState("10", forge.InProgress, forge.Failed); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1168,7 +1168,7 @@ func TestExecClient_TransitionState_TransitionRemoveLabelsMatchDispatchWorkflow(
 		"claim-remove-labels")
 
 	dir := prependFakeGH(t, fakeGHClaimPrecondition)
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	if err := c.TransitionState("10", forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1194,7 +1194,7 @@ func TestProbe_PositionalSlug(t *testing.T) {
 	// this test does not care about.
 	dir := prependFakeGH(t, "")
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	c.Probe() //nolint:errcheck
 
 	// call-01.txt is the `gh repo view` invocation; call-00.txt is gh auth status.
@@ -1227,7 +1227,7 @@ func TestProbe_StderrSurfaced(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	_, err := c.Probe()
 	if err == nil {
 		t.Fatal("want error, got nil")
@@ -1251,7 +1251,7 @@ func TestFailureDetail_GraphQLArgShape(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	detail, err := c.FailureDetail("https://github.com/owner/repo/pull/42")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1290,7 +1290,7 @@ func TestFailureDetail_GraphQLFailureSurfacesStderr(t *testing.T) {
 exit 1
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	_, err := c.FailureDetail("https://github.com/owner/repo/pull/42")
 	if err == nil {
 		t.Fatal("FailureDetail: want error, got nil")
@@ -1312,7 +1312,7 @@ elif [ "$1" = "api" ]; then
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	stale, err := c.NeedsUpdate("https://github.com/owner/repo/pull/42")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1343,7 +1343,7 @@ elif [ "$1" = "api" ]; then
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	stale, err := c.NeedsUpdate("https://github.com/owner/repo/pull/42")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1415,7 +1415,7 @@ if [ "$1" = "api" ]; then
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	err := c.Merge("https://github.com/owner/repo/pull/42")
 	if err == nil {
 		t.Fatal("want error, got nil")
@@ -1440,7 +1440,7 @@ if [ "$1" = "api" ]; then
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	err := c.Merge("https://github.com/owner/repo/pull/42")
 	if !errors.Is(err, forge.ErrMergeConflict) {
 		t.Fatalf("want forge.ErrMergeConflict, got: %v", err)
@@ -1460,7 +1460,7 @@ if [ "$1" = "api" ]; then
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	err := c.Merge("https://github.com/owner/repo/pull/42")
 	if err == nil {
 		t.Fatal("want error, got nil")
@@ -1476,7 +1476,7 @@ fi
 // A transient stderr (a 502 from GitHub) is classified from the text alone, so
 // a caller can detect it without querying the PR's mergeable state.
 func TestClassifyMergeFailure_TransientStderrWrapsErrMergeTransient(t *testing.T) {
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	mergeErr := errors.New("exit status 1")
 	err := c.classifyMergeFailure("https://github.com/owner/repo/pull/42", mergeErr, "HTTP 502: Bad Gateway (https://api.github.com/graphql)\n")
 	if !errors.Is(err, forge.ErrMergeTransient) {
@@ -1486,7 +1486,7 @@ func TestClassifyMergeFailure_TransientStderrWrapsErrMergeTransient(t *testing.T
 
 // An auth failure is not retryable and must not classify as transient.
 func TestClassifyMergeFailure_NonTransientNonConflictStderrDoesNotWrapErrMergeTransient(t *testing.T) {
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	mergeErr := errors.New("exit status 1")
 	err := c.classifyMergeFailure("https://github.com/owner/repo/pull/42", mergeErr, "HTTP 401: Bad credentials (https://api.github.com/graphql)\n")
 	if errors.Is(err, forge.ErrMergeTransient) {
@@ -1503,7 +1503,7 @@ func TestMarkReady_AlreadyReadyIsIdempotentNoOp(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	if err := c.MarkReady("https://github.com/owner/repo/pull/42"); err != nil {
 		t.Fatalf("MarkReady on an already-ready PR must be a no-op, got: %v", err)
 	}
@@ -1583,7 +1583,7 @@ func TestMarkReady_GenuineFailureSurfaced(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	err := c.MarkReady("https://github.com/owner/repo/pull/42")
 	if err == nil {
 		t.Fatal("want error, got nil")
@@ -1602,7 +1602,7 @@ func TestMarkDraft_AlreadyDraftIsIdempotentNoOp(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	if err := c.MarkDraft("https://github.com/owner/repo/pull/42"); err != nil {
 		t.Fatalf("MarkDraft on an already-draft PR must be a no-op, got: %v", err)
 	}
@@ -1615,7 +1615,7 @@ func TestMarkDraft_GenuineFailureSurfaced(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	err := c.MarkDraft("https://github.com/owner/repo/pull/42")
 	if err == nil {
 		t.Fatal("want error, got nil")
@@ -1639,7 +1639,7 @@ if [ "$1" = "issue" ] && [ "$2" = "close" ]; then
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	if err := c.CloseMergedIssue("42"); err != nil {
 		t.Fatalf("CloseMergedIssue on an already-closed issue must be a no-op, got: %v", err)
 	}
@@ -1657,7 +1657,7 @@ if [ "$1" = "issue" ] && [ "$2" = "close" ]; then
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	if err := c.CloseMergedIssue("42"); err != nil {
 		t.Fatalf("CloseMergedIssue on an open issue: %v", err)
 	}
@@ -1691,7 +1691,7 @@ if [ "$1" = "issue" ] && [ "$2" = "close" ]; then
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	err := c.CloseMergedIssue("42")
 	if err == nil {
 		t.Fatal("want error, got nil")
@@ -1713,7 +1713,7 @@ if [ "$1" = "issue" ] && [ "$2" = "close" ]; then
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	err := c.CloseMergedIssue("42")
 	if err == nil {
 		t.Fatal("CloseMergedIssue: want error, got nil")
@@ -1728,7 +1728,7 @@ func TestExecClient_Comment_GenuineFailureSurfaced(t *testing.T) {
 	prependFakeGH(t, `printf 'HTTP 403: Resource not accessible by integration\n' >&2
 exit 1`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	err := c.Comment("10", "hello")
 	if err == nil {
 		t.Fatal("Comment: want error, got nil")
@@ -1741,14 +1741,14 @@ exit 1`)
 // forge.HostPostedIssueFiler closes the read-only capability gate's
 // issue-filing axis (issue #2028).
 func TestExecClient_ImplementsHostPostedIssueFiler(t *testing.T) {
-	var _ forge.HostPostedIssueFiler = NewExecClient("owner/repo", testLabels, "agent/issue-")
+	var _ forge.HostPostedIssueFiler = NewExecClient("owner/repo", testLabels)
 }
 
 // forge.GithubTracker is the positive marker settle's ensureClosesReference
 // uses to scope its "Closes #N" injection to GitHub-hosted PRs, never forgejo,
 // whose issue numbers live in a foreign namespace (issue #2341).
 func TestExecClient_ImplementsGithubTracker(t *testing.T) {
-	var _ forge.GithubTracker = NewExecClient("owner/repo", testLabels, "agent/issue-")
+	var _ forge.GithubTracker = NewExecClient("owner/repo", testLabels)
 }
 
 // forge.MergeCloser is settle's deterministic post-merge close backstop (issue
@@ -1757,8 +1757,8 @@ func TestExecClient_ImplementsGithubTracker(t *testing.T) {
 // let an ISSUE_TRACKER=local plus CODE_FORGE=github pairing close a local
 // issue through the wrong path.
 func TestExecClient_ImplementsMergeCloser(t *testing.T) {
-	var _ forge.MergeCloser = NewExecClient("owner/repo", testLabels, "agent/issue-")
-	if _, ok := any(NewExecClient("owner/repo", testLabels, "agent/issue-")).(forge.IssueCloser); ok {
+	var _ forge.MergeCloser = NewExecClient("owner/repo", testLabels)
+	if _, ok := any(NewExecClient("owner/repo", testLabels)).(forge.IssueCloser); ok {
 		t.Error("ExecClient satisfies forge.IssueCloser, want it hidden")
 	}
 }
@@ -1770,7 +1770,7 @@ func TestExecClient_PostIssue_ReturnsURL(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	url, err := c.PostIssue("a title", "a body", []string{"ready-for-agent"})
 	if err != nil {
 		t.Fatalf("PostIssue: %v", err)
@@ -1790,7 +1790,7 @@ func TestExecClient_PostIssue_ArgsCarryTitleBodyAndOneLabelFlagPerLabel(t *testi
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	if _, err := c.PostIssue("a title", "a body", []string{"ready-for-agent", "agent-review-finding"}); err != nil {
 		t.Fatalf("PostIssue: %v", err)
 	}
@@ -1819,7 +1819,7 @@ func TestExecClient_PostIssue_GenuineFailureSurfaced(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	_, err := c.PostIssue("a title", "a body", nil)
 	if err == nil {
 		t.Fatal("want error, got nil")
@@ -1840,7 +1840,7 @@ func TestExecClient_PostIssue_ErrorEmptyStderrNoTrailingColon(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	_, err := c.PostIssue("a title", "a body", nil)
 	if err == nil {
 		t.Fatal("PostIssue: want error, got nil")
@@ -2089,7 +2089,7 @@ func TestGhCommandErr_RateLimitedStderrWrapsErrRateLimit(t *testing.T) {
 // backlogDedupIndex's capability path (issue #3609 review) needs bodies and
 // the newest issues, not ListOpenIssues's unlabelled/oldest-first page.
 func TestExecClient_ImplementsLabeledBacklogLister(t *testing.T) {
-	var _ forge.LabeledBacklogLister = NewExecClient("owner/repo", testLabels, "agent/issue-")
+	var _ forge.LabeledBacklogLister = NewExecClient("owner/repo", testLabels)
 }
 
 // ListIssuesWithLabels must request body (dedup needs the hidden marker
@@ -2108,7 +2108,7 @@ func TestExecClient_ListIssuesWithLabels(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	issues, err := c.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding", "agent-research-finding"})
 	if err != nil {
 		t.Fatalf("ListIssuesWithLabels: %v", err)
@@ -2165,7 +2165,7 @@ func TestExecClient_ListIssuesWithLabels_DecodesCloseFacts(t *testing.T) {
 		`{"number":5,"title":"e","body":"","labels":[],"stateReason":"","closedAt":"0001-01-01T00:00:00Z"}`+
 		`]'`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	issues, err := c.ListIssuesWithLabels(forge.IssueClosed, []string{"agent-tuning-finding"})
 	if err != nil {
 		t.Fatalf("ListIssuesWithLabels: %v", err)
@@ -2201,7 +2201,7 @@ func TestExecClient_ListIssuesWithLabels_DecodesReopened(t *testing.T) {
 		`{"number":3,"title":"c","body":"","labels":[],"stateReason":"","closedAt":null}`+
 		`]'`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	issues, err := c.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-tuning-finding"})
 	if err != nil {
 		t.Fatalf("ListIssuesWithLabels: %v", err)
@@ -2236,7 +2236,7 @@ func TestExecClient_ListIssuesWithLabels_PartialFailureReturnsSucceededLabels(t 
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	issues, err := c.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding", "agent-research-finding"})
 	if err != nil {
 		t.Fatalf("ListIssuesWithLabels: want nil error on partial failure, got %v", err)
@@ -2253,7 +2253,7 @@ func TestExecClient_ListIssuesWithLabels_AllFailuresReturnsError(t *testing.T) {
 	prependFakeGH(t, `echo 'boom' >&2
 exit 1`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	_, err := c.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding", "agent-research-finding"})
 	if err == nil {
 		t.Fatal("ListIssuesWithLabels: want error when every label fails, got nil")
@@ -2272,7 +2272,7 @@ func TestExecClient_ListIssuesWithLabels_NewestFirst(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	issues, err := c.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding", "agent-research-finding"})
 	if err != nil {
 		t.Fatalf("ListIssuesWithLabels: %v", err)
@@ -2287,7 +2287,7 @@ esac`)
 func TestExecClient_ListIssuesWithLabels_NoLabelsReturnsEmpty(t *testing.T) {
 	prependFakeGH(t, `exit 1`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	issues, err := c.ListIssuesWithLabels(forge.IssueOpen, nil)
 	if err != nil {
 		t.Fatalf("ListIssuesWithLabels(nil): %v", err)
@@ -2302,7 +2302,7 @@ func TestExecClient_ListIssuesWithLabels_NoLabelsReturnsEmpty(t *testing.T) {
 func TestExecClient_ListIssuesWithLabels_OpenStateArgv(t *testing.T) {
 	dir := prependFakeGH(t, `printf '[]'`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	if _, err := c.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding"}); err != nil {
 		t.Fatalf("ListIssuesWithLabels: %v", err)
 	}
@@ -2325,7 +2325,7 @@ func TestExecClient_ListIssuesWithLabels_OpenStateArgv(t *testing.T) {
 func TestExecClient_ListIssuesWithLabels_ClosedStateArgv(t *testing.T) {
 	dir := prependFakeGH(t, `printf '[]'`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	if _, err := c.ListIssuesWithLabels(forge.IssueClosed, []string{"agent-review-finding"}); err != nil {
 		t.Fatalf("ListIssuesWithLabels: %v", err)
 	}
@@ -2349,7 +2349,7 @@ func TestExecClient_ListIssuesWithLabels_ClosedStateArgv(t *testing.T) {
 func TestExecClient_ListIssuesWithLabels_UnsupportedStateErrorsWithoutInvokingGH(t *testing.T) {
 	dir := prependFakeGH(t, `echo 'should not run' >&2; exit 1`)
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
 	_, err := c.ListIssuesWithLabels(forge.IssueMerged, []string{"agent-review-finding"})
 	if err == nil {
 		t.Fatal("ListIssuesWithLabels(IssueMerged): want error, got nil")
@@ -2373,7 +2373,7 @@ func TestExecClient_ListIssues_AscendingWithLabels(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	issues, err := c.ListIssues(forge.Dispatchable)
 	if err != nil {
 		t.Fatalf("ListIssues: %v", err)
@@ -2398,7 +2398,7 @@ func TestExecClient_ListIssues_ParseErrorNamesSource(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	if _, err := c.ListIssues(forge.Dispatchable); err == nil {
 		t.Fatal("ListIssues: want error on malformed JSON, got nil")
 	} else if !strings.Contains(err.Error(), "parse gh issue list") {
@@ -2426,7 +2426,7 @@ JSON
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	for _, tc := range []struct {
 		name string
 		list func() ([]forge.Issue, error)
@@ -2456,7 +2456,7 @@ esac`)
 func TestExecClient_AddLabels_OneCallRepeatedFlags(t *testing.T) {
 	dir := prependFakeGH(t, "")
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	if err := c.AddLabels("10", []string{"agent-butler-finding", "agent-butler-patch"}); err != nil {
 		t.Fatalf("AddLabels: %v", err)
 	}
@@ -2490,7 +2490,7 @@ func TestExecClient_AddLabels_GenuineFailureSurfaced(t *testing.T) {
 	prependFakeGH(t, `printf 'HTTP 403: Resource not accessible by integration\n' >&2
 exit 1`)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	c := NewExecClient("owner/repo", testLabels)
 	err := c.AddLabels("10", []string{"ready-for-agent"})
 	if err == nil {
 		t.Fatal("AddLabels: want error, got nil")
