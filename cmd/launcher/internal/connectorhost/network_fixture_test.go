@@ -29,6 +29,10 @@ func loadNetworkFixture(t *testing.T, wasm string) (*connectorhost.Connector, *b
 func loadNetworkFixtureWith(t *testing.T, wasm string, tweak func(*connectorhost.Network)) (c *connectorhost.Connector, b *backend, audit *bytes.Buffer, params map[string]string) {
 	t.Helper()
 	b = newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			fmt.Fprint(w, strings.Repeat("x", connectorhost.MaxHTTPResponse+1))
+			return
+		}
 		fmt.Fprint(w, "scripted "+r.URL.Path)
 	})
 	audit = &bytes.Buffer{}
@@ -77,6 +81,7 @@ func TestNetworkFixtureRefusesUndeclaredRequestsUnsent(t *testing.T) {
 		{"network-host.wasm", "GET", func(*backend) string { return "undeclared.invalid" }, "/repos/x"},
 		{"network-method.wasm", "DELETE", (*backend).host, "/repos/x"},
 		{"network-path.wasm", "GET", (*backend).host, "/admin"},
+		{"network-write-path.wasm", "POST", (*backend).host, "/admin"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.wasm, func(t *testing.T) {
@@ -101,6 +106,35 @@ func TestNetworkFixtureRefusesUndeclaredRequestsUnsent(t *testing.T) {
 				t.Errorf("second call err = %v, want ErrUnusable", err)
 			}
 		})
+	}
+}
+
+// A write whose answer is over the response cap fails closed: the Connector
+// gets no body and the request, which did reach the backend, is audited once.
+func TestNetworkFixtureOversizedWriteResponseFailsClosed(t *testing.T) {
+	c, b, audit, params := loadNetworkFixtureWith(t, "network-write-oversize.wasm", func(n *connectorhost.Network) {
+		n.Routes = append(n.Routes, connectorhost.Route{Method: "PUT", Host: n.Routes[0].Host, Path: "/repos"})
+	})
+	var out fetched
+	err := c.Call(context.Background(), "fetch", params, &out)
+	if !errors.Is(err, connectorhost.ErrCall) || !errors.Is(err, connectorhost.ErrResponseTooLarge) {
+		t.Fatalf("err = %v, want ErrCall and ErrResponseTooLarge", err)
+	}
+	if out.Body != "" || out.Status != 0 {
+		t.Errorf("fetched %+v, want nothing to reach the Connector", out)
+	}
+	if b.hits.Load() != 1 || b.last.Load().Method != http.MethodPut {
+		t.Errorf("backend saw %d requests, want the one PUT", b.hits.Load())
+	}
+	lines := auditLines(t, audit)
+	if len(lines) != 1 || lines[0].Decision != connectorhost.DecisionFailed || lines[0].Method != "PUT" || lines[0].Path != "/repos/x" || lines[0].Connector != "fixture-network" {
+		t.Fatalf("audit = %+v, want one failed PUT entry", lines)
+	}
+	if !strings.Contains(lines[0].Reason, connectorhost.ErrResponseTooLarge.Error()) {
+		t.Errorf("audit reason %q does not name %v", lines[0].Reason, connectorhost.ErrResponseTooLarge)
+	}
+	if err := c.Call(context.Background(), "fetch", params, new(fetched)); !errors.Is(err, connectorhost.ErrUnusable) {
+		t.Errorf("second call err = %v, want ErrUnusable", err)
 	}
 }
 

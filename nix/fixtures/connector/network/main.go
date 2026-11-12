@@ -3,11 +3,13 @@
 // link-time mode (-ldflags=-X=main.mode=<mode>; the sandbox has no env or args)
 // makes it hostile:
 //
-//	""         asks for params.url as given
-//	host       the same path on an undeclared host
-//	method     DELETE instead of the method given
-//	path       an undeclared path on the same host
-//	malformed  a declared request, then a result of the wrong shape
+//	""              asks for params.url as given
+//	host            the same path on an undeclared host
+//	method          DELETE instead of the method given
+//	path            an undeclared path on the same host
+//	malformed       a declared request, then a result of the wrong shape
+//	write-path      a POST with a body to an undeclared path on the same host
+//	write-oversize  a PUT with a body to params.url, which the test declares
 //
 // The test supplies the url because the scripted backend's port is dynamic.
 package main
@@ -56,6 +58,12 @@ func fetch(raw json.RawMessage) (any, error) {
 	case "path":
 		u.Path = "/admin"
 		req.URL = u.String()
+	case "write-path":
+		u.Path = "/admin"
+		req.URL = u.String()
+		req.Method, req.Body = "POST", "payload"
+	case "write-oversize":
+		req.Method, req.Body = "PUT", "payload"
 	}
 	resp, err := connector.HTTPRequest(req)
 	if err != nil {

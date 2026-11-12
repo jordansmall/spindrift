@@ -42,7 +42,7 @@ pkgs.runCommand "connector-wasm-fixtures" { nativeBuildInputs = [ pkgs.go ]; } '
     build hostile-$mode.wasm -ldflags=-X=main.mode=$mode ./hostile
   done
   cd ../connector
-  for mode in host method path malformed; do
+  for mode in host method path malformed write-path write-oversize; do
     build network-$mode.wasm -ldflags=-X=main.mode=$mode ./network
   done
 ''
