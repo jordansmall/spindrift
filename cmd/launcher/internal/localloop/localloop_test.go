@@ -287,7 +287,7 @@ func TestWire_ComposedLoop_HappyPath(t *testing.T) {
 	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
-	})
+	}, "agent/issue-")
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestWire_ComposedLoop_EmptyTitleSanitizesToSlug(t *testing.T) {
 	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
-	})
+	}, "agent/issue-")
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -445,7 +445,7 @@ func TestWire_ComposedLoop_GarbageParentUsesTitleNaming(t *testing.T) {
 	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
-	})
+	}, "agent/issue-")
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -517,7 +517,7 @@ func TestWire_ComposedLoop_HealsStuckBranchRefLanding(t *testing.T) {
 	res, err := reconcile.Run(it, cf, nil, forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{}), func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
-	})
+	}, "agent/issue-")
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -602,7 +602,7 @@ func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
-	})
+	}, "agent/issue-")
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -722,7 +722,7 @@ func TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands(t *testing.T) 
 	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
-	})
+	}, "agent/issue-")
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -788,7 +788,7 @@ func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
 	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
-	})
+	}, "agent/issue-")
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -884,7 +884,7 @@ func TestWire_ComposedLoop_BroadTicketIssueExcludedFromOwnSeams(t *testing.T) {
 			res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, func(num string) forge.SeedScope {
 				p := lw.ResolveParent(num)
 				return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
-			})
+			}, "agent/issue-")
 			if err != nil {
 				t.Fatalf("reconcile.Run: %v", err)
 			}
@@ -982,7 +982,7 @@ func TestWire_ComposedLoop_StuckBroadTicketLandingSurfacesAnyway(t *testing.T) {
 	res, err := reconcile.Run(it, seamCF, nil, cfg.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
-	})
+	}, "agent/issue-")
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -1080,7 +1080,7 @@ func TestWire_ComposedLoop_DegenerateAllMembersCollide_KeepsBothMembers(t *testi
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
 	}
-	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, scopeFor)
+	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, scopeFor, "agent/issue-")
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -1104,7 +1104,7 @@ func TestWire_ComposedLoop_DegenerateAllMembersCollide_KeepsBothMembers(t *testi
 	s.Settle(dispatch.NewFake(), numB, 0, dispatch.Result{
 		Resolved: outcome.Resolved{Found: true, Outcome: outcome.Outcome{Issue: numB, Landing: branchB, Status: "ready"}},
 	})
-	res, err = reconcile.Run(it, cf, nil, cfg.Capabilities, scopeFor)
+	res, err = reconcile.Run(it, cf, nil, cfg.Capabilities, scopeFor, "agent/issue-")
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -1180,7 +1180,7 @@ func TestWire_ComposedLoop_BroadTicketIssuePresent_OpenSeamNamesSeam(t *testing.
 	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
-	})
+	}, "agent/issue-")
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -1324,7 +1324,7 @@ func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.
 	res, err := reconcile.Run(it, cfA, nil, cfgA.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
-	})
+	}, "agent/issue-")
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -1500,7 +1500,7 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 	res, err := reconcile.Run(it, cf02, nil, cfg02.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
-	})
+	}, "agent/issue-")
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -1786,7 +1786,7 @@ func TestWire_ComposedLoop_AlreadyResolvedClosesIssue(t *testing.T) {
 	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
-	})
+	}, "agent/issue-")
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}

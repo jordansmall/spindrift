@@ -46,7 +46,8 @@ type LivenessProbe interface {
 // a local Code Forge with no PR (ADR 0033, issue #2151). It then resets a dead
 // InProgress issue (#600), skipped on local, which has no PR to key that off.
 // With no IssueCloser or query seam, Run returns empty, not an error.
-func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe, caps forge.Capabilities, scopeFor func(num string) forge.SeedScope) (Result, error) {
+// branchPrefix is BRANCH_PREFIX: every agent branch is named from it.
+func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe, caps forge.Capabilities, scopeFor func(num string) forge.SeedScope, branchPrefix string) (Result, error) {
 	closer := caps.IssueCloser
 	if closer == nil {
 		return Result{}, nil
@@ -67,8 +68,8 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe, caps forge
 	}
 
 	var res Result
-	prc := prReconciler{closer: closer, pr: pr, cf: cf, lr: lr, lpr: lpr, flagger: flagger}
-	llc := localLandingReconciler{closer: closer, container: container, repair: repair, lr: lr, lpr: lpr, cf: cf, scopeFor: scopeFor}
+	prc := prReconciler{closer: closer, pr: pr, lr: lr, lpr: lpr, flagger: flagger, branchPrefix: branchPrefix}
+	llc := localLandingReconciler{closer: closer, container: container, repair: repair, lr: lr, lpr: lpr, scopeFor: scopeFor, branchPrefix: branchPrefix}
 	for _, iss := range issues {
 		if pr != nil {
 			if err := prc.reconcile(&res, iss); err != nil {
@@ -89,7 +90,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe, caps forge
 		return res, fmt.Errorf("reconcile: list in-progress issues: %w", err)
 	}
 	for _, iss := range inProgress {
-		orphaned, err := isOrphaned(pr, cf, lp, iss.Number)
+		orphaned, err := isOrphaned(pr, cf, lp, branchPrefix, iss.Number)
 		if err != nil {
 			return res, fmt.Errorf("reconcile issue %s: liveness check: %w", iss.Number, err)
 		}
@@ -108,10 +109,11 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe, caps forge
 type prReconciler struct {
 	closer  forge.IssueCloser
 	pr      forge.PRForge
-	cf      forge.CodeForge
 	lr      forge.LandingRecorder
 	lpr     forge.LandingPassRecorder
 	flagger forge.AbandonedFlagger
+	// branchPrefix is BRANCH_PREFIX, naming the issue's agent branch.
+	branchPrefix string
 }
 
 // reconcile checks one open issue against live PR state: it closes the issue
@@ -128,7 +130,7 @@ func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 		if p.lr == nil {
 			return nil
 		}
-		url, found, err := p.resolveBranch(iss.Number, p.cf.AgentBranch(iss.Number))
+		url, found, err := p.resolveBranch(iss.Number, forge.AgentBranchName(p.branchPrefix, iss.Number))
 		if err != nil || !found {
 			return err
 		}
@@ -147,7 +149,7 @@ func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 			// The host only ever records cf.AgentBranch as a bare branch, but a
 			// record from before issue #5005 may carry a Box-supplied one, so
 			// trust it only when it names this issue's own agent branch.
-			if !ownsAgentBranch(p.cf, iss, parsed.Branch) {
+			if !ownsAgentBranch(p.branchPrefix, iss, parsed.Branch) {
 				return nil
 			}
 			url, found, err := p.resolveBranch(iss.Number, parsed.Branch)
@@ -221,8 +223,8 @@ func clearLandingPass(lpr forge.LandingPassRecorder, num string) {
 
 // ownsAgentBranch reports whether a recorded bare branch is iss's own agent
 // branch, printing the unverifiable line when it is not (issue #5005).
-func ownsAgentBranch(cf forge.CodeForge, iss forge.Issue, branch string) bool {
-	want := cf.AgentBranch(iss.Number)
+func ownsAgentBranch(branchPrefix string, iss forge.Issue, branch string) bool {
+	want := forge.AgentBranchName(branchPrefix, iss.Number)
 	if branch == want {
 		return true
 	}
@@ -250,8 +252,9 @@ type localLandingReconciler struct {
 	repair    forge.LandingRepair
 	lr        forge.LandingRecorder
 	lpr       forge.LandingPassRecorder
-	cf        forge.CodeForge
 	scopeFor  func(num string) forge.SeedScope
+	// branchPrefix is BRANCH_PREFIX, naming the issue's agent branch.
+	branchPrefix string
 }
 
 // reconcile checks one open issue's recorded landing, parsed into a typed
@@ -283,7 +286,7 @@ func (l localLandingReconciler) reconcile(res *Result, iss forge.Issue) error {
 	case forge.LandingBranchRef:
 		// Same trust rule as the PR path: a foreign branch (even the integration
 		// branch itself, trivially contained) must not close or repair the issue.
-		if !ownsAgentBranch(l.cf, iss, landing.Branch) {
+		if !ownsAgentBranch(l.branchPrefix, iss, landing.Branch) {
 			return nil
 		}
 		return l.reconcileBranchRef(res, iss, landing)
@@ -345,7 +348,7 @@ func (l localLandingReconciler) discover(res *Result, iss forge.Issue) error {
 	if l.lr == nil || l.repair == nil {
 		return nil
 	}
-	branch := l.cf.AgentBranch(iss.Number)
+	branch := forge.AgentBranchName(l.branchPrefix, iss.Number)
 	landing := forge.Landing{Kind: forge.LandingBranchRef, Branch: branch}
 	scope := l.scopeFor(iss.Number)
 	contained, err := l.container.LandingContained(landing, scope)
@@ -380,8 +383,8 @@ func (l localLandingReconciler) close(res *Result, num string) error {
 // when the container runtime answered, no live container. A closed unmerged PR
 // withholds the reset rather than re-dispatching rejected work; the branch
 // check catches the die-after-push-before-PR window a PR-only check misses.
-func isOrphaned(pr forge.PRForge, cf forge.CodeForge, lp LivenessProbe, num string) (bool, error) {
-	branch := cf.AgentBranch(num)
+func isOrphaned(pr forge.PRForge, cf forge.CodeForge, lp LivenessProbe, branchPrefix, num string) (bool, error) {
+	branch := forge.AgentBranchName(branchPrefix, num)
 	if _, found, err := pr.PRForBranch(branch); err != nil {
 		return false, err
 	} else if found {
