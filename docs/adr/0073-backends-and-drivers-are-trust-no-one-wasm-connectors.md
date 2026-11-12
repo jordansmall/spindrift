@@ -302,3 +302,19 @@ The comparator runs after each Pass in `driver-exec`, against the native
 Strategy that stays authoritative, and its records are `shadow_divergence` and
 `shadow_summary` host ops in the Pass log, which CI already uploads. The
 cut-over count and its recipe are in the reference's Shadow mode section.
+
+## Amendment (issue #6805): a Connector's backend row reaches the launcher
+
+`spindrift.connectors.<name>.backend` carries `{ module; routes; credential; }`,
+and the flake module passes the rows to `mkHarness` as `backendRows`, with
+`credential` resolved to its env var; it must name a secret, host-only
+(`boxEnv = false`) knob the Connector itself owns, so a Connector never gets a
+core credential such as the forge token. Evaluation checks the Route table with
+the registry-route rules the Connector host applies at load, naming the
+Connector and the route, and refuses a row that would replace the built-in `git`
+or `local` backend. The rows travel in the launcher input
+document's `backends` section; the launcher and daemon validate and store the
+rows. Binding a module to its Route table and attaching the credential
+host-side happen once a Connector backend is selected as the tracker or forge,
+which is later work (issues #6807 and #6810). A backend without a row is still
+built from the generated registry.

@@ -169,3 +169,11 @@ recorded:
 The input document may carry a `drivers` section: the Descriptor facts and
 wasm module path of each Driver row a Connector contributes from outside the
 core registry (ADR 0073). It is absent when there are none.
+
+## Amendment (issue #6805): a `backends` section
+
+The input document may also carry a `backends` section: the name, wasm module
+path, Route table and credential env var of each network backend a Connector
+contributes (ADR 0073). The launcher and the daemon apply it; the Box's binaries
+do not, since the Box never brokers a forge credential. It is absent when there
+are none, and the document is then unchanged.
