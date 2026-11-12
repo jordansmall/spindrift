@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"slices"
 	"strings"
 	"sync"
@@ -105,9 +106,10 @@ var (
 // routes, a name that is a built-in backend and an invalid Route table are
 // errors, as is an invalid non-empty accepted baseline. A row's BaseHost routes
 // are resolved from lookup(BaseEnv) first, so validation sees the concrete
-// table; an unset, plaintext, userinfo-bearing or otherwise malformed base URL
-// is an error, as is BaseHost without a BaseEnv. Rows are validated whole
-// before any is stored.
+// table (resolveBase says when an unusable base is an error); BaseHost without
+// a BaseEnv is an error. The credential is only required at request time (see
+// Load).
+// Rows are validated whole before any is stored.
 func Use(raw json.RawMessage, lookup func(string) string) error {
 	var rows []Row
 	if len(bytes.TrimSpace(raw)) != 0 {
@@ -118,19 +120,18 @@ func Use(raw json.RawMessage, lookup func(string) string) error {
 		}
 	}
 	seen := map[string]bool{}
-	for i := range rows {
-		resolved, err := resolveBase(rows[i], lookup)
+	next := make(map[string]Row, len(rows))
+	for _, row := range rows {
+		resolved, unconfigured, err := resolveBase(row, lookup)
 		if err == nil {
-			rows[i] = resolved
-			err = validate(rows[i], seen)
+			err = validate(resolved, seen)
 		}
 		if err != nil {
 			return fmt.Errorf("backend rows: %w", err)
 		}
-	}
-	next := make(map[string]Row, len(rows))
-	for _, row := range rows {
-		next[row.Name] = row
+		if !unconfigured {
+			next[resolved.Name] = resolved
+		}
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -138,37 +139,61 @@ func Use(raw json.RawMessage, lookup func(string) string) error {
 	return nil
 }
 
+// unsetHost is the placeholder base host an unconfigured non-Shadow row
+// resolves against, so its routes still validate whole before it is dropped.
+const unsetHost = "unset.invalid"
+
 // resolveBase returns row with every BaseHost route host and path prefix
 // replaced from the base URL its BaseEnv names. It runs before validate so
 // ValidateRoutes judges the table the Connector will actually be held to.
-func resolveBase(row Row, lookup func(string) string) (Row, error) {
+// unconfigured reports an unset or unusable base on a non-Shadow row: it
+// resolves against unsetHost and the caller drops it. A Consumer importing every
+// Connector need not configure a tracker it does not use, and the row shares the
+// native adapter's base knob, which accepts plain http, so it must not fail a
+// Consumer that does not read through the Connector yet; a Shadow row opted in,
+// so every base error stands.
+func resolveBase(row Row, lookup func(string) string) (_ Row, unconfigured bool, _ error) {
 	uses := func(routes []connectorhost.Route) bool {
 		return slices.ContainsFunc(routes, func(r connectorhost.Route) bool { return r.Host == BaseHost })
 	}
 	if !uses(row.Routes) && !uses(row.AcceptedRoutes) {
-		return row, nil
+		return row, false, nil
 	}
 	if row.BaseEnv == "" {
-		return row, fmt.Errorf("backend %q: a route host is %s but the row has no baseEnv", row.Name, BaseHost)
+		return row, false, fmt.Errorf("backend %q: a route host is %s but the row has no baseEnv", row.Name, BaseHost)
 	}
 	raw := lookup(row.BaseEnv)
-	if raw == "" {
-		return row, fmt.Errorf("backend %q: %s is not set", row.Name, row.BaseEnv)
+	u, perr := url.Parse(raw)
+	if perr != nil {
+		u = &url.URL{} // url.Parse returns nil on error
 	}
-	u, err := url.Parse(raw)
+	prefix := strings.TrimSuffix(u.Path, "/")
+	var err error
 	switch {
-	case err != nil:
-		return row, fmt.Errorf("backend %q: %s is not a URL", row.Name, row.BaseEnv)
+	case raw == "":
+		err = fmt.Errorf("backend %q: %s is not set", row.Name, row.BaseEnv)
+	case perr != nil:
+		err = fmt.Errorf("backend %q: %s is not a URL", row.Name, row.BaseEnv)
 	case u.Scheme != "https":
-		return row, fmt.Errorf("backend %q: %s must be an https URL", row.Name, row.BaseEnv)
+		err = fmt.Errorf("backend %q: %s must be an https URL", row.Name, row.BaseEnv)
 	case u.User != nil:
-		return row, fmt.Errorf("backend %q: %s must not carry userinfo", row.Name, row.BaseEnv)
+		err = fmt.Errorf("backend %q: %s must not carry userinfo", row.Name, row.BaseEnv)
 	case u.RawPath != "":
-		return row, fmt.Errorf("backend %q: %s must not carry an escaped path", row.Name, row.BaseEnv)
+		err = fmt.Errorf("backend %q: %s must not carry an escaped path", row.Name, row.BaseEnv)
 	case strings.ContainsAny(raw, "?#"):
-		return row, fmt.Errorf("backend %q: %s must not carry a query or fragment", row.Name, row.BaseEnv)
+		err = fmt.Errorf("backend %q: %s must not carry a query or fragment", row.Name, row.BaseEnv)
+	case !bareHost(u):
+		err = fmt.Errorf("backend %q: %s must name a host", row.Name, row.BaseEnv)
+	case !canonicalPrefix(prefix):
+		err = fmt.Errorf("backend %q: %s must have a canonical path", row.Name, row.BaseEnv)
 	}
-	host, prefix := u.Host, strings.TrimSuffix(u.Path, "/")
+	if err != nil {
+		if row.Shadow {
+			return row, false, err
+		}
+		u, prefix, unconfigured = &url.URL{Scheme: "https", Host: unsetHost}, "", true
+	}
+	host := u.Host
 	apply := func(routes []connectorhost.Route) []connectorhost.Route {
 		out := slices.Clone(routes)
 		for i := range out {
@@ -186,7 +211,22 @@ func resolveBase(row Row, lookup func(string) string) (Row, error) {
 	}
 	row.Routes = apply(row.Routes)
 	row.AcceptedRoutes = apply(row.AcceptedRoutes)
-	return row, nil
+	return row, unconfigured, nil
+}
+
+// bareHost reports whether u names a host[:port] that Route.validate would
+// accept: url.Parse unescapes an IPv6 zone ("%25en0") into a host that no
+// longer re-parses to itself.
+func bareHost(u *url.URL) bool {
+	r, err := url.Parse("https://" + u.Host)
+	return err == nil && r.Host == u.Host && u.Hostname() != "" && !strings.HasSuffix(u.Host, ":")
+}
+
+// canonicalPrefix reports whether a base path prefix joins onto a route path to
+// a canonical path: "" or an absolute path with no empty or dot segments. "/" is
+// not, since prefix+"/rest" is "//rest".
+func canonicalPrefix(prefix string) bool {
+	return prefix == "" || prefix != "/" && path.Clean(prefix) == prefix
 }
 
 func validate(row Row, seen map[string]bool) error {
