@@ -48,6 +48,36 @@ let
   connectorDriverRows = lib.mapAttrs (_: r: r.driver) (
     lib.filterAttrs (_: r: r.driver != null) config.spindrift.connectors
   );
+  # The backend rows network Connectors register (ADR 0073, issue #6805), keyed
+  # by Connector name. `credential` names one of the Connector's own `knobs` and
+  # is resolved to its env var here. A core knob (ghToken) or a knob the Box
+  # sees is refused: the host attaches the credential to requests to the
+  # Connector's own routes, so a core secret would leak to it. The env is read
+  # through `envSchema`, not `knob.env`: its collision fold refuses a knob
+  # aliasing a core env var, and keeps a Connector's knob under its own key.
+  connectorBackendRows = lib.mapAttrs (
+    name: r:
+    let
+      key = r.backend.credential;
+      fail = why: throw "Connector '${name}': backend credential '${key}' ${why}";
+      knob =
+        r.knobs.${key}
+          or (fail "is not in this Connector's `knobs` (a core knob cannot be a backend credential)");
+      env =
+        if !(knob.secret or false) then
+          fail "is not a secret knob (`secret = true` required)"
+        else if (knob.boxEnv or false) != false then
+          fail "must be host-only (`boxEnv = false` required)"
+        else if !(knob ? env) then
+          fail "has no `env`"
+        else
+          config.spindrift.envSchema.${key}.env;
+    in
+    {
+      inherit (r.backend) module routes;
+      credentialEnv = env;
+    }
+  ) (lib.filterAttrs (_: r: r.backend != null) config.spindrift.connectors);
   # Connectors whose row asks for shadow mode (ADR 0073, issue #6797).
   shadowConnectors = lib.attrNames (lib.filterAttrs (_: r: r.shadow) config.spindrift.connectors);
 
@@ -430,6 +460,42 @@ in
                     Driver.
                   '';
                 };
+                backend = mkOption {
+                  type = types.nullOr (
+                    types.submodule {
+                      options = {
+                        module = mkOption {
+                          type = types.raw;
+                          description = "Function of pkgs returning the Connector's wasm file path.";
+                        };
+                        routes = mkOption {
+                          # Items stay raw: lib/connector-routes.nix words the errors.
+                          type = types.listOf types.raw;
+                          description = "The Connector's Route table, a list of `{ method; host; path; }`.";
+                        };
+                        credential = mkOption {
+                          type = types.str;
+                          description = "Env-schema key of the knob holding the Connector's bearer token.";
+                        };
+                      };
+                    }
+                  );
+                  default = null;
+                  description = ''
+                    The network Connector's backend row (ADR 0073, issue
+                    #6805): `{ module; routes; credential; }`. `module` is a
+                    function of pkgs returning the Connector's wasm file path,
+                    `routes` its Route table (a list of `{ method; host; path; }`
+                    validated at evaluation with the registry-route rules, so a
+                    blanket or non-canonical route fails the build naming this
+                    Connector), and `credential` the env-schema key of the knob
+                    holding its bearer token: one of this Connector's own
+                    `knobs`, secret and host-only (`boxEnv = false`), so a core
+                    knob such as the forge token is refused. Null declares no
+                    backend; a name equal to a built-in backend (git, local) is
+                    refused.
+                  '';
+                };
                 shadow = mkOption {
                   type = types.bool;
                   default = false;
@@ -590,6 +656,7 @@ in
       }
       // structuralArgs
       // lib.optionalAttrs (connectorDriverRows != { }) { driverRows = connectorDriverRows; }
+      // lib.optionalAttrs (connectorBackendRows != { }) { backendRows = connectorBackendRows; }
       // lib.optionalAttrs (shadowConnectors != [ ]) { shadowDrivers = shadowConnectors; }
       // lib.optionalAttrs (byNameModels != null) { byName = byNameModels; }
       // lib.optionalAttrs (runDefaults != { }) { defaults = runDefaults; };
