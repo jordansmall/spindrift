@@ -100,7 +100,7 @@ func (l *Listener) ListenAndServe(socketPath string) error {
 // loopback. A TCP port has no filesystem permissions of its own,
 // so Handler must already be gated (built with NewGatedHandler) -- serving an
 // ungated Handler here would let anything that can route to the host reach the
-// four routes with no secret at all, so this fails closed instead. Call Addr to
+// known routes with no secret at all, so this fails closed instead. Call Addr to
 // learn an ephemeral port's bound address.
 func (l *Listener) ListenAndServeTCP(addr string) error {
 	if l.Handler == nil || !l.Handler.gated {

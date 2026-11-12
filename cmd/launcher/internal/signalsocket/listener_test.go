@@ -69,7 +69,7 @@ func newTestListener(t *testing.T) (*Listener, *Buffer, *bytes.Buffer) {
 	t.Helper()
 	buf := New(Config{Consumes: []signalwire.Kind{signalwire.KindComment, signalwire.KindPRIntent, signalwire.KindIssueIntent}})
 	logw := &bytes.Buffer{}
-	l := &Listener{Handler: NewHandler(buf, logw)}
+	l := &Listener{Handler: NewHandler(buf, logw, nil)}
 	t.Cleanup(func() { _ = l.Close() })
 	return l, buf, logw
 }
@@ -80,7 +80,7 @@ func newGatedTestListener(t *testing.T, secret string) (*Listener, *Buffer, *byt
 	t.Helper()
 	buf := New(Config{Consumes: []signalwire.Kind{signalwire.KindComment, signalwire.KindPRIntent, signalwire.KindIssueIntent}})
 	logw := &bytes.Buffer{}
-	gh, err := NewGatedHandler(buf, logw, secret)
+	gh, err := NewGatedHandler(buf, logw, secret, nil)
 	if err != nil {
 		t.Fatalf("NewGatedHandler: %v", err)
 	}
@@ -274,14 +274,14 @@ func TestListener_TCPRejectsBadSecret(t *testing.T) {
 // fails at handler construction, before there is a listener to bind at all.
 func TestListener_TCPEmptySecretBindsNothing(t *testing.T) {
 	buf := New(Config{Consumes: []signalwire.Kind{signalwire.KindComment}})
-	if _, err := NewGatedHandler(buf, nil, ""); err == nil {
+	if _, err := NewGatedHandler(buf, nil, "", nil); err == nil {
 		t.Fatal("NewGatedHandler with an empty secret = nil, want an error")
 	}
 }
 
 // TestListener_TCPRefusesUngatedHandler pins ListenAndServeTCP's fail-closed
 // guard: serving TCP with a Handler built by NewHandler (unix, no gate) must
-// be refused rather than silently exposing the four routes with no secret.
+// be refused rather than silently exposing the known routes with no secret.
 func TestListener_TCPRefusesUngatedHandler(t *testing.T) {
 	l, _, _ := newTestListener(t)
 	if err := l.ListenAndServeTCP("127.0.0.1:0"); err == nil {
