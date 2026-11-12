@@ -20,27 +20,31 @@ const (
 // fails outside wasip1.
 var send = connector.HTTPRequest
 
-// get sends one GET and decodes a 2xx JSON body into out. The host attaches
-// the credential, so none is set here.
-func get(t tracker.Target, path string, out any) error {
-	resp, err := send(connector.Request{
-		Method: "GET",
-		URL:    t.API + path,
-		Headers: map[string]string{
-			"Accept":               "application/vnd.github+json",
-			"X-GitHub-Api-Version": "2022-11-28",
-		},
-	})
+// call sends one request to api+path and decodes a 2xx JSON body into out. The
+// host attaches the credential, so none is set here.
+func call(method, api, path string, body []byte, out any) error {
+	headers := map[string]string{
+		"Accept":               "application/vnd.github+json",
+		"X-GitHub-Api-Version": "2022-11-28",
+	}
+	if body != nil {
+		headers["Content-Type"] = "application/json"
+	}
+	resp, err := send(connector.Request{Method: method, URL: api + path, Headers: headers, Body: string(body)})
 	if err != nil {
 		return err
 	}
 	if resp.Status < 200 || resp.Status > 299 {
-		return fmt.Errorf("GET %s: status %d", path, resp.Status)
+		return fmt.Errorf("%s %s: status %d", method, path, resp.Status)
 	}
 	if err := json.Unmarshal(resp.Body, out); err != nil {
-		return fmt.Errorf("GET %s: decode: %w", path, err)
+		return fmt.Errorf("%s %s: decode: %w", method, path, err)
 	}
 	return nil
+}
+
+func get(t tracker.Target, path string, out any) error {
+	return call("GET", t.API, path, nil, out)
 }
 
 type rawIssue struct {
