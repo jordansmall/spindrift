@@ -105,6 +105,10 @@ type Dispatch struct {
 	// current attempt wrote at the head of its log, so logIsEmpty can still
 	// tell a Box that never produced output from one that ran.
 	attemptStampLen int64
+
+	// decodedLogs memoizes the Pass logs the host decodes for its post-attempt
+	// reads (see decoded).
+	decodedLogs decodedLogs
 }
 
 var _ Dispatcher = (*Dispatch)(nil)

@@ -105,7 +105,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 			}
 
 			var clsErr error
-			cls, clsErr = d.driver.ClassifyTransient(attemptLogPath)
+			cls, clsErr = d.classify(attemptLogPath)
 			if clsErr != nil {
 				fmt.Fprintf(os.Stderr, "    ?? #%s: classify error: %v\n", d.number, clsErr)
 				return Failed(Result{KilledBySignal: runner.KilledBySignal(err)})
@@ -187,7 +187,7 @@ func (d *Dispatch) successResult(logPath string) Result {
 	if resolved.Found && resolved.IsGenuineOrSynthetic() {
 		return d.outcomeResult(logPath, resolved)
 	}
-	cls, clsErr := d.driver.ClassifyTransient(logPath)
+	cls, clsErr := d.classify(logPath)
 	return Result{Classification: cls, ClassifyErr: clsErr}
 }
 
