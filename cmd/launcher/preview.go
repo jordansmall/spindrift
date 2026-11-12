@@ -90,7 +90,7 @@ func previewSelectiveList(c config, it forge.IssueTracker, cf forge.CodeForge, c
 		return err
 	}
 
-	kept, notices := evictUnmetBlockers(it, cf, caps, readiness, issues)
+	kept, notices := evictUnmetBlockers(it, caps, c.BranchPrefix, readiness, issues)
 	for _, n := range notices {
 		fmt.Fprintln(w, n)
 	}

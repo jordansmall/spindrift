@@ -93,6 +93,7 @@ func TestOverlapsInProgress_CandidateTouchesOfErrorReturnsNoCollision(t *testing
 func TestOverlapsInProgress_CollidesViaOpenPRChangedFiles(t *testing.T) {
 	c := baseConfig()
 	c.OverlapGate = "defer"
+	c.BranchPrefix = "agent/issue-"
 	branchPrefix := "agent/issue-"
 	fc := forge.NewFake(dispatchLabels(c, ""))
 	fc.BranchPrefix = branchPrefix
@@ -116,7 +117,7 @@ func TestPRTouchesOf_ReturnsOpenPRChangedFiles(t *testing.T) {
 	fc.SetPR("agent/issue-20", forge.PR{URL: "https://github.com/owner/repo/pull/20"})
 	fc.SetPRFiles("https://github.com/owner/repo/pull/20", []string{"lib/env-schema.nix"})
 
-	got := prTouchesOf(fc, "20")
+	got := prTouchesOf(fc, "agent/issue-", "20")
 	if len(got) != 1 || got[0] != "lib/env-schema.nix" {
 		t.Errorf("prTouchesOf = %v, want [lib/env-schema.nix]", got)
 	}
@@ -129,7 +130,7 @@ func TestPRTouchesOf_NonGithubForgeReturnsNil(t *testing.T) {
 	fc.SetPR("agent/issue-20", forge.PR{URL: "https://github.com/owner/repo/pull/20"})
 	fc.SetPRFiles("https://github.com/owner/repo/pull/20", []string{"lib/env-schema.nix"})
 
-	if got := prTouchesOf(fc.AsPushOnly(), "20"); got != nil {
+	if got := prTouchesOf(fc.AsPushOnly(), "agent/issue-", "20"); got != nil {
 		t.Errorf("prTouchesOf on a non-github forge = %v, want nil", got)
 	}
 }
@@ -137,7 +138,7 @@ func TestPRTouchesOf_NonGithubForgeReturnsNil(t *testing.T) {
 func TestPRTouchesOf_NoOpenPRReturnsNil(t *testing.T) {
 	fc := forge.NewFake()
 
-	if got := prTouchesOf(fc, "20"); got != nil {
+	if got := prTouchesOf(fc, "agent/issue-", "20"); got != nil {
 		t.Errorf("prTouchesOf with no open PR = %v, want nil", got)
 	}
 }
@@ -150,7 +151,7 @@ func TestPRTouchesOf_ListPRFilesErrorReturnsNil(t *testing.T) {
 	fc.SetPR("agent/issue-20", forge.PR{URL: "https://github.com/owner/repo/pull/20"})
 	fc.PRFilesErr = fmt.Errorf("boom")
 
-	if got := prTouchesOf(fc, "20"); got != nil {
+	if got := prTouchesOf(fc, "agent/issue-", "20"); got != nil {
 		t.Errorf("prTouchesOf on ListPRFiles error = %v, want nil", got)
 	}
 }
@@ -161,6 +162,7 @@ func TestPRTouchesOf_ListPRFilesErrorReturnsNil(t *testing.T) {
 func TestWaveOverlapCheck_TouchesOfErrorFallsBackToPRFilesOnly(t *testing.T) {
 	c := baseConfig()
 	c.OverlapGate = "defer"
+	c.BranchPrefix = "agent/issue-"
 	fc := forge.NewFake(dispatchLabels(c, ""))
 	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- internal/pkgx/foo.go", Labels: []string{"ready-for-agent"}})
@@ -187,6 +189,7 @@ func TestWaveOverlapCheck_TouchesOfErrorFallsBackToPRFilesOnly(t *testing.T) {
 func TestWaveOverlapCheck_TouchesOfErrorNoOpenPRDoesNotClaimFallback(t *testing.T) {
 	c := baseConfig()
 	c.OverlapGate = "defer"
+	c.BranchPrefix = "agent/issue-"
 	fc := forge.NewFake(dispatchLabels(c, ""))
 	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- internal/pkgx/foo.go", Labels: []string{"ready-for-agent"}})
@@ -202,5 +205,15 @@ func TestWaveOverlapCheck_TouchesOfErrorNoOpenPRDoesNotClaimFallback(t *testing.
 	}
 	if !strings.Contains(out, "no PR-changed-files available to fall back to") {
 		t.Errorf("expected a diagnostic naming the no-fallback case, got %q", out)
+	}
+}
+
+func TestPRTouchesOf_NamesBranchFromPrefix(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetPR("custom/20", forge.PR{URL: "https://github.com/owner/repo/pull/20"})
+	fc.SetPRFiles("https://github.com/owner/repo/pull/20", []string{"lib/env-schema.nix"})
+
+	if got := prTouchesOf(fc, "custom/", "20"); len(got) != 1 {
+		t.Errorf("prTouchesOf = %v, want the PR's changed files", got)
 	}
 }

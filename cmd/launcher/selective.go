@@ -53,7 +53,7 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		return signalledOr(stopCh, abortCh, err)
 	}
 
-	issues, notices := evictUnmetBlockers(it, cf, caps, readiness, issues)
+	issues, notices := evictUnmetBlockers(it, caps, c.BranchPrefix, readiness, issues)
 	for _, n := range notices {
 		fmt.Fprintln(stdout, n)
 	}
@@ -126,7 +126,7 @@ func confirmUnlabeled(n int, forceYes, interactive bool, stdin io.Reader, stdout
 
 // evictUnmetBlockers removes issues whose unmerged blockers are absent from the
 // list. Eviction cascades: anything blocked by an evicted issue is evicted too.
-func evictUnmetBlockers(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, readiness waves.Readiness, issues []issue) ([]issue, []string) {
+func evictUnmetBlockers(it forge.IssueTracker, caps forge.Capabilities, branchPrefix string, readiness waves.Readiness, issues []issue) ([]issue, []string) {
 	willRun := make(map[string]bool, len(issues))
 	for _, iss := range issues {
 		willRun[iss.number] = true
@@ -149,7 +149,7 @@ func evictUnmetBlockers(it forge.IssueTracker, cf forge.CodeForge, caps forge.Ca
 		if willRun[blocker] {
 			return true
 		}
-		return readiness.Ready(it, cf, caps, blocker, seedScopeFor(dependent))
+		return readiness.Ready(it, caps, branchPrefix, blocker, seedScopeFor(dependent))
 	}
 
 	// Iterate the issues slice (not the map) to produce stable output order.
@@ -170,7 +170,7 @@ func evictUnmetBlockers(it forge.IssueTracker, cf forge.CodeForge, caps forge.Ca
 			break
 		}
 		for _, num := range toEvict {
-			dep := firstUnmet(it, cf, caps, readiness, willRun, num, readiness.Edges[num], seedScopeFor)
+			dep := firstUnmet(it, caps, branchPrefix, readiness, willRun, num, readiness.Edges[num], seedScopeFor)
 			notices = append(notices, fmt.Sprintf("⚠ #%s blocked by %s (not in list, unmerged); skipping",
 				num, forge.Ref(dep, readiness.Sources[num][dep])))
 			delete(willRun, num)
@@ -188,9 +188,9 @@ func evictUnmetBlockers(it forge.IssueTracker, cf forge.CodeForge, caps forge.Ca
 
 // firstUnmet returns the first dep that is neither in willRun nor already
 // satisfied, relative to dependent. Used only for notice formatting.
-func firstUnmet(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, readiness waves.Readiness, willRun map[string]bool, dependent string, deps []string, seedScopeFor func(string) forge.SeedScope) string {
+func firstUnmet(it forge.IssueTracker, caps forge.Capabilities, branchPrefix string, readiness waves.Readiness, willRun map[string]bool, dependent string, deps []string, seedScopeFor func(string) forge.SeedScope) string {
 	for _, dep := range deps {
-		if !willRun[dep] && !readiness.Ready(it, cf, caps, dep, seedScopeFor(dependent)) {
+		if !willRun[dep] && !readiness.Ready(it, caps, branchPrefix, dep, seedScopeFor(dependent)) {
 			return dep
 		}
 	}

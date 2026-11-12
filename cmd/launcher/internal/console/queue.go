@@ -146,7 +146,7 @@ func (q *Queue) Snapshot() []Pick {
 // never stalls a later ready pick, and returns the first successful claim as a
 // single-issue batch. Scanning one kind at a time is required: the console
 // drains once per kind (issue #1708), each with that kind's own tracker.
-func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedLabel string, kind Kind) (waves.Batch, error) {
+func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedLabel, branchPrefix string, kind Kind) (waves.Batch, error) {
 	// caps is resolved fresh per call, never cached on Queue (issue #2946):
 	// tracker varies per stack (work vs research), so a cached value could
 	// carry one stack's tracker state into the other's picks. Zero-value
@@ -165,9 +165,9 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 			q.hold(pick.Number, kind, "", "blocker check failed, will retry")
 			continue
 		}
-		cfg := waves.Config{FailedLabel: failedLabel}
+		cfg := waves.Config{FailedLabel: failedLabel, BranchPrefix: branchPrefix}
 		cfg.SeedScopeOf = localloop.SeedScopeResolver(tracker, caps)
-		ready, failed, unready := readiness.Status(cfg, tracker, cf, caps, pick.Number)
+		ready, failed, unready := readiness.Status(cfg, tracker, caps, pick.Number)
 		if !ready {
 			q.setHeld(pick.Number, kind, unready, failed, readiness.Sources[pick.Number])
 			continue

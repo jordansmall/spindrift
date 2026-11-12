@@ -11,8 +11,8 @@ import (
 // issue never declared in ## Touches. Only a Code Forge with a PRForge has a PR
 // to inspect; anywhere else, when num has no open PR, or when the fetch fails,
 // it returns nil and the caller falls back to the declared touches alone.
-func prTouchesOf(cf forge.CodeForge, num string) []string {
-	files, err := forge.ResolveOpenPRFiles(cf, cf.AgentBranch(num))
+func prTouchesOf(cf forge.CodeForge, branchPrefix, num string) []string {
+	files, err := forge.ResolveOpenPRFiles(cf, forge.AgentBranchName(branchPrefix, num))
 	if err != nil {
 		return nil
 	}
@@ -48,7 +48,7 @@ func waveOverlapCheck(cfg Config, it forge.IssueTracker, cf forge.CodeForge) fun
 		// files alone, but it prints so operators see the gap instead of a silent
 		// degradation.
 		touches, err := forge.TouchesOf(it, fi.Number)
-		prFiles := prTouchesOf(cf, fi.Number)
+		prFiles := prTouchesOf(cf, cfg.BranchPrefix, fi.Number)
 		if err != nil {
 			if len(prFiles) > 0 {
 				fmt.Printf("    .. failed to fetch #%s's declared touches (%v); falling back to its open PR's changed files only\n", fi.Number, err)

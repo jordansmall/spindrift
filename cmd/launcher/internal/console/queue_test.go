@@ -14,7 +14,7 @@ func TestQueue_Discover_EmptyQueue_ReturnsNoIssues(t *testing.T) {
 	q := NewQueue()
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 
-	batch, err := q.Discover(f, f, "", KindWork)
+	batch, err := q.Discover(f, f, "", "agent/issue-", KindWork)
 
 	if err != nil || len(batch.Issues) != 0 || len(batch.Edges) != 0 {
 		t.Errorf("Discover() = %v, %v, want no issues", batch, err)
@@ -30,7 +30,7 @@ func TestQueue_Discover_BlockerFieldsNilAcrossPaths(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 
 	empty := NewQueue()
-	emptyBatch, err := empty.Discover(f, f, "", KindWork)
+	emptyBatch, err := empty.Discover(f, f, "", "agent/issue-", KindWork)
 	if err != nil {
 		t.Fatalf("Discover (empty queue): %v", err)
 	}
@@ -47,7 +47,7 @@ func TestQueue_Discover_BlockerFieldsNilAcrossPaths(t *testing.T) {
 	claimed := NewQueue()
 	claimed.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
-	claimedBatch, err := claimed.Discover(f, f, "", KindWork)
+	claimedBatch, err := claimed.Discover(f, f, "", "agent/issue-", KindWork)
 	if err != nil {
 		t.Fatalf("Discover (claim success): %v", err)
 	}
@@ -82,7 +82,7 @@ func TestQueue_Discover_WiresSeedScopeContainmentOnlyUnderLocalForge(t *testing.
 	q := NewQueue()
 	q.Add(Pick{Number: "42", Title: "then", State: PickQueued})
 
-	batch, err := q.Discover(f, f.AsLocal(), "agent-failed", KindWork)
+	batch, err := q.Discover(f, f.AsLocal(), "agent-failed", "agent/issue-", KindWork)
 	if err != nil {
 		t.Fatalf("Discover (local forge): %v", err)
 	}
@@ -102,7 +102,7 @@ func TestQueue_Discover_WiresSeedScopeContainmentOnlyUnderLocalForge(t *testing.
 	q2 := NewQueue()
 	q2.Add(Pick{Number: "42", Title: "then", State: PickQueued})
 
-	if _, err := q2.Discover(f2, f2, "agent-failed", KindWork); err != nil {
+	if _, err := q2.Discover(f2, f2, "agent-failed", "agent/issue-", KindWork); err != nil {
 		t.Fatalf("Discover (plain forge): %v", err)
 	}
 	if len(f2.LandingContainedCalls) != 0 {
@@ -170,7 +170,7 @@ func TestQueue_Discover_ClaimsAndReturnsFrontQueuedPick(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
-	batch, err := q.Discover(f, f, "", KindWork)
+	batch, err := q.Discover(f, f, "", "agent/issue-", KindWork)
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -205,7 +205,7 @@ func TestQueue_Discover_RacedClaim_DissolvesAndTriesNext(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 	f.SetIssue(forge.Issue{Number: "43", Labels: []string{"ready-for-agent"}})
 
-	batch, err := q.Discover(raceOnNum{Fake: f, racedNum: "42"}, f, "", KindWork)
+	batch, err := q.Discover(raceOnNum{Fake: f, racedNum: "42"}, f, "", "agent/issue-", KindWork)
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -234,7 +234,7 @@ func TestQueue_Discover_AlreadyClaimed_DissolvesWithSkipReason(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-in-progress"}})
 
-	batch, err := q.Discover(f, f, "", KindWork)
+	batch, err := q.Discover(f, f, "", "agent/issue-", KindWork)
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -259,7 +259,7 @@ func TestQueue_Discover_DuplicateNumber_ClaimTargetsNewestRow(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
-	batch, err := q.Discover(f, f, "", KindWork)
+	batch, err := q.Discover(f, f, "", "agent/issue-", KindWork)
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -301,7 +301,7 @@ func TestQueue_Discover_DuplicateNumber_HoldTargetsNewestRow(t *testing.T) {
 				}
 			}
 
-			if _, err := q.Discover(f, f, "", KindWork); err != nil {
+			if _, err := q.Discover(f, f, "", "agent/issue-", KindWork); err != nil {
 				t.Fatalf("Discover: %v", err)
 			}
 			snap := q.Snapshot()
@@ -311,7 +311,7 @@ func TestQueue_Discover_DuplicateNumber_HoldTargetsNewestRow(t *testing.T) {
 			}
 
 			f.SetIssue(forge.Issue{Number: "41", State: forge.IssueClosed})
-			if _, err := q.Discover(f, f, "", KindWork); err != nil {
+			if _, err := q.Discover(f, f, "", "agent/issue-", KindWork); err != nil {
 				t.Fatalf("Discover: %v", err)
 			}
 			snap = q.Snapshot()
@@ -336,7 +336,7 @@ func TestQueue_Discover_SkipsPickOfOtherKind(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
-	batch, err := q.Discover(f, f, "", KindWork)
+	batch, err := q.Discover(f, f, "", "agent/issue-", KindWork)
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -363,7 +363,7 @@ func TestQueue_Discover_HoldsPickWithOpenBlocker(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen})
 	f.NativeDeps = map[string][]string{"42": {"41"}}
 
-	batch, err := q.Discover(f, f, "agent-failed", KindWork)
+	batch, err := q.Discover(f, f, "agent-failed", "agent/issue-", KindWork)
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -401,7 +401,7 @@ func TestQueue_Discover_FailedBlockerSurfacedPickStaysHeld(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen, Labels: []string{"agent-failed"}})
 	f.NativeDeps = map[string][]string{"42": {"41"}}
 
-	batch, err := q.Discover(f, f, "agent-failed", KindWork)
+	batch, err := q.Discover(f, f, "agent-failed", "agent/issue-", KindWork)
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -431,7 +431,7 @@ func TestQueue_Discover_ClosedFailedBlockerLaunches(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueClosed, Labels: []string{"agent-failed"}})
 	f.NativeDeps = map[string][]string{"42": {"41"}}
 
-	batch, err := q.Discover(f, f, "agent-failed", KindWork)
+	batch, err := q.Discover(f, f, "agent-failed", "agent/issue-", KindWork)
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -455,7 +455,7 @@ func TestQueue_Discover_FailedBlockerReasonUsesSharedPrefix(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen, Labels: []string{"agent-failed"}})
 	f.NativeDeps = map[string][]string{"42": {"41"}}
 
-	if _, err := q.Discover(f, f, "agent-failed", KindWork); err != nil {
+	if _, err := q.Discover(f, f, "agent-failed", "agent/issue-", KindWork); err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
 
@@ -475,7 +475,7 @@ func TestQueue_Discover_UnpickDuringClaimCheck_NeverLaunches(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
-	batch, err := q.Discover(removeOnDepsOf{Fake: f, q: q, num: "42"}, f, "", KindWork)
+	batch, err := q.Discover(removeOnDepsOf{Fake: f, q: q, num: "42"}, f, "", "agent/issue-", KindWork)
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -531,13 +531,13 @@ func TestQueue_Discover_UnpickDuringHoldCheck_LeavesTerminalRowUntouched(t *test
 					}
 				}
 
-				if _, err := q.Discover(path.tracker(f, q), f, "", KindWork); err != nil {
+				if _, err := q.Discover(path.tracker(f, q), f, "", "agent/issue-", KindWork); err != nil {
 					t.Fatalf("Discover: %v", err)
 				}
 				oldRowUntouched(q.Snapshot())
 
 				f.SetIssue(forge.Issue{Number: "41", State: forge.IssueClosed})
-				batch, err := q.Discover(f, f, "", KindWork)
+				batch, err := q.Discover(f, f, "", "agent/issue-", KindWork)
 				if err != nil {
 					t.Fatalf("Discover: %v", err)
 				}
@@ -562,7 +562,7 @@ func TestQueue_Discover_HoldsPickOnDepsOfFailure(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
-	batch, err := q.Discover(failDepsOf{Fake: f, num: "42"}, f, "", KindWork)
+	batch, err := q.Discover(failDepsOf{Fake: f, num: "42"}, f, "", "agent/issue-", KindWork)
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -593,7 +593,7 @@ func TestQueue_Discover_HoldsPickOnDepsOfFailureWithRealBlocker(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen})
 	f.NativeDeps = map[string][]string{"42": {"41"}}
 
-	batch, err := q.Discover(failDepsOf{Fake: f, num: "42"}, f, "", KindWork)
+	batch, err := q.Discover(failDepsOf{Fake: f, num: "42"}, f, "", "agent/issue-", KindWork)
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -689,7 +689,7 @@ func TestQueue_Discover_SameNumberTwoKinds_ClaimTargetsOwnKindRow(t *testing.T) 
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
-	batch, err := q.Discover(f, f, "", KindResearch)
+	batch, err := q.Discover(f, f, "", "agent/issue-", KindResearch)
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -713,7 +713,7 @@ func TestQueue_Discover_SameNumberTwoKinds_WorkClaimTargetsOwnKindRow(t *testing
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
-	if _, err := q.Discover(f, f, "", KindWork); err != nil {
+	if _, err := q.Discover(f, f, "", "agent/issue-", KindWork); err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
 
@@ -733,7 +733,7 @@ func TestQueue_Discover_SameNumberTwoKinds_DepsOfFailureHoldTargetsOwnKindRow(t 
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
-	if _, err := q.Discover(failDepsOf{Fake: f, num: "42"}, f, "", KindResearch); err != nil {
+	if _, err := q.Discover(failDepsOf{Fake: f, num: "42"}, f, "", "agent/issue-", KindResearch); err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
 
@@ -754,7 +754,7 @@ func TestQueue_Discover_SameNumberTwoKinds_HoldTargetsOwnKindRow(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}, Body: "Blocked by #41"})
 	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen})
 
-	if _, err := q.Discover(f, f, "", KindResearch); err != nil {
+	if _, err := q.Discover(f, f, "", "agent/issue-", KindResearch); err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
 
@@ -774,7 +774,7 @@ func TestQueue_Discover_SameNumberTwoKinds_DissolveTargetsOwnKindRow(t *testing.
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
-	if _, err := q.Discover(raceOnNum{Fake: f, racedNum: "42"}, f, "", KindResearch); err != nil {
+	if _, err := q.Discover(raceOnNum{Fake: f, racedNum: "42"}, f, "", "agent/issue-", KindResearch); err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
 
@@ -805,7 +805,7 @@ func TestQueue_Close_DropsUnclaimedAndLatchesDiscover(t *testing.T) {
 	if len(snap) != 2 || snap[0].Number != "44" || snap[1].Number != "45" {
 		t.Fatalf("snapshot = %+v, want only #44 (running) and #45 (settled)", snap)
 	}
-	batch, err := q.Discover(f, f, "", KindWork)
+	batch, err := q.Discover(f, f, "", "agent/issue-", KindWork)
 	if err != nil || len(batch.Issues) != 0 {
 		t.Fatalf("Discover after Close = %+v, %v, want empty batch", batch, err)
 	}
@@ -854,7 +854,7 @@ func TestQueue_Discover_CloseDuringClaim_RevertsClaim(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
-	batch, err := q.Discover(closeInClaim{Fake: f, q: q}, f, "", KindWork)
+	batch, err := q.Discover(closeInClaim{Fake: f, q: q}, f, "", "agent/issue-", KindWork)
 
 	if err != nil || len(batch.Issues) != 0 {
 		t.Fatalf("Discover = %+v, %v, want empty batch", batch, err)

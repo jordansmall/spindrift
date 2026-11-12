@@ -546,7 +546,7 @@ func (q runContinuousQueue) EnsureLogDirExists() error { return nil }
 func (l *Launcher) runStack(st launchStack, pwd string) bool {
 	discover := func() (waves.Batch, error) {
 		defer l.signalRefresh() // a claim attempt is always a tracker write, win or lose
-		batch, err := l.queueRef().Discover(st.tracker, l.CodeForge, st.failedLabel, st.kind)
+		batch, err := l.queueRef().Discover(st.tracker, l.CodeForge, st.failedLabel, l.BranchPrefix, st.kind)
 		// A successful claim is a fresh Dispatch, so an earlier Terminate mark
 		// must not carry over or the re-pick's settle would abandon on its first
 		// checkpoint (ADR 0024, issue #649). Begin starts a new generation rather

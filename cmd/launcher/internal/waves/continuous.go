@@ -125,7 +125,7 @@ func issueReadiness(cfg Config, it forge.IssueTracker, cf forge.CodeForge, check
 		// (issue #2946): it and cf never vary within a single Dispatch or
 		// RunContinuous invocation.
 		caps := forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
-		unready = unreadyBlockers(it, cf, caps, iss.Number, edges, cfg.SeedScopeOf)
+		unready = unreadyBlockers(it, caps, cfg.BranchPrefix, iss.Number, edges, cfg.SeedScopeOf)
 	}
 	switch {
 	case !cfg.IgnoreBlockers && depsOfFailed[iss.Number]:
