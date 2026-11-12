@@ -194,6 +194,71 @@ func TestNetworkRefusalNamesMethodHostAndPath(t *testing.T) {
 	}
 }
 
+// A refusal that cannot name a host and path still names what it can, so an
+// operator reading the log or the audit reason can tell which request it was.
+func TestNetworkRefusalNamesWhatItCan(t *testing.T) {
+	b := newBackend(t, func(http.ResponseWriter, *http.Request) {})
+	route := connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"}
+	cases := map[string]struct {
+		raw  string
+		want []string
+	}{
+		"write to undeclared path": {fmt.Sprintf(`{"method":"POST","url":"%s/admin"}`, b.URL), []string{"POST", b.host(), "/admin"}},
+		"write to undeclared host": {`{"method":"PUT","url":"https://api.example.com/v1/x"}`, []string{"PUT", "api.example.com", "/v1/x"}},
+		"unparseable url":          {`{"method":"POST","url":"https://exa mple.com/x"}`, []string{"POST", "unparseable"}},
+		"plaintext":                {`{"method":"POST","url":"http://api.example.com/x"}`, []string{"POST", "api.example.com", "/x"}},
+		"unknown field":            {`{"method":"GET","cred":"x"}`, []string{"cred"}},
+		"truncated":                {`{"method":`, []string{"unexpected"}},
+		"trailing data":            {`{"method":"GET"}{}`, []string{"trailing"}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var audit bytes.Buffer
+			n := netFor(b, &audit, route)
+			_, _, err := n.Do(context.Background(), []byte(tc.raw), 1<<10)
+			if !errors.Is(err, connectorhost.ErrRouteRefused) {
+				t.Fatalf("err = %v, want ErrRouteRefused", err)
+			}
+			lines := auditLines(t, &audit)
+			if len(lines) != 1 {
+				t.Fatalf("audit = %+v, want one entry", lines)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %v lacks %q", err, want)
+				}
+				if !strings.Contains(lines[0].Reason, want) {
+					t.Errorf("audit reason %q lacks %q", lines[0].Reason, want)
+				}
+			}
+		})
+	}
+}
+
+func TestNetworkRefusalDoesNotEchoAHostileURL(t *testing.T) {
+	b := newBackend(t, func(http.ResponseWriter, *http.Request) {})
+	hostile := "https://exa mple.com/x?secret=" + strings.Repeat("A", 4096)
+	raw, err := json.Marshal(map[string]string{"method": "POST", "url": hostile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var audit bytes.Buffer
+	n := netFor(b, &audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+	_, _, derr := n.Do(context.Background(), raw, 1<<20)
+	if !errors.Is(derr, connectorhost.ErrRouteRefused) {
+		t.Fatalf("err = %v, want ErrRouteRefused", derr)
+	}
+	lines := auditLines(t, &audit)
+	if len(lines) != 1 {
+		t.Fatalf("audit = %+v, want one entry", lines)
+	}
+	for _, got := range []string{derr.Error(), lines[0].Reason} {
+		if strings.Contains(got, "secret") || len(got) > 200 {
+			t.Errorf("refusal echoes the guest url: %.200q (len %d)", got, len(got))
+		}
+	}
+}
+
 func TestNetworkDoesNotFollowRedirects(t *testing.T) {
 	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin", http.StatusFound)
