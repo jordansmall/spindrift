@@ -235,7 +235,7 @@ func appendRejection(warnings []string, channel string, r outcome.Rejections) []
 func (s *Settle) settleUnresolved(num, clsNote, missingNote string) {
 	branch := s.cf.AgentBranch(num)
 
-	res, prErr := forge.ResolveOpenPR(s.cf, num)
+	res, prErr := forge.ResolveOpenPR(s.cf, branch)
 	if prErr != nil {
 		s.cfg.Progress.Step(Step{Key: num, Status: StatusMissing, Detail: strings.TrimPrefix(clsNote+fmt.Sprintf("  note=PR lookup failed: %v", prErr), "  ")})
 		return

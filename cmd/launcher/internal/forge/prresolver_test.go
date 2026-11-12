@@ -32,7 +32,7 @@ func TestResolveOpenPR(t *testing.T) {
 		f.BranchPrefix = "agent/issue-"
 		f.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/o/r/pull/7"})
 
-		res, err := forge.ResolveOpenPR(f.AsPushOnly(), "42")
+		res, err := forge.ResolveOpenPR(f.AsPushOnly(), "agent/issue-42")
 		if err != nil || res.Found {
 			t.Fatalf("want {Found:false} nil; got %+v, err=%v", res, err)
 		}
@@ -42,7 +42,7 @@ func TestResolveOpenPR(t *testing.T) {
 		f := forge.NewFake()
 		f.BranchPrefix = "agent/issue-"
 
-		res, err := forge.ResolveOpenPR(f, "42")
+		res, err := forge.ResolveOpenPR(f, "agent/issue-42")
 		if err != nil || res.Found {
 			t.Fatalf("want {Found:false} nil; got %+v, err=%v", res, err)
 		}
@@ -53,7 +53,7 @@ func TestResolveOpenPR(t *testing.T) {
 		f.BranchPrefix = "agent/issue-"
 		f.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/o/r/pull/7"})
 
-		res, err := forge.ResolveOpenPR(f, "42")
+		res, err := forge.ResolveOpenPR(f, "agent/issue-42")
 		if err != nil || !res.Found || res.URL != "https://github.com/o/r/pull/7" {
 			t.Fatalf("want {Found:true URL:.../pull/7} nil; got %+v, err=%v", res, err)
 		}
@@ -68,7 +68,7 @@ func TestResolveOpenPRFiles(t *testing.T) {
 		f := forge.NewFake()
 		f.BranchPrefix = "agent/issue-"
 
-		got, err := forge.ResolveOpenPRFiles(f.AsPushOnly(), "42")
+		got, err := forge.ResolveOpenPRFiles(f.AsPushOnly(), "agent/issue-42")
 		if err != nil || got != nil {
 			t.Fatalf("want nil, nil; got %v, err=%v", got, err)
 		}
@@ -78,7 +78,7 @@ func TestResolveOpenPRFiles(t *testing.T) {
 		f := forge.NewFake()
 		f.BranchPrefix = "agent/issue-"
 
-		got, err := forge.ResolveOpenPRFiles(f, "42")
+		got, err := forge.ResolveOpenPRFiles(f, "agent/issue-42")
 		if err != nil || got != nil {
 			t.Fatalf("want nil, nil; got %v, err=%v", got, err)
 		}
@@ -90,7 +90,7 @@ func TestResolveOpenPRFiles(t *testing.T) {
 		f.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/o/r/pull/7"})
 		f.SetPRFiles("https://github.com/o/r/pull/7", []string{"a.go", "b.go"})
 
-		got, err := forge.ResolveOpenPRFiles(f, "42")
+		got, err := forge.ResolveOpenPRFiles(f, "agent/issue-42")
 		if err != nil || len(got) != 2 || got[0] != "a.go" || got[1] != "b.go" {
 			t.Fatalf("want [a.go b.go], nil; got %v, err=%v", got, err)
 		}
@@ -102,7 +102,7 @@ func TestResolveOpenPRFiles(t *testing.T) {
 		f.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/o/r/pull/7"})
 		f.PRFilesErr = fmt.Errorf("boom")
 
-		got, err := forge.ResolveOpenPRFiles(f, "42")
+		got, err := forge.ResolveOpenPRFiles(f, "agent/issue-42")
 		if err == nil || got != nil {
 			t.Fatalf("want nil, error; got %v, err=%v", got, err)
 		}
@@ -125,7 +125,7 @@ func TestResolveOpenPRWithRetry(t *testing.T) {
 		rc := &recordingClock{}
 		backoff := retry.LinearBackoff{Unit: time.Second, Clock: rc.Clock()}
 
-		res, err := forge.ResolveOpenPRWithRetry(f, "42", backoff, 5)
+		res, err := forge.ResolveOpenPRWithRetry(f, "agent/issue-42", backoff, 5)
 		if err != nil {
 			t.Fatalf("want nil error; got %v", err)
 		}
@@ -146,7 +146,7 @@ func TestResolveOpenPRWithRetry(t *testing.T) {
 		backoff := retry.LinearBackoff{Unit: time.Second, Clock: rc.Clock()}
 
 		const maxAttempts = 4
-		res, err := forge.ResolveOpenPRWithRetry(f, "42", backoff, maxAttempts)
+		res, err := forge.ResolveOpenPRWithRetry(f, "agent/issue-42", backoff, maxAttempts)
 		if err == nil {
 			t.Fatalf("want non-nil error; got nil (res=%+v)", res)
 		}
@@ -162,7 +162,7 @@ func TestResolveOpenPRWithRetry(t *testing.T) {
 		rc := &recordingClock{}
 		backoff := retry.LinearBackoff{Unit: time.Second, Clock: rc.Clock()}
 
-		res, err := forge.ResolveOpenPRWithRetry(f, "42", backoff, 5)
+		res, err := forge.ResolveOpenPRWithRetry(f, "agent/issue-42", backoff, 5)
 		if err != nil || res.Found {
 			t.Fatalf("want {Found:false} nil; got %+v, err=%v", res, err)
 		}
@@ -179,7 +179,7 @@ func TestResolveOpenPRWithRetry(t *testing.T) {
 		rc := &recordingClock{}
 		backoff := retry.LinearBackoff{Unit: time.Second, Clock: rc.Clock()}
 
-		res, err := forge.ResolveOpenPRWithRetry(f, "42", backoff, 5)
+		res, err := forge.ResolveOpenPRWithRetry(f, "agent/issue-42", backoff, 5)
 		if err == nil {
 			t.Fatalf("want non-nil error; got nil (res=%+v)", res)
 		}
