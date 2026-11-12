@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -89,11 +90,11 @@ func TestWireShapes(t *testing.T) {
 	_, m := handlers(r)
 	cases := []struct{ method, params, want string }{
 		{"tracker.listIssues", `{` + target + `,"label":"ready","limit":7}`,
-			`{"issues":[{"number":"3","title":"t","body":"b","state":"open","labels":["ready"]}]}`},
+			`{"issues":[{"number":"3","title":"t","body":"b","state":"open","labels":["ready"],"closedAt":"","closedNotPlanned":false,"dedupMarker":""}]}`},
 		{"tracker.issue", `{` + target + `,"number":"3"}`,
-			`{"number":"3","title":"","body":"","state":"closed","labels":[]}`},
+			`{"number":"3","title":"","body":"","state":"closed","labels":[],"closedAt":"","closedNotPlanned":false,"dedupMarker":""}`},
 		{"tracker.comments", `{` + target + `,"number":"3"}`,
-			`{"comments":[{"author":"a","createdAt":"2026-01-02T03:04:05Z","body":"hi","minimized":true,"minimizedReason":"SPAM","association":"MEMBER"}]}`},
+			`{"comments":[{"author":"a","createdAt":"2026-01-02T03:04:05Z","body":"hi","minimized":true,"minimizedReason":"SPAM","association":"MEMBER","researchMarker":false}]}`},
 		{"tracker.nativeDeps", `{` + target + `,"number":"3"}`, `{"ids":["4","5"]}`},
 	}
 	for _, c := range cases {
@@ -160,5 +161,35 @@ func TestMissingRequiredPanics(t *testing.T) {
 			}()
 			handlers(r)
 		}()
+	}
+}
+
+func TestProjectKeyIDsCapability(t *testing.T) {
+	r := fakeReader(t)
+	r.IDs = ProjectKeyIDs
+	caps, _ := handlers(r)
+	if want := []string{"tracker", "tracker.comments", "tracker.ids.projectKey"}; !reflect.DeepEqual(caps, want) {
+		t.Fatalf("caps = %v, want %v", caps, want)
+	}
+	r.IDs = DecimalIDs
+	caps, _ = handlers(r)
+	if want := []string{"tracker", "tracker.comments"}; !reflect.DeepEqual(caps, want) {
+		t.Fatalf("decimal caps = %v, want %v", caps, want)
+	}
+}
+
+func TestMarkerFieldsEncode(t *testing.T) {
+	r := fakeReader(t)
+	r.Issue = func(Target, string) (Issue, error) {
+		return Issue{Number: "3", State: "closed", ClosedAt: "2026-01-02T03:04:05Z", ClosedNotPlanned: true, DedupMarker: "marker-line"}, nil
+	}
+	r.Comments = func(Target, string) ([]Comment, error) { return []Comment{{Body: "x", ResearchMarker: true}}, nil }
+	_, m := handlers(r)
+	if got, want := call(t, m, "tracker.issue", `{`+target+`,"number":"3"}`),
+		`{"number":"3","title":"","body":"","state":"closed","labels":[],"closedAt":"2026-01-02T03:04:05Z","closedNotPlanned":true,"dedupMarker":"marker-line"}`; got != want {
+		t.Errorf("issue = %s, want %s", got, want)
+	}
+	if got := call(t, m, "tracker.comments", `{`+target+`,"number":"3"}`); !strings.Contains(got, `"researchMarker":true`) {
+		t.Errorf("comments = %s, want researchMarker", got)
 	}
 }
