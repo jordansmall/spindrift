@@ -209,6 +209,10 @@ var table = []row{
 		b.OutboxDir = t.TempDir()
 	}), nil},
 	{"OutboxDir/unset", "OutboxDir", withBox(func(*testing.T, *runner.Box) {}), nil},
+	{"MirrorDir/set", "MirrorDir", withBox(func(t *testing.T, b *runner.Box) {
+		b.MirrorDir = t.TempDir()
+	}), nil},
+	{"MirrorDir/unset", "MirrorDir", withBox(func(*testing.T, *runner.Box) {}), nil},
 	{"Sockets/single", "Sockets", withBox(sockets([2]string{"a.sock", "/run/contract/a.sock"})), nil},
 	{"Sockets/two", "Sockets", withBox(sockets(
 		[2]string{"a.sock", "/run/contract/a.sock"},
@@ -274,6 +278,7 @@ var facets = map[string]func(d Decoded, l Launch) error{
 	},
 	"DriverCacheDir":    launchWide,
 	"OutboxDir":         launchWide,
+	"MirrorDir":         launchWide,
 	"Sockets":           addHosts,
 	"RegistryProxy":     addHosts,
 	"SignalSocket":      addHosts,
@@ -307,7 +312,7 @@ func env(d Decoded, l Launch) error {
 	return nil
 }
 
-// ownedMounts is every bind the spec asks for, none of them read-only.
+// ownedMounts is every bind the spec asks for; only the mirror is read-only.
 func ownedMounts(b runner.Box) []Mount {
 	var want []Mount
 	if b.DriverCacheDir != "" {
@@ -315,6 +320,9 @@ func ownedMounts(b runner.Box) []Mount {
 	}
 	if b.OutboxDir != "" {
 		want = append(want, Mount{b.OutboxDir, outboxTarget, false})
+	}
+	if b.MirrorDir != "" {
+		want = append(want, Mount{b.MirrorDir, runner.MirrorTarget, true})
 	}
 	for _, s := range b.Sockets {
 		want = append(want, Mount{s.Source, s.Target, false})

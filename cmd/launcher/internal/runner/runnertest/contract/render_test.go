@@ -97,6 +97,9 @@ func (s *stubHarness) Decode(t *testing.T, _ []string) Decoded {
 	if b.OutboxDir != "" && keep("OutboxDir") {
 		d.Mounts = append(d.Mounts, Mount{b.OutboxDir, outboxTarget, false})
 	}
+	if b.MirrorDir != "" && keep("MirrorDir") {
+		d.Mounts = append(d.Mounts, Mount{b.MirrorDir, runner.MirrorTarget, true})
+	}
 	if keep("Sockets") && keep("RegistryProxy") && keep("SignalSocket") {
 		for _, m := range b.Sockets {
 			d.Mounts = append(d.Mounts, Mount{m.Source, m.Target, false})
@@ -184,6 +187,7 @@ func TestDroppedFieldFailsItsRows(t *testing.T) {
 		{"Output/buffer", "Output", runner.KindOCI},
 		{"DriverCacheDir/set", "DriverCacheDir", runner.KindOCI},
 		{"OutboxDir/set", "OutboxDir", runner.KindOCI},
+		{"MirrorDir/set", "MirrorDir", runner.KindOCI},
 		{"Sockets/two", "Sockets", runner.KindOCI},
 		{"RegistryProxy/tcp-add-host", "RegistryProxy", runner.KindOCI},
 		{"SignalSocket/tcp-add-host", "SignalSocket", runner.KindOCI},

@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"errors"
 	"os"
 	"testing"
 
@@ -455,5 +456,91 @@ func TestRun_ForwardsRecordIDIntoBoxEnv(t *testing.T) {
 	}
 	if got := fr.RunCalls[0].Env["RECORD_ID"]; got == "" || got != d.recordID {
 		t.Errorf("Box.Env[RECORD_ID]: got %q, want the Dispatch's record ID %q", got, d.recordID)
+	}
+}
+
+// The mirror is seeded fresh before every Pass, not once per launcher
+// process: a base-branch commit landed between Passes must be what the next
+// Box clones, so each Pass (Run, Fix and ResolveConflict) calls the hook and
+// mounts the dir it returns.
+func TestDispatch_SeedMirrorBeforeEachPass(t *testing.T) {
+	dir := tempLogDir(t)
+	mirror := t.TempDir()
+	var calls int
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{
+		SeedMirror: func() (string, error) { calls++; return mirror, nil },
+	}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("81", "T")
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
+	}
+	if result := d.Fix(1, ""); !result.ok() {
+		t.Fatalf("Fix: want succeeded, got %+v", result)
+	}
+
+	if err := d.ResolveConflict("https://github.com/owner/repo/pull/1"); err != nil {
+		t.Fatalf("ResolveConflict: %v", err)
+	}
+
+	if calls != 3 {
+		t.Errorf("SeedMirror calls: got %d, want 3 (one per Pass)", calls)
+	}
+	if len(fr.RunCalls) != 3 {
+		t.Fatalf("RunCalls: got %d, want 3", len(fr.RunCalls))
+	}
+	for i, box := range fr.RunCalls {
+		if box.MirrorDir != mirror {
+			t.Errorf("RunCalls[%d].MirrorDir: got %q, want %q", i, box.MirrorDir, mirror)
+		}
+	}
+}
+
+func TestRun_NoMirrorDirWithoutSeedHook(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	if result := f.New("82", "T").Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
+	}
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	if got := fr.RunCalls[0].MirrorDir; got != "" {
+		t.Errorf("Box.MirrorDir: got %q, want empty so no /repo mount", got)
+	}
+}
+
+// A Pass that cannot seed its mirror must not start a Box against a stale or
+// missing one.
+func TestRun_SeedMirrorErrorFailsPassBeforeBox(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{
+		SeedMirror: func() (string, error) { return "", errors.New("push refused") },
+	}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	if result := f.New("83", "T").Run(); result.ok() {
+		t.Fatalf("Run: want failure when the mirror seed fails, got %+v", result)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("RunCalls: got %d, want 0 (no Box on a failed seed)", len(fr.RunCalls))
 	}
 }

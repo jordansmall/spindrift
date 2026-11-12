@@ -1116,9 +1116,8 @@ func TestBwrapArgs_RootChmodedReadOnlyAfterAllMounts(t *testing.T) {
 		nixVarSnapshotDir: "/fake/snapshot",
 		network:           testNet("open"),
 		syscallFilterPath: "/nix/store/fake-hash-seccomp/filter.bpf",
-		mountParams:       runner.MountParams{HostMediatedRemote: true, AccumulationRepoDir: t.TempDir()},
 	}
-	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{"FOO": "bar"}, OutboxDir: t.TempDir()}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{"FOO": "bar"}, OutboxDir: t.TempDir(), MirrorDir: t.TempDir()}
 	args := a.buildArgs("/tmp/fake-etc", box, a.snapshotDirFor(box))
 
 	// The mounts that need a writable / are only exercised if the fixture

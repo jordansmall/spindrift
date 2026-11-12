@@ -57,8 +57,7 @@ type Config struct {
 	MaxParallel int
 
 	// MountParams carries the mount-gating facts the run adapters share; the
-	// build adapters ignore them. DriverSessionCacheDir is ADR 0009;
-	// AccumulationRepoDir is issue #1697. Embedded, so call sites keep
-	// reaching its fields as cfg.PromptDir.
+	// build adapters ignore them. DriverSessionCacheDir is ADR 0009.
+	// Embedded, so call sites keep reaching its fields as cfg.PromptDir.
 	MountParams
 }

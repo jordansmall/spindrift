@@ -117,6 +117,14 @@ type Config struct {
 	// lets each issue resolve its own BASE_BRANCH under local (issue #1734).
 	ResolveEnv func(num, name string) string
 
+	// SeedMirror, when non-nil, runs before every Pass (Run, Fix and
+	// ResolveConflict alike) and returns the host path of the freshly seeded
+	// mirror to mount at /repo; an error fails the Pass. Nil means the dispatch
+	// needs no host-seeded mirror (the forge has none, or the kind never clones,
+	// as self-contained research), so the Box gets no /repo.
+	// Parallel Boxes share one mirror, so the hook must serialize itself.
+	SeedMirror func() (string, error)
+
 	// Policy is the transient-retry tuning, built once by retryPolicy
 	// (issue #2928).
 	Policy retry.Policy

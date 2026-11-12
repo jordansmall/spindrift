@@ -186,13 +186,13 @@ func TestBuildMountSpecs_SkillsDirMissing_NoMount(t *testing.T) {
 
 // ADR 0033: the code-in mount is read-only so the operator's Accumulation repo
 // stays single-writer.
-func TestBuildMountSpecs_LocalCodeForge_AccumulationRepoMountedReadOnly(t *testing.T) {
+func TestBuildMountSpecs_MirrorDirMountedReadOnly(t *testing.T) {
 	dir := t.TempDir()
-	specs := BuildMountSpecs(MountParams{HostMediatedRemote: true, AccumulationRepoDir: dir}, Box{})
+	specs := BuildMountSpecs(MountParams{}, Box{MirrorDir: dir})
 
 	var found *MountSpec
 	for i := range specs {
-		if specs[i].Target == "/repo" {
+		if specs[i].Target == MirrorTarget {
 			found = &specs[i]
 		}
 	}
@@ -241,26 +241,25 @@ func TestBuildMountSpecs_OutboxDirEmpty_NoMount(t *testing.T) {
 	}
 }
 
-// The /repo mount is local-only (ADR 0033), so it never appears when
-// HostMediatedRemote is false, whatever AccumulationRepoDir says.
-func TestBuildMountSpecs_NonLocalCodeForge_NoAccumulationRepoMount(t *testing.T) {
-	repoDir := t.TempDir()
-	specs := BuildMountSpecs(MountParams{HostMediatedRemote: false, AccumulationRepoDir: repoDir}, Box{})
+// The /repo mount is local-only (ADR 0033): a Box with no MirrorDir, as every
+// non-local forge's is, gets none.
+func TestBuildMountSpecs_NoMirrorDir_NoMount(t *testing.T) {
+	specs := BuildMountSpecs(MountParams{}, Box{})
 	for _, s := range specs {
-		if s.Target == "/repo" {
+		if s.Target == MirrorTarget {
 			t.Errorf("unexpected /repo spec: %+v", s)
 		}
 	}
 }
 
-// The /repo mount stays gated on candidateMount, not just on the
-// HostMediatedRemote check.
-func TestBuildMountSpecs_LocalCodeForge_AbsentAccumulationRepoDir_NoMount(t *testing.T) {
-	specs := BuildMountSpecs(MountParams{HostMediatedRemote: true}, Box{})
+// The /repo mount stays gated on candidateMount: a MirrorDir that does not
+// exist on the host mounts nothing.
+func TestBuildMountSpecs_AbsentMirrorDir_NoMount(t *testing.T) {
+	specs := BuildMountSpecs(MountParams{}, Box{MirrorDir: filepath.Join(t.TempDir(), "missing")})
 
 	for _, s := range specs {
-		if s.Target == "/repo" {
-			t.Errorf("unexpected /repo spec when AccumulationRepoDir is unset: %+v", specs)
+		if s.Target == MirrorTarget {
+			t.Errorf("unexpected /repo spec when MirrorDir is absent: %+v", specs)
 		}
 	}
 }
@@ -298,15 +297,13 @@ func TestBuildMountSpecs_NeverProducesIssuesMount(t *testing.T) {
 		PromptDir:             promptDir,
 		SkillsDir:             skillsDir,
 		DriverSessionCacheDir: "/home/agent/.claude/projects",
-		HostMediatedRemote:    true,
-		AccumulationRepoDir:   repoDir,
-	}, Box{DriverCacheDir: cacheDir, OutboxDir: outboxDir})
+	}, Box{DriverCacheDir: cacheDir, OutboxDir: outboxDir, MirrorDir: repoDir})
 
 	wantTargets := []string{
 		agentpaths.PromptsDir,
 		"/operator-skills",
 		"/home/agent/.claude/projects",
-		"/repo",
+		MirrorTarget,
 		"/outbox",
 	}
 	for _, want := range wantTargets {

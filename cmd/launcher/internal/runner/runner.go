@@ -55,6 +55,12 @@ type Box struct {
 	// Empty omits the mount.
 	OutboxDir string
 
+	// MirrorDir is the host path of the bare Accumulation repo (issue #1726)
+	// mounted read-only at /repo, which the Box clones from. Dispatch seeds it
+	// fresh for each Pass, so the Box sees the base branch as it stands now.
+	// Empty omits the mount: only a forge with a host-seeded mirror sets it.
+	MirrorDir string
+
 	// RegistryProxy locates the launcher-side registry-credential proxy.
 	RegistryProxy RegistryProxyLocation
 
