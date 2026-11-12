@@ -121,10 +121,14 @@ type Config struct {
 	// SeedMirror, when non-nil, runs before every Pass (Run, Fix and
 	// ResolveConflict alike) and returns the host path of the freshly seeded
 	// mirror to mount at /repo; an error fails the Pass. Nil means the dispatch
-	// needs no host-seeded mirror (the forge has none, or the kind never clones,
-	// as self-contained research), so the Box gets no /repo.
-	// Parallel Boxes share one mirror, so the hook must serialize itself.
-	SeedMirror func() (string, error)
+	// needs no host-seeded mirror (the Box clones the forge itself, or never
+	// clones, as self-contained research), so the Box gets no /repo and no
+	// BOX_HOST_SEEDED_MIRROR.
+	// release is non-nil on success and runs once the Pass's Box has exited.
+	// The hook may hand each Pass its own mirror (github, forgejo: release
+	// removes it, and only that Pass's) or re-seed one shared mirror (local, git:
+	// release is a no-op, and the hook must serialize itself).
+	SeedMirror func() (dir string, release func(), err error)
 
 	// Policy is the transient-retry tuning, built once by retryPolicy
 	// (issue #2928).
@@ -389,6 +393,11 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 	}
 	if cfg.ForgeDescriptor.OutboxRelayCapable {
 		env["BOX_OUTBOX_RELAY_CAPABLE"] = "1"
+	}
+	// The launcher mounts /repo exactly when it sets SeedMirror, so this is
+	// the Box's single signal to clone /repo rather than the forge.
+	if cfg.SeedMirror != nil {
+		env["BOX_HOST_SEEDED_MIRROR"] = "1"
 	}
 	// Both seams of this run are local (ADR 0033). main.go's
 	// resolveCapabilitySignals computes the same boolean over the same two

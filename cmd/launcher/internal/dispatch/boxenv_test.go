@@ -666,6 +666,20 @@ func TestBuildBoxEnvForwardsGHTokenOptional(t *testing.T) {
 	}
 }
 
+// BOX_HOST_SEEDED_MIRROR is the Box's one signal that /repo is a host-seeded
+// mirror to clone from: set exactly when the launcher mounts one.
+func TestBuildBoxEnvForwardsHostSeededMirror(t *testing.T) {
+	seed := func() (string, func(), error) { return "/m", func() {}, nil }
+	env := mustBuildBoxEnv(t, Config{SeedMirror: seed}, "3", "T", 0, "", "")
+	if got := env["BOX_HOST_SEEDED_MIRROR"]; got != "1" {
+		t.Errorf("BOX_HOST_SEEDED_MIRROR with SeedMirror set: got %q, want %q", got, "1")
+	}
+	env = mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")
+	if got, ok := env["BOX_HOST_SEEDED_MIRROR"]; ok {
+		t.Errorf("BOX_HOST_SEEDED_MIRROR should be absent without SeedMirror, got %q", got)
+	}
+}
+
 // A Chore's host-rendered Input (the tuning digest, ADR 0062) forwards as
 // CHORE_INPUT verbatim, and a code Chore with none forwards no variable.
 func TestBuildBoxEnv_ChoreForwardsInputOnlyWhenSet(t *testing.T) {

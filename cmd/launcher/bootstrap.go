@@ -297,23 +297,23 @@ func newScratchMirrorDir(pwd string) (string, error) {
 // a HostRepoDir (local), else a per-process scratch dir. Nil when c has no
 // host-seeded mirror. It does not take the Accumulation lock: bootstrap's flock
 // stays held for the whole run, and a second open file would conflict with it.
-func seedMirrorHook(c config, pwd string) func() (string, error) {
+func seedMirrorHook(c config, pwd string) func() (string, func(), error) {
 	if !hostSeedsMirror(c) {
 		return nil
 	}
 	row, _ := backendkit.ByName(c.CodeForge)
 	dir := c.hostRepoDir()
-	return func() (string, error) {
+	return func() (string, func(), error) {
 		seedMirrorMu.Lock()
 		defer seedMirrorMu.Unlock()
 		if dir == "" {
 			d, err := newScratchMirrorDir(pwd)
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			dir = d
 		}
-		return dir, row.SeedMirror(backendShared(c), c.knobLookup, pwd, dir)
+		return dir, func() {}, row.SeedMirror(backendShared(c), c.knobLookup, pwd, dir)
 	}
 }
 
