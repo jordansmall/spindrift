@@ -12,6 +12,7 @@ import (
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
+	"spindrift.dev/launcher/internal/shadowrecord"
 )
 
 const fixturesEnv = "SPINDRIFT_CONNECTOR_FIXTURES_DIR"
@@ -127,13 +128,13 @@ func TestDivergentConnectorIsReportedWithLineAndBothResults(t *testing.T) {
 }
 
 func TestDivergencesAreCappedButAllCounted(t *testing.T) {
-	log := passLog(t, maxRecorded+50)
+	log := passLog(t, shadowrecord.MaxRecorded+50)
 	divs, sum := replay(t, nativeStrategy(), fixture(t, "driver.wasm"), log, 0)
-	if len(divs) != maxRecorded || sum.Recorded != maxRecorded {
-		t.Errorf("emitted %d, Recorded = %d, want %d", len(divs), sum.Recorded, maxRecorded)
+	if len(divs) != shadowrecord.MaxRecorded || sum.Recorded != shadowrecord.MaxRecorded {
+		t.Errorf("emitted %d, Recorded = %d, want %d", len(divs), sum.Recorded, shadowrecord.MaxRecorded)
 	}
-	if sum.Diverged <= maxRecorded {
-		t.Errorf("Diverged = %d, want more than the cap %d", sum.Diverged, maxRecorded)
+	if sum.Diverged <= shadowrecord.MaxRecorded {
+		t.Errorf("Diverged = %d, want more than the cap %d", sum.Diverged, shadowrecord.MaxRecorded)
 	}
 }
 
@@ -175,8 +176,8 @@ func TestConnectorFailingMidRunStopsTheReplay(t *testing.T) {
 		}
 	}
 	var ops []hostop.SpindriftOp
-	r := &run{native: nativeStrategy(), emit: func(op hostop.SpindriftOp) { ops = append(ops, op) }}
-	r.sum.Driver, r.sum.Loaded = "native", true
+	r := &run{native: nativeStrategy(), Recorder: shadowrecord.New("native", func(op hostop.SpindriftOp) { ops = append(ops, op) })}
+	r.Sum.Loaded = true
 	r.compare(context.Background(), shadow, func() error { return failure }, log, 0)
 	r.finish()
 
@@ -205,8 +206,8 @@ func TestDeadlineEndsTheReplayWithASummaryError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 	var ops []hostop.SpindriftOp
-	r := &run{native: nativeStrategy(), emit: func(op hostop.SpindriftOp) { ops = append(ops, op) }}
-	r.sum.Driver, r.sum.Loaded = "native", true
+	r := &run{native: nativeStrategy(), Recorder: shadowrecord.New("native", func(op hostop.SpindriftOp) { ops = append(ops, op) })}
+	r.Sum.Loaded = true
 	start := time.Now()
 	r.compare(ctx, shadow, func() error { return nil }, log, 0)
 	r.finish()
@@ -263,8 +264,8 @@ func TestNativeReadResultErrorIsASummaryError(t *testing.T) {
 		}
 	}
 	var ops []hostop.SpindriftOp
-	r := &run{native: native, emit: func(op hostop.SpindriftOp) { ops = append(ops, op) }}
-	r.sum.Loaded = true
+	r := &run{native: native, Recorder: shadowrecord.New("", func(op hostop.SpindriftOp) { ops = append(ops, op) })}
+	r.Sum.Loaded = true
 	r.compare(context.Background(), nativeStrategy(), func() error { return nil }, log, 0)
 	r.finish()
 

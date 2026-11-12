@@ -159,6 +159,7 @@ let
     "passmachine"
     "registryvocab"
     "report"
+    "shadowrecord"
     "testutil"
     "usage"
   ];

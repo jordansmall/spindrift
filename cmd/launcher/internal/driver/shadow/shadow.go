@@ -9,22 +9,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/logscan"
-)
-
-const (
-	// maxRecorded caps the divergence ops one run emits, so a wholly divergent
-	// Connector cannot balloon the Pass log; the summary still counts them all.
-	maxRecorded = 100
-	// maxPayload caps each side of a divergence and its line, for the same
-	// reason: a single log line may be megabytes.
-	maxPayload = 8 << 10
+	"spindrift.dev/launcher/internal/shadowrecord"
 )
 
 // Run replays the Pass log at logPath through native and through the Connector
@@ -35,15 +26,14 @@ const (
 // and never panics: a Connector that does not load, or fails closed mid-run, is
 // reported in the summary.
 func Run(ctx context.Context, native driverkit.Strategy, wasm []byte, logPath string, exitCode int, emit func(hostop.SpindriftOp)) {
-	r := &run{native: native, emit: emit}
-	r.sum.Driver = native.Name
+	r := &run{native: native, Recorder: shadowrecord.New(native.Name, emit)}
 	defer r.finish()
 
 	// The interpreter, not LoadCompiled: a compiled module is cached on disk,
 	// and a shadow must not depend on, or write to, the host's filesystem.
 	c, err := connectorhost.Load(ctx, wasm)
 	if err != nil {
-		r.sum.Error = err.Error()
+		r.Sum.Error = err.Error()
 		return
 	}
 	defer func() { _ = c.Close(context.WithoutCancel(ctx)) }()
@@ -52,17 +42,16 @@ func Run(ctx context.Context, native driverkit.Strategy, wasm []byte, logPath st
 	defer context.AfterFunc(ctx, c.Abort)()
 	shadow, err := c.DriverStrategy()
 	if err != nil {
-		r.sum.Error = err.Error()
+		r.Sum.Error = err.Error()
 		return
 	}
-	r.sum.Loaded = true
+	r.Sum.Loaded = true
 	r.compare(ctx, shadow, c.Err, logPath, exitCode)
 }
 
 type run struct {
-	native     driverkit.Strategy
-	emit       func(hostop.SpindriftOp)
-	sum        hostop.ShadowSummary
+	native driverkit.Strategy
+	*shadowrecord.Recorder
 	nativeTime time.Duration
 	shadowTime time.Duration
 }
@@ -71,14 +60,13 @@ type run struct {
 // anywhere in the shadow into the summary's Error.
 func (r *run) finish() {
 	if p := recover(); p != nil {
-		r.sum.Error = fmt.Sprintf("panic: %v", p)
+		r.Sum.Error = fmt.Sprintf("panic: %v", p)
 	}
-	if r.sum.Compared > 0 {
-		r.sum.NativeNsPerLine = r.nativeTime.Nanoseconds() / int64(r.sum.Compared)
-		r.sum.ShadowNsPerLine = r.shadowTime.Nanoseconds() / int64(r.sum.Compared)
+	if r.Sum.Compared > 0 {
+		r.Sum.NativeNsPerLine = r.nativeTime.Nanoseconds() / int64(r.Sum.Compared)
+		r.Sum.ShadowNsPerLine = r.shadowTime.Nanoseconds() / int64(r.Sum.Compared)
 	}
-	sum := r.sum
-	r.emit(hostop.SpindriftOp{Op: hostop.OpShadowSummary, ShadowSummary: &sum})
+	r.Recorder.Finish()
 }
 
 // compare runs the three checks. failed reports the Connector's fatal failure;
@@ -89,11 +77,11 @@ func (r *run) compare(ctx context.Context, shadow driverkit.Strategy, failed fun
 	// aborted Connector fails with a trap that would hide the deadline.
 	stop := func() bool {
 		if err := ctx.Err(); err != nil {
-			r.sum.Error = fmt.Sprintf("shadow deadline exceeded after %d lines: %v", r.sum.Compared, err)
+			r.Sum.Error = fmt.Sprintf("shadow deadline exceeded after %d lines: %v", r.Sum.Compared, err)
 			return true
 		}
 		if err := failed(); err != nil {
-			r.sum.Error = err.Error()
+			r.Sum.Error = err.Error()
 			return true
 		}
 		return false
@@ -119,49 +107,33 @@ func (r *run) compare(ctx context.Context, shadow driverkit.Strategy, failed fun
 		}
 		r.nativeTime += t1.Sub(t0)
 		r.shadowTime += t2.Sub(t1)
-		r.sum.Compared++
-		r.check("events", lineNo, line, eventsJSON(nativeEvs), eventsJSON(shadowEvs))
+		r.Sum.Compared++
+		r.Check("events", lineNo, line, eventsJSON(nativeEvs), eventsJSON(shadowEvs))
 	})
 	if stopped {
 		return
 	}
 	if err != nil {
-		r.sum.Error = fmt.Sprintf("scan %s: %v", logPath, err)
+		r.Sum.Error = fmt.Sprintf("scan %s: %v", logPath, err)
 		return
 	}
 	nativeExit, shadowExit := resolveExit(r.native, logPath, exitCode), resolveExit(shadow, logPath, exitCode)
 	if stop() {
 		return
 	}
-	r.check("resolveExit", 0, "", nativeExit, shadowExit)
+	r.Check("resolveExit", 0, "", nativeExit, shadowExit)
 
 	// The result text is the native reader's, so both sides encode the same input.
 	text, err := r.native.ReadResult(logPath)
 	if err != nil {
-		r.sum.Error = fmt.Sprintf("read result: %v", err)
+		r.Sum.Error = fmt.Sprintf("read result: %v", err)
 		return
 	}
 	nativeRes, shadowRes := resultEvent(r.native, text), resultEvent(shadow, text)
 	if stop() {
 		return
 	}
-	r.check("resultEvent", 0, text, nativeRes, shadowRes)
-}
-
-// check compares two JSON encodings and records a divergence when they differ.
-func (r *run) check(check string, lineNo int, line string, native, shadow json.RawMessage) {
-	if string(native) == string(shadow) {
-		return
-	}
-	r.sum.Diverged++
-	if r.sum.Recorded >= maxRecorded {
-		return
-	}
-	r.sum.Recorded++
-	r.emit(hostop.SpindriftOp{Op: hostop.OpShadowDivergence, Divergence: &hostop.ShadowDivergence{
-		Driver: r.native.Name, Check: check, LineNo: lineNo,
-		Line: clip(line), Native: clipJSON(native), Shadow: clipJSON(shadow),
-	}})
+	r.Check("resultEvent", 0, text, nativeRes, shadowRes)
 }
 
 // eventsJSON encodes evs for comparison. ResetAt is reduced to its presence:
@@ -175,7 +147,7 @@ func eventsJSON(evs []driverkit.Event) json.RawMessage {
 			norm[i].ResetAt = &time.Time{}
 		}
 	}
-	return encodeJSON(norm)
+	return shadowrecord.EncodeJSON(norm)
 }
 
 // resolveExit encodes a Strategy's resolved exit code. A nil ResolveExit keeps
@@ -185,7 +157,7 @@ func resolveExit(s driverkit.Strategy, logPath string, exitCode int) json.RawMes
 	if s.ResolveExit != nil {
 		got, err = s.ResolveExit(logPath, exitCode)
 	}
-	return encodeJSON(map[string]any{"exit_code": got, "error": errString(err)})
+	return shadowrecord.EncodeJSON(map[string]any{"exit_code": got, "error": errString(err)})
 }
 
 func resultEvent(s driverkit.Strategy, text string) json.RawMessage {
@@ -194,7 +166,7 @@ func resultEvent(s driverkit.Strategy, text string) json.RawMessage {
 	if s.ResultEvent != nil {
 		ev, err = s.ResultEvent(text)
 	}
-	return encodeJSON(map[string]any{"event": string(ev), "error": errString(err)})
+	return shadowrecord.EncodeJSON(map[string]any{"event": string(ev), "error": errString(err)})
 }
 
 func errString(err error) string {
@@ -202,28 +174,4 @@ func errString(err error) string {
 		return ""
 	}
 	return err.Error()
-}
-
-func encodeJSON(v any) json.RawMessage {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return json.RawMessage(fmt.Sprintf("%q", "unencodable: "+err.Error()))
-	}
-	return b
-}
-
-func clip(s string) string {
-	if len(s) <= maxPayload {
-		return s
-	}
-	return strings.ToValidUTF8(s[:maxPayload], "") + fmt.Sprintf("...[%d bytes]", len(s))
-}
-
-// clipJSON swaps an oversized encoding for a string holding its head, so the
-// op stays valid JSON.
-func clipJSON(raw json.RawMessage) json.RawMessage {
-	if len(raw) <= maxPayload {
-		return raw
-	}
-	return encodeJSON(clip(string(raw)))
 }

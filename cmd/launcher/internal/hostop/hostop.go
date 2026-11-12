@@ -212,7 +212,9 @@ func EncodeSpindriftOp(op SpindriftOp) string {
 // line), "resolveExit" or "resultEvent". Neither of the last two has a LineNo,
 // so line_no is absent from the op; resolveExit has no Line either, while
 // resultEvent's Line is the native result text it encoded. Native and Shadow
-// are each side's result, JSON-encoded.
+// are each side's result, JSON-encoded. A backend read shadow reports through
+// the same op: Check is then the read operation's name and Line its
+// JSON-encoded inputs.
 type ShadowDivergence struct {
 	Driver string          `json:"driver"`
 	Check  string          `json:"check"`
@@ -226,14 +228,24 @@ type ShadowDivergence struct {
 // of a shadow run and Box-reported (see ShadowDivergence). Loaded is false
 // when the Connector never loaded; Error set with Loaded true means it failed
 // closed mid-run and the counts are those so far. Diverged counts every
-// mismatch, Recorded only the ones emitted as shadow_divergence ops.
+// mismatch, Recorded only the ones emitted as shadow_divergence ops. A Pass-log
+// replay counts Compared lines; a backend read shadow uses the same op with
+// Compared counting compared calls, the *_ns_per_line fields meaning per
+// compared call, and the counters below it alone fills: Forbidden (shadow calls
+// answered 403 that were not a rate limit), RateLimited and
+// SecondaryRateLimited (primary and secondary rate limits), and Skipped
+// (sampled calls dropped rather than delay the native path).
 type ShadowSummary struct {
-	Driver          string `json:"driver"`
-	Loaded          bool   `json:"loaded"`
-	Error           string `json:"error,omitempty"`
-	Compared        int    `json:"compared"`
-	Diverged        int    `json:"diverged"`
-	Recorded        int    `json:"recorded"`
-	NativeNsPerLine int64  `json:"native_ns_per_line"`
-	ShadowNsPerLine int64  `json:"shadow_ns_per_line"`
+	Driver               string `json:"driver"`
+	Loaded               bool   `json:"loaded"`
+	Error                string `json:"error,omitempty"`
+	Compared             int    `json:"compared"`
+	Diverged             int    `json:"diverged"`
+	Recorded             int    `json:"recorded"`
+	Forbidden            int    `json:"forbidden,omitempty"`
+	RateLimited          int    `json:"rate_limited,omitempty"`
+	SecondaryRateLimited int    `json:"secondary_rate_limited,omitempty"`
+	Skipped              int    `json:"skipped,omitempty"`
+	NativeNsPerLine      int64  `json:"native_ns_per_line"`
+	ShadowNsPerLine      int64  `json:"shadow_ns_per_line"`
 }
