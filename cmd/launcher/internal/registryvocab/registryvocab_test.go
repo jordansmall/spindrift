@@ -2,6 +2,7 @@ package registryvocab
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 )
 
@@ -133,5 +134,27 @@ func TestSubtree_ScopedJSON(t *testing.T) {
 	}
 	if !decoded.Scoped {
 		t.Errorf("round trip = %+v, want Scoped true", decoded)
+	}
+}
+
+func TestCheckPathPattern(t *testing.T) {
+	tests := []struct {
+		pattern string
+		want    error
+	}{
+		{"/repos/o/r", nil},
+		{"", ErrPatternNotCanonical},
+		{"relative/x", ErrPatternNotCanonical},
+		{"/a/", ErrPatternNotCanonical},
+		{"/a/../b", ErrPatternNotCanonical},
+		{"/a/./b", ErrPatternNotCanonical},
+		{"/", ErrPatternBlanketRoot},
+		{"/a?b", ErrPatternURLDelimiter},
+		{"/a#b", ErrPatternURLDelimiter},
+	}
+	for _, tc := range tests {
+		if got := CheckPathPattern(tc.pattern); !errors.Is(got, tc.want) {
+			t.Errorf("CheckPathPattern(%q) = %v, want %v", tc.pattern, got, tc.want)
+		}
 	}
 }

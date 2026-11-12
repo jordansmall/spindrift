@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -784,36 +783,31 @@ func validateAuthScheme(label, scheme string) error {
 	return fmt.Errorf("registryroutes: %s: auth-scheme %q is not one of \"bearer\", \"basic\", or \"header:<Name>\"", label, scheme)
 }
 
-// rejectURLDelimiters bans "?" and "#" (issue #3321): they open a URL's query
-// and fragment, so no request path carries them, and a declared path spliced
-// into a GOPROXY or Gradle URL would be cut short at them. Shared by
-// validateAllowPatterns and validateDeclaredPath so the two cannot drift.
-func rejectURLDelimiters(label, field, value string) error {
-	if strings.ContainsAny(value, "?#") {
-		return fmt.Errorf("registryroutes: %s: %s %q must not contain %q or %q", label, field, value, "?", "#")
+// validateAllowPatterns applies registryvocab.CheckPathPattern to each pattern,
+// phrasing a failure as a parse-time error naming the route.
+func validateAllowPatterns(label string, patterns []string) error {
+	for _, p := range patterns {
+		switch err := registryvocab.CheckPathPattern(p); {
+		case errors.Is(err, registryvocab.ErrPatternURLDelimiter):
+			return urlDelimiterError(label, "allow pattern", p)
+		case errors.Is(err, registryvocab.ErrPatternNotCanonical):
+			return fmt.Errorf("registryroutes: %s: allow pattern %q must be an absolute path already in canonical form (leading \"/\", no trailing \"/\", no \".\" or \"..\" segment)", label, p)
+		case errors.Is(err, registryvocab.ErrPatternBlanketRoot):
+			return fmt.Errorf("registryroutes: %s: allow pattern %q would blanket-authorize the whole host, which is an off switch for host-rooted enforcement -- not permitted", label, p)
+		case err != nil:
+			// A reason added to CheckPathPattern must fail closed here, not pass.
+			return fmt.Errorf("registryroutes: %s: allow pattern %q is not permitted: %w", label, p, err)
+		}
 	}
 	return nil
 }
 
-// validateAllowPatterns rejects any pattern not already in the canonical
-// subtree-root form registrypathset derives (ADR 0047, issue #3258). It checks
-// with path.Clean rather than normalizing, so a mistyped pattern fails at parse
-// time instead of silently mismatching a request path. "/" is rejected too:
-// PathSet.Admits reads it as "admit every path", the off switch ADR 0047 bans.
-// "?" and "#" are banned first (rejectURLDelimiters): path.Clean keeps them.
-func validateAllowPatterns(label string, patterns []string) error {
-	for _, p := range patterns {
-		if err := rejectURLDelimiters(label, "allow pattern", p); err != nil {
-			return err
-		}
-		if p == "" || path.Clean(p) != p || !strings.HasPrefix(p, "/") {
-			return fmt.Errorf("registryroutes: %s: allow pattern %q must be an absolute path already in canonical form (leading \"/\", no trailing \"/\", no \".\" or \"..\" segment)", label, p)
-		}
-		if p == "/" {
-			return fmt.Errorf("registryroutes: %s: allow pattern %q would blanket-authorize the whole host, which is an off switch for host-rooted enforcement -- not permitted", label, p)
-		}
-	}
-	return nil
+// urlDelimiterError is the shared message for a "?" or "#" in a declared value:
+// registryvocab.HasURLDelimiter in validateDeclaredPath and
+// registryvocab.ErrPatternURLDelimiter in validateAllowPatterns, so the two
+// cannot drift.
+func urlDelimiterError(label, field, value string) error {
+	return fmt.Errorf("registryroutes: %s: %s %q must not contain %q or %q", label, field, value, "?", "#")
 }
 
 // validateDeclaredPath validates the path key of one [routes.ecosystems.<name>]
@@ -830,8 +824,8 @@ func validateAllowPatterns(label string, patterns []string) error {
 // banned, %q emits no escape Groovy rejects.
 // It strips every trailing "/", so "//" cannot pass the bare-root check.
 func validateDeclaredPath(label, field, value string) (string, error) {
-	if err := rejectURLDelimiters(label, field, value); err != nil {
-		return "", err
+	if registryvocab.HasURLDelimiter(value) {
+		return "", urlDelimiterError(label, field, value)
 	}
 	if strings.IndexFunc(value, unicode.IsSpace) >= 0 {
 		return "", fmt.Errorf("registryroutes: %s: %s %q must not contain whitespace", label, field, value)
