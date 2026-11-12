@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/gitexec"
 )
 
 // MatchesAnyMarker reports whether stderr contains any of markers,
@@ -87,7 +88,7 @@ func IsMergeTransient(stderr string) bool {
 // transport or server marker, or a ctx deadline kill, wraps
 // forge.ErrTransientPushFailure so callers know a retry is safe. ctx bounds
 // the subprocess because git applies no timeout of its own.
-func GitForcePush(ctx context.Context, dir string, extraArgs ...string) error {
+func GitForcePush(ctx context.Context, dir string, cred gitexec.Credential, extraArgs ...string) error {
 	// stderr goes to a file, not an io.Writer: Cmd.Run's copy goroutine waits
 	// for EOF on the pipe, which a hung grandchild (git-receive-pack's
 	// pre-receive hook) holds open after the context kills git itself.
@@ -99,7 +100,7 @@ func GitForcePush(ctx context.Context, dir string, extraArgs ...string) error {
 	defer stderrFile.Close()
 
 	args := append([]string{"-C", dir, "push", "--force-with-lease"}, extraArgs...)
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := cred.Apply(exec.CommandContext(ctx, "git", args...))
 	cmd.Stderr = stderrFile
 	if err := cmd.Run(); err != nil {
 		// A deadline kill is transient: every caller builds a fresh deadline per

@@ -574,7 +574,7 @@ func (e *execClient) Rebase(prURL string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), rebaseForcePushTimeout)
 	defer cancel()
-	return gitplumbing.GitForcePush(ctx, dir)
+	return gitplumbing.GitForcePush(ctx, dir, gitexec.Credential{})
 }
 
 // runRedacted runs cmd and returns its trimmed, credential-redacted stdout+stderr.

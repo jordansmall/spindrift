@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -864,7 +865,7 @@ func TestCloneToTemp_GitInDisablesAutoMaintenance(t *testing.T) {
 	src := t.TempDir()
 	testutil.GitRun(t, src, "init", "-q")
 	testutil.GitRun(t, src, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "init")
-	_, gitIn, cleanup, err := cloneToTemp(src, "spindrift-git-forge-test-*", time.Minute)
+	_, gitIn, cleanup, err := cloneToTemp(src, gitexec.Credential{}, "spindrift-git-forge-test-*", time.Minute)
 	if err != nil {
 		t.Fatalf("cloneToTemp: %v", err)
 	}
@@ -886,7 +887,7 @@ func TestCloneToTemp_PersistsAutoMaintenanceGuard(t *testing.T) {
 	src := t.TempDir()
 	testutil.GitRun(t, src, "init", "-q")
 	testutil.GitRun(t, src, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "init")
-	dir, _, cleanup, err := cloneToTemp(src, "spindrift-git-forge-test-*", time.Minute)
+	dir, _, cleanup, err := cloneToTemp(src, gitexec.Credential{}, "spindrift-git-forge-test-*", time.Minute)
 	if err != nil {
 		t.Fatalf("cloneToTemp: %v", err)
 	}
