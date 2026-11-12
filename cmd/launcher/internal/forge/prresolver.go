@@ -15,7 +15,7 @@ type PRForIssue struct {
 // zero PRForIssue with no error, so every caller shares one absent policy;
 // only a genuine lookup failure returns a non-nil error.
 func ResolveOpenPR(cf CodeForge, num string) (PRForIssue, error) {
-	pr, ok := cf.(PRForge)
+	pr, ok := AsCodeForge[PRForge](cf)
 	if !ok {
 		return PRForIssue{}, nil
 	}
@@ -61,6 +61,6 @@ func ResolveOpenPRFiles(cf CodeForge, num string) ([]string, error) {
 	}
 	// ResolveOpenPR only reports Found when cf implements PRForge, so this
 	// assertion always succeeds.
-	pr := cf.(PRForge)
+	pr, _ := AsCodeForge[PRForge](cf)
 	return pr.ListPRFiles(res.URL)
 }

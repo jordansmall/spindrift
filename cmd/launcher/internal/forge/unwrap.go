@@ -26,3 +26,31 @@ func As[T any](it IssueTracker) (T, bool) {
 	var zero T
 	return zero, false
 }
+
+// CodeForgeUnwrapper is implemented by a CodeForge that wraps another one, in
+// the manner of errors.Unwrap.
+type CodeForgeUnwrapper interface {
+	UnwrapCodeForge() CodeForge
+}
+
+// AsCodeForge returns the outermost layer of cf, following UnwrapCodeForge,
+// that implements T.
+//
+// An optional capability on a CodeForge must be looked up with AsCodeForge,
+// never a bare type assertion: embedding the CodeForge interface hides every
+// capability of the wrapped forge, so a wrapper's own implementation shadows
+// the wrapped forge's and everything else shows through.
+func AsCodeForge[T any](cf CodeForge) (T, bool) {
+	for cf != nil {
+		if v, ok := cf.(T); ok {
+			return v, true
+		}
+		u, ok := cf.(CodeForgeUnwrapper)
+		if !ok {
+			break
+		}
+		cf = u.UnwrapCodeForge()
+	}
+	var zero T
+	return zero, false
+}
