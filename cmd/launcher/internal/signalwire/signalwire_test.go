@@ -3,6 +3,7 @@ package signalwire
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // TestIssueIntentValidate pins Validate's own rule set: required title and
@@ -133,5 +134,87 @@ func TestPRIntentValidate(t *testing.T) {
 				t.Fatalf("Validate() = (%q, %d), want (%q, %d): %q", rej.Status, rej.Code, tc.wantStatus, tc.wantCode, rej.Reason)
 			}
 		})
+	}
+}
+
+func issueSnapshotOf(bodyLen int, comments ...IssueComment) IssueSnapshot {
+	return IssueSnapshot{
+		Ref: "owner/repo#7", Title: "title", State: "open", Labels: []string{"bug"},
+		Body: strings.Repeat("b", bodyLen), Comments: comments,
+	}
+}
+
+func TestCapIssueSnapshotLeavesASmallSnapshotAlone(t *testing.T) {
+	in := issueSnapshotOf(10, IssueComment{Author: "a", CreatedAt: "t", Body: "c"})
+	got := CapIssueSnapshot(in)
+	if got.Truncated || len(got.Comments) != 1 || got.Body != in.Body {
+		t.Fatalf("got %+v, want the snapshot untouched", got)
+	}
+}
+
+func TestCapIssueSnapshotDropsOldestCommentsFirst(t *testing.T) {
+	chunk := strings.Repeat("c", MaxIssueReplyBytes/4)
+	in := issueSnapshotOf(10,
+		IssueComment{Author: "a", Body: "oldest" + chunk},
+		IssueComment{Author: "a", Body: "second" + chunk},
+		IssueComment{Author: "a", Body: "third" + chunk},
+		IssueComment{Author: "a", Body: "newest" + chunk},
+		IssueComment{Author: "a", Body: "latest" + chunk},
+	)
+	got := CapIssueSnapshot(in)
+	if !got.Truncated {
+		t.Fatal("Truncated = false, want true")
+	}
+	if n := got.TextBytes(); n > MaxIssueReplyBytes {
+		t.Fatalf("text = %d bytes, want <= %d", n, MaxIssueReplyBytes)
+	}
+	if len(got.Comments) == 0 || len(got.Comments) == len(in.Comments) {
+		t.Fatalf("kept %d of %d comments, want some dropped and some kept", len(got.Comments), len(in.Comments))
+	}
+	if last := got.Comments[len(got.Comments)-1]; !strings.HasPrefix(last.Body, "latest") {
+		t.Errorf("newest comment was dropped; kept tail %q", last.Body[:6])
+	}
+	if got.Body != in.Body {
+		t.Error("body was cut while comments could still be dropped")
+	}
+}
+
+func TestCapIssueSnapshotCutsBodyOnARuneBoundary(t *testing.T) {
+	in := issueSnapshotOf(0)
+	in.Body = strings.Repeat("é", MaxIssueReplyBytes) // 2 bytes per rune
+	got := CapIssueSnapshot(in)
+	if !got.Truncated {
+		t.Fatal("Truncated = false, want true")
+	}
+	if !utf8.ValidString(got.Body) {
+		t.Error("cut body is not valid utf-8")
+	}
+	if n := got.TextBytes(); n > MaxIssueReplyBytes {
+		t.Fatalf("text = %d bytes, want <= %d", n, MaxIssueReplyBytes)
+	}
+	if got.Body == "" {
+		t.Error("body cut to nothing; want the head of the body kept")
+	}
+}
+
+func TestCapIssueSnapshotBoundsEveryField(t *testing.T) {
+	big := strings.Repeat("x", 2*MaxIssueReplyBytes)
+	got := CapIssueSnapshot(IssueSnapshot{Title: big, Labels: []string{big, big}, Body: big,
+		Comments: []IssueComment{{Body: big}}})
+	if n := got.TextBytes(); n > MaxIssueReplyBytes {
+		t.Fatalf("text = %d bytes, want <= %d", n, MaxIssueReplyBytes)
+	}
+	if !got.Truncated {
+		t.Error("Truncated = false, want true")
+	}
+}
+
+// signalclient's maxReplyBytes (1 MiB) silently truncates a longer reply, so a
+// capped snapshot must still fit after worst-case JSON escaping (one byte to a
+// six-byte \u escape) plus envelope slack.
+func TestMaxIssueReplyBytesFitsTheClientReplyLimit(t *testing.T) {
+	const clientMaxReplyBytes = 1 << 20
+	if 6*MaxIssueReplyBytes+16*1024 > clientMaxReplyBytes {
+		t.Fatalf("a worst-case escaped %d-byte snapshot overruns the client's %d-byte reply limit", MaxIssueReplyBytes, clientMaxReplyBytes)
 	}
 }

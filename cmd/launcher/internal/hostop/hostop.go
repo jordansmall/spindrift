@@ -38,9 +38,10 @@ type SpindriftOp struct {
 	// on a pass_model op (issue #6270). Empty on every other op kind.
 	Model  string `json:"model,omitempty"`
 	Effort string `json:"effort,omitempty"`
-	// Kind names the signal kind on a "signal" op (issue #3724): "comment",
-	// "pr-intent", "issue-intent", "status", or "unknown" (the sentinel for
-	// a path outside the four routes). Empty on every other op kind.
+	// Kind names the signal kind on a "signal" op (issue #3724): a buffered kind
+	// ("comment", "pr-intent", "issue-intent"), a read route ("status", "issue"),
+	// or "unknown" (the sentinel for a path outside the known routes). Empty on
+	// every other op kind.
 	Kind string `json:"kind,omitempty"`
 	// Size is the signal's content byte count and Hash its content hash,
 	// "sha256:"-prefixed hex, on a "signal" op.
@@ -49,7 +50,7 @@ type SpindriftOp struct {
 	// Decision is "continue" or "stop" on a "decision" op, "fire" or
 	// "skip" on a "delta_review_trigger" op (issue #3246), or "accept",
 	// "reject", "read", or "usage" on a "signal" op (issue #3724, #3867)
-	// -- "read" for the status route, which never accepts or rejects
+	// -- "read" for the status and issue routes, which never accept or reject
 	// content and so carries no Reason; "usage" for the diagnostics-only
 	// route a Box-side client usage failure reports on, Reason carrying
 	// the client's error, never buffered. The op kinds share the field
