@@ -57,35 +57,74 @@ type CommentLister interface {
 	Comments(num string) ([]Comment, error)
 }
 
+// Thread is an issue with its live comment window, as IssueThread returns it.
+type Thread struct {
+	Issue    Issue
+	Comments []Comment
+	// CommentsErr is the CommentLister failure, if any. Comments is then empty,
+	// so a caller that serves the thread can say it is incomplete.
+	CommentsErr error
+}
+
+// IssueThread reads issue num and, when t implements CommentLister, its last 10
+// live comments, oldest first: the fetch-and-window step IssueText renders and
+// the Signal socket's issue read serves structured. A t.Issue error is
+// returned; a comments error is not (it lands in Thread.CommentsErr and on
+// warn), so losing the thread never fails a read the issue alone would have
+// carried. Minimized comments are excluded before the window is taken, so
+// hidden ones cannot evict live ones; each one dropped writes a line to warn.
+func IssueThread(t IssueTracker, num string, warn io.Writer) (Thread, error) {
+	iss, err := t.Issue(num)
+	if err != nil {
+		return Thread{}, err
+	}
+	cl, ok := As[CommentLister](t)
+	if !ok {
+		return Thread{Issue: iss}, nil
+	}
+	comments, cErr := cl.Comments(num)
+	if cErr != nil {
+		fmt.Fprintf(warn, "    ?? %s: comments unreadable: %v\n", logRef(num), cErr)
+		return Thread{Issue: iss, CommentsErr: cErr}, nil
+	}
+	comments = dropMinimized(comments, num, warn)
+	if len(comments) > issueTextCommentWindow {
+		comments = comments[len(comments)-issueTextCommentWindow:]
+	}
+	return Thread{Issue: iss, Comments: comments}, nil
+}
+
+// logRef renders num for a host log line: "#5" for a numeric number, the
+// bare key ("PROJ-5") for a tracker whose ids already name the project.
+func logRef(num string) string {
+	if num != "" && strings.Trim(num, "0123456789") == "" {
+		return "#" + num
+	}
+	return num
+}
+
 // IssueText renders issue num's body, its last 10 comments under "## Comments"
 // when t implements CommentLister, and num's transitive link chain under
 // "## Linked issues" when t implements LinkedIssueLister. A t.Issue error is
-// returned; a comments or LinkedIssues error is swallowed, so losing either
-// section never fails a dispatch the subject text alone would have carried.
+// returned; a comments error writes a line to warn and a LinkedIssues error is
+// swallowed, so losing either section never fails a dispatch the subject text
+// alone would have carried.
 // Minimized comments are excluded before the window is taken, so hidden ones
 // cannot evict live ones; each one dropped writes a line to warn.
 func IssueText(t IssueTracker, num string, warn io.Writer) (string, error) {
-	iss, err := t.Issue(num)
+	th, err := IssueThread(t, num, warn)
 	if err != nil {
 		return "", err
 	}
-	text := iss.Body
-	if cl, ok := As[CommentLister](t); ok {
-		if comments, cErr := cl.Comments(num); cErr == nil {
-			comments = dropMinimized(comments, num, warn)
-			if len(comments) > issueTextCommentWindow {
-				comments = comments[len(comments)-issueTextCommentWindow:]
-			}
-			if len(comments) > 0 {
-				var b strings.Builder
-				b.WriteString(text)
-				b.WriteString("\n\n## Comments\n\n")
-				for _, c := range comments {
-					fmt.Fprintf(&b, "%s (%s): %s\n", c.Author, c.CreatedAt, c.Body)
-				}
-				text = b.String()
-			}
+	text := th.Issue.Body
+	if len(th.Comments) > 0 {
+		var b strings.Builder
+		b.WriteString(text)
+		b.WriteString("\n\n## Comments\n\n")
+		for _, c := range th.Comments {
+			fmt.Fprintf(&b, "%s (%s): %s\n", c.Author, c.CreatedAt, c.Body)
 		}
+		text = b.String()
 	}
 
 	// No room left for a linked section, and truncation must keep the
@@ -312,7 +351,7 @@ func dropMinimized(comments []Comment, num string, warn io.Writer) []Comment {
 			if reason == "" {
 				reason = "no reason"
 			}
-			fmt.Fprintf(warn, "    ?? #%s: dropped minimized comment by %s (%s)\n", num, c.Author, reason)
+			fmt.Fprintf(warn, "    ?? %s: dropped minimized comment by %s (%s)\n", logRef(num), c.Author, reason)
 			continue
 		}
 		live = append(live, c)
