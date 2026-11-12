@@ -36,9 +36,25 @@ func httpCallGuest(req string, respPtr, respCap int64, pass bool) []byte {
 	return guestModuleWith([]guestImport{imp}, []dataSeg{{0, hs}, {respOff, []byte(survived)}, {netReqOff, []byte(req)}}, fns...)
 }
 
+type netLoader func(context.Context, []byte, connectorhost.Network) (*connectorhost.Connector, error)
+
+// netLoaders are the ways to load a network Connector; a grant behaves the same
+// under the interpreter and the compiler.
+var netLoaders = map[string]netLoader{
+	"interpreter": connectorhost.LoadNetwork,
+	"compiled": func(ctx context.Context, wasm []byte, n connectorhost.Network) (*connectorhost.Connector, error) {
+		return connectorhost.LoadNetworkCompiled(ctx, wasm, n, "")
+	},
+}
+
 func loadNet(t *testing.T, wasm []byte, n *connectorhost.Network) *connectorhost.Connector {
 	t.Helper()
-	c, err := connectorhost.LoadNetwork(context.Background(), wasm, *n)
+	return loadNetWith(t, connectorhost.LoadNetwork, wasm, n)
+}
+
+func loadNetWith(t *testing.T, load netLoader, wasm []byte, n *connectorhost.Network) *connectorhost.Connector {
+	t.Helper()
+	c, err := load(context.Background(), wasm, *n)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +63,12 @@ func loadNet(t *testing.T, wasm []byte, n *connectorhost.Network) *connectorhost
 }
 
 func TestLoadNetworkGrantsHttpRequestAndKeepsTheCredentialOutOfTheGuest(t *testing.T) {
+	for name, load := range netLoaders {
+		t.Run(name, func(t *testing.T) { grantsHTTPRequest(t, load) })
+	}
+}
+
+func grantsHTTPRequest(t *testing.T, load netLoader) {
 	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"result":{"authorized":%t}}`, r.Header.Get("Authorization") == "Bearer s3cret")
 	})
@@ -56,7 +78,7 @@ func TestLoadNetworkGrantsHttpRequestAndKeepsTheCredentialOutOfTheGuest(t *testi
 	if bytes.Contains(wasm, []byte("s3cret")) {
 		t.Fatal("credential in the module bytes")
 	}
-	c := loadNet(t, wasm, netFor(b, &audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"}))
+	c := loadNetWith(t, load, wasm, netFor(b, &audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"}))
 	var out struct{ Authorized bool }
 	if err := c.Call(context.Background(), "m", nil, &out); err != nil {
 		t.Fatal(err)
@@ -74,6 +96,12 @@ func TestLoadNetworkGrantsHttpRequestAndKeepsTheCredentialOutOfTheGuest(t *testi
 }
 
 func TestNetworkConnectorRefusalFailsClosedWithoutSending(t *testing.T) {
+	for name, load := range netLoaders {
+		t.Run(name, func(t *testing.T) { refusalFailsClosed(t, load) })
+	}
+}
+
+func refusalFailsClosed(t *testing.T, load netLoader) {
 	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {})
 	route := connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"}
 	cases := map[string]string{
@@ -84,7 +112,7 @@ func TestNetworkConnectorRefusalFailsClosedWithoutSending(t *testing.T) {
 	for name, req := range cases {
 		t.Run(name, func(t *testing.T) {
 			var audit bytes.Buffer
-			c := loadNet(t, httpCallGuest(req, netRespOff, 4096, false), netFor(b, &audit, route))
+			c := loadNetWith(t, load, httpCallGuest(req, netRespOff, 4096, false), netFor(b, &audit, route))
 			before := b.hits.Load()
 			err := c.Call(context.Background(), "poke", nil, nil)
 			if !errors.Is(err, connectorhost.ErrCall) {
@@ -183,6 +211,12 @@ func TestNetworkConnectorOutOfBoundsHostCallFailsClosed(t *testing.T) {
 }
 
 func TestLoadNetworkRejectsABadConfig(t *testing.T) {
+	for name, load := range netLoaders {
+		t.Run(name, func(t *testing.T) { rejectsABadConfig(t, load) })
+	}
+}
+
+func rejectsABadConfig(t *testing.T, load netLoader) {
 	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {})
 	wasm := answeringGuest(nil, `{"result":5}`)
 	good := connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"}
@@ -196,12 +230,12 @@ func TestLoadNetworkRejectsABadConfig(t *testing.T) {
 	} {
 		n := netFor(b, &audit, good)
 		mutate(n)
-		c, err := connectorhost.LoadNetwork(context.Background(), wasm, *n)
+		c, err := load(context.Background(), wasm, *n)
 		if c != nil {
 			_ = c.Close(context.Background())
 		}
 		if err == nil {
-			t.Errorf("%s: LoadNetwork accepted the config", name)
+			t.Errorf("%s: load accepted the config", name)
 		} else if name == "blanket root route" && !errors.Is(err, connectorhost.ErrRouteTable) {
 			t.Errorf("%s: err = %v, want ErrRouteTable", name, err)
 		}

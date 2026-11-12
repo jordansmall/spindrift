@@ -536,13 +536,18 @@ func Load(ctx context.Context, wasm []byte) (*Connector, error) {
 // refused before the module compiles, with ErrRouteTable for the routes. The
 // interpreter runs it as in Load.
 func LoadNetwork(ctx context.Context, wasm []byte, n Network) (*Connector, error) {
-	if n.Name == "" || n.Audit == nil {
-		return nil, errors.New("connector network grant needs a name and an audit log")
-	}
-	if err := ValidateRoutes(n.Routes); err != nil {
+	if err := checkGrant(n); err != nil {
 		return nil, err
 	}
 	return loadWith(ctx, wasm, wazero.NewRuntimeConfigInterpreter(), nil, &n)
+}
+
+// checkGrant refuses a network grant before any module compiles for it.
+func checkGrant(n Network) error {
+	if n.Name == "" || n.Audit == nil {
+		return errors.New("connector network grant needs a name and an audit log")
+	}
+	return ValidateRoutes(n.Routes)
 }
 
 // LoadCompiled is Load under wazero's compiler where the platform has one,
@@ -552,17 +557,35 @@ func LoadNetwork(ctx context.Context, wasm []byte, n Network) (*Connector, error
 // A non-empty cacheDir keeps the compiled module on disk, shared across
 // processes; "" disables it.
 func LoadCompiled(ctx context.Context, wasm []byte, cacheDir string) (*Connector, error) {
-	cfg := wazero.NewRuntimeConfig()
-	var cache wazero.CompilationCache
-	if cacheDir != "" {
-		// The cache only speeds up the load, so a failure to build one is not
-		// a load failure.
-		if cc, err := wazero.NewCompilationCacheWithDir(cacheDir); err == nil {
-			cache = cc
-			cfg = cfg.WithCompilationCache(cache)
-		}
-	}
+	cfg, cache := compiledConfig(cacheDir)
 	return loadWith(ctx, wasm, cfg, cache, nil)
+}
+
+// LoadNetworkCompiled is LoadNetwork under the compiler, as LoadCompiled is to
+// Load: for test binaries that drive a network Connector hard. The grant is
+// checked as in LoadNetwork, before the module compiles.
+func LoadNetworkCompiled(ctx context.Context, wasm []byte, n Network, cacheDir string) (*Connector, error) {
+	if err := checkGrant(n); err != nil {
+		return nil, err
+	}
+	cfg, cache := compiledConfig(cacheDir)
+	return loadWith(ctx, wasm, cfg, cache, &n)
+}
+
+// compiledConfig returns wazero's compiler config and its compilation cache,
+// nil when cacheDir is "".
+func compiledConfig(cacheDir string) (wazero.RuntimeConfig, wazero.CompilationCache) {
+	cfg := wazero.NewRuntimeConfig()
+	if cacheDir == "" {
+		return cfg, nil
+	}
+	// The cache only speeds up the load, so a failure to build one is not a
+	// load failure.
+	cc, err := wazero.NewCompilationCacheWithDir(cacheDir)
+	if err != nil {
+		return cfg, nil
+	}
+	return cfg.WithCompilationCache(cc), cc
 }
 
 // loadWith takes ownership of cache, which may be nil. network is the Host call grant, nil for none.
