@@ -12,6 +12,7 @@ package forge
 import (
 	"encoding/json"
 	"fmt"
+	"unicode/utf8"
 
 	"spindrift.dev/sdk/connector"
 )
@@ -42,6 +43,9 @@ type Check struct {
 	Name       string `json:"name"`
 	Conclusion string `json:"conclusion"`
 	Summary    string `json:"summary"`
+	// JobID names the job whose log JobLog reads; "" when the context has none
+	// (a StatusContext, or a CheckRun that is not a workflow job).
+	JobID string `json:"jobId,omitempty"`
 }
 
 // Rollup is a PR head commit's status-check rollup. State is the aggregate
@@ -63,6 +67,13 @@ type Reader struct {
 
 	// Checks returns the status-check rollup of the PR's head commit.
 	Checks func(t Target, number string) (Rollup, error)
+
+	// JobLog returns the raw log of the job a Check's JobID names. It is
+	// optional: a Connector that leaves it nil does not register
+	// forge.jobLog, and core renders failure detail without logs. The method
+	// cuts the result to the tail core asks for, so JobLog may return the
+	// whole log.
+	JobLog func(t Target, jobID string) (string, error)
 }
 
 type method = func(json.RawMessage) (any, error)
@@ -147,5 +158,38 @@ func handlers(r Reader) ([]string, map[string]method) {
 			return ro, nil
 		},
 	}
+	if r.JobLog != nil {
+		m["forge.jobLog"] = func(params json.RawMessage) (any, error) {
+			var p struct {
+				Target Target `json:"target"`
+				JobID  string `json:"jobId"`
+				Tail   int    `json:"tail"`
+			}
+			if err := unmarshal(params, &p); err != nil {
+				return nil, err
+			}
+			log, err := r.JobLog(p.Target, p.JobID)
+			if err != nil {
+				return nil, err
+			}
+			return struct {
+				Log string `json:"log"`
+			}{tailBytes(log, p.Tail)}, nil
+		}
+	}
 	return []string{"forge"}, m
+}
+
+// tailBytes returns s's last n bytes, starting on a rune boundary; n <= 0
+// means no cut. Core asks for a tail so a long log cannot outgrow the call's
+// output cap once JSON-escaped.
+func tailBytes(s string, n int) string {
+	if n <= 0 || len(s) <= n {
+		return s
+	}
+	s = s[len(s)-n:]
+	for len(s) > 0 && !utf8.RuneStart(s[0]) {
+		s = s[1:]
+	}
+	return s
 }

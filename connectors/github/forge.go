@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -12,7 +13,7 @@ import (
 
 // rollupQuery is the one GraphQL document the Connector sends: REST check-runs
 // answer 403 under a fine-grained PAT, the rollup does not.
-const rollupQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:50){nodes{__typename ... on CheckRun{name conclusion summary} ... on StatusContext{context state description}}}}}}}}}}`
+const rollupQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:50){nodes{__typename ... on CheckRun{name conclusion summary detailsUrl} ... on StatusContext{context state description}}}}}}}}}}`
 
 type rawPR struct {
 	Number   int     `json:"number"`
@@ -84,15 +85,16 @@ type rawContext struct {
 	Name        string  `json:"name"`
 	Conclusion  string  `json:"conclusion"`
 	Summary     *string `json:"summary"`
+	DetailsURL  *string `json:"detailsUrl"`
 	Context     string  `json:"context"`
 	State       string  `json:"state"`
 	Description *string `json:"description"`
 }
 
-func (c rawContext) check() forge.Check {
+func (c rawContext) check(repo string) forge.Check {
 	switch c.Typename {
 	case "CheckRun":
-		return forge.Check{Kind: c.Typename, Name: c.Name, Conclusion: c.Conclusion, Summary: deref(c.Summary)}
+		return forge.Check{Kind: c.Typename, Name: c.Name, Conclusion: c.Conclusion, Summary: deref(c.Summary), JobID: jobID(repo, deref(c.DetailsURL))}
 	case "StatusContext":
 		return forge.Check{Kind: c.Typename, Name: c.Context, Conclusion: c.State, Summary: deref(c.Description)}
 	}
@@ -157,7 +159,40 @@ func checks(t forge.Target, number string) (forge.Rollup, error) {
 	roll := nodes[0].Commit.StatusCheckRollup
 	out.State = roll.State
 	for _, c := range roll.Contexts.Nodes {
-		out.Checks = append(out.Checks, c.check())
+		out.Checks = append(out.Checks, c.check(t.Repo))
 	}
 	return out, nil
+}
+
+// jobPathRE matches the path of a workflow job's web page, the detailsUrl of a
+// GitHub Actions CheckRun. Any other CheckRun (a third-party App's) has no job
+// log to read.
+var jobPathRE = regexp.MustCompile(`^/([^/]+/[^/]+)/actions/runs/\d+/job/(\d+)/?$`)
+
+// jobID is the job a detailsUrl names, or "" unless it is a job of repo: the
+// log read is authorised for the target repo alone, so another repo's job URL
+// is not followed.
+func jobID(repo, detailsURL string) string {
+	u, err := url.Parse(detailsURL)
+	if err != nil {
+		return ""
+	}
+	if m := jobPathRE.FindStringSubmatch(u.Path); m != nil && strings.EqualFold(m[1], repo) {
+		return m[2]
+	}
+	return ""
+}
+
+// jobLog reads a job's log. The route answers 302 to a blob the host follows; a
+// log too large to return whole comes back as its tail, which is what core
+// excerpts. A failed read is an error the caller drops.
+func jobLog(t forge.Target, id string) (string, error) {
+	if _, err := strconv.ParseUint(id, 10, 64); err != nil {
+		return "", fmt.Errorf("job id %q is not a number", id)
+	}
+	if _, _, err := splitRepo(t.Repo); err != nil {
+		return "", err
+	}
+	b, err := fetch("GET", t.API, "/repos/"+t.Repo+"/actions/jobs/"+id+"/logs", nil)
+	return string(b), err
 }

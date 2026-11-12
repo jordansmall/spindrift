@@ -196,3 +196,96 @@ func TestForgeBadRepoRefusedWithoutRequest(t *testing.T) {
 		t.Fatalf("requests sent: %#v", *got)
 	}
 }
+
+func TestChecksFillsJobIDFromDetailsURL(t *testing.T) {
+	stub(t, map[string]connector.Response{
+		graphqlURL: ok(`{"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"statusCheckRollup":{
+			"state":"FAILURE","contexts":{"nodes":[
+				{"__typename":"CheckRun","name":"unit","conclusion":"FAILURE","summary":null,"detailsUrl":"https://github.com/o/r/actions/runs/900/job/12345"},
+				{"__typename":"CheckRun","name":"app","conclusion":"FAILURE","summary":null,"detailsUrl":"https://app.example/checks/1"},
+				{"__typename":"CheckRun","name":"run","conclusion":"FAILURE","summary":null,"detailsUrl":"https://github.com/o/r/actions/runs/900"},
+				{"__typename":"CheckRun","name":"odd","conclusion":"FAILURE","summary":null,"detailsUrl":"https://github.com/o/r/actions/runs/9/job/1/../2"},
+				{"__typename":"CheckRun","name":"slash","conclusion":"FAILURE","summary":null,"detailsUrl":"https://github.com/o/r/actions/runs/900/job/678/"},
+				{"__typename":"CheckRun","name":"none","conclusion":"FAILURE","summary":null,"detailsUrl":null},
+				{"__typename":"StatusContext","context":"ci","state":"ERROR","description":null}]}}}}]}}}}}`),
+	})
+	ro, err := checks(ftgt, "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range ro.Checks {
+		got = append(got, c.Name+"="+c.JobID)
+	}
+	want := []string{"unit=12345", "app=", "run=", "odd=", "slash=678", "none=", "ci="}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("job ids = %v, want %v", got, want)
+	}
+}
+
+func TestRollupQueryAsksForDetailsURL(t *testing.T) {
+	if !strings.Contains(rollupQuery, "detailsUrl") {
+		t.Fatal("rollup query does not select detailsUrl")
+	}
+}
+
+const jobLogURL = "https://api.github.com/repos/o/r/actions/jobs/12345/logs"
+
+func TestJobLog(t *testing.T) {
+	got := stub(t, map[string]connector.Response{
+		jobLogURL: {Status: 200, Body: []byte("2026-01-01T00:00:00Z --- FAIL: TestX\n")},
+	})
+	log, err := jobLog(ftgt, "12345")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if log != "2026-01-01T00:00:00Z --- FAIL: TestX\n" {
+		t.Fatalf("log = %q", log)
+	}
+	if r := (*got)[0]; r.Method != "GET" || r.Body != "" {
+		t.Fatalf("request = %#v", r)
+	}
+}
+
+func TestJobLogErrors(t *testing.T) {
+	stub(t, map[string]connector.Response{jobLogURL: {Status: 410, Body: []byte("{}")}})
+	if _, err := jobLog(ftgt, "12345"); err == nil {
+		t.Fatal("a non-2xx log read: want error")
+	}
+}
+
+func TestJobLogBadIDRefusedWithoutRequest(t *testing.T) {
+	got := stub(t, nil)
+	for _, id := range []string{"", "0x1", "-1", "1/../x", "1?x=y", " 1", "1\n"} {
+		if _, err := jobLog(ftgt, id); err == nil {
+			t.Errorf("jobLog(%q): want error", id)
+		}
+	}
+	if _, err := jobLog(forge.Target{API: ftgt.API, Repo: "norepo"}, "1"); err == nil {
+		t.Error("bad repo: want error")
+	}
+	if len(*got) != 0 {
+		t.Fatalf("requests sent: %#v", *got)
+	}
+}
+
+func TestChecksIgnoresJobURLOfAnotherRepo(t *testing.T) {
+	stub(t, map[string]connector.Response{
+		graphqlURL: ok(`{"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"statusCheckRollup":{
+			"state":"FAILURE","contexts":{"nodes":[
+				{"__typename":"CheckRun","name":"other","conclusion":"FAILURE","summary":null,"detailsUrl":"https://github.com/evil/repo/actions/runs/900/job/12345"},
+				{"__typename":"CheckRun","name":"case","conclusion":"FAILURE","summary":null,"detailsUrl":"https://github.com/O/R/actions/runs/900/job/678"}]}}}}]}}}}}`),
+	})
+	ro, err := checks(ftgt, "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range ro.Checks {
+		got = append(got, c.Name+"="+c.JobID)
+	}
+	want := []string{"other=", "case=678"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("job ids = %v, want %v", got, want)
+	}
+}

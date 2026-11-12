@@ -20,9 +20,9 @@ const (
 // fails outside wasip1.
 var send = connector.HTTPRequest
 
-// call sends one request to api+path and decodes a 2xx JSON body into out. The
-// host attaches the credential, so none is set here.
-func call(method, api, path string, body []byte, out any) error {
+// fetch sends one request to api+path and returns a 2xx body. The host
+// attaches the credential, so none is set here.
+func fetch(method, api, path string, body []byte) ([]byte, error) {
 	headers := map[string]string{
 		"Accept":               "application/vnd.github+json",
 		"X-GitHub-Api-Version": "2022-11-28",
@@ -32,12 +32,21 @@ func call(method, api, path string, body []byte, out any) error {
 	}
 	resp, err := send(connector.Request{Method: method, URL: api + path, Headers: headers, Body: string(body)})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if resp.Status < 200 || resp.Status > 299 {
-		return fmt.Errorf("%s %s: status %d", method, path, resp.Status)
+		return nil, fmt.Errorf("%s %s: status %d", method, path, resp.Status)
 	}
-	if err := json.Unmarshal(resp.Body, out); err != nil {
+	return resp.Body, nil
+}
+
+// call is fetch plus decoding the JSON body into out.
+func call(method, api, path string, body []byte, out any) error {
+	b, err := fetch(method, api, path, body)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(b, out); err != nil {
 		return fmt.Errorf("%s %s: decode: %w", method, path, err)
 	}
 	return nil

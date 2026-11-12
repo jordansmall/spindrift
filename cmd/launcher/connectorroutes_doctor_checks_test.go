@@ -204,3 +204,20 @@ func TestConnectorRoutesWidened_FromNixRenderedBaseline(t *testing.T) {
 		})
 	}
 }
+
+// The github Connector's log read (issue #6893) is the one Route that opts in
+// to a redirect, so a Consumer whose baseline predates it sees exactly that
+// route as added, flagged as following one.
+func TestConnectorRoutesChecks_RedirectingLogRouteShowsAsWidening(t *testing.T) {
+	issues := connectorhost.Route{Method: "GET", Host: "api.github.com", Path: "/repos/o/r/issues"}
+	graphql := connectorhost.Route{Method: "POST", Host: "api.github.com", Path: "/graphql"}
+	logs := connectorhost.Route{Method: "GET", Host: "api.github.com", Path: "/repos/o/r/actions/jobs", FollowRedirect: true}
+	useConnectorRows(t, connectorRow([]connectorhost.Route{issues, graphql}, []connectorhost.Route{issues, graphql, logs}))
+	out := runConnectorRows(t, connectorRoutesChecks())
+	if want := "\n+ GET api.github.com /repos/o/r/actions/jobs (follows redirect)"; !strings.Contains(out, want) {
+		t.Errorf("output lacks %q:\n%s", want, out)
+	}
+	if strings.Contains(out, "+ GET api.github.com /repos/o/r/issues") || strings.Contains(out, "+ POST") {
+		t.Errorf("accepted routes reported as added:\n%s", out)
+	}
+}
