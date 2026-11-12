@@ -53,7 +53,7 @@ func StripInlineCode(line string) string {
 }
 
 // IsSentinelBullet reports whether content is a "no blockers" sentinel.
-// local.go's parseLocalBlockers calls it too, so both backends agree on what
+// ParseBlockerSlugs calls it too, so both backends agree on what
 // "no blockers" means.
 func IsSentinelBullet(content string) bool {
 	return sentinelBullet.MatchString(content)
@@ -131,6 +131,41 @@ func ParseBlockerRefs(body string) []string {
 				addRef(m[1])
 			}
 			remaining = after
+		}
+	}
+	return refs
+}
+
+// ParseBlockerSlugs returns the filename slugs under body's "## Blocked by"
+// section, the local tracker's dependency grammar. It reads only the
+// description: comments are host-written on the agent's behalf and must not
+// alter the declared blockers.
+func ParseBlockerSlugs(body string) []string {
+	body = Description(body)
+	seen := map[string]bool{}
+	var refs []string
+	inSection := false
+	for line := range UnfencedLines(body) {
+		if IsBlockedByHeader(line) {
+			inSection = true
+			continue
+		}
+		if IsAnyHeading(line) {
+			inSection = false
+		}
+		if inSection && IsBulletItem(line) {
+			// The sentinel check runs after backtick-stripping, unlike
+			// ParseBlockerRefs, so a quoted "`None`" also reads as the
+			// sentinel. Real slugs are never a backtick-quoted "None", so this
+			// only widens sentinel recognition, never narrows it.
+			slug := strings.Trim(ExtractBulletContent(line), "`")
+			if IsSentinelBullet(slug) {
+				continue
+			}
+			if slug != "" && !seen[slug] {
+				seen[slug] = true
+				refs = append(refs, slug)
+			}
 		}
 	}
 	return refs

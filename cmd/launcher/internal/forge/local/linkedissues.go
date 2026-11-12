@@ -37,7 +37,7 @@ func (lt *LocalTracker) LinkedIssues(num string) ([]forge.LinkedIssue, error) {
 		li := cur.li
 		depth := cur.depth + 1
 
-		for _, ref := range parseLocalBlockers(li.body) {
+		for _, ref := range forge.ParseBlockerSlugs(li.body) {
 			if visited[ref] {
 				continue
 			}

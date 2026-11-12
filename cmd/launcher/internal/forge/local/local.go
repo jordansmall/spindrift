@@ -379,11 +379,11 @@ func (lt *LocalTracker) DepsOf(num string) ([]forge.Dependency, error) {
 	if err != nil {
 		return nil, err
 	}
-	return forge.WithSource(parseLocalBlockers(li.body), forge.DepSourceBody), nil
+	return forge.WithSource(forge.ParseBlockerSlugs(li.body), forge.DepSourceBody), nil
 }
 
 // TouchesOf returns the touch-set parsed from issue num's description (the
-// body above its "## Comments" section, as parseLocalBlockers reads it) with
+// body above its "## Comments" section, as forge.ParseBlockerSlugs reads it) with
 // the shared body grammar, because the local tracker has no native touch-set
 // concept.
 func (lt *LocalTracker) TouchesOf(num string) ([]string, error) {
@@ -392,39 +392,6 @@ func (lt *LocalTracker) TouchesOf(num string) ([]string, error) {
 		return nil, err
 	}
 	return forge.ParseTouchPaths(forge.Description(li.body)), nil
-}
-
-// parseLocalBlockers reads only the description: comments are host-written on
-// the agent's behalf and must not alter the declared blockers.
-func parseLocalBlockers(body string) []string {
-	body = forge.Description(body)
-	seen := map[string]bool{}
-	var refs []string
-	inSection := false
-	for line := range forge.UnfencedLines(body) {
-		if forge.IsBlockedByHeader(line) {
-			inSection = true
-			continue
-		}
-		if forge.IsAnyHeading(line) {
-			inSection = false
-		}
-		if inSection && forge.IsBulletItem(line) {
-			// The sentinel check runs after backtick-stripping, unlike
-			// ParseBlockerRefs, so a quoted "`None`" also reads as the
-			// sentinel. Real slugs are never a backtick-quoted "None", so this
-			// only widens sentinel recognition, never narrows it.
-			slug := strings.Trim(forge.ExtractBulletContent(line), "`")
-			if forge.IsSentinelBullet(slug) {
-				continue
-			}
-			if slug != "" && !seen[slug] {
-				seen[slug] = true
-				refs = append(refs, slug)
-			}
-		}
-	}
-	return refs
 }
 
 // Comment appends body as a bullet under issue num's "## Comments" section,
