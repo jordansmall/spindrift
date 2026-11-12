@@ -437,7 +437,12 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	h.tr, err = connectortracker.New(conn, failingWrites{t}, testLabels, connectortracker.Target{API: b.URL, Repo: connectorRepo})
+	// The guest links the 0.2 SDK but speaks only the 0.1 reads; its version
+	// comes from the ldflag in connectors/github/package.nix, not the SDK default.
+	if !strings.HasPrefix(conn.ProtocolVersion, "0.1.") {
+		t.Fatalf("handshake protocol version = %q, want 0.1.x (the protocolVersion ldflag in connectors/github/package.nix)", conn.ProtocolVersion)
+	}
+	h.tr, err = connectortracker.New(conn, failingWrites{t}, connectortracker.Lifecycle{Labels: testLabels}, connectortracker.Target{API: b.URL, Repo: connectorRepo})
 	if err != nil {
 		t.Fatal(err)
 	}

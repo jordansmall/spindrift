@@ -1,10 +1,10 @@
 // Package connectortracker builds core's tracker reads (the forge.IssueTracker
-// list and issue reads and, when advertised, forge.CommentLister and
-// forge.NativeDepsReader) from a tracker Connector, over the 0.2 tracker
-// primitives in sdk/tracker. Every write stays with the native adapter, which
-// also stays authoritative for every optional capability the Connector
-// does not serve: the result is a stack of forge.Unwrapper layers over the
-// native adapter, so forge.As reaches those capabilities through it.
+// list and issue reads and, when advertised, forge.CommentLister,
+// forge.NativeDepsReader and forge.BlockersLister) from a tracker Connector,
+// over the 0.2 tracker primitives in sdk/tracker. Every write stays with the
+// native adapter, which also stays authoritative for every optional capability
+// the Connector does not serve: the result is a stack of forge.Unwrapper layers
+// over the native adapter, so forge.As reaches those capabilities through it.
 package connectortracker
 
 import (
@@ -36,6 +36,16 @@ var ErrAnswer = errors.New("connector answer refused")
 type Target struct {
 	API  string `json:"api"`
 	Repo string `json:"repo"`
+	// Dialect names the tracker deployment's API dialect, "" for a tracker with
+	// one. It is core config, so a Connector never guesses a deployment.
+	Dialect string `json:"dialect"`
+}
+
+// Lifecycle resolves a Dispatch state to the selectors a Connector lists by.
+// A state may have a label, a native status, both, or neither.
+type Lifecycle struct {
+	Labels   forge.DispatchLabels
+	Statuses map[forge.DispatchState]string
 }
 
 // Routes returns a copy of a tracker Connector's Route table with the
@@ -82,6 +92,7 @@ type (
 	listIssuesParams struct {
 		Target Target `json:"target"`
 		Label  string `json:"label"`
+		Status string `json:"status"`
 		Limit  int    `json:"limit"`
 	}
 	numberedParams struct {
@@ -98,6 +109,8 @@ type guestCall func(ctx context.Context, method string, params, result any) erro
 const (
 	// CapNativeDeps: the Connector serves tracker.nativeDeps.
 	CapNativeDeps = "tracker.nativeDeps"
+	// CapBlocks: the Connector serves tracker.blocks.
+	CapBlocks = "tracker.blocks"
 	// CapComments: the Connector serves tracker.comments and attests that each
 	// comment's minimized and minimizedReason are faithful. forge.IssueText
 	// drops minimized comments on that flag, and some trackers (GitHub REST)
@@ -117,10 +130,12 @@ var projectKeyID = regexp.MustCompile(`^[A-Z][A-Z0-9_]*-[1-9][0-9]*$`)
 // stack on it.
 type reads struct {
 	forge.IssueTracker
-	call   guestCall
-	labels forge.DispatchLabels
-	target Target
-	ids    idGrammar
+	call      guestCall
+	lifecycle Lifecycle
+	target    Target
+	ids       idGrammar
+	// v02 is false for a 0.1 Connector, which has no status selector.
+	v02 bool
 }
 
 // Unwrap implements forge.Unwrapper, so forge.As finds the native adapter's own
@@ -134,7 +149,7 @@ func (t *reads) WalksAllPages() bool { return false }
 
 // StateLabels implements forge.LabeledTracker. It shadows the native adapter's
 // labels with the family the Connector's lists are resolved through.
-func (t *reads) StateLabels() forge.DispatchLabels { return t.labels }
+func (t *reads) StateLabels() forge.DispatchLabels { return t.lifecycle.Labels }
 
 // commentsLayer serves forge.CommentLister from the Connector. It exists only
 // when the Connector advertises CapComments; otherwise the lookup falls through
@@ -178,26 +193,50 @@ type nativeDepsLayer struct {
 func (l nativeDepsLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
 
 // NativeDepsOf returns the ids num blocks on, deduplicated in the guest's order.
-// An id outside the Connector's id grammar fails closed, as in issue().
 func (l nativeDepsLayer) NativeDepsOf(num string) ([]string, error) {
+	return l.r.idList(CapNativeDeps, num)
+}
+
+// blocksLayer serves forge.BlockersLister from the Connector. It exists only
+// when the Connector advertises CapBlocks; otherwise the lookup falls through
+// to the native adapter's lister, if it has one.
+type blocksLayer struct {
+	forge.IssueTracker
+	r *reads
+}
+
+func (l blocksLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
+
+// BlocksOf returns the issues num blocks, deduplicated in the guest's order.
+func (l blocksLayer) BlocksOf(num string) ([]forge.Dependency, error) {
+	ids, err := l.r.idList(CapBlocks, num)
+	if err != nil {
+		return nil, err
+	}
+	return forge.WithSource(ids, forge.DepSourceNative), nil
+}
+
+// idList calls an {ids} method for num. An id outside the Connector's id
+// grammar fails closed, as in issue().
+func (t *reads) idList(method, num string) ([]string, error) {
 	var res struct {
 		IDs []string `json:"ids"`
 	}
-	if err := l.r.call(context.Background(), CapNativeDeps, numberedParams{l.r.target, num}, &res); err != nil {
+	if err := t.call(context.Background(), method, numberedParams{t.target, num}, &res); err != nil {
 		return nil, err
 	}
-	var deps []string
+	var ids []string
 	seen := map[string]bool{}
 	for _, id := range res.IDs {
-		if !l.r.ids.valid(id) {
-			return nil, fmt.Errorf("%w: native dependency id %q is not %s", ErrAnswer, id, l.r.ids.name)
+		if !t.ids.valid(id) {
+			return nil, fmt.Errorf("%w: %s id %q is not %s", ErrAnswer, method, id, t.ids.name)
 		}
 		if !seen[id] {
 			seen[id] = true
-			deps = append(deps, id)
+			ids = append(ids, id)
 		}
 	}
-	return deps, nil
+	return ids, nil
 }
 
 var (
@@ -208,27 +247,44 @@ var (
 	_ forge.CommentLister    = commentsLayer{}
 	_ forge.Unwrapper        = nativeDepsLayer{}
 	_ forge.NativeDepsReader = nativeDepsLayer{}
+	_ forge.Unwrapper        = blocksLayer{}
+	_ forge.BlockersLister   = blocksLayer{}
 )
 
 // New builds core's tracker reads from a tracker Connector. writes keeps
 // every write (transitions, verdicts, comments, labels, probes), which never
 // cross the protocol, and answers every optional capability the Connector does
-// not serve (see CapComments and CapNativeDeps). Look capabilities up with
-// forge.As. Calls run under context.Background() because IssueTracker methods
-// carry no context.
-func New(c *connectorhost.Connector, writes forge.IssueTracker, labels forge.DispatchLabels, target Target) (forge.IssueTracker, error) {
+// not serve (see CapComments, CapNativeDeps and CapBlocks). Look capabilities
+// up with forge.As. Calls run under context.Background() because IssueTracker
+// methods carry no context.
+//
+// A 0.1 Connector predates the status selector, tracker.blocks and project-key
+// ids, so core ignores those capabilities for it and never sends a status.
+func New(c *connectorhost.Connector, writes forge.IssueTracker, lifecycle Lifecycle, target Target) (forge.IssueTracker, error) {
 	if !slices.Contains(c.Capabilities, "tracker") {
 		return nil, fmt.Errorf("%w: capabilities %v lack \"tracker\"", ErrNotTracker, c.Capabilities)
 	}
-	return newTracker(c.Call, writes, labels, target, c.Capabilities), nil
+	return newTracker(c.Call, writes, lifecycle, target, c.Capabilities, speaksV02(c.ProtocolVersion)), nil
 }
 
-func newTracker(call guestCall, writes forge.IssueTracker, labels forge.DispatchLabels, target Target, caps []string) forge.IssueTracker {
+// speaksV02 reports whether a protocol version is 0.2 or later; one the
+// handshake would refuse reports false.
+func speaksV02(version string) bool {
+	minor, ok := connectorhost.ProtocolMinor(version)
+	return ok && minor >= 2
+}
+
+func newTracker(call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, target Target, caps []string, v02 bool) forge.IssueTracker {
+	if !v02 {
+		caps = slices.DeleteFunc(slices.Clone(caps), func(c string) bool {
+			return c == CapBlocks || c == CapProjectKeyIDs
+		})
+	}
 	ids := decimalIDs
 	if slices.Contains(caps, CapProjectKeyIDs) {
 		ids = projectKeyIDs
 	}
-	r := &reads{IssueTracker: writes, call: call, labels: labels, target: target, ids: ids}
+	r := &reads{IssueTracker: writes, call: call, lifecycle: lifecycle, target: target, ids: ids, v02: v02}
 	var it forge.IssueTracker = r
 	if slices.Contains(caps, CapComments) {
 		it = commentsLayer{it, r}
@@ -236,22 +292,38 @@ func newTracker(call guestCall, writes forge.IssueTracker, labels forge.Dispatch
 	if slices.Contains(caps, CapNativeDeps) {
 		it = nativeDepsLayer{it, r}
 	}
+	if slices.Contains(caps, CapBlocks) {
+		it = blocksLayer{it, r}
+	}
 	return it
 }
 
 func (t *reads) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
-	return t.list(t.labels.Label(state))
+	label, status := t.lifecycle.Labels.Label(state), t.lifecycle.Statuses[state]
+	if !t.v02 && status != "" {
+		if label == "" {
+			// A 0.1 guest would ignore the status and list every open issue.
+			return nil, fmt.Errorf("%w: a 0.1 connector cannot list by status %q", connectorhost.ErrProtocolUnsupported, status)
+		}
+		status = ""
+	}
+	if label == "" && status == "" {
+		// Both empty means every open issue to the Connector; a state with no
+		// selector is empty, as in native jira's stateJQL.
+		return nil, nil
+	}
+	return t.list(label, status)
 }
 
 func (t *reads) ListOpenIssues() ([]forge.Issue, error) {
-	return t.list("")
+	return t.list("", "")
 }
 
-func (t *reads) list(label string) ([]forge.Issue, error) {
+func (t *reads) list(label, status string) ([]forge.Issue, error) {
 	var res struct {
 		Issues []wireIssue `json:"issues"`
 	}
-	p := listIssuesParams{Target: t.target, Label: label, Limit: forge.ResultPageLimit}
+	p := listIssuesParams{Target: t.target, Label: label, Status: status, Limit: forge.ResultPageLimit}
 	if err := t.call(context.Background(), "tracker.listIssues", p, &res); err != nil {
 		return nil, err
 	}
@@ -291,7 +363,10 @@ func (t *reads) Issue(num string) (forge.Issue, error) {
 type idGrammar struct {
 	name  string
 	valid func(string) bool
-	// less orders two valid ids by creation: numerically, not lexically.
+	// less is a stable id order standing in for creation order: decimal ids
+	// numerically; project keys by project, then number. A key's number
+	// reflects when it was keyed, so a moved issue sorts away from where
+	// native jira's "order by created" puts it.
 	less func(a, b string) bool
 }
 

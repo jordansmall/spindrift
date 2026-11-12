@@ -7,7 +7,8 @@
 // policy decision. That includes the markers: a Connector whose tracker keeps
 // the dedup or research marker in a side store returns it as a field
 // (Issue.DedupMarker, Comment.ResearchMarker) and never splices it into a
-// body; core restores it.
+// body; core restores it. The optional reads are Comments, NativeDeps (the
+// issues an issue is blocked on) and Blocks (the issues it blocks).
 package tracker
 
 import (
@@ -19,9 +20,21 @@ import (
 
 // Target names the tracker repository a call reads from. API is the https
 // base URL without a trailing slash, for example https://api.github.com.
+// Dialect names the tracker deployment's API dialect (a Jira Connector takes
+// "cloud" or "server"); it is "" for a tracker with one.
 type Target struct {
-	API  string `json:"api"`
-	Repo string `json:"repo"`
+	API     string `json:"api"`
+	Repo    string `json:"repo"`
+	Dialect string `json:"dialect"`
+}
+
+// Query selects the open issues a ListIssues call returns. They are the
+// selectors core resolved from a Dispatch state: a Connector matches an open
+// issue carrying Label OR in Status, ignoring an empty one. Both empty means
+// every open issue.
+type Query struct {
+	Label  string `json:"label"`
+	Status string `json:"status"`
 }
 
 // Issue is one tracker issue. State is "open" or "closed".
@@ -72,9 +85,8 @@ type Reader struct {
 	// Connector returns. The zero value is DecimalIDs.
 	IDs IDGrammar
 
-	// ListIssues returns up to limit open issues carrying label; "" means
-	// every open issue.
-	ListIssues func(t Target, label string, limit int) ([]Issue, error)
+	// ListIssues returns up to limit open issues matching q.
+	ListIssues func(t Target, q Query, limit int) ([]Issue, error)
 
 	// Issue returns one issue.
 	Issue func(t Target, number string) (Issue, error)
@@ -91,6 +103,11 @@ type Reader struct {
 	// on, in the API's order. Leaving it nil advertises no
 	// "tracker.nativeDeps" capability.
 	NativeDeps func(t Target, number string) ([]string, error)
+
+	// Blocks is optional: it returns the ids of the issues number blocks, in
+	// the API's order, the reverse of NativeDeps. Leaving it nil advertises no
+	// "tracker.blocks" capability.
+	Blocks func(t Target, number string) ([]string, error)
 }
 
 type method = func(json.RawMessage) (any, error)
@@ -135,13 +152,13 @@ func handlers(r Reader) ([]string, map[string]method) {
 		"tracker.listIssues": func(params json.RawMessage) (any, error) {
 			var p struct {
 				Target Target `json:"target"`
-				Label  string `json:"label"`
-				Limit  int    `json:"limit"`
+				Query
+				Limit int `json:"limit"`
 			}
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
 			}
-			issues, err := r.ListIssues(p.Target, p.Label, p.Limit)
+			issues, err := r.ListIssues(p.Target, p.Query, p.Limit)
 			if err != nil {
 				return nil, err
 			}
@@ -187,29 +204,40 @@ func handlers(r Reader) ([]string, map[string]method) {
 		}
 	}
 
-	if r.NativeDeps != nil {
-		caps = append(caps, "tracker.nativeDeps")
-		m["tracker.nativeDeps"] = func(params json.RawMessage) (any, error) {
-			t, n, err := numbered(params)
-			if err != nil {
-				return nil, err
-			}
-			ids, err := r.NativeDeps(t, n)
-			if err != nil {
-				return nil, err
-			}
-			if ids == nil {
-				ids = []string{} // encode [] rather than null
-			}
-			return struct {
-				IDs []string `json:"ids"`
-			}{ids}, nil
+	for _, c := range []struct {
+		name string
+		fn   func(Target, string) ([]string, error)
+	}{{"tracker.nativeDeps", r.NativeDeps}, {"tracker.blocks", r.Blocks}} {
+		if c.fn == nil {
+			continue
 		}
+		caps = append(caps, c.name)
+		m[c.name] = idList(c.fn)
 	}
 	if r.IDs == ProjectKeyIDs {
 		caps = append(caps, "tracker.ids.projectKey")
 	}
 	return caps, m
+}
+
+// idList serves an {ids} method over fn.
+func idList(fn func(Target, string) ([]string, error)) method {
+	return func(params json.RawMessage) (any, error) {
+		t, n, err := numbered(params)
+		if err != nil {
+			return nil, err
+		}
+		ids, err := fn(t, n)
+		if err != nil {
+			return nil, err
+		}
+		if ids == nil {
+			ids = []string{} // encode [] rather than null
+		}
+		return struct {
+			IDs []string `json:"ids"`
+		}{ids}, nil
+	}
 }
 
 // normalize makes Labels encode as [] rather than null.

@@ -107,13 +107,13 @@ func pages[T any](t tracker.Target, path string, visit func([]T) bool) error {
 	return fmt.Errorf("GET %s: more than %d pages", path, maxPages)
 }
 
-func listIssues(t tracker.Target, label string, limit int) ([]tracker.Issue, error) {
+func listIssues(t tracker.Target, query tracker.Query, limit int) ([]tracker.Issue, error) {
 	if limit < 1 {
 		return nil, fmt.Errorf("list issues: limit %d < 1", limit)
 	}
 	q := "?state=open&sort=created&direction=asc&per_page=" + strconv.Itoa(pageSize)
-	if label != "" {
-		q += "&labels=" + url.QueryEscape(label)
+	if query.Label != "" {
+		q += "&labels=" + url.QueryEscape(query.Label)
 	}
 	var out []tracker.Issue
 	err := pages(t, repoPath(t)+q, func(raw []rawIssue) bool {

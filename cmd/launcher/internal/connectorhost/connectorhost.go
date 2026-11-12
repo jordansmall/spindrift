@@ -181,14 +181,22 @@ func supportedRange() string {
 	return fmt.Sprintf("0.%d.x to 0.%d.x", currentMinor-1, currentMinor)
 }
 
-// CheckProtocol reports whether core accepts a Connector declaring version, a
-// strict MAJOR.MINOR.PATCH of decimal digits without leading zeros, major 0.
-func CheckProtocol(version string) error {
+// ProtocolMinor returns the minor of a strict MAJOR.MINOR.PATCH version of
+// decimal digits without leading zeros, major 0; ok is false for anything else.
+func ProtocolMinor(version string) (minor int, ok bool) {
 	parts := strings.Split(version, ".")
-	if len(parts) == 3 && parts[0] == "0" && canonical(parts[1]) && canonical(parts[2]) {
-		if minor, err := strconv.Atoi(parts[1]); err == nil && (minor == currentMinor || minor == currentMinor-1) {
-			return nil
-		}
+	if len(parts) != 3 || parts[0] != "0" || !canonical(parts[1]) || !canonical(parts[2]) {
+		return 0, false
+	}
+	minor, err := strconv.Atoi(parts[1])
+	return minor, err == nil
+}
+
+// CheckProtocol reports whether core accepts a Connector declaring version: a
+// valid ProtocolMinor equal to core's or the one before it.
+func CheckProtocol(version string) error {
+	if minor, ok := ProtocolMinor(version); ok && (minor == currentMinor || minor == currentMinor-1) {
+		return nil
 	}
 	return &ProtocolError{Connector: version}
 }

@@ -19,6 +19,8 @@ import (
 
 var testLabels = forge.DispatchLabels{Dispatchable: "ready-for-agent"}
 
+var testLifecycle = Lifecycle{Labels: testLabels}
+
 var testTarget = Target{API: "https://api.example", Repo: "o/r"}
 
 type recordedCall struct {
@@ -50,7 +52,7 @@ func stubGuest(t *testing.T, replies map[string]string) (func(context.Context, s
 
 func TestNewRequiresCapability(t *testing.T) {
 	c := &connectorhost.Connector{Capabilities: []string{"driver"}}
-	_, err := New(c, &forge.IssueTrackerFake{}, testLabels, testTarget)
+	_, err := New(c, &forge.IssueTrackerFake{}, testLifecycle, testTarget)
 	if !errors.Is(err, ErrNotTracker) {
 		t.Fatalf("err = %v, want ErrNotTracker", err)
 	}
@@ -60,7 +62,7 @@ func TestTrackerListIssuesSortsAndResolves(t *testing.T) {
 	call, calls := stubGuest(t, map[string]string{"tracker.listIssues": `{"issues":[
 		{"number":"10","title":"b","state":"open","labels":["priority:high"]},
 		{"number":"9","title":"a","state":"open","labels":[]}]}`})
-	tr := newTracker(call, &forge.IssueTrackerFake{}, testLabels, testTarget, nil)
+	tr := newTracker(call, &forge.IssueTrackerFake{}, testLifecycle, testTarget, nil, true)
 
 	got, err := tr.ListIssues(forge.Dispatchable)
 	if err != nil {
@@ -73,22 +75,73 @@ func TestTrackerListIssuesSortsAndResolves(t *testing.T) {
 		t.Errorf("issue 10 = %+v, want resolved priority and open state", got[1])
 	}
 	want := recordedCall{"tracker.listIssues", map[string]any{
-		"target": map[string]any{"api": "https://api.example", "repo": "o/r"},
-		"label":  "ready-for-agent", "limit": float64(forge.ResultPageLimit),
+		"target": map[string]any{"api": "https://api.example", "repo": "o/r", "dialect": ""},
+		"label":  "ready-for-agent", "status": "", "limit": float64(forge.ResultPageLimit),
 	}}
 	if !reflect.DeepEqual((*calls)[0], want) {
 		t.Errorf("call = %+v, want %+v", (*calls)[0], want)
 	}
 }
 
-func TestTrackerListOpenIssuesSendsNoLabel(t *testing.T) {
+func TestTrackerListOpenIssuesSendsNoSelector(t *testing.T) {
 	call, calls := stubGuest(t, map[string]string{"tracker.listIssues": `{"issues":[]}`})
-	tr := newTracker(call, &forge.IssueTrackerFake{}, testLabels, testTarget, nil)
+	lc := Lifecycle{Labels: testLabels, Statuses: map[forge.DispatchState]string{forge.Dispatchable: "Ready"}}
+	tr := newTracker(call, &forge.IssueTrackerFake{}, lc, testTarget, nil, true)
 	if _, err := tr.ListOpenIssues(); err != nil {
 		t.Fatal(err)
 	}
-	if l := (*calls)[0].params["label"]; l != "" {
-		t.Errorf("label = %v, want empty", l)
+	p := (*calls)[0].params
+	if p["label"] != "" || p["status"] != "" {
+		t.Errorf("label = %v, status = %v; want both empty", p["label"], p["status"])
+	}
+}
+
+func TestTrackerListIssuesSendsLabelAndStatus(t *testing.T) {
+	call, calls := stubGuest(t, map[string]string{"tracker.listIssues": `{"issues":[]}`})
+	lc := Lifecycle{Labels: testLabels, Statuses: map[forge.DispatchState]string{forge.Dispatchable: "Ready for Agent"}}
+	tr := newTracker(call, &forge.IssueTrackerFake{}, lc, testTarget, nil, true)
+	if _, err := tr.ListIssues(forge.Dispatchable); err != nil {
+		t.Fatal(err)
+	}
+	p := (*calls)[0].params
+	if p["label"] != "ready-for-agent" || p["status"] != "Ready for Agent" {
+		t.Errorf("label = %v, status = %v; want both selectors", p["label"], p["status"])
+	}
+}
+
+func TestTrackerListIssuesStatusOnlyState(t *testing.T) {
+	call, calls := stubGuest(t, map[string]string{"tracker.listIssues": `{"issues":[]}`})
+	lc := Lifecycle{Statuses: map[forge.DispatchState]string{forge.Dispatchable: "Ready"}}
+	tr := newTracker(call, &forge.IssueTrackerFake{}, lc, testTarget, nil, true)
+	if _, err := tr.ListIssues(forge.Dispatchable); err != nil {
+		t.Fatal(err)
+	}
+	p := (*calls)[0].params
+	if p["label"] != "" || p["status"] != "Ready" {
+		t.Errorf("label = %v, status = %v; want status only", p["label"], p["status"])
+	}
+}
+
+// A state with no selector must not widen to every open issue.
+func TestTrackerListIssuesWithoutSelectorIsEmpty(t *testing.T) {
+	call, calls := stubGuest(t, map[string]string{"tracker.listIssues": `{"issues":[{"number":"1","state":"open"}]}`})
+	tr := newTracker(call, &forge.IssueTrackerFake{}, Lifecycle{}, testTarget, nil, true)
+	got, err := tr.ListIssues(forge.Dispatchable)
+	if err != nil || len(got) != 0 || len(*calls) != 0 {
+		t.Errorf("issues = %v, err = %v, guest calls = %v; want none and no call", got, err, *calls)
+	}
+}
+
+func TestTrackerTargetCarriesDialect(t *testing.T) {
+	call, calls := stubGuest(t, map[string]string{"tracker.listIssues": `{"issues":[]}`})
+	tgt := Target{API: "https://j.example", Repo: "ENG", Dialect: "server"}
+	tr := newTracker(call, &forge.IssueTrackerFake{}, testLifecycle, tgt, nil, true)
+	if _, err := tr.ListOpenIssues(); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"api": "https://j.example", "repo": "ENG", "dialect": "server"}
+	if got := (*calls)[0].params["target"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("target = %v, want %v", got, want)
 	}
 }
 
@@ -105,7 +158,7 @@ func TestTrackerRejectsBadIssues(t *testing.T) {
 				"tracker.issue":      body,
 				"tracker.listIssues": `{"issues":[` + body + `]}`,
 			})
-			tr := newTracker(call, &forge.IssueTrackerFake{}, testLabels, testTarget, nil)
+			tr := newTracker(call, &forge.IssueTrackerFake{}, testLifecycle, testTarget, nil, true)
 			if _, err := tr.Issue("1"); !errors.Is(err, ErrAnswer) {
 				t.Errorf("Issue err = %v, want ErrAnswer", err)
 			}
@@ -118,7 +171,7 @@ func TestTrackerRejectsBadIssues(t *testing.T) {
 
 func TestTrackerIssueRejectsOtherNumber(t *testing.T) {
 	call, _ := stubGuest(t, map[string]string{"tracker.issue": `{"number":"5","state":"open"}`})
-	tr := newTracker(call, &forge.IssueTrackerFake{}, testLabels, testTarget, nil)
+	tr := newTracker(call, &forge.IssueTrackerFake{}, testLifecycle, testTarget, nil, true)
 	if _, err := tr.Issue("4"); !errors.Is(err, ErrAnswer) {
 		t.Fatalf("err = %v, want ErrAnswer", err)
 	}
@@ -126,7 +179,7 @@ func TestTrackerIssueRejectsOtherNumber(t *testing.T) {
 
 func TestTrackerIssueClosed(t *testing.T) {
 	call, _ := stubGuest(t, map[string]string{"tracker.issue": `{"number":"4","title":"t","body":"b","state":"closed","labels":["x"]}`})
-	tr := newTracker(call, &forge.IssueTrackerFake{}, testLabels, testTarget, nil)
+	tr := newTracker(call, &forge.IssueTrackerFake{}, testLifecycle, testTarget, nil, true)
 	got, err := tr.Issue("4")
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +191,7 @@ func TestTrackerIssueClosed(t *testing.T) {
 
 func TestTrackerGuestErrorPassesThrough(t *testing.T) {
 	call, _ := stubGuest(t, nil)
-	tr := newTracker(call, &forge.IssueTrackerFake{}, testLabels, testTarget, nil)
+	tr := newTracker(call, &forge.IssueTrackerFake{}, testLifecycle, testTarget, nil, true)
 	if _, err := tr.Issue("1"); err == nil {
 		t.Error("guest error swallowed")
 	}
@@ -174,7 +227,7 @@ func TestTrackerListIssuesCapsAtPageLimit(t *testing.T) {
 	}
 	sb.WriteString(`]}`)
 	call, _ := stubGuest(t, map[string]string{"tracker.listIssues": sb.String()})
-	tr := newTracker(call, &forge.IssueTrackerFake{}, testLabels, testTarget, nil)
+	tr := newTracker(call, &forge.IssueTrackerFake{}, testLifecycle, testTarget, nil, true)
 
 	got, err := tr.ListOpenIssues()
 	if err != nil {
@@ -201,7 +254,7 @@ func newNative() *forge.IssueTrackerFake { return forge.NewFake(testLabels).Issu
 
 func TestTrackerKeepsNativeCapabilitiesVisible(t *testing.T) {
 	call, _ := stubGuest(t, nil)
-	tr := newTracker(call, richNative{newNative()}, testLabels, testTarget, []string{CapComments, CapNativeDeps})
+	tr := newTracker(call, richNative{newNative()}, testLifecycle, testTarget, []string{CapComments, CapNativeDeps}, true)
 
 	c := forge.ResolveCapabilities(nil, tr, backend.Descriptor{}, backend.Descriptor{})
 	if c.HostPostedCommenter == nil || c.IssueLabeler == nil || c.DemandCounter == nil || c.BlockersLister == nil {
@@ -214,7 +267,7 @@ func TestTrackerKeepsNativeCapabilitiesVisible(t *testing.T) {
 
 func TestTrackerShadowsNativePaginationAndLabels(t *testing.T) {
 	call, _ := stubGuest(t, nil)
-	tr := newTracker(call, richNative{newNative()}, forge.DispatchLabels{Dispatchable: "other"}, testTarget, nil)
+	tr := newTracker(call, richNative{newNative()}, Lifecycle{Labels: forge.DispatchLabels{Dispatchable: "other"}}, testTarget, nil, true)
 
 	fp, ok := forge.As[forge.FullyPaginated](tr)
 	if !ok || fp.WalksAllPages() {
@@ -229,7 +282,7 @@ func TestTrackerShadowsNativePaginationAndLabels(t *testing.T) {
 func TestTrackerWritesReachNative(t *testing.T) {
 	native := newNative()
 	call, _ := stubGuest(t, nil)
-	tr := newTracker(call, native, testLabels, testTarget, []string{CapComments, CapNativeDeps})
+	tr := newTracker(call, native, testLifecycle, testTarget, []string{CapComments, CapNativeDeps}, true)
 	if err := tr.TransitionState("3", forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +295,7 @@ func TestTrackerCommentsWithoutCapabilityComeFromNative(t *testing.T) {
 	native := newNative()
 	native.CommentsFor = map[string][]forge.Comment{"4": {{Author: "native", Body: "n"}}}
 	call, calls := stubGuest(t, map[string]string{"tracker.comments": `{"comments":[{"author":"guest"}]}`})
-	tr := newTracker(call, native, testLabels, testTarget, nil)
+	tr := newTracker(call, native, testLifecycle, testTarget, nil, true)
 
 	cl, ok := forge.As[forge.CommentLister](tr)
 	if !ok {
@@ -260,7 +313,7 @@ func TestTrackerCommentsWithoutCapabilityComeFromNative(t *testing.T) {
 func TestTrackerCommentsWithoutCapabilityAbsentWhenNativeHasNone(t *testing.T) {
 	call, _ := stubGuest(t, nil)
 	var native forge.IssueTracker = newNative()
-	tr := newTracker(call, bareTracker{native}, testLabels, testTarget, nil)
+	tr := newTracker(call, bareTracker{native}, testLifecycle, testTarget, nil, true)
 	if _, ok := forge.As[forge.CommentLister](tr); ok {
 		t.Error("CommentLister present without the capability or a native lister")
 	}
@@ -277,7 +330,7 @@ func TestTrackerCommentsCapabilityServesFromConnectorAndDropsMinimized(t *testin
 		{"author":"b","createdAt":"2026-01-02T00:00:00Z","body":"hidden","minimized":true,"minimizedReason":"spam","association":"NONE"}]}`})
 	native := newNative()
 	native.CommentsFor = map[string][]forge.Comment{"4": {{Author: "native", Body: "n"}}}
-	tr := newTracker(call, native, testLabels, testTarget, []string{CapComments})
+	tr := newTracker(call, native, testLifecycle, testTarget, []string{CapComments}, true)
 
 	cl, ok := forge.As[forge.CommentLister](tr)
 	if !ok {
@@ -313,7 +366,7 @@ func TestTrackerNativeDepsFollowsCapability(t *testing.T) {
 	native := newNative()
 	native.NativeDeps = map[string][]string{"9": {"7"}}
 
-	without := newTracker(call, native, testLabels, testTarget, nil)
+	without := newTracker(call, native, testLifecycle, testTarget, nil, true)
 	r, ok := forge.As[forge.NativeDepsReader](without)
 	if !ok {
 		t.Fatal("without the capability the native reader should show through")
@@ -326,12 +379,12 @@ func TestTrackerNativeDepsFollowsCapability(t *testing.T) {
 		t.Errorf("ids = %v, guest calls = %v; want the native's with no guest call", ids, *calls)
 	}
 
-	bare := newTracker(call, bareTracker{native}, testLabels, testTarget, nil)
+	bare := newTracker(call, bareTracker{native}, testLifecycle, testTarget, nil, true)
 	if _, ok := forge.As[forge.NativeDepsReader](bare); ok {
 		t.Error("NativeDepsReader present without the capability or a native reader")
 	}
 
-	with := newTracker(call, native, testLabels, testTarget, []string{CapNativeDeps})
+	with := newTracker(call, native, testLifecycle, testTarget, []string{CapNativeDeps}, true)
 	r, ok = forge.As[forge.NativeDepsReader](with)
 	if !ok {
 		t.Fatal("tracker with the capability lacks NativeDepsReader")
@@ -344,10 +397,69 @@ func TestTrackerNativeDepsFollowsCapability(t *testing.T) {
 	}
 }
 
+func TestTrackerBlocksFollowsCapability(t *testing.T) {
+	call, calls := stubGuest(t, map[string]string{"tracker.blocks": `{"ids":["3","5","3"]}`})
+	native := newNative()
+	native.NativeDeps = map[string][]string{"7": {"9"}}
+
+	without := newTracker(call, native, testLifecycle, testTarget, nil, true)
+	r, ok := forge.As[forge.BlockersLister](without)
+	if !ok {
+		t.Fatal("without the capability the native lister should show through")
+	}
+	deps, err := r.BlocksOf("9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(deps, forge.WithSource([]string{"7"}, forge.DepSourceNative)) || len(*calls) != 0 {
+		t.Errorf("deps = %v, guest calls = %v; want the native's with no guest call", deps, *calls)
+	}
+
+	bare := newTracker(call, bareTracker{native}, testLifecycle, testTarget, nil, true)
+	if _, ok := forge.As[forge.BlockersLister](bare); ok {
+		t.Error("BlockersLister present without the capability or a native lister")
+	}
+
+	with := newTracker(call, native, testLifecycle, testTarget, []string{CapBlocks}, true)
+	r, ok = forge.As[forge.BlockersLister](with)
+	if !ok {
+		t.Fatal("tracker with the capability lacks BlockersLister")
+	}
+	if deps, err = r.BlocksOf("9"); err != nil {
+		t.Fatal(err)
+	}
+	if want := forge.WithSource([]string{"3", "5"}, forge.DepSourceNative); !reflect.DeepEqual(deps, want) {
+		t.Errorf("deps = %v, want %v (the Connector's, deduped in order, native-sourced)", deps, want)
+	}
+	if (*calls)[0].method != "tracker.blocks" {
+		t.Errorf("method = %q, want tracker.blocks", (*calls)[0].method)
+	}
+}
+
+func TestBlocksRefusesIDsOutsideGrammar(t *testing.T) {
+	for _, bad := range []string{"abc", "0", "007", "ENG-3", ""} {
+		call, _ := stubGuest(t, map[string]string{"tracker.blocks": `{"ids":["3",` + strconv.Quote(bad) + `]}`})
+		tr := newTracker(call, newNative(), testLifecycle, testTarget, []string{CapBlocks}, true)
+		r, ok := forge.As[forge.BlockersLister](tr)
+		if !ok {
+			t.Fatal("tracker with the capability lacks BlockersLister")
+		}
+		if deps, err := r.BlocksOf("9"); !errors.Is(err, ErrAnswer) {
+			t.Errorf("id %q: deps = %v, err = %v; want ErrAnswer", bad, deps, err)
+		}
+	}
+	call, _ := stubGuest(t, map[string]string{"tracker.blocks": `{"ids":["ENG-3","OPS-4"]}`})
+	tr := newTracker(call, newNative(), testLifecycle, testTarget, []string{CapBlocks, CapProjectKeyIDs}, true)
+	r, _ := forge.As[forge.BlockersLister](tr)
+	if deps, err := r.BlocksOf("ENG-1"); err != nil || len(deps) != 2 {
+		t.Errorf("projectKey: deps = %v, err = %v; want 2 ids", deps, err)
+	}
+}
+
 func TestNativeDepsRefusesBadIDs(t *testing.T) {
 	for _, bad := range []string{"abc", "0", "-3", "1/../x", "007", ""} {
 		call, _ := stubGuest(t, map[string]string{"tracker.nativeDeps": `{"ids":["3",` + strconv.Quote(bad) + `]}`})
-		tr := newTracker(call, newNative(), testLabels, testTarget, []string{CapNativeDeps})
+		tr := newTracker(call, newNative(), testLifecycle, testTarget, []string{CapNativeDeps}, true)
 		r, ok := forge.As[forge.NativeDepsReader](tr)
 		if !ok {
 			t.Fatal("tracker with the capability lacks NativeDepsReader")
@@ -360,7 +472,7 @@ func TestNativeDepsRefusesBadIDs(t *testing.T) {
 
 func TestProjectKeyIDsRoundTrip(t *testing.T) {
 	call, _ := stubGuest(t, map[string]string{"tracker.issue": `{"number":"ENG-12","title":"t","state":"open"}`})
-	tr := newTracker(call, newNative(), testLabels, testTarget, []string{CapProjectKeyIDs})
+	tr := newTracker(call, newNative(), testLifecycle, testTarget, []string{CapProjectKeyIDs}, true)
 	got, err := tr.Issue("ENG-12")
 	if err != nil {
 		t.Fatal(err)
@@ -377,7 +489,7 @@ func TestProjectKeyIDsRefuseOutsideGrammar(t *testing.T) {
 			"tracker.issue":      body,
 			"tracker.listIssues": `{"issues":[` + body + `]}`,
 		})
-		tr := newTracker(call, newNative(), testLabels, testTarget, []string{CapProjectKeyIDs})
+		tr := newTracker(call, newNative(), testLifecycle, testTarget, []string{CapProjectKeyIDs}, true)
 		if _, err := tr.Issue(bad); !errors.Is(err, ErrAnswer) {
 			t.Errorf("Issue(%q) err = %v, want ErrAnswer", bad, err)
 		}
@@ -390,7 +502,7 @@ func TestProjectKeyIDsRefuseOutsideGrammar(t *testing.T) {
 func TestDecimalConnectorRefusesProjectKey(t *testing.T) {
 	body := `{"number":"ENG-12","state":"open"}`
 	call, _ := stubGuest(t, map[string]string{"tracker.issue": body, "tracker.listIssues": `{"issues":[` + body + `]}`})
-	tr := newTracker(call, newNative(), testLabels, testTarget, nil)
+	tr := newTracker(call, newNative(), testLifecycle, testTarget, nil, true)
 	if _, err := tr.Issue("ENG-12"); !errors.Is(err, ErrAnswer) {
 		t.Errorf("Issue err = %v, want ErrAnswer", err)
 	}
@@ -402,7 +514,7 @@ func TestDecimalConnectorRefusesProjectKey(t *testing.T) {
 func TestProjectKeyNativeDepsFollowGrammar(t *testing.T) {
 	deps := func(caps []string, ids string) ([]string, error) {
 		call, _ := stubGuest(t, map[string]string{"tracker.nativeDeps": `{"ids":` + ids + `}`})
-		tr := newTracker(call, newNative(), testLabels, testTarget, append([]string{CapNativeDeps}, caps...))
+		tr := newTracker(call, newNative(), testLifecycle, testTarget, append([]string{CapNativeDeps}, caps...), true)
 		r, ok := forge.As[forge.NativeDepsReader](tr)
 		if !ok {
 			t.Fatal("no NativeDepsReader")
@@ -428,7 +540,7 @@ func TestProjectKeyListSortsByPrefixThenNumber(t *testing.T) {
 		{"number":"ENG-10","state":"open"},
 		{"number":"ENG-9","state":"open"},
 		{"number":"ABC-3","state":"open"}]}`})
-	tr := newTracker(call, newNative(), testLabels, testTarget, []string{CapProjectKeyIDs})
+	tr := newTracker(call, newNative(), testLifecycle, testTarget, []string{CapProjectKeyIDs}, true)
 	got, err := tr.ListOpenIssues()
 	if err != nil {
 		t.Fatal(err)
@@ -447,7 +559,7 @@ func TestTrackerRestoresDedupMarkerAsNativeDoes(t *testing.T) {
 	for name, body := range map[string]string{"with body": "prose", "empty body": ""} {
 		call, _ := stubGuest(t, map[string]string{"tracker.issue": `{"number":"4","state":"open","body":` +
 			strconv.Quote(body) + `,"dedupMarker":` + strconv.Quote(marker) + `}`})
-		tr := newTracker(call, newNative(), testLabels, testTarget, nil)
+		tr := newTracker(call, newNative(), testLifecycle, testTarget, nil, true)
 		got, err := tr.Issue("4")
 		if err != nil {
 			t.Fatal(err)
@@ -457,7 +569,7 @@ func TestTrackerRestoresDedupMarkerAsNativeDoes(t *testing.T) {
 		}
 	}
 	call, _ := stubGuest(t, map[string]string{"tracker.issue": `{"number":"4","state":"open","body":"prose"}`})
-	got, err := newTracker(call, newNative(), testLabels, testTarget, nil).Issue("4")
+	got, err := newTracker(call, newNative(), testLifecycle, testTarget, nil, true).Issue("4")
 	if err != nil || got.Body != "prose" {
 		t.Errorf("no marker: body = %q, err = %v; want body untouched", got.Body, err)
 	}
@@ -467,7 +579,7 @@ func TestTrackerClosedFields(t *testing.T) {
 	read := func(body string) forge.Issue {
 		t.Helper()
 		call, _ := stubGuest(t, map[string]string{"tracker.issue": body})
-		got, err := newTracker(call, newNative(), testLabels, testTarget, nil).Issue("4")
+		got, err := newTracker(call, newNative(), testLifecycle, testTarget, nil, true).Issue("4")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -491,7 +603,7 @@ func TestTrackerRestoresResearchMarkerOnlyWhenFlagged(t *testing.T) {
 	call, _ := stubGuest(t, map[string]string{"tracker.comments": `{"comments":[
 		{"author":"bot","body":"verdict","researchMarker":true},
 		{"author":"human","body":"verdict"}]}`})
-	tr := newTracker(call, newNative(), testLabels, testTarget, []string{CapComments})
+	tr := newTracker(call, newNative(), testLifecycle, testTarget, []string{CapComments}, true)
 	cl, ok := forge.As[forge.CommentLister](tr)
 	if !ok {
 		t.Fatal("no CommentLister")
@@ -502,5 +614,46 @@ func TestTrackerRestoresResearchMarkerOnlyWhenFlagged(t *testing.T) {
 	}
 	if len(got) != 2 || got[0].Body != forge.ResearchMarker+"\nverdict" || got[1].Body != "verdict" {
 		t.Errorf("comments = %+v, want the marker only on the flagged one", got)
+	}
+}
+
+func TestLegacyConnectorNeverReceivesStatus(t *testing.T) {
+	call, calls := stubGuest(t, map[string]string{"tracker.listIssues": `{"issues":[]}`})
+	statuses := map[forge.DispatchState]string{forge.Dispatchable: "Ready"}
+
+	both := newTracker(call, &forge.IssueTrackerFake{}, Lifecycle{Labels: testLabels, Statuses: statuses}, testTarget, nil, false)
+	if _, err := both.ListIssues(forge.Dispatchable); err != nil {
+		t.Fatal(err)
+	}
+	if p := (*calls)[0].params; p["label"] != "ready-for-agent" || p["status"] != "" {
+		t.Errorf("label = %v, status = %v; want the label alone", p["label"], p["status"])
+	}
+
+	n := len(*calls)
+	only := newTracker(call, &forge.IssueTrackerFake{}, Lifecycle{Statuses: statuses}, testTarget, nil, false)
+	if _, err := only.ListIssues(forge.Dispatchable); !errors.Is(err, connectorhost.ErrProtocolUnsupported) {
+		t.Errorf("status-only state err = %v, want ErrProtocolUnsupported", err)
+	}
+	if len(*calls) != n {
+		t.Errorf("a status-only state reached the guest")
+	}
+}
+
+func TestLegacyConnectorIgnoresV02Capabilities(t *testing.T) {
+	call, _ := stubGuest(t, map[string]string{"tracker.issue": `{"number":"ENG-1","state":"open"}`})
+	tr := newTracker(call, bareTracker{newNative()}, testLifecycle, testTarget, []string{CapBlocks, CapProjectKeyIDs}, false)
+	if _, ok := forge.As[forge.BlockersLister](tr); ok {
+		t.Error("a 0.1 Connector's tracker.blocks must be ignored")
+	}
+	if _, err := tr.Issue("ENG-1"); err == nil {
+		t.Error("a 0.1 Connector's project-key ids must be refused")
+	}
+}
+
+func TestSpeaksV02(t *testing.T) {
+	for v, want := range map[string]bool{"0.1.0": false, "0.1.7": false, "0.2.0": true, "0.3.0": true, "1.0.0": false, "garbage": false} {
+		if got := speaksV02(v); got != want {
+			t.Errorf("speaksV02(%q) = %v, want %v", v, got, want)
+		}
 	}
 }

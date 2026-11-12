@@ -2996,22 +2996,25 @@ This is protocol version **0.2.0**. The host is
 - **Tracker capabilities.** Provisional at protocol 0.y: issue #6753 finalises
   the tracker axis, and a `0.y` bump may change what follows. A tracker
   Connector advertises `"tracker"`, meaning it serves `tracker.listIssues` and
-  `tracker.issue`, and optionally `"tracker.comments"` and
-  `"tracker.nativeDeps"`, serving the method of the same name. Advertising
+  `tracker.issue`, and optionally `"tracker.comments"`, `"tracker.nativeDeps"` and
+  `"tracker.blocks"`, serving the method of the same name, and
+  `"tracker.ids.projectKey"` (every id is `ENG-12`, not a decimal integer). Advertising
   `"tracker.comments"` attests that each comment's `minimized` and
   `minimizedReason` are faithful; a Connector whose API cannot report minimized
   state leaves it out, and core reads comments from its native adapter. Every
-  `params` carries `target`, `{api, repo}`:
-  the https API base URL without a trailing slash and the `owner/name` slug.
+  `params` carries `target`, `{api, repo, dialect}`:
+  the https API base URL without a trailing slash, the `owner/name` slug and the
+  tracker's API dialect (`""` for a tracker with one).
   The Connector reads and returns raw data; every write stays on core's native
   adapter.
 
   | Method | Params | Result |
   |---|---|---|
-  | `tracker.listIssues` | `{target, label, limit}`, `label` `""` for every open issue | `{issues}` |
+  | `tracker.listIssues` | `{target, label, status, limit}`; an open issue matches when it carries `label` or is in `status`, an empty one ignored, both empty for every open issue | `{issues}` |
   | `tracker.issue` | `{target, number}` | an issue |
   | `tracker.comments` (optional) | `{target, number}` | `{comments}`, oldest first |
   | `tracker.nativeDeps` (optional) | `{target, number}` | `{ids}`, the issues `number` is blocked on, in the API's order |
+  | `tracker.blocks` (optional) | `{target, number}` | `{ids}`, the issues `number` blocks, in the API's order |
 
   An issue is `{number, title, body, state, labels}` with `state` `"open"` or
   `"closed"`; a comment is `{author, createdAt, body, minimized,

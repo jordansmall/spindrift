@@ -8,16 +8,16 @@ import (
 	"testing"
 )
 
-var wantTarget = Target{API: "https://api.github.com", Repo: "o/r"}
+var wantTarget = Target{API: "https://api.github.com", Repo: "o/r", Dialect: "cloud"}
 
-const target = `"target":{"api":"https://api.github.com","repo":"o/r"}`
+const target = `"target":{"api":"https://api.github.com","repo":"o/r","dialect":"cloud"}`
 
 func fakeReader(t *testing.T) Reader {
 	t.Helper()
 	return Reader{
-		ListIssues: func(tg Target, label string, limit int) ([]Issue, error) {
-			if tg != wantTarget || label != "ready" || limit != 7 {
-				t.Errorf("ListIssues(%v, %q, %d)", tg, label, limit)
+		ListIssues: func(tg Target, q Query, limit int) ([]Issue, error) {
+			if tg != wantTarget || q != (Query{Label: "ready", Status: "In Review"}) || limit != 7 {
+				t.Errorf("ListIssues(%v, %+v, %d)", tg, q, limit)
 			}
 			return []Issue{{Number: "3", Title: "t", Body: "b", State: "open", Labels: []string{"ready"}}}, nil
 		},
@@ -56,7 +56,7 @@ func TestCapabilities(t *testing.T) {
 	if want := []string{"tracker"}; !reflect.DeepEqual(caps, want) {
 		t.Fatalf("caps = %v, want %v", caps, want)
 	}
-	for _, name := range []string{"tracker.comments", "tracker.nativeDeps"} {
+	for _, name := range []string{"tracker.comments", "tracker.nativeDeps", "tracker.blocks"} {
 		if _, ok := m[name]; ok {
 			t.Errorf("%s handler present without its Reader field", name)
 		}
@@ -77,6 +77,19 @@ func TestCapabilities(t *testing.T) {
 	if _, ok := m["tracker.nativeDeps"]; !ok {
 		t.Error("nativeDeps handler missing")
 	}
+	r.Blocks = func(Target, string) ([]string, error) { return nil, nil }
+	caps, m = handlers(r)
+	if want := []string{"tracker", "tracker.comments", "tracker.nativeDeps", "tracker.blocks"}; !reflect.DeepEqual(caps, want) {
+		t.Fatalf("caps = %v, want %v", caps, want)
+	}
+	if _, ok := m["tracker.blocks"]; !ok {
+		t.Error("blocks handler missing")
+	}
+	r.NativeDeps = nil
+	caps, _ = handlers(r)
+	if want := []string{"tracker", "tracker.comments", "tracker.blocks"}; !reflect.DeepEqual(caps, want) {
+		t.Fatalf("caps = %v, want %v", caps, want)
+	}
 }
 
 func TestWireShapes(t *testing.T) {
@@ -87,15 +100,22 @@ func TestWireShapes(t *testing.T) {
 		}
 		return []string{"4", "5"}, nil
 	}
+	r.Blocks = func(tg Target, number string) ([]string, error) {
+		if tg != wantTarget || number != "3" {
+			t.Errorf("Blocks(%v, %q)", tg, number)
+		}
+		return []string{"6"}, nil
+	}
 	_, m := handlers(r)
 	cases := []struct{ method, params, want string }{
-		{"tracker.listIssues", `{` + target + `,"label":"ready","limit":7}`,
+		{"tracker.listIssues", `{` + target + `,"label":"ready","status":"In Review","limit":7}`,
 			`{"issues":[{"number":"3","title":"t","body":"b","state":"open","labels":["ready"],"closedAt":"","closedNotPlanned":false,"dedupMarker":""}]}`},
 		{"tracker.issue", `{` + target + `,"number":"3"}`,
 			`{"number":"3","title":"","body":"","state":"closed","labels":[],"closedAt":"","closedNotPlanned":false,"dedupMarker":""}`},
 		{"tracker.comments", `{` + target + `,"number":"3"}`,
 			`{"comments":[{"author":"a","createdAt":"2026-01-02T03:04:05Z","body":"hi","minimized":true,"minimizedReason":"SPAM","association":"MEMBER","researchMarker":false}]}`},
 		{"tracker.nativeDeps", `{` + target + `,"number":"3"}`, `{"ids":["4","5"]}`},
+		{"tracker.blocks", `{` + target + `,"number":"3"}`, `{"ids":["6"]}`},
 	}
 	for _, c := range cases {
 		if got := call(t, m, c.method, c.params); got != c.want {
@@ -106,10 +126,11 @@ func TestWireShapes(t *testing.T) {
 
 func TestEmptyListsEncodeAsArrays(t *testing.T) {
 	r := Reader{
-		ListIssues: func(Target, string, int) ([]Issue, error) { return nil, nil },
+		ListIssues: func(Target, Query, int) ([]Issue, error) { return nil, nil },
 		Issue:      func(Target, string) (Issue, error) { return Issue{}, nil },
 		Comments:   func(Target, string) ([]Comment, error) { return nil, nil },
 		NativeDeps: func(Target, string) ([]string, error) { return nil, nil },
+		Blocks:     func(Target, string) ([]string, error) { return nil, nil },
 	}
 	_, m := handlers(r)
 	p := `{` + target + `,"number":"1"}`
@@ -117,6 +138,7 @@ func TestEmptyListsEncodeAsArrays(t *testing.T) {
 		"tracker.listIssues": `{"issues":[]}`,
 		"tracker.comments":   `{"comments":[]}`,
 		"tracker.nativeDeps": `{"ids":[]}`,
+		"tracker.blocks":     `{"ids":[]}`,
 	} {
 		if got := call(t, m, method, p); got != want {
 			t.Errorf("%s = %s, want %s", method, got, want)
