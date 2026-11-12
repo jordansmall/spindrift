@@ -1766,8 +1766,14 @@ its output to goldens beside it:
 `transcript.golden.txt` and `result.golden.txt` (the rendered transcript and
 final result), `resolve-exit.golden.json` (exit-code resolution), and, for a
 reviewer-role case only, `verdict.golden.json` (what the review verdict scan
-returns for the transcript). It also replays each heartbeat in chunks. The
-test fails until a Driver has at least one `<case>` log.
+returns for the transcript). It also replays each heartbeat in chunks.
+A case may add `stdout.raw`, the CLI's unfiltered stdout (else the case's
+recorded `pass.jsonl` is the raw input). The kit replays it through
+the Driver's stream filter whole, one byte at a time and in seeded random
+chunks, flushing at the end, and a second flush must add nothing. A Driver
+with a filter matches `stream.golden.txt`; one without must forward the bytes
+unchanged and owns no such golden. `conformance.RunStreamFilter` runs this
+check alone. The test fails until a Driver has at least one `<case>` log.
 
 The transcript and heartbeat render under the default `implementor` role. A
 review-pass case opts in to the reviewer role with a `render.json` beside its
@@ -2794,7 +2800,7 @@ done | sort -r | awk -F'\t' '
 
 The protocol, not the SDK, is the contract between core and a Connector
 ([ADR 0073](adr/0073-backends-and-drivers-are-trust-no-one-wasm-connectors.md)).
-This is protocol version **0.1.0**. The host is
+This is protocol version **0.1.1**. The host is
 [`connectorhost`](../cmd/launcher/internal/connectorhost/connectorhost.go).
 
 - **Module.** A Connector is a WebAssembly reactor module built with the
@@ -2816,7 +2822,7 @@ This is protocol version **0.1.0**. The host is
   bytes in the module's memory export named `memory`. The result is:
 
   ```json
-  {"protocolVersion": "0.1.0", "capabilities": []}
+  {"protocolVersion": "0.1.1", "capabilities": []}
   ```
 
   `capabilities` is an array of strings, `[]` when empty; both fields are
@@ -2876,10 +2882,12 @@ This is protocol version **0.1.0**. The host is
   wraps `ErrCall`. After any failed guest call, `ErrExport` and
   `ErrRequestTooLarge` aside, the Connector is closed and refuses further
   calls with `ErrUnusable`.
-- **Driver capabilities.** Part of 0.1.0. A Driver Connector advertises
+- **Driver capabilities.** A Driver Connector advertises
   capability `"driver"`, meaning it serves the first six methods below, and
-  optionally `"driver.resolveExit"`, `"driver.toolPhase"`, `"driver.toolKind"`
-  and `"driver.modelFamily"`, each serving the method of the same name. The
+  optionally `"driver.resolveExit"`, `"driver.toolPhase"`, `"driver.toolKind"`,
+  `"driver.modelFamily"` and (0.1.1) `"driver.streamFilter"`. The first four
+  each serve the method of the same name; `driver.streamFilter` serves the four
+  stream methods. The
   host's `DriverStrategy` builds a
   `driverkit.Strategy` from them, so everything above the Strategy is
   unchanged. It calls only `driver.describe` when building the Strategy; the
@@ -2898,6 +2906,10 @@ This is protocol version **0.1.0**. The host is
   | `driver.toolPhase` (optional) | `{tool, input}`, `input` the call's raw JSON | `{phase}` |
   | `driver.toolKind` (optional) | `{tool}` | `{kind}` |
   | `driver.modelFamily` (optional) | `{model}` | `{label, rank}` |
+  | `driver.newStreamFilter` (optional, `driver.streamFilter`) | `{}` | `{filter}`, an opaque handle |
+  | `driver.streamWrite` (optional, `driver.streamFilter`) | `{filter, data}` | `{data}` |
+  | `driver.streamFlush` (optional, `driver.streamFilter`) | `{filter}` | `{data}` |
+  | `driver.freeStreamFilter` (optional, `driver.streamFilter`) | `{filter}` | `null` |
 
   The decode output is the canonical event schema of [ADR
   0065](adr/0065-drivers-decode-pass-logs-into-canonical-events.md).
@@ -2923,8 +2935,26 @@ This is protocol version **0.1.0**. The host is
   their capability is advertised. They have no error return, so a failed call
   yields an empty phase, an empty kind, or the model id as its own label at
   the last rank.
-  What does not cross in 0.1.0: the stream filter, which stays at driverkit's
-  zero value.
+  The stream filter arrives in 0.1.1 and is additive. It rewrites the CLI's
+  stdout on its way to the Pass log. A core that predates it ignores the
+  capability and keeps driverkit's identity filter, and a Connector without it
+  gets the identity too. One guest filter serves one stream and is freed
+  once the host drops it and it is garbage-collected, like a Decoder handle.
+  `data` is base64, so the stream is byte-exact, and each result is what
+  the filter wrote during that call. The host sends a write in pieces of at
+  most 4 MiB raw, so the encoded request stays under the 8 MiB request cap.
+  Each call is bounded by the per-request limits, which scale with the request;
+  a flush, whose request is tiny, gets only the base limits. A flush that
+  writes back a large held tail therefore fails closed once its base64 result
+  passes 8 MiB (about 6 MiB of raw bytes), so settle the held-tail size before
+  pi's cut-over (#6875). The filter fails
+  closed. The first failure (a trap, a spent budget or memory limit, an output
+  over the cap, a Connector error, or a failed `driver.newStreamFilter`)
+  returns an `ErrCall` error wrapping its own sentinel, such as `ErrTrap` or
+  `ErrOutputTooLarge`. It is sticky: every later write and flush returns it and
+  nothing more reaches the Pass log. What a live Pass does with that error is
+  decided at pi's cut-over (#6875). The Conformance kit checks a filter against
+  a case's `stdout.raw` and `stream.golden.txt` (see Driver Pass-log corpus).
 - **Network Connectors.** `LoadNetwork` links one Host call, imported as
   `spindrift.http_request(reqPtr, reqLen, respPtr, respCap i32) -> i64`. The
   request is JSON `{"method", "url", "headers", "body"}`. The result is
@@ -3021,7 +3051,7 @@ This is protocol version **0.1.0**. The host is
   spindrift's release version. A `0.y` bump is breaking; a `0.y.z` bump is
   additive. Core accepts its current `0.y` and the one before it, so today
   0.1.z and 0.0.z. Any other version is refused at load with
-  `connector protocol "<version>" is outside core's supported range 0.0.x to 0.1.x (core speaks 0.1.0)`,
+  `connector protocol "<version>" is outside core's supported range 0.0.x to 0.1.x (core speaks 0.1.1)`,
   naming the Connector's version, core's range and core's own version. A
   module that is not valid wasm, imports something ungranted, declares sizes
   over the caps above, lacks the export or the `memory` export, has the wrong

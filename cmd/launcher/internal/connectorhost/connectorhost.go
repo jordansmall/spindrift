@@ -23,7 +23,7 @@ import (
 )
 
 // ProtocolVersion is the Connector protocol core speaks.
-const ProtocolVersion = "0.1.0"
+const ProtocolVersion = "0.1.1"
 
 // Limits on every call into a Connector. The bases below are wide multiples of
 // what a Go reactor needs in the interpreter, because Nix CI runs under load;
