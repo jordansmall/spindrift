@@ -1066,6 +1066,7 @@ driverGoTests
         )}
         export SPINDRIFT_CONNECTOR_FIXTURES_DIR=${fixtures.connectorWasm}
         export SPINDRIFT_FIXTURE_CONNECTOR_DOC=${fixtures.driverConnectorArtifacts}/input.json
+        export SPINDRIFT_FIXTURE_CONNECTOR_BASELINE_DOCS=${fixtures.connectorBaselineDocs}
         export SPINDRIFT_FIXTURE_DRIVER_ROWS_FILE=${fixtures.driverConnectorArtifacts}/box-rows.json
         go vet ${binaryPkgs}
         go test ${binaryPkgs}

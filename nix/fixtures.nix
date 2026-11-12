@@ -655,14 +655,16 @@ let
     inherit nixpkgs system;
     packages = p: [ p.hello ];
   };
-  consumerVia =
-    extra: modules:
+  # `selfPath` is the Consumer's source tree; the flake module reads the
+  # accepted Route baseline (spindrift-connector-routes.json) from it.
+  consumerAtVia =
+    selfPath: extra: modules:
     flake-parts.lib.mkFlake
       {
         inputs = {
           inherit nixpkgs;
           self = {
-            outPath = ../.;
+            outPath = selfPath;
           };
         };
       }
@@ -674,6 +676,7 @@ let
         }
         // extra
       );
+  consumerVia = consumerAtVia ../.;
   # Parameterised on the module so core-entry.nix can evaluate the one
   # unchanged config through two entry points (issue #6765).
   moduleConsumerVia = module: consumerVia { } [ module ];
@@ -716,6 +719,32 @@ let
       cp ${boxHarness.internals.driverRowsFile} $out/box-rows.json
       ln -s "$(jq -r '.drivers[0].module' "$doc")" $out/module.wasm
     '';
+
+  # Issue #6806: a Consumer importing the fixture network Connector from a
+  # source tree holding an accepted Route baseline, one tree per relation of
+  # the baseline to the Connector's live table (GET api.fixture.test /repos):
+  # `widened` (live broader than accepted), `accepted` (equal) and `narrowed`
+  # (live narrower). Their input documents, side by side for the Go doctor test.
+  baselineConsumerAt =
+    dir:
+    consumerAtVia dir { debug = true; } [
+      ../lib/flakeModule.nix
+      ((import ./fixtures/connector).lib.connector { core = import ../core; }).flakeModule
+    ];
+  baselineConsumers = pkgs.lib.genAttrs [ "widened" "accepted" "narrowed" ] (
+    n: baselineConsumerAt (./fixtures/connector-routes + "/${n}")
+  );
+  connectorBaselineDocs = pkgs.runCommand "connector-baseline-docs" { } (
+    ''
+      mkdir $out
+    ''
+    + pkgs.lib.concatStrings (
+      pkgs.lib.mapAttrsToList (n: c: ''
+        ${runInputDocOf c.apps.${system}.default.program}
+        cp "$doc" $out/${n}.json
+      '') baselineConsumers
+    )
+  );
 
   consumerPkgs = moduleConsumer.packages.${system};
   consumerFormatter = moduleConsumer.formatter.${system};
@@ -797,6 +826,9 @@ in
     connectorConsumerVia
     driverConnectorConsumer
     driverConnectorArtifacts
+    connectorBaselineDocs
+    baselineConsumers
+    baselineConsumerAt
     runInputDocOf
     consumerPkgs
     consumerFormatter

@@ -239,6 +239,18 @@ in
         };
       }))
     ) "a row with an empty credentialEnv must fail";
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = row // {
+          credentialKnob = "";
+        };
+      }))
+    ) "a row with an empty credentialKnob must fail";
+    assert assertMsg (evaluates (withRows {
+      fixture = row // {
+        credentialKnob = "fixtureToken";
+      };
+    })) "a row with a credentialKnob must evaluate";
     # Checked whichever Driver the Harness selects, so a bad second row fails too.
     assert assertMsg (
       !(evaluates (withRows {
@@ -386,9 +398,53 @@ in
             module: .backends[0].module,
             routes: [{method: "GET", host: "api.fixture.test", path: "/repos"}],
             credentialEnv: "FIXTURE_TOKEN",
+            credentialKnob: "fixtureToken",
             acceptedRoutes: []
           }] and (.backends[0].module | endswith("/network.wasm"))' "$doc"
         test -f "$(jq -r '.backends[0].module' "$doc")"
         touch $out
       '';
+
+  # Issue #6806: the accepted Route baseline is read from the Consumer's own
+  # source tree (spindrift-connector-routes.json), keyed by Connector name, and
+  # rides on the document's backend row. A missing file is an empty baseline.
+  connector-backend-rows-accepted-baseline =
+    let
+      consumers = fixtures.baselineConsumers;
+      programOf = c: c.apps.${system}.default.program;
+      builds = c: (builtins.tryEval (builtins.seq (programOf c) true)).success;
+      withAccepted =
+        a:
+        withRows {
+          fixture = row // {
+            acceptedRoutes = a;
+          };
+        };
+      blanket = [ (goodRoute // { path = "/"; }) ];
+    in
+    assert assertMsg (builds consumers.accepted) "control: a well-formed baseline must evaluate";
+    assert assertMsg (evaluates (withAccepted [ ])) "an empty accepted baseline must be allowed";
+    assert assertMsg (evaluates (withAccepted [ goodRoute ])) "a well-formed baseline must evaluate";
+    assert assertMsg (
+      !(evaluates (withAccepted blanket))
+    ) "a blanket-root accepted baseline must fail evaluation";
+    assert assertMsg (
+      !(evaluates (withAccepted "x"))
+    ) "an accepted baseline that is not a list must fail evaluation";
+    assert assertMsg (
+      !(builds (fixtures.baselineConsumerAt ../fixtures/connector-routes/blanket))
+    ) "a blanket-root path in the baseline file must fail evaluation";
+    assert assertMsg (
+      !(builds (fixtures.baselineConsumerAt ../fixtures/connector-routes/list))
+    ) "a baseline file whose top level is not an object must fail evaluation";
+    pkgs.runCommand "connector-backend-rows-accepted-baseline" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      jq -e '.backends[0].acceptedRoutes == [{method: "GET", host: "api.fixture.test", path: "/repos/x"}]' ${fixtures.connectorBaselineDocs}/widened.json
+      jq -e '.backends[0].acceptedRoutes == [{method: "GET", host: "api.fixture.test", path: "/repos"}]' ${fixtures.connectorBaselineDocs}/accepted.json
+      jq -e '.backends[0].credentialKnob == "fixtureToken"' ${fixtures.connectorBaselineDocs}/accepted.json
+      jq -e '.backends[0].acceptedRoutes | map(.method) == ["GET", "POST"]' ${fixtures.connectorBaselineDocs}/narrowed.json
+      jq -e '.backends[0].acceptedRoutes == [{method: "GET", host: "api.fixture.test", path: "/repos"}]' ${
+        (withAccepted [ goodRoute ]).internals.runInputDocumentFile
+      }
+      touch $out
+    '';
 }

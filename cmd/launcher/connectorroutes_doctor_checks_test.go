@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -124,5 +126,49 @@ func TestConnectorRoutesChecks_NoRowsNoChecks(t *testing.T) {
 	useConnectorRows(t)
 	if got := connectorRoutesChecks(); len(got) != 0 {
 		t.Errorf("connectorRoutesChecks() = %d rows, want none", len(got))
+	}
+}
+
+// The baseline a Consumer commits beside its flake reaches doctor through the
+// Nix-rendered input document: a Connector whose live table broadens the
+// accepted one (a flake-lock bump that left the baseline alone) is flagged,
+// while an equal or narrower live table is not.
+func TestConnectorRoutesWidened_FromNixRenderedBaseline(t *testing.T) {
+	dir := os.Getenv("SPINDRIFT_FIXTURE_CONNECTOR_BASELINE_DOCS")
+	if dir == "" {
+		t.Skip("SPINDRIFT_FIXTURE_CONNECTOR_BASELINE_DOCS is unset")
+	}
+	for _, tc := range []struct {
+		doc      string
+		widening bool
+	}{{"widened", true}, {"accepted", false}, {"narrowed", false}} {
+		t.Run(tc.doc, func(t *testing.T) {
+			t.Cleanup(backendrows.Snapshot())
+			raw, err := os.ReadFile(filepath.Join(dir, tc.doc+".json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var parsed struct {
+				Backends json.RawMessage `json:"backends"`
+			}
+			if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Backends) == 0 {
+				t.Fatalf("document carries no backends section (err=%v): %s", err, raw)
+			}
+			if err := backendrows.Use(parsed.Backends); err != nil {
+				t.Fatal(err)
+			}
+			row, ok := backendrows.Lookup("fixture")
+			if !ok {
+				t.Fatal("backendrows.Lookup(fixture) = false after the document's rows applied")
+			}
+			_, err = connectorRoutesWidenedCheck(row).Probe()
+			if tc.widening {
+				if err == nil || !strings.Contains(err.Error(), "+ GET api.fixture.test /repos") {
+					t.Fatalf("widened baseline: want an error naming %q, got %v", "+ GET api.fixture.test /repos", err)
+				}
+			} else if err != nil {
+				t.Fatalf("%s baseline must not flag a widening, got %v", tc.doc, err)
+			}
+		})
 	}
 }
