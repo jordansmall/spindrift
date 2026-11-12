@@ -15,6 +15,7 @@ import (
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/runner"
@@ -224,7 +225,9 @@ func (lc *launchContext) settler() settle.Settler {
 // hostSeedsMirror reports whether c's Box clones from a host-seeded mirror
 // mounted at /repo (backend.ClonesFromMirror). Research needs it too, unless
 // it is self-contained (issue #2439). The read-only decision is dispatch's own
-// (effectiveBoxForgeAndIssueAccess), so launcher and Box agree per kind.
+// (effectiveBoxForgeAndIssueAccess), so launcher and Box agree per kind. A
+// github or forgejo Box's per-Pass fetched mirror is a different arm of
+// seedMirrorHook, gated on a forge.MirrorSeeder rather than the registry row.
 func hostSeedsMirror(c config) bool {
 	row, _ := backendkit.ByName(c.CodeForge)
 	return backend.ClonesFromMirror(row.Descriptor, c.effectiveBoxForgeAndIssueAccess() == "read-only") && !c.selfContained
@@ -290,30 +293,58 @@ func newScratchMirrorDir(pwd string) (string, error) {
 	return filepath.Join(d, "repo.git"), nil
 }
 
-// seedMirrorHook is dispatch.Config.SeedMirror: it re-seeds the host mirror
-// through the forge Strategy's SeedMirror before each Pass and returns the dir
-// to mount at /repo, so a Box clones the base as it stands now rather than as
-// of launch (issue #6896). The mirror is the Accumulation repo for a forge with
-// a HostRepoDir (local), else a per-process scratch dir. Nil when c has no
-// host-seeded mirror. It does not take the Accumulation lock: bootstrap's flock
-// stays held for the whole run, and a second open file would conflict with it.
-func seedMirrorHook(c config, pwd string) func() (string, func(), error) {
-	if !hostSeedsMirror(c) {
+// seedMirrorHook is dispatch.Config.SeedMirror: it prepares the dir to mount
+// read-only at /repo before each Pass, so a Box clones the base as it stands
+// now rather than as of launch (issue #6896). Nil when the Box clones from its
+// remote instead.
+//
+// Two arms. A host-seeded backend (local; git under read-only) re-seeds one
+// shared mirror through the forge Strategy's SeedMirror: the Accumulation repo
+// for a forge with a HostRepoDir, else a per-process scratch dir. It does not
+// take the Accumulation lock, because bootstrap's flock stays held for the
+// whole run and a second open file would conflict with it. Otherwise, a
+// read-only Box (which has no forge credential to clone with) gets a fresh
+// bare mirror the launcher fetches with its own credential through seeder
+// (issue #6897). Read-write Boxes clone directly.
+func seedMirrorHook(c config, pwd string, seeder forge.MirrorSeeder) func() (string, func(), error) {
+	if hostSeedsMirror(c) {
+		row, _ := backendkit.ByName(c.CodeForge)
+		dir := c.hostRepoDir()
+		return func() (string, func(), error) {
+			seedMirrorMu.Lock()
+			defer seedMirrorMu.Unlock()
+			if dir == "" {
+				d, err := newScratchMirrorDir(pwd)
+				if err != nil {
+					return "", nil, err
+				}
+				dir = d
+			}
+			return dir, func() {}, row.SeedMirror(backendShared(c), c.knobLookup, pwd, dir)
+		}
+	}
+	// Effective access, not the adapter: a ReadOnlyBox kind under a read-write
+	// knob still holds the read-write adapter, which also seeds.
+	if c.selfContained || seeder == nil || c.effectiveBoxForgeAndIssueAccess() != "read-only" {
 		return nil
 	}
-	row, _ := backendkit.ByName(c.CodeForge)
-	dir := c.hostRepoDir()
 	return func() (string, func(), error) {
-		seedMirrorMu.Lock()
-		defer seedMirrorMu.Unlock()
-		if dir == "" {
-			d, err := newScratchMirrorDir(pwd)
-			if err != nil {
-				return "", nil, err
-			}
-			dir = d
+		// Under pwd, not /tmp: a podman machine on macOS shares only the
+		// operator's tree, like the outbox (dispatch.OutboxDirFor).
+		root := hostpaths.MirrorRoot(pwd)
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			return "", nil, err
 		}
-		return dir, func() {}, row.SeedMirror(backendShared(c), c.knobLookup, pwd, dir)
+		tmp, err := os.MkdirTemp(root, "pass-")
+		if err != nil {
+			return "", nil, err
+		}
+		dir := filepath.Join(tmp, "repo.git")
+		if err := seeder.SeedMirror(dir); err != nil {
+			_ = os.RemoveAll(tmp)
+			return "", nil, fmt.Errorf("host-side fetch of the %s Target repo: %w", c.CodeForge, err)
+		}
+		return dir, func() { _ = os.RemoveAll(tmp) }, nil
 	}
 }
 

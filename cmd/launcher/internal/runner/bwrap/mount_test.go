@@ -79,8 +79,8 @@ func TestOutboxMount_RenderedByBwrap(t *testing.T) {
 	}
 }
 
-// A Box with no MirrorDir (every non-local forge's) must not get a /repo
-// mount through the adapter's own render path.
+// A Box with no MirrorDir (neither local nor a read-only host-fetched forge)
+// must not get a /repo mount through the adapter's own render path.
 func TestMirrorMount_AbsentWithoutMirrorDir_Bwrap(t *testing.T) {
 	bwrap := &bwrapAdapter{
 		agentFiles:    t.TempDir(),

@@ -16,6 +16,8 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/hostpaths"
+	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -1025,7 +1027,7 @@ func TestSeedMirrorHook_Local_ReseedsBaseAdvanceBetweenPasses(t *testing.T) {
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
 	c.BaseBranch = "main"
 
-	hook := seedMirrorHook(c, checkout)
+	hook := seedMirrorHook(c, checkout, nil)
 	if hook == nil {
 		t.Fatal("seedMirrorHook(CODE_FORGE=local) = nil, want a per-Pass seed")
 	}
@@ -1052,9 +1054,9 @@ func TestSeedMirrorHook_Local_ReseedsBaseAdvanceBetweenPasses(t *testing.T) {
 	}
 }
 
-// No hook means no mirror dir on the Box, so no /repo mount: every backend
-// that does not host-seed a mirror (github, forgejo) clones from its
-// remote, and self-contained research never clones.
+// No hook means no mirror dir on the Box, so no /repo mount: with no
+// MirrorSeeder, a backend that does not host-seed a mirror (github, forgejo)
+// clones from its remote, and self-contained research never clones.
 func TestSeedMirrorHook_NoMirror_Nil(t *testing.T) {
 	cases := map[string]func(*config){
 		"self-contained research": func(c *config) { c.CodeForge = "local"; c.selfContained = true },
@@ -1068,7 +1070,7 @@ func TestSeedMirrorHook_NoMirror_Nil(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := baseConfig()
 			mutate(&c)
-			if hook := seedMirrorHook(c, "/nonexistent/pwd"); hook != nil {
+			if hook := seedMirrorHook(c, "/nonexistent/pwd", nil); hook != nil {
 				t.Errorf("seedMirrorHook = non-nil, want nil (no host-seeded mirror)")
 			}
 		})
@@ -1091,7 +1093,7 @@ func TestSeedMirrorHook_Git_ReadOnlySeedsFromRemote(t *testing.T) {
 	c.BaseBranch = "main"
 	c.setRowKnob("CODE_FORGE_REMOTE_URL", fx.Bare)
 
-	hook := seedMirrorHook(c, pwd)
+	hook := seedMirrorHook(c, pwd, nil)
 	if hook == nil {
 		t.Fatal("seedMirrorHook(CODE_FORGE=git, read-only) = nil, want a per-Pass seed")
 	}
@@ -1131,7 +1133,7 @@ func TestSeedMirrorHook_Git_ReadWrite_Nil(t *testing.T) {
 	c := baseConfig()
 	c.CodeForge = "git"
 	c.BoxForgeAndIssueAccess = "read-write"
-	if hook := seedMirrorHook(c, "/nonexistent/pwd"); hook != nil {
+	if hook := seedMirrorHook(c, "/nonexistent/pwd", nil); hook != nil {
 		t.Error("seedMirrorHook(CODE_FORGE=git, read-write) = non-nil, want nil")
 	}
 }
@@ -1163,4 +1165,142 @@ func gitIdentity(t *testing.T) {
 	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
 	t.Setenv("GIT_COMMITTER_NAME", "Test Bot")
 	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
+}
+
+// stubSeeder writes a marker file where a bare clone would go, or fails with
+// err.
+type stubSeeder struct{ err error }
+
+func (s stubSeeder) SeedMirror(dir string) error {
+	if s.err != nil {
+		return s.err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644)
+}
+
+func hostFetchConfig(access string) config { return hostFetchConfigFor("github", access) }
+
+func hostFetchConfigFor(codeForge, access string) config {
+	c := baseConfig()
+	c.CodeForge = codeForge
+	c.BoxForgeAndIssueAccess = access
+	return c
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+// Each Pass fetches into a dir of its own under the operator's tree (a podman
+// machine on macOS shares it, unlike /tmp), and the release removes it, so
+// parallel Passes never share a mirror and none outlives its Box.
+func TestSeedMirrorHook_HostFetch_FreshDirPerPassRemovedOnRelease(t *testing.T) {
+	pwd := t.TempDir()
+	hook := seedMirrorHook(hostFetchConfig("read-only"), pwd, stubSeeder{})
+	if hook == nil {
+		t.Fatal("seedMirrorHook(github, read-only) = nil, want a per-Pass host-side fetch")
+	}
+
+	dir1, release1, err := hook()
+	if err != nil {
+		t.Fatalf("first Pass: %v", err)
+	}
+	dir2, release2, err := hook()
+	if err != nil {
+		t.Fatalf("second Pass: %v", err)
+	}
+	if dir1 == dir2 {
+		t.Fatalf("both Passes got %q, want distinct mirror dirs", dir1)
+	}
+	root := hostpaths.MirrorRoot(pwd)
+	for _, d := range []string{dir1, dir2} {
+		if !strings.HasPrefix(d, root+string(filepath.Separator)) || filepath.Base(d) != "repo.git" {
+			t.Errorf("mirror dir %q, want <pwd>/.spindrift/mirror/<pass>/repo.git", d)
+		}
+		if !dirExists(d) {
+			t.Errorf("mirror dir %q does not exist before its release", d)
+		}
+	}
+
+	release1()
+	if dirExists(dir1) || dirExists(filepath.Dir(dir1)) {
+		t.Errorf("first Pass's mirror survives its release: %s", dir1)
+	}
+	if !dirExists(dir2) {
+		t.Errorf("releasing the first Pass removed the second's mirror %s", dir2)
+	}
+	release2()
+	if entries, _ := os.ReadDir(root); len(entries) != 0 {
+		t.Errorf("%d mirror entries left under %s after both releases", len(entries), root)
+	}
+}
+
+// The host-fetched dir mounts read-only at /repo; the adapters' rendering of
+// that spec is covered by TestMirrorAndOutboxMounts_RenderedByBwrap and its OCI
+// twin.
+func TestSeedMirrorHook_HostFetch_DirMountsReadOnlyAtRepo(t *testing.T) {
+	for _, codeForge := range []string{"github", "forgejo"} {
+		t.Run(codeForge, func(t *testing.T) {
+			hook := seedMirrorHook(hostFetchConfigFor(codeForge, "read-only"), t.TempDir(), stubSeeder{})
+			if hook == nil {
+				t.Fatalf("seedMirrorHook(%s, read-only) = nil, want a per-Pass host-side fetch", codeForge)
+			}
+			dir, release, err := hook()
+			if err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			defer release()
+
+			var found bool
+			for _, spec := range runner.BuildMountSpecs(runner.MountParams{}, runner.Box{MirrorDir: dir}) {
+				if spec.Target != runner.MirrorTarget {
+					continue
+				}
+				found = true
+				if spec.Source != dir || !spec.ReadOnly {
+					t.Errorf("/repo mount = %+v, want read-only from %s", spec, dir)
+				}
+			}
+			if !found {
+				t.Errorf("no %s mount for MirrorDir %s", runner.MirrorTarget, dir)
+			}
+		})
+	}
+}
+
+// Under read-write the Box clones directly: there is no hook, so no MirrorDir
+// and no /repo mount.
+func TestSeedMirrorHook_HostFetch_NilUnderReadWrite(t *testing.T) {
+	for _, codeForge := range []string{"github", "forgejo"} {
+		t.Run(codeForge, func(t *testing.T) {
+			if hook := seedMirrorHook(hostFetchConfigFor(codeForge, "read-write"), t.TempDir(), stubSeeder{}); hook != nil {
+				t.Errorf("seedMirrorHook(%s, read-write) = non-nil, want nil", codeForge)
+			}
+		})
+	}
+}
+
+// A failed host-side fetch is the Pass's error, raised before any Box starts
+// (dispatch's TestRun_SeedMirrorErrorFailsPassBeforeBox), and leaves no
+// half-seeded dir behind.
+func TestSeedMirrorHook_HostFetch_FailureNamesFetchAndLeavesNoDir(t *testing.T) {
+	pwd := t.TempDir()
+	cause := errors.New("git clone: exit status 128")
+	hook := seedMirrorHook(hostFetchConfig("read-only"), pwd, stubSeeder{err: cause})
+
+	dir, release, err := hook()
+	if err == nil {
+		release()
+		t.Fatalf("seed = %q, want an error", dir)
+	}
+	if !errors.Is(err, cause) || !strings.Contains(err.Error(), "host-side fetch") {
+		t.Errorf("error = %v, want it to name the host-side fetch and wrap %v", err, cause)
+	}
+	if entries, _ := os.ReadDir(hostpaths.MirrorRoot(pwd)); len(entries) != 0 {
+		t.Errorf("%d entries left under .spindrift/mirror after a failed fetch", len(entries))
+	}
 }

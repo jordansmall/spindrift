@@ -241,8 +241,9 @@ func TestBuildMountSpecs_OutboxDirEmpty_NoMount(t *testing.T) {
 	}
 }
 
-// The /repo mount is local-only (ADR 0033): a Box with no MirrorDir, as every
-// non-local forge's is, gets none.
+// The /repo mount exists only for local's Accumulation repo or a per-Pass
+// host-fetched mirror (read-only github/forgejo): a Box with no MirrorDir gets
+// none.
 func TestBuildMountSpecs_NoMirrorDir_NoMount(t *testing.T) {
 	specs := BuildMountSpecs(MountParams{}, Box{})
 	for _, s := range specs {
