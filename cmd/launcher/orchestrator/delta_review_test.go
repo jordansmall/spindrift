@@ -78,7 +78,7 @@ func TestScanPassOutcomeReturnsLastMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	o, found := scanPassOutcome(logPath, "claude")
+	o, found := scanPassOutcome(decodePassLog(logPath, "claude"))
 	if !found {
 		t.Fatal("scanPassOutcome found = false, want true")
 	}
@@ -97,7 +97,7 @@ func TestScanPassOutcomeNoMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, found := scanPassOutcome(logPath, "claude")
+	_, found := scanPassOutcome(decodePassLog(logPath, "claude"))
 	if found {
 		t.Error("scanPassOutcome found = true, want false")
 	}
@@ -227,10 +227,10 @@ func TestScanPassIgnoresOutcomeOutsideFinalResultText(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, hasOutcome := scanPassLog(logPath, "claude", passmachine.KindLegacy); hasOutcome {
+	if _, hasOutcome := scanPassLog(decodePassLog(logPath, "claude"), passmachine.KindLegacy); hasOutcome {
 		t.Error("scanPassLog hasOutcome = true, want false for outcome text outside the final result")
 	}
-	if o, found := scanPassOutcome(logPath, "claude"); found {
+	if o, found := scanPassOutcome(decodePassLog(logPath, "claude")); found {
 		t.Errorf("scanPassOutcome = %+v, found = true, want false", o)
 	}
 }
@@ -245,10 +245,10 @@ func TestScanPassDetectsMarkdownWrappedFinalResultOutcome(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, hasOutcome := scanPassLog(logPath, "claude", passmachine.KindLegacy); !hasOutcome {
+	if _, hasOutcome := scanPassLog(decodePassLog(logPath, "claude"), passmachine.KindLegacy); !hasOutcome {
 		t.Error("scanPassLog hasOutcome = false, want true")
 	}
-	o, found := scanPassOutcome(logPath, "claude")
+	o, found := scanPassOutcome(decodePassLog(logPath, "claude"))
 	if !found || o.Note != "final" {
 		t.Errorf("scanPassOutcome = %+v, found = %v, want the wrapped final line (note=final)", o, found)
 	}

@@ -47,7 +47,7 @@ func TestScanReviewLogOpencode(t *testing.T) {
 			if err := os.WriteFile(logPath, []byte(tc.content), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			verdict, findings := scanReviewLog(logPath, "opencode")
+			verdict, findings := scanReviewLog(decodePassLog(logPath, "opencode"))
 			if verdict != tc.wantVerdict {
 				t.Errorf("verdict = %q, want %q", verdict, tc.wantVerdict)
 			}
