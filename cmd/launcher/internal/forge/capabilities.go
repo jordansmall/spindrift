@@ -45,6 +45,8 @@ type Capabilities struct {
 	DemandCounter         DemandCounter
 	IssueTypeChecker      IssueTypeChecker
 	StatusMappingChecker  StatusMappingChecker
+	NativeDepsReader      NativeDepsReader
+	BodyGrammarer         BodyGrammarer
 
 	// CODE_FORGE and ISSUE_TRACKER select independently, so each knob keeps
 	// its own descriptor row.
@@ -90,6 +92,8 @@ func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc b
 	c.DemandCounter, _ = it.(DemandCounter)
 	c.IssueTypeChecker, _ = it.(IssueTypeChecker)
 	c.StatusMappingChecker, _ = it.(StatusMappingChecker)
+	c.NativeDepsReader, _ = it.(NativeDepsReader)
+	c.BodyGrammarer, _ = it.(BodyGrammarer)
 
 	c.ForgeDescriptor = forgeDesc
 	c.TrackerDescriptor = trackerDesc
