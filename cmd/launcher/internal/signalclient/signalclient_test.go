@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -183,5 +184,56 @@ func TestFetchIssue_OversizedReplyIsAnErrorNotATruncatedDecode(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "limit") {
 		t.Errorf("error = %v, want it to name the reply limit", err)
+	}
+}
+
+func TestFetchIssueSearch_EncodesTheQueryAndDecodesTheReply(t *testing.T) {
+	const text = "flaky repo:x/y & more"
+	var got url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/issue-search" || r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		got = r.URL.Query()
+		_ = json.NewEncoder(w).Encode(signalwire.IssueSearchReply{
+			Issues:    []signalwire.IssueSearchResult{{Number: "7", Title: "t", State: "closed", Labels: []string{"a"}}},
+			Truncated: true,
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	reply, rej, err := signalclient.FetchIssueSearch(srv.Client(), srv.URL, secret, text, "closed", "agent-review-finding")
+	if err != nil || rej != nil {
+		t.Fatalf("FetchIssueSearch = (%v, %v), want success", rej, err)
+	}
+	if got.Get("text") != text || got.Get("state") != "closed" || got.Get("label") != "agent-review-finding" || len(got) != 3 {
+		t.Errorf("query on the wire = %v, want text, state and label intact", got)
+	}
+	if len(reply.Issues) != 1 || reply.Issues[0].Number != "7" || !reply.Truncated {
+		t.Errorf("reply = %+v, want the decoded reply", reply)
+	}
+
+	if _, _, err := signalclient.FetchIssueSearch(srv.Client(), srv.URL, secret, "x", "open", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["label"]; ok {
+		t.Errorf("query = %v, want the label omitted when empty", got)
+	}
+}
+
+func TestFetchIssueSearch_RejectComesBackAsAReject(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(signalwire.Reject{Status: "invalid_query", Reason: "nope"})
+	}))
+	t.Cleanup(srv.Close)
+
+	_, rej, err := signalclient.FetchIssueSearch(srv.Client(), srv.URL, secret, "x", "open", "")
+	if err != nil {
+		t.Fatalf("FetchIssueSearch: %v", err)
+	}
+	if rej == nil || rej.Status != "invalid_query" {
+		t.Fatalf("reject = %+v, want invalid_query", rej)
 	}
 }

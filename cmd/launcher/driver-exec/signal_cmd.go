@@ -24,19 +24,21 @@ import (
 const signalUsageReportTimeout = 5 * time.Second
 
 // runSignal posts one signal to the Box's Signal socket (ADR 0052, issue
-// #3724): `signal comment|pr-intent|issue-intent|status`, or reads one with
-// `signal issue <ref>`. The kind is the route, so it is a word rather than a
-// flag, and no flag names a destination -- an issue number, label, branch or
-// target is unrepresentable here, not merely ignored. `issue` is the one read
-// that takes a positional: the ref names what to read, never where to write,
-// and the host refuses any ref outside the Dispatch's own tracker.
+// #3724): `signal comment|pr-intent|issue-intent|status`, or reads with
+// `signal issue <ref>` or `signal issue-search <text...>`. The kind is the
+// route, so it is a word rather than a flag, and no flag names a destination
+// -- an issue number, branch or target is unrepresentable here, not merely
+// ignored. The reads are the only verbs that take a positional or a filter:
+// they name what to read, never where to write, and the host refuses any ref
+// outside the Dispatch's own tracker and any search label outside its fixed
+// finding set.
 //
 // Bodies arrive on stdin or via -body-file, never on argv: a 64 KiB Markdown
 // body would blow the argv cap, and argv is world-readable through /proc.
 // -title and -type are short closed-vocabulary fields and stay flags.
 func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 	if len(args) == 0 {
-		return signalUsageFailure(stdout, "", "want one of comment, pr-intent, issue-intent, issue, status")
+		return signalUsageFailure(stdout, "", "want one of comment, pr-intent, issue-intent, issue, issue-search, status")
 	}
 	kind, rest := args[0], args[1:]
 
@@ -162,6 +164,23 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		}
 		return getSignalIssue(stdout, client, base, secret, fs.Arg(0))
 
+	case signalwire.IssueSearchRoute:
+		fs := signalFlagSet(kind, stdout)
+		state := fs.String("state", "open", "open or closed; the host refuses anything else")
+		label := fs.String("label", "", "restrict to one finding label; the host refuses any outside its fixed set")
+		if !parseSignalFlagValues(fs, rest, kind, stdout) {
+			return 1
+		}
+		text := strings.Join(fs.Args(), " ")
+		if strings.TrimSpace(text) == "" {
+			return signalUsageFailure(stdout, kind, "want search text: signal issue-search [-state open|closed] [-label <finding label>] <text...>")
+		}
+		client, base, secret, err := signalclient.Target()
+		if err != nil {
+			return signalFail(stdout, err)
+		}
+		return getSignalIssueSearch(stdout, client, base, secret, text, *state, *label)
+
 	case "status":
 		fs := signalFlagSet(kind, stdout)
 		if !parseSignalFlags(fs, rest, kind, stdout) {
@@ -174,7 +193,7 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		return getSignalStatus(stdout, client, base, secret)
 	}
 
-	return signalUsageFailure(stdout, "", "unknown signal kind; want one of comment, pr-intent, issue-intent, issue, status")
+	return signalUsageFailure(stdout, "", "unknown signal kind; want one of comment, pr-intent, issue-intent, issue, issue-search, status")
 }
 
 // classListViolation returns why class is not acceptable against the Chore's
@@ -506,6 +525,32 @@ func getSignalIssue(stdout io.Writer, client *http.Client, base, secret, ref str
 	}
 	if snap.Truncated {
 		fmt.Fprintf(stdout, "\n[truncated: issue exceeded %dKB or its comments could not be read]\n", signalwire.MaxIssueReplyBytes/1024)
+	}
+	return 0
+}
+
+// getSignalIssueSearch prints one line per hit, or a single "no matching
+// issues" line.
+func getSignalIssueSearch(stdout io.Writer, client *http.Client, base, secret, text, state, label string) int {
+	reply, rej, err := signalclient.FetchIssueSearch(client, base, secret, text, state, label)
+	if err != nil {
+		return signalFail(stdout, err)
+	}
+	if rej != nil {
+		return printReject(stdout, signalwire.IssueSearchRoute, *rej)
+	}
+	if len(reply.Issues) == 0 {
+		fmt.Fprintln(stdout, "no matching issues")
+	}
+	for _, i := range reply.Issues {
+		fmt.Fprintf(stdout, "#%s [%s] %s", i.Number, i.State, i.Title)
+		if len(i.Labels) > 0 {
+			fmt.Fprintf(stdout, " (labels: %s)", strings.Join(i.Labels, ", "))
+		}
+		fmt.Fprintln(stdout)
+	}
+	if reply.Truncated {
+		fmt.Fprintf(stdout, "[results capped at %d hits or truncated titles; narrow the search to see more]\n", signalwire.MaxIssueSearchResults)
 	}
 	return 0
 }
