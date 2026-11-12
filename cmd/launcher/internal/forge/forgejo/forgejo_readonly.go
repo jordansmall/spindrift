@@ -54,3 +54,4 @@ func (c *readOnlyCodeForge) CommitSubjects(outboxDir, base, ref string) ([]strin
 var _ forge.BundleRelay = (*readOnlyCodeForge)(nil)
 var _ forge.BundleCommitSubjects = (*readOnlyCodeForge)(nil)
 var _ forge.MergeCommitReader = (*readOnlyCodeForge)(nil)
+var _ forge.MirrorSeeder = (*readOnlyCodeForge)(nil)

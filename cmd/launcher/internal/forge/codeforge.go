@@ -156,6 +156,18 @@ type BranchPusher interface {
 	PushBranch(srcDir, localRef, branch, base string) error
 }
 
+// MirrorSeeder is the optional host-credentialed repo-fetch interface: github
+// and forgejo base adapters implement it, backed by the same relay clone the
+// bundle relay uses. It is how a read-only Box gets the target repo with no
+// forge credential: the host seeds a mirror, the Box clones that.
+type MirrorSeeder interface {
+	// SeedMirror clones the target repo's branches into dir as a bare repo,
+	// with the host's own credential, so every remote branch (a fix pass's own
+	// agent branch included) is a local head a clone of dir sees as
+	// origin/<branch>. dir must not exist yet or be empty, as for `git clone`.
+	SeedMirror(dir string) error
+}
+
 // BranchDeleter is the optional host-credentialed branch-delete interface
 // (issue #4112, ADR 0057): github and forgejo base adapters implement it
 // regardless of the Box's access mode. The butler patch rung uses it to

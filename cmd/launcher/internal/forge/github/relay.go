@@ -68,3 +68,4 @@ func GitRemote(repo string) (url string, gitArgs []string) {
 var _ forge.BundleCommitSubjects = (*readOnlyCodeForge)(nil)
 var _ forge.BundleRelay = (*readOnlyCodeForge)(nil)
 var _ forge.MergeCommitReader = (*readOnlyCodeForge)(nil)
+var _ forge.MirrorSeeder = (*readOnlyCodeForge)(nil)

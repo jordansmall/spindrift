@@ -369,3 +369,25 @@ func TestGitRemote_LedgerIgnoresAmbientSSHRewrite(t *testing.T) {
 		})
 	}
 }
+
+// The mirror is mounted into the Box, so the launcher's gh credential helper
+// must authenticate the host-side clone without persisting into its config.
+func TestExecClient_SeedMirror_PersistsNoCredentialHelper(t *testing.T) {
+	repo, srv := newRelayHTTPSHarness(t)
+	dir := filepath.Join(t.TempDir(), "mirror")
+
+	c := NewExecClient("owner/repo", testLabels)
+	if err := c.SeedMirror(dir); err != nil {
+		t.Fatalf("SeedMirror: %v", err)
+	}
+	if got, want := forgetest.RevParse(t, dir, "main"), forgetest.RevParse(t, repo.Bare, "main"); got != want {
+		t.Errorf("mirror main = %s, want %s", got, want)
+	}
+	if !srv.sawAuthorised("/git-upload-pack") {
+		t.Error("server saw no authorised git-upload-pack request")
+	}
+	out, _ := exec.Command("git", "-C", dir, "config", "--local", "--get-regexp", `credential\.|insteadof`).CombinedOutput()
+	if len(out) != 0 {
+		t.Errorf("mirror local config carries pins:\n%s", out)
+	}
+}

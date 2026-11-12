@@ -152,3 +152,14 @@ func (h *hostMediationHarness) IssuePosted(title, body string, labels []string) 
 func TestReadOnlyCodeForge_HostMediationContract(t *testing.T) {
 	forgetest.RunHostMediationContract(t, newHostMediationHarness(t))
 }
+
+func (h *hostMediationHarness) MirrorBase() string { return h.base }
+
+func (h *hostMediationHarness) RefSHA(ref string) string {
+	return forgetest.RevParse(h.t, h.repo.Bare, "refs/heads/"+ref)
+}
+
+// UnseedableCodeForge targets a repo the relay server has no directory for.
+func (h *hostMediationHarness) UnseedableCodeForge() (forge.CodeForge, string) {
+	return NewReadOnlyCodeForge("owner/missing", forge.DispatchLabels{}), "relay-token"
+}
