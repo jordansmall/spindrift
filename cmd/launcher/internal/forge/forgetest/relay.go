@@ -1,10 +1,12 @@
 package forgetest
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"spindrift.dev/launcher/internal/seambundle"
@@ -37,6 +39,11 @@ func WriteFile(t *testing.T, path, contents string) {
 	}
 }
 
+// relaySeedCount numbers SeedRelayBundle's commit bodies (the subject stays
+// "feature" for CommitSubjects assertions) so reseeding a branch
+// yields a different SHA even within one clock second.
+var relaySeedCount atomic.Int64
+
 // SeedRelayBundle clones bare, creates branch one commit ahead of base
 // carrying a marker file, and writes a git bundle of base..branch to
 // outboxDir/seambundle.FileName -- standing in for the Box's code-out.
@@ -49,7 +56,7 @@ func SeedRelayBundle(t *testing.T, bare, base, outboxDir, branch string) string 
 	Run(t, work, "checkout", "-b", branch)
 	WriteFile(t, filepath.Join(work, "feature.txt"), "feature\n")
 	Run(t, work, "add", "feature.txt")
-	Run(t, work, "commit", "-m", "feature")
+	Run(t, work, "commit", "-m", "feature", "-m", fmt.Sprint(relaySeedCount.Add(1)))
 	Run(t, work, "bundle", "create", filepath.Join(outboxDir, seambundle.FileName), base+".."+branch)
 	return RevParse(t, work, branch)
 }

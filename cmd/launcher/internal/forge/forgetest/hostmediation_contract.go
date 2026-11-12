@@ -1,6 +1,7 @@
 package forgetest
 
 import (
+	"errors"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -11,21 +12,8 @@ import (
 // comment, host-posted issue filing) against an adapter's own scripted or real
 // backend, without knowing which adapter it is (ADR 0034).
 type HostMediationHarness interface {
+	BundleRelayHarness
 	HostPostedCommentHarness
-
-	// CodeForge returns the read-only CodeForge under test. It must implement
-	// forge.BundleRelay and forge.DraftPRCreator.
-	CodeForge() forge.CodeForge
-
-	// SeedBundle stages ref as a relayable code-out bundle and returns the
-	// outbox directory RelayBundle should read it from.
-	SeedBundle(ref string) (outboxDir string)
-	// BundleLanded reports whether ref's staged content reached the backing
-	// repo or store after a RelayBundle call.
-	BundleLanded(ref string) bool
-	// EmptyOutbox returns a fresh outbox directory with nothing staged, the
-	// Box-never-wrote-a-bundle fault RelayBundle must reject.
-	EmptyOutbox() (outboxDir string)
 
 	// SeedDraftPRHead returns a head ref to call CreateDraftPR with: failing
 	// selects a head the backend will refuse to open a draft PR for, !failing
@@ -38,6 +26,28 @@ type HostMediationHarness interface {
 	// its URL with no error, rather than surfacing the refusal as a failure
 	// (issue #2407 slices 1-3). Returns that head and the URL it must return.
 	SeedExistingOpenPR() (head, wantURL string)
+}
+
+// BundleRelayHarness is the bundle-only slice of HostMediationHarness, which
+// RunBundleRelayContract runs standalone for an adapter (git) whose read-only
+// CodeForge relays bundles but has no PR seam.
+type BundleRelayHarness interface {
+	// CodeForge returns the read-only CodeForge under test. It must implement
+	// forge.BundleRelay (and, under RunHostMediationContract, also
+	// forge.DraftPRCreator).
+	CodeForge() forge.CodeForge
+
+	// SeedBundle stages ref as a relayable code-out bundle and returns the
+	// outbox directory RelayBundle should read it from. Each call stages a
+	// fresh commit, so a second call for the same ref diverges from the first.
+	SeedBundle(ref string) (outboxDir string)
+	// BundleLanded reports whether ref's most recently staged content reached
+	// the backing repo or store after a RelayBundle call.
+	BundleLanded(ref string) bool
+	// EmptyOutbox returns a fresh outbox directory with nothing staged, the
+	// Box-never-wrote-a-bundle fault RelayBundle must reject with
+	// forge.ErrBundleNotFound.
+	EmptyOutbox() (outboxDir string)
 }
 
 // HostPostedCommentHarness is the tracker-only slice of HostMediationHarness,
@@ -81,6 +91,7 @@ type IssueFilerHarness interface {
 func RunHostMediationContract(t *testing.T, h HostMediationHarness) {
 	t.Run("BundleRelayLandsRef", func(t *testing.T) { testBundleRelayLandsRef(t, h) })
 	t.Run("BundleRelayThenDraftPRCreate", func(t *testing.T) { testBundleRelayThenDraftPRCreate(t, h) })
+	t.Run("BundleRelayReRelayForceUpdates", func(t *testing.T) { testBundleReRelayForceUpdates(t, h) })
 	t.Run("BundleRelayMissingBundleErrors", func(t *testing.T) { testBundleRelayMissingBundleErrors(t, h) })
 	t.Run("DraftPRCreation", func(t *testing.T) { testDraftPRCreation(t, h) })
 	t.Run("DraftPRCreationFails", func(t *testing.T) { testDraftPRCreationFails(t, h) })
@@ -90,6 +101,14 @@ func RunHostMediationContract(t *testing.T, h HostMediationHarness) {
 	if ih, ok := h.(IssueFilerHarness); ok {
 		RunIssueFilerContract(t, ih)
 	}
+}
+
+// RunBundleRelayContract runs only the bundle-relay scenarios, for an adapter
+// (git) with no PR seam to drive RunHostMediationContract with.
+func RunBundleRelayContract(t *testing.T, h BundleRelayHarness) {
+	t.Run("BundleRelayLandsRef", func(t *testing.T) { testBundleRelayLandsRef(t, h) })
+	t.Run("BundleRelayReRelayForceUpdates", func(t *testing.T) { testBundleReRelayForceUpdates(t, h) })
+	t.Run("BundleRelayMissingBundleErrors", func(t *testing.T) { testBundleRelayMissingBundleErrors(t, h) })
 }
 
 // RunHostPostedCommentContract runs only the host-posted comment scenarios, for
@@ -108,7 +127,7 @@ func RunIssueFilerContract(t *testing.T, ih IssueFilerHarness) {
 	t.Run("HostPostedIssueFilingFails", func(t *testing.T) { testHostPostedIssueFilingFails(t, ih) })
 }
 
-func mustBundleRelay(t *testing.T, h HostMediationHarness) forge.BundleRelay {
+func mustBundleRelay(t *testing.T, h BundleRelayHarness) forge.BundleRelay {
 	t.Helper()
 	br, ok := forge.AsCodeForge[forge.BundleRelay](h.CodeForge())
 	if !ok {
@@ -147,7 +166,7 @@ func mustHostPostedIssueFiler(t *testing.T, ih IssueFilerHarness) forge.HostPost
 // testBundleRelayLandsRef verifies the ref RelayBundle imports actually lands
 // on the backing repo or store, the relay-before-land step settle depends on
 // before it merges (ADR 0033, ADR 0034).
-func testBundleRelayLandsRef(t *testing.T, h HostMediationHarness) {
+func testBundleRelayLandsRef(t *testing.T, h BundleRelayHarness) {
 	br := mustBundleRelay(t, h)
 	const ref = "agent/issue-hm101"
 	outbox := h.SeedBundle(ref)
@@ -193,13 +212,31 @@ func testBundleRelayThenDraftPRCreate(t *testing.T, h HostMediationHarness) {
 
 // testBundleRelayMissingBundleErrors verifies RelayBundle rejects an outbox
 // with no staged bundle rather than silently no-oping (ADR 0033).
-func testBundleRelayMissingBundleErrors(t *testing.T, h HostMediationHarness) {
+func testBundleRelayMissingBundleErrors(t *testing.T, h BundleRelayHarness) {
 	br := mustBundleRelay(t, h)
 	const ref = "agent/issue-hm102"
 	outbox := h.EmptyOutbox()
 
-	if err := br.RelayBundle(outbox, ref); err == nil {
-		t.Fatal("RelayBundle with no bundle staged: got nil error, want one")
+	err := br.RelayBundle(outbox, ref)
+	if !errors.Is(err, forge.ErrBundleNotFound) {
+		t.Fatalf("RelayBundle with no bundle staged: err = %v, want errors.Is(err, forge.ErrBundleNotFound)", err)
+	}
+}
+
+// testBundleReRelayForceUpdates verifies a second relay of the same ref with
+// diverged history replaces the first (a fix pass re-handing off its branch)
+// rather than being refused as a non-fast-forward.
+func testBundleReRelayForceUpdates(t *testing.T, h BundleRelayHarness) {
+	br := mustBundleRelay(t, h)
+	const ref = "agent/issue-hm104"
+	for i := range 2 {
+		outbox := h.SeedBundle(ref)
+		if err := br.RelayBundle(outbox, ref); err != nil {
+			t.Fatalf("RelayBundle #%d(%q, %q): %v", i+1, outbox, ref, err)
+		}
+		if !h.BundleLanded(ref) {
+			t.Fatalf("RelayBundle #%d(%q, %q) reported success but the staged content never landed", i+1, outbox, ref)
+		}
 	}
 }
 

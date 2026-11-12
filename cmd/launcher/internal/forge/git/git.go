@@ -105,6 +105,21 @@ func validateGitRef(ref string) error {
 	return nil
 }
 
+// cloneInto clones remoteURL into the existing empty directory dir, bounded by
+// timeout.
+func cloneInto(remoteURL string, cred gitexec.Credential, dir string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cloneCmd := exec.CommandContext(ctx, "git", append(append([]string{"clone"}, gitexec.NoAutoMaintenance("--config")...), remoteURL, dir)...)
+	if err := cred.Apply(cloneCmd).Run(); err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("git clone %s: timed out after %s: %w", forge.RedactURLCredentials(remoteURL), timeout, ctx.Err())
+		}
+		return fmt.Errorf("git clone %s: %w", forge.RedactURLCredentials(remoteURL), err)
+	}
+	return nil
+}
+
 // cloneToTemp clones remoteURL into a fresh temp directory and returns a helper
 // that runs git -C <dir> <args...>, plus a cleanup func the caller must defer.
 func cloneToTemp(remoteURL string, cred gitexec.Credential, prefix string, timeout time.Duration) (dir string, gitIn func(ctx context.Context, args ...string) *exec.Cmd, cleanup func(), err error) {
@@ -114,15 +129,9 @@ func cloneToTemp(remoteURL string, cred gitexec.Credential, prefix string, timeo
 	}
 	cleanup = func() { os.RemoveAll(dir) }
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	cloneCmd := exec.CommandContext(ctx, "git", append(append([]string{"clone"}, gitexec.NoAutoMaintenance("--config")...), remoteURL, dir)...)
-	if err := cred.Apply(cloneCmd).Run(); err != nil {
+	if err := cloneInto(remoteURL, cred, dir, timeout); err != nil {
 		cleanup()
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return "", nil, nil, fmt.Errorf("git clone %s: timed out after %s: %w", forge.RedactURLCredentials(remoteURL), timeout, ctx.Err())
-		}
-		return "", nil, nil, fmt.Errorf("git clone %s: %w", forge.RedactURLCredentials(remoteURL), err)
+		return "", nil, nil, err
 	}
 	gitIn = func(ctx context.Context, args ...string) *exec.Cmd {
 		return cred.Apply(exec.CommandContext(ctx, "git", gitexec.GuardedArgs(dir, args...)...))
