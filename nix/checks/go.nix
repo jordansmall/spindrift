@@ -17,6 +17,8 @@ let
   driverDir = name: ../../cmd/launcher/internal/driver + "/${name}";
   adapterGoTestAttr = prefix: name: "${prefix}-${name}-go-test";
   launcherDir = ../../cmd/launcher;
+  # The Connector under connectors/<name>, built from the batteries core.
+  connectorFor = dir: (import dir).lib.connector { core = import ../../core; };
   allDriverDirs = map driverDir driverNames;
   # Everything that links the Driver bundle: the root package, its testdata,
   # the mains and the bundled fixture. The root's *.go files are listed one by
@@ -233,9 +235,7 @@ let
           dir = ../../connectors + "/${name}";
         in
         pkgs.lib.optionalString (builtins.pathExists dir) ''
-          export SPINDRIFT_DRIVER_CONNECTOR_WASM=${
-            ((import dir).lib.connector { core = import ../../core; }).package pkgs
-          }/${name}.wasm
+          export SPINDRIFT_DRIVER_CONNECTOR_WASM=${(connectorFor dir).package pkgs}/${name}.wasm
         '';
     };
   driverGoTests = driverGoTestsFor {
@@ -316,12 +316,23 @@ let
       prefix = "backends";
       pkgFor = name: "internal/forge/${name}";
       sharedFor = backendGoTestSharedFor;
+      # A backend with a Connector under connectors/<name> also runs its tracker
+      # read conformance against that Connector (the wasm, and the Route table
+      # the test points at its scripted backend).
       setupFor =
         name:
+        let
+          dir = ../../connectors + "/${name}";
+          connector = connectorFor dir;
+        in
         pkgs.lib.concatMapStrings (f: ''
           mkdir -p src/${builtins.dirOf f}
           cp ${../.. + "/${f}"} src/${f}
-        '') ((rowFor name).goTestRepoFiles or [ ]);
+        '') ((rowFor name).goTestRepoFiles or [ ])
+        + pkgs.lib.optionalString (builtins.pathExists dir) ''
+          export SPINDRIFT_TRACKER_CONNECTOR_WASM=${connector.package pkgs}/${name}.wasm
+          export SPINDRIFT_TRACKER_CONNECTOR_ROUTES=${pkgs.lib.escapeShellArg (builtins.toJSON connector.routes)}
+        '';
       nativeBuildInputs = goTestInputs;
     };
   backendGoTests = backendGoTestsFor {
