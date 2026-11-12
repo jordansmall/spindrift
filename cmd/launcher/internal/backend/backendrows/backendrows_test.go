@@ -515,3 +515,66 @@ func TestUseMapsARootBaseRouteToTheBarePrefix(t *testing.T) {
 		t.Errorf("Routes[0] = %v, want %v", got.Routes[0], want)
 	}
 }
+
+func TestUseRoundTripsAndValidatesShadowRows(t *testing.T) {
+	shadowed := func(shadow bool, every int) backendrows.Row {
+		r := row("gh", getRepos)
+		r.Shadow, r.ShadowEvery = shadow, every
+		return r
+	}
+	t.Run("round trip", func(t *testing.T) {
+		isolate(t)
+		if err := backendrows.Use(rows(t, []backendrows.Row{shadowed(true, 20)}), noEnv); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := backendrows.Lookup("gh")
+		if !got.Shadow || got.ShadowEvery != 20 {
+			t.Errorf("Lookup = %+v, want shadow every 20", got)
+		}
+		if strings.Contains(string(rows(t, []backendrows.Row{row("x", getRepos)})), "shadow") {
+			t.Error("a non-shadow row renders a shadow key")
+		}
+	})
+	for name, tc := range map[string]struct {
+		row  backendrows.Row
+		want string
+	}{
+		"negative":              {shadowed(true, -1), "negative shadowEvery"},
+		"negative without flag": {shadowed(false, -1), "negative shadowEvery"},
+		"every without shadow":  {shadowed(false, 5), "shadowEvery without shadow"},
+		"shadow without every":  {shadowed(true, 0), "shadow without shadowEvery"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			err := backendrows.Use(rows(t, []backendrows.Row{tc.row}), noEnv)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), `"gh"`) {
+				t.Errorf("err = %v, want it to name gh and contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadPassesShadowAndObserveToTheNetwork(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") }))
+	t.Cleanup(srv.Close)
+	var audit bytes.Buffer
+	var seen []connectorhost.AuditEntry
+	r := backendrows.Row{
+		Name: "fixture-network", Module: fixtureWasm(t), CredentialEnv: "FIXTURE_TOKEN",
+		Routes: []connectorhost.Route{{Method: "GET", Host: srv.Listener.Addr().String(), Path: "/repos"}},
+	}
+	c, err := backendrows.Load(context.Background(), r, backendrows.Options{
+		Getenv: func(string) string { return "tok" }, Audit: &audit, Client: srv.Client(),
+		Shadow: true, Observe: func(e connectorhost.AuditEntry) { seen = append(seen, e) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
+	if err := c.Call(context.Background(), "fetch", map[string]string{"url": srv.URL + "/repos/x", "method": "GET"}, new(fetched)); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 1 || !seen[0].Shadow || seen[0].Status != 200 || !strings.Contains(audit.String(), `"shadow":true`) {
+		t.Errorf("observed %+v, audit %q", seen, audit.String())
+	}
+}
