@@ -7,11 +7,13 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// PRForgeHarness lets RunPRForgeContract drive a PRForge's scripted backend
-// without knowing which adapter it is. The push-only git adapter has no
-// harness here; its absence of PRForge is pinned by PushOnlyCodeForgeProvider
-// below and by the CodeForge contract's PushOnly marker (issue #1545).
-type PRForgeHarness interface {
+// PRForgeReadHarness is the part of a PRForge's scripted backend the read
+// cases drive, so a read-only Connector-backed PRForge can run them alone via
+// RunPRForgeReadContract. In a read-only run CodeForge may be a stand-in whose
+// Merge marks the scripted backend's PR merged, since merging is a native
+// write the Connector cannot perform; the read cases need only AgentBranch and
+// that Merge.
+type PRForgeReadHarness interface {
 	Forge() forge.PRForge
 	// CodeForge returns the same adapter as the statically-typed handle
 	// callers hold before discovering PRForge via cf.(forge.PRForge).
@@ -30,6 +32,14 @@ type PRForgeHarness interface {
 	// url on successive calls, in order.
 	SeedCheckStates(url string, states []forge.RollupState)
 	SeedFailingCheck(url, name, conclusion, summary string)
+}
+
+// PRForgeHarness lets RunPRForgeContract drive a PRForge's scripted backend
+// without knowing which adapter it is. The push-only git adapter has no
+// harness here; its absence of PRForge is pinned by PushOnlyCodeForgeProvider
+// below and by the CodeForge contract's PushOnly marker (issue #1545).
+type PRForgeHarness interface {
+	PRForgeReadHarness
 	SeedAutoMergeAllowed(allowed bool)
 	// SeedNeedsUpdate scripts url's NeedsUpdate result: true when the PR's
 	// base branch has commits its head has not incorporated yet.
@@ -48,17 +58,36 @@ type PushOnlyCodeForgeProvider interface {
 	PushOnlyCodeForge() forge.CodeForge
 }
 
+// RunPRForgeReadContract runs only the read cases of RunPRForgeContract, for a
+// PRForge that cannot write. It never calls MarkReady, MarkDraft,
+// EnqueueAutoMerge, or NeedsUpdate; CodeForge().Merge is the harness's
+// stand-in (see PRForgeReadHarness).
+func RunPRForgeReadContract(t *testing.T, h PRForgeReadHarness) {
+	for _, c := range prforgeReadCases {
+		t.Run(c.name, func(t *testing.T) { c.run(t, h) })
+	}
+}
+
+// prforgeReadCases are the cases that never write through the PRForge;
+// RunPRForgeContract runs them too.
+var prforgeReadCases = []struct {
+	name string
+	run  func(*testing.T, PRForgeReadHarness)
+}{
+	{"PRForBranchResolution", testPRForBranchResolution},
+	{"OpenPRForBranchAdoptsDraft", testOpenPRForBranchAdoptsDraft},
+	{"CheckStateSequence", testCheckStateSequence},
+	{"MergeTransitionsPRState", testMergeTransitionsPRState},
+	{"FailureDetailOnFailingCheck", testFailureDetailOnFailingCheck},
+}
+
 // RunPRForgeContract runs the shared PRForge conformance suite against h.
 func RunPRForgeContract(t *testing.T, h PRForgeHarness) {
 	t.Run("OptionalInterfaceDiscovery", func(t *testing.T) { testOptionalInterfaceDiscovery(t, h) })
-	t.Run("PRForBranchResolution", func(t *testing.T) { testPRForBranchResolution(t, h) })
-	t.Run("OpenPRForBranchAdoptsDraft", func(t *testing.T) { testOpenPRForBranchAdoptsDraft(t, h) })
+	RunPRForgeReadContract(t, h)
 	t.Run("MarkReadyClearsAdoptedDraftThenMerges", func(t *testing.T) { testMarkReadyClearsAdoptedDraftThenMerges(t, h) })
-	t.Run("CheckStateSequence", func(t *testing.T) { testCheckStateSequence(t, h) })
-	t.Run("MergeTransitionsPRState", func(t *testing.T) { testMergeTransitionsPRState(t, h) })
 	t.Run("AutoMergeEligibility", func(t *testing.T) { testAutoMergeEligibility(t, h) })
 	t.Run("MarkDraftIdempotent", func(t *testing.T) { testMarkDraftIdempotent(t, h) })
-	t.Run("FailureDetailOnFailingCheck", func(t *testing.T) { testFailureDetailOnFailingCheck(t, h) })
 	t.Run("NeedsUpdate", func(t *testing.T) { testNeedsUpdate(t, h) })
 }
 
@@ -75,7 +104,7 @@ func testOptionalInterfaceDiscovery(t *testing.T, h PRForgeHarness) {
 	}
 }
 
-func testPRForBranchResolution(t *testing.T, h PRForgeHarness) {
+func testPRForBranchResolution(t *testing.T, h PRForgeReadHarness) {
 	const num = "201"
 	branch := h.CodeForge().AgentBranch(num)
 	wantURL := h.SeedOpenPR(num)
@@ -107,7 +136,7 @@ func testPRForBranchResolution(t *testing.T, h PRForgeHarness) {
 
 // testOpenPRForBranchAdoptsDraft pins issue #2408: a stranded draft PR is as
 // adoptable as a ready one, on every PRForge-capable adapter.
-func testOpenPRForBranchAdoptsDraft(t *testing.T, h PRForgeHarness) {
+func testOpenPRForBranchAdoptsDraft(t *testing.T, h PRForgeReadHarness) {
 	const num = "202"
 	branch := h.CodeForge().AgentBranch(num)
 	wantURL := h.SeedDraftPR(num)
@@ -173,7 +202,7 @@ func testMarkReadyClearsAdoptedDraftThenMerges(t *testing.T, h PRForgeHarness) {
 
 // testCheckStateSequence covers the three shapes settle's gate-to-green
 // polling loop meets, then the exhausted case that must report StateNone.
-func testCheckStateSequence(t *testing.T, h PRForgeHarness) {
+func testCheckStateSequence(t *testing.T, h PRForgeReadHarness) {
 	cases := []struct {
 		name   string
 		num    string
@@ -210,7 +239,7 @@ func testCheckStateSequence(t *testing.T, h PRForgeHarness) {
 
 // testMergeTransitionsPRState pins Merge as the one event flipping PRState
 // from OPEN to MERGED, which is how settle's merge gate stops polling.
-func testMergeTransitionsPRState(t *testing.T, h PRForgeHarness) {
+func testMergeTransitionsPRState(t *testing.T, h PRForgeReadHarness) {
 	const num = "205"
 	url := h.SeedOpenPR(num)
 
@@ -290,7 +319,7 @@ func testMarkDraftIdempotent(t *testing.T, h PRForgeHarness) {
 
 // testFailureDetailOnFailingCheck pins the detail settle renders into
 // fix-pass prompts (gateRedRetry).
-func testFailureDetailOnFailingCheck(t *testing.T, h PRForgeHarness) {
+func testFailureDetailOnFailingCheck(t *testing.T, h PRForgeReadHarness) {
 	const cleanNum = "207"
 	cleanURL := h.SeedOpenPR(cleanNum)
 	if detail, err := h.Forge().FailureDetail(cleanURL); err != nil || detail != "" {
