@@ -133,3 +133,86 @@ func TestReadIfChanged_MissingFileReportsUnchanged(t *testing.T) {
 		t.Fatalf("ReadIfChanged: next = %q, want prev %q preserved", next, "stale-token")
 	}
 }
+
+func TestFollow_NoPathReturnsStatic(t *testing.T) {
+	if got := Follow("static-token", "")(); got != "static-token" {
+		t.Fatalf("Follow: token = %q, want %q", got, "static-token")
+	}
+}
+
+// rotate replaces path with token the way the minter does: write beside it,
+// then rename.
+func rotate(t *testing.T, path, token string) {
+	t.Helper()
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(token+"\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+}
+
+// The minter replaces the file by rename, so a rotation must show on the very
+// next call rather than waiting for a poll interval.
+func TestFollow_SeesRotationOnNextCall(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "token")
+	if err := os.WriteFile(path, []byte("first-token\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	token := Follow("static-token", path)
+
+	if got := token(); got != "first-token" {
+		t.Fatalf("Follow: token = %q, want %q", got, "first-token")
+	}
+
+	rotate(t, path, "second-token")
+
+	if got := token(); got != "second-token" {
+		t.Fatalf("Follow: token after rotation = %q, want %q", got, "second-token")
+	}
+}
+
+// A caller that once had a token must never be handed "" or the static
+// fallback again because the file went missing or was emptied mid-rotation.
+func TestFollow_KeepsLastGoodToken(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, []byte("good-token"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	token := Follow("static-token", path)
+	if got := token(); got != "good-token" {
+		t.Fatalf("Follow: token = %q, want %q", got, "good-token")
+	}
+
+	if err := os.WriteFile(path, []byte(" \n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if got := token(); got != "good-token" {
+		t.Fatalf("Follow: token after emptying = %q, want %q", got, "good-token")
+	}
+
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if got := token(); got != "good-token" {
+		t.Fatalf("Follow: token after removal = %q, want %q", got, "good-token")
+	}
+}
+
+func TestFollow_FileNotYetWrittenReturnsStatic(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token")
+	token := Follow("static-token", path)
+
+	if got := token(); got != "static-token" {
+		t.Fatalf("Follow: token = %q, want %q", got, "static-token")
+	}
+
+	if err := os.WriteFile(path, []byte("minted-token"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if got := token(); got != "minted-token" {
+		t.Fatalf("Follow: token after first mint = %q, want %q", got, "minted-token")
+	}
+}
