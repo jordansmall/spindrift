@@ -35,6 +35,11 @@ type Document struct {
 	// the backendrows package decodes them. Absent when none are declared, then
 	// the generated backend registry is the fallback.
 	Backends json.RawMessage `json:"backends,omitempty"`
+	// DeprecatedDefaults maps a knob's env var name to the one-line notice for
+	// a deprecated default the Consumer left unset (issue #6757). The notice
+	// text lives only in Nix; the run-time side prints it verbatim. Absent
+	// when no knob is on a deprecated default.
+	DeprecatedDefaults map[string]string `json:"deprecatedDefaults,omitempty"`
 }
 
 // Load reads and parses the Launcher input document at path.

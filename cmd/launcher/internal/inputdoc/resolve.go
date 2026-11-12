@@ -68,6 +68,9 @@ type Resolved struct {
 	// Backends is the document's raw backend rows, nil when it carries none.
 	Backends json.RawMessage
 
+	// deprecatedDefaults is the document's DeprecatedDefaults, nil when absent.
+	deprecatedDefaults map[string]string
+
 	src knobResolver
 }
 
@@ -89,11 +92,13 @@ func Resolve(args []string, doc *Document, env map[string]string) (Resolved, err
 	var settings map[string]string
 	var artifacts Artifacts
 	var drivers, backends json.RawMessage
+	var deprecated map[string]string
 	if doc != nil {
 		settings, artifacts, drivers, backends = doc.Settings, doc.Artifacts, doc.Drivers, doc.Backends
+		deprecated = doc.DeprecatedDefaults
 	}
 	src := knobResolver{explicit: explicit, settings: settings, env: env}
-	return Resolved{Knobs: LoadKnobs(src), Artifacts: artifacts, Args: rest, Drivers: drivers, Backends: backends, src: src}, nil
+	return Resolved{Knobs: LoadKnobs(src), Artifacts: artifacts, Args: rest, Drivers: drivers, Backends: backends, deprecatedDefaults: deprecated, src: src}, nil
 }
 
 // Source is the KnobSource Resolve loaded Knobs from, for a caller that wraps
@@ -111,6 +116,20 @@ func (r Resolved) Setting(key string) (string, bool) {
 // default tier, for knobs that must carry only what the operator set at
 // dispatch time (issue #3171). ok follows EmptyIsSetting.
 func (r Resolved) Flag(env string) (string, bool) { return r.src.flag(env) }
+
+// DeprecatedDefault returns the document's deprecation notice for env, only
+// while the knob is still on its default: an explicit flag, even one that
+// restates the default, is the operator's own choice and gets no notice.
+func (r Resolved) DeprecatedDefault(env string) (string, bool) {
+	msg, ok := r.deprecatedDefaults[env]
+	if !ok {
+		return "", false
+	}
+	if _, set := r.src.flag(env); set {
+		return "", false
+	}
+	return msg, true
+}
 
 // FlagArgs re-renders the explicit flags as argv for a child launcher, so it
 // sees the same configuration without tripping AmbientKnobError. A

@@ -543,3 +543,34 @@ func TestLoad_ParsesBackendsKey(t *testing.T) {
 		t.Errorf("Backends = %s", doc.Backends)
 	}
 }
+
+func TestResolved_DeprecatedDefault(t *testing.T) {
+	const env = "BOX_FORGE_AND_ISSUE_ACCESS"
+	withEntry := &Document{DeprecatedDefaults: map[string]string{env: "notice text"}}
+	cases := []struct {
+		name string
+		args []string
+		doc  *Document
+		want string
+		ok   bool
+	}{
+		{"entry and no flag", nil, withEntry, "notice text", true},
+		{"explicit read-write", []string{"--box-access", "read-write"}, withEntry, "", false},
+		{"explicit read-only", []string{"--box-access", "read-only"}, withEntry, "", false},
+		{"deprecated alias", []string{"--box-forge-and-issue-access", "read-write"}, withEntry, "", false},
+		{"no entry", nil, &Document{}, "", false},
+		{"no document", nil, nil, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := Resolve(tc.args, tc.doc, nil)
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			got, ok := r.DeprecatedDefault(env)
+			if got != tc.want || ok != tc.ok {
+				t.Errorf("DeprecatedDefault(%q) = (%q, %v), want (%q, %v)", env, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
