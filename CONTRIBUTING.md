@@ -293,8 +293,8 @@ and in the in-box `box` program; the only bash left is the generated shim that
 - **`connectors/`** — shipped Connector subflakes, each its own Go module built
   to a wasip1 reactor by its own `package.nix`. `connectors/claude` is the
   claude Driver's host half (`spindrift.dev/connector/claude`);
-  `connectors/github` is the github backend's tracker read path. Each gets
-  `connector-<name>-go-{fmt,vet,test}` from `nix/checks/go.nix`.
+  `connectors/github` is the github backend's tracker and forge read paths.
+  Each gets `connector-<name>-go-{fmt,vet,test}` from `nix/checks/go.nix`.
 - **`agent/`** — `entrypoint.sh`, the generated shim, and the Driver's hook
   scripts. The shim has no logic: `lib/image.nix` renders the preambles ahead
   of one `exec box` line, and `box` (`cmd/launcher/box`) does the rest
@@ -310,9 +310,9 @@ and in the in-box `box` program; the only bash left is the generated shim that
   which `checks/go.nix` generates from the same row; each backend row in
   `lib/backends/default.nix` likewise yields `backends-<name>-go-test` over
   its `internal/forge/<name>` package; when `connectors/<name>` exists that
-  check also builds its wasm and exports `SPINDRIFT_TRACKER_CONNECTOR_WASM` and
-  `SPINDRIFT_TRACKER_CONNECTOR_ROUTES`, so the backend's tests run the tracker
-  read contract against the Connector. Also here:
+  check also builds its wasm and exports `SPINDRIFT_BACKEND_CONNECTOR_WASM` and
+  `SPINDRIFT_BACKEND_CONNECTOR_ROUTES`, so the backend's tests run the tracker
+  and PR forge read contracts against the Connector. Also here:
   `fixtures.nix` (the
   harness variants the checks build), `regen.nix` (`nix run .#regen`, the
   schema-artifact regenerator), `regen-opencode-schema.nix` (`nix run
