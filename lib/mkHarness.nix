@@ -126,8 +126,11 @@
   # Backend rows network Connectors declare (lib/flakeModule.nix's
   # spindrift.connectors.<name>.backend), keyed by Connector name, each
   # `{ module = pkgs: <wasm file path>; routes = [ { method; host; path; } ];
-  # credentialEnv = "<env var>"; }`. They reach the host binaries through the
-  # launcher input document's `backends` section (ADR 0073, issue #6805).
+  # credentialEnv = "<env var>"; }`, plus optional `credentialScheme`
+  # ("bearer" or "basic"), `identityEnv` (Basic identity) and `baseEnv` (the
+  # site base URL a `{base}` route host resolves from). They reach the host
+  # binaries through the launcher input document's `backends` section (ADR
+  # 0073, issue #6805).
   backendRows ? { },
   # Names of core Drivers whose Connector row (a `driverRows` entry carrying
   # `module`) runs in shadow mode (ADR 0073, issue #6797): the native Strategy
@@ -553,14 +556,41 @@ let
         accepted
       else
         throw "mkHarness: the accepted baseline (spindrift-connector-routes.json) is invalid:\n${lib.concatStringsSep "\n" ps}";
+  isNonEmptyStr = v: builtins.isString v && v != "";
   checkBackendRow =
     name: row:
+    let
+      scheme = row.credentialScheme or "bearer";
+    in
     if lib.elem name coreBackendNames then
       throw "mkHarness: backendRows.${name} is a built-in backend and cannot be replaced by a Connector row"
     else if !(builtins.isFunction (row.module or null)) then
       throw "mkHarness: backendRows.${name} must carry `module`, a function of pkgs returning the Connector's wasm path"
     else if !(builtins.isString (row.credentialEnv or null) && row.credentialEnv != "") then
       throw "mkHarness: backendRows.${name} must carry a non-empty string `credentialEnv`"
+    else if
+      !(lib.elem scheme [
+        "bearer"
+        "basic"
+      ])
+    then
+      throw "mkHarness: backendRows.${name} `credentialScheme` must be \"bearer\" or \"basic\""
+    else if scheme == "basic" && !isNonEmptyStr (row.identityEnv or null) then
+      throw "mkHarness: backendRows.${name} with the basic `credentialScheme` must carry a non-empty string `identityEnv`"
+    else if scheme == "bearer" && row ? identityEnv then
+      throw "mkHarness: backendRows.${name} `identityEnv` applies only to the basic `credentialScheme`"
+    else if row ? baseEnv && !isNonEmptyStr row.baseEnv then
+      throw "mkHarness: backendRows.${name} `baseEnv` must be a non-empty string"
+    else if
+      !(row ? baseEnv)
+      &&
+        lib.any (t: builtins.isList t && lib.any (r: builtins.isAttrs r && (r.host or null) == "{base}") t)
+          [
+            (row.routes or null)
+            (row.acceptedRoutes or null)
+          ]
+    then
+      throw "mkHarness: backendRows.${name} has a route host of {base} but no `baseEnv` naming the site's base URL"
     else if
       row ? credentialKnob && !(builtins.isString row.credentialKnob && row.credentialKnob != "")
     then
@@ -584,6 +614,9 @@ let
       }
       // lib.optionalAttrs (r ? acceptedRoutes) { inherit (r) acceptedRoutes; }
       // lib.optionalAttrs (r ? credentialKnob) { inherit (r) credentialKnob; }
+      // lib.optionalAttrs (r ? credentialScheme) { inherit (r) credentialScheme; }
+      // lib.optionalAttrs (r ? identityEnv) { inherit (r) identityEnv; }
+      // lib.optionalAttrs (r ? baseEnv) { inherit (r) baseEnv; }
     ) (lib.mapAttrs checkBackendRow backendRows);
   driverEntry =
     driverEntries.${driver}

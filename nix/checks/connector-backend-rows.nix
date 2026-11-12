@@ -33,6 +33,14 @@ let
     credentialEnv = "FIXTURE_TOKEN";
   };
   withRows = rows: mkHarness { backendRows = rows; };
+  basicRow = row // {
+    credentialScheme = "basic";
+    identityEnv = "FIXTURE_EMAIL";
+  };
+  baseRow = row // {
+    baseEnv = "FIXTURE_BASE_URL";
+    routes = [ (goodRoute // { host = "{base}"; }) ];
+  };
   plain = mkHarness { };
   # Forces the validation chain without a build.
   evaluates =
@@ -140,6 +148,18 @@ let
     }
     {
       route = goodRoute // {
+        host = "{base}:8443";
+      };
+      why = "bare host";
+    }
+    {
+      route = goodRoute // {
+        host = "x{base}";
+      };
+      why = "bare host";
+    }
+    {
+      route = goodRoute // {
         extra = "x";
       };
       why = "exactly";
@@ -162,6 +182,7 @@ let
     (goodRoute // { host = "127.0.0.1:8080"; })
     (goodRoute // { host = "[::1]:8080"; })
     (goodRoute // { host = "[::1]"; })
+    (goodRoute // { host = "{base}"; })
   ];
   problemsOf = r: routes.problems "fixture" [ r ];
   has = sub: s: builtins.match ".*${pkgs.lib.escapeRegex sub}.*" s != null;
@@ -251,6 +272,43 @@ in
         credentialKnob = "fixtureToken";
       };
     })) "a row with a credentialKnob must evaluate";
+    assert assertMsg (evaluates (withRows {
+      fixture = basicRow;
+    })) "control: a basic row with an identityEnv must evaluate";
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = removeAttrs basicRow [ "identityEnv" ];
+      }))
+    ) "a basic row without an identityEnv must fail";
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = row // {
+          identityEnv = "FIXTURE_EMAIL";
+        };
+      }))
+    ) "an identityEnv on a bearer row must fail";
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = row // {
+          credentialScheme = "digest";
+        };
+      }))
+    ) "an unknown credentialScheme must fail";
+    assert assertMsg (evaluates (withRows {
+      fixture = baseRow;
+    })) "control: a {base} route with a baseEnv must evaluate";
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = removeAttrs baseRow [ "baseEnv" ];
+      }))
+    ) "a {base} route without a baseEnv must fail";
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = baseRow // {
+          baseEnv = "";
+        };
+      }))
+    ) "an empty baseEnv must fail";
     # Checked whichever Driver the Harness selects, so a bad second row fails too.
     assert assertMsg (
       !(evaluates (withRows {
@@ -273,6 +331,14 @@ in
           and .[0].routes == [{method: "GET", host: "api.fixture.test", path: "/repos"}]
           and (.[0].module | endswith("/network.wasm"))' "$doc"
         test -f "$(jq -r '.backends[0].module' "$doc")"
+        jq -e '.backends[0] | keys == ["credentialEnv", "credentialScheme", "identityEnv", "module", "name", "routes"]
+          and .credentialScheme == "basic" and .identityEnv == "FIXTURE_EMAIL"' ${
+            (withRows { fixture = basicRow; }).internals.runInputDocumentFile
+          }
+        jq -e '.backends[0] | keys == ["baseEnv", "credentialEnv", "module", "name", "routes"]
+          and .baseEnv == "FIXTURE_BASE_URL" and .routes[0].host == "{base}"' ${
+            (withRows { fixture = baseRow; }).internals.runInputDocumentFile
+          }
         touch $out
       '';
 
@@ -307,16 +373,39 @@ in
         flakeOption = false;
         boxEnv = false;
       };
+      emailKnob = {
+        env = "PROBE_EMAIL";
+        group = "dispatch";
+        doc = "Basic identity knob of a probe Connector in the backend-row checks";
+        flakeOption = false;
+        boxEnv = false;
+      };
+      baseKnob = {
+        env = "PROBE_BASE_URL";
+        group = "dispatch";
+        doc = "site base URL knob of a probe Connector in the backend-row checks";
+        flakeOption = false;
+        boxEnv = false;
+      };
+      probeKnobs = {
+        probeToken = secretKnob;
+        probeEmail = emailKnob;
+        probeBase = baseKnob;
+      };
       probeBackend = {
         module = p: "${fixtures.connectorWasm}/network.wasm";
         routes = [ goodRoute ];
         credential = "probeToken";
       };
+      basicBackend = probeBackend // {
+        scheme = "basic";
+        identity = "probeEmail";
+        base = "probeBase";
+        routes = [ (goodRoute // { host = "{base}"; }) ];
+      };
       probe =
         {
-          knobs ? {
-            probeToken = secretKnob;
-          },
+          knobs ? probeKnobs,
           backend ? probeBackend,
         }:
         consumerWith [ { spindrift.connectors.probe = { inherit knobs backend; }; } ];
@@ -389,6 +478,62 @@ in
         };
       }))
     ) "a misspelled backend field must fail evaluation";
+    assert assertMsg (builds (probe {
+      backend = basicBackend;
+    })) "control: a basic row must evaluate";
+    assert assertMsg (
+      !(builds (probe {
+        backend = removeAttrs basicBackend [ "identity" ];
+      }))
+    ) "a basic scheme without an identity must fail evaluation";
+    assert assertMsg (
+      !(builds (probe {
+        backend = probeBackend // {
+          identity = "probeEmail";
+        };
+      }))
+    ) "an identity on a bearer row must fail evaluation";
+    assert assertMsg (
+      !(builds (probe {
+        backend = basicBackend // {
+          identity = "noSuchKnob";
+        };
+      }))
+    ) "an identity that is no knob of the Connector must fail evaluation";
+    assert assertMsg (
+      !(builds (probe {
+        backend = basicBackend // {
+          identity = "ghToken";
+        };
+      }))
+    ) "an identity naming a core knob must fail evaluation";
+    assert assertMsg (
+      !(builds (probe {
+        knobs = probeKnobs // {
+          probeEmail = emailKnob // {
+            boxEnv = true;
+          };
+        };
+        backend = basicBackend;
+      }))
+    ) "an identity knob with boxEnv = true must fail evaluation";
+    assert assertMsg (
+      !(builds (probe {
+        backend = basicBackend // {
+          base = "noSuchKnob";
+        };
+      }))
+    ) "a base that is no env-schema knob must fail evaluation";
+    assert assertMsg (
+      !(builds (probe {
+        backend = removeAttrs basicBackend [ "base" ];
+      }))
+    ) "a {base} route without a base must fail evaluation";
+    assert assertMsg (builds (probe {
+      backend = basicBackend // {
+        base = "ghToken";
+      };
+    })) "a base may be any env-schema knob, core included";
     pkgs.runCommand "connector-backend-rows-flake-module-forwards-row"
       { nativeBuildInputs = [ pkgs.jq ]; }
       ''
@@ -402,6 +547,22 @@ in
             acceptedRoutes: []
           }] and (.backends[0].module | endswith("/network.wasm"))' "$doc"
         test -f "$(jq -r '.backends[0].module' "$doc")"
+        ${fixtures.runInputDocOf (
+          programOf (probe {
+            backend = basicBackend;
+          })
+        )}
+        jq -e '.backends == [{
+            name: "probe",
+            module: .backends[0].module,
+            routes: [{method: "GET", host: "{base}", path: "/repos"}],
+            credentialEnv: "PROBE_TOKEN",
+            credentialKnob: "probeToken",
+            credentialScheme: "basic",
+            identityEnv: "PROBE_EMAIL",
+            baseEnv: "PROBE_BASE_URL",
+            acceptedRoutes: []
+          }]' "$doc"
         touch $out
       '';
 
