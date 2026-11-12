@@ -203,7 +203,7 @@ var workKindFacts = map[string]map[string]int{
 
 var (
 	kindNameRef       = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`\bdispatchkind\.` + kindVarAlternation() + `\b`) })
-	kindBootstrapCall = regexp.MustCompile(`\b(bootstrap|applyDispatchKind)\(`)
+	kindBootstrapCall = regexp.MustCompile(`\b(bootstrap|bootstrapShadowed|applyDispatchKind)\(`)
 	kindPickerAlias   = regexp.MustCompile(`^\s*Kind(\w+)\s*=\s*dispatchkind\.(\w+)\s*$`)
 )
 
