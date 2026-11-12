@@ -209,7 +209,7 @@ func fileIssueIntentsDetailedFunc(progress Progress, it forge.IssueTracker, num 
 	}
 	// Filing stays best-effort: a tracker that cannot file degrades each
 	// finding inline (issue #6343).
-	filer, ok := it.(forge.HostPostedIssueFiler)
+	filer, ok := forge.As[forge.HostPostedIssueFiler](it)
 	if !ok {
 		return degradeIssueIntents(num, result, fmt.Sprintf("tracker %T cannot file issues host-side (no HostPostedIssueFiler capability)", it))
 	}

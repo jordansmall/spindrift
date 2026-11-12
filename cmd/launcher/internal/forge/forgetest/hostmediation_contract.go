@@ -128,7 +128,7 @@ func mustDraftPRCreator(t *testing.T, h HostMediationHarness) forge.DraftPRCreat
 
 func mustHostPostedCommenter(t *testing.T, h HostPostedCommentHarness) forge.HostPostedCommenter {
 	t.Helper()
-	hc, ok := h.Tracker().(forge.HostPostedCommenter)
+	hc, ok := forge.As[forge.HostPostedCommenter](h.Tracker())
 	if !ok {
 		t.Fatal("harness's Tracker does not implement forge.HostPostedCommenter")
 	}
@@ -137,7 +137,7 @@ func mustHostPostedCommenter(t *testing.T, h HostPostedCommentHarness) forge.Hos
 
 func mustHostPostedIssueFiler(t *testing.T, ih IssueFilerHarness) forge.HostPostedIssueFiler {
 	t.Helper()
-	f, ok := ih.IssueFilerTracker().(forge.HostPostedIssueFiler)
+	f, ok := forge.As[forge.HostPostedIssueFiler](ih.IssueFilerTracker())
 	if !ok {
 		t.Fatal("harness's IssueFilerTracker does not implement forge.HostPostedIssueFiler")
 	}

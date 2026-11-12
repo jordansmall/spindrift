@@ -432,7 +432,7 @@ func numbers(issues []forge.Issue) []string {
 // compared rather than nil-ness: forgejo returns nil where github returns an
 // empty slice.
 func testComments(t *testing.T, h Harness) {
-	lister, lists := h.Tracker().(forge.CommentLister)
+	lister, lists := forge.As[forge.CommentLister](h.Tracker())
 	ch, capable := h.(CommentCapable)
 	if !lists && !capable {
 		t.Skip("tracker does not list its comments (not a forge.CommentLister)")
@@ -477,7 +477,7 @@ func testComments(t *testing.T, h Harness) {
 // issues sit in other states. Adapters without the capability skip it.
 func testDemandCount(t *testing.T, h Harness) {
 	tr := h.Tracker()
-	dc, ok := tr.(forge.DemandCounter)
+	dc, ok := forge.As[forge.DemandCounter](tr)
 	if !ok {
 		t.Skip("adapter does not implement forge.DemandCounter")
 	}

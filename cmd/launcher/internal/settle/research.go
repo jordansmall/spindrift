@@ -49,7 +49,7 @@ var _ Settler = (*ResearchSettle)(nil)
 // BOX_FORGE_AND_ISSUE_ACCESS path. verdictRelayed forces the SPINDRIFT_COMMENT
 // relay even here, so a missing verdict comment must fail.
 func NewResearchSettle(it forge.IssueTracker, verdicts forge.VerdictLabels, verdictRelayed bool, findingLabel string) *ResearchSettle {
-	landing, _ := it.(forge.LandingRecorder)
+	landing, _ := forge.As[forge.LandingRecorder](it)
 	return &ResearchSettle{it: it, progress: StdoutProgress{}, landing: landing, findingLabel: findingLabel, verdicts: verdicts, verdictRelayed: verdictRelayed}
 }
 
@@ -57,7 +57,7 @@ func NewResearchSettle(it forge.IssueTracker, verdicts forge.VerdictLabels, verd
 // BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1917): the Box has no write
 // token, so this Settle posts the relayed comment before the verdict label.
 func NewResearchSettleReadOnly(it forge.IssueTracker, verdicts forge.VerdictLabels, verdictRelayed bool, findingLabel string) *ResearchSettle {
-	landing, _ := it.(forge.LandingRecorder)
+	landing, _ := forge.As[forge.LandingRecorder](it)
 	return &ResearchSettle{it: it, progress: StdoutProgress{}, landing: landing, findingLabel: findingLabel, readOnly: true, verdicts: verdicts, verdictRelayed: verdictRelayed}
 }
 

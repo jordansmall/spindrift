@@ -286,7 +286,7 @@ func notPlannedExpired(iss forge.Issue, chore string, cutoff time.Time) bool {
 // to ListOpenIssues, open-only.
 func backlogDedupIndex(it forge.IssueTracker, num, chore string, notPlannedBefore time.Time) map[string]string {
 	index := make(map[string]string)
-	lister, ok := it.(forge.LabeledBacklogLister)
+	lister, ok := forge.As[forge.LabeledBacklogLister](it)
 	if !ok {
 		issues, err := it.ListOpenIssues()
 		if err != nil {
@@ -501,7 +501,7 @@ func PriorFindings(it forge.IssueTracker, chore string) ([]PriorFinding, error) 
 			out = append(out, f)
 		}
 	}
-	lister, ok := it.(forge.LabeledBacklogLister)
+	lister, ok := forge.As[forge.LabeledBacklogLister](it)
 	if !ok {
 		issues, err := it.ListOpenIssues()
 		collect(issues, true)

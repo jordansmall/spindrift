@@ -529,7 +529,7 @@ func reportCloseErr(num string, err error) {
 // writes for landed work (ADR 0029), even paired with a github Code Forge.
 // Reports whether the tracker implements MergeCloser.
 func (s *Settle) closeIssue(num string) bool {
-	closer, ok := s.it.(forge.MergeCloser)
+	closer, ok := forge.As[forge.MergeCloser](s.it)
 	if !ok {
 		return false
 	}
@@ -548,7 +548,7 @@ func (s *Settle) closeResolvedIssue(num string) {
 	if s.closeIssue(num) {
 		return
 	}
-	if closer, ok := s.it.(forge.IssueCloser); ok {
+	if closer, ok := forge.As[forge.IssueCloser](s.it); ok {
 		reportCloseErr(num, closer.CloseIssue(num))
 	}
 }

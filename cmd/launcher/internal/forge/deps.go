@@ -47,7 +47,7 @@ var grammars = map[BodyGrammar]grammarRules{
 }
 
 func rulesOf(it IssueTracker) grammarRules {
-	if g, ok := it.(BodyGrammarer); ok {
+	if g, ok := As[BodyGrammarer](it); ok {
 		return grammars[g.BodyGrammar()]
 	}
 	return grammars[BodyGrammarIssueRefs]
@@ -60,11 +60,11 @@ func rulesOf(it IssueTracker) grammarRules {
 // BodyGrammarNativeDepsOnly, which returns the error unchanged and never reads
 // the body.
 //
-// It asserts NativeDepsReader and BodyGrammarer on the bare tracker rather than
+// It looks up NativeDepsReader and BodyGrammarer on the bare tracker rather than
 // reading Capabilities: its callers (waves, console) hold no Capabilities.
 func DepsOf(it IssueTracker, num string) ([]Dependency, error) {
 	rules := rulesOf(it)
-	if nr, ok := it.(NativeDepsReader); ok {
+	if nr, ok := As[NativeDepsReader](it); ok {
 		deps, err := nr.NativeDepsOf(num)
 		if rules.nativeOnly {
 			if err != nil {
