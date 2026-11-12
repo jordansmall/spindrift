@@ -51,7 +51,7 @@ func reconcileIssues(c config, it forge.IssueTracker, cf forge.CodeForge, lp rec
 		return nil
 	}
 	lw := localloop.Wire(localloopConfig(c), it)
-	res, err := reconcile.Run(it, cf, lp, caps, lw.SeedScopeOf)
+	res, err := reconcile.Run(it, cf, lp, caps, lw.SeedScopeOf, c.BranchPrefix)
 	if err != nil {
 		if len(res.Closed) > 0 {
 			fmt.Fprintf(w, "reconcile: closed %d issue(s) before error: %s\n", len(res.Closed), strings.Join(res.Closed, ", "))
