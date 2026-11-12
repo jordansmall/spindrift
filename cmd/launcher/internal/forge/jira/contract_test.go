@@ -24,7 +24,10 @@ type jiraIssueRecord struct {
 	// property key; served back only where a request names the key.
 	props      map[string]json.RawMessage
 	nativeDeps []string
-	failGET    bool // simulates the native-API error the issue's GET returns
+	blocks     []string // issues this one blocks: outward "blocks" links
+	wireKey    string   // when set, the key the payload reports instead of the requested one
+	failGET    bool     // simulates the native-API error the issue's GET returns
+	status     string   // workflow status the payload reports and a status clause matches; "" is "Open"
 	comments   []jiraWireComment
 }
 
@@ -76,6 +79,7 @@ type jiraHarness struct {
 }
 
 var jqlLabelClause = regexp.MustCompile(`labels = "([^"]+)"`)
+var jqlStatusClause = regexp.MustCompile(`status = "([^"]+)"`)
 
 // newJiraHarness builds a Server/DC harness; newJiraCloudHarness a Cloud one,
 // which the adapter selects by configuring an Email.
@@ -84,13 +88,11 @@ func newJiraHarness(t *testing.T) *jiraHarness { return newJiraHarnessMode(t, fa
 func newJiraCloudHarness(t *testing.T) *jiraHarness { return newJiraHarnessMode(t, true) }
 
 func newJiraHarnessMode(t *testing.T, cloud bool) *jiraHarness {
-	h := &jiraHarness{cloud: cloud, issues: map[string]*jiraIssueRecord{}}
+	h := newJiraBackend(t, cloud, httptest.NewServer)
 	email := ""
 	if cloud {
 		email = "bot@example.com"
 	}
-	h.srv = httptest.NewServer(http.HandlerFunc(h.handle))
-	t.Cleanup(h.srv.Close)
 	h.tr = jira.NewJiraClient(jira.JiraConfig{
 		BaseURL:       h.srv.URL,
 		ProjectKey:    "PROJ",
@@ -99,6 +101,16 @@ func newJiraHarnessMode(t *testing.T, cloud bool) *jiraHarness {
 		Labels:        testLabels,
 		VerdictLabels: forge.ResearchVerdictLabels(),
 	})
+	return h
+}
+
+// newJiraBackend serves the scripted Jira API from start's server, with no
+// native tracker: the Connector harness needs TLS, which the Connector host
+// requires of every route.
+func newJiraBackend(t *testing.T, cloud bool, start func(http.Handler) *httptest.Server) *jiraHarness {
+	h := &jiraHarness{cloud: cloud, issues: map[string]*jiraIssueRecord{}}
+	h.srv = start(http.HandlerFunc(h.handle))
+	t.Cleanup(h.srv.Close)
 	return h
 }
 
@@ -139,15 +151,19 @@ func (h *jiraHarness) SeedComments(num string, comments []forge.Comment) {
 
 type jiraPayloadLink struct {
 	Type struct {
-		Inward string `json:"inward"`
+		Inward  string `json:"inward,omitempty"`
+		Outward string `json:"outward,omitempty"`
 	} `json:"type"`
 	InwardIssue *struct {
 		Key string `json:"key"`
-	} `json:"inwardIssue"`
+	} `json:"inwardIssue,omitempty"`
+	OutwardIssue *struct {
+		Key string `json:"key"`
+	} `json:"outwardIssue,omitempty"`
 }
 
 func (h *jiraHarness) payload(key string, rec *jiraIssueRecord, wantProps string) map[string]any {
-	links := make([]jiraPayloadLink, len(rec.nativeDeps))
+	links := make([]jiraPayloadLink, len(rec.nativeDeps), len(rec.nativeDeps)+len(rec.blocks))
 	for i, id := range rec.nativeDeps {
 		l := jiraPayloadLink{}
 		l.Type.Inward = "is blocked by"
@@ -156,13 +172,24 @@ func (h *jiraHarness) payload(key string, rec *jiraIssueRecord, wantProps string
 		}{Key: id}
 		links[i] = l
 	}
+	for _, id := range rec.blocks {
+		l := jiraPayloadLink{}
+		l.Type.Outward = "blocks"
+		l.OutwardIssue = &struct {
+			Key string `json:"key"`
+		}{Key: id}
+		links = append(links, l)
+	}
+	if rec.wireKey != "" {
+		key = rec.wireKey
+	}
 	out := map[string]any{
 		"key": key,
 		"fields": map[string]any{
 			"summary":     rec.title,
 			"description": rec.body,
 			"status": map[string]any{
-				"name": "Open",
+				"name": statusOf(rec),
 				"statusCategory": map[string]any{
 					"key": "new",
 				},
@@ -517,18 +544,33 @@ const (
 	idOnly
 )
 
-// matching returns the payloads of the issues whose labels satisfy the JQL's
-// labels clause, in creation order. With idOnly it returns only the id, as
-// real Cloud search/jql does when no fields are requested.
+// statusOf is the workflow status a record reports.
+func statusOf(rec *jiraIssueRecord) string {
+	if rec.status == "" {
+		return "Open"
+	}
+	return rec.status
+}
+
+// matching returns the payloads of the issues satisfying the JQL's selector,
+// in creation order: with both a status and a labels clause an issue matches
+// either (as the Connector's query spells them), with neither every issue
+// does. With idOnly it returns only the id, as real Cloud search/jql does
+// when no fields are requested.
 func (h *jiraHarness) matching(jql string, shape payloadShape, wantProps string) []map[string]any {
-	var wantLabel string
+	var wantLabel, wantStatus string
 	if sub := jqlLabelClause.FindStringSubmatch(jql); sub != nil {
 		wantLabel = sub[1]
+	}
+	if sub := jqlStatusClause.FindStringSubmatch(jql); sub != nil {
+		wantStatus = sub[1]
 	}
 	var out []map[string]any
 	for _, num := range h.order {
 		rec := h.issues[num]
-		if wantLabel != "" && !contains(rec.labels, wantLabel) {
+		if (wantLabel != "" || wantStatus != "") &&
+			!(wantLabel != "" && contains(rec.labels, wantLabel)) &&
+			!(wantStatus != "" && statusOf(rec) == wantStatus) {
 			continue
 		}
 		if shape == fullPayload {
