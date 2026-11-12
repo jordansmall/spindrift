@@ -39,7 +39,10 @@ const gitOutputWaitDelay = time.Second
 // PR or CI concept, so it implements forge.CodeForge only, never PRForge, and
 // Merge/Rebase land code by pushing directly to the remote.
 type gitClient struct {
+	// remoteURL never carries userinfo: NewGitClient splits it into cred, which
+	// every git call presents out of band (gitexec.Credential.Apply).
 	remoteURL    string
+	cred         gitexec.Credential
 	baseBranch   string
 	userName     string
 	userEmail    string
@@ -68,8 +71,10 @@ func WithOpTimeout(d time.Duration) Option {
 // because ambient host git config may be unset on a bare CI runner and a merge
 // commit needs a committer.
 func NewGitClient(remoteURL, baseBranch, userName, userEmail string, opts ...Option) forge.CodeForge {
+	cleanURL, cred := gitexec.SplitCredential(remoteURL)
 	g := &gitClient{
-		remoteURL:    remoteURL,
+		remoteURL:    cleanURL,
+		cred:         cred,
 		baseBranch:   baseBranch,
 		userName:     userName,
 		userEmail:    userEmail,
@@ -95,7 +100,7 @@ func validateGitRef(ref string) error {
 
 // cloneToTemp clones remoteURL into a fresh temp directory and returns a helper
 // that runs git -C <dir> <args...>, plus a cleanup func the caller must defer.
-func cloneToTemp(remoteURL, prefix string, timeout time.Duration) (dir string, gitIn func(ctx context.Context, args ...string) *exec.Cmd, cleanup func(), err error) {
+func cloneToTemp(remoteURL string, cred gitexec.Credential, prefix string, timeout time.Duration) (dir string, gitIn func(ctx context.Context, args ...string) *exec.Cmd, cleanup func(), err error) {
 	dir, err = os.MkdirTemp("", prefix)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("mkdtemp: %w", err)
@@ -104,7 +109,8 @@ func cloneToTemp(remoteURL, prefix string, timeout time.Duration) (dir string, g
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	if err := exec.CommandContext(ctx, "git", append(append([]string{"clone"}, gitexec.NoAutoMaintenance("--config")...), remoteURL, dir)...).Run(); err != nil {
+	cloneCmd := exec.CommandContext(ctx, "git", append(append([]string{"clone"}, gitexec.NoAutoMaintenance("--config")...), remoteURL, dir)...)
+	if err := cred.Apply(cloneCmd).Run(); err != nil {
 		cleanup()
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return "", nil, nil, fmt.Errorf("git clone %s: timed out after %s: %w", forge.RedactURLCredentials(remoteURL), timeout, ctx.Err())
@@ -112,7 +118,7 @@ func cloneToTemp(remoteURL, prefix string, timeout time.Duration) (dir string, g
 		return "", nil, nil, fmt.Errorf("git clone %s: %w", forge.RedactURLCredentials(remoteURL), err)
 	}
 	gitIn = func(ctx context.Context, args ...string) *exec.Cmd {
-		return exec.CommandContext(ctx, "git", gitexec.GuardedArgs(dir, args...)...)
+		return cred.Apply(exec.CommandContext(ctx, "git", gitexec.GuardedArgs(dir, args...)...))
 	}
 	return dir, gitIn, cleanup, nil
 }
@@ -151,7 +157,7 @@ func (g *gitClient) Merge(branch string) error {
 	if err := validateGitRef(branch); err != nil {
 		return err
 	}
-	dir, gitIn, cleanup, err := cloneToTemp(g.remoteURL, "spindrift-git-forge-merge-*", g.cloneTimeout)
+	dir, gitIn, cleanup, err := cloneToTemp(g.remoteURL, g.cred, "spindrift-git-forge-merge-*", g.cloneTimeout)
 	if err != nil {
 		return err
 	}
@@ -199,7 +205,7 @@ func (g *gitClient) Rebase(branch string) error {
 	if err := validateGitRef(branch); err != nil {
 		return err
 	}
-	dir, gitIn, cleanup, err := cloneToTemp(g.remoteURL, "spindrift-git-forge-rebase-*", g.cloneTimeout)
+	dir, gitIn, cleanup, err := cloneToTemp(g.remoteURL, g.cred, "spindrift-git-forge-rebase-*", g.cloneTimeout)
 	if err != nil {
 		return err
 	}
@@ -236,7 +242,7 @@ func (g *gitClient) Rebase(branch string) error {
 	}
 	pushCtx, pushCancel := context.WithTimeout(context.Background(), g.opTimeout)
 	defer pushCancel()
-	return gitplumbing.GitForcePush(pushCtx, dir)
+	return gitplumbing.GitForcePush(pushCtx, dir, g.cred)
 }
 
 // BranchExists reports whether branch exists on the remote. Under
@@ -252,7 +258,7 @@ func (g *gitClient) BranchExists(branch string) (bool, error) {
 	defer cancel()
 	want := "refs/heads/" + branch
 	var out bytes.Buffer
-	cmd := exec.CommandContext(ctx, "git", "ls-remote", "--exit-code", "--heads", g.remoteURL, want)
+	cmd := g.cred.Apply(exec.CommandContext(ctx, "git", "ls-remote", "--exit-code", "--heads", g.remoteURL, want))
 	cmd.Stdout = &out
 	cmd.WaitDelay = gitOutputWaitDelay
 	err := cmd.Run()
@@ -280,7 +286,7 @@ func (g *gitClient) BranchExists(branch string) (bool, error) {
 func (g *gitClient) Probe() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), g.opTimeout)
 	defer cancel()
-	if err := exec.CommandContext(ctx, "git", "ls-remote", g.remoteURL).Run(); err != nil {
+	if err := g.cred.Apply(exec.CommandContext(ctx, "git", "ls-remote", g.remoteURL)).Run(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return "", fmt.Errorf("%w: timed out after %s: %s", forge.ErrRepoNotFound, g.opTimeout, forge.RedactURLCredentials(g.remoteURL))
 		}

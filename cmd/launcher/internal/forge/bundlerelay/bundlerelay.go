@@ -52,7 +52,7 @@ func Relay(backend, outboxDir, ref string, clone func(dir string) error) error {
 	// ref came from a bundle fetch, so refs/heads/ref is fresh in this clone
 	// and has no upstream for a bare force-with-lease to target. The
 	// destination must be explicit, first push or retried force-update alike.
-	return gitplumbing.GitForcePush(ctx, dir, "-u", "origin", ref)
+	return gitplumbing.GitForcePush(ctx, dir, gitexec.Credential{}, "-u", "origin", ref)
 }
 
 // PushBranch fetches localRef from the git repo at srcDir into a fresh clone
@@ -108,7 +108,7 @@ func PushBranch(backend, srcDir, localRef, branch, base string, clone func(dir s
 	// this ref it overrides the bare --force-with-lease's clone-relative
 	// lease, which covers only the clone-to-push window (issue #4104).
 	lease := "--force-with-lease=refs/heads/" + branch + ":"
-	if err := gitplumbing.GitForcePush(ctx, dir, lease, "-u", "origin", branch); err != nil {
+	if err := gitplumbing.GitForcePush(ctx, dir, gitexec.Credential{}, lease, "-u", "origin", branch); err != nil {
 		// "stale info" is git's lease-mismatch marker, here only ever an
 		// existing branch; a timeout or hook rejection passes through as is.
 		if !strings.Contains(err.Error(), "stale info") {

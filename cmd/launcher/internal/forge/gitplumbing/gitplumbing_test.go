@@ -11,6 +11,7 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/gitexec"
 )
 
 func TestMatchesAnyMarker(t *testing.T) {
@@ -265,7 +266,7 @@ func TestGitForcePush_StaleLeaseIsNotTransient(t *testing.T) {
 	// work's remote-tracking ref is now stale relative to origin/main.
 	run(work, "commit", "--allow-empty", "-m", "local change")
 
-	err := GitForcePush(context.Background(), work)
+	err := GitForcePush(context.Background(), work, gitexec.Credential{})
 	if err == nil {
 		t.Fatal("want error, got nil")
 	}
@@ -303,7 +304,7 @@ func TestGitForcePush_MissingRepositoryIsPermanent(t *testing.T) {
 	// No real remote: the push fails with a missing-repository error.
 	run(work, "remote", "add", "origin", filepath.Join(dir, "does-not-exist"))
 
-	err := GitForcePush(context.Background(), work)
+	err := GitForcePush(context.Background(), work, gitexec.Credential{})
 	if err == nil {
 		t.Fatal("want error, got nil")
 	}
