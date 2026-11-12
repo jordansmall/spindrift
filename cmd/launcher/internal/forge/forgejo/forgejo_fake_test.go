@@ -2,6 +2,7 @@ package forgejo_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -32,6 +33,7 @@ type fakeStatus struct {
 	Context     string `json:"context"`
 	State       string `json:"state"`
 	Description string `json:"description"`
+	TargetURL   string `json:"target_url,omitempty"`
 }
 
 // rollupToForgejoState maps a canonical forge.RollupState to the lowercase
@@ -57,6 +59,7 @@ type fakeForgejo struct {
 	shaToNum      map[string]string    // head SHA to PR number
 	checkQueues   map[string][]forge.RollupState
 	failingChecks map[string][]fakeStatus
+	jobLogs       map[string]string // job-page path to the raw log its /logs route serves
 	enqueued      map[string]bool
 	autoMergeOK   bool
 
@@ -76,6 +79,7 @@ var (
 	fakeForgejoPullMergeRe = regexp.MustCompile(`^/api/v1/repos/owner/repo/pulls/([0-9]+)/merge$`)
 	fakeForgejoStatusRe    = regexp.MustCompile(`^/api/v1/repos/owner/repo/commits/([^/]+)/status$`)
 	fakeForgejoStatusesRe  = regexp.MustCompile(`^/api/v1/repos/owner/repo/commits/([^/]+)/statuses$`)
+	fakeForgejoJobLogRe    = regexp.MustCompile(`^/owner/repo/actions/runs/[0-9]+/jobs/[0-9]+/logs$`)
 	fakeForgejoRepoRootRe  = regexp.MustCompile(`^/api/v1/repos/owner/repo$`)
 	fakeForgejoCompareRe   = regexp.MustCompile(`^/api/v1/repos/owner/repo/compare/`)
 	fakeForgejoIssueNumRe  = regexp.MustCompile(`issue-(\d+)`)
@@ -88,6 +92,7 @@ func newFakeForgejo(t *testing.T) *fakeForgejo {
 		shaToNum:      map[string]string{},
 		checkQueues:   map[string][]forge.RollupState{},
 		failingChecks: map[string][]fakeStatus{},
+		jobLogs:       map[string]string{},
 		enqueued:      map[string]bool{},
 	}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.handle))
@@ -165,6 +170,23 @@ func (f *fakeForgejo) SeedFailingCheck(url, name, conclusion, summary string) {
 		Context:     name,
 		State:       strings.ToLower(conclusion),
 		Description: summary,
+	})
+}
+
+// SeedFailingCheckLog is SeedFailingCheck for a check that ran as an Actions
+// job: the status carries the job page as its target_url and the job's /logs
+// web route serves log, as Forgejo does.
+func (f *fakeForgejo) SeedFailingCheckLog(url, name, log string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	num := prNumFromURL(url)
+	jobPath := fmt.Sprintf("/owner/repo/actions/runs/%d/jobs/%d", len(f.jobLogs)+1, len(f.jobLogs)+1)
+	f.jobLogs[jobPath] = log
+	f.failingChecks[num] = append(f.failingChecks[num], fakeStatus{
+		Context:     name,
+		State:       "failure",
+		Description: "job failed",
+		TargetURL:   f.srv.URL + jobPath,
 	})
 }
 
@@ -271,6 +293,8 @@ func (f *fakeForgejo) handle(w http.ResponseWriter, r *http.Request) {
 		f.handleCommitStatus(w, r, fakeForgejoStatusRe.FindStringSubmatch(r.URL.Path)[1])
 	case r.Method == http.MethodGet && fakeForgejoStatusesRe.MatchString(r.URL.Path):
 		f.handleCommitStatuses(w, r, fakeForgejoStatusesRe.FindStringSubmatch(r.URL.Path)[1])
+	case r.Method == http.MethodGet && fakeForgejoJobLogRe.MatchString(r.URL.Path):
+		f.handleJobLog(w, r)
 	case r.Method == http.MethodGet && fakeForgejoCompareRe.MatchString(r.URL.Path):
 		f.handleCompare(w, r)
 	default:
@@ -443,4 +467,15 @@ func (f *fakeForgejo) handleCommitStatuses(w http.ResponseWriter, _ *http.Reques
 		statuses = append(statuses, f.failingChecks[num]...)
 	}
 	json.NewEncoder(w).Encode(statuses)
+}
+
+func (f *fakeForgejo) handleJobLog(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	log, ok := f.jobLogs[strings.TrimSuffix(r.URL.Path, "/logs")]
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Write([]byte(log))
 }

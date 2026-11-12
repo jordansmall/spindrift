@@ -606,3 +606,26 @@ func TestDoWithHeaderErrorReturnsNoHeaders(t *testing.T) {
 		t.Fatalf("headers = %v, want nil on error", h)
 	}
 }
+
+func TestGetSameHost(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Write([]byte("0123456789"))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, TokenAuth{Scheme: "token", Token: "tok"}, "t", nil, nil)
+
+	var body strings.Builder
+	if err := c.GetSameHost(srv.URL+"/web/page", &body); err != nil || body.String() != "0123456789" || gotAuth != "token tok" {
+		t.Fatalf("GetSameHost = %q, %v (auth %q), want the body streamed to the writer with the credential", body.String(), err, gotAuth)
+	}
+	gotAuth = ""
+	body.Reset()
+	if err := c.GetSameHost("http://other.invalid/web/page", &body); err == nil {
+		t.Fatal("foreign host: want an error")
+	}
+	if gotAuth != "" || body.Len() != 0 {
+		t.Fatalf("refused URL: credential sent %q, body written %q", gotAuth, body.String())
+	}
+}

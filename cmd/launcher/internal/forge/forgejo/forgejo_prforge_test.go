@@ -8,7 +8,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
@@ -23,8 +25,20 @@ func newPRForgeTestForgeWithMethod(t *testing.T, mergeMethod string, handler htt
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
+	return newPRForgeAtWithMethod(t, srv.URL, mergeMethod)
+}
+
+// newPRForgeAt points the adapter at a server the test started itself, for
+// handlers that must know the server's own URL.
+func newPRForgeAt(t *testing.T, baseURL string) forge.PRForge {
+	t.Helper()
+	return newPRForgeAtWithMethod(t, baseURL, "")
+}
+
+func newPRForgeAtWithMethod(t *testing.T, baseURL, mergeMethod string) forge.PRForge {
+	t.Helper()
 	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:     srv.URL,
+		BaseURL:     baseURL,
 		Repo:        "owner/repo",
 		Token:       "tok",
 		MergeMethod: mergeMethod,
@@ -1217,5 +1231,208 @@ func TestCommentPR_PostsToIssueCommentEndpoint(t *testing.T) {
 	}
 	if gotBody["body"] != "held for review" {
 		t.Fatalf("body = %v", gotBody)
+	}
+}
+
+// jobLogHandler serves one failing status whose target_url is the Actions job
+// page at jobURL, plus whatever logs does for the job's /logs route.
+func jobLogHandler(jobURL string, logs http.HandlerFunc) http.HandlerFunc {
+	return pullHandler(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/owner/repo/commits/abc123/statuses" {
+			b, _ := json.Marshal([]map[string]any{{
+				"id": 1, "context": "ci/build", "state": "failure",
+				"description": "exit status 1", "target_url": jobURL,
+			}})
+			w.Write(b)
+			return
+		}
+		logs(w, r)
+	})
+}
+
+func TestFailureDetail_IncludesJobLogTail(t *testing.T) {
+	var srvURL string
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jobLogHandler(srvURL+"/owner/repo/actions/runs/7/jobs/2", func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/owner/repo/actions/runs/7/jobs/2/logs" {
+				http.NotFound(w, r)
+				return
+			}
+			gotAuth = r.Header.Get("Authorization")
+			w.Write([]byte(strings.Repeat("noise\n", 2000) + "FAIL TestThing: boom\n"))
+		})(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	srvURL = srv.URL
+	pr := newPRForgeAt(t, srv.URL)
+	got, err := pr.FailureDetail("https://forge.test/owner/repo/pulls/206")
+	if err != nil {
+		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "FAIL TestThing: boom") {
+		t.Fatalf("FailureDetail(...) = %q, want the log tail", got)
+	}
+	if gotAuth != "token tok" {
+		t.Fatalf("logs request Authorization = %q, want the adapter credential", gotAuth)
+	}
+}
+
+// A multi-MiB log still yields its tail: the body is streamed into a bounded
+// buffer, not read whole, and the renderer says it trimmed.
+func TestFailureDetail_HugeJobLogStillYieldsItsTail(t *testing.T) {
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jobLogHandler(srvURL+"/owner/repo/actions/runs/7/jobs/2", func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/owner/repo/actions/runs/7/jobs/2/logs" {
+				http.NotFound(w, r)
+				return
+			}
+			w.Write([]byte(strings.Repeat("noise line\n", (5<<20)/len("noise line\n")) + "FAIL TestHuge: boom\n"))
+		})(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	srvURL = srv.URL
+	pr := newPRForgeAt(t, srv.URL)
+	got, err := pr.FailureDetail("https://forge.test/owner/repo/pulls/206")
+	if err != nil {
+		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
+	}
+	for _, want := range []string{"FAIL TestHuge: boom", `[log excerpt for "ci/build" trimmed`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("FailureDetail(...) = %q, want it to contain %q", got, want)
+		}
+	}
+}
+
+func TestFailureDetail_ForeignHostJobURLIsNotFetched(t *testing.T) {
+	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("foreign host got request %s %s (Authorization=%q)", r.Method, r.URL.Path, r.Header.Get("Authorization"))
+	}))
+	t.Cleanup(foreign.Close)
+	pr := newPRForgeTestForge(t, jobLogHandler(foreign.URL+"/owner/repo/actions/runs/7/jobs/2", func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s", r.URL.Path)
+	}))
+	got, err := pr.FailureDetail("https://forge.test/owner/repo/pulls/206")
+	if err != nil {
+		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "exit status 1") {
+		t.Fatalf("FailureDetail(...) = %q, want the status summary still rendered", got)
+	}
+}
+
+func TestFailureDetail_NonJobTargetURLIsNotFetched(t *testing.T) {
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jobLogHandler(srvURL+"/owner/repo/actions/runs/7", func(w http.ResponseWriter, r *http.Request) {
+			t.Errorf("unexpected request %s", r.URL.Path)
+		})(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	srvURL = srv.URL
+	if _, err := newPRForgeAt(t, srv.URL).FailureDetail("https://forge.test/owner/repo/pulls/206"); err != nil {
+		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
+	}
+}
+
+func TestFailureDetail_OtherRepoJobURLIsNotFetched(t *testing.T) {
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jobLogHandler(srvURL+"/other/thing/actions/runs/7/jobs/2", func(w http.ResponseWriter, r *http.Request) {
+			t.Errorf("unexpected request %s", r.URL.Path)
+		})(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	srvURL = srv.URL
+	if _, err := newPRForgeAt(t, srv.URL).FailureDetail("https://forge.test/owner/repo/pulls/206"); err != nil {
+		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
+	}
+}
+
+func TestFailureDetail_LogsRouteMissingStillSucceeds(t *testing.T) {
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jobLogHandler(srvURL+"/owner/repo/actions/runs/7/jobs/2", http.NotFound)(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	srvURL = srv.URL
+	got, err := newPRForgeAt(t, srv.URL).FailureDetail("https://forge.test/owner/repo/pulls/206")
+	if err != nil {
+		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "ci/build") || strings.Contains(got, "boom") {
+		t.Fatalf("FailureDetail(...) = %q, want the status rendered without a log", got)
+	}
+}
+
+// A status target_url is remote-supplied: path segments before
+// <owner>/<repo>/actions/... that are not the configured base's own must not
+// earn a credentialed request, or a hostile link could aim the token at any
+// route on the configured host.
+func TestFailureDetail_ForeignPathPrefixJobURLIsNotFetched(t *testing.T) {
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jobLogHandler(srvURL+"/some/other/endpoint/owner/repo/actions/runs/7/jobs/2", func(w http.ResponseWriter, r *http.Request) {
+			t.Errorf("unexpected request %s (Authorization=%q)", r.URL.Path, r.Header.Get("Authorization"))
+		})(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	srvURL = srv.URL
+	got, err := newPRForgeAt(t, srv.URL).FailureDetail("https://forge.test/owner/repo/pulls/206")
+	if err != nil {
+		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "exit status 1") {
+		t.Fatalf("FailureDetail(...) = %q, want the status summary still rendered", got)
+	}
+}
+
+// A Forgejo served under a subpath keeps working: the configured base's path
+// is the prefix the job link must carry.
+func TestFailureDetail_SubpathBaseJobURLIsFetched(t *testing.T) {
+	var srvURL string
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jobLogHandler(srvURL+"/forge/owner/repo/actions/runs/7/jobs/2", func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/owner/repo/actions/runs/7/jobs/2/logs" {
+				http.NotFound(w, r)
+				return
+			}
+			w.Write([]byte("FAIL TestSub: boom\n"))
+		})(w, r)
+	})
+	srv := httptest.NewServer(http.StripPrefix("/forge", inner))
+	t.Cleanup(srv.Close)
+	srvURL = srv.URL
+	got, err := newPRForgeAt(t, srv.URL+"/forge").FailureDetail("https://forge.test/owner/repo/pulls/206")
+	if err != nil {
+		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "FAIL TestSub: boom") {
+		t.Fatalf("FailureDetail(...) = %q, want the log tail", got)
+	}
+}
+
+func TestFailureDetail_SkipsJobLogsOnceTheBudgetIsSpent(t *testing.T) {
+	t.Cleanup(forgejo.SetJobLogsBudget(-time.Second))
+	var srvURL string
+	var logHits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jobLogHandler(srvURL+"/owner/repo/actions/runs/7/jobs/2", func(w http.ResponseWriter, r *http.Request) {
+			logHits.Add(1)
+			w.Write([]byte("FAIL TestThing: boom\n"))
+		})(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	srvURL = srv.URL
+	got, err := newPRForgeAt(t, srv.URL).FailureDetail("https://forge.test/owner/repo/pulls/206")
+	if err != nil {
+		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "ci/build") || strings.Contains(got, "boom") {
+		t.Fatalf("FailureDetail(...) = %q, want the failing status without a log", got)
+	}
+	if logHits.Load() != 0 {
+		t.Fatalf("log route hit %d times, want 0", logHits.Load())
 	}
 }

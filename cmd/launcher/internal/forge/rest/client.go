@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 	"unicode"
@@ -190,6 +191,9 @@ func truncateRunes(s string, n int) string {
 	return string(runes[:n]) + "..."
 }
 
+// BaseURL is the configured base URL, without a trailing "/".
+func (c *Client) BaseURL() string { return c.baseURL }
+
 // HTTPClientForTest returns the underlying *http.Client, so an adapter's own
 // tests can assert construction defaults such as Timeout without driving a
 // real request. Test-only.
@@ -267,6 +271,46 @@ func (c *Client) DoWithHeader(method, path string, body, out any) (http.Header, 
 		return nil, fmt.Errorf("%s: %s %s: unexpected %w", c.backend, method, path, statusErr)
 	}
 	return nil, fmt.Errorf("%s: %s %s: maxAttempts must be >= 1 (got %d)", c.backend, method, path, c.maxAttempts)
+}
+
+// GetSameHost GETs the absolute URL rawURL with the client's credential and
+// streams its body to w, so a caller bounds a large body (a CI job log) by what
+// w keeps rather than by a read cap. It is for routes outside the API
+// prefix (a web page's raw output) that the path-relative Do cannot reach.
+// The URL must share the base URL's scheme and host: the credential is applied
+// to whatever is requested, so a URL a remote party supplied (a CI status
+// link) must never reach another host. A single attempt, with no retry.
+func (c *Client) GetSameHost(rawURL string, w io.Writer) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("%s: parse URL: %w", c.backend, err)
+	}
+	base, err := url.Parse(c.baseURL)
+	if err != nil {
+		return fmt.Errorf("%s: parse base URL: %w", c.backend, err)
+	}
+	if !strings.EqualFold(u.Scheme, base.Scheme) || !strings.EqualFold(u.Host, base.Host) {
+		return fmt.Errorf("%s: refusing GET %s: not on the configured host", c.backend, u.Path)
+	}
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	if err != nil {
+		return fmt.Errorf("%s: build request: %w", c.backend, err)
+	}
+	if c.auth != nil {
+		c.auth.Apply(req)
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return fmt.Errorf("%s: GET %s: %w", c.backend, u.Path, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("%s: GET %s: unexpected %w", c.backend, u.Path, StatusError{Status: resp.StatusCode})
+	}
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		return fmt.Errorf("%s: read %s: %w", c.backend, u.Path, err)
+	}
+	return nil
 }
 
 // Paginate calls fetch for page 1, 2, 3, ... until fetch reports done, so each
