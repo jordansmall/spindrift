@@ -3,6 +3,7 @@ package dispatch
 import (
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -498,7 +499,7 @@ func TestDispatch_SeedMirrorBeforeEachPass(t *testing.T) {
 
 	fr := runner.NewFake()
 	f, err := NewFactory(Config{
-		SeedMirror: func() (string, error) { calls++; return mirror, nil },
+		SeedMirror: func() (string, func(), error) { calls++; return mirror, func() {}, nil },
 	}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
@@ -526,6 +527,50 @@ func TestDispatch_SeedMirrorBeforeEachPass(t *testing.T) {
 	for i, box := range fr.RunCalls {
 		if box.MirrorDir != mirror {
 			t.Errorf("RunCalls[%d].MirrorDir: got %q, want %q", i, box.MirrorDir, mirror)
+		}
+	}
+}
+
+// A per-Pass mirror (github, forgejo) must outlive its Box and be gone right
+// after: release runs once per Pass, after the Box exits, so parallel Passes
+// never remove a mirror another Box still mounts.
+func TestDispatch_SeedMirrorReleasedAfterBoxExits(t *testing.T) {
+	dir := tempLogDir(t)
+	var seeds, releases int
+	var releasedAtBox []int
+
+	fr := runner.NewFake()
+	fr.RunFunc = func(runner.Box) error {
+		releasedAtBox = append(releasedAtBox, releases)
+		return nil
+	}
+	f, err := NewFactory(Config{
+		SeedMirror: func() (string, func(), error) {
+			seeds++
+			return t.TempDir(), func() { releases++ }, nil
+		},
+	}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("84", "T")
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
+	}
+	if releases != 1 {
+		t.Errorf("releases after Run: got %d, want 1", releases)
+	}
+	if result := d.Fix(1, ""); !result.ok() {
+		t.Fatalf("Fix: want succeeded, got %+v", result)
+	}
+	if seeds != 2 || releases != 2 {
+		t.Errorf("after two Passes: seeds=%d releases=%d, want 2 and 2", seeds, releases)
+	}
+	for i, n := range releasedAtBox {
+		if n != i {
+			t.Errorf("Box %d ran with %d releases already done, want %d (release only after the Box exits)", i, n, i)
 		}
 	}
 }
@@ -558,15 +603,19 @@ func TestRun_SeedMirrorErrorFailsPassBeforeBox(t *testing.T) {
 
 	fr := runner.NewFake()
 	f, err := NewFactory(Config{
-		SeedMirror: func() (string, error) { return "", errors.New("push refused") },
+		SeedMirror: func() (string, func(), error) { return "", nil, errors.New("push refused") },
 	}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
 	defer f.Cleanup()
 
-	if result := f.New("83", "T").Run(); result.ok() {
+	result := f.New("83", "T").Run()
+	if result.ok() {
 		t.Fatalf("Run: want failure when the mirror seed fails, got %+v", result)
+	}
+	if note := result.result.FailureNote(); !strings.Contains(note, "seed mirror: push refused") {
+		t.Errorf("failure note = %q, want it to name the seed error", note)
 	}
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("RunCalls: got %d, want 0 (no Box on a failed seed)", len(fr.RunCalls))

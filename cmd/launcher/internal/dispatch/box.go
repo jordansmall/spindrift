@@ -496,10 +496,11 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 
 	var mirrorDir string
 	if d.cfg.SeedMirror != nil {
-		dir, err := d.cfg.SeedMirror()
+		dir, release, err := d.cfg.SeedMirror()
 		if err != nil {
 			return fmt.Errorf("seed mirror: %w", err)
 		}
+		defer release()
 		mirrorDir = dir
 	}
 

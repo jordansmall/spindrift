@@ -1029,7 +1029,7 @@ func TestSeedMirrorHook_Local_ReseedsBaseAdvanceBetweenPasses(t *testing.T) {
 	if hook == nil {
 		t.Fatal("seedMirrorHook(CODE_FORGE=local) = nil, want a per-Pass seed")
 	}
-	dir, err := hook()
+	dir, _, err := hook()
 	if err != nil {
 		t.Fatalf("first seed: %v", err)
 	}
@@ -1043,7 +1043,7 @@ func TestSeedMirrorHook_Local_ReseedsBaseAdvanceBetweenPasses(t *testing.T) {
 	testutil.GitRun(t, checkout, "commit", "-m", "later")
 	advanced := testutil.GitOutput(t, checkout, "rev-parse", "HEAD")
 
-	if _, err := hook(); err != nil {
+	if _, _, err := hook(); err != nil {
 		t.Fatalf("second seed: %v", err)
 	}
 	got := testutil.GitOutput(t, repoPath, "rev-parse", "refs/heads/main")
@@ -1095,7 +1095,7 @@ func TestSeedMirrorHook_Git_ReadOnlySeedsFromRemote(t *testing.T) {
 	if hook == nil {
 		t.Fatal("seedMirrorHook(CODE_FORGE=git, read-only) = nil, want a per-Pass seed")
 	}
-	dir, err := hook()
+	dir, _, err := hook()
 	if err != nil {
 		t.Fatalf("first seed: %v", err)
 	}
@@ -1109,7 +1109,7 @@ func TestSeedMirrorHook_Git_ReadOnlySeedsFromRemote(t *testing.T) {
 	}
 
 	fx.AdvanceBase()
-	dir2, err := hook()
+	dir2, _, err := hook()
 	if err != nil {
 		t.Fatalf("second seed: %v", err)
 	}
