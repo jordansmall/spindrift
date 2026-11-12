@@ -35,6 +35,11 @@ type handler struct {
 	// read from.
 	issues IssueReader
 
+	// search answers the search verb; nil when the Dispatch's tracker cannot
+	// be read or cannot search. It is already scoped to the Dispatch's
+	// repository, so the request names no scope.
+	search IssueSearcher
+
 	// logMu serialises the mirror's writes: requests are served
 	// concurrently, and two interleaved writes would splice one stream-json
 	// line into another.
@@ -99,6 +104,8 @@ func (h *handler) routes(w http.ResponseWriter, r *http.Request) {
 		serve(w, r, h.buf.AcceptIssueIntent)
 	case signalwire.IssueRoute:
 		h.issue(w, r)
+	case signalwire.IssueSearchRoute:
+		h.issueSearch(w, r)
 	case statusKind:
 		h.status(w, r)
 	default:
@@ -107,13 +114,14 @@ func (h *handler) routes(w http.ResponseWriter, r *http.Request) {
 }
 
 // NewHandler returns the signal socket's Handler, serving b's three buffered
-// routes, the GET /status and GET /issue reads, and the diagnostics-only usage
-// route (ADR 0052), and mirroring one spindrift_op event per request to logw
-// (issue #3724). A nil logw discards the mirror. issues backs GET /issue; nil
-// makes that route reject. The unix transport is the only caller: it has the
+// routes, the GET /status, GET /issue and GET /issue-search reads, and the
+// diagnostics-only usage route (ADR 0052), and mirroring one spindrift_op event
+// per request to logw (issue #3724). A nil logw discards the mirror. issues
+// backs GET /issue and search backs GET /issue-search; a nil issues or search
+// makes its own route reject. The unix transport is the only caller: it has the
 // socket file's permissions as its own gate, so this Handler carries none.
-func NewHandler(b *Buffer, logw io.Writer, issues IssueReader) *Handler {
-	h := &handler{buf: b, logw: logw, issues: issues}
+func NewHandler(b *Buffer, logw io.Writer, issues IssueReader, search IssueSearcher) *Handler {
+	h := &handler{buf: b, logw: logw, issues: issues, search: search}
 	return &Handler{Handler: h.mirror(http.HandlerFunc(h.routes))}
 }
 
@@ -123,12 +131,12 @@ func NewHandler(b *Buffer, logw io.Writer, issues IssueReader) *Handler {
 // secret would match an absent header, so it fails closed here rather than at
 // listen time. The gate sits inside the mirror (gate wraps routes, mirror
 // wraps gate), so a rejected request still emits its one spindrift_op event.
-// issues is as for NewHandler.
-func NewGatedHandler(b *Buffer, logw io.Writer, secret string, issues IssueReader) (*Handler, error) {
+// issues and search are as for NewHandler.
+func NewGatedHandler(b *Buffer, logw io.Writer, secret string, issues IssueReader, search IssueSearcher) (*Handler, error) {
 	if secret == "" {
 		return nil, errors.New("signalsocket: refusing to gate a handler with an empty secret")
 	}
-	h := &handler{buf: b, logw: logw, issues: issues}
+	h := &handler{buf: b, logw: logw, issues: issues, search: search}
 	return &Handler{Handler: h.mirror(gate(secret, http.HandlerFunc(h.routes))), gated: true}, nil
 }
 
@@ -182,6 +190,8 @@ func kindForPath(path string) (kind string, isUsage bool) {
 		return string(signalwire.KindIssueIntent), isUsage
 	case "/" + signalwire.IssueRoute:
 		return signalwire.IssueRoute, isUsage
+	case "/" + signalwire.IssueSearchRoute:
+		return signalwire.IssueSearchRoute, isUsage
 	case "/status":
 		return statusKind, isUsage
 	default:

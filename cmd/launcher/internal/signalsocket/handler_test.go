@@ -50,7 +50,7 @@ func wantReject(t *testing.T, w *httptest.ResponseRecorder, status string, code 
 
 func TestHandlerAcceptsEveryKind(t *testing.T) {
 	b := newAll(t)
-	h := signalsocket.NewHandler(b, nil, nil)
+	h := signalsocket.NewHandler(b, nil, nil, nil)
 
 	for _, tc := range []struct {
 		path string
@@ -98,7 +98,7 @@ func TestHandlerAcceptsEveryKind(t *testing.T) {
 }
 
 func TestHandlerRejectsUnknownPathWithoutEchoingIt(t *testing.T) {
-	h := signalsocket.NewHandler(newAll(t), nil, nil)
+	h := signalsocket.NewHandler(newAll(t), nil, nil, nil)
 	for _, path := range []string{"/merge", "/comment/7", "/"} {
 		w := do(t, h, http.MethodPost, path, `{"body":"x"}`)
 		wantReject(t, w, "unknown_kind", http.StatusNotFound)
@@ -113,7 +113,7 @@ func TestHandlerRejectsUnknownPathWithoutEchoingIt(t *testing.T) {
 // launcher's log would let a caller write its own text there.
 func TestHandlerMirrorsUnknownKindWithoutEchoingPath(t *testing.T) {
 	var log strings.Builder
-	h := signalsocket.NewHandler(newAll(t), &log, nil)
+	h := signalsocket.NewHandler(newAll(t), &log, nil, nil)
 	w := do(t, h, http.MethodPost, "/comments-typo-xyz", `{"body":"x"}`)
 	wantReject(t, w, "unknown_kind", http.StatusNotFound)
 
@@ -131,7 +131,7 @@ func TestHandlerMirrorsUnknownKindWithoutEchoingPath(t *testing.T) {
 
 func TestHandlerRejectsWrongMethod(t *testing.T) {
 	var log strings.Builder
-	h := signalsocket.NewHandler(newAll(t), &log, nil)
+	h := signalsocket.NewHandler(newAll(t), &log, nil, nil)
 	cases := []struct {
 		method, path, wantKind string
 	}{
@@ -159,7 +159,7 @@ func TestHandlerRejectsWrongMethod(t *testing.T) {
 }
 
 func TestHandlerRejectsMalformedBody(t *testing.T) {
-	h := signalsocket.NewHandler(newAll(t), nil, nil)
+	h := signalsocket.NewHandler(newAll(t), nil, nil, nil)
 	for _, body := range []string{``, `{`, `[{"body":"x"}]`, `"just a string"`, `{"body":"x"} {"body":"y"}`} {
 		w := do(t, h, http.MethodPost, "/comment", body)
 		wantReject(t, w, "malformed_json", http.StatusBadRequest)
@@ -172,7 +172,7 @@ func TestHandlerRejectsMalformedBody(t *testing.T) {
 // before the intent is ever buffered.
 func TestHandlerRejectsMalformedPatch(t *testing.T) {
 	b := newAll(t)
-	h := signalsocket.NewHandler(b, nil, nil)
+	h := signalsocket.NewHandler(b, nil, nil, nil)
 
 	w := do(t, h, http.MethodPost, "/issue-intent",
 		`{"title":"t","body":"b","type":"bug","patch":"just some ordinary text"}`)
@@ -201,7 +201,7 @@ func TestHandlerRejectsMalformedPatch(t *testing.T) {
 // validation (here, invalid_patch), rather than the generic request-size
 // reject a one-field-sized ceiling would give.
 func TestHandlerRequestSizeAccommodatesBodyAndPatch(t *testing.T) {
-	h := signalsocket.NewHandler(newAll(t), nil, nil)
+	h := signalsocket.NewHandler(newAll(t), nil, nil, nil)
 
 	// \u0001 escapes to one control byte, so MaxBodyBytes repeats decode to
 	// exactly MaxBodyBytes bytes while costing 6*MaxBodyBytes on the wire.
@@ -217,7 +217,7 @@ func TestHandlerRequestSizeAccommodatesBodyAndPatch(t *testing.T) {
 // Content is never destination (issue #3724): a request that tries to name one
 // must fail loudly rather than have the field dropped on the floor.
 func TestHandlerRejectsDestinationFields(t *testing.T) {
-	h := signalsocket.NewHandler(newAll(t), nil, nil)
+	h := signalsocket.NewHandler(newAll(t), nil, nil, nil)
 	for _, tc := range []struct{ path, body string }{
 		{"/comment", `{"body":"x","issue":7}`},
 		{"/pr-intent", `{"title":"t","body":"x","branch":"main"}`},
@@ -229,7 +229,7 @@ func TestHandlerRejectsDestinationFields(t *testing.T) {
 }
 
 func TestHandlerRejectsOversizeBody(t *testing.T) {
-	h := signalsocket.NewHandler(newAll(t), nil, nil)
+	h := signalsocket.NewHandler(newAll(t), nil, nil, nil)
 
 	// Over the reader's ceiling: the decoder never sees a whole value.
 	huge := strings.Repeat("a", signalwire.MaxRequestBytes+1)
@@ -257,7 +257,7 @@ func TestHandlerRejectsOversizeBody(t *testing.T) {
 // receipt's size and hash even though the signal never got buffered.
 func TestHandlerMirrorsSizeAndHashOnAFieldOversizeReject(t *testing.T) {
 	var log strings.Builder
-	h := signalsocket.NewHandler(newAll(t), &log, nil)
+	h := signalsocket.NewHandler(newAll(t), &log, nil, nil)
 	body := strings.Repeat("c", signalwire.MaxBodyBytes+1)
 	w := do(t, h, http.MethodPost, "/comment", `{"body":"`+body+`"}`)
 	wantReject(t, w, "oversize", http.StatusRequestEntityTooLarge)
@@ -277,7 +277,7 @@ func TestHandlerMirrorsSizeAndHashOnAFieldOversizeReject(t *testing.T) {
 // A max-size body escapes to more bytes than it holds, so the reader's ceiling
 // must leave the buffer's own limit room to be the binding one.
 func TestHandlerAcceptsMaxSizeBody(t *testing.T) {
-	h := signalsocket.NewHandler(newAll(t), nil, nil)
+	h := signalsocket.NewHandler(newAll(t), nil, nil, nil)
 	body, err := json.Marshal(signalwire.Comment{Body: strings.Repeat("\x01", signalwire.MaxBodyBytes)})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -305,7 +305,7 @@ func TestHandlerMirrorsUsageReportWithoutTouchingTheBuffer(t *testing.T) {
 		t.Run(tc.path, func(t *testing.T) {
 			var log strings.Builder
 			b := newAll(t)
-			h := signalsocket.NewHandler(b, &log, nil)
+			h := signalsocket.NewHandler(b, &log, nil, nil)
 
 			w := do(t, h, http.MethodPost, tc.path, `{"reason":"flag provided but not defined: -nonce"}`)
 			if w.Code != http.StatusNoContent {
@@ -357,7 +357,7 @@ func TestHandlerRejectsBadUsageReports(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var log strings.Builder
 			b := newAll(t)
-			h := signalsocket.NewHandler(b, &log, nil)
+			h := signalsocket.NewHandler(b, &log, nil, nil)
 
 			w := do(t, h, tc.method, tc.path, tc.body)
 			wantReject(t, w, tc.wantStatus, tc.wantCode)
@@ -380,7 +380,7 @@ func TestHandlerRejectsBadUsageReports(t *testing.T) {
 
 func TestHandlerRejectsKindNotConsumed(t *testing.T) {
 	b := signalsocket.New(signalsocket.Config{Consumes: []signalwire.Kind{signalwire.KindComment}})
-	h := signalsocket.NewHandler(b, nil, nil)
+	h := signalsocket.NewHandler(b, nil, nil, nil)
 	w := do(t, h, http.MethodPost, "/pr-intent", `{"title":"t","body":"x"}`)
 	wantReject(t, w, "kind_not_consumed", http.StatusConflict)
 }
@@ -393,7 +393,7 @@ func TestHandlerRejectsKindNotConsumed(t *testing.T) {
 func TestHandlerAcceptsUsageReportForAKindNotConsumed(t *testing.T) {
 	var log strings.Builder
 	b := signalsocket.New(signalsocket.Config{Consumes: []signalwire.Kind{signalwire.KindComment}})
-	h := signalsocket.NewHandler(b, &log, nil)
+	h := signalsocket.NewHandler(b, &log, nil, nil)
 
 	w := do(t, h, http.MethodPost, "/pr-intent/usage", `{"reason":"-title is required"}`)
 	if w.Code != http.StatusNoContent {
@@ -438,7 +438,7 @@ func mirroredOps(t *testing.T, log string) []hostop.SpindriftOp {
 
 func TestHandlerMirrorsOneOpPerRequest(t *testing.T) {
 	var log strings.Builder
-	h := signalsocket.NewHandler(newAll(t), &log, nil)
+	h := signalsocket.NewHandler(newAll(t), &log, nil, nil)
 
 	do(t, h, http.MethodPost, "/comment", `{"body":"looks good"}`)
 	do(t, h, http.MethodPost, "/issue-intent", `{"title":"t","body":"x","type":"chore"}`)
@@ -488,7 +488,7 @@ func TestHandlerMirrorsOneOpPerRequest(t *testing.T) {
 
 func TestHandlerMirrorsSizeAndHashFromTheReceipt(t *testing.T) {
 	var log strings.Builder
-	h := signalsocket.NewHandler(newAll(t), &log, nil)
+	h := signalsocket.NewHandler(newAll(t), &log, nil, nil)
 	w := do(t, h, http.MethodPost, "/comment", `{"body":"looks good"}`)
 	var rec signalwire.Receipt
 	if err := json.Unmarshal(w.Body.Bytes(), &rec); err != nil {
@@ -506,7 +506,7 @@ func TestHandlerReplyNamesNothingOutsideTheBox(t *testing.T) {
 		Consumes:        []signalwire.Kind{signalwire.KindComment, signalwire.KindIssueIntent},
 		MaxIssueIntents: 1,
 	})
-	h := signalsocket.NewHandler(b, io.Discard, nil)
+	h := signalsocket.NewHandler(b, io.Discard, nil, nil)
 
 	reqs := []struct{ method, path, body string }{
 		{http.MethodPost, "/comment", `{"body":"looks good"}`},
@@ -534,7 +534,7 @@ func TestHandlerReplyNamesNothingOutsideTheBox(t *testing.T) {
 }
 
 func TestHandlerNilLogWriterDiscardsTheMirror(t *testing.T) {
-	h := signalsocket.NewHandler(newAll(t), nil, nil)
+	h := signalsocket.NewHandler(newAll(t), nil, nil, nil)
 	if w := do(t, h, http.MethodPost, "/comment", `{"body":"x"}`); w.Code != http.StatusOK {
 		t.Fatalf("POST /comment with a nil log writer = %d, want 200", w.Code)
 	}
@@ -545,7 +545,7 @@ func TestHandlerNilLogWriterDiscardsTheMirror(t *testing.T) {
 // check has to sit ahead of the decoder, not behind it.
 func TestHandlerRejectsInvalidUTF8Bytes(t *testing.T) {
 	var log strings.Builder
-	h := signalsocket.NewHandler(newAll(t), &log, nil)
+	h := signalsocket.NewHandler(newAll(t), &log, nil, nil)
 	for _, tc := range []struct{ path, body string }{
 		{"/comment", "{\"body\":\"a\xffb\"}"},
 		{"/pr-intent", "{\"title\":\"t\",\"body\":\"a\xfeb\"}"},
@@ -569,7 +569,7 @@ func TestHandlerRejectsInvalidUTF8Bytes(t *testing.T) {
 // The bounded read runs before the utf-8 check, so a body over the reader's
 // ceiling still reports oversize even when its bytes are invalid utf-8 too.
 func TestHandlerRejectsOversizeBeforeInvalidUTF8(t *testing.T) {
-	h := signalsocket.NewHandler(newAll(t), nil, nil)
+	h := signalsocket.NewHandler(newAll(t), nil, nil, nil)
 	for _, filler := range []string{"a", "\xff"} {
 		huge := strings.Repeat(filler, signalwire.MaxRequestBytes+1)
 		w := do(t, h, http.MethodPost, "/comment", `{"body":"`+huge+`"}`)
@@ -593,7 +593,7 @@ func TestHandlerRejectsPathsServeMuxWouldClean(t *testing.T) {
 	} {
 		t.Run(path, func(t *testing.T) {
 			var log strings.Builder
-			h := signalsocket.NewHandler(newAll(t), &log, nil)
+			h := signalsocket.NewHandler(newAll(t), &log, nil, nil)
 			w := do(t, h, http.MethodPost, path, `{"body":"x"}`)
 			if w.Code >= 300 && w.Code < 400 {
 				t.Fatalf("POST %s = %d, want a 404 reject, never a redirect", path, w.Code)
@@ -636,7 +636,7 @@ func TestHandlerIssueReadReturnsTheSnapshotAndMirrorsOneRead(t *testing.T) {
 	}
 	rd := &fakeIssueReader{snap: want}
 	var log strings.Builder
-	h := signalsocket.NewHandler(newAll(t), &log, rd)
+	h := signalsocket.NewHandler(newAll(t), &log, rd, nil)
 
 	w := do(t, h, http.MethodGet, "/issue?ref=owner%2Frepo%237", "")
 
@@ -665,7 +665,7 @@ func TestHandlerIssueReadReturnsTheSnapshotAndMirrorsOneRead(t *testing.T) {
 func TestHandlerIssueReadPassesReaderRejectThrough(t *testing.T) {
 	rd := &fakeIssueReader{rej: &signalwire.Reject{Status: "out_of_scope", Reason: "ref is outside this dispatch", Code: http.StatusForbidden}}
 	var log strings.Builder
-	h := signalsocket.NewHandler(newAll(t), &log, rd)
+	h := signalsocket.NewHandler(newAll(t), &log, rd, nil)
 
 	w := do(t, h, http.MethodGet, "/issue?ref=other%2Frepo%231", "")
 
@@ -695,7 +695,7 @@ func TestHandlerIssueReadRejectsBadRequests(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var log strings.Builder
-			h := signalsocket.NewHandler(newAll(t), &log, &fakeIssueReader{})
+			h := signalsocket.NewHandler(newAll(t), &log, &fakeIssueReader{}, nil)
 			wantReject(t, do(t, h, c.method, c.target, ""), c.status, c.code)
 			if ops := mirroredOps(t, log.String()); len(ops) != 1 || ops[0].Kind != "issue" || ops[0].Decision != "reject" {
 				t.Fatalf("ops = %+v, want one issue/reject", ops)
@@ -709,7 +709,7 @@ func TestHandlerIssueReadCapsAnOversizedSnapshot(t *testing.T) {
 		Ref: "owner/repo#7", Title: "t", State: "open",
 		Body: strings.Repeat("b", 2*signalwire.MaxIssueReplyBytes),
 	}}
-	h := signalsocket.NewHandler(newAll(t), nil, rd)
+	h := signalsocket.NewHandler(newAll(t), nil, rd, nil)
 
 	w := do(t, h, http.MethodGet, "/issue?ref=7", "")
 
@@ -724,7 +724,7 @@ func TestHandlerIssueReadCapsAnOversizedSnapshot(t *testing.T) {
 
 func TestHandlerIssueReadWithoutAReaderRejects(t *testing.T) {
 	var log strings.Builder
-	h := signalsocket.NewHandler(newAll(t), &log, nil)
+	h := signalsocket.NewHandler(newAll(t), &log, nil, nil)
 
 	wantReject(t, do(t, h, http.MethodGet, "/issue?ref=7", ""), "unsupported", http.StatusNotImplemented)
 	if ops := mirroredOps(t, log.String()); len(ops) != 1 || ops[0].Kind != "issue" || ops[0].Decision != "reject" {
@@ -734,7 +734,7 @@ func TestHandlerIssueReadWithoutAReaderRejects(t *testing.T) {
 
 func TestHandlerIssueUsageReportIsMirroredUnderTheIssueKind(t *testing.T) {
 	var log strings.Builder
-	h := signalsocket.NewHandler(newAll(t), &log, nil)
+	h := signalsocket.NewHandler(newAll(t), &log, nil, nil)
 
 	w := do(t, h, http.MethodPost, "/issue/usage", `{"reason":"missing ref"}`)
 
@@ -748,7 +748,7 @@ func TestHandlerIssueUsageReportIsMirroredUnderTheIssueKind(t *testing.T) {
 
 func TestGatedHandlerIssueReadRequiresTheSecret(t *testing.T) {
 	rd := &fakeIssueReader{snap: signalwire.IssueSnapshot{Ref: "r", Title: "t", State: "open"}}
-	h, err := signalsocket.NewGatedHandler(newAll(t), nil, "s3cret", rd)
+	h, err := signalsocket.NewGatedHandler(newAll(t), nil, "s3cret", rd, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

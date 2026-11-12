@@ -24,7 +24,7 @@ func connectorIssueHandler(t *testing.T, replies map[string]string, guestErr err
 	}
 	tr := mustTracker(t, guest, newNative(), testLifecycle, testTarget, nil, true)
 	rd := signalsocket.NewTrackerIssueReader(tr, "o/r", io.Discard)
-	return signalsocket.NewHandler(signalsocket.New(signalsocket.Config{}), nil, rd), calls
+	return signalsocket.NewHandler(signalsocket.New(signalsocket.Config{}), nil, rd, nil), calls
 }
 
 func TestSignalIssueReadThroughAConnectorTracker(t *testing.T) {

@@ -587,6 +587,19 @@ func issueReader(c config, it forge.IssueTracker, warn io.Writer) signalsocket.I
 	return signalsocket.NewTrackerIssueReader(it, scope, warn)
 }
 
+// issueSearcher builds the issue-search verb's searcher over the tracker
+// capability resolved in caps. It is served only where the issue verb is
+// (reader non-nil, i.e. a read scope resolved); the search's own scope comes
+// from the already-scoped capability, not from reader. A tracker that cannot
+// search gets none. The nil is returned explicitly: a typed-nil wrapper would
+// defeat the handler's nil check.
+func issueSearcher(reader signalsocket.IssueReader, caps forge.Capabilities, warn io.Writer) signalsocket.IssueSearcher {
+	if reader == nil || caps.IssueSearcher == nil {
+		return nil
+	}
+	return signalsocket.NewTrackerIssueSearcher(caps.IssueSearcher, warn)
+}
+
 // issueScope names where the tracker's issues live for the discovery lines:
 // the tracker's own scope when its Strategy has one, else the repo slug.
 func issueScope(c config) string {
@@ -803,6 +816,7 @@ func dispatchConfig(c config, pwd string, it forge.IssueTracker, lw *localloop.W
 	presence := resolveAgentPresenceSignals(c.driver)
 	reviewModel, _ := launcherInput.Flag("REVIEW_MODEL")
 	reviewEffort, _ := launcherInput.Flag("REVIEW_EFFORT")
+	reader := issueReader(c, it, os.Stderr)
 	return dispatch.Config{
 		BoxEnvVars: c.boxEnvVars,
 		ResolveEnv: boxTokenResolver(hostGitConfigResolver(c, localBaseBranchResolver(c, it, lw, cf, caps))),
@@ -841,7 +855,8 @@ func dispatchConfig(c config, pwd string, it forge.IssueTracker, lw *localloop.W
 		IssueTextFor: func(number string) (string, error) {
 			return forge.IssueText(it, number, os.Stderr)
 		},
-		IssueReader: issueReader(c, it, os.Stderr),
+		IssueReader:   reader,
+		IssueSearcher: issueSearcher(reader, caps, os.Stderr),
 	}
 }
 

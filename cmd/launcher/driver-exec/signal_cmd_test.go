@@ -71,7 +71,7 @@ func startSignalServerWithIssues(t *testing.T, transport string, cfg signalsocke
 	srv := &signalServer{buf: buf, log: log}
 	switch transport {
 	case "unix":
-		l := &signalsocket.Listener{Handler: signalsocket.NewHandler(buf, log, issues)}
+		l := &signalsocket.Listener{Handler: signalsocket.NewHandler(buf, log, issues, nil)}
 		t.Cleanup(func() { _ = l.Close() })
 		// A name shorter than the helper's own "probe.sock" probe, so its
 		// sun_path check stays conservative for this socket too.
@@ -86,7 +86,7 @@ func startSignalServerWithIssues(t *testing.T, transport string, cfg signalsocke
 		if err != nil {
 			t.Fatalf("NewSecret: %v", err)
 		}
-		gh, err := signalsocket.NewGatedHandler(buf, log, secret, issues)
+		gh, err := signalsocket.NewGatedHandler(buf, log, secret, issues, nil)
 		if err != nil {
 			t.Fatalf("NewGatedHandler: %v", err)
 		}

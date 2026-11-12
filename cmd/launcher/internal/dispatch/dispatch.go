@@ -231,6 +231,10 @@ type Config struct {
 	// resolvable scope, makes the route answer unsupported.
 	IssueReader signalsocket.IssueReader
 
+	// IssueSearcher answers the issue-search verb from the same tracker. Nil
+	// whenever IssueReader is nil, or the tracker cannot search.
+	IssueSearcher signalsocket.IssueSearcher
+
 	// HeartbeatOut is the human-facing sink for every Box's heartbeat writer
 	// and each dispatch-start announce line (issue #1829). Nil defaults to
 	// os.Stdout in box.go. The console entry point sets io.Discard: Bubble Tea

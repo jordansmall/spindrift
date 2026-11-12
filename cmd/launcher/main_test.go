@@ -3327,6 +3327,27 @@ func TestDispatchConfig_CopiesDescriptorRowsThrough(t *testing.T) {
 	}
 }
 
+// dispatchConfig hands the Signal socket an issue searcher exactly when the
+// tracker resolved a search capability and an issue reader exists.
+func TestDispatchConfig_CarriesIssueSearcher(t *testing.T) {
+	it := forge.NewFake()
+	cf := forge.NewFake()
+	with := dispatchConfig(minimalValidConfig(), "", it, testWired(it), cf, forge.Capabilities{IssueSearcher: it})
+	if with.IssueReader == nil || with.IssueSearcher == nil {
+		t.Errorf("reader/searcher non-nil = %v/%v, want both with a search capability", with.IssueReader != nil, with.IssueSearcher != nil)
+	}
+	without := dispatchConfig(minimalValidConfig(), "", it, testWired(it), cf, forge.Capabilities{})
+	if without.IssueReader == nil || without.IssueSearcher != nil {
+		t.Errorf("reader/searcher non-nil = %v/%v, want reader only without a search capability", without.IssueReader != nil, without.IssueSearcher != nil)
+	}
+	noReader := minimalValidConfig()
+	noReader.IssueTracker = "local"
+	got := dispatchConfig(noReader, "", it, testWired(it), cf, forge.Capabilities{IssueSearcher: it})
+	if got.IssueReader != nil || got.IssueSearcher != nil {
+		t.Errorf("reader/searcher non-nil = %v/%v, want neither without an issue reader", got.IssueReader != nil, got.IssueSearcher != nil)
+	}
+}
+
 // Pins issue #3725: SignalCarrier and NetworkMode must reach dispatch.Config
 // unchanged, since startSignalSocket's per-Dispatch transport gate reads them off
 // this value rather than re-resolving c directly.

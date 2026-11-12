@@ -158,6 +158,16 @@ func (r trackerIssueReader) id(ref string) (string, *signalwire.Reject) {
 	return r.scope + "-" + strconv.Itoa(n), nil
 }
 
+// trackerReject maps a failed tracker read to the Box-facing Reject: a Route
+// table refusal is 403, anything else 502. The error detail stays with the
+// caller's warn writer, never in the Reason.
+func trackerReject(err error) *signalwire.Reject {
+	if errors.Is(err, connectorhost.ErrRouteRefused) {
+		return &signalwire.Reject{Status: "refused", Reason: "the tracker's route table refused this request", Code: http.StatusForbidden}
+	}
+	return &signalwire.Reject{Status: "tracker_error", Reason: "the tracker request failed", Code: http.StatusBadGateway}
+}
+
 func (r trackerIssueReader) ReadIssue(ref string) (signalwire.IssueSnapshot, *signalwire.Reject) {
 	id, rej := r.id(ref)
 	if rej != nil {
@@ -166,26 +176,19 @@ func (r trackerIssueReader) ReadIssue(ref string) (signalwire.IssueSnapshot, *si
 	th, err := forge.IssueThread(r.t, id, r.warn)
 	if err != nil {
 		fmt.Fprintf(r.warn, "    ?? signal issue read %s: %v\n", id, err)
-		switch {
-		case errors.Is(err, connectorhost.ErrRouteRefused):
-			return signalwire.IssueSnapshot{}, &signalwire.Reject{Status: "refused", Reason: "the tracker's route table refused this read", Code: http.StatusForbidden}
-		case errors.Is(err, forge.ErrNotFound):
+		if errors.Is(err, forge.ErrNotFound) {
 			return signalwire.IssueSnapshot{}, &signalwire.Reject{Status: "not_found", Reason: "no such issue in this dispatch's tracker", Code: http.StatusNotFound}
 		}
-		return signalwire.IssueSnapshot{}, &signalwire.Reject{Status: "tracker_error", Reason: "the tracker read failed", Code: http.StatusBadGateway}
+		return signalwire.IssueSnapshot{}, trackerReject(err)
 	}
 	// A tracker can resolve a bare id to another project's issue; the
 	// answer must be the issue asked for or nothing.
 	if !strings.EqualFold(th.Issue.Number, id) {
 		return signalwire.IssueSnapshot{}, foreignRef()
 	}
-	state := "open"
-	if th.Issue.State == forge.IssueClosed {
-		state = "closed"
-	}
 	// Truncated is the one "this thread is incomplete" signal the wire has, so an
 	// unreadable comment fetch sets it rather than reading as "no comments".
-	snap := signalwire.IssueSnapshot{Ref: id, Title: th.Issue.Title, State: state, Labels: th.Issue.Labels, Body: th.Issue.Body, Truncated: th.CommentsErr != nil}
+	snap := signalwire.IssueSnapshot{Ref: id, Title: th.Issue.Title, State: th.Issue.State.Wire(), Labels: th.Issue.Labels, Body: th.Issue.Body, Truncated: th.CommentsErr != nil}
 	for _, c := range th.Comments {
 		snap.Comments = append(snap.Comments, signalwire.IssueComment{Author: c.Author, CreatedAt: c.CreatedAt, Body: c.Body})
 	}

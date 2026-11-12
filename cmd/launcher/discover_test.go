@@ -434,3 +434,44 @@ func TestIssueReader_ScopeFromConfig(t *testing.T) {
 		})
 	}
 }
+
+// The issue-search verb's searcher exists exactly when the issue reader does
+// and the tracker can search. Absence must be an untyped nil: a typed-nil
+// wrapper would defeat the handler's nil check.
+func TestIssueSearcher_NeedsReaderAndCapability(t *testing.T) {
+	for _, tc := range []struct {
+		name, tracker string
+		capability    bool
+		want          bool
+	}{
+		{"no reader", "local", true, false},
+		{"no capability", "github", false, false},
+		{"reader and capability", "github", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := baseConfig()
+			c.IssueTracker = tc.tracker
+			c.RepoSlug = "owner/repo"
+			fc := forge.NewFake()
+			// Only the capability holds issue 7, so a searcher built over the
+			// reader's tracker instead would not find it.
+			searchable := forge.NewFake()
+			searchable.SetIssue(forge.Issue{Number: "7", Title: "flaky widget"})
+			var caps forge.Capabilities
+			if tc.capability {
+				caps.IssueSearcher = searchable
+			}
+			got := issueSearcher(issueReader(c, fc, io.Discard), caps, io.Discard)
+			if (got != nil) != tc.want {
+				t.Fatalf("issueSearcher non-nil = %v, want %v", got != nil, tc.want)
+			}
+			if got == nil {
+				return
+			}
+			reply, rej := got.SearchIssues("widget", forge.IssueOpen, "", 5)
+			if rej != nil || len(reply.Issues) != 1 || reply.Issues[0].Number != "7" {
+				t.Errorf("SearchIssues = %+v, %+v; want the seeded issue 7 from the capability", reply, rej)
+			}
+		})
+	}
+}
