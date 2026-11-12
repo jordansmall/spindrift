@@ -19,6 +19,7 @@ var Strategy = backendkit.Strategy{
 	LandedBanner: func(s backendkit.Shared) string {
 		return "branches pushed and PRs opened on " + s.RepoSlug
 	},
+	IssueReadScope: func(s backendkit.Shared, _ backendkit.Lookup) string { return s.RepoSlug },
 	AutoMergeRemedy: func(backendkit.Shared) string {
 		return `enable "Allow auto-merge" in repo Settings → General`
 	},

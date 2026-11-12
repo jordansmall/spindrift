@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -452,5 +453,88 @@ func TestSignalSocketConfig_ZeroCapLeavesSocketDefault(t *testing.T) {
 	research := researchFactory.New("42", "t")
 	if got := research.signalSocketConfig().MaxIssueIntents; got != 0 {
 		t.Errorf("research Dispatch MaxIssueIntents = %d, want 0 (socket default)", got)
+	}
+}
+
+type fakeIssueReader struct{ refs []string }
+
+func (f *fakeIssueReader) ReadIssue(ref string) (signalwire.IssueSnapshot, *signalwire.Reject) {
+	f.refs = append(f.refs, ref)
+	return signalwire.IssueSnapshot{Ref: ref, Title: "from the host reader", State: "open"}, nil
+}
+
+// getIssue runs a socket-carrier Dispatch whose Box does GET /issue?ref=7 and
+// returns the status and body it saw, over whichever carrier the transport
+// verdict picks.
+func getIssue(t *testing.T, cfg Config, transport registrymanifest.Endpoint) (int, string) {
+	t.Helper()
+	cfg.SignalCarrier = "socket"
+	fr := runner.NewFake()
+	fr.RegistryProxyTransportEndpoint = transport
+
+	var status int
+	var body string
+	fr.RunFunc = func(box runner.Box) error {
+		var resp *http.Response
+		var err error
+		if transport.IsUnix() {
+			client := &http.Client{Transport: &http.Transport{
+				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+					return net.Dial("unix", box.Sockets[0].Source)
+				},
+			}}
+			resp, err = client.Get("http://signal/issue?ref=7")
+		} else {
+			req, rerr := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%s/issue?ref=7", box.SignalSocket.Endpoint.Port()), nil)
+			if rerr != nil {
+				t.Fatalf("build request: %v", rerr)
+			}
+			req.Header.Set(signalwire.SecretHeader, box.Env["SIGNAL_SOCKET_SECRET"])
+			resp, err = http.DefaultClient.Do(req)
+		}
+		if err != nil {
+			t.Errorf("GET /issue: %v", err)
+		} else {
+			status = resp.StatusCode
+			b, _ := io.ReadAll(resp.Body)
+			body = string(b)
+			resp.Body.Close() //nolint:errcheck
+		}
+		box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=" + box.Env["RUN_NONCE"] + "\n")) //nolint:errcheck
+		return nil
+	}
+	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
+	}
+	return status, body
+}
+
+// TestSignalSocket_IssueRead_UsesConfiguredReader pins that the per-Pass
+// handler is built over Config.IssueReader on both carriers (issue #6894).
+func TestSignalSocket_IssueRead_UsesConfiguredReader(t *testing.T) {
+	for name, transport := range map[string]registrymanifest.Endpoint{
+		"unix": registrymanifest.NewUnixEndpoint(""),
+		"tcp":  registrymanifest.NewTCPEndpoint("host.docker.internal", ""),
+	} {
+		t.Run(name, func(t *testing.T) {
+			reader := &fakeIssueReader{}
+			cfg := retryConfig(3, 0, 0)
+			cfg.IssueReader = reader
+			status, body := getIssue(t, cfg, transport)
+			if status != http.StatusOK || !strings.Contains(body, "from the host reader") {
+				t.Errorf("GET /issue = %d %q, want 200 from the configured reader", status, body)
+			}
+			if len(reader.refs) != 1 || reader.refs[0] != "7" {
+				t.Errorf("reader saw refs %v, want [7]", reader.refs)
+			}
+		})
+	}
+}
+
+func TestSignalSocket_IssueRead_NilReaderIsUnsupported(t *testing.T) {
+	status, _ := getIssue(t, retryConfig(3, 0, 0), registrymanifest.NewUnixEndpoint(""))
+	if status != http.StatusNotImplemented {
+		t.Errorf("GET /issue with no reader = %d, want 501", status)
 	}
 }

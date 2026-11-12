@@ -44,6 +44,7 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/shutdown"
+	"spindrift.dev/launcher/internal/signalsocket"
 	"spindrift.dev/launcher/internal/stopsignal"
 	"spindrift.dev/launcher/internal/terminate"
 	"spindrift.dev/launcher/internal/waves"
@@ -566,6 +567,26 @@ func newIssueTracker(c config) forge.IssueTracker {
 	return mustBuild(s.NewIssueTracker(backendShared(c), c.knobLookup))
 }
 
+// issueReader builds the Signal socket's host issue reader over the Dispatch's
+// tracker. The scope comes from resolved config, never the request (ADR
+// 0052); a tracker with none gets no reader. A tracker that has a read scope
+// hook but resolved none is a misconfiguration, so it says so on warn: the
+// prompt still offers the verb, and every call would answer 501.
+func issueReader(c config, it forge.IssueTracker, warn io.Writer) signalsocket.IssueReader {
+	s, ok := backendkit.ByName(c.IssueTracker)
+	if !ok {
+		return nil
+	}
+	scope := s.IssueReadScopeOf(backendShared(c), c.knobLookup)
+	if scope == "" {
+		if s.IssueReadScope != nil {
+			fmt.Fprintf(warn, "    ?? signal issue read disabled: %s tracker has no read scope (check its project knobs)\n", c.IssueTracker)
+		}
+		return nil
+	}
+	return signalsocket.NewTrackerIssueReader(it, scope, warn)
+}
+
 // issueScope names where the tracker's issues live for the discovery lines:
 // the tracker's own scope when its Strategy has one, else the repo slug.
 func issueScope(c config) string {
@@ -822,6 +843,7 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 		IssueTextFor: func(number string) (string, error) {
 			return forge.IssueText(it, number, os.Stderr)
 		},
+		IssueReader: issueReader(c, it, os.Stderr),
 	}
 }
 
