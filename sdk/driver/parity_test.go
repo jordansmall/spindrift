@@ -1,8 +1,10 @@
 package driver
 
 import (
+	"bytes"
 	"go/ast"
 	"go/parser"
+	"go/printer"
 	"go/token"
 	"os"
 	"reflect"
@@ -180,5 +182,52 @@ func TestHostLineParity(t *testing.T) {
 	}
 	if !reflect.DeepEqual(passRoles, core) {
 		t.Errorf("SDK pass roles %v differ from core's %v", passRoles, core)
+	}
+}
+
+// funcSource returns the normalised source of the top-level func name (no
+// receiver) declared in dir's non-test files, "" when there is none.
+func funcSource(t *testing.T, dir, name string) string {
+	t.Helper()
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pkg := range pkgs {
+		for _, f := range pkg.Files {
+			for _, d := range f.Decls {
+				fn, ok := d.(*ast.FuncDecl)
+				if !ok || fn.Recv != nil || fn.Name.Name != name {
+					continue
+				}
+				fn.Doc = nil
+				var buf bytes.Buffer
+				if err := printer.Fprint(&buf, fset, fn); err != nil {
+					t.Fatal(err)
+				}
+				return strings.Join(strings.Fields(buf.String()), " ")
+			}
+		}
+	}
+	return ""
+}
+
+// TestHelperParity fails when an SDK helper's source drifts from its driverkit
+// original. A Connector cannot import driverkit (issue #6870), so the SDK
+// carries twins; identical source means identical output for every input.
+func TestHelperParity(t *testing.T) {
+	for _, name := range []string{"ToolTarget", "ErrorText", "CompactJSON"} {
+		t.Run(name, func(t *testing.T) {
+			core := funcSource(t, coreDir, name)
+			if core == "" {
+				t.Fatalf("core has no func %s", name)
+			}
+			if sdk := funcSource(t, ".", name); sdk != core {
+				t.Errorf("SDK %s differs from core's:\nSDK:  %s\ncore: %s", name, sdk, core)
+			}
+		})
 	}
 }
