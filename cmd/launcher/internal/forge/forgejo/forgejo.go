@@ -534,22 +534,16 @@ func (c *forgejoClient) nativeLinks(num, endpoint string) ([]string, error) {
 	return dependencyIDs(payload), nil
 }
 
-// DepsOf returns issue num's dependencies, preferring Forgejo's native
-// dependencies API and falling back to body-text parsing when that lookup
-// errors or finds nothing.
+// DepsOf delegates to forge.DepsOf, which prefers NativeDepsOf over the body.
 func (c *forgejoClient) DepsOf(num string) ([]forge.Dependency, error) {
-	deps, err := c.nativeLinks(num, "dependencies")
-	if err == nil && len(deps) > 0 {
-		return forge.WithSource(deps, forge.DepSourceNative), nil
-	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "WARNING: native dependency lookup for issue %s failed (%v); falling back to body parsing\n", num, err)
-	}
-	iss, err := c.Issue(num)
-	if err != nil {
-		return nil, err
-	}
-	return forge.WithSource(forge.ParseBlockerRefs(iss.Body), forge.DepSourceBody), nil
+	return forge.DepsOf(c, num)
+}
+
+var _ forge.NativeDepsReader = (*forgejoClient)(nil)
+
+// NativeDepsOf reads issue num's dependencies from Forgejo's native API.
+func (c *forgejoClient) NativeDepsOf(num string) ([]string, error) {
+	return c.nativeLinks(num, "dependencies")
 }
 
 // BlocksOf returns the issues num blocks, from Forgejo's native blocks
@@ -564,14 +558,9 @@ func (c *forgejoClient) BlocksOf(num string) ([]forge.Dependency, error) {
 	return forge.WithSource(blocks, forge.DepSourceNative), nil
 }
 
-// TouchesOf returns the touch-set parsed from issue num's body. Forgejo has no
-// native touch-set concept to prefer over the shared body grammar.
+// TouchesOf delegates to forge.TouchesOf.
 func (c *forgejoClient) TouchesOf(num string) ([]string, error) {
-	iss, err := c.Issue(num)
-	if err != nil {
-		return nil, err
-	}
-	return forge.ParseTouchPaths(iss.Body), nil
+	return forge.TouchesOf(c, num)
 }
 
 // CloseMergedIssue implements forge.MergeCloser (issue #2259), a backstop for

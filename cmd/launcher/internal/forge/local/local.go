@@ -370,28 +370,21 @@ func (lt *LocalTracker) CompleteVerdict(num string, verdict forge.Verdict) error
 	return lt.writeIssueFile(num, li)
 }
 
-// DepsOf returns the dependency slugs under issue num's "## Blocked by"
-// section, always forge.DepSourceBody because the local tracker has no native
-// relationship concept. Local issues reference each other by filename slug,
-// not by the GitHub "#N" refs ParseBlockerRefs reads.
+var _ forge.BodyGrammarer = (*LocalTracker)(nil)
+
+// BodyGrammar declares description-only parsing with filename-slug blockers:
+// local issues reference each other by slug, not "#N", and have no native
+// relationships.
+func (lt *LocalTracker) BodyGrammar() forge.BodyGrammar { return forge.BodyGrammarLocal }
+
+// DepsOf delegates to forge.DepsOf.
 func (lt *LocalTracker) DepsOf(num string) ([]forge.Dependency, error) {
-	li, err := lt.readIssueFile(num)
-	if err != nil {
-		return nil, err
-	}
-	return forge.WithSource(forge.ParseBlockerSlugs(li.body), forge.DepSourceBody), nil
+	return forge.DepsOf(lt, num)
 }
 
-// TouchesOf returns the touch-set parsed from issue num's description (the
-// body above its "## Comments" section, as forge.ParseBlockerSlugs reads it) with
-// the shared body grammar, because the local tracker has no native touch-set
-// concept.
+// TouchesOf delegates to forge.TouchesOf.
 func (lt *LocalTracker) TouchesOf(num string) ([]string, error) {
-	li, err := lt.readIssueFile(num)
-	if err != nil {
-		return nil, err
-	}
-	return forge.ParseTouchPaths(forge.Description(li.body)), nil
+	return forge.TouchesOf(lt, num)
 }
 
 // Comment appends body as a bullet under issue num's "## Comments" section,

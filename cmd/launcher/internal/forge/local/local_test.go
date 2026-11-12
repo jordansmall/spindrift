@@ -650,7 +650,7 @@ func TestLocalTracker_DepsOf_ParsesBlockedBySlugSection(t *testing.T) {
 	})
 
 	lt := NewLocalTracker(dir, labels)
-	deps, err := lt.DepsOf("depends-on-others")
+	deps, err := forge.DepsOf(lt, "depends-on-others")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
@@ -672,7 +672,7 @@ func TestLocalTracker_DepsOf_IssueRefLineDoesNotEndSection(t *testing.T) {
 	})
 
 	lt := NewLocalTracker(dir, labels)
-	deps, err := lt.DepsOf("depends-on-others")
+	deps, err := forge.DepsOf(lt, "depends-on-others")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
@@ -732,7 +732,7 @@ func TestLocalTracker_DepsOf_SkipsFencedLines(t *testing.T) {
 				body:        tc.body,
 			})
 
-			deps, err := NewLocalTracker(dir, labels).DepsOf("depends-on-others")
+			deps, err := forge.DepsOf(NewLocalTracker(dir, labels), "depends-on-others")
 			if err != nil {
 				t.Fatalf("DepsOf: %v", err)
 			}
@@ -757,7 +757,7 @@ func TestLocalTracker_DepsOf_StripsBackticksFromSlug(t *testing.T) {
 	})
 
 	lt := NewLocalTracker(dir, labels)
-	deps, err := lt.DepsOf("depends-on-others")
+	deps, err := forge.DepsOf(lt, "depends-on-others")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
@@ -783,7 +783,7 @@ func TestLocalTracker_DepsOf_SkipsSentinelBullet(t *testing.T) {
 	})
 
 	lt := NewLocalTracker(dir, labels)
-	deps, err := lt.DepsOf("first-slice")
+	deps, err := forge.DepsOf(lt, "first-slice")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
@@ -805,7 +805,7 @@ func TestLocalTracker_DepsOf_SkipsBacktickQuotedSentinel(t *testing.T) {
 	})
 
 	lt := NewLocalTracker(dir, labels)
-	deps, err := lt.DepsOf("backtick-sentinel")
+	deps, err := forge.DepsOf(lt, "backtick-sentinel")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
@@ -825,7 +825,7 @@ func TestLocalTracker_DepsOf_SkipsSentinelBulletNA(t *testing.T) {
 	})
 
 	lt := NewLocalTracker(dir, labels)
-	deps, err := lt.DepsOf("third-slice")
+	deps, err := forge.DepsOf(lt, "third-slice")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
@@ -845,7 +845,7 @@ func TestLocalTracker_DepsOf_SentinelBulletDoesNotSuppressRealSlug(t *testing.T)
 	})
 
 	lt := NewLocalTracker(dir, labels)
-	deps, err := lt.DepsOf("second-slice")
+	deps, err := forge.DepsOf(lt, "second-slice")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
@@ -866,7 +866,7 @@ func TestLocalTracker_DepsOf_NoBlockedBySection(t *testing.T) {
 	})
 
 	lt := NewLocalTracker(dir, labels)
-	deps, err := lt.DepsOf("standalone")
+	deps, err := forge.DepsOf(lt, "standalone")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
@@ -887,7 +887,7 @@ func TestLocalTracker_DepsOf_EmptyBlockedBySection(t *testing.T) {
 	})
 
 	lt := NewLocalTracker(dir, labels)
-	deps, err := lt.DepsOf("empty-section")
+	deps, err := forge.DepsOf(lt, "empty-section")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
@@ -1731,7 +1731,7 @@ func TestLocalTracker_DepsOf_ThenIssue_RejectsPathTraversalBlocker(t *testing.T)
 	})
 
 	lt := NewLocalTracker(dir, testLabels)
-	deps, err := lt.DepsOf("depends-on-traversal")
+	deps, err := forge.DepsOf(lt, "depends-on-traversal")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
@@ -1784,7 +1784,7 @@ func TestLocalTracker_TouchesAndDepsOf_IgnoreCommentSection(t *testing.T) {
 		t.Fatalf("Comment: %v", err)
 	}
 
-	touches, err := lt.TouchesOf("subject")
+	touches, err := forge.TouchesOf(lt, "subject")
 	if err != nil {
 		t.Fatalf("TouchesOf: %v", err)
 	}
@@ -1792,7 +1792,7 @@ func TestLocalTracker_TouchesAndDepsOf_IgnoreCommentSection(t *testing.T) {
 		t.Errorf("TouchesOf = %v, want %v", touches, want)
 	}
 
-	deps, err := lt.DepsOf("subject")
+	deps, err := forge.DepsOf(lt, "subject")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}

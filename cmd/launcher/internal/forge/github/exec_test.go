@@ -88,7 +88,7 @@ func TestExecClient_DepsOf_NativeWins(t *testing.T) {
 esac`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
-	deps, err := c.DepsOf("10")
+	deps, err := forge.DepsOf(c, "10")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestExecClient_DepsOf_FallsBackOnEmptyNative(t *testing.T) {
 esac`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
-	deps, err := c.DepsOf("10")
+	deps, err := forge.DepsOf(c, "10")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestExecClient_DepsOf_FallsBackOnNativeError(t *testing.T) {
 esac`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
-	deps, err := c.DepsOf("10")
+	deps, err := forge.DepsOf(c, "10")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
@@ -154,7 +154,7 @@ esac`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	out := testutil.CaptureStderr(t, func() {
-		if _, err := c.DepsOf("10"); err != nil {
+		if _, err := forge.DepsOf(c, "10"); err != nil {
 			t.Fatalf("DepsOf: %v", err)
 		}
 	})
@@ -174,12 +174,12 @@ func TestExecClient_DepsOf_NativeErrorEmptyStderrNoTrailingColon(t *testing.T) {
 esac`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
-	_, err := c.nativeDepsOf("10")
+	_, err := c.NativeDepsOf("10")
 	if err == nil {
-		t.Fatal("nativeDepsOf: want error, got nil")
+		t.Fatal("NativeDepsOf: want error, got nil")
 	}
 	if strings.HasSuffix(err.Error(), ": ") {
-		t.Fatalf("nativeDepsOf error must not have a trailing colon-space; got: %q", err.Error())
+		t.Fatalf("NativeDepsOf error must not have a trailing colon-space; got: %q", err.Error())
 	}
 }
 
@@ -197,7 +197,7 @@ esac`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	out := testutil.CaptureStderr(t, func() {
-		if _, err := c.DepsOf("10"); err != nil {
+		if _, err := forge.DepsOf(c, "10"); err != nil {
 			t.Fatalf("DepsOf: %v", err)
 		}
 	})
@@ -219,7 +219,7 @@ func TestExecClient_DepsOf_NativeIgnoresBody(t *testing.T) {
 esac`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
-	deps, err := c.DepsOf("10")
+	deps, err := forge.DepsOf(c, "10")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestExecClient_DepsOf_NativeDeduplicates(t *testing.T) {
 esac`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
-	deps, err := c.DepsOf("10")
+	deps, err := forge.DepsOf(c, "10")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
@@ -792,7 +792,7 @@ func TestExecClient_TouchesOf_FetchesFullIssueBody(t *testing.T) {
 esac`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
-	touches, err := c.TouchesOf("10")
+	touches, err := forge.TouchesOf(c, "10")
 	if err != nil {
 		t.Fatalf("TouchesOf: %v", err)
 	}

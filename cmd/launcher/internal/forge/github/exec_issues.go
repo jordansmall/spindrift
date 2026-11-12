@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"slices"
 	"sort"
@@ -348,25 +347,16 @@ func (e *execClient) CompleteVerdict(num string, verdict forge.Verdict) error {
 	return nil
 }
 
-// DepsOf returns issue num's dependencies, preferring GitHub's native
-// issue-dependencies API and falling back to body-text parsing when that
-// lookup errors or returns no relationships.
+// DepsOf delegates to forge.DepsOf, which prefers NativeDepsOf over the body.
 func (e *execClient) DepsOf(num string) ([]forge.Dependency, error) {
-	deps, err := e.nativeDepsOf(num)
-	if err == nil && len(deps) > 0 {
-		return forge.WithSource(deps, forge.DepSourceNative), nil
-	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "WARNING: native dependency lookup for issue %s failed (%v); falling back to body parsing\n", num, err)
-	}
-	iss, err := e.Issue(num)
-	if err != nil {
-		return nil, err
-	}
-	return forge.WithSource(forge.ParseBlockerRefs(iss.Body), forge.DepSourceBody), nil
+	return forge.DepsOf(e, num)
 }
 
-func (e *execClient) nativeDepsOf(num string) ([]string, error) {
+var _ forge.NativeDepsReader = (*execClient)(nil)
+
+// NativeDepsOf reads issue num's blocked_by relationships from GitHub's
+// native issue-dependencies API.
+func (e *execClient) NativeDepsOf(num string) ([]string, error) {
 	return e.nativeDependencyIDs(num, "blocked_by")
 }
 
@@ -435,14 +425,9 @@ func (e *execClient) PriorClaimState(num string) (forge.DispatchState, bool, err
 	return prior, found, nil
 }
 
-// TouchesOf parses the declared touch-set from issue num's body; this adapter
-// has no native touch-set concept to prefer over the shared body grammar.
+// TouchesOf delegates to forge.TouchesOf.
 func (e *execClient) TouchesOf(num string) ([]string, error) {
-	iss, err := e.Issue(num)
-	if err != nil {
-		return nil, err
-	}
-	return forge.ParseTouchPaths(iss.Body), nil
+	return forge.TouchesOf(e, num)
 }
 
 // CloseMergedIssue closes issue num as a backstop for a merged agent PR whose

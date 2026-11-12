@@ -3454,8 +3454,10 @@ func TestTea_RefreshKey_InvalidatesDetailCache(t *testing.T) {
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "the full ticket body")
 
-	if len(f.IssueCalls) != calls+1 {
-		t.Errorf("IssueCalls grew from %d to %d across a refreshed reopen, want exactly one new fetch (%d)", calls, len(f.IssueCalls), calls+1)
+	// One detail open costs `calls` Issue reads (the body, plus forge.DepsOf's
+	// body fallback), so a cache-invalidated reopen repeats exactly that.
+	if len(f.IssueCalls) != 2*calls {
+		t.Errorf("IssueCalls grew from %d to %d across a refreshed reopen, want exactly one repeat of the first open (%d)", calls, len(f.IssueCalls), 2*calls)
 	}
 
 	sendKey(tm, "esc")
