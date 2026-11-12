@@ -1,4 +1,5 @@
 {
   ".": "0.31.0",
-  "connectors/claude": "0.1.0"
+  "connectors/claude": "0.1.0",
+  "connectors/github": "0.1.0"
 }

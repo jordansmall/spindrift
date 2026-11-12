@@ -25,6 +25,9 @@
     },
     "connectors/claude": {
       "component": "claude"
+    },
+    "connectors/github": {
+      "component": "github"
     }
   }
 }
