@@ -48,7 +48,9 @@ var (
 // query string: any query is forwarded to an admitted path, and the audit log
 // records it.
 type Route struct {
-	Method, Host, Path string
+	Method string `json:"method"`
+	Host   string `json:"host"`
+	Path   string `json:"path"`
 }
 
 func (r Route) String() string { return r.Method + " " + r.Host + " " + r.Path }

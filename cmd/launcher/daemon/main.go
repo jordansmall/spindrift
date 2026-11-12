@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -820,6 +821,9 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return refuse(err)
 	}
 	if err := driverrows.Use(doc.Drivers); err != nil {
+		return refuse(err)
+	}
+	if err := backendrows.Use(doc.Backends); err != nil {
 		return refuse(err)
 	}
 

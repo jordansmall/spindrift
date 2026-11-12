@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/console"
 	"spindrift.dev/launcher/internal/dispatch"
@@ -2331,6 +2332,10 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if err := driverrows.Use(resolved.Drivers); err != nil {
+		fmt.Fprintf(stderr, "%s\n", err)
+		return configErrorCode(verb, int(exitcode.ConfigInvalid))
+	}
+	if err := backendrows.Use(resolved.Backends); err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return configErrorCode(verb, int(exitcode.ConfigInvalid))
 	}
