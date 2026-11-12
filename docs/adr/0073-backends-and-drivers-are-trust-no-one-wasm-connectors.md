@@ -263,7 +263,8 @@ What the live heartbeat needs is far below the interpreter's rate. The
 densest real pass in the corpus emits about 2.8 lines/s (61 lines in 21.9 s,
 `real-conflict-resolve-error`); the interpreter sustains about 62 lines/s
 through the heartbeat, roughly 20x headroom, and about 5 percent of one core
-at the real rate.
+at the real rate. (Not on dogfood-sized lines; see the #6849 re-measure
+below.)
 
 The compiler would add surface for a gain the heartbeat does not need. It
 generates native code in the launcher's process from an untrusted module, so
@@ -275,11 +276,100 @@ per-user (`seamtest/strategy.go`) or another user could plant code in it.
 Where the interpreter is weaker: re-decoding a whole log, such as reading
 back a 332-line pass, takes seconds, not milliseconds. Revisit if a Connector
 decodes at a much higher line rate, for example partial-message streaming, or
-a whole-log path becomes interactive.
+a whole-log path becomes interactive. The #6849 re-measure below puts numbers
+on this: about 50 s a read. One path is already interactive: the console's
+`RenderTranscript` read (`internal/console/transcript.go`) would take about
+50 s on the largest Pass after a cut-over to the interpreter.
 
 To re-run, use the command in the header of
 `cmd/launcher/internal/driver/claude/connector_bench_test.go` with `-count 5`,
 the wasm built as `nix/checks/go.nix`'s `setupFor` builds it.
+
+### Re-measured on dogfood-sized Pass logs (issue #6849)
+
+The 769-line corpus above averages 0.7 KB a line. Dogfood Pass logs average
+about 5 KB a line, with tool results up to 850 KB. The new corpus,
+`cmd/launcher/internal/driver/claude/testdata/dogfood/` (`NOTES.md`), is two
+synthetic Passes: 636 lines, 2.96 MB; the largest (`large-pass`) is 511 lines,
+2.57 MB. Medians of 3, same machine and toolchain, run inside a dogfood Box on
+a shared host, so the old corpus re-measured at 19.0 ms/line on the
+interpreter against 15.3 ms above. Compare ratios within one run, not across
+runs. To re-run, use the same header command with `-count 3`.
+
+| bench, per line | native | interpreter | compiler |
+|---|---|---|---|
+| Decode, dogfood corpus | 140 µs | 80.3 ms | 11.1 ms |
+| Heartbeat (97-byte chunks), dogfood corpus | 258 µs | 87.5 ms | 13.4 ms |
+| Decode, 769-line corpus (same run) | 29.1 µs | 19.0 ms | 2.59 ms |
+
+The cost is per byte, not per call. `BenchmarkConnectorDecodeSize` decodes one
+`tool_result` line per Call:
+
+| line | native | interpreter | compiler |
+|---|---|---|---|
+| 245 B | 14.9 µs | 10.8 ms | 1.35 ms |
+| 8,153 B | 390 µs | 189 ms | 28.9 ms |
+| 261,040 B | 13.4 ms | 6.42 s | 930 ms |
+| 866,965 B | 47.2 ms | 19.9 s | 2.50 s |
+
+A linear fit over six sizes gives the interpreter about 4.9 ms per Call plus
+23.3 µs per byte (every point within 5 percent), the compiler about 0.58 ms
+plus 3.3 µs per byte, native about 2.4 µs plus 49 ns per byte. Above about 200
+bytes a line, cost is per byte; the interpreter's is about 475x native's. The
+fit is of `sizedLine`, which carries each result once; the corpus repeats it in
+`content` and `tool_use_result`, so on the corpus itself the interpreter costs
+about 17-18 µs per byte (80.3 ms a line at a 4.65 KB mean; `ResultText` 47 s
+over 2.57 MB) and the fit over-predicts it by about 30 percent. On that
+synthetic shape, #6849's two-point estimate from shadow summaries (19 ms fixed,
+about 11 µs per byte) is off: the fixed part is about a quarter of that, the
+per-byte part about twice. Size-free Calls cost: `newDecoder` 0.79 ms
+interpreter, 0.23 ms compiler; on the interpreter `sessionFlags` 2.25 ms and
+`resultEvent` 1.53 ms. Load is 205 ms interpreter, 1.58 s compiler.
+
+After a Pass, core makes whole-log reads, each opening its own decoder and
+decoding the log (`BenchmarkConnectorWholeLog`, on `large-pass`):
+
+| read | native | interpreter | compiler |
+|---|---|---|---|
+| `ResultText` | 103 ms | 47.0 s | 6.94 s |
+| `RenderTranscript` | 96.6 ms | 48.6 s | 6.60 s |
+| `ExtractUsageAfter` | 323 ms | 184 s | 25.6 s |
+| `ClassifyTransient` | 82.7 ms | 54.0 s | 7.03 s |
+| `ReadPasses` | 87.7 ms | 49.1 s | 8.20 s |
+| `SessionBaselinesAfter` | 104 ms | 55.2 s | 6.43 s |
+
+`ResolveExit` makes no Connector call for claude. `ExtractUsageAfter` scans
+four times, so it costs about 3.5x a single-scan read on every engine. The
+first five rows sum to about 0.69 s native, 383 s (6.4 minutes) on the
+interpreter, 54 s on the compiler, for one Pass, before
+`SessionBaselinesAfter` on prior logs.
+
+Shadow replay (`BenchmarkConnectorShadowReplay`, `shadow.Run` on `large-pass`,
+interpreter) took 53.2 s with no divergences: 0.44 of the 2-minute
+`shadowBudget`. It decodes the log once, at about 20.7 µs per byte, so a Pass
+log above roughly 5 MB would exhaust the budget and record a summary error.
+
+Do the #6798 conclusions still hold?
+
+- **Heartbeat headroom: no, not as stated.** The interpreter sustains about
+  11 lines/s through the heartbeat on the dogfood corpus (87.5 ms/line)
+  against the densest real pass's 2.8 lines/s: about 4x headroom, not 20x, and
+  about a quarter of one core at that rate. Worse, the cost is per byte, and
+  the heartbeat writer decodes inside `Write`, so one 850 KB tool result takes
+  about 20 s and stalls the stream behind it. The heartbeat keeps up on
+  average, not per line.
+- **Interpreter choice: holds for shadow mode, not for cut-over.** The
+  largest Pass fits the shadow budget at 0.44 and the live heartbeat keeps up
+  on average. For cut-over (#6799), each whole-log read becomes about 50 s and
+  the after-Pass set about 6.4 minutes. The compiler alone does not fix that:
+  about 7x faster is still about 54 s for the set, plus a 1.6 s Load and the
+  surface rejected above. The engine stays the interpreter, and #6799 should
+  not cut over until the whole-log path is resolved.
+
+Open for #6799, not decided: decode a Pass log once and share its canonical
+events across the readers (about nine full scans after a Pass today); cut the
+Connector's per-byte cost (the bulk is large `tool_result` strings the readers
+mostly do not need); or the compiler with a per-user cache.
 
 ## Amendment (issue #6796): a Connector's Driver row reaches the binaries
 
