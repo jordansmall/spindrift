@@ -4137,6 +4137,15 @@ needs its own push credentials for that remote (e.g. an SSH key or
 credential helper covering `CODE_FORGE_REMOTE_URL`) — separate from the
 Box's `GH_TOKEN`, which only covers the Issue Tracker. A push auth failure
 surfaces as a `merge-blocked` comment on the issue, not a crash.
+Userinfo on an http(s) `CODE_FORGE_REMOTE_URL` (`oauth2:<token>@`, or a
+bare `<token>@`) also works: the launcher splits it off and runs every
+host-side git call against the bare URL, handing git the credential
+through an environment-only credential helper, so the token reaches no
+argv, no clone's `remote.origin.url`, and no error text (issue #6860).
+Userinfo replaces any ambient credential helper for that call, so a URL
+whose password lives in a helper should carry no userinfo (put the
+username in the helper's config instead). The Forgejo backend's host-side
+git calls authenticate with `FORGEJO_TOKEN` the same way.
 
 ### In-box orchestrator
 
