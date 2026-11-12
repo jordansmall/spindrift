@@ -2425,11 +2425,27 @@ spindrift.connectors.fixture.backend = {
 `module` is a function of `pkgs` returning the Connector's wasm file, `routes`
 its Route table (see Network Connectors under [Connector
 protocol](#connector-protocol)) and `credential` the env-schema key of the knob
-holding its bearer token. It must be one of the Connector's own `knobs`, secret
-and `boxEnv = false`, as the fixture's `FIXTURE_TOKEN`; a core knob is refused so
-a Connector never gets core's forge token (ADR 0073). The flake module resolves
-the key to its env var and hands every such row to `mkHarness` as
-`backendRows`, keyed by Connector name.
+holding its secret (bearer token). It must be one of the Connector's own
+`knobs`, secret and `boxEnv = false`, as the fixture's `FIXTURE_TOKEN`; a core
+knob is refused so a Connector never gets core's forge token (ADR 0073). The
+flake module resolves the key to its env var and hands every such row to
+`mkHarness` as `backendRows`, keyed by Connector name.
+
+Three optional fields serve a tracker on the Consumer's own site, such as Jira.
+`scheme` is `"bearer"` (default) or `"basic"`; `basic` pairs `credential` (the
+API token) with `identity`, the key of another of the Connector's own host-only
+knobs holding the username (Jira Cloud's `JIRA_EMAIL`), which need not be
+secret, and bearer refuses an `identity`. `base` names any env-schema knob,
+core or the Connector's own, holding the site's https base URL; a Route whose
+`host` is exactly `{base}` resolves at launcher load to that URL's host, with
+the URL's path prefix prepended to the route path (a route path of `/` maps to
+the bare prefix, such as `/jira`; a base URL carrying an escaped path, `%2F`,
+is refused at load). An accepted baseline route resolves the same way, from the
+same base URL as the live routes, so repointing the base knob at a different
+host moves both tables together and doctor shows no diff; only its `; host
+from <ENV>` suffix hints at the change. A `{base}` route without `base` fails
+evaluation. They render into the row as `credentialScheme`, `identityEnv` and
+`baseEnv`, only when set (a bearer row with no `base` renders as before).
 
 Evaluation fails, naming the Connector and the route, on a Route table the host
 would refuse at load: a method that is not an uppercase token, a bad
@@ -2438,12 +2454,16 @@ or `#` (the registry-route rules). It also fails on a row named `git` or
 `local`, which stay built in, on a `credential` that is not one of the
 Connector's own secret, host-only knobs (a core knob included), on a credential
 knob with no `env` or whose `env` aliases a core one such as `GH_TOKEN`, and on
-a row missing its `module`, `routes` or `credential`.
+a row missing its `module`, `routes` or `credential`, on a `basic` scheme
+without an `identity` (or an `identity` on bearer), and on an `identity` that
+is not one of the Connector's own host-only knobs or a `base` that is no
+env-schema knob.
 
 `mkHarness` renders each row into the Launcher input document's `backends`
 section as `{name, module, routes, acceptedRoutes, credentialEnv,
-credentialKnob}`; `credentialKnob` is the Consumer knob that names
-`credentialEnv`, and doctor shows it. The launcher and the daemon validate and
+credentialKnob, credentialScheme, identityEnv, baseEnv}` (the last three
+optional); `credentialKnob` is the Consumer knob that names `credentialEnv`,
+and doctor shows it. The launcher and the daemon validate and
 store the rows (the `backendrows` package: `Use` validates the rows whole and
 exits `config-invalid` on a bad one). `Lookup` finds a row and `Load` binds its
 module to its Route table through the Connector host; nothing calls them until
