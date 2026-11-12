@@ -31,11 +31,19 @@ import (
 // only a result names gets a row of its own. A NoTotals result is skipped
 // entirely, as sumTotals does.
 func UsageByModel(path string, newDecoder func() Decoder, family ModelFamily, src TotalsSource) ([]usage.ModelUsage, error) {
+	l, err := DecodeLog(path, newDecoder)
+	if err != nil {
+		return nil, err
+	}
+	return l.usageByModel(family, src), nil
+}
+
+func (l *Log) usageByModel(family ModelFamily, src TotalsSource) []usage.ModelUsage {
 	buckets := make(map[string]*usage.ModelUsage)
 	seenIDs := make(map[string]bool)
 	resultOutput := make(map[string]int)
 	results, complete := 0, true
-	err := scanEvents(path, newDecoder, func(ev Event) {
+	l.Each(func(ev Event) {
 		if ev.Kind == KindResult && !ev.NoTotals && src == SessionTotals {
 			results++
 			if len(ev.ModelOutput) == 0 {
@@ -64,9 +72,6 @@ func UsageByModel(path string, newDecoder func() Decoder, family ModelFamily, sr
 		b.CacheWrite5mTokens += ev.Tokens.CacheWrite5m
 		b.CacheWrite1hTokens += ev.Tokens.CacheWrite1h
 	})
-	if err != nil {
-		return nil, err
-	}
 	if src == SessionTotals {
 		outputKnown := complete && results > 0
 		if outputKnown {
@@ -104,7 +109,7 @@ func UsageByModel(path string, newDecoder func() Decoder, family ModelFamily, sr
 	for _, model := range models {
 		result = append(result, *buckets[model])
 	}
-	return result, nil
+	return result
 }
 
 // TotalsSource names where a Driver's run totals come from.
@@ -139,12 +144,12 @@ func (s EventSpan) DurationMs() int64 { return s.Latest - s.Earliest }
 // with none, reports found=false and no error. It also returns the subagent
 // residual already folded into u.OutputTokens (always 0 under PerCallTotals),
 // so ExtractUsage can tell it from the main loop's output.
-func sumTotals(path string, newDecoder func() Decoder, src TotalsSource) (usage.Usage, EventSpan, bool, int, error) {
+func sumTotals(l *Log, src TotalsSource) (usage.Usage, EventSpan, bool, int) {
 	if src == SessionTotals {
-		return sumSession(path, newDecoder)
+		return sumSession(l)
 	}
-	u, span, found, err := sumPerCall(path, newDecoder)
-	return u, span, found, 0, err
+	u, span, found := sumPerCall(l)
+	return u, span, found, 0
 }
 
 // spanAnchor tracks the earliest non-zero event Timestamp of any kind. A
@@ -175,11 +180,11 @@ func (a spanAnchor) span(lastUsage int64) (EventSpan, bool) {
 // deduplication (only the breakdowns dedup), leaves DurationApiMs zero, and
 // spans the earliest event Timestamp to the last KindUsage; with no timestamp
 // the span and DurationMs stay unset.
-func sumPerCall(path string, newDecoder func() Decoder) (usage.Usage, EventSpan, bool, error) {
+func sumPerCall(l *Log) (usage.Usage, EventSpan, bool) {
 	var u usage.Usage
 	var anchor spanAnchor
 	var lastUsage int64
-	err := scanEvents(path, newDecoder, func(ev Event) {
+	l.Each(func(ev Event) {
 		anchor.see(ev.Timestamp)
 		if ev.Kind == KindUsage {
 			addTokens(&u, ev.Tokens)
@@ -187,14 +192,14 @@ func sumPerCall(path string, newDecoder func() Decoder) (usage.Usage, EventSpan,
 			lastUsage = ev.Timestamp
 		}
 	})
-	if err != nil || u.NumTurns == 0 {
-		return usage.Usage{}, EventSpan{}, false, err
+	if u.NumTurns == 0 {
+		return usage.Usage{}, EventSpan{}, false
 	}
 	span, ok := anchor.span(lastUsage)
 	if ok {
 		u.DurationMs = span.DurationMs()
 	}
-	return u, span, true, nil
+	return u, span, true
 }
 
 // sumSession reports found only for a log with a KindResult that has totals.
@@ -206,12 +211,12 @@ func sumPerCall(path string, newDecoder func() Decoder) (usage.Usage, EventSpan,
 // non-zero event Timestamp, floored by the longest session's own DurationMs
 // (the floor also covers a log with no timestamps, or a span narrower than a
 // session that provably ran longer). One result reports its own DurationMs.
-func sumSession(path string, newDecoder func() Decoder) (usage.Usage, EventSpan, bool, int, error) {
+func sumSession(l *Log) (usage.Usage, EventSpan, bool, int) {
 	var u usage.Usage
 	var span EventSpan
 	var maxDurationMs int64
 	results, residual := 0, 0
-	err := scanEvents(path, newDecoder, func(ev Event) {
+	l.Each(func(ev Event) {
 		if ev.Timestamp != 0 {
 			if !span.Have || ev.Timestamp < span.Earliest {
 				span.Earliest = ev.Timestamp
@@ -229,14 +234,14 @@ func sumSession(path string, newDecoder func() Decoder) (usage.Usage, EventSpan,
 			maxDurationMs = max(maxDurationMs, ev.DurationMs)
 		}
 	})
-	if err != nil || results == 0 {
-		return usage.Usage{}, EventSpan{}, false, 0, err
+	if results == 0 {
+		return usage.Usage{}, EventSpan{}, false, 0
 	}
 	u.DurationMs = maxDurationMs
 	if results > 1 && span.DurationMs() > 0 {
 		u.DurationMs = max(span.DurationMs(), maxDurationMs)
 	}
-	return u, span, true, residual, nil
+	return u, span, true, residual
 }
 
 // resultResidual is the output a session result reports beyond its main loop:
@@ -282,18 +287,23 @@ func addTokens(u *usage.Usage, t Tokens) {
 // they stay 0 on every row for ExtractUsage to patch from the session totals,
 // split between the main-loop row and a usage.SubagentsAgent row.
 func UsageByAgent(path string, newDecoder func() Decoder, src TotalsSource) ([]usage.AgentUsage, error) {
+	l, err := DecodeLog(path, newDecoder)
+	if err != nil {
+		return nil, err
+	}
+	return l.usageByAgent(src), nil
+}
+
+func (l *Log) usageByAgent(src TotalsSource) []usage.AgentUsage {
 	agents := make(map[string]*usage.AgentUsage)
 	seenIDs := make(map[string]bool)
-	err := scanEvents(path, newDecoder, func(ev Event) {
+	l.Each(func(ev Event) {
 		if ev.Kind != KindUsage || !firstSighting(seenIDs, ev.MessageID) {
 			return
 		}
 		addAgentCall(agents, ev, src)
 	})
-	if err != nil {
-		return nil, err
-	}
-	return sortedAgents(agents), nil
+	return sortedAgents(agents)
 }
 
 // addAgentCall books one already-deduped KindUsage event onto its agent's row
@@ -341,19 +351,32 @@ func ExtractUsage(
 	byModel func(path string) ([]usage.ModelUsage, error),
 	byAgent func(path string) ([]usage.AgentUsage, error),
 ) (usage.Report, error) {
-	u, span, found, residual, err := sumTotals(logPath, newDecoder, src)
+	l, err := DecodeLog(logPath, newDecoder)
 	if err != nil {
 		return usage.Report{}, err
 	}
+	return l.extractUsage(src,
+		func() ([]usage.ModelUsage, error) { return byModel(logPath) },
+		func() ([]usage.AgentUsage, error) { return byAgent(logPath) },
+	), nil
+}
+
+func (l *Log) extractUsage(
+	src TotalsSource,
+	byModel func() ([]usage.ModelUsage, error),
+	byAgent func() ([]usage.AgentUsage, error),
+) usage.Report {
+	logPath := l.path
+	u, span, found, residual := sumTotals(l, src)
 	if !found {
-		return usage.Report{}, nil
+		return usage.Report{}
 	}
-	models, err := byModel(logPath)
+	models, err := byModel()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: breakdown by model failed for %s: %v\n", logPath, err)
 		models = nil
 	}
-	agents, err := byAgent(logPath)
+	agents, err := byAgent()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: breakdown by agent failed for %s: %v\n", logPath, err)
 		agents = nil
@@ -369,7 +392,7 @@ func ExtractUsage(
 		report.LatestEventMs = span.Latest
 		report.HasEventSpan = true
 	}
-	return report, nil
+	return report
 }
 
 // withSessionOutput patches the main-loop row to total less residual,

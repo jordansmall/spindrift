@@ -60,8 +60,16 @@ type Strategy struct {
 // ReadResult returns the final-message text of the log at logPath, read as
 // s.Result says.
 func (s Strategy) ReadResult(logPath string) (string, error) {
-	if s.Result == LastMessage {
-		return LastMessageText(logPath, s.NewDecoder)
+	l, err := DecodeLog(logPath, s.NewDecoder)
+	if err != nil {
+		return "", err
 	}
-	return ResultText(logPath, s.NewDecoder)
+	return s.resultOf(l), nil
+}
+
+func (s Strategy) resultOf(l *Log) string {
+	if s.Result == LastMessage {
+		return l.lastMessageText()
+	}
+	return l.resultText()
 }

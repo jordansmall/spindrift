@@ -4,10 +4,8 @@ import (
 	"encoding/json"
 	"maps"
 	"slices"
-	"strings"
 
 	"spindrift.dev/launcher/internal/hostop"
-	"spindrift.dev/launcher/internal/logscan"
 	"spindrift.dev/launcher/internal/usage"
 )
 
@@ -117,21 +115,27 @@ func (s *passState) finish(src TotalsSource) PassTally {
 // IsError; a call still unanswered at a segment boundary is dropped. A missing
 // log is one empty tally.
 func ReadPasses(path string, opts PassOptions, trackWrite string, visit func(PassLine)) ([]PassTally, error) {
-	decode := opts.NewDecoder()
+	l, err := DecodeLog(path, opts.NewDecoder)
+	if err != nil {
+		return nil, err
+	}
+	return l.readPasses(opts.Totals, opts.WriteTool, trackWrite, visit), nil
+}
+
+func (l *Log) readPasses(totals TotalsSource, writeTool, trackWrite string, visit func(PassLine)) []PassTally {
 	var done []PassTally
 	cur := newPassState()
-	err := ScanLog(path, logscan.SkipOversized, func(raw string) {
-		text := strings.TrimSpace(raw)
-		if text == "" {
-			return
+	for _, decoded := range l.lines {
+		if decoded.text == "" {
+			continue
 		}
-		events := decode(raw)
-		line := PassLine{Text: text}
+		events := decoded.events
+		line := PassLine{Text: decoded.text}
 		for _, ev := range events {
 			if ev.Kind == KindHostOp && ev.HostOp != nil {
 				line.HostOp = ev.HostOp
 				if ev.HostOp.Op == hostop.OpPassStart {
-					done = append(done, cur.finish(opts.Totals))
+					done = append(done, cur.finish(totals))
 					cur = newPassState()
 				}
 			}
@@ -143,20 +147,17 @@ func ReadPasses(path string, opts PassOptions, trackWrite string, visit func(Pas
 			}
 		}
 		for _, ev := range events {
-			cur.apply(ev, opts, trackWrite)
+			cur.apply(ev, totals, writeTool, trackWrite)
 		}
 		if visit != nil {
 			visit(line)
 		}
-	})
-	if err != nil {
-		return nil, err
 	}
-	return append(done, cur.finish(opts.Totals)), nil
+	return append(done, cur.finish(totals))
 }
 
-func (s *passState) apply(ev Event, opts PassOptions, trackWrite string) {
-	perCall := opts.Totals == PerCallTotals
+func (s *passState) apply(ev Event, totals TotalsSource, writeTool, trackWrite string) {
+	perCall := totals == PerCallTotals
 	if perCall {
 		s.msg.apply(ev)
 		s.anchor.see(ev.Timestamp)
@@ -166,7 +167,7 @@ func (s *passState) apply(ev Event, opts PassOptions, trackWrite string) {
 		s.sawCall = true
 		if firstSighting(s.seenIDs, ev.MessageID) {
 			s.tally.APICalls++
-			addAgentCall(s.agents, ev, opts.Totals)
+			addAgentCall(s.agents, ev, totals)
 		}
 		if perCall {
 			addTokens(&s.tally.Usage, ev.Tokens)
@@ -194,7 +195,7 @@ func (s *passState) apply(ev Event, opts PassOptions, trackWrite string) {
 			s.models[m] = true
 		}
 	case KindToolCall:
-		if opts.WriteTool != "" && trackWrite != "" && ev.ToolName == opts.WriteTool && ev.ToolTarget == trackWrite {
+		if writeTool != "" && trackWrite != "" && ev.ToolName == writeTool && ev.ToolTarget == trackWrite {
 			var in struct {
 				Content string `json:"content"`
 			}

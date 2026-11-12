@@ -94,10 +94,15 @@ func RebaseResults(newDecoder func() Decoder, base SessionBaselines) func() Deco
 // base updated with the last raw cumulative figures of each session the log's
 // results report. A missing log is a clone of base.
 func SessionBaselinesAfter(path string, newDecoder func() Decoder, base SessionBaselines) (SessionBaselines, error) {
-	after := base.clone()
-	err := scanEvents(path, newDecoder, func(ev Event) { after.observe(&ev) })
+	l, err := DecodeLog(path, newDecoder)
 	if err != nil {
 		return nil, err
 	}
-	return after, nil
+	return l.baselinesAfter(base), nil
+}
+
+func (l *Log) baselinesAfter(base SessionBaselines) SessionBaselines {
+	after := base.clone()
+	l.Each(func(ev Event) { after.observe(&ev) })
+	return after
 }

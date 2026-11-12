@@ -29,9 +29,14 @@ type ExtractFunc func(chunk string) ScanDecision
 // and ResetAt is always zero, because both are strategy-specific and the
 // caller supplies them. found lets callers apply their own terminal fallback.
 func ClassifyScan(logPath string, policy logscan.Policy, extract ExtractFunc, transientExtras, terminalExtras []Pattern) (cl Classification, found bool, err error) {
-	scanErr := ScanLog(logPath, policy, func(line string) {
-		decision := extract(line)
+	return classifyDecisions(func(visit func(ScanDecision)) error {
+		return ScanLog(logPath, policy, func(line string) { visit(extract(line)) })
+	}, transientExtras, terminalExtras)
+}
 
+// classifyDecisions is ClassifyScan over any source of per-chunk decisions.
+func classifyDecisions(scan func(visit func(ScanDecision)) error, transientExtras, terminalExtras []Pattern) (cl Classification, found bool, err error) {
+	scanErr := scan(func(decision ScanDecision) {
 		if decision.Reset {
 			found = false
 			cl = Classification{}

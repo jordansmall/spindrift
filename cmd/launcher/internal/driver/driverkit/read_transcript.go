@@ -22,11 +22,19 @@ const resultTextMaxLen = 200
 // first line. Returns ("", nil) when logPath does not exist, as the claude
 // Driver does.
 func RenderTranscript(logPath string, newDecoder func() Decoder, topLevelRole string) (string, error) {
+	l, err := DecodeLog(logPath, newDecoder)
+	if err != nil {
+		return "", err
+	}
+	return l.renderTranscript(topLevelRole), nil
+}
+
+func (l *Log) renderTranscript(topLevelRole string) string {
 	if topLevelRole == "" {
 		topLevelRole = ImplementorRole
 	}
 	var lines []string
-	err := scanEvents(logPath, newDecoder, func(ev Event) {
+	l.Each(func(ev Event) {
 		role := ev.Role
 		if role == "" {
 			role = topLevelRole
@@ -46,13 +54,10 @@ func RenderTranscript(logPath string, newDecoder func() Decoder, topLevelRole st
 			lines = append(lines, "["+role+"]   -> "+summary)
 		}
 	})
-	if err != nil {
-		return "", err
-	}
 	if len(lines) == 0 {
-		return "", nil
+		return ""
 	}
-	return strings.Join(lines, "\n") + "\n", nil
+	return strings.Join(lines, "\n") + "\n"
 }
 
 var lineBreaks = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")

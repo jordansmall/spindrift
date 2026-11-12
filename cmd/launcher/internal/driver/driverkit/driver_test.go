@@ -259,7 +259,7 @@ func TestStrategyDriverExtractUsage(t *testing.T) {
 			{
 				"usageByModel failure degrades only the model section",
 				func() {
-					usageByModel = func(string, func() Decoder, ModelFamily, TotalsSource) ([]usage.ModelUsage, error) {
+					usageByModel = func(*Log, ModelFamily, TotalsSource) ([]usage.ModelUsage, error) {
 						return nil, errors.New("simulated I/O error")
 					}
 				},
@@ -269,7 +269,7 @@ func TestStrategyDriverExtractUsage(t *testing.T) {
 			{
 				"usageByAgent failure degrades only the agent section",
 				func() {
-					usageByAgent = func(string, func() Decoder, TotalsSource) ([]usage.AgentUsage, error) {
+					usageByAgent = func(*Log, TotalsSource) ([]usage.AgentUsage, error) {
 						return nil, errors.New("simulated I/O error")
 					}
 				},
