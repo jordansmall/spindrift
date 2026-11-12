@@ -400,7 +400,7 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_CRED_DOES_NOT_EXIST" }
 }
 
 // A throwaway checkout with one commit on "main", for use as the pwd argument
-// to seedAccumulationRepoIfHostMediated.
+// to seedAccumulationRepoIfHostSeeded.
 func mustSeedableCheckout(t *testing.T) string {
 	t.Helper()
 	checkout := t.TempDir()
@@ -429,11 +429,11 @@ func assertClonableAccumulationRepo(t *testing.T, repoPath, baseBranch string) {
 	}
 }
 
-// seedAccumulationRepoIfHostMediated wires local.SeedAccumulationRepo (ADR
+// seedAccumulationRepoIfHostSeeded wires local.SeedAccumulationRepo (ADR
 // 0033) against the config's resolved codeForgeAccumulationRepoDir and
 // baseBranch. Seeding must happen before any Box runs (issue #1726): a
 // defaulted but nonexistent path makes the /repo mount silently skip.
-func TestSeedAccumulationRepoIfHostMediated_Local_SeedsFromPwd(t *testing.T) {
+func TestSeedAccumulationRepoIfHostSeeded_Local_SeedsFromPwd(t *testing.T) {
 	checkout := mustSeedableCheckout(t)
 
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
@@ -442,12 +442,12 @@ func TestSeedAccumulationRepoIfHostMediated_Local_SeedsFromPwd(t *testing.T) {
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
 	c.BaseBranch = "main"
 
-	lock, err := seedAccumulationRepoIfHostMediated(c, checkout)
+	lock, err := seedAccumulationRepoIfHostSeeded(c, checkout)
 	if err != nil {
-		t.Fatalf("seedAccumulationRepoIfHostMediated: %v", err)
+		t.Fatalf("seedAccumulationRepoIfHostSeeded: %v", err)
 	}
 	if lock == nil {
-		t.Fatal("seedAccumulationRepoIfHostMediated lock = nil, want a held *local.AccumulationLock (issue #2441)")
+		t.Fatal("seedAccumulationRepoIfHostSeeded lock = nil, want a held *local.AccumulationLock (issue #2441)")
 	}
 	t.Cleanup(func() { _ = lock.Release() })
 
@@ -457,16 +457,16 @@ func TestSeedAccumulationRepoIfHostMediated_Local_SeedsFromPwd(t *testing.T) {
 // No seeding occurs for github/git (issue #1726). The nonexistent pwd would
 // fail SeedAccumulationRepo's git push if it were invoked, so a nil error
 // proves the no-op.
-func TestSeedAccumulationRepoIfHostMediated_NonLocal_NoOp(t *testing.T) {
+func TestSeedAccumulationRepoIfHostSeeded_NonLocal_NoOp(t *testing.T) {
 	c := baseConfig()
 	c.CodeForge = "github"
 
-	lock, err := seedAccumulationRepoIfHostMediated(c, "/nonexistent/pwd")
+	lock, err := seedAccumulationRepoIfHostSeeded(c, "/nonexistent/pwd")
 	if err != nil {
-		t.Errorf("seedAccumulationRepoIfHostMediated(CODE_FORGE=github) = %v, want nil (no-op)", err)
+		t.Errorf("seedAccumulationRepoIfHostSeeded(CODE_FORGE=github) = %v, want nil (no-op)", err)
 	}
 	if lock != nil {
-		t.Errorf("seedAccumulationRepoIfHostMediated(CODE_FORGE=github) lock = %v, want nil (no-op)", lock)
+		t.Errorf("seedAccumulationRepoIfHostSeeded(CODE_FORGE=github) lock = %v, want nil (no-op)", lock)
 	}
 }
 
@@ -474,7 +474,7 @@ func TestSeedAccumulationRepoIfHostMediated_NonLocal_NoOp(t *testing.T) {
 // c.selfContained is false (issue #2439): research still clones and explores
 // the repo in-box via the box main's clone, so it needs /repo
 // mounted like work does. Only the selfContained sub-mode stays a no-op.
-func TestSeedAccumulationRepoIfHostMediated_ResearchKind_SeedsFromPwd(t *testing.T) {
+func TestSeedAccumulationRepoIfHostSeeded_ResearchKind_SeedsFromPwd(t *testing.T) {
 	checkout := mustSeedableCheckout(t)
 
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
@@ -484,12 +484,12 @@ func TestSeedAccumulationRepoIfHostMediated_ResearchKind_SeedsFromPwd(t *testing
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
 	c.BaseBranch = "main"
 
-	lock, err := seedAccumulationRepoIfHostMediated(c, checkout)
+	lock, err := seedAccumulationRepoIfHostSeeded(c, checkout)
 	if err != nil {
-		t.Fatalf("seedAccumulationRepoIfHostMediated: %v", err)
+		t.Fatalf("seedAccumulationRepoIfHostSeeded: %v", err)
 	}
 	if lock == nil {
-		t.Fatal("seedAccumulationRepoIfHostMediated lock = nil, want a held *local.AccumulationLock (issue #2441)")
+		t.Fatal("seedAccumulationRepoIfHostSeeded lock = nil, want a held *local.AccumulationLock (issue #2441)")
 	}
 	t.Cleanup(func() { _ = lock.Release() })
 
@@ -501,7 +501,7 @@ func TestSeedAccumulationRepoIfHostMediated_ResearchKind_SeedsFromPwd(t *testing
 // missing baseBranch in pwd) for a run that never uses the repo. The
 // nonexistent pwd would fail SeedAccumulationRepo's git push if it were
 // invoked, so a nil error proves the no-op.
-func TestSeedAccumulationRepoIfHostMediated_ResearchSelfContained_NoOp(t *testing.T) {
+func TestSeedAccumulationRepoIfHostSeeded_ResearchSelfContained_NoOp(t *testing.T) {
 	c := baseConfig()
 	c.CodeForge = "local"
 	c.dispatchKind = dispatchkind.Research
@@ -509,12 +509,12 @@ func TestSeedAccumulationRepoIfHostMediated_ResearchSelfContained_NoOp(t *testin
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", filepath.Join(t.TempDir(), "accum.git"))
 	c.BaseBranch = "main"
 
-	lock, err := seedAccumulationRepoIfHostMediated(c, "/nonexistent/pwd")
+	lock, err := seedAccumulationRepoIfHostSeeded(c, "/nonexistent/pwd")
 	if err != nil {
-		t.Errorf("seedAccumulationRepoIfHostMediated(research kind, selfContained) = %v, want nil (no-op)", err)
+		t.Errorf("seedAccumulationRepoIfHostSeeded(research kind, selfContained) = %v, want nil (no-op)", err)
 	}
 	if lock != nil {
-		t.Errorf("seedAccumulationRepoIfHostMediated(research kind, selfContained) lock = %v, want nil (no-op)", lock)
+		t.Errorf("seedAccumulationRepoIfHostSeeded(research kind, selfContained) lock = %v, want nil (no-op)", lock)
 	}
 }
 
@@ -523,7 +523,7 @@ func TestSeedAccumulationRepoIfHostMediated_ResearchSelfContained_NoOp(t *testin
 // the first call's lock is held rather than race SeedAccumulationRepo's
 // seed+mount window. A third call after release succeeds, proving the lock is
 // per-run and not permanent.
-func TestSeedAccumulationRepoIfHostMediated_ConcurrentCallSameRepo_FailsUntilReleased(t *testing.T) {
+func TestSeedAccumulationRepoIfHostSeeded_ConcurrentCallSameRepo_FailsUntilReleased(t *testing.T) {
 	checkout := mustSeedableCheckout(t)
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 	c := baseConfig()
@@ -531,32 +531,32 @@ func TestSeedAccumulationRepoIfHostMediated_ConcurrentCallSameRepo_FailsUntilRel
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
 	c.BaseBranch = "main"
 
-	firstLock, err := seedAccumulationRepoIfHostMediated(c, checkout)
+	firstLock, err := seedAccumulationRepoIfHostSeeded(c, checkout)
 	if err != nil {
-		t.Fatalf("first seedAccumulationRepoIfHostMediated: %v", err)
+		t.Fatalf("first seedAccumulationRepoIfHostSeeded: %v", err)
 	}
 	if firstLock == nil {
-		t.Fatal("first seedAccumulationRepoIfHostMediated lock = nil, want a held *local.AccumulationLock")
+		t.Fatal("first seedAccumulationRepoIfHostSeeded lock = nil, want a held *local.AccumulationLock")
 	}
 
-	secondLock, err := seedAccumulationRepoIfHostMediated(c, checkout)
+	secondLock, err := seedAccumulationRepoIfHostSeeded(c, checkout)
 	if err == nil {
-		t.Error("second seedAccumulationRepoIfHostMediated while first lock held = nil error, want contention error (issue #2441)")
+		t.Error("second seedAccumulationRepoIfHostSeeded while first lock held = nil error, want contention error (issue #2441)")
 	}
 	if secondLock != nil {
-		t.Errorf("second seedAccumulationRepoIfHostMediated while first lock held = %v, want nil lock on error", secondLock)
+		t.Errorf("second seedAccumulationRepoIfHostSeeded while first lock held = %v, want nil lock on error", secondLock)
 	}
 
 	if err := firstLock.Release(); err != nil {
 		t.Fatalf("firstLock.Release(): %v", err)
 	}
 
-	thirdLock, err := seedAccumulationRepoIfHostMediated(c, checkout)
+	thirdLock, err := seedAccumulationRepoIfHostSeeded(c, checkout)
 	if err != nil {
-		t.Fatalf("third seedAccumulationRepoIfHostMediated after release: %v", err)
+		t.Fatalf("third seedAccumulationRepoIfHostSeeded after release: %v", err)
 	}
 	if thirdLock == nil {
-		t.Fatal("third seedAccumulationRepoIfHostMediated after release lock = nil, want a held *local.AccumulationLock")
+		t.Fatal("third seedAccumulationRepoIfHostSeeded after release lock = nil, want a held *local.AccumulationLock")
 	}
 	t.Cleanup(func() { _ = thirdLock.Release() })
 }
@@ -566,7 +566,7 @@ func TestSeedAccumulationRepoIfHostMediated_ConcurrentCallSameRepo_FailsUntilRel
 // the repo stays wedged for the rest of the process. A nil returned lock does
 // not prove that (a caller could nil it out without releasing), so this
 // reacquires the flock directly against the same repoPath.
-func TestSeedAccumulationRepoIfHostMediated_SeedFailure_ReleasesLock(t *testing.T) {
+func TestSeedAccumulationRepoIfHostSeeded_SeedFailure_ReleasesLock(t *testing.T) {
 	checkout := t.TempDir()
 	testutil.GitRun(t, checkout, "init", "-b", "main")
 	// No commit: baseBranch has no ref yet, so SeedAccumulationRepo's push
@@ -578,12 +578,12 @@ func TestSeedAccumulationRepoIfHostMediated_SeedFailure_ReleasesLock(t *testing.
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
 	c.BaseBranch = "main"
 
-	lock, err := seedAccumulationRepoIfHostMediated(c, checkout)
+	lock, err := seedAccumulationRepoIfHostSeeded(c, checkout)
 	if err == nil {
-		t.Fatal("seedAccumulationRepoIfHostMediated with an empty checkout = nil error, want a seed failure")
+		t.Fatal("seedAccumulationRepoIfHostSeeded with an empty checkout = nil error, want a seed failure")
 	}
 	if lock != nil {
-		t.Fatalf("seedAccumulationRepoIfHostMediated on seed failure lock = %v, want nil", lock)
+		t.Fatalf("seedAccumulationRepoIfHostSeeded on seed failure lock = %v, want nil", lock)
 	}
 
 	reacquired, err := local.AcquireAccumulationLock(repoPath)
@@ -594,7 +594,7 @@ func TestSeedAccumulationRepoIfHostMediated_SeedFailure_ReleasesLock(t *testing.
 }
 
 // Regression test for bootstrap's early-return window (issue #2441): every
-// step after seedAccumulationRepoIfHostMediated hands back a held lock used to
+// step after seedAccumulationRepoIfHostSeeded hands back a held lock used to
 // leak it on `return nil, err`. RUNTIME=bwrap keeps EnsureReady() a no-op, so
 // BOX_FORGE_AND_ISSUE_ACCESS=read-only against the github tracker fails
 // checkReadOnlyCapabilityGate offline, exactly inside that window.

@@ -11,6 +11,8 @@
   validAsCodeForge = true;
   # ADR 0033: local has no writable remote to push to.
   hostMediatedRemote = true;
+  # ADR 0033: the Box clones from the host-seeded mirror mounted at /repo.
+  hostSeededMirror = true;
   goTestBuildsOn = "git";
   # ADR 0032: local is not reachable from inside the Box at all.
   inBoxUnreachableTracker = true;

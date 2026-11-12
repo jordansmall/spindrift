@@ -1191,6 +1191,7 @@ rec {
         (optional "doctorTokenHint" "DoctorTokenHint" "")
         (optional "doctorSlugHint" "DoctorSlugHint" "")
         (optional "hostMediatedRemote" "HostMediatedRemote" false)
+        (optional "hostSeededMirror" "HostSeededMirror" false)
         (optional "inBoxUnreachableTracker" "InBoxUnreachableTracker" false)
         (optional "inBoxUnwritableTracker" "InBoxUnwritableTracker" false)
         (optional "slugIssueRefTracker" "SlugIssueRefTracker" false)

@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"reflect"
@@ -149,17 +148,17 @@ func TestCloneConfig_RunsGhCredentialHelperOnlyWhereTheForgeWantsIt(t *testing.T
 	}
 }
 
-func TestCloneConfig_HostMediatedRemoteFollowsTheEnv(t *testing.T) {
-	for _, want := range []bool{false, true} {
-		t.Run(fmt.Sprintf("remote=%v", want), func(t *testing.T) {
+func TestCloneConfig_HostSeededMirrorFollowsTheForgeRow(t *testing.T) {
+	for forge, want := range map[string]bool{"github": false, "forgejo": false, "local": true} {
+		t.Run("forge="+forge, func(t *testing.T) {
 			f := newFixture(t)
-			f.env.HostMediatedRemote = want
+			f.env.CodeForge = forge
 			f.run()
 			if len(f.cloneCfgs) != 1 {
 				t.Fatalf("clone configs = %+v, want one", f.cloneCfgs)
 			}
-			if got := f.cloneCfgs[0].HostMediatedRemote; got != want {
-				t.Errorf("HostMediatedRemote = %v, want %v", got, want)
+			if got := f.cloneCfgs[0].HostSeededMirror; got != want {
+				t.Errorf("HostSeededMirror = %v, want %v", got, want)
 			}
 		})
 	}

@@ -21,10 +21,10 @@ type Config struct {
 	// GHCredentialHelper runs `gh auth setup-git` before cloning. See
 	// backend.Descriptor.InBoxGHCredentialHelper for which forges want it.
 	GHCredentialHelper bool
-	// HostMediatedRemote marks the remote as a host-owned filesystem mount,
-	// so the clone trusts the mount and work dir globally (#1720).
-	HostMediatedRemote bool
-	RepoSlug           string
+	// HostSeededMirror marks the remote as a host-seeded mirror mount, so the
+	// clone trusts the mount and work dir globally (#1720).
+	HostSeededMirror bool
+	RepoSlug         string
 	// Lookup serves the knobs the CODE_FORGE backend's Strategy reads.
 	Lookup       backendkit.Lookup
 	RepoMountDir string
@@ -60,12 +60,12 @@ func Clone(cfg Config, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if cfg.HostMediatedRemote {
+	if cfg.HostSeededMirror {
 		// Under rootless podman the Box's mapped uid never matches the
 		// host-owned bind mount's uid, so git's dubious-ownership guard
 		// rejects RepoMountDir before the clone copies a single object
 		// (#1720). Both paths outlive the clone step, so these are standing
-		// global entries: the one host-mediated exception to the
+		// global entries: the one host-seeded-mirror exception to the
 		// repo-local-only config rule below.
 		for _, dir := range []string{cfg.RepoMountDir, cfg.WorkDir} {
 			if err := run(stdout, stderr, "", "git", "config", "--global", "--add", "safe.directory", dir); err != nil {

@@ -37,7 +37,7 @@ func (r *boxRun) cloneConfig() boxclone.Config {
 	return boxclone.Config{
 		CodeForge:          r.codeForge(),
 		GHCredentialHelper: r.forgeDescriptor().InBoxGHCredentialHelper,
-		HostMediatedRemote: r.env.HostMediatedRemote,
+		HostSeededMirror:   r.forgeDescriptor().HostSeededMirror,
 		RepoSlug:           g("REPO_SLUG"),
 		Lookup:             envLookup(g),
 		RepoMountDir:       r.in.RepoMountDir,
