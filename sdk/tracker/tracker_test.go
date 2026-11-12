@@ -125,6 +125,33 @@ func TestWireShapes(t *testing.T) {
 	}
 }
 
+func TestSearchCapabilityAndWireShape(t *testing.T) {
+	r := fakeReader(t)
+	if _, m := handlers(r); m["tracker.searchIssues"] != nil {
+		t.Error("searchIssues handler present without Reader.Search")
+	}
+	r.Search = func(tg Target, text, state, label string, limit int) ([]Issue, error) {
+		if tg != wantTarget || text != "flaky test" || state != "closed" || label != "bug" || limit != 5 {
+			t.Errorf("Search(%v, %q, %q, %q, %d)", tg, text, state, label, limit)
+		}
+		return []Issue{{Number: "8", Title: "t", State: "closed"}}, nil
+	}
+	caps, m := handlers(r)
+	if want := []string{"tracker", "tracker.comments", "tracker.searchIssues"}; !reflect.DeepEqual(caps, want) {
+		t.Fatalf("caps = %v, want %v", caps, want)
+	}
+	got := call(t, m, "tracker.searchIssues", `{`+target+`,"text":"flaky test","state":"closed","label":"bug","limit":5}`)
+	if want := `{"issues":[{"number":"8","title":"t","body":"","state":"closed","labels":[],"closedAt":"","closedNotPlanned":false,"dedupMarker":""}]}`; got != want {
+		t.Errorf("tracker.searchIssues = %s, want %s", got, want)
+	}
+
+	r.Search = func(Target, string, string, string, int) ([]Issue, error) { return nil, nil }
+	_, m = handlers(r)
+	if got := call(t, m, "tracker.searchIssues", `{`+target+`}`); got != `{"issues":[]}` {
+		t.Errorf("empty search = %s, want an empty array", got)
+	}
+}
+
 func TestEmptyListsEncodeAsArrays(t *testing.T) {
 	r := Reader{
 		ListIssues: func(Target, Query, int) ([]Issue, error) { return nil, nil },
@@ -150,6 +177,7 @@ func TestEmptyListsEncodeAsArrays(t *testing.T) {
 func TestBadParams(t *testing.T) {
 	r := fakeReader(t)
 	r.NativeDeps = func(Target, string) ([]string, error) { return nil, nil }
+	r.Search = func(Target, string, string, string, int) ([]Issue, error) { return nil, nil }
 	_, m := handlers(r)
 	for name, fn := range m {
 		if _, err := fn(json.RawMessage(`{not json`)); err == nil {
