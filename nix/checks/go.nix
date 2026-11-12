@@ -1061,7 +1061,8 @@ driverGoTests
 
   # The packages that link every Driver through the bundle (bundleBinaryDirs),
   # the bundle's own tests, the registry root's cross-Driver guard tests and the
-  # forge package's contract guard, which needs every backend directory, and
+  # forge package's contract guard, which needs every backend directory, the
+  # forge package's capability-probe guard, which needs package main's files, and
   # the host-profile advisory guard, which needs package main's
   # route-resolution file, and the seamtest guard that no package outside the
   # Drivers builds a native Strategy; the whole tree is copied, so a Driver edit
@@ -1108,6 +1109,7 @@ driverGoTests
           fi
         }
         SPINDRIFT_CONTRACT_GUARD_FULL_TREE=1 guard ./internal/forge TestEveryBackendRunsItsContracts
+        SPINDRIFT_PROBE_GUARD_FULL_TREE=1 guard ./internal/forge TestNoCapabilityProbeOutsideResolver
         SPINDRIFT_HOSTPROFILE_GUARD_FULL_TREE=1 guard ./internal/hostprofile TestAdvisoryBoundaryHoldsOnRealTree
         guard ./internal/seamtest TestNoNativeStrategyOutsideDrivers
         touch $out

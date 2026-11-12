@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -65,43 +66,47 @@ func packageGoFiles(t *testing.T) []string {
 	return files
 }
 
-// scanResolvedFieldNames returns the Capabilities field names that
-// ResolveCodeForge or ResolveCapabilities assigns, found as assignments whose left side is the
-// selector c.X. A field with no such line passes the completeness test's
-// "field exists" check but stays permanently nil at runtime, so that test
-// needs this scan to catch it.
-func scanResolvedFieldNames(t *testing.T, filename string) map[string]bool {
+// inspectFuncs walks the body of each top-level func in filename named in
+// funcs, calling visit as ast.Inspect would.
+func inspectFuncs(t *testing.T, filename string, funcs []string, visit func(ast.Node) bool) {
 	t.Helper()
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, filename, nil, 0)
+	file, err := parser.ParseFile(token.NewFileSet(), filename, nil, 0)
 	if err != nil {
 		t.Fatalf("ParseFile(%s): %v", filename, err)
 	}
-	assigned := make(map[string]bool)
 	for _, decl := range file.Decls {
-		fd, ok := decl.(*ast.FuncDecl)
-		if !ok || (fd.Name.Name != "ResolveCapabilities" && fd.Name.Name != "ResolveCodeForge") || fd.Body == nil {
-			continue
+		if fd, ok := decl.(*ast.FuncDecl); ok && fd.Body != nil && slices.Contains(funcs, fd.Name.Name) {
+			ast.Inspect(fd.Body, visit)
 		}
-		ast.Inspect(fd.Body, func(n ast.Node) bool {
-			as, ok := n.(*ast.AssignStmt)
-			if !ok {
-				return true
-			}
-			for _, lhs := range as.Lhs {
-				sel, ok := lhs.(*ast.SelectorExpr)
-				if !ok {
-					continue
-				}
-				recv, ok := sel.X.(*ast.Ident)
-				if !ok || recv.Name != "c" {
-					continue
-				}
-				assigned[sel.Sel.Name] = true
-			}
-			return true
-		})
 	}
+}
+
+// scanResolvedFieldNames returns the Capabilities field names that
+// ResolveCodeForge or ResolveCapabilities assigns, found as assignments whose
+// left side is the selector c.X. A field with no such line passes the
+// completeness test's "field exists" check but stays permanently nil at
+// runtime, so that test needs this scan to catch it.
+func scanResolvedFieldNames(t *testing.T, filename string) map[string]bool {
+	t.Helper()
+	assigned := make(map[string]bool)
+	inspectFuncs(t, filename, []string{"ResolveCapabilities", "ResolveCodeForge"}, func(n ast.Node) bool {
+		as, ok := n.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		for _, lhs := range as.Lhs {
+			sel, ok := lhs.(*ast.SelectorExpr)
+			if !ok {
+				continue
+			}
+			recv, ok := sel.X.(*ast.Ident)
+			if !ok || recv.Name != "c" {
+				continue
+			}
+			assigned[sel.Sel.Name] = true
+		}
+		return true
+	})
 	return assigned
 }
 
