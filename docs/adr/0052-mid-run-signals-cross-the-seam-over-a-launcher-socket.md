@@ -164,7 +164,7 @@ fragment today, so both variants bake into the image and the knob picks at
 run time. No rebuild is needed to flip.
 
 The in-box front is a **`driver-exec` verb only** (`driver-exec signal
-comment|pr-intent|issue-intent|status`), where
+comment|pr-intent|issue-intent|status`, plus the read verb `issue`), where
 [ADR 0036](0036-host-box-handoff-branching-belongs-to-driver-exec-verbs.md)
 puts hand-off branching. It reads endpoint and secret from its own
 environment, posts, prints the accept or reject line, and exits non-zero on
@@ -295,3 +295,48 @@ The Box-side "empty means log" fallbacks (`agent/entrypoint.sh`, and the
 in-Box prompt assembly's gates) are kept on purpose. They cover an older host
 launcher that forwards nothing; the current launcher always forwards the
 resolved value, so they never fire against it.
+
+## Amendment (issue #6894): read verbs
+
+Everything above moves content from the Box to the host. The socket now
+also carries one read the other way: `driver-exec signal issue <ref>`
+returns an issue of the Dispatch's own tracker, so an agent can follow a
+linked or parent issue without a tracker token or a `gh` call. It is the
+first of a family; the shape below is the contract the next read verb
+(`issue-search`) reuses.
+
+A read verb is a **route, not a Kind**. `GET /issue?ref=<ref>` buffers
+nothing, mints no receipt and is never consumed at settle, like `status`;
+its disposition is `read`. The reply is a typed snapshot (`IssueSnapshot`:
+ref, title, state, labels, body, comments, a `truncated` flag) with its
+own size cap in `signalwire`: `MaxIssueRefBytes` of 256 for the ref and
+`MaxIssueReplyBytes` of 64 KiB of text, the budget of the host's ISSUE
+TEXT snapshot. `CapIssueSnapshot` drops the oldest comments first, then
+cuts the body. The handler applies the cap itself and never trusts the
+reader to have. The client now errors on a reply past its 1 MiB read limit
+instead of truncating it.
+
+The host reads through an `IssueReader` injected into each Pass's handler
+at construction; a nil reader answers 501 `unsupported`. The production
+reader goes through the Dispatch's `forge.IssueTracker`, so a native
+tracker and a Connector take the same path, and on a Connector the Route
+table and `connectorhost` audit still decide: a refused read comes back
+403 `refused`. "The content names no destination" still holds, because the
+read's destination is never in the request. The repository or Jira project
+is the reader's scope, fixed from resolved config when the Pass is built
+(the backend strategy's `IssueReadScope`); the ref only names an issue
+within it. The grammar is `N`, `#N`, `<scope>#N` or `KEY-N`, checked
+before any tracker call: `invalid_ref` for anything outside it,
+`foreign_ref` for another repo or project, and a reply whose issue number
+differs from the one asked for is refused. A failure's detail goes to the
+launcher log and never to the Box.
+
+Each read emits one `spindrift_op` event of kind `issue`: decision `read`
+with the size and hash of the encoded reply, or `reject` with a fixed
+reason that never echoes the ref. The prompt fragments name the verb under
+the socket carrier for every tracker with a host reader (GitHub, Forgejo,
+Jira); under the `log` carrier every tracker but local now takes the
+unreadable arm, since marker lines have no return path. A later read verb
+follows the same four parts: a GET route token, a typed reply with its
+own cap in `signalwire`, a host reader interface injected per Pass, and
+decision `read`.
