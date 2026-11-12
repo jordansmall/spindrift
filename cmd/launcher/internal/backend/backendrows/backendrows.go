@@ -31,9 +31,17 @@ type Row struct {
 	Module string `json:"module"`
 	// Routes is the only traffic the Connector may send.
 	Routes []connectorhost.Route `json:"routes"`
-	// CredentialEnv names the host env var holding the bearer token the host
-	// attaches to each admitted request. The Connector never sees it.
+	// CredentialEnv names the host env var holding the secret the host attaches
+	// to each admitted request, as a bearer token or, under CredentialScheme
+	// "basic", as the Basic password. The Connector never sees it.
 	CredentialEnv string `json:"credentialEnv"`
+	// CredentialScheme is how CredentialEnv is attached: "" or "bearer" sends
+	// it as a Bearer token, "basic" pairs it with IdentityEnv's value as Basic
+	// credentials (Jira Cloud: an account email and an API token).
+	CredentialScheme string `json:"credentialScheme,omitempty"`
+	// IdentityEnv names the host env var holding the Basic identity. It is
+	// required under the "basic" scheme and refused otherwise.
+	IdentityEnv string `json:"identityEnv,omitempty"`
 	// CredentialKnob is the Consumer knob that names CredentialEnv; doctor shows it.
 	CredentialKnob string `json:"credentialKnob,omitempty"`
 	// AcceptedRoutes is the Consumer's accepted baseline of Routes, which doctor
@@ -50,6 +58,12 @@ type Row struct {
 
 // BaseHost is the Route host that stands for the host of the row's BaseEnv URL.
 const BaseHost = "{base}"
+
+// The CredentialScheme values a row may name; "" means SchemeBearer.
+const (
+	SchemeBearer = "bearer"
+	SchemeBasic  = "basic"
+)
 
 // Widening returns the live Routes no accepted Route covers. An accepted Route
 // covers one with the same method and host, compared literally, and a path
@@ -184,6 +198,12 @@ func validate(row Row, seen map[string]bool) error {
 		return fmt.Errorf("backend %q has no credentialEnv", row.Name)
 	case len(row.Routes) == 0:
 		return fmt.Errorf("backend %q has an empty route table", row.Name)
+	case row.CredentialScheme != "" && row.CredentialScheme != SchemeBearer && row.CredentialScheme != SchemeBasic:
+		return fmt.Errorf("backend %q: unknown credentialScheme %q, want bearer or basic", row.Name, row.CredentialScheme)
+	case row.CredentialScheme == SchemeBasic && row.IdentityEnv == "":
+		return fmt.Errorf("backend %q: the basic credentialScheme needs an identityEnv", row.Name)
+	case row.CredentialScheme != SchemeBasic && row.IdentityEnv != "":
+		return fmt.Errorf("backend %q: identityEnv applies only to the basic credentialScheme", row.Name)
 	}
 	seen[row.Name] = true
 	if err := connectorhost.ValidateRoutes(row.Routes); err != nil {
@@ -248,6 +268,14 @@ func Load(ctx context.Context, row Row, o Options) (*connectorhost.Connector, er
 			token := getenv(row.CredentialEnv)
 			if token == "" {
 				return errors.New(row.CredentialEnv + " is not set")
+			}
+			if row.CredentialScheme == SchemeBasic {
+				identity := getenv(row.IdentityEnv)
+				if identity == "" {
+					return errors.New(row.IdentityEnv + " is not set")
+				}
+				r.SetBasicAuth(identity, token)
+				return nil
 			}
 			r.Header.Set("Authorization", "Bearer "+token)
 			return nil
