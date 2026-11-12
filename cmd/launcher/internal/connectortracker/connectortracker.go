@@ -14,6 +14,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
@@ -32,6 +33,18 @@ var ErrAnswer = errors.New("connector answer refused")
 type Target struct {
 	API  string `json:"api"`
 	Repo string `json:"repo"`
+}
+
+// Routes returns a copy of a tracker Connector's Route table with the
+// repository named in each path. A table spells the repository as "{repo}"
+// because the slug is runtime config, not something a Connector's package can
+// know; the result goes to connectorhost.LoadNetwork, which validates it.
+func Routes(table []connectorhost.Route, repo string) []connectorhost.Route {
+	out := slices.Clone(table)
+	for i := range out {
+		out[i].Path = strings.ReplaceAll(out[i].Path, "{repo}", repo)
+	}
+	return out
 }
 
 // The shapes the tracker adapter decodes from the guest. The Connector returns
