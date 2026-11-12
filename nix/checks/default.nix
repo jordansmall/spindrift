@@ -67,6 +67,7 @@ let
     // (import ./equivalence.nix common)
     // (import ./builtins-compat.nix common)
     // (import ./preambles.nix common)
+    // (import ./box-access-default.nix common)
     // (import ./drivers.nix common)
     // (import ./prompt-inject.nix common)
     // (import ./fragment-pairs.nix common)
