@@ -212,6 +212,10 @@ in
             type = pkgs.lib.types.bool;
             default = false;
           };
+          options.shadowEvery = pkgs.lib.mkOption {
+            type = pkgs.lib.types.int;
+            default = 10;
+          };
         }
       );
       mergeFrom =
@@ -260,6 +264,25 @@ in
           ]
       ))
     ) "a definition setting only `shadow` must not count as a second registration";
+    assert assertMsg (
+      !(fails (
+        shadowable.merge
+          [ "connectors" "dup" ]
+          [
+            {
+              file = "a.nix";
+              value = { };
+            }
+            {
+              file = "b.nix";
+              value = {
+                shadow = true;
+                shadowEvery = 3;
+              };
+            }
+          ]
+      ))
+    ) "a definition setting only `shadow` and `shadowEvery` must not count as a second registration";
     assert assertMsg (
       (configOf oneModule).connectors.dup.knobs.a.env == "DUP_A"
     ) "control: one module registering the row must evaluate";

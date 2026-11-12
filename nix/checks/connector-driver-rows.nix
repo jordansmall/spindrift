@@ -35,6 +35,10 @@ let
     driverRows.fixture = fixtureRow;
   };
   plain = mkHarness { };
+  # The dogfood's shadowed Connectors that are not core Drivers: backend rows,
+  # which carry `shadow` and `shadowEvery` themselves. Derived so no backend
+  # name is spelled in a test (ADR 0068, backend-name-guard).
+  backendShadows = pkgs.lib.filter (n: !(registry.entries ? ${n})) (import ../dogfood-shadow.nix);
   claudeConnector = (import ../../connectors/claude).lib.connector { core = import ../../core; };
   claudeRow = claudeConnector.driverRow pkgs.lib;
   shadowOn = mkHarness {
@@ -246,18 +250,25 @@ in
     ) "`shadow` on the claude Connector must reach mkHarness";
     pkgs.runCommand "connector-driver-rows-flake-module-shadow-option" { } "touch $out";
 
-  # Issue #6797: the dogfood really shadows claude. The real flake's default
-  # app (flake.nix's `spindrift.connectors` through the module) must equal the
-  # direct mirror's, whose Box rows file carries `shadow`; the app program
-  # embeds that file, so dropping flake.nix's shadow wiring changes it. The
-  # mirror alone would not notice: it reads nix/dogfood-shadow.nix itself.
-  connector-driver-rows-dogfood-shadows-claude =
+  # Issues #6797, #6810: the dogfood shadows claude (Driver replay) and github
+  # (sampled reads). The real flake's default app (flake.nix's
+  # `spindrift.connectors` through the module) must equal the direct mirror's,
+  # whose Box rows file and input document carry `shadow`; the app program
+  # embeds both, so dropping flake.nix's shadow wiring changes it. The mirror
+  # alone would not notice: it reads nix/dogfood-shadow.nix itself.
+  connector-driver-rows-dogfood-shadows =
     assert assertMsg (config.apps.default.program == fixtures.harness.apps.default.program)
       "flake.nix must shadow the nix/dogfood-shadow.nix Connectors: the dogfood app differs from the mirror (fixtures.harness)";
-    pkgs.runCommand "connector-driver-rows-dogfood-shadows-claude" { nativeBuildInputs = [ pkgs.jq ]; }
-      ''
-        jq -e 'any(.[]; .name == "claude" and .shadow == true)' \
-          ${fixtures.harness.internals.driverRowsFile}
-        touch $out
-      '';
+    pkgs.runCommand "connector-driver-rows-dogfood-shadows" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      jq -e 'any(.[]; .name == "claude" and .shadow == true)' \
+        ${fixtures.harness.internals.driverRowsFile}
+      ${fixtures.runInputDocOf config.apps.default.program}
+      jq -e --argjson names '${builtins.toJSON backendShadows}' '
+        [.backends[] | select(.name as $n | $names | index($n))] as $rows
+        | ($names | length) > 0
+          and ($rows | length) == ($names | length)
+          and all($rows[]; .shadow == true and .shadowEvery >= 1)
+      ' "$doc"
+      touch $out
+    '';
 }

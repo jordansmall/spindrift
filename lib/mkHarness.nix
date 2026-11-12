@@ -507,11 +507,16 @@ let
   # Forced whole, so every row is checked whichever Driver the Harness selects.
   connectorEntries = builtins.deepSeq checkedRows checkedRows;
   # A shadow replays through the row's module and compares against the native
-  # Strategy of the same name, so it needs both a core Driver and a module.
+  # Strategy of the same name, so it needs both a core Driver and a module. A
+  # backend row is shadowed by `shadow` on the row itself, not listed here.
   checkShadow =
     name:
     if !(connectorEntries ? ${name}) then
-      throw "mkHarness: shadowDrivers names '${name}' but driverRows has no such Connector row"
+      throw "mkHarness: shadowDrivers names '${name}' but driverRows has no such Connector row${
+        lib.optionalString (
+          backendRows ? ${name}
+        ) "; a backend row is shadowed with `shadow` on backendRows.${name}"
+      }"
     else if !(driverRegistry.entries ? ${name}) then
       throw "mkHarness: shadowDrivers names '${name}', which is outside the core registry and has no native Strategy to compare against"
     else if !(connectorEntries.${name} ? module) then
@@ -557,6 +562,23 @@ let
       else
         throw "mkHarness: the accepted baseline (spindrift-connector-routes.json) is invalid:\n${lib.concatStringsSep "\n" ps}";
   isNonEmptyStr = v: builtins.isString v && v != "";
+  # Mirrors backendrows.validate: `shadow` is a bool and `shadowEvery` an int
+  # of at least 1, each meaningful only with the other.
+  checkBackendShadow =
+    name: row:
+    let
+      on = row.shadow or false;
+    in
+    if !(builtins.isBool on) then
+      throw "mkHarness: backendRows.${name}.shadow must be a bool"
+    else if row ? shadowEvery && !(builtins.isInt row.shadowEvery && row.shadowEvery >= 1) then
+      throw "mkHarness: backendRows.${name}.shadowEvery must be an integer of at least 1"
+    else if row ? shadowEvery && !on then
+      throw "mkHarness: backendRows.${name} sets `shadowEvery` without `shadow`"
+    else if on && !(row ? shadowEvery) then
+      throw "mkHarness: backendRows.${name} sets `shadow` without `shadowEvery`"
+    else
+      row;
   checkBackendRow =
     name: row:
     let
@@ -596,7 +618,7 @@ let
     then
       throw "mkHarness: backendRows.${name} `credentialKnob` must be a non-empty string"
     else
-      row
+      checkBackendShadow name row
       // {
         routes = (import ./connector-routes.nix).check name (row.routes or null);
       }
@@ -617,6 +639,8 @@ let
       // lib.optionalAttrs (r ? credentialScheme) { inherit (r) credentialScheme; }
       // lib.optionalAttrs (r ? identityEnv) { inherit (r) identityEnv; }
       // lib.optionalAttrs (r ? baseEnv) { inherit (r) baseEnv; }
+      // lib.optionalAttrs (r ? shadow) { inherit (r) shadow; }
+      // lib.optionalAttrs (r ? shadowEvery) { inherit (r) shadowEvery; }
     ) (lib.mapAttrs checkBackendRow backendRows);
   driverEntry =
     driverEntries.${driver}

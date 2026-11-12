@@ -19,6 +19,12 @@ let
   rosterLib = import ../lib/roster.nix { inherit (pkgs) lib; };
 
   dogfoodShadow = import ./dogfood-shadow.nix;
+  githubConnector = (import ../connectors/github).lib.connector { core = import ../core; };
+  dogfoodDriverRows = {
+    claude =
+      ((import ../connectors/claude).lib.connector { core = import ../core; }).driverRow
+        pkgs.lib;
+  };
 
   # Shared with flake.nix's `spindrift` module config the same way (issue #486).
   dogfoodSkills = import ./dogfood-skills.nix {
@@ -97,13 +103,21 @@ let
     # renders the default Harness with harness.<driver>.env layering on.
     # dogfoodBwrapHarness inherits it, so `.#dogfood-bwrap` layers too.
     multiDriver = true;
-    # The Connector module's work, done by hand: flake.nix registers claude's
-    # row and shadows it (nix/dogfood-shadow.nix), so the module path hands
-    # mkHarness both.
-    driverRows.claude =
-      ((import ../connectors/claude).lib.connector { core = import ../core; }).driverRow
-        pkgs.lib;
-    shadowDrivers = dogfoodShadow;
+    # The Connector modules' work, done by hand: flake.nix registers claude's
+    # and github's rows and shadows them (nix/dogfood-shadow.nix), so the
+    # module path hands mkHarness all of it. A Driver row is shadowed by name
+    # in `shadowDrivers`; a backend row carries the flag itself.
+    driverRows = dogfoodDriverRows;
+    shadowDrivers = builtins.filter (n: dogfoodDriverRows ? ${n}) dogfoodShadow;
+    backendRows.github = {
+      module = p: "${githubConnector.package p}/github.wasm";
+      inherit (githubConnector) routes;
+      credentialEnv = "SPINDRIFT_GITHUB_CONNECTOR_TOKEN";
+      credentialKnob = "githubConnectorToken";
+      acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).github;
+      shadow = true;
+      shadowEvery = 10;
+    };
   };
 
   # The dogfood as a direct call, mirroring the `spindrift = { ... }` module

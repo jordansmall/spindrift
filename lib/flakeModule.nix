@@ -78,6 +78,17 @@ let
         throw "spindrift-connector-routes.json: the top level must be an object keyed by Connector name"
     else
       { };
+  # Connectors whose row asks for shadow mode (ADR 0073, issues #6797, #6810).
+  # A row with a `driver` is shadowed through mkHarness's `shadowDrivers`, one
+  # with a `backend` on its own backend row; a row with neither has nothing to
+  # shadow, so it is refused by name rather than ignored.
+  shadowRows = lib.mapAttrs (
+    name: r:
+    if r.driver == null && r.backend == null then
+      throw "Connector '${name}': `shadow` needs a `driver` or a `backend` row to shadow"
+    else
+      r
+  ) (lib.filterAttrs (_: r: r.shadow) config.spindrift.connectors);
   connectorBackendRows = lib.mapAttrs (
     name: r:
     let
@@ -118,9 +129,12 @@ let
       // lib.optionalAttrs (b.scheme != "bearer") { credentialScheme = b.scheme; }
       // lib.optionalAttrs (b.identity != null) { identityEnv = ownKnobEnv "identity" b.identity false; }
       // lib.optionalAttrs (b.base != null) { inherit baseEnv; }
+      // lib.optionalAttrs (shadowRows ? ${name}) {
+        shadow = true;
+        inherit (r) shadowEvery;
+      }
   ) (lib.filterAttrs (_: r: r.backend != null) config.spindrift.connectors);
-  # Connectors whose row asks for shadow mode (ADR 0073, issue #6797).
-  shadowConnectors = lib.attrNames (lib.filterAttrs (_: r: r.shadow) config.spindrift.connectors);
+  shadowConnectors = lib.attrNames (lib.filterAttrs (_: r: r.driver != null) shadowRows);
 
   sectionKnobs = lib.foldl' (
     acc: knobName:
@@ -596,11 +610,25 @@ in
                     Run this Connector in shadow mode: the native Strategy of
                     the same name stays authoritative, and the Box replays each
                     Pass log through the row's Driver `module`, recording any
-                    divergence from the native decode. Needs `driver` to name
-                    a core Driver and carry a `module`; mkHarness throws
-                    otherwise. Only the Harness running that Driver bakes the
-                    module. Off by default, which leaves the Consumer's
-                    outputs byte-identical.
+                    divergence from the native decode. A `driver` row must
+                    name a core Driver and carry a `module`; only the Harness
+                    running that Driver bakes the module. A `backend` row
+                    instead samples every `shadowEvery`th read through its
+                    Connector beside the native read, which stays
+                    authoritative. A row with neither throws. mkHarness
+                    throws on any other mismatch. Off by default, which
+                    leaves the Consumer's outputs byte-identical.
+                  '';
+                };
+                shadowEvery = mkOption {
+                  type = types.ints.positive;
+                  default = 10;
+                  description = ''
+                    With `shadow` on a `backend` row, sample one read in this
+                    many per operation through the Connector (1 samples every
+                    read). The rate is the row's, not a knob: it is carried
+                    only onto a shadowed backend row and is ignored while
+                    `shadow` is off.
                   '';
                 };
               };
