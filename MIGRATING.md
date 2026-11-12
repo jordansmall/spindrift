@@ -1,5 +1,31 @@
 # Migration Guide
 
+## The Box's read-write forge access default flips to read-only (issue #6891)
+
+`BOX_FORGE_AND_ISSUE_ACCESS` (`perSystem.spindrift.forge.boxAccess`,
+`--box-access`) defaults to `read-write`: the Box writes to the Code Forge and
+Issue Tracker directly. A coming minor release flips that default to
+`read-only`, where the launcher host-mediates every write (parent issue #6757).
+
+A Consumer that never set the knob is affected. The build now warns on stderr,
+and the launcher and `spindrift doctor` print the same notice at run time.
+Setting the knob explicitly, to either value, silences it and pins the
+behaviour across the flip.
+
+To keep read-write, set it explicitly:
+
+```nix
+perSystem.spindrift.forge.boxAccess = "read-write";
+# or, with mkHarness directly:
+defaults.boxForgeAndIssueAccess = "read-write";
+```
+
+or pass `--box-access read-write` for a single dispatch (the daemon has no such
+flag; set the knob). To adopt `read-only` now, set
+`"read-only"`; it needs a forge and tracker that support host mediation (the
+build throws naming the missing seam otherwise; see the knob's doc in
+`docs/flake-options.md`).
+
 ## A knob env var stops the launcher (issue #6623)
 
 ADR 0020's staging is complete. The warning that named an ambient knob env var
