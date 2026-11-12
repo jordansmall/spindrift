@@ -2647,8 +2647,12 @@ This is protocol version **0.1.0**. The host is
   request the log cannot record fails closed (`ErrAudit`) and leaves no line.
   Any failed call of a network Connector whose failure no Host call already
   audited adds a `failed` line naming the Connector. The SDK's
-  `connector.HTTPRequest` wraps the import. Route tables on Connector rows
-  are later work.
+  `connector.HTTPRequest` wraps the import. A credential taken from
+  `GH_TOKEN_REFRESH_FILE` through `tokenrefresh.Follow` is re-read on every
+  request, so the first request after a rotation carries the new token and none
+  is dropped; every rotation must replace the file by rename, as
+  `gh-token-refresher` does. No CLI flag wires `LoadNetwork`'s credential to
+  that file yet. Route tables on Connector rows are later work.
 - **Versioning.** The protocol version is `0.y.z` and independent of
   spindrift's release version. A `0.y` bump is breaking; a `0.y.z` bump is
   additive. Core accepts its current `0.y` and the one before it, so today
@@ -2882,7 +2886,7 @@ When a vault's naming isn't uniform, fall back to the per-secret
 | ------------------------- | ---------------------- | ---------------------------------------- |
 | `REPO_SLUG`               | — (required unless `CODE_FORGE` and `ISSUE_TRACKER` are both `local`; baked via `forge.repoSlug`) | target repo, `owner/repo` |
 | `GH_TOKEN`                | — (required unless `CODE_FORGE` is `local` or `forgejo`, and `ISSUE_TRACKER` is not `github`) | GitHub token for `gh` inside containers (secret; env only) |
-| `GH_TOKEN_REFRESH_FILE`   | — (baked via `forge.ghTokenRefreshFile`) | path the launcher polls to keep `GH_TOKEN` current past an installation token's ~1h lifetime — see [GitHub App installation token](#github-app-installation-token-recommended) |
+| `GH_TOKEN_REFRESH_FILE`   | — (baked via `forge.ghTokenRefreshFile`) | path the launcher polls to keep `GH_TOKEN` current past an installation token's ~1h lifetime; a Connector host credential built with `tokenrefresh.Follow` re-reads it per request, though no CLI flag wires that yet ([Network Connectors](#connector-protocol)) — see [GitHub App installation token](#github-app-installation-token-recommended) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | — (one auth required)  | from `claude setup-token` (secret; env only) |
 | `ANTHROPIC_API_KEY`       | —                      | alternative to the OAuth token (secret; env only) |
 | `GIT_USER_NAME`           | host `git config`; baked via `git.user.name` | commit author name (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config); the `github` Code Forge's host-side Rebase also pins it on its throwaway clone) |
