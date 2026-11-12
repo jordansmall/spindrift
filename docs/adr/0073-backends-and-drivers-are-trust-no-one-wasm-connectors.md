@@ -57,7 +57,7 @@ The question was grilled on 2026-11-09. Specs #6750–#6759 carry the work.
    enters the Connector protocol only if answering it needs the backend's API.
    Moving into core:
    - branch naming (`AgentBranch`);
-   - dependency and touched-file parsing (`DepsOf`, `TouchesOf`);
+   - dependency and touched-file parsing (`DepsOf`, `TouchesOf`; done, #6802);
    - record and verdict rendering;
    - the github-tracker marker;
    - transient-versus-permanent classification.
