@@ -49,3 +49,11 @@ const MaxHTTPResponse = maxHTTPResponse
 
 // RecordFailure exposes the unexported recordFailure to the external tests.
 func (n *Network) RecordFailure(d Decision, err error) { n.recordFailure(d, err) }
+
+// SetStreamPiece shrinks the stream filter's write piece for the test and
+// returns the restore.
+func SetStreamPiece(n int) (restore func()) {
+	old := streamPiece
+	streamPiece = n
+	return func() { streamPiece = old }
+}
