@@ -2243,8 +2243,9 @@ and right before handing the roster to a Driver.
 
 A Connector (ADR 0073) is a subflake that adds backend or Driver rows from
 outside core. This section covers the Nix shape and, under [Driver rows on a
-Connector](#driver-rows-on-a-connector), how a Driver row reaches the
-binaries. The root flake registers one Connector, `connectors/claude`; what
+Connector](#driver-rows-on-a-connector) and [Backend rows on a
+Connector](#backend-rows-on-a-connector), how a row reaches the binaries. The
+root flake registers one Connector, `connectors/claude`; what
 the other registered facts mean at runtime is issue #6751. The worked example
 is the fixture Connector in
 [`nix/fixtures/connector/`](../nix/fixtures/connector/).
@@ -2385,6 +2386,60 @@ text-based, so a `../` in a comment or string counts too. It does not see
 absolute paths (an absolute flake `path:/…` input included), `<nixpkgs>`
 lookups, a path after `/` or `}` (an interpolation tail or URL), paths built
 with `+`, or symlinks that point outside the Connector.
+
+#### Backend rows on a Connector
+
+A Connector row may carry `backend`, a network backend's row (ADR 0073). The
+fixture Connector's, in
+[`nix/fixtures/connector/module.nix`](../nix/fixtures/connector/module.nix):
+
+```nix
+spindrift.connectors.fixture.backend = {
+  module = pkgs: "${drv}/network.wasm";
+  routes = [ { method = "GET"; host = "api.fixture.test"; path = "/repos"; } ];
+  credential = "fixtureToken";
+};
+```
+
+`module` is a function of `pkgs` returning the Connector's wasm file, `routes`
+its Route table (see Network Connectors under [Connector
+protocol](#connector-protocol)) and `credential` the env-schema key of the knob
+holding its bearer token. It must be one of the Connector's own `knobs`, secret
+and `boxEnv = false`, as the fixture's `FIXTURE_TOKEN`; a core knob is refused so
+a Connector never gets core's forge token (ADR 0073). The flake module resolves
+the key to its env var and hands every such row to `mkHarness` as
+`backendRows`, keyed by Connector name.
+
+Evaluation fails, naming the Connector and the route, on a Route table the host
+would refuse at load: a method that is not an uppercase token, a bad
+`host[:port]`, or a path that is not canonical, is the blanket `/`, or holds `?`
+or `#` (the registry-route rules). It also fails on a row named `git` or
+`local`, which stay built in, on a `credential` that is not one of the
+Connector's own secret, host-only knobs (a core knob included), on a credential
+knob with no `env` or whose `env` aliases a core one such as `GH_TOKEN`, and on
+a row missing its `module`, `routes` or `credential`.
+
+`mkHarness` renders each row into the Launcher input document's `backends`
+section as `{name, module, routes, credentialEnv}`. The launcher and the daemon
+validate and store the rows (the `backendrows` package: `Use` validates the rows
+whole and exits `config-invalid` on a bad one). `Lookup` finds a row and `Load`
+binds its module to its Route table through the Connector host; nothing calls
+them until a Connector backend can be selected (issues #6807 and #6810). Then
+the host reads the credential from its own environment at each request and
+attaches it on a route match; the module never sees it. The Box's binaries read
+no backend rows, since the Box never brokers a forge credential.
+
+A backend without a row is built from the generated registry as before, and a
+binary with no document, Quickstart included, has no rows. With no backend row
+the document is byte-identical to before. Nothing selects a Connector backend
+as `ISSUE_TRACKER` or `CODE_FORGE` yet, and `doctor` does not list the Route
+table yet (issues #6807 and #6806).
+
+`nix/checks/connector-backend-rows.nix` pins the rows: the fixture's reaches the
+input document, a bad credential (a core knob, one of the Connector's own that is
+not secret or not host-only, or no knob at all), a blanket route or a row missing
+a field fails evaluation, and the launcher test applies that Nix-rendered
+document and sends a declared request through the host.
 
 #### Shadow mode
 
@@ -2652,7 +2707,9 @@ This is protocol version **0.1.0**. The host is
   request, so the first request after a rotation carries the new token and none
   is dropped; every rotation must replace the file by rename, as
   `gh-token-refresher` does. No CLI flag wires `LoadNetwork`'s credential to
-  that file yet. Route tables on Connector rows are later work.
+  that file yet. A Connector row declares its Route table under `backend`
+  ([Backend rows on a Connector](#backend-rows-on-a-connector)), checked at
+  evaluation with the same path rules.
 - **Versioning.** The protocol version is `0.y.z` and independent of
   spindrift's release version. A `0.y` bump is breaking; a `0.y.z` bump is
   additive. Core accepts its current `0.y` and the one before it, so today
