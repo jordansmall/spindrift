@@ -538,6 +538,21 @@ let
   # missing its module or credential env, and a bad Route table; refusing them
   # here too fails the build naming the Connector.
   coreBackendNames = map (b: b.name) (lib.filter (b: b.core or false) backends);
+  # The Consumer's accepted baseline may be empty (nothing accepted yet) but
+  # not malformed: a blanket path in it would accept every route on a host, so
+  # a non-empty table passes the same rules as a live one.
+  checkAcceptedRoutes =
+    name: accepted:
+    if !(builtins.isList accepted) then
+      throw "mkHarness: backendRows.${name}.acceptedRoutes (the accepted baseline) must be a list"
+    else
+      let
+        ps = (import ./connector-routes.nix).problems name accepted;
+      in
+      if accepted == [ ] || ps == [ ] then
+        accepted
+      else
+        throw "mkHarness: the accepted baseline (spindrift-connector-routes.json) is invalid:\n${lib.concatStringsSep "\n" ps}";
   checkBackendRow =
     name: row:
     if lib.elem name coreBackendNames then
@@ -546,15 +561,30 @@ let
       throw "mkHarness: backendRows.${name} must carry `module`, a function of pkgs returning the Connector's wasm path"
     else if !(builtins.isString (row.credentialEnv or null) && row.credentialEnv != "") then
       throw "mkHarness: backendRows.${name} must carry a non-empty string `credentialEnv`"
+    else if
+      row ? credentialKnob && !(builtins.isString row.credentialKnob && row.credentialKnob != "")
+    then
+      throw "mkHarness: backendRows.${name} `credentialKnob` must be a non-empty string"
     else
-      row // { routes = (import ./connector-routes.nix).check name (row.routes or null); };
+      row
+      // {
+        routes = (import ./connector-routes.nix).check name (row.routes or null);
+      }
+      // lib.optionalAttrs (row ? acceptedRoutes) {
+        acceptedRoutes = checkAcceptedRoutes name row.acceptedRoutes;
+      };
   docBackendRows =
     p:
-    lib.mapAttrsToList (name: r: {
-      inherit name;
-      module = r.module p;
-      inherit (r) routes credentialEnv;
-    }) (lib.mapAttrs checkBackendRow backendRows);
+    lib.mapAttrsToList (
+      name: r:
+      {
+        inherit name;
+        module = r.module p;
+        inherit (r) routes credentialEnv;
+      }
+      // lib.optionalAttrs (r ? acceptedRoutes) { inherit (r) acceptedRoutes; }
+      // lib.optionalAttrs (r ? credentialKnob) { inherit (r) credentialKnob; }
+    ) (lib.mapAttrs checkBackendRow backendRows);
   driverEntry =
     driverEntries.${driver}
       or (throw "mkHarness: unknown driver '${driver}'; known drivers: ${lib.concatStringsSep ", " (lib.attrNames driverEntries)}");

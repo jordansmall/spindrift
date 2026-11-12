@@ -385,7 +385,8 @@ in
             name: "fixture",
             module: .backends[0].module,
             routes: [{method: "GET", host: "api.fixture.test", path: "/repos"}],
-            credentialEnv: "FIXTURE_TOKEN"
+            credentialEnv: "FIXTURE_TOKEN",
+            acceptedRoutes: []
           }] and (.backends[0].module | endswith("/network.wasm"))' "$doc"
         test -f "$(jq -r '.backends[0].module' "$doc")"
         touch $out

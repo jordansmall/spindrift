@@ -55,6 +55,25 @@ let
   # Connector's own routes, so a core secret would leak to it. The env is read
   # through `envSchema`, not `knob.env`: its collision fold refuses a knob
   # aliasing a core env var, and keeps a Connector's knob under its own key.
+  #
+  # `acceptedRoutes` is the Consumer's reviewed baseline of each Route table,
+  # read from the Consumer's own source tree and never from an option: a
+  # Connector's module cannot set its own baseline, and a flake-lock bump that
+  # widens a table leaves the baseline untouched so doctor shows the diff. The
+  # path is built by concatenation, not "${self}", which would copy a fixture's
+  # whole repo path into the store.
+  acceptedRoutesFile = self.outPath + "/spindrift-connector-routes.json";
+  acceptedRoutesBaseline =
+    if builtins.pathExists acceptedRoutesFile then
+      let
+        parsed = builtins.fromJSON (builtins.readFile acceptedRoutesFile);
+      in
+      if builtins.isAttrs parsed then
+        parsed
+      else
+        throw "spindrift-connector-routes.json: the top level must be an object keyed by Connector name"
+    else
+      { };
   connectorBackendRows = lib.mapAttrs (
     name: r:
     let
@@ -76,6 +95,8 @@ let
     {
       inherit (r.backend) module routes;
       credentialEnv = env;
+      credentialKnob = key;
+      acceptedRoutes = acceptedRoutesBaseline.${name} or [ ];
     }
   ) (lib.filterAttrs (_: r: r.backend != null) config.spindrift.connectors);
   # Connectors whose row asks for shadow mode (ADR 0073, issue #6797).
