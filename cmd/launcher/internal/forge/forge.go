@@ -226,6 +226,15 @@ const (
 	IssueMerged IssueState = "MERGED"
 )
 
+// Wire is the "open"/"closed" spelling the signal and Connector wires use. A
+// merged state reads as open, as it did where this was open-coded.
+func (s IssueState) Wire() string {
+	if s == IssueClosed {
+		return "closed"
+	}
+	return "open"
+}
+
 // PR is a GitHub pull request as seen by the launcher.
 type PR struct {
 	URL string

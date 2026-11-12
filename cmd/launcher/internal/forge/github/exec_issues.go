@@ -3,6 +3,7 @@ package github
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -34,6 +36,7 @@ type ghIssueRow struct {
 	Number int       `json:"number"`
 	Title  string    `json:"title"`
 	Body   string    `json:"body"`
+	State  string    `json:"state"`
 	Labels []ghLabel `json:"labels"`
 	// StateReason and ClosedAt are requested only by ListIssuesWithLabels.
 	// ClosedAt stays a string so a null or malformed value cannot fail the list.
@@ -52,6 +55,7 @@ func (r ghIssueRow) toIssue() forge.Issue {
 		Number:           strconv.Itoa(r.Number),
 		Title:            r.Title,
 		Body:             r.Body,
+		State:            forge.IssueState(r.State),
 		Labels:           names,
 		Priority:         forge.ResolvePriority(names),
 		ClosedAt:         closedAt,
@@ -137,7 +141,7 @@ func (e *execClient) ListIssuesWithLabels(state forge.IssueState, labels []strin
 	var ghState string
 	switch state {
 	case forge.IssueOpen, forge.IssueClosed:
-		ghState = strings.ToLower(string(state))
+		ghState = state.Wire()
 	default:
 		return nil, fmt.Errorf("gh issue list: unsupported issue state %q", state)
 	}
@@ -474,3 +478,45 @@ func (e *execClient) PostIssue(title, body string, labels []string) (string, err
 
 var _ forge.HostPostedCommenter = (*execClient)(nil)
 var _ forge.HostPostedIssueFiler = (*execClient)(nil)
+
+// SearchIssues implements forge.IssueSearcher (issue #6895). text comes from an
+// untrusted Box and lands in a GitHub search string, where a bare qualifier
+// such as "repo:other/x" or "is:pr" would widen the scope (repo: qualifiers OR
+// together). Each term is therefore double-quoted, which makes it a literal
+// phrase rather than a qualifier, and text that could break out of the quoting
+// is rejected rather than escaped; a backslash is rejected too, since the search
+// parser may read `\"` as an escaped quote.
+func (e *execClient) SearchIssues(text string, state forge.IssueState, label string, limit int) ([]forge.Issue, error) {
+	switch state {
+	case forge.IssueOpen, forge.IssueClosed:
+	default:
+		return nil, fmt.Errorf("gh issue list: unsupported issue state %q", state)
+	}
+	if strings.ContainsFunc(text, func(r rune) bool { return r == '"' || r == '\\' || unicode.IsControl(r) }) {
+		return nil, errors.New("gh issue list: search text must not contain a double quote, backslash or control character")
+	}
+	terms := strings.Fields(text)
+	if len(terms) == 0 {
+		return nil, errors.New("gh issue list: search text is empty")
+	}
+	for i, t := range terms {
+		terms[i] = `"` + t + `"`
+	}
+	args := []string{"issue", "list",
+		"--repo", e.repo,
+		"--state", state.Wire(),
+	}
+	if label != "" {
+		args = append(args, "--label", label)
+	}
+	args = append(args,
+		"--limit", strconv.Itoa(limit),
+		"--search", strings.Join(terms, " ")+" in:title,body",
+		"--json", "number,title,state,labels",
+	)
+	out, err := exec.Command("gh", args...).Output()
+	if err != nil {
+		return nil, ghCommandErr("gh issue list", err)
+	}
+	return parseIssueRows(out)
+}

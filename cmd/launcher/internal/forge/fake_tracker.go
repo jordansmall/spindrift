@@ -5,6 +5,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -519,4 +520,54 @@ func (tf *IssueTrackerFake) Probe() (string, error) { return tf.probe(pathTracke
 // was constructed with.
 func (tf *IssueTrackerFake) StateLabels() DispatchLabels {
 	return tf.labels
+}
+
+var _ IssueSearcher = (*IssueTrackerFake)(nil)
+
+// SearchIssues filters the fake store by state (an unset stored State counts
+// as open; a searched state other than IssueOpen or IssueClosed is an error),
+// exact label, and case-insensitive substring of every term in title or body,
+// newest (highest number) first, capped at limit (a negative limit is zero, as
+// in the Connector path).
+func (tf *IssueTrackerFake) SearchIssues(text string, state IssueState, label string, limit int) ([]Issue, error) {
+	var out []Issue
+	// Reads through pathListIssues on purpose: an error injected for
+	// list-issues also fails search. The state check sits inside the read so a
+	// Connector-backed fake still crosses the Connector first.
+	err := tf.read(pathListIssues, &out, func() (any, error) {
+		if state != IssueOpen && state != IssueClosed {
+			return nil, fmt.Errorf("fake tracker: unsupported issue state %q", state)
+		}
+		return tf.searchIssues(text, state, label, limit), nil
+	})
+	return out, err
+}
+
+func (tf *IssueTrackerFake) searchIssues(text string, state IssueState, label string, limit int) []Issue {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	terms := strings.Fields(strings.ToLower(text))
+	var out []Issue
+	for _, iss := range tf.issues {
+		if (iss.State == IssueClosed) != (state == IssueClosed) {
+			continue
+		}
+		if label != "" && !slices.Contains(iss.Labels, label) {
+			continue
+		}
+		hay := strings.ToLower(iss.Title + "\n" + iss.Body)
+		if !slices.ContainsFunc(terms, func(t string) bool { return !strings.Contains(hay, t) }) {
+			iss.Priority = ResolvePriority(iss.Labels)
+			out = append(out, iss)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		ni, _ := strconv.Atoi(out[i].Number)
+		nj, _ := strconv.Atoi(out[j].Number)
+		return ni > nj
+	})
+	if limit = max(limit, 0); len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }
