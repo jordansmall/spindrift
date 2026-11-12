@@ -83,9 +83,14 @@ let
     ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE = "the GitHub axis without the Signal socket issue read";
     ISSUE_TRACKER_FORGEJO_LINKS_READABLE = "the Forgejo axis with the Signal socket issue read";
     ISSUE_TRACKER_FORGEJO_LINKS_UNREADABLE = "the Forgejo axis without the Signal socket issue read";
+    ISSUE_TRACKER_SEARCHABLE = "a tracker search reaches the Box: the Signal socket issue-search verb, or local's own folder search";
+    ISSUE_TRACKER_UNSEARCHABLE = "no tracker search reaches the Box (jira, or a non-local tracker under the log carrier)";
+    ISSUE_TRACKER_GITHUB_SEARCHABLE = "the GitHub axis with the Signal socket issue-search verb";
+    ISSUE_TRACKER_GITHUB_UNSEARCHABLE = "the GitHub axis without the Signal socket issue-search verb";
+    ISSUE_TRACKER_FORGEJO_SEARCHABLE = "the Forgejo axis with the Signal socket issue-search verb";
+    ISSUE_TRACKER_FORGEJO_UNSEARCHABLE = "the Forgejo axis without the Signal socket issue-search verb";
     ISSUE_TRACKER_WRITABLE = "the Box can write the tracker directly";
     ISSUE_TRACKER_UNWRITABLE = "the tracker takes no in-Box writes (jira)";
-    ISSUE_TRACKER_GITHUB_WRITABLE = "the GitHub axis and the tracker is writable";
     ISSUE_TRACKER_GITHUB_READWRITE = "the GitHub write axis, writable Box, no forced relay";
     ISSUE_TRACKER_UNWRITABLE_READWRITE = "an unwritable tracker on a writable Box, no forced relay (comments relay via note=)";
     ISSUE_TRACKER_FORGEJO_READWRITE = "the Forgejo write axis, writable Box, no forced relay";

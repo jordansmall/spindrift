@@ -9,7 +9,7 @@ coordinator-scout-brief.md
 coordinator.md
 file-issues-direct.md
 file-issues-triage-recap.md
-github/filer-dedup.md
+filer-dedup-unwritable.md
 github/filer-direct-file.md
 github/filer-direct-label.md
 github/if-blocked-pr.md

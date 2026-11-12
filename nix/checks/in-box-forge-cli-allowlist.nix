@@ -129,8 +129,7 @@ let
         "prompts/fragments/forgejo/${name}.md"
       ];
     in
-    both "filer-dedup"
-    ++ both "open-pr-create"
+    both "open-pr-create"
     ++ both "if-blocked-pr"
     ++ both "research-verdict"
     ++ both "research-outcome-landing"

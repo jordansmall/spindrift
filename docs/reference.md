@@ -5594,11 +5594,10 @@ For the REST surface `fj` lacks — attaching a label at issue-create time —
 the filer fragments (`forgejo/filer-direct-file.md`,
 `forgejo/filer-direct-label.md`) fall back to a `curl` call against the
 Forgejo REST API directly rather than an `fj` porcelain command.
-`forgejo/filer-dedup.md` likewise searches over REST
-(`GET .../issues`), since `fj` has no confirmed issue-search verb; each closed
-search's `jq` keeps only results carrying that search's label, because Forgejo
-ignores a `labels=` name the repo does not define and returns every closed
-issue matching the `q=` terms.
+`forgejo/filer-dedup.md` searches through the Signal socket's
+`issue-search` verb rather than REST (issue #6895); the host drops results that
+do not carry a closed search's label, because Forgejo ignores a `labels=` name
+the repo does not define.
 
 #### Forgejo integration harness
 
@@ -6174,9 +6173,9 @@ own search matches them — a permanent, bounded gap, not a transition period,
 and deliberately not backfilled (a guessed key could skip a new finding
 without filing anything a human would triage). The marker records the folded form (e.g.
 `pkg:file:go:type:field`), so a literal body search for the raw site key
-— the Filer prompt's own body search (`gh issue list --search` on GitHub, the REST
-`q=` issue search on Forgejo, none on `local` or on a tracker the Box cannot
-write such as Jira, where the host's dedup over relayed intents is the whole
+— the Filer prompt's own body search (the Signal socket's `issue-search` verb on
+GitHub and Forgejo under `socket`, none on `local`, on Jira, or under the `log`
+carrier, where the host's dedup over relayed intents is the whole
 check) — may not
 match the marker text; the Launcher's host-side dedup is the backstop.
 The Launcher appends that marker line to every issue it files,
@@ -6239,8 +6238,8 @@ no symbol (a package doc comment, a file header) keys on the bare `.go` path.
 
 The two direct filing paths (`gh`, Forgejo) never reach the Launcher,
 so their dedup stays entirely the Filer's own: it runs the open-issue
-search above itself (`gh issue list` or the Forgejo REST issue search,
-forked on the tracker), keyed on the finding's site rather than its prose,
+search above itself (the `issue-search` verb under `socket`; none under
+`log`), keyed on the finding's site rather than its prose,
 and appends the same marker line to the body it files, keeping the
 marker format identical across both write mechanisms.
 
@@ -7281,6 +7280,15 @@ adapter answers); a tracker that cannot search answers `501 unsupported`,
 and a Connector's Route table that does not allow the search answers `403
 refused`. The audit log records it as a read, with the reply's hash and
 size. Empty text is a usage failure reported on `/issue-search/usage`.
+
+The Filer's dedup step runs the six searches (site key and all open issues,
+then closed issues under each of the four provenance labels) through this verb
+under `socket`, on github and forgejo trackers. Jira and any tracker under the
+`log` carrier, which has no socket, render the no-search fragment instead and
+rely on the host's site-key dedup (so under `log` an open issue matching the
+subject or a closed provenance issue no longer suppresses filing in-Box; the
+host-side site-key and line-range dedup still applies); a `rejected (...)`
+reply is treated the same way.
 
 The prompts instruct the verb under `socket` (issue #3726): prompt assembly
 picks each of the three signal fragments — the research verdict comment, the

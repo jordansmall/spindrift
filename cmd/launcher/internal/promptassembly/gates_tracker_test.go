@@ -815,20 +815,54 @@ func TestGatesIssueTrackerLinksReadable(t *testing.T) {
 	}
 }
 
+// TestGatesIssueTrackerSearchable pins the gates that select the Filer's
+// dedup step (issue #6895): a search reaches the Box through the Signal
+// socket's issue-search verb on github and forgejo, or through local's own
+// folder search. Jira (no searcher) and any tracker under the log carrier
+// (no socket) take the no-search arm.
+func TestGatesIssueTrackerSearchable(t *testing.T) {
+	for _, tc := range []struct {
+		tracker, read, carrier string
+		searchable             bool
+	}{
+		{"github", "GITHUB", "socket", true},
+		{"forgejo", "FORGEJO", "socket", true},
+		{"jira", "GITHUB", "socket", false},
+		{"local", "LOCAL", "socket", true},
+		{"github", "GITHUB", "log", false},
+		{"forgejo", "FORGEJO", "log", false},
+		{"jira", "GITHUB", "log", false},
+		{"local", "LOCAL", "log", true},
+	} {
+		g := Gates(Env{IssueTracker: tc.tracker, TrackerAxisRead: tc.read, SignalCarrier: tc.carrier})
+		for gate, want := range map[string]bool{
+			"ISSUE_TRACKER_SEARCHABLE":           tc.searchable,
+			"ISSUE_TRACKER_UNSEARCHABLE":         !tc.searchable,
+			"ISSUE_TRACKER_GITHUB_SEARCHABLE":    tc.read == "GITHUB" && tc.searchable,
+			"ISSUE_TRACKER_GITHUB_UNSEARCHABLE":  tc.read == "GITHUB" && !tc.searchable,
+			"ISSUE_TRACKER_FORGEJO_SEARCHABLE":   tc.read == "FORGEJO" && tc.searchable,
+			"ISSUE_TRACKER_FORGEJO_UNSEARCHABLE": tc.read == "FORGEJO" && !tc.searchable,
+		} {
+			if got := g[gate]; got != want {
+				t.Errorf("Gates(IssueTracker=%q, SignalCarrier=%q)[%s] = %v, want %v", tc.tracker, tc.carrier, gate, got, want)
+			}
+		}
+	}
+}
+
 // TestGatesIssueTrackerWritable pins the inverse pair that selects the Filer's
-// dedup step: a tracker with no in-Box client (jira) has no tracker search to
-// run, however the Filer files (issue #6354).
+// relay reason: a tracker with no in-Box client (jira) never claims a
+// read-only token, however the Filer files (issue #6354).
 func TestGatesIssueTrackerWritable(t *testing.T) {
 	for _, tc := range []struct {
 		tracker, read string
 		writable      bool
-		githubArm     bool
 	}{
-		{"", "GITHUB", true, true},
-		{"github", "GITHUB", true, true},
-		{"forgejo", "FORGEJO", true, false},
-		{"local", "LOCAL", true, false},
-		{"jira", "GITHUB", false, false},
+		{"", "GITHUB", true},
+		{"github", "GITHUB", true},
+		{"forgejo", "FORGEJO", true},
+		{"local", "LOCAL", true},
+		{"jira", "GITHUB", false},
 	} {
 		g := Gates(Env{IssueTracker: tc.tracker, TrackerAxisRead: tc.read})
 		if got := g["ISSUE_TRACKER_WRITABLE"]; got != tc.writable {
@@ -836,9 +870,6 @@ func TestGatesIssueTrackerWritable(t *testing.T) {
 		}
 		if got := g["ISSUE_TRACKER_UNWRITABLE"]; got != !tc.writable {
 			t.Errorf("Gates(IssueTracker=%q)[ISSUE_TRACKER_UNWRITABLE] = %v, want %v", tc.tracker, got, !tc.writable)
-		}
-		if got := g["ISSUE_TRACKER_GITHUB_WRITABLE"]; got != tc.githubArm {
-			t.Errorf("Gates(IssueTracker=%q)[ISSUE_TRACKER_GITHUB_WRITABLE] = %v, want %v", tc.tracker, got, tc.githubArm)
 		}
 	}
 }

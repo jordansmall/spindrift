@@ -33,7 +33,6 @@ row's gate in `lib/fragments.nix` (and the gate's definition in
 
 | intent | fragment(s) | rendered by | access modes | r/w | planned replacement |
 | ------ | ----------- | ----------- | ------------ | --- | ------------------- |
-| search existing issues before filing a finding | `github/filer-dedup.md`, `forgejo/filer-dedup.md` | Filer pass (work, research, butler) | both | read | Signal-socket verb |
 | open the draft pull request | `github/open-pr-create.md`, `forgejo/open-pr-create.md` | work, implement pass | `read-write` | write | removed along with `read-write` mode |
 | check for an existing pull request and open a draft one when blocked | `github/if-blocked-pr.md`, `forgejo/if-blocked-pr.md` | work, implement pass | `read-write` | write | removed along with `read-write` mode |
 | comment on the issue with what is done and what remains when blocked | `github/issue-blocked-comment.md`, `forgejo/issue-blocked-comment.md` | work, implement pass | `read-write`, on a tracker with an in-Box client | write | removed along with `read-write` mode |
@@ -53,23 +52,11 @@ every issue-side write row carries the tracker one.
 
 ## Reachable under `read-only`
 
-A `read-only` Box still reaches one in-box read use, not gated on access
-mode:
-
-- The Filer's dedup searches: `github/filer-dedup.md`,
-  `forgejo/filer-dedup.md`. Gated on the tracker being writable, in either
-  access mode and whichever way the Filer files.
-
-This is the set that #6900 ("A read-only Box holds no forge credential")
-drives to empty. The fix pass already reads CI failure detail from the
-launcher-injected `CI FAILURE` section (`ci-failure.md`), which carries each
-failing job's log tail, so `fix-ci-read` instructs no forge call. The planned
-replacement for the rest:
-
-- The Filer's dedup becomes a Signal-socket search verb. Host-side dedup over
-  relayed intents is not a substitute: it matches by exact site key and
-  overlapping line range only, never by subject, which is why the dedup search
-  exists.
+A `read-only` Box reaches no in-box read use: #6900 ("A read-only Box holds
+no forge credential") drove that set to empty. The fix pass reads
+CI failure detail from the launcher-injected `CI FAILURE` section
+(`ci-failure.md`), which carries each failing job's log tail, so
+`fix-ci-read` instructs no forge call.
 
 Parent and linked issue reads have already moved: `issue-read.md`,
 `research-issue-read.md` and `scout-issue-read.md` name `driver-exec signal
@@ -78,3 +65,12 @@ Dispatch's tracker, and no forge CLI. They render for every tracker with a
 host-side issue read (github, forgejo, jira) under the `socket` carrier; under
 the `log` carrier, which has no socket, the `*-unreadable` sibling renders
 instead, and `local` keeps its own folder fragment.
+
+The Filer's dedup has moved the same way: `github/filer-dedup.md` and
+`forgejo/filer-dedup.md` run `driver-exec signal issue-search` (issue #6895),
+which the host answers for github and forgejo trackers under the `socket`
+carrier. Jira (no searcher) and any tracker under `log` render
+`filer-dedup-unwritable.md`, which runs no search: host-side dedup over
+relayed intents matches by exact site key and overlapping line range only,
+never by subject, so subject-level suppression is lost there. `local` keeps
+its own folder fragment.

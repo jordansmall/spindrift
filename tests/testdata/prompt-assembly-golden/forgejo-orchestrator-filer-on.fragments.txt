@@ -9,7 +9,7 @@ coordinator-scout-brief.md
 coordinator.md
 file-issues-direct.md
 file-issues-triage-recap.md
-forgejo/filer-dedup.md
+filer-dedup-unwritable.md
 forgejo/filer-direct-file.md
 forgejo/filer-direct-label.md
 forgejo/if-blocked-pr.md

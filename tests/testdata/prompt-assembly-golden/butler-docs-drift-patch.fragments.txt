@@ -2,9 +2,9 @@ butler-file-issues-relay.md
 butler-patch.md
 butler-review-patch.md
 caveman-default.md
+filer-dedup-unwritable.md
 filer-file-relay.md
 filer-label-relay-butler.md
-github/filer-dedup.md
 scout-issue-read-unreadable.md
 skill-preamble.md
 tdd-baked.md
