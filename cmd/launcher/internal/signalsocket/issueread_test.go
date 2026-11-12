@@ -18,7 +18,7 @@ import (
 // to scope, the way the Pass builds it.
 func trackerHandler(t *testing.T, tr forge.IssueTracker, scope string, warn io.Writer) http.Handler {
 	t.Helper()
-	return signalsocket.NewHandler(newAll(t), nil, signalsocket.NewTrackerIssueReader(tr, scope, warn))
+	return signalsocket.NewHandler(newAll(t), nil, signalsocket.NewTrackerIssueReader(tr, scope, warn), nil)
 }
 
 func readIssue(t *testing.T, h http.Handler, ref string) (int, []byte) {

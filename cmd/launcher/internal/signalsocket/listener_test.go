@@ -69,7 +69,7 @@ func newTestListener(t *testing.T) (*Listener, *Buffer, *bytes.Buffer) {
 	t.Helper()
 	buf := New(Config{Consumes: []signalwire.Kind{signalwire.KindComment, signalwire.KindPRIntent, signalwire.KindIssueIntent}})
 	logw := &bytes.Buffer{}
-	l := &Listener{Handler: NewHandler(buf, logw, nil)}
+	l := &Listener{Handler: NewHandler(buf, logw, nil, nil)}
 	t.Cleanup(func() { _ = l.Close() })
 	return l, buf, logw
 }
@@ -80,7 +80,7 @@ func newGatedTestListener(t *testing.T, secret string) (*Listener, *Buffer, *byt
 	t.Helper()
 	buf := New(Config{Consumes: []signalwire.Kind{signalwire.KindComment, signalwire.KindPRIntent, signalwire.KindIssueIntent}})
 	logw := &bytes.Buffer{}
-	gh, err := NewGatedHandler(buf, logw, secret, nil)
+	gh, err := NewGatedHandler(buf, logw, secret, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGatedHandler: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestListener_TCPRejectsBadSecret(t *testing.T) {
 // fails at handler construction, before there is a listener to bind at all.
 func TestListener_TCPEmptySecretBindsNothing(t *testing.T) {
 	buf := New(Config{Consumes: []signalwire.Kind{signalwire.KindComment}})
-	if _, err := NewGatedHandler(buf, nil, "", nil); err == nil {
+	if _, err := NewGatedHandler(buf, nil, "", nil, nil); err == nil {
 		t.Fatal("NewGatedHandler with an empty secret = nil, want an error")
 	}
 }

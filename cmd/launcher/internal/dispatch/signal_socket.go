@@ -54,7 +54,7 @@ func (d *Dispatch) startSignalSocket(transport registrymanifest.Endpoint, tcpAdd
 		}
 
 		socketPath := filepath.Join(dir, signalSocketFile)
-		l := &signalsocket.Listener{Handler: signalsocket.NewHandler(buf, logw, d.cfg.IssueReader)}
+		l := &signalsocket.Listener{Handler: signalsocket.NewHandler(buf, logw, d.cfg.IssueReader, d.cfg.IssueSearcher)}
 		if err := l.ListenAndServe(socketPath); err != nil {
 			os.RemoveAll(dir) //nolint:errcheck
 			return nil, runner.SignalSocketLocation{}, nil, fmt.Errorf("signal socket: %w", err)
@@ -82,7 +82,7 @@ func (d *Dispatch) startSignalSocket(transport registrymanifest.Endpoint, tcpAdd
 		if err != nil {
 			return nil, runner.SignalSocketLocation{}, nil, fmt.Errorf("signal socket: %w", err)
 		}
-		handler, err := signalsocket.NewGatedHandler(buf, logw, secret, d.cfg.IssueReader)
+		handler, err := signalsocket.NewGatedHandler(buf, logw, secret, d.cfg.IssueReader, d.cfg.IssueSearcher)
 		if err != nil {
 			return nil, runner.SignalSocketLocation{}, nil, fmt.Errorf("signal socket: %w", err)
 		}
