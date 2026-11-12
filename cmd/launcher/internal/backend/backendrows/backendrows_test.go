@@ -468,24 +468,28 @@ func TestUseSubstitutesTheConfiguredBaseURLIntoRoutes(t *testing.T) {
 	}
 }
 
+// baseSearch is the one {base} route the base-URL tests below resolve.
+var baseSearch = connectorhost.Route{Method: "GET", Host: "{base}", Path: "/rest"}
+
 func TestUseRefusesAnInvalidBaseURLNamingTheBackend(t *testing.T) {
-	search := connectorhost.Route{Method: "GET", Host: "{base}", Path: "/rest"}
 	cases := map[string]struct {
 		row  backendrows.Row
 		base string
 	}{
-		"unset":            {baseRow(search), ""},
-		"plaintext":        {baseRow(search), "http://acme.example.net"},
-		"no scheme":        {baseRow(search), "acme.example.net"},
-		"userinfo":         {baseRow(search), "https://u:p@acme.example.net"},
-		"query":            {baseRow(search), "https://acme.example.net/?x=1"},
-		"fragment":         {baseRow(search), "https://acme.example.net/#x"},
-		"escaped path":     {baseRow(search), "https://acme.example.net/ji%2Fra"},
-		"bad escape":       {baseRow(search), "https://u:p%zz@acme.example.net"},
-		"empty host":       {baseRow(search), "https:///jira"},
-		"malformed host":   {baseRow(search), "https://acme.example.net:"},
-		"unparseable":      {baseRow(search), "https://acme example.net"},
-		"host with no env": {row("site", search), "https://acme.example.net"},
+		"plaintext":        {shadowedBaseRow(baseSearch), "http://acme.example.net"},
+		"ipv6 zone":        {shadowedBaseRow(baseSearch), "https://[fe80::1%25en0]"},
+		"no scheme":        {shadowedBaseRow(baseSearch), "acme.example.net"},
+		"userinfo":         {shadowedBaseRow(baseSearch), "https://u:p@acme.example.net"},
+		"query":            {shadowedBaseRow(baseSearch), "https://acme.example.net/?x=1"},
+		"fragment":         {shadowedBaseRow(baseSearch), "https://acme.example.net/#x"},
+		"escaped path":     {shadowedBaseRow(baseSearch), "https://acme.example.net/ji%2Fra"},
+		"bad escape":       {shadowedBaseRow(baseSearch), "https://u:p%zz@acme.example.net"},
+		"empty host":       {shadowedBaseRow(baseSearch), "https:///jira"},
+		"malformed host":   {shadowedBaseRow(baseSearch), "https://acme.example.net:"},
+		"unparseable":      {shadowedBaseRow(baseSearch), "https://acme example.net"},
+		"host with no env": {row("site", baseSearch), "https://acme.example.net"},
+		"non-canonical":    {shadowedBaseRow(baseSearch), "https://acme.example.net/jira//"},
+		"root doubled":     {shadowedBaseRow(baseSearch), "https://acme.example.net//"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -504,6 +508,61 @@ func TestUseRefusesAnInvalidBaseURLNamingTheBackend(t *testing.T) {
 				t.Error("good row stored although the document was refused")
 			}
 		})
+	}
+}
+
+func shadowedBaseRow(routes ...connectorhost.Route) backendrows.Row {
+	r := baseRow(routes...)
+	r.Shadow, r.ShadowEvery = true, 20
+	return r
+}
+
+func TestUseSkipsANonShadowBaseRowWithAnUnusableBase(t *testing.T) {
+	for name, base := range map[string]string{
+		"unset":                 "",
+		"plaintext":             "http://jira.corp:8080",
+		"ipv6 zone":             "https://[fe80::1%25en0]",
+		"query":                 "https://acme.example.net/?x=1",
+		"escaped path":          "https://acme.example.net/ji%2Fra",
+		"userinfo":              "https://u:p@acme.example.net",
+		"unparseable":           "https://acme example.net",
+		"empty host":            "https:///jira",
+		"empty port":            "https://acme.example.net:",
+		"trailing double slash": "https://jira.corp/jira//",
+		"root doubled":          "https://jira.corp//",
+		"leading double slash":  "https://jira.corp//jira",
+		"dot segment":           "https://jira.corp/./jira",
+	} {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			if err := backendrows.Use(rows(t, []backendrows.Row{row("good", getRepos), baseRow(baseSearch)}), envOf(base)); err != nil {
+				t.Fatalf("Use() = %v, want the row left unapplied", err)
+			}
+			if _, ok := backendrows.Lookup("site"); ok {
+				t.Error("row with an unusable base applied")
+			}
+			if _, ok := backendrows.Lookup("good"); !ok {
+				t.Error("good row not applied")
+			}
+		})
+	}
+}
+
+func TestUseStillValidatesAnUnconfiguredBaseRow(t *testing.T) {
+	isolate(t)
+	bad := baseRow(baseSearch)
+	bad.CredentialEnv = ""
+	err := backendrows.Use(rows(t, []backendrows.Row{bad}), envOf(""))
+	if err == nil || !strings.Contains(err.Error(), "no credentialEnv") {
+		t.Errorf("err = %v, want the missing credentialEnv refused", err)
+	}
+}
+
+func TestUseRefusesAShadowedBaseRowWithAnUnsetBase(t *testing.T) {
+	isolate(t)
+	err := backendrows.Use(rows(t, []backendrows.Row{shadowedBaseRow(baseSearch)}), envOf(""))
+	if err == nil || !strings.Contains(err.Error(), "SITE_BASE_URL is not set") {
+		t.Errorf("err = %v, want it to name SITE_BASE_URL as not set", err)
 	}
 }
 
