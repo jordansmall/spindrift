@@ -155,6 +155,13 @@ type Reader struct {
 	// CountInterval is how often core re-asks Count, chosen for the API's rate
 	// limits. It is required, at least one second, when Count is set.
 	CountInterval time.Duration
+
+	// Search is optional: it returns up to limit issues matching the free text
+	// text, narrowed to state ("open" or "closed") and, when label is not "",
+	// to issues carrying it. Leaving it nil advertises no
+	// "tracker.searchIssues" capability, and core searches through its native
+	// adapter instead.
+	Search func(t Target, text, state, label string, limit int) ([]Issue, error)
 }
 
 type method = func(json.RawMessage) (any, error)
@@ -220,13 +227,7 @@ func handlers(r Reader) ([]string, map[string]method) {
 			if err != nil {
 				return nil, err
 			}
-			out := make([]Issue, 0, len(issues)) // encode [] rather than null
-			for _, i := range issues {
-				out = append(out, normalize(i))
-			}
-			return struct {
-				Issues []Issue `json:"issues"`
-			}{out}, nil
+			return issueList(issues), nil
 		},
 		"tracker.issue": func(params json.RawMessage) (any, error) {
 			t, n, err := numbered(params)
@@ -355,6 +356,26 @@ func handlers(r Reader) ([]string, map[string]method) {
 			}{int(r.CountInterval / time.Second)}, nil
 		}
 	}
+	if r.Search != nil {
+		caps = append(caps, "tracker.searchIssues")
+		m["tracker.searchIssues"] = func(params json.RawMessage) (any, error) {
+			var p struct {
+				Target Target `json:"target"`
+				Text   string `json:"text"`
+				State  string `json:"state"`
+				Label  string `json:"label"`
+				Limit  int    `json:"limit"`
+			}
+			if err := unmarshal(params, &p); err != nil {
+				return nil, err
+			}
+			issues, err := r.Search(p.Target, p.Text, p.State, p.Label, p.Limit)
+			if err != nil {
+				return nil, err
+			}
+			return issueList(issues), nil
+		}
+	}
 	if r.IDs == ProjectKeyIDs {
 		caps = append(caps, "tracker.ids.projectKey")
 	}
@@ -379,6 +400,17 @@ func idList(fn func(Target, string) ([]string, error)) method {
 			IDs []string `json:"ids"`
 		}{ids}, nil
 	}
+}
+
+// issueList is the {"issues": [...]} reply of the issue-list reads.
+func issueList(issues []Issue) any {
+	out := make([]Issue, 0, len(issues)) // encode [] rather than null
+	for _, i := range issues {
+		out = append(out, normalize(i))
+	}
+	return struct {
+		Issues []Issue `json:"issues"`
+	}{out}
 }
 
 // normalize makes Labels encode as [] rather than null.

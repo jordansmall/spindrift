@@ -1,13 +1,14 @@
 // Package connectortracker builds core's tracker reads (the forge.IssueTracker
 // list and issue reads and, when advertised, forge.CommentLister,
-// forge.NativeDepsReader, forge.BlockersLister, the Probe read,
-// forge.StatusMappingChecker, forge.IssueTypeChecker and forge.DemandCounter)
-// from a tracker Connector, over the 0.2 tracker primitives in sdk/tracker.
-// Every write stays with the native adapter, which also stays authoritative for
-// every optional capability the protocol does not carry: the result is a stack
-// of forge.Unwrapper layers over the native adapter, so forge.As reaches those
-// capabilities through it. The check and demand capabilities are the exception:
-// they come only from the Connector, and are absent when it omits them.
+// forge.NativeDepsReader, forge.BlockersLister, forge.IssueSearcher, the Probe
+// read, forge.StatusMappingChecker, forge.IssueTypeChecker and
+// forge.DemandCounter) from a tracker Connector, over the 0.2 tracker
+// primitives in sdk/tracker. Every write stays with the native adapter, which
+// also stays authoritative for every optional capability the protocol does not
+// carry: the result is a stack of forge.Unwrapper layers over the native
+// adapter, so forge.As reaches those capabilities through it. The check and
+// demand capabilities are the exception: they come only from the Connector,
+// and are absent when it omits them.
 package connectortracker
 
 import (
@@ -104,6 +105,13 @@ type (
 		Status string `json:"status"`
 		Limit  int    `json:"limit"`
 	}
+	searchIssuesParams struct {
+		Target Target `json:"target"`
+		Text   string `json:"text"`
+		State  string `json:"state"`
+		Label  string `json:"label"`
+		Limit  int    `json:"limit"`
+	}
 	numberedParams struct {
 		Target Target `json:"target"`
 		Number string `json:"number"`
@@ -165,6 +173,8 @@ const (
 	// CapCountInterval is the method that serves the probe cadence; it rides on
 	// CapCount rather than being advertised itself.
 	CapCountInterval = "tracker.countInterval"
+	// CapSearchIssues: the Connector serves tracker.searchIssues.
+	CapSearchIssues = "tracker.searchIssues"
 )
 
 // projectKeyID is the projectKey grammar: ids become branch names, so the
@@ -429,6 +439,45 @@ func (t *reads) Hides(capability any) bool {
 	return false
 }
 
+// searchLayer serves forge.IssueSearcher from the Connector. It exists only
+// when the Connector advertises CapSearchIssues; otherwise the lookup falls
+// through to the native adapter's searcher, if it has one.
+type searchLayer struct {
+	forge.IssueTracker
+	r *reads
+}
+
+func (l searchLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
+
+// SearchIssues returns the guest's matches in its order, at most limit: the
+// guest is asked for limit but is not trusted to honour it, nor the state and
+// label filters (hits outside them are dropped). A bad number or
+// state fails closed, as in issue().
+func (l searchLayer) SearchIssues(text string, state forge.IssueState, label string, limit int) ([]forge.Issue, error) {
+	var res struct {
+		Issues []wireIssue `json:"issues"`
+	}
+	p := searchIssuesParams{Target: l.r.target, Text: text, State: state.Wire(), Label: label, Limit: limit}
+	if err := l.r.call(context.Background(), CapSearchIssues, p, &res); err != nil {
+		return nil, err
+	}
+	res.Issues = res.Issues[:min(len(res.Issues), max(limit, 0))]
+	var issues []forge.Issue
+	for _, w := range res.Issues {
+		iss, err := w.issue(l.r.ids)
+		if err != nil {
+			return nil, err
+		}
+		// The guest is not trusted to have applied the filters: a hit outside
+		// the requested state or label would be treated as a suppressing match.
+		if iss.State != state || (label != "" && !slices.Contains(iss.Labels, label)) {
+			continue
+		}
+		issues = append(issues, iss)
+	}
+	return issues, nil
+}
+
 var (
 	_ forge.Unwrapper            = (*reads)(nil)
 	_ forge.FullyPaginated       = (*reads)(nil)
@@ -447,16 +496,18 @@ var (
 	_ forge.IssueTypeChecker     = createMetaLayer{}
 	_ forge.Unwrapper            = countLayer{}
 	_ forge.DemandCounter        = countLayer{}
+	_ forge.Unwrapper            = searchLayer{}
+	_ forge.IssueSearcher        = searchLayer{}
 )
 
 // New builds core's tracker reads from a tracker Connector. writes keeps
 // every write (transitions, verdicts, comments, labels), which never cross the
 // protocol, and answers every optional capability the protocol does not carry
-// (see CapComments, CapNativeDeps and CapBlocks); Probe stays with it unless
-// the Connector advertises CapProbe. The doctor and demand checks (CapStatuses,
-// CapCreateMeta, CapCount) are never answered natively. Look capabilities
-// up with forge.As. Calls run under context.Background() because IssueTracker
-// methods carry no context.
+// (see CapComments, CapNativeDeps, CapBlocks and CapSearchIssues); Probe stays
+// with it unless the Connector advertises CapProbe. The doctor and demand
+// checks (CapStatuses, CapCreateMeta, CapCount) are never answered natively.
+// Look capabilities up with forge.As. Calls run under context.Background()
+// because IssueTracker methods carry no context.
 //
 // A 0.1 Connector predates the status selector, tracker.blocks and project-key
 // ids, so core ignores those capabilities for it and never sends a status.
@@ -510,6 +561,9 @@ func newTracker(call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, 
 			return nil, err
 		}
 		it = countLayer{it, r, interval}
+	}
+	if slices.Contains(caps, CapSearchIssues) {
+		it = searchLayer{it, r}
 	}
 	return it, nil
 }
