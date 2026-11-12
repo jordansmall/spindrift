@@ -142,6 +142,24 @@ func TestTrackerGuestErrorPassesThrough(t *testing.T) {
 	}
 }
 
+func TestRoutesNamesTheRepoWithoutMutatingTheTable(t *testing.T) {
+	table := []connectorhost.Route{
+		{Method: "GET", Host: "api.example", Path: "/repos/{repo}/issues"},
+		{Method: "GET", Host: "api.example", Path: "/user"},
+	}
+	got := Routes(table, "owner/name")
+	want := []connectorhost.Route{
+		{Method: "GET", Host: "api.example", Path: "/repos/owner/name/issues"},
+		{Method: "GET", Host: "api.example", Path: "/user"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Routes = %v, want %v", got, want)
+	}
+	if table[0].Path != "/repos/{repo}/issues" {
+		t.Errorf("Routes mutated its input: %v", table)
+	}
+}
+
 func TestTrackerListIssuesCapsAtPageLimit(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString(`{"issues":[`)
