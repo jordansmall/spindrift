@@ -81,10 +81,11 @@ const (
 	hostopDir       = "../../cmd/launcher/internal/hostop"
 )
 
-// parseNonTest parses dir's non-test files.
-func parseNonTest(t *testing.T, dir string) []*ast.File {
+// parseDir parses dir's non-test files, returning them with their FileSet.
+func parseDir(t *testing.T, dir string) (*token.FileSet, []*ast.File) {
 	t.Helper()
-	pkgs, err := parser.ParseDir(token.NewFileSet(), dir, func(fi os.FileInfo) bool {
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
 		return !strings.HasSuffix(fi.Name(), "_test.go")
 	}, 0)
 	if err != nil {
@@ -96,6 +97,13 @@ func parseNonTest(t *testing.T, dir string) []*ast.File {
 			files = append(files, f)
 		}
 	}
+	return fset, files
+}
+
+// parseNonTest parses dir's non-test files.
+func parseNonTest(t *testing.T, dir string) []*ast.File {
+	t.Helper()
+	_, files := parseDir(t, dir)
 	return files
 }
 
@@ -185,31 +193,28 @@ func TestHostLineParity(t *testing.T) {
 	}
 }
 
+func render(t *testing.T, fset *token.FileSet, n any) string {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := printer.Fprint(&buf, fset, n); err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(strings.Fields(buf.String()), " ")
+}
+
 // funcSource returns the normalised source of the top-level func name (no
 // receiver) declared in dir's non-test files, "" when there is none.
 func funcSource(t *testing.T, dir, name string) string {
 	t.Helper()
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, pkg := range pkgs {
-		for _, f := range pkg.Files {
-			for _, d := range f.Decls {
-				fn, ok := d.(*ast.FuncDecl)
-				if !ok || fn.Recv != nil || fn.Name.Name != name {
-					continue
-				}
-				fn.Doc = nil
-				var buf bytes.Buffer
-				if err := printer.Fprint(&buf, fset, fn); err != nil {
-					t.Fatal(err)
-				}
-				return strings.Join(strings.Fields(buf.String()), " ")
+	fset, files := parseDir(t, dir)
+	for _, f := range files {
+		for _, d := range f.Decls {
+			fn, ok := d.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil || fn.Name.Name != name {
+				continue
 			}
+			fn.Doc = nil
+			return render(t, fset, fn)
 		}
 	}
 	return ""
@@ -217,9 +222,14 @@ func funcSource(t *testing.T, dir, name string) string {
 
 // TestHelperParity fails when an SDK helper's source drifts from its driverkit
 // original. A Connector cannot import driverkit (issue #6870), so the SDK
-// carries twins; identical source means identical output for every input.
+// carries twins; identical source means identical output for every input. That
+// holds for ErrorText and SessionUUID only because their callees CompactJSON
+// and SessionKey are pinned here too. No twin for BaseTransientPatterns (host
+// Classify appends them via driverkit.MatchTransient), LineFramer (only pi's
+// stream filter, which does not cross the Connector protocol) or TrimNarration
+// (only the host heartbeat writer).
 func TestHelperParity(t *testing.T) {
-	for _, name := range []string{"ToolTarget", "ErrorText", "CompactJSON"} {
+	for _, name := range []string{"ToolTarget", "ErrorText", "CompactJSON", "SessionKey", "SessionUUID"} {
 		t.Run(name, func(t *testing.T) {
 			core := funcSource(t, coreDir, name)
 			if core == "" {
