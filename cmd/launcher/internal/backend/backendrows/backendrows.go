@@ -54,6 +54,11 @@ type Row struct {
 	// the base URL's path prefix prepended to its Path; Use resolves them, so a
 	// stored Row carries concrete hosts.
 	BaseEnv string `json:"baseEnv,omitempty"`
+	// Shadow asks the launcher to run this Connector in sampled shadow mode
+	// beside the native backend of the same name, answering every ShadowEvery-th
+	// call per read operation. ShadowEvery is required with Shadow.
+	Shadow      bool `json:"shadow,omitempty"`
+	ShadowEvery int  `json:"shadowEvery,omitempty"`
 }
 
 // BaseHost is the Route host that stands for the host of the row's BaseEnv URL.
@@ -204,6 +209,12 @@ func validate(row Row, seen map[string]bool) error {
 		return fmt.Errorf("backend %q: the basic credentialScheme needs an identityEnv", row.Name)
 	case row.CredentialScheme != SchemeBasic && row.IdentityEnv != "":
 		return fmt.Errorf("backend %q: identityEnv applies only to the basic credentialScheme", row.Name)
+	case row.ShadowEvery < 0:
+		return fmt.Errorf("backend %q has a negative shadowEvery", row.Name)
+	case row.ShadowEvery > 0 && !row.Shadow:
+		return fmt.Errorf("backend %q has shadowEvery without shadow", row.Name)
+	case row.Shadow && row.ShadowEvery == 0:
+		return fmt.Errorf("backend %q has shadow without shadowEvery", row.Name)
 	}
 	seen[row.Name] = true
 	if err := connectorhost.ValidateRoutes(row.Routes); err != nil {
@@ -244,6 +255,10 @@ type Options struct {
 	Audit io.Writer
 	// Client is the transport; nil means a default client.
 	Client *http.Client
+	// Shadow marks every audit entry as a shadow Connector's.
+	Shadow bool
+	// Observe, when non-nil, sees each audit entry after it is recorded.
+	Observe func(connectorhost.AuditEntry)
 }
 
 // Load compiles the row's module as a network Connector bound to its Route
@@ -282,6 +297,7 @@ func Load(ctx context.Context, row Row, o Options) (*connectorhost.Connector, er
 		},
 		Client: o.Client,
 		Audit:  connectorhost.NewAuditLog(o.Audit),
+		Shadow: o.Shadow, Observe: o.Observe,
 	})
 }
 
