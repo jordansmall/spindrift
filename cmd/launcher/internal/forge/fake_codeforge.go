@@ -48,12 +48,16 @@ func (cf *CodeForgeFake) AgentBranch(num string) string {
 // BranchExists returns BranchExistsErr if set, else the result scripted by
 // SetBranchExists, which is false for an unscripted branch.
 func (cf *CodeForgeFake) BranchExists(branch string) (bool, error) {
-	cf.mu.Lock()
-	defer cf.mu.Unlock()
-	if cf.BranchExistsErr != nil {
-		return false, cf.BranchExistsErr
-	}
-	return cf.branchExists[branch], nil
+	var out bool
+	err := cf.read(pathBranch, &out, func() (any, error) {
+		cf.mu.Lock()
+		defer cf.mu.Unlock()
+		if cf.BranchExistsErr != nil {
+			return nil, cf.BranchExistsErr
+		}
+		return cf.branchExists[branch], nil
+	})
+	return out, err
 }
 
 // SetBranchExists scripts BranchExists's result for branch.
@@ -67,12 +71,16 @@ func (cf *CodeForgeFake) SetBranchExists(branch string, exists bool) {
 // there is one, else the result scripted by SetBranchProtected, which is false
 // for an unscripted branch.
 func (cf *CodeForgeFake) BranchProtected(branch string) (bool, error) {
-	cf.mu.Lock()
-	defer cf.mu.Unlock()
-	if err := cf.branchProtectedErr[branch]; err != nil {
-		return false, err
-	}
-	return cf.branchProtected[branch], nil
+	var out bool
+	err := cf.read(pathBranchProtected, &out, func() (any, error) {
+		cf.mu.Lock()
+		defer cf.mu.Unlock()
+		if err := cf.branchProtectedErr[branch]; err != nil {
+			return nil, err
+		}
+		return cf.branchProtected[branch], nil
+	})
+	return out, err
 }
 
 // SetBranchProtected scripts BranchProtected's result for branch.
@@ -129,11 +137,4 @@ func (cf *CodeForgeFake) Rebase(url string) error {
 
 // Probe returns the scripted repo or error. It duplicates Fake's identical
 // method so that CodeForgeFake satisfies CodeForge on its own.
-func (cf *CodeForgeFake) Probe() (string, error) {
-	cf.mu.Lock()
-	defer cf.mu.Unlock()
-	if cf.ProbeErr != nil {
-		return "", cf.ProbeErr
-	}
-	return cf.ProbeRepo, nil
-}
+func (cf *CodeForgeFake) Probe() (string, error) { return cf.probe(pathForgeProbe) }

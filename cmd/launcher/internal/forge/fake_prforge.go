@@ -132,12 +132,16 @@ func (pf *PRForgeFake) SetMergeCommit(url, sha string) {
 
 // MergeCommit returns the scripted merge commit for url, or MergeCommitErr.
 func (pf *PRForgeFake) MergeCommit(url string) (string, error) {
-	pf.mu.Lock()
-	defer pf.mu.Unlock()
-	if pf.MergeCommitErr != nil {
-		return "", pf.MergeCommitErr
-	}
-	return pf.mergeCommits[url], nil
+	var sha string
+	err := pf.read(pathMergeCommit, &sha, func() (any, error) {
+		pf.mu.Lock()
+		defer pf.mu.Unlock()
+		if pf.MergeCommitErr != nil {
+			return nil, pf.MergeCommitErr
+		}
+		return pf.mergeCommits[url], nil
+	})
+	return sha, err
 }
 
 // SetMergeableState scripts the MergeableState Mergeable returns for url.
@@ -158,23 +162,30 @@ func (pf *PRForgeFake) SetMergeableStates(url string, states []MergeableState) {
 // Mergeable returns the next queued state for url, else the scripted state, or
 // MergeableUnknown when nothing was scripted.
 func (pf *PRForgeFake) Mergeable(url string) (MergeableState, error) {
-	pf.mu.Lock()
-	defer pf.mu.Unlock()
-	pf.MergeableCalls++
-	if pf.MergeableErr != nil && pf.MergeableCalls > pf.MergeableErrAfter {
-		return MergeableUnknown, pf.MergeableErr
+	var s MergeableState
+	err := pf.read(pathMergeable, &s, func() (any, error) {
+		pf.mu.Lock()
+		defer pf.mu.Unlock()
+		pf.MergeableCalls++
+		if pf.MergeableErr != nil && pf.MergeableCalls > pf.MergeableErrAfter {
+			return nil, pf.MergeableErr
+		}
+		if pf.DraftUnmergeable && pf.drafts[url] {
+			return MergeableConflicting, nil
+		}
+		if q := pf.mergeableQ[url]; len(q) > 0 {
+			pf.mergeableQ[url] = q[1:]
+			return q[0], nil
+		}
+		if s, ok := pf.mergeableStates[url]; ok {
+			return s, nil
+		}
+		return MergeableUnknown, nil
+	})
+	if err != nil {
+		return MergeableUnknown, err
 	}
-	if pf.DraftUnmergeable && pf.drafts[url] {
-		return MergeableConflicting, nil
-	}
-	if q := pf.mergeableQ[url]; len(q) > 0 {
-		pf.mergeableQ[url] = q[1:]
-		return q[0], nil
-	}
-	if s, ok := pf.mergeableStates[url]; ok {
-		return s, nil
-	}
-	return MergeableUnknown, nil
+	return s, nil
 }
 
 // SetNeedsUpdate scripts the NeedsUpdate result for url.
@@ -187,12 +198,16 @@ func (pf *PRForgeFake) SetNeedsUpdate(url string, stale bool) {
 // NeedsUpdate returns the scripted staleness for url, false when nothing was
 // scripted.
 func (pf *PRForgeFake) NeedsUpdate(url string) (bool, error) {
-	pf.mu.Lock()
-	defer pf.mu.Unlock()
-	if pf.NeedsUpdateErr != nil {
-		return false, pf.NeedsUpdateErr
-	}
-	return pf.needsUpdate[url], nil
+	var stale bool
+	err := pf.read(pathNeedsUpdate, &stale, func() (any, error) {
+		pf.mu.Lock()
+		defer pf.mu.Unlock()
+		if pf.NeedsUpdateErr != nil {
+			return nil, pf.NeedsUpdateErr
+		}
+		return pf.needsUpdate[url], nil
+	})
+	return stale, err
 }
 
 // SetDraft seeds url's draft state, which MarkReady and MarkDraft then flip.
@@ -203,10 +218,19 @@ func (pf *PRForgeFake) SetDraft(url string, draft bool) {
 }
 
 // IsDraft reports url's tracked draft state, false when none was seeded or set.
+// It has no error return, so a Connector failure panics rather than answering
+// "not a draft" for a read that never happened.
 func (pf *PRForgeFake) IsDraft(url string) bool {
-	pf.mu.Lock()
-	defer pf.mu.Unlock()
-	return pf.drafts[url]
+	var draft bool
+	err := pf.read(pathDraft, &draft, func() (any, error) {
+		pf.mu.Lock()
+		defer pf.mu.Unlock()
+		return pf.drafts[url], nil
+	})
+	if err != nil {
+		panic(fmt.Sprintf("forge: Fake.IsDraft(%s): %v", url, err))
+	}
+	return draft
 }
 
 // SetCheckStates scripts the states successive CheckState calls return for url.
@@ -233,77 +257,89 @@ func (pf *PRForgeFake) SetPRFiles(url string, files []string) {
 
 func (pf *PRForgeFake) ListPRFiles(url string) ([]string, error) {
 	pf.Fire("ListPRFiles")
-	pf.mu.Lock()
-	defer pf.mu.Unlock()
-	if pf.PRFilesErr != nil {
-		return nil, pf.PRFilesErr
+	var files []string
+	err := pf.read(pathFiles, &files, func() (any, error) {
+		pf.mu.Lock()
+		defer pf.mu.Unlock()
+		if pf.PRFilesErr != nil {
+			return nil, pf.PRFilesErr
+		}
+		return pf.prFiles[url], nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	out := make([]string, len(pf.prFiles[url]))
-	copy(out, pf.prFiles[url])
-	return out, nil
+	// A scripted empty list decodes as nil through JSON null; keep it non-nil.
+	return append([]string{}, files...), nil
+}
+
+// openPRAnswer is OpenPRForBranch's (PR, bool) as one JSON answer.
+type openPRAnswer struct {
+	PR PR
+	OK bool
 }
 
 func (pf *PRForgeFake) OpenPRForBranch(branch string) (PR, bool, error) {
 	pf.Fire("OpenPRForBranch")
-	pf.mu.Lock()
-	defer pf.mu.Unlock()
-	if len(pf.OpenPRForBranchErrs) > 0 {
-		err := pf.OpenPRForBranchErrs[0]
-		pf.OpenPRForBranchErrs = pf.OpenPRForBranchErrs[1:]
-		if err != nil {
-			return PR{}, false, err
+	var out openPRAnswer
+	err := pf.read(pathPRsForBranch, &out, func() (any, error) {
+		pf.mu.Lock()
+		defer pf.mu.Unlock()
+		if err := popErr(&pf.OpenPRForBranchErrs, pf.OpenPRForBranchErr); err != nil {
+			return nil, err
 		}
-	} else if pf.OpenPRForBranchErr != nil {
-		return PR{}, false, pf.OpenPRForBranchErr
+		url, ok := pf.branchPRs[branch]
+		if !ok || pf.prStates[url] != PROpen {
+			return openPRAnswer{}, nil
+		}
+		pr, ok := pf.prs[url]
+		return openPRAnswer{pr, ok}, nil
+	})
+	if err != nil || !out.OK {
+		return PR{}, false, err
 	}
-	url, ok := pf.branchPRs[branch]
-	if !ok {
-		return PR{}, false, nil
-	}
-	if pf.prStates[url] != PROpen {
-		return PR{}, false, nil
-	}
-	pr, ok := pf.prs[url]
-	if !ok {
-		return PR{}, false, nil
-	}
-	return pr, true, nil
+	return out.PR, true, nil
+}
+
+// branchPRAnswer is PRForBranch's (URL, bool) as one JSON answer.
+type branchPRAnswer struct {
+	URL string
+	OK  bool
 }
 
 func (pf *PRForgeFake) PRForBranch(branch string) (string, bool, error) {
-	pf.mu.Lock()
-	defer pf.mu.Unlock()
-	if len(pf.PRForBranchErrs) > 0 {
-		err := pf.PRForBranchErrs[0]
-		pf.PRForBranchErrs = pf.PRForBranchErrs[1:]
-		if err != nil {
-			return "", false, err
+	var out branchPRAnswer
+	err := pf.read(pathPRsForBranch, &out, func() (any, error) {
+		pf.mu.Lock()
+		defer pf.mu.Unlock()
+		if err := popErr(&pf.PRForBranchErrs, pf.PRForBranchErr); err != nil {
+			return nil, err
 		}
-	} else if pf.PRForBranchErr != nil {
-		return "", false, pf.PRForBranchErr
+		url, ok := pf.branchPRs[branch]
+		return branchPRAnswer{url, ok}, nil
+	})
+	if err != nil || !out.OK {
+		return "", false, err
 	}
-	url, ok := pf.branchPRs[branch]
-	if !ok {
-		return "", false, nil
-	}
-	return url, true, nil
+	return out.URL, true, nil
 }
 
 func (pf *PRForgeFake) PRState(url string) (PRState, error) {
-	pf.mu.Lock()
-	defer pf.mu.Unlock()
-	if len(pf.PRStateErrs) > 0 {
-		err := pf.PRStateErrs[0]
-		pf.PRStateErrs = pf.PRStateErrs[1:]
-		if err != nil {
-			return "", err
+	var s PRState
+	err := pf.read(pathPR, &s, func() (any, error) {
+		pf.mu.Lock()
+		defer pf.mu.Unlock()
+		if err := popErr(&pf.PRStateErrs, pf.PRStateErr); err != nil {
+			return nil, err
 		}
-	} else if pf.PRStateErr != nil {
-		return "", pf.PRStateErr
-	}
-	s, ok := pf.prStates[url]
-	if !ok {
-		return "", fmt.Errorf("PR %s not found", url)
+		s, ok := pf.prStates[url]
+		if !ok {
+			return nil, fmt.Errorf("PR %s not found", url)
+		}
+		return s, nil
+	})
+	if err != nil {
+		return "", err
 	}
 	return s, nil
 }
@@ -313,21 +349,28 @@ func (pf *PRForgeFake) PRState(url string) (PRState, error) {
 // with no checks registered gives.
 func (pf *PRForgeFake) CheckState(url string) (RollupState, error) {
 	pf.Fire("CheckState")
-	pf.mu.Lock()
-	defer pf.mu.Unlock()
-	if eq := pf.checkErrQ[url]; len(eq) > 0 {
-		entry := eq[0]
-		pf.checkErrQ[url] = eq[1:]
-		if entry != nil {
-			return StateNone, entry
+	var s RollupState
+	err := pf.read(pathChecks, &s, func() (any, error) {
+		pf.mu.Lock()
+		defer pf.mu.Unlock()
+		if eq := pf.checkErrQ[url]; len(eq) > 0 {
+			entry := eq[0]
+			pf.checkErrQ[url] = eq[1:]
+			if entry != nil {
+				return nil, entry
+			}
 		}
+		q := pf.checkQ[url]
+		if len(q) == 0 {
+			return StateNone, nil
+		}
+		s := q[0]
+		pf.checkQ[url] = q[1:]
+		return s, nil
+	})
+	if err != nil {
+		return StateNone, err
 	}
-	q := pf.checkQ[url]
-	if len(q) == 0 {
-		return StateNone, nil
-	}
-	s := q[0]
-	pf.checkQ[url] = q[1:]
 	return s, nil
 }
 
@@ -344,18 +387,22 @@ func (pf *PRForgeFake) SetHeadCommitSHAs(url string, shas []string) {
 // HeadCommitSHA pops the next scripted entry for url, or synthesizes a distinct
 // value once the queue is exhausted.
 func (pf *PRForgeFake) HeadCommitSHA(url string) (string, error) {
-	pf.mu.Lock()
-	defer pf.mu.Unlock()
-	if pf.HeadCommitSHAErr != nil {
-		return "", pf.HeadCommitSHAErr
-	}
-	if q := pf.headSHAQ[url]; len(q) > 0 {
-		s := q[0]
-		pf.headSHAQ[url] = q[1:]
-		return s, nil
-	}
-	pf.headSHACounter++
-	return fmt.Sprintf("fake-sha-%d", pf.headSHACounter), nil
+	var sha string
+	err := pf.read(pathHeadSHA, &sha, func() (any, error) {
+		pf.mu.Lock()
+		defer pf.mu.Unlock()
+		if pf.HeadCommitSHAErr != nil {
+			return nil, pf.HeadCommitSHAErr
+		}
+		if q := pf.headSHAQ[url]; len(q) > 0 {
+			s := q[0]
+			pf.headSHAQ[url] = q[1:]
+			return s, nil
+		}
+		pf.headSHACounter++
+		return fmt.Sprintf("fake-sha-%d", pf.headSHACounter), nil
+	})
+	return sha, err
 }
 
 // SetFailureDetail scripts the FailureDetail result for url.
@@ -369,21 +416,29 @@ func (pf *PRForgeFake) SetFailureDetail(url, detail string) {
 // scripted. The real adapter is best-effort the same way: a PR with no failing
 // checks yields no detail rather than an error.
 func (pf *PRForgeFake) FailureDetail(url string) (string, error) {
-	pf.mu.Lock()
-	defer pf.mu.Unlock()
-	if pf.FailureDetailErr != nil {
-		return "", pf.FailureDetailErr
-	}
-	return pf.failureDetail[url], nil
+	var detail string
+	err := pf.read(pathChecks, &detail, func() (any, error) {
+		pf.mu.Lock()
+		defer pf.mu.Unlock()
+		if pf.FailureDetailErr != nil {
+			return nil, pf.FailureDetailErr
+		}
+		return pf.failureDetail[url], nil
+	})
+	return detail, err
 }
 
 func (pf *PRForgeFake) CanAutoMerge() (bool, error) {
-	pf.mu.Lock()
-	defer pf.mu.Unlock()
-	if pf.AutoMergeErr != nil {
-		return false, pf.AutoMergeErr
-	}
-	return pf.AutoMergeAllowed, nil
+	var ok bool
+	err := pf.read(pathAutoMerge, &ok, func() (any, error) {
+		pf.mu.Lock()
+		defer pf.mu.Unlock()
+		if pf.AutoMergeErr != nil {
+			return nil, pf.AutoMergeErr
+		}
+		return pf.AutoMergeAllowed, nil
+	})
+	return ok, err
 }
 
 func (pf *PRForgeFake) EnqueueAutoMerge(prURL string) error {

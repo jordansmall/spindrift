@@ -149,7 +149,7 @@ type CommentCall struct {
 
 func (tf *IssueTrackerFake) ListIssues(state DispatchState) ([]Issue, error) {
 	var out []Issue
-	err := tf.read("/tracker/listIssues", &out, func() (any, error) {
+	err := tf.read(pathListIssues, &out, func() (any, error) {
 		tf.mu.Lock()
 		defer tf.mu.Unlock()
 		tf.ListIssuesCalls = append(tf.ListIssuesCalls, state)
@@ -167,11 +167,11 @@ func (tf *IssueTrackerFake) ListIssues(state DispatchState) ([]Issue, error) {
 // asserts which states the dispatch loop listed.
 func (tf *IssueTrackerFake) CountReady(_ bool) (int, error) {
 	var n int
-	err := tf.read("/tracker/listIssues", &n, func() (any, error) {
+	err := tf.read(pathListIssues, &n, func() (any, error) {
 		tf.mu.Lock()
 		defer tf.mu.Unlock()
 		if tf.ListIssuesErr != nil {
-			return 0, tf.ListIssuesErr
+			return nil, tf.ListIssuesErr
 		}
 		return len(tf.listState(Dispatchable)), nil
 	})
@@ -220,7 +220,7 @@ func (tf *IssueTrackerFake) listState(state DispatchState) []Issue {
 // its dispatch label.
 func (tf *IssueTrackerFake) ListOpenIssues() ([]Issue, error) {
 	var out []Issue
-	err := tf.read("/tracker/listIssues", &out, func() (any, error) {
+	err := tf.read(pathListIssues, &out, func() (any, error) {
 		tf.mu.Lock()
 		defer tf.mu.Unlock()
 		var open []Issue
@@ -245,38 +245,36 @@ func (tf *IssueTrackerFake) ListOpenIssues() ([]Issue, error) {
 // lowercase so a bare *IssueTrackerFake never satisfies SeamLister; only
 // seamListedIssueTracker promotes it to the exported AllIssues name.
 func (tf *IssueTrackerFake) allIssues() ([]Issue, error) {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
 	var out []Issue
-	for _, iss := range tf.issues {
-		iss.Priority = ResolvePriority(iss.Labels)
-		out = append(out, iss)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		ni, _ := strconv.Atoi(out[i].Number)
-		nj, _ := strconv.Atoi(out[j].Number)
-		return ni < nj
+	err := tf.read(pathAllIssues, &out, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		var all []Issue
+		for _, iss := range tf.issues {
+			iss.Priority = ResolvePriority(iss.Labels)
+			all = append(all, iss)
+		}
+		sort.Slice(all, func(i, j int) bool {
+			ni, _ := strconv.Atoi(all[i].Number)
+			nj, _ := strconv.Atoi(all[j].Number)
+			return ni < nj
+		})
+		return all, nil
 	})
-	return out, nil
+	return out, err
 }
 
 func (tf *IssueTrackerFake) Issue(num string) (Issue, error) {
 	var out Issue
-	err := tf.read("/tracker/issue", &out, func() (any, error) {
+	err := tf.read(pathIssue, &out, func() (any, error) {
 		tf.mu.Lock()
 		defer tf.mu.Unlock()
 		tf.IssueCalls = append(tf.IssueCalls, num)
 		if err, ok := tf.IssueErrByNum[num]; ok {
 			return nil, err
 		}
-		if len(tf.IssueErrs) > 0 {
-			err := tf.IssueErrs[0]
-			tf.IssueErrs = tf.IssueErrs[1:]
-			if err != nil {
-				return nil, err
-			}
-		} else if tf.IssueErr != nil {
-			return nil, tf.IssueErr
+		if err := popErr(&tf.IssueErrs, tf.IssueErr); err != nil {
+			return nil, err
 		}
 		iss, ok := tf.issues[num]
 		if !ok {
@@ -374,7 +372,7 @@ var _ NativeDepsReader = (*IssueTrackerFake)(nil)
 // (forge.DepsOf calls it once per issue).
 func (tf *IssueTrackerFake) NativeDepsOf(num string) ([]string, error) {
 	var out []string
-	err := tf.read("/tracker/nativeDeps", &out, func() (any, error) {
+	err := tf.read(pathNativeDeps, &out, func() (any, error) {
 		tf.mu.Lock()
 		defer tf.mu.Unlock()
 		tf.NativeDepsCalls = append(tf.NativeDepsCalls, num)
@@ -393,23 +391,27 @@ func (tf *IssueTrackerFake) NativeDepsOf(num string) ([]string, error) {
 // deterministic assertions: NativeDeps is an unordered map, so a real adapter
 // may order the set its way.
 func (tf *IssueTrackerFake) BlocksOf(num string) ([]Dependency, error) {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	var ids []string
-	for child, blockers := range tf.NativeDeps {
-		if slices.Contains(blockers, num) {
-			ids = append(ids, child)
+	var out []Dependency
+	err := tf.read(pathBlocks, &out, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		var ids []string
+		for child, blockers := range tf.NativeDeps {
+			if slices.Contains(blockers, num) {
+				ids = append(ids, child)
+			}
 		}
-	}
-	sort.Slice(ids, func(i, j int) bool {
-		ni, ei := strconv.Atoi(ids[i])
-		nj, ej := strconv.Atoi(ids[j])
-		if ei == nil && ej == nil {
-			return ni < nj
-		}
-		return ids[i] < ids[j]
+		sort.Slice(ids, func(i, j int) bool {
+			ni, ei := strconv.Atoi(ids[i])
+			nj, ej := strconv.Atoi(ids[j])
+			if ei == nil && ej == nil {
+				return ni < nj
+			}
+			return ids[i] < ids[j]
+		})
+		return WithSource(ids, DepSourceNative), nil
 	})
-	return WithSource(ids, DepSourceNative), nil
+	return out, err
 }
 
 func (tf *IssueTrackerFake) Comment(num, body string) error {
@@ -424,7 +426,7 @@ func (tf *IssueTrackerFake) Comment(num, body string) error {
 // yields nil and no error, matching an issue with no comments.
 func (tf *IssueTrackerFake) Comments(num string) ([]Comment, error) {
 	var out []Comment
-	err := tf.read("/tracker/comments", &out, func() (any, error) {
+	err := tf.read(pathComments, &out, func() (any, error) {
 		tf.mu.Lock()
 		defer tf.mu.Unlock()
 		if err, ok := tf.CommentsErr[num]; ok {
@@ -436,19 +438,21 @@ func (tf *IssueTrackerFake) Comments(num string) ([]Comment, error) {
 }
 
 func (tf *IssueTrackerFake) ListLabels() ([]string, error) {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	if tf.ListLabelsErr != nil {
-		return nil, tf.ListLabelsErr
-	}
-	src := tf.Labels
-	if len(tf.LabelsSeq) > 0 {
-		src = tf.LabelsSeq[0]
-		tf.LabelsSeq = tf.LabelsSeq[1:]
-	}
-	out := make([]string, len(src))
-	copy(out, src)
-	return out, nil
+	var out []string
+	err := tf.read(pathLabels, &out, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		if tf.ListLabelsErr != nil {
+			return nil, tf.ListLabelsErr
+		}
+		src := tf.Labels
+		if len(tf.LabelsSeq) > 0 {
+			src = tf.LabelsSeq[0]
+			tf.LabelsSeq = tf.LabelsSeq[1:]
+		}
+		return append([]string{}, src...), nil
+	})
+	return out, err
 }
 
 func (tf *IssueTrackerFake) CreateLabel(name, description, color string) error {
@@ -509,14 +513,7 @@ func (tf *IssueTrackerFake) SetIssue(iss Issue) {
 	tf.issues[iss.Number] = iss
 }
 
-func (tf *IssueTrackerFake) Probe() (string, error) {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	if tf.ProbeErr != nil {
-		return "", tf.ProbeErr
-	}
-	return tf.ProbeRepo, nil
-}
+func (tf *IssueTrackerFake) Probe() (string, error) { return tf.probe(pathTrackerProbe) }
 
 // StateLabels implements LabeledTracker, returning the DispatchLabels the Fake
 // was constructed with.
