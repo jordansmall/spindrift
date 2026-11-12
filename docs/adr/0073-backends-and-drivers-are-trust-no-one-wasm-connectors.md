@@ -489,3 +489,22 @@ path equals the accepted path or lies beneath it; a narrowing is not flagged.
 report that never fails configuration validation; accepting a widening is a
 reviewed commit to the file. The reference's Reviewing a widened Route table
 has the procedure.
+
+## Amendment (issue #6810): github reads in sampled shadow mode
+
+Proof-order step 2 is in place on dogfood: the launcher wraps the native github
+tracker and forge, and the Connector answers a sample of the same reads beside
+them. Native stays authoritative and every write stays native. Sampling is per
+operation at a row-owned rate (`spindrift.connectors.<name>.shadowEvery`,
+default 10, first call always sampled), so a rare read such as `FailureDetail`
+is still compared. A rate limit is classified host-side, in the Connector
+host's audit entry, because the guest sees only status and body; the shadow
+then suspends itself for the rest of the run so it adds no load once GitHub
+pushes back, and the summary says so, which makes the run not clean. The
+credential is a static token, `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`, for now: the
+backend row's `Authorize` reads the environment at each request, and nothing
+yet wires a `GH_TOKEN_REFRESH_FILE` follower into `backendrows.Load` (the
+network host can follow one, and `network_rotate_test.go` covers it). The
+cut-over bar is the same 20 consecutive clean runs, counted over the
+`shadow-github-*.log` records; the reference's Shadow mode section has the
+recipe and what counts as clean.

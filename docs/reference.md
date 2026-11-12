@@ -2284,14 +2284,16 @@ is the fixture Connector in
   modules' files. Each row takes a single definition, so a Consumer cannot
   adjust a Connector's row additively; overriding it is `lib.mkForce` on the
   whole row.
-  The one exception is `shadow` (issue #6797): a definition that sets only
-  `spindrift.connectors.<name>.shadow = true` is a Consumer's switch on the
-  registered row, not a second registration. With it on, the native Strategy of
-  the same name stays authoritative while the Box replays each Pass log through
-  the row's Driver `module` and records divergences; the row must name a core
-  Driver and carry a `module`. spindrift's own dogfood is a pinned exception to
-  mimicking a new Consumer: it shadows the Connectors in
-  `nix/dogfood-shadow.nix` until cut-over.
+  The one exception is `shadow` (issues #6797, #6810): a definition that sets
+  only `spindrift.connectors.<name>.shadow = true` (and optionally
+  `shadowEvery`) is a Consumer's switch on the registered row, not a second
+  registration. With it on, the native Strategy or backend of the same name
+  stays authoritative. A `driver` row must name a core Driver and carry a
+  `module`; the Box replays each Pass log through it and records divergences.
+  A `backend` row samples every `shadowEvery`th read (default 10, minimum 1)
+  per operation through its Connector instead. A row with neither is refused.
+  spindrift's own dogfood is a pinned exception to mimicking a new Consumer: it
+  shadows the Connectors in `nix/dogfood-shadow.nix` until cut-over.
 - **Row-owned knobs.** A row's `knobs` attrset has the shape of a core row's
   (ADR 0068), keyed by env-schema key with an env-schema entry as value. The
   knobs fold into `spindrift.envSchema` on top of lib/env-schema.nix. Only that
@@ -2320,8 +2322,8 @@ is the fixture Connector in
   for the repository's `owner/name` slug, which `connectortracker.Routes` fills at
   run time because the slug is config, not something the Connector's package
   can know. The option is a declaration only: the host validates the table when
-  it loads the Connector, and no binary loads one from a row yet. A backend
-  row's table is `backend.routes` instead ([Backend rows on a
+  it loads the Connector, and no binary loads one from this option yet. A
+  backend row's table is `backend.routes` instead ([Backend rows on a
   Connector](#backend-rows-on-a-connector)).
 - **`flake.nix`.** The Connector's own flake pins core with
   `inputs.core.url = "github:jordansmall/spindrift?dir=core"` and exposes the
@@ -2468,8 +2470,9 @@ optional); `credentialKnob` is the Consumer knob that names `credentialEnv`,
 and doctor shows it. The launcher and the daemon validate and
 store the rows (the `backendrows` package: `Use` validates the rows whole and
 exits `config-invalid` on a bad one). `Lookup` finds a row and `Load` binds its
-module to its Route table through the Connector host; nothing calls them until
-a Connector backend can be selected (issues #6807 and #6810). Then the host
+module to its Route table through the Connector host. Only the read shadow
+([Shadow mode](#shadow-mode)) calls them today; a Connector backend cannot yet
+be selected as the tracker or forge (issues #6807 and #6810). The host
 reads the credential from its own environment at each request and attaches it
 on a route match; the module never sees it. The Box's binaries read no backend
 rows, since the Box never brokers a forge credential.
@@ -2561,6 +2564,10 @@ writes a read-only tracker lacks) and the PR forge read contract
 against `connectors/<backend>` when it exists, through
 `SPINDRIFT_BACKEND_CONNECTOR_WASM` and `SPINDRIFT_BACKEND_CONNECTOR_ROUTES`.
 
+Its first production use is the sampled read shadow ([Shadow
+mode](#shadow-mode)): dogfood loads the Connector beside the native adapter and
+compares its reads, while the native adapter still answers every call.
+
 #### Shadow mode
 
 A Connector can run beside the native code it will replace before it replaces
@@ -2570,11 +2577,20 @@ it, and the Connector's answer is only compared and recorded. The switch is
 the row option `spindrift.connectors.<name>.shadow`, set `true` as a bare
 definition by whoever owns the flake that evaluates the row (see **Module**).
 It is not an env knob, because a Connector row's knobs reach no flake option or
-Box env yet. `mkHarness` takes the shadowed names as `shadowDrivers` and
-refuses one with no `module` or no core Driver of that name. Only a Box
-running the shadowed Driver replays anything, and the Box rows file carries the
-flag to `driver-exec`. spindrift's own dogfood shadows the Connectors listed in
-`nix/dogfood-shadow.nix`, a pinned exception to mimicking a new Consumer.
+Box env yet. For a Driver row, `mkHarness` takes the shadowed names as
+`shadowDrivers` and refuses one with no `module` or no core Driver of that
+name. Only a Box running the shadowed Driver replays anything, and the Box rows
+file carries the flag to `driver-exec`. For a backend row, the switch lands on
+the row's entry in the launcher input document's `backends` as `shadow` and
+`shadowEvery`, the sampling rate from the row option
+`spindrift.connectors.<name>.shadowEvery` (default 10; `mkHarness` refuses a
+value below 1, or either field without the other). The github Connector's row
+reads with the host-only `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`. spindrift's own
+dogfood shadows the Connectors listed in `nix/dogfood-shadow.nix`, a pinned
+exception to mimicking a new Consumer; its accepted github Route table is
+baselined in `spindrift-connector-routes.json`.
+
+##### Driver replay
 
 After each Pass, `driver-exec` replays the Pass log through the Connector and
 compares it with the native Strategy on three things:
@@ -2662,6 +2678,117 @@ Pass logs mix Driver JSON with host ops and may hold lines that are not JSON;
 never reached, ran no Pass and is skipped rather than counted or treated as a
 break. A log of the shadowed Driver with Passes and a missing summary breaks the
 count.
+
+##### Backend read shadow
+
+A shadowed backend row (`backend` with `shadow` on) samples the backend's reads
+instead of replaying a log. Only `dispatch` and `research` runs shadow; the
+launcher wraps the native tracker and forge, and every `shadowEvery`th call to
+each operation, the first included, is also asked of the Connector. The shadowed
+operations are the tracker reads `ListIssues`, `ListOpenIssues` and `Issue`, and
+the PR reads `OpenPRForBranch`, `PRForBranch`, `PRState`, `CheckState` and
+`FailureDetail`. The native adapter is authoritative: a caller always gets the
+native result and error, and every write, and every read the Connector does not
+serve, goes to the native adapter alone; that includes the tracker's comment and
+native-dependency reads (`CapComments`, `CapNativeDeps`), so a clean run says
+nothing about them. The Connector's call runs on one async
+worker behind a 64-entry queue. A sample that finds the queue full is dropped
+and counted as `skipped`, so the shadow never slows a native call. List results
+compare order-insensitively. If both sides fail, that counts as agreement.
+
+Records are `spindrift_op` lines in
+`.spindrift/logs/shadow-<backend>-<UTC stamp>-<pid>.log`, one file per backend
+per run, in the directory CI uploads. The stamp is `20060102T150405Z`. The
+matching `.audit.jsonl` holds the Connector's [audit
+lines](#connector-protocol). Divergences and the summary use the same shapes as
+the Driver replay, with these differences:
+
+- `shadow_divergence`: `driver` is the backend name (`github`), `check` is the
+  operation name, `line` is the call's inputs as JSON, and `line_no` is absent.
+  `native` and `shadow` are each side's result, or `{"error": ...}`.
+- `shadow_summary`, one per run: `compared` counts compared calls, and
+  `native_ns_per_line` and `shadow_ns_per_line` are the mean cost per compared
+  call. It adds `skipped` (samples dropped), `forbidden` (403s that are not rate
+  limits), `rate_limited` (primary) and `secondary_rate_limited`; each is
+  omitted at zero.
+
+The host classifies a 403 or 429 itself, since the guest sees only status and
+body, and marks the audit line: `shadow` is `true` on every entry a shadow
+Connector wrote, `rate_limit` is `primary` when `x-ratelimit-remaining` is `0`
+and `secondary` when the response has a `Retry-After` header or a "secondary
+rate limit" body, and `retry_after` carries that header verbatim. A 429 that is
+not primary counts as secondary, with or without those signals. The first 403
+and the first limit of each kind also print one `==>` warning.
+
+Opening is all-or-nothing: when the Connector loads but one side (tracker or PR
+reads) cannot be built, the whole shadow is refused and the summary records an
+`error`, so that run compares nothing rather than counting a half-compared run
+as clean.
+
+The Connector read runs after the native read (and, on the first sample, only
+after the wasm module loads), so a label, PR state or check rollup that changed
+in that window shows up as a divergence that is not a Connector fault. Check a
+divergence on such mutable fields against timing before blaming the Connector.
+
+Shadow mode never fails a run. A Connector that cannot be loaded, a request its
+Route table refuses, and a Connector that fails closed or panics each end the
+shadow with an `error` in the summary, and the native path carries on. So does a
+request that outlives the Connector's per-call time budget (5 seconds plus a
+little per request byte), which cancels the in-flight request and fails the
+Connector. A rate limit also records an `error`, and suspends the shadow for
+the rest of the run, so it adds no load once GitHub pushes back; a plain 403 only counts toward `forbidden`. At the end of a run the
+launcher waits up to 30 seconds for queued calls, then aborts the Connector and
+writes the summary.
+
+The shadow reads the credential from the host-only
+`SPINDRIFT_GITHUB_CONNECTOR_TOKEN` (knob `githubConnectorToken`), a static
+token: the Connector host's backend path reads it from the environment per
+request and does not follow `GH_TOKEN_REFRESH_FILE`, so use a token that
+outlives the run. On dogfood CI, pass it to the launcher from the
+`SPINDRIFT_GITHUB_CONNECTOR_TOKEN` repository secret with an `env:` entry on the
+dispatch step of `agent-dispatch.yml` and the research step of
+`agent-research.yml`; a maintainer adds those entries by hand, since an agent's
+push credential cannot edit workflow files. With it unset the shadow sends
+nothing, and each run's summary carries the `error` and is not clean.
+
+The token must be read-only. The Route table admits `POST /graphql`, whose body
+the host does not restrict, so the token's scope is the only barrier against a
+mutation from the untrusted Connector. Use a fine-grained personal access token
+scoped to the one repository, with repository permissions Metadata, Issues,
+Pull requests, Checks and Commit statuses set to read and nothing with write.
+Do not reuse the dispatch PAT or a classic token: a classic token's `repo`
+scope grants write, so it cannot be read-only for a private repository.
+
+A run is **clean** when its `shadow-<backend>-*.log` holds one `shadow_summary`
+with `loaded: true`, no `error`, `compared` above zero, `diverged` zero and no
+`forbidden`. A `skipped` count alone does not make a run dirty: a dropped sample
+is a call not compared, not a disagreement. A rate limit already sets `error`,
+so it is dirty, as is a run with no summary (a launcher killed before it wrote
+one). The github shadow cuts over after 20 consecutive clean dogfood runs. The
+recipe counts them from the newest log back, with `logs` as above, and orders
+runs by the UTC stamp in the file name, since `gh run download` resets file
+times and the stamp sorts lexically:
+
+```sh
+logs=.spindrift/logs
+backend=github
+for f in "$logs"/shadow-"$backend"-*.log; do
+  [ -e "$f" ] || continue
+  stamp=${f##*/shadow-"$backend"-}; stamp=${stamp%%-*}
+  verdict=$(jq -Rrs '
+    [split("\n")[] | fromjson? | objects
+     | select(.type == "spindrift_op" and .spindrift_op.op == "shadow_summary")
+     | .spindrift_op.shadow_summary] as $sums
+    | if ($sums | length) == 1
+         and all($sums[]; .loaded and (.error // "") == "" and .compared > 0
+                          and .diverged == 0 and (.forbidden // 0) == 0)
+      then "clean" else "dirty" end' "$f")
+  printf '%s\t%s\n' "$stamp" "$verdict"
+done | sort -r | awk -F'\t' '
+  $2 != "clean" { exit }
+  { n++ }
+  END { print n + 0, "consecutive clean runs (cut-over bar: 20)" }'
+```
 
 ### Connector protocol
 
@@ -2818,7 +2945,11 @@ This is protocol version **0.1.0**. The host is
   result is schema-checked as for any call. A route does not restrict the query
   string. Each Host call writes one JSON line to the audit log, with `connector`,
   `route`, `method`, `host`, `path`, `query`, `status`, `size` and `decision`
-  (`sent`, `refused` or `failed`), plus `reason` on a refusal or failure; a
+  (`sent`, `refused` or `failed`), plus `reason` on a refusal or failure, and,
+  when set, `shadow` (`true` on an entry a read-shadow Connector wrote),
+  `rate_limit` (`primary` or `secondary`, on a 403 that carries a
+  rate-limit signal or on any 429) and `retry_after` (the `Retry-After` header, on a 403 or
+  429; [Shadow mode](#shadow-mode) has the classification); a
   request the log cannot record fails closed (`ErrAudit`) and leaves no line.
   Any failed call of a network Connector whose failure no Host call already
   audited adds a `failed` line naming the Connector. The SDK's
@@ -2862,8 +2993,8 @@ This is protocol version **0.1.0**. The host is
   branch names), and deduplicates native deps. Advertised comments flow into the existing
   `IssueText` trust handling, so a comment the Connector marks `minimized` is
   dropped as for a native adapter. The SDK's
-  `tracker.Register(tracker.Reader{...})` serves the methods. Nothing in
-  production uses `connectortracker` yet.
+  `tracker.Register(tracker.Reader{...})` serves the methods. Only the read
+  shadow ([Shadow mode](#shadow-mode)) uses `connectortracker` in production.
 - **Forge capabilities.** Provisional at protocol 0.y: issue #6754 finalises
   the forge axis, and a `0.y` bump may change what follows. A forge Connector
   advertises `"forge"`, meaning it serves the three methods below. Every
@@ -2884,8 +3015,8 @@ This is protocol version **0.1.0**. The host is
   forge's web host and the target repository, refuses an unknown rollup
   `state`, filters failing conclusions with the native adapter's sets, and
   renders and caps failure detail. The SDK's
-  `forge.Register(forge.Reader{...})` serves the methods. Nothing in
-  production uses `connectorforge` yet.
+  `forge.Register(forge.Reader{...})` serves the methods. Only the read
+  shadow ([Shadow mode](#shadow-mode)) uses `connectorforge` in production.
 - **Versioning.** The protocol version is `0.y.z` and independent of
   spindrift's release version. A `0.y` bump is breaking; a `0.y.z` bump is
   additive. Core accepts its current `0.y` and the one before it, so today
