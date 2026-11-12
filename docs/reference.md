@@ -2254,7 +2254,8 @@ A Connector (ADR 0073) is a subflake that adds backend or Driver rows from
 outside core. This section covers the Nix shape and, under [Driver rows on a
 Connector](#driver-rows-on-a-connector) and [Backend rows on a
 Connector](#backend-rows-on-a-connector), how a row reaches the binaries. The
-root flake registers one Connector, `connectors/claude`; what
+root flake registers two Connectors, `connectors/claude` and
+`connectors/github` (see [The github Connector](#the-github-connector)); what
 the other registered facts mean at runtime is issue #6751. The worked example
 is the fixture Connector in
 [`nix/fixtures/connector/`](../nix/fixtures/connector/).
@@ -2309,6 +2310,17 @@ is the fixture Connector in
   };
   ```
 
+- **Route table.** A tracker Connector's row may carry `routes`, a list of
+  `{method, host, path}` submodules (default `[ ]`): the only HTTP traffic its
+  `http_request` Host call may send (see Network Connectors under [Connector
+  protocol](#connector-protocol)). `method` is an exact uppercase verb, `host`
+  an exact `host[:port]`, and `path` a subtree root. `{repo}` in a `path` stands
+  for the tracker's `owner/name` slug, which `connectortracker.Routes` fills at
+  run time because the slug is config, not something the Connector's package
+  can know. The option is a declaration only: the host validates the table when
+  it loads the Connector, and no binary loads one from a row yet. A backend
+  row's table is `backend.routes` instead ([Backend rows on a
+  Connector](#backend-rows-on-a-connector)).
 - **`flake.nix`.** The Connector's own flake pins core with
   `inputs.core.url = "github:jordansmall/spindrift?dir=core"` and exposes the
   module as `flakeModules.default`. That pin is for building the Connector
@@ -2494,6 +2506,30 @@ To accept a widening, review the `+` lines, add them under the Connector's name
 in the file and commit. Doctor then reports `within the accepted table`. A
 direct `mkHarness` caller passes `acceptedRoutes` on its `backendRows` entry; a
 row without it accepts nothing.
+
+#### The github Connector
+
+`connectors/github` is the github backend's tracker read path as a network
+Connector: it serves `tracker.listIssues`, `tracker.issue` and
+`tracker.nativeDeps` over GitHub REST through `http_request`, and the host
+attaches the credential. Its Route table is one route, `GET api.github.com
+/repos/{repo}/issues`, a subtree that covers the list, issue and
+`dependencies/blocked_by` reads and nothing that writes. It is the narrowest
+table the subtree-only Route model (ADR 0047) can express, not an exact one:
+it also admits `GET /issues/comments/*`, `/issues/events` and
+`/issues/{n}/timeline`, which no read uses. It skips pull
+requests, which the REST issues list includes.
+
+It does not advertise `tracker.comments`: REST reports no minimized state, and
+a Connector that advertises the capability attests that it reports each
+comment's `minimized` faithfully. Comments therefore stay on the native
+adapter (GraphQL), which drops a maintainer-minimized comment. The native
+github adapter stays authoritative and is the one every
+binary uses. The Connector is held to the tracker read contract
+(`forgetest.RunTrackerReadContract`, with a `StateSeeder` standing in for the
+writes a read-only tracker lacks), which the backends `go test` check runs
+against `connectors/<backend>` when it exists, through
+`SPINDRIFT_TRACKER_CONNECTOR_WASM` and `SPINDRIFT_TRACKER_CONNECTOR_ROUTES`.
 
 #### Shadow mode
 
@@ -2761,9 +2797,43 @@ This is protocol version **0.1.0**. The host is
   request, so the first request after a rotation carries the new token and none
   is dropped; every rotation must replace the file by rename, as
   `gh-token-refresher` does. No CLI flag wires `LoadNetwork`'s credential to
-  that file yet. A Connector row declares its Route table under `backend`
-  ([Backend rows on a Connector](#backend-rows-on-a-connector)), checked at
-  evaluation with the same path rules.
+  that file yet. A backend Connector row declares its Route table under
+  `backend` ([Backend rows on a Connector](#backend-rows-on-a-connector)),
+  checked at evaluation with the same path rules; a tracker Connector declares
+  its own with the `routes` option (see **Route table** under [Connector
+  subflake shape](#connector-subflake-shape)).
+- **Tracker capabilities.** Provisional at protocol 0.y: issue #6753 finalises
+  the tracker axis, and a `0.y` bump may change what follows. A tracker
+  Connector advertises `"tracker"`, meaning it serves `tracker.listIssues` and
+  `tracker.issue`, and optionally `"tracker.comments"` and
+  `"tracker.nativeDeps"`, serving the method of the same name. Advertising
+  `"tracker.comments"` attests that each comment's `minimized` and
+  `minimizedReason` are faithful; a Connector whose API cannot report minimized
+  state leaves it out, and core reads comments from its native adapter. Every
+  `params` carries `target`, `{api, repo}`:
+  the https API base URL without a trailing slash and the `owner/name` slug.
+  The Connector reads and returns raw data; every write stays on core's native
+  adapter.
+
+  | Method | Params | Result |
+  |---|---|---|
+  | `tracker.listIssues` | `{target, label, limit}`, `label` `""` for every open issue | `{issues}` |
+  | `tracker.issue` | `{target, number}` | an issue |
+  | `tracker.comments` (optional) | `{target, number}` | `{comments}`, oldest first |
+  | `tracker.nativeDeps` (optional) | `{target, number}` | `{ids}`, the issues `number` is blocked on, in the API's order |
+
+  An issue is `{number, title, body, state, labels}` with `state` `"open"` or
+  `"closed"`; a comment is `{author, createdAt, body, minimized,
+  minimizedReason, association}`. Core keeps the policy.
+  [`connectortracker.New`](../cmd/launcher/internal/connectortracker/connectortracker.go)
+  builds core's tracker reads from such a Connector: it resolves the dispatch
+  label, orders by issue number, applies the page cap, rejects an unknown
+  `state` or a `number` that is not a positive decimal integer (numbers become
+  branch names), and deduplicates native deps. Advertised comments flow into the existing
+  `IssueText` trust handling, so a comment the Connector marks `minimized` is
+  dropped as for a native adapter. The SDK's
+  `tracker.Register(tracker.Reader{...})` serves the methods. Nothing in
+  production uses `connectortracker` yet.
 - **Versioning.** The protocol version is `0.y.z` and independent of
   spindrift's release version. A `0.y` bump is breaking; a `0.y.z` bump is
   additive. Core accepts its current `0.y` and the one before it, so today
