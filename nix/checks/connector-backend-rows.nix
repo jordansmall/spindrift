@@ -275,4 +275,119 @@ in
       jq -e 'has("backends") | not' ${plain.internals.runInputDocumentFile}
       touch $out
     '';
+
+  # Issue #6805: a fixture Consumer importing a Connector from outside core
+  # gets that Connector's backend row in the launcher's input document, with
+  # the credential resolved from the Connector's own knob to its env var.
+  connector-backend-rows-flake-module-forwards-row =
+    let
+      fixtureConnector = (import ../fixtures/connector).lib.connector { core = import ../../core; };
+      consumerWith = modules: fixtures.connectorConsumerVia ([ ../../lib/flakeModule.nix ] ++ modules);
+      withRow = consumerWith [ fixtureConnector.flakeModule ];
+      # A Connector row is registered by one module only (a second definition of
+      # the same name throws), so each negative case is a fresh `probe` row
+      # rather than an override of the fixture's.
+      secretKnob = {
+        env = "PROBE_TOKEN";
+        group = "dispatch";
+        secret = true;
+        doc = "credential knob of a probe Connector in the backend-row checks";
+        flakeOption = false;
+        boxEnv = false;
+      };
+      probeBackend = {
+        module = p: "${fixtures.connectorWasm}/network.wasm";
+        routes = [ goodRoute ];
+        credential = "probeToken";
+      };
+      probe =
+        {
+          knobs ? {
+            probeToken = secretKnob;
+          },
+          backend ? probeBackend,
+        }:
+        consumerWith [ { spindrift.connectors.probe = { inherit knobs backend; }; } ];
+      programOf = c: c.apps.${system}.default.program;
+      builds = c: (builtins.tryEval (builtins.seq (programOf c) true)).success;
+    in
+    assert assertMsg (builds withRow) "control: the fixture Connector's row must evaluate";
+    assert assertMsg (builds (probe { })) "control: a secret host-only knob must be accepted";
+    assert assertMsg (
+      !(builds (probe {
+        backend = probeBackend // {
+          credential = "noSuchKnob";
+        };
+      }))
+    ) "a credential that is no knob of the Connector must fail evaluation";
+    assert assertMsg (
+      !(builds (probe {
+        backend = probeBackend // {
+          credential = "ghToken";
+        };
+      }))
+    ) "a credential naming a core knob must fail evaluation";
+    assert assertMsg (
+      !(builds (probe {
+        knobs.probeToken = secretKnob // {
+          boxEnv = true;
+        };
+      }))
+    ) "a credential knob with boxEnv = true must fail evaluation";
+    assert assertMsg (
+      !(builds (probe {
+        knobs.probeToken = secretKnob // {
+          secret = false;
+        };
+      }))
+    ) "a credential knob that is not secret must fail evaluation";
+    assert assertMsg (
+      !(builds (probe {
+        knobs.probeToken = secretKnob // {
+          env = "GH_TOKEN";
+        };
+      }))
+    ) "a credential knob aliasing a core env var must fail evaluation";
+    assert assertMsg (
+      !(builds (probe {
+        knobs.probeToken = removeAttrs secretKnob [ "env" ];
+      }))
+    ) "a credential knob without an env var must fail evaluation";
+    assert assertMsg (
+      !(builds (probe {
+        backend = probeBackend // {
+          routes = [ (goodRoute // { path = "/"; }) ];
+        };
+      }))
+    ) "a blanket-root route must fail evaluation";
+    assert assertMsg (
+      !(builds (probe {
+        backend = removeAttrs probeBackend [ "credential" ];
+      }))
+    ) "a backend row without a credential must fail evaluation";
+    assert assertMsg (
+      !(builds (probe {
+        backend = removeAttrs probeBackend [ "module" ];
+      }))
+    ) "a backend row without a module must fail evaluation";
+    assert assertMsg (
+      !(builds (probe {
+        backend = removeAttrs probeBackend [ "routes" ] // {
+          route = [ goodRoute ];
+        };
+      }))
+    ) "a misspelled backend field must fail evaluation";
+    pkgs.runCommand "connector-backend-rows-flake-module-forwards-row"
+      { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        ${fixtures.runInputDocOf (programOf withRow)}
+        jq -e '.backends == [{
+            name: "fixture",
+            module: .backends[0].module,
+            routes: [{method: "GET", host: "api.fixture.test", path: "/repos"}],
+            credentialEnv: "FIXTURE_TOKEN"
+          }] and (.backends[0].module | endswith("/network.wasm"))' "$doc"
+        test -f "$(jq -r '.backends[0].module' "$doc")"
+        touch $out
+      '';
 }

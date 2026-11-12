@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,8 +23,10 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/butler"
+	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -6832,9 +6837,9 @@ func TestConfigArtifact_EmptyBoxArtifactFollowsRunnerFamily(t *testing.T) {
 // want.
 func TestMainRun_InputDocument_AppliesDriverRows(t *testing.T) {
 	drivertest.Isolate(t)
-	realDoc := os.Getenv("SPINDRIFT_FIXTURE_DRIVER_DOC")
+	realDoc := os.Getenv("SPINDRIFT_FIXTURE_CONNECTOR_DOC")
 	if realDoc == "" {
-		t.Skip("SPINDRIFT_FIXTURE_DRIVER_DOC is unset")
+		t.Skip("SPINDRIFT_FIXTURE_CONNECTOR_DOC is unset")
 	}
 	raw, err := os.ReadFile(realDoc)
 	if err != nil {
@@ -6857,6 +6862,81 @@ func TestMainRun_InputDocument_AppliesDriverRows(t *testing.T) {
 	}
 	if _, err := driver.New("fixture"); err != nil {
 		t.Errorf("driver.New(fixture): %v", err)
+	}
+}
+
+// A document's backend rows are applied before any verb runs, and the Route
+// table in force is the one Nix rendered from a Consumer importing the fixture
+// network Connector. Only the `backends` section is taken, as above.
+func TestMainRun_InputDocument_AppliesBackendRows(t *testing.T) {
+	t.Cleanup(backendrows.Snapshot())
+	realDoc := os.Getenv("SPINDRIFT_FIXTURE_CONNECTOR_DOC")
+	if realDoc == "" {
+		t.Skip("SPINDRIFT_FIXTURE_CONNECTOR_DOC is unset")
+	}
+	raw, err := os.ReadFile(realDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		Backends json.RawMessage `json:"backends"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Backends) == 0 {
+		t.Fatalf("the Nix-rendered document carries no backends section (err=%v): %s", err, raw)
+	}
+	docPath := filepath.Join(t.TempDir(), "input.json")
+	if err := os.WriteFile(docPath, []byte(`{"settings":{},"artifacts":{},"backends":`+string(parsed.Backends)+`}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	mainRunT(t, []string{"--input", docPath, "research"}, &stdout, &stderr)
+	row, ok := backendrows.Lookup("fixture")
+	if !ok {
+		t.Fatalf("backendrows.Lookup(fixture) = false after the document's rows applied; stderr=%s", stderr.String())
+	}
+
+	var seen []*http.Request
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r)
+	}))
+	t.Cleanup(srv.Close)
+	// The route's host is fixed by Nix, so send every connection to srv; the
+	// test certificate is for example.com.
+	tr := srv.Client().Transport.(*http.Transport).Clone()
+	tr.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, srv.Listener.Addr().String())
+	}
+	tr.TLSClientConfig.ServerName = "example.com"
+	c, err := backendrows.Load(context.Background(), row, backendrows.Options{
+		Getenv: func(k string) string {
+			if k == "FIXTURE_TOKEN" {
+				return "tok-6805"
+			}
+			return ""
+		},
+		Audit:  io.Discard,
+		Client: &http.Client{Transport: tr},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
+
+	var out struct {
+		Status int `json:"status"`
+	}
+	if err := c.Call(context.Background(), "fetch", map[string]string{"url": "https://api.fixture.test/repos/x", "method": "GET"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 1 || seen[0].Header.Get("Authorization") != "Bearer tok-6805" {
+		t.Fatalf("backend saw %d requests, want one carrying Bearer tok-6805", len(seen))
+	}
+	err = c.Call(context.Background(), "fetch", map[string]string{"url": "https://api.fixture.test/other", "method": "GET"}, new(struct{}))
+	if !errors.Is(err, connectorhost.ErrRouteRefused) {
+		t.Fatalf("err = %v, want ErrRouteRefused", err)
+	}
+	if len(seen) != 1 {
+		t.Error("a request outside the Nix-rendered Route table reached the backend")
 	}
 }
 

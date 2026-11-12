@@ -1,4 +1,5 @@
-# Builds driver.wasm, a wasip1 reactor: the fixture Driver's host half. The SDK
+# Builds driver.wasm (the fixture Driver's host half) and network.wasm (the
+# fixture network Connector, ./network), wasip1 reactors. The SDK
 # source comes from `core`, not a path out of this directory (the escape
 # guard); both trees are copied to their repo-relative layout because go.mod
 # replaces spindrift.dev/sdk with a relative path three levels up.
@@ -21,4 +22,5 @@ pkgs.runCommand "connector-fixture-wasm" { nativeBuildInputs = [ pkgs.go ]; } ''
   cd work/nix/fixtures/connector
   mkdir $out
   go build -buildmode=c-shared -o $out/driver.wasm .
+  go build -buildmode=c-shared -o $out/network.wasm ./network
 ''
