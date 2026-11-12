@@ -13,6 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
@@ -55,7 +56,7 @@ func TestRemoteLedger_FetchesBaseBranchAndCleansUp(t *testing.T) {
 	remoteRepo := ledgertest.NewRepo(t)
 	head := mustGitOutput(t, remoteRepo, "rev-parse", "refs/heads/main")
 
-	backend, tree, cleanup, err := remoteLedger(config{Knobs: inputdoc.Knobs{BaseBranch: "main"}}, remoteRepo)
+	backend, tree, cleanup, err := remoteLedger(config{Knobs: inputdoc.Knobs{BaseBranch: "main"}}, remoteRepo, gitexec.Credential{})
 	if err != nil {
 		t.Fatalf("remoteLedger: %v", err)
 	}
@@ -159,7 +160,7 @@ func TestRemoteLedger_CountsOneFetchAndOnePushPerSweep(t *testing.T) {
 	trace := filepath.Join(t.TempDir(), "trace2.log")
 	t.Setenv("GIT_TRACE2_EVENT", trace)
 
-	backend, tree, cleanup, err := remoteLedger(config{Knobs: inputdoc.Knobs{BaseBranch: "main"}}, remoteRepo)
+	backend, tree, cleanup, err := remoteLedger(config{Knobs: inputdoc.Knobs{BaseBranch: "main"}}, remoteRepo, gitexec.Credential{})
 	if err != nil {
 		t.Fatalf("remoteLedger: %v", err)
 	}

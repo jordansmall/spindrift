@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/gitexec"
+	"spindrift.dev/launcher/internal/gitexec/gitexectest"
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
 	"spindrift.dev/launcher/internal/signalwire"
 )
@@ -98,7 +100,7 @@ func TestFetchTree_FetchesBranchAndReturnsTreeOverScratch(t *testing.T) {
 	remote, head := newTreeBareRepo(t, "a.go", "b.go")
 	scratch := ledgertest.NewRepo(t)
 
-	tree, err := FetchTree(scratch, remote, "main")
+	tree, err := FetchTree(scratch, remote, "main", gitexec.Credential{})
 	if err != nil {
 		t.Fatalf("FetchTree: %v", err)
 	}
@@ -294,7 +296,7 @@ func TestGitTreeCommitPatch_RefetchesBeforeApplying(t *testing.T) {
 	upstream, origTip := newTreeBareRepo(t, "a.go", "b.go")
 	scratch := ledgertest.NewRepo(t)
 
-	tree, err := FetchTree(scratch, upstream, "main")
+	tree, err := FetchTree(scratch, upstream, "main", gitexec.Credential{})
 	if err != nil {
 		t.Fatalf("FetchTree: %v", err)
 	}
@@ -465,11 +467,60 @@ func TestFetchTree_RedactsCredentialsOnError(t *testing.T) {
 	const secret = "secret-token"
 	url := "https://user:" + secret + "@127.0.0.1:1/x.git"
 
-	_, err := FetchTree(scratch, url, "main")
+	_, err := FetchTree(scratch, url, "main", gitexec.Credential{})
 	if err == nil {
 		t.Fatal("FetchTree: got nil error, want one (unreachable remote)")
 	}
 	if strings.Contains(err.Error(), secret) {
 		t.Fatalf("FetchTree error leaked the credential: %v", err)
+	}
+}
+
+// TestFetchTree_CredentialAuthenticatesCleanURL pins that FetchTree, and the
+// GitTree it returns for CommitPatch's re-fetch, authenticate with the
+// Credential alone: the URL has no userinfo and the token reaches no traced
+// argv or persisted config.
+func TestFetchTree_CredentialAuthenticatesCleanURL(t *testing.T) {
+	const token = "s3cr3t-tree-token-6860"
+	traceFile := filepath.Join(t.TempDir(), "trace.log")
+	t.Setenv("GIT_TRACE", traceFile)
+	url, bareDir := gitexectest.AuthRemote(t, "oauth2", token)
+	scratch := ledgertest.NewRepo(t)
+	cred := gitexec.Credential{Username: "oauth2", Password: token}
+
+	tree, err := FetchTree(scratch, url, "main", cred)
+	if err != nil {
+		t.Fatalf("FetchTree: %v", err)
+	}
+	if err := fetchBranchTip(tree.Credential, tree.GitArgs, tree.Repo, tree.URL, "main"); err != nil {
+		t.Fatalf("re-fetch via the returned GitTree: %v", err)
+	}
+	wantOut, err := exec.Command("git", "-C", bareDir, "rev-parse", "refs/heads/main").Output()
+	if err != nil {
+		t.Fatalf("rev-parse: %v", err)
+	}
+	want := strings.TrimSpace(string(wantOut))
+	if got, err := tree.Head("main"); err != nil || got != want {
+		t.Fatalf("Head(main) = %q, %v; want %s", got, err, want)
+	}
+
+	trace, err := os.ReadFile(traceFile)
+	if err != nil || len(trace) == 0 {
+		t.Fatalf("GIT_TRACE empty or unreadable: %v", err)
+	}
+	if strings.Contains(string(trace), token) {
+		t.Errorf("git trace carries the token:\n%s", trace)
+	}
+	cfg, err := os.ReadFile(filepath.Join(scratch, "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(cfg), token) {
+		t.Errorf("scratch config carries the token:\n%s", cfg)
+	}
+
+	_, err = FetchTree(ledgertest.NewRepo(t), url, "main", gitexec.Credential{Username: "oauth2", Password: "wrong-token"})
+	if err == nil || strings.Contains(err.Error(), "wrong-token") || strings.Contains(err.Error(), token) {
+		t.Fatalf("FetchTree with a wrong token = %v, want an error without any token", err)
 	}
 }

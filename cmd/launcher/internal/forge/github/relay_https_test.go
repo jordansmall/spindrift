@@ -15,6 +15,7 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/ledger"
 )
 
@@ -351,7 +352,7 @@ func TestGitRemote_LedgerIgnoresAmbientSSHRewrite(t *testing.T) {
 			writeAmbientSSHRewrite(t, key)
 
 			url, gitArgs := GitRemote("owner/repo")
-			remote, err := ledger.NewRemote(t.TempDir(), url, gitArgs...)
+			remote, err := ledger.NewRemote(t.TempDir(), url, gitexec.Credential{}, gitArgs...)
 			if err != nil {
 				t.Fatalf("NewRemote: %v", err)
 			}

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
 )
@@ -25,7 +26,7 @@ type remoteHarness struct {
 
 func (h remoteHarness) newRemote() ledger.Remote {
 	h.t.Helper()
-	r, err := ledger.NewRemote(h.t.TempDir(), h.remote)
+	r, err := ledger.NewRemote(h.t.TempDir(), h.remote, gitexec.Credential{})
 	if err != nil {
 		h.t.Fatalf("NewRemote: %v", err)
 	}
@@ -74,7 +75,7 @@ func TestNewRemoteUnreachableNotLostRace(t *testing.T) {
 	scratch := t.TempDir()
 	// A path with no repo at all: git fails to even connect.
 	unreachable := t.TempDir() + "/does-not-exist.git"
-	_, err := ledger.NewRemote(scratch, unreachable)
+	_, err := ledger.NewRemote(scratch, unreachable, gitexec.Credential{})
 	if err == nil {
 		t.Fatal("NewRemote against an unreachable remote: got nil error, want one")
 	}
@@ -99,7 +100,7 @@ func TestRemoteAppendAppliedDespitePushError(t *testing.T) {
 		t.Fatalf("write git-receive-pack wrapper: %v", err)
 	}
 
-	r, err := ledger.NewRemote(t.TempDir(), bare, "--exec-path="+execDir)
+	r, err := ledger.NewRemote(t.TempDir(), bare, gitexec.Credential{}, "--exec-path="+execDir)
 	if err != nil {
 		t.Fatalf("NewRemote: %v", err)
 	}
@@ -126,7 +127,7 @@ func TestRemoteRedactsCredentials(t *testing.T) {
 	// (not a DNS failure, which some environments intercept), and the
 	// userinfo is included right in the connection error text if unredacted.
 	tokened := "https://user:secret@127.0.0.1:1/x.git"
-	_, err := ledger.NewRemote(scratch, tokened)
+	_, err := ledger.NewRemote(scratch, tokened, gitexec.Credential{})
 	if err == nil {
 		t.Fatal("NewRemote against an unreachable remote: got nil error, want one")
 	}
@@ -156,7 +157,7 @@ func TestRemoteAppendPushFailureRedactsCredentials(t *testing.T) {
 	}
 
 	scratch := t.TempDir()
-	r, err := ledger.NewRemote(scratch, tokened, "-c", "url."+bare+".insteadOf="+tokened)
+	r, err := ledger.NewRemote(scratch, tokened, gitexec.Credential{}, "-c", "url."+bare+".insteadOf="+tokened)
 	if err != nil {
 		t.Fatalf("NewRemote: %v", err)
 	}
@@ -191,7 +192,7 @@ func TestRemoteReadHistoryNoFetch(t *testing.T) {
 	setGitIdentityEnv(t)
 	bare := ledgertest.NewRepo(t)
 
-	seed, err := ledger.NewRemote(t.TempDir(), bare)
+	seed, err := ledger.NewRemote(t.TempDir(), bare, gitexec.Credential{})
 	if err != nil {
 		t.Fatalf("NewRemote (seed): %v", err)
 	}
@@ -202,7 +203,7 @@ func TestRemoteReadHistoryNoFetch(t *testing.T) {
 	trace := filepath.Join(t.TempDir(), "trace2.log")
 	t.Setenv("GIT_TRACE2_EVENT", trace)
 
-	r, err := ledger.NewRemote(t.TempDir(), bare)
+	r, err := ledger.NewRemote(t.TempDir(), bare, gitexec.Credential{})
 	if err != nil {
 		t.Fatalf("NewRemote: %v", err)
 	}
@@ -229,11 +230,11 @@ func TestRemoteStaleMirrorInvisibleUntilRace(t *testing.T) {
 	setGitIdentityEnv(t)
 	bare := ledgertest.NewRepo(t)
 
-	r, err := ledger.NewRemote(t.TempDir(), bare)
+	r, err := ledger.NewRemote(t.TempDir(), bare, gitexec.Credential{})
 	if err != nil {
 		t.Fatalf("NewRemote: %v", err)
 	}
-	rival, err := ledger.NewRemote(t.TempDir(), bare)
+	rival, err := ledger.NewRemote(t.TempDir(), bare, gitexec.Credential{})
 	if err != nil {
 		t.Fatalf("NewRemote (rival): %v", err)
 	}
@@ -275,7 +276,7 @@ func TestNewRemote_ScratchDisablesAutoMaintenance(t *testing.T) {
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	setGitIdentityEnv(t)
 	scratch := t.TempDir()
-	if _, err := ledger.NewRemote(scratch, ledgertest.NewRepo(t)); err != nil {
+	if _, err := ledger.NewRemote(scratch, ledgertest.NewRepo(t), gitexec.Credential{}); err != nil {
 		t.Fatalf("NewRemote: %v", err)
 	}
 	for key, want := range map[string]string{"maintenance.auto": "false", "gc.auto": "0"} {

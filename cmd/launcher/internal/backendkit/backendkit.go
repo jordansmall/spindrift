@@ -17,6 +17,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/gitexec"
 )
 
 // Lookup resolves one knob's env name to its already-resolved value. An alias
@@ -48,7 +49,11 @@ type Shared struct {
 type LedgerSite struct {
 	URL     string
 	GitArgs []string
-	Repo    string
+	// Credential is attached to every git call core makes against URL, which
+	// itself carries no userinfo. Zero for a forge that authenticates through
+	// GitArgs (github's gh credential helper).
+	Credential gitexec.Credential
+	Repo       string
 }
 
 // Strategy is one backend's Go half. A nil closure means the backend does not

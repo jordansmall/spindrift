@@ -58,11 +58,13 @@ const patchRef = "refs/butler/patch"
 // identity CommitPatch commits under -- production wiring sets them, not
 // FetchTree, since a scan-only Tree never needs one.
 type GitTree struct {
-	Repo    string
-	URL     string
-	GitArgs []string
-	Name    string
-	Email   string
+	Repo string
+	URL  string
+	// Credential authenticates the re-fetch from URL; URL itself carries none.
+	Credential gitexec.Credential
+	GitArgs    []string
+	Name       string
+	Email      string
 }
 
 // Head resolves branch's tip in g.Repo to a full commit sha.
@@ -97,18 +99,19 @@ func (g GitTree) TrackedFiles(commit string) ([]string, error) {
 // FetchTree shallow-fetches branch's current tip from url into the
 // already-initialized bare repo at scratch (e.g. via ledger.NewRemote), once
 // at construction, and returns a Tree over it -- the scan checkout a hosted
-// Ledger's backend row shares with its Ledger backend (issue #3995). gitArgs
-// are the same leading git options a Ledger backend takes (e.g. credential
+// Ledger's backend row shares with its Ledger backend (issue #3995). cred
+// (zero for none) authenticates every fetch from url; gitArgs are the same
+// leading git options a Ledger backend takes (e.g. credential
 // helpers); GIT_TERMINAL_PROMPT=0 keeps a missing credential from hanging,
 // and url's credentials never reach an error string
-// (forge.RedactURLCredentials). The returned GitTree carries url and
+// (forge.RedactURLCredentials). The returned GitTree carries url, cred and
 // gitArgs, so a later CommitPatch on it re-fetches rather than trusting this
 // construction-time fetch to still be fresh.
-func FetchTree(scratch, url, branch string, gitArgs ...string) (GitTree, error) {
-	if err := fetchBranchTip(gitArgs, scratch, url, branch); err != nil {
+func FetchTree(scratch, url, branch string, cred gitexec.Credential, gitArgs ...string) (GitTree, error) {
+	if err := fetchBranchTip(cred, gitArgs, scratch, url, branch); err != nil {
 		return GitTree{}, err
 	}
-	return GitTree{Repo: scratch, URL: url, GitArgs: gitArgs}, nil
+	return GitTree{Repo: scratch, URL: url, Credential: cred, GitArgs: gitArgs}, nil
 }
 
 // fetchBranchTip shallow-fetches branch's current tip from url into repo,
@@ -116,9 +119,9 @@ func FetchTree(scratch, url, branch string, gitArgs ...string) (GitTree, error) 
 // invocation FetchTree and CommitPatch's re-fetch share, so "the current
 // base head" always means "just fetched", never "however stale scratch was
 // at construction" (issue #4074).
-func fetchBranchTip(gitArgs []string, repo, url, branch string) error {
+func fetchBranchTip(cred gitexec.Credential, gitArgs []string, repo, url, branch string) error {
 	ref := "refs/heads/" + branch
-	cmd := gitexec.Cmd(gitArgs, "-C", repo, "fetch", "--depth=1", "-q", url, "+"+ref+":"+ref)
+	cmd := cred.Apply(gitexec.Cmd(gitArgs, "-C", repo, "fetch", "--depth=1", "-q", url, "+"+ref+":"+ref))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("butler: fetch branch %s from %s: %w: %s", branch, forge.RedactURLCredentials(url), err, forge.RedactURLCredentials(string(out)))
 	}
@@ -180,7 +183,7 @@ func (g GitTree) CommitPatch(branch string, scanned ScannedCommit, diff, message
 	}
 
 	if g.URL != "" {
-		if err := fetchBranchTip(g.GitArgs, g.Repo, g.URL, branch); err != nil {
+		if err := fetchBranchTip(g.Credential, g.GitArgs, g.Repo, g.URL, branch); err != nil {
 			return PatchCommit{}, err
 		}
 	}

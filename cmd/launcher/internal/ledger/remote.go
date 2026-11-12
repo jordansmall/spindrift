@@ -20,10 +20,13 @@ type Remote struct {
 	// repo is the scratch bare repo's filesystem path.
 	repo string
 	// url is the remote to fetch from and push to: a temp bare repo path in
-	// tests, https://<GH_HOST or github.com>/<slug>.git or a Forgejo tokened
-	// URL in production. It may carry a token as userinfo, so it must never
-	// reach an error string unredacted.
+	// tests, https://<GH_HOST or github.com>/<slug>.git or the Forgejo clone
+	// URL in production. Callers pass it credential-free (cred authenticates);
+	// errors still redact it as defence in depth.
 	url string
+	// cred authenticates every command that talks to url, as an env-only
+	// credential helper: the secret is in no argv, URL, or persisted config.
+	cred gitexec.Credential
 	// gitArgs are extra leading git args applied to every command that talks
 	// to url (e.g. -c credential.helper=... -c credential.helper=!gh auth
 	// git-credential), before the subcommand.
@@ -40,8 +43,9 @@ const butlerRefspec = "+" + RefPrefix + "*:" + RefPrefix + "*"
 
 // NewRemote returns a Remote whose scratch repo is scratch, git-init'ing it
 // bare if it is not already a repo, then syncing its mirror from url once --
-// the routine fetch, so nothing later needs to repeat it.
-func NewRemote(scratch, url string, gitArgs ...string) (Remote, error) {
+// the routine fetch, so nothing later needs to repeat it. cred (zero for none)
+// authenticates every git call against url.
+func NewRemote(scratch, url string, cred gitexec.Credential, gitArgs ...string) (Remote, error) {
 	if err := exec.Command("git", "-C", scratch, "rev-parse", "--is-bare-repository").Run(); err != nil {
 		if out, err := exec.Command("git", "init", "--bare", "-q", scratch).CombinedOutput(); err != nil {
 			return Remote{}, fmt.Errorf("ledger: init scratch repo %s: %w: %s", scratch, err, out)
@@ -55,7 +59,7 @@ func NewRemote(scratch, url string, gitArgs ...string) (Remote, error) {
 			}
 		}
 	}
-	r := Remote{repo: scratch, url: url, gitArgs: gitArgs, mirror: Local{Repo: scratch}}
+	r := Remote{repo: scratch, url: url, cred: cred, gitArgs: gitArgs, mirror: Local{Repo: scratch}}
 	if err := r.sync(); err != nil {
 		return Remote{}, err
 	}
@@ -68,7 +72,7 @@ func NewRemote(scratch, url string, gitArgs ...string) (Remote, error) {
 // Read/History already treat that as a zero Tip). Called only from
 // NewRemote and from Append after a lost race, never routinely.
 func (r Remote) sync() error {
-	out, err := gitexec.Cmd(r.gitArgs, "-C", r.repo, "fetch", "--prune", "-q", r.url, butlerRefspec).CombinedOutput()
+	out, err := r.cred.Apply(gitexec.Cmd(r.gitArgs, "-C", r.repo, "fetch", "--prune", "-q", r.url, butlerRefspec)).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ledger: fetch %s: %w: %s", forge.RedactURLCredentials(r.url), err, forge.RedactURLCredentials(string(out)))
 	}
@@ -86,7 +90,7 @@ func (r Remote) History(chore string, since time.Time) ([]Entry, error) {
 // lsRemote queries url directly (no scratch repo involved) for ref's current
 // value, "" if absent, so Append can tell a lost race from a real push error.
 func (r Remote) lsRemote(ref string) (string, error) {
-	out, err := gitexec.Cmd(r.gitArgs, "ls-remote", r.url, ref).Output()
+	out, err := r.cred.Apply(gitexec.Cmd(r.gitArgs, "ls-remote", r.url, ref)).Output()
 	if err != nil {
 		return "", fmt.Errorf("ledger: ls-remote %s %s: %w", forge.RedactURLCredentials(r.url), ref, err)
 	}
@@ -121,7 +125,7 @@ func (r Remote) Append(chore, old string, s State, at time.Time) (string, error)
 	ref := RefPrefix + chore
 	lease := fmt.Sprintf("--force-with-lease=%s:%s", ref, old)
 	refspec := fmt.Sprintf("%s:%s", newCommit, ref)
-	pushOut, err := gitexec.Cmd(r.gitArgs, "-C", r.repo, "push", "-q", r.url, lease, refspec).CombinedOutput()
+	pushOut, err := r.cred.Apply(gitexec.Cmd(r.gitArgs, "-C", r.repo, "push", "-q", r.url, lease, refspec)).CombinedOutput()
 	if err != nil {
 		// The lease lost only if the remote ref has since moved off old
 		// (absent counts as "") to something other than our own newCommit;
