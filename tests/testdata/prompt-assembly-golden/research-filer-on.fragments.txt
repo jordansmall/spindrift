@@ -4,9 +4,9 @@ filer-file-relay.md
 filer-label-relay-research.md
 github/filer-dedup.md
 research-file-issues-relay.md
-research-issue-read.md
+research-issue-read-unreadable.md
 research-outcome-landing-relayed.md
 research-verdict-relay.md
-scout-issue-read.md
+scout-issue-read-unreadable.md
 skill-preamble.md
 tdd-baked.md

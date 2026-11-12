@@ -147,14 +147,17 @@ func TestAssemblePRBodyReferenceSelection(t *testing.T) {
 	})
 }
 
-// The issue-read step follows the tracker read axis; a tracker with no
-// in-Box client (jira) gets the unreadable arm in work and research alike
-// (issue #5233's jira row rides github's axes).
+// The issue-read step follows the tracker read axis and the carrier: the
+// Signal socket's issue verb reads linked issues on github, forgejo and jira
+// alike (issue #6894); without a socket every tracker but local renders the
+// unreadable arm.
 func TestAssembleIssueReadSelection(t *testing.T) {
 	rows := []gatedRow{
 		{"ISSUE_TRACKER_GITHUB_LINKS_READABLE", "IR_GITHUB"},
+		{"ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE", "IR_GITHUB_LOG"},
 		{"ISSUE_TRACKER_LOCAL", "IR_LOCAL"},
-		{"ISSUE_TRACKER_FORGEJO", "IR_FORGEJO"},
+		{"ISSUE_TRACKER_FORGEJO_LINKS_READABLE", "IR_FORGEJO"},
+		{"ISSUE_TRACKER_FORGEJO_LINKS_UNREADABLE", "IR_FORGEJO_LOG"},
 		{"ISSUE_TRACKER_LINKS_UNREADABLE", "IR_UNREADABLE"},
 	}
 	for _, kind := range []struct {
@@ -162,11 +165,16 @@ func TestAssembleIssueReadSelection(t *testing.T) {
 		mutate []func(*Env)
 	}{{"work", nil}, {"research", []func(*Env){fragResearch}}} {
 		t.Run(kind.name, func(t *testing.T) {
+			with := func(fs ...func(*Env)) []func(*Env) { return append(fs, kind.mutate...) }
 			assertSelection(t, rows, targetPrompt, []selectionCase{
-				{"github", kind.mutate, []string{"IR_GITHUB"}},
-				{"local", append([]func(*Env){fragLocalTracker}, kind.mutate...), []string{"IR_LOCAL"}},
-				{"forgejo", append([]func(*Env){fragForgejoTracker}, kind.mutate...), []string{"IR_FORGEJO"}},
-				{"jira", append([]func(*Env){fragJiraTracker}, kind.mutate...), []string{"IR_UNREADABLE"}},
+				{"github", with(fragSocket), []string{"IR_GITHUB"}},
+				{"local", with(fragSocket, fragLocalTracker), []string{"IR_LOCAL"}},
+				{"forgejo", with(fragSocket, fragForgejoTracker), []string{"IR_FORGEJO"}},
+				{"jira", with(fragSocket, fragJiraTracker), []string{"IR_GITHUB"}},
+				{"github log", with(), []string{"IR_GITHUB_LOG", "IR_UNREADABLE"}},
+				{"local log", with(fragLocalTracker), []string{"IR_LOCAL"}},
+				{"forgejo log", with(fragForgejoTracker), []string{"IR_FORGEJO_LOG", "IR_UNREADABLE"}},
+				{"jira log", with(fragJiraTracker), []string{"IR_GITHUB_LOG", "IR_UNREADABLE"}},
 			})
 		})
 	}
@@ -567,9 +575,9 @@ func TestAssembleAgentsJSONRosterShape(t *testing.T) {
 }
 
 // The scout's issue-read step is rendered into the agents JSON, not the
-// prompt: on jira, which has no in-Box client, the unreadable arm renders
-// instead of the one pointing at the Code Forge (issue #6344).
-func TestAssembleScoutIssueReadUnreadableOnJira(t *testing.T) {
+// prompt: under the log carrier, which has no socket for the issue verb, the
+// unreadable arm renders instead of the verb arm (issues #6344, #6894).
+func TestAssembleScoutIssueReadFollowsCarrier(t *testing.T) {
 	reg, env0 := syntheticRegistry(t, []FragmentRow{
 		{Gate: "ISSUE_TRACKER_LINKS_REACHABLE", Fragment: "reachable.md", Var: "SCOUT_READ_STEP"},
 		{Gate: "ISSUE_TRACKER_LINKS_UNREADABLE", Fragment: "unreadable.md", Var: "SCOUT_READ_STEP"},
@@ -578,21 +586,25 @@ func TestAssembleScoutIssueReadUnreadableOnJira(t *testing.T) {
 		"fragments/reachable.md":  "[REACHABLE]",
 		"fragments/unreadable.md": "[UNREADABLE]",
 	})
-	for _, tc := range []struct{ tracker, want, wantNot string }{
-		{"github", "[REACHABLE]", "[UNREADABLE]"},
-		{"jira", "[UNREADABLE]", "[REACHABLE]"},
+	for _, tc := range []struct{ tracker, carrier, want, wantNot string }{
+		{"github", "socket", "[REACHABLE]", "[UNREADABLE]"},
+		{"jira", "socket", "[REACHABLE]", "[UNREADABLE]"},
+		{"local", "socket", "", "[REACHABLE]"},
+		{"github", "log", "[UNREADABLE]", "[REACHABLE]"},
+		{"jira", "log", "[UNREADABLE]", "[REACHABLE]"},
 	} {
 		env := env0
 		env.IssueTracker = tc.tracker
+		env.SignalCarrier = tc.carrier
 		env.AgentsJSONTemplate = rosterScoutOnly
 		env.AgentsPromptFiles = `{"scout":"scout-prompt.md"}`
 		res, err := Assemble(env, reg)
 		if err != nil {
-			t.Fatalf("Assemble(%s): %v", tc.tracker, err)
+			t.Fatalf("Assemble(%s/%s): %v", tc.tracker, tc.carrier, err)
 		}
 		scout := agentPromptFromJSON(t, res.AgentsJSON, "scout")
-		if !strings.Contains(scout, tc.want) || strings.Contains(scout, tc.wantNot) {
-			t.Errorf("%s scout prompt = %q, want %s and not %s", tc.tracker, scout, tc.want, tc.wantNot)
+		if !strings.Contains(scout, tc.want) || strings.Contains(scout, tc.wantNot) || (tc.want == "" && strings.Contains(scout, "[UNREADABLE]")) {
+			t.Errorf("%s/%s scout prompt = %q, want %q and not %s", tc.tracker, tc.carrier, scout, tc.want, tc.wantNot)
 		}
 	}
 }

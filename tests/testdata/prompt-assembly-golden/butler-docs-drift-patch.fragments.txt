@@ -5,6 +5,6 @@ caveman-default.md
 filer-file-relay.md
 filer-label-relay-butler.md
 github/filer-dedup.md
-scout-issue-read.md
+scout-issue-read-unreadable.md
 skill-preamble.md
 tdd-baked.md

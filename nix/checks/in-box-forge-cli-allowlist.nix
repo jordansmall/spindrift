@@ -129,12 +129,7 @@ let
         "prompts/fragments/forgejo/${name}.md"
       ];
     in
-    [
-      "prompts/fragments/issue-read.md"
-      "prompts/fragments/research-issue-read.md"
-      "prompts/fragments/scout-issue-read.md"
-    ]
-    ++ both "filer-dedup"
+    both "filer-dedup"
     ++ both "fix-ci-read"
     ++ both "open-pr-create"
     ++ both "if-blocked-pr"

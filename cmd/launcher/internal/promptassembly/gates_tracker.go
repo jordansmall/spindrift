@@ -54,16 +54,22 @@ func trackerGates(e Env) map[string]bool {
 	// The backend-agnostic form of "the Box can read the tracker": gates a
 	// slot whose shared fragment serves every reachable tracker.
 	g["ISSUE_TRACKER_REACHABLE"] = !row.InBoxUnreachableTracker
-	// Without an in-Box client the Box cannot fetch parent/linked issues; the
-	// subject issue's text is injected host-side (issue #6344). The scout's
-	// step has no readable arm for local either, hence LINKS_REACHABLE.
-	g["ISSUE_TRACKER_LINKS_REACHABLE"] = !row.InBoxUnreachableTracker && !unwritable
-	g["ISSUE_TRACKER_LINKS_READABLE"] = !unwritable
-	g["ISSUE_TRACKER_LINKS_UNREADABLE"] = unwritable
-	// The deprecated GITHUB issue-read rows must not render GitHub link-reading
-	// wording on a client-less tracker riding github's arm, so an override that
-	// still names them matches the shipped slot.
-	g["ISSUE_TRACKER_GITHUB_LINKS_READABLE"] = itRead == "GITHUB" && !unwritable
+	// The Signal socket's issue read (issue #6894) answers for every tracker
+	// the host can read, i.e. every reachable one. Local has no host reader and
+	// keeps its folder fragment, its linked issues being injected host-side
+	// (ADR 0050). Under the log carrier there is no socket, so a non-local
+	// tracker has no way to read a linked issue.
+	verb := e.SignalCarrier == "socket" && !row.InBoxUnreachableTracker
+	g["ISSUE_TRACKER_LINKS_REACHABLE"] = verb
+	g["ISSUE_TRACKER_LINKS_READABLE"] = row.InBoxUnreachableTracker || verb
+	g["ISSUE_TRACKER_LINKS_UNREADABLE"] = !g["ISSUE_TRACKER_LINKS_READABLE"]
+	// The deprecated per-backend issue-read rows must render verb wording only
+	// where the verb exists, so an override that still names them matches the
+	// shipped slot.
+	g["ISSUE_TRACKER_GITHUB_LINKS_READABLE"] = itRead == "GITHUB" && verb
+	g["ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE"] = itRead == "GITHUB" && !verb
+	g["ISSUE_TRACKER_FORGEJO_LINKS_READABLE"] = itRead == "FORGEJO" && verb
+	g["ISSUE_TRACKER_FORGEJO_LINKS_UNREADABLE"] = itRead == "FORGEJO" && !verb
 	// InBoxUnwritableTracker (not local, which also lacks an in-Box client but
 	// takes the writable arm) picks the Filer's no-search dedup step and the
 	// FILER_RELAY_REASON fragment in every access mode (issue #6354).

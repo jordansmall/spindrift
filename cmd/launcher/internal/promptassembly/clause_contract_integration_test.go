@@ -2037,8 +2037,8 @@ var clauseContracts = []clauseContract{
 	},
 	{
 		fragment: "issue-read.md",
-		pattern:  regexp.MustCompile(`via (GitHub|Forgejo)\b`),
-		reason:   "the fragment is shared across trackers and names the active one, so the agent fetches parents and links through the right client.",
+		clause:   "driver-exec signal issue <ref>",
+		reason:   "the Box reads parent and linked issues through the Signal socket's read verb, which the host answers from the Dispatch's tracker, so no forge CLI is needed (issue #6894).",
 	},
 	{
 		fragment: "issue-read.md",
@@ -2827,8 +2827,8 @@ var clauseContracts = []clauseContract{
 	},
 	{
 		fragment: "fragments/scout-issue-read.md",
-		clause:   "via ${FORGE_DISPLAY_NAME}",
-		reason:   "the scout's issue-read step is shared across trackers and names the active one, so linked issues are fetched through the right client; it renders into the agents JSON, which no checked prompt captures, so it is checked as raw source.",
+		clause:   "driver-exec signal issue <ref>",
+		reason:   "the scout reads linked issues through the Signal socket's read verb, with no forge CLI (issue #6894); it renders into the agents JSON, which no checked prompt captures, so it is checked as raw source.",
 	},
 	{
 		fragment: "fragments/scout-issue-read-unreadable.md",
@@ -2858,8 +2858,8 @@ var clauseContracts = []clauseContract{
 	// issue-read.md
 	{
 		fragment: "issue-read.md",
-		pattern:  regexp.MustCompile(`references too via [A-Z]\w+`),
-		reason:   "the parent/linked-issue pull names the tracker's forge through FORGE_DISPLAY_NAME, so the agent reads linked issues from the right backend.",
+		clause:   "references too with `driver-exec signal issue <ref>`",
+		reason:   "the parent/linked-issue pull goes through the Signal socket's read verb rather than a forge client, so the agent reads linked issues from the dispatch's own tracker (issue #6894).",
 	},
 
 	// issue-read-unreadable.md

@@ -28,20 +28,22 @@ func appendToFile(t *testing.T, path, text string) {
 // keyed by pre so each family's output is distinguishable.
 func issueReadFamily(pre, stem, slotGate string, local bool) ([]FragmentRow, map[string]string) {
 	rows := []FragmentRow{
-		{Axis: "tracker", Shared: true, Gate: slotGate, ExtraSubstVars: []string{"FORGE_DISPLAY_NAME"}, Fragment: stem + ".md", Var: pre + "_STEP"},
+		{Axis: "tracker", Shared: true, Gate: slotGate, Fragment: stem + ".md", Var: pre + "_STEP"},
 		{Gate: "ISSUE_TRACKER_LINKS_UNREADABLE", Fragment: stem + "-unreadable.md", Var: pre + "_STEP"},
-		{Gate: "ISSUE_TRACKER_GITHUB_LINKS_READABLE", Fragment: stem + ".md", ExtraSubstVars: []string{"FORGE_DISPLAY_NAME"}, LegacyFragment: stem + "-github.md", Var: pre + "_GITHUB_STEP"},
-		{Gate: "ISSUE_TRACKER_LINKS_UNREADABLE", Fragment: stem + "-unreadable.md", Var: pre + "_GITHUB_STEP"},
+		{Gate: "ISSUE_TRACKER_GITHUB_LINKS_READABLE", Fragment: stem + ".md", LegacyFragment: stem + "-github.md", Var: pre + "_GITHUB_STEP"},
+		{Gate: "ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE", Fragment: stem + "-unreadable.md", Var: pre + "_GITHUB_STEP"},
 	}
 	files := map[string]string{
-		"fragments/" + stem + ".md":            "TRACKER-ARM[" + pre + "] ${FORGE_DISPLAY_NAME}\n",
+		"fragments/" + stem + ".md":            "TRACKER-ARM[" + pre + "]\n",
 		"fragments/" + stem + "-unreadable.md": "NO-CLIENT-ARM[" + pre + "]\n",
 	}
 	if local {
 		rows = append(rows, FragmentRow{Gate: "ISSUE_TRACKER_LOCAL", Fragment: "local/" + stem + ".md", LegacyFragment: stem + "-local.md", Var: pre + "_LOCAL_STEP"})
 		files["fragments/local/"+stem+".md"] = "LOCAL-ARM[" + pre + "]\n"
 	}
-	rows = append(rows, FragmentRow{Gate: "ISSUE_TRACKER_FORGEJO", Fragment: stem + ".md", ExtraSubstVars: []string{"FORGE_DISPLAY_NAME"}, LegacyFragment: stem + "-forgejo.md", Var: pre + "_FORGEJO_STEP"})
+	rows = append(rows,
+		FragmentRow{Gate: "ISSUE_TRACKER_FORGEJO_LINKS_READABLE", Fragment: stem + ".md", LegacyFragment: stem + "-forgejo.md", Var: pre + "_FORGEJO_STEP"},
+		FragmentRow{Gate: "ISSUE_TRACKER_FORGEJO_LINKS_UNREADABLE", Fragment: stem + "-unreadable.md", Var: pre + "_FORGEJO_STEP"})
 	return rows, files
 }
 
@@ -245,9 +247,11 @@ func TestAssembleValidateDeprecatedAndRemovedVarStillErrors(t *testing.T) {
 	requireErrContains(t, err, "${TDD_STEP}")
 }
 
-// issueReadEnv moves coveredEnv onto the tracker whose axis signal is axis.
+// issueReadEnv moves coveredEnv onto the tracker whose axis signal is axis,
+// on the socket carrier whose issue verb the readable arm names.
 func issueReadEnv(env Env, tracker, axis string) Env {
 	env.IssueTracker = tracker
+	env.SignalCarrier = "socket"
 	env.TrackerAxisRead, env.TrackerAxisWrite, env.TrackerAxisFiler = axis, axis, axis
 	return env
 }
@@ -355,10 +359,11 @@ func TestAssembleDeprecatedIssueReadVarFallsBackToLegacyFragment(t *testing.T) {
 	}
 }
 
-// A client-less tracker (jira) rides github's arm, so an override still naming
-// the deprecated GITHUB issue-read var must render the unreadable arm, not
-// nothing and not the readable arm (issue #6344).
-func TestAssembleDeprecatedIssueReadVarOnJiraRendersUnreadable(t *testing.T) {
+// Without a socket, jira (which rides github's arm) has no way to read a linked
+// issue, so an override still naming the deprecated GITHUB issue-read var must
+// render the unreadable arm, not nothing and not the readable arm (issues #6344,
+// #6894).
+func TestAssembleDeprecatedIssueReadVarOnLogCarrierRendersUnreadable(t *testing.T) {
 	slots := []struct {
 		name, kind, file, pre, stem, gate string
 		agent                             string // subagent whose prompt carries the slot; "" means the main prompt
@@ -377,6 +382,7 @@ func TestAssembleDeprecatedIssueReadVarOnJiraRendersUnreadable(t *testing.T) {
 				files[s.file] = "prompt " + v + "\n"
 				reg, env := syntheticRegistry(t, rows, files)
 				env = issueReadEnv(env, "jira", "GITHUB")
+				env.SignalCarrier = "log"
 				env.DispatchKind = s.kind
 				if s.agent != "" {
 					env.AgentsJSONTemplate = `{"` + s.agent + `":{"model":"x"}}`
