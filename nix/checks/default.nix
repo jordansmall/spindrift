@@ -114,6 +114,7 @@ let
     // (import ./driver-map.nix common)
     // (import ./promptassembly.nix common)
     // (import ./prompt-assembly-golden-coverage.nix common)
+    // (import ./in-box-forge-cli-allowlist.nix common)
     // (import ./fragment-paths.nix common)
     // (import ./baked-skills.nix common)
     // (import ./seccomp.nix common)
@@ -227,6 +228,7 @@ let
     "driver-map"
     "event-stream-parity"
     "go"
+    "in-box-forge-cli-allowlist"
     "nix-checks-lore-parity"
     "prompts"
     "roster"
