@@ -15,8 +15,8 @@ import (
 	"spindrift.dev/launcher/internal/retry"
 )
 
-// handoffBranch is the agent branch of issue 1 under an unset BRANCH_PREFIX.
-const handoffBranch = "1"
+// handoffBranch is the agent branch of issue 1.
+var handoffBranch = forge.AgentBranchName(testBranchPrefix, "1")
 
 // handoffResult is a Box outcome of the given status that carries a PR-intent line.
 func handoffResult(status string) *dispatch.Result {

@@ -75,7 +75,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		result.Resolved.SelfReportFound && result.Resolved.SelfReport.Status == outcome.StatusAlreadyResolved
 	if o.Status == outcome.StatusAlreadyResolved && s.bundlePresent(num) {
 		o.Status = outcome.StatusBlocked
-		o.Note = fmt.Sprintf("agent reported already-resolved but a bundle of commits exists for %s", s.cf.AgentBranch(num))
+		o.Note = fmt.Sprintf("agent reported already-resolved but a bundle of commits exists for %s", s.agentBranch(num))
 		demotedResolved = true
 	}
 
@@ -233,7 +233,7 @@ func appendRejection(warnings []string, channel string, r outcome.Rejections) []
 // outcome line. clsNote is classification detail to log alongside a
 // confirmed-missing PR, empty for the ParseErr case, which never classifies.
 func (s *Settle) settleUnresolved(num, clsNote, missingNote string) {
-	branch := s.cf.AgentBranch(num)
+	branch := s.agentBranch(num)
 
 	res, prErr := forge.ResolveOpenPR(s.cf, branch)
 	if prErr != nil {
@@ -559,7 +559,7 @@ func (s *Settle) unreviewedLanding(num string, result dispatch.Result) string {
 	if result.Resolved.Found {
 		return result.Resolved.Outcome.Landing
 	}
-	return s.cfForNum(num).AgentBranch(num)
+	return s.agentBranch(num)
 }
 
 // failUnreviewed settles num as agent-failed for a run the review loop never

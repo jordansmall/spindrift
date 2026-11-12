@@ -15,6 +15,9 @@ import (
 
 // Config carries the subset of launcher config a Settle needs.
 type Config struct {
+	// BranchPrefix is BRANCH_PREFIX, the input to forge.AgentBranchName.
+	BranchPrefix string
+
 	// MergeMode is "immediate" (merge the PR), "manual" (leave it open), or
 	// "auto" (enqueue the forge's native auto-merge).
 	MergeMode string
@@ -232,4 +235,9 @@ func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 		s.lander = pushOnlyLander{s}
 	}
 	return s
+}
+
+// agentBranch is num's agent branch under the configured BRANCH_PREFIX.
+func (s *Settle) agentBranch(num string) string {
+	return forge.AgentBranchName(s.cfg.BranchPrefix, num)
 }

@@ -379,7 +379,6 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			name: "local merge and relay use the per-issue Code Forge", local: true,
 			setup: func(e *pushOnlyEnv) {
 				perIssue = forge.NewFake()
-				perIssue.BranchPrefix = "agent/issue-"
 				e.c.CodeForgeForIssue = func(string) forge.CodeForge { return perIssue.AsLocal() }
 			},
 			want: merged, wantLabels: complete,
@@ -541,7 +540,6 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 				c.MergeMode = tc.mergeMode
 			}
 			fc := forge.NewFake(testDispatchLabels)
-			fc.BranchPrefix = "agent/issue-"
 			labels := []string{"agent-in-progress"}
 			if tc.labels != nil {
 				labels = tc.labels

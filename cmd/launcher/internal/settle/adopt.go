@@ -21,7 +21,7 @@ func (s *Settle) settleAdopted(d dispatch.Dispatcher, num string, gen uint64, pr
 	// Host-discovered, so it names the record even if the gate never gets a
 	// CheckState answer.
 	s.latchPR(num, prURL)
-	branch := s.cf.AgentBranch(num)
+	branch := s.agentBranch(num)
 	note := fmt.Sprintf("no outcome line; PR discovered on %s", branch)
 	if s.cfg.Unclaimed {
 		note = "host-opened patch PR"

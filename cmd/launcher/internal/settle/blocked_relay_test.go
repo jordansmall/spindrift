@@ -43,8 +43,7 @@ func TestSettle_LocalReadOnly_BlockedRelaysBundleWithoutDraftPR(t *testing.T) {
 	const issNum = "1946"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
+	branch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	d := dispatch.NewFake()
@@ -92,14 +91,13 @@ func TestSettle_LocalReadWrite_BlockedUnaffectedByHostMediation(t *testing.T) {
 	const issNum = "1946"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: fc.AgentBranch(issNum), Status: "blocked", Note: "push rejected"},
+			Outcome: outcome.Outcome{Issue: issNum, Landing: forge.AgentBranchName(testBranchPrefix, issNum), Status: "blocked", Note: "push rejected"},
 		},
 		PRIntent:      "feat: add widget\n\nAdds a widget.",
 		PRIntentFound: true,
@@ -123,8 +121,7 @@ func TestSettle_LocalReadOnly_BlockedRelayFailureStaysBlocked(t *testing.T) {
 	const issNum = "1946"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
+	branch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.RelayBundleErr = errors.New("bundle missing")
 
@@ -157,8 +154,7 @@ func TestSettle_LocalReadOnly_BlockedRelayAbsentBundleLogsBenign(t *testing.T) {
 	const issNum = "1946"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
+	branch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.RelayBundleErr = forge.ErrBundleNotFound
 

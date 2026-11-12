@@ -35,7 +35,6 @@ func TestSettle_LocalPushOnly_NoOutcomeBundlePresentMarksRecoverable(t *testing.
 	writeBundle(t, outbox)
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	d := dispatch.NewFake()
@@ -77,8 +76,7 @@ func TestSettle_LocalPushOnly_SyntheticBlockedBundlePresentMarksRecoverable(t *t
 	writeBundle(t, outbox)
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
+	branch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	d := dispatch.NewFake()
@@ -127,8 +125,7 @@ func TestSettle_LocalPushOnly_GenuineBlockedDoesNotMarkRecoverable(t *testing.T)
 	writeBundle(t, outbox)
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
+	branch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	d := dispatch.NewFake()
@@ -173,7 +170,6 @@ func TestSettle_LocalPushOnly_NoOutcomeBundleMissingFallsBackToFailed(t *testing
 	outbox := t.TempDir() // no bundle written
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	d := dispatch.NewFake()
@@ -211,7 +207,6 @@ func TestSettle_LocalPushOnly_NoSelfReportFallsBackToFailed(t *testing.T) {
 	writeBundle(t, outbox)
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	d := dispatch.NewFake()
@@ -249,7 +244,6 @@ func TestSettle_LocalPushOnly_KilledBySignalBundlePresentMarksRecoverable(t *tes
 	writeBundle(t, outbox)
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	d := dispatch.NewFake()
@@ -288,7 +282,6 @@ func TestSettle_LocalPushOnly_KilledBySignalBundleMissingFallsBackToFailed(t *te
 	outbox := t.TempDir() // no bundle written
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	d := dispatch.NewFake()
@@ -325,7 +318,6 @@ func TestSettle_LocalPushOnly_CleanFailureBundlePresentFallsBackToFailed(t *test
 	writeBundle(t, outbox)
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	d := dispatch.NewFake()
@@ -359,7 +351,6 @@ func TestRecover_GitPushOnlyRelaysNothing(t *testing.T) {
 	const issNum = "1"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	c := baseConfig()
@@ -385,7 +376,6 @@ func TestRecover_LocalPushOnlyNoBundleNoSelfReportRelaysNothing(t *testing.T) {
 	outbox := t.TempDir() // no bundle written
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	c := baseConfig()
@@ -415,7 +405,6 @@ func TestSettle_LocalPushOnly_SelfReportBlockedFallsBackToFailed(t *testing.T) {
 	writeBundle(t, outbox)
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	d := dispatch.NewFake()

@@ -25,7 +25,6 @@ func TestSettle_SyntheticBlockedDemotedFromAlreadyResolved_PostsCommentFailsNotC
 	const note = "agent reported already-resolved but 2 commits exist on agent/issue-4016; treating as blocked"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	d := dispatch.NewFake()
@@ -81,8 +80,7 @@ func TestSettle_GenuineAlreadyResolvedWithBundlePresent_DemotesRelaysNotCloses(t
 	const issNum = "4016"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
+	branch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	outbox := t.TempDir()

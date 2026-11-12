@@ -67,7 +67,7 @@ func TestSettle_DispatchRecordSeam(t *testing.T) {
 
 			fc := seamForge(num)
 			if tc.checkStates != nil {
-				fc.SetPR(fc.AgentBranch(num), forge.PR{URL: testPR})
+				fc.SetPR(forge.AgentBranchName(testBranchPrefix, num), forge.PR{URL: testPR})
 				fc.SetCheckStates(testPR, tc.checkStates)
 			}
 			cfg := baseConfig()
@@ -178,7 +178,6 @@ func seamDispatch(t *testing.T, root, num string, fr *runner.Fake) *dispatch.Dis
 // seamForge is a forge with issue num in progress.
 func seamForge(num string) *forge.Fake {
 	fc := forge.NewFake(ambiguousDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: num, Labels: []string{"agent-in-progress"}})
 	return fc
 }
@@ -226,7 +225,7 @@ func TestRecoverOpenPR_FixPassContinuesPriorRecord(t *testing.T) {
 	}
 
 	fc := seamForge(num)
-	fc.SetPR(fc.AgentBranch(num), forge.PR{URL: testPR})
+	fc.SetPR(forge.AgentBranchName(testBranchPrefix, num), forge.PR{URL: testPR})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
 	cfg := baseConfig()
 	cfg.MaxFixAttempts = 1
@@ -278,7 +277,7 @@ func settleSeamComplete(t *testing.T, root, num string) (report.Record, string) 
 	fr.RunFunc = seamBoxRun(num, "implement", "a1", "2026-05-01T09:00:00Z", "ready", "box-said-so")
 	d := seamDispatch(t, root, num, fr)
 	fc := seamForge(num)
-	fc.SetPR(fc.AgentBranch(num), forge.PR{URL: testPR})
+	fc.SetPR(forge.AgentBranchName(testBranchPrefix, num), forge.PR{URL: testPR})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	cfg := baseConfig()
 	cfg.Progress = &ProgressRecorder{}

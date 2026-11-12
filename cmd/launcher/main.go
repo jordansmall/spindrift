@@ -866,6 +866,7 @@ func newDispatchFactory(c config, pwd string, r runner.Runner, it forge.IssueTra
 func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) settle.Config {
 	return settle.Config{
 		Capabilities:      caps,
+		BranchPrefix:      c.BranchPrefix,
 		MergeMode:         c.MergeMode,
 		MergeGuardPaths:   c.MergeGuardPaths,
 		CompleteLabel:     c.CompleteLabel,

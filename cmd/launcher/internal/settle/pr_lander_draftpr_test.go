@@ -32,14 +32,14 @@ func draftPRCases() []prCase {
 		return stepAt(handoffBranch, label, fmt.Sprintf("attempt=%d/%d  !! %v", n, of, err))
 	}
 	opensPR := func(fc *forge.Fake) func(int) {
-		return func(int) { fc.SetPR(fc.AgentBranch("1"), forge.PR{URL: testPR}) }
+		return func(int) { fc.SetPR(handoffBranch, forge.PR{URL: testPR}) }
 	}
 	// The create on call makes the PR, as a gateway timeout that fired after the
 	// forge made it would.
 	createdOnCall := func(fc *forge.Fake, call int, mark func()) {
 		fc.On("CreateDraftPR", func(n int) {
 			if n == call {
-				fc.SetPR(fc.AgentBranch("1"), forge.PR{URL: testPR})
+				fc.SetPR(handoffBranch, forge.PR{URL: testPR})
 				if mark != nil {
 					mark()
 				}
@@ -262,7 +262,7 @@ func draftPRCases() []prCase {
 				withoutIntent(fc)
 				fc.CreateDraftPRErrs = []error{errDraftPR504}
 				fc.OpenPRForBranchErrs = []error{errLookup}
-				fc.CreateDraftPRAdoptHead, fc.CreateDraftPRAdoptedURL = fc.AgentBranch("1"), testPR
+				fc.CreateDraftPRAdoptHead, fc.CreateDraftPRAdoptedURL = handoffBranch, testPR
 			}),
 			wantComments: announced, wantStepsLike: []Step{stepAt(handoffBranch, StatusReconstructed, "note=")},
 		}),
@@ -281,7 +281,7 @@ func draftPRCases() []prCase {
 			wantStatuses: []Status{detailOnly, StatusVerifiedMerged},
 			setup: g.readOnly(3, func(_ *testing.T, fc *forge.Fake, _ *Config) {
 				withoutIntent(fc)
-				fc.CreateDraftPRAdoptHead, fc.CreateDraftPRAdoptedURL = fc.AgentBranch("1"), testPR
+				fc.CreateDraftPRAdoptHead, fc.CreateDraftPRAdoptedURL = handoffBranch, testPR
 			}),
 			check: draftPRCalls(1),
 		}),

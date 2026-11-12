@@ -260,6 +260,7 @@ func TestWire_ComposedLoop_HappyPath(t *testing.T) {
 	fixtureSHA := bundleFixtureCommit(t, accumDir, testBaseBranch, branch, num, lw.OutboxDir(num))
 
 	cfg := settle.Config{
+		BranchPrefix:      "agent/issue-",
 		MergeMode:         "immediate",
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
@@ -349,6 +350,7 @@ func TestWire_ComposedLoop_EmptyTitleSanitizesToSlug(t *testing.T) {
 	bundleFixtureCommit(t, accumDir, testBaseBranch, branch, num, lw.OutboxDir(num))
 
 	cfg := settle.Config{
+		BranchPrefix:      "agent/issue-",
 		MergeMode:         "immediate",
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
@@ -424,6 +426,7 @@ func TestWire_ComposedLoop_GarbageParentUsesTitleNaming(t *testing.T) {
 	bundleFixtureCommit(t, accumDir, testBaseBranch, branch, num, lw.OutboxDir(num))
 
 	cfg := settle.Config{
+		BranchPrefix:      "agent/issue-",
 		MergeMode:         "immediate",
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
@@ -569,6 +572,7 @@ func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 	// Agent that produced no code-out.
 
 	cfg := settle.Config{
+		BranchPrefix:      "agent/issue-",
 		MergeMode:         "immediate",
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
@@ -657,6 +661,7 @@ func TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands(t *testing.T) 
 	fixtureSHA := bundleFixtureCommit(t, accumDir, testBaseBranch, branch, num, lw.OutboxDir(num))
 
 	cfg := settle.Config{
+		BranchPrefix:      "agent/issue-",
 		MergeMode:         "immediate",
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
@@ -764,6 +769,7 @@ func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
 	bundleFixtureCommit(t, accumDir, testBaseBranch, branch, landedNum, lw.OutboxDir(landedNum))
 
 	cfg := settle.Config{
+		BranchPrefix:      "agent/issue-",
 		MergeMode:         "immediate",
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
@@ -859,6 +865,7 @@ func TestWire_ComposedLoop_BroadTicketIssueExcludedFromOwnSeams(t *testing.T) {
 			bundleFixtureCommit(t, accumDir, testBaseBranch, branch, seamNum, lw.OutboxDir(seamNum))
 
 			cfg := settle.Config{
+				BranchPrefix:      "agent/issue-",
 				MergeMode:         "immediate",
 				CompleteLabel:     testLabels.Complete,
 				OutboxDir:         lw.OutboxDir,
@@ -941,6 +948,7 @@ func TestWire_ComposedLoop_StuckBroadTicketLandingSurfacesAnyway(t *testing.T) {
 	}, it)
 
 	cfg := settle.Config{
+		BranchPrefix:      "agent/issue-",
 		MergeMode:         "immediate",
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
@@ -1052,6 +1060,7 @@ func TestWire_ComposedLoop_DegenerateAllMembersCollide_KeepsBothMembers(t *testi
 
 	cf := lw.CodeForgeForIssue(numA)
 	cfg := settle.Config{
+		BranchPrefix:      "agent/issue-",
 		MergeMode:         "immediate",
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
@@ -1152,6 +1161,7 @@ func TestWire_ComposedLoop_BroadTicketIssuePresent_OpenSeamNamesSeam(t *testing.
 	bundleFixtureCommit(t, accumDir, testBaseBranch, branch, landedNum, lw.OutboxDir(landedNum))
 
 	cfg := settle.Config{
+		BranchPrefix:      "agent/issue-",
 		MergeMode:         "immediate",
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
@@ -1281,6 +1291,7 @@ func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.
 	fixtureShaB := bundleFixtureCommit(t, accumDir, testBaseBranch, branchB, numB, lw.OutboxDir(numB))
 
 	cfgA := settle.Config{
+		BranchPrefix:      "agent/issue-",
 		MergeMode:         "immediate",
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
@@ -1295,6 +1306,7 @@ func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.
 		},
 	})
 	cfgB := settle.Config{
+		BranchPrefix:      "agent/issue-",
 		MergeMode:         "immediate",
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
@@ -1376,6 +1388,7 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 	sha01 := bundleFixtureCommit(t, accumDir, testBaseBranch, branch01, blockerNum, lw.OutboxDir(blockerNum))
 
 	cfg01 := settle.Config{
+		BranchPrefix:      "agent/issue-",
 		MergeMode:         "immediate",
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
@@ -1469,6 +1482,7 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 	sha02 := bundleFixtureCommit(t, accumDir, seedBase, branch02, dependentNum, lw.OutboxDir(dependentNum))
 
 	cfg02 := settle.Config{
+		BranchPrefix:      "agent/issue-",
 		MergeMode:         "immediate",
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
@@ -1587,6 +1601,7 @@ func TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly(t *testing.T) {
 	sha11 := bundleFixtureCommit(t, accumDir, testBaseBranch, branch11, blockerNum, lw.OutboxDir(blockerNum))
 
 	cfg11 := settle.Config{
+		BranchPrefix:      "agent/issue-",
 		MergeMode:         "immediate",
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
@@ -1719,6 +1734,7 @@ func TestWire_ComposedLoop_AlreadyResolvedClosesIssue(t *testing.T) {
 	// and found the work already done on the default branch.
 
 	cfg := settle.Config{
+		BranchPrefix:      "agent/issue-",
 		MergeMode:         "immediate",
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,

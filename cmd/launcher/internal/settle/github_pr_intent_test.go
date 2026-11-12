@@ -43,8 +43,7 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges(t *testin
 	const prURL = "https://github.com/owner/repo/pull/1919"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
+	branch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = prURL
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
@@ -93,8 +92,7 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_ClosesAlr
 	const prURL = "https://github.com/owner/repo/pull/1919"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
+	branch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = prURL
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
@@ -135,8 +133,7 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_LocalTrac
 	const prURL = "https://github.com/owner/repo/pull/1919"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
+	branch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = prURL
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
@@ -217,8 +214,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits(t *testing
 	const prURL = "https://github.com/owner/repo/pull/1919"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
+	branch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = prURL
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
@@ -276,8 +272,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_CallsCommi
 	const prURL = "https://github.com/owner/repo/pull/1919"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
+	branch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = prURL
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
@@ -319,8 +314,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_DefusesInj
 	const prURL = "https://github.com/owner/repo/pull/1919"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
+	branch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = prURL
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
@@ -366,8 +360,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_PostsIssue
 	const prURL = "https://github.com/owner/repo/pull/1919"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
+	branch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = prURL
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
@@ -410,7 +403,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsButCreateDraftPRFailsP
 	branch := "agent/issue-1919"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.CommitSubjectsResult = []string{"feat: add widget", "fix: typo"}
 	fc.CreateDraftPRErr = errors.New("create draft PR: 500")
@@ -455,8 +447,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsButAdoptsExistingPR_No
 	const prURL = "https://github.com/owner/repo/pull/1919"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
+	branch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRAdoptHead = branch
 	fc.CreateDraftPRAdoptedURL = prURL
@@ -509,8 +500,7 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_NoReconst
 	const prURL = "https://github.com/owner/repo/pull/1919"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
+	branch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = prURL
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
@@ -546,8 +536,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_LocalTrack
 	const prURL = "https://github.com/owner/repo/pull/1919"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
+	branch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = prURL
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
@@ -854,8 +843,7 @@ func TestSettle_GithubReadOnly_HostileLandingIgnored_UsesAgentBranch(t *testing.
 	const prURL = "https://github.com/owner/repo/pull/1919"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	agentBranch := fc.AgentBranch(issNum)
+	agentBranch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = prURL
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
@@ -895,8 +883,7 @@ func TestSettle_GithubReadOnly_MergedStatus_HostileLandingIgnored_UsesAgentBranc
 	const prURL = "https://github.com/owner/repo/pull/1955"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	agentBranch := fc.AgentBranch(issNum)
+	agentBranch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress", "agent-complete"}})
 	// The PR is registered only against the host-derived agent branch, so a
 	// settle that resolved it via o.Landing would find no PR here.
@@ -942,13 +929,12 @@ func TestSettle_GithubReadOnly_MergedStatus_HostileLandingIgnored_UsesAgentBranc
 func TestSettle_GithubReadOnly_OpenWiringErrorBlocksNotFails(t *testing.T) {
 	const issNum = "5144"
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	result := dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: fc.AgentBranch(issNum), Status: "ready"},
+			Outcome: outcome.Outcome{Issue: issNum, Landing: forge.AgentBranchName(testBranchPrefix, issNum), Status: "ready"},
 		},
 		PRIntent:      "feat: add widget\n\nAdds a widget.",
 		PRIntentFound: true,

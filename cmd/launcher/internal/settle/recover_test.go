@@ -33,7 +33,6 @@ type recoverEnv struct {
 func newRecoverEnv(t *testing.T, bundle bool) *recoverEnv {
 	t.Helper()
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: recoverNum, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = recoverPR
 	fc.SetCheckStates(recoverPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})

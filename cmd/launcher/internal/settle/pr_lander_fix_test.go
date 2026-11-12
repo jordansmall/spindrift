@@ -77,7 +77,7 @@ func fixCases() []prCase {
 			}
 		}
 	}
-	oneRelay := forge.RelayBundleCall{OutboxDir: "/outbox/1", Ref: forge.NewFake(testDispatchLabels).AgentBranch("1")}
+	oneRelay := forge.RelayBundleCall{OutboxDir: "/outbox/1", Ref: handoffBranch}
 
 	// The clock the fix-no-op confirm pause must sleep through (issue #2502).
 	var sleeps *[]time.Duration
