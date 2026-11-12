@@ -258,7 +258,8 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		recordDecisions(cfg.decisionsPath, &state, decisionsPreSnapshot)
 		// driver-exec truncates cfg.logPath for each pass (issue #626), so on
 		// return the file holds exactly this pass's raw stream.
-		verdict, hasOutcome := scanPassLog(cfg.logPath, cfg.driver, passmachine.KindLegacy)
+		passLog := decodePassLog(cfg.logPath, cfg.driver)
+		verdict, hasOutcome := scanPassLog(passLog, passmachine.KindLegacy)
 		if cfg.advisoryReviewer {
 			// Discarded here, not filtered by role in passmachine.Scan: the
 			// advisory reviewer shares the roster reviewer's name, and Scan
@@ -271,7 +272,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		// The next pass truncates cfg.logPath, so this pass's usage must be
 		// read back now or never (issue #2694). One scan feeds both
 		// passUsageTotals and the pass_usage op below.
-		report := cfg.passReport()
+		report := cfg.passReport(passLog)
 		passUsageTotals := report.Totals
 		// No Role: this loop's pass_start op carries none either, since it
 		// never distinguishes pass kinds.
@@ -419,10 +420,11 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// implement/fix pass emits is not state.LastVerdict's source. The
 		// outcome's status lets the machine tell a premature ready from a
 		// settled one (issue #5972).
-		passOut, hasOutcome := scanPassOutcome(cfg.logPath, cfg.driver)
+		passLog := decodePassLog(cfg.logPath, cfg.driver)
+		passOut, hasOutcome := scanPassOutcome(passLog)
 		// Folded in before the next driver-exec invocation truncates
 		// cfg.logPath (issue #2694). One scan feeds both values below.
-		report := cfg.passReport()
+		report := cfg.passReport(passLog)
 		passUsageTotals := report.Totals
 		cumulativeTokens += passUsageTotals.TotalTokens()
 		cumulativeUSD += passUsageTotals.TotalCostUSD
@@ -460,7 +462,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			// nothing for a delta to exist against, and a land pass that
 			// already blocked is not settling as ready.
 			if passKind == passmachine.KindLand && hasOutcome && passLandDelta != nil {
-				if err := runDeltaReviewGate(cfg, &state, passLandDelta, &pc, &cumulativeTokens, &cumulativeUSD, &manifest, &findingsLogRounds, stdout); err != nil {
+				if err := runDeltaReviewGate(cfg, &state, passLandDelta, passLog, &pc, &cumulativeTokens, &cumulativeUSD, &manifest, &findingsLogRounds, stdout); err != nil {
 					return 0, err
 				}
 			}
@@ -516,10 +518,11 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		}
 		recordReviewedCommitAnchor(&state)
 
-		reviewVerdict, findings := scanReviewLog(cfg.logPath, cfg.driver)
+		reviewLog := decodePassLog(cfg.logPath, cfg.driver)
+		reviewVerdict, findings := scanReviewLog(reviewLog)
 		// Folded in before the next invocation truncates cfg.logPath (issue
 		// #2694), same as the block above. One scan feeds both values below.
-		reviewReport := cfg.passReport()
+		reviewReport := cfg.passReport(reviewLog)
 		reviewUsageTotals := reviewReport.Totals
 		cumulativeTokens += reviewUsageTotals.TotalTokens()
 		cumulativeUSD += reviewUsageTotals.TotalCostUSD
@@ -570,10 +573,9 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 // terminal delta-review pass before it settles. Called once per run from
 // runWithReviewPass; the pointer arguments are that loop's own locals, so
 // mutations here flow back into it as they did when this code was inline.
-func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *landdelta.Delta, pc *passCounter, cumulativeTokens *int, cumulativeUSD *float64, manifest *[]passmanifest.Entry, findingsLogRounds *int, stdout io.Writer) error {
-	// Both values seed the corrective blocked line below, so both are
-	// captured whether or not the gate fires.
-	landOutcome, outcomeFound := scanPassOutcome(cfg.logPath, cfg.driver)
+func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *landdelta.Delta, landLog decodedPass, pc *passCounter, cumulativeTokens *int, cumulativeUSD *float64, manifest *[]passmanifest.Entry, findingsLogRounds *int, stdout io.Writer) error {
+	// landOutcome seeds the corrective blocked line below.
+	landOutcome, outcomeFound := scanPassOutcome(landLog)
 	if !outcomeFound || landOutcome.Status != outcome.StatusReady {
 		return nil
 	}
@@ -644,8 +646,9 @@ func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *lan
 		fmt.Fprintln(os.Stderr, "orchestrator: delta-review pass exited", deltaRC, "(dropped; the run keeps the land pass's rc)")
 	}
 
-	deltaVerdict, deltaFindings := scanReviewLog(deltaCfg.logPath, cfg.driver)
-	deltaReport := deltaCfg.passReport()
+	deltaPassLog := decodePassLog(deltaCfg.logPath, cfg.driver)
+	deltaVerdict, deltaFindings := scanReviewLog(deltaPassLog)
+	deltaReport := deltaCfg.passReport(deltaPassLog)
 	deltaUsageTotals := deltaReport.Totals
 	*cumulativeTokens += deltaUsageTotals.TotalTokens()
 	*cumulativeUSD += deltaUsageTotals.TotalCostUSD
@@ -805,30 +808,54 @@ func deltaReviewBlockNote(findings string) string {
 	return string(runes[:deltaReviewNoteMaxRunes-1]) + "…"
 }
 
+// decodedPass is one pass's log decoded once. Every read of a pass consumes it,
+// so a Connector-backed Driver decodes the log a single time. It must not
+// outlive its pass: driver-exec truncates the reused log path for the next.
+// The zero value, from an unresolvable Driver or an undecodable log, makes
+// every read below give its zero result.
+type decodedPass struct {
+	log driverkit.PassLog
+	ok  bool
+}
+
+// decodeLog is the tests' seam for counting whole-log decodes.
+var decodeLog = driver.Driver.Decode
+
+// decodePassLog decodes the pass log at logPath through the named Driver, once
+// per pass and before the next pass's driver-exec truncates it (issue #2694),
+// reporting why on stderr when it cannot.
+func decodePassLog(logPath, driverName string) decodedPass {
+	d, err := driver.New(driverName)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchestrator: decode pass log: resolve driver:", err)
+		return decodedPass{}
+	}
+	log, err := decodeLog(d, logPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchestrator: decode pass log:", err)
+		return decodedPass{}
+	}
+	return decodedPass{log: log, ok: true}
+}
+
 // scanPassLog scans one pass's raw Driver log for the reviewer's
 // "VERDICT: APPROVE|BLOCK" line and whether the pass reached a terminal
 // outcome. The raw log is stream-json, so the verdict sits inside JSON string
 // fields and a bare-line scan misses it; RenderTranscript turns it back into
 // "[role] text" lines first (ADR 0009, issue #262 slice 4). The outcome comes
 // from scanPassOutcome, not the transcript.
-func scanPassLog(logPath, driverName string, kind passmachine.PassKind) (verdict string, hasOutcome bool) {
-	d, err := driver.New(driverName)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "orchestrator: scan pass log:", err)
+func scanPassLog(p decodedPass, kind passmachine.PassKind) (verdict string, hasOutcome bool) {
+	if !p.ok {
 		return "", false
 	}
-	rendered, err := d.RenderTranscript(logPath, driverkit.RenderOptions{TopLevelRole: driverkit.ImplementorRole})
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "orchestrator: scan pass log:", err)
-		return "", false
-	}
+	rendered := p.log.RenderTranscript(driverkit.RenderOptions{TopLevelRole: driverkit.ImplementorRole})
 
 	// Scan folds the verdict against kind's match rule, so callers must state
 	// their true pass kind (issue #2980). verdictscan.go covers why the fold
 	// is BLOCK-dominant rather than last-match-wins (#2546).
 	res := passmachine.Scan(rendered, kind)
 
-	_, hasOutcome = scanPassOutcome(logPath, driverName)
+	_, hasOutcome = scanPassOutcome(p)
 	return string(res.Verdict), hasOutcome
 }
 
@@ -838,18 +865,11 @@ func scanPassLog(logPath, driverName string, kind passmachine.PassKind) (verdict
 // results, subagent prompts, or mid-pass assistant turns never ends the run
 // (issue #4405). The delta-review gate (issue #3246) also reads the land
 // pass's Issue, Landing, and Status fields from it verbatim.
-func scanPassOutcome(logPath, driverName string) (outcome.Outcome, bool) {
-	d, err := driver.New(driverName)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "orchestrator: scan pass outcome:", err)
+func scanPassOutcome(p decodedPass) (outcome.Outcome, bool) {
+	if !p.ok {
 		return outcome.Outcome{}, false
 	}
-	text, err := d.ResultText(logPath)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "orchestrator: scan pass outcome:", err)
-		return outcome.Outcome{}, false
-	}
-	line := outcome.ExtractOutcomeLine(outcome.StripResultText(text))
+	line := outcome.ExtractOutcomeLine(outcome.StripResultText(p.log.ResultText()))
 	if line == "" {
 		return outcome.Outcome{}, false
 	}
@@ -865,17 +885,11 @@ func scanPassOutcome(logPath, driverName string) (outcome.Outcome, bool) {
 // supplies the verdict and the winning block's line index (see verdictscan.go
 // for the KindReview match rule); this then slices the findings out of the
 // same rendering. Returns ("", "") when Scan finds no verdict at all.
-func scanReviewLog(logPath, driverName string) (verdict, findings string) {
-	d, err := driver.New(driverName)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "orchestrator: scan review log:", err)
+func scanReviewLog(p decodedPass) (verdict, findings string) {
+	if !p.ok {
 		return "", ""
 	}
-	rendered, err := d.RenderTranscript(logPath, driverkit.RenderOptions{TopLevelRole: driverkit.ReviewerRole})
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "orchestrator: scan review log:", err)
-		return "", ""
-	}
+	rendered := p.log.RenderTranscript(driverkit.RenderOptions{TopLevelRole: driverkit.ReviewerRole})
 
 	res := passmachine.Scan(rendered, passmachine.KindReview)
 	if res.Verdict == passmachine.VerdictNone {
@@ -905,26 +919,17 @@ func scanReviewLog(logPath, driverName string) (verdict, findings string) {
 	return string(res.Verdict), findings
 }
 
-// passReport extracts cfg.logPath's usage.Report (issue #2694), best-effort: an
-// unresolvable driver name, an ExtractUsageAfter error, or a log with no result
-// event all give the zero Report rather than aborting the run. Call it once
-// per pass, right after that pass's log is scanned, because the orchestrator
-// reuses one log path and the next pass truncates it. cfg.usageBaselineFile
-// carries each session's last cumulative result across passes and Boxes, so a
-// resumed session's pass books only its increment (issue #6706); empty
-// disables it.
-func (cfg config) passReport() usage.Report {
-	d, err := driver.New(cfg.driver)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "orchestrator: budget usage: resolve driver:", err)
+// passReport extracts p's usage.Report (issue #2694), best-effort: an
+// undecodable log or one with no result event gives the zero Report rather than
+// aborting the run. Call it once per pass. cfg.usageBaselineFile carries each
+// session's last cumulative result across passes and Boxes, so a resumed
+// session's pass books only its increment (issue #6706); empty disables it.
+func (cfg config) passReport(p decodedPass) usage.Report {
+	if !p.ok {
 		return usage.Report{}
 	}
 	base := loadUsageBaselines(cfg.usageBaselineFile)
-	r, after, err := d.ExtractUsageAfter(cfg.logPath, base)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "orchestrator: budget usage: extract usage:", err)
-		return usage.Report{}
-	}
+	r, after := p.log.ExtractUsageAfter(base)
 	saveUsageBaselines(cfg.usageBaselineFile, after)
 	if !r.Found {
 		// No result event is ordinary for a pass cut short, not an error, so

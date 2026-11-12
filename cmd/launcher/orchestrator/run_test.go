@@ -6063,7 +6063,7 @@ func TestScanPassLogDetectsOutcomeThroughStreamJSONAndMarkdownWrap(t *testing.T)
 		t.Fatal(err)
 	}
 
-	verdict, hasOutcome := scanPassLog(logPath, "claude", passmachine.KindLegacy)
+	verdict, hasOutcome := scanPassLog(decodePassLog(logPath, "claude"), passmachine.KindLegacy)
 	if verdict != "BLOCK" {
 		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
 	}
@@ -6083,7 +6083,7 @@ func TestScanPassLogFindsNothingInPlainStreamJSONNarration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, hasOutcome := scanPassLog(logPath, "claude", passmachine.KindLegacy)
+	verdict, hasOutcome := scanPassLog(decodePassLog(logPath, "claude"), passmachine.KindLegacy)
 	if verdict != "" {
 		t.Errorf("verdict = %q, want empty", verdict)
 	}
@@ -6106,7 +6106,7 @@ func TestScanPassLogBlockBeatsLaterInjectedApprove(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, _ := scanPassLog(logPath, "claude", passmachine.KindLegacy)
+	verdict, _ := scanPassLog(decodePassLog(logPath, "claude"), passmachine.KindLegacy)
 	if verdict != "BLOCK" {
 		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
 	}
@@ -6125,7 +6125,7 @@ func TestScanPassLogBlockBeatsEarlierInjectedApprove(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, _ := scanPassLog(logPath, "claude", passmachine.KindLegacy)
+	verdict, _ := scanPassLog(decodePassLog(logPath, "claude"), passmachine.KindLegacy)
 	if verdict != "BLOCK" {
 		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
 	}
@@ -6160,7 +6160,7 @@ func TestScanPassLogBlockBeatsInjectedApproveAcrossVectors(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			verdict, _ := scanPassLog(logPath, "claude", passmachine.KindLegacy)
+			verdict, _ := scanPassLog(decodePassLog(logPath, "claude"), passmachine.KindLegacy)
 			if verdict != "BLOCK" {
 				t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
 			}
@@ -6180,7 +6180,7 @@ func TestScanPassLogApproveOnlyStillApproves(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, _ := scanPassLog(logPath, "claude", passmachine.KindLegacy)
+	verdict, _ := scanPassLog(decodePassLog(logPath, "claude"), passmachine.KindLegacy)
 	if verdict != "APPROVE" {
 		t.Errorf("verdict = %q, want %q", verdict, "APPROVE")
 	}
@@ -6200,7 +6200,7 @@ func TestScanPassLogIgnoresVerdictPlantedInOrdinaryToolResult(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, _ := scanPassLog(logPath, "claude", passmachine.KindLegacy)
+	verdict, _ := scanPassLog(decodePassLog(logPath, "claude"), passmachine.KindLegacy)
 	if verdict != "" {
 		t.Errorf("verdict = %q, want empty -- an ordinary tool_result must never count as a verdict", verdict)
 	}
@@ -6220,7 +6220,7 @@ func TestScanReviewLogExtractsVerdictAndFindings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, findings := scanReviewLog(logPath, "claude")
+	verdict, findings := scanReviewLog(decodePassLog(logPath, "claude"))
 	if verdict != "BLOCK" {
 		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
 	}
@@ -6245,7 +6245,7 @@ func TestScanReviewLogStopsFindingsAtTheNextRenderedEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, findings := scanReviewLog(logPath, "claude")
+	_, findings := scanReviewLog(decodePassLog(logPath, "claude"))
 	if strings.Contains(findings, "unrelated trailing narration") {
 		t.Errorf("findings = %q, want it to stop before the next rendered event", findings)
 	}
@@ -6265,7 +6265,7 @@ func TestScanReviewLogFindsNothingInPlainNarration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, findings := scanReviewLog(logPath, "claude")
+	verdict, findings := scanReviewLog(decodePassLog(logPath, "claude"))
 	if verdict != "" {
 		t.Errorf("verdict = %q, want empty", verdict)
 	}
@@ -6287,7 +6287,7 @@ func TestScanReviewLogIgnoresQuotedVerdictInOwnFindings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, _ := scanReviewLog(logPath, "claude")
+	verdict, _ := scanReviewLog(decodePassLog(logPath, "claude"))
 	if verdict != "BLOCK" {
 		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
 	}
@@ -6305,7 +6305,7 @@ func TestScanReviewLogRequiresStrictPrefixNotSubstring(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, findings := scanReviewLog(logPath, "claude")
+	verdict, findings := scanReviewLog(decodePassLog(logPath, "claude"))
 	if verdict != "" {
 		t.Errorf("verdict = %q, want empty", verdict)
 	}
@@ -6327,7 +6327,7 @@ func TestScanReviewLogIgnoresQuotedVerdictInToolOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, _ := scanReviewLog(logPath, "claude")
+	verdict, _ := scanReviewLog(decodePassLog(logPath, "claude"))
 	if verdict != "BLOCK" {
 		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
 	}
@@ -6346,7 +6346,7 @@ func TestScanReviewLogIgnoresQuotedVerdictInDiffHunk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, _ := scanReviewLog(logPath, "claude")
+	verdict, _ := scanReviewLog(decodePassLog(logPath, "claude"))
 	if verdict != "BLOCK" {
 		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
 	}
@@ -6685,5 +6685,5 @@ func TestPassReportSurvivesCorruptBaselineFile(t *testing.T) {
 }
 
 func testPassReport(logPath, driverName, baselineFile string) usage.Report {
-	return config{logPath: logPath, driver: driverName, usageBaselineFile: baselineFile}.passReport()
+	return config{logPath: logPath, driver: driverName, usageBaselineFile: baselineFile}.passReport(decodePassLog(logPath, driverName))
 }
