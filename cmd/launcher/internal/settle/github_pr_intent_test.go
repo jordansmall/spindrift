@@ -123,11 +123,11 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_ClosesAlr
 	}
 }
 
-// Pins ensureClosesReference's GithubTracker allow-list (issue #2341): with
-// ISSUE_TRACKER=local and CODE_FORGE=github, a valid real combination, the
-// local-shaped tracker is not a forge.GithubTracker, so settle must not append
-// a "Closes #<num>". The local adapter closes issues through its own axis
-// (ADR 0029), not GitHub's auto-close-on-merge convention.
+// Pins the ClosesRefTracker gate (issue #2341): with ISSUE_TRACKER=local and
+// CODE_FORGE=github, a valid real combination, the local tracker row is not a
+// closes-ref tracker, so settle must not append a "Closes #<num>". The local
+// adapter closes issues through its own axis (ADR 0029), not GitHub's
+// auto-close-on-merge convention.
 func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_LocalTrackerNotInjected(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
@@ -153,6 +153,7 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_LocalTrac
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsGithubReadOnly())
+	s.cfg.Capabilities.TrackerDescriptor = row(t, "local")
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CreateDraftPRCalls) != 1 {
@@ -556,6 +557,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_LocalTrack
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsGithubReadOnly())
+	s.cfg.Capabilities.TrackerDescriptor = row(t, "local")
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CreateDraftPRCalls) != 1 {

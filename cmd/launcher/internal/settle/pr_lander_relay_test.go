@@ -366,9 +366,10 @@ func blockedHandoffCases() []prCase {
 
 	return []prCase{
 		blocked(prCase{
-			name:  "a blocked read-only hand-off relays the bundle and opens a draft PR that closes the issue",
-			want:  withDraftPR,
-			check: allOf(g.relayedBundle(), openedDraftPR("feat: add widget", "Adds a widget.\n\nCloses #1")), wantComments: []string{"stuck"},
+			name:    "a blocked read-only hand-off relays the bundle and opens a draft PR that closes the issue",
+			tracker: backend.GitHub,
+			want:    withDraftPR,
+			check:   allOf(g.relayedBundle(), openedDraftPR("feat: add widget", "Adds a widget.\n\nCloses #1")), wantComments: []string{"stuck"},
 		}),
 		blocked(prCase{
 			name:   "a blocked hand-off's PR intent that already closes the issue gets no second reference",

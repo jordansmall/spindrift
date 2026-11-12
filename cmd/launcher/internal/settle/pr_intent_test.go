@@ -5,95 +5,89 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 )
 
 // Internal seam: a pure body-text matrix; the Settle draft-PR rows pin only the
 // append and already-closed cases.
-// Only non-local (GitHub-shaped) trackers get a "Closes #<num>" reference. A
-// LandingRecorder-shaped (local) tracker closes issues through its own axis
+// Only a tracker row with ClosesRefTracker (github) gets a "Closes #<num>"
+// reference. A local tracker closes issues through its own axis
 // (ADR 0029), never through GitHub's auto-close-on-merge keyword.
 func TestInternalSeam_EnsureClosesReference(t *testing.T) {
+	const num = "1919"
 	tests := []struct {
 		name    string
 		body    string
-		num     string
-		local   bool
-		forgejo bool
+		tracker string // backend row name; "" is the zero Descriptor
 		want    string
 	}{
-		{
-			name: "non-local, no closes reference, appends",
-			body: "Adds a widget.",
-			num:  "1919",
-			want: "Adds a widget.\n\nCloses #1919",
-		},
-		{
-			name: "non-local, already has Closes, unchanged",
-			body: "Adds a widget.\n\nCloses #1919",
-			num:  "1919",
-			want: "Adds a widget.\n\nCloses #1919",
-		},
-		{
-			name: "non-local, already has Fixes, unchanged",
-			body: "Adds a widget.\n\nFixes #1919",
-			num:  "1919",
-			want: "Adds a widget.\n\nFixes #1919",
-		},
-		{
-			name: "non-local, already has colon-form Closes, unchanged",
-			body: "Adds a widget.\n\nCloses: #1919",
-			num:  "1919",
-			want: "Adds a widget.\n\nCloses: #1919",
-		},
-		{
-			name: "non-local, closes references a different number, appends",
-			body: "Adds a widget.\n\nCloses #191",
-			num:  "1919",
-			want: "Adds a widget.\n\nCloses #191\n\nCloses #1919",
-		},
-		{
-			name: "non-local, closes references a longer number, appends",
-			body: "Adds a widget.\n\nCloses #19195",
-			num:  "1919",
-			want: "Adds a widget.\n\nCloses #19195\n\nCloses #1919",
-		},
-		{
-			name: "non-local, empty body, becomes exactly Closes",
-			body: "",
-			num:  "1919",
-			want: "Closes #1919",
-		},
-		{
-			name:  "local tracker, no closes reference, unchanged",
-			body:  "Adds a widget.",
-			num:   "1919",
-			local: true,
-			want:  "Adds a widget.",
-		},
-		{
-			name:    "forgejo tracker, no closes reference, unchanged",
-			body:    "Adds a widget.",
-			num:     "1919",
-			forgejo: true,
-			want:    "Adds a widget.",
-		},
+		{"github tracker, no closes reference, appends", "Adds a widget.", "github", "Adds a widget.\n\nCloses #1919"},
+		{"github tracker, already has Closes, unchanged", "Adds a widget.\n\nCloses #1919", "github", "Adds a widget.\n\nCloses #1919"},
+		{"github tracker, already has Fixes, unchanged", "Adds a widget.\n\nFixes #1919", "github", "Adds a widget.\n\nFixes #1919"},
+		{"github tracker, already has colon-form Closes, unchanged", "Adds a widget.\n\nCloses: #1919", "github", "Adds a widget.\n\nCloses: #1919"},
+		{"github tracker, closes references a different number, appends", "Adds a widget.\n\nCloses #191", "github", "Adds a widget.\n\nCloses #191\n\nCloses #1919"},
+		{"github tracker, closes references a longer number, appends", "Adds a widget.\n\nCloses #19195", "github", "Adds a widget.\n\nCloses #19195\n\nCloses #1919"},
+		{"github tracker, empty body, becomes exactly Closes", "", "github", "Closes #1919"},
+		{"local tracker, no closes reference, unchanged", "Adds a widget.", "local", "Adds a widget."},
+		{"forgejo tracker, no closes reference, unchanged", "Adds a widget.", "forgejo", "Adds a widget."},
+		{"jira tracker, no closes reference, unchanged", "Adds a widget.", "jira", "Adds a widget."},
+		{"zero descriptor fails closed, unchanged", "Adds a widget.", "", "Adds a widget."},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var it forge.IssueTracker
-			switch {
-			case tt.local:
-				it = forge.NewFake(testDispatchLabels).AsLocalShaped()
-			case tt.forgejo:
-				it = forge.NewFake(testDispatchLabels).AsForgejoShaped()
-			default:
-				it = forge.NewFake(testDispatchLabels).AsNoLandingRecorder()
+			var tracker backend.Descriptor
+			if tt.tracker != "" {
+				tracker = row(t, tt.tracker)
 			}
-			got := ensureClosesReference(tt.body, tt.num, it)
+			got := ensureClosesReference(tt.body, num, tracker)
 			if got != tt.want {
-				t.Errorf("ensureClosesReference(%q, %q) = %q, want %q", tt.body, tt.num, got, tt.want)
+				t.Errorf("ensureClosesReference(%q, %q) = %q, want %q", tt.body, num, got, tt.want)
+			}
+		})
+	}
+}
+
+// The gate is a fact of the tracker row alone: the Code Forge row never
+// changes it, so a github tracker with a forgejo forge still injects (#6880).
+func TestMediation_Open_ClosesGateFollowsTrackerRow(t *testing.T) {
+	tests := []struct {
+		tracker, forge string
+		wantCloses     bool
+	}{
+		{"github", "github", true},
+		{"github", "forgejo", true},
+		{"github", "local", true},
+		{"github", "git", true},
+		{"forgejo", "forgejo", false},
+		{"forgejo", "local", false},
+		{"forgejo", "github", false},
+		{"jira", "github", false},
+		{"jira", "forgejo", false},
+		{"local", "github", false},
+		{"local", "forgejo", false},
+		{"local", "local", false},
+		{"jira", "git", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.tracker+"+"+tt.forge, func(t *testing.T) {
+			fc := forge.NewFake(testDispatchLabels)
+			fc.CreateDraftPRURL = "https://example.test/pull/1919"
+			it := fc.AsNoLandingRecorder()
+			caps := forge.ResolveCapabilities(fc.AsGithubReadOnly(), it, row(t, tt.forge), row(t, tt.tracker))
+			m := NewMediation(caps, it, func(num string) string { return "/outbox/" + num }, "main")
+			result := dispatch.Result{PRIntent: "feat: add widget\n\nAdds a widget.", PRIntentFound: true}
+			if _, _, _, err := m.Open("1919", "agent/issue-1919", result, FallbackNone); err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			if len(fc.CreateDraftPRCalls) != 1 {
+				t.Fatalf("CreateDraftPRCalls = %+v, want 1", fc.CreateDraftPRCalls)
+			}
+			body := fc.CreateDraftPRCalls[0].Body
+			if got := strings.Contains(body, "Closes #1919"); got != tt.wantCloses {
+				t.Errorf("body %q: Closes injected = %v, want %v", body, got, tt.wantCloses)
 			}
 		})
 	}

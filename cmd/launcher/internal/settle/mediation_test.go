@@ -17,7 +17,7 @@ import (
 // and a tracker without LandingRecorder.
 func newTestMediation(fc *forge.Fake) *Mediation {
 	noLanding := fc.AsNoLandingRecorder()
-	caps := forge.ResolveCapabilities(fc.AsGithubReadOnly(), noLanding, backend.Descriptor{}, backend.Descriptor{})
+	caps := forge.ResolveCapabilities(fc.AsGithubReadOnly(), noLanding, backend.Descriptor{}, githubTrackerRow)
 	return NewMediation(caps, noLanding, func(num string) string { return "/outbox/" + num }, "main")
 }
 
