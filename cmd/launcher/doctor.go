@@ -228,6 +228,10 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.
 	// bootstrap, which must stay quiet.
 	if c.BoxForgeAndIssueAccess == "read-write" {
 		rep.Success("BOX_FORGE_AND_ISSUE_ACCESS=read-write — read-only token gate is a no-op")
+		if msg, ok := boxAccessDefaultNotice(c); ok {
+			// Passthrough, not an Advisory: a quiet doctor would hide the notice.
+			rep.Passthrough("%s\n", msg)
+		}
 	}
 	// Kinds are picked by the same Enablement row and backend.RelaysOutbox
 	// predicate the daemon's gateKinds uses, so doctor cannot disagree with

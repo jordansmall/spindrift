@@ -861,6 +861,9 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return refuse(err)
 	}
 	args.Kinds = gatedKinds
+	if msg := boxAccessNotice(doc, args.Kinds); msg != "" {
+		fmt.Fprintln(stderr, msg)
+	}
 	doctorFlags, err := doctorPreflightFlags(args.Kinds, args.ExplicitSelector)
 	if err != nil {
 		return refuse(err)
@@ -1027,7 +1030,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		nixSystem:     nixSystem,
 		// Snapshotted once here, not per-child: nothing between mainRun's
 		// entry and this line calls os.Setenv, so it's still a startup capture.
-		env:         append(os.Environ(), driverEnv...),
+		env:         append(append(os.Environ(), driverEnv...), inputdoc.DefaultNoticeDecidedEnv+"=1"),
 		knobs:       stripped,
 		doctorFlags: doctorFlags,
 		demand:      demand,
@@ -1327,3 +1330,21 @@ func resumeFromHandoff(raw string) (*resumed, error) {
 // errInPlaceUnsupported is returned wherever the exec path is unavailable;
 // restart_other.go's stubs and mainRun's refusal share it.
 var errInPlaceUnsupported = errors.New("in-place restart is supported only on linux amd64/arm64")
+
+// boxAccessNotice is the document's deprecation notice for a defaulted
+// BOX_FORGE_AND_ISSUE_ACCESS (issue #6757), or "" when there is none or every
+// gated kind runs a forced read-only Box and so never sees the default. The
+// daemon has no box-access flag, so the document entry alone says "defaulted".
+// An in-place restart inherits the decided marker and stays quiet.
+func boxAccessNotice(doc *inputdoc.Document, kinds []daemon.Kind) string {
+	if doc == nil || inputdoc.DefaultNoticeDecided() {
+		return ""
+	}
+	msg := doc.DeprecatedDefaults["BOX_FORGE_AND_ISSUE_ACCESS"]
+	for _, k := range kinds {
+		if d, ok := dispatchkind.ByVerb(string(k)); ok && !d.ReadOnlyBox {
+			return msg
+		}
+	}
+	return ""
+}
