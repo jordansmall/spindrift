@@ -36,6 +36,11 @@ let
     coreModule
     githubConnector.flakeModule
   ];
+  jiraConnector = (import ../../connectors/jira).lib.connector { inherit core; };
+  withJira = fixtures.connectorConsumerVia [
+    coreModule
+    jiraConnector.flakeModule
+  ];
   drivers = import ../../lib/drivers { inherit (pkgs) lib; };
   withTemplate = fixtures.connectorConsumerVia [
     coreModule
@@ -142,6 +147,16 @@ in
       routes == import ../../connectors/github/routes.nix
     ) "the github Connector's row must carry the Route table in connectors/github/routes.nix";
     pkgs.runCommand "connectors-github-contributes-routes" { } "touch $out";
+
+  connectors-jira-contributes-routes =
+    let
+      routes = (configOf withJira).connectors.jira.routes or null;
+    in
+    assert assertMsg (routes != null) "the jira Connector must register spindrift.connectors.jira";
+    assert assertMsg (
+      routes == import ../../connectors/jira/routes.nix
+    ) "the jira Connector's row must carry the Route table in connectors/jira/routes.nix";
+    pkgs.runCommand "connectors-jira-contributes-routes" { } "touch $out";
 
   connectors-fixture-knob-in-env-schema =
     assert assertMsg (

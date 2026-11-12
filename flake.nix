@@ -41,6 +41,7 @@
       connectorDirs = [
         ./connectors/claude
         ./connectors/github
+        ./connectors/jira
       ];
       connectorModules = map (
         dir: ((import dir).lib.connector { inherit core; }).flakeModule

@@ -3,5 +3,9 @@
     { "method": "GET", "host": "api.github.com", "path": "/repos/{repo}/issues" },
     { "method": "GET", "host": "api.github.com", "path": "/repos/{repo}/pulls" },
     { "method": "POST", "host": "api.github.com", "path": "/graphql" }
+  ],
+  "jira": [
+    { "method": "GET", "host": "{base}", "path": "/rest/api/2/search" },
+    { "method": "GET", "host": "{base}", "path": "/rest/api/2/issue" }
   ]
 }

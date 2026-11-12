@@ -20,6 +20,7 @@ let
 
   dogfoodShadow = import ./dogfood-shadow.nix;
   githubConnector = (import ../connectors/github).lib.connector { core = import ../core; };
+  jiraConnector = (import ../connectors/jira).lib.connector { core = import ../core; };
   dogfoodDriverRows = {
     claude =
       ((import ../connectors/claude).lib.connector { core = import ../core; }).driverRow
@@ -117,6 +118,18 @@ let
       acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).github;
       shadow = true;
       shadowEvery = 10;
+    };
+    # Registered but not shadowed: nothing reads jira through the Connector
+    # until the cut-over (issue #6753), so nix/dogfood-shadow.nix omits it.
+    backendRows.jira = {
+      module = p: "${jiraConnector.package p}/jira.wasm";
+      inherit (jiraConnector) routes;
+      credentialEnv = "SPINDRIFT_JIRA_CONNECTOR_TOKEN";
+      credentialKnob = "jiraConnectorToken";
+      credentialScheme = "basic";
+      identityEnv = "SPINDRIFT_JIRA_CONNECTOR_EMAIL";
+      baseEnv = "JIRA_BASE_URL";
+      acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).jira;
     };
   };
 
