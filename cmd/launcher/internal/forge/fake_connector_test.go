@@ -80,7 +80,7 @@ var (
 		"FlagAbandoned", "EnqueueAutoMerge", "MarkReady", "MarkDraft", "CommentPR",
 		"Merge", "Rebase", "PostIssue", "RelayBundle", "CreateDraftPR")
 	// fakeConfig answer from configuration, with no state worth a fetch.
-	fakeConfig = setOf("ProbeInterval", "StateLabels", "IsGithubTracker", "WalksAllPages",
+	fakeConfig = setOf("ProbeInterval", "StateLabels", "WalksAllPages",
 		"On", "Fire") // On and Fire are fakehook.Hooks: test scripting, not state
 )
 

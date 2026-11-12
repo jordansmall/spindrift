@@ -38,13 +38,7 @@ var _ IssueLabeler = issueFilerTracker{}
 // jira adapters, which implement neither (ADR 0029).
 type noLandingIssueTracker struct{ IssueTracker }
 
-// IsGithubTracker implements the optional GithubTracker marker (issue
-// #2341) so this shape still reads as github-shaped to the settle tests
-// built on AsNoLandingRecorder, which expect an injected Closes #N
-// reference. *Fake has no such method to promote.
-func (noLandingIssueTracker) IsGithubTracker() bool { return true }
-
-// AsNoLandingRecorder returns f in the github adapter's shape: GithubTracker, but no LandingRecorder or IssueCloser.
+// AsNoLandingRecorder returns f in the github adapter's shape: no LandingRecorder or IssueCloser.
 func (f *Fake) AsNoLandingRecorder() IssueTracker { return noLandingIssueTracker{f} }
 
 // localShapedIssueTracker matches the real local adapter (issue #1892):
@@ -113,8 +107,7 @@ var _ IssueCloser = localIssueFilerTracker{}
 
 // forgejoShapedIssueTracker adds MergeCloser while hiding RecordLanding and
 // CloseIssue by embedding the IssueTracker interface value rather than
-// *Fake. It omits GithubTracker because forgejo issue numbers are foreign to
-// GitHub's Closes-keyword namespace (issue #2341).
+// *Fake.
 type forgejoShapedIssueTracker struct {
 	IssueTracker
 	f *Fake
@@ -133,7 +126,7 @@ func (fs forgejoShapedIssueTracker) AddLabels(num string, labels []string) error
 	return fs.f.AddLabels(num, labels)
 }
 
-// AsForgejoShaped returns f in the forgejo adapter's shape: MergeCloser and IssueLabeler, but no LandingRecorder, IssueCloser, or GithubTracker.
+// AsForgejoShaped returns f in the forgejo adapter's shape: MergeCloser and IssueLabeler, but no LandingRecorder or IssueCloser.
 func (f *Fake) AsForgejoShaped() IssueTracker {
 	return forgejoShapedIssueTracker{IssueTracker: f, f: f}
 }

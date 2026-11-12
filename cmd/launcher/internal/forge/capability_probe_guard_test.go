@@ -282,7 +282,7 @@ func TestCapabilityProbeDetector(t *testing.T) {
 		"assertion":       {src: pre + "func f(cf forge.CodeForge) { _, _ = cf.(forge.PRForge) }\n", want: 1},
 		"bare-assertion":  {src: "package forge\nfunc f(cf CodeForge) { _, _ = cf.(PRForge) }\n", want: 1},
 		"type-switch":     {src: pre + "func f(cf forge.CodeForge) {\n\tswitch cf.(type) {\n\tcase forge.LandingRef:\n\t}\n}\n", want: 1},
-		"tracker-as":      {src: pre + "func f(it forge.IssueTracker) { _, _ = forge.As[forge.GithubTracker](it) }\n"},
+		"tracker-as":      {src: pre + "func f(it forge.IssueTracker) { _, _ = forge.As[forge.MergeCloser](it) }\n"},
 		"other-assertion": {src: pre + "func f(x any) { _, _ = x.(forge.Issue) }\n"},
 		"plain-switch":    {src: pre + "func f(x any) {\n\tswitch x.(type) {\n\tcase string:\n\t}\n}\n"},
 

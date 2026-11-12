@@ -88,9 +88,6 @@ func TestResolveCapabilities_IssueTrackerShapes(t *testing.T) {
 		if c.IssueCloser != nil {
 			t.Errorf("IssueCloser = %v, want nil", c.IssueCloser)
 		}
-		if c.GithubTracker == nil {
-			t.Error("GithubTracker = nil, want non-nil for no-landing-recorder (github-shaped) tracker")
-		}
 	})
 
 	t.Run("local-shaped", func(t *testing.T) {
