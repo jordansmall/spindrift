@@ -264,3 +264,15 @@ func TestSlugIssueRefTrackerIsLocalOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestClosesRefTrackerIsGithubOnly(t *testing.T) {
+	for _, name := range []string{"github", "forgejo", "jira", "local", "git"} {
+		d, ok := ByName(name)
+		if !ok {
+			t.Fatalf("ByName(%q) not registered", name)
+		}
+		if want := name == "github"; d.ClosesRefTracker != want {
+			t.Errorf("%s.ClosesRefTracker = %v, want %v", name, d.ClosesRefTracker, want)
+		}
+	}
+}

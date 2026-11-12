@@ -83,6 +83,14 @@ type Descriptor struct {
 	// only when LOCAL_ISSUE_REFERENCE opts in, instead of `Closes #N`.
 	SlugIssueRefTracker bool
 
+	// ClosesRefTracker is true for a tracker whose issue numbers a github PR
+	// body's `Closes #N` auto-closes ("github"), so settle's host-mediated
+	// draft PR appends one (issues #2341, #6880). The fact ignores the Code
+	// Forge: a github tracker under a forgejo forge still appends one. Jira
+	// keys and local slugs are not bare numbers, and forgejo closes through
+	// MergeCloser instead.
+	ClosesRefTracker bool
+
 	// RelayCapable is true for a CODE_FORGE backend with every host-mediation
 	// seam needed under BOX_FORGE_AND_ISSUE_ACCESS=read-only: bundle relay
 	// always, plus draft-PR-create and commit-subjects when the backend has a
