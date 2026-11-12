@@ -35,8 +35,12 @@ pkgs.runCommand "connector-wasm-fixtures" { nativeBuildInputs = [ pkgs.go ]; } '
   build probe.wasm ./probe
   build call.wasm ./call
   build seamtest-driver.wasm ./seamtest-driver
+  build network.wasm ./network
   cp ${driverWasm}/driver.wasm $out/driver.wasm
   for mode in trap loop memory oversize malformed invalid; do
     build hostile-$mode.wasm -ldflags=-X=main.mode=$mode ./hostile
+  done
+  for mode in host method path malformed; do
+    build network-$mode.wasm -ldflags=-X=main.mode=$mode ./network
   done
 ''
