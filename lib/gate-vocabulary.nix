@@ -76,10 +76,13 @@ let
     ISSUE_TRACKER_GITHUB = "the tracker reads through the GitHub axis";
     ISSUE_TRACKER_FORGEJO = "the tracker reads through the Forgejo axis";
     ISSUE_TRACKER_REACHABLE = "the Box has an in-Box client for the tracker";
-    ISSUE_TRACKER_LINKS_REACHABLE = "the Box can fetch parent and linked issues itself";
-    ISSUE_TRACKER_LINKS_READABLE = "the tracker is not unwritable, so linked issues are readable";
-    ISSUE_TRACKER_LINKS_UNREADABLE = "the tracker is unwritable, so linked issue text is injected host-side";
-    ISSUE_TRACKER_GITHUB_LINKS_READABLE = "the GitHub axis with readable linked issues";
+    ISSUE_TRACKER_LINKS_REACHABLE = "the Signal socket issue read covers the tracker, and the scout step renders";
+    ISSUE_TRACKER_LINKS_READABLE = "linked issues are readable: via the Signal socket issue read, or local's host-injected text";
+    ISSUE_TRACKER_LINKS_UNREADABLE = "a non-local tracker under the log carrier, which has no socket to read a linked issue through";
+    ISSUE_TRACKER_GITHUB_LINKS_READABLE = "the GitHub axis with the Signal socket issue read";
+    ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE = "the GitHub axis without the Signal socket issue read";
+    ISSUE_TRACKER_FORGEJO_LINKS_READABLE = "the Forgejo axis with the Signal socket issue read";
+    ISSUE_TRACKER_FORGEJO_LINKS_UNREADABLE = "the Forgejo axis without the Signal socket issue read";
     ISSUE_TRACKER_WRITABLE = "the Box can write the tracker directly";
     ISSUE_TRACKER_UNWRITABLE = "the tracker takes no in-Box writes (jira)";
     ISSUE_TRACKER_GITHUB_WRITABLE = "the GitHub axis and the tracker is writable";

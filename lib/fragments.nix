@@ -600,21 +600,21 @@ let
     # The issue-read step (issues #1691, #1963, ADR 0032): the subject issue's
     # body and comments are injected host-side (issues #3445, #3469,
     # promptassembly.issueTextSection), so these fragments cover only a
-    # *linked* issue. Each folds the trailing `git log` bullet in: the loop
-    # adds a blank line per fragment, so a mid-list `${VAR}` would split it.
+    # *linked* issue, read through the Signal socket's issue verb (issue #6894).
+    # Each folds the trailing `git log` bullet in: the loop adds a blank line
+    # per fragment, so a mid-list `${VAR}` would split it.
     {
       axis = "tracker";
       shared = true;
       gate = "ISSUE_TRACKER_LINKS_READABLE";
-      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       fragment = "issue-read.md";
       var = "ISSUE_READ_STEP";
     }
-    # A tracker with no in-Box client (jira) cannot have its linked issues read
-    # from the Box (issue #6344), so each issue-read slot has an unreadable arm
-    # sharing its var (exclusive gates, so one binds), which keeps an override
-    # naming only the slot var rendering the step on jira. The deprecated GITHUB
-    # rows below get the same sibling arm, since jira rides github's arm.
+    # Under the log carrier there is no socket to read a linked issue through
+    # (local aside, which has its own folder fragment), so each issue-read slot
+    # has an unreadable arm sharing its var (exclusive gates, so one binds).
+    # That keeps an override naming only the slot var rendering the step. The
+    # deprecated per-backend rows below get the same sibling arm.
     {
       gate = "ISSUE_TRACKER_LINKS_UNREADABLE";
       inverseOf = "ISSUE_TRACKER_LINKS_READABLE";
@@ -629,12 +629,11 @@ let
     {
       gate = "ISSUE_TRACKER_GITHUB_LINKS_READABLE";
       fragment = "issue-read.md";
-      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       legacyFragment = "issue-read-github.md";
       var = "ISSUE_READ_GITHUB_STEP";
     }
     {
-      gate = "ISSUE_TRACKER_LINKS_UNREADABLE";
+      gate = "ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE";
       fragment = "issue-read-unreadable.md";
       var = "ISSUE_READ_GITHUB_STEP";
     }
@@ -645,19 +644,22 @@ let
       var = "ISSUE_READ_LOCAL_STEP";
     }
     {
-      gate = "ISSUE_TRACKER_FORGEJO";
+      gate = "ISSUE_TRACKER_FORGEJO_LINKS_READABLE";
       fragment = "issue-read.md";
-      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       legacyFragment = "issue-read-forgejo.md";
       var = "ISSUE_READ_FORGEJO_STEP";
     }
-    # The research issue-read step (issue #5647): one shared body naming the
-    # tracker; local's differs in more than its name and has its own file.
+    {
+      gate = "ISSUE_TRACKER_FORGEJO_LINKS_UNREADABLE";
+      fragment = "issue-read-unreadable.md";
+      var = "ISSUE_READ_FORGEJO_STEP";
+    }
+    # The research issue-read step (issue #5647): one shared body; local's
+    # differs in more than its name and has its own file.
     {
       axis = "tracker";
       shared = true;
       gate = "ISSUE_TRACKER_LINKS_READABLE";
-      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       fragment = "research-issue-read.md";
       var = "RESEARCH_ISSUE_READ_STEP";
     }
@@ -670,12 +672,11 @@ let
     {
       gate = "ISSUE_TRACKER_GITHUB_LINKS_READABLE";
       fragment = "research-issue-read.md";
-      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       legacyFragment = "research-issue-read-github.md";
       var = "RESEARCH_ISSUE_READ_GITHUB_STEP";
     }
     {
-      gate = "ISSUE_TRACKER_LINKS_UNREADABLE";
+      gate = "ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE";
       fragment = "research-issue-read-unreadable.md";
       var = "RESEARCH_ISSUE_READ_GITHUB_STEP";
     }
@@ -686,10 +687,14 @@ let
       var = "RESEARCH_ISSUE_READ_LOCAL_STEP";
     }
     {
-      gate = "ISSUE_TRACKER_FORGEJO";
+      gate = "ISSUE_TRACKER_FORGEJO_LINKS_READABLE";
       fragment = "research-issue-read.md";
-      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       legacyFragment = "research-issue-read-forgejo.md";
+      var = "RESEARCH_ISSUE_READ_FORGEJO_STEP";
+    }
+    {
+      gate = "ISSUE_TRACKER_FORGEJO_LINKS_UNREADABLE";
+      fragment = "research-issue-read-unreadable.md";
       var = "RESEARCH_ISSUE_READ_FORGEJO_STEP";
     }
     # The scout's issue-read step (issue #5647): every tracker the Box can
@@ -698,7 +703,6 @@ let
       axis = "tracker";
       shared = true;
       gate = "ISSUE_TRACKER_LINKS_REACHABLE";
-      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       fragment = "scout-issue-read.md";
       var = "SCOUT_ISSUE_READ_STEP";
     }
@@ -712,20 +716,23 @@ let
     {
       gate = "ISSUE_TRACKER_GITHUB_LINKS_READABLE";
       fragment = "scout-issue-read.md";
-      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       legacyFragment = "scout-issue-read-github.md";
       var = "SCOUT_ISSUE_READ_GITHUB_STEP";
     }
     {
-      gate = "ISSUE_TRACKER_LINKS_UNREADABLE";
+      gate = "ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE";
       fragment = "scout-issue-read-unreadable.md";
       var = "SCOUT_ISSUE_READ_GITHUB_STEP";
     }
     {
-      gate = "ISSUE_TRACKER_FORGEJO";
+      gate = "ISSUE_TRACKER_FORGEJO_LINKS_READABLE";
       fragment = "scout-issue-read.md";
-      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       legacyFragment = "scout-issue-read-forgejo.md";
+      var = "SCOUT_ISSUE_READ_FORGEJO_STEP";
+    }
+    {
+      gate = "ISSUE_TRACKER_FORGEJO_LINKS_UNREADABLE";
+      fragment = "scout-issue-read-unreadable.md";
       var = "SCOUT_ISSUE_READ_FORGEJO_STEP";
     }
     # The local content-plane write step (issue #1692, ADR 0032): a local Box

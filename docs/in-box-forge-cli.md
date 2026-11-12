@@ -33,9 +33,6 @@ row's gate in `lib/fragments.nix` (and the gate's definition in
 
 | intent | fragment(s) | rendered by | access modes | r/w | planned replacement |
 | ------ | ----------- | ----------- | ------------ | --- | ------------------- |
-| read a parent or linked issue (the subject issue's text is already injected host-side) | `issue-read.md` | work, implement pass | both | read | Signal-socket verb |
-| read a parent or linked issue, plus prior research comments in the snapshot | `research-issue-read.md` | research | both | read | Signal-socket verb |
-| read a parent or linked issue | `scout-issue-read.md` | work, scout subagent of the implement pass, when provisioned | both | read | Signal-socket verb |
 | search existing issues before filing a finding | `github/filer-dedup.md`, `forgejo/filer-dedup.md` | Filer pass (work, research, butler) | both | read | Signal-socket verb |
 | read the failing CI run's log in the fix pass | `github/fix-ci-read.md`, `forgejo/fix-ci-read.md` | work, fix pass | both | read | host injection |
 | open the draft pull request | `github/open-pr-create.md`, `forgejo/open-pr-create.md` | work, implement pass | `read-write` | write | removed along with `read-write` mode |
@@ -57,14 +54,9 @@ every issue-side write row carries the tracker one.
 
 ## Reachable under `read-only`
 
-A `read-only` Box still reaches three in-box read uses, none gated on access
+A `read-only` Box still reaches two in-box read uses, none gated on access
 mode:
 
-- Parent and linked issue reads: `issue-read.md`, `research-issue-read.md`,
-  `scout-issue-read.md`. Gated on whether the tracker has an in-Box client,
-  not on access. A tracker without one (jira) renders the `*-unreadable`
-  sibling instead, and `local` has no in-Box tracker at all, so neither
-  instructs a CLI.
 - CI failure logs in the fix pass: `github/fix-ci-read.md`,
   `forgejo/fix-ci-read.md`. Gated on the Code Forge backend alone.
 - The Filer's dedup searches: `github/filer-dedup.md`,
@@ -78,9 +70,15 @@ drives to empty. The planned replacements:
   failing checks' names and summaries as `CI_FAILURE_SUMMARY` (the
   `ci-failure.md` fragment); it will inject the failing job's log detail too,
   and `fix-ci-read` is then removed.
-- Parent and linked issue reads become a Signal-socket verb the host answers
-  with the issue text, as it already does for the subject issue.
 - The Filer's dedup becomes a Signal-socket search verb. Host-side dedup over
   relayed intents is not a substitute: it matches by exact site key and
   overlapping line range only, never by subject, which is why the dedup search
   exists.
+
+Parent and linked issue reads have already moved: `issue-read.md`,
+`research-issue-read.md` and `scout-issue-read.md` name `driver-exec signal
+issue <ref>` (issue #6894), a Signal-socket verb the host answers from the
+Dispatch's tracker, and no forge CLI. They render for every tracker with a
+host-side issue read (github, forgejo, jira) under the `socket` carrier; under
+the `log` carrier, which has no socket, the `*-unreadable` sibling renders
+instead, and `local` keeps its own folder fragment.

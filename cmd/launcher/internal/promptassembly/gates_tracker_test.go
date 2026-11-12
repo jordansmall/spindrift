@@ -777,33 +777,40 @@ func TestGatesIssueTrackerReachable(t *testing.T) {
 	}
 }
 
-// TestGatesIssueTrackerLinksReadable pins the inverse pair that selects the
-// issue-read wording: only a tracker with no in-Box client (jira) cannot have
-// its parent/linked issues read from the Box (issue #6344).
+// TestGatesIssueTrackerLinksReadable pins the gates that select the
+// issue-read wording: the Signal socket's issue read covers every reachable
+// tracker (github, forgejo, jira) and exists only under the socket carrier;
+// local keeps its own folder fragment in both carriers (issue #6894).
 func TestGatesIssueTrackerLinksReadable(t *testing.T) {
 	for _, tc := range []struct {
-		tracker, read string
-		readable      bool
-		githubArm     bool
+		tracker, read, carrier string
+		verb                   bool // the socket verb covers this tracker and carrier
+		readable               bool
 	}{
-		{"", "GITHUB", true, true},
-		{"github", "GITHUB", true, true},
-		{"forgejo", "FORGEJO", true, false},
-		{"local", "LOCAL", true, false},
-		{"jira", "GITHUB", false, false},
+		{"", "GITHUB", "socket", true, true},
+		{"github", "GITHUB", "socket", true, true},
+		{"forgejo", "FORGEJO", "socket", true, true},
+		{"jira", "GITHUB", "socket", true, true},
+		{"local", "LOCAL", "socket", false, true},
+		{"github", "GITHUB", "log", false, false},
+		{"forgejo", "FORGEJO", "log", false, false},
+		{"jira", "GITHUB", "log", false, false},
+		{"local", "LOCAL", "log", false, true},
+		{"github", "GITHUB", "", false, false},
 	} {
-		g := Gates(Env{IssueTracker: tc.tracker, TrackerAxisRead: tc.read})
-		if got := g["ISSUE_TRACKER_LINKS_READABLE"]; got != tc.readable {
-			t.Errorf("Gates(IssueTracker=%q)[ISSUE_TRACKER_LINKS_READABLE] = %v, want %v", tc.tracker, got, tc.readable)
-		}
-		if got := g["ISSUE_TRACKER_GITHUB_LINKS_READABLE"]; got != tc.githubArm {
-			t.Errorf("Gates(IssueTracker=%q)[ISSUE_TRACKER_GITHUB_LINKS_READABLE] = %v, want %v", tc.tracker, got, tc.githubArm)
-		}
-		if got := g["ISSUE_TRACKER_LINKS_REACHABLE"]; got != (tc.readable && tc.tracker != "local") {
-			t.Errorf("Gates(IssueTracker=%q)[ISSUE_TRACKER_LINKS_REACHABLE] = %v, want %v", tc.tracker, got, tc.readable && tc.tracker != "local")
-		}
-		if got := g["ISSUE_TRACKER_LINKS_UNREADABLE"]; got != !tc.readable {
-			t.Errorf("Gates(IssueTracker=%q)[ISSUE_TRACKER_LINKS_UNREADABLE] = %v, want %v", tc.tracker, got, !tc.readable)
+		g := Gates(Env{IssueTracker: tc.tracker, TrackerAxisRead: tc.read, SignalCarrier: tc.carrier})
+		for gate, want := range map[string]bool{
+			"ISSUE_TRACKER_LINKS_READABLE":           tc.readable,
+			"ISSUE_TRACKER_LINKS_UNREADABLE":         !tc.readable,
+			"ISSUE_TRACKER_LINKS_REACHABLE":          tc.verb,
+			"ISSUE_TRACKER_GITHUB_LINKS_READABLE":    tc.read == "GITHUB" && tc.verb,
+			"ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE":  tc.read == "GITHUB" && !tc.verb,
+			"ISSUE_TRACKER_FORGEJO_LINKS_READABLE":   tc.read == "FORGEJO" && tc.verb,
+			"ISSUE_TRACKER_FORGEJO_LINKS_UNREADABLE": tc.read == "FORGEJO" && !tc.verb,
+		} {
+			if got := g[gate]; got != want {
+				t.Errorf("Gates(IssueTracker=%q, SignalCarrier=%q)[%s] = %v, want %v", tc.tracker, tc.carrier, gate, got, want)
+			}
 		}
 	}
 }

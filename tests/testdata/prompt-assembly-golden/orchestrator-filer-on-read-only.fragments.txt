@@ -18,7 +18,7 @@ if-blocked-pr-outbox.md
 if-blocked-push-outbox.md
 if-blocked-triage-outbox.md
 issue-blocked-comment-relay.md
-issue-read.md
+issue-read-unreadable.md
 land-git-stop-read-only.md
 land-pass-order-finish-filer.md
 land-pass-order-gate-default-filer.md
@@ -31,7 +31,7 @@ pr-body-closes.md
 review-loop-orchestrator-filer.md
 review-loop-orchestrator.md
 scout-delegate.md
-scout-issue-read.md
+scout-issue-read-unreadable.md
 skill-preamble.md
 tdd-baked.md
 worker-scout-brief.md

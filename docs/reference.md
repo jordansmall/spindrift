@@ -5262,8 +5262,8 @@ such block and are experimental, so you select them by editing
   `gh issue comment`, and a run whose relayed verdict is missing fails to
   `agent-research-failed` instead of applying a bare verdict label (issue
   #5245). The backend row's `inBoxUnwritableTracker` bit drives both
-  halves, and also swaps the work, research and scout issue-read steps
-  to say linked Jira issues cannot be read from the Box (issue #6344).
+  halves. Linked Jira issues are read through `driver-exec signal issue`
+  like any other tracker's (issue #6894).
 
   A blocked work run's progress comment is host-posted on Jira for the
   same reason: under `read-write` the IF BLOCKED step tells the agent to
@@ -7032,6 +7032,10 @@ issue rejected (foreign_ref): ...`), so the verb is a canonical read, not
 a `gh` passthrough. It takes exactly one positional ref and no flags
 (anything else is a usage failure reported on `/issue/usage`), and works
 over both the unix and the TCP+secret carriers.
+The work, research and scout issue-read fragments instruct it for every
+tracker with a host-side issue read (github, forgejo, jira) under the
+`socket` carrier; under `log` there is no socket, so they render their
+`*-unreadable` sibling, and `local` keeps its host-injected linked issues.
 
 The prompts instruct the verb under `socket` (issue #3726): prompt assembly
 picks each of the three signal fragments — the research verdict comment, the
