@@ -278,3 +278,25 @@ neither touches the invariant ADR 0032 protected:
   into the operator's checkout as a local branch (issue #1730); the operator
   still publishes the team PR manually. A `finalize` verb (push + PR) and a
   hard-air-gap local-model driver are noted futures.
+
+## Amendment (issue #6897): the read-only mirror mount covers github and forgejo
+
+The shared-host-filesystem exception above is no longer `local`'s alone. Under
+`BOX_FORGE_AND_ISSUE_ACCESS=read-only` (effective access, so a `ReadOnlyBox`
+kind such as the butler counts), a `github` or `forgejo` Pass gets the same
+read-only `/repo` mount: before each Pass the Launcher fetches the Target repo
+host-side with its own credential, through the clone the bundle relay already
+uses, into a fresh `.spindrift/mirror/pass-*/repo.git`, and removes it when
+that Pass's Box exits. The Box clones `/repo` and needs no forge credential for
+the clone, so a private repo works. A failed fetch fails the Pass before the
+Box starts. The branch still returns as a bundle through the outbox, unchanged.
+The mount stays read-only; `read-write` mounts none and keeps its direct in-box
+clone until that path is removed. ADR 0073 recorded this widening as a
+consequence; this is the first step of it.
+
+The push-only `git` Code Forge backend implements no `forge.MirrorSeeder`,
+which only the `github` and `forgejo` adapters do, over the credentialed clone
+their bundle relay already has. A read-only `git` Box instead clones the one
+mirror its Strategy re-seeds before each Pass (issue #6898, above). Either way
+the Launcher forwards `BOX_HOST_SEEDED_MIRROR=1` exactly when it mounts
+`/repo`, and the Box keys its clone on that alone.

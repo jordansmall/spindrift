@@ -576,3 +576,17 @@ Interfaces that exist only for the local forge, the integration tip
 and branch protection on the Accumulation repo, never enter the protocol: they
 need the Accumulation repo, which only a Built-in backend owns, so the `local`
 forge stays native (decisions 5 and 7).
+
+## Amendment (issue #6897): the read-only mirror is on github and forgejo
+
+The consequence that the Box's mounts gain a read-only mirror on every forge
+has happened for `github` and `forgejo` under
+`BOX_FORGE_AND_ISSUE_ACCESS=read-only`. The Launcher fetches the Target repo
+host-side before each Pass, mounts it at `/repo`, and forwards
+`BOX_HOST_SEEDED_MIRROR=1`; the Box clones it without a forge credential,
+keeping a credential-free `forge` remote so `gh` and `fj` resolve the repo; it
+is also the push default, so `gh` finds the current branch's PR. ADR 0033's
+amendment for this issue records the widened exception. Two parts of the
+code plane are still to come: `read-write` keeps its direct in-box clone until
+it is removed, and the read-only Box still holds `GH_TOKEN` for its in-box
+reads, so removing the Box token is separate work (spec #6757).
