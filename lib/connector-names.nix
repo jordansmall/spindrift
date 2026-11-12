@@ -2,8 +2,8 @@
 # (ADR 0073). Pure so nix/checks/connectors.nix can pin the text:
 # builtins.tryEval cannot see thrown messages. `defs` is the module system's
 # definition list; each carries the `file` of the module that wrote it. A def
-# that sets nothing but `shadow` is a Consumer's switch on a registered row
-# (issue #6797), not a second registration.
+# that sets nothing but `shadow` and its rate `shadowEvery` is a Consumer's
+# switch on a registered row (issues #6797, #6810), not a second registration.
 rec {
   duplicateError =
     name: defs:
@@ -28,7 +28,11 @@ rec {
       merge =
         loc: defs:
         let
-          switchOnly = d: builtins.isAttrs d.value && builtins.attrNames d.value == [ "shadow" ];
+          switchOnly =
+            d:
+            builtins.isAttrs d.value
+            && builtins.attrNames d.value != [ ]
+            && builtins.all (n: n == "shadow" || n == "shadowEvery") (builtins.attrNames d.value);
           err = duplicateError (builtins.elemAt loc (builtins.length loc - 1)) (
             builtins.filter (d: !(switchOnly d)) defs
           );
