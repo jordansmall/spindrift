@@ -9,12 +9,21 @@
 package driver
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 
 	"spindrift.dev/sdk/connector"
 	"spindrift.dev/sdk/event"
 )
+
+// StreamFilter sits between a Driver's stdout and its Pass-log tee. Flush
+// writes out anything the filter still holds, and is safe to call repeatedly.
+type StreamFilter interface {
+	io.Writer
+	Flush() error
+}
 
 // Decoder turns one Pass log line into the canonical events it carries.
 type Decoder func(line string) []event.Event
@@ -64,6 +73,11 @@ type Strategy struct {
 	// ResolveExit is optional and may rewrite the CLI's exit code. It takes
 	// the Pass log's content, not a path: a Connector has no filesystem.
 	ResolveExit func(log []byte, exitCode int) (int, error)
+
+	// NewStreamFilter is optional. It wraps the writer the Pass log is teed
+	// to with a filter over the CLI's stdout, called once per stream; nil is
+	// the identity.
+	NewStreamFilter func(w io.Writer) StreamFilter
 
 	// Classify tunes how the host scans a failed Pass log for a Reason.
 	Classify ClassifyOptions
@@ -304,6 +318,72 @@ func handlers(s Strategy) ([]string, map[string]method) {
 			return struct {
 				ExitCode int `json:"exitCode"`
 			}{code}, nil
+		}
+	}
+	if s.NewStreamFilter != nil {
+		caps = append(caps, "driver.streamFilter")
+		type streamFilter struct {
+			f   StreamFilter
+			out *bytes.Buffer
+		}
+		filters := map[uint32]*streamFilter{}
+		var nextFilter uint32
+		// drain returns the bytes the filter wrote since the last call as a
+		// non-nil slice, so an empty result encodes as "" rather than null.
+		drain := func(sf *streamFilter) any {
+			data := append([]byte{}, sf.out.Bytes()...)
+			sf.out.Reset()
+			return struct {
+				Data []byte `json:"data"`
+			}{data}
+		}
+		type filterParams struct {
+			Filter uint32 `json:"filter"`
+		}
+		// run decodes params into p, whose id field names the filter, then
+		// drains what step writes through it. The reset first keeps a failed
+		// call's partial output from leading the next.
+		run := func(params json.RawMessage, p any, id *uint32, step func(*streamFilter) error) (any, error) {
+			if err := unmarshal(params, p); err != nil {
+				return nil, err
+			}
+			sf, ok := filters[*id]
+			if !ok {
+				return nil, fmt.Errorf("unknown filter %d", *id)
+			}
+			sf.out.Reset()
+			if err := step(sf); err != nil {
+				return nil, err
+			}
+			return drain(sf), nil
+		}
+		m["driver.newStreamFilter"] = func(json.RawMessage) (any, error) {
+			nextFilter++
+			out := &bytes.Buffer{}
+			filters[nextFilter] = &streamFilter{f: s.NewStreamFilter(out), out: out}
+			return filterParams{nextFilter}, nil
+		}
+		m["driver.streamWrite"] = func(params json.RawMessage) (any, error) {
+			var p struct {
+				filterParams
+				Data []byte `json:"data"`
+			}
+			return run(params, &p, &p.Filter, func(sf *streamFilter) error {
+				_, err := sf.f.Write(p.Data)
+				return err
+			})
+		}
+		m["driver.streamFlush"] = func(params json.RawMessage) (any, error) {
+			var p filterParams
+			return run(params, &p, &p.Filter, func(sf *streamFilter) error { return sf.f.Flush() })
+		}
+		m["driver.freeStreamFilter"] = func(params json.RawMessage) (any, error) {
+			var p filterParams
+			if err := unmarshal(params, &p); err != nil {
+				return nil, err
+			}
+			delete(filters, p.Filter)
+			return nil, nil
 		}
 	}
 	if h := s.Heartbeat; h.Phase != nil {

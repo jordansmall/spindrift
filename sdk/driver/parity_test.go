@@ -241,3 +241,38 @@ func TestHelperParity(t *testing.T) {
 		})
 	}
 }
+
+// ifaceSource returns the normalised source of the interface type name
+// declared in dir's non-test files, "" when there is none.
+func ifaceSource(t *testing.T, dir, name string) string {
+	t.Helper()
+	fset, files := parseDir(t, dir)
+	for _, f := range files {
+		for _, d := range f.Decls {
+			gd, ok := d.(*ast.GenDecl)
+			if !ok || gd.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				ts := spec.(*ast.TypeSpec)
+				if _, ok := ts.Type.(*ast.InterfaceType); ok && ts.Name.Name == name {
+					return render(t, fset, ts.Type)
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// TestStreamFilterParity fails when the SDK's StreamFilter drifts from
+// driverkit's: the host wraps a Connector-backed filter in the driverkit
+// interface, so a method one side lacks breaks that adapter.
+func TestStreamFilterParity(t *testing.T) {
+	core := ifaceSource(t, coreDir, "StreamFilter")
+	if core == "" {
+		t.Fatal("core has no interface StreamFilter")
+	}
+	if sdk := ifaceSource(t, ".", "StreamFilter"); sdk != core {
+		t.Errorf("SDK StreamFilter differs from core's:\nSDK:  %s\ncore: %s", sdk, core)
+	}
+}
