@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -72,5 +73,68 @@ func TestRunDecodesEachPassLogOnce(t *testing.T) {
 	}
 	if got := decodes.Load(); got != int64(passes) {
 		t.Errorf("decodes = %d, want %d (one decode per pass)", got, passes)
+	}
+}
+
+// runDeltaFixture runs the six-call delta-review loop with resultTextFile set
+// and returns the file's path, the decode count, and what each fake driver-exec
+// call saw of the file when it started.
+func runDeltaFixture(t *testing.T, deltaReviewStep string) (f deltaReviewLoopFixture, resultFile string, decodes *atomic.Int64, seen []string) {
+	t.Helper()
+	chdirToFreshGitRepo(t)
+	decodes = countDecodes(t)
+	f = newDeltaReviewLoopFixture(t)
+	resultFile = filepath.Join(f.dir, "result-text")
+	seenLog := filepath.Join(f.dir, "seen.log")
+	probe := `if [ -e "` + resultFile + `" ]; then echo present >> "` + seenLog + `"; else echo absent >> "` + seenLog + `"; fi
+`
+	writeFakeDriverExec(t, f.dir, f.callLog, probe+deltaReviewFakeDriverBody(f.callLog, "none", "", "", deltaReviewStep))
+	t.Setenv("PATH", f.dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := f.config(10)
+	cfg.resultTextFile = resultFile
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	b, err := os.ReadFile(seenLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f, resultFile, decodes, strings.Fields(string(b))
+}
+
+// The result-text file holds the final Pass's result text, written from the
+// Pass's one decode, and is gone while a Pass is running so it never outlives
+// the log content it was decoded from.
+func TestResultTextFileHoldsLastPassFromItsOneDecode(t *testing.T) {
+	deltaApprove := teeStreamJSONStep(streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"))
+	f, resultFile, decodes, seen := runDeltaFixture(t, deltaApprove)
+
+	got, err := os.ReadFile(resultFile)
+	if err != nil {
+		t.Fatalf("result-text file: %v", err)
+	}
+	if want := "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"; !strings.Contains(string(got), want) {
+		t.Errorf("result-text file = %q, want it to carry %q", got, want)
+	}
+	if n := int64(f.callCount(t)); decodes.Load() != n {
+		t.Errorf("decodes = %d, want %d (writing the file must not decode again)", decodes.Load(), n)
+	}
+	for i, s := range seen[:5] {
+		if s != "absent" {
+			t.Errorf("pass %d saw the result-text file %s at start, want absent", i+1, s)
+		}
+	}
+}
+
+// A delta-review BLOCK appends a corrective result to the land pass's log
+// after it was decoded, so the file no longer matches and must go.
+func TestResultTextFileRemovedWhenDeltaBlockRewritesTheLog(t *testing.T) {
+	block := teeStreamJSONStep(streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"))
+	_, resultFile, _, _ := runDeltaFixture(t, block)
+
+	if _, err := os.Stat(resultFile); !os.IsNotExist(err) {
+		t.Errorf("result-text file after a delta BLOCK: stat err = %v, want not-exist", err)
 	}
 }

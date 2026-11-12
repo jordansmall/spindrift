@@ -51,6 +51,10 @@ type config struct {
 	// usageBaselineFile persists each session's last cumulative result figures
 	// across passes and Boxes (issue #6706). Empty disables it.
 	usageBaselineFile string
+	// resultTextFile receives the decoded result text of the last Pass log
+	// decoded at logPath, so the Box need not decode that log again. Empty
+	// disables it.
+	resultTextFile string
 	// scoutBriefPath and passSummaryPath reach the run-state artifact as
 	// paths, never inlined content.
 	scoutBriefPath  string
@@ -258,7 +262,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		recordDecisions(cfg.decisionsPath, &state, decisionsPreSnapshot)
 		// driver-exec truncates cfg.logPath for each pass (issue #626), so on
 		// return the file holds exactly this pass's raw stream.
-		passLog := decodePassLog(cfg.logPath, cfg.driver)
+		passLog := cfg.decodeAndPublishPass()
 		verdict, hasOutcome := scanPassLog(passLog, passmachine.KindLegacy)
 		if cfg.advisoryReviewer {
 			// Discarded here, not filtered by role in passmachine.Scan: the
@@ -420,7 +424,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// implement/fix pass emits is not state.LastVerdict's source. The
 		// outcome's status lets the machine tell a premature ready from a
 		// settled one (issue #5972).
-		passLog := decodePassLog(cfg.logPath, cfg.driver)
+		passLog := cfg.decodeAndPublishPass()
 		passOut, hasOutcome := scanPassOutcome(passLog)
 		// Folded in before the next driver-exec invocation truncates
 		// cfg.logPath (issue #2694). One scan feeds both values below.
@@ -518,7 +522,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		}
 		recordReviewedCommitAnchor(&state)
 
-		reviewLog := decodePassLog(cfg.logPath, cfg.driver)
+		reviewLog := cfg.decodeAndPublishPass()
 		reviewVerdict, findings := scanReviewLog(reviewLog)
 		// Folded in before the next invocation truncates cfg.logPath (issue
 		// #2694), same as the block above. One scan feeds both values below.
@@ -634,6 +638,8 @@ func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *lan
 	deltaLog.Close()
 	defer os.Remove(deltaLog.Name())
 	deltaCfg.logPath = deltaLog.Name()
+	// The file keeps describing the land pass's log, not the review's.
+	deltaCfg.resultTextFile = ""
 
 	// The delta pass's exit code is dropped on purpose: the run's rc stays the
 	// land pass's, because box skips relay on a non-zero rc and a failing
@@ -680,6 +686,11 @@ func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *lan
 		blocked := landOutcome
 		blocked.Status = outcome.StatusBlocked
 		blocked.Note = deltaReviewBlockNote(deltaFindings)
+		// The appended event changes the log's result text after the decode
+		// the file came from, so the Box must decode the log itself.
+		if err := cfg.clearResultText(); err != nil {
+			return err
+		}
 		return appendResultEvent(cfg.logPath, cfg.driver, blocked.Line())
 	}
 
@@ -820,6 +831,55 @@ type decodedPass struct {
 
 // decodeLog is the tests' seam for counting whole-log decodes.
 var decodeLog = driver.Driver.Decode
+
+// decodeAndPublishPass decodes the Pass log at cfg.logPath and publishes its
+// result text to cfg.resultTextFile from that same decode. The file is a
+// failure-soft extra: when it cannot be written the Box decodes the log itself.
+func (cfg config) decodeAndPublishPass() decodedPass {
+	p := decodePassLog(cfg.logPath, cfg.driver)
+	if cfg.resultTextFile != "" && p.ok {
+		if err := writeFileAtomic(cfg.resultTextFile, []byte(p.log.ResultText())); err != nil {
+			fmt.Fprintln(os.Stderr, "orchestrator: write result text:", err)
+		}
+	}
+	return p
+}
+
+// writeFileAtomic renames a temp file into place so a kill mid-write cannot
+// leave truncated text the Box would accept as the result.
+func writeFileAtomic(path string, data []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp*")
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(f.Name(), 0o644)
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), path)
+	}
+	if err != nil {
+		_ = os.Remove(f.Name())
+	}
+	return err
+}
+
+// clearResultText removes the published result text, which a Pass log about to
+// change no longer describes. Only absence is tolerated: a stale file would be
+// taken by the Box over the log's real result.
+func (cfg config) clearResultText() error {
+	if cfg.resultTextFile == "" {
+		return nil
+	}
+	if err := os.Remove(cfg.resultTextFile); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("clear result text: %w", err)
+	}
+	return nil
+}
 
 // decodePassLog decodes the pass log at logPath through the named Driver, once
 // per pass and before the next pass's driver-exec truncates it (issue #2694),
@@ -1079,6 +1139,11 @@ var renderedEventPrefix = regexp.MustCompile(`^\[\S+\] `)
 func invokeDriverExec(cfg config, stdout io.Writer) (int, error) {
 	cmd, err := buildDriverExecCmd(cfg)
 	if err != nil {
+		return 0, err
+	}
+	// driver-exec truncates the log, so a result text decoded from the last
+	// Pass no longer describes it. Absent means "decode the log yourself".
+	if err := cfg.clearResultText(); err != nil {
 		return 0, err
 	}
 	cmd.Stdout = stdout

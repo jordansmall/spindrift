@@ -109,6 +109,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		logPath:           *logPath,
 		stateFile:         *stateFile,
 		usageBaselineFile: *usageBaselineFile,
+		resultTextFile:    resultTextPathFor(*logPath),
 		scoutBriefPath:    *scoutBriefPath,
 		passSummaryPath:   *passSummaryPath,
 		dispositionsPath:  *dispositionsPath,
@@ -130,4 +131,15 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 
 func main() {
 	os.Exit(mainRun(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// resultTextPathFor is where the last decoded Pass log's result text is
+// published (issue #6851): the Box reads the same <stream-log>.result path
+// (box resultTextPath). It is a convention, not a flag, because the
+// Box-to-orchestrator argv is pinned by the driver-invocation goldens.
+func resultTextPathFor(logPath string) string {
+	if logPath == "" {
+		return ""
+	}
+	return logPath + ".result"
 }

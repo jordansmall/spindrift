@@ -121,7 +121,21 @@ func (r *boxRun) passSummary(driverName, streamLog string) string {
 	return strings.TrimSpace(outcome.StripResultText(text))
 }
 
+// resultTextPath is where the orchestrator publishes the result text it
+// decoded from streamLog. The orchestrator derives the same path from its
+// --log-path (resultTextPathFor).
+func resultTextPath(streamLog string) string { return streamLog + ".result" }
+
+// resultText is the Driver's result text for the Pass that wrote streamLog.
+// The orchestrator already decoded that log, so its published text is taken
+// and consumed; when it never got that far, the log is decoded here.
 func resultText(driverName, streamLog string) (string, error) {
+	path := resultTextPath(streamLog)
+	b, err := os.ReadFile(path)
+	_ = os.Remove(path)
+	if err == nil {
+		return string(b), nil
+	}
 	d, err := driver.New(driverName)
 	if err != nil {
 		return "", err
