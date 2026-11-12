@@ -192,6 +192,9 @@ func TestCloneLocalClonesMountSkipsGhAndTrustsBothPaths(t *testing.T) {
 	if got := f.originURL(t); got != f.origin {
 		t.Errorf("origin url = %q, want %q", got, f.origin)
 	}
+	if got := testutil.GitOutput(t, f.work, "remote"); got != "origin" {
+		t.Errorf("remotes = %q, want only origin (local has no forge URL)", got)
+	}
 	if got := f.ghCalls(t); got != "" {
 		t.Errorf("gh was invoked: %q", got)
 	}
@@ -366,5 +369,50 @@ func TestCloneFromMirrorIgnoresForgeCloneURLAndSkipsGh(t *testing.T) {
 	}
 	if got := f.ghCalls(t); got != "" {
 		t.Errorf("gh was invoked: %q", got)
+	}
+}
+
+func TestCloneHostSeededMirrorNeedsNoForgeCredential(t *testing.T) {
+	for _, forge := range []string{"github", "forgejo"} {
+		t.Run(forge, func(t *testing.T) {
+			f := newFixture(t)
+			t.Setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+			// GHCredentialHelper stays on for github and no FORGEJO_TOKEN is
+			// set: the mirror must skip both, and a clone that reached the
+			// forge URL would have nothing redirecting it to origin.
+			f.cfg.CodeForge = forge
+			f.cfg.HostSeededMirror = true
+			f.cfg.RepoMountDir = f.origin
+			var out bytes.Buffer
+			if err := boxclone.Clone(f.cfg, &out, &out); err != nil {
+				t.Fatalf("Clone: %v\n%s", err, out.String())
+			}
+			if got := f.originURL(t); got != f.origin {
+				t.Errorf("origin url = %q, want the mirror %q", got, f.origin)
+			}
+			if got := f.ghCalls(t); got != "" {
+				t.Errorf("gh was invoked: %q", got)
+			}
+			safe := testutil.GitOutput(t, filepath.Dir(f.work), "config", "--file", f.globalCfg, "--get-all", "safe.directory")
+			for _, want := range []string{f.origin, f.work} {
+				if !strings.Contains(safe, want) {
+					t.Errorf("safe.directory %q missing %q", safe, want)
+				}
+			}
+			testutil.GitRun(t, f.work, "rev-parse", "--verify", "refs/remotes/origin/main")
+			want := map[string]string{"github": "https://github.com/o/r", "forgejo": "https://forgejo.invalid/o/r"}[forge]
+			if got := testutil.GitOutput(t, f.work, "remote", "get-url", "forge"); got != want {
+				t.Errorf("forge remote url = %q, want the credential-free %q", got, want)
+			}
+			if got := testutil.GitOutput(t, f.work, "config", "--bool", "remote.forge.skipFetchAll"); got != "true" {
+				t.Errorf("remote.forge.skipFetchAll = %q, want true", got)
+			}
+			// A branch tracking origin, as branch recovery leaves it: gh finds its PR
+			// through the push remote, which must still be forge.
+			testutil.GitRun(t, f.work, "checkout", "-b", "feat", "origin/main")
+			if got := testutil.GitOutput(t, f.work, "for-each-ref", "--format=%(push:remotename)", "refs/heads/feat"); got != "forge" {
+				t.Errorf("push remote of a branch tracking origin = %q, want forge", got)
+			}
+		})
 	}
 }

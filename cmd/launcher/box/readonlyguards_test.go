@@ -147,7 +147,7 @@ func TestReadonlyGuards_OutboxRelay_ShimAndHooksAndPath(t *testing.T) {
 		t.Error("fj shim installed without fj on PATH")
 	}
 	decoy := g.pushurl()
-	if filepath.Base(decoy) != "readonly-push-guard.git" || !strings.HasPrefix(decoy, g.dir) {
+	if filepath.Base(decoy) != readonlyDecoyName || !strings.HasPrefix(decoy, g.dir) {
 		t.Fatalf("pushurl = %q, want a decoy under the temp dir", decoy)
 	}
 	for _, hook := range []string{
@@ -446,20 +446,27 @@ func TestShebangInterpreter(t *testing.T) {
 }
 
 func TestReadonlyGuards_VerificationCatchesARetargetedPushurl(t *testing.T) {
-	g := newGuardsFixture(t)
-	g.env.OutboxRelayCapable = true
-	install := g.d.Guards.Install
-	g.d.Guards.Install = func(rows []promptassembly.ForbiddenMarkerRow, cfg readonlyguards.Config, out io.Writer) (readonlyguards.Result, error) {
-		res, err := install(rows, cfg, out)
-		g.git(g.in.WorkDir, "config", "remote.origin.pushurl", "https://forge.example/owner/repo.git")
-		return res, err
-	}
-	_, err := run(g.in, g.env, g.d)
-	if err == nil || !strings.Contains(err.Error(), "not the decoy") {
-		t.Fatalf("run() error = %v, want the retargeted pushurl reported", err)
-	}
-	if len(g.calls) != 0 {
-		t.Fatal("Driver ran with the pushurl guard defeated")
+	for _, remote := range []string{"origin", "forge"} {
+		t.Run(remote, func(t *testing.T) {
+			g := newGuardsFixture(t)
+			g.env.OutboxRelayCapable = true
+			if remote != "origin" {
+				g.git(g.in.WorkDir, "remote", "add", remote, "https://forge.example/owner/repo.git")
+			}
+			install := g.d.Guards.Install
+			g.d.Guards.Install = func(rows []promptassembly.ForbiddenMarkerRow, cfg readonlyguards.Config, out io.Writer) (readonlyguards.Result, error) {
+				res, err := install(rows, cfg, out)
+				g.git(g.in.WorkDir, "config", "remote."+remote+".pushurl", "https://forge.example/owner/repo.git")
+				return res, err
+			}
+			_, err := run(g.in, g.env, g.d)
+			if err == nil || !strings.Contains(err.Error(), "not the decoy") || !strings.Contains(err.Error(), "remote "+remote+"'s") {
+				t.Fatalf("run() error = %v, want the retargeted %s pushurl reported", err, remote)
+			}
+			if len(g.calls) != 0 {
+				t.Fatal("Driver ran with the pushurl guard defeated")
+			}
+		})
 	}
 }
 
@@ -473,13 +480,20 @@ func TestReadonlyGuards_VerificationCatchesARetargetedPushurl(t *testing.T) {
 func TestReadonlyGuards_RealGitPushBlockedLocally(t *testing.T) {
 	remote := filepath.Join(t.TempDir(), "remote.git")
 	for _, tc := range []struct {
-		name string
-		args []string
+		name        string
+		args        []string
+		forgeRemote bool
 	}{
-		{"new ref", []string{"push", "origin", "HEAD:some-branch"}},
-		{"new ref, --no-verify", []string{"push", "origin", "HEAD:some-branch", "--no-verify"}},
-		{"checked-out branch, --no-verify", []string{"push", "--no-verify", "-u", "origin", "agent/issue-42"}},
-		{"unresolvable origin", []string{"push", "origin", "HEAD:some-branch"}},
+		{"new ref", []string{"push", "origin", "HEAD:some-branch"}, false},
+		{"new ref, --no-verify", []string{"push", "origin", "HEAD:some-branch", "--no-verify"}, false},
+		{"checked-out branch, --no-verify", []string{"push", "--no-verify", "-u", "origin", "agent/issue-42"}, false},
+		{"unresolvable origin", []string{"push", "origin", "HEAD:some-branch"}, false},
+		// A mirror clone's remote.pushDefault names forge, so a push that names
+		// no remote goes there, not to origin.
+		{"forge, bare push", []string{"push"}, true},
+		{"forge, bare push, --no-verify", []string{"push", "--no-verify"}, true},
+		{"forge, bare push -u", []string{"push", "-u"}, true},
+		{"forge, named push", []string{"push", "forge", "HEAD:some-branch"}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g := newGuardsFixture(t)
@@ -502,6 +516,10 @@ func TestReadonlyGuards_RealGitPushBlockedLocally(t *testing.T) {
 				origin = "https://readonly-push-hook-test.invalid/owner/repo.git"
 			}
 			g.git(work, "remote", "add", "origin", origin)
+			if tc.forgeRemote {
+				g.git(work, "remote", "add", "forge", "https://readonly-push-hook-test.invalid/owner/repo.git")
+				g.git(work, "config", "remote.pushDefault", "forge")
+			}
 
 			g.run()
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"reflect"
@@ -148,18 +149,25 @@ func TestCloneConfig_RunsGhCredentialHelperOnlyWhereTheForgeWantsIt(t *testing.T
 	}
 }
 
-func TestCloneConfig_HostSeededMirrorFollowsTheForgeRow(t *testing.T) {
-	for forge, want := range map[string]bool{"github": false, "forgejo": false, "local": true} {
-		t.Run("forge="+forge, func(t *testing.T) {
-			f := newFixture(t)
-			f.env.CodeForge = forge
-			f.run()
-			if len(f.cloneCfgs) != 1 {
-				t.Fatalf("clone configs = %+v, want one", f.cloneCfgs)
-			}
-			if got := f.cloneCfgs[0].HostSeededMirror; got != want {
-				t.Errorf("HostSeededMirror = %v, want %v", got, want)
-			}
-		})
+// BOX_HOST_SEEDED_MIRROR is the launcher's word that it mounted a mirror at
+// RepoMountDir; the forge row no longer decides it.
+func TestCloneConfig_HostSeededMirrorFollowsTheEnv(t *testing.T) {
+	for _, forge := range []string{"github", "forgejo", "local"} {
+		for _, set := range []bool{true, false} {
+			t.Run(fmt.Sprintf("forge=%s/set=%v", forge, set), func(t *testing.T) {
+				f := newFixture(t)
+				f.env.CodeForge = forge
+				if set {
+					f.knobs["BOX_HOST_SEEDED_MIRROR"] = "1"
+				}
+				f.run()
+				if len(f.cloneCfgs) != 1 {
+					t.Fatalf("clone configs = %+v, want one", f.cloneCfgs)
+				}
+				if got := f.cloneCfgs[0].HostSeededMirror; got != set {
+					t.Errorf("HostSeededMirror = %v, want %v", got, set)
+				}
+			})
+		}
 	}
 }

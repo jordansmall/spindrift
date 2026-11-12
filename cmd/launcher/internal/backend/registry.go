@@ -42,10 +42,11 @@ type Descriptor struct {
 	// host seeds fresh before each Pass and mounts at /repo, rather than from
 	// its network remote, whenever the Box hands its branch back as a bundle
 	// (ClonesFromMirror): always for local (ADR 0033), under a read-only Box
-	// for git (issue #6898), whose Box holds no credential for the remote. The
-	// Box trusts the mount as a git safe.directory. github and forgejo do not
-	// set it: they get a per-Pass host-fetched mirror under read-only, via
-	// forge.MirrorSeeder (issue #6897).
+	// for git (issue #6898), whose Box holds no credential for the remote. Read
+	// only host-side, to pick the Strategy's seeding hook; the Box keys on
+	// BOX_HOST_SEEDED_MIRROR, which dispatch sets for any forge with a seed
+	// hook. github and forgejo do not set it: they get a per-Pass host-fetched
+	// mirror under read-only, via forge.MirrorSeeder (issue #6897).
 	HostSeededMirror bool
 
 	// OutboxRelayCapable is true for a backend whose CODE_FORGE has pull
@@ -61,7 +62,9 @@ type Descriptor struct {
 	// `gh auth setup-git`, so gh's credential helper authenticates the clone and
 	// fetch. git keeps it because CODE_FORGE_REMOTE_URL may point at github.com;
 	// forgejo clones with a FORGEJO_TOKEN URL (ADR 0038) and has no GH_TOKEN,
-	// local clones a filesystem mount (ADR 0033). Read by the Box's cloneConfig
+	// local clones a filesystem mount (ADR 0033), as does any Box the launcher
+	// mounted a host-seeded mirror into (BOX_HOST_SEEDED_MIRROR), which skips
+	// the helper whatever the forge. Read by the Box's cloneConfig
 	// (cmd/launcher/box/clone.go).
 	InBoxGHCredentialHelper bool
 
