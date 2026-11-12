@@ -59,6 +59,9 @@ type Policy struct {
 	// PatchPaths is BUTLER_PATCH_PATHS, the host allow/deny glob list a patch
 	// candidate's diff paths must clear (ADR 0057).
 	PatchPaths string
+	// BranchPrefix is BRANCH_PREFIX, the input to forge.AgentBranchName for a
+	// patch PR's head branch.
+	BranchPrefix string
 	// PatchMaxFiles is BUTLER_PATCH_MAX_FILES, the host limit on how many
 	// files a patch candidate's diff may touch.
 	PatchMaxFiles int
@@ -90,7 +93,6 @@ const DefaultPatchPaths = "docs/**,*.md,!docs/adr/**,!**/CLAUDE.md,!**/CONTEXT.m
 // is on. A Runner built with a nil PatchForge never reaches decide's patch
 // branch at all -- see WithPatchForge.
 type PatchForge interface {
-	AgentBranch(num string) string
 	forge.BranchPusher
 	forge.DraftPRCreator
 	forge.IssueLabeler
@@ -407,7 +409,7 @@ func (r *Runner) run(c chore.Chore, src scopeSource, tip ledger.Tip, claimedAt t
 	}
 	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: p.scope, PromotionClasses: promotionClasses, ClassList: c.ClassList, PatchClasses: patchClasses, MaxFindings: room.Findings, Input: p.input, ClaimTime: p.claimTime})
 	defer d.Close()
-	step := newSettleRun(r.it, r.backend, choreName, claim, p.scope, r.now, room, promo, patchRung{tree: r.tree, forge: r.patchForge, base: r.policy.Branch, gate: r.patchGate}, kindLabels{finding: r.policy.FindingLabel, patch: r.policy.PatchLabel}, r.out)
+	step := newSettleRun(r.it, r.backend, choreName, claim, p.scope, r.now, room, promo, patchRung{tree: r.tree, forge: r.patchForge, branchPrefix: r.policy.BranchPrefix, base: r.policy.Branch, gate: r.patchGate}, kindLabels{finding: r.policy.FindingLabel, patch: r.policy.PatchLabel}, r.out)
 	step.progress = r.progress
 	if p.arm != nil {
 		if err := p.arm(d, step); err != nil {

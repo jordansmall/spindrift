@@ -70,7 +70,7 @@ func (x *queueRecoverFixture) addFailed(t *testing.T, num, report string) {
 		t.Fatal(err)
 	}
 	log := filepath.Join(dispatch.HostLogDirFor(x.dir), "issue-"+num+".log")
-	if err := os.WriteFile(log, []byte("SPINDRIFT_OUTCOME: issue="+num+" landing="+x.fc.AgentBranch(num)+" status="+report+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(log, []byte("SPINDRIFT_OUTCOME: issue="+num+" landing="+forge.AgentBranchName(x.c.BranchPrefix, num)+" status="+report+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -170,7 +170,7 @@ func TestRecoverQueueOne_IneligibleIssuesAreLeftUntouched(t *testing.T) {
 		{"no self-report", func(t *testing.T, x *queueRecoverFixture) { x.addFailed(t, "42", "") }},
 		{"open PR", func(t *testing.T, x *queueRecoverFixture) {
 			x.addFailed(t, "42", "ready")
-			x.fc.SetPR(x.fc.AgentBranch("42"), forge.PR{URL: testReconcilePR})
+			x.fc.SetPR(forge.AgentBranchName(x.c.BranchPrefix, "42"), forge.PR{URL: testReconcilePR})
 		}},
 		{"no bundle", func(t *testing.T, x *queueRecoverFixture) {
 			x.addFailed(t, "42", "ready")

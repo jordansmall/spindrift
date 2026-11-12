@@ -34,7 +34,7 @@ func TestRecoverByNumber_GreenMergesAndCompletes(t *testing.T) {
 	fc.BranchPrefix = c.BranchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
-	branch := fc.AgentBranch("42")
+	branch := forge.AgentBranchName(c.BranchPrefix, "42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 	// The leading PENDING proves this run's own checks registered. Issue
 	// #1652's adopted-path gate does not trust an immediate SUCCESS alone.
@@ -69,7 +69,7 @@ func TestRecoverByNumber_RetriesTransientPRLookupError(t *testing.T) {
 	fc.BranchPrefix = c.BranchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
-	branch := fc.AgentBranch("42")
+	branch := forge.AgentBranchName(c.BranchPrefix, "42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 	fc.OpenPRForBranchErrs = []error{errors.New("HTTP 502: Bad Gateway"), nil}
@@ -97,7 +97,7 @@ func TestRecoverByNumber_RetryMaxOneStillRetriesOnce(t *testing.T) {
 	fc.BranchPrefix = c.BranchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
-	branch := fc.AgentBranch("42")
+	branch := forge.AgentBranchName(c.BranchPrefix, "42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 	fc.OpenPRForBranchErrs = []error{errors.New("HTTP 502: Bad Gateway"), nil}
@@ -123,7 +123,7 @@ func TestRecoverByNumber_AdoptedPRAlwaysCallsMarkReadyThenMergesAndCompletes(t *
 	fc.BranchPrefix = c.BranchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
-	branch := fc.AgentBranch("42")
+	branch := forge.AgentBranchName(c.BranchPrefix, "42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 	// The leading PENDING proves this run's own checks registered. Issue
 	// #1652's adopted-path gate does not trust an immediate SUCCESS alone.
@@ -160,7 +160,7 @@ func TestRecoverByNumber_RelayedBranchAdoptedMergesAndCompletes(t *testing.T) {
 	fc.BranchPrefix = c.BranchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
-	branch := fc.AgentBranch("42")
+	branch := forge.AgentBranchName(c.BranchPrefix, "42")
 	// No PR is registered for the branch, so forge.ResolveOpenPR reports
 	// res.Found=false and the adopt arm fires.
 	fc.CreateDraftPRURL = testReconcilePR
@@ -324,7 +324,7 @@ func TestRecoverByNumber_RedFollowsSelfHeal(t *testing.T) {
 	fc.BranchPrefix = c.BranchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
-	branch := fc.AgentBranch("42")
+	branch := forge.AgentBranchName(c.BranchPrefix, "42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateFailure})
 
@@ -354,7 +354,7 @@ func TestRecoverByNumber_ReportLines(t *testing.T) {
 		fc.BranchPrefix = c.BranchPrefix
 		fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 		if withPR {
-			fc.SetPR(fc.AgentBranch("42"), forge.PR{URL: testReconcilePR})
+			fc.SetPR(forge.AgentBranchName(c.BranchPrefix, "42"), forge.PR{URL: testReconcilePR})
 			fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 		}
 		dir := tempLogDir(t)

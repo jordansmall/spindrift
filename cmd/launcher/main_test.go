@@ -3477,11 +3477,13 @@ func TestDispatchConfig_DivergentDocumentArtifactsDoNotReachCapabilities(t *test
 // OpenPRForIssue to a closure that resolves the issue's agent branch and
 // reports whether it already has an open PR.
 func TestDispatchConfig_PRForge_WiresOpenPRForIssue(t *testing.T) {
+	c := minimalValidConfig()
+	c.BranchPrefix = "agent/issue-"
 	cf := forge.NewFake()
-	cf.SetPR(cf.AgentBranch("42"), forge.PR{URL: "https://github.com/o/r/pull/1"})
+	cf.SetPR(forge.AgentBranchName(c.BranchPrefix, "42"), forge.PR{URL: "https://github.com/o/r/pull/1"})
 
 	it := forge.NewFake()
-	cfg := dispatchConfig(minimalValidConfig(), "", it, testWired(it), cf, forge.Capabilities{})
+	cfg := dispatchConfig(c, "", it, testWired(it), cf, forge.Capabilities{})
 
 	if cfg.OpenPRForIssue == nil {
 		t.Fatal("want OpenPRForIssue set for a PRForge-implementing Code Forge")

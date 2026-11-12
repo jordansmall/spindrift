@@ -835,7 +835,7 @@ func dispatchConfig(c config, pwd string, it forge.IssueTracker, lw *localloop.W
 		// forge.ResolveOpenPR (issue #565) keeps a zero-exit rate-limited retry
 		// from re-running a box whose work already landed a PR.
 		OpenPRForIssue: func(number string) (bool, error) {
-			res, err := forge.ResolveOpenPR(cf, cf.AgentBranch(number))
+			res, err := forge.ResolveOpenPR(cf, forge.AgentBranchName(c.BranchPrefix, number))
 			return res.Found, err
 		},
 		IssueTextFor: func(number string) (string, error) {
@@ -1350,7 +1350,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 		return failBeforeLabelClaim(fmt.Errorf("issue %s: claim: %w", issueNum, claimErr))
 	}
 	defer release()
-	branch := cf.AgentBranch(iss.number)
+	branch := forge.AgentBranchName(c.BranchPrefix, iss.number)
 	backoff := retry.LinearBackoff{Unit: time.Duration(c.TransientBackoffSecs) * time.Second, Clock: retry.RealClock()}
 	// transientRetryMax counts retries everywhere else, so the first attempt
 	// sits on top of it: maxAttempts = retries + 1.

@@ -53,6 +53,7 @@ func testRunPolicy(every time.Duration, chores ...string) Policy {
 		PromotionLabel: "ready-for-agent",
 		FindingLabel:   testKindLabels.finding,
 		PatchLabel:     testKindLabels.patch,
+		BranchPrefix:   testBranchPrefix,
 	}
 }
 
@@ -1280,7 +1281,7 @@ func TestSweep_PatchRungOnWithRoomForwardsPatchClasses(t *testing.T) {
 	policy.Budgets.MaxPromotionsPerDay = 1
 	policy.Budgets.MaxPatchesPerDay = 1
 
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc}
+	pf := &fakePatchForge{IssueLabeler: fc}
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
 	if _, err := r.Sweep([]string{"bugs"}); err != nil {
@@ -1510,7 +1511,7 @@ type fakeDraftCall struct{ title, body, base, head string }
 // fakeDeleteCall records one DeleteBranch invocation.
 type fakeDeleteCall struct{ branch, base string }
 
-// fakePatchForge is PatchForge's test double: AgentBranch is prefix+num,
+// fakePatchForge is PatchForge's test double:
 // PushBranch/CreateDraftPR each record their call and answer a scripted
 // error, or -- on CreateDraftPR -- the scripted draftURL. AddLabels is
 // promoted straight through from the embedded forge.IssueLabeler (issue
@@ -1521,7 +1522,6 @@ type fakeDeleteCall struct{ branch, base string }
 // recovery (issue #4112): a lookup told apart from a real create failure,
 // and the branch cleanup that follows only when no PR was found.
 type fakePatchForge struct {
-	prefix string
 	forge.IssueLabeler
 
 	pushCalls []fakePushCall
@@ -1539,8 +1539,6 @@ type fakePatchForge struct {
 	deleteCalls []fakeDeleteCall
 	deleteErr   error
 }
-
-func (f *fakePatchForge) AgentBranch(num string) string { return f.prefix + num }
 
 func (f *fakePatchForge) PushBranch(srcDir, localRef, branch, base string) error {
 	f.pushCalls = append(f.pushCalls, fakePushCall{srcDir, localRef, branch, base})
@@ -1655,7 +1653,7 @@ func TestSweep_PatchedFindingLandsDraftPR(t *testing.T) {
 	fc.PostIssueURL = "https://example.com/issues/9400"
 	fc.SetIssue(forge.Issue{Number: "9400"})
 
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: "https://example.com/pull/1"}
+	pf := &fakePatchForge{IssueLabeler: fc, draftURL: "https://example.com/pull/1"}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -1679,7 +1677,7 @@ func TestSweep_PatchedFindingLandsDraftPR(t *testing.T) {
 		t.Errorf("PostIssue labels = %v, want no dispatch label", labels)
 	}
 
-	wantBranch := pf.prefix + "9400"
+	wantBranch := testBranchPrefix + "9400"
 	if len(pf.pushCalls) != 1 || pf.pushCalls[0].branch != wantBranch || pf.pushCalls[0].base != "main" {
 		t.Fatalf("pushCalls = %+v, want exactly one push to %q with base %q", pf.pushCalls, wantBranch, "main")
 	}
@@ -1727,7 +1725,7 @@ func TestSweep_PatchDiffNoLongerAppliesFallsBackToPromote(t *testing.T) {
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9401"
 
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: "https://example.com/pull/2"}
+	pf := &fakePatchForge{IssueLabeler: fc, draftURL: "https://example.com/pull/2"}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -1784,7 +1782,7 @@ func TestSweep_PatchDiffNoLongerAppliesFilesPlainWithPromotionOff(t *testing.T) 
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9402"
 
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc}
+	pf := &fakePatchForge{IssueLabeler: fc}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	policy := patchTestPolicy()
@@ -1832,7 +1830,7 @@ func TestSweep_PatchPRCreateFailsFallsBackToPromoteViaAddLabels(t *testing.T) {
 	fc.PostIssueURL = "https://example.com/issues/9403"
 	fc.SetIssue(forge.Issue{Number: "9403"})
 
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftErr: errors.New("boom")}
+	pf := &fakePatchForge{IssueLabeler: fc, draftErr: errors.New("boom")}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -1853,7 +1851,7 @@ func TestSweep_PatchPRCreateFailsFallsBackToPromoteViaAddLabels(t *testing.T) {
 		t.Errorf("PostIssue labels = %v, want agent-butler-patch (filed as a patch candidate before the PR failed)", labels)
 	}
 
-	wantBranch := pf.prefix + "9403"
+	wantBranch := testBranchPrefix + "9403"
 	if len(pf.openPRCalls) != 1 || pf.openPRCalls[0] != wantBranch {
 		t.Fatalf("openPRCalls = %v, want exactly one lookup of %q", pf.openPRCalls, wantBranch)
 	}
@@ -1896,7 +1894,7 @@ func TestSweep_PatchBudgetSpendsOncePerSweep(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "9500"})
 	fc.SetIssue(forge.Issue{Number: "9501"})
 
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: "https://example.com/pull/9"}
+	pf := &fakePatchForge{IssueLabeler: fc, draftURL: "https://example.com/pull/9"}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcherN("docs-drift", 2) }
 
 	policy := patchTestPolicy()
@@ -1942,7 +1940,7 @@ func TestSweep_PatchPushFailsFallsBackToPromote(t *testing.T) {
 	fc.PostIssueURL = "https://example.com/issues/9501"
 	fc.SetIssue(forge.Issue{Number: "9501"})
 
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, pushErr: errors.New("push boom")}
+	pf := &fakePatchForge{IssueLabeler: fc, pushErr: errors.New("push boom")}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -1995,7 +1993,7 @@ func TestSweep_PatchPRCreateErrorsButPRWasCreatedAdopts(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "9504"})
 
 	pf := &fakePatchForge{
-		prefix: "agent/issue-", IssueLabeler: fc, draftErr: errors.New("timeout"),
+		IssueLabeler: fc, draftErr: errors.New("timeout"),
 		openPR: forge.PR{URL: "https://example.com/pull/9504"}, openPRFound: true,
 	}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
@@ -2047,7 +2045,7 @@ func TestSweep_PatchPRLookupErrorsFallsBackToPromoteKeepsBranch(t *testing.T) {
 	fc.PostIssueURL = "https://example.com/issues/9505"
 	fc.SetIssue(forge.Issue{Number: "9505"})
 
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftErr: errors.New("boom"), openPRErr: errors.New("lookup boom")}
+	pf := &fakePatchForge{IssueLabeler: fc, draftErr: errors.New("boom"), openPRErr: errors.New("lookup boom")}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -2091,7 +2089,7 @@ func TestSweep_PatchBranchCleanupFailsStillFallsBackToPromote(t *testing.T) {
 	fc.PostIssueURL = "https://example.com/issues/9506"
 	fc.SetIssue(forge.Issue{Number: "9506"})
 
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftErr: errors.New("boom"), deleteErr: errors.New("delete boom")}
+	pf := &fakePatchForge{IssueLabeler: fc, draftErr: errors.New("boom"), deleteErr: errors.New("delete boom")}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -2136,7 +2134,7 @@ func TestSweep_PatchFallbackAddLabelsFailsCountsNoPromotion(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "9503"})
 	fc.AddLabelsErr = errors.New("label boom")
 
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftErr: errors.New("boom")}
+	pf := &fakePatchForge{IssueLabeler: fc, draftErr: errors.New("boom")}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -2181,7 +2179,7 @@ func TestSweep_PatchFallbackCommentFailsStillCountsPromotion(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "9504"})
 	fc.CommentErr = errors.New("comment boom")
 
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftErr: errors.New("boom")}
+	pf := &fakePatchForge{IssueLabeler: fc, draftErr: errors.New("boom")}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -2227,7 +2225,7 @@ func TestSweep_PatchLocalTrackerIssueURLLeavesFindingFiled(t *testing.T) {
 	fc := forge.NewFake()
 	fc.PostIssueURL = "local:fix-typo"
 
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc}
+	pf := &fakePatchForge{IssueLabeler: fc}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -2344,7 +2342,7 @@ func TestSweep_PatchGateCalledAfterDoneCommit(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "9500"})
 
 	prURL := "https://example.com/pull/500"
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: prURL}
+	pf := &fakePatchForge{IssueLabeler: fc, draftURL: prURL}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	var sawDoneCommit bool
@@ -2397,7 +2395,7 @@ func TestSweep_PatchGateRedLeavesLedgerAndLabelsUnchanged(t *testing.T) {
 
 	prURL := "https://example.com/pull/501"
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateFailure})
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: prURL}
+	pf := &fakePatchForge{IssueLabeler: fc, draftURL: prURL}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	real := newPatchGateSettle(fc, "immediate", "")
@@ -2439,7 +2437,7 @@ func TestSweep_PatchGateImmediateGreenMergesAndCompletes(t *testing.T) {
 
 	prURL := "https://example.com/pull/502"
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: prURL}
+	pf := &fakePatchForge{IssueLabeler: fc, draftURL: prURL}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	gate := newPatchGateSettle(fc, "immediate", "")
@@ -2490,7 +2488,7 @@ func TestSweep_PatchGateManualAndAutoLeaveIssueUntouched(t *testing.T) {
 
 			prURL := fmt.Sprintf("https://example.com/pull/951%d", i)
 			fc.SetCheckStates(prURL, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
-			pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: prURL}
+			pf := &fakePatchForge{IssueLabeler: fc, draftURL: prURL}
 			newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 			gate := newPatchGateSettle(fc, tc.mode, "")
@@ -2541,7 +2539,7 @@ func TestSweep_PatchGateMergeGuardHitLeavesUnmerged(t *testing.T) {
 	prURL := "https://example.com/pull/520"
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 	fc.SetPRFiles(prURL, []string{".github/workflows/ci.yml"})
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: prURL}
+	pf := &fakePatchForge{IssueLabeler: fc, draftURL: prURL}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	gate := newPatchGateSettle(fc, "immediate", ".github/**")
@@ -2607,7 +2605,7 @@ func TestSweep_PatchOutsidePatchPathsNeverReachesTree(t *testing.T) {
 	d := intentsDispatcher(
 		fmt.Sprintf(`{"title":"fix typo","body":"repro","dedupTerms":["CLAUDE.md:Foo"],"class":"docs-drift","concurrence":"agreed","patch":%q}`, claudeDiff),
 	)
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc}
+	pf := &fakePatchForge{IssueLabeler: fc}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return d }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -2671,7 +2669,7 @@ func TestSweep_PatchAppliesToBaseHeadButNotScannedFallsThrough(t *testing.T) {
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9700"
 
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc}
+	pf := &fakePatchForge{IssueLabeler: fc}
 	diff := patchDiffFor("a.md")
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher {
 		// Base moves while the Box "works": only now does a.md's content
@@ -2718,7 +2716,7 @@ func TestSweep_PatchAppliesToScannedAndMovedBaseHeadLands(t *testing.T) {
 	fc.PostIssueURL = "https://example.com/issues/9701"
 	fc.SetIssue(forge.Issue{Number: "9701"})
 
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: "https://example.com/pull/3"}
+	pf := &fakePatchForge{IssueLabeler: fc, draftURL: "https://example.com/pull/3"}
 	diff := patchDiffFor("a.md")
 	var movedHead string
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher {
@@ -2756,5 +2754,33 @@ func TestSweep_PatchAppliesToScannedAndMovedBaseHeadLands(t *testing.T) {
 	}
 	if string(got) != "new\n" {
 		t.Errorf("patched a.md = %q, want %q", string(got), "new\n")
+	}
+}
+
+// The patch head branch is core's forge.AgentBranchName over the Policy's
+// BranchPrefix, not a method the PatchForge supplies.
+func TestSweep_PatchHeadNamedFromPolicyBranchPrefix(t *testing.T) {
+	t.Parallel()
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9500"
+	fc.SetIssue(forge.Issue{Number: "9500"})
+
+	pf := &fakePatchForge{IssueLabeler: fc, draftURL: "https://example.com/pull/1"}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
+	policy := patchTestPolicy()
+	policy.BranchPrefix = "custom/prefix-"
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
+	if _, err := r.Sweep([]string{"bugs"}); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	want := forge.AgentBranchName("custom/prefix-", "9500")
+	if len(pf.draftCalls) != 1 || pf.draftCalls[0].head != want {
+		t.Fatalf("draftCalls = %+v, want one draft PR with head %q", pf.draftCalls, want)
 	}
 }

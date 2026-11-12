@@ -102,7 +102,7 @@ func requiredLabels(opts doctorOptions, rc readContext) []string {
 		labels = append(labels, butlerKind.FindingLabel)
 		// The patch rung never applies its label while the daily cap is 0 or
 		// while this tracker/forge pair cannot land patches at all.
-		if c.ButlerMaxPatchesPerDay > 0 && butlerPatchForge(rc.codeForge, rc.capabilities) != nil {
+		if c.ButlerMaxPatchesPerDay > 0 && butlerPatchForge(rc.capabilities) != nil {
 			labels = append(labels, butlerKind.PatchLabel)
 		}
 		// Read from the catalog, not chore.Load: Load errors on unrelated knob

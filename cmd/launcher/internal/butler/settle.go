@@ -92,8 +92,10 @@ type settleRun struct {
 type patchRung struct {
 	tree  Tree
 	forge PatchForge
-	base  string
-	gate  PatchGate
+	// branchPrefix is BRANCH_PREFIX, the input to forge.AgentBranchName.
+	branchPrefix string
+	base         string
+	gate         PatchGate
 }
 
 // kindLabels carries the butler kind row's finding and patch labels.
@@ -259,7 +261,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 								fmt.Fprintf(s.out, "    #%s  status=patch-failed  !! %v\n", num, err)
 								return
 							}
-							head := s.patch.forge.AgentBranch(issueNum)
+							head := forge.AgentBranchName(s.patch.branchPrefix, issueNum)
 							prURL, err := s.landPatch(num, pc, subject, head, f, url, issueNum)
 							if err != nil {
 								fmt.Fprintf(s.out, "    #%s  status=patch-failed  !! %v\n", num, err)
@@ -463,7 +465,7 @@ func promoteOnlyRoom(promotions int) chore.Room {
 }
 
 // issueNumberFromURL returns url's trailing path segment -- a filed issue's
-// number on the github/forgejo trackers -- for AgentBranch and
+// number on the github/forgejo trackers -- for forge.AgentBranchName and
 // IssueLabeler.AddLabels, neither of which take a URL. It errors when that
 // segment is not a positive decimal number: the local tracker's PostIssue
 // returns "local:" + slug, which must never become a branch name or a

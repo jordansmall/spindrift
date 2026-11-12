@@ -52,6 +52,7 @@ func testPolicy() Policy {
 		Zone:         time.UTC,
 		FindingLabel: testKindLabels.finding,
 		PatchLabel:   testKindLabels.patch,
+		BranchPrefix: testBranchPrefix,
 	}
 }
 

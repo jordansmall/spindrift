@@ -308,8 +308,8 @@ func TestNoPRIssueStateLiteralOutsideForge(t *testing.T) {
 	}
 }
 
-// Issue #444 made CodeForge.AgentBranch(num) the single owner of the agent
-// branch name, so no file outside internal/forge may concatenate branchPrefix
+// forge.AgentBranchName is the single owner of the agent branch name (issues
+// #444, #6859), so no file outside internal/forge may concatenate branchPrefix
 // itself.
 func TestNoBranchPrefixConcatOutsideForge(t *testing.T) {
 	forbidden := []string{"branchPrefix + ", "BranchPrefix + "}
@@ -336,7 +336,7 @@ func TestNoBranchPrefixConcatOutsideForge(t *testing.T) {
 		content := string(data)
 		for _, needle := range forbidden {
 			if strings.Contains(content, needle) {
-				t.Errorf("%s: contains %q — the agent branch name must be computed by CodeForge.AgentBranch(num), not concatenated here", path, needle)
+				t.Errorf("%s: contains %q — the agent branch name must be computed by forge.AgentBranchName, not concatenated here", path, needle)
 			}
 		}
 		return nil
