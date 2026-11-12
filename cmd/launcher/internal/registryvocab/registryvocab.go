@@ -6,6 +6,7 @@
 package registryvocab
 
 import (
+	"errors"
 	"net"
 	"path"
 	"strings"
@@ -71,6 +72,40 @@ func (s PathSet) Admits(requestPath string) bool {
 		}
 	}
 	return false
+}
+
+// Reasons CheckPathPattern refuses a pattern; callers wrap them with their own
+// context and test with errors.Is.
+var (
+	ErrPatternURLDelimiter = errors.New(`contains "?" or "#"`)
+	ErrPatternNotCanonical = errors.New(`not an absolute path already in canonical form (leading "/", no trailing "/", no "." or ".." segment)`)
+	ErrPatternBlanketRoot  = errors.New(`"/" would blanket-authorize the whole host`)
+)
+
+// HasURLDelimiter reports whether s contains "?" or "#" (issue #3321): they
+// open a URL's query and fragment, so no request path carries them, and a
+// declared path spliced into a GOPROXY or Gradle URL would be cut short at them.
+func HasURLDelimiter(s string) bool {
+	return strings.ContainsAny(s, "?#")
+}
+
+// CheckPathPattern rejects a path pattern not already in the canonical
+// subtree-root form PathSet.Admits matches (ADR 0047, issue #3258). It checks
+// with path.Clean rather than normalizing, so a mistyped pattern fails at parse
+// time instead of silently mismatching a request path. "/" is rejected too:
+// Admits reads it as "admit every path", the off switch ADR 0047 bans. "?" and
+// "#" are checked first (HasURLDelimiter): path.Clean keeps them.
+func CheckPathPattern(p string) error {
+	if HasURLDelimiter(p) {
+		return ErrPatternURLDelimiter
+	}
+	if p == "" || path.Clean(p) != p || !strings.HasPrefix(p, "/") {
+		return ErrPatternNotCanonical
+	}
+	if p == "/" {
+		return ErrPatternBlanketRoot
+	}
+	return nil
 }
 
 // IsValidHeaderFieldName reports whether name is a valid RFC 7230 token.
