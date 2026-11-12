@@ -2262,8 +2262,9 @@ A Connector (ADR 0073) is a subflake that adds backend or Driver rows from
 outside core. This section covers the Nix shape and, under [Driver rows on a
 Connector](#driver-rows-on-a-connector) and [Backend rows on a
 Connector](#backend-rows-on-a-connector), how a row reaches the binaries. The
-root flake registers two Connectors, `connectors/claude` and
-`connectors/github` (see [The github Connector](#the-github-connector)); what
+root flake registers three Connectors, `connectors/claude`,
+`connectors/github` (see [The github Connector](#the-github-connector)) and
+`connectors/jira` (see [The jira Connector](#the-jira-connector)); what
 the other registered facts mean at runtime is issue #6751. The worked example
 is the fixture Connector in
 [`nix/fixtures/connector/`](../nix/fixtures/connector/).
@@ -2455,7 +2456,11 @@ same base URL as the live routes, so repointing the base knob at a different
 host moves both tables together and doctor shows no diff; only its `; host
 from <ENV>` suffix hints at the change. A `{base}` route without `base` fails
 evaluation. They render into the row as `credentialScheme`, `identityEnv` and
-`baseEnv`, only when set (a bearer row with no `base` renders as before).
+`baseEnv`, only when set (a bearer row with no `base` renders as before). A
+`base` knob left unset, or set to anything but a bare https URL with a
+canonical path, leaves a non-shadow row unapplied, so core falls back to the
+native backend for it (the knob is the native adapter's own, which accepts
+plain http); a shadow row with an unset or unusable base fails at load.
 
 Evaluation fails, naming the Connector and the route, on a Route table the host
 would refuse at load: a method that is not an uppercase token, a bad
@@ -2573,6 +2578,22 @@ against `connectors/<backend>` when it exists, through
 Its first production use is the sampled read shadow ([Shadow
 mode](#shadow-mode)): dogfood loads the Connector beside the native adapter and
 compares its reads, while the native adapter still answers every call.
+
+#### The jira Connector
+
+`connectors/jira` is the jira backend's tracker read path as a network
+Connector on protocol 0.2: it serves `tracker.listIssues`, `tracker.issue`,
+`tracker.comments`, `tracker.nativeDeps` and `tracker.blocks` over Jira REST
+through `http_request`, with project-key ids (`tracker.ids.projectKey`) and the
+`dialect` (`cloud` or `server`) taken from the target. It advertises
+`tracker.comments` because Jira has no minimized comments, so `minimized` is
+faithfully always false. It returns the dedup and research markers from entity
+properties rather than splicing them into text. Its Route table is two `GET`
+routes on the `{base}` host, `/rest/api/2/search` and `/rest/api/2/issue`, and
+its row authorizes with Basic credentials from the host-only
+`SPINDRIFT_JIRA_CONNECTOR_TOKEN` and `SPINDRIFT_JIRA_CONNECTOR_EMAIL`, with
+`JIRA_BASE_URL` as the base. The row is registered but not shadowed: the native
+jira adapter answers every call until the cut-over (issue #6753).
 
 #### Shadow mode
 
@@ -2993,18 +3014,17 @@ This is protocol version **0.2.0**. The host is
   checked at evaluation with the same path rules; a tracker or forge Connector
   declares its own with the `routes` option (see **Route table** under
   [Connector subflake shape](#connector-subflake-shape)).
-- **Tracker capabilities.** Provisional at protocol 0.y: issue #6753 finalises
-  the tracker axis, and a `0.y` bump may change what follows. A tracker
-  Connector advertises `"tracker"`, meaning it serves `tracker.listIssues` and
-  `tracker.issue`, and optionally `"tracker.comments"`, `"tracker.nativeDeps"` and
-  `"tracker.blocks"`, serving the method of the same name, and
-  `"tracker.ids.projectKey"` (every id is `ENG-12`, not a decimal integer). Advertising
-  `"tracker.comments"` attests that each comment's `minimized` and
-  `minimizedReason` are faithful; a Connector whose API cannot report minimized
-  state leaves it out, and core reads comments from its native adapter. Every
-  `params` carries `target`, `{api, repo, dialect}`:
-  the https API base URL without a trailing slash, the `owner/name` slug and the
-  tracker's API dialect (`""` for a tracker with one).
+- **Tracker capabilities.** A tracker Connector advertises `"tracker"`,
+  meaning it serves `tracker.listIssues` and `tracker.issue`, and optionally
+  `"tracker.comments"`, `"tracker.nativeDeps"` and `"tracker.blocks"`, serving
+  the method of the same name, and `"tracker.ids.projectKey"` (see **Issue
+  ids**). Advertising `"tracker.comments"` attests that each comment's
+  `minimized` and `minimizedReason` are faithful; a Connector whose API cannot
+  report minimized state leaves it out, and core reads comments from its native
+  adapter. Every `params` carries `target`, `{api, repo, dialect}`: the https
+  API base URL without a trailing slash, the `owner/name` slug or project key,
+  and the tracker's API dialect (`""` for a tracker with one, `"cloud"` or
+  `"server"` for Jira).
   The Connector reads and returns raw data; every write stays on core's native
   adapter.
 
@@ -3016,18 +3036,38 @@ This is protocol version **0.2.0**. The host is
   | `tracker.nativeDeps` (optional) | `{target, number}` | `{ids}`, the issues `number` is blocked on, in the API's order |
   | `tracker.blocks` (optional) | `{target, number}` | `{ids}`, the issues `number` blocks, in the API's order |
 
-  An issue is `{number, title, body, state, labels}` with `state` `"open"` or
-  `"closed"`; a comment is `{author, createdAt, body, minimized,
-  minimizedReason, association}`. Core keeps the policy.
+  An issue is `{number, title, body, state, labels, closedAt, closedNotPlanned,
+  dedupMarker}`. `number` is a string id and `state` is `"open"` or `"closed"`.
+  `closedAt` is RFC3339, `""` when the issue is open or the date is unknown;
+  core ignores it and `closedNotPlanned` for an open issue. `dedupMarker` is
+  the raw dedup marker line when the tracker keeps it in a side store (a Jira
+  entity property), `""` otherwise; it is never part of `body`, and core
+  restores it. A comment is `{author, createdAt, body, minimized,
+  minimizedReason, association, researchMarker}`; `researchMarker` reports that
+  the comment carries the research marker in a side store, `body` excludes it,
+  and core restores it.
+
+  **Issue ids.** Core accepts one id grammar per Connector, because ids become
+  branch names, and fails closed on any `number` or dependency id outside it.
+  The default is a positive canonical decimal integer. A Connector that
+  advertises `"tracker.ids.projectKey"` returns `ENG-12` instead: an upper-case
+  project key, a hyphen and a positive canonical integer. The SDK's
+  `Reader.IDs` selects the grammar.
+
+  Core keeps the policy.
   [`connectortracker.New`](../cmd/launcher/internal/connectortracker/connectortracker.go)
   builds core's tracker reads from such a Connector: it resolves the dispatch
-  label, orders by issue number, applies the page cap, rejects an unknown
-  `state` or a `number` that is not a positive decimal integer (numbers become
-  branch names), and deduplicates native deps. Advertised comments flow into the existing
+  label and status of a Dispatch state, orders by issue id, applies the page
+  cap, rejects an unknown `state` or an id outside the grammar, and
+  deduplicates native deps. A state with neither a label nor a status lists
+  nothing, without a guest call. Advertised comments flow into the existing
   `IssueText` trust handling, so a comment the Connector marks `minimized` is
   dropped as for a native adapter. The SDK's
-  `tracker.Register(tracker.Reader{...})` serves the methods. Only the read
-  shadow ([Shadow mode](#shadow-mode)) uses `connectortracker` in production.
+  `tracker.Register(tracker.Reader{...})` serves the methods. A 0.1 Connector
+  predates the `status` selector, `tracker.blocks` and project-key ids: core
+  never sends it a `status`, ignores those two capabilities, and fails a read
+  whose Dispatch state has only a status selector. Only the read shadow
+  ([Shadow mode](#shadow-mode)) uses `connectortracker` in production.
 - **Forge capabilities.** Provisional at protocol 0.y: issue #6754 finalises
   the forge axis, and a `0.y` bump may change what follows. A forge Connector
   advertises `"forge"`, meaning it serves the three methods below. Every
