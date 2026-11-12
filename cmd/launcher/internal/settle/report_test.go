@@ -293,13 +293,12 @@ func TestInternalSeam_FlushSettled_UnsettledLatchedPRDoesNotLeak(t *testing.T) {
 
 // readWriteRecords settles a read-write run for issue 77 whose Box printed
 // status and claimed landing, and returns the settled records. setup seeds the
-// forge; the agent branch is fc.AgentBranch("77").
+// forge; the agent branch is forge.AgentBranchName(testBranchPrefix, "77").
 func readWriteRecords(t *testing.T, status, landing string, setup func(fc *forge.Fake)) []report.Record {
 	t.Helper()
 	readRecords := testutil.InstallPipeReporter(t)
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "77", Labels: []string{"agent-in-progress"}})
 	setup(fc)
 	s := newTestSettle(baseConfig(), fc, fc)
@@ -317,7 +316,7 @@ func readWriteRecords(t *testing.T, status, landing string, setup func(fc *forge
 // host-side; the Box's landing= is only what the gate watches.
 func TestSettle_ReadWriteReady_BranchPR_Latched(t *testing.T) {
 	recs := readWriteRecords(t, "ready", testPR, func(fc *forge.Fake) {
-		fc.SetPR(fc.AgentBranch("77"), forge.PR{URL: testPR})
+		fc.SetPR(forge.AgentBranchName(testBranchPrefix, "77"), forge.PR{URL: testPR})
 		fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	})
 	if len(recs) != 1 || recs[0].PRURL != testPR {
@@ -343,7 +342,7 @@ func TestSettle_ReadWriteReady_LandingWithoutBranchPR_NotLatched(t *testing.T) {
 func TestSettle_ReadWriteReady_LandingDiffersFromBranchPR_BranchPRWins(t *testing.T) {
 	const evil = "https://evil.example/x"
 	recs := readWriteRecords(t, "ready", evil, func(fc *forge.Fake) {
-		fc.SetPR(fc.AgentBranch("77"), forge.PR{URL: testPR})
+		fc.SetPR(forge.AgentBranchName(testBranchPrefix, "77"), forge.PR{URL: testPR})
 		fc.SetCheckStates(evil, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	})
 	if len(recs) != 1 || recs[0].PRURL != testPR {
@@ -359,8 +358,7 @@ func TestSettle_GithubReadOnly_ReadyOpenedPR_LatchedDespiteCheckStateError(t *te
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
+	branch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = prURL
 	fc.SetCheckStateErrors(prURL, []error{errors.New("403 rate limit")})
@@ -408,7 +406,7 @@ func TestRecoverOpenPR_CheckStateError_StillCarriesPR(t *testing.T) {
 // PR resolved host-side from the branch, never from its own landing=.
 func TestSettle_ReadWriteBlocked_PROnBranch_SettledRecordCarriesPR(t *testing.T) {
 	recs := readWriteRecords(t, "blocked", "https://evil.example/x", func(fc *forge.Fake) {
-		fc.SetPR(fc.AgentBranch("77"), forge.PR{URL: testPR})
+		fc.SetPR(forge.AgentBranchName(testBranchPrefix, "77"), forge.PR{URL: testPR})
 	})
 	if len(recs) != 1 || recs[0].PRURL != testPR || recs[0].State != "failed" {
 		t.Fatalf("records = %+v, want one failed record with PRURL=%s", recs, testPR)
@@ -427,7 +425,7 @@ func TestSettle_ReadWriteBlocked_NoPR_NoPRURL(t *testing.T) {
 func TestSettle_ReadWriteBlocked_ClosedEarlierPR_NoPRURL(t *testing.T) {
 	const old = "https://github.com/owner/repo/pull/1"
 	recs := readWriteRecords(t, "blocked", "", func(fc *forge.Fake) {
-		fc.SetPR(fc.AgentBranch("77"), forge.PR{URL: old})
+		fc.SetPR(forge.AgentBranchName(testBranchPrefix, "77"), forge.PR{URL: old})
 		fc.SetPRState(old, forge.PRClosed)
 	})
 	if len(recs) != 1 || recs[0].PRURL != "" || recs[0].State != "failed" {
@@ -440,7 +438,7 @@ func TestSettle_ReadWriteBlocked_ClosedEarlierPR_NoPRURL(t *testing.T) {
 func TestSettle_ReadWriteMerged_ClosedEarlierPR_NoPRURL(t *testing.T) {
 	const old = "https://github.com/owner/repo/pull/1"
 	recs := readWriteRecords(t, "merged", "", func(fc *forge.Fake) {
-		fc.SetPR(fc.AgentBranch("77"), forge.PR{URL: old})
+		fc.SetPR(forge.AgentBranchName(testBranchPrefix, "77"), forge.PR{URL: old})
 		fc.SetPRState(old, forge.PRClosed)
 	})
 	if len(recs) != 1 || recs[0].PRURL != "" || recs[0].State != "failed" {
@@ -452,7 +450,7 @@ func TestSettle_ReadWriteMerged_ClosedEarlierPR_NoPRURL(t *testing.T) {
 // the settle.
 func TestSettle_ReadWriteBlocked_PRLookupError_NoPRURL(t *testing.T) {
 	recs := readWriteRecords(t, "blocked", "", func(fc *forge.Fake) {
-		fc.SetPR(fc.AgentBranch("77"), forge.PR{URL: testPR})
+		fc.SetPR(forge.AgentBranchName(testBranchPrefix, "77"), forge.PR{URL: testPR})
 		fc.OpenPRForBranchErr = errors.New("503")
 	})
 	if len(recs) != 1 || recs[0].PRURL != "" || recs[0].State != "failed" {
@@ -468,8 +466,7 @@ func TestSettle_GithubReadOnly_BlockedDraftPR_SettledRecordCarriesPR(t *testing.
 	const issNum = "1933"
 	const prURL = "https://github.com/owner/repo/pull/1933"
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
+	branch := forge.AgentBranchName(testBranchPrefix, issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = prURL
 

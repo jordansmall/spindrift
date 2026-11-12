@@ -189,9 +189,8 @@ func TestSettle_GitForge_MergedStatusSkipsVerify(t *testing.T) {
 // explicit agent-recover entry point, Recover.
 func TestSettle_NoOutcome_NonDraftPRBlocked(t *testing.T) {
 	fc := forge.NewFake()
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{"agent-in-progress"}})
-	branch := fc.AgentBranch("3")
+	branch := forge.AgentBranchName(testBranchPrefix, "3")
 	fc.SetPR(branch, forge.PR{URL: testPR})
 
 	c := baseConfig()
@@ -342,7 +341,6 @@ func hostLandedPassFixture(t *testing.T, fc *forge.Fake, passes []passmanifest.E
 // tracker, for shapes the Fake has no view of.
 func hostLandedPassFixtureOver(t *testing.T, fc *forge.Fake, tracker forge.IssueTracker, passes []passmanifest.Entry) (*Settle, dispatch.Result) {
 	t.Helper()
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: hostLandedIssue, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = draftPRRetryURL
 	fc.SetCheckStates(draftPRRetryURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
@@ -356,7 +354,7 @@ func hostLandedPassFixtureOver(t *testing.T, fc *forge.Fake, tracker forge.Issue
 	result := dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
-			Outcome: outcome.Outcome{Issue: hostLandedIssue, Landing: fc.AgentBranch(hostLandedIssue), Status: "ready"},
+			Outcome: outcome.Outcome{Issue: hostLandedIssue, Landing: forge.AgentBranchName(testBranchPrefix, hostLandedIssue), Status: "ready"},
 		},
 		PRIntent:      "feat: add widget\n\nAdds a widget.",
 		PRIntentFound: true,
@@ -776,5 +774,23 @@ func TestSettle_NoWarnings_RecordsEmptyBatch(t *testing.T) {
 
 	if len(d.RecordedWarnings) != 1 || len(d.RecordedWarnings[0]) != 0 {
 		t.Errorf("RecordedWarnings = %q, want exactly one empty batch", d.RecordedWarnings)
+	}
+}
+
+// The agent branch is named from Config.BranchPrefix, not from the Code Forge:
+// the fake's own prefix is empty, so only the Config prefix can find the PR.
+func TestSettle_NamesAgentBranchFromConfigPrefix(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{"agent-in-progress"}})
+	fc.SetPR(forge.AgentBranchName(testBranchPrefix, "5"), forge.PR{URL: testPR})
+
+	c := baseConfig()
+	c.BranchPrefix = testBranchPrefix
+	s := newTestSettle(c, fc, fc)
+	s.Settle(dispatch.NewFake(), "5", 0, dispatch.Result{})
+
+	iss, _ := fc.Issue("5")
+	if containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("PR on the Config-prefixed branch must be found, not demoted; got labels=%v", iss.Labels)
 	}
 }

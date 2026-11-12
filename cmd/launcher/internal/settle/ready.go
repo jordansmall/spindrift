@@ -171,7 +171,7 @@ func (s *Settle) relayBoxBundle(num string, gen uint64) (ref string, err error) 
 	if !ok {
 		return "", nil
 	}
-	ref = cf.AgentBranch(num)
+	ref = s.agentBranch(num)
 	if s.cfg.OutboxDir == nil {
 		return ref, fmt.Errorf("settle: Config.OutboxDir is unset but the Code Forge implements forge.BundleRelay — every CODE_FORGE=local construction site must supply an OutboxDir resolver")
 	}

@@ -127,7 +127,7 @@ func mergeCases() []prCase {
 			},
 			want: merged, wantLabels: complete, wantMerged: testPR, wantCalls: rebased, wantResolves: 1, wantRebases: 1,
 			check: func(t *testing.T, fc *forge.Fake, _ *dispatch.Fake) {
-				want := []forge.RelayBundleCall{{OutboxDir: "/outbox/1", Ref: fc.AgentBranch("1")}}
+				want := []forge.RelayBundleCall{{OutboxDir: "/outbox/1", Ref: forge.AgentBranchName(testBranchPrefix, "1")}}
 				if !slices.Equal(fc.RelayBundleCalls, want) {
 					t.Errorf("RelayBundle calls = %+v, want %+v", fc.RelayBundleCalls, want)
 				}

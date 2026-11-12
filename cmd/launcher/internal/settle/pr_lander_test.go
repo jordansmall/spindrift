@@ -364,7 +364,7 @@ func TestSettle_PRLander(t *testing.T) {
 			}
 			fc.SetIssue(forge.Issue{Number: "1", Labels: labels, Body: tc.body})
 			if !tc.noPR {
-				fc.SetPR(fc.AgentBranch("1"), forge.PR{URL: testPR})
+				fc.SetPR(forge.AgentBranchName(testBranchPrefix, "1"), forge.PR{URL: testPR})
 			}
 			fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 			files := []string{"src/main.go"}

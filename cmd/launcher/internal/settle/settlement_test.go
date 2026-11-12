@@ -24,7 +24,6 @@ func TestSettled_ReturnsSettlement(t *testing.T) {
 func TestSettle_BlockHandoffReturnsInProgressHandoffBlockedWithoutPR(t *testing.T) {
 	const num = "1919"
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: num, Labels: []string{"agent-in-progress"}})
 	fc.RelayBundleErr = forge.ErrBundleNotFound
 	c := baseConfig()

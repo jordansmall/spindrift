@@ -89,7 +89,7 @@ func (s *Settle) mediationFor(num string, gen uint64) (branch string, m *Mediati
 	m.br = s.retryingRelay(num, gen, m.br)
 	m.dpc = s.retryingDraftPR(num, gen, m.dpc, caps.PRForge, func() { m.adoptedOwn = true })
 	m.onOpen = func(url string) { s.latchPR(num, url) }
-	return cf.AgentBranch(num), m
+	return s.agentBranch(num), m
 }
 
 // NewMediation builds a Mediation from caps' relay and PR-creating fields

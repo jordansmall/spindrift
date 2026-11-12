@@ -132,7 +132,7 @@ func verifyCases() []prCase {
 
 	// The branch lookup that finds the PR to verify is itself a read: an error
 	// from it proves nothing about whether a PR exists, so it must not demote.
-	branch := forge.NewFake().AgentBranch("1")
+	branch := forge.AgentBranchName(testBranchPrefix, "1")
 	cases = append(cases,
 		prCase{
 			name:  "a merged self-report whose PRForBranch lookup keeps failing leaves the issue in progress",

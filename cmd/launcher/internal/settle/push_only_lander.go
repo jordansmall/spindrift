@@ -138,7 +138,7 @@ func (s pushOnlyLander) latchOpenPR(string) {}
 // branch, never the Agent-controlled o.Landing, so landing= carries the same
 // provenance as the PR arm.
 func (s pushOnlyLander) settleReportedMerge(num string) {
-	s.cfg.Progress.Step(Step{Key: num, Landing: s.cfForNum(num).AgentBranch(num), Status: Status("merged")})
+	s.cfg.Progress.Step(Step{Key: num, Landing: s.agentBranch(num), Status: Status("merged")})
 }
 
 // landRelayed lands a relayed branch from a bundle alone (ADR 0039, #2254,
@@ -163,7 +163,7 @@ func (s pushOnlyLander) landRelayed(d dispatch.Dispatcher, num string, gen uint6
 // derived agent branch, never an outcome-line field (issue #1949): there may
 // be no parsed outcome line at all on this path. note is printed verbatim.
 func (s pushOnlyLander) landRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, note string, passes []passmanifest.Entry) {
-	s.gateAdopted(d, num, gen, s.cfForNum(num).AgentBranch(num), note, passes)
+	s.gateAdopted(d, num, gen, s.agentBranch(num), note, passes)
 }
 
 // salvage promotes a local push-only issue to Recoverable (ADR 0039) when

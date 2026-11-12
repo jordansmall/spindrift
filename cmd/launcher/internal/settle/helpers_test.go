@@ -10,6 +10,7 @@ import (
 
 func baseConfig() Config {
 	return Config{
+		BranchPrefix:      testBranchPrefix,
 		CompleteLabel:     "agent-complete",
 		FindingLabel:      "agent-review-finding",
 		MergePollInterval: 1,   // The Clock below never sleeps for real, so this costs nothing.
@@ -23,6 +24,9 @@ func baseConfig() Config {
 }
 
 const testPR = "https://github.com/owner/repo/pull/42"
+
+// testBranchPrefix is the BRANCH_PREFIX default; baseConfig sets it on Config.
+const testBranchPrefix = "agent/issue-"
 
 // testDispatchLabels mirrors lib/env-schema.nix and is pinned against the agent
 // workflows by nix/checks/dispatch-labels.nix (issue #460).

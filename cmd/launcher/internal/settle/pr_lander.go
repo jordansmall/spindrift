@@ -63,7 +63,7 @@ func (s prLander) latchOpenPR(num string) {
 	if s.readOnly {
 		return
 	}
-	res, err := forge.ResolveOpenPR(s.cf, s.cf.AgentBranch(num))
+	res, err := forge.ResolveOpenPR(s.cf, s.agentBranch(num))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not resolve PR for settled record: %v\n", num, err)
 		return
@@ -79,7 +79,7 @@ func (s prLander) latchOpenPR(num string) {
 // after its retries proves nothing, so it leaves the issue as it stands, as
 // verifyMerged does for its own reads.
 func (s prLander) settleReportedMerge(num string) {
-	branch := s.cfForNum(num).AgentBranch(num)
+	branch := s.agentBranch(num)
 	var pr string
 	var ok bool
 	if !s.retryVerifyRead(num, branch, func() error {
@@ -1006,8 +1006,9 @@ func (s prLander) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, re
 }
 
 // adoptRelayedBranch relays num's finished branch out of the outbox and opens
-// a PR on it. branch comes from cf.AgentBranch(num), never the outcome line's
-// landing= field (#1949): a prompt-injected read-only Box controls that field.
+// a PR on it. branch comes from forge.AgentBranchName(BranchPrefix, num), never
+// the outcome line's landing= field (#1949): a prompt-injected read-only Box
+// controls that field.
 // FallbackDefault means a missing PR-intent line falls back to an issue-derived
 // default instead of blocking, since this Box was cut short before that step.
 // opened is false when no PR is open. The error is then non-nil only for a
