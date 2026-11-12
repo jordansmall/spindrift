@@ -327,7 +327,12 @@ let
           dir = ../../connectors + "/${name}";
           connector = connectorFor dir;
         in
-        pkgs.lib.concatMapStrings (f: ''
+        # A backend test that drives core (doctor, say) reads through the
+        # shared Fake's fixture Connector.
+        ''
+          export SPINDRIFT_CONNECTOR_FIXTURES_DIR=${fixtures.connectorWasm}
+        ''
+        + pkgs.lib.concatMapStrings (f: ''
           mkdir -p src/${builtins.dirOf f}
           cp ${../.. + "/${f}"} src/${f}
         '') ((rowFor name).goTestRepoFiles or [ ])
@@ -353,6 +358,7 @@ let
       "agentpaths"
       "backend"
       "chore"
+      "connectorhost"
       "connlimit"
       "dispatch"
       "dispatchkey"
@@ -361,6 +367,7 @@ let
       "doctor"
       "driver/driverkit"
       "fakehook"
+      "fixturebuild"
       "flock"
       "freshness"
       "gitexec"

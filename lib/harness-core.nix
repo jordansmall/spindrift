@@ -14,18 +14,17 @@ let
   # internal/forge's own Go files without its backend subpackages (github,
   # forgejo, ...): the top level carries the shared verdict vocabulary
   # (promptassembly, issue #4159). The backends only the Box links come in
-  # through backendBundleFiles. internal/fakehook rides along: forge.Fake is
-  # non-test code and imports it.
+  # through backendBundleFiles. internal/fakehook and internal/fixturebuild ride
+  # along: forge.Fake is non-test code and imports them.
   forgeTopLevelFiles = lib.fileset.unions (
     lib.mapAttrsToList (n: _: ../cmd/launcher/internal/forge + "/${n}") (
       lib.filterAttrs (n: t: t == "regular" && lib.hasSuffix ".go" n && !lib.hasSuffix "_test.go" n) (
         builtins.readDir ../cmd/launcher/internal/forge
       )
     )
-    ++ [
-      (lib.fileset.fileFilter (
-        f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
-      ) ../cmd/launcher/internal/fakehook)
+    ++ map (dir: lib.fileset.fileFilter (f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name) dir) [
+      ../cmd/launcher/internal/fakehook
+      ../cmd/launcher/internal/fixturebuild
     ]
   );
 

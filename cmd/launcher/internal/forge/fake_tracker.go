@@ -148,13 +148,17 @@ type CommentCall struct {
 }
 
 func (tf *IssueTrackerFake) ListIssues(state DispatchState) ([]Issue, error) {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	tf.ListIssuesCalls = append(tf.ListIssuesCalls, state)
-	if tf.ListIssuesErr != nil {
-		return nil, tf.ListIssuesErr
-	}
-	return tf.listState(state), nil
+	var out []Issue
+	err := tf.read("/tracker/listIssues", &out, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		tf.ListIssuesCalls = append(tf.ListIssuesCalls, state)
+		if tf.ListIssuesErr != nil {
+			return nil, tf.ListIssuesErr
+		}
+		return tf.listState(state), nil
+	})
+	return out, err
 }
 
 // CountReady implements DemandCounter. It shares ListIssuesErr with
@@ -162,12 +166,16 @@ func (tf *IssueTrackerFake) ListIssues(state DispatchState) ([]Issue, error) {
 // recorded in ListIssuesCalls, so a demand probe never perturbs a test that
 // asserts which states the dispatch loop listed.
 func (tf *IssueTrackerFake) CountReady(_ bool) (int, error) {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	if tf.ListIssuesErr != nil {
-		return 0, tf.ListIssuesErr
-	}
-	return len(tf.listState(Dispatchable)), nil
+	var n int
+	err := tf.read("/tracker/listIssues", &n, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		if tf.ListIssuesErr != nil {
+			return 0, tf.ListIssuesErr
+		}
+		return len(tf.listState(Dispatchable)), nil
+	})
+	return n, err
 }
 
 // ProbeInterval implements DemandCounter.
@@ -211,22 +219,26 @@ func (tf *IssueTrackerFake) listState(state DispatchState) []Issue {
 // ListOpenIssues returns every non-closed issue, ascending by number, whatever
 // its dispatch label.
 func (tf *IssueTrackerFake) ListOpenIssues() ([]Issue, error) {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
 	var out []Issue
-	for _, iss := range tf.issues {
-		if iss.State == IssueClosed {
-			continue
+	err := tf.read("/tracker/listIssues", &out, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		var open []Issue
+		for _, iss := range tf.issues {
+			if iss.State == IssueClosed {
+				continue
+			}
+			iss.Priority = ResolvePriority(iss.Labels)
+			open = append(open, iss)
 		}
-		iss.Priority = ResolvePriority(iss.Labels)
-		out = append(out, iss)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		ni, _ := strconv.Atoi(out[i].Number)
-		nj, _ := strconv.Atoi(out[j].Number)
-		return ni < nj
+		sort.Slice(open, func(i, j int) bool {
+			ni, _ := strconv.Atoi(open[i].Number)
+			nj, _ := strconv.Atoi(open[j].Number)
+			return ni < nj
+		})
+		return open, nil
 	})
-	return out, nil
+	return out, err
 }
 
 // allIssues returns every issue, open or closed, ascending by number. It stays
@@ -249,27 +261,31 @@ func (tf *IssueTrackerFake) allIssues() ([]Issue, error) {
 }
 
 func (tf *IssueTrackerFake) Issue(num string) (Issue, error) {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	tf.IssueCalls = append(tf.IssueCalls, num)
-	if err, ok := tf.IssueErrByNum[num]; ok {
-		return Issue{}, err
-	}
-	if len(tf.IssueErrs) > 0 {
-		err := tf.IssueErrs[0]
-		tf.IssueErrs = tf.IssueErrs[1:]
-		if err != nil {
-			return Issue{}, err
+	var out Issue
+	err := tf.read("/tracker/issue", &out, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		tf.IssueCalls = append(tf.IssueCalls, num)
+		if err, ok := tf.IssueErrByNum[num]; ok {
+			return nil, err
 		}
-	} else if tf.IssueErr != nil {
-		return Issue{}, tf.IssueErr
-	}
-	iss, ok := tf.issues[num]
-	if !ok {
-		return Issue{}, fmt.Errorf("issue %s not found", num)
-	}
-	iss.Priority = ResolvePriority(iss.Labels)
-	return iss, nil
+		if len(tf.IssueErrs) > 0 {
+			err := tf.IssueErrs[0]
+			tf.IssueErrs = tf.IssueErrs[1:]
+			if err != nil {
+				return nil, err
+			}
+		} else if tf.IssueErr != nil {
+			return nil, tf.IssueErr
+		}
+		iss, ok := tf.issues[num]
+		if !ok {
+			return nil, fmt.Errorf("issue %s not found", num)
+		}
+		iss.Priority = ResolvePriority(iss.Labels)
+		return iss, nil
+	})
+	return out, err
 }
 
 // TransitionState swaps the from-state label for the to-state label on issue
@@ -357,13 +373,17 @@ var _ NativeDepsReader = (*IssueTrackerFake)(nil)
 // set. It records num in NativeDepsCalls, the spy for a dependency-graph build
 // (forge.DepsOf calls it once per issue).
 func (tf *IssueTrackerFake) NativeDepsOf(num string) ([]string, error) {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	tf.NativeDepsCalls = append(tf.NativeDepsCalls, num)
-	if err := tf.NativeDepsErr[num]; err != nil {
-		return nil, err
-	}
-	return tf.NativeDeps[num], nil
+	var out []string
+	err := tf.read("/tracker/nativeDeps", &out, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		tf.NativeDepsCalls = append(tf.NativeDepsCalls, num)
+		if err := tf.NativeDepsErr[num]; err != nil {
+			return nil, err
+		}
+		return tf.NativeDeps[num], nil
+	})
+	return out, err
 }
 
 // BlocksOf returns every issue number keyed in NativeDeps whose own deps name
@@ -403,12 +423,16 @@ func (tf *IssueTrackerFake) Comment(num, body string) error {
 // Comments returns num's scripted CommentsFor entry. An unscripted number
 // yields nil and no error, matching an issue with no comments.
 func (tf *IssueTrackerFake) Comments(num string) ([]Comment, error) {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	if err, ok := tf.CommentsErr[num]; ok {
-		return nil, err
-	}
-	return tf.CommentsFor[num], nil
+	var out []Comment
+	err := tf.read("/tracker/comments", &out, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		if err, ok := tf.CommentsErr[num]; ok {
+			return nil, err
+		}
+		return tf.CommentsFor[num], nil
+	})
+	return out, err
 }
 
 func (tf *IssueTrackerFake) ListLabels() ([]string, error) {
