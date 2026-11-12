@@ -1310,6 +1310,21 @@ checkedMerge {
       "lib/env-schema.nix: continuousDispatch.doc must say plainly it is not removed — it stays for no-daemon operators and remains the Console's engine (issue #3547), got: ${doc}";
     pkgs.runCommand "continuous-dispatch-doc-reference" { } "touch $out";
 
+  # The read-write default's deprecation (issue #6891) rides the knob's doc
+  # string, which is what renders it onto --help, the man page, and
+  # docs/flake-options.md.
+  box-access-default-doc-deprecated =
+    let
+      schema = import ../../lib/env-schema.nix;
+      inherit (pkgs.lib) assertMsg hasInfix;
+      doc = schema.boxForgeAndIssueAccess.doc;
+    in
+    assert assertMsg (hasInfix "DEPRECATED" doc)
+      "lib/env-schema.nix: boxForgeAndIssueAccess.doc must mark the read-write default DEPRECATED (issue #6891), got: ${doc}";
+    assert assertMsg (hasInfix "#6757" doc)
+      "lib/env-schema.nix: boxForgeAndIssueAccess.doc must name the parent issue #6757 that flips the default, got: ${doc}";
+    pkgs.runCommand "box-access-default-doc-deprecated" { } "touch $out";
+
   # A knob's launcherIgnores = true axis and its doc string's "the launcher
   # itself ignores it" clause must agree exactly, in both directions: a
   # daemon-only knob whose doc states the fact but forgot the axis, or an
