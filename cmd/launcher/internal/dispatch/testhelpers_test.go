@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -87,12 +88,14 @@ type fakeDriver struct {
 	// KindUsage, for tests asserting a session summary's API time, turns or wall
 	// time, which per-call totals cannot express.
 	SessionTotals bool
-	// ExtractUsageAfterFn, when set, replaces ExtractUsageAfter, so a test can
-	// observe the baselines the chain hands each log.
-	ExtractUsageAfterFn func(logPath string, base driverkit.SessionBaselines) (usage.Report, driverkit.SessionBaselines, error)
+	// OnDecode, when set, observes every Decode, so a test can count how often
+	// a log is decoded.
+	OnDecode func(logPath string)
 }
 
-func (d fakeDriver) base() driverkit.Driver {
+func (d fakeDriver) base() driverkit.Driver { return driverkit.New(d.strategy()) }
+
+func (d fakeDriver) strategy() driverkit.Strategy {
 	s := testStrategy
 	if d.DriverName != "" {
 		s.Name = d.DriverName
@@ -100,7 +103,7 @@ func (d fakeDriver) base() driverkit.Driver {
 	if d.SessionTotals {
 		s.Totals = driverkit.SessionTotals
 	}
-	return driverkit.New(s)
+	return s
 }
 
 func (d fakeDriver) Name() string { return d.base().Name() }
@@ -125,9 +128,6 @@ func (d fakeDriver) ExtractUsage(logPath string) (usage.Report, error) {
 }
 
 func (d fakeDriver) ExtractUsageAfter(logPath string, base driverkit.SessionBaselines) (usage.Report, driverkit.SessionBaselines, error) {
-	if d.ExtractUsageAfterFn != nil {
-		return d.ExtractUsageAfterFn(logPath, base)
-	}
 	return d.base().ExtractUsageAfter(logPath, base)
 }
 
@@ -156,7 +156,56 @@ func (d fakeDriver) SessionBaselinesAfter(logPath string, base driverkit.Session
 }
 
 func (d fakeDriver) Decode(logPath string) (driverkit.PassLog, error) {
-	return d.base().Decode(logPath)
+	if d.OnDecode != nil {
+		d.OnDecode(logPath)
+	}
+	if d.ClassifyFn == nil {
+		return d.base().Decode(logPath)
+	}
+	return d.decodeClassified(logPath)
+}
+
+// fakeClassifyMarker is the text of the error event decodeClassified appends.
+const fakeClassifyMarker = "fake-classify-marker"
+
+// decodeClassified decodes the log with a trailing error event that the
+// Strategy's patterns classify as ClassifyFn's answer, so a PassLog classifies
+// the way the path-based hook did. ClassifyFn runs once per decode, with the
+// log's own path.
+func (d fakeDriver) decodeClassified(logPath string) (driverkit.PassLog, error) {
+	cl, err := d.ClassifyFn(logPath)
+	if err != nil {
+		return driverkit.PassLog{}, err
+	}
+	raw, err := os.ReadFile(logPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return driverkit.PassLog{}, err
+	}
+	f, err := os.CreateTemp("", "fake-classify-*")
+	if err != nil {
+		return driverkit.PassLog{}, err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if len(raw) > 0 && raw[len(raw)-1] != '\n' {
+		raw = append(raw, '\n')
+	}
+	marker := eventLine(driverkit.Event{Kind: driverkit.KindError, Text: fakeClassifyMarker, ResetAt: cl.ResetAt})
+	_, err = f.Write(append(raw, marker...))
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return driverkit.PassLog{}, err
+	}
+	s := d.strategy()
+	pat := []driverkit.Pattern{{Substr: fakeClassifyMarker, Reason: cl.Reason}}
+	if cl.Class == driver.Transient {
+		s.TransientPatterns = append(slices.Clone(s.TransientPatterns), pat...)
+	} else {
+		s.TerminalPatterns = append(slices.Clone(s.TerminalPatterns), pat...)
+	}
+	return driverkit.New(s).Decode(tmp)
 }
 
 func (d fakeDriver) SessionFlags(mode, repoSlug, issue, home string) string {

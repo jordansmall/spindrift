@@ -78,10 +78,11 @@ func (d *Dispatch) attemptReports() []usage.Report {
 	var found []usage.Report
 	var base driverkit.SessionBaselines
 	for _, pl := range AllAttemptLogPaths(d.pwd, d.number) {
-		r, after, err := d.driver.ExtractUsageAfter(pl.Path, base)
+		dec, err := d.decoded(pl.Path)
 		if err != nil {
 			continue
 		}
+		r, after := dec.ExtractUsageAfter(base)
 		base = after
 		if r.Found {
 			found = append(found, r)
