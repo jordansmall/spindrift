@@ -144,6 +144,29 @@ func (h *prforgeHarness) SeedFailingCheck(url, name, conclusion, summary string)
 	writeFile(h.t, filepath.Join(prDir, "contexts.json"), string(out))
 }
 
+// SeedFailingCheckLog writes a failing Actions CheckRun whose detailsUrl names
+// a job, and that job's log where the fake gh script's job-logs route reads it.
+func (h *prforgeHarness) SeedFailingCheckLog(url, check, log string) {
+	prDir := filepath.Join(h.stateDir, "prs", prNum(url))
+	if err := os.MkdirAll(prDir, 0o755); err != nil {
+		h.t.Fatal(err)
+	}
+	const jobID = "7001"
+	contexts := []failureDetailContext{{
+		TypeName: "CheckRun", Name: check, Conclusion: "FAILURE", Summary: "exit status 1",
+		DetailsURL: "https://github.com/owner/repo/actions/runs/900/job/" + jobID,
+	}}
+	out, err := json.Marshal(contexts)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	writeFile(h.t, filepath.Join(prDir, "contexts.json"), string(out))
+	if err := os.MkdirAll(filepath.Join(h.stateDir, "joblogs"), 0o755); err != nil {
+		h.t.Fatal(err)
+	}
+	writeFile(h.t, filepath.Join(h.stateDir, "joblogs", jobID), log)
+}
+
 // SeedAutoMergeAllowed scripts the repo-wide CanAutoMerge result.
 func (h *prforgeHarness) SeedAutoMergeAllowed(allowed bool) {
 	writeFile(h.t, filepath.Join(h.stateDir, "automerge_allowed"), strconv.FormatBool(allowed))

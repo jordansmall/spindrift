@@ -49,6 +49,10 @@ func (h *fakePRForgeHarness) SeedFailingCheck(url, name, conclusion, summary str
 	h.f.SetFailureDetail(url, name+": "+conclusion+"\n"+summary)
 }
 
+func (h *fakePRForgeHarness) SeedFailingCheckLog(url, check, log string) {
+	h.f.SetFailureDetail(url, forge.RenderFailureDetail([]forge.FailureDetailEntry{{Name: check, State: "FAILURE", Log: log}}))
+}
+
 func (h *fakePRForgeHarness) SeedAutoMergeAllowed(allowed bool) {
 	h.f.AutoMergeAllowed = allowed
 }

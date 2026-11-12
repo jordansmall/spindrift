@@ -530,6 +530,10 @@ func (h *connectorHarness) SeedFailingCheck(url, name, conclusion, summary strin
 	})
 }
 
+func (h *connectorHarness) SeedFailingCheckLog(url, check, log string) {
+	h.SeedJobLogFailure(url, check, "7001", log)
+}
+
 func atoi(s string) int {
 	n, _ := strconv.Atoi(s)
 	return n
@@ -646,7 +650,7 @@ func TestConnector_FailureDetailMatchesNative(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := renderFailureDetail(native)
+	want := renderFailureDetail(native, nil)
 	if want == "" {
 		t.Fatal("native rendered no failure detail for the failing contexts")
 	}

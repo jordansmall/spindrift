@@ -148,6 +148,12 @@ api-graphql)
 		;;
 	esac
 	;;
+api-repos/*/actions/jobs/*/logs)
+	# $2 is "repos/<owner>/<repo>/actions/jobs/<id>/logs"; a job with no seeded
+	# log fails as an expired or inaccessible one does.
+	id="${2%/logs}"
+	cat "$STATE_DIR/joblogs/${id##*/}" 2>/dev/null || exit 1
+	;;
 api-repos/*/compare/*)
 	# $2 is "repos/<owner>/<repo>/compare/<base>...<head>" and head always ends
 	# in "-<num>" (agent/issue-<num>, url.PathEscape'd), so the trailing hyphen
