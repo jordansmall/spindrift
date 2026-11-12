@@ -29,7 +29,6 @@ func (r *recordingClock) Clock() retry.Clock {
 func TestResolveOpenPR(t *testing.T) {
 	t.Run("push-only forge has no PR to discover", func(t *testing.T) {
 		f := forge.NewFake()
-		f.BranchPrefix = "agent/issue-"
 		f.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/o/r/pull/7"})
 
 		res, err := forge.ResolveOpenPR(f.AsPushOnly(), "agent/issue-42")
@@ -40,7 +39,6 @@ func TestResolveOpenPR(t *testing.T) {
 
 	t.Run("no open PR yet", func(t *testing.T) {
 		f := forge.NewFake()
-		f.BranchPrefix = "agent/issue-"
 
 		res, err := forge.ResolveOpenPR(f, "agent/issue-42")
 		if err != nil || res.Found {
@@ -50,7 +48,6 @@ func TestResolveOpenPR(t *testing.T) {
 
 	t.Run("open PR found reports URL", func(t *testing.T) {
 		f := forge.NewFake()
-		f.BranchPrefix = "agent/issue-"
 		f.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/o/r/pull/7"})
 
 		res, err := forge.ResolveOpenPR(f, "agent/issue-42")
@@ -66,7 +63,6 @@ func TestResolveOpenPR(t *testing.T) {
 func TestResolveOpenPRFiles(t *testing.T) {
 	t.Run("push-only forge has no PR to discover", func(t *testing.T) {
 		f := forge.NewFake()
-		f.BranchPrefix = "agent/issue-"
 
 		got, err := forge.ResolveOpenPRFiles(f.AsPushOnly(), "agent/issue-42")
 		if err != nil || got != nil {
@@ -76,7 +72,6 @@ func TestResolveOpenPRFiles(t *testing.T) {
 
 	t.Run("no open PR yet", func(t *testing.T) {
 		f := forge.NewFake()
-		f.BranchPrefix = "agent/issue-"
 
 		got, err := forge.ResolveOpenPRFiles(f, "agent/issue-42")
 		if err != nil || got != nil {
@@ -86,7 +81,6 @@ func TestResolveOpenPRFiles(t *testing.T) {
 
 	t.Run("open PR found returns its changed files", func(t *testing.T) {
 		f := forge.NewFake()
-		f.BranchPrefix = "agent/issue-"
 		f.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/o/r/pull/7"})
 		f.SetPRFiles("https://github.com/o/r/pull/7", []string{"a.go", "b.go"})
 
@@ -98,7 +92,6 @@ func TestResolveOpenPRFiles(t *testing.T) {
 
 	t.Run("ListPRFiles failure propagates", func(t *testing.T) {
 		f := forge.NewFake()
-		f.BranchPrefix = "agent/issue-"
 		f.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/o/r/pull/7"})
 		f.PRFilesErr = fmt.Errorf("boom")
 
@@ -115,7 +108,6 @@ func TestResolveOpenPRFiles(t *testing.T) {
 func TestResolveOpenPRWithRetry(t *testing.T) {
 	t.Run("transient error then success adopts the PR", func(t *testing.T) {
 		f := forge.NewFake()
-		f.BranchPrefix = "agent/issue-"
 		f.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/o/r/pull/7"})
 		f.OpenPRForBranchErrs = []error{
 			fmt.Errorf("gh pr list: exit status 1: HTTP 502: Bad Gateway"),
@@ -139,7 +131,6 @@ func TestResolveOpenPRWithRetry(t *testing.T) {
 
 	t.Run("persistent transient error exhausts attempts and returns the error", func(t *testing.T) {
 		f := forge.NewFake()
-		f.BranchPrefix = "agent/issue-"
 		f.OpenPRForBranchErr = fmt.Errorf("gh pr list: exit status 1: connection reset")
 
 		rc := &recordingClock{}
@@ -157,7 +148,6 @@ func TestResolveOpenPRWithRetry(t *testing.T) {
 
 	t.Run("no open PR yet does not retry", func(t *testing.T) {
 		f := forge.NewFake()
-		f.BranchPrefix = "agent/issue-"
 
 		rc := &recordingClock{}
 		backoff := retry.LinearBackoff{Unit: time.Second, Clock: rc.Clock()}
@@ -173,7 +163,6 @@ func TestResolveOpenPRWithRetry(t *testing.T) {
 
 	t.Run("non-transient error does not retry", func(t *testing.T) {
 		f := forge.NewFake()
-		f.BranchPrefix = "agent/issue-"
 		f.OpenPRForBranchErr = fmt.Errorf("gh pr list: exit status 1: no pull requests found")
 
 		rc := &recordingClock{}

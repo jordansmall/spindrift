@@ -836,7 +836,7 @@ func TestSettle_GithubReadWrite_UnaffectedByHostMediation(t *testing.T) {
 // Issue #1949's fix for a confirmed live exploit: a prompt-injected read-only
 // Box can print landing=main, or any other ref, on its outcome line. settle
 // must never trust that as the relay destination or the draft-PR head. Both
-// come from the Code Forge's own canonical AgentBranch for the issue.
+// come from the canonical agent branch (forge.AgentBranchName) for the issue.
 func TestSettle_GithubReadOnly_HostileLandingIgnored_UsesAgentBranch(t *testing.T) {
 	const issNum = "1919"
 	const hostileLanding = "main"
@@ -876,7 +876,7 @@ func TestSettle_GithubReadOnly_HostileLandingIgnored_UsesAgentBranch(t *testing.
 // The "merged" analogue of #1949's fix (issue #1955): a prompt-injected Box
 // can print landing=main on a status=merged outcome line too, so verifyMerged
 // must resolve the PR to check from the Code Forge's own canonical
-// AgentBranch, exactly like the "ready" arm above.
+// agent branch, exactly like the "ready" arm above.
 func TestSettle_GithubReadOnly_MergedStatus_HostileLandingIgnored_UsesAgentBranch(t *testing.T) {
 	const issNum = "1955"
 	const hostileLanding = "main"

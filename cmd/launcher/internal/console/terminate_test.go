@@ -35,7 +35,6 @@ func newTermTestLauncher(t *testing.T) (launch *Launcher, fc *forge.Fake, fr *ru
 	t.Helper()
 	labels := forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"}
 	fc = forge.NewFake(labels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-in-progress"}})
 
 	factory, fr, dir := newTermFactory(t)
@@ -106,7 +105,6 @@ func TestLauncher_Terminate_ReapsTransitionsAndComments(t *testing.T) {
 func TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel(t *testing.T) {
 	labels := forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress", Complete: "agent-complete"}
 	fc := forge.NewFake(labels)
-	fc.BranchPrefix = "agent/issue-"
 	// The agent-complete label simulates selfHeal's swap landing just before
 	// Terminate runs.
 	fc.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-complete"}})
@@ -237,7 +235,6 @@ func TestLauncher_Terminate_AppendsBoxLogTerminalLine(t *testing.T) {
 func TestLauncher_TerminateThenRepick_NoOutcomeReportsBlocked(t *testing.T) {
 	labels := forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress", Complete: "agent-complete"}
 	fc := forge.NewFake(labels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-in-progress"}})
 
 	dir := t.TempDir()

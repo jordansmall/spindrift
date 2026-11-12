@@ -14,7 +14,7 @@ import (
 
 // hostMediateDraftPR relays a read-only Box's finished branch and opens its
 // draft PR host-side (issue #1919). The relay runs even when the Box printed no
-// PR-intent line (issue #2447). branch comes from cf.AgentBranch, never the
+// PR-intent line (issue #2447). branch comes from forge.AgentBranchName, never the
 // Box-controlled landing= (issue #1949). A non-nil error means no PR is open
 // and the caller skips the CI watch; errAbandoned also means a stop landed
 // during the relay's backoff, so the caller must post nothing (issue #3523).
@@ -65,7 +65,7 @@ func (s *Settle) hostMediateDraftPR(num string, gen uint64, result dispatch.Resu
 // relayBlockedWork relays a blocked Box's branch so the work is not lost, then
 // opens a draft PR if the Box left a PR-intent line (issue #1933). Failures
 // only log: the caller's blocked transition already recorded the outcome.
-// branch comes from cf.AgentBranch, never o.Landing (issue #1949). A push-only
+// branch comes from forge.AgentBranchName, never o.Landing (issue #1949). A push-only
 // forge cannot use Open, which requires DraftPRCreator, so it relays directly.
 // It returns errAbandoned when a stop landed during the relay's backoff, so the
 // caller must post nothing on the issue the operator stopped (issue #3523);

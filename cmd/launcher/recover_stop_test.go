@@ -156,7 +156,6 @@ func TestRecoverByNumber_MidFlightAbort_ReclaimsToDispatchable(t *testing.T) {
 
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.BranchPrefix
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := forge.AgentBranchName(c.BranchPrefix, "42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
@@ -205,7 +204,6 @@ func TestRecoverByNumber_MidFlightAbort_ParkedFailedLabelStillReaped(t *testing.
 
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.BranchPrefix
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.FailedLabel}})
 	fc.SetPR(forge.AgentBranchName(c.BranchPrefix, "42"), forge.PR{URL: testReconcilePR})
 
@@ -328,7 +326,6 @@ func TestRecoverByNumber_AbortAfterAdoptSettled_NoReclaim(t *testing.T) {
 
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.BranchPrefix
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := forge.AgentBranchName(c.BranchPrefix, "42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
@@ -378,7 +375,6 @@ func TestRecoverByNumber_AbortAfterSettleRelayed_ExitsStopWithoutRecoverFailed(t
 
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.BranchPrefix
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 
 	dir := tempLogDir(t)
@@ -409,7 +405,6 @@ func TestRecoverByNumber_AbortAfterSettleRelayed_ExitsStopWithoutRecoverFailed(t
 func TestRecoverByNumber_OwnerSettling_Skips(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.BranchPrefix
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	fc.SetPR(forge.AgentBranchName(c.BranchPrefix, "42"), forge.PR{URL: testReconcilePR})
 
@@ -454,7 +449,6 @@ func TestRecoverByNumber_OwnerSettling_Skips(t *testing.T) {
 func TestRecoverByNumber_IssueClaimedElsewhere_Skips(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.BranchPrefix
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := forge.AgentBranchName(c.BranchPrefix, "42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
@@ -551,7 +545,6 @@ func TestRecoverByNumber_MidFlightAbort_OwnFailedSettleSpared(t *testing.T) {
 
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.BranchPrefix
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	fc.SetPR(forge.AgentBranchName(c.BranchPrefix, "42"), forge.PR{URL: testReconcilePR})
 

@@ -356,23 +356,18 @@ func TestFake_FailureDetailErr(t *testing.T) {
 	}
 }
 
-// Issue #444 gives the forge client sole ownership of the branch-prefix rule so
-// call sites never concatenate it themselves. The Fake has to match the real
-// adapters' AgentBranch contract.
-func TestFake_AgentBranch(t *testing.T) {
-	f := forge.NewFake()
-	f.BranchPrefix = "agent/issue-"
-	if got := f.AgentBranch("42"); got != "agent/issue-42" {
-		t.Errorf("AgentBranch(42) = %q, want %q", got, "agent/issue-42")
-	}
-}
-
-// An empty BranchPrefix yields the bare issue number (AgentBranchName is
-// prefix+num); the launcher's unconfigured default is "agent/issue-" instead.
-func TestFake_AgentBranch_ZeroValue(t *testing.T) {
-	f := forge.NewFake()
-	if got := f.AgentBranch("7"); got != "7" {
-		t.Errorf("AgentBranch(7) = %q, want %q", got, "7")
+// AgentBranchName is plain concatenation: the prefix carries the whole shape
+// (BRANCH_PREFIX defaults to "agent/issue-"), so a custom prefix is honored
+// verbatim rather than re-suffixed.
+func TestAgentBranchName(t *testing.T) {
+	for _, tc := range []struct{ prefix, num, want string }{
+		{"agent/issue-", "42", "agent/issue-42"},
+		{"bot/", "7", "bot/7"},
+		{"", "9", "9"},
+	} {
+		if got := forge.AgentBranchName(tc.prefix, tc.num); got != tc.want {
+			t.Errorf("AgentBranchName(%q, %q) = %q, want %q", tc.prefix, tc.num, got, tc.want)
+		}
 	}
 }
 

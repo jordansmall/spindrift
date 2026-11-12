@@ -28,7 +28,7 @@ type Config struct {
 	// GitUserName and GitUserEmail are the identity on the merge commits a local
 	// Code Forge's Merge creates.
 	GitUserName, GitUserEmail string
-	// BranchPrefix prefixes each per-issue Code Forge's AgentBranch output.
+	// BranchPrefix is the prefix of each per-issue agent branch (forge.AgentBranchName).
 	BranchPrefix string
 }
 

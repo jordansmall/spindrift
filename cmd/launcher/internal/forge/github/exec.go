@@ -128,11 +128,6 @@ func NewExecClient(repo string, labels forge.DispatchLabels, branchPrefix string
 	return e
 }
 
-// AgentBranch returns forge.AgentBranchName(branchPrefix, num).
-func (e *execClient) AgentBranch(num string) string {
-	return forge.AgentBranchName(e.branchPrefix, num)
-}
-
 // IsGithubTracker implements the optional forge.GithubTracker marker (#2341),
 // which tells settle's ensureClosesReference that this adapter owns the GitHub
 // Closes-keyword convention. Other trackers, such as forgejo, number their

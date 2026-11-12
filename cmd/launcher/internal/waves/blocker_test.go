@@ -403,7 +403,6 @@ func TestUnreadyBlockers_Mixed(t *testing.T) {
 
 func TestReadinessReady_MergedPR(t *testing.T) {
 	fc := forge.NewFake()
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN"})
 	fc.SetPR("agent/issue-99", forge.PR{URL: "https://github.com/owner/repo/pull/99"})
 	fc.SetPRState("https://github.com/owner/repo/pull/99", forge.PRMerged)
@@ -415,7 +414,6 @@ func TestReadinessReady_MergedPR(t *testing.T) {
 
 func TestReadinessReady_OpenPRWithCompleteLabel(t *testing.T) {
 	fc := forge.NewFake()
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Labels: []string{testCompleteLabel}})
 	fc.SetPR("agent/issue-99", forge.PR{URL: "https://github.com/owner/repo/pull/99"})
 	// SetPR without a SetPRState override leaves the PR state OPEN.
@@ -449,7 +447,6 @@ func TestReadinessReady_ClosedPRDefersToIssueState(t *testing.T) {
 	const prURL = "https://github.com/owner/repo/pull/99"
 	setup := func(issueState forge.IssueState) *forge.Fake {
 		fc := forge.NewFake()
-		fc.BranchPrefix = "agent/issue-"
 		fc.SetIssue(forge.Issue{Number: "99", State: issueState})
 		fc.SetPR("agent/issue-99", forge.PR{URL: prURL})
 		fc.SetPRState(prURL, forge.PRClosed)
@@ -487,7 +484,6 @@ func TestReadinessStatus_ClosedPRClosedIssueFetchesOnce(t *testing.T) {
 	c := baseConfig()
 	c.BranchPrefix = "agent/issue-"
 	fc := forge.NewFake()
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "11", State: forge.IssueClosed})
 	fc.SetPR("agent/issue-11", forge.PR{URL: "https://github.com/owner/repo/pull/11"})
 	fc.SetPRState("https://github.com/owner/repo/pull/11", forge.PRClosed)
@@ -619,7 +615,6 @@ func TestReadinessStatus_ClosedPRClosedIssueFailedLabelIsReady(t *testing.T) {
 	c := baseConfig()
 	c.BranchPrefix = "agent/issue-"
 	fc := forge.NewFake()
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "11", State: "CLOSED", Labels: []string{c.FailedLabel}})
 	fc.SetPR("agent/issue-11", forge.PR{URL: "https://github.com/owner/repo/pull/11"})
 	fc.SetPRState("https://github.com/owner/repo/pull/11", forge.PRClosed)
@@ -660,7 +655,6 @@ func TestReadinessStatus_MergedPRIgnoresFailedLabel(t *testing.T) {
 	c := baseConfig()
 	c.BranchPrefix = "agent/issue-"
 	fc := forge.NewFake()
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN", Labels: []string{c.FailedLabel}})
 	fc.SetPR("agent/issue-11", forge.PR{URL: "https://github.com/owner/repo/pull/11"})
 	fc.SetPRState("https://github.com/owner/repo/pull/11", forge.PRMerged)
@@ -683,7 +677,6 @@ func TestReadinessStatus_OpenPRFailedLabelFetchesOnce(t *testing.T) {
 	c := baseConfig()
 	c.BranchPrefix = "agent/issue-"
 	fc := forge.NewFake()
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN", Labels: []string{c.FailedLabel}})
 	fc.SetPR("agent/issue-11", forge.PR{URL: "https://github.com/owner/repo/pull/11"})
 	fc.SetPRState("https://github.com/owner/repo/pull/11", forge.PROpen)
@@ -709,7 +702,6 @@ func TestReadinessStatus_MultipleBlockersAtMostOneFetchEach(t *testing.T) {
 	c := baseConfig()
 	c.BranchPrefix = "agent/issue-"
 	fc := forge.NewFake()
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"})
 	fc.SetIssue(forge.Issue{Number: "12", State: "CLOSED"})
 	fc.SetPR("agent/issue-12", forge.PR{URL: "https://github.com/owner/repo/pull/12"})

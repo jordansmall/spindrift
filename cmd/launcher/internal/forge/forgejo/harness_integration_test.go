@@ -558,7 +558,7 @@ func TestForgejoIntegration_DispatchLifecycle(t *testing.T) {
 		t.Fatalf("adapter-read labels %v disagree with raw REST oracle %v", adapterLabels, rawLabels)
 	}
 
-	branch := cf.AgentBranch(numStr)
+	branch := forge.AgentBranchName("agent/issue-", numStr)
 	seedBranchWithCommit(t, baseURL, token, repo, branch)
 
 	// OpenPRForBranch must find a PR that is still a draft under the

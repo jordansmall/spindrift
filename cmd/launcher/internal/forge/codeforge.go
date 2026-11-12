@@ -5,12 +5,9 @@ import (
 	"strings"
 )
 
-// CodeForge is the seam every adapter implements: agent branch naming, rebase,
-// merge/landing under MERGE_MODE, and connectivity probe.
+// CodeForge is the seam every adapter implements: rebase, merge/landing under
+// MERGE_MODE, and connectivity probe.
 type CodeForge interface {
-	// AgentBranch returns the agent branch name for issue num. The prefix is
-	// baked in at construction; callers never concatenate it themselves.
-	AgentBranch(num string) string
 	// BranchExists reports whether branch exists on the remote, independent of
 	// any PR, the signal a bare `git push` with no PR opened yet still leaves
 	// behind. Reconcile's gated orphan reset (#1432, #600) needs it.
@@ -220,8 +217,8 @@ type MergeCommitReader interface {
 }
 
 // AgentBranchName is the one place the agent branch name is built from its
-// prefix (issue #444): every adapter's AgentBranch returns it, and the in-Box
-// main, which holds no CodeForge, calls it directly.
+// prefix (issue #444). It is core policy, not a forge method: every caller,
+// host-side and in-Box, passes the configured BRANCH_PREFIX.
 func AgentBranchName(prefix, num string) string {
 	return prefix + num
 }

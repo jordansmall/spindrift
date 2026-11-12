@@ -215,7 +215,6 @@ func TestRun_Discovered_DependencyEdge_DispatchesDependentOnNextInvocation(t *te
 	c.MaxParallel = 2
 
 	fc := forge.NewFake(dispatchLabels(c, label))
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "2", Body: "depends on #1", Labels: []string{label}})
 	fc.SetPR("agent/issue-1", forge.PR{URL: prURL})

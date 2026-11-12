@@ -95,7 +95,7 @@ type Step struct {
 
 // Line renders the step as the operator-facing progress line, omitting each
 // empty field. An empty Landing drops the "landing=" segment: every producer
-// passes a non-empty landing (outcome.Parse rejects an empty one; AgentBranch
+// passes a non-empty landing (outcome.Parse rejects an empty one; agent branch
 // and PR URLs are never empty), and steps that never had a landing (fix-pass,
 // filed=, dedup lines) rely on the omission.
 func (st Step) Line() string {

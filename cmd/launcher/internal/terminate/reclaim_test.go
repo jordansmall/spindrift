@@ -21,7 +21,6 @@ func newFakeForge(t *testing.T) *forge.Fake {
 	t.Helper()
 	labels := forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"}
 	fc := forge.NewFake(labels)
-	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-in-progress"}})
 	return fc
 }
