@@ -334,3 +334,80 @@ func TestAuditLogConcurrentRecordsAreWholeLines(t *testing.T) {
 		t.Fatalf("decoded %d lines, want 50", len(l))
 	}
 }
+
+func TestNetworkAuditShadowMarkAndObserve(t *testing.T) {
+	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") })
+	route := connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"}
+	sent := []byte(fmt.Sprintf(`{"method":"GET","url":"%s/repos"}`, b.URL))
+	for _, shadow := range []bool{false, true} {
+		var audit bytes.Buffer
+		var seen []connectorhost.AuditEntry
+		n := netFor(b, &audit, route)
+		n.Shadow = shadow
+		n.Observe = func(e connectorhost.AuditEntry) { seen = append(seen, e) }
+		if _, _, err := n.Do(context.Background(), sent, 1<<10); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := n.Do(context.Background(), []byte(`{`), 1<<10); !errors.Is(err, connectorhost.ErrRouteRefused) {
+			t.Fatal(err)
+		}
+		n.RecordFailure(connectorhost.DecisionFailed, errors.New("boom"))
+		lines := auditLines(t, &audit)
+		if len(lines) != 3 || len(seen) != 3 {
+			t.Fatalf("shadow=%v: %d audit lines, %d observed, want 3 each", shadow, len(lines), len(seen))
+		}
+		for i := range lines {
+			if lines[i].Shadow != shadow || seen[i] != lines[i] {
+				t.Errorf("shadow=%v entry %d: audit %+v, observed %+v", shadow, i, lines[i], seen[i])
+			}
+		}
+		if got := strings.Contains(audit.String(), `"shadow":true`); got != shadow {
+			t.Errorf("shadow=%v: shadow key present = %v in %q", shadow, got, audit.String())
+		}
+		if !shadow && strings.Contains(audit.String(), `"shadow"`) {
+			t.Errorf("non-shadow audit carries a shadow key: %q", audit.String())
+		}
+	}
+}
+
+func TestNetworkAuditClassifiesRateLimits(t *testing.T) {
+	cases := map[string]struct {
+		status         int
+		headers        map[string]string
+		body           string
+		wantRateLimit  string
+		wantRetryAfter string
+	}{
+		"primary":              {403, map[string]string{"X-RateLimit-Remaining": "0"}, "", "primary", ""},
+		"primary beats retry":  {403, map[string]string{"X-RateLimit-Remaining": "0", "Retry-After": "30"}, "", "primary", "30"},
+		"secondary header":     {403, map[string]string{"Retry-After": "60"}, "", "secondary", "60"},
+		"secondary 429 header": {429, map[string]string{"Retry-After": "5"}, "", "secondary", "5"},
+		"secondary body 403":   {403, nil, `{"message":"You have exceeded a Secondary Rate Limit"}`, "secondary", ""},
+		"secondary body 429":   {429, nil, "You have exceeded a secondary rate limit", "secondary", ""},
+		"plain 403":            {403, map[string]string{"X-RateLimit-Remaining": "4999"}, `{"message":"Forbidden"}`, "", ""},
+		"plain 429":            {429, nil, "", "secondary", ""},
+		"ok ignores headers":   {200, map[string]string{"X-RateLimit-Remaining": "0", "Retry-After": "9"}, "", "", ""},
+		"404 ignores headers":  {404, map[string]string{"Retry-After": "9"}, "secondary rate limit", "", ""},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+				for k, v := range c.headers {
+					w.Header().Set(k, v)
+				}
+				w.WriteHeader(c.status)
+				_, _ = io.WriteString(w, c.body)
+			})
+			var audit bytes.Buffer
+			n := netFor(b, &audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+			status, _, err := n.Do(context.Background(), []byte(fmt.Sprintf(`{"method":"GET","url":"%s/repos"}`, b.URL)), 1<<10)
+			if err != nil || status != c.status {
+				t.Fatalf("got %d %v", status, err)
+			}
+			l := auditLines(t, &audit)
+			if len(l) != 1 || l[0].RateLimit != c.wantRateLimit || l[0].RetryAfter != c.wantRetryAfter {
+				t.Errorf("audit = %+v, want rate_limit %q retry_after %q", l, c.wantRateLimit, c.wantRetryAfter)
+			}
+		})
+	}
+}

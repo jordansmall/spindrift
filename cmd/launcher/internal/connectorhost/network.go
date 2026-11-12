@@ -108,6 +108,40 @@ type AuditEntry struct {
 	Size      int64    `json:"size"`
 	Decision  Decision `json:"decision"`
 	Reason    string   `json:"reason,omitempty"`
+	// Shadow marks an entry a sampled shadow Connector recorded beside the
+	// native backend; it is omitted otherwise, so other entries are unchanged.
+	Shadow bool `json:"shadow,omitempty"`
+	// RateLimit is RateLimitPrimary or RateLimitSecondary when a 403 or 429 carries a
+	// rate-limit signal, else empty; see rateLimitKind.
+	RateLimit string `json:"rate_limit,omitempty"`
+	// RetryAfter is the response's Retry-After value verbatim, on a 403 or 429.
+	RetryAfter string `json:"retry_after,omitempty"`
+}
+
+// The wire values of AuditEntry.RateLimit; docs/reference.md documents them.
+const (
+	RateLimitPrimary   = "primary"
+	RateLimitSecondary = "secondary"
+)
+
+// rateLimitKind classifies a 403 or 429 response from GitHub's documented
+// rate-limit signals: x-ratelimit-remaining of 0 is the primary limit, a
+// retry-after header or a "secondary rate limit" body is the secondary one. It
+// is read host-side because the guest sees only status and body. A 429 with
+// neither is still secondary (it means too many requests on any server); a
+// plain 403 is not a limit, so Status alone tells it apart.
+func rateLimitKind(status int, h http.Header, body []byte) (kind, retryAfter string) {
+	if status != http.StatusForbidden && status != http.StatusTooManyRequests {
+		return "", ""
+	}
+	retryAfter = h.Get("Retry-After")
+	switch {
+	case h.Get("X-RateLimit-Remaining") == "0":
+		kind = RateLimitPrimary
+	case status == http.StatusTooManyRequests || retryAfter != "" || bytes.Contains(bytes.ToLower(body), []byte("secondary rate limit")):
+		kind = RateLimitSecondary
+	}
+	return kind, retryAfter
 }
 
 // AuditLog writes AuditEntry records as JSON lines. Each record is one Write
@@ -138,7 +172,18 @@ func (l *AuditLog) Record(e AuditEntry) error {
 // recordFailure audits d for a caller already failing, so the write error has
 // nowhere to go.
 func (n *Network) recordFailure(d Decision, err error) {
-	_ = n.Audit.Record(AuditEntry{Connector: n.Name, Decision: d, Reason: err.Error()})
+	_ = n.record(AuditEntry{Connector: n.Name, Decision: d, Reason: err.Error()})
+}
+
+// record stamps e with the Network's Shadow mark, writes it, then hands it to
+// Observe, outside the audit log's mutex.
+func (n *Network) record(e AuditEntry) error {
+	e.Shadow = n.Shadow
+	err := n.Audit.Record(e)
+	if n.Observe != nil {
+		n.Observe(e)
+	}
+	return err
 }
 
 // Network is the host side of a network Connector's single Host call,
@@ -156,6 +201,10 @@ type Network struct {
 	Client *http.Client
 	// Audit receives one entry per request; required.
 	Audit *AuditLog
+	// Shadow stamps every audit entry as a shadow Connector's.
+	Shadow bool
+	// Observe, when non-nil, is called with each entry after it is recorded.
+	Observe func(AuditEntry)
 }
 
 // httpRequest is the wire form of a guest's http_request.
@@ -183,7 +232,7 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 		if err != nil {
 			entry.Reason = err.Error()
 		}
-		if aerr := n.Audit.Record(entry); aerr != nil && err == nil {
+		if aerr := n.record(entry); aerr != nil && err == nil {
 			status, body, err = 0, nil, fmt.Errorf("%w: connector %q: %v", ErrAudit, n.Name, aerr)
 		}
 	}()
@@ -253,6 +302,7 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 	status = resp.StatusCode
 	data, rderr := io.ReadAll(io.LimitReader(resp.Body, int64(maxBody)+1))
 	entry.Size = int64(len(data))
+	entry.RateLimit, entry.RetryAfter = rateLimitKind(status, resp.Header, data)
 	if rderr != nil {
 		return status, nil, fmt.Errorf("%w: connector %q: reading response: %v", ErrHTTPSend, n.Name, rderr)
 	}
