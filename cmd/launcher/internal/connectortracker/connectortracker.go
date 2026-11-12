@@ -1,8 +1,8 @@
 // Package connectortracker builds core's tracker reads (the forge.IssueTracker
 // list and issue reads and, when advertised, forge.CommentLister and
-// forge.NativeDepsReader) from a tracker Connector, over the provisional 0.y
-// tracker primitives in sdk/tracker. Every write stays with the native adapter,
-// which also stays authoritative for every optional capability the Connector
+// forge.NativeDepsReader) from a tracker Connector, over the 0.2 tracker
+// primitives in sdk/tracker. Every write stays with the native adapter, which
+// also stays authoritative for every optional capability the Connector
 // does not serve: the result is a stack of forge.Unwrapper layers over the
 // native adapter, so forge.As reaches those capabilities through it.
 package connectortracker
@@ -11,12 +11,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -56,6 +59,14 @@ type (
 		Body   string   `json:"body"`
 		State  string   `json:"state"`
 		Labels []string `json:"labels"`
+
+		// ClosedAt is RFC3339, "" when the issue is open or the date is unknown.
+		// Core ignores it and ClosedNotPlanned for an open issue.
+		ClosedAt         string `json:"closedAt"`
+		ClosedNotPlanned bool   `json:"closedNotPlanned"`
+		// DedupMarker is the raw dedup marker line from the tracker's side store,
+		// "" when there is none. It is never part of Body.
+		DedupMarker string `json:"dedupMarker"`
 	}
 	wireComment struct {
 		Author          string `json:"author"`
@@ -64,6 +75,9 @@ type (
 		Minimized       bool   `json:"minimized"`
 		MinimizedReason string `json:"minimizedReason"`
 		Association     string `json:"association"`
+		// ResearchMarker reports that the comment carries the research marker in
+		// a side store; Body excludes it.
+		ResearchMarker bool `json:"researchMarker"`
 	}
 	listIssuesParams struct {
 		Target Target `json:"target"`
@@ -89,7 +103,14 @@ const (
 	// drops minimized comments on that flag, and some trackers (GitHub REST)
 	// cannot report it, so core trusts no Connector's comments without it.
 	CapComments = "tracker.comments"
+	// CapProjectKeyIDs: every id the Connector returns is a project key and a
+	// number ("ENG-12"). Absent, ids are decimal integers.
+	CapProjectKeyIDs = "tracker.ids.projectKey"
 )
+
+// projectKeyID is the projectKey grammar: ids become branch names, so the
+// shape is closed rather than sanitised.
+var projectKeyID = regexp.MustCompile(`^[A-Z][A-Z0-9_]*-[1-9][0-9]*$`)
 
 // reads serves the list and issue reads from a Connector and leaves every write
 // to the embedded native adapter. It is the base layer; the optional layers
@@ -99,6 +120,7 @@ type reads struct {
 	call   guestCall
 	labels forge.DispatchLabels
 	target Target
+	ids    idGrammar
 }
 
 // Unwrap implements forge.Unwrapper, so forge.As finds the native adapter's own
@@ -134,7 +156,13 @@ func (l commentsLayer) Comments(num string) ([]forge.Comment, error) {
 	}
 	comments := make([]forge.Comment, len(res.Comments))
 	for i, c := range res.Comments {
-		comments[i] = forge.Comment(c)
+		comments[i] = forge.Comment{
+			Author: c.Author, CreatedAt: c.CreatedAt, Body: c.Body,
+			Minimized: c.Minimized, MinimizedReason: c.MinimizedReason, Association: c.Association,
+		}
+		if c.ResearchMarker {
+			comments[i].Body = forge.ResearchMarker + "\n" + c.Body
+		}
 	}
 	return comments, nil
 }
@@ -150,7 +178,7 @@ type nativeDepsLayer struct {
 func (l nativeDepsLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
 
 // NativeDepsOf returns the ids num blocks on, deduplicated in the guest's order.
-// An id that is not a positive decimal integer fails closed, as in issue().
+// An id outside the Connector's id grammar fails closed, as in issue().
 func (l nativeDepsLayer) NativeDepsOf(num string) ([]string, error) {
 	var res struct {
 		IDs []string `json:"ids"`
@@ -161,8 +189,8 @@ func (l nativeDepsLayer) NativeDepsOf(num string) ([]string, error) {
 	var deps []string
 	seen := map[string]bool{}
 	for _, id := range res.IDs {
-		if !isIssueNumber(id) {
-			return nil, fmt.Errorf("%w: native dependency id %q is not a positive integer", ErrAnswer, id)
+		if !l.r.ids.valid(id) {
+			return nil, fmt.Errorf("%w: native dependency id %q is not %s", ErrAnswer, id, l.r.ids.name)
 		}
 		if !seen[id] {
 			seen[id] = true
@@ -196,7 +224,11 @@ func New(c *connectorhost.Connector, writes forge.IssueTracker, labels forge.Dis
 }
 
 func newTracker(call guestCall, writes forge.IssueTracker, labels forge.DispatchLabels, target Target, caps []string) forge.IssueTracker {
-	r := &reads{IssueTracker: writes, call: call, labels: labels, target: target}
+	ids := decimalIDs
+	if slices.Contains(caps, CapProjectKeyIDs) {
+		ids = projectKeyIDs
+	}
+	r := &reads{IssueTracker: writes, call: call, labels: labels, target: target, ids: ids}
 	var it forge.IssueTracker = r
 	if slices.Contains(caps, CapComments) {
 		it = commentsLayer{it, r}
@@ -226,16 +258,12 @@ func (t *reads) list(label string) ([]forge.Issue, error) {
 	issues := make([]forge.Issue, len(res.Issues))
 	for i, w := range res.Issues {
 		var err error
-		if issues[i], err = w.issue(); err != nil {
+		if issues[i], err = w.issue(t.ids); err != nil {
 			return nil, err
 		}
 	}
-	// Numbers were validated as decimal integers by issue().
-	sort.Slice(issues, func(i, j int) bool {
-		ni, _ := strconv.Atoi(issues[i].Number)
-		nj, _ := strconv.Atoi(issues[j].Number)
-		return ni < nj
-	})
+	// Numbers were validated by issue().
+	sort.Slice(issues, func(i, j int) bool { return t.ids.less(issues[i].Number, issues[j].Number) })
 	// The guest is asked for Limit but is not trusted to honour it.
 	issues = issues[:min(len(issues), forge.ResultPageLimit)]
 	forge.WarnPageMayTruncateBacklog("tracker connector list", len(issues))
@@ -247,7 +275,7 @@ func (t *reads) Issue(num string) (forge.Issue, error) {
 	if err := t.call(context.Background(), "tracker.issue", numberedParams{t.target, num}, &w); err != nil {
 		return forge.Issue{}, err
 	}
-	got, err := w.issue()
+	got, err := w.issue(t.ids)
 	if err != nil {
 		return forge.Issue{}, err
 	}
@@ -257,18 +285,54 @@ func (t *reads) Issue(num string) (forge.Issue, error) {
 	return got, nil
 }
 
-// isIssueNumber reports whether s is a positive decimal integer in canonical
-// form (no sign, no leading zeros).
-func isIssueNumber(s string) bool {
-	n, err := strconv.Atoi(s)
-	return err == nil && n >= 1 && strconv.Itoa(n) == s
+// idGrammar is the shape of every id a Connector returns. Ids become branch
+// names, so core checks them all against one grammar chosen from the
+// Connector's capabilities.
+type idGrammar struct {
+	name  string
+	valid func(string) bool
+	// less orders two valid ids by creation: numerically, not lexically.
+	less func(a, b string) bool
+}
+
+var decimalIDs = idGrammar{
+	name: "a positive integer",
+	valid: func(s string) bool {
+		n, err := strconv.Atoi(s)
+		return err == nil && n >= 1 && strconv.Itoa(n) == s
+	},
+	less: func(a, b string) bool {
+		na, _ := strconv.Atoi(a)
+		nb, _ := strconv.Atoi(b)
+		return na < nb
+	},
+}
+
+var projectKeyIDs = idGrammar{
+	name:  "a project key and number (ENG-12)",
+	valid: projectKeyID.MatchString,
+	less: func(a, b string) bool {
+		pa, na := splitKey(a)
+		pb, nb := splitKey(b)
+		if pa != pb {
+			return pa < pb
+		}
+		return na < nb
+	},
+}
+
+// splitKey splits a valid project-key id into its prefix and number.
+func splitKey(id string) (string, int) {
+	i := strings.LastIndexByte(id, '-')
+	n, _ := strconv.Atoi(id[i+1:])
+	return id[:i], n
 }
 
 // issue converts a wire issue, failing closed on a state it does not know or a
-// number that is not a positive decimal integer (numbers become branch names).
-func (w wireIssue) issue() (forge.Issue, error) {
-	if !isIssueNumber(w.Number) {
-		return forge.Issue{}, fmt.Errorf("%w: issue number %q is not a positive integer", ErrAnswer, w.Number)
+// number outside the id grammar (numbers become branch names).
+func (w wireIssue) issue(g idGrammar) (forge.Issue, error) {
+	if !g.valid(w.Number) {
+		return forge.Issue{}, fmt.Errorf("%w: issue number %q is not %s", ErrAnswer, w.Number, g.name)
 	}
 	var state forge.IssueState
 	switch w.State {
@@ -279,12 +343,18 @@ func (w wireIssue) issue() (forge.Issue, error) {
 	default:
 		return forge.Issue{}, fmt.Errorf("%w: issue %s has unknown state %q", ErrAnswer, w.Number, w.State)
 	}
-	return forge.Issue{
+	iss := forge.Issue{
 		Number:   w.Number,
 		Title:    w.Title,
-		Body:     w.Body,
+		Body:     dedupmarker.Append(w.Body, w.DedupMarker),
 		State:    state,
 		Labels:   w.Labels,
 		Priority: forge.ResolvePriority(w.Labels),
-	}, nil
+	}
+	if state == forge.IssueClosed {
+		// A malformed date leaves ClosedAt zero rather than failing the read.
+		iss.ClosedAt, _ = time.Parse(time.RFC3339, w.ClosedAt)
+		iss.ClosedNotPlanned = w.ClosedNotPlanned
+	}
+	return iss, nil
 }

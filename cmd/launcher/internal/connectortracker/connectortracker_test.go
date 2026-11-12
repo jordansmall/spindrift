@@ -9,9 +9,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -353,5 +355,152 @@ func TestNativeDepsRefusesBadIDs(t *testing.T) {
 		if ids, err := r.NativeDepsOf("9"); !errors.Is(err, ErrAnswer) {
 			t.Errorf("id %q: ids = %v, err = %v; want ErrAnswer", bad, ids, err)
 		}
+	}
+}
+
+func TestProjectKeyIDsRoundTrip(t *testing.T) {
+	call, _ := stubGuest(t, map[string]string{"tracker.issue": `{"number":"ENG-12","title":"t","state":"open"}`})
+	tr := newTracker(call, newNative(), testLabels, testTarget, []string{CapProjectKeyIDs})
+	got, err := tr.Issue("ENG-12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Number != "ENG-12" {
+		t.Errorf("number = %q, want ENG-12", got.Number)
+	}
+}
+
+func TestProjectKeyIDsRefuseOutsideGrammar(t *testing.T) {
+	for _, bad := range []string{"eng-12", "ENG-012", "ENG-0", "ENG12", "12", "ENG-12/../x", ""} {
+		body := `{"number":` + strconv.Quote(bad) + `,"state":"open"}`
+		call, _ := stubGuest(t, map[string]string{
+			"tracker.issue":      body,
+			"tracker.listIssues": `{"issues":[` + body + `]}`,
+		})
+		tr := newTracker(call, newNative(), testLabels, testTarget, []string{CapProjectKeyIDs})
+		if _, err := tr.Issue(bad); !errors.Is(err, ErrAnswer) {
+			t.Errorf("Issue(%q) err = %v, want ErrAnswer", bad, err)
+		}
+		if _, err := tr.ListOpenIssues(); !errors.Is(err, ErrAnswer) {
+			t.Errorf("list with %q err = %v, want ErrAnswer", bad, err)
+		}
+	}
+}
+
+func TestDecimalConnectorRefusesProjectKey(t *testing.T) {
+	body := `{"number":"ENG-12","state":"open"}`
+	call, _ := stubGuest(t, map[string]string{"tracker.issue": body, "tracker.listIssues": `{"issues":[` + body + `]}`})
+	tr := newTracker(call, newNative(), testLabels, testTarget, nil)
+	if _, err := tr.Issue("ENG-12"); !errors.Is(err, ErrAnswer) {
+		t.Errorf("Issue err = %v, want ErrAnswer", err)
+	}
+	if _, err := tr.ListOpenIssues(); !errors.Is(err, ErrAnswer) {
+		t.Errorf("list err = %v, want ErrAnswer", err)
+	}
+}
+
+func TestProjectKeyNativeDepsFollowGrammar(t *testing.T) {
+	deps := func(caps []string, ids string) ([]string, error) {
+		call, _ := stubGuest(t, map[string]string{"tracker.nativeDeps": `{"ids":` + ids + `}`})
+		tr := newTracker(call, newNative(), testLabels, testTarget, append([]string{CapNativeDeps}, caps...))
+		r, ok := forge.As[forge.NativeDepsReader](tr)
+		if !ok {
+			t.Fatal("no NativeDepsReader")
+		}
+		return r.NativeDepsOf("ENG-1")
+	}
+	got, err := deps([]string{CapProjectKeyIDs}, `["ENG-3","OPS-4","ENG-3"]`)
+	if err != nil || !reflect.DeepEqual(got, []string{"ENG-3", "OPS-4"}) {
+		t.Errorf("ids = %v, err = %v; want ENG-3, OPS-4", got, err)
+	}
+	for _, bad := range []string{`["ENG-3","3"]`, `["eng-3"]`, `["ENG-03"]`} {
+		if ids, err := deps([]string{CapProjectKeyIDs}, bad); !errors.Is(err, ErrAnswer) {
+			t.Errorf("projectKey %s: ids = %v, err = %v; want ErrAnswer", bad, ids, err)
+		}
+	}
+	if ids, err := deps(nil, `["ENG-3"]`); !errors.Is(err, ErrAnswer) {
+		t.Errorf("decimal: ids = %v, err = %v; want ErrAnswer", ids, err)
+	}
+}
+
+func TestProjectKeyListSortsByPrefixThenNumber(t *testing.T) {
+	call, _ := stubGuest(t, map[string]string{"tracker.listIssues": `{"issues":[
+		{"number":"ENG-10","state":"open"},
+		{"number":"ENG-9","state":"open"},
+		{"number":"ABC-3","state":"open"}]}`})
+	tr := newTracker(call, newNative(), testLabels, testTarget, []string{CapProjectKeyIDs})
+	got, err := tr.ListOpenIssues()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nums []string
+	for _, i := range got {
+		nums = append(nums, i.Number)
+	}
+	if want := []string{"ABC-3", "ENG-9", "ENG-10"}; !reflect.DeepEqual(nums, want) {
+		t.Errorf("order = %v, want %v", nums, want)
+	}
+}
+
+func TestTrackerRestoresDedupMarkerAsNativeDoes(t *testing.T) {
+	marker := dedupmarker.Build([]string{"a", "b"})
+	for name, body := range map[string]string{"with body": "prose", "empty body": ""} {
+		call, _ := stubGuest(t, map[string]string{"tracker.issue": `{"number":"4","state":"open","body":` +
+			strconv.Quote(body) + `,"dedupMarker":` + strconv.Quote(marker) + `}`})
+		tr := newTracker(call, newNative(), testLabels, testTarget, nil)
+		got, err := tr.Issue("4")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := dedupmarker.Append(body, marker); got.Body != want {
+			t.Errorf("%s: body = %q, want %q", name, got.Body, want)
+		}
+	}
+	call, _ := stubGuest(t, map[string]string{"tracker.issue": `{"number":"4","state":"open","body":"prose"}`})
+	got, err := newTracker(call, newNative(), testLabels, testTarget, nil).Issue("4")
+	if err != nil || got.Body != "prose" {
+		t.Errorf("no marker: body = %q, err = %v; want body untouched", got.Body, err)
+	}
+}
+
+func TestTrackerClosedFields(t *testing.T) {
+	read := func(body string) forge.Issue {
+		t.Helper()
+		call, _ := stubGuest(t, map[string]string{"tracker.issue": body})
+		got, err := newTracker(call, newNative(), testLabels, testTarget, nil).Issue("4")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	closed := read(`{"number":"4","state":"closed","closedAt":"2026-03-04T05:06:07Z","closedNotPlanned":true}`)
+	if want := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC); !closed.ClosedAt.Equal(want) || !closed.ClosedNotPlanned {
+		t.Errorf("closed = %+v, want ClosedAt %v and not planned", closed, want)
+	}
+	open := read(`{"number":"4","state":"open","closedAt":"2026-03-04T05:06:07Z","closedNotPlanned":true}`)
+	if !open.ClosedAt.IsZero() || open.ClosedNotPlanned {
+		t.Errorf("open = %+v, want closed fields ignored", open)
+	}
+	bad := read(`{"number":"4","state":"closed","closedAt":"yesterday","closedNotPlanned":true}`)
+	if !bad.ClosedAt.IsZero() || !bad.ClosedNotPlanned {
+		t.Errorf("malformed date = %+v, want zero ClosedAt and no error", bad)
+	}
+}
+
+func TestTrackerRestoresResearchMarkerOnlyWhenFlagged(t *testing.T) {
+	call, _ := stubGuest(t, map[string]string{"tracker.comments": `{"comments":[
+		{"author":"bot","body":"verdict","researchMarker":true},
+		{"author":"human","body":"verdict"}]}`})
+	tr := newTracker(call, newNative(), testLabels, testTarget, []string{CapComments})
+	cl, ok := forge.As[forge.CommentLister](tr)
+	if !ok {
+		t.Fatal("no CommentLister")
+	}
+	got, err := cl.Comments("4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Body != forge.ResearchMarker+"\nverdict" || got[1].Body != "verdict" {
+		t.Errorf("comments = %+v, want the marker only on the flagged one", got)
 	}
 }

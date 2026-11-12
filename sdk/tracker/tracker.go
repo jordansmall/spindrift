@@ -1,11 +1,13 @@
-// Package tracker is the Connector author's side of the provisional tracker
-// read primitives: a Connector declares a Reader and Register exports it over
-// the Connector protocol. The primitives are provisional at protocol 0.y;
-// issue #6753 finalises the tracker axis.
+// Package tracker is the Connector author's side of the tracker read
+// primitives of Connector protocol 0.2: a Connector declares a Reader and
+// Register exports it over the Connector protocol.
 //
 // Every write stays on core's native adapter. The Connector returns data only
 // (raw fields such as minimized, association and createdAt); core makes every
-// policy decision.
+// policy decision. That includes the markers: a Connector whose tracker keeps
+// the dedup or research marker in a side store returns it as a field
+// (Issue.DedupMarker, Comment.ResearchMarker) and never splices it into a
+// body; core restores it.
 package tracker
 
 import (
@@ -29,6 +31,14 @@ type Issue struct {
 	Body   string   `json:"body"`
 	State  string   `json:"state"`
 	Labels []string `json:"labels"`
+
+	// ClosedAt is RFC3339, "" when the issue is open or the date is unknown.
+	// Core ignores it and ClosedNotPlanned for an open issue.
+	ClosedAt         string `json:"closedAt"`
+	ClosedNotPlanned bool   `json:"closedNotPlanned"`
+	// DedupMarker is the raw dedup marker line from the tracker's side store,
+	// "" when there is none. It is never part of Body.
+	DedupMarker string `json:"dedupMarker"`
 }
 
 // Comment is one issue comment. CreatedAt is RFC3339 as the forge reports it.
@@ -39,10 +49,29 @@ type Comment struct {
 	Minimized       bool   `json:"minimized"`
 	MinimizedReason string `json:"minimizedReason"`
 	Association     string `json:"association"`
+	// ResearchMarker reports that the comment carries the research marker in
+	// a side store; Body excludes it.
+	ResearchMarker bool `json:"researchMarker"`
 }
+
+// IDGrammar names the shape of the issue ids a Connector returns. Core checks
+// every id against it and refuses any outside.
+type IDGrammar int
+
+const (
+	// DecimalIDs is the default: positive canonical decimal integers.
+	DecimalIDs IDGrammar = iota
+	// ProjectKeyIDs are "ENG-12": an upper-case project key, a hyphen and a
+	// positive canonical integer. It advertises "tracker.ids.projectKey".
+	ProjectKeyIDs
+)
 
 // Reader is everything a tracker Connector reads.
 type Reader struct {
+	// IDs declares the grammar of every issue number and dependency id the
+	// Connector returns. The zero value is DecimalIDs.
+	IDs IDGrammar
+
 	// ListIssues returns up to limit open issues carrying label; "" means
 	// every open issue.
 	ListIssues func(t Target, label string, limit int) ([]Issue, error)
@@ -176,6 +205,9 @@ func handlers(r Reader) ([]string, map[string]method) {
 				IDs []string `json:"ids"`
 			}{ids}, nil
 		}
+	}
+	if r.IDs == ProjectKeyIDs {
+		caps = append(caps, "tracker.ids.projectKey")
 	}
 	return caps, m
 }
