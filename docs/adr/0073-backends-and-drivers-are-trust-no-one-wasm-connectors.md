@@ -371,6 +371,73 @@ events across the readers (about nine full scans after a Pass today); cut the
 Connector's per-byte cost (the bulk is large `tool_result` strings the readers
 mostly do not need); or the compiler with a per-user cache.
 
+## Amendment (issue #6851): the post-Pass reads share one decode
+
+`driverkit.Driver.Decode` decodes a Pass log once into a `PassLog`, and its
+readers (`ResultText`, `ExtractUsageAfter`, `RenderTranscript`, `ReadPasses`,
+`SessionBaselinesAfter`, `ClassifyTransient`) answer from that decode. The
+orchestrator decodes each Pass log once and runs its post-Pass reads on it. The
+path-based `Driver` methods are unchanged in signature, and each now decodes
+once; `ExtractUsageAfter` used to scan four times. This is the "decode once and
+share" option the #6849 paragraph left open.
+
+`BenchmarkConnectorPostPass` measures it on `large-pass`: `Decode` alone, then
+`DecodeAndReads`, one decode followed by every reader above. Before the clock
+starts, each reader's output is checked against the native path-based reader's.
+Single runs (`-benchtime=1x`) for the Connector, a 3 s run for native, whose
+1x figure swung between 60 and 110 ms:
+
+| | native | interpreter | compiler |
+|---|---|---|---|
+| `Decode` alone | 87.9 ms | 43.4 s | 6.39 s |
+| `DecodeAndReads` | 79.5 ms | 43.7 s | 6.12 s |
+| the same six reads, each decoding its own copy | 650 ms | 299 s | 42.9 s |
+
+The readers add nothing measurable to the decode: they walk events already in
+memory and make no Connector call. The last row sums the path-based rows of
+`BenchmarkConnectorWholeLog` from this run, so it is the cost of the same set
+before this change, about 7x the shared decode on both the interpreter and
+the compiler. Those rows, with `ExtractUsageAfter` now one decode:
+
+| read | native | interpreter | compiler |
+|---|---|---|---|
+| `ResultText` | 109 ms | 44.5 s | 6.21 s |
+| `RenderTranscript` | 118 ms | 48.0 s | 7.46 s |
+| `ExtractUsageAfter` | 102 ms | 52.5 s | 7.60 s |
+| `ClassifyTransient` | 109 ms | 50.4 s | 7.44 s |
+| `ReadPasses` | 112 ms | 46.1 s | 6.79 s |
+| `SessionBaselinesAfter` | 102 ms | 57.1 s | 7.39 s |
+
+`ExtractUsageAfter` fell from 184 s to 52.5 s on the interpreter and from
+25.6 s to 7.60 s on the compiler, from about 3.5x a single-scan read to about
+1.1x. Runs differ by a few seconds on the same engine (`ResultText` was 47.0 s
+under #6849 and 44.5 s here), so read the rows as one-decode cost, not as a
+ranking.
+
+The post-Pass reads run in three processes, and each shares its decode:
+
+- The in-Box orchestrator decodes each Pass log once for its verdict, outcome
+  and usage reads. It writes the final Pass's result text to
+  `<stream-log>.result` (a path convention, since the Box-to-orchestrator argv
+  is pinned by the driver-invocation goldens), so the Box reads that instead
+  of decoding the log again. The file is removed before each Pass truncates
+  the log, and after a delta-review BLOCK appends to it, so a Box that finds
+  no file decodes the log itself.
+- The host Dispatch memoizes its decode of each attempt log, so classify and
+  every later usage read over the attempt logs share it. The memo keys on file
+  identity rather than path, because a retry rotates log X to X.1 and writes a
+  new X.
+- driver-exec's `ResolveExit` makes no Connector call for claude.
+
+The host's attempt log and the Box's stream log are different files on
+different machines, so each is decoded once. The post-Pass cost through the
+interpreter is therefore about 44 s per log on the largest Pass, not 44 s per
+reader. One whole-log read stays outside this: `dispatchrecord.ParseLog`
+decodes the primary log when a fix or conflict-resolve Dispatch starts, to
+continue its Record ID. The per-byte cost of a decode is unchanged, so #6799
+still has the other two options above open: cut that per-byte cost, or the
+compiler with a per-user cache.
+
 ## Amendment (issue #6796): a Connector's Driver row reaches the binaries
 
 `spindrift.connectors.<name>.driver` carries a Driver row, and the flake module
