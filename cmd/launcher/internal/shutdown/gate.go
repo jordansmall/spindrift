@@ -31,10 +31,12 @@ type Gate struct {
 	stop  <-chan struct{}
 	abort <-chan struct{}
 
-	it     forge.IssueTracker
-	cf     forge.CodeForge
-	reaper terminate.Reaper
-	reg    *terminate.Registry
+	it forge.IssueTracker
+	cf forge.CodeForge
+	// branchPrefix is BRANCH_PREFIX, naming the agent branch Reclaim resolves.
+	branchPrefix string
+	reaper       terminate.Reaper
+	reg          *terminate.Registry
 	// settled holds the labels a settle writes on reaching a terminal state
 	// (forge.SettledLabels: Complete, Failed, Ambiguous, plus any research
 	// verdict labels), the ones unsettled below reads. Empty disables that
@@ -79,7 +81,7 @@ type Gate struct {
 // settled is the kind's settled labels (forge.SettledLabels: Complete, Failed,
 // Ambiguous, plus any research verdict labels), which unsettled reads; pass
 // nil to leave that check off.
-func NewGate(stop, abort <-chan struct{}, it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reaper, reg *terminate.Registry, settled []string) *Gate {
+func NewGate(stop, abort <-chan struct{}, it forge.IssueTracker, cf forge.CodeForge, branchPrefix string, reaper terminate.Reaper, reg *terminate.Registry, settled []string) *Gate {
 	if reg == nil {
 		// A fresh Registry behaves exactly like the nil one it replaces
 		// (Marked reports false until something marks it), mirroring
@@ -87,15 +89,16 @@ func NewGate(stop, abort <-chan struct{}, it forge.IssueTracker, cf forge.CodeFo
 		reg = terminate.NewRegistry()
 	}
 	g := &Gate{
-		stop:     stop,
-		abort:    abort,
-		it:       it,
-		cf:       cf,
-		reaper:   reaper,
-		reg:      reg,
-		settled:  settled,
-		inflight: map[string]bool{},
-		claimed:  map[string]bool{},
+		stop:         stop,
+		abort:        abort,
+		it:           it,
+		cf:           cf,
+		branchPrefix: branchPrefix,
+		reaper:       reaper,
+		reg:          reg,
+		settled:      settled,
+		inflight:     map[string]bool{},
+		claimed:      map[string]bool{},
 	}
 	g.idle = sync.NewCond(&g.mu)
 	return g
@@ -152,7 +155,7 @@ func (g *Gate) reclaimInFlight() {
 	}
 	g.aborting = true
 	g.mu.Unlock()
-	AbortInFlight(g.it, g.cf, g.reaper, g.reg, g.settled, nums)
+	AbortInFlight(g.it, g.cf, g.branchPrefix, g.reaper, g.reg, g.settled, nums)
 	g.mu.Lock()
 	g.aborting = false
 	g.idle.Broadcast()
@@ -186,7 +189,7 @@ func (g *Gate) releaseClaim(num string) {
 	}
 	delete(g.claimed, num)
 	g.mu.Unlock()
-	reclaimOne(g.it, g.cf, nil, g.reg, num, terminate.DrainDecline)
+	reclaimOne(g.it, g.cf, g.branchPrefix, nil, g.reg, num, terminate.DrainDecline)
 	g.mu.Lock()
 }
 
@@ -316,8 +319,8 @@ func (g *Gate) Aborted() bool {
 // reclaimOne runs terminate.Reclaim for a single issue, logging a failure to
 // stderr rather than returning it -- the same best-effort discipline
 // AbortInFlight uses per issue.
-func reclaimOne(it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reaper, reg *terminate.Registry, num string, trigger terminate.Trigger) {
-	if err := terminate.Reclaim(it, cf, reaper, reg, num, trigger); err != nil {
+func reclaimOne(it forge.IssueTracker, cf forge.CodeForge, branchPrefix string, reaper terminate.Reaper, reg *terminate.Registry, num string, trigger terminate.Trigger) {
+	if err := terminate.Reclaim(it, cf, branchPrefix, reaper, reg, num, trigger); err != nil {
 		fmt.Fprintf(os.Stderr, "shutdown: reclaim #%s: %v\n", num, err)
 	}
 }
@@ -328,7 +331,7 @@ func reclaimOne(it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reap
 // settled is the kind's settled labels (forge.SettledLabels: Complete, Failed,
 // Ambiguous, plus any research verdict labels), which unsettled reads; pass
 // nil to leave that check off.
-func AbortInFlight(it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reaper, reg *terminate.Registry, settled []string, nums []string) {
+func AbortInFlight(it forge.IssueTracker, cf forge.CodeForge, branchPrefix string, reaper terminate.Reaper, reg *terminate.Registry, settled []string, nums []string) {
 	nums = unsettled(it, settled, nums)
 	if len(nums) == 0 {
 		fmt.Println("==> abort requested; nothing in flight")
@@ -338,7 +341,7 @@ func AbortInFlight(it forge.IssueTracker, cf forge.CodeForge, reaper terminate.R
 	sort.Strings(sorted)
 	fmt.Printf("==> abort requested; terminating %d outstanding Box(es)\n", len(sorted))
 	for _, num := range sorted {
-		reclaimOne(it, cf, reaper, reg, num, terminate.SignalAbort)
+		reclaimOne(it, cf, branchPrefix, reaper, reg, num, terminate.SignalAbort)
 	}
 }
 

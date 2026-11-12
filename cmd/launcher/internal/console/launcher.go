@@ -21,8 +21,11 @@ import (
 // pick still promotes and queues, but nothing ever runs.
 type Launcher struct {
 	CodeForge forge.CodeForge
-	Factory   *dispatch.Factory
-	Settle    settle.Settler
+	// BranchPrefix is BRANCH_PREFIX, naming the agent branch Terminate,
+	// Discover, and RunContinuous resolve.
+	BranchPrefix string
+	Factory      *dispatch.Factory
+	Settle       settle.Settler
 	// ResearchTracker, ResearchFactory, and ResearchSettle mirror
 	// CodeForge/Factory/Settle for the research dispatch kind (ADR 0022, issue
 	// #1708): ResearchTracker carries the fixed agent-research label family a
@@ -322,7 +325,7 @@ func (l *Launcher) Terminate(tracker forge.IssueTracker, num string) error {
 	if kind.AdviseOnly {
 		cf = nil
 	}
-	killErr := terminate.Reclaim(reclaimTracker, cf, reaper, l.registry(), num, terminate.Gesture)
+	killErr := terminate.Reclaim(reclaimTracker, cf, l.BranchPrefix, reaper, l.registry(), num, terminate.Gesture)
 
 	l.queueRef().setState(num, kind, PickTerminated, "terminated by operator")
 	l.signalRefresh()
@@ -562,7 +565,7 @@ func (l *Launcher) runStack(st launchStack, pwd string) bool {
 	// the issue from Dispatchable to InProgress, so runContinuousQueue's no-op
 	// Claim avoids a redundant second one (issue #2938).
 	qs := queueSettler{Settler: st.settle, q: l.queueRef(), notify: l.signalRefresh, terminated: l.registry(), kind: st.kind}
-	err := waves.RunContinuous(waves.Config{}, &waves.Session{Limiter: l.limiter(), Terminated: l.registry(), BoxFailed: qs.boxFailed}, st.tracker, l.CodeForge, st.factory, qs, runContinuousQueue{
+	err := waves.RunContinuous(waves.Config{BranchPrefix: l.BranchPrefix}, &waves.Session{Limiter: l.limiter(), Terminated: l.registry(), BoxFailed: qs.boxFailed}, st.tracker, l.CodeForge, st.factory, qs, runContinuousQueue{
 		discover: discover,
 		pending:  func() int { return l.queueRef().PendingCount(st.kind) },
 		report:   l.recordStaleDrainReport,

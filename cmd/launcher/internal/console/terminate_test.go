@@ -45,7 +45,7 @@ func newTermTestLauncher(t *testing.T) (launch *Launcher, fc *forge.Fake, fr *ru
 		CompleteLabel: "agent-complete",
 		Capabilities:  forge.ResolveCapabilities(fc, fc, backend.Descriptor{}, backend.Descriptor{}),
 	}, fc, fc)
-	launch = &Launcher{CodeForge: fc, Factory: factory, Settle: s, Terminated: s.Registry(), queue: NewQueue()}
+	launch = &Launcher{CodeForge: fc, Factory: factory, BranchPrefix: "agent/issue-", Settle: s, Terminated: s.Registry(), queue: NewQueue()}
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 	return launch, fc, fr, dir
 }
@@ -129,7 +129,7 @@ func TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel(t *testing.T) {
 		CompleteLabel: "agent-complete",
 		Capabilities:  forge.ResolveCapabilities(fc, fc, backend.Descriptor{}, backend.Descriptor{}),
 	}, fc, fc)
-	launch := &Launcher{CodeForge: fc, Factory: factory, Settle: s, Terminated: s.Registry(), queue: NewQueue()}
+	launch := &Launcher{CodeForge: fc, Factory: factory, BranchPrefix: "agent/issue-", Settle: s, Terminated: s.Registry(), queue: NewQueue()}
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 	if err := launch.Terminate(fc, "42"); err != nil {
