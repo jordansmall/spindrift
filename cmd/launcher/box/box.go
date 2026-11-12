@@ -589,7 +589,7 @@ func (r *boxRun) pass(handoff, driverName, prompt, sessionMode string) (int, err
 
 	rc := r.d.Orchestrate(r.orchestratorArgv(handoff, promptFile, sessionFile, streamLog))
 
-	text, err := d.ResultText(streamLog)
+	text, err := resultText(driverName, streamLog)
 	if err != nil {
 		return rc, phaseErr("driver extract", err)
 	}

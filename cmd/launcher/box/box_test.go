@@ -2452,3 +2452,33 @@ func TestFirstRun_UsageBaselineFileClearedOnlyByAnInitialSession(t *testing.T) {
 		})
 	}
 }
+
+// The orchestrator already decoded the final Pass log; the Box takes its
+// result text from <stream-log>.result rather than decoding the log again.
+func TestPass_UsesOrchestratorResultTextWithoutDecodingTheLog(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun("no marker here\n", 0)
+	var resultFile string
+	f.d.Orchestrate = func(argv []string) int {
+		rc := f.orchestrate(argv)
+		for i := 0; i+1 < len(argv); i += 2 {
+			if argv[i] == "--log-path" {
+				resultFile = resultTextPath(argv[i+1])
+			}
+		}
+		if resultFile == "" {
+			t.Fatal("orchestrator argv carries no --log-path")
+		}
+		f.write(resultFile, readyLine+"\n")
+		return rc
+	}
+	if _, err := run(f.in, f.env, f.d); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(f.stdout(), readyLine) {
+		t.Errorf("stdout = %q, want the outcome line from the result-text file", f.stdout())
+	}
+	if _, err := os.Stat(resultFile); !os.IsNotExist(err) {
+		t.Errorf("result-text file left behind: stat err = %v", err)
+	}
+}

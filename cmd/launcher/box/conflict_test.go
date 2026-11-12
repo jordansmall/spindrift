@@ -513,3 +513,22 @@ func TestConflictResolve_OpencodeSummaryIsTheFinalMessageOnly(t *testing.T) {
 		t.Errorf("summary leaked a non-final message: %q", f.stdout())
 	}
 }
+
+func TestConflictResolve_SummaryComesFromTheOrchestratorResultText(t *testing.T) {
+	f := newCRFixture(t)
+	f.finishRebase()
+	finish := f.passFn
+	f.passFn = func() {
+		finish()
+		// The stream log stays empty: the summary can only come from the file.
+		if err := os.WriteFile(resultTextPath(f.pass.argv["--log-path"]), []byte("rebased, check green\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rc := f.run(); rc != 0 {
+		t.Fatalf("rc = %d", rc)
+	}
+	if !strings.Contains(f.stdout(), "==> conflict-resolve pass summary:\n  | rebased, check green\n") {
+		t.Errorf("stdout = %q", f.stdout())
+	}
+}

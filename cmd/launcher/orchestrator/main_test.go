@@ -330,3 +330,12 @@ exit 0
 		t.Errorf("stdout = %q, want the budget-cap-fired continue reason naming the cap, proving Handoff.Caps.MaxBudgetTokens threaded through config into Caps.MaxBudgetTokens", stdout.String())
 	}
 }
+
+func TestResultTextPathFor(t *testing.T) {
+	if got, want := resultTextPathFor("/tmp/stream.log"), "/tmp/stream.log.result"; got != want {
+		t.Errorf("resultTextPathFor = %q, want %q", got, want)
+	}
+	if got := resultTextPathFor(""); got != "" {
+		t.Errorf("resultTextPathFor(\"\") = %q, want empty", got)
+	}
+}
