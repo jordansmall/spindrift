@@ -75,8 +75,9 @@ any PR/CI method — the exact "lying about capabilities" failure mode this
 ADR's Considered Options already rejected for a single stubbed interface.
 
 The fix narrows `CodeForge` to the four methods every adapter honors with
-real behavior — `AgentBranch`, `Merge`, `Rebase`, `Probe` — and moves the
-PR/CI-rollup/auto-merge surface to a new **`PRForge`** interface
+real behavior — `AgentBranch` (since removed: agent branch naming is core
+policy, amended by issue #6859, ADR 0073), `Merge`, `Rebase`, `Probe` — and
+moves the PR/CI-rollup/auto-merge surface to a new **`PRForge`** interface
 (`OpenPRForBranch`, `PRForBranch`, `PRState`, `CheckState`, `FailureDetail`,
 `ListPRFiles`, `CanAutoMerge`, `EnqueueAutoMerge`). Only the `github` adapter
 implements `PRForge`; the `git` adapter implements `CodeForge` alone, with no

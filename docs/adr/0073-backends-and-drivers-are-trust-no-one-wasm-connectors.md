@@ -56,7 +56,7 @@ The question was grilled on 2026-11-09. Specs #6750–#6759 carry the work.
 5. **The contract is translation primitives; core owns policy.** A method
    enters the Connector protocol only if answering it needs the backend's API.
    Moving into core:
-   - branch naming (`AgentBranch`);
+   - branch naming (`AgentBranch`; done, #6859);
    - dependency and touched-file parsing (`DepsOf`, `TouchesOf`; done, #6802);
    - record and verdict rendering;
    - the github-tracker marker;
