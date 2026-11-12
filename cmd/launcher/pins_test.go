@@ -91,6 +91,9 @@ func TestNoRunnerExecOutsidePackage(t *testing.T) {
 			// seamtest is test support (issue #4280): it shells out to the host's
 			// `nix build` for fixtures, never to a sandbox.
 			"internal/seamtest",
+			// fixturebuild is seamtest's nix-build resolver, moved to a leaf
+			// package core's test Fake can import (issue #6809).
+			"internal/fixturebuild",
 		}
 		if slices.ContainsFunc(exempt, func(p string) bool {
 			return strings.HasPrefix(filepath.ToSlash(path), p)

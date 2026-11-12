@@ -1215,7 +1215,7 @@ checkedMerge {
         "SPINDRIFT_DRIVER_WARNED" # daemon-set marker on children (issue #5050)
         "SPINDRIFT_BWRAP_NETNS_PROBE" # set on the launcher's own re-exec under pasta by the bwrap probe (issue #5983)
         "SPINDRIFT_SEAM_FIXTURES_DIR" # test-only override read by internal/seamtest (issue #4280)
-        "SPINDRIFT_CONNECTOR_FIXTURES_DIR" # test-only override read by internal/seamtest (issue #6794)
+        "SPINDRIFT_CONNECTOR_FIXTURES_DIR" # test-only override read by internal/fixturebuild (issue #6794)
         "UPDATE_GOLDENS" # test-only regen switch read by internal/golden (issue #4781)
         "REGISTRY_PROXY_TCP_SECRET" # launcher-minted, read by driver-exec registry helpers
         "SIGNAL_SOCKET_ENDPOINT" # launcher-minted, read by driver-exec signal helper

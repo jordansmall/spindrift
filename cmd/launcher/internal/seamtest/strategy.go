@@ -3,7 +3,6 @@ package seamtest
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,13 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
-)
-
-const (
-	// connectorEnvVar names the dir holding the fixture Connector .wasm files.
-	connectorEnvVar = "SPINDRIFT_CONNECTOR_FIXTURES_DIR"
-	// connectorFlakeAttr is the flake package that builds that dir.
-	connectorFlakeAttr = "connector-wasm-fixtures"
+	"spindrift.dev/launcher/internal/fixturebuild"
 )
 
 // fakeDriverName is the name the fake CLI is invoked under, so the Strategy
@@ -47,29 +40,15 @@ func Strategy() driverkit.Strategy {
 }
 
 var loadStrategy = sync.OnceValues(func() (driverkit.Strategy, error) {
-	dir := os.Getenv(connectorEnvVar)
-	if dir == "" {
-		built, skip, err := ResolveBuild(connectorEnvVar, "a directory of fixture Connector .wasm files", func(root string) []string {
-			return []string{root + "#" + connectorFlakeAttr}
-		})
-		if skip != "" {
-			return driverkit.Strategy{}, errors.New(skip)
-		}
-		if err != nil {
-			return driverkit.Strategy{}, err
-		}
-		dir = built
+	dir, err := fixturebuild.ConnectorDir()
+	if err != nil {
+		return driverkit.Strategy{}, err
 	}
 	wasm, err := os.ReadFile(filepath.Join(dir, "seamtest-driver.wasm"))
 	if err != nil {
 		return driverkit.Strategy{}, err
 	}
-	// Per-user, not os.TempDir: another user must not plant native code here.
-	cacheDir, err := os.UserCacheDir()
-	if err == nil {
-		cacheDir = filepath.Join(cacheDir, "spindrift", "wazero")
-	}
-	c, err := connectorhost.LoadCompiled(context.Background(), wasm, cacheDir)
+	c, err := connectorhost.LoadCompiled(context.Background(), wasm, fixturebuild.WazeroCacheDir())
 	if err != nil {
 		return driverkit.Strategy{}, err
 	}
