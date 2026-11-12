@@ -2310,12 +2310,12 @@ is the fixture Connector in
   };
   ```
 
-- **Route table.** A tracker Connector's row may carry `routes`, a list of
-  `{method, host, path}` submodules (default `[ ]`): the only HTTP traffic its
-  `http_request` Host call may send (see Network Connectors under [Connector
+- **Route table.** A tracker or forge Connector's row may carry `routes`, a
+  list of `{method, host, path}` submodules (default `[ ]`): the only HTTP
+  traffic its `http_request` Host call may send (see Network Connectors under [Connector
   protocol](#connector-protocol)). `method` is an exact uppercase verb, `host`
   an exact `host[:port]`, and `path` a subtree root. `{repo}` in a `path` stands
-  for the tracker's `owner/name` slug, which `connectortracker.Routes` fills at
+  for the repository's `owner/name` slug, which `connectortracker.Routes` fills at
   run time because the slug is config, not something the Connector's package
   can know. The option is a declaration only: the host validates the table when
   it loads the Connector, and no binary loads one from a row yet. A backend
@@ -2509,27 +2509,35 @@ row without it accepts nothing.
 
 #### The github Connector
 
-`connectors/github` is the github backend's tracker read path as a network
-Connector: it serves `tracker.listIssues`, `tracker.issue` and
-`tracker.nativeDeps` over GitHub REST through `http_request`, and the host
-attaches the credential. Its Route table is one route, `GET api.github.com
-/repos/{repo}/issues`, a subtree that covers the list, issue and
-`dependencies/blocked_by` reads and nothing that writes. It is the narrowest
-table the subtree-only Route model (ADR 0047) can express, not an exact one:
-it also admits `GET /issues/comments/*`, `/issues/events` and
-`/issues/{n}/timeline`, which no read uses. It skips pull
-requests, which the REST issues list includes.
+`connectors/github` is the github backend's tracker and forge read paths as a
+network Connector: it serves `tracker.listIssues`, `tracker.issue` and
+`tracker.nativeDeps` over GitHub REST, and `forge.prsForBranch`, `forge.pr` and
+`forge.checks` over REST plus one GraphQL rollup query, through `http_request`;
+the host attaches the credential. Its Route table is three routes on
+`api.github.com`: `GET /repos/{repo}/issues` (the list, issue and
+`dependencies/blocked_by` reads), `GET /repos/{repo}/pulls` (branch lookup, one
+PR) and `POST /graphql` (the check rollup). The subtree-only Route model (ADR
+0047) makes it the narrowest table, not an exact one: `/issues` also admits
+`GET /issues/comments/*`, `/issues/events` and `/issues/{n}/timeline`, which no
+read uses, and a Route restricts no body, so `POST /graphql` admits any GraphQL
+document, mutations included. Issue #6808 accepts that: the Connector sends
+only the rollup query and every write stays on the native adapter. It skips
+pull requests in the REST issues list.
 
 It does not advertise `tracker.comments`: REST reports no minimized state, and
 a Connector that advertises the capability attests that it reports each
 comment's `minimized` faithfully. Comments therefore stay on the native
 adapter (GraphQL), which drops a maintainer-minimized comment. The native
 github adapter stays authoritative and is the one every
-binary uses. The Connector is held to the tracker read contract
+binary uses. The same holds for the forge reads: the Connector serves
+`OpenPRForBranch`, `PRForBranch`, `PRState`, `CheckState` and `FailureDetail`;
+`Mergeable`, `HeadCommitSHA`, `NeedsUpdate`, `ListPRFiles`, `CanAutoMerge` and
+every write stay native. The Connector is held to the tracker read contract
 (`forgetest.RunTrackerReadContract`, with a `StateSeeder` standing in for the
-writes a read-only tracker lacks), which the backends `go test` check runs
+writes a read-only tracker lacks) and the PR forge read contract
+(`forgetest.RunPRForgeReadContract`), which the backends `go test` check runs
 against `connectors/<backend>` when it exists, through
-`SPINDRIFT_TRACKER_CONNECTOR_WASM` and `SPINDRIFT_TRACKER_CONNECTOR_ROUTES`.
+`SPINDRIFT_BACKEND_CONNECTOR_WASM` and `SPINDRIFT_BACKEND_CONNECTOR_ROUTES`.
 
 #### Shadow mode
 
@@ -2799,9 +2807,9 @@ This is protocol version **0.1.0**. The host is
   `gh-token-refresher` does. No CLI flag wires `LoadNetwork`'s credential to
   that file yet. A backend Connector row declares its Route table under
   `backend` ([Backend rows on a Connector](#backend-rows-on-a-connector)),
-  checked at evaluation with the same path rules; a tracker Connector declares
-  its own with the `routes` option (see **Route table** under [Connector
-  subflake shape](#connector-subflake-shape)).
+  checked at evaluation with the same path rules; a tracker or forge Connector
+  declares its own with the `routes` option (see **Route table** under
+  [Connector subflake shape](#connector-subflake-shape)).
 - **Tracker capabilities.** Provisional at protocol 0.y: issue #6753 finalises
   the tracker axis, and a `0.y` bump may change what follows. A tracker
   Connector advertises `"tracker"`, meaning it serves `tracker.listIssues` and
@@ -2834,6 +2842,28 @@ This is protocol version **0.1.0**. The host is
   dropped as for a native adapter. The SDK's
   `tracker.Register(tracker.Reader{...})` serves the methods. Nothing in
   production uses `connectortracker` yet.
+- **Forge capabilities.** Provisional at protocol 0.y: issue #6754 finalises
+  the forge axis, and a `0.y` bump may change what follows. A forge Connector
+  advertises `"forge"`, meaning it serves the three methods below. Every
+  `params` carries `target`, `{api, repo}`, as for the tracker. The Connector
+  reads and returns raw data; every write stays on core's native adapter.
+
+  | Method | Params | Result |
+  |---|---|---|
+  | `forge.prsForBranch` | `{target, branch}` | `{prs}`, every PR whose head is `branch`, any state, newest first |
+  | `forge.pr` | `{target, number}` | a PR |
+  | `forge.checks` | `{target, number}` | `{state, checks}`, the rollup of the PR's head commit |
+
+  A PR is `{number, url, state, merged}`; a check is `{kind, name, conclusion,
+  summary}`, with `kind` `"CheckRun"` or `"StatusContext"`. Core keeps the
+  policy.
+  [`connectorforge.New`](../cmd/launcher/internal/connectorforge/connectorforge.go)
+  builds core's PR reads from such a Connector: it pins PR URLs to the
+  forge's web host and the target repository, refuses an unknown rollup
+  `state`, filters failing conclusions with the native adapter's sets, and
+  renders and caps failure detail. The SDK's
+  `forge.Register(forge.Reader{...})` serves the methods. Nothing in
+  production uses `connectorforge` yet.
 - **Versioning.** The protocol version is `0.y.z` and independent of
   spindrift's release version. A `0.y` bump is breaking; a `0.y.z` bump is
   additive. Core accepts its current `0.y` and the one before it, so today
