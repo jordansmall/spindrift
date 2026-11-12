@@ -58,6 +58,12 @@ func allKinds() []signalwire.Kind {
 // stubbed: the point of this harness is that the verb, the transport, the
 // handler and the buffer agree end to end.
 func startSignalServer(t *testing.T, transport string, cfg signalsocket.Config) *signalServer {
+	return startSignalServerWithIssues(t, transport, cfg, nil)
+}
+
+// startSignalServerWithIssues is startSignalServer with the issue read verb
+// answered by issues.
+func startSignalServerWithIssues(t *testing.T, transport string, cfg signalsocket.Config, issues signalsocket.IssueReader) *signalServer {
 	t.Helper()
 	buf := signalsocket.New(cfg)
 	log := &syncBuffer{}
@@ -65,7 +71,7 @@ func startSignalServer(t *testing.T, transport string, cfg signalsocket.Config) 
 	srv := &signalServer{buf: buf, log: log}
 	switch transport {
 	case "unix":
-		l := &signalsocket.Listener{Handler: signalsocket.NewHandler(buf, log)}
+		l := &signalsocket.Listener{Handler: signalsocket.NewHandler(buf, log, issues)}
 		t.Cleanup(func() { _ = l.Close() })
 		// A name shorter than the helper's own "probe.sock" probe, so its
 		// sun_path check stays conservative for this socket too.
@@ -80,7 +86,7 @@ func startSignalServer(t *testing.T, transport string, cfg signalsocket.Config) 
 		if err != nil {
 			t.Fatalf("NewSecret: %v", err)
 		}
-		gh, err := signalsocket.NewGatedHandler(buf, log, secret)
+		gh, err := signalsocket.NewGatedHandler(buf, log, secret, issues)
 		if err != nil {
 			t.Fatalf("NewGatedHandler: %v", err)
 		}
@@ -864,7 +870,7 @@ func TestRunSignal_UsageErrors(t *testing.T) {
 		if rc != 1 {
 			t.Fatalf("exit = %d, want 1 (out=%q)", rc, out)
 		}
-		for _, kind := range []string{"comment", "pr-intent", "issue-intent", "status"} {
+		for _, kind := range []string{"comment", "pr-intent", "issue-intent", "issue", "status"} {
 			if !strings.Contains(out, kind) {
 				t.Fatalf("output = %q, want the usage line to name %q", out, kind)
 			}
@@ -1009,12 +1015,12 @@ func TestRunSignal_UsageFailureRejectedLine(t *testing.T) {
 		{
 			name: "no args",
 			args: nil,
-			want: "signal rejected (usage): want one of comment, pr-intent, issue-intent, status",
+			want: "signal rejected (usage): want one of comment, pr-intent, issue-intent, issue, status",
 		},
 		{
 			name: "unrecognised kind",
 			args: []string{"nope"},
-			want: "signal rejected (usage): unknown signal kind; want one of comment, pr-intent, issue-intent, status",
+			want: "signal rejected (usage): unknown signal kind; want one of comment, pr-intent, issue-intent, issue, status",
 		},
 	}
 	for _, tc := range cases {
@@ -1288,4 +1294,155 @@ func TestRawFields(t *testing.T) {
 		// reaching the type switch.
 		rawFields(badWire{Count: 1})
 	})
+}
+
+// fakeIssueReader answers ReadIssue from a canned snapshot or reject and
+// records the refs it was asked for.
+type fakeIssueReader struct {
+	mu   sync.Mutex
+	snap signalwire.IssueSnapshot
+	rej  *signalwire.Reject
+	refs []string
+}
+
+func (f *fakeIssueReader) ReadIssue(ref string) (signalwire.IssueSnapshot, *signalwire.Reject) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refs = append(f.refs, ref)
+	return f.snap, f.rej
+}
+
+func sampleIssueSnapshot() signalwire.IssueSnapshot {
+	return signalwire.IssueSnapshot{
+		Ref:    "5",
+		Title:  "Fix the thing",
+		State:  "open",
+		Labels: []string{"bug", "ready-for-agent"},
+		Body:   "The body.\nSecond line.",
+		Comments: []signalwire.IssueComment{
+			{Author: "alice", CreatedAt: "2026-01-02T03:04:05Z", Body: "first comment"},
+			{Author: "bob", CreatedAt: "2026-01-03T03:04:05Z", Body: "second comment"},
+		},
+	}
+}
+
+func TestRunSignal_IssuePrintsTheSnapshot(t *testing.T) {
+	forEachTransport(t, func(t *testing.T, transport string) {
+		reader := &fakeIssueReader{snap: sampleIssueSnapshot()}
+		startSignalServerWithIssues(t, transport, signalsocket.Config{Consumes: allKinds()}, reader)
+
+		rc, out := runVerb(t, "", "issue", "owner/repo#5")
+		if rc != 0 {
+			t.Fatalf("exit = %d, want 0 (out=%q)", rc, out)
+		}
+		want := "#5 Fix the thing\n" +
+			"state: open\n" +
+			"labels: bug, ready-for-agent\n" +
+			"\n" +
+			"The body.\nSecond line.\n" +
+			"\n" +
+			"## Comments\n" +
+			"\n" +
+			"alice (2026-01-02T03:04:05Z): first comment\n" +
+			"\n" +
+			"bob (2026-01-03T03:04:05Z): second comment\n"
+		if out != want {
+			t.Fatalf("output =\n%q\nwant\n%q", out, want)
+		}
+		if len(reader.refs) != 1 || reader.refs[0] != "owner/repo#5" {
+			t.Fatalf("reader saw refs %q, want the ref intact", reader.refs)
+		}
+	})
+}
+
+func TestRunSignal_IssueHeaderForJiraKey(t *testing.T) {
+	startSignalServerWithIssues(t, "unix", signalsocket.Config{Consumes: allKinds()},
+		&fakeIssueReader{snap: signalwire.IssueSnapshot{Ref: "PROJ-12", Title: "t", State: "open", Body: "b"}})
+
+	rc, out := runVerb(t, "", "issue", "PROJ-12")
+	if rc != 0 {
+		t.Fatalf("exit = %d, want 0 (out=%q)", rc, out)
+	}
+	if !strings.HasPrefix(out, "PROJ-12 t\n") {
+		t.Fatalf("output = %q, want a header led by the bare Jira key", out)
+	}
+}
+
+func TestRunSignal_IssueOmitsEmptySections(t *testing.T) {
+	startSignalServerWithIssues(t, "unix", signalsocket.Config{Consumes: allKinds()},
+		&fakeIssueReader{snap: signalwire.IssueSnapshot{Ref: "5", Title: "t", State: "closed", Body: "b"}})
+
+	rc, out := runVerb(t, "", "issue", "5")
+	if rc != 0 {
+		t.Fatalf("exit = %d, want 0 (out=%q)", rc, out)
+	}
+	if strings.Contains(out, "## Comments") || strings.Contains(out, "labels:") {
+		t.Fatalf("output = %q, want no empty comments or labels section", out)
+	}
+}
+
+func TestRunSignal_IssueTruncatedMarker(t *testing.T) {
+	snap := sampleIssueSnapshot()
+	snap.Truncated = true
+	startSignalServerWithIssues(t, "unix", signalsocket.Config{Consumes: allKinds()}, &fakeIssueReader{snap: snap})
+
+	rc, out := runVerb(t, "", "issue", "5")
+	if rc != 0 {
+		t.Fatalf("exit = %d, want 0 (out=%q)", rc, out)
+	}
+	if !strings.Contains(out, "[truncated: issue exceeded 64KB or its comments could not be read]") {
+		t.Fatalf("output = %q, want the truncation marker", out)
+	}
+}
+
+func TestRunSignal_IssueRejectPassesThrough(t *testing.T) {
+	forEachTransport(t, func(t *testing.T, transport string) {
+		startSignalServerWithIssues(t, transport, signalsocket.Config{Consumes: allKinds()}, &fakeIssueReader{
+			rej: &signalwire.Reject{Status: "foreign_ref", Reason: "another repository", Code: http.StatusForbidden},
+		})
+
+		rc, out := runVerb(t, "", "issue", "other/repo#9")
+		if rc == 0 {
+			t.Fatalf("exit = 0, want non-zero (out=%q)", out)
+		}
+		if got, want := lastNonEmptyLine(out), "signal issue rejected (foreign_ref): another repository"; got != want {
+			t.Fatalf("last line = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestRunSignal_IssueUnsupportedWithoutAReader(t *testing.T) {
+	startSignalServer(t, "unix", signalsocket.Config{Consumes: allKinds()})
+
+	rc, out := runVerb(t, "", "issue", "5")
+	if rc == 0 || !strings.Contains(out, "signal issue rejected (unsupported)") {
+		t.Fatalf("exit = %d out = %q, want an unsupported reject", rc, out)
+	}
+}
+
+func TestRunSignal_IssueArgumentCountIsAUsageFailure(t *testing.T) {
+	for name, args := range map[string][]string{
+		"no ref":     {"issue"},
+		"extra ref":  {"issue", "1", "2"},
+		"stray flag": {"issue", "-x", "1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			reader := &fakeIssueReader{snap: sampleIssueSnapshot()}
+			srv := startSignalServerWithIssues(t, "unix", signalsocket.Config{Consumes: allKinds()}, reader)
+
+			rc, out := runVerb(t, "", args...)
+			if rc != 1 {
+				t.Fatalf("exit = %d, want 1 (out=%q)", rc, out)
+			}
+			if last := lastNonEmptyLine(out); !strings.HasPrefix(last, "signal issue rejected (usage): ") {
+				t.Fatalf("last line = %q, want the usage rejected line", last)
+			}
+			if len(reader.refs) != 0 {
+				t.Fatalf("reader was called with %q, want no read on a usage failure", reader.refs)
+			}
+			if log := srv.log.String(); !strings.Contains(log, `"kind":"issue"`) || !strings.Contains(log, "usage") {
+				t.Fatalf("mirror = %q, want a usage report under kind issue", log)
+			}
+		})
+	}
 }

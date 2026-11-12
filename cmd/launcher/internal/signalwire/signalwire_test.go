@@ -208,13 +208,3 @@ func TestCapIssueSnapshotBoundsEveryField(t *testing.T) {
 		t.Error("Truncated = false, want true")
 	}
 }
-
-// signalclient's maxReplyBytes (1 MiB) silently truncates a longer reply, so a
-// capped snapshot must still fit after worst-case JSON escaping (one byte to a
-// six-byte \u escape) plus envelope slack.
-func TestMaxIssueReplyBytesFitsTheClientReplyLimit(t *testing.T) {
-	const clientMaxReplyBytes = 1 << 20
-	if 6*MaxIssueReplyBytes+16*1024 > clientMaxReplyBytes {
-		t.Fatalf("a worst-case escaped %d-byte snapshot overruns the client's %d-byte reply limit", MaxIssueReplyBytes, clientMaxReplyBytes)
-	}
-}

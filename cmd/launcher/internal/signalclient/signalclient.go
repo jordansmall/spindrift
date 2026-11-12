@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -42,8 +43,10 @@ const (
 	// rather than a slow signal.
 	Timeout = 30 * time.Second
 
-	// maxReplyBytes bounds the reply read. Every reply is a receipt, a reject
-	// or a status summary, all tiny.
+	// maxReplyBytes bounds the reply read. Every reply is a receipt, a reject,
+	// a status summary or a capped issue snapshot (which fits even after
+	// worst-case JSON escaping). A longer reply is an error: cutting it
+	// silently would hand a decoder half a document.
 	maxReplyBytes = 1 << 20
 )
 
@@ -103,9 +106,12 @@ func Do(client *http.Client, req *http.Request, secret string) (int, []byte, err
 		return 0, nil, fmt.Errorf("reach the signal socket: %w", err)
 	}
 	defer resp.Body.Close()
-	reply, err := io.ReadAll(io.LimitReader(resp.Body, maxReplyBytes))
+	reply, err := io.ReadAll(io.LimitReader(resp.Body, maxReplyBytes+1))
 	if err != nil {
 		return 0, nil, fmt.Errorf("read the signal socket's reply: %w", err)
+	}
+	if len(reply) > maxReplyBytes {
+		return 0, nil, fmt.Errorf("the signal socket's reply exceeds the %d-byte reply limit", maxReplyBytes)
 	}
 	return resp.StatusCode, reply, nil
 }
@@ -172,4 +178,28 @@ func Status() (signalwire.Status, error) {
 		return signalwire.Status{}, fmt.Errorf("signal status rejected (%s): %s", rej.Status, rej.Reason)
 	}
 	return st, nil
+}
+
+// FetchIssue is FetchStatus for the issue read verb: GET base+"/issue" with
+// ref as the query value. The ref goes through url.Values because it can carry
+// '#', '&' and '/', any of which would otherwise cut or split the query.
+func FetchIssue(client *http.Client, base, secret, ref string) (signalwire.IssueSnapshot, *signalwire.Reject, error) {
+	q := url.Values{"ref": {ref}}
+	req, err := http.NewRequest(http.MethodGet, base+"/"+signalwire.IssueRoute+"?"+q.Encode(), nil)
+	if err != nil {
+		return signalwire.IssueSnapshot{}, nil, err
+	}
+	code, reply, err := Do(client, req, secret)
+	if err != nil {
+		return signalwire.IssueSnapshot{}, nil, err
+	}
+	if code < 200 || code > 299 {
+		rej := DecodeReject(code, reply)
+		return signalwire.IssueSnapshot{}, &rej, nil
+	}
+	var snap signalwire.IssueSnapshot
+	if err := json.Unmarshal(reply, &snap); err != nil {
+		return signalwire.IssueSnapshot{}, nil, fmt.Errorf("decode issue: %w", err)
+	}
+	return snap, nil, nil
 }

@@ -6946,7 +6946,7 @@ There is no live toggle: `BOX_SIGNAL_CARRIER=log nix run
 .#daemon` opts every child the daemon starts from that point forward back
 onto the log carrier, and a restart is the only way to change it again —
 see [Daemon](#daemon). The in-Box front for `socket` mode is the `driver-exec
-signal comment|pr-intent|issue-intent|status` verb (issue #3724), which
+signal comment|pr-intent|issue-intent|status|issue` verb (issue #3724), which
 reads `SIGNAL_SOCKET_ENDPOINT` and errors when it is unset — so it serves
 the socket carrier only; under `log` the front stays what it has always
 been, a nonce-guarded marker line the Box prints. `box` and in-Box
@@ -6984,6 +6984,19 @@ ceiling of 65536 bytes per field (`title`, `body`, `type` and each
 `dedupTerms` entry alike); a body over that ceiling is refused outright,
 never truncated, so an oversize send costs a retry rather than posting a
 truncated verdict.
+
+`driver-exec signal issue <ref>` is the socket's one read of another
+issue (issue #6894): it prints the issue's title, state, labels, body and
+most recent comments in the shape of the subject issue's ISSUE TEXT,
+bounded to 64 KiB of text with a `[truncated: issue exceeded 64KB or its
+comments could not be read]` line when the cap cut something or the
+comment fetch failed. `<ref>` is an issue number, `#number`,
+`<scope>#number` or `KEY-number`; the host reads only the Dispatch's own
+tracker and rejects a ref naming another repository or project (`signal
+issue rejected (foreign_ref): ...`), so the verb is a canonical read, not
+a `gh` passthrough. It takes exactly one positional ref and no flags
+(anything else is a usage failure reported on `/issue/usage`), and works
+over both the unix and the TCP+secret carriers.
 
 The prompts instruct the verb under `socket` (issue #3726): prompt assembly
 picks each of the three signal fragments — the research verdict comment, the
