@@ -195,8 +195,11 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 	var in httpRequest
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	if derr := dec.Decode(&in); derr != nil || dec.More() {
-		return 0, nil, refuse("malformed request")
+	if derr := dec.Decode(&in); derr != nil {
+		return 0, nil, refuse("malformed request: %v", derr)
+	}
+	if dec.More() {
+		return 0, nil, refuse("malformed request: trailing data after the request object")
 	}
 	entry.Method = in.Method
 	u, perr := url.Parse(in.URL)
