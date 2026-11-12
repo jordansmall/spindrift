@@ -1,5 +1,4 @@
-- `gh pr view --json url,statusCheckRollup` — the open PR and its current CI
-  state.
-- `gh run list --branch ${BRANCH} --status failure --limit 5` and
-  `gh run view --log-failed <run-id>` (or the CI provider's equivalent) — the
-  actual failure, not a guess.
+- CI is not yours to fetch: the CI FAILURE section above, when the launcher
+  captured one, carries each failing check and a tail of its job's log. Run no
+  forge CLI or API call for CI. A check with no log excerpt only names what
+  failed — reproduce it locally by running that check.
