@@ -126,9 +126,3 @@ func NewExecClient(repo string, labels forge.DispatchLabels, opts ...ExecOption)
 	}
 	return e
 }
-
-// IsGithubTracker implements the optional forge.GithubTracker marker (#2341),
-// which tells settle's ensureClosesReference that this adapter owns the GitHub
-// Closes-keyword convention. Other trackers, such as forgejo, number their
-// issues in a separate namespace, so the keyword does not carry over.
-func (e *execClient) IsGithubTracker() bool { return true }

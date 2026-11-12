@@ -274,19 +274,6 @@ type LandingPassRecorder interface {
 	RecordLandingPass(num string, pass int, kind string) error
 }
 
-// GithubTracker marks the github adapter specifically (issue #2341). It is
-// narrower than "not LandingRecorder," which forgejo also passes: a `Closes
-// #N` injected for a forgejo-tracked issue could auto-close an unrelated
-// GitHub issue. The PR_BODY_CLOSES gate it backs also covers jira, but jira
-// keys are not bare digits, so a github-only marker is enough.
-type GithubTracker interface {
-	// IsGithubTracker is a no-op marker that always returns true. It is
-	// exported because the implementer lives in package forge/github, and
-	// an unexported interface method could only be satisfied by types
-	// declared here.
-	IsGithubTracker() bool
-}
-
 // IssueCloser is the optional IssueTracker capability for adapters with a
 // native open/closed axis reconcile can flip (ADR 0029). Only the local
 // adapter implements it; a github or jira issue closes through the forge's

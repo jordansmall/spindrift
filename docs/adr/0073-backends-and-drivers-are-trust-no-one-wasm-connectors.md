@@ -59,7 +59,7 @@ The question was grilled on 2026-11-09. Specs #6750–#6759 carry the work.
    - branch naming (`AgentBranch`; done, #6859);
    - dependency and touched-file parsing (`DepsOf`, `TouchesOf`; done, #6802);
    - record and verdict rendering;
-   - the github-tracker marker;
+   - the github-tracker marker (done, #6880);
    - transient-versus-permanent classification.
 
    Local-only interfaces never enter the protocol. Optional interfaces become
