@@ -66,7 +66,7 @@ func packageGoFiles(t *testing.T) []string {
 }
 
 // scanResolvedFieldNames returns the Capabilities field names that
-// ResolveCapabilities assigns, found as assignments whose left side is the
+// ResolveCodeForge or ResolveCapabilities assigns, found as assignments whose left side is the
 // selector c.X. A field with no such line passes the completeness test's
 // "field exists" check but stays permanently nil at runtime, so that test
 // needs this scan to catch it.
@@ -80,7 +80,7 @@ func scanResolvedFieldNames(t *testing.T, filename string) map[string]bool {
 	assigned := make(map[string]bool)
 	for _, decl := range file.Decls {
 		fd, ok := decl.(*ast.FuncDecl)
-		if !ok || fd.Name.Name != "ResolveCapabilities" || fd.Body == nil {
+		if !ok || (fd.Name.Name != "ResolveCapabilities" && fd.Name.Name != "ResolveCodeForge") || fd.Body == nil {
 			continue
 		}
 		ast.Inspect(fd.Body, func(n ast.Node) bool {
@@ -106,13 +106,13 @@ func scanResolvedFieldNames(t *testing.T, filename string) map[string]bool {
 }
 
 // This test checks scanResolvedFieldNames itself. The fields it lists span both
-// the CodeForge-side and IssueTracker-side halves of ResolveCapabilities, so the
+// the CodeForge-side (ResolveCodeForge) and IssueTracker-side halves, so the
 // completeness test below does not depend on an unverified AST walk.
 func TestScanResolvedFieldNames_FindsKnownAssignments(t *testing.T) {
 	assigned := scanResolvedFieldNames(t, "capabilities.go")
 	for _, name := range []string{"BundleRelay", "PRForge", "BlockersLister", "FullyPaginated"} {
 		if !assigned[name] {
-			t.Errorf("scanResolvedFieldNames did not find an assignment for %s in ResolveCapabilities", name)
+			t.Errorf("scanResolvedFieldNames did not find an assignment for %s in ResolveCodeForge or ResolveCapabilities", name)
 		}
 	}
 }
@@ -121,7 +121,7 @@ func TestScanResolvedFieldNames_FindsKnownAssignments(t *testing.T) {
 // and Capabilities' fields to stay in correspondence. The test parses the
 // source rather than hand-listing today's interfaces or files, and checks all
 // three directions: every interface has a field, every interface-typed field
-// names an interface the scan found, and ResolveCapabilities assigns each one.
+// names an interface the scan found, and a resolver assigns each one.
 func TestCapabilities_CoversEveryOptionalInterface(t *testing.T) {
 	var interfaceNames []string
 	for _, f := range packageGoFiles(t) {
@@ -148,7 +148,7 @@ func TestCapabilities_CoversEveryOptionalInterface(t *testing.T) {
 			t.Errorf("Capabilities.%s has type %s, want interface %s", name, field.Type.Name(), name)
 		}
 		if !resolvedFields[name] {
-			t.Errorf("ResolveCapabilities never assigns Capabilities.%s", name)
+			t.Errorf("neither ResolveCodeForge nor ResolveCapabilities assigns Capabilities.%s", name)
 		}
 	}
 

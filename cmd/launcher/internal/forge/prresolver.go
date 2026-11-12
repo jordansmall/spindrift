@@ -15,8 +15,11 @@ type OpenPR struct {
 // zero OpenPR with no error, so every caller shares one absent policy;
 // only a genuine lookup failure returns a non-nil error.
 func ResolveOpenPR(cf CodeForge, branch string) (OpenPR, error) {
-	pr, ok := AsCodeForge[PRForge](cf)
-	if !ok {
+	return openPR(ResolveCodeForge(cf).PRForge, branch)
+}
+
+func openPR(pr PRForge, branch string) (OpenPR, error) {
+	if pr == nil {
 		return OpenPR{}, nil
 	}
 	got, found, err := pr.OpenPRForBranch(branch)
@@ -55,12 +58,10 @@ func ResolveOpenPRWithRetry(cf CodeForge, branch string, backoff retry.LinearBac
 // It mirrors ResolveOpenPR's absent policy: a push-only Code Forge and "no open
 // PR yet" both resolve to (nil, nil).
 func ResolveOpenPRFiles(cf CodeForge, branch string) ([]string, error) {
-	res, err := ResolveOpenPR(cf, branch)
+	pr := ResolveCodeForge(cf).PRForge
+	res, err := openPR(pr, branch)
 	if err != nil || !res.Found {
 		return nil, err
 	}
-	// ResolveOpenPR only reports Found when cf implements PRForge, so this
-	// assertion always succeeds.
-	pr, _ := AsCodeForge[PRForge](cf)
 	return pr.ListPRFiles(res.URL)
 }
