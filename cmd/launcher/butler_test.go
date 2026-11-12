@@ -1058,7 +1058,7 @@ func TestCmdButler_PatchFindingCarriesPatchLabel(t *testing.T) {
 	// remote that git redirects to the fixture's bare repo.
 	t.Setenv("GIT_CONFIG_COUNT", "1")
 	t.Setenv("GIT_CONFIG_KEY_0", "url."+repo+".insteadOf")
-	t.Setenv("GIT_CONFIG_VALUE_0", "http://tok@forgejo.test/owner/repo.git")
+	t.Setenv("GIT_CONFIG_VALUE_0", "http://forgejo.test/owner/repo.git")
 
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9301"

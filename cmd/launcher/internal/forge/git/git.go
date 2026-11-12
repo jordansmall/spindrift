@@ -65,6 +65,13 @@ func WithOpTimeout(d time.Duration) Option {
 	return func(g *gitClient) { g.opTimeout = d }
 }
 
+// WithCredential sets the credential presented to the remote, for a caller
+// that holds the token apart from the URL. It overrides any credential
+// NewGitClient split out of a userinfo-bearing URL.
+func WithCredential(cred gitexec.Credential) Option {
+	return func(g *gitClient) { g.cred = cred }
+}
+
 // NewGitClient returns a forge.CodeForge backed by a plain git remote URL.
 // baseBranch is the target branch Merge pushes onto for MERGE_MODE=immediate.
 // userName and userEmail set the commit identity on Merge's throwaway clone,

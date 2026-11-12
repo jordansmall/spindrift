@@ -39,7 +39,7 @@ func NewReadOnlyForgejoCodeForgeForTest(cfg ForgejoCodeForgeConfig, tracker forg
 // A present bundle that is unreadable or fails verification returns a generic
 // error, so a broken hand-off blocks the seam instead of landing nothing.
 func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
-	return bundlerelay.Relay("forgejo", outboxDir, ref, c.relayClone("relay bundle"))
+	return bundlerelay.Relay("forgejo", outboxDir, ref, c.cred, c.relayClone("relay bundle"))
 }
 
 // CommitSubjects returns the one-line commit subjects the bundle at
