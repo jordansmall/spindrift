@@ -2504,10 +2504,11 @@ This is protocol version **0.1.0**. The host is
   nothing. It satisfies only the `wasi_snapshot_preview1` imports Go's wasip1
   runtime needs: no preopened directories, an empty environment and argument
   list, no stdio, a fake clock and a deterministic random source. There are no
-  sockets or subprocesses. Core grants no Host calls beyond WASI yet: the
-  allow-list is empty, so a module that imports anything else is refused at
-  load with the handshake error. A Driver Connector is granted no Host calls
-  at all, so one importing anything beyond WASI is refused the same way.
+  sockets or subprocesses. `Load` grants no Host calls beyond WASI, so a
+  module that imports anything else is refused at load with the handshake
+  error. A Driver Connector is loaded this way and stays granted no Host
+  calls. Only a network Connector, loaded with `LoadNetwork`, gets one more:
+  `http_request` (see Network Connectors below).
 - **Handshake.** The module exports `connector_handshake`, which takes no
   parameters and returns one `i64`, `ptr << 32 | len`, locating the result
   bytes in the module's memory export named `memory`. The result is:
@@ -2622,6 +2623,32 @@ This is protocol version **0.1.0**. The host is
   the last rank.
   What does not cross in 0.1.0: the stream filter, which stays at driverkit's
   zero value.
+- **Network Connectors.** `LoadNetwork` links one Host call, imported as
+  `spindrift.http_request(reqPtr, reqLen, respPtr, respCap i32) -> i64`. The
+  request is JSON `{"method", "url", "headers", "body"}`. The result is
+  `status << 32 | n`, with the `n` response body bytes at `respPtr`. The host
+  checks each request against the Connector's **Route table**: a method, a
+  `host[:port]` and a path pattern per route. Path patterns follow the
+  registry-route rules (`registryvocab.CheckPathPattern`): canonical absolute
+  paths, no blanket `/`, no `?` or `#`. The host sends only an `https` URL
+  whose canonical, unescaped path a route admits. It attaches the credential
+  itself, never follows a redirect, and caps the body at 4 MiB (or `respCap`,
+  if smaller). An unmatched or malformed request is refused unsent with
+  `ErrRouteRefused`, naming the Connector, method, host and path. A refusal,
+  an oversized body (`ErrResponseTooLarge`) and a pointer outside module
+  memory fail closed: the call fails and the Connector is closed. A transport
+  failure is not fatal: status `0` hands the guest a fixed reason, never the
+  error detail. The response body is arbitrary upstream bytes: the host
+  checks only its size and the status/length framing, while the Connector's
+  result is schema-checked as for any call. A route does not restrict the query
+  string. Each Host call writes one JSON line to the audit log, with `connector`,
+  `route`, `method`, `host`, `path`, `query`, `status`, `size` and `decision`
+  (`sent`, `refused` or `failed`), plus `reason` on a refusal or failure; a
+  request the log cannot record fails closed (`ErrAudit`) and leaves no line.
+  Any failed call of a network Connector whose failure no Host call already
+  audited adds a `failed` line naming the Connector. The SDK's
+  `connector.HTTPRequest` wraps the import. Route tables on Connector rows
+  are later work.
 - **Versioning.** The protocol version is `0.y.z` and independent of
   spindrift's release version. A `0.y` bump is breaking; a `0.y.z` bump is
   additive. Core accepts its current `0.y` and the one before it, so today
