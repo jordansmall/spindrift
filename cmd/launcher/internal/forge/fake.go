@@ -7,6 +7,11 @@ package forge
 // real sleeps. Fake embeds *core plus the four capability slices below, and no
 // two of those five may declare a name in common. Probe overrides the one
 // collision; a new one breaks the build or silently shadows the promoted field.
+//
+// Reads that map to a protocol primitive cross a network Connector and its
+// Route table (see fake_connector.go); writes stay native. A read with no
+// primitive yet (allIssues, BlocksOf, ListLabels, Probe, PriorClaimState, ...)
+// is native too, until the protocol grows one (#6753, #6754).
 type Fake struct {
 	// Every capability slice below embeds core too, so Fake embeds it directly
 	// to keep the shallowest unambiguous path to core's fields.
