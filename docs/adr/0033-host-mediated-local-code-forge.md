@@ -64,21 +64,21 @@ The pieces:
   (`CODE_FORGE_ACCUMULATION_REPO_DIR` overrides it), a bare repo the Launcher
   owns, the code-plane sibling of `.spindrift/issues/`. The Launcher
   auto-creates it and seeds its base host-side from the operator's local
-  checkout (offline) before any Box runs, idempotently on every run
-  thereafter — no operator setup step required (issue #1726). It is *not* the
-  operator's working repo: a bare repo has no checked-out branch (no
-  `receive.denyCurrentBranch` foot-gun), keeps agent refs and objects out of
-  the operator's `git branch`/gc, is isolated from the operator's live
-  branch-juggling, and resets with `rm -rf`. Seeding is guarded by a
-  non-blocking, cross-process exclusive lock on the repo path (issue #2441):
-  held from seeding through the end of the whole launcher process's run, it
-  stops a second, independent `spindrift` process (e.g. a concurrent
-  `research` and `dispatch` run against the same accumulation repo) from
-  re-seeding — and force-push-rewinding — the base ref while the first
-  process still has a Box mounted against it. Contention fails fast with a
-  named-repo-path error rather than blocking or racing; see [Local code
-  forge](../reference.md#local-code-forge-code_forgelocal) for the operator
-  side of this.
+  checkout (offline) at launch and again before every Pass, so a fix pass
+  clones the current base (issue #6896) — no operator setup step required
+  (issue #1726). It is *not* the operator's working repo: a bare repo has no
+  checked-out branch (no `receive.denyCurrentBranch` foot-gun), keeps agent
+  refs and objects out of the operator's `git branch`/gc, is isolated from
+  the operator's live branch-juggling, and resets with `rm -rf`. Seeding is
+  guarded by a non-blocking, cross-process exclusive lock on the repo path
+  (issue #2441): held from seeding through the end of the whole launcher
+  process's run, it stops a second, independent `spindrift` process (e.g. a
+  concurrent `research` and `dispatch` run against the same accumulation
+  repo) from re-seeding — and force-push-rewinding — the base ref
+  while the first process still has a Box mounted against it. Contention
+  fails fast with a named-repo-path error rather than blocking or racing;
+  see [Local code forge](../reference.md#local-code-forge-code_forgelocal)
+  for the operator side of this.
 
 - **Code-in — a read-only clone mount.** The Launcher RO bind-mounts
   `.spindrift/accum.git` into the Box; the agent runs `git clone /repo /work`

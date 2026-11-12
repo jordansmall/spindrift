@@ -505,12 +505,18 @@ accumulates code in — the code-plane sibling of the `.spindrift/issues/`
 directory. Defaults to `.spindrift/accum.git` under the launcher's working
 directory; `CODE_FORGE_ACCUMULATION_REPO_DIR` overrides it. The Launcher
 auto-creates and seeds it (base branch ref from the operator's local
-checkout, offline) before any Box runs, idempotently on every run
-thereafter; each seam clones it through a read-only mount and lands onto an
-Integration branch inside it. Deliberately *not* the operator's working
-checkout: a bare repo has no checked-out branch, keeps agent refs and
-objects out of the operator's repo, and resets with `rm -rf`.
-_Avoid_: mirror, staging repo, local remote.
+checkout, offline) at launch and again before every Pass; each seam clones
+it through a read-only mount and lands onto an Integration branch inside it.
+Deliberately *not* the operator's working checkout: a bare repo has no
+checked-out branch, keeps agent refs and objects out of the operator's repo,
+and resets with `rm -rf`.
+_Avoid_: staging repo, local remote.
+
+**Host-seeded mirror**:
+The host-side repository the Launcher seeds before each Pass and mounts
+read-only at `/repo` for the Box to clone from, so a Pass sees the base as it
+stands then. On the `local` Code Forge it is the Accumulation repo; a forge
+with no host-side repo has none.
 
 **Integration branch**:
 The branch in the Accumulation repo where all the seams of one broad ticket
