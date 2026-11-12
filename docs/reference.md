@@ -6578,33 +6578,36 @@ precedent it mirrors.
 `.spindrift/accum.git` under the launcher's working directory by default,
 overridden by `CODE_FORGE_ACCUMULATION_REPO_DIR`. The launcher auto-creates
 it and seeds its base ref from `BASE_BRANCH` in the operator's own checkout,
-offline, before any Box runs — idempotently on every run thereafter, so
-there is no operator setup step.
+offline, at launch and again before every Pass, so a fix pass clones the base
+as it stands then rather than as of launch (issue #6896). There is no
+operator setup step.
 
 **Seeding is cross-process locked (issue #2441).** Seeding force-pushes the
 base branch into the Accumulation repo — a full mirror, including a rewind
-if the operator's checkout moved backwards — which is safe within one
-launcher process (seeding runs once, before any Box), but not across two:
-a second, independent `spindrift` process (e.g. a `research` run and a
-`dispatch` run against the same `CODE_FORGE_ACCUMULATION_REPO_DIR`) seeding
-while the first process still has a Box mounted against it could rewind the
-ref out from under that Box mid-flight. The launcher guards this with a
-non-blocking exclusive file lock (`<accum-repo-path>.lock`), held from
-seeding through the end of the whole process's run — every Box it
-dispatches, not just the initial seed. A second process that tries to seed
-the same Accumulation repo while the first still holds the lock fails fast
-with a clear error naming the repo path, rather than blocking or silently
-racing the first process's mount; the operator re-runs once the first
-process exits. `console` is the one case where "the whole run" is a full
-interactive session, not a single seed-and-dispatch: it holds the lock from
-startup until the operator quits, so a `dispatch`/`research` process against
-the same Accumulation repo fails fast for as long as a `console` session
-stays open. The lock is advisory and per-`CODE_FORGE_ACCUMULATION_REPO_DIR`
-path, but that default resolves to one shared `.spindrift/accum.git` under
-the launcher's working directory (not one per ticket) — so, by default, two
-unrelated tickets dispatched from the same checkout now contend for the same
-lock too, serializing what used to run concurrently; give each its own
-`CODE_FORGE_ACCUMULATION_REPO_DIR` to keep them independent.
+if the operator's checkout moved backwards. Within one launcher process
+seeds are serialised, so they never race each other, and a rewind needs
+the operator to move their own checkout backwards mid-run; across two
+processes nothing serialises them: a second, independent `spindrift`
+process (e.g. a `research` run and a `dispatch` run against the same
+`CODE_FORGE_ACCUMULATION_REPO_DIR`) seeding while the first process still
+has a Box mounted against it could rewind the ref out from under that Box
+mid-flight. The launcher guards this with a non-blocking exclusive file lock
+(`<accum-repo-path>.lock`), held from seeding through the end of the whole
+process's run — every Box it dispatches, not just the initial seed. A
+second process that tries to seed the same Accumulation repo while the
+first still holds the lock fails fast with a clear error naming the repo
+path, rather than blocking or silently racing the first process's mount;
+the operator re-runs once the first process exits. `console` is the one
+case where "the whole run" is a full interactive session, not a single
+seed-and-dispatch: it holds the lock from startup until the operator quits,
+so a `dispatch`/`research` process against the same Accumulation repo fails
+fast for as long as a `console` session stays open. The lock is advisory
+and per-`CODE_FORGE_ACCUMULATION_REPO_DIR` path, but that default resolves
+to one shared `.spindrift/accum.git` under the launcher's working directory
+(not one per ticket) — so, by default, two unrelated tickets dispatched
+from the same checkout now contend for the same lock too, serializing what
+used to run concurrently; give each its own `CODE_FORGE_ACCUMULATION_REPO_DIR`
+to keep them independent.
 
 Edge cases:
 
@@ -6622,7 +6625,7 @@ Edge cases:
   operator to run.
 - **Self-contained research and the remote Code Forges take no lock at
   all.** `--self-contained` research and `CODE_FORGE=github`/`git` never
-  call `seedAccumulationRepoIfHostMediated`'s seeding path, so nothing acquires the
+  call `seedAccumulationRepoIfHostSeeded`'s seeding path, so nothing acquires the
   lock for them; only non-self-contained runs under `CODE_FORGE=local` do.
 - **`flock` is advisory-only, and unreliable over a network filesystem.**
   A process that doesn't check the lock can still write through it, and on
