@@ -299,7 +299,8 @@ and in the in-box `box` program; the only bash left is the generated shim that
 - **`connectors/`** — shipped Connector subflakes, each its own Go module built
   to a wasip1 reactor by its own `package.nix`. `connectors/claude` is the
   claude Driver's host half (`spindrift.dev/connector/claude`);
-  `connectors/github` is the github backend's tracker and forge read paths.
+  `connectors/github` is the github backend's tracker and forge read paths;
+  `connectors/jira` is the jira backend's tracker read path.
   Each gets `connector-<name>-go-{fmt,vet,test}` from `nix/checks/go.nix`.
 - **`agent/`** — `entrypoint.sh`, the generated shim, and the Driver's hook
   scripts. The shim has no logic: `lib/image.nix` renders the preambles ahead

@@ -28,6 +28,9 @@
     },
     "connectors/github": {
       "component": "github"
+    },
+    "connectors/jira": {
+      "component": "jira"
     }
   }
 }
