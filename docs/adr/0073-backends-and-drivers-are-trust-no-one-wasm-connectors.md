@@ -508,3 +508,20 @@ network host can follow one, and `network_rotate_test.go` covers it). The
 cut-over bar is the same 20 consecutive clean runs, counted over the
 `shadow-github-*.log` records; the reference's Shadow mode section has the
 recipe and what counts as clean.
+
+## Amendment (issue #6893): a Route may follow one redirect
+
+The host never follows a redirect, and the guest's Response carries only a
+status and a body, so a Connector cannot read an answer that lives behind a 302.
+GitHub answers a job-log read with a 302 to a pre-signed blob URL on a host that
+varies. A Route may therefore set `followRedirect`: on a GET route only, the
+host follows exactly one hop, to an `https` URL without userinfo, sending it
+afresh with neither the credential nor the guest's headers (the pre-signed URL
+is its own authority), under the same body cap, except that a body over the cap
+keeps its tail rather than failing the call (an oversized body is fatal to the
+Connector, and the tail of a log is the useful part). The audit line records the
+target as `redirect_host`. The hop asks for the tail with a `Range` suffix and is
+bounded to half the call's remaining budget, failing non-fatally (not killing
+the Connector) past it. `Route.String` shows the opt-in, so the Route-table
+diff `spindrift doctor` prints, and a baseline that lacks it, count it as a
+widening.

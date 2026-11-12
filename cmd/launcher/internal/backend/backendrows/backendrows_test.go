@@ -387,6 +387,9 @@ func TestWidening(t *testing.T) {
 		{"narrowed pattern", []connectorhost.Route{r("GET", "api.fixture.test", "/repos/x")}, []connectorhost.Route{getRepos}, nil},
 		{"host is compared literally", []connectorhost.Route{r("GET", "API.fixture.test", "/repos")}, []connectorhost.Route{getRepos},
 			[]connectorhost.Route{r("GET", "API.fixture.test", "/repos")}},
+		{"opting into a redirect widens", []connectorhost.Route{{Method: "GET", Host: "api.fixture.test", Path: "/repos", FollowRedirect: true}}, []connectorhost.Route{getRepos},
+			[]connectorhost.Route{{Method: "GET", Host: "api.fixture.test", Path: "/repos", FollowRedirect: true}}},
+		{"dropping the redirect opt-in is no widening", []connectorhost.Route{getRepos}, []connectorhost.Route{{Method: "GET", Host: "api.fixture.test", Path: "/repos", FollowRedirect: true}}, nil},
 		{"dropped route is no widening", nil, []connectorhost.Route{getRepos}, nil},
 	}
 	for _, tc := range cases {

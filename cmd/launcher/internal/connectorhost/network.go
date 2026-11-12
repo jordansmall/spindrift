@@ -10,8 +10,10 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"spindrift.dev/launcher/internal/registryvocab"
 )
@@ -35,7 +37,8 @@ var (
 	// the response body arrived.
 	ErrHTTPSend = errors.New("connector http request failed")
 	// ErrResponseTooLarge marks a response body over the guest's response buffer
-	// or maxHTTPResponse, whichever is smaller.
+	// or maxHTTPResponse, whichever is smaller. A FollowRedirect route is exempt:
+	// it keeps the body's tail instead.
 	ErrResponseTooLarge = errors.New("connector http response too large")
 	// ErrAudit marks a request the audit log could not record. The answer is
 	// withheld and the call fails closed: an unaudited request must not succeed.
@@ -47,13 +50,29 @@ var (
 // Path subtree root in registryvocab.PathSet form. A route does not restrict the
 // query string: any query is forwarded to an admitted path, and the audit log
 // records it.
+//
+// FollowRedirect lets a GET route follow one redirect hop to a host the table
+// cannot name (a pre-signed blob URL). The hop is sent uncredentialed and
+// audited with its target host, asks for the body's tail with a Range suffix,
+// and is bounded to half the call's remaining budget (failing non-fatally past
+// it); String shows the opt-in, so a Route-table diff does too. A body over the
+// response cap keeps its tail rather than failing the call: that error is
+// fatal to the Connector, and the tail of a blob such as a job log is the
+// useful part.
 type Route struct {
-	Method string `json:"method"`
-	Host   string `json:"host"`
-	Path   string `json:"path"`
+	Method         string `json:"method"`
+	Host           string `json:"host"`
+	Path           string `json:"path"`
+	FollowRedirect bool   `json:"followRedirect,omitempty"`
 }
 
-func (r Route) String() string { return r.Method + " " + r.Host + " " + r.Path }
+func (r Route) String() string {
+	s := r.Method + " " + r.Host + " " + r.Path
+	if r.FollowRedirect {
+		s += " (follows redirect)"
+	}
+	return s
+}
 
 // ValidateRoutes checks every route, naming the first that fails; the error
 // matches ErrRouteTable, and the path reason (registryvocab.ErrPattern*) when
@@ -76,6 +95,9 @@ func (r Route) validate() error {
 		u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
 		return errors.New("host is not a bare host[:port]")
 	}
+	if r.FollowRedirect && r.Method != http.MethodGet {
+		return errors.New("followRedirect is allowed on GET only")
+	}
 	return registryvocab.CheckPathPattern(r.Path)
 }
 
@@ -94,7 +116,8 @@ const (
 // when the request got no response, else the server's status even if the call
 // then failed. Size counts the body bytes read: for an oversized response
 // (DecisionFailed) that is the cap, min(response buffer, maxHTTPResponse), plus
-// one, though none reach the guest.
+// one, though none reach the guest. A FollowRedirect route's oversized body is
+// DecisionSent with Size its full length; Reason notes only the tail was kept.
 // A request has one entry; any failed call of a network Connector whose failure
 // no Host call already audited gets a further DecisionFailed one.
 type AuditEntry struct {
@@ -116,6 +139,8 @@ type AuditEntry struct {
 	RateLimit string `json:"rate_limit,omitempty"`
 	// RetryAfter is the response's Retry-After value verbatim, on a 403 or 429.
 	RetryAfter string `json:"retry_after,omitempty"`
+	// RedirectHost is the host of the one hop a FollowRedirect route followed.
+	RedirectHost string `json:"redirect_host,omitempty"`
 }
 
 // The wire values of AuditEntry.RateLimit; docs/reference.md documents them.
@@ -196,7 +221,8 @@ type Network struct {
 	// Authorize attaches the credential to an admitted request, after the
 	// guest's headers are copied so it wins over any the guest set.
 	Authorize func(*http.Request) error
-	// Client is the transport. A redirect is never followed, on a copy, so the
+	// Client is the transport. A redirect is never followed except the one hop
+	// of a FollowRedirect route; CheckRedirect is set on a copy, so the
 	// caller's client is untouched.
 	Client *http.Client
 	// Audit receives one entry per request; required.
@@ -213,6 +239,52 @@ type httpRequest struct {
 	URL     string            `json:"url"`
 	Headers map[string]string `json:"headers,omitempty"`
 	Body    string            `json:"body,omitempty"`
+}
+
+// tailChunk is readTail's read size.
+const tailChunk = 32 << 10
+
+// redirectHopShare: a followed redirect hop gets 1/redirectHopShare of the
+// caller's remaining deadline, so a slow blob host fails non-fatally before
+// the call budget expires.
+const redirectHopShare = 2
+
+// readTail reads r to EOF keeping only its last limit bytes, in memory bounded
+// by 2*limit plus one tailChunk, and returns them with the total bytes read.
+func readTail(r io.Reader, limit int) (tail []byte, total int64, err error) {
+	chunk := make([]byte, tailChunk)
+	for {
+		n, rerr := r.Read(chunk)
+		tail = append(tail, chunk[:n]...)
+		total += int64(n)
+		if len(tail) >= 2*limit {
+			tail = append(tail[:0], tail[len(tail)-limit:]...)
+		}
+		if rerr != nil {
+			if len(tail) > limit {
+				tail = tail[len(tail)-limit:]
+			}
+			if rerr == io.EOF {
+				rerr = nil
+			}
+			return tail, total, rerr
+		}
+	}
+}
+
+// contentRangeTotal parses the complete length from "bytes a-b/total"; ok is
+// false for a malformed header or an unknown ("*") total.
+func contentRangeTotal(h string) (total int64, ok bool) {
+	rest, found := strings.CutPrefix(h, "bytes ")
+	if !found {
+		return 0, false
+	}
+	_, t, found := strings.Cut(rest, "/")
+	if !found {
+		return 0, false
+	}
+	total, err := strconv.ParseInt(t, 10, 64)
+	return total, err == nil && total >= 0
 }
 
 // do runs one http_request: match, authorize, send, audit. One audit entry is
@@ -298,10 +370,62 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 	if serr != nil {
 		return 0, nil, fmt.Errorf("%w: connector %q: %v", ErrHTTPSend, n.Name, serr)
 	}
+	if matched.FollowRedirect && resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		loc, lerr := resp.Location()
+		if lerr == nil {
+			status = resp.StatusCode
+			resp.Body.Close()
+			if loc.Scheme != "https" || loc.User != nil || loc.Host == "" {
+				return status, nil, refuse("redirect from %s%s: only https locations without userinfo are followed", u.Host, u.Path)
+			}
+			entry.RedirectHost = loc.Host
+			// A fresh request: the guest's headers and the credential must not leave the admitted host.
+			// The hop's budget covers its body read; expiring ctx instead would
+			// kill the Connector rather than fail with a plain ErrHTTPSend.
+			hopCtx := ctx
+			if dl, ok := ctx.Deadline(); ok {
+				var cancel context.CancelFunc
+				hopCtx, cancel = context.WithTimeout(ctx, time.Until(dl)/redirectHopShare)
+				defer cancel()
+			}
+			hop, herr := http.NewRequestWithContext(hopCtx, http.MethodGet, loc.String(), nil)
+			if herr != nil {
+				return status, nil, fmt.Errorf("%w: connector %q: %v", ErrHTTPSend, n.Name, herr)
+			}
+			// A server honouring the suffix range sends only the tail; one that
+			// ignores it sends the whole body, which readTail trims. A suffix
+			// range on a zero-length blob can draw a 416 from Azure-style hosts;
+			// harmless, as an empty log yields no excerpt either way.
+			hop.Header.Set("Range", fmt.Sprintf("bytes=-%d", maxBody))
+			resp, serr = client.Do(hop)
+			if serr != nil {
+				return status, nil, fmt.Errorf("%w: connector %q: redirect to %s: %v", ErrHTTPSend, n.Name, loc.Host, serr)
+			}
+		} else {
+			entry.Reason = "redirect not followed: " + lerr.Error()
+		}
+	}
 	defer resp.Body.Close()
 	status = resp.StatusCode
-	data, rderr := io.ReadAll(io.LimitReader(resp.Body, int64(maxBody)+1))
-	entry.Size = int64(len(data))
+	var data []byte
+	var rderr error
+	if matched.FollowRedirect {
+		var total int64
+		data, total, rderr = readTail(resp.Body, maxBody)
+		// A 206 carries only the tail; its Content-Range total is the real size.
+		if resp.StatusCode == http.StatusPartialContent {
+			if full, ok := contentRangeTotal(resp.Header.Get("Content-Range")); ok {
+				total = full
+			}
+		}
+		entry.Size = total
+		if total > int64(maxBody) {
+			entry.Reason = fmt.Sprintf("body over %d bytes; kept its last %d", maxBody, maxBody)
+		}
+	} else {
+		data, rderr = io.ReadAll(io.LimitReader(resp.Body, int64(maxBody)+1))
+		entry.Size = int64(len(data))
+	}
 	entry.RateLimit, entry.RetryAfter = rateLimitKind(status, resp.Header, data)
 	if rderr != nil {
 		return status, nil, fmt.Errorf("%w: connector %q: reading response: %v", ErrHTTPSend, n.Name, rderr)

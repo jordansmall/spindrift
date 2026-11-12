@@ -43,29 +43,36 @@ let
     else
       null;
 
+  # `followRedirect` is optional; the Go host allows it on GET only.
+  knownKeys = [
+    "followRedirect"
+    "host"
+    "method"
+    "path"
+  ];
+  required = [
+    "host"
+    "method"
+    "path"
+  ];
+
   routeProblem =
     r:
     if
       !(
         builtins.isAttrs r
-        &&
-          builtins.attrNames r == [
-            "host"
-            "method"
-            "path"
-          ]
-        && builtins.all (k: builtins.isString r.${k}) [
-          "host"
-          "method"
-          "path"
-        ]
+        && builtins.all (k: r ? ${k} && builtins.isString r.${k}) required
+        && builtins.all (k: builtins.elem k knownKeys) (builtins.attrNames r)
+        && (r ? followRedirect -> builtins.isBool r.followRedirect)
       )
     then
-      "is not an attrset of exactly the strings `method`, `host` and `path`"
+      "is not an attrset of exactly the strings `method`, `host` and `path` and an optional boolean `followRedirect`"
     else if !(methodOk r.method) then
       "method is not an uppercase HTTP token"
     else if !(hostOk r.host) then
       "host is not a bare host[:port]"
+    else if (r.followRedirect or false) && r.method != "GET" then
+      "followRedirect is allowed on GET only"
     else
       pathProblem r.path;
 

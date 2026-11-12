@@ -526,7 +526,7 @@ in
                         routes = mkOption {
                           # Items stay raw: lib/connector-routes.nix words the errors.
                           type = types.listOf types.raw;
-                          description = "The Connector's Route table, a list of `{ method; host; path; }`.";
+                          description = "The Connector's Route table, a list of `{ method; host; path; }`, each with an optional GET-only boolean `followRedirect`.";
                         };
                         credential = mkOption {
                           type = types.str;
@@ -591,15 +591,25 @@ in
                           type = types.str;
                           description = "Path, a subtree root; `{repo}` stands for the tracker's owner/name slug.";
                         };
+                        followRedirect = mkOption {
+                          type = types.nullOr types.bool;
+                          default = null;
+                          description = "GET only: let the host follow one redirect hop.";
+                        };
                       };
                     }
                   );
+                  # Unset (null) fields are dropped so a Route that never sets
+                  # `followRedirect` renders exactly as before the field existed.
+                  apply = map (lib.filterAttrs (_: v: v != null));
                   default = [ ];
                   description = ''
                     A network Connector's Route table: the only HTTP traffic
                     its http_request Host call may send. Method is exact
                     uppercase, host an exact host[:port], and path a subtree
                     root; `{repo}` in a path is the tracker's owner/name slug.
+                    A GET Route may set `followRedirect = true` to follow one
+                    redirect hop.
                     A backend row carries its own table in `backend.routes`.
                   '';
                 };

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/registryvocab"
@@ -27,19 +28,19 @@ func TestRouteTableValidation(t *testing.T) {
 		r    connectorhost.Route
 		want error
 	}{
-		"blanket root":   {connectorhost.Route{"GET", "h.io", "/"}, registryvocab.ErrPatternBlanketRoot},
-		"trailing slash": {connectorhost.Route{"GET", "h.io", "/a/"}, registryvocab.ErrPatternNotCanonical},
-		"dot-dot":        {connectorhost.Route{"GET", "h.io", "/a/../b"}, registryvocab.ErrPatternNotCanonical},
-		"relative":       {connectorhost.Route{"GET", "h.io", "a/b"}, registryvocab.ErrPatternNotCanonical},
-		"query":          {connectorhost.Route{"GET", "h.io", "/a?x"}, registryvocab.ErrPatternURLDelimiter},
-		"fragment":       {connectorhost.Route{"GET", "h.io", "/a#x"}, registryvocab.ErrPatternURLDelimiter},
-		"lowercase verb": {connectorhost.Route{"get", "h.io", "/a"}, nil},
-		"empty verb":     {connectorhost.Route{"", "h.io", "/a"}, nil},
-		"empty host":     {connectorhost.Route{"GET", "", "/a"}, nil},
-		"scheme host":    {connectorhost.Route{"GET", "https://h.io", "/a"}, nil},
-		"path in host":   {connectorhost.Route{"GET", "h.io/x", "/a"}, nil},
-		"userinfo host":  {connectorhost.Route{"GET", "u@h.io", "/a"}, nil},
-		"empty port":     {connectorhost.Route{"GET", "h.io:", "/a"}, nil},
+		"blanket root":   {connectorhost.Route{Method: "GET", Host: "h.io", Path: "/"}, registryvocab.ErrPatternBlanketRoot},
+		"trailing slash": {connectorhost.Route{Method: "GET", Host: "h.io", Path: "/a/"}, registryvocab.ErrPatternNotCanonical},
+		"dot-dot":        {connectorhost.Route{Method: "GET", Host: "h.io", Path: "/a/../b"}, registryvocab.ErrPatternNotCanonical},
+		"relative":       {connectorhost.Route{Method: "GET", Host: "h.io", Path: "a/b"}, registryvocab.ErrPatternNotCanonical},
+		"query":          {connectorhost.Route{Method: "GET", Host: "h.io", Path: "/a?x"}, registryvocab.ErrPatternURLDelimiter},
+		"fragment":       {connectorhost.Route{Method: "GET", Host: "h.io", Path: "/a#x"}, registryvocab.ErrPatternURLDelimiter},
+		"lowercase verb": {connectorhost.Route{Method: "get", Host: "h.io", Path: "/a"}, nil},
+		"empty verb":     {connectorhost.Route{Method: "", Host: "h.io", Path: "/a"}, nil},
+		"empty host":     {connectorhost.Route{Method: "GET", Host: "", Path: "/a"}, nil},
+		"scheme host":    {connectorhost.Route{Method: "GET", Host: "https://h.io", Path: "/a"}, nil},
+		"path in host":   {connectorhost.Route{Method: "GET", Host: "h.io/x", Path: "/a"}, nil},
+		"userinfo host":  {connectorhost.Route{Method: "GET", Host: "u@h.io", Path: "/a"}, nil},
+		"empty port":     {connectorhost.Route{Method: "GET", Host: "h.io:", Path: "/a"}, nil},
 	}
 	for name, c := range bad {
 		err := connectorhost.ValidateRoutes([]connectorhost.Route{good, c.r})
@@ -76,6 +77,14 @@ func newBackend(t *testing.T, h http.HandlerFunc) *backend {
 }
 
 func (b *backend) host() string { return b.Listener.Addr().String() }
+
+// redirectingOrigin answers every request with a 302 to location.
+func redirectingOrigin(t *testing.T, location string) *backend {
+	t.Helper()
+	return newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, location, http.StatusFound)
+	})
+}
 
 func netFor(b *backend, audit *bytes.Buffer, routes ...connectorhost.Route) *connectorhost.Network {
 	return &connectorhost.Network{
@@ -409,5 +418,193 @@ func TestNetworkAuditClassifiesRateLimits(t *testing.T) {
 				t.Errorf("audit = %+v, want rate_limit %q retry_after %q", l, c.wantRateLimit, c.wantRetryAfter)
 			}
 		})
+	}
+}
+
+func TestNetworkFollowRedirectRouteFollowsOneUncredentialedHop(t *testing.T) {
+	target := newBackend(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "log body") })
+	origin := redirectingOrigin(t, target.URL+"/blob?sig=abc")
+	var audit bytes.Buffer
+	n := netFor(origin, &audit, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true})
+	raw := fmt.Sprintf(`{"method":"GET","url":"%s/logs/1","headers":{"X-Guest":"1","Accept":"text/plain"}}`, origin.URL)
+	status, body, err := n.Do(context.Background(), []byte(raw), 1<<10)
+	if err != nil || status != 200 || string(body) != "log body" {
+		t.Fatalf("got %d %q %v", status, body, err)
+	}
+	if target.hits.Load() != 1 || origin.hits.Load() != 1 {
+		t.Fatalf("hits origin=%d target=%d, want 1 each", origin.hits.Load(), target.hits.Load())
+	}
+	r := target.last.Load()
+	if r.Method != "GET" || r.URL.Path != "/blob" || r.URL.RawQuery != "sig=abc" {
+		t.Errorf("second hop = %s %v", r.Method, r.URL)
+	}
+	for _, h := range []string{"Authorization", "X-Guest", "Accept"} {
+		if v := r.Header.Get(h); v != "" {
+			t.Errorf("second hop carried %s = %q", h, v)
+		}
+	}
+	lines := auditLines(t, &audit)
+	if len(lines) != 1 || lines[0].RedirectHost != target.host() || lines[0].Decision != connectorhost.DecisionSent ||
+		lines[0].Status != 200 || lines[0].Size != int64(len("log body")) {
+		t.Fatalf("audit = %+v, want one sent entry with redirect_host %s", lines, target.host())
+	}
+}
+
+func TestNetworkFollowRedirectDoesNotChainAndKeeps3xx(t *testing.T) {
+	target := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/elsewhere", http.StatusFound)
+	})
+	origin := redirectingOrigin(t, target.URL+"/blob")
+	n := netFor(origin, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true})
+	status, _, err := n.Do(context.Background(), []byte(fmt.Sprintf(`{"method":"GET","url":"%s/logs"}`, origin.URL)), 1<<10)
+	if err != nil || status != http.StatusFound {
+		t.Fatalf("got %d %v, want the second hop's 302 returned", status, err)
+	}
+	if target.hits.Load() != 1 {
+		t.Fatalf("target hit %d times, want 1", target.hits.Load())
+	}
+}
+
+func TestNetworkFollowRedirectRefusesPlaintextAndUserinfoTargets(t *testing.T) {
+	for name, loc := range map[string]string{
+		"plaintext": "http://127.0.0.1:1/blob",
+		"userinfo":  "https://u:p@127.0.0.1:1/blob",
+	} {
+		t.Run(name, func(t *testing.T) {
+			origin := redirectingOrigin(t, loc)
+			var audit bytes.Buffer
+			n := netFor(origin, &audit, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true})
+			_, _, err := n.Do(context.Background(), []byte(fmt.Sprintf(`{"method":"GET","url":"%s/logs"}`, origin.URL)), 1<<10)
+			if !errors.Is(err, connectorhost.ErrRouteRefused) {
+				t.Fatalf("err = %v, want ErrRouteRefused", err)
+			}
+			lines := auditLines(t, &audit)
+			if len(lines) != 1 || lines[0].Decision != connectorhost.DecisionRefused {
+				t.Fatalf("audit = %+v, want one refused entry", lines)
+			}
+		})
+	}
+}
+
+func TestNetworkFollowRedirectKeepsTheTailOfAnOversizedBody(t *testing.T) {
+	// Several chunks long, so the tail window slides more than once.
+	big := strings.Repeat("a", 100<<10) + strings.Repeat("b", 70<<10) + "tail"
+	target := newBackend(t, func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, big) })
+	origin := redirectingOrigin(t, target.URL)
+	var audit bytes.Buffer
+	n := netFor(origin, &audit, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true})
+	const limit = 50 << 10
+	status, body, err := n.Do(context.Background(), []byte(fmt.Sprintf(`{"method":"GET","url":"%s/logs"}`, origin.URL)), limit)
+	if err != nil || status != 200 {
+		t.Fatalf("got %d %v, want 200 and no error", status, err)
+	}
+	if string(body) != big[len(big)-limit:] {
+		t.Errorf("body = %d bytes, want the last %d", len(body), limit)
+	}
+	lines := auditLines(t, &audit)
+	if len(lines) != 1 || lines[0].Decision != connectorhost.DecisionSent || lines[0].Size != int64(len(big)) || lines[0].Reason == "" {
+		t.Fatalf("audit = %+v, want one sent entry of size %d with a reason", lines, len(big))
+	}
+}
+
+func TestNetworkFollowRedirectAsksTheHopForTheTail(t *testing.T) {
+	const limit = 1 << 10
+	target := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = io.WriteString(w, "the tail")
+	})
+	origin := redirectingOrigin(t, target.URL)
+	n := netFor(origin, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true})
+	status, body, err := n.Do(context.Background(), []byte(fmt.Sprintf(`{"method":"GET","url":"%s/logs"}`, origin.URL)), limit)
+	if err != nil || status != http.StatusPartialContent || string(body) != "the tail" {
+		t.Fatalf("got %d %q %v", status, body, err)
+	}
+	if got, want := target.last.Load().Header.Get("Range"), fmt.Sprintf("bytes=-%d", limit); got != want {
+		t.Errorf("hop Range = %q, want %q", got, want)
+	}
+}
+
+func TestNetworkFollowRedirectAuditsTheWholeBodyWhenTheHopSendsOnlyTheTail(t *testing.T) {
+	const limit = 1 << 10
+	const total = 5 << 20
+	tail := strings.Repeat("t", limit)
+	target := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", total-limit, total-1, total))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = io.WriteString(w, tail)
+	})
+	origin := redirectingOrigin(t, target.URL)
+	var audit bytes.Buffer
+	n := netFor(origin, &audit, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true})
+	status, body, err := n.Do(context.Background(), []byte(fmt.Sprintf(`{"method":"GET","url":"%s/logs"}`, origin.URL)), limit)
+	if err != nil || status != http.StatusPartialContent || string(body) != tail {
+		t.Fatalf("got %d %d bytes %v", status, len(body), err)
+	}
+	lines := auditLines(t, &audit)
+	if len(lines) != 1 || lines[0].Size != total || lines[0].Reason == "" {
+		t.Fatalf("audit = %+v, want one entry of size %d with a reason", lines, total)
+	}
+}
+
+func TestNetworkFollowRedirectHopIsCutBeforeTheCallersDeadline(t *testing.T) {
+	// The hop's body never ends on its own; the handler holds it open until the
+	// hop's context is cut, so the test waits no longer than the cut itself.
+	target := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "x")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	})
+	origin := redirectingOrigin(t, target.URL)
+	n := netFor(origin, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true})
+	// The hop is cut at half of this, leaving ~2s of slack before the outer expiry.
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	_, _, err := n.Do(ctx, []byte(fmt.Sprintf(`{"method":"GET","url":"%s/logs"}`, origin.URL)), 1<<10)
+	if !errors.Is(err, connectorhost.ErrHTTPSend) {
+		t.Fatalf("err = %v, want ErrHTTPSend", err)
+	}
+	if ctx.Err() != nil {
+		t.Errorf("the caller's context expired (%v): the hop was not cut inside the budget", ctx.Err())
+	}
+}
+
+func TestNetworkFollowRedirectReturnsNon3xxUnchanged(t *testing.T) {
+	origin := newBackend(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "direct") })
+	n := netFor(origin, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true})
+	status, body, err := n.Do(context.Background(), []byte(fmt.Sprintf(`{"method":"GET","url":"%s/logs"}`, origin.URL)), 1<<10)
+	if err != nil || status != 200 || string(body) != "direct" {
+		t.Fatalf("got %d %q %v", status, body, err)
+	}
+}
+
+func TestRouteFollowRedirectIsGetOnlyAndShownInTheString(t *testing.T) {
+	post := connectorhost.Route{Method: "POST", Host: "h.io", Path: "/a", FollowRedirect: true}
+	if err := connectorhost.ValidateRoutes([]connectorhost.Route{post}); !errors.Is(err, connectorhost.ErrRouteTable) {
+		t.Fatalf("POST followRedirect: err = %v, want ErrRouteTable", err)
+	}
+	get := connectorhost.Route{Method: "GET", Host: "h.io", Path: "/a", FollowRedirect: true}
+	if err := connectorhost.ValidateRoutes([]connectorhost.Route{get}); err != nil {
+		t.Fatalf("GET followRedirect refused: %v", err)
+	}
+	if got, want := get.String(), "GET h.io /a (follows redirect)"; got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+	get.FollowRedirect = false
+	if got, want := get.String(), "GET h.io /a"; got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
+func TestNetworkFollowRedirectAuditsA3xxWithoutAUsableLocation(t *testing.T) {
+	origin := newBackend(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusFound) })
+	var audit bytes.Buffer
+	n := netFor(origin, &audit, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true})
+	status, _, err := n.Do(context.Background(), []byte(fmt.Sprintf(`{"method":"GET","url":"%s/logs"}`, origin.URL)), 1<<10)
+	if err != nil || status != http.StatusFound {
+		t.Fatalf("got %d %v, want the 302 returned as is", status, err)
+	}
+	lines := auditLines(t, &audit)
+	if len(lines) != 1 || lines[0].Decision != connectorhost.DecisionSent || !strings.Contains(lines[0].Reason, "redirect not followed") {
+		t.Fatalf("audit = %+v, want one sent entry whose reason says the hop was skipped", lines)
 	}
 }
