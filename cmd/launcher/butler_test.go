@@ -138,28 +138,28 @@ func TestButlerPatchForge(t *testing.T) {
 	cf.BranchPrefix = "agent/issue-"
 
 	t.Run("neither capability", func(t *testing.T) {
-		if pf := butlerPatchForge(cf, forge.Capabilities{}); pf != nil {
+		if pf := butlerPatchForge(forge.Capabilities{}); pf != nil {
 			t.Fatalf("butlerPatchForge = %v, want nil", pf)
 		}
 	})
 
 	t.Run("push only", func(t *testing.T) {
 		caps := forge.Capabilities{BranchPusher: fakeBranchPusher{}}
-		if pf := butlerPatchForge(cf, caps); pf != nil {
+		if pf := butlerPatchForge(caps); pf != nil {
 			t.Fatalf("butlerPatchForge = %v, want nil", pf)
 		}
 	})
 
 	t.Run("draft PR only", func(t *testing.T) {
 		caps := forge.Capabilities{DraftPRCreator: fakeDraftPRCreator{}}
-		if pf := butlerPatchForge(cf, caps); pf != nil {
+		if pf := butlerPatchForge(caps); pf != nil {
 			t.Fatalf("butlerPatchForge = %v, want nil", pf)
 		}
 	})
 
 	t.Run("push and draft PR, no issue labeler", func(t *testing.T) {
 		caps := forge.Capabilities{BranchPusher: fakeBranchPusher{}, DraftPRCreator: fakeDraftPRCreator{}}
-		if pf := butlerPatchForge(cf, caps); pf != nil {
+		if pf := butlerPatchForge(caps); pf != nil {
 			t.Fatalf("butlerPatchForge = %v, want nil: a tracker with no IssueLabeler must never opt the rung on", pf)
 		}
 	})
@@ -176,7 +176,7 @@ func TestButlerPatchForge(t *testing.T) {
 			BranchDeleter:   fakeBranchDeleter{},
 			ForgeDescriptor: githubDesc, TrackerDescriptor: githubDesc,
 		}
-		if pf := butlerPatchForge(cf, caps); pf != nil {
+		if pf := butlerPatchForge(caps); pf != nil {
 			t.Fatalf("butlerPatchForge = %v, want nil: no PRForge to resolve an ambiguous create with", pf)
 		}
 	})
@@ -190,7 +190,7 @@ func TestButlerPatchForge(t *testing.T) {
 			PRForge:         cf.PRForgeFake,
 			ForgeDescriptor: githubDesc, TrackerDescriptor: githubDesc,
 		}
-		if pf := butlerPatchForge(cf, caps); pf != nil {
+		if pf := butlerPatchForge(caps); pf != nil {
 			t.Fatalf("butlerPatchForge = %v, want nil: no BranchDeleter to clean up an orphaned branch with", pf)
 		}
 	})
@@ -201,12 +201,9 @@ func TestButlerPatchForge(t *testing.T) {
 			PRForge: cf.PRForgeFake, BranchDeleter: fakeBranchDeleter{},
 			ForgeDescriptor: githubDesc, TrackerDescriptor: githubDesc,
 		}
-		pf := butlerPatchForge(cf, caps)
+		pf := butlerPatchForge(caps)
 		if pf == nil {
 			t.Fatal("butlerPatchForge = nil, want a non-nil PatchForge")
-		}
-		if got, want := pf.AgentBranch("42"), "agent/issue-42"; got != want {
-			t.Errorf("AgentBranch(42) = %q, want %q", got, want)
 		}
 		if err := pf.PushBranch("dir", "ref", "branch", "base"); err != nil {
 			t.Errorf("PushBranch: %v", err)
@@ -237,7 +234,7 @@ func TestButlerPatchForge(t *testing.T) {
 			PRForge: cf.PRForgeFake, BranchDeleter: fakeBranchDeleter{},
 			ForgeDescriptor: githubDesc, TrackerDescriptor: forgejoDesc,
 		}
-		if pf := butlerPatchForge(cf, caps); pf != nil {
+		if pf := butlerPatchForge(caps); pf != nil {
 			t.Fatalf("butlerPatchForge = %v, want nil: forge and tracker descriptors name different backends", pf)
 		}
 	})
@@ -254,7 +251,7 @@ func TestButlerPatchForge(t *testing.T) {
 		if caps.IssueLabeler != nil {
 			t.Fatalf("caps.IssueLabeler = %v, want nil: the local tracker implements no IssueLabeler", caps.IssueLabeler)
 		}
-		if pf := butlerPatchForge(pushCf, caps); pf != nil {
+		if pf := butlerPatchForge(caps); pf != nil {
 			t.Fatalf("butlerPatchForge = %v, want nil", pf)
 		}
 	})
@@ -273,7 +270,7 @@ func TestButlerPatchForge(t *testing.T) {
 		if caps.PRForge == nil || caps.BranchDeleter == nil {
 			t.Fatalf("caps.PRForge = %v caps.BranchDeleter = %v, want both non-nil", caps.PRForge, caps.BranchDeleter)
 		}
-		if pf := butlerPatchForge(pushCf, caps); pf == nil {
+		if pf := butlerPatchForge(caps); pf == nil {
 			t.Fatal("butlerPatchForge = nil, want a non-nil PatchForge")
 		}
 	})
@@ -288,7 +285,7 @@ func TestButlerPatchForge(t *testing.T) {
 		if caps.IssueLabeler == nil {
 			t.Fatal("caps.IssueLabeler = nil, want the forgejo-shaped fake's AddLabels")
 		}
-		if pf := butlerPatchForge(pushCf, caps); pf != nil {
+		if pf := butlerPatchForge(caps); pf != nil {
 			t.Fatalf("butlerPatchForge = %v, want nil: forge and tracker descriptors name different backends", pf)
 		}
 	})

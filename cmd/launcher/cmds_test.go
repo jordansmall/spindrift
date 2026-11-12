@@ -149,7 +149,7 @@ func TestCmdRecover_AdoptedPRSucceeds(t *testing.T) {
 	fc.BranchPrefix = c.BranchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
-	branch := fc.AgentBranch("42")
+	branch := forge.AgentBranchName(c.BranchPrefix, "42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 	// A leading PENDING proves this run's own checks registered. Issue #1652's
 	// adopted-path gate does not trust an immediate SUCCESS alone.

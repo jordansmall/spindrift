@@ -255,21 +255,16 @@ func resolveButlerSettings(cfg config, caps forge.Capabilities, choreName string
 	return butlerSettings{chores: chores, claimTimeout: claimTimeout, window: window}, nil
 }
 
-// hostPatchForge adapts an already-resolved CodeForge and Capabilities into
-// butler.PatchForge: AgentBranch comes from cf (every CodeForge has it),
-// every other method from the Capabilities fields forge.ResolveCapabilities
-// already populated only when a write-capable adapter backs cf and it (issue
-// #4074, #4112).
+// hostPatchForge adapts already-resolved Capabilities into butler.PatchForge:
+// every method comes from the fields forge.ResolveCapabilities populated only
+// when a write-capable adapter backs the forge (issue #4074, #4112).
 type hostPatchForge struct {
-	cf forge.CodeForge
 	pr forge.PRForge
 	forge.BranchPusher
 	forge.DraftPRCreator
 	forge.IssueLabeler
 	forge.BranchDeleter
 }
-
-func (h hostPatchForge) AgentBranch(num string) string { return h.cf.AgentBranch(num) }
 
 func (h hostPatchForge) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 	return h.pr.OpenPRForBranch(branch)
@@ -289,7 +284,7 @@ func (h hostPatchForge) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 // on merge, the hazard ensureClosesReference guards on the work path
 // (#2341). nil whenever any leg is missing: WithPatchForge(nil, nil) is
 // "never opted in", so the rung stays off (issue #4074).
-func butlerPatchForge(cf forge.CodeForge, caps forge.Capabilities) butler.PatchForge {
+func butlerPatchForge(caps forge.Capabilities) butler.PatchForge {
 	if !caps.HostCanOpenPR() || caps.IssueLabeler == nil ||
 		caps.PRForge == nil || caps.BranchDeleter == nil {
 		return nil
@@ -297,7 +292,7 @@ func butlerPatchForge(cf forge.CodeForge, caps forge.Capabilities) butler.PatchF
 	if caps.TrackerDescriptor.Name == "" || caps.TrackerDescriptor != caps.ForgeDescriptor {
 		return nil
 	}
-	return hostPatchForge{cf: cf, pr: caps.PRForge, BranchPusher: caps.BranchPusher, DraftPRCreator: caps.DraftPRCreator, IssueLabeler: caps.IssueLabeler, BranchDeleter: caps.BranchDeleter}
+	return hostPatchForge{pr: caps.PRForge, BranchPusher: caps.BranchPusher, DraftPRCreator: caps.DraftPRCreator, IssueLabeler: caps.IssueLabeler, BranchDeleter: caps.BranchDeleter}
 }
 
 // cmdButler is the `butler [--chore <name>]` subcommand (ADR 0056, issue
@@ -372,11 +367,12 @@ func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
 		PatchPaths:        lc.config.ButlerPatchPaths,
 		PatchMaxFiles:     lc.config.ButlerPatchMaxFiles,
 		PatchMaxLines:     lc.config.ButlerPatchMaxLines,
+		BranchPrefix:      lc.config.BranchPrefix,
 		RecordsRoot:       lc.pwd,
 		Knobs:             lc.config.knobLookup,
 	}
 
-	sweeper := butler.New(backend, tree, lc.issueTracker, newDispatcher, policy, time.Now).WithPatchForge(butlerPatchForge(lc.codeForge, lc.capabilities), lc.merge).WithMergeReader(butlerMergeReader(lc.capabilities))
+	sweeper := butler.New(backend, tree, lc.issueTracker, newDispatcher, policy, time.Now).WithPatchForge(butlerPatchForge(lc.capabilities), lc.merge).WithMergeReader(butlerMergeReader(lc.capabilities))
 	o, err := sweeper.Sweep(candidates)
 	if err == nil {
 		err = butlerOutcomeErr(o)

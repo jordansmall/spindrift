@@ -145,7 +145,7 @@ func TestSettleRun_PatchedFindingLogsNoPromoteSkip(t *testing.T) {
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9501"
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: "https://example.com/pull/2"}
+	pf := &fakePatchForge{IssueLabeler: fc, draftURL: "https://example.com/pull/2"}
 	logs := sweepLog(t, patchTestPolicy(), tree, patchableDispatcher("docs-drift"), pf, fc)
 	if len(pf.draftCalls) != 1 {
 		t.Fatalf("draftCalls = %v, want the patch to land", pf.draftCalls)
@@ -164,7 +164,7 @@ func TestSettleRun_PatchLandingFailedFallbackSkipLogsReason(t *testing.T) {
 	fc.PostIssueURL = "https://example.com/issues/9502"
 	fc.SetIssue(forge.Issue{Number: "9502"})
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftErr: errors.New("boom")}
+	pf := &fakePatchForge{IssueLabeler: fc, draftErr: errors.New("boom")}
 	policy := patchTestPolicy()
 	policy.Chores = withClasses(policy.Chores, "bugs", "other")
 	logs := sweepLog(t, policy, tree, patchableDispatcher("docs-drift"), pf, fc)
@@ -198,7 +198,7 @@ func TestSettleRun_PatchApplyFailedSkipLogsReason(t *testing.T) {
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9503"
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatchErr: errors.New("does not apply")}
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc}
+	pf := &fakePatchForge{IssueLabeler: fc}
 	policy := patchTestPolicy()
 	policy.Chores = withClasses(policy.Chores, "bugs", "other")
 	logs := sweepLog(t, policy, tree, patchableDispatcher("docs-drift"), pf, fc)

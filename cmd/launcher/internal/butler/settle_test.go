@@ -1516,7 +1516,7 @@ func patchReserveResult() dispatch.Result {
 // PushBranch/CreateDraftPR.
 func patchReserveRig(fc *forge.Fake) (fakeTree, *fakePatchForge, *fakePatchGate) {
 	tree := fakeTree{head: "headsha", files: []string{"docs/a.md"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
-	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: "https://example.com/pull/1"}
+	pf := &fakePatchForge{IssueLabeler: fc, draftURL: "https://example.com/pull/1"}
 	return tree, pf, &fakePatchGate{}
 }
 
@@ -1538,7 +1538,7 @@ func TestSettleRun_Patch_ReserveCountsDespiteDoneAppendFailure(t *testing.T) {
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	room := chore.Room{Promotions: 1, Patches: 1}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, patchReservePromotion(true), patchRung{tree: tree, forge: pf, base: "main", gate: gate}, testKindLabels, io.Discard)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, patchReservePromotion(true), patchRung{tree: tree, forge: pf, branchPrefix: testBranchPrefix, base: "main", gate: gate}, testKindLabels, io.Discard)
 
 	got := s.settle(dispatch.NewFake(), patchReserveResult())
 	if got.done {
@@ -1575,7 +1575,7 @@ func TestSettleRun_Patch_ReserveCountsDespiteTakeoverBeforeDone(t *testing.T) {
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	room := chore.Room{Promotions: 1, Patches: 1}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, patchReservePromotion(true), patchRung{tree: tree, forge: pf, base: "main", gate: gate}, testKindLabels, io.Discard)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, patchReservePromotion(true), patchRung{tree: tree, forge: pf, branchPrefix: testBranchPrefix, base: "main", gate: gate}, testKindLabels, io.Discard)
 
 	s.settle(dispatch.NewFake(), patchReserveResult())
 	if len(pf.draftCalls) != 1 {
@@ -1609,7 +1609,7 @@ func TestSettleRun_Patch_ReservesWithPromotionOff(t *testing.T) {
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	room := chore.Room{Promotions: 0, Patches: 1}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, patchReservePromotion(false), patchRung{tree: tree, forge: pf, base: "main", gate: gate}, testKindLabels, io.Discard)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, patchReservePromotion(false), patchRung{tree: tree, forge: pf, branchPrefix: testBranchPrefix, base: "main", gate: gate}, testKindLabels, io.Discard)
 
 	s.settle(dispatch.NewFake(), patchReserveResult())
 	if len(pf.draftCalls) != 1 {
@@ -1641,7 +1641,7 @@ func TestSettleRun_Patch_SuccessNoDoubleCount(t *testing.T) {
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	room := chore.Room{Promotions: 1, Patches: 1}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, patchReservePromotion(true), patchRung{tree: tree, forge: pf, base: "main", gate: gate}, testKindLabels, io.Discard)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, patchReservePromotion(true), patchRung{tree: tree, forge: pf, branchPrefix: testBranchPrefix, base: "main", gate: gate}, testKindLabels, io.Discard)
 
 	got := s.settle(dispatch.NewFake(), patchReserveResult())
 	if !got.done || got.patched != 1 {
@@ -1675,7 +1675,7 @@ func TestSettleRun_Patch_StaleClaimReserveFailsNeverLands(t *testing.T) {
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Hour)
 	room := chore.Room{Promotions: 1, Patches: 1}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", staleClaim, scope, func() time.Time { return now }, room, patchReservePromotion(true), patchRung{tree: tree, forge: pf, base: "main", gate: gate}, testKindLabels, io.Discard)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", staleClaim, scope, func() time.Time { return now }, room, patchReservePromotion(true), patchRung{tree: tree, forge: pf, branchPrefix: testBranchPrefix, base: "main", gate: gate}, testKindLabels, io.Discard)
 
 	got := s.settle(dispatch.NewFake(), patchReserveResult())
 	if got.done {
@@ -1722,7 +1722,7 @@ func TestSettleRun_ReservesPromotionAndPatchInOneCommit(t *testing.T) {
 		patchPolicy{classes: []string{"docs-drift"}, perDay: 1, paths: DefaultPatchPaths, maxFiles: 3, maxLines: 20},
 	)
 	room := chore.Room{Promotions: 1, Patches: 1}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy, patchRung{tree: tree, forge: pf, base: "main", gate: gate}, testKindLabels, io.Discard)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy, patchRung{tree: tree, forge: pf, branchPrefix: testBranchPrefix, base: "main", gate: gate}, testKindLabels, io.Discard)
 
 	result := readyResult(
 		`{"title":"promotable","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`,
@@ -1786,7 +1786,7 @@ func TestSettleRun_Patch_GateRunsDespiteLostFinish(t *testing.T) {
 			scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 			now := start.Add(time.Minute)
 			room := chore.Room{Promotions: 1, Patches: 1}
-			s := newSettleRun(fc.AsIssueFiler(), tc.wrap(inner), "bugs", claim, scope, func() time.Time { return now }, room, patchReservePromotion(true), patchRung{tree: tree, forge: pf, base: "main", gate: gate}, testKindLabels, io.Discard)
+			s := newSettleRun(fc.AsIssueFiler(), tc.wrap(inner), "bugs", claim, scope, func() time.Time { return now }, room, patchReservePromotion(true), patchRung{tree: tree, forge: pf, branchPrefix: testBranchPrefix, base: "main", gate: gate}, testKindLabels, io.Discard)
 
 			if got := s.settle(dispatch.NewFake(), patchReserveResult()); got.done {
 				t.Errorf("settled = %+v, want done=false (the Finish was lost)", got)
@@ -1980,6 +1980,10 @@ func TestSettleRun_Promotion_KeepsRunLabels(t *testing.T) {
 // testKindLabels is the butler row's finding and patch labels, spelled out so
 // a test pins the label settle files under without reading the descriptor.
 var testKindLabels = kindLabels{finding: "agent-butler-finding", patch: "agent-butler-patch"}
+
+// testBranchPrefix is BRANCH_PREFIX's schema default, the prefix every butler
+// test hands the patch rung.
+const testBranchPrefix = "agent/issue-"
 
 func TestSettleRun_FilingStepsGoToProgressSink(t *testing.T) {
 	t.Parallel()

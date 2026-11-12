@@ -90,7 +90,7 @@ func TestCmdRecover_UnreviewedReadyReportsSkipNotNoOpenPR(t *testing.T) {
 // opened its draft PR in-box, so recover takes the adopt path.
 func (x *queueRecoverFixture) openPRRecover(t *testing.T) (string, error) {
 	t.Helper()
-	x.fc.SetPR(x.fc.AgentBranch("42"), forge.PR{URL: testReconcilePR})
+	x.fc.SetPR(forge.AgentBranchName(x.c.BranchPrefix, "42"), forge.PR{URL: testReconcilePR})
 	var out strings.Builder
 	ws := testNewSettle(x.c, x.fc, testWired(x.fc), x.fc)
 	err := recoverByNumber(x.c, x.fc, x.fc, capsFor(x.fc, x.fc), x.dir, testFactory(t, x.dir, nil), ws, ws.Registry(), "42", &out, io.Discard)
