@@ -43,7 +43,9 @@ type Descriptor struct {
 	// its network remote, whenever the Box hands its branch back as a bundle
 	// (ClonesFromMirror): always for local (ADR 0033), under a read-only Box
 	// for git (issue #6898), whose Box holds no credential for the remote. The
-	// Box trusts the mount as a git safe.directory.
+	// Box trusts the mount as a git safe.directory. github and forgejo do not
+	// set it: they get a per-Pass host-fetched mirror under read-only, via
+	// forge.MirrorSeeder (issue #6897).
 	HostSeededMirror bool
 
 	// OutboxRelayCapable is true for a backend whose CODE_FORGE has pull

@@ -79,8 +79,8 @@ func TestOutboxMount_RenderedByOCI(t *testing.T) {
 	}
 }
 
-// A Box with no MirrorDir (every non-local forge's) must not get a /repo
-// mount through the adapter's own render path.
+// A Box with no MirrorDir (neither local nor a read-only host-fetched forge)
+// must not get a /repo mount through the adapter's own render path.
 func TestMirrorMount_AbsentWithoutMirrorDir_OCI(t *testing.T) {
 	oci := &ociAdapter{
 		cli:   "podman",

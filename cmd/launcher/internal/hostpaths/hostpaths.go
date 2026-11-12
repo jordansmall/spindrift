@@ -15,6 +15,11 @@ func OutboxDir(pwd, key string) string {
 	return filepath.Join(OutboxRoot(pwd), key)
 }
 
+// MirrorRoot is the directory holding each Pass's host-fetched mirror.
+func MirrorRoot(pwd string) string {
+	return filepath.Join(pwd, ".spindrift", "mirror")
+}
+
 // LogDir is the host-side log directory.
 func LogDir(pwd string) string {
 	return filepath.Join(pwd, ".spindrift", "logs")

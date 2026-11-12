@@ -844,7 +844,7 @@ func dispatchConfig(c config, pwd string, it forge.IssueTracker, lw *localloop.W
 		RegistryProxyRoutes:      c.registryProxyRoutes,
 		RegistryProxyRewriteRows: ecosystem.ResponseRewriteRows(ecosystem.Registered()),
 		SignalCarrier:            c.SignalCarrier,
-		SeedMirror:               seedMirrorHook(c, pwd),
+		SeedMirror:               seedMirrorHook(c, pwd, caps.MirrorSeeder),
 		NetworkMode:              c.runnerNetworkMode(),
 		// forge.ResolveOpenPR (issue #565) keeps a zero-exit rate-limited retry
 		// from re-running a box whose work already landed a PR.
