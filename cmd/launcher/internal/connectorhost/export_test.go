@@ -46,3 +46,6 @@ func (n *Network) Do(ctx context.Context, raw []byte, maxBody int) (int, []byte,
 
 // MaxHTTPResponse is the response cap, exposed so the tests probe it.
 const MaxHTTPResponse = maxHTTPResponse
+
+// RecordFailure exposes the unexported recordFailure to the external tests.
+func (n *Network) RecordFailure(d Decision, err error) { n.recordFailure(d, err) }
