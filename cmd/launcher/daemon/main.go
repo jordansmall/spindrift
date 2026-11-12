@@ -1335,9 +1335,10 @@ var errInPlaceUnsupported = errors.New("in-place restart is supported only on li
 // BOX_FORGE_AND_ISSUE_ACCESS (issue #6757), or "" when there is none or every
 // gated kind runs a forced read-only Box and so never sees the default. The
 // daemon has no box-access flag, so the document entry alone says "defaulted".
-// An in-place restart inherits the decided marker and stays quiet.
+// The decided marker is ignored here: an in-place restart inherits it, but the
+// successor may be a build with a different document, so it decides afresh.
 func boxAccessNotice(doc *inputdoc.Document, kinds []daemon.Kind) string {
-	if doc == nil || inputdoc.DefaultNoticeDecided() {
+	if doc == nil {
 		return ""
 	}
 	msg := doc.DeprecatedDefaults["BOX_FORGE_AND_ISSUE_ACCESS"]

@@ -4900,11 +4900,12 @@ func TestBoxAccessNotice(t *testing.T) {
 			}
 		})
 	}
-	// An in-place restart re-execs with the marker its predecessor set.
-	t.Run("decided by a prior run", func(t *testing.T) {
+	// An in-place restart execs a successor build with its predecessor's
+	// marker; that marker records a decision against the old document.
+	t.Run("marker inherited across a restart", func(t *testing.T) {
 		t.Setenv(inputdoc.DefaultNoticeDecidedEnv, "1")
-		if got := boxAccessNotice(defaulted, []daemon.Kind{work}); got != "" {
-			t.Errorf("boxAccessNotice() = %q, want no repeat notice", got)
+		if got := boxAccessNotice(defaulted, []daemon.Kind{work}); got != msg {
+			t.Errorf("boxAccessNotice() = %q, want %q", got, msg)
 		}
 	})
 }
