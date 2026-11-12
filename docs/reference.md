@@ -2916,6 +2916,20 @@ indirect-only requirement, or a `replace` or `exclude` that names it.
   `go mod tidy` in `cmd/launcher`, refresh the vendor hashes in
   `lib/build-constants.nix` (each `*VendorHash`: set it to `lib.fakeHash`,
   build, copy the hash Nix reports), and run the gate.
+- **Fuzzing the host.** Three targets in `cmd/launcher/internal/connectorhost`
+  cover what the host takes from a guest; run them after bumping the pin,
+  since wazero decodes and compiles every module the host loads.
+  `FuzzHandshake` and `FuzzCall`
+  (`fuzz_test.go`) feed the handshake result and `connector_call` responses.
+  `FuzzLoad` (`load_fuzz_test.go`) feeds arbitrary module bytes through `Load`
+  (declared-size pre-scan, compile, instantiate, `_initialize`, handshake) on
+  the interpreter; every input must load or fail with `ErrHandshake` or
+  `ErrProtocolUnsupported`. Its seeds run in the normal `go test` lane: the
+  fixture Connectors from `SPINDRIFT_CONNECTOR_FIXTURES_DIR` plus hand-built
+  modules that lie about table, frame, local and vector sizes. To fuzz, run
+  `go test ./internal/connectorhost/ -run '^$' -fuzz '^FuzzLoad$' -fuzzminimizetime=0 -parallel=4`
+  from `cmd/launcher` with that variable set; keep `-parallel` low on
+  many-core hosts.
 
 ### Targeting repos that define their own devShell toolchain
 
