@@ -2,6 +2,10 @@ package forgetest
 
 import (
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -83,6 +87,21 @@ type IssueFilerHarness interface {
 	IssuePosted(title, body string, labels []string) bool
 }
 
+// MirrorSeedHarness is implemented by harnesses whose CodeForge() also
+// satisfies forge.MirrorSeeder (github, forgejo). RunHostMediationContract
+// type-asserts for it and skips the mirror scenarios when it is absent.
+type MirrorSeedHarness interface {
+	// MirrorBase is the backing repo's default branch.
+	MirrorBase() string
+	// RefSHA returns the sha refs/heads/<ref> points at in the backing repo;
+	// a missing branch fails the test (forgetest.RevParse is fatal).
+	RefSHA(ref string) string
+	// UnseedableCodeForge returns a CodeForge over a target the backend
+	// refuses or cannot reach, and the credential it authenticates with, which
+	// SeedMirror's error must not leak.
+	UnseedableCodeForge() (cf forge.CodeForge, secret string)
+}
+
 // RunHostMediationContract runs the shared host-mediation conformance suite
 // against h. Every adapter capable of BOX_FORGE_AND_ISSUE_ACCESS=read-only
 // calls it from its own test file. Each success scenario runs before its
@@ -97,6 +116,11 @@ func RunHostMediationContract(t *testing.T, h HostMediationHarness) {
 	t.Run("DraftPRCreationFails", func(t *testing.T) { testDraftPRCreationFails(t, h) })
 	t.Run("DraftPRCreationAdoptsExisting", func(t *testing.T) { testDraftPRCreationAdoptsExisting(t, h) })
 	RunHostPostedCommentContract(t, h)
+
+	if mh, ok := h.(MirrorSeedHarness); ok {
+		t.Run("MirrorSeedCloneRelayLands", func(t *testing.T) { testMirrorSeedCloneRelayLands(t, h, mh) })
+		t.Run("MirrorSeedFailsWithoutLeakingCredential", func(t *testing.T) { testMirrorSeedFails(t, mh) })
+	}
 
 	if ih, ok := h.(IssueFilerHarness); ok {
 		RunIssueFilerContract(t, ih)
@@ -339,4 +363,79 @@ func testHostPostedIssueFilingFails(t *testing.T, ih IssueFilerHarness) {
 	if _, err := f.PostIssue(title, body, labels); err == nil {
 		t.Fatal("PostIssue with a failing backend: got nil error, want one")
 	}
+}
+
+// testMirrorSeedCloneRelayLands is the read-only code-in/code-out round trip
+// with the Box given no forge credential: the host seeds a bare mirror, the
+// Box clones it credential-free and commits on a new branch, and the bundle
+// it writes lands through the host's relay.
+func testMirrorSeedCloneRelayLands(t *testing.T, h HostMediationHarness, mh MirrorSeedHarness) {
+	ms, ok := h.CodeForge().(forge.MirrorSeeder)
+	if !ok {
+		t.Fatal("harness's CodeForge does not implement forge.MirrorSeeder")
+	}
+	br := mustBundleRelay(t, h)
+	base := mh.MirrorBase()
+	const ref = "agent/issue-hm104"
+
+	mirror := filepath.Join(t.TempDir(), "mirror")
+	if err := ms.SeedMirror(mirror); err != nil {
+		t.Fatalf("SeedMirror(%q): %v", mirror, err)
+	}
+
+	work := filepath.Join(t.TempDir(), "work")
+	boxGit := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = credentialFreeEnv()
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("credential-free git %v: %v: %s", args, err, out)
+		}
+	}
+	boxGit("", "clone", mirror, work)
+	if got, want := RevParse(t, work, "origin/"+base), mh.RefSHA(base); got != want {
+		t.Fatalf("clone of the mirror sees origin/%s = %s, want %s", base, got, want)
+	}
+
+	outbox := t.TempDir()
+	want := SeedRelayBundleFrom(t, work, base, outbox, ref)
+	if err := br.RelayBundle(outbox, ref); err != nil {
+		t.Fatalf("RelayBundle(%q, %q): %v", outbox, ref, err)
+	}
+	if got := mh.RefSHA(ref); got != want {
+		t.Fatalf("RelayBundle reported success but %s = %q, want %s", ref, got, want)
+	}
+}
+
+// testMirrorSeedFails verifies SeedMirror against a target the backend refuses
+// returns an error that does not carry the host's credential.
+func testMirrorSeedFails(t *testing.T, mh MirrorSeedHarness) {
+	cf, secret := mh.UnseedableCodeForge()
+	ms, ok := cf.(forge.MirrorSeeder)
+	if !ok {
+		t.Fatal("harness's UnseedableCodeForge does not implement forge.MirrorSeeder")
+	}
+	err := ms.SeedMirror(filepath.Join(t.TempDir(), "mirror"))
+	if err == nil {
+		t.Fatal("SeedMirror against an unseedable target returned nil, want an error")
+	}
+	if secret != "" && strings.Contains(err.Error(), secret) {
+		t.Errorf("SeedMirror error leaks the credential: %v", err)
+	}
+}
+
+// credentialFreeEnv is the environment of a Box given no forge credential: no
+// token variables and no ambient git config (credential helpers, insteadOf).
+func credentialFreeEnv() []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		switch name {
+		case "GH_TOKEN", "GITHUB_TOKEN", "FORGEJO_TOKEN", "GITEA_TOKEN":
+			continue
+		}
+		env = append(env, kv)
+	}
+	return append(env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0")
 }

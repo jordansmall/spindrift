@@ -3,6 +3,7 @@ package forgejo_test
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -14,6 +15,14 @@ import (
 )
 
 const credToken = "s3cr3t-forgejo-token-6860"
+
+// urlUserinfo matches URL userinfo (scheme://user@host), not a bare "@"
+// elsewhere in a git config.
+var urlUserinfo = regexp.MustCompile(`://[^/\s]*@`)
+
+// exitTail matches the ": <git output>" cloneOutputTail appends after the exit
+// status.
+var exitTail = regexp.MustCompile(`exit status \d+: \S`)
 
 // credHarness serves an authenticated smart-HTTP remote (user oauth2, password
 // = the Forgejo token) with git tracing on, and builds both adapters over it
@@ -89,7 +98,7 @@ func assertCloneConfigCredentialFree(t *testing.T, cf forge.CodeForge) {
 	if !strings.Contains(cfg, "url = http://") {
 		t.Fatalf("clone config has no http remote.origin.url:\n%s", cfg)
 	}
-	if strings.Contains(cfg, credToken) || strings.Contains(cfg, "@") {
+	if strings.Contains(cfg, credToken) || urlUserinfo.MatchString(cfg) {
 		t.Errorf("clone config carries the token or URL userinfo:\n%s", cfg)
 	}
 }
@@ -192,5 +201,54 @@ func TestForgejoCodeForge_WrongTokenErrorsDoNotLeakIt(t *testing.T) {
 		if strings.Contains(err.Error(), wrong) {
 			t.Errorf("%s error leaks the token: %v", name, err)
 		}
+	}
+}
+
+// SeedMirror's host fetch authenticates over HTTP with the token on the
+// credential path, and the bare mirror the Box clones keeps neither the token
+// nor URL userinfo in its config.
+func TestForgejoCodeForge_SeedMirrorAuthenticatesAndPersistsNoToken(t *testing.T) {
+	h := newCredHarness(t)
+	ms, ok := h.ro.(forge.MirrorSeeder)
+	if !ok {
+		t.Fatal("read-only forgejo CodeForge does not implement forge.MirrorSeeder")
+	}
+	dir := filepath.Join(t.TempDir(), "repo.git")
+	if err := ms.SeedMirror(dir); err != nil {
+		t.Fatalf("SeedMirror over authenticated HTTP: %v", err)
+	}
+	if got, want := forgetest.RevParse(t, dir, "refs/heads/main"), forgetest.RevParse(t, h.bare, "refs/heads/main"); got != want {
+		t.Errorf("mirror main = %s, want %s", got, want)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg := string(b); strings.Contains(cfg, credToken) || urlUserinfo.MatchString(cfg) {
+		t.Errorf("mirror config carries the token or URL userinfo:\n%s", cfg)
+	}
+	h.assertTokenOutOfBand(t)
+}
+
+// A failed seed names git's cause, redacted of any URL userinfo and the token.
+func TestForgejoCodeForge_SeedMirrorFailureNamesCauseWithoutToken(t *testing.T) {
+	h := newCredHarness(t)
+	cf := forgejo.NewReadOnlyForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
+		BaseURL: newFakeForgejo(t).URL(), Repo: "owner/repo", Token: credToken, BaseBranch: "main",
+	}, nil, h.bare+"-missing")
+	err := cf.(forge.MirrorSeeder).SeedMirror(filepath.Join(t.TempDir(), "repo.git"))
+	if err == nil {
+		t.Fatal("SeedMirror of a missing remote returned nil")
+	}
+	// git's own wording is locale- and version-dependent, so assert on what the
+	// code adds: the op, the remote, and a non-empty tail of git's output.
+	if want := "seed mirror: git clone " + h.bare + "-missing"; !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q does not carry %q", err, want)
+	}
+	if !exitTail.MatchString(err.Error()) {
+		t.Errorf("error %q carries no tail of git's output", err)
+	}
+	if strings.Contains(err.Error(), credToken) {
+		t.Errorf("error leaks the token: %v", err)
 	}
 }

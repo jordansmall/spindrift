@@ -276,3 +276,18 @@ func (h *hostMediationHarness) IssuePosted(title, body string, labels []string) 
 func TestReadOnlyForgejoCodeForge_HostMediationContract(t *testing.T) {
 	forgetest.RunHostMediationContract(t, newHostMediationHarness(t))
 }
+
+func (h *hostMediationHarness) MirrorBase() string { return "main" }
+
+func (h *hostMediationHarness) RefSHA(ref string) string {
+	return forgetest.RevParse(h.t, h.repo.Bare, "refs/heads/"+ref)
+}
+
+// UnseedableCodeForge's remote is a path with no repo behind it.
+func (h *hostMediationHarness) UnseedableCodeForge() (forge.CodeForge, string) {
+	return forgejo.NewReadOnlyForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
+		BaseURL: h.srv.URL,
+		Repo:    "owner/repo",
+		Token:   "mirror-secret-token",
+	}, nil, h.repo.Bare+"-missing"), "mirror-secret-token"
+}

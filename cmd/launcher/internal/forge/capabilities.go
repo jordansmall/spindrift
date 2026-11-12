@@ -19,6 +19,7 @@ type Capabilities struct {
 	DraftPRCreator          DraftPRCreator
 	BranchPusher            BranchPusher
 	BranchDeleter           BranchDeleter
+	MirrorSeeder            MirrorSeeder
 	BranchProtectionForge   BranchProtectionForge
 	BundleCommitSubjects    BundleCommitSubjects
 	MergeCommitReader       MergeCommitReader
@@ -71,6 +72,7 @@ func ResolveCodeForge(cf CodeForge) Capabilities {
 	c.DraftPRCreator, _ = AsCodeForge[DraftPRCreator](cf)
 	c.BranchPusher, _ = AsCodeForge[BranchPusher](cf)
 	c.BranchDeleter, _ = AsCodeForge[BranchDeleter](cf)
+	c.MirrorSeeder, _ = AsCodeForge[MirrorSeeder](cf)
 	c.BranchProtectionForge, _ = AsCodeForge[BranchProtectionForge](cf)
 	c.BundleCommitSubjects, _ = AsCodeForge[BundleCommitSubjects](cf)
 	c.MergeCommitReader, _ = AsCodeForge[MergeCommitReader](cf)

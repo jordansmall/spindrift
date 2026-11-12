@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/gitexec"
 )
@@ -71,4 +72,47 @@ func TestNewForgejoCodeForge_ReusesTrackerRESTClient(t *testing.T) {
 	if cfNoTracker.rest == fc.rest {
 		t.Fatal("newForgejoCodeForge(..., nil, ...).rest unexpectedly shares the unrelated tracker's *rest.Client")
 	}
+}
+
+func TestCloneOutputTail(t *testing.T) {
+	const maxTail = 512 // mirrors cloneOutputTail's limit
+
+	t.Run("short output is kept whole", func(t *testing.T) {
+		if got, want := cloneOutputTail([]byte("  fatal: nope\n")), ": fatal: nope"; got != want {
+			t.Errorf("cloneOutputTail = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("blank output renders nothing", func(t *testing.T) {
+		if got := cloneOutputTail([]byte(" \n")); got != "" {
+			t.Errorf("cloneOutputTail = %q, want empty", got)
+		}
+	})
+
+	t.Run("long output keeps only the tail", func(t *testing.T) {
+		out := strings.Repeat("a", maxTail) + "END"
+		got := cloneOutputTail([]byte(out))
+		if want := ": ..." + out[len(out)-maxTail:]; got != want {
+			t.Errorf("cloneOutputTail tail = %q, want %q", got, want)
+		}
+		if strings.Contains(got, "a"+strings.Repeat("a", maxTail)) {
+			t.Errorf("cloneOutputTail kept more than %d bytes of output", maxTail)
+		}
+	})
+
+	t.Run("a cut inside a multibyte rune advances to a rune boundary", func(t *testing.T) {
+		// "é" is two bytes; the naive cut at len-maxTail lands on its
+		// continuation byte.
+		out := "é" + strings.Repeat("a", maxTail-1)
+		if utf8.RuneStart(out[len(out)-maxTail]) {
+			t.Fatal("fixture cut does not land mid-rune")
+		}
+		got := cloneOutputTail([]byte(out))
+		if !utf8.ValidString(got) {
+			t.Errorf("cloneOutputTail returned invalid UTF-8: %q", got)
+		}
+		if want := ": ..." + strings.Repeat("a", maxTail-1); got != want {
+			t.Errorf("cloneOutputTail = %q, want %q", got, want)
+		}
+	})
 }

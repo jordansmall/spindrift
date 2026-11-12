@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -631,6 +632,22 @@ func (e *execClient) httpsClone(op string) func(dir string) error {
 	}
 }
 
+// SeedMirror clones the target repo bare into dir with the launcher's own gh
+// credential, so the credential-less Box clones dir instead of the forge.
+// GitRemote's pins ride as top-level `git -c`, not clone's --config: nothing
+// pushes from the mirror, so the credential helper must not persist into a
+// repo the Box mounts, and command scope (unlike repo-local config) lets an
+// outer insteadOf route the clone, as it does the Ledger's.
+func (e *execClient) SeedMirror(dir string) error {
+	url, gitArgs := GitRemote(e.repo)
+	args := append(slices.Clone(gitArgs), gitexec.NoAutoMaintenance("-c")...)
+	args = append(args, "clone", "--bare", url, dir)
+	if _, err := exec.Command("git", args...).Output(); err != nil {
+		return ghCommandErr("github: seed mirror: git clone", err)
+	}
+	return nil
+}
+
 // PushBranch creates branch on the target repo from localRef in the git repo
 // at srcDir, over HTTPS through the gh credential helper (issue #4071, ADR
 // 0057); refuses if branch already exists, or is base (issue #4104).
@@ -688,6 +705,7 @@ func (e *execClient) CreateDraftPR(title, body, base, head string) (string, bool
 
 var _ forge.BranchProtectionForge = (*execClient)(nil)
 var _ forge.BranchPusher = (*execClient)(nil)
+var _ forge.MirrorSeeder = (*execClient)(nil)
 var _ forge.BranchDeleter = (*execClient)(nil)
 var _ forge.DraftPRCreator = (*execClient)(nil)
 var _ forge.CIRunReporter = (*execClient)(nil)

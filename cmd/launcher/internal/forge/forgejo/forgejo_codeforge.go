@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/bundlerelay"
@@ -290,14 +291,47 @@ func (f *forgejoCodeForge) BranchProtected(branch string) (bool, error) {
 // relayClone builds the `git clone` closure bundlerelay's Relay,
 // CommitSubjects, and PushBranch all take as their clone step: op names the
 // caller for the wrapped error's description. The token rides f.cred, never
-// f.remote, and the clone's CombinedOutput stays out of the error anyway.
+// f.remote.
 func (f *forgejoCodeForge) relayClone(op string) func(dir string) error {
+	return f.cloneInto(op, "--no-single-branch")
+}
+
+// cloneInto builds the credentialed `git clone` of the target repo, shared by
+// relayClone and SeedMirror and parameterised on the one flag that differs:
+// --bare for SeedMirror, --no-single-branch for the relay clones.
+func (f *forgejoCodeForge) cloneInto(op, shapeFlag string) func(dir string) error {
 	return func(dir string) error {
-		if _, err := f.cred.Apply(exec.Command("git", "clone", "--no-single-branch", f.remote, dir)).CombinedOutput(); err != nil {
-			return fmt.Errorf("forgejo: %s: git clone %s: %w", op, forge.RedactURLCredentials(f.remote), err)
+		out, err := f.cred.Apply(exec.Command("git", "clone", shapeFlag, f.remote, dir)).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("forgejo: %s: git clone %s: %w%s", op, forge.RedactURLCredentials(f.remote), err, cloneOutputTail(out))
 		}
 		return nil
 	}
+}
+
+// cloneOutputTail renders the tail of git's output as ": <text>" so a seed
+// failure names its cause (auth, not-found, network). It is redacted because
+// git echoes the remote URL and the error reaches issue comments.
+func cloneOutputTail(out []byte) string {
+	const maxTail = 512
+	msg := strings.TrimSpace(forge.RedactURLCredentials(string(out)))
+	if msg == "" {
+		return ""
+	}
+	if len(msg) > maxTail {
+		cut := len(msg) - maxTail
+		for cut < len(msg) && !utf8.RuneStart(msg[cut]) {
+			cut++
+		}
+		msg = "..." + msg[cut:]
+	}
+	return ": " + msg
+}
+
+// SeedMirror clones the target repo bare into dir with the launcher's own
+// token, so the credential-less Box clones dir instead of the forge.
+func (f *forgejoCodeForge) SeedMirror(dir string) error {
+	return f.cloneInto("seed mirror", "--bare")(dir)
 }
 
 // PushBranch creates branch on the target repo from localRef in the git repo
@@ -355,5 +389,6 @@ func (f *forgejoCodeForge) CreateDraftPR(title, body, base, head string) (string
 
 var _ forge.BranchProtectionForge = (*forgejoCodeForge)(nil)
 var _ forge.BranchPusher = (*forgejoCodeForge)(nil)
+var _ forge.MirrorSeeder = (*forgejoCodeForge)(nil)
 var _ forge.BranchDeleter = (*forgejoCodeForge)(nil)
 var _ forge.DraftPRCreator = (*forgejoCodeForge)(nil)

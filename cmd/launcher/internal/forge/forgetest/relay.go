@@ -52,6 +52,13 @@ func SeedRelayBundle(t *testing.T, bare, base, outboxDir, branch string) string 
 	t.Helper()
 	work := t.TempDir()
 	Run(t, "", "clone", bare, work)
+	return SeedRelayBundleFrom(t, work, base, outboxDir, branch)
+}
+
+// SeedRelayBundleFrom is SeedRelayBundle for a work clone the caller already
+// holds, e.g. a credential-free clone of a seeded mirror.
+func SeedRelayBundleFrom(t *testing.T, work, base, outboxDir, branch string) string {
+	t.Helper()
 	Run(t, work, "checkout", base)
 	Run(t, work, "checkout", "-b", branch)
 	WriteFile(t, filepath.Join(work, "feature.txt"), "feature\n")
