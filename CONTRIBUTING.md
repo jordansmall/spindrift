@@ -287,7 +287,11 @@ and in the in-box `box` program; the only bash left is the generated shim that
   ([ADR 0073](docs/adr/0073-backends-and-drivers-are-trust-no-one-wasm-connectors.md)).
   Its own Go module (`spindrift.dev/sdk`), so Connector authors do not depend
   on core internals. It carries a published copy of the event vocabulary,
-  kept in parity with driverkit by `sdk/event/parity_test.go`. Fixture
+  kept in parity with driverkit by `sdk/event/parity_test.go`. It also
+  carries twins of the driverkit helpers a Connector needs (`ToolTarget`,
+  `ErrorText`, `CompactJSON`, `SessionKey`, `SessionUUID`, `IsProgress`),
+  pinned by `TestHelperParity` in `sdk/driver/parity_test.go` and
+  `TestIsProgressParity` in `sdk/event/parity_test.go`. Fixture
   Connectors live under `nix/fixtures/connector-wasm`, except the fixture Driver
   Connector, which is `nix/fixtures/connector` itself.
 - **`connectors/`** — shipped Connector subflakes, each its own Go module built

@@ -188,3 +188,41 @@ func TestTypeLinesEmbedded(t *testing.T) {
 		t.Fatalf("skip: got %q", got)
 	}
 }
+
+// funcSource returns the normalised source of the top-level func name (no
+// receiver) declared in dir's non-test files, "" when there is none.
+func funcSource(t *testing.T, dir, name string) string {
+	t.Helper()
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pkg := range pkgs {
+		for _, f := range pkg.Files {
+			for _, d := range f.Decls {
+				fn, ok := d.(*ast.FuncDecl)
+				if !ok || fn.Recv != nil || fn.Name.Name != name {
+					continue
+				}
+				fn.Doc = nil
+				return render(t, fset, fn)
+			}
+		}
+	}
+	return ""
+}
+
+// A Connector cannot import driverkit (issue #6870), so identical source is
+// what makes the SDK's IsProgress answer as core's for every Kind.
+func TestIsProgressParity(t *testing.T) {
+	core := funcSource(t, coreDir, "IsProgress")
+	if core == "" {
+		t.Fatal("core has no func IsProgress")
+	}
+	if sdk := funcSource(t, ".", "IsProgress"); sdk != core {
+		t.Errorf("SDK IsProgress differs from core's:\nSDK:  %s\ncore: %s", sdk, core)
+	}
+}
