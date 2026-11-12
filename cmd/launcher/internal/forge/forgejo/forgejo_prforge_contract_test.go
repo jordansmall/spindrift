@@ -1,6 +1,7 @@
 package forgejo_test
 
 import (
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -35,4 +36,19 @@ func (h *prforgeHarness) BranchPrefix() string { return "agent/issue-" }
 
 func TestForgejoCodeForge_PRForgeContract(t *testing.T) {
 	forgetest.RunPRForgeContract(t, newPRForgeHarness(t))
+}
+
+// The fake's job-log support backs the failure-detail log excerpt: the status
+// carries the job page and the web /logs route serves the raw log.
+func TestForgejoFakeServesFailingCheckLog(t *testing.T) {
+	h := newPRForgeHarness(t)
+	prURL := h.SeedOpenPR("42")
+	h.SeedFailingCheckLog(prURL, "ci/build", "step 3\nFAIL TestFake: kaboom\n")
+	got, err := h.Forge().FailureDetail(prURL)
+	if err != nil {
+		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "FAIL TestFake: kaboom") {
+		t.Fatalf("FailureDetail(...) = %q, want the job log", got)
+	}
 }

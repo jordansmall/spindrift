@@ -19,3 +19,11 @@ func SetMergeRecheckDelay(cf forge.CodeForge, d time.Duration) {
 func RelayClone(cf forge.CodeForge, op string) func(dir string) error {
 	return cf.(*forgejoCodeForge).relayClone(op)
 }
+
+// SetJobLogsBudget swaps the cap on one FailureDetail's job-log reads and
+// returns a restore func.
+func SetJobLogsBudget(d time.Duration) (restore func()) {
+	old := jobLogsBudget
+	jobLogsBudget = d
+	return func() { jobLogsBudget = old }
+}

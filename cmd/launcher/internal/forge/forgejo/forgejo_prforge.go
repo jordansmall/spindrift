@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -295,6 +297,8 @@ type forgejoStatus struct {
 	Context     string `json:"context"`
 	State       string `json:"state"`
 	Description string `json:"description"`
+	// TargetURL is the status's link; for Forgejo Actions it is the job page.
+	TargetURL string `json:"target_url"`
 }
 
 var forgejoFailingStatusStates = map[string]bool{
@@ -333,6 +337,11 @@ func (f *forgejoCodeForge) latestStatuses(sha string) ([]forgejoStatus, error) {
 	return out, nil
 }
 
+// jobLogsBudget caps the total time one FailureDetail spends reading job logs,
+// so a slow forge cannot stall PR settle; jobs left once it is spent get no
+// log. A var so a test can shrink it.
+var jobLogsBudget = 60 * time.Second
+
 // FailureDetail renders the failing entries of latestStatuses into a bounded
 // report, returning "" when nothing is failing. forge.RenderFailureDetail owns
 // the formatting and the forge.MaxFailureDetailBytes truncation. Callers should
@@ -346,18 +355,86 @@ func (f *forgejoCodeForge) FailureDetail(prURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	deadline := time.Now().Add(jobLogsBudget)
 	var entries []forge.FailureDetailEntry
 	for _, s := range statuses {
 		if !forgejoFailingStatusStates[s.State] {
 			continue
 		}
+		var log string
+		if time.Now().Before(deadline) {
+			log = f.jobLog(s.TargetURL)
+		}
 		entries = append(entries, forge.FailureDetailEntry{
 			Name:    s.Context,
 			State:   strings.ToUpper(s.State),
 			Summary: s.Description,
+			Log:     log,
 		})
 	}
 	return forge.RenderFailureDetail(entries), nil
+}
+
+// jobPathSegs counts the segments of a job page path below the base URL:
+// <owner>/<repo>/actions/runs/<n>/jobs/<m>.
+const jobPathSegs = 7
+
+// jobLogURL returns the raw-log URL for targetURL when it is a Forgejo Actions
+// job page, <base>/<owner>/<repo>/actions/runs/<n>/jobs/<m>, of the configured
+// repo; the second result is false for any other link.
+func (f *forgejoCodeForge) jobLogURL(targetURL string) (string, bool) {
+	u, err := url.Parse(targetURL)
+	if err != nil {
+		return "", false
+	}
+	base, err := url.Parse(f.rest.BaseURL())
+	if err != nil {
+		return "", false
+	}
+	// The segments ahead of the job path must be the base URL's own subpath
+	// exactly: the link is remote-supplied and the credential rides the GET.
+	var baseSegs []string
+	if p := strings.Trim(base.Path, "/"); p != "" {
+		baseSegs = strings.Split(p, "/")
+	}
+	segs := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(segs) != len(baseSegs)+jobPathSegs || !slices.Equal(segs[:len(baseSegs)], baseSegs) {
+		return "", false
+	}
+	tail := segs[len(baseSegs):]
+	owner, repo, runID, jobID := tail[0], tail[1], tail[4], tail[6]
+	if !strings.EqualFold(owner+"/"+repo, f.repo) || tail[2] != "actions" || tail[3] != "runs" || tail[5] != "jobs" {
+		return "", false
+	}
+	for _, n := range []string{runID, jobID} {
+		if _, err := strconv.ParseUint(n, 10, 64); err != nil {
+			return "", false
+		}
+	}
+	u.RawQuery, u.Fragment = "", ""
+	u.Path = "/" + strings.Join(segs, "/") + "/logs"
+	u.RawPath = ""
+	return u.String(), true
+}
+
+// jobLog fetches the log of the Actions job targetURL names, or "" when the
+// link is not such a job, is on another host, or the read fails: the log is an
+// extra, so FailureDetail never fails because of it. Forgejo serves the raw
+// log from the web route <job page>/logs, outside /api/v1, and only on
+// instances recent enough to have it; older ones answer 404, which lands here.
+// The log is streamed into a forge.TailBuffer, so a log of any size yields its
+// tail. rest.GetSameHost pins the request to the configured host so the
+// credential cannot follow a status link elsewhere.
+func (f *forgejoCodeForge) jobLog(targetURL string) string {
+	logURL, ok := f.jobLogURL(targetURL)
+	if !ok {
+		return ""
+	}
+	var tail forge.TailBuffer
+	if err := f.rest.GetSameHost(logURL, &tail); err != nil {
+		return ""
+	}
+	return tail.String()
 }
 
 type forgejoPRFile struct {
