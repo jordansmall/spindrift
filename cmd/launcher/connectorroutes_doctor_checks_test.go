@@ -15,12 +15,19 @@ import (
 
 func useConnectorRows(t *testing.T, rows ...backendrows.Row) {
 	t.Helper()
+	useConnectorRowsWith(t, func(string) string { return "" }, rows...)
+}
+
+// useConnectorRowsWith applies rows with lookup answering the knob a row's
+// baseEnv names.
+func useConnectorRowsWith(t *testing.T, lookup func(string) string, rows ...backendrows.Row) {
+	t.Helper()
 	t.Cleanup(backendrows.Snapshot())
 	raw, err := json.Marshal(rows)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := backendrows.Use(raw); err != nil {
+	if err := backendrows.Use(raw, lookup); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -64,6 +71,31 @@ func TestConnectorRoutesChecks_ListRoutesAndCredential(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestConnectorRoutesChecks_ConfigHostedRowListsTheResolvedHost(t *testing.T) {
+	search := connectorhost.Route{Method: "GET", Host: backendrows.BaseHost, Path: "/rest/search"}
+	issue := connectorhost.Route{Method: "POST", Host: backendrows.BaseHost, Path: "/rest/issue"}
+	row := connectorRow([]connectorhost.Route{search}, []connectorhost.Route{search, issue})
+	row.BaseEnv = "FIXTURE_BASE_URL"
+	useConnectorRowsWith(t, func(k string) string {
+		if k == "FIXTURE_BASE_URL" {
+			return "https://acme.example.net/jira"
+		}
+		return ""
+	}, row)
+	out := runConnectorRows(t, connectorRoutesChecks())
+	for _, want := range []string{"GET acme.example.net /jira/rest/search", "\n+ POST acme.example.net /jira/rest/issue", "host from FIXTURE_BASE_URL"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, backendrows.BaseHost) {
+		t.Errorf("output shows the unresolved placeholder:\n%s", out)
+	}
+	if strings.Contains(out, "+ GET") {
+		t.Errorf("accepted route reported as added:\n%s", out)
 	}
 }
 
@@ -154,7 +186,7 @@ func TestConnectorRoutesWidened_FromNixRenderedBaseline(t *testing.T) {
 			if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Backends) == 0 {
 				t.Fatalf("document carries no backends section (err=%v): %s", err, raw)
 			}
-			if err := backendrows.Use(parsed.Backends); err != nil {
+			if err := backendrows.Use(parsed.Backends, func(string) string { return "" }); err != nil {
 				t.Fatal(err)
 			}
 			row, ok := backendrows.Lookup("fixture")

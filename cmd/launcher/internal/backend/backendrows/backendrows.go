@@ -14,6 +14,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -39,7 +40,16 @@ type Row struct {
 	// diffs Routes against. Unlike Routes it may be empty or absent: nothing
 	// accepted yet, so every live route counts as added.
 	AcceptedRoutes []connectorhost.Route `json:"acceptedRoutes,omitempty"`
+	// BaseEnv names the knob env var holding the site's https base URL, for a
+	// Connector whose host is the Consumer's own (a Jira site). A Route or
+	// accepted Route whose Host is BaseHost takes the base URL's host and has
+	// the base URL's path prefix prepended to its Path; Use resolves them, so a
+	// stored Row carries concrete hosts.
+	BaseEnv string `json:"baseEnv,omitempty"`
 }
+
+// BaseHost is the Route host that stands for the host of the row's BaseEnv URL.
+const BaseHost = "{base}"
 
 // Widening returns the live Routes no accepted Route covers. An accepted Route
 // covers one with the same method and host, compared literally, and a path
@@ -74,9 +84,12 @@ var (
 // earlier call applied; empty raw applies none, so it clears them. A row with
 // no name, a repeated name, a row missing its module, credentialEnv or
 // routes, a name that is a built-in backend and an invalid Route table are
-// errors, as is an invalid non-empty accepted baseline. Rows are validated
-// whole before any is stored.
-func Use(raw json.RawMessage) error {
+// errors, as is an invalid non-empty accepted baseline. A row's BaseHost routes
+// are resolved from lookup(BaseEnv) first, so validation sees the concrete
+// table; an unset, plaintext, userinfo-bearing or otherwise malformed base URL
+// is an error, as is BaseHost without a BaseEnv. Rows are validated whole
+// before any is stored.
+func Use(raw json.RawMessage, lookup func(string) string) error {
 	var rows []Row
 	if len(bytes.TrimSpace(raw)) != 0 {
 		dec := json.NewDecoder(bytes.NewReader(raw))
@@ -86,8 +99,13 @@ func Use(raw json.RawMessage) error {
 		}
 	}
 	seen := map[string]bool{}
-	for _, row := range rows {
-		if err := validate(row, seen); err != nil {
+	for i := range rows {
+		resolved, err := resolveBase(rows[i], lookup)
+		if err == nil {
+			rows[i] = resolved
+			err = validate(rows[i], seen)
+		}
+		if err != nil {
 			return fmt.Errorf("backend rows: %w", err)
 		}
 	}
@@ -99,6 +117,57 @@ func Use(raw json.RawMessage) error {
 	defer mu.Unlock()
 	applied = next
 	return nil
+}
+
+// resolveBase returns row with every BaseHost route host and path prefix
+// replaced from the base URL its BaseEnv names. It runs before validate so
+// ValidateRoutes judges the table the Connector will actually be held to.
+func resolveBase(row Row, lookup func(string) string) (Row, error) {
+	uses := func(routes []connectorhost.Route) bool {
+		return slices.ContainsFunc(routes, func(r connectorhost.Route) bool { return r.Host == BaseHost })
+	}
+	if !uses(row.Routes) && !uses(row.AcceptedRoutes) {
+		return row, nil
+	}
+	if row.BaseEnv == "" {
+		return row, fmt.Errorf("backend %q: a route host is %s but the row has no baseEnv", row.Name, BaseHost)
+	}
+	raw := lookup(row.BaseEnv)
+	if raw == "" {
+		return row, fmt.Errorf("backend %q: %s is not set", row.Name, row.BaseEnv)
+	}
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil:
+		return row, fmt.Errorf("backend %q: %s is not a URL", row.Name, row.BaseEnv)
+	case u.Scheme != "https":
+		return row, fmt.Errorf("backend %q: %s must be an https URL", row.Name, row.BaseEnv)
+	case u.User != nil:
+		return row, fmt.Errorf("backend %q: %s must not carry userinfo", row.Name, row.BaseEnv)
+	case u.RawPath != "":
+		return row, fmt.Errorf("backend %q: %s must not carry an escaped path", row.Name, row.BaseEnv)
+	case strings.ContainsAny(raw, "?#"):
+		return row, fmt.Errorf("backend %q: %s must not carry a query or fragment", row.Name, row.BaseEnv)
+	}
+	host, prefix := u.Host, strings.TrimSuffix(u.Path, "/")
+	apply := func(routes []connectorhost.Route) []connectorhost.Route {
+		out := slices.Clone(routes)
+		for i := range out {
+			if out[i].Host == BaseHost {
+				out[i].Host = host
+				// "/" is the base's own subtree root: prefix+"/" is not canonical.
+				if out[i].Path == "/" && prefix != "" {
+					out[i].Path = prefix
+				} else {
+					out[i].Path = prefix + out[i].Path
+				}
+			}
+		}
+		return out
+	}
+	row.Routes = apply(row.Routes)
+	row.AcceptedRoutes = apply(row.AcceptedRoutes)
+	return row, nil
 }
 
 func validate(row Row, seen map[string]bool) error {

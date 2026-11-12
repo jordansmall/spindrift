@@ -35,6 +35,9 @@ func connectorRoutesCheck(row backendrows.Row) doctor.Check {
 			if row.CredentialKnob != "" {
 				credential = fmt.Sprintf("credential knob %s (env %s)", row.CredentialKnob, row.CredentialEnv)
 			}
+			if row.BaseEnv != "" {
+				credential += "; host from " + row.BaseEnv
+			}
 			return fmt.Sprintf("%s (%s; routes: %s)", name, credential, output)
 		},
 	}

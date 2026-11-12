@@ -157,6 +157,15 @@ func childEnvValue(doc *inputdoc.Document, key string) (string, bool) {
 	return childValue(doc, key, os.Getenv(key))
 }
 
+// backendRowSetting resolves the knob a backend row names as its baseEnv: the
+// ambient env first, then the document. The launcher's backendRowSetting
+// (inputdoc.go) goes through flag, document and default instead. The
+// allowlist in knob_env_guard_test.go says why the key is not a literal.
+func backendRowSetting(doc *inputdoc.Document, stderr io.Writer, key string) string {
+	v, _ := doc.Lookup(key, stderr)
+	return v
+}
+
 // childLookup is the Lookup a backend Strategy resolves its knobs through.
 // A knob unset in both places reports absent, so the backend's generated
 // ReadKnobs applies its own row default.
