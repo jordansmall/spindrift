@@ -53,7 +53,7 @@ func StripInlineCode(line string) string {
 }
 
 // IsSentinelBullet reports whether content is a "no blockers" sentinel.
-// ParseBlockerSlugs calls it too, so both backends agree on what
+// ParseBlockerSlugs calls it too, so both grammars agree on what
 // "no blockers" means.
 func IsSentinelBullet(content string) bool {
 	return sentinelBullet.MatchString(content)

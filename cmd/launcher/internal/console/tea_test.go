@@ -3411,8 +3411,8 @@ func TestTea_DetailModal_ResolvesOnlyOwnBlockersNotWholeBacklog(t *testing.T) {
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "Blocks", `#42 (native) open "fix the thing"`)
 
-	if want := []string{"7"}; !reflect.DeepEqual(f.DepsOfCalls, want) {
-		t.Errorf("DepsOfCalls = %v, want %v — exactly one call, for the opened ticket only", f.DepsOfCalls, want)
+	if want := []string{"7"}; !reflect.DeepEqual(f.NativeDepsCalls, want) {
+		t.Errorf("NativeDepsCalls = %v, want %v — exactly one call, for the opened ticket only", f.NativeDepsCalls, want)
 	}
 
 	sendKey(tm, "esc")
@@ -3490,8 +3490,8 @@ func TestTea_RefreshKey_ReopenAfterRefreshStaysBoundedCost(t *testing.T) {
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "core body")
 
-	if want := []string{"7", "7"}; !reflect.DeepEqual(f.DepsOfCalls, want) {
-		t.Errorf("DepsOfCalls = %v, want %v — one call per open, for the opened ticket only", f.DepsOfCalls, want)
+	if want := []string{"7", "7"}; !reflect.DeepEqual(f.NativeDepsCalls, want) {
+		t.Errorf("NativeDepsCalls = %v, want %v — one call per open, for the opened ticket only", f.NativeDepsCalls, want)
 	}
 
 	sendKey(tm, "esc")

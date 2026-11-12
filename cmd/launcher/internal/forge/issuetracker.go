@@ -80,16 +80,6 @@ type IssueTracker interface {
 	// transition (ADR 0022). Plain TransitionState cannot express which
 	// verdict a human should act on. Work-kind dispatches never call this.
 	CompleteVerdict(num string, verdict Verdict) error
-	// DepsOf returns the canonical dependencies for the issue, each tagged
-	// with its source. Implementations prefer the tracker's native
-	// dependency relationships and fall back to body-text parsing only when
-	// native yields nothing. A non-empty native result is never merged.
-	DepsOf(num string) ([]Dependency, error)
-	// TouchesOf returns the path globs an issue names as the files its work
-	// will touch, which the wave engine's overlap gate consumes. Every
-	// adapter uses the body-grammar default (a "## Touches" section,
-	// ParseTouchPaths). An issue with no such section returns nil, nil.
-	TouchesOf(num string) ([]string, error)
 	// Comment posts a comment on the issue.
 	Comment(num, body string) error
 	// Probe checks issue tracker connectivity and returns the resolved slug.

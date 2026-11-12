@@ -48,7 +48,7 @@ func NewReadiness(it forge.IssueTracker, issues []Issue) (Readiness, error) {
 			defer wg.Done()
 			limiter.Acquire()
 			defer limiter.Release()
-			deps, depsErr := it.DepsOf(iss.Number)
+			deps, depsErr := forge.DepsOf(it, iss.Number)
 			results[i] = depsResult{deps: deps, err: depsErr}
 		})
 	}

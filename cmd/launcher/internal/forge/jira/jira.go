@@ -341,19 +341,13 @@ const jiraBlockedByLink = "is blocked by"
 // direction (issue #1744).
 const jiraBlocksLink = "blocks"
 
-// DepsOf delegates to forge.DepsOf; under BodyGrammarNoDeps the native issue
-// links are authoritative, so it never falls back to prose parsing.
-func (j *jiraClient) DepsOf(num string) ([]forge.Dependency, error) {
-	return forge.DepsOf(j, num)
-}
-
 var (
 	_ forge.NativeDepsReader = (*jiraClient)(nil)
 	_ forge.BodyGrammarer    = (*jiraClient)(nil)
 )
 
 // BodyGrammar declares native links authoritative: no body dependency fallback.
-func (j *jiraClient) BodyGrammar() forge.BodyGrammar { return forge.BodyGrammarNoDeps }
+func (j *jiraClient) BodyGrammar() forge.BodyGrammar { return forge.BodyGrammarNativeDepsOnly }
 
 // NativeDepsOf reads issue num's "is blocked by" links from the issue payload.
 func (j *jiraClient) NativeDepsOf(num string) ([]string, error) {
@@ -479,11 +473,6 @@ func (j *jiraClient) Comments(num string) ([]forge.Comment, error) {
 }
 
 var _ forge.CommentLister = (*jiraClient)(nil)
-
-// TouchesOf delegates to forge.TouchesOf.
-func (j *jiraClient) TouchesOf(num string) ([]string, error) {
-	return forge.TouchesOf(j, num)
-}
 
 func (j *jiraClient) Comment(num, body string) error {
 	body, isResearch := stripResearchMarker(body)

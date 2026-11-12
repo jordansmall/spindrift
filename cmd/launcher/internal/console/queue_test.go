@@ -616,25 +616,29 @@ func TestQueue_Discover_HoldsPickOnDepsOfFailureWithRealBlocker(t *testing.T) {
 	}
 }
 
-// failDepsOf wraps a *forge.Fake so DepsOf errors for num, simulating a
-// transient tracker failure.
+// failDepsOf wraps a *forge.Fake so forge.DepsOf errors for num, simulating a
+// transient tracker failure. NoDeps makes core return NativeDepsOf's error
+// as-is rather than falling back to the body.
 type failDepsOf struct {
 	*forge.Fake
 	num string
 }
 
-func (r failDepsOf) DepsOf(num string) ([]forge.Dependency, error) {
+func (r failDepsOf) NativeDepsOf(num string) ([]string, error) {
 	if num == r.num {
 		return nil, errBoom
 	}
-	return r.Fake.DepsOf(num)
+	return r.Fake.NativeDepsOf(num)
 }
 
-// removeOnDepsOf wraps a *forge.Fake so its first DepsOf call for num
+func (failDepsOf) BodyGrammar() forge.BodyGrammar { return forge.BodyGrammarNativeDepsOnly }
+
+// removeOnDepsOf wraps a *forge.Fake so its NativeDepsOf call for num
 // synchronously Removes that pick from q, simulating an operator's Unpick
 // landing in Discover's window between reading a pick as a candidate and
-// claiming it. A non-nil err is returned in place of num's deps, so the
-// Unpick lands in the same window as the blocker-check failure hold.
+// claiming it. A non-nil err is returned from NativeDepsOf and, under NoDeps,
+// from forge.DepsOf, so the Unpick lands in the same window as the
+// blocker-check failure hold.
 type removeOnDepsOf struct {
 	*forge.Fake
 	q   *Queue
@@ -642,14 +646,21 @@ type removeOnDepsOf struct {
 	err error
 }
 
-func (r removeOnDepsOf) DepsOf(num string) ([]forge.Dependency, error) {
+func (r removeOnDepsOf) NativeDepsOf(num string) ([]string, error) {
 	if num == r.num {
 		r.q.Remove(num)
 		if r.err != nil {
 			return nil, r.err
 		}
 	}
-	return r.Fake.DepsOf(num)
+	return r.Fake.NativeDepsOf(num)
+}
+
+func (r removeOnDepsOf) BodyGrammar() forge.BodyGrammar {
+	if r.err != nil {
+		return forge.BodyGrammarNativeDepsOnly
+	}
+	return forge.BodyGrammarIssueRefs
 }
 
 // raceOnNum wraps a *forge.Fake so TransitionState fails for exactly one

@@ -18,11 +18,11 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// concurrencyTrackingFake wraps forge.Fake's DepsOf with an in-flight counter
-// and a short sleep so a test can see whether NewReadiness's DepsOf calls
-// overlap. A sequential caller never pushes inFlight above 1; a concurrent one
-// does regardless of GOMAXPROCS, because the sleep yields the OS thread rather
-// than spinning.
+// concurrencyTrackingFake wraps forge.Fake's NativeDepsOf, the first read
+// forge.DepsOf makes, with an in-flight counter and a short sleep so a test
+// can see whether NewReadiness's DepsOf calls overlap. A sequential caller
+// never pushes inFlight above 1; a concurrent one does regardless of
+// GOMAXPROCS, because the sleep yields the OS thread rather than spinning.
 type concurrencyTrackingFake struct {
 	*forge.Fake
 	mu          sync.Mutex
@@ -30,7 +30,7 @@ type concurrencyTrackingFake struct {
 	maxInFlight int
 }
 
-func (f *concurrencyTrackingFake) DepsOf(num string) ([]forge.Dependency, error) {
+func (f *concurrencyTrackingFake) NativeDepsOf(num string) ([]string, error) {
 	f.mu.Lock()
 	f.inFlight++
 	if f.inFlight > f.maxInFlight {
@@ -44,7 +44,7 @@ func (f *concurrencyTrackingFake) DepsOf(num string) ([]forge.Dependency, error)
 	f.inFlight--
 	f.mu.Unlock()
 
-	return f.Fake.DepsOf(num)
+	return f.Fake.NativeDepsOf(num)
 }
 
 // TestNewReadiness_DepsOfCallsOverlap guards issue #1745: NewReadiness must fan
@@ -218,7 +218,7 @@ func TestReadinessStatus_LocalTracker_HoldsAndReportsUnfetchableBlocker(t *testi
 	num := strings.TrimPrefix(ref, "local:")
 
 	c := baseConfig()
-	deps, err := lt.DepsOf(num)
+	deps, err := forge.DepsOf(lt, num)
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}

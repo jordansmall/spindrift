@@ -534,11 +534,6 @@ func (c *forgejoClient) nativeLinks(num, endpoint string) ([]string, error) {
 	return dependencyIDs(payload), nil
 }
 
-// DepsOf delegates to forge.DepsOf, which prefers NativeDepsOf over the body.
-func (c *forgejoClient) DepsOf(num string) ([]forge.Dependency, error) {
-	return forge.DepsOf(c, num)
-}
-
 var _ forge.NativeDepsReader = (*forgejoClient)(nil)
 
 // NativeDepsOf reads issue num's dependencies from Forgejo's native API.
@@ -556,11 +551,6 @@ func (c *forgejoClient) BlocksOf(num string) ([]forge.Dependency, error) {
 		return nil, err
 	}
 	return forge.WithSource(blocks, forge.DepSourceNative), nil
-}
-
-// TouchesOf delegates to forge.TouchesOf.
-func (c *forgejoClient) TouchesOf(num string) ([]string, error) {
-	return forge.TouchesOf(c, num)
 }
 
 // CloseMergedIssue implements forge.MergeCloser (issue #2259), a backstop for
