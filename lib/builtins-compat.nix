@@ -40,6 +40,12 @@ rec {
         "\\}"
       ];
 
+  # Literal substring test. Not lib.hasInfix: its `.*X.*` regex overflows the
+  # stack of CI's std::regex Nix on long text, which this split never builds.
+  # A needle with a brace throws: escapeRegex emits `\{`/`\}`, which Nix's ERE
+  # engine rejects.
+  hasInfix = needle: text: builtins.length (builtins.split (escapeRegex needle) text) > 1;
+
   hasSuffix =
     suffix: content:
     let

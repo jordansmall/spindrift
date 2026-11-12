@@ -8,10 +8,7 @@ let
   researchVerdicts = import ./research-verdicts.nix;
   builtinsCompat = import ./builtins-compat.nix;
 
-  # Literal (non-regex) substring test, the same idiom lib/prompt-inject.nix
-  # uses: split on a regex-escaped needle and check for more than one part.
-  hasInfix =
-    needle: text: builtins.length (builtins.split (builtinsCompat.escapeRegex needle) text) > 1;
+  inherit (builtinsCompat) hasInfix;
 
   # A sliceBetween slice normally ends with the blank line that separated the
   # block from the next heading, but issue #2462's COMMIT_PUSH_* placeholder
