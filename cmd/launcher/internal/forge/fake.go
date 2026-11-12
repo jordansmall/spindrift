@@ -8,10 +8,9 @@ package forge
 // two of those five may declare a name in common. Probe overrides the one
 // collision; a new one breaks the build or silently shadows the promoted field.
 //
-// Reads that map to a protocol primitive cross a network Connector and its
-// Route table (see fake_connector.go); writes stay native. A read with no
-// primitive yet (allIssues, BlocksOf, ListLabels, Probe, PriorClaimState, ...)
-// is native too, until the protocol grows one (#6753, #6754).
+// Reads cross a network Connector and its Route table (see fake_connector.go);
+// writes stay native until the protocol grows write primitives (#6753, #6754,
+// #6756).
 type Fake struct {
 	// Every capability slice below embeds core too, so Fake embeds it directly
 	// to keep the shallowest unambiguous path to core's fields.
@@ -72,14 +71,7 @@ func NewFake(labels ...DispatchLabels) *Fake {
 // Probe resolves through Fake's own direct *core embed to break the ambiguous
 // selector between the embedded *IssueTrackerFake and *CodeForgeFake, which
 // both define Probe at equal depth.
-func (f *Fake) Probe() (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.ProbeErr != nil {
-		return "", f.ProbeErr
-	}
-	return f.ProbeRepo, nil
-}
+func (f *Fake) Probe() (string, error) { return f.probe(pathTrackerProbe) }
 
 var _ LandingRecorder = (*Fake)(nil)
 

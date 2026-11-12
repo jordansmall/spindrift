@@ -1,6 +1,9 @@
 package forge
 
-import "sync"
+import (
+	"errors"
+	"sync"
+)
 
 var _ CIRunReporter = (*RunURLFake)(nil)
 
@@ -31,11 +34,17 @@ func (f *RunURLFake) SetRunURLs(url string, urls []string) {
 // CheckRun is CheckState plus the next scripted run URL.
 func (f *RunURLFake) CheckRun(url string) (RollupState, string, error) {
 	state, err := f.CheckState(url)
-	f.mu.Lock()
-	defer f.mu.Unlock()
 	var run string
-	if q := f.urlsQ[url]; len(q) > 0 {
-		run, f.urlsQ[url] = q[0], q[1:]
+	if rerr := f.read(pathRunURL, &run, func() (any, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		var next string
+		if q := f.urlsQ[url]; len(q) > 0 {
+			next, f.urlsQ[url] = q[0], q[1:]
+		}
+		return next, nil
+	}); rerr != nil {
+		err = errors.Join(err, rerr)
 	}
 	return state, run, err
 }

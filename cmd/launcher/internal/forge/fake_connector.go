@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -30,10 +31,81 @@ const (
 	fakeToken = "fake-connector-token"
 )
 
-// fakeRoutes is the fixture Route table. Paths are subtree roots (ADR 0047).
-var fakeRoutes = []connectorhost.Route{
-	{Method: http.MethodGet, Host: fakeHost, Path: "/tracker"},
-	{Method: http.MethodGet, Host: fakeHost, Path: "/forge"},
+// The read paths, one per Route. Every read names one of these, so a call
+// cannot drift from the table below; reads answering from the same state share
+// one (pathChecks, pathPRsForBranch, pathListIssues), so its audit entry does
+// not tell them apart.
+const (
+	pathListIssues       = "/tracker/listIssues"
+	pathIssue            = "/tracker/issue"
+	pathComments         = "/tracker/comments"
+	pathNativeDeps       = "/tracker/nativeDeps"
+	pathLabels           = "/tracker/labels"
+	pathBlocks           = "/tracker/blocks"
+	pathAllIssues        = "/tracker/allIssues"
+	pathTrackerProbe     = "/tracker/probe"
+	pathPriorClaim       = "/tracker/priorClaim"
+	pathPRsForBranch     = "/forge/prsForBranch"
+	pathPR               = "/forge/pr"
+	pathChecks           = "/forge/checks"
+	pathBranch           = "/forge/branch"
+	pathBranchProtected  = "/forge/branchProtected"
+	pathForgeProbe       = "/forge/probe"
+	pathLandingRef       = "/forge/landingRef"
+	pathIntegrationTip   = "/forge/integrationTip"
+	pathLandingContained = "/forge/landingContained"
+	pathCommitSubjects   = "/forge/commitSubjects"
+	pathMergeable        = "/forge/mergeable"
+	pathNeedsUpdate      = "/forge/needsUpdate"
+	pathDraft            = "/forge/draft"
+	pathFiles            = "/forge/files"
+	pathHeadSHA          = "/forge/headSHA"
+	pathMergeCommit      = "/forge/mergeCommit"
+	pathAutoMerge        = "/forge/autoMerge"
+	pathRunURL           = "/forge/runURL"
+)
+
+// fakeRoutes is the fixture Route table: one exact path per Route (a path is a
+// subtree root, ADR 0047), so a misspelt path is refused.
+var fakeRoutes = func() []connectorhost.Route {
+	var rs []connectorhost.Route
+	for _, p := range []string{
+		pathListIssues, pathIssue, pathComments, pathNativeDeps, pathLabels,
+		pathBlocks, pathAllIssues, pathTrackerProbe, pathPriorClaim,
+		pathPRsForBranch, pathPR, pathChecks, pathBranch, pathBranchProtected,
+		pathForgeProbe, pathLandingRef, pathIntegrationTip, pathLandingContained,
+		pathCommitSubjects, pathMergeable, pathNeedsUpdate, pathDraft, pathFiles,
+		pathHeadSHA, pathMergeCommit, pathAutoMerge, pathRunURL,
+	} {
+		rs = append(rs, connectorhost.Route{Method: http.MethodGet, Host: fakeHost, Path: p})
+	}
+	return rs
+}()
+
+// popErr is the scripted-error rule shared by the Fake's reads: a non-empty
+// queue is consumed one entry per call and wins over fallback, and a nil entry
+// means "no error this call".
+func popErr(q *[]error, fallback error) error {
+	if len(*q) == 0 {
+		return fallback
+	}
+	err := (*q)[0]
+	*q = (*q)[1:]
+	return err
+}
+
+// probe is the Probe read shared by Fake, IssueTrackerFake and CodeForgeFake.
+func (c *core) probe(path string) (string, error) {
+	var repo string
+	err := c.read(path, &repo, func() (any, error) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.ProbeErr != nil {
+			return nil, c.ProbeErr
+		}
+		return c.ProbeRepo, nil
+	})
+	return repo, err
 }
 
 // pendingRead is one read in flight: the closure the backend runs against the
@@ -71,23 +143,59 @@ var fakeBackend = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	p := v.(*pendingRead)
-	val, err := p.serve()
+	val, err := runServe(p.serve)
+	var body []byte
+	if err == nil {
+		body, err = json.Marshal(val)
+	}
 	if err != nil {
 		p.err = err
 		http.Error(w, "scripted error", http.StatusInternalServerError)
 		return
 	}
-	_ = json.NewEncoder(w).Encode(val)
+	_, _ = w.Write(body)
 })
+
+// runServe turns a panic in serve into the read's error, so a bug in a Fake's
+// scripted state fails that read instead of killing the shared Connector.
+func runServe(serve func() (any, error)) (val any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			val, err = nil, fmt.Errorf("fake backend panic: %v", r)
+		}
+	}()
+	return serve()
+}
 
 // inProcess serves the backend without a socket.
 type inProcess struct{}
 
 func (inProcess) RoundTrip(r *http.Request) (*http.Response, error) {
-	rec := httptest.NewRecorder()
-	fakeBackend.ServeHTTP(rec, r)
-	return rec.Result(), nil
+	w := &bufferedResponse{header: http.Header{}, code: http.StatusOK}
+	fakeBackend.ServeHTTP(w, r)
+	return &http.Response{
+		Status:        fmt.Sprintf("%d %s", w.code, http.StatusText(w.code)),
+		StatusCode:    w.code,
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Header:        w.header,
+		Body:          io.NopCloser(&w.body),
+		ContentLength: int64(w.body.Len()),
+		Request:       r,
+	}, nil
 }
+
+// bufferedResponse is the minimal http.ResponseWriter inProcess needs.
+type bufferedResponse struct {
+	header http.Header
+	code   int
+	body   bytes.Buffer
+}
+
+func (w *bufferedResponse) Header() http.Header         { return w.header }
+func (w *bufferedResponse) WriteHeader(code int)        { w.code = code }
+func (w *bufferedResponse) Write(b []byte) (int, error) { return w.body.Write(b) }
 
 // auditSink attaches each audit line to the pending read its query names.
 type auditSink struct{}
@@ -99,7 +207,7 @@ func (auditSink) Write(line []byte) (int, error) {
 	}
 	q, err := url.ParseQuery(e.Query)
 	if err != nil {
-		return len(line), nil
+		return 0, err
 	}
 	if id, err := strconv.ParseUint(q.Get("call"), 10, 64); err == nil {
 		if v, ok := pending.Load(id); ok {
@@ -110,17 +218,37 @@ func (auditSink) Write(line []byte) (int, error) {
 	return len(line), nil
 }
 
+var (
+	seamMu   sync.Mutex
+	seamConn *connectorhost.Connector
+)
+
 // seam is the one Connector shared by every Fake in the test binary. It panics
 // when the Connector cannot load, because no core test may skip the seam (ADR
-// 0067). A route refusal closes a Connector for good, so nothing hostile may be
-// sent through it.
-var seam = sync.OnceValue(func() *connectorhost.Connector {
-	c, err := loadFakeConnector()
-	if err != nil {
-		panic(fmt.Sprintf("forge: fake Connector: %v", err))
+// 0067). A failed call (a route refusal, a blown budget) closes a Connector for
+// good, so read retires it and the next read loads a fresh one: one bad read
+// must not fail every later test in the binary.
+func seam() *connectorhost.Connector {
+	seamMu.Lock()
+	defer seamMu.Unlock()
+	if seamConn == nil {
+		c, err := loadFakeConnector()
+		if err != nil {
+			panic(fmt.Sprintf("forge: fake Connector: %v", err))
+		}
+		seamConn = c
 	}
-	return c
-})
+	return seamConn
+}
+
+// retireSeam drops c unless another read already replaced it.
+func retireSeam(c *connectorhost.Connector) {
+	seamMu.Lock()
+	defer seamMu.Unlock()
+	if seamConn == c {
+		seamConn = nil
+	}
+}
 
 func loadFakeConnector() (*connectorhost.Connector, error) {
 	dir, err := fixturebuild.ConnectorDir()
@@ -161,7 +289,11 @@ func (c *core) read(path string, out any, serve func() (any, error)) error {
 		"url":    "https://" + fakeHost + path + "?call=" + strconv.FormatUint(id, 10),
 		"method": http.MethodGet,
 	}
-	if err := seam().Call(context.Background(), "fetch", params, &got); err != nil {
+	conn := seam()
+	if err := conn.Call(context.Background(), "fetch", params, &got); err != nil {
+		if conn.Err() != nil || errors.Is(err, connectorhost.ErrUnusable) {
+			retireSeam(conn)
+		}
 		return fmt.Errorf("fake connector read %s: %w", path, err)
 	}
 	if !p.audited || p.audit.Decision != connectorhost.DecisionSent || p.audit.Route == "" {

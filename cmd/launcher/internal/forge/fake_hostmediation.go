@@ -138,24 +138,32 @@ func (hm *HostMediationFake) createDraftPR(title, body, base, head string) (stri
 
 // commitSubjects backs the optional BundleCommitSubjects interface (issue #2447).
 func (hm *HostMediationFake) commitSubjects(outboxDir, base, ref string) ([]string, error) {
-	hm.mu.Lock()
-	defer hm.mu.Unlock()
-	hm.CommitSubjectsCalls = append(hm.CommitSubjectsCalls, CommitSubjectsCall{OutboxDir: outboxDir, Base: base, Ref: ref})
-	if hm.CommitSubjectsErr != nil {
-		return nil, hm.CommitSubjectsErr
-	}
-	return hm.CommitSubjectsResult, nil
+	var out []string
+	err := hm.read(pathCommitSubjects, &out, func() (any, error) {
+		hm.mu.Lock()
+		defer hm.mu.Unlock()
+		hm.CommitSubjectsCalls = append(hm.CommitSubjectsCalls, CommitSubjectsCall{OutboxDir: outboxDir, Base: base, Ref: ref})
+		if hm.CommitSubjectsErr != nil {
+			return nil, hm.CommitSubjectsErr
+		}
+		return hm.CommitSubjectsResult, nil
+	})
+	return out, err
 }
 
 // landingRef backs the optional LandingRef interface (ADR 0033).
 func (hm *HostMediationFake) landingRef() (string, error) {
-	hm.mu.Lock()
-	defer hm.mu.Unlock()
-	hm.LandingRefCallCount++
-	if hm.LandingRefErr != nil {
-		return "", hm.LandingRefErr
-	}
-	return hm.LandingRefValue, nil
+	var out string
+	err := hm.read(pathLandingRef, &out, func() (any, error) {
+		hm.mu.Lock()
+		defer hm.mu.Unlock()
+		hm.LandingRefCallCount++
+		if hm.LandingRefErr != nil {
+			return nil, hm.LandingRefErr
+		}
+		return hm.LandingRefValue, nil
+	})
+	return out, err
 }
 
 type landingParentKey struct{ landing, parent string }
@@ -188,12 +196,19 @@ func (hm *HostMediationFake) SetLandingContained(landing, parent string, contain
 // defaults to contained=false, nil, the same posture as a malformed or
 // not-yet-merged landing in production.
 func (hm *HostMediationFake) landingContained(landing Landing, scope SeedScope) (bool, error) {
-	hm.mu.Lock()
-	defer hm.mu.Unlock()
-	key := landingParentKey{landing.String(), scope.Parent()}
-	hm.LandingContainedCalls = append(hm.LandingContainedCalls, LandingContainedCall{Landing: key.landing, Parent: key.parent})
-	res := hm.landingContainedResults[key]
-	return res.contained, res.err
+	var out bool
+	err := hm.read(pathLandingContained, &out, func() (any, error) {
+		hm.mu.Lock()
+		defer hm.mu.Unlock()
+		key := landingParentKey{landing.String(), scope.Parent()}
+		hm.LandingContainedCalls = append(hm.LandingContainedCalls, LandingContainedCall{Landing: key.landing, Parent: key.parent})
+		res := hm.landingContainedResults[key]
+		if res.err != nil {
+			return nil, res.err
+		}
+		return res.contained, nil
+	})
+	return out, err
 }
 
 // SetIntegrationTip scripts the "<branch>@<sha>" reference IntegrationTip
@@ -211,13 +226,17 @@ func (hm *HostMediationFake) SetIntegrationTip(parent, ref string) {
 // integrationTip backs the optional LandingRepair interface (ADR 0029, ADR
 // 0033, issue #1809).
 func (hm *HostMediationFake) integrationTip(parent string) (string, error) {
-	hm.mu.Lock()
-	defer hm.mu.Unlock()
-	hm.IntegrationTipCalls = append(hm.IntegrationTipCalls, parent)
-	if hm.IntegrationTipErr != nil {
-		return "", hm.IntegrationTipErr
-	}
-	return hm.integrationTipResults[parent], nil
+	var out string
+	err := hm.read(pathIntegrationTip, &out, func() (any, error) {
+		hm.mu.Lock()
+		defer hm.mu.Unlock()
+		hm.IntegrationTipCalls = append(hm.IntegrationTipCalls, parent)
+		if hm.IntegrationTipErr != nil {
+			return nil, hm.IntegrationTipErr
+		}
+		return hm.integrationTipResults[parent], nil
+	})
+	return out, err
 }
 
 // postIssue backs the optional HostPostedIssueFiler interface (issue #2018).

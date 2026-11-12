@@ -82,13 +82,26 @@ func (tf *IssueTrackerFake) FlagAbandoned(num string) error {
 	return nil
 }
 
+// priorClaimAnswer is PriorClaimState's answer over pathPriorClaim.
+type priorClaimAnswer struct {
+	State DispatchState
+	OK    bool
+}
+
 // PriorClaimState implements the optional PriorClaimStateReader interface.
 func (tf *IssueTrackerFake) PriorClaimState(num string) (DispatchState, bool, error) {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	if tf.PriorClaimStateErr != nil {
-		return Untriaged, false, tf.PriorClaimStateErr
+	var out priorClaimAnswer
+	err := tf.read(pathPriorClaim, &out, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		if tf.PriorClaimStateErr != nil {
+			return nil, tf.PriorClaimStateErr
+		}
+		state, ok := tf.PriorClaimStates[num]
+		return priorClaimAnswer{state, ok}, nil
+	})
+	if err != nil {
+		return Untriaged, false, err
 	}
-	state, ok := tf.PriorClaimStates[num]
-	return state, ok, nil
+	return out.State, out.OK, nil
 }
