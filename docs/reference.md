@@ -2527,11 +2527,12 @@ A missing file or key accepts nothing, so every route shows as added. That is
 how a Connector newly arriving, or an existing one whose table grew in a
 `flake.lock` bump, reaches the operator. A live route is covered when an
 accepted one has the same method and host (compared literally) and its path is
-equal or an ancestor of the live path. A new host, method or path, or a broader
-path (accepted `/repos/x`, live `/repos`), is a widening. A narrower or
-unchanged table shows nothing, and stale baseline entries are harmless. A
-non-empty entry must pass the Route-table rules above, so `/` or a non-canonical
-path fails evaluation; an empty list is fine.
+equal or an ancestor of the live path, and it sets `followRedirect` whenever
+the live one does. A new host, method or path, a new `followRedirect`,
+or a broader path (accepted `/repos/x`, live `/repos`), is a widening. A
+narrower or unchanged table shows nothing, and stale baseline entries are
+harmless. A non-empty entry must pass the Route-table rules above, so `/`
+or a non-canonical path fails evaluation; an empty list is fine.
 
 To accept a widening, review the `+` lines, add them under the Connector's name
 in the file and commit. Doctor then reports `within the accepted table`. A
@@ -2964,13 +2965,18 @@ This is protocol version **0.1.1**. The host is
   registry-route rules (`registryvocab.CheckPathPattern`): canonical absolute
   paths, no blanket `/`, no `?` or `#`. The host sends only an `https` URL
   whose canonical, unescaped path a route admits. It attaches the credential
-  itself, never follows a redirect, and caps the body at 4 MiB (or `respCap`,
-  if smaller). An unmatched or malformed request is refused unsent with
+  itself, never follows a redirect (unless the route sets `followRedirect`:
+  GET only, one hop, sent without the credential or the guest's headers,
+  asking for the tail with a `Range` suffix and bounded to half the call's
+  remaining budget, failing non-fatally past it; the target host in the audit
+  `redirect_host`), and caps the body at 4 MiB (or `respCap`, if smaller;
+  a `followRedirect` route keeps the last bytes of a larger body instead
+  of failing). An unmatched or malformed request is refused unsent with
   `ErrRouteRefused`, naming the Connector, method, host and path. A refusal,
   an oversized body (`ErrResponseTooLarge`) and a pointer outside module
   memory fail closed: the call fails and the Connector is closed. A transport
-  failure is not fatal: status `0` hands the guest a fixed reason, never the
-  error detail. The response body is arbitrary upstream bytes: the host
+  failure is not fatal: status `0` hands the guest a fixed reason, never
+  the error detail. The response body is arbitrary upstream bytes: the host
   checks only its size and the status/length framing, while the Connector's
   result is schema-checked as for any call. A route does not restrict the query
   string. Each Host call writes one JSON line to the audit log, with `connector`,

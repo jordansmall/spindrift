@@ -112,6 +112,19 @@ let
     }
     {
       route = goodRoute // {
+        method = "POST";
+        followRedirect = true;
+      };
+      why = "GET only";
+    }
+    {
+      route = goodRoute // {
+        followRedirect = "yes";
+      };
+      why = "optional boolean";
+    }
+    {
+      route = goodRoute // {
         method = "get";
       };
       why = "uppercase HTTP token";
@@ -183,6 +196,8 @@ let
     (goodRoute // { host = "[::1]:8080"; })
     (goodRoute // { host = "[::1]"; })
     (goodRoute // { host = "{base}"; })
+    (goodRoute // { followRedirect = true; })
+    (goodRoute // { followRedirect = false; })
   ];
   problemsOf = r: routes.problems "fixture" [ r ];
   has = sub: s: builtins.match ".*${pkgs.lib.escapeRegex sub}.*" s != null;

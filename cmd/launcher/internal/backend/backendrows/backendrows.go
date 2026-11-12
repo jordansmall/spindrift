@@ -71,8 +71,9 @@ const (
 )
 
 // Widening returns the live Routes no accepted Route covers. An accepted Route
-// covers one with the same method and host, compared literally, and a path
-// equal to or inside the accepted path's subtree; so a new host, method or
+// covers one with the same method and host, compared literally, no redirect
+// opt-in the accepted one lacks, and a path equal to or inside the accepted
+// path's subtree; so a new host, method or
 // path, or a broader path pattern, is a widening and a narrower one is not.
 // The subtree test is PathSet.Admits' request-path match, sound here because Use
 // validates both tables as canonical patterns (no blanket "/").
@@ -80,7 +81,7 @@ func (r Row) Widening() []connectorhost.Route {
 	var added []connectorhost.Route
 	for _, live := range r.Routes {
 		covered := slices.ContainsFunc(r.AcceptedRoutes, func(a connectorhost.Route) bool {
-			return a.Method == live.Method && a.Host == live.Host &&
+			return a.Method == live.Method && a.Host == live.Host && (a.FollowRedirect || !live.FollowRedirect) &&
 				registryvocab.PathSet{a.Path}.Admits(live.Path)
 		})
 		if !covered {
