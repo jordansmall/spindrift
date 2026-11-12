@@ -31,6 +31,11 @@ let
     coreModule
     claudeConnector.flakeModule
   ];
+  githubConnector = (import ../../connectors/github).lib.connector { inherit core; };
+  withGithub = fixtures.connectorConsumerVia [
+    coreModule
+    githubConnector.flakeModule
+  ];
   drivers = import ../../lib/drivers { inherit (pkgs) lib; };
   withTemplate = fixtures.connectorConsumerVia [
     coreModule
@@ -125,6 +130,18 @@ in
       drivers.renderPreamble row == drivers.renderPreamble drivers.entries.claude
     ) "the claude Connector's row must render core's claude preamble";
     pkgs.runCommand "connectors-claude-contributes-driver-row" { } "touch $out";
+
+  # The github Connector's module registers its Route table on the row, so
+  # the table a Consumer's row carries is the one routes.nix declares.
+  connectors-github-contributes-routes =
+    let
+      routes = (configOf withGithub).connectors.github.routes or null;
+    in
+    assert assertMsg (routes != null) "the github Connector must register spindrift.connectors.github";
+    assert assertMsg (
+      routes == import ../../connectors/github/routes.nix
+    ) "the github Connector's row must carry the Route table in connectors/github/routes.nix";
+    pkgs.runCommand "connectors-github-contributes-routes" { } "touch $out";
 
   connectors-fixture-knob-in-env-schema =
     assert assertMsg (

@@ -759,8 +759,9 @@ let
     cd src/sdk
   '';
   # Every Connector under connectors/<name> is a Go module that replaces the
-  # SDK with ../../sdk, so gofmt and a wasip1 vet run in that repo-relative
-  # layout (the host build of a Connector is not meaningful: it is a reactor).
+  # SDK with ../../sdk, so gofmt, a wasip1 vet and a native go test run in that
+  # repo-relative layout. The wasm itself is not run natively (it is a reactor),
+  # but a Connector's unit tests swap its wasip1-only transport for a stub.
   connectorsDir = ../../connectors;
   connectorNames = builtins.attrNames (
     pkgs.lib.filterAttrs (_: t: t == "directory") (builtins.readDir connectorsDir)
@@ -792,6 +793,7 @@ let
       [
         (mk "fmt" (gofmtCheck "."))
         (mk "vet" "GOOS=wasip1 GOARCH=wasm go vet ./...")
+        (mk "test" "go test ./...")
       ]
     ) connectorNames
   );
