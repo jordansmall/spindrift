@@ -56,23 +56,23 @@ type Capabilities struct {
 	TrackerDescriptor backend.Descriptor
 }
 
-// ResolveCapabilities resolves cf (type assertion) and it (As) against every
+// ResolveCapabilities resolves cf (AsCodeForge) and it (As) against every
 // optional interface once and folds in the two descriptor rows.
 func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc backend.Descriptor) Capabilities {
 	var c Capabilities
 
-	c.BundleRelay, _ = cf.(BundleRelay)
-	c.LandingRef, _ = cf.(LandingRef)
-	c.LandingRepair, _ = cf.(LandingRepair)
-	c.LandingContainmentQuery, _ = cf.(LandingContainmentQuery)
-	c.PRForge, _ = cf.(PRForge)
-	c.CIRunReporter, _ = cf.(CIRunReporter)
-	c.DraftPRCreator, _ = cf.(DraftPRCreator)
-	c.BranchPusher, _ = cf.(BranchPusher)
-	c.BranchDeleter, _ = cf.(BranchDeleter)
-	c.BranchProtectionForge, _ = cf.(BranchProtectionForge)
-	c.BundleCommitSubjects, _ = cf.(BundleCommitSubjects)
-	c.MergeCommitReader, _ = cf.(MergeCommitReader)
+	c.BundleRelay, _ = AsCodeForge[BundleRelay](cf)
+	c.LandingRef, _ = AsCodeForge[LandingRef](cf)
+	c.LandingRepair, _ = AsCodeForge[LandingRepair](cf)
+	c.LandingContainmentQuery, _ = AsCodeForge[LandingContainmentQuery](cf)
+	c.PRForge, _ = AsCodeForge[PRForge](cf)
+	c.CIRunReporter, _ = AsCodeForge[CIRunReporter](cf)
+	c.DraftPRCreator, _ = AsCodeForge[DraftPRCreator](cf)
+	c.BranchPusher, _ = AsCodeForge[BranchPusher](cf)
+	c.BranchDeleter, _ = AsCodeForge[BranchDeleter](cf)
+	c.BranchProtectionForge, _ = AsCodeForge[BranchProtectionForge](cf)
+	c.BundleCommitSubjects, _ = AsCodeForge[BundleCommitSubjects](cf)
+	c.MergeCommitReader, _ = AsCodeForge[MergeCommitReader](cf)
 
 	c.BlockersLister, _ = As[BlockersLister](it)
 	c.HostPostedCommenter, _ = As[HostPostedCommenter](it)

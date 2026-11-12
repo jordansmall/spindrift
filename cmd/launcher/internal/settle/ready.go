@@ -167,7 +167,7 @@ func (s *Settle) transientBackoff() retry.LinearBackoff {
 // branch it relays, empty when the Code Forge is not a BundleRelay.
 func (s *Settle) relayBoxBundle(num string, gen uint64) (ref string, err error) {
 	cf := s.cfForNum(num)
-	br, ok := cf.(forge.BundleRelay)
+	br, ok := forge.AsCodeForge[forge.BundleRelay](cf)
 	if !ok {
 		return "", nil
 	}

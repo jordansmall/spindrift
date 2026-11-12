@@ -63,3 +63,63 @@ func TestAsAbsentIsFalse(t *testing.T) {
 		t.Fatal("As over a wrapper of nil = true")
 	}
 }
+
+type plainForge struct{ CodeForge }
+
+type namedForge struct {
+	CodeForge
+	name string
+}
+
+func (n namedForge) Name() string { return n.name }
+
+type wrapForge struct{ CodeForge }
+
+func (w wrapForge) UnwrapCodeForge() CodeForge { return w.CodeForge }
+
+type namedWrapForge struct {
+	wrapForge
+	name string
+}
+
+func (n namedWrapForge) Name() string { return n.name }
+
+func TestAsCodeForgeOuterLayerShadowsInner(t *testing.T) {
+	inner := namedForge{name: "inner"}
+	outer := namedWrapForge{wrapForge: wrapForge{inner}, name: "outer"}
+	got, ok := AsCodeForge[namer](outer)
+	if !ok || got.Name() != "outer" {
+		t.Fatalf("AsCodeForge = %v, %v; want the outer layer", got, ok)
+	}
+}
+
+func TestAsCodeForgeSeesInnerCapabilityThroughWrapper(t *testing.T) {
+	var cf CodeForge = wrapForge{wrapForge{namedForge{name: "inner"}}}
+	got, ok := AsCodeForge[namer](cf)
+	if !ok || got.Name() != "inner" {
+		t.Fatalf("AsCodeForge = %v, %v; want the inner layer", got, ok)
+	}
+}
+
+func TestAsCodeForgePlainForgeIsTypeAssertion(t *testing.T) {
+	var cf CodeForge = namedForge{name: "plain"}
+	got, ok := AsCodeForge[namer](cf)
+	if !ok || got.Name() != "plain" {
+		t.Fatalf("AsCodeForge = %v, %v; want the forge itself", got, ok)
+	}
+	if _, ok := AsCodeForge[namer](plainForge{}); ok {
+		t.Fatal("AsCodeForge found a capability the forge lacks")
+	}
+}
+
+func TestAsCodeForgeAbsentIsFalse(t *testing.T) {
+	if _, ok := AsCodeForge[namer](wrapForge{plainForge{}}); ok {
+		t.Fatal("AsCodeForge found a capability no layer has")
+	}
+	if _, ok := AsCodeForge[namer](nil); ok {
+		t.Fatal("AsCodeForge(nil) = true")
+	}
+	if _, ok := AsCodeForge[namer](wrapForge{}); ok {
+		t.Fatal("AsCodeForge over a wrapper of nil = true")
+	}
+}

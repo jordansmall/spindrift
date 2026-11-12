@@ -204,3 +204,44 @@ func TestResolveCapabilities_DescriptorPassthrough(t *testing.T) {
 		t.Errorf("TrackerDescriptor = %+v, want %+v", c.TrackerDescriptor, trackerDesc)
 	}
 }
+
+// prShadowForge overrides only PRForge, the way a shadow layer answers the
+// read methods itself while the wrapped native forge keeps everything else.
+type prShadowForge struct {
+	wrapForge
+	PRForge
+}
+
+func TestResolveCapabilities_WrappedCodeForge(t *testing.T) {
+	it := NewFake()
+	native := NewFake().AsLocal()
+
+	t.Run("inner capabilities show through", func(t *testing.T) {
+		c := ResolveCapabilities(wrapForge{native}, it, backend.Descriptor{}, backend.Descriptor{})
+		if c.BundleRelay == nil || c.LandingRef == nil || c.LandingRepair == nil || c.LandingContainmentQuery == nil {
+			t.Errorf("wrapped local forge lost capabilities: %+v", c)
+		}
+		if c.PRForge != nil {
+			t.Errorf("PRForge = %v, want nil: the local forge has none", c.PRForge)
+		}
+	})
+
+	t.Run("outer layer wins for the capability it implements", func(t *testing.T) {
+		shadow := &Fake{}
+		cf := prShadowForge{wrapForge: wrapForge{native}, PRForge: shadow}
+		c := ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
+		if _, ok := c.PRForge.(prShadowForge); !ok {
+			t.Errorf("PRForge = %v, want the outer layer's", c.PRForge)
+		}
+		if c.BundleRelay == nil {
+			t.Error("BundleRelay = nil, want the inner forge's")
+		}
+	})
+
+	t.Run("nil forge resolves nothing", func(t *testing.T) {
+		c := ResolveCapabilities(nil, it, backend.Descriptor{}, backend.Descriptor{})
+		if c.BundleRelay != nil || c.PRForge != nil {
+			t.Errorf("nil forge resolved capabilities: %+v", c)
+		}
+	})
+}

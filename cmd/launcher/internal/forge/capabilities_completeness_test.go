@@ -12,7 +12,7 @@ import (
 
 // scanOptionalInterfaceNames returns the name of every top-level interface
 // declared in filename, excluding CodeForge and IssueTracker (mandatory for every
-// adapter) and Unwrapper (the wrapper convention As walks): none is an optional
+// adapter) and Unwrapper and CodeForgeUnwrapper (the wrapper conventions As and AsCodeForge walk): none is an optional
 // seam Capabilities resolves.
 func scanOptionalInterfaceNames(t *testing.T, filename string) []string {
 	t.Helper()
@@ -35,7 +35,7 @@ func scanOptionalInterfaceNames(t *testing.T, filename string) []string {
 			if _, ok := ts.Type.(*ast.InterfaceType); !ok {
 				continue
 			}
-			if ts.Name.Name == "CodeForge" || ts.Name.Name == "IssueTracker" || ts.Name.Name == "Unwrapper" {
+			if ts.Name.Name == "CodeForge" || ts.Name.Name == "IssueTracker" || ts.Name.Name == "Unwrapper" || ts.Name.Name == "CodeForgeUnwrapper" {
 				continue
 			}
 			names = append(names, ts.Name.Name)
