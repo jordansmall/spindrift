@@ -377,16 +377,6 @@ var _ forge.BodyGrammarer = (*LocalTracker)(nil)
 // relationships.
 func (lt *LocalTracker) BodyGrammar() forge.BodyGrammar { return forge.BodyGrammarLocal }
 
-// DepsOf delegates to forge.DepsOf.
-func (lt *LocalTracker) DepsOf(num string) ([]forge.Dependency, error) {
-	return forge.DepsOf(lt, num)
-}
-
-// TouchesOf delegates to forge.TouchesOf.
-func (lt *LocalTracker) TouchesOf(num string) ([]string, error) {
-	return forge.TouchesOf(lt, num)
-}
-
 // Comment appends body as a bullet under issue num's "## Comments" section,
 // creating that section if absent.
 func (lt *LocalTracker) Comment(num, body string) error {

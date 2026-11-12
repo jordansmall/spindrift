@@ -59,8 +59,8 @@ func TestOpenDetailModalCmd_ResolvesBlockedByFromDepsOfOnly(t *testing.T) {
 	if !reflect.DeepEqual(msg.BlockedBy, want) {
 		t.Errorf("BlockedBy = %v, want %v", msg.BlockedBy, want)
 	}
-	if want := []string{"42"}; !reflect.DeepEqual(f.DepsOfCalls, want) {
-		t.Errorf("DepsOfCalls = %v, want %v", f.DepsOfCalls, want)
+	if want := []string{"42"}; !reflect.DeepEqual(f.NativeDepsCalls, want) {
+		t.Errorf("NativeDepsCalls = %v, want %v", f.NativeDepsCalls, want)
 	}
 }
 

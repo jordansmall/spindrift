@@ -2,7 +2,10 @@ package forge
 
 import (
 	"errors"
+	"io"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -121,7 +124,7 @@ func TestDepsOf(t *testing.T) {
 		{
 			name: "no-deps grammar returns the native error as-is",
 			build: func(s *depsStub) IssueTracker {
-				return nativeGrammarStub{nativeStub{s, nil, nativeErr}, BodyGrammarNoDeps}
+				return nativeGrammarStub{nativeStub{s, nil, nativeErr}, BodyGrammarNativeDepsOnly}
 			},
 			body:    refBody,
 			wantErr: nativeErr,
@@ -129,7 +132,7 @@ func TestDepsOf(t *testing.T) {
 		{
 			name: "no-deps grammar returns native empty without reading the body",
 			build: func(s *depsStub) IssueTracker {
-				return nativeGrammarStub{nativeStub{s, nil, nil}, BodyGrammarNoDeps}
+				return nativeGrammarStub{nativeStub{s, nil, nil}, BodyGrammarNativeDepsOnly}
 			},
 			body:       refBody,
 			wantSource: DepSourceNative,
@@ -137,7 +140,7 @@ func TestDepsOf(t *testing.T) {
 		{
 			name: "no-deps grammar returns native links",
 			build: func(s *depsStub) IssueTracker {
-				return nativeGrammarStub{nativeStub{s, []string{"K-1"}, nil}, BodyGrammarNoDeps}
+				return nativeGrammarStub{nativeStub{s, []string{"K-1"}, nil}, BodyGrammarNativeDepsOnly}
 			},
 			body:       refBody,
 			want:       []string{"K-1"},
@@ -145,7 +148,7 @@ func TestDepsOf(t *testing.T) {
 		},
 		{
 			name:  "no-deps grammar without a native reader returns nothing",
-			build: func(s *depsStub) IssueTracker { return grammarStub{s, BodyGrammarNoDeps} },
+			build: func(s *depsStub) IssueTracker { return grammarStub{s, BodyGrammarNativeDepsOnly} },
 			body:  refBody,
 		},
 	}
@@ -176,7 +179,7 @@ func TestDepsOf(t *testing.T) {
 }
 
 func TestDepsOfNoDepsNativeEmptyIsNonNil(t *testing.T) {
-	s := nativeGrammarStub{nativeStub{&depsStub{}, nil, nil}, BodyGrammarNoDeps}
+	s := nativeGrammarStub{nativeStub{&depsStub{}, nil, nil}, BodyGrammarNativeDepsOnly}
 	deps, err := DepsOf(s, "1")
 	if err != nil || deps == nil {
 		t.Fatalf("deps = %#v, err = %v; want empty non-nil, nil", deps, err)
@@ -194,7 +197,7 @@ func TestTouchesOf(t *testing.T) {
 	}{
 		{"default parses the whole body", func(s *depsStub) IssueTracker { return s }, whole, []string{"a/**", "b/**"}},
 		{"local grammar ignores comments", func(s *depsStub) IssueTracker { return grammarStub{s, BodyGrammarLocal} }, whole, []string{"a/**"}},
-		{"no-deps grammar still parses touches", func(s *depsStub) IssueTracker { return grammarStub{s, BodyGrammarNoDeps} }, body, []string{"a/**"}},
+		{"no-deps grammar still parses touches", func(s *depsStub) IssueTracker { return grammarStub{s, BodyGrammarNativeDepsOnly} }, body, []string{"a/**"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -234,5 +237,35 @@ func TestParseBlockerSlugs(t *testing.T) {
 				t.Errorf("ParseBlockerSlugs = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestDepsOfFallbackWarnsOnStderr(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = orig })
+
+	f := NewFake()
+	f.SetIssue(Issue{Number: "9", Body: "Depends on #7\n"})
+	f.NativeDepsErr = map[string]error{"9": errors.New("graphql down")}
+	deps, depsErr := DepsOf(f, "9")
+
+	os.Stderr = orig
+	w.Close()
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if depsErr != nil || !reflect.DeepEqual(ids(deps), []string{"7"}) {
+		t.Fatalf("deps = %v, err = %v; want [7], nil", ids(deps), depsErr)
+	}
+	for _, want := range []string{"WARNING: native dependency lookup for issue 9 failed (", "falling back to body parsing"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("stderr = %q, want it to contain %q", out, want)
+		}
 	}
 }

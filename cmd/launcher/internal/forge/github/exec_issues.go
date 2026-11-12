@@ -347,11 +347,6 @@ func (e *execClient) CompleteVerdict(num string, verdict forge.Verdict) error {
 	return nil
 }
 
-// DepsOf delegates to forge.DepsOf, which prefers NativeDepsOf over the body.
-func (e *execClient) DepsOf(num string) ([]forge.Dependency, error) {
-	return forge.DepsOf(e, num)
-}
-
 var _ forge.NativeDepsReader = (*execClient)(nil)
 
 // NativeDepsOf reads issue num's blocked_by relationships from GitHub's
@@ -423,11 +418,6 @@ func (e *execClient) PriorClaimState(num string) (forge.DispatchState, bool, err
 		}
 	}
 	return prior, found, nil
-}
-
-// TouchesOf delegates to forge.TouchesOf.
-func (e *execClient) TouchesOf(num string) ([]string, error) {
-	return forge.TouchesOf(e, num)
 }
 
 // CloseMergedIssue closes issue num as a backstop for a merged agent PR whose

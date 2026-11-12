@@ -8,7 +8,7 @@ import (
 )
 
 // openDetailModalCmd fetches number's body separately because ListOpenIssues
-// never carries Body, then resolves Blocked-by from DepsOf and Blocks from
+// never carries Body, then resolves Blocked-by from forge.DepsOf and Blocks from
 // BlocksOf, which only forge.BlockersLister trackers have (not local, which
 // has no reverse edge to query). Reading one issue's edges keeps first-open
 // latency independent of backlog size (issue #1744, replacing #1632/#1746).
@@ -18,7 +18,8 @@ func openDetailModalCmd(tracker forge.IssueTracker, all []forge.Issue, number st
 		if err != nil {
 			return DetailModalLoadedMsg{Number: number, Err: err}
 		}
-		blockedBy := resolveEdgeRefs(tracker, all, tracker.DepsOf, number)
+		depsOf := func(num string) ([]forge.Dependency, error) { return forge.DepsOf(tracker, num) }
+		blockedBy := resolveEdgeRefs(tracker, all, depsOf, number)
 		var blocks []BlockerRef
 		// Resolve capabilities rather than asserting
 		// tracker.(forge.BlockersLister) directly (issue #2946). CodeForge is

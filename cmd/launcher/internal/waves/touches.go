@@ -47,7 +47,7 @@ func waveOverlapCheck(cfg Config, it forge.IssueTracker, cf forge.CodeForge) fun
 		// no body. A failed fetch is non-fatal and falls back to the PR's changed
 		// files alone, but it prints so operators see the gap instead of a silent
 		// degradation.
-		touches, err := it.TouchesOf(fi.Number)
+		touches, err := forge.TouchesOf(it, fi.Number)
 		prFiles := prTouchesOf(cf, fi.Number)
 		if err != nil {
 			if len(prFiles) > 0 {
@@ -70,7 +70,7 @@ func waveOverlapCheck(cfg Config, it forge.IssueTracker, cf forge.CodeForge) fun
 // This fetch runs once per candidate per wave/drain tick, so unlike
 // waveOverlapCheck's snapshot fetch it stays silent instead of reprinting.
 func overlapsInProgress(it forge.IssueTracker, num string, inProgress []inProgressTouches) (string, bool) {
-	touches, err := it.TouchesOf(num)
+	touches, err := forge.TouchesOf(it, num)
 	if err != nil || len(touches) == 0 {
 		return "", false
 	}

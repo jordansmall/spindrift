@@ -22,7 +22,7 @@ func TestTouchSetsOverlap_LiteralPathHit(t *testing.T) {
 func declaredOnly(it forge.IssueTracker, issues []forge.Issue) []inProgressTouches {
 	entries := make([]inProgressTouches, len(issues))
 	for i, fi := range issues {
-		touches, _ := it.TouchesOf(fi.Number)
+		touches, _ := forge.TouchesOf(it, fi.Number)
 		entries[i] = inProgressTouches{number: fi.Number, touches: touches}
 	}
 	return entries
@@ -74,7 +74,7 @@ func TestOverlapsInProgress_CandidateTouchesOfErrorReturnsNoCollision(t *testing
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- lib/env-schema.nix", Labels: []string{"ready-for-agent"}})
 	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- lib/env-schema.nix", State: "OPEN", Labels: []string{"agent-in-progress"}})
-	fc.TouchesOfErr = map[string]error{"10": fmt.Errorf("boom")}
+	fc.IssueErrByNum = map[string]error{"10": fmt.Errorf("boom")}
 
 	inProgress, _ := fc.ListIssues(forge.InProgress)
 	out := testutil.CaptureStdout(t, func() {
@@ -165,7 +165,7 @@ func TestWaveOverlapCheck_TouchesOfErrorFallsBackToPRFilesOnly(t *testing.T) {
 	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- internal/pkgx/foo.go", Labels: []string{"ready-for-agent"}})
 	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- docs/reference.md", State: "OPEN", Labels: []string{"agent-in-progress"}})
-	fc.TouchesOfErr = map[string]error{"20": fmt.Errorf("boom")}
+	fc.IssueErrByNum = map[string]error{"20": fmt.Errorf("boom")}
 	fc.SetPR("agent/issue-20", forge.PR{URL: "https://github.com/owner/repo/pull/20"})
 	fc.SetPRFiles("https://github.com/owner/repo/pull/20", []string{"internal/pkgx/foo.go"})
 
@@ -191,7 +191,7 @@ func TestWaveOverlapCheck_TouchesOfErrorNoOpenPRDoesNotClaimFallback(t *testing.
 	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- internal/pkgx/foo.go", Labels: []string{"ready-for-agent"}})
 	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- docs/reference.md", State: "OPEN", Labels: []string{"agent-in-progress"}})
-	fc.TouchesOfErr = map[string]error{"20": fmt.Errorf("boom")}
+	fc.IssueErrByNum = map[string]error{"20": fmt.Errorf("boom")}
 	// Issue #20 deliberately gets no fc.SetPR call, so it has no open PR.
 
 	out := testutil.CaptureStdout(t, func() {

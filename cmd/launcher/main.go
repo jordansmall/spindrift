@@ -696,7 +696,7 @@ func localBaseBranchResolver(c config, it forge.IssueTracker, lw *localloop.Wire
 				// should have been held by the #2130 readiness gate until its
 				// blocker landed onto this very branch, so reaching here means
 				// one slipped through onto bare base. Say so loudly.
-				deps, derr := it.DepsOf(num)
+				deps, derr := forge.DepsOf(it, num)
 				switch {
 				case derr != nil:
 					fmt.Printf("!! BASE_BRANCH: seam #%s: checking blockers: %v; integration branch %s does not exist, falling back to %s -- cannot confirm the #2130 readiness gate held a blocked seam\n", num, derr, integrationBranch, c.BaseBranch)

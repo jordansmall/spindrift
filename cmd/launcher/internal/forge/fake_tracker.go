@@ -28,10 +28,11 @@ type IssueTrackerFake struct {
 	// back to body parsing for (issue #1544).
 	NativeDepsErr map[string]error
 
-	// TouchesOfErr, keyed by issue number, is returned by TouchesOf instead of
-	// parsing the body. Per-number, because one overlap-gate check calls
-	// TouchesOf for both issues and a blanket error hides which side failed.
-	TouchesOfErr map[string]error
+	// IssueErrByNum, keyed by issue number, is returned by Issue for that
+	// number alone, scripting a failed raw issue read. Per-number, because one
+	// overlap-gate check reads both issues and a blanket IssueErr hides which
+	// side failed.
+	IssueErrByNum map[string]error
 
 	TransitionStateCalls []TransitionStateCall
 	TransitionStateErr   error
@@ -55,12 +56,15 @@ type IssueTrackerFake struct {
 	IssueErr error
 
 	// IssueErrs is a per-call queue drained before IssueErr is checked. A nil
-	// entry falls through to the normal issue lookup.
+	// entry falls through to the normal issue lookup. forge.DepsOf and
+	// forge.TouchesOf read through Issue, so they record IssueCalls and drain
+	// both IssueErrs and IssueErr too.
 	IssueErrs []error
 
-	// DepsOfCalls records each call's issue number so a test can assert a
-	// dependency-graph build's exact call count (issue #1632).
-	DepsOfCalls []string
+	// NativeDepsCalls records each NativeDepsOf call's issue number, the native
+	// read core's DepsOf makes, so a test can assert a dependency-graph build's
+	// exact call count (issue #1632).
+	NativeDepsCalls []string
 
 	Labels []string
 	// LabelsSeq, when non-empty, is a per-call queue drained by ListLabels:
@@ -248,6 +252,9 @@ func (tf *IssueTrackerFake) Issue(num string) (Issue, error) {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
 	tf.IssueCalls = append(tf.IssueCalls, num)
+	if err, ok := tf.IssueErrByNum[num]; ok {
+		return Issue{}, err
+	}
 	if len(tf.IssueErrs) > 0 {
 		err := tf.IssueErrs[0]
 		tf.IssueErrs = tf.IssueErrs[1:]
@@ -346,18 +353,13 @@ func (tf *IssueTrackerFake) CompleteVerdict(num string, verdict Verdict) error {
 
 var _ NativeDepsReader = (*IssueTrackerFake)(nil)
 
-// DepsOf delegates to the core DepsOf. It must not hold tf.mu: core calls
-// NativeDepsOf and Issue, which each lock.
-func (tf *IssueTrackerFake) DepsOf(num string) ([]Dependency, error) {
-	return DepsOf(tf, num)
-}
-
 // NativeDepsOf returns num's scripted NativeDeps, or NativeDepsErr[num] when
-// set. It records num in DepsOfCalls, the spy for a dependency-graph build.
+// set. It records num in NativeDepsCalls, the spy for a dependency-graph build
+// (forge.DepsOf calls it once per issue).
 func (tf *IssueTrackerFake) NativeDepsOf(num string) ([]string, error) {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
-	tf.DepsOfCalls = append(tf.DepsOfCalls, num)
+	tf.NativeDepsCalls = append(tf.NativeDepsCalls, num)
 	if err := tf.NativeDepsErr[num]; err != nil {
 		return nil, err
 	}
@@ -388,21 +390,6 @@ func (tf *IssueTrackerFake) BlocksOf(num string) ([]Dependency, error) {
 		return ids[i] < ids[j]
 	})
 	return WithSource(ids, DepSourceNative), nil
-}
-
-// TouchesOf returns the touch-set parsed from num's issue body, matching the
-// real adapters' shared body-grammar default.
-func (tf *IssueTrackerFake) TouchesOf(num string) ([]string, error) {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	if err, ok := tf.TouchesOfErr[num]; ok {
-		return nil, err
-	}
-	iss, ok := tf.issues[num]
-	if !ok {
-		return nil, fmt.Errorf("issue %s not found", num)
-	}
-	return ParseTouchPaths(iss.Body), nil
 }
 
 func (tf *IssueTrackerFake) Comment(num, body string) error {

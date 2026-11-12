@@ -765,25 +765,25 @@ func TestDrainMaxJobs_Claimed_OverlapDeferral_WritesBlockedMarker(t *testing.T) 
 	}
 }
 
-// touchesFailOnRefetch fails TouchesOf for num from its third call on (the
-// in-progress snapshot and the selection loop each fetch it once),
-// modelling a transient forge error between the selection loop and the
-// claimed-path fallback.
+// touchesFailOnRefetch fails the raw Issue read forge.TouchesOf makes for num
+// from its third call on (the in-progress snapshot and the selection loop each
+// fetch it once), modelling a transient forge error between the selection loop
+// and the claimed-path fallback.
 type touchesFailOnRefetch struct {
 	forge.IssueTracker
 	num   string
 	calls int
 }
 
-func (f *touchesFailOnRefetch) TouchesOf(num string) ([]string, error) {
+func (f *touchesFailOnRefetch) Issue(num string) (forge.Issue, error) {
 	if num != f.num {
-		return f.IssueTracker.TouchesOf(num)
+		return f.IssueTracker.Issue(num)
 	}
 	f.calls++
 	if f.calls > 2 {
-		return nil, errors.New("transient 403")
+		return forge.Issue{}, errors.New("transient 403")
 	}
-	return f.IssueTracker.TouchesOf(num)
+	return f.IssueTracker.Issue(num)
 }
 
 // The marker comes from the collider the selection loop recorded, so a second

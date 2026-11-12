@@ -45,8 +45,10 @@ type Capabilities struct {
 	DemandCounter         DemandCounter
 	IssueTypeChecker      IssueTypeChecker
 	StatusMappingChecker  StatusMappingChecker
-	NativeDepsReader      NativeDepsReader
-	BodyGrammarer         BodyGrammarer
+	// DepsOf and TouchesOf assert these two on the bare IssueTracker instead:
+	// their callers (waves, console) hold no Capabilities.
+	NativeDepsReader NativeDepsReader
+	BodyGrammarer    BodyGrammarer
 
 	// CODE_FORGE and ISSUE_TRACKER select independently, so each knob keeps
 	// its own descriptor row.

@@ -631,20 +631,23 @@ func TestSelectiveListDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched(t *tes
 	}
 }
 
-// failDepsOf wraps a *forge.Fake so DepsOf errors for num, simulating a
-// transient tracker failure. It mirrors the helper of the same name in
-// console/queue_test.go.
+// failDepsOf wraps a *forge.Fake so forge.DepsOf errors for num, simulating a
+// transient tracker failure. NoDeps makes core return NativeDepsOf's error
+// as-is, leaving the raw Issue read that previewIssues also makes intact. It
+// mirrors the helper of the same name in console/queue_test.go.
 type failDepsOf struct {
 	*forge.Fake
 	num string
 }
 
-func (r failDepsOf) DepsOf(num string) ([]forge.Dependency, error) {
+func (r failDepsOf) NativeDepsOf(num string) ([]string, error) {
 	if num == r.num {
 		return nil, errBoom
 	}
-	return r.Fake.DepsOf(num)
+	return r.Fake.NativeDepsOf(num)
 }
+
+func (failDepsOf) BodyGrammar() forge.BodyGrammar { return forge.BodyGrammarNativeDepsOnly }
 
 // writeLocalReadyIssue writes a minimal local-tracker issue file at dir/slug.md
 // with its frontmatter state set to label. toIssue folds the state marker into
