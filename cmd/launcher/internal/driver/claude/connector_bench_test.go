@@ -30,7 +30,7 @@ import (
 //
 // A whole-log read of the dogfood corpus takes tens of seconds on the
 // interpreter, so add -benchtime 1x for a smoke run, and select one family with
-// -bench: Decode, Heartbeat, WholeLog, DecodeSize, FixedCalls, ShadowReplay.
+// -bench: Decode, Heartbeat, WholeLog, PostPass, DecodeSize, FixedCalls, ShadowReplay.
 
 // chunkSize is shorter than most corpus lines, so nearly every line arrives
 // split across writes, as from a pipe.
@@ -206,36 +206,77 @@ func requireSameAsNative(b *testing.B, what string, got, native any) {
 
 // wholeLogReads is every whole-log read core makes of a finished Pass's log,
 // plus the console's interactive transcript render. claude declares no
-// ResolveExit, so that row makes no Connector call.
+// ResolveExit, so that row makes no Connector call and has no fromLog. read is
+// the path-based reader, which decodes the log itself; fromLog is the same read
+// off a log already decoded by Driver.Decode.
 var wholeLogReads = []struct {
-	name string
-	read func(d driverkit.Driver, path string) (any, error)
+	name    string
+	read    func(d driverkit.Driver, path string) (any, error)
+	fromLog func(p driverkit.PassLog) (any, error)
 }{
-	{"ResolveExit", func(d driverkit.Driver, path string) (any, error) { return d.ResolveExit(path, 0) }},
-	{"ResultText", func(d driverkit.Driver, path string) (any, error) { return d.ResultText(path) }},
-	{"RenderTranscript", func(d driverkit.Driver, path string) (any, error) {
-		return d.RenderTranscript(path, driverkit.RenderOptions{TopLevelRole: driverkit.ImplementorRole})
-	}},
-	{"ExtractUsageAfter", func(d driverkit.Driver, path string) (any, error) {
-		r, after, err := d.ExtractUsageAfter(path, driverkit.SessionBaselines{})
-		return []any{r, after}, err
-	}},
-	{"ClassifyTransient", func(d driverkit.Driver, path string) (any, error) { return d.ClassifyTransient(path) }},
-	{"ReadPasses", func(d driverkit.Driver, path string) (any, error) {
-		var lines []driverkit.PassLine
-		tallies, err := d.ReadPasses(path, passmachine.DispositionsPath, driverkit.SessionBaselines{}, func(l driverkit.PassLine) {
-			lines = append(lines, l)
-		})
-		return []any{tallies, lines}, err
-	}},
-	{"SessionBaselinesAfter", func(d driverkit.Driver, path string) (any, error) {
-		return d.SessionBaselinesAfter(path, driverkit.SessionBaselines{})
-	}},
+	{name: "ResolveExit", read: func(d driverkit.Driver, path string) (any, error) { return d.ResolveExit(path, 0) }},
+	{
+		name:    "ResultText",
+		read:    func(d driverkit.Driver, path string) (any, error) { return d.ResultText(path) },
+		fromLog: func(p driverkit.PassLog) (any, error) { return p.ResultText(), nil },
+	},
+	{
+		name: "RenderTranscript",
+		read: func(d driverkit.Driver, path string) (any, error) {
+			return d.RenderTranscript(path, driverkit.RenderOptions{TopLevelRole: driverkit.ImplementorRole})
+		},
+		fromLog: func(p driverkit.PassLog) (any, error) {
+			return p.RenderTranscript(driverkit.RenderOptions{TopLevelRole: driverkit.ImplementorRole}), nil
+		},
+	},
+	{
+		name: "ExtractUsageAfter",
+		read: func(d driverkit.Driver, path string) (any, error) {
+			r, after, err := d.ExtractUsageAfter(path, driverkit.SessionBaselines{})
+			return []any{r, after}, err
+		},
+		fromLog: func(p driverkit.PassLog) (any, error) {
+			r, after := p.ExtractUsageAfter(driverkit.SessionBaselines{})
+			return []any{r, after}, nil
+		},
+	},
+	{
+		name:    "ClassifyTransient",
+		read:    func(d driverkit.Driver, path string) (any, error) { return d.ClassifyTransient(path) },
+		fromLog: func(p driverkit.PassLog) (any, error) { return p.ClassifyTransient() },
+	},
+	{
+		name: "ReadPasses",
+		read: func(d driverkit.Driver, path string) (any, error) {
+			var lines []driverkit.PassLine
+			tallies, err := d.ReadPasses(path, passmachine.DispositionsPath, driverkit.SessionBaselines{}, func(l driverkit.PassLine) {
+				lines = append(lines, l)
+			})
+			return []any{tallies, lines}, err
+		},
+		fromLog: func(p driverkit.PassLog) (any, error) {
+			var lines []driverkit.PassLine
+			tallies := p.ReadPasses(passmachine.DispositionsPath, driverkit.SessionBaselines{}, func(l driverkit.PassLine) {
+				lines = append(lines, l)
+			})
+			return []any{tallies, lines}, nil
+		},
+	},
+	{
+		name: "SessionBaselinesAfter",
+		read: func(d driverkit.Driver, path string) (any, error) {
+			return d.SessionBaselinesAfter(path, driverkit.SessionBaselines{})
+		},
+		fromLog: func(p driverkit.PassLog) (any, error) {
+			return p.SessionBaselinesAfter(driverkit.SessionBaselines{}), nil
+		},
+	},
 }
 
-// BenchmarkConnectorWholeLog is each whole-log read on the largest dogfood
-// Pass. Every read opens its own decoder, so each pays a full decode of the log
-// through the Connector.
+// BenchmarkConnectorWholeLog is each path-based whole-log read on the largest
+// dogfood Pass. Every read opens its own decoder, so each pays a full decode of
+// the log through the Connector. BenchmarkConnectorPostPass is the same reads
+// off one decode.
 func BenchmarkConnectorWholeLog(b *testing.B) {
 	path, size := largestDogfoodLog(b)
 	native := driverkit.New(claude.Strategy)
@@ -264,6 +305,71 @@ func BenchmarkConnectorWholeLog(b *testing.B) {
 			})
 		})
 	}
+}
+
+// BenchmarkConnectorPostPass is the post-Pass read set on the largest dogfood
+// Pass, off a single Driver.Decode (issue #6851): Decode alone, then Decode plus
+// every PassLog reader. The second should cost about the first, since a reader
+// walks the decoded events and makes no Connector call.
+func BenchmarkConnectorPostPass(b *testing.B) {
+	path, size := largestDogfoodLog(b)
+	native := driverkit.New(claude.Strategy)
+	want := map[string]any{}
+	for _, r := range wholeLogReads {
+		if r.fromLog == nil {
+			continue
+		}
+		v, err := r.read(native, path)
+		if err != nil {
+			b.Fatalf("native %s: %v", r.name, err)
+		}
+		want[r.name] = v
+	}
+	readAll := func(d driverkit.Driver, check func(name string, got any)) error {
+		p, err := d.Decode(path)
+		if err != nil {
+			return err
+		}
+		for _, r := range wholeLogReads {
+			if r.fromLog == nil {
+				continue
+			}
+			got, err := r.fromLog(p)
+			if err != nil {
+				return fmt.Errorf("%s: %w", r.name, err)
+			}
+			if check != nil {
+				check(r.name, got)
+			}
+		}
+		return nil
+	}
+	b.Run("Decode", func(b *testing.B) {
+		benchStrategies(b, func(b *testing.B, s driverkit.Strategy) {
+			d := driverkit.New(s)
+			b.SetBytes(size)
+			for b.Loop() {
+				if _, err := d.Decode(path); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	})
+	b.Run("DecodeAndReads", func(b *testing.B) {
+		benchStrategies(b, func(b *testing.B, s driverkit.Strategy) {
+			d := driverkit.New(s)
+			// Before the loop, which starts the clock on its first call.
+			if err := readAll(d, func(name string, got any) { requireSameAsNative(b, name, got, want[name]) }); err != nil {
+				b.Fatal(err)
+			}
+			b.SetBytes(size)
+			for b.Loop() {
+				if err := readAll(d, nil); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	})
 }
 
 // sizedLine returns a valid claude tool_result line of about n bytes, the shape
