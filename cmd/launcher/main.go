@@ -2188,7 +2188,7 @@ var verbHandlers = map[string]verbHandler{
 			fmt.Fprintln(stderr, "flag --self-contained is only valid for the research subcommand")
 			return 1
 		}
-		lc, err := bootstrap(stdout, !parsed.noBuild, dispatchkind.Work, false)
+		lc, err := bootstrapShadowed(stdout, !parsed.noBuild, dispatchkind.Work, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return bootstrapExitCode(err)
@@ -2200,7 +2200,7 @@ var verbHandlers = map[string]verbHandler{
 	},
 	"research": func(args []string, stdout, stderr io.Writer) int {
 		parsed := parseIssuePositionals(args)
-		lc, err := bootstrap(stdout, !parsed.noBuild, dispatchkind.Research, parsed.selfContained)
+		lc, err := bootstrapShadowed(stdout, !parsed.noBuild, dispatchkind.Research, parsed.selfContained)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return bootstrapExitCode(err)

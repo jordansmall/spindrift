@@ -60,6 +60,18 @@ type launchContext struct {
 // research's no-repo sub-mode (issue #2202). The accumulation lock is the one
 // thing an early error return can leak, so a defer releases it.
 func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor, selfContained bool) (lc *launchContext, err error) {
+	return bootstrapWith(stdout, ensureReady, kind, selfContained, false)
+}
+
+// bootstrapShadowed is bootstrap for a dispatch run (`dispatch`, `research`):
+// a backend row asking for a read shadow gets its tracker and code forge
+// layered before the settlers and factory capture them. lc.cleanup closes the
+// shadows, so every path that defers it ends them.
+func bootstrapShadowed(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor, selfContained bool) (*launchContext, error) {
+	return bootstrapWith(stdout, ensureReady, kind, selfContained, true)
+}
+
+func bootstrapWith(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor, selfContained, shadowReads bool) (lc *launchContext, err error) {
 	pwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -108,6 +120,20 @@ func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor
 	c := gc.config
 	it := gc.issueTracker
 	cf := gc.codeForge
+	caps := gc.capabilities
+	var shadows *readShadows
+	if shadowReads {
+		shadows = newReadShadows(pwd, os.Stderr)
+		it = shadows.wrapTracker(c, it)
+		cf = shadows.wrapCodeForge(c, cf)
+		caps = forge.ResolveCapabilities(cf, it, caps.ForgeDescriptor, caps.TrackerDescriptor)
+		// Covers every early error return below, like accumLock's.
+		defer func() {
+			if err != nil {
+				shadows.close()
+			}
+		}()
+	}
 
 	// Resolution mutates env (os.Unsetenv on the env-var form, see
 	// credresolver.New) and must run exactly once per route, so it cannot run
@@ -145,11 +171,11 @@ func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor
 	}
 
 	lw := localloop.Wire(localloopConfig(c), it)
-	mergeSettle, verdict, terminated, err := newSettlers(c.kind().Settle, c, it, lw, cf, gc.capabilities)
+	mergeSettle, verdict, terminated, err := newSettlers(c.kind().Settle, c, it, lw, cf, caps)
 	if err != nil {
 		return nil, err
 	}
-	f := newDispatchFactory(c, pwd, r, it, lw, cf, gc.capabilities)
+	f := newDispatchFactory(c, pwd, r, it, lw, cf, caps)
 	var merge settle.MergeSettler
 	if mergeSettle != nil {
 		merge = mergeSettle
@@ -161,13 +187,14 @@ func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor
 		runner:       r,
 		issueTracker: it,
 		codeForge:    cf,
-		capabilities: gc.capabilities,
+		capabilities: caps,
 		factory:      f,
 		merge:        merge,
 		verdict:      verdict,
 		terminated:   terminated,
 		cleanup: func() {
 			f.Cleanup()
+			shadows.close()
 			// Held for the whole run rather than only the seed, so a
 			// concurrent process cannot seed or mount the same Accumulation
 			// repo while this one still uses it (issue #2441). The OS releases
