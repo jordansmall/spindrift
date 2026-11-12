@@ -78,9 +78,8 @@ type guestCall func(ctx context.Context, method string, params, result any) erro
 // embedded native adapter.
 //
 // Optional capabilities found by type assertion on the native adapter
-// (forge.CIRunReporter and the like) are hidden behind this wrapper. Nothing in
-// production builds one yet; connectortracker.New is likewise only called from
-// tests today.
+// (forge.CIRunReporter and the like) are hidden behind this wrapper. Only the read
+// shadow builds one in production, so no authoritative path loses them.
 type reads struct {
 	forge.PRForge
 	call    guestCall
