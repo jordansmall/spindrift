@@ -98,7 +98,7 @@ func bootstrapWith(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descri
 	if err := dispatch.MigrateLegacyLogDir(pwd); err != nil {
 		return nil, err
 	}
-	accumLock, err := seedAccumulationRepoIfHostMediated(seedConfig, pwd)
+	accumLock, err := seedAccumulationRepoIfHostSeeded(seedConfig, pwd)
 	if err != nil {
 		return nil, err
 	}
@@ -217,14 +217,14 @@ func (lc *launchContext) settler() settle.Settler {
 	return lc.merge
 }
 
-// seedAccumulationRepoIfHostMediated seeds the bare Accumulation repo (ADR 0033)
+// seedAccumulationRepoIfHostSeeded seeds the bare Accumulation repo (ADR 0033)
 // from pwd's checkout before any Box runs, holding an exclusive lock on it for
 // the caller (issue #2441). A missing repo makes candidateMount silently skip
 // the /repo mount, and host-side landing then fails (issue #1726); research
 // needs the seed too unless it is self-contained (issue #2439).
-func seedAccumulationRepoIfHostMediated(c config, pwd string) (*local.AccumulationLock, error) {
+func seedAccumulationRepoIfHostSeeded(c config, pwd string) (*local.AccumulationLock, error) {
 	row, _ := backendkit.ByName(c.CodeForge)
-	if !row.HostMediatedRemote || c.selfContained {
+	if !row.HostSeededMirror || c.selfContained {
 		return nil, nil
 	}
 	repoDir := c.hostRepoDir()

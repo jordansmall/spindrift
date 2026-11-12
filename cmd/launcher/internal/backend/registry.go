@@ -33,8 +33,16 @@ type Descriptor struct {
 	DoctorTokenHint, DoctorSlugHint string
 
 	// HostMediatedRemote is true only for a backend with no writable remote to
-	// push to at all (ADR 0033: "local").
+	// push to at all (ADR 0033: "local"): the branch returns to the host as an
+	// outbox bundle. It says nothing about where the Box clones from; see
+	// HostSeededMirror.
 	HostMediatedRemote bool
+
+	// HostSeededMirror is true for a backend whose Box clones from a mirror the
+	// host seeds before any Box runs and mounts at /repo (ADR 0033: "local"),
+	// not from a network remote. The Box trusts the mount as a git
+	// safe.directory.
+	HostSeededMirror bool
 
 	// OutboxRelayCapable is true for a backend whose CODE_FORGE selection gets
 	// the outbox mount/relay treatment under read-only (issue #1918).

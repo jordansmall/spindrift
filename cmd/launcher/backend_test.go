@@ -33,6 +33,7 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 		doctorTokenHint         string
 		doctorSlugHint          string
 		hostMediatedRemote      bool
+		hostSeededMirror        bool
 		outboxRelayCapable      bool
 		inBoxUnreachableTracker bool
 
@@ -88,6 +89,7 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 			validAsTracker:          true,
 			validAsCodeForge:        true,
 			hostMediatedRemote:      true,
+			hostSeededMirror:        true,
 			inBoxUnreachableTracker: true,
 
 			hasValidateCodeForge: true,
@@ -133,6 +135,9 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 			}
 			if row.HostMediatedRemote != tc.hostMediatedRemote {
 				t.Errorf("hostMediatedRemote = %v, want %v", row.HostMediatedRemote, tc.hostMediatedRemote)
+			}
+			if row.HostSeededMirror != tc.hostSeededMirror {
+				t.Errorf("hostSeededMirror = %v, want %v", row.HostSeededMirror, tc.hostSeededMirror)
 			}
 			if row.OutboxRelayCapable != tc.outboxRelayCapable {
 				t.Errorf("outboxRelayCapable = %v, want %v", row.OutboxRelayCapable, tc.outboxRelayCapable)

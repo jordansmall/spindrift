@@ -184,7 +184,7 @@ func TestCloneLocalClonesMountSkipsGhAndTrustsBothPaths(t *testing.T) {
 	t.Setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
 	f.cfg.CodeForge = "local"
 	f.cfg.GHCredentialHelper = false
-	f.cfg.HostMediatedRemote = true
+	f.cfg.HostSeededMirror = true
 	f.cfg.RepoMountDir = f.origin
 	if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
@@ -334,7 +334,7 @@ func TestCloneSkipsGhWhenCredentialHelperIsOffRegardlessOfForge(t *testing.T) {
 	}
 }
 
-func TestCloneAddsNoSafeDirectoryUnlessRemoteIsHostMediated(t *testing.T) {
+func TestCloneAddsNoSafeDirectoryUnlessRemoteIsHostSeeded(t *testing.T) {
 	f := newFixture(t)
 	f.redirect(t, "https://github.com/o/r.git")
 	if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {

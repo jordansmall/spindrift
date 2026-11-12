@@ -1220,7 +1220,7 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_BOTH_FAIL_ENV_DOES_NOT_EXIST" }
 
 // mustLocalAccumulationRepo seeds a bare Accumulation repo from a throwaway
 // "main" checkout through local.SeedAccumulationRepo, the same seed path
-// bootstrap()'s seedAccumulationRepoIfHostMediated runs before dispatch. An
+// bootstrap()'s seedAccumulationRepoIfHostSeeded runs before dispatch. An
 // empty registryConfig skips writing relPath, leaving the checkout declaring no
 // registry.
 func mustLocalAccumulationRepo(t *testing.T, relPath, registryConfig string) string {
