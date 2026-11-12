@@ -652,7 +652,7 @@ func TestFailureDetail_Bounded(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		longDesc := strings.Repeat("x", 500)
 		var statuses []map[string]any
-		for i := 0; i < 20; i++ {
+		for i := 0; i < 40; i++ {
 			statuses = append(statuses, map[string]any{
 				"context":     "check-" + strconv.Itoa(i),
 				"state":       "failure",
@@ -666,8 +666,8 @@ func TestFailureDetail_Bounded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
 	}
-	if len(got) > 4000 {
-		t.Fatalf("FailureDetail(...) length = %d, want <= 4000", len(got))
+	if len(got) > 12000 {
+		t.Fatalf("FailureDetail(...) length = %d, want <= 12000", len(got))
 	}
 }
 

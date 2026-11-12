@@ -106,7 +106,8 @@ type PRForge interface {
 	// main even though each was individually green (issue #936).
 	NeedsUpdate(url string) (bool, error)
 	// FailureDetail returns each failing check's name, conclusion or state, and
-	// summary or description (no job logs) for the PR's head commit, or ""
+	// summary or description, plus a capped excerpt of each failing job's log when
+	// the adapter can read one, for the PR's head commit, or ""
 	// when nothing is currently failing.
 	// Best-effort: a non-nil error means detail unavailable, and callers must
 	// proceed without it rather than failing their own operation.
