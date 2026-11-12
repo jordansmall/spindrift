@@ -614,7 +614,7 @@ func TestJiraClient_DepsOf_NativeLinks(t *testing.T) {
 	defer srv.Close()
 
 	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
-	deps, err := jc.DepsOf("PROJ-10")
+	deps, err := forge.DepsOf(jc, "PROJ-10")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
@@ -623,7 +623,7 @@ func TestJiraClient_DepsOf_NativeLinks(t *testing.T) {
 	}
 }
 
-// Mirrors the dedupe guard already fixed in the GitHub adapter's nativeDepsOf.
+// Mirrors the dedupe guard already fixed in the GitHub adapter's NativeDepsOf.
 func TestJiraClient_DepsOf_DuplicateLinksDeduped(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -644,7 +644,7 @@ func TestJiraClient_DepsOf_DuplicateLinksDeduped(t *testing.T) {
 	defer srv.Close()
 
 	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
-	deps, err := jc.DepsOf("PROJ-11")
+	deps, err := forge.DepsOf(jc, "PROJ-11")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}

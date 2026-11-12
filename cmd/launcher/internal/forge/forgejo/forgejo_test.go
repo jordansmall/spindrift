@@ -1016,7 +1016,7 @@ func TestForgejoClient_NativeLinks_WalkAllPages(t *testing.T) {
 		endpoint string
 		lookup   func(forge.IssueTracker, string) ([]forge.Dependency, error)
 	}{
-		{"dependencies", func(fc forge.IssueTracker, num string) ([]forge.Dependency, error) { return fc.DepsOf(num) }},
+		{"dependencies", func(fc forge.IssueTracker, num string) ([]forge.Dependency, error) { return forge.DepsOf(fc, num) }},
 		{"blocks", func(fc forge.IssueTracker, num string) ([]forge.Dependency, error) {
 			return fc.(forge.BlockersLister).BlocksOf(num)
 		}},
@@ -1078,7 +1078,7 @@ func TestForgejoClient_TouchesOf_ParsesBodyTouchSection(t *testing.T) {
 	defer srv.Close()
 
 	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
-	touches, err := fc.TouchesOf("10")
+	touches, err := forge.TouchesOf(fc, "10")
 	if err != nil {
 		t.Fatalf("TouchesOf: %v", err)
 	}

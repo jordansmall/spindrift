@@ -474,7 +474,7 @@ func TestFake_DepsOf_ParsesBody(t *testing.T) {
 		Body:   "This issue depends on #3 and #5.",
 	})
 
-	deps, err := f.DepsOf("10")
+	deps, err := forge.DepsOf(f, "10")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
@@ -502,7 +502,7 @@ func TestFake_DepsOf_EmptyBody(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "11", Body: "No deps here."})
 
-	deps, err := f.DepsOf("11")
+	deps, err := forge.DepsOf(f, "11")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
@@ -513,7 +513,7 @@ func TestFake_DepsOf_EmptyBody(t *testing.T) {
 
 func TestFake_DepsOf_MissingIssue(t *testing.T) {
 	f := forge.NewFake()
-	_, err := f.DepsOf("999")
+	_, err := forge.DepsOf(f, "999")
 	if err == nil {
 		t.Fatal("want error for unknown issue, got nil")
 	}
@@ -574,7 +574,7 @@ func TestFake_TouchesOf_ParsesBody(t *testing.T) {
 		Body:   "## Touches\n- lib/env-schema.nix\n- cmd/launcher/*.go",
 	})
 
-	touches, err := f.TouchesOf("10")
+	touches, err := forge.TouchesOf(f, "10")
 	if err != nil {
 		t.Fatalf("TouchesOf: %v", err)
 	}

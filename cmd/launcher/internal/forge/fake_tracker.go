@@ -19,12 +19,12 @@ type IssueTrackerFake struct {
 	// directly: there is no constructor argument.
 	VerdictLabels VerdictLabels
 	issues        map[string]Issue
-	// NativeDeps, keyed by issue number, is returned by DepsOf as
-	// DepSourceNative and wins over body parsing when non-empty.
+	// NativeDeps, keyed by issue number, is returned by NativeDepsOf and wins
+	// over body parsing in DepsOf when non-empty.
 	// forgetest.RunTrackerContract pins that rule across every adapter.
 	NativeDeps map[string][]string
-	// NativeDepsErr, keyed by issue number, is returned by DepsOf instead of
-	// consulting NativeDeps, scripting the native-API failure DepsOf falls
+	// NativeDepsErr, keyed by issue number, is returned by NativeDepsOf instead
+	// of consulting NativeDeps, scripting the native-API failure DepsOf falls
 	// back to body parsing for (issue #1544).
 	NativeDepsErr map[string]error
 
@@ -344,22 +344,24 @@ func (tf *IssueTrackerFake) CompleteVerdict(num string, verdict Verdict) error {
 	return nil
 }
 
-// DepsOf returns num's scripted NativeDeps (DepSourceNative) when set,
-// otherwise the dependency IDs parsed from the issue body (DepSourceBody).
+var _ NativeDepsReader = (*IssueTrackerFake)(nil)
+
+// DepsOf delegates to the core DepsOf. It must not hold tf.mu: core calls
+// NativeDepsOf and Issue, which each lock.
 func (tf *IssueTrackerFake) DepsOf(num string) ([]Dependency, error) {
+	return DepsOf(tf, num)
+}
+
+// NativeDepsOf returns num's scripted NativeDeps, or NativeDepsErr[num] when
+// set. It records num in DepsOfCalls, the spy for a dependency-graph build.
+func (tf *IssueTrackerFake) NativeDepsOf(num string) ([]string, error) {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
 	tf.DepsOfCalls = append(tf.DepsOfCalls, num)
-	if err := tf.NativeDepsErr[num]; err == nil {
-		if native, ok := tf.NativeDeps[num]; ok && len(native) > 0 {
-			return WithSource(native, DepSourceNative), nil
-		}
+	if err := tf.NativeDepsErr[num]; err != nil {
+		return nil, err
 	}
-	iss, ok := tf.issues[num]
-	if !ok {
-		return nil, fmt.Errorf("issue %s not found", num)
-	}
-	return WithSource(ParseBlockerRefs(iss.Body), DepSourceBody), nil
+	return tf.NativeDeps[num], nil
 }
 
 // BlocksOf returns every issue number keyed in NativeDeps whose own deps name

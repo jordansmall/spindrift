@@ -341,9 +341,22 @@ const jiraBlockedByLink = "is blocked by"
 // direction (issue #1744).
 const jiraBlocksLink = "blocks"
 
-// DepsOf returns issue num's dependencies from native Jira issue links rather
-// than prose parsing, so always DepSourceNative.
+// DepsOf delegates to forge.DepsOf; under BodyGrammarNoDeps the native issue
+// links are authoritative, so it never falls back to prose parsing.
 func (j *jiraClient) DepsOf(num string) ([]forge.Dependency, error) {
+	return forge.DepsOf(j, num)
+}
+
+var (
+	_ forge.NativeDepsReader = (*jiraClient)(nil)
+	_ forge.BodyGrammarer    = (*jiraClient)(nil)
+)
+
+// BodyGrammar declares native links authoritative: no body dependency fallback.
+func (j *jiraClient) BodyGrammar() forge.BodyGrammar { return forge.BodyGrammarNoDeps }
+
+// NativeDepsOf reads issue num's "is blocked by" links from the issue payload.
+func (j *jiraClient) NativeDepsOf(num string) ([]string, error) {
 	var payload jiraIssuePayload
 	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload); err != nil {
 		return nil, err
@@ -356,7 +369,7 @@ func (j *jiraClient) DepsOf(num string) ([]forge.Dependency, error) {
 			deps = append(deps, link.InwardIssue.Key)
 		}
 	}
-	return forge.WithSource(deps, forge.DepSourceNative), nil
+	return deps, nil
 }
 
 // BlocksOf returns the issues num blocks, read from the same issuelinks
@@ -467,14 +480,9 @@ func (j *jiraClient) Comments(num string) ([]forge.Comment, error) {
 
 var _ forge.CommentLister = (*jiraClient)(nil)
 
-// TouchesOf parses the declared touch-set from issue num's description with
-// the shared body grammar; Jira has no native touch-set to prefer over it.
+// TouchesOf delegates to forge.TouchesOf.
 func (j *jiraClient) TouchesOf(num string) ([]string, error) {
-	iss, err := j.Issue(num)
-	if err != nil {
-		return nil, err
-	}
-	return forge.ParseTouchPaths(iss.Body), nil
+	return forge.TouchesOf(j, num)
 }
 
 func (j *jiraClient) Comment(num, body string) error {

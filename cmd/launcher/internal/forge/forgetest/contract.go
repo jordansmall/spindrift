@@ -166,7 +166,7 @@ func testDepsOf(t *testing.T, h Harness) {
 		// slug-bullet "## Blocked by" section, not github/Fake's inline
 		// "blocked by #N" prose.
 		h.SeedIssue(forge.Issue{Number: "301", Body: "## Blocked by\n- 7\n"})
-		deps, err := h.Tracker().DepsOf("301")
+		deps, err := forge.DepsOf(h.Tracker(), "301")
 		if err != nil {
 			t.Fatalf("DepsOf: %v", err)
 		}
@@ -180,7 +180,7 @@ func testDepsOf(t *testing.T, h Harness) {
 	t.Run("NativeWins", func(t *testing.T) {
 		h.SeedIssue(forge.Issue{Number: "302", Body: "Blocked by #7"})
 		nc.SeedNativeDeps("302", []string{"999"})
-		deps, err := h.Tracker().DepsOf("302")
+		deps, err := forge.DepsOf(h.Tracker(), "302")
 		if err != nil {
 			t.Fatalf("DepsOf: %v", err)
 		}
@@ -195,7 +195,7 @@ func testDepsOf(t *testing.T, h Harness) {
 			h.SeedIssue(forge.Issue{Number: "303", Body: "Blocked by #7"})
 			nc.SeedNativeDeps("303", []string{"999"})
 			h.FailNativeDeps("303")
-			deps, err := h.Tracker().DepsOf("303")
+			deps, err := forge.DepsOf(h.Tracker(), "303")
 			if err != nil {
 				t.Fatalf("DepsOf: %v", err)
 			}
