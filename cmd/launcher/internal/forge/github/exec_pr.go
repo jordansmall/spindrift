@@ -172,8 +172,9 @@ func (e *execClient) CheckState(url string) (forge.RollupState, error) {
 
 // actionsRunRE matches a GitHub Actions run URL, optionally followed by the
 // /job/<id> segment a check run's detailsUrl carries. Group 1 is the
-// https://host/owner/repo prefix, group 2 the run path.
-var actionsRunRE = regexp.MustCompile(`^(https://[^/]+/[^/]+/[^/]+)(/actions/runs/\d+)(?:/job/\d+)?/?$`)
+// https://host/owner/repo prefix, group 2 the run path, group 3 the job id
+// ("" without one).
+var actionsRunRE = regexp.MustCompile(`^(https://[^/]+/[^/]+/[^/]+)(/actions/runs/\d+)(?:/job/(\d+))?/?$`)
 
 // rollupQueryResult is the statusCheckRollup object CheckRun's --jq emits, or
 // {} when the head commit has no checks.

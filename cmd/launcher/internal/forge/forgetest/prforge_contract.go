@@ -34,6 +34,10 @@ type PRForgeReadHarness interface {
 	// url on successive calls, in order.
 	SeedCheckStates(url string, states []forge.RollupState)
 	SeedFailingCheck(url, name, conclusion, summary string)
+	// SeedFailingCheckLog seeds a failing check named check whose job log is
+	// log, in the form the backend serves a CI job's log (its own check, not
+	// the log of one SeedFailingCheck seeded).
+	SeedFailingCheckLog(url, check, log string)
 }
 
 // PRForgeHarness lets RunPRForgeContract drive a PRForge's scripted backend
@@ -338,6 +342,30 @@ func testFailureDetailOnFailingCheck(t *testing.T, h PRForgeReadHarness) {
 	}
 	if !strings.Contains(detail, "build") || !strings.Contains(detail, "FAILURE") {
 		t.Fatalf("FailureDetail(%q) = %q, want it to mention the failing check's name and conclusion", failingURL, detail)
+	}
+
+	// The log's head and tail are distinguishable and it is over the cap, so
+	// only an excerpt that keeps the tail passes.
+	const loggedNum = "291"
+	loggedURL := h.SeedOpenPR(loggedNum)
+	log := "HEAD-OF-LOG\n" + strings.Repeat("padding line of test output\n", 400) + "--- FAIL: TestX\nTAIL-OF-LOG\n"
+	if len(log) <= 2*forge.MaxLogExcerptBytes {
+		t.Fatalf("contract log is %d bytes, want over twice the %d-byte excerpt cap", len(log), forge.MaxLogExcerptBytes)
+	}
+	h.SeedFailingCheckLog(loggedURL, "build", log)
+
+	detail, err = h.Forge().FailureDetail(loggedURL)
+	if err != nil {
+		t.Fatalf("FailureDetail(%q) with a job log: %v", loggedURL, err)
+	}
+	if !strings.Contains(detail, "--- FAIL: TestX\nTAIL-OF-LOG") {
+		t.Errorf("FailureDetail(%q) = %q, want the tail of the failing job's log", loggedURL, detail)
+	}
+	if strings.Contains(detail, "HEAD-OF-LOG") {
+		t.Errorf("FailureDetail(%q) = %q, kept the head of a log over the excerpt cap", loggedURL, detail)
+	}
+	if want := `[log excerpt for "build" trimmed`; !strings.Contains(detail, want) {
+		t.Errorf("FailureDetail(%q) = %q, want the trim notice %q", loggedURL, detail, want)
 	}
 }
 

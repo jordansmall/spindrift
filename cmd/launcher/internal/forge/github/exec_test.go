@@ -1370,7 +1370,7 @@ func TestRenderFailureDetail(t *testing.T) {
 			{TypeName: "StatusContext", Context: "legacy-ci", State: "SUCCESS"},
 			{TypeName: "StatusContext", Context: "legacy-status", State: "ERROR", Description: "build broke"},
 		}
-		got := renderFailureDetail(contexts)
+		got := renderFailureDetail(contexts, nil)
 		if strings.Contains(got, "unit-tests") || strings.Contains(got, "legacy-ci") {
 			t.Fatalf("passing contexts must be filtered out: %q", got)
 		}
@@ -1386,7 +1386,7 @@ func TestRenderFailureDetail(t *testing.T) {
 		contexts := []failureDetailContext{
 			{TypeName: "CheckRun", Name: "unit-tests", Conclusion: "SUCCESS"},
 		}
-		if got := renderFailureDetail(contexts); got != "" {
+		if got := renderFailureDetail(contexts, nil); got != "" {
 			t.Fatalf("want empty string, got %q", got)
 		}
 	})
@@ -1395,7 +1395,7 @@ func TestRenderFailureDetail(t *testing.T) {
 		contexts := []failureDetailContext{
 			{TypeName: "CheckRun", Name: "huge", Conclusion: "FAILURE", Summary: strings.Repeat("x", forge.MaxFailureDetailBytes*2)},
 		}
-		got := renderFailureDetail(contexts)
+		got := renderFailureDetail(contexts, nil)
 		if len(got) > forge.MaxFailureDetailBytes {
 			t.Fatalf("detail not bounded: got %d bytes, want <= %d", len(got), forge.MaxFailureDetailBytes)
 		}

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/seamtest"
 )
@@ -58,5 +59,37 @@ func TestFailureDetailSeam(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A gh that never answers the job-log reads must not stall FailureDetail past
+// the shared log budget: the logs are dropped and the report still renders.
+func TestFailureDetail_SlowJobLogsAreBoundedByTheBudget(t *testing.T) {
+	const url = "https://github.com/o/r/pull/9"
+	contexts := `[` +
+		`{"__typename":"CheckRun","name":"build","conclusion":"FAILURE","summary":"boom","detailsUrl":"https://github.com/o/r/actions/runs/1/job/11"},` +
+		`{"__typename":"CheckRun","name":"test","conclusion":"FAILURE","summary":"bang","detailsUrl":"https://github.com/o/r/actions/runs/1/job/12"}]`
+	dir := t.TempDir()
+	script := "#!/bin/sh\ncase \"$2\" in\ngraphql) printf '%s' '" + contexts + "' ;;\n*) exec sleep 30 ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	prev := jobLogsBudget
+	jobLogsBudget = 200 * time.Millisecond
+	t.Cleanup(func() { jobLogsBudget = prev })
+
+	start := time.Now()
+	got, err := NewExecClient("o/r", testLabels).FailureDetail(url)
+	if err != nil {
+		t.Fatalf("FailureDetail: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("FailureDetail took %v; want it bounded by the %v log budget", elapsed, jobLogsBudget)
+	}
+	for _, s := range []string{"build", "boom", "test", "bang"} {
+		if !strings.Contains(got, s) {
+			t.Errorf("detail %q missing %q", got, s)
+		}
 	}
 }
