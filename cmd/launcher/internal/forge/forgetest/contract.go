@@ -57,17 +57,53 @@ type CommentCapable interface {
 	SeedComments(num string, comments []forge.Comment)
 }
 
+// StateSeeder is implemented by harnesses whose tracker cannot write (a
+// read-only Connector-backed one): the read cases seed a dispatch state in the
+// scripted backend instead of calling TransitionState.
+type StateSeeder interface {
+	SeedState(num string, state forge.DispatchState)
+}
+
+// seedState puts issue num, already seeded via SeedIssue, into state.
+func seedState(t *testing.T, h Harness, num string, state forge.DispatchState) {
+	t.Helper()
+	if s, ok := h.(StateSeeder); ok {
+		s.SeedState(num, state)
+		return
+	}
+	if err := h.Tracker().TransitionState(num, forge.Untriaged, state); err != nil {
+		t.Fatalf("%s: TransitionState(Untriaged, %v): %v", num, state, err)
+	}
+}
+
+// RunTrackerReadContract runs only the read cases of RunTrackerContract, for
+// a tracker that cannot write. It never calls TransitionState, CompleteVerdict,
+// or Comment.
+func RunTrackerReadContract(t *testing.T, h Harness) {
+	for _, c := range readCases {
+		t.Run(c.name, func(t *testing.T) { c.run(t, h) })
+	}
+}
+
+// readCases are the cases that never write; RunTrackerContract runs them too.
+var readCases = []struct {
+	name string
+	run  func(*testing.T, Harness)
+}{
+	{"DepsOf", testDepsOf},
+	{"DispatchOrder", testDispatchOrder},
+	{"LabelToPriority", testLabelToPriority},
+	{"Comments", testComments},
+}
+
 // RunTrackerContract runs the shared IssueTracker conformance suite against h,
 // backed by the calling adapter's own scripted-backend Harness.
 func RunTrackerContract(t *testing.T, h Harness) {
 	t.Run("DispatchLifecycle", func(t *testing.T) { testDispatchLifecycle(t, h) })
 	t.Run("ClaimAlreadyInProgress", func(t *testing.T) { testClaimAlreadyInProgress(t, h) })
 	t.Run("DoubleDispatchGuard", func(t *testing.T) { testDoubleDispatchGuard(t, h) })
-	t.Run("DepsOf", func(t *testing.T) { testDepsOf(t, h) })
+	RunTrackerReadContract(t, h)
 	t.Run("ResearchVerdictTerminals", func(t *testing.T) { testResearchVerdictTerminals(t, h) })
-	t.Run("DispatchOrder", func(t *testing.T) { testDispatchOrder(t, h) })
-	t.Run("LabelToPriority", func(t *testing.T) { testLabelToPriority(t, h) })
-	t.Run("Comments", func(t *testing.T) { testComments(t, h) })
 	t.Run("DemandCount", func(t *testing.T) { testDemandCount(t, h) })
 }
 
@@ -277,9 +313,7 @@ func testDispatchOrder(t *testing.T, h Harness) {
 	want := []string{"501", "502", "503"}
 	for _, num := range want {
 		h.SeedIssue(forge.Issue{Number: num, Title: "order"})
-		if err := tr.TransitionState(num, forge.Untriaged, forge.Dispatchable); err != nil {
-			t.Fatalf("%s: TransitionState(Untriaged, Dispatchable): %v", num, err)
-		}
+		seedState(t, h, num, forge.Dispatchable)
 	}
 
 	issues, err := tr.ListIssues(forge.Dispatchable)

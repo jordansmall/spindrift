@@ -48,3 +48,48 @@ func (h *fakeHarness) IsPriorityCapable()     {}
 func TestFake_TrackerContract(t *testing.T) {
 	forgetest.RunTrackerContract(t, newFakeHarness())
 }
+
+// readOnlyHarness wraps the Fake behind a tracker whose writes fail the test,
+// the shape of a Connector-backed tracker: RunTrackerReadContract must seed
+// dispatch state through SeedState, never TransitionState.
+type readOnlyHarness struct {
+	*fakeHarness
+	t *testing.T
+}
+
+type readOnlyTracker struct {
+	*forge.Fake
+	t *testing.T
+}
+
+func (r readOnlyTracker) TransitionState(num string, from, to forge.DispatchState) error {
+	r.t.Errorf("read contract wrote: TransitionState(%s, %v, %v)", num, from, to)
+	return nil
+}
+
+func (r readOnlyTracker) CompleteVerdict(num string, v forge.Verdict) error {
+	r.t.Errorf("read contract wrote: CompleteVerdict(%s)", num)
+	return nil
+}
+
+func (r readOnlyTracker) Comment(num, body string) error {
+	r.t.Errorf("read contract wrote: Comment(%s)", num)
+	return nil
+}
+
+func (h readOnlyHarness) Tracker() forge.IssueTracker {
+	return readOnlyTracker{Fake: h.f, t: h.t}
+}
+
+func (h readOnlyHarness) SeedState(num string, state forge.DispatchState) {
+	iss, err := h.f.Issue(num)
+	if err != nil {
+		h.t.Fatalf("SeedState(%s): %v", num, err)
+	}
+	iss.Labels = append(iss.Labels, testLabels.Label(state))
+	h.f.SetIssue(iss)
+}
+
+func TestFake_TrackerReadContract_NoWrites(t *testing.T) {
+	forgetest.RunTrackerReadContract(t, readOnlyHarness{fakeHarness: newFakeHarness(), t: t})
+}
