@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
@@ -55,6 +57,12 @@ type (
 	newDecoderResult struct {
 		Decoder uint32 `json:"decoder"`
 	}
+	newStreamFilterResult struct {
+		Filter uint32 `json:"filter"`
+	}
+	streamDataResult struct {
+		Data []byte `json:"data"`
+	}
 	toolPhaseResult struct {
 		Phase string `json:"phase"`
 	}
@@ -78,7 +86,8 @@ var guestKinds = []driverkit.Kind{
 
 // DriverStrategy builds a driverkit.Strategy from a Driver Connector, so
 // everything above the Strategy is unchanged. Only the fields that cross the
-// protocol are set: the stream filter stays at its zero value.
+// protocol are set; the stream filter is set only for a Connector that
+// advertises "driver.streamFilter", else driverkit's identity passthrough stays.
 //
 // Strategy funcs carry no context or error return, so every guest call runs
 // under context.Background() and the funcs fail closed, as documented on each.
@@ -162,6 +171,9 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 			return r.ExitCode, nil
 		}
 	}
+	if slices.Contains(c.Capabilities, "driver.streamFilter") {
+		s.NewStreamFilter = c.newStreamFilter
+	}
 	// These funcs have no error return. A failed call leaves the heartbeat
 	// uninformative rather than wrong: no phase, no kind, and the model id
 	// as its own label at the last rank.
@@ -207,13 +219,24 @@ func patterns(ws []wirePattern) ([]driverkit.Pattern, error) {
 	return out, nil
 }
 
-// decoderHandle is the heap object whose reachability tracks a guest decoder.
-type decoderHandle struct{ id uint32 }
+// guestHandle is the heap object whose reachability tracks a guest decoder or
+// filter.
+type guestHandle struct{ id uint32 }
+
+// bind sets the handle's guest id and frees it with freeMethod once the handle
+// is unreachable. The Connector may be closed by then, so the cleanup ignores
+// errors.
+func (c *Connector) bind(h *guestHandle, id uint32, freeMethod, key string) {
+	h.id = id
+	runtime.AddCleanup(h, func(id uint32) {
+		_ = c.Call(context.Background(), freeMethod, map[string]any{key: id}, nil)
+	}, id)
+}
 
 func (c *Connector) newDecoder() driverkit.Decoder {
 	ctx := context.Background()
 	var r newDecoderResult
-	h := &decoderHandle{}
+	h := &guestHandle{}
 	// A Decoder has no error return, so a failed guest call yields a single
 	// KindUnparsed event carrying the line: the classifier then still sees it
 	// for terminal markers, and no guest-supplied event is trusted.
@@ -222,11 +245,7 @@ func (c *Connector) newDecoder() driverkit.Decoder {
 	}
 	err := c.Call(ctx, "driver.newDecoder", struct{}{}, &r)
 	if err == nil {
-		h.id = r.Decoder
-		// The Connector may be closed by then, so the cleanup ignores errors.
-		runtime.AddCleanup(h, func(id uint32) {
-			_ = c.Call(ctx, "driver.freeDecoder", map[string]any{"decoder": id}, nil)
-		}, r.Decoder)
+		c.bind(h, r.Decoder, "driver.freeDecoder", "decoder")
 	}
 	return func(line string) []driverkit.Event {
 		// spindrift_op lines are core's own grammar, host-written into every
@@ -254,6 +273,78 @@ func (c *Connector) newDecoder() driverkit.Decoder {
 		}
 		return evs
 	}
+}
+
+// streamPiece is the most raw bytes one streamWrite carries: base64 grows it by
+// a third, so half of maxRequest keeps a piece's request under it, which the
+// host would otherwise refuse. A var so a test can shrink it: the interpreter
+// takes tens of seconds on a real piece.
+var streamPiece = maxRequest / 2
+
+// guestFilter is a driverkit.StreamFilter backed by a guest filter. Its first
+// error, guest or downstream write, is sticky: the filter is the log tee's
+// fail-closed channel, and a guest that failed mid-stream has lost state, so
+// later bytes must not pass unfiltered. mu serialises Write and Flush because
+// driver-exec flushes from its SIGTERM goroutine mid-Write, so Flush waits out
+// an in-flight Write, up to a call budget per piece.
+type guestFilter struct {
+	c   *Connector
+	w   io.Writer
+	h   *guestHandle
+	mu  sync.Mutex
+	err error
+}
+
+func (c *Connector) newStreamFilter(w io.Writer) driverkit.StreamFilter {
+	ctx := context.Background()
+	f := &guestFilter{c: c, w: w, h: &guestHandle{}}
+	var r newStreamFilterResult
+	if f.err = c.Call(ctx, "driver.newStreamFilter", struct{}{}, &r); f.err != nil {
+		return f
+	}
+	c.bind(f.h, r.Filter, "driver.freeStreamFilter", "filter")
+	return f
+}
+
+// call runs one guest filter method and writes the bytes it returns to w. The
+// caller holds mu.
+func (f *guestFilter) call(method string, params map[string]any) error {
+	var r streamDataResult
+	if err := f.c.Call(context.Background(), method, params, &r); err != nil {
+		f.err = err
+		return err
+	}
+	if _, err := f.w.Write(r.Data); err != nil {
+		// The guest has already consumed the bytes, so the tee has a gap.
+		f.err = err
+		return err
+	}
+	return nil
+}
+
+func (f *guestFilter) Write(p []byte) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for f.err == nil && len(p) > 0 {
+		piece := p[:min(len(p), streamPiece)]
+		params := map[string]any{"filter": f.h.id, "data": piece}
+		if err := f.call("driver.streamWrite", params); err != nil {
+			return n, err
+		}
+		n += len(piece)
+		p = p[len(piece):]
+	}
+	return n, f.err
+}
+
+func (f *guestFilter) Flush() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	return f.call("driver.streamFlush", map[string]any{"filter": f.h.id})
 }
 
 // guestEvents strictly decodes the events a guest returned and reports false
