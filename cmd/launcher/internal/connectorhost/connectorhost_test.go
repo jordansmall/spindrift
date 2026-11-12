@@ -307,7 +307,7 @@ var loop = []byte{0x03, 0x40, 0x0c, 0x00, 0x0b}
 var sentinels = []error{
 	connectorhost.ErrBudget, connectorhost.ErrTrap, connectorhost.ErrMemoryCap, connectorhost.ErrDeclaredSize,
 	connectorhost.ErrOutputTooLarge, connectorhost.ErrMalformedOutput, connectorhost.ErrExport,
-	connectorhost.ErrRequestTooLarge,
+	connectorhost.ErrRequestTooLarge, connectorhost.ErrRouteRefused, connectorhost.ErrResponseTooLarge,
 }
 
 // assertOnlySentinel fails t unless err matches want and no other sentinel.

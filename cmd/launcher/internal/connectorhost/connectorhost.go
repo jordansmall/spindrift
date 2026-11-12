@@ -109,18 +109,22 @@ var (
 	// sentinel (ErrBudget, ErrTrap, ErrMemoryCap, ErrDeclaredSize, ErrExport,
 	// ErrOutputTooLarge, ErrMalformedOutput); a failure with none, such as invalid
 	// wasm or an unlinkable import, matches only this. A context deadline that
-	// passed also matches context.DeadlineExceeded.
+	// passed also matches context.DeadlineExceeded. A Host call that fails closed
+	// during the handshake (see ErrCall) surfaces here with its own sentinel.
 	ErrHandshake = errors.New("connector handshake failed")
 	// ErrCall marks a failed connector_call. It wraps the specific cause, which
 	// still matches its own sentinel: ErrBudget, ErrTrap, ErrMemoryCap,
 	// ErrOutputTooLarge, ErrMalformedOutput (a malformed exchange, response or
-	// result), ErrExport (the module lacks the call exports or gives them the
-	// wrong signature) or ErrUnusable. A call the caller's context cut off also
-	// matches that context's error. Every such guest failure but ErrExport closes
-	// the Connector. A Connector that answered with an error, or whose result failed
-	// the Driver's host-side validation (an unknown pattern reason, a ResolveExit
-	// answer that breaks the invariant), matches only ErrCall and stays usable;
-	// so does a request refused as ErrRequestTooLarge, which never reaches the guest.
+	// result, or a Host call with pointers outside module memory), ErrExport (the
+	// module lacks the call exports or gives them the wrong signature), ErrUnusable,
+	// or, for a network Connector, ErrRouteRefused, ErrResponseTooLarge or ErrAudit (a Host
+	// call failed closed; such a cause is not also ErrTrap). A call the caller's
+	// context cut off also matches that context's error. Every such guest failure
+	// but ErrExport closes the Connector. A Connector that answered with an error,
+	// or whose result failed the Driver's host-side validation (an unknown pattern
+	// reason, a ResolveExit answer that breaks the invariant), matches only ErrCall
+	// and stays usable; so does a request refused as ErrRequestTooLarge, which
+	// never reaches the guest.
 	ErrCall = errors.New("connector call failed")
 	// ErrExport marks an export that is missing or lacks the signature the ABI
 	// gives it: connector_handshake takes nothing and returns an i64,
@@ -206,6 +210,13 @@ type Connector struct {
 	mod    api.Module
 	mem    api.Memory
 	memCap *capAllocator
+	// network is the grant LoadNetwork gave, nil for Load.
+	network *Network
+	// hostErr is a Host call's fatal failure, set just before it panics to unwind
+	// the guest; invoke reports it in place of the trap, and call reads it to
+	// tell an already-audited failure from one it must audit. Reset by each
+	// invoke. Guarded by mu.
+	hostErr error
 	// mu serializes guest calls, since a wazero module instance is not safe for
 	// concurrent use, and guards dead.
 	mu   sync.Mutex
@@ -257,9 +268,13 @@ func (c *Connector) applyLimits(ctx context.Context, l limits) (context.Context,
 // several invokes can share one.
 func (c *Connector) invoke(ctx context.Context, fn api.Function, name string, args ...uint64) ([]uint64, error) {
 	c.memCap.hit = false // a refusal the guest survived in an earlier call is not this call's cause
+	c.hostErr = nil
 	res, err := fn.Call(ctx, args...)
 	if err == nil {
 		return res, nil
+	}
+	if c.hostErr != nil {
+		return nil, fmt.Errorf("%s: %w", name, c.hostErr)
 	}
 	// With WithCloseOnContextDone a call cut off by its context surfaces as a
 	// sys.ExitError and closes the module, so the context is checked before the
@@ -413,6 +428,11 @@ func (c *Connector) call(ctx context.Context, method string, params, result any)
 	if err != nil {
 		c.dead = true
 		c.err = fail(err)
+		// A Host call's fatal failure was audited where it happened; any other
+		// failed call (a rejected result, a trap, a budget or memory limit) has not.
+		if c.network != nil && c.hostErr == nil {
+			c.network.recordFailure(DecisionFailed, c.err)
+		}
 		// Not ctx: a cancelled caller must not stop the module being released.
 		_ = c.rt.Close(context.WithoutCancel(ctx))
 		return c.err
@@ -496,8 +516,9 @@ type handshake struct {
 // The sandbox grants nothing: wazero's ModuleConfig defaults to no filesystem,
 // environment, arguments or stdio and to fake clocks and a deterministic random
 // source, and WASI is the only host module instantiated, so a Connector
-// importing anything else fails to link. A Driver Connector must stay granted
-// no Host calls (ADR 0073 rule 2) when backend Host calls arrive. Memory and
+// importing anything else fails to link. A Driver Connector stays granted no
+// Host calls (ADR 0073 rule 2): only a network Connector loaded with LoadNetwork
+// gets spindrift.http_request. Memory and
 // table minimums and each function frame's slots (parameters, locals and
 // operand stack) are capped, reference types, SIMD and multi-value are off (so
 // table.grow does not compile) and every call, _initialize included, runs under
@@ -506,7 +527,22 @@ type handshake struct {
 func Load(ctx context.Context, wasm []byte) (*Connector, error) {
 	// The interpreter, not wazero's compiler: its per-line cost is well inside
 	// the heartbeat's line rate (ADR 0073, amendment for #6798).
-	return loadWith(ctx, wasm, wazero.NewRuntimeConfigInterpreter(), nil)
+	return loadWith(ctx, wasm, wazero.NewRuntimeConfigInterpreter(), nil, nil)
+}
+
+// LoadNetwork is Load for a network Connector (ADR 0073): it also links the one
+// Host call spindrift.http_request, served by n, which must name the Connector,
+// carry a valid Route table and have an Audit log. A config that does not is
+// refused before the module compiles, with ErrRouteTable for the routes. The
+// interpreter runs it as in Load.
+func LoadNetwork(ctx context.Context, wasm []byte, n Network) (*Connector, error) {
+	if n.Name == "" || n.Audit == nil {
+		return nil, errors.New("connector network grant needs a name and an audit log")
+	}
+	if err := ValidateRoutes(n.Routes); err != nil {
+		return nil, err
+	}
+	return loadWith(ctx, wasm, wazero.NewRuntimeConfigInterpreter(), nil, &n)
 }
 
 // LoadCompiled is Load under wazero's compiler where the platform has one,
@@ -526,11 +562,11 @@ func LoadCompiled(ctx context.Context, wasm []byte, cacheDir string) (*Connector
 			cfg = cfg.WithCompilationCache(cache)
 		}
 	}
-	return loadWith(ctx, wasm, cfg, cache)
+	return loadWith(ctx, wasm, cfg, cache, nil)
 }
 
-// loadWith takes ownership of cache, which may be nil.
-func loadWith(ctx context.Context, wasm []byte, cfg wazero.RuntimeConfig, cache wazero.CompilationCache) (*Connector, error) {
+// loadWith takes ownership of cache, which may be nil. network is the Host call grant, nil for none.
+func loadWith(ctx context.Context, wasm []byte, cfg wazero.RuntimeConfig, cache wazero.CompilationCache, network *Network) (*Connector, error) {
 	// Reference types are off because table.grow is uncapped and one
 	// uninterruptible host operation. SIMD and multi-value are off so every value
 	// and block type takes one slot, which lets checkDeclaredSizes bound a frame's
@@ -540,7 +576,7 @@ func loadWith(ctx context.Context, wasm []byte, cfg wazero.RuntimeConfig, cache 
 	cfg = cfg.WithCloseOnContextDone(true).
 		WithCoreFeatures(api.CoreFeaturesV2 &^ (api.CoreFeatureReferenceTypes | api.CoreFeatureSIMD | api.CoreFeatureMultiValue))
 	rt := wazero.NewRuntimeWithConfig(ctx, cfg)
-	c := &Connector{rt: rt, memCap: &capAllocator{ceiling: memoryCapBytes}}
+	c := &Connector{rt: rt, memCap: &capAllocator{ceiling: memoryCapBytes}, network: network}
 	h, err := c.load(ctx, wasm)
 	if err == nil {
 		err = CheckProtocol(h.ProtocolVersion)
@@ -561,6 +597,11 @@ func (c *Connector) load(ctx context.Context, wasm []byte) (*handshake, error) {
 	fail := func(err error) (*handshake, error) { return nil, fmt.Errorf("%w: %w", ErrHandshake, err) }
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, c.rt); err != nil {
 		return fail(err)
+	}
+	if c.network != nil {
+		if err := c.instantiateNetwork(ctx); err != nil {
+			return fail(err)
+		}
 	}
 	if err := checkDeclaredSizes(wasm); err != nil {
 		return fail(err)

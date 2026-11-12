@@ -39,12 +39,28 @@ type dataSeg struct {
 // a () -> () function, so the exports' indexes follow them. Unlike wasmModule
 // it can place bytes in memory, so a handshake can be served.
 func guestModule(imports [][2]string, data []dataSeg, fns ...guestFn) []byte {
+	typed := make([]guestImport, len(imports))
+	for i, imp := range imports {
+		typed[i] = guestImport{module: imp[0], name: imp[1]}
+	}
+	return guestModuleWith(typed, data, fns...)
+}
+
+// guestImport is a function import with its own signature.
+type guestImport struct {
+	module, name    string
+	params, results []byte
+}
+
+// guestModuleWith is guestModule for imports that take parameters or return
+// values; each import's type follows the exports' own.
+func guestModuleWith(imports []guestImport, data []dataSeg, fns ...guestFn) []byte {
 	vec := func(b []byte) []byte { return append(uleb(len(b)), b...) }
 	section := func(id byte, content []byte) []byte {
 		return append(append([]byte{id}, uleb(len(content))...), content...)
 	}
 	m := []byte("\x00asm\x01\x00\x00\x00")
-	types := append(uleb(1+len(fns)), 0x60, 0, 0)
+	types := []byte{0x60, 0, 0} // type 0: () -> (), then one per export, then one per import
 	funcs := uleb(len(fns))
 	exports := uleb(len(fns) + 1)
 	code := uleb(len(fns))
@@ -55,12 +71,15 @@ func guestModule(imports [][2]string, data []dataSeg, fns ...guestFn) []byte {
 		code = append(code, vec(append(append([]byte{0}, f.body...), 0x0b))...)
 	}
 	exports = append(append(exports, vec([]byte("memory"))...), 2, 0)
-	m = append(m, section(1, types)...)
+	for _, imp := range imports {
+		types = append(append(append(types, 0x60), vec(imp.params)...), vec(imp.results)...)
+	}
+	m = append(m, section(1, append(uleb(1+len(fns)+len(imports)), types...))...)
 	if len(imports) > 0 {
 		imps := uleb(len(imports))
-		for _, imp := range imports {
-			imps = append(append(imps, vec([]byte(imp[0]))...), vec([]byte(imp[1]))...)
-			imps = append(imps, 0, 0)
+		for i, imp := range imports {
+			imps = append(append(imps, vec([]byte(imp.module))...), vec([]byte(imp.name))...)
+			imps = append(append(imps, 0), uleb(1+len(fns)+i)...)
 		}
 		m = append(m, section(2, imps)...)
 	}

@@ -34,7 +34,8 @@ var (
 	// credential could not be resolved, or the transport failed before or while
 	// the response body arrived.
 	ErrHTTPSend = errors.New("connector http request failed")
-	// ErrResponseTooLarge marks a response body over maxHTTPResponse.
+	// ErrResponseTooLarge marks a response body over the guest's response buffer
+	// or maxHTTPResponse, whichever is smaller.
 	ErrResponseTooLarge = errors.New("connector http response too large")
 	// ErrAudit marks a request the audit log could not record. The answer is
 	// withheld and the call fails closed: an unaudited request must not succeed.
@@ -76,31 +77,35 @@ func (r Route) validate() error {
 	return registryvocab.CheckPathPattern(r.Path)
 }
 
+// Decision is what the host did with a request.
+type Decision string
+
 // The decisions an AuditEntry records.
 const (
-	DecisionSent    = "sent"
-	DecisionRefused = "refused"
-	DecisionFailed  = "failed"
+	DecisionSent    Decision = "sent"
+	DecisionRefused Decision = "refused"
+	DecisionFailed  Decision = "failed"
 )
 
 // AuditEntry is one line of the network audit log: what a Connector asked for
 // and what the host did with it. Route is empty when none matched; Status is 0
 // when the request got no response, else the server's status even if the call
-// then failed. Size counts the body bytes read: for a refused oversized response
-// that is the cap plus one, though none reach the guest.
-// A request has one entry; a Connector whose call then fails closed on a
-// result the host rejects gets a further DecisionFailed one.
+// then failed. Size counts the body bytes read: for an oversized response
+// (DecisionFailed) that is the cap, min(response buffer, maxHTTPResponse), plus
+// one, though none reach the guest.
+// A request has one entry; any failed call of a network Connector whose failure
+// no Host call already audited gets a further DecisionFailed one.
 type AuditEntry struct {
-	Connector string `json:"connector"`
-	Route     string `json:"route"`
-	Method    string `json:"method"`
-	Host      string `json:"host"`
-	Path      string `json:"path"`
-	Query     string `json:"query,omitempty"`
-	Status    int    `json:"status"`
-	Size      int64  `json:"size"`
-	Decision  string `json:"decision"` // a Decision* constant
-	Reason    string `json:"reason,omitempty"`
+	Connector string   `json:"connector"`
+	Route     string   `json:"route"`
+	Method    string   `json:"method"`
+	Host      string   `json:"host"`
+	Path      string   `json:"path"`
+	Query     string   `json:"query,omitempty"`
+	Status    int      `json:"status"`
+	Size      int64    `json:"size"`
+	Decision  Decision `json:"decision"`
+	Reason    string   `json:"reason,omitempty"`
 }
 
 // AuditLog writes AuditEntry records as JSON lines. Each record is one Write
@@ -126,6 +131,12 @@ func (l *AuditLog) Record(e AuditEntry) error {
 	defer l.mu.Unlock()
 	_, err = l.w.Write(line)
 	return err
+}
+
+// recordFailure audits d for a caller already failing, so the write error has
+// nowhere to go.
+func (n *Network) recordFailure(d Decision, err error) {
+	_ = n.Audit.Record(AuditEntry{Connector: n.Name, Decision: d, Reason: err.Error()})
 }
 
 // Network is the host side of a network Connector's single Host call,
