@@ -1,5 +1,5 @@
 // Package connector is the Connector author's side of the Connector protocol
-// (version 0.1.1, ADR 0073): it hides the wasm export plumbing and the JSON
+// (version 0.2.0, ADR 0073): it hides the wasm export plumbing and the JSON
 // encoding so an author only declares capabilities.
 //
 // A Connector is built as a wasip1 reactor
@@ -14,8 +14,8 @@ import (
 )
 
 // protocolVersion is a var, not a const, so a test fixture can override it
-// with -ldflags=-X spindrift.dev/sdk/connector.protocolVersion=0.2.0.
-var protocolVersion = "0.1.1"
+// with -ldflags=-X spindrift.dev/sdk/connector.protocolVersion=0.3.0.
+var protocolVersion = "0.2.0"
 
 var capabilities []string
 

@@ -2800,7 +2800,7 @@ done | sort -r | awk -F'\t' '
 
 The protocol, not the SDK, is the contract between core and a Connector
 ([ADR 0073](adr/0073-backends-and-drivers-are-trust-no-one-wasm-connectors.md)).
-This is protocol version **0.1.1**. The host is
+This is protocol version **0.2.0**. The host is
 [`connectorhost`](../cmd/launcher/internal/connectorhost/connectorhost.go).
 
 - **Module.** A Connector is a WebAssembly reactor module built with the
@@ -2822,7 +2822,7 @@ This is protocol version **0.1.1**. The host is
   bytes in the module's memory export named `memory`. The result is:
 
   ```json
-  {"protocolVersion": "0.1.1", "capabilities": []}
+  {"protocolVersion": "0.2.0", "capabilities": []}
   ```
 
   `capabilities` is an array of strings, `[]` when empty; both fields are
@@ -3050,8 +3050,8 @@ This is protocol version **0.1.1**. The host is
 - **Versioning.** The protocol version is `0.y.z` and independent of
   spindrift's release version. A `0.y` bump is breaking; a `0.y.z` bump is
   additive. Core accepts its current `0.y` and the one before it, so today
-  0.1.z and 0.0.z. Any other version is refused at load with
-  `connector protocol "<version>" is outside core's supported range 0.0.x to 0.1.x (core speaks 0.1.1)`,
+  0.2.z and 0.1.z. Any other version is refused at load with
+  `connector protocol "<version>" is outside core's supported range 0.1.x to 0.2.x (core speaks 0.2.0)`,
   naming the Connector's version, core's range and core's own version. A
   module that is not valid wasm, imports something ungranted, declares sizes
   over the caps above, lacks the export or the `memory` export, has the wrong

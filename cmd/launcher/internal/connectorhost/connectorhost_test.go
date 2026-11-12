@@ -61,8 +61,8 @@ func TestLoadAcceptsPreviousMinor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.ProtocolVersion != "0.0.3" {
-		t.Errorf("ProtocolVersion = %q, want 0.0.3", c.ProtocolVersion)
+	if c.ProtocolVersion != "0.1.1" {
+		t.Errorf("ProtocolVersion = %q, want 0.1.1", c.ProtocolVersion)
 	}
 }
 
@@ -75,10 +75,10 @@ func TestLoadRefusesFutureProtocol(t *testing.T) {
 	if !errors.As(err, &pe) {
 		t.Fatalf("err = %v, want a *ProtocolError", err)
 	}
-	if pe.Connector != "0.2.0" {
-		t.Errorf("ProtocolError.Connector = %q, want 0.2.0", pe.Connector)
+	if pe.Connector != "0.3.0" {
+		t.Errorf("ProtocolError.Connector = %q, want 0.3.0", pe.Connector)
 	}
-	for _, want := range []string{"0.2.0", "0.0.x", "0.1.x", connectorhost.ProtocolVersion} {
+	for _, want := range []string{"0.3.0", "0.1.x", "0.2.x", connectorhost.ProtocolVersion} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not name %q", err, want)
 		}
@@ -131,12 +131,12 @@ func TestLoadRejectsGarbage(t *testing.T) {
 }
 
 func TestCheckProtocolWindow(t *testing.T) {
-	for _, v := range []string{"0.1.0", "0.1.9", "0.0.0", "0.0.3"} {
+	for _, v := range []string{"0.1.0", "0.1.1", "0.1.9", "0.2.0", "0.2.7"} {
 		if err := connectorhost.CheckProtocol(v); err != nil {
 			t.Errorf("CheckProtocol(%q) = %v, want nil", v, err)
 		}
 	}
-	for _, v := range []string{"0.2.0", "1.0.0", "1.1.0", "0.1", "v0.1.0", "0.1.0-rc1", "0.1.x", "", "0.01.0", "0.1.00", "00.1.0", "0.+1.0", "0..0", "0.1.0.0"} {
+	for _, v := range []string{"0.0.0", "0.0.3", "0.3.0", "1.0.0", "1.1.0", "0.1", "v0.1.0", "0.1.0-rc1", "0.1.x", "", "0.01.0", "0.1.00", "00.1.0", "0.+1.0", "0..0", "0.1.0.0"} {
 		if err := connectorhost.CheckProtocol(v); !errors.Is(err, connectorhost.ErrProtocolUnsupported) {
 			t.Errorf("CheckProtocol(%q) = %v, want ErrProtocolUnsupported", v, err)
 		}
