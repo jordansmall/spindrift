@@ -395,6 +395,12 @@ func encodeRequest(method string, params any) ([]byte, error) {
 	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }
 
+// Call sends one request for method and decodes its result into result (nil to
+// ignore it); see call for the failure contract.
+func (c *Connector) Call(ctx context.Context, method string, params, result any) error {
+	return c.call(ctx, method, params, result)
+}
+
 // call sends one request through connector_call and decodes the response's
 // result into result, which may be nil to ignore it. A failure comes back
 // wrapping ErrCall and, for a guest failure, its own sentinel too.
