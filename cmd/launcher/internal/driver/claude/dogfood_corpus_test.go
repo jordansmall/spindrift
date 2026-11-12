@@ -14,12 +14,8 @@ import (
 // case name.
 func dogfoodLines(t testing.TB) map[string][][]byte {
 	t.Helper()
-	paths, err := filepath.Glob(filepath.Join("testdata", "dogfood", "*", "pass.jsonl"))
-	if err != nil || len(paths) == 0 {
-		t.Fatalf("dogfood pass logs: %v (found %d)", err, len(paths))
-	}
 	out := map[string][][]byte{}
-	for _, p := range paths {
+	for _, p := range passLogPaths(t, "dogfood") {
 		data, err := os.ReadFile(p)
 		if err != nil {
 			t.Fatal(err)
