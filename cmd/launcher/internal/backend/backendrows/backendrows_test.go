@@ -39,13 +39,15 @@ func row(name string, routes ...connectorhost.Route) backendrows.Row {
 	return backendrows.Row{Name: name, Module: "/x/" + name + ".wasm", Routes: routes, CredentialEnv: "TOKEN"}
 }
 
+func noEnv(string) string { return "" }
+
 var getRepos = connectorhost.Route{Method: "GET", Host: "api.fixture.test", Path: "/repos"}
 
 func TestUseRoundTripsRowsThroughLookup(t *testing.T) {
 	isolate(t)
 	raw := json.RawMessage(`[{"name":"fixture","module":"/nix/store/x-network.wasm",` +
 		`"routes":[{"method":"GET","host":"api.fixture.test","path":"/repos"}],"credentialEnv":"FIXTURE_TOKEN"}]`)
-	if err := backendrows.Use(raw); err != nil {
+	if err := backendrows.Use(raw, noEnv); err != nil {
 		t.Fatal(err)
 	}
 	got, ok := backendrows.Lookup("fixture")
@@ -65,10 +67,10 @@ func TestUseWithoutRowsClearsTheEarlierRows(t *testing.T) {
 	for name, raw := range map[string]json.RawMessage{"nil": nil, "empty": {}, "whitespace": []byte("  \n"), "empty array": []byte("[]")} {
 		t.Run(name, func(t *testing.T) {
 			isolate(t)
-			if err := backendrows.Use(rows(t, []backendrows.Row{row("x", getRepos)})); err != nil {
+			if err := backendrows.Use(rows(t, []backendrows.Row{row("x", getRepos)}), noEnv); err != nil {
 				t.Fatal(err)
 			}
-			if err := backendrows.Use(raw); err != nil {
+			if err := backendrows.Use(raw, noEnv); err != nil {
 				t.Fatal(err)
 			}
 			if _, ok := backendrows.Lookup("x"); ok {
@@ -101,7 +103,7 @@ func TestUseRefusesInvalidRowsNamingTheBackend(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			isolate(t)
-			err := backendrows.Use(tc.raw)
+			err := backendrows.Use(tc.raw, noEnv)
 			if err == nil {
 				t.Fatal("Use() = nil, want an error")
 			}
@@ -122,10 +124,10 @@ func TestUseRefusesInvalidRowsNamingTheBackend(t *testing.T) {
 
 func TestUseReplacesTheEarlierRows(t *testing.T) {
 	isolate(t)
-	if err := backendrows.Use(rows(t, []backendrows.Row{row("x", getRepos), row("y", getRepos)})); err != nil {
+	if err := backendrows.Use(rows(t, []backendrows.Row{row("x", getRepos), row("y", getRepos)}), noEnv); err != nil {
 		t.Fatal(err)
 	}
-	if err := backendrows.Use(rows(t, []backendrows.Row{row("x", getRepos)})); err != nil {
+	if err := backendrows.Use(rows(t, []backendrows.Row{row("x", getRepos)}), noEnv); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := backendrows.Lookup("x"); !ok {
@@ -138,7 +140,7 @@ func TestUseReplacesTheEarlierRows(t *testing.T) {
 
 func TestUseAppliesNothingWhenAnyRowIsInvalid(t *testing.T) {
 	isolate(t)
-	err := backendrows.Use(rows(t, []backendrows.Row{row("good", getRepos), {Name: "bad"}}))
+	err := backendrows.Use(rows(t, []backendrows.Row{row("good", getRepos), {Name: "bad"}}), noEnv)
 	if err == nil {
 		t.Fatal("Use() = nil, want an error")
 	}
@@ -156,7 +158,7 @@ func TestUseValidatesAcceptedRoutesWhenPresent(t *testing.T) {
 	t.Run("blanket path is refused and applies nothing", func(t *testing.T) {
 		isolate(t)
 		blanket := connectorhost.Route{Method: "GET", Host: "api.fixture.test", Path: "/"}
-		err := backendrows.Use(rows(t, []backendrows.Row{row("good", getRepos), withAccepted("broad", blanket)}))
+		err := backendrows.Use(rows(t, []backendrows.Row{row("good", getRepos), withAccepted("broad", blanket)}), noEnv)
 		if err == nil {
 			t.Fatal("Use() = nil, want an error")
 		}
@@ -174,7 +176,7 @@ func TestUseValidatesAcceptedRoutesWhenPresent(t *testing.T) {
 	})
 	t.Run("empty and valid baselines pass", func(t *testing.T) {
 		isolate(t)
-		if err := backendrows.Use(rows(t, []backendrows.Row{withAccepted("none"), withAccepted("some", getRepos)})); err != nil {
+		if err := backendrows.Use(rows(t, []backendrows.Row{withAccepted("none"), withAccepted("some", getRepos)}), noEnv); err != nil {
 			t.Fatalf("Use() = %v", err)
 		}
 	})
@@ -331,7 +333,7 @@ func TestUseAcceptsAcceptedRoutesAndAllListsByName(t *testing.T) {
 		`{"name":"zeta","module":"/x/z.wasm","routes":[{"method":"GET","host":"h","path":"/a"}],"credentialEnv":"T","acceptedRoutes":[]},` +
 		`{"name":"alpha","module":"/x/a.wasm","routes":[{"method":"GET","host":"h","path":"/a"}],"credentialEnv":"T",` +
 		`"acceptedRoutes":[{"method":"GET","host":"h","path":"/a"}]}]`)
-	if err := backendrows.Use(raw); err != nil {
+	if err := backendrows.Use(raw, noEnv); err != nil {
 		t.Fatal(err)
 	}
 	all := backendrows.All()
@@ -340,5 +342,104 @@ func TestUseAcceptsAcceptedRoutesAndAllListsByName(t *testing.T) {
 	}
 	if len(all[0].AcceptedRoutes) != 1 || len(all[1].AcceptedRoutes) != 0 {
 		t.Errorf("AcceptedRoutes not decoded: %+v", all)
+	}
+}
+
+func baseRow(routes ...connectorhost.Route) backendrows.Row {
+	r := row("site", routes...)
+	r.BaseEnv = "SITE_BASE_URL"
+	return r
+}
+
+func envOf(base string) func(string) string {
+	return func(k string) string {
+		if k == "SITE_BASE_URL" {
+			return base
+		}
+		return ""
+	}
+}
+
+func TestUseSubstitutesTheConfiguredBaseURLIntoRoutes(t *testing.T) {
+	search := connectorhost.Route{Method: "GET", Host: "{base}", Path: "/rest/api/3/search"}
+	cases := map[string]struct {
+		base string
+		want connectorhost.Route
+	}{
+		"bare host":        {"https://acme.example.net", connectorhost.Route{Method: "GET", Host: "acme.example.net", Path: "/rest/api/3/search"}},
+		"trailing slash":   {"https://acme.example.net/", connectorhost.Route{Method: "GET", Host: "acme.example.net", Path: "/rest/api/3/search"}},
+		"path prefix":      {"https://acme.example.net/jira", connectorhost.Route{Method: "GET", Host: "acme.example.net", Path: "/jira/rest/api/3/search"}},
+		"prefix and slash": {"https://acme.example.net:8443/jira/", connectorhost.Route{Method: "GET", Host: "acme.example.net:8443", Path: "/jira/rest/api/3/search"}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			r := baseRow(search, getRepos)
+			r.AcceptedRoutes = []connectorhost.Route{search}
+			if err := backendrows.Use(rows(t, []backendrows.Row{r}), envOf(tc.base)); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := backendrows.Lookup("site")
+			if len(got.Routes) != 2 || got.Routes[0] != tc.want || got.Routes[1] != getRepos {
+				t.Errorf("Routes = %v, want [%v %v]", got.Routes, tc.want, getRepos)
+			}
+			if len(got.AcceptedRoutes) != 1 || got.AcceptedRoutes[0] != tc.want {
+				t.Errorf("AcceptedRoutes = %v, want [%v]", got.AcceptedRoutes, tc.want)
+			}
+			if w := got.Widening(); len(w) != 1 || w[0] != getRepos {
+				t.Errorf("Widening() = %v, want only %v", w, getRepos)
+			}
+		})
+	}
+}
+
+func TestUseRefusesAnInvalidBaseURLNamingTheBackend(t *testing.T) {
+	search := connectorhost.Route{Method: "GET", Host: "{base}", Path: "/rest"}
+	cases := map[string]struct {
+		row  backendrows.Row
+		base string
+	}{
+		"unset":            {baseRow(search), ""},
+		"plaintext":        {baseRow(search), "http://acme.example.net"},
+		"no scheme":        {baseRow(search), "acme.example.net"},
+		"userinfo":         {baseRow(search), "https://u:p@acme.example.net"},
+		"query":            {baseRow(search), "https://acme.example.net/?x=1"},
+		"fragment":         {baseRow(search), "https://acme.example.net/#x"},
+		"escaped path":     {baseRow(search), "https://acme.example.net/ji%2Fra"},
+		"bad escape":       {baseRow(search), "https://u:p%zz@acme.example.net"},
+		"empty host":       {baseRow(search), "https:///jira"},
+		"malformed host":   {baseRow(search), "https://acme.example.net:"},
+		"unparseable":      {baseRow(search), "https://acme example.net"},
+		"host with no env": {row("site", search), "https://acme.example.net"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			err := backendrows.Use(rows(t, []backendrows.Row{row("good", getRepos), tc.row}), envOf(tc.base))
+			if err == nil {
+				t.Fatal("Use() = nil, want an error")
+			}
+			if !strings.Contains(err.Error(), `backend "site"`) {
+				t.Errorf("err = %q, want it to name the backend", err)
+			}
+			if strings.Contains(err.Error(), "p%zz") {
+				t.Errorf("err = %q, want it to leave the base URL value out", err)
+			}
+			if _, ok := backendrows.Lookup("good"); ok {
+				t.Error("good row stored although the document was refused")
+			}
+		})
+	}
+}
+
+func TestUseMapsARootBaseRouteToTheBarePrefix(t *testing.T) {
+	isolate(t)
+	root := connectorhost.Route{Method: "GET", Host: "{base}", Path: "/"}
+	if err := backendrows.Use(rows(t, []backendrows.Row{baseRow(root)}), envOf("https://acme.example.net/jira")); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := backendrows.Lookup("site")
+	if want := (connectorhost.Route{Method: "GET", Host: "acme.example.net", Path: "/jira"}); got.Routes[0] != want {
+		t.Errorf("Routes[0] = %v, want %v", got.Routes[0], want)
 	}
 }

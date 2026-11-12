@@ -106,3 +106,17 @@ func (s launcherKnobSource) HostGitConfig(env string) string {
 func loadSchemaConfig() inputdoc.Knobs {
 	return inputdoc.LoadKnobs(launcherKnobSource{launcherInput.Source()})
 }
+
+// backendRowSetting resolves the knob a backend row names as its baseEnv. A
+// schema knob resolves through the flag, document and default tiers; a
+// Connector's own knob is in no document, so it comes from the environment,
+// where its credential lives too. The daemon's backendRowSetting
+// (daemon/demand.go) reads the environment first, then the document.
+func backendRowSetting(r inputdoc.Resolved, env map[string]string) func(string) string {
+	return func(key string) string {
+		if _, ok := inputdoc.SchemaFlag(key); ok {
+			return r.Source().String(key)
+		}
+		return env[key]
+	}
+}

@@ -823,7 +823,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if err := driverrows.Use(doc.Drivers); err != nil {
 		return refuse(err)
 	}
-	if err := backendrows.Use(doc.Backends); err != nil {
+	if err := backendrows.Use(doc.Backends, func(k string) string { return backendRowSetting(doc, stderr, k) }); err != nil {
 		return refuse(err)
 	}
 

@@ -2323,7 +2323,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 			return configErrorCode(verb, 1)
 		}
 	}
-	resolved, err := inputdoc.Resolve(schemaArgs, doc, processEnv())
+	env := processEnv()
+	resolved, err := inputdoc.Resolve(schemaArgs, doc, env)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		if errors.Is(err, inputdoc.ErrConfigInvalid) {
@@ -2335,7 +2336,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return configErrorCode(verb, int(exitcode.ConfigInvalid))
 	}
-	if err := backendrows.Use(resolved.Backends); err != nil {
+	if err := backendrows.Use(resolved.Backends, backendRowSetting(resolved, env)); err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return configErrorCode(verb, int(exitcode.ConfigInvalid))
 	}

@@ -16,18 +16,21 @@ import (
 )
 
 // knobEnvGuardAllowlist maps a FuncDecl name to the normalised selector
-// (see selectorLabel) it is allowed a non-literal first arg for. Two funcs
+// (see selectorLabel) it is allowed a non-literal first arg for. Three funcs
 // qualify. warnStrippedChildEnv replays the document's own settings keys to
 // warn about them, it reads no knob. childEnvValue is the daemon's
 // backendkit.Lookup: the Strategy names its own knobs, so the key is not
 // literal here, and clearKnobEnvT covers them by recording the keys the
-// registered Strategies read. The exemption covers only the plain
-// package-level func's own direct body — not a method of the same
-// name (see fd.Recv below), and not a func literal nested inside it,
+// registered Strategies read. backendRowSetting resolves the knob a backend
+// row names as its baseEnv: the row names its own knob, so the key is not
+// literal, and there is no registered set to record. The exemption covers
+// only the plain package-level func's own direct body — not a method of the
+// same name (see fd.Recv below), and not a func literal nested inside it,
 // which gets no exemption either.
 var knobEnvGuardAllowlist = map[string]string{
 	"warnStrippedChildEnv": "os.Getenv",
 	"childEnvValue":        "os.Getenv",
+	"backendRowSetting":    ".Lookup",
 }
 
 // knobEnvGuardMethods lists the inputdoc.Document knob readers this guard

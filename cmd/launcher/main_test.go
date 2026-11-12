@@ -6940,6 +6940,44 @@ func TestMainRun_InputDocument_AppliesBackendRows(t *testing.T) {
 	}
 }
 
+// A row's baseEnv may name a schema knob (resolved through the document) or a
+// Connector's own knob, which no document carries and only the environment
+// holds, as it does the row's credential.
+func TestMainRun_InputDocument_BackendRowBaseEnvResolution(t *testing.T) {
+	cases := map[string]struct {
+		baseEnv  string
+		settings string
+		env      string
+	}{
+		"connector's own knob from the environment": {baseEnv: "PROBE_BASE_URL", settings: `{}`, env: "PROBE_BASE_URL"},
+		"schema knob from the document":             {baseEnv: "JIRA_BASE_URL", settings: `{"JIRA_BASE_URL":"https://acme.example/jira"}`},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Cleanup(backendrows.Snapshot())
+			if tc.env != "" {
+				t.Setenv(tc.env, "https://acme.example/jira")
+			}
+			doc := `{"settings":` + tc.settings + `,"artifacts":{},"backends":[{"name":"probe","module":"/nonexistent.wasm",` +
+				`"credentialEnv":"PROBE_TOKEN","baseEnv":"` + tc.baseEnv + `",` +
+				`"routes":[{"method":"GET","host":"{base}","path":"/rest/api/3/issue"}]}]}`
+			docPath := filepath.Join(t.TempDir(), "input.json")
+			if err := os.WriteFile(docPath, []byte(doc), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			mainRunT(t, []string{"--input", docPath, "research"}, &stdout, &stderr)
+			row, ok := backendrows.Lookup("probe")
+			if !ok {
+				t.Fatalf("backendrows.Lookup(probe) = false; stderr=%s", stderr.String())
+			}
+			if len(row.Routes) != 1 || row.Routes[0].Host != "acme.example" || row.Routes[0].Path != "/jira/rest/api/3/issue" {
+				t.Errorf("routes = %+v, want host acme.example and path /jira/rest/api/3/issue", row.Routes)
+			}
+		})
+	}
+}
+
 func TestMainRun_InputDocument_InvalidDriverRowsAreConfigInvalid(t *testing.T) {
 	docPath := filepath.Join(t.TempDir(), "input.json")
 	if err := os.WriteFile(docPath, []byte(`{"settings":{},"artifacts":{},"drivers":"nope"}`), 0o644); err != nil {
