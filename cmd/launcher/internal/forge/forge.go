@@ -4,10 +4,13 @@
 package forge
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // ErrMergeConflict is returned by Merge when the PR branch conflicts with the
@@ -281,9 +284,40 @@ const (
 )
 
 // MaxFailureDetailBytes bounds the string RenderFailureDetail returns, so a
-// PR with many failing checks, or long check-run summaries or status
-// descriptions, cannot blow the fix Box's env/prompt budget.
-const MaxFailureDetailBytes = 4000
+// PR with many failing checks, long summaries, or job logs cannot blow the fix
+// Box's env/prompt budget. It is injected as one env string, so it must stay
+// far below Linux's 128 KiB MAX_ARG_STRLEN. It leaves room for a few
+// MaxLogExcerptBytes excerpts.
+const MaxFailureDetailBytes = 12000
+
+// MaxLogExcerptBytes bounds the slice of one failing job's log that
+// RenderFailureDetail keeps; failures print last, so it keeps the tail.
+const MaxLogExcerptBytes = 4000
+
+// JobLogKeepBytes is the tail of a job log an adapter hands the renderer: over
+// MaxLogExcerptBytes so RenderFailureDetail still sees a log past its cap and
+// says it trimmed, yet bounded however long the job ran.
+const JobLogKeepBytes = 2 * MaxLogExcerptBytes
+
+// TailBuffer is an io.Writer that keeps at least the last JobLogKeepBytes
+// written to it, so a job log can be streamed without being held whole. The
+// zero value is ready to use.
+type TailBuffer struct{ buf []byte }
+
+// Write appends p and drops older bytes once the buffer doubles. It never fails.
+func (t *TailBuffer) Write(p []byte) (int, error) {
+	t.buf = append(t.buf, p...)
+	// Trim only once the buffer doubles, so a run of small writes does not
+	// copy on every call.
+	if len(t.buf) > 2*JobLogKeepBytes {
+		t.buf = bytes.Clone(t.buf[len(t.buf)-JobLogKeepBytes:])
+	}
+	return len(p), nil
+}
+
+// String is the retained tail: everything written while that is under
+// 2*JobLogKeepBytes, else between JobLogKeepBytes and 2*JobLogKeepBytes bytes.
+func (t *TailBuffer) String() string { return string(t.buf) }
 
 // FailureDetailEntry is one failing check or status, normalized from an
 // adapter's native shape into the fields RenderFailureDetail formats.
@@ -291,27 +325,142 @@ type FailureDetailEntry struct {
 	Name    string
 	State   string
 	Summary string
+	Log     string // raw log text of the failing job; "" when the adapter has none
 }
 
-// RenderFailureDetail formats failing entries into a bounded report, truncated
-// to MaxFailureDetailBytes. Callers must filter entries down to failing ones
-// first.
+// MaxSummaryBytes and MaxNameBytes bound one entry's summary and name in
+// RenderFailureDetail, so a single verbose third-party check (CheckRun
+// summaries reach 64 KiB) cannot starve every job log of room. The head of a
+// summary is kept: it leads with the conclusion.
+const (
+	MaxSummaryBytes = 1000
+	MaxNameBytes    = 200
+)
+
+// minLogExcerptBytes is the least of a job log RenderFailureDetail will print;
+// an entry that cannot get at least this much is omitted, never shown with a
+// "last 0 bytes" excerpt.
+const minLogExcerptBytes = 400
+
+// RenderFailureDetail formats failing entries into a bounded report. Names and
+// summaries are capped (MaxNameBytes, MaxSummaryBytes); the room
+// MaxFailureDetailBytes leaves beyond the headers is split evenly across the
+// entries that have a log, each capped at MaxLogExcerptBytes, so every job
+// keeps the tail of its log where the error is. A trimmed excerpt says so,
+// naming its job and the cap it got. When the entries cannot all fit with at
+// least minLogExcerptBytes per log, the trailing ones are omitted whole and a
+// closing line names the first and counts them. Callers must filter entries
+// down to failing ones first.
 func RenderFailureDetail(entries []FailureDetailEntry) string {
-	var b strings.Builder
-	for _, e := range entries {
-		b.WriteString(e.Name)
-		b.WriteString(": ")
-		b.WriteString(e.State)
-		b.WriteString("\n")
+	const sep = "---\n"
+	names := make([]string, len(entries))
+	headers := make([]string, len(entries))
+	logs := make([]string, len(entries))
+	costs := make([]int, len(entries))
+	for i, e := range entries {
+		names[i] = capHead(e.Name, MaxNameBytes)
+		headers[i] = names[i] + ": " + e.State + "\n"
 		if e.Summary != "" {
-			b.WriteString(e.Summary)
+			headers[i] += capHead(e.Summary, MaxSummaryBytes) + "\n"
+		}
+		costs[i] = len(headers[i]) + len(sep)
+		// Kept as delivered: the trim notice compares against the adapter's cut
+		// log, so trailing whitespace must not hide a cut head.
+		if strings.TrimSpace(e.Log) != "" {
+			logs[i] = e.Log
+			// Reserve the widest excerpt notice and the line end.
+			costs[i] += len(excerptNotice(names[i], MaxFailureDetailBytes)) + 1
+		}
+	}
+	// fit counts the leading entries whose headers and minimum excerpts fit.
+	fit := func(limit int) (int, int, int) {
+		var n, fixed, logged int
+		for i := range entries {
+			need := fixed + costs[i] + (logged+min(1, len(logs[i])))*minLogExcerptBytes
+			if need > limit {
+				return n, fixed, logged
+			}
+			fixed += costs[i]
+			if logs[i] != "" {
+				logged++
+			}
+			n++
+		}
+		return n, fixed, logged
+	}
+	limit := MaxFailureDetailBytes
+	n, fixed, logged := fit(limit)
+	if n < len(entries) {
+		// Longest possible omission line: %q expands a NUL to four bytes, and
+		// capHead appends "...[cut]" to a name it cuts.
+		limit -= len(omitNotice(capHead(strings.Repeat("\x00", MaxNameBytes+1), MaxNameBytes), len(entries)))
+		n, fixed, logged = fit(limit)
+	}
+	excerptCap := MaxLogExcerptBytes
+	if logged > 0 {
+		excerptCap = min(excerptCap, (limit-fixed)/logged)
+	}
+
+	var b strings.Builder
+	for i := range n {
+		b.WriteString(headers[i])
+		if log := logs[i]; log != "" {
+			// Tail the log without its trailing whitespace so a whitespace-only
+			// last excerptCap bytes cannot leave the excerpt empty; the notice
+			// still tracks the delivered length.
+			excerpt := logTail(strings.TrimRightFunc(log, unicode.IsSpace), excerptCap)
+			if len(log) > excerptCap {
+				b.WriteString(excerptNotice(names[i], excerptCap))
+			}
+			b.WriteString(strings.TrimSpace(excerpt))
 			b.WriteString("\n")
 		}
-		b.WriteString("---\n")
+		b.WriteString(sep)
 	}
-	s := strings.TrimSpace(b.String())
-	if len(s) > MaxFailureDetailBytes {
-		s = s[:MaxFailureDetailBytes]
+	if n < len(entries) {
+		b.WriteString(omitNotice(names[n], len(entries)-n))
 	}
-	return s
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+func excerptNotice(name string, n int) string {
+	return fmt.Sprintf("[log excerpt for %q trimmed to its last %d bytes or fewer]\n", name, n)
+}
+
+func omitNotice(first string, n int) string {
+	return fmt.Sprintf("[%d further failing entries omitted to fit %d bytes, starting with %q]", n, MaxFailureDetailBytes, first)
+}
+
+// capHead returns s cut to at most n bytes on a rune boundary, marked when cut.
+func capHead(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return cutAtRune(s, n) + "...[cut]"
+}
+
+// logTail returns log's last limit or fewer bytes, starting on a rune
+// boundary and, when the cut falls inside a line, at the next line start.
+func logTail(log string, limit int) string {
+	if len(log) <= limit {
+		return log
+	}
+	tail := log[len(log)-limit:]
+	for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
+		tail = tail[1:]
+	}
+	if log[len(log)-len(tail)-1] != '\n' {
+		if i := strings.IndexByte(tail, '\n'); i >= 0 && i+1 < len(tail) {
+			tail = tail[i+1:]
+		}
+	}
+	return tail
+}
+
+// cutAtRune returns s[:n] backed off to a rune boundary.
+func cutAtRune(s string, n int) string {
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }

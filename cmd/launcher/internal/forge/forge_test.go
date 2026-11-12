@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -426,13 +427,231 @@ func TestRenderFailureDetail(t *testing.T) {
 		}
 	})
 
-	t.Run("truncates to MaxFailureDetailBytes", func(t *testing.T) {
+	t.Run("caps a huge summary to its head", func(t *testing.T) {
 		entries := []forge.FailureDetailEntry{
 			{Name: "huge", State: "FAILURE", Summary: strings.Repeat("x", forge.MaxFailureDetailBytes*2)},
 		}
 		got := forge.RenderFailureDetail(entries)
-		if len(got) != forge.MaxFailureDetailBytes {
-			t.Fatalf("len(got) = %d, want %d", len(got), forge.MaxFailureDetailBytes)
+		want := "huge: FAILURE\n" + strings.Repeat("x", forge.MaxSummaryBytes) + "...[cut]\n---"
+		if got != want {
+			t.Fatalf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("an oversized summary leaves every job a log excerpt", func(t *testing.T) {
+		entries := []forge.FailureDetailEntry{
+			{Name: "third-party", State: "FAILURE", Summary: strings.Repeat("s", 64<<10)},
+		}
+		for _, n := range []string{"job-1", "job-2", "job-3"} {
+			entries = append(entries, forge.FailureDetailEntry{
+				Name: n, State: "FAILURE",
+				Log: strings.Repeat("noise line\n", forge.MaxLogExcerptBytes) + "ERROR " + n,
+			})
+		}
+		got := forge.RenderFailureDetail(entries)
+		if len(got) > forge.MaxFailureDetailBytes {
+			t.Fatalf("len(got) = %d, want <= %d", len(got), forge.MaxFailureDetailBytes)
+		}
+		if strings.Contains(got, "last 0 bytes") {
+			t.Fatalf("a log was starved to nothing:\n%s", got)
+		}
+		for _, n := range []string{"job-1", "job-2", "job-3"} {
+			if want := "ERROR " + n + "\n"; !strings.Contains(got, want) {
+				t.Errorf("missing final line %q", want)
+			}
+		}
+	})
+
+	t.Run("a very long name stays within the bound", func(t *testing.T) {
+		entries := []forge.FailureDetailEntry{
+			{Name: strings.Repeat("n", forge.MaxFailureDetailBytes*2), State: "FAILURE", Log: strings.Repeat("log\n", 5000) + "ERROR end"},
+			{Name: strings.Repeat("世", forge.MaxFailureDetailBytes), State: "FAILURE", Log: "ERROR two"},
+		}
+		got := forge.RenderFailureDetail(entries)
+		if len(got) > forge.MaxFailureDetailBytes {
+			t.Fatalf("len(got) = %d, want <= %d", len(got), forge.MaxFailureDetailBytes)
+		}
+		if !utf8.ValidString(got) {
+			t.Fatal("invalid UTF-8")
+		}
+		if !strings.Contains(got, "ERROR end\n") || !strings.Contains(got, "ERROR two\n") {
+			t.Fatalf("lost a log tail:\n%s", got)
+		}
+	})
+
+	t.Run("shows the log excerpt after the summary", func(t *testing.T) {
+		entries := []forge.FailureDetailEntry{
+			{Name: "build", State: "FAILURE", Summary: "1 error", Log: "compiling\nerror: boom\n"},
+		}
+		got := forge.RenderFailureDetail(entries)
+		want := "build: FAILURE\n1 error\ncompiling\nerror: boom\n---"
+		if got != want {
+			t.Fatalf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("trims a long log to its tail and names the job", func(t *testing.T) {
+		log := "first\n" + strings.Repeat("a", 3000) + "\n" + strings.Repeat("b", 3000) + "\nlast line"
+		got := forge.RenderFailureDetail([]forge.FailureDetailEntry{
+			{Name: "build", State: "FAILURE", Log: log},
+		})
+		want := "build: FAILURE\n" +
+			"[log excerpt for \"build\" trimmed to its last 4000 bytes or fewer]\n" +
+			strings.Repeat("b", 3000) + "\nlast line\n---"
+		if got != want {
+			t.Fatalf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("keeps a single overlong line's tail", func(t *testing.T) {
+		got := forge.RenderFailureDetail([]forge.FailureDetailEntry{
+			{Name: "build", State: "FAILURE", Log: strings.Repeat("x", 5000)},
+		})
+		want := "build: FAILURE\n" +
+			"[log excerpt for \"build\" trimmed to its last 4000 bytes or fewer]\n" +
+			strings.Repeat("x", 4000) + "\n---"
+		if got != want {
+			t.Fatalf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("log excerpt cut lands on a rune boundary", func(t *testing.T) {
+		// 1334 three-byte runes plus one ASCII byte is 4003 bytes, so the
+		// 4000-byte tail would start one byte into the first rune.
+		log := strings.Repeat("世", 1334) + "x"
+		got := forge.RenderFailureDetail([]forge.FailureDetailEntry{
+			{Name: "build", State: "FAILURE", Log: log},
+		})
+		want := "build: FAILURE\n" +
+			"[log excerpt for \"build\" trimmed to its last 4000 bytes or fewer]\n" +
+			strings.Repeat("世", 1333) + "x\n---"
+		if got != want {
+			t.Fatalf("got %q, want %q", got, want)
+		}
+		if !utf8.ValidString(got) {
+			t.Fatalf("invalid UTF-8: %q", got)
+		}
+	})
+
+	t.Run("omission line stays in budget for cut names that %q expands", func(t *testing.T) {
+		// capHead appends "...[cut]" to an over-long name, so the omission
+		// line names a string longer than MaxNameBytes. How many entries fit
+		// depends on the summary size alone, and an overflow needs the output
+		// to land within that slack of the bound, so sweep every summary size
+		// for the digit widths of the omitted count rather than every count.
+		name := strings.Repeat("\x00", forge.MaxNameBytes+1)
+		for _, count := range []int{12, 60} {
+			for sum := 0; sum <= forge.MaxSummaryBytes; sum++ {
+				entries := make([]forge.FailureDetailEntry, count)
+				for i := range entries {
+					entries[i] = forge.FailureDetailEntry{Name: name, State: "FAILURE", Summary: strings.Repeat("s", sum)}
+				}
+				if got := forge.RenderFailureDetail(entries); len(got) > forge.MaxFailureDetailBytes {
+					t.Fatalf("count=%d summary=%d: len(got) = %d, want <= %d", count, sum, len(got), forge.MaxFailureDetailBytes)
+				}
+			}
+		}
+	})
+
+	t.Run("notices a trim hidden by trailing whitespace", func(t *testing.T) {
+		log := strings.Repeat("noise line\n", forge.JobLogKeepBytes)[:forge.JobLogKeepBytes-5000] + strings.Repeat(" \n", 2500)
+		if len(log) != forge.JobLogKeepBytes {
+			t.Fatalf("setup: len(log) = %d", len(log))
+		}
+		got := forge.RenderFailureDetail([]forge.FailureDetailEntry{{Name: "padded", State: "FAILURE", Log: log}})
+		if want := fmt.Sprintf("[log excerpt for %q trimmed to its last ", "padded"); !strings.Contains(got, want) {
+			t.Fatalf("missing trim notice:\n%.300s", got)
+		}
+	})
+
+	t.Run("keeps content ahead of a whitespace-only tail", func(t *testing.T) {
+		log := strings.Repeat("noise line\n", 1000) + "real final line" + strings.Repeat(" \n", forge.MaxLogExcerptBytes)
+		got := forge.RenderFailureDetail([]forge.FailureDetailEntry{{Name: "padded", State: "FAILURE", Log: log}})
+		if !strings.Contains(got, "real final line\n---") {
+			t.Fatalf("excerpt lost the content before the whitespace:\n%.400s", got)
+		}
+		if want := fmt.Sprintf("[log excerpt for %q trimmed to its last ", "padded"); !strings.Contains(got, want) {
+			t.Fatalf("missing trim notice:\n%.300s", got)
+		}
+	})
+
+	t.Run("budgets excerpts so every job keeps its final line", func(t *testing.T) {
+		var entries []forge.FailureDetailEntry
+		for _, n := range []string{"job-1", "job-2", "job-3", "job-4"} {
+			entries = append(entries, forge.FailureDetailEntry{
+				Name:  n,
+				State: "FAILURE",
+				Log:   strings.Repeat("noise line\n", forge.MaxLogExcerptBytes) + "ERROR " + n,
+			})
+		}
+		got := forge.RenderFailureDetail(entries)
+		if len(got) > forge.MaxFailureDetailBytes {
+			t.Fatalf("len(got) = %d, want <= %d", len(got), forge.MaxFailureDetailBytes)
+		}
+		if strings.Contains(got, "failure detail trimmed") {
+			t.Fatalf("budgeting should avoid the overall cut:\n%s", got)
+		}
+		for _, e := range entries {
+			if want := "ERROR " + e.Name + "\n"; !strings.Contains(got, want) {
+				t.Errorf("missing final line %q", want)
+			}
+			if want := fmt.Sprintf("[log excerpt for %q trimmed to its last ", e.Name); !strings.Contains(got, want) {
+				t.Errorf("missing trim notice naming %q", e.Name)
+			}
+		}
+		// Four logs share the budget, so the cap stated is under MaxLogExcerptBytes.
+		if full := fmt.Sprintf("last %d bytes", forge.MaxLogExcerptBytes); strings.Contains(got, full) {
+			t.Errorf("notice states the %d-byte cap although the budget forced less:\n%s", forge.MaxLogExcerptBytes, got[:300])
+		}
+	})
+
+	t.Run("omits trailing entries whole and names the first", func(t *testing.T) {
+		var entries []forge.FailureDetailEntry
+		for i := range 40 {
+			entries = append(entries, forge.FailureDetailEntry{
+				Name:  fmt.Sprintf("job-%02d", i),
+				State: "FAILURE",
+				Log:   strings.Repeat("noise line\n", forge.MaxLogExcerptBytes) + fmt.Sprintf("ERROR job-%02d", i),
+			})
+		}
+		got := forge.RenderFailureDetail(entries)
+		if len(got) > forge.MaxFailureDetailBytes {
+			t.Fatalf("len(got) = %d, want <= %d", len(got), forge.MaxFailureDetailBytes)
+		}
+		var kept int
+		for i := range entries {
+			if strings.Contains(got, fmt.Sprintf("ERROR job-%02d\n", i)) {
+				kept++
+			} else if !strings.Contains(got, fmt.Sprintf("job-%02d: ", i)) {
+				break
+			}
+		}
+		if kept == 0 || kept == len(entries) {
+			t.Fatalf("kept %d of %d entries, want a strict prefix", kept, len(entries))
+		}
+		want := fmt.Sprintf("[%d further failing entries omitted to fit %d bytes, starting with \"job-%02d\"]",
+			len(entries)-kept, forge.MaxFailureDetailBytes, kept)
+		if !strings.HasSuffix(got, want) {
+			t.Fatalf("tail = %q, want suffix %q", got[len(got)-150:], want)
+		}
+		if strings.Contains(got, fmt.Sprintf("job-%02d: ", kept)) {
+			t.Fatalf("entry %d should have been omitted whole", kept)
+		}
+		if strings.Contains(got, "last 0 bytes") {
+			t.Fatal("a log was starved to nothing")
+		}
+	})
+
+	t.Run("capped summary stays valid UTF-8", func(t *testing.T) {
+		entries := []forge.FailureDetailEntry{
+			{Name: "huge", State: "FAILURE", Summary: strings.Repeat("世", forge.MaxFailureDetailBytes)},
+		}
+		got := forge.RenderFailureDetail(entries)
+		if !strings.Contains(got, "...[cut]\n---") {
+			t.Fatalf("missing cut marker, got %q", got[len(got)-40:])
+		}
+		if !utf8.ValidString(got) {
+			t.Fatal("invalid UTF-8 after the summary cap")
 		}
 	})
 }
