@@ -1,0 +1,4 @@
+before
+ÿþ bad bytes
+done
+delta Ã

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,6 +14,7 @@ import (
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/driver/driverkit/conformance"
 )
 
 func TestDriverStreamFilterIsAdvertisedOnlyWithTheCapability(t *testing.T) {
@@ -300,6 +302,13 @@ func TestDriverStreamFilterBornFailedWhenTheConnectorIsClosed(t *testing.T) {
 	if buf.Len() != 0 {
 		t.Errorf("writer received %q", buf.String())
 	}
+}
+
+// TestFixtureDriverPassesTheConformanceStreamFilterCheck replays the corpus of
+// raw stdout fixtures through the fixture Driver's Connector filter, whole and
+// in every chunking, flush included.
+func TestFixtureDriverPassesTheConformanceStreamFilterCheck(t *testing.T) {
+	conformance.RunStreamFilter(t, strategy(t, "driver.wasm"), filepath.Join("testdata", "streamfilter"))
 }
 
 type teeFailWriter struct{ err error }
