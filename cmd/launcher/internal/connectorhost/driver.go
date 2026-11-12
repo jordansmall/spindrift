@@ -88,7 +88,7 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 	}
 	ctx := context.Background()
 	var d describeResult
-	if err := c.call(ctx, "driver.describe", struct{}{}, &d); err != nil {
+	if err := c.Call(ctx, "driver.describe", struct{}{}, &d); err != nil {
 		return driverkit.Strategy{}, err
 	}
 	transient, err := patterns(d.TransientPatterns)
@@ -125,12 +125,12 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 		Heartbeat:           driverkit.HeartbeatTracking{KindOrder: d.KindOrder, KindPlurals: d.KindPlurals},
 		ResultEvent: func(text string) ([]byte, error) {
 			var r resultEventResult
-			err := c.call(ctx, "driver.resultEvent", map[string]any{"text": text}, &r)
+			err := c.Call(ctx, "driver.resultEvent", map[string]any{"text": text}, &r)
 			return []byte(r.Event), err
 		},
 		SessionFlags: func(mode, repoSlug, issue, home string) string {
 			var r sessionFlagsResult
-			err := c.call(ctx, "driver.sessionFlags",
+			err := c.Call(ctx, "driver.sessionFlags",
 				map[string]any{"mode": mode, "repoSlug": repoSlug, "issue": issue, "home": home}, &r)
 			if err != nil {
 				panic(err) // no error return: a wrong flag string would start a mis-configured session
@@ -152,7 +152,7 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 				return exitCode, err
 			}
 			var r resolveExitResult
-			if err := c.call(ctx, resolveExitMethod, resolveExitParams(log, exitCode), &r); err != nil {
+			if err := c.Call(ctx, resolveExitMethod, resolveExitParams(log, exitCode), &r); err != nil {
 				return exitCode, err
 			}
 			// driver.Driver's invariant: a failing exit is never resolved to success.
@@ -168,7 +168,7 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 	if slices.Contains(c.Capabilities, "driver.toolPhase") {
 		s.Heartbeat.Phase = func(tool string, input json.RawMessage) string {
 			var r toolPhaseResult
-			if c.call(ctx, "driver.toolPhase", map[string]any{"tool": tool, "input": input}, &r) != nil {
+			if c.Call(ctx, "driver.toolPhase", map[string]any{"tool": tool, "input": input}, &r) != nil {
 				return ""
 			}
 			return r.Phase
@@ -177,7 +177,7 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 	if slices.Contains(c.Capabilities, "driver.toolKind") {
 		s.Heartbeat.Kind = func(tool string) string {
 			var r toolKindResult
-			if c.call(ctx, "driver.toolKind", map[string]any{"tool": tool}, &r) != nil {
+			if c.Call(ctx, "driver.toolKind", map[string]any{"tool": tool}, &r) != nil {
 				return ""
 			}
 			return r.Kind
@@ -186,7 +186,7 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 	if slices.Contains(c.Capabilities, "driver.modelFamily") {
 		s.Heartbeat.Family = func(model string) (string, int) {
 			var r modelFamilyResult
-			if c.call(ctx, "driver.modelFamily", map[string]any{"model": model}, &r) != nil {
+			if c.Call(ctx, "driver.modelFamily", map[string]any{"model": model}, &r) != nil {
 				return model, math.MaxInt
 			}
 			return r.Label, r.Rank
@@ -220,12 +220,12 @@ func (c *Connector) newDecoder() driverkit.Decoder {
 	unparsed := func(line string) []driverkit.Event {
 		return []driverkit.Event{{Kind: driverkit.KindUnparsed, Text: strings.TrimSpace(line)}}
 	}
-	err := c.call(ctx, "driver.newDecoder", struct{}{}, &r)
+	err := c.Call(ctx, "driver.newDecoder", struct{}{}, &r)
 	if err == nil {
 		h.id = r.Decoder
 		// The Connector may be closed by then, so the cleanup ignores errors.
 		runtime.AddCleanup(h, func(id uint32) {
-			_ = c.call(ctx, "driver.freeDecoder", map[string]any{"decoder": id}, nil)
+			_ = c.Call(ctx, "driver.freeDecoder", map[string]any{"decoder": id}, nil)
 		}, r.Decoder)
 	}
 	return func(line string) []driverkit.Event {
@@ -237,7 +237,7 @@ func (c *Connector) newDecoder() driverkit.Decoder {
 		if t := strings.TrimSpace(line); t != "" &&
 			json.Unmarshal([]byte(t), &op) == nil && op.Type == hostop.TypeSpindriftOp && op.SpindriftOp != nil {
 			if err == nil {
-				_ = c.call(ctx, "driver.decode", map[string]any{"decoder": h.id, "line": line}, nil)
+				_ = c.Call(ctx, "driver.decode", map[string]any{"decoder": h.id, "line": line}, nil)
 			}
 			return []driverkit.Event{{Kind: driverkit.KindHostOp, HostOp: op.SpindriftOp}}
 		}
@@ -245,7 +245,7 @@ func (c *Connector) newDecoder() driverkit.Decoder {
 			return unparsed(line)
 		}
 		var raw json.RawMessage
-		if c.call(ctx, "driver.decode", map[string]any{"decoder": h.id, "line": line}, &raw) != nil {
+		if c.Call(ctx, "driver.decode", map[string]any{"decoder": h.id, "line": line}, &raw) != nil {
 			return unparsed(line)
 		}
 		evs, ok := guestEvents(raw)
