@@ -183,6 +183,15 @@ of transport (no probe run at all), under `NETWORK_MODE=no-host-loopback`
 when the probe finds no unix socket path, or on an indeterminate probe —
 see [Signal socket](#signal-socket-box_signal_carriersocket).
 
+**Connector routes**
+
+For each network Connector row in the input document, a
+`connector-routes[<name>]` row listing the credential knob it attaches, that
+knob's env var and the Route table, and a `connector-routes-widened[<name>]`
+row diffing the table against the accepted baseline. Both are always Advisory
+and never affect the exit code; see
+[Reviewing a widened Route table](#reviewing-a-widened-route-table).
+
 **Output conventions**
 
 - Every failing row rendered through `Reporter.Results`
@@ -2420,26 +2429,71 @@ knob with no `env` or whose `env` aliases a core one such as `GH_TOKEN`, and on
 a row missing its `module`, `routes` or `credential`.
 
 `mkHarness` renders each row into the Launcher input document's `backends`
-section as `{name, module, routes, credentialEnv}`. The launcher and the daemon
-validate and store the rows (the `backendrows` package: `Use` validates the rows
-whole and exits `config-invalid` on a bad one). `Lookup` finds a row and `Load`
-binds its module to its Route table through the Connector host; nothing calls
-them until a Connector backend can be selected (issues #6807 and #6810). Then
-the host reads the credential from its own environment at each request and
-attaches it on a route match; the module never sees it. The Box's binaries read
-no backend rows, since the Box never brokers a forge credential.
+section as `{name, module, routes, acceptedRoutes, credentialEnv,
+credentialKnob}`; `credentialKnob` is the Consumer knob that names
+`credentialEnv`, and doctor shows it. The launcher and the daemon validate and
+store the rows (the `backendrows` package: `Use` validates the rows whole and
+exits `config-invalid` on a bad one). `Lookup` finds a row and `Load` binds its
+module to its Route table through the Connector host; nothing calls them until
+a Connector backend can be selected (issues #6807 and #6810). Then the host
+reads the credential from its own environment at each request and attaches it
+on a route match; the module never sees it. The Box's binaries read no backend
+rows, since the Box never brokers a forge credential.
 
 A backend without a row is built from the generated registry as before, and a
 binary with no document, Quickstart included, has no rows. With no backend row
 the document is byte-identical to before. Nothing selects a Connector backend
-as `ISSUE_TRACKER` or `CODE_FORGE` yet, and `doctor` does not list the Route
-table yet (issues #6807 and #6806).
+as `ISSUE_TRACKER` or `CODE_FORGE` yet (issue #6807).
 
 `nix/checks/connector-backend-rows.nix` pins the rows: the fixture's reaches the
 input document, a bad credential (a core knob, one of the Connector's own that is
 not secret or not host-only, or no knob at all), a blanket route or a row missing
 a field fails evaluation, and the launcher test applies that Nix-rendered
 document and sends a declared request through the host.
+
+##### Reviewing a widened Route table
+
+A Route table is a permissions manifest (ADR 0073), so `spindrift doctor`
+diffs each network Connector's table against an accepted baseline and prints
+two Advisory rows per Connector. `connector-routes[fixture]` lists the table:
+
+```
+connector-routes[fixture] (credential knob fixtureToken (env FIXTURE_TOKEN); routes: GET api.fixture.test /repos)
+```
+
+`connector-routes-widened[fixture]` prints `(within the accepted table)`, or
+fails with `routes beyond the accepted table:` and one `+ METHOD host path`
+line per added route. It is a report only: it never makes `validateConfig` exit
+2.
+
+The baseline is `spindrift-connector-routes.json` at the Consumer flake's root.
+It is read from the flake's own source, never from an option, so a Connector's
+module cannot accept its own routes, and it must be git-tracked, since flakes
+only see tracked files. It is an object keyed by Connector name, each value a
+list of routes:
+
+```json
+{
+  "fixture": [
+    { "method": "GET", "host": "api.fixture.test", "path": "/repos" }
+  ]
+}
+```
+
+A missing file or key accepts nothing, so every route shows as added. That is
+how a Connector newly arriving, or an existing one whose table grew in a
+`flake.lock` bump, reaches the operator. A live route is covered when an
+accepted one has the same method and host (compared literally) and its path is
+equal or an ancestor of the live path. A new host, method or path, or a broader
+path (accepted `/repos/x`, live `/repos`), is a widening. A narrower or
+unchanged table shows nothing, and stale baseline entries are harmless. A
+non-empty entry must pass the Route-table rules above, so `/` or a non-canonical
+path fails evaluation; an empty list is fine.
+
+To accept a widening, review the `+` lines, add them under the Connector's name
+in the file and commit. Doctor then reports `within the accepted table`. A
+direct `mkHarness` caller passes `acceptedRoutes` on its `backendRows` entry; a
+row without it accepts nothing.
 
 #### Shadow mode
 
