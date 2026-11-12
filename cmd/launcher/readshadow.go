@@ -225,7 +225,7 @@ func shadowSides(conn *connectorhost.Connector, row backendrows.Row, c config, i
 		errs    []error
 	)
 	if it != nil {
-		t, err := connectortracker.New(conn, it, dispatchLabels(c), connectortracker.Target{API: api, Repo: c.RepoSlug})
+		t, err := connectortracker.New(conn, it, connectortracker.Lifecycle{Labels: dispatchLabels(c)}, connectortracker.Target{API: api, Repo: c.RepoSlug})
 		tracker = t
 		errs = append(errs, err)
 	}

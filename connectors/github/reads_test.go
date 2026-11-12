@@ -61,7 +61,7 @@ func TestListIssues(t *testing.T) {
 			{"number":8,"title":"pr","body":"b","state":"open","labels":[],"pull_request":{}},
 			{"number":9,"title":"c","body":"cb","state":"open","labels":[]}]`),
 	})
-	issues, err := listIssues(tgt, "ready for/agent", 30)
+	issues, err := listIssues(tgt, tracker.Query{Label: "ready for/agent"}, 30)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestListIssuesSkipsPullRequestsAcrossPages(t *testing.T) {
 		listBase + "&page=1": ok(p1),
 		listBase + "&page=2": ok(items(101, 100, false)),
 	})
-	issues, err := listIssues(tgt, "", 100)
+	issues, err := listIssues(tgt, tracker.Query{}, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestListIssuesAllPullRequestsFirstPage(t *testing.T) {
 		listBase + "&page=1": ok(items(1, 100, true)),
 		listBase + "&page=2": ok(items(101, 3, false)),
 	})
-	issues, err := listIssues(tgt, "", 2)
+	issues, err := listIssues(tgt, tracker.Query{}, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestListIssuesAllPullRequestsFirstPage(t *testing.T) {
 
 func TestListIssuesLimit(t *testing.T) {
 	stub(t, map[string]connector.Response{listBase + "&page=1": ok(items(1, 5, false))})
-	issues, err := listIssues(tgt, "", 3)
+	issues, err := listIssues(tgt, tracker.Query{}, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestListIssuesLimit(t *testing.T) {
 		t.Fatalf("issues = %#v", issues)
 	}
 	for _, n := range []int{0, -1} {
-		if _, err := listIssues(tgt, "", n); err == nil {
+		if _, err := listIssues(tgt, tracker.Query{}, n); err == nil {
 			t.Fatalf("limit %d: want error", n)
 		}
 	}
@@ -143,7 +143,7 @@ func TestPageCeiling(t *testing.T) {
 	if n != maxPages {
 		t.Fatalf("requests = %d, want %d", n, maxPages)
 	}
-	if _, err := listIssues(tgt, "", maxPages*pageSize+1); err == nil {
+	if _, err := listIssues(tgt, tracker.Query{}, maxPages*pageSize+1); err == nil {
 		t.Fatal("listIssues: want error")
 	}
 }
@@ -202,7 +202,7 @@ func TestErrors(t *testing.T) {
 	}
 	boom := errors.New("boom")
 	send = func(connector.Request) (connector.Response, error) { return connector.Response{}, boom }
-	if _, err := listIssues(tgt, "", 1); !errors.Is(err, boom) {
+	if _, err := listIssues(tgt, tracker.Query{}, 1); !errors.Is(err, boom) {
 		t.Fatalf("err = %v", err)
 	}
 }
