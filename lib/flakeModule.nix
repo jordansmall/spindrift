@@ -55,6 +55,10 @@ let
   # Connector's own routes, so a core secret would leak to it. The env is read
   # through `envSchema`, not `knob.env`: its collision fold refuses a knob
   # aliasing a core env var, and keeps a Connector's knob under its own key.
+  # `identity` (the Basic username, e.g. a Jira account email) follows the same
+  # ownership and host-only rule but is not a secret; `base` (the site's base
+  # URL, which `{base}` route hosts resolve from) is a non-secret URL, so any
+  # env-schema knob may carry it.
   #
   # `acceptedRoutes` is the Consumer's reviewed baseline of each Route table,
   # read from the Consumer's own source tree and never from an option: a
@@ -77,13 +81,18 @@ let
   connectorBackendRows = lib.mapAttrs (
     name: r:
     let
-      key = r.backend.credential;
-      fail = why: throw "Connector '${name}': backend credential '${key}' ${why}";
-      knob =
-        r.knobs.${key}
-          or (fail "is not in this Connector's `knobs` (a core knob cannot be a backend credential)");
-      env =
-        if !(knob.secret or false) then
+      b = r.backend;
+      # A knob the row names as `field` must be one of the Connector's own,
+      # host-only and carry an `env`; `secret` is required of the credential only.
+      ownKnobEnv =
+        field: key: secret:
+        let
+          fail = why: throw "Connector '${name}': backend ${field} '${key}' ${why}";
+          knob =
+            r.knobs.${key}
+              or (fail "is not in this Connector's `knobs` (a core knob cannot be a backend ${field})");
+        in
+        if secret && !(knob.secret or false) then
           fail "is not a secret knob (`secret = true` required)"
         else if (knob.boxEnv or false) != false then
           fail "must be host-only (`boxEnv = false` required)"
@@ -91,13 +100,24 @@ let
           fail "has no `env`"
         else
           config.spindrift.envSchema.${key}.env;
+      baseEnv =
+        config.spindrift.envSchema.${b.base}.env
+          or (throw "Connector '${name}': backend base '${b.base}' is not an env-schema knob");
     in
-    {
-      inherit (r.backend) module routes;
-      credentialEnv = env;
-      credentialKnob = key;
-      acceptedRoutes = acceptedRoutesBaseline.${name} or [ ];
-    }
+    if b.scheme == "basic" && b.identity == null then
+      throw "Connector '${name}': backend scheme 'basic' needs an `identity` (the knob holding the Basic username)"
+    else if b.scheme == "bearer" && b.identity != null then
+      throw "Connector '${name}': backend `identity` applies only to scheme 'basic'"
+    else
+      {
+        inherit (b) module routes;
+        credentialEnv = ownKnobEnv "credential" b.credential true;
+        credentialKnob = b.credential;
+        acceptedRoutes = acceptedRoutesBaseline.${name} or [ ];
+      }
+      // lib.optionalAttrs (b.scheme != "bearer") { credentialScheme = b.scheme; }
+      // lib.optionalAttrs (b.identity != null) { identityEnv = ownKnobEnv "identity" b.identity false; }
+      // lib.optionalAttrs (b.base != null) { inherit baseEnv; }
   ) (lib.filterAttrs (_: r: r.backend != null) config.spindrift.connectors);
   # Connectors whose row asks for shadow mode (ADR 0073, issue #6797).
   shadowConnectors = lib.attrNames (lib.filterAttrs (_: r: r.shadow) config.spindrift.connectors);
@@ -496,7 +516,25 @@ in
                         };
                         credential = mkOption {
                           type = types.str;
-                          description = "Env-schema key of the knob holding the Connector's bearer token.";
+                          description = "Env-schema key of the knob holding the Connector's secret: its bearer token, or the Basic password under `scheme = \"basic\"`.";
+                        };
+                        scheme = mkOption {
+                          type = types.enum [
+                            "bearer"
+                            "basic"
+                          ];
+                          default = "bearer";
+                          description = "How the host attaches the credential: as a Bearer token, or as Basic credentials paired with `identity`.";
+                        };
+                        identity = mkOption {
+                          type = types.nullOr types.str;
+                          default = null;
+                          description = "Env-schema key of the knob holding the Basic username (Jira Cloud: the account email). Required under `scheme = \"basic\"`, refused under bearer.";
+                        };
+                        base = mkOption {
+                          type = types.nullOr types.str;
+                          default = null;
+                          description = "Env-schema key of the knob holding the site's https base URL. A route whose `host` is `{base}` resolves to that URL's host, with its path prefix prepended to the route path.";
                         };
                       };
                     }
@@ -504,17 +542,23 @@ in
                   default = null;
                   description = ''
                     The network Connector's backend row (ADR 0073, issue
-                    #6805): `{ module; routes; credential; }`. `module` is a
-                    function of pkgs returning the Connector's wasm file path,
-                    `routes` its Route table (a list of `{ method; host; path; }`
-                    validated at evaluation with the registry-route rules, so a
-                    blanket or non-canonical route fails the build naming this
-                    Connector), and `credential` the env-schema key of the knob
-                    holding its bearer token: one of this Connector's own
-                    `knobs`, secret and host-only (`boxEnv = false`), so a core
-                    knob such as the forge token is refused. Null declares no
-                    backend; a name equal to a built-in backend (git, local) is
-                    refused.
+                    #6805): `{ module; routes; credential; scheme; identity;
+                    base; }`. `module` is a function of pkgs returning the
+                    Connector's wasm file path, `routes` its Route table (a
+                    list of `{ method; host; path; }` validated at evaluation
+                    with the registry-route rules, so a blanket or non-canonical
+                    route fails the build naming this Connector), and
+                    `credential` the env-schema key of the knob
+                    holding its secret: one of this Connector's own `knobs`,
+                    secret and host-only (`boxEnv = false`), so a core knob such
+                    as the forge token is refused. `scheme` is "bearer"
+                    (default) or "basic"; basic needs `identity`, the key of
+                    one of the Connector's own host-only knobs holding the
+                    username (not necessarily secret), and bearer refuses it.
+                    `base` names any env-schema knob holding the site's https
+                    base URL, which a route host of `{base}` resolves from.
+                    Null declares no backend; a name equal to a built-in
+                    backend (git, local) is refused.
                   '';
                 };
                 routes = mkOption {

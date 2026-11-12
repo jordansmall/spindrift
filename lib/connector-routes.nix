@@ -11,7 +11,12 @@ let
   methodOk = m: builtins.match "[!#$%&'*+.^_`|~0-9A-Z-]+" m != null;
 
   # A bare host[:port]: no userinfo, path, query, fragment or trailing ":".
-  hostOk = h: builtins.match "([A-Za-z0-9._~!$&'()*+,;=-]+|[[][0-9A-Fa-f:.]+[]])(:[0-9]+)?" h != null;
+  # The whole-host literal `{base}` stands for the host of the row's base URL;
+  # the Go host resolves it at load and validates the result.
+  hostOk =
+    h:
+    h == "{base}"
+    || builtins.match "([A-Za-z0-9._~!$&'()*+,;=-]+|[[][0-9A-Fa-f:.]+[]])(:[0-9]+)?" h != null;
 
   # path.Clean(p) == p, for a path with a leading "/".
   canonical =
