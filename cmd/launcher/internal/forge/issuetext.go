@@ -70,7 +70,7 @@ func IssueText(t IssueTracker, num string, warn io.Writer) (string, error) {
 		return "", err
 	}
 	text := iss.Body
-	if cl, ok := t.(CommentLister); ok {
+	if cl, ok := As[CommentLister](t); ok {
 		if comments, cErr := cl.Comments(num); cErr == nil {
 			comments = dropMinimized(comments, num, warn)
 			if len(comments) > issueTextCommentWindow {
@@ -94,7 +94,7 @@ func IssueText(t IssueTracker, num string, warn io.Writer) (string, error) {
 		return truncateIssueText(text), nil
 	}
 
-	ll, ok := t.(LinkedIssueLister)
+	ll, ok := As[LinkedIssueLister](t)
 	if !ok {
 		return text, nil
 	}

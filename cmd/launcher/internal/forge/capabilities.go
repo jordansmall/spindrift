@@ -45,7 +45,7 @@ type Capabilities struct {
 	DemandCounter         DemandCounter
 	IssueTypeChecker      IssueTypeChecker
 	StatusMappingChecker  StatusMappingChecker
-	// DepsOf and TouchesOf assert these two on the bare IssueTracker instead:
+	// DepsOf and TouchesOf look these two up on the bare IssueTracker instead:
 	// their callers (waves, console) hold no Capabilities.
 	NativeDepsReader NativeDepsReader
 	BodyGrammarer    BodyGrammarer
@@ -56,8 +56,8 @@ type Capabilities struct {
 	TrackerDescriptor backend.Descriptor
 }
 
-// ResolveCapabilities type-asserts cf and it against every optional interface
-// once and folds in the two descriptor rows.
+// ResolveCapabilities resolves cf (type assertion) and it (As) against every
+// optional interface once and folds in the two descriptor rows.
 func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc backend.Descriptor) Capabilities {
 	var c Capabilities
 
@@ -74,28 +74,28 @@ func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc b
 	c.BundleCommitSubjects, _ = cf.(BundleCommitSubjects)
 	c.MergeCommitReader, _ = cf.(MergeCommitReader)
 
-	c.BlockersLister, _ = it.(BlockersLister)
-	c.HostPostedCommenter, _ = it.(HostPostedCommenter)
-	c.HostPostedIssueFiler, _ = it.(HostPostedIssueFiler)
-	c.LandingRecorder, _ = it.(LandingRecorder)
-	c.LandingPassRecorder, _ = it.(LandingPassRecorder)
-	c.GithubTracker, _ = it.(GithubTracker)
-	c.IssueCloser, _ = it.(IssueCloser)
-	c.MergeCloser, _ = it.(MergeCloser)
-	c.AbandonedFlagger, _ = it.(AbandonedFlagger)
-	c.SeamLister, _ = it.(SeamLister)
-	c.PriorClaimStateReader, _ = it.(PriorClaimStateReader)
-	c.LabeledTracker, _ = it.(LabeledTracker)
-	c.FullyPaginated, _ = it.(FullyPaginated)
-	c.CommentLister, _ = it.(CommentLister)
-	c.LinkedIssueLister, _ = it.(LinkedIssueLister)
-	c.LabeledBacklogLister, _ = it.(LabeledBacklogLister)
-	c.IssueLabeler, _ = it.(IssueLabeler)
-	c.DemandCounter, _ = it.(DemandCounter)
-	c.IssueTypeChecker, _ = it.(IssueTypeChecker)
-	c.StatusMappingChecker, _ = it.(StatusMappingChecker)
-	c.NativeDepsReader, _ = it.(NativeDepsReader)
-	c.BodyGrammarer, _ = it.(BodyGrammarer)
+	c.BlockersLister, _ = As[BlockersLister](it)
+	c.HostPostedCommenter, _ = As[HostPostedCommenter](it)
+	c.HostPostedIssueFiler, _ = As[HostPostedIssueFiler](it)
+	c.LandingRecorder, _ = As[LandingRecorder](it)
+	c.LandingPassRecorder, _ = As[LandingPassRecorder](it)
+	c.GithubTracker, _ = As[GithubTracker](it)
+	c.IssueCloser, _ = As[IssueCloser](it)
+	c.MergeCloser, _ = As[MergeCloser](it)
+	c.AbandonedFlagger, _ = As[AbandonedFlagger](it)
+	c.SeamLister, _ = As[SeamLister](it)
+	c.PriorClaimStateReader, _ = As[PriorClaimStateReader](it)
+	c.LabeledTracker, _ = As[LabeledTracker](it)
+	c.FullyPaginated, _ = As[FullyPaginated](it)
+	c.CommentLister, _ = As[CommentLister](it)
+	c.LinkedIssueLister, _ = As[LinkedIssueLister](it)
+	c.LabeledBacklogLister, _ = As[LabeledBacklogLister](it)
+	c.IssueLabeler, _ = As[IssueLabeler](it)
+	c.DemandCounter, _ = As[DemandCounter](it)
+	c.IssueTypeChecker, _ = As[IssueTypeChecker](it)
+	c.StatusMappingChecker, _ = As[StatusMappingChecker](it)
+	c.NativeDepsReader, _ = As[NativeDepsReader](it)
+	c.BodyGrammarer, _ = As[BodyGrammarer](it)
 
 	c.ForgeDescriptor = forgeDesc
 	c.TrackerDescriptor = trackerDesc

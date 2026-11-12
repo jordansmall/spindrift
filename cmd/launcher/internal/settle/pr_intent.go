@@ -210,7 +210,7 @@ func hasClosingReference(body, num string) bool {
 // forgejo tracker also fails a LandingRecorder check, and its issue numbers
 // are a foreign namespace, so a Closes keyword would hit an unrelated issue.
 func ensureClosesReference(body, num string, it forge.IssueTracker) string {
-	if _, ok := it.(forge.GithubTracker); !ok {
+	if _, ok := forge.As[forge.GithubTracker](it); !ok {
 		return body
 	}
 	if hasClosingReference(body, num) {
