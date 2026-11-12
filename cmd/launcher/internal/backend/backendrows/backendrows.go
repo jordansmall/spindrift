@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"sync"
@@ -141,4 +142,18 @@ func Load(ctx context.Context, row Row, o Options) (*connectorhost.Connector, er
 		Client: o.Client,
 		Audit:  connectorhost.NewAuditLog(o.Audit),
 	})
+}
+
+// Snapshot captures the applied rows and returns the function that restores
+// them, for a test that applies rows to the process-global set. It is not in
+// export_test.go because cmd/launcher's own tests need it.
+func Snapshot() (restore func()) {
+	mu.Lock()
+	defer mu.Unlock()
+	saved := maps.Clone(applied)
+	return func() {
+		mu.Lock()
+		defer mu.Unlock()
+		applied = saved
+	}
 }

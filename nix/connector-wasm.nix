@@ -11,11 +11,13 @@ let
     fileset = fs.unions [
       ../sdk
       ./fixtures/connector-wasm
+      ./fixtures/connector
     ];
   };
-  # The fixture Driver is built by the fixture Connector itself, the one source
-  # of its wasm; it keeps its place here for the tests that read driver.wasm.
-  driverWasm = import ./fixtures/connector/package.nix {
+  # The fixture Driver and network Connector are built by the fixture Connector
+  # itself, the one source of their wasm; they keep their place here for the
+  # tests that read driver.wasm and network.wasm.
+  connectorWasm = import ./fixtures/connector/package.nix {
     inherit pkgs;
     core = import ../core;
   };
@@ -35,11 +37,11 @@ pkgs.runCommand "connector-wasm-fixtures" { nativeBuildInputs = [ pkgs.go ]; } '
   build probe.wasm ./probe
   build call.wasm ./call
   build seamtest-driver.wasm ./seamtest-driver
-  build network.wasm ./network
-  cp ${driverWasm}/driver.wasm $out/driver.wasm
+  cp ${connectorWasm}/driver.wasm ${connectorWasm}/network.wasm $out/
   for mode in trap loop memory oversize malformed invalid; do
     build hostile-$mode.wasm -ldflags=-X=main.mode=$mode ./hostile
   done
+  cd ../connector
   for mode in host method path malformed; do
     build network-$mode.wasm -ldflags=-X=main.mode=$mode ./network
   done
