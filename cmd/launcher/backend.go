@@ -7,6 +7,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/butler"
+	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/launcherchecks"
 	"spindrift.dev/launcher/internal/ledger"
 )
@@ -15,20 +16,20 @@ import (
 // (ledger.NewRemote), then a butler.Tree fetched from the same url onto
 // c.BaseBranch (butler.FetchTree) over that same scratch repo -- one
 // checkout serving both the Ledger backend and the Chore scan. Shared by the
-// github and forgejo rows, which differ only in url and gitArgs.
-func remoteLedger(c config, url string, gitArgs ...string) (ledger.Backend, butler.Tree, func(), error) {
+// github and forgejo rows, which differ only in url, credential and gitArgs.
+func remoteLedger(c config, url string, cred gitexec.Credential, gitArgs ...string) (ledger.Backend, butler.Tree, func(), error) {
 	dir, err := os.MkdirTemp("", "spindrift-ledger-*")
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("butler: create ledger scratch dir: %w", err)
 	}
 	cleanup := func() { os.RemoveAll(dir) }
 
-	r, err := ledger.NewRemote(dir, url, gitArgs...)
+	r, err := ledger.NewRemote(dir, url, cred, gitArgs...)
 	if err != nil {
 		cleanup()
 		return nil, nil, nil, err
 	}
-	tree, err := butler.FetchTree(dir, url, c.BaseBranch, gitArgs...)
+	tree, err := butler.FetchTree(dir, url, c.BaseBranch, cred, gitArgs...)
 	if err != nil {
 		cleanup()
 		return nil, nil, nil, err
@@ -51,7 +52,7 @@ func ledgerFor(c config, s backendkit.Strategy) (ledger.Backend, butler.Tree, fu
 		return nil, nil, nil, err
 	}
 	if site.URL != "" {
-		return remoteLedger(c, site.URL, site.GitArgs...)
+		return remoteLedger(c, site.URL, site.Credential, site.GitArgs...)
 	}
 	return ledger.Local{Repo: site.Repo}, butler.GitTree{Repo: site.Repo}, func() {}, nil
 }

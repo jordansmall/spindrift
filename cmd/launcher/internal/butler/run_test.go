@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
 	"spindrift.dev/launcher/internal/outcome"
@@ -1431,11 +1432,11 @@ func TestSweep_RemoteBackendEndToEndAgainstHostedForgeShape(t *testing.T) {
 	head := strings.TrimSpace(string(runRepoGitOutput(t, remoteRepo, "rev-parse", "refs/heads/main")))
 
 	scratch := t.TempDir()
-	backend, err := ledger.NewRemote(scratch, remoteRepo)
+	backend, err := ledger.NewRemote(scratch, remoteRepo, gitexec.Credential{})
 	if err != nil {
 		t.Fatalf("NewRemote: %v", err)
 	}
-	tree, err := FetchTree(scratch, remoteRepo, "main")
+	tree, err := FetchTree(scratch, remoteRepo, "main", gitexec.Credential{})
 	if err != nil {
 		t.Fatalf("FetchTree: %v", err)
 	}
