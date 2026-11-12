@@ -1641,7 +1641,9 @@ or a backend adapter other than `git` and `local` (which core keeps), which
 is what lets the core `launcher-go-test` check build from a source holding
 no Driver and no github, forgejo or jira adapter (ADR 0066 decision 8, ADR
 0068 decision 7). A library test that needs a tracker or Code Forge uses
-`forge.NewFake`. The fields are the contract:
+`forge.NewFake`, whose reads cross the fixture network Connector and so need
+the same `SPINDRIFT_CONNECTOR_FIXTURES_DIR` as `seamtest`. The fields are the
+contract:
 
 - `Name` — the Driver identifier; it must match a key in the Nix
   `lib/drivers/` registry.
