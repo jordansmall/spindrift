@@ -19,6 +19,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
@@ -55,6 +56,7 @@ type (
 		Name       string `json:"name"`
 		Conclusion string `json:"conclusion"`
 		Summary    string `json:"summary"`
+		JobID      string `json:"jobId,omitempty"`
 	}
 	wireRollup struct {
 		State  string      `json:"state"`
@@ -67,6 +69,11 @@ type (
 	numberedParams struct {
 		Target Target `json:"target"`
 		Number string `json:"number"`
+	}
+	jobLogParams struct {
+		Target Target `json:"target"`
+		JobID  string `json:"jobId"`
+		Tail   int    `json:"tail"`
 	}
 )
 
@@ -261,11 +268,17 @@ var (
 	}
 )
 
+// jobLogsBudget caps the total time one FailureDetail spends reading job logs,
+// so a slow forge cannot stall PR settle; jobs left once it is spent get no
+// log. A var so a test can shrink it.
+var jobLogsBudget = 60 * time.Second
+
 func (t *reads) FailureDetail(prURL string) (string, error) {
 	ro, err := t.rollup(prURL)
 	if err != nil {
 		return "", err
 	}
+	deadline := time.Now().Add(jobLogsBudget)
 	var entries []forge.FailureDetailEntry
 	for _, c := range ro.Checks {
 		var failing bool
@@ -276,8 +289,33 @@ func (t *reads) FailureDetail(prURL string) (string, error) {
 			failing = failingStatusContextStates[c.Conclusion]
 		}
 		if failing {
-			entries = append(entries, forge.FailureDetailEntry{Name: c.Name, State: c.Conclusion, Summary: c.Summary})
+			entries = append(entries, forge.FailureDetailEntry{
+				Name: c.Name, State: c.Conclusion, Summary: c.Summary, Log: t.jobLog(deadline, c.JobID),
+			})
 		}
 	}
 	return forge.RenderFailureDetail(entries), nil
+}
+
+// jobLog reads the tail of one job's log, or "" for no job, a Connector without
+// forge.jobLog, or any failed read: the log only enriches a detail that is
+// already in hand, and a caller treats an error as no detail at all. The guest
+// is asked for a tail of forge.JobLogKeepBytes so a long log never crosses the
+// output cap.
+//
+// The budget is checked before the call rather than carried as its context
+// deadline: a deadline expiring mid-call closes the Connector, costing every
+// later read for the sake of a log.
+func (t *reads) jobLog(deadline time.Time, jobID string) string {
+	if jobID == "" || !time.Now().Before(deadline) {
+		return ""
+	}
+	var res struct {
+		Log string `json:"log"`
+	}
+	p := jobLogParams{t.target, jobID, forge.JobLogKeepBytes}
+	if err := t.call(context.Background(), "forge.jobLog", p, &res); err != nil {
+		return ""
+	}
+	return res.Log
 }

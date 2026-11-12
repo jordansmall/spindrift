@@ -3,6 +3,7 @@ package forge
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -144,5 +145,59 @@ func TestMissingRequiredPanics(t *testing.T) {
 			}()
 			handlers(r)
 		}()
+	}
+}
+
+func jobLogReader(t *testing.T, log string) Reader {
+	r := fakeReader(t)
+	r.JobLog = func(tg Target, jobID string) (string, error) {
+		if tg != wantTarget || jobID != "42" {
+			t.Errorf("JobLog(%v, %q)", tg, jobID)
+		}
+		return log, nil
+	}
+	return r
+}
+
+func TestJobLogIsOptional(t *testing.T) {
+	_, m := handlers(jobLogReader(t, "x"))
+	if _, ok := m["forge.jobLog"]; !ok {
+		t.Fatal("forge.jobLog handler missing when Reader.JobLog is set")
+	}
+	_, m = handlers(fakeReader(t))
+	if _, ok := m["forge.jobLog"]; ok {
+		t.Fatal("forge.jobLog registered with no Reader.JobLog")
+	}
+}
+
+func TestJobLogWireAndTail(t *testing.T) {
+	const params = `{` + target + `,"jobId":"42","tail":%d}`
+	for name, c := range map[string]struct {
+		log  string
+		tail int
+		want string
+	}{
+		"whole log fits":     {"abc\ndef", 100, `{"log":"abc\ndef"}`},
+		"keeps the tail":     {"abcdef", 3, `{"log":"def"}`},
+		"no tail, no cut":    {"abcdef", 0, `{"log":"abcdef"}`},
+		"cut on rune start":  {"aéb", 2, `{"log":"b"}`}, // "é" is 2 bytes; a cut inside it drops the half
+		"empty log":          {"", 10, `{"log":""}`},
+		"negative tail":      {"abcdef", -1, `{"log":"abcdef"}`},
+		"tail longer than s": {"ab", 3, `{"log":"ab"}`},
+	} {
+		_, m := handlers(jobLogReader(t, c.log))
+		if got := call(t, m, "forge.jobLog", fmt.Sprintf(params, c.tail)); got != c.want {
+			t.Errorf("%s: got %s, want %s", name, got, c.want)
+		}
+	}
+}
+
+func TestCheckJobIDWire(t *testing.T) {
+	b, err := json.Marshal(Check{Kind: "CheckRun", Name: "b", JobID: "42"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"kind":"CheckRun","name":"b","conclusion":"","summary":"","jobId":"42"}`; string(b) != want {
+		t.Errorf("got %s, want %s", b, want)
 	}
 }

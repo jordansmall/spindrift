@@ -2545,13 +2545,19 @@ row without it accepts nothing.
 network Connector: it serves `tracker.listIssues`, `tracker.issue` and
 `tracker.nativeDeps` over GitHub REST, and `forge.prsForBranch`, `forge.pr` and
 `forge.checks` over REST plus one GraphQL rollup query, through `http_request`;
-the host attaches the credential. Its Route table is three routes on
+the host attaches the credential. Its Route table is four routes on
 `api.github.com`: `GET /repos/{repo}/issues` (the list, issue and
 `dependencies/blocked_by` reads), `GET /repos/{repo}/pulls` (branch lookup, one
-PR) and `POST /graphql` (the check rollup). The subtree-only Route model (ADR
+PR), `POST /graphql` (the check rollup) and `GET /repos/{repo}/actions/jobs`
+(a failing job's log, `forge.jobLog`, for the fix pass's `CI FAILURE` detail;
+issue #6893). The last sets `followRedirect`, because GitHub answers a log read
+with a 302 to a pre-signed blob URL on a host that varies; the host follows
+that one hop with no credential, and doctor shows the opt-in as
+`(follows redirect)` on the route. The subtree-only Route model (ADR
 0047) makes it the narrowest table, not an exact one: `/issues` also admits
-`GET /issues/comments/*`, `/issues/events` and `/issues/{n}/timeline`, which no
-read uses, and a Route restricts no body, so `POST /graphql` admits any GraphQL
+`GET /issues/comments/*`, `/issues/events` and `/issues/{n}/timeline`, and
+`/actions/jobs` every other GET under it, none of which a read uses; a Route
+restricts no body, so `POST /graphql` admits any GraphQL
 document, mutations included. Issue #6808 accepts that: the Connector sends
 only the rollup query and every write stays on the native adapter. It skips
 pull requests in the REST issues list.
@@ -3033,7 +3039,7 @@ This is protocol version **0.1.1**. The host is
   shadow ([Shadow mode](#shadow-mode)) uses `connectortracker` in production.
 - **Forge capabilities.** Provisional at protocol 0.y: issue #6754 finalises
   the forge axis, and a `0.y` bump may change what follows. A forge Connector
-  advertises `"forge"`, meaning it serves the three methods below. Every
+  advertises `"forge"`, meaning it serves the first three methods below. Every
   `params` carries `target`, `{api, repo}`, as for the tracker. The Connector
   reads and returns raw data; every write stays on core's native adapter.
 
@@ -3042,10 +3048,15 @@ This is protocol version **0.1.1**. The host is
   | `forge.prsForBranch` | `{target, branch}` | `{prs}`, every PR whose head is `branch`, any state, newest first |
   | `forge.pr` | `{target, number}` | a PR |
   | `forge.checks` | `{target, number}` | `{state, checks}`, the rollup of the PR's head commit |
+  | `forge.jobLog` | `{target, jobId, tail}` | `{log}`, the last `tail` bytes of a job's log; optional |
 
   A PR is `{number, url, state, merged}`; a check is `{kind, name, conclusion,
-  summary}`, with `kind` `"CheckRun"` or `"StatusContext"`. Core keeps the
-  policy.
+  summary, jobId}`, with `kind` `"CheckRun"` or `"StatusContext"`, and `jobId`
+  (omitted when empty) naming the job whose log `forge.jobLog` reads. A
+  Connector without `forge.jobLog`, or whose log read fails, still serves
+  failure detail, only without logs. Core keeps the policy, including how much
+  of a log to keep: it asks for twice `forge.MaxLogExcerptBytes` and cuts the
+  rest.
   [`connectorforge.New`](../cmd/launcher/internal/connectorforge/connectorforge.go)
   builds core's PR reads from such a Connector: it pins PR URLs to the
   forge's web host and the target repository, refuses an unknown rollup

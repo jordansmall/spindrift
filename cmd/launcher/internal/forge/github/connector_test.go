@@ -47,6 +47,7 @@ type scriptedContext struct {
 	Name        string `json:"name,omitempty"`
 	Conclusion  string `json:"conclusion,omitempty"`
 	Summary     string `json:"summary,omitempty"`
+	DetailsURL  string `json:"detailsUrl,omitempty"`
 	Context     string `json:"context,omitempty"`
 	State       string `json:"state,omitempty"`
 	Description string `json:"description,omitempty"`
@@ -69,17 +70,20 @@ type restPR struct {
 // restBackend serves exactly the REST and GraphQL reads the github Connector
 // makes and records any other request, so a read outside the Route table's
 // subtree fails the test instead of passing silently.
+// jobLogs is the Actions job logs by job id: a read answers 302 to a blob path
+// on the same server, as GitHub redirects to pre-signed storage.
 type restBackend struct {
 	*httptest.Server
 	mu         sync.Mutex
 	issues     map[int]*restIssue
 	prs        map[int]*restPR
+	jobLogs    map[string]string
 	unexpected []string
 }
 
 func newRESTBackend(t *testing.T) *restBackend {
 	t.Helper()
-	b := &restBackend{issues: map[int]*restIssue{}, prs: map[int]*restPR{}}
+	b := &restBackend{issues: map[int]*restIssue{}, prs: map[int]*restPR{}, jobLogs: map[string]string{}}
 	b.Server = httptest.NewTLSServer(http.HandlerFunc(b.serve))
 	t.Cleanup(b.Close)
 	return b
@@ -92,12 +96,31 @@ func (b *restBackend) serve(w http.ResponseWriter, r *http.Request) {
 		b.unexpected = append(b.unexpected, r.Method+" "+r.URL.RequestURI()+": "+why)
 		http.NotFound(w, r)
 	}
+	if id, ok := strings.CutPrefix(r.URL.Path, "/blob/"); ok {
+		// The redirect hop is uncredentialed, as pre-signed storage URLs are.
+		log, found := b.jobLogs[id]
+		if r.Header.Get("Authorization") != "" || len(r.Header.Values("Accept")) != 0 || !found {
+			reject("blob read with a credential or guest header, or for no such log")
+			return
+		}
+		_, _ = w.Write([]byte(log))
+		return
+	}
 	if r.Header.Get("Authorization") != "Bearer "+connectorToken {
 		reject("missing host credential")
 		return
 	}
 	if r.URL.Path == "/graphql" {
 		b.graphql(w, r, reject)
+		return
+	}
+	if rest, ok := strings.CutPrefix(r.URL.Path, "/repos/"+connectorRepo+"/actions/jobs/"); ok {
+		id, ok := strings.CutSuffix(rest, "/logs")
+		if _, found := b.jobLogs[id]; r.Method != http.MethodGet || !ok || !found {
+			reject("not a read of a scripted job log")
+			return
+		}
+		http.Redirect(w, r, b.URL+"/blob/"+id, http.StatusFound)
 		return
 	}
 	if rest, ok := strings.CutPrefix(r.URL.Path, "/repos/"+connectorRepo+"/pulls"); ok {
@@ -232,6 +255,13 @@ func (b *restBackend) graphql(w http.ResponseWriter, r *http.Request, reject fun
 		nodes := p.contexts
 		if nodes == nil {
 			nodes = []scriptedContext{}
+		}
+		if !strings.Contains(req.Query, "detailsUrl") {
+			// GitHub returns only the fields the query selects.
+			nodes = append([]scriptedContext(nil), nodes...)
+			for i := range nodes {
+				nodes[i].DetailsURL = ""
+			}
 		}
 		rollup = map[string]any{"state": state, "contexts": map[string]any{"nodes": nodes}}
 	}
@@ -400,7 +430,10 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var table []struct{ Method, Host, Path string }
+	var table []struct {
+		Method, Host, Path string
+		FollowRedirect     bool
+	}
 	if err := json.Unmarshal([]byte(os.Getenv(connectorRoutesEnv)), &table); err != nil {
 		t.Fatalf("%s: %v", connectorRoutesEnv, err)
 	}
@@ -416,7 +449,7 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 		if r.Host != "api.github.com" {
 			t.Fatalf("route %s %s names host %q, want api.github.com", r.Method, r.Path, r.Host)
 		}
-		declared = append(declared, connectorhost.Route{Method: r.Method, Host: u.Host, Path: r.Path})
+		declared = append(declared, connectorhost.Route{Method: r.Method, Host: u.Host, Path: r.Path, FollowRedirect: r.FollowRedirect})
 	}
 	h := &connectorHarness{
 		backend: b,
@@ -561,6 +594,7 @@ func TestConnector_ReadContracts(t *testing.T) {
 	h := newConnectorHarness(t)
 	t.Run("Tracker", func(t *testing.T) { forgetest.RunTrackerReadContract(t, h) })
 	t.Run("PRForge", func(t *testing.T) { forgetest.RunPRForgeReadContract(t, h) })
+	t.Run("JobLogExcerpt", func(t *testing.T) { testJobLogExcerpt(t, h) })
 
 	// REST reports no minimized state, so the Connector must not attest
 	// comments; they stay on the native adapter.
@@ -635,5 +669,50 @@ func TestConnector_ListIssuesOmitsPullRequests(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Number != "11" {
 		t.Errorf("ListIssues = %+v, want only issue 11", got)
+	}
+}
+
+// SeedJobLogFailure scripts a failing GitHub Actions job on the PR: a CheckRun
+// whose detailsUrl names the job, and the job's log.
+func (h *connectorHarness) SeedJobLogFailure(url, name, jobID, log string) {
+	h.mutatePR(prNum(url), func(p *restPR) {
+		p.contexts = append(p.contexts, scriptedContext{
+			TypeName: "CheckRun", Name: name, Conclusion: "FAILURE", Summary: "exit status 1",
+			DetailsURL: "https://" + connectorWebHost + "/" + connectorRepo + "/actions/runs/900/job/" + jobID,
+		})
+	})
+	h.backend.mu.Lock()
+	defer h.backend.mu.Unlock()
+	h.backend.jobLogs[jobID] = log
+}
+
+// A failing job's log reaches the fix pass's detail as a capped tail, fetched
+// by the Connector through the log Route's one redirect hop.
+func testJobLogExcerpt(t *testing.T, h *connectorHarness) {
+	url := h.SeedOpenPR("302")
+	log := "FIRST-LINE-MARKER\n" + strings.Repeat("padding line of test output\n", 400) + "--- FAIL: TestX\nLAST-LINE-MARKER\n"
+	h.SeedJobLogFailure(url, "unit", "12345", log)
+
+	got, err := h.Forge().FailureDetail(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"unit: FAILURE\nexit status 1\n", "--- FAIL: TestX\nLAST-LINE-MARKER", `[log excerpt for "unit" trimmed`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("FailureDetail lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "FIRST-LINE-MARKER") {
+		t.Errorf("FailureDetail kept the head of a log over the excerpt cap:\n%s", got)
+	}
+
+	var redirected bool
+	for _, e := range h.auditEntries(t) {
+		if strings.HasSuffix(e.Path, "/actions/jobs/12345/logs") {
+			redirected = e.Decision == connectorhost.DecisionSent && e.RedirectHost != ""
+		}
+	}
+	if !redirected {
+		t.Errorf("audit lacks a sent log read with a followed redirect:\n%s", h.audit)
 	}
 }

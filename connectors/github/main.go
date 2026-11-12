@@ -23,6 +23,7 @@ func init() {
 		PRsForBranch: prsForBranch,
 		PR:           pr,
 		Checks:       checks,
+		JobLog:       jobLog,
 	})
 }
 

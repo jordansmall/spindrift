@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
@@ -387,5 +388,95 @@ func TestGuestErrorsPropagate(t *testing.T) {
 	}
 	if _, err := f.FailureDetail(prURL7); err == nil {
 		t.Error("FailureDetail swallowed the guest error")
+	}
+}
+
+func TestFailureDetailCarriesTheFailingJobLog(t *testing.T) {
+	f, calls := newTestForge(t, map[string]string{
+		"forge.checks": rollupJSON(t, []wireCheck{
+			{Kind: "CheckRun", Name: "build", Conclusion: "SUCCESS", JobID: "1"},
+			{Kind: "CheckRun", Name: "unit", Conclusion: "FAILURE", Summary: "exit 1", JobID: "42"},
+			{Kind: "CheckRun", Name: "app", Conclusion: "FAILURE"}, // not a workflow job
+		}),
+		"forge.jobLog": `{"log":"--- FAIL: TestX\nboom\n"}`,
+	})
+	got, err := f.FailureDetail(prURL7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := forge.RenderFailureDetail([]forge.FailureDetailEntry{
+		{Name: "unit", State: "FAILURE", Summary: "exit 1", Log: "--- FAIL: TestX\nboom\n"},
+		{Name: "app", State: "FAILURE"},
+	})
+	if got != want {
+		t.Errorf("FailureDetail =\n%s\nwant\n%s", got, want)
+	}
+	var logCalls []recordedCall
+	for _, c := range *calls {
+		if c.method == "forge.jobLog" {
+			logCalls = append(logCalls, c)
+		}
+	}
+	wantCall := recordedCall{"forge.jobLog", map[string]any{
+		"target": map[string]any{"api": "https://api.example", "repo": "o/r"},
+		"jobId":  "42",
+		"tail":   float64(forge.JobLogKeepBytes),
+	}}
+	if len(logCalls) != 1 || !reflect.DeepEqual(logCalls[0], wantCall) {
+		t.Errorf("jobLog calls = %v, want [%v]", logCalls, wantCall)
+	}
+}
+
+func TestFailureDetailSurvivesAnUnreadableLog(t *testing.T) {
+	// The stub guest has no forge.jobLog, as with a Connector that predates it
+	// or a log the forge refuses.
+	f, _ := newTestForge(t, map[string]string{"forge.checks": rollupJSON(t, []wireCheck{
+		{Kind: "CheckRun", Name: "unit", Conclusion: "FAILURE", Summary: "exit 1", JobID: "42"},
+	})})
+	got, err := f.FailureDetail(prURL7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "unit: FAILURE\nexit 1\n---"; got != want {
+		t.Errorf("FailureDetail = %q, want %q", got, want)
+	}
+}
+
+func TestFailureDetailCapsAHostileLog(t *testing.T) {
+	huge, _ := json.Marshal(strings.Repeat("x\n", 10*forge.MaxFailureDetailBytes))
+	f, _ := newTestForge(t, map[string]string{
+		"forge.checks": rollupJSON(t, []wireCheck{{Kind: "CheckRun", Name: "unit", Conclusion: "FAILURE", JobID: "42"}}),
+		"forge.jobLog": `{"log":` + string(huge) + `}`,
+	})
+	got, err := f.FailureDetail(prURL7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) > forge.MaxFailureDetailBytes {
+		t.Errorf("len = %d, want <= %d", len(got), forge.MaxFailureDetailBytes)
+	}
+}
+
+func TestFailureDetailSkipsLogsOnceTheBudgetIsSpent(t *testing.T) {
+	old := jobLogsBudget
+	jobLogsBudget = -time.Second
+	t.Cleanup(func() { jobLogsBudget = old })
+	f, calls := newTestForge(t, map[string]string{
+		"forge.checks": rollupJSON(t, []wireCheck{
+			{Kind: "CheckRun", Name: "unit", Conclusion: "FAILURE", Summary: "exit 1", JobID: "42"},
+		}),
+		"forge.jobLog": `{"log":"boom\n"}`,
+	})
+	got, err := f.FailureDetail(prURL7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "unit: FAILURE\nexit 1\n---"; got != want {
+		t.Errorf("FailureDetail = %q, want %q", got, want)
+	}
+	for _, c := range *calls {
+		if c.method == "forge.jobLog" {
+			t.Errorf("forge.jobLog called after the budget was spent: %+v", c)
+		}
 	}
 }
