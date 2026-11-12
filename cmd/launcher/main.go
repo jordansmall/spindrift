@@ -953,6 +953,7 @@ func wavesConfig(c config) waves.Config {
 		OverlapGate:    c.OverlapGate,
 		SettledLabels:  settledLabels(c),
 		FailedLabel:    c.FailedLabel,
+		BranchPrefix:   c.BranchPrefix,
 		IgnoreBlockers: c.kind().AdviseOnly,
 		Verb:           c.kind().Verb,
 		// The same tuning dispatch's exit-retry path and settleConfig thread
@@ -1303,7 +1304,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 	if !queue {
 		gateSettled = slices.DeleteFunc(gateSettled, func(l string) bool { return slices.Contains(fi.Labels, l) })
 	}
-	gate := shutdown.NewGate(stopCh, abortCh, it, cf, reaper, terminated, gateSettled)
+	gate := shutdown.NewGate(stopCh, abortCh, it, cf, c.BranchPrefix, reaper, terminated, gateSettled)
 	gate.Watch()
 	// Settle is idempotent (gate.go), so deferring it here reaches every one
 	// of this function's early returns, not just the two happy-path arms that
@@ -1966,6 +1967,7 @@ func cmdConsole(lc *launchContext, stdin io.Reader, stdout, stderr io.Writer) in
 	defer researchFactory.Cleanup()
 	launch := &console.Launcher{
 		CodeForge:       lc.codeForge,
+		BranchPrefix:    lc.config.BranchPrefix,
 		Factory:         lc.factory,
 		Settle:          lc.merge,
 		Terminated:      lc.terminated,

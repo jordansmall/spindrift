@@ -80,7 +80,8 @@ func (t Trigger) wording() wording {
 // rather than concrete types: pass a nil interface when there is none, never a
 // typed nil boxed into one (a nil *dispatch.Factory, say), or the nil guards
 // below will not see it as nil.
-func Reclaim(tracker forge.IssueTracker, cf forge.CodeForge, reaper Reaper, reg *Registry, num string, trigger Trigger) error {
+// branchPrefix is BRANCH_PREFIX, naming num's agent branch.
+func Reclaim(tracker forge.IssueTracker, cf forge.CodeForge, branchPrefix string, reaper Reaper, reg *Registry, num string, trigger Trigger) error {
 	reg.Mark(num)
 
 	var killErr error
@@ -96,7 +97,7 @@ func Reclaim(tracker forge.IssueTracker, cf forge.CodeForge, reaper Reaper, reg 
 
 	danglingNote := "no open branch/PR found"
 	if cf != nil {
-		branch := cf.AgentBranch(num)
+		branch := forge.AgentBranchName(branchPrefix, num)
 		if res, err := forge.ResolveOpenPR(cf, branch); err == nil && res.Found {
 			danglingNote = res.URL
 		} else if branch != "" {

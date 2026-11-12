@@ -112,6 +112,9 @@ type Config struct {
 	// state; the abort spares an issue wearing one.
 	SettledLabels []string
 	FailedLabel   string
+	// BranchPrefix is BRANCH_PREFIX, naming the agent branch that blocker
+	// readiness, overlap touches, and an abort's reclaim resolve.
+	BranchPrefix string
 
 	// IgnoreBlockers skips blocker-edge gating for the advise-only dispatch
 	// kinds (research, ADR 0022; butler): they land no code, so they are never

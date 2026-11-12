@@ -4116,6 +4116,24 @@ func TestSettleConfig_BaseBranchThreadsFromConfig(t *testing.T) {
 	}
 }
 
+// BRANCH_PREFIX reaches settle and both wave-engine configs, so every branch
+// name they resolve matches the one the Box pushed.
+func TestConfigs_ThreadBranchPrefix(t *testing.T) {
+	fc := forge.NewFake()
+	c := minimalValidConfig()
+	c.BranchPrefix = "bot/"
+
+	if got := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc, forge.Capabilities{}).BranchPrefix; got != "bot/" {
+		t.Errorf("settleConfig(c).BranchPrefix = %q, want %q", got, "bot/")
+	}
+	if got := wavesConfig(c).BranchPrefix; got != "bot/" {
+		t.Errorf("wavesConfig(c).BranchPrefix = %q, want %q", got, "bot/")
+	}
+	if got := selectiveWavesConfig(c).BranchPrefix; got != "bot/" {
+		t.Errorf("selectiveWavesConfig(c).BranchPrefix = %q, want %q", got, "bot/")
+	}
+}
+
 // wavesConfig threads c.TransientRetryMax and c.TransientBackoffSecs into
 // waves.Config's Policy field (issues #2866, #2928): the same launcher-wide
 // knobs dispatch's exit-retry path and settleConfig thread, now reaching

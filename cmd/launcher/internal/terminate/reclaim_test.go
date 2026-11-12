@@ -60,7 +60,7 @@ func TestReclaim_ReapsTransitionsAndComments(t *testing.T) {
 	fc, fr, factory, dir := newReclaimFixture(t)
 	fc.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/owner/repo/pull/7"})
 
-	if err := terminate.Reclaim(fc, fc, factory, terminate.NewRegistry(), "42", terminate.Gesture); err != nil {
+	if err := terminate.Reclaim(fc, fc, "agent/issue-", factory, terminate.NewRegistry(), "42", terminate.Gesture); err != nil {
 		t.Fatalf("Reclaim: %v", err)
 	}
 
@@ -112,7 +112,7 @@ func TestReclaim_MarksRegistry(t *testing.T) {
 	reg := terminate.NewRegistry()
 	gen := reg.Begin("42")
 
-	if err := terminate.Reclaim(fc, fc, factory, reg, "42", terminate.Gesture); err != nil {
+	if err := terminate.Reclaim(fc, fc, "agent/issue-", factory, reg, "42", terminate.Gesture); err != nil {
 		t.Fatalf("Reclaim: %v", err)
 	}
 
@@ -128,7 +128,7 @@ func TestReclaim_PropagatesKillError(t *testing.T) {
 	fc, fr, factory, _ := newReclaimFixture(t)
 	fr.KillErr = errors.New("boom: kill failed")
 
-	err := terminate.Reclaim(fc, fc, factory, terminate.NewRegistry(), "42", terminate.Gesture)
+	err := terminate.Reclaim(fc, fc, "agent/issue-", factory, terminate.NewRegistry(), "42", terminate.Gesture)
 	if err != fr.KillErr {
 		t.Fatalf("Reclaim err = %v, want %v", err, fr.KillErr)
 	}
@@ -147,7 +147,7 @@ func TestReclaim_PropagatesKillError(t *testing.T) {
 func TestReclaim_NotesDanglingBranchWhenNoOpenPR(t *testing.T) {
 	fc := newFakeForge(t)
 
-	if err := terminate.Reclaim(fc, fc, nil, terminate.NewRegistry(), "42", terminate.Gesture); err != nil {
+	if err := terminate.Reclaim(fc, fc, "agent/issue-", nil, terminate.NewRegistry(), "42", terminate.Gesture); err != nil {
 		t.Fatalf("Reclaim: %v", err)
 	}
 
@@ -166,7 +166,7 @@ func TestReclaim_NotesDanglingBranchWhenNoOpenPR(t *testing.T) {
 func TestReclaim_NilReaperAndCodeForge_SafeAndNotesNone(t *testing.T) {
 	fc := newFakeForge(t)
 
-	if err := terminate.Reclaim(fc, nil, nil, terminate.NewRegistry(), "42", terminate.Gesture); err != nil {
+	if err := terminate.Reclaim(fc, nil, "agent/issue-", nil, terminate.NewRegistry(), "42", terminate.Gesture); err != nil {
 		t.Fatalf("Reclaim: %v", err)
 	}
 
@@ -228,7 +228,7 @@ func TestReclaim_WordingNamesTrigger(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fc, _, factory, dir := newReclaimFixture(t)
 
-			if err := terminate.Reclaim(fc, fc, factory, terminate.NewRegistry(), "42", tt.trigger); err != nil {
+			if err := terminate.Reclaim(fc, fc, "agent/issue-", factory, terminate.NewRegistry(), "42", tt.trigger); err != nil {
 				t.Fatalf("Reclaim: %v", err)
 			}
 
@@ -256,5 +256,19 @@ func TestReclaim_WordingNamesTrigger(t *testing.T) {
 				t.Errorf("terminal log must carry %q; got %q", tt.wantLogLine, log)
 			}
 		})
+	}
+}
+
+// Reclaim names the dangling branch from the prefix it is passed, not from the
+// forge fake, whose own BranchPrefix is left empty here.
+func TestReclaim_NamesBranchFromPassedPrefix(t *testing.T) {
+	fc := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	fc.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-in-progress"}})
+
+	if err := terminate.Reclaim(fc, fc, "agent/issue-", nil, terminate.NewRegistry(), "42", terminate.Gesture); err != nil {
+		t.Fatalf("Reclaim: %v", err)
+	}
+	if len(fc.CommentCalls) != 1 || !strings.Contains(fc.CommentCalls[0].Body, "branch=agent/issue-42") {
+		t.Errorf("CommentCalls = %+v, want one naming branch=agent/issue-42", fc.CommentCalls)
 	}
 }
