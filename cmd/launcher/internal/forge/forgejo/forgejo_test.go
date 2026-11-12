@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"reflect"
 	"slices"
@@ -2149,5 +2150,92 @@ func TestForgejoClient_TransitionState_CompleteStripsStaleFailed(t *testing.T) {
 	}
 	if len(iss.Labels) != 1 || iss.Labels[0] != "agent-complete" {
 		t.Errorf("labels = %v, want exactly [agent-complete]", iss.Labels)
+	}
+}
+
+func TestForgejoClient_ImplementsIssueSearcher(t *testing.T) {
+	if _, ok := forgejo.NewForgejoClient(forgejo.ForgejoConfig{}).(forge.IssueSearcher); !ok {
+		t.Error("forgejoClient does not satisfy forge.IssueSearcher, want it implemented")
+	}
+}
+
+// The text travels only as the q query value; labels= narrows server-side and
+// a client-side re-check drops what an ignored filter let through.
+func TestForgejoClient_SearchIssues_QueriesAndRefiltersLabel(t *testing.T) {
+	var got url.Values
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
+			serveLabels(w, r, `[{"name":"agent-review-finding"}]`)
+			return
+		}
+		if serveNoOrgLabels(w, r) {
+			return
+		}
+		gotPath, got = r.URL.Path, r.URL.Query()
+		w.Write(mixedLabelFixture("agent-review-finding"))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.IssueSearcher)
+	issues, err := fc.SearchIssues("a/b ?x=1&type=pulls", forge.IssueClosed, "agent-review-finding", 7)
+	if err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	assertOnlyIssue5(t, "SearchIssues", issues)
+	if gotPath != "/api/v1/repos/owner/repo/issues" {
+		t.Errorf("path = %q", gotPath)
+	}
+	for k, want := range map[string]string{
+		"q": "a/b ?x=1&type=pulls", "type": "issues", "state": "closed", "limit": "7", "labels": "agent-review-finding",
+	} {
+		if got.Get(k) != want {
+			t.Errorf("query %s = %q, want %q", k, got.Get(k), want)
+		}
+	}
+}
+
+func TestForgejoClient_SearchIssues_NoLabelSendsNoLabelsParam(t *testing.T) {
+	var got url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Query()
+		w.Write(mixedLabelFixture("x"))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.IssueSearcher)
+	issues, err := fc.SearchIssues("t", forge.IssueOpen, "", 10)
+	if err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	if len(issues) != 2 || got.Has("labels") || got.Get("state") != "open" {
+		t.Errorf("issues = %+v, query = %v", issues, got)
+	}
+	if _, err := fc.SearchIssues("t", forge.IssueState("MERGED"), "", 10); err == nil {
+		t.Error("unsupported state: want an error")
+	}
+}
+
+// An undefined label makes Forgejo drop labels= and return every issue, so the
+// search must answer empty without leaning on the capped first page.
+func TestForgejoClient_SearchIssues_UndefinedLabelFindsNothing(t *testing.T) {
+	var issuesRequests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
+			serveLabels(w, r, `[]`)
+			return
+		}
+		if serveNoOrgLabels(w, r) {
+			return
+		}
+		issuesRequests++
+		w.Write(mixedLabelFixture("other"))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.IssueSearcher)
+	issues, err := fc.SearchIssues("t", forge.IssueOpen, "agent-review-finding", 10)
+	if err != nil || len(issues) != 0 || issuesRequests != 0 {
+		t.Errorf("issues=%+v err=%v issuesRequests=%d, want none and no /issues call", issues, err, issuesRequests)
 	}
 }

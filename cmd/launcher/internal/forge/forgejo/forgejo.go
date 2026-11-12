@@ -387,7 +387,7 @@ func (c *forgejoClient) ListIssuesWithLabels(state forge.IssueState, labels []st
 	var restState string
 	switch state {
 	case forge.IssueOpen, forge.IssueClosed:
-		restState = strings.ToLower(string(state))
+		restState = state.Wire()
 	default:
 		return nil, fmt.Errorf("forgejo: unsupported issue state %q", state)
 	}
@@ -402,6 +402,47 @@ func (c *forgejoClient) ListIssuesWithLabels(state forge.IssueState, labels []st
 	return forge.MergeLabeledIssues(issueListSource, present, func(label string) ([]forge.Issue, error) {
 		return c.listIssues(restState, label)
 	})
+}
+
+// SearchIssues implements forge.IssueSearcher (issue #6895). text is sent only
+// as the url-encoded q value, never spliced into the path. A single request
+// serves it: the server caps the page at its own MAX_RESPONSE_ITEMS, which is
+// the intended bound for a dedup lookup. An undefined label short-circuits to
+// no results, since Forgejo would drop labels= and return every issue; a
+// defined one is re-checked client-side for the same reason as listIssues.
+func (c *forgejoClient) SearchIssues(text string, state forge.IssueState, label string, limit int) ([]forge.Issue, error) {
+	var restState string
+	switch state {
+	case forge.IssueOpen, forge.IssueClosed:
+		restState = state.Wire()
+	default:
+		return nil, fmt.Errorf("forgejo: unsupported issue state %q", state)
+	}
+	q := url.Values{
+		"q":     {text},
+		"type":  {"issues"},
+		"state": {restState},
+		"limit": {strconv.Itoa(limit)},
+	}
+	if label != "" {
+		if !c.labelKnownDefined(label) {
+			return nil, nil
+		}
+		q.Set("labels", label)
+	}
+	var payload []forgejoIssuePayload
+	if err := c.rest.Do(http.MethodGet, c.repoPath()+"/issues?"+q.Encode(), nil, &payload); err != nil {
+		return nil, err
+	}
+	var issues []forge.Issue
+	for _, p := range payload {
+		iss := toForgeIssue(p)
+		if label != "" && !slices.Contains(iss.Labels, label) {
+			continue
+		}
+		issues = append(issues, iss)
+	}
+	return issues, nil
 }
 
 // setLabels replaces the full label set on issue num. Forgejo's

@@ -2492,3 +2492,92 @@ exit 1`)
 		t.Fatalf("AddLabels error must contain gh's stderr; got: %q", err.Error())
 	}
 }
+
+func TestExecClient_ImplementsIssueSearcher(t *testing.T) {
+	var _ forge.IssueSearcher = NewExecClient("owner/repo", testLabels)
+}
+
+func TestExecClient_SearchIssues_BuildsScopedQueryAndDecodes(t *testing.T) {
+	dir := prependFakeGH(t, `printf '[{"number":7,"title":"flaky test","state":"CLOSED","labels":[{"name":"agent-review-finding"}]}]'`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
+	issues, err := c.SearchIssues("flaky  test", forge.IssueClosed, "agent-review-finding", 5)
+	if err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	if len(issues) != 1 || issues[0].Number != "7" || issues[0].Title != "flaky test" ||
+		issues[0].State != forge.IssueClosed || len(issues[0].Labels) != 1 || issues[0].Labels[0] != "agent-review-finding" {
+		t.Fatalf("issues = %+v", issues)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	argv := string(raw)
+	for _, want := range []string{
+		"--repo\nowner/repo\n",
+		"--state\nclosed\n",
+		"--label\nagent-review-finding\n",
+		"--limit\n5\n",
+		"--search\n\"flaky\" \"test\" in:title,body\n",
+		"--json\nnumber,title,state,labels\n",
+	} {
+		if !strings.Contains(argv, want) {
+			t.Errorf("argv = %q, want it to contain %q", argv, want)
+		}
+	}
+}
+
+func TestExecClient_SearchIssues_OmitsLabelFlagWhenEmpty(t *testing.T) {
+	dir := prependFakeGH(t, `printf '[]'`)
+	if _, err := NewExecClient("owner/repo", forge.DispatchLabels{}).SearchIssues("x", forge.IssueOpen, "", 3); err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	if strings.Contains(string(raw), "--label") {
+		t.Errorf("argv = %q, want no --label", raw)
+	}
+}
+
+// The text comes from an untrusted Box. A qualifier such as repo:other/x would
+// OR another repository into the search, so every term is quoted into a literal.
+func TestExecClient_SearchIssues_NeutralisesSearchQualifiers(t *testing.T) {
+	dir := prependFakeGH(t, `printf '[]'`)
+	if _, err := NewExecClient("owner/repo", forge.DispatchLabels{}).SearchIssues("repo:evil/x is:pr   -label:y", forge.IssueOpen, "", 3); err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	want := "--search\n\"repo:evil/x\" \"is:pr\" \"-label:y\" in:title,body\n"
+	if !strings.Contains(string(raw), want) {
+		t.Errorf("argv = %q, want it to contain %q", raw, want)
+	}
+	for _, q := range []string{"repo:evil/x", "is:pr", "-label:y"} {
+		if strings.Contains(strings.ReplaceAll(string(raw), `"`+q+`"`, ""), q) {
+			t.Errorf("argv = %q carries %q unquoted", raw, q)
+		}
+	}
+}
+
+func TestExecClient_SearchIssues_RejectsUnsearchableInput(t *testing.T) {
+	dir := prependFakeGH(t, `printf '[]'`)
+	c := NewExecClient("owner/repo", forge.DispatchLabels{})
+	for name, text := range map[string]string{
+		"double quote": `a" repo:evil/x "b`,
+		"backslash":    `a\ repo:evil/x`,
+		"newline":      "a\nrepo:evil/x",
+		"tab":          "a\tb",
+		"nul":          "a\x00b",
+		"empty":        "   ",
+	} {
+		if _, err := c.SearchIssues(text, forge.IssueOpen, "", 3); err == nil {
+			t.Errorf("%s: SearchIssues(%q) = nil error, want rejection", name, text)
+		}
+	}
+	if _, err := c.SearchIssues("x", forge.IssueState("MERGED"), "", 3); err == nil {
+		t.Error("unsupported state: want an error")
+	}
+	if calls, _ := filepath.Glob(filepath.Join(dir, "call-*.txt")); len(calls) != 0 {
+		t.Errorf("gh was invoked %d times for rejected input, want 0", len(calls))
+	}
+}

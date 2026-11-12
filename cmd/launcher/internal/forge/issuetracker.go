@@ -126,6 +126,23 @@ type LabeledBacklogLister interface {
 	ListIssuesWithLabels(state IssueState, labels []string) ([]Issue, error)
 }
 
+// IssueSearcher is the optional IssueTracker capability for a free-text search
+// of the backlog, so the in-Box Filer can dedup against it without a forge
+// token (issue #6895). The query comes from an untrusted Box: an
+// implementation must treat it as plain terms, never as tracker query syntax
+// that could widen the search past this repo.
+type IssueSearcher interface {
+	// SearchIssues returns the issues in state whose title or body contains
+	// every whitespace-separated term of text, in the tracker's own order, at
+	// most limit.
+	// state must be IssueOpen or IssueClosed. A non-empty label restricts the
+	// result to issues carrying exactly that label. Results carry Number,
+	// Title, State and Labels. An implementation MAY return an error for text it
+	// cannot search verbatim: GitHub rejects a double quote, backslash or
+	// control character; the other adapters pass the text through.
+	SearchIssues(text string, state IssueState, label string, limit int) ([]Issue, error)
+}
+
 // MergeLabeledIssues calls fetch once per label, merges the results by
 // Number, and sorts them newest first. A failed label is logged and
 // skipped rather than aborting the whole scan: the repo may simply lack one
