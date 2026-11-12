@@ -268,13 +268,15 @@ rec {
       settings,
       artifacts,
       drivers ? [ ],
+      backends ? [ ],
     }:
     builtins.toJSON (
       {
         inherit settings artifacts;
       }
-      # Absent when no Connector declares an outside Driver, so an existing
-      # document stays byte-identical.
+      # Absent when no Connector declares an outside Driver or backend, so an
+      # existing document stays byte-identical.
       // (if drivers == [ ] then { } else { inherit drivers; })
+      // (if backends == [ ] then { } else { inherit backends; })
     );
 }

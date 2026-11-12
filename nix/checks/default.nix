@@ -126,6 +126,7 @@ let
     // (import ./eval-probe.nix common)
     // (import ./core-entry.nix (common // { inherit rootFlakeModule; }))
     // (import ./connectors.nix common)
+    // (import ./connector-backend-rows.nix common)
     // (import ./connector-driver-rows.nix common)
     // (import ./connector-escape-guard.nix common)
     // (import ./wazero-pin-guard.nix common)

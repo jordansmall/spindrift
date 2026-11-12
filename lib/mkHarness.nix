@@ -123,6 +123,12 @@
   # outside the core registry is carried to the host and Box binaries; `driver`
   # may select one.
   driverRows ? { },
+  # Backend rows network Connectors declare (lib/flakeModule.nix's
+  # spindrift.connectors.<name>.backend), keyed by Connector name, each
+  # `{ module = pkgs: <wasm file path>; routes = [ { method; host; path; } ];
+  # credentialEnv = "<env var>"; }`. They reach the host binaries through the
+  # launcher input document's `backends` section (ADR 0073, issue #6805).
+  backendRows ? { },
   # Names of core Drivers whose Connector row (a `driverRows` entry carrying
   # `module`) runs in shadow mode (ADR 0073, issue #6797): the native Strategy
   # stays authoritative while the Box replays each Pass log through the
@@ -527,6 +533,28 @@ let
     docDriverRows p
     ++ lib.optional shadowActive (rowOf p connectorEntries.${driver} // { shadow = true; });
   driverRowsFile = pkgs.writeText "driver-rows.json" (builtins.toJSON (boxDriverRows pkgs));
+
+  # Backend rows (issue #6805): the Go side refuses a built-in name, a row
+  # missing its module or credential env, and a bad Route table; refusing them
+  # here too fails the build naming the Connector.
+  coreBackendNames = map (b: b.name) (lib.filter (b: b.core or false) backends);
+  checkBackendRow =
+    name: row:
+    if lib.elem name coreBackendNames then
+      throw "mkHarness: backendRows.${name} is a built-in backend and cannot be replaced by a Connector row"
+    else if !(builtins.isFunction (row.module or null)) then
+      throw "mkHarness: backendRows.${name} must carry `module`, a function of pkgs returning the Connector's wasm path"
+    else if !(builtins.isString (row.credentialEnv or null) && row.credentialEnv != "") then
+      throw "mkHarness: backendRows.${name} must carry a non-empty string `credentialEnv`"
+    else
+      row // { routes = (import ./connector-routes.nix).check name (row.routes or null); };
+  docBackendRows =
+    p:
+    lib.mapAttrsToList (name: r: {
+      inherit name;
+      module = r.module p;
+      inherit (r) routes credentialEnv;
+    }) (lib.mapAttrs checkBackendRow backendRows);
   driverEntry =
     driverEntries.${driver}
       or (throw "mkHarness: unknown driver '${driver}'; known drivers: ${lib.concatStringsSep ", " (lib.attrNames driverEntries)}");
@@ -1376,6 +1404,7 @@ let
       settings = documentSettings;
       artifacts = runArtifacts;
       drivers = docDriverRows hostPkgs;
+      backends = docBackendRows hostPkgs;
     }
   );
 
