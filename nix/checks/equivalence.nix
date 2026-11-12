@@ -2296,6 +2296,7 @@ in
         "kindPrompts"
         "rosterWarnings"
         "deprecatedFragmentVarWarnings"
+        "deprecatedDefaults"
       ];
       actual = builtins.attrNames harness.internals;
     in

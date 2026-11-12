@@ -269,6 +269,7 @@ rec {
       artifacts,
       drivers ? [ ],
       backends ? [ ],
+      deprecatedDefaults ? { },
     }:
     builtins.toJSON (
       {
@@ -278,5 +279,6 @@ rec {
       # existing document stays byte-identical.
       // (if drivers == [ ] then { } else { inherit drivers; })
       // (if backends == [ ] then { } else { inherit backends; })
+      // (if deprecatedDefaults == { } then { } else { inherit deprecatedDefaults; })
     );
 }
