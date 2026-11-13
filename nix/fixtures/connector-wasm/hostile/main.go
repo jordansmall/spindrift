@@ -33,7 +33,7 @@ func pack(b []byte) uint64 {
 //
 //go:wasmexport connector_handshake
 func connectorHandshake() uint64 {
-	result = []byte(`{"protocolVersion":"0.1.0","capabilities":["fixture.hostile"]}`)
+	result = []byte(`{"protocolVersion":"0.3.0","capabilities":["fixture.hostile"]}`)
 	return pack(result)
 }
 
