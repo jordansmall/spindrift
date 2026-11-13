@@ -137,20 +137,92 @@ func (b *restBackend) serveWrite(w http.ResponseWriter, r *http.Request, reject 
 		}
 		writeJSON(w, rules)
 	case r.Method == http.MethodPost && strings.HasPrefix(path, repo+"/issues/") && strings.HasSuffix(path, "/comments"):
-		p := b.prByNumber(strings.TrimSuffix(strings.TrimPrefix(path, repo+"/issues/"), "/comments"))
+		num := strings.TrimSuffix(strings.TrimPrefix(path, repo+"/issues/"), "/comments")
 		var in struct {
 			Body string `json:"body"`
 		}
-		if p == nil || json.NewDecoder(r.Body).Decode(&in) != nil {
-			reject("comment on no such pull request, or an undecodable body")
+		if json.NewDecoder(r.Body).Decode(&in) != nil {
+			reject("undecodable comment")
 			return true
 		}
-		p.comments = append(p.comments, in.Body)
+		switch p, i := b.prByNumber(num), b.find(num); {
+		case p != nil:
+			p.comments = append(p.comments, in.Body)
+		case i != nil:
+			i.comments = append(i.comments, in.Body)
+		default:
+			// A plain 404, not reject: the contract's failing-comment target is
+			// an unknown number and must fail the Comment without failing the run.
+			writeJSONStatus(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+			return true
+		}
+		writeJSONStatus(w, http.StatusCreated, map[string]any{})
+	case r.Method == http.MethodPost && path == repo+"/issues":
+		b.createIssue(w, r, reject)
+	case r.Method == http.MethodPost && strings.HasPrefix(path, repo+"/issues/") && strings.HasSuffix(path, "/labels"):
+		i := b.find(strings.TrimSuffix(strings.TrimPrefix(path, repo+"/issues/"), "/labels"))
+		var in struct {
+			Labels []string `json:"labels"`
+		}
+		if i == nil || json.NewDecoder(r.Body).Decode(&in) != nil {
+			reject("labels added to no such issue, or an undecodable body")
+			return true
+		}
+		for _, l := range in.Labels {
+			if !hasLabel(i.labels, l) {
+				i.labels = append(i.labels, l)
+			}
+		}
+		writeJSON(w, wireIssue(i)["labels"])
+	case r.Method == http.MethodGet && path == repo+"/labels":
+		all := make([]any, len(b.labels))
+		for n, l := range b.labels {
+			all[n] = map[string]string{"name": l}
+		}
+		writeJSON(w, page(r.URL.Query(), all))
+	case r.Method == http.MethodPost && path == repo+"/labels":
+		var in struct {
+			Name string `json:"name"`
+		}
+		if json.NewDecoder(r.Body).Decode(&in) != nil || in.Name == "" {
+			reject("undecodable label")
+			return true
+		}
+		if slices.Contains(b.labels, in.Name) {
+			writeJSONStatus(w, http.StatusUnprocessableEntity, map[string]string{"message": "Validation Failed: already_exists"})
+			return true
+		}
+		b.labels = append(b.labels, in.Name)
 		writeJSONStatus(w, http.StatusCreated, map[string]any{})
 	default:
 		return false
 	}
 	return true
+}
+
+// createIssue files an issue as GitHub does: a title is required, and the
+// reply carries the issue's html_url. Filed issues number above every number
+// the tests seed by hand.
+func (b *restBackend) createIssue(w http.ResponseWriter, r *http.Request, reject func(string)) {
+	var in struct {
+		Title  string   `json:"title"`
+		Body   string   `json:"body"`
+		Labels []string `json:"labels"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		reject("undecodable issue: " + err.Error())
+		return
+	}
+	if in.Title == "" {
+		writeJSONStatus(w, http.StatusUnprocessableEntity, map[string]string{"message": "Validation Failed: title missing"})
+		return
+	}
+	n := 7000
+	for num := range b.issues {
+		n = max(n, num+1)
+	}
+	b.issues[n] = &restIssue{num: n, title: in.Title, body: in.Body, labels: in.Labels}
+	writeJSONStatus(w, http.StatusCreated, map[string]any{"number": n, "html_url": b.web + "/issues/" + strconv.Itoa(n)})
 }
 
 // openPR creates a PR as GitHub does: the head must be a real branch, and one
@@ -598,4 +670,88 @@ func testBaseMovedOn(t *testing.T, h *connectorHarness) {
 	if !h.backend.repo.Rebased(branch) {
 		t.Error("branch does not contain the base after Rebase")
 	}
+}
+
+// labelID is a label's node id; GitHub resolves label(name:) against the
+// repository's registry, and a label applied to an issue joins it, so the
+// registry here is b.labels plus every label on an issue.
+func (b *restBackend) labelID(name string) (string, bool) {
+	known := slices.Contains(b.labels, name)
+	for _, i := range b.issues {
+		known = known || hasLabel(i.labels, name)
+	}
+	return "LA_" + name, known
+}
+
+// labelIDs serves the query removeLabels sends: the issue's node id and one
+// aliased label(name:$nK) per name, null for a label the repository lacks. A
+// name must arrive as a variable, as it may carry any character.
+func (b *restBackend) labelIDs(w http.ResponseWriter, raw []byte, slug string, number int, reject func(string)) {
+	var req struct {
+		Query     string         `json:"query"`
+		Variables map[string]any `json:"variables"`
+	}
+	if err := json.Unmarshal(raw, &req); err != nil || slug != connectorRepo {
+		reject("label query undecodable or for another repository")
+		return
+	}
+	repo := map[string]any{"issue": nil}
+	var errs []map[string]string
+	if i := b.issues[number]; i != nil && !i.pull {
+		repo["issue"] = map[string]any{"id": "I_" + strconv.Itoa(number)}
+	} else {
+		// GitHub answers a missing number with a null issue and a NOT_FOUND error.
+		errs = append(errs, map[string]string{"type": "NOT_FOUND", "message": "Could not resolve to an issue or pull request with the number of " + strconv.Itoa(number) + "."})
+	}
+	for k := 0; ; k++ {
+		alias := "l" + strconv.Itoa(k)
+		if !strings.Contains(req.Query, " "+alias+":label(name:$n"+strconv.Itoa(k)+")") {
+			break
+		}
+		name, _ := req.Variables["n"+strconv.Itoa(k)].(string)
+		if id, known := b.labelID(name); known {
+			repo[alias] = map[string]any{"id": id}
+		} else {
+			repo[alias] = nil
+		}
+	}
+	resp := map[string]any{"data": map[string]any{"repository": repo}}
+	if errs != nil {
+		resp["errors"] = errs
+	}
+	writeJSON(w, resp)
+}
+
+// removeLabels serves removeLabelsFromLabelable: it strips the labels whose ids
+// it issued from the issue whose node id it issued.
+func (b *restBackend) removeLabels(w http.ResponseWriter, raw []byte, reject func(string)) {
+	var req struct {
+		Variables struct {
+			ID  string   `json:"id"`
+			IDs []string `json:"ids"`
+		} `json:"variables"`
+	}
+	if err := json.Unmarshal(raw, &req); err != nil || len(req.Variables.IDs) == 0 {
+		reject("label removal undecodable or with no label ids")
+		return
+	}
+	var i *restIssue
+	for n, c := range b.issues {
+		if "I_"+strconv.Itoa(n) == req.Variables.ID {
+			i = c
+		}
+	}
+	if i == nil {
+		reject("labels removed from no such issue node")
+		return
+	}
+	for _, id := range req.Variables.IDs {
+		name, ok := strings.CutPrefix(id, "LA_")
+		if !ok {
+			reject("label removal with an id the fake never issued")
+			return
+		}
+		i.labels = slices.DeleteFunc(i.labels, func(l string) bool { return l == name })
+	}
+	writeJSON(w, map[string]any{"data": map[string]any{"removeLabelsFromLabelable": map[string]any{"clientMutationId": nil}}})
 }

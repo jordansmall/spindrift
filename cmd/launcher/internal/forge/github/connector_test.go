@@ -43,6 +43,7 @@ type restIssue struct {
 	blockedBy  []string
 	failNative bool
 	pull       bool
+	comments   []string
 }
 
 // scriptedContext is one node of a statusCheckRollup contexts union, in the
@@ -107,6 +108,14 @@ type restBackend struct {
 	// merge requests answer, in order, before the real answer resumes.
 	merges        int
 	mergeStatuses []int
+	// labels is the repository's label registry; hits counts every request the
+	// server received, accepted or not; tokens are extra Authorization values
+	// it accepts beside connectorToken's, and auths the Authorization of each
+	// request it accepted, in order.
+	labels []string
+	hits   int
+	tokens map[string]bool
+	auths  []string
 }
 
 // newRESTBackend starts the backend and a real bare repository. Production git
@@ -137,6 +146,7 @@ func newRESTBackend(t *testing.T) *restBackend {
 func (b *restBackend) serve(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.hits++
 	reject := func(why string) {
 		b.unexpected = append(b.unexpected, r.Method+" "+r.URL.RequestURI()+": "+why)
 		http.NotFound(w, r)
@@ -151,10 +161,12 @@ func (b *restBackend) serve(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(log))
 		return
 	}
-	if r.Header.Get("Authorization") != "Bearer "+connectorToken {
+	auth := r.Header.Get("Authorization")
+	if auth != "Bearer "+connectorToken && !b.tokens[auth] {
 		reject("missing host credential")
 		return
 	}
+	b.auths = append(b.auths, auth)
 	if r.URL.Path == "/graphql" {
 		b.graphql(w, r, reject)
 		return
@@ -290,6 +302,11 @@ func (b *restBackend) graphql(w http.ResponseWriter, r *http.Request, reject fun
 		reject("graphql is POST only")
 		return
 	}
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		reject("unreadable graphql body: " + err.Error())
+		return
+	}
 	var req struct {
 		Query     string `json:"query"`
 		Variables struct {
@@ -299,11 +316,17 @@ func (b *restBackend) graphql(w http.ResponseWriter, r *http.Request, reject fun
 			ID     string `json:"id"`
 		} `json:"variables"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(raw, &req); err != nil {
 		reject("undecodable graphql body: " + err.Error())
 		return
 	}
 	switch {
+	case strings.Contains(req.Query, "removeLabelsFromLabelable"):
+		b.removeLabels(w, raw, reject)
+		return
+	case strings.Contains(req.Query, "label(name:"):
+		b.labelIDs(w, raw, req.Variables.Owner+"/"+req.Variables.Repo, req.Variables.Number, reject)
+		return
 	case strings.Contains(req.Query, "autoMergeAllowed"):
 		b.repoQuery(w, req.Variables.Owner, req.Variables.Repo)
 		return
@@ -495,6 +518,20 @@ func newConnectorHarness(t *testing.T) *connectorHarness { return newComposedHar
 // scripted backend stands in for it.
 func loadGithubConnector(t *testing.T, host, repo string, client *http.Client, audit io.Writer) (*connectorhost.Connector, []connectorhost.Route) {
 	t.Helper()
+	return loadGithubConnectorAs(t, host, repo, client, audit, stampConnectorToken)
+}
+
+// stampConnectorToken is the static credential the Connector's requests carry
+// unless a test supplies its own.
+func stampConnectorToken(r *http.Request) error {
+	r.Header.Set("Authorization", "Bearer "+connectorToken)
+	return nil
+}
+
+// loadGithubConnectorAs is loadGithubConnector with the credential authorize
+// stamps on each request.
+func loadGithubConnectorAs(t *testing.T, host, repo string, client *http.Client, audit io.Writer, authorize func(*http.Request) error) (*connectorhost.Connector, []connectorhost.Route) {
+	t.Helper()
 	path := os.Getenv(connectorWasmEnv)
 	if path == "" {
 		t.Skipf("%s unset: no compiled github Connector to test", connectorWasmEnv)
@@ -519,14 +556,11 @@ func loadGithubConnector(t *testing.T, host, repo string, client *http.Client, a
 	}
 	routes := connectortracker.Routes(declared, repo)
 	conn, err := connectorhost.LoadNetwork(context.Background(), wasm, connectorhost.Network{
-		Name:   "github",
-		Routes: routes,
-		Authorize: func(r *http.Request) error {
-			r.Header.Set("Authorization", "Bearer "+connectorToken)
-			return nil
-		},
-		Client: client,
-		Audit:  connectorhost.NewAuditLog(audit),
+		Name:      "github",
+		Routes:    routes,
+		Authorize: authorize,
+		Client:    client,
+		Audit:     connectorhost.NewAuditLog(audit),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -563,13 +597,22 @@ func newComposedHarness(t *testing.T, readOnlyBox bool) *connectorHarness {
 // targetRepo while the Route table stays pinned to connectorRepo: the hostile
 // fixture for a Connector that reaches outside its declared repository.
 func newHarnessFor(t *testing.T, readOnlyBox bool, targetRepo string) *connectorHarness {
+	return newHarnessWith(t, readOnlyBox, targetRepo, connectortracker.Lifecycle{Labels: testLabels}, nil)
+}
+
+// newHarnessWith is newHarnessFor with the tracker's lifecycle and the
+// credential the Connector's requests carry (nil means stampConnectorToken).
+func newHarnessWith(t *testing.T, readOnlyBox bool, targetRepo string, lc connectortracker.Lifecycle, authorize func(*http.Request) error) *connectorHarness {
 	t.Helper()
+	if authorize == nil {
+		authorize = stampConnectorToken
+	}
 	b := newRESTBackend(t)
 	h := &connectorHarness{t: t, backend: b, audit: &bytes.Buffer{}}
-	conn, routes := loadGithubConnector(t, b.host, connectorRepo, b.Client(), h.audit)
+	conn, routes := loadGithubConnectorAs(t, b.host, connectorRepo, b.Client(), h.audit, authorize)
 	h.conn, h.routes = conn, routes
 	var err error
-	h.tr, err = connectortracker.New(conn, failingWrites{t}, connectortracker.Lifecycle{Labels: testLabels}, connectortracker.Target{API: b.URL, Repo: connectorRepo})
+	h.tr, err = connectortracker.New(conn, failingWrites{t}, lc, connectortracker.Target{API: b.URL, Repo: connectorRepo})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -750,6 +793,21 @@ func TestConnector_Contracts(t *testing.T) {
 		h := newComposedHostMediationHarness(t)
 		forgetest.RunHostMediationContract(t, h)
 		cov.record(t, h.connectorHarness)
+	})
+	t.Run("TrackerWrites", func(t *testing.T) {
+		w := newTrackerWriteHarness(t)
+		testTrackerWrites(t, w)
+		cov.record(t, w.h)
+	})
+	t.Run("HostPostedComment", func(t *testing.T) {
+		w := newTrackerWriteHarness(t)
+		forgetest.RunHostPostedCommentContract(t, w)
+		cov.record(t, w.h)
+	})
+	t.Run("IssueFiler", func(t *testing.T) {
+		w := newTrackerWriteHarness(t)
+		forgetest.RunIssueFilerContract(t, w)
+		cov.record(t, w.h)
 	})
 	cov.assertUsed(t)
 }

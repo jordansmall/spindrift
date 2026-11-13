@@ -295,6 +295,7 @@ let
       "fixturebuild"
       "seamtest"
       "testutil"
+      "tokenrefresh"
       "unixsocket"
       "usage"
     ]
