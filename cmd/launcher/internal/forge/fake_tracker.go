@@ -532,10 +532,9 @@ func (tf *IssueTrackerFake) CreateLabel(name, description, color string) error {
 	})
 }
 
-// missingLabels returns the labels a RequireLabelsExist PostIssue rejects.
+// missingLabels returns the labels a RequireLabelsExist PostIssue rejects. The
+// caller holds tf.mu.
 func (tf *IssueTrackerFake) missingLabels(labels []string) []string {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
 	if !tf.RequireLabelsExist {
 		return nil
 	}

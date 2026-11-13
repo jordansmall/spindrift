@@ -39,30 +39,33 @@ func (tf *IssueTrackerFake) RecordLandingPass(num string, pass int, kind string)
 
 // CloseIssue implements the optional IssueCloser interface (ADR 0029).
 func (tf *IssueTrackerFake) CloseIssue(num string) error {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	tf.CloseIssueCalls = append(tf.CloseIssueCalls, num)
-	if tf.CloseIssueErr != nil {
-		return tf.CloseIssueErr
-	}
-	iss, ok := tf.issues[num]
-	if !ok {
-		return fmt.Errorf("issue %s not found", num)
-	}
-	iss.State = IssueClosed
-	tf.issues[num] = iss
-	return nil
+	return tf.call(http.MethodPost, pathClose, nil, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		tf.CloseIssueCalls = append(tf.CloseIssueCalls, num)
+		if tf.CloseIssueErr != nil {
+			return nil, tf.CloseIssueErr
+		}
+		return nil, tf.closeLocked(num)
+	})
 }
 
 // CloseMergedIssue implements the optional MergeCloser interface (issue #1892).
 // It records into CloseMergedIssueCalls, not CloseIssueCalls.
 func (tf *IssueTrackerFake) CloseMergedIssue(num string) error {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	tf.CloseMergedIssueCalls = append(tf.CloseMergedIssueCalls, num)
-	if tf.CloseMergedIssueErr != nil {
-		return tf.CloseMergedIssueErr
-	}
+	return tf.call(http.MethodPost, pathClose, nil, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		tf.CloseMergedIssueCalls = append(tf.CloseMergedIssueCalls, num)
+		if tf.CloseMergedIssueErr != nil {
+			return nil, tf.CloseMergedIssueErr
+		}
+		return nil, tf.closeLocked(num)
+	})
+}
+
+// closeLocked marks num closed; the caller holds tf.mu.
+func (tf *IssueTrackerFake) closeLocked(num string) error {
 	iss, ok := tf.issues[num]
 	if !ok {
 		return fmt.Errorf("issue %s not found", num)

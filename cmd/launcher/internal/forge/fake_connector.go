@@ -20,12 +20,12 @@ import (
 	"spindrift.dev/launcher/internal/fixturebuild"
 )
 
-// The Fake crosses a real network Connector (ADR 0073, point 7): a read or a
-// forge write is a "fetch" through the Connector host, which checks it against
-// the fixture Route table, attaches the credential, and sends it to a scripted
+// The Fake crosses a real network Connector (ADR 0073, point 7): every read and
+// write is a "fetch" through the Connector host, which checks it against the
+// fixture Route table, attaches the credential, and sends it to a scripted
 // backend that serves the Fake's own state, so a read observes every write.
-// Tracker writes stay native (#6753), as does RelayBundle: a bundle relay is git
-// in core, not a forge HTTP primitive.
+// RelayBundle alone stays native: a bundle relay is git in core, not a forge
+// HTTP primitive.
 
 const (
 	fakeHost  = "fake.invalid"
@@ -77,12 +77,17 @@ const (
 	pathComment      = "/tracker/comment"
 	pathTransition   = "/tracker/transition"
 	pathEditLabels   = "/tracker/editLabels"
+	pathFileIssue    = "/tracker/fileIssue"
+	pathClose        = "/tracker/close"
 )
 
 // fakeWriteRoutes are the Routes the Fake's forge and tracker writes cross,
-// mirroring the finalised forge and tracker axes of the Connector protocol. The
-// rebase Route is fixture-only: a composed forge rebases in core's git, not
-// over a Connector; the Fake keeps Rebase crossing so its calls stay audited.
+// mirroring the finalised forge and tracker axes of the Connector protocol,
+// except that RecordLanding and RecordLandingPass borrow the comment Route and
+// FlagAbandoned borrows the editLabels Route. The rebase Route is fixture-only:
+// a composed forge rebases in core's git, not over a Connector; the Fake keeps
+// Rebase crossing so its calls stay audited. The close Route is fixture-only
+// too: sdk/tracker has no close primitive yet.
 var fakeWriteRoutes = []struct{ method, path string }{
 	{http.MethodPost, pathMerge},
 	{http.MethodPost, pathRebase},
@@ -95,6 +100,8 @@ var fakeWriteRoutes = []struct{ method, path string }{
 	{http.MethodPost, pathTransition},
 	{http.MethodPost, pathEditLabels},
 	{http.MethodPost, pathLabels},
+	{http.MethodPost, pathFileIssue},
+	{http.MethodPost, pathClose},
 }
 
 // fakeRoutes is the fixture Route table: one exact method and path per Route (a

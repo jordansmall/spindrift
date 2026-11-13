@@ -8,9 +8,8 @@ package forge
 // two of those five may declare a name in common. Probe overrides the one
 // collision; a new one breaks the build or silently shadows the promoted field.
 //
-// Reads and forge writes cross a network Connector and its Route table (see
-// fake_connector.go); tracker writes stay native until the protocol grows
-// their primitives (#6753).
+// Every read and write crosses a network Connector and its Route table (see
+// fake_connector.go), RelayBundle excepted.
 type Fake struct {
 	// Every capability slice below embeds core too, so Fake embeds it directly
 	// to keep the shallowest unambiguous path to core's fields.

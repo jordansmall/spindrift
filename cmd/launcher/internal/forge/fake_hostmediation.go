@@ -252,18 +252,30 @@ func (hm *HostMediationFake) integrationTip(parent string) (string, error) {
 }
 
 // postIssue backs the optional HostPostedIssueFiler interface (issue #2018).
-func (hm *HostMediationFake) postIssue(title, body string, labels []string) (string, error) {
-	hm.mu.Lock()
-	defer hm.mu.Unlock()
-	hm.PostIssueCalls = append(hm.PostIssueCalls, PostIssueCall{Title: title, Body: body, Labels: labels})
-	if err, ok := hm.PostIssueErrForTitle[title]; ok {
-		return "", err
-	}
-	if hm.PostIssueErr != nil {
-		return "", hm.PostIssueErr
-	}
-	if url, ok := hm.PostIssueURLForTitle[title]; ok {
-		return url, nil
-	}
-	return hm.PostIssueURL, nil
+// refuse, when set, runs under core.mu, the lock HostMediationFake and
+// IssueTrackerFake share and missingLabels requires, after the call is
+// recorded; its error is the backend refusing the filing.
+func (hm *HostMediationFake) postIssue(title, body string, labels []string, refuse func() error) (string, error) {
+	var out string
+	err := hm.call(http.MethodPost, pathFileIssue, &out, func() (any, error) {
+		hm.mu.Lock()
+		defer hm.mu.Unlock()
+		hm.PostIssueCalls = append(hm.PostIssueCalls, PostIssueCall{Title: title, Body: body, Labels: labels})
+		if refuse != nil {
+			if err := refuse(); err != nil {
+				return nil, err
+			}
+		}
+		if err, ok := hm.PostIssueErrForTitle[title]; ok {
+			return nil, err
+		}
+		if hm.PostIssueErr != nil {
+			return nil, hm.PostIssueErr
+		}
+		if url, ok := hm.PostIssueURLForTitle[title]; ok {
+			return url, nil
+		}
+		return hm.PostIssueURL, nil
+	})
+	return out, err
 }
