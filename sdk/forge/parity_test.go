@@ -86,8 +86,10 @@ func TestWireShapesMatchCore(t *testing.T) {
 		}
 	}
 	mine := structLines(t, "forge.go", nil)
-	for name, lines := range structLines(t, "branches.go", nil) {
-		mine[name] = lines
+	for _, file := range []string{"branches.go", "prs.go"} {
+		for name, lines := range structLines(t, file, nil) {
+			mine[name] = lines
+		}
 	}
 	core := structLines(t, coreFile, rename)
 	for sdk, name := range pairs {
@@ -128,7 +130,11 @@ func TestCapabilitiesMatchCore(t *testing.T) {
 			}
 		}
 	}
-	for name, want := range map[string]string{"capBranches": CapBranches, "capPushOnly": CapPushOnly} {
+	for name, want := range map[string]string{
+		"capBranches": CapBranches, "capPushOnly": CapPushOnly, "capPRs": CapPRs,
+		"capAutoMerge": CapAutoMerge, "capCIRun": CapCIRun,
+		"capBranchProtection": CapBranchProtection, "capProbe": CapProbe,
+	} {
 		if got, ok := core[name]; !ok || got != want {
 			t.Errorf("core %s = %q (declared: %v), sdk says %q", name, got, ok, want)
 		}

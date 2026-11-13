@@ -1,14 +1,16 @@
-// Package forge is the Connector author's side of the provisional forge
-// primitives: a Connector declares a Reader and Register exports it over the
-// Connector protocol, and declares Branches (remote identity, branch exists,
-// branch delete) and RegisterBranches exports those. The primitives are
-// provisional at protocol 0.y; issue #6754 finalises the forge axis.
+// Package forge is the Connector author's side of the forge primitives. A
+// Connector declares a Reader and Register exports it over the Connector
+// protocol; it declares Branches (remote identity, branch exists, branch
+// delete) and RegisterBranches exports those; and it declares PRs (open,
+// behind, files, draft flips, comments, merge) and RegisterPRs exports those.
 //
-// Every write other than branch delete (merge, auto-merge, ready/draft flips,
-// PR comments) stays on core's native adapter, and core does every git
-// operation itself. The Connector returns raw fields only; core makes
-// every policy decision (which conclusions fail, rendering and capping failure
-// detail, PR URL validation).
+// A method is in the contract only when it needs the forge's API: core does
+// every git operation itself, and derives whatever it can. The Connector
+// returns raw fields only; core makes every policy decision (which
+// conclusions fail, rendering and capping failure detail, PR URL validation).
+// Auto-merge, the CI run link, branch protection and the forge probe are
+// optional primitives, each a handshake capability a Connector declares by
+// setting its funcs.
 package forge
 
 import (
@@ -28,11 +30,22 @@ type Target struct {
 
 // PR is one pull request. State is "open" or "closed" as the forge reports it;
 // Merged is true for a merged (hence closed) PR. URL is the PR's web URL.
+//
+// The fields after Merged are read by a PR-capable forge (CapPRs); a
+// Reader-only Connector may leave them zero. Head is the head branch name.
+// Mergeable is the raw "MERGEABLE", "CONFLICTING" or "UNKNOWN"; core fails
+// closed on anything else. MergeCommit is the commit a merged PR landed as,
+// "" when none.
 type PR struct {
-	Number string `json:"number"`
-	URL    string `json:"url"`
-	State  string `json:"state"`
-	Merged bool   `json:"merged"`
+	Number      string `json:"number"`
+	URL         string `json:"url"`
+	State       string `json:"state"`
+	Merged      bool   `json:"merged"`
+	Draft       bool   `json:"draft,omitempty"`
+	Head        string `json:"head,omitempty"`
+	HeadSHA     string `json:"headSha,omitempty"`
+	Mergeable   string `json:"mergeable,omitempty"`
+	MergeCommit string `json:"mergeCommit,omitempty"`
 }
 
 // Check is one context of a head commit's status-check rollup, in GitHub

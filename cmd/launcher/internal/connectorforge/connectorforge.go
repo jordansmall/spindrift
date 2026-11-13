@@ -58,10 +58,15 @@ type (
 		WebURL   string `json:"webUrl"`
 	}
 	wirePR struct {
-		Number string `json:"number"`
-		URL    string `json:"url"`
-		State  string `json:"state"`
-		Merged bool   `json:"merged"`
+		Number      string `json:"number"`
+		URL         string `json:"url"`
+		State       string `json:"state"`
+		Merged      bool   `json:"merged"`
+		Draft       bool   `json:"draft,omitempty"`
+		Head        string `json:"head,omitempty"`
+		HeadSHA     string `json:"headSha,omitempty"`
+		Mergeable   string `json:"mergeable,omitempty"`
+		MergeCommit string `json:"mergeCommit,omitempty"`
 	}
 	wireCheck struct {
 		Kind       string `json:"kind"`

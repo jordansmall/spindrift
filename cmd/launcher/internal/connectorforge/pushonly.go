@@ -18,8 +18,13 @@ import (
 // The capability names a forge Connector advertises. sdk/forge declares the
 // same strings, and its parity test pins them.
 const (
-	capBranches = "forge.branches"
-	capPushOnly = "forge.pushOnly"
+	capBranches         = "forge.branches"
+	capPushOnly         = "forge.pushOnly"
+	capPRs              = "forge.prs"
+	capAutoMerge        = "forge.autoMerge"
+	capCIRun            = "forge.ciRun"
+	capBranchProtection = "forge.branchProtection"
+	capProbe            = "forge.probe"
 )
 
 // ErrPRForgeUnsupported marks a forge Connector that is not push-only: composing
