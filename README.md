@@ -253,7 +253,7 @@ The first three are on by default. The rest are off until you enable them.
   under a `## Touches` heading. The launcher holds it back while another
   in-progress issue lists an overlapping path. See
   [Declared touch-set overlap](docs/reference.md#declared-touch-set-overlap).
-- **Read-only Box.** With `forge.boxAccess = "read-only"`, the Box gets a
+- **Read-only Box (the default).** With `forge.boxAccess = "read-only"`, the Box gets a
   read-only token. The launcher pushes the branch, opens the PR, and posts
   comments for it, so the agent has no way to merge. See
   [Read-only Box](docs/reference.md#read-only-box-box_forge_and_issue_accessread-only).

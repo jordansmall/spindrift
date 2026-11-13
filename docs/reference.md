@@ -3648,7 +3648,7 @@ When a vault's naming isn't uniform, fall back to the per-secret
 | `CODE_FORGE`              | `github` (baked)       | code-landing backend: `github` (open PR, watch CI, merge), `git` (push-only to `CODE_FORGE_REMOTE_URL`; no PR, CI-watch, or merge gate — see [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)), `local` (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network — see [ADR 0033](../docs/adr/0033-host-mediated-local-code-forge.md)), or `forgejo` (open a PR via `fj pr create`, watch the CI rollup, and merge under `MERGE_MODE` on a Forgejo/Gitea instance authenticated by `FORGEJO_TOKEN` — the second full `PRForge` backend beside `github`; see [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)) |
 | `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `CODE_FORGE_ACCUMULATION_REPO_DIR` | `.spindrift/accum.git` under the launcher's working directory when `CODE_FORGE=local` (auto-created and seeded); an explicit value overrides it | host path to the bare Accumulation repo, mounted read-only into the Box and landed into host-side |
-| `BOX_FORGE_AND_ISSUE_ACCESS` | `read-write` (baked)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-write` (the Box writes directly, unchanged) or `read-only` (the Launcher host-mediates every write instead — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)), coherence-checked against the selected forge/tracker's registry capability bits at `nix build` (Consumer eval) time (issue #2526) — `read-only` is permitted only when the selected forge implements bundle-relay (and host-side draft-PR-create when it has pull requests) and the selected tracker implements host-posted comments; `local`, `github`, and `forgejo` satisfy both sides of the check today, the plain `git` forge satisfies the forge side by bundle relay alone (issue #6898), and the `jira` tracker satisfies the tracker side (paired with a `github`, `forgejo`, or `git` Code Forge, issues #6355, #6898); a Go startup gate remains only as a backstop for a runtime override past what nix already validated |
+| `BOX_FORGE_AND_ISSUE_ACCESS` | `read-only` (baked; issue #6899)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-only` (the default: the Launcher host-mediates every write — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)) or `read-write` (the Box writes directly; deprecated, warns at build, dispatch, daemon start and `spindrift doctor`, and a later minor release removes it, issue #6757; see [MIGRATING.md](../MIGRATING.md)), coherence-checked against the selected forge/tracker's registry capability bits at `nix build` (Consumer eval) time (issue #2526) — `read-only` is permitted only when the selected forge implements bundle-relay (and host-side draft-PR-create when it has pull requests) and the selected tracker implements host-posted comments; `local`, `github`, and `forgejo` satisfy both sides of the check today, the plain `git` forge satisfies the forge side by bundle relay alone (issue #6898), and the `jira` tracker satisfies the tracker side (paired with a `github`, `forgejo`, or `git` Code Forge, issues #6355, #6898); a Go startup gate remains only as a backstop for a runtime override past what nix already validated |
 | `BOX_SIGNAL_CARRIER`     | `socket` (per-run only; not bakeable) | transport for the three mid-run signal channels (comment, PR intent, issue intent) crossing the launcher/Box seam: `socket` (the default — routed over a launcher-owned Signal socket, see [ADR 0052](adr/0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md) and [Signal socket](#signal-socket-box_signal_carriersocket) below) or `log` (the opt-out — nonce-guarded marker lines in the Box log, as before; stays selectable through the whole 0.22 minor). Unset counts as `socket`, so it fails at launcher startup under `NETWORK_MODE=none`, and when each Dispatch starts under `no-host-loopback` where the transport needs TCP; pass `--box-signal-carrier log` there (the daemon reads `BOX_SIGNAL_CARRIER` from its own environment and forwards it to each child as that flag) |
 | `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
 | `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query (per-run only; not bakeable) |
@@ -5716,7 +5716,7 @@ When either backend knob selects forgejo — `ISSUE_TRACKER=forgejo` or
 `CODE_FORGE=forgejo` — the image bakes [`fj`](https://codeberg.org/Cyborus/forgejo-cli)
 (forgejo-cli) onto the Box's PATH, because the forgejo backend row declares it
 as its `cliPackage`; an image selecting no such backend never carries it.
-This is the forgejo analog of the `gh` load out: in the default read-write
+This is the forgejo analog of the `gh` load out: in a read-write
 mode an Agent reads its issue, comments, posts research verdicts, and opens
 the PR through `fj` porcelain rather than hand-assembled REST calls.
 
@@ -7106,7 +7106,7 @@ token](#read-only-box-token) below) — and every write the Box would
 otherwise make in-box instead travels out as a stdout block or a bundle for
 the Launcher to apply with its own, separately-scoped write token:
 
-| write            | `read-write` (default)  | `read-only`                          |
+| write            | `read-write`            | `read-only`                          |
 | ---------------- | ------------------------ | ------------------------------------- |
 | get the code (not a write) | clone the Target repo in-box | clone the read-only `/repo` mirror the Launcher fetched host-side for this Pass; the clone needs no forge credential |
 | land the branch   | `git push`               | `seam.bundle` written to the outbox; the Launcher relays it (ADR 0033's mechanism, reused) |
@@ -7128,6 +7128,12 @@ failed fetch fails the Pass
 starts. `local` already works this way, its Accumulation repo being the mirror,
 and so does a `read-only` `git` Box, over one mirror re-seeded per Pass.
 `read-write` keeps its direct in-box clone.
+
+`read-only` is the default (issue #6899). An explicit `read-write` still works
+but is deprecated: the build, the launcher at dispatch and daemon start, and
+`spindrift doctor` warn, and a later minor release removes it (issue #6757).
+[MIGRATING.md](../MIGRATING.md) lists what a Consumer that never set the knob
+must check first.
 
 Every way the shipped prompts still tell a Box to run a forge CLI, and which of
 them a `read-only` Box reaches, is inventoried in [In-Box forge CLI
