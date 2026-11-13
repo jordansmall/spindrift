@@ -359,7 +359,7 @@ func TestAssembleDeprecatedIssueReadVarFallsBackToLegacyFragment(t *testing.T) {
 	}
 }
 
-// Without a socket, jira (which rides github's arm) has no way to read a linked
+// Without a socket, jira has no way to read a linked
 // issue, so an override still naming the deprecated GITHUB issue-read var must
 // render the unreadable arm, not nothing and not the readable arm (issues #6344,
 // #6894).

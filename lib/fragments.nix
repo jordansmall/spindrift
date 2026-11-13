@@ -10,7 +10,7 @@
 # 0068) names its `fragment` relative to a backend folder instead:
 # `fragments/<folder>/<fragment>`. <folder> comes from the axis's signal, the
 # one its gates test, not from the backend's name: "tracker" the tracker read
-# arm (jira rides github's), "filer" the tracker Filer arm (a local tracker's
+# arm (jira reads its own), "filer" the tracker Filer arm (a local tracker's
 # rides github's), "forge" the CODE_FORGE arm (git and local ride github's). A
 # folder with no such file renders empty unless the row is `shared = true`, which
 # falls back to the root-level `fragments/<fragment>` (one body naming the active

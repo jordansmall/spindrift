@@ -30,7 +30,7 @@ func fragGitForge(e *Env) {
 	e.OutboxRelayCapable = false
 }
 
-// jira rides github's read and write axes but its row has no in-Box client.
+// jira reads its own axis and borrows github's write axis, but has no in-Box client.
 func fragJiraTracker(e *Env) { e.IssueTracker = "jira" }
 
 func fragLocalTracker(e *Env) {

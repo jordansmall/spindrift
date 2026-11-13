@@ -11,7 +11,7 @@ func TestSkewFallbacksMatchShippedBackends(t *testing.T) {
 	}{
 		{"", "GITHUB", "GITHUB", "GH"},
 		{"github", "GITHUB", "GITHUB", "GH"},
-		{"jira", "GITHUB", "GITHUB", "GH"},
+		{"jira", "JIRA", "GITHUB", "GH"},
 		{"local", "LOCAL", "", "GH"},
 		{"forgejo", "FORGEJO", "FORGEJO", "FORGEJO"},
 		{"unknown", "GITHUB", "GITHUB", "GH"},

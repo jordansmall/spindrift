@@ -37,10 +37,10 @@ func TestGatesIssueTrackerReadAxis(t *testing.T) {
 			},
 		},
 		{
-			name:            "jira rides the github arm",
-			trackerAxisRead: "GITHUB",
+			name:            "jira",
+			trackerAxisRead: "JIRA",
 			want: map[string]bool{
-				"ISSUE_TRACKER_GITHUB":  true,
+				"ISSUE_TRACKER_GITHUB":  false,
 				"ISSUE_TRACKER_LOCAL":   false,
 				"ISSUE_TRACKER_FORGEJO": false,
 			},
@@ -614,7 +614,7 @@ func TestGatesResearchVerdictRelayed(t *testing.T) {
 
 // TestGatesJiraResearchAlwaysRelays pins that a jira research dispatch uses the
 // relayed verdict form with the Filer off or on (issue #5245), while jira stays
-// on the GITHUB read/write axis, and a jira work dispatch is not relayed.
+// on the GITHUB write axis, and a jira work dispatch is not relayed.
 func TestGatesJiraResearchAlwaysRelays(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -636,8 +636,8 @@ func TestGatesJiraResearchAlwaysRelays(t *testing.T) {
 				FilerEnabled:    tc.filerEnabled,
 				BoxWriteEnabled: true,
 			})
-			if !g["ISSUE_TRACKER_GITHUB"] {
-				t.Error("ISSUE_TRACKER_GITHUB = false, want true (jira stays on the GITHUB axis)")
+			if g["ISSUE_TRACKER_GITHUB"] {
+				t.Error("ISSUE_TRACKER_GITHUB = true, want false (jira reads through its own axis)")
 			}
 			if g["ISSUE_TRACKER_GITHUB_READONLY"] != tc.wantReadOnly {
 				t.Errorf("ISSUE_TRACKER_GITHUB_READONLY = %v, want %v", g["ISSUE_TRACKER_GITHUB_READONLY"], tc.wantReadOnly)
@@ -692,9 +692,9 @@ func TestGatesUnwritableReadWrite(t *testing.T) {
 		boxWrite bool
 		want     bool
 	}{
-		{"jira read-write", "work", "jira", "GITHUB", "GITHUB", true, true},
-		{"jira research read-write", "research", "jira", "GITHUB", "GITHUB", true, false},
-		{"jira read-only", "work", "jira", "GITHUB", "GITHUB", false, false},
+		{"jira read-write", "work", "jira", "JIRA", "GITHUB", true, true},
+		{"jira research read-write", "research", "jira", "JIRA", "GITHUB", true, false},
+		{"jira read-only", "work", "jira", "JIRA", "GITHUB", false, false},
 		{"github read-write", "work", "github", "GITHUB", "GITHUB", true, false},
 		{"forgejo read-write", "work", "forgejo", "FORGEJO", "FORGEJO", true, false},
 		{"local", "work", "local", "LOCAL", "", true, false},
@@ -790,11 +790,11 @@ func TestGatesIssueTrackerLinksReadable(t *testing.T) {
 		{"", "GITHUB", "socket", true, true},
 		{"github", "GITHUB", "socket", true, true},
 		{"forgejo", "FORGEJO", "socket", true, true},
-		{"jira", "GITHUB", "socket", true, true},
+		{"jira", "JIRA", "socket", true, true},
 		{"local", "LOCAL", "socket", false, true},
 		{"github", "GITHUB", "log", false, false},
 		{"forgejo", "FORGEJO", "log", false, false},
-		{"jira", "GITHUB", "log", false, false},
+		{"jira", "JIRA", "log", false, false},
 		{"local", "LOCAL", "log", false, true},
 		{"github", "GITHUB", "", false, false},
 	} {
@@ -803,8 +803,8 @@ func TestGatesIssueTrackerLinksReadable(t *testing.T) {
 			"ISSUE_TRACKER_LINKS_READABLE":           tc.readable,
 			"ISSUE_TRACKER_LINKS_UNREADABLE":         !tc.readable,
 			"ISSUE_TRACKER_LINKS_REACHABLE":          tc.verb,
-			"ISSUE_TRACKER_GITHUB_LINKS_READABLE":    tc.read == "GITHUB" && tc.verb,
-			"ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE":  tc.read == "GITHUB" && !tc.verb,
+			"ISSUE_TRACKER_GITHUB_LINKS_READABLE":    (tc.read == "GITHUB" || tc.read == "JIRA") && tc.verb,
+			"ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE":  (tc.read == "GITHUB" || tc.read == "JIRA") && !tc.verb,
 			"ISSUE_TRACKER_FORGEJO_LINKS_READABLE":   tc.read == "FORGEJO" && tc.verb,
 			"ISSUE_TRACKER_FORGEJO_LINKS_UNREADABLE": tc.read == "FORGEJO" && !tc.verb,
 		} {
@@ -862,7 +862,7 @@ func TestGatesIssueTrackerWritable(t *testing.T) {
 		{"github", "GITHUB", true},
 		{"forgejo", "FORGEJO", true},
 		{"local", "LOCAL", true},
-		{"jira", "GITHUB", false},
+		{"jira", "JIRA", false},
 	} {
 		g := Gates(Env{IssueTracker: tc.tracker, TrackerAxisRead: tc.read})
 		if got := g["ISSUE_TRACKER_WRITABLE"]; got != tc.writable {

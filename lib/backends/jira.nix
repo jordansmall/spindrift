@@ -17,6 +17,12 @@
   # Comments and issue filing (#6352) both post host-side, so the Box needs no
   # Jira client under read-only.
   hostPostingCapable = true;
+  # jira reads through its own tracker folder (issue #6857). It declares a write
+  # axis only because the registry requires one beside a read axis: GITHUB
+  # keeps its write-side gates as before, and inBoxUnwritableTracker keeps it
+  # off the direct write path.
+  trackerAxisRead = "JIRA";
+  trackerAxisWrite = "GITHUB";
   # Issues carry applied labels though there is no registry (see default.nix).
   issuesWearLabels = true;
   # Build-time check of the merged defaults, run by lib/mkHarness.nix when this

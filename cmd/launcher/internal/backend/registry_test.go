@@ -191,7 +191,7 @@ func TestTrackerAxisAndForgeBackendSignals(t *testing.T) {
 		{"github", "GITHUB", "GITHUB", "GH", "GH"},
 		{"local", "LOCAL", "", "GH", "GH"},
 		{"forgejo", "FORGEJO", "FORGEJO", "FORGEJO", "FORGEJO"},
-		{"jira", "GITHUB", "GITHUB", "GH", "GH"},
+		{"jira", "JIRA", "GITHUB", "GH", "GH"},
 		// Unregistered: ByName returns a zero-value Descriptor, a branch
 		// distinct from a registered row with unset fields (issue #2533 review).
 		{"not-a-real-backend", "GITHUB", "GITHUB", "GH", "GH"},

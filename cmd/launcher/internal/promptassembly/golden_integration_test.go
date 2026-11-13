@@ -331,7 +331,7 @@ func goldenCells() []goldenCell {
 			c.forgejoTracker()
 		}},
 		{name: "jira-tracker", mode: modeInitial, setup: func(c *cellInputs) {
-			// jira rides the same prompt-selection arms as github.
+			// jira has its own read folder but selects the same arms as github here.
 			c.export("ISSUE_TRACKER", "jira")
 		}},
 		{name: "jira-tracker-filer", mode: modeInitial, review: true, setup: func(c *cellInputs) {
