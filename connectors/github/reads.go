@@ -195,3 +195,32 @@ func nativeDeps(t tracker.Target, number string) ([]string, error) {
 	}
 	return ids, nil
 }
+
+// removedLabels lists the labels removed from issue number, oldest removal
+// first, from its timeline. Events with no label (a label deleted from the
+// repository leaves a null) name nothing and are skipped.
+func removedLabels(t tracker.Target, number string) ([]string, error) {
+	base, err := numberPath(t, number)
+	if err != nil {
+		return nil, err
+	}
+	type event struct {
+		Event string `json:"event"`
+		Label *struct {
+			Name string `json:"name"`
+		} `json:"label"`
+	}
+	names := []string{}
+	err = pages(t.API, fmt.Sprintf("%s/timeline?per_page=%d", base, pageSize), func(raw []event) bool {
+		for _, e := range raw {
+			if e.Event == "unlabeled" && e.Label != nil {
+				names = append(names, e.Label.Name)
+			}
+		}
+		return false
+	})
+	if err != nil {
+		return nil, err
+	}
+	return names, nil
+}
