@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
@@ -90,6 +92,14 @@ func (b *restBackend) serveWrite(w http.ResponseWriter, r *http.Request, reject 
 	repo := "/repos/" + connectorRepo
 	path := r.URL.Path
 	switch {
+	case r.Method == http.MethodGet && path == "/user":
+		// The token's classic scopes, as GitHub reports them on this header.
+		w.Header().Set("X-OAuth-Scopes", "read:org, repo")
+		writeJSON(w, map[string]any{"login": "bot"})
+		return true
+	case r.Method == http.MethodGet && path == repo:
+		writeJSON(w, map[string]any{"permissions": map[string]any{"push": true}})
+		return true
 	case r.Method == http.MethodGet && strings.HasPrefix(path, repo+"/compare/"):
 		basehead := strings.TrimPrefix(path, repo+"/compare/")
 		_, head, _ := strings.Cut(basehead, "...")
@@ -465,7 +475,7 @@ func (h *connectorHarness) comments(url string) []string { return h.prView(url).
 // declaredForgeCaps is exactly the forge capabilities the github Connector's
 // handshake declares: no CI run URL and no push-only mode.
 var declaredForgeCaps = []string{
-	"forge", "forge.branches", "forge.prs", "forge.draftPRs", "forge.autoMerge", "forge.branchProtection", "forge.probe",
+	"forge", "forge.branches", "forge.prs", "forge.draftPRs", "forge.autoMerge", "forge.branchProtection", "forge.probe", "forge.tokenGrant",
 }
 
 func testComposedCapabilities(t *testing.T, h *connectorHarness) {
@@ -646,6 +656,16 @@ func testBranchProtection(t *testing.T, h *connectorHarness) {
 func testProbe(t *testing.T, h *connectorHarness) {
 	if got, err := h.cf.Probe(); err != nil || got != connectorRepo {
 		t.Errorf("Probe = (%q, %v), want %q", got, err, connectorRepo)
+	}
+}
+
+func testTokenGrant(t *testing.T, h *connectorHarness) {
+	target := connectorforge.Target{API: h.backend.URL, Repo: connectorRepo}
+	for _, token := range []string{"ghp_x", "ghs_x"} {
+		got, err := connectorforge.IntrospectToken(h.conn, target, token)
+		if want := (backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true}); err != nil || got != want {
+			t.Errorf("IntrospectToken(%s) = (%+v, %v), want %+v", token, got, err, want)
+		}
 	}
 }
 

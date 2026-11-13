@@ -1,13 +1,21 @@
 package github
 
 import (
+	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/connectorforge"
+	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -204,4 +212,147 @@ func TestConnector_PriorClaimStateFailsWhenTheTimelineDoes(t *testing.T) {
 	if _, found, err := pr.PriorClaimState("99"); err == nil || found {
 		t.Fatalf("PriorClaimState of a missing issue = %v, %v; want an error", found, err)
 	}
+}
+
+// tokenBackend is the GitHub API as token introspection sees it: GET /user
+// answers with the token's OAuth scopes header, GET /repos/{repo} with its
+// permissions, each only to the token it was scripted for.
+type tokenBackend struct {
+	*httptest.Server
+	mu         sync.Mutex
+	token      string
+	userStatus int
+	scopes     *string
+	repoBody   string
+	seenAuth   []string
+	unexpected []string
+}
+
+func newTokenBackend(t *testing.T, token string) *tokenBackend {
+	t.Helper()
+	b := &tokenBackend{token: token, userStatus: http.StatusOK}
+	b.Server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		b.seenAuth = append(b.seenAuth, r.Header.Get("Authorization"))
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/user":
+			if b.scopes != nil {
+				w.Header().Set("X-OAuth-Scopes", *b.scopes)
+			}
+			w.WriteHeader(b.userStatus)
+			_, _ = w.Write([]byte(`{"login":"bot"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/"+connectorRepo:
+			_, _ = w.Write([]byte(b.repoBody))
+		default:
+			b.unexpected = append(b.unexpected, r.Method+" "+r.URL.RequestURI())
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(b.Close)
+	return b
+}
+
+// tokenCredentialEnv names the host env var the token under audit rides in, as
+// a backend row's CredentialEnv does.
+const tokenCredentialEnv = "TOKEN_UNDER_AUDIT"
+
+// loadTokenConnector loads the github Connector the way a backend row does,
+// with the token under audit as its credential.
+func loadTokenConnector(t *testing.T, b *tokenBackend, token string) *connectorhost.Connector {
+	t.Helper()
+	path, routes := githubConnectorRoutes(t, b.Listener.Addr().String(), connectorRepo)
+	conn, err := backendrows.Load(context.Background(), backendrows.Row{
+		Name: "github", Module: path, Routes: routes, CredentialEnv: tokenCredentialEnv,
+	}, backendrows.Options{
+		Getenv: func(k string) string {
+			if k == tokenCredentialEnv {
+				return token
+			}
+			return ""
+		},
+		Audit:  io.Discard,
+		Client: b.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	return conn
+}
+
+// The Connector's token introspection answers as the native introspector does
+// for every token shape, over the same GitHub API, and reaches it with the
+// token under audit as its credential and never through gh.
+func TestConnector_TokenGrantMatchesNative(t *testing.T) {
+	str := func(s string) *string { return &s }
+	for _, tc := range []struct {
+		name, token string
+		userStatus  int
+		scopes      *string
+		repoBody    string
+		// reaches is whether the shape makes a request at all.
+		reaches bool
+	}{
+		{name: "classic PAT with repo scope", token: "ghp_abc", scopes: str("read:org, repo"), reaches: true},
+		{name: "classic PAT with only read:org", token: "ghp_abc", scopes: str("read:org"), reaches: true},
+		{name: "classic PAT with no scopes", token: "ghp_abc", scopes: str(""), reaches: true},
+		{name: "classic PAT with no scopes header", token: "ghp_abc", reaches: true},
+		{name: "OAuth token with public_repo", token: "gho_abc", scopes: str("public_repo"), reaches: true},
+		{name: "installation token with push", token: "ghs_abc", repoBody: `{"permissions":{"push":true}}`, reaches: true},
+		{name: "installation token without push", token: "ghs_abc", repoBody: `{"permissions":{"push":false}}`, reaches: true},
+		{name: "installation token without permissions", token: "ghs_abc", repoBody: `{}`, reaches: true},
+		{name: "fine-grained PAT", token: "github_pat_abc"},
+		{name: "unknown prefix", token: "ghu_abc"},
+		{name: "opaque token", token: "opaque"},
+		{name: "user read refused", token: "ghp_abc", userStatus: http.StatusUnauthorized, reaches: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newTokenBackend(t, tc.token)
+			b.scopes, b.repoBody = tc.scopes, tc.repoBody
+			if tc.userStatus != 0 {
+				b.userStatus = tc.userStatus
+			}
+			conn := loadTokenConnector(t, b, tc.token)
+			calls := noGH(t)
+			got, gotErr := connectorforge.IntrospectToken(conn, connectorforge.Target{API: b.URL, Repo: connectorRepo}, tc.token)
+			if n := calls(); n != 0 {
+				t.Errorf("the Connector's introspection ran gh %d times", n)
+			}
+			if len(b.unexpected) != 0 {
+				t.Errorf("unexpected backend requests: %v", b.unexpected)
+			}
+			if tc.reaches != (len(b.seenAuth) > 0) {
+				t.Errorf("backend saw %d requests, want some = %v", len(b.seenAuth), tc.reaches)
+			}
+			for _, a := range b.seenAuth {
+				if a != "Bearer "+tc.token {
+					t.Errorf("backend saw Authorization %q, want the token under audit", a)
+				}
+			}
+
+			ghTokenStub(t, tc.userStatus, tc.scopes, tc.repoBody)
+			want, wantErr := newTokenIntrospector(TokenOAuthScopes, TokenRepoPushPermission)(tc.token, connectorRepo)
+			if (gotErr == nil) != (wantErr == nil) || got != want {
+				t.Errorf("Connector = (%+v, %v), native (%+v, %v)", got, gotErr, want, wantErr)
+			}
+		})
+	}
+}
+
+// ghTokenStub scripts the gh the native introspector runs to answer what
+// tokenBackend serves.
+func ghTokenStub(t *testing.T, userStatus int, scopes *string, repoBody string) {
+	t.Helper()
+	header := ""
+	if scopes != nil {
+		header = "X-OAuth-Scopes: " + *scopes + `\n`
+	}
+	prependFakeGH(t, `case "$*" in
+"api -i user")
+	[ `+strconv.Itoa(userStatus)+` = 401 ] && { echo "HTTP 401: Bad credentials" >&2; exit 1; }
+	printf 'HTTP/2.0 200 OK\n`+header+`\n{}' ;;
+"api repos/`+connectorRepo+`")
+	printf '%s' '`+repoBody+`' ;;
+esac`)
 }

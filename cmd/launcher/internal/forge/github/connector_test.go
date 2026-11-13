@@ -345,6 +345,15 @@ func (b *restBackend) graphql(w http.ResponseWriter, r *http.Request, reject fun
 	case strings.Contains(req.Query, "label(name:"):
 		b.labelIDs(w, raw, req.Variables.Owner+"/"+req.Variables.Repo, req.Variables.Number, reject)
 		return
+	case strings.Contains(req.Query, "viewerPermission"):
+		// Token introspection of an installation token: it may push.
+		writeJSON(w, map[string]any{"data": map[string]any{"repository": map[string]any{"viewerPermission": "WRITE"}}})
+		return
+	case strings.Contains(req.Query, "viewer{"):
+		// Token introspection of a classic token: its grant rides the header.
+		w.Header().Set("X-OAuth-Scopes", "read:org, repo")
+		writeJSON(w, map[string]any{"data": map[string]any{"viewer": map[string]any{"login": "bot"}}})
+		return
 	case strings.Contains(req.Query, "autoMergeAllowed"):
 		b.repoQuery(w, req.Variables.Owner, req.Variables.Repo)
 		return
@@ -546,17 +555,14 @@ func stampConnectorToken(r *http.Request) error {
 	return nil
 }
 
-// loadGithubConnectorAs is loadGithubConnector with the credential authorize
-// stamps on each request.
-func loadGithubConnectorAs(t *testing.T, host, repo string, client *http.Client, audit io.Writer, authorize func(*http.Request) error) (*connectorhost.Connector, []connectorhost.Route) {
+// githubConnectorRoutes returns the compiled github Connector's path and its
+// declared Route table bound to host and to repo, skipping the test when no
+// Connector was built.
+func githubConnectorRoutes(t *testing.T, host, repo string) (string, []connectorhost.Route) {
 	t.Helper()
 	path := os.Getenv(connectorWasmEnv)
 	if path == "" {
 		t.Skipf("%s unset: no compiled github Connector to test", connectorWasmEnv)
-	}
-	wasm, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
 	}
 	var table []struct {
 		Method, Host, Path string
@@ -572,7 +578,18 @@ func loadGithubConnectorAs(t *testing.T, host, repo string, client *http.Client,
 		}
 		declared = append(declared, connectorhost.Route{Method: r.Method, Host: host, Path: r.Path, FollowRedirect: r.FollowRedirect})
 	}
-	routes := connectortracker.Routes(declared, repo)
+	return path, connectortracker.Routes(declared, repo)
+}
+
+// loadGithubConnectorAs is loadGithubConnector with the credential authorize
+// stamps on each request.
+func loadGithubConnectorAs(t *testing.T, host, repo string, client *http.Client, audit io.Writer, authorize func(*http.Request) error) (*connectorhost.Connector, []connectorhost.Route) {
+	t.Helper()
+	path, routes := githubConnectorRoutes(t, host, repo)
+	wasm, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	conn, err := connectorhost.LoadNetwork(context.Background(), wasm, connectorhost.Network{
 		Name:      "github",
 		Routes:    routes,
@@ -795,6 +812,7 @@ func TestConnector_Contracts(t *testing.T) {
 			{"BranchLifecycle", testBranchLifecycle},
 			{"BranchProtection", testBranchProtection},
 			{"Probe", testProbe},
+			{"TokenGrant", testTokenGrant},
 			{"BaseMovedOn", testBaseMovedOn},
 			{"MergeTransientAndPermanent", testMergeTransientAndPermanent},
 		} {
