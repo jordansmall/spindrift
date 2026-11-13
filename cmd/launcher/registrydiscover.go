@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"spindrift.dev/launcher/internal/credresolver"
@@ -17,9 +18,11 @@ import (
 // Errors go to stderr, not stdout, so a caller piping stdout to a report file
 // still sees failures. The report prints on the error and zero-route paths
 // too, so an operator still sees which hosts matched; only the `route ...`
-// lines mean a file was written. Zero routes is a failure: a header-only file
-// would fail registryroutes.Parse. rows is the registered Strategies to discover
-// over: production passes ecosystem.Registered(), tests a synthetic Strategy.
+// lines mean a file was written. Zero proposed routes writes no file (a
+// header-only file would fail registryroutes.Parse); that is a failure unless
+// known public hosts alone explain it and no config was skipped. rows is the
+// registered Strategies to discover over: production passes
+// ecosystem.Registered(), tests a synthetic Strategy.
 func runRegistryDiscover(stdout, stderr io.Writer, rows []ecosystem.Strategy, repoDir, outPath string, force bool, stores []registrydiscover.Store, lookup registrydiscover.Lookup, probe registrydiscover.Probe) int {
 	routes, report, err := registrydiscover.Discover(repoDir, rows, stores, lookup, probe)
 	if err != nil {
@@ -30,10 +33,28 @@ func runRegistryDiscover(stdout, stderr io.Writer, rows []ecosystem.Strategy, re
 		return 1
 	}
 
-	if len(routes) == 0 {
+	// A public route is a comment, not a route: a file of only comments fails
+	// registryroutes.Parse.
+	var public, proposed []registrydiscover.Route
+	for _, r := range routes {
+		if r.Public {
+			public = append(public, r)
+		} else {
+			proposed = append(proposed, r)
+		}
+	}
+
+	if len(proposed) == 0 {
 		printRegistryDiscoverReport(stdout, report)
-		fmt.Fprintf(stderr, "registry discover: no registry declarations found under %s; nothing to write\n", repoDir)
-		return 1
+		printRegistryDiscoverPublic(stdout, public)
+		// A skipped note is a registry the operator declared but discovery
+		// could not use, so "nothing to configure" would be untrue.
+		if len(public) == 0 || slices.ContainsFunc(report.NoRegistry, func(n ecosystem.Note) bool { return n.Skipped }) {
+			fmt.Fprintf(stderr, "registry discover: no registry declarations found under %s; nothing to write\n", repoDir)
+			return 1
+		}
+		fmt.Fprintln(stdout, "nothing to configure; no routes file written")
+		return 0
 	}
 
 	if err := registrydiscover.WriteFile(outPath, routes, force); err != nil {
@@ -41,14 +62,23 @@ func runRegistryDiscover(stdout, stderr io.Writer, rows []ecosystem.Strategy, re
 		return 1
 	}
 
-	for _, r := range routes {
+	for _, r := range proposed {
 		fmt.Fprintf(stdout, "route %s (auth %s, credential %s)\n", r.MatchHost, r.AuthScheme, r.CredentialSource)
 	}
+	printRegistryDiscoverPublic(stdout, public)
 	printRegistryDiscoverReport(stdout, report)
-	printRegistryDiscoverEnvHint(stdout, routes)
+	printRegistryDiscoverEnvHint(stdout, proposed)
 
 	fmt.Fprintf(stdout, "wrote routes file %s\n", outPath)
 	return 0
+}
+
+// printRegistryDiscoverPublic prints one line per known public host, which
+// proposes no route.
+func printRegistryDiscoverPublic(w io.Writer, public []registrydiscover.Route) {
+	for _, r := range public {
+		fmt.Fprintf(w, "public %s (host profile %q): %s\n", r.MatchHost, r.Profile.Name, r.Profile.Note)
+	}
 }
 
 func printRegistryDiscoverReport(w io.Writer, report registrydiscover.Report) {

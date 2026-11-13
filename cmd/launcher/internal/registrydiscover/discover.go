@@ -98,6 +98,9 @@ type Route struct {
 	CredentialValue  string // store path, or placeholder env var name
 	RegistryName     string // companion registry-name, cargo-credentials only
 	PropertyKey      string // companion key, gradle-properties only
+	// Public marks a known public host the Strategy never routes. It proposes
+	// no route: Render writes only its profile comment.
+	Public bool
 }
 
 // MatchedHost is a report entry for a host discovery matched to a store.
@@ -116,7 +119,8 @@ type UnmatchedHost struct {
 
 // Report summarizes a Discover run: which declared hosts matched a store,
 // which did not, and which config files declare no usable registry (carried
-// through from Extract's Note, including its Skipped distinction).
+// through from Extract's Note, including its Skipped distinction). A note
+// wholly covered by a known public host is left out: its public line says it.
 type Report struct {
 	Matched    []MatchedHost
 	Unmatched  []UnmatchedHost
@@ -194,6 +198,24 @@ func Discover(repoDir string, rows []ecosystem.Strategy, stores []Store, lookup 
 		routes = append(routes, route)
 	}
 
+	// A public default is no declaration, so only the probe's profile match
+	// can name it; without one there is nothing to tell the operator.
+	covered := map[string]bool{}
+	for _, n := range notes {
+		for _, d := range n.Public {
+			host := registryvocab.HostKey(d.Host)
+			if seen[host] {
+				continue
+			}
+			seen[host] = true
+			if res := probe(d.UpstreamBaseURL); res.Profile.Name != "" {
+				routes = append(routes, Route{MatchHost: host, UpstreamBaseURL: d.UpstreamBaseURL, Profile: res.Profile, Public: true})
+				covered[host] = true
+			}
+		}
+	}
+	report.NoRegistry = uncoveredNotes(notes, covered)
+
 	if err := disambiguateEnvPlaceholders(routes); err != nil {
 		// The report stays valid through a collision; returning it lets the
 		// caller show the operator which hosts were involved.
@@ -201,6 +223,23 @@ func Discover(repoDir string, rows []ecosystem.Strategy, stores []Store, lookup 
 	}
 
 	return routes, report, nil
+}
+
+// uncoveredNotes drops the notes whose every public default got a Public route:
+// the public line already tells the operator about them. A Skipped note stays,
+// since it also carries registry URLs that were unusable.
+func uncoveredNotes(notes []ecosystem.Note, covered map[string]bool) []ecosystem.Note {
+	var kept []ecosystem.Note
+	for _, n := range notes {
+		wholly := !n.Skipped && len(n.Public) > 0
+		for _, d := range n.Public {
+			wholly = wholly && covered[registryvocab.HostKey(d.Host)]
+		}
+		if !wholly {
+			kept = append(kept, n)
+		}
+	}
+	return kept
 }
 
 // siblingAllow joins each profile sibling for a declaration's ecosystem onto

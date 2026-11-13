@@ -31,7 +31,8 @@ var Strategy = ecosystem.Strategy{
 	ConfigParser:         parseNuGetConfig,
 }
 
-// publicNuGetHost is NuGet's implicit default source. Routing it would point a
+// publicNuGetHost is NuGet's implicit default source. It is declared Public so
+// discovery can name it, but never routed: routing it would point a
 // credential-less public feed at the proxy, so an operator who wants it routed
 // opts in through a routes file instead.
 const publicNuGetHost = "api.nuget.org"
@@ -97,11 +98,12 @@ func effectiveSources(raw nugetConfig) []packageSource {
 // parseNuGetConfig is NuGet's ConfigParser. It keeps only absolute http(s) v3
 // sources, which NuGet recognises by protocolVersion="3" or a URL ending in
 // ".json" (any case); a v2 feed, a local path, or a URL with userinfo is
-// skipped, not an error. nuget.org is neither declared nor counted as a named
-// registry. The declared URL is the service index's directory for a ".json"
-// URL, and the URL itself for a protocolVersion="3" one, since the path-set is
-// the declared URL's path. A query or fragment never survives. A source that
-// <disabledPackageSources> switches off is dropped before any of this.
+// skipped, not an error. nuget.org is declared Public (never routed) and not
+// counted as a named registry. The declared URL is the service index's
+// directory for a ".json" URL, and the URL itself for a protocolVersion="3"
+// one, since the path-set is the declared URL's path. A query or fragment
+// never survives. A source that <disabledPackageSources> switches off is
+// dropped before any of this.
 func parseNuGetConfig(content string) ([]ecosystem.Declaration, bool, error) {
 	var raw nugetConfig
 	dec := xml.NewDecoder(strings.NewReader(content))
@@ -116,10 +118,10 @@ func parseNuGetConfig(content string) ([]ecosystem.Declaration, bool, error) {
 	namedAny := false
 	for _, source := range effectiveSources(raw) {
 		u, err := url.Parse(source.value)
-		if err == nil && registryvocab.HostKey(u.Host) == publicNuGetHost {
-			continue
+		public := err == nil && registryvocab.HostKey(u.Host) == publicNuGetHost
+		if !public {
+			namedAny = true
 		}
-		namedAny = true
 		if err != nil {
 			continue
 		}
@@ -134,7 +136,7 @@ func parseNuGetConfig(content string) ([]ecosystem.Declaration, bool, error) {
 		if !ok {
 			continue
 		}
-		out = append(out, ecosystem.Declaration{Host: host, UpstreamBaseURL: upstreamBaseURL})
+		out = append(out, ecosystem.Declaration{Host: host, UpstreamBaseURL: upstreamBaseURL, Public: public})
 	}
 	return out, namedAny, nil
 }

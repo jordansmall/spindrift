@@ -21,6 +21,11 @@ func Render(routes []Route) []byte {
 	}
 
 	for _, r := range routes {
+		if r.Public {
+			fmt.Fprintf(&b, "\n# %s gets no route\n", quoteTOMLString(r.MatchHost))
+			writeProfileComments(&b, r.Profile)
+			continue
+		}
 		b.WriteString("\n[[routes]]\n")
 		writeProfileComments(&b, r.Profile)
 		fmt.Fprintf(&b, "match-host = %s\n", quoteTOMLString(r.MatchHost))

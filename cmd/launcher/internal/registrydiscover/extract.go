@@ -51,17 +51,23 @@ func Extract(repoDir string, rows []ecosystem.Strategy) ([]ecosystem.Declaration
 			return nil, nil, fmt.Errorf("registrydiscover: parsing %s: %w", found, err)
 		}
 
-		if len(decls) == 0 {
-			// Skipped separates "named nothing" from "named registries, none usable".
-			notes = append(notes, ecosystem.Note{ConfigPath: found, Ecosystem: row.Name, Skipped: namedAny})
-			continue
-		}
-
+		var routed, public []ecosystem.Declaration
 		for i := range decls {
 			decls[i].Ecosystem = row.Name
 			decls[i].ConfigPath = found
+			if decls[i].Public {
+				public = append(public, decls[i])
+			} else {
+				routed = append(routed, decls[i])
+			}
 		}
-		declared = append(declared, decls...)
+
+		if len(routed) == 0 {
+			// Skipped separates "named nothing" from "named registries, none usable".
+			notes = append(notes, ecosystem.Note{ConfigPath: found, Ecosystem: row.Name, Skipped: namedAny, Public: public})
+			continue
+		}
+		declared = append(declared, routed...)
 	}
 
 	return declared, notes, nil

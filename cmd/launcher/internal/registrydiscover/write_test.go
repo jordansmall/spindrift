@@ -732,3 +732,38 @@ func TestRender_PublicProfileWritesOnlyTheNoteComment(t *testing.T) {
 		t.Errorf("a public profile changed more than its comment:\n%s", got)
 	}
 }
+
+func TestRender_PublicRouteWritesOnlyTheCommentLines(t *testing.T) {
+	const note = "known public host, needs no credential, nothing to configure"
+	public := Route{
+		MatchHost:       "api.nuget.org",
+		UpstreamBaseURL: "https://api.nuget.org/v3/index.json",
+		Profile:         ProfileAdvice{Name: "nuget.org", Note: note},
+		Public:          true,
+	}
+	normal := Route{
+		MatchHost:        "feed.example.com",
+		UpstreamBaseURL:  "https://feed.example.com/v3",
+		AuthScheme:       "bearer",
+		CredentialSource: "env",
+		CredentialValue:  "X",
+	}
+
+	want := "\n# \"api.nuget.org\" gets no route\n# host profile \"nuget.org\": " + note + "\n"
+	got := string(Render([]Route{public}))
+	if !strings.HasSuffix(got, want) || strings.Contains(got, "[[routes]]") {
+		t.Errorf("Render(public) = %q, want it to end in %q with no [[routes]]", got, want)
+	}
+
+	both := string(Render([]Route{public, normal}))
+	if !strings.Contains(both, want) {
+		t.Errorf("Render output missing %q:\n%s", want, both)
+	}
+	parsed, err := registryroutes.Parse([]byte(both), nil)
+	if err != nil {
+		t.Fatalf("Parse(Render): %v\n%s", err, both)
+	}
+	if len(parsed) != 1 {
+		t.Errorf("parsed %d routes, want 1", len(parsed))
+	}
+}

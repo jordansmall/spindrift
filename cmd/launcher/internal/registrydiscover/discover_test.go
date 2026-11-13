@@ -288,7 +288,7 @@ func TestDiscover_NoteFlowsToReportNoRegistry(t *testing.T) {
 		t.Errorf("routes = %+v, want none", routes)
 	}
 	want := []ecosystem.Note{{ConfigPath: cfgPath, Ecosystem: synthetic.Strategy.Name}}
-	if !slices.Equal(report.NoRegistry, want) {
+	if !reflect.DeepEqual(report.NoRegistry, want) {
 		t.Errorf("report.NoRegistry = %+v, want %+v", report.NoRegistry, want)
 	}
 }
@@ -307,7 +307,7 @@ func TestDiscover_UnusableURLYieldsNoRouteReportedAsSkipped(t *testing.T) {
 		t.Fatalf("routes = %+v, want none", routes)
 	}
 	want := []ecosystem.Note{{ConfigPath: cfgPath, Ecosystem: synthetic.Strategy.Name, Skipped: true}}
-	if !slices.Equal(report.NoRegistry, want) {
+	if !reflect.DeepEqual(report.NoRegistry, want) {
 		t.Errorf("report.NoRegistry = %+v, want %+v", report.NoRegistry, want)
 	}
 }
@@ -886,5 +886,90 @@ func TestDiscover_NoSiblingsLeavesAllowEmpty(t *testing.T) {
 	routes, _ := discoverSynthetic(t, dir, nil, noMatch, siblingsProbe(nil))
 	if len(routes) != 1 || routes[0].Allow != nil {
 		t.Errorf("routes = %+v, want one route with nil Allow", routes)
+	}
+}
+
+// publicOnlyRow is a Strategy whose config names only a public default, which
+// Extract moves onto the file's Note rather than declaring.
+var publicOnlyRow = ecosystem.Strategy{
+	Name:             "fake",
+	InTreeConfigPath: "fake.cfg",
+	ConfigParser: func(string) ([]ecosystem.Declaration, bool, error) {
+		return []ecosystem.Declaration{{Host: "Pub.Example.com", UpstreamBaseURL: "https://pub.example.com/v3", Public: true}}, true, nil
+	},
+}
+
+func TestDiscover_PublicDeclarationWithProfileYieldsCommentOnlyRoute(t *testing.T) {
+	dir := t.TempDir()
+	testutil.WriteFixture(t, dir, "fake.cfg", "x")
+	advice := ProfileAdvice{Name: "pub", Note: "known public host"}
+	probe := func(string) ProbeResult { return ProbeResult{Profile: advice} }
+
+	routes, report, err := Discover(dir, []ecosystem.Strategy{publicOnlyRow}, []Store{{Name: "netrc", Path: "/n"}}, alwaysMatch, probe)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	want := []Route{{MatchHost: "pub.example.com", UpstreamBaseURL: "https://pub.example.com/v3", Profile: advice, Public: true}}
+	if !reflect.DeepEqual(routes, want) {
+		t.Errorf("routes = %+v, want %+v", routes, want)
+	}
+	if len(report.Matched) != 0 || len(report.Unmatched) != 0 {
+		t.Errorf("report matched=%+v unmatched=%+v, want none", report.Matched, report.Unmatched)
+	}
+}
+
+func TestDiscover_PublicDeclarationWithoutProfileYieldsNoRoute(t *testing.T) {
+	dir := t.TempDir()
+	testutil.WriteFixture(t, dir, "fake.cfg", "x")
+
+	routes, _, err := Discover(dir, []ecosystem.Strategy{publicOnlyRow}, nil, noMatch, probeAs("bearer"))
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(routes) != 0 {
+		t.Errorf("routes = %+v, want none", routes)
+	}
+}
+
+func TestDiscover_NoRegistryDropsOnlyNotesWhollyCoveredByAMatchedPublicHost(t *testing.T) {
+	publicRow := func(name string, namedAny bool, hosts ...string) ecosystem.Strategy {
+		return ecosystem.Strategy{
+			Name:             name,
+			InTreeConfigPath: name + ".cfg",
+			ConfigParser: func(string) ([]ecosystem.Declaration, bool, error) {
+				var decls []ecosystem.Declaration
+				for _, h := range hosts {
+					decls = append(decls, ecosystem.Declaration{Host: h, UpstreamBaseURL: "https://" + h + "/v3", Public: true})
+				}
+				return decls, namedAny, nil
+			},
+		}
+	}
+	rows := []ecosystem.Strategy{
+		publicRow("covered", false, "known.example.com"),
+		publicRow("skipped", true, "known.example.com"),
+		publicRow("unmatched", false, "unknown.example.com"),
+	}
+	dir := t.TempDir()
+	for _, r := range rows {
+		testutil.WriteFixture(t, dir, r.InTreeConfigPath, "x")
+	}
+	probe := func(u string) ProbeResult {
+		if strings.Contains(u, "//known.example.com") {
+			return ProbeResult{Profile: ProfileAdvice{Name: "known"}}
+		}
+		return ProbeResult{}
+	}
+
+	_, report, err := Discover(dir, rows, nil, noMatch, probe)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	var got []string
+	for _, n := range report.NoRegistry {
+		got = append(got, n.Ecosystem)
+	}
+	if want := []string{"skipped", "unmatched"}; !slices.Equal(got, want) {
+		t.Errorf("NoRegistry ecosystems = %v, want %v", got, want)
 	}
 }

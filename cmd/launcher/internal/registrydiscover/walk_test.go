@@ -3,6 +3,8 @@ package registrydiscover
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -154,9 +156,59 @@ func TestExtract_NoDeclarationsProducesNoteCarryingNamedAny(t *testing.T) {
 			t.Errorf("declared = %+v, want none", declared)
 		}
 		want := ecosystem.Note{ConfigPath: "fake.cfg", Ecosystem: "fake", Skipped: namedAny}
-		if len(notes) != 1 || notes[0] != want {
+		if !reflect.DeepEqual(notes, []ecosystem.Note{want}) {
 			t.Errorf("namedAny=%v: notes = %+v, want [%+v]", namedAny, notes, want)
 		}
+	}
+}
+
+func TestExtract_PublicDeclarationsRideTheNoteNotDeclared(t *testing.T) {
+	public := ecosystem.Declaration{Host: "pub.example.com", UpstreamBaseURL: "https://pub.example.com/v3", Public: true}
+	routed := ecosystem.Declaration{Host: "feed.example.com", UpstreamBaseURL: "https://feed.example.com/v3"}
+	cases := []struct {
+		name         string
+		parsed       []ecosystem.Declaration
+		wantDeclared []ecosystem.Declaration
+		wantNotes    []ecosystem.Note
+	}{
+		{
+			name:   "only public: no declaration, a Note carrying the stamped public decl",
+			parsed: []ecosystem.Declaration{public},
+			wantNotes: []ecosystem.Note{{
+				ConfigPath: "fake.cfg", Ecosystem: "fake", Skipped: true,
+				Public: []ecosystem.Declaration{{Ecosystem: "fake", ConfigPath: "fake.cfg", Host: public.Host, UpstreamBaseURL: public.UpstreamBaseURL, Public: true}},
+			}},
+		},
+		{
+			name:         "public beside a routed one: only the routed one is declared, no Note",
+			parsed:       []ecosystem.Declaration{public, routed},
+			wantDeclared: []ecosystem.Declaration{{Ecosystem: "fake", ConfigPath: "fake.cfg", Host: routed.Host, UpstreamBaseURL: routed.UpstreamBaseURL}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "fake.cfg"), []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			row := ecosystem.Strategy{
+				Name:             "fake",
+				InTreeConfigPath: "fake.cfg",
+				ConfigParser: func(string) ([]ecosystem.Declaration, bool, error) {
+					return slices.Clone(tc.parsed), true, nil
+				},
+			}
+			declared, notes, err := Extract(dir, []ecosystem.Strategy{row})
+			if err != nil {
+				t.Fatalf("Extract: unexpected error: %v", err)
+			}
+			if !slices.Equal(declared, tc.wantDeclared) {
+				t.Errorf("declared = %+v, want %+v", declared, tc.wantDeclared)
+			}
+			if !reflect.DeepEqual(notes, tc.wantNotes) {
+				t.Errorf("notes = %+v, want %+v", notes, tc.wantNotes)
+			}
+		})
 	}
 }
 
@@ -210,7 +262,7 @@ func TestExtract_OrderFollowsRowsThenParserOrder(t *testing.T) {
 		t.Fatalf("notes = %+v, want %+v", notes, wantNotes)
 	}
 	for i, w := range wantNotes {
-		if notes[i] != w {
+		if !reflect.DeepEqual(notes[i], w) {
 			t.Errorf("notes[%d] = %+v, want %+v", i, notes[i], w)
 		}
 	}
