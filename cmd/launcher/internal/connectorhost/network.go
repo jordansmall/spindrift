@@ -243,8 +243,8 @@ func (c *Connector) AuditRefusal(method string, refusal error) error {
 	return refusal
 }
 
-// Network is the host side of a network Connector's single Host call,
-// http_request.
+// Network is the host side of a network Connector's Host calls: http_request
+// and the http_response_header read of its answer.
 type Network struct {
 	// Name is the Connector's name, in errors and the audit log.
 	Name string
@@ -321,7 +321,7 @@ func contentRangeTotal(h string) (total int64, ok bool) {
 
 // do runs one http_request: match, authorize, send, audit. One audit entry is
 // recorded whatever the outcome; if that write fails the answer is withheld.
-func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, body []byte, err error) {
+func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, body []byte, hdr http.Header, err error) {
 	entry := AuditEntry{Connector: n.Name}
 	defer func() {
 		entry.Status = status
@@ -337,7 +337,7 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 			entry.Reason = err.Error()
 		}
 		if aerr := n.record(entry); aerr != nil && err == nil {
-			status, body, err = 0, nil, fmt.Errorf("%w: connector %q: %v", ErrAudit, n.Name, aerr)
+			status, body, hdr, err = 0, nil, nil, fmt.Errorf("%w: connector %q: %v", ErrAudit, n.Name, aerr)
 		}
 	}()
 
@@ -349,19 +349,19 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if derr := dec.Decode(&in); derr != nil {
-		return 0, nil, refuse("malformed request: %v", derr)
+		return 0, nil, nil, refuse("malformed request: %v", derr)
 	}
 	if dec.More() {
-		return 0, nil, refuse("malformed request: trailing data after the request object")
+		return 0, nil, nil, refuse("malformed request: trailing data after the request object")
 	}
 	entry.Method = in.Method
 	u, perr := url.Parse(in.URL)
 	if perr != nil {
-		return 0, nil, refuse("%s: unparseable url", in.Method)
+		return 0, nil, nil, refuse("%s: unparseable url", in.Method)
 	}
 	entry.Host, entry.Path, entry.Query = u.Host, u.Path, u.RawQuery
 	if u.Scheme != "https" || u.User != nil || u.Fragment != "" {
-		return 0, nil, refuse("%s %s%s: only https urls without userinfo or fragment are allowed", in.Method, u.Host, u.Path)
+		return 0, nil, nil, refuse("%s %s%s: only https urls without userinfo or fragment are allowed", in.Method, u.Host, u.Path)
 	}
 	// Admits cleans the path, so a non-canonical or escaped form must be refused
 	// first: the server would resolve it differently from the way it was matched.
@@ -376,20 +376,20 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 		}
 	}
 	if matched == nil {
-		return 0, nil, refuse("no route admits %s %s%s", in.Method, u.Host, u.Path)
+		return 0, nil, nil, refuse("no route admits %s %s%s", in.Method, u.Host, u.Path)
 	}
 	entry.Route = matched.String()
 
 	req, rerr := http.NewRequestWithContext(ctx, in.Method, u.String(), strings.NewReader(in.Body))
 	if rerr != nil {
-		return 0, nil, fmt.Errorf("%w: connector %q: %v", ErrHTTPSend, n.Name, rerr)
+		return 0, nil, nil, fmt.Errorf("%w: connector %q: %v", ErrHTTPSend, n.Name, rerr)
 	}
 	for k, v := range in.Headers {
 		req.Header.Set(k, v)
 	}
 	if n.Authorize != nil {
 		if aerr := n.Authorize(req); aerr != nil {
-			return 0, nil, fmt.Errorf("%w: connector %q: authorize: %v", ErrHTTPSend, n.Name, aerr)
+			return 0, nil, nil, fmt.Errorf("%w: connector %q: authorize: %v", ErrHTTPSend, n.Name, aerr)
 		}
 	}
 
@@ -400,7 +400,7 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, serr := client.Do(req)
 	if serr != nil {
-		return 0, nil, fmt.Errorf("%w: connector %q: %v", ErrHTTPSend, n.Name, serr)
+		return 0, nil, nil, fmt.Errorf("%w: connector %q: %v", ErrHTTPSend, n.Name, serr)
 	}
 	if matched.FollowRedirect && resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		loc, lerr := resp.Location()
@@ -408,7 +408,7 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 			status = resp.StatusCode
 			resp.Body.Close()
 			if loc.Scheme != "https" || loc.User != nil || loc.Host == "" {
-				return status, nil, refuse("redirect from %s%s: only https locations without userinfo are followed", u.Host, u.Path)
+				return status, nil, nil, refuse("redirect from %s%s: only https locations without userinfo are followed", u.Host, u.Path)
 			}
 			entry.RedirectHost = loc.Host
 			// A fresh request: the guest's headers and the credential must not leave the admitted host.
@@ -422,7 +422,7 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 			}
 			hop, herr := http.NewRequestWithContext(hopCtx, http.MethodGet, loc.String(), nil)
 			if herr != nil {
-				return status, nil, fmt.Errorf("%w: connector %q: %v", ErrHTTPSend, n.Name, herr)
+				return status, nil, nil, fmt.Errorf("%w: connector %q: %v", ErrHTTPSend, n.Name, herr)
 			}
 			// A server honouring the suffix range sends only the tail; one that
 			// ignores it sends the whole body, which readTail trims. A suffix
@@ -431,7 +431,7 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 			hop.Header.Set("Range", fmt.Sprintf("bytes=-%d", maxBody))
 			resp, serr = client.Do(hop)
 			if serr != nil {
-				return status, nil, fmt.Errorf("%w: connector %q: redirect to %s: %v", ErrHTTPSend, n.Name, loc.Host, serr)
+				return status, nil, nil, fmt.Errorf("%w: connector %q: redirect to %s: %v", ErrHTTPSend, n.Name, loc.Host, serr)
 			}
 		} else {
 			entry.Reason = "redirect not followed: " + lerr.Error()
@@ -460,10 +460,10 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 	}
 	entry.RateLimit, entry.RetryAfter = rateLimitKind(status, resp.Header, data)
 	if rderr != nil {
-		return status, nil, fmt.Errorf("%w: connector %q: reading response: %v", ErrHTTPSend, n.Name, rderr)
+		return status, nil, nil, fmt.Errorf("%w: connector %q: reading response: %v", ErrHTTPSend, n.Name, rderr)
 	}
 	if len(data) > maxBody {
-		return status, nil, fmt.Errorf("%w: connector %q: over %d bytes", ErrResponseTooLarge, n.Name, maxBody)
+		return status, nil, nil, fmt.Errorf("%w: connector %q: over %d bytes", ErrResponseTooLarge, n.Name, maxBody)
 	}
-	return status, data, nil
+	return status, data, resp.Header, nil
 }

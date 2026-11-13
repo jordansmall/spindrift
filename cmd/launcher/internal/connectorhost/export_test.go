@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 )
 
@@ -43,6 +44,12 @@ var LogWindow = logWindow
 
 // Do exposes the unexported do to the external tests.
 func (n *Network) Do(ctx context.Context, raw []byte, maxBody int) (int, []byte, error) {
+	status, body, _, err := n.do(ctx, raw, maxBody)
+	return status, body, err
+}
+
+// DoHeader is Do that also returns the response headers the host would hold.
+func (n *Network) DoHeader(ctx context.Context, raw []byte, maxBody int) (int, []byte, http.Header, error) {
 	return n.do(ctx, raw, maxBody)
 }
 

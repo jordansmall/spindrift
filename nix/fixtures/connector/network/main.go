@@ -1,7 +1,8 @@
 // Command network is the fixture network Connector (ADR 0073, point 2): its
-// "fetch" method sends one http_request and answers with what came back. The
-// link-time mode (-ldflags=-X=main.mode=<mode>; the sandbox has no env or args)
-// makes it hostile:
+// "fetch" method sends one http_request and answers with what came back, and
+// the response header params.header names, if any, read through
+// http_response_header. The link-time mode (-ldflags=-X=main.mode=<mode>; the
+// sandbox has no env or args) makes it hostile:
 //
 //	""              asks for params.url as given
 //	host            the same path on an undeclared host
@@ -26,12 +27,15 @@ var mode string
 type params struct {
 	URL    string `json:"url"`
 	Method string `json:"method"`
+	Header string `json:"header"`
 }
 
 // observed is what fetch tells core it saw.
 type observed struct {
 	Status int    `json:"status"`
 	Body   string `json:"body"`
+	// Header is nil when the named header was absent, to tell it from empty.
+	Header *string `json:"header,omitempty"`
 }
 
 func init() {
@@ -72,7 +76,13 @@ func fetch(raw json.RawMessage) (any, error) {
 	if mode == "malformed" {
 		return "not an object", nil
 	}
-	return observed{resp.Status, string(resp.Body)}, nil
+	out := observed{Status: resp.Status, Body: string(resp.Body)}
+	if p.Header != "" {
+		if v, ok := connector.ResponseHeader(p.Header); ok {
+			out.Header = &v
+		}
+	}
+	return out, nil
 }
 
 func main() {}
