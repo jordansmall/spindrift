@@ -7,6 +7,11 @@
   # through `core`, never a relative path out of its own directory.
   lib.sdkSrc = ../sdk;
 
+  # A Connector's conformance suite (go fmt/vet/test plus the launcher's
+  # conformance test against its wasm), returned per system for its own
+  # subflake's `checks`.
+  lib.connectorChecks = import ../lib/connector-checks.nix;
+
   # The core Driver rows (ADR 0073): a Connector contributes its Driver's row
   # through `core`, never a relative path out of its own directory.
   lib.driverEntries = { lib }: (import ../lib/drivers { inherit lib; }).entries;
