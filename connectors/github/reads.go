@@ -20,9 +20,9 @@ const (
 // fails outside wasip1.
 var send = connector.HTTPRequest
 
-// fetch sends one request to api+path and returns a 2xx body. The host
-// attaches the credential, so none is set here.
-func fetch(method, api, path string, body []byte) ([]byte, error) {
+// request sends one request to api+path. The host attaches the credential, so
+// none is set here. The status is the caller's to judge.
+func request(method, api, path string, body []byte) (connector.Response, error) {
 	headers := map[string]string{
 		"Accept":               "application/vnd.github+json",
 		"X-GitHub-Api-Version": "2022-11-28",
@@ -30,12 +30,22 @@ func fetch(method, api, path string, body []byte) ([]byte, error) {
 	if body != nil {
 		headers["Content-Type"] = "application/json"
 	}
-	resp, err := send(connector.Request{Method: method, URL: api + path, Headers: headers, Body: string(body)})
+	return send(connector.Request{Method: method, URL: api + path, Headers: headers, Body: string(body)})
+}
+
+// statusError is a non-2xx answer, carrying the class core retries on.
+func statusError(method, path string, status int) error {
+	return connector.Errorf(connector.ClassForStatus(status), "%s %s: status %d", method, path, status)
+}
+
+// fetch is request returning a 2xx body.
+func fetch(method, api, path string, body []byte) ([]byte, error) {
+	resp, err := request(method, api, path, body)
 	if err != nil {
 		return nil, err
 	}
 	if resp.Status < 200 || resp.Status > 299 {
-		return nil, fmt.Errorf("%s %s: status %d", method, path, resp.Status)
+		return nil, statusError(method, path, resp.Status)
 	}
 	return resp.Body, nil
 }
