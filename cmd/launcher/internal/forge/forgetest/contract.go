@@ -109,6 +109,7 @@ var readCases = []struct {
 	{"DispatchOrder", testDispatchOrder},
 	{"LabelToPriority", testLabelToPriority},
 	{"Comments", testComments},
+	{"DemandCount", testDemandCount},
 }
 
 // RunTrackerContract runs the shared IssueTracker conformance suite against h,
@@ -119,7 +120,6 @@ func RunTrackerContract(t *testing.T, h Harness) {
 	t.Run("DoubleDispatchGuard", func(t *testing.T) { testDoubleDispatchGuard(t, h) })
 	RunTrackerReadContract(t, h)
 	t.Run("ResearchVerdictTerminals", func(t *testing.T) { testResearchVerdictTerminals(t, h) })
-	t.Run("DemandCount", func(t *testing.T) { testDemandCount(t, h) })
 }
 
 // testDispatchLifecycle checks that ListIssues(state) reflects the current
@@ -510,21 +510,20 @@ func testDemandCount(t *testing.T, h Harness) {
 		t.Fatalf("CountReady: %v", err)
 	}
 
-	for _, num := range []string{"121", "122", "123", "124"} {
-		h.SeedIssue(forge.Issue{Number: num, Title: "demand " + num})
-		if err := tr.TransitionState(num, forge.Untriaged, forge.Dispatchable); err != nil {
-			t.Fatalf("TransitionState(%s, Untriaged, Dispatchable): %v", num, err)
-		}
-	}
-	h.SeedIssue(forge.Issue{Number: "125", Title: "untriaged"})
-	for _, step := range [][3]any{
-		{"122", forge.Dispatchable, forge.InProgress},
-		{"123", forge.Dispatchable, forge.InProgress},
-		{"123", forge.InProgress, forge.Complete},
+	for _, seed := range []struct {
+		num   string
+		state forge.DispatchState
+	}{
+		{"121", forge.Dispatchable},
+		{"122", forge.InProgress},
+		{"123", forge.Complete},
+		{"124", forge.Dispatchable},
+		{"125", forge.Untriaged},
 	} {
-		num := step[0].(string)
-		if err := tr.TransitionState(num, step[1].(forge.DispatchState), step[2].(forge.DispatchState)); err != nil {
-			t.Fatalf("TransitionState(%s, %v, %v): %v", num, step[1], step[2], err)
+		num := id(h, seed.num)
+		h.SeedIssue(forge.Issue{Number: num, Title: "demand " + seed.num})
+		if seed.state != forge.Untriaged {
+			seedState(t, h, num, seed.state)
 		}
 	}
 

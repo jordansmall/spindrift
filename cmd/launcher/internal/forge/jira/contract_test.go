@@ -73,6 +73,9 @@ type jiraHarness struct {
 	statusCalls      int
 	statusesFail     bool
 
+	// myselfStatus is the status GET /myself answers with; 0 means 200.
+	myselfStatus int
+
 	cloud bool // serves Cloud's search/jql + approximate-count; rejects v2 /search (410)
 	srv   *httptest.Server
 	tr    forge.IssueTracker
@@ -323,6 +326,14 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 
 	case r.Method == http.MethodPost && r.URL.Path == "/rest/api/2/issue":
 		h.createIssue(w, r)
+		return
+
+	case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/myself":
+		if h.myselfStatus != 0 {
+			w.WriteHeader(h.myselfStatus)
+			return
+		}
+		fmt.Fprint(w, `{"accountId":"abc123"}`)
 		return
 
 	case r.Method == http.MethodGet && projectStatusesPathRe.MatchString(r.URL.Path):

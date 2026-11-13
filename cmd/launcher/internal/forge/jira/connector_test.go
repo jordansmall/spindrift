@@ -115,6 +115,8 @@ func newConnectorHarnessWith(t *testing.T, cloud bool, lc connectortracker.Lifec
 		h.routes = append(h.routes, connectorhost.Route{Method: r.Method, Host: u.Host, Path: r.Path})
 	}
 
+	h.routes = connectortracker.Routes(h.routes, connectorProject)
+
 	dialect, name := "server", "jira"
 	if cloud {
 		dialect = "cloud"
@@ -146,16 +148,17 @@ func newConnectorHarnessWith(t *testing.T, cloud bool, lc connectortracker.Lifec
 }
 
 // record notes a backend request and flags one a read-only Connector must not
-// make: anything but a GET under the search or issue roots, or one lacking the
-// host-attached credential.
+// make: anything outside its Route table (reads, plus Cloud's count, which
+// writes nothing), or one lacking the host-attached credential.
 func (h *connectorHarness) record(r *http.Request, wantAuth string) {
 	h.seenMu.Lock()
 	defer h.seenMu.Unlock()
 	line := r.Method + " " + r.URL.Path
 	h.seen = append(h.seen, line)
-	read := r.Method == http.MethodGet &&
-		(strings.HasPrefix(r.URL.Path, "/rest/api/2/search") || strings.HasPrefix(r.URL.Path, "/rest/api/2/issue/"))
-	if !read || r.Header.Get("Authorization") != wantAuth {
+	admitted := slices.ContainsFunc(h.routes, func(rt connectorhost.Route) bool {
+		return rt.Method == r.Method && strings.HasPrefix(r.URL.Path, rt.Path)
+	})
+	if !admitted || r.Header.Get("Authorization") != wantAuth {
 		h.badReq = append(h.badReq, line)
 	}
 }
@@ -214,8 +217,16 @@ func TestConnector_ReadContracts(t *testing.T) {
 	var routes []connectorhost.Route
 	for _, fl := range connectorFlavours {
 		t.Run(fl.name, func(t *testing.T) {
-			h := newConnectorHarness(t, fl.cloud)
+			// A status no scripted issue holds keeps the contract's states label-
+			// selected while still giving the doctor reads a mapping to check.
+			h := newConnectorHarnessWith(t, fl.cloud, connectortracker.Lifecycle{
+				Labels:    testLabels,
+				Statuses:  map[forge.DispatchState]string{forge.Dispatchable: "To Do"},
+				IssueType: "Task",
+			})
+			h.workflowStatuses = []string{"To Do"}
 			forgetest.RunTrackerReadContract(t, h)
+			exerciseDoctorReads(t, h.tr)
 
 			// Jira has no minimized-comment concept, so the Connector attests the
 			// thread itself; it also serves the reverse dependency direction.
