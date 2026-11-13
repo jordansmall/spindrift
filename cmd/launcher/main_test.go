@@ -2903,7 +2903,7 @@ func TestNewCodeForge_GithubReadOnly_ImplementsBundleRelay(t *testing.T) {
 	}
 }
 
-// The default read-write keeps today's github adapter byte for byte: it must
+// An explicit read-write keeps today's github adapter byte for byte: it must
 // never satisfy forge.BundleRelay, or settle's generic relay-before-merge
 // (ready.go) would try to relay a bundle a read-write Box never wrote.
 func TestNewCodeForge_GithubReadWrite_DoesNotImplementBundleRelay(t *testing.T) {
@@ -2955,7 +2955,7 @@ func TestNewCodeForge_ForgejoReadOnly_SatisfiesBundleRelayAndDraftPRCreator(t *t
 	}
 }
 
-// The default read-write forgejo adapter now pushes branches and opens draft
+// The explicit read-write forgejo adapter now pushes branches and opens draft
 // PRs host-side too (issue #4071), so only forge.BundleRelay stays
 // read-only-only: settle's generic relay-before-merge (ready.go) would
 // otherwise try to relay a bundle a read-write Box never wrote.
@@ -4080,7 +4080,7 @@ func TestSettleConfig_ReadOnlyThreadsFromBoxForgeAndIssueAccess(t *testing.T) {
 	cRW := minimalValidConfig()
 	scRW := settleConfig(cRW, localloop.Wire(localloopConfig(cRW), fc), fc, forge.Capabilities{})
 	if scRW.ReadOnly {
-		t.Error("settleConfig(read-write default).ReadOnly = true, want false")
+		t.Error("settleConfig(read-write).ReadOnly = true, want false")
 	}
 }
 

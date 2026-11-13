@@ -802,18 +802,5 @@ runArtifactsRowChecks allRows
     assert assertMsg (
       parsed.artifacts.RUNTIME == "sample-runtime"
     ) "renderInputDocumentJSON must nest artifacts under .artifacts, got: ${out}";
-    # Absent when empty, so an existing document stays byte-identical.
-    assert assertMsg (
-      !(parsed ? deprecatedDefaults)
-    ) "renderInputDocumentJSON must omit deprecatedDefaults when none is passed, got: ${out}";
-    assert assertMsg (
-      (builtins.fromJSON (
-        preambles.renderInputDocumentJSON {
-          settings = { };
-          artifacts = { };
-          deprecatedDefaults.X = "msg";
-        }
-      )).deprecatedDefaults.X == "msg"
-    ) "renderInputDocumentJSON must carry a non-empty deprecatedDefaults";
     pkgs.runCommand "preambles-render-input-document-json" { } "touch $out";
 }

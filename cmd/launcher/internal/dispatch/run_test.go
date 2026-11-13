@@ -214,7 +214,7 @@ func TestRun_PopulatesBoxOutboxDir_GithubReadOnly(t *testing.T) {
 	}
 }
 
-// The default BOX_FORGE_AND_ISSUE_ACCESS=read-write pushes in-box and never
+// An explicit BOX_FORGE_AND_ISSUE_ACCESS=read-write pushes in-box and never
 // consults an outbox.
 func TestRun_NoOutboxDirForGithubReadWrite(t *testing.T) {
 	dir := tempLogDir(t)

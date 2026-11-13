@@ -45,7 +45,7 @@ type ResearchSettle struct {
 
 var _ Settler = (*ResearchSettle)(nil)
 
-// NewResearchSettle constructs a ResearchSettle for the read-write (default)
+// NewResearchSettle constructs a ResearchSettle for the explicit read-write
 // BOX_FORGE_AND_ISSUE_ACCESS path. verdictRelayed forces the SPINDRIFT_COMMENT
 // relay even here, so a missing verdict comment must fail.
 func NewResearchSettle(it forge.IssueTracker, verdicts forge.VerdictLabels, verdictRelayed bool, findingLabel string) *ResearchSettle {
