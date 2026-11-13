@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backendkit"
@@ -32,10 +33,10 @@ func TestIntrospectTokenSendsOnlyThePrefix(t *testing.T) {
 	call := func(_ context.Context, m string, params, result any) error {
 		method = m
 		sent, _ = json.Marshal(params)
-		return json.Unmarshal([]byte(`{"introspectable":true,"writeCapable":true}`), result)
+		return json.Unmarshal([]byte(`{"introspectable":true,"writeCapable":true,"scopes":["read:org","repo"]}`), result)
 	}
 	got, err := introspectToken(call, []string{capTokenGrant}, testTarget, "ghp_SECRET")
-	if err != nil || got != (backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true}) {
+	if err != nil || !reflect.DeepEqual(got, backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true, Scopes: []string{"read:org", "repo"}}) {
 		t.Fatalf("introspectToken = %+v, %v", got, err)
 	}
 	if method != "forge.tokenGrant" {
@@ -58,7 +59,7 @@ func TestIntrospectTokenCarriesTheReason(t *testing.T) {
 		return json.Unmarshal([]byte(`{"introspectable":false,"writeCapable":false,"reason":"why"}`), result)
 	}
 	got, err := introspectToken(call, []string{capTokenGrant}, testTarget, "github_pat_x")
-	if err != nil || got != (backendkit.TokenIntrospection{Reason: "why"}) {
+	if err != nil || !reflect.DeepEqual(got, backendkit.TokenIntrospection{Reason: "why"}) {
 		t.Fatalf("introspectToken = %+v, %v", got, err)
 	}
 }

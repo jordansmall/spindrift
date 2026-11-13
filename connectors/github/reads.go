@@ -116,12 +116,18 @@ func numberPath(t tracker.Target, number string) (string, error) {
 // returns true to stop early; a short page ends the walk. Exceeding maxPages
 // is an error so a runaway list never truncates silently.
 func pages[T any](api, path string, visit func([]T) bool) error {
+	return pagesOf(api, path, func(raw []T) int { return len(raw) }, visit)
+}
+
+// pagesOf is pages for a response that wraps its list: size counts the items
+// of one decoded page, and a page shorter than pageSize ends the walk.
+func pagesOf[B any](api, path string, size func(B) int, visit func(B) bool) error {
 	for page := 1; page <= maxPages; page++ {
-		var raw []T
+		var raw B
 		if err := call("GET", api, path+"&page="+strconv.Itoa(page), nil, &raw); err != nil {
 			return err
 		}
-		if visit(raw) || len(raw) < pageSize {
+		if visit(raw) || size(raw) < pageSize {
 			return nil
 		}
 	}

@@ -2,6 +2,7 @@ package github
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 )
 
@@ -128,6 +129,9 @@ func TestNewTokenIntrospector(t *testing.T) {
 			}
 			if tc.wantIntro && result.WriteCapable != tc.wantWriteCap {
 				t.Errorf("WriteCapable = %v, want %v", result.WriteCapable, tc.wantWriteCap)
+			}
+			if !reflect.DeepEqual(result.Scopes, tc.scopes) {
+				t.Errorf("Scopes = %v, want %v", result.Scopes, tc.scopes)
 			}
 		})
 	}

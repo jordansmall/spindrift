@@ -146,8 +146,6 @@ type TokenPrompt struct {
 	// AmbientToken is the host gh CLI's own token, the github fallback for an
 	// operator who declines to paste a fine-grained PAT.
 	AmbientToken func() (string, error)
-	// TokenScopes reads the scopes GitHub reports for a classic token.
-	TokenScopes func(token string) ([]string, error)
 	// Probe validates token against the live API by building the backend's
 	// tracker with it.
 	Probe func(token string) error
@@ -172,6 +170,9 @@ type TokenIntrospection struct {
 	// Reason is an optional operator-facing explanation shown when
 	// Introspectable is false.
 	Reason string
+	// Scopes are the OAuth scopes the forge reports for the token, nil when it
+	// reports none.
+	Scopes []string
 }
 
 // TokenIntrospector probes token for write capability, scoped to repoSlug where

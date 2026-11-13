@@ -269,6 +269,7 @@ func TestConnectorRoutesChecks_GithubForgeWritesShowAsWidening(t *testing.T) {
 		route("DELETE", "/repos/o/r/git/refs/heads"),
 		route("GET", "/repos/o/r/branches"),
 		route("GET", "/repos/o/r/rules/branches"),
+		route("GET", "/installation/repositories"),
 	}
 	useConnectorRows(t, connectorRow(accepted, append(append([]connectorhost.Route{}, accepted...), added...)))
 	out := runConnectorRows(t, connectorRoutesChecks())

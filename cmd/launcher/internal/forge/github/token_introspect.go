@@ -11,8 +11,6 @@ import (
 // TokenOAuthScopes reads the X-OAuth-Scopes header `gh api -i` returns for a
 // classic/OAuth token (issue #1950, ADR 0027). It passes token via GH_TOKEN so
 // the probe reflects the token under audit, not the caller's own credential.
-// Quickstart duplicates it in hostEnvironment.TokenScopes because quickstart is
-// its own `package main` and cannot import this package.
 func TokenOAuthScopes(token string) ([]string, error) {
 	cmd := exec.Command("gh", "api", "-i", "user")
 	cmd.Env = append(os.Environ(), "GH_TOKEN="+token)

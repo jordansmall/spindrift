@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"spindrift.dev/sdk/connector"
@@ -21,42 +22,91 @@ const notIntrospectableReason = "e.g. a fine-grained PAT, whose granted permissi
 // classic tokens have no read-only variant of repo access.
 var writeScopes = map[string]bool{"repo": true, "public_repo": true}
 
+// viewerQuery is the cheapest authenticated read; only its X-OAuth-Scopes
+// response header is used.
+const viewerQuery = `{viewer{login}}`
+
 // tokenGrant reports what the token the host attached may do. The host sends
 // only the token's prefix up to its first "_", so a fine-grained PAT
 // (github_pat_...) arrives as "github_". GitHub signals write capability
-// differently per shape: X-OAuth-Scopes for classic and OAuth tokens, and
-// permissions.push for an App installation token, which has no ambient user
-// role to inflate it. Any other shape is not introspectable.
+// differently per shape: X-OAuth-Scopes for classic and OAuth tokens, and the
+// repository's `permissions.push` for an App installation token. Any other
+// shape is not introspectable.
+//
+// The classic read goes over `POST /graphql`, which the Connector already
+// declares. The installation token's push comes from `GET
+// /installation/repositories`, a root that lets every load of the Connector
+// list the repositories the installation reaches, with their permissions (a
+// small widening beside what `POST /graphql` already admits): GraphQL's
+// viewerPermission is null for an App, and REST's `GET /user` and `GET
+// /repos/{repo}` would each need a subtree-admitting Route that every load of
+// the Connector would inherit.
 func tokenGrant(t forge.Target, prefix string) (forge.Grant, error) {
 	switch prefix {
 	case "ghp_", "gho_":
-		resp, err := request("GET", t.API, "/user", nil)
-		if err != nil {
+		if err := graphql(t.API, viewerQuery, map[string]any{}, nil); err != nil {
 			return forge.Grant{}, err
-		}
-		if !is2xx(resp.Status) {
-			return forge.Grant{}, statusError("GET", "/user", resp.Status)
 		}
 		// Absent or empty scopes grant nothing, so neither is an error.
 		value, _ := responseHeader("X-OAuth-Scopes")
+		var scopes []string
 		write := false
 		for _, s := range strings.Split(value, ",") {
-			write = write || writeScopes[strings.TrimSpace(s)]
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			scopes = append(scopes, s)
+			write = write || writeScopes[s]
 		}
-		return forge.Grant{Introspectable: true, WriteCapable: write}, nil
+		return forge.Grant{Introspectable: true, WriteCapable: write, Scopes: scopes}, nil
 	case "ghs_":
-		var repo struct {
+		push, err := installationPush(t)
+		if err != nil {
+			return forge.Grant{}, err
+		}
+		return forge.Grant{Introspectable: true, WriteCapable: push}, nil
+	}
+	return forge.Grant{Reason: notIntrospectableReason}, nil
+}
+
+// installationPush walks the installation's repositories for t.Repo and returns
+// its `permissions.push`. A repository the installation does not list, or one
+// listed without a push permission, is an error rather than a guess; this
+// mirrors forge/github.TokenRepoPushPermission, which a wasip1 module cannot
+// import.
+func installationPush(t forge.Target) (bool, error) {
+	type page struct {
+		Repositories []struct {
+			FullName    string `json:"full_name"`
 			Permissions *struct {
 				Push *bool `json:"push"`
 			} `json:"permissions"`
-		}
-		if err := call("GET", t.API, forgePath(t, ""), nil, &repo); err != nil {
-			return forge.Grant{}, err
-		}
-		if repo.Permissions == nil || repo.Permissions.Push == nil {
-			return forge.Grant{}, fmt.Errorf("repo permissions field missing or incomplete for %s; cannot determine write capability", t.Repo)
-		}
-		return forge.Grant{Introspectable: true, WriteCapable: *repo.Permissions.Push}, nil
+		} `json:"repositories"`
 	}
-	return forge.Grant{Reason: notIntrospectableReason}, nil
+	var push *bool
+	found := false
+	err := pagesOf(t.API, "/installation/repositories?per_page="+strconv.Itoa(pageSize),
+		func(p page) int { return len(p.Repositories) },
+		func(p page) bool {
+			for _, r := range p.Repositories {
+				if strings.EqualFold(r.FullName, t.Repo) {
+					found = true
+					if r.Permissions != nil {
+						push = r.Permissions.Push
+					}
+					return true
+				}
+			}
+			return false
+		})
+	switch {
+	case err != nil:
+		return false, err
+	case !found:
+		return false, fmt.Errorf("%s is not among the installation's repositories; cannot determine write capability", t.Repo)
+	case push == nil:
+		return false, fmt.Errorf("installation repository %s carries no push permission; cannot determine write capability", t.Repo)
+	}
+	return *push, nil
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -554,7 +555,7 @@ func testMergeRefusesDraft(t *testing.T, h *connectorHarness) {
 func testHeadCommitSHA(t *testing.T, h *connectorHarness) {
 	url := h.SeedLandablePR("405")
 	got, err := h.caps.PRForge.HeadCommitSHA(url)
-	if want := h.backend.repo.BranchSHA(forge.AgentBranchName(h.BranchPrefix(), "405")); err != nil || got != want {
+	if want := h.backend.repo.BranchSHA(forge.AgentBranchName(h.BranchPrefix(), "405")); err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("HeadCommitSHA = (%q, %v), want %q", got, err, want)
 	}
 }
@@ -661,9 +662,12 @@ func testProbe(t *testing.T, h *connectorHarness) {
 
 func testTokenGrant(t *testing.T, h *connectorHarness) {
 	target := connectorforge.Target{API: h.backend.URL, Repo: connectorRepo}
-	for _, token := range []string{"ghp_x", "ghs_x"} {
+	for token, want := range map[string]backendkit.TokenIntrospection{
+		"ghp_x": {Introspectable: true, WriteCapable: true, Scopes: []string{"read:org", "repo"}},
+		"ghs_x": {Introspectable: true, WriteCapable: true},
+	} {
 		got, err := connectorforge.IntrospectToken(h.conn, target, token)
-		if want := (backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true}); err != nil || got != want {
+		if err != nil || !reflect.DeepEqual(got, want) {
 			t.Errorf("IntrospectToken(%s) = (%+v, %v), want %+v", token, got, err, want)
 		}
 	}

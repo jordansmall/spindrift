@@ -80,9 +80,10 @@ type (
 		JobID      string `json:"jobId,omitempty"`
 	}
 	wireGrant struct {
-		Introspectable bool   `json:"introspectable"`
-		WriteCapable   bool   `json:"writeCapable"`
-		Reason         string `json:"reason,omitempty"`
+		Introspectable bool     `json:"introspectable"`
+		WriteCapable   bool     `json:"writeCapable"`
+		Reason         string   `json:"reason,omitempty"`
+		Scopes         []string `json:"scopes,omitempty"`
 	}
 	wireRollup struct {
 		State  string      `json:"state"`

@@ -2,18 +2,21 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
@@ -214,16 +217,18 @@ func TestConnector_PriorClaimStateFailsWhenTheTimelineDoes(t *testing.T) {
 	}
 }
 
-// tokenBackend is the GitHub API as token introspection sees it: GET /user
-// answers with the token's OAuth scopes header, GET /repos/{repo} with its
-// permissions, each only to the token it was scripted for.
+// tokenBackend is the GitHub API as token introspection sees it: the GraphQL
+// viewer query answers with the token's OAuth scopes header, the repository's
+// viewerPermission query with its permission. Anything but POST /graphql is
+// unexpected: the Connector declares no REST Route for either read.
 type tokenBackend struct {
 	*httptest.Server
 	mu         sync.Mutex
 	token      string
 	userStatus int
 	scopes     *string
-	repoBody   string
+	// permission is the repository's viewerPermission; empty leaves it out.
+	permission string
 	seenAuth   []string
 	unexpected []string
 }
@@ -235,15 +240,23 @@ func newTokenBackend(t *testing.T, token string) *tokenBackend {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		b.seenAuth = append(b.seenAuth, r.Header.Get("Authorization"))
+		var req struct{ Query string }
+		if r.Method == http.MethodPost && r.URL.Path == "/graphql" {
+			_ = json.NewDecoder(r.Body).Decode(&req)
+		}
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/user":
+		case strings.Contains(req.Query, "viewerPermission"):
+			repo := `{}`
+			if b.permission != "" {
+				repo = `{"viewerPermission":"` + b.permission + `"}`
+			}
+			_, _ = w.Write([]byte(`{"data":{"repository":` + repo + `}}`))
+		case strings.Contains(req.Query, "viewer"):
 			if b.scopes != nil {
 				w.Header().Set("X-OAuth-Scopes", *b.scopes)
 			}
 			w.WriteHeader(b.userStatus)
-			_, _ = w.Write([]byte(`{"login":"bot"}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/repos/"+connectorRepo:
-			_, _ = w.Write([]byte(b.repoBody))
+			_, _ = w.Write([]byte(`{"data":{"viewer":{"login":"bot"}}}`))
 		default:
 			b.unexpected = append(b.unexpected, r.Method+" "+r.URL.RequestURI())
 			http.NotFound(w, r)
@@ -281,41 +294,54 @@ func loadTokenConnector(t *testing.T, b *tokenBackend, token string) *connectorh
 	return conn
 }
 
-// The Connector's token introspection answers as the native introspector does
-// for every token shape, over the same GitHub API, and reaches it with the
-// token under audit as its credential and never through gh.
-func TestConnector_TokenGrantMatchesNative(t *testing.T) {
+// The Connector's token introspection reports each token shape's grant over
+// the GitHub API, reaching it with the token under audit as its credential and
+// never through gh.
+func TestConnector_TokenGrant(t *testing.T) {
 	str := func(s string) *string { return &s }
+	// Held to the native adapter's constant, not a copy, so the two cannot drift.
+	notIntrospectable := backendkit.TokenIntrospection{Reason: notIntrospectableReason}
 	for _, tc := range []struct {
 		name, token string
 		userStatus  int
 		scopes      *string
-		repoBody    string
+		permission  string
+		want        backendkit.TokenIntrospection
+		wantErr     bool
 		// reaches is whether the shape makes a request at all.
 		reaches bool
 	}{
-		{name: "classic PAT with repo scope", token: "ghp_abc", scopes: str("read:org, repo"), reaches: true},
-		{name: "classic PAT with only read:org", token: "ghp_abc", scopes: str("read:org"), reaches: true},
-		{name: "classic PAT with no scopes", token: "ghp_abc", scopes: str(""), reaches: true},
-		{name: "classic PAT with no scopes header", token: "ghp_abc", reaches: true},
-		{name: "OAuth token with public_repo", token: "gho_abc", scopes: str("public_repo"), reaches: true},
-		{name: "installation token with push", token: "ghs_abc", repoBody: `{"permissions":{"push":true}}`, reaches: true},
-		{name: "installation token without push", token: "ghs_abc", repoBody: `{"permissions":{"push":false}}`, reaches: true},
-		{name: "installation token without permissions", token: "ghs_abc", repoBody: `{}`, reaches: true},
-		{name: "fine-grained PAT", token: "github_pat_abc"},
-		{name: "unknown prefix", token: "ghu_abc"},
-		{name: "opaque token", token: "opaque"},
-		{name: "user read refused", token: "ghp_abc", userStatus: http.StatusUnauthorized, reaches: true},
+		{name: "classic PAT with repo scope", token: "ghp_abc", scopes: str("read:org, repo"), reaches: true,
+			want: backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true, Scopes: []string{"read:org", "repo"}}},
+		{name: "classic PAT with only read:org", token: "ghp_abc", scopes: str("read:org"), reaches: true,
+			want: backendkit.TokenIntrospection{Introspectable: true, Scopes: []string{"read:org"}}},
+		{name: "classic PAT with no scopes", token: "ghp_abc", scopes: str(""), reaches: true,
+			want: backendkit.TokenIntrospection{Introspectable: true}},
+		{name: "classic PAT with no scopes header", token: "ghp_abc", reaches: true,
+			want: backendkit.TokenIntrospection{Introspectable: true}},
+		{name: "OAuth token with public_repo", token: "gho_abc", scopes: str("public_repo"), reaches: true,
+			want: backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true, Scopes: []string{"public_repo"}}},
+		{name: "installation token with write", token: "ghs_abc", permission: "WRITE", reaches: true,
+			want: backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true}},
+		{name: "installation token with admin", token: "ghs_abc", permission: "ADMIN", reaches: true,
+			want: backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true}},
+		{name: "installation token with read only", token: "ghs_abc", permission: "READ", reaches: true,
+			want: backendkit.TokenIntrospection{Introspectable: true}},
+		{name: "installation token without permissions", token: "ghs_abc", reaches: true, wantErr: true},
+		{name: "fine-grained PAT", token: "github_pat_abc", want: notIntrospectable},
+		{name: "unknown prefix", token: "ghu_abc", want: notIntrospectable},
+		{name: "opaque token", token: "opaque", want: notIntrospectable},
+		{name: "user read refused", token: "ghp_abc", userStatus: http.StatusUnauthorized, reaches: true, wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b := newTokenBackend(t, tc.token)
-			b.scopes, b.repoBody = tc.scopes, tc.repoBody
+			b.scopes, b.permission = tc.scopes, tc.permission
 			if tc.userStatus != 0 {
 				b.userStatus = tc.userStatus
 			}
 			conn := loadTokenConnector(t, b, tc.token)
 			calls := noGH(t)
-			got, gotErr := connectorforge.IntrospectToken(conn, connectorforge.Target{API: b.URL, Repo: connectorRepo}, tc.token)
+			got, err := connectorforge.IntrospectToken(conn, connectorforge.Target{API: b.URL, Repo: connectorRepo}, tc.token)
 			if n := calls(); n != 0 {
 				t.Errorf("the Connector's introspection ran gh %d times", n)
 			}
@@ -330,29 +356,26 @@ func TestConnector_TokenGrantMatchesNative(t *testing.T) {
 					t.Errorf("backend saw Authorization %q, want the token under audit", a)
 				}
 			}
-
-			ghTokenStub(t, tc.userStatus, tc.scopes, tc.repoBody)
-			want, wantErr := newTokenIntrospector(TokenOAuthScopes, TokenRepoPushPermission)(tc.token, connectorRepo)
-			if (gotErr == nil) != (wantErr == nil) || got != want {
-				t.Errorf("Connector = (%+v, %v), native (%+v, %v)", got, gotErr, want, wantErr)
+			if (err != nil) != tc.wantErr || !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("IntrospectToken = (%+v, %v), want (%+v, err=%v)", got, err, tc.want, tc.wantErr)
 			}
 		})
 	}
 }
 
-// ghTokenStub scripts the gh the native introspector runs to answer what
-// tokenBackend serves.
-func ghTokenStub(t *testing.T, userStatus int, scopes *string, repoBody string) {
-	t.Helper()
-	header := ""
-	if scopes != nil {
-		header = "X-OAuth-Scopes: " + *scopes + `\n`
+// The Connector carries its own copy of the write-scope set, since its module
+// cannot import this package: each scope native treats as write-granting must
+// make the Connector report a write-capable grant too.
+func TestConnector_TokenGrantWriteScopesMatchNative(t *testing.T) {
+	for scope := range ghTokenWriteScopes {
+		t.Run(scope, func(t *testing.T) {
+			b := newTokenBackend(t, "ghp_abc")
+			b.scopes = &scope
+			conn := loadTokenConnector(t, b, "ghp_abc")
+			got, err := connectorforge.IntrospectToken(conn, connectorforge.Target{API: b.URL, Repo: connectorRepo}, "ghp_abc")
+			if err != nil || !got.WriteCapable {
+				t.Errorf("IntrospectToken(scope %q) = (%+v, %v), want write-capable", scope, got, err)
+			}
+		})
 	}
-	prependFakeGH(t, `case "$*" in
-"api -i user")
-	[ `+strconv.Itoa(userStatus)+` = 401 ] && { echo "HTTP 401: Bad credentials" >&2; exit 1; }
-	printf 'HTTP/2.0 200 OK\n`+header+`\n{}' ;;
-"api repos/`+connectorRepo+`")
-	printf '%s' '`+repoBody+`' ;;
-esac`)
 }
