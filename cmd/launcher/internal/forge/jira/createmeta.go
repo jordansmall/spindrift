@@ -4,18 +4,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
 )
-
-// filledFields are the create fields PostIssue sets itself, plus reporter,
-// which Jira defaults to the caller. A required field outside this set (and
-// without a default) makes every host-side create fail.
-var filledFields = map[string]bool{
-	"project": true, "summary": true, "issuetype": true,
-	"description": true, "labels": true, "reporter": true,
-}
 
 // createMetaPageSize and maxCreateMetaPages bound the createmeta walk; the
 // page cap stops a server that ignores startAt from looping forever.
@@ -82,21 +73,18 @@ func (j *jiraClient) CheckIssueType() ([]string, error) {
 			typeID = ty.ID
 		}
 	}
-	if typeID == "" {
-		return nil, fmt.Errorf("JIRA_ISSUE_TYPE %q is not an issue type of project %s (offered: %s; it must match an offered name exactly as the instance spells it, e.g. \"Aufgabe\" for Task on a German one): %w",
-			j.cfg.IssueType, j.cfg.ProjectKey, strings.Join(offered, ", "), forge.ErrUnknownIssueType)
+	if err := forge.IssueTypeNotOffered(j.cfg.ProjectKey, j.cfg.IssueType, offered); err != nil {
+		return nil, err
 	}
-	fields, err := j.createMetaRows(base + "/" + url.PathEscape(typeID))
+	rows, err := j.createMetaRows(base + "/" + url.PathEscape(typeID))
 	if err != nil {
 		return nil, err
 	}
-	var unfilled []string
-	for _, f := range fields {
-		if f.Required && !f.HasDefaultValue && !filledFields[f.FieldID] {
-			unfilled = append(unfilled, fmt.Sprintf("%q (%s)", f.Name, f.FieldID))
-		}
+	fields := make([]forge.CreateField, len(rows))
+	for i, r := range rows {
+		fields[i] = forge.CreateField{ID: r.FieldID, Name: r.Name, Required: r.Required, HasDefault: r.HasDefaultValue}
 	}
-	return unfilled, nil
+	return forge.UnfilledCreateFields(fields), nil
 }
 
 var _ forge.IssueTypeChecker = (*jiraClient)(nil)

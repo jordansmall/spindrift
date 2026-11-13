@@ -3,8 +3,6 @@ package jira
 import (
 	"net/http"
 	"net/url"
-	"slices"
-	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -31,21 +29,13 @@ func (j *jiraClient) CheckMappedStatuses() ([]string, error) {
 	if err := j.rest.Do(http.MethodGet, "/rest/api/2/project/"+url.PathEscape(j.cfg.ProjectKey)+"/statuses", nil, &types); err != nil {
 		return nil, err
 	}
-	have := map[string]bool{}
+	var have []string
 	for _, ty := range types {
 		for _, s := range ty.Statuses {
-			have[strings.ToLower(s.Name)] = true
+			have = append(have, s.Name)
 		}
 	}
-	slices.Sort(mapped) // map order is random; sorting first keeps the spelling kept on a case-only dedup stable
-	var missing []string
-	for _, status := range mapped {
-		if key := strings.ToLower(status); !have[key] {
-			have[key] = true // report a case-only duplicate once
-			missing = append(missing, status)
-		}
-	}
-	return missing, nil
+	return forge.MissingStatuses(mapped, have), nil
 }
 
 var _ forge.StatusMappingChecker = (*jiraClient)(nil)
