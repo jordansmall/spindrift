@@ -110,7 +110,7 @@ func RunIssueFilerContract(t *testing.T, ih IssueFilerHarness) {
 
 func mustBundleRelay(t *testing.T, h HostMediationHarness) forge.BundleRelay {
 	t.Helper()
-	br, ok := h.CodeForge().(forge.BundleRelay)
+	br, ok := forge.AsCodeForge[forge.BundleRelay](h.CodeForge())
 	if !ok {
 		t.Fatal("harness's CodeForge does not implement forge.BundleRelay")
 	}
@@ -119,7 +119,7 @@ func mustBundleRelay(t *testing.T, h HostMediationHarness) forge.BundleRelay {
 
 func mustDraftPRCreator(t *testing.T, h HostMediationHarness) forge.DraftPRCreator {
 	t.Helper()
-	dpc, ok := h.CodeForge().(forge.DraftPRCreator)
+	dpc, ok := forge.AsCodeForge[forge.DraftPRCreator](h.CodeForge())
 	if !ok {
 		t.Fatal("harness's CodeForge does not implement forge.DraftPRCreator")
 	}

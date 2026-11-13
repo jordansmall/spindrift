@@ -15,7 +15,7 @@ import (
 type PRForgeReadHarness interface {
 	Forge() forge.PRForge
 	// CodeForge returns the same adapter as the statically-typed handle
-	// callers hold before discovering PRForge via cf.(forge.PRForge).
+	// callers hold before discovering PRForge via forge.AsCodeForge.
 	CodeForge() forge.CodeForge
 	// BranchPrefix returns the prefix forge.AgentBranchName prepends to an
 	// issue number.
@@ -98,14 +98,14 @@ func RunPRForgeContract(t *testing.T, h PRForgeHarness) {
 }
 
 func testOptionalInterfaceDiscovery(t *testing.T, h PRForgeHarness) {
-	if _, ok := h.CodeForge().(forge.PRForge); !ok {
+	if _, ok := forge.AsCodeForge[forge.PRForge](h.CodeForge()); !ok {
 		t.Fatal("PR-capable harness's CodeForge does not satisfy forge.PRForge")
 	}
 	p, ok := h.(PushOnlyCodeForgeProvider)
 	if !ok {
 		return
 	}
-	if _, ok := p.PushOnlyCodeForge().(forge.PRForge); ok {
+	if _, ok := forge.AsCodeForge[forge.PRForge](p.PushOnlyCodeForge()); ok {
 		t.Fatal("push-only CodeForge satisfies forge.PRForge, want it hidden")
 	}
 }

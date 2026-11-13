@@ -173,10 +173,10 @@ func TestCanAutoMergeNeedsTheCapability(t *testing.T) {
 
 func TestOptionalSurfacesFollowTheCapabilities(t *testing.T) {
 	h := newPRHarness(t, nil, nil)
-	if h.caps.PRForge == nil || h.caps.DraftPRCreator == nil || h.caps.BranchDeleter == nil || h.caps.MergeCommitReader == nil {
+	if h.caps.PRForge == nil || h.caps.BranchDeleter == nil || h.caps.MergeCommitReader == nil {
 		t.Errorf("base capabilities missing: %+v", h.caps)
 	}
-	if h.caps.CIRunReporter != nil || h.caps.BranchProtectionForge != nil {
+	if h.caps.CIRunReporter != nil || h.caps.BranchProtectionForge != nil || h.caps.DraftPRCreator != nil || h.caps.BranchPusher != nil {
 		t.Errorf("undeclared surfaces present: %+v", h.caps)
 	}
 
@@ -185,6 +185,12 @@ func TestOptionalSurfacesFollowTheCapabilities(t *testing.T) {
 	}
 	if h := newPRHarness(t, []string{capBranchProtection}, nil); h.caps.CIRunReporter != nil || h.caps.BranchProtectionForge == nil {
 		t.Errorf("forge.branchProtection alone resolved %+v", h.caps)
+	}
+	if h := newPRHarness(t, []string{capDraftPRs}, nil); h.caps.DraftPRCreator == nil || h.caps.BranchPusher == nil || !h.caps.HostCanOpenPR() || h.caps.CIRunReporter != nil || h.caps.BranchProtectionForge != nil || h.caps.PRForge == nil {
+		t.Errorf("forge.draftPRs alone resolved %+v", h.caps)
+	}
+	if h := newPRHarness(t, []string{capCIRun, capBranchProtection, capDraftPRs}, nil); h.caps.CIRunReporter == nil || h.caps.BranchProtectionForge == nil || !h.caps.HostCanOpenPR() || h.caps.PRForge == nil || h.caps.MergeCommitReader == nil || h.caps.BranchDeleter == nil {
+		t.Errorf("every optional surface stacked resolved %+v", h.caps)
 	}
 
 	h = newPRHarness(t, []string{capCIRun, capBranchProtection}, map[string]any{
@@ -313,13 +319,13 @@ func TestMarkDraftCommentAndURLPinning(t *testing.T) {
 
 func TestCreateDraftPR(t *testing.T) {
 	created := prJSON + `}`
-	h := newPRHarness(t, nil, map[string]any{"forge.openPR": created})
+	h := newPRHarness(t, []string{capDraftPRs}, map[string]any{"forge.openPR": created})
 	if url, ok, err := h.caps.DraftPRCreator.CreateDraftPR("t", "b", "main", "agent/issue-1"); url != prURL7 || !ok || err != nil {
 		t.Fatalf("CreateDraftPR = (%q, %v, %v)", url, ok, err)
 	}
 
 	t.Run("adopts an existing open PR", func(t *testing.T) {
-		h := newPRHarness(t, nil, map[string]any{
+		h := newPRHarness(t, []string{capDraftPRs}, map[string]any{
 			"forge.openPR":       classed(connectorhost.Permanent),
 			"forge.prsForBranch": `{"prs":[` + created + `]}`})
 		if url, ok, err := h.caps.DraftPRCreator.CreateDraftPR("t", "b", "main", "agent/issue-1"); url != prURL7 || ok || err != nil {
@@ -328,13 +334,13 @@ func TestCreateDraftPR(t *testing.T) {
 	})
 	t.Run("returns the create error when nothing is open", func(t *testing.T) {
 		cause := classed(connectorhost.Permanent)
-		h := newPRHarness(t, nil, map[string]any{"forge.openPR": cause, "forge.prsForBranch": `{"prs":[]}`})
+		h := newPRHarness(t, []string{capDraftPRs}, map[string]any{"forge.openPR": cause, "forge.prsForBranch": `{"prs":[]}`})
 		if _, _, err := h.caps.DraftPRCreator.CreateDraftPR("t", "b", "main", "agent/issue-1"); !errors.Is(err, cause) {
 			t.Fatalf("CreateDraftPR = %v, want the create error", err)
 		}
 	})
 	t.Run("refuses a foreign PR", func(t *testing.T) {
-		h := newPRHarness(t, nil, map[string]any{"forge.openPR": `{"number":"7","url":"https://evil.example/o/r/pull/7","state":"open","merged":false}`})
+		h := newPRHarness(t, []string{capDraftPRs}, map[string]any{"forge.openPR": `{"number":"7","url":"https://evil.example/o/r/pull/7","state":"open","merged":false}`})
 		if _, _, err := h.caps.DraftPRCreator.CreateDraftPR("t", "b", "main", "h"); !errors.Is(err, ErrAnswer) {
 			t.Fatalf("CreateDraftPR = %v, want ErrAnswer", err)
 		}

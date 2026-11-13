@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os/exec"
 	"slices"
 	"strings"
 	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/bundlerelay"
 	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/retry"
 )
@@ -117,6 +119,10 @@ type pushOnly struct {
 	call   guestCall
 	target Target
 	git    forge.CodeForge
+	// cloneURL and cred are what core's own git (relayClone) clones with; both
+	// are set only once cloneURL passed the host check.
+	cloneURL string
+	cred     gitexec.Credential
 }
 
 // Compose builds a Code Forge from a forge Connector whose handshake advertises
@@ -147,6 +153,7 @@ func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge,
 		return nil, forge.Capabilities{}, err
 	}
 	p.git = g.Plumbing(remote.CloneURL, g.Credential)
+	p.cloneURL, p.cred = remote.CloneURL, g.Credential
 	var cf forge.CodeForge = p
 	if !isPushOnly {
 		// remote() accepted the web URL, so it parses with a host.
@@ -238,4 +245,22 @@ func retryTransient(attempts int, b retry.LinearBackoff, fn func() error) error 
 		}
 		b.Do(n)
 	}
+}
+
+// relayClone is the `git clone` step bundlerelay's helpers take, run in core's
+// git over the validated clone URL with core's credential: the Connector never
+// sees git or the credential. op names the caller; the credential rides the
+// environment, never the URL, and the clone's output stays out of the error.
+func (p *pushOnly) relayClone(op string) func(dir string) error {
+	return func(dir string) error {
+		if _, err := p.cred.Apply(exec.Command("git", "clone", "--no-single-branch", p.cloneURL, dir)).CombinedOutput(); err != nil {
+			return fmt.Errorf("connector forge: %s: git clone %s: %w", op, forge.RedactURLCredentials(p.cloneURL), err)
+		}
+		return nil
+	}
+}
+
+// pushBranch creates branch from localRef in the repo at srcDir, create-only.
+func (p *pushOnly) pushBranch(srcDir, localRef, branch, base string) error {
+	return bundlerelay.PushBranch("connector forge", srcDir, localRef, branch, base, p.cred, p.relayClone("push branch"))
 }

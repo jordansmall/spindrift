@@ -192,7 +192,7 @@ func testPushOnlyMergeModeMapping(t *testing.T, h CodeForgeHarness) {
 	if _, ok := h.(PushOnly); !ok {
 		return
 	}
-	if _, isPR := h.Forge().(forge.PRForge); isPR {
+	if _, isPR := forge.AsCodeForge[forge.PRForge](h.Forge()); isPR {
 		t.Fatal("push-only harness's CodeForge satisfies forge.PRForge, want MERGE_MODE=auto to have no meaning here")
 	}
 	const num = "905"

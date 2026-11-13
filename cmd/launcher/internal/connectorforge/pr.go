@@ -14,10 +14,10 @@ import (
 // answers every PR question and performs every PR write, while the policy (URL
 // pinning, answer validation, merge-failure classification) stays here. It
 // builds on reads for the five PR reads, and on pushOnly for the branch and git
-// pieces. It never implements the optional CIRunReporter or
-// BranchProtectionForge itself: composePR wraps it in a type that does only when
-// the Connector declares the capability, so a type probe finds exactly the
-// declared surface.
+// pieces. It implements none of the optional surfaces (CIRunReporter,
+// BranchProtectionForge, DraftPRCreator and BranchPusher) as interface
+// methods: composePR stacks one layer per declared surface over it, so a type
+// probe finds exactly the declared ones.
 type prForge struct {
 	*reads
 	push      *pushOnly
@@ -34,37 +34,59 @@ func composePR(p *pushOnly, caps []string, webHost string) forge.CodeForge {
 		autoMerge: slices.Contains(caps, capAutoMerge),
 		hasProbe:  slices.Contains(caps, capProbe),
 	}
-	switch ci, bp := slices.Contains(caps, capCIRun), slices.Contains(caps, capBranchProtection); {
-	case ci && bp:
-		return withCIRunAndProtection{f}
-	case ci:
-		return withCIRun{f}
-	case bp:
-		return withProtection{f}
+	var cf forge.CodeForge = f
+	if slices.Contains(caps, capCIRun) {
+		cf = ciRunLayer{cf, f}
 	}
-	return f
+	if slices.Contains(caps, capBranchProtection) {
+		cf = protectionLayer{cf, f}
+	}
+	if slices.Contains(caps, capDraftPRs) {
+		cf = draftPRLayer{cf, f}
+	}
+	return cf
 }
 
+// A layer adds one optional surface over the forge it wraps. Embedding
+// forge.CodeForge hides everything the wrapped forge offers beyond the base
+// interface, so each layer unwraps for forge.AsCodeForge to find the rest:
+// probe a composed forge with AsCodeForge or ResolveCodeForge, never a bare
+// type assertion.
 type (
-	withCIRun              struct{ *prForge }
-	withProtection         struct{ *prForge }
-	withCIRunAndProtection struct{ *prForge }
+	ciRunLayer struct {
+		forge.CodeForge
+		f *prForge
+	}
+	protectionLayer struct {
+		forge.CodeForge
+		f *prForge
+	}
+	// draftPRLayer is the host-mediated PR surface: CreateDraftPR over the
+	// Connector's forge.openPR and PushBranch through core's own git.
+	draftPRLayer struct {
+		forge.CodeForge
+		f *prForge
+	}
 )
 
-func (f withCIRun) CheckRun(prURL string) (forge.RollupState, string, error) {
-	return f.checkRun(prURL)
+func (l ciRunLayer) UnwrapCodeForge() forge.CodeForge      { return l.CodeForge }
+func (l protectionLayer) UnwrapCodeForge() forge.CodeForge { return l.CodeForge }
+func (l draftPRLayer) UnwrapCodeForge() forge.CodeForge    { return l.CodeForge }
+
+func (l ciRunLayer) CheckRun(prURL string) (forge.RollupState, string, error) {
+	return l.f.checkRun(prURL)
 }
 
-func (f withProtection) BranchProtected(branch string) (bool, error) {
-	return f.branchProtected(branch)
+func (l protectionLayer) BranchProtected(branch string) (bool, error) {
+	return l.f.branchProtected(branch)
 }
 
-func (f withCIRunAndProtection) CheckRun(prURL string) (forge.RollupState, string, error) {
-	return f.checkRun(prURL)
+func (l draftPRLayer) CreateDraftPR(title, body, base, head string) (string, bool, error) {
+	return l.f.createDraftPR(title, body, base, head)
 }
 
-func (f withCIRunAndProtection) BranchProtected(branch string) (bool, error) {
-	return f.branchProtected(branch)
+func (l draftPRLayer) PushBranch(srcDir, localRef, branch, base string) error {
+	return l.f.push.pushBranch(srcDir, localRef, branch, base)
 }
 
 func (f *prForge) checkRun(prURL string) (forge.RollupState, string, error) {
@@ -264,10 +286,10 @@ func (f *prForge) Rebase(prURL string) error {
 	return f.push.git.Rebase(w.Head)
 }
 
-// CreateDraftPR opens a draft PR. The Connector has no duplicate class, so when
+// createDraftPR opens a draft PR. The Connector has no duplicate class, so when
 // the create fails and head already has an open PR, that one is adopted
 // (created false): a retried hand-off must not fail on its own earlier PR.
-func (f *prForge) CreateDraftPR(title, body, base, head string) (string, bool, error) {
+func (f *prForge) createDraftPR(title, body, base, head string) (string, bool, error) {
 	p := struct {
 		Target Target `json:"target"`
 		PR     struct {

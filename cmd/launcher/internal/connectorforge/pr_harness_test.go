@@ -196,6 +196,10 @@ func TestFullCapabilityForgeHostMediatesWithCoresCredential(t *testing.T) {
 		t.Error("the Connector's audit log carries core's git credential")
 	}
 
+	// An identical tip is a no-op push, so advance the branch before retrying.
+	forgetest.WriteFile(t, filepath.Join(src, "more.txt"), "more\n")
+	forgetest.Run(t, src, "add", "more.txt")
+	forgetest.Run(t, src, "commit", "-m", "more")
 	if err := caps.BranchPusher.PushBranch(src, "work", branch, "main"); err == nil {
 		t.Error("second PushBranch onto the same branch succeeded, want create-only refusal")
 	} else if strings.Contains(err.Error(), h.Credential.Password) {
