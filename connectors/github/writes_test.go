@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"spindrift.dev/sdk/connector"
@@ -175,5 +176,201 @@ func TestDeleteBranchMissingRefIsNotFound(t *testing.T) {
 		if got := classOf(t, deleteBranch(ftgt, "gone")); got != want {
 			t.Errorf("status %d: class %q, want %q", status, got, want)
 		}
+	}
+}
+
+const (
+	apiRepo  = "https://api.github.com/repos/o/r"
+	prJSON   = `{"number":5,"node_id":"PR_node","draft":true,"state":"open","html_url":"https://github.com/o/r/pull/5","head":{"ref":"agent/issue-9","sha":"abc"},"base":{"ref":"main"}}`
+	readyGQL = "markPullRequestReadyForReview"
+)
+
+func TestOpen(t *testing.T) {
+	got := stub(t, map[string]connector.Response{apiRepo + "/pulls": ok(prJSON)})
+	p, err := open(ftgt, forge.NewPR{Title: "T", Body: "B", Base: "main", Head: "agent/issue-9", Draft: true})
+	if err != nil || p.Number != "5" || !p.Draft || p.Head != "agent/issue-9" {
+		t.Fatalf("open = %#v, %v", p, err)
+	}
+	r := (*got)[0]
+	if r.Method != "POST" {
+		t.Fatalf("request = %#v", r)
+	}
+	var body forge.NewPR
+	if err := json.Unmarshal([]byte(r.Body), &body); err != nil || body != (forge.NewPR{Title: "T", Body: "B", Base: "main", Head: "agent/issue-9", Draft: true}) {
+		t.Fatalf("body = %s, %v", r.Body, err)
+	}
+}
+
+func TestOpenAlreadyExistsIsClassedError(t *testing.T) {
+	stub(t, map[string]connector.Response{apiRepo + "/pulls": {Status: 422, Body: []byte("{}")}})
+	_, err := open(ftgt, forge.NewPR{Head: "h", Base: "main"})
+	if got := classOf(t, err); got != connector.Permanent {
+		t.Fatalf("class = %v", got)
+	}
+}
+
+func TestBehind(t *testing.T) {
+	got := stub(t, map[string]connector.Response{
+		apiRepo + "/pulls/5":                      ok(prJSON),
+		apiRepo + "/compare/main...agent/issue-9": ok(`{"behind_by":3}`),
+	})
+	n, err := behind(ftgt, "5")
+	if err != nil || n != 3 {
+		t.Fatalf("behind = %d, %v", n, err)
+	}
+	if len(*got) != 2 || (*got)[1].Method != "GET" {
+		t.Fatalf("requests = %#v", *got)
+	}
+	if _, err := behind(ftgt, "5/../x"); err == nil {
+		t.Error("bad number: want error")
+	}
+}
+
+func TestFilesPagesAndKeepsDeletedPaths(t *testing.T) {
+	var page1 []string
+	for i := range pageSize {
+		page1 = append(page1, `{"filename":"f`+string(rune('a'+i%26))+`"}`)
+	}
+	stub(t, map[string]connector.Response{
+		apiRepo + "/pulls/5/files?per_page=100&page=1": ok("[" + strings.Join(page1, ",") + "]"),
+		apiRepo + "/pulls/5/files?per_page=100&page=2": ok(`[{"filename":"old.go","status":"removed"}]`),
+	})
+	files, err := prFiles(ftgt, "5")
+	if err != nil || len(files) != pageSize+1 || files[pageSize] != "old.go" {
+		t.Fatalf("files = %d, %v", len(files), err)
+	}
+}
+
+func TestFilesEmptyIsNotNil(t *testing.T) {
+	stub(t, map[string]connector.Response{apiRepo + "/pulls/5/files?per_page=100&page=1": ok(`[]`)})
+	files, err := prFiles(ftgt, "5")
+	if err != nil || files == nil || len(files) != 0 {
+		t.Fatalf("files = %#v, %v", files, err)
+	}
+}
+
+func TestFilesOverPageCeilingIsError(t *testing.T) {
+	old := send
+	send = func(connector.Request) (connector.Response, error) {
+		return ok("[" + strings.Repeat(`{"filename":"f"},`, pageSize-1) + `{"filename":"f"}]`), nil
+	}
+	t.Cleanup(func() { send = old })
+	if _, err := prFiles(ftgt, "5"); err == nil {
+		t.Fatal("want error, not a truncated list")
+	}
+}
+
+func TestSetDraftFlipsAndIsIdempotent(t *testing.T) {
+	resp := map[string]connector.Response{
+		apiRepo + "/pulls/5": ok(prJSON), // draft: true
+		graphqlURL:           ok(`{"data":{}}`),
+	}
+	got := stub(t, resp)
+	if err := setDraft(ftgt, "5", true); err != nil {
+		t.Fatal(err)
+	}
+	if len(*got) != 1 {
+		t.Fatalf("already-draft PR sent a mutation: %#v", *got)
+	}
+	if err := setDraft(ftgt, "5", false); err != nil {
+		t.Fatal(err)
+	}
+	r := (*got)[len(*got)-1]
+	if r.Method != "POST" || r.URL != graphqlURL || !strings.Contains(r.Body, readyGQL) || !strings.Contains(r.Body, "PR_node") {
+		t.Fatalf("mutation = %#v", r)
+	}
+	// ready PR back to draft
+	ready := strings.Replace(prJSON, `"draft":true`, `"draft":false`, 1)
+	resp[apiRepo+"/pulls/5"] = ok(ready)
+	if err := setDraft(ftgt, "5", true); err != nil {
+		t.Fatal(err)
+	}
+	if r := (*got)[len(*got)-1]; !strings.Contains(r.Body, "convertPullRequestToDraft") {
+		t.Fatalf("mutation = %#v", r)
+	}
+}
+
+func TestMutationGraphQLErrorsFail(t *testing.T) {
+	stub(t, map[string]connector.Response{
+		apiRepo + "/pulls/5": ok(prJSON),
+		graphqlURL:           ok(`{"errors":[{"message":"nope"}]}`),
+	})
+	if err := setDraft(ftgt, "5", false); err == nil {
+		t.Error("setDraft: want error")
+	}
+	if err := enqueueAutoMerge(ftgt, "5"); err == nil {
+		t.Error("enqueueAutoMerge: want error")
+	}
+}
+
+func TestEnqueueAutoMerge(t *testing.T) {
+	got := stub(t, map[string]connector.Response{
+		apiRepo + "/pulls/5": ok(prJSON),
+		graphqlURL:           ok(`{"data":{}}`),
+	})
+	if err := enqueueAutoMerge(ftgt, "5"); err != nil {
+		t.Fatal(err)
+	}
+	r := (*got)[1]
+	if r.Method != "POST" || !strings.Contains(r.Body, "enablePullRequestAutoMerge") ||
+		!strings.Contains(r.Body, "REBASE") || !strings.Contains(r.Body, "PR_node") {
+		t.Fatalf("mutation = %#v", r)
+	}
+}
+
+func TestComment(t *testing.T) {
+	got := stub(t, map[string]connector.Response{
+		apiRepo + "/issues/5/comments": {Status: 201, Body: []byte("{}")},
+	})
+	if err := comment(ftgt, "5", "hi"); err != nil {
+		t.Fatal(err)
+	}
+	r := (*got)[0]
+	if r.Method != "POST" || r.Body != `{"body":"hi"}` {
+		t.Fatalf("request = %#v", r)
+	}
+}
+
+func TestMerge(t *testing.T) {
+	url := apiRepo + "/pulls/5/merge"
+	got := stub(t, map[string]connector.Response{url: ok(`{"merged":true}`)})
+	if err := merge(ftgt, "5"); err != nil {
+		t.Fatal(err)
+	}
+	if r := (*got)[0]; r.Method != "PUT" || r.Body != `{"merge_method":"rebase"}` {
+		t.Fatalf("request = %#v", r)
+	}
+	for status, want := range map[int]connector.Class{502: connector.Transient, 405: connector.Permanent, 409: connector.Permanent} {
+		stub(t, map[string]connector.Response{url: {Status: status, Body: []byte("{}")}})
+		if got := classOf(t, merge(ftgt, "5")); got != want {
+			t.Errorf("status %d: class = %v, want %v", status, got, want)
+		}
+	}
+}
+
+func TestBranchProtected(t *testing.T) {
+	classic := apiRepo + "/branches/release/1/protection"
+	rules := apiRepo + "/rules/branches/release/1"
+	for name, c := range map[string]struct {
+		resp    map[string]connector.Response
+		want    bool
+		wantErr bool
+	}{
+		"classic rule":         {map[string]connector.Response{classic: ok(`{}`)}, true, false},
+		"absent, ruleset":      {map[string]connector.Response{rules: ok(`[{"type":"pull_request"}]`)}, true, false},
+		"absent, no ruleset":   {map[string]connector.Response{rules: ok(`[]`)}, false, false},
+		"unreadable, ruleset":  {map[string]connector.Response{classic: {Status: 403, Body: []byte("{}")}, rules: ok(`[{}]`)}, true, false},
+		"unreadable, none":     {map[string]connector.Response{classic: {Status: 403, Body: []byte("{}")}, rules: ok(`[]`)}, false, true},
+		"classic read failure": {map[string]connector.Response{classic: {Status: 502, Body: []byte("{}")}}, false, true},
+		"ruleset read failure": {map[string]connector.Response{rules: {Status: 500, Body: []byte("{}")}}, false, true},
+	} {
+		stub(t, c.resp)
+		got, err := branchProtected(ftgt, "release/1")
+		if got != c.want || (err != nil) != c.wantErr {
+			t.Errorf("%s: protected = %v, err = %v", name, got, err)
+		}
+	}
+	if _, err := branchProtected(ftgt, ""); err == nil {
+		t.Error("empty branch: want error")
 	}
 }
