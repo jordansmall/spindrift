@@ -706,7 +706,7 @@ func TestRequiredLabels(t *testing.T) {
 	githubDesc, _ := backend.ByName("github")
 	patchCaps := forge.Capabilities{
 		BranchPusher: fakeBranchPusher{}, DraftPRCreator: fakeDraftPRCreator{}, IssueLabeler: fakeIssueLabeler{},
-		PRForge: cf.PRForgeFake, BranchDeleter: fakeBranchDeleter{},
+		PRForge: cf.PRForgeFake, BranchDeleter: cf,
 		ForgeDescriptor: githubDesc, TrackerDescriptor: githubDesc,
 	}
 	mk := func(tracker, access, driver string, patches int, caps forge.Capabilities, chores ...string) readContext {

@@ -34,6 +34,11 @@ type CodeForgeFake struct {
 	RebaseErrs []error
 	// RebasedURLs records every URL passed to Rebase, in order.
 	RebasedURLs []string
+	// DeleteBranchErr, if non-nil, is returned by every DeleteBranch call that
+	// passes validation; the branch is then left in place.
+	DeleteBranchErr error
+	// DeletedBranches records every branch DeleteBranch removed, in order.
+	DeletedBranches []string
 }
 
 // BranchExists returns BranchExistsErr if set, else the result scripted by
@@ -92,7 +97,7 @@ func (cf *CodeForgeFake) SetBranchProtectedErr(branch string, err error) {
 
 // Merge runs its whole mutation and recording inside the backend's
 // serve closure, so the state a later read observes was written behind the
-// Connector; Rebase does the same.
+// Connector.
 func (cf *CodeForgeFake) Merge(url string) error {
 	cf.Fire("Merge")
 	return cf.call(http.MethodPost, pathMerge, nil, func() (any, error) {
@@ -122,3 +127,24 @@ func (cf *CodeForgeFake) Rebase(url string) error {
 // Probe returns the scripted repo or error. It duplicates Fake's identical
 // method so that CodeForgeFake satisfies CodeForge on its own.
 func (cf *CodeForgeFake) Probe() (string, error) { return cf.probe(pathForgeProbe) }
+
+// DeleteBranch refuses an invalid branch (ValidateBranchDelete) before crossing
+// the Connector, then marks branch as no longer existing so a later
+// BranchExists observes the write. Unlike the BranchDeleter contract, deleting
+// a branch the Fake was never told exists succeeds; assert DeletedBranches to
+// pin which head a caller deleted.
+func (cf *CodeForgeFake) DeleteBranch(branch, base string) error {
+	if err := ValidateBranchDelete("fake", branch, base); err != nil {
+		return err
+	}
+	return cf.call(http.MethodDelete, pathDeleteBranch, nil, func() (any, error) {
+		cf.mu.Lock()
+		defer cf.mu.Unlock()
+		if cf.DeleteBranchErr != nil {
+			return nil, cf.DeleteBranchErr
+		}
+		cf.DeletedBranches = append(cf.DeletedBranches, branch)
+		cf.branchExists[branch] = false
+		return nil, nil
+	})
+}

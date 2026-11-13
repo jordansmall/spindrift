@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -87,6 +88,7 @@ var (
 		"EnqueueAutoMerge": http.MethodPost, "MarkReady": http.MethodPatch,
 		"MarkDraft": http.MethodPatch, "CommentPR": http.MethodPost,
 		"Merge": http.MethodPost, "Rebase": http.MethodPost, "CreateDraftPR": http.MethodPost,
+		"DeleteBranch": http.MethodDelete,
 	}
 	// fakeConfig answer from configuration, with no state worth a fetch.
 	fakeConfig = setOf("ProbeInterval", "StateLabels", "WalksAllPages",
@@ -126,11 +128,13 @@ func guardTargets() []guardTarget {
 	return ts
 }
 
-// guardArg synthesizes a plausible argument: "1" and "b" are what the seeded
-// Fake knows, so most reads succeed, though only crossing is asserted.
-func guardArg(t reflect.Type) reflect.Value {
+// guardArg synthesizes a plausible argument: "1" is what the seeded Fake knows,
+// so most reads succeed, though only crossing is asserted. String parameters
+// are distinct, so a delete whose base equals its branch is not refused before
+// it crosses.
+func guardArg(t reflect.Type, i int) reflect.Value {
 	if t.Kind() == reflect.String {
-		return reflect.ValueOf("1").Convert(t)
+		return reflect.ValueOf(strconv.Itoa(i + 1)).Convert(t)
 	}
 	return reflect.Zero(t)
 }
@@ -182,7 +186,7 @@ func TestFakeCallsCrossTheConnector(t *testing.T) {
 				m := reflect.ValueOf(target).MethodByName(name)
 				args := make([]reflect.Value, m.Type().NumIn())
 				for j := range args {
-					args[j] = guardArg(m.Type().In(j))
+					args[j] = guardArg(m.Type().In(j), j)
 				}
 				func() {
 					defer func() {
@@ -442,6 +446,44 @@ func TestFakeForgeWritesCrossTheConnectorAndKeepScriptedErrors(t *testing.T) {
 	}
 	if s, _ := f.PRState("u"); s == PRMerged {
 		t.Error("a failed Merge marked the PR merged")
+	}
+}
+
+func TestFakeDeleteBranchCrossesTheConnectorAndIsObservedByBranchExists(t *testing.T) {
+	sentinel := errors.New("scripted")
+	f := NewFake()
+	f.SetBranchExists("b", true)
+	crossed := observeReads(t, f)
+	if err := f.DeleteBranch("b", "main"); err != nil {
+		t.Fatal(err)
+	}
+	if got := crossed(); len(got) != 1 || got[0].Method != http.MethodDelete || got[0].Decision != connectorhost.DecisionSent {
+		t.Errorf("DeleteBranch audit = %+v, want one sent DELETE", got)
+	}
+	if ok, err := f.BranchExists("b"); err != nil || ok {
+		t.Errorf("BranchExists after DeleteBranch = %v, %v, want false", ok, err)
+	}
+	if len(f.DeletedBranches) != 1 || f.DeletedBranches[0] != "b" {
+		t.Errorf("DeletedBranches = %v, want [b]", f.DeletedBranches)
+	}
+
+	refused := observeReads(t, f)
+	for _, c := range [][2]string{{"main", "main"}, {"-x", "main"}, {"", "main"}} {
+		if err := f.DeleteBranch(c[0], c[1]); err == nil {
+			t.Errorf("DeleteBranch(%q, %q) = nil, want a validation refusal", c[0], c[1])
+		}
+	}
+	if got := refused(); len(got) != 0 {
+		t.Errorf("refused DeleteBranch crossed the Connector: %+v", got)
+	}
+
+	f.SetBranchExists("c", true)
+	f.DeleteBranchErr = sentinel
+	if err := f.DeleteBranch("c", "main"); !errors.Is(err, sentinel) {
+		t.Errorf("DeleteBranch err = %v, want the scripted sentinel", err)
+	}
+	if ok, _ := f.BranchExists("c"); !ok {
+		t.Error("a failed DeleteBranch removed the branch")
 	}
 }
 

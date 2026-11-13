@@ -69,10 +69,11 @@ const (
 // The write paths. A write has its own Route, so a read and a write on one path
 // (pathDraft, pathAutoMerge) are distinct; fakeWriteRoutes lists each method.
 const (
-	pathMerge     = "/forge/merge"
-	pathRebase    = "/forge/rebase"
-	pathPRComment = "/forge/prComment"
-	pathOpenPR    = "/forge/openPR"
+	pathMerge        = "/forge/merge"
+	pathRebase       = "/forge/rebase"
+	pathPRComment    = "/forge/prComment"
+	pathOpenPR       = "/forge/openPR"
+	pathDeleteBranch = "/forge/deleteBranch"
 )
 
 // fakeWriteRoutes are the Routes the Fake's forge writes cross, mirroring the
@@ -86,6 +87,7 @@ var fakeWriteRoutes = []struct{ method, path string }{
 	{http.MethodPatch, pathDraft},
 	{http.MethodPost, pathPRComment},
 	{http.MethodPost, pathOpenPR},
+	{http.MethodDelete, pathDeleteBranch},
 }
 
 // fakeRoutes is the fixture Route table: one exact method and path per Route (a
