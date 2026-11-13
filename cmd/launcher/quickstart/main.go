@@ -96,6 +96,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := useBakedGithubRow(os.Getenv); err != nil {
+		fmt.Fprintf(os.Stderr, "quickstart: %s\n", err)
+		os.Exit(1)
+	}
+
 	interactive := term.IsTerminal(os.Stdin.Fd())
 
 	if err := runQuickstart(dir, hostEnvironment{}, hostCommandRunner{}, buildForge, os.Stdout, os.Stdin, interactive, *force); err != nil {
