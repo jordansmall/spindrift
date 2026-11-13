@@ -2581,23 +2581,27 @@ rollup) and `GET /repos/{repo}/actions/jobs` (a failing job's log,
 sets `followRedirect`, because GitHub answers a log read with a 302 to a
 pre-signed blob URL on a host that varies; the host follows that one hop with
 no credential, and doctor shows the opt-in as `(follows redirect)` on the
-route. The subtree-only Route model (ADR 0047) makes it the narrowest table,
-not an exact one: `/issues` also admits `GET /issues/comments/*`
-and `/issues/events`, and `/actions/jobs` every other
-GET under it, none of which a read uses; a Route restricts no body, so `POST
-/graphql` admits any GraphQL document, mutations included, and no Route can pin
-it to the repository: the Connector sends the rollup, repository-identity
-queries, the draft-flip and auto-merge mutations, and the label-id query and
-removal mutation there (issues #6808, #6881, #6882). The write roots over-admit
-too: `POST /pulls` also admits review and review-comment creation, and `PUT
-/pulls` update-branch. It skips pull requests in the REST issues list.
+route. One more read route, `GET /installation/repositories`, is not pinned to
+`{repo}`: it serves an App installation token's push permission to the
+read-only gate, and it lets any load of the Connector list every repository
+the installation reaches, with its permissions. The subtree-only Route model
+(ADR 0047) makes the table the narrowest, not an exact one: `/issues` also
+admits `GET /issues/comments/*` and `/issues/events`, and `/actions/jobs`
+every other GET under it, none of which a read uses; a Route restricts no
+body, so `POST /graphql` admits any GraphQL document, mutations included, and
+no Route can pin it to the repository: the Connector sends the rollup,
+repository-identity and token-grant queries, the draft-flip and auto-merge
+mutations, and the label-id query and removal mutation there (issues #6808,
+#6881, #6882). The write roots over-admit too: `POST /pulls` also admits
+review and review-comment creation, and `PUT /pulls` update-branch. It skips
+pull requests in the REST issues list.
 
 It does not advertise `tracker.comments`: REST reports no minimized state, and
 a Connector that advertises the capability attests that it reports each
 comment's `minimized` faithfully. Comments therefore stay on the native
 adapter (GraphQL), which drops a maintainer-minimized comment. The native
-github adapter stays authoritative and is the one every
-binary uses. The same holds for the forge reads: the Connector serves
+github adapter stays authoritative for dispatch reads and every write. The
+same holds for the forge reads: the Connector serves
 `OpenPRForBranch`, `PRForBranch`, `PRState`, `CheckState` and `FailureDetail`;
 `Mergeable`, `HeadCommitSHA`, `NeedsUpdate`, `ListPRFiles`, `CanAutoMerge` and
 every write stay native. The Connector is held to the tracker read contract
@@ -2616,6 +2620,25 @@ against the compiled Connector behind the host.
 Its first production use is the sampled read shadow ([Shadow
 mode](#shadow-mode)): dogfood loads the Connector beside the native adapter and
 compares its reads, while the native adapter still answers every call.
+
+The host's checks are the exception (issue #6884). With a `github` backend
+row configured and not in shadow mode (a shadow row keeps `gh` answering), the
+repository probe (`forge.probe`), branch protection (`forge.branchProtection`),
+the `MERGE_MODE=auto` preflight (`forge.autoMerge`), the issue list by dispatch
+state (the core tracker list, which doctor's recoverable-issue row and dispatch
+both read), the label list (`tracker.labels`), the daemon's demand count
+(`tracker.count`), recover's prior-claim read (`tracker.removedLabels`) and
+the read-only gate's token introspection (`forge.tokenGrant`) go through the
+Connector and never run `gh`. They share one loaded Connector per repository
+for the life of the process; token introspection loads its own, with the
+candidate token as its credential. A Connector that does not declare one
+of those capabilities makes that read unsupported, which doctor reports as
+`unsupported` rather than falling back to `gh`. The label list and a classic
+token's grant ride `POST /graphql`; an App installation token's grant reads `GET
+/installation/repositories`, the one Route these checks add. Quickstart, which
+runs before any Consumer flake, bakes the github Connector into its package and
+applies it as a row whose credential is `GH_TOKEN`; a `go run` of quickstart
+bakes in nothing and keeps `gh`.
 
 #### The jira Connector
 
@@ -7230,23 +7253,24 @@ fragments render the no-write path whenever it is absent, for any reason
 fall open into the write-capable path.
 
 A second startup gate (issue #1950) checks the *token*, not just the forge/
-tracker shape: `read-only` also aborts unless `BOX_GH_TOKEN` is set and
-differs from the Launcher's own `GH_TOKEN`. Where the Box token can be
-introspected — a classic/OAuth PAT (`X-OAuth-Scopes`) or a GitHub App
-installation token (the repo endpoint's `permissions.push` field) — it's
-rejected if it carries write access; a fine-grained PAT can't be introspected
-reliably, so it's accepted with a loud warning instead. The introspection runs
-through the github backend's Connector when a `github` backend row is
-configured and not in shadow mode (a shadow row keeps `gh` answering), so the
-host needs no `gh` (a Connector that does not declare `forge.tokenGrant` leaves the token unverifiable, so launch refuses and names
-the remedy rather than let an unverified read-only token reach the Box);
-without that row the native `gh` probe answers. The Connector makes both reads
-over `POST /graphql` (the scopes header of a viewer query; the repository's
-`viewerPermission`), so it needs no REST Route for `/user` or the repository.
-`spindrift doctor` reports this gate's outcome the same way it reports labels
-and forge connectivity, and reports a gate its Connector cannot serve as
-`unsupported` (even in a quiet run), never a failure. `read-write` never
-inspects `BOX_GH_TOKEN` either way.
+tracker shape: `read-only` also aborts unless `BOX_GH_TOKEN` is set and differs
+from the Launcher's own `GH_TOKEN`. Where the Box token can be introspected —
+a classic/OAuth PAT (`X-OAuth-Scopes`) or a GitHub App installation token (the
+repo endpoint's `permissions.push` field) — it's rejected if it carries write
+access; a fine-grained PAT can't be introspected reliably, so it's accepted with
+a loud warning instead. The introspection runs through the github backend's
+Connector when a `github` backend row is configured and not in shadow mode (a
+shadow row keeps `gh` answering), so the host needs no `gh` (a Connector that
+does not declare `forge.tokenGrant` leaves the token unverifiable, so launch
+refuses and names the remedy rather than let an unverified read-only token reach
+the Box); without that row the native `gh` probe answers. The Connector reads a
+classic or OAuth token's scopes header over `POST /graphql` (a viewer query) and
+an installation token's `permissions.push` from `GET /installation/repositories`
+(GraphQL's `viewerPermission` is null for an App), so it needs no REST Route
+for `/user` or the repository.  `spindrift doctor` reports this gate's outcome
+the same way it reports labels and forge connectivity, and reports a gate
+its Connector cannot serve as `unsupported` (even in a quiet run), never a
+failure. `read-write` never inspects `BOX_GH_TOKEN` either way.
 
 `read-only` is an **alternative route to the same guarantee** [two-actor
 separation](#two-actor-separation-opt-in-hard-mode) provides: a Box that
