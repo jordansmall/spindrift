@@ -1,7 +1,7 @@
 {
   "inTree": {
     "configPath": "nuget.config",
-    "content": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<configuration>\n  <packageSources>\n    <add key=\"internal\" value=\"http://127.0.0.1:27182/nuget-internal-example-test/v3/index.json\" />\n  </packageSources>\n</configuration>\n",
+    "content": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<configuration>\n  <packageSources>\n    <add key=\"internal\" value=\"http://127.0.0.1:27182/nuget-internal-example-test/v3/index.json\" allowInsecureConnections=\"true\" />\n  </packageSources>\n</configuration>\n",
     "outcome": "applied"
   }
 }

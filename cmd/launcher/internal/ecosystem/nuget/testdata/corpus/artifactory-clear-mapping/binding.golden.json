@@ -1,7 +1,7 @@
 {
   "inTree": {
     "configPath": "nuget.config",
-    "content": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<configuration>\n  <packageSources>\n    <clear />\n    <add key=\"artifactory\" value=\"http://127.0.0.1:27182/artifactory-example-test/artifactory/api/nuget/v3/nuget-local/index.json\" />\n    <add key=\"nuget.org\" value=\"https://api.nuget.org/v3/index.json\" />\n  </packageSources>\n  <packageSourceMapping>\n    <packageSource key=\"artifactory\">\n      <package pattern=\"*\" />\n    </packageSource>\n    <packageSource key=\"nuget.org\">\n      <package pattern=\"Microsoft.*\" />\n    </packageSource>\n  </packageSourceMapping>\n</configuration>\n",
+    "content": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<configuration>\n  <packageSources>\n    <clear />\n    <add key=\"artifactory\" value=\"http://127.0.0.1:27182/artifactory-example-test/artifactory/api/nuget/v3/nuget-local/index.json\" allowInsecureConnections=\"true\" />\n    <add key=\"nuget.org\" value=\"https://api.nuget.org/v3/index.json\" />\n  </packageSources>\n  <packageSourceCredentials>\n    <nuget.org>\n      <add key=\"Username\" value=\"synth\" />\n    </nuget.org>\n  </packageSourceCredentials>\n  <packageSourceMapping>\n    <packageSource key=\"artifactory\">\n      <package pattern=\"*\" />\n    </packageSource>\n    <packageSource key=\"nuget.org\">\n      <package pattern=\"Microsoft.*\" />\n    </packageSource>\n  </packageSourceMapping>\n</configuration>\n",
     "outcome": "applied"
   }
 }
