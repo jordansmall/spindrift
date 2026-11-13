@@ -160,22 +160,22 @@ func (c config) effectiveBoxForgeAndIssueAccess() string {
 	return c.BoxForgeAndIssueAccess
 }
 
-// boxAccessDefaultNotice is the document's deprecation notice for a
-// BOX_FORGE_AND_ISSUE_ACCESS the Consumer left unset (issue #6757). A
-// ReadOnlyBox kind is skipped: its Box is forced read-only whatever the
-// default is. Under the daemon the decision was already made for every kind
-// it runs (issue #6891), so a child or preflight stays quiet.
-func boxAccessDefaultNotice(c config) (string, bool) {
-	if c.kind().ReadOnlyBox || inputdoc.DefaultNoticeDecided() {
+// boxAccessReadWriteNotice is the deprecation notice for an effective
+// BOX_FORGE_AND_ISSUE_ACCESS=read-write (issue #6757), whether the document or
+// a flag set it. A ReadOnlyBox kind is skipped: its Box is forced read-only
+// whatever the knob says. Under the daemon the decision was already made for
+// every kind it runs (issue #6891), so a child or preflight stays quiet.
+func boxAccessReadWriteNotice(c config) (string, bool) {
+	if c.effectiveBoxForgeAndIssueAccess() != "read-write" || inputdoc.BoxAccessNoticeDecided() {
 		return "", false
 	}
-	return launcherInput.DeprecatedDefault("BOX_FORGE_AND_ISSUE_ACCESS")
+	return inputdoc.BoxAccessReadWriteNotice, true
 }
 
-// warnBoxAccessDefault prints the notice to stderr, not the run's stdout: the
+// warnBoxAccessReadWrite prints the notice to stderr, not the run's stdout: the
 // notice is advisory and stdout is the run's product.
-func warnBoxAccessDefault(c config, stderr io.Writer) {
-	if msg, ok := boxAccessDefaultNotice(c); ok {
+func warnBoxAccessReadWrite(c config, stderr io.Writer) {
+	if msg, ok := boxAccessReadWriteNotice(c); ok {
 		fmt.Fprintln(stderr, msg)
 	}
 }

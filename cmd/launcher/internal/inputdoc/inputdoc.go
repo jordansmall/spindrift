@@ -35,11 +35,6 @@ type Document struct {
 	// the backendrows package decodes them. Absent when none are declared, then
 	// the generated backend registry is the fallback.
 	Backends json.RawMessage `json:"backends,omitempty"`
-	// DeprecatedDefaults maps a knob's env var name to the one-line notice for
-	// a deprecated default the Consumer left unset (issue #6757). The notice
-	// text lives only in Nix; the run-time side prints it verbatim. Absent
-	// when no knob is on a deprecated default.
-	DeprecatedDefaults map[string]string `json:"deprecatedDefaults,omitempty"`
 }
 
 // Load reads and parses the Launcher input document at path.
@@ -195,15 +190,21 @@ const DriverWarnedEnv = "SPINDRIFT_DRIVER_WARNED"
 // exemption for a non-knob read.
 func DriverWarned() string { return os.Getenv(DriverWarnedEnv) }
 
-// DefaultNoticeDecidedEnv names the marker env var a daemon sets on its children
-// and doctor preflight: it already decided the deprecated-default notice for
-// its kinds, printing it or deliberately withholding it (a butler-only daemon),
-// so none of them repeats it (issue #6891).
-const DefaultNoticeDecidedEnv = "SPINDRIFT_DEFAULT_NOTICE_DECIDED"
+// BoxAccessNoticeDecidedEnv names the marker env var a daemon sets on its
+// children and doctor preflight: it already decided the
+// BOX_FORGE_AND_ISSUE_ACCESS=read-write deprecation notice for its kinds,
+// printing it or deliberately withholding it (a butler-only daemon), so none of
+// them repeats it (issue #6891).
+const BoxAccessNoticeDecidedEnv = "SPINDRIFT_BOX_ACCESS_NOTICE_DECIDED"
 
-// DefaultNoticeDecided reads the DefaultNoticeDecidedEnv marker here for the same
-// reason as DriverWarned.
-func DefaultNoticeDecided() bool { return os.Getenv(DefaultNoticeDecidedEnv) != "" }
+// BoxAccessNoticeDecided reads the BoxAccessNoticeDecidedEnv marker here for
+// the same reason as DriverWarned.
+func BoxAccessNoticeDecided() bool { return os.Getenv(BoxAccessNoticeDecidedEnv) != "" }
+
+// BoxAccessReadWriteNotice is the run-time deprecation notice for an effective
+// BOX_FORGE_AND_ISSUE_ACCESS=read-write (issue #6757); lib/mkHarness.nix's
+// boxAccessWarnings carries the same text for the build.
+const BoxAccessReadWriteNotice = "spindrift: BOX_FORGE_AND_ISSUE_ACCESS=read-write is deprecated and will be removed in a later minor release (issue #6757). The default is now read-only, where the launcher host-mediates every Box write. To move, set perSystem.spindrift.forge.boxAccess = \"read-only\" (or defaults.boxForgeAndIssueAccess), or unset it; see MIGRATING.md, \"The Box's forge access defaults to read-only (issue #6899)\"."
 
 // DriverMarker is the DriverWarnedEnv value for an (ambient, baked) pair. It
 // names both so a child baking a different Driver than the daemon still warns.
