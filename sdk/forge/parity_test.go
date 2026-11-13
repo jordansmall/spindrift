@@ -28,6 +28,7 @@ var pairs = map[string]string{
 	"PR":     "wirePR",
 	"Check":  "wireCheck",
 	"Rollup": "wireRollup",
+	"Grant":  "wireGrant",
 }
 
 // structLines renders each field of every named struct in the file as
@@ -134,7 +135,7 @@ func TestCapabilitiesMatchCore(t *testing.T) {
 		"capBranches": CapBranches, "capPushOnly": CapPushOnly, "capPRs": CapPRs,
 		"capAutoMerge": CapAutoMerge, "capCIRun": CapCIRun,
 		"capBranchProtection": CapBranchProtection, "capProbe": CapProbe,
-		"capDraftPRs": CapDraftPRs,
+		"capDraftPRs": CapDraftPRs, "CapTokenGrant": CapTokenGrant,
 	} {
 		if got, ok := core[name]; !ok || got != want {
 			t.Errorf("core %s = %q (declared: %v), sdk says %q", name, got, ok, want)
