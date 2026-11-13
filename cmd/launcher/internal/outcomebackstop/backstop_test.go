@@ -62,14 +62,14 @@ func (f *fakeClock) clock() retry.Clock {
 
 func baseConfig(git *fakeGit, clk *fakeClock) Config {
 	return Config{
-		Repo:               "/repo",
-		Issue:              "42",
-		Branch:             "agent/issue-42",
-		Base:               "origin/main",
-		Kind:               "work",
-		OutboxRelayCapable: true,
-		Clock:              clk.clock(),
-		Git:                git.run,
+		Repo:         "/repo",
+		Issue:        "42",
+		Branch:       "agent/issue-42",
+		Base:         "origin/main",
+		Kind:         "work",
+		RelayCapable: true,
+		Clock:        clk.clock(),
+		Git:          git.run,
 	}
 }
 
@@ -134,7 +134,7 @@ func TestRun_EmitsSyntheticFlagOnReady(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.OutboxRelayCapable = true
+	cfg.RelayCapable = true
 	cfg.MaxAttempts = 3
 
 	var buf bytes.Buffer
@@ -209,7 +209,7 @@ func TestRun_ReadOnlyGithub(t *testing.T) {
 	}}
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
-	cfg.OutboxRelayCapable = true
+	cfg.RelayCapable = true
 	cfg.WriteEnabled = false
 
 	var buf bytes.Buffer
@@ -235,7 +235,7 @@ func TestRun_WritablePushSuccess(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.OutboxRelayCapable = true
+	cfg.RelayCapable = true
 	cfg.MaxAttempts = 3
 
 	var buf bytes.Buffer
@@ -273,7 +273,7 @@ func TestRun_PushFailsEveryAttempt(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.OutboxRelayCapable = true
+	cfg.RelayCapable = true
 	cfg.MaxAttempts = 2
 
 	var buf bytes.Buffer
@@ -332,7 +332,7 @@ func TestRun_PushTransientThenSucceeds(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.OutboxRelayCapable = true
+	cfg.RelayCapable = true
 	cfg.MaxAttempts = 3
 	// The responses map returns the same result for every call, so varying the
 	// push result per attempt needs a closure.
@@ -381,7 +381,7 @@ func TestRun_MaxAttemptsClampsToOne(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.OutboxRelayCapable = true
+	cfg.RelayCapable = true
 	cfg.MaxAttempts = 0
 
 	var buf bytes.Buffer
@@ -411,7 +411,7 @@ func TestRun_SalvageSucceeds(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.OutboxRelayCapable = true
+	cfg.RelayCapable = true
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -435,7 +435,7 @@ func TestRun_SalvageFails(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.OutboxRelayCapable = true
+	cfg.RelayCapable = true
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -458,7 +458,7 @@ func TestRun_SalvageStatusFails(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.OutboxRelayCapable = true
+	cfg.RelayCapable = true
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -483,7 +483,7 @@ func TestRun_SalvageStatusFails(t *testing.T) {
 func TestRun_SalvageStatusFailsBlocksRelayArms(t *testing.T) {
 	for name, mutate := range map[string]func(*Config){
 		"host-mediated": func(c *Config) { c.HostMediatedRemote = true; c.WriteEnabled = true },
-		"read-only":     func(c *Config) { c.OutboxRelayCapable = true; c.WriteEnabled = false },
+		"read-only":     func(c *Config) { c.RelayCapable = true; c.WriteEnabled = false },
 	} {
 		t.Run(name, func(t *testing.T) {
 			git := &fakeGit{responses: map[string]fakeResult{
@@ -517,7 +517,7 @@ func TestRun_SalvageAddFailsSkipsCommit(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.OutboxRelayCapable = true
+	cfg.RelayCapable = true
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -542,7 +542,7 @@ func TestRun_RevListErrorPushArmTreatedAsWorkExists(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.OutboxRelayCapable = true
+	cfg.RelayCapable = true
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -640,7 +640,7 @@ func TestRun_RevListUnparseablePushArmTreatedAsWorkExists(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.OutboxRelayCapable = true
+	cfg.RelayCapable = true
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -665,7 +665,7 @@ func TestRun_RevListUnparseablePushArmTreatedAsWorkExists(t *testing.T) {
 // count can fail, shared by Run's and DemoteAlreadyResolved's relay-arm tests.
 var relayArms = map[string]func(*Config){
 	"host-mediated": func(c *Config) { c.HostMediatedRemote = true; c.WriteEnabled = true },
-	"read-only":     func(c *Config) { c.OutboxRelayCapable = true; c.WriteEnabled = false },
+	"read-only":     func(c *Config) { c.RelayCapable = true; c.WriteEnabled = false },
 }
 
 var countFailures = map[string]fakeResult{
@@ -736,7 +736,7 @@ func TestRun_Issue2380_LandedAndPushedResolvesReady(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.OutboxRelayCapable = true
+	cfg.RelayCapable = true
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -917,7 +917,7 @@ func TestRun_UnresolvedBlockOverridesSuccessfulPush(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.OutboxRelayCapable = true
+	cfg.RelayCapable = true
 	cfg.MaxAttempts = 3
 	cfg.RunStateFilePath = runStatePath
 
@@ -941,7 +941,7 @@ func TestRun_UnresolvedBlockOverridesSuccessfulPush(t *testing.T) {
 }
 
 // Issue #2459 for the read-only outbox-relay arm (!cfg.WriteEnabled &&
-// cfg.OutboxRelayCapable): an unresolved BLOCK verdict keeps status=blocked
+// cfg.RelayCapable): an unresolved BLOCK verdict keeps status=blocked
 // even under otherwise-ready relay conditions.
 func TestRun_UnresolvedBlockOverridesOutboxRelay(t *testing.T) {
 	dir := t.TempDir()
@@ -956,7 +956,7 @@ func TestRun_UnresolvedBlockOverridesOutboxRelay(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = false
-	cfg.OutboxRelayCapable = true
+	cfg.RelayCapable = true
 	cfg.RunStateFilePath = runStatePath
 
 	var buf bytes.Buffer
@@ -1058,7 +1058,7 @@ func TestDemoteAlreadyResolved_ReadOnlyOutboxRelayNoPush(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = false
-	cfg.OutboxRelayCapable = true
+	cfg.RelayCapable = true
 
 	var buf bytes.Buffer
 	if err := DemoteAlreadyResolved(cfg, alreadyResolvedLine(), &buf); err != nil {
@@ -1231,7 +1231,7 @@ func TestRun_NegativeBackoffJitterClampsAndDoesNotPanic(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.OutboxRelayCapable = true
+	cfg.RelayCapable = true
 	cfg.MaxAttempts = 2
 	cfg.Backoff = -5 * time.Second
 	cfg.Jitter = -3 * time.Second

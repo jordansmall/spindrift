@@ -9,6 +9,9 @@
   displayName = "Git";
   validAsCodeForge = true;
   inBoxGHCredentialHelper = true;
+  # Bundle relay only (issue #6898): git has no pull requests, so no draft-PR
+  # seam and no outboxRelayCapable.
+  relayCapable = true;
   knobs = {
     codeForgeRemoteURL = {
       env = "CODE_FORGE_REMOTE_URL";

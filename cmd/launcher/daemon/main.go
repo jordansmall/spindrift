@@ -139,9 +139,9 @@ func parseArgs(args []string) (parsedArgs, error) {
 	return parsedArgs{InputPath: inputPath, Kinds: kinds, ExplicitSelector: explicitSelector, FeatureBranch: featureBranch, CheckOnly: checkOnly, RestartInPlace: restartInPlace}, nil
 }
 
-// errNoOutboxRelay is why a recover kind is disabled: no read-only Box's
-// outbox bundle is relayed, so there is nothing for it to land.
-var errNoOutboxRelay = fmt.Errorf("no outbox bundle is relayed (recover needs CODE_FORGE %s with BOX_FORGE_AND_ISSUE_ACCESS=read-only)", strings.Join(backend.OutboxRelayBackends(), " or "))
+// errNoOutboxRelay is why a recover kind is disabled: the forge is not a
+// read-only pull-request forge, so no stranded bundle awaits landing as a PR.
+var errNoOutboxRelay = fmt.Errorf("no pull-request outbox to recover (recover needs CODE_FORGE %s with BOX_FORGE_AND_ISSUE_ACCESS=read-only)", strings.Join(backend.OutboxRelayBackends(), " or "))
 
 // gateKnobs are the resolved knob values gateKinds judges each kind's
 // Enablement row by.
@@ -153,7 +153,7 @@ type gateKnobs struct {
 // gateKinds drops from a bare invocation's kinds every kind whose descriptor
 // Enablement row is unmet, so a bare daemon without Chores runs the other
 // kinds rather than being refused by startupPreflight's `doctor --butler`,
-// and one whose Box relays no outbox bundle runs without recover. A kind
+// and one on a forge with no read-only PR outbox runs without recover. A kind
 // named explicitly fails startup instead of running nothing. A butler that
 // survives this gate has the rest of its config validated by that same
 // `doctor --butler` (issue #3920).

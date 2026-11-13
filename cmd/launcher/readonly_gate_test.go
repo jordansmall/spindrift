@@ -4,12 +4,29 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/backendkit"
 )
 
-// The git/jira pair fails under read-only on the forge axis (git is not
-// relay-capable), so this fixture pins that read-write is a complete no-op
-// rather than a gate that happens to pass.
+// withRelayIncapableGit swaps in a registry whose git row lacks the
+// relayCapable bit. Every registered forge is relay-capable since issue #6898,
+// so the gate's rejection path needs a synthetic row to stay under test.
+func withRelayIncapableGit(t *testing.T) {
+	t.Helper()
+	rows := backendkit.Strategies()
+	for i := range rows {
+		if rows[i].Name == "git" {
+			rows[i].RelayCapable = false
+		}
+	}
+	t.Cleanup(backendkit.ReplaceRegistryForTest(rows))
+}
+
+// A relay-incapable forge with jira would fail under read-only on the forge
+// axis, so this fixture pins that read-write is a complete no-op rather than a
+// gate that happens to pass.
 func TestReadOnlyCapabilityGate_ReadWriteIsNoOp(t *testing.T) {
+	withRelayIncapableGit(t)
 	c := minimalValidConfig()
 	c.BoxForgeAndIssueAccess = "read-write"
 	c.CodeForge = "git"
@@ -33,6 +50,9 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 		wantErr        bool
 		wantSubstrs    []string
 		wantNotSubstrs []string
+		// relayIncapableGit runs the case against a registry whose git row lacks
+		// RelayCapable (withRelayIncapableGit).
+		relayIncapableGit bool
 	}{
 		{
 			name:         "read-only github/github passes",
@@ -56,13 +76,28 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 			wantErr:      false,
 		},
 		{
-			// git has no host-mediation seam on the forge axis, so it fails
-			// whatever tracker pairs with it.
-			name:         "read-only git forge fails naming CODE_FORGE and bundle-relay",
+			name:         "read-only git/github passes",
 			access:       "read-only",
 			codeForge:    "git",
 			issueTracker: "github",
-			wantErr:      true,
+			wantErr:      false,
+		},
+		{
+			name:         "read-only git/jira passes",
+			access:       "read-only",
+			codeForge:    "git",
+			issueTracker: "jira",
+			wantErr:      false,
+		},
+		{
+			// A forge without the relayCapable bit fails whatever tracker pairs
+			// with it; the real git row is relay-capable (issue #6898).
+			name:              "read-only relay-incapable forge fails naming CODE_FORGE and bundle-relay",
+			relayIncapableGit: true,
+			access:            "read-only",
+			codeForge:         "git",
+			issueTracker:      "github",
+			wantErr:           true,
 			wantSubstrs: []string{
 				"BOX_FORGE_AND_ISSUE_ACCESS",
 				"does not implement",
@@ -101,13 +136,14 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 			wantErr:      false,
 		},
 		{
-			// jira can post from the host, so a git/jira pair fails on the
+			// jira can post from the host, so a relay-incapable forge/jira pair fails on the
 			// forge axis alone, with the forge message.
-			name:         "read-only git/jira fails on the forge axis first",
-			access:       "read-only",
-			codeForge:    "git",
-			issueTracker: "jira",
-			wantErr:      true,
+			name:              "read-only relay-incapable forge/jira fails on the forge axis first",
+			relayIncapableGit: true,
+			access:            "read-only",
+			codeForge:         "git",
+			issueTracker:      "jira",
+			wantErr:           true,
 			wantSubstrs: []string{
 				"bundle-relay",
 				`the selected CODE_FORGE="git"`,
@@ -153,6 +189,9 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.relayIncapableGit {
+				withRelayIncapableGit(t)
+			}
 			c := minimalValidConfig()
 			c.BoxForgeAndIssueAccess = tc.access
 			c.CodeForge = tc.codeForge
@@ -188,6 +227,7 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 // preview print verbatim to stderr. errors.Is must still hold so doctor.go's
 // doctorExitCodeFor keeps classifying the exit code.
 func TestReadOnlyCapabilityGate_ErrorTextHasNoSentinelPrefix(t *testing.T) {
+	withRelayIncapableGit(t)
 	c := minimalValidConfig()
 	c.BoxForgeAndIssueAccess = "read-only"
 	c.CodeForge = "git"

@@ -641,11 +641,12 @@ func TestRunDoctor_InvalidBoxForgeAndIssueAccess_OmitsReadWriteNoOpLine(t *testi
 }
 
 // Regression test for the gap issue #2942 closes: doctor used to report only
-// the two read-only token gates, so CODE_FORGE=git with read-only access (git
-// has no bundle-relay implementation) passed doctor clean even though it fails
+// the two read-only token gates, so a relay-incapable CODE_FORGE with read-only access (a
+// forge with no bundle-relay implementation) passed doctor clean even though it fails
 // the same gate at dispatch. checkReadOnlyCapabilityGate wraps
 // errLaunchGateConfigInvalid, so the exit is 2, not the internal-error 1.
 func TestDoctorReport_ReadOnlyCapabilityGate_GitCodeForge_ExitsTwoAndNamesBundleRelay(t *testing.T) {
+	withRelayIncapableGit(t)
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
@@ -812,9 +813,9 @@ func TestRunDoctor_ReportsRecoverKind(t *testing.T) {
 		{"forgejo read-only is on", "forgejo", "read-only",
 			"ok: recover kind: on — CODE_FORGE=forgejo relays a read-only Box's outbox bundle\n"},
 		{"github read-write is off", "github", "read-write",
-			"ok: recover kind: off — CODE_FORGE=github with BOX_FORGE_AND_ISSUE_ACCESS=read-write relays no outbox bundle; run `spindrift recover <n>` by hand\n"},
+			"ok: recover kind: off — CODE_FORGE=github with BOX_FORGE_AND_ISSUE_ACCESS=read-write is not a read-only pull-request forge; run `spindrift recover <n>` by hand\n"},
 		{"local read-only is off", "local", "read-only",
-			"ok: recover kind: off — CODE_FORGE=local with BOX_FORGE_AND_ISSUE_ACCESS=read-only relays no outbox bundle; run `spindrift recover <n>` by hand\n"},
+			"ok: recover kind: off — CODE_FORGE=local with BOX_FORGE_AND_ISSUE_ACCESS=read-only is not a read-only pull-request forge; run `spindrift recover <n>` by hand\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

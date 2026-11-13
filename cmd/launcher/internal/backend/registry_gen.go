@@ -25,6 +25,7 @@ var Git = Descriptor{
 	DisplayName:             "Git",
 	ValidAsCodeForge:        true,
 	InBoxGHCredentialHelper: true,
+	RelayCapable:            true,
 }
 
 // Local is the descriptor for the "local" backend.

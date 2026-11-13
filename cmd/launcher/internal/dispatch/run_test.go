@@ -187,7 +187,7 @@ func TestRun_PopulatesBoxOutboxDir_GithubReadOnly(t *testing.T) {
 
 	fr := runner.NewFake()
 	f, err := NewFactory(Config{
-		ForgeDescriptor:        backend.Descriptor{OutboxRelayCapable: true},
+		ForgeDescriptor:        backend.Descriptor{RelayCapable: true, OutboxRelayCapable: true},
 		BoxForgeAndIssueAccess: "read-only",
 	}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
@@ -220,7 +220,7 @@ func TestRun_NoOutboxDirForGithubReadWrite(t *testing.T) {
 
 	fr := runner.NewFake()
 	f, err := NewFactory(Config{
-		ForgeDescriptor:        backend.Descriptor{OutboxRelayCapable: true},
+		ForgeDescriptor:        backend.Descriptor{RelayCapable: true, OutboxRelayCapable: true},
 		BoxForgeAndIssueAccess: "read-write",
 	}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
@@ -251,7 +251,7 @@ func TestRun_PopulatesBoxOutboxDir_ButlerReadWrite(t *testing.T) {
 	fr := runner.NewFake()
 	f, err := NewFactory(Config{
 		Kind:                   "butler",
-		ForgeDescriptor:        backend.Descriptor{OutboxRelayCapable: true},
+		ForgeDescriptor:        backend.Descriptor{RelayCapable: true, OutboxRelayCapable: true},
 		BoxForgeAndIssueAccess: "read-write",
 	}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
@@ -313,17 +313,45 @@ func TestRun_PopulatesBoxOutboxDir_ForgejoReadOnly(t *testing.T) {
 	}
 }
 
-// The outbox dir is gated on the backend's capability, not just the access
-// mode. No backend valid under read-only (github, local, forgejo) leaves
-// both OutboxRelayCapable and HostMediatedRemote false today, so the
-// descriptor here is a hypothetical backend shape, not a pin on any real
-// backend's behavior.
-func TestRun_NoOutboxDirForOutboxIncapableReadOnly(t *testing.T) {
+// git relays a bundle but has no pull requests (OutboxRelayCapable false), so
+// the outbox mount must follow RelayCapable, not the PR bit (issue #6898).
+func TestRun_PopulatesBoxOutboxDir_GitReadOnly(t *testing.T) {
 	dir := tempLogDir(t)
 
 	fr := runner.NewFake()
 	f, err := NewFactory(Config{
-		ForgeDescriptor:        backend.Descriptor{OutboxRelayCapable: false},
+		ForgeDescriptor:        backend.Git,
+		BoxForgeAndIssueAccess: "read-only",
+	}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("83", "T")
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	if fr.RunCalls[0].OutboxDir == "" {
+		t.Fatal("Box.OutboxDir: got empty, want the per-issue outbox dir for git read-only")
+	}
+}
+
+// The outbox dir is gated on the backend's capability, not just the access
+// mode. No registered backend leaves
+// both RelayCapable and HostMediatedRemote false today, so the
+// descriptor here is a hypothetical backend shape, not a pin on any real
+// backend's behavior.
+func TestRun_NoOutboxDirForRelayIncapableReadOnly(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{
+		ForgeDescriptor:        backend.Descriptor{},
 		BoxForgeAndIssueAccess: "read-only",
 	}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
@@ -340,7 +368,7 @@ func TestRun_NoOutboxDirForOutboxIncapableReadOnly(t *testing.T) {
 		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
 	}
 	if got := fr.RunCalls[0].OutboxDir; got != "" {
-		t.Errorf("Box.OutboxDir: got %q, want empty for OutboxRelayCapable=false read-only", got)
+		t.Errorf("Box.OutboxDir: got %q, want empty for a relay-incapable read-only forge", got)
 	}
 }
 

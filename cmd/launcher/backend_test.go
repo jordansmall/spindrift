@@ -101,8 +101,9 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 			validAsTracker:   false,
 			validAsCodeForge: true,
 
-			hasValidateCodeForge: true,
-			hasNewCodeForge:      true,
+			hasValidateCodeForge:    true,
+			hasNewCodeForge:         true,
+			hasNewReadOnlyCodeForge: true,
 		},
 	}
 

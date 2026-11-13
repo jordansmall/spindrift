@@ -242,7 +242,7 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.
 			if backend.RelaysOutbox(c.CodeForge, c.BoxForgeAndIssueAccess) {
 				rep.Success("%s kind: on — CODE_FORGE=%s relays a read-only Box's outbox bundle", d.Name, c.CodeForge)
 			} else {
-				rep.Success("%s kind: off — CODE_FORGE=%s with BOX_FORGE_AND_ISSUE_ACCESS=%s relays no outbox bundle; run `spindrift %s <n>` by hand", d.Name, c.CodeForge, c.BoxForgeAndIssueAccess, d.Verb)
+				rep.Success("%s kind: off — CODE_FORGE=%s with BOX_FORGE_AND_ISSUE_ACCESS=%s is not a read-only pull-request forge; run `spindrift %s <n>` by hand", d.Name, c.CodeForge, c.BoxForgeAndIssueAccess, d.Verb)
 			}
 		}
 	}

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/boxclone"
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/bundleout"
@@ -181,10 +182,12 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	if r.carrier == "" {
 		r.carrier = "log"
 	}
-	// An empty BOX_WRITE_ENABLED plus an outbox-relay-capable backend is a
-	// read-only Box that hands off via the outbox (issues #2094, #2267).
+	// relay is the read-only PR hand-off: an empty BOX_WRITE_ENABLED plus a
+	// forge with pull requests (OutboxRelayCapable), so the PR-intent nudge
+	// never fires for git, which relays a bundle but has no PR (issues #2094,
+	// #2267, #6898). needsBox is the wider bundle hand-off, git included.
 	r.relay = !env.BoxWriteEnabled && env.OutboxRelayCapable
-	r.needsBox = env.HostMediatedRemote || r.relay
+	r.needsBox = env.HostMediatedRemote || backend.RelaysBundle(r.forgeDescriptor(), !env.BoxWriteEnabled)
 
 	if err := r.exportStartEnv(); err != nil {
 		return 0, err
@@ -480,7 +483,7 @@ func (r *boxRun) backstopConfig(recoveryAttempted bool) (outcomebackstop.Config,
 		Base:               "origin/" + r.env.BaseBranch,
 		Kind:               r.kind,
 		HostMediatedRemote: r.env.HostMediatedRemote,
-		OutboxRelayCapable: r.env.OutboxRelayCapable,
+		RelayCapable:       r.forgeDescriptor().RelayCapable,
 		WriteEnabled:       r.env.BoxWriteEnabled,
 		RecoveryAttempted:  recoveryAttempted,
 		MaxAttempts:        knobs[0],

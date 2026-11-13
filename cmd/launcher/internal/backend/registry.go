@@ -44,15 +44,13 @@ type Descriptor struct {
 	// safe.directory.
 	HostSeededMirror bool
 
-	// OutboxRelayCapable is true for a backend whose CODE_FORGE selection gets
-	// the outbox mount/relay treatment under read-only (issue #1918).
-	// Consumers read this field rather than asserting a backend name (#2947),
-	// which is what let #2927 close forgejo's asymmetry with a one-field flip.
-	// The bit also means "this forge has pull requests": the promptassembly IF
-	// BLOCKED PR gates read it that way, read-write Boxes included (issue
-	// #5276). TestRelayCapableMatchesReadOnlyForgeInterfaces (cmd/launcher)
-	// fails when it diverges from the read-only forge implementing
-	// DraftPRCreator.
+	// OutboxRelayCapable is true for a backend whose CODE_FORGE has pull
+	// requests: the promptassembly IF BLOCKED PR gates read it that way,
+	// read-write Boxes included (issue #5276), and recover-kind enablement
+	// follows it (RelaysOutbox). It does not decide the outbox mount or the
+	// relay: RelaysBundle does, from RelayCapable (issues #1918, #6898).
+	// TestRelayCapableMatchesReadOnlyForgeInterfaces (cmd/launcher) fails when
+	// it diverges from the read-only forge implementing DraftPRCreator.
 	OutboxRelayCapable bool
 
 	// InBoxGHCredentialHelper is true for a CODE_FORGE whose Box clone runs
@@ -94,9 +92,9 @@ type Descriptor struct {
 	// RelayCapable is true for a CODE_FORGE backend with every host-mediation
 	// seam needed under BOX_FORGE_AND_ISSUE_ACCESS=read-only: bundle relay
 	// always, plus draft-PR-create and commit-subjects when the backend has a
-	// PR concept. True for github, forgejo, local; false for git. Wider than
-	// OutboxRelayCapable (#1918/#2267/#2927), which is the outbox mount plus
-	// "this forge has pull requests" (#5276).
+	// PR concept. True for every registered CODE_FORGE (git relays a bundle
+	// only, issue #6898). Wider than OutboxRelayCapable, which is "this forge
+	// has pull requests" (#5276).
 	// cmd/launcher's TestRelayCapableMatchesReadOnlyForgeInterfaces checks the
 	// bit against the interfaces each row's read-only forge implements
 	// (issue #2628).
@@ -235,9 +233,20 @@ func OutboxRelayBackends() []string {
 	return names
 }
 
-// RelaysOutbox reports whether a Box under codeForge and boxAccess hands its
-// finished branch back as an outbox bundle the host relays (issue #4656): an
-// OutboxRelayCapable CODE_FORGE under BOX_FORGE_AND_ISSUE_ACCESS=read-only.
+// RelaysBundle reports whether a Box on forge d hands its finished branch back
+// as an outbox bundle the host relays, rather than pushing: a
+// HostMediatedRemote forge always (ADR 0033), a RelayCapable one only under a
+// read-only Box (issues #1918, #6898). The launcher's outbox mount and the
+// Box's relay, push guard, and outcome backstop all decide through this.
+func RelaysBundle(d Descriptor, readOnly bool) bool {
+	return d.HostMediatedRemote || (d.RelayCapable && readOnly)
+}
+
+// RelaysOutbox reports whether a Box under codeForge and boxAccess is a
+// pull-request forge's read-only Box, whose outbox bundle the host relays into
+// a PR (issue #4656): an OutboxRelayCapable CODE_FORGE under
+// BOX_FORGE_AND_ISSUE_ACCESS=read-only. It gates the recover kind, so read-only
+// `git`, which relays a bundle but opens no PR, is false (see RelaysBundle).
 // Both arguments are resolved knob values; an unset CODE_FORGE is not
 // defaulted here, so "" is not a backend and relays nothing.
 func RelaysOutbox(codeForge, boxAccess string) bool {

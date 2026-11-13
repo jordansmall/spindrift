@@ -34,9 +34,9 @@ type Config struct {
 	// HostMediatedRemote reports whether this run's CODE_FORGE has no writable
 	// remote to push to in-box at all (ADR 0033: CODE_FORGE=local, #2267).
 	HostMediatedRemote bool
-	// OutboxRelayCapable reports whether the active CODE_FORGE backend gets the
-	// outbox-relay treatment under a read-only Box (#1918: github and forgejo).
-	OutboxRelayCapable bool
+	// RelayCapable reports whether the active CODE_FORGE backend relays a
+	// read-only Box's outbox bundle (#1918, #6898: every registered backend).
+	RelayCapable bool
 	// WriteEnabled reports whether BOX_WRITE_ENABLED was present. A read-only
 	// github or forgejo Box holds no push token by design.
 	WriteEnabled bool
@@ -65,7 +65,7 @@ func (cfg Config) relayNote() string {
 	switch {
 	case cfg.HostMediatedRemote:
 		return "; branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)"
-	case !cfg.WriteEnabled && cfg.OutboxRelayCapable:
+	case !cfg.WriteEnabled && cfg.RelayCapable:
 		return "; branch relayed via outbox bundle (read-only Box)"
 	}
 	return ""
