@@ -87,6 +87,9 @@ type (
 		// DedupMarker is the raw dedup marker line from the tracker's side store,
 		// "" when there is none. It is never part of Body.
 		DedupMarker string `json:"dedupMarker"`
+		// Status is the tracker's workflow status name, "" for a tracker
+		// without one.
+		Status string `json:"status"`
 	}
 	wireComment struct {
 		Author          string `json:"author"`
