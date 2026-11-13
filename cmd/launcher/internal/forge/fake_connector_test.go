@@ -76,16 +76,18 @@ func TestFakeTrackerManyReadsShareOneConnector(t *testing.T) {
 // is in none of these sets, and has no Set or As prefix, must cross the
 // Connector, so a newly added read is covered the moment it exists.
 var (
-	// fakeNativeWrites mutate the Fake's state natively: the tracker writes await
-	// the tracker Connector (#6753), and RelayBundle is git in core, not a forge
-	// HTTP primitive.
-	fakeNativeWrites = setOf("TransitionState", "CompleteVerdict", "Comment", "CreateLabel",
-		"AddLabels", "RecordLanding", "RecordLandingPass", "CloseIssue", "CloseMergedIssue",
-		"FlagAbandoned", "PostIssue", "RelayBundle")
-	// fakeForgeWrites are the forge writes, each with the HTTP method its Route
-	// must be audited under. They cross the Connector like reads do.
-	fakeForgeWrites = map[string]string{
-		"EnqueueAutoMerge": http.MethodPost, "MarkReady": http.MethodPatch,
+	// fakeNativeWrites mutate the Fake's state natively: the tracker writes not
+	// yet moved behind the tracker Connector (#6753, #6890) await it, and
+	// RelayBundle is git in core, not a forge HTTP primitive.
+	fakeNativeWrites = setOf("TransitionState", "CompleteVerdict", "CreateLabel",
+		"AddLabels", "CloseIssue", "CloseMergedIssue", "FlagAbandoned", "PostIssue",
+		"RelayBundle")
+	// fakeWrites are the forge and tracker writes, each with the HTTP method its
+	// Route must be audited under. They cross the Connector like reads do.
+	fakeWrites = map[string]string{
+		"Comment": http.MethodPost, "RecordLanding": http.MethodPost,
+		"RecordLandingPass": http.MethodPost,
+		"EnqueueAutoMerge":  http.MethodPost, "MarkReady": http.MethodPatch,
 		"MarkDraft": http.MethodPatch, "CommentPR": http.MethodPost,
 		"Merge": http.MethodPost, "Rebase": http.MethodPost, "CreateDraftPR": http.MethodPost,
 		"DeleteBranch": http.MethodDelete,
@@ -148,9 +150,9 @@ func seededFake(labels ...DispatchLabels) *Fake {
 
 // TestFakeCallsCrossTheConnector is the bypass guard: every exported method of
 // the Fake that is not a scripting, native-write, or config method is a read or
-// a forge write, and must cross the Connector at least once, sent on a declared
-// Route; a forge write under its own HTTP method. A new read that answers
-// natively fails here without anyone listing it, and so does a forge write that
+// a write, and must cross the Connector at least once, sent on a declared
+// Route; a write under its own HTTP method. A new read that answers
+// natively fails here without anyone listing it, and so does a write that
 // answers natively or crosses on the wrong method.
 func TestFakeCallsCrossTheConnector(t *testing.T) {
 	routes := map[string]bool{}
@@ -204,16 +206,16 @@ func TestFakeCallsCrossTheConnector(t *testing.T) {
 					if a.Decision != connectorhost.DecisionSent || !routes[a.Route] {
 						t.Errorf("%s.%s audit = %+v, want a sent call on a declared Route", tg.name, name, a)
 					}
-					if want, ok := fakeForgeWrites[name]; ok && a.Method != want {
+					if want, ok := fakeWrites[name]; ok && a.Method != want {
 						t.Errorf("%s.%s crossed as %s, want %s", tg.name, name, a.Method, want)
 					}
 				}
 			})
 		}
 	}
-	for name := range fakeForgeWrites {
+	for name := range fakeWrites {
 		if !seen[name] {
-			t.Errorf("%s is classified as a forge write but no Fake method has that name", name)
+			t.Errorf("%s is classified as a write but no Fake method has that name", name)
 		}
 	}
 	for _, set := range []map[string]bool{fakeNativeWrites, fakeConfig} {
