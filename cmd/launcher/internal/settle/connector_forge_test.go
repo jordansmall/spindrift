@@ -4,11 +4,14 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/connectorforge/connectorforgetest"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/retry"
 )
 
 // A handshake declaring push-only resolves to a push-only forge, and the
@@ -155,5 +158,121 @@ func TestSettle_PRLanderThroughConnectorForge(t *testing.T) {
 				t.Errorf("comments = %+v, want one containing %q", fc.CommentCalls, tc.wantComment)
 			}
 		})
+	}
+}
+
+// readOnlySettle settles issue 1's ready hand-off for a read-only Box whose
+// bundle sits in outbox. A nil cf is the tracker Fake itself, with the
+// capabilities it resolves: a PR forge with no BundleRelay, the native shape a
+// Connector without forge.draftPRs is held to (caps is then ignored).
+func readOnlySettle(t *testing.T, caps forge.Capabilities, cf forge.CodeForge, outbox string, maxRetries int) (Settlement, *forge.Fake, *ProgressRecorder) {
+	t.Helper()
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	if cf == nil {
+		cf = fc
+		caps = forge.ResolveCapabilities(cf, fc, backend.Descriptor{}, githubTrackerRow)
+	}
+	rec := &ProgressRecorder{}
+	cfg := baseConfig()
+	cfg.Capabilities = caps
+	cfg.ReadOnly, cfg.BaseBranch, cfg.Progress = true, "main", rec
+	cfg.OutboxDir = func(string) string { return outbox }
+	cfg.Policy = retry.Policy{Max: maxRetries, Unit: time.Second}
+	s := New(cfg, fc, cf)
+	gen := s.term.Begin("1")
+	return s.Settle(dispatch.NewFake(), "1", gen, *handoffResult("ready")), fc, rec
+}
+
+func statusesOf(rec *ProgressRecorder, among ...Status) []Status {
+	var got []Status
+	for _, st := range rec.Steps() {
+		if slices.Contains(among, st.Status) {
+			got = append(got, st.Status)
+		}
+	}
+	return got
+}
+
+// A draft-PR create the forge refuses is retried, looked up once more, then
+// parked agent-failed with the relayed bundle still in the outbox, exactly as
+// for a native forge (issue #5144; TestSettle_PRLander pins the same schedule
+// via draftPRCases): the Connector relays in core's git, so the
+// branch is on the remote before the create is attempted.
+func TestSettle_FailedDraftPRCreateParksThroughConnectorForge(t *testing.T) {
+	parked := Settlement{Verdict: ForReason(dispatchrecord.ReasonDraftPRFailed), Note: "draft PR create failed; work preserved in outbox"}
+	for _, tc := range []struct {
+		name    string
+		retries int
+		want    []Status
+	}{
+		{"with a retry budget", 2, []Status{StatusDraftPRRetry, StatusDraftPRRetry, StatusDraftPRFinalLookup, StatusDraftPRFailed}},
+		{"with no retry budget", 0, []Status{StatusDraftPRFinalLookup, StatusDraftPRFailed}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := connectorforgetest.NewHostMediation(t)
+			outbox := h.SeedBundle(handoffBranch)
+			h.Backend.RefuseHead(handoffBranch)
+
+			got, fc, rec := readOnlySettle(t, h.Capabilities(), h.CodeForge(), outbox, tc.retries)
+
+			if got != parked {
+				t.Errorf("Settle = %+v, want %+v", got, parked)
+			}
+			if !h.BundleLanded(handoffBranch) {
+				t.Error("the relay did not land the agent branch on the bare repo")
+			}
+			if !bundleExists(t, outbox) {
+				t.Error("the bundle must stay in the outbox for `spindrift recover`")
+			}
+			if h.Backend.PRCount() != 0 {
+				t.Errorf("backend holds %d PRs, want none", h.Backend.PRCount())
+			}
+			if gotSt := statusesOf(rec, StatusDraftPRRetry, StatusDraftPRFinalLookup, StatusDraftPRFailed, StatusDraftPRAdopted); !slices.Equal(gotSt, tc.want) {
+				t.Errorf("draft-PR statuses = %v, want %v", gotSt, tc.want)
+			}
+			assertOutboxParked(t, fc, "1")
+		})
+	}
+}
+
+// A handshake without forge.draftPRs resolves to a forge that cannot
+// host-mediate, and a read-only hand-off through it settles exactly as through
+// a native PR forge lacking BundleRelay: Open's wiring error blocks the
+// hand-off in progress with a comment, and nothing reaches the forge.
+func TestSettle_NoDraftPRCapabilityCannotHostMediateThroughConnectorForge(t *testing.T) {
+	h := connectorforgetest.NewHostMediationVariant(t, connectorforgetest.MinimalPRWasm)
+	caps := h.Capabilities()
+	if caps.BundleRelay != nil || caps.DraftPRCreator != nil || caps.BranchPusher != nil || caps.HostCanOpenPR() {
+		t.Fatalf("caps = %+v, want no BundleRelay, DraftPRCreator or BranchPusher", caps)
+	}
+	outbox := h.SeedBundle(handoffBranch)
+	requests := h.Backend.Requests()
+
+	got, fc, rec := readOnlySettle(t, caps, h.CodeForge(), outbox, 2)
+	want, nativeFC, nativeRec := readOnlySettle(t, forge.Capabilities{}, nil, outbox, 2)
+
+	if want.Reason() != dispatchrecord.ReasonHandoffBlocked {
+		t.Fatalf("native settlement = %+v, want a blocked hand-off", want)
+	}
+	if got != want {
+		t.Errorf("Settle = %+v, want the native %+v", got, want)
+	}
+	if g, w := statusesOf(rec, StatusMergeBlocked), statusesOf(nativeRec, StatusMergeBlocked); !slices.Equal(g, w) || len(g) != 1 {
+		t.Errorf("merge-blocked steps = %v, want the native %v", g, w)
+	}
+	iss, _ := fc.Issue("1")
+	nativeIss, _ := nativeFC.Issue("1")
+	if !slices.Equal(iss.Labels, nativeIss.Labels) || !containsLabel(iss.Labels, "agent-in-progress") {
+		t.Errorf("labels = %v, want the native %v, still in progress", iss.Labels, nativeIss.Labels)
+	}
+	if len(fc.CommentCalls) != len(nativeFC.CommentCalls) {
+		t.Errorf("comments = %+v, want the native count: %+v", fc.CommentCalls, nativeFC.CommentCalls)
+	}
+	if h.Backend.Requests() != requests || h.Backend.PRCount() != 0 {
+		t.Errorf("backend saw %d requests (was %d) and holds %d PRs, want it untouched", h.Backend.Requests(), requests, h.Backend.PRCount())
+	}
+	if exists, err := h.CodeForge().BranchExists(handoffBranch); err != nil || exists {
+		t.Errorf("BranchExists = (%v, %v), want the branch unpushed", exists, err)
 	}
 }
