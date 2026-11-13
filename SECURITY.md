@@ -92,6 +92,12 @@ leaked one rather than removing it. See [Secret exposure
 model](docs/reference.md#secret-exposure-model) for the full story,
 including the fully-local, zero-GitHub-token posture.
 
+The jira Connector performs tracker transitions and label edits, so its
+credential needs edit-issue and transition-issue permission. Its Route table
+admits those writes as subtree Routes (`PUT` and `POST /rest/api/2/issue`),
+which also admit editing any issue field, creating issues, and posting
+comments.
+
 Deploying safely rests on a few operator-side prerequisites the harness cannot
 enforce for you — `spindrift doctor` preflights connectivity, token validity, and
 labels, but these are on you:
