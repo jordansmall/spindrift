@@ -101,15 +101,9 @@ type fakeIssueLabeler struct{}
 
 func (fakeIssueLabeler) AddLabels(num string, labels []string) error { return nil }
 
-// fakeBranchDeleter is a minimal stand-in for forge.BranchDeleter, the leg
-// butlerPatchForge requires alongside PRForge for landPatch's ambiguous-
-// create recovery (issue #4112).
-type fakeBranchDeleter struct{}
-
-func (fakeBranchDeleter) DeleteBranch(branch, base string) error { return nil }
-
-// pushDraftForge wraps a forge.CodeForge with the BranchPusher,
-// DraftPRCreator, and BranchDeleter methods, plus a real *forge.PRForgeFake,
+// pushDraftForge wraps a forge.CodeForge with the BranchPusher and
+// DraftPRCreator methods, a DeleteBranch delegating to the wrapped Fake (so the
+// delete crosses its Connector), plus a real *forge.PRForgeFake,
 // a write-capable adapter would carry, so forge.ResolveCapabilities can
 // populate Capabilities.BranchPusher/DraftPRCreator/PRForge/BranchDeleter
 // off a real type assertion rather than a hand-built Capabilities value
@@ -118,8 +112,13 @@ type pushDraftForge struct {
 	forge.CodeForge
 	fakeBranchPusher
 	fakeDraftPRCreator
-	fakeBranchDeleter
 	*forge.PRForgeFake
+}
+
+// DeleteBranch is the wrapped CodeForge's, so the delete crosses the Fake's
+// Connector rather than a stub.
+func (p pushDraftForge) DeleteBranch(branch, base string) error {
+	return p.CodeForge.(forge.BranchDeleter).DeleteBranch(branch, base)
 }
 
 // butlerPatchForge opts the patch rung on only when Capabilities proves the
@@ -172,7 +171,7 @@ func TestButlerPatchForge(t *testing.T) {
 	t.Run("no PRForge", func(t *testing.T) {
 		caps := forge.Capabilities{
 			BranchPusher: fakeBranchPusher{}, DraftPRCreator: fakeDraftPRCreator{}, IssueLabeler: fakeIssueLabeler{},
-			BranchDeleter:   fakeBranchDeleter{},
+			BranchDeleter:   cf,
 			ForgeDescriptor: githubDesc, TrackerDescriptor: githubDesc,
 		}
 		if pf := butlerPatchForge(caps); pf != nil {
@@ -197,7 +196,7 @@ func TestButlerPatchForge(t *testing.T) {
 	t.Run("both capabilities", func(t *testing.T) {
 		caps := forge.Capabilities{
 			BranchPusher: fakeBranchPusher{}, DraftPRCreator: fakeDraftPRCreator{}, IssueLabeler: fakeIssueLabeler{},
-			PRForge: cf.PRForgeFake, BranchDeleter: fakeBranchDeleter{},
+			PRForge: cf.PRForgeFake, BranchDeleter: cf,
 			ForgeDescriptor: githubDesc, TrackerDescriptor: githubDesc,
 		}
 		pf := butlerPatchForge(caps)
@@ -230,7 +229,7 @@ func TestButlerPatchForge(t *testing.T) {
 	t.Run("mismatched tracker and forge namespaces", func(t *testing.T) {
 		caps := forge.Capabilities{
 			BranchPusher: fakeBranchPusher{}, DraftPRCreator: fakeDraftPRCreator{}, IssueLabeler: fakeIssueLabeler{},
-			PRForge: cf.PRForgeFake, BranchDeleter: fakeBranchDeleter{},
+			PRForge: cf.PRForgeFake, BranchDeleter: cf,
 			ForgeDescriptor: githubDesc, TrackerDescriptor: forgejoDesc,
 		}
 		if pf := butlerPatchForge(caps); pf != nil {
@@ -1068,7 +1067,7 @@ func TestCmdButler_PatchFindingCarriesPatchLabel(t *testing.T) {
 	caps := forge.Capabilities{
 		HostPostedIssueFiler: testHostFiler(t),
 		BranchPusher:         fakeBranchPusher{}, DraftPRCreator: fakeDraftPRCreator{}, IssueLabeler: fakeIssueLabeler{},
-		PRForge: fc.PRForgeFake, BranchDeleter: fakeBranchDeleter{},
+		PRForge: fc.PRForgeFake, BranchDeleter: fc,
 		ForgeDescriptor: forgejoDesc, TrackerDescriptor: forgejoDesc,
 	}
 
