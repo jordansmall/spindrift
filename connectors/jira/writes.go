@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -145,4 +146,46 @@ func listLabels(t tracker.Target) ([]string, error) {
 		}
 	}
 	return nil, fmt.Errorf("GET /rest/api/2/label: more than %d pages", maxPages)
+}
+
+// comment posts r.Body as a wiki-markup comment on issue number. A research
+// verdict also carries the research entity property, so core finds it by
+// property rather than by marker text the wiki renderer could mangle.
+func comment(t tracker.Target, number string, r tracker.CommentRequest) error {
+	req := map[string]any{"body": toWikiMarkup(r.Body)}
+	if r.Research {
+		req["properties"] = []map[string]any{{"key": researchPropertyKey, "value": true}}
+	}
+	return do(t, "POST", issuePath(number)+"/comment", req, nil)
+}
+
+// fileIssue creates an issue of type r.IssueType in the target's project and
+// returns its browse URL. The dedup marker is stored as an entity property in
+// the same request, so the visible description never carries it.
+func fileIssue(t tracker.Target, r tracker.IssueRequest) (string, error) {
+	if r.IssueType == "" {
+		return "", errors.New("jira: no issue type to file under")
+	}
+	req := map[string]any{
+		"fields": map[string]any{
+			"project":     map[string]string{"key": t.Repo},
+			"summary":     r.Title,
+			"issuetype":   map[string]string{"name": r.IssueType},
+			"description": toWikiMarkup(r.Body),
+			"labels":      append([]string{}, r.Labels...),
+		},
+	}
+	if r.DedupMarker != "" {
+		req["properties"] = []map[string]any{{"key": dedupPropertyKey, "value": map[string]string{"marker": r.DedupMarker}}}
+	}
+	var created struct {
+		Key string `json:"key"`
+	}
+	if err := do(t, "POST", "/rest/api/2/issue", req, &created); err != nil {
+		return "", err
+	}
+	if created.Key == "" {
+		return "", errors.New("jira: create issue response carried no key")
+	}
+	return strings.TrimRight(t.API, "/") + "/browse/" + created.Key, nil
 }

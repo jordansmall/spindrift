@@ -320,3 +320,138 @@ func TestTransitionMovedResultCarriesStatus(t *testing.T) {
 		t.Fatalf("res = %+v, err = %v, want the mapped status named", res, err)
 	}
 }
+
+// commentBody decodes a comment POST body, leaving properties absent when the
+// request carried none.
+func commentBody(t *testing.T, r connector.Request) map[string]any {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal([]byte(r.Body), &m); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+func TestCommentPostsWikiBody(t *testing.T) {
+	got := script(t, func(connector.Request, *url.URL) (int, string) { return 201, "{}" })
+	if err := comment(cloud, "ENG-7", tracker.CommentRequest{Body: "**done** see `x_y`"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(*got) != 1 {
+		t.Fatalf("requests = %v", *got)
+	}
+	r := (*got)[0]
+	if r.Method != "POST" || r.URL != site+"/rest/api/2/issue/ENG-7/comment" {
+		t.Fatalf("request = %+v", r)
+	}
+	m := commentBody(t, r)
+	if m["body"] != `*done* see {{x\_y}}` {
+		t.Errorf("body = %q", m["body"])
+	}
+	if _, ok := m["properties"]; ok {
+		t.Errorf("non-research comment carries properties: %s", r.Body)
+	}
+}
+
+func TestCommentResearchSetsProperty(t *testing.T) {
+	got := script(t, func(connector.Request, *url.URL) (int, string) { return 201, "{}" })
+	if err := comment(cloud, "ENG-7", tracker.CommentRequest{Body: "verdict", Research: true}); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"body":"verdict","properties":[{"key":"spindrift-research","value":true}]}`
+	if r := (*got)[0]; r.Body != want {
+		t.Errorf("body = %s, want %s", r.Body, want)
+	}
+}
+
+func TestCommentMarkerLinePassesThrough(t *testing.T) {
+	got := script(t, func(connector.Request, *url.URL) (int, string) { return 201, "{}" })
+	in := "**a**\n<!-- spindrift-butler: `k_1` **x** -->"
+	if err := comment(cloud, "ENG-7", tracker.CommentRequest{Body: in}); err != nil {
+		t.Fatal(err)
+	}
+	if b := commentBody(t, (*got)[0])["body"]; b != "*a*\n<!-- spindrift-butler: `k_1` **x** -->" {
+		t.Errorf("body = %q", b)
+	}
+}
+
+func TestCommentHTTPError(t *testing.T) {
+	script(t, func(connector.Request, *url.URL) (int, string) { return 403, "{}" })
+	if err := comment(cloud, "ENG-7", tracker.CommentRequest{Body: "x"}); err == nil {
+		t.Fatal("want error")
+	}
+}
+
+func issueServer(t *testing.T, status int, body string) *[]connector.Request {
+	return script(t, func(connector.Request, *url.URL) (int, string) { return status, body })
+}
+
+func TestFileIssueSendsFieldsAndReturnsBrowseURL(t *testing.T) {
+	got := issueServer(t, 201, `{"id":"1","key":"ENG-9"}`)
+	url, err := fileIssue(cloud, tracker.IssueRequest{
+		Title: "t", Body: "**b**", Labels: []string{"a", "b"},
+		DedupMarker: "<!-- spindrift-dedup: k -->", IssueType: "Task",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if url != site+"/browse/ENG-9" {
+		t.Errorf("url = %q", url)
+	}
+	r := (*got)[0]
+	if r.Method != "POST" || r.URL != site+"/rest/api/2/issue" {
+		t.Fatalf("request = %+v", r)
+	}
+	want := `{"fields":{"description":"*b*","issuetype":{"name":"Task"},"labels":["a","b"],"project":{"key":"ENG"},"summary":"t"},` +
+		`"properties":[{"key":"spindrift.dedup","value":{"marker":"<!-- spindrift-dedup: k -->"}}]}`
+	var gotM, wantM any
+	if err := json.Unmarshal([]byte(r.Body), &gotM); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(want), &wantM); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotM, wantM) {
+		t.Errorf("body = %s\nwant   %s", r.Body, want)
+	}
+}
+
+func TestFileIssueOmitsEmptyDedupAndNeverNullLabels(t *testing.T) {
+	got := issueServer(t, 201, `{"key":"ENG-9"}`)
+	if _, err := fileIssue(cloud, tracker.IssueRequest{Title: "t", Body: "b", IssueType: "Bug"}); err != nil {
+		t.Fatal(err)
+	}
+	b := (*got)[0].Body
+	if strings.Contains(b, "properties") || !strings.Contains(b, `"labels":[]`) {
+		t.Errorf("body = %s", b)
+	}
+}
+
+func TestFileIssueTrimsTrailingSlashFromSite(t *testing.T) {
+	issueServer(t, 201, `{"key":"ENG-9"}`)
+	tg := cloud
+	tg.API = site + "/"
+	url, err := fileIssue(tg, tracker.IssueRequest{Title: "t", IssueType: "Task"})
+	if err != nil || url != site+"/browse/ENG-9" {
+		t.Errorf("url = %q, err = %v", url, err)
+	}
+}
+
+func TestFileIssueErrors(t *testing.T) {
+	for name, c := range map[string]struct {
+		status int
+		body   string
+		typ    string
+	}{
+		"no key":     {201, `{}`, "Task"},
+		"http error": {400, `{"errors":{}}`, "Task"},
+		"no type":    {201, `{"key":"ENG-9"}`, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			issueServer(t, c.status, c.body)
+			if _, err := fileIssue(cloud, tracker.IssueRequest{Title: "t", IssueType: c.typ}); err == nil {
+				t.Fatal("want error")
+			}
+		})
+	}
+}

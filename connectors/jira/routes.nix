@@ -8,16 +8,15 @@
 # credential probe (`/myself`) and the project's statuses (`/project/{repo}/statuses`,
 # `{repo}` being the Jira project key, substituted by `connectortracker.Routes`)
 # and the site-wide label list (`/label`); Cloud's approximate count, a POST that
-# only counts; and the lifecycle writes core asks for: PUT `/rest/api/2/issue`
-# (the label edit) and POST `/rest/api/2/issue` (a workflow transition, under
-# `/issue/{key}/transitions`).
+# only counts; and the writes core asks for: PUT `/rest/api/2/issue` (the label
+# edit) and POST `/rest/api/2/issue` (a workflow transition, under
+# `/issue/{key}/transitions`; a comment, under `/issue/{key}/comment`; and an
+# issue create, on the root).
 #
 # It is the narrowest table the subtree-only Route model can express, not an
 # exact one: `/rest/api/2/search` also admits GET `/rest/api/2/search/jql`,
 # which Cloud's walk needs, and `/rest/api/2/issue` also admits any other GET
 # under an issue (worklogs, attachments), none of which the Connector uses.
-# The POST subtree also admits issue create and comments, which the Connector
-# does not use either.
 [
   {
     method = "GET";
