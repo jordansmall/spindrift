@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/boxclone"
 )
@@ -37,7 +38,7 @@ func (r *boxRun) cloneConfig() boxclone.Config {
 	return boxclone.Config{
 		CodeForge:          r.codeForge(),
 		GHCredentialHelper: r.forgeDescriptor().InBoxGHCredentialHelper,
-		HostSeededMirror:   r.forgeDescriptor().HostSeededMirror,
+		HostSeededMirror:   backend.ClonesFromMirror(r.forgeDescriptor(), !r.env.BoxWriteEnabled),
 		RepoSlug:           g("REPO_SLUG"),
 		Lookup:             envLookup(g),
 		RepoMountDir:       r.in.RepoMountDir,

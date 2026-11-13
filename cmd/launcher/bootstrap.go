@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -197,6 +199,7 @@ func bootstrapWith(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descri
 		cleanup: func() {
 			f.Cleanup()
 			shadows.close()
+			removeScratchMirrors()
 			// Held for the whole run rather than only the seed, so a
 			// concurrent process cannot seed or mount the same Accumulation
 			// repo while this one still uses it (issue #2441). The OS releases
@@ -218,19 +221,24 @@ func (lc *launchContext) settler() settle.Settler {
 	return lc.merge
 }
 
-// hostSeedsMirror reports whether c's runs mount a host-seeded mirror at
-// /repo. Research needs it too, unless it is self-contained (issue #2439).
+// hostSeedsMirror reports whether c's Box clones from a host-seeded mirror
+// mounted at /repo (backend.ClonesFromMirror). Research needs it too, unless
+// it is self-contained (issue #2439). The read-only decision is dispatch's own
+// (effectiveBoxForgeAndIssueAccess), so launcher and Box agree per kind.
 func hostSeedsMirror(c config) bool {
 	row, _ := backendkit.ByName(c.CodeForge)
-	return row.HostSeededMirror && !c.selfContained
+	return backend.ClonesFromMirror(row.Descriptor, c.effectiveBoxForgeAndIssueAccess() == "read-only") && !c.selfContained
 }
 
 // seedAccumulationRepoIfHostSeeded makes the bare Accumulation repo (ADR 0033)
 // from pwd's checkout at launch, holding an exclusive lock on it for the
 // caller (issue #2441). Host-side landing needs the repo before any Box runs
 // (issue #1726); each Pass then re-seeds the mirror through seedMirrorHook.
+// Only a HostMediatedRemote forge has an Accumulation repo: a forge that merely
+// seeds a mirror (git under read-only) lands on its remote.
 func seedAccumulationRepoIfHostSeeded(c config, pwd string) (*local.AccumulationLock, error) {
-	if !hostSeedsMirror(c) {
+	row, _ := backendkit.ByName(c.CodeForge)
+	if !row.HostMediatedRemote || c.selfContained {
 		return nil, nil
 	}
 	repoDir := c.hostRepoDir()
@@ -245,25 +253,67 @@ func seedAccumulationRepoIfHostSeeded(c config, pwd string) (*local.Accumulation
 	return lock, nil
 }
 
-// seedMirrorMu serialises every in-process Pass's force-push of the one base
-// ref, across parallel Boxes and across the work and research factories.
+// seedMirrorMu serialises every in-process Pass's seed of the one mirror,
+// across parallel Boxes and across the work and research factories. It also
+// guards scratchMirrors.
 var seedMirrorMu sync.Mutex
 
-// seedMirrorHook is dispatch.Config.SeedMirror: it re-seeds the Accumulation
-// repo from pwd's base branch before each Pass and returns the dir to mount at
-// /repo, so a Box clones the base as it stands now rather than as of launch
-// (issue #6896). Nil when c has no host-seeded mirror. It does not take the
-// Accumulation lock: bootstrap's flock stays held for the whole run, and a
-// second open file would conflict with it.
+// scratchMirrors are the per-process mirror dirs seedMirrorHook made for a
+// forge with no HostRepoDir of its own; removeScratchMirrors deletes them.
+var scratchMirrors []string
+
+// removeScratchMirrors deletes every scratch mirror dir, on the launch
+// context's cleanup.
+func removeScratchMirrors() {
+	seedMirrorMu.Lock()
+	defer seedMirrorMu.Unlock()
+	for _, d := range scratchMirrors {
+		_ = os.RemoveAll(d)
+	}
+	scratchMirrors = nil
+}
+
+// newScratchMirrorDir makes a fresh dir under pwd's .spindrift for a mirror and
+// returns the bare repo path inside it. It is not under /tmp: a podman machine
+// on macOS shares $HOME with the VM, not /tmp, so only a path in the checkout
+// is mountable. The caller holds seedMirrorMu.
+func newScratchMirrorDir(pwd string) (string, error) {
+	root := filepath.Join(pwd, ".spindrift")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", err
+	}
+	d, err := os.MkdirTemp(root, "mirror-*")
+	if err != nil {
+		return "", err
+	}
+	scratchMirrors = append(scratchMirrors, d)
+	return filepath.Join(d, "repo.git"), nil
+}
+
+// seedMirrorHook is dispatch.Config.SeedMirror: it re-seeds the host mirror
+// through the forge Strategy's SeedMirror before each Pass and returns the dir
+// to mount at /repo, so a Box clones the base as it stands now rather than as
+// of launch (issue #6896). The mirror is the Accumulation repo for a forge with
+// a HostRepoDir (local), else a per-process scratch dir. Nil when c has no
+// host-seeded mirror. It does not take the Accumulation lock: bootstrap's flock
+// stays held for the whole run, and a second open file would conflict with it.
 func seedMirrorHook(c config, pwd string) func() (string, error) {
 	if !hostSeedsMirror(c) {
 		return nil
 	}
-	repoDir := c.hostRepoDir()
+	row, _ := backendkit.ByName(c.CodeForge)
+	dir := c.hostRepoDir()
 	return func() (string, error) {
 		seedMirrorMu.Lock()
 		defer seedMirrorMu.Unlock()
-		return repoDir, local.SeedAccumulationRepo(repoDir, pwd, c.BaseBranch)
+		if dir == "" {
+			d, err := newScratchMirrorDir(pwd)
+			if err != nil {
+				return "", err
+			}
+			dir = d
+		}
+		return dir, row.SeedMirror(backendShared(c), c.knobLookup, pwd, dir)
 	}
 }
 

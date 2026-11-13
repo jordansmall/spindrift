@@ -304,3 +304,28 @@ func TestRelaysBundle(t *testing.T) {
 		})
 	}
 }
+
+// TestClonesFromMirror pins when the Box clones from the host-seeded mirror:
+// only a HostSeededMirror forge whose Box hands its branch back as a bundle.
+func TestClonesFromMirror(t *testing.T) {
+	cases := []struct {
+		name     string
+		desc     Descriptor
+		readOnly bool
+		want     bool
+	}{
+		{"local read-write", Local, false, true},
+		{"local read-only", Local, true, true},
+		{"git read-write", Git, false, false},
+		{"git read-only", Git, true, true},
+		{"github read-only", GitHub, true, false},
+		{"forgejo read-only", Forgejo, true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ClonesFromMirror(tc.desc, tc.readOnly); got != tc.want {
+				t.Fatalf("ClonesFromMirror(%s, readOnly=%v) = %v, want %v", tc.name, tc.readOnly, got, tc.want)
+			}
+		})
+	}
+}

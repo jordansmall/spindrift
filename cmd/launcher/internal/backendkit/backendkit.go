@@ -103,6 +103,13 @@ type Strategy struct {
 	// Nil on a backend that is not HostMediatedRemote.
 	HostRepoDir func(Shared, Lookup) (string, error)
 
+	// SeedMirror makes dir the host-seeded mirror a Box clones from (see
+	// backend.ClonesFromMirror) as the base branch stands now: local pushes
+	// pwd's checkout into its Accumulation repo, git fetches the remote with
+	// the host credential. Nil on a backend whose Descriptor does not set
+	// HostSeededMirror.
+	SeedMirror func(s Shared, l Lookup, pwd, dir string) error
+
 	// ConfigureCLI sets up the backend's CLI inside the Box; nil means the
 	// backend has none to set up.
 	ConfigureCLI func(BoxCLI) error

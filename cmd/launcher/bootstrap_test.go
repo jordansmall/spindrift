@@ -11,8 +11,10 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/testutil"
 )
@@ -1051,7 +1053,7 @@ func TestSeedMirrorHook_Local_ReseedsBaseAdvanceBetweenPasses(t *testing.T) {
 }
 
 // No hook means no mirror dir on the Box, so no /repo mount: every backend
-// that does not host-seed a mirror (github, forgejo, git) clones from its
+// that does not host-seed a mirror (github, forgejo) clones from its
 // remote, and self-contained research never clones.
 func TestSeedMirrorHook_NoMirror_Nil(t *testing.T) {
 	cases := map[string]func(*config){
@@ -1071,4 +1073,94 @@ func TestSeedMirrorHook_NoMirror_Nil(t *testing.T) {
 			}
 		})
 	}
+}
+
+// git hosts a mirror only under a read-only Box (issue #6898): the Box holds
+// no credential for the remote, so the launcher seeds a per-Pass mirror with
+// the host's and the Box clones from it. Every head lands in it, so an agent
+// branch already on the remote is there for branch recovery.
+func TestSeedMirrorHook_Git_ReadOnlySeedsFromRemote(t *testing.T) {
+	gitIdentity(t)
+	fx := forgetest.NewGitRepoFixture(t, "main")
+	fx.SeedBranch("agent/issue-3", "3")
+	pwd := t.TempDir()
+	t.Cleanup(removeScratchMirrors)
+	c := baseConfig()
+	c.CodeForge = "git"
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.BaseBranch = "main"
+	c.setRowKnob("CODE_FORGE_REMOTE_URL", fx.Bare)
+
+	hook := seedMirrorHook(c, pwd)
+	if hook == nil {
+		t.Fatal("seedMirrorHook(CODE_FORGE=git, read-only) = nil, want a per-Pass seed")
+	}
+	dir, err := hook()
+	if err != nil {
+		t.Fatalf("first seed: %v", err)
+	}
+	if !strings.HasPrefix(dir, filepath.Join(pwd, ".spindrift")+string(filepath.Separator)) {
+		t.Errorf("mirror dir %q is not under <pwd>/.spindrift", dir)
+	}
+	for _, b := range []string{"main", "agent/issue-3"} {
+		if got, want := testutil.GitOutput(t, dir, "rev-parse", "refs/heads/"+b), fx.BranchSHA(b); got != want {
+			t.Errorf("mirror %s = %s, want %s", b, got, want)
+		}
+	}
+
+	fx.AdvanceBase()
+	dir2, err := hook()
+	if err != nil {
+		t.Fatalf("second seed: %v", err)
+	}
+	if dir2 != dir {
+		t.Errorf("second seed dir = %q, want the same mirror %q", dir2, dir)
+	}
+	if got, want := testutil.GitOutput(t, dir, "rev-parse", "refs/heads/main"), fx.BranchSHA("main"); got != want {
+		t.Errorf("mirror main = %s, want the advanced base %s", got, want)
+	}
+
+	removeScratchMirrors()
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("mirror dir survives removeScratchMirrors: stat err = %v", err)
+	}
+}
+
+// git under read-write clones and pushes the remote itself, so no mirror.
+func TestSeedMirrorHook_Git_ReadWrite_Nil(t *testing.T) {
+	c := baseConfig()
+	c.CodeForge = "git"
+	c.BoxForgeAndIssueAccess = "read-write"
+	if hook := seedMirrorHook(c, "/nonexistent/pwd"); hook != nil {
+		t.Error("seedMirrorHook(CODE_FORGE=git, read-write) = non-nil, want nil")
+	}
+}
+
+// git has no Accumulation repo to seed at launch even when it hosts a mirror.
+func TestSeedAccumulationRepoIfHostSeeded_GitReadOnly_NoOp(t *testing.T) {
+	c := baseConfig()
+	c.CodeForge = "git"
+	c.BoxForgeAndIssueAccess = "read-only"
+	lock, err := seedAccumulationRepoIfHostSeeded(c, "/nonexistent/pwd")
+	if err != nil || lock != nil {
+		t.Errorf("seedAccumulationRepoIfHostSeeded(git, read-only) = (%v, %v), want (nil, nil)", lock, err)
+	}
+}
+
+// Every forge whose mirror the Box can clone from carries a SeedMirror hook.
+func TestHostSeededMirrorRowsHaveSeedMirror(t *testing.T) {
+	for _, d := range backend.Registry {
+		row, _ := backendkit.ByName(d.Name)
+		if got := row.SeedMirror != nil; got != d.HostSeededMirror {
+			t.Errorf("%s: SeedMirror non-nil = %v, want %v (HostSeededMirror)", d.Name, got, d.HostSeededMirror)
+		}
+	}
+}
+
+func gitIdentity(t *testing.T) {
+	t.Helper()
+	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
+	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "Test Bot")
+	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
 }

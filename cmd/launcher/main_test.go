@@ -3554,18 +3554,21 @@ func TestDispatchConfig_NonPRForge_OpenPRForIssueAlwaysReportsNotFound(t *testin
 
 // SeedMirror is built inside dispatchConfig, so every dispatch entry point
 // re-seeds per Pass (issue #6896): non-nil exactly for the registry rows that
-// host-seed a mirror, nil for the rest.
-func TestDispatchConfig_SeedMirror_SetIffHostSeededMirror(t *testing.T) {
+// whose Box clones from a mirror (backend.ClonesFromMirror), nil for the rest.
+func TestDispatchConfig_SeedMirror_SetIffClonesFromMirror(t *testing.T) {
 	for _, d := range backend.Registry {
-		t.Run(d.Name, func(t *testing.T) {
-			c := minimalValidConfig()
-			c.CodeForge = d.Name
-			fc := forge.NewFake()
-			cfg := dispatchConfig(c, t.TempDir(), fc, testWired(fc), fc, forge.Capabilities{})
-			if got, want := cfg.SeedMirror != nil, d.HostSeededMirror; got != want {
-				t.Errorf("dispatchConfig().SeedMirror non-nil = %v, want %v (HostSeededMirror)", got, want)
-			}
-		})
+		for _, access := range []string{"read-write", "read-only"} {
+			t.Run(d.Name+"/"+access, func(t *testing.T) {
+				c := minimalValidConfig()
+				c.CodeForge = d.Name
+				c.BoxForgeAndIssueAccess = access
+				fc := forge.NewFake()
+				cfg := dispatchConfig(c, t.TempDir(), fc, testWired(fc), fc, forge.Capabilities{})
+				if got, want := cfg.SeedMirror != nil, backend.ClonesFromMirror(d, access == "read-only"); got != want {
+					t.Errorf("dispatchConfig().SeedMirror non-nil = %v, want %v (ClonesFromMirror)", got, want)
+				}
+			})
+		}
 	}
 }
 

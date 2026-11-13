@@ -24,6 +24,7 @@ var Git = Descriptor{
 	Name:                    "git",
 	DisplayName:             "Git",
 	ValidAsCodeForge:        true,
+	HostSeededMirror:        true,
 	InBoxGHCredentialHelper: true,
 	RelayCapable:            true,
 }

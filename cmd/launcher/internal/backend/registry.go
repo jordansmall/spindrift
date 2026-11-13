@@ -39,9 +39,11 @@ type Descriptor struct {
 	HostMediatedRemote bool
 
 	// HostSeededMirror is true for a backend whose Box clones from a mirror the
-	// host seeds fresh before each Pass and mounts at /repo (ADR 0033: "local"),
-	// not from a network remote. The Box trusts the mount as a git
-	// safe.directory.
+	// host seeds fresh before each Pass and mounts at /repo, rather than from
+	// its network remote, whenever the Box hands its branch back as a bundle
+	// (ClonesFromMirror): always for local (ADR 0033), under a read-only Box
+	// for git (issue #6898), whose Box holds no credential for the remote. The
+	// Box trusts the mount as a git safe.directory.
 	HostSeededMirror bool
 
 	// OutboxRelayCapable is true for a backend whose CODE_FORGE has pull
@@ -240,6 +242,13 @@ func OutboxRelayBackends() []string {
 // Box's relay, push guard, and outcome backstop all decide through this.
 func RelaysBundle(d Descriptor, readOnly bool) bool {
 	return d.HostMediatedRemote || (d.RelayCapable && readOnly)
+}
+
+// ClonesFromMirror reports whether a Box on forge d clones from the host-seeded
+// per-Pass mirror mounted at /repo instead of its remote: a HostSeededMirror
+// forge whose Box relays its branch back as a bundle (RelaysBundle).
+func ClonesFromMirror(d Descriptor, readOnly bool) bool {
+	return d.HostSeededMirror && RelaysBundle(d, readOnly)
 }
 
 // RelaysOutbox reports whether a Box under codeForge and boxAccess is a
