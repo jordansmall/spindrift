@@ -30,6 +30,8 @@ var pairs = map[string]string{
 	"TransitionRequest": "transitionRequest",
 	"TransitionResult":  "transitionResult",
 	"StatusTarget":      "StatusTarget",
+	"CommentRequest":    "commentRequest",
+	"IssueRequest":      "issueRequest",
 }
 
 // fieldLines renders each field of st as "name type tag"; an embedded field
@@ -105,6 +107,7 @@ func flatten(t *testing.T, lines []string, all map[string][]string) []string {
 var methodConsts = map[string]string{
 	"CapTransition": CapTransition, "CapEditLabels": CapEditLabels,
 	"CapListLabels": CapListLabels, "CapCreateLabel": CapCreateLabel,
+	"CapComment": CapComment, "CapFileIssue": CapFileIssue,
 }
 
 // handlerParams renders the anonymous `var p struct{...}` each method handler
@@ -205,6 +208,7 @@ func TestWriteCapabilitiesMatchCore(t *testing.T) {
 	for name, want := range map[string]string{
 		"CapTransition": CapTransition, "CapEditLabels": CapEditLabels, "CapLabels": CapLabels,
 		"CapListLabels": CapListLabels, "CapCreateLabel": CapCreateLabel,
+		"CapComment": CapComment, "CapFileIssue": CapFileIssue,
 		"transitionMoved": TransitionMoved, "transitionUnavailable": TransitionUnavailable,
 		"transitionUnmapped": TransitionUnmapped,
 	} {
@@ -225,6 +229,8 @@ func TestWriteParamsMatchCore(t *testing.T) {
 		"tracker.transition":  "transitionParams",
 		"tracker.editLabels":  "editLabelsParams",
 		"tracker.createLabel": "createLabelParams",
+		"tracker.comment":     "commentParams",
+		"tracker.fileIssue":   "fileIssueParams",
 	} {
 		want, ok := sdk[method]
 		if !ok || len(want) == 0 {
