@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 	"unicode"
@@ -133,6 +134,22 @@ func (e *TransitionRefusedError) Error() string {
 		offers = "offers transitions to " + QuoteList(e.Offered)
 	}
 	return fmt.Sprintf("issue %s could not move%s to %q: the workflow %s", e.Issue, from, e.To, offers)
+}
+
+// CommentRefusal posts a TransitionState refusal on the issue, since a refused
+// move applies no label and the card would otherwise carry no trace of why it
+// did not move. It returns the refusal found in err, or nil (posting nothing)
+// when err is not one. A failed comment is logged and returned.
+func CommentRefusal(it IssueTracker, num string, err error) (*TransitionRefusedError, error) {
+	var refusal *TransitionRefusedError
+	if !errors.As(err, &refusal) {
+		return nil, nil
+	}
+	cerr := it.Comment(num, "spindrift could not move this issue: "+refusal.Error())
+	if cerr != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not comment the refused transition: %v\n", num, cerr)
+	}
+	return refusal, cerr
 }
 
 // QuoteList renders each of items %q-quoted, joined by ", ".
