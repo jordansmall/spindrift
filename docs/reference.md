@@ -3192,7 +3192,8 @@ This is protocol version **0.3.0**. The host is
   prior-claim read follows the same rule: core maps the last removed label
   named like the Complete or Failed label to that state, and a Connector
   without `tracker.removedLabels` offers none. Probe is part of
-  every tracker, so without `tracker.probe` it stays on the native adapter. The
+  every tracker, so without `tracker.probe` it stays on the native adapter, as
+  does the label list without `tracker.labels`. The
   SDK's `tracker.Register(tracker.Reader{...})` serves the methods. A 0.1
   Connector predates the `status` selector, `tracker.blocks` and project-key
   ids: core never sends it a `status`, ignores those two capabilities, and
