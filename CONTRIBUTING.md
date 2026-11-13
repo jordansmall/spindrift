@@ -479,6 +479,10 @@ releases and is owned separately from core, so wire these besides the code:
 4. A flake entry: add the directory to the list in `nix/connector-dirs.nix` so
    the root plain-imports its entry point. `nix/connector-fragments.nix` finds
    a Connector's prompt fragment folder through the same list.
+5. A conformance suite: set the subflake's `checks` to a
+   `core.lib.connectorChecks` call, which returns the per-system output, so
+   CI's `connector` lane runs it. The `connector-checks-parity` check names any
+   Connector without one.
 
 The root package's `exclude-paths` keeps a commit that touches only
 `connectors/` out of a core release. The `connector-ownership` check names any

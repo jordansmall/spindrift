@@ -2352,7 +2352,12 @@ is the fixture Connector in
   [`nix/connector-dirs.nix`](../nix/connector-dirs.nix); `connectors/claude`
   is the first, and it builds
   `package` (the compiled wasm) from the SDK source core exports as `lib.sdkSrc`,
-  not a path out of its directory.
+  not a path out of its directory. It also exposes `checks`, built from
+  `core.lib.connectorChecks`: the Connector's Go fmt, wasip1 vet and unit
+  tests, and the launcher's Driver or backend conformance test against its
+  wasm (and, for a backend, its Route table). `nix run .#connector-dev --
+  <connector> flake check` runs them, and the `connector-checks-parity` check
+  fails on a Connector without them.
 - **Iterating.** Build or check a Connector against the local core with
   `nix run .#connector-dev -- <connector> <nix-args...>`. `<connector>` is a
   path if it contains `/` or is `.` or `..`; any other word is a bare name
