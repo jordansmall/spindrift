@@ -158,12 +158,13 @@ func (c *replay) inTreeRewrite(rewrites []bindregistry.HostRewrite) (*inTreeOutp
 	}
 	defer cleanup()
 
-	outcome, err := bindregistry.ApplyInTreeBinding(work, c.row, rewrites)
+	row := bindregistry.BoundInTreeRow(work, c.row)
+	outcome, err := bindregistry.ApplyInTreeBinding(work, row, rewrites)
 	if err != nil {
 		return nil, err
 	}
-	res := &inTreeOutput{ConfigPath: c.row.InTreeConfigPath, Outcome: outcome.String()}
-	content, err := os.ReadFile(filepath.Join(work, c.row.InTreeConfigPath))
+	res := &inTreeOutput{ConfigPath: row.InTreeConfigPath, Outcome: outcome.String()}
+	content, err := os.ReadFile(filepath.Join(work, row.InTreeConfigPath))
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}

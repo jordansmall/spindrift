@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -19,7 +20,10 @@ const intreebindingTempFilePattern = ".intreebinding-*"
 
 // InTreeBindings returns every Strategy of all whose registry pin lives in a
 // tracked config file rather than an env var (ADR 0044), in Strategies order: npm's .npmrc, yarn
-// berry's .yarnrc.yml (issue #2856), and pnpm's pnpm-workspace.yaml (issue #2855).
+// berry's .yarnrc.yml (issue #2856), pnpm's pnpm-workspace.yaml (issue #2855),
+// and nuget's nuget.config spellings.
+// A row naming only DiscoveryConfigPaths is admitted too; BoundInTreeRow picks
+// the spelling it binds.
 func InTreeBindings(all []ecosystem.Strategy) []ecosystem.Strategy {
 	var rows []ecosystem.Strategy
 	for _, row := range all {
@@ -28,11 +32,53 @@ func InTreeBindings(all []ecosystem.Strategy) []ecosystem.Strategy {
 		// not compose: once one swaps the index host away, the other has nothing
 		// left to key off. Cargo is that case, and keeps a non-empty
 		// InTreeConfigPath only for host-side discovery.
-		if row.InTreeConfigPath != "" && row.RepoAwareHomeConfig == nil {
+		if len(row.ConfigPaths()) > 0 && row.RepoAwareHomeConfig == nil {
 			rows = append(rows, row)
 		}
 	}
 	return rows
+}
+
+// discoversInTreeConfig reports whether row has no fixed InTreeConfigPath and
+// instead names DiscoveryConfigPaths spellings for BoundInTreeRow to choose from.
+func discoversInTreeConfig(row ecosystem.Strategy) bool {
+	return row.InTreeConfigPath == "" && len(row.DiscoveryConfigPaths) > 0
+}
+
+// BoundInTreeRow returns row with InTreeConfigPath naming the file Apply
+// rewrites. A row with a fixed InTreeConfigPath is returned as is; one with
+// DiscoveryConfigPaths binds the first spelling that is a regular file in
+// repoDir under exactly that name, or the first spelling when none is, so a
+// not-found message still names a path.
+func BoundInTreeRow(repoDir string, row ecosystem.Strategy) ecosystem.Strategy {
+	if !discoversInTreeConfig(row) {
+		return row
+	}
+	row.InTreeConfigPath = row.DiscoveryConfigPaths[0]
+	for _, p := range row.DiscoveryConfigPaths {
+		if regularFileSpelled(repoDir, p) {
+			row.InTreeConfigPath = p
+			break
+		}
+	}
+	return row
+}
+
+// regularFileSpelled reports whether rel's file name exists in its directory
+// spelled exactly so. On a case-insensitive filesystem (macOS) os.Stat alone
+// matches any case variant, which would bind a spelling git does not track.
+func regularFileSpelled(repoDir, rel string) bool {
+	full := filepath.Join(repoDir, rel)
+	entries, err := os.ReadDir(filepath.Dir(full))
+	if err != nil {
+		return false
+	}
+	base := filepath.Base(full)
+	if !slices.ContainsFunc(entries, func(e os.DirEntry) bool { return e.Name() == base }) {
+		return false
+	}
+	info, err := os.Stat(full)
+	return err == nil && info.Mode().IsRegular()
 }
 
 // isTracked reports whether relPath is git-tracked in the repo at repoDir.
@@ -189,6 +235,9 @@ func replaceAllFold(s, old, repl string) string {
 // pnpm-workspace.yaml's registries; ADR 0044's yarn and pnpm updates), so the
 // value has to be edited into the tracked file itself.
 func ApplyInTreeBinding(repoDir string, row ecosystem.Strategy, rewrites []HostRewrite) (ApplyOutcome, error) {
+	if row.InTreeConfigPath == "" {
+		return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with %s row that has no bound config path; resolve it with BoundInTreeRow first", row.Name)
+	}
 	// Internal-consistency guards, not operator-facing outcomes: the verb layer
 	// already drops any route with no upstream host or a host shared with
 	// another route (issue #3142, host-only matching cannot disambiguate
@@ -487,17 +536,50 @@ func RevertInTreeBinding(repoDir string, row ecosystem.Strategy) (reverted bool,
 // RevertInTreeBindings reverts every Strategy in rows, continuing past a per-Strategy
 // error so one Strategy's failure cannot strand the rest, and reports whether any
 // failed. Each outcome is narrated to w; who prefixes a failure line.
+// A row with DiscoveryConfigPaths is reverted at each spelling whose
+// skip-worktree bit is set, not at a re-resolved one: Apply tags the bit
+// before rewriting, so it marks the bound spelling even if the agent created
+// an earlier one since. An unmarked spelling is left alone, its dirty content
+// being the agent's.
 func RevertInTreeBindings(workDir string, rows []ecosystem.Strategy, who string, w io.Writer) (failed bool) {
 	for _, row := range rows {
-		reverted, err := RevertInTreeBinding(workDir, row)
+		targets, probed, err := revertTargets(workDir, row)
 		if err != nil {
-			fmt.Fprintln(w, who+": revert in-tree "+row.InTreeConfigPath+":", err)
+			fmt.Fprintln(w, who+": revert in-tree "+probed+":", err)
 			failed = true
 			continue
 		}
-		if reverted {
-			fmt.Fprintln(w, "==> in-tree "+row.Name+" config "+row.InTreeConfigPath+" restored and un-hidden from git")
+		for _, target := range targets {
+			reverted, err := RevertInTreeBinding(workDir, target)
+			if err != nil {
+				fmt.Fprintln(w, who+": revert in-tree "+target.InTreeConfigPath+":", err)
+				failed = true
+				continue
+			}
+			if reverted {
+				fmt.Fprintln(w, "==> in-tree "+target.Name+" config "+target.InTreeConfigPath+" restored and un-hidden from git")
+			}
 		}
 	}
 	return failed
+}
+
+// revertTargets returns the rows to revert for row: row itself when it names a
+// fixed InTreeConfigPath, else one row per DiscoveryConfigPaths spelling whose
+// skip-worktree bit is set. On a probe error it also returns the spelling probed.
+func revertTargets(workDir string, row ecosystem.Strategy) (targets []ecosystem.Strategy, probed string, err error) {
+	if !discoversInTreeConfig(row) {
+		return []ecosystem.Strategy{row}, "", nil
+	}
+	for _, p := range row.DiscoveryConfigPaths {
+		set, err := skipWorktreeBitSet(workDir, p)
+		if err != nil {
+			return nil, p, err
+		}
+		if set {
+			row.InTreeConfigPath = p
+			targets = append(targets, row)
+		}
+	}
+	return targets, "", nil
 }
