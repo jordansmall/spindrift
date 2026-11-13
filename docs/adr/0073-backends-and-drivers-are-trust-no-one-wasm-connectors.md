@@ -630,3 +630,13 @@ research flag as the `spindrift-research` comment property and the dedup
 marker as the `spindrift.dedup` issue property, and returns the filed issue's
 browse URL. Both writes go through POST `/rest/api/2/issue`, already in its
 Route table.
+
+## Amendment (issue #6884): a response-header read beside `http_request`
+
+A network Connector may also import `spindrift.http_response_header`, which
+returns one named header of the last `http_request`'s response. A guest sees
+only status and body otherwise, so it cannot read a header such as
+`X-OAuth-Scopes`. The call is additive: a Connector that never imports it, and
+protocol 0.3, are unchanged. It exposes only response headers (`Set-Cookie`
+excluded), nothing of the request or the credential. The reference's
+Network Connectors entry has the ABI.

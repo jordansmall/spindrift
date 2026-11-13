@@ -3082,7 +3082,16 @@ This is protocol version **0.3.0**. The host is
   request the log cannot record fails closed (`ErrAudit`) and leaves no line.
   Any failed call of a network Connector whose failure no Host call already
   audited adds a `failed` line naming the Connector. The SDK's
-  `connector.HTTPRequest` wraps the import. A credential taken from
+  `connector.HTTPRequest` wraps the import. A second, additive import,
+  `spindrift.http_response_header(namePtr, nameLen, outPtr, outCap i32) -> i64`,
+  reads one header of the last `http_request`'s response (the SDK's
+  `connector.ResponseHeader`); a Connector that never imports it is unchanged.
+  The name is case-insensitive and repeated values join with `, `. The result
+  is `found << 32 | n`: `found` is 1 for a present header (an empty value is
+  present) and 0 for an absent one, `n` is the value's full length, and at
+  most `outCap` bytes are written at `outPtr`, so a short buffer asks again.
+  `Set-Cookie` is never served, and a refused, failed or oversized request
+  leaves every name absent. A credential taken from
   `GH_TOKEN_REFRESH_FILE` through `tokenrefresh.Follow` is re-read on every
   request, so the first request after a rotation carries the new token and none
   is dropped; every rotation must replace the file by rename, as
