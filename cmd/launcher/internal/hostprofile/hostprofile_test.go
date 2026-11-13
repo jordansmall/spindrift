@@ -24,6 +24,7 @@ func TestMatch(t *testing.T) {
 		{"crates.io index", "https://index.crates.io/", nil, "crates.io"},
 		{"npmjs", "https://registry.npmjs.org/", nil, "registry.npmjs.org"},
 		{"go proxy", "https://proxy.golang.org", nil, "proxy.golang.org"},
+		{"nuget.org", "https://api.nuget.org/v3/", nil, "nuget.org"},
 		{"unprofiled host", "https://registry.example.com/npm/", nil, ""},
 		{"unprofiled host with unrelated header", "https://registry.example.com/npm/", http.Header{"Server": {"nginx"}}, ""},
 	}
@@ -44,7 +45,7 @@ func TestMatch(t *testing.T) {
 }
 
 func TestMatchPublicDefaultsAreUnauthenticated(t *testing.T) {
-	for _, u := range []string{"https://index.crates.io/", "https://registry.npmjs.org/", "https://proxy.golang.org"} {
+	for _, u := range []string{"https://index.crates.io/", "https://registry.npmjs.org/", "https://proxy.golang.org", "https://api.nuget.org/v3/"} {
 		row, ok := Match(u, nil)
 		if !ok {
 			t.Fatalf("Match(%q): no match", u)
