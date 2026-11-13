@@ -26,5 +26,11 @@
           value.default = connector.package core.inputs.nixpkgs.legacyPackages.${system};
         }) systems
       );
+      checks = core.lib.connectorChecks {
+        inherit (core.inputs) nixpkgs;
+        inherit connector systems;
+        name = "jira";
+        src = ./.;
+      };
     };
 }
