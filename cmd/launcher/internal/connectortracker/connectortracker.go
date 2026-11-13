@@ -240,6 +240,10 @@ const (
 	// CapCountInterval is the method that serves the probe cadence; it rides on
 	// CapCount rather than being advertised itself.
 	CapCountInterval = "tracker.countInterval"
+	// CapRemovedLabels: the Connector serves tracker.removedLabels, the label
+	// names removed from an issue, oldest first. Core maps them to a lifecycle
+	// state for recover; the Connector knows nothing of that.
+	CapRemovedLabels = "tracker.removedLabels"
 	// CapSearchIssues: the Connector serves tracker.searchIssues.
 	CapSearchIssues = "tracker.searchIssues"
 	// CapTransition: the Connector serves tracker.transition. With CapEditLabels
@@ -502,6 +506,36 @@ func (l countLayer) CountReady(bool) (int, error) {
 // maxCountInterval bounds the cadence a Connector may ask for.
 const maxCountInterval = 24 * time.Hour
 
+// priorClaimLayer serves forge.PriorClaimStateReader from the removed labels.
+type priorClaimLayer struct {
+	forge.IssueTracker
+	r *reads
+}
+
+func (l priorClaimLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
+
+// PriorClaimState is the most recent removal of the Complete or Failed label,
+// the claim's strip of it being the only trace of the state before it.
+func (l priorClaimLayer) PriorClaimState(num string) (forge.DispatchState, bool, error) {
+	var res struct {
+		Labels []string `json:"labels"`
+	}
+	if err := l.r.call(context.Background(), CapRemovedLabels, numberedParams{l.r.target, num}, &res); err != nil {
+		return forge.Untriaged, false, err
+	}
+	labels := l.r.lifecycle.Labels
+	prior, found := forge.Untriaged, false
+	for _, name := range res.Labels {
+		switch {
+		case name != "" && name == labels.Complete:
+			prior, found = forge.Complete, true
+		case name != "" && name == labels.Failed:
+			prior, found = forge.Failed, true
+		}
+	}
+	return prior, found, nil
+}
+
 // readCountInterval reads the Connector's demand-probe cadence once, at
 // construction; a sub-second cadence would hammer the tracker, and a cadence
 // past maxCountInterval is an implausible answer (and would overflow a
@@ -524,7 +558,7 @@ func readCountInterval(call guestCall) (time.Duration, error) {
 // them.
 func (t *reads) Hides(capability any) bool {
 	switch capability.(type) {
-	case *forge.DemandCounter, *forge.IssueTypeChecker, *forge.StatusMappingChecker:
+	case *forge.DemandCounter, *forge.IssueTypeChecker, *forge.StatusMappingChecker, *forge.PriorClaimStateReader:
 		return true
 	}
 	return false
@@ -570,25 +604,27 @@ func (l searchLayer) SearchIssues(text string, state forge.IssueState, label str
 }
 
 var (
-	_ forge.Unwrapper            = (*reads)(nil)
-	_ forge.FullyPaginated       = (*reads)(nil)
-	_ forge.LabeledTracker       = (*reads)(nil)
-	_ forge.Unwrapper            = commentsLayer{}
-	_ forge.CommentLister        = commentsLayer{}
-	_ forge.Unwrapper            = nativeDepsLayer{}
-	_ forge.NativeDepsReader     = nativeDepsLayer{}
-	_ forge.Unwrapper            = blocksLayer{}
-	_ forge.BlockersLister       = blocksLayer{}
-	_ forge.CapabilityHider      = (*reads)(nil)
-	_ forge.Unwrapper            = probeLayer{}
-	_ forge.Unwrapper            = statusesLayer{}
-	_ forge.StatusMappingChecker = statusesLayer{}
-	_ forge.Unwrapper            = createMetaLayer{}
-	_ forge.IssueTypeChecker     = createMetaLayer{}
-	_ forge.Unwrapper            = countLayer{}
-	_ forge.DemandCounter        = countLayer{}
-	_ forge.Unwrapper            = searchLayer{}
-	_ forge.IssueSearcher        = searchLayer{}
+	_ forge.Unwrapper             = (*reads)(nil)
+	_ forge.FullyPaginated        = (*reads)(nil)
+	_ forge.LabeledTracker        = (*reads)(nil)
+	_ forge.Unwrapper             = commentsLayer{}
+	_ forge.CommentLister         = commentsLayer{}
+	_ forge.Unwrapper             = nativeDepsLayer{}
+	_ forge.NativeDepsReader      = nativeDepsLayer{}
+	_ forge.Unwrapper             = blocksLayer{}
+	_ forge.BlockersLister        = blocksLayer{}
+	_ forge.CapabilityHider       = (*reads)(nil)
+	_ forge.Unwrapper             = probeLayer{}
+	_ forge.Unwrapper             = statusesLayer{}
+	_ forge.StatusMappingChecker  = statusesLayer{}
+	_ forge.Unwrapper             = createMetaLayer{}
+	_ forge.IssueTypeChecker      = createMetaLayer{}
+	_ forge.Unwrapper             = countLayer{}
+	_ forge.DemandCounter         = countLayer{}
+	_ forge.Unwrapper             = priorClaimLayer{}
+	_ forge.PriorClaimStateReader = priorClaimLayer{}
+	_ forge.Unwrapper             = searchLayer{}
+	_ forge.IssueSearcher         = searchLayer{}
 )
 
 // New builds core's tracker from a tracker Connector. writes answers every
@@ -599,7 +635,8 @@ var (
 // does not carry (see CapComments, CapNativeDeps, CapBlocks and
 // CapSearchIssues); Probe stays with it unless the Connector advertises
 // CapProbe. The doctor and demand checks (CapStatuses, CapCreateMeta, CapCount)
-// are never answered natively.
+// and recover's prior-claim read (CapRemovedLabels) are never answered
+// natively.
 // Look capabilities up with forge.As. Calls run under context.Background()
 // because IssueTracker methods carry no context.
 //
@@ -655,6 +692,9 @@ func newTracker(call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, 
 			return nil, err
 		}
 		it = countLayer{it, r, interval}
+	}
+	if slices.Contains(caps, CapRemovedLabels) {
+		it = priorClaimLayer{it, r}
 	}
 	if slices.Contains(caps, CapSearchIssues) {
 		it = searchLayer{it, r}
