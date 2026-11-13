@@ -474,14 +474,15 @@ releases and is owned separately from core, so wire these besides the code:
    The check recognises only a `/connectors/<name>/` or `/connectors/<name>/**`
    line as last to cover `*`, `connectors/`, or the Connector; it cannot see
    an extension pattern like `*.nix @other`, so do not add one after it.
-4. A flake entry: add the directory to `connectorDirs` in `flake.nix` so the
-   root plain-imports its entry point.
+4. A flake entry: add the directory to the list in `nix/connector-dirs.nix` so
+   the root plain-imports its entry point. `nix/connector-fragments.nix` finds
+   a Connector's prompt fragment folder through the same list.
 
 The root package's `exclude-paths` keeps a commit that touches only
 `connectors/` out of a core release. The `connector-ownership` check names any
 Connector missing its release-please package, manifest version, or CODEOWNERS
 line, or whose `component` is not its own name; it does not cover
-`connectorDirs`.
+`nix/connector-dirs.nix`.
 
 ## Reporting security issues
 
