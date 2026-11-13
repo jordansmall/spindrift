@@ -17,6 +17,7 @@ const (
 	CapBranchProtection = "forge.branchProtection"
 	CapProbe            = "forge.probe"
 	CapDraftPRs         = "forge.draftPRs"
+	CapTokenGrant       = "forge.tokenGrant"
 )
 
 // NewPR is the pull request a Connector opens. Base is the branch it merges
@@ -27,6 +28,16 @@ type NewPR struct {
 	Base  string `json:"base"`
 	Head  string `json:"head"`
 	Draft bool   `json:"draft"`
+}
+
+// Grant is what a token may do on a repository, in core's canonical terms. A
+// Connector whose forge cannot say sets Introspectable false and gives Reason,
+// the operator-facing explanation. WriteCapable is meaningful only when
+// Introspectable is true.
+type Grant struct {
+	Introspectable bool   `json:"introspectable"`
+	WriteCapable   bool   `json:"writeCapable"`
+	Reason         string `json:"reason,omitempty"`
 }
 
 // PRs is everything a Connector-backed Code Forge needs of the forge itself
@@ -71,6 +82,13 @@ type PRs struct {
 	// Probe is optional and declares CapProbe. It returns the repository's
 	// full name, proving the forge answers with the Connector's credential.
 	Probe func(t Target) (string, error)
+
+	// TokenGrant is optional and declares CapTokenGrant. It reports what the
+	// credential the host attached may do on the repository: the token under
+	// audit rides as the Connector's credential, so the Connector never sees
+	// it. tokenPrefix is the token's non-secret leading part, through its first
+	// "_" ("" when it has none), which is all the Connector may dispatch on.
+	TokenGrant func(t Target, tokenPrefix string) (Grant, error)
 }
 
 // RegisterPRs exports p as the Connector's PR primitives. Call it from
@@ -264,6 +282,19 @@ func prHandlers(p PRs) ([]string, map[string]method) {
 			}{repo}, nil
 		}
 		caps = append(caps, CapProbe)
+	}
+	if p.TokenGrant != nil {
+		m["forge.tokenGrant"] = func(params json.RawMessage) (any, error) {
+			var q struct {
+				Target      Target `json:"target"`
+				TokenPrefix string `json:"tokenPrefix"`
+			}
+			if err := unmarshal(params, &q); err != nil {
+				return nil, err
+			}
+			return p.TokenGrant(q.Target, q.TokenPrefix)
+		}
+		caps = append(caps, CapTokenGrant)
 	}
 	return caps, m
 }

@@ -8,9 +8,9 @@
 // every git operation itself, and derives whatever it can. The Connector
 // returns raw fields only; core makes every policy decision (which
 // conclusions fail, rendering and capping failure detail, PR URL validation).
-// Auto-merge, the CI run link, branch protection and the forge probe are
-// optional primitives, each a handshake capability a Connector declares by
-// setting its funcs.
+// Auto-merge, the CI run link, branch protection, the forge probe and the token
+// grant are optional primitives, each a handshake capability a Connector
+// declares by setting its funcs.
 package forge
 
 import (
