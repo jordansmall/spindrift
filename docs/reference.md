@@ -5519,8 +5519,18 @@ such block and are experimental, so you select them by editing
     could not move from status "A" to "B": the workflow offers transitions
     to "C", "D"` as a comment on the issue and settles the Record with
     reason `transition-refused`, whose note keeps the reason and note it
-    displaced (see [Stats](#stats)). The `doctor` `status-mapping` row
-    catches a mapped status the workflow lacks ahead of time.
+    displaced (see [Stats](#stats)). A refused claim (dispatch or the
+    Console queue) and a refused move back to `dispatchable` (terminate,
+    abort, or the Console's quit revert) post the same comment. A
+    dispatch process comments an unchanged claim refusal once, but a
+    wave, one-shot or daemon-spawned run starts fresh, so each such run
+    posts it again until the workflow offers the transition. Only a
+    successful claim clears that memory, so a card that leaves the
+    dispatchable listing and returns with the same refusal is not
+    commented again. The Console queue keeps no such memory: a refused
+    pick is dissolved, so picking the same card again posts it again. The
+    `doctor` `status-mapping` row catches a mapped status the workflow
+    lacks ahead of time.
 
   To migrate, map every work state, then set `JIRA_LIFECYCLE=status`
   (`issues.jira.lifecycle = "status"` in the flake). Research states are
