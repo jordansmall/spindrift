@@ -32,6 +32,11 @@ const (
 	// dateLayout is the timestamp format Jira emits (not RFC3339: the zone
 	// offset has no colon).
 	dateLayout = "2006-01-02T15:04:05.000-0700"
+
+	// countInterval is how often core re-asks Count. A JQL search carries no
+	// conditional-request support, and Jira Cloud rate-limits REST calls, so
+	// the probe stays infrequent.
+	countInterval = 5 * time.Minute
 )
 
 // notPlannedResolutions are the resolution names that mean the work was
@@ -46,19 +51,34 @@ var send = connector.HTTPRequest
 // get sends a GET to t.API+path and decodes a 2xx JSON body into out. The host
 // attaches the credential, so none is set here.
 func get(t tracker.Target, path string, out any) error {
-	resp, err := send(connector.Request{
-		Method:  "GET",
+	return do(t, "GET", path, nil, out)
+}
+
+// do sends method to t.API+path, with body as JSON when non-nil, and decodes a
+// 2xx JSON response into out.
+func do(t tracker.Target, method, path string, body, out any) error {
+	req := connector.Request{
+		Method:  method,
 		URL:     t.API + path,
 		Headers: map[string]string{"Accept": "application/json"},
-	})
+	}
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		req.Headers["Content-Type"] = "application/json"
+		req.Body = string(b)
+	}
+	resp, err := send(req)
 	if err != nil {
 		return err
 	}
 	if resp.Status < 200 || resp.Status > 299 {
-		return fmt.Errorf("GET %s: status %d", path, resp.Status)
+		return fmt.Errorf("%s %s: status %d", method, path, resp.Status)
 	}
 	if err := json.Unmarshal(resp.Body, out); err != nil {
-		return fmt.Errorf("GET %s: decode: %w", path, err)
+		return fmt.Errorf("%s %s: decode: %w", method, path, err)
 	}
 	return nil
 }
@@ -140,6 +160,11 @@ func rfc3339(jiraTime string) string {
 // OR the label, never a resolved one even if it still carries a stale
 // dispatch label. Both selectors empty lists every open issue.
 func jql(project string, q tracker.Query) string {
+	return openJQL(project, q) + " order by created asc"
+}
+
+// openJQL is jql without its ORDER BY, which a count does not need.
+func openJQL(project string, q tracker.Query) string {
 	s := fmt.Sprintf("project = %q", project)
 	var sel []string
 	if q.Status != "" {
@@ -151,7 +176,7 @@ func jql(project string, q tracker.Query) string {
 	if len(sel) > 0 {
 		s += " AND (" + strings.Join(sel, " OR ") + ")"
 	}
-	return s + " AND statusCategory != Done order by created asc"
+	return s + " AND statusCategory != Done"
 }
 
 type searchPayload struct {
