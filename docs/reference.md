@@ -2566,25 +2566,30 @@ primitives (open, merge, compare, comment, branch lookup and delete, branch
 protection), declared as protocol 0.3.x, through eight further write-half
 routes, each pinned to `{repo}`: `POST` and `PUT /pulls`, `POST /issues`,
 `GET /compare`, `/git/matching-refs/heads`, `/branches` and `/rules/branches`,
-and `DELETE /git/refs/heads`. Its read Route table is four routes on
-`api.github.com`: `GET /repos/{repo}/issues` (the list, issue and
-`dependencies/blocked_by` reads), `GET /repos/{repo}/pulls` (branch lookup, one
-PR), `POST /graphql` (the check rollup) and `GET /repos/{repo}/actions/jobs`
-(a failing job's log, `forge.jobLog`, for the fix pass's `CI FAILURE` detail;
-issue #6893). The last sets `followRedirect`, because GitHub answers a log read
-with a 302 to a pre-signed blob URL on a host that varies; the host follows
-that one hop with no credential, and doctor shows the opt-in as
-`(follows redirect)` on the route. The subtree-only Route model (ADR
-0047) makes it the narrowest table, not an exact one: `/issues` also admits
-`GET /issues/comments/*`, `/issues/events` and `/issues/{n}/timeline`, and
-`/actions/jobs` every other GET under it, none of which a read uses; a Route
-restricts no body, so `POST /graphql` admits any GraphQL
-document, mutations included, and no Route can pin it to the repository: the
-Connector sends the rollup, repository-identity queries and the draft-flip and
-auto-merge mutations there (issues #6808, #6882). The write roots over-admit
-too: `POST /issues` also admits creating issues and posting labels, `POST
-/pulls` review and review-comment creation, and `PUT /pulls` update-branch. It skips
-pull requests in the REST issues list.
+and `DELETE /git/refs/heads`. The tracker write primitives (add and remove a
+label, post a comment, file an issue, list and create the repository's labels)
+ride `POST /issues` (label add, comment, issue filing) and `POST /graphql`
+(label removal, as `gh issue edit --remove-label` does: REST removes by
+`DELETE /issues/{n}/labels/{name}`, whose escaped `/` in a name such as
+`agent/ready` the host refuses), plus two more routes: `GET` and `POST /labels`.
+Its read Route table is four routes on `api.github.com`: `GET
+/repos/{repo}/issues` (the list, issue and `dependencies/blocked_by` reads),
+`GET /repos/{repo}/pulls` (branch lookup, one PR), `POST /graphql` (the check
+rollup) and `GET /repos/{repo}/actions/jobs` (a failing job's log,
+`forge.jobLog`, for the fix pass's `CI FAILURE` detail; issue #6893). The last
+sets `followRedirect`, because GitHub answers a log read with a 302 to a
+pre-signed blob URL on a host that varies; the host follows that one hop with
+no credential, and doctor shows the opt-in as `(follows redirect)` on the
+route. The subtree-only Route model (ADR 0047) makes it the narrowest table,
+not an exact one: `/issues` also admits `GET /issues/comments/*`,
+`/issues/events` and `/issues/{n}/timeline`, and `/actions/jobs` every other
+GET under it, none of which a read uses; a Route restricts no body, so `POST
+/graphql` admits any GraphQL document, mutations included, and no Route can pin
+it to the repository: the Connector sends the rollup, repository-identity
+queries, the draft-flip and auto-merge mutations, and the label-id query and
+removal mutation there (issues #6808, #6881, #6882). The write roots over-admit
+too: `POST /pulls` also admits review and review-comment creation, and `PUT
+/pulls` update-branch. It skips pull requests in the REST issues list.
 
 It does not advertise `tracker.comments`: REST reports no minimized state, and
 a Connector that advertises the capability attests that it reports each
@@ -2599,7 +2604,13 @@ every write stay native. The Connector is held to the tracker read contract
 writes a read-only tracker lacks) and the PR forge read contract
 (`forgetest.RunPRForgeReadContract`), which the backends `go test` check runs
 against `connectors/<backend>` when it exists, through
-`SPINDRIFT_BACKEND_CONNECTOR_WASM` and `SPINDRIFT_BACKEND_CONNECTOR_ROUTES`.
+`SPINDRIFT_BACKEND_CONNECTOR_WASM` and `SPINDRIFT_BACKEND_CONNECTOR_ROUTES`. Its
+tracker write primitives are held to the tracker contract
+(`forgetest.RunTrackerContract`), the host-posted-comment contract
+(`forgetest.RunHostPostedCommentContract`) and the issue-filer contract
+(`forgetest.RunIssueFilerContract`), which
+`cmd/launcher/internal/forge/github/connector_trackerwrites_test.go` runs
+against the compiled Connector behind the host.
 
 Its first production use is the sampled read shadow ([Shadow
 mode](#shadow-mode)): dogfood loads the Connector beside the native adapter and

@@ -6,18 +6,22 @@
 # check rollup over `POST /graphql`, and a failing job's log under
 # `/actions/jobs`. The forge write half adds the PR and branch primitives: open
 # and merge a PR, compare, the comment on a PR, branch lookup and delete, and
-# branch protection.
+# branch protection. The tracker write half adds the repository's label list and
+# create (`GET` and `POST /labels`); label add, comment and issue filing ride
+# the `POST /issues` root, and label removal rides `POST /graphql`.
 #
 # It is the narrowest table the subtree-only Route model can express, not an
 # exact one: `/issues` also admits GET `/issues/comments/*`, `/issues/events`
 # and `/issues/{n}/timeline`, which no read uses. `POST /graphql` is wider
 # still: a Route restricts neither body nor query, so it admits any GraphQL
 # document, mutations included, and no Route can pin it to the repository. The
-# Connector sends the rollup query, repository-identity queries and the
-# draft-flip and auto-merge mutations there (issues #6808, #6882); every REST
-# write is pinned to `{repo}`. The write roots over-admit too: `POST /issues`
-# also admits creating issues and posting labels, `POST /pulls` review and
-# review-comment creation, and `PUT /pulls` update-branch.
+# Connector sends the rollup query, repository-identity queries, the draft-flip
+# and auto-merge mutations, and the label-id query and removal mutation there
+# (issues #6808, #6881, #6882). Label removal cannot be a REST `DELETE`: the
+# host refuses the escaped `/` in a name such as `agent/ready`. Every REST
+# write is pinned to `{repo}`. The write roots over-admit too: `POST /pulls`
+# also admits review and review-comment creation, and `PUT /pulls`
+# update-branch.
 # `/actions/jobs` is a root too: the log read is `GET /actions/jobs/{id}/logs`,
 # but the root also admits every other GET under `/actions/jobs`, which
 # no read uses. Its Route follows one redirect hop (issue #6893): GitHub
@@ -86,5 +90,15 @@
     method = "GET";
     host = "api.github.com";
     path = "/repos/{repo}/rules/branches";
+  }
+  {
+    method = "GET";
+    host = "api.github.com";
+    path = "/repos/{repo}/labels";
+  }
+  {
+    method = "POST";
+    host = "api.github.com";
+    path = "/repos/{repo}/labels";
   }
 ]
