@@ -1,7 +1,7 @@
 {
   "inTree": {
     "configPath": "nuget.config",
-    "content": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<configuration>\n  <packageSources>\n    <add key=\"artifactory\" value=\"http://127.0.0.1:27182/artifactory-example-test/artifactory/api/nuget/v3/nuget-local/index.json\" />\n  </packageSources>\n  <packageSourceCredentials>\n    <artifactory>\n      <add key=\"Username\" value=\"synth\" />\n      <add key=\"ClearTextPassword\" value=\"not-a-secret\" />\n    </artifactory>\n  </packageSourceCredentials>\n</configuration>\n",
+    "content": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<configuration>\n  <packageSources>\n    <add key=\"artifactory\" value=\"http://127.0.0.1:27182/artifactory-example-test/artifactory/api/nuget/v3/nuget-local/index.json\" allowInsecureConnections=\"true\" />\n  </packageSources>\n  <packageSourceCredentials>\n  </packageSourceCredentials>\n</configuration>\n",
     "outcome": "applied"
   }
 }

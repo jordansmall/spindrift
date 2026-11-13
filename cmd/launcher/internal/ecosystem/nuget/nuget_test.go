@@ -167,3 +167,104 @@ func TestParseNuGetConfig_MalformedXML(t *testing.T) {
 		t.Error("parseNuGetConfig() error = nil, want a decode error")
 	}
 }
+
+func TestRewriteNuGetConfig(t *testing.T) {
+	const local = "http://127.0.0.1:27182/feed"
+	const routed = local + "/api/nuget/v3/index.json"
+	const nugetOrg = "https://api.nuget.org/v3/index.json"
+	wrap := func(sources, rest string) string {
+		return "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<configuration>\n  <packageSources>\n" +
+			sources + "  </packageSources>\n" + rest + "</configuration>\n"
+	}
+	cases := []struct {
+		name, in, want string
+	}{
+		{
+			name: "self-closing with a space keeps it",
+			in:   wrap(`    <add key="a" value="`+routed+`" />`+"\n", ""),
+			want: wrap(`    <add key="a" value="`+routed+`" allowInsecureConnections="true" />`+"\n", ""),
+		},
+		{
+			name: "self-closing without a space keeps that",
+			in:   wrap(`    <add key="a" value="`+routed+`"/>`+"\n", ""),
+			want: wrap(`    <add key="a" value="`+routed+`" allowInsecureConnections="true"/>`+"\n", ""),
+		},
+		{
+			name: "non-self-closing add",
+			in:   wrap(`    <add key="a" value="`+routed+`"></add>`+"\n", ""),
+			want: wrap(`    <add key="a" value="`+routed+`" allowInsecureConnections="true"></add>`+"\n", ""),
+		},
+		{
+			name: "an existing false is set to true",
+			in:   wrap(`    <add key="a" value="`+routed+`" allowInsecureConnections="false" protocolVersion="3" />`+"\n", ""),
+			want: wrap(`    <add key="a" value="`+routed+`" allowInsecureConnections="true" protocolVersion="3" />`+"\n", ""),
+		},
+		{
+			name: "an existing true is left byte-identical",
+			in:   wrap(`    <add key="a" value='`+routed+`' allowInsecureConnections = 'true' />`+"\n", ""),
+			want: wrap(`    <add key="a" value='`+routed+`' allowInsecureConnections = 'true' />`+"\n", ""),
+		},
+		{
+			name: "only the routed source is marked, beside nuget.org and clear",
+			in: wrap("    <clear />\n    <add key=\"a\" value=\""+routed+"\" />\n    <add key=\"nuget.org\" value=\""+nugetOrg+"\" />\n",
+				"  <packageSourceMapping>\n    <packageSource key=\"a\">\n      <package pattern=\"*\" />\n    </packageSource>\n  </packageSourceMapping>\n"),
+			want: wrap("    <clear />\n    <add key=\"a\" value=\""+routed+"\" allowInsecureConnections=\"true\" />\n    <add key=\"nuget.org\" value=\""+nugetOrg+"\" />\n",
+				"  <packageSourceMapping>\n    <packageSource key=\"a\">\n      <package pattern=\"*\" />\n    </packageSource>\n  </packageSourceMapping>\n"),
+		},
+		{
+			name: "a look-alike prefix is not routed",
+			in:   wrap(`    <add key="a" value="http://127.0.0.1:271820/feed/index.json" />`+"\n", ""),
+			want: wrap(`    <add key="a" value="http://127.0.0.1:271820/feed/index.json" />`+"\n", ""),
+		},
+		{
+			name: "credentials are dropped for the routed key only",
+			in: wrap("    <add key=\"a\" value=\""+routed+"\" />\n    <add key=\"b\" value=\"https://other.example.test/index.json\" />\n",
+				"  <packageSourceCredentials>\n    <a>\n      <add key=\"Username\" value=\"u\" />\n    </a>\n    <b>\n      <add key=\"Username\" value=\"v\" />\n    </b>\n  </packageSourceCredentials>\n"),
+			want: wrap("    <add key=\"a\" value=\""+routed+"\" allowInsecureConnections=\"true\" />\n    <add key=\"b\" value=\"https://other.example.test/index.json\" />\n",
+				"  <packageSourceCredentials>\n    <b>\n      <add key=\"Username\" value=\"v\" />\n    </b>\n  </packageSourceCredentials>\n"),
+		},
+		{
+			name: "an encoded, differently-cased element name matches its key",
+			in: wrap("    <add key=\"My Feed\" value=\""+routed+"\" />\n",
+				"  <packageSourceCredentials>\n    <my_x0020_FEED>\n      <add key=\"Username\" value=\"u\" />\n    </my_x0020_FEED>\n  </packageSourceCredentials>\n"),
+			want: wrap("    <add key=\"My Feed\" value=\""+routed+"\" allowInsecureConnections=\"true\" />\n",
+				"  <packageSourceCredentials>\n  </packageSourceCredentials>\n"),
+		},
+		{
+			name: "credentials declared before the sources are still dropped",
+			in:   "<configuration>\n  <packageSourceCredentials>\n    <a><add key=\"Username\" value=\"u\" /></a>\n  </packageSourceCredentials>\n  <packageSources>\n    <add key=\"a\" value=\"" + routed + "\" />\n  </packageSources>\n</configuration>\n",
+			want: "<configuration>\n  <packageSourceCredentials>\n  </packageSourceCredentials>\n  <packageSources>\n    <add key=\"a\" value=\"" + routed + "\" allowInsecureConnections=\"true\" />\n  </packageSources>\n</configuration>\n",
+		},
+		{
+			name: "CRLF line endings leave no stray line behind",
+			in: "<configuration>\r\n  <packageSources>\r\n    <add key=\"a\" value=\"" + routed + "\" />\r\n  </packageSources>\r\n" +
+				"  <packageSourceCredentials>\r\n    <a>\r\n      <add key=\"Username\" value=\"u\" />\r\n    </a>\r\n  </packageSourceCredentials>\r\n</configuration>\r\n",
+			want: "<configuration>\r\n  <packageSources>\r\n    <add key=\"a\" value=\"" + routed + "\" allowInsecureConnections=\"true\" />\r\n  </packageSources>\r\n" +
+				"  <packageSourceCredentials>\r\n  </packageSourceCredentials>\r\n</configuration>\r\n",
+		},
+		{
+			name: "nothing routed is byte-identical, credentials included",
+			in: wrap("    <add key=\"b\" value=\"https://other.example.test/index.json\" />\n",
+				"  <packageSourceCredentials>\n    <b>\n      <add key=\"Username\" value=\"v\" />\n    </b>\n  </packageSourceCredentials>\n"),
+			want: wrap("    <add key=\"b\" value=\"https://other.example.test/index.json\" />\n",
+				"  <packageSourceCredentials>\n    <b>\n      <add key=\"Username\" value=\"v\" />\n    </b>\n  </packageSourceCredentials>\n"),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := rewriteNuGetConfig(tc.in, []string{local})
+			if err != nil {
+				t.Fatalf("rewriteNuGetConfig: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got:\n%s\nwant:\n%s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRewriteNuGetConfig_MalformedXML(t *testing.T) {
+	if _, err := rewriteNuGetConfig("<configuration><packageSources>", []string{"http://127.0.0.1:1/x"}); err == nil {
+		t.Error("err = nil, want a decode error")
+	}
+}

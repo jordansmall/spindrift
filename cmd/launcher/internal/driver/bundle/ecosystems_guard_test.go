@@ -334,6 +334,17 @@ func TestEveryRegisteredStrategyPairsConfigPathsWithParser(t *testing.T) {
 	}
 }
 
+// InTreeRewrite is generic, but only nuget needs an edit host substitution
+// cannot express (issue #5963); a second setter must be a deliberate change
+// here, not a silent one.
+func TestOnlyNuGetSetsInTreeRewrite(t *testing.T) {
+	for _, s := range ecosystem.Registered() {
+		if s.Name != nuget.Strategy.Name && s.InTreeRewrite != nil {
+			t.Errorf("Strategy %q sets InTreeRewrite; only nuget may", s.Name)
+		}
+	}
+}
+
 func TestUnregisteredStrategiesClassifiesPlantedInput(t *testing.T) {
 	eco := t.TempDir()
 	testutil.WriteFixture(t, eco, "rows.go", `package ecosystem
