@@ -159,3 +159,11 @@ is plain files, so it survives the Dashboard moving to its own repo: it
 becomes a published artifact rather than shared code.
 Generating event rows into both modules was considered and rejected: it
 pins names but not fields, and it binds the Dashboard to this repo's regen.
+
+## Amendment (ADR 0074): the contract generalises to every Published surface
+
+Decided, not yet landed. ADR 0074 makes this ADR's `schema`/`v` bump rule
+and its Daemon-written fixture the rule for every Published surface, and
+lists the status file and the Events file in VERSIONING.md. The fixture
+moves from `dashboard/testdata/contract/` to the top-level `contracts/`,
+and the Dashboard starts honouring `v` as it already honours `schema`.

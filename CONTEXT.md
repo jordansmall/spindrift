@@ -1223,6 +1223,14 @@ publishes — never the Daemon's internals. The name is the role, not the
 rendering: a web page and a terminal view are both the Dashboard.
 _Avoid_: monitor, console (that drives), UI, status page.
 
+**Published surface**:
+Data spindrift writes for readers outside its own process tree and promises
+to keep readable: the status file, the [[Events file]], `daemon status`, and
+`stats --json` (ADR 0074). Each carries a schema integer and is pinned by a
+fixture its producer writes; anything else spindrift writes is internal,
+however readable.
+_Avoid_: API (that names code), output, artifact, public data.
+
 **Section**:
 A named slice of the session's issues the Console shows one at a time — Backlog,
 Running, Held, Settled, or Failed. The Backlog section is the pick source; the
