@@ -330,18 +330,17 @@ _Avoid_: ecosystem fixtures, registry test data.
 **Route discovery**:
 How a routes file gets written without hand-transcription (ADR 0045):
 `spindrift registry discover` parses the Target repo's own committed registry
-config — for npm, yarn, and pnpm the same files the in-tree rewrite
-substitutes; for cargo, `.cargo/config.toml` left exactly as the repo wrote
-it, since cargo binds by source replacement rather than a rewrite; for nuget,
-the first of `nuget.config`, `NuGet.config` and `NuGet.Config`, read only,
-since nuget has no binding yet — to extract hosts and base URLs (plus, for
-cargo, registry names), matches credentials in host-keyed stores, searched in
-this documented order (netrc, npmrc, cargo credentials.toml,
-gradle.properties), probes the auth scheme, and writes Registry routes.
-Setup-time only, by the operator: discovery is never fed from inside the Box,
-because Box-influenced route creation would let an Agent steer a real
-credential toward any host the operator's stores hold. `doctor` re-runs it in
-check mode and reports drift; the in-Box scan may *warn* that a host is
+config — for npm, yarn, pnpm and nuget the same files the in-tree rewrite
+substitutes (nuget's the first of `nuget.config`, `NuGet.config` and
+`NuGet.Config`); for cargo, `.cargo/config.toml` left exactly as the repo wrote
+it, since cargo binds by source replacement rather than a rewrite — to extract
+hosts and base URLs (plus, for cargo, registry names), matches credentials in
+host-keyed stores, searched in this documented order (netrc, npmrc, cargo
+credentials.toml, gradle.properties), probes the auth scheme, and writes
+Registry routes. Setup-time only, by the operator: discovery is never fed from
+inside the Box, because Box-influenced route creation would let an Agent steer
+a real credential toward any host the operator's stores hold. `doctor` re-runs
+it in check mode and reports drift; the in-Box scan may *warn* that a host is
 uncovered, never add a route.
 _Avoid_: auto-configuration, zero-config, runtime discovery.
 
