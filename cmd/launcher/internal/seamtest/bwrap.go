@@ -54,6 +54,11 @@ func bwrapFake(args []string, stdout, stderr io.Writer) int {
 	if boxRuns < len(cfg.Runs) {
 		run = cfg.Runs[boxRuns]
 	}
-	io.WriteString(stdout, boxOutput(run, args))
+	out, err := boxOutput(run, args)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	io.WriteString(stdout, out)
 	return run.Exit
 }

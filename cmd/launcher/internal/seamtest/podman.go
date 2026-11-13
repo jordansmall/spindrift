@@ -34,6 +34,11 @@ type PodmanRun struct {
 	// <base64>" line, the log-carrier grammar. Without RUN_NONCE in the run
 	// argv they are omitted: the launcher would reject them as unverified.
 	Intents []string `json:"intents"`
+	// Files maps a destination path to a prebuilt source file the run copies
+	// there, standing in for what a Box writes into its mounted outbox (a
+	// read-only Box's code-out bundle). The launcher empties the outbox before
+	// the run, so a test cannot pre-place the file.
+	Files map[string]string `json:"files"`
 }
 
 // podmanMain serves both podman and docker; the invoked name picks the config.
@@ -85,14 +90,25 @@ func podmanFake(tool string, args []string, stdout, stderr io.Writer) int {
 		if n < len(cfg.Runs) {
 			run = cfg.Runs[n]
 		}
-		io.WriteString(stdout, boxOutput(run, args))
+		out, err := boxOutput(run, args)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		io.WriteString(stdout, out)
 		return run.Exit
 	}
 	return 0
 }
 
 // boxOutput is what a scripted Box run prints: its intents, then its outcome.
-func boxOutput(run PodmanRun, args []string) string {
+// It also materializes run.Files, the run's other observable effect.
+func boxOutput(run PodmanRun, args []string) (string, error) {
+	for dst, src := range run.Files {
+		if err := copyFile(src, dst); err != nil {
+			return "", fmt.Errorf("box fake: copy %s to %s: %w", src, dst, err)
+		}
+	}
 	var b strings.Builder
 	if nonce, ok := runNonce(args); ok {
 		for _, raw := range run.Intents {
@@ -100,7 +116,7 @@ func boxOutput(run PodmanRun, args []string) string {
 		}
 	}
 	b.WriteString(withNonce(run.Outcome, args))
-	return b.String()
+	return b.String(), nil
 }
 
 func withNonce(outcome string, args []string) string {
@@ -127,4 +143,16 @@ func runNonce(args []string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// copyFile copies src to dst, creating the parent directory.
+func copyFile(src, dst string) error {
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(dst, b, 0o644)
 }
