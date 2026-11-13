@@ -61,6 +61,8 @@ let
   # backend, so a backend edit leaves their drvPaths unchanged (issue #5738).
   backendBundleDirs = [
     "backendkit"
+    "connectorforge"
+    "connectortracker"
     "dedupmarker"
     "flock"
     "forge/bundlerelay"
@@ -73,9 +75,12 @@ let
     "forge/rest"
     "gitexec"
     "gitremote"
+    "hostpaths"
     "seambundle"
   ];
-  backendBundleFiles = lib.fileset.unions (
+  # connectorforgetest is a test kit importing forge/forgetest, which the Box
+  # does not carry; `go mod vendor` would fail on it.
+  backendBundleFiles = lib.fileset.difference (lib.fileset.unions (
     [ ../cmd/launcher/internal/driver/bundle/backends.go ]
     ++ map (
       d:
@@ -83,7 +88,7 @@ let
         ../cmd/launcher/internal + "/${d}"
       )
     ) backendBundleDirs
-  );
+  )) ../cmd/launcher/internal/connectorforge/connectorforgetest;
 
   # In-box Driver runner (issue #626): runs one Driver invocation, direct or
   # inside the Project devShell, tees the stream to a log path, and filters

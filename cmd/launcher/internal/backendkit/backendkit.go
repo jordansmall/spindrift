@@ -246,6 +246,13 @@ func Strategies() []Strategy {
 	return append([]Strategy(nil), registry...)
 }
 
+// ErrUnsupported marks a probe error that names a capability the backend's
+// Connector does not offer, as distinct from a check that ran and failed.
+// Doctor reports such a check as unsupported and never counts it a failure.
+// It lives here, not in doctor or runner, so a backend adapter the Box links
+// can wrap it without pulling either into the Box binary.
+var ErrUnsupported = errors.New("check unsupported: the backend's connector does not offer the capability")
+
 // ErrRepoSlugRequired is the blank-REPO_SLUG failure RequireRepoSlug wraps.
 var ErrRepoSlugRequired = errors.New("set REPO_SLUG")
 

@@ -10,11 +10,11 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/runner"
 )
 
 // readsAuditLog records the requests of the shared Connector the host-side
@@ -205,7 +205,7 @@ func (e *execClient) listLabelsViaConnector(row backendrows.Row) (labels []strin
 // anything but an auth failure, a rate limit or an unsupported Connector means
 // the repository is unreachable.
 func classifyProbeErr(err error, repoSlug string) error {
-	if errors.Is(err, forge.ErrAuthFailure) || errors.Is(err, forge.ErrRateLimit) || errors.Is(err, runner.ErrUnsupported) {
+	if errors.Is(err, forge.ErrAuthFailure) || errors.Is(err, forge.ErrRateLimit) || errors.Is(err, backendkit.ErrUnsupported) {
 		return err
 	}
 	return fmt.Errorf("%w: probe of %s: %w", forge.ErrRepoNotFound, repoSlug, err)
@@ -213,12 +213,12 @@ func classifyProbeErr(err error, repoSlug string) error {
 
 // unsupportedWithout maps an err matching any of missing, the sentinels of a
 // Connector that does not declare the capability a read needs, to
-// runner.ErrUnsupported, and passes any other error through: a refused read is
+// backendkit.ErrUnsupported, and passes any other error through: a refused read is
 // a failed one, not an unsupported one.
 func unsupportedWithout(err error, verb string, missing ...error) error {
 	for _, m := range missing {
 		if errors.Is(err, m) {
-			return fmt.Errorf("the %s connector cannot %s: %w: %w", backend.GitHub.Name, verb, err, runner.ErrUnsupported)
+			return fmt.Errorf("the %s connector cannot %s: %w: %w", backend.GitHub.Name, verb, err, backendkit.ErrUnsupported)
 		}
 	}
 	return err

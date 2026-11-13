@@ -9,10 +9,10 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/runner"
 )
 
 // routedHarness configures a github backend row at the scripted backend and
@@ -97,7 +97,7 @@ func TestExecClient_ConfiguredRowReadsGoThroughTheConnector(t *testing.T) {
 			t.Errorf("BranchProtected(%q) = %v, %v; want %v", tc.branch, got, err, tc.want)
 		}
 	}
-	if _, err := c.BranchProtected("locked"); err == nil || errors.Is(err, runner.ErrUnsupported) {
+	if _, err := c.BranchProtected("locked"); err == nil || errors.Is(err, backendkit.ErrUnsupported) {
 		t.Errorf("BranchProtected of an unreadable branch = %v, want a failure that is not unsupported", err)
 	}
 
@@ -166,8 +166,8 @@ func TestExecClient_ConfiguredRowWithoutTheCapabilityIsUnsupported(t *testing.T)
 
 			err := tc.read(c)
 
-			if !errors.Is(err, runner.ErrUnsupported) {
-				t.Errorf("a Connector without %s: err = %v, want runner.ErrUnsupported", tc.capName, err)
+			if !errors.Is(err, backendkit.ErrUnsupported) {
+				t.Errorf("a Connector without %s: err = %v, want backendkit.ErrUnsupported", tc.capName, err)
 			}
 			if n := calls(); n != 0 {
 				t.Errorf("the read ran gh %d times", n)
@@ -192,7 +192,7 @@ func TestExecClient_ConfiguredRowLoadsTheConnectorOnce(t *testing.T) {
 		return old(ctx, row, o)
 	}
 
-	if _, err := NewExecClient(connectorRepo, testLabels).ListLabels(); err == nil || errors.Is(err, runner.ErrUnsupported) {
+	if _, err := NewExecClient(connectorRepo, testLabels).ListLabels(); err == nil || errors.Is(err, backendkit.ErrUnsupported) {
 		t.Fatalf("ListLabels with a failing load = %v, want the load error", err)
 	}
 	for range 2 {
@@ -214,11 +214,11 @@ func TestExecClient_ConfiguredRowLoadsTheConnectorOnce(t *testing.T) {
 
 func TestUnsupportedWithout_MapsOnlyAMissingCapability(t *testing.T) {
 	boom, missing := errors.New("boom"), errors.New("missing")
-	if err := unsupportedWithout(boom, "read", missing); !errors.Is(err, boom) || errors.Is(err, runner.ErrUnsupported) {
+	if err := unsupportedWithout(boom, "read", missing); !errors.Is(err, boom) || errors.Is(err, backendkit.ErrUnsupported) {
 		t.Errorf("a failed read = %v, want it passed through, not unsupported", err)
 	}
-	if err := unsupportedWithout(fmt.Errorf("wrapped: %w", missing), "read", boom, missing); !errors.Is(err, runner.ErrUnsupported) {
-		t.Errorf("a Connector lacking the capability = %v, want runner.ErrUnsupported", err)
+	if err := unsupportedWithout(fmt.Errorf("wrapped: %w", missing), "read", boom, missing); !errors.Is(err, backendkit.ErrUnsupported) {
+		t.Errorf("a Connector lacking the capability = %v, want backendkit.ErrUnsupported", err)
 	}
 	if err := unsupportedWithout(nil, "read", missing); err != nil {
 		t.Errorf("nil = %v, want nil", err)

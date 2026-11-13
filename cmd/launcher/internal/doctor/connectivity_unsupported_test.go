@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/runner"
 )
 
 // unsupportedProbeTracker is a Fake whose Probe names a capability its
@@ -16,7 +16,7 @@ import (
 type unsupportedProbeTracker struct{ *forge.Fake }
 
 func (unsupportedProbeTracker) Probe() (string, error) {
-	return "", fmt.Errorf("the github connector does not declare forge.probe: %w", runner.ErrUnsupported)
+	return "", fmt.Errorf("the github connector does not declare forge.probe: %w", backendkit.ErrUnsupported)
 }
 
 // A connectivity row whose Connector lacks the capability reports as
@@ -38,7 +38,7 @@ func TestRun_ConnectivityProbeUnsupportedDoesNotFail(t *testing.T) {
 type unsupportedProtectionForge struct{ *forge.Fake }
 
 func (unsupportedProtectionForge) BranchProtected(string) (bool, error) {
-	return false, fmt.Errorf("the github connector cannot read branch protection: %w", runner.ErrUnsupported)
+	return false, fmt.Errorf("the github connector cannot read branch protection: %w", backendkit.ErrUnsupported)
 }
 
 // A branch-protection row whose Connector lacks the capability reports as
@@ -47,8 +47,8 @@ func TestBranchProtectionCheck_UnsupportedIsNotFailed(t *testing.T) {
 	f := forge.NewFake()
 	caps := forge.Capabilities{BranchProtectionForge: unsupportedProtectionForge{f}}
 	res := RunChecks([]Check{BranchProtectionCheck(caps, "auto", "main")})[0]
-	if !errors.Is(res.Err, runner.ErrUnsupported) || errors.Is(res.Err, ErrDegraded) {
-		t.Fatalf("Err = %v, want runner.ErrUnsupported alone", res.Err)
+	if !errors.Is(res.Err, backendkit.ErrUnsupported) || errors.Is(res.Err, ErrDegraded) {
+		t.Fatalf("Err = %v, want backendkit.ErrUnsupported alone", res.Err)
 	}
 	if Blocking(res) {
 		t.Error("an unsupported branch-protection probe blocks the run")
@@ -66,7 +66,7 @@ func TestBranchProtectionCheck_UnsupportedIsNotFailed(t *testing.T) {
 type unsupportedLabelsTracker struct{ *forge.Fake }
 
 func (unsupportedLabelsTracker) ListLabels() ([]string, error) {
-	return nil, fmt.Errorf("the github connector cannot list labels: %w", runner.ErrUnsupported)
+	return nil, fmt.Errorf("the github connector cannot list labels: %w", backendkit.ErrUnsupported)
 }
 
 // A label check whose Connector lacks the capability reports as unsupported

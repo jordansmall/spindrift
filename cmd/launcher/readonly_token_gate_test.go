@@ -12,7 +12,6 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
-	"spindrift.dev/launcher/internal/runner"
 )
 
 // TestCheckReadOnlyTokenGate pins checkReadOnlyTokenGate's case matrix for
@@ -435,14 +434,14 @@ func TestCheckReadOnlyTokenGate_ProductionGitHubHookWarnsOnFineGrainedPAT(t *tes
 
 // A backend whose Connector cannot introspect a token leaves read-only
 // unverified, with the same trust notice as a non-introspectable token. The
-// error wraps runner.ErrUnsupported alone: it is no connectivity failure.
+// error wraps backendkit.ErrUnsupported alone: it is no connectivity failure.
 func TestCheckReadOnlyTokenGate_UnsupportedIntrospectionIsUnverifiedNotAConnectivityFailure(t *testing.T) {
 	c := minimalValidConfig()
 	c.BoxForgeAndIssueAccess = "read-only"
 	c.GhToken = "launcher-token"
 	t.Setenv("BOX_GH_TOKEN", "box-token")
 	introspect := func(string, string) (backendkit.TokenIntrospection, error) {
-		return backendkit.TokenIntrospection{}, fmt.Errorf("no github connector is configured: %w", runner.ErrUnsupported)
+		return backendkit.TokenIntrospection{}, fmt.Errorf("no github connector is configured: %w", backendkit.ErrUnsupported)
 	}
 
 	var buf bytes.Buffer
@@ -451,8 +450,8 @@ func TestCheckReadOnlyTokenGate_UnsupportedIntrospectionIsUnverifiedNotAConnecti
 	if verified {
 		t.Error("verified = true, want false")
 	}
-	if !errors.Is(err, runner.ErrUnsupported) {
-		t.Fatalf("err = %v, want it to wrap runner.ErrUnsupported", err)
+	if !errors.Is(err, backendkit.ErrUnsupported) {
+		t.Fatalf("err = %v, want it to wrap backendkit.ErrUnsupported", err)
 	}
 	if errors.Is(err, doctor.ErrConnectivity) || errors.Is(err, errReadOnlyGateMisconfigured) {
 		t.Errorf("err = %v, must be neither a connectivity nor a misconfiguration failure", err)
@@ -468,7 +467,7 @@ func TestWalkGateRegistry_UnsupportedGateReportsAndDoesNotBlock(t *testing.T) {
 	var ranAfter bool
 	registry := []launchGate{
 		{Name: "read-only-token-github", Network: true, Check: func(config, io.Writer) error {
-			return fmt.Errorf("introspecting BOX_GH_TOKEN: no github connector is configured: %w", runner.ErrUnsupported)
+			return fmt.Errorf("introspecting BOX_GH_TOKEN: no github connector is configured: %w", backendkit.ErrUnsupported)
 		}},
 		{Name: "after", Network: true, Check: func(config, io.Writer) error { ranAfter = true; return nil }},
 	}
@@ -495,7 +494,7 @@ func TestWalkGateRegistry_EnforceRefusesUnsupportedGate(t *testing.T) {
 	var ranAfter bool
 	registry := []launchGate{
 		{Name: "read-only-token-github", Network: true, UnsupportedRemedy: "pin a Connector that serves forge.tokenGrant", Check: func(config, io.Writer) error {
-			return fmt.Errorf("introspecting BOX_GH_TOKEN: no github connector is configured: %w", runner.ErrUnsupported)
+			return fmt.Errorf("introspecting BOX_GH_TOKEN: no github connector is configured: %w", backendkit.ErrUnsupported)
 		}},
 		{Name: "after", Network: true, Check: func(config, io.Writer) error { ranAfter = true; return nil }},
 	}
@@ -510,7 +509,7 @@ func TestWalkGateRegistry_EnforceRefusesUnsupportedGate(t *testing.T) {
 			t.Errorf("err = %q, want it to contain %q", err, want)
 		}
 	}
-	if errors.Is(err, runner.ErrUnsupported) {
+	if errors.Is(err, backendkit.ErrUnsupported) {
 		t.Errorf("err = %v, must not wrap ErrUnsupported: Blocking would treat it as non-blocking", err)
 	}
 	if ranAfter {
@@ -522,7 +521,7 @@ func TestWalkGateRegistry_EnforceRefusesUnsupportedGate(t *testing.T) {
 // remedy a Connector without forge.tokenGrant needs.
 func TestGateRegistry_EnforceRefusesGithubWithoutTokenGrant(t *testing.T) {
 	row := rowWithIntrospector(t, "github", func(string, string) (backendkit.TokenIntrospection, error) {
-		return backendkit.TokenIntrospection{}, fmt.Errorf("the github connector cannot introspect the token: %w", runner.ErrUnsupported)
+		return backendkit.TokenIntrospection{}, fmt.Errorf("the github connector cannot introspect the token: %w", backendkit.ErrUnsupported)
 	})
 	c := minimalValidConfig()
 	c.BoxForgeAndIssueAccess = "read-only"

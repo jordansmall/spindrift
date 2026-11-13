@@ -8,7 +8,6 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
-	"spindrift.dev/launcher/internal/runner"
 )
 
 // launchGate is one entry in the ordered gate registry (issue #2942).
@@ -27,7 +26,7 @@ type launchGate struct {
 	// probe is moot.
 	Network bool
 	// UnsupportedRemedy names how to make an unverifiable gate verifiable. A
-	// gate whose Check wraps runner.ErrUnsupported is reported as unsupported
+	// gate whose Check wraps backendkit.ErrUnsupported is reported as unsupported
 	// by doctor but refuses the launch under walkEnforce: a security gate that
 	// cannot run must not fail open.
 	UnsupportedRemedy string
@@ -136,7 +135,7 @@ func walkGateRegistry(registry []launchGate, c config, checkW io.Writer, rep *do
 			continue
 		}
 		err := g.Check(c, checkW)
-		if errors.Is(err, runner.ErrUnsupported) && mode == walkEnforce {
+		if errors.Is(err, backendkit.ErrUnsupported) && mode == walkEnforce {
 			// Fail closed. The new error deliberately does not wrap
 			// ErrUnsupported, which Blocking classifications treat as
 			// non-blocking.
@@ -144,7 +143,7 @@ func walkGateRegistry(registry []launchGate, c config, checkW io.Writer, rep *do
 			rep.Finding(doctor.Required, "%s: %s", g.Name, err)
 			return err
 		}
-		if errors.Is(err, runner.ErrUnsupported) {
+		if errors.Is(err, backendkit.ErrUnsupported) {
 			// Report mode: no failure; the gate itself already warned that it
 			// could not verify.
 			rep.Unsupported("%s (%s)", g.Name, doctor.UnsupportedReason(err))

@@ -280,6 +280,7 @@ let
       "gitremote"
       "golden"
       "hostop"
+      "hostpaths"
       "inputdoc"
       "landdelta"
       "ledger"
@@ -359,6 +360,7 @@ let
     map (p: internalDir + "/${p}") [
       "agentpaths"
       "backend"
+      "backendkit"
       "chore"
       "connectorhost"
       "connlimit"
