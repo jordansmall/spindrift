@@ -2,7 +2,8 @@
 // reads sent through the host's http_request Host call, which attaches the
 // credential. The native jira adapter stays authoritative; every write stays
 // in core. The Connector returns raw fields only (state, close time, the
-// entity-property markers, link keys), and core makes every policy decision.
+// entity-property markers, link keys, the doctor and daemon checks' raw data),
+// and core makes every policy decision.
 package main
 
 import "spindrift.dev/sdk/tracker"
@@ -17,6 +18,12 @@ func init() {
 		Comments:   comments,
 		NativeDeps: nativeDeps,
 		Blocks:     blocks,
+
+		Probe:         probe,
+		Statuses:      statuses,
+		CreateMeta:    createMeta,
+		Count:         count,
+		CountInterval: countInterval,
 	})
 }
 
