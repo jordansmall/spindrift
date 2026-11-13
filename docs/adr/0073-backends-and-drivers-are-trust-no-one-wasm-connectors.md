@@ -616,3 +616,17 @@ label-only. The Connector answers only whether a move happened, was unavailable
 or was unmapped. The production wiring waits for the #6753 cut-over: the native
 adapter stays authoritative until then, and `readshadow.go` still builds the
 Connector tracker with dispatch labels alone, no status lifecycle.
+
+## Amendment (issue #6855): host-posted comments and findings go through the Connector
+
+A tracker Connector may also declare `tracker.comment` and `tracker.fileIssue`,
+and core then resolves its host-posted commenter and issue filer from the
+handshake, so host mediation (ADR 0072) keeps its shape. Core sends each in
+canonical form: the first research marker line in a comment's body becomes a
+`research` flag, and a finding's dedup marker is split off the body and sent
+beside it, with the issue type core files as. The jira Connector converts the
+Markdown to wiki markup with a copy of the native converter, stores the
+research flag as the `spindrift-research` comment property and the dedup
+marker as the `spindrift.dedup` issue property, and returns the filed issue's
+browse URL. Both writes go through POST `/rest/api/2/issue`, already in its
+Route table.
