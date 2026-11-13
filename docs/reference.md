@@ -1648,8 +1648,8 @@ or a backend adapter other than `git` and `local` (which core keeps), which
 is what lets the core `launcher-go-test` check build from a source holding
 no Driver and no github, forgejo or jira adapter (ADR 0066 decision 8, ADR
 0068 decision 7). A library test that needs a tracker or Code Forge uses
-`forge.NewFake`, whose reads and forge writes cross the fixture network
-Connector (tracker writes stay native until #6753) and so need
+`forge.NewFake`, whose reads and writes cross the fixture network
+Connector (RelayBundle excepted) and so need
 the same `SPINDRIFT_CONNECTOR_FIXTURES_DIR` as `seamtest`. The fields are the
 contract:
 
