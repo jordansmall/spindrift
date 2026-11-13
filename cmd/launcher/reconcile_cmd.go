@@ -60,7 +60,7 @@ func reconcileIssues(c config, it forge.IssueTracker, cf forge.CodeForge, lp rec
 			fmt.Fprintf(w, "reconcile: flagged %d issue(s) abandoned before error: %s\n", len(res.Abandoned), strings.Join(res.Abandoned, ", "))
 		}
 		if len(res.Reset) > 0 {
-			fmt.Fprintf(w, "reconcile: reset %d issue(s) before error: %s\n", len(res.Reset), strings.Join(res.Reset, ", "))
+			fmt.Fprintf(w, "reconcile: reset %d issue(s) despite errors: %s\n", len(res.Reset), strings.Join(res.Reset, ", "))
 		}
 		return err
 	}

@@ -37,10 +37,13 @@ type IssueTrackerFake struct {
 
 	TransitionStateCalls []TransitionStateCall
 	TransitionStateErr   error
-	CompleteVerdictCalls []CompleteVerdictCall
-	CompleteVerdictErr   error
-	CommentCalls         []CommentCall
-	CommentErr           error
+	// TransitionStateErrByNum, keyed by issue number, fails TransitionState for
+	// that issue alone, ahead of TransitionStateErr.
+	TransitionStateErrByNum map[string]error
+	CompleteVerdictCalls    []CompleteVerdictCall
+	CompleteVerdictErr      error
+	CommentCalls            []CommentCall
+	CommentErr              error
 
 	ListIssuesErr error
 	// ListIssuesCalls records each call's state argument so a test can assert
@@ -303,6 +306,9 @@ func (tf *IssueTrackerFake) TransitionState(num string, from, to DispatchState) 
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
 	tf.TransitionStateCalls = append(tf.TransitionStateCalls, TransitionStateCall{num, from, to})
+	if err := tf.TransitionStateErrByNum[num]; err != nil {
+		return err
+	}
 	if tf.TransitionStateErr != nil {
 		return tf.TransitionStateErr
 	}
