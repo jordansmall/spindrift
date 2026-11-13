@@ -16,8 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"spindrift.dev/launcher/internal/backend"
-	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/bundlerelay"
 	"spindrift.dev/launcher/internal/forge/gitplumbing"
@@ -81,6 +79,9 @@ func (e *execClient) BranchExists(branch string) (bool, error) {
 func (e *execClient) BranchProtected(branch string) (bool, error) {
 	if branch == "" {
 		return false, fmt.Errorf("branch must not be empty")
+	}
+	if row, ok := routedRow(); ok {
+		return e.branchProtectedViaConnector(row, branch)
 	}
 	var stderr bytes.Buffer
 	cmd := exec.Command("gh", "api",
@@ -398,6 +399,9 @@ func (e *execClient) classifyMergeFailure(url string, mergeErr error, stderr str
 
 // CanAutoMerge reports whether the repo allows GitHub's native auto-merge.
 func (e *execClient) CanAutoMerge() (bool, error) {
+	if row, ok := routedRow(); ok {
+		return e.canAutoMergeViaConnector(row)
+	}
 	parts := strings.SplitN(e.repo, "/", 2)
 	if len(parts) != 2 {
 		return false, fmt.Errorf("invalid repo slug: %q", e.repo)
@@ -463,11 +467,8 @@ func runGHReadyToggle(prURL string, args ...string) error {
 // the other two, so a caller checking those first does not misreport a
 // throttled operator's real cause.
 func (e *execClient) Probe() (string, error) {
-	// Backend rows are opt-in: without a github row the host's gh answers.
-	if row, ok := backendrows.Lookup(backend.GitHub.Name); ok {
-		audit, closeAudit := openAudit(probeAuditLog)
-		defer closeAudit()
-		return probeViaConnector(row, backendrows.Options{Audit: audit, Client: connectorClient}, e.repo)
+	if row, ok := routedRow(); ok {
+		return e.probeViaConnector(row)
 	}
 	if _, err := exec.Command("gh", "auth", "status").Output(); err != nil {
 		wrapped := ghCommandErr("gh auth status", err)
@@ -495,6 +496,9 @@ func (e *execClient) Probe() (string, error) {
 // ListLabels returns the names of all labels defined in the repository.
 // --paginate is load-bearing: one page holds at most demandPageSize labels.
 func (e *execClient) ListLabels() ([]string, error) {
+	if row, ok := routedRow(); ok {
+		return e.listLabelsViaConnector(row)
+	}
 	out, err := exec.Command("gh", "api",
 		fmt.Sprintf("repos/%s/labels?per_page=%d", e.repo, demandPageSize),
 		"--paginate",

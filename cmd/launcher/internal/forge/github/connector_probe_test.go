@@ -9,9 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/runner"
 )
 
 // probeBackend answers the Connector's repository-identity query (POST
@@ -71,7 +69,7 @@ func TestExecClientProbe_ConfiguredRowGoesThroughTheConnector(t *testing.T) {
 			useGithubRowAt(t, b.Listener.Addr().String())
 			useConnectorClient(t, b)
 			t.Setenv(tokenCredentialEnv, "ghp_host")
-			calls := noGH(t)
+			calls := countGH(t)
 
 			slug, err := NewExecClient(connectorRepo, testLabels).Probe()
 
@@ -128,18 +126,5 @@ func TestExecClientProbe_NoRowUsesGh(t *testing.T) {
 	}
 	if m, _ := filepath.Glob(filepath.Join(dir, "call-*.txt")); len(m) != 2 {
 		t.Errorf("Probe ran gh %d times, want 2 (auth status, repo view)", len(m))
-	}
-}
-
-// A Connector that does not declare forge.probe cannot probe: the row is
-// unsupported, not unreachable.
-func TestProbeViaConnector_WithoutTheCapabilityIsUnsupported(t *testing.T) {
-	err := unsupportedWithoutProbe(connectorforge.ErrNoProbe)
-	if !errors.Is(err, runner.ErrUnsupported) {
-		t.Errorf("a Connector without forge.probe = %v, want runner.ErrUnsupported", err)
-	}
-	boom := errors.New("boom")
-	if err := unsupportedWithoutProbe(boom); !errors.Is(err, boom) || errors.Is(err, runner.ErrUnsupported) {
-		t.Errorf("a failed probe = %v, want it passed through", err)
 	}
 }

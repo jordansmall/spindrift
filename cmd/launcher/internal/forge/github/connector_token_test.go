@@ -12,7 +12,6 @@ import (
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
-	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -24,10 +23,19 @@ func useGithubRow(t *testing.T, b *tokenBackend) {
 }
 
 // useGithubRowAt is useGithubRow for a backend at host.
-func useGithubRowAt(t *testing.T, host string) {
+func useGithubRowAt(t *testing.T, host string) { applyGithubRow(t, host, func(*backendrows.Row) {}) }
+
+// useGithubRowShadow is useGithubRowAt with the row in shadow mode.
+func useGithubRowShadow(t *testing.T, host string) {
+	applyGithubRow(t, host, func(r *backendrows.Row) { r.Shadow, r.ShadowEvery = true, 1 })
+}
+
+func applyGithubRow(t *testing.T, host string, adjust func(*backendrows.Row)) {
 	t.Helper()
 	path, routes := githubConnectorRoutes(t, host, connectorRepo)
-	doc, err := json.Marshal([]backendrows.Row{{Name: "github", Module: path, Routes: routes, CredentialEnv: tokenCredentialEnv}})
+	row := backendrows.Row{Name: "github", Module: path, Routes: routes, CredentialEnv: tokenCredentialEnv}
+	adjust(&row)
+	doc, err := json.Marshal([]backendrows.Row{row})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +53,7 @@ func TestIntrospectViaConnector_ReportsTheGrantAndAuditsTheRequests(t *testing.T
 	b := newTokenBackend(t, "ghp_abc")
 	b.scopes = &scopes
 	useGithubRow(t, b)
-	calls := noGH(t)
+	calls := countGH(t)
 	var audit bytes.Buffer
 
 	got, err := introspectViaConnector(githubRow(t), backendrows.Options{Audit: &audit, Client: b.Client()}, "ghp_abc", connectorRepo)
@@ -79,19 +87,6 @@ func TestIntrospectViaConnector_IgnoresTheHostsCredential(t *testing.T) {
 		if a != "Bearer ghp_abc" {
 			t.Errorf("backend saw Authorization %q, want the token under audit", a)
 		}
-	}
-}
-
-func TestUnsupportedWithoutTokenGrant_MapsOnlyAMissingCapability(t *testing.T) {
-	boom := errors.New("boom")
-	if err := unsupportedWithoutTokenGrant(boom); !errors.Is(err, boom) || errors.Is(err, runner.ErrUnsupported) {
-		t.Errorf("a failed introspection = %v, want it passed through, not unsupported", err)
-	}
-	if err := unsupportedWithoutTokenGrant(connectorforge.ErrNoTokenGrant); !errors.Is(err, runner.ErrUnsupported) {
-		t.Errorf("a Connector without forge.tokenGrant = %v, want runner.ErrUnsupported", err)
-	}
-	if err := unsupportedWithoutTokenGrant(nil); err != nil {
-		t.Errorf("nil = %v, want nil", err)
 	}
 }
 
@@ -169,4 +164,24 @@ func ghTokenStub(t *testing.T, userStatus int, scopes *string, repoBody string) 
 "api repos/`+connectorRepo+`")
 	printf '%s' '`+repoBody+`' ;;
 esac`)
+}
+
+// A shadow github row never routes the token gate: gh stays authoritative, and
+// the shadow compares gh against the Connector.
+func TestIntrospectToken_ShadowRowRunsNative(t *testing.T) {
+	b := newTokenBackend(t, "ghp_abc")
+	useGithubRowShadow(t, b.Listener.Addr().String())
+	var native bool
+	old := nativeIntrospect
+	nativeIntrospect = func(string, string) (backendkit.TokenIntrospection, error) {
+		native = true
+		return backendkit.TokenIntrospection{}, nil
+	}
+	t.Cleanup(func() { nativeIntrospect = old })
+
+	_, _ = introspectToken("ghp_abc", connectorRepo)
+
+	if !native || len(b.seenAuth) != 0 {
+		t.Errorf("native introspection ran = %v, backend requests = %d; want gh to answer, not the Connector", native, len(b.seenAuth))
+	}
 }

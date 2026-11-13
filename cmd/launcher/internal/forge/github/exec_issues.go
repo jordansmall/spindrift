@@ -96,6 +96,9 @@ func decodeIssueRows(out []byte) ([]forge.Issue, error) {
 }
 
 func (e *execClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
+	if row, ok := routedRow(); ok {
+		return e.listIssuesViaConnector(row, state)
+	}
 	label := e.labels.Label(state)
 	cmd := exec.Command("gh", "issue", "list",
 		"--repo", e.repo,
@@ -401,6 +404,9 @@ func (e *execClient) nativeDependencyIDs(num, direction string) ([]string, error
 // so the timeline is the only route back to it. Events arrive oldest first,
 // across --paginate pages too, so the last match scanned is the most recent.
 func (e *execClient) PriorClaimState(num string) (forge.DispatchState, bool, error) {
+	if row, ok := routedRow(); ok {
+		return e.priorClaimStateViaConnector(row, num)
+	}
 	cmd := exec.Command("gh", "api",
 		fmt.Sprintf("repos/%s/issues/%s/timeline", e.repo, num),
 		"--paginate",

@@ -55,6 +55,9 @@ type demandCache struct {
 // up to forge.ResultPageLimit issues and demandMaxPages pages. Page 1's ETag
 // does not cover them; ADR 0059 covers the resulting staleness and over-count.
 func (e *execClient) CountReady(fresh bool) (int, error) {
+	if row, ok := routedRow(); ok {
+		return e.countReadyViaConnector(row)
+	}
 	e.demandMu.Lock()
 	defer e.demandMu.Unlock()
 
