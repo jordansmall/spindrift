@@ -3186,14 +3186,13 @@ This is protocol version **0.3.0**. The host is
 
   | Method | Params | Result |
   |---|---|---|
-  | `forge.openPR` | `{target, pr: {title, body, base, head, draft}}` | a PR |
   | `forge.behind` | `{target, number}` | `{behindBy}`, commits the base has that the head lacks |
   | `forge.prFiles` | `{target, number}` | `{files}`, every path the PR changes |
   | `forge.setDraft` | `{target, number, draft}` | `{}` |
   | `forge.comment` | `{target, number, body}` | `{}` |
   | `forge.merge` | `{target, number}` | `{}` |
 
-  Four more are optional, each declared by its own capability. Without one,
+  Five more are optional, each declared by its own capability. Without one,
   the composed forge lacks that surface, exactly as a native forge without the
   API does: no capability lookup or type probe finds it.
 
@@ -3203,32 +3202,67 @@ This is protocol version **0.3.0**. The host is
   | `forge.ciRun` | `forge.ciRun` (`{target, number}` → `{url}`) | no CI run link |
   | `forge.branchProtection` | `forge.branchProtected` (`{target, branch}` → `{protected}`) | doctor's `branch-protection` row is not applicable |
   | `forge.probe` | `forge.probe` (`{target}` → `{repo}`) | Probe re-reads `forge.remote` |
+  | `forge.draftPRs` | `forge.openPR` (`{target, pr: {title, body, base, head, draft}}` → a PR) | no draft-PR creation, host-side branch push, bundle relay or commit subjects: the forge cannot host-mediate a read-only Box (see Host mediation) |
 
   Core pins every PR URL to the remote's web host, fails closed on an unknown
   `mergeable` value, and rebases a PR by reading its `head` and running the
-  rebase in its own git plumbing. A draft PR open that fails adopts the
-  branch's open PR, if there is one, as not created. A failed `forge.merge` is
-  classified in core: `transient` matches `forge.ErrMergeTransient`, so the
-  Lander retries it as for a native forge, and any other class re-reads the PR
-  and maps its `mergeable` state onto the same conflict and blocked-by-checks
-  errors the native adapters return. A merge the Connector aims at a path its
-  Route table does not declare is refused unsent and audited, and returns
+  rebase in its own git plumbing. A failed `forge.merge` is classified in
+  core: `transient` matches `forge.ErrMergeTransient`, so the Lander retries
+  it as for a native forge, and any other class re-reads the PR and maps its
+  `mergeable` state onto the same conflict and blocked-by-checks errors the
+  native adapters return. A merge the Connector aims at a path its Route table
+  does not declare is refused unsent and audited, and returns
   `connectorhost.ErrRouteRefused` unclassified. The SDK's
   `forge.RegisterPRs(forge.PRs{...})` serves the methods.
 
+  **Host mediation.** A Connector declaring `forge.draftPRs` can serve a
+  [read-only Box](#read-only-box-box_forge_and_issue_accessread-only), the Box
+  that cannot push: core's git, not the Connector, carries the Box's work to
+  the forge, so the Connector never sees the bundle, git or the credential.
+  Core pushes a branch it built itself, relays the Box's outbox bundle and
+  reads the bundle's commit subjects, each in its own clone of the validated
+  `forge.remote` clone URL with its own credential. The relay and the subjects
+  are offered only when `Git.ReadOnlyBox` is set, since Settle reads a relay
+  as "the Box handed off a bundle". Only the draft-PR create crosses the
+  Connector, as `forge.openPR`. A create that fails adopts the branch's open
+  PR, if there is one, as not created: adopt is the result a retried hand-off
+  needs, so no forge-specific status code or error class stands for it.
+  Without `forge.draftPRs` the forge cannot host-mediate, and Settle blocks a
+  read-only hand-off as it does for a native PR forge without bundle relay.
+
+  **Local-only interfaces stay out.** The protocol carries only what needs a
+  forge's API. The Integration tip (`LandingRef`), landing containment
+  (`LandingContainmentQuery`), `LandingRepair` and branch protection on the
+  Accumulation repo are interfaces of the local forge's own repository and
+  never enter it: they stay with the Built-in backends, and a Connector forge
+  neither declares nor is asked for them. `forge.branchProtection` is a PR
+  forge's protection of its base branch, a different question.
+
+  The forge axis is final at these methods and capabilities: `forge`
+  (`prsForBranch`, `pr`, `checks`, optional `jobLog`), `forge.branches`
+  (`remote`, `branchExists`, `deleteBranch`), `forge.pushOnly` or `forge.prs`
+  (`behind`, `prFiles`, `setDraft`, `comment`, `merge`), and the optional
+  `forge.autoMerge`, `forge.ciRun`, `forge.branchProtection`, `forge.probe`
+  and `forge.draftPRs`. A new forge surface would be a new optional
+  capability, an additive protocol bump.
+
   Every forge Connector call core makes, the reads above included, retries a
   `transient` failure, three attempts with a 2-second linear backoff (see Error
-  class), except `forge.merge` and `forge.openPR`, which are not idempotent and
-  run once. A `forge.deleteBranch` retry that answers `not-found` counts as
-  done: the earlier attempt deleted the branch and only its answer was lost. A
-  `rate-limited` failure maps onto core's `forge.RateLimitError`, which feeds
-  its rate-limit hold, and `auth` onto `forge.ErrAuthFailure`;
-  `connectorhost.ErrorClass` still reads the class from either. Any other class
+  class), except `forge.merge`, `forge.openPR` and `forge.comment`, which are
+  not idempotent and run once. A `forge.deleteBranch` retry that answers
+  `not-found` counts as done: the earlier attempt deleted the branch and only
+  its answer was lost. A `rate-limited` failure maps onto core's
+  `forge.RateLimitError`, which feeds its rate-limit hold, and `auth` onto
+  `forge.ErrAuthFailure`; `connectorhost.ErrorClass` still reads the class
+  from either. A `transient` `forge.merge` failure becomes
+  `forge.ErrMergeTransient`, the Lander's merge retry. Any other class
   returns as it came. No backend is selected through `Compose` yet.
 - **Versioning.** The protocol version is `0.y.z` and independent of
   spindrift's release version. A `0.y` bump is breaking; a `0.y.z` bump is
-  additive. Core accepts its current `0.y` and the one before it, so today
-  0.3.z and 0.2.z. Any other version is refused at load with
+  additive. Protocol 0.3 has not shipped in a release, so moving
+  `forge.openPR` behind `forge.draftPRs` within 0.3 takes no bump. Core
+  accepts its current `0.y` and the one before it, so today 0.3.z and 0.2.z.
+  Any other version is refused at load with
   `connector protocol "<version>" is outside core's supported range 0.2.x to 0.3.x (core speaks 0.3.0)`,
   naming the Connector's version, core's range and core's own version. A
   module that is not valid wasm, imports something ungranted, declares sizes
@@ -6921,6 +6955,11 @@ the Launcher to apply with its own, separately-scoped write token:
 Every way the shipped prompts still tell a Box to run a forge CLI, and which of
 them a `read-only` Box reaches, is inventoried in [In-Box forge CLI
 uses](in-box-forge-cli.md).
+
+A Connector-backed forge host-mediates the same way when it declares
+`forge.draftPRs`: core relays the bundle in its own git and only the draft-PR
+create crosses the Connector (see [Connector protocol](#connector-protocol),
+Host mediation).
 
 The three `SPINDRIFT_*` stdout lines in the table are the `log` carrier's
 form. By default (`BOX_SIGNAL_CARRIER` unset, i.e. `socket`) the same
