@@ -29,6 +29,7 @@ const (
 	capBranchProtection = "forge.branchProtection"
 	capProbe            = "forge.probe"
 	capDraftPRs         = "forge.draftPRs"
+	capTokenGrant       = "forge.tokenGrant"
 )
 
 // ErrPRForgeUnsupported marks a forge Connector that is neither push-only nor

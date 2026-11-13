@@ -79,6 +79,11 @@ type (
 		Summary    string `json:"summary"`
 		JobID      string `json:"jobId,omitempty"`
 	}
+	wireGrant struct {
+		Introspectable bool   `json:"introspectable"`
+		WriteCapable   bool   `json:"writeCapable"`
+		Reason         string `json:"reason,omitempty"`
+	}
 	wireRollup struct {
 		State  string      `json:"state"`
 		Checks []wireCheck `json:"checks"`
