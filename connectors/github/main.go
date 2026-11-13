@@ -24,6 +24,10 @@ func init() {
 		ListIssues: listIssues,
 		Issue:      issue,
 		NativeDeps: nativeDeps,
+		// Probe and Count serve the tracker's doctor and daemon-demand reads.
+		Probe:         trackerProbe,
+		Count:         count,
+		CountInterval: countInterval,
 	})
 	tracker.RegisterWrites(tracker.Writer{
 		Transition:  trackerTransition,
