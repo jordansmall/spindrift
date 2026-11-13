@@ -1,6 +1,9 @@
 package forge
 
-import "fmt"
+import (
+	"fmt"
+	"net/http"
+)
 
 var _ PRForge = (*PRForgeFake)(nil)
 
@@ -442,26 +445,30 @@ func (pf *PRForgeFake) CanAutoMerge() (bool, error) {
 }
 
 func (pf *PRForgeFake) EnqueueAutoMerge(prURL string) error {
-	pf.mu.Lock()
-	defer pf.mu.Unlock()
-	pf.LandingCallLog = append(pf.LandingCallLog, "EnqueueAutoMerge:"+prURL)
-	pf.EnqueueAutoMergeCalls = append(pf.EnqueueAutoMergeCalls, prURL)
-	return pf.EnqueueAutoMergeErr
+	return pf.call(http.MethodPost, pathAutoMerge, nil, func() (any, error) {
+		pf.mu.Lock()
+		defer pf.mu.Unlock()
+		pf.LandingCallLog = append(pf.LandingCallLog, "EnqueueAutoMerge:"+prURL)
+		pf.EnqueueAutoMergeCalls = append(pf.EnqueueAutoMergeCalls, prURL)
+		return nil, pf.EnqueueAutoMergeErr
+	})
 }
 
 // MarkReady records the call to MarkReadyCalls and, unless MarkReadyErr fails
 // it, clears the PR's draft state (see IsDraft).
 func (pf *PRForgeFake) MarkReady(prURL string) error {
 	pf.Fire("MarkReady")
-	pf.mu.Lock()
-	defer pf.mu.Unlock()
-	pf.LandingCallLog = append(pf.LandingCallLog, "MarkReady:"+prURL)
-	pf.MarkReadyCalls = append(pf.MarkReadyCalls, prURL)
-	if pf.MarkReadyErr != nil {
-		return pf.MarkReadyErr
-	}
-	pf.drafts[prURL] = false
-	return nil
+	return pf.call(http.MethodPatch, pathDraft, nil, func() (any, error) {
+		pf.mu.Lock()
+		defer pf.mu.Unlock()
+		pf.LandingCallLog = append(pf.LandingCallLog, "MarkReady:"+prURL)
+		pf.MarkReadyCalls = append(pf.MarkReadyCalls, prURL)
+		if pf.MarkReadyErr != nil {
+			return nil, pf.MarkReadyErr
+		}
+		pf.drafts[prURL] = false
+		return nil, nil
+	})
 }
 
 // CommentPRCall is one recorded CommentPR call.
@@ -472,22 +479,26 @@ type CommentPRCall struct {
 
 // CommentPR records the call to CommentPRCalls and returns CommentPRErr.
 func (pf *PRForgeFake) CommentPR(prURL, body string) error {
-	pf.mu.Lock()
-	defer pf.mu.Unlock()
-	pf.CommentPRCalls = append(pf.CommentPRCalls, CommentPRCall{PR: prURL, Body: body})
-	return pf.CommentPRErr
+	return pf.call(http.MethodPost, pathPRComment, nil, func() (any, error) {
+		pf.mu.Lock()
+		defer pf.mu.Unlock()
+		pf.CommentPRCalls = append(pf.CommentPRCalls, CommentPRCall{PR: prURL, Body: body})
+		return nil, pf.CommentPRErr
+	})
 }
 
 // MarkDraft records the call to MarkDraftCalls and, unless MarkDraftErr fails
 // it, sets the PR's draft state: the inverse of MarkReady.
 func (pf *PRForgeFake) MarkDraft(prURL string) error {
-	pf.mu.Lock()
-	defer pf.mu.Unlock()
-	pf.LandingCallLog = append(pf.LandingCallLog, "MarkDraft:"+prURL)
-	pf.MarkDraftCalls = append(pf.MarkDraftCalls, prURL)
-	if pf.MarkDraftErr != nil {
-		return pf.MarkDraftErr
-	}
-	pf.drafts[prURL] = true
-	return nil
+	return pf.call(http.MethodPatch, pathDraft, nil, func() (any, error) {
+		pf.mu.Lock()
+		defer pf.mu.Unlock()
+		pf.LandingCallLog = append(pf.LandingCallLog, "MarkDraft:"+prURL)
+		pf.MarkDraftCalls = append(pf.MarkDraftCalls, prURL)
+		if pf.MarkDraftErr != nil {
+			return nil, pf.MarkDraftErr
+		}
+		pf.drafts[prURL] = true
+		return nil, nil
+	})
 }

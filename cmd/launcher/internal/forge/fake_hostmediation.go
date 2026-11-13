@@ -1,5 +1,7 @@
 package forge
 
+import "net/http"
+
 // HostMediationFake holds every field the optional BundleRelay, DraftPRCreator,
 // HostPostedIssueFiler, LandingRef, LandingRepair, and LandingContainmentQuery
 // interfaces read or write. Its backing methods stay unexported so a bare *Fake
@@ -113,27 +115,37 @@ func (hm *HostMediationFake) relayBundle(outboxDir, ref string) error {
 	return err
 }
 
+// openPRResult is what the backend answers an openPR write with.
+type openPRResult struct {
+	URL     string
+	Created bool
+}
+
 // createDraftPR backs the optional DraftPRCreator interface (issue #1919).
 func (hm *HostMediationFake) createDraftPR(title, body, base, head string) (string, bool, error) {
 	hm.Fire("CreateDraftPR")
-	hm.mu.Lock()
-	defer hm.mu.Unlock()
-	hm.CreateDraftPRCalls = append(hm.CreateDraftPRCalls, CreateDraftPRCall{Title: title, Body: body, Base: base, Head: head})
-	if len(hm.CreateDraftPRErrs) > 0 {
-		err := hm.CreateDraftPRErrs[0]
-		hm.CreateDraftPRErrs = hm.CreateDraftPRErrs[1:]
-		if err != nil {
-			return "", false, err
+	var out openPRResult
+	err := hm.call(http.MethodPost, pathOpenPR, &out, func() (any, error) {
+		hm.mu.Lock()
+		defer hm.mu.Unlock()
+		hm.CreateDraftPRCalls = append(hm.CreateDraftPRCalls, CreateDraftPRCall{Title: title, Body: body, Base: base, Head: head})
+		if q := hm.CreateDraftPRErrs; len(q) > 0 {
+			// A queued nil is a scripted success that skips the adopt-head path.
+			hm.CreateDraftPRErrs = q[1:]
+			if err := q[0]; err != nil {
+				return nil, err
+			}
+			return openPRResult{hm.CreateDraftPRURL, true}, nil
 		}
-		return hm.CreateDraftPRURL, true, nil
-	}
-	if hm.CreateDraftPRAdoptHead != "" && head == hm.CreateDraftPRAdoptHead {
-		return hm.CreateDraftPRAdoptedURL, false, nil
-	}
-	if hm.CreateDraftPRErr != nil {
-		return "", false, hm.CreateDraftPRErr
-	}
-	return hm.CreateDraftPRURL, true, nil
+		if hm.CreateDraftPRAdoptHead != "" && head == hm.CreateDraftPRAdoptHead {
+			return openPRResult{hm.CreateDraftPRAdoptedURL, false}, nil
+		}
+		if hm.CreateDraftPRErr != nil {
+			return nil, hm.CreateDraftPRErr
+		}
+		return openPRResult{hm.CreateDraftPRURL, true}, nil
+	})
+	return out.URL, out.Created, err
 }
 
 // commitSubjects backs the optional BundleCommitSubjects interface (issue #2447).

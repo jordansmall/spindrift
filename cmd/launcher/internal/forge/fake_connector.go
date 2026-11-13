@@ -66,12 +66,27 @@ const (
 	pathRunURL           = "/forge/runURL"
 )
 
-// The write paths, POSTed to; a write has its own Route, so GET and POST on one
-// path are distinct.
+// The write paths. A write has its own Route, so a read and a write on one path
+// (pathDraft, pathAutoMerge) are distinct; fakeWriteRoutes lists each method.
 const (
-	pathMerge  = "/forge/merge"
-	pathRebase = "/forge/rebase"
+	pathMerge     = "/forge/merge"
+	pathRebase    = "/forge/rebase"
+	pathPRComment = "/forge/prComment"
+	pathOpenPR    = "/forge/openPR"
 )
+
+// fakeWriteRoutes are the Routes the Fake's forge writes cross, mirroring the
+// finalised forge axis of the Connector protocol. The rebase Route is
+// fixture-only: a composed forge rebases in core's git, not over a Connector;
+// the Fake keeps Rebase crossing so its calls stay audited.
+var fakeWriteRoutes = []struct{ method, path string }{
+	{http.MethodPost, pathMerge},
+	{http.MethodPost, pathRebase},
+	{http.MethodPost, pathAutoMerge},
+	{http.MethodPatch, pathDraft},
+	{http.MethodPost, pathPRComment},
+	{http.MethodPost, pathOpenPR},
+}
 
 // fakeRoutes is the fixture Route table: one exact method and path per Route (a
 // path is a subtree root, ADR 0047), so a misspelt path is refused.
@@ -87,15 +102,15 @@ var fakeRoutes = func() []connectorhost.Route {
 	} {
 		rs = append(rs, connectorhost.Route{Method: http.MethodGet, Host: fakeHost, Path: p})
 	}
-	for _, p := range []string{pathMerge, pathRebase} {
-		rs = append(rs, connectorhost.Route{Method: http.MethodPost, Host: fakeHost, Path: p})
+	for _, w := range fakeWriteRoutes {
+		rs = append(rs, connectorhost.Route{Method: w.method, Host: fakeHost, Path: w.path})
 	}
 	return rs
 }()
 
-// popErr is the scripted-error rule shared by the Fake's reads: a non-empty
-// queue is consumed one entry per call and wins over fallback, and a nil entry
-// means "no error this call".
+// popErr is the scripted-error rule shared by the Fake's reads and writes: a
+// non-empty queue is consumed one entry per call and wins over fallback, and a
+// nil entry means "no error this call".
 func popErr(q *[]error, fallback error) error {
 	if len(*q) == 0 {
 		return fallback
@@ -119,9 +134,9 @@ func (c *core) probe(path string) (string, error) {
 	return repo, err
 }
 
-// pendingRead is one call in flight: the closure the backend runs against the
+// pendingCall is one call in flight: the closure the backend runs against the
 // Fake's state, and what came back through the Connector.
-type pendingRead struct {
+type pendingCall struct {
 	serve func() (any, error)
 	// err is the serve error, kept here because a Go error loses its identity
 	// crossing the wasm boundary (a Connector failure wraps ErrCall).
@@ -132,7 +147,7 @@ type pendingRead struct {
 }
 
 var (
-	pending    sync.Map // uint64 call id -> *pendingRead
+	pending    sync.Map // uint64 call id -> *pendingCall
 	nextCallID atomic.Uint64
 )
 
@@ -153,7 +168,7 @@ var fakeBackend = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "unknown call", http.StatusNotFound)
 		return
 	}
-	p := v.(*pendingRead)
+	p := v.(*pendingCall)
 	val, err := runServe(p.serve)
 	var body []byte
 	if err == nil {
@@ -168,7 +183,7 @@ var fakeBackend = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) 
 })
 
 // runServe turns a panic in serve into the call's error, so a bug in a Fake's
-// scripted state fails that read instead of killing the shared Connector.
+// scripted state fails that call instead of killing the shared Connector.
 func runServe(serve func() (any, error)) (val any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -222,7 +237,7 @@ func (auditSink) Write(line []byte) (int, error) {
 	}
 	if id, err := strconv.ParseUint(q.Get("call"), 10, 64); err == nil {
 		if v, ok := pending.Load(id); ok {
-			p := v.(*pendingRead)
+			p := v.(*pendingCall)
 			p.audit, p.audited = e, true
 		}
 	}
@@ -293,7 +308,7 @@ func (c *core) read(path string, out any, serve func() (any, error)) error {
 // fails unless the host audited it as sent on a declared Route.
 func (c *core) call(method, path string, out any, serve func() (any, error)) error {
 	id := nextCallID.Add(1)
-	p := &pendingRead{serve: serve}
+	p := &pendingCall{serve: serve}
 	pending.Store(id, p)
 	defer pending.Delete(id)
 

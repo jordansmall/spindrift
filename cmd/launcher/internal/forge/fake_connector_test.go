@@ -88,9 +88,6 @@ var (
 		"MarkDraft": http.MethodPatch, "CommentPR": http.MethodPost,
 		"Merge": http.MethodPost, "Rebase": http.MethodPost, "CreateDraftPR": http.MethodPost,
 	}
-	// pendingForgeWrites are forge writes not yet converted to cross the
-	// Connector; the guard skips them until they are.
-	pendingForgeWrites = setOf("EnqueueAutoMerge", "MarkReady", "MarkDraft", "CommentPR", "CreateDraftPR")
 	// fakeConfig answer from configuration, with no state worth a fetch.
 	fakeConfig = setOf("ProbeInterval", "StateLabels", "WalksAllPages",
 		"On", "Fire") // On and Fire are fakehook.Hooks: test scripting, not state
@@ -149,7 +146,8 @@ func seededFake(labels ...DispatchLabels) *Fake {
 // the Fake that is not a scripting, native-write, or config method is a read or
 // a forge write, and must cross the Connector at least once, sent on a declared
 // Route; a forge write under its own HTTP method. A new read that answers
-// natively fails here without anyone listing it.
+// natively fails here without anyone listing it, and so does a forge write that
+// answers natively or crosses on the wrong method.
 func TestFakeCallsCrossTheConnector(t *testing.T) {
 	routes := map[string]bool{}
 	for _, r := range fakeRoutes {
@@ -171,7 +169,7 @@ func TestFakeCallsCrossTheConnector(t *testing.T) {
 		for i := range pt.NumMethod() {
 			name := pt.Method(i).Name
 			seen[name] = true
-			if strings.HasPrefix(name, "Set") || strings.HasPrefix(name, "As") || fakeNativeWrites[name] || pendingForgeWrites[name] || fakeConfig[name] {
+			if strings.HasPrefix(name, "Set") || strings.HasPrefix(name, "As") || fakeNativeWrites[name] || fakeConfig[name] {
 				continue
 			}
 			t.Run(tg.name+"."+name, func(t *testing.T) {
@@ -214,10 +212,10 @@ func TestFakeCallsCrossTheConnector(t *testing.T) {
 			t.Errorf("%s is classified as a forge write but no Fake method has that name", name)
 		}
 	}
-	for _, set := range []map[string]bool{fakeNativeWrites, pendingForgeWrites, fakeConfig} {
+	for _, set := range []map[string]bool{fakeNativeWrites, fakeConfig} {
 		for name := range set {
 			if !seen[name] {
-				t.Errorf("%s is classified as a non-read but no Fake method has that name", name)
+				t.Errorf("%s is classified as a native write or config method but no Fake method has that name", name)
 			}
 		}
 	}
@@ -457,5 +455,50 @@ func TestFakeRefusedWriteDoesNotPoisonTheSharedConnector(t *testing.T) {
 	f := NewFake()
 	if err := f.Merge("u"); err != nil || f.Merged != "u" {
 		t.Fatalf("Merge after a refused write = %v, Merged = %q", err, f.Merged)
+	}
+}
+
+func TestFakePRWritesCrossTheConnectorAndKeepScriptedState(t *testing.T) {
+	sentinel := errors.New("scripted")
+	f := NewFake()
+	f.SetPR("b", PR{URL: "u"})
+	if err := f.MarkDraft("u"); err != nil {
+		t.Fatal(err)
+	}
+	if d := f.IsDraft("u"); !d {
+		t.Error("IsDraft = false after MarkDraft")
+	}
+	if err := f.MarkReady("u"); err != nil {
+		t.Fatal(err)
+	}
+	if d := f.IsDraft("u"); d {
+		t.Error("IsDraft = true after MarkReady")
+	}
+	f.CommentPRErr = sentinel
+	if err := f.CommentPR("u", "hi"); !errors.Is(err, sentinel) || len(f.CommentPRCalls) != 1 {
+		t.Errorf("CommentPR = %v, calls = %v, want the scripted sentinel and one call", err, f.CommentPRCalls)
+	}
+	f.EnqueueAutoMergeErr = sentinel
+	if err := f.EnqueueAutoMerge("u"); !errors.Is(err, sentinel) {
+		t.Errorf("EnqueueAutoMerge err = %v, want the scripted sentinel", err)
+	}
+}
+
+func TestFakeCreateDraftPRKeepsQueueAndAdoptSemantics(t *testing.T) {
+	sentinel := errors.New("scripted")
+	f := NewFake()
+	f.CreateDraftPRURL, f.CreateDraftPRAdoptedURL, f.CreateDraftPRAdoptHead = "new", "old", "adopt"
+	f.CreateDraftPRErrs = []error{nil, sentinel}
+	if url, created, err := f.createDraftPR("t", "b", "main", "adopt"); url != "new" || !created || err != nil {
+		t.Errorf("queued nil = %q, %v, %v, want new, true, nil", url, created, err)
+	}
+	if _, _, err := f.createDraftPR("t", "b", "main", "h"); !errors.Is(err, sentinel) {
+		t.Errorf("queued err = %v, want the scripted sentinel", err)
+	}
+	if url, created, err := f.createDraftPR("t", "b", "main", "adopt"); url != "old" || created || err != nil {
+		t.Errorf("adopt = %q, %v, %v, want old, false, nil", url, created, err)
+	}
+	if len(f.CreateDraftPRCalls) != 3 {
+		t.Errorf("CreateDraftPRCalls = %d, want 3", len(f.CreateDraftPRCalls))
 	}
 }
