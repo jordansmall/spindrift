@@ -41,6 +41,8 @@ in
 
   spindrift.connectors.jira.routes = routes;
 
+  spindrift.connectors.jira.fragments = import ./fragments.nix;
+
   spindrift.connectors.jira.backend = {
     module = pkgs: "${import ./package.nix { inherit pkgs core; }}/jira.wasm";
     inherit routes;

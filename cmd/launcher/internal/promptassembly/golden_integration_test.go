@@ -334,6 +334,20 @@ func goldenCells() []goldenCell {
 			// jira has its own read folder but selects the same arms as github here.
 			c.export("ISSUE_TRACKER", "jira")
 		}},
+		{name: "jira-tracker-read-only", mode: modeInitial, setup: func(c *cellInputs) {
+			// A read-only Box never holds a Jira token, so the blocked-comment
+			// relay step comes from jira's own folder, not the shared root body
+			// that names ${FORGE_DISPLAY_NAME}'s token (issue #6857).
+			c.export("ISSUE_TRACKER", "jira")
+			c.readOnly()
+		}, check: func(t *testing.T, prompt string) {
+			if !strings.Contains(prompt, "You have no client that can post a comment to this tracker") {
+				t.Error("jira read-only prompt lacks the no-comment-client blocked step")
+			}
+			if strings.Contains(prompt, "token is read-only here") {
+				t.Error("jira read-only prompt claims a Jira token the Box never holds")
+			}
+		}},
 		{name: "jira-tracker-filer", mode: modeInitial, review: true, setup: func(c *cellInputs) {
 			// A tracker with no in-Box client: the Filer's dedup runs no
 			// tracker search (issue #6354).
@@ -554,7 +568,7 @@ func assembleCell(t *testing.T, c *cellInputs, outDir string) (promptassembly.Re
 	env := promptassembly.EnvFromEnviron()
 	env.ProbeBakedSkills(skillsDir)
 	env.SkillsFound = promptassembly.ScanSkillsFound(skillsDir)
-	env.PromptsDir = repopath.PromptsDir()
+	env.PromptsDir = repopath.MergedPromptsDir(t)
 	env.AgentsPromptFiles = c.agentsPromptFiles
 	env.CommsContractFile = seamtest.Path(t, "comms-contract.md")
 	env.CheckContractFile = seamtest.Path(t, "check-contract.md")

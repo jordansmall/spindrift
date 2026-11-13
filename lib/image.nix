@@ -308,7 +308,12 @@ let
       "cp ${pkgs.writeText pf e.prompt} $out${contracts.agentPaths.PROMPTS_DIR}/${pf}\n"
     ) agents.customRosterPromptFiles}
     cp ${pkgs.writeText "conflict-resolve-prompt.md" prompts.conflictResolvePrompt} $out${contracts.agentPaths.PROMPTS_DIR}/conflict-resolve-prompt.md
-    cp -r ${prompts.fragmentsSourceDir} $out${contracts.agentPaths.PROMPTS_DIR}/fragments
+    ${import ./fragments-install.nix {
+      inherit lib;
+      src = prompts.fragmentsSourceDir;
+      inherit (prompts) connectorFragments;
+      dest = "$out${contracts.agentPaths.PROMPTS_DIR}/fragments";
+    }}
     cp -r ${prompts.choresSourceDir} $out${contracts.agentPaths.PROMPTS_DIR}/chores
   '';
 
