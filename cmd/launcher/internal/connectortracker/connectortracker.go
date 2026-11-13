@@ -53,6 +53,8 @@ type Target struct {
 //
 // Statuses and IssueType feed the check capabilities (CheckMappedStatuses,
 // CheckIssueType): a caller selecting a Connector tracker for doctor fills them.
+// IssueType is also the type tracker.fileIssue files under, so a caller filing
+// through the Connector must fill it too.
 type Lifecycle struct {
 	Labels   forge.DispatchLabels
 	Statuses map[forge.DispatchState]string
@@ -592,11 +594,12 @@ var (
 // New builds core's tracker from a tracker Connector. writes answers every
 // write the Connector does not perform: transitions and verdicts unless it
 // advertises both CapTransition and CapEditLabels, the label registry unless
-// CapLabels, and comments and issue edits always. It also answers every
-// optional capability the protocol does not carry (see CapComments,
-// CapNativeDeps, CapBlocks and CapSearchIssues); Probe stays with it unless
-// the Connector advertises CapProbe. The doctor and demand
-// checks (CapStatuses, CapCreateMeta, CapCount) are never answered natively.
+// CapLabels, comments unless CapComment, issue filing unless CapFileIssue, and
+// issue edits always. It also answers every optional capability the protocol
+// does not carry (see CapComments, CapNativeDeps, CapBlocks and
+// CapSearchIssues); Probe stays with it unless the Connector advertises
+// CapProbe. The doctor and demand checks (CapStatuses, CapCreateMeta, CapCount)
+// are never answered natively.
 // Look capabilities up with forge.As. Calls run under context.Background()
 // because IssueTracker methods carry no context.
 //
@@ -661,6 +664,12 @@ func newTracker(call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, 
 	}
 	if slices.Contains(caps, CapLabels) {
 		it = labelsLayer{it, r}
+	}
+	if slices.Contains(caps, CapComment) {
+		it = commentPostLayer{it, r}
+	}
+	if slices.Contains(caps, CapFileIssue) {
+		it = filerLayer{it, r}
 	}
 	return it, nil
 }

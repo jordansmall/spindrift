@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -187,7 +188,67 @@ func (l labelsLayer) CreateLabel(name, description, color string) error {
 	return l.r.call(context.Background(), CapCreateLabel, p, &struct{}{})
 }
 
+// commentPostLayer posts comments through the Connector. It exists only when
+// the Connector advertises CapComment.
+type commentPostLayer struct {
+	forge.IssueTracker
+	r *reads
+}
+
+func (l commentPostLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
+
+// Comment sends body in canonical form: the first line that is exactly the
+// research marker is dropped and flagged, the inverse of what commentsLayer
+// puts back on read. Later copies (a verdict quoting the marker) stay verbatim.
+func (l commentPostLayer) Comment(num, body string) error {
+	lines := strings.Split(body, "\n")
+	research := false
+	for i, line := range lines {
+		if strings.TrimSpace(line) == forge.ResearchMarker {
+			lines = slices.Delete(lines, i, i+1)
+			research = true
+			break
+		}
+	}
+	p := commentParams{l.r.target, num, commentRequest{Body: strings.Join(lines, "\n"), Research: research}}
+	return l.r.call(context.Background(), CapComment, p, &struct{}{})
+}
+
+// filerLayer files host-posted issues through the Connector. It exists only
+// when the Connector advertises CapFileIssue; otherwise forge.As finds the
+// native adapter's filer, if it has one.
+type filerLayer struct {
+	forge.IssueTracker
+	r *reads
+}
+
+func (l filerLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
+
+// PostIssue splits the dedup marker off body so the Connector stores it apart
+// from the description, and returns the new issue's URL.
+func (l filerLayer) PostIssue(title, body string, labels []string) (string, error) {
+	desc, marker := dedupmarker.Split(body)
+	p := fileIssueParams{l.r.target, issueRequest{
+		Title: title, Body: desc, Labels: append([]string{}, labels...),
+		DedupMarker: marker, IssueType: l.r.lifecycle.IssueType,
+	}}
+	var res struct {
+		URL string `json:"url"`
+	}
+	if err := l.r.call(context.Background(), CapFileIssue, p, &res); err != nil {
+		return "", err
+	}
+	if res.URL == "" {
+		return "", fmt.Errorf("%w: tracker.fileIssue answered no url", ErrAnswer)
+	}
+	return res.URL, nil
+}
+
 var (
-	_ forge.Unwrapper = transitionLayer{}
-	_ forge.Unwrapper = labelsLayer{}
+	_ forge.Unwrapper            = transitionLayer{}
+	_ forge.Unwrapper            = labelsLayer{}
+	_ forge.Unwrapper            = commentPostLayer{}
+	_ forge.HostPostedCommenter  = commentPostLayer{}
+	_ forge.Unwrapper            = filerLayer{}
+	_ forge.HostPostedIssueFiler = filerLayer{}
 )
