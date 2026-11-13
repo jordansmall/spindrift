@@ -312,8 +312,8 @@ var setupVars = []string{
 // forgeDisplayNameVar is the ${FORGE_DISPLAY_NAME} substitution: the display
 // name of the backend whose folder the row being rendered resolved to (issue
 // #5647). On tracker-axis and plain rows that is the tracker arm's backend,
-// not necessarily the forge: jira renders "GitHub" because it rides github's
-// arm. It is rebound before every row, so extraSubstRaw carries only the
+// not necessarily the forge: jira renders "Jira", its own read signal's arm. It
+// is rebound before every row, so extraSubstRaw carries only the
 // initial value a base template sees.
 const forgeDisplayNameVar = "FORGE_DISPLAY_NAME"
 

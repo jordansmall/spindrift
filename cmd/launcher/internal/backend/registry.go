@@ -132,7 +132,7 @@ type Descriptor struct {
 	IssuesWearLabels bool
 
 	// TrackerAxisRead is this tracker's read-step axis value ("GITHUB",
-	// "LOCAL", or "FORGEJO"); empty means "GITHUB", so github and jira leave it
+	// "LOCAL", "FORGEJO", or "JIRA"); empty means "GITHUB", so github leaves it
 	// at the Go zero value. An unregistered name's zero-value Descriptor reads
 	// back the same way, which is why TrackerAxisSignals tests for ""
 	// to cover both cases at once.

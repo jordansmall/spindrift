@@ -55,6 +55,8 @@ var Jira = Descriptor{
 	InBoxUnwritableTracker: true,
 	HostPostingCapable:     true,
 	IssuesWearLabels:       true,
+	TrackerAxisRead:        "JIRA",
+	TrackerAxisWrite:       "GITHUB",
 }
 
 // Forgejo is the descriptor for the "forgejo" backend.

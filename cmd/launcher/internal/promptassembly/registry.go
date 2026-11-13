@@ -29,9 +29,9 @@ type FragmentRow struct {
 	// Axis is "" for a plain row, or "tracker" / "filer" / "forge" for a row
 	// whose fragment comes from the folder of that axis's signal: the tracker
 	// read arm, the tracker Filer arm, or the CODE_FORGE arm. These are the
-	// signals the axis's gates test, so jira (on github's read arm) reads
-	// github/'s file. A folder with no such file renders an empty step, not
-	// an error, unless Shared is set.
+	// signals the axis's gates test, so a local tracker's Filer (on github's
+	// arm) reads github/'s file. A folder with no such file renders an empty
+	// step, not an error, unless Shared is set.
 	Axis string `json:"axis,omitempty"`
 	// Shared (axis rows only) names a root-level fragment under
 	// prompts/fragments/ read when the axis folder has no file of its own:
@@ -91,7 +91,7 @@ func LoadRegistryFile(path string) (Registry, error) {
 	return reg, nil
 }
 
-// signalFolder maps an axis signal ("GH", "GITHUB", "LOCAL", "FORGEJO") to the
+// signalFolder maps an axis signal ("GH", "GITHUB", "LOCAL", "FORGEJO", "JIRA") to the
 // fragments/ folder holding that arm's files. "GH" is the forge/filer spelling
 // of the github arm, and an empty signal takes it too, as trackerGates does
 // for an empty itFiler, so a folder and its gate cannot disagree.

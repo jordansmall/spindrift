@@ -61,7 +61,7 @@ type Env struct {
 	// TrackerAxisRead, TrackerAxisWrite, and TrackerAxisFiler are nix's
 	// pre-resolved form of the "${ISSUE_TRACKER:-github}" case statement
 	// entrypoint.sh once held (issue #2533). Read is
-	// "GITHUB"/"LOCAL"/"FORGEJO"; Write is "GITHUB"/"FORGEJO", or "" when the
+	// "GITHUB"/"LOCAL"/"FORGEJO"/"JIRA"; Write is "GITHUB"/"FORGEJO", or "" when the
 	// tracker has no in-box direct-write path (local always relays instead);
 	// Filer is "GH"/"FORGEJO".
 	TrackerAxisRead  string

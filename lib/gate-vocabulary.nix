@@ -79,8 +79,8 @@ let
     ISSUE_TRACKER_LINKS_REACHABLE = "the Signal socket issue read covers the tracker, and the scout step renders";
     ISSUE_TRACKER_LINKS_READABLE = "linked issues are readable: via the Signal socket issue read, or local's host-injected text";
     ISSUE_TRACKER_LINKS_UNREADABLE = "a non-local tracker under the log carrier, which has no socket to read a linked issue through";
-    ISSUE_TRACKER_GITHUB_LINKS_READABLE = "the GitHub axis with the Signal socket issue read";
-    ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE = "the GitHub axis without the Signal socket issue read";
+    ISSUE_TRACKER_GITHUB_LINKS_READABLE = "the GitHub axis (or jira) with the Signal socket issue read";
+    ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE = "the GitHub axis (or jira) without the Signal socket issue read";
     ISSUE_TRACKER_FORGEJO_LINKS_READABLE = "the Forgejo axis with the Signal socket issue read";
     ISSUE_TRACKER_FORGEJO_LINKS_UNREADABLE = "the Forgejo axis without the Signal socket issue read";
     ISSUE_TRACKER_SEARCHABLE = "a tracker search reaches the Box: the Signal socket issue-search verb, or local's own folder search";

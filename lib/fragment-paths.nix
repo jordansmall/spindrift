@@ -15,9 +15,9 @@ let
   backends = import ./backends/default.nix;
 
   # An axis picks its folder by signal, not backend name (mirroring the Go
-  # assembler's axisFolder and the gates), so jira, which rides github's read
-  # arm, has no folder of its own. The registry defaults for an omitted signal
-  # are documented in lib/backends/default.nix.
+  # assembler's axisFolder and the gates), so a backend riding another's arm
+  # (a local tracker's Filer on GH) has no folder of its own. The registry
+  # defaults for an omitted signal are documented in lib/backends/default.nix.
   axes = {
     tracker = {
       valid = "validAsTracker";

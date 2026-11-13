@@ -24,7 +24,7 @@ func trackerGates(e Env) map[string]bool {
 	// ADR 0041 / issue #2593: an advise-only dispatch with the Filer provisioned
 	// always uses the relay form, regardless of BOX_WRITE_ENABLED. So does a
 	// research verdict on a tracker the Box cannot write (jira, issue #5245): it
-	// rides the GITHUB axis for reads, but has no in-box write path. The butler
+	// borrows the GITHUB write axis, but has no in-box write path. The butler
 	// posts no verdict, so that term is scoped to ContractVerdict. Env forwards
 	// IssueTracker as the empty string by default; resolve it to the default.
 	trackerName := e.IssueTracker
@@ -35,7 +35,8 @@ func trackerGates(e Env) map[string]bool {
 	researchForceRelay := (d.AdviseOnly && e.FilerEnabled) ||
 		(verdictContract(d) && backend.ResearchVerdictRelayed(trackerName, e.FilerEnabled))
 
-	// Exactly one of these three ever fires.
+	// At most one of these three fires; jira (itRead "JIRA") fires none, as no
+	// fragment row is keyed on a jira read gate.
 	g["ISSUE_TRACKER_GITHUB"] = itRead == "GITHUB"
 	g["ISSUE_TRACKER_LOCAL"] = itRead == "LOCAL"
 	g["ISSUE_TRACKER_FORGEJO"] = itRead == "FORGEJO"
@@ -65,9 +66,11 @@ func trackerGates(e Env) map[string]bool {
 	g["ISSUE_TRACKER_LINKS_UNREADABLE"] = !g["ISSUE_TRACKER_LINKS_READABLE"]
 	// The deprecated per-backend issue-read rows must render verb wording only
 	// where the verb exists, so an override that still names them matches the
-	// shipped slot.
-	g["ISSUE_TRACKER_GITHUB_LINKS_READABLE"] = itRead == "GITHUB" && verb
-	g["ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE"] = itRead == "GITHUB" && !verb
+	// shipped slot. jira keeps the GITHUB pair: an override that named them
+	// before jira had its own read axis still renders the same text.
+	githubIssueRead := itRead == "GITHUB" || itRead == "JIRA"
+	g["ISSUE_TRACKER_GITHUB_LINKS_READABLE"] = githubIssueRead && verb
+	g["ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE"] = githubIssueRead && !verb
 	g["ISSUE_TRACKER_FORGEJO_LINKS_READABLE"] = itRead == "FORGEJO" && verb
 	g["ISSUE_TRACKER_FORGEJO_LINKS_UNREADABLE"] = itRead == "FORGEJO" && !verb
 	// The Signal socket's issue-search (issue #6895) answers for github and
@@ -168,7 +171,7 @@ func trackerGates(e Env) map[string]bool {
 
 // issueTrackerAxisFallback maps a raw IssueTracker value onto its three axis
 // suffixes, the same mapping nix now performs at eval time. Used only by
-// trackerGates's version-skew fallback; jira shares github's arm.
+// trackerGates's version-skew fallback.
 func issueTrackerAxisFallback(issueTracker string) (itRead, itWrite, itFiler string) {
 	tracker := issueTracker
 	if tracker == "" {
