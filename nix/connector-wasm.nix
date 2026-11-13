@@ -32,8 +32,8 @@ pkgs.runCommand "connector-wasm-fixtures" { nativeBuildInputs = [ pkgs.go ]; } '
   mkdir $out
   build() { go build -buildmode=c-shared -o "$out/$1" "''${@:2}"; }
   build current.wasm ./handshake
-  build previous.wasm -ldflags=-X=${versionSymbol}=0.1.1 ./handshake
-  build future.wasm -ldflags=-X=${versionSymbol}=0.3.0 ./handshake
+  build previous.wasm -ldflags=-X=${versionSymbol}=0.2.1 ./handshake
+  build future.wasm -ldflags=-X=${versionSymbol}=0.4.0 ./handshake
   build probe.wasm ./probe
   build call.wasm ./call
   build seamtest-driver.wasm ./seamtest-driver
