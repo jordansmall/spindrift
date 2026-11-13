@@ -1,5 +1,6 @@
 // Command call is the fixture Connector for the generic call protocol: "echo"
-// returns its params and "fail" returns an error.
+// returns its params and "fail" returns a plain error, and
+// "failTransient" one classed Transient.
 package main
 
 import (
@@ -12,6 +13,9 @@ import (
 func init() {
 	connector.Handle("echo", func(params json.RawMessage) (any, error) { return params, nil })
 	connector.Handle("fail", func(json.RawMessage) (any, error) { return nil, errors.New("fixture failure") })
+	connector.Handle("failTransient", func(json.RawMessage) (any, error) {
+		return nil, connector.Errorf(connector.Transient, "fixture transient")
+	})
 }
 
 func main() {}

@@ -3,6 +3,7 @@ package connector
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 )
@@ -59,6 +60,10 @@ func TestCall(t *testing.T) {
 	resetHandlers(t)
 	Handle("echo", func(p json.RawMessage) (any, error) { return p, nil })
 	Handle("fail", func(json.RawMessage) (any, error) { return nil, errors.New("boom") })
+	Handle("slow", func(json.RawMessage) (any, error) { return nil, Errorf(Transient, "try later") })
+	Handle("wrapped", func(json.RawMessage) (any, error) {
+		return nil, fmt.Errorf("ctx: %w", &Error{RateLimited, errors.New("slow down")})
+	})
 	Handle("none", func(json.RawMessage) (any, error) { return nil, nil })
 	Handle("sum", func(p json.RawMessage) (any, error) {
 		var in []int
@@ -74,12 +79,14 @@ func TestCall(t *testing.T) {
 
 	cases := []struct{ name, req, want string }{
 		{"echo", `{"method":"echo","params":{"a":[1,2]}}`, `{"result":{"a":[1,2]}}`},
-		{"fail", `{"method":"fail","params":null}`, `{"error":"boom"}`},
+		{"fail", `{"method":"fail","params":null}`, `{"error":"boom","class":"permanent"}`},
+		{"classed", `{"method":"slow"}`, `{"error":"try later","class":"transient"}`},
+		{"classed wrapped", `{"method":"wrapped"}`, `{"error":"ctx: slow down","class":"rate-limited"}`},
 		{"nil result", `{"method":"none"}`, `{"result":null}`},
 		{"typed", `{"method":"sum","params":[1,2,3]}`, `{"result":{"total":6}}`},
-		{"bad params", `{"method":"sum","params":"x"}`, `{"error":"json: cannot unmarshal string into Go value of type []int"}`},
-		{"unknown", `{"method":"nope"}`, `{"error":"unknown method \"nope\""}`},
-		{"malformed", `{`, `{"error":"malformed request: unexpected end of JSON input"}`},
+		{"bad params", `{"method":"sum","params":"x"}`, `{"error":"json: cannot unmarshal string into Go value of type []int","class":"permanent"}`},
+		{"unknown", `{"method":"nope"}`, `{"error":"unknown method \"nope\"","class":"permanent"}`},
+		{"malformed", `{`, `{"error":"malformed request: unexpected end of JSON input","class":"permanent"}`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -111,4 +118,39 @@ func TestHandleDuplicatePanics(t *testing.T) {
 		}
 	}()
 	Handle("m", func(json.RawMessage) (any, error) { return nil, nil })
+}
+
+func TestCallEncodeFailureIsPermanent(t *testing.T) {
+	resetHandlers(t)
+	Handle("bad", func(json.RawMessage) (any, error) { return make(chan int), nil })
+	var resp struct{ Class Class }
+	if err := json.Unmarshal(call([]byte(`{"method":"bad"}`)), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Class != Permanent {
+		t.Errorf("class = %q, want %q", resp.Class, Permanent)
+	}
+}
+
+func TestClassForStatus(t *testing.T) {
+	for status, want := range map[int]Class{
+		200: Permanent, 400: Permanent, 401: Auth, 403: Auth, 404: NotFound,
+		408: Transient, 422: Permanent, 429: RateLimited, 500: Transient, 503: Transient,
+	} {
+		if got := ClassForStatus(status); got != want {
+			t.Errorf("ClassForStatus(%d) = %q, want %q", status, got, want)
+		}
+	}
+}
+
+func TestErrorfWrapsAndUnwraps(t *testing.T) {
+	base := errors.New("base")
+	err := Errorf(NotFound, "gone: %w", base)
+	if !errors.Is(err, base) {
+		t.Error("Errorf lost the %w cause")
+	}
+	var ce *Error
+	if !errors.As(err, &ce) || ce.Class != NotFound || err.Error() != "gone: base" {
+		t.Errorf("err = %v (%+v)", err, ce)
+	}
 }

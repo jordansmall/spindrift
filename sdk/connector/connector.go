@@ -10,6 +10,7 @@ package connector
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
 )
 
@@ -65,34 +66,42 @@ type callRequest struct {
 
 type errorBody struct {
 	Error string `json:"error"`
+	Class Class  `json:"class"`
 }
 
 // call runs one request and returns the response JSON: {"result": ...} on
-// success, {"error": "..."} on any failure.
+// success, {"error": "...", "class": "..."} on any failure. A handler error
+// reports the class of the *Error in its chain; any other failure (a handler
+// error with no class, a malformed request, an unknown method, an encode
+// failure) is Permanent.
 func call(req []byte) []byte {
 	var r callRequest
 	if err := json.Unmarshal(req, &r); err != nil {
-		return errorResponse("malformed request: " + err.Error())
+		return errorResponse(Permanent, "malformed request: "+err.Error())
 	}
 	fn, ok := handlers[r.Method]
 	if !ok {
-		return errorResponse("unknown method " + strconv.Quote(r.Method))
+		return errorResponse(Permanent, "unknown method "+strconv.Quote(r.Method))
 	}
 	res, err := fn(r.Params)
 	if err != nil {
-		return errorResponse(err.Error())
+		class := Permanent
+		if ce := new(*Error); errors.As(err, ce) {
+			class = (*ce).Class
+		}
+		return errorResponse(class, err.Error())
 	}
 	out, err := json.Marshal(struct {
 		Result any `json:"result"`
 	}{res})
 	if err != nil {
-		return errorResponse("encode result: " + err.Error())
+		return errorResponse(Permanent, "encode result: "+err.Error())
 	}
 	return out
 }
 
-func errorResponse(msg string) []byte {
-	out, err := json.Marshal(errorBody{msg})
+func errorResponse(class Class, msg string) []byte {
+	out, err := json.Marshal(errorBody{msg, class})
 	if err != nil {
 		panic(err) // a string cannot fail to marshal
 	}
