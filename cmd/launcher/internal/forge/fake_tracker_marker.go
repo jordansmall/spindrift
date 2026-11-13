@@ -1,6 +1,9 @@
 package forge
 
-import "fmt"
+import (
+	"fmt"
+	"net/http"
+)
 
 // RecordLandingCall records a single RecordLanding invocation.
 type RecordLandingCall struct {
@@ -9,10 +12,12 @@ type RecordLandingCall struct {
 
 // RecordLanding implements the optional LandingRecorder interface (ADR 0029).
 func (tf *IssueTrackerFake) RecordLanding(num, landing string) error {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	tf.RecordLandingCalls = append(tf.RecordLandingCalls, RecordLandingCall{num, landing})
-	return tf.RecordLandingErr
+	return tf.call(http.MethodPost, pathComment, nil, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		tf.RecordLandingCalls = append(tf.RecordLandingCalls, RecordLandingCall{num, landing})
+		return nil, tf.RecordLandingErr
+	})
 }
 
 // RecordLandingPassCall records a single RecordLandingPass invocation.
@@ -24,10 +29,12 @@ type RecordLandingPassCall struct {
 
 // RecordLandingPass implements the optional LandingPassRecorder interface (issue #2983).
 func (tf *IssueTrackerFake) RecordLandingPass(num string, pass int, kind string) error {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	tf.RecordLandingPassCalls = append(tf.RecordLandingPassCalls, RecordLandingPassCall{num, pass, kind})
-	return tf.RecordLandingPassErr
+	return tf.call(http.MethodPost, pathComment, nil, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		tf.RecordLandingPassCalls = append(tf.RecordLandingPassCalls, RecordLandingPassCall{num, pass, kind})
+		return nil, tf.RecordLandingPassErr
+	})
 }
 
 // CloseIssue implements the optional IssueCloser interface (ADR 0029).

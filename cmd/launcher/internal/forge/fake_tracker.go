@@ -2,6 +2,7 @@ package forge
 
 import (
 	"fmt"
+	"net/http"
 	"slices"
 	"sort"
 	"strconv"
@@ -423,10 +424,12 @@ func (tf *IssueTrackerFake) BlocksOf(num string) ([]Dependency, error) {
 
 func (tf *IssueTrackerFake) Comment(num, body string) error {
 	tf.Fire("Comment")
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	tf.CommentCalls = append(tf.CommentCalls, CommentCall{num, body})
-	return tf.CommentErr
+	return tf.call(http.MethodPost, pathComment, nil, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		tf.CommentCalls = append(tf.CommentCalls, CommentCall{num, body})
+		return nil, tf.CommentErr
+	})
 }
 
 // Comments returns num's scripted CommentsFor entry. An unscripted number

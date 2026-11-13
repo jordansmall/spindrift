@@ -74,12 +74,13 @@ const (
 	pathPRComment    = "/forge/prComment"
 	pathOpenPR       = "/forge/openPR"
 	pathDeleteBranch = "/forge/deleteBranch"
+	pathComment      = "/tracker/comment"
 )
 
-// fakeWriteRoutes are the Routes the Fake's forge writes cross, mirroring the
-// finalised forge axis of the Connector protocol. The rebase Route is
-// fixture-only: a composed forge rebases in core's git, not over a Connector;
-// the Fake keeps Rebase crossing so its calls stay audited.
+// fakeWriteRoutes are the Routes the Fake's forge and tracker writes cross,
+// mirroring the finalised forge and tracker axes of the Connector protocol. The
+// rebase Route is fixture-only: a composed forge rebases in core's git, not
+// over a Connector; the Fake keeps Rebase crossing so its calls stay audited.
 var fakeWriteRoutes = []struct{ method, path string }{
 	{http.MethodPost, pathMerge},
 	{http.MethodPost, pathRebase},
@@ -88,6 +89,7 @@ var fakeWriteRoutes = []struct{ method, path string }{
 	{http.MethodPost, pathPRComment},
 	{http.MethodPost, pathOpenPR},
 	{http.MethodDelete, pathDeleteBranch},
+	{http.MethodPost, pathComment},
 }
 
 // fakeRoutes is the fixture Route table: one exact method and path per Route (a
