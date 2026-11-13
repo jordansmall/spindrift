@@ -3,10 +3,10 @@
 // The native jira adapter stays authoritative until the cut-over. The
 // Connector returns raw fields only (state, status, close time, the
 // entity-property markers, link keys, the doctor and daemon checks' raw data)
-// and performs the writes core asks for, one transition or label edit at a
-// time; core makes every lifecycle decision. The Connector only refuses a
-// status mapping in which two states other than failed and ambiguous share a
-// status.
+// and performs the writes core asks for, one transition, label edit, comment or
+// filed issue at a time; core makes every lifecycle decision. The Connector
+// only refuses a status mapping in which two states other than failed and
+// ambiguous share a status.
 package main
 
 import "spindrift.dev/sdk/tracker"
@@ -34,6 +34,8 @@ func init() {
 		Transition: transition,
 		EditLabels: editLabels,
 		ListLabels: listLabels,
+		Comment:    comment,
+		FileIssue:  fileIssue,
 	})
 }
 
