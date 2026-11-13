@@ -1,5 +1,7 @@
 package forge
 
+import "net/http"
+
 var _ CodeForge = (*CodeForgeFake)(nil)
 
 var _ BranchProtectionForge = (*CodeForgeFake)(nil)
@@ -88,40 +90,32 @@ func (cf *CodeForgeFake) SetBranchProtectedErr(branch string, err error) {
 	cf.branchProtectedErr[branch] = err
 }
 
+// Merge and Rebase run their whole mutation and recording inside the backend's
+// serve closure, so the state a later read observes was written behind the
+// Connector.
 func (cf *CodeForgeFake) Merge(url string) error {
 	cf.Fire("Merge")
-	cf.mu.Lock()
-	defer cf.mu.Unlock()
-	cf.LandingCallLog = append(cf.LandingCallLog, "Merge:"+url)
-	if len(cf.MergeErrs) > 0 {
-		err := cf.MergeErrs[0]
-		cf.MergeErrs = cf.MergeErrs[1:]
-		if err != nil {
-			return err
+	return cf.call(http.MethodPost, pathMerge, nil, func() (any, error) {
+		cf.mu.Lock()
+		defer cf.mu.Unlock()
+		cf.LandingCallLog = append(cf.LandingCallLog, "Merge:"+url)
+		if err := popErr(&cf.MergeErrs, cf.MergeErr); err != nil {
+			return nil, err
 		}
 		cf.Merged = url
 		cf.prStates[url] = PRMerged
-		return nil
-	}
-	if cf.MergeErr != nil {
-		return cf.MergeErr
-	}
-	cf.Merged = url
-	cf.prStates[url] = PRMerged
-	return nil
+		return nil, nil
+	})
 }
 
 func (cf *CodeForgeFake) Rebase(url string) error {
 	cf.Fire("Rebase")
-	cf.mu.Lock()
-	defer cf.mu.Unlock()
-	cf.RebasedURLs = append(cf.RebasedURLs, url)
-	if len(cf.RebaseErrs) > 0 {
-		err := cf.RebaseErrs[0]
-		cf.RebaseErrs = cf.RebaseErrs[1:]
-		return err
-	}
-	return cf.RebaseErr
+	return cf.call(http.MethodPost, pathRebase, nil, func() (any, error) {
+		cf.mu.Lock()
+		defer cf.mu.Unlock()
+		cf.RebasedURLs = append(cf.RebasedURLs, url)
+		return nil, popErr(&cf.RebaseErrs, cf.RebaseErr)
+	})
 }
 
 // Probe returns the scripted repo or error. It duplicates Fake's identical
