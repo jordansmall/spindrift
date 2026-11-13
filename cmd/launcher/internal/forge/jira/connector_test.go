@@ -259,8 +259,8 @@ func TestConnector_ReadContracts(t *testing.T) {
 	// A route no request used is broader than the reads need.
 	for _, r := range routes {
 		// The write routes (label edit, transition) and the label list are
-		// exercised by the write contract, not these read runs.
-		if r.Method == "PUT" || (r.Method == "POST" && r.Path == "/rest/api/2/issue") ||
+		// exercised by TestConnector_TrackerContract, not these read runs.
+		if ((r.Method == "PUT" || r.Method == "POST") && r.Path == "/rest/api/2/issue") ||
 			(r.Method == "GET" && r.Path == "/rest/api/2/label") {
 			continue
 		}
