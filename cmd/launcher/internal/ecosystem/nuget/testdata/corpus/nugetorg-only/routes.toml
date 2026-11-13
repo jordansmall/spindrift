@@ -1,0 +1,7 @@
+[[routes]]
+match-host = "api.nuget.org"
+upstream-origin = "https://api.nuget.org"
+allow = ["/v3-flatcontainer"]
+
+[routes.ecosystems.nuget]
+path = "/v3"

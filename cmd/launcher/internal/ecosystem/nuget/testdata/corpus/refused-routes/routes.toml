@@ -1,0 +1,8 @@
+[[routes]]
+match-host = "artifactory.example.test"
+upstream-origin = "https://artifactory.example.test"
+auth-scheme = "bearer"
+credential = { env = "NUGET_TOKEN" }
+
+[routes.ecosystems.nuget]
+path = "mirror"

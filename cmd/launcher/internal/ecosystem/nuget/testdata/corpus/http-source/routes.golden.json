@@ -1,0 +1,19 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "netrc",
+      "FromEnv": "",
+      "FromFile": "stores/netrc",
+      "MatchHost": "nuget.internal.example.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "http://nuget.internal.example.test:8081"
+    },
+    "Ecosystems": null,
+    "MatchHost": "nuget.internal.example.test",
+    "UpstreamOrigin": "http://nuget.internal.example.test:8081"
+  }
+]

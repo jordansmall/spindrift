@@ -1,0 +1,29 @@
+{
+  "derived": [
+    {
+      "Host": "nuget.internal.example.test",
+      "Origin": "http://nuget.internal.example.test:8081",
+      "Subtrees": [
+        {
+          "ecosystem": "nuget",
+          "path": "/v3"
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/v3"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "nuget",
+          "path": "/v3"
+        }
+      ],
+      "matchHost": "nuget.internal.example.test",
+      "upstream": "http://nuget.internal.example.test:8081"
+    }
+  ]
+}

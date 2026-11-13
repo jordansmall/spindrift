@@ -1,0 +1,3 @@
+{
+  "refused": "registryroutes: route \"artifactory.example.test\": ecosystems.nuget.path \"mirror\" must start with \"/\""
+}

@@ -1,0 +1,1 @@
+machine artifactory.example.test login synth password not-a-secret
