@@ -17,6 +17,7 @@ type prStore struct {
 	logs        map[int]string
 	protected   map[string]bool
 	allowRebase bool
+	refused     map[string]bool
 	requests    int
 	merges      int
 }
@@ -73,6 +74,24 @@ func (b *Backend) MergeRequests() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.prs.merges
+}
+
+// RefuseHead makes the backend refuse to open a PR from head, as a forge
+// refuses an unprocessable one.
+func (b *Backend) RefuseHead(head string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.prs.refused == nil {
+		b.prs.refused = map[string]bool{}
+	}
+	b.prs.refused[head] = true
+}
+
+// PRCount is how many PRs the backend holds.
+func (b *Backend) PRCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.prs.pulls)
 }
 
 // AddPR scripts an open PR number from head into base, ready or draft.
@@ -238,6 +257,17 @@ func (b *Backend) servePR(w http.ResponseWriter, r *http.Request, rel string) {
 		if json.NewDecoder(r.Body).Decode(&in) != nil {
 			http.Error(w, "bad body", http.StatusBadRequest)
 			return
+		}
+		if b.prs.refused[in.Head] {
+			http.Error(w, "unprocessable head", http.StatusUnprocessableEntity)
+			return
+		}
+		// A forge answers 409 when the head already has an open PR.
+		for _, p := range b.prs.pulls {
+			if p.head == in.Head && !p.closed && !p.merged {
+				http.Error(w, "pull request already exists for these targets", http.StatusConflict)
+				return
+			}
 		}
 		n := 1
 		for _, p := range b.prs.pulls {

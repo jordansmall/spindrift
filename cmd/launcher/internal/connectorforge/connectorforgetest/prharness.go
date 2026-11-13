@@ -29,7 +29,7 @@ func NewPR(t *testing.T) *PRHarness { return NewPRVariant(t, PRWasm) }
 // NewPRVariant loads the named fixture PR Connector wasm file.
 func NewPRVariant(t *testing.T, wasm string) *PRHarness {
 	t.Helper()
-	return &PRHarness{newBase(t, wasm, prMethods)}
+	return &PRHarness{newBase(t, wasm, prMethods, writableBox)}
 }
 
 // Forge returns the PRForge Compose resolved.

@@ -167,16 +167,7 @@ func TestFullCapabilityForgeHostMediatesWithCoresCredential(t *testing.T) {
 	wantSHA := forgetest.RevParse(t, src, "work")
 
 	// A git shim on PATH records the credential core's git ran with.
-	realGit, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatal(err)
-	}
-	shim, seen := t.TempDir(), filepath.Join(t.TempDir(), "seen")
-	script := "#!/bin/sh\nprintf '%s:%s\\n' \"$GITEXEC_USERNAME\" \"$GITEXEC_PASSWORD\" >> " + seen + "\nexec " + realGit + " \"$@\"\n"
-	if err := os.WriteFile(filepath.Join(shim, "git"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", shim+string(os.PathListSeparator)+os.Getenv("PATH"))
+	seen := gitCredentialLog(t)
 
 	branch := "agent/issue-9001"
 	if err := caps.BranchPusher.PushBranch(src, "work", branch, "main"); err != nil {
@@ -212,5 +203,92 @@ func TestFullCapabilityForgeHostMediatesWithCoresCredential(t *testing.T) {
 	}
 	if !h.IsDraft(url) {
 		t.Errorf("PR %s is not a draft", url)
+	}
+}
+
+// gitCredentialLog puts a git shim on PATH and returns the file it appends the
+// GITEXEC_USERNAME:GITEXEC_PASSWORD core's git ran with to.
+func gitCredentialLog(t *testing.T) string {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shim, seen := t.TempDir(), filepath.Join(t.TempDir(), "seen")
+	script := "#!/bin/sh\nprintf '%s:%s\\n' \"$GITEXEC_USERNAME\" \"$GITEXEC_PASSWORD\" >> '" + seen + "'\nexec '" + realGit + "' \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(shim, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", shim+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return seen
+}
+
+func TestComposedForgeHostMediationContract(t *testing.T) {
+	forgetest.RunHostMediationContract(t, connectorforgetest.NewHostMediation(t))
+}
+
+func TestReadOnlyBoxRelaysAndOpensTheDraftWithoutTheConnectorSeeingGit(t *testing.T) {
+	h := connectorforgetest.NewHostMediation(t)
+	caps := h.Capabilities()
+	if caps.BundleRelay == nil || caps.BundleCommitSubjects == nil || caps.DraftPRCreator == nil || caps.BranchPusher == nil {
+		t.Fatalf("capabilities = %+v, want BundleRelay, BundleCommitSubjects, DraftPRCreator and BranchPusher", caps)
+	}
+	seen := gitCredentialLog(t)
+	const ref = "agent/issue-9002"
+	outbox := h.SeedBundle(ref)
+	h.Audit.Reset()
+	before := h.Backend.Requests()
+
+	subjects, err := caps.BundleCommitSubjects.CommitSubjects(outbox, "main", ref)
+	if err != nil || len(subjects) != 1 || subjects[0] != "feature" {
+		t.Fatalf("CommitSubjects = (%q, %v), want [feature]", subjects, err)
+	}
+	if err := caps.BundleRelay.RelayBundle(outbox, ref); err != nil {
+		t.Fatalf("RelayBundle: %v", err)
+	}
+	if !h.BundleLanded(ref) {
+		t.Fatalf("%s never reached the repository", ref)
+	}
+	log, err := os.ReadFile(seen)
+	if err != nil {
+		t.Fatalf("git shim never ran with a credential: %v", err)
+	}
+	if !strings.Contains(string(log), h.Credential.Username+":"+h.Credential.Password) {
+		t.Errorf("relay's git ran without core's credential: %q", log)
+	}
+	if n := h.Backend.Requests() - before; n != 0 || h.Audit.Len() != 0 {
+		t.Errorf("relay crossed the Connector: %d backend requests, audit %q, want none", n, h.Audit.String())
+	}
+
+	if _, created, err := caps.DraftPRCreator.CreateDraftPR("t", "b", "main", ref); err != nil || !created {
+		t.Fatalf("CreateDraftPR = (%v, %v), want created", created, err)
+	}
+	var entries []connectorhost.AuditEntry
+	for _, l := range strings.Split(strings.TrimSpace(h.Audit.String()), "\n") {
+		var e connectorhost.AuditEntry
+		if err := json.Unmarshal([]byte(l), &e); err != nil {
+			t.Fatalf("audit line %q: %v", l, err)
+		}
+		entries = append(entries, e)
+	}
+	if len(entries) != 1 || entries[0].Method != "POST" || !strings.HasSuffix(entries[0].Path, "/repos/o/r/pulls") {
+		t.Errorf("audit entries = %+v, want only the forge.openPR POST", entries)
+	}
+	if n := h.Backend.Requests() - before; n != 1 {
+		t.Errorf("backend saw %d requests, want only the openPR POST", n)
+	}
+	if strings.Contains(h.Audit.String(), h.Credential.Password) {
+		t.Error("the Connector's audit log carries core's git credential")
+	}
+}
+
+func TestBundleRelayIsOfferedOnlyToAReadOnlyBoxOnADraftPRForge(t *testing.T) {
+	rw := connectorforgetest.NewPR(t).Capabilities()
+	if rw.BundleRelay != nil || rw.BundleCommitSubjects != nil || rw.DraftPRCreator == nil || rw.BranchPusher == nil {
+		t.Errorf("read-write capabilities = %+v, want DraftPRCreator and BranchPusher and no bundle relay", rw)
+	}
+	ro := connectorforgetest.NewHostMediationVariant(t, connectorforgetest.MinimalPRWasm).Capabilities()
+	if ro.BundleRelay != nil || ro.BundleCommitSubjects != nil || ro.DraftPRCreator != nil || ro.BranchPusher != nil {
+		t.Errorf("read-only capabilities without forge.draftPRs = %+v, want none of the host-mediated surface", ro)
 	}
 }
