@@ -283,3 +283,37 @@ func TestConnectorRoutesChecks_GithubForgeWritesShowAsWidening(t *testing.T) {
 		}
 	}
 }
+
+// The github Connector's tracker write primitives (issue #6881) add two roots
+// over a Consumer whose baseline holds the forge write half: GET and POST under
+// /labels list and create the repository's labels. Label add, comment and issue
+// filing ride the existing POST /issues root and label removal the existing
+// POST /graphql root, so they add nothing. The declared set is a hand-picked
+// subset of connectors/github/routes.nix, which a Go test cannot import.
+func TestConnectorRoutesChecks_GithubTrackerWritesShowAsWidening(t *testing.T) {
+	route := func(method, path string) connectorhost.Route {
+		return connectorhost.Route{Method: method, Host: "api.github.com", Path: path}
+	}
+	accepted := []connectorhost.Route{
+		route("GET", "/repos/o/r/issues"),
+		route("POST", "/repos/o/r/issues"),
+		route("POST", "/repos/o/r/pulls"),
+		route("GET", "/repos/o/r/branches"),
+	}
+	added := []connectorhost.Route{
+		route("GET", "/repos/o/r/labels"),
+		route("POST", "/repos/o/r/labels"),
+	}
+	useConnectorRows(t, connectorRow(accepted, append(append([]connectorhost.Route{}, accepted...), added...)))
+	out := runConnectorRows(t, connectorRoutesChecks())
+	for _, r := range added {
+		if want := "\n+ " + r.String(); !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	for _, r := range accepted {
+		if strings.Contains(out, "+ "+r.String()) {
+			t.Errorf("accepted route %s reported as added:\n%s", r, out)
+		}
+	}
+}
