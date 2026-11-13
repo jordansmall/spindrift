@@ -601,3 +601,18 @@ amendment for this issue records the widened exception. Two parts of the
 code plane are still to come: `read-write` keeps its direct in-box clone until
 it is removed, and the read-only Box still holds `GH_TOKEN` for its in-box
 reads, so removing the Box token is separate work (spec #6757).
+
+## Amendment (issue #6854): the tracker Connector performs lifecycle writes
+
+A Connector declaring the tracker write primitives (`tracker.transition`,
+`tracker.editLabels`, and `tracker.labels` for the label list and create)
+performs claims, transitions and verdict label edits through `http_request`.
+Jira's Route table widens by PUT and POST `/rest/api/2/issue` and GET
+`/rest/api/2/label` (`connectors/jira/routes.nix`). Every lifecycle decision
+stays in core, in `connectortracker`'s transition layer: the hybrid fallback to
+a label swap, the status-only refusal, the settled-label strip before a native
+claim, the already-claimed check, verdict completion, and research staying
+label-only. The Connector answers only whether a move happened, was unavailable
+or was unmapped. The production wiring waits for the #6753 cut-over: the native
+adapter stays authoritative until then, and `readshadow.go` still builds the
+Connector tracker with dispatch labels alone, no status lifecycle.
