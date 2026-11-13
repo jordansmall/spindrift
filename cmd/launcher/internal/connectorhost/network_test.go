@@ -646,3 +646,42 @@ func TestNetworkFollowRedirectAuditsA3xxWithoutAUsableLocation(t *testing.T) {
 		t.Fatalf("audit = %+v, want one sent entry whose reason says the hop was skipped", lines)
 	}
 }
+
+func TestNetworkDoReturnsTheResponseHeaders(t *testing.T) {
+	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-OAuth-Scopes", "repo")
+		fmt.Fprint(w, "hello")
+	})
+	n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+	raw := fmt.Sprintf(`{"method":"GET","url":"%s/repos/x"}`, b.URL)
+	_, _, h, err := n.DoHeader(context.Background(), []byte(raw), 1<<10)
+	if err != nil || h.Get("x-oauth-scopes") != "repo" {
+		t.Fatalf("headers = %v, err %v, want X-OAuth-Scopes: repo", h, err)
+	}
+}
+
+func TestNetworkDoHoldsNoHeadersForAFailedRequest(t *testing.T) {
+	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Leak", "1")
+		fmt.Fprint(w, strings.Repeat("x", 64))
+	})
+	n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+	raw := fmt.Sprintf(`{"method":"GET","url":"%s/repos/x"}`, b.URL)
+	if _, _, h, err := n.DoHeader(context.Background(), []byte(raw), 8); err == nil || h != nil {
+		t.Fatalf("headers = %v, err %v, want an oversize failure with no headers", h, err)
+	}
+}
+
+func TestNetworkFollowRedirectHeadersAreTheHopsNotTheOrigins(t *testing.T) {
+	target := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Source", "target")
+		fmt.Fprint(w, "log body")
+	})
+	origin := redirectingOrigin(t, target.URL+"/blob")
+	n := netFor(origin, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true})
+	raw := fmt.Sprintf(`{"method":"GET","url":"%s/logs/1"}`, origin.URL)
+	_, _, h, err := n.DoHeader(context.Background(), []byte(raw), 1<<10)
+	if err != nil || h.Get("X-Source") != "target" || h.Get("Location") != "" {
+		t.Fatalf("headers = %v, err %v, want the hop's", h, err)
+	}
+}

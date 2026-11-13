@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"strconv"
 	"strings"
@@ -225,6 +226,9 @@ type Connector struct {
 	// tell an already-audited failure from one it must audit. Reset by each
 	// invoke. Guarded by mu.
 	hostErr error
+	// respHeader is the last http_request's response headers, nil when it left
+	// none; http_response_header reads it. Reset by each invoke. Guarded by mu.
+	respHeader http.Header
 	// mu serializes guest calls, since a wazero module instance is not safe for
 	// concurrent use, and guards dead.
 	mu   sync.Mutex
@@ -277,6 +281,7 @@ func (c *Connector) applyLimits(ctx context.Context, l limits) (context.Context,
 func (c *Connector) invoke(ctx context.Context, fn api.Function, name string, args ...uint64) ([]uint64, error) {
 	c.memCap.hit = false // a refusal the guest survived in an earlier call is not this call's cause
 	c.hostErr = nil
+	c.respHeader = nil
 	res, err := fn.Call(ctx, args...)
 	if err == nil {
 		return res, nil

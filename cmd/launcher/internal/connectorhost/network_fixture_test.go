@@ -16,6 +16,8 @@ import (
 type fetched struct {
 	Status int    `json:"status"`
 	Body   string `json:"body"`
+	// Header is nil when the header the test asked for was absent.
+	Header *string `json:"header"`
 }
 
 // loadNetworkFixture loads a fixture network Connector against a scripted
@@ -33,6 +35,10 @@ func loadNetworkFixtureWith(t *testing.T, wasm string, tweak func(*connectorhost
 			fmt.Fprint(w, strings.Repeat("x", connectorhost.MaxHTTPResponse+1))
 			return
 		}
+		w.Header().Add("X-Scripted", "a")
+		w.Header().Add("X-Scripted", "b")
+		w.Header().Set("X-Empty", "")
+		w.Header().Set("Set-Cookie", "session=s3cret")
 		fmt.Fprint(w, "scripted "+r.URL.Path)
 	})
 	audit = &bytes.Buffer{}
@@ -195,3 +201,29 @@ func TestNetworkFixtureServesManyRequestsUnderTheMemoryCap(t *testing.T) {
 		}
 	}
 }
+
+func TestNetworkFixtureReadsResponseHeadersThroughTheHostCall(t *testing.T) {
+	c, _, _, params := loadNetworkFixture(t, "network.wasm")
+	for _, tc := range []struct {
+		name, header string
+		want         *string
+	}{
+		{"canonicalised and joined", "x-scripted", ptr("a, b")},
+		{"present but empty", "X-Empty", ptr("")},
+		{"absent", "X-Missing", nil},
+		{"set-cookie is withheld", "Set-Cookie", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := map[string]string{"url": params["url"], "method": "GET", "header": tc.header}
+			var out fetched
+			if err := c.Call(context.Background(), "fetch", p, &out); err != nil {
+				t.Fatal(err)
+			}
+			if (out.Header == nil) != (tc.want == nil) || (tc.want != nil && *out.Header != *tc.want) {
+				t.Errorf("header %q = %v, want %v", tc.header, out.Header, tc.want)
+			}
+		})
+	}
+}
+
+func ptr(s string) *string { return &s }
