@@ -3,12 +3,15 @@
 // forge.NativeDepsReader, forge.BlockersLister, forge.IssueSearcher, the Probe
 // read, forge.StatusMappingChecker, forge.IssueTypeChecker and
 // forge.DemandCounter) from a tracker Connector, over the 0.2 tracker
-// primitives in sdk/tracker. Every write stays with the native adapter, which
-// also stays authoritative for every optional capability the protocol does not
-// carry: the result is a stack of forge.Unwrapper layers over the native
-// adapter, so forge.As reaches those capabilities through it. The check and
-// demand capabilities are the exception: they come only from the Connector,
-// and are absent when it omits them.
+// primitives in sdk/tracker. A Connector that advertises the transition and
+// label-edit primitives performs the writes, while core keeps every lifecycle
+// decision (claim checks, the settled-label strip, fallback and refusal,
+// verdicts); any other write stays with the native adapter, which also stays
+// authoritative for every optional capability the protocol does not carry: the
+// result is a stack of forge.Unwrapper layers over the native adapter, so
+// forge.As reaches those capabilities through it. The check and demand
+// capabilities are the exception: they come only from the Connector, and are
+// absent when it omits them.
 package connectortracker
 
 import (
@@ -56,6 +59,15 @@ type Lifecycle struct {
 	// IssueType is the issue type core files issues as (JIRA_ISSUE_TYPE), which
 	// the createMeta check measures the project against.
 	IssueType string
+	// VerdictLabels names the label each research verdict lands as.
+	VerdictLabels forge.VerdictLabels
+	// Resolutions is the resolution a transition into a mapped state sets; a
+	// state absent leaves it to the tracker's workflow default.
+	Resolutions map[forge.DispatchState]string
+	// StatusOnly is the status-only lifecycle: an unavailable or unmapped
+	// transition is refused instead of swapped for a label, and the claim check
+	// reads the native status alone.
+	StatusOnly bool
 }
 
 // Routes returns a copy of a tracker Connector's Route table with the
@@ -122,6 +134,36 @@ type (
 	targetParams struct {
 		Target Target `json:"target"`
 	}
+	editLabelsParams struct {
+		Target Target   `json:"target"`
+		Number string   `json:"number"`
+		Add    []string `json:"add"`
+		Remove []string `json:"remove"`
+	}
+	createLabelParams struct {
+		Target      Target `json:"target"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Color       string `json:"color"`
+	}
+	StatusTarget struct {
+		Status     string `json:"status"`
+		Resolution string `json:"resolution"`
+	}
+	transitionRequest struct {
+		State   string                  `json:"state"`
+		Mapping map[string]StatusTarget `json:"mapping"`
+	}
+	transitionResult struct {
+		Outcome string   `json:"outcome"`
+		Status  string   `json:"status"`
+		Offered []string `json:"offered"`
+	}
+	transitionParams struct {
+		Target Target `json:"target"`
+		Number string `json:"number"`
+		transitionRequest
+	}
 	createMetaParams struct {
 		Target    Target `json:"target"`
 		IssueType string `json:"issueType"`
@@ -178,6 +220,24 @@ const (
 	CapCountInterval = "tracker.countInterval"
 	// CapSearchIssues: the Connector serves tracker.searchIssues.
 	CapSearchIssues = "tracker.searchIssues"
+	// CapTransition: the Connector serves tracker.transition. With CapEditLabels
+	// it performs core's transitions and verdicts.
+	CapTransition = "tracker.transition"
+	// CapEditLabels: the Connector serves tracker.editLabels.
+	CapEditLabels = "tracker.editLabels"
+	// CapLabels: the Connector serves tracker.listLabels and tracker.createLabel,
+	// its label registry.
+	CapLabels = "tracker.labels"
+	// CapListLabels and CapCreateLabel are the methods behind CapLabels.
+	CapListLabels  = "tracker.listLabels"
+	CapCreateLabel = "tracker.createLabel"
+)
+
+// The outcomes of tracker.transition that are not an error.
+const (
+	transitionMoved       = "moved"
+	transitionUnavailable = "unavailable"
+	transitionUnmapped    = "unmapped"
 )
 
 // projectKeyID is the projectKey grammar: ids become branch names, so the
@@ -185,8 +245,8 @@ const (
 var projectKeyID = regexp.MustCompile(`^[A-Z][A-Z0-9_]*-[1-9][0-9]*$`)
 
 // reads serves the list and issue reads from a Connector and leaves every write
-// to the embedded native adapter. It is the base layer; the optional layers
-// stack on it.
+// to the embedded native adapter, which the write layers override. It is the base
+// layer; the optional layers stack on it.
 type reads struct {
 	forge.IssueTracker
 	call      guestCall
@@ -503,11 +563,13 @@ var (
 	_ forge.IssueSearcher        = searchLayer{}
 )
 
-// New builds core's tracker reads from a tracker Connector. writes keeps
-// every write (transitions, verdicts, comments, labels), which never cross the
-// protocol, and answers every optional capability the protocol does not carry
-// (see CapComments, CapNativeDeps, CapBlocks and CapSearchIssues); Probe stays
-// with it unless the Connector advertises CapProbe. The doctor and demand
+// New builds core's tracker from a tracker Connector. writes answers every
+// write the Connector does not perform: transitions and verdicts unless it
+// advertises both CapTransition and CapEditLabels, the label registry unless
+// CapLabels, and comments and issue edits always. It also answers every
+// optional capability the protocol does not carry (see CapComments,
+// CapNativeDeps, CapBlocks and CapSearchIssues); Probe stays with it unless
+// the Connector advertises CapProbe. The doctor and demand
 // checks (CapStatuses, CapCreateMeta, CapCount) are never answered natively.
 // Look capabilities up with forge.As. Calls run under context.Background()
 // because IssueTracker methods carry no context.
@@ -568,6 +630,12 @@ func newTracker(call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, 
 	if slices.Contains(caps, CapSearchIssues) {
 		it = searchLayer{it, r}
 	}
+	if slices.Contains(caps, CapTransition) && slices.Contains(caps, CapEditLabels) {
+		it = transitionLayer{it, r}
+	}
+	if slices.Contains(caps, CapLabels) {
+		it = labelsLayer{it, r}
+	}
 	return it, nil
 }
 
@@ -616,18 +684,24 @@ func (t *reads) list(label, status string) ([]forge.Issue, error) {
 }
 
 func (t *reads) Issue(num string) (forge.Issue, error) {
+	got, _, err := t.readIssue(num)
+	return got, err
+}
+
+// readIssue is Issue plus the raw workflow status the write layers decide on.
+func (t *reads) readIssue(num string) (forge.Issue, string, error) {
 	var w wireIssue
 	if err := t.call(context.Background(), "tracker.issue", numberedParams{t.target, num}, &w); err != nil {
-		return forge.Issue{}, err
+		return forge.Issue{}, "", err
 	}
 	got, err := w.issue(t.ids)
 	if err != nil {
-		return forge.Issue{}, err
+		return forge.Issue{}, "", err
 	}
 	if got.Number != num {
-		return forge.Issue{}, fmt.Errorf("%w: asked for issue %s, got %s", ErrAnswer, num, got.Number)
+		return forge.Issue{}, "", fmt.Errorf("%w: asked for issue %s, got %s", ErrAnswer, num, got.Number)
 	}
-	return got, nil
+	return got, w.Status, nil
 }
 
 // idGrammar is the shape of every id a Connector returns. Ids become branch
