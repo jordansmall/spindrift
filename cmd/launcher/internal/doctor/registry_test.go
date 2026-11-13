@@ -652,3 +652,26 @@ func TestPrerequisiteCheckMapsTierAndFields(t *testing.T) {
 		}
 	}
 }
+
+func TestBlocking_UnsupportedIsNeverBlockingAtAnyTier(t *testing.T) {
+	err := fmt.Errorf("no capability: %w", ErrUnsupported)
+	for _, tier := range []Tier{Required, Advisory} {
+		if Blocking(Result{Check: Check{Name: "c", Tier: tier}, Err: err}) {
+			t.Errorf("tier %v: Blocking(unsupported) = true, want false", tier)
+		}
+	}
+}
+
+func TestFirstRequiredError_SkipsUnsupportedRequiredRowAndKeepsGoing(t *testing.T) {
+	genuine := errors.New("branch is unprotected")
+	results := []Result{
+		{Check: Check{Name: "unsupported", Tier: Required}, Err: fmt.Errorf("x: %w", ErrUnsupported)},
+		{Check: Check{Name: "other", Tier: Required}, Err: genuine},
+	}
+	if got := FirstRequiredError(results); !errors.Is(got, genuine) {
+		t.Fatalf("FirstRequiredError() = %v, want %v", got, genuine)
+	}
+	if got := FirstRequiredError(results[:1]); got != nil {
+		t.Fatalf("FirstRequiredError(only unsupported) = %v, want nil", got)
+	}
+}
