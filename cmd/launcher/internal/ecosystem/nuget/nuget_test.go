@@ -73,8 +73,19 @@ func TestParseNuGetConfig(t *testing.T) {
 			wantNamed: true,
 		},
 		{
-			name:    "nuget.org alone is neither declared nor named",
+			name:    "nuget.org alone is declared Public and never named",
 			sources: `<add key="nuget.org" value="https://api.nuget.org/v3/index.json" />`,
+			want:    []ecosystem.Declaration{{Host: "api.nuget.org", UpstreamBaseURL: "https://api.nuget.org/v3", Public: true}},
+		},
+		{
+			name: "a feed plus nuget.org names only the feed",
+			sources: `<add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+				<add key="a" value="` + feed + `/index.json" />`,
+			want: []ecosystem.Declaration{
+				{Host: "api.nuget.org", UpstreamBaseURL: "https://api.nuget.org/v3", Public: true},
+				{Host: "feed.example.test", UpstreamBaseURL: feed},
+			},
+			wantNamed: true,
 		},
 		{
 			name: "clear drops an earlier add",

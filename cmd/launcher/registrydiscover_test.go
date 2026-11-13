@@ -538,3 +538,126 @@ func TestDefaultRegistryDiscoverStores(t *testing.T) {
 		}
 	}
 }
+
+// publicDiscoverRow names only a public default, which discovery never routes.
+var publicDiscoverRow = ecosystem.Strategy{
+	Name:             "fake",
+	InTreeConfigPath: "fake.cfg",
+	ConfigParser: func(string) ([]ecosystem.Declaration, bool, error) {
+		return []ecosystem.Declaration{{Host: "pub.example.com", UpstreamBaseURL: "https://pub.example.com/v3", Public: true}}, false, nil
+	},
+}
+
+func discoverPublicProbe(string) registrydiscover.ProbeResult {
+	return registrydiscover.ProbeResult{Profile: registrydiscover.ProfileAdvice{Name: "pub", Note: "known public host"}}
+}
+
+func TestRunRegistryDiscover_PublicOnly_WritesNoFileAndSaysNothingToConfigure(t *testing.T) {
+	repoDir := t.TempDir()
+	writeDiscoverDeclarations(t, repoDir, publicDiscoverRow, "x")
+	outPath := filepath.Join(t.TempDir(), "routes.toml")
+
+	var out, errOut strings.Builder
+	code := runRegistryDiscover(&out, &errOut, []ecosystem.Strategy{publicDiscoverRow}, repoDir, outPath, false, discoverNetrcStore(), discoverNoMatch, discoverPublicProbe)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stdout=%s stderr=%s", code, out.String(), errOut.String())
+	}
+	if _, err := os.Stat(outPath); err == nil {
+		t.Errorf("Stat(%q): file exists, want none (a comment-only file fails Parse)", outPath)
+	}
+	for _, want := range []string{`public pub.example.com (host profile "pub"): known public host`, "nothing to configure; no routes file written"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("stdout = %q, want it to contain %q", out.String(), want)
+		}
+	}
+	if strings.Contains(out.String(), "config declares only non-http") || strings.Contains(out.String(), "no registry declared") {
+		t.Errorf("stdout = %q, want the public config left out of the empty/skipped sections", out.String())
+	}
+	if errOut.String() != "" {
+		t.Errorf("stderr = %q, want empty", errOut.String())
+	}
+}
+
+func TestRunRegistryDiscover_PublicOnlyWithoutProfile_StillErrors(t *testing.T) {
+	repoDir := t.TempDir()
+	writeDiscoverDeclarations(t, repoDir, publicDiscoverRow, "x")
+	outPath := filepath.Join(t.TempDir(), "routes.toml")
+
+	var out, errOut strings.Builder
+	code := runRegistryDiscover(&out, &errOut, []ecosystem.Strategy{publicDiscoverRow}, repoDir, outPath, false, nil, discoverNoMatch, discoverBearerProbe)
+	if code == 0 || !strings.Contains(errOut.String(), "nothing to write") {
+		t.Errorf("code = %d stderr = %q, want the nothing-to-write error", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "config present, no registry declared:") {
+		t.Errorf("stdout = %q, want the no-registry section the missing profile leaves unexplained", out.String())
+	}
+}
+
+// A skipped private feed beside nuget.org must not be explained away by the
+// public line: the operator's own registry was dropped.
+func TestRunRegistryDiscover_PublicBesideSkippedNuGetFeed_StillErrors(t *testing.T) {
+	repoDir := t.TempDir()
+	cfg := `<configuration><packageSources>` +
+		`<add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />` +
+		`<add key="acme" value="https://acme.jfrog.io/artifactory/api/nuget/nuget-local" />` +
+		`</packageSources></configuration>`
+	if err := os.WriteFile(filepath.Join(repoDir, "nuget.config"), []byte(cfg), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	probe := func(u string) registrydiscover.ProbeResult {
+		if strings.Contains(u, "api.nuget.org") {
+			return discoverPublicProbe(u)
+		}
+		return discoverBearerProbe(u)
+	}
+	outPath := filepath.Join(t.TempDir(), "routes.toml")
+
+	var out, errOut strings.Builder
+	code := runRegistryDiscover(&out, &errOut, ecosystem.Registered(), repoDir, outPath, false, nil, discoverNoMatch, probe)
+	if code != 1 || !strings.Contains(errOut.String(), "nothing to write") {
+		t.Errorf("code = %d stderr = %q, want 1 and the nothing-to-write error", code, errOut.String())
+	}
+	for _, want := range []string{"config declares only non-http/unusable registry URLs:", "nuget.config (nuget)", `public api.nuget.org (host profile "pub")`} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("stdout = %q, want it to contain %q", out.String(), want)
+		}
+	}
+	if strings.Contains(out.String(), "nothing to configure") {
+		t.Errorf("stdout = %q, want no nothing-to-configure claim", out.String())
+	}
+}
+
+func TestRunRegistryDiscover_PublicBesideRealRoute_CommentsLandInFile(t *testing.T) {
+	repoDir := t.TempDir()
+	writeDiscoverDeclarations(t, repoDir, publicDiscoverRow, "x")
+	writeDiscoverDeclarations(t, repoDir, synthetic.Strategy, "main = https://registry.example.com/index")
+	outPath := filepath.Join(t.TempDir(), "routes.toml")
+
+	probe := func(u string) registrydiscover.ProbeResult {
+		if strings.Contains(u, "pub.example.com") {
+			return discoverPublicProbe(u)
+		}
+		return discoverBearerProbe(u)
+	}
+	var out, errOut strings.Builder
+	code := runRegistryDiscover(&out, &errOut, []ecosystem.Strategy{publicDiscoverRow, synthetic.Strategy}, repoDir, outPath, false, discoverNetrcStore(), discoverAlwaysMatch, probe)
+	if code != 0 {
+		t.Fatalf("code = %d; stdout=%s stderr=%s", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "route registry.example.com") || !strings.Contains(out.String(), "public pub.example.com") {
+		t.Errorf("stdout = %q, want a route line and a public line", out.String())
+	}
+	if strings.Contains(out.String(), "route pub.example.com") {
+		t.Errorf("stdout = %q, public host printed as a route", out.String())
+	}
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `# "pub.example.com" gets no route`) {
+		t.Errorf("file = %s, want the public comment", data)
+	}
+	if routes, err := registryroutes.Parse(data, nil); err != nil || len(routes) != 1 {
+		t.Errorf("Parse = %d routes, %v; want 1, nil", len(routes), err)
+	}
+}
