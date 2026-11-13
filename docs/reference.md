@@ -2620,12 +2620,16 @@ properties rather than splicing them into text. Its count is Cloud's
 approximate count or, on Server, the total of a zero-row search, over the same
 query as `tracker.listIssues`. It also performs the writes core asks for:
 `tracker.transition` (a workflow transition, with the mapped resolution when
-the transition's screen has a resolution field), `tracker.editLabels` and
-`tracker.listLabels`; `tracker.createLabel` is a no-op, as Jira has no label
-registry. Its Route table is `GET` routes on the `{base}` host,
+the transition's screen has a resolution field), `tracker.editLabels`,
+`tracker.listLabels`, `tracker.comment` (wiki markup, the research marker as the
+`spindrift-research` comment property) and `tracker.fileIssue` (an issue of the
+requested type, its dedup marker as the `spindrift.dedup` issue property,
+answering the issue's browse URL); `tracker.createLabel` is a no-op, as Jira has
+no label registry. Its Route table is `GET` routes on the `{base}` host,
 `/rest/api/2/search`, `/rest/api/2/issue`, `/rest/api/2/label`,
 `/rest/api/2/myself` and `/rest/api/2/project/{repo}/statuses`, `PUT` and `POST`
-on `/rest/api/2/issue` (the label edit and a transition), and
+on `/rest/api/2/issue` (the label edit; a transition, a comment and an issue
+create), and
 `POST /rest/api/3/search/approximate-count`. The writes and the label read widen
 the table beyond a Consumer's accepted baseline, so doctor's
 `connector-routes-widened[jira]` row lists them as `+` lines until the
@@ -3082,7 +3086,8 @@ This is protocol version **0.3.0**. The host is
   `"tracker.comments"`, `"tracker.nativeDeps"`, `"tracker.blocks"`,
   `"tracker.probe"`, `"tracker.statuses"`, `"tracker.createMeta"`,
   `"tracker.count"`, `"tracker.searchIssues"`, `"tracker.transition"`,
-  `"tracker.editLabels"` and `"tracker.labels"`, serving the method of the
+  `"tracker.editLabels"`, `"tracker.comment"`, `"tracker.fileIssue"` and
+  `"tracker.labels"`, serving the method of the
   same name (`"tracker.labels"` serves `tracker.listLabels` and
   `tracker.createLabel`), and `"tracker.ids.projectKey"` (see **Issue
   ids**). Advertising `"tracker.comments"` attests that each comment's
@@ -3110,6 +3115,8 @@ This is protocol version **0.3.0**. The host is
   | `tracker.searchIssues` (optional) | `{target, text, state, label, limit}`, `label` `""` for any | `{issues}`, in match order |
   | `tracker.transition` (optional) | `{target, number, state, mapping}`: `state` is the Dispatch state's canonical name (`dispatchable`, `in-progress`, `complete`, `failed`, `ambiguous`) and `mapping` is core's whole table, `{<state>: {status, resolution}}`, for every state that names a status; the Connector looks up `mapping[state]`, applies the rule that only `failed` and `ambiguous` may share a status (an error otherwise) and sends the resolution when it is non-empty | `{outcome, status, offered}`: `status` is the native status the Connector resolved `state` to (`""` when unmapped); `outcome` is `moved` (the native transition ran), `unavailable` (the workflow offers no transition to `status` from the issue's current status; `offered` names the statuses it does offer) or `unmapped` (`mapping` holds no non-empty status for `state`); an error for anything else, including a screen field the transition requires and the request does not fill |
   | `tracker.editLabels` (optional) | `{target, number, add, remove}` | `{}`; one edit that adds and removes the named labels |
+  | `tracker.comment` (optional) | `{target, number, body, research}`: `body` is canonical Markdown without the research marker line, and `research` says the comment carries that marker | `{}`; one comment, the marker kept where the tracker can report it as `researchMarker` |
+  | `tracker.fileIssue` (optional) | `{target, title, body, labels, dedupMarker, issueType}`: `body` is canonical Markdown without the dedup marker line, `dedupMarker` that line verbatim (`""` for none), and `issueType` the type core files as | `{url}`, the new issue's browse URL; the marker kept where `tracker.issue` returns it as `dedupMarker` |
   | `tracker.listLabels` (optional, capability `tracker.labels`) | `{target}` | `{labels}`, every label the tracker knows |
   | `tracker.createLabel` (optional, capability `tracker.labels`) | `{target, name, description, color}` | `{}`; a no-op where the tracker has no label registry |
 
@@ -3140,7 +3147,10 @@ This is protocol version **0.3.0**. The host is
   issue), the already-claimed check before a claim, the settled-label strip
   before a native claim, and the verdict guard that the in-progress label is
   present; research stays label-only because its dispatch-kind row maps no
-  status. The Connector holds no lifecycle mode.
+  status. The Connector holds no lifecycle mode. Core resolves its host-posted
+  commenter and issue filer from `tracker.comment` and `tracker.fileIssue`, and
+  from the native adapter without them, lifting the research and dedup markers
+  out of the body before the call.
   [`connectortracker.New`](../cmd/launcher/internal/connectortracker/connectortracker.go)
   builds core's tracker reads from such a Connector: it resolves the dispatch
   label and status of a Dispatch state, orders by issue id, applies the page
