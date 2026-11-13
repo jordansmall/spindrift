@@ -218,3 +218,63 @@ func TestCountIntervalOverflowRefused(t *testing.T) {
 }
 
 func jsonInto(raw string, result any) error { return json.Unmarshal([]byte(raw), result) }
+
+func TestPriorClaimLayer(t *testing.T) {
+	lc := Lifecycle{Labels: forge.DispatchLabels{Dispatchable: "ready", Complete: "done", Failed: "broke"}}
+	for _, tc := range []struct {
+		name    string
+		removed string
+		want    forge.DispatchState
+		found   bool
+	}{
+		{"last removal complete", `["broke","done"]`, forge.Complete, true},
+		{"last removal failed", `["done","broke"]`, forge.Failed, true},
+		{"other labels ignored after", `["done","wontfix","ready"]`, forge.Complete, true},
+		{"no lifecycle removal", `["wontfix","ready"]`, 0, false},
+		{"none removed", `[]`, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			call, calls := stubGuest(t, map[string]string{"tracker.removedLabels": `{"labels":` + tc.removed + `}`})
+			tr := mustTracker(t, call, richNative{newNative()}, lc, testTarget, []string{CapRemovedLabels}, true)
+			r, ok := forge.As[forge.PriorClaimStateReader](tr)
+			if !ok {
+				t.Fatal("no PriorClaimStateReader")
+			}
+			got, found, err := r.PriorClaimState("42")
+			if err != nil || found != tc.found || (found && got != tc.want) {
+				t.Fatalf("PriorClaimState = %v, %v, %v; want %v, %v", got, found, err, tc.want, tc.found)
+			}
+			if len(*calls) != 1 || (*calls)[0].params["number"] != "42" {
+				t.Errorf("calls = %v; want one read of issue 42", *calls)
+			}
+		})
+	}
+}
+
+func TestPriorClaimLayerEmptyLabelNeverMatches(t *testing.T) {
+	call, _ := stubGuest(t, map[string]string{"tracker.removedLabels": `{"labels":[""]}`})
+	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapRemovedLabels}, true)
+	r, _ := forge.As[forge.PriorClaimStateReader](tr)
+	if _, found, err := r.PriorClaimState("42"); err != nil || found {
+		t.Errorf("found = %v, %v; want an unmapped state never found", found, err)
+	}
+}
+
+func TestPriorClaimLayerGuestError(t *testing.T) {
+	boom := errors.New("boom")
+	call := func(context.Context, string, any, any) error { return boom }
+	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapRemovedLabels}, true)
+	r, _ := forge.As[forge.PriorClaimStateReader](tr)
+	if _, found, err := r.PriorClaimState("42"); !errors.Is(err, boom) || found {
+		t.Errorf("found = %v, err = %v; want boom", found, err)
+	}
+}
+
+func TestAbsentPriorClaimStaysAbsent(t *testing.T) {
+	call, calls := stubGuest(t, nil)
+	tr := mustTracker(t, call, richNative{newNative()}, testLifecycle, testTarget, nil, true)
+	c := forge.ResolveCapabilities(nil, tr, backend.Descriptor{}, backend.Descriptor{})
+	if c.PriorClaimStateReader != nil || len(*calls) != 0 {
+		t.Errorf("PriorClaimStateReader = %v with %d calls; want none", c.PriorClaimStateReader, len(*calls))
+	}
+}
