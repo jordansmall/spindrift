@@ -268,12 +268,9 @@ func (s *Settle) settleUnresolved(num, clsNote, missingNote string) {
 // logging it is the caller's, since each site words it differently.
 func Transition(it forge.IssueTracker, num string, from forge.DispatchState, v Verdict, note string) (Verdict, string, error) {
 	err := it.TransitionState(num, from, v.State())
-	var refusal *forge.TransitionRefusedError
-	if !errors.As(err, &refusal) {
+	refusal, _ := forge.CommentRefusal(it, num, err)
+	if refusal == nil {
 		return v, note, err
-	}
-	if cerr := it.Comment(num, "spindrift could not move this issue: "+refusal.Error()); cerr != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: could not comment the refused transition: %v\n", num, cerr)
 	}
 	// The displaced reason and note ride in the new note: a merged PR whose
 	// card could not reach Done still landed.
