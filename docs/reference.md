@@ -2581,8 +2581,8 @@ sets `followRedirect`, because GitHub answers a log read with a 302 to a
 pre-signed blob URL on a host that varies; the host follows that one hop with
 no credential, and doctor shows the opt-in as `(follows redirect)` on the
 route. The subtree-only Route model (ADR 0047) makes it the narrowest table,
-not an exact one: `/issues` also admits `GET /issues/comments/*`,
-`/issues/events` and `/issues/{n}/timeline`, and `/actions/jobs` every other
+not an exact one: `/issues` also admits `GET /issues/comments/*`
+and `/issues/events`, and `/actions/jobs` every other
 GET under it, none of which a read uses; a Route restricts no body, so `POST
 /graphql` admits any GraphQL document, mutations included, and no Route can pin
 it to the repository: the Connector sends the rollup, repository-identity
@@ -3096,9 +3096,9 @@ This is protocol version **0.3.0**. The host is
   meaning it serves `tracker.listIssues` and `tracker.issue`, and optionally
   `"tracker.comments"`, `"tracker.nativeDeps"`, `"tracker.blocks"`,
   `"tracker.probe"`, `"tracker.statuses"`, `"tracker.createMeta"`,
-  `"tracker.count"`, `"tracker.searchIssues"`, `"tracker.transition"`,
-  `"tracker.editLabels"`, `"tracker.comment"`, `"tracker.fileIssue"` and
-  `"tracker.labels"`, serving the method of the
+  `"tracker.count"`, `"tracker.removedLabels"`, `"tracker.searchIssues"`,
+  `"tracker.transition"`, `"tracker.editLabels"`, `"tracker.comment"`,
+  `"tracker.fileIssue"` and `"tracker.labels"`, serving the method of the
   same name (`"tracker.labels"` serves `tracker.listLabels` and
   `tracker.createLabel`), and `"tracker.ids.projectKey"` (see **Issue
   ids**). Advertising `"tracker.comments"` attests that each comment's
@@ -3123,6 +3123,7 @@ This is protocol version **0.3.0**. The host is
   | `tracker.createMeta` (optional) | `{target, issueType}` | `{issueTypes, fields}`: every issue type the project offers, and the create fields (`{fieldId, name, required, hasDefaultValue}`) of `issueType`, none when it is not offered |
   | `tracker.count` (optional) | `{target, label, status}`, selecting as `tracker.listIssues` does | `{count}`, possibly approximate |
   | `tracker.countInterval` (with `tracker.count`) | `{}` | `{seconds}`, at least 1: how often core re-asks `tracker.count` |
+  | `tracker.removedLabels` (optional) | `{target, number}` | `{labels}`: the names removed from the issue, oldest first |
   | `tracker.searchIssues` (optional) | `{target, text, state, label, limit}`, `label` `""` for any | `{issues}`, in match order |
   | `tracker.transition` (optional) | `{target, number, state, mapping}`: `state` is the Dispatch state's canonical name (`dispatchable`, `in-progress`, `complete`, `failed`, `ambiguous`) and `mapping` is core's whole table, `{<state>: {status, resolution}}`, for every state that names a status; the Connector looks up `mapping[state]`, applies the rule that only `failed` and `ambiguous` may share a status (an error otherwise) and sends the resolution when it is non-empty | `{outcome, status, offered}`: `status` is the native status the Connector resolved `state` to (`""` when unmapped); `outcome` is `moved` (the native transition ran), `unavailable` (the workflow offers no transition to `status` from the issue's current status; `offered` names the statuses it does offer) or `unmapped` (`mapping` holds no non-empty status for `state`); an error for anything else, including a screen field the transition requires and the request does not fill |
   | `tracker.editLabels` (optional) | `{target, number, add, remove}` | `{}`; one edit that adds and removes the named labels |
@@ -3177,7 +3178,10 @@ This is protocol version **0.3.0**. The host is
   answers the Demand probe at the cadence `tracker.countInterval` gave once, at
   construction. Those three optional checks come from the handshake alone: one
   the Connector leaves out is absent, never answered by the native adapter, so
-  doctor skips its rows and the daemon has no Demand source. Probe is part of
+  doctor skips its rows and the daemon has no Demand source. Recover's
+  prior-claim read follows the same rule: core maps the last removed label
+  named like the Complete or Failed label to that state, and a Connector
+  without `tracker.removedLabels` offers none. Probe is part of
   every tracker, so without `tracker.probe` it stays on the native adapter. The
   SDK's `tracker.Register(tracker.Reader{...})` serves the methods. A 0.1
   Connector predates the `status` selector, `tracker.blocks` and project-key
