@@ -13,9 +13,9 @@ import (
 	"spindrift.dev/launcher/internal/connectorhost"
 )
 
-// observeReads records the host's audit entry for each read f sends through the
-// Connector, for the rest of the test.
-func observeReads(t *testing.T, f *Fake) func() []connectorhost.AuditEntry {
+// observeCrossings records the host's audit entry for every call f sends
+// through the Connector, reads and writes alike, for the rest of the test.
+func observeCrossings(t *testing.T, f *Fake) func() []connectorhost.AuditEntry {
 	t.Helper()
 	var mu sync.Mutex
 	var got []connectorhost.AuditEntry
@@ -195,7 +195,7 @@ func TestFakeCallsCrossTheConnector(t *testing.T) {
 					f.SetIssue(Issue{Number: "1", Title: "a", Labels: []string{"ready"}})
 					f.SetPR("b", PR{URL: "1"})
 				}
-				reads := observeReads(t, f)
+				reads := observeCrossings(t, f)
 				m := reflect.ValueOf(target).MethodByName(name)
 				args := make([]reflect.Value, m.Type().NumIn())
 				for j := range args {
@@ -342,7 +342,7 @@ func TestFakeProbeKeepsScriptedErrorIdentity(t *testing.T) {
 func TestFakeCheckRunCrossesTheConnectorForStateAndRunURL(t *testing.T) {
 	const url = "u"
 	f := NewRunURLFake()
-	reads := observeReads(t, f.Fake)
+	reads := observeCrossings(t, f.Fake)
 	f.SetCheckStates(url, []RollupState{StateSuccess})
 	f.SetRunURLs(url, []string{"run-1"})
 	state, run, err := f.CheckRun(url)
@@ -469,7 +469,7 @@ func TestFakeDeleteBranchCrossesTheConnectorAndIsObservedByBranchExists(t *testi
 	sentinel := errors.New("scripted")
 	f := NewFake()
 	f.SetBranchExists("b", true)
-	crossed := observeReads(t, f)
+	crossed := observeCrossings(t, f)
 	if err := f.DeleteBranch("b", "main"); err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +483,7 @@ func TestFakeDeleteBranchCrossesTheConnectorAndIsObservedByBranchExists(t *testi
 		t.Errorf("DeletedBranches = %v, want [b]", f.DeletedBranches)
 	}
 
-	refused := observeReads(t, f)
+	refused := observeCrossings(t, f)
 	for _, c := range [][2]string{{"main", "main"}, {"-x", "main"}, {"", "main"}} {
 		if err := f.DeleteBranch(c[0], c[1]); err == nil {
 			t.Errorf("DeleteBranch(%q, %q) = nil, want a validation refusal", c[0], c[1])
@@ -574,7 +574,7 @@ func routesOf(got []connectorhost.AuditEntry) []string {
 func TestFakeClaimCrossesTransitionThenEditLabels(t *testing.T) {
 	f := NewFake(DispatchLabels{Dispatchable: "ready", InProgress: "wip", Complete: "done", Failed: "failed"})
 	f.SetIssue(Issue{Number: "1", Labels: []string{"ready", "failed"}})
-	reads := observeReads(t, f)
+	reads := observeCrossings(t, f)
 	if err := f.TransitionState("1", Dispatchable, InProgress); err != nil {
 		t.Fatal(err)
 	}
@@ -591,7 +591,7 @@ func TestFakeClaimCrossesTransitionThenEditLabels(t *testing.T) {
 func TestFakeAlreadyClaimedSendsNoEditLabels(t *testing.T) {
 	f := NewFake(DispatchLabels{Dispatchable: "ready", InProgress: "wip"})
 	f.SetIssue(Issue{Number: "1", Labels: []string{"wip"}})
-	reads := observeReads(t, f)
+	reads := observeCrossings(t, f)
 	if err := f.TransitionState("1", Dispatchable, InProgress); !errors.Is(err, ErrAlreadyClaimed) {
 		t.Fatalf("err = %v, want ErrAlreadyClaimed", err)
 	}
@@ -611,7 +611,7 @@ func TestFakeCompleteVerdictCrossesReadThenEditLabels(t *testing.T) {
 	}
 	t.Run("in progress", func(t *testing.T) {
 		f := newFake("wip")
-		reads := observeReads(t, f)
+		reads := observeCrossings(t, f)
 		if err := f.CompleteVerdict("1", Recommend); err != nil {
 			t.Fatal(err)
 		}
@@ -622,7 +622,7 @@ func TestFakeCompleteVerdictCrossesReadThenEditLabels(t *testing.T) {
 	})
 	t.Run("not in progress", func(t *testing.T) {
 		f := newFake("ready")
-		reads := observeReads(t, f)
+		reads := observeCrossings(t, f)
 		if err := f.CompleteVerdict("1", Recommend); err == nil {
 			t.Fatal("want an error when the issue lacks the in-progress label")
 		}
