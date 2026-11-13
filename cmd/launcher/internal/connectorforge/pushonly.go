@@ -18,6 +18,7 @@ import (
 // The capability names a forge Connector advertises. sdk/forge declares the
 // same strings, and its parity test pins them.
 const (
+	capForge            = "forge"
 	capBranches         = "forge.branches"
 	capPushOnly         = "forge.pushOnly"
 	capPRs              = "forge.prs"
@@ -27,9 +28,9 @@ const (
 	capProbe            = "forge.probe"
 )
 
-// ErrPRForgeUnsupported marks a forge Connector that is not push-only: composing
-// a PR-capable Connector forge is not supported yet.
-var ErrPRForgeUnsupported = errors.New("composing a PR-capable connector forge is not supported")
+// ErrPRForgeUnsupported marks a forge Connector that is neither push-only nor
+// declares "forge.prs", so no Code Forge can be composed from it.
+var ErrPRForgeUnsupported = errors.New("connector forge is neither push-only nor PR-capable")
 
 // ErrRemoteCredentials marks a Connector remote URL that carries credentials.
 // Core's git attaches its own, so a URL's userinfo is never honoured.
@@ -61,20 +62,35 @@ type Git struct {
 	Clock retry.Clock
 }
 
+// notRetried are the methods whose request is not idempotent: a retry after a
+// transient failure could repeat a merge, open a second PR or post a second
+// comment when the first attempt landed and only its response was lost. Their
+// caller owns the retry decision.
+var notRetried = []string{"forge.merge", "forge.openPR", "forge.comment"}
+
 // classedCall is c.Call made to read as core does: a transient failure is
 // retried, then the Connector's error class is mapped onto core's sentinels (a
 // rate limit matches forge.ErrRateLimit and an auth failure forge.ErrAuthFailure).
 // The class stays readable through connectorhost.ErrorClass.
 func classedCall(c *connectorhost.Connector, clock retry.Clock) guestCall {
+	return classify(c.Call, clock)
+}
+
+// classify is classedCall over any raw call, a seam for tests.
+func classify(raw guestCall, clock retry.Clock) guestCall {
 	if clock.Sleep == nil {
 		clock = retry.RealClock()
 	}
 	b := retry.LinearBackoff{Unit: callBackoffUnit, Clock: clock}
 	return func(ctx context.Context, method string, params, result any) error {
 		attempt := 0
-		err := retryTransient(callAttempts, b, func() error {
+		attempts := callAttempts
+		if slices.Contains(notRetried, method) {
+			attempts = 1
+		}
+		err := retryTransient(attempts, b, func() error {
 			attempt++
-			err := c.Call(ctx, method, params, result)
+			err := raw(ctx, method, params, result)
 			// A retried DELETE may find its own earlier attempt already landed,
 			// its 5xx lost on the way back: that not-found is success.
 			if attempt > 1 && method == "forge.deleteBranch" && connectorhost.ErrorClass(err) == connectorhost.NotFound {
@@ -102,18 +118,24 @@ type pushOnly struct {
 	git    forge.CodeForge
 }
 
-// Compose builds a push-only Code Forge from a forge Connector whose handshake
-// advertises "forge.branches" and "forge.pushOnly". The returned Capabilities
-// carry exactly what the composed forge offers: a BranchDeleter and no PRForge.
+// Compose builds a Code Forge from a forge Connector whose handshake advertises
+// "forge.branches" and either "forge.pushOnly" (a push-only forge: a
+// BranchDeleter and no PRForge) or "forge" with "forge.prs" (a PR forge: the PR
+// surface, draft creation, branch deletion and the merge commit, plus a
+// CIRunReporter and BranchProtectionForge only when declared). The returned
+// Capabilities are the composed forge resolved by type, so they and any later
+// type probe (doctor's, for one) agree on exactly what it offers.
 // The remote's identity is read once here, and refused (and audited) unless
 // both its URLs are plain https on a host the Connector declared, so the git
 // credential never reaches a host the Connector merely named.
 func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge, forge.Capabilities, error) {
+	has := func(capName string) bool { return slices.Contains(c.Capabilities, capName) }
+	isPushOnly := has(capPushOnly)
 	switch {
-	case !slices.Contains(c.Capabilities, capBranches):
+	case !has(capBranches):
 		return nil, forge.Capabilities{}, fmt.Errorf("%w: capabilities %v lack %q", ErrNotForge, c.Capabilities, capBranches)
-	case !slices.Contains(c.Capabilities, capPushOnly):
-		return nil, forge.Capabilities{}, fmt.Errorf("%w: capabilities %v lack %q", ErrPRForgeUnsupported, c.Capabilities, capPushOnly)
+	case !isPushOnly && !(has(capForge) && has(capPRs)):
+		return nil, forge.Capabilities{}, fmt.Errorf("%w: capabilities %v lack %q and %q", ErrPRForgeUnsupported, c.Capabilities, capPushOnly, capPRs)
 	}
 	if g.Plumbing == nil {
 		return nil, forge.Capabilities{}, errors.New("connectorforge: Git.Plumbing is nil")
@@ -124,7 +146,13 @@ func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge,
 		return nil, forge.Capabilities{}, err
 	}
 	p.git = g.Plumbing(remote.CloneURL, g.Credential)
-	return p, forge.Capabilities{BranchDeleter: p}, nil
+	var cf forge.CodeForge = p
+	if !isPushOnly {
+		// remote() accepted the web URL, so it parses with a host.
+		web, _ := url.Parse(remote.WebURL)
+		cf = composePR(p, c.Capabilities, web.Host)
+	}
+	return cf, forge.ResolveCodeForge(cf), nil
 }
 
 // remote reads and validates the repository's identity.

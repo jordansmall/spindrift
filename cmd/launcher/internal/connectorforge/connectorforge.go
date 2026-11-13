@@ -1,21 +1,24 @@
 // Package connectorforge builds core's forge PR reads (the open-PR and
 // any-state branch lookups, the PR state, the check rollup state and the
-// failure detail of forge.PRForge) from a forge Connector, over the
-// provisional 0.y forge primitives in sdk/forge. Every write stays with the
-// native adapter, which also keeps serving the reads the Connector has no
-// primitive for (Mergeable, HeadCommitSHA, NeedsUpdate, ListPRFiles,
-// CanAutoMerge).
+// failure detail of forge.PRForge) from a forge Connector, over the forge
+// primitives in sdk/forge. New wraps a native adapter: every write stays with
+// it, and so does every read the Connector has no primitive for (Mergeable,
+// HeadCommitSHA, NeedsUpdate, ListPRFiles, CanAutoMerge). Compose instead
+// builds a whole Code Forge from the Connector.
 //
 // The Connector returns raw fields; every policy decision is made here: PR URL
 // validation, which conclusions count as failing, and rendering and capping the
-// failure detail, so a hostile guest's text cannot outgrow forge.MaxFailureDetailBytes.
+// failure detail, so a hostile guest's text cannot outgrow
+// forge.MaxFailureDetailBytes.
 //
-// Compose builds a push-only Code Forge from a Connector advertising
-// "forge.branches" and "forge.pushOnly": the Connector answers the branch
-// questions and names the remote, and git runs in core's own plumbing with
-// core's own credential, attached only after the remote's host is checked
-// against the Connector's declared routes. Every Connector call retries a
-// transient failure and reads its error class as core's sentinels.
+// Compose builds a Code Forge from a Connector advertising "forge.branches" and
+// either "forge.pushOnly" (a push-only forge) or "forge.prs" (a PR forge whose
+// merge, draft, comment and auto-merge writes the Connector performs): the
+// Connector answers the forge questions and names the remote, and git runs in
+// core's own plumbing with core's own credential, attached only after the
+// remote's host is checked against the Connector's declared routes. Every
+// idempotent Connector call retries a transient failure, and every call reads
+// its error class as core's sentinels.
 package connectorforge
 
 import (
@@ -23,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -118,7 +122,7 @@ type reads struct {
 // matched case-insensitively with the port as written ("github.com:443" does
 // not match "github.com").
 func New(c *connectorhost.Connector, writes forge.PRForge, target Target, webHost string) (forge.PRForge, error) {
-	if !slices.Contains(c.Capabilities, "forge") {
+	if !slices.Contains(c.Capabilities, capForge) {
 		return nil, fmt.Errorf("%w: capabilities %v lack \"forge\"", ErrNotForge, c.Capabilities)
 	}
 	if webHost == "" {
@@ -138,6 +142,13 @@ func isPRNumber(s string) bool {
 	return err == nil && n >= 1 && strconv.Itoa(n) == s
 }
 
+// onWebHost reports whether u is a plain https URL on the target's web host:
+// no userinfo, opaque part, query or fragment.
+func (t *reads) onWebHost(u *url.URL) bool {
+	return u.Scheme == "https" && strings.EqualFold(u.Host, t.webHost) && u.User == nil && u.Opaque == "" &&
+		u.RawQuery == "" && !u.ForceQuery && u.Fragment == ""
+}
+
 // prNumber extracts the PR number from raw, which must be an https URL on the
 // target's web host of the form /<owner>/<repo>/pull/<n> naming the target
 // repository (host and repo case-insensitive, as forges are) with nothing else
@@ -147,8 +158,7 @@ func (t *reads) prNumber(raw string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("PR URL %q: %w", raw, err)
 	}
-	if u.Scheme != "https" || !strings.EqualFold(u.Host, t.webHost) || u.User != nil || u.Opaque != "" ||
-		u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+	if !t.onWebHost(u) {
 		return "", fmt.Errorf("PR URL %q is not a plain https URL on %s", raw, t.webHost)
 	}
 	parts := strings.Split(u.Path, "/")
@@ -157,6 +167,23 @@ func (t *reads) prNumber(raw string) (string, error) {
 		return "", fmt.Errorf("PR URL %q is not /%s/pull/<n>", raw, t.target.Repo)
 	}
 	return parts[4], nil
+}
+
+// ownRunLink keeps a CI run link only when it is a plain https URL on the
+// target repository's web host. The guest is untrusted and the link is
+// rendered for operators to click, so a link off the target repo is dropped,
+// not failed on. A backslash is refused: browsers read it as "/", which would
+// escape the repository prefix.
+func (t *reads) ownRunLink(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || !t.onWebHost(u) || strings.Contains(u.Path, `\`) {
+		return ""
+	}
+	prefix := "/" + t.target.Repo + "/"
+	if len(u.Path) <= len(prefix) || !strings.EqualFold(u.Path[:len(prefix)], prefix) || path.Clean(u.Path) != u.Path {
+		return ""
+	}
+	return raw
 }
 
 // check validates a PR the guest returned: a canonical number, a URL naming
@@ -223,23 +250,30 @@ func (t *reads) PRForBranch(branch string) (string, bool, error) {
 	return prs[0].URL, true, nil
 }
 
-func (t *reads) PRState(prURL string) (forge.PRState, error) {
+// pr reads and validates the PR at prURL, which must be the PR the guest answers
+// for.
+func (t *reads) pr(prURL string) (wirePR, forge.PRState, error) {
 	n, err := t.prNumber(prURL)
 	if err != nil {
-		return "", err
+		return wirePR{}, "", err
 	}
 	var w wirePR
 	if err := t.call(context.Background(), "forge.pr", numberedParams{t.target, n}, &w); err != nil {
-		return "", err
+		return wirePR{}, "", err
 	}
 	state, err := t.check(w)
 	if err != nil {
-		return "", err
+		return wirePR{}, "", err
 	}
 	if w.Number != n {
-		return "", fmt.Errorf("%w: asked for PR %s, got %s", ErrAnswer, n, w.Number)
+		return wirePR{}, "", fmt.Errorf("%w: asked for PR %s, got %s", ErrAnswer, n, w.Number)
 	}
-	return state, nil
+	return w, state, nil
+}
+
+func (t *reads) PRState(prURL string) (forge.PRState, error) {
+	_, state, err := t.pr(prURL)
+	return state, err
 }
 
 func (t *reads) rollup(prURL string) (wireRollup, error) {
