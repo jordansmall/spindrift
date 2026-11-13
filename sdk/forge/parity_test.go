@@ -135,7 +135,7 @@ func TestCapabilitiesMatchCore(t *testing.T) {
 		"capBranches": CapBranches, "capPushOnly": CapPushOnly, "capPRs": CapPRs,
 		"capAutoMerge": CapAutoMerge, "capCIRun": CapCIRun,
 		"capBranchProtection": CapBranchProtection, "capProbe": CapProbe,
-		"capDraftPRs": CapDraftPRs, "CapTokenGrant": CapTokenGrant,
+		"capDraftPRs": CapDraftPRs, "capTokenGrant": CapTokenGrant,
 	} {
 		if got, ok := core[name]; !ok || got != want {
 			t.Errorf("core %s = %q (declared: %v), sdk says %q", name, got, ok, want)
