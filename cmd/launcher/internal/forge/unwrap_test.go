@@ -123,3 +123,52 @@ func TestAsCodeForgeAbsentIsFalse(t *testing.T) {
 		t.Fatal("AsCodeForge over a wrapper of nil = true")
 	}
 }
+
+type hiderTracker struct {
+	wrapTracker
+	hidden any
+}
+
+func (h hiderTracker) Hides(capability any) bool {
+	_, ok := capability.(*namer)
+	_, want := h.hidden.(*namer)
+	return ok && want
+}
+
+func TestAsHiderStopsUnwrapping(t *testing.T) {
+	inner := namedTracker{name: "inner"}
+	hider := hiderTracker{wrapTracker: wrapTracker{inner}, hidden: (*namer)(nil)}
+	if _, ok := As[namer](hider); ok {
+		t.Fatal("As looked past a layer that hides the capability")
+	}
+}
+
+func TestAsHiderLeavesOtherCapabilitiesVisible(t *testing.T) {
+	inner := namedTracker{name: "inner"}
+	hider := hiderTracker{wrapTracker: wrapTracker{inner}}
+	got, ok := As[namer](hider)
+	if !ok || got.Name() != "inner" {
+		t.Fatalf("As = %v, %v; want the inner layer", got, ok)
+	}
+}
+
+type namedHiderTracker struct {
+	hiderTracker
+	name string
+}
+
+func (n namedHiderTracker) Name() string { return n.name }
+
+func TestAsLayerAboveHiderStillWins(t *testing.T) {
+	hider := hiderTracker{wrapTracker: wrapTracker{namedTracker{name: "inner"}}, hidden: (*namer)(nil)}
+	outer := namedWrapTracker{wrapTracker: wrapTracker{hider}, name: "outer"}
+	got, ok := As[namer](outer)
+	if !ok || got.Name() != "outer" {
+		t.Fatalf("As = %v, %v; want the outer layer", got, ok)
+	}
+	own := namedHiderTracker{hiderTracker: hider, name: "own"}
+	got, ok = As[namer](own)
+	if !ok || got.Name() != "own" {
+		t.Fatalf("As = %v, %v; want the hider's own implementation", got, ok)
+	}
+}

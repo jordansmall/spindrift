@@ -6,7 +6,16 @@ type Unwrapper interface {
 	Unwrap() IssueTracker
 }
 
-// As returns the outermost layer of it, following Unwrap, that implements T.
+// CapabilityHider is implemented by a wrapper that answers some capabilities
+// itself or not at all: As stops at it for those instead of unwrapping.
+type CapabilityHider interface {
+	// Hides reports whether As must not look past this layer for the capability
+	// capability points at, e.g. (*DemandCounter)(nil).
+	Hides(capability any) bool
+}
+
+// As returns the outermost layer of it, following Unwrap, that implements T,
+// stopping at a CapabilityHider that hides T.
 //
 // An optional capability on an IssueTracker must be looked up with As, never a
 // bare type assertion: embedding the IssueTracker interface hides every
@@ -16,6 +25,9 @@ func As[T any](it IssueTracker) (T, bool) {
 	for it != nil {
 		if v, ok := it.(T); ok {
 			return v, true
+		}
+		if h, ok := it.(CapabilityHider); ok && h.Hides((*T)(nil)) {
+			break
 		}
 		u, ok := it.(Unwrapper)
 		if !ok {
