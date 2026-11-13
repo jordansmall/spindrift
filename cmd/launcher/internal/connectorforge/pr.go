@@ -345,19 +345,7 @@ func (f *prForge) Probe() (string, error) {
 	if !f.hasProbe {
 		return f.push.Probe()
 	}
-	var res struct {
-		Repo string `json:"repo"`
-	}
-	p := struct {
-		Target Target `json:"target"`
-	}{f.target}
-	if err := f.call(context.Background(), "forge.probe", p, &res); err != nil {
-		return "", err
-	}
-	if res.Repo == "" {
-		return "", fmt.Errorf("%w: probe named no repository", ErrAnswer)
-	}
-	return res.Repo, nil
+	return probeRepo(f.call, f.target)
 }
 
 func (f *prForge) BranchExists(branch string) (bool, error) { return f.push.BranchExists(branch) }
