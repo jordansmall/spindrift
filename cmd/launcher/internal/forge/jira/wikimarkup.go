@@ -183,9 +183,9 @@ func pushItem(levels []listLevel, indent int, bullet byte) []listLevel {
 
 // tableCells splits one pipe-table row into inline-converted cells; an empty
 // cell becomes a space because Jira ends a row at "||" or "|" followed by
-// nothing. A "|" inside a code span or after a backslash is cell content, and
-// is re-escaped on output since Jira splits on every unescaped "|", monospace
-// included.
+// nothing. A "|" inside a code span or after a backslash is cell content; GFM
+// unescapes "\|" before inline parsing, code spans included, so it is
+// unescaped here and every pipe re-escaped, since Jira splits on each "|".
 func tableCells(row string) []string {
 	row = strings.TrimSpace(row)
 	row = strings.TrimPrefix(row, "|")
@@ -196,7 +196,7 @@ func tableCells(row string) []string {
 		if c == "" {
 			c = " "
 		}
-		cells[i] = convertInline(escapeChars(c, "|"))
+		cells[i] = convertInline(escapeChars(strings.ReplaceAll(c, `\|`, "|"), "|"))
 	}
 	return cells
 }
@@ -228,6 +228,17 @@ func splitCells(row string) []string {
 	return append(cells, row[start:])
 }
 
+// codeSpanEscaper makes Markdown code-span text literal inside {{...}}, where
+// Jira still reads inline markup, macros and links. Code spans have no
+// escapes, so a backslash is sent as an entity: "\\" is a line break and a
+// trailing "\" would escape the closing braces.
+var codeSpanEscaper = strings.NewReplacer(
+	`\`, "&#92;",
+	"*", `\*`, "_", `\_`, "-", `\-`, "+", `\+`, "^", `\^`, "~", `\~`,
+	"?", `\?`, "!", `\!`, "|", `\|`,
+	"{", `\{`, "}", `\}`, "[", `\[`, "]", `\]`,
+)
+
 // convertInline rewrites spans inside one line. Code spans and URLs are
 // copied or wrapped without recursion so emphasis never reaches inside them;
 // "_x_" is already Jira italic, so only "*x*" and "**x**"/"__x__" change.
@@ -248,9 +259,7 @@ func convertInline(s string) string {
 		case c == '`':
 			n := runLen(s, i)
 			if end := codeSpanEnd(s, i); end > 0 {
-				// Jira reads braces inside {{...}} as macros or the span
-				// end, and brackets as links.
-				b.WriteString("{{" + escapeChars(s[i+n:end-n], "{}[]") + "}}")
+				b.WriteString("{{" + codeSpanEscaper.Replace(s[i+n:end-n]) + "}}")
 				i = end
 				continue
 			}
@@ -351,19 +360,29 @@ func isEscape(s string, i int) bool {
 
 // escapeChars backslash-escapes each byte of s that appears in set, such as
 // the "|" Jira would read as a link or cell separator; an already-escaped
-// pair such as "\|" is left as is, never doubled.
+// pair such as "\|" is left as is, never doubled. It owns text outside code
+// spans, which are copied verbatim for codeSpanEscaper to escape.
 func escapeChars(s, set string) string {
 	var b strings.Builder
-	for i := 0; i < len(s); i++ {
+	for i := 0; i < len(s); {
 		switch {
 		case isEscape(s, i):
 			b.WriteString(s[i : i+2])
-			i++
+			i += 2
+		case s[i] == '`':
+			end := codeSpanEnd(s, i)
+			if end < 0 {
+				end = i + runLen(s, i)
+			}
+			b.WriteString(s[i:end])
+			i = end
 		case strings.IndexByte(set, s[i]) >= 0:
 			b.WriteByte('\\')
 			b.WriteByte(s[i])
+			i++
 		default:
 			b.WriteByte(s[i])
+			i++
 		}
 	}
 	return b.String()
