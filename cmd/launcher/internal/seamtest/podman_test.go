@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -150,5 +151,18 @@ func TestPodmanIntentsRelayAsNoncedIssueIntentLines(t *testing.T) {
 		"\nSPINDRIFT_OUTCOME issue=1 status=ready nonce=abc\n"
 	if out != want {
 		t.Errorf("out = %q; want %q", out, want)
+	}
+}
+
+func TestPodmanRunFailsWhenAFixtureCannotBeCopied(t *testing.T) {
+	cfg := PodmanConfig{Record: filepath.Join(t.TempDir(), "rec"), Runs: []PodmanRun{
+		{Files: map[string]string{filepath.Join(t.TempDir(), "dst"): filepath.Join(t.TempDir(), "missing")}},
+	}}
+	code, _, stderr := runPodman(t, cfg, "run", "img")
+	if code == 0 {
+		t.Errorf("exit = 0, want non-zero for an uncopyable fixture")
+	}
+	if !strings.Contains(stderr, "box fake: copy") {
+		t.Errorf("stderr = %q, want the copy error", stderr)
 	}
 }

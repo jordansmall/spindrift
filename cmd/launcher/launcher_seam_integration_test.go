@@ -14,8 +14,10 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/ledger"
+	"spindrift.dev/launcher/internal/seambundle"
 	"spindrift.dev/launcher/internal/seamtest"
 )
 
@@ -42,8 +44,10 @@ var smokeRuntimeSettings = map[string]string{
 }
 
 // smokeSecrets are exported to the launcher's own environment; none may land
-// on a runner argv.
-var smokeSecrets = map[string]string{"GH_TOKEN": "fake-token", "CLAUDE_CODE_OAUTH_TOKEN": "fake-oauth"}
+// on a runner argv. BOX_GH_TOKEN is the distinct read-only Box credential the
+// read-only default (the launch token gate) requires, as a migrated Consumer
+// supplies it.
+var smokeSecrets = map[string]string{"GH_TOKEN": "fake-token", "BOX_GH_TOKEN": "fake-box-token", "CLAUDE_CODE_OAUTH_TOKEN": "fake-oauth"}
 
 // tmpOverlay is argvEnv's mount source for a bwrap --tmp-overlay target.
 const tmpOverlay = "<tmp-overlay>"
@@ -249,15 +253,18 @@ func seedLedgerRemote(t *testing.T) (bare string, env map[string]string) {
 	seamGit(t, gitEnv, seed, "add", "README.md")
 	seamGit(t, gitEnv, seed, "commit", "-q", "-m", "seed")
 	seamGit(t, gitEnv, seed, "push", "-q", bare, "main")
-	return bare, map[string]string{
-		// pushInsteadOf too: GitRemote pins both keys to the exact URL (issue
-		// #4665), and a matching pushInsteadOf shadows insteadOf for pushes.
-		"GIT_CONFIG_COUNT":   "2",
-		"GIT_CONFIG_KEY_0":   "url." + bare + ".insteadOf",
-		"GIT_CONFIG_VALUE_0": "https://github.com/" + smokeRepo + ".git",
-		"GIT_CONFIG_KEY_1":   "url." + bare + ".pushInsteadOf",
-		"GIT_CONFIG_VALUE_1": "https://github.com/" + smokeRepo + ".git",
+	// A global file, not GIT_CONFIG_COUNT: the relay clone persists the same
+	// identity rules in its local config, which beat GIT_CONFIG_COUNT on a tie
+	// but lose to global config.
+	cfg := root + "/gitconfig"
+	url := "https://github.com/" + smokeRepo + ".git"
+	// pushInsteadOf too: GitRemote pins both keys to the exact URL (issue
+	// #4665), and a matching pushInsteadOf shadows insteadOf for pushes.
+	rules := "[url \"" + bare + "\"]\n\tinsteadOf = " + url + "\n\tpushInsteadOf = " + url + "\n"
+	if err := os.WriteFile(cfg, []byte(rules), 0o644); err != nil {
+		t.Fatal(err)
 	}
+	return bare, map[string]string{"GIT_CONFIG_GLOBAL": cfg}
 }
 
 func seamGit(t *testing.T, env []string, dir string, args ...string) {
@@ -330,6 +337,8 @@ func runSmoke(t *testing.T, c smokeCase, docPath string) (boxRun []string, gh []
 		replies = []seamtest.GhReply{{Args: []string{"issue", "create"}, Stdout: "https://github.com/" + smokeRepo + "/issues/12\n"}}
 	default:
 		args = append(args, "dispatch")
+		// The host opens the PR for the relayed branch; the fake answers with its URL.
+		replies = []seamtest.GhReply{{Args: []string{"pr", "create"}, Stdout: smokePR + "\n"}}
 	}
 
 	env := seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{
@@ -339,14 +348,24 @@ func runSmoke(t *testing.T, c smokeCase, docPath string) (boxRun []string, gh []
 		PRs: []seamtest.GhPR{{Number: 9, URL: smokePR, HeadRefName: "agent/issue-7", BaseRefName: "main",
 			HeadRefOid: "abc123", Checks: "SUCCESS", Mergeable: "MERGEABLE"}},
 	})
+	// Every kind runs read-only, so the launcher clones the Target repo host-side
+	// (SeedMirror); the same insteadOf remote serves that clone, the work kind's bundle relay,
+	// and the Ledger.
+	bare, gitEnv := seedLedgerRemote(t)
 	if c.kind == "butler" {
-		var gitEnv map[string]string
-		bareLedger, gitEnv = seedLedgerRemote(t)
-		for k, v := range gitEnv {
-			env[k] = v
+		bareLedger = bare
+	}
+	for k, v := range gitEnv {
+		env[k] = v
+	}
+	run := seamtest.PodmanRun{Outcome: outcome, Intents: intents}
+	if c.kind == "work" {
+		// A read-only Box cannot push: it hands the launcher a bundle in its outbox.
+		run.Files = map[string]string{
+			filepath.Join(hostpaths.OutboxDir(workDir, "7"), seambundle.FileName): seamBundle(t, bare),
 		}
 	}
-	runs := []seamtest.PodmanRun{{Outcome: outcome, Intents: intents}}
+	runs := []seamtest.PodmanRun{run}
 	for _, tool := range []string{"podman", "docker"} {
 		cfg := seamtest.PodmanConfig{Record: recDir + "/" + tool + ".jsonl", ImagePresent: true}
 		if tool == c.runtime {
@@ -553,4 +572,24 @@ func docImageTag(doc *inputdoc.Document) string {
 		return a.OCI.ImageTag.String()
 	}
 	return ""
+}
+
+// seamBundle writes a one-commit bundle of the agent branch cut from bare's
+// main, the code-out a read-only Box leaves in its outbox, and returns its path.
+func seamBundle(t *testing.T, bare string) string {
+	t.Helper()
+	root := t.TempDir()
+	env := append(os.Environ(), "GIT_AUTHOR_NAME=seam", "GIT_AUTHOR_EMAIL=seam@example.com",
+		"GIT_COMMITTER_NAME=seam", "GIT_COMMITTER_EMAIL=seam@example.com")
+	work := root + "/work"
+	seamGit(t, env, "", "clone", "-q", bare, work)
+	seamGit(t, env, work, "checkout", "-q", "-b", "agent/issue-7")
+	if err := os.WriteFile(work+"/change.txt", []byte("seam\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seamGit(t, env, work, "add", "change.txt")
+	seamGit(t, env, work, "commit", "-q", "-m", "seam change")
+	path := root + "/" + seambundle.FileName
+	seamGit(t, env, work, "bundle", "create", "-q", path, "origin/main..agent/issue-7")
+	return path
 }
