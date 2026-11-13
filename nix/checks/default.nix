@@ -131,6 +131,7 @@ let
     // (import ./connector-backend-rows.nix common)
     // (import ./connector-driver-rows.nix common)
     // (import ./connector-escape-guard.nix common)
+    // (import ./connector-checks-parity.nix common)
     // (import ./wazero-pin-guard.nix common)
     // (import ./connector-ownership.nix common);
 
@@ -359,6 +360,7 @@ let
     "bats:.github/scripts" = "the classifier suite builds ci-go-tokens.go";
     "box-access-default:." = "a consumer flake fixture's outPath";
     "baked-skills:cmd/launcher" = "spliced and built; its marker files are under promptassembly/";
+    "connector-checks-parity:connectors" = "imports each Connector's flake.nix, never reads its text";
     "dashboard-js:dashboard" = "a fileset root over the JS tree only";
     "default:." = "the coverage guards' path probes";
     "default:cmd/launcher" = "launcherGoModules' vendor source";
