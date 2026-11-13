@@ -20,15 +20,41 @@ type rawPR struct {
 	URL      string  `json:"html_url"`
 	State    string  `json:"state"`
 	MergedAt *string `json:"merged_at"`
+	Draft    bool    `json:"draft"`
+	// NodeID is the GraphQL id the draft-flip mutations take.
+	NodeID string `json:"node_id"`
+	Head   struct {
+		Ref string `json:"ref"`
+		SHA string `json:"sha"`
+	} `json:"head"`
+	// Base.Ref is the branch the PR targets.
+	Base struct {
+		Ref string `json:"ref"`
+	} `json:"base"`
+	// Mergeable is null while GitHub is still computing it.
+	Mergeable      *bool  `json:"mergeable"`
+	MergeCommitSHA string `json:"merge_commit_sha"`
 }
 
 func (r rawPR) pr() forge.PR {
-	return forge.PR{
-		Number: strconv.Itoa(r.Number),
-		URL:    r.URL,
-		State:  r.State,
-		Merged: r.MergedAt != nil,
+	p := forge.PR{
+		Number:    strconv.Itoa(r.Number),
+		URL:       r.URL,
+		State:     r.State,
+		Merged:    r.MergedAt != nil,
+		Draft:     r.Draft,
+		Head:      r.Head.Ref,
+		HeadSHA:   r.Head.SHA,
+		Mergeable: "UNKNOWN",
 	}
+	if r.Mergeable != nil {
+		p.Mergeable = map[bool]string{true: "MERGEABLE", false: "CONFLICTING"}[*r.Mergeable]
+	}
+	// An open PR's merge_commit_sha is a test-merge commit, not a landing.
+	if p.Merged {
+		p.MergeCommit = r.MergeCommitSHA
+	}
+	return p
 }
 
 func parseNumber(number string) (int, error) {

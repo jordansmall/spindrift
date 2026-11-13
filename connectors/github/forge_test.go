@@ -26,9 +26,9 @@ func TestPRsForBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []forge.PR{
-		{Number: "12", URL: "https://github.com/o/r/pull/12", State: "closed", Merged: true},
-		{Number: "11", URL: "https://github.com/o/r/pull/11", State: "closed"},
-		{Number: "10", URL: "https://github.com/o/r/pull/10", State: "open"},
+		{Number: "12", URL: "https://github.com/o/r/pull/12", State: "closed", Merged: true, Mergeable: "UNKNOWN"},
+		{Number: "11", URL: "https://github.com/o/r/pull/11", State: "closed", Mergeable: "UNKNOWN"},
+		{Number: "10", URL: "https://github.com/o/r/pull/10", State: "open", Mergeable: "UNKNOWN"},
 	}
 	if !reflect.DeepEqual(prs, want) {
 		t.Fatalf("prs = %#v", prs)
@@ -59,7 +59,7 @@ func TestPR(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := forge.PR{Number: "5", URL: "https://github.com/o/r/pull/5", State: "closed", Merged: true}
+	want := forge.PR{Number: "5", URL: "https://github.com/o/r/pull/5", State: "closed", Merged: true, Mergeable: "UNKNOWN"}
 	if p != want {
 		t.Fatalf("pr = %#v", p)
 	}
