@@ -13,6 +13,8 @@ const (
 	CapTransition = "tracker.transition"
 	CapEditLabels = "tracker.editLabels"
 	CapLabels     = "tracker.labels"
+	CapComment    = "tracker.comment"
+	CapFileIssue  = "tracker.fileIssue"
 
 	// The methods behind CapLabels; they ride on it rather than being
 	// advertised themselves.
@@ -59,6 +61,28 @@ type TransitionResult struct {
 	Offered []string `json:"offered"`
 }
 
+// CommentRequest is a comment to post. Body is canonical Markdown with the
+// research marker line already removed; Research says the comment carries that
+// marker, which the Connector stores the way its tracker can (Jira: a comment
+// entity property).
+type CommentRequest struct {
+	Body     string `json:"body"`
+	Research bool   `json:"research"`
+}
+
+// IssueRequest is an issue to file. Body is canonical Markdown without the
+// dedup marker line; DedupMarker is that line verbatim ("" for none), stored
+// where the tracker can find it on read (Jira: an issue entity property).
+// IssueType is the type core files as; a Connector has no config channel, so
+// core ships it on each call.
+type IssueRequest struct {
+	Title       string   `json:"title"`
+	Body        string   `json:"body"`
+	Labels      []string `json:"labels"`
+	DedupMarker string   `json:"dedupMarker"`
+	IssueType   string   `json:"issueType"`
+}
+
 // Writer is the write primitives of a Connector-backed tracker. Each func is
 // optional and declares its capability only when set. Core decides lifecycle
 // policy (fallback, refusal, claim checks, verdicts); a Writer applies the
@@ -72,6 +96,14 @@ type Writer struct {
 	// EditLabels declares CapEditLabels. It adds and removes labels on the
 	// issue in one write.
 	EditLabels func(t Target, number string, add, remove []string) error
+
+	// Comment declares CapComment. It posts r.Body on the issue and records the
+	// research marker when r.Research is set.
+	Comment func(t Target, number string, r CommentRequest) error
+
+	// FileIssue declares CapFileIssue. It creates the issue r describes and
+	// returns its browse URL.
+	FileIssue func(t Target, r IssueRequest) (url string, err error)
 
 	// ListLabels declares CapLabels. It returns the names of the labels the
 	// tracker's registry holds.
@@ -142,6 +174,39 @@ func writeHandlers(w Writer) ([]string, map[string]method) {
 				return nil, err
 			}
 			return done(w.EditLabels(p.Target, p.Number, p.Add, p.Remove))
+		}
+	}
+	if w.Comment != nil {
+		caps = append(caps, CapComment)
+		m[CapComment] = func(params json.RawMessage) (any, error) {
+			var p struct {
+				Target Target `json:"target"`
+				Number string `json:"number"`
+				CommentRequest
+			}
+			if err := unmarshal(params, &p); err != nil {
+				return nil, err
+			}
+			return done(w.Comment(p.Target, p.Number, p.CommentRequest))
+		}
+	}
+	if w.FileIssue != nil {
+		caps = append(caps, CapFileIssue)
+		m[CapFileIssue] = func(params json.RawMessage) (any, error) {
+			var p struct {
+				Target Target `json:"target"`
+				IssueRequest
+			}
+			if err := unmarshal(params, &p); err != nil {
+				return nil, err
+			}
+			url, err := w.FileIssue(p.Target, p.IssueRequest)
+			if err != nil {
+				return nil, err
+			}
+			return struct {
+				URL string `json:"url"`
+			}{url}, nil
 		}
 	}
 	if w.ListLabels != nil {

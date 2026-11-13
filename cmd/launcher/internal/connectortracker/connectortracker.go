@@ -164,6 +164,26 @@ type (
 		Number string `json:"number"`
 		transitionRequest
 	}
+	commentRequest struct {
+		Body     string `json:"body"`
+		Research bool   `json:"research"`
+	}
+	commentParams struct {
+		Target Target `json:"target"`
+		Number string `json:"number"`
+		commentRequest
+	}
+	issueRequest struct {
+		Title       string   `json:"title"`
+		Body        string   `json:"body"`
+		Labels      []string `json:"labels"`
+		DedupMarker string   `json:"dedupMarker"`
+		IssueType   string   `json:"issueType"`
+	}
+	fileIssueParams struct {
+		Target Target `json:"target"`
+		issueRequest
+	}
 	createMetaParams struct {
 		Target    Target `json:"target"`
 		IssueType string `json:"issueType"`
@@ -231,6 +251,12 @@ const (
 	// CapListLabels and CapCreateLabel are the methods behind CapLabels.
 	CapListLabels  = "tracker.listLabels"
 	CapCreateLabel = "tracker.createLabel"
+	// CapComment: the Connector serves tracker.comment, posting canonical
+	// Markdown and storing the research marker as the tracker can.
+	CapComment = "tracker.comment"
+	// CapFileIssue: the Connector serves tracker.fileIssue, filing a host
+	// finding and answering its browse URL.
+	CapFileIssue = "tracker.fileIssue"
 )
 
 // The outcomes of tracker.transition that are not an error.

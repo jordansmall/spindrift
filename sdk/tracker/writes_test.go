@@ -34,15 +34,27 @@ func fakeWriter(t *testing.T) Writer {
 			}
 			return nil
 		},
+		Comment: func(tg Target, number string, r CommentRequest) error {
+			if tg != wantTarget || number != "3" || r != (CommentRequest{Body: "hi", Research: true}) {
+				t.Errorf("Comment(%v, %q, %+v)", tg, number, r)
+			}
+			return nil
+		},
+		FileIssue: func(tg Target, r IssueRequest) (string, error) {
+			if tg != wantTarget || !reflect.DeepEqual(r, IssueRequest{Title: "T", Body: "B", Labels: []string{"l"}, DedupMarker: "<!-- m -->", IssueType: "Task"}) {
+				t.Errorf("FileIssue(%v, %+v)", tg, r)
+			}
+			return "https://x/browse/ENG-9", nil
+		},
 	}
 }
 
 func TestWriteCapabilities(t *testing.T) {
 	caps, m := writeHandlers(fakeWriter(t))
-	if want := []string{CapTransition, CapEditLabels, CapLabels}; !reflect.DeepEqual(caps, want) {
+	if want := []string{CapTransition, CapEditLabels, CapComment, CapFileIssue, CapLabels}; !reflect.DeepEqual(caps, want) {
 		t.Fatalf("caps = %v, want %v", caps, want)
 	}
-	for _, name := range []string{"tracker.transition", "tracker.editLabels", "tracker.listLabels", "tracker.createLabel"} {
+	for _, name := range []string{"tracker.transition", "tracker.editLabels", "tracker.listLabels", "tracker.createLabel", "tracker.comment", "tracker.fileIssue"} {
 		if m[name] == nil {
 			t.Errorf("method %s missing", name)
 		}
@@ -95,6 +107,21 @@ func TestEditLabels(t *testing.T) {
 	}
 }
 
+func TestComment(t *testing.T) {
+	_, m := writeHandlers(fakeWriter(t))
+	if got := call(t, m, "tracker.comment", `{`+target+`,"number":"3","body":"hi","research":true}`); got != `{}` {
+		t.Errorf("got %s, want {}", got)
+	}
+}
+
+func TestFileIssue(t *testing.T) {
+	_, m := writeHandlers(fakeWriter(t))
+	got := call(t, m, "tracker.fileIssue", `{`+target+`,"title":"T","body":"B","labels":["l"],"dedupMarker":"<!-- m -->","issueType":"Task"}`)
+	if want := `{"url":"https://x/browse/ENG-9"}`; got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
 func TestListLabels(t *testing.T) {
 	_, m := writeHandlers(fakeWriter(t))
 	if got, want := call(t, m, "tracker.listLabels", `{`+target+`}`), `{"labels":["x","y"]}`; got != want {
@@ -136,12 +163,16 @@ func TestWriteErrorsPass(t *testing.T) {
 		EditLabels:  func(Target, string, []string, []string) error { return boom },
 		ListLabels:  func(Target) ([]string, error) { return nil, boom },
 		CreateLabel: func(Target, string, string, string) error { return boom },
+		Comment:     func(Target, string, CommentRequest) error { return boom },
+		FileIssue:   func(Target, IssueRequest) (string, error) { return "", boom },
 	})
 	for name, params := range map[string]string{
 		"tracker.transition":  `{` + target + `,"number":"3"}`,
 		"tracker.editLabels":  `{` + target + `,"number":"3"}`,
 		"tracker.listLabels":  `{` + target + `}`,
 		"tracker.createLabel": `{` + target + `,"name":"n"}`,
+		"tracker.comment":     `{` + target + `,"number":"3"}`,
+		"tracker.fileIssue":   `{` + target + `}`,
 	} {
 		if _, err := m[name](json.RawMessage(params)); !errors.Is(err, boom) {
 			t.Errorf("%s: err = %v, want boom", name, err)
