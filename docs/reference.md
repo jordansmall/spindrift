@@ -2592,14 +2592,19 @@ compares its reads, while the native adapter still answers every call.
 
 `connectors/jira` is the jira backend's tracker read path as a network
 Connector on protocol 0.2: it serves `tracker.listIssues`, `tracker.issue`,
-`tracker.comments`, `tracker.nativeDeps` and `tracker.blocks` over Jira REST
+`tracker.comments`, `tracker.nativeDeps`, `tracker.blocks`, and doctor's and
+the daemon's reads (`tracker.probe`, `tracker.statuses`, `tracker.createMeta`
+and `tracker.count`, re-asked every five minutes) over Jira REST
 through `http_request`, with project-key ids (`tracker.ids.projectKey`) and the
 `dialect` (`cloud` or `server`) taken from the target. It advertises
 `tracker.comments` because Jira has no minimized comments, so `minimized` is
 faithfully always false. It returns the dedup and research markers from entity
-properties rather than splicing them into text. Its Route table is two `GET`
-routes on the `{base}` host, `/rest/api/2/search` and `/rest/api/2/issue`, and
-its row authorizes with Basic credentials from the host-only
+properties rather than splicing them into text. Its count is Cloud's
+approximate count or, on Server, the total of a zero-row search, over the same
+query as `tracker.listIssues`. Its Route table is four `GET` routes on the
+`{base}` host, `/rest/api/2/search`, `/rest/api/2/issue`, `/rest/api/2/myself`
+and `/rest/api/2/project/{repo}/statuses`, plus `POST /rest/api/3/search/approximate-count`,
+and its row authorizes with Basic credentials from the host-only
 `SPINDRIFT_JIRA_CONNECTOR_TOKEN` and `SPINDRIFT_JIRA_CONNECTOR_EMAIL`, with
 `JIRA_BASE_URL` as the base. The row is registered but not shadowed: the native
 jira adapter answers every call until the cut-over (issue #6753).
@@ -3030,7 +3035,9 @@ This is protocol version **0.2.0**. The host is
   [Connector subflake shape](#connector-subflake-shape)).
 - **Tracker capabilities.** A tracker Connector advertises `"tracker"`,
   meaning it serves `tracker.listIssues` and `tracker.issue`, and optionally
-  `"tracker.comments"`, `"tracker.nativeDeps"` and `"tracker.blocks"`, serving
+  `"tracker.comments"`, `"tracker.nativeDeps"`, `"tracker.blocks"`,
+  `"tracker.probe"`, `"tracker.statuses"`, `"tracker.createMeta"` and
+  `"tracker.count"`, serving
   the method of the same name, and `"tracker.ids.projectKey"` (see **Issue
   ids**). Advertising `"tracker.comments"` attests that each comment's
   `minimized` and `minimizedReason` are faithful; a Connector whose API cannot
@@ -3049,6 +3056,11 @@ This is protocol version **0.2.0**. The host is
   | `tracker.comments` (optional) | `{target, number}` | `{comments}`, oldest first |
   | `tracker.nativeDeps` (optional) | `{target, number}` | `{ids}`, the issues `number` is blocked on, in the API's order |
   | `tracker.blocks` (optional) | `{target, number}` | `{ids}`, the issues `number` blocks, in the API's order |
+  | `tracker.probe` (optional) | `{target}` | `{status}`, the HTTP status of one authenticated read; an error only when the request could not be sent |
+  | `tracker.statuses` (optional) | `{target}` | `{statuses}`, the name of every status in the project's workflows |
+  | `tracker.createMeta` (optional) | `{target, issueType}` | `{issueTypes, fields}`: every issue type the project offers, and the create fields (`{fieldId, name, required, hasDefaultValue}`) of `issueType`, none when it is not offered |
+  | `tracker.count` (optional) | `{target, label, status}`, selecting as `tracker.listIssues` does | `{count}`, possibly approximate |
+  | `tracker.countInterval` (with `tracker.count`) | `{}` | `{seconds}`, at least 1: how often core re-asks `tracker.count` |
 
   An issue is `{number, title, body, state, labels, closedAt, closedNotPlanned,
   dedupMarker}`. `number` is a string id and `state` is `"open"` or `"closed"`.
@@ -3076,12 +3088,21 @@ This is protocol version **0.2.0**. The host is
   deduplicates native deps. A state with neither a label nor a status lists
   nothing, without a guest call. Advertised comments flow into the existing
   `IssueText` trust handling, so a comment the Connector marks `minimized` is
-  dropped as for a native adapter. The SDK's
-  `tracker.Register(tracker.Reader{...})` serves the methods. A 0.1 Connector
-  predates the `status` selector, `tracker.blocks` and project-key ids: core
-  never sends it a `status`, ignores those two capabilities, and fails a read
-  whose Dispatch state has only a status selector. Only the read shadow
-  ([Shadow mode](#shadow-mode)) uses `connectortracker` in production.
+  dropped as for a native adapter. Doctor's and the daemon's checks are judged
+  in core with the native jira adapter's own rules: a `tracker.probe` status of
+  401 or 403 is an auth failure and any other non-2xx an unreachable tracker;
+  the mapped statuses missing from `tracker.statuses` fail the status-mapping
+  row; `tracker.createMeta` feeds the issue-type rows; and `tracker.count`
+  answers the Demand probe at the cadence `tracker.countInterval` gave once, at
+  construction. Those three optional checks come from the handshake alone: one
+  the Connector leaves out is absent, never answered by the native adapter, so
+  doctor skips its rows and the daemon has no Demand source. Probe is part of
+  every tracker, so without `tracker.probe` it stays on the native adapter. The
+  SDK's `tracker.Register(tracker.Reader{...})` serves the methods. A 0.1
+  Connector predates the `status` selector, `tracker.blocks` and project-key
+  ids: core never sends it a `status`, ignores those two capabilities, and
+  fails a read whose Dispatch state has only a status selector. Only the read
+  shadow ([Shadow mode](#shadow-mode)) uses `connectortracker` in production.
 - **Forge capabilities.** Provisional at protocol 0.y: issue #6754 finalises
   the forge axis, and a `0.y` bump may change what follows. A forge Connector
   advertises `"forge"`, meaning it serves the first three methods below. Every
