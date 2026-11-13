@@ -145,6 +145,9 @@ func TestHandoffEndToEnd(t *testing.T) {
 		"--agents-json-output", agentsJSONOutput,
 		"--handoff-output", handoffOutput,
 		"--review-prompt-output", reviewPromptOutput,
+		// Off the Box's /tmp default, which a macOS Nix host shares across
+		// builds.
+		"--heartbeat-log", filepath.Join(dir, "heartbeat.log"),
 	}
 	assembleCmd := exec.Command(driverExecBin, assembleArgs...)
 	if out, err := assembleCmd.CombinedOutput(); err != nil {

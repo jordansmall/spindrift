@@ -30,6 +30,9 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv("HOME", home)
+	// A handoff without a HeartbeatLog would otherwise write the Box's
+	// /tmp/heartbeat.log, which a macOS Nix host shares across builds.
+	defaultHeartbeatLog = filepath.Join(home, "heartbeat.log")
 	for _, v := range []string{
 		synthetic.Strategy.HomeConfig.HomeEnvVar,
 		"STUB_ECOSYSTEM_HOME", "STUB_HOME_ECOSYSTEM_HOME", "STUB_REPO_AWARE_HOME", "STUB_HOME_HOME",

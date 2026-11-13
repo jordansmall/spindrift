@@ -385,8 +385,15 @@ func TestResolveExitDegradesToRCOnDriverError(t *testing.T) {
 
 // A handoff without a HeartbeatLog still gets the coarse heartbeat at
 // /tmp/heartbeat.log, the path a human tails inside the Box (issue #183).
+// The run writes defaultHeartbeatLog, which TestMain points off /tmp.
 func TestMainRunHeartbeatLogDefaultsToTmp(t *testing.T) {
-	const defaultLog = "/tmp/heartbeat.log"
+	if boxHeartbeatLog != "/tmp/heartbeat.log" {
+		t.Fatalf("boxHeartbeatLog = %q, want /tmp/heartbeat.log", boxHeartbeatLog)
+	}
+	defaultLog := defaultHeartbeatLog
+	if defaultLog == boxHeartbeatLog {
+		t.Fatal("TestMain must point defaultHeartbeatLog off the shared /tmp")
+	}
 	os.Remove(defaultLog)
 	t.Cleanup(func() { os.Remove(defaultLog) })
 
