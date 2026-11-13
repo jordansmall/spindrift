@@ -1,10 +1,16 @@
-// Package tracker is the Connector author's side of the tracker read
-// primitives of Connector protocol 0.2: a Connector declares a Reader and
-// Register exports it over the Connector protocol.
+// Package tracker is the Connector author's side of the tracker primitives:
+// the reads of Connector protocol 0.2, which a Connector declares as a Reader
+// and Register exports, and the write primitives (transition, label edit,
+// label list and create), which it declares as a Writer and RegisterWrites
+// exports.
 //
-// Every write stays on core's native adapter. The Connector returns data only
-// (raw fields such as minimized, association and createdAt); core makes every
-// policy decision. That includes the markers: a Connector whose tracker keeps
+// Core decides every lifecycle policy: the fallback when a transition is
+// unavailable, the refusal, the claim checks and the verdicts. A Connector
+// only validates the status mapping it is handed, refusing one in which two
+// states other than failed and ambiguous share a status. The Connector
+// never decides what a record or verdict says; it returns data (raw fields
+// such as minimized, association, createdAt and status) and performs the one
+// write it is asked for. That includes the markers: a Connector whose tracker keeps
 // the dedup or research marker in a side store returns it as a field
 // (Issue.DedupMarker, Comment.ResearchMarker) and never splices it into a
 // body; core restores it. The optional reads are Comments, NativeDeps (the
@@ -56,6 +62,9 @@ type Issue struct {
 	// DedupMarker is the raw dedup marker line from the tracker's side store,
 	// "" when there is none. It is never part of Body.
 	DedupMarker string `json:"dedupMarker"`
+	// Status is the tracker's workflow status name, "" for a tracker without
+	// one.
+	Status string `json:"status"`
 }
 
 // Comment is one issue comment. CreatedAt is RFC3339 as the forge reports it.

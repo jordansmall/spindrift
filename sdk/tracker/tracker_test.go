@@ -110,9 +110,9 @@ func TestWireShapes(t *testing.T) {
 	_, m := handlers(r)
 	cases := []struct{ method, params, want string }{
 		{"tracker.listIssues", `{` + target + `,"label":"ready","status":"In Review","limit":7}`,
-			`{"issues":[{"number":"3","title":"t","body":"b","state":"open","labels":["ready"],"closedAt":"","closedNotPlanned":false,"dedupMarker":""}]}`},
+			`{"issues":[{"number":"3","title":"t","body":"b","state":"open","labels":["ready"],"closedAt":"","closedNotPlanned":false,"dedupMarker":"","status":""}]}`},
 		{"tracker.issue", `{` + target + `,"number":"3"}`,
-			`{"number":"3","title":"","body":"","state":"closed","labels":[],"closedAt":"","closedNotPlanned":false,"dedupMarker":""}`},
+			`{"number":"3","title":"","body":"","state":"closed","labels":[],"closedAt":"","closedNotPlanned":false,"dedupMarker":"","status":""}`},
 		{"tracker.comments", `{` + target + `,"number":"3"}`,
 			`{"comments":[{"author":"a","createdAt":"2026-01-02T03:04:05Z","body":"hi","minimized":true,"minimizedReason":"SPAM","association":"MEMBER","researchMarker":false}]}`},
 		{"tracker.nativeDeps", `{` + target + `,"number":"3"}`, `{"ids":["4","5"]}`},
@@ -141,7 +141,7 @@ func TestSearchCapabilityAndWireShape(t *testing.T) {
 		t.Fatalf("caps = %v, want %v", caps, want)
 	}
 	got := call(t, m, "tracker.searchIssues", `{`+target+`,"text":"flaky test","state":"closed","label":"bug","limit":5}`)
-	if want := `{"issues":[{"number":"8","title":"t","body":"","state":"closed","labels":[],"closedAt":"","closedNotPlanned":false,"dedupMarker":""}]}`; got != want {
+	if want := `{"issues":[{"number":"8","title":"t","body":"","state":"closed","labels":[],"closedAt":"","closedNotPlanned":false,"dedupMarker":"","status":""}]}`; got != want {
 		t.Errorf("tracker.searchIssues = %s, want %s", got, want)
 	}
 
@@ -237,7 +237,7 @@ func TestMarkerFieldsEncode(t *testing.T) {
 	r.Comments = func(Target, string) ([]Comment, error) { return []Comment{{Body: "x", ResearchMarker: true}}, nil }
 	_, m := handlers(r)
 	if got, want := call(t, m, "tracker.issue", `{`+target+`,"number":"3"}`),
-		`{"number":"3","title":"","body":"","state":"closed","labels":[],"closedAt":"2026-01-02T03:04:05Z","closedNotPlanned":true,"dedupMarker":"marker-line"}`; got != want {
+		`{"number":"3","title":"","body":"","state":"closed","labels":[],"closedAt":"2026-01-02T03:04:05Z","closedNotPlanned":true,"dedupMarker":"marker-line","status":""}`; got != want {
 		t.Errorf("issue = %s, want %s", got, want)
 	}
 	if got := call(t, m, "tracker.comments", `{`+target+`,"number":"3"}`); !strings.Contains(got, `"researchMarker":true`) {
