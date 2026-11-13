@@ -13,12 +13,16 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/forge/git"
+	"spindrift.dev/launcher/internal/gitexec"
+	"spindrift.dev/launcher/internal/retry"
 )
 
 const (
@@ -26,7 +30,6 @@ const (
 	connectorRoutesEnv = "SPINDRIFT_BACKEND_CONNECTOR_ROUTES"
 	connectorToken     = "connector-test-token"
 	connectorRepo      = "owner/repo"
-	connectorWebHost   = "github.com"
 )
 
 // restIssue is one issue in the scripted GitHub REST backend.
@@ -60,18 +63,30 @@ type scriptedContext struct {
 type restPR struct {
 	num      int
 	branch   string
+	base     string
+	title    string
+	body     string
 	draft    bool
 	merged   bool
 	closed   bool
+	enqueued bool
+	mergeSHA string
+	// behind is how many commits the base has that the head lacks.
+	behind   int
+	files    []string
+	comments []string
 	rollups  []string
 	contexts []scriptedContext
 }
 
-// restBackend serves exactly the REST and GraphQL reads the github Connector
-// makes and records any other request, so a read outside the Route table's
+// restBackend serves exactly the REST and GraphQL requests the github Connector
+// makes and records any other request, so one outside the Route table's
 // subtree fails the test instead of passing silently.
 // jobLogs is the Actions job logs by job id: a read answers 302 to a blob path
 // on the same server, as GitHub redirects to pre-signed storage.
+// The server's own host stands in for github.com: the repository's URL and
+// every PR's html_url name it, and git is pointed at repo, the real bare
+// repository behind branches and merges.
 type restBackend struct {
 	*httptest.Server
 	mu         sync.Mutex
@@ -79,13 +94,37 @@ type restBackend struct {
 	prs        map[int]*restPR
 	jobLogs    map[string]string
 	unexpected []string
+	// host and web are the backend's host and the repository's web URL.
+	host string
+	web  string
+	repo *forgetest.GitRepoFixture
+	// autoMerge is the repository's auto-merge setting.
+	autoMerge  bool
+	protection map[string]branchRules
 }
 
+// newRESTBackend starts the backend and a real bare repository. Production git
+// is https-only, so git reaches the bare repo through the environment: no
+// config file, and Credential.Apply extends the count.
 func newRESTBackend(t *testing.T) *restBackend {
 	t.Helper()
-	b := &restBackend{issues: map[int]*restIssue{}, prs: map[int]*restPR{}, jobLogs: map[string]string{}}
+	for k, v := range map[string]string{
+		"GIT_AUTHOR_NAME": "Test Bot", "GIT_AUTHOR_EMAIL": "bot@example.com",
+		"GIT_COMMITTER_NAME": "Test Bot", "GIT_COMMITTER_EMAIL": "bot@example.com",
+	} {
+		t.Setenv(k, v)
+	}
+	b := &restBackend{
+		issues: map[int]*restIssue{}, prs: map[int]*restPR{}, jobLogs: map[string]string{},
+		protection: map[string]branchRules{}, repo: forgetest.NewGitRepoFixture(t, "main"),
+	}
 	b.Server = httptest.NewTLSServer(http.HandlerFunc(b.serve))
 	t.Cleanup(b.Close)
+	b.host = b.Listener.Addr().String()
+	b.web = "https://" + b.host + "/" + connectorRepo
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "url."+b.repo.Bare+".insteadOf")
+	t.Setenv("GIT_CONFIG_VALUE_0", b.web+".git")
 	return b
 }
 
@@ -112,6 +151,9 @@ func (b *restBackend) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/graphql" {
 		b.graphql(w, r, reject)
+		return
+	}
+	if b.serveWrite(w, r, reject) {
 		return
 	}
 	if rest, ok := strings.CutPrefix(r.URL.Path, "/repos/"+connectorRepo+"/actions/jobs/"); ok {
@@ -165,11 +207,7 @@ func (b *restBackend) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func prHTMLURL(num int) string {
-	return "https://" + connectorWebHost + "/" + connectorRepo + "/pull/" + strconv.Itoa(num)
-}
-
-func wirePR(p *restPR) map[string]any {
+func (b *restBackend) wirePR(p *restPR) map[string]any {
 	state, mergedAt := "open", any(nil)
 	if p.merged || p.closed {
 		state = "closed"
@@ -177,20 +215,33 @@ func wirePR(p *restPR) map[string]any {
 	if p.merged {
 		mergedAt = "2026-01-01T00:00:00Z"
 	}
+	var mergeable any
+	if !p.merged && !p.closed {
+		_, mergeable = b.rebaseTree(p)
+	}
+	// An open PR carries GitHub's test-merge commit, which is not a landing.
+	mergeCommit := fakeSHA(p.num)
+	if p.merged {
+		mergeCommit = p.mergeSHA
+	}
 	return map[string]any{
-		"number": p.num, "html_url": prHTMLURL(p.num), "state": state, "merged_at": mergedAt, "draft": p.draft,
+		"number": p.num, "html_url": b.prURL(p.num), "state": state, "merged_at": mergedAt, "draft": p.draft,
+		"node_id": nodeID(p.num), "mergeable": mergeable, "merge_commit_sha": mergeCommit,
+		"head": map[string]string{"ref": p.branch, "sha": b.headSHA(p)},
+		"base": map[string]string{"ref": p.base},
 	}
 }
 
 // pulls serves GET .../pulls?head=owner:branch (exact head match, newest
-// first) and GET .../pulls/{n}.
+// first), POST .../pulls, and one PR's GET, files and PUT merge.
 func (b *restBackend) pulls(w http.ResponseWriter, r *http.Request, rest string, reject func(string)) {
-	if r.Method != http.MethodGet {
-		reject("not a read of the repo's pulls")
-		return
-	}
 	q := r.URL.Query()
-	if rest == "" {
+	parts := strings.Split(strings.TrimPrefix(rest, "/"), "/")
+	p := b.prByNumber(parts[0])
+	switch {
+	case rest == "" && r.Method == http.MethodPost:
+		b.openPR(w, r, reject)
+	case rest == "" && r.Method == http.MethodGet:
 		if q.Get("state") != "all" || q.Get("sort") != "created" || q.Get("direction") != "desc" {
 			reject("unexpected pulls query")
 			return
@@ -205,21 +256,29 @@ func (b *restBackend) pulls(w http.ResponseWriter, r *http.Request, rest string,
 		sort.Sort(sort.Reverse(sort.IntSlice(nums)))
 		out := []any{}
 		for _, n := range nums {
-			out = append(out, wirePR(b.prs[n]))
+			out = append(out, b.wirePR(b.prs[n]))
 		}
 		writeJSON(w, page(q, out))
-		return
+	case p == nil || !strings.HasPrefix(rest, "/"):
+		reject("no such pull request")
+	case len(parts) == 1 && r.Method == http.MethodGet:
+		writeJSON(w, b.wirePR(p))
+	case len(parts) == 2 && parts[1] == "files" && r.Method == http.MethodGet:
+		out := []any{}
+		for _, f := range p.files {
+			out = append(out, map[string]string{"filename": f})
+		}
+		writeJSON(w, page(q, out))
+	case len(parts) == 2 && parts[1] == "merge" && r.Method == http.MethodPut:
+		b.mergePR(w, r, p, reject)
+	default:
+		reject("not a request the Connector makes of a pull request")
 	}
-	n, err := strconv.Atoi(strings.TrimPrefix(rest, "/"))
-	if p := b.prs[n]; err == nil && p != nil && strings.HasPrefix(rest, "/") {
-		writeJSON(w, wirePR(p))
-		return
-	}
-	reject("no such pull request")
 }
 
-// graphql serves the statusCheckRollup query for one PR, popping its next
-// scripted rollup state.
+// graphql serves the repository-identity query, the pull-request mutations, and
+// the statusCheckRollup query for one PR, popping its next scripted rollup
+// state.
 func (b *restBackend) graphql(w http.ResponseWriter, r *http.Request, reject func(string)) {
 	if r.Method != http.MethodPost {
 		reject("graphql is POST only")
@@ -231,10 +290,19 @@ func (b *restBackend) graphql(w http.ResponseWriter, r *http.Request, reject fun
 			Owner  string `json:"owner"`
 			Repo   string `json:"repo"`
 			Number int    `json:"number"`
+			ID     string `json:"id"`
 		} `json:"variables"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		reject("undecodable graphql body: " + err.Error())
+		return
+	}
+	switch {
+	case strings.Contains(req.Query, "autoMergeAllowed"):
+		b.repoQuery(w, req.Variables.Owner, req.Variables.Repo)
+		return
+	case strings.HasPrefix(req.Query, "mutation"):
+		b.mutation(w, req.Query, req.Variables.ID, reject)
 		return
 	}
 	if req.Variables.Owner+"/"+req.Variables.Repo != connectorRepo || !strings.Contains(req.Query, "statusCheckRollup") {
@@ -397,30 +465,28 @@ func (w failingPRWrites) MarkReady(string) error               { return w.fail("
 func (w failingPRWrites) CommentPR(string, string) error       { return w.fail("CommentPR") }
 func (w failingPRWrites) MarkDraft(string) error               { return w.fail("MarkDraft") }
 
-// mergeStandIn is the CodeForge of a read-only PRForge run: Merge is a native
-// write the Connector cannot perform, so it marks the scripted PR merged
-// instead. The rest of CodeForge is unreachable from the read cases.
-type mergeStandIn struct {
-	forge.CodeForge
-	h *connectorHarness
-}
-
-func (m mergeStandIn) Merge(ref string) error {
-	m.h.mutatePR(prNum(ref), func(p *restPR) { p.merged = true })
-	return nil
-}
-
 // connectorHarness drives the compiled github Connector, through the
 // Connector host, against the scripted REST backend.
+// pf is the read shadow's PRForge (connectorforge.New over native writes the
+// reads must never reach); cf and caps are the Code Forge composed from the
+// Connector alone, whose PRForge is caps.PRForge.
 type connectorHarness struct {
+	t       *testing.T
 	backend *restBackend
 	routes  []connectorhost.Route
 	audit   *bytes.Buffer
+	conn    *connectorhost.Connector
 	tr      forge.IssueTracker
 	pf      forge.PRForge
+	cf      forge.CodeForge
+	caps    forge.Capabilities
 }
 
-func newConnectorHarness(t *testing.T) *connectorHarness {
+func newConnectorHarness(t *testing.T) *connectorHarness { return newComposedHarness(t, false) }
+
+// newComposedHarness loads the Connector and composes the Code Forge over it.
+// readOnlyBox is the Box's mode: a read-only Box relays its bundle.
+func newComposedHarness(t *testing.T, readOnlyBox bool) *connectorHarness {
 	t.Helper()
 	path := os.Getenv(connectorWasmEnv)
 	if path == "" {
@@ -452,6 +518,7 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 		declared = append(declared, connectorhost.Route{Method: r.Method, Host: u.Host, Path: r.Path, FollowRedirect: r.FollowRedirect})
 	}
 	h := &connectorHarness{
+		t:       t,
 		backend: b,
 		routes:  connectortracker.Routes(declared, connectorRepo),
 		audit:   &bytes.Buffer{},
@@ -470,6 +537,7 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	h.conn = conn
 	// The guest speaks the 0.3 forge write surface; its version
 	// comes from the ldflag in connectors/github/package.nix, not the SDK default.
 	if !strings.HasPrefix(conn.ProtocolVersion, "0.3.") {
@@ -479,7 +547,18 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.pf, err = connectorforge.New(conn, failingPRWrites{t}, connectorforge.Target{API: b.URL, Repo: connectorRepo}, connectorWebHost)
+	h.pf, err = connectorforge.New(conn, failingPRWrites{t}, connectorforge.Target{API: b.URL, Repo: connectorRepo}, b.host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.cf, h.caps, err = connectorforge.Compose(conn, connectorforge.Target{API: b.URL, Repo: connectorRepo}, connectorforge.Git{
+		Credential:  gitexec.Credential{Username: "bot", Password: "git-secret"},
+		ReadOnlyBox: readOnlyBox,
+		Plumbing: func(u string, cred gitexec.Credential) forge.CodeForge {
+			return git.NewGitClient(u, "main", "Test Bot", "bot@example.com", git.WithCredential(cred))
+		},
+		Clock: retry.Clock{Now: time.Now, Sleep: func(time.Duration) {}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,7 +568,7 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 func (h *connectorHarness) Tracker() forge.IssueTracker { return h.tr }
 
 func (h *connectorHarness) Forge() forge.PRForge       { return h.pf }
-func (h *connectorHarness) CodeForge() forge.CodeForge { return mergeStandIn{h: h} }
+func (h *connectorHarness) CodeForge() forge.CodeForge { return h.cf }
 
 func (h *connectorHarness) BranchPrefix() string { return "agent/issue-" }
 
@@ -499,7 +578,7 @@ func (h *connectorHarness) mutatePR(num string, f func(*restPR)) {
 	defer h.backend.mu.Unlock()
 	p := h.backend.prs[n]
 	if p == nil {
-		p = &restPR{num: n, branch: "agent/issue-" + num}
+		p = &restPR{num: n, branch: "agent/issue-" + num, base: "main"}
 		h.backend.prs[n] = p
 	}
 	f(p)
@@ -507,12 +586,12 @@ func (h *connectorHarness) mutatePR(num string, f func(*restPR)) {
 
 func (h *connectorHarness) SeedOpenPR(num string) string {
 	h.mutatePR(num, func(*restPR) {})
-	return prHTMLURL(atoi(num))
+	return h.backend.prURL(atoi(num))
 }
 
 func (h *connectorHarness) SeedDraftPR(num string) string {
 	h.mutatePR(num, func(p *restPR) { p.draft = true })
-	return prHTMLURL(atoi(num))
+	return h.backend.prURL(atoi(num))
 }
 
 func (h *connectorHarness) IsDraft(url string) bool {
@@ -599,38 +678,50 @@ var (
 	_ forgetest.PRForgeReadHarness = (*connectorHarness)(nil)
 )
 
-func TestConnector_ReadContracts(t *testing.T) {
-	h := newConnectorHarness(t)
-	t.Run("Tracker", func(t *testing.T) { forgetest.RunTrackerReadContract(t, h) })
-	t.Run("PRForge", func(t *testing.T) { forgetest.RunPRForgeReadContract(t, h) })
-	t.Run("JobLogExcerpt", func(t *testing.T) { testJobLogExcerpt(t, h) })
+// TestConnector_Contracts runs the shared contracts against the compiled
+// Connector: the tracker and PR reads (through the read shadow's PRForge), and
+// the whole Code Forge composed from the Connector. A route no request in either
+// run used is broader than the Connector needs, so coverage is judged over both.
+func TestConnector_Contracts(t *testing.T) {
+	var cov routeCoverage
+	t.Run("Reads", func(t *testing.T) {
+		h := newConnectorHarness(t)
+		t.Run("Tracker", func(t *testing.T) { forgetest.RunTrackerReadContract(t, h) })
+		t.Run("PRForge", func(t *testing.T) { forgetest.RunPRForgeReadContract(t, h) })
+		t.Run("JobLogExcerpt", func(t *testing.T) { testJobLogExcerpt(t, h) })
 
-	// REST reports no minimized state, so the Connector must not attest
-	// comments; they stay on the native adapter.
-	if _, ok := forge.As[forge.CommentLister](h.tr); ok {
-		t.Error("Connector tracker serves comments: it must not advertise tracker.comments")
-	}
-
-	h.backend.mu.Lock()
-	unexpected := h.backend.unexpected
-	h.backend.mu.Unlock()
-	if len(unexpected) > 0 {
-		t.Errorf("backend saw requests outside the Connector's reads: %q", unexpected)
-	}
-
-	admitted := map[string]int{}
-	for _, e := range h.auditEntries(t) {
-		if e.Decision != connectorhost.DecisionSent {
-			t.Errorf("audit entry %+v: want every request sent", e)
+		// REST reports no minimized state, so the Connector must not attest
+		// comments; they stay on the native adapter.
+		if _, ok := forge.As[forge.CommentLister](h.tr); ok {
+			t.Error("Connector tracker serves comments: it must not advertise tracker.comments")
 		}
-		admitted[e.Route]++
-	}
-	// A route no request used is broader than the reads need.
-	for _, r := range h.routes {
-		if admitted[r.String()] == 0 {
-			t.Errorf("route %q admitted no request: the table is broader than the Connector's reads", r)
+		cov.record(t, h)
+	})
+	t.Run("ComposedForge", func(t *testing.T) {
+		h := newComposedHarness(t, false)
+		t.Run("Capabilities", func(t *testing.T) { testComposedCapabilities(t, h) })
+		t.Run("PRForgeContract", func(t *testing.T) { forgetest.RunPRForgeContract(t, composedPRHarness{h}) })
+		for _, c := range []struct {
+			name string
+			run  func(*testing.T, *connectorHarness)
+		}{
+			{"MergeLandsHead", testMergeLandsHead},
+			{"MergeableTracksReality", testMergeableTracksReality},
+			{"MergeRefusesDraft", testMergeRefusesDraft},
+			{"HeadCommitSHA", testHeadCommitSHA},
+			{"CreateDraftPRAdopts", testCreateDraftPRAdopts},
+			{"ListPRFiles", testListPRFiles},
+			{"CommentPR", testCommentPR},
+			{"BranchLifecycle", testBranchLifecycle},
+			{"BranchProtection", testBranchProtection},
+			{"Probe", testProbe},
+			{"BaseMovedOn", testBaseMovedOn},
+		} {
+			t.Run(c.name, func(t *testing.T) { c.run(t, h) })
 		}
-	}
+		cov.record(t, h)
+	})
+	cov.assertUsed(t)
 }
 
 // TestConnector_FailureDetailMatchesNative pins the failing sets connectorforge
@@ -687,7 +778,7 @@ func (h *connectorHarness) SeedJobLogFailure(url, name, jobID, log string) {
 	h.mutatePR(prNum(url), func(p *restPR) {
 		p.contexts = append(p.contexts, scriptedContext{
 			TypeName: "CheckRun", Name: name, Conclusion: "FAILURE", Summary: "exit status 1",
-			DetailsURL: "https://" + connectorWebHost + "/" + connectorRepo + "/actions/runs/900/job/" + jobID,
+			DetailsURL: h.backend.web + "/actions/runs/900/job/" + jobID,
 		})
 	})
 	h.backend.mu.Lock()
