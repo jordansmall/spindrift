@@ -5564,7 +5564,10 @@ such block and are experimental, so you select them by editing
   Every comment body the adapter posts (research verdicts, blocked-run
   notes, settle comments) is converted from Markdown to Jira wiki markup
   first, since the v2 API renders wiki markup. Constructs outside the
-  supported subset pass through as text, and `<!-- spindrift-... -->`
+  supported subset pass through as text. Code-span contents have Jira's
+  markup characters backslash-escaped and backslashes sent as `&#92;` so
+  they render literally, though that rendering is not yet checked against a
+  live Jira instance (issue #6358). `<!-- spindrift-... -->`
   marker lines pass through verbatim (issue #6348), except the research
   marker: wiki markup has no comment syntax, so it would render as text.
   The adapter strips that line and posts it as a `spindrift-research`
