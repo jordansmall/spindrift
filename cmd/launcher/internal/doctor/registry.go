@@ -15,11 +15,6 @@ import (
 // package's value so a Prerequisite Probe can wrap it without importing doctor.
 var ErrDegraded = runner.ErrDegraded
 
-// ErrUnsupported marks a Probe error as naming a capability the backend's
-// Connector does not offer: the check could not run, which is not a failure at
-// any tier. Reporter.Results prints it as its own "unsupported:" line.
-var ErrUnsupported = runner.ErrUnsupported
-
 // Tier classifies a Check as blocking (Required) or non-blocking (Advisory).
 // A Required-tier failure wrapping ErrDegraded is the exception.
 type Tier int
@@ -71,12 +66,12 @@ func runOne(c Check) Result {
 // Blocking reports whether r's failure stops the run. A Required-tier probe
 // that wrapped ErrDegraded could not determine its answer, which is not the
 // same as affirmatively detecting the condition it checks (issue #2962), so
-// it never blocks; nor does a probe wrapping ErrUnsupported, at any tier.
+// it never blocks; nor does a probe wrapping runner.ErrUnsupported, at any tier.
 // Every caller asking "does this failure stop the run?" — this package's
 // fail-fast chains and cmd/launcher's configuration classification alike —
 // routes through here so the two cannot drift apart.
 func Blocking(r Result) bool {
-	return r.Check.Tier == Required && r.Err != nil && !errors.Is(r.Err, ErrDegraded) && !errors.Is(r.Err, ErrUnsupported)
+	return r.Check.Tier == Required && r.Err != nil && !errors.Is(r.Err, ErrDegraded) && !errors.Is(r.Err, runner.ErrUnsupported)
 }
 
 // RunChecks runs every check's Probe in order, never short-circuiting on a

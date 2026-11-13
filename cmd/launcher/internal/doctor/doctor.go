@@ -250,7 +250,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 				if err != nil {
 					// A capability the backend lacks is not a connectivity failure; the
 					// ErrConnectivity prefix would bury the reason Results prints.
-					if errors.Is(err, ErrUnsupported) {
+					if errors.Is(err, runner.ErrUnsupported) {
 						return nil, err
 					}
 					if errors.Is(err, forge.ErrAuthFailure) {
@@ -276,7 +276,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 			Probe: func() (any, error) {
 				repo, err := cf.Probe()
 				if err != nil {
-					if errors.Is(err, ErrUnsupported) {
+					if errors.Is(err, runner.ErrUnsupported) {
 						return nil, err
 					}
 					return nil, fmt.Errorf("%w: code forge connectivity check failed: %w", ErrConnectivity, err)
@@ -394,7 +394,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 		existing, lerr := it.ListLabels()
 		if lerr != nil {
 			// A capability the backend lacks is not a connectivity failure.
-			if errors.Is(lerr, ErrUnsupported) {
+			if errors.Is(lerr, runner.ErrUnsupported) {
 				return nil, nil, lerr
 			}
 			return nil, nil, fmt.Errorf("%w: label check failed: %w", ErrConnectivity, lerr)
@@ -427,7 +427,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 	}
 
 	requiredMissing, tierResults, err := checkLabels()
-	if errors.Is(err, ErrUnsupported) {
+	if errors.Is(err, runner.ErrUnsupported) {
 		rep.Unsupported("labels (%s)", UnsupportedReason(err))
 		return nil
 	}
