@@ -53,25 +53,52 @@ func newQueueRecoverFixture(t *testing.T) *queueRecoverFixture {
 func (x *queueRecoverFixture) addFailed(t *testing.T, num, report string) {
 	t.Helper()
 	x.fc.SetIssue(forge.Issue{Number: num, Labels: []string{x.c.FailedLabel}})
+	x.seedBundle(t, num)
+	if report == "" {
+		return
+	}
+	x.seedReport(t, num, forge.AgentBranchName(x.c.BranchPrefix, num), report)
+}
+
+func (x *queueRecoverFixture) seedOutbox(t *testing.T, num string) string {
+	t.Helper()
 	outbox := dispatch.OutboxDirFor(x.dir, num)
 	if err := os.MkdirAll(outbox, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	return outbox
+}
+
+func (x *queueRecoverFixture) seedBundle(t *testing.T, num string) {
+	t.Helper()
+	outbox := x.seedOutbox(t, num)
 	if err := os.WriteFile(filepath.Join(outbox, seambundle.FileName), []byte("bundle"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if report == "" {
-		return
-	}
+}
+
+func (x *queueRecoverFixture) seedReport(t *testing.T, num, landing, status string) {
+	t.Helper()
 	// The marker a real Box run's Run() leaves, so recover's EnsureRunLineage
 	// keeps this log rather than quarantining it as a prior run's.
 	if err := os.WriteFile(filepath.Join(dispatch.HostLogDirFor(x.dir), "issue-"+num+".run-lineage"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	log := filepath.Join(dispatch.HostLogDirFor(x.dir), "issue-"+num+".log")
-	if err := os.WriteFile(log, []byte("SPINDRIFT_OUTCOME: issue="+num+" landing="+forge.AgentBranchName(x.c.BranchPrefix, num)+" status="+report+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(log, []byte("SPINDRIFT_OUTCOME: issue="+num+" landing="+landing+" status="+status+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// claimed lists the issues a recover run moved Failed->InProgress.
+func (x *queueRecoverFixture) claimed() []string {
+	var nums []string
+	for _, call := range x.fc.TransitionStateCalls {
+		if call.From == forge.Failed && call.To == forge.InProgress {
+			nums = append(nums, call.Num)
+		}
+	}
+	return nums
 }
 
 func (x *queueRecoverFixture) run(t *testing.T) (int, string) {
@@ -103,6 +130,13 @@ func (x *queueRecoverFixture) assertUntouched(t *testing.T) {
 	}
 }
 
+func (x *queueRecoverFixture) assertStillAmbiguous(t *testing.T, num string) {
+	t.Helper()
+	if got := x.labels(t, num); !slices.Equal(got, []string{dispatchLabels(x.c).Ambiguous}) {
+		t.Errorf("%s labels = %v, want only the ambiguous label", num, got)
+	}
+}
+
 // seedRecord saves seed as num's attempt record; an empty seed.Bundle means the
 // issue's current outbox bundle.
 func (x *queueRecoverFixture) seedRecord(t *testing.T, num string, seed recoverrecord.Record) {
@@ -121,6 +155,35 @@ func (x *queueRecoverFixture) seedRecord(t *testing.T, num string, seed recoverr
 	if err := rec.Save(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// sharedFailedStatus simulates a Jira site that maps failed and ambiguous to
+// one status: ListIssues(Failed) also returns the ambiguous cards, ahead of
+// the genuinely failed ones, though they never wear the failed label.
+type sharedFailedStatus struct {
+	forge.IssueTracker
+}
+
+func (s sharedFailedStatus) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
+	failed, err := s.IssueTracker.ListIssues(state)
+	if err != nil || state != forge.Failed {
+		return failed, err
+	}
+	ambiguous, err := s.IssueTracker.ListIssues(forge.Ambiguous)
+	if err != nil {
+		return nil, err
+	}
+	return append(ambiguous, failed...), nil
+}
+
+// addAmbiguous seeds an issue the pre-implement gate halted: the ambiguous
+// label, an empty outbox (the shape resetOutboxDir leaves) and an ambiguous
+// self-report. A leftover bundle is a separate seedBundle.
+func (x *queueRecoverFixture) addAmbiguous(t *testing.T, num string) {
+	t.Helper()
+	x.fc.SetIssue(forge.Issue{Number: num, Labels: []string{dispatchLabels(x.c).Ambiguous}})
+	x.seedOutbox(t, num)
+	x.seedReport(t, num, "none", "ambiguous")
 }
 
 func TestRecoverQueueOne_ReadyBundleNoPRMergesAndCompletes(t *testing.T) {
@@ -268,15 +331,78 @@ func TestRecoverQueueOne_AttemptsOnlyOneEligibleIssue(t *testing.T) {
 	if code != 0 {
 		t.Errorf("exit = %d, want 0", code)
 	}
-	var started []string
-	for _, call := range x.fc.TransitionStateCalls {
-		if call.From == forge.Failed && call.To == forge.InProgress {
-			started = append(started, call.Num)
-		}
-	}
-	if len(started) != 1 {
+	if started := x.claimed(); len(started) != 1 {
 		t.Errorf("issues claimed = %v, want exactly one", started)
 	}
+}
+
+// On a status shared with failed, queue recover skips an ambiguous-halted
+// card: no claim, relay, label change or merge. Queue mode only: the hand-run
+// `spindrift recover <n>` never lists Failed (it fetches the named issue), and
+// recoverIssue's Failed re-list is queue mode's pre-claim check, which an
+// ambiguous card never reaches because the Strict gate declines before Begin.
+// Hand-running recover on one is an operator choice.
+func TestRecoverQueueOne_SharedStatusAmbiguousCardIsSkipped(t *testing.T) {
+	cases := []struct {
+		name           string
+		leftoverBundle bool
+	}{
+		// Pins only the realistic empty-outbox shape: the missing bundle declines
+		// whatever the self-report says.
+		{"no bundle", false},
+		// A leftover bundle isolates the self-report gate: status=ambiguous is not ready.
+		{"leftover bundle", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			x := newQueueRecoverFixture(t)
+			x.addAmbiguous(t, "41")
+			if tc.leftoverBundle {
+				x.seedBundle(t, "41")
+			}
+			x.tracker = sharedFailedStatus{IssueTracker: x.fc}
+
+			code, _ := x.run(t)
+
+			if code != 2 {
+				t.Errorf("exit = %d, want 2", code)
+			}
+			x.assertUntouched(t)
+			x.assertStillAmbiguous(t, "41")
+			if len(x.fc.RelayBundleCalls) != 0 || len(x.fc.AddLabelsCalls) != 0 || len(x.fc.FlagAbandonedCalls) != 0 {
+				t.Errorf("relay=%v addLabels=%v flagAbandoned=%v, want none", x.fc.RelayBundleCalls, x.fc.AddLabelsCalls, x.fc.FlagAbandonedCalls)
+			}
+			if x.fc.Merged != "" {
+				t.Errorf("Merged = %q, want none", x.fc.Merged)
+			}
+			if _, err := os.Stat(recoverrecord.Path(x.dir, "41")); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("recover record for 41: stat err = %v, want not-exist", err)
+			}
+		})
+	}
+}
+
+// The skip is a continue, not a stop: an ambiguous card listed first must not
+// shadow the ready failed issue behind it.
+func TestRecoverQueueOne_SharedStatusAmbiguousCardDoesNotShadowReadyIssue(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addAmbiguous(t, "41")
+	x.seedBundle(t, "41")
+	x.addFailed(t, "42", "ready")
+	x.tracker = sharedFailedStatus{IssueTracker: x.fc}
+
+	code, out := x.run(t)
+
+	if code != 0 {
+		t.Errorf("exit = %d, want 0 (output %q)", code, out)
+	}
+	if started := x.claimed(); !slices.Equal(started, []string{"42"}) {
+		t.Errorf("issues claimed = %v, want only 42", started)
+	}
+	if x.fc.Merged != testReconcilePR {
+		t.Errorf("Merged = %q, want %q", x.fc.Merged, testReconcilePR)
+	}
+	x.assertStillAmbiguous(t, "41")
 }
 
 func TestRecoverQueueOne_PRLessForgeRefuses(t *testing.T) {
