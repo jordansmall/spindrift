@@ -6,6 +6,8 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectortracker"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/jira"
 )
@@ -53,5 +55,65 @@ func TestStrategyNewIssueTracker_JiraIssueTypeReachesPostIssue(t *testing.T) {
 		if (err != nil) != tc.wantErr {
 			t.Errorf("%s: PostIssue err = %v, wantErr %v", tc.name, err, tc.wantErr)
 		}
+	}
+}
+
+// connectorLifecycle builds the Connector's lifecycle from jira.WorkLifecycle
+// plus the labels and issue type. It lives in the test package because
+// forge/jira is linked into the Box, which must not pull in the Connector host.
+func connectorLifecycle(t dispatchkind.Tracker, labels forge.DispatchLabels, verdicts forge.VerdictLabels, mapping, lifecycle, issueType string) (connectortracker.Lifecycle, error) {
+	wl, err := jira.WorkLifecycle(t, mapping, lifecycle)
+	if err != nil {
+		return connectortracker.Lifecycle{}, err
+	}
+	return connectortracker.Lifecycle{
+		Labels:        labels,
+		VerdictLabels: verdicts,
+		IssueType:     issueType,
+		Statuses:      wl.Statuses,
+		Resolutions:   wl.Resolutions,
+		StatusOnly:    wl.StatusOnly,
+	}, nil
+}
+
+func TestConnectorLifecycle(t *testing.T) {
+	const mapping = `{"dispatchable":"To Do","inProgress":"In Progress","complete":{"status":"Done","resolution":"Fixed"}}`
+	labels := forge.DispatchLabels{Dispatchable: "d", InProgress: "p"}
+	verdicts := forge.ResearchVerdictLabels()
+
+	work, err := connectorLifecycle(dispatchkind.TrackerWork, labels, verdicts, mapping, jira.LifecycleStatus, "Task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantStatuses := map[forge.DispatchState]string{forge.Dispatchable: "To Do", forge.InProgress: "In Progress", forge.Complete: "Done"}
+	if !reflect.DeepEqual(work.Statuses, wantStatuses) {
+		t.Errorf("work Statuses = %v, want %v", work.Statuses, wantStatuses)
+	}
+	if want := map[forge.DispatchState]string{forge.Complete: "Fixed"}; !reflect.DeepEqual(work.Resolutions, want) {
+		t.Errorf("work Resolutions = %v, want %v", work.Resolutions, want)
+	}
+	if !work.StatusOnly || work.IssueType != "Task" || work.Labels != labels || !reflect.DeepEqual(work.VerdictLabels, verdicts) {
+		t.Errorf("work lifecycle = %+v", work)
+	}
+
+	// Research verdicts ride labels in either lifecycle (ADR 0072).
+	research, err := connectorLifecycle(dispatchkind.TrackerResearch, labels, verdicts, mapping, jira.LifecycleStatus, "Task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(research.Statuses) != 0 || len(research.Resolutions) != 0 || research.StatusOnly {
+		t.Errorf("research lifecycle = %+v, want label-only", research)
+	}
+
+	hybrid, err := connectorLifecycle(dispatchkind.TrackerWork, labels, verdicts, mapping, jira.LifecycleHybrid, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hybrid.StatusOnly || len(hybrid.Statuses) != 3 {
+		t.Errorf("hybrid lifecycle = %+v", hybrid)
+	}
+
+	if _, err := connectorLifecycle(dispatchkind.TrackerWork, labels, verdicts, `{"nope":"x"}`, jira.LifecycleHybrid, ""); err == nil {
+		t.Error("an invalid mapping must be refused")
 	}
 }

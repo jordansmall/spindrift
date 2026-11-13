@@ -85,3 +85,38 @@ func statusMappingFor(t dispatchkind.Tracker, mapping string) string {
 	}
 	return mapping
 }
+
+// WorkLifecycleConfig is the native lifecycle policy core hands the jira
+// Connector for one tracker instance: the status and resolution each mapped
+// work state moves to, and whether the lifecycle is status-only.
+type WorkLifecycleConfig struct {
+	Statuses    map[forge.DispatchState]string
+	Resolutions map[forge.DispatchState]string
+	StatusOnly  bool
+}
+
+// WorkLifecycle builds the WorkLifecycleConfig for tracker instance t. Research
+// gets the zero config (it stays on labels, decided from the kind row's
+// Tracker axis). An unparseable mapping is an error; callers validate it at
+// startup.
+func WorkLifecycle(t dispatchkind.Tracker, mapping, lifecycle string) (WorkLifecycleConfig, error) {
+	var cfg WorkLifecycleConfig
+	targets, err := ParseStatusMapping(statusMappingFor(t, mapping))
+	if err != nil {
+		return WorkLifecycleConfig{}, err
+	}
+	for state, target := range targets {
+		if target.Status == "" {
+			continue
+		}
+		if cfg.Statuses == nil {
+			cfg.Statuses, cfg.Resolutions = map[forge.DispatchState]string{}, map[forge.DispatchState]string{}
+		}
+		cfg.Statuses[state] = target.Status
+		if target.Resolution != "" {
+			cfg.Resolutions[state] = target.Resolution
+		}
+	}
+	cfg.StatusOnly = statusOnlyFor(t, lifecycle)
+	return cfg, nil
+}
