@@ -38,13 +38,15 @@ func statusError(method, path string, status int) error {
 	return connector.Errorf(connector.ClassForStatus(status), "%s %s: status %d", method, path, status)
 }
 
+func is2xx(status int) bool { return status >= 200 && status <= 299 }
+
 // fetch is request returning a 2xx body.
 func fetch(method, api, path string, body []byte) ([]byte, error) {
 	resp, err := request(method, api, path, body)
 	if err != nil {
 		return nil, err
 	}
-	if resp.Status < 200 || resp.Status > 299 {
+	if !is2xx(resp.Status) {
 		return nil, statusError(method, path, resp.Status)
 	}
 	return resp.Body, nil
@@ -113,10 +115,10 @@ func numberPath(t tracker.Target, number string) (string, error) {
 // pages walks a paginated list: path must already carry a query string. visit
 // returns true to stop early; a short page ends the walk. Exceeding maxPages
 // is an error so a runaway list never truncates silently.
-func pages[T any](t tracker.Target, path string, visit func([]T) bool) error {
+func pages[T any](api, path string, visit func([]T) bool) error {
 	for page := 1; page <= maxPages; page++ {
 		var raw []T
-		if err := get(t, path+"&page="+strconv.Itoa(page), &raw); err != nil {
+		if err := call("GET", api, path+"&page="+strconv.Itoa(page), nil, &raw); err != nil {
 			return err
 		}
 		if visit(raw) || len(raw) < pageSize {
@@ -135,7 +137,7 @@ func listIssues(t tracker.Target, query tracker.Query, limit int) ([]tracker.Iss
 		q += "&labels=" + url.QueryEscape(query.Label)
 	}
 	var out []tracker.Issue
-	err := pages(t, repoPath(t)+q, func(raw []rawIssue) bool {
+	err := pages(t.API, repoPath(t)+q, func(raw []rawIssue) bool {
 		for _, r := range raw {
 			// The REST issues list includes pull requests; `gh issue list` does not.
 			if r.PullRequest != nil {
@@ -177,7 +179,7 @@ func nativeDeps(t tracker.Target, number string) ([]string, error) {
 	}
 	ids := []string{}
 	path := fmt.Sprintf("%s/dependencies/blocked_by?per_page=%d", base, pageSize)
-	err = pages(t, path, func(raw []rawDep) bool {
+	err = pages(t.API, path, func(raw []rawDep) bool {
 		for _, r := range raw {
 			ids = append(ids, strconv.Itoa(r.Number))
 		}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -48,7 +47,10 @@ func (r rawPR) pr() forge.PR {
 		Mergeable: "UNKNOWN",
 	}
 	if r.Mergeable != nil {
-		p.Mergeable = map[bool]string{true: "MERGEABLE", false: "CONFLICTING"}[*r.Mergeable]
+		p.Mergeable = "CONFLICTING"
+		if *r.Mergeable {
+			p.Mergeable = "MERGEABLE"
+		}
 	}
 	// An open PR's merge_commit_sha is a test-merge commit, not a landing.
 	if p.Merged {
@@ -56,6 +58,9 @@ func (r rawPR) pr() forge.PR {
 	}
 	return p
 }
+
+// forgePath is a REST path under the target repository; rest starts with "/".
+func forgePath(t forge.Target, rest string) string { return "/repos/" + t.Repo + rest }
 
 func parseNumber(number string) (int, error) {
 	n, err := strconv.Atoi(number)
@@ -83,8 +88,8 @@ func prsForBranch(t forge.Target, branch string) ([]forge.PR, error) {
 		return nil, err
 	}
 	var raw []rawPR
-	path := "/repos/" + t.Repo + "/pulls?head=" + url.QueryEscape(owner+":"+branch) +
-		"&state=all&sort=created&direction=desc&per_page=" + strconv.Itoa(pageSize)
+	path := forgePath(t, "/pulls?head="+url.QueryEscape(owner+":"+branch)+
+		"&state=all&sort=created&direction=desc&per_page="+strconv.Itoa(pageSize))
 	if err := call("GET", t.API, path, nil, &raw); err != nil {
 		return nil, err
 	}
@@ -95,12 +100,20 @@ func prsForBranch(t forge.Target, branch string) ([]forge.PR, error) {
 	return prs, nil
 }
 
-func pr(t forge.Target, number string) (forge.PR, error) {
-	if _, err := parseNumber(number); err != nil {
-		return forge.PR{}, err
-	}
+// readPR is the raw REST pull request, for the primitives that need its node
+// id or refs rather than core's view of it.
+func readPR(t forge.Target, number string) (rawPR, error) {
 	var raw rawPR
-	if err := call("GET", t.API, "/repos/"+t.Repo+"/pulls/"+number, nil, &raw); err != nil {
+	if _, err := parseNumber(number); err != nil {
+		return raw, err
+	}
+	err := call("GET", t.API, forgePath(t, "/pulls/"+number), nil, &raw)
+	return raw, err
+}
+
+func pr(t forge.Target, number string) (forge.PR, error) {
+	raw, err := readPR(t, number)
+	if err != nil {
 		return forge.PR{}, err
 	}
 	return raw.pr(), nil
@@ -137,43 +150,29 @@ func checks(t forge.Target, number string) (forge.Rollup, error) {
 	if err != nil {
 		return forge.Rollup{}, err
 	}
-	body, err := json.Marshal(map[string]any{
-		"query":     rollupQuery,
-		"variables": map[string]any{"owner": owner, "repo": name, "number": n},
-	})
-	if err != nil {
+	var data struct {
+		Repository *struct {
+			PullRequest *struct {
+				Commits struct {
+					Nodes []struct {
+						Commit struct {
+							StatusCheckRollup *struct {
+								State    string `json:"state"`
+								Contexts struct {
+									Nodes []rawContext `json:"nodes"`
+								} `json:"contexts"`
+							} `json:"statusCheckRollup"`
+						} `json:"commit"`
+					} `json:"nodes"`
+				} `json:"commits"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
+	}
+	vars := map[string]any{"owner": owner, "repo": name, "number": n}
+	if err := graphql(t.API, rollupQuery, vars, &data); err != nil {
 		return forge.Rollup{}, err
 	}
-	var resp struct {
-		Errors []struct {
-			Message string `json:"message"`
-		} `json:"errors"`
-		Data struct {
-			Repository *struct {
-				PullRequest *struct {
-					Commits struct {
-						Nodes []struct {
-							Commit struct {
-								StatusCheckRollup *struct {
-									State    string `json:"state"`
-									Contexts struct {
-										Nodes []rawContext `json:"nodes"`
-									} `json:"contexts"`
-								} `json:"statusCheckRollup"`
-							} `json:"commit"`
-						} `json:"nodes"`
-					} `json:"commits"`
-				} `json:"pullRequest"`
-			} `json:"repository"`
-		} `json:"data"`
-	}
-	if err := call("POST", t.API, "/graphql", body, &resp); err != nil {
-		return forge.Rollup{}, err
-	}
-	if len(resp.Errors) > 0 {
-		return forge.Rollup{}, fmt.Errorf("POST /graphql: %s", resp.Errors[0].Message)
-	}
-	repo := resp.Data.Repository
+	repo := data.Repository
 	if repo == nil || repo.PullRequest == nil {
 		return forge.Rollup{}, fmt.Errorf("POST /graphql: no pull request %s#%s", t.Repo, number)
 	}
@@ -219,6 +218,6 @@ func jobLog(t forge.Target, id string) (string, error) {
 	if _, _, err := splitRepo(t.Repo); err != nil {
 		return "", err
 	}
-	b, err := fetch("GET", t.API, "/repos/"+t.Repo+"/actions/jobs/"+id+"/logs", nil)
+	b, err := fetch("GET", t.API, forgePath(t, "/actions/jobs/"+id+"/logs"), nil)
 	return string(b), err
 }
