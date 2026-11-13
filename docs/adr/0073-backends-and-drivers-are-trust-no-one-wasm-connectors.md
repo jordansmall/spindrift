@@ -525,3 +525,12 @@ bounded to half the call's remaining budget, failing non-fatally (not killing
 the Connector) past it. `Route.String` shows the opt-in, so the Route-table
 diff `spindrift doctor` prints, and a baseline that lacks it, count it as a
 widening.
+
+## Amendment (issue #6863): a composed PR forge lets the Connector write PRs
+
+`connectorforge.New`'s read-only wrap still keeps every write native. A
+composed PR forge (`connectorforge.Compose` over a Connector declaring
+`forge.prs`) instead has the Connector perform the PR writes: open, merge, draft
+flips, comments and auto-merge. Git push and rebase stay in core with core's
+credential, and every landing and merge-gate decision stays in core too: merge
+failure classification, PR URL pinning and the cap on failure detail.
