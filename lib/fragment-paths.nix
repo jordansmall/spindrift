@@ -82,11 +82,25 @@ let
   # The tolerant listing mkHarness's scan sites use over whatever fragmentsDir
   # they get (shipped, fixture, or override): a backend folder may legitimately
   # lack a row's file (it renders empty), so only the files present are listed.
+  # A path a Connector declares is looked up in that Connector's dir.
   pathsIn =
-    fragmentsDir: row:
-    pathsFor (builtins.filter (f: builtins.pathExists (fragmentsDir + "/${f}/${row.fragment}")) (
-      axisFolders row.axis
-    )) row;
+    connectors: fragmentsDir: row:
+    pathsFor (builtins.filter (
+      f: builtins.pathExists (fileOf connectors fragmentsDir "${f}/${row.fragment}")
+    ) (axisFolders row.axis)) row;
+
+  # A Connector contributes fragment files (issue #6857) as
+  # `{ name; dir; shipped }`: `dir` is laid out `<folder>/<fragment>` like the
+  # shipped tree, `shipped` has the shape of the `shipped` table below.
+  declaredBy =
+    shipped:
+    builtins.concatMap (frag: map (f: "${f}/${frag}") shipped.${frag}) (builtins.attrNames shipped);
+  fileOf =
+    connectors: fragmentsDir: path:
+    let
+      owner = builtins.filter (c: builtins.elem path (declaredBy c.shipped)) connectors;
+    in
+    (if owner == [ ] then fragmentsDir else (builtins.head owner).dir) + "/${path}";
 
   # Per axis-row fragment, the folders the shipped tree carries a file in. An
   # empty list is legitimate: a folder without a row's file renders empty
@@ -191,35 +205,99 @@ let
     ) (builtins.filter (k: !builtins.any (r: r.fragment == k) axisRows) (builtins.attrNames shipped));
   shippedProblemsIn = problemsWith shipped;
 
+  # Every way a Connector's declaration disagrees with the axes, the core
+  # `shipped` table, the other Connectors, or its own dir; each names the path
+  # and the Connector. A folder or fragment that is not a plain path component
+  # is reported and never looked up, so a Connector cannot reach outside its
+  # own `dir`.
+  plain = s: s != "." && s != ".." && builtins.match "[^/]+" s != null;
+  connectorProblemsWith =
+    shipped: connectors:
+    let
+      coreDeclared = declaredBy shipped;
+      forConnector =
+        i: c:
+        let
+          by = "declared by the ${c.name} Connector";
+          own = declaredBy c.shipped;
+          earlier = builtins.genList (builtins.elemAt connectors) i;
+          forFragment =
+            frag:
+            let
+              row = builtins.filter (r: r.fragment == frag) axisRows;
+              axis = (builtins.head row).axis;
+            in
+            if !plain frag then
+              [ "${frag}: ${by}, but is not a plain fragment file name" ]
+            else if row == [ ] then
+              [ "${frag}: ${by}, but names no axis row in lib/fragments.nix" ]
+            else
+              builtins.concatMap (
+                f:
+                let
+                  path = "${f}/${frag}";
+                in
+                if !plain f then
+                  [ "${path}: ${by}, but ${f} is not a plain folder name" ]
+                else if !builtins.elem f (axisFolders axis) then
+                  [ "${path}: ${by}, but ${f} is not a folder of axis ${axis}" ]
+                else if !builtins.pathExists (c.dir + "/${path}") then
+                  [ "${path}: ${by} but missing under ${c.dir}" ]
+                else
+                  [ ]
+              ) c.shipped.${frag};
+          strays =
+            folder:
+            map (n: "${folder}/${n}: present under ${c.dir} but not declared by the ${c.name} Connector") (
+              builtins.filter (n: !builtins.elem "${folder}/${n}" own) (
+                builtins.attrNames (builtins.readDir (c.dir + "/${folder}"))
+              )
+            );
+          dirEntries = builtins.readDir c.dir;
+          duplicates = builtins.concatMap (
+            p:
+            let
+              owners =
+                (if builtins.elem p coreDeclared then [ "lib/fragment-paths.nix's `shipped`" ] else [ ])
+                ++ map (o: o.name) (builtins.filter (o: builtins.elem p (declaredBy o.shipped)) earlier);
+            in
+            if owners == [ ] then
+              [ ]
+            else
+              [ "${p}: declared by both ${builtins.concatStringsSep " and " (owners ++ [ c.name ])}" ]
+          ) own;
+        in
+        builtins.concatMap forFragment (builtins.attrNames c.shipped)
+        ++ builtins.concatMap strays (
+          builtins.filter (n: dirEntries.${n} == "directory") (builtins.attrNames dirEntries)
+        )
+        ++ map (
+          n:
+          "${n}: present at the top of ${c.dir}, but a Connector ships only <folder>/<fragment> files (${by})"
+        ) (builtins.filter (n: dirEntries.${n} != "directory") (builtins.attrNames dirEntries))
+        ++ duplicates;
+    in
+    builtins.concatLists (
+      builtins.genList (i: forConnector i (builtins.elemAt connectors i)) (builtins.length connectors)
+    );
+
   defaultFragmentsDir = ../templates/default/prompts/fragments;
   shippedProblems = shippedProblemsIn defaultFragmentsDir;
 
-  # The shipped tree's expected files: what `shipped` declares, not what is on
-  # disk, so a missing one fails the shipped-tree checks rather than shrinking
-  # the set.
+  # The shipped tree's expected files: what `shipped` and the Connectors
+  # declare, not what is on disk, so a missing one fails the shipped-tree
+  # checks rather than shrinking the set.
   pathsOf =
-    row:
-    if shippedProblems != [ ] then
-      throw "lib/fragment-paths.nix: shipped per-backend fragment files disagree with the tree:\n  ${builtins.concatStringsSep "\n  " shippedProblems}"
+    connectors: row:
+    let
+      problems = shippedProblems ++ connectorProblemsWith shipped connectors;
+    in
+    if problems != [ ] then
+      throw "lib/fragment-paths.nix: shipped per-backend fragment files disagree with the tree or a Connector's fragment dir:\n  ${builtins.concatStringsSep "\n  " problems}"
     else
-      pathsFor shipped.${row.fragment} row;
-in
-{
-  # Over the shipped tree by default; pass a fragmentsDir to a consumer that
-  # reads another one.
-  inherit
-    pathsOf
-    pathsIn
-    shippedProblemsIn
-    axisSignals
-    ;
-
-  # For the check's negative cases: the same comparison over a doctored `shipped`.
-  inherit problemsWith shipped;
-
-  # The fragments/ folder one backend row reads from on `axis`, the same folder
-  # pathsIn lists for that row.
-  folderOf = axis: backend: folderOf (axes.${axis}.signal backend);
+      pathsFor (
+        shipped.${row.fragment} ++ builtins.concatMap (c: c.shipped.${row.fragment} or [ ]) connectors
+      ) row;
 
   # Files a scan of `fragmentsDir` may read: pathsIn plus a deprecated row's
   # legacyFragment, but only when no primary file exists there, mirroring the
@@ -227,17 +305,42 @@ in
   # legacy file the assembler never renders cannot fail the build. Kept out of
   # pathsOf so the shipped-tree checks do not demand the legacy file exist.
   scanPathsOf =
-    fragmentsDir: row:
-    pathsIn fragmentsDir row
+    connectors: fragmentsDir: row:
+    pathsIn connectors fragmentsDir row
     ++ (
       if
         row ? legacyFragment
-        && builtins.all (p: !builtins.pathExists (fragmentsDir + "/${p}")) (pathsIn fragmentsDir row)
+        && builtins.all (p: !builtins.pathExists (fileOf connectors fragmentsDir p)) (
+          pathsIn connectors fragmentsDir row
+        )
       then
         [ row.legacyFragment ]
       else
         [ ]
     );
+
+  # The registry over a set of Connector fragment contributions; `[ ]` is the
+  # shipped tree alone.
+  api = connectors: {
+    # Over the shipped tree by default; pass a fragmentsDir to a consumer that
+    # reads another one.
+    pathsOf = pathsOf connectors;
+    pathsIn = pathsIn connectors;
+    scanPathsOf = scanPathsOf connectors;
+    fileOf = fileOf connectors;
+  };
+in
+api [ ]
+// {
+  withConnectors = api;
+  inherit shippedProblemsIn axisSignals;
+
+  # For the check's negative cases: the same comparisons over doctored inputs.
+  inherit problemsWith connectorProblemsWith shipped;
+
+  # The fragments/ folder one backend row reads from on `axis`, the same folder
+  # pathsIn lists for that row.
+  folderOf = axis: backend: folderOf (axes.${axis}.signal backend);
 
   # Whether an old-layout fragmentsDir handed to mkHarness (a test fixture;
   # fragmentsDir is not Consumer-tunable) may omit the row's files. The runtime
