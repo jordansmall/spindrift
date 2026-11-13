@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -30,6 +31,7 @@ const (
 	connectorRoutesEnv = "SPINDRIFT_BACKEND_CONNECTOR_ROUTES"
 	connectorToken     = "connector-test-token"
 	connectorRepo      = "owner/repo"
+	gitSecret          = "git-secret"
 )
 
 // restIssue is one issue in the scripted GitHub REST backend.
@@ -101,6 +103,10 @@ type restBackend struct {
 	// autoMerge is the repository's auto-merge setting.
 	autoMerge  bool
 	protection map[string]branchRules
+	// merges counts merge requests; mergeStatuses scripts the status the next
+	// merge requests answer, in order, before the real answer resumes.
+	merges        int
+	mergeStatuses []int
 }
 
 // newRESTBackend starts the backend and a real bare repository. Production git
@@ -484,9 +490,10 @@ type connectorHarness struct {
 
 func newConnectorHarness(t *testing.T) *connectorHarness { return newComposedHarness(t, false) }
 
-// newComposedHarness loads the Connector and composes the Code Forge over it.
-// readOnlyBox is the Box's mode: a read-only Box relays its bundle.
-func newComposedHarness(t *testing.T, readOnlyBox bool) *connectorHarness {
+// loadGithubConnector loads the compiled github Connector with its declared
+// Route table bound to host and to repo. The table names the real API host; the
+// scripted backend stands in for it.
+func loadGithubConnector(t *testing.T, host, repo string, client *http.Client, audit io.Writer) (*connectorhost.Connector, []connectorhost.Route) {
 	t.Helper()
 	path := os.Getenv(connectorWasmEnv)
 	if path == "" {
@@ -503,46 +510,65 @@ func newComposedHarness(t *testing.T, readOnlyBox bool) *connectorHarness {
 	if err := json.Unmarshal([]byte(os.Getenv(connectorRoutesEnv)), &table); err != nil {
 		t.Fatalf("%s: %v", connectorRoutesEnv, err)
 	}
-
-	b := newRESTBackend(t)
-	u, err := url.Parse(b.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The table names the real API host; the scripted backend stands in for it.
 	var declared []connectorhost.Route
 	for _, r := range table {
 		if r.Host != "api.github.com" {
 			t.Fatalf("route %s %s names host %q, want api.github.com", r.Method, r.Path, r.Host)
 		}
-		declared = append(declared, connectorhost.Route{Method: r.Method, Host: u.Host, Path: r.Path, FollowRedirect: r.FollowRedirect})
+		declared = append(declared, connectorhost.Route{Method: r.Method, Host: host, Path: r.Path, FollowRedirect: r.FollowRedirect})
 	}
-	h := &connectorHarness{
-		t:       t,
-		backend: b,
-		routes:  connectortracker.Routes(declared, connectorRepo),
-		audit:   &bytes.Buffer{},
-	}
+	routes := connectortracker.Routes(declared, repo)
 	conn, err := connectorhost.LoadNetwork(context.Background(), wasm, connectorhost.Network{
 		Name:   "github",
-		Routes: h.routes,
+		Routes: routes,
 		Authorize: func(r *http.Request) error {
 			r.Header.Set("Authorization", "Bearer "+connectorToken)
 			return nil
 		},
-		Client: b.Client(),
-		Audit:  connectorhost.NewAuditLog(h.audit),
+		Client: client,
+		Audit:  connectorhost.NewAuditLog(audit),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	h.conn = conn
 	// The guest speaks the 0.3 forge write surface; its version
 	// comes from the ldflag in connectors/github/package.nix, not the SDK default.
 	if !strings.HasPrefix(conn.ProtocolVersion, "0.3.") {
 		t.Fatalf("handshake protocol version = %q, want 0.3.x (the protocolVersion ldflag in connectors/github/package.nix)", conn.ProtocolVersion)
 	}
+	return conn, routes
+}
+
+// composeForge composes the Code Forge over conn for the repository target
+// names.
+func composeForge(conn *connectorhost.Connector, api, targetRepo string, readOnlyBox bool) (forge.CodeForge, forge.Capabilities, error) {
+	return connectorforge.Compose(conn, connectorforge.Target{API: api, Repo: targetRepo}, connectorforge.Git{
+		Credential:  gitexec.Credential{Username: "bot", Password: gitSecret},
+		ReadOnlyBox: readOnlyBox,
+		Plumbing: func(u string, cred gitexec.Credential) forge.CodeForge {
+			return git.NewGitClient(u, "main", "Test Bot", "bot@example.com", git.WithCredential(cred))
+		},
+		Clock: retry.Clock{Now: time.Now, Sleep: func(time.Duration) {}},
+	})
+}
+
+// newComposedHarness loads the Connector and composes the Code Forge over it.
+// readOnlyBox is the Box's mode: a read-only Box relays its bundle.
+func newComposedHarness(t *testing.T, readOnlyBox bool) *connectorHarness {
+	return newHarnessFor(t, readOnlyBox, connectorRepo)
+}
+
+// newHarnessFor is newComposedHarness with the composed forge's Target naming
+// targetRepo while the Route table stays pinned to connectorRepo: the hostile
+// fixture for a Connector that reaches outside its declared repository.
+func newHarnessFor(t *testing.T, readOnlyBox bool, targetRepo string) *connectorHarness {
+	t.Helper()
+	b := newRESTBackend(t)
+	h := &connectorHarness{t: t, backend: b, audit: &bytes.Buffer{}}
+	conn, routes := loadGithubConnector(t, b.host, connectorRepo, b.Client(), h.audit)
+	h.conn, h.routes = conn, routes
+	var err error
 	h.tr, err = connectortracker.New(conn, failingWrites{t}, connectortracker.Lifecycle{Labels: testLabels}, connectortracker.Target{API: b.URL, Repo: connectorRepo})
 	if err != nil {
 		t.Fatal(err)
@@ -551,14 +577,7 @@ func newComposedHarness(t *testing.T, readOnlyBox bool) *connectorHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.cf, h.caps, err = connectorforge.Compose(conn, connectorforge.Target{API: b.URL, Repo: connectorRepo}, connectorforge.Git{
-		Credential:  gitexec.Credential{Username: "bot", Password: "git-secret"},
-		ReadOnlyBox: readOnlyBox,
-		Plumbing: func(u string, cred gitexec.Credential) forge.CodeForge {
-			return git.NewGitClient(u, "main", "Test Bot", "bot@example.com", git.WithCredential(cred))
-		},
-		Clock: retry.Clock{Now: time.Now, Sleep: func(time.Duration) {}},
-	})
+	h.cf, h.caps, err = composeForge(conn, b.URL, targetRepo, readOnlyBox)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -716,10 +735,21 @@ func TestConnector_Contracts(t *testing.T) {
 			{"BranchProtection", testBranchProtection},
 			{"Probe", testProbe},
 			{"BaseMovedOn", testBaseMovedOn},
+			{"MergeTransientAndPermanent", testMergeTransientAndPermanent},
 		} {
 			t.Run(c.name, func(t *testing.T) { c.run(t, h) })
 		}
 		cov.record(t, h)
+	})
+	t.Run("CodeForgeContract", func(t *testing.T) {
+		h := newComposedHarness(t, false)
+		forgetest.RunCodeForgeContract(t, composedCodeForgeHarness{h})
+		cov.record(t, h)
+	})
+	t.Run("HostMediationContract", func(t *testing.T) {
+		h := newComposedHostMediationHarness(t)
+		forgetest.RunHostMediationContract(t, h)
+		cov.record(t, h.connectorHarness)
 	})
 	cov.assertUsed(t)
 }
