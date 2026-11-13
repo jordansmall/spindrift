@@ -221,3 +221,47 @@ func TestBadNumberRefusedWithoutRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestRemovedLabelsKeepsUnlabeledEventsInOrderAcrossPages(t *testing.T) {
+	const u = "https://api.github.com/repos/o/r/issues/5/timeline?per_page=100&page="
+	// A full first page of other events, so the walk must continue: the
+	// unlabeled event on page 2 follows the one buried in page 1.
+	var p1 strings.Builder
+	p1.WriteString(`[{"event":"unlabeled","label":{"name":"agent-failed"}}`)
+	for range 99 {
+		p1.WriteString(`,{"event":"labeled","label":{"name":"agent-complete"}}`)
+	}
+	p1.WriteString("]")
+	got := stub(t, map[string]connector.Response{
+		u + "1": ok(p1.String()),
+		u + "2": ok(`[{"event":"commented"},{"event":"unlabeled","label":{"name":"agent-complete"}},{"event":"unlabeled","label":null},{"event":"unlabeled","label":{"name":"ready"}}]`),
+	})
+	names, err := removedLabels(tgt, "5")
+	if want := []string{"agent-failed", "agent-complete", "ready"}; err != nil || !reflect.DeepEqual(names, want) {
+		t.Fatalf("removedLabels = %v, %v; want %v", names, err, want)
+	}
+	if len(*got) != 2 || (*got)[0].Method != "GET" {
+		t.Errorf("requests = %d, want two GETs", len(*got))
+	}
+}
+
+func TestRemovedLabelsNoneIsEmptyNotNil(t *testing.T) {
+	stub(t, map[string]connector.Response{
+		"https://api.github.com/repos/o/r/issues/5/timeline?per_page=100&page=1": ok(`[]`),
+	})
+	names, err := removedLabels(tgt, "5")
+	if err != nil || names == nil || len(names) != 0 {
+		t.Fatalf("removedLabels = %#v, %v; want empty, nil", names, err)
+	}
+}
+
+func TestRemovedLabelsFailsOnNon2xxAndBadNumber(t *testing.T) {
+	got := stub(t, nil)
+	if _, err := removedLabels(tgt, "5"); err == nil {
+		t.Error("404 accepted")
+	}
+	n := len(*got)
+	if _, err := removedLabels(tgt, "../x"); err == nil || len(*got) != n {
+		t.Errorf("bad number err = %v, requests %d -> %d; want refusal without a request", err, n, len(*got))
+	}
+}

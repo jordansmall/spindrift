@@ -25,9 +25,11 @@ func init() {
 		Issue:      issue,
 		NativeDeps: nativeDeps,
 		// Probe and Count serve the tracker's doctor and daemon-demand reads.
+		// RemovedLabels serves recover's prior-claim read; core maps the names.
 		Probe:         trackerProbe,
 		Count:         count,
 		CountInterval: countInterval,
+		RemovedLabels: removedLabels,
 	})
 	tracker.RegisterWrites(tracker.Writer{
 		Transition:  trackerTransition,
