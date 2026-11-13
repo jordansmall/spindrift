@@ -930,25 +930,14 @@ func runDoctorReadWrite(t *testing.T) string {
 	return out
 }
 
-func TestRunDoctor_DefaultedBoxAccess_PrintsDeprecationNotice(t *testing.T) {
-	useDeprecatedDefaultDoc(t)
-	want := testBoxAccessNotice + "\n"
+func TestRunDoctor_ReadWriteBoxAccess_PrintsDeprecationNotice(t *testing.T) {
+	want := inputdoc.BoxAccessReadWriteNotice + "\n"
 	if out := runDoctorReadWrite(t); !strings.Contains(out, want) {
 		t.Errorf("runDoctor() output = %q, want it to contain %q", out, want)
 	}
 }
 
-func TestRunDoctor_ExplicitBoxAccess_NoDeprecationNotice(t *testing.T) {
-	useDeprecatedDefaultDoc(t)
-	setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-write")
-	if out := runDoctorReadWrite(t); strings.Contains(out, testBoxAccessNotice) {
-		t.Errorf("runDoctor() output = %q, want no notice for an explicit setting", out)
-	}
-}
-
-func TestRunDoctor_ExplicitReadOnlyBoxAccess_NoDeprecationNotice(t *testing.T) {
-	useDeprecatedDefaultDoc(t)
-	setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
+func TestRunDoctor_ReadOnlyBoxAccess_NoDeprecationNotice(t *testing.T) {
 	t.Setenv("BOX_GH_TOKEN", "")
 	// The fixture has no distinct BOX_GH_TOKEN, so the read-only token gate
 	// refuses; the notice must still be absent from what was printed before it.
@@ -956,17 +945,16 @@ func TestRunDoctor_ExplicitReadOnlyBoxAccess_NoDeprecationNotice(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "read-only token gate misconfigured") {
 		t.Fatalf("runDoctor() error = %v, want the read-only token gate refusal", err)
 	}
-	if strings.Contains(out, testBoxAccessNotice) {
-		t.Errorf("runDoctor() output = %q, want no notice for an explicit read-only setting", out)
+	if strings.Contains(out, inputdoc.BoxAccessReadWriteNotice) {
+		t.Errorf("runDoctor() output = %q, want no notice for read-only", out)
 	}
 }
 
 // The daemon's startup preflight (issue #6891): a butler-only daemon withholds
 // the notice, and a daemon with a work kind has already printed it.
 func TestRunDoctor_UnderDaemon_NoDeprecationNotice(t *testing.T) {
-	useDeprecatedDefaultDoc(t)
-	t.Setenv(inputdoc.DefaultNoticeDecidedEnv, "1")
-	if out := runDoctorReadWrite(t); strings.Contains(out, testBoxAccessNotice) {
+	t.Setenv(inputdoc.BoxAccessNoticeDecidedEnv, "1")
+	if out := runDoctorReadWrite(t); strings.Contains(out, inputdoc.BoxAccessReadWriteNotice) {
 		t.Errorf("runDoctor() output = %q, want no notice under the daemon", out)
 	}
 }

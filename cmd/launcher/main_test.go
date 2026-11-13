@@ -4065,7 +4065,7 @@ func createIntegrationBranchForTest(t *testing.T, bare, fromBranch, newBranch st
 }
 
 // settleConfig's ReadOnly field mirrors c.BoxForgeAndIssueAccess (issue
-// #1917): "read-only" threads true and the "read-write" default threads false,
+// #1917): "read-only" threads true and "read-write" threads false,
 // so settle.Settle's blocked-note relay gate sees the mode directly.
 func TestSettleConfig_ReadOnlyThreadsFromBoxForgeAndIssueAccess(t *testing.T) {
 	fc := forge.NewFake()

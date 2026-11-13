@@ -523,7 +523,7 @@ func TestGateKinds(t *testing.T) {
 			want: []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)},
 		},
 		{
-			name:      "bare default drops recover for github read-write",
+			name:      "explicit read-write drops recover for github",
 			kinds:     everyWithRecover,
 			codeForge: "github", boxAccess: "read-write",
 			want: []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)},
@@ -3750,9 +3750,9 @@ func TestMainRun_DriverMismatch_WarnsOnceAndMarksChildren(t *testing.T) {
 }
 
 // The doctor preflight and every dispatch child carry the decided marker so
-// none repeats the deprecated-default notice the daemon already decided
+// none repeats the read-write deprecation notice the daemon already decided
 // (issue #6891).
-func TestMainRun_MarksChildrenDefaultNoticeDecided(t *testing.T) {
+func TestMainRun_MarksChildrenBoxAccessNoticeDecided(t *testing.T) {
 	path := capturedEnvFixtureArtifactsT(t, map[string]string{"DAEMON_BREAKER_THRESHOLD": "1"}, claudeArtifacts())
 
 	origDoctor := runnerDoctorCommand
@@ -3778,8 +3778,8 @@ func TestMainRun_MarksChildrenDefaultNoticeDecided(t *testing.T) {
 			t.Errorf("%s command was never built", label)
 			continue
 		}
-		if !slices.Contains(cmd.Env, inputdoc.DefaultNoticeDecidedEnv+"=1") {
-			t.Errorf("%s env lacks %s=1", label, inputdoc.DefaultNoticeDecidedEnv)
+		if !slices.Contains(cmd.Env, inputdoc.BoxAccessNoticeDecidedEnv+"=1") {
+			t.Errorf("%s env lacks %s=1", label, inputdoc.BoxAccessNoticeDecidedEnv)
 		}
 	}
 }
@@ -4878,24 +4878,23 @@ func TestMainRun_InvalidBackendRowsFailStartup(t *testing.T) {
 }
 
 func TestBoxAccessNotice(t *testing.T) {
-	const msg = "spindrift: BOX_FORGE_AND_ISSUE_ACCESS defaults to read-write (test notice)"
-	defaulted := &inputdoc.Document{DeprecatedDefaults: map[string]string{"BOX_FORGE_AND_ISSUE_ACCESS": msg}}
+	msg := inputdoc.BoxAccessReadWriteNotice
 	work, butler := daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Butler)
 	cases := []struct {
-		name  string
-		doc   *inputdoc.Document
-		kinds []daemon.Kind
-		want  string
+		name      string
+		boxAccess string
+		kinds     []daemon.Kind
+		want      string
 	}{
-		{"defaulted with a work kind", defaulted, []daemon.Kind{work}, msg},
-		{"defaulted with work and butler", defaulted, []daemon.Kind{butler, work}, msg},
-		{"butler-only daemon", defaulted, []daemon.Kind{butler}, ""},
-		{"no entry", &inputdoc.Document{}, []daemon.Kind{work}, ""},
-		{"nil document", nil, []daemon.Kind{work}, ""},
+		{"read-write with a work kind", "read-write", []daemon.Kind{work}, msg},
+		{"read-write with work and butler", "read-write", []daemon.Kind{butler, work}, msg},
+		{"read-write butler-only daemon", "read-write", []daemon.Kind{butler}, ""},
+		{"read-only with a work kind", "read-only", []daemon.Kind{work}, ""},
+		{"empty value", "", []daemon.Kind{work}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := boxAccessNotice(tc.doc, tc.kinds); got != tc.want {
+			if got := boxAccessNotice(tc.boxAccess, tc.kinds); got != tc.want {
 				t.Errorf("boxAccessNotice() = %q, want %q", got, tc.want)
 			}
 		})
@@ -4903,9 +4902,36 @@ func TestBoxAccessNotice(t *testing.T) {
 	// An in-place restart execs a successor build with its predecessor's
 	// marker; that marker records a decision against the old document.
 	t.Run("marker inherited across a restart", func(t *testing.T) {
-		t.Setenv(inputdoc.DefaultNoticeDecidedEnv, "1")
-		if got := boxAccessNotice(defaulted, []daemon.Kind{work}); got != msg {
+		t.Setenv(inputdoc.BoxAccessNoticeDecidedEnv, "1")
+		if got := boxAccessNotice("read-write", []daemon.Kind{work}); got != msg {
 			t.Errorf("boxAccessNotice() = %q, want %q", got, msg)
 		}
 	})
+}
+
+// The notice reaches the operator only through mainRun's wiring of the
+// resolved knob into boxAccessNotice, so drive it end to end.
+func TestMainRun_BoxAccessNoticeOnStderr(t *testing.T) {
+	for _, tc := range []struct {
+		access string
+		want   int
+	}{{"read-write", 1}, {"read-only", 0}} {
+		t.Run(tc.access, func(t *testing.T) {
+			clearKnobEnvT(t)
+			checkOnlyNoNetworkT(t)
+			docPath := writeInputDocT(t, map[string]string{
+				"DAEMON_APP":                 ".#dogfood",
+				"BASE_BRANCH":                "main",
+				"MAX_PARALLEL":               "1",
+				"BOX_FORGE_AND_ISSUE_ACCESS": tc.access,
+			})
+			var stdout, stderr bytes.Buffer
+			if got := mainRun([]string{"--input", docPath, "--check-only", "dispatch"}, &stdout, &stderr); got != 0 {
+				t.Fatalf("mainRun() = %d, want 0; stderr = %q", got, stderr.String())
+			}
+			if n := strings.Count(stderr.String(), inputdoc.BoxAccessReadWriteNotice); n != tc.want {
+				t.Errorf("notice count = %d, want %d; stderr = %q", n, tc.want, stderr.String())
+			}
+		})
+	}
 }

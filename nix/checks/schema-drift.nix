@@ -1213,7 +1213,7 @@ checkedMerge {
         "SPINDRIFT_REPORT_FD" # report FD handed to a child
         "SPINDRIFT_DAEMON_PROGRAM" # daemon wrapper's own program path
         "SPINDRIFT_DRIVER_WARNED" # daemon-set marker on children (issue #5050)
-        "SPINDRIFT_DEFAULT_NOTICE_DECIDED" # daemon-set marker on children and its doctor preflight (issue #6891)
+        "SPINDRIFT_BOX_ACCESS_NOTICE_DECIDED" # daemon-set marker on children and its doctor preflight (issue #6891)
         "SPINDRIFT_BWRAP_NETNS_PROBE" # set on the launcher's own re-exec under pasta by the bwrap probe (issue #5983)
         "SPINDRIFT_SEAM_FIXTURES_DIR" # test-only override read by internal/seamtest (issue #4280)
         "SPINDRIFT_CONNECTOR_FIXTURES_DIR" # test-only override read by internal/fixturebuild (issue #6794)
