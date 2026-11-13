@@ -281,7 +281,7 @@ func TestCloneGitFailureGoesToStderrNotStdout(t *testing.T) {
 	}
 }
 
-// CloneURL hands the selected Strategy the slug, the mount dir and the
+// CloneURL hands the selected Strategy the slug and the
 // config's Lookup, and returns its answer or error untouched.
 func TestCloneURLDelegatesToTheStrategy(t *testing.T) {
 	knobs := map[string]string{"FORGEJO_TOKEN": "t"}
@@ -291,7 +291,6 @@ func TestCloneURLDelegatesToTheStrategy(t *testing.T) {
 	}{
 		{boxclone.Config{CodeForge: "github", RepoSlug: "o/r"}, "https://github.com/o/r.git"},
 		{boxclone.Config{CodeForge: "forgejo", RepoSlug: "o/r"}, "https://t@forgejo.invalid/o/r.git"},
-		{boxclone.Config{CodeForge: "local", RepoMountDir: "/mnt/repo"}, "/mnt/repo"},
 	} {
 		t.Run(tc.cfg.CodeForge, func(t *testing.T) {
 			tc.cfg.Lookup = mapLookup(knobs)
@@ -346,5 +345,26 @@ func TestCloneAddsNoSafeDirectoryUnlessRemoteIsHostSeeded(t *testing.T) {
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
 		t.Errorf("safe.directory lookup = %q, %v; want unset (exit 1)", out, err)
+	}
+}
+
+// A forge that clones the mirror needs neither its remote URL nor a gh
+// credential: a read-only git Box has no GH_TOKEN to authenticate with (#6898).
+func TestCloneFromMirrorIgnoresForgeCloneURLAndSkipsGh(t *testing.T) {
+	f := newFixture(t)
+	t.Setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+	f.cfg.CodeForge = "git"
+	f.cfg.GHCredentialHelper = true
+	f.cfg.HostSeededMirror = true
+	f.cfg.RepoMountDir = f.origin
+	f.knobs["CODE_FORGE_REMOTE_URL"] = "https://unreachable.invalid/o/r.git"
+	if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.originURL(t); got != f.origin {
+		t.Errorf("origin url = %q, want the mirror %q", got, f.origin)
+	}
+	if got := f.ghCalls(t); got != "" {
+		t.Errorf("gh was invoked: %q", got)
 	}
 }

@@ -50,7 +50,7 @@ func TestStrategyValidateTrackerRequiresSlug(t *testing.T) {
 
 func TestStrategyCloneURLIsLiteralGithubCom(t *testing.T) {
 	t.Setenv("GH_HOST", "ghe.example.com")
-	got, err := Strategy.CloneURL(backendkit.Shared{RepoSlug: "o/r"}, nil, "")
+	got, err := Strategy.CloneURL(backendkit.Shared{RepoSlug: "o/r"}, nil)
 	if err != nil || got != "https://github.com/o/r.git" {
 		t.Errorf("CloneURL = %q, %v, want https://github.com/o/r.git", got, err)
 	}

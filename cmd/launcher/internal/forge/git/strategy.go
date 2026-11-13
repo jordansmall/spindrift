@@ -48,7 +48,7 @@ var Strategy = backendkit.Strategy{
 		}
 		return SeedMirror(k.CodeForgeRemoteURL, s.BaseBranch, dir)
 	},
-	CloneURL: func(_ backendkit.Shared, l backendkit.Lookup, _ string) (string, error) {
+	CloneURL: func(_ backendkit.Shared, l backendkit.Lookup) (string, error) {
 		k, err := ReadKnobs(l)
 		if err != nil {
 			return "", err

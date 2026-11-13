@@ -62,7 +62,7 @@ var Strategy = backendkit.Strategy{
 	// differently. The Box's envLookup maps a blank FORGEJO_BASE_URL to unset,
 	// so the codeberg default here agrees with identityBase treating blank as
 	// no identity.
-	CloneURL: func(s backendkit.Shared, l backendkit.Lookup, _ string) (string, error) {
+	CloneURL: func(s backendkit.Shared, l backendkit.Lookup) (string, error) {
 		k, err := ReadKnobs(l)
 		if err != nil {
 			return "", err

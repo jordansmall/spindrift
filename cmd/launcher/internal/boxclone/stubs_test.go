@@ -14,28 +14,25 @@ import (
 // package. forgejo's URL carries its token so the banner-redaction test still
 // has something to redact.
 func init() {
-	stub := func(name string, clone func(backendkit.Shared, backendkit.Lookup, string) (string, error)) {
+	stub := func(name string, clone func(backendkit.Shared, backendkit.Lookup) (string, error)) {
 		backendkit.Register(backendkit.Strategy{Descriptor: backend.Descriptor{Name: name}, CloneURL: clone})
 	}
-	stub("github", func(s backendkit.Shared, _ backendkit.Lookup, _ string) (string, error) {
+	stub("github", func(s backendkit.Shared, _ backendkit.Lookup) (string, error) {
 		return "https://github.com/" + s.RepoSlug + ".git", nil
 	})
-	stub("git", func(_ backendkit.Shared, l backendkit.Lookup, _ string) (string, error) {
+	stub("git", func(_ backendkit.Shared, l backendkit.Lookup) (string, error) {
 		u, _ := l("CODE_FORGE_REMOTE_URL")
 		if u == "" {
 			return "", errors.New("CODE_FORGE_REMOTE_URL is required when CODE_FORGE=git")
 		}
 		return u, nil
 	})
-	stub("forgejo", func(s backendkit.Shared, l backendkit.Lookup, _ string) (string, error) {
+	stub("forgejo", func(s backendkit.Shared, l backendkit.Lookup) (string, error) {
 		tok, _ := l("FORGEJO_TOKEN")
 		if tok == "" {
 			return "", errors.New("FORGEJO_TOKEN is required when CODE_FORGE=forgejo")
 		}
 		return "https://" + tok + "@forgejo.invalid/" + s.RepoSlug + ".git", nil
-	})
-	stub("local", func(_ backendkit.Shared, _ backendkit.Lookup, mount string) (string, error) {
-		return mount, nil
 	})
 	stub("jira", nil)
 }

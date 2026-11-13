@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/registryvocab"
@@ -293,6 +294,13 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 		}
 		env[name] = resolve(key, name)
 	}
+	if backend.ClonesFromMirror(cfg.ForgeDescriptor, cfg.boxAccessForKind() == "read-only") {
+		// The Box clones the mirror and nothing in it reads the remote, so its
+		// userinfo (commonly a token) stays on the host.
+		if u, ok := env["CODE_FORGE_REMOTE_URL"]; ok {
+			env["CODE_FORGE_REMOTE_URL"], _ = gitexec.SplitCredential(u)
+		}
+	}
 	if _, ok := env["BOX_FORGE_AND_ISSUE_ACCESS"]; ok {
 		if d, ok := dispatchkind.ByName(cfg.Kind); ok && d.ReadOnlyBox {
 			// The schema forwards the raw knob; keep the Box's copy consistent
@@ -386,7 +394,7 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 		env["BOX_FULLY_LOCAL"] = "1"
 	}
 	// Fail-closed opt-out: absent means the Box requires GH_TOKEN (issue #3325).
-	if !backend.NeedsGHToken(cfg.ForgeDescriptor, cfg.TrackerDescriptor) {
+	if !backend.NeedsGHToken(cfg.ForgeDescriptor, cfg.TrackerDescriptor, cfg.boxAccessForKind() == "read-only") {
 		env["BOX_GH_TOKEN_OPTIONAL"] = "1"
 	}
 	if trackerInBoxUnreachable {
