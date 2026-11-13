@@ -8,6 +8,7 @@ import (
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/bundlerelay"
 )
 
 // prForge is a PR-capable Code Forge composed from a Connector: the Connector
@@ -26,8 +27,9 @@ type prForge struct {
 }
 
 // composePR wraps the validated push-only pieces p as a PR forge for a Connector
-// advertising caps, pinning PR URLs to webHost.
-func composePR(p *pushOnly, caps []string, webHost string) forge.CodeForge {
+// advertising caps, pinning PR URLs to webHost. relay adds the read-only Box's
+// bundle relay over the draft surface (see Git.ReadOnlyBox).
+func composePR(p *pushOnly, caps []string, webHost string, relay bool) forge.CodeForge {
 	f := &prForge{
 		reads:     &reads{call: p.call, target: p.target, webHost: webHost},
 		push:      p,
@@ -42,7 +44,12 @@ func composePR(p *pushOnly, caps []string, webHost string) forge.CodeForge {
 		cf = protectionLayer{cf, f}
 	}
 	if slices.Contains(caps, capDraftPRs) {
-		cf = draftPRLayer{cf, f}
+		cf = draftPRLayer{cf, f, p}
+		// Settle reads BundleRelay as "the Box handed off a bundle", so only a
+		// read-only Box is offered it.
+		if relay {
+			cf = relayLayer{cf, p}
+		}
 	}
 	return cf
 }
@@ -66,12 +73,29 @@ type (
 	draftPRLayer struct {
 		forge.CodeForge
 		f *prForge
+		p *pushOnly
+	}
+	// relayLayer is the read-only Box's hand-off: core relays the bundle and
+	// reads its commit subjects in its own git, so the Connector never sees
+	// either.
+	relayLayer struct {
+		forge.CodeForge
+		p *pushOnly
 	}
 )
 
 func (l ciRunLayer) UnwrapCodeForge() forge.CodeForge      { return l.CodeForge }
 func (l protectionLayer) UnwrapCodeForge() forge.CodeForge { return l.CodeForge }
 func (l draftPRLayer) UnwrapCodeForge() forge.CodeForge    { return l.CodeForge }
+func (l relayLayer) UnwrapCodeForge() forge.CodeForge      { return l.CodeForge }
+
+func (l relayLayer) RelayBundle(outboxDir, ref string) error {
+	return bundlerelay.Relay("connector forge", outboxDir, ref, l.p.cred, l.p.relayClone("relay bundle"))
+}
+
+func (l relayLayer) CommitSubjects(outboxDir, base, ref string) ([]string, error) {
+	return bundlerelay.CommitSubjects("connector forge", outboxDir, base, ref, l.p.relayClone("commit subjects"))
+}
 
 func (l ciRunLayer) CheckRun(prURL string) (forge.RollupState, string, error) {
 	return l.f.checkRun(prURL)
@@ -86,7 +110,7 @@ func (l draftPRLayer) CreateDraftPR(title, body, base, head string) (string, boo
 }
 
 func (l draftPRLayer) PushBranch(srcDir, localRef, branch, base string) error {
-	return l.f.push.pushBranch(srcDir, localRef, branch, base)
+	return l.p.pushBranch(srcDir, localRef, branch, base)
 }
 
 func (f *prForge) checkRun(prURL string) (forge.RollupState, string, error) {

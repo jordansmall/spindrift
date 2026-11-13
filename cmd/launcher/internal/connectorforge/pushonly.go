@@ -63,6 +63,11 @@ type Git struct {
 	Plumbing func(cloneURL string, cred gitexec.Credential) forge.CodeForge
 	// Clock paces the retry backoff; the zero value is retry.RealClock().
 	Clock retry.Clock
+	// ReadOnlyBox is set when the Box cannot push (BOX_FORGE_AND_ISSUE_ACCESS=
+	// read-only), so core relays its bundle: Compose then offers BundleRelay and
+	// BundleCommitSubjects, and only on a forge declaring "forge.draftPRs",
+	// matching the native read-only constructors.
+	ReadOnlyBox bool
 }
 
 // notRetried are the methods whose request is not idempotent: a retry after a
@@ -128,8 +133,10 @@ type pushOnly struct {
 // Compose builds a Code Forge from a forge Connector whose handshake advertises
 // "forge.branches" and either "forge.pushOnly" (a push-only forge: a
 // BranchDeleter and no PRForge) or "forge" with "forge.prs" (a PR forge: the PR
-// surface, draft creation, branch deletion and the merge commit, plus a
-// CIRunReporter and BranchProtectionForge only when declared). The returned
+// surface, branch deletion and the merge commit, plus a CIRunReporter and
+// BranchProtectionForge only when declared, and a DraftPRCreator and
+// BranchPusher only on "forge.draftPRs"; with Git.ReadOnlyBox that surface also
+// relays the Box's bundle and reads its commit subjects). The returned
 // Capabilities are the composed forge resolved by type, so they and any later
 // type probe (doctor's, for one) agree on exactly what it offers.
 // The remote's identity is read once here, and refused (and audited) unless
@@ -158,7 +165,7 @@ func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge,
 	if !isPushOnly {
 		// remote() accepted the web URL, so it parses with a host.
 		web, _ := url.Parse(remote.WebURL)
-		cf = composePR(p, c.Capabilities, web.Host)
+		cf = composePR(p, c.Capabilities, web.Host, g.ReadOnlyBox)
 	}
 	return cf, forge.ResolveCodeForge(cf), nil
 }
