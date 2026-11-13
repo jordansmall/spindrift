@@ -100,6 +100,7 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 			name:             "git",
 			validAsTracker:   false,
 			validAsCodeForge: true,
+			hostSeededMirror: true,
 
 			hasValidateCodeForge:    true,
 			hasNewCodeForge:         true,

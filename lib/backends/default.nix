@@ -65,6 +65,11 @@
 # (issues #1918, #2267, #6898); git is relayCapable without it. The same Go
 # test enforces it against DraftPRCreator.
 
+# hostSeededMirror means the Box clones from a per-Pass mirror the launcher
+# seeds and mounts at /repo whenever it hands its branch back as a bundle
+# (backend.ClonesFromMirror): always for local, under read-only for git
+# (issue #6898). Each row's Strategy.SeedMirror does the seeding.
+
 # inBoxGHCredentialHelper marks a CODE_FORGE whose Box clone runs
 # `gh auth setup-git`; github and git (its remote URL may be github.com), not
 # forgejo (token URL, ADR 0038) or local (filesystem mount, ADR 0033; issue #4452).

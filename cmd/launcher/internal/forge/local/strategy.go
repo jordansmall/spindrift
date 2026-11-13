@@ -48,6 +48,9 @@ var Strategy = backendkit.Strategy{
 	CloneURL: func(_ backendkit.Shared, _ backendkit.Lookup, repoMountDir string) (string, error) {
 		return repoMountDir, nil
 	},
+	SeedMirror: func(s backendkit.Shared, _ backendkit.Lookup, pwd, dir string) error {
+		return SeedAccumulationRepo(dir, pwd, s.BaseBranch)
+	},
 	HostRepoDir: func(_ backendkit.Shared, l backendkit.Lookup) (string, error) {
 		return resolveAccumulationRepoDir(l)
 	},
