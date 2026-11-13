@@ -20,7 +20,13 @@ import (
 // document's row would, and restores the applied set afterwards.
 func useGithubRow(t *testing.T, b *tokenBackend) {
 	t.Helper()
-	path, routes := githubConnectorRoutes(t, b.Listener.Addr().String(), connectorRepo)
+	useGithubRowAt(t, b.Listener.Addr().String())
+}
+
+// useGithubRowAt is useGithubRow for a backend at host.
+func useGithubRowAt(t *testing.T, host string) {
+	t.Helper()
+	path, routes := githubConnectorRoutes(t, host, connectorRepo)
 	doc, err := json.Marshal([]backendrows.Row{{Name: "github", Module: path, Routes: routes, CredentialEnv: tokenCredentialEnv}})
 	if err != nil {
 		t.Fatal(err)

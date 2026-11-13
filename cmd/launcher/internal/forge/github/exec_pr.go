@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/bundlerelay"
 	"spindrift.dev/launcher/internal/forge/gitplumbing"
@@ -461,6 +463,12 @@ func runGHReadyToggle(prURL string, args ...string) error {
 // the other two, so a caller checking those first does not misreport a
 // throttled operator's real cause.
 func (e *execClient) Probe() (string, error) {
+	// Backend rows are opt-in: without a github row the host's gh answers.
+	if row, ok := backendrows.Lookup(backend.GitHub.Name); ok {
+		audit, closeAudit := openAudit(probeAuditLog)
+		defer closeAudit()
+		return probeViaConnector(row, backendrows.Options{Audit: audit, Client: connectorClient}, e.repo)
+	}
 	if _, err := exec.Command("gh", "auth", "status").Output(); err != nil {
 		wrapped := ghCommandErr("gh auth status", err)
 		if errors.Is(wrapped, forge.ErrRateLimit) {
