@@ -75,6 +75,10 @@ type ConfigParser func(content string) (decls []Declaration, namedAny bool, err 
 // every key beyond "path".
 type RouteDeclarationValidator func(key string, value any) error
 
+// InTreeRewriter is a Strategy's in-tree content edit beyond host substitution
+// (see Strategy.InTreeRewrite).
+type InTreeRewriter func(content string, localURLs []string) (string, error)
+
 // Strategy is one ecosystem's entry in the registered list. A nil hook field
 // contributes nothing to a walk over Strategies.
 type Strategy struct {
@@ -98,6 +102,16 @@ type Strategy struct {
 	// InTreeConfigPath, never both: leaving InTreeConfigPath empty is what keeps
 	// it out of bindregistry.InTreeBindings.
 	DiscoveryConfigPaths []string
+
+	// InTreeRewrite is nil for every Strategy whose in-tree binding is host
+	// substitution alone. When set, bindregistry.ApplyInTreeBinding calls it
+	// with the config after that substitution and the LocalURL of every
+	// rewrite, so it can make further edits keyed off values that now start
+	// with one of those URLs. It runs only on the path that rewrites a host: a
+	// config with none left is tagged without it, which keeps a second Apply
+	// convergent. An error aborts the Apply before the skip-worktree tag and
+	// before any write.
+	InTreeRewrite InTreeRewriter
 
 	EnvExports EnvExportRenderer
 

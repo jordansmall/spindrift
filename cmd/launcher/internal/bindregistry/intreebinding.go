@@ -320,6 +320,20 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Strategy, rewrites []HostR
 		rewritten = replaceAllFold(rewritten, "http://"+rw.UpstreamHost, rw.LocalURL)
 	}
 
+	// Only on this path, never the no-host-left one above, so a convergent
+	// second Apply does not re-run it over already-rewritten content. Before the
+	// tag, so a hook error leaves the bit clear and the file untouched.
+	if row.InTreeRewrite != nil {
+		localURLs := make([]string, len(rewrites))
+		for i, rw := range rewrites {
+			localURLs[i] = rw.LocalURL
+		}
+		var err error
+		if rewritten, err = row.InTreeRewrite(rewritten, localURLs); err != nil {
+			return 0, err
+		}
+	}
+
 	// Tag before writing: update-index only flips an index bit, so a path git
 	// refuses to tag (exit 128 for an unmerged path) fails before content is
 	// rewritten, instead of leaving the local proxy URL in an unmerged file

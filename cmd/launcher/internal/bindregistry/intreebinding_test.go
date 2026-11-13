@@ -1,6 +1,7 @@
 package bindregistry
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1690,5 +1691,91 @@ func TestApplyInTreeBindingHostBoundaryRescansAndEOF(t *testing.T) {
 	want := "a=https://nexus.corp:8081/x http://127.0.0.1:27182/r0/y\n{mirror: http://127.0.0.1:27182/r0}\n[http://127.0.0.1:27182/r0, https://nexus.corp:8081]\nregistry=http://127.0.0.1:27182/r0"
 	if string(got) != want {
 		t.Errorf("content = %q, want %q", got, want)
+	}
+}
+
+// The in-tree content hook is proven on a copy of the synthetic Strategy, so
+// the shared synthetic.Strategy (and its goldens) keep it nil.
+func TestApplyInTreeBindingRunsInTreeRewriteAfterSubstitution(t *testing.T) {
+	dir := newTestRepo(t)
+	writeConfig(t, dir, synthetic.Strategy.InTreeConfigPath, "a = \"https://upstream.example/x/\"\nb = \"http://other.example/y/\"\n", true)
+
+	var gotContent string
+	var gotURLs []string
+	row := synthetic.Strategy
+	row.InTreeRewrite = func(content string, localURLs []string) (string, error) {
+		gotContent, gotURLs = content, localURLs
+		return content + "# hooked\n", nil
+	}
+	rewrites := []HostRewrite{
+		{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"},
+		{UpstreamHost: "other.example", LocalURL: "http://127.0.0.1:27183"},
+	}
+
+	reason, err := ApplyInTreeBinding(dir, row, rewrites)
+	if err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	if reason != ApplyApplied {
+		t.Errorf("reason = %v, want %v", reason, ApplyApplied)
+	}
+	wantContent := "a = \"http://127.0.0.1:27182/x/\"\nb = \"http://127.0.0.1:27183/y/\"\n"
+	if gotContent != wantContent {
+		t.Errorf("hook content = %q, want the post-substitution %q", gotContent, wantContent)
+	}
+	if strings.Join(gotURLs, ",") != "http://127.0.0.1:27182,http://127.0.0.1:27183" {
+		t.Errorf("hook localURLs = %v, want the rewrites' LocalURLs in caller order", gotURLs)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, synthetic.Strategy.InTreeConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != wantContent+"# hooked\n" {
+		t.Errorf("on-disk content = %q, want the hook's output", got)
+	}
+	if !skipWorktreeSet(t, dir, synthetic.Strategy.InTreeConfigPath) {
+		t.Error("skip-worktree bit not set after apply")
+	}
+}
+
+func TestApplyInTreeBindingInTreeRewriteErrorAbortsBeforeTagAndWrite(t *testing.T) {
+	dir := newTestRepo(t)
+	content := "registry = \"https://upstream.example/index/\"\n"
+	writeConfig(t, dir, synthetic.Strategy.InTreeConfigPath, content, true)
+
+	row := synthetic.Strategy
+	row.InTreeRewrite = func(string, []string) (string, error) { return "", errors.New("hook failed") }
+
+	if _, err := ApplyInTreeBinding(dir, row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}}); err == nil || !strings.Contains(err.Error(), "hook failed") {
+		t.Fatalf("err = %v, want the hook's error", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, synthetic.Strategy.InTreeConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != content {
+		t.Errorf("content changed after hook error: got %q, want %q", got, content)
+	}
+	if skipWorktreeSet(t, dir, synthetic.Strategy.InTreeConfigPath) {
+		t.Error("skip-worktree bit set after hook error, want unset")
+	}
+}
+
+func TestApplyInTreeBindingInTreeRewriteSkippedWhenNoHostLeft(t *testing.T) {
+	dir := newTestRepo(t)
+	writeConfig(t, dir, synthetic.Strategy.InTreeConfigPath, "registry = \"https://some-other-host.example/index/\"\n", true)
+
+	row := synthetic.Strategy
+	row.InTreeRewrite = func(string, []string) (string, error) {
+		t.Error("InTreeRewrite called with no upstream host in the config")
+		return "", nil
+	}
+
+	reason, err := ApplyInTreeBinding(dir, row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	if err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	if reason != ApplyNoopContent {
+		t.Errorf("reason = %v, want %v", reason, ApplyNoopContent)
 	}
 }
