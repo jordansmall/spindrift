@@ -53,7 +53,7 @@ func newPRHarness(t *testing.T, caps []string, replies map[string]any) *prHarnes
 		panic("bad reply")
 	}
 	p := &pushOnly{call: call, target: testTarget, git: h.git}
-	h.f = composePR(p, caps, testWebHost)
+	h.f = composePR(p, caps, testWebHost, false /* relay */)
 	h.caps = forge.ResolveCodeForge(h.f)
 	return h
 }
