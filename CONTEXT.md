@@ -526,8 +526,9 @@ _Avoid_: staging repo, local remote.
 **Host-seeded mirror**:
 The host-side repository the Launcher seeds before each Pass and mounts
 read-only at `/repo` for the Box to clone from, so a Pass sees the base as it
-stands then. On the `local` Code Forge it is the Accumulation repo; a forge
-with no host-side repo has none.
+stands then. On the `local` Code Forge it is the Accumulation repo; on `git`
+under read-only it is a scratch mirror of the remote under `.spindrift/mirror-*`;
+a forge with neither has none.
 
 **Integration branch**:
 The branch in the Accumulation repo where all the seams of one broad ticket

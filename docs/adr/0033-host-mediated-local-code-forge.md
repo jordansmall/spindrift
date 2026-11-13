@@ -54,7 +54,10 @@ one principle:
 
 > **`local` = host-mediated because it is not reachable from inside the Box** —
 > on the issue plane (ADR 0032) and now the code plane. Reachable backends
-> (`github`, `git`) let the Box read and land directly; `local` does neither, so
+> (`github`, `git`) let the Box read and land directly (amended by issue
+> #6898: `git` under `BOX_FORGE_AND_ISSUE_ACCESS=read-only` is relayed too,
+> with a per-Pass mirror of the remote as the read-only mount and the launcher
+> force-pushing the returned bundle); `local` does neither, so
 > the Launcher mediates: a read-only mount in, a Launcher-applied artifact out.
 
 The pieces:
