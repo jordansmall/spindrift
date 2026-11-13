@@ -2553,7 +2553,12 @@ row without it accepts nothing.
 network Connector: it serves `tracker.listIssues`, `tracker.issue` and
 `tracker.nativeDeps` over GitHub REST, and `forge.prsForBranch`, `forge.pr` and
 `forge.checks` over REST plus one GraphQL rollup query, through `http_request`;
-the host attaches the credential. Its Route table is four routes on
+the host attaches the credential. It also serves the forge branch and PR
+primitives (open, merge, compare, comment, branch lookup and delete, branch
+protection), declared as protocol 0.3.x, through eight further write-half
+routes, each pinned to `{repo}`: `POST` and `PUT /pulls`, `POST /issues`,
+`GET /compare`, `/git/matching-refs/heads`, `/branches` and `/rules/branches`,
+and `DELETE /git/refs/heads`. Its read Route table is four routes on
 `api.github.com`: `GET /repos/{repo}/issues` (the list, issue and
 `dependencies/blocked_by` reads), `GET /repos/{repo}/pulls` (branch lookup, one
 PR), `POST /graphql` (the check rollup) and `GET /repos/{repo}/actions/jobs`
@@ -2566,8 +2571,11 @@ that one hop with no credential, and doctor shows the opt-in as
 `GET /issues/comments/*`, `/issues/events` and `/issues/{n}/timeline`, and
 `/actions/jobs` every other GET under it, none of which a read uses; a Route
 restricts no body, so `POST /graphql` admits any GraphQL
-document, mutations included. Issue #6808 accepts that: the Connector sends
-only the rollup query and every write stays on the native adapter. It skips
+document, mutations included, and no Route can pin it to the repository: the
+Connector sends the rollup, repository-identity queries and the draft-flip and
+auto-merge mutations there (issues #6808, #6882). The write roots over-admit
+too: `POST /issues` also admits creating issues and posting labels, `POST
+/pulls` review and review-comment creation, and `PUT /pulls` update-branch. It skips
 pull requests in the REST issues list.
 
 It does not advertise `tracker.comments`: REST reports no minimized state, and

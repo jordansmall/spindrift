@@ -4,14 +4,20 @@
 # the Connector makes: the tracker reads (list, issue, blocked_by) under
 # `/issues`, the forge PR reads (branch lookup, one PR) under `/pulls`, the
 # check rollup over `POST /graphql`, and a failing job's log under
-# `/actions/jobs`.
+# `/actions/jobs`. The forge write half adds the PR and branch primitives: open
+# and merge a PR, compare, the comment on a PR, branch lookup and delete, and
+# branch protection.
 #
 # It is the narrowest table the subtree-only Route model can express, not an
 # exact one: `/issues` also admits GET `/issues/comments/*`, `/issues/events`
 # and `/issues/{n}/timeline`, which no read uses. `POST /graphql` is wider
 # still: a Route restricts neither body nor query, so it admits any GraphQL
-# document, mutations included. Issue #6808 accepts that: the Connector sends
-# only the rollup query, and every write stays on the native adapter.
+# document, mutations included, and no Route can pin it to the repository. The
+# Connector sends the rollup query, repository-identity queries and the
+# draft-flip and auto-merge mutations there (issues #6808, #6882); every REST
+# write is pinned to `{repo}`. The write roots over-admit too: `POST /issues`
+# also admits creating issues and posting labels, `POST /pulls` review and
+# review-comment creation, and `PUT /pulls` update-branch.
 # `/actions/jobs` is a root too: the log read is `GET /actions/jobs/{id}/logs`,
 # but the root also admits every other GET under `/actions/jobs`, which
 # no read uses. Its Route follows one redirect hop (issue #6893): GitHub
@@ -40,5 +46,45 @@
     host = "api.github.com";
     path = "/repos/{repo}/actions/jobs";
     followRedirect = true;
+  }
+  {
+    method = "POST";
+    host = "api.github.com";
+    path = "/repos/{repo}/pulls";
+  }
+  {
+    method = "PUT";
+    host = "api.github.com";
+    path = "/repos/{repo}/pulls";
+  }
+  {
+    method = "POST";
+    host = "api.github.com";
+    path = "/repos/{repo}/issues";
+  }
+  {
+    method = "GET";
+    host = "api.github.com";
+    path = "/repos/{repo}/compare";
+  }
+  {
+    method = "GET";
+    host = "api.github.com";
+    path = "/repos/{repo}/git/matching-refs/heads";
+  }
+  {
+    method = "DELETE";
+    host = "api.github.com";
+    path = "/repos/{repo}/git/refs/heads";
+  }
+  {
+    method = "GET";
+    host = "api.github.com";
+    path = "/repos/{repo}/branches";
+  }
+  {
+    method = "GET";
+    host = "api.github.com";
+    path = "/repos/{repo}/rules/branches";
   }
 ]
