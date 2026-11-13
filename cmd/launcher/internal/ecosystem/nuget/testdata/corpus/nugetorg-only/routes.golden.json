@@ -1,0 +1,25 @@
+[
+  {
+    "Allow": [
+      "/v3-flatcontainer"
+    ],
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "",
+      "FromFile": "",
+      "MatchHost": "",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": ""
+    },
+    "Ecosystems": {
+      "nuget": {
+        "path": "/v3"
+      }
+    },
+    "MatchHost": "api.nuget.org",
+    "UpstreamOrigin": "https://api.nuget.org"
+  }
+]

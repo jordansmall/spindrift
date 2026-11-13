@@ -1,0 +1,3 @@
+{
+  "refused": "registryroutes: route \"artifactory.example.test\": ecosystems.nuget.registry is not a key nuget's route declaration accepts"
+}

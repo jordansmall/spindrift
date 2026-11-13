@@ -19,6 +19,7 @@ import (
 	"spindrift.dev/launcher/internal/ecosystem/gomod"
 	"spindrift.dev/launcher/internal/ecosystem/gradle"
 	"spindrift.dev/launcher/internal/ecosystem/npmfamily"
+	"spindrift.dev/launcher/internal/ecosystem/nuget"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -31,6 +32,7 @@ func TestRegisteredEcosystemOrderIsPinned(t *testing.T) {
 	want := []string{
 		cargo.Strategy.Name, npmfamily.Npm.Name, npmfamily.Yarn.Name,
 		npmfamily.Pnpm.Name, gomod.Strategy.Name, gradle.Strategy.Name,
+		nuget.Strategy.Name,
 	}
 	var got []string
 	for _, s := range ecosystem.Registered() {

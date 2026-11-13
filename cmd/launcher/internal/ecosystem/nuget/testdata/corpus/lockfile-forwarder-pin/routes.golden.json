@@ -1,0 +1,19 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "SPINDRIFT_REGISTRY_CREDENTIAL_ARTIFACTORY_EXAMPLE_TEST",
+      "FromFile": "",
+      "MatchHost": "artifactory.example.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://artifactory.example.test"
+    },
+    "Ecosystems": null,
+    "MatchHost": "artifactory.example.test",
+    "UpstreamOrigin": ""
+  }
+]

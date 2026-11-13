@@ -2193,6 +2193,7 @@ build/settings files is enough on its own:
 | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`                                              | npm/pnpm/yarn      |
 | `go.sum`                                                                                        | go mod             |
 | `build.gradle`, `build.gradle.kts`, `settings.gradle`, `settings.gradle.kts`, `gradle.lockfile` | gradle             |
+| `packages.lock.json`                                                                            | dotnet             |
 <!-- END GENERATED LOCKFILE CLASSIFICATION -->
 
 Unrecognized ecosystems emit no hint. The hint is suppressed entirely when
@@ -9222,7 +9223,7 @@ registry names, then matches each host to a credential across the operator's
 own credential stores:
 
 <!-- BEGIN GENERATED REGISTRY DISCOVERY SOURCES -- nix run .#regen-goldens -- DO NOT EDIT -->
-- Config files read from the Target repo: `.cargo/config.toml`, `.npmrc`, `.yarnrc.yml`, `pnpm-workspace.yaml`
+- Config files read from the Target repo: `.cargo/config.toml`, `.npmrc`, `.yarnrc.yml`, `pnpm-workspace.yaml`, `nuget.config` or `NuGet.config` or `NuGet.Config`
 - Credential stores, searched **in this order**: `netrc` (`~/.netrc`), `npmrc` (`~/.npmrc`), `cargo-credentials` (`~/.cargo/credentials.toml`), `gradle-properties` (`~/.gradle/gradle.properties`)
 <!-- END GENERATED REGISTRY DISCOVERY SOURCES -->
 
@@ -9277,15 +9278,17 @@ paths are those profile siblings. `upstream-origin` is the other
 exception, and only appears when the discovered URL's scheme or port is
 something `match-host` alone
 can't imply (ADR 0047, issue #3261). A route's per-ecosystem declaration —
-a `[routes.ecosystems.<name>]` sub-table carrying gradle's or go's typed
-`path` key, or cargo's `registries` list (ADR 0048, issue #3405) — is a
-surface discovery never writes at all, even where it already scanned the
+a `[routes.ecosystems.<name>]` sub-table carrying gradle's, go's or nuget's
+typed `path` key, or cargo's `registries` list (ADR 0048, issue #3405) — is
+a surface discovery never writes at all, even where it already scanned the
 value: the cargo registry names it read to drive the credential match
-above go no further than that match, and Gradle and Go name no registry
-host in-tree for it to scan a path out of in the first place. An operator
-declares such a block by hand when a route needs one. `<repo-dir>` is the
-Target repo to scan; `<routes-file>` is the path to write. It refuses to
-overwrite an existing `<routes-file>`; pass `--force` to overwrite anyway.
+above go no further than that match, nuget's feed path reaches the
+path-set straight from the repo's config instead, and Gradle and Go name
+no registry host in-tree for it to scan a path out of in the first place.
+An operator declares such a block by hand when a route needs one.
+`<repo-dir>` is the Target repo to scan; `<routes-file>` is the path to
+write. It refuses to overwrite an existing `<routes-file>`; pass `--force` to
+overwrite anyway.
 
 A host discovery can't match to any store still gets a route, pointed at a
 placeholder credential named `SPINDRIFT_REGISTRY_CREDENTIAL_<HOST>` (host

@@ -6,6 +6,7 @@ import (
 	"spindrift.dev/launcher/internal/ecosystem/gomod"
 	"spindrift.dev/launcher/internal/ecosystem/gradle"
 	"spindrift.dev/launcher/internal/ecosystem/npmfamily"
+	"spindrift.dev/launcher/internal/ecosystem/nuget"
 )
 
 // Registers the bundled ecosystems' Strategies. Kept in its own file because
@@ -16,5 +17,5 @@ import (
 func init() {
 	// The argument order is both the lockfile first-hit precedence and the
 	// env-export file's line order.
-	ecosystem.Register(cargo.Strategy, npmfamily.Npm, npmfamily.Yarn, npmfamily.Pnpm, gomod.Strategy, gradle.Strategy)
+	ecosystem.Register(cargo.Strategy, npmfamily.Npm, npmfamily.Yarn, npmfamily.Pnpm, gomod.Strategy, gradle.Strategy, nuget.Strategy)
 }

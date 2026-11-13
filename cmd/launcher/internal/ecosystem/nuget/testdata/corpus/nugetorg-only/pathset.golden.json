@@ -1,0 +1,19 @@
+{
+  "derived": null,
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/v3-flatcontainer",
+        "/v3"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "nuget",
+          "path": "/v3"
+        }
+      ],
+      "matchHost": "api.nuget.org",
+      "upstream": "https://api.nuget.org"
+    }
+  ]
+}

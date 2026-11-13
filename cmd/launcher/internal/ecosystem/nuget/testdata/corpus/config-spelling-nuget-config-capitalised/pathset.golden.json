@@ -1,0 +1,29 @@
+{
+  "derived": [
+    {
+      "Host": "artifactory.example.test",
+      "Origin": "https://artifactory.example.test",
+      "Subtrees": [
+        {
+          "ecosystem": "nuget",
+          "path": "/artifactory/api/nuget/v3/nuget-local"
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/artifactory/api/nuget/v3/nuget-local"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "nuget",
+          "path": "/artifactory/api/nuget/v3/nuget-local"
+        }
+      ],
+      "matchHost": "artifactory.example.test",
+      "upstream": "https://artifactory.example.test"
+    }
+  ]
+}

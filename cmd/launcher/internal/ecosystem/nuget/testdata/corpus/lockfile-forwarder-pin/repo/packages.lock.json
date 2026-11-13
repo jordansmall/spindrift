@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net8.0": {
+      "Widget": {
+        "type": "Direct",
+        "requested": "[1.0.0, )",
+        "resolved": "1.0.0",
+        "contentHash": "bm90LWEtcmVhbC1oYXNo",
+        "source": "http://127.0.0.1:27182/artifactory.example.test/artifactory/api/nuget/v3/nuget-local/index.json"
+      }
+    }
+  }
+}

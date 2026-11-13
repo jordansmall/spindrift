@@ -1,0 +1,19 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "netrc",
+      "FromEnv": "",
+      "FromFile": "stores/netrc",
+      "MatchHost": "artifactory.example.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://artifactory.example.test"
+    },
+    "Ecosystems": null,
+    "MatchHost": "artifactory.example.test",
+    "UpstreamOrigin": ""
+  }
+]
