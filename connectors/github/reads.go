@@ -128,16 +128,21 @@ func pages[T any](api, path string, visit func([]T) bool) error {
 	return fmt.Errorf("GET %s: more than %d pages", path, maxPages)
 }
 
+// listQuery selects the open issues q names; count walks the same set.
+func listQuery(q tracker.Query) string {
+	s := "?state=open&sort=created&direction=asc&per_page=" + strconv.Itoa(pageSize)
+	if q.Label != "" {
+		s += "&labels=" + url.QueryEscape(q.Label)
+	}
+	return s
+}
+
 func listIssues(t tracker.Target, query tracker.Query, limit int) ([]tracker.Issue, error) {
 	if limit < 1 {
 		return nil, fmt.Errorf("list issues: limit %d < 1", limit)
 	}
-	q := "?state=open&sort=created&direction=asc&per_page=" + strconv.Itoa(pageSize)
-	if query.Label != "" {
-		q += "&labels=" + url.QueryEscape(query.Label)
-	}
 	var out []tracker.Issue
-	err := pages(t.API, repoPath(t)+q, func(raw []rawIssue) bool {
+	err := pages(t.API, repoPath(t)+listQuery(query), func(raw []rawIssue) bool {
 		for _, r := range raw {
 			// The REST issues list includes pull requests; `gh issue list` does not.
 			if r.PullRequest != nil {
