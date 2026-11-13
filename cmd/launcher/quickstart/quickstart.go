@@ -31,11 +31,6 @@ type Environment interface {
 
 	Getenv(key string) string
 
-	// TokenScopes reads the X-OAuth-Scopes header GitHub returns for a
-	// ghp_/gho_ token. Fine-grained PATs have no such endpoint, so only the
-	// classic audit branch calls this.
-	TokenScopes(token string) ([]string, error)
-
 	// GHAuthToken returns the host gh CLI's own token, the fallback for an
 	// operator who declines to paste a fine-grained PAT.
 	GHAuthToken() (string, error)
@@ -460,7 +455,6 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 			Prompt:       prompt,
 			PromptMasked: promptMasked,
 			AmbientToken: env.GHAuthToken,
-			TokenScopes:  env.TokenScopes,
 			Probe: func(token string) error {
 				it, _, err := forgeBuilder(strategy, shared, knobLookup(knobs, strategy.TokenEnvVar, token))
 				if err != nil {

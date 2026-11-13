@@ -35,9 +35,9 @@ func TestNoGhExecOutsideForge(t *testing.T) {
 			return nil
 		}
 		// Quickstart runs before nix develop, so no forge client exists yet.
-		// Its Environment seam shells to gh directly to read token scopes and
-		// the gh CLI fallback (issue #1047), the same carve-out ADR 0027 makes
-		// for the pre-CLI wizard.
+		// Its Environment seam shells to gh directly for the gh CLI fallback
+		// token (issue #1047), the same carve-out ADR 0027 makes for the
+		// pre-CLI wizard.
 		if strings.HasPrefix(filepath.ToSlash(path), "quickstart") {
 			if info.IsDir() {
 				return filepath.SkipDir

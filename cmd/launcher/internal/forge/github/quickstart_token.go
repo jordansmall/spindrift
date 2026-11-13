@@ -1,24 +1,28 @@
 package github
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/runner"
 )
 
-// acquireToken is the wizard's github token setup: acquire, then audit for
-// least privilege.
-func acquireToken(_ backendkit.Shared, _ backendkit.Lookup, p backendkit.TokenPrompt) (string, error) {
-	token, err := acquireGHToken(p)
-	if err != nil {
-		return "", err
+// acquireTokenWith builds the wizard's github token setup: acquire, then audit
+// for least privilege, reading a classic token's scopes through introspect.
+func acquireTokenWith(introspect backendkit.TokenIntrospector) func(backendkit.Shared, backendkit.Lookup, backendkit.TokenPrompt) (string, error) {
+	return func(s backendkit.Shared, _ backendkit.Lookup, p backendkit.TokenPrompt) (string, error) {
+		token, err := acquireGHToken(p)
+		if err != nil {
+			return "", err
+		}
+		if err := auditGHToken(token, s.RepoSlug, introspect, p); err != nil {
+			return "", err
+		}
+		return token, nil
 	}
-	if err := auditGHToken(token, p); err != nil {
-		return "", err
-	}
-	return token, nil
 }
 
 // acquireGHToken reuses an ambient GH_TOKEN without prompting, otherwise it
@@ -56,8 +60,10 @@ const requiredGHPermissions = `  Issues: Read and write
 `
 
 // auditGHToken checks a GitHub token for least privilege, branching on its
-// prefix. A fine-grained PAT cannot be introspected, so it passes ungated.
-func auditGHToken(token string, p backendkit.TokenPrompt) error {
+// prefix. A fine-grained PAT cannot be introspected, so it passes ungated; so
+// does a classic token on a host whose Connector cannot report its scopes,
+// after saying so.
+func auditGHToken(token, repoSlug string, introspect backendkit.TokenIntrospector, p backendkit.TokenPrompt) error {
 	w := p.Out
 	if strings.HasPrefix(token, "github_pat_") {
 		fmt.Fprintln(w, "fine-grained PAT detected — GitHub exposes no endpoint to introspect it.")
@@ -65,10 +71,15 @@ func auditGHToken(token string, p backendkit.TokenPrompt) error {
 		return nil
 	}
 	if strings.HasPrefix(token, "ghp_") || strings.HasPrefix(token, "gho_") {
-		scopes, err := p.TokenScopes(token)
+		grant, err := introspect(token, repoSlug)
+		if errors.Is(err, runner.ErrUnsupported) {
+			fmt.Fprintf(w, "cannot audit the token's scopes (%v) — verify yourself that it is least-privilege.\n", err)
+			return nil
+		}
 		if err != nil {
 			return fmt.Errorf("read token scopes: %w", err)
 		}
+		scopes := grant.Scopes
 		fmt.Fprintf(w, "token scopes: %s\n", strings.Join(scopes, ", "))
 		excess := excessGHScopes(scopes)
 		if len(excess) == 0 {

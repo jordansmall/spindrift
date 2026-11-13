@@ -23,8 +23,6 @@ import (
 
 type fakeEnvironment struct {
 	env               map[string]string
-	tokenScopes       []string
-	tokenScopesErr    error
 	ghAuthToken       string
 	ghAuthTokenErr    error
 	runtimes          map[string]bool
@@ -45,10 +43,6 @@ func (f fakeEnvironment) LookPath(file string) (string, error) {
 }
 
 func (f fakeEnvironment) Getenv(key string) string { return f.env[key] }
-
-func (f fakeEnvironment) TokenScopes(token string) ([]string, error) {
-	return f.tokenScopes, f.tokenScopesErr
-}
 
 func (f fakeEnvironment) GHAuthToken() (string, error) { return f.ghAuthToken, f.ghAuthTokenErr }
 
@@ -919,7 +913,8 @@ func TestRunQuickstart_ClassicTokenNarrowScope_AcceptedWithoutGate(t *testing.T)
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	env := fakeEnvironment{tokenScopes: narrowTokenScopes, runtimes: map[string]bool{"podman": true}}
+	ghScopes(t, narrowTokenScopes)
+	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}}
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
@@ -952,7 +947,8 @@ func TestRunQuickstart_ClassicTokenBroadScope_AcceptWritesToken(t *testing.T) {
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	env := fakeEnvironment{tokenScopes: []string{"repo", "gist"}, runtimes: map[string]bool{"podman": true}}
+	ghScopes(t, []string{"repo", "gist"})
+	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}}
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
@@ -982,7 +978,8 @@ func TestRunQuickstart_ClassicTokenBroadScope_DeclineAbortsWithoutWriting(t *tes
 		"no", // declines the ACCEPT gate
 	}, "\n") + "\n")
 
-	env := fakeEnvironment{tokenScopes: []string{"repo"}, runtimes: map[string]bool{"podman": true}}
+	ghScopes(t, []string{"repo"})
+	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}}
 	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
 	if err == nil {
 		t.Fatal("expected declining the ACCEPT gate to abort, got nil error")
@@ -1005,7 +1002,8 @@ func TestRunQuickstart_NoAmbientToken_PrintsGuidedPATInstructions(t *testing.T) 
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	env := fakeEnvironment{tokenScopes: narrowTokenScopes, runtimes: map[string]bool{"podman": true}}
+	ghScopes(t, narrowTokenScopes)
+	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}}
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
@@ -1030,7 +1028,8 @@ func TestRunQuickstart_BlankTokenInput_FallsBackToGHAuthToken(t *testing.T) {
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	env := fakeEnvironment{ghAuthToken: "gho_fallbacktoken", tokenScopes: narrowTokenScopes, runtimes: map[string]bool{"podman": true}}
+	ghScopes(t, narrowTokenScopes)
+	env := fakeEnvironment{ghAuthToken: "gho_fallbacktoken", runtimes: map[string]bool{"podman": true}}
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
@@ -1081,7 +1080,8 @@ func TestRunQuickstart_TokenScopesReadError_AbortsWithoutWriting(t *testing.T) {
 		"ghp_broadtoken",
 	}, "\n") + "\n")
 
-	env := fakeEnvironment{tokenScopesErr: errors.New("gh api -i user: exit status 1"), runtimes: map[string]bool{"podman": true}}
+	ghFailing(t)
+	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}}
 	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
 	if err == nil {
 		t.Fatal("expected a failed scope read to abort, got nil error")
@@ -1134,10 +1134,10 @@ func TestRunQuickstart_AmbientTokenBroadScope_StillRequiresACCEPT(t *testing.T) 
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
+	ghScopes(t, []string{"repo"})
 	env := fakeEnvironment{
-		env:         map[string]string{"GH_TOKEN": "ghp_ambientbroadtoken"},
-		tokenScopes: []string{"repo"},
-		runtimes:    map[string]bool{"podman": true},
+		env:      map[string]string{"GH_TOKEN": "ghp_ambientbroadtoken"},
+		runtimes: map[string]bool{"podman": true},
 	}
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
@@ -3739,4 +3739,49 @@ func TestRenderFlakeNix_KnobWithoutQuickstartKnobsEntry_Errors(t *testing.T) {
 			t.Errorf("error %q should name %s", err, want)
 		}
 	}
+}
+
+// ghScopes puts a gh on PATH that answers `api -i user` with scopes in
+// X-OAuth-Scopes, so the wizard's scope audit (read through the github
+// Strategy's introspection) never reaches the real gh.
+func ghScopes(t *testing.T, scopes []string) {
+	t.Helper()
+	fakeGH(t, "printf 'HTTP/2.0 200 OK\\nX-OAuth-Scopes: "+strings.Join(scopes, ", ")+"\\n\\n{}'")
+}
+
+// ghFailing puts a gh on PATH whose every call fails.
+func ghFailing(t *testing.T) {
+	t.Helper()
+	fakeGH(t, "echo 'HTTP 401: Bad credentials' >&2; exit 1")
+}
+
+func fakeGH(t *testing.T, body string) {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\n" + body + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestMain puts a gh on PATH for the whole package: the wizard reads a classic
+// token's scopes through the github Strategy's native probe, which would
+// otherwise reach the real gh and its network. Tests that audit scopes
+// override it with ghScopes.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "quickstart-gh")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	script := "#!/bin/sh\nprintf 'HTTP/2.0 200 OK\\nX-OAuth-Scopes: public_repo\\n\\n{}'\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
 }

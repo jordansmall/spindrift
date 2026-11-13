@@ -32,34 +32,6 @@ func (hostEnvironment) Getenv(key string) string {
 	return os.Getenv(key)
 }
 
-// TokenScopes reads the X-OAuth-Scopes header from `gh api -i`, since no forge
-// method exposes it (ADR 0027). GH_TOKEN carries the token under audit so the
-// probe checks the pasted token, not the host gh CLI's own credential.
-func (hostEnvironment) TokenScopes(token string) ([]string, error) {
-	cmd := exec.Command("gh", "api", "-i", "user")
-	cmd.Env = append(os.Environ(), "GH_TOKEN="+token)
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("gh api -i user: %w", err)
-	}
-	for _, line := range strings.Split(string(out), "\n") {
-		name, value, ok := strings.Cut(line, ":")
-		if !ok || !strings.EqualFold(strings.TrimSpace(name), "x-oauth-scopes") {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return nil, nil
-		}
-		var scopes []string
-		for _, s := range strings.Split(value, ",") {
-			scopes = append(scopes, strings.TrimSpace(s))
-		}
-		return scopes, nil
-	}
-	return nil, nil
-}
-
 // GHAuthToken returns the operator's own `gh auth token`, the fallback when
 // they decline to paste a fine-grained PAT.
 func (hostEnvironment) GHAuthToken() (string, error) {

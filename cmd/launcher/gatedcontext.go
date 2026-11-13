@@ -32,13 +32,13 @@ func newGatedContext(w io.Writer, kind *dispatchkind.Descriptor, selfContained b
 	// hoisted into one instance rather than one per call.
 	discardRep := doctor.NewDiscardReporter()
 	nonNetwork, network := splitGateRegistryByNetwork(gateRegistry)
-	if err := walkGateRegistry(nonNetwork, rc.config, w, discardRep, false); err != nil {
+	if err := walkGateRegistry(nonNetwork, rc.config, w, discardRep, walkEnforce); err != nil {
 		return gatedContext{}, err
 	}
 	if err := checkRunnerLaunchPrerequisites(runnerPrerequisites(rc.config)); err != nil {
 		return gatedContext{}, err
 	}
-	if err := walkGateRegistry(network, rc.config, w, discardRep, false); err != nil {
+	if err := walkGateRegistry(network, rc.config, w, discardRep, walkEnforce); err != nil {
 		return gatedContext{}, err
 	}
 	return gatedContext{readContext: rc}, nil

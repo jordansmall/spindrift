@@ -2,11 +2,13 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // launchGate is one entry in the ordered gate registry (issue #2942).
@@ -21,11 +23,29 @@ type launchGate struct {
 	// The token gates derive it from their backend row (readOnlyTokenGates).
 	Applicable func(c config) bool
 	// Network marks a gate whose Check makes a live network call. Once one
-	// fails, walkGateRegistry stops even in collectAll mode, since a later
+	// fails, walkGateRegistry stops even in walkReport mode, since a later
 	// probe is moot.
 	Network bool
-	Check   func(c config, w io.Writer) error
+	// UnsupportedRemedy names how to make an unverifiable gate verifiable. A
+	// gate whose Check wraps runner.ErrUnsupported is reported as unsupported
+	// by doctor but refuses the launch under walkEnforce: a security gate that
+	// cannot run must not fail open.
+	UnsupportedRemedy string
+	Check             func(c config, w io.Writer) error
 }
+
+// walkMode selects what walkGateRegistry does with a failing or unsupported
+// gate.
+type walkMode int
+
+const (
+	// walkEnforce is the launch path: stop at the first failure, and treat a
+	// gate the backend's Connector cannot serve as a failure.
+	walkEnforce walkMode = iota
+	// walkReport is doctor's path: enumerate every broken non-network gate,
+	// and render an unsupported gate as such without failing.
+	walkReport
+)
 
 // tokenGateApplicable reports whether c's codeForge or issueTracker resolves to
 // a backend sharing desc's TokenEnvVar. Matching on TokenEnvVar rather than
@@ -58,7 +78,8 @@ func readOnlyTokenGates(rows []backendkit.Strategy) []launchGate {
 			Applicable: func(c config) bool {
 				return c.BoxForgeAndIssueAccess == "read-only" && tokenGateApplicable(c, r.Descriptor)
 			},
-			Network: true,
+			Network:           true,
+			UnsupportedRemedy: "pin a " + r.Name + " Connector that serves forge.tokenGrant, or remove the " + r.Name + " backend row",
 			Check: func(c config, w io.Writer) error {
 				_, err := checkReadOnlyTokenGate(c, r, w)
 				return err
@@ -106,18 +127,33 @@ func splitGateRegistryByNetwork(registry []launchGate) (nonNetwork, network []la
 // walkGateRegistry runs registry's gates against c in order. checkW goes to
 // each gate's own Check, so a gate's operator-facing output still reaches the
 // caller's real writer even when rep is discarding the generic ok and MISSING
-// lines (issue #2942 AC5). collectAll lets doctor enumerate every broken
+// lines (issue #2942 AC5). walkReport lets doctor enumerate every broken
 // non-network gate instead of stopping at the first.
-func walkGateRegistry(registry []launchGate, c config, checkW io.Writer, rep *doctor.Reporter, collectAll bool) error {
+func walkGateRegistry(registry []launchGate, c config, checkW io.Writer, rep *doctor.Reporter, mode walkMode) error {
 	var errs []error
 	for _, g := range registry {
 		if g.Applicable != nil && !g.Applicable(c) {
 			continue
 		}
-		if err := g.Check(c, checkW); err != nil {
+		err := g.Check(c, checkW)
+		if errors.Is(err, runner.ErrUnsupported) && mode == walkEnforce {
+			// Fail closed. The new error deliberately does not wrap
+			// ErrUnsupported, which Blocking classifications treat as
+			// non-blocking.
+			err = fmt.Errorf("%s cannot be verified, so the launch is refused: %s; %s", g.Name, doctor.UnsupportedReason(err), g.UnsupportedRemedy)
+			rep.Finding(doctor.Required, "%s: %s", g.Name, err)
+			return err
+		}
+		if errors.Is(err, runner.ErrUnsupported) {
+			// Report mode: no failure; the gate itself already warned that it
+			// could not verify.
+			rep.Unsupported("%s (%s)", g.Name, doctor.UnsupportedReason(err))
+			continue
+		}
+		if err != nil {
 			errs = append(errs, err)
 			rep.Finding(doctor.Required, "%s: %s", g.Name, err)
-			if !collectAll || g.Network {
+			if mode == walkEnforce || g.Network {
 				return errors.Join(errs...)
 			}
 			continue
@@ -132,9 +168,9 @@ func walkGateRegistry(registry []launchGate, c config, checkW io.Writer, rep *do
 // newGatedContext uses to interleave the bwrap gates (gatedcontext.go), so
 // doctor's report order cannot diverge from enforcement's after a later edit
 // to registry.
-func walkSplitGateRegistry(registry []launchGate, c config, checkW io.Writer, rep *doctor.Reporter, collectAll bool) error {
+func walkSplitGateRegistry(registry []launchGate, c config, checkW io.Writer, rep *doctor.Reporter, mode walkMode) error {
 	nonNetwork, network := splitGateRegistryByNetwork(registry)
-	errNonNetwork := walkGateRegistry(nonNetwork, c, checkW, rep, collectAll)
-	errNetwork := walkGateRegistry(network, c, checkW, rep, collectAll)
+	errNonNetwork := walkGateRegistry(nonNetwork, c, checkW, rep, mode)
+	errNetwork := walkGateRegistry(network, c, checkW, rep, mode)
 	return errors.Join(errNonNetwork, errNetwork)
 }

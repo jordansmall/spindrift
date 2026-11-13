@@ -250,5 +250,5 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.
 	// splitGateRegistryByNetwork construction gatedContext enforces with, not
 	// gateRegistry's raw declaration order, so doctor cannot report a different
 	// set or order from what gatedContext enforces.
-	return walkSplitGateRegistry(gateRegistry, c, checkW, rep, true)
+	return walkSplitGateRegistry(gateRegistry, c, checkW, rep, walkReport)
 }
