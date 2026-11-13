@@ -3117,11 +3117,11 @@ This is protocol version **0.3.0**. The host is
   ids: core never sends it a `status`, ignores those two capabilities, and
   fails a read whose Dispatch state has only a status selector. Only the read
   shadow ([Shadow mode](#shadow-mode)) uses `connectortracker` in production.
-- **Forge capabilities.** Provisional at protocol 0.y: issue #6754 finalises
-  the forge axis, and a `0.y` bump may change what follows. A forge Connector
-  advertises `"forge"`, meaning it serves the first three methods below. Every
-  `params` carries `target`, `{api, repo}`, as for the tracker. The Connector
-  reads and returns raw data; every PR write stays on core's native adapter.
+- **Forge capabilities.** A forge Connector advertises `"forge"`, meaning it
+  serves the first three methods below. Every `params` carries `target`,
+  `{api, repo}`, as for the tracker. The Connector only translates: it returns
+  raw data and performs the forge call, and every landing and merge-gate
+  decision stays in core.
 
   | Method | Params | Result |
   |---|---|---|
@@ -3130,8 +3130,10 @@ This is protocol version **0.3.0**. The host is
   | `forge.checks` | `{target, number}` | `{state, checks}`, the rollup of the PR's head commit |
   | `forge.jobLog` | `{target, jobId, tail}` | `{log}`, the last `tail` bytes of a job's log; optional |
 
-  A PR is `{number, url, state, merged}`; a check is `{kind, name, conclusion,
-  summary, jobId}`, with `kind` `"CheckRun"` or `"StatusContext"`, and `jobId`
+  A PR is `{number, url, state, merged}`, plus, for a PR-capable forge,
+  `{draft, head, headSha, mergeable, mergeCommit}` (each omitted when empty;
+  `mergeable` is `MERGEABLE`, `CONFLICTING` or `UNKNOWN`); a check is
+  `{kind, name, conclusion, summary, jobId}`, with `kind` `"CheckRun"` or `"StatusContext"`, and `jobId`
   (omitted when empty) naming the job whose log `forge.jobLog` reads. A
   Connector without `forge.jobLog`, or whose log read fails, still serves
   failure detail, only without logs. Core keeps the policy, including how much
@@ -3161,8 +3163,10 @@ This is protocol version **0.3.0**. The host is
   merge, rebase) stays in core's own git plumbing against `cloneUrl`, with
   core's credential, which the Connector never sees.
   [`connectorforge.Compose`](../cmd/launcher/internal/connectorforge/pushonly.go)
-  builds the Code Forge and refuses a Connector missing either capability. It
-  reads `forge.remote` once at construction, and again on every Probe, and
+  builds the Code Forge and refuses a Connector without `"forge.branches"`, or
+  declaring neither `"forge.pushOnly"` nor `"forge.prs"`. It reads
+  `forge.remote` once at construction, and again on a Probe that has no
+  `forge.probe`, and
   refuses the answer unless both URLs are `https`, carry no userinfo and name a
   host of the Connector's Route table (case-insensitive, port included);
   otherwise the git credential would go to whatever host the Connector named.
@@ -3173,9 +3177,49 @@ This is protocol version **0.3.0**. The host is
   Connector has no network grant and so no audit log. The SDK's
   `forge.RegisterBranches(forge.Branches{...})` serves the methods.
 
+  **PR primitives.** A forge Connector that advertises `"forge"`,
+  `"forge.branches"` and `"forge.prs"`, and not `"forge.pushOnly"`, is
+  PR-capable: `Compose` builds a PR forge from it, under the PR Lander. Each
+  primitive needs the forge's API; whatever core can derive, it derives, so
+  the PR's state, mergeability, head commit and merge commit come from
+  `forge.pr`, and failure detail from `forge.checks` and `forge.jobLog`.
+
+  | Method | Params | Result |
+  |---|---|---|
+  | `forge.openPR` | `{target, pr: {title, body, base, head, draft}}` | a PR |
+  | `forge.behind` | `{target, number}` | `{behindBy}`, commits the base has that the head lacks |
+  | `forge.prFiles` | `{target, number}` | `{files}`, every path the PR changes |
+  | `forge.setDraft` | `{target, number, draft}` | `{}` |
+  | `forge.comment` | `{target, number, body}` | `{}` |
+  | `forge.merge` | `{target, number}` | `{}` |
+
+  Four more are optional, each declared by its own capability. Without one,
+  the composed forge lacks that surface, exactly as a native forge without the
+  API does: no capability lookup or type probe finds it.
+
+  | Capability | Methods | Without it |
+  |---|---|---|
+  | `forge.autoMerge` | `forge.autoMergeAllowed` (`{target}` → `{allowed}`), `forge.enqueueAutoMerge` (`{target, number}` → `{}`) | auto-merge reads as disallowed |
+  | `forge.ciRun` | `forge.ciRun` (`{target, number}` → `{url}`) | no CI run link |
+  | `forge.branchProtection` | `forge.branchProtected` (`{target, branch}` → `{protected}`) | doctor's `branch-protection` row is not applicable |
+  | `forge.probe` | `forge.probe` (`{target}` → `{repo}`) | Probe re-reads `forge.remote` |
+
+  Core pins every PR URL to the remote's web host, fails closed on an unknown
+  `mergeable` value, and rebases a PR by reading its `head` and running the
+  rebase in its own git plumbing. A draft PR open that fails adopts the
+  branch's open PR, if there is one, as not created. A failed `forge.merge` is
+  classified in core: `transient` matches `forge.ErrMergeTransient`, so the
+  Lander retries it as for a native forge, and any other class re-reads the PR
+  and maps its `mergeable` state onto the same conflict and blocked-by-checks
+  errors the native adapters return. A merge the Connector aims at a path its
+  Route table does not declare is refused unsent and audited, and returns
+  `connectorhost.ErrRouteRefused` unclassified. The SDK's
+  `forge.RegisterPRs(forge.PRs{...})` serves the methods.
+
   Every forge Connector call core makes, the reads above included, retries a
   `transient` failure, three attempts with a 2-second linear backoff (see Error
-  class). A `forge.deleteBranch` retry that answers `not-found` counts as
+  class), except `forge.merge` and `forge.openPR`, which are not idempotent and
+  run once. A `forge.deleteBranch` retry that answers `not-found` counts as
   done: the earlier attempt deleted the branch and only its answer was lost. A
   `rate-limited` failure maps onto core's `forge.RateLimitError`, which feeds
   its rate-limit hold, and `auth` onto `forge.ErrAuthFailure`;
