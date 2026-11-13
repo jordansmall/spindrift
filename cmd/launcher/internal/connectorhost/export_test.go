@@ -74,3 +74,7 @@ func ReportedError(body string) error {
 	}
 	return r.callError()
 }
+
+// NetworkConnector wraps n in a Connector with no guest module, so the host
+// helpers that read only the Network are testable without a wasm fixture.
+func NetworkConnector(n *Network) *Connector { return &Connector{network: n} }

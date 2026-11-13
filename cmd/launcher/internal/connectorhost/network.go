@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -209,6 +210,37 @@ func (n *Network) record(e AuditEntry) error {
 		n.Observe(e)
 	}
 	return err
+}
+
+// DeclaredHosts returns the distinct hosts of the Connector's Route table as
+// written (host[:port]), or nil without a network grant.
+func (c *Connector) DeclaredHosts() []string {
+	if c.network == nil {
+		return nil
+	}
+	var hosts []string
+	for _, r := range c.network.Routes {
+		if !slices.ContainsFunc(hosts, func(h string) bool { return strings.EqualFold(h, r.Host) }) {
+			hosts = append(hosts, r.Host)
+		}
+	}
+	return hosts
+}
+
+// AuditRefusal audits core refusing the Connector's answer to method, as
+// opposed to an http_request, and returns refusal. A failed audit write, or a
+// Connector without a network grant (so no audit log), also matches ErrAudit:
+// an unaudited refusal must not pass for an audited one. refusal's text is
+// written to the audit log, so keep secrets out of it.
+func (c *Connector) AuditRefusal(method string, refusal error) error {
+	if c.network == nil {
+		return errors.Join(refusal, fmt.Errorf("%w: connector has no audit log", ErrAudit))
+	}
+	n := c.network
+	if err := n.record(AuditEntry{Connector: n.Name, Decision: DecisionRefused, Reason: method + ": " + refusal.Error()}); err != nil {
+		return errors.Join(refusal, fmt.Errorf("%w: connector %q: %v", ErrAudit, n.Name, err))
+	}
+	return refusal
 }
 
 // Network is the host side of a network Connector's single Host call,
