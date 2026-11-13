@@ -75,6 +75,8 @@ const (
 	pathOpenPR       = "/forge/openPR"
 	pathDeleteBranch = "/forge/deleteBranch"
 	pathComment      = "/tracker/comment"
+	pathTransition   = "/tracker/transition"
+	pathEditLabels   = "/tracker/editLabels"
 )
 
 // fakeWriteRoutes are the Routes the Fake's forge and tracker writes cross,
@@ -90,6 +92,9 @@ var fakeWriteRoutes = []struct{ method, path string }{
 	{http.MethodPost, pathOpenPR},
 	{http.MethodDelete, pathDeleteBranch},
 	{http.MethodPost, pathComment},
+	{http.MethodPost, pathTransition},
+	{http.MethodPost, pathEditLabels},
+	{http.MethodPost, pathLabels},
 }
 
 // fakeRoutes is the fixture Route table: one exact method and path per Route (a
