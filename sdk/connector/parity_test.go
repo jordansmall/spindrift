@@ -104,3 +104,52 @@ func TestRequestMatchesHost(t *testing.T) {
 		t.Errorf("Request drifted from host httpRequest\n sdk:  %q\n host: %q", sdk, host)
 	}
 }
+
+// hostClassSrc declares the host's error-class constants. An unread class
+// reads as permanent on the host, so a drifted wire string would silently
+// retire a retryable failure.
+const hostClassSrc = "../../cmd/launcher/internal/connectorhost/class.go"
+
+// classConsts maps each const of type Class in the file to its string value.
+func classConsts(t *testing.T, path string) map[string]string {
+	t.Helper()
+	f, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]string{}
+	for _, d := range f.Decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok || gd.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			vs := spec.(*ast.ValueSpec)
+			if id, ok := vs.Type.(*ast.Ident); !ok || id.Name != "Class" {
+				continue
+			}
+			for i, n := range vs.Names {
+				lit, ok := vs.Values[i].(*ast.BasicLit)
+				if !ok {
+					t.Fatalf("%s: %s is not a string literal", path, n.Name)
+				}
+				v, err := strconv.Unquote(lit.Value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				out[n.Name] = v
+			}
+		}
+	}
+	return out
+}
+
+func TestClassesMatchHost(t *testing.T) {
+	mine := classConsts(t, "errors.go")
+	if len(mine) == 0 {
+		t.Fatal("sdk declares no Class consts: parser is vacuous")
+	}
+	if got := classConsts(t, hostClassSrc); !reflect.DeepEqual(got, mine) {
+		t.Errorf("host classes drifted from sdk\n host: %v\n sdk:  %v", got, mine)
+	}
+}

@@ -6,6 +6,13 @@ import (
 	"spindrift.dev/sdk/connector"
 )
 
+// The capability names a forge Connector advertises in its handshake. Core
+// keeps its own copies; a parity test pins them.
+const (
+	CapBranches = "forge.branches"
+	CapPushOnly = "forge.pushOnly"
+)
+
 // Remote is a repository's git identity. CloneURL is what core's git plumbing
 // pushes to and WebURL is the repository's web page. Neither may carry
 // credentials: core refuses one that does, and one naming a host outside the
@@ -96,9 +103,9 @@ func branchHandlers(b Branches) ([]string, map[string]method) {
 			return struct{}{}, nil // an empty object, not null
 		},
 	}
-	caps := []string{"forge.branches"}
+	caps := []string{CapBranches}
 	if b.PushOnly {
-		caps = append(caps, "forge.pushOnly")
+		caps = append(caps, CapPushOnly)
 	}
 	return caps, m
 }

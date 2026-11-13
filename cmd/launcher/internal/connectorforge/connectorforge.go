@@ -9,6 +9,13 @@
 // The Connector returns raw fields; every policy decision is made here: PR URL
 // validation, which conclusions count as failing, and rendering and capping the
 // failure detail, so a hostile guest's text cannot outgrow forge.MaxFailureDetailBytes.
+//
+// Compose builds a push-only Code Forge from a Connector advertising
+// "forge.branches" and "forge.pushOnly": the Connector answers the branch
+// questions and names the remote, and git runs in core's own plumbing with
+// core's own credential, attached only after the remote's host is checked
+// against the Connector's declared routes. Every Connector call retries a
+// transient failure and reads its error class as core's sentinels.
 package connectorforge
 
 import (
@@ -23,6 +30,7 @@ import (
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/retry"
 )
 
 // ErrNotForge marks a Connector that does not advertise the "forge"
@@ -45,6 +53,10 @@ type Target struct {
 
 // The shapes the forge adapter decodes from the guest.
 type (
+	wireRemote struct {
+		CloneURL string `json:"cloneUrl"`
+		WebURL   string `json:"webUrl"`
+	}
 	wirePR struct {
 		Number string `json:"number"`
 		URL    string `json:"url"`
@@ -107,7 +119,7 @@ func New(c *connectorhost.Connector, writes forge.PRForge, target Target, webHos
 	if webHost == "" {
 		return nil, ErrNoWebHost
 	}
-	return newForge(c.Call, writes, target, webHost), nil
+	return newForge(classedCall(c, retry.Clock{}), writes, target, webHost), nil
 }
 
 func newForge(call guestCall, writes forge.PRForge, target Target, webHost string) forge.PRForge {

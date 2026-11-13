@@ -16,11 +16,15 @@ import (
 // beside sdk/ at the same relative layout so this path resolves there too.
 const coreFile = "../../cmd/launcher/internal/connectorforge/connectorforge.go"
 
+// corePushOnlyFile holds core's capability-name consts, copied by the same nix check.
+const corePushOnlyFile = "../../cmd/launcher/internal/connectorforge/pushonly.go"
+
 // pairs maps each sdk type to core's copy of it. The sdk's params and result
 // envelopes are anonymous structs inside handlers, so only the named shapes
 // can be compared.
 var pairs = map[string]string{
 	"Target": "Target",
+	"Remote": "wireRemote",
 	"PR":     "wirePR",
 	"Check":  "wireCheck",
 	"Rollup": "wireRollup",
@@ -82,6 +86,9 @@ func TestWireShapesMatchCore(t *testing.T) {
 		}
 	}
 	mine := structLines(t, "forge.go", nil)
+	for name, lines := range structLines(t, "branches.go", nil) {
+		mine[name] = lines
+	}
 	core := structLines(t, coreFile, rename)
 	for sdk, name := range pairs {
 		want, ok := mine[sdk]
@@ -95,6 +102,35 @@ func TestWireShapesMatchCore(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("core %s drifted from sdk %s\n core: %q\n sdk:  %q", name, sdk, got, want)
+		}
+	}
+}
+
+// TestCapabilitiesMatchCore pins the capability names against core's named
+// consts, which gate Compose on the handshake.
+func TestCapabilitiesMatchCore(t *testing.T) {
+	f, err := parser.ParseFile(token.NewFileSet(), corePushOnlyFile, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	core := map[string]string{}
+	for _, d := range f.Decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok || gd.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			vs := spec.(*ast.ValueSpec)
+			for i, n := range vs.Names {
+				if lit, ok := vs.Values[i].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+					core[n.Name] = strings.Trim(lit.Value, `"`)
+				}
+			}
+		}
+	}
+	for name, want := range map[string]string{"capBranches": CapBranches, "capPushOnly": CapPushOnly} {
+		if got, ok := core[name]; !ok || got != want {
+			t.Errorf("core %s = %q (declared: %v), sdk says %q", name, got, ok, want)
 		}
 	}
 }
