@@ -29,9 +29,12 @@ let
   preambles = import ../../lib/preambles.nix;
   driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
   fragmentRows = import ../../lib/fragments.nix;
-  fragmentBasenames = map (pkgs.lib.removeSuffix ".md") (
-    builtins.concatMap (import ../../lib/fragment-paths.nix).pathsOf fragmentRows
+  # Over the in-repo Connectors' contributions (issue #6857), so a Connector's
+  # fragment file must reach the image too.
+  fragmentPaths = (import ../../lib/fragment-paths.nix).withConnectors (
+    import ../connector-fragments.nix
   );
+  fragmentFiles = builtins.concatMap fragmentPaths.pathsOf fragmentRows;
   # Read reviewModel's default from the schema so a bump only edits
   # lib/env-schema.nix (issue #2433). Deliberate carve-out from
   # readSchemaDefaults (issue #2506 AC5): this pin needs the raw schema, not
@@ -554,14 +557,14 @@ in
 
   # The conditional prompt fragments (issue #463) bake inside the overridable
   # prompt directory, unlike the contracts above, so a SPINDRIFT_PROMPT_DIR
-  # override must supply its own fragment. fragmentBasenames comes from
+  # override must supply its own fragment. fragmentFiles comes from
   # lib/fragments.nix rather than a hardcoded list, so a new row cannot drop
   # out of coverage (issue #957, and issue #956 for the bats mirror).
   fragments-baked-into-image = pkgs.runCommand "fragments-baked-into-image" { } ''
-    for f in ${pkgs.lib.concatStringsSep " " fragmentBasenames}; do
-      diff ${../../templates/default/prompts/fragments}/"$f".md \
-        ${batsHarness.internals.agentFiles}${agentPaths.PROMPTS_DIR}/fragments/"$f".md
-    done
+    ${pkgs.lib.concatMapStrings (p: ''
+      diff ${fragmentPaths.fileOf ../../templates/default/prompts/fragments p} \
+        ${batsHarness.internals.agentFiles}${agentPaths.PROMPTS_DIR}/fragments/${p}
+    '') fragmentFiles}
     touch $out
   '';
 

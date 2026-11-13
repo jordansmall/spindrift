@@ -132,6 +132,11 @@
   # binaries through the launcher input document's `backends` section (ADR
   # 0073, issue #6805).
   backendRows ? { },
+  # Prompt fragment files Connectors contribute (lib/flakeModule.nix's
+  # spindrift.connectors.<name>.fragments), each `{ name; dir; shipped; }` in
+  # lib/fragment-paths.nix's Connector shape (issue #6857). Their dirs overlay
+  # the image's prompts/fragments, and a path one declares is read from it.
+  connectorFragments ? [ ],
   # Names of core Drivers whose Connector row (a `driverRows` entry carrying
   # `module`) runs in shadow mode (ADR 0073, issue #6797): the native Strategy
   # stays authoritative while the Box replays each Pass log through the
@@ -277,7 +282,13 @@ let
   # one exception that still slices its own source: it needs the
   # RESEARCH_VERDICTS-rendered text, not the registry's unrendered default.
   promptContract = import ./prompt-contract.nix;
-  fragmentPaths = import ./fragment-paths.nix;
+  # folderOf and mayBeAbsent are connector-independent; the rest resolve over
+  # the Connectors' contributions.
+  fragmentPaths =
+    let
+      base = import ./fragment-paths.nix;
+    in
+    base // base.withConnectors connectorFragments;
   # Shared per-file scan of the default prompt corpus (issue #5858).
   corpusScan = import ./prompt-corpus-scan.nix;
   # A source left at its default resolves to the shared per-file scan; an
@@ -294,7 +305,7 @@ let
   fragmentScanOf =
     path:
     let
-      scanned = corpusScan.scan (builtins.readFile (fragmentsDir + "/${path}"));
+      scanned = corpusScan.scan (builtins.readFile (fragmentPaths.fileOf fragmentsDir path));
     in
     if fragmentsDir == corpusScan.fragmentsDir then
       corpusScan.fragments.${path} or scanned
@@ -970,7 +981,7 @@ let
   researchRelayChecksFragment =
     issueTrackerRow ? name
     && !builtins.pathExists (
-      fragmentsDir + "/${fragmentPaths.folderOf "tracker" issueTrackerRow}/research-verdict-relay.md"
+      fragmentPaths.fileOf fragmentsDir "${fragmentPaths.folderOf "tracker" issueTrackerRow}/research-verdict-relay.md"
     );
   buildTimeRejectVerdicts = promptContract.buildTimeRejectVerdicts {
     staticGates = {
@@ -981,7 +992,9 @@ let
       "reviewer-verdict" = reviewPrompt;
     }
     // lib.optionalAttrs researchRelayChecksFragment {
-      "verdict-comment-relay" = builtins.readFile (fragmentsDir + "/research-verdict-relay.md");
+      "verdict-comment-relay" = builtins.readFile (
+        fragmentPaths.fileOf fragmentsDir "research-verdict-relay.md"
+      );
     };
   };
 
@@ -1029,7 +1042,8 @@ let
           # plain row's absence still aborts eval.
           (
             builtins.filter (
-              path: !(fragmentPaths.mayBeAbsent row) || builtins.pathExists (fragmentsDir + "/${path}")
+              path:
+              !(fragmentPaths.mayBeAbsent row) || builtins.pathExists (fragmentPaths.fileOf fragmentsDir path)
             ) (fragmentPaths.scanPathsOf fragmentsDir row)
           )
       ) readOnlyReachableFragmentRows
@@ -1090,7 +1104,7 @@ let
             value = fragmentScanOf path;
           })
           (
-            builtins.filter (path: builtins.pathExists (fragmentsDir + "/${path}")) (
+            builtins.filter (path: builtins.pathExists (fragmentPaths.fileOf fragmentsDir path)) (
               builtins.concatMap (fragmentPaths.scanPathsOf fragmentsDir) fragments
             )
           )
@@ -1231,6 +1245,7 @@ let
       workerPrompt
       conflictResolvePrompt
       fragmentsSourceDir
+      connectorFragments
       choresSourceDir
       ;
     kindPrompts = map (e: { inherit (e) file baked; }) kindPrompts;
@@ -1312,7 +1327,12 @@ let
       "cp ${hostPkgs.writeText pf e.prompt} $out/${pf}\n"
     ) imageAgents.customRosterPromptFiles}
     cp ${hostPkgs.writeText "conflict-resolve-prompt.md" imagePrompts.conflictResolvePrompt} $out/conflict-resolve-prompt.md
-    cp -r ${imagePrompts.fragmentsSourceDir} $out/fragments
+    ${import ./fragments-install.nix {
+      inherit lib;
+      src = imagePrompts.fragmentsSourceDir;
+      inherit (imagePrompts) connectorFragments;
+      dest = "$out/fragments";
+    }}
     cp -r ${imagePrompts.choresSourceDir} $out/chores
   '';
 

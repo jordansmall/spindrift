@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/seamtest"
+	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
 // These tests are guards over the production rows and shipped prompts, so
@@ -246,5 +247,36 @@ func TestAssembleDeprecatedForgeSlotVarsRenderAsBefore(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// The deprecated read-only blocked-comment var resolves like its shipped slot
+// (issue #6857): jira's folder file wins, and github keeps the shared root body
+// naming GitHub's token. The seam prompts lack the Connector-owned jira folder,
+// so this reads the merged tree the Box image bakes.
+func TestAssembleDeprecatedBlockedCommentReadOnlyVarFollowsTrackerFolder(t *testing.T) {
+	_, reg := seamPrompts(t)
+	prompts := repopath.MergedPromptsDir(t)
+	const slot = "${ISSUE_BLOCKED_COMMENT_STEP}${ISSUE_BLOCKED_COMMENT_RELAY_STEP}"
+	const old = "${ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP}"
+	for _, tc := range []struct{ tracker, read, want string }{
+		{"jira", "JIRA", "You have no client that can post a comment to this tracker"},
+		{"github", "GITHUB", "Your GitHub token is read-only here"},
+	} {
+		t.Run(tc.tracker, func(t *testing.T) {
+			env := seamEnv(prompts)
+			env.DispatchKind = "work"
+			env.IssueTracker = tc.tracker
+			env.TrackerAxisRead, env.TrackerAxisWrite, env.TrackerAxisFiler = tc.read, "GITHUB", "GITHUB"
+			env.BoxWriteEnabled = false
+			want, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+			if !strings.Contains(want.Prompt, tc.want) {
+				t.Fatalf("shipped slot prompt lacks %q", tc.want)
+			}
+			assertOverrideRendersAsSlot(t, reg, prompts, env, "issue-prompt.md", slot, old)
+		})
 	}
 }

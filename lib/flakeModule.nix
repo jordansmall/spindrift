@@ -135,6 +135,11 @@ let
       }
   ) (lib.filterAttrs (_: r: r.backend != null) config.spindrift.connectors);
   shadowConnectors = lib.attrNames (lib.filterAttrs (_: r: r.driver != null) shadowRows);
+  # The fragment contributions Connectors register (issue #6857), a list in
+  # Connector-name order; lib/fragment-paths.nix's `withConnectors` validates it.
+  connectorFragments = lib.filter (f: f != null) (
+    lib.mapAttrsToList (_: r: r.fragments) config.spindrift.connectors
+  );
 
   sectionKnobs = lib.foldl' (
     acc: knobName:
@@ -575,6 +580,37 @@ in
                     backend (git, local) is refused.
                   '';
                 };
+                fragments = mkOption {
+                  type = types.nullOr (
+                    types.submodule {
+                      options = {
+                        name = mkOption {
+                          type = types.str;
+                          description = "The Connector's name in fragment-path error messages.";
+                        };
+                        dir = mkOption {
+                          type = types.path;
+                          description = "A directory laid out `<folder>/<fragment>` like templates/default/prompts/fragments.";
+                        };
+                        shipped = mkOption {
+                          type = types.attrsOf (types.listOf types.str);
+                          description = "Per fragment file name, the tracker-axis folders of `dir` that carry it (the shape of lib/fragment-paths.nix's `shipped`).";
+                        };
+                      };
+                    }
+                  );
+                  default = null;
+                  description = ''
+                    The prompt fragment files the Connector contributes to an
+                    axis row's folders (issue #6857), e.g. the `jira/` folder
+                    of a tracker-axis row: `{ name; dir; shipped; }`. mkHarness
+                    overlays `dir` onto the image's prompts/fragments and
+                    reads each declared path from it; a declaration that
+                    disagrees with the axes, core's own files, another
+                    Connector or `dir` fails evaluation naming the path.
+                    Null contributes none.
+                  '';
+                };
                 routes = mkOption {
                   type = types.listOf (
                     types.submodule {
@@ -788,6 +824,7 @@ in
       // structuralArgs
       // lib.optionalAttrs (connectorDriverRows != { }) { driverRows = connectorDriverRows; }
       // lib.optionalAttrs (connectorBackendRows != { }) { backendRows = connectorBackendRows; }
+      // lib.optionalAttrs (connectorFragments != [ ]) { inherit connectorFragments; }
       // lib.optionalAttrs (shadowConnectors != [ ]) { shadowDrivers = shadowConnectors; }
       // lib.optionalAttrs (byNameModels != null) { byName = byNameModels; }
       // lib.optionalAttrs (runDefaults != { }) { defaults = runDefaults; };

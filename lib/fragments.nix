@@ -905,6 +905,8 @@ let
       var = "ISSUE_BLOCKED_COMMENT_GITHUB_STEP";
     }
     {
+      axis = "tracker";
+      shared = true;
       gate = "ISSUE_TRACKER_GITHUB_READONLY";
       fragment = "issue-blocked-comment-relay.md";
       extraSubstVars = [ "FORGE_DISPLAY_NAME" ];

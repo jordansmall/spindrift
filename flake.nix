@@ -38,11 +38,7 @@
 
       # ADR 0073: each Connector subflake is plain-imported here and handed
       # this root's own core, never its pinned one.
-      connectorDirs = [
-        ./connectors/claude
-        ./connectors/github
-        ./connectors/jira
-      ];
+      connectorDirs = import ./nix/connector-dirs.nix;
       connectorModules = map (
         dir: ((import dir).lib.connector { inherit core; }).flakeModule
       ) connectorDirs;

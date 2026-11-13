@@ -582,11 +582,18 @@ let
   # the repo layout, so the tests resolve their relative
   # paths (#611, #1985, #2038, #2507, #2566, #2741, #2743, #3988). forge's tests shell out to git;
   # the RUNTIME=bwrap tests LookPath "bwrap" (#2441), and bubblewrap is Linux-only.
+  # repopath.MergedPromptsDir overlays connectors/<name>/fragments onto the
+  # prompts tree (issue #6857), so those dirs sit beside templates/ too.
+  connectorFragmentTrees = pkgs.lib.concatMapStrings (c: ''
+    mkdir -p src/connectors/${c.name}
+    cp -r ${c.dir} src/connectors/${c.name}/fragments
+  '') (import ../connector-fragments.nix);
   sideTrees = ''
     cp -r ${../../docs} src/docs
     cp -r ${../../.github} src/.github
     cp -r ${../../.forgejo} src/.forgejo
     cp -r ${../../templates} src/templates
+    ${connectorFragmentTrees}
     cp -r ${../../agent} src/agent
     mkdir -p src/tests/testdata
     cp -r ${../../tests/testdata/prompt-assembly-golden} src/tests/testdata/prompt-assembly-golden
@@ -1279,6 +1286,7 @@ driverGoTests
         mkdir -p src/tests/testdata src/templates/default
         cp -r ${../../tests/testdata/prompt-assembly-golden} src/tests/testdata/prompt-assembly-golden
         cp -r ${../../templates/default/prompts} src/templates/default/prompts
+        ${connectorFragmentTrees}
         chmod -R +w src
         ${goTestPrologue}
         files=$(grep -rl --include='*_test.go' --exclude-dir=vendor '^//go:build integration' . || true)

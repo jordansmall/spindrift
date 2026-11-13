@@ -68,3 +68,15 @@ func TestImportsStdlibOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestMergedPromptsDirOverlaysConnectorFragments(t *testing.T) {
+	dir := MergedPromptsDir(t)
+	for _, rel := range []string{
+		filepath.Join("fragments", "issue-blocked-comment-relay.md"),
+		filepath.Join("fragments", "jira", "issue-blocked-comment-relay.md"),
+	} {
+		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
+			t.Errorf("MergedPromptsDir() lacks %s: %v", rel, err)
+		}
+	}
+}

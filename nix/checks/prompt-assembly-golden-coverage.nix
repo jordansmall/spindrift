@@ -19,7 +19,9 @@ let
   goldenDir = ../../tests/testdata/prompt-assembly-golden;
 
   registry = unique (
-    builtins.concatMap (import ../../lib/fragment-paths.nix).pathsOf (import ../../lib/fragments.nix)
+    builtins.concatMap ((import ../../lib/fragment-paths.nix).withConnectors (import ../connector-fragments.nix)).pathsOf (
+      import ../../lib/fragments.nix
+    )
   );
 
   sidecars = filter (hasSuffix ".fragments.txt") (builtins.attrNames (builtins.readDir goldenDir));

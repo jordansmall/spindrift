@@ -10,5 +10,7 @@
       package = pkgs: import ./package.nix { inherit pkgs core; };
       # The Route table the module registers, for a check that exports it.
       routes = import ./routes.nix;
+      # The tracker-axis prompt fragments the module contributes (issue #6857).
+      fragments = import ./fragments.nix;
     };
 }

@@ -52,6 +52,9 @@ let
     inherit nixpkgs system;
     overlays = [ ghFakeOverlay ];
     packages = p: [ p.hello ];
+    # The shipped tree as a Consumer of the in-repo Connectors gets it, so the
+    # image checks see the Connector-owned fragment files (issue #6857).
+    connectorFragments = import ./connector-fragments.nix;
   };
 
   batsHarness = import ../lib/mkHarness.nix batsHarnessArgs;
@@ -110,6 +113,8 @@ let
     # in `shadowDrivers`; a backend row carries the flag itself.
     driverRows = dogfoodDriverRows;
     shadowDrivers = builtins.filter (n: dogfoodDriverRows ? ${n}) dogfoodShadow;
+    # Connector-shipped fragment files (issue #6857), as the module collects them.
+    connectorFragments = import ./connector-fragments.nix;
     backendRows.github = {
       module = p: "${githubConnector.package p}/github.wasm";
       inherit (githubConnector) routes;
