@@ -2607,7 +2607,7 @@ compares its reads, while the native adapter still answers every call.
 
 #### The jira Connector
 
-`connectors/jira` is the jira backend's tracker read path as a network
+`connectors/jira` is the jira backend's tracker path as a network
 Connector on protocol 0.2: it serves `tracker.listIssues`, `tracker.issue`,
 `tracker.comments`, `tracker.nativeDeps`, `tracker.blocks`, and doctor's and
 the daemon's reads (`tracker.probe`, `tracker.statuses`, `tracker.createMeta`
@@ -2618,10 +2618,19 @@ through `http_request`, with project-key ids (`tracker.ids.projectKey`) and the
 faithfully always false. It returns the dedup and research markers from entity
 properties rather than splicing them into text. Its count is Cloud's
 approximate count or, on Server, the total of a zero-row search, over the same
-query as `tracker.listIssues`. Its Route table is four `GET` routes on the
-`{base}` host, `/rest/api/2/search`, `/rest/api/2/issue`, `/rest/api/2/myself`
-and `/rest/api/2/project/{repo}/statuses`, plus `POST /rest/api/3/search/approximate-count`,
-and its row authorizes with Basic credentials from the host-only
+query as `tracker.listIssues`. It also performs the writes core asks for:
+`tracker.transition` (a workflow transition, with the mapped resolution when
+the transition's screen has a resolution field), `tracker.editLabels` and
+`tracker.listLabels`; `tracker.createLabel` is a no-op, as Jira has no label
+registry. Its Route table is `GET` routes on the `{base}` host,
+`/rest/api/2/search`, `/rest/api/2/issue`, `/rest/api/2/label`,
+`/rest/api/2/myself` and `/rest/api/2/project/{repo}/statuses`, `PUT` and `POST`
+on `/rest/api/2/issue` (the label edit and a transition), and
+`POST /rest/api/3/search/approximate-count`. The writes and the label read widen
+the table beyond a Consumer's accepted baseline, so doctor's
+`connector-routes-widened[jira]` row lists them as `+` lines until the
+Consumer adds them to `spindrift-connector-routes.json`. Its row authorizes
+with Basic credentials from the host-only
 `SPINDRIFT_JIRA_CONNECTOR_TOKEN` and `SPINDRIFT_JIRA_CONNECTOR_EMAIL`, with
 `JIRA_BASE_URL` as the base. The row is registered but not shadowed: the native
 jira adapter answers every call until the cut-over (issue #6753).
@@ -3072,8 +3081,10 @@ This is protocol version **0.3.0**. The host is
   meaning it serves `tracker.listIssues` and `tracker.issue`, and optionally
   `"tracker.comments"`, `"tracker.nativeDeps"`, `"tracker.blocks"`,
   `"tracker.probe"`, `"tracker.statuses"`, `"tracker.createMeta"`,
-  `"tracker.count"` and `"tracker.searchIssues"`, serving
-  the method of the same name, and `"tracker.ids.projectKey"` (see **Issue
+  `"tracker.count"`, `"tracker.searchIssues"`, `"tracker.transition"`,
+  `"tracker.editLabels"` and `"tracker.labels"`, serving the method of the
+  same name (`"tracker.labels"` serves `tracker.listLabels` and
+  `tracker.createLabel`), and `"tracker.ids.projectKey"` (see **Issue
   ids**). Advertising `"tracker.comments"` attests that each comment's
   `minimized` and `minimizedReason` are faithful; a Connector whose API cannot
   report minimized state leaves it out, and core reads comments from its native
@@ -3081,8 +3092,8 @@ This is protocol version **0.3.0**. The host is
   API base URL without a trailing slash, the `owner/name` slug or project key,
   and the tracker's API dialect (`""` for a tracker with one, `"cloud"` or
   `"server"` for Jira).
-  The Connector reads and returns raw data; every write stays on core's native
-  adapter.
+  The Connector reads and returns raw data and performs only the write core
+  asks for; every lifecycle decision stays in core.
 
   | Method | Params | Result |
   |---|---|---|
@@ -3097,11 +3108,16 @@ This is protocol version **0.3.0**. The host is
   | `tracker.count` (optional) | `{target, label, status}`, selecting as `tracker.listIssues` does | `{count}`, possibly approximate |
   | `tracker.countInterval` (with `tracker.count`) | `{}` | `{seconds}`, at least 1: how often core re-asks `tracker.count` |
   | `tracker.searchIssues` (optional) | `{target, text, state, label, limit}`, `label` `""` for any | `{issues}`, in match order |
+  | `tracker.transition` (optional) | `{target, number, state, mapping}`: `state` is the Dispatch state's canonical name (`dispatchable`, `in-progress`, `complete`, `failed`, `ambiguous`) and `mapping` is core's whole table, `{<state>: {status, resolution}}`, for every state that names a status; the Connector looks up `mapping[state]`, applies the rule that only `failed` and `ambiguous` may share a status (an error otherwise) and sends the resolution when it is non-empty | `{outcome, status, offered}`: `status` is the native status the Connector resolved `state` to (`""` when unmapped); `outcome` is `moved` (the native transition ran), `unavailable` (the workflow offers no transition to `status` from the issue's current status; `offered` names the statuses it does offer) or `unmapped` (`mapping` holds no non-empty status for `state`); an error for anything else, including a screen field the transition requires and the request does not fill |
+  | `tracker.editLabels` (optional) | `{target, number, add, remove}` | `{}`; one edit that adds and removes the named labels |
+  | `tracker.listLabels` (optional, capability `tracker.labels`) | `{target}` | `{labels}`, every label the tracker knows |
+  | `tracker.createLabel` (optional, capability `tracker.labels`) | `{target, name, description, color}` | `{}`; a no-op where the tracker has no label registry |
 
   An issue is `{number, title, body, state, labels, closedAt, closedNotPlanned,
-  dedupMarker}`. `number` is a string id and `state` is `"open"` or `"closed"`.
+  dedupMarker, status}`. `number` is a string id and `state` is `"open"` or `"closed"`.
   `closedAt` is RFC3339, `""` when the issue is open or the date is unknown;
-  core ignores it and `closedNotPlanned` for an open issue. `dedupMarker` is
+  core ignores it and `closedNotPlanned` for an open issue. `status` is the
+  workflow status name, `""` for a tracker without one. `dedupMarker` is
   the raw dedup marker line when the tracker keeps it in a side store (a Jira
   entity property), `""` otherwise; it is never part of `body`, and core
   restores it. A comment is `{author, createdAt, body, minimized,
@@ -3116,7 +3132,15 @@ This is protocol version **0.3.0**. The host is
   project key, a hyphen and a positive canonical integer. The SDK's
   `Reader.IDs` selects the grammar.
 
-  Core keeps the policy.
+  Core keeps the policy, writes included. `tracker.transition` and
+  `tracker.editLabels` are primitives: core's `TransitionState` and
+  `CompleteVerdict` decide the hybrid label fallback when a transition is
+  `unavailable` or `unmapped`, the status-only refusal
+  (`forge.TransitionRefusedError`, carrying the status read back from the
+  issue), the already-claimed check before a claim, the settled-label strip
+  before a native claim, and the verdict guard that the in-progress label is
+  present; research stays label-only because its dispatch-kind row maps no
+  status. The Connector holds no lifecycle mode.
   [`connectortracker.New`](../cmd/launcher/internal/connectortracker/connectortracker.go)
   builds core's tracker reads from such a Connector: it resolves the dispatch
   label and status of a Dispatch state, orders by issue id, applies the page

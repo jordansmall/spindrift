@@ -300,7 +300,8 @@ and in the in-box `box` program; the only bash left is the generated shim that
   to a wasip1 reactor by its own `package.nix`. `connectors/claude` is the
   claude Driver's host half (`spindrift.dev/connector/claude`);
   `connectors/github` is the github backend's tracker and forge read paths;
-  `connectors/jira` is the jira backend's tracker read path.
+  `connectors/jira` is the jira backend's tracker read and write paths
+  (transitions, label edits, label list and create).
   Each gets `connector-<name>-go-{fmt,vet,test}` from `nix/checks/go.nix`.
 - **`agent/`** — `entrypoint.sh`, the generated shim, and the Driver's hook
   scripts. The shim has no logic: `lib/image.nix` renders the preambles ahead
@@ -319,7 +320,8 @@ and in the in-box `box` program; the only bash left is the generated shim that
   its `internal/forge/<name>` package; when `connectors/<name>` exists that
   check also builds its wasm and exports `SPINDRIFT_BACKEND_CONNECTOR_WASM` and
   `SPINDRIFT_BACKEND_CONNECTOR_ROUTES`, so the backend's tests run the tracker
-  and PR forge read contracts against the Connector. Also here:
+  and PR forge read contracts against the Connector (jira also runs the
+  tracker write contract and the native transition cases). Also here:
   `fixtures.nix` (the
   harness variants the checks build), `regen.nix` (`nix run .#regen`, the
   schema-artifact regenerator), `regen-opencode-schema.nix` (`nix run
