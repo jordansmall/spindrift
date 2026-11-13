@@ -534,3 +534,45 @@ composed PR forge (`connectorforge.Compose` over a Connector declaring
 flips, comments and auto-merge. Git push and rebase stay in core with core's
 credential, and every landing and merge-gate decision stays in core too: merge
 failure classification, PR URL pinning and the cap on failure detail.
+
+## Amendment (issue #6864): the forge axis is final; draft PRs are optional
+
+The #6863 amendment put PR open in the always-on PR surface. It is instead the
+optional `forge.draftPRs` capability (`forge.openPR`): core opens a PR only to
+host-mediate, and a forge without it still lands and merges a PR the Box opened
+itself. Without it the forge lacks draft creation exactly as a native forge
+without the API does.
+
+The protocol stays 0.3.0, with no bump. Moving `forge.openPR` behind
+`forge.draftPRs` breaks a Connector that relied on the #6863 surface, but
+protocol 0.3 (commit 28493d2ed) has not shipped in any spindrift release, so no
+released Connector declares the old shape.
+
+The forge axis is now final: `forge` (reads), `forge.branches` (`remote`,
+`branchExists`, `deleteBranch`), `forge.pushOnly` or `forge.prs` (`behind`,
+`prFiles`, `setDraft`, `comment`, `merge`), and the optional `forge.autoMerge`,
+`forge.ciRun`, `forge.branchProtection`, `forge.probe` and `forge.draftPRs`. A
+later forge surface is a new optional capability, an additive protocol bump,
+not a change to these.
+
+A read-only Box is host-mediated on a Connector forge declaring
+`forge.draftPRs`, and only there. Core's git pushes a branch it built,
+relays the Box's bundle and reads its commit subjects, in its own clone of the
+validated `forge.remote` URL with its own credential, so the Connector never
+sees the bundle, git or the credential (decision 6 holds). Only the draft-PR
+create crosses the Connector. The Connector has no duplicate class, so a failed
+create adopts the branch's open PR as not created, which is what a retried
+hand-off needs. Without the capability, Settle blocks a read-only hand-off as it
+does for a native PR forge without bundle relay.
+
+Error classes stay the five of the Connector protocol and core decides on each:
+`transient` retries, except for the non-idempotent `forge.merge`, `forge.openPR`
+and `forge.comment`, which run once (a merge's `transient` becomes
+`ErrMergeTransient`), `rate-limited` feeds core's rate-limit hold, `auth` is an auth failure,
+`not-found` on a retried delete is success, and `permanent` returns as it came.
+
+Interfaces that exist only for the local forge, the integration tip
+(`LandingRef`), landing containment (`LandingContainmentQuery`), `LandingRepair`
+and branch protection on the Accumulation repo, never enter the protocol: they
+need the Accumulation repo, which only a Built-in backend owns, so the `local`
+forge stays native (decisions 5 and 7).
