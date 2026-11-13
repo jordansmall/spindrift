@@ -171,6 +171,13 @@ func (b *restBackend) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b.auths = append(b.auths, auth)
+	if r.URL.Path == "/installation/repositories" {
+		// Token introspection of an installation token: it may push.
+		writeJSON(w, map[string]any{"repositories": []map[string]any{
+			{"full_name": connectorRepo, "permissions": map[string]any{"push": true}},
+		}})
+		return
+	}
 	if r.URL.Path == "/graphql" {
 		b.graphql(w, r, reject)
 		return
@@ -344,10 +351,6 @@ func (b *restBackend) graphql(w http.ResponseWriter, r *http.Request, reject fun
 		return
 	case strings.Contains(req.Query, "label(name:"):
 		b.labelIDs(w, raw, req.Variables.Owner+"/"+req.Variables.Repo, req.Variables.Number, reject)
-		return
-	case strings.Contains(req.Query, "viewerPermission"):
-		// Token introspection of an installation token: it may push.
-		writeJSON(w, map[string]any{"data": map[string]any{"repository": map[string]any{"viewerPermission": "WRITE"}}})
 		return
 	case strings.Contains(req.Query, "viewer{"):
 		// Token introspection of a classic token: its grant rides the header.

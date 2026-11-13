@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -218,19 +219,21 @@ func TestConnector_PriorClaimStateFailsWhenTheTimelineDoes(t *testing.T) {
 }
 
 // tokenBackend is the GitHub API as token introspection sees it: the GraphQL
-// viewer query answers with the token's OAuth scopes header, the repository's
-// viewerPermission query with its permission. Anything but POST /graphql is
-// unexpected: the Connector declares no REST Route for either read.
+// viewer query answers with the token's OAuth scopes header, and
+// GET /installation/repositories lists the repository with its permissions.
+// Anything else is unexpected: the Connector declares no other Route for either
+// read.
 type tokenBackend struct {
 	*httptest.Server
 	mu         sync.Mutex
 	token      string
 	userStatus int
 	scopes     *string
-	// permission is the repository's viewerPermission; empty leaves it out.
-	permission string
-	seenAuth   []string
-	unexpected []string
+	// permissions is the installation list's permissions object for the repository;
+	// nil leaves the repository out of the list, "" leaves out its permissions.
+	permissions *string
+	seenAuth    []string
+	unexpected  []string
 }
 
 func newTokenBackend(t *testing.T, token string) *tokenBackend {
@@ -245,12 +248,16 @@ func newTokenBackend(t *testing.T, token string) *tokenBackend {
 			_ = json.NewDecoder(r.Body).Decode(&req)
 		}
 		switch {
-		case strings.Contains(req.Query, "viewerPermission"):
-			repo := `{}`
-			if b.permission != "" {
-				repo = `{"viewerPermission":"` + b.permission + `"}`
+		case r.Method == http.MethodGet && r.URL.Path == "/installation/repositories":
+			repos := `{"full_name":"owner/other","permissions":{"push":true}}`
+			if b.permissions != nil {
+				repos += `,{"full_name":"` + connectorRepo + `"`
+				if *b.permissions != "" {
+					repos += `,"permissions":` + *b.permissions
+				}
+				repos += `}`
 			}
-			_, _ = w.Write([]byte(`{"data":{"repository":` + repo + `}}`))
+			_, _ = w.Write([]byte(`{"total_count":2,"repositories":[` + repos + `]}`))
 		case strings.Contains(req.Query, "viewer"):
 			if b.scopes != nil {
 				w.Header().Set("X-OAuth-Scopes", *b.scopes)
@@ -305,7 +312,7 @@ func TestConnector_TokenGrant(t *testing.T) {
 		name, token string
 		userStatus  int
 		scopes      *string
-		permission  string
+		permissions *string
 		want        backendkit.TokenIntrospection
 		wantErr     bool
 		// reaches is whether the shape makes a request at all.
@@ -321,13 +328,12 @@ func TestConnector_TokenGrant(t *testing.T) {
 			want: backendkit.TokenIntrospection{Introspectable: true}},
 		{name: "OAuth token with public_repo", token: "gho_abc", scopes: str("public_repo"), reaches: true,
 			want: backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true, Scopes: []string{"public_repo"}}},
-		{name: "installation token with write", token: "ghs_abc", permission: "WRITE", reaches: true,
+		{name: "installation token with push", token: "ghs_abc", permissions: str(`{"pull":true,"push":true}`), reaches: true,
 			want: backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true}},
-		{name: "installation token with admin", token: "ghs_abc", permission: "ADMIN", reaches: true,
-			want: backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true}},
-		{name: "installation token with read only", token: "ghs_abc", permission: "READ", reaches: true,
+		{name: "installation token with read only", token: "ghs_abc", permissions: str(`{"pull":true,"push":false}`), reaches: true,
 			want: backendkit.TokenIntrospection{Introspectable: true}},
-		{name: "installation token without permissions", token: "ghs_abc", reaches: true, wantErr: true},
+		{name: "installation token without permissions", token: "ghs_abc", permissions: str(""), reaches: true, wantErr: true},
+		{name: "installation token without the repository", token: "ghs_abc", reaches: true, wantErr: true},
 		{name: "fine-grained PAT", token: "github_pat_abc", want: notIntrospectable},
 		{name: "unknown prefix", token: "ghu_abc", want: notIntrospectable},
 		{name: "opaque token", token: "opaque", want: notIntrospectable},
@@ -335,7 +341,7 @@ func TestConnector_TokenGrant(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b := newTokenBackend(t, tc.token)
-			b.scopes, b.permission = tc.scopes, tc.permission
+			b.scopes, b.permissions = tc.scopes, tc.permissions
 			if tc.userStatus != 0 {
 				b.userStatus = tc.userStatus
 			}
@@ -375,6 +381,55 @@ func TestConnector_TokenGrantWriteScopesMatchNative(t *testing.T) {
 			got, err := connectorforge.IntrospectToken(conn, connectorforge.Target{API: b.URL, Repo: connectorRepo}, "ghp_abc")
 			if err != nil || !got.WriteCapable {
 				t.Errorf("IntrospectToken(scope %q) = (%+v, %v), want write-capable", scope, got, err)
+			}
+		})
+	}
+}
+
+// doctor's label check compares the lifecycle labels with what the repository
+// defines. Both page REST, the Connector directly and native through gh; 150
+// labels force a second page.
+func TestConnector_ListLabelsMatchesNative(t *testing.T) {
+	for _, fx := range []struct {
+		name string
+		n    int
+	}{
+		{"none", 0},
+		{"one page", 3},
+		{"past one page", 150},
+	} {
+		t.Run(fx.name, func(t *testing.T) {
+			h := newConnectorHarness(t)
+			var want []string
+			for i := range fx.n {
+				want = append(want, "label-"+strconv.Itoa(i))
+			}
+			h.backend.labels = want
+			calls := noGH(t)
+			got, err := h.tr.ListLabels()
+			if err != nil {
+				t.Fatalf("Connector ListLabels: %v", err)
+			}
+			if n := calls(); n != 0 {
+				t.Errorf("the Connector's ListLabels ran gh %d times", n)
+			}
+			if h.backend.unexpected != nil {
+				t.Errorf("unexpected backend requests: %v", h.backend.unexpected)
+			}
+
+			script := `if [ "$1" = "api" ] && [ "$2" = "repos/` + connectorRepo + `/labels?per_page=100" ]; then`
+			for _, name := range want {
+				script += "\n  echo " + name
+			}
+			prependFakeGH(t, script+"\n  exit 0\nfi\nexit 1\n")
+			native, err := NewExecClient(connectorRepo, testLabels).ListLabels()
+			if err != nil {
+				t.Fatalf("native ListLabels: %v", err)
+			}
+			slices.Sort(got)
+			slices.Sort(native)
+			if !slices.Equal(got, native) || len(got) != fx.n {
+				t.Errorf("Connector ListLabels = %d labels, native %d, want %d", len(got), len(native), fx.n)
 			}
 		})
 	}
