@@ -221,3 +221,41 @@ func TestConnectorRoutesChecks_RedirectingLogRouteShowsAsWidening(t *testing.T) 
 		t.Errorf("accepted routes reported as added:\n%s", out)
 	}
 }
+
+// The github Connector's forge write half (issue #6882) widens a Consumer
+// whose baseline holds only the four read routes: each new subtree root shows
+// as added, and the accepted reads do not. The declared set is a hand copy of
+// connectors/github/routes.nix, which a Go test cannot import.
+func TestConnectorRoutesChecks_GithubForgeWritesShowAsWidening(t *testing.T) {
+	route := func(method, path string) connectorhost.Route {
+		return connectorhost.Route{Method: method, Host: "api.github.com", Path: path}
+	}
+	accepted := []connectorhost.Route{
+		route("GET", "/repos/o/r/issues"),
+		route("GET", "/repos/o/r/pulls"),
+		route("POST", "/graphql"),
+		{Method: "GET", Host: "api.github.com", Path: "/repos/o/r/actions/jobs", FollowRedirect: true},
+	}
+	added := []connectorhost.Route{
+		route("POST", "/repos/o/r/pulls"),
+		route("PUT", "/repos/o/r/pulls"),
+		route("POST", "/repos/o/r/issues"),
+		route("GET", "/repos/o/r/compare"),
+		route("GET", "/repos/o/r/git/matching-refs/heads"),
+		route("DELETE", "/repos/o/r/git/refs/heads"),
+		route("GET", "/repos/o/r/branches"),
+		route("GET", "/repos/o/r/rules/branches"),
+	}
+	useConnectorRows(t, connectorRow(accepted, append(append([]connectorhost.Route{}, accepted...), added...)))
+	out := runConnectorRows(t, connectorRoutesChecks())
+	for _, r := range added {
+		if want := "\n+ " + r.String(); !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	for _, r := range accepted {
+		if strings.Contains(out, "+ "+r.String()) {
+			t.Errorf("accepted route %s reported as added:\n%s", r, out)
+		}
+	}
+}
