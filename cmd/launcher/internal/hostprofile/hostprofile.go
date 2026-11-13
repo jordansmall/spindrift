@@ -64,6 +64,7 @@ var table = []Row{
 	{Name: "crates.io", Hosts: []string{"crates.io", "*.crates.io"}, Note: publicNote},
 	{Name: "registry.npmjs.org", Hosts: []string{"registry.npmjs.org"}, Note: publicNote},
 	{Name: "proxy.golang.org", Hosts: []string{"proxy.golang.org"}, Note: publicNote},
+	{Name: "nuget.org", Hosts: []string{"api.nuget.org"}, Note: publicNote},
 }
 
 // Rows returns a deep copy of the table's rows in match order, for the test
