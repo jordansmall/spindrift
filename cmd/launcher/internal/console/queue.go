@@ -179,6 +179,7 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 		// runContinuousQueue's own Claim (launcher.go, issue #2938) is a
 		// documented no-op.
 		if err := tracker.TransitionState(pick.Number, forge.Dispatchable, forge.InProgress); err != nil {
+			forge.CommentRefusal(tracker, pick.Number, err)
 			reason := err.Error()
 			if errors.Is(err, forge.ErrAlreadyClaimed) {
 				reason = "skipped: already claimed"
@@ -191,6 +192,7 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 			// so hand the issue back rather than strand it at InProgress.
 			reason := "dropped: session quit"
 			if err := tracker.TransitionState(pick.Number, forge.InProgress, forge.Dispatchable); err != nil {
+				forge.CommentRefusal(tracker, pick.Number, err)
 				reason += " (claim revert failed: " + err.Error() + ")"
 			}
 			q.dissolve(pick.Number, kind, reason)
