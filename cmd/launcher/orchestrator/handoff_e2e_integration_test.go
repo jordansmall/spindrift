@@ -133,6 +133,9 @@ func TestHandoffEndToEnd(t *testing.T) {
 		"--driver", "claude",
 		"--driver-bin", fakeClaude,
 		"--driver-flags", "",
+		// driver-exec's default is the Box's /tmp/heartbeat.log, which the
+		// darwin Nix build sandbox does not let a check write.
+		"--heartbeat-log", filepath.Join(dir, "heartbeat.log"),
 		// claude's real argv shape (lib/drivers/claude.nix), the same values
 		// claudeArgvShape in driver-exec's main_test.go pins.
 		"--argv-prompt-style", "flag",
