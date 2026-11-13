@@ -476,6 +476,17 @@ host-side happen once a Connector backend is selected as the tracker or forge,
 which is later work (issues #6807 and #6810). A backend without a row is still
 built from the generated registry.
 
+## Amendment (issue #6857): a Connector's fragment folder reaches the Box
+
+`spindrift.connectors.<name>.fragments` carries `{ name; dir; shipped; }`: a
+prompt-fragment folder the Connector contributes, with `shipped` listing its
+files. Evaluation validates the declaration against the fragment registry,
+naming the Connector and path on a file for a folder not of its row's axis or
+on a missing, stray or duplicate file, and `mkHarness` overlays `dir` onto the
+Box's `prompts/fragments`. The jira Connector ships jira's tracker-axis folder
+this way, now that jira has its own tracker read signal instead of riding
+github's.
+
 ## Amendment (issue #6806): the diff is against a baseline in the Consumer flake
 
 Decision 3's diff is taken against `spindrift-connector-routes.json` at the

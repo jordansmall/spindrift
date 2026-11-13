@@ -848,8 +848,13 @@ serves every backend without a gate row and a variable each. The folder is
 chosen by the signal the axis's gates test, not by the backend's name: the
 tracker read arm for `"tracker"`, the tracker Filer arm for `"filer"`, and the
 `CODE_FORGE` arm for `"forge"`, with `GH` mapping to `github` and a backend
-that rides another's arm (`jira` on github's read arm, a local tracker's Filer
-on github's) reading that folder. A folder with no such file renders an empty
+that rides another's arm (a local tracker's Filer on github's) reading that
+folder; `jira` has its own read signal and reads its own `jira` folder. A
+folder's files may ship from a Connector
+(`spindrift.connectors.<name>.fragments`): evaluation fails, naming the path and
+the Connector, on a declared file for a folder not of its row's axis or on a
+missing, stray or duplicate file. A Connector's declared file wins over a
+file at the same path in a custom fragments directory. A folder with no such file renders an empty
 step, unless the row is `shared`, in which case the root-level
 `fragments/<fragment>` is read next: one body for every backend, naming the
 active one through `${FORGE_DISPLAY_NAME}`, which is the `displayName` of the
@@ -2282,7 +2287,9 @@ is the fixture Connector in
 
   A Connector that compiles to wasm also exports `package`, a function of the
   caller's `pkgs` returning the build (`connectors/claude` returns
-  `$out/claude.wasm`).
+  `$out/claude.wasm`). A Connector that ships prompt fragment files also
+  exports `fragments`, the `{ name; dir; shipped }` contribution its module
+  sets as `spindrift.connectors.<name>.fragments` (`connectors/jira`).
 
 - **Module.** `module.nix` is a flake-parts module. It imports
   `core.flakeModules.default` (the module system dedups by path, so a Consumer
@@ -2339,8 +2346,9 @@ is the fixture Connector in
   module as `flakeModules.default`. That pin is for building the Connector
   standalone only. The batteries root plain-imports each Connector's entry
   point and passes its own `core`, so a Consumer never evaluates two cores.
-  The root's list of Connector directories is `connectorDirs` in
-  [`flake.nix`](../flake.nix); `connectors/claude` is the first, and it builds
+  The root's list of Connector directories is
+  [`nix/connector-dirs.nix`](../nix/connector-dirs.nix); `connectors/claude`
+  is the first, and it builds
   `package` (the compiled wasm) from the SDK source core exports as `lib.sdkSrc`,
   not a path out of its directory.
 - **Iterating.** Build or check a Connector against the local core with
@@ -2608,6 +2616,10 @@ and its row authorizes with Basic credentials from the host-only
 `SPINDRIFT_JIRA_CONNECTOR_TOKEN` and `SPINDRIFT_JIRA_CONNECTOR_EMAIL`, with
 `JIRA_BASE_URL` as the base. The row is registered but not shadowed: the native
 jira adapter answers every call until the cut-over (issue #6753).
+
+The Connector also ships jira's tracker-axis fragment folder,
+`connectors/jira/fragments/jira/`, through
+`spindrift.connectors.jira.fragments`.
 
 #### Shadow mode
 
