@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 var wantTarget = Target{API: "https://api.github.com", Repo: "o/r", Dialect: "cloud"}
@@ -214,4 +215,123 @@ func TestMarkerFieldsEncode(t *testing.T) {
 	if got := call(t, m, "tracker.comments", `{`+target+`,"number":"3"}`); !strings.Contains(got, `"researchMarker":true`) {
 		t.Errorf("comments = %s, want researchMarker", got)
 	}
+}
+
+func jiraReader(t *testing.T) Reader {
+	t.Helper()
+	r := fakeReader(t)
+	r.Probe = func(tg Target) (int, error) {
+		if tg != wantTarget {
+			t.Errorf("Probe(%v)", tg)
+		}
+		return 401, nil
+	}
+	r.Statuses = func(tg Target) ([]string, error) {
+		if tg != wantTarget {
+			t.Errorf("Statuses(%v)", tg)
+		}
+		return []string{"To Do", "Done"}, nil
+	}
+	r.CreateMeta = func(tg Target, issueType string) (CreateMeta, error) {
+		if tg != wantTarget || issueType != "Task" {
+			t.Errorf("CreateMeta(%v, %q)", tg, issueType)
+		}
+		return CreateMeta{
+			IssueTypes: []string{"Task", "Bug"},
+			Fields:     []CreateField{{ID: "summary", Name: "Summary", Required: true, HasDefaultValue: false}},
+		}, nil
+	}
+	r.Count = func(tg Target, q Query) (int, error) {
+		if tg != wantTarget || q != (Query{Label: "ready", Status: "In Review"}) {
+			t.Errorf("Count(%v, %+v)", tg, q)
+		}
+		return 12, nil
+	}
+	r.CountInterval = 90*time.Second + 900*time.Millisecond
+	return r
+}
+
+func TestDoctorCapabilities(t *testing.T) {
+	caps, _ := handlers(fakeReader(t))
+	if want := []string{"tracker", "tracker.comments"}; !reflect.DeepEqual(caps, want) {
+		t.Fatalf("caps = %v, want %v", caps, want)
+	}
+	caps, m := handlers(jiraReader(t))
+	want := []string{"tracker", "tracker.comments", "tracker.probe", "tracker.statuses", "tracker.createMeta", "tracker.count"}
+	if !reflect.DeepEqual(caps, want) {
+		t.Fatalf("caps = %v, want %v", caps, want)
+	}
+	for _, name := range []string{"tracker.probe", "tracker.statuses", "tracker.createMeta", "tracker.count", "tracker.countInterval"} {
+		if _, ok := m[name]; !ok {
+			t.Errorf("%s handler missing", name)
+		}
+	}
+	r := jiraReader(t)
+	r.Probe, r.Statuses, r.CreateMeta, r.Count, r.CountInterval = nil, nil, nil, nil, 0
+	_, m = handlers(r)
+	for _, name := range []string{"tracker.probe", "tracker.statuses", "tracker.createMeta", "tracker.count", "tracker.countInterval"} {
+		if _, ok := m[name]; ok {
+			t.Errorf("%s handler present without its Reader field", name)
+		}
+	}
+}
+
+func TestDoctorWireShapes(t *testing.T) {
+	_, m := handlers(jiraReader(t))
+	cases := []struct{ method, params, want string }{
+		{"tracker.probe", `{` + target + `}`, `{"status":401}`},
+		{"tracker.statuses", `{` + target + `}`, `{"statuses":["To Do","Done"]}`},
+		{"tracker.createMeta", `{` + target + `,"issueType":"Task"}`,
+			`{"issueTypes":["Task","Bug"],"fields":[{"fieldId":"summary","name":"Summary","required":true,"hasDefaultValue":false}]}`},
+		{"tracker.count", `{` + target + `,"label":"ready","status":"In Review"}`, `{"count":12}`},
+		{"tracker.countInterval", `{}`, `{"seconds":90}`},
+	}
+	for _, c := range cases {
+		if got := call(t, m, c.method, c.params); got != c.want {
+			t.Errorf("%s = %s, want %s", c.method, got, c.want)
+		}
+	}
+}
+
+func TestDoctorEmptyListsEncodeAsArrays(t *testing.T) {
+	r := jiraReader(t)
+	r.Statuses = func(Target) ([]string, error) { return nil, nil }
+	r.CreateMeta = func(Target, string) (CreateMeta, error) { return CreateMeta{}, nil }
+	_, m := handlers(r)
+	if got, want := call(t, m, "tracker.statuses", `{`+target+`}`), `{"statuses":[]}`; got != want {
+		t.Errorf("statuses = %s, want %s", got, want)
+	}
+	if got, want := call(t, m, "tracker.createMeta", `{`+target+`,"issueType":"Task"}`), `{"issueTypes":[],"fields":[]}`; got != want {
+		t.Errorf("createMeta = %s, want %s", got, want)
+	}
+}
+
+func TestDoctorBadParamsAndErrors(t *testing.T) {
+	_, m := handlers(jiraReader(t))
+	for _, name := range []string{"tracker.probe", "tracker.statuses", "tracker.createMeta", "tracker.count"} {
+		if _, err := m[name](json.RawMessage(`{not json`)); err == nil {
+			t.Errorf("%s: bad params accepted", name)
+		}
+	}
+	boom := errors.New("boom")
+	r := jiraReader(t)
+	r.Probe = func(Target) (int, error) { return 0, boom }
+	r.Count = func(Target, Query) (int, error) { return 0, boom }
+	_, m = handlers(r)
+	for _, name := range []string{"tracker.probe", "tracker.count"} {
+		if _, err := m[name](json.RawMessage(`{` + target + `}`)); !errors.Is(err, boom) {
+			t.Errorf("%s err = %v, want boom", name, err)
+		}
+	}
+}
+
+func TestCountWithoutIntervalPanics(t *testing.T) {
+	r := jiraReader(t)
+	r.CountInterval = 500 * time.Millisecond
+	defer func() {
+		if recover() == nil {
+			t.Error("Count with CountInterval < 1s: no panic")
+		}
+	}()
+	handlers(r)
 }

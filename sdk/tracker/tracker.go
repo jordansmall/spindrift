@@ -8,12 +8,16 @@
 // the dedup or research marker in a side store returns it as a field
 // (Issue.DedupMarker, Comment.ResearchMarker) and never splices it into a
 // body; core restores it. The optional reads are Comments, NativeDeps (the
-// issues an issue is blocked on) and Blocks (the issues it blocks).
+// issues an issue is blocked on) and Blocks (the issues it blocks). The
+// optional doctor and daemon reads are Probe, Statuses, CreateMeta and Count
+// with its CountInterval; each returns raw API data and core decides what it
+// means.
 package tracker
 
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"spindrift.dev/sdk/connector"
 )
@@ -79,6 +83,23 @@ const (
 	ProjectKeyIDs
 )
 
+// CreateMeta is a project's create metadata for one issue type.
+type CreateMeta struct {
+	// IssueTypes names every issue type the project offers.
+	IssueTypes []string `json:"issueTypes"`
+	// Fields are the create fields of the issue type asked for, empty when the
+	// project does not offer it.
+	Fields []CreateField `json:"fields"`
+}
+
+// CreateField is one field of an issue type's create form.
+type CreateField struct {
+	ID              string `json:"fieldId"`
+	Name            string `json:"name"`
+	Required        bool   `json:"required"`
+	HasDefaultValue bool   `json:"hasDefaultValue"`
+}
+
 // Reader is everything a tracker Connector reads.
 type Reader struct {
 	// IDs declares the grammar of every issue number and dependency id the
@@ -108,6 +129,32 @@ type Reader struct {
 	// the API's order, the reverse of NativeDeps. Leaving it nil advertises no
 	// "tracker.blocks" capability.
 	Blocks func(t Target, number string) ([]string, error)
+
+	// Probe is optional: one authenticated read that checks the credential and
+	// that the tracker is reachable. It returns the HTTP status rather than
+	// failing on a non-2xx, so core decides what an auth failure is; err is for
+	// a transport failure only. Setting it advertises "tracker.probe".
+	Probe func(t Target) (status int, err error)
+
+	// Statuses is optional: it returns the names of every status in the
+	// project's workflows, any issue type's. Core checks its status mapping
+	// against them. Setting it advertises "tracker.statuses".
+	Statuses func(t Target) ([]string, error)
+
+	// CreateMeta is optional: it returns the project's create metadata for
+	// issueType. Setting it advertises "tracker.createMeta".
+	CreateMeta func(t Target, issueType string) (CreateMeta, error)
+
+	// Count is optional: it returns how many open issues match q, the same set
+	// ListIssues(q) would return, read without walking them. It may be
+	// approximate where the API only offers an approximate count; a demand
+	// probe tolerates lag. Setting it advertises "tracker.count" and requires
+	// CountInterval.
+	Count func(t Target, q Query) (int, error)
+
+	// CountInterval is how often core re-asks Count, chosen for the API's rate
+	// limits. It is required, at least one second, when Count is set.
+	CountInterval time.Duration
 }
 
 type method = func(json.RawMessage) (any, error)
@@ -139,6 +186,15 @@ func numbered(params json.RawMessage) (Target, string, error) {
 	return p.Target, p.Number, err
 }
 
+// targetOnly decodes the {target} params of the project-level reads.
+func targetOnly(params json.RawMessage) (Target, error) {
+	var p struct {
+		Target Target `json:"target"`
+	}
+	err := unmarshal(params, &p)
+	return p.Target, err
+}
+
 // handlers builds the capability list and method table for r.
 func handlers(r Reader) ([]string, map[string]method) {
 	switch {
@@ -146,6 +202,8 @@ func handlers(r Reader) ([]string, map[string]method) {
 		panic("tracker: Reader.ListIssues is required")
 	case r.Issue == nil:
 		panic("tracker: Reader.Issue is required")
+	case r.Count != nil && r.CountInterval < time.Second:
+		panic("tracker: Reader.CountInterval of at least one second is required with Count")
 	}
 
 	m := map[string]method{
@@ -213,6 +271,89 @@ func handlers(r Reader) ([]string, map[string]method) {
 		}
 		caps = append(caps, c.name)
 		m[c.name] = idList(c.fn)
+	}
+	if r.Probe != nil {
+		caps = append(caps, "tracker.probe")
+		m["tracker.probe"] = func(params json.RawMessage) (any, error) {
+			t, err := targetOnly(params)
+			if err != nil {
+				return nil, err
+			}
+			status, err := r.Probe(t)
+			if err != nil {
+				return nil, err
+			}
+			return struct {
+				Status int `json:"status"`
+			}{status}, nil
+		}
+	}
+	if r.Statuses != nil {
+		caps = append(caps, "tracker.statuses")
+		m["tracker.statuses"] = func(params json.RawMessage) (any, error) {
+			t, err := targetOnly(params)
+			if err != nil {
+				return nil, err
+			}
+			names, err := r.Statuses(t)
+			if err != nil {
+				return nil, err
+			}
+			if names == nil {
+				names = []string{} // encode [] rather than null
+			}
+			return struct {
+				Statuses []string `json:"statuses"`
+			}{names}, nil
+		}
+	}
+	if r.CreateMeta != nil {
+		caps = append(caps, "tracker.createMeta")
+		m["tracker.createMeta"] = func(params json.RawMessage) (any, error) {
+			var p struct {
+				Target    Target `json:"target"`
+				IssueType string `json:"issueType"`
+			}
+			if err := unmarshal(params, &p); err != nil {
+				return nil, err
+			}
+			cm, err := r.CreateMeta(p.Target, p.IssueType)
+			if err != nil {
+				return nil, err
+			}
+			if cm.IssueTypes == nil {
+				cm.IssueTypes = []string{} // encode [] rather than null
+			}
+			if cm.Fields == nil {
+				cm.Fields = []CreateField{}
+			}
+			return cm, nil
+		}
+	}
+	if r.Count != nil {
+		caps = append(caps, "tracker.count")
+		m["tracker.count"] = func(params json.RawMessage) (any, error) {
+			var p struct {
+				Target Target `json:"target"`
+				Query
+			}
+			if err := unmarshal(params, &p); err != nil {
+				return nil, err
+			}
+			n, err := r.Count(p.Target, p.Query)
+			if err != nil {
+				return nil, err
+			}
+			return struct {
+				Count int `json:"count"`
+			}{n}, nil
+		}
+		// The cadence is the Connector's, not a repo's: no target.
+		m["tracker.countInterval"] = func(json.RawMessage) (any, error) {
+			return struct {
+				Seconds int `json:"seconds"`
+			}{int(r.CountInterval / time.Second)}, nil
+		}
 	}
 	if r.IDs == ProjectKeyIDs {
 		caps = append(caps, "tracker.ids.projectKey")
