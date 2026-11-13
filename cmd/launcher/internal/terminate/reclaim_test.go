@@ -2,6 +2,7 @@ package terminate_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,6 +138,26 @@ func TestReclaim_PropagatesKillError(t *testing.T) {
 	}
 	if len(fc.CommentCalls) != 1 {
 		t.Errorf("CommentCalls: want 1 despite kill error, got %+v", fc.CommentCalls)
+	}
+}
+
+// TestReclaim_RefusedRelease_CommentsRefusal pins that a status-mode refusal of
+// the InProgress -> Dispatchable move leaves its reason on the card, ahead of
+// the normal terminate comment.
+func TestReclaim_RefusedRelease_CommentsRefusal(t *testing.T) {
+	fc, _, factory, _ := newReclaimFixture(t)
+	refused := &forge.TransitionRefusedError{Issue: "42", From: "A", To: "B"}
+	fc.TransitionStateErr = fmt.Errorf("wrapped: %w", refused)
+
+	if err := terminate.Reclaim(fc, fc, "agent/issue-", factory, terminate.NewRegistry(), "42", terminate.Gesture); err != nil {
+		t.Fatalf("Reclaim: %v", err)
+	}
+
+	if len(fc.CommentCalls) != 2 {
+		t.Fatalf("CommentCalls: want the refusal then the terminate comment (the Complete clear stays silent), got %+v", fc.CommentCalls)
+	}
+	if want := "spindrift could not move this issue: " + refused.Error(); fc.CommentCalls[0].Body != want {
+		t.Errorf("first comment = %q, want %q", fc.CommentCalls[0].Body, want)
 	}
 }
 

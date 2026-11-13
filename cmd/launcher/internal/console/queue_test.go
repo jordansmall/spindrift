@@ -1,6 +1,7 @@
 package console
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -245,6 +246,41 @@ func TestQueue_Discover_AlreadyClaimed_DissolvesWithSkipReason(t *testing.T) {
 	snap := q.Snapshot()
 	if snap[0].State != PickDissolved || snap[0].Reason != "skipped: already claimed" {
 		t.Errorf("pick #42 = %+v, want dissolved with reason %q", snap[0], "skipped: already claimed")
+	}
+}
+
+// A claim the tracker refuses (a status-mode workflow with no path to
+// InProgress) applies no label, so the pick's card gets one comment saying
+// why; ErrAlreadyClaimed is a lost race, not a refusal, and posts nothing.
+func TestQueue_Discover_RefusedClaim_CommentsRefusal(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "refused", State: PickQueued})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
+	refused := &forge.TransitionRefusedError{Issue: "42", From: "A", To: "B"}
+	f.TransitionStateErr = fmt.Errorf("wrapped: %w", refused)
+
+	if _, err := q.Discover(f, f, "", "agent/issue-", KindWork); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	want := "spindrift could not move this issue: " + refused.Error()
+	if len(f.CommentCalls) != 1 || f.CommentCalls[0].Num != "42" || f.CommentCalls[0].Body != want {
+		t.Errorf("CommentCalls = %+v, want one on #42 with %q", f.CommentCalls, want)
+	}
+}
+
+func TestQueue_Discover_AlreadyClaimed_PostsNoComment(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "already claimed", State: PickQueued})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-in-progress"}})
+
+	if _, err := q.Discover(f, f, "", "agent/issue-", KindWork); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(f.CommentCalls) != 0 {
+		t.Errorf("CommentCalls = %+v, want none", f.CommentCalls)
 	}
 }
 
@@ -877,6 +913,44 @@ func TestQueue_Discover_CloseDuringClaim_RevertsClaim(t *testing.T) {
 	snap := q.Snapshot()
 	if len(snap) != 1 || snap[0].State != PickDissolved || !strings.HasPrefix(snap[0].Reason, "dropped: session quit") {
 		t.Errorf("snapshot = %+v, want #42 dissolved with a \"dropped: session quit\" reason", snap)
+	}
+}
+
+// refuseRevert refuses only the InProgress->Dispatchable move back, so the
+// claim lands and the quit revert is what the workflow cannot offer.
+type refuseRevert struct {
+	closeInClaim
+	err error
+}
+
+func (r refuseRevert) TransitionState(num string, from, to forge.DispatchState) error {
+	if from == forge.InProgress && to == forge.Dispatchable {
+		return r.err
+	}
+	return r.closeInClaim.TransitionState(num, from, to)
+}
+
+// A quit-revert the tracker refuses leaves the card at InProgress, so the pick
+// gets one comment saying why, and the dissolve reason keeps the failure.
+func TestQueue_Discover_CloseDuringClaim_RefusedRevert_CommentsRefusal(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "racing quit", State: PickQueued})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
+	refused := &forge.TransitionRefusedError{Issue: "42", From: "In Progress", To: "Ready"}
+	tr := refuseRevert{closeInClaim: closeInClaim{Fake: f, q: q}, err: fmt.Errorf("wrapped: %w", refused)}
+
+	if _, err := q.Discover(tr, f, "", "agent/issue-", KindWork); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	want := "spindrift could not move this issue: " + refused.Error()
+	if len(f.CommentCalls) != 1 || f.CommentCalls[0].Num != "42" || f.CommentCalls[0].Body != want {
+		t.Errorf("CommentCalls = %+v, want one on #42 with %q", f.CommentCalls, want)
+	}
+	snap := q.Snapshot()
+	if len(snap) != 1 || snap[0].State != PickDissolved || !strings.Contains(snap[0].Reason, "claim revert failed") {
+		t.Errorf("snapshot = %+v, want #42 dissolved with a claim-revert-failed reason", snap)
 	}
 }
 

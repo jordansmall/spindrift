@@ -111,6 +111,7 @@ func Reclaim(tracker forge.IssueTracker, cf forge.CodeForge, branchPrefix string
 	// #757, ready.go); Complete if Terminate lands just after settling.
 	// TransitionState has no compare-and-swap, so both calls run regardless.
 	if err := tracker.TransitionState(num, forge.InProgress, forge.Dispatchable); err != nil {
+		forge.CommentRefusal(tracker, num, err)
 		fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: transition to Dispatchable: %v\n", num, err)
 	}
 	if err := tracker.TransitionState(num, forge.Complete, forge.Dispatchable); err != nil {
