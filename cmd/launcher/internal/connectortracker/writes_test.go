@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -21,6 +22,9 @@ type writeGuest struct {
 	transition    string
 	transitionErr error
 	editErr       error
+	commentErr    error
+	fileURL       string
+	fileErr       error
 	calls         []recordedCall
 }
 
@@ -42,6 +46,13 @@ func (g *writeGuest) call(_ context.Context, method string, params, result any) 
 			return g.issueErr
 		}
 		return json.Unmarshal([]byte(g.issue), result)
+	case CapComment:
+		return g.commentErr
+	case CapFileIssue:
+		if g.fileErr != nil {
+			return g.fileErr
+		}
+		return json.Unmarshal([]byte(g.fileURL), result)
 	case "tracker.listLabels":
 		return json.Unmarshal([]byte(`{"labels":["a","b"]}`), result)
 	case "tracker.createLabel":
@@ -477,5 +488,119 @@ func TestWritesStayNativeWithoutCapabilities(t *testing.T) {
 		if len(native.TransitionStateCalls) != 1 || len(native.CompleteVerdictCalls) != 1 || len(g.calls) != 0 {
 			t.Errorf("caps %v: native calls = %d/%d, guest calls = %v", caps, len(native.TransitionStateCalls), len(native.CompleteVerdictCalls), g.methods())
 		}
+	}
+}
+
+func postCaps(caps ...string) []string { return caps }
+
+func (g *writeGuest) last() recordedCall { return g.calls[len(g.calls)-1] }
+
+func TestCommentStripsFirstResearchMarkerAndFlagsIt(t *testing.T) {
+	g := &writeGuest{}
+	native := newNative()
+	tr := writeTracker(t, g, lifecycle(false), native, postCaps(CapComment))
+	body := forge.ResearchMarker + "\nverdict\n  " + forge.ResearchMarker + "  \nquoted"
+	if err := tr.Comment("7", body); err != nil {
+		t.Fatal(err)
+	}
+	c := g.last()
+	if c.method != CapComment || c.params["number"] != "7" || c.params["research"] != true {
+		t.Errorf("call = %+v", c)
+	}
+	if want := "verdict\n  " + forge.ResearchMarker + "  \nquoted"; c.params["body"] != want {
+		t.Errorf("body = %q, want %q", c.params["body"], want)
+	}
+	if len(native.CommentCalls) != 0 {
+		t.Errorf("native comment used: %+v", native.CommentCalls)
+	}
+}
+
+func TestCommentWithoutMarkerPassesVerbatim(t *testing.T) {
+	g := &writeGuest{}
+	tr := writeTracker(t, g, lifecycle(false), newNative(), postCaps(CapComment))
+	body := "plain\nbody " + forge.ResearchMarker + "\n"
+	if err := tr.Comment("7", body); err != nil {
+		t.Fatal(err)
+	}
+	if c := g.last(); c.params["body"] != body || c.params["research"] != false {
+		t.Errorf("call = %+v", c)
+	}
+}
+
+func TestCommentGuestErrorPropagates(t *testing.T) {
+	g := &writeGuest{commentErr: errors.New("boom")}
+	tr := writeTracker(t, g, lifecycle(false), newNative(), postCaps(CapComment))
+	if err := tr.Comment("7", "x"); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestPostIssueSplitsDedupMarkerAndSendsIssueType(t *testing.T) {
+	g := &writeGuest{fileURL: `{"url":"https://j/browse/P-1"}`}
+	lc := lifecycle(false)
+	lc.IssueType = "Bug"
+	tr := writeTracker(t, g, lc, newNative(), postCaps(CapFileIssue))
+	filer, ok := forge.As[forge.HostPostedIssueFiler](tr)
+	if !ok {
+		t.Fatal("no filer")
+	}
+	marker := dedupmarker.Build([]string{"a", "b"})
+	url, err := filer.PostIssue("title", dedupmarker.Append("desc", marker), []string{"l1"})
+	if err != nil || url != "https://j/browse/P-1" {
+		t.Fatalf("url, err = %q, %v", url, err)
+	}
+	p := g.last().params
+	if g.last().method != CapFileIssue || p["title"] != "title" || p["body"] != "desc" || p["dedupMarker"] != marker || p["issueType"] != "Bug" || !reflect.DeepEqual(strs(p["labels"]), []string{"l1"}) {
+		t.Errorf("call = %+v", g.last())
+	}
+}
+
+func TestPostIssueNilLabelsSendEmptyList(t *testing.T) {
+	g := &writeGuest{fileURL: `{"url":"u"}`}
+	tr := writeTracker(t, g, lifecycle(false), newNative(), postCaps(CapFileIssue))
+	filer, _ := forge.As[forge.HostPostedIssueFiler](tr)
+	if _, err := filer.PostIssue("t", "b", nil); err != nil {
+		t.Fatal(err)
+	}
+	if l, ok := g.last().params["labels"].([]any); !ok || len(l) != 0 {
+		t.Errorf("labels = %#v, want []", g.last().params["labels"])
+	}
+}
+
+func TestPostIssueEmptyURLIsAnswerError(t *testing.T) {
+	g := &writeGuest{fileURL: `{"url":""}`}
+	tr := writeTracker(t, g, lifecycle(false), newNative(), postCaps(CapFileIssue))
+	filer, _ := forge.As[forge.HostPostedIssueFiler](tr)
+	if _, err := filer.PostIssue("t", "b", nil); !errors.Is(err, ErrAnswer) {
+		t.Errorf("err = %v, want ErrAnswer", err)
+	}
+}
+
+func TestPostIssueGuestErrorPropagates(t *testing.T) {
+	g := &writeGuest{fileErr: errors.New("boom")}
+	tr := writeTracker(t, g, lifecycle(false), newNative(), postCaps(CapFileIssue))
+	filer, _ := forge.As[forge.HostPostedIssueFiler](tr)
+	if _, err := filer.PostIssue("t", "b", nil); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestCommentAndFilingStayNativeWithoutCapabilities(t *testing.T) {
+	g := &writeGuest{}
+	fake := forge.NewFake(testLabels)
+	fake.PostIssueURL = "native-url"
+	tr := writeTracker(t, g, lifecycle(false), fake.AsIssueFiler(), nil)
+	if err := tr.Comment("7", "hi"); err != nil {
+		t.Fatal(err)
+	}
+	filer, ok := forge.As[forge.HostPostedIssueFiler](tr)
+	if !ok {
+		t.Fatal("native filer hidden")
+	}
+	if url, err := filer.PostIssue("t", "b", nil); err != nil || url != "native-url" {
+		t.Errorf("url, err = %q, %v", url, err)
+	}
+	if len(fake.CommentCalls) != 1 || len(fake.PostIssueCalls) != 1 || len(g.calls) != 0 {
+		t.Errorf("native %d/%d, guest %v", len(fake.CommentCalls), len(fake.PostIssueCalls), g.methods())
 	}
 }
