@@ -1107,6 +1107,10 @@ driverGoTests
         export SPINDRIFT_FIXTURE_CONNECTOR_DOC=${fixtures.driverConnectorArtifacts}/input.json
         export SPINDRIFT_FIXTURE_CONNECTOR_BASELINE_DOCS=${fixtures.connectorBaselineDocs}
         export SPINDRIFT_FIXTURE_DRIVER_ROWS_FILE=${fixtures.driverConnectorArtifacts}/box-rows.json
+        # quickstart's tests drive its identity probe and scope audit through
+        # the compiled github Connector (cmd/launcher/quickstart/connector_row.go).
+        export SPINDRIFT_BACKEND_CONNECTOR_WASM=${(connectorFor ../../connectors/github).package pkgs}/github.wasm
+        export SPINDRIFT_BACKEND_CONNECTOR_ROUTES=${pkgs.lib.escapeShellArg (builtins.toJSON (connectorFor ../../connectors/github).routes)}
         go vet ${binaryPkgs}
         go test ${binaryPkgs}
         guard() {
