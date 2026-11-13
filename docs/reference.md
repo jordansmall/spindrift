@@ -3387,7 +3387,7 @@ When a vault's naming isn't uniform, fall back to the per-secret
 | `CODE_FORGE`              | `github` (baked)       | code-landing backend: `github` (open PR, watch CI, merge), `git` (push-only to `CODE_FORGE_REMOTE_URL`; no PR, CI-watch, or merge gate — see [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)), `local` (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network — see [ADR 0033](../docs/adr/0033-host-mediated-local-code-forge.md)), or `forgejo` (open a PR via `fj pr create`, watch the CI rollup, and merge under `MERGE_MODE` on a Forgejo/Gitea instance authenticated by `FORGEJO_TOKEN` — the second full `PRForge` backend beside `github`; see [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)) |
 | `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `CODE_FORGE_ACCUMULATION_REPO_DIR` | `.spindrift/accum.git` under the launcher's working directory when `CODE_FORGE=local` (auto-created and seeded); an explicit value overrides it | host path to the bare Accumulation repo, mounted read-only into the Box and landed into host-side |
-| `BOX_FORGE_AND_ISSUE_ACCESS` | `read-write` (baked)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-write` (the Box writes directly, unchanged) or `read-only` (the Launcher host-mediates every write instead — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)), coherence-checked against the selected forge/tracker's registry capability bits at `nix build` (Consumer eval) time (issue #2526) — `read-only` is permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments; `local`, `github`, and `forgejo` satisfy both sides of the check today, and the `jira` tracker satisfies the tracker side (paired with a `github` or `forgejo` Code Forge, issue #6355); a Go startup gate remains only as a backstop for a runtime override past what nix already validated |
+| `BOX_FORGE_AND_ISSUE_ACCESS` | `read-write` (baked)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-write` (the Box writes directly, unchanged) or `read-only` (the Launcher host-mediates every write instead — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)), coherence-checked against the selected forge/tracker's registry capability bits at `nix build` (Consumer eval) time (issue #2526) — `read-only` is permitted only when the selected forge implements bundle-relay (and host-side draft-PR-create when it has pull requests) and the selected tracker implements host-posted comments; `local`, `github`, and `forgejo` satisfy both sides of the check today, the plain `git` forge satisfies the forge side by bundle relay alone (issue #6898), and the `jira` tracker satisfies the tracker side (paired with a `github`, `forgejo`, or `git` Code Forge, issues #6355, #6898); a Go startup gate remains only as a backstop for a runtime override past what nix already validated |
 | `BOX_SIGNAL_CARRIER`     | `socket` (per-run only; not bakeable) | transport for the three mid-run signal channels (comment, PR intent, issue intent) crossing the launcher/Box seam: `socket` (the default — routed over a launcher-owned Signal socket, see [ADR 0052](adr/0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md) and [Signal socket](#signal-socket-box_signal_carriersocket) below) or `log` (the opt-out — nonce-guarded marker lines in the Box log, as before; stays selectable through the whole 0.22 minor). Unset counts as `socket`, so it fails at launcher startup under `NETWORK_MODE=none`, and when each Dispatch starts under `no-host-loopback` where the transport needs TCP; pass `--box-signal-carrier log` there (the daemon reads `BOX_SIGNAL_CARRIER` from its own environment and forwards it to each child as that flag) |
 | `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
 | `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query (per-run only; not bakeable) |
@@ -4229,6 +4229,24 @@ Userinfo replaces any ambient credential helper for that call, so a URL
 whose password lives in a helper should carry no userinfo (put the
 username in the helper's config instead). The Forgejo backend's host-side
 git calls authenticate with `FORGEJO_TOKEN` the same way.
+
+Under `BOX_FORGE_AND_ISSUE_ACCESS=read-only` the same `git` forge is
+host-mediated (issue #6898): the Box holds no credential for
+`CODE_FORGE_REMOTE_URL`, and only the host ever uses it, with the host
+credential above. Before each Pass the launcher clones every branch of the
+remote into a bare mirror under `.spindrift/mirror-*/repo.git` (re-seeded
+every Pass, removed when the launcher exits) and mounts it read-only at
+`/repo`; the Box clones that
+mirror, with no `gh auth setup-git` and no userinfo in its
+`CODE_FORGE_REMOTE_URL` (the launcher strips it). The Box commits, writes
+`seam.bundle` to the outbox, and prints `landing=agent/issue-N
+status=ready`; the launcher clones the remote, imports the bundle, and
+force-pushes the agent branch, then applies `MERGE_MODE` exactly as above
+(`immediate` pushes it onto the target branch, `manual` leaves it). There is
+no PR to open, so `git` is bundle-relay-capable but not `outboxRelayCapable`,
+and the daemon's `recover` kind stays off for it. A `GH_TOKEN` is optional here when the Issue
+Tracker is not GitHub, since the Box has no other credential to carry. See
+[Read-only Box](#read-only-box-box_forge_and_issue_accessread-only).
 
 ### In-box orchestrator
 
@@ -5365,9 +5383,8 @@ such block and are experimental, so you select them by editing
   carries `hostPostingCapable`, so `BOX_FORGE_AND_ISSUE_ACCESS=read-only`
   is legal with Jira when paired with a `github` or `forgejo` Code Forge
   (issue #6355; see [Read-only
-  Box](#read-only-box-box_forge_and_issue_accessread-only)). `jira` on the
-  `git` Code Forge is still refused on the forge axis, since `git` has no
-  bundle relay.
+  Box](#read-only-box-box_forge_and_issue_accessread-only)), or the plain
+  `git` Code Forge (issue #6898).
 
   Every comment body the adapter posts (research verdicts, blocked-run
   notes, settle comments) is converted from Markdown to Jira wiki markup
@@ -6907,11 +6924,12 @@ the read-write workflow — fails locally instead of reaching the forge and
 403ing there (issue #2463): the Box repoints `origin`'s push URL at a
 throwaway local repo and installs a `pre-push` hook that always refuses, so
 the failure is instant and names the actual hand-off instead of a bare 403.
-This guard installs for `github`, `local`, and `forgejo` — every CODE_FORGE
-choice permitted under read-only today has a genuinely relay-based hand-off:
-`github` and `forgejo` carry `outboxRelayCapable` (issue #2927 gave
-`forgejo` the bit `github` already had), and `local` carries
-`hostMediatedRemote` instead. No backend registered today leaves a real
+This guard installs for `github`, `local`, `forgejo`, and `git` — every
+CODE_FORGE choice permitted under read-only today has a genuinely relay-based
+hand-off: `github`, `forgejo`, and `git` are `relayCapable` (issue #2927 gave
+`forgejo` the bit `github` already had; `git`, issue #6898, relays the bundle
+to the plain remote with no PR), and `local` carries `hostMediatedRemote`
+instead. No backend registered today leaves a real
 `git push` as its read-only hand-off; that shape exists only as latent guard
 infrastructure for a hypothetical future backend.
 
@@ -6940,8 +6958,8 @@ relay under `read-only` (issue #2019; it was once gated on the since-removed
 attempt that failed and fell back to pasting the findings into the PR body).
 
 This is checked by capability, not by `CODE_FORGE`/`ISSUE_TRACKER` value
-alone: the selected forge must implement bundle-relay and host-side
-draft-PR-create, and the selected tracker must implement host-posted
+alone: the selected forge must implement bundle-relay (and host-side
+draft-PR-create when it has pull requests), and the selected tracker must implement host-posted
 comments. mkHarness's `readOnlyCapabilityOk` eval assert (issue #2526)
 enforces this at `nix build` (Consumer eval) time, before an image can ever
 exist, reading the same backend-registry capability bits the launcher's own
@@ -6955,8 +6973,9 @@ way for it to work); `github` satisfies it as of issue #1919; `forgejo`
 satisfies it via the `relayCapable`/`hostPostingCapable` registry bits this
 issue (#2526) itself added to its backend row. The `jira` tracker satisfies the
 tracker side as of issue #6355, via `hostPostingCapable` on its row, but only
-alongside a `github` or `forgejo` forge: `jira` with `CODE_FORGE=git` is still
-refused, since `git` has no bundle relay. `read-write` is unaffected
+alongside a `github`, `forgejo`, or `git` forge (the plain `git` forge
+satisfies the forge side as of issue #6898, bundle relay only, no draft PR).
+`read-write` is unaffected
 either way — it never inspects these capabilities.
 
 Inside the Box, the write-enabled-vs-not decision is resolved once,
@@ -7984,8 +8003,8 @@ glossary entries in [`CONTEXT.md`](../CONTEXT.md) for the full vocabulary.
 The butler Box always runs the read-only posture, whatever
 `BOX_FORGE_AND_ISSUE_ACCESS` says (issue #3906): the launcher never sets
 `BOX_WRITE_ENABLED` for it, so box installs the read-only guards
-(the `gh`/`fj` shims, plus the git push hook on an outbox-relay or
-host-mediated forge) and dispatch's outbox decision (`needsOutbox`) applies
+(the `gh`/`fj` shims, plus the git push hook on a bundle-relaying
+forge) and dispatch's outbox decision (`needsOutbox`) applies
 the same forced read-only access, so the `/outbox` mount matches. Research
 does not get this treatment; under `read-write` it still posts its own
 verdict comment. Treat the guards as defense in depth on top of the prompt
@@ -9535,7 +9554,7 @@ since only then does a Box leave a bundle in the outbox), never on
 `CODE_FORGE=local` (ADR 0039) or a read-write Box. The bare default includes
 it where enabled and silently drops it elsewhere; naming `recover` where it is
 disabled fails startup (`daemon: recover selected but CODE_FORGE=<x> with
-BOX_FORGE_AND_ISSUE_ACCESS=<y>: no outbox bundle is relayed (recover needs
+BOX_FORGE_AND_ISSUE_ACCESS=<y>: no pull-request outbox to recover (recover needs
 CODE_FORGE github or forgejo with BOX_FORGE_AND_ISSUE_ACCESS=read-only)`).
 `gateKinds` (`cmd/launcher/daemon/main.go`) decides all of this from each
 kind's descriptor `Enablement` row (`EnabledByOutboxRelay` for `recover`),

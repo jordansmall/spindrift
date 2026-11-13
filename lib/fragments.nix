@@ -925,8 +925,9 @@ let
     # The LAND THE CHANGE CODE_FORGE=git push step (issue #2510): the
     # forbidden-marker check (lib/prompt-contract.nix) flags any raw, un-gated
     # "git push" imperative in the shared templates, so this one moved into a
-    # gated fragment. There is no read-only arm: issue #2526's eval-time
-    # assert makes read-only with CODE_FORGE=git fail `nix build` outright.
+    # gated fragment. There is no read-only arm: a read-only git Box pushes
+    # nothing (issue #6898), the host relays its bundle, so only the stop step
+    # below renders there.
     {
       gate = "BOX_ACCESS_READ_WRITE";
       fragment = "land-git-push-git.md";

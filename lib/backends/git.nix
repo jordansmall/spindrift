@@ -20,7 +20,7 @@
       env = "CODE_FORGE_REMOTE_URL";
       group = "forge";
       flag = "remote-url";
-      doc = "plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo); required when CODE_FORGE=git, unused otherwise";
+      doc = "plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo); required when CODE_FORGE=git, unused otherwise; under read-only the Box never uses it to reach the remote, the host does (issue #6898)";
       flakeOption = true;
       nixSubPath = "remoteURL";
       boxEnv = true;
