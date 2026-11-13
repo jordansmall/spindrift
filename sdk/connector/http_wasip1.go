@@ -21,3 +21,18 @@ func hostHTTPRequest(req, resp []byte) (uint64, error) {
 	runtime.KeepAlive(resp)
 	return r, nil
 }
+
+// responseHeaderImport is the host's spindrift.http_response_header:
+// (namePtr, nameLen, outPtr, outCap) -> found<<32 | n.
+//
+//go:wasmimport spindrift http_response_header
+func responseHeaderImport(namePtr, nameLen, outPtr, outCap uint32) uint64
+
+func hostResponseHeader(name, out []byte) (uint64, error) {
+	r := responseHeaderImport(
+		uint32(uintptr(unsafe.Pointer(unsafe.SliceData(name)))), uint32(len(name)),
+		uint32(uintptr(unsafe.Pointer(unsafe.SliceData(out)))), uint32(len(out)))
+	runtime.KeepAlive(name)
+	runtime.KeepAlive(out)
+	return r, nil
+}

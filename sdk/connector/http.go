@@ -75,3 +75,34 @@ func HTTPRequest(req Request) (Response, error) {
 	}
 	return Response{Status: status, Body: bytes.Clone(buf[:n])}, nil
 }
+
+// headerBufStart is ResponseHeader's first buffer; a longer value costs one
+// more host call, which is repeatable because the host holds the response.
+const headerBufStart = 1024
+
+// headerCall is the http_response_header Host call, swapped by tests. It writes
+// as much of the value as fits into out and returns found<<32 | n, found being
+// 1 when the header is present and n the value's full length.
+var headerCall = hostResponseHeader
+
+// ResponseHeader returns the named header of the response to this Connector's
+// most recent HTTPRequest, joining repeated values with ", ". The name is
+// case-insensitive. ok is false when the header is absent, when that request
+// did not complete, and outside a host that serves the call; an empty value is
+// present. Set-Cookie is never served. The call is imported only by a Connector
+// that uses it, so one built against an older host fails to link, not to call.
+func ResponseHeader(name string) (value string, ok bool) {
+	buf := make([]byte, headerBufStart)
+	for range 2 {
+		packed, err := headerCall([]byte(name), buf)
+		if err != nil || packed>>32 == 0 {
+			return "", false
+		}
+		n := int(uint32(packed))
+		if n <= len(buf) {
+			return string(buf[:n]), true
+		}
+		buf = make([]byte, n)
+	}
+	return "", false
+}

@@ -5,6 +5,7 @@ package connector
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -75,5 +76,61 @@ func TestHTTPRequestBodyIsNotOverwrittenByALaterCall(t *testing.T) {
 	}
 	if string(first.Body) != "first" {
 		t.Errorf("earlier Body = %q after a later call, want first", first.Body)
+	}
+}
+
+// fakeHeaderHost swaps headerCall for one that answers with value, found or
+// not, writing only as much as the buffer holds as the host does.
+func fakeHeaderHost(t *testing.T, found bool, value string, gotName *string) {
+	t.Helper()
+	saved := headerCall
+	t.Cleanup(func() { headerCall = saved })
+	headerCall = func(name, out []byte) (uint64, error) {
+		if gotName != nil {
+			*gotName = string(name)
+		}
+		if !found {
+			return 0, nil
+		}
+		copy(out, value)
+		return 1<<32 | uint64(len(value)), nil
+	}
+}
+
+func TestResponseHeaderReturnsTheValue(t *testing.T) {
+	var name string
+	fakeHeaderHost(t, true, "repo, read:org", &name)
+	got, ok := ResponseHeader("X-OAuth-Scopes")
+	if !ok || got != "repo, read:org" || name != "X-OAuth-Scopes" {
+		t.Errorf("ResponseHeader = %q, %v (host saw %q), want the value", got, ok, name)
+	}
+}
+
+func TestResponseHeaderEmptyValueIsPresent(t *testing.T) {
+	fakeHeaderHost(t, true, "", nil)
+	if got, ok := ResponseHeader("X-OAuth-Scopes"); !ok || got != "" {
+		t.Errorf("ResponseHeader = %q, %v, want an empty present value", got, ok)
+	}
+}
+
+func TestResponseHeaderAbsent(t *testing.T) {
+	fakeHeaderHost(t, false, "", nil)
+	if got, ok := ResponseHeader("X-Nope"); ok || got != "" {
+		t.Errorf("ResponseHeader = %q, %v, want absent", got, ok)
+	}
+}
+
+// A value longer than the first buffer is fetched again with room for it.
+func TestResponseHeaderGrowsForALongValue(t *testing.T) {
+	long := strings.Repeat("a", 3*headerBufStart)
+	fakeHeaderHost(t, true, long, nil)
+	if got, ok := ResponseHeader("Link"); !ok || got != long {
+		t.Errorf("ResponseHeader = %d bytes, %v, want the %d byte value", len(got), ok, len(long))
+	}
+}
+
+func TestResponseHeaderOutsideWasip1HasNoHost(t *testing.T) {
+	if got, ok := ResponseHeader("X"); ok || got != "" {
+		t.Errorf("ResponseHeader = %q, %v, want absent without a host", got, ok)
 	}
 }
