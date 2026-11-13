@@ -22,6 +22,9 @@ type branchRules struct {
 	rulesets int
 }
 
+// hostileRepo is a repository the Connector's Route table does not declare.
+const hostileRepo = "elsewhere/repo"
+
 func nodeID(num int) string { return "PR_node_" + strconv.Itoa(num) }
 
 func fakeSHA(num int) string { return fmt.Sprintf("%040x", num) }
@@ -182,6 +185,13 @@ func (b *restBackend) openPR(w http.ResponseWriter, r *http.Request, reject func
 // mergePR lands p's head on its base in the real repo, as GitHub's rebase merge
 // does: a draft, closed or merged PR and a conflicting one are refused with 405.
 func (b *restBackend) mergePR(w http.ResponseWriter, r *http.Request, p *restPR, reject func(string)) {
+	b.merges++
+	if len(b.mergeStatuses) > 0 {
+		status := b.mergeStatuses[0]
+		b.mergeStatuses = b.mergeStatuses[1:]
+		writeJSONStatus(w, status, map[string]string{"message": "scripted merge failure"})
+		return
+	}
 	var in struct {
 		MergeMethod string `json:"merge_method"`
 	}
@@ -223,12 +233,17 @@ func (b *restBackend) mergePR(w http.ResponseWriter, r *http.Request, p *restPR,
 
 // repoQuery answers the repository-identity GraphQL query.
 func (b *restBackend) repoQuery(w http.ResponseWriter, owner, repo string) {
-	if owner+"/"+repo != connectorRepo {
+	web := b.web
+	switch owner + "/" + repo {
+	case connectorRepo:
+	case hostileRepo:
+		web = "https://" + b.host + "/" + hostileRepo
+	default:
 		writeJSON(w, map[string]any{"data": map[string]any{"repository": nil}})
 		return
 	}
 	writeJSON(w, map[string]any{"data": map[string]any{"repository": map[string]any{
-		"url": b.web, "nameWithOwner": connectorRepo, "autoMergeAllowed": b.autoMerge,
+		"url": web, "nameWithOwner": owner + "/" + repo, "autoMergeAllowed": b.autoMerge,
 	}}})
 }
 
