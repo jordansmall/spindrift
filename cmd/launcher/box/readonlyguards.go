@@ -53,11 +53,12 @@ func (r *boxRun) installReadonlyGuards() error {
 	shimDir := readonlyShimDir(d.Getenv("HOME"))
 	cfg := readonlyguards.Config{ShimDir: shimDir}
 	var decoy string
-	// Only the git-hook guard is gated on outbox capability: a read-only Box
+	// Only the git-hook guard is gated on the bundle hand-off: a read-only Box
 	// whose hand-off IS a real `git push` must never get that push blocked
-	// locally. No backend registered today leaves both unset (issue #2927), but
-	// the branch stays live for a future one. The shims install regardless.
-	if env.HostMediatedRemote || env.OutboxRelayCapable {
+	// locally. Every backend registered today hands back a bundle (issue
+	// #2927), but the branch stays live for a future one. The shims install
+	// regardless.
+	if r.needsBox {
 		// A bare decoy outside the work dir, never the work dir itself: every
 		// real push targets the branch already checked out there, so a pushurl
 		// pointing at it would resolve as "Everything up-to-date" and exit 0

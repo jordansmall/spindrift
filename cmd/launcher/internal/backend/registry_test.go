@@ -47,7 +47,7 @@ func TestRelayCapableAndHostPostingCapable(t *testing.T) {
 		{"github", GitHub, true},
 		{"forgejo", Forgejo, true},
 		{"local", Local, true},
-		{"git", Git, false},
+		{"git", Git, true},
 	}
 	for _, tc := range relayCases {
 		t.Run("RelayCapable/"+tc.name, func(t *testing.T) {
@@ -274,5 +274,33 @@ func TestClosesRefTrackerIsGithubOnly(t *testing.T) {
 		if want := name == "github"; d.ClosesRefTracker != want {
 			t.Errorf("%s.ClosesRefTracker = %v, want %v", name, d.ClosesRefTracker, want)
 		}
+	}
+}
+
+// TestRelaysBundle pins the single "this Box hands its branch back as an
+// outbox bundle" decision: a host-mediated remote always, a relay-capable
+// forge only under a read-only Box.
+func TestRelaysBundle(t *testing.T) {
+	cases := []struct {
+		name     string
+		desc     Descriptor
+		readOnly bool
+		want     bool
+	}{
+		{"local read-write", Local, false, true},
+		{"local read-only", Local, true, true},
+		{"github read-write", GitHub, false, false},
+		{"github read-only", GitHub, true, true},
+		{"forgejo read-only", Forgejo, true, true},
+		{"git read-write", Git, false, false},
+		{"git read-only", Git, true, true},
+		{"relay-incapable read-only", Descriptor{}, true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := RelaysBundle(tc.desc, tc.readOnly); got != tc.want {
+				t.Fatalf("RelaysBundle(%s, readOnly=%v) = %v, want %v", tc.name, tc.readOnly, got, tc.want)
+			}
+		})
 	}
 }

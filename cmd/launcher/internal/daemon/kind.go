@@ -51,7 +51,7 @@ func ParseKind(s string) (Kind, error) {
 // while "dispatch", "research", "butler", or "recover" alone still restrict
 // it to one kind for callers that want that. The daemon binary still drops
 // the butler from "" when BUTLER_CHORES enables no Chore, and recover where
-// no outbox bundle is relayed (cmd/launcher/daemon's gateKinds).
+// CODE_FORGE has no read-only PR outbox (cmd/launcher/daemon's gateKinds).
 func ParseKinds(s string) ([]Kind, error) {
 	if s == "" {
 		kinds := make([]Kind, 0, len(dispatchkind.All))

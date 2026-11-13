@@ -74,7 +74,7 @@ type Env struct {
 
 	// HostMediatedRemote and OutboxRelayCapable are per-dispatch presence facts
 	// the launcher forwards: the CODE_FORGE has no writable remote at all, and
-	// its backend gets outbox-relay treatment under a read-only Box.
+	// it is a PR-shaped forge (github, forgejo), which the PR gates key on.
 	HostMediatedRemote bool // $BOX_HOST_MEDIATED_REMOTE presence
 	OutboxRelayCapable bool // $BOX_OUTBOX_RELAY_CAPABLE presence
 

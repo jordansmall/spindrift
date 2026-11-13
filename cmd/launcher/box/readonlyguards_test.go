@@ -176,6 +176,8 @@ func TestReadonlyGuards_HostMediatedOnly_InstallsHook(t *testing.T) {
 
 func TestReadonlyGuards_NeitherCapability_ShimsOnly(t *testing.T) {
 	g := newGuardsFixture(t)
+	// An unregistered forge reads as the zero Descriptor: neither host-mediated nor relay-capable.
+	g.env.CodeForge = "unregistered"
 	g.run()
 	assertExecutable(t, filepath.Join(g.shimDir, "gh"))
 	if g.pushurl() != "" {
@@ -528,6 +530,8 @@ func TestReadonlyGuards_RealGitPushBlockedLocally(t *testing.T) {
 // Without outbox capability the hand-off is a real push, so nothing blocks it.
 func TestReadonlyGuards_NeitherCapability_PushesNormally(t *testing.T) {
 	g := newGuardsFixture(t)
+	// An unregistered forge reads as the zero Descriptor: neither host-mediated nor relay-capable.
+	g.env.CodeForge = "unregistered"
 	work := g.in.WorkDir
 	g.git(work, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "work")
 	remote := filepath.Join(t.TempDir(), "remote.git")

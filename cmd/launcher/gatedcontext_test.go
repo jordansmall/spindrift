@@ -154,11 +154,13 @@ func TestNewGatedContext_InvalidConfig_SurfacesValidateError(t *testing.T) {
 	}
 }
 
-// CODE_FORGE=git is not RelayCapable (internal/backend/registry_gen.go), so
-// pairing it with read-only access trips checkReadOnlyCapabilityGate on an
+// A relay-incapable CODE_FORGE (withRelayIncapableGit: no registered forge is
+// one since #6898) paired with read-only access
+// trips checkReadOnlyCapabilityGate on an
 // otherwise-valid config. That proves newGatedContext walks gateRegistry at
 // all, rather than only ever exercising the validate() short-circuit above.
 func TestNewGatedContext_FailingRegistryGate_SurfacesGateError(t *testing.T) {
+	withRelayIncapableGit(t)
 	setKnob(t, "REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "ghp_test")
 	setKnob(t, "GIT_USER_NAME", "bot")
@@ -175,7 +177,7 @@ func TestNewGatedContext_FailingRegistryGate_SurfacesGateError(t *testing.T) {
 	gc, err := newGatedContext(&w, dispatchkind.Work, false)
 
 	if err == nil {
-		t.Fatal("newGatedContext() = nil error, want checkReadOnlyCapabilityGate to reject CODE_FORGE=git under read-only access")
+		t.Fatal("newGatedContext() = nil error, want checkReadOnlyCapabilityGate to reject a relay-incapable CODE_FORGE under read-only access")
 	}
 	if !strings.Contains(err.Error(), "bundle-relay") {
 		t.Errorf("newGatedContext() error = %q, want the read-only-capability gate's bundle-relay message", err.Error())
@@ -290,7 +292,8 @@ func TestNewGatedContext_BwrapGatesRunAfterCapabilityAndNetworkModeGates(t *test
 	setKnob(t, "GIT_USER_NAME", "bot")
 	setKnob(t, "GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
-	setKnob(t, "CODE_FORGE", "git") // not RelayCapable (internal/backend/registry_gen.go)
+	withRelayIncapableGit(t) // no registered forge lacks RelayCapable since #6898
+	setKnob(t, "CODE_FORGE", "git")
 	setKnob(t, "CODE_FORGE_REMOTE_URL", "https://example.com/repo.git")
 	setKnob(t, "BASE_BRANCH", "main")
 	setKnob(t, "MERGE_MODE", "manual")
@@ -303,7 +306,7 @@ func TestNewGatedContext_BwrapGatesRunAfterCapabilityAndNetworkModeGates(t *test
 	gc, err := newGatedContext(&w, dispatchkind.Work, false)
 
 	if err == nil {
-		t.Fatal("newGatedContext() = nil error, want checkReadOnlyCapabilityGate to reject CODE_FORGE=git under read-only access")
+		t.Fatal("newGatedContext() = nil error, want checkReadOnlyCapabilityGate to reject a relay-incapable CODE_FORGE under read-only access")
 	}
 	if !strings.Contains(err.Error(), "bundle-relay") {
 		t.Errorf("newGatedContext() error = %q, want the read-only-capability gate's bundle-relay message, not the bwrap-pasta gate's", err.Error())

@@ -58,10 +58,12 @@
 # see the adapters, so cmd/launcher's
 # TestRelayCapableMatchesReadOnlyForgeInterfaces checks each row's bit against
 # the interfaces its read-only forge implements (issue #2628).
-# outboxRelayCapable is narrower: it covers the outbox mount and relay
-# treatment (issues #1918, #2267, #2927), and also stands for "this forge has
-# pull requests" in the prompt's IF BLOCKED PR gates, read-write Boxes included
-# (issue #5276). The same Go test enforces it against DraftPRCreator.
+# outboxRelayCapable is narrower: it means "this forge has pull requests", the
+# prompt's IF BLOCKED PR gates (read-write Boxes included, issue #5276) and the
+# recover kind's enablement. It does not decide the outbox mount or the relay,
+# which backend.RelaysBundle derives from hostMediatedRemote and relayCapable
+# (issues #1918, #2267, #6898); git is relayCapable without it. The same Go
+# test enforces it against DraftPRCreator.
 
 # inBoxGHCredentialHelper marks a CODE_FORGE whose Box clone runs
 # `gh auth setup-git`; github and git (its remote URL may be github.com), not

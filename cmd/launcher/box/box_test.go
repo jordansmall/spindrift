@@ -609,7 +609,7 @@ func TestBackstop_ConfigMapping(t *testing.T) {
 		Base:               "origin/main",
 		Kind:               "work",
 		HostMediatedRemote: true,
-		OutboxRelayCapable: true,
+		RelayCapable:       true,
 		WriteEnabled:       true,
 		RecoveryAttempted:  true,
 		MaxAttempts:        3,
@@ -1070,7 +1070,8 @@ func TestSettle_BundleOutPredicate(t *testing.T) {
 		{"read-write github", func(f *fixture) {}, 0},
 		{"host mediated (local)", func(f *fixture) { f.env.HostMediatedRemote = true }, 1},
 		{"read-only relay-capable", func(f *fixture) { f.readOnlyRelay() }, 1},
-		{"read-only not relay-capable", func(f *fixture) { f.env.BoxWriteEnabled = false }, 0},
+		{"read-only git (bundle relay, no PRs)", func(f *fixture) { f.env.BoxWriteEnabled = false; f.env.CodeForge = "git" }, 1},
+		{"read-only not relay-capable", func(f *fixture) { f.env.BoxWriteEnabled = false; f.env.CodeForge = "unregistered" }, 0},
 		{"advise-only skips even when needed", func(f *fixture) { f.readOnlyRelay(); f.env.DispatchKind = "research" }, 0},
 	}
 	for _, c := range cases {
