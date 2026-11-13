@@ -90,9 +90,9 @@ func (cf *CodeForgeFake) SetBranchProtectedErr(branch string, err error) {
 	cf.branchProtectedErr[branch] = err
 }
 
-// Merge and Rebase run their whole mutation and recording inside the backend's
+// Merge runs its whole mutation and recording inside the backend's
 // serve closure, so the state a later read observes was written behind the
-// Connector.
+// Connector; Rebase does the same.
 func (cf *CodeForgeFake) Merge(url string) error {
 	cf.Fire("Merge")
 	return cf.call(http.MethodPost, pathMerge, nil, func() (any, error) {
@@ -108,6 +108,7 @@ func (cf *CodeForgeFake) Merge(url string) error {
 	})
 }
 
+// Rebase records url and returns the scripted error, crossing the Connector.
 func (cf *CodeForgeFake) Rebase(url string) error {
 	cf.Fire("Rebase")
 	return cf.call(http.MethodPost, pathRebase, nil, func() (any, error) {
