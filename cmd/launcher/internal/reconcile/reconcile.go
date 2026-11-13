@@ -5,6 +5,7 @@
 package reconcile
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -89,20 +90,25 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe, caps forge
 	if err != nil {
 		return res, fmt.Errorf("reconcile: list in-progress issues: %w", err)
 	}
+	var resetErrs []error
 	for _, iss := range inProgress {
 		orphaned, err := isOrphaned(pr, cf, lp, branchPrefix, iss.Number)
 		if err != nil {
-			return res, fmt.Errorf("reconcile issue %s: liveness check: %w", iss.Number, err)
+			resetErrs = append(resetErrs, fmt.Errorf("reconcile issue %s: liveness check: %w", iss.Number, err))
+			break
 		}
 		if !orphaned {
 			continue
 		}
 		if err := it.TransitionState(iss.Number, forge.InProgress, forge.Dispatchable); err != nil {
-			return res, fmt.Errorf("reconcile issue %s: reset: %w", iss.Number, err)
+			// A failed reset must not strand the orphans behind it.
+			forge.CommentRefusal(it, iss.Number, err)
+			resetErrs = append(resetErrs, fmt.Errorf("reconcile issue %s: reset: %w", iss.Number, err))
+			continue
 		}
 		res.Reset = append(res.Reset, iss.Number)
 	}
-	return res, nil
+	return res, errors.Join(resetErrs...)
 }
 
 // prReconciler bundles the seams the remote-PR path needs per issue.

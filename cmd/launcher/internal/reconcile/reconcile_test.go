@@ -2,6 +2,7 @@ package reconcile_test
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -602,6 +603,64 @@ func TestRun_ResetsOrphanedInProgressIssue(t *testing.T) {
 	}
 	if !slices.Contains(iss.Labels, "dispatchable") || slices.Contains(iss.Labels, "in-progress") {
 		t.Errorf("Labels = %v, want dispatchable in place of in-progress", iss.Labels)
+	}
+}
+
+// A refused reset (status mode) comments the refusal on that issue, but the
+// sweep carries on so one stuck card cannot strand the orphans behind it; the
+// refusal still surfaces in the returned error.
+func TestRun_RefusedOrphanReset_CommentsAndContinues(t *testing.T) {
+	labels := forge.DispatchLabels{Dispatchable: "dispatchable", InProgress: "in-progress"}
+	f := forge.NewFake(labels)
+	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen, Labels: []string{"in-progress"}})
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Labels: []string{"in-progress"}})
+	refused := &forge.TransitionRefusedError{Issue: "41", From: "A", To: "B"}
+	f.TransitionStateErrByNum = map[string]error{"41": fmt.Errorf("wrapped: %w", refused)}
+	lp := fakeLiveness{
+		stale:     map[string]bool{"41": true, "42": true},
+		reachable: map[string]bool{"41": true, "42": true},
+	}
+
+	res, err := reconcile.Run(f, f, lp, capsFor(f, f), selfScope, testPrefix)
+
+	var got *forge.TransitionRefusedError
+	if !errors.As(err, &got) || got != refused {
+		t.Fatalf("err = %v, want it to wrap the refusal", err)
+	}
+	if len(res.Reset) != 1 || res.Reset[0] != "42" {
+		t.Errorf("Reset = %v, want [42]", res.Reset)
+	}
+	want := "spindrift could not move this issue: " + refused.Error()
+	if len(f.CommentCalls) != 1 || f.CommentCalls[0].Num != "41" || f.CommentCalls[0].Body != want {
+		t.Errorf("CommentCalls = %+v, want one on #41 with %q", f.CommentCalls, want)
+	}
+}
+
+// A liveness failure aborts the sweep but must not drop a reset failure that
+// already happened before it.
+func TestRun_LivenessErrorAfterFailedReset_KeepsBothErrors(t *testing.T) {
+	labels := forge.DispatchLabels{Dispatchable: "dispatchable", InProgress: "in-progress"}
+	f := forge.NewFake(labels)
+	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen, Labels: []string{"in-progress"}})
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Labels: []string{"in-progress"}})
+	resetErr := errors.New("reset: disk full")
+	livenessErr := errors.New("pr lookup: boom")
+	f.TransitionStateErrByNum = map[string]error{"41": resetErr}
+	// The open-issue sweep and #41's liveness check each look up a branch PR
+	// per issue first; only #42's liveness check fails.
+	f.PRForBranchErrs = []error{nil, nil, nil, livenessErr}
+	lp := fakeLiveness{
+		stale:     map[string]bool{"41": true, "42": true},
+		reachable: map[string]bool{"41": true, "42": true},
+	}
+
+	_, err := reconcile.Run(f, f, lp, capsFor(f, f), selfScope, testPrefix)
+
+	if !errors.Is(err, resetErr) || !errors.Is(err, livenessErr) {
+		t.Fatalf("err = %v, want both the reset and the liveness error", err)
+	}
+	if len(f.CommentCalls) != 0 {
+		t.Errorf("CommentCalls = %+v, want none for a non-refusal", f.CommentCalls)
 	}
 }
 
