@@ -540,7 +540,10 @@ let
     p:
     docDriverRows p
     ++ lib.optional shadowActive (rowOf p connectorEntries.${driver} // { shadow = true; });
-  driverRowsFile = pkgs.writeText "driver-rows.json" (builtins.toJSON (boxDriverRows pkgs));
+  # A host-side test renders the rows with its own pkgs, so a darwin check
+  # never demands the Linux wasm.
+  driverRowsFileWith = p: p.writeText "driver-rows.json" (builtins.toJSON (boxDriverRows p));
+  driverRowsFile = driverRowsFileWith pkgs;
 
   # Backend rows (issue #6805): the Go side refuses a built-in name, a row
   # missing its module or credential env, and a bad Route table; refusing them
@@ -1889,6 +1892,7 @@ else
         researchOutcomeContractFile
         driverPreambleFile
         driverRowsFile
+        driverRowsFileWith
         agentPathsPreambleFile
         runInputDocumentFile
         backendBundleDirs
