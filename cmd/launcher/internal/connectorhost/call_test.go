@@ -87,3 +87,52 @@ func TestCallConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestCallErrorClass(t *testing.T) {
+	c, err := load(t, "call.wasm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		method string
+		want   connectorhost.Class
+	}{
+		{"fail", connectorhost.Permanent},
+		{"failTransient", connectorhost.Transient},
+		{"nope", connectorhost.Permanent},
+	} {
+		err := c.Call(context.Background(), tc.method, nil, nil)
+		var ce *connectorhost.CallError
+		if !errors.Is(err, connectorhost.ErrCall) || !errors.As(err, &ce) {
+			t.Fatalf("%s: err = %v, want ErrCall holding a *CallError", tc.method, err)
+		}
+		if ce.Class != tc.want || connectorhost.ErrorClass(err) != tc.want {
+			t.Errorf("%s: class = %q, want %q", tc.method, ce.Class, tc.want)
+		}
+	}
+	if err := c.Call(context.Background(), "echo", "x", nil); err != nil {
+		t.Errorf("Connector unusable after reported errors: %v", err)
+	}
+}
+
+func TestErrorClassHostSideIsEmpty(t *testing.T) {
+	if got := connectorhost.ErrorClass(connectorhost.ErrBudget); got != "" {
+		t.Errorf("ErrorClass(ErrBudget) = %q, want empty", got)
+	}
+}
+
+func TestReportedErrorDefaultsToPermanent(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		want       connectorhost.Class
+	}{
+		{"0.2 envelope, no class", `{"error":"boom"}`, connectorhost.Permanent},
+		{"unknown class", `{"error":"boom","class":"exploded"}`, connectorhost.Permanent},
+		{"empty class", `{"error":"boom","class":""}`, connectorhost.Permanent},
+		{"known class", `{"error":"boom","class":"auth"}`, connectorhost.Auth},
+	} {
+		if got := connectorhost.ErrorClass(connectorhost.ReportedError(tc.body)); got != tc.want {
+			t.Errorf("%s: class = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}

@@ -2,6 +2,8 @@ package connectorhost
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -56,4 +58,19 @@ func SetStreamPiece(n int) (restore func()) {
 	old := streamPiece
 	streamPiece = n
 	return func() { streamPiece = old }
+}
+
+// ReportedError decodes a raw connector_call response body the way Call does
+// and returns the Connector-reported error, or nil when the body holds none. A
+// body that does not decode is an error too, so a test expecting "no error"
+// cannot pass on malformed input.
+func ReportedError(body string) error {
+	var r response
+	if err := json.Unmarshal([]byte(body), &r); err != nil {
+		return fmt.Errorf("undecodable response body: %w", err)
+	}
+	if r.Error == nil {
+		return nil
+	}
+	return r.callError()
 }

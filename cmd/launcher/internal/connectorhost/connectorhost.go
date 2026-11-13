@@ -123,8 +123,8 @@ var (
 	// but ErrExport closes the Connector. A Connector that answered with an error,
 	// or whose result failed the Driver's host-side validation (an unknown pattern
 	// reason, a ResolveExit answer that breaks the invariant), matches only ErrCall
-	// and stays usable; so does a request refused as ErrRequestTooLarge, which
-	// never reaches the guest.
+	// and stays usable (the error is a *CallError carrying its Class); so does a
+	// request refused as ErrRequestTooLarge, which never reaches the guest.
 	ErrCall = errors.New("connector call failed")
 	// ErrExport marks an export that is missing or lacks the signature the ABI
 	// gives it: connector_handshake takes nothing and returns an i64,
@@ -446,7 +446,7 @@ func (c *Connector) Call(ctx context.Context, method string, params, result any)
 		return c.err
 	}
 	if resp.Error != nil {
-		return fail(errors.New(*resp.Error))
+		return fail(resp.callError())
 	}
 	return nil
 }
@@ -464,6 +464,7 @@ func (c *Connector) callExports() (alloc, call api.Function, err error) {
 type response struct {
 	Result json.RawMessage `json:"result"`
 	Error  *string         `json:"error"`
+	Class  string          `json:"class"`
 }
 
 // exchange writes req into guest memory and returns the decoded response. The
