@@ -9301,12 +9301,22 @@ the route naming the profile and giving its `basic` username convention
 and credential-helper hint. The Artifactory profile's only sibling is
 cargo's `../v1/crates`, because Artifactory's cargo `config.json`
 points `dl` at `<repo>/v1/crates`, beside the declared `<repo>/index`.
-A public-default host (crates.io, registry.npmjs.org) instead gets one
-comment saying it is a known public host that needs no credential and
-has nothing to configure; the route itself is unchanged. Only the
-scheme fill is gated on the probe being silent. It's a setup-time,
-operator-run tool, never invoked from inside the Box — a Box-influenced
-route would let an Agent steer a real credential at a host of its choosing. Once a route is configured,
+Only the scheme fill is gated on the probe being silent.
+A public-default host (crates.io, registry.npmjs.org, proxy.golang.org,
+nuget.org (`api.nuget.org`)) instead gets one comment saying it is a
+known public host that needs no credential and has nothing to configure.
+For cargo and npm the route itself is unchanged. Go has no discovery, so
+proxy.golang.org never gets the comment. NuGet never routes its public
+feed, so a `nuget.config` naming only nuget.org gets a comment-only entry
+with no `[[routes]]` block; when nothing else needs a route, discovery
+writes no file, reports the host as public with nothing to configure, and
+exits 0. A config whose registries were all skipped as unusable (an
+Artifactory v2 NuGet feed beside nuget.org, say) still prints its skipped
+section and exits non-zero, even when a public line also prints. To match
+the public host's Host profile, discovery sends it an unauthenticated probe
+`GET` (for nuget.org, to `api.nuget.org`). It's a setup-time, operator-run
+tool, never invoked from inside the Box — a Box-influenced route would let an Agent steer a real
+credential at a host of its choosing. Once a route is configured,
 how a proxied dispatch actually reaches the Box over it — socket or
 every-interface TCP — is a separate, cached decision; see [Registry transport
 probe cache](#registry-transport-probe-cache).
@@ -9362,7 +9372,8 @@ naming the still-contested placeholder rather than write a routes file
 where two hosts share one env var. A repo with no registry declarations
 at all — none of the scanned config files, or only config declaring
 non-http/unusable registry URLs — writes nothing and exits non-zero,
-since that's indistinguishable from a mistyped `<repo-dir>`.
+since that's indistinguishable from a mistyped `<repo-dir>`. A repo
+naming only public hosts exits zero, as described above.
 
 A routes file can drift from the repo's own config after either changes —
 a new registry the repo starts using, or a route left over from one it
