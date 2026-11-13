@@ -28,7 +28,16 @@ type jiraIssueRecord struct {
 	wireKey    string   // when set, the key the payload reports instead of the requested one
 	failGET    bool     // simulates the native-API error the issue's GET returns
 	status     string   // workflow status the payload reports and a status clause matches; "" is "Open"
+	resolution string   // resolution the last transition posted
 	comments   []jiraWireComment
+}
+
+// jiraWireTransitionField is one screen field of a transition, as Jira reports
+// it under expand=transitions.fields.
+type jiraWireTransitionField struct {
+	Required        bool   `json:"required"`
+	HasDefaultValue bool   `json:"hasDefaultValue"`
+	Name            string `json:"name"`
 }
 
 // jiraWireComment mirrors Jira's native comment JSON independently of the
@@ -70,6 +79,9 @@ type jiraHarness struct {
 	// served per issue type by the project statuses endpoint; statusCalls counts
 	// the reads and statusesFail makes the endpoint answer 403.
 	workflowStatuses []string
+	// transitionFields are the screen fields a transition to the named status
+	// reports; every workflow status is a transition target from any status.
+	transitionFields map[string]map[string]jiraWireTransitionField
 	statusCalls      int
 	statusesFail     bool
 
@@ -372,6 +384,27 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		return
 
+	case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/label":
+		// The site-wide label list: every label on any issue, one page.
+		values := []string{}
+		for _, num := range h.order {
+			for _, l := range h.issues[num].labels {
+				if !contains(values, l) {
+					values = append(values, l)
+				}
+			}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"values": values, "total": len(values), "isLast": true})
+		return
+
+	case r.Method == http.MethodGet && issueTransitionsPathRe.MatchString(r.URL.Path):
+		h.listTransitions(w, issueTransitionsPathRe.FindStringSubmatch(r.URL.Path)[1])
+		return
+
+	case r.Method == http.MethodPost && issueTransitionsPathRe.MatchString(r.URL.Path):
+		h.doTransition(w, r, issueTransitionsPathRe.FindStringSubmatch(r.URL.Path)[1])
+		return
+
 	case r.Method == http.MethodPut && matchIssuePath(r.URL.Path) != "":
 		num := matchIssuePath(r.URL.Path)
 		rec, ok := h.issues[num]
@@ -399,6 +432,61 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
+}
+
+// listTransitions serves GET /issue/{key}/transitions: one transition per
+// workflow status, its id the status's 1-based position.
+func (h *jiraHarness) listTransitions(w http.ResponseWriter, num string) {
+	if _, ok := h.issues[num]; !ok {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	type transition struct {
+		ID string `json:"id"`
+		To struct {
+			Name string `json:"name"`
+		} `json:"to"`
+		Fields map[string]jiraWireTransitionField `json:"fields"`
+	}
+	out := []transition{}
+	for i, name := range h.workflowStatuses {
+		tr := transition{ID: strconv.Itoa(i + 1), Fields: h.transitionFields[name]}
+		tr.To.Name = name
+		out = append(out, tr)
+	}
+	json.NewEncoder(w).Encode(map[string]any{"transitions": out})
+}
+
+// doTransition serves POST /issue/{key}/transitions: the workflow status moves
+// to the posted transition's target and the posted resolution is recorded.
+func (h *jiraHarness) doTransition(w http.ResponseWriter, r *http.Request, num string) {
+	rec, ok := h.issues[num]
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var body struct {
+		Transition struct {
+			ID string `json:"id"`
+		} `json:"transition"`
+		Fields struct {
+			Resolution struct {
+				Name string `json:"name"`
+			} `json:"resolution"`
+		} `json:"fields"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	i, err := strconv.Atoi(body.Transition.ID)
+	if err != nil || i < 1 || i > len(h.workflowStatuses) {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	rec.status = h.workflowStatuses[i-1]
+	rec.resolution = body.Fields.Resolution.Name
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // failingIssueTitle is the title the fake's create rejects as Jira rejects a
@@ -465,8 +553,9 @@ func (h *jiraHarness) createIssue(w http.ResponseWriter, r *http.Request) {
 func (h *jiraHarness) issueTypes() []string { return []string{"Task", "Bug"} }
 
 var (
-	issuePathRe        = regexp.MustCompile(`^/rest/api/2/issue/([^/]+)$`)
-	issueCommentPathRe = regexp.MustCompile(`^/rest/api/2/issue/([^/]+)/comment$`)
+	issuePathRe            = regexp.MustCompile(`^/rest/api/2/issue/([^/]+)$`)
+	issueCommentPathRe     = regexp.MustCompile(`^/rest/api/2/issue/([^/]+)/comment$`)
+	issueTransitionsPathRe = regexp.MustCompile(`^/rest/api/2/issue/([^/]+)/transitions$`)
 )
 
 func matchIssuePath(path string) string {
