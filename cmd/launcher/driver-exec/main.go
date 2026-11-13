@@ -20,6 +20,12 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
+// boxHeartbeatLog is the path a human tails inside the Box (issue #183).
+const boxHeartbeatLog = "/tmp/heartbeat.log"
+
+// defaultHeartbeatLog is a var so tests can keep off the shared /tmp.
+var defaultHeartbeatLog = boxHeartbeatLog
+
 // mainRun returns the exit code rather than calling os.Exit so tests can run
 // it repeatedly with different argv. The FlagSet is scoped, not the global
 // flag package, which panics on re-registering flags across repeated calls in
@@ -92,7 +98,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 	heartbeatLog := handoff.HeartbeatLog
 	if heartbeatLog == "" {
-		heartbeatLog = "/tmp/heartbeat.log"
+		heartbeatLog = defaultHeartbeatLog
 	}
 
 	// A reviewer pass overrides only the fields the handoff's ReviewModel and
