@@ -23,10 +23,10 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// noGH puts a gh on PATH that fails every call and records it, and returns a
+// countGH puts a gh on PATH that fails every call and records it, and returns a
 // function reporting how many times it was run: the Connector-backed paths
 // reach GitHub through the host's http_request call, never the gh CLI.
-func noGH(t *testing.T) (calls func() int) {
+func countGH(t *testing.T) (calls func() int) {
 	t.Helper()
 	dir := prependFakeGH(t, "exit 99")
 	return func() int {
@@ -59,7 +59,7 @@ func TestConnector_ProbeMatchesNative(t *testing.T) {
 		if status != 200 {
 			h.backend.listStatus = status
 		}
-		calls := noGH(t)
+		calls := countGH(t)
 		gotSlug, gotErr := h.tr.Probe()
 		if n := calls(); n != 0 {
 			t.Errorf("status %d: the Connector's Probe ran gh %d times", status, n)
@@ -106,7 +106,7 @@ func TestConnector_CountReadyMatchesNative(t *testing.T) {
 	} {
 		t.Run(fx.name, func(t *testing.T) {
 			h := newConnectorHarness(t)
-			calls := noGH(t)
+			calls := countGH(t)
 			for _, it := range fx.items {
 				h.SeedIssue(forge.Issue{Number: it.num, Title: it.num, Labels: it.labels})
 				h.mutate(it.num, func(i *restIssue) { i.pull = it.pull })
@@ -182,7 +182,7 @@ func TestConnector_PriorClaimStateMatchesNative(t *testing.T) {
 			h := newConnectorHarness(t)
 			h.SeedIssue(forge.Issue{Number: "7", Title: "t"})
 			h.mutate("7", func(i *restIssue) { i.unlabeled = fx.removed })
-			calls := noGH(t)
+			calls := countGH(t)
 			pr, ok := forge.As[forge.PriorClaimStateReader](h.tr)
 			if !ok {
 				t.Fatal("Connector tracker does not serve PriorClaimState: it must advertise tracker.removedLabels")
@@ -250,14 +250,16 @@ func newTokenBackend(t *testing.T, token string) *tokenBackend {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/installation/repositories":
 			repos := `{"full_name":"owner/other","permissions":{"push":true}}`
+			total := 1
 			if b.permissions != nil {
 				repos += `,{"full_name":"` + connectorRepo + `"`
 				if *b.permissions != "" {
 					repos += `,"permissions":` + *b.permissions
 				}
 				repos += `}`
+				total = 2
 			}
-			_, _ = w.Write([]byte(`{"total_count":2,"repositories":[` + repos + `]}`))
+			_, _ = w.Write([]byte(`{"total_count":` + strconv.Itoa(total) + `,"repositories":[` + repos + `]}`))
 		case strings.Contains(req.Query, "viewer"):
 			if b.scopes != nil {
 				w.Header().Set("X-OAuth-Scopes", *b.scopes)
@@ -346,7 +348,7 @@ func TestConnector_TokenGrant(t *testing.T) {
 				b.userStatus = tc.userStatus
 			}
 			conn := loadTokenConnector(t, b, tc.token)
-			calls := noGH(t)
+			calls := countGH(t)
 			got, err := connectorforge.IntrospectToken(conn, connectorforge.Target{API: b.URL, Repo: connectorRepo}, tc.token)
 			if n := calls(); n != 0 {
 				t.Errorf("the Connector's introspection ran gh %d times", n)
@@ -405,7 +407,7 @@ func TestConnector_ListLabelsMatchesNative(t *testing.T) {
 				want = append(want, "label-"+strconv.Itoa(i))
 			}
 			h.backend.labels = want
-			calls := noGH(t)
+			calls := countGH(t)
 			got, err := h.tr.ListLabels()
 			if err != nil {
 				t.Fatalf("Connector ListLabels: %v", err)
