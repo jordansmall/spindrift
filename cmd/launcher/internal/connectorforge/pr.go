@@ -234,6 +234,11 @@ func (f *prForge) CanAutoMerge() (bool, error) {
 	if !f.autoMerge {
 		return false, nil
 	}
+	return f.autoMergeAllowed()
+}
+
+// autoMergeAllowed is the read itself, for callers that checked the capability.
+func (f *prForge) autoMergeAllowed() (bool, error) {
 	var res struct {
 		Allowed bool `json:"allowed"`
 	}

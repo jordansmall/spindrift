@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorforge/connectorforgetest"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
@@ -290,5 +291,16 @@ func TestBundleRelayIsOfferedOnlyToAReadOnlyBoxOnADraftPRForge(t *testing.T) {
 	ro := connectorforgetest.NewHostMediationVariant(t, connectorforgetest.MinimalPRWasm).Capabilities()
 	if ro.BundleRelay != nil || ro.BundleCommitSubjects != nil || ro.DraftPRCreator != nil || ro.BranchPusher != nil {
 		t.Errorf("read-only capabilities without forge.draftPRs = %+v, want none of the host-mediated surface", ro)
+	}
+}
+
+func TestAutoMergeAllowedNeedsTheCapability(t *testing.T) {
+	h := connectorforgetest.NewPRVariant(t, connectorforgetest.MinimalPRWasm)
+	before := h.Backend.Requests()
+	if _, err := connectorforge.AutoMergeAllowed(h.Conn, connectorforge.Target{}); !errors.Is(err, connectorforge.ErrNoAutoMerge) {
+		t.Fatalf("AutoMergeAllowed = %v, want ErrNoAutoMerge", err)
+	}
+	if n := h.Backend.Requests(); n != before {
+		t.Errorf("AutoMergeAllowed sent %d backend requests, want none", n-before)
 	}
 }
