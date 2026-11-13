@@ -6,14 +6,18 @@
 # request the Connector makes: the JQL search under `/rest/api/2/search`, the
 # issue, comment and createmeta reads under `/rest/api/2/issue`, the doctor's
 # credential probe (`/myself`) and the project's statuses (`/project/{repo}/statuses`,
-# `{repo}` being the Jira project key, substituted by `connectortracker.Routes`),
-# and Cloud's approximate count, a POST that only counts and writes nothing.
+# `{repo}` being the Jira project key, substituted by `connectortracker.Routes`)
+# and the site-wide label list (`/label`); Cloud's approximate count, a POST that
+# only counts; and the lifecycle writes core asks for: PUT `/rest/api/2/issue`
+# (the label edit) and POST `/rest/api/2/issue` (a workflow transition, under
+# `/issue/{key}/transitions`).
 #
 # It is the narrowest table the subtree-only Route model can express, not an
 # exact one: `/rest/api/2/search` also admits GET `/rest/api/2/search/jql`,
 # which Cloud's walk needs, and `/rest/api/2/issue` also admits any other GET
-# under an issue (transitions, worklogs, attachments), none of which the
-# Connector uses. Every write stays on the native adapter.
+# under an issue (worklogs, attachments), none of which the Connector uses.
+# The POST subtree also admits issue create and comments, which the Connector
+# does not use either.
 [
   {
     method = "GET";
@@ -24,6 +28,21 @@
     method = "GET";
     host = "{base}";
     path = "/rest/api/2/issue";
+  }
+  {
+    method = "PUT";
+    host = "{base}";
+    path = "/rest/api/2/issue";
+  }
+  {
+    method = "POST";
+    host = "{base}";
+    path = "/rest/api/2/issue";
+  }
+  {
+    method = "GET";
+    host = "{base}";
+    path = "/rest/api/2/label";
   }
   {
     method = "GET";

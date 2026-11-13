@@ -156,6 +156,16 @@ in
     assert assertMsg (
       routes == import ../../connectors/jira/routes.nix
     ) "the jira Connector's row must carry the Route table in connectors/jira/routes.nix";
+    # The writes are what the doctor widened diff shows against the accepted
+    # baseline until a human accepts them, so the table must name them.
+    assert assertMsg (builtins.all (
+      method:
+      builtins.elem {
+        inherit method;
+        host = "{base}";
+        path = "/rest/api/2/issue";
+      } routes
+    ) [ "PUT" "POST" ]) "the jira Route table must carry PUT and POST /rest/api/2/issue for the write primitives";
     pkgs.runCommand "connectors-jira-contributes-routes" { } "touch $out";
 
   connectors-fixture-knob-in-env-schema =

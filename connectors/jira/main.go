@@ -1,9 +1,12 @@
-// Command jira is the Jira tracker read path as a Connector (ADR 0073): REST
-// reads sent through the host's http_request Host call, which attaches the
-// credential. The native jira adapter stays authoritative; every write stays
-// in core. The Connector returns raw fields only (state, close time, the
-// entity-property markers, link keys, the doctor and daemon checks' raw data),
-// and core makes every policy decision.
+// Command jira is the Jira tracker as a Connector (ADR 0073): REST calls sent
+// through the host's http_request Host call, which attaches the credential.
+// The native jira adapter stays authoritative until the cut-over. The
+// Connector returns raw fields only (state, status, close time, the
+// entity-property markers, link keys, the doctor and daemon checks' raw data)
+// and performs the writes core asks for, one transition or label edit at a
+// time; core makes every lifecycle decision. The Connector only refuses a
+// status mapping in which two states other than failed and ambiguous share a
+// status.
 package main
 
 import "spindrift.dev/sdk/tracker"
@@ -24,6 +27,13 @@ func init() {
 		CreateMeta:    createMeta,
 		Count:         count,
 		CountInterval: countInterval,
+	})
+	// CreateLabel is left unset: Jira labels are free text created on first
+	// use, so core's create call is answered as a no-op.
+	tracker.RegisterWrites(tracker.Writer{
+		Transition: transition,
+		EditLabels: editLabels,
+		ListLabels: listLabels,
 	})
 }
 

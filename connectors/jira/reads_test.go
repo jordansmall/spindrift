@@ -62,6 +62,7 @@ func TestIssueMapsRawFields(t *testing.T) {
 	}
 	want := tracker.Issue{
 		Number: "ENG-7", Title: "s", Body: "d\nmore", State: "closed",
+		Status:           "Done",
 		Labels:           []string{"x", "y"},
 		ClosedAt:         "2025-03-04T05:06:07.123+02:00",
 		ClosedNotPlanned: true,
@@ -316,4 +317,11 @@ func mustQuery(t *testing.T, r connector.Request) url.Values {
 		t.Fatal(err)
 	}
 	return u.Query()
+}
+
+func TestReadWithEmptyBodyErrors(t *testing.T) {
+	serve(t, "/jira/rest/api/2/issue/ENG-1", "")
+	if _, err := issue(cloud, "ENG-1"); err == nil || !strings.Contains(err.Error(), "decode") {
+		t.Fatalf("err = %v, want a decode error", err)
+	}
 }

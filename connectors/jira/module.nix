@@ -26,7 +26,7 @@ in
       env = "SPINDRIFT_JIRA_CONNECTOR_TOKEN";
       group = "dispatch";
       secret = true;
-      doc = "API token the jira Connector's backend row authorizes its reads with, paired with SPINDRIFT_JIRA_CONNECTOR_EMAIL for Basic auth (must be read-only); host-only, never reaches the Box; unused until the jira cut-over (issue #6753)";
+      doc = "API token the jira Connector's backend row authorizes its calls with, paired with SPINDRIFT_JIRA_CONNECTOR_EMAIL for Basic auth (needs permission to edit and transition issues in the project: the Connector writes labels and workflow transitions through it once the cut-over lands); host-only, never reaches the Box; unused until the jira cut-over (issue #6753)";
       flakeOption = false;
       boxEnv = false;
     };
