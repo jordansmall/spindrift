@@ -119,3 +119,13 @@ func rewriteSyntheticDownload(body []byte, rc registryvocab.RewriteContext) regi
 	}
 	return unchanged
 }
+
+// Spellings is Strategy as a discovery-only row: it reads whichever of paths
+// exists first, and has no in-tree binding.
+func Spellings(name string, paths ...string) ecosystem.Strategy {
+	r := Strategy
+	r.Name = name
+	r.InTreeConfigPath = ""
+	r.DiscoveryConfigPaths = paths
+	return r
+}

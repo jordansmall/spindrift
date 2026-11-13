@@ -37,14 +37,17 @@ func MaterializeRef(repoDir, ref string, rows []ecosystem.Strategy) (dir string,
 	// Walking Strategies, the same Strategies Extract walks, keeps the materialized
 	// file set from drifting from the scanned one: a config path added to a Strategy
 	// is picked up here with no second list to maintain.
-	var paths []string
+	type candidate struct {
+		path string
+		row  int
+	}
+	var cands []candidate
 	var stdin bytes.Buffer
-	for _, row := range rows {
-		if row.InTreeConfigPath == "" {
-			continue
+	for i, row := range rows {
+		for _, path := range row.ConfigPaths() {
+			cands = append(cands, candidate{path, i})
+			fmt.Fprintf(&stdin, "%s:%s\n", ref, path)
 		}
-		paths = append(paths, row.InTreeConfigPath)
-		fmt.Fprintf(&stdin, "%s:%s\n", ref, row.InTreeConfigPath)
 	}
 
 	// --follow-symlinks is what resolves in-tree links, and what reports an
@@ -55,7 +58,7 @@ func MaterializeRef(repoDir, ref string, rows []ecosystem.Strategy) (dir string,
 	if cerr != nil {
 		return "", noop, fmt.Errorf("read config files at ref %q in repo %q: %w", ref, repoDir, cerr)
 	}
-	blobs, perr := parseCatFileBatch(out, len(paths))
+	blobs, perr := parseCatFileBatch(out, len(cands))
 	if perr != nil {
 		return "", noop, fmt.Errorf("read config files at ref %q in repo %q: %w", ref, repoDir, perr)
 	}
@@ -66,18 +69,22 @@ func MaterializeRef(repoDir, ref string, rows []ecosystem.Strategy) (dir string,
 	}
 	cleanup = func() { os.RemoveAll(tmp) }
 
-	for i, path := range paths {
-		if blobs[i] == nil {
+	// Only a row's first present spelling is written: on a case-insensitive
+	// filesystem a second spelling would clobber the one Extract must read.
+	done := make(map[int]bool)
+	for i, c := range cands {
+		if blobs[i] == nil || done[c.row] {
 			continue
 		}
-		dest := filepath.Join(tmp, path)
+		done[c.row] = true
+		dest := filepath.Join(tmp, c.path)
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			cleanup()
-			return "", noop, fmt.Errorf("materialize snapshot dir for %q: %w", path, err)
+			return "", noop, fmt.Errorf("materialize snapshot dir for %q: %w", c.path, err)
 		}
 		if err := os.WriteFile(dest, blobs[i], 0o644); err != nil {
 			cleanup()
-			return "", noop, fmt.Errorf("materialize snapshot file %q: %w", path, err)
+			return "", noop, fmt.Errorf("materialize snapshot file %q: %w", c.path, err)
 		}
 	}
 

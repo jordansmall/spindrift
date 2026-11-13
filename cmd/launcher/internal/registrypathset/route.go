@@ -97,7 +97,7 @@ func declaredPathAloneLabel(route registryproxy.Route, rows []ecosystem.Strategy
 func discoverableNames(rows []ecosystem.Strategy) string {
 	var names []string
 	for _, row := range rows {
-		if row.InTreeConfigPath == "" || row.ConfigParser == nil {
+		if len(row.ConfigPaths()) == 0 || row.ConfigParser == nil {
 			continue
 		}
 		names = append(names, row.Name)
