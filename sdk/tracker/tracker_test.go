@@ -363,3 +363,38 @@ func TestCountWithoutIntervalPanics(t *testing.T) {
 	}()
 	handlers(r)
 }
+
+func TestRemovedLabels(t *testing.T) {
+	r := fakeReader(t)
+	caps, m := handlers(r)
+	if _, ok := m["tracker.removedLabels"]; ok || len(caps) != 2 {
+		t.Fatalf("removedLabels advertised without its Reader field: %v", caps)
+	}
+	r.RemovedLabels = func(tg Target, number string) ([]string, error) {
+		if tg != wantTarget || number != "3" {
+			t.Errorf("RemovedLabels(%v, %q)", tg, number)
+		}
+		return []string{"agent-failed", "agent-complete"}, nil
+	}
+	caps, m = handlers(r)
+	if want := []string{"tracker", "tracker.comments", "tracker.removedLabels"}; !reflect.DeepEqual(caps, want) {
+		t.Fatalf("caps = %v, want %v", caps, want)
+	}
+	if got, want := call(t, m, "tracker.removedLabels", `{`+target+`,"number":"3"}`), `{"labels":["agent-failed","agent-complete"]}`; got != want {
+		t.Errorf("removedLabels = %s, want %s", got, want)
+	}
+	r.RemovedLabels = func(Target, string) ([]string, error) { return nil, nil }
+	_, m = handlers(r)
+	if got, want := call(t, m, "tracker.removedLabels", `{`+target+`,"number":"3"}`), `{"labels":[]}`; got != want {
+		t.Errorf("empty removedLabels = %s, want %s", got, want)
+	}
+	if _, err := m["tracker.removedLabels"](json.RawMessage(`{not json`)); err == nil {
+		t.Error("bad params accepted")
+	}
+	boom := errors.New("boom")
+	r.RemovedLabels = func(Target, string) ([]string, error) { return nil, boom }
+	_, m = handlers(r)
+	if _, err := m["tracker.removedLabels"](json.RawMessage(`{` + target + `,"number":"3"}`)); !errors.Is(err, boom) {
+		t.Errorf("err = %v, want boom", err)
+	}
+}

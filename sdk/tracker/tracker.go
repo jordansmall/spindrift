@@ -17,7 +17,8 @@
 // issues an issue is blocked on) and Blocks (the issues it blocks). The
 // optional doctor and daemon reads are Probe, Statuses, CreateMeta and Count
 // with its CountInterval; each returns raw API data and core decides what it
-// means.
+// means. RemovedLabels serves recover's read of the lifecycle label an issue
+// last lost.
 package tracker
 
 import (
@@ -164,6 +165,12 @@ type Reader struct {
 	// CountInterval is how often core re-asks Count, chosen for the API's rate
 	// limits. It is required, at least one second, when Count is set.
 	CountInterval time.Duration
+
+	// RemovedLabels is optional: it returns the names of the labels removed
+	// from the issue, oldest removal first, one entry per removal. Core
+	// decides which of them is a lifecycle state; the Connector knows
+	// nothing of that. Setting it advertises "tracker.removedLabels".
+	RemovedLabels func(t Target, number string) ([]string, error)
 
 	// Search is optional: it returns up to limit issues matching the free text
 	// text, narrowed to state ("open" or "closed") and, when label is not "",
@@ -363,6 +370,25 @@ func handlers(r Reader) ([]string, map[string]method) {
 			return struct {
 				Seconds int `json:"seconds"`
 			}{int(r.CountInterval / time.Second)}, nil
+		}
+	}
+	if r.RemovedLabels != nil {
+		caps = append(caps, "tracker.removedLabels")
+		m["tracker.removedLabels"] = func(params json.RawMessage) (any, error) {
+			t, n, err := numbered(params)
+			if err != nil {
+				return nil, err
+			}
+			names, err := r.RemovedLabels(t, n)
+			if err != nil {
+				return nil, err
+			}
+			if names == nil {
+				names = []string{} // encode [] rather than null
+			}
+			return struct {
+				Labels []string `json:"labels"`
+			}{names}, nil
 		}
 	}
 	if r.Search != nil {
