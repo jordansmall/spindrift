@@ -151,21 +151,39 @@ in
   connectors-jira-contributes-routes =
     let
       routes = (configOf withJira).connectors.jira.routes or null;
+      widened = [
+        {
+          method = "PUT";
+          path = "/rest/api/2/issue";
+        }
+        {
+          method = "POST";
+          path = "/rest/api/2/issue";
+        }
+        {
+          method = "GET";
+          path = "/rest/api/2/label";
+        }
+      ];
     in
     assert assertMsg (routes != null) "the jira Connector must register spindrift.connectors.jira";
     assert assertMsg (
       routes == import ../../connectors/jira/routes.nix
     ) "the jira Connector's row must carry the Route table in connectors/jira/routes.nix";
-    # The writes are what the doctor widened diff shows against the accepted
-    # baseline until a human accepts them, so the table must name them.
-    assert assertMsg (builtins.all (
-      method:
-      builtins.elem {
-        inherit method;
-        host = "{base}";
-        path = "/rest/api/2/issue";
-      } routes
-    ) [ "PUT" "POST" ]) "the jira Route table must carry PUT and POST /rest/api/2/issue for the write primitives";
+    # The writes and the label list are the Routes the Connector's tracker
+    # write path needs, so the table must name them.
+    assert assertMsg (builtins.all
+      (
+        r:
+        let
+          route = r // {
+            host = "{base}";
+          };
+        in
+        builtins.elem route routes
+      )
+      widened
+    ) "the jira Route table must carry PUT and POST /rest/api/2/issue and GET /rest/api/2/label";
     pkgs.runCommand "connectors-jira-contributes-routes" { } "touch $out";
 
   connectors-fixture-knob-in-env-schema =

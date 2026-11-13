@@ -127,6 +127,30 @@ func TestConnectorRoutesChecks_WideningFailsNamingAddedRoutes(t *testing.T) {
 	}
 }
 
+func TestConnectorRoutesChecks_JiraWriteRoutesRenderAsAdded(t *testing.T) {
+	get := func(p string) connectorhost.Route {
+		return connectorhost.Route{Method: "GET", Host: backendrows.BaseHost, Path: p}
+	}
+	put := connectorhost.Route{Method: "PUT", Host: backendrows.BaseHost, Path: "/rest/api/2/issue"}
+	post := connectorhost.Route{Method: "POST", Host: backendrows.BaseHost, Path: "/rest/api/2/issue"}
+	label := get("/rest/api/2/label")
+	accepted := []connectorhost.Route{get("/rest/api/2/search")}
+	row := connectorRow(accepted, append([]connectorhost.Route{accepted[0]}, put, post, label))
+	row.BaseEnv = "FIXTURE_BASE_URL"
+	useConnectorRowsWith(t, func(k string) string {
+		if k == "FIXTURE_BASE_URL" {
+			return "https://acme.example.net"
+		}
+		return ""
+	}, row)
+	out := runConnectorRows(t, connectorRoutesChecks())
+	for _, want := range []string{"\n+ PUT acme.example.net /rest/api/2/issue", "\n+ POST acme.example.net /rest/api/2/issue", "\n+ GET acme.example.net /rest/api/2/label"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestConnectorRoutesChecks_WithinAcceptedPasses(t *testing.T) {
 	for name, tc := range map[string]struct{ accepted, live []connectorhost.Route }{
 		"unchanged": {[]connectorhost.Route{fixtureGetRepos}, []connectorhost.Route{fixtureGetRepos}},

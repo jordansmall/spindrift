@@ -29,7 +29,11 @@ type jiraIssueRecord struct {
 	failGET    bool     // simulates the native-API error the issue's GET returns
 	status     string   // workflow status the payload reports and a status clause matches; "" is "Open"
 	resolution string   // resolution the last transition posted
-	comments   []jiraWireComment
+	posts      int      // transition POSTs received
+	// labelsAtPost are the labels the issue carried when the last transition POST
+	// arrived, so a test can tell a strip made before it from one made after.
+	labelsAtPost []string
+	comments     []jiraWireComment
 }
 
 // jiraWireTransitionField is one screen field of a transition, as Jira reports
@@ -84,6 +88,8 @@ type jiraHarness struct {
 	transitionFields map[string]map[string]jiraWireTransitionField
 	statusCalls      int
 	statusesFail     bool
+	// transitionsFail makes GET .../transitions answer 500.
+	transitionsFail bool
 
 	// myselfStatus is the status GET /myself answers with; 0 means 200.
 	myselfStatus int
@@ -441,6 +447,10 @@ func (h *jiraHarness) listTransitions(w http.ResponseWriter, num string) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	if h.transitionsFail {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 	type transition struct {
 		ID string `json:"id"`
 		To struct {
@@ -484,6 +494,8 @@ func (h *jiraHarness) doTransition(w http.ResponseWriter, r *http.Request, num s
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+	rec.posts++
+	rec.labelsAtPost = append([]string(nil), rec.labels...)
 	rec.status = h.workflowStatuses[i-1]
 	rec.resolution = body.Fields.Resolution.Name
 	w.WriteHeader(http.StatusNoContent)
