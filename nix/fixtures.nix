@@ -748,7 +748,7 @@ let
       mkdir $out
       ${runInputDocOf driverConnectorConsumer.apps.${system}.default.program}
       cp "$doc" $out/input.json
-      cp ${boxHarness.internals.driverRowsFile} $out/box-rows.json
+      cp ${boxHarness.internals.driverRowsFileWith pkgs} $out/box-rows.json
       ln -s "$(jq -r '.drivers[0].module' "$doc")" $out/module.wasm
     '';
 

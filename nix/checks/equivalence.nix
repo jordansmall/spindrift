@@ -2278,6 +2278,7 @@ in
         "researchOutcomeContractFile"
         "driverPreambleFile"
         "driverRowsFile"
+        "driverRowsFileWith"
         "agentPathsPreambleFile"
         "driverExecBin"
         "orchestratorBin"

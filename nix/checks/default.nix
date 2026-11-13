@@ -202,6 +202,12 @@ let
     "seccomp-filter-is-regular-file-multiple-of-8-bytes"
     "seccomp-filter-covers-compat-architectures"
     "seccomp-filter-denies-mount-syscalls"
+    # Read the Box's Driver rows file, which mkHarness renders with the Linux
+    # twin's pkgs, so its Connector wasm is an aarch64-linux build.
+    "connector-driver-rows-outside-row-reaches-document-and-box"
+    "connector-driver-rows-shadow-reaches-box-only"
+    "connector-driver-rows-shadow-only-for-selected-driver"
+    "connector-driver-rows-dogfood-shadows"
   ];
 
   portableSourceChecks =
