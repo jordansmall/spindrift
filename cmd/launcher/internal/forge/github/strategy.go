@@ -23,7 +23,7 @@ var Strategy = backendkit.Strategy{
 	AutoMergeRemedy: func(backendkit.Shared) string {
 		return `enable "Allow auto-merge" in repo Settings → General`
 	},
-	AcquireToken: acquireToken,
+	AcquireToken: acquireTokenWith(introspectToken),
 	NewIssueTracker: func(s backendkit.Shared, _ backendkit.Lookup) (forge.IssueTracker, error) {
 		return NewExecClient(s.RepoSlug, s.Labels, WithVerdictLabels(s.VerdictLabels)), nil
 	},
@@ -61,7 +61,7 @@ var Strategy = backendkit.Strategy{
 		host, slug := gitremote.ParseHostSlug(remote)
 		return strings.EqualFold(host, Host()) && strings.EqualFold(slug, s.RepoSlug)
 	},
-	IntrospectToken: newTokenIntrospector(TokenOAuthScopes, TokenRepoPushPermission),
+	IntrospectToken: introspectToken,
 }
 
 func codeForgeOpts(s backendkit.Shared) []ExecOption {

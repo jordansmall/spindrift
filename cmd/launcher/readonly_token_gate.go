@@ -8,6 +8,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // errReadOnlyGateMisconfigured marks a read-only token gate misconfiguration
@@ -51,6 +52,13 @@ func checkReadOnlyTokenGate(c config, row backendkit.Strategy, w io.Writer) (ver
 		return false, nil
 	}
 	result, err := row.IntrospectToken(boxToken, c.RepoSlug)
+	if errors.Is(err, runner.ErrUnsupported) {
+		// Same trust notice as a token that cannot be introspected; the error
+		// lets doctor report the gate as unsupported, while walkEnforce turns
+		// it into a launch refusal.
+		fmt.Fprintf(w, "WARNING: %s's write capability could not be determined (%s). "+readOnlyTrustNotice+"\n", boxEnv, doctor.UnsupportedReason(err))
+		return false, fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: introspecting %s: %w", boxEnv, err)
+	}
 	if err != nil {
 		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only: introspecting %s failed: %w", doctor.ErrConnectivity, boxEnv, err)
 	}

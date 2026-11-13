@@ -3,12 +3,16 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // TestCheckReadOnlyTokenGate pins checkReadOnlyTokenGate's case matrix for
@@ -393,8 +397,13 @@ func TestCheckReadOnlyTokenGate_NonIntrospectableWarningUsesHookReason(t *testin
 
 // Pins the wiring between the production GitHub Strategy's IntrospectToken
 // hook and the gate: it uses the real row, so deleting the hook from
-// internal/forge/github/strategy.go fails here and nowhere else.
+// internal/forge/github/strategy.go fails here and nowhere else. No github
+// Connector row is applied, so the hook answers natively.
 func TestCheckReadOnlyTokenGate_ProductionGitHubHookWarnsOnFineGrainedPAT(t *testing.T) {
+	t.Cleanup(backendrows.Snapshot())
+	if err := backendrows.Use(nil, func(string) string { return "" }); err != nil {
+		t.Fatal(err)
+	}
 	row, ok := backendkit.ByName("github")
 	if !ok {
 		t.Fatal("backendkit.ByName(\"github\") ok = false, want true")
@@ -421,5 +430,109 @@ func TestCheckReadOnlyTokenGate_ProductionGitHubHookWarnsOnFineGrainedPAT(t *tes
 	}
 	if strings.Contains(out, "no IntrospectToken hook") {
 		t.Errorf("output = %q, must not take the no-hook branch", out)
+	}
+}
+
+// A backend whose Connector cannot introspect a token leaves read-only
+// unverified, with the same trust notice as a non-introspectable token. The
+// error wraps runner.ErrUnsupported alone: it is no connectivity failure.
+func TestCheckReadOnlyTokenGate_UnsupportedIntrospectionIsUnverifiedNotAConnectivityFailure(t *testing.T) {
+	c := minimalValidConfig()
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.GhToken = "launcher-token"
+	t.Setenv("BOX_GH_TOKEN", "box-token")
+	introspect := func(string, string) (backendkit.TokenIntrospection, error) {
+		return backendkit.TokenIntrospection{}, fmt.Errorf("no github connector is configured: %w", runner.ErrUnsupported)
+	}
+
+	var buf bytes.Buffer
+	verified, err := checkReadOnlyTokenGate(c, rowWithIntrospector(t, "github", introspect), &buf)
+
+	if verified {
+		t.Error("verified = true, want false")
+	}
+	if !errors.Is(err, runner.ErrUnsupported) {
+		t.Fatalf("err = %v, want it to wrap runner.ErrUnsupported", err)
+	}
+	if errors.Is(err, doctor.ErrConnectivity) || errors.Is(err, errReadOnlyGateMisconfigured) {
+		t.Errorf("err = %v, must be neither a connectivity nor a misconfiguration failure", err)
+	}
+	if !strings.Contains(buf.String(), "WARNING: BOX_GH_TOKEN's write capability could not be determined") || !strings.Contains(buf.String(), readOnlyTrustNotice) {
+		t.Errorf("warning = %q, want the not-determinable warning ending in the trust notice", buf.String())
+	}
+}
+
+// doctor's walk reports an unsupported gate as such, neither failing nor
+// stopping later gates.
+func TestWalkGateRegistry_UnsupportedGateReportsAndDoesNotBlock(t *testing.T) {
+	var ranAfter bool
+	registry := []launchGate{
+		{Name: "read-only-token-github", Network: true, Check: func(config, io.Writer) error {
+			return fmt.Errorf("introspecting BOX_GH_TOKEN: no github connector is configured: %w", runner.ErrUnsupported)
+		}},
+		{Name: "after", Network: true, Check: func(config, io.Writer) error { ranAfter = true; return nil }},
+	}
+
+	var buf bytes.Buffer
+	if err := walkGateRegistry(registry, config{}, &buf, doctor.NewReporter(&buf, true), walkReport); err != nil {
+		t.Fatalf("walkGateRegistry() = %v, want nil: an unsupported gate must not fail doctor", err)
+	}
+	if want := "unsupported: read-only-token-github (introspecting BOX_GH_TOKEN: no github connector is configured)\n"; !strings.Contains(buf.String(), want) {
+		t.Errorf("output = %q, want it to contain %q", buf.String(), want)
+	}
+	if strings.Contains(buf.String(), "MISSING") {
+		t.Errorf("output = %q, must not report a failure", buf.String())
+	}
+	if !ranAfter {
+		t.Error("a later gate never ran")
+	}
+}
+
+// The launch path fails closed: a gate its Connector cannot serve refuses the
+// launch and names the remedy, instead of letting an unverified read-only
+// token reach the Box.
+func TestWalkGateRegistry_EnforceRefusesUnsupportedGate(t *testing.T) {
+	var ranAfter bool
+	registry := []launchGate{
+		{Name: "read-only-token-github", Network: true, UnsupportedRemedy: "pin a Connector that serves forge.tokenGrant", Check: func(config, io.Writer) error {
+			return fmt.Errorf("introspecting BOX_GH_TOKEN: no github connector is configured: %w", runner.ErrUnsupported)
+		}},
+		{Name: "after", Network: true, Check: func(config, io.Writer) error { ranAfter = true; return nil }},
+	}
+
+	var buf bytes.Buffer
+	err := walkGateRegistry(registry, config{}, &buf, doctor.NewReporter(&buf, true), walkEnforce)
+	if err == nil {
+		t.Fatal("walkGateRegistry() = nil, want a refusal: an unverifiable read-only token must not launch")
+	}
+	for _, want := range []string{"read-only-token-github", "refused", "no github connector is configured", "pin a Connector that serves forge.tokenGrant"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q, want it to contain %q", err, want)
+		}
+	}
+	if errors.Is(err, runner.ErrUnsupported) {
+		t.Errorf("err = %v, must not wrap ErrUnsupported: Blocking would treat it as non-blocking", err)
+	}
+	if ranAfter {
+		t.Error("a later gate ran after the refusal")
+	}
+}
+
+// The real github row's gate, built by readOnlyTokenGates, refuses with the
+// remedy a Connector without forge.tokenGrant needs.
+func TestGateRegistry_EnforceRefusesGithubWithoutTokenGrant(t *testing.T) {
+	row := rowWithIntrospector(t, "github", func(string, string) (backendkit.TokenIntrospection, error) {
+		return backendkit.TokenIntrospection{}, fmt.Errorf("the github connector cannot introspect the token: %w", runner.ErrUnsupported)
+	})
+	c := minimalValidConfig()
+	c.BoxForgeAndIssueAccess = "read-only"
+	c.CodeForge, c.IssueTracker = "github", "github"
+	c.GhToken = "launcher-token"
+	t.Setenv("BOX_GH_TOKEN", "ghp_boxtoken")
+
+	var buf bytes.Buffer
+	err := walkGateRegistry(readOnlyTokenGates([]backendkit.Strategy{row}), c, &buf, doctor.NewDiscardReporter(), walkEnforce)
+	if err == nil || !strings.Contains(err.Error(), "pin a github Connector that serves forge.tokenGrant") {
+		t.Fatalf("walkGateRegistry() = %v, want a refusal naming the remedy", err)
 	}
 }

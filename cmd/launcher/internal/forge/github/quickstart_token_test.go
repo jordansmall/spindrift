@@ -3,17 +3,39 @@ package github_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/forge/github"
+	"spindrift.dev/launcher/internal/runner"
 )
+
+// noIntrospection fails the test when the wizard audits a token it should not.
+func noIntrospection(t *testing.T) backendkit.TokenIntrospector {
+	return func(string, string) (backendkit.TokenIntrospection, error) {
+		t.Helper()
+		t.Fatal("must not introspect the token")
+		return backendkit.TokenIntrospection{}, nil
+	}
+}
 
 func acquire(t *testing.T, p backendkit.TokenPrompt) (string, error) {
 	t.Helper()
-	return github.Strategy.AcquireToken(backendkit.Shared{RepoSlug: "o/r"}, nil, p)
+	return acquireWith(t, noIntrospection(t), p)
+}
+
+func acquireWith(t *testing.T, introspect backendkit.TokenIntrospector, p backendkit.TokenPrompt) (string, error) {
+	t.Helper()
+	return github.AcquireTokenWith(introspect)(backendkit.Shared{RepoSlug: "o/r"}, nil, p)
+}
+
+func scopesOf(scopes []string, err error) backendkit.TokenIntrospector {
+	return func(string, string) (backendkit.TokenIntrospection, error) {
+		return backendkit.TokenIntrospection{Introspectable: true, Scopes: scopes}, err
+	}
 }
 
 func TestAcquireToken_AmbientTokenSkipsPromptAndPrintsAuditNote(t *testing.T) {
@@ -62,13 +84,12 @@ func TestAcquireToken_BlankFallsBackToAmbientGhToken(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var out bytes.Buffer
-			token, err := acquire(t, backendkit.TokenPrompt{
+			// A gho_ token is audited; keep the scopes narrow.
+			token, err := acquireWith(t, scopesOf([]string{"public_repo"}, nil), backendkit.TokenPrompt{
 				Out:          &out,
 				Getenv:       func(string) string { return "" },
 				PromptMasked: func(string) string { return "" },
 				AmbientToken: func() (string, error) { return c.token, c.err },
-				// A gho_ token is audited; keep the scopes narrow.
-				TokenScopes: func(string) ([]string, error) { return []string{"public_repo"}, nil },
 			})
 			if c.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), c.wantErr) {
@@ -105,11 +126,10 @@ func TestAcquireToken_ClassicTokenAudit(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var out bytes.Buffer
-			_, err := acquire(t, backendkit.TokenPrompt{
+			_, err := acquireWith(t, scopesOf(c.scopes, c.scopesErr), backendkit.TokenPrompt{
 				Out:          &out,
 				Getenv:       func(k string) string { return map[string]string{"GH_TOKEN": "ghp_x"}[k] },
 				Prompt:       func(string) string { return c.answer },
-				TokenScopes:  func(string) ([]string, error) { return c.scopes, c.scopesErr },
 				PromptMasked: func(string) string { t.Fatal("must not prompt"); return "" },
 			})
 			if c.wantErr == "" && err != nil {
@@ -157,5 +177,43 @@ func TestAcquireToken_AmbientLookupFollowsDescriptorTokenEnvVar(t *testing.T) {
 	})
 	if err != nil || token != "ghs_right" {
 		t.Fatalf("got %q, %v", token, err)
+	}
+}
+
+// A host with no github Connector cannot read the scopes, which is not a reason
+// to refuse the token: the operator is told and the wizard carries on.
+func TestAcquireToken_UnsupportedIntrospectionWarnsAndContinues(t *testing.T) {
+	var out bytes.Buffer
+	unsupported := func(string, string) (backendkit.TokenIntrospection, error) {
+		return backendkit.TokenIntrospection{}, fmt.Errorf("no github connector is configured: %w", runner.ErrUnsupported)
+	}
+	token, err := acquireWith(t, unsupported, backendkit.TokenPrompt{
+		Out:    &out,
+		Getenv: func(k string) string { return map[string]string{"GH_TOKEN": "ghp_x"}[k] },
+	})
+	if err != nil || token != "ghp_x" {
+		t.Fatalf("got %q, %v", token, err)
+	}
+	if !strings.Contains(out.String(), "cannot audit the token's scopes") {
+		t.Errorf("output missing the unaudited notice: %q", out.String())
+	}
+}
+
+// The wizard audits the pasted token itself, scoped to the target repo.
+func TestAcquireToken_AuditsThePastedTokenForTheTargetRepo(t *testing.T) {
+	var gotToken, gotRepo string
+	introspect := func(token, repo string) (backendkit.TokenIntrospection, error) {
+		gotToken, gotRepo = token, repo
+		return backendkit.TokenIntrospection{Introspectable: true, Scopes: []string{"public_repo"}}, nil
+	}
+	if _, err := acquireWith(t, introspect, backendkit.TokenPrompt{
+		Out:          new(bytes.Buffer),
+		Getenv:       func(string) string { return "" },
+		PromptMasked: func(string) string { return "gho_pasted" },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if gotToken != "gho_pasted" || gotRepo != "o/r" {
+		t.Errorf("introspected (%q, %q), want (gho_pasted, o/r)", gotToken, gotRepo)
 	}
 }
