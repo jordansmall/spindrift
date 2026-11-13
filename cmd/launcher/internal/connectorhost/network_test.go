@@ -3,10 +3,12 @@ package connectorhost_test
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -546,6 +548,38 @@ func TestNetworkFollowRedirectAuditsTheWholeBodyWhenTheHopSendsOnlyTheTail(t *te
 	}
 }
 
+// slowCloseConn delays the TCP close, widening the window between the TLS
+// close_notify the client sends on cancel and the connection actually dropping.
+type slowCloseConn struct{ net.Conn }
+
+func (c slowCloseConn) Close() error {
+	time.Sleep(200 * time.Millisecond)
+	return c.Conn.Close()
+}
+
+// slowCloseClient is b's client with every TLS connection wrapped in slowCloseConn.
+func slowCloseClient(t *testing.T, b *backend) *http.Client {
+	t.Helper()
+	tr := b.Client().Transport.(*http.Transport).Clone()
+	// httptest.Server.Close only closes idle conns on the server's own client.
+	t.Cleanup(tr.CloseIdleConnections)
+	tr.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		raw, err := (&net.Dialer{}).DialContext(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		cfg := tr.TLSClientConfig.Clone()
+		cfg.ServerName, _, _ = net.SplitHostPort(addr)
+		c := tls.Client(slowCloseConn{raw}, cfg)
+		if err := c.HandshakeContext(ctx); err != nil {
+			_ = raw.Close()
+			return nil, err
+		}
+		return c, nil
+	}
+	return &http.Client{Transport: tr}
+}
+
 func TestNetworkFollowRedirectHopIsCutBeforeTheCallersDeadline(t *testing.T) {
 	// The hop's body never ends on its own; the handler holds it open until the
 	// hop's context is cut, so the test waits no longer than the cut itself.
@@ -553,9 +587,13 @@ func TestNetworkFollowRedirectHopIsCutBeforeTheCallersDeadline(t *testing.T) {
 		_, _ = io.WriteString(w, "x")
 		w.(http.Flusher).Flush()
 		<-r.Context().Done()
+		// Abort rather than return: a normal return writes the terminating chunk,
+		// which would beat the client's delayed socket close and read as a complete body.
+		panic(http.ErrAbortHandler)
 	})
 	origin := redirectingOrigin(t, target.URL)
 	n := netFor(origin, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true})
+	n.Client = slowCloseClient(t, origin)
 	// The hop is cut at half of this, leaving ~2s of slack before the outer expiry.
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
