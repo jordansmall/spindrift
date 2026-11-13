@@ -44,7 +44,7 @@ func newTokenIntrospector(oauthScopes func(token string) ([]string, error), repo
 					break
 				}
 			}
-			return backendkit.TokenIntrospection{Introspectable: true, WriteCapable: writeCapable}, nil
+			return backendkit.TokenIntrospection{Introspectable: true, WriteCapable: writeCapable, Scopes: scopes}, nil
 		case strings.HasPrefix(token, "ghs_"):
 			// An App installation token carries no X-OAuth-Scopes header, but it
 			// also has no ambient user role to blur permissions.push the way a

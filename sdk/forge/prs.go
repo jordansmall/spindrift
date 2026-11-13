@@ -38,6 +38,9 @@ type Grant struct {
 	Introspectable bool   `json:"introspectable"`
 	WriteCapable   bool   `json:"writeCapable"`
 	Reason         string `json:"reason,omitempty"`
+	// Scopes are the OAuth scopes the forge reports for the token, nil when it
+	// reports none.
+	Scopes []string `json:"scopes,omitempty"`
 }
 
 // PRs is everything a Connector-backed Code Forge needs of the forge itself

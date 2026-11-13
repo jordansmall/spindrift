@@ -63,7 +63,7 @@ func withOptionals(p PRs) PRs {
 		if tg != wantTarget {
 			return Grant{}, errors.New("wrong target")
 		}
-		return Grant{Introspectable: prefix == "ghp_", WriteCapable: true, Reason: "why:" + prefix}, nil
+		return Grant{Introspectable: prefix == "ghp_", WriteCapable: true, Reason: "why:" + prefix, Scopes: []string{"repo", prefix}}, nil
 	}
 	return p
 }
@@ -121,7 +121,7 @@ func TestPRWireShapes(t *testing.T) {
 		{"forge.branchProtected", `{` + target + `,"branch":"main"}`, `{"protected":true}`},
 		{"forge.probe", `{` + target + `}`, `{"repo":"o/r"}`},
 		{"forge.tokenGrant", `{` + target + `,"tokenPrefix":"ghp_"}`,
-			`{"introspectable":true,"writeCapable":true,"reason":"why:ghp_"}`},
+			`{"introspectable":true,"writeCapable":true,"reason":"why:ghp_","scopes":["repo","ghp_"]}`},
 	}
 	for _, c := range cases {
 		if got := call(t, m, c.method, c.params); got != c.want {
