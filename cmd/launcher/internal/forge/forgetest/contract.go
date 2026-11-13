@@ -115,10 +115,24 @@ var readCases = []struct {
 // RunTrackerContract runs the shared IssueTracker conformance suite against h,
 // backed by the calling adapter's own scripted-backend Harness.
 func RunTrackerContract(t *testing.T, h Harness) {
+	RunTrackerWorkContract(t, h)
+	RunTrackerVerdictContract(t, h)
+}
+
+// RunTrackerWorkContract runs the cases a work tracker answers whatever its
+// lifecycle: state transitions, the claim check, and the read cases.
+func RunTrackerWorkContract(t *testing.T, h Harness) {
 	t.Run("DispatchLifecycle", func(t *testing.T) { testDispatchLifecycle(t, h) })
 	t.Run("ClaimAlreadyInProgress", func(t *testing.T) { testClaimAlreadyInProgress(t, h) })
-	t.Run("DoubleDispatchGuard", func(t *testing.T) { testDoubleDispatchGuard(t, h) })
 	RunTrackerReadContract(t, h)
+}
+
+// RunTrackerVerdictContract runs the cases that land a verdict as a label over
+// the InProgress label. A tracker whose claim is a native status change carries
+// no InProgress label for them to guard, so it runs these on a label-only
+// tracker (research's, ADR 0022).
+func RunTrackerVerdictContract(t *testing.T, h Harness) {
+	t.Run("DoubleDispatchGuard", func(t *testing.T) { testDoubleDispatchGuard(t, h) })
 	t.Run("ResearchVerdictTerminals", func(t *testing.T) { testResearchVerdictTerminals(t, h) })
 }
 
@@ -126,38 +140,38 @@ func RunTrackerContract(t *testing.T, h Harness) {
 // state after each TransitionState, never a stale one.
 func testDispatchLifecycle(t *testing.T, h Harness) {
 	tr := h.Tracker()
-	h.SeedIssue(forge.Issue{Number: "101", Title: "lifecycle"})
+	h.SeedIssue(forge.Issue{Number: id(h, "101"), Title: "lifecycle"})
 
-	if err := tr.TransitionState("101", forge.Untriaged, forge.Dispatchable); err != nil {
+	if err := tr.TransitionState(id(h, "101"), forge.Untriaged, forge.Dispatchable); err != nil {
 		t.Fatalf("TransitionState(Untriaged, Dispatchable): %v", err)
 	}
-	requireIn(t, tr, forge.Dispatchable, "101")
-	requireNotIn(t, tr, forge.InProgress, "101")
+	requireIn(t, tr, forge.Dispatchable, id(h, "101"))
+	requireNotIn(t, tr, forge.InProgress, id(h, "101"))
 
-	if err := tr.TransitionState("101", forge.Dispatchable, forge.InProgress); err != nil {
+	if err := tr.TransitionState(id(h, "101"), forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatalf("TransitionState(Dispatchable, InProgress): %v", err)
 	}
-	requireIn(t, tr, forge.InProgress, "101")
-	requireNotIn(t, tr, forge.Dispatchable, "101")
+	requireIn(t, tr, forge.InProgress, id(h, "101"))
+	requireNotIn(t, tr, forge.Dispatchable, id(h, "101"))
 
-	if err := tr.TransitionState("101", forge.InProgress, forge.Complete); err != nil {
+	if err := tr.TransitionState(id(h, "101"), forge.InProgress, forge.Complete); err != nil {
 		t.Fatalf("TransitionState(InProgress, Complete): %v", err)
 	}
-	requireIn(t, tr, forge.Complete, "101")
-	requireNotIn(t, tr, forge.InProgress, "101")
+	requireIn(t, tr, forge.Complete, id(h, "101"))
+	requireNotIn(t, tr, forge.InProgress, id(h, "101"))
 
-	h.SeedIssue(forge.Issue{Number: "102", Title: "failed path"})
-	if err := tr.TransitionState("102", forge.Untriaged, forge.Dispatchable); err != nil {
+	h.SeedIssue(forge.Issue{Number: id(h, "102"), Title: "failed path"})
+	if err := tr.TransitionState(id(h, "102"), forge.Untriaged, forge.Dispatchable); err != nil {
 		t.Fatalf("TransitionState(Untriaged, Dispatchable): %v", err)
 	}
-	if err := tr.TransitionState("102", forge.Dispatchable, forge.InProgress); err != nil {
+	if err := tr.TransitionState(id(h, "102"), forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatalf("TransitionState(Dispatchable, InProgress): %v", err)
 	}
-	if err := tr.TransitionState("102", forge.InProgress, forge.Failed); err != nil {
+	if err := tr.TransitionState(id(h, "102"), forge.InProgress, forge.Failed); err != nil {
 		t.Fatalf("TransitionState(InProgress, Failed): %v", err)
 	}
-	requireIn(t, tr, forge.Failed, "102")
-	requireNotIn(t, tr, forge.InProgress, "102")
+	requireIn(t, tr, forge.Failed, id(h, "102"))
+	requireNotIn(t, tr, forge.InProgress, id(h, "102"))
 }
 
 // testClaimAlreadyInProgress checks that a second claim (TransitionState to
@@ -166,22 +180,22 @@ func testDispatchLifecycle(t *testing.T, h Harness) {
 // claim still succeeds (#3887).
 func testClaimAlreadyInProgress(t *testing.T, h Harness) {
 	tr := h.Tracker()
-	h.SeedIssue(forge.Issue{Number: "111", Title: "already claimed"})
+	h.SeedIssue(forge.Issue{Number: id(h, "111"), Title: "already claimed"})
 
-	if err := tr.TransitionState("111", forge.Untriaged, forge.Dispatchable); err != nil {
+	if err := tr.TransitionState(id(h, "111"), forge.Untriaged, forge.Dispatchable); err != nil {
 		t.Fatalf("TransitionState(Untriaged, Dispatchable): %v", err)
 	}
-	if err := tr.TransitionState("111", forge.Dispatchable, forge.InProgress); err != nil {
+	if err := tr.TransitionState(id(h, "111"), forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatalf("TransitionState(Dispatchable, InProgress): %v", err)
 	}
-	requireIn(t, tr, forge.InProgress, "111")
+	requireIn(t, tr, forge.InProgress, id(h, "111"))
 
-	err := tr.TransitionState("111", forge.Dispatchable, forge.InProgress)
+	err := tr.TransitionState(id(h, "111"), forge.Dispatchable, forge.InProgress)
 	if !errors.Is(err, forge.ErrAlreadyClaimed) {
 		t.Fatalf("second claim: err = %v, want errors.Is(forge.ErrAlreadyClaimed)", err)
 	}
-	requireIn(t, tr, forge.InProgress, "111")
-	requireNotIn(t, tr, forge.Dispatchable, "111")
+	requireIn(t, tr, forge.InProgress, id(h, "111"))
+	requireNotIn(t, tr, forge.Dispatchable, id(h, "111"))
 }
 
 // testDoubleDispatchGuard checks that CompleteVerdict requires InProgress: it
@@ -189,19 +203,19 @@ func testClaimAlreadyInProgress(t *testing.T, h Harness) {
 // label already landed (#701).
 func testDoubleDispatchGuard(t *testing.T, h Harness) {
 	tr := h.Tracker()
-	h.SeedIssue(forge.Issue{Number: "201", Title: "double dispatch"})
-	if err := tr.TransitionState("201", forge.Untriaged, forge.Dispatchable); err != nil {
+	h.SeedIssue(forge.Issue{Number: id(h, "201"), Title: "double dispatch"})
+	if err := tr.TransitionState(id(h, "201"), forge.Untriaged, forge.Dispatchable); err != nil {
 		t.Fatalf("TransitionState(Untriaged, Dispatchable): %v", err)
 	}
-	if err := tr.TransitionState("201", forge.Dispatchable, forge.InProgress); err != nil {
+	if err := tr.TransitionState(id(h, "201"), forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatalf("TransitionState(Dispatchable, InProgress): %v", err)
 	}
 
-	if err := tr.CompleteVerdict("201", forge.Recommend); err != nil {
+	if err := tr.CompleteVerdict(id(h, "201"), forge.Recommend); err != nil {
 		t.Fatalf("first CompleteVerdict: %v", err)
 	}
 
-	if err := tr.CompleteVerdict("201", forge.Reject); err == nil {
+	if err := tr.CompleteVerdict(id(h, "201"), forge.Reject); err == nil {
 		t.Fatal("second CompleteVerdict on an issue that already left InProgress: want error, got nil")
 	}
 }
@@ -269,9 +283,9 @@ func testResearchVerdictTerminals(t *testing.T, h Harness) {
 		verdict   forge.Verdict
 		wantLabel string
 	}{
-		{"401", forge.Recommend, verdictLabels.Label(forge.Recommend)},
-		{"402", forge.Reject, verdictLabels.Label(forge.Reject)},
-		{"403", forge.Unclear, verdictLabels.Label(forge.Unclear)},
+		{id(h, "401"), forge.Recommend, verdictLabels.Label(forge.Recommend)},
+		{id(h, "402"), forge.Reject, verdictLabels.Label(forge.Reject)},
+		{id(h, "403"), forge.Unclear, verdictLabels.Label(forge.Unclear)},
 	}
 	tr := h.Tracker()
 	for _, tc := range cases {
