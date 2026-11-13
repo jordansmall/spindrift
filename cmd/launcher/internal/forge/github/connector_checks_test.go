@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -146,5 +147,61 @@ func TestConnector_ProbeIntervalMatchesNative(t *testing.T) {
 	}
 	if got := dc.ProbeInterval(); got != demandProbeInterval {
 		t.Errorf("Connector ProbeInterval = %v, native %v", got, demandProbeInterval)
+	}
+}
+
+// recover reads the terminal label a claim stripped from the timeline. The
+// Connector returns the removed names and core picks the state, so the answer
+// must be the native adapter's, which filters the same timeline through gh.
+func TestConnector_PriorClaimStateMatchesNative(t *testing.T) {
+	for _, fx := range []struct {
+		name    string
+		removed []string
+		want    forge.DispatchState
+		found   bool
+	}{
+		{"complete last", []string{testLabels.Failed, testLabels.Complete}, forge.Complete, true},
+		{"failed last", []string{testLabels.Complete, testLabels.Failed}, forge.Failed, true},
+		{"complete then claim strip", []string{testLabels.Complete, testLabels.Dispatchable}, forge.Complete, true},
+		{"none found", []string{testLabels.Dispatchable, "bug"}, 0, false},
+		{"no removals", nil, 0, false},
+	} {
+		t.Run(fx.name, func(t *testing.T) {
+			h := newConnectorHarness(t)
+			h.SeedIssue(forge.Issue{Number: "7", Title: "t"})
+			h.mutate("7", func(i *restIssue) { i.unlabeled = fx.removed })
+			calls := noGH(t)
+			pr, ok := forge.As[forge.PriorClaimStateReader](h.tr)
+			if !ok {
+				t.Fatal("Connector tracker does not serve PriorClaimState: it must advertise tracker.removedLabels")
+			}
+			got, found, err := pr.PriorClaimState("7")
+			if err != nil || found != fx.found || (found && got != fx.want) {
+				t.Fatalf("Connector PriorClaimState = %v, %v, %v; want %v, %v", got, found, err, fx.want, fx.found)
+			}
+			if n := calls(); n != 0 {
+				t.Errorf("the Connector's PriorClaimState ran gh %d times", n)
+			}
+			if h.backend.unexpected != nil {
+				t.Errorf("unexpected backend requests: %v", h.backend.unexpected)
+			}
+
+			// The native adapter's gh --jq has already reduced the timeline to
+			// the removed names, one a line.
+			out := strings.Join(fx.removed, "\\n")
+			prependFakeGH(t, `case "$*" in *timeline*) printf '`+out+`\n' ;; esac`)
+			wantState, wantFound, err := NewExecClient(connectorRepo, testLabels).PriorClaimState("7")
+			if err != nil || found != wantFound || (found && got != wantState) {
+				t.Errorf("Connector PriorClaimState = (%v, %v), native (%v, %v, %v)", got, found, wantState, wantFound, err)
+			}
+		})
+	}
+}
+
+func TestConnector_PriorClaimStateFailsWhenTheTimelineDoes(t *testing.T) {
+	h := newConnectorHarness(t)
+	pr, _ := forge.As[forge.PriorClaimStateReader](h.tr)
+	if _, found, err := pr.PriorClaimState("99"); err == nil || found {
+		t.Fatalf("PriorClaimState of a missing issue = %v, %v; want an error", found, err)
 	}
 }

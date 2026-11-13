@@ -42,8 +42,10 @@ type restIssue struct {
 	labels     []string
 	blockedBy  []string
 	failNative bool
-	pull       bool
-	comments   []string
+	// unlabeled names the labels removed from the issue, oldest first.
+	unlabeled []string
+	pull      bool
+	comments  []string
 }
 
 // scriptedContext is one node of a statusCheckRollup contexts union, in the
@@ -224,6 +226,18 @@ func (b *restBackend) serve(w http.ResponseWriter, r *http.Request) {
 			deps = append(deps, map[string]any{"number": n})
 		}
 		writeJSON(w, deps)
+	case len(parts) == 2 && parts[1] == "timeline":
+		i := b.find(parts[0])
+		if i == nil {
+			reject("no such issue")
+			return
+		}
+		// A labeled event first, so the read must pick out the unlabeled ones.
+		events := []map[string]any{{"event": "labeled", "label": map[string]any{"name": "bug"}}}
+		for _, name := range i.unlabeled {
+			events = append(events, map[string]any{"event": "unlabeled", "label": map[string]any{"name": name}})
+		}
+		writeJSON(w, events)
 	default:
 		reject("unknown endpoint")
 	}
