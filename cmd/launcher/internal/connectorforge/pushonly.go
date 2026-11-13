@@ -26,6 +26,7 @@ const (
 	capCIRun            = "forge.ciRun"
 	capBranchProtection = "forge.branchProtection"
 	capProbe            = "forge.probe"
+	capDraftPRs         = "forge.draftPRs"
 )
 
 // ErrPRForgeUnsupported marks a forge Connector that is neither push-only nor
