@@ -14,9 +14,10 @@ let
       ./fixtures/connector
     ];
   };
-  # The fixture Driver and network Connector are built by the fixture Connector
-  # itself, the one source of their wasm; they keep their place here for the
-  # tests that read driver.wasm and network.wasm.
+  # The fixture Driver, network Connector and push-only forge Connector are
+  # built by the fixture Connector itself, the one source of their wasm; they
+  # keep their place here for the tests that read driver.wasm, network.wasm and
+  # forge.wasm.
   connectorWasm = import ./fixtures/connector/package.nix {
     inherit pkgs;
     core = import ../core;
@@ -37,7 +38,8 @@ pkgs.runCommand "connector-wasm-fixtures" { nativeBuildInputs = [ pkgs.go ]; } '
   build probe.wasm ./probe
   build call.wasm ./call
   build seamtest-driver.wasm ./seamtest-driver
-  cp ${connectorWasm}/driver.wasm ${connectorWasm}/network.wasm $out/
+  cp ${connectorWasm}/driver.wasm ${connectorWasm}/network.wasm \
+    ${connectorWasm}/forge.wasm $out/
   for mode in trap loop memory oversize malformed invalid; do
     build hostile-$mode.wasm -ldflags=-X=main.mode=$mode ./hostile
   done

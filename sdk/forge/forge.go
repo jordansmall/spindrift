@@ -1,10 +1,12 @@
-// Package forge is the Connector author's side of the provisional forge read
+// Package forge is the Connector author's side of the provisional forge
 // primitives: a Connector declares a Reader and Register exports it over the
-// Connector protocol. The primitives are provisional at protocol 0.y; issue
-// #6754 finalises the forge axis.
+// Connector protocol, and declares Branches (remote identity, branch exists,
+// branch delete) and RegisterBranches exports those. The primitives are
+// provisional at protocol 0.y; issue #6754 finalises the forge axis.
 //
-// Every write (merge, auto-merge, ready/draft flips, PR comments) stays on
-// core's native adapter. The Connector returns raw fields only; core makes
+// Every write other than branch delete (merge, auto-merge, ready/draft flips,
+// PR comments) stays on core's native adapter, and core does every git
+// operation itself. The Connector returns raw fields only; core makes
 // every policy decision (which conclusions fail, rendering and capping failure
 // detail, PR URL validation).
 package forge
