@@ -73,8 +73,8 @@ func renderLockfileClassification() string {
 func renderRegistryDiscoverySources() string {
 	var configs []string
 	for _, row := range ecosystem.Registered() {
-		if row.InTreeConfigPath != "" {
-			configs = append(configs, "`"+row.InTreeConfigPath+"`")
+		if paths := row.ConfigPaths(); len(paths) > 0 {
+			configs = append(configs, "`"+strings.Join(paths, "` or `")+"`")
 		}
 	}
 	var stores []string

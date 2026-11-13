@@ -232,8 +232,8 @@ remote = https://artifacts.example.com/artifactory/api/remote/index
 	}
 }
 
-// bundle_test.TestEveryRegisteredStrategyPairsInTreeConfigPathWithParser
-// proves each registered Strategy pairs an InTreeConfigPath with a parser;
+// bundle_test.TestEveryRegisteredStrategyPairsConfigPathsWithParser
+// proves each registered Strategy pairs its config paths with a parser;
 // this one proves a Strategy's declaration reaches a subtree. A Strategy whose config parses
 // but derives no path would leave the proxy refusing every request that
 // Strategy makes, with no other test failing. The ecosystem corpus proves the

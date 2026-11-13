@@ -310,21 +310,24 @@ func TestEveryDeclaredStrategyIsRegisteredByTheBundle(t *testing.T) {
 }
 
 // registrydiscover.Extract, and registrypathset through it, silently skips a
-// Strategy whose InTreeConfigPath and ConfigParser disagree, so this is the
+// Strategy whose ConfigPaths and ConfigParser disagree, so this is the
 // only tripwire.
 // Looping Registered() covers every future ecosystem package, since
 // TestEveryDeclaredStrategyIsRegisteredByTheBundle keeps the list complete.
-func TestEveryRegisteredStrategyPairsInTreeConfigPathWithParser(t *testing.T) {
+func TestEveryRegisteredStrategyPairsConfigPathsWithParser(t *testing.T) {
 	registered := ecosystem.Registered()
 	if len(registered) == 0 {
 		t.Fatal("the Bundle registered no ecosystem Strategies")
 	}
 	for _, s := range registered {
-		if s.InTreeConfigPath != "" && s.ConfigParser == nil {
-			t.Errorf("Strategy %q declares InTreeConfigPath %q but has no ConfigParser", s.Name, s.InTreeConfigPath)
+		if s.InTreeConfigPath != "" && len(s.DiscoveryConfigPaths) > 0 {
+			t.Errorf("Strategy %q sets both InTreeConfigPath %q and DiscoveryConfigPaths %q", s.Name, s.InTreeConfigPath, s.DiscoveryConfigPaths)
 		}
-		if s.ConfigParser != nil && s.InTreeConfigPath == "" {
-			t.Errorf("Strategy %q has a ConfigParser but no InTreeConfigPath", s.Name)
+		if len(s.ConfigPaths()) > 0 && s.ConfigParser == nil {
+			t.Errorf("Strategy %q declares config paths %q but has no ConfigParser", s.Name, s.ConfigPaths())
+		}
+		if s.ConfigParser != nil && len(s.ConfigPaths()) == 0 {
+			t.Errorf("Strategy %q has a ConfigParser but no config paths", s.Name)
 		}
 	}
 }

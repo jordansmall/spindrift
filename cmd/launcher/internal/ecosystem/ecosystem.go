@@ -50,9 +50,18 @@ type HomeConfig struct {
 // binding still needs one. A nil field means no such notion at all.
 type RepoAwareHomeConfigRenderer func(port int, prefix string, routes []registrymanifest.Route, repoConfig string) (content string, exports []EnvExport, warnings []string)
 
+// ConfigPaths returns the in-tree config spellings discovery probes, in order.
+func (s Strategy) ConfigPaths() []string {
+	if s.InTreeConfigPath != "" {
+		return []string{s.InTreeConfigPath}
+	}
+	return s.DiscoveryConfigPaths
+}
+
 // ConfigParser returns every registry declaration named in the content of a
-// Strategy's InTreeConfigPath. It is pure: registrydiscover's walker reads the file
-// and stamps Declaration.Ecosystem and ConfigPath after the call returns.
+// Strategy's in-tree config (one of ConfigPaths). It is pure: registrydiscover's
+// walker reads the file and stamps Declaration.Ecosystem and ConfigPath after
+// the call returns.
 // namedAny separates "named nothing" from "named only unusable things". Nil
 // for a Strategy with no committed config (go, gradle); a walk skips such a Strategy.
 type ConfigParser func(content string) (decls []Declaration, namedAny bool, err error)
@@ -78,10 +87,17 @@ type Strategy struct {
 	// entrypoint.sh's old lockfile chain did.
 	Classification string
 
-	// InTreeConfigPath is empty for an ecosystem with no in-tree registry
-	// config to rewrite (go, gradle); consumers exclude such Strategies by
-	// filtering on that emptiness, never via a second hand-maintained list.
+	// InTreeConfigPath is empty for an ecosystem with no in-tree config to
+	// rewrite (go, gradle, nuget); bind-side consumers exclude such Strategies
+	// by filtering on that emptiness, never via a second hand-maintained list.
 	InTreeConfigPath string
+
+	// DiscoveryConfigPaths lists, in probe order, the spellings of an in-tree
+	// config that discovery and the path-set read but bind never rewrites;
+	// discovery reads the first that exists. A Strategy sets this or
+	// InTreeConfigPath, never both: leaving InTreeConfigPath empty is what keeps
+	// it out of bindregistry.InTreeBindings.
+	DiscoveryConfigPaths []string
 
 	EnvExports EnvExportRenderer
 
@@ -111,8 +127,8 @@ type Strategy struct {
 	// packument dist.tarball row (issue #3401).
 	RewriteRows []registryvocab.RewriteRow
 
-	// ConfigParser reads InTreeConfigPath and is nil exactly when that is empty;
-	// driver/bundle's TestEveryRegisteredStrategyPairsInTreeConfigPathWithParser
+	// ConfigParser reads ConfigPaths() and is nil exactly when that is empty;
+	// driver/bundle's TestEveryRegisteredStrategyPairsConfigPathsWithParser
 	// enforces it.
 	ConfigParser ConfigParser
 

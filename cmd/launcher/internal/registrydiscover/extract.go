@@ -1,6 +1,6 @@
 // Package registrydiscover extracts registry declarations from a Target repo's
 // own committed config files, the ones named by the Strategies'
-// InTreeConfigPath field (ADR 0044/0045), so `spindrift registry discover` can
+// ConfigPaths (ADR 0044/0045), so `spindrift registry discover` can
 // propose a routes file instead of an operator transcribing hosts by hand.
 package registrydiscover
 
@@ -24,33 +24,42 @@ func Extract(repoDir string, rows []ecosystem.Strategy) ([]ecosystem.Declaration
 	for _, row := range rows {
 		// A Strategy that gains a path before its parser lands discovers nothing
 		// rather than failing the whole scan.
-		if row.InTreeConfigPath == "" || row.ConfigParser == nil {
+		if len(row.ConfigPaths()) == 0 || row.ConfigParser == nil {
 			continue
 		}
 
-		data, err := os.ReadFile(filepath.Join(repoDir, row.InTreeConfigPath))
-		if err != nil {
-			// A missing config file is not an error, and earns no Note either.
-			if os.IsNotExist(err) {
-				continue
+		var data []byte
+		var found string
+		for _, path := range row.ConfigPaths() {
+			d, err := os.ReadFile(filepath.Join(repoDir, path))
+			if err != nil {
+				// A missing config file is not an error, and earns no Note either.
+				if os.IsNotExist(err) {
+					continue
+				}
+				return nil, nil, fmt.Errorf("registrydiscover: reading %s: %w", path, err)
 			}
-			return nil, nil, fmt.Errorf("registrydiscover: reading %s: %w", row.InTreeConfigPath, err)
+			data, found = d, path
+			break
+		}
+		if found == "" {
+			continue
 		}
 
 		decls, namedAny, err := row.ConfigParser(string(data))
 		if err != nil {
-			return nil, nil, fmt.Errorf("registrydiscover: parsing %s: %w", row.InTreeConfigPath, err)
+			return nil, nil, fmt.Errorf("registrydiscover: parsing %s: %w", found, err)
 		}
 
 		if len(decls) == 0 {
 			// Skipped separates "named nothing" from "named registries, none usable".
-			notes = append(notes, ecosystem.Note{ConfigPath: row.InTreeConfigPath, Ecosystem: row.Name, Skipped: namedAny})
+			notes = append(notes, ecosystem.Note{ConfigPath: found, Ecosystem: row.Name, Skipped: namedAny})
 			continue
 		}
 
 		for i := range decls {
 			decls[i].Ecosystem = row.Name
-			decls[i].ConfigPath = row.InTreeConfigPath
+			decls[i].ConfigPath = found
 		}
 		declared = append(declared, decls...)
 	}
