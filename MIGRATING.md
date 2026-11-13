@@ -1,18 +1,42 @@
 # Migration Guide
 
-## The Box's read-write forge access default flips to read-only (issue #6891)
+## The Box's forge access defaults to read-only (issue #6899)
 
 `BOX_FORGE_AND_ISSUE_ACCESS` (`perSystem.spindrift.forge.boxAccess`,
-`--box-access`) defaults to `read-write`: the Box writes to the Code Forge and
-Issue Tracker directly. A coming minor release flips that default to
-`read-only`, where the launcher host-mediates every write (parent issue #6757).
+`defaults.boxForgeAndIssueAccess`, `--box-access`) now defaults to `read-only`.
+It used to default to `read-write`. Under `read-only` the Box never writes to
+the Code Forge or Issue Tracker. It returns its branch as a bundle, and the
+launcher pushes it, opens the draft PR, posts the comments, and swaps the
+labels with its own token. See [Read-only
+Box](docs/reference.md#read-only-box-box_forge_and_issue_accessread-only).
 
-A Consumer that never set the knob is affected. The build now warns on stderr,
-and the launcher and `spindrift doctor` print the same notice at run time.
-Setting the knob explicitly, to either value, silences it and pins the
-behaviour across the flip.
+A Consumer that never set the knob is affected. An explicit `read-write` still
+works, but it is deprecated: the build, the launcher at dispatch and in the
+daemon, and `spindrift doctor` all warn, and a later minor release removes it
+(parent issue #6757). The butler's Box is always read-only, whatever the knob
+says.
 
-To keep read-write, set it explicitly:
+If you never set the knob, check three things before you update:
+
+- **A distinct, read-scoped Box token.** On `github` and `forgejo` the launcher
+  refuses to start a read-only run unless `BOX_GH_TOKEN` (GitHub) or
+  `BOX_FORGEJO_TOKEN` (Forgejo) is set and differs from the launcher's own
+  `GH_TOKEN` or `FORGEJO_TOKEN`. Where the forge can report token scopes
+  (GitHub), a write-capable Box token is rejected too. See [Read-only Box
+  token](docs/reference.md#read-only-box-token). `local` and `git` have no Box
+  token row.
+- **The labels.** The four triage labels must exist, as before (see [Label
+  lifecycle](docs/reference.md#label-lifecycle)). A deployment with a Filer
+  also needs `agent-review-finding`, because the host files what the Box
+  relays. `spindrift doctor` checks both and offers to create them. Trackers
+  with no label registry (`local`, `jira`) skip the check.
+- **Host mediation support.** The forge must relay bundles and the tracker must
+  post comments host-side. Every built-in combination does: the `github`,
+  `forgejo`, `local`, and `git` forges, and `jira` alongside a `github`,
+  `forgejo`, or `git` forge. The build throws naming the missing seam
+  otherwise.
+
+To keep `read-write` for now, set it explicitly:
 
 ```nix
 perSystem.spindrift.forge.boxAccess = "read-write";
@@ -21,10 +45,8 @@ defaults.boxForgeAndIssueAccess = "read-write";
 ```
 
 or pass `--box-access read-write` for a single dispatch (the daemon has no such
-flag; set the knob). To adopt `read-only` now, set
-`"read-only"`; it needs a forge and tracker that support host mediation (the
-build throws naming the missing seam otherwise; see the knob's doc in
-`docs/flake-options.md`).
+flag; set the knob). Either way it warns as deprecated until you move to
+`read-only`.
 
 ## A knob env var stops the launcher (issue #6623)
 
