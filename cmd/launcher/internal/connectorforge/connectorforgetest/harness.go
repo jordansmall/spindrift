@@ -1,8 +1,8 @@
 // Package connectorforgetest is a scripted forgejo-shaped backend, a loaded
-// fixture push-only forge Connector and a real bare git repo behind one
-// forgetest.CodeForgeHarness, so the composed Connector forge is driven through
-// the same seams production uses: the Route table, the audit log and core's own
-// git plumbing.
+// fixture forge Connector and a real bare git repo behind one
+// forgetest.CodeForgeHarness (push-only) or forgetest.PRForgeHarness (PR
+// capable), so the composed Connector forge is driven through the same seams
+// production uses: the Route table, the audit log and core's own git plumbing.
 package connectorforgetest
 
 import (
@@ -55,6 +55,8 @@ type Backend struct {
 	failures []int
 	branch   int
 	remotes  int
+
+	prs prStore
 }
 
 func newBackend(t *testing.T, bare string) *Backend {
@@ -99,14 +101,22 @@ func (b *Backend) RemoteRequests() int {
 }
 
 func (b *Backend) serve(w http.ResponseWriter, r *http.Request) {
+	b.mu.Lock()
+	b.prs.requests++
+	if strings.HasSuffix(r.URL.Path, "/merge") {
+		b.prs.merges++
+	}
+	b.mu.Unlock()
 	switch {
 	case r.URL.Path == apiPath+"/repos/"+Repo && r.Method == http.MethodGet:
 		b.mu.Lock()
 		b.remotes++
-		clone, web := b.clone, b.web
+		clone, web, allowRebase := b.clone, b.web, b.prs.allowRebase
 		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"clone_url": clone, "html_url": web})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"clone_url": clone, "html_url": web, "full_name": Repo, "allow_rebase": allowRebase,
+		})
 	case strings.HasPrefix(r.URL.Path, branchPath):
 		b.mu.Lock()
 		b.branch++
@@ -120,6 +130,8 @@ func (b *Backend) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		b.branchAnswer(w, r, strings.TrimPrefix(r.URL.Path, branchPath))
+	case strings.HasPrefix(r.URL.Path, apiPath+"/repos/"+Repo+"/"):
+		b.servePR(w, r, strings.TrimPrefix(r.URL.Path, apiPath+"/repos/"+Repo))
 	default:
 		http.NotFound(w, r)
 	}
@@ -138,7 +150,11 @@ func (b *Backend) branchAnswer(w http.ResponseWriter, r *http.Request, branch st
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
-		w.WriteHeader(http.StatusOK)
+		b.mu.Lock()
+		protected := b.prs.protected[branch]
+		b.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"protected": protected})
 	}
 }
 
@@ -150,24 +166,34 @@ type stack struct {
 	target  connectorforge.Target
 }
 
-func load(t *testing.T, bare string) *stack {
+// pushOnlyMethods are all the push-only fixture's Route table needs; a PR forge
+// also writes.
+var (
+	pushOnlyMethods = []string{http.MethodGet, http.MethodDelete}
+	prMethods       = []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete}
+)
+
+// load starts a backend and loads the fixture wasm file against it, declaring
+// one Route per method over the repository's subtree.
+func load(t *testing.T, bare, wasmFile string, methods []string) *stack {
 	t.Helper()
 	b := newBackend(t, bare)
 	dir, err := fixturebuild.ConnectorDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	wasm, err := os.ReadFile(filepath.Join(dir, "forge.wasm"))
+	wasm, err := os.ReadFile(filepath.Join(dir, wasmFile))
 	if err != nil {
 		t.Fatal(err)
 	}
 	audit := &bytes.Buffer{}
-	route := func(method string) connectorhost.Route {
-		return connectorhost.Route{Method: method, Host: b.Host, Path: apiPath + "/repos/" + Repo}
+	var routes []connectorhost.Route
+	for _, m := range methods {
+		routes = append(routes, connectorhost.Route{Method: m, Host: b.Host, Path: apiPath + "/repos/" + Repo})
 	}
 	c, err := connectorhost.LoadNetwork(context.Background(), wasm, connectorhost.Network{
 		Name:   "fixture-forge",
-		Routes: []connectorhost.Route{route(http.MethodGet), route(http.MethodDelete)},
+		Routes: routes,
 		Authorize: func(r *http.Request) error {
 			r.Header.Set("Authorization", "Bearer "+Token)
 			return nil
@@ -182,9 +208,9 @@ func load(t *testing.T, bare string) *stack {
 	return &stack{b, c, audit, connectorforge.Target{API: b.URL + apiPath, Repo: Repo}}
 }
 
-// Harness implements forgetest.CodeForgeHarness and forgetest.PushOnly over the
-// composed Connector forge.
-type Harness struct {
+// base is what the push-only and PR harnesses share: one backend, one loaded
+// Connector, one bare repo and the composed forge.
+type base struct {
 	t *testing.T
 	// Repo is the real bare repo behind the backend.
 	Repo *forgetest.GitRepoFixture
@@ -197,6 +223,8 @@ type Harness struct {
 	// Credential is core's git credential handed to Compose.
 	Credential gitexec.Credential
 
+	wasm     string
+	methods  []string
 	target   connectorforge.Target
 	mu       sync.Mutex
 	sleeps   []time.Duration
@@ -211,9 +239,9 @@ type PlumbingCall struct {
 	Credential gitexec.Credential
 }
 
-// New starts the backend, loads the fixture Connector and composes the forge
-// with the default, valid remote.
-func New(t *testing.T) *Harness {
+// newBase starts the backend, loads the fixture Connector wasm file and
+// composes the forge with the default, valid remote.
+func newBase(t *testing.T, wasm string, methods []string) *base {
 	t.Helper()
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
 	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
@@ -221,9 +249,9 @@ func New(t *testing.T) *Harness {
 	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
 
 	repo := forgetest.NewGitRepoFixture(t, "main")
-	s := load(t, repo.Bare)
-	h := &Harness{
-		t: t, Repo: repo, Backend: s.backend, Conn: s.conn, Audit: s.audit, target: s.target,
+	s := load(t, repo.Bare, wasm, methods)
+	h := &base{
+		t: t, wasm: wasm, methods: methods, Repo: repo, Backend: s.backend, Conn: s.conn, Audit: s.audit, target: s.target,
 		Credential: gitexec.Credential{Username: "bot", Password: "git-secret"},
 	}
 	// Production code is https-only, so git is pointed at the bare repo through
@@ -240,7 +268,7 @@ func New(t *testing.T) *Harness {
 	return h
 }
 
-func (h *Harness) git() connectorforge.Git {
+func (h *base) git() connectorforge.Git {
 	return connectorforge.Git{
 		Credential: h.Credential,
 		Plumbing: func(u string, cred gitexec.Credential) forge.CodeForge {
@@ -259,25 +287,36 @@ func (h *Harness) git() connectorforge.Git {
 
 // Compose composes a forge from the harness's Connector as it stands, so a test
 // can script the backend first.
-func (h *Harness) Compose() (forge.CodeForge, forge.Capabilities, error) {
+func (h *base) Compose() (forge.CodeForge, forge.Capabilities, error) {
 	return connectorforge.Compose(h.Conn, h.target, h.git())
 }
 
 // PlumbingCalls returns every call Compose made to build the git plumbing.
-func (h *Harness) PlumbingCalls() []PlumbingCall {
+func (h *base) PlumbingCalls() []PlumbingCall {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]PlumbingCall(nil), h.plumbing...)
 }
 
 // Capabilities are the capabilities the New-time Compose resolved.
-func (h *Harness) Capabilities() forge.Capabilities { return h.caps }
+func (h *base) Capabilities() forge.Capabilities { return h.caps }
 
 // Sleeps returns the backoff sleeps the composed forge's retries took.
-func (h *Harness) Sleeps() []time.Duration {
+func (h *base) Sleeps() []time.Duration {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]time.Duration(nil), h.sleeps...)
+}
+
+// Harness implements forgetest.CodeForgeHarness and forgetest.PushOnly over the
+// composed push-only Connector forge.
+type Harness struct{ *base }
+
+// New starts the backend, loads the fixture push-only Connector and composes the
+// forge with the default, valid remote.
+func New(t *testing.T) *Harness {
+	t.Helper()
+	return &Harness{newBase(t, "forge.wasm", pushOnlyMethods)}
 }
 
 // Forge returns the composed forge.
@@ -286,7 +325,7 @@ func (h *Harness) Forge() forge.CodeForge { return h.cf }
 // Unreachable composes against a second backend, then closes it so Probe fails.
 func (h *Harness) Unreachable() forge.CodeForge {
 	h.t.Helper()
-	s := load(h.t, h.Repo.Bare)
+	s := load(h.t, h.Repo.Bare, h.wasm, h.methods)
 	cf, _, err := connectorforge.Compose(s.conn, s.target, h.git())
 	if err != nil {
 		h.t.Fatal(err)
@@ -295,20 +334,20 @@ func (h *Harness) Unreachable() forge.CodeForge {
 	return cf
 }
 
-func (h *Harness) BranchPrefix() string { return prefix }
+func (h *base) BranchPrefix() string { return prefix }
 
 func (h *Harness) IsPushOnly() {}
 
-func (h *Harness) SeedLandable(num string) string {
+func (h *base) SeedLandable(num string) string {
 	h.Repo.SeedBranch(forge.AgentBranchName(prefix, num), num)
 	return forge.AgentBranchName(prefix, num)
 }
 
-func (h *Harness) AdvanceBase() { h.Repo.AdvanceBase() }
+func (h *base) AdvanceBase() { h.Repo.AdvanceBase() }
 
-func (h *Harness) Landed(num string) bool { return h.Repo.Landed(num) }
+func (h *base) Landed(num string) bool { return h.Repo.Landed(num) }
 
-func (h *Harness) Rebased(num string) bool { return h.Repo.Rebased(forge.AgentBranchName(prefix, num)) }
+func (h *base) Rebased(num string) bool { return h.Repo.Rebased(forge.AgentBranchName(prefix, num)) }
 
 func (h *Harness) FailNextMerge(ref string) { h.Repo.ConflictBase(strings.TrimPrefix(ref, prefix)) }
 
