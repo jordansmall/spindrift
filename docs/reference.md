@@ -7233,9 +7233,18 @@ differs from the Launcher's own `GH_TOKEN`. Where the Box token can be
 introspected — a classic/OAuth PAT (`X-OAuth-Scopes`) or a GitHub App
 installation token (the repo endpoint's `permissions.push` field) — it's
 rejected if it carries write access; a fine-grained PAT can't be introspected
-reliably, so it's accepted with a loud warning instead. `spindrift doctor`
-reports this gate's outcome the same way it reports labels and forge
-connectivity. `read-write` never inspects `BOX_GH_TOKEN` either way.
+reliably, so it's accepted with a loud warning instead. The introspection runs
+through the github backend's Connector when a `github` backend row is
+configured and not in shadow mode (a shadow row keeps `gh` answering), so the
+host needs no `gh` (a Connector that does not declare `forge.tokenGrant` leaves the token unverifiable, so launch refuses and names
+the remedy rather than let an unverified read-only token reach the Box);
+without that row the native `gh` probe answers. The Connector makes both reads
+over `POST /graphql` (the scopes header of a viewer query; the repository's
+`viewerPermission`), so it needs no REST Route for `/user` or the repository.
+`spindrift doctor` reports this gate's outcome the same way it reports labels
+and forge connectivity, and reports a gate its Connector cannot serve as
+`unsupported` (even in a quiet run), never a failure. `read-write` never
+inspects `BOX_GH_TOKEN` either way.
 
 `read-only` is an **alternative route to the same guarantee** [two-actor
 separation](#two-actor-separation-opt-in-hard-mode) provides: a Box that
