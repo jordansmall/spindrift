@@ -7,7 +7,7 @@ h6. Heading six
 
 Plain *bold* and *bold* and _italic_ and _italic_ and ***odd*** text.
 
-Inline {{code with *stars*}} and a [link|https://example.com/a_b] and https://example.com/x_y_z bare.
+Inline {{code with \*stars\*}} and a [link|https://example.com/a_b] and https://example.com/x_y_z bare.
 
 * top
 ** nested
