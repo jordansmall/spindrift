@@ -3,7 +3,9 @@ package jira_test
 import (
 	"errors"
 	"os"
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/connectorhost"
@@ -224,5 +226,306 @@ func TestConnector_HybridFallsBackToLabelWhenTransitionUnoffered(t *testing.T) {
 				t.Errorf("status %q labels %v, want the native status kept and only %q labelled", rec.status, rec.labels, testLabels.Failed)
 			}
 		})
+	}
+}
+
+// writeLabels adds the ambiguous label the shared testLabels lack, so the
+// ambiguous cases can fall back to it.
+var writeLabels = func() forge.DispatchLabels {
+	l := testLabels
+	l.Ambiguous = "agent-ambiguous-spec"
+	return l
+}()
+
+// transitionCase is one TransitionState scenario run against the Connector in
+// each flavour: the lifecycle and workflow it runs under, the issue it starts
+// from, and what the backend and the error must show afterwards.
+type transitionCase struct {
+	name      string
+	mapping   string
+	lifecycle string
+	backend   writeBackend
+	// the seeded issue; status defaults to "To Do"
+	status string
+	labels []string
+	from   forge.DispatchState
+	to     forge.DispatchState
+
+	failIssueRead   bool
+	failTransitions bool
+
+	// wantErr, when set, are substrings of a plain (non-refusal, non-claim) error
+	wantErr     []string
+	wantClaimed bool
+	wantRefusal *forge.TransitionRefusedError
+
+	wantStatus       string
+	wantResolution   string
+	wantLabels       []string
+	wantPosts        int
+	wantLabelsAtPost []string // checked only when wantPosts > 0
+}
+
+func sorted(s []string) []string { return slices.Sorted(slices.Values(s)) }
+
+func transitionCases() []transitionCase {
+	doneOnly := writeBackend{statuses: []string{"Done"}}
+	inProgressOnly := writeBackend{statuses: []string{"In Progress"}}
+	const inProg = "agent-in-progress"
+	return []transitionCase{
+		{
+			name: "string mapping posts no resolution", mapping: `{"complete":"Done"}`, lifecycle: jira.LifecycleHybrid,
+			backend: doneOnly, status: "In Progress", labels: []string{inProg}, from: forge.InProgress, to: forge.Complete,
+			wantStatus: "Done", wantPosts: 1, wantLabelsAtPost: []string{inProg},
+		},
+		{
+			name: "object mapping sends its resolution", mapping: `{"complete":{"status":"Done","resolution":"Won't Do"}}`, lifecycle: jira.LifecycleHybrid,
+			backend: writeBackend{[]string{"Done"}, doneResolutionScreen}, status: "In Progress", labels: []string{inProg}, from: forge.InProgress, to: forge.Complete,
+			wantStatus: "Done", wantResolution: "Won't Do", wantPosts: 1, wantLabelsAtPost: []string{inProg},
+		},
+		{
+			name: "resolution without a screen field is refused, not swapped for a label", mapping: `{"complete":{"status":"Done","resolution":"Won't Do"}}`, lifecycle: jira.LifecycleHybrid,
+			backend: doneOnly, status: "In Progress", labels: []string{inProg}, from: forge.InProgress, to: forge.Complete,
+			wantErr:    []string{"Done", "PROJ-1", "Won't Do", "no resolution field"},
+			wantStatus: "In Progress", wantLabels: []string{inProg},
+		},
+		{
+			name: "a required field with no value is refused, not swapped for a label", mapping: `{"complete":"Done"}`, lifecycle: jira.LifecycleHybrid,
+			backend: writeBackend{[]string{"Done"}, map[string]map[string]jiraWireTransitionField{"Done": {
+				"resolution":        {Required: true, Name: "Resolution"},
+				"customfield_10001": {Required: true},
+			}}},
+			status: "In Progress", labels: []string{inProg}, from: forge.InProgress, to: forge.Complete,
+			wantErr:    []string{"Resolution (resolution)", "customfield_10001", "Done", "PROJ-1"},
+			wantStatus: "In Progress", wantLabels: []string{inProg},
+		},
+		{
+			name: "a required field with a default does not block", mapping: `{"complete":"Done"}`, lifecycle: jira.LifecycleHybrid,
+			backend: writeBackend{[]string{"Done"}, map[string]map[string]jiraWireTransitionField{"Done": {
+				"resolution": {Required: true, HasDefaultValue: true, Name: "Resolution"},
+				"labels":     {Name: "Labels"},
+			}}},
+			status: "In Progress", labels: []string{inProg}, from: forge.InProgress, to: forge.Complete,
+			wantStatus: "Done", wantPosts: 1, wantLabelsAtPost: []string{inProg},
+		},
+		{
+			name: "a native claim strips settled labels before it transitions", mapping: `{"inProgress":"In Progress"}`, lifecycle: jira.LifecycleHybrid,
+			backend: inProgressOnly, labels: []string{"agent-failed", "agent-complete", "ready-for-agent", "unrelated"},
+			from: forge.Dispatchable, to: forge.InProgress,
+			wantStatus: "In Progress", wantLabels: []string{"unrelated"}, wantPosts: 1,
+			wantLabelsAtPost: []string{"ready-for-agent", "unrelated"},
+		},
+		{
+			name: "hybrid honours a native In Progress status as claimed", mapping: `{"dispatchable":"To Do","inProgress":"In Progress"}`, lifecycle: jira.LifecycleHybrid,
+			backend: inProgressOnly, status: "In Progress", from: forge.Dispatchable, to: forge.InProgress,
+			wantClaimed: true, wantStatus: "In Progress",
+		},
+		{
+			name: "status mode honours a native In Progress status as claimed", mapping: `{"dispatchable":"To Do","inProgress":"In Progress"}`, lifecycle: jira.LifecycleStatus,
+			backend: inProgressOnly, status: "In Progress", from: forge.Dispatchable, to: forge.InProgress,
+			wantClaimed: true, wantStatus: "In Progress",
+		},
+		{
+			name: "hybrid honours the in-progress label as claimed", mapping: `{"dispatchable":"To Do","inProgress":"In Progress"}`, lifecycle: jira.LifecycleHybrid,
+			backend: inProgressOnly, labels: []string{inProg}, from: forge.Dispatchable, to: forge.InProgress,
+			wantClaimed: true, wantStatus: "To Do", wantLabels: []string{inProg},
+		},
+		{
+			name: "status mode ignores a stale in-progress label", mapping: `{"dispatchable":"To Do","inProgress":"In Progress"}`, lifecycle: jira.LifecycleStatus,
+			backend: inProgressOnly, labels: []string{inProg}, from: forge.Dispatchable, to: forge.InProgress,
+			wantStatus: "In Progress", wantLabels: []string{inProg}, wantPosts: 1, wantLabelsAtPost: []string{inProg},
+		},
+		{
+			name: "a mapped ambiguous state transitions", mapping: `{"ambiguous":"Needs Spec"}`, lifecycle: jira.LifecycleHybrid,
+			backend: writeBackend{statuses: []string{"Needs Spec"}}, status: "In Progress", labels: []string{inProg}, from: forge.InProgress, to: forge.Ambiguous,
+			wantStatus: "Needs Spec", wantPosts: 1, wantLabelsAtPost: []string{inProg},
+		},
+		{
+			name: "an unmapped ambiguous state falls back to its label", mapping: ``, lifecycle: jira.LifecycleHybrid,
+			status: "In Progress", labels: []string{inProg}, from: forge.InProgress, to: forge.Ambiguous,
+			wantStatus: "In Progress", wantLabels: []string{"agent-ambiguous-spec"},
+		},
+		{
+			name: "an unavailable ambiguous transition falls back to its label", mapping: `{"ambiguous":"Needs Spec"}`, lifecycle: jira.LifecycleHybrid,
+			backend: writeBackend{statuses: []string{"Backlog"}}, status: "In Progress", labels: []string{inProg}, from: forge.InProgress, to: forge.Ambiguous,
+			wantStatus: "In Progress", wantLabels: []string{"agent-ambiguous-spec"},
+		},
+		{
+			name: "a failing transition list is an error, not a label swap", mapping: `{"inProgress":"In Progress"}`, lifecycle: jira.LifecycleHybrid,
+			failTransitions: true, from: forge.Dispatchable, to: forge.InProgress,
+			wantErr: []string{"500"}, wantStatus: "To Do",
+		},
+		{
+			name: "status mode refuses an unmapped target with no label edit", mapping: `{"dispatchable":"To Do","inProgress":"In Progress"}`, lifecycle: jira.LifecycleStatus,
+			backend: inProgressOnly, status: "In Progress", from: forge.InProgress, to: forge.Recoverable,
+			wantRefusal: &forge.TransitionRefusedError{Issue: "PROJ-1", From: "In Progress", State: "recoverable"},
+			wantStatus:  "In Progress",
+		},
+		{
+			name: "a refusal carries the status the issue sat in", mapping: `{"dispatchable":"To Do","complete":"Done"}`, lifecycle: jira.LifecycleStatus,
+			backend: writeBackend{statuses: []string{"Blocked", "To Do"}}, status: "In Review", from: forge.InProgress, to: forge.Complete,
+			wantRefusal: &forge.TransitionRefusedError{Issue: "PROJ-1", From: "In Review", To: "Done", Offered: []string{"Blocked", "To Do"}},
+			wantStatus:  "In Review",
+		},
+		{
+			name: "a refusal survives a failed status read", mapping: `{"dispatchable":"To Do","complete":"Done"}`, lifecycle: jira.LifecycleStatus,
+			backend: writeBackend{statuses: []string{"Blocked"}}, status: "In Review", failIssueRead: true, from: forge.InProgress, to: forge.Complete,
+			wantRefusal: &forge.TransitionRefusedError{Issue: "PROJ-1", To: "Done", Offered: []string{"Blocked"}},
+			wantStatus:  "In Review",
+		},
+	}
+}
+
+// The native adapter's status-only and transition cases, run against the
+// Connector: every decision is core's, so each outcome must match.
+func TestConnector_TransitionCases(t *testing.T) {
+	for _, fl := range connectorFlavours {
+		for _, tc := range transitionCases() {
+			t.Run(fl.name+"/"+tc.name, func(t *testing.T) {
+				lc, err := connectorLifecycle(dispatchkind.TrackerWork, writeLabels, forge.ResearchVerdictLabels(), tc.mapping, tc.lifecycle, "Task")
+				if err != nil {
+					t.Fatal(err)
+				}
+				h := newConnectorHarnessWith(t, fl.cloud, lc)
+				tc.backend.apply(h)
+				h.transitionsFail = tc.failTransitions
+				h.SeedIssue(forge.Issue{Number: "PROJ-1", Title: "t", Labels: tc.labels})
+				status := tc.status
+				if status == "" {
+					status = "To Do"
+				}
+				h.mutate("PROJ-1", func(r *jiraIssueRecord) { r.status = status })
+				if tc.failIssueRead {
+					h.FailNativeDeps("PROJ-1") // fails the issue read
+				}
+
+				err = h.tr.TransitionState("PROJ-1", tc.from, tc.to)
+				switch {
+				case tc.wantRefusal != nil:
+					var got *forge.TransitionRefusedError
+					if !errors.As(err, &got) {
+						t.Fatalf("err = %v, want a *forge.TransitionRefusedError", err)
+					}
+					if !reflect.DeepEqual(got, tc.wantRefusal) {
+						t.Errorf("refusal = %+v, want %+v", got, tc.wantRefusal)
+					}
+				case tc.wantClaimed:
+					if !errors.Is(err, forge.ErrAlreadyClaimed) {
+						t.Fatalf("err = %v, want forge.ErrAlreadyClaimed", err)
+					}
+				case tc.wantErr != nil:
+					if err == nil {
+						t.Fatal("want an error")
+					}
+					var refused *forge.TransitionRefusedError
+					if errors.As(err, &refused) || errors.Is(err, forge.ErrAlreadyClaimed) {
+						t.Fatalf("err = %v, want a plain error", err)
+					}
+					for _, want := range tc.wantErr {
+						if !strings.Contains(err.Error(), want) {
+							t.Errorf("error %q does not name %q", err, want)
+						}
+					}
+				case err != nil:
+					t.Fatalf("TransitionState: %v", err)
+				}
+
+				rec := h.issueRecord("PROJ-1")
+				if rec.status != tc.wantStatus || rec.resolution != tc.wantResolution || rec.posts != tc.wantPosts {
+					t.Errorf("status %q resolution %q posts %d, want %q / %q / %d",
+						rec.status, rec.resolution, rec.posts, tc.wantStatus, tc.wantResolution, tc.wantPosts)
+				}
+				if !slices.Equal(sorted(rec.labels), sorted(tc.wantLabels)) {
+					t.Errorf("labels = %v, want %v", rec.labels, tc.wantLabels)
+				}
+				if tc.wantPosts > 0 && !slices.Equal(sorted(rec.labelsAtPost), sorted(tc.wantLabelsAtPost)) {
+					t.Errorf("labels at the transition = %v, want %v", rec.labelsAtPost, tc.wantLabelsAtPost)
+				}
+			})
+		}
+	}
+}
+
+// A transition whose mapping is unavailable gives core the same outcome through
+// the Connector as through the native adapter: hybrid falls back to the label,
+// status refuses with what the workflow offers.
+func TestConnector_UnavailableTransitionMatchesNative(t *testing.T) {
+	const mapping = `{"dispatchable":"To Do","complete":"Done"}`
+	for _, fl := range connectorFlavours {
+		for _, lifecycle := range []string{jira.LifecycleHybrid, jira.LifecycleStatus} {
+			t.Run(fl.name+"/"+lifecycle, func(t *testing.T) {
+				lc, err := connectorLifecycle(dispatchkind.TrackerWork, testLabels, forge.ResearchVerdictLabels(), mapping, lifecycle, "Task")
+				if err != nil {
+					t.Fatal(err)
+				}
+				h := newConnectorHarnessWith(t, fl.cloud, lc)
+				h.workflowStatuses = []string{"Blocked", "To Do"}
+				targets, err := jira.ParseStatusMapping(mapping)
+				if err != nil {
+					t.Fatal(err)
+				}
+				email := ""
+				if fl.cloud {
+					email = connectorEmail
+				}
+				native := jira.NewJiraClient(jira.JiraConfig{
+					BaseURL:       h.srv.URL,
+					ProjectKey:    connectorProject,
+					Email:         email,
+					Token:         connectorToken,
+					Labels:        testLabels,
+					StatusMapping: targets,
+					StatusOnly:    lifecycle == jira.LifecycleStatus,
+					HTTPClient:    h.srv.Client(),
+				})
+
+				// The same issue per side, reseeded identically between them.
+				sides := []struct {
+					name string
+					key  string
+					tr   forge.IssueTracker
+				}{{"native", "PROJ-1", native}, {"connector", "PROJ-1", h.tr}}
+				outcomes := map[string]struct {
+					err    error
+					labels []string
+				}{}
+				for _, s := range sides {
+					h.SeedIssue(forge.Issue{Number: s.key, Title: "t", Labels: []string{testLabels.InProgress}})
+					h.mutate(s.key, func(r *jiraIssueRecord) { r.status = "In Review" })
+					err := s.tr.TransitionState(s.key, forge.InProgress, forge.Complete)
+					outcomes[s.name] = struct {
+						err    error
+						labels []string
+					}{err, sorted(h.issueRecord(s.key).labels)}
+					if rec := h.issueRecord(s.key); rec.status != "In Review" {
+						t.Errorf("%s moved the issue to %q, want it left in In Review", s.name, rec.status)
+					}
+				}
+
+				n, c := outcomes["native"], outcomes["connector"]
+				if !slices.Equal(n.labels, c.labels) {
+					t.Errorf("labels: native %v, connector %v", n.labels, c.labels)
+				}
+				if lifecycle == jira.LifecycleHybrid {
+					if n.err != nil || c.err != nil {
+						t.Fatalf("hybrid errors: native %v, connector %v, want none", n.err, c.err)
+					}
+					if want := []string{testLabels.Complete}; !slices.Equal(c.labels, want) {
+						t.Errorf("labels = %v, want the fallback %v", c.labels, want)
+					}
+					return
+				}
+				var nRef, cRef *forge.TransitionRefusedError
+				if !errors.As(n.err, &nRef) || !errors.As(c.err, &cRef) {
+					t.Fatalf("status errors: native %v, connector %v, want both a TransitionRefusedError", n.err, c.err)
+				}
+				if !reflect.DeepEqual(nRef, cRef) || cRef.From != "In Review" || cRef.To != "Done" || !slices.Equal(cRef.Offered, []string{"Blocked", "To Do"}) {
+					t.Errorf("refusals differ or are incomplete: native %+v, connector %+v", nRef, cRef)
+				}
+				if !slices.Equal(c.labels, []string{testLabels.InProgress}) {
+					t.Errorf("labels = %v, want the seeded label untouched", c.labels)
+				}
+			})
+		}
 	}
 }
