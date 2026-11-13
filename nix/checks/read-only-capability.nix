@@ -142,6 +142,7 @@ in
         builtins.seq (mkHarnessWith {
           codeForge = "git";
           issueTracker = "jira";
+          boxForgeAndIssueAccess = "read-write";
         }) "reached"
       );
     in

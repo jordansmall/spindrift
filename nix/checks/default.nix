@@ -358,6 +358,7 @@ let
   commentTreeReaders = {
     "bats:.github/scripts" = "the classifier suite builds ci-go-tokens.go";
     "box-access-default:." = "a consumer flake fixture's outPath";
+    "box-access-default:cmd/launcher/internal/inputdoc" = "reads inputdoc.go for the notice parity pin";
     "baked-skills:cmd/launcher" = "spliced and built; its marker files are under promptassembly/";
     "dashboard-js:dashboard" = "a fileset root over the JS tree only";
     "default:." = "the coverage guards' path probes";

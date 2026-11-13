@@ -58,7 +58,10 @@ set_dispatch_env() {
   export CLAUDE_CODE_OAUTH_TOKEN="fake-oauth"
   # The fake runtime cannot answer the socket carrier's transport probe, so
   # launcher-level suites pin the log carrier rather than take the schema
-  # default. Bound the merge gate's poll loop (issue #2424): a test that
+  # default. They pin read-write box access for the same reason: the fake
+  # runtime returns no bundle for the read-only relay, and the read-only
+  # default's host-side mirror seed would reach the network (issue #6899).
+  # Bound the merge gate's poll loop (issue #2424): a test that
   # reaches it without its own values would inherit the production defaults
   # (3600s timeout, 30s interval) and really sleep, as CI did on PR #2410.
   # Interval 0 keeps iterations instant; a small nonzero timeout still lets it
@@ -69,6 +72,7 @@ set_dispatch_env() {
     --user-name "Test Bot"
     --user-email bot@example.com
     --box-signal-carrier log
+    --box-access read-write
     --merge-poll-interval 0
     --merge-poll-timeout 2
   )

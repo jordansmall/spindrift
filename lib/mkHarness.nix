@@ -1515,7 +1515,6 @@ let
       artifacts = runArtifacts;
       drivers = docDriverRows hostPkgs;
       backends = docBackendRows hostPkgs;
-      inherit deprecatedDefaults;
     }
   );
 
@@ -1732,16 +1731,12 @@ let
   ) (lib.filter bareWorker keptRoster);
   droppedBareWorkerMsg = "spindrift: the worker model ${builtins.toJSON (lib.head droppedBareWorkers).model} is not a `<provider>/<model>` id, which this Driver requires, so the worker is not provisioned (issue #5331).";
 
-  # The read-write default is deprecated (issue #6757). `defaults ? k` is true
-  # only for an explicit setting (the flake module drops nulls), so an explicit
-  # read-write stays silent. The message also travels in the input document,
-  # so the launcher and doctor print the same text.
-  boxAccessDefaultDeprecated =
-    !(defaults ? boxForgeAndIssueAccess) && mergedDefaults.boxForgeAndIssueAccess == "read-write";
-  boxAccessDefaultMsg = "spindrift: BOX_FORGE_AND_ISSUE_ACCESS defaults to read-write, and that default flips to read-only in a coming minor release (issue #6757). To keep read-write, set it explicitly (perSystem.spindrift.forge.boxAccess = \"read-write\" or defaults.boxForgeAndIssueAccess; --box-access read-write covers a single dispatch); see MIGRATING.md, \"The Box's read-write forge access default flips to read-only (issue #6891)\".";
-  deprecatedDefaults = lib.optionalAttrs boxAccessDefaultDeprecated {
-    BOX_FORGE_AND_ISSUE_ACCESS = boxAccessDefaultMsg;
-  };
+  # read-only is the default (issue #6899), so a merged read-write is always
+  # explicit. The input document carries no notice: the launcher warns on the
+  # effective value, which a --box-access flag can differ from.
+  boxAccessWarnings =
+    lib.optional (mergedDefaults.boxForgeAndIssueAccess == "read-write")
+      "spindrift: BOX_FORGE_AND_ISSUE_ACCESS=read-write is deprecated and will be removed in a later minor release (issue #6757). The default is now read-only, where the launcher host-mediates every Box write. To move, set perSystem.spindrift.forge.boxAccess = \"read-only\" (or defaults.boxForgeAndIssueAccess), or unset it; see MIGRATING.md, \"The Box's forge access defaults to read-only (issue #6899)\".";
 
   # The same warnings as data, so a check can assert on them without
   # capturing stderr.
@@ -1757,7 +1752,7 @@ let
     lib.foldl' (acc: msg: lib.warn msg acc) outputs (
       lib.optional (legacyKnobsSet != [ ]) deprecationMsg
       ++ rosterWarnings
-      ++ lib.attrValues deprecatedDefaults
+      ++ boxAccessWarnings
       ++ deprecatedFragmentVarWarnings
     );
 
@@ -1954,7 +1949,7 @@ else
         kindPrompts
         ;
 
-      inherit rosterWarnings deprecatedFragmentVarWarnings deprecatedDefaults;
+      inherit rosterWarnings deprecatedFragmentVarWarnings boxAccessWarnings;
     };
 
     packages =

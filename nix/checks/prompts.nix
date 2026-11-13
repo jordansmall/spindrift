@@ -2121,8 +2121,8 @@ in
     pkgs.runCommand "build-time-reject-research-verdict-comment-relay-missing" { } "touch $out";
 
   # The gate-not-triggered counterpart (AC3): the same broken fragments
-  # directory, but boxForgeAndIssueAccess left at its schema default
-  # (read-write). The gating condition is not statically known true, so
+  # directory, but boxForgeAndIssueAccess set to
+  # read-write. The gating condition is not statically known true, so
   # buildTimeRejectVerdicts resolves "advise" and the build succeeds.
   build-time-reject-research-verdict-comment-relay-not-triggered =
     let
