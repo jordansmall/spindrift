@@ -207,3 +207,33 @@ func TestReporter_Verbose_Results_PrintsDegradedRequiredFindingAsAdvisory(t *tes
 		t.Fatalf("Results() wrote %q, want %q", buf.String(), want)
 	}
 }
+
+func TestReporter_Verbose_Results_PrintsUnsupportedAsItsOwnLineWithoutRemedy(t *testing.T) {
+	results := []Result{{
+		Check: Check{Name: "token-scopes", Tier: Required, Remedy: "install gh"},
+		Err:   fmt.Errorf("the github connector does not declare forge.tokenGrant: %w", ErrUnsupported),
+	}}
+
+	var buf bytes.Buffer
+	NewReporter(&buf, true).Results(results)
+
+	want := "unsupported: token-scopes (the github connector does not declare forge.tokenGrant)\n"
+	if buf.String() != want {
+		t.Fatalf("Results() wrote %q, want %q", buf.String(), want)
+	}
+}
+
+func TestReporter_Quiet_Results_PrintsUnsupportedRow(t *testing.T) {
+	results := []Result{{
+		Check: Check{Name: "token-scopes", Tier: Required, Remedy: "install gh"},
+		Err:   fmt.Errorf("no capability: %w", ErrUnsupported),
+	}}
+
+	var buf bytes.Buffer
+	NewReporter(&buf, false).Results(results)
+
+	want := "unsupported: token-scopes (no capability)\n"
+	if buf.String() != want {
+		t.Fatalf("Results() wrote %q in quiet mode, want %q", buf.String(), want)
+	}
+}

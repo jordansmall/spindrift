@@ -75,6 +75,14 @@ func (r *Reporter) Finding(t Tier, format string, a ...any) {
 	fmt.Fprint(r.w, rowPrefix(t)+": "+line+"\n")
 }
 
+// Unsupported writes an "unsupported: " row naming a check the backend's
+// Connector cannot serve. It is not a failure, so it carries no remedy, but a
+// quiet run still prints it: a check that never ran must not read as a clean
+// report.
+func (r *Reporter) Unsupported(format string, a ...any) {
+	fmt.Fprint(r.w, "unsupported: "+fmt.Sprintf(format, a...)+"\n")
+}
+
 // remedyLine writes a finding's indented "  remedy: <remedy>" line, or
 // nothing when remedySuffix reports the remedy repeats the error text. It
 // ignores verbose: its only caller, Results, gates it on the row's visibility.
@@ -107,7 +115,8 @@ func rowPrefix(t Tier) string {
 // Results reports one row per Result: an "ok: <name>" success row, or a
 // status line keyed on r.Check.Tier plus a "  remedy: <remedy>" line on
 // failure. An Err wrapping ErrDegraded prints as "advisory:" whatever the
-// Check's own Tier, with the sentinel's text trimmed off.
+// Check's own Tier, with the sentinel's text trimmed off; one wrapping
+// ErrUnsupported prints as "unsupported: <name> (<reason>)" with no remedy.
 func (r *Reporter) Results(results []Result) {
 	for _, res := range results {
 		if res.Err == nil {
@@ -116,6 +125,10 @@ func (r *Reporter) Results(results []Result) {
 				continue
 			}
 			r.Success("%s", res.Check.Name)
+			continue
+		}
+		if errors.Is(res.Err, ErrUnsupported) {
+			r.Unsupported("%s (%s)", res.Check.Name, UnsupportedReason(res.Err))
 			continue
 		}
 		// An indeterminate probe demotes the row's tier for rendering
@@ -136,4 +149,10 @@ func (r *Reporter) Results(results []Result) {
 		r.Finding(tier, "%s: %s", res.Check.Name, msg)
 		r.remedyLine(res.Check.Remedy, msg)
 	}
+}
+
+// UnsupportedReason is err's text without the trailing ErrUnsupported sentinel,
+// which every call site wraps last.
+func UnsupportedReason(err error) string {
+	return strings.TrimSuffix(err.Error(), ": "+ErrUnsupported.Error())
 }
