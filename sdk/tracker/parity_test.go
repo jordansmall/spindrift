@@ -23,6 +23,9 @@ var pairs = map[string]string{
 	"Target":  "Target",
 	"Issue":   "wireIssue",
 	"Comment": "wireComment",
+	// CreateMeta is not paired: its Fields element type is a differently named
+	// copy, so the rendered lines cannot match.
+	"CreateField": "wireCreateField",
 }
 
 // structLines renders each field of every named struct in the file as
