@@ -120,8 +120,8 @@ tests](docs/reference.md#seam-tests) for the fixture list and its drift guard.
 
 Separately, core tests run against a compiled fake Driver Connector
 (`seamtest.Strategy()`, ADR 0067), so a plain `go test` with no integration tag
-in any package that uses `seamtest`, or reads a `forge.NewFake` (its tracker
-and PR reads cross a fixture network Connector, ADR 0073), also needs its
+in any package that uses `seamtest`, or a `forge.NewFake` (its reads and forge
+writes cross a fixture network Connector, ADR 0073), also needs its
 `.wasm` files. They resolve from the directory named by
 `SPINDRIFT_CONNECTOR_FIXTURES_DIR`, falling back to
 `nix build .#connector-wasm-fixtures`. Unlike the seam-fixtures tests, these do
