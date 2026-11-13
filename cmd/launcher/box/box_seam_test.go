@@ -20,6 +20,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/boxclone"
 	"spindrift.dev/launcher/internal/markergate"
 	"spindrift.dev/launcher/internal/promptassembly"
@@ -147,14 +148,16 @@ func seamOriginCommit(t *testing.T, workDir, msg string, files map[string]string
 }
 
 // seamCloneRoute points the clone box makes at the origin behind workDir:
-// CODE_FORGE=local clones from REPO_MOUNT_DIR, every other forge from a URL
-// the HOME gitconfig rewrites to the origin, which keeps the test off the
-// global gitconfig and covers the clone's later fetch and the Box's pushes.
-// It fills the env vars box reads the URL from.
+// a Box that clones the host-seeded mirror (local, or git under read-only)
+// clones REPO_MOUNT_DIR, every other forge a URL the HOME gitconfig rewrites to
+// the origin, which keeps the test off the global gitconfig and covers the
+// clone's later fetch and the Box's pushes. It fills the env vars box reads
+// the URL from.
 func seamCloneRoute(t *testing.T, workDir, home string, env map[string]string) {
 	t.Helper()
 	origin := seamOriginPath(workDir)
-	if env["CODE_FORGE"] == "local" {
+	d, _ := backend.ByName(env["CODE_FORGE"])
+	if backend.ClonesFromMirror(d, env["BOX_WRITE_ENABLED"] == "") {
 		env["REPO_MOUNT_DIR"] = origin
 		return
 	}
@@ -1826,7 +1829,7 @@ func TestBoxSeamReadonlyGuardsAndForgejoCLI(t *testing.T) {
 		{
 			name:  "read-only git backend",
 			env:   map[string]string{"BOX_WRITE_ENABLED": "", "CODE_FORGE": "git"},
-			shims: []string{"gh"},
+			shims: []string{"gh"}, hook: true,
 		},
 		{name: "read-only self-contained", relay: true, env: map[string]string{"SELF_CONTAINED": "1"}},
 		{
@@ -2314,6 +2317,7 @@ func TestBoxSeamSettleBundleOut(t *testing.T) {
 		wantExit   int
 		wantBundle bool
 		noOutbox   bool   // box never creates the outbox dir
+		noPush     bool   // the origin never receives the agent branch
 		wantLine   string // regexp one SPINDRIFT_OUTCOME line must match; the last one when lastOnly
 		lastOnly   bool
 	}{
@@ -2335,6 +2339,17 @@ func TestBoxSeamSettleBundleOut(t *testing.T) {
 		},
 		{
 			name: "read-only github with commits", relay: true, wantBundle: true,
+			runs: func(repo string) []seamtest.DriverRun { return commits(repo, ready, 0) },
+		},
+		{
+			// The remote is unreachable and the Box holds no credential: the
+			// clone can only have come from the mirror, and the branch leaves
+			// as a bundle, never a push (#6898).
+			name: "read-only git with commits and no credential", wantBundle: true, noPush: true,
+			env: map[string]string{
+				"CODE_FORGE": "git", "BOX_WRITE_ENABLED": "", "GH_TOKEN": "", "BOX_GH_TOKEN_OPTIONAL": "1",
+				"CODE_FORGE_REMOTE_URL": "https://unreachable.invalid/o/r.git",
+			},
 			runs: func(repo string) []seamtest.DriverRun { return commits(repo, ready, 0) },
 		},
 		{
@@ -2393,6 +2408,12 @@ func TestBoxSeamSettleBundleOut(t *testing.T) {
 			}
 			if _, err := os.Stat(r.outboxDir); c.noOutbox && err == nil {
 				t.Errorf("outbox %s exists; want it never created", r.outboxDir)
+			}
+			if c.noPush {
+				pushed := seamGitOut(t, seamOriginPath(repo), "branch", "--list", seamBranch)
+				if strings.TrimSpace(pushed) != "" {
+					t.Errorf("origin received %s; want it relayed as a bundle only", seamBranch)
+				}
 			}
 
 			if c.wantLine == "" {

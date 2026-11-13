@@ -539,7 +539,7 @@ func secretRequiredThisRun(env string, rules []driver.CredentialRule) bool {
 	switch env {
 	case "GH_TOKEN":
 		sig := resolveCapabilitySignals(codeForge, issueTracker)
-		return !sig.fullyLocal && backend.NeedsGHToken(forgeRow.Descriptor, trackerRow.Descriptor)
+		return !sig.fullyLocal && backend.NeedsGHToken(forgeRow.Descriptor, trackerRow.Descriptor, resolvedKnob("BOX_FORGE_AND_ISSUE_ACCESS") == "read-only")
 	default:
 		// Any other backend's own token is required exactly when a selected
 		// backend names it as its TokenEnvVar. BOX_GH_TOKEN (ADR 0016) is opt-in and

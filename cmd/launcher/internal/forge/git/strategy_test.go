@@ -41,12 +41,12 @@ func TestStrategyValidateCodeForge(t *testing.T) {
 }
 
 func TestStrategyCloneURL(t *testing.T) {
-	got, err := Strategy.CloneURL(backendkit.Shared{}, mapLookup(map[string]string{"CODE_FORGE_REMOTE_URL": "ssh://h/x.git"}), "")
+	got, err := Strategy.CloneURL(backendkit.Shared{}, mapLookup(map[string]string{"CODE_FORGE_REMOTE_URL": "ssh://h/x.git"}))
 	if err != nil || got != "ssh://h/x.git" {
 		t.Errorf("CloneURL = %q, %v, want ssh://h/x.git", got, err)
 	}
 	for _, l := range []backendkit.Lookup{mapLookup(nil), mapLookup(map[string]string{"CODE_FORGE_REMOTE_URL": ""})} {
-		_, err := Strategy.CloneURL(backendkit.Shared{}, l, "")
+		_, err := Strategy.CloneURL(backendkit.Shared{}, l)
 		if err == nil || !strings.Contains(err.Error(), "CODE_FORGE_REMOTE_URL is required when CODE_FORGE=git") {
 			t.Errorf("err = %v, want one naming CODE_FORGE_REMOTE_URL", err)
 		}

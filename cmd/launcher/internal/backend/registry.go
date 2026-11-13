@@ -214,12 +214,13 @@ func ForgeBackendSignal(codeForge string) string {
 // NeedsGHToken reports whether a forge/tracker pairing reaches GitHub: a GitHub
 // tracker or forge token, or a forge whose Box clone runs `gh auth setup-git`
 // (InBoxGHCredentialHelper: github, git). local clones a mount, so it frees
-// GH_TOKEN when paired with a non-GitHub tracker (issue #4494); an unknown
-// name's zero row fails closed.
-func NeedsGHToken(forge, tracker Descriptor) bool {
+// GH_TOKEN when paired with a non-GitHub tracker (issue #4494); so does a git
+// Box under read-only, which clones the host-seeded mirror instead (issue
+// #6898). An unknown name's zero row fails closed.
+func NeedsGHToken(forge, tracker Descriptor, readOnly bool) bool {
 	return tracker.TokenEnvVar == GitHub.TokenEnvVar ||
 		forge.TokenEnvVar == GitHub.TokenEnvVar ||
-		forge.InBoxGHCredentialHelper ||
+		(forge.InBoxGHCredentialHelper && !ClonesFromMirror(forge, readOnly)) ||
 		!forge.ValidAsCodeForge
 }
 

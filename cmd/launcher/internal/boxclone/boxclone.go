@@ -21,8 +21,10 @@ type Config struct {
 	// GHCredentialHelper runs `gh auth setup-git` before cloning. See
 	// backend.Descriptor.InBoxGHCredentialHelper for which forges want it.
 	GHCredentialHelper bool
-	// HostSeededMirror marks the remote as a host-seeded mirror mount, so the
-	// clone trusts the mount and work dir globally (#1720).
+	// HostSeededMirror marks this Box as cloning the host-seeded mirror mounted
+	// at RepoMountDir (backend.ClonesFromMirror), not the forge's remote: the
+	// clone trusts the mount and work dir globally (#1720) and needs no forge
+	// credential, so it skips GHCredentialHelper.
 	HostSeededMirror bool
 	RepoSlug         string
 	// Lookup serves the knobs the CODE_FORGE backend's Strategy reads.
@@ -33,7 +35,7 @@ type Config struct {
 	GitUserEmail string
 }
 
-// CloneURL resolves the URL to clone from via the CODE_FORGE backend's
+// CloneURL resolves the remote URL to clone from via the CODE_FORGE backend's
 // Strategy. The choice is gated on the exact CODE_FORGE value, so a stray
 // CODE_FORGE_REMOTE_URL cannot redirect a github deployment (github's
 // Strategy ignores the lookup). An unregistered backend, or one with no clone
@@ -43,7 +45,7 @@ func CloneURL(cfg Config) (string, error) {
 	if !ok || s.CloneURL == nil {
 		return "", fmt.Errorf("CODE_FORGE=%q is not a code forge the Box can clone from", cfg.CodeForge)
 	}
-	return s.CloneURL(backendkit.Shared{RepoSlug: cfg.RepoSlug}, cfg.Lookup, cfg.RepoMountDir)
+	return s.CloneURL(backendkit.Shared{RepoSlug: cfg.RepoSlug}, cfg.Lookup)
 }
 
 // Clone clones the repo into cfg.WorkDir, sets the repo-local git identity and
@@ -51,16 +53,9 @@ func CloneURL(cfg Config) (string, error) {
 // the state captured at clone time. Narration goes to stdout; git and gh keep
 // their own stdout and stderr streams.
 func Clone(cfg Config, stdout, stderr io.Writer) error {
-	if cfg.GHCredentialHelper {
-		if err := run(stdout, stderr, "", "gh", "auth", "setup-git"); err != nil {
-			return err
-		}
-	}
-	url, err := CloneURL(cfg)
-	if err != nil {
-		return err
-	}
+	var url string
 	if cfg.HostSeededMirror {
+		url = cfg.RepoMountDir
 		// Under rootless podman the Box's mapped uid never matches the
 		// host-owned bind mount's uid, so git's dubious-ownership guard
 		// rejects RepoMountDir before the clone copies a single object
@@ -71,6 +66,16 @@ func Clone(cfg Config, stdout, stderr io.Writer) error {
 			if err := run(stdout, stderr, "", "git", "config", "--global", "--add", "safe.directory", dir); err != nil {
 				return err
 			}
+		}
+	} else {
+		if cfg.GHCredentialHelper {
+			if err := run(stdout, stderr, "", "gh", "auth", "setup-git"); err != nil {
+				return err
+			}
+		}
+		var err error
+		if url, err = CloneURL(cfg); err != nil {
+			return err
 		}
 	}
 	fmt.Fprintf(stdout, "==> cloning %s\n", forge.RedactURLCredentials(url))

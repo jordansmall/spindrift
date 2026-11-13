@@ -104,13 +104,6 @@ func TestStrategyCodeForgeAbsolutisesAccumulationRepo(t *testing.T) {
 	}
 }
 
-func TestStrategyCloneURLIsRepoMountDir(t *testing.T) {
-	got, err := Strategy.CloneURL(backendkit.Shared{}, nil, "/mnt/repo")
-	if err != nil || got != "/mnt/repo" {
-		t.Errorf("CloneURL = %q, %v, want /mnt/repo", got, err)
-	}
-}
-
 func TestStrategyHasNoWebURLOrRemoteMatch(t *testing.T) {
 	if Strategy.WebURL != nil || Strategy.RemoteMatch != nil {
 		t.Error("local has no web URL and never matches a remote")

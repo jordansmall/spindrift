@@ -129,8 +129,31 @@ func TestNeedsGHToken(t *testing.T) {
 		{"unknown forge", Descriptor{}, Forgejo, true},
 	}
 	for _, c := range cases {
-		if got := NeedsGHToken(c.forge, c.tracker); got != c.want {
+		if got := NeedsGHToken(c.forge, c.tracker, false); got != c.want {
 			t.Errorf("%s: NeedsGHToken(%q, %q) = %v, want %v", c.name, c.forge.Name, c.tracker.Name, got, c.want)
+		}
+	}
+}
+
+// Under read-only a git Box clones the host-seeded mirror, so its gh credential
+// helper never runs and only a GitHub tracker or forge token keeps GH_TOKEN
+// required (#6898).
+func TestNeedsGHTokenReadOnlyMirror(t *testing.T) {
+	cases := []struct {
+		name           string
+		forge, tracker Descriptor
+		want           bool
+	}{
+		{"git forge, jira tracker", Git, Jira, false},
+		{"git forge, forgejo tracker", Git, Forgejo, false},
+		{"git forge, local tracker", Git, Local, false},
+		{"git forge, github tracker", Git, GitHub, true},
+		{"github forge, jira tracker", GitHub, Jira, true},
+		{"unknown forge", Descriptor{}, Jira, true},
+	}
+	for _, c := range cases {
+		if got := NeedsGHToken(c.forge, c.tracker, true); got != c.want {
+			t.Errorf("%s: NeedsGHToken(%q, %q, readOnly) = %v, want %v", c.name, c.forge.Name, c.tracker.Name, got, c.want)
 		}
 	}
 }

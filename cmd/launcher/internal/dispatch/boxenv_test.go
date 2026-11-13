@@ -686,3 +686,36 @@ func TestBuildBoxEnv_ChoreForwardsInputOnlyWhenSet(t *testing.T) {
 		t.Errorf("CHORE_INPUT should be absent when Input is empty, got %q", v)
 	}
 }
+
+// A Box that clones the host-seeded mirror (git under read-only, #6898) holds no
+// forge credential: the remote URL's userinfo stays on the host, and the
+// pairing no longer demands GH_TOKEN. Read-write still forwards the URL as is.
+func TestBuildBoxEnvMirrorCloneCarriesNoRemoteCredential(t *testing.T) {
+	const withCred = "https://oauth2:s3cret@git.example.test/o/r.git"
+	const clean = "https://git.example.test/o/r.git"
+	t.Setenv("CODE_FORGE_REMOTE_URL", withCred)
+	for _, c := range []struct {
+		name, access string
+		wantURL      string
+		wantOptional bool
+	}{
+		{"read-only", "read-only", clean, true},
+		{"read-write", "read-write", withCred, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := Config{
+				BoxEnvVars:             "CODE_FORGE_REMOTE_URL",
+				ForgeDescriptor:        backend.Git,
+				TrackerDescriptor:      backend.Jira,
+				BoxForgeAndIssueAccess: c.access,
+			}
+			env := mustBuildBoxEnv(t, cfg, "3", "T", 0, "", "")
+			if got := env["CODE_FORGE_REMOTE_URL"]; got != c.wantURL {
+				t.Errorf("CODE_FORGE_REMOTE_URL = %q, want %q", got, c.wantURL)
+			}
+			if _, ok := env["BOX_GH_TOKEN_OPTIONAL"]; ok != c.wantOptional {
+				t.Errorf("BOX_GH_TOKEN_OPTIONAL present = %v, want %v", ok, c.wantOptional)
+			}
+		})
+	}
+}

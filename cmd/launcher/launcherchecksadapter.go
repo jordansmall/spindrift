@@ -40,6 +40,7 @@ func launcherCheckConfig(c config) launcherchecks.Config {
 
 		ResearchDispatch: researchDispatch,
 		SelfContained:    c.selfContained,
+		BoxReadOnly:      c.effectiveBoxForgeAndIssueAccess() == "read-only",
 	}
 }
 

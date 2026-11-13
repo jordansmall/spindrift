@@ -90,11 +90,11 @@ type Strategy struct {
 
 	// Remote identity (ADR 0068 decision 1). It is logic, not Descriptor
 	// data: forgejo's clone URL embeds its token and defaults to codeberg.
-	// CloneURL is the URL the Box clones from; its string argument is the
-	// repoMountDir, the Box's read-only mount of a host-mediated repo. WebURL
+	// CloneURL is the remote URL a Box that clones the remote itself uses (not one
+	// that clones the host-seeded mirror, backend.ClonesFromMirror). WebURL
 	// is the repo's browser URL ("" when unknown). RemoteMatch takes a git
 	// remote URL and reports whether it names this backend's Target repo.
-	CloneURL    func(Shared, Lookup, string) (string, error)
+	CloneURL    func(Shared, Lookup) (string, error)
 	WebURL      func(Shared, Lookup) string
 	RemoteMatch func(Shared, Lookup, string) bool
 
