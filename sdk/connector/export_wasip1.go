@@ -32,7 +32,7 @@ func connectorAlloc(size uint32) uint32 {
 //go:wasmexport connector_call
 func connectorCall(ptr, length uint32) uint64 {
 	if uint32(uintptr(unsafe.Pointer(unsafe.SliceData(input)))) != ptr || int(length) > cap(input) {
-		result = errorResponse("connector_call does not match the last connector_alloc")
+		result = errorResponse(Permanent, "connector_call does not match the last connector_alloc")
 	} else {
 		result = call(input[:length])
 	}
