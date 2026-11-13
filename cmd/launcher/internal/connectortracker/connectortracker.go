@@ -1,10 +1,13 @@
 // Package connectortracker builds core's tracker reads (the forge.IssueTracker
 // list and issue reads and, when advertised, forge.CommentLister,
-// forge.NativeDepsReader and forge.BlockersLister) from a tracker Connector,
-// over the 0.2 tracker primitives in sdk/tracker. Every write stays with the
-// native adapter, which also stays authoritative for every optional capability
-// the Connector does not serve: the result is a stack of forge.Unwrapper layers
-// over the native adapter, so forge.As reaches those capabilities through it.
+// forge.NativeDepsReader, forge.BlockersLister, the Probe read,
+// forge.StatusMappingChecker, forge.IssueTypeChecker and forge.DemandCounter)
+// from a tracker Connector, over the 0.2 tracker primitives in sdk/tracker.
+// Every write stays with the native adapter, which also stays authoritative for
+// every optional capability the protocol does not carry: the result is a stack
+// of forge.Unwrapper layers over the native adapter, so forge.As reaches those
+// capabilities through it. The check and demand capabilities are the exception:
+// they come only from the Connector, and are absent when it omits them.
 package connectortracker
 
 import (
@@ -43,9 +46,15 @@ type Target struct {
 
 // Lifecycle resolves a Dispatch state to the selectors a Connector lists by.
 // A state may have a label, a native status, both, or neither.
+//
+// Statuses and IssueType feed the check capabilities (CheckMappedStatuses,
+// CheckIssueType): a caller selecting a Connector tracker for doctor fills them.
 type Lifecycle struct {
 	Labels   forge.DispatchLabels
 	Statuses map[forge.DispatchState]string
+	// IssueType is the issue type core files issues as (JIRA_ISSUE_TYPE), which
+	// the createMeta check measures the project against.
+	IssueType string
 }
 
 // Routes returns a copy of a tracker Connector's Route table with the
@@ -99,6 +108,28 @@ type (
 		Target Target `json:"target"`
 		Number string `json:"number"`
 	}
+	targetParams struct {
+		Target Target `json:"target"`
+	}
+	createMetaParams struct {
+		Target    Target `json:"target"`
+		IssueType string `json:"issueType"`
+	}
+	countParams struct {
+		Target Target `json:"target"`
+		Label  string `json:"label"`
+		Status string `json:"status"`
+	}
+	wireCreateMeta struct {
+		IssueTypes []string          `json:"issueTypes"`
+		Fields     []wireCreateField `json:"fields"`
+	}
+	wireCreateField struct {
+		ID              string `json:"fieldId"`
+		Name            string `json:"name"`
+		Required        bool   `json:"required"`
+		HasDefaultValue bool   `json:"hasDefaultValue"`
+	}
 )
 
 // guestCall is the Connector.Call signature, a seam so the adapter's policy
@@ -119,6 +150,21 @@ const (
 	// CapProjectKeyIDs: every id the Connector returns is a project key and a
 	// number ("ENG-12"). Absent, ids are decimal integers.
 	CapProjectKeyIDs = "tracker.ids.projectKey"
+	// CapProbe: the Connector serves tracker.probe, one authenticated read whose
+	// HTTP status core maps to a Probe result.
+	CapProbe = "tracker.probe"
+	// CapStatuses: the Connector serves tracker.statuses, the project's workflow
+	// status names.
+	CapStatuses = "tracker.statuses"
+	// CapCreateMeta: the Connector serves tracker.createMeta, the project's issue
+	// types and the create fields of one.
+	CapCreateMeta = "tracker.createMeta"
+	// CapCount: the Connector serves tracker.count and tracker.countInterval,
+	// the ready-demand count and its probe cadence.
+	CapCount = "tracker.count"
+	// CapCountInterval is the method that serves the probe cadence; it rides on
+	// CapCount rather than being advertised itself.
+	CapCountInterval = "tracker.countInterval"
 )
 
 // projectKeyID is the projectKey grammar: ids become branch names, so the
@@ -239,22 +285,176 @@ func (t *reads) idList(method, num string) ([]string, error) {
 	return ids, nil
 }
 
+// A layer for a check or demand capability exists only when the Connector
+// advertises it; reads hides the native adapter's version of each but Probe
+// (which falls back to native), so an absent capability is absent rather than
+// answered from the native side.
+
+// probeLayer serves Probe from the Connector's one authenticated read.
+type probeLayer struct {
+	forge.IssueTracker
+	r *reads
+}
+
+func (l probeLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
+
+// Probe maps the read's HTTP status as the native adapters map theirs: auth
+// failures stay distinguishable, anything else means the repo is unreachable.
+func (l probeLayer) Probe() (string, error) {
+	var res struct {
+		Status int `json:"status"`
+	}
+	if err := l.r.call(context.Background(), CapProbe, targetParams{l.r.target}, &res); err != nil {
+		return "", fmt.Errorf("%w: %w", forge.ErrRepoNotFound, err)
+	}
+	switch {
+	case res.Status >= 200 && res.Status < 300:
+		return l.r.target.Repo, nil
+	case res.Status == 401 || res.Status == 403:
+		return "", fmt.Errorf("%w: probe of %s answered %d", forge.ErrAuthFailure, l.r.target.Repo, res.Status)
+	default:
+		return "", fmt.Errorf("%w: probe of %s answered %d", forge.ErrRepoNotFound, l.r.target.Repo, res.Status)
+	}
+}
+
+// statusesLayer serves forge.StatusMappingChecker.
+type statusesLayer struct {
+	forge.IssueTracker
+	r *reads
+}
+
+func (l statusesLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
+
+func (l statusesLayer) CheckMappedStatuses() ([]string, error) {
+	var mapped []string
+	for _, s := range l.r.lifecycle.Statuses {
+		if s != "" {
+			mapped = append(mapped, s)
+		}
+	}
+	if len(mapped) == 0 {
+		return nil, nil
+	}
+	var res struct {
+		Statuses []string `json:"statuses"`
+	}
+	if err := l.r.call(context.Background(), CapStatuses, targetParams{l.r.target}, &res); err != nil {
+		return nil, err
+	}
+	return forge.MissingStatuses(mapped, res.Statuses), nil
+}
+
+// createMetaLayer serves forge.IssueTypeChecker.
+type createMetaLayer struct {
+	forge.IssueTracker
+	r *reads
+}
+
+func (l createMetaLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
+
+func (l createMetaLayer) CheckIssueType() ([]string, error) {
+	issueType := l.r.lifecycle.IssueType
+	var res wireCreateMeta
+	if err := l.r.call(context.Background(), CapCreateMeta, createMetaParams{l.r.target, issueType}, &res); err != nil {
+		return nil, err
+	}
+	if err := forge.IssueTypeNotOffered(l.r.target.Repo, issueType, res.IssueTypes); err != nil {
+		return nil, err
+	}
+	fields := make([]forge.CreateField, len(res.Fields))
+	for i, f := range res.Fields {
+		fields[i] = forge.CreateField{ID: f.ID, Name: f.Name, Required: f.Required, HasDefault: f.HasDefaultValue}
+	}
+	return forge.UnfilledCreateFields(fields), nil
+}
+
+// countLayer serves forge.DemandCounter.
+type countLayer struct {
+	forge.IssueTracker
+	r        *reads
+	interval time.Duration
+}
+
+func (l countLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
+
+func (l countLayer) ProbeInterval() time.Duration { return l.interval }
+
+// CountReady counts the set ListIssues(Dispatchable) selects; a state with no
+// selector is empty, not every open issue.
+func (l countLayer) CountReady(bool) (int, error) {
+	label, status := l.r.lifecycle.Labels.Label(forge.Dispatchable), l.r.lifecycle.Statuses[forge.Dispatchable]
+	if label == "" && status == "" {
+		return 0, nil
+	}
+	var res struct {
+		Count int `json:"count"`
+	}
+	if err := l.r.call(context.Background(), CapCount, countParams{l.r.target, label, status}, &res); err != nil {
+		return 0, err
+	}
+	if res.Count < 0 {
+		return 0, fmt.Errorf("%w: tracker.count answered %d", ErrAnswer, res.Count)
+	}
+	return res.Count, nil
+}
+
+// maxCountInterval bounds the cadence a Connector may ask for.
+const maxCountInterval = 24 * time.Hour
+
+// readCountInterval reads the Connector's demand-probe cadence once, at
+// construction; a sub-second cadence would hammer the tracker, and a cadence
+// past maxCountInterval is an implausible answer (and would overflow a
+// time.Duration).
+func readCountInterval(call guestCall) (time.Duration, error) {
+	var res struct {
+		Seconds int `json:"seconds"`
+	}
+	if err := call(context.Background(), CapCountInterval, struct{}{}, &res); err != nil {
+		return 0, err
+	}
+	if res.Seconds < 1 || res.Seconds > int(maxCountInterval/time.Second) {
+		return 0, fmt.Errorf("%w: %s answered %d seconds, want 1 to %d", ErrAnswer, CapCountInterval, res.Seconds, int(maxCountInterval/time.Second))
+	}
+	return time.Duration(res.Seconds) * time.Second, nil
+}
+
+// Hides implements forge.CapabilityHider for the capabilities the protocol
+// owns: the native adapter's own must never answer for a Connector that omits
+// them.
+func (t *reads) Hides(capability any) bool {
+	switch capability.(type) {
+	case *forge.DemandCounter, *forge.IssueTypeChecker, *forge.StatusMappingChecker:
+		return true
+	}
+	return false
+}
+
 var (
-	_ forge.Unwrapper        = (*reads)(nil)
-	_ forge.FullyPaginated   = (*reads)(nil)
-	_ forge.LabeledTracker   = (*reads)(nil)
-	_ forge.Unwrapper        = commentsLayer{}
-	_ forge.CommentLister    = commentsLayer{}
-	_ forge.Unwrapper        = nativeDepsLayer{}
-	_ forge.NativeDepsReader = nativeDepsLayer{}
-	_ forge.Unwrapper        = blocksLayer{}
-	_ forge.BlockersLister   = blocksLayer{}
+	_ forge.Unwrapper            = (*reads)(nil)
+	_ forge.FullyPaginated       = (*reads)(nil)
+	_ forge.LabeledTracker       = (*reads)(nil)
+	_ forge.Unwrapper            = commentsLayer{}
+	_ forge.CommentLister        = commentsLayer{}
+	_ forge.Unwrapper            = nativeDepsLayer{}
+	_ forge.NativeDepsReader     = nativeDepsLayer{}
+	_ forge.Unwrapper            = blocksLayer{}
+	_ forge.BlockersLister       = blocksLayer{}
+	_ forge.CapabilityHider      = (*reads)(nil)
+	_ forge.Unwrapper            = probeLayer{}
+	_ forge.Unwrapper            = statusesLayer{}
+	_ forge.StatusMappingChecker = statusesLayer{}
+	_ forge.Unwrapper            = createMetaLayer{}
+	_ forge.IssueTypeChecker     = createMetaLayer{}
+	_ forge.Unwrapper            = countLayer{}
+	_ forge.DemandCounter        = countLayer{}
 )
 
 // New builds core's tracker reads from a tracker Connector. writes keeps
-// every write (transitions, verdicts, comments, labels, probes), which never
-// cross the protocol, and answers every optional capability the Connector does
-// not serve (see CapComments, CapNativeDeps and CapBlocks). Look capabilities
+// every write (transitions, verdicts, comments, labels), which never cross the
+// protocol, and answers every optional capability the protocol does not carry
+// (see CapComments, CapNativeDeps and CapBlocks); Probe stays with it unless
+// the Connector advertises CapProbe. The doctor and demand checks (CapStatuses,
+// CapCreateMeta, CapCount) are never answered natively. Look capabilities
 // up with forge.As. Calls run under context.Background() because IssueTracker
 // methods carry no context.
 //
@@ -264,7 +464,7 @@ func New(c *connectorhost.Connector, writes forge.IssueTracker, lifecycle Lifecy
 	if !slices.Contains(c.Capabilities, "tracker") {
 		return nil, fmt.Errorf("%w: capabilities %v lack \"tracker\"", ErrNotTracker, c.Capabilities)
 	}
-	return newTracker(c.Call, writes, lifecycle, target, c.Capabilities, speaksV02(c.ProtocolVersion)), nil
+	return newTracker(c.Call, writes, lifecycle, target, c.Capabilities, speaksV02(c.ProtocolVersion))
 }
 
 // speaksV02 reports whether a protocol version is 0.2 or later; one the
@@ -274,7 +474,7 @@ func speaksV02(version string) bool {
 	return ok && minor >= 2
 }
 
-func newTracker(call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, target Target, caps []string, v02 bool) forge.IssueTracker {
+func newTracker(call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, target Target, caps []string, v02 bool) (forge.IssueTracker, error) {
 	if !v02 {
 		caps = slices.DeleteFunc(slices.Clone(caps), func(c string) bool {
 			return c == CapBlocks || c == CapProjectKeyIDs
@@ -295,7 +495,23 @@ func newTracker(call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, 
 	if slices.Contains(caps, CapBlocks) {
 		it = blocksLayer{it, r}
 	}
-	return it
+	if slices.Contains(caps, CapProbe) {
+		it = probeLayer{it, r}
+	}
+	if slices.Contains(caps, CapStatuses) {
+		it = statusesLayer{it, r}
+	}
+	if slices.Contains(caps, CapCreateMeta) {
+		it = createMetaLayer{it, r}
+	}
+	if slices.Contains(caps, CapCount) {
+		interval, err := readCountInterval(call)
+		if err != nil {
+			return nil, err
+		}
+		it = countLayer{it, r, interval}
+	}
+	return it, nil
 }
 
 func (t *reads) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
