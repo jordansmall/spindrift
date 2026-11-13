@@ -14,13 +14,12 @@ type issueFilerTracker struct {
 func (f *Fake) AsIssueFiler() IssueTracker { return issueFilerTracker{IssueTracker: f, f: f} }
 
 func (i issueFilerTracker) PostIssue(title, body string, labels []string) (string, error) {
-	if missing := i.f.missingLabels(labels); len(missing) > 0 {
-		i.f.mu.Lock()
-		i.f.PostIssueCalls = append(i.f.PostIssueCalls, PostIssueCall{Title: title, Body: body, Labels: labels})
-		i.f.mu.Unlock()
-		return "", fmt.Errorf("could not add label: %q not found", missing)
-	}
-	return i.f.postIssue(title, body, labels)
+	return i.f.postIssue(title, body, labels, func() error {
+		if missing := i.f.missingLabels(labels); len(missing) > 0 {
+			return fmt.Errorf("could not add label: %q not found", missing)
+		}
+		return nil
+	})
 }
 
 // AddLabels promotes IssueTrackerFake's AddLabels (issue #4074): the butler's
@@ -92,7 +91,7 @@ func (l localIssueFilerTracker) CloseIssue(num string) error {
 }
 
 func (l localIssueFilerTracker) PostIssue(title, body string, labels []string) (string, error) {
-	return l.f.postIssue(title, body, labels)
+	return l.f.postIssue(title, body, labels, nil)
 }
 
 // AsLocalIssueFiler returns f in the local adapter's combined shape, AsLocalShaped plus HostPostedIssueFiler (issue #2592).

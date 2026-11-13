@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -76,21 +77,24 @@ func TestFakeTrackerManyReadsShareOneConnector(t *testing.T) {
 // is in none of these sets, and has no Set or As prefix, must cross the
 // Connector, so a newly added read is covered the moment it exists.
 var (
-	// fakeNativeWrites mutate the Fake's state natively: the tracker writes not
-	// yet moved behind the tracker Connector (#6753, #6890) await it, and
-	// RelayBundle is git in core, not a forge HTTP primitive.
-	fakeNativeWrites = setOf("CloseIssue", "CloseMergedIssue", "PostIssue", "RelayBundle")
+	// fakeNativeWrites mutate the Fake's state natively. Only RelayBundle stays
+	// here: a bundle relay is git in core, not a forge HTTP primitive.
+	fakeNativeWrites = setOf("RelayBundle")
 	// fakeWrites are the forge and tracker writes, each with the HTTP method its
 	// Route must be audited under. They cross the Connector like reads do.
 	fakeWrites = map[string]string{
+		// tracker writes
 		"Comment": http.MethodPost, "RecordLanding": http.MethodPost,
 		"RecordLandingPass": http.MethodPost, "TransitionState": http.MethodPost,
 		"CompleteVerdict": http.MethodPost, "CreateLabel": http.MethodPost,
 		"AddLabels": http.MethodPost, "FlagAbandoned": http.MethodPost,
+		"PostIssue": http.MethodPost, "CloseIssue": http.MethodPost,
+		"CloseMergedIssue": http.MethodPost,
+		// forge writes
 		"EnqueueAutoMerge": http.MethodPost, "MarkReady": http.MethodPatch,
 		"MarkDraft": http.MethodPatch, "CommentPR": http.MethodPost,
-		"Merge": http.MethodPost, "Rebase": http.MethodPost, "CreateDraftPR": http.MethodPost,
-		"DeleteBranch": http.MethodDelete,
+		"Merge": http.MethodPost, "Rebase": http.MethodPost,
+		"CreateDraftPR": http.MethodPost, "DeleteBranch": http.MethodDelete,
 	}
 	// fakeConfig answer from configuration, with no state worth a fetch.
 	fakeConfig = setOf("ProbeInterval", "StateLabels", "WalksAllPages",
@@ -163,12 +167,19 @@ func TestFakeCallsCrossTheConnector(t *testing.T) {
 	targets := append(guardTargets(), guardTarget{"RunURLFake", nil})
 	for _, tg := range targets {
 		build := func() (*Fake, any) {
+			var f *Fake
+			var target any
 			if tg.of == nil {
 				r := NewRunURLFake(DispatchLabels{Dispatchable: "ready"})
-				return r.Fake, r
+				f, target = r.Fake, r
+			} else {
+				f = seededFake(DispatchLabels{Dispatchable: "ready"})
+				target = tg.of(f)
 			}
-			f := seededFake(DispatchLabels{Dispatchable: "ready"})
-			return f, tg.of(f)
+			// "2" is the Verdict guardArg synthesizes: without a label for it
+			// CompleteVerdict is refused in core before anything crosses.
+			f.VerdictLabels = NewVerdictLabels(VerdictLabel{Verdict: "2", Label: "verdict"})
+			return f, target
 		}
 		_, proto := build()
 		pt := reflect.TypeOf(proto)
@@ -206,9 +217,12 @@ func TestFakeCallsCrossTheConnector(t *testing.T) {
 					if a.Decision != connectorhost.DecisionSent || !routes[a.Route] {
 						t.Errorf("%s.%s audit = %+v, want a sent call on a declared Route", tg.name, name, a)
 					}
-					if want, ok := fakeWrites[name]; ok && a.Method != want {
-						t.Errorf("%s.%s crossed as %s, want %s", tg.name, name, a.Method, want)
+					if want, ok := fakeWrites[name]; ok && a.Method != want && a.Method != http.MethodGet {
+						t.Errorf("%s.%s crossed as %s, want a read or %s", tg.name, name, a.Method, want)
 					}
+				}
+				if want, ok := fakeWrites[name]; ok && !slices.ContainsFunc(got, func(a connectorhost.AuditEntry) bool { return a.Method == want }) {
+					t.Errorf("%s.%s never crossed as %s", tg.name, name, want)
 				}
 			})
 		}
@@ -545,4 +559,77 @@ func TestFakeCreateDraftPRKeepsQueueAndAdoptSemantics(t *testing.T) {
 	if len(f.CreateDraftPRCalls) != 3 {
 		t.Errorf("CreateDraftPRCalls = %d, want 3", len(f.CreateDraftPRCalls))
 	}
+}
+
+func routesOf(got []connectorhost.AuditEntry) []string {
+	var r []string
+	for _, a := range got {
+		r = append(r, a.Method+" "+a.Path)
+	}
+	return r
+}
+
+// Claim policy runs in core over the read and editLabels primitives: the
+// backend only moves labels it is told to.
+func TestFakeClaimCrossesTransitionThenEditLabels(t *testing.T) {
+	f := NewFake(DispatchLabels{Dispatchable: "ready", InProgress: "wip", Complete: "done", Failed: "failed"})
+	f.SetIssue(Issue{Number: "1", Labels: []string{"ready", "failed"}})
+	reads := observeReads(t, f)
+	if err := f.TransitionState("1", Dispatchable, InProgress); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"POST " + pathTransition, "GET " + pathIssue, "POST " + pathEditLabels}
+	if got := routesOf(reads()); !slices.Equal(got, want) {
+		t.Errorf("crossings = %v, want %v", got, want)
+	}
+	iss, _ := f.Issue("1")
+	if slices.Contains(iss.Labels, "failed") || !slices.Contains(iss.Labels, "wip") {
+		t.Errorf("labels = %v, want the stale terminal label removed through editLabels and wip added", iss.Labels)
+	}
+}
+
+func TestFakeAlreadyClaimedSendsNoEditLabels(t *testing.T) {
+	f := NewFake(DispatchLabels{Dispatchable: "ready", InProgress: "wip"})
+	f.SetIssue(Issue{Number: "1", Labels: []string{"wip"}})
+	reads := observeReads(t, f)
+	if err := f.TransitionState("1", Dispatchable, InProgress); !errors.Is(err, ErrAlreadyClaimed) {
+		t.Fatalf("err = %v, want ErrAlreadyClaimed", err)
+	}
+	for _, r := range routesOf(reads()) {
+		if r == "POST "+pathEditLabels {
+			t.Errorf("an already-claimed issue crossed %s", r)
+		}
+	}
+}
+
+func TestFakeCompleteVerdictCrossesReadThenEditLabels(t *testing.T) {
+	newFake := func(labels ...string) *Fake {
+		f := NewFake(DispatchLabels{Dispatchable: "ready", InProgress: "wip"})
+		f.VerdictLabels = ResearchVerdictLabels()
+		f.SetIssue(Issue{Number: "1", Labels: labels})
+		return f
+	}
+	t.Run("in progress", func(t *testing.T) {
+		f := newFake("wip")
+		reads := observeReads(t, f)
+		if err := f.CompleteVerdict("1", Recommend); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"GET " + pathIssue, "POST " + pathEditLabels}
+		if got := routesOf(reads()); !slices.Equal(got, want) {
+			t.Errorf("crossings = %v, want %v", got, want)
+		}
+	})
+	t.Run("not in progress", func(t *testing.T) {
+		f := newFake("ready")
+		reads := observeReads(t, f)
+		if err := f.CompleteVerdict("1", Recommend); err == nil {
+			t.Fatal("want an error when the issue lacks the in-progress label")
+		}
+		for _, r := range routesOf(reads()) {
+			if r == "POST "+pathEditLabels || r == "POST "+pathTransition {
+				t.Errorf("a refused verdict crossed %s", r)
+			}
+		}
+	})
 }
