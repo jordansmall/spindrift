@@ -92,15 +92,18 @@ type Strategy struct {
 	Classification string
 
 	// InTreeConfigPath is empty for an ecosystem with no in-tree config to
-	// rewrite (go, gradle, nuget); bind-side consumers exclude such Strategies
-	// by filtering on that emptiness, never via a second hand-maintained list.
+	// rewrite (go, gradle) or whose config has several spellings
+	// (DiscoveryConfigPaths); bind-side consumers exclude a Strategy with
+	// neither by ConfigPaths being empty, never via a second hand-maintained
+	// list.
 	InTreeConfigPath string
 
 	// DiscoveryConfigPaths lists, in probe order, the spellings of an in-tree
-	// config that discovery and the path-set read but bind never rewrites;
-	// discovery reads the first that exists. A Strategy sets this or
-	// InTreeConfigPath, never both: leaving InTreeConfigPath empty is what keeps
-	// it out of bindregistry.InTreeBindings.
+	// config, for a tool that reads whichever exists first. Discovery and the
+	// in-tree binding both take the first that exists
+	// (bindregistry.BoundInTreeRow); revert covers every spelling, since an
+	// agent may create another mid-run. A Strategy sets this or
+	// InTreeConfigPath, never both.
 	DiscoveryConfigPaths []string
 
 	// InTreeRewrite is nil for every Strategy whose in-tree binding is host
