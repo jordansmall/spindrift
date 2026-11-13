@@ -3121,7 +3121,7 @@ This is protocol version **0.3.0**. The host is
   the forge axis, and a `0.y` bump may change what follows. A forge Connector
   advertises `"forge"`, meaning it serves the first three methods below. Every
   `params` carries `target`, `{api, repo}`, as for the tracker. The Connector
-  reads and returns raw data; every write stays on core's native adapter.
+  reads and returns raw data; every PR write stays on core's native adapter.
 
   | Method | Params | Result |
   |---|---|---|
@@ -3144,6 +3144,43 @@ This is protocol version **0.3.0**. The host is
   renders and caps failure detail. The SDK's
   `forge.Register(forge.Reader{...})` serves the methods. Only the read
   shadow ([Shadow mode](#shadow-mode)) uses `connectorforge` in production.
+
+  **Branch primitives.** A forge Connector advertises `"forge.branches"` to
+  serve three more methods, on the same `target`, and `"forge.pushOnly"` when
+  its forge has no pull-request concept, so core composes a push-only Code
+  Forge from it.
+
+  | Method | Params | Result |
+  |---|---|---|
+  | `forge.remote` | `{target}` | `{cloneUrl, webUrl}`, the repository's git identity |
+  | `forge.branchExists` | `{target, branch}` | `{exists}` |
+  | `forge.deleteBranch` | `{target, branch}` | `{}`; deletes `branch` from the forge |
+
+  `forge.deleteBranch` is a write, but only of a branch: core refuses the base
+  branch and an option-shaped name before the call. Every git operation (push,
+  merge, rebase) stays in core's own git plumbing against `cloneUrl`, with
+  core's credential, which the Connector never sees.
+  [`connectorforge.Compose`](../cmd/launcher/internal/connectorforge/pushonly.go)
+  builds the Code Forge and refuses a Connector missing either capability. It
+  reads `forge.remote` once at construction, and again on every Probe, and
+  refuses the answer unless both URLs are `https`, carry no userinfo and name a
+  host of the Connector's Route table (case-insensitive, port included);
+  otherwise the git credential would go to whatever host the Connector named.
+  A refusal is audited as one line with `decision` `refused` and `reason`
+  `forge.remote: <error>`, the error printing the URL without its userinfo,
+  and no route, host or status. It matches `ErrRemoteCredentials` or
+  `ErrRemoteHost`, and also `ErrAudit` when the line cannot be written or the
+  Connector has no network grant and so no audit log. The SDK's
+  `forge.RegisterBranches(forge.Branches{...})` serves the methods.
+
+  Every forge Connector call core makes, the reads above included, retries a
+  `transient` failure, three attempts with a 2-second linear backoff (see Error
+  class). A `forge.deleteBranch` retry that answers `not-found` counts as
+  done: the earlier attempt deleted the branch and only its answer was lost. A
+  `rate-limited` failure maps onto core's `forge.RateLimitError`, which feeds
+  its rate-limit hold, and `auth` onto `forge.ErrAuthFailure`;
+  `connectorhost.ErrorClass` still reads the class from either. Any other class
+  returns as it came. No backend is selected through `Compose` yet.
 - **Versioning.** The protocol version is `0.y.z` and independent of
   spindrift's release version. A `0.y` bump is breaking; a `0.y.z` bump is
   additive. Core accepts its current `0.y` and the one before it, so today
