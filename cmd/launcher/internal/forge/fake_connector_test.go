@@ -2,6 +2,7 @@ package forge
 
 import (
 	"errors"
+	"net/http"
 	"reflect"
 	"strings"
 	"sync"
@@ -74,11 +75,22 @@ func TestFakeTrackerManyReadsShareOneConnector(t *testing.T) {
 // is in none of these sets, and has no Set or As prefix, must cross the
 // Connector, so a newly added read is covered the moment it exists.
 var (
-	// fakeWrites mutate the Fake's state natively (ADR 0073: writes stay native).
-	fakeWrites = setOf("TransitionState", "CompleteVerdict", "Comment", "CreateLabel",
+	// fakeNativeWrites mutate the Fake's state natively: the tracker writes await
+	// the tracker Connector (#6753), and RelayBundle is git in core, not a forge
+	// HTTP primitive.
+	fakeNativeWrites = setOf("TransitionState", "CompleteVerdict", "Comment", "CreateLabel",
 		"AddLabels", "RecordLanding", "RecordLandingPass", "CloseIssue", "CloseMergedIssue",
-		"FlagAbandoned", "EnqueueAutoMerge", "MarkReady", "MarkDraft", "CommentPR",
-		"Merge", "Rebase", "PostIssue", "RelayBundle", "CreateDraftPR")
+		"FlagAbandoned", "PostIssue", "RelayBundle")
+	// fakeForgeWrites are the forge writes, each with the HTTP method its Route
+	// must be audited under. They cross the Connector like reads do.
+	fakeForgeWrites = map[string]string{
+		"EnqueueAutoMerge": http.MethodPost, "MarkReady": http.MethodPatch,
+		"MarkDraft": http.MethodPatch, "CommentPR": http.MethodPost,
+		"Merge": http.MethodPost, "Rebase": http.MethodPost, "CreateDraftPR": http.MethodPost,
+	}
+	// pendingForgeWrites are forge writes not yet converted to cross the
+	// Connector; the guard skips them until they are.
+	pendingForgeWrites = setOf("EnqueueAutoMerge", "MarkReady", "MarkDraft", "CommentPR", "CreateDraftPR")
 	// fakeConfig answer from configuration, with no state worth a fetch.
 	fakeConfig = setOf("ProbeInterval", "StateLabels", "WalksAllPages",
 		"On", "Fire") // On and Fire are fakehook.Hooks: test scripting, not state
@@ -133,11 +145,12 @@ func seededFake(labels ...DispatchLabels) *Fake {
 	return f
 }
 
-// TestFakeReadsCrossTheConnector is the bypass guard: every exported method of
-// the Fake that is not a scripting, write, or config method is a read, and a
-// read must cross the Connector at least once, sent on a declared Route. A new
-// read that answers natively fails here without anyone listing it.
-func TestFakeReadsCrossTheConnector(t *testing.T) {
+// TestFakeCallsCrossTheConnector is the bypass guard: every exported method of
+// the Fake that is not a scripting, native-write, or config method is a read or
+// a forge write, and must cross the Connector at least once, sent on a declared
+// Route; a forge write under its own HTTP method. A new read that answers
+// natively fails here without anyone listing it.
+func TestFakeCallsCrossTheConnector(t *testing.T) {
 	routes := map[string]bool{}
 	for _, r := range fakeRoutes {
 		routes[r.Method+" "+r.Host+" "+r.Path] = true
@@ -158,7 +171,7 @@ func TestFakeReadsCrossTheConnector(t *testing.T) {
 		for i := range pt.NumMethod() {
 			name := pt.Method(i).Name
 			seen[name] = true
-			if strings.HasPrefix(name, "Set") || strings.HasPrefix(name, "As") || fakeWrites[name] || fakeConfig[name] {
+			if strings.HasPrefix(name, "Set") || strings.HasPrefix(name, "As") || fakeNativeWrites[name] || pendingForgeWrites[name] || fakeConfig[name] {
 				continue
 			}
 			t.Run(tg.name+"."+name, func(t *testing.T) {
@@ -187,13 +200,21 @@ func TestFakeReadsCrossTheConnector(t *testing.T) {
 				}
 				for _, a := range got {
 					if a.Decision != connectorhost.DecisionSent || !routes[a.Route] {
-						t.Errorf("%s.%s audit = %+v, want a sent read on a declared Route", tg.name, name, a)
+						t.Errorf("%s.%s audit = %+v, want a sent call on a declared Route", tg.name, name, a)
+					}
+					if want, ok := fakeForgeWrites[name]; ok && a.Method != want {
+						t.Errorf("%s.%s crossed as %s, want %s", tg.name, name, a.Method, want)
 					}
 				}
 			})
 		}
 	}
-	for _, set := range []map[string]bool{fakeWrites, fakeConfig} {
+	for name := range fakeForgeWrites {
+		if !seen[name] {
+			t.Errorf("%s is classified as a forge write but no Fake method has that name", name)
+		}
+	}
+	for _, set := range []map[string]bool{fakeNativeWrites, pendingForgeWrites, fakeConfig} {
 		for name := range set {
 			if !seen[name] {
 				t.Errorf("%s is classified as a non-read but no Fake method has that name", name)
@@ -405,3 +426,36 @@ func TestFakePRMetadataReadsKeepScriptedErrorIdentity(t *testing.T) {
 }
 
 func second[T any](_ T, err error) error { return err }
+
+func TestFakeForgeWritesCrossTheConnectorAndKeepScriptedErrors(t *testing.T) {
+	sentinel := errors.New("scripted")
+	f := NewFake()
+	f.SetPR("b", PR{URL: "u"})
+	f.RebaseErrs = []error{sentinel, nil}
+	if err := f.Rebase("u"); !errors.Is(err, sentinel) {
+		t.Errorf("Rebase err = %v, want the scripted sentinel", err)
+	}
+	if err := f.Rebase("u"); err != nil || len(f.RebasedURLs) != 2 {
+		t.Errorf("Rebase #2 = %v, RebasedURLs = %v", err, f.RebasedURLs)
+	}
+	f.MergeErr = sentinel
+	if err := f.Merge("u"); !errors.Is(err, sentinel) {
+		t.Errorf("Merge err = %v, want the scripted sentinel", err)
+	}
+	if s, _ := f.PRState("u"); s == PRMerged {
+		t.Error("a failed Merge marked the PR merged")
+	}
+}
+
+// A write on an undeclared route is refused and retires the shared Connector;
+// the next write, on another Fake, must still succeed and record its state.
+func TestFakeRefusedWriteDoesNotPoisonTheSharedConnector(t *testing.T) {
+	err := NewFake().core.call(http.MethodPost, "/forge/mrge", nil, func() (any, error) { return nil, nil })
+	if err == nil {
+		t.Fatal("write on an undeclared path succeeded, want a route refusal")
+	}
+	f := NewFake()
+	if err := f.Merge("u"); err != nil || f.Merged != "u" {
+		t.Fatalf("Merge after a refused write = %v, Merged = %q", err, f.Merged)
+	}
+}

@@ -20,11 +20,12 @@ import (
 	"spindrift.dev/launcher/internal/fixturebuild"
 )
 
-// The Fake's read path crosses a real network Connector (ADR 0073, point 7): a
-// read is a "fetch" through the Connector host, which checks it against the
-// fixture Route table, attaches the credential, and sends it to a scripted
-// backend that serves the Fake's own state. Writes stay native and mutate that
-// same state, so a read observes every write.
+// The Fake crosses a real network Connector (ADR 0073, point 7): a read or a
+// forge write is a "fetch" through the Connector host, which checks it against
+// the fixture Route table, attaches the credential, and sends it to a scripted
+// backend that serves the Fake's own state, so a read observes every write.
+// Tracker writes stay native (#6753), as does RelayBundle: a bundle relay is git
+// in core, not a forge HTTP primitive.
 
 const (
 	fakeHost  = "fake.invalid"
@@ -65,8 +66,15 @@ const (
 	pathRunURL           = "/forge/runURL"
 )
 
-// fakeRoutes is the fixture Route table: one exact path per Route (a path is a
-// subtree root, ADR 0047), so a misspelt path is refused.
+// The write paths, POSTed to; a write has its own Route, so GET and POST on one
+// path are distinct.
+const (
+	pathMerge  = "/forge/merge"
+	pathRebase = "/forge/rebase"
+)
+
+// fakeRoutes is the fixture Route table: one exact method and path per Route (a
+// path is a subtree root, ADR 0047), so a misspelt path is refused.
 var fakeRoutes = func() []connectorhost.Route {
 	var rs []connectorhost.Route
 	for _, p := range []string{
@@ -78,6 +86,9 @@ var fakeRoutes = func() []connectorhost.Route {
 		pathHeadSHA, pathMergeCommit, pathAutoMerge, pathRunURL,
 	} {
 		rs = append(rs, connectorhost.Route{Method: http.MethodGet, Host: fakeHost, Path: p})
+	}
+	for _, p := range []string{pathMerge, pathRebase} {
+		rs = append(rs, connectorhost.Route{Method: http.MethodPost, Host: fakeHost, Path: p})
 	}
 	return rs
 }()
@@ -108,7 +119,7 @@ func (c *core) probe(path string) (string, error) {
 	return repo, err
 }
 
-// pendingRead is one read in flight: the closure the backend runs against the
+// pendingRead is one call in flight: the closure the backend runs against the
 // Fake's state, and what came back through the Connector.
 type pendingRead struct {
 	serve func() (any, error)
@@ -156,7 +167,7 @@ var fakeBackend = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) 
 	_, _ = w.Write(body)
 })
 
-// runServe turns a panic in serve into the read's error, so a bug in a Fake's
+// runServe turns a panic in serve into the call's error, so a bug in a Fake's
 // scripted state fails that read instead of killing the shared Connector.
 func runServe(serve func() (any, error)) (val any, err error) {
 	defer func() {
@@ -271,11 +282,16 @@ func loadFakeConnector() (*connectorhost.Connector, error) {
 	}, fixturebuild.WazeroCacheDir())
 }
 
-// read sends one GET for path through the Connector, runs serve in the
-// backend, and decodes the answer into out. serve takes the Fake's lock itself,
-// so the caller must not hold it. The read fails unless the host audited it as
-// sent on a declared Route.
+// read sends one GET for path through the Connector; see call.
 func (c *core) read(path string, out any, serve func() (any, error)) error {
+	return c.call(http.MethodGet, path, out, serve)
+}
+
+// call sends one method request for path through the Connector, runs serve in
+// the backend, and decodes the answer into out (nil for a write with no result).
+// serve takes the Fake's lock itself, so the caller must not hold it. The call
+// fails unless the host audited it as sent on a declared Route.
+func (c *core) call(method, path string, out any, serve func() (any, error)) error {
 	id := nextCallID.Add(1)
 	p := &pendingRead{serve: serve}
 	pending.Store(id, p)
@@ -287,17 +303,17 @@ func (c *core) read(path string, out any, serve func() (any, error)) error {
 	}
 	params := map[string]string{
 		"url":    "https://" + fakeHost + path + "?call=" + strconv.FormatUint(id, 10),
-		"method": http.MethodGet,
+		"method": method,
 	}
 	conn := seam()
 	if err := conn.Call(context.Background(), "fetch", params, &got); err != nil {
 		if conn.Err() != nil || errors.Is(err, connectorhost.ErrUnusable) {
 			retireSeam(conn)
 		}
-		return fmt.Errorf("fake connector read %s: %w", path, err)
+		return fmt.Errorf("fake connector %s %s: %w", method, path, err)
 	}
 	if !p.audited || p.audit.Decision != connectorhost.DecisionSent || p.audit.Route == "" {
-		return fmt.Errorf("fake connector read %s: not sent on a declared route: %+v", path, p.audit)
+		return fmt.Errorf("fake connector %s %s: not sent on a declared route: %+v", method, path, p.audit)
 	}
 	if o, ok := observers.Load(c); ok {
 		o.(func(connectorhost.AuditEntry))(p.audit)
@@ -306,7 +322,10 @@ func (c *core) read(path string, out any, serve func() (any, error)) error {
 		return p.err
 	}
 	if got.Status != http.StatusOK {
-		return fmt.Errorf("fake connector read %s: status %d: %s", path, got.Status, strings.TrimSpace(got.Body))
+		return fmt.Errorf("fake connector %s %s: status %d: %s", method, path, got.Status, strings.TrimSpace(got.Body))
+	}
+	if out == nil {
+		return nil
 	}
 	return json.Unmarshal([]byte(got.Body), out)
 }
