@@ -97,6 +97,8 @@ type restBackend struct {
 	prs        map[int]*restPR
 	jobLogs    map[string]string
 	unexpected []string
+	// listStatus, when set, is the status every issues-list read answers with.
+	listStatus int
 	// host and web are the backend's host and the repository's web URL.
 	host string
 	web  string
@@ -195,6 +197,8 @@ func (b *restBackend) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	switch parts := strings.Split(strings.TrimPrefix(rest, "/"), "/"); {
+	case rest == "" && b.listStatus != 0:
+		w.WriteHeader(b.listStatus)
 	case rest == "":
 		b.list(w, q)
 	case len(parts) == 1:
