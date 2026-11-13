@@ -79,15 +79,15 @@ var (
 	// fakeNativeWrites mutate the Fake's state natively: the tracker writes not
 	// yet moved behind the tracker Connector (#6753, #6890) await it, and
 	// RelayBundle is git in core, not a forge HTTP primitive.
-	fakeNativeWrites = setOf("TransitionState", "CompleteVerdict", "CreateLabel",
-		"AddLabels", "CloseIssue", "CloseMergedIssue", "FlagAbandoned", "PostIssue",
-		"RelayBundle")
+	fakeNativeWrites = setOf("CloseIssue", "CloseMergedIssue", "PostIssue", "RelayBundle")
 	// fakeWrites are the forge and tracker writes, each with the HTTP method its
 	// Route must be audited under. They cross the Connector like reads do.
 	fakeWrites = map[string]string{
 		"Comment": http.MethodPost, "RecordLanding": http.MethodPost,
-		"RecordLandingPass": http.MethodPost,
-		"EnqueueAutoMerge":  http.MethodPost, "MarkReady": http.MethodPatch,
+		"RecordLandingPass": http.MethodPost, "TransitionState": http.MethodPost,
+		"CompleteVerdict": http.MethodPost, "CreateLabel": http.MethodPost,
+		"AddLabels": http.MethodPost, "FlagAbandoned": http.MethodPost,
+		"EnqueueAutoMerge": http.MethodPost, "MarkReady": http.MethodPatch,
 		"MarkDraft": http.MethodPatch, "CommentPR": http.MethodPost,
 		"Merge": http.MethodPost, "Rebase": http.MethodPost, "CreateDraftPR": http.MethodPost,
 		"DeleteBranch": http.MethodDelete,

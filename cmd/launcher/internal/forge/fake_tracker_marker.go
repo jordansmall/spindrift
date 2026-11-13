@@ -73,20 +73,24 @@ func (tf *IssueTrackerFake) CloseMergedIssue(num string) error {
 }
 
 // FlagAbandoned implements the optional AbandonedFlagger interface (ADR 0029).
+// Real adapters set a frontmatter field, not a label; the Fake borrows the
+// editLabels Route to model that edit as a tracker write.
 func (tf *IssueTrackerFake) FlagAbandoned(num string) error {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	tf.FlagAbandonedCalls = append(tf.FlagAbandonedCalls, num)
-	if tf.FlagAbandonedErr != nil {
-		return tf.FlagAbandonedErr
-	}
-	iss, ok := tf.issues[num]
-	if !ok {
-		return fmt.Errorf("issue %s not found", num)
-	}
-	iss.Abandoned = true
-	tf.issues[num] = iss
-	return nil
+	return tf.call(http.MethodPost, pathEditLabels, nil, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		tf.FlagAbandonedCalls = append(tf.FlagAbandonedCalls, num)
+		if tf.FlagAbandonedErr != nil {
+			return nil, tf.FlagAbandonedErr
+		}
+		iss, ok := tf.issues[num]
+		if !ok {
+			return nil, fmt.Errorf("issue %s not found", num)
+		}
+		iss.Abandoned = true
+		tf.issues[num] = iss
+		return nil, nil
+	})
 }
 
 // priorClaimAnswer is PriorClaimState's answer over pathPriorClaim.

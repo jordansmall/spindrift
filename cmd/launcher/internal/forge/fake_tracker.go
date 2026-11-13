@@ -301,76 +301,131 @@ func (tf *IssueTrackerFake) Issue(num string) (Issue, error) {
 //
 // A claim also errors on ErrAlreadyClaimed without mutating labels when num
 // already carries InProgress (#3887), so a test on the Fake pins the same
-// contract the real adapters must honor.
+// contract the real adapters must honor. The check is not atomic against a
+// concurrent claim, as for the real adapters.
+//
+// That policy runs here in core, as for every Connector-backed tracker: the
+// backend only answers the transition primitive, serves the issue read, and
+// applies the editLabels it is sent.
 func (tf *IssueTrackerFake) TransitionState(num string, from, to DispatchState) error {
 	tf.Fire("TransitionState")
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	tf.TransitionStateCalls = append(tf.TransitionStateCalls, TransitionStateCall{num, from, to})
-	if err := tf.TransitionStateErrByNum[num]; err != nil {
+	// The transition primitive is a no-op carrying only the spy and scripted
+	// refusals; the labels below carry the change. Unlike connectortracker
+	// (writes.go), it crosses before the claim check, keeping the
+	// TransitionStateCalls/TransitionStateErr order tests rely on.
+	err := tf.call(http.MethodPost, pathTransition, nil, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		tf.TransitionStateCalls = append(tf.TransitionStateCalls, TransitionStateCall{num, from, to})
+		if err := tf.TransitionStateErrByNum[num]; err != nil {
+			return nil, err
+		}
+		return nil, tf.TransitionStateErr
+	})
+	if err != nil {
 		return err
 	}
-	if tf.TransitionStateErr != nil {
-		return tf.TransitionStateErr
+	labels, ok, err := tf.issueLabels(num)
+	if err != nil || !ok {
+		return err // a missing issue is best-effort
 	}
-	iss, ok := tf.issues[num]
-	if !ok {
-		return nil // best-effort
+	dl, vl := tf.labelSets()
+	if dl.AlreadyClaimed(from, to, labels) {
+		return fmt.Errorf("fake: issue %s: %w (%q)", num, ErrAlreadyClaimed, dl.Label(to))
 	}
-	if tf.labels.AlreadyClaimed(from, to, iss.Labels) {
-		return fmt.Errorf("fake: issue %s: %w (%q)", num, ErrAlreadyClaimed, tf.labels.Label(to))
-	}
-	add := tf.labels.Label(to)
-	remove := map[string]bool{}
-	for _, l := range TransitionRemoveLabels(tf.labels, tf.VerdictLabels, from, to) {
-		remove[l] = true
-	}
-	var next []string
-	for _, l := range iss.Labels {
-		if !remove[l] {
-			next = append(next, l)
-		}
-	}
-	next = append(next, add)
-	iss.Labels = next
-	tf.issues[num] = iss
-	return nil
+	return tf.editLabels(num, []string{dl.Label(to)}, TransitionRemoveLabels(dl, vl, from, to), nil)
+}
+
+// labelSets snapshots the dispatch and verdict labels under tf.mu.
+func (tf *IssueTrackerFake) labelSets() (DispatchLabels, VerdictLabels) {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	return tf.labels, tf.VerdictLabels
 }
 
 // CompleteVerdict swaps the InProgress label for verdict's terminal label on
 // issue num, best-effort on a missing issue like TransitionState. Unlike
 // TransitionState it first asserts num carries InProgress and errors without
 // mutating labels when it does not, the double-dispatch guard
-// forgetest.RunTrackerContract pins across every adapter (#701).
+// forgetest.RunTrackerContract pins across every adapter (#701). The guard runs
+// here in core over the read and editLabels primitives. CompleteVerdictErr rides
+// the editLabels pre hook, so it is consulted only after the missing-issue,
+// no-verdict-label and not-in-progress checks: scripting it on an unseeded
+// issue yields nil.
 func (tf *IssueTrackerFake) CompleteVerdict(num string, verdict Verdict) error {
 	tf.mu.Lock()
-	defer tf.mu.Unlock()
 	tf.CompleteVerdictCalls = append(tf.CompleteVerdictCalls, CompleteVerdictCall{num, verdict})
-	if tf.CompleteVerdictErr != nil {
-		return tf.CompleteVerdictErr
+	tf.mu.Unlock()
+	dl, vl := tf.labelSets()
+	add := vl.Label(verdict)
+	labels, ok, err := tf.issueLabels(num)
+	if err != nil || !ok {
+		return err // a missing issue is best-effort, even with no verdict label
 	}
-	iss, ok := tf.issues[num]
-	if !ok {
-		return nil // best-effort
-	}
-	add := tf.VerdictLabels.Label(verdict)
 	if add == "" {
 		return fmt.Errorf("issue %s: no label configured for verdict %v", num, verdict)
 	}
-	remove := tf.labels.Label(InProgress)
-	if remove != "" && !slices.Contains(iss.Labels, remove) {
-		return fmt.Errorf("issue %s: expected %q label, issue has %v", num, remove, iss.Labels)
-	}
-	var next []string
-	for _, l := range iss.Labels {
-		if l != remove {
-			next = append(next, l)
+	var remove []string
+	if r := dl.Label(InProgress); r != "" {
+		if !slices.Contains(labels, r) {
+			return fmt.Errorf("issue %s: expected %q label, issue has %v", num, r, labels)
 		}
+		remove = []string{r}
 	}
-	next = append(next, add)
-	iss.Labels = next
-	tf.issues[num] = iss
-	return nil
+	return tf.editLabels(num, []string{add}, remove, func() error {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		return tf.CompleteVerdictErr
+	})
+}
+
+// issueAnswer is issueLabels' answer over pathIssue.
+type issueAnswer struct {
+	Labels []string
+	OK     bool
+}
+
+// issueLabels reads num's labels through the Connector for core-side policy. It
+// is not the public Issue read: it records no IssueCalls and consumes none of
+// the IssueErr scripting, which belongs to callers' own reads of the issue.
+func (tf *IssueTrackerFake) issueLabels(num string) ([]string, bool, error) {
+	var out issueAnswer
+	err := tf.read(pathIssue, &out, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		iss, ok := tf.issues[num]
+		return issueAnswer{append([]string(nil), iss.Labels...), ok}, nil
+	})
+	return out.Labels, out.OK, err
+}
+
+// editLabels is the editLabels primitive: it strips remove from num's labels,
+// then appends each add not already present. It holds no policy. pre, if
+// non-nil, runs first in the backend, outside the Fake's lock, and may refuse the
+// write, the seam for a caller's spy and scripted error.
+func (tf *IssueTrackerFake) editLabels(num string, add, remove []string, pre func() error) error {
+	return tf.call(http.MethodPost, pathEditLabels, nil, func() (any, error) {
+		if pre != nil {
+			if err := pre(); err != nil {
+				return nil, err
+			}
+		}
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		iss, ok := tf.issues[num]
+		if !ok {
+			return nil, fmt.Errorf("issue %s not found", num)
+		}
+		next := slices.DeleteFunc(slices.Clone(iss.Labels), func(l string) bool { return slices.Contains(remove, l) })
+		for _, l := range add {
+			if !slices.Contains(next, l) {
+				next = append(next, l)
+			}
+		}
+		iss.Labels = next
+		tf.issues[num] = iss
+		return nil, nil
+	})
 }
 
 var _ NativeDepsReader = (*IssueTrackerFake)(nil)
@@ -466,13 +521,15 @@ func (tf *IssueTrackerFake) ListLabels() ([]string, error) {
 }
 
 func (tf *IssueTrackerFake) CreateLabel(name, description, color string) error {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	tf.CreateLabelCalls = append(tf.CreateLabelCalls, CreateLabelCall{name, description, color})
-	if tf.CreateLabelErr == nil {
-		tf.Labels = append(tf.Labels, name)
-	}
-	return tf.CreateLabelErr
+	return tf.call(http.MethodPost, pathLabels, nil, func() (any, error) {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		tf.CreateLabelCalls = append(tf.CreateLabelCalls, CreateLabelCall{name, description, color})
+		if tf.CreateLabelErr == nil {
+			tf.Labels = append(tf.Labels, name)
+		}
+		return nil, tf.CreateLabelErr
+	})
 }
 
 // missingLabels returns the labels a RequireLabelsExist PostIssue rejects.
@@ -497,23 +554,12 @@ func (tf *IssueTrackerFake) missingLabels(labels []string) []string {
 // otherwise knows exists, so a missing issue is a real fake-setup bug, not a
 // benign double-dispatch the way a stale TransitionState can be.
 func (tf *IssueTrackerFake) AddLabels(num string, labels []string) error {
-	tf.mu.Lock()
-	defer tf.mu.Unlock()
-	tf.AddLabelsCalls = append(tf.AddLabelsCalls, AddLabelsCall{Num: num, Labels: append([]string(nil), labels...)})
-	if tf.AddLabelsErr != nil {
+	return tf.editLabels(num, labels, nil, func() error {
+		tf.mu.Lock()
+		defer tf.mu.Unlock()
+		tf.AddLabelsCalls = append(tf.AddLabelsCalls, AddLabelsCall{Num: num, Labels: append([]string(nil), labels...)})
 		return tf.AddLabelsErr
-	}
-	iss, ok := tf.issues[num]
-	if !ok {
-		return fmt.Errorf("issue %s not found", num)
-	}
-	for _, l := range labels {
-		if !slices.Contains(iss.Labels, l) {
-			iss.Labels = append(iss.Labels, l)
-		}
-	}
-	tf.issues[num] = iss
-	return nil
+	})
 }
 
 // SetIssue upserts an issue into the fake store.
