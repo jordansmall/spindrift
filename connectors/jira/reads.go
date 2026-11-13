@@ -55,7 +55,7 @@ func get(t tracker.Target, path string, out any) error {
 }
 
 // do sends method to t.API+path, with body as JSON when non-nil, and decodes a
-// 2xx JSON response into out.
+// 2xx JSON response into out, when there is one.
 func do(t tracker.Target, method, path string, body, out any) error {
 	req := connector.Request{
 		Method:  method,
@@ -77,6 +77,11 @@ func do(t tracker.Target, method, path string, body, out any) error {
 	if resp.Status < 200 || resp.Status > 299 {
 		return fmt.Errorf("%s %s: status %d", method, path, resp.Status)
 	}
+	// A write answers 204 with no body and passes a nil out; a read that
+	// answers 200 empty must still fail to decode.
+	if out == nil {
+		return nil
+	}
 	if err := json.Unmarshal(resp.Body, out); err != nil {
 		return fmt.Errorf("%s %s: decode: %w", method, path, err)
 	}
@@ -90,6 +95,7 @@ type rawIssue struct {
 		Summary     string `json:"summary"`
 		Description string `json:"description"`
 		Status      struct {
+			Name           string `json:"name"`
 			StatusCategory struct {
 				Key string `json:"key"`
 			} `json:"statusCategory"`
@@ -123,6 +129,7 @@ func (r rawIssue) issue() tracker.Issue {
 		Title:  r.Fields.Summary,
 		Body:   r.Fields.Description,
 		State:  "open",
+		Status: r.Fields.Status.Name,
 		Labels: append([]string{}, r.Fields.Labels...),
 	}
 	if raw, ok := r.Properties[dedupPropertyKey]; ok {
