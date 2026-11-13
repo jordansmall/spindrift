@@ -63,11 +63,13 @@ func withOptionals(p PRs) PRs {
 }
 
 var requiredPRMethods = []string{
-	"forge.openPR", "forge.behind", "forge.prFiles", "forge.setDraft", "forge.comment", "forge.merge",
+	"forge.behind", "forge.prFiles", "forge.setDraft", "forge.comment", "forge.merge",
 }
 
 func TestPRCapabilities(t *testing.T) {
-	caps, m := prHandlers(fakePRs(t))
+	minimal := fakePRs(t)
+	minimal.Open = nil
+	caps, m := prHandlers(minimal)
 	if want := []string{"forge.prs"}; !reflect.DeepEqual(caps, want) {
 		t.Fatalf("caps = %v, want %v", caps, want)
 	}
@@ -81,18 +83,18 @@ func TestPRCapabilities(t *testing.T) {
 	}
 
 	caps, m = prHandlers(withOptionals(fakePRs(t)))
-	want := []string{"forge.prs", "forge.autoMerge", "forge.ciRun", "forge.branchProtection", "forge.probe"}
+	want := []string{"forge.prs", "forge.draftPRs", "forge.autoMerge", "forge.ciRun", "forge.branchProtection", "forge.probe"}
 	if !reflect.DeepEqual(caps, want) {
 		t.Fatalf("caps = %v, want %v", caps, want)
 	}
-	for _, name := range []string{"forge.autoMergeAllowed", "forge.enqueueAutoMerge", "forge.ciRun",
+	for _, name := range []string{"forge.openPR", "forge.autoMergeAllowed", "forge.enqueueAutoMerge", "forge.ciRun",
 		"forge.branchProtected", "forge.probe"} {
 		if _, ok := m[name]; !ok {
 			t.Errorf("%s handler missing", name)
 		}
 	}
-	if len(m) != len(requiredPRMethods)+5 {
-		t.Errorf("%d handlers, want %d", len(m), len(requiredPRMethods)+5)
+	if len(m) != len(requiredPRMethods)+6 {
+		t.Errorf("%d handlers, want %d", len(m), len(requiredPRMethods)+6)
 	}
 }
 
@@ -185,7 +187,6 @@ func TestPRErrorPassesThrough(t *testing.T) {
 func TestMissingPRFuncPanics(t *testing.T) {
 	full := fakePRs(t)
 	for name, mut := range map[string]func(*PRs){
-		"Open":     func(p *PRs) { p.Open = nil },
 		"Behind":   func(p *PRs) { p.Behind = nil },
 		"Files":    func(p *PRs) { p.Files = nil },
 		"SetDraft": func(p *PRs) { p.SetDraft = nil },
@@ -212,6 +213,7 @@ func TestMissingPRFuncPanics(t *testing.T) {
 func TestPROptionalsAreIndependent(t *testing.T) {
 	full := withOptionals(fakePRs(t))
 	for cap, mut := range map[string]func(*PRs){
+		"forge.draftPRs":         func(p *PRs) { p.Open = nil },
 		"forge.ciRun":            func(p *PRs) { p.CIRun = nil },
 		"forge.branchProtection": func(p *PRs) { p.BranchProtected = nil },
 		"forge.probe":            func(p *PRs) { p.Probe = nil },
@@ -222,7 +224,7 @@ func TestPROptionalsAreIndependent(t *testing.T) {
 		p := full
 		mut(&p)
 		caps, _ := prHandlers(p)
-		if slices.Contains(caps, cap) || len(caps) != 4 {
+		if slices.Contains(caps, cap) || len(caps) != 5 {
 			t.Errorf("without %s: caps = %v", cap, caps)
 		}
 	}

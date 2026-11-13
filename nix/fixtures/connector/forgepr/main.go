@@ -3,7 +3,8 @@
 // them to a forgejo-shaped REST backend over http_request, with Target.API as
 // the base URL (the scripted backend's port is dynamic). Link-time mode
 // (-ldflags=-X=main.mode=<mode>) selects a variant: "" sets every optional
-// primitive; "minimal" sets none of the optional PR primitives;
+// primitive; "minimal" sets none of the optional PR primitives (draft PR
+// creation, auto-merge, CI run, branch protection, probe);
 // "undeclared-merge" merges through a path outside the repo subtree the Route
 // table declares, which the host refuses unsent.
 package main
@@ -33,7 +34,6 @@ func init() {
 		DeleteBranch: deleteBranch,
 	})
 	p := forge.PRs{
-		Open:     open,
 		Behind:   behind,
 		Files:    files,
 		SetDraft: setDraft,
@@ -41,6 +41,7 @@ func init() {
 		Merge:    merge,
 	}
 	if mode != "minimal" {
+		p.Open = open
 		p.AutoMergeAllowed = autoMergeAllowed
 		p.EnqueueAutoMerge = enqueueAutoMerge
 		p.CIRun = ciRun

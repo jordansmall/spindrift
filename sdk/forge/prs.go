@@ -16,6 +16,7 @@ const (
 	CapCIRun            = "forge.ciRun"
 	CapBranchProtection = "forge.branchProtection"
 	CapProbe            = "forge.probe"
+	CapDraftPRs         = "forge.draftPRs"
 )
 
 // NewPR is the pull request a Connector opens. Base is the branch it merges
@@ -31,7 +32,10 @@ type NewPR struct {
 // PRs is everything a Connector-backed Code Forge needs of the forge itself
 // for pull requests; core derives the rest. Reading a PR stays on Reader.
 type PRs struct {
-	// Open opens a pull request and returns it.
+	// Open is optional and declares CapDraftPRs. It opens a pull request and
+	// returns it. Core only ever opens drafts through it (Draft is always
+	// true), and a Connector that sets it lets the host push a branch it built
+	// itself and open the PR for it.
 	Open func(t Target, p NewPR) (PR, error)
 
 	// Behind returns how many commits the PR's base has that its head lacks.
@@ -83,8 +87,6 @@ func RegisterPRs(p PRs) {
 // prHandlers builds the capability list and method table for p.
 func prHandlers(p PRs) ([]string, map[string]method) {
 	switch {
-	case p.Open == nil:
-		panic("forge: PRs.Open is required")
 	case p.Behind == nil:
 		panic("forge: PRs.Behind is required")
 	case p.Files == nil:
@@ -115,16 +117,6 @@ func prHandlers(p PRs) ([]string, map[string]method) {
 		return struct{}{}, nil
 	}
 	m := map[string]method{
-		"forge.openPR": func(params json.RawMessage) (any, error) {
-			var q struct {
-				Target Target `json:"target"`
-				PR     NewPR  `json:"pr"`
-			}
-			if err := unmarshal(params, &q); err != nil {
-				return nil, err
-			}
-			return p.Open(q.Target, q.PR)
-		},
 		"forge.behind": func(params json.RawMessage) (any, error) {
 			t, n, err := numbered(params)
 			if err != nil {
@@ -186,6 +178,19 @@ func prHandlers(p PRs) ([]string, map[string]method) {
 	}
 	caps := []string{CapPRs}
 
+	if p.Open != nil {
+		m["forge.openPR"] = func(params json.RawMessage) (any, error) {
+			var q struct {
+				Target Target `json:"target"`
+				PR     NewPR  `json:"pr"`
+			}
+			if err := unmarshal(params, &q); err != nil {
+				return nil, err
+			}
+			return p.Open(q.Target, q.PR)
+		}
+		caps = append(caps, CapDraftPRs)
+	}
 	if p.AutoMergeAllowed != nil {
 		m["forge.autoMergeAllowed"] = func(params json.RawMessage) (any, error) {
 			t, err := targeted(params)
