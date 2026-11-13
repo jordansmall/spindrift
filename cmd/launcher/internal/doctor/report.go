@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/backendkit"
 )
 
 // Reporter owns every line doctor writes to its report stream and
@@ -118,7 +118,7 @@ func rowPrefix(t Tier) string {
 // status line keyed on r.Check.Tier plus a "  remedy: <remedy>" line on
 // failure. An Err wrapping ErrDegraded prints as "advisory:" whatever the
 // Check's own Tier, with the sentinel's text trimmed off; one wrapping
-// runner.ErrUnsupported prints as "unsupported: <name> (<reason>)" with no remedy.
+// backendkit.ErrUnsupported prints as "unsupported: <name> (<reason>)" with no remedy.
 func (r *Reporter) Results(results []Result) {
 	for _, res := range results {
 		if res.Err == nil {
@@ -129,7 +129,7 @@ func (r *Reporter) Results(results []Result) {
 			r.Success("%s", res.Check.Name)
 			continue
 		}
-		if errors.Is(res.Err, runner.ErrUnsupported) {
+		if errors.Is(res.Err, backendkit.ErrUnsupported) {
 			r.Unsupported("%s (%s)", res.Check.Name, UnsupportedReason(res.Err))
 			continue
 		}
@@ -153,8 +153,8 @@ func (r *Reporter) Results(results []Result) {
 	}
 }
 
-// UnsupportedReason is err's text without the trailing runner.ErrUnsupported sentinel,
+// UnsupportedReason is err's text without the trailing backendkit.ErrUnsupported sentinel,
 // which every call site wraps last.
 func UnsupportedReason(err error) string {
-	return strings.TrimSuffix(err.Error(), ": "+runner.ErrUnsupported.Error())
+	return strings.TrimSuffix(err.Error(), ": "+backendkit.ErrUnsupported.Error())
 }

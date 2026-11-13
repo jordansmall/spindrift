@@ -7,7 +7,6 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
-	"spindrift.dev/launcher/internal/runner"
 )
 
 // acquireTokenWith builds the wizard's github token setup: acquire, then audit
@@ -72,7 +71,7 @@ func auditGHToken(token, repoSlug string, introspect backendkit.TokenIntrospecto
 	}
 	if strings.HasPrefix(token, "ghp_") || strings.HasPrefix(token, "gho_") {
 		grant, err := introspect(token, repoSlug)
-		if errors.Is(err, runner.ErrUnsupported) {
+		if errors.Is(err, backendkit.ErrUnsupported) {
 			fmt.Fprintf(w, "cannot audit the token's scopes (%v) — verify yourself that it is least-privilege.\n", err)
 			return nil
 		}

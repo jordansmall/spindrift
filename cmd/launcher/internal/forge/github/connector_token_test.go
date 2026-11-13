@@ -12,7 +12,6 @@ import (
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
-	"spindrift.dev/launcher/internal/runner"
 )
 
 // useGithubRow applies a github backend row whose Connector reaches b, as a
@@ -96,7 +95,7 @@ func TestIntrospectViaConnector_RefusedReadIsAnError(t *testing.T) {
 	b.userStatus = http.StatusUnauthorized
 	useGithubRow(t, b)
 	_, err := introspectViaConnector(githubRow(t), backendrows.Options{Audit: &bytes.Buffer{}, Client: b.Client()}, "ghp_abc", connectorRepo)
-	if err == nil || errors.Is(err, runner.ErrUnsupported) {
+	if err == nil || errors.Is(err, backendkit.ErrUnsupported) {
 		t.Fatalf("err = %v, want a non-unsupported error", err)
 	}
 }

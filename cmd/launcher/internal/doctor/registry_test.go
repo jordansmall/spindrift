@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -654,7 +655,7 @@ func TestPrerequisiteCheckMapsTierAndFields(t *testing.T) {
 }
 
 func TestBlocking_UnsupportedIsNeverBlockingAtAnyTier(t *testing.T) {
-	err := fmt.Errorf("no capability: %w", runner.ErrUnsupported)
+	err := fmt.Errorf("no capability: %w", backendkit.ErrUnsupported)
 	for _, tier := range []Tier{Required, Advisory} {
 		if Blocking(Result{Check: Check{Name: "c", Tier: tier}, Err: err}) {
 			t.Errorf("tier %v: Blocking(unsupported) = true, want false", tier)
@@ -665,7 +666,7 @@ func TestBlocking_UnsupportedIsNeverBlockingAtAnyTier(t *testing.T) {
 func TestFirstRequiredError_SkipsUnsupportedRequiredRowAndKeepsGoing(t *testing.T) {
 	genuine := errors.New("branch is unprotected")
 	results := []Result{
-		{Check: Check{Name: "unsupported", Tier: Required}, Err: fmt.Errorf("x: %w", runner.ErrUnsupported)},
+		{Check: Check{Name: "unsupported", Tier: Required}, Err: fmt.Errorf("x: %w", backendkit.ErrUnsupported)},
 		{Check: Check{Name: "other", Tier: Required}, Err: genuine},
 	}
 	if got := FirstRequiredError(results); !errors.Is(got, genuine) {

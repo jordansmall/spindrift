@@ -10,7 +10,6 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/forge/github"
-	"spindrift.dev/launcher/internal/runner"
 )
 
 // noIntrospection fails the test when the wizard audits a token it should not.
@@ -185,7 +184,7 @@ func TestAcquireToken_AmbientLookupFollowsDescriptorTokenEnvVar(t *testing.T) {
 func TestAcquireToken_UnsupportedIntrospectionWarnsAndContinues(t *testing.T) {
 	var out bytes.Buffer
 	unsupported := func(string, string) (backendkit.TokenIntrospection, error) {
-		return backendkit.TokenIntrospection{}, fmt.Errorf("no github connector is configured: %w", runner.ErrUnsupported)
+		return backendkit.TokenIntrospection{}, fmt.Errorf("no github connector is configured: %w", backendkit.ErrUnsupported)
 	}
 	token, err := acquireWith(t, unsupported, backendkit.TokenPrompt{
 		Out:    &out,

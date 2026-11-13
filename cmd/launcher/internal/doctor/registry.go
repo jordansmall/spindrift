@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -66,12 +67,12 @@ func runOne(c Check) Result {
 // Blocking reports whether r's failure stops the run. A Required-tier probe
 // that wrapped ErrDegraded could not determine its answer, which is not the
 // same as affirmatively detecting the condition it checks (issue #2962), so
-// it never blocks; nor does a probe wrapping runner.ErrUnsupported, at any tier.
+// it never blocks; nor does a probe wrapping backendkit.ErrUnsupported, at any tier.
 // Every caller asking "does this failure stop the run?" — this package's
 // fail-fast chains and cmd/launcher's configuration classification alike —
 // routes through here so the two cannot drift apart.
 func Blocking(r Result) bool {
-	return r.Check.Tier == Required && r.Err != nil && !errors.Is(r.Err, ErrDegraded) && !errors.Is(r.Err, runner.ErrUnsupported)
+	return r.Check.Tier == Required && r.Err != nil && !errors.Is(r.Err, ErrDegraded) && !errors.Is(r.Err, backendkit.ErrUnsupported)
 }
 
 // RunChecks runs every check's Probe in order, never short-circuiting on a

@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/runner"
 )
 
 // BranchProtectionCheckName is the Name of the branch-protection Check row, so
@@ -43,7 +43,7 @@ func BranchProtectionCheck(caps forge.Capabilities, mergePolicy, baseBranch stri
 			if err != nil {
 				// A Connector without the capability is a check the backend does
 				// not offer, not an indeterminate probe.
-				if errors.Is(err, runner.ErrUnsupported) {
+				if errors.Is(err, backendkit.ErrUnsupported) {
 					return nil, err
 				}
 				// ErrDegraded stops an indeterminate probe (e.g. a permission

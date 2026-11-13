@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/backendkit"
 )
 
 func TestReporter_Success_PrintsOkRow(t *testing.T) {
@@ -213,7 +213,7 @@ func TestReporter_Verbose_Results_PrintsDegradedRequiredFindingAsAdvisory(t *tes
 func TestReporter_Verbose_Results_PrintsUnsupportedAsItsOwnLineWithoutRemedy(t *testing.T) {
 	results := []Result{{
 		Check: Check{Name: "token-scopes", Tier: Required, Remedy: "install gh"},
-		Err:   fmt.Errorf("the github connector does not declare forge.tokenGrant: %w", runner.ErrUnsupported),
+		Err:   fmt.Errorf("the github connector does not declare forge.tokenGrant: %w", backendkit.ErrUnsupported),
 	}}
 
 	var buf bytes.Buffer
@@ -228,7 +228,7 @@ func TestReporter_Verbose_Results_PrintsUnsupportedAsItsOwnLineWithoutRemedy(t *
 func TestReporter_Quiet_Results_PrintsUnsupportedRow(t *testing.T) {
 	results := []Result{{
 		Check: Check{Name: "token-scopes", Tier: Required, Remedy: "install gh"},
-		Err:   fmt.Errorf("no capability: %w", runner.ErrUnsupported),
+		Err:   fmt.Errorf("no capability: %w", backendkit.ErrUnsupported),
 	}}
 
 	var buf bytes.Buffer

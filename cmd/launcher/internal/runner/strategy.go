@@ -99,13 +99,6 @@ func LaunchGates(ps []Prerequisite, stage Launch) []Prerequisite {
 // and still prints it, with its Remedy, as an advisory line.
 var ErrDegraded = errors.New("check degraded: probe could not determine result")
 
-// ErrUnsupported marks a probe error that names a capability the backend's
-// Connector does not offer, as distinct from a check that ran and failed.
-// Doctor reports such a check as unsupported and never counts it a failure.
-// Like ErrDegraded it lives here so a backend package can wrap it without
-// importing doctor.
-var ErrUnsupported = errors.New("check unsupported: the backend's connector does not offer the capability")
-
 // PrerequisitesFor returns the family's prerequisites for cfg, art and l, or
 // nil when it declares none.
 func (s Strategy) PrerequisitesFor(cfg Config, art inputdoc.Artifacts, l KnobLookup) []Prerequisite {
