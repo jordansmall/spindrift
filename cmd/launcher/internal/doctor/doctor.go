@@ -393,6 +393,10 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 	checkLabels := func() (requiredMissing []string, tierResults []tierResult, err error) {
 		existing, lerr := it.ListLabels()
 		if lerr != nil {
+			// A capability the backend lacks is not a connectivity failure.
+			if errors.Is(lerr, ErrUnsupported) {
+				return nil, nil, lerr
+			}
 			return nil, nil, fmt.Errorf("%w: label check failed: %w", ErrConnectivity, lerr)
 		}
 		present := make(map[string]bool, len(existing))
@@ -423,6 +427,10 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 	}
 
 	requiredMissing, tierResults, err := checkLabels()
+	if errors.Is(err, ErrUnsupported) {
+		rep.Unsupported("labels (%s)", UnsupportedReason(err))
+		return nil
+	}
 	if err != nil {
 		return err
 	}

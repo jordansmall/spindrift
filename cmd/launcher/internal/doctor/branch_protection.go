@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"errors"
 	"fmt"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -39,6 +40,11 @@ func BranchProtectionCheck(caps forge.Capabilities, mergePolicy, baseBranch stri
 			}
 			protected, err := bp.BranchProtected(baseBranch)
 			if err != nil {
+				// A Connector without the capability is a check the backend does
+				// not offer, not an indeterminate probe.
+				if errors.Is(err, ErrUnsupported) {
+					return nil, err
+				}
 				// ErrDegraded stops an indeterminate probe (e.g. a permission
 				// error) from blocking Run as a false Required failure (AC3).
 				return nil, fmt.Errorf("branch protection probe for %q failed: %w: %w", baseBranch, err, ErrDegraded)
