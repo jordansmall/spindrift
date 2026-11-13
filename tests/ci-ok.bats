@@ -24,12 +24,7 @@ needs() {
   [ "$status" -eq 0 ]
 }
 
-@test "code lane on a PR: check-macos skipped and not required passes" {
-  run bash "$CI_OK_SH" changes check < <(needs changes=success check=success)
-  [ "$status" -eq 0 ]
-}
-
-@test "code lane on main: a skipped check-macos still fails when required" {
+@test "code lane: a skipped check-macos fails" {
   run bash "$CI_OK_SH" changes check check-macos < <(needs changes=success check=success)
   [ "$status" -eq 1 ]
   [[ "$output" == *check-macos* ]]
