@@ -14,10 +14,10 @@ let
       ./fixtures/connector
     ];
   };
-  # The fixture Driver, network Connector and push-only forge Connector are
-  # built by the fixture Connector itself, the one source of their wasm; they
-  # keep their place here for the tests that read driver.wasm, network.wasm and
-  # forge.wasm.
+  # The fixture Driver, network Connector and the push-only and PR-capable forge
+  # Connectors are built by the fixture Connector itself, the one source of
+  # their wasm; they keep their place here for the tests that read driver.wasm,
+  # network.wasm, forge.wasm and forge-pr.wasm.
   connectorWasm = import ./fixtures/connector/package.nix {
     inherit pkgs;
     core = import ../core;
@@ -39,12 +39,15 @@ pkgs.runCommand "connector-wasm-fixtures" { nativeBuildInputs = [ pkgs.go ]; } '
   build call.wasm ./call
   build seamtest-driver.wasm ./seamtest-driver
   cp ${connectorWasm}/driver.wasm ${connectorWasm}/network.wasm \
-    ${connectorWasm}/forge.wasm $out/
+    ${connectorWasm}/forge.wasm ${connectorWasm}/forge-pr.wasm $out/
   for mode in trap loop memory oversize malformed invalid; do
     build hostile-$mode.wasm -ldflags=-X=main.mode=$mode ./hostile
   done
   cd ../connector
   for mode in host method path malformed write-path write-oversize; do
     build network-$mode.wasm -ldflags=-X=main.mode=$mode ./network
+  done
+  for mode in minimal undeclared-merge; do
+    build forge-pr-$mode.wasm -ldflags=-X=main.mode=$mode ./forgepr
   done
 ''
