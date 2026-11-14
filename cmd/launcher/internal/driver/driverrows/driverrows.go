@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -28,7 +29,19 @@ type Row struct {
 	// names: the Box replays each Pass log through it and reports where it
 	// disagrees, while the native Strategy stays the Driver.
 	Shadow bool `json:"shadow,omitempty"`
+	// FirstParty is rendered only by mkHarness, and only when Module is the wasm
+	// the batteries flake itself builds under this name; no Nix row can set it
+	// (mkHarness throws), though Go decodes it from any rows JSON. It
+	// gates only in-process loads inside the Box; the Launcher has no
+	// first-party exception.
+	FirstParty bool `json:"firstParty,omitempty"`
 }
+
+// ErrNotFirstParty is why the Box refuses to load a Driver Connector: it loads
+// only the batteries flake's Connectors in-process, with no fallback for any
+// other. The refusal fires when the Driver is loaded, so an unmarked row the
+// run never selects does not fail it.
+var ErrNotFirstParty = errors.New("Driver Connector is not first-party; the Box loads only the batteries flake's Connectors in-process")
 
 // Use applies the rows in raw, a JSON array of Row; empty raw is a no-op. Each
 // row replaces the Descriptor of the Driver it names. A row with a Module
@@ -41,7 +54,26 @@ type Row struct {
 // native Strategy or a Module, repeated, or with a Descriptor other than the
 // native one, it is skipped, not an error, and driver-exec reports the reason
 // (shadow never fails a run). Rows are validated whole before any is applied.
-func Use(raw json.RawMessage) error {
+// Use is the Launcher's entry point and loads any Connector; UseFile is the
+// Box's, whose registered loader refuses a Connector row not marked FirstParty.
+func Use(raw json.RawMessage) error { return use(raw, hostLoads) }
+
+// loadPolicy is who applies the rows, which decides what it may load.
+type loadPolicy int
+
+const (
+	hostLoads loadPolicy = iota // the Launcher loads any Connector
+	boxLoads                    // the Box loads only first-party Connectors
+)
+
+// refuses reports whether p must not load row's Connector.
+func (p loadPolicy) refuses(row Row) bool {
+	return p == boxLoads && row.Module != "" && !row.FirstParty
+}
+
+// use applies raw under p: a row p refuses still registers, but loading its
+// Driver fails with ErrNotFirstParty, and a shadow row it refuses is skipped.
+func use(raw json.RawMessage, p loadPolicy) error {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil
 	}
@@ -56,7 +88,7 @@ func Use(raw json.RawMessage) error {
 	skipped := map[string]string{}
 	for _, row := range rows {
 		if row.Shadow {
-			if reason := shadowSkip(row, seenShadow[row.Name]); reason != "" {
+			if reason := shadowSkip(row, seenShadow[row.Name], p); reason != "" {
 				skipped[row.Name] = "shadow row skipped: " + reason
 			}
 			seenShadow[row.Name] = true
@@ -87,13 +119,19 @@ func Use(raw json.RawMessage) error {
 		}
 		driver.UseDescriptor(row.Descriptor)
 		if row.Module != "" && !driver.Has(row.Name) {
-			driver.RegisterConnector(row.Name, loader(row.Name, row.Module))
+			if p.refuses(row) {
+				driver.RegisterConnector(row.Name, refusal(row.Name))
+			} else {
+				driver.RegisterConnector(row.Name, loader(row.Name, row.Module))
+			}
 		}
 	}
 	return nil
 }
 
 // UseFile applies the rows in the JSON file at path; an empty path is a no-op.
+// It is the Box's entry point, so loading a Connector not marked FirstParty
+// fails with ErrNotFirstParty, where Use loads any.
 func UseFile(path string) error {
 	if path == "" {
 		return nil
@@ -102,7 +140,21 @@ func UseFile(path string) error {
 	if err != nil {
 		return fmt.Errorf("driver rows: %w", err)
 	}
-	return Use(raw)
+	return use(raw, boxLoads)
+}
+
+// notFirstParty is the one text of a refused Driver Connector, shared by the
+// load refusal and the shadow skip reason.
+func notFirstParty(name string) error {
+	return fmt.Errorf("Driver %q: %w", name, ErrNotFirstParty)
+}
+
+// refusal is the loader of a Connector the Box will not load. It reads no
+// module, so no third-party wasm is ever instantiated.
+func refusal(name string) func() (driverkit.Strategy, error) {
+	return func() (driverkit.Strategy, error) {
+		return driverkit.Strategy{}, fmt.Errorf("driver rows: %w", notFirstParty(name))
+	}
 }
 
 // loader returns the function that loads the Connector at module as the Driver
@@ -138,11 +190,13 @@ func sameDescriptor(a, b driver.Descriptor) bool {
 }
 
 // shadowSkip returns why a shadow row cannot apply, or "" if it can. repeated
-// is whether an earlier shadow row names the same Driver.
-func shadowSkip(row Row, repeated bool) string {
+// is whether an earlier shadow row names the same Driver; p is who applies it.
+func shadowSkip(row Row, repeated bool, p loadPolicy) string {
 	switch {
 	case repeated:
 		return fmt.Sprintf("Driver %q has more than one shadow row", row.Name)
+	case p.refuses(row):
+		return notFirstParty(row.Name).Error()
 	case !driver.HasNative(row.Name) || row.Module == "":
 		return fmt.Sprintf("Driver %q needs a native Strategy and a module", row.Name)
 	}
