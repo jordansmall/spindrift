@@ -184,3 +184,137 @@ func TestFailedStartHasNoStats(t *testing.T) {
 		t.Fatalf("Stats = %+v, true after a failed start", st)
 	}
 }
+
+func killCount(f *runner.Fake) int {
+	return len(f.KillCalls)
+}
+
+func TestCloseStopsAStartedSandboxExactlyOnce(t *testing.T) {
+	f := runner.NewFake()
+	f.StartConnectorSandboxFunc = inMemoryHost
+	s := New(f, "podman")
+	if _, err := s.Load(context.Background(), notWasm); errors.Is(err, connectorsandbox.ErrConnectorSandboxStart) {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := s.Close(context.Background()); err != nil {
+			t.Fatalf("Close = %v", err)
+		}
+	}
+	if got := killCount(f); got != 1 {
+		t.Fatalf("Kill calls = %v, want exactly one though the host exited on its stdin closing", f.KillCalls)
+	}
+}
+
+func TestHelloFailureThenCloseStopsOnce(t *testing.T) {
+	f := runner.NewFake()
+	f.StartConnectorSandboxFunc = func(string) (runner.ConnectorSandbox, error) {
+		return runner.ConnectorSandbox{
+			Stdin:  nopWriteCloser{io.Discard},
+			Stdout: strings.NewReader(""),
+			Wait:   func() error { return errors.New("exit status 125") },
+			Stderr: func() string { return "" },
+		}, nil
+	}
+	s := New(f, "podman")
+	if _, err := s.Load(context.Background(), notWasm); !errors.Is(err, connectorsandbox.ErrConnectorSandboxStart) {
+		t.Fatalf("Load = %v", err)
+	}
+	if err := s.Close(context.Background()); err != nil {
+		t.Fatalf("Close = %v", err)
+	}
+	if got := killCount(f); got != 1 {
+		t.Fatalf("Kill calls = %v, want exactly one", f.KillCalls)
+	}
+}
+
+func TestRefusedStartIsNeverStopped(t *testing.T) {
+	f := runner.NewFake()
+	s := New(f, "podman")
+	_, _ = s.Load(context.Background(), notWasm)
+	_ = s.Close(context.Background())
+	if got := killCount(f); got != 0 {
+		t.Fatalf("Kill calls = %v, want none for a sandbox that never started", f.KillCalls)
+	}
+}
+
+func TestNoLoadNeverStops(t *testing.T) {
+	f := runner.NewFake()
+	s := New(f, "podman")
+	_ = s.Close(context.Background())
+	if got := killCount(f); got != 0 {
+		t.Fatalf("Kill calls = %v, want none", f.KillCalls)
+	}
+}
+
+// killClosesHost is a Starter whose Kill is what ends the host: the sandbox
+// ignores its stdin closing.
+type killClosesHost struct {
+	*runner.Fake
+	stdin io.Closer
+}
+
+func (k *killClosesHost) Kill(name string) error {
+	_ = k.stdin.Close()
+	return k.Fake.Kill(name)
+}
+
+func TestHostKilledBySessionsIsNotStoppedTwice(t *testing.T) {
+	f := runner.NewFake()
+	k := &killClosesHost{Fake: f}
+	f.StartConnectorSandboxFunc = func(name string) (runner.ConnectorSandbox, error) {
+		sb, err := inMemoryHost(name)
+		k.stdin = sb.Stdin
+		sb.Stdin = nopWriteCloser{sb.Stdin}
+		return sb, err
+	}
+	s := New(k, "podman")
+	if _, err := s.Load(context.Background(), notWasm); errors.Is(err, connectorsandbox.ErrConnectorSandboxStart) {
+		t.Fatal(err)
+	}
+	// A cancelled ctx makes Sessions.Close kill the host at once rather than
+	// after closeGrace.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = s.Close(ctx)
+	if got := killCount(f); got != 1 {
+		t.Fatalf("Kill calls = %v, want exactly one", f.KillCalls)
+	}
+}
+
+func TestFailedStopIsRetriedByCloseAndReported(t *testing.T) {
+	f := runner.NewFake()
+	f.StartConnectorSandboxFunc = inMemoryHost
+	f.KillErr = errors.New("podman rm -f: boom")
+	s := New(f, "podman")
+	if _, err := s.Load(context.Background(), notWasm); errors.Is(err, connectorsandbox.ErrConnectorSandboxStart) {
+		t.Fatal(err)
+	}
+	// A cancelled ctx makes Sessions.Close kill the host through its killer,
+	// which discards the error; Close's own stop must still surface it.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.Close(ctx); !errors.Is(err, f.KillErr) {
+		t.Fatalf("Close = %v, want the Kill error", err)
+	}
+	before := killCount(f)
+	if before < 2 {
+		t.Fatalf("Kill calls = %v, want the killer path and Close's retry", f.KillCalls)
+	}
+
+	f.KillErr = nil
+	if err := s.Close(context.Background()); err != nil {
+		t.Fatalf("Close after a successful retry = %v", err)
+	}
+	if got := killCount(f); got != before+1 {
+		t.Fatalf("Kill calls = %v, want one more", f.KillCalls)
+	}
+	for range 3 {
+		if err := s.Close(context.Background()); err != nil {
+			t.Fatalf("Close = %v", err)
+		}
+	}
+	if got := killCount(f); got != before+1 {
+		t.Fatalf("Kill calls = %v, want no more once a stop succeeded", f.KillCalls)
+	}
+}
