@@ -743,12 +743,22 @@ let
         packages = p: [ p.hello ];
         driverRows.fixture = row;
       };
+      # The batteries claude row, shadowed as the dogfood runs it: the one
+      # first-party Driver row, so driver-exec's Box-side rows file must
+      # carry the mark for it to apply.
+      claudeBoxHarness = import ../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        driverRows = dogfoodDriverRows;
+        shadowDrivers = [ "claude" ];
+      };
     in
     pkgs.runCommand "driver-connector-artifacts" { nativeBuildInputs = [ pkgs.jq ]; } ''
       mkdir $out
       ${runInputDocOf driverConnectorConsumer.apps.${system}.default.program}
       cp "$doc" $out/input.json
       cp ${boxHarness.internals.driverRowsFileWith pkgs} $out/box-rows.json
+      cp ${claudeBoxHarness.internals.driverRowsFileWith pkgs} $out/claude-box-rows.json
       ln -s "$(jq -r '.drivers[0].module' "$doc")" $out/module.wasm
     '';
 
