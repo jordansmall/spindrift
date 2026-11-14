@@ -37,7 +37,9 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 
 ### `spindrift doctor` checks
 
-The checks `spindrift doctor` runs, grouped by what it probes.
+The checks `spindrift doctor` runs, grouped by what it probes. With
+`CONNECTOR_SANDBOX` on it also sweeps orphaned Connector sandboxes first
+([Connector sandbox](#connector-sandbox)); the sweep never changes its verdict.
 
 **Configuration and required knobs**
 
@@ -3538,6 +3540,27 @@ Driver Connectors); a run that loads none starts none.
   `ErrConnectorSandboxStart`, naming the runner and its stderr. There is no
   in-process fallback. On a bwrap host that denies unprivileged user
   namespaces, bwrap exits at once and its message is the stderr named.
+- **Lifetime.** The sandbox lasts no longer than its run. On every exit path
+  (success, a failed or blocked run, a Launcher error, SIGINT/SIGTERM, the
+  shutdown gate, and daemon shutdown with runs in flight, where each daemon
+  child is its own run with its own sandbox) the Launcher closes the sandbox's
+  stdin, then calls the runner's `Kill` on its name as the backstop, logging
+  `==> stopped Connector sandbox: <name>` once it succeeds. A failed `Kill`
+  logs a warning instead and is retried by the next exit step.
+- **Orphans.** Only a hard kill of the Launcher or the runtime CLI leaves a
+  sandbox running. With `CONNECTOR_SANDBOX` on, the next Launcher start
+  (ahead of its token, network and push gates), or a daemon's start through
+  its `doctor` preflight (so any `spindrift doctor` too), lists running
+  sandboxes by the `spindrift-connector-sandbox-` prefix and kills each one
+  whose `<pid>`, the Launcher that started it, is no longer alive, logging
+  `==> reaped orphaned Connector sandbox: <name>`. Unlike an
+  orphaned Box, which Console startup only lists (issue #1619), an orphaned
+  sandbox is killed: it holds no work worth inspecting. Liveness is checked in
+  the sweeping process's pid namespace, so a sandbox whose Launcher runs in
+  another pid namespace on the same runtime daemon looks orphaned and is
+  killed too. Box names never match the prefix, so the sweep never touches a
+  Box; Box orphan detection likewise skips sandbox names. Under bwrap, `Kill`
+  reaches a sandbox or Box an earlier Launcher started through its cgroup.
 - **What stays in-process.** The Box (`driver-exec`) still loads its Driver
   Connectors in its own process. `doctor`, `preview` and the daemon process's
   own probes are not runs, so they load in-process too.
