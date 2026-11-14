@@ -2355,9 +2355,14 @@ is the fixture Connector in
   not a path out of its directory. It also exposes `checks`, built from
   `core.lib.connectorChecks`: the Connector's Go fmt, wasip1 vet and unit
   tests, and the launcher's Driver or backend conformance test against its
-  wasm (and, for a backend, its Route table). `nix run .#connector-dev --
-  <connector> flake check` runs them, and the `connector-checks-parity` check
-  fails on a Connector without them.
+  wasm (and, for a backend, its Route table), as `connector-<name>-go-fmt`,
+  `-go-vet`, `-go-test` and `-conformance`. They live only in the subflake:
+  core's root `checks` carry none, and the root's `drivers-<name>-go-test` and
+  `backends-<name>-go-test` skip their Connector conformance tests. `nix run
+  .#connector-dev -- <connector> flake check` runs them, CI's `connector` lane
+  runs it per touched Connector (every first-party Connector when a contract
+  path changes), and the `connector-checks-parity` check fails on a Connector
+  without them.
 - **Iterating.** Build or check a Connector against the local core with
   `nix run .#connector-dev -- <connector> <nix-args...>`. `<connector>` is a
   path if it contains `/` or is `.` or `..`; any other word is a bare name
@@ -2634,8 +2639,8 @@ same holds for the forge reads: the Connector serves
 every write stay native. The Connector is held to the tracker read contract
 (`forgetest.RunTrackerReadContract`, with a `StateSeeder` standing in for the
 writes a read-only tracker lacks) and the PR forge read contract
-(`forgetest.RunPRForgeReadContract`), which the backends `go test` check runs
-against `connectors/<backend>` when it exists, through
+(`forgetest.RunPRForgeReadContract`), which the Connector's subflake check
+`connector-<backend>-conformance` runs against it, through
 `SPINDRIFT_BACKEND_CONNECTOR_WASM` and `SPINDRIFT_BACKEND_CONNECTOR_ROUTES`. Its
 tracker write primitives are held to the tracker contract
 (`forgetest.RunTrackerContract`), the host-posted-comment contract
@@ -3441,6 +3446,9 @@ This is protocol version **0.3.0**. The host is
   additive. Protocol 0.3 has not shipped in a release, so moving
   `forge.openPR` behind `forge.draftPRs` within 0.3 takes no bump. Core
   accepts its current `0.y` and the one before it, so today 0.3.z and 0.2.z.
+  That overlap is what protects a third-party Connector, not core's CI, which
+  runs only first-party Connectors' conformance: a third-party Connector has
+  one `0.y` bump to move before core refuses it.
   Any other version is refused at load with
   `connector protocol "<version>" is outside core's supported range 0.2.x to 0.3.x (core speaks 0.3.0)`,
   naming the Connector's version, core's range and core's own version. A
@@ -3467,8 +3475,8 @@ This is protocol version **0.3.0**. The host is
   against; no native twin exists. Test binaries load it under wazero's compiler
   with a per-user compilation cache (`connectorhost.LoadCompiled`), while the
   launcher stays on the interpreter. The claude Connector (`connectors/claude`)
-  is proven the same way by `drivers-claude-go-test`, which sets
-  `SPINDRIFT_DRIVER_CONNECTOR_WASM`.
+  is proven the same way by `connector-claude-conformance` in its subflake,
+  which sets `SPINDRIFT_DRIVER_CONNECTOR_WASM`.
 
 #### Pinned wazero
 
