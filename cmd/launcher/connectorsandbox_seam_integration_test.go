@@ -4,14 +4,21 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/runner/runnertest"
 	"spindrift.dev/launcher/internal/seambundle"
 	"spindrift.dev/launcher/internal/seamtest"
 )
@@ -38,6 +45,14 @@ type sandboxExit struct {
 	wantOut  string
 	// wantBox is whether a Box is expected to have run.
 	wantBox bool
+	// issues are the ready issues the tracker holds, default just #7; the first
+	// one dispatched is the one the Box run answers. maxParallel, when set,
+	// caps concurrent Boxes.
+	issues      []int
+	maxParallel int
+	// signal, when set, is sent to the launcher once the Box is in flight; the
+	// Box stays held until the launcher has latched the stop it asks for.
+	signal os.Signal
 }
 
 // sandboxExits is every exit path the seam harness drives. A path that starts
@@ -46,6 +61,14 @@ var sandboxExits = []sandboxExit{
 	{name: "success", shadow: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, wantBox: true, wantOut: "verified-merged"},
 	{name: "failed-run", shadow: true, box: seamtest.PodmanRun{Exit: 1}, wantBox: true, wantOut: "(box-failed)"},
 	{name: "launcher-error", shadow: false, wantExit: 1, wantOut: "forge.tokenGrant"},
+	{name: "blocked-run", shadow: true, box: seamtest.PodmanRun{Outcome: seamOutcome("blocked")}, wantBox: true, wantOut: "(blocked)"},
+	{name: "sigint", shadow: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, signal: syscall.SIGINT, wantExit: 7, wantBox: true, wantOut: "verified-merged"},
+	{name: "sigterm", shadow: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, signal: syscall.SIGTERM, wantExit: 7, wantBox: true, wantOut: "verified-merged"},
+	// The shutdown gate declines the issue left waiting on the one Box slot
+	// while the stop arrives, so no second Box launches. Which issue goes first
+	// is unordered, so the Box run may answer the other; the gate's own line is
+	// the proof it declined.
+	{name: "shutdown-gate", shadow: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, issues: []int{7, 8}, maxParallel: 1, signal: syscall.SIGTERM, wantExit: 7, wantBox: true, wantOut: "==> stop requested; nothing in flight"},
 }
 
 func seamOutcome(status string) string {
@@ -60,7 +83,17 @@ func TestSeamConnectorSandboxStoppedOnce(t *testing.T) {
 	}
 }
 
-func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
+// sandboxRig is a launcher run wired to the family's fakes and ready to start.
+type sandboxRig struct {
+	cmd     seamtest.Cmd
+	recDir  string
+	release string
+}
+
+// newSandboxRig builds a work dispatch of the given issues on runtime's fakes.
+// run scripts the first Box; running names the containers the podman fake
+// reports as already running. The rig releases a held Box through release.
+func newSandboxRig(t *testing.T, runtime string, shadow bool, run seamtest.PodmanRun, issues []int, running []string, extra ...string) sandboxRig {
 	t.Helper()
 	fixture := "launcher-run-input.json"
 	if runtime == "bwrap" {
@@ -74,17 +107,20 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	docPath := sandboxDoc(t, seamtest.Path(t, fixture), filepath.Join(connectors, "forge.wasm"), x.shadow)
+	docPath := sandboxDoc(t, seamtest.Path(t, fixture), filepath.Join(connectors, "forge.wasm"), shadow)
 
 	bin := seamtest.BuildLauncher(t)
 	fakeDir := seamtest.InstallFakes(t, "podman", "docker", "bwrap", "gh")
 	recDir := t.TempDir()
 	workDir := t.TempDir()
 
-	issue := seamtest.GhIssue{Number: 7, Title: "T", Body: "B", Labels: []string{"ready-for-agent"}}
+	var ghIssues []seamtest.GhIssue
+	for _, n := range issues {
+		ghIssues = append(ghIssues, seamtest.GhIssue{Number: n, Title: "T", Body: "B", Labels: []string{"ready-for-agent"}})
+	}
 	env := seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{
 		Record:  recDir + "/gh.jsonl",
-		Issues:  []seamtest.GhIssue{issue},
+		Issues:  ghIssues,
 		Replies: []seamtest.GhReply{{Args: []string{"pr", "create"}, Stdout: smokePR + "\n"}},
 		PRs: []seamtest.GhPR{{Number: 9, URL: smokePR, HeadRefName: "agent/issue-7", BaseRefName: "main",
 			HeadRefOid: "abc123", Checks: "SUCCESS", Mergeable: "MERGEABLE"}},
@@ -93,7 +129,10 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 	for k, v := range gitEnv {
 		env[k] = v
 	}
-	run := x.box
+	release := filepath.Join(recDir, "release")
+	if run.HoldUntil != "" {
+		run.HoldUntil = release
+	}
 	run.Files = map[string]string{
 		filepath.Join(hostpaths.OutboxDir(workDir, "7"), seambundle.FileName): seamBundle(t, bare),
 	}
@@ -101,7 +140,7 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 	for _, tool := range []string{"podman", "docker"} {
 		cfg := seamtest.PodmanConfig{Record: recDir + "/" + tool + ".jsonl", ImagePresent: true, ConnectorHost: host}
 		if tool == runtime {
-			cfg.Runs = runs
+			cfg.Runs, cfg.Running = runs, running
 		}
 		for k, v := range seamtest.WriteFakeConfig(t, tool, cfg) {
 			env[k] = v
@@ -115,41 +154,68 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 
 	args := []string{"--input", docPath, "--repo-slug", smokeRepo, "--box-signal-carrier", "log",
 		"--user-name", "Seam Bot", "--user-email", "seam@example.com", "--no-build",
-		"--merge-policy", "immediate", "--merge-poll-interval", "1", "dispatch"}
+		"--merge-policy", "immediate", "--merge-poll-interval", "1"}
 	if runtime == "bwrap" {
 		args = append([]string{"--network-mode", "host"}, args...)
 	}
-	res := seamtest.Run(t, seamtest.Cmd{Bin: bin, Args: args, Env: env, CleanEnv: true, PathDirs: []string{fakeDir}, Dir: workDir})
+	args = append(append(args, extra...), "dispatch")
+	return sandboxRig{
+		cmd:     seamtest.Cmd{Bin: bin, Args: args, Env: env, CleanEnv: true, PathDirs: []string{fakeDir}, Dir: workDir},
+		recDir:  recDir,
+		release: release,
+	}
+}
+
+func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
+	t.Helper()
+	issues := x.issues
+	if issues == nil {
+		issues = []int{7}
+	}
+	var extra []string
+	if x.maxParallel > 0 {
+		extra = []string{"--max-parallel", strconv.Itoa(x.maxParallel)}
+	}
+	run := x.box
+	if x.signal != nil {
+		run.HoldUntil = "set by the rig"
+	}
+	rig := newSandboxRig(t, runtime, x.shadow, run, issues, nil, extra...)
+	recPath := rig.recDir + "/" + runtime + ".jsonl"
+
+	p := seamtest.Start(t, rig.cmd)
+	if x.signal != nil {
+		// Whatever happens, free a held fake Box so it cannot outlive the test.
+		t.Cleanup(func() { _ = os.WriteFile(rig.release, nil, 0o644) })
+		runnertest.Eventually(t, time.Minute, "a Box to start", func() bool {
+			_, boxes := countRuns(runtime, seamtest.ReadRecord(t, recPath))
+			return boxes > 0
+		})
+		p.Signal(t, x.signal)
+		// The launcher latches the stop silently while the Box is in flight, so
+		// there is nothing to wait on: give the relay goroutine time to close the
+		// stop channel before the Box is released, or the run could end unsignalled.
+		time.Sleep(300 * time.Millisecond)
+		if err := os.WriteFile(rig.release, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res := p.Wait(t)
 	res.WantExit(t, x.wantExit)
 	if out := res.Stdout + res.Stderr; !strings.Contains(out, x.wantOut) {
 		t.Errorf("output lacks %q:\n%s", x.wantOut, out)
 	}
 
-	var stopped []string
-	for _, line := range strings.Split(res.Stderr, "\n") {
-		if name, ok := strings.CutPrefix(line, stoppedLine); ok {
-			stopped = append(stopped, name)
-		}
-	}
+	stopped := stoppedSandboxes(res.Stderr)
 	if len(stopped) != 1 {
 		t.Fatalf("the stop hook ran %d times (%q), want exactly once\nstderr:\n%s", len(stopped), stopped, res.Stderr)
 	}
 
-	recs := seamtest.ReadRecord(t, recDir+"/"+runtime+".jsonl")
-	starts, boxes := 0, 0
+	recs := seamtest.ReadRecord(t, recPath)
+	starts, boxes := countRuns(runtime, recs)
 	for _, r := range recs {
-		switch {
-		case runtime == "bwrap" && strings.HasSuffix(r[len(r)-1], "/bin/connector-host"):
-			starts++
-		case runtime == "bwrap":
-			boxes++
-		case r[0] == "run" && sandboxName(r) != "":
-			starts++
-			if got := sandboxName(r); got != stopped[0] {
-				t.Errorf("stopped sandbox %q, but the runtime started %q", stopped[0], got)
-			}
-		case r[0] == "run":
-			boxes++
+		if got := sandboxName(r); runtime == "podman" && r[0] == "run" && got != "" && got != stopped[0] {
+			t.Errorf("stopped sandbox %q, but the runtime started %q", stopped[0], got)
 		}
 	}
 	if starts != 1 {
@@ -171,6 +237,91 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 			t.Errorf("podman probed sandbox %s %d times, want once", stopped[0], probes)
 		}
 	}
+}
+
+// TestSeamConnectorSandboxReapsOrphans starts a launcher while the runtime
+// still lists a sandbox a hard-killed launcher left behind, and asserts it
+// removes that one and nothing that merely resembles it. Only podman has a
+// seam to stage a leftover: bwrap lists cgroup directories under the host's
+// real cgroupfs, which a launcher subprocess cannot be pointed away from, so
+// bwrap's list-then-stop is pinned at the runner (runnertest SandboxOrphan).
+func TestSeamConnectorSandboxReapsOrphans(t *testing.T) {
+	dead := exec.Command("true")
+	if err := dead.Run(); err != nil {
+		t.Fatal(err)
+	}
+	orphan := fmt.Sprintf("%s%d-1700000000000000000", runner.ConnectorSandboxPrefix, dead.Process.Pid)
+	others := []string{
+		// A sandbox whose owning launcher still runs: this test process.
+		fmt.Sprintf("%s%d-1700000000000000000", runner.ConnectorSandboxPrefix, os.Getpid()),
+		// Boxes, whose names only resemble a sandbox's.
+		"spindrift-box-connector-sandbox-7",
+		fmt.Sprintf("box-%s%d-1700000000000000000", runner.ConnectorSandboxPrefix, dead.Process.Pid),
+	}
+	rig := newSandboxRig(t, "podman", true, seamtest.PodmanRun{Outcome: seamOutcome("ready")}, []int{7}, append([]string{orphan}, others...))
+	res := seamtest.Start(t, rig.cmd).Wait(t)
+	res.WantExit(t, 0)
+
+	var reaped []string
+	for _, line := range strings.Split(res.Stderr, "\n") {
+		if name, ok := strings.CutPrefix(line, "==> reaped orphaned Connector sandbox: "); ok {
+			reaped = append(reaped, name)
+		}
+	}
+	if len(reaped) != 1 || reaped[0] != orphan {
+		t.Errorf("reaped %q, want only %q", reaped, orphan)
+	}
+	for _, r := range seamtest.ReadRecord(t, rig.recDir+"/podman.jsonl") {
+		line := strings.Join(r, " ")
+		for _, o := range others {
+			if strings.Contains(line, o) {
+				t.Errorf("the launcher touched %s: podman %s", o, line)
+			}
+		}
+	}
+	if got := countArgv(seamtest.ReadRecord(t, rig.recDir+"/podman.jsonl"), "rm", "-f", "id-"+orphan); got != 1 {
+		t.Errorf("podman removed the orphan %d times, want once", got)
+	}
+}
+
+func countArgv(recs [][]string, want ...string) int {
+	n := 0
+	for _, r := range recs {
+		if slices.Equal(r, want) {
+			n++
+		}
+	}
+	return n
+}
+
+// stoppedSandboxes is the sandbox names a launcher's stderr reports stopped.
+func stoppedSandboxes(stderr string) []string {
+	var names []string
+	for _, line := range strings.Split(stderr, "\n") {
+		if name, ok := strings.CutPrefix(line, stoppedLine); ok {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// countRuns is how many Connector sandboxes and how many Boxes the runtime's
+// record shows started.
+func countRuns(runtime string, recs [][]string) (sandboxes, boxes int) {
+	for _, r := range recs {
+		switch {
+		case runtime == "bwrap" && seamtest.IsBwrapOverlayProbe(r):
+		case runtime == "bwrap" && strings.HasSuffix(r[len(r)-1], "/bin/connector-host"):
+			sandboxes++
+		case runtime == "bwrap":
+			boxes++
+		case r[0] == "run" && sandboxName(r) != "":
+			sandboxes++
+		case r[0] == "run":
+			boxes++
+		}
+	}
+	return sandboxes, boxes
 }
 
 func b2i(b bool) int {
