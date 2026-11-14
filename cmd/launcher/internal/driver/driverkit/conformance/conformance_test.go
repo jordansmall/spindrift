@@ -151,3 +151,68 @@ func TestCheckStreamReplaysStdoutRawInPreferenceToThePassLog(t *testing.T) {
 		t.Fatalf("stdout.raw was not the replayed input: %v", f.errs)
 	}
 }
+
+// echoDecoder emits one event per line, so a batch decoder can disagree with
+// it on any line.
+func echoDecoder() driverkit.Decoder {
+	return func(line string) []driverkit.Event { return []driverkit.Event{{Text: line}} }
+}
+
+func batchStrategy(batch func(lines []string) [][]driverkit.Event) driverkit.Strategy {
+	return driverkit.Strategy{
+		NewDecoder:      echoDecoder,
+		NewBatchDecoder: func() driverkit.BatchDecoder { return batch },
+	}
+}
+
+func TestCheckBatchDecodeFailsWhenBatchDisagreesWithPerLine(t *testing.T) {
+	root := t.TempDir()
+	writeCase(t, root, "c", "one\ntwo\nthree\n")
+	s := batchStrategy(func(lines []string) [][]driverkit.Event {
+		out := make([][]driverkit.Event, len(lines))
+		for i, l := range lines {
+			out[i] = []driverkit.Event{{Text: l}}
+			if l == "two" {
+				out[i] = []driverkit.Event{{Text: "TWO"}}
+			}
+		}
+		return out
+	})
+	f := &failures{TB: t}
+	checkBatchDecode(f, s, filepath.Join(root, "c"))
+	if len(f.errs) == 0 || !strings.Contains(f.errs[0], "line 2") {
+		t.Fatalf("errs = %v, want a line-2 mismatch", f.errs)
+	}
+}
+
+func TestCheckBatchDecodeFailsOnWrongResultCount(t *testing.T) {
+	root := t.TempDir()
+	writeCase(t, root, "c", "one\ntwo\n")
+	s := batchStrategy(func(lines []string) [][]driverkit.Event { return nil })
+	f := &failures{TB: t}
+	checkBatchDecode(f, s, filepath.Join(root, "c"))
+	if len(f.errs) == 0 {
+		t.Fatal("a batch decoder returning no results passed")
+	}
+}
+
+func TestCheckBatchDecodePassesWhenBatchAgrees(t *testing.T) {
+	root := t.TempDir()
+	writeCase(t, root, "c", "one\ntwo\nthree\n")
+	for name, s := range map[string]driverkit.Strategy{
+		"fallback": {NewDecoder: echoDecoder},
+		"own": batchStrategy(func(lines []string) [][]driverkit.Event {
+			out := make([][]driverkit.Event, len(lines))
+			for i, l := range lines {
+				out[i] = []driverkit.Event{{Text: l}}
+			}
+			return out
+		}),
+	} {
+		f := &failures{TB: t}
+		checkBatchDecode(f, s, filepath.Join(root, "c"))
+		if len(f.errs) != 0 {
+			t.Errorf("%s: agreeing batch decoder failed: %v", name, f.errs)
+		}
+	}
+}
