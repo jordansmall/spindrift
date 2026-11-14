@@ -29,14 +29,19 @@ import (
 // read, only removed from a routed source so NuGet's client-side credential
 // handling cannot abort before the request reaches the proxy.
 var Strategy = ecosystem.Strategy{
-	Name:                 "nuget",
+	Name:                 nameNuGet,
 	CredentialStores:     []string{"netrc", "npmrc", "gradle-properties"},
 	LockfileNames:        []string{"packages.lock.json"},
 	Classification:       "dotnet",
 	DiscoveryConfigPaths: []string{"nuget.config", "NuGet.config", "NuGet.Config"},
 	ConfigParser:         parseNuGetConfig,
 	InTreeRewrite:        rewriteNuGetConfig,
+	RewriteRows:          []registryvocab.RewriteRow{serviceIndexRow},
 }
+
+// nameNuGet is a const, not Strategy.Name, so the rewrite row can name its
+// ecosystem without an initialisation cycle through Strategy.
+const nameNuGet = "nuget"
 
 // publicNuGetHost is NuGet's implicit default source. It is declared Public so
 // discovery can name it, but never routed: routing it would point a

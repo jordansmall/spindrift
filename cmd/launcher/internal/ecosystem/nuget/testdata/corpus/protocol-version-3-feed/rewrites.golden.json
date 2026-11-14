@@ -1,0 +1,7 @@
+[
+  {
+    "body": "{\"resources\":[{\"@id\":\"http://127.0.0.1:27182/artifactory-example-test/artifactory/api/nuget/v3/nuget-local/query\",\"@type\":\"SearchQueryService\",\"comment\":\"Query endpoint of NuGet Search service\"},{\"@id\":\"http://127.0.0.1:27182/artifactory-example-test/artifactory/api/nuget/v3/nuget-local/registration-semver2/\",\"@type\":\"RegistrationsBaseUrl/3.6.0\"},{\"@id\":\"http://127.0.0.1:27182/artifactory-example-test/artifactory/api/nuget/v3/nuget-local/flat-container/\",\"@type\":\"PackageBaseAddress/3.0.0\"},{\"@id\":\"http://127.0.0.1:27182/artifactory-example-test/artifactory/api/nuget/v3/nuget-local/readme/{lower_id}/{lower_version}/readme\",\"@type\":\"ReadmeUriTemplate/6.13.0\"},{\"@id\":\"https://www.nuget.org/packages/{id}/{version}\",\"@type\":\"PackageDetailsUriTemplate/5.1.0\"}],\"version\":\"3.0.0\"}",
+    "request": "GET /artifactory-example-test/artifactory/api/nuget/v3/nuget-local",
+    "status": 200
+  }
+]
