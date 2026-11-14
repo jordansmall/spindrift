@@ -2915,12 +2915,16 @@ The shadow reads the credential from the host-only
 `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` (knob `githubConnectorToken`), a static
 token: the Connector host's backend path reads it from the environment per
 request and does not follow `GH_TOKEN_REFRESH_FILE`, so use a token that
-outlives the run. On dogfood CI, pass it to the launcher from the
-`SPINDRIFT_GITHUB_CONNECTOR_TOKEN` repository secret with an `env:` entry on the
-dispatch step of `agent-dispatch.yml` and the research step of
-`agent-research.yml`; a maintainer adds those entries by hand, since an agent's
-push credential cannot edit workflow files. With it unset the shadow sends
-nothing, and each run's summary carries the `error` and is not clean.
+outlives the run. It can come from a vault like any core secret, through
+`SPINDRIFT_GITHUB_CONNECTOR_TOKEN_CMD` or the `SECRET_CMD` template (see
+[Runtime configuration](#runtime-configuration)); the template applies only
+while github is the active `CODE_FORGE` or `ISSUE_TRACKER`. On dogfood CI,
+pass it to the launcher from the `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` repository
+secret with an `env:` entry on the dispatch step of `agent-dispatch.yml` and the
+research step of `agent-research.yml`; a maintainer adds those entries by hand,
+since an agent's push credential cannot edit workflow files. With it unset the
+shadow sends nothing, and each run's summary carries the `error` and is not
+clean.
 
 The token must be read-only. The Route table admits `POST /graphql`, whose body
 the host does not restrict, so the token's scope is the only barrier against a
@@ -3631,12 +3635,21 @@ the command string itself (which reveals a vault item name, not the
 secret) may appear in host-side logs. The plaintext direct-value and
 `--<secret>-file` forms remain fully supported and are not deprecated;
 with this in place, `harness.env` is expected to hold fetch recipes
-rather than live credentials. See
-`spindrift --help --all` for the full `--<secret>-cmd`/`--<secret>-file`
-flag list. When the launcher's own stdin and stderr are both TTYs, an
-interactive vault unlock prompt passes through instead of being discarded —
-see [Secret exposure model](#secret-exposure-model) for the TTY-gated
-exception.
+rather than live credentials. A Connector backend row's host-only
+credential (`SPINDRIFT_GITHUB_CONNECTOR_TOKEN`,
+`SPINDRIFT_JIRA_CONNECTOR_TOKEN`) resolves the same way: `<ENV>_CMD`, then
+the plain env var, then the `SECRET_CMD` template. The template applies
+only to a row this run reads through: its backend is the active
+`CODE_FORGE` or `ISSUE_TRACKER`, and the row is shadowed or routed (only
+github routes). An explicit `<ENV>_CMD` runs regardless. The jira row's
+paired identity env, `SPINDRIFT_JIRA_CONNECTOR_EMAIL`, gets no `_CMD` or
+template resolution. The token has no `--<secret>-cmd` or `--<secret>-file`
+flag, and a failing command or template fails startup naming the env var,
+not the command. See `spindrift --help --all` for the full
+`--<secret>-cmd`/`--<secret>-file` flag list. When the launcher's own stdin
+and stderr are both TTYs, an interactive vault unlock prompt passes through
+instead of being discarded — see [Secret exposure
+model](#secret-exposure-model) for the TTY-gated exception.
 
 One vault under a uniform item-naming scheme (e.g. every item named
 `spindrift-<kebab-case-env>`, the convention `harness.env.example` already
