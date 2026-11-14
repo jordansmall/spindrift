@@ -43,7 +43,7 @@ jobs:
           # Never a shallow fetch here: a shallow base has no parents, so the
           # BASE...HEAD diff below finds no merge base once main moves on.
           git fetch origin "$BASE_SHA"
-          for f in ci-changes.sh ci-ok.sh ci-go-tokens.go ci-comment-readers; do
+          for f in ci-changes.sh ci-ok.sh ci-go-tokens.go ci-comment-readers ci-connector-contract; do
             if git cat-file -e "$BASE_SHA:.github/scripts/$f" 2>/dev/null; then
               git show "$BASE_SHA:.github/scripts/$f" >".github/scripts/$f"
             fi
