@@ -226,3 +226,7 @@ func TestConnectorErrorClassCoreObserves(t *testing.T) {
 		}
 	})
 }
+
+func TestComposedForgeCodeForgeContract_RemoteEngine(t *testing.T) {
+	forgetest.RunCodeForgeContract(t, connectorforgetest.NewRemote(t))
+}

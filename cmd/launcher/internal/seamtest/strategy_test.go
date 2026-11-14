@@ -1,14 +1,17 @@
 package seamtest
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/driver/driverkit/conformance"
+	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/hostop"
 )
 
@@ -128,4 +131,28 @@ func TestMillisParsesRFC3339(t *testing.T) {
 	if got := Millis("2026-10-07T12:34:56.789Z"); got != 1791376496789 {
 		t.Errorf("Millis = %d, want 1791376496789", got)
 	}
+}
+
+// TestStrategyCorpus_RemoteEngine runs the same kit over the fixture Driver
+// Connector in a child connector-host.
+func TestStrategyCorpus_RemoteEngine(t *testing.T) {
+	dir, err := fixturebuild.ConnectorDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wasm, err := os.ReadFile(filepath.Join(dir, "seamtest-driver.wasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := fixturebuild.ConnectorHostCmd(t)
+	c, err := connectorhost.LoadRemote(context.Background(), wasm, cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
+	s, err := c.DriverStrategy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	conformance.Run(t, s, filepath.Join("testdata", "corpus"))
 }

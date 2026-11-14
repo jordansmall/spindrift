@@ -2,8 +2,10 @@ package forge_test
 
 import (
 	"errors"
+	"os/exec"
 	"testing"
 
+	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 )
@@ -92,4 +94,11 @@ func (h readOnlyHarness) SeedState(num string, state forge.DispatchState) {
 
 func TestFake_TrackerReadContract_NoWrites(t *testing.T) {
 	forgetest.RunTrackerReadContract(t, readOnlyHarness{fakeHarness: newFakeHarness(), t: t})
+}
+
+// TestFake_TrackerContract_RemoteEngine runs the tracker reads, work and
+// verdict contracts with the Fake's Connector in a child connector-host.
+func TestFake_TrackerContract_RemoteEngine(t *testing.T) {
+	forge.UseRemoteSeam(t, func() *exec.Cmd { return fixturebuild.ConnectorHostCmd(t) })
+	forgetest.RunTrackerContract(t, newFakeHarness())
 }

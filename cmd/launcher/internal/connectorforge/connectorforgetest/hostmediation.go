@@ -31,7 +31,7 @@ func NewHostMediation(t *testing.T) *HostMediationHarness {
 // NewHostMediationVariant is NewHostMediation over the named fixture wasm file.
 func NewHostMediationVariant(t *testing.T, wasm string) *HostMediationHarness {
 	t.Helper()
-	b := newBase(t, wasm, prMethods, readOnlyBox)
+	b := newBase(t, inProcess, wasm, prMethods, readOnlyBox)
 	return &HostMediationHarness{base: b, fake: forge.NewFake(), relayedSHA: map[string]string{}, prSeq: 100}
 }
 

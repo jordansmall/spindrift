@@ -1,8 +1,10 @@
 package forge_test
 
 import (
+	"os/exec"
 	"testing"
 
+	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 )
@@ -210,4 +212,11 @@ func (h *fakeLocalCodeForgeHarness) MarkLanded(num string) string {
 
 func TestFake_LocalCodeForgeContract(t *testing.T) {
 	forgetest.RunCodeForgeContract(t, newFakeLocalCodeForgeHarness(t))
+}
+
+// TestFake_CodeForgeContract_RemoteEngine runs the code-forge contract with the
+// Fake's Connector in a child connector-host.
+func TestFake_CodeForgeContract_RemoteEngine(t *testing.T) {
+	forge.UseRemoteSeam(t, func() *exec.Cmd { return fixturebuild.ConnectorHostCmd(t) })
+	forgetest.RunCodeForgeContract(t, newFakeCodeForgeHarness())
 }

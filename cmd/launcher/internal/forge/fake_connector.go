@@ -263,6 +263,9 @@ func (auditSink) Write(line []byte) (int, error) {
 var (
 	seamMu   sync.Mutex
 	seamConn *connectorhost.Connector
+	// fakeLoad loads the seam Connector, under seamMu; a test swaps it so a reload
+	// after a retired Connector keeps the engine under test.
+	fakeLoad = loadInProcess
 )
 
 // seam is the one Connector shared by every Fake in the test binary. It panics
@@ -274,7 +277,7 @@ func seam() *connectorhost.Connector {
 	seamMu.Lock()
 	defer seamMu.Unlock()
 	if seamConn == nil {
-		c, err := loadFakeConnector()
+		c, err := loadFakeConnectorVia(fakeLoad)
 		if err != nil {
 			panic(fmt.Sprintf("forge: fake Connector: %v", err))
 		}
@@ -292,7 +295,13 @@ func retireSeam(c *connectorhost.Connector) {
 	}
 }
 
-func loadFakeConnector() (*connectorhost.Connector, error) {
+func loadInProcess(wasm []byte, n connectorhost.Network) (*connectorhost.Connector, error) {
+	return connectorhost.LoadNetworkCompiled(context.Background(), wasm, n, fixturebuild.WazeroCacheDir())
+}
+
+// loadFakeConnectorVia loads the fake Connector through load, the one point
+// that picks the engine: in-process by default, a child host for a test.
+func loadFakeConnectorVia(load func(wasm []byte, n connectorhost.Network) (*connectorhost.Connector, error)) (*connectorhost.Connector, error) {
 	dir, err := fixturebuild.ConnectorDir()
 	if err != nil {
 		return nil, err
@@ -301,7 +310,7 @@ func loadFakeConnector() (*connectorhost.Connector, error) {
 	if err != nil {
 		return nil, err
 	}
-	return connectorhost.LoadNetworkCompiled(context.Background(), wasm, connectorhost.Network{
+	return load(wasm, connectorhost.Network{
 		Name:   "fake",
 		Routes: fakeRoutes,
 		Authorize: func(r *http.Request) error {
@@ -310,7 +319,7 @@ func loadFakeConnector() (*connectorhost.Connector, error) {
 		},
 		Client: &http.Client{Transport: inProcess{}},
 		Audit:  connectorhost.NewAuditLog(auditSink{}),
-	}, fixturebuild.WazeroCacheDir())
+	})
 }
 
 // read sends one GET for path through the Connector; see call.
