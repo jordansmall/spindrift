@@ -36,7 +36,7 @@ var Strategy = ecosystem.Strategy{
 	DiscoveryConfigPaths: []string{"nuget.config", "NuGet.config", "NuGet.Config"},
 	ConfigParser:         parseNuGetConfig,
 	InTreeRewrite:        rewriteNuGetConfig,
-	RewriteRows:          []registryvocab.RewriteRow{serviceIndexRow},
+	RewriteRows:          []registryvocab.RewriteRow{serviceIndexRow, registrationRow},
 }
 
 // nameNuGet is a const, not Strategy.Name, so the rewrite row can name its
