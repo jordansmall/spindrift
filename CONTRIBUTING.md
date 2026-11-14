@@ -43,7 +43,10 @@ reads. A PR whose non-docs paths all sit under `connectors/<name>/` skips the
 matrix and runs the docs checks plus, per touched Connector,
 `nix run .#connector-dev -- <name> flake check` against the PR's own core with
 no lock write; a PR touching core and a Connector runs the matrix and that
-Connector's check. Every run of the matrix also runs the evaluator tripwire:
+Connector's check. A PR touching the Connector contract (the paths in
+`.github/scripts/ci-connector-contract`, read from the PR base) runs every
+first-party Connector's check.
+Every run of the matrix also runs the evaluator tripwire:
 it evaluates the core subflake via `?dir=core` and the root flake under both
 Lix and CppNix (pinned through `flake.lock`'s nixpkgs), because core reads
 sources above `core/` (ADR 0073). The `ci-ok` job is the one required status
