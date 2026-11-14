@@ -186,6 +186,9 @@ func bootstrapWith(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descri
 	} else if err := r.IsReady(); err != nil {
 		return nil, err
 	}
+	if c.ConnectorSandbox {
+		sandbox.ReapOrphans(r, os.Stderr)
+	}
 
 	lw := localloop.Wire(localloopConfig(c), it)
 	mergeSettle, verdict, terminated, err := newSettlers(c.kind().Settle, c, it, lw, cf, caps)

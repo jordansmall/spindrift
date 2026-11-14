@@ -67,8 +67,8 @@ func (s *Sandbox) ensure() (*connectorhost.Sessions, error) {
 		return s.sessions, s.err
 	}
 	s.started = true
-	s.name = fmt.Sprintf("%s%d-%d", runner.ConnectorSandboxPrefix, os.Getpid(), time.Now().UnixNano())
 	began := time.Now()
+	s.name = sandboxName(os.Getpid(), time.Now())
 	sb, err := s.r.StartConnectorSandbox(s.name)
 	if err != nil {
 		s.err = s.startError(err, "")
