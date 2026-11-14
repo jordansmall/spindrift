@@ -179,7 +179,7 @@ var (
 
 // load starts a backend and loads the fixture wasm file against it, declaring
 // one Route per method over the repository's subtree.
-func load(t *testing.T, bare, wasmFile string, methods []string) *stack {
+func load(t *testing.T, eng engine, bare, wasmFile string, methods []string) *stack {
 	t.Helper()
 	b := newBackend(t, bare)
 	dir, err := fixturebuild.ConnectorDir()
@@ -195,7 +195,7 @@ func load(t *testing.T, bare, wasmFile string, methods []string) *stack {
 	for _, m := range methods {
 		routes = append(routes, connectorhost.Route{Method: m, Host: b.Host, Path: apiPath + "/repos/" + Repo})
 	}
-	c, err := connectorhost.LoadNetwork(context.Background(), wasm, connectorhost.Network{
+	c, err := eng(context.Background(), wasm, connectorhost.Network{
 		Name:   "fixture-forge",
 		Routes: routes,
 		Authorize: func(r *http.Request) error {
@@ -228,6 +228,7 @@ type base struct {
 	Credential gitexec.Credential
 
 	wasm        string
+	eng         engine
 	methods     []string
 	readOnlyBox bool
 	target      connectorforge.Target
@@ -246,7 +247,7 @@ type PlumbingCall struct {
 
 // newBase starts the backend, loads the fixture Connector wasm file and
 // composes the forge with the default, valid remote.
-func newBase(t *testing.T, wasm string, methods []string, readOnly bool) *base {
+func newBase(t *testing.T, eng engine, wasm string, methods []string, readOnly bool) *base {
 	t.Helper()
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
 	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
@@ -254,9 +255,9 @@ func newBase(t *testing.T, wasm string, methods []string, readOnly bool) *base {
 	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
 
 	repo := forgetest.NewGitRepoFixture(t, "main")
-	s := load(t, repo.Bare, wasm, methods)
+	s := load(t, eng, repo.Bare, wasm, methods)
 	h := &base{
-		t: t, wasm: wasm, methods: methods, readOnlyBox: readOnly, Repo: repo, Backend: s.backend, Conn: s.conn, Audit: s.audit, target: s.target,
+		t: t, eng: eng, wasm: wasm, methods: methods, readOnlyBox: readOnly, Repo: repo, Backend: s.backend, Conn: s.conn, Audit: s.audit, target: s.target,
 		Credential: gitexec.Credential{Username: "bot", Password: "git-secret"},
 	}
 	// Production code is https-only, so git is pointed at the bare repo through
@@ -321,7 +322,7 @@ type Harness struct{ *base }
 // forge with the default, valid remote.
 func New(t *testing.T) *Harness {
 	t.Helper()
-	return &Harness{newBase(t, "forge.wasm", pushOnlyMethods, writableBox)}
+	return &Harness{newBase(t, inProcess, "forge.wasm", pushOnlyMethods, writableBox)}
 }
 
 // Forge returns the composed forge.
@@ -330,7 +331,7 @@ func (h *Harness) Forge() forge.CodeForge { return h.cf }
 // Unreachable composes against a second backend, then closes it so Probe fails.
 func (h *Harness) Unreachable() forge.CodeForge {
 	h.t.Helper()
-	s := load(h.t, h.Repo.Bare, h.wasm, h.methods)
+	s := load(h.t, h.eng, h.Repo.Bare, h.wasm, h.methods)
 	cf, _, err := connectorforge.Compose(s.conn, s.target, h.git())
 	if err != nil {
 		h.t.Fatal(err)

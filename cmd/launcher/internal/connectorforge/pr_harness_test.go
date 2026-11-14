@@ -304,3 +304,7 @@ func TestAutoMergeAllowedNeedsTheCapability(t *testing.T) {
 		t.Errorf("AutoMergeAllowed sent %d backend requests, want none", n-before)
 	}
 }
+
+func TestComposedForgePRForgeContract_RemoteEngine(t *testing.T) {
+	forgetest.RunPRForgeContract(t, connectorforgetest.NewPRRemote(t))
+}

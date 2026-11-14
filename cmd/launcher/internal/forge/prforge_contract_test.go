@@ -1,8 +1,10 @@
 package forge_test
 
 import (
+	"os/exec"
 	"testing"
 
+	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 )
@@ -71,5 +73,12 @@ func (h *fakePRForgeHarness) AutoMergeEnqueued(url string) bool {
 }
 
 func TestFake_PRForgeContract(t *testing.T) {
+	forgetest.RunPRForgeContract(t, newFakePRForgeHarness())
+}
+
+// TestFake_PRForgeContract_RemoteEngine runs the PR-forge contract with the
+// Fake's Connector in a child connector-host.
+func TestFake_PRForgeContract_RemoteEngine(t *testing.T) {
+	forge.UseRemoteSeam(t, func() *exec.Cmd { return fixturebuild.ConnectorHostCmd(t) })
 	forgetest.RunPRForgeContract(t, newFakePRForgeHarness())
 }
