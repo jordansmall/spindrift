@@ -32,6 +32,9 @@
 # core paths or not. The name regex makes plain quoting safe, so no jq. A path
 # matching ci-connector-contract (the SDK, canonical types, Host calls) selects
 # every Connector with a flake.nix at NEW instead, since each one depends on it.
+# A path under cmd/launcher/internal/{forge,driver}/<name>/ selects <name> too
+# (when it has a flake.nix at NEW): the subflake's conformance test runs that
+# core package. Plain classify mode still treats it as core, hence code.
 set -euo pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -57,21 +60,28 @@ is_docs_path() {
   esac
 }
 
-# Sets connector_name for a Connector path; fails for any other path. Sets a
-# global, not stdout, so the per-name flake.nix lookup cache survives.
+# Succeeds when connectors/$1/flake.nix exists at the new revision; caches per name.
 declare -A has_flake=()
-connector_of() {
+connector_name_re='[a-z0-9][a-z0-9_-]*'
+flake_at_new() {
   [ -n "$new_rev" ] || return 1
-  [[ $1 =~ ^\"?connectors/([a-z0-9][a-z0-9_-]*)/. ]] || return 1
-  connector_name=${BASH_REMATCH[1]}
-  if [ -z "${has_flake[$connector_name]:-}" ]; then
-    if git cat-file -e "$new_rev:connectors/$connector_name/flake.nix" 2>/dev/null; then
-      has_flake[$connector_name]=1
+  if [ -z "${has_flake[$1]:-}" ]; then
+    if git cat-file -e "$new_rev:connectors/$1/flake.nix" 2>/dev/null; then
+      has_flake[$1]=1
     else
-      has_flake[$connector_name]=0
+      has_flake[$1]=0
     fi
   fi
-  [ "${has_flake[$connector_name]}" = 1 ]
+  [ "${has_flake[$1]}" = 1 ]
+}
+
+# Sets connector_name for a Connector path; fails for any other path. Sets a
+# global, not stdout: a command substitution's subshell would drop
+# flake_at_new's per-name cache.
+connector_of() {
+  [[ $1 =~ ^\"?connectors/($connector_name_re)/. ]] || return 1
+  connector_name=${BASH_REMATCH[1]}
+  flake_at_new "$connector_name"
 }
 
 # Sets paths to the paths a name-status line touches; fails on an unknown
@@ -142,7 +152,14 @@ if [ "$mode" = connectors ]; then
   while IFS=$'\t' read -r status path new_path; do
     diff_paths "$status" "$path" "${new_path:-}" || continue
     for p in "${paths[@]}"; do
-      if connector_of "$p"; then names+=("$connector_name"); fi
+      if connector_of "$p"; then
+        names+=("$connector_name")
+      # Keys on the directory name only: a forge and a driver sharing a name
+      # would both select that Connector (no such pair exists today).
+      elif [[ $p =~ ^\"?cmd/launcher/internal/(forge|driver)/($connector_name_re)/. ]] &&
+        flake_at_new "${BASH_REMATCH[2]}"; then
+        names+=("${BASH_REMATCH[2]}")
+      fi
       # A git-quoted path loses its leading quote so the globs still anchor.
       if [ "$scan_contract" -eq 1 ] && matches_globs ci-connector-contract "${p#\"}"; then contract=1; fi
     done

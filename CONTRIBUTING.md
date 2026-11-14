@@ -23,9 +23,11 @@ nix build .#checks.$(nix eval --raw --impure --expr builtins.currentSystem).laun
 nix build .#checks.$(nix eval --raw --impure --expr builtins.currentSystem).launcher-binaries-go-test -L
                                 # the tests of the mains, which link every Driver through the bundle
 nix build .#checks.$(nix eval --raw --impure --expr builtins.currentSystem).drivers-claude-go-test -L
-                                # one Driver's own tests (drivers-<name>-go-test)
+                                # one Driver's own tests (drivers-<name>-go-test); skips its Connector conformance
 nix build .#checks.$(nix eval --raw --impure --expr builtins.currentSystem).backends-github-go-test -L
-                                # one backend's own tests (backends-<name>-go-test)
+                                # one backend's own tests (backends-<name>-go-test); skips its Connector conformance
+nix run .#connector-dev -- claude flake check -L
+                                # one Connector's fmt, vet, tests and conformance, from its subflake
 nix build .#packages.x86_64-linux.agent-image -L
                                 # realise the Linux OCI image (the one thing checks assert only at eval time)
 nix develop                     # host-side dev shell: git, gh, jq, and the spindrift CLI on PATH
@@ -39,13 +41,20 @@ docs files (and gofmt, nixfmt and the Go tests). A comment edit still runs the
 full matrix when it touches a directive (`//go:build`, `//nolint`, a
 shellcheck or `GENERATED` marker) or a file listed in
 `.github/scripts/ci-comment-readers`, whose text a check outside that set
-reads. A PR whose non-docs paths all sit under `connectors/<name>/` skips the
-matrix and runs the docs checks plus, per touched Connector,
+reads. The matrix, and so `nix flake check`, runs no Connector check: those
+live in each Connector's subflake and run only in CI's `connector` lane. A PR
+whose non-docs paths all sit under `connectors/<name>/` skips the matrix and
+runs the docs checks plus, per touched Connector,
 `nix run .#connector-dev -- <name> flake check` against the PR's own core with
 no lock write; a PR touching core and a Connector runs the matrix and that
 Connector's check. A PR touching the Connector contract (the paths in
-`.github/scripts/ci-connector-contract`, read from the PR base) runs every
-first-party Connector's check.
+`.github/scripts/ci-connector-contract`, read from the PR base) runs the check
+of every first-party Connector. A change to a Connector's core package,
+`cmd/launcher/internal/{forge,driver}/<name>/`, runs that Connector's check
+too; any other core-only PR runs no Connector leg. Core's CI proves only
+first-party Connectors: a third-party Connector is protected by the Connector
+protocol's `0.y` overlap window
+([Versioning](docs/reference.md#connector-protocol)), not by CI.
 Every run of the matrix also runs the evaluator tripwire:
 it evaluates the core subflake via `?dir=core` and the root flake under both
 Lix and CppNix (pinned through `flake.lock`'s nixpkgs), because core reads
@@ -310,7 +319,9 @@ and in the in-box `box` program; the only bash left is the generated shim that
   `connectors/github` is the github backend's tracker and forge read paths;
   `connectors/jira` is the jira backend's tracker read and write paths
   (transitions, label edits, label list and create).
-  Each gets `connector-<name>-go-{fmt,vet,test}` from `nix/checks/go.nix`.
+  Each subflake gets `connector-<name>-go-{fmt,vet,test}` and
+  `connector-<name>-conformance` from `core.lib.connectorChecks`; core's root
+  `checks` carry none of them.
 - **`agent/`** — `entrypoint.sh`, the generated shim, and the Driver's hook
   scripts. The shim has no logic: `lib/image.nix` renders the preambles ahead
   of one `exec box` line, and `box` (`cmd/launcher/box`) does the rest
@@ -325,8 +336,10 @@ and in the in-box `box` program; the only bash left is the generated shim that
   evaluation (issue #5502). Its Go tests run in `drivers-<name>-go-test`,
   which `checks/go.nix` generates from the same row; each backend row in
   `lib/backends/default.nix` likewise yields `backends-<name>-go-test` over
-  its `internal/forge/<name>` package; when `connectors/<name>` exists that
-  check also builds its wasm and exports `SPINDRIFT_BACKEND_CONNECTOR_WASM` and
+  its `internal/forge/<name>` package. Those root checks skip the Connector
+  conformance tests: the Connector's subflake
+  (`connector-<name>-conformance`) exports
+  `SPINDRIFT_BACKEND_CONNECTOR_WASM` and
   `SPINDRIFT_BACKEND_CONNECTOR_ROUTES`, so the backend's tests run the tracker
   and PR forge read contracts against the Connector (jira also runs the
   tracker write contract and the native transition cases). Also here:

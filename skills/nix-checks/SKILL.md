@@ -65,6 +65,13 @@ touches; otherwise CI's full `nix flake check` is the final gate. A Box's
 worker subagents run targeted checks only — its coordinator agent owns the
 full gate.
 
+The gate holds no Connector check: a Connector's Go and conformance checks run
+only from its own subflake, in CI's `connector` lane. A change touching a
+Connector contract path (`.github/scripts/ci-connector-contract`) runs
+`nix run .#connector-dev -- <name> flake check` for each first-party Connector
+under `connectors/`; a change to one Connector, or to its core package
+`cmd/launcher/internal/{forge,driver}/<name>`, runs that one's.
+
 A Driver's Nix checks live in `nix/checks/drivers/<name>.nix`, named after its
 row in `lib/drivers/default.nix`; `nix/checks/drivers.nix` unions the files
 and runs the parity checks over every row. Its Go tests are the exception:
