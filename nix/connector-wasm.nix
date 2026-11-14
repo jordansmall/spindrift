@@ -37,6 +37,7 @@ pkgs.runCommand "connector-wasm-fixtures" { nativeBuildInputs = [ pkgs.go ]; } '
   build future.wasm -ldflags=-X=${versionSymbol}=0.4.0 ./handshake
   build probe.wasm ./probe
   build call.wasm ./call
+  build escape.wasm ./escape
   build seamtest-driver.wasm ./seamtest-driver
   cp ${connectorWasm}/driver.wasm ${connectorWasm}/network.wasm \
     ${connectorWasm}/forge.wasm ${connectorWasm}/forge-pr.wasm $out/

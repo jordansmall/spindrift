@@ -351,8 +351,9 @@ type handshake struct {
 //
 // The sandbox grants nothing: wazero's ModuleConfig defaults to no filesystem,
 // environment, arguments or stdio and to fake clocks and a deterministic random
-// source, and WASI is the only host module instantiated, so a Connector
-// importing anything else fails to link. A Driver Connector stays granted no
+// source, and WASI is the only host module instantiated (bar the test-only
+// spindrift_escape of an escapeprobe build), so a Connector importing anything
+// else fails to link. A Driver Connector stays granted no
 // Host calls (ADR 0073 rule 2): only a network Connector loaded with LoadNetwork
 // gets spindrift.http_request. Memory and
 // table minimums and each function frame's slots (parameters, locals and
