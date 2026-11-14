@@ -234,11 +234,11 @@ not a denylist, which is what distinguishes it from the Driver-credential scrub
 hooks (`agent/env-credential-scrub.sh`) it deliberately does not reuse.
 ADR 0045 supersedes the scalar model described by ADR 0044: the proxy serves
 Registry routes and gains a shape-keyed response-rewrite table (a cargo
-index's `dl`, an npm packument's tarball URLs, re-pointed at the Forwarder)
-so that URLs a registry embeds in its responses stay on the credentialed
-path too. The rows of that table are declared by each Ecosystem Strategy and
-handed to the proxy, which never reads an ecosystem's committed config
-itself (ADR 0048).
+index's `dl`, an npm packument's tarball URLs, a NuGet service index's
+resources and registration URLs, re-pointed at the Forwarder) so that URLs
+a registry embeds in its responses stay on the credentialed path too. The
+rows of that table are declared by each Ecosystem Strategy and handed to the
+proxy, which never reads an ecosystem's committed config itself (ADR 0048).
 _Avoid_: mirror, cache, credential helper, MITM (it does not intercept TLS).
 
 **Credential reference**:

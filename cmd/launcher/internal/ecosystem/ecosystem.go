@@ -139,9 +139,9 @@ type Strategy struct {
 	// export exists. It requires BindingEnvVar.
 	AnnounceBindingValue bool
 
-	// RewriteRows is empty for a row declaring no response rewrite. The two
-	// today are cargo's sparse-index config.json "dl" row (ADR 0045) and npm's
-	// packument dist.tarball row (issue #3401).
+	// RewriteRows is empty for a row declaring no response rewrite. The
+	// generated REGISTRY RESPONSE REWRITES span in docs/reference.md lists
+	// every row declared today.
 	RewriteRows []registryvocab.RewriteRow
 
 	// ConfigParser reads ConfigPaths() and is nil exactly when that is empty;
