@@ -233,3 +233,9 @@ type Tokens struct {
 // A shared reader takes a `func() Decoder` factory rather than a Decoder so a
 // stateful decoder gets fresh state per scan or writer.
 type Decoder func(line string) []Event
+
+// A BatchDecoder decodes lines in order on one stateful decoder, returning one
+// result per line, each what a Decoder would return for it. It lets a decoder
+// that pays a fixed cost per call, as a Connector's does, take many lines at
+// once. Obtain one from Strategy.BatchDecoder.
+type BatchDecoder func(lines []string) [][]Event

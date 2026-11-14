@@ -23,6 +23,10 @@ type Strategy struct {
 	Name string
 	// NewDecoder builds the CLI's per-log decoder.
 	NewDecoder func() Decoder
+	// NewBatchDecoder builds a decoder taking many lines per call that agrees
+	// with NewDecoder line for line; nil means none, and BatchDecoder falls back
+	// to NewDecoder.
+	NewBatchDecoder func() BatchDecoder
 	// TransientPatterns and TerminalPatterns extend the base classification
 	// patterns for this CLI's own failure text.
 	TransientPatterns, TerminalPatterns []Pattern
@@ -55,6 +59,22 @@ type Strategy struct {
 	// NewStreamFilter wraps the writer a Pass log is teed to with a filter over the
 	// CLI's stdout; nil is the identity, bytes passing through untouched.
 	NewStreamFilter func(w io.Writer) StreamFilter
+}
+
+// BatchDecoder returns a fresh batch decoder: the Strategy's own when it has
+// one, else one NewDecoder decoder run over each line in turn.
+func (s Strategy) BatchDecoder() BatchDecoder {
+	if s.NewBatchDecoder != nil {
+		return s.NewBatchDecoder()
+	}
+	decode := s.NewDecoder()
+	return func(lines []string) [][]Event {
+		out := make([][]Event, len(lines))
+		for i, l := range lines {
+			out[i] = decode(l)
+		}
+		return out
+	}
 }
 
 // ReadResult returns the final-message text of the log at logPath, read as
