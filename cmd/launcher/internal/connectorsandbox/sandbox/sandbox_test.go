@@ -151,3 +151,36 @@ func TestSandboxThatDiesBeforeHelloNamesItsStderr(t *testing.T) {
 type nopWriteCloser struct{ io.Writer }
 
 func (nopWriteCloser) Close() error { return nil }
+
+func TestStatsCountTheStartAndTheExchanges(t *testing.T) {
+	f := runner.NewFake()
+	f.StartConnectorSandboxFunc = inMemoryHost
+	s := New(f, "podman")
+	if _, ok := s.Stats(); ok {
+		t.Fatal("Stats ok before any load")
+	}
+	// The load fails to compile, but its exchange with the host still crossed.
+	_, _ = s.Load(context.Background(), notWasm)
+	st, ok := s.Stats()
+	if !ok || st.Start <= 0 || st.Calls <= 0 {
+		t.Fatalf("Stats = %+v, %v; want a start time and counted exchanges", st, ok)
+	}
+	if err := s.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if after, ok := s.Stats(); !ok || after.Start != st.Start || after.Calls != st.Calls {
+		t.Fatalf("Stats after Close = %+v, %v; want %+v", after, ok, st)
+	}
+}
+
+func TestFailedStartHasNoStats(t *testing.T) {
+	f := runner.NewFake()
+	f.StartConnectorSandboxFunc = func(string) (runner.ConnectorSandbox, error) {
+		return runner.ConnectorSandbox{}, errors.New("podman: no such image")
+	}
+	s := New(f, "podman")
+	_, _ = s.Load(context.Background(), notWasm)
+	if st, ok := s.Stats(); ok {
+		t.Fatalf("Stats = %+v, true after a failed start", st)
+	}
+}

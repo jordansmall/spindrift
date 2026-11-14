@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
 )
@@ -19,6 +20,15 @@ func (f failingLoader) LoadNetwork(context.Context, []byte, connectorhost.Networ
 }
 
 func (f failingLoader) Err() error { return f.err }
+
+func (f failingLoader) Stats() (Stats, bool) { return Stats{}, false }
+
+type statsLoader struct {
+	failingLoader
+	stats Stats
+}
+
+func (l statsLoader) Stats() (Stats, bool) { return l.stats, true }
 
 // notWasm fails to compile in-process with an error that is not the loader's,
 // so a load that falls back shows.
@@ -45,5 +55,21 @@ func TestUseRoutesLoadsToTheInstalledLoader(t *testing.T) {
 	}
 	if Failure() != nil {
 		t.Fatal("Failure after restore")
+	}
+}
+
+func TestReportIsTheInstalledLoadersStats(t *testing.T) {
+	if _, ok := Report(); ok {
+		t.Fatal("Report ok with no loader installed")
+	}
+	restore := Use(failingLoader{ErrConnectorSandboxStart})
+	t.Cleanup(restore)
+	if _, ok := Report(); ok {
+		t.Fatal("Report ok for a loader whose sandbox did not start")
+	}
+	want := Stats{Start: time.Second, HopStats: connectorhost.HopStats{Calls: 3, HostCalls: 2, Hop: time.Millisecond}}
+	Use(statsLoader{stats: want})
+	if got, ok := Report(); !ok || got != want {
+		t.Fatalf("Report = %v, %v; want %v, true", got, ok, want)
 	}
 }
