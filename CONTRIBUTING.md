@@ -49,11 +49,12 @@ runs the docs checks plus, per touched Connector,
 no lock write; a PR touching core and a Connector runs the matrix and that
 Connector's check. A PR touching the Connector contract (the paths in
 `.github/scripts/ci-connector-contract`, read from the PR base) runs the check
-of every first-party Connector. A core-only PR outside the contract and
-`connectors/` runs no Connector leg. Core's CI proves only first-party
-Connectors: a third-party Connector is protected by the Connector protocol's
-`0.y` overlap window ([Versioning](docs/reference.md#connector-protocol)), not
-by CI.
+of every first-party Connector. A change to a Connector's core package,
+`cmd/launcher/internal/{forge,driver}/<name>/`, runs that Connector's check
+too; any other core-only PR runs no Connector leg. Core's CI proves only
+first-party Connectors: a third-party Connector is protected by the Connector
+protocol's `0.y` overlap window
+([Versioning](docs/reference.md#connector-protocol)), not by CI.
 Every run of the matrix also runs the evaluator tripwire:
 it evaluates the core subflake via `?dir=core` and the root flake under both
 Lix and CppNix (pinned through `flake.lock`'s nixpkgs), because core reads

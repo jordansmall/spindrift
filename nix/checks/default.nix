@@ -487,7 +487,8 @@ let
   # each backend row's goTestRepoFiles. cmd/launcher is excluded from the walk:
   # the conformance test compiles only internal/{forge,driver}/<name>'s import
   # closure, which the first two inputs approximate, and listing the whole
-  # launcher would select every Connector on every launcher edit.
+  # launcher would select every Connector on every launcher edit (<name>'s own
+  # package selects its Connector via ci-changes.sh, not the contract globs).
   connectorContractScan =
     let
       inherit (pkgs.lib)

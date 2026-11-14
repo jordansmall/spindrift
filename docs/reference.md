@@ -2360,9 +2360,10 @@ is the fixture Connector in
   core's root `checks` carry none, and the root's `drivers-<name>-go-test` and
   `backends-<name>-go-test` skip their Connector conformance tests. `nix run
   .#connector-dev -- <connector> flake check` runs them, CI's `connector` lane
-  runs it per touched Connector (every first-party Connector when a contract
-  path changes), and the `connector-checks-parity` check fails on a Connector
-  without them.
+  runs it per touched Connector or Connector core package
+  `cmd/launcher/internal/{forge,driver}/<name>/` (every first-party Connector
+  when a contract path changes), and the `connector-checks-parity` check fails
+  on a Connector without them.
 - **Iterating.** Build or check a Connector against the local core with
   `nix run .#connector-dev -- <connector> <nix-args...>`. `<connector>` is a
   path if it contains `/` or is `.` or `..`; any other word is a bare name
