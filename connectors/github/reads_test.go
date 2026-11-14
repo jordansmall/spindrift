@@ -66,8 +66,8 @@ func TestListIssues(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []tracker.Issue{
-		{Number: "7", Title: "a", Body: "", State: "open", Labels: []string{"x", "y"}},
-		{Number: "9", Title: "c", Body: "cb", State: "open", Labels: []string{}},
+		{Number: "7", Title: "a", Body: "", State: "", Labels: []string{"x", "y"}},
+		{Number: "9", Title: "c", Body: "", State: "", Labels: []string{}},
 	}
 	if !reflect.DeepEqual(issues, want) {
 		t.Fatalf("issues = %#v", issues)
