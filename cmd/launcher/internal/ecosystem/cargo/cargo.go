@@ -679,58 +679,6 @@ func cargoRegistryEnvVarName(registryName string) string {
 // before fetching a crate.
 var cargoDLMarkers = []string{"{crate}", "{version}", "{prefix}", "{lowerprefix}", "{sha256-checksum}"}
 
-// spliceCargoDLRawPath re-splices a dl template's path from the original's raw
-// bytes: url.Parse drops RawPath for a path with a literal brace, so
-// ecosystemkit.RepointRegistryURL's re-encoding would escape the braces (cargo
-// would then send them unsubstituted) and normalise other escapes. Only a dl
-// spelling a marker literally is touched; query, fragment and bytes like a
-// bare space are copied verbatim, as cargo sends them upstream. LearnedPath
-// narrows to just above the first marker's segment.
-func spliceCargoDLRawPath(original string, edit registryvocab.RewriteEdit, rc registryvocab.RewriteContext) registryvocab.RewriteEdit {
-	rawPath := rawPathOf(pathPart(original))
-	cut := -1
-	for _, m := range cargoDLMarkers {
-		if i := strings.Index(rawPath, m); i >= 0 && (cut < 0 || i < cut) {
-			cut = i
-		}
-	}
-	if cut < 0 {
-		return edit
-	}
-
-	tail := original[len(pathPart(original)):]
-	edit.To = rc.Forwarder.Scheme + "://" + rc.Forwarder.Host + "/" + rc.Prefix + rawPath + tail
-
-	// url.Parse already validated every escape in rawPath, so an unescape
-	// error is unreachable; keep ecosystemkit.RepointRegistryURL's learned
-	// path if it hits.
-	i := strings.LastIndex(rawPath[:cut], "/")
-	if learned, err := url.PathUnescape(strings.TrimRight(rawPath[:i], "/")); err == nil {
-		if learned == "" {
-			learned = "/"
-		}
-		edit.LearnedPath = learned
-	}
-	return edit
-}
-
-// rawPathOf strips the scheme and authority from an absolute URL's path part.
-func rawPathOf(u string) string {
-	_, rest, _ := strings.Cut(u, "://")
-	if i := strings.Index(rest, "/"); i >= 0 {
-		return rest[i:]
-	}
-	return ""
-}
-
-// pathPart returns u up to its first "?" or "#".
-func pathPart(u string) string {
-	if i := strings.IndexAny(u, "?#"); i >= 0 {
-		return u[:i]
-	}
-	return u
-}
-
 // rewriteCargoDL rewrites a cargo sparse-index config.json body's "dl" field to
 // point at the Forwarder with the route's prefix re-inserted, so a later crate
 // download (which cargo builds by joining dl with a crate path, or by
@@ -764,7 +712,7 @@ func rewriteCargoDL(body []byte, rc registryvocab.RewriteContext) registryvocab.
 		}
 	}
 
-	edit = spliceCargoDLRawPath(dlStr, edit, rc)
+	edit = ecosystemkit.SpliceTemplateRawPath(dlStr, edit, rc, cargoDLMarkers)
 	obj["dl"] = edit.To
 
 	newBody, err := json.Marshal(obj)

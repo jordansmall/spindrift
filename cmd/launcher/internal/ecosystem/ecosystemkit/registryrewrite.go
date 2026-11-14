@@ -69,6 +69,52 @@ func RepointRegistryURL(value string, rc registryvocab.RewriteContext) (registry
 	return registryvocab.RewriteEdit{From: value, To: newURL.String(), LearnedPath: learnedPath}, true
 }
 
+// SpliceTemplateRawPath re-splices a URL-template value's path from the
+// original's raw bytes: url.Parse drops RawPath for a path with a literal
+// brace, so RepointRegistryURL's re-encoding would escape the braces (a client
+// would then send them unsubstituted) and normalise other escapes. Only a value
+// whose path spells one of markers literally is touched; query, fragment and
+// bytes like a bare space are copied verbatim. LearnedPath narrows to just
+// above the first marker's segment. A declined edit (empty To) is returned
+// as-is.
+func SpliceTemplateRawPath(original string, edit registryvocab.RewriteEdit, rc registryvocab.RewriteContext, markers []string) registryvocab.RewriteEdit {
+	if edit.To == "" {
+		return edit
+	}
+	pathPart := original
+	if i := strings.IndexAny(original, "?#"); i >= 0 {
+		pathPart = original[:i]
+	}
+	rawPath := ""
+	_, rest, _ := strings.Cut(pathPart, "://")
+	if i := strings.Index(rest, "/"); i >= 0 {
+		rawPath = rest[i:]
+	}
+
+	cut := -1
+	for _, m := range markers {
+		if i := strings.Index(rawPath, m); i >= 0 && (cut < 0 || i < cut) {
+			cut = i
+		}
+	}
+	if cut < 0 {
+		return edit
+	}
+
+	edit.To = rc.Forwarder.Scheme + "://" + rc.Forwarder.Host + "/" + rc.Prefix + rawPath + original[len(pathPart):]
+
+	// url.Parse already validated every escape in rawPath, so an unescape
+	// error is unreachable; keep RepointRegistryURL's learned path if it hits.
+	i := strings.LastIndex(rawPath[:cut], "/")
+	if learned, err := url.PathUnescape(strings.TrimRight(rawPath[:i], "/")); err == nil {
+		if learned == "" {
+			learned = "/"
+		}
+		edit.LearnedPath = learned
+	}
+	return edit
+}
+
 // normalizeHostPort lowercases hostport and strips a default port for scheme
 // (443 for https, 80 for http), so a match-host written without a port compares
 // equal to one that spells the default out. A hostport with no port at all is
