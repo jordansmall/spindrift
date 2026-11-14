@@ -58,9 +58,11 @@ func waitFinished(t *testing.T, tm *teatest.TestModel) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(teatestTimeout))
 }
 
-// waitForDrain blocks until launch's queue has no PickRunning pick left, that
-// is, until LiveIssues() is empty. See teatestTimeout for why the bound is
-// generous rather than tight.
+// waitForDrain blocks until launch's queue has no pick the quit path treats as
+// busy, now or once drain claims it: none Claiming or Running (CloseIfIdle's
+// predicate), and none Queued that drain will go on to claim. Callers therefore
+// need no separate "wait until running" step before it. See teatestTimeout for
+// why the bound is generous rather than tight.
 func waitForDrain(t *testing.T, launch *Launcher) {
 	t.Helper()
 	if err := waitForDrainWithin(launch, teatestTimeout, 5*time.Millisecond); err != nil {
@@ -68,21 +70,40 @@ func waitForDrain(t *testing.T, launch *Launcher) {
 	}
 }
 
+// drainBusyIssues returns the numbers of picks waitForDrain must still wait on.
+// A PickHeld pick is excluded because it waits on a blocker that may never
+// clear (a drain still running can re-claim it once one does), and a
+// PickQueued pick of a kind with no wired stack because drain never claims it:
+// waiting on either could spin the whole budget.
+func drainBusyIssues(launch *Launcher) []string {
+	wired := map[Kind]bool{}
+	for _, s := range launch.stacks(nil) {
+		wired[s.kind] = true
+	}
+	var busy []string
+	for _, p := range launch.queueRef().Snapshot() {
+		if p.State.live() || (p.State == PickQueued && wired[p.effectiveKind()]) {
+			busy = append(busy, p.Number)
+		}
+	}
+	return busy
+}
+
 // waitForDrainWithin is the budget/checkInterval-parameterized poll
 // waitForDrain wraps, split out the same way waitForOutputOnce is split from
 // waitForOutput so a unit test can drive a small budget without waiting on
 // the full teatestTimeout.
 func waitForDrainWithin(launch *Launcher, budget, checkInterval time.Duration) error {
-	live := launch.LiveIssues()
+	busy := drainBusyIssues(launch)
 	start := time.Now()
-	for len(live) > 0 && time.Since(start) <= budget {
+	for len(busy) > 0 && time.Since(start) <= budget {
 		time.Sleep(checkInterval)
-		live = launch.LiveIssues()
+		busy = drainBusyIssues(launch)
 	}
-	if len(live) == 0 {
+	if len(busy) == 0 {
 		return nil
 	}
-	return fmt.Errorf("waitForDrain: still live after %s: %s", budget, strings.Join(live, ", "))
+	return fmt.Errorf("waitForDrain: still busy after %s: %s", budget, strings.Join(busy, ", "))
 }
 
 // waitForOrphanRow blocks until tm's output contains every one of want plus the
@@ -100,7 +121,12 @@ func waitForOrphanRow(t *testing.T, tm *teatest.TestModel, want ...string) {
 // asserting that a wait genuinely blocks for the settle delay, rather than
 // returning on the first check, shares it.
 func settlesAfter(launch *Launcher, num string, delay time.Duration) {
-	launch.queue.Add(Pick{Number: num, Title: "fix the thing", State: PickRunning})
+	settlesFrom(launch, num, PickRunning, delay)
+}
+
+// settlesFrom is settlesAfter for a pick that starts in state.
+func settlesFrom(launch *Launcher, num string, state PickState, delay time.Duration) {
+	launch.queue.Add(Pick{Number: num, Title: "fix the thing", State: state})
 	go func() {
 		time.Sleep(delay)
 		launch.queue.setState(num, KindWork, PickSettled, "")
@@ -158,6 +184,45 @@ func TestWaitForDrain_NonPositiveBudgetStillNamesTheLiveIssue(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "42") {
 		t.Fatalf("waitForDrainWithin() error = %q, want it to name the still-live issue 42 even with a non-positive budget", err)
+	}
+}
+
+// TestWaitForDrain_WaitsOutAPickThatHasNotStartedRunning pins that a pick still
+// PickQueued or PickClaiming counts as undrained: CloseIfIdle refuses to quit
+// on a claiming pick, and drain goes on to claim a queued one. A poll reading
+// only PickRunning returns at once for these, and the quit that follows then
+// races the pick onto the confirm (issue #7046).
+func TestWaitForDrain_WaitsOutAPickThatHasNotStartedRunning(t *testing.T) {
+	for _, state := range []PickState{PickQueued, PickClaiming} {
+		t.Run(state.String(), func(t *testing.T) {
+			launch := &Launcher{queue: NewQueue()}
+
+			delay := 15 * time.Millisecond
+			start := time.Now()
+			settlesFrom(launch, "42", state, delay)
+
+			if err := waitForDrainWithin(launch, teatestTimeout, time.Millisecond); err != nil {
+				t.Fatalf("waitForDrainWithin() = %v, want nil once the %v pick settles within the budget", err, state)
+			}
+			if elapsed := time.Since(start); elapsed < delay {
+				t.Fatalf("waitForDrainWithin() returned after %s, want it to wait at least the %s settle delay", elapsed, delay)
+			}
+		})
+	}
+}
+
+// TestWaitForDrain_DoesNotWaitOnPicksDrainNeverClaims pins the two queued-ish
+// states drain may never advance: a PickHeld pick waits on a blocker that may
+// never clear, and a PickQueued pick of a kind with no wired stack (research
+// here, with no ResearchFactory) is never claimed. Waiting on either could spin
+// the whole budget.
+func TestWaitForDrain_DoesNotWaitOnPicksDrainNeverClaims(t *testing.T) {
+	launch := &Launcher{queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "1", Title: "held", State: PickHeld})
+	launch.queue.Add(Pick{Number: "2", Title: "unwired", Kind: KindResearch, State: PickQueued})
+
+	if err := waitForDrainWithin(launch, 5*time.Millisecond, time.Millisecond); err != nil {
+		t.Fatalf("waitForDrainWithin() = %v, want nil: a held or unwired-kind pick is not drainable", err)
 	}
 }
 
