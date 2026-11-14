@@ -209,6 +209,7 @@ let
     "connector-driver-rows-shadow-reaches-box-only"
     "connector-driver-rows-shadow-only-for-selected-driver"
     "connector-driver-rows-dogfood-shadows"
+    "connector-driver-rows-first-party-mark"
   ];
 
   portableSourceChecks =

@@ -486,6 +486,29 @@ let
   # extraction, baked into the image below.
   driverRegistry = import ./drivers/default.nix { inherit lib; };
 
+  # The Box loads a Driver Connector in-process only when its wire row carries
+  # the first-party mark, so the mark follows the wasm, not a row claim: rowOf
+  # renders it iff the row's module is the one the batteries flake itself
+  # builds under that name. Overriding `module` or renaming a batteries row
+  # yields no mark, and no row may set the attribute.
+  batteriesRows = lib.listToAttrs (
+    lib.concatMap (
+      dir:
+      let
+        connector = (import dir).lib.connector { core = import ../core; };
+      in
+      lib.optional (connector ? driverRow) (
+        let
+          row = connector.driverRow lib;
+        in
+        lib.nameValuePair row.name row
+      )
+    ) (import ../nix/connector-dirs.nix)
+  );
+  wasmOf = p: r: builtins.unsafeDiscardStringContext (r.module p);
+  isBatteriesBuild =
+    p: r: batteriesRows ? ${r.name} && wasmOf p r == wasmOf p batteriesRows.${r.name};
+
   # Driver rows a Connector declares (ADR 0073), checked as the core entries
   # are. The Go fallback reads the generated Descriptors and the generated
   # credential lists cover core rows only, so a row that would make either
@@ -503,6 +526,8 @@ let
     in
     if row.name != name then
       throw "mkHarness: driverRows.${name} has name '${row.name}'; the two must match"
+    else if row ? firstParty then
+      throw "mkHarness: driverRows.${name} sets `firstParty`; mkHarness derives the mark itself from the batteries flake's own Connector wasm, so no row may set it"
     else if core != null then
       if driverRegistry.descriptorFacts row == driverRegistry.descriptorFacts core then
         shaped
@@ -545,7 +570,13 @@ let
   # host's for the document and the Box's own for the image. The document
   # carries outside rows only: the host never runs a shadow, and on a macOS
   # host the wasm is not built.
-  rowOf = p: r: driverRegistry.descriptorFacts r // { module = r.module p; };
+  rowOf =
+    p: r:
+    driverRegistry.descriptorFacts r
+    // {
+      module = r.module p;
+    }
+    // lib.optionalAttrs (isBatteriesBuild p r) { firstParty = true; };
   docDriverRows = p: lib.mapAttrsToList (_: rowOf p) outsideRows;
   boxDriverRows =
     p:

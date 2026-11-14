@@ -89,6 +89,75 @@ in
     ) "an outside Driver row without a module must fail closed";
     pkgs.runCommand "connector-driver-rows-outside-row-needs-module" { } "touch $out";
 
+  # The Box loads a Driver Connector in-process only when its wire row carries
+  # the first-party mark, and mkHarness alone derives it: a row renders it iff
+  # its module is the wasm the batteries flake builds under that name. A row
+  # setting the attribute fails closed (tryEval cannot read the message, so the
+  # unmarked controls pin that the same rows evaluate without it).
+  connector-driver-rows-first-party-mark =
+    let
+      markedWith =
+        mark:
+        withRows {
+          fixture = fixtureRow // {
+            firstParty = mark;
+          };
+        };
+      # The batteries row's own wasm swapped for another build, and the
+      # batteries row under a name of the Consumer's choosing.
+      swapped = mkHarness {
+        driverRows.claude = claudeRow // {
+          module = fixtureRow.module;
+        };
+        shadowDrivers = [ "claude" ];
+      };
+      renamed = withRows {
+        renamed = claudeRow // {
+          name = "renamed";
+        };
+      };
+      claudeWasmDir = builtins.unsafeDiscardStringContext (builtins.dirOf (claudeRow.module pkgs));
+    in
+    assert assertMsg (evaluates (withRows {
+      fixture = fixtureRow;
+    })) "control: the unmarked outside row must evaluate";
+    assert assertMsg (
+      !(evaluates (markedWith true))
+    ) "a Consumer row claiming `firstParty = true` must fail closed";
+    assert assertMsg (
+      !(evaluates (markedWith ../fixtures/connector))
+    ) "a Consumer row claiming a path as `firstParty` must fail closed";
+    assert assertMsg (
+      !(evaluates (markedWith claudeWasmDir))
+    ) "a Consumer row claiming a string as `firstParty` must fail closed";
+    assert assertMsg (
+      !(evaluates (mkHarness {
+        driverRows.claude = claudeRow // {
+          firstParty = true;
+        };
+      }))
+    ) "the batteries row carrying `firstParty` must fail closed: the mark is derived, never claimed";
+    assert assertMsg (preambleEvaluates shadowOn) "control: the batteries claude row must evaluate";
+    assert assertMsg (preambleEvaluates swapped)
+      "control: a batteries row with another module must evaluate";
+    assert assertMsg (evaluates renamed) "control: a renamed batteries row must evaluate";
+    pkgs.runCommand "connector-driver-rows-first-party-mark" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      line=$(grep '^DRIVER_ROWS_FILE=' ${shadowOn.internals.driverPreambleFile})
+      eval "$line"
+      jq -e 'length == 1 and .[0].name == "claude" and .[0].firstParty == true' "$DRIVER_ROWS_FILE"
+
+      # The batteries row's name with a Consumer's wasm, and the batteries wasm
+      # under a Consumer's name, are not first-party.
+      jq -e 'length == 1 and .[0].name == "claude" and (.[0] | has("firstParty") | not)' ${swapped.internals.driverRowsFile}
+      jq -e 'length == 1 and .[0].name == "renamed" and (.[0] | has("firstParty") | not)' ${renamed.internals.driverRowsFile}
+      jq -e '[.drivers[] | has("firstParty")] | any | not' ${renamed.internals.runInputDocumentFile}
+
+      # A third-party Connector's row, and the input document, stay unmarked.
+      jq -e 'length == 1 and (.[0] | has("firstParty") | not)' ${withFixture.internals.driverRowsFile}
+      jq -e '[.drivers[] | has("firstParty")] | any | not' ${withFixture.internals.runInputDocumentFile}
+      touch $out
+    '';
+
   connector-driver-rows-core-name-must-match-core =
     assert assertMsg (evaluates (withRows {
       claude = registry.entries.claude;
@@ -176,7 +245,8 @@ in
         jq -e --slurpfile facts ${facts} '
           length == 1 and .[0].shadow == true
           and (.[0].module | endswith("/claude.wasm"))
-          and (.[0] | del(.module, .shadow)) == $facts[0]
+          and .[0].firstParty == true
+          and (.[0] | del(.module, .shadow, .firstParty)) == $facts[0]
         ' "$DRIVER_ROWS_FILE"
         test -f "$(jq -r '.[0].module' "$DRIVER_ROWS_FILE")"
 
