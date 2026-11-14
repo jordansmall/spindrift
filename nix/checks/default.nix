@@ -123,6 +123,7 @@ let
     // (import ./docs-edit-isolation.nix (common // { inherit checksAt baselineChecks; }))
     // (import ./seam-fixtures.nix common)
     // (import ./event-stream-parity.nix common)
+    // (import ./shadow-clean-run-recipes.nix common)
     // (import ./bare-bang-guard.nix common)
     // (import ./backend-name-guard.nix common)
     // (import ./eval-probe.nix common)
@@ -170,11 +171,12 @@ let
     imageOnlyCheckNames ++ evalHeavyCheckNames ++ batsShardNames
   );
 
-  # A narrower axis than imageOnlyCheckNames: source checks that depend on the
-  # bats harness internals, e.g. the Linux-twin driverExecBin build
-  # (issue #2648, issue #2354). mkHarness.nix always instantiates pkgs for the
-  # Linux twin of the host system, so a darwin eval still demands a Linux
-  # builder and fails with "Required system: aarch64-linux".
+  # A narrower axis than imageOnlyCheckNames: source checks that only evaluate
+  # on Linux, e.g. bats harness internals, the Linux-twin driverExecBin build
+  # (issue #2648, issue #2354), or Linux-only packages such as glibcLocales.
+  # For the harness ones, mkHarness.nix always instantiates pkgs for the Linux
+  # twin of the host system, so a darwin eval still demands a Linux builder and
+  # fails with "Required system: aarch64-linux".
   linuxOnlyCheckNames = batsShardNames ++ [
     # Evaluates the bats shards, which are Linux-only (issue #5154). Also in
     # evalHeavyCheckNames, which only checks-inbox drops.
@@ -197,6 +199,9 @@ let
     "dogfood-bwrap-app-wiring"
     # Same gate for agent-closure-pi off fixtures.dogfoodBwrapPiHarness.
     "dogfood-bwrap-pi-app-wiring"
+    # Pins an en_US.UTF-8 sort through pkgs.glibcLocales, which is null off
+    # Linux, so interpolating it throws during darwin eval.
+    "shadow-clean-run-recipes"
     # lib/seccomp.nix builds against pkgs.libseccomp, whose meta.platforms is
     # Linux-only, so evaluating it on darwin throws "Refusing to evaluate
     # package 'libseccomp'" before the check derivation itself ever runs.
@@ -245,6 +250,7 @@ let
     # which a comment-only edit can reach.
     "runner-names-guard"
     "schema-drift"
+    "shadow-clean-run-recipes"
     "versioning-prompt-template-carve-out"
   ];
 
