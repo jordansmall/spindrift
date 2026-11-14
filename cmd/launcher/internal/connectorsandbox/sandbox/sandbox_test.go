@@ -286,6 +286,10 @@ func TestFailedStopIsRetriedByCloseAndReported(t *testing.T) {
 	f := runner.NewFake()
 	f.StartConnectorSandboxFunc = inMemoryHost
 	f.KillErr = errors.New("podman rm -f: boom")
+	var out strings.Builder
+	prev := logOut
+	logOut = &out
+	t.Cleanup(func() { logOut = prev })
 	s := New(f, "podman")
 	if _, err := s.Load(context.Background(), notWasm); errors.Is(err, connectorsandbox.ErrConnectorSandboxStart) {
 		t.Fatal(err)
@@ -300,6 +304,13 @@ func TestFailedStopIsRetriedByCloseAndReported(t *testing.T) {
 	before := killCount(f)
 	if before < 2 {
 		t.Fatalf("Kill calls = %v, want the killer path and Close's retry", f.KillCalls)
+	}
+	warn := "warning: stopping Connector sandbox " + s.name + ": " + f.KillErr.Error()
+	if !strings.Contains(out.String(), warn) {
+		t.Fatalf("log = %q, want %q", out.String(), warn)
+	}
+	if strings.Contains(out.String(), "==> stopped") {
+		t.Fatalf("log = %q, want no stopped line before a stop succeeds", out.String())
 	}
 
 	f.KillErr = nil
@@ -316,5 +327,8 @@ func TestFailedStopIsRetriedByCloseAndReported(t *testing.T) {
 	}
 	if got := killCount(f); got != before+1 {
 		t.Fatalf("Kill calls = %v, want no more once a stop succeeded", f.KillCalls)
+	}
+	if got := strings.Count(out.String(), "==> stopped Connector sandbox: "+s.name+"\n"); got != 1 {
+		t.Fatalf("stopped lines = %d in %q, want exactly one", got, out.String())
 	}
 }
