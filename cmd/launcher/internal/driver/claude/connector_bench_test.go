@@ -30,7 +30,7 @@ import (
 //
 // A whole-log read of the dogfood corpus takes tens of seconds on the
 // interpreter, so add -benchtime 1x for a smoke run, and select one family with
-// -bench: Decode, Heartbeat, WholeLog, PostPass, DecodeSize, FixedCalls, ShadowReplay.
+// -bench: Decode, DecodeBatch, Heartbeat, WholeLog, PostPass, DecodeSize, FixedCalls, ShadowReplay.
 
 // chunkSize is shorter than most corpus lines, so nearly every line arrives
 // split across writes, as from a pipe.
@@ -134,6 +134,46 @@ func BenchmarkConnectorDecode(b *testing.B) {
 					decode := s.NewDecoder()
 					for _, line := range lines {
 						decode(line)
+					}
+				}
+				reportPerLine(b, len(lines))
+			})
+		})
+	}
+}
+
+// batchBytes mirrors the bound at which the shadow replay decodes a batch
+// (shadow.flushBytes, unexported): a batch is flushed once its lines reach it.
+const batchBytes = 1 << 20
+
+// BenchmarkConnectorDecodeBatch is the batched decode cost on the same corpora
+// as BenchmarkConnectorDecode: a fresh batch decoder over every corpus line,
+// handed over in batchBytes-sized batches as the shadow replay does (issue
+// #6850). Compare its ns/line with BenchmarkConnectorDecode's.
+func BenchmarkConnectorDecodeBatch(b *testing.B) {
+	for _, c := range benchCorpora {
+		b.Run("corpus="+c.name, func(b *testing.B) {
+			log, lines := corpusLogs(b, c.dir)
+			var batches [][]string
+			var cur []string
+			size := 0
+			for _, l := range lines {
+				cur = append(cur, l)
+				if size += len(l); size >= batchBytes {
+					batches, cur, size = append(batches, cur), nil, 0
+				}
+			}
+			if len(cur) > 0 {
+				batches = append(batches, cur)
+			}
+			benchStrategies(b, func(b *testing.B, s driverkit.Strategy) {
+				b.SetBytes(int64(len(log)))
+				for b.Loop() {
+					decode := s.BatchDecoder()
+					for _, batch := range batches {
+						if got := decode(batch); len(got) != len(batch) {
+							b.Fatalf("batch of %d lines decoded to %d event lists", len(batch), len(got))
+						}
 					}
 				}
 				reportPerLine(b, len(lines))
