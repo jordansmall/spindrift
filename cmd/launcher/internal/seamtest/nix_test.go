@@ -54,3 +54,50 @@ func TestNixMissingConfigExits(t *testing.T) {
 		t.Errorf("exit %d; want %d", code, fakeConfigExit)
 	}
 }
+
+func TestNixRunExecsConfiguredProgramWithItsFlagsBeforeTheVerb(t *testing.T) {
+	cfg := NixConfig{Exec: "/bin/launcher", ExecArgs: []string{"--input", "doc.json"}}
+	prog, argv, ok := nixRunExec(cfg, []string{"run", "git+file:///repo?rev=abc#", "--", "dispatch", "--max-jobs", "1"})
+	if !ok || prog != "/bin/launcher" {
+		t.Fatalf("nixRunExec = %q, %v; want /bin/launcher, true", prog, ok)
+	}
+	want := []string{"/bin/launcher", "--input", "doc.json", "dispatch", "--max-jobs", "1"}
+	if !reflect.DeepEqual(argv, want) {
+		t.Errorf("argv = %v; want %v", argv, want)
+	}
+}
+
+func TestNixRunDoesNotExecWithoutConfigOrForOtherVerbs(t *testing.T) {
+	for _, tc := range []struct {
+		cfg  NixConfig
+		args []string
+	}{
+		{NixConfig{}, []string{"run", ".#", "--", "dispatch"}},
+		{NixConfig{Exec: "/bin/launcher"}, []string{"develop", ".#ci"}},
+		{NixConfig{Exec: "/bin/launcher"}, []string{"run", ".#"}},
+	} {
+		if _, _, ok := nixRunExec(tc.cfg, tc.args); ok {
+			t.Errorf("nixRunExec(%v, %v) ok; want not", tc.cfg, tc.args)
+		}
+	}
+}
+
+func TestNixRunDoctorExitsCleanly(t *testing.T) {
+	cfg := NixConfig{Record: filepath.Join(t.TempDir(), "rec"), Exec: "/bin/launcher"}
+	if got := runNix(t, cfg, "run", ".#", "--", "doctor"); got != 0 {
+		t.Errorf("exit %d; want 0", got)
+	}
+}
+
+func TestNixRunStubsDoctorUnlessExecDoctor(t *testing.T) {
+	args := []string{"run", ".#", "--", "doctor", "--butler"}
+	if !nixRunStubsDoctor(NixConfig{Exec: "/bin/launcher"}, args) {
+		t.Error("doctor not stubbed by default")
+	}
+	if nixRunStubsDoctor(NixConfig{Exec: "/bin/launcher", ExecDoctor: true}, args) {
+		t.Error("doctor stubbed despite ExecDoctor")
+	}
+	if nixRunStubsDoctor(NixConfig{Exec: "/bin/launcher"}, []string{"run", ".#", "--", "dispatch"}) {
+		t.Error("dispatch stubbed")
+	}
+}

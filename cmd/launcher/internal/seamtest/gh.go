@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"slices"
 	"strconv"
@@ -135,6 +136,8 @@ func (c GhConfig) answer(args []string, prior [][]string) (string, error) {
 		return c.prView(args, prior)
 	case hasPrefix(args, "api", "graphql"):
 		return c.graphql(args, prior)
+	case hasPrefix(args, "api") && len(args) > 1 && strings.Contains(args[1], "/issues?"):
+		return c.issueDemand(args[1], prior)
 	}
 	return "", nil
 }
@@ -256,6 +259,30 @@ func (c GhConfig) issueList(args []string, prior [][]string) (string, error) {
 		rows = append(rows, row)
 	}
 	return marshalLine(rows)
+}
+
+// issueDemand answers the daemon's demand probe, a `gh api -i` read of the
+// issues page: a 200 whose body lists the open issues carrying the page's
+// labels query. It ignores If-None-Match, so a conditional request never 304s.
+func (c GhConfig) issueDemand(path string, prior [][]string) (string, error) {
+	_, query, _ := strings.Cut(path, "?")
+	q, err := url.ParseQuery(query)
+	if err != nil {
+		return "", err
+	}
+	rows := []map[string]any{}
+	for _, i := range c.Issues {
+		labels, state := c.issueState(i, prior)
+		if state != string(forge.IssueOpen) || !slices.Contains(labels, q.Get("labels")) {
+			continue
+		}
+		rows = append(rows, map[string]any{"number": i.Number})
+	}
+	body, err := marshalLine(rows)
+	if err != nil {
+		return "", err
+	}
+	return "HTTP/2.0 200 OK\r\nEtag: \"seam\"\r\n\r\n" + body, nil
 }
 
 func (c GhConfig) issueView(args []string, prior [][]string) (string, error) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -224,5 +225,17 @@ func TestGhUnknownCallsSucceedSilently(t *testing.T) {
 		if code, out := runGh(t, cfg, args...); code != 0 || out != "" {
 			t.Errorf("%v: got exit %d %q", args, code, out)
 		}
+	}
+}
+
+func TestGhDemandProbeCountsOpenLabelledIssues(t *testing.T) {
+	cfg, _ := typedCfg(t)
+	code, out := runGh(t, cfg, "api", "repos/o/r/issues?state=open&labels=ready-for-agent&sort=updated&direction=desc&per_page=100", "-i")
+	head, body, ok := strings.Cut(out, "\r\n\r\n")
+	if code != 0 || !ok || !strings.HasPrefix(head, "HTTP/2.0 200") {
+		t.Fatalf("got exit %d %q; want an HTTP 200 response", code, out)
+	}
+	if want := `[{"number":7}]` + "\n"; body != want {
+		t.Errorf("body = %q; want %q", body, want)
 	}
 }
