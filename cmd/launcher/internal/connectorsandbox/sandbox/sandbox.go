@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -23,6 +24,9 @@ type Starter interface {
 	StartConnectorSandbox(name string) (runner.ConnectorSandbox, error)
 	Kill(name string) error
 }
+
+// logOut is where kill reports; a var so a test can read the lines.
+var logOut io.Writer = os.Stderr
 
 // helloTimeout bounds the wait for a started sandbox's connector host to speak.
 var helloTimeout = 30 * time.Second
@@ -92,8 +96,8 @@ func (s *Sandbox) ensure() (*connectorhost.Sessions, error) {
 
 // kill is the stop hook of a started sandbox. Closing its stdin is the first
 // signal and this the backstop, so it runs until it succeeds once however many
-// paths reach it. A failed stop is left unmarked so a later call, such as
-// Close's, retries and returns the real error.
+// paths reach it. A failed stop is reported and left unmarked so a later call,
+// such as Close's, retries and returns the real error.
 func (s *Sandbox) kill() error {
 	s.stopMu.Lock()
 	defer s.stopMu.Unlock()
@@ -101,9 +105,13 @@ func (s *Sandbox) kill() error {
 		return nil
 	}
 	if err := s.r.Kill(s.name); err != nil {
+		fmt.Fprintf(logOut, "warning: stopping Connector sandbox %s: %v\n", s.name, err)
 		return err
 	}
 	s.stopped = true
+	// bwrap's kill is an in-process signal that leaves no CLI call to
+	// observe, so this line is the one trace of the stop on both families.
+	fmt.Fprintf(logOut, "==> stopped Connector sandbox: %s\n", s.name)
 	return nil
 }
 
