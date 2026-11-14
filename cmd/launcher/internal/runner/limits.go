@@ -7,6 +7,15 @@ import (
 	"strings"
 )
 
+// Fixed caps for the Connector sandbox on every runner, deliberately not
+// Config's per-Box knobs: it holds only connector-host. The memory cap leaves
+// room for several Connector modules (each capped near 64 MiB by connectorhost)
+// plus the host's Go runtime; the pids cap covers that runtime's threads.
+const (
+	SandboxPidsLimit   = "128"
+	SandboxMemoryLimit = "512m"
+)
+
 // MemoryLimitToBytes converts a podman/docker-style unit-suffixed memory
 // limit ("5g", "512m", "1024k", "512b", "8GiB", "1.5t"; bare digits are
 // already bytes) to a raw byte count. The grammar follows go-units'

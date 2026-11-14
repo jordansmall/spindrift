@@ -565,15 +565,6 @@ func (a *ociAdapter) buildRunArgs(box runner.Box) []string {
 	return args
 }
 
-// Fixed caps for the Connector sandbox, deliberately not Config's per-Box
-// knobs: it holds only connector-host. The memory cap leaves room for several
-// Connector modules (each capped near 64 MiB by connectorhost) plus the host's
-// Go runtime; the pids cap covers that runtime's threads.
-const (
-	sandboxPidsLimit   = "128"
-	sandboxMemoryLimit = "512m"
-)
-
 // hardeningArgs are applied unconditionally, so no consumer knob can weaken a
 // sandbox.
 var hardeningArgs = []string{"--cap-drop=all", "--security-opt=no-new-privileges"}
@@ -584,7 +575,7 @@ var hardeningArgs = []string{"--cap-drop=all", "--security-opt=no-new-privileges
 func (a *ociAdapter) buildSandboxArgs(name string) []string {
 	args := []string{"run", "-i", "--rm", "--name", name, "--network=none"}
 	args = append(args, hardeningArgs...)
-	return append(args, "--read-only", "--pids-limit="+sandboxPidsLimit, "--memory="+sandboxMemoryLimit, a.sandboxImg.tag)
+	return append(args, "--read-only", "--pids-limit="+runner.SandboxPidsLimit, "--memory="+runner.SandboxMemoryLimit, a.sandboxImg.tag)
 }
 
 // ensureSandboxImage loads the Connector sandbox image exactly as EnsureReady

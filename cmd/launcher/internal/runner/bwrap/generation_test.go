@@ -877,6 +877,9 @@ const testHostVersion = "1-1"
 var realHostStoreDBVersion = hostStoreDBVersion
 
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == hostModeArg {
+		serveHostMode()
+	}
 	hostStoreDBVersion = func() (string, error) { return testHostVersion, nil }
 	// CI's nix build sandbox has no host DB, while a dev machine or Box does:
 	// pin the sandbox's answer so an unstubbed vacuum fails the same everywhere.

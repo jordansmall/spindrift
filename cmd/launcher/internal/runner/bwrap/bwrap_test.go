@@ -2028,7 +2028,7 @@ func TestBwrapAnchoredCgroup_StaysDiscoverable(t *testing.T) {
 	userService, _ := systemdUserSessionFixture(t, "pids")
 
 	a := &bwrapAdapter{pidsLimit: "256"}
-	dir := a.provisionCgroup(runner.Box{Name: "test-box"})
+	dir := a.provisionCgroup("test-box", a.pidsLimit, a.memoryLimit)
 	wantDir := filepath.Join(userService, "spindrift-test-box")
 	if dir != wantDir {
 		t.Fatalf("provisionCgroup dir = %q, want anchored at %q", dir, wantDir)
@@ -2459,7 +2459,7 @@ func TestBwrapProvisionCgroup_PidsMaxWriteFailureKeepsDirAndWritesMemoryMax(t *t
 	a := &bwrapAdapter{pidsLimit: "256", memoryLimit: "5g"}
 	var dir string
 	out := runnertest.CaptureStdoutDuring(t, func() {
-		dir = a.provisionCgroup(runner.Box{Name: "test-box"})
+		dir = a.provisionCgroup("test-box", a.pidsLimit, a.memoryLimit)
 	})
 
 	wantDir := filepath.Join(cgroupFSRoot, "spindrift-test-box")
@@ -2500,7 +2500,7 @@ func TestBwrapProvisionCgroup_MemoryMaxWriteFailureKeepsDir(t *testing.T) {
 	a := &bwrapAdapter{memoryLimit: "5g"}
 	var dir string
 	out := runnertest.CaptureStdoutDuring(t, func() {
-		dir = a.provisionCgroup(runner.Box{Name: "test-box"})
+		dir = a.provisionCgroup("test-box", a.pidsLimit, a.memoryLimit)
 	})
 
 	wantDir := filepath.Join(cgroupFSRoot, "spindrift-test-box")
@@ -2529,7 +2529,7 @@ func TestBwrapProvisionCgroup_MalformedMemoryLimitKeepsDir(t *testing.T) {
 	a := &bwrapAdapter{memoryLimit: "not-a-size"}
 	var dir string
 	out := runnertest.CaptureStdoutDuring(t, func() {
-		dir = a.provisionCgroup(runner.Box{Name: "test-box"})
+		dir = a.provisionCgroup("test-box", a.pidsLimit, a.memoryLimit)
 	})
 
 	wantDir := filepath.Join(cgroupFSRoot, "spindrift-test-box")
@@ -2563,7 +2563,7 @@ func TestBwrapProvisionCgroup_BothLimitWritesFailKeepsDir(t *testing.T) {
 	a := &bwrapAdapter{pidsLimit: "256", memoryLimit: "5g"}
 	var dir string
 	out := runnertest.CaptureStdoutDuring(t, func() {
-		dir = a.provisionCgroup(runner.Box{Name: "test-box"})
+		dir = a.provisionCgroup("test-box", a.pidsLimit, a.memoryLimit)
 	})
 
 	wantDir := filepath.Join(cgroupFSRoot, "spindrift-test-box")
@@ -4460,13 +4460,8 @@ func TestBwrapIsReady_OlderVersionSnapshotOnlyReturnsNil(t *testing.T) {
 	}
 }
 
-func TestStartConnectorSandbox_FailsClosed(t *testing.T) {
-	for name, r := range map[string]runner.Runner{
-		"run":   &bwrapAdapter{},
-		"build": &bwrapBuildAdapter{},
-	} {
-		if _, err := r.StartConnectorSandbox(runner.ConnectorSandboxPrefix + "x"); err == nil || !strings.Contains(err.Error(), "#7015") {
-			t.Errorf("%s adapter StartConnectorSandbox = %v, want an error naming #7015", name, err)
-		}
+func TestStartConnectorSandbox_BuildAdapterFailsClosed(t *testing.T) {
+	if _, err := (&bwrapBuildAdapter{}).StartConnectorSandbox(runner.ConnectorSandboxPrefix + "x"); err == nil {
+		t.Error("build adapter StartConnectorSandbox = nil, want it to fail closed")
 	}
 }

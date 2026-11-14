@@ -823,41 +823,96 @@ func (a *bwrapAdapter) reclaimLeftoverCgroupDir(name, dir string) bool {
 	return removeCgroupDir(dir) == nil
 }
 
-// provisionCgroup creates a per-Box cgroup v2 subtree at the anchor
-// cgroupDirForName resolves and writes pids.max/memory.max into it. Failing to
-// create the dir means no usable delegation on this host, which ADR 0042 treats
-// as expected: warn, return "", and let Run proceed unenforced. Once the dir
-// exists it is kept, since a failed limit write leaves it usable for PID tracking.
+// provisionCgroup creates the cgroup v2 subtree for the Box or Connector
+// sandbox called name at the anchor cgroupDirForName resolves and writes
+// pids.max/memory.max (pidsLimit, memoryLimit; empty writes none) into it.
+// Failing to create the dir means no usable delegation on this host, which
+// ADR 0042 treats as expected: warn, return "", and let Run proceed
+// unenforced. Once the dir exists it is kept, since a failed limit write leaves
+// it usable for PID tracking.
 // A leftover empty dir from a crashed launcher is reclaimed rather than failing
 // every retry on EEXIST (issue #4164).
-func (a *bwrapAdapter) provisionCgroup(box runner.Box) (dir string) {
-	dir, err := a.cgroupDirForName(box.Name)
+func (a *bwrapAdapter) provisionCgroup(name, pidsLimit, memoryLimit string) (dir string) {
+	dir, err := a.cgroupDirForName(name)
 	if err != nil {
-		fmt.Printf("==> bwrap runner: warning: cgroup v2 delegation unavailable (%v); running box %q without cgroup resource containment\n", err, box.Name)
+		fmt.Printf("==> bwrap runner: warning: cgroup v2 delegation unavailable (%v); running %q without cgroup resource containment\n", err, name)
 		return ""
 	}
 	err = os.Mkdir(dir, 0o755)
-	if errors.Is(err, os.ErrExist) && a.reclaimLeftoverCgroupDir(box.Name, dir) {
+	if errors.Is(err, os.ErrExist) && a.reclaimLeftoverCgroupDir(name, dir) {
 		err = os.Mkdir(dir, 0o755)
 	}
 	if err != nil {
-		fmt.Printf("==> bwrap runner: warning: could not create delegated cgroup %s (%v); running box %q without cgroup resource containment\n", dir, err, box.Name)
+		fmt.Printf("==> bwrap runner: warning: could not create delegated cgroup %s (%v); running %q without cgroup resource containment\n", dir, err, name)
 		return ""
 	}
-	if a.pidsLimit != "" {
-		if err := writeCgroupLimit(filepath.Join(dir, "pids.max"), []byte(a.pidsLimit), 0o644); err != nil {
-			fmt.Printf("==> bwrap runner: warning: could not write cgroup pids.max (%v); box %q keeps cgroup tracking but runs without a process-count limit\n", err, box.Name)
+	if pidsLimit != "" {
+		if err := writeCgroupLimit(filepath.Join(dir, "pids.max"), []byte(pidsLimit), 0o644); err != nil {
+			fmt.Printf("==> bwrap runner: warning: could not write cgroup pids.max (%v); %q keeps cgroup tracking but runs without a process-count limit\n", err, name)
 		}
 	}
-	if a.memoryLimit != "" {
-		bytesLimit, err := runner.MemoryLimitToBytes(a.memoryLimit)
+	if memoryLimit != "" {
+		bytesLimit, err := runner.MemoryLimitToBytes(memoryLimit)
 		if err != nil {
-			fmt.Printf("==> bwrap runner: warning: invalid MEMORY_LIMIT %q (%v); box %q keeps cgroup tracking but runs without a memory limit\n", a.memoryLimit, err, box.Name)
+			fmt.Printf("==> bwrap runner: warning: invalid MEMORY_LIMIT %q (%v); %q keeps cgroup tracking but runs without a memory limit\n", memoryLimit, err, name)
 		} else if err := writeCgroupLimit(filepath.Join(dir, "memory.max"), []byte(strconv.FormatInt(bytesLimit, 10)), 0o644); err != nil {
-			fmt.Printf("==> bwrap runner: warning: could not write cgroup memory.max (%v); box %q keeps cgroup tracking but runs without a memory limit\n", err, box.Name)
+			fmt.Printf("==> bwrap runner: warning: could not write cgroup memory.max (%v); %q keeps cgroup tracking but runs without a memory limit\n", err, name)
 		}
 	}
 	return dir
+}
+
+// startInCgroup starts the command newCmd builds, cloned straight into
+// cgroupDir where the kernel supports it so pasta's and bwrap's own forks never
+// run outside the limits (issue #4815), then hands its process off under name
+// so Kill finds it. newCmd is a func, not a value: exec.Cmd.Start is one-shot,
+// and the CLONE_INTO_CGROUP attempt may need a fresh Cmd for its fallback. A
+// failed start removes cgroupDir; the caller's other cleanup is its own.
+func (a *bwrapAdapter) startInCgroup(name, cgroupDir string, newCmd func() *exec.Cmd, handOff func(*os.Process)) (*exec.Cmd, error) {
+	// The fd only needs to outlive Start.
+	var cgroupFile *os.File
+	if cgroupDir != "" {
+		if f, err := os.Open(cgroupDir); err == nil {
+			cgroupFile = f
+		} else {
+			fmt.Printf("==> bwrap runner: warning: could not open cgroup %s (%v); %q starts outside it and is moved in after Start\n", cgroupDir, err, name)
+		}
+	}
+	cmd := newCmd()
+	intoCgroup := cgroupFile != nil && cgroupCloneSupported
+	if intoCgroup {
+		setCgroupClone(cmd, int(cgroupFile.Fd()))
+	}
+	err := cmd.Start()
+	if err != nil && intoCgroup {
+		// Start is one-shot and the kernel may refuse CLONE_INTO_CGROUP, so retry
+		// on a fresh cmd without it.
+		fmt.Printf("==> bwrap runner: warning: could not start %q inside cgroup %s (%v); retrying and moving it in after Start\n", name, cgroupDir, err)
+		cmd = newCmd()
+		err = cmd.Start()
+	}
+	if cgroupFile != nil {
+		cgroupFile.Close()
+	}
+	if err != nil {
+		if cgroupDir != "" {
+			_ = os.Remove(cgroupDir)
+		}
+		return nil, err
+	}
+	if cgroupDir != "" {
+		// A same-cgroup no-op after CLONE_INTO_CGROUP. Where that was skipped or
+		// refused, descendants forked before this write escape the limits (issue
+		// #4815). Best-effort: the box is already running, so failing to move it
+		// in means this Box runs unenforced, never that Run fails.
+		pid := strconv.Itoa(cmd.Process.Pid)
+		if err := os.WriteFile(filepath.Join(cgroupDir, "cgroup.procs"), []byte(pid), 0o644); err != nil {
+			fmt.Printf("==> bwrap runner: warning: could not move %q into cgroup %s: %v\n", name, cgroupDir, err)
+		}
+	}
+	// Atomic even when the cgroup.procs write above failed; see beginProvisioning.
+	handOff(cmd.Process)
+	return cmd, nil
 }
 
 // Run launches a single issue into a bubblewrap sandbox. It returns
@@ -898,7 +953,7 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 	// is exec'd; the child is cloned straight into it (CLONE_INTO_CGROUP) at
 	// Start. An empty cgroupDir means provisionCgroup could not create the dir
 	// at all.
-	cgroupDir := a.provisionCgroup(box)
+	cgroupDir := a.provisionCgroup(box.Name, a.pidsLimit, a.memoryLimit)
 
 	// Shared flocks held for the life of the sandboxed process are how
 	// reclaimStaleSnapshots detects a live Box still using this generation (its
@@ -990,53 +1045,12 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 		return cmd
 	}
 
-	// Cloned straight into the cgroup where the kernel supports it, so pasta's
-	// and bwrap's own forks never run outside the limits (issue #4815). The fd
-	// only needs to outlive Start.
-	var cgroupFile *os.File
-	if cgroupDir != "" {
-		if f, err := os.Open(cgroupDir); err == nil {
-			cgroupFile = f
-		} else {
-			fmt.Printf("==> bwrap runner: warning: could not open cgroup %s (%v); box %q starts outside it and is moved in after Start\n", cgroupDir, err, box.Name)
-		}
-	}
-	cmd := newCmd()
-	intoCgroup := cgroupFile != nil && cgroupCloneSupported
-	if intoCgroup {
-		setCgroupClone(cmd, int(cgroupFile.Fd()))
-	}
-	err = cmd.Start()
-	if err != nil && intoCgroup {
-		// Start is one-shot and the kernel may refuse CLONE_INTO_CGROUP, so retry
-		// on a fresh cmd without it.
-		fmt.Printf("==> bwrap runner: warning: could not start box %q inside cgroup %s (%v); retrying and moving it in after Start\n", box.Name, cgroupDir, err)
-		cmd = newCmd()
-		err = cmd.Start()
-	}
-	if cgroupFile != nil {
-		cgroupFile.Close()
-	}
+	cmd, err := a.startInCgroup(box.Name, cgroupDir, newCmd, handOff)
 	if err != nil {
-		if cgroupDir != "" {
-			_ = os.Remove(cgroupDir)
-		}
 		UnlockSnapshot(nixVarSnapshotLock)
 		UnlockSnapshot(nixVarVersionLock)
 		return err
 	}
-	if cgroupDir != "" {
-		// A same-cgroup no-op after CLONE_INTO_CGROUP. Where that was skipped or
-		// refused, descendants forked before this write escape the limits (issue
-		// #4815). Best-effort: the box is already running, so failing to move it
-		// in means this Box runs unenforced, never that Run fails.
-		pid := strconv.Itoa(cmd.Process.Pid)
-		if err := os.WriteFile(filepath.Join(cgroupDir, "cgroup.procs"), []byte(pid), 0o644); err != nil {
-			fmt.Printf("==> bwrap runner: warning: could not move box %q into cgroup %s: %v\n", box.Name, cgroupDir, err)
-		}
-	}
-	// Atomic even when the cgroup.procs write above failed; see beginProvisioning.
-	handOff(cmd.Process)
 	defer a.untrackRunning(box.Name)
 	// Deferred so the shared lock spans cmd.Wait()'s whole duration: releasing
 	// earlier would let reclaimStaleSnapshots believe this generation is free
@@ -1712,13 +1726,88 @@ func (a *bwrapBuildAdapter) RegistryProxyTransport() (registrymanifest.Endpoint,
 	return registrymanifest.NewUnixEndpoint(""), false, nil
 }
 
-// errNoConnectorSandbox is the fail-closed answer until bwrap isolates the
-// Connector sandbox (issue #7015).
-var errNoConnectorSandbox = errors.New("bwrap cannot isolate a Connector sandbox yet (issue #7015)")
+// errNoConnectorSandbox is the build adapter's answer: it launches nothing.
+var errNoConnectorSandbox = errors.New("the bwrap build adapter cannot start a Connector sandbox")
 
-// StartConnectorSandbox fails closed: a Connector must never run unsandboxed.
-func (a *bwrapAdapter) StartConnectorSandbox(string) (runner.ConnectorSandbox, error) {
-	return runner.ConnectorSandbox{}, errNoConnectorSandbox
+// StartConnectorSandbox starts connector-host alone under bwrap, tracked and
+// cgrouped like a Box so Kill(name) and ListRunning see it. It fails closed on
+// anything that would weaken isolation: a missing connector-host or syscall
+// filter (unlike a Box, which only warns), and never uses pasta, so the host
+// gets no network whatever the Box's mode is.
+func (a *bwrapAdapter) StartConnectorSandbox(name string) (runner.ConnectorSandbox, error) {
+	if a.connectorHost == "" {
+		return runner.ConnectorSandbox{}, errors.New("no connector-host in the input document")
+	}
+	if a.syscallFilterPath == "" {
+		return runner.ConnectorSandbox{}, errors.New("no syscall filter in the input document; refusing to start an unfiltered Connector sandbox")
+	}
+	if a.alreadyRunning(name) {
+		return runner.ConnectorSandbox{}, runner.ErrAlreadyRunning
+	}
+	if _, err := os.Stat(a.connectorHost); err != nil {
+		if a.connectorHostDrv == "" {
+			return runner.ConnectorSandbox{}, fmt.Errorf("connector-host %s is absent and the input document has no derivation to build it", a.connectorHost)
+		}
+		if err := a.prepare.realize("connector-host", a.connectorHostDrv); err != nil {
+			return runner.ConnectorSandbox{}, err
+		}
+	}
+	filter, err := os.Open(a.syscallFilterPath)
+	if err != nil {
+		return runner.ConnectorSandbox{}, fmt.Errorf("open syscall filter: %w", err)
+	}
+	defer filter.Close()
+
+	// Plain pipes rather than cmd.StdinPipe/StdoutPipe: the retry in
+	// startInCgroup builds a second Cmd, which must reuse the same pipes. Only
+	// the child holds the write end of stdout once the parent's copy is closed,
+	// so a bwrap that dies at startup reads as EOF, not a hang.
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		return runner.ConnectorSandbox{}, err
+	}
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		stdinR.Close()
+		stdinW.Close()
+		return runner.ConnectorSandbox{}, err
+	}
+	stderr := &runner.BoundedWriter{}
+	args := a.buildSandboxArgs()
+	newCmd := func() *exec.Cmd {
+		cmd := execCommand("bwrap", args...)
+		setDeathSignal(cmd)
+		cmd.Env = []string{} // non-nil: bwrap needs none, and nil would inherit the launcher's
+		cmd.ExtraFiles = []*os.File{filter}
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = stdinR, stdoutW, stderr
+		return cmd
+	}
+
+	handOff, release := a.beginProvisioning(name)
+	defer release()
+	cgroupDir := a.provisionCgroup(name, runner.SandboxPidsLimit, runner.SandboxMemoryLimit)
+	cmd, err := a.startInCgroup(name, cgroupDir, newCmd, handOff)
+	stdinR.Close()
+	stdoutW.Close()
+	if err != nil {
+		stdinW.Close()
+		stdoutR.Close()
+		return runner.ConnectorSandbox{}, fmt.Errorf("start bwrap: %w", err)
+	}
+	wait := sync.OnceValue(func() error {
+		defer func() {
+			// As cmd.StdoutPipe's own Wait does: its reader finishes first.
+			stdoutR.Close()
+			a.untrackRunning(name)
+			if cgroupDir != "" {
+				if err := removeCgroupDir(cgroupDir); err != nil {
+					fmt.Printf("==> bwrap runner: warning: could not remove cgroup %s: %v\n", cgroupDir, err)
+				}
+			}
+		}()
+		return cmd.Wait()
+	})
+	return runner.ConnectorSandbox{Stdin: stdinW, Stdout: stdoutR, Wait: wait, Stderr: stderr.String}, nil
 }
 
 // StartConnectorSandbox fails closed; the build adapter launches nothing.
