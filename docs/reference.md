@@ -3527,6 +3527,21 @@ Driver Connectors); a run that loads none starts none.
   `BwrapConfig` scripts a start failure. The forge Conformance contracts and
   the Driver Conformance kit run with the host inside each
   (`launcher-go-seam-test`).
+- **Escape tests.** WASI already keeps a Connector from files, sockets and
+  the environment, so the second layer is tested with a `connector-host` built
+  under the `escapeprobe` tag (`.#connector-host-escapeprobe`, and the
+  `.#connector-sandbox-image-escapeprobe` image around it). Its test-only
+  `spindrift_escape` host module reads a path, dials a socket or dumps the
+  environment from the host process, standing in for a wazero escape. The
+  integration-tagged tests in `internal/runner/{bwrap,oci}` start it in a
+  real sandbox and assert the operator's home, SSH keys, runtime control
+  sockets, the rest of `/nix/store`, every network target and every Launcher
+  variable are out of reach, and that an undeclared route is refused into the
+  Launcher's audit log; a control in `runnertest/escape` proves the same
+  probes succeed unsandboxed. The
+  `connector-host-escapeprobe-absent-from-release` check keeps the tag out of
+  the Launcher, the daemon, the Box's binaries, the release `connector-host`
+  and the release sandbox image.
 
 #### Pinned wazero
 

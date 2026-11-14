@@ -148,6 +148,11 @@ The tests that run a Connector in a child `connector-host` take its binary from
 `SPINDRIFT_CONNECTOR_HOST`, falling back to `nix build .#connector-host`; they
 fail, not skip, when neither works.
 
+The Connector sandbox escape tests (issue #7017) take the escape-probe
+connector-host from `SPINDRIFT_CONNECTOR_HOST_ESCAPEPROBE`, falling back to
+`nix build` of its flake attr. Unlike the tests above they skip when nix is
+absent, except on bwrap under `SPINDRIFT_REQUIRE_BWRAP`, where they fail.
+
 The `piseam` package (issue #5478) runs the locked `pi` binary against a stub
 OpenAI-compatible Provider. It takes `pi` from `SPINDRIFT_PI_BIN`, else builds
 `nixpkgs#pi-coding-agent` from the flake's locked inputs, and skips when
