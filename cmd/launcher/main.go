@@ -17,6 +17,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/console"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
@@ -2416,12 +2417,27 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return cmdCompleteIssues()
 	}
 	if handler, ok := verbHandlers[verb]; ok {
-		return handler(rest, stdout, stderr)
+		return sandboxVerdict(handler(rest, stdout, stderr), stderr)
 	}
 	// Unrecognized subcommand prints help rather than dispatching (issue #555).
 	fmt.Fprintf(stderr, "unknown subcommand: %s\n\n", verb)
 	printHelp(stderr)
 	return 1
+}
+
+// sandboxVerdict fails a run that ended well (it dispatched, or found nothing
+// to dispatch) but whose Connector sandbox did not start. A load site is free
+// to swallow that error (a read shadow only dirties its summary, a probe falls
+// to its next answer), so the run's result is not left to them.
+func sandboxVerdict(code int, stderr io.Writer) int {
+	switch exitcode.Dispatch(code) {
+	case exitcode.Dispatched, exitcode.QueueEmpty, exitcode.NoneDispatchable:
+		if err := connectorsandbox.Failure(); err != nil {
+			fmt.Fprintf(stderr, "%s\n", err)
+			return int(exitcode.Failed)
+		}
+	}
+	return code
 }
 
 func main() {

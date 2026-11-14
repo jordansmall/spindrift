@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"os"
 
-	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 )
@@ -166,7 +166,7 @@ func loader(name, module string) func() (driverkit.Strategy, error) {
 		if err != nil {
 			return driverkit.Strategy{}, fmt.Errorf("read module: %w", err)
 		}
-		c, err := connectorhost.Load(context.Background(), wasm)
+		c, err := connectorsandbox.Load(context.Background(), wasm)
 		if err != nil {
 			return driverkit.Strategy{}, fmt.Errorf("load module %s: %w", module, err)
 		}

@@ -1,15 +1,19 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorsandbox"
+	"spindrift.dev/launcher/internal/connectorsandbox/sandbox"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/ecosystem"
@@ -116,6 +120,14 @@ func bootstrapWith(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descri
 		}()
 	}
 
+	// Ahead of the gate walk, whose token gates already load a Connector.
+	closeSandbox := installConnectorSandbox(seedConfig, pwd)
+	defer func() {
+		if err != nil {
+			closeSandbox()
+		}
+	}()
+
 	gc, err := newGatedContext(stdout, kind, selfContained)
 	if err != nil {
 		return nil, err
@@ -200,6 +212,7 @@ func bootstrapWith(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descri
 		cleanup: func() {
 			f.Cleanup()
 			shadows.close()
+			closeSandbox()
 			removeScratchMirrors()
 			// Held for the whole run rather than only the seed, so a
 			// concurrent process cannot seed or mount the same Accumulation
@@ -370,4 +383,65 @@ func researchLaunchStack(lc *launchContext) (forge.IssueTracker, *dispatch.Facto
 		return nil, nil, nil, err
 	}
 	return it, f, verdict, nil
+}
+
+// lazyRunner is the Connector sandbox's Starter: it builds its runner on the
+// first start, so a run that loads no Connector builds none. It cannot borrow
+// bootstrap's own runner, which is built after the token gates that already
+// load Connectors.
+type lazyRunner struct {
+	build func() (runner.Runner, error)
+	once  sync.Once
+	r     runner.Runner
+	err   error
+}
+
+func (l *lazyRunner) get() (runner.Runner, error) {
+	l.once.Do(func() { l.r, l.err = l.build() })
+	return l.r, l.err
+}
+
+func (l *lazyRunner) StartConnectorSandbox(name string) (runner.ConnectorSandbox, error) {
+	r, err := l.get()
+	if err != nil {
+		return runner.ConnectorSandbox{}, err
+	}
+	return r.StartConnectorSandbox(name)
+}
+
+func (l *lazyRunner) Kill(name string) error {
+	r, err := l.get()
+	if err != nil {
+		return err
+	}
+	return r.Kill(name)
+}
+
+// installConnectorSandbox makes every Connector this process hosts load into
+// one sandbox, under CONNECTOR_SANDBOX, and returns the func that stops it. The
+// install lasts the process, so sandboxVerdict can still read a start failure
+// once the run has cleaned up.
+func installConnectorSandbox(c config, pwd string) (closeSandbox func()) {
+	if !c.ConnectorSandbox {
+		return func() {}
+	}
+	sb := sandbox.New(&lazyRunner{build: func() (runner.Runner, error) {
+		return runnerForKind(c, runnerConfig(c), pwd)
+	}}, connectorSandboxRunnerLabel(c))
+	connectorsandbox.Use(sb)
+	return func() { _ = sb.Close(context.Background()) }
+}
+
+// connectorSandboxRunnerLabel names the runner a Connector sandbox starts
+// through in a start error: the family, plus RUNTIME only when that family
+// serves it, so bwrap beside RUNTIME=podman is not named podman.
+func connectorSandboxRunnerLabel(c config) string {
+	family, err := runner.DescriptorFor(c.runnerKind)
+	if err != nil {
+		return c.runnerKind
+	}
+	if slices.Contains(family.Runtimes, c.runtime) && c.runtime != family.Name {
+		return fmt.Sprintf("%s (%s)", family.Name, c.runtime)
+	}
+	return family.Name
 }

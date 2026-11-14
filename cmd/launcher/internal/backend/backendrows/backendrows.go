@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
@@ -317,7 +318,7 @@ func Load(ctx context.Context, row Row, o Options) (*connectorhost.Connector, er
 	if err != nil {
 		return nil, fmt.Errorf("backend %q: read module: %w", row.Name, err)
 	}
-	return connectorhost.LoadNetwork(ctx, wasm, connectorhost.Network{
+	return connectorsandbox.LoadNetwork(ctx, wasm, connectorhost.Network{
 		Name:   row.Name,
 		Routes: row.Routes,
 		Authorize: func(r *http.Request) error {
