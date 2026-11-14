@@ -195,7 +195,7 @@ func TestNetworkFixtureSendFailureShowsTheGuestOnlyAFixedReason(t *testing.T) {
 func TestNetworkFixtureServesManyRequestsUnderTheMemoryCap(t *testing.T) {
 	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "scripted "+r.URL.Path) })
 	n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
-	c := loadNetWith(t, netLoaders["compiled"], fixture(t, "network.wasm"), n)
+	c := loadNetWith(t, netLoadersFor(t)["compiled"], fixture(t, "network.wasm"), n)
 	params := map[string]string{"url": b.URL + "/repos/x", "method": "GET"}
 	for i := range 400 {
 		var out fetched

@@ -458,6 +458,24 @@ let
     meta.license = lib.licenses.mit;
   };
 
+  # The out-of-process Connector host (issue #7013), a single static file so a
+  # sandbox binds one store path. CGO_ENABLED=0 makes that so: net and os/user
+  # would otherwise link the C resolver and libc dynamically. Same src and
+  # vendorHash as daemonBin; subPackages does not change the vendored set.
+  connectorHostBin = hostPkgs.buildGoModule {
+    pname = "connector-host";
+    version = spindriftVersion;
+    src = launcherModuleSrc;
+    vendorHash = buildConstants.launcherVendorHash;
+    subPackages = [ "connector-host" ];
+    env.CGO_ENABLED = 0;
+    doCheck = false;
+    meta = {
+      license = lib.licenses.mit;
+      mainProgram = "connector-host";
+    };
+  };
+
   # A revision-independent sibling of launcherBin (issue #2677, ADR 0043):
   # launcherBin bakes `-X main.revision`, so its store path moves on every
   # commit. Staleness detection (issue #1364) needs a hash stable across
@@ -469,12 +487,12 @@ let
 
   # The fileset is a directory-level approximation of the launcher's import
   # graph, not the graph itself: it subtracts the driver-exec, orchestrator,
-  # quickstart and daemon subtrees (each an independent `package main` the
-  # launcher never imports). internal/daemon stays in: `spindrift butler`
-  # imports it for the awake window's zone (issue #3879). A reviewer found 13
-  # directories included here that are outside the real import graph
-  # (internal/testutil, for one), so perturbing those still moves this outPath
-  # (issue #2677 review fix).
+  # quickstart, daemon and connector-host subtrees (each an independent
+  # `package main` the launcher never imports). internal/daemon stays in:
+  # `spindrift butler` imports it for the awake window's zone (issue #3879).
+  # A reviewer found 13 directories included here that are outside the real
+  # import graph (internal/testutil, for one), so perturbing those still moves
+  # this outPath (issue #2677 review fix).
   launcherCurrencyFileset =
     lib.fileset.difference
       (lib.fileset.unions [
@@ -488,6 +506,7 @@ let
           ../cmd/launcher/orchestrator
           ../cmd/launcher/quickstart
           ../cmd/launcher/daemon
+          ../cmd/launcher/connector-host
         ]
       );
 
@@ -525,6 +544,7 @@ in
     boxBin
     orchestratorBin
     daemonBin
+    connectorHostBin
     launcherModuleSrc
     launcherCurrencyFileset
     launcherCurrencyBin

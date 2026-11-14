@@ -61,7 +61,7 @@ func TestCallGuardsAgainstHostileGuest(t *testing.T) {
 		{"call loops", build(allocOff, respPtr, body(fnCall, append(loop, i64Const(0)...))), connectorhost.ErrBudget},
 		{"call grows memory past the cap", build(allocOff, respPtr, body(fnCall, append(grow(capPages+1), i64Const(respPtr)...))), connectorhost.ErrMemoryCap},
 	}
-	for engine, ld := range loaders {
+	for engine, ld := range loadersFor(t) {
 		t.Run(engine, func(t *testing.T) {
 			for _, tc := range tests {
 				t.Run(tc.name, func(t *testing.T) {

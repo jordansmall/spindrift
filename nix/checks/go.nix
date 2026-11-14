@@ -664,6 +664,11 @@ let
       fi
       ${goTestPrologueWith (vendorFor files)}
       export SPINDRIFT_CONNECTOR_FIXTURES_DIR=${fixtures.connectorWasm}
+      # Built here from the same trimmed source, not the connector-host package:
+      # that one's src is the whole module, so a Driver edit would move this
+      # derivation. cgo off, like the shipped binary.
+      CGO_ENABLED=0 go build -o "$TMPDIR/connector-host" ./connector-host
+      export SPINDRIFT_CONNECTOR_HOST="$TMPDIR/connector-host"
       go test ${corePkgs}
       touch $out
     '';
@@ -1388,3 +1393,17 @@ driverGoTests
   '';
 }
 // connectorGoChecks
+// pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+  # The Connector host is bound into a sandbox as one file (issue #7013), so a
+  # dynamic interpreter or library it needs would not be there.
+  connector-host-static =
+    pkgs.runCommand "connector-host-static" { nativeBuildInputs = [ pkgs.file ]; }
+      ''
+        desc=$(file -L ${fixtures.connectorHost}/bin/connector-host)
+        case "$desc" in
+          *"statically linked"* | *"static-pie linked"*) ;;
+          *) echo "connector-host is not a static binary: $desc" >&2; exit 1 ;;
+        esac
+        touch $out
+      '';
+}
