@@ -112,6 +112,9 @@ func (e *wasmEngine) load(ctx context.Context, wasm []byte) error {
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, e.rt); err != nil {
 		return err
 	}
+	if err := instantiateEscape(ctx, e.rt); err != nil {
+		return err
+	}
 	if e.host != nil {
 		if err := e.instantiateNetwork(ctx); err != nil {
 			return err
