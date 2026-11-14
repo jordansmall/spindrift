@@ -179,7 +179,7 @@ var (
 
 // load starts a backend and loads the fixture wasm file against it, declaring
 // one Route per method over the repository's subtree.
-func load(t *testing.T, eng engine, bare, wasmFile string, methods []string) *stack {
+func load(t *testing.T, eng Engine, bare, wasmFile string, methods []string) *stack {
 	t.Helper()
 	b := newBackend(t, bare)
 	dir, err := fixturebuild.ConnectorDir()
@@ -228,7 +228,7 @@ type base struct {
 	Credential gitexec.Credential
 
 	wasm        string
-	eng         engine
+	eng         Engine
 	methods     []string
 	readOnlyBox bool
 	target      connectorforge.Target
@@ -247,7 +247,7 @@ type PlumbingCall struct {
 
 // newBase starts the backend, loads the fixture Connector wasm file and
 // composes the forge with the default, valid remote.
-func newBase(t *testing.T, eng engine, wasm string, methods []string, readOnly bool) *base {
+func newBase(t *testing.T, eng Engine, wasm string, methods []string, readOnly bool) *base {
 	t.Helper()
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
 	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")

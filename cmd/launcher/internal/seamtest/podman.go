@@ -6,7 +6,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"syscall"
+	"testing"
+
+	"spindrift.dev/launcher/internal/fixturebuild"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // PodmanConfig is the podman fake's JSON config.
@@ -18,6 +24,15 @@ type PodmanConfig struct {
 	// Runs scripts the `run` invocations in order; runs past the end behave
 	// as the zero PodmanRun (exit 0, no output).
 	Runs []PodmanRun `json:"runs"`
+	// ConnectorHost is the connector-host binary a Connector sandbox `run`
+	// execs in place of an image's entrypoint, so the fake process is the host
+	// and the launcher's pipes reach it unchanged. Sandbox runs never consume
+	// Runs.
+	ConnectorHost string `json:"connector_host"`
+	// RefuseSandbox, when set, makes a Connector sandbox `run` exit 125 (the
+	// status a container runtime gives a run it could not start) with this
+	// message on stderr, scripting a sandbox start failure.
+	RefuseSandbox string `json:"refuse_sandbox"`
 }
 
 // PodmanRun is one scripted `podman run`.
@@ -80,9 +95,12 @@ func podmanFake(tool string, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "Error: no such object: %q\n", name)
 		return 1
 	case "run":
+		if isSandboxRun(args) {
+			return sandboxRun(tool, cfg, args, stderr)
+		}
 		n := 0
 		for _, p := range prior {
-			if len(p) > 0 && p[0] == "run" {
+			if len(p) > 0 && p[0] == "run" && !isSandboxRun(p) {
 				n++
 			}
 		}
@@ -155,4 +173,68 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.WriteFile(dst, b, 0o644)
+}
+
+// isSandboxRun reports whether a `run` argv starts a Connector sandbox: the
+// runner names every one with ConnectorSandboxPrefix, which no Box carries.
+func isSandboxRun(args []string) bool {
+	return slices.ContainsFunc(longFlags(args, "name"), func(n string) bool { return strings.HasPrefix(n, runner.ConnectorSandboxPrefix) })
+}
+
+// sandboxRun refuses a sandbox whose argv weakens its isolation, then becomes
+// the connector-host. It returns only on a refusal.
+func sandboxRun(tool string, cfg PodmanConfig, args []string, stderr io.Writer) int {
+	if problems := runner.SandboxViolations(args); len(problems) > 0 {
+		fmt.Fprintf(stderr, "%s fake: Connector sandbox isolation: %s\n", tool, strings.Join(problems, "; "))
+		return 1
+	}
+	if cfg.RefuseSandbox != "" {
+		fmt.Fprintln(stderr, cfg.RefuseSandbox)
+		return 125
+	}
+	if cfg.ConnectorHost == "" {
+		fmt.Fprintf(stderr, "%s fake: a Connector sandbox run needs connector_host in the config\n", tool)
+		return fakeConfigExit
+	}
+	err := syscall.Exec(cfg.ConnectorHost, []string{"connector-host"}, os.Environ())
+	fmt.Fprintf(stderr, "%s fake: exec %s: %v\n", tool, cfg.ConnectorHost, err)
+	return 1
+}
+
+// longFlags is every value of the long flag --name, in either `--name=v` or
+// `--name v` form.
+func longFlags(args []string, name string) []string {
+	var vs []string
+	for i, a := range args {
+		if v, ok := strings.CutPrefix(a, "--"+name+"="); ok {
+			vs = append(vs, v)
+		} else if a == "--"+name && i+1 < len(args) {
+			vs = append(vs, args[i+1])
+		}
+	}
+	return vs
+}
+
+// UsePodman makes `podman` on PATH this fake, scripted by cfg, until the test
+// ends, and returns the file its argvs are recorded to (cfg.Record, or a fresh
+// one). The calling test binary must run seamtest.Main in TestMain. An empty
+// cfg.ConnectorHost is filled with the connector-host fixturebuild resolves, so
+// a sandbox run reaches the real host.
+func UsePodman(t testing.TB, cfg PodmanConfig) (record string) {
+	t.Helper()
+	if cfg.Record == "" {
+		cfg.Record = filepath.Join(t.TempDir(), "podman.jsonl")
+	}
+	if cfg.ConnectorHost == "" {
+		host, err := fixturebuild.ConnectorHost()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.ConnectorHost = host
+	}
+	for k, v := range WriteFakeConfig(t, "podman", cfg) {
+		t.Setenv(k, v)
+	}
+	t.Setenv("PATH", InstallFakes(t, "podman")+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return cfg.Record
 }

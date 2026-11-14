@@ -1306,6 +1306,11 @@ driverGoTests
         ${connectorFragmentTrees}
         chmod -R +w src
         ${goTestPrologue}
+        # The Connector sandbox seam tests run the real host inside the podman
+        # fake, and load the fixture Connectors into it.
+        export SPINDRIFT_CONNECTOR_FIXTURES_DIR=${fixtures.connectorWasm}
+        CGO_ENABLED=0 go build -o "$TMPDIR/connector-host" ./connector-host
+        export SPINDRIFT_CONNECTOR_HOST="$TMPDIR/connector-host"
         files=$(grep -rl --include='*_test.go' --exclude-dir=vendor '^//go:build integration' . || true)
         if [ -z "$files" ]; then
           echo "no integration-tagged test files found" >&2

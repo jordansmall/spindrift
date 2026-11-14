@@ -3,10 +3,14 @@ package seamtest
 import (
 	"bytes"
 	"encoding/base64"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // runPodman points the fake at cfg, runs it once with args and returns its
@@ -164,5 +168,81 @@ func TestPodmanRunFailsWhenAFixtureCannotBeCopied(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "box fake: copy") {
 		t.Errorf("stderr = %q, want the copy error", stderr)
+	}
+}
+
+// sandboxArgv is the isolation argv the OCI runner renders for a Connector
+// sandbox, written out here so a drift in either side fails a test.
+func sandboxArgv(extra ...string) []string {
+	args := []string{"run", "-i", "--rm", "--name", runner.ConnectorSandboxPrefix + "1", "--network=none",
+		"--cap-drop=all", "--security-opt=no-new-privileges", "--read-only", "--pids-limit=128", "--memory=512m"}
+	return append(append(args, extra...), "spindrift-connector-sandbox:x")
+}
+
+func TestPodmanSandboxRunRefusesWeakenedIsolation(t *testing.T) {
+	for name, argv := range map[string][]string{
+		"tty":        sandboxArgv("-t"),
+		"tty long":   sandboxArgv("--tty"),
+		"tty merged": append([]string{"run", "-it"}, sandboxArgv()[2:]...),
+		"env":        sandboxArgv("-e", "A=b"),
+		"env long":   sandboxArgv("--env=A=b"),
+		"env file":   sandboxArgv("--env-file", "f"),
+		"volume":     sandboxArgv("-v", "/a:/b"),
+		"mount":      sandboxArgv("--mount", "type=bind"),
+		"tmpfs":      sandboxArgv("--tmpfs", "/tmp"),
+		"add-host":   sandboxArgv("--add-host", "h:1.2.3.4"),
+		"privileged": sandboxArgv("--privileged"),
+		"cap-add":    sandboxArgv("--cap-add=NET_ADMIN"),
+		"network":    sandboxArgv("--network=host"),
+		"no -i":      slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "-i" }),
+		"no --rm":    slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "--rm" }),
+		"no none":    slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "--network=none" }),
+		"no ro":      slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "--read-only" }),
+		"no caps":    slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "--cap-drop=all" }),
+		"no nnp":     slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "--security-opt=no-new-privileges" }),
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := PodmanConfig{Record: filepath.Join(t.TempDir(), "rec"), ConnectorHost: "/nonexistent/host"}
+			code, out, stderr := runPodman(t, cfg, argv...)
+			if code == 0 || out != "" || !strings.Contains(stderr, "isolation") {
+				t.Errorf("exit %d, stdout %q, stderr %q; want a non-zero exit and an isolation message", code, out, stderr)
+			}
+		})
+	}
+}
+
+func TestPodmanSandboxRunCanBeRefused(t *testing.T) {
+	cfg := PodmanConfig{Record: filepath.Join(t.TempDir(), "rec"), ConnectorHost: "/nonexistent/host",
+		RefuseSandbox: "Error: cannot start the sandbox"}
+	code, out, stderr := runPodman(t, cfg, sandboxArgv()...)
+	if code != 125 || out != "" || !strings.Contains(stderr, "cannot start the sandbox") {
+		t.Errorf("exit %d, stdout %q, stderr %q; want 125 and the scripted message", code, out, stderr)
+	}
+}
+
+func TestPodmanSandboxRunNeedsAHostPath(t *testing.T) {
+	code, _, stderr := runPodman(t, PodmanConfig{Record: filepath.Join(t.TempDir(), "rec")}, sandboxArgv()...)
+	if code != fakeConfigExit || !strings.Contains(stderr, "connector_host") {
+		t.Errorf("exit %d, stderr %q; want %d naming connector_host", code, stderr, fakeConfigExit)
+	}
+}
+
+func TestPodmanSandboxRunsDoNotConsumeTheBoxScript(t *testing.T) {
+	rec := filepath.Join(t.TempDir(), "rec")
+	cfg := PodmanConfig{Record: rec, ConnectorHost: "/nonexistent/host", RefuseSandbox: "no",
+		Runs: []PodmanRun{{Exit: 3}}}
+	runPodman(t, cfg, sandboxArgv()...)
+	if code, _, _ := runPodman(t, cfg, "run", "--name", "box"); code != 3 {
+		t.Errorf("first Box run exit %d; want the scripted 3", code)
+	}
+}
+
+func TestUsePodmanPutsTheFakeOnPATH(t *testing.T) {
+	rec := UsePodman(t, PodmanConfig{ImagePresent: true, RefuseSandbox: "no"})
+	if err := exec.Command("podman", "image", "exists", "img").Run(); err != nil {
+		t.Fatalf("podman image exists: %v", err)
+	}
+	if got := ReadRecord(t, rec); len(got) != 1 || got[0][0] != "image" {
+		t.Errorf("record = %v; want the one image call", got)
 	}
 }

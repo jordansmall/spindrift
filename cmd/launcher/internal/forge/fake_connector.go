@@ -369,3 +369,28 @@ func (c *core) call(method, path string, out any, serve func() (any, error)) err
 	}
 	return json.Unmarshal([]byte(got.Body), out)
 }
+
+// SwapFakeLoader loads the Fake's Connector through load instead of in-process,
+// for a test that runs the contracts over another engine. The returned restore
+// closes that Connector and puts the previous loader back. load serves every
+// reload too, since a failed call retires the Connector. The seam is
+// package-global, so no two swaps may overlap.
+func SwapFakeLoader(load func(wasm []byte, n connectorhost.Network) (*connectorhost.Connector, error)) (restore func(), err error) {
+	c, err := loadFakeConnectorVia(load)
+	if err != nil {
+		return nil, err
+	}
+	seamMu.Lock()
+	savedConn, savedLoad := seamConn, fakeLoad
+	seamConn, fakeLoad = c, load
+	seamMu.Unlock()
+	return func() {
+		seamMu.Lock()
+		cur := seamConn
+		seamConn, fakeLoad = savedConn, savedLoad
+		seamMu.Unlock()
+		if cur != nil {
+			_ = cur.Close(context.Background())
+		}
+	}, nil
+}
