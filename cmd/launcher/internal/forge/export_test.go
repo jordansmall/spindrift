@@ -15,24 +15,11 @@ import (
 // with one that calls it.
 func UseRemoteSeam(t *testing.T, newCmd func() *exec.Cmd) {
 	t.Helper()
-	remote := func(wasm []byte, n connectorhost.Network) (*connectorhost.Connector, error) {
+	restore, err := SwapFakeLoader(func(wasm []byte, n connectorhost.Network) (*connectorhost.Connector, error) {
 		return connectorhost.LoadNetworkRemote(context.Background(), wasm, n, newCmd())
-	}
-	c, err := loadFakeConnectorVia(remote)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	seamMu.Lock()
-	savedConn, savedLoad := seamConn, fakeLoad
-	seamConn, fakeLoad = c, remote
-	seamMu.Unlock()
-	t.Cleanup(func() {
-		seamMu.Lock()
-		cur := seamConn
-		seamConn, fakeLoad = savedConn, savedLoad
-		seamMu.Unlock()
-		if cur != nil {
-			_ = cur.Close(context.Background())
-		}
-	})
+	t.Cleanup(restore)
 }
