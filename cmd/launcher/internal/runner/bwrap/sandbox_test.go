@@ -74,14 +74,21 @@ func startableSandbox(t *testing.T, child func(args []string) *exec.Cmd) (*bwrap
 
 type bwrapSandboxHarness struct{}
 
-func (bwrapSandboxHarness) Sandbox(t *testing.T, _ string) runner.Runner {
+func (bwrapSandboxHarness) Sandbox(t *testing.T, name string) runner.Runner {
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	a, _ := startableSandbox(t, func([]string) *exec.Cmd { return exec.Command(self, hostModeArg) })
-	t.Cleanup(func() { _ = a.Kill(runner.ConnectorSandboxPrefix + "contract") })
+	t.Cleanup(func() { _ = a.Kill(name) })
 	return a
+}
+
+// Fresh is a second adapter over the same cgroup tree: it tracks no process.
+func (bwrapSandboxHarness) Fresh(t *testing.T) runner.Runner { return sandboxAdapter(t) }
+
+func TestBwrap_ConnectorSandboxOrphan(t *testing.T) {
+	contract.SandboxOrphan(t, bwrapSandboxHarness{})
 }
 
 func TestBwrap_ConnectorSandboxLifecycle(t *testing.T) {
@@ -216,5 +223,66 @@ func TestStartConnectorSandbox_CgroupUsesFixedCaps(t *testing.T) {
 	}
 	if string(mem) != "536870912" {
 		t.Errorf("memory.max = %q, want 536870912 (512 MiB)", mem)
+	}
+}
+
+// An empty leftover dir under an earlier anchor must not hide the live cgroup
+// of the same name, or Kill would signal nothing and the orphan reap would
+// report a sandbox it never stopped.
+func TestKillCgroup_TargetsLiveDirNotEmptyLeftover(t *testing.T) {
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+	stale := filepath.Join(cgroupFSRoot, "a-anchor", "spindrift-orphan")
+	live := filepath.Join(cgroupFSRoot, "b-anchor", "spindrift-orphan")
+	for _, dir := range []string{stale, live} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// cgroup.kill must pre-exist: killCgroup opens it without O_CREATE.
+		if err := os.WriteFile(filepath.Join(dir, "cgroup.kill"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(live, "cgroup.procs"), []byte("4242\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := (&bwrapAdapter{}).Kill("orphan"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(live, "cgroup.kill")); string(got) != "1" {
+		t.Errorf("live cgroup.kill = %q, want 1", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(stale, "cgroup.kill")); len(got) != 0 {
+		t.Errorf("empty leftover cgroup.kill = %q, want untouched", got)
+	}
+}
+
+// A Box a previous Launcher started has no tracked process, so Kill must reach
+// it through its cgroup, as the OCI runners kill by name.
+func TestKill_UntrackedBoxNameKillsItsCgroup(t *testing.T) {
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+	dir := filepath.Join(cgroupFSRoot, "anchor", "spindrift-agent-issue-42")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// cgroup.kill must pre-exist: killCgroup opens it without O_CREATE.
+	for file, body := range map[string]string{"cgroup.kill": "", "cgroup.procs": "4242\n"} {
+		if err := os.WriteFile(filepath.Join(dir, file), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := (&bwrapAdapter{}).Kill("agent-issue-42"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "cgroup.kill")); string(got) != "1" {
+		t.Errorf("cgroup.kill = %q, want 1", got)
 	}
 }

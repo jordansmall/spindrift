@@ -97,9 +97,20 @@ func TestSandboxArgsIgnoreBoxNetwork(t *testing.T) {
 }
 
 // ociSandboxHarness runs the real connector-host as the fake CLI's `run`.
-type ociSandboxHarness struct{}
+type ociSandboxHarness struct{ script string }
 
-func (ociSandboxHarness) Sandbox(t *testing.T, name string) runner.Runner {
+// Fresh is a second adapter over the same fake CLI, whose state files stand in
+// for the container runtime's.
+func (h *ociSandboxHarness) Fresh(t *testing.T) runner.Runner {
+	t.Helper()
+	r, err := New(runner.Config{Runtime: h.script}, sandboxArtifacts(), runnertest.Lookup(nil), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func (h *ociSandboxHarness) Sandbox(t *testing.T, name string) runner.Runner {
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -117,15 +128,16 @@ func (ociSandboxHarness) Sandbox(t *testing.T, name string) runner.Runner {
 		},
 		"ps": {Stdout: name, Shell: live + " || exit 0"},
 	})
-	r, err := New(runner.Config{Runtime: script}, sandboxArtifacts(), runnertest.Lookup(nil), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return r
+	h.script = script
+	return h.Fresh(t)
 }
 
 func TestOCI_ConnectorSandboxLifecycle(t *testing.T) {
-	contract.SandboxLifecycle(t, ociSandboxHarness{})
+	contract.SandboxLifecycle(t, &ociSandboxHarness{})
+}
+
+func TestOCI_ConnectorSandboxOrphan(t *testing.T) {
+	contract.SandboxOrphan(t, &ociSandboxHarness{})
 }
 
 // serveHostMode is TestMain's branch that turns the test binary into the host.

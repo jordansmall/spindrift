@@ -1170,14 +1170,17 @@ func (a *bwrapAdapter) beginProvisioning(name string) (handOff func(proc *os.Pro
 func (a *bwrapAdapter) RemoveHostTree(path string) error { return os.RemoveAll(path) }
 
 // Kill sends SIGKILL to name's tracked live process, if Run has one under that
-// name. A miss (already exited, or never launched) is not an error: Terminate's
-// reap step is best-effort by design.
+// name, and otherwise to everything in name's live cgroup, so a Box or
+// Connector sandbox a previous launcher started is killed by name as the OCI
+// runners do (the orphan sweep, Console/Reclaim's Terminate). A miss
+// (already exited, or never launched) is not an error: Terminate's reap step
+// is best-effort by design.
 func (a *bwrapAdapter) Kill(name string) error {
 	a.mu.Lock()
 	proc := a.running[name]
 	a.mu.Unlock()
 	if proc == nil {
-		return nil
+		return killCgroup(name)
 	}
 	// The process can finish between the map lookup above and this call, so
 	// os.ErrProcessDone means it is already gone: a miss, not an error.
@@ -1185,6 +1188,47 @@ func (a *bwrapAdapter) Kill(name string) error {
 		return err
 	}
 	return nil
+}
+
+// killCgroup SIGKILLs every process in each live cgroup liveCgroups finds for
+// name, so an empty leftover dir under another anchor cannot stand in for the
+// live one. cgroup.kill (Linux 5.14+) also takes descendants that moved or
+// forked meanwhile; without it the pids listed in cgroup.procs are signalled
+// one by one. No live cgroup is a miss. Failures are collected rather than
+// returned at once, so one unkillable pid does not spare the rest; a failed
+// cgroup.kill write is reported only if the fallback also failed.
+func killCgroup(name string) error {
+	var errs []error
+	for _, cg := range liveCgroups() {
+		if cg.name != name {
+			continue
+		}
+		var killErr error
+		// Opened without O_CREATE: where cgroup.kill is absent (older kernels, a
+		// tmp-dir stand-in) WriteFile would create a regular file and report success.
+		if f, err := os.OpenFile(filepath.Join(cg.dir, "cgroup.kill"), os.O_WRONLY, 0); err == nil {
+			_, err = f.WriteString("1")
+			killErr = errors.Join(err, f.Close())
+			if killErr == nil {
+				continue
+			}
+		}
+		var pidErrs []error
+		for _, field := range strings.Fields(cg.procs) {
+			pid, err := strconv.Atoi(field)
+			if err != nil || pid <= 1 {
+				continue
+			}
+			if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+				pidErrs = append(pidErrs, err)
+			}
+		}
+		if len(pidErrs) > 0 {
+			errs = append(errs, killErr)
+			errs = append(errs, pidErrs...)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // IsRunning reports whether name has a live per-Box cgroup, answered from
@@ -1201,10 +1245,24 @@ func (a *bwrapAdapter) IsRunning(name string) bool {
 // ListRunning enumerates every spindrift-* cgroup dir anywhere under
 // cgroupFSRoot and reports the live subset, so Console startup orphan detection
 // (issue #651) finds Boxes started by a prior launcher invocation (issue #2669).
-// Liveness is read from each candidate's own cgroup.procs, so a leftover empty
-// dir is excluded. No cgroup v2 tree yields a nil slice and no error.
+// No cgroup v2 tree yields a nil slice and no error.
 func (a *bwrapAdapter) ListRunning() ([]string, error) {
 	var names []string
+	for _, cg := range liveCgroups() {
+		names = append(names, cg.name)
+	}
+	return names, nil
+}
+
+// liveCgroup is one per-Box cgroup dir whose cgroup.procs was non-empty, with
+// the pids read from it.
+type liveCgroup struct{ name, dir, procs string }
+
+// liveCgroups walks cgroupFSRoot for spindrift-* dirs and returns those whose
+// own cgroup.procs is non-empty, so a leftover empty dir is excluded. It is the
+// one lookup behind ListRunning, IsRunning and killCgroup.
+func liveCgroups() []liveCgroup {
+	var live []liveCgroup
 	_ = filepath.WalkDir(cgroupFSRoot, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip this entry, keep walking the rest of the tree
@@ -1221,11 +1279,11 @@ func (a *bwrapAdapter) ListRunning() ([]string, error) {
 		}
 		procs, err := os.ReadFile(filepath.Join(path, "cgroup.procs"))
 		if err == nil && len(strings.TrimSpace(string(procs))) > 0 {
-			names = append(names, name)
+			live = append(live, liveCgroup{name: name, dir: path, procs: string(procs)})
 		}
 		return fs.SkipDir // box cgroup dirs are leaves; no need to descend further
 	})
-	return names, nil
+	return live
 }
 
 // bwrapBuildAdapter implements Runner for the `launcher build` bwrap path.
