@@ -147,12 +147,12 @@ The question was grilled on 2026-11-09. Specs #6750–#6759 carry the work.
 
     Before any third-party Connector can run, the Connector host moves into a
     **Connector sandbox**: an empty container started by the same runner that
-    starts Boxes, with no mounts, no network and no credentials. On macOS that
-    means a container in the runner's VM, not a weaker process sandbox.
-    `http_request` crosses back to the Launcher over the Launcher socket
-    transport (ADR 0052), and the Launcher still checks routes, attaches
-    credentials and audits. The protocol does not change, so Connectors do not
-    notice.
+    starts Boxes, with no mounts but the host binary, no network and no
+    credentials. On macOS that means a container in the runner's VM, not a weaker
+    process sandbox. `http_request` crosses back to the Launcher over the
+    sandbox's attached stdio (see the #7013 amendment), and the Launcher still
+    checks routes, attaches credentials and audits. The protocol does not
+    change, so Connectors do not notice.
 
 ### Layout evidence
 
@@ -670,3 +670,25 @@ Driver Connectors carry the mark: Backend Connectors such as `github` and
 
 Decision 1 stands: trust no one, first-party included. The mark is a placement
 rule, not trust.
+
+## Amendment (issue #7013): the sandbox transport is stdio, and modules arrive over the pipe
+
+Decision 14 named the Launcher socket (ADR 0052) as the way `http_request`
+crosses back out of the Connector sandbox. That is replaced by the sandbox's
+attached stdio. A socket needs a bind mount, and its TCP fallback (macOS
+Docker) needs a container network, so either would break the sandbox's "no
+mounts, no network" promise. Stdio rides the container runtime's own client
+connection, so it works unchanged on podman, docker, nerdctl, bwrap and inside
+a macOS runner VM. Checked on podman and bwrap: 5 MB round-tripped
+byte-identical with `--network=none` and `--unshare-all`.
+
+The host is the `connector-host` binary, a static cgo-off build. The Launcher
+starts it and speaks length-prefixed frames on its stdin and stdout; stderr
+carries logs only. The Launcher sends the module bytes over that pipe, and the
+host never reads a module path, so the sandbox holds only the read-only host
+binary and needs no module mounts. Every `http_request` goes back over the same
+pipe to the Launcher's Host-call handler, so Routes, credentials, audit and
+output validation stay in the Launcher and the host never sees a credential.
+Named errors survive the wire. The host exits on stdin EOF. The container
+itself comes in a later ticket of spec #6763; until then the host runs as a
+plain child process of the Launcher.

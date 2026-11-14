@@ -3443,9 +3443,10 @@ indirect-only requirement, or a `replace` or `exclude` that names it.
   `go mod tidy` in `cmd/launcher`, refresh the vendor hashes in
   `lib/build-constants.nix` (each `*VendorHash`: set it to `lib.fakeHash`,
   build, copy the hash Nix reports), and run the gate.
-- **Fuzzing the host.** Four targets in `cmd/launcher/internal/connectorhost`
-  cover what the host takes from a guest; run them after bumping the pin,
-  since wazero decodes and compiles every module the host loads.
+- **Fuzzing the host.** Six targets in `cmd/launcher/internal/connectorhost`
+  cover what the host takes from a guest and what crosses the out-of-process
+  pipe; run them after bumping the pin, since wazero decodes and compiles every
+  module the host loads.
   `FuzzHandshake`, `FuzzCall` and `FuzzStreamFilterResult` (`fuzz_test.go`) feed
   the handshake result, `connector_call` responses, and the base64 `data` a
   guest stream filter returns (it must decode to exactly those bytes or fail
@@ -3459,6 +3460,13 @@ indirect-only requirement, or a `replace` or `exclude` that names it.
   `go test ./internal/connectorhost/ -run '^$' -fuzz '^FuzzLoad$' -fuzzminimizetime=0 -parallel=4`
   from `cmd/launcher` with that variable set; keep `-parallel` low on
   many-core hosts.
+  `FuzzServe` and `FuzzRemoteReply` (`wire_fuzz_test.go`) fuzz both ends of the
+  `connector-host` frame stream. `FuzzServe` feeds the host arbitrary bytes as
+  the Launcher's stream: it must end the serve without panicking or hanging, and
+  write back only whole frames the Launcher can decode. `FuzzRemoteReply` feeds
+  the Launcher arbitrary bytes as a hostile host's reply to a load, handshake or
+  call: an answer must pass the output checks, and a failure must name its
+  sentinel. Their seeds run in the normal `go test` lane.
 
 ### Targeting repos that define their own devShell toolchain
 
