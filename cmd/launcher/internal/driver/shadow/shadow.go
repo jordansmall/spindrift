@@ -2,7 +2,8 @@
 // native one and reports where they disagree, so a Connector port can be
 // trusted before it replaces the native Driver. The native Strategy stays
 // authoritative: nothing here returns a result a caller could use in its place,
-// and no failure of the Connector escapes Run.
+// and no failure of the Connector escapes Run. The shadow decodes the log in
+// batches, one Connector call each; lines are still compared one at a time.
 package shadow
 
 import (
@@ -69,6 +70,14 @@ func (r *run) finish() {
 	r.Recorder.Finish()
 }
 
+// flushBytes bounds the buffered line bytes before the shadow decodes a batch:
+// enough to amortise the per-call fixed cost over hundreds of lines, small
+// enough to bound memory and the time between stop() checks. A deadline or
+// Connector failure therefore leaves up to about one batch of decoded lines
+// uncompared, and the "deadline exceeded after N lines" count undercounts by
+// as much. A var for tests.
+var flushBytes = 1 << 20
+
 // compare runs the three checks. failed reports the Connector's fatal failure;
 // that and ctx ending both stop the run, since a dead Connector's answers say
 // nothing about its code.
@@ -86,30 +95,59 @@ func (r *run) compare(ctx context.Context, shadow driverkit.Strategy, failed fun
 		}
 		return false
 	}
-	nativeDec, shadowDec := r.native.NewDecoder(), shadow.NewDecoder()
-	lineNo := 0
+	nativeDec, shadowDec := r.native.NewDecoder(), shadow.BatchDecoder()
+	type numbered struct {
+		no   int
+		line string
+	}
+	var batch []numbered
+	batchBytes := 0
 	stopped := false
-	// The same scan the Pass-log readers use, so both see the lines they would.
-	err := driverkit.ScanLog(logPath, logscan.SkipOversized, func(line string) {
-		lineNo++
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		defer func() { batch, batchBytes = batch[:0], 0 }()
 		if stopped || stop() {
 			stopped = true
 			return
 		}
-		t0 := time.Now()
-		nativeEvs := nativeDec(line)
-		t1 := time.Now()
-		shadowEvs := shadowDec(line)
-		t2 := time.Now()
+		lines := make([]string, len(batch))
+		nativeEvs := make([][]driverkit.Event, len(batch))
+		var nativeSpent time.Duration
+		for i, l := range batch {
+			lines[i] = l.line
+			t := time.Now()
+			nativeEvs[i] = nativeDec(l.line)
+			nativeSpent += time.Since(t)
+		}
+		t := time.Now()
+		shadowEvs := shadowDec(lines)
+		shadowSpent := time.Since(t)
 		if stop() {
 			stopped = true
 			return
 		}
-		r.nativeTime += t1.Sub(t0)
-		r.shadowTime += t2.Sub(t1)
-		r.Sum.Compared++
-		r.Check("events", lineNo, line, eventsJSON(nativeEvs), eventsJSON(shadowEvs))
+		r.nativeTime += nativeSpent
+		r.shadowTime += shadowSpent
+		for i, l := range batch {
+			r.Sum.Compared++
+			r.Check("events", l.no, l.line, eventsJSON(nativeEvs[i]), eventsJSON(shadowEvs[i]))
+		}
+	}
+	lineNo := 0
+	// The same scan the Pass-log readers use, so both see the lines they would.
+	err := driverkit.ScanLog(logPath, logscan.SkipOversized, func(line string) {
+		lineNo++
+		if stopped {
+			return
+		}
+		batch = append(batch, numbered{lineNo, line})
+		if batchBytes += len(line); batchBytes >= flushBytes {
+			flush()
+		}
 	})
+	flush()
 	if stopped {
 		return
 	}

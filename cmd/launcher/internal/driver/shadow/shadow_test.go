@@ -162,6 +162,7 @@ func TestUnloadableConnectorYieldsOnlyASummary(t *testing.T) {
 // Driver whose decode traps, so the failure is injected through the seam
 // Run gives compare.
 func TestConnectorFailingMidRunStopsTheReplay(t *testing.T) {
+	batchOf1(t)
 	log := passLog(t, 20)
 	var failure error
 	shadow := nativeStrategy()
@@ -194,6 +195,7 @@ func TestConnectorFailingMidRunStopsTheReplay(t *testing.T) {
 // per-call budget, must not stretch the replay past the overall deadline: the
 // run ends as a summary error naming it.
 func TestDeadlineEndsTheReplayWithASummaryError(t *testing.T) {
+	batchOf1(t)
 	log := passLog(t, 1000)
 	shadow := nativeStrategy()
 	shadow.NewDecoder = func() driverkit.Decoder {
@@ -227,6 +229,7 @@ func TestDeadlineEndsTheReplayWithASummaryError(t *testing.T) {
 // surfaces as, and the replay returns without waiting out a call budget.
 func TestRealConnectorAbortedMidRunReportsTheDeadline(t *testing.T) {
 	const lines = 3000
+	batchOf1(t) // the abort comes from a divergence, so it must land before the log's end
 	log := passLog(t, lines)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -314,5 +317,139 @@ func nativeStrategy() driverkit.Strategy {
 			}
 		},
 		ResultEvent: func(text string) ([]byte, error) { return []byte("native " + text + "\n"), nil },
+	}
+}
+
+// batchShadow agrees with nativeStrategy except on the line containing
+// diverge, and records the size of each batch it is handed.
+func batchShadow(diverge string, sizes *[]int) driverkit.Strategy {
+	s := nativeStrategy()
+	s.Name = "shadow"
+	s.NewBatchDecoder = func() driverkit.BatchDecoder {
+		dec := nativeStrategy().NewDecoder()
+		return func(lines []string) [][]driverkit.Event {
+			*sizes = append(*sizes, len(lines))
+			out := make([][]driverkit.Event, len(lines))
+			for i, l := range lines {
+				out[i] = dec(l)
+				if diverge != "" && strings.Contains(l, diverge) {
+					out[i] = nil
+				}
+			}
+			return out
+		}
+	}
+	// A shadow that fell back to one line per call would never reach NewBatchDecoder.
+	s.NewDecoder = func() driverkit.Decoder { panic("shadow decoded per line") }
+	return s
+}
+
+func compareWith(t *testing.T, shadow driverkit.Strategy, log string) ([]hostop.ShadowDivergence, hostop.ShadowSummary) {
+	t.Helper()
+	var ops []hostop.SpindriftOp
+	r := &run{native: nativeStrategy(), Recorder: shadowrecord.New("native", func(op hostop.SpindriftOp) { ops = append(ops, op) })}
+	r.Sum.Loaded = true
+	r.compare(context.Background(), shadow, func() error { return nil }, log, 0)
+	r.finish()
+	return split(t, ops)
+}
+
+func TestShadowDecodesInBatchesAndComparesPerLine(t *testing.T) {
+	log := passLog(t, 30)
+	// passLog cycles three lines; the assistant ("working") lines are 2, 5, 8, ...
+	var sizes []int
+	divs, sum := compareWith(t, batchShadow(`"working"`, &sizes), log)
+
+	if len(sizes) != 1 || sizes[0] != 30 {
+		t.Errorf("batch sizes = %v, want one batch of all 30 lines", sizes)
+	}
+	if sum.Compared != 30 || sum.Error != "" {
+		t.Errorf("summary = %+v, want 30 compared, no error", sum)
+	}
+	var events []hostop.ShadowDivergence
+	for _, d := range divs {
+		if d.Check == "events" {
+			events = append(events, d)
+		}
+	}
+	if len(events) != 10 || sum.Diverged < 10 {
+		t.Fatalf("events divergences = %d (Diverged %d), want one per assistant line", len(events), sum.Diverged)
+	}
+	for i, d := range events {
+		if want := 2 + 3*i; d.LineNo != want || !strings.Contains(d.Line, `"working"`) {
+			t.Errorf("divergence %d at line %d %q, want line %d of the log", i, d.LineNo, d.Line, want)
+		}
+	}
+	if sum.NativeNsPerLine <= 0 || sum.ShadowNsPerLine <= 0 {
+		t.Errorf("ns per line = %d native, %d shadow, want both populated", sum.NativeNsPerLine, sum.ShadowNsPerLine)
+	}
+}
+
+func TestShadowFlushesABatchAtTheByteBound(t *testing.T) {
+	log := passLog(t, 30)
+	setFlushBytes(t, 200) // a handful of passLog lines
+
+	var sizes []int
+	divs, sum := compareWith(t, batchShadow(`"result"`, &sizes), log)
+
+	total := 0
+	for _, n := range sizes {
+		total += n
+	}
+	if len(sizes) < 3 || total != 30 {
+		t.Errorf("batch sizes = %v, want several batches covering 30 lines", sizes)
+	}
+	if sum.Compared != 30 {
+		t.Errorf("Compared = %d, want 30", sum.Compared)
+	}
+	// Result lines are every third line; a divergence must land on each, however the batches fall.
+	n := 0
+	for _, d := range divs {
+		if d.Check == "events" {
+			n++
+			if d.LineNo%3 != 0 {
+				t.Errorf("divergence at line %d, want a multiple of 3", d.LineNo)
+			}
+		}
+	}
+	if n != 10 {
+		t.Errorf("events divergences = %d, want 10", n)
+	}
+}
+
+// batchOf1 sets the byte bound so every line is its own batch: stop() is checked
+// per batch, so a test counting lines at the moment of a stop needs this grain.
+func batchOf1(t *testing.T) {
+	t.Helper()
+	setFlushBytes(t, 1)
+}
+
+func setFlushBytes(t *testing.T, n int) {
+	t.Helper()
+	old := flushBytes
+	flushBytes = n
+	t.Cleanup(func() { flushBytes = old })
+}
+
+// A failure inside a batch discards the whole batch: its lines are not compared.
+func TestConnectorFailingMidBatchComparesNoneOfIt(t *testing.T) {
+	log := passLog(t, 20)
+	var failure error
+	shadow := batchShadow("", new([]int))
+	shadow.NewBatchDecoder = func() driverkit.BatchDecoder {
+		return func(lines []string) [][]driverkit.Event {
+			failure = errors.New("connector trapped")
+			return make([][]driverkit.Event, len(lines))
+		}
+	}
+	var ops []hostop.SpindriftOp
+	r := &run{native: nativeStrategy(), Recorder: shadowrecord.New("native", func(op hostop.SpindriftOp) { ops = append(ops, op) })}
+	r.Sum.Loaded = true
+	r.compare(context.Background(), shadow, func() error { return failure }, log, 0)
+	r.finish()
+
+	divs, sum := split(t, ops)
+	if len(divs) != 0 || sum.Error != "connector trapped" || sum.Compared != 0 {
+		t.Errorf("summary = %+v, divergences = %v, want the trap and nothing compared", sum, divs)
 	}
 }
