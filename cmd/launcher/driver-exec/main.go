@@ -153,11 +153,12 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}, stdout)
 	if err != nil {
 		fmt.Fprintln(stderr, "driver-exec:", err)
+		runShadow(handoff.Driver, *logPath, 0, err, stdout)
 		return 1
 	}
 
 	exit := resolveExit(d, rc, *logPath)
-	runShadow(handoff.Driver, *logPath, rc, stdout)
+	runShadow(handoff.Driver, *logPath, rc, nil, stdout)
 	return exit
 }
 
@@ -175,8 +176,11 @@ const shadowBudget = 2 * time.Minute
 // stdout as spindrift ops. It never alters the run: the native result stays
 // authoritative, and a Connector that cannot be read, or a shadow row that was
 // skipped as malformed, is a summary, not an error. rawExit is the CLI's own
-// code, not the resolved one: the comparator resolves it once per side.
-func runShadow(name, logPath string, rawExit int, stdout io.Writer) {
+// code, not the resolved one: the comparator resolves it once per side. A
+// non-nil runErr means the run step failed and the log may be truncated: the
+// summary carries it as the error and nothing is replayed, so the Pass cannot
+// read as clean.
+func runShadow(name, logPath string, rawExit int, runErr error, stdout io.Writer) {
 	emit := func(op hostop.SpindriftOp) { fmt.Fprint(stdout, hostop.EncodeSpindriftOp(op)) }
 	resolved := driver.ResolveName(name)
 	if reason, ok := driver.ShadowSkipped(name); ok {
@@ -189,6 +193,10 @@ func runShadow(name, logPath string, rawExit int, stdout io.Writer) {
 	}
 	native, ok := driver.NativeStrategy(name)
 	if !ok {
+		return
+	}
+	if runErr != nil {
+		emit(hostop.SpindriftOp{Op: hostop.OpShadowSummary, ShadowSummary: &hostop.ShadowSummary{Driver: resolved, Error: "driver-exec: " + runErr.Error()}})
 		return
 	}
 	wasm, err := os.ReadFile(module)

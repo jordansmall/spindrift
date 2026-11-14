@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -626,6 +627,14 @@ func shadowRun(t *testing.T, rows string, rc int) (int, string) {
 // logLine and exits rc.
 func shadowRunDriver(t *testing.T, name, rows, logLine string, rc int) (int, string) {
 	t.Helper()
+	var stdout bytes.Buffer
+	got := shadowRunDriverTo(t, name, rows, logLine, rc, &stdout)
+	return got, stdout.String()
+}
+
+// shadowRunDriverTo is shadowRunDriver writing stdout to the given writer.
+func shadowRunDriverTo(t *testing.T, name, rows, logLine string, rc int, stdout io.Writer) int {
+	t.Helper()
 	drivertest.Isolate(t)
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -640,9 +649,51 @@ func shadowRunDriver(t *testing.T, name, rows, logLine string, rc int) (int, str
 		h.DriverRowsFile = filepath.Join(dir, "rows.json")
 		writeTestFile(t, h.DriverRowsFile, rows)
 	}
-	var stdout, stderr bytes.Buffer
-	got := mainRun([]string{"-handoff-file", writeHandoffFile(t, h), "-log-path", filepath.Join(dir, "stream.log")}, &stdout, &stderr)
-	return got, stdout.String()
+	var stderr bytes.Buffer
+	return mainRun([]string{"-handoff-file", writeHandoffFile(t, h), "-log-path", filepath.Join(dir, "stream.log")}, stdout, &stderr)
+}
+
+// failFirstWrite fails its first Write, then accepts the rest so the later
+// summary still lands. With no model in the handoff that first Write is the
+// Driver's stream chunk; a model would put the pass_model op first.
+type failFirstWrite struct {
+	buf    bytes.Buffer
+	failed bool
+}
+
+func (w *failFirstWrite) Write(p []byte) (int, error) {
+	if !w.failed {
+		w.failed = true
+		return 0, errors.New("broken pipe")
+	}
+	return w.buf.Write(p)
+}
+
+// A Pass whose stream driver-exec could not copy still ends in a
+// shadow_summary naming why, even though the Driver exited non-zero, and the
+// truncated log is never replayed (it could read as clean).
+func TestMainRunShadowedRunFailureIsSummarisedWithoutReplay(t *testing.T) {
+	var out failFirstWrite
+	var replayed bool
+	// Readable, so only the runErr guard keeps runShadow from replaying it.
+	module := filepath.Join(t.TempDir(), "driver.wasm")
+	writeTestFile(t, module, "not wasm")
+	prev := shadowReplay
+	shadowReplay = func(context.Context, driverkit.Strategy, []byte, string, int, func(hostop.SpindriftOp)) {
+		replayed = true
+	}
+	t.Cleanup(func() { shadowReplay = prev })
+	rc := shadowRunDriverTo(t, "", claudeShadowRow(t, module), `{"type":"system","subtype":"init"}`, 3, &out)
+	if rc != 1 {
+		t.Errorf("exit code = %d, want 1", rc)
+	}
+	if replayed {
+		t.Error("the truncated log was replayed")
+	}
+	_, sum := shadowOps(t, out.buf.String())
+	if !strings.Contains(sum.Error, "broken pipe") || sum.Loaded || sum.Driver != "claude" {
+		t.Errorf("summary = %+v, want a dirty claude summary naming the broken pipe", sum)
+	}
 }
 
 func claudeShadowRow(t *testing.T, module string) string {

@@ -2772,7 +2772,9 @@ counts as a divergence against the native decode.
 The replay as a whole, load included, is capped at 2 minutes per Pass: a run
 that hits the cap is aborted mid-call and gives a summary with that `error`
 and the counts up to that point, so a slow Connector cannot delay the Pass's
-exit code by more than 2 minutes. None of these runs is clean.
+exit code by more than 2 minutes. A Pass whose run step fails, such as one
+whose stream driver-exec could not copy, whatever the Driver's own exit code,
+gives a summary with that `error` and no replay. None of these runs is clean.
 
 A run is **clean** when its Pass logs hold one `shadow_summary` for the shadowed
 Driver per `pass_start` op, and every summary has `loaded: true`, no `error`,
