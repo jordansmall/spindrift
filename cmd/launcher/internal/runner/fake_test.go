@@ -67,3 +67,16 @@ func TestFakeListRunning_ReturnsConfiguredNames(t *testing.T) {
 		t.Errorf("ListRunning = %v, want [agent-issue-42 agent-issue-43]", got)
 	}
 }
+
+func TestFake_StartConnectorSandboxFailsClosedByDefault(t *testing.T) {
+	f := NewFake()
+	if _, err := f.StartConnectorSandbox("s"); !errors.Is(err, ErrFakeNoSandbox) {
+		t.Fatalf("StartConnectorSandbox = %v, want ErrFakeNoSandbox", err)
+	}
+	if got := f.ConnectorSandboxStarts; len(got) != 1 || got[0] != "s" {
+		t.Errorf("ConnectorSandboxStarts = %v, want [s]", got)
+	}
+	if f.IsRunning("s") {
+		t.Error("a sandbox that failed to start counts as running")
+	}
+}

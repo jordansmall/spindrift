@@ -15,7 +15,7 @@ import (
 func TestEnsureReady_ImagePresent_NoLockFileCreated(t *testing.T) {
 	dir := redirectImageLockDir(t)
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	a := &ociAdapter{cli: script, image: "spindrift:abc123"}
+	a := &ociAdapter{cli: script, boxImg: imageSpec{tag: "spindrift:abc123"}}
 
 	if err := a.EnsureReady(); err != nil {
 		t.Fatalf("EnsureReady: unexpected error: %v", err)
@@ -59,7 +59,7 @@ func TestEnsureReady_LockHeldByAnother_BlocksThenObservesPresentWithoutRebuildin
 	}
 	t.Cleanup(func() { execCommand = origExec })
 
-	a := &ociAdapter{cli: cliScript, image: image, imageDrv: "/nix/store/fake.drv"}
+	a := &ociAdapter{cli: cliScript, boxImg: imageSpec{tag: image, drv: "/nix/store/fake.drv"}}
 
 	type result struct{ err error }
 	done := make(chan result, 1)
@@ -125,10 +125,8 @@ func TestEnsureReady_LockUncontended_StillRunsHostBuild(t *testing.T) {
 	t.Cleanup(func() { execCommand = origExec })
 
 	a := &ociAdapter{
-		cli:          cliScript,
-		image:        "spindrift:abc123",
-		imageDrv:     "/nix/store/fake.drv",
-		imageArchive: "/tmp/spindrift-image.tar",
+		boxImg: imageSpec{tag: "spindrift:abc123", drv: "/nix/store/fake.drv", archive: "/tmp/spindrift-image.tar"},
+		cli:    cliScript,
 	}
 
 	if err := a.EnsureReady(); err != nil {
@@ -173,10 +171,8 @@ func TestEnsureReady_LockAcquireFails_ContinuesUnlockedWithWarning(t *testing.T)
 	t.Cleanup(func() { execCommand = origExec })
 
 	a := &ociAdapter{
-		cli:          cliScript,
-		image:        "spindrift:abc123",
-		imageDrv:     "/nix/store/fake.drv",
-		imageArchive: "/tmp/spindrift-image.tar",
+		boxImg: imageSpec{tag: "spindrift:abc123", drv: "/nix/store/fake.drv", archive: "/tmp/spindrift-image.tar"},
+		cli:    cliScript,
 	}
 
 	var ensureErr error

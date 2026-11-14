@@ -20,8 +20,8 @@ func TestAdapterRendersOnly_NoDuplicatedMountDecisions(t *testing.T) {
 func TestMountSpecs_RenderedByOCI(t *testing.T) {
 	fx := runnertest.NewMountFixture(t)
 	oci := &ociAdapter{
-		cli:   "podman",
-		image: "spindrift:test",
+		boxImg: imageSpec{tag: "spindrift:test"},
+		cli:    "podman",
 		mountParams: runner.MountParams{
 			PromptDir:             fx.PromptDir,
 			SkillsDir:             fx.SkillsDir,
@@ -40,8 +40,8 @@ func TestMirrorAndOutboxMounts_RenderedByOCI(t *testing.T) {
 	outboxDir := t.TempDir()
 
 	oci := &ociAdapter{
-		cli:   "podman",
-		image: "spindrift:test",
+		boxImg: imageSpec{tag: "spindrift:test"},
+		cli:    "podman",
 	}
 	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir, MirrorDir: repoDir}
 
@@ -63,8 +63,8 @@ func TestOutboxMount_RenderedByOCI(t *testing.T) {
 	outboxDir := t.TempDir()
 
 	oci := &ociAdapter{
-		cli:   "podman",
-		image: "spindrift:test",
+		boxImg: imageSpec{tag: "spindrift:test"},
+		cli:    "podman",
 	}
 	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir}
 
@@ -83,8 +83,8 @@ func TestOutboxMount_RenderedByOCI(t *testing.T) {
 // must not get a /repo mount through the adapter's own render path.
 func TestMirrorMount_AbsentWithoutMirrorDir_OCI(t *testing.T) {
 	oci := &ociAdapter{
-		cli:   "podman",
-		image: "spindrift:test",
+		boxImg: imageSpec{tag: "spindrift:test"},
+		cli:    "podman",
 	}
 	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 

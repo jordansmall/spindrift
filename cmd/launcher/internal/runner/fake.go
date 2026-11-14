@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"errors"
 	"os"
 	"slices"
 	"sort"
@@ -76,6 +77,14 @@ type Fake struct {
 	RegistryProxyTransportAddHost bool
 
 	RegistryProxyTransportErr error
+
+	// ConnectorSandboxStarts holds the name of every StartConnectorSandbox call.
+	ConnectorSandboxStarts []string
+
+	// StartConnectorSandboxFunc starts a sandbox for StartConnectorSandbox; nil
+	// fails every start with ErrFakeNoSandbox. It runs with the Fake's lock
+	// released.
+	StartConnectorSandboxFunc func(name string) (ConnectorSandbox, error)
 }
 
 // NewFake returns an empty Fake runner.
@@ -243,4 +252,32 @@ func (f *Fake) RegistryProxyTransport() (registrymanifest.Endpoint, bool, error)
 	defer f.mu.Unlock()
 	f.RegistryProxyTransportCalls++
 	return f.RegistryProxyTransportEndpoint, f.RegistryProxyTransportAddHost, f.RegistryProxyTransportErr
+}
+
+// ErrFakeNoSandbox is what StartConnectorSandbox returns while
+// StartConnectorSandboxFunc is nil.
+var ErrFakeNoSandbox = errors.New("runner.Fake: no StartConnectorSandboxFunc set")
+
+// StartConnectorSandbox records the name, then starts the sandbox through
+// StartConnectorSandboxFunc. A started sandbox counts as running (IsRunning,
+// ListRunning) until Kill(name).
+func (f *Fake) StartConnectorSandbox(name string) (ConnectorSandbox, error) {
+	f.mu.Lock()
+	f.ConnectorSandboxStarts = append(f.ConnectorSandboxStarts, name)
+	fn := f.StartConnectorSandboxFunc
+	f.mu.Unlock()
+	if fn == nil {
+		return ConnectorSandbox{}, ErrFakeNoSandbox
+	}
+	sb, err := fn(name)
+	if err != nil {
+		return ConnectorSandbox{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.live == nil {
+		f.live = map[string]chan struct{}{}
+	}
+	f.live[name] = make(chan struct{})
+	return sb, nil
 }

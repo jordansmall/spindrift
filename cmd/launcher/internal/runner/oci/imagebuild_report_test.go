@@ -12,7 +12,7 @@ func TestOCIEnsureReady_WarmReportsNothing(t *testing.T) {
 	redirectImageLockDir(t)
 	drain := runnertest.InstallImageBuildPipe(t)
 	cli, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0}) // image inspect: present
-	a := &ociAdapter{cli: cli, image: "spindrift:abc123"}
+	a := &ociAdapter{cli: cli, boxImg: imageSpec{tag: "spindrift:abc123"}}
 
 	if err := a.EnsureReady(); err != nil {
 		t.Fatalf("EnsureReady: %v", err)
@@ -24,7 +24,7 @@ func TestOCIEnsureReady_SiblingRealisedReportsNothing(t *testing.T) {
 	redirectImageLockDir(t)
 	drain := runnertest.InstallImageBuildPipe(t)
 	cli, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}, runnertest.Call{Exit: 0}) // absent, then present under the lock
-	a := &ociAdapter{cli: cli, image: "spindrift:abc123"}
+	a := &ociAdapter{cli: cli, boxImg: imageSpec{tag: "spindrift:abc123"}}
 
 	if err := a.EnsureReady(); err != nil {
 		t.Fatalf("EnsureReady: %v", err)
@@ -45,10 +45,8 @@ func TestOCIEnsureReady_ColdBuildReportsStartedBeforeNixThenFinished(t *testing.
 		return exec.Command(nixScript, args...)
 	}
 	a := &ociAdapter{
-		cli:          cli,
-		image:        "spindrift:abc123",
-		imageDrv:     "/nix/store/fake.drv",
-		imageArchive: "/tmp/spindrift-image.tar",
+		boxImg: imageSpec{tag: "spindrift:abc123", drv: "/nix/store/fake.drv", archive: "/tmp/spindrift-image.tar"},
+		cli:    cli,
 	}
 
 	if err := a.EnsureReady(); err != nil {
@@ -63,7 +61,7 @@ func TestOCIEnsureReady_ColdBuildFailureStillReportsFinished(t *testing.T) {
 	drain := runnertest.InstallImageBuildPipe(t)
 	cli, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}, runnertest.Call{Exit: 1})
 	runnertest.StubExec(t, &execCommand, runnertest.Call{Exit: 1, Stdout: "genuine derivation error"})
-	a := &ociAdapter{cli: cli, image: "spindrift:abc123", imageDrv: "/nix/store/fake.drv"}
+	a := &ociAdapter{cli: cli, boxImg: imageSpec{tag: "spindrift:abc123", drv: "/nix/store/fake.drv"}}
 
 	if err := a.EnsureReady(); err == nil {
 		t.Fatal("EnsureReady = nil, want the nix build failure")
@@ -74,7 +72,7 @@ func TestOCIEnsureReady_ColdBuildFailureStillReportsFinished(t *testing.T) {
 func TestImageBuild_NoReporterInstalledIsHarmless(t *testing.T) {
 	redirectImageLockDir(t)
 	cli, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	a := &ociAdapter{cli: cli, image: "spindrift:abc123"}
+	a := &ociAdapter{cli: cli, boxImg: imageSpec{tag: "spindrift:abc123"}}
 	if err := a.EnsureReady(); err != nil {
 		t.Fatalf("EnsureReady: %v", err)
 	}

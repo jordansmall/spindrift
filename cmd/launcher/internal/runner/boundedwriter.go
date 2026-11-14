@@ -1,10 +1,15 @@
 package runner
 
+import "sync"
+
 // BoundedWriter retains only the last rebuildOutputCap bytes written (#1130).
 // RunNixBuild's capture backs Launcher.rebuildOutput and stays in memory until
 // the next rebuild, so an uncapped verbose build pins a multi-MB transcript for
 // a whole Console session. It keeps the tail because failures print at the end.
+// It is safe for concurrent use: a Connector sandbox's stderr is written by the
+// exec copier while a caller reads it.
 type BoundedWriter struct {
+	mu  sync.Mutex
 	buf []byte
 }
 
@@ -13,6 +18,8 @@ type BoundedWriter struct {
 const rebuildOutputCap = 64 * 1024
 
 func (w *BoundedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.buf = append(w.buf, p...)
 	if len(w.buf) > rebuildOutputCap {
 		w.buf = w.buf[len(w.buf)-rebuildOutputCap:]
@@ -21,5 +28,7 @@ func (w *BoundedWriter) Write(p []byte) (int, error) {
 }
 
 func (w *BoundedWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	return string(w.buf)
 }

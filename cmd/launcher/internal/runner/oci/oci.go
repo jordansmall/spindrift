@@ -28,17 +28,12 @@ import (
 // ociAdapter implements Runner for OCI container runtimes; podman and docker
 // are one adapter differing only by CLI name.
 type ociAdapter struct {
-	cli             string // "podman" or "docker"
-	image           string // content-hash tag the Box runs and the archive is re-tagged to
-	imageArchive    string // baked nix store path to the OCI tarball
-	imageDrv        string // baked .drv path; used by nix build for host realize
-	sandboxImage    string // tag of the Connector sandbox image (connector-host only, no Env)
-	sandboxArchive  string // baked nix store path to the sandbox image's OCI tarball
-	sandboxDrv      string // baked .drv path of the sandbox image
-	nixBuilderImage string // fallback container image that carries nix
-	nixVolume       string // named volume for /nix (incremental rebuilds)
-	flakeImageAttr  string // nix flake attr for the image (.#packages.x.agent-image)
-	pwd             string // $PWD; container-fallback mounts this as /workspace
+	cli             string    // "podman" or "docker"
+	boxImg          imageSpec // the image the Box runs
+	sandboxImg      imageSpec // the Connector sandbox image (connector-host only, no Env)
+	nixBuilderImage string    // fallback container image that carries nix
+	nixVolume       string    // named volume for /nix (incremental rebuilds)
+	pwd             string    // $PWD; container-fallback mounts this as /workspace
 	// mountParams passes host-mount facts from Config to BuildMountSpecs
 	// unmodified. DriverSessionCacheDir is ADR 0009; the CODE_FORGE=local
 	// mount specs are issue #1697.
@@ -88,16 +83,18 @@ func New(cfg runner.Config, art inputdoc.OCIArtifacts, l runner.KnobLookup, pwd 
 		return nil, err
 	}
 	return &ociAdapter{
-		cli:             runner.BinaryFor(cfg.Runtime),
-		image:           art.ImageTag.String(),
-		imageArchive:    art.ImageArchive.String(),
-		imageDrv:        art.ImageDrv.String(),
-		sandboxImage:    art.ConnectorSandboxImageTag.String(),
-		sandboxArchive:  art.ConnectorSandboxImageArchive.String(),
-		sandboxDrv:      art.ConnectorSandboxImageDrv.String(),
+		cli: runner.BinaryFor(cfg.Runtime),
+		boxImg: imageSpec{
+			tag: art.ImageTag.String(), archive: art.ImageArchive.String(),
+			drv: art.ImageDrv.String(), flakeAttr: art.FlakeImageAttr.String(),
+		},
+		sandboxImg: imageSpec{
+			tag: art.ConnectorSandboxImageTag.String(), archive: art.ConnectorSandboxImageArchive.String(),
+			drv: art.ConnectorSandboxImageDrv.String(), flakeAttr: art.ConnectorSandboxFlakeAttr.String(),
+			sandbox: true,
+		},
 		nixBuilderImage: art.NixBuilderImage.String(),
 		nixVolume:       art.NixVolume.String(),
-		flakeImageAttr:  art.FlakeImageAttr.String(),
 		pwd:             pwd,
 		mountParams:     cfg.MountParams,
 		network:         cfg.OCINetwork(k.PodmanNetwork, noHostLoopbackNetwork(runner.BinaryFor(cfg.Runtime))),
@@ -109,8 +106,8 @@ func New(cfg runner.Config, art inputdoc.OCIArtifacts, l runner.KnobLookup, pwd 
 // imagePresent inspects rather than asking `image exists`, which docker has
 // no verb for. Shared by IsReady's one-shot check and EnsureReady's
 // double-checked probe/re-probe around the realize lock.
-func (a *ociAdapter) imagePresent() bool {
-	inspect := exec.Command(a.cli, "image", "inspect", a.image)
+func (a *ociAdapter) imagePresent(image string) bool {
+	inspect := exec.Command(a.cli, "image", "inspect", image)
 	inspect.Stdout = io.Discard
 	inspect.Stderr = io.Discard
 	return inspect.Run() == nil
@@ -118,7 +115,7 @@ func (a *ociAdapter) imagePresent() bool {
 
 // IsReady reports whether the OCI image is already loaded, without building it.
 func (a *ociAdapter) IsReady() error {
-	if a.imagePresent() {
+	if a.imagePresent(a.boxImg.tag) {
 		return nil
 	}
 	return errors.New("image absent; run `spindrift build`")
@@ -129,21 +126,57 @@ func (a *ociAdapter) IsReady() error {
 // fails the realize: without the lock a child only duplicates the work every
 // child already duplicated before this issue, which beats refusing to build
 // outright, so both degrade to a stderr warning and unlocked operation.
-func (a *ociAdapter) lockImage() func() {
+func lockImage(img imageSpec) func() {
 	onWait := func() {
-		fmt.Printf("==> image '%s' is being realized elsewhere — waiting\n", a.image)
+		fmt.Fprintf(img.out(), "==> image '%s' is being realized elsewhere — waiting\n", img.tag)
 	}
-	lock, err := acquireImageLock(a.image, onWait)
+	lock, err := acquireImageLock(img.tag, onWait)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "==> WARNING: could not lock image '%s' for realize (%v); continuing unlocked\n", a.image, err)
+		fmt.Fprintf(os.Stderr, "==> WARNING: could not lock image '%s' for realize (%v); continuing unlocked\n", img.tag, err)
 		return func() {}
 	}
 	return func() {
 		if err := lock.Release(); err != nil {
-			fmt.Fprintf(os.Stderr, "==> WARNING: could not release image lock for '%s': %v\n", a.image, err)
+			fmt.Fprintf(os.Stderr, "==> WARNING: could not release image lock for '%s': %v\n", img.tag, err)
 		}
 	}
 }
+
+// imageSpec describes one image realizeImage brings into the runtime. The Box
+// and the Connector sandbox differ only in these fields; the zero value is
+// the Box.
+type imageSpec struct {
+	tag       string
+	archive   string // baked store path to the OCI tarball
+	drv       string // baked .drv path for the host `nix build`
+	flakeAttr string // flake attr the container-build fallback builds
+	// sandbox marks the Connector sandbox image, which is realized mid-run
+	// while stdout carries the dispatch's own output, and outside the
+	// pre-dispatch "building image" state of the Console.
+	sandbox bool
+}
+
+// label names the image in messages.
+func (s imageSpec) label() string {
+	if s.sandbox {
+		return "Connector sandbox image"
+	}
+	return "spindrift image"
+}
+
+// out receives progress and the child commands' stdout: os.Stdout for the
+// Box, os.Stderr for the sandbox. It reads the os var at call time so a test
+// that swaps it sees the output.
+func (s imageSpec) out() io.Writer {
+	if s.sandbox {
+		return os.Stderr
+	}
+	return os.Stdout
+}
+
+// reportBuild reports whether the cold build is marked in the Console
+// (report.ImageBuild); only the Box is.
+func (s imageSpec) reportBuild() bool { return !s.sandbox }
 
 // EnsureReady checks that the OCI image is present and builds it if not. The
 // warm path (image already present) returns before ever touching the lock,
@@ -152,51 +185,60 @@ func (a *ociAdapter) lockImage() func() {
 // lost the race and waited may find the winner already finished, in which
 // case it must not repeat the build, load and tag.
 func (a *ociAdapter) EnsureReady() error {
-	if a.imagePresent() {
-		fmt.Printf("==> image '%s' already loaded\n", a.image)
+	if a.imagePresent(a.boxImg.tag) {
+		fmt.Printf("==> image '%s' already loaded\n", a.boxImg.tag)
 		return nil
 	}
+	return a.realizeImage(a.boxImg)
+}
 
-	release := a.lockImage()
+// realizeImage is the cold path shared by the Box and the Connector sandbox:
+// lock, re-probe, realize the derivation on the host, and fall back to a Nix
+// builder container when the host has no Linux builder.
+func (a *ociAdapter) realizeImage(img imageSpec) error {
+	release := lockImage(img)
 	defer release()
 
-	if a.imagePresent() {
-		fmt.Printf("==> image '%s' already realized elsewhere; skipping the build\n", a.image)
+	if a.imagePresent(img.tag) {
+		fmt.Fprintf(img.out(), "==> image '%s' already realized elsewhere; skipping the build\n", img.tag)
 		return nil
 	}
 
 	// Only the cold path reports: a warm or sibling-realised run builds nothing,
 	// so there is no "building image" state to show. The deferred finish clears
 	// it on every exit, failures included.
-	report.ImageBuild(report.ImageBuildStarted)
-	defer report.ImageBuild(report.ImageBuildFinished)
+	if img.reportBuild() {
+		report.ImageBuild(report.ImageBuildStarted)
+		defer report.ImageBuild(report.ImageBuildFinished)
+	}
 
-	fmt.Printf("==> image '%s' not found — building first\n", a.image)
+	fmt.Fprintf(img.out(), "==> image '%s' not found — building first\n", img.tag)
 
 	// Tee stderr so a failure is both visible and inspectable below.
 	var hostStderr bytes.Buffer
-	nixBuild := execCommand("nix", "build", a.imageDrv+"^*", "--no-link")
-	nixBuild.Stdout = os.Stdout
+	nixBuild := execCommand("nix", "build", img.drv+"^*", "--no-link")
+	nixBuild.Stdout = img.out()
 	nixBuild.Stderr = io.MultiWriter(os.Stderr, &hostStderr)
-	if err := nixBuild.Run(); err == nil {
-		fmt.Println("==> realized image derivation on the host")
-		return a.loadImage(a.imageArchive)
+	nixErr := nixBuild.Run()
+	if nixErr == nil {
+		fmt.Fprintln(img.out(), "==> realized image derivation on the host")
+		return a.loadImage(img, img.archive)
 	}
 
 	// Only a missing builder justifies the container fallback: a genuine
 	// derivation error is already on stderr, and a slow doomed retry buries it.
 	if !isNoBuilderError(hostStderr.String()) {
-		return fmt.Errorf("nix build failed")
+		return fmt.Errorf("nix build of the %s failed: %w", img.label(), nixErr)
 	}
 
 	if _, err := exec.LookPath(a.cli); err == nil {
-		return a.buildInContainer()
+		return a.buildInContainer(img)
 	}
 
 	// Reachable only from `build`, which skips main.go's validate(); under
 	// `run` validate() already guaranteed the runtime, so the container
 	// fallback above would have succeeded.
-	fmt.Fprintf(os.Stderr, `==> cannot build the spindrift image.
+	fmt.Fprintf(os.Stderr, `==> cannot build the %s.
 
 The image is a Linux (OCI) derivation, and this host can neither realize it
 directly nor fall back to a container build:
@@ -210,7 +252,7 @@ directly nor fall back to a container build:
     inside an ephemeral Nix container.
 
 Run 'build' from your Consumer flake's directory.
-`, a.cli)
+`, img.label(), a.cli)
 	return fmt.Errorf("cannot build image: no Linux builder and no container runtime")
 }
 
@@ -260,25 +302,26 @@ func isRuntimeUnusableError(stderr string) bool {
 	return strings.Contains(stderr, "OCI runtime error")
 }
 
-func (a *ociAdapter) loadImage(archive string) error {
-	fmt.Printf("==> loading spindrift image from %s\n", archive)
+func (a *ociAdapter) loadImage(img imageSpec, archive string) error {
+	out, image := img.out(), img.tag
+	fmt.Fprintf(out, "==> loading %s from %s\n", img.label(), archive)
 	load := exec.Command(a.cli, "load", "-i", archive)
-	load.Stdout = os.Stdout
+	load.Stdout = out
 	load.Stderr = os.Stderr
 	if err := load.Run(); err != nil {
 		return fmt.Errorf("load failed: %w", err)
 	}
 	// buildLayeredImage names the archive "<repo>:latest" where repo matches
-	// a.image's own repo, so re-tag from that derived source rather than a
+	// image's own repo, so re-tag from that derived source rather than a
 	// hardcoded "spindrift:latest", which misses a driver-scoped archive.
-	sourceTag := freshness.ImageRepo(a.image) + ":latest"
-	tag := exec.Command(a.cli, "tag", sourceTag, a.image)
-	tag.Stdout = os.Stdout
+	sourceTag := freshness.ImageRepo(image) + ":latest"
+	tag := exec.Command(a.cli, "tag", sourceTag, image)
+	tag.Stdout = out
 	tag.Stderr = os.Stderr
 	if err := tag.Run(); err != nil {
 		return fmt.Errorf("tag failed: %w", err)
 	}
-	fmt.Printf("==> done: %s + %s\n", sourceTag, a.image)
+	fmt.Fprintf(out, "==> done: %s + %s\n", sourceTag, image)
 	return nil
 }
 
@@ -300,7 +343,7 @@ func containerBuildCmd(flakeImageAttr string) string {
 	)
 }
 
-func (a *ociAdapter) buildInContainer() error {
+func (a *ociAdapter) buildInContainer(img imageSpec) error {
 	// Stage under a temp dir so interruption never litters the consumer tree.
 	tmpDir, err := os.MkdirTemp("", "spindrift-build-*")
 	if err != nil {
@@ -311,10 +354,10 @@ func (a *ociAdapter) buildInContainer() error {
 	if !isDigestPinned(a.nixBuilderImage) {
 		fmt.Fprintf(os.Stderr, "==> WARNING: nixBuilderImage %q is not digest-pinned; use @sha256:… for supply-chain safety\n", a.nixBuilderImage)
 	}
-	fmt.Printf("==> no host Linux builder; building the image inside a %s container\n", a.nixBuilderImage)
-	fmt.Printf("    (reusing the '%s' volume for /nix so rebuilds are incremental)\n", a.nixVolume)
+	fmt.Fprintf(img.out(), "==> no host Linux builder; building the image inside a %s container\n", a.nixBuilderImage)
+	fmt.Fprintf(img.out(), "    (reusing the '%s' volume for /nix so rebuilds are incremental)\n", a.nixVolume)
 
-	shCmd := containerBuildCmd(a.flakeImageAttr)
+	shCmd := containerBuildCmd(img.flakeAttr)
 	build := exec.Command(a.cli, "run", "--rm",
 		"-v", a.nixVolume+":/nix",
 		"-v", a.pwd+":/workspace",
@@ -323,13 +366,13 @@ func (a *ociAdapter) buildInContainer() error {
 		a.nixBuilderImage,
 		"sh", "-euc", shCmd,
 	)
-	build.Stdout = os.Stdout
+	build.Stdout = img.out()
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "==> container build failed — see the %s output above.\n", a.cli)
 		return fmt.Errorf("container build failed")
 	}
-	return a.loadImage(filepath.Join(tmpDir, "image.tar"))
+	return a.loadImage(img, filepath.Join(tmpDir, "image.tar"))
 }
 
 // container is one inspectContainer observation: ID, status and creation
@@ -511,16 +554,73 @@ func (a *ociAdapter) buildRunArgs(box runner.Box) []string {
 	for _, host := range addHostTargets(box) {
 		args = append(args, "--add-host", host+":host-gateway")
 	}
-	// These two are unconditional, so no consumer knob can weaken the sandbox.
-	args = append(args, "--cap-drop=all", "--security-opt=no-new-privileges")
+	args = append(args, hardeningArgs...)
 	if a.pidsLimit != "" {
 		args = append(args, "--pids-limit="+a.pidsLimit)
 	}
 	if a.memoryLimit != "" {
 		args = append(args, "--memory="+a.memoryLimit)
 	}
-	args = append(args, a.image, "/agent/entrypoint.sh")
+	args = append(args, a.boxImg.tag, "/agent/entrypoint.sh")
 	return args
+}
+
+// Fixed caps for the Connector sandbox, deliberately not Config's per-Box
+// knobs: it holds only connector-host. The memory cap leaves room for several
+// Connector modules (each capped near 64 MiB by connectorhost) plus the host's
+// Go runtime; the pids cap covers that runtime's threads.
+const (
+	sandboxPidsLimit   = "128"
+	sandboxMemoryLimit = "512m"
+)
+
+// hardeningArgs are applied unconditionally, so no consumer knob can weaken a
+// sandbox.
+var hardeningArgs = []string{"--cap-drop=all", "--security-opt=no-new-privileges"}
+
+// buildSandboxArgs assembles `run` for the Connector sandbox. It shares no
+// Box state: no network config, env, mounts or add-host, and no -t, which
+// would corrupt the binary frame stream.
+func (a *ociAdapter) buildSandboxArgs(name string) []string {
+	args := []string{"run", "-i", "--rm", "--name", name, "--network=none"}
+	args = append(args, hardeningArgs...)
+	return append(args, "--read-only", "--pids-limit="+sandboxPidsLimit, "--memory="+sandboxMemoryLimit, a.sandboxImg.tag)
+}
+
+// ensureSandboxImage loads the Connector sandbox image exactly as EnsureReady
+// loads the Box image (realizeImage: lock, host build or container-build
+// fallback, load, re-tag), minus the Console's image-build report.
+func (a *ociAdapter) ensureSandboxImage() error {
+	if a.sandboxImg.tag == "" {
+		return errors.New("no Connector sandbox image in the input document")
+	}
+	if a.imagePresent(a.sandboxImg.tag) {
+		return nil
+	}
+	return a.realizeImage(a.sandboxImg)
+}
+
+// StartConnectorSandbox runs the Connector sandbox image detached from any
+// terminal, with stdin and stdout piped to the caller.
+func (a *ociAdapter) StartConnectorSandbox(name string) (runner.ConnectorSandbox, error) {
+	if err := a.ensureSandboxImage(); err != nil {
+		return runner.ConnectorSandbox{}, err
+	}
+	cmd := exec.Command(a.cli, a.buildSandboxArgs(name)...)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return runner.ConnectorSandbox{}, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return runner.ConnectorSandbox{}, err
+	}
+	stderr := &runner.BoundedWriter{}
+	cmd.Stderr = stderr
+	if err := cmd.Start(); err != nil {
+		return runner.ConnectorSandbox{}, fmt.Errorf("start %s: %w", a.cli, err)
+	}
+	return runner.ConnectorSandbox{Stdin: stdin, Stdout: stdout, Wait: cmd.Wait, Stderr: stderr.String}, nil
 }
 
 // probeSocketDir returns a fresh directory for the throwaway probe socket,
@@ -592,7 +692,7 @@ func (a *ociAdapter) registrySocketProbeArgs(hostSocketPath, containerName strin
 	box := runner.Box{Name: containerName, Sockets: []runner.SocketMount{{Source: hostSocketPath, Target: runner.RegistryProxySocketTarget}}}
 	full := a.buildRunArgs(box)
 	args := append([]string{full[0], "--rm", "--entrypoint", registryProbeEntrypoint}, probeArgsFromRunArgs(full)...)
-	return append(args, a.image, "probe-registry-socket", "-path", runner.RegistryProxySocketTarget)
+	return append(args, a.boxImg.tag, "probe-registry-socket", "-path", runner.RegistryProxySocketTarget)
 }
 
 // registryTCPProbeArgs assembles the run args for a throwaway container that
@@ -604,7 +704,7 @@ func (a *ociAdapter) registryTCPProbeArgs(host string, port int, containerName s
 	box := runner.Box{Name: containerName, RegistryProxy: runner.RegistryProxyLocation{Endpoint: registrymanifest.NewTCPEndpoint(host, ""), TCPAddHost: addHost}}
 	full := a.buildRunArgs(box)
 	args := append([]string{full[0], "--rm", "--entrypoint", registryProbeEntrypoint}, probeArgsFromRunArgs(full)...)
-	return append(args, a.image, "probe-registry-tcp", "-host", host, "-port", strconv.Itoa(port))
+	return append(args, a.boxImg.tag, "probe-registry-tcp", "-host", host, "-port", strconv.Itoa(port))
 }
 
 // cliWaitDelay bounds Cmd.WaitDelay for this package's container-CLI
@@ -626,7 +726,7 @@ var registryProxyProbeTimeout = 30 * time.Second
 // probeRegistryProxyTransport under the same runtime+image+networkMode key, so
 // dispatch and the doctor row (#3114) agree; an error is never cached.
 func (a *ociAdapter) RegistryProxyTransport() (registrymanifest.Endpoint, bool, error) {
-	key := registryProbeCacheKey{runtime: a.cli, image: a.image, networkMode: a.network.Mode}
+	key := registryProbeCacheKey{runtime: a.cli, image: a.boxImg.tag, networkMode: a.network.Mode}
 	if endpoint, tcpAddHost, ok := loadRegistryProbeCache(a.pwd, key); ok {
 		return endpoint, tcpAddHost, nil
 	}

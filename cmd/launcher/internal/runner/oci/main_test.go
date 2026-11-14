@@ -10,6 +10,9 @@ import (
 // #4658). TMPDIR itself stays put: lengthening it pushes the socket tests'
 // paths past the unix socket limit.
 func TestMain(m *testing.M) {
+	if os.Getenv(hostModeEnv) != "" {
+		serveHostMode()
+	}
 	dir, err := os.MkdirTemp("", "spindrift-runner-test-")
 	if err != nil {
 		panic(err)

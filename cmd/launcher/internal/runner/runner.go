@@ -178,6 +178,28 @@ type Runner interface {
 	// alongside unix. Probe it, never infer it from runtime.GOOS, which misses
 	// the operator VM and mount setup (#3111; doctor #3114, ociAdapter cache #3113).
 	RegistryProxyTransport() (endpoint registrymanifest.Endpoint, tcpAddHost bool, err error)
+
+	// StartConnectorSandbox starts the long-lived Connector sandbox named name
+	// (a ConnectorSandboxPrefix name) with its stdio attached and returns the
+	// pipes without waiting for it. The sandbox holds only connector-host: no
+	// network, environment, mounts or credentials. Stop it by closing Stdin and
+	// calling Kill(name); a runner that cannot isolate one fails closed here.
+	StartConnectorSandbox(name string) (ConnectorSandbox, error)
+}
+
+// ConnectorSandboxPrefix starts every Connector sandbox name. It is distinct
+// from the Box name scheme, so ListRunning's orphan detection skips it.
+const ConnectorSandboxPrefix = "spindrift-connector-sandbox-"
+
+// ConnectorSandbox is a started Connector sandbox's attached stdio.
+type ConnectorSandbox struct {
+	Stdin  io.WriteCloser
+	Stdout io.Reader
+	// Wait returns once the sandbox process has exited.
+	Wait func() error
+	// Stderr returns the tail of the runtime's stderr so far, for naming a
+	// failure.
+	Stderr func() string
 }
 
 // ErrAlreadyRunning is returned by Run when a sandbox for this box is already
