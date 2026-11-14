@@ -32,6 +32,7 @@ func (s docSpan) end() string { return "<!-- END GENERATED " + s.name + " -->\n"
 var referenceSpans = []docSpan{
 	{"LOCKFILE CLASSIFICATION", renderLockfileClassification},
 	{"REGISTRY DISCOVERY SOURCES", renderRegistryDiscoverySources},
+	{"REGISTRY RESPONSE REWRITES", renderRegistryResponseRewrites},
 }
 
 // renderLockfileClassification merges consecutive registered Strategies sharing a
@@ -83,6 +84,21 @@ func renderRegistryDiscoverySources() string {
 	}
 	return "- Config files read from the Target repo: " + strings.Join(configs, ", ") + "\n" +
 		"- Credential stores, searched **in this order**: " + strings.Join(stores, ", ") + "\n"
+}
+
+func renderRegistryResponseRewrites() string {
+	var b strings.Builder
+	for _, row := range ecosystem.Registered() {
+		if len(row.RewriteRows) == 0 {
+			continue
+		}
+		var names []string
+		for _, r := range row.RewriteRows {
+			names = append(names, "`"+r.Name+"`")
+		}
+		fmt.Fprintf(&b, "- `%s`: %s\n", row.Name, strings.Join(names, ", "))
+	}
+	return b.String()
 }
 
 // spliceSpan replaces only the text between s's markers. Anything but exactly

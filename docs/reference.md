@@ -9401,6 +9401,28 @@ scheme, such as a public registry's, has no scheme to depart from. The
 warning never fails doctor: edit the route's `auth-scheme` or `allow` only
 if the departure isn't deliberate.
 
+## Registry response rewrites
+
+A registry embeds absolute URLs in its own responses: a cargo index's `dl`
+template, an npm packument's tarball URLs, a NuGet service index's resource
+`@id`s. A client follows them straight to the upstream, bypassing the
+credentialed route. The proxy therefore repoints them at itself (ADR 0045)
+through the response-rewrite rows each Ecosystem Strategy declares. A URL no
+row covers reaches the upstream with no credential and fails visibly, so a
+new response shape needs a row of its own. The rows today:
+
+<!-- BEGIN GENERATED REGISTRY RESPONSE REWRITES -- nix run .#regen-goldens -- DO NOT EDIT -->
+- `cargo`: `cargo config.json`
+- `npm`: `npm packument`
+- `nuget`: `nuget service index`, `nuget registration`
+<!-- END GENERATED REGISTRY RESPONSE REWRITES -->
+
+NuGet's service index is buffered and its `RepositorySignatures` resources are
+dropped, since NuGet refuses them over the Forwarder's http endpoint. Its
+registration documents are streamed rather than buffered. The trigger for
+widening NuGet's rewrite to another document is recorded beside its rows in
+the `nuget` package.
+
 ## Registry transport probe cache
 
 Deciding how a dispatch reaches a Box's registry proxy or Signal socket —
