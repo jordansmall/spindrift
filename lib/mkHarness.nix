@@ -1978,8 +1978,10 @@ else
 
       # daemonBin is otherwise reachable only as apps.daemon.program, a
       # string -- exposed here so nix/checks/equivalence.nix's store-path
-      # checks can compare and override it directly (issue #3621).
-      inherit daemonBin connectorSandboxImage;
+      # checks can compare and override it directly (issue #3621). launcherBin
+      # is exposed so nix/checks/go.nix's connector-host-escapeprobe-absent-from-release
+      # can scan it.
+      inherit daemonBin connectorSandboxImage launcherBin;
 
       # The fully resolved roster, after dropOptedOut and the reviewEffort
       # step (issue #2512). Exposed for nix/checks/equivalence.nix's
