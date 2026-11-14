@@ -124,7 +124,11 @@ func runOnce(cfg execConfig, w io.Writer, child *atomic.Pointer[os.Process]) (in
 		return 0, err
 	}
 	cmd.Stdout = w
-	cmd.Stderr = os.Stderr
+	// A non-*os.File writer gives the Driver a private pipe: under bwrap fd 1
+	// and fd 2 share one open file description, and a Driver setting O_NONBLOCK
+	// on an inherited fd 2 would make driver-exec's stdout writes fail EAGAIN.
+	// Wait also waits for this pipe's EOF, so a grandchild holding fd 2 holds the Pass.
+	cmd.Stderr = bestEffortWriter{os.Stderr}
 	if err := cmd.Start(); err != nil {
 		return 0, err
 	}
@@ -162,4 +166,13 @@ func buildCmd(cfg execConfig) (*exec.Cmd, error) {
 	}
 	nixArgs := append([]string{"develop", ".#" + cfg.devshellName, "--command", bin}, cfg.args...)
 	return exec.Command("nix", nixArgs...), nil
+}
+
+// bestEffortWriter swallows write errors: a failed copy would make cmd.Wait fail
+// a Pass whose Driver exited 0, and stop draining the Driver's stderr pipe.
+type bestEffortWriter struct{ w io.Writer }
+
+func (b bestEffortWriter) Write(p []byte) (int, error) {
+	_, _ = b.w.Write(p)
+	return len(p), nil
 }
