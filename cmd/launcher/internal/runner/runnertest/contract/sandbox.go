@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/fixturebuild"
@@ -91,6 +92,47 @@ func SandboxLifecycle(t *testing.T, h SandboxHarness) {
 	}
 	runnertest.Eventually(t, settleTimeout, "sandbox gone from ListRunning", func() bool {
 		names, err := r.ListRunning()
+		return err == nil && !slices.Contains(names, name)
+	})
+}
+
+// OrphanHarness is a SandboxHarness that can also model a restarted Launcher.
+type OrphanHarness interface {
+	SandboxHarness
+	// Fresh returns a Runner over the backend of the last Sandbox result but
+	// holding none of its in-memory state.
+	Fresh(t *testing.T) runner.Runner
+}
+
+// SandboxOrphan asserts a sandbox left running by a Launcher that died (its
+// stdin never closed, its in-memory handle gone) is found by name through a
+// fresh Runner's ListRunning and stopped by its Kill: what the orphan sweep
+// relies on.
+func SandboxOrphan(t *testing.T, h OrphanHarness) {
+	name := runner.ConnectorSandboxPrefix + "orphan"
+	sb, err := h.Sandbox(t, name).StartConnectorSandbox(name)
+	if err != nil {
+		t.Fatalf("StartConnectorSandbox: %v", err)
+	}
+	t.Cleanup(func() { _ = sb.Stdin.Close() })
+
+	fresh := h.Fresh(t)
+	runnertest.Eventually(t, settleTimeout, "orphan listed by a fresh runner", func() bool {
+		names, err := fresh.ListRunning()
+		return err == nil && slices.Contains(names, name)
+	})
+	if err := fresh.Kill(name); err != nil {
+		t.Fatalf("Kill of an orphan from a fresh runner: got %v, want nil", err)
+	}
+	exited := make(chan struct{})
+	go func() { _ = sb.Wait(); close(exited) }()
+	select {
+	case <-exited:
+	case <-time.After(settleTimeout):
+		t.Fatal("orphan's host process still running after Kill")
+	}
+	runnertest.Eventually(t, settleTimeout, "orphan gone from the fresh runner's ListRunning", func() bool {
+		names, err := fresh.ListRunning()
 		return err == nil && !slices.Contains(names, name)
 	})
 }
