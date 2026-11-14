@@ -471,19 +471,25 @@ let
   # sandbox binds one store path. CGO_ENABLED=0 makes that so: net and os/user
   # would otherwise link the C resolver and libc dynamically. Same src and
   # vendorHash as daemonBin; subPackages does not change the vendored set.
-  connectorHostBin = hostPkgs.buildGoModule {
-    pname = "connector-host";
-    version = spindriftVersion;
-    src = launcherModuleSrc;
-    vendorHash = buildConstants.launcherVendorHash;
-    subPackages = [ "connector-host" ];
-    env.CGO_ENABLED = 0;
-    doCheck = false;
-    meta = {
-      license = lib.licenses.mit;
-      mainProgram = "connector-host";
+  mkConnectorHost =
+    p:
+    p.buildGoModule {
+      pname = "connector-host";
+      version = spindriftVersion;
+      src = launcherModuleSrc;
+      vendorHash = buildConstants.launcherVendorHash;
+      subPackages = [ "connector-host" ];
+      env.CGO_ENABLED = 0;
+      doCheck = false;
+      meta = {
+        license = lib.licenses.mit;
+        mainProgram = "connector-host";
+      };
     };
-  };
+  connectorHostBin = mkConnectorHost hostPkgs;
+  # The Linux build, for the sandbox image: a darwin host's own build would not
+  # run in a Linux container.
+  connectorHostLinuxBin = mkConnectorHost pkgs;
 
   # A revision-independent sibling of launcherBin (issue #2677, ADR 0043):
   # launcherBin bakes `-X main.revision`, so its store path moves on every
@@ -554,6 +560,7 @@ in
     orchestratorBin
     daemonBin
     connectorHostBin
+    connectorHostLinuxBin
     launcherModuleSrc
     launcherCurrencyFileset
     launcherCurrencyBin

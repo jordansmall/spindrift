@@ -10,6 +10,7 @@ let
   # assembled once (issue #2667 review fix) while each row renders the key.
   flakeImageAttrFor = system: name: ".#packages.${system}.${name}";
   runnerRows = (import ./runners/index.nix { }).rows;
+  connectorSandboxImageName = import ./connector-sandbox-image-name.nix;
 in
 rec {
   # Shell-escapes each baked default via escapeShellArg so a value containing
@@ -108,7 +109,14 @@ rec {
       driverVersion,
       ...
     }@args:
-    row.runArtifacts (args // { flakeImageAttr = flakeImageAttrFor systems.linux imageAttrName; })
+    row.runArtifacts (
+      args
+      // {
+        flakeImageAttr = flakeImageAttrFor systems.linux imageAttrName;
+        # mkHarness exposes the sandbox image as this fixed Linux package.
+        connectorSandboxFlakeAttr = flakeImageAttrFor systems.linux connectorSandboxImageName;
+      }
+    )
     // {
       RUNNER_KIND = row.name;
       BOX_ARTIFACT = row.artifact;
@@ -150,11 +158,18 @@ rec {
   # Restores the unknown-argument error that `...` above would swallow: every
   # name must be a formal of the trailer or of some row's `runArtifacts`
   # (mkHarness passes the union of all rows' inputs, whichever row it picked).
-  # `flakeImageAttr` is a row formal but derived above from systems.linux and
-  # imageAttrName, so a caller-passed one would be silently overwritten.
+  # `flakeImageAttr` (from systems.linux and imageAttrName) and
+  # `connectorSandboxFlakeAttr` (from systems.linux and the fixed sandbox image
+  # name) are row formals but derived above, so a caller-passed one would be
+  # silently overwritten.
   runArtifacts =
     let
-      withoutDerived = fns: removeAttrs fns [ "flakeImageAttr" ];
+      withoutDerived =
+        fns:
+        removeAttrs fns [
+          "flakeImageAttr"
+          "connectorSandboxFlakeAttr"
+        ];
       sharedInputs = withoutDerived (
         builtins.foldl' (
           acc: row: acc // builtins.functionArgs row.runArtifacts
@@ -167,7 +182,7 @@ rec {
       unknown = builtins.filter (n: !(allowed ? ${n})) (builtins.attrNames args);
     in
     if unknown != [ ] then
-      throw "preambles.runArtifacts: unknown argument(s) ${builtins.concatStringsSep ", " unknown}: neither the shared trailer nor any runner row (lib/runners) takes them (flakeImageAttr is derived from systems.linux and imageAttrName, never passed)"
+      throw "preambles.runArtifacts: unknown argument(s) ${builtins.concatStringsSep ", " unknown}: neither the shared trailer nor any runner row (lib/runners) takes them (flakeImageAttr and connectorSandboxFlakeAttr are derived from systems.linux plus imageAttrName or the fixed connector sandbox image name, never passed)"
     else if !(builtins.elem args.runtime args.row.runtimes) then
       throw "preambles.runArtifacts: runtime ${args.runtime} is not one of runner row ${args.row.name}'s runtimes (${builtins.concatStringsSep ", " args.row.runtimes}); the document would name a family and a runtime that contradict each other"
     else
@@ -199,6 +214,9 @@ rec {
     imageName = "dummy";
     runtime = "dummy";
     imageDrv = "dummy";
+    connectorSandboxImagePath = "dummy";
+    connectorSandboxImageTag = "dummy";
+    connectorSandboxImageDrv = "dummy";
     nixBuilderImage = "dummy";
     systems = {
       host = "dummy";
@@ -234,7 +252,15 @@ rec {
   # placeholder value. Every string arg is "dummy" and every bool arg false, so
   # a stub value of "true"/"false" marks a boolean artifact, which
   # lib/renderers.nix's renderLauncherArtifactsGo types as a Flag.
-  rowArtifactsStub = row: row.runArtifacts (dummyRunArtifactArgs // { flakeImageAttr = "dummy"; });
+  rowArtifactsStub =
+    row:
+    row.runArtifacts (
+      dummyRunArtifactArgs
+      // {
+        flakeImageAttr = "dummy";
+        connectorSandboxFlakeAttr = "dummy";
+      }
+    );
 
   # The shared trailer's artifacts alone (a row rendering nothing of its own),
   # same placeholder convention as rowArtifactsStub.

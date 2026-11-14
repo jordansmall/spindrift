@@ -32,6 +32,9 @@ type ociAdapter struct {
 	image           string // content-hash tag the Box runs and the archive is re-tagged to
 	imageArchive    string // baked nix store path to the OCI tarball
 	imageDrv        string // baked .drv path; used by nix build for host realize
+	sandboxImage    string // tag of the Connector sandbox image (connector-host only, no Env)
+	sandboxArchive  string // baked nix store path to the sandbox image's OCI tarball
+	sandboxDrv      string // baked .drv path of the sandbox image
 	nixBuilderImage string // fallback container image that carries nix
 	nixVolume       string // named volume for /nix (incremental rebuilds)
 	flakeImageAttr  string // nix flake attr for the image (.#packages.x.agent-image)
@@ -89,6 +92,9 @@ func New(cfg runner.Config, art inputdoc.OCIArtifacts, l runner.KnobLookup, pwd 
 		image:           art.ImageTag.String(),
 		imageArchive:    art.ImageArchive.String(),
 		imageDrv:        art.ImageDrv.String(),
+		sandboxImage:    art.ConnectorSandboxImageTag.String(),
+		sandboxArchive:  art.ConnectorSandboxImageArchive.String(),
+		sandboxDrv:      art.ConnectorSandboxImageDrv.String(),
 		nixBuilderImage: art.NixBuilderImage.String(),
 		nixVolume:       art.NixVolume.String(),
 		flakeImageAttr:  art.FlakeImageAttr.String(),

@@ -506,6 +506,32 @@ in
         touch $out
       '';
 
+  # The Connector sandbox image must carry no ambient configuration: no
+  # `config.Env` key at all (not an empty list), connector-host as the sole
+  # entrypoint, and no shell to exec into (issue #7014).
+  connector-sandbox-image-declares-no-env =
+    pkgs.runCommand "connector-sandbox-image-declares-no-env" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        mkdir img && tar -xf ${nonRustHarness.internals.connectorSandboxImage} -C img
+        cfg=$(jq -r '.[0].Config' img/manifest.json)
+        jq -e '.config | has("Env") | not' "img/$cfg" >/dev/null || {
+          echo "the connector sandbox image must declare no Env, got: $(jq -c '.config.Env' "img/$cfg")" >&2
+          exit 1
+        }
+        entry=$(jq -r '.config.Entrypoint | join(" ")' "img/$cfg")
+        echo "$entry" | grep -qE '^/nix/store/[^/]+-connector-host-[^/]+/bin/connector-host$' || {
+          echo "expected the sole entrypoint to be connector-host, got '$entry'" >&2
+          exit 1
+        }
+        for layer in $(jq -r '.[0].Layers[]' img/manifest.json); do
+          if tar -tf "img/$layer" | grep -qE '(^|/)(bin|sbin|usr/bin|usr/sbin)/([^/]*sh|busybox)$'; then
+            echo "the connector sandbox image must hold no shell; layer $layer has one" >&2
+            exit 1
+          fi
+        done
+        touch $out
+      '';
+
   # The rendered prompt must be baked into the agent-files layer at
   # /agent/prompts so the Box needs no host /nix/store mount, which a macOS
   # podman VM cannot provide.
