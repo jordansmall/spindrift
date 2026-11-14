@@ -2781,29 +2781,61 @@ such as one whose replay hit an early error, therefore makes the run not clean,
 as does a run where the shadow never ran. `pass_start` does not name its
 Driver, but a Box runs one Driver and its log's `dispatch_start` stamp does, so
 the recipe skips a log whose stamp names another Driver (dogfood also runs
-opencode). Each shadow cuts over after 20 consecutive clean dogfood runs. The
+opencode). A Pass has ended once its `pass_usage` op is in the log. A log with a
+Pass not yet ended is a run still in flight, and the recipe skips it, so a live
+daemon's newest log does not break the streak. A run has finished once its
+Dispatch's primary `issue-<n>.log` holds `dispatch_settled`, which the host
+writes only there, after the `-fix-N` and `-conflict-resolve` satellites have
+run. So an unended Pass is dirty in a finished run, satellite logs included,
+and a finished Pass with a missing summary is dirty too. A launcher killed
+mid-Pass (a CI timeout, an out-of-memory kill, a reboot) never writes
+`dispatch_settled`, so on a live host its log reads as in flight and is
+skipped, as is a satellite log whose primary log is missing. After a daemon
+crash or reboot, once the daemon is known to be down, rerun the recipe with
+`finished=1` so those killed runs count dirty instead of being skipped. Logs
+fetched from CI with `gh run download` have all ended, so for them set
+`finished=1`: every log then counts as finished, an unended Pass or a missing
+summary counts dirty, and a satellite fetched without its primary is not
+skipped. Each shadow cuts over after 20 consecutive clean dogfood runs. The
 recipe counts them from the newest log back, with `logs` the directory of Pass
 logs (`.spindrift/logs`, or a directory of artifacts fetched with `gh run
 download <run-id> -n agent-logs-<issue> -D logs`). It orders logs by the
-`started` time in each log's `dispatch_start` stamp, not by file time, which
-`gh run download` resets:
+instant the `started` stamp in each log's `dispatch_start` names, UTC offset
+included, not by file time, which `gh run download` resets. Logs from older
+dispatches carry no stamp and so no `started`, and a malformed stamp reads as
+none; the recipe sorts under `LC_ALL=C`, so those land after every stamped log
+whatever the shell's locale and keep their verdict:
 
 ```sh
 logs=.spindrift/logs
 driver=claude
+finished=
 for f in "$logs"/issue-*.log; do
   [ -e "$f" ] || continue
-  jq -Rrs --arg driver "$driver" '
+  base=${f##*/}; base=${base%.log}; base=${base%-fix-*}; base=${base%-conflict-resolve}
+  primary=${f%/*}/$base.log
+  settled=${finished:+true}
+  [ -n "$settled" ] || settled=$(jq -Rrs '
+    [split("\n")[] | fromjson? | objects | select(.type == "spindrift_op") | .spindrift_op.op]
+    | any(. == "dispatch_settled")' "$primary" 2>/dev/null)
+  jq -Rrs --arg driver "$driver" --argjson settled "${settled:-false}" '
+    def utc: if . == "" then "" else
+      try ((.[0:19] + "Z" | fromdateiso8601)
+      - ((capture("(?<s>[+-])(?<h>\\d\\d):(?<m>\\d\\d)$") // {s: "+", h: "0", m: "0"})
+         | (if .s == "-" then -1 else 1 end) * ((.h | tonumber) * 3600 + (.m | tonumber) * 60))
+      | tostring) catch "" end;
     [split("\n")[] | fromjson? | objects | select(.type == "spindrift_op") | .spindrift_op] as $ops
     | ([$ops[] | select(.op == "dispatch_start") | .dispatch_start][0] // {}) as $start
     | [$ops[] | select(.op == "shadow_summary") | .shadow_summary | select(.driver == $driver)] as $sums
     | ([$ops[] | select(.op == "pass_start")] | length) as $passes
+    | ([$ops[] | select(.op == "pass_usage")] | length) as $ended
     | (if $passes == 0 or ($start.driver // $driver) != $driver then "skip"
+       elif $ended < $passes and ($settled | not) then "skip"
        elif ($sums | length) == $passes
          and all($sums[]; .loaded and (.error // "") == "" and .compared > 0 and .diverged == 0)
        then "clean" else "dirty" end) as $verdict
-    | "\($start.started // "")\t\($verdict)"' "$f"
-done | sort -r | awk -F'\t' '
+    | "\(($start.started // "") | utc)\t\($verdict)"' "$f"
+done | LC_ALL=C sort -r | awk -F'\t' '
   $2 == "skip" { next }
   $2 != "clean" { exit }
   { n++ }
@@ -2813,7 +2845,7 @@ done | sort -r | awk -F'\t' '
 Pass logs mix Driver JSON with host ops and may hold lines that are not JSON;
 `fromjson?` drops those. A log with no `pass_start` op, such as one a Box
 never reached, ran no Pass and is skipped rather than counted or treated as a
-break. A log of the shadowed Driver with Passes and a missing summary breaks the
+break. A finished run of the shadowed Driver with a missing summary breaks the
 count.
 
 ##### Backend read shadow
@@ -2873,9 +2905,9 @@ shadow with an `error` in the summary, and the native path carries on. So does a
 request that outlives the Connector's per-call time budget (5 seconds plus a
 little per request byte), which cancels the in-flight request and fails the
 Connector. A rate limit also records an `error`, and suspends the shadow for
-the rest of the run, so it adds no load once GitHub pushes back; a plain 403 only counts toward `forbidden`. At the end of a run the
-launcher waits up to 30 seconds for queued calls, then aborts the Connector and
-writes the summary.
+the rest of the run, so it adds no load once GitHub pushes back; a plain 403
+only counts toward `forbidden`. At the end of a run the launcher waits up to 30
+seconds for queued calls, then aborts the Connector and writes the summary.
 
 The shadow reads the credential from the host-only
 `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` (knob `githubConnectorToken`), a static
@@ -2900,28 +2932,41 @@ A run is **clean** when its `shadow-<backend>-*.log` holds one `shadow_summary`
 with `loaded: true`, no `error`, `compared` above zero, `diverged` zero and no
 `forbidden`. A `skipped` count alone does not make a run dirty: a dropped sample
 is a call not compared, not a disagreement. A rate limit already sets `error`,
-so it is dirty, as is a run with no summary (a launcher killed before it wrote
-one). The github shadow cuts over after 20 consecutive clean dogfood runs. The
-recipe counts them from the newest log back, with `logs` as above, and orders
-runs by the UTC stamp in the file name, since `gh run download` resets file
-times and the stamp sorts lexically:
+so it is dirty. So is a run with no summary once its launcher (the pid in the
+file name) has exited, since the launcher writes the summary as it exits; while
+that pid still runs, the log is a run in flight and the recipe skips it. The
+recipe checks the pid with `kill -0` on the host it runs on, so for logs
+fetched from CI, which have all ended, set `finished=1`: it counts every missing
+summary dirty. On the live host a reused pid of a dead launcher still reads as
+in flight, which skips a dirty run instead of counting it. `kill -0` also fails
+when the recipe runs as a different user from the launcher, so every live
+launcher's log reads as ended and counts dirty; run it as the daemon's user.
+The github shadow cuts over after 20 consecutive clean dogfood runs. The recipe
+counts them from the newest log back, with `logs` as above, and orders runs by
+the UTC stamp in the file name, since `gh run download` resets file times and
+the stamp sorts lexically:
 
 ```sh
 logs=.spindrift/logs
 backend=github
+finished=
 for f in "$logs"/shadow-"$backend"-*.log; do
   [ -e "$f" ] || continue
   stamp=${f##*/shadow-"$backend"-}; stamp=${stamp%%-*}
-  verdict=$(jq -Rrs '
+  pid=${f##*-}; live=
+  [ -n "$finished" ] || { kill -0 "${pid%.log}" 2>/dev/null && live=1; }
+  verdict=$(jq -Rrs --arg live "$live" '
     [split("\n")[] | fromjson? | objects
      | select(.type == "spindrift_op" and .spindrift_op.op == "shadow_summary")
      | .spindrift_op.shadow_summary] as $sums
-    | if ($sums | length) == 1
+    | if ($sums | length) == 0 and $live != "" then "skip"
+      elif ($sums | length) == 1
          and all($sums[]; .loaded and (.error // "") == "" and .compared > 0
                           and .diverged == 0 and (.forbidden // 0) == 0)
       then "clean" else "dirty" end' "$f")
   printf '%s\t%s\n' "$stamp" "$verdict"
 done | sort -r | awk -F'\t' '
+  $2 == "skip" { next }
   $2 != "clean" { exit }
   { n++ }
   END { print n + 0, "consecutive clean runs (cut-over bar: 20)" }'
