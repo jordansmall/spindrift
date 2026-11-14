@@ -101,6 +101,9 @@ func bootstrapWith(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descri
 	}
 	warnBoxAccessReadWrite(seedConfig, os.Stderr)
 
+	// Ahead of every gate so a start that fails one still reaps.
+	sweepOrphanedSandboxes(seedConfig, os.Stderr)
+
 	// One-time relocation (issue #2138): fold a legacy top-level logs/ into
 	// .spindrift/logs before anything reads or creates a log path this run.
 	if err := dispatch.MigrateLegacyLogDir(pwd); err != nil {
@@ -185,9 +188,6 @@ func bootstrapWith(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descri
 		}
 	} else if err := r.IsReady(); err != nil {
 		return nil, err
-	}
-	if c.ConnectorSandbox {
-		sandbox.ReapOrphans(r, os.Stderr)
 	}
 
 	lw := localloop.Wire(localloopConfig(c), it)

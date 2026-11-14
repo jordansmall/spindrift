@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"spindrift.dev/launcher/internal/connectorsandbox/sandbox"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // sweepOrphanedSandboxes is the one owner of when the orphan sweep runs: only
@@ -18,13 +19,13 @@ func sweepOrphanedSandboxes(c config, stderr io.Writer) {
 		return
 	}
 	pwd, err := os.Getwd()
+	var r runner.Runner
 	if err == nil {
-		r, rerr := runnerForKind(c, runnerConfig(c), pwd)
-		if rerr == nil {
-			sandbox.ReapOrphans(r, stderr)
-			return
-		}
-		err = rerr
+		r, err = runnerForKind(c, runnerConfig(c), pwd)
 	}
-	fmt.Fprintf(stderr, "warning: reaping orphaned Connector sandboxes: %v\n", err)
+	if err != nil {
+		fmt.Fprintf(stderr, "warning: reaping orphaned Connector sandboxes: %v\n", err)
+		return
+	}
+	sandbox.ReapOrphans(r, stderr)
 }

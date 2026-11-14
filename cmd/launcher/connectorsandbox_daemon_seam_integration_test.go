@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -25,7 +26,26 @@ const daemonSlots = 2
 func newDaemonRig(t *testing.T, runtime string) sandboxRig {
 	t.Helper()
 	box := seamtest.PodmanRun{Outcome: seamOutcome("blocked"), HoldUntil: "set by the rig"}
-	rig := newSandboxRig(t, runtime, true, []seamtest.PodmanRun{box, box}, []int{7, 8}, nil)
+	return newDaemonRigWith(t, runtime, daemonRigOpts{runs: []seamtest.PodmanRun{box, box}, issues: []int{7, 8}})
+}
+
+// daemonRigOpts is what newDaemonRigWith varies: the scripted runs, the ready
+// issues and the containers already running; execDoctor makes the nix fake run
+// the real `doctor` preflight instead of answering it, and imageAbsent leaves
+// the Box image unloaded.
+type daemonRigOpts struct {
+	runs        []seamtest.PodmanRun
+	issues      []int
+	running     []string
+	execDoctor  bool
+	imageAbsent bool
+}
+
+// newDaemonRigWith is newDaemonRig over the given options.
+func newDaemonRigWith(t *testing.T, runtime string, o daemonRigOpts) sandboxRig {
+	t.Helper()
+	execDoctor := o.execDoctor
+	rig := newSandboxRig(t, runtime, sandboxRigOpts{shadow: true, runs: o.runs, issues: o.issues, running: o.running, imageAbsent: o.imageAbsent})
 
 	setDocSettings(t, rig.docPath, map[string]string{
 		"REPO_SLUG": smokeRepo, "MAX_PARALLEL": "2", "DAEMON_IDLE_FLOOR": "1s", "DAEMON_IDLE_CAP": "2s",
@@ -34,8 +54,14 @@ func newDaemonRig(t *testing.T, runtime string) sandboxRig {
 	seamGit(t, gitEnv, rig.workDir, "init", "-q", "-b", "main")
 	seamGit(t, gitEnv, rig.workDir, "remote", "add", "origin", "https://github.com/"+smokeRepo+".git")
 
+	flags := rig.flags
+	if execDoctor {
+		// --no-build is a dispatch flag, which doctor rejects; the real
+		// wrapper bakes none, and a doctor-only rig starts no child.
+		flags = slices.DeleteFunc(slices.Clone(flags), func(f string) bool { return f == "--no-build" })
+	}
 	for k, v := range seamtest.WriteFakeConfig(t, "nix", seamtest.NixConfig{
-		Record: filepath.Join(rig.recDir, "nix.jsonl"), Exec: rig.bin, ExecArgs: rig.flags,
+		Record: filepath.Join(rig.recDir, "nix.jsonl"), Exec: rig.bin, ExecArgs: flags, ExecDoctor: execDoctor,
 	}) {
 		rig.env[k] = v
 	}
@@ -87,7 +113,7 @@ func TestSeamDaemonRunsEachHoldOneSandbox(t *testing.T) {
 
 func runDaemonSandboxes(t *testing.T, runtime string, stopInFlight bool) {
 	rig := newDaemonRig(t, runtime)
-	recPath := rig.recDir + "/" + runtime + ".jsonl"
+	recPath := filepath.Join(rig.recDir, runtime+".jsonl")
 	t.Cleanup(func() { _ = os.WriteFile(rig.release, nil, 0o644) })
 
 	p := seamtest.Start(t, rig.cmd)
@@ -113,9 +139,7 @@ func runDaemonSandboxes(t *testing.T, runtime string, stopInFlight bool) {
 	if stopInFlight {
 		p.Signal(t, syscall.SIGTERM)
 		runnertest.Eventually(t, time.Minute, "the daemon to forward the stop", func() bool { return countEvents(p.Stdout(), "shutdown") > 0 })
-		// The children latch the forwarded stop silently, so give them time to
-		// before the Boxes are released, or a run could end unsignalled.
-		time.Sleep(300 * time.Millisecond)
+		awaitStopLatched()
 	}
 	if err := os.WriteFile(rig.release, nil, 0o644); err != nil {
 		t.Fatal(err)
@@ -201,5 +225,40 @@ func setDocSettings(t *testing.T, path string, set map[string]string) {
 	}
 	if err := os.WriteFile(path, b, 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestSeamDaemonStartReapsOrphanedSandboxes starts a daemon while the runtime
+// still lists a sandbox a hard-killed launcher left behind and no issue is
+// ready, so the daemon never starts a child launcher. The daemon's startup
+// `doctor` preflight must sweep the orphan itself, and only it. The Box image
+// is absent, as after an upgrade changed its tag: listing and killing
+// sandboxes needs no image, so the sweep must not wait for a build.
+func TestSeamDaemonStartReapsOrphanedSandboxes(t *testing.T) {
+	orphan, others := stageOrphan(t)
+	rig := newDaemonRigWith(t, "podman", daemonRigOpts{running: append([]string{orphan}, others...), execDoctor: true, imageAbsent: true})
+	recPath := filepath.Join(rig.recDir, "podman.jsonl")
+
+	p := seamtest.Start(t, rig.cmd)
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("daemon stdout:\n%s\ndaemon stderr:\n%s", p.Stdout(), p.Stderr())
+		}
+	})
+	// The sweep precedes doctor's verdict, so it lands whether or not the
+	// fake environment lets startup proceed.
+	runnertest.Eventually(t, time.Minute, "the daemon's doctor to reap the orphan", func() bool {
+		return countArgv(seamtest.ReadRecord(t, recPath), "rm", "-f", "id-"+orphan) > 0
+	})
+	p.Signal(t, syscall.SIGTERM)
+	res := p.Wait(t)
+
+	recs := seamtest.ReadRecord(t, recPath)
+	assertOrphanReaped(t, recs, orphan, others)
+	if out := res.Stdout + res.Stderr; strings.Contains(out, "reaping orphaned Connector sandboxes") {
+		t.Errorf("the sweep warned instead of running:\n%s", out)
+	}
+	if got := countEvents(res.Stdout, "child_start"); got != 0 {
+		t.Errorf("the daemon started %d children, want none", got)
 	}
 }

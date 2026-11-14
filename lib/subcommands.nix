@@ -55,7 +55,7 @@
   {
     name = "doctor";
     usage = "[--verbose|-v] [--butler] [--research]";
-    doc = "check configuration validity, forge credentials, repository connectivity, and label presence; distinct exit code per failure class (see docs/reference.md)";
+    doc = "check configuration validity, forge credentials, repository connectivity, and label presence; distinct exit code per failure class (see docs/reference.md); with CONNECTOR_SANDBOX on, also stops orphaned Connector sandboxes";
   }
   {
     name = "reconcile";
