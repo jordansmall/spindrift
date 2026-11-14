@@ -120,6 +120,12 @@ type bwrapAdapter struct {
 	// posture).
 	syscallFilterPath string
 
+	// connectorHost is the store path of the static connector-host package
+	// (binary at bin/connector-host), the one path a Connector sandbox binds.
+	// connectorHostDrv realizes it when absent.
+	connectorHost    string
+	connectorHostDrv string
+
 	// mu guards the maps below: running, the box-name to live-process map Kill
 	// consults (issue #649), plus provisioning and prefetchFallbackLogged. A bwrap sandbox is an unnamed child process with no daemon to query
 	// by name, so Run tracks its own handle here for Terminate, the one caller
@@ -203,6 +209,8 @@ func New(cfg runner.Config, art inputdoc.BwrapArtifacts, l runner.KnobLookup, pw
 		pidsLimit:          cfg.PidsLimit,
 		memoryLimit:        cfg.MemoryLimit,
 		syscallFilterPath:  art.SyscallFilter.String(),
+		connectorHost:      art.ConnectorHost.String(),
+		connectorHostDrv:   art.ConnectorHostDrv.String(),
 	}, nil
 }
 
@@ -521,6 +529,20 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box runner.Box, nixVarLower stri
 	}
 	args = append(args, "--", "/agent/entrypoint.sh")
 	return args
+}
+
+// buildSandboxArgs renders bwrap's argv for the Connector sandbox: no network
+// or env, and only the connector-host store path bound, read-only, where a Box
+// binds the whole /nix/store. --seccomp is unconditional; the caller must place
+// the filter on seccompFilterFD or refuse to start.
+func (a *bwrapAdapter) buildSandboxArgs() []string {
+	return []string{
+		"--unshare-all", "--clearenv", "--cap-drop", "ALL", "--new-session", "--die-with-parent",
+		"--proc", "/proc", "--dev", "/dev",
+		"--ro-bind", a.connectorHost, a.connectorHost,
+		"--seccomp", strconv.Itoa(seccompFilterFD),
+		"--", a.connectorHost + "/bin/connector-host",
+	}
 }
 
 // execTarget computes the top-level host-exec'd program and argv for box's bwrap
