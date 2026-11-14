@@ -3501,18 +3501,30 @@ Driver Connectors); a run that loads none starts none.
   --pids-limit=128 --memory=512m`: no `-t` (a tty would corrupt the frame
   stream), no env, no host volumes or bind mounts (podman adds its default in-memory tmpfs under a read-only root), no network. These are fixed, not the Box's knobs,
   so nothing a Box is configured with reaches it.
+- **Isolation under bwrap.** There is no image: the Launcher runs `bwrap
+  --unshare-all --clearenv --cap-drop ALL --new-session --die-with-parent
+  --proc /proc --dev /dev --ro-bind <host> <host> --seccomp 3 --
+  <host>/bin/connector-host`, where `<host>` is the static `connector-host`
+  store path from the run document's `CONNECTOR_HOST` (realized from
+  `CONNECTOR_HOST_DRV` when absent). Only that one store path is bound, never
+  the whole `/nix/store` a Box sees, and the ADR 0054 seccomp filter is
+  required: without it the sandbox does not start. It runs in its own cgroup,
+  so `ListRunning` lists it under its `spindrift-connector-sandbox-` name, with
+  the same fixed `pids.max` 128 and `memory.max` 512 MiB caps as above, not
+  the Box's knobs.
 - **Failure.** A sandbox that cannot start fails the run with
   `ErrConnectorSandboxStart`, naming the runner and its stderr. There is no
-  in-process fallback. Under `bwrap` the sandbox fails closed the same way
-  until [#7015](https://github.com/jordansmall/spindrift/issues/7015) lands.
+  in-process fallback. On a bwrap host that denies unprivileged user
+  namespaces, bwrap exits at once and its message is the stderr named.
 - **What stays in-process.** The Box (`driver-exec`) still loads its Driver
   Connectors in its own process. `doctor`, `preview` and the daemon process's
   own probes are not runs, so they load in-process too.
-- **Testing.** The `seamtest` podman fake checks a sandbox `run`'s argv against
-  the isolation above, refusing one that weakens it, then execs the real
-  `connector-host`. The `PodmanConfig.RefuseSandbox` field scripts a start
-  failure. The forge Conformance contracts and the Driver Conformance kit run
-  with the host inside it (`launcher-go-seam-test`).
+- **Testing.** The `seamtest` podman and bwrap fakes check a sandbox's argv
+  against the isolation above, refusing one that weakens it, then exec the real
+  `connector-host`. The `RefuseSandbox` field of `PodmanConfig` and
+  `BwrapConfig` scripts a start failure. The forge Conformance contracts and
+  the Driver Conformance kit run with the host inside each
+  (`launcher-go-seam-test`).
 
 #### Pinned wazero
 

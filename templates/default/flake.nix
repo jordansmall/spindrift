@@ -254,7 +254,7 @@
             # };
             # infra = {
             #   connector = {
-            #     # when enabled, the launcher loads its own Connectors (the github read path, read shadows, token introspection, Driver Connectors) into one sandbox container per run, started on the first Connector load, instead of in the launcher process; a run that loads no Connector starts none. A sandbox that cannot start fails the run with a named error and never falls back to in-process loading. OCI runtimes only for now: under bwrap the sandbox fails closed. Off by default
+            #     # when enabled, the launcher loads its own Connectors (the github read path, read shadows, token introspection, Driver Connectors) into one sandbox container per run, started on the first Connector load, instead of in the launcher process; a run that loads no Connector starts none. A sandbox that cannot start fails the run with a named error and never falls back to in-process loading. Under bwrap the sandbox binds only the connector-host store path. Off by default
             #     sandbox = false;
             #   };
             #   devShell = {
