@@ -2292,6 +2292,7 @@ in
         "driverEntry"
         "daemonBin"
         "connectorSandboxImage"
+        "launcherBin"
         "imageAttrName"
         "runInputDocumentFile"
         "backendBundleDirs"

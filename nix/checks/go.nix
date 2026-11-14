@@ -1344,6 +1344,66 @@ driverGoTests
   '';
 }
 // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+  # The escape primitives (issue #7017) must never reach a release artifact.
+  # The escape build and the release host are separate derivations, so a hit
+  # means a production build picked up the tag or the escape image shipped.
+  # The sandbox image is scanned by unpacking it: its gzipped layers hide the
+  # connector-host reference from closureInfo.
+  connector-host-escapeprobe-absent-from-release =
+    let
+      release = fixtures.harness.internals;
+      closure = pkgs.closureInfo {
+        rootPaths = [
+          release.daemonBin
+          release.launcherBin
+          release.boxBin
+          release.orchestratorBin
+          release.driverExecBin
+          fixtures.connectorHost
+        ];
+      };
+    in
+    pkgs.runCommand "connector-host-escapeprobe-absent-from-release" { } ''
+      # The escape build carries the module name, so the scans below can fail.
+      grep -qaF spindrift_escape ${fixtures.connectorHostEscape}/bin/connector-host || {
+        echo "the escape build holds no spindrift_escape string; the scans prove nothing" >&2
+        exit 1
+      }
+      if grep -E -- escapeprobe ${closure}/store-paths; then
+        echo "the release closure holds an escapeprobe path" >&2
+        exit 1
+      fi
+      # grep exits 1 on no match and 2 on error; only 1 is a pass.
+      while read -r path; do
+        rc=0
+        grep -rlaF spindrift_escape "$path" || rc=$?
+        if [ "$rc" -eq 0 ]; then
+          echo "a release path holds the escape host module name" >&2
+          exit 1
+        elif [ "$rc" -ne 1 ]; then
+          echo "grep failed on $path (exit $rc)" >&2
+          exit 1
+        fi
+      done < ${closure}/store-paths
+
+      mkdir img && tar -xf ${release.connectorSandboxImage} -C img
+      find img -name layer.tar >layers
+      while IFS= read -r layer; do tar -xf "$layer" -C img; done <layers
+      found=
+      for host in img/nix/store/*-connector-host-[0-9]*/bin/connector-host; do
+        test -e "$host" && found=1
+      done
+      test -n "$found" || {
+        echo "the release sandbox image holds no connector-host; the scan proves nothing" >&2
+        exit 1
+      }
+      if grep -rlaE 'spindrift_escape|escapeprobe' img; then
+        echo "the release sandbox image holds the escape host" >&2
+        exit 1
+      fi
+      touch $out
+    '';
+
   # The Connector host is bound into a sandbox as one file (issue #7013), so a
   # dynamic interpreter or library it needs would not be there.
   connector-host-static =
