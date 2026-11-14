@@ -192,12 +192,18 @@ func sandboxRun(tool string, cfg PodmanConfig, args []string, stderr io.Writer) 
 		fmt.Fprintln(stderr, cfg.RefuseSandbox)
 		return 125
 	}
-	if cfg.ConnectorHost == "" {
+	return execConnectorHost(tool, cfg.ConnectorHost, stderr)
+}
+
+// execConnectorHost replaces the fake with the connector-host binary at host.
+// It returns only when that is impossible.
+func execConnectorHost(tool, host string, stderr io.Writer) int {
+	if host == "" {
 		fmt.Fprintf(stderr, "%s fake: a Connector sandbox run needs connector_host in the config\n", tool)
 		return fakeConfigExit
 	}
-	err := syscall.Exec(cfg.ConnectorHost, []string{"connector-host"}, os.Environ())
-	fmt.Fprintf(stderr, "%s fake: exec %s: %v\n", tool, cfg.ConnectorHost, err)
+	err := syscall.Exec(host, []string{"connector-host"}, os.Environ())
+	fmt.Fprintf(stderr, "%s fake: exec %s: %v\n", tool, host, err)
 	return 1
 }
 
