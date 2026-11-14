@@ -3483,6 +3483,37 @@ This is protocol version **0.3.0**. The host is
   is proven the same way by `connector-claude-conformance` in its subflake,
   which sets `SPINDRIFT_DRIVER_CONNECTOR_WASM`.
 
+#### Connector sandbox
+
+`CONNECTOR_SANDBOX` (flake option `infra.connector.sandbox`; see
+[flake-options.md](flake-options.md)) is opt-in and off by default. Off, the
+Launcher loads every Connector it hosts into its own process. On, it loads them
+into one sandbox container per run, which the `connector-host` binary serves
+over the container's stdio, one session per Connector. The sandbox starts
+lazily on the first Connector load and is shared by every Launcher-hosted
+Connector in the run (the github read path, read shadows, token introspection,
+Driver Connectors); a run that loads none starts none.
+
+- **Isolation.** The sandbox image is built minimal, holding only
+  `connector-host`, and carries no `Env`. On an OCI runtime the Launcher runs
+  it as `run -i --rm --name spindrift-connector-sandbox-<pid>-<nanos>
+  --network=none --cap-drop=all --security-opt=no-new-privileges --read-only
+  --pids-limit=128 --memory=512m`: no `-t` (a tty would corrupt the frame
+  stream), no env, no host volumes or bind mounts (podman adds its default in-memory tmpfs under a read-only root), no network. These are fixed, not the Box's knobs,
+  so nothing a Box is configured with reaches it.
+- **Failure.** A sandbox that cannot start fails the run with
+  `ErrConnectorSandboxStart`, naming the runner and its stderr. There is no
+  in-process fallback. Under `bwrap` the sandbox fails closed the same way
+  until [#7015](https://github.com/jordansmall/spindrift/issues/7015) lands.
+- **What stays in-process.** The Box (`driver-exec`) still loads its Driver
+  Connectors in its own process. `doctor`, `preview` and the daemon process's
+  own probes are not runs, so they load in-process too.
+- **Testing.** The `seamtest` podman fake checks a sandbox `run`'s argv against
+  the isolation above, refusing one that weakens it, then execs the real
+  `connector-host`. The `PodmanConfig.RefuseSandbox` field scripts a start
+  failure. The forge Conformance contracts and the Driver Conformance kit run
+  with the host inside it (`launcher-go-seam-test`).
+
 #### Pinned wazero
 
 The sandbox is only as sound as wazero, so `cmd/launcher/go.mod` pins
@@ -3503,7 +3534,7 @@ indirect-only requirement, or a `replace` or `exclude` that names it.
   `go mod tidy` in `cmd/launcher`, refresh the vendor hashes in
   `lib/build-constants.nix` (each `*VendorHash`: set it to `lib.fakeHash`,
   build, copy the hash Nix reports), and run the gate.
-- **Fuzzing the host.** Six targets in `cmd/launcher/internal/connectorhost`
+- **Fuzzing the host.** Seven targets in `cmd/launcher/internal/connectorhost`
   cover what the host takes from a guest and what crosses the out-of-process
   pipe; run them after bumping the pin, since wazero decodes and compiles every
   module the host loads.
@@ -3527,6 +3558,10 @@ indirect-only requirement, or a `replace` or `exclude` that names it.
   the Launcher arbitrary bytes as a hostile host's reply to a load, handshake or
   call: an answer must pass the output checks, and a failure must name its
   sentinel. Their seeds run in the normal `go test` lane.
+  `FuzzSessionsDemux` (`sessions_fuzz_test.go`) feeds the Launcher's session
+  layer arbitrary bytes as a hostile host's stream after a valid hello: the demux
+  must end, fail the host and leave no open session able to block a read or a
+  wait.
 
 ### Targeting repos that define their own devShell toolchain
 
