@@ -128,6 +128,13 @@ rebase, re-run it only if the rebase hit conflicts or brought in changes to
 files the branch touches. A Box's worker subagents run targeted checks only —
 its coordinator agent owns the full gate.
 
+The gate holds no Connector check: a Connector's Go and conformance checks run
+only from its own subflake, in CI's `connector` lane. A change touching a
+Connector contract path (`.github/scripts/ci-connector-contract`) runs
+`nix run .#connector-dev -- <name> flake check` for each first-party Connector
+under `connectors/`; a change to one Connector, or to its core package
+`cmd/launcher/internal/{forge,driver}/<name>`, runs that one's.
+
 Keep `-L` (`--print-build-logs`) on every single-attr `nix build`: without it
 a failure prints only a store path and a `[build failed]` line, costing a turn
 on `nix log`. Pass no `-j`, `--max-jobs`, or `--cores`: the Box's `nix.conf`

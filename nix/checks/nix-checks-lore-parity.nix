@@ -185,6 +185,12 @@ let
       # Keeps workers off the full gate, which the coordinator owns (issue #4408).
       clause = "worker subagents run targeted checks only — its coordinator agent owns the full gate";
     }
+    {
+      name = "connector-contract-check";
+      # Connector conformance runs outside the gate (issue #7011), so a surface
+      # that drops this step or its trigger lets a contract break pass unchecked.
+      clause = "a change touching a Connector contract path (.github/scripts/ci-connector-contract) runs nix run .#connector-dev -- <name> flake check for each first-party Connector";
+    }
   ];
 
   clauseCheck = c: {
