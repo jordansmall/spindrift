@@ -438,6 +438,55 @@ continue its Record ID. The per-byte cost of a decode is unchanged, so #6799
 still has the other two options above open: cut that per-byte cost, or the
 compiler with a per-user cache.
 
+## Amendment (issue #6850): Pass-log lines decode in batches
+
+The Driver gains `driver.decodeBatch`, taking `{decoder, lines}` and returning
+one event array per line, decoded in order on one stateful decoder. It is
+additive within 0.3 and gated by a capability of the same name: a Connector
+without it is decoded one line per call, as before, and `driverkit`'s
+`Strategy.BatchDecoder()` hides the difference. A `spindrift_op` line in a batch
+decodes as core's host op, as in a single call. A request packs lines under the
+`maxRequest` cap; a request that fails, or whose answer is not one element per
+line, makes each of its lines one `unparsed` event, as a failed per-line call
+does, and a rejected element makes only its own line one. The request limits
+(time, memory, output) scale with request bytes, so a batch gets one fixed base
+rather than one per line, and never more than its bytes allow any request.
+Batch and per-line decoding agree for a well-behaved guest: a guest JSON-RPC
+error fails only that line on `driver.decode` but every line of the request on
+`driver.decodeBatch`. SDK guests error only on an unknown handle, which fails
+every line in both modes.
+
+The shadow replay decodes its Connector side in batches of about 1 MiB of
+lines and still compares line by line, so a divergence reports the same line
+number. The conformance kit checks that a Connector's batch answers equal its
+per-line answers.
+
+`BenchmarkConnectorDecodeBatch` runs the corpora of `BenchmarkConnectorDecode`
+through a batch decoder in 1 MiB batches, the shadow's bound. Medians of 3,
+`-benchtime=1x`, one run on a shared host that was slower than #6849's (the
+per-call dogfood interpreter row is 104 ms there against 80.3 ms above), so
+compare the rows within this table, not with the ones above. Native has no
+batch decoder, so its batched row is the per-line fallback and shows run noise:
+
+| per line | native | interpreter | compiler |
+|---|---|---|---|
+| Decode, dogfood corpus, per call | 170 µs | 104 ms | 14.5 ms |
+| Decode, dogfood corpus, batched | 183 µs | 96.6 ms | 13.7 ms |
+| Decode, 769-line corpus, per call | 32.5 µs | 19.4 ms | 2.65 ms |
+| Decode, 769-line corpus, batched | 41.2 µs | 20.9 ms | 2.62 ms |
+
+On the dogfood corpus batching saves about 7 percent on the interpreter and 5
+percent on the compiler, which is the per-Call base the #6849 fit puts at about
+5 ms of 80. The cost is per byte, and batching leaves the bytes alone. On the
+small-line corpus there is no measurable saving. Batching therefore removes the
+per-line base but does not change the whole-log picture above.
+
+`BenchmarkConnectorShadowReplay` now batches through `shadow.Run`. Three runs
+on `large-pass` took 55.4 s, 49.2 s and 43.6 s, with no divergences: median
+0.41 of the 2-minute `shadowBudget`, against 53.2 s and 0.44 under #6849. The
+spread is wider than the difference, so the headroom for the largest Pass is
+unchanged in practice, and a log above roughly 5 MB still exhausts the budget.
+
 ## Amendment (issue #6796): a Connector's Driver row reaches the binaries
 
 `spindrift.connectors.<name>.driver` carries a Driver row, and the flake module
