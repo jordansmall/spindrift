@@ -728,6 +728,22 @@ let
       hostPkgs = pkgs;
     }).connectorHostBin;
 
+  # connector-host with the test-only escape primitives (issue #7017), for the
+  # sandbox escape tests. The distinct pname keeps the build out of every
+  # production name, which checks match on to prove none ships.
+  connectorHostEscape = connectorHost.overrideAttrs (_: {
+    pname = "connector-host-escapeprobe";
+    tags = [ "escapeprobe" ];
+  });
+
+  # The Connector sandbox image around that host, under its own image name so
+  # loading it never replaces an operator's real sandbox image.
+  connectorSandboxImageEscape = import ../lib/connector-sandbox-image.nix {
+    inherit pkgs;
+    connectorHost = connectorHostEscape;
+    name = "spindrift-connector-sandbox-escapeprobe";
+  };
+
   # Issue #6796: a Consumer importing the fixture Driver Connector, and the
   # artifacts its row renders for the launcher (input document) and the Box
   # (rows file). The Go tests read these instead of hand-written rows. The
@@ -825,6 +841,8 @@ in
     seamFixtures
     connectorWasm
     connectorHost
+    connectorHostEscape
+    connectorSandboxImageEscape
     harness
     dogfoodBwrapHarness
     dogfoodOpencodeHarness
