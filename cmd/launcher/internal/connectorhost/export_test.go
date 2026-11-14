@@ -85,3 +85,22 @@ func ReportedError(body string) error {
 // NetworkConnector wraps n in a Connector with no guest module, so the host
 // helpers that read only the Network are testable without a wasm fixture.
 func NetworkConnector(n *Network) *Connector { return &Connector{network: n} }
+
+// HostCalls exposes a Network's Launcher-side Host call handler to the external
+// tests.
+type HostCalls struct{ h *networkCalls }
+
+// NewHostCalls returns the handler a network Connector over n would serve its
+// Host calls with.
+func NewHostCalls(n *Network) *HostCalls { return &HostCalls{&networkCalls{n: n}} }
+
+// HTTPRequest exposes the handler's httpRequest.
+func (t *HostCalls) HTTPRequest(ctx context.Context, raw []byte, bufCap int) (int, []byte, http.Header, error) {
+	return t.h.httpRequest(ctx, raw, bufCap)
+}
+
+// Refuse exposes the handler's refuse.
+func (t *HostCalls) Refuse(call, why string) error { return t.h.refuse(call, why) }
+
+// Failed reports whether the handler has audited a fatal failure.
+func (t *HostCalls) Failed() bool { return t.h.failed }

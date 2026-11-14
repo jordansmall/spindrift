@@ -221,10 +221,12 @@ type Connector struct {
 	memCap *capAllocator
 	// network is the grant LoadNetwork gave, nil for Load.
 	network *Network
+	// host serves network's Host calls; nil exactly when network is. Its failed
+	// flag says a Host call already audited this call's failure. Guarded by mu.
+	host *networkCalls
 	// hostErr is a Host call's fatal failure, set just before it panics to unwind
-	// the guest; invoke reports it in place of the trap, and call reads it to
-	// tell an already-audited failure from one it must audit. Reset by each
-	// invoke. Guarded by mu.
+	// the guest; invoke reports it in place of the trap. Reset by each invoke.
+	// Guarded by mu.
 	hostErr error
 	// respHeader is the last http_request's response headers, nil when it left
 	// none; http_response_header reads it. Reset by each invoke. Guarded by mu.
@@ -430,6 +432,9 @@ func (c *Connector) Call(ctx context.Context, method string, params, result any)
 	if c.dead {
 		return fail(ErrUnusable)
 	}
+	if c.host != nil {
+		c.host.failed = false
+	}
 	alloc, call, err := c.callExports()
 	if err != nil {
 		return fail(err)
@@ -443,7 +448,7 @@ func (c *Connector) Call(ctx context.Context, method string, params, result any)
 		c.err = fail(err)
 		// A Host call's fatal failure was audited where it happened; any other
 		// failed call (a rejected result, a trap, a budget or memory limit) has not.
-		if c.network != nil && c.hostErr == nil {
+		if c.host != nil && !c.host.failed {
 			c.network.recordFailure(DecisionFailed, c.err)
 		}
 		// Not ctx: a cancelled caller must not stop the module being released.
@@ -614,6 +619,9 @@ func loadWith(ctx context.Context, wasm []byte, cfg wazero.RuntimeConfig, cache 
 		WithCoreFeatures(api.CoreFeaturesV2 &^ (api.CoreFeatureReferenceTypes | api.CoreFeatureSIMD | api.CoreFeatureMultiValue))
 	rt := wazero.NewRuntimeWithConfig(ctx, cfg)
 	c := &Connector{rt: rt, memCap: &capAllocator{ceiling: memoryCapBytes}, network: network}
+	if network != nil {
+		c.host = &networkCalls{n: network}
+	}
 	h, err := c.load(ctx, wasm)
 	if err == nil {
 		err = CheckProtocol(h.ProtocolVersion)
