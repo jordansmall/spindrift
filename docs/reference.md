@@ -3089,7 +3089,8 @@ This is protocol version **0.3.0**. The host is
 - **Driver capabilities.** A Driver Connector advertises
   capability `"driver"`, meaning it serves the first six methods below, and
   optionally `"driver.resolveExit"`, `"driver.toolPhase"`, `"driver.toolKind"`,
-  `"driver.modelFamily"` and (0.1.1) `"driver.streamFilter"`. The first four
+  `"driver.modelFamily"`, (0.3.0) `"driver.decodeBatch"` and (0.1.1)
+  `"driver.streamFilter"`. The first five
   each serve the method of the same name; `driver.streamFilter` serves the four
   stream methods. The
   host's `DriverStrategy` builds a
@@ -3110,6 +3111,7 @@ This is protocol version **0.3.0**. The host is
   | `driver.toolPhase` (optional) | `{tool, input}`, `input` the call's raw JSON | `{phase}` |
   | `driver.toolKind` (optional) | `{tool}` | `{kind}` |
   | `driver.modelFamily` (optional) | `{model}` | `{label, rank}` |
+  | `driver.decodeBatch` (optional, `driver.decodeBatch`) | `{decoder, lines}` | an array with one event array per line |
   | `driver.newStreamFilter` (optional, `driver.streamFilter`) | `{}` | `{filter}`, an opaque handle |
   | `driver.streamWrite` (optional, `driver.streamFilter`) | `{filter, data}` | `{data}` |
   | `driver.streamFlush` (optional, `driver.streamFilter`) | `{filter}` | `{data}` |
@@ -3123,7 +3125,14 @@ This is protocol version **0.3.0**. The host is
   The host decodes guest events strictly
   (an unknown field or kind rejects the batch), and a rejected or failed
   `driver.decode` becomes one `unparsed` event carrying the line, so the
-  classifier still sees it. `driver.resolveExit` gets the Pass log's content,
+  classifier still sees it. `driver.decodeBatch` decodes many lines in order on
+  one decoder, and the host uses it where the Connector advertises the
+  capability, one line per call otherwise; the shadow replay batches about 1 MiB
+  of lines a call. Requests are packed under the 8 MiB request cap. A
+  `spindrift_op` line in a batch decodes as core's host op. A failed batch
+  request, or an answer that is not one element per line, makes each of its
+  lines one `unparsed` event; a rejected element makes only its own line one.
+  `driver.resolveExit` gets the Pass log's content,
   not a path: the host reads the file, because a Connector has no filesystem.
   The log crosses as a JSON string, so invalid UTF-8 in it reaches the guest
   as U+FFFD and the content is not byte-exact. A log whose request would pass
