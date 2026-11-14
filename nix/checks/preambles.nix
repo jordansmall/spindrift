@@ -61,6 +61,8 @@ let
     passwdFileDrv = "/nix/store/eee-passwd.drv";
     groupFileDrv = "/nix/store/fff-group.drv";
     syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
+    connectorHostPath = "/nix/store/jjj-connector-host";
+    connectorHostDrv = "/nix/store/jjj-connector-host.drv";
     agentClosurePath = "/nix/store/ggg-agent-closure";
     prefetch = "";
     imagePath = "/nix/store/ccc-image";
@@ -152,6 +154,8 @@ let
     # (issue #2670).
     syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
     syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
+    connectorHostPath = "/nix/store/jjj-connector-host";
+    connectorHostDrv = "/nix/store/jjj-connector-host.drv";
   };
 in
 runArtifactsRowChecks allRows
@@ -466,6 +470,12 @@ runArtifactsRowChecks allRows
       out.SYSCALL_FILTER_DRV == "/nix/store/fake-syscall-filter-path/filter.bpf.drv"
     ) "runArtifacts (bwrap) must set SYSCALL_FILTER_DRV, got: ${builtins.toJSON out}";
     assert assertMsg (
+      out.CONNECTOR_HOST == "/nix/store/jjj-connector-host"
+    ) "runArtifacts (bwrap) must set CONNECTOR_HOST, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.CONNECTOR_HOST_DRV == "/nix/store/jjj-connector-host.drv"
+    ) "runArtifacts (bwrap) must set CONNECTOR_HOST_DRV, got: ${builtins.toJSON out}";
+    assert assertMsg (
       out ? BAKED_PREFETCH
     ) "runArtifacts (bwrap) must set BAKED_PREFETCH, got: ${builtins.toJSON out}";
     assert assertMsg (
@@ -664,6 +674,8 @@ runArtifactsRowChecks allRows
           "GROUP_FILE_DRV"
           "NIX_CONFIG_FILE_DRV"
           "SYSCALL_FILTER_DRV"
+          "CONNECTOR_HOST"
+          "CONNECTOR_HOST_DRV"
         ];
       in
       assertMsg (leaked == [ ])
@@ -726,6 +738,8 @@ runArtifactsRowChecks allRows
         nixStoreWritable = false;
         syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
         syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
+        connectorHostPath = "/nix/store/jjj-connector-host";
+        connectorHostDrv = "/nix/store/jjj-connector-host.drv";
       };
     in
     assert assertMsg (

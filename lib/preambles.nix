@@ -242,6 +242,8 @@ rec {
     nixStoreWritable = false;
     syscallFilterPath = "dummy";
     syscallFilterDrv = "dummy";
+    connectorHostPath = "dummy";
+    connectorHostDrv = "dummy";
   };
 
   # The run-document keys one row renders by itself (without the shared
