@@ -347,3 +347,47 @@ func awaitSessions(in io.Reader, n int) bool {
 	}
 	return true
 }
+
+func TestSessionsStatsStartAtZero(t *testing.T) {
+	if got := sessionsHost(t).Stats(); got != (connectorhost.HopStats{}) {
+		t.Errorf("fresh Stats = %+v, want zero", got)
+	}
+}
+
+func TestSessionsStatsCountEveryExchange(t *testing.T) {
+	s := sessionsHost(t)
+	c, err := s.Load(context.Background(), fixture(t, "call.wasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded := s.Stats()
+	if loaded.Calls == 0 || loaded.Hop <= 0 {
+		t.Fatalf("Stats after Load = %+v, want the load and handshake counted and timed", loaded)
+	}
+	const calls = 5
+	for range calls {
+		echoes(t, c, "ping")
+	}
+	got := s.Stats()
+	if got.Calls != loaded.Calls+calls || got.Hop <= loaded.Hop || got.HostCalls != 0 {
+		t.Errorf("Stats = %+v after %+v and %d calls, want %d more Calls, more Hop, no HostCalls", got, loaded, calls, calls)
+	}
+	_ = c.Close(context.Background())
+	_ = s.Close(context.Background())
+	if after := s.Stats(); after.Calls < got.Calls {
+		t.Errorf("Stats after Close = %+v, want at least %+v", after, got)
+	}
+}
+
+func TestSessionsStatsCountHostCalls(t *testing.T) {
+	s := sessionsHost(t)
+	c, _, _, params := loadNetworkFixtureVia(t, s.LoadNetwork, "network.wasm", func(*connectorhost.Network) {})
+	before := s.Stats()
+	if err := c.Call(context.Background(), "fetch", params, new(fetched)); err != nil {
+		t.Fatal(err)
+	}
+	got := s.Stats()
+	if got.HostCalls != 1 || got.Calls != before.Calls+1 {
+		t.Errorf("Stats = %+v after %+v and one fetch, want one Host call over one more exchange", got, before)
+	}
+}
