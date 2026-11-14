@@ -565,7 +565,7 @@ func githubConnectorRoutes(t *testing.T, host, repo string) (string, []connector
 	t.Helper()
 	path := os.Getenv(connectorWasmEnv)
 	if path == "" {
-		t.Skipf("%s unset: no compiled github Connector to test", connectorWasmEnv)
+		t.Skipf("%s unset: no compiled github Connector to test; connectors/github's connector-github-conformance check runs it", connectorWasmEnv)
 	}
 	var table []struct {
 		Method, Host, Path string

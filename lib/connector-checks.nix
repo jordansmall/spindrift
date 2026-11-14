@@ -1,8 +1,9 @@
 # A Connector's conformance suite, built from core so a Connector's own
-# subflake can run it (`nix flake check` in connectors/<name>). It mirrors what
-# the root go.nix runs per Connector: the Connector's Go fmt, wasip1 vet and
-# unit tests, plus the launcher's conformance test for its Driver or backend
-# run against the Connector's wasm.
+# subflake can run it (`nix flake check` in connectors/<name>). It is the only
+# place a Connector's checks run: root `checks` carry none, and CI's `connector`
+# lane runs it via `nix run .#connector-dev -- <name> flake check`. It covers
+# the Connector's Go fmt, wasip1 vet and unit tests, plus the launcher's
+# conformance test for its Driver or backend run against the Connector's wasm.
 # It runs `go test ./internal/{driver,forge}/<name>/...` inside core's launcher,
 # so it works only for a Connector named after a core Driver or backend package.
 {
