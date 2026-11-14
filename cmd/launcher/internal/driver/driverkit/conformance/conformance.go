@@ -1,6 +1,7 @@
 // Package conformance is the kit a Driver's package calls from its own tests:
 // Run replays a corpus of recorded Pass logs against a driverkit.Strategy and
-// checks every observable output against the goldens beside each log. It takes
+// checks every observable output against the goldens beside each log, and that
+// the Strategy's batch decoder agrees with its per-line decoder. It takes
 // the Strategy and a directory, never the Driver registry or another Driver's
 // package, so a Driver proves itself over its own corpus alone (issue #5506).
 // RunConnector takes the compiled Connector (.wasm) form of a Driver instead,
@@ -34,6 +35,7 @@ import (
 	"spindrift.dev/launcher/internal/driver/corpus"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/golden"
+	"spindrift.dev/launcher/internal/logscan"
 	"spindrift.dev/launcher/internal/passmachine"
 )
 
@@ -91,6 +93,7 @@ func RunStreamFilter(t *testing.T, s driverkit.Strategy, corpusDir string) {
 // replay is what a case check needs beyond its directory. filtered is whether
 // the Strategy declares a stream filter; update rewrites goldens.
 type replay struct {
+	s        driverkit.Strategy
 	d        driverkit.Driver
 	filtered bool
 	update   bool
@@ -107,6 +110,7 @@ const (
 func replayCorpus(t *testing.T, s driverkit.Strategy, corpusDir string, sc scope) {
 	t.Helper()
 	r := replay{
+		s:        s,
 		d:        driverkit.New(s),
 		filtered: s.NewStreamFilter != nil,
 		update:   golden.Update(),
@@ -296,6 +300,7 @@ func runCase(t *testing.T, r replay, dir string) {
 	}
 
 	checkStream(t, r, dir)
+	checkBatchDecode(t, r.s, dir)
 }
 
 // chunkings returns the chunk-size sources every chunked replay runs under:
@@ -378,4 +383,63 @@ func checkStream(t testing.TB, r replay, dir string) {
 			t.Errorf("%s: stream filter output differs from the single-write run", label)
 		}
 	}
+}
+
+// checkBatchDecode decodes the case's Pass-log lines with the Strategy's batch
+// decoder and with one fresh per-line decoder, and requires the same events for
+// every line. The lines come from the scan the Pass-log readers use. The batch
+// decoder runs once per batch size, so batches split mid-log cover state that
+// carries across calls.
+func checkBatchDecode(t testing.TB, s driverkit.Strategy, dir string) {
+	t.Helper()
+	if s.NewDecoder == nil {
+		return
+	}
+	var lines []string
+	err := driverkit.ScanLog(filepath.Join(dir, "pass.jsonl"), logscan.SkipOversized, func(line string) {
+		lines = append(lines, line)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	perLine := make([]string, len(lines))
+	decode := s.NewDecoder()
+	for i, l := range lines {
+		perLine[i] = eventsKey(t, decode(l))
+	}
+	for _, size := range []int{len(lines), (len(lines) + 1) / 2, 3} {
+		if size < 1 {
+			continue
+		}
+		batch := s.BatchDecoder()
+		for start := 0; start < len(lines); start += size {
+			end := min(start+size, len(lines))
+			got := batch(lines[start:end])
+			if len(got) != end-start {
+				t.Errorf("batch size %d, from line %d: decoder returned %d results for %d lines",
+					size, start+1, len(got), end-start)
+				return
+			}
+			for i, evs := range got {
+				if key := eventsKey(t, evs); key != perLine[start+i] {
+					t.Errorf("batch size %d, line %d: batch decoded %s, per-line decoded %s",
+						size, start+i+1, key, perLine[start+i])
+					return
+				}
+			}
+		}
+	}
+}
+
+// eventsKey encodes a line's events for comparison; nil and empty agree.
+func eventsKey(t testing.TB, evs []driverkit.Event) string {
+	t.Helper()
+	if len(evs) == 0 {
+		return "[]"
+	}
+	b, err := json.Marshal(evs)
+	if err != nil {
+		t.Fatalf("marshal events: %v", err)
+	}
+	return string(b)
 }
