@@ -37,6 +37,12 @@ import (
 //	SPINDRIFT_DRIVER_CONNECTOR_WASM=<claude.wasm> \
 //	  go test -tags integration -run '^$' -bench ConnectorSandbox ./internal/seamtest/
 //
+// -count repeats each row as one block, in row order, so a host whose load
+// drifts during the run charges the drift to the later rows (issue #7074). To
+// compare rows, run one row per invocation (-bench .../sandbox-bwrap$ and so
+// on), interleaved in a shuffled order, and compare each row against the
+// process row from the same round.
+//
 // A sandbox row's ns/line less in-process is the per-call overhead; the
 // HostCall row's ns/op less in-process is the per-call and per-Host-call
 // overhead together. hop-ns/call is the sandbox's own measure of a call, and
