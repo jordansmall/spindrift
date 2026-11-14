@@ -13,6 +13,7 @@ import (
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/driver/drivertest"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/promptassembly"
@@ -492,16 +493,31 @@ func TestMainRunRoutesVerbs(t *testing.T) {
 	}
 }
 
-// TestMainRunAppliesHandoffDriverRows pins that driver-exec resolves the
-// handoff's Driver after applying the rows file the handoff names. The file is
-// the one the Nix renders for the fixture Driver Connector's row, so the
-// Connector's row reaches an in-box binary through the real artifact.
-func TestMainRunAppliesHandoffDriverRows(t *testing.T) {
+// TestMainRunRefusesThirdPartyHandoffDriverRows pins, for an inline unmarked
+// row and the rows file the Nix renders for the fixture Driver Connector (a
+// third-party row, so unmarked), that driver-exec does not load a Connector
+// the batteries flake does not ship: selecting that Driver exits non-zero naming the refusal, and
+// the fixture Driver never runs.
+func TestMainRunRefusesThirdPartyHandoffDriverRows(t *testing.T) {
+	t.Run("inline row", func(t *testing.T) {
+		rows := filepath.Join(t.TempDir(), "rows.json")
+		writeTestFile(t, rows, `[{"name":"fixture","module":"/m/fixture.wasm"}]`)
+		refusesDriverRows(t, rows)
+	})
+	t.Run("rendered by Nix", func(t *testing.T) {
+		rows := os.Getenv("SPINDRIFT_FIXTURE_DRIVER_ROWS_FILE")
+		if rows == "" {
+			t.Skip("SPINDRIFT_FIXTURE_DRIVER_ROWS_FILE is unset")
+		}
+		refusesDriverRows(t, rows)
+	})
+}
+
+// refusesDriverRows runs driver-exec selecting the Driver "fixture" from the
+// rows file and requires the not-first-party refusal before anything runs.
+func refusesDriverRows(t *testing.T, rows string) {
+	t.Helper()
 	drivertest.Isolate(t)
-	rows := os.Getenv("SPINDRIFT_FIXTURE_DRIVER_ROWS_FILE")
-	if rows == "" {
-		t.Skip("SPINDRIFT_FIXTURE_DRIVER_ROWS_FILE is unset")
-	}
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
 	if err := os.WriteFile(promptFile, []byte("run the fixture"), 0o600); err != nil {
@@ -514,10 +530,87 @@ func TestMainRunAppliesHandoffDriverRows(t *testing.T) {
 		DriverBin:      writeFakeDriver(t, dir, "fake-driver", "exit 0\n"),
 		ArgvShape:      claudeArgvShape,
 	})
+	logPath := filepath.Join(dir, "stream.log")
+	var stdout, stderr bytes.Buffer
+	rc := mainRun([]string{"-handoff-file", handoffPath, "-log-path", logPath}, &stdout, &stderr)
+	if rc == 0 {
+		t.Fatalf("mainRun exit code = 0, want a refusal of the unmarked fixture row")
+	}
+	if want := driverrows.ErrNotFirstParty.Error(); !strings.Contains(stderr.String(), want) {
+		t.Errorf("stderr = %q, want it to contain %q", stderr.String(), want)
+	}
+	if _, err := os.Stat(logPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("stream log Stat = %v, want it absent: the refused Driver must not run", err)
+	}
+}
+
+// TestMainRunLoadsFirstPartyMarkedDriverRow pins the positive side: the fixture
+// Driver Connector, once its row carries the first-party mark, is loaded and
+// run through driver-exec.
+func TestMainRunLoadsFirstPartyMarkedDriverRow(t *testing.T) {
+	fixtures := os.Getenv("SPINDRIFT_CONNECTOR_FIXTURES_DIR")
+	if fixtures == "" {
+		t.Skip("SPINDRIFT_CONNECTOR_FIXTURES_DIR is unset")
+	}
+	drivertest.Isolate(t)
+	dir := t.TempDir()
+	b, err := json.Marshal([]map[string]any{{
+		"name":       "fixture",
+		"module":     filepath.Join(fixtures, "driver.wasm"),
+		"firstParty": true,
+		"credentials": []map[string]any{
+			{"env": []string{"FIXTURE_KEY"}, "modelPrefix": "fx/", "remedy": "set FIXTURE_KEY"},
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := filepath.Join(dir, "rows.json")
+	writeTestFile(t, rows, string(b))
+	promptFile := filepath.Join(dir, "prompt.txt")
+	writeTestFile(t, promptFile, "run the fixture")
+	handoffPath := writeHandoffFile(t, promptassembly.Handoff{
+		PromptFile:     promptFile,
+		Driver:         "fixture",
+		DriverRowsFile: rows,
+		DriverBin:      writeFakeDriver(t, dir, "fake-driver", "exit 0\n"),
+		ArgvShape:      claudeArgvShape,
+	})
 	var stdout, stderr bytes.Buffer
 	rc := mainRun([]string{"-handoff-file", handoffPath, "-log-path", filepath.Join(dir, "stream.log")}, &stdout, &stderr)
 	if rc != 0 {
 		t.Fatalf("mainRun exit code = %d, want 0 (stderr: %q)", rc, stderr.String())
+	}
+}
+
+// TestMainRunUnmarkedRowDoesNotBlockOtherDriver pins that an unmarked third-party
+// row only refuses its own Driver: the run selecting native claude still runs.
+func TestMainRunUnmarkedRowDoesNotBlockOtherDriver(t *testing.T) {
+	rc, _ := shadowRun(t, `[{"name":"outsider","module":"/m/outsider.wasm"}]`, 3)
+	if rc != 3 {
+		t.Errorf("exit code = %d, want the native claude's 3", rc)
+	}
+}
+
+// TestMainRunAppliesFirstPartyShadowRowFromNix pins that the shadow row the
+// Nix renders for the batteries claude Connector carries the first-party mark,
+// so driver-exec applies it (loads the real claude wasm) rather than skipping
+// it as unmarked.
+func TestMainRunAppliesFirstPartyShadowRowFromNix(t *testing.T) {
+	rows := os.Getenv("SPINDRIFT_FIXTURE_CLAUDE_ROWS_FILE")
+	if rows == "" {
+		t.Skip("SPINDRIFT_FIXTURE_CLAUDE_ROWS_FILE is unset")
+	}
+	b, err := os.ReadFile(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc, out := shadowRun(t, string(b), 3)
+	if rc != 3 {
+		t.Errorf("exit code = %d, want the native 3", rc)
+	}
+	if _, sum := shadowOps(t, out); !sum.Loaded || sum.Error != "" || sum.Driver != "claude" {
+		t.Errorf("summary = %+v, want the claude shadow row applied and loaded", sum)
 	}
 }
 
@@ -565,9 +658,10 @@ func shadowRow(t *testing.T, name, module string) string {
 	}
 	b, err := json.Marshal(struct {
 		driver.Descriptor
-		Module string `json:"module"`
-		Shadow bool   `json:"shadow"`
-	}{desc, module, true})
+		Module     string `json:"module"`
+		Shadow     bool   `json:"shadow"`
+		FirstParty bool   `json:"firstParty"`
+	}{desc, module, true, true})
 	if err != nil {
 		t.Fatal(err)
 	}

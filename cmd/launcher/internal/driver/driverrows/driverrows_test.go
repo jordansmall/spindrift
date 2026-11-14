@@ -2,6 +2,7 @@ package driverrows_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -90,7 +91,7 @@ func TestUseFileReadsDocument(t *testing.T) {
 	drivertest.Isolate(t)
 	wasm := fixtureWasm(t, "driver.wasm")
 	path := filepath.Join(t.TempDir(), "rows.json")
-	doc := rows(t, []map[string]any{{"name": "filefixture", "module": wasm}})
+	doc := rows(t, []map[string]any{{"name": "filefixture", "module": wasm, "firstParty": true}})
 	if err := os.WriteFile(path, doc, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -286,4 +287,109 @@ func TestShadowRowBesideNativeRowOfSameNameIsFine(t *testing.T) {
 	if got, ok := driver.ShadowModule("nat"); !ok || got != "/m.wasm" {
 		t.Errorf("ShadowModule(nat) = %q, %v, want /m.wasm", got, ok)
 	}
+}
+
+// useFile applies raw through the Box's entry point, the one that gates on the
+// first-party mark.
+func useFile(t *testing.T, raw json.RawMessage) error {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "rows.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return driverrows.UseFile(path)
+}
+
+func TestBoxRefusesToLoadConnectorDriverNotFirstParty(t *testing.T) {
+	drivertest.Isolate(t)
+	if err := useFile(t, rows(t, []map[string]any{{"name": "outsider", "module": "/m/outsider.wasm"}})); err != nil {
+		t.Fatalf("UseFile = %v, want the unmarked row registered, not refused at startup", err)
+	}
+	if !driver.Has("outsider") {
+		t.Fatal("UseFile registered no Driver for the unmarked row")
+	}
+	_, err := driver.New("outsider")
+	if !errors.Is(err, driverrows.ErrNotFirstParty) || !strings.Contains(err.Error(), "outsider") {
+		t.Fatalf("New(outsider) = %v, want ErrNotFirstParty naming outsider", err)
+	}
+}
+
+func TestBoxUnmarkedRowDoesNotBlockOtherDrivers(t *testing.T) {
+	drivertest.Isolate(t)
+	driver.Register(driverkit.Strategy{Name: "nat"})
+	driver.RegisterConnector("trusted", func() (driverkit.Strategy, error) { return driverkit.Strategy{Name: "trusted"}, nil })
+	err := useFile(t, rows(t, []map[string]any{
+		{"name": "outsider", "module": "/m/x.wasm"},
+		{"name": "nat"},
+	}))
+	if err != nil {
+		t.Fatalf("UseFile = %v", err)
+	}
+	for _, name := range []string{"nat", "trusted"} {
+		if _, err := driver.New(name); err != nil {
+			t.Errorf("New(%s) = %v, want it unaffected by the unmarked row", name, err)
+		}
+	}
+}
+
+func TestBoxLoadsFirstPartyConnectorDriver(t *testing.T) {
+	drivertest.Isolate(t)
+	wasm := fixtureWasm(t, "driver.wasm")
+	if err := useFile(t, rows(t, []map[string]any{{"name": "fixture", "module": wasm, "firstParty": true}})); err != nil {
+		t.Fatal(err)
+	}
+	d, err := driver.New("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev, err := d.ResultEvent("hi"); err != nil || string(ev) != "result hi\n" {
+		t.Errorf("ResultEvent = %q, %v", ev, err)
+	}
+}
+
+func TestBoxAppliesFirstPartyShadowRow(t *testing.T) {
+	drivertest.Isolate(t)
+	driver.Register(driverkit.Strategy{Name: "claude"})
+	if err := useFile(t, claudeShadowRow(t, true)); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := driver.ShadowModule("claude"); !ok || got != "/m/claude.wasm" {
+		t.Errorf("ShadowModule(claude) = %q, %v, want /m/claude.wasm", got, ok)
+	}
+}
+
+func TestBoxSkipsShadowRowNotFirstParty(t *testing.T) {
+	drivertest.Isolate(t)
+	driver.Register(driverkit.Strategy{Name: "claude"})
+	if err := useFile(t, claudeShadowRow(t, false)); err != nil {
+		t.Fatalf("UseFile = %v, want the shadow skipped, not fatal", err)
+	}
+	reason, ok := driver.ShadowSkipped("claude")
+	if !ok || !strings.Contains(reason, driverrows.ErrNotFirstParty.Error()) {
+		t.Errorf("ShadowSkipped = %q, %v, want the not-first-party reason", reason, ok)
+	}
+	if _, ok := driver.ShadowModule("claude"); ok {
+		t.Error("a skipped row left a shadow behind")
+	}
+}
+
+func TestHostUseAcceptsConnectorDriverNotFirstParty(t *testing.T) {
+	drivertest.Isolate(t)
+	if err := driverrows.Use(rows(t, []map[string]any{{"name": "outsider", "module": "/m/outsider.wasm"}})); err != nil {
+		t.Fatalf("Use = %v, want the Launcher to carry no first-party gate", err)
+	}
+	if !driver.Has("outsider") {
+		t.Error("Use registered no Driver")
+	}
+}
+
+// claudeShadowRow is claude's shadow row, carrying its generated Descriptor so
+// only the first-party mark decides whether it applies.
+func claudeShadowRow(t *testing.T, firstParty bool) json.RawMessage {
+	t.Helper()
+	desc, ok := driver.DescriptorFor("claude")
+	if !ok {
+		t.Fatal("claude has no Descriptor")
+	}
+	return rows(t, []driverrows.Row{{Descriptor: desc, Module: "/m/claude.wasm", Shadow: true, FirstParty: firstParty}})
 }
