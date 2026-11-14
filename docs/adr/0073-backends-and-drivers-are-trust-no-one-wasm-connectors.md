@@ -798,3 +798,39 @@ crosses into the runner VM) is unmeasured until the human macOS check (#7021).
 A real run reports the same costs in the host-side read shadow's
 `shadow_summary` (`sandbox_start_ns`, `sandbox_calls`, `sandbox_host_calls`,
 `sandbox_hop_ns`); see [the reference](../reference.md).
+
+## Amendment (issue #7074): the sandboxes do not slow Decode
+
+The #7018 amendment's Decode gap (podman +27%, bwrap +23% over the process
+row) does not reproduce. It came from the run, not the sandbox. `go test
+-count=5` times each row as one block, in the fixed order in-process, process,
+podman, bwrap, so a load change on the shared workstation lands on the later
+rows. Re-measured on the same host with one row per `go test` invocation,
+rows shuffled within each round, every row moves with the round: in one
+pinned run (`taskset -c 10-13`), rounds 1–3 read 15.9 to 18.4 ms per line and
+rounds 4–5 read 19.0 to 20.9 ms per line on every row, the process row
+included. That 20% swing is the size of the gap #7018 reported.
+
+Read against the process row from the same round, nothing in the sandbox
+costs Decode anything outside that noise:
+
+| row (pinned, 6 rounds) | Decode, median per line | vs process, median of per-round ratios |
+|---|---|---|
+| process sandbox | 17.58 ms | — |
+| bwrap | 17.86 ms | −0.7% |
+| bwrap without the seccomp filter | 16.23 ms | −1.3% |
+| bwrap without namespaces (no `--unshare-*`) | 17.20 ms | +1.2% |
+| podman | 17.33 ms | +5.5% |
+
+The per-round ratios spread about ±10%. Podman's one positive median came from
+a run pinned with `taskset`, which crun may not carry into the container, so
+podman was re-run unpinned against the process row alone over 8 rounds:
+16.66 ms against 16.39 ms per line (process spread 16.15 to 17.61 ms), a
+per-round median of +1.3% (−4.6% to +7.2%). Both medians sit inside the process
+row's spread, so neither the seccomp filter, the namespaces, the mount and
+`/proc` view, nor the bwrap row's own cgroup costs Decode anything measurable.
+Nothing is removed and nothing is kept for a cost. This supersedes the #7018
+amendment's Decode row and its claim that the guest runs slower inside the
+sandbox. Its Load, Start and Host-call rows were timed in the same blocks and
+are not re-checked here. The benchmark header now gives the interleaved
+recipe.
