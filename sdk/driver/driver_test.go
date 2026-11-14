@@ -56,7 +56,7 @@ func marshal(t *testing.T, v any) string {
 func TestCapabilities(t *testing.T) {
 	s := countingStrategy()
 	caps, methods := handlers(s)
-	if want := []string{"driver"}; !reflect.DeepEqual(caps, want) {
+	if want := []string{"driver", "driver.decodeBatch"}; !reflect.DeepEqual(caps, want) {
 		t.Fatalf("caps = %v, want %v", caps, want)
 	}
 	if _, ok := methods["driver.resolveExit"]; ok {
@@ -64,7 +64,7 @@ func TestCapabilities(t *testing.T) {
 	}
 	s.ResolveExit = func([]byte, int) (int, error) { return 0, nil }
 	caps, methods = handlers(s)
-	if want := []string{"driver", "driver.resolveExit"}; !reflect.DeepEqual(caps, want) {
+	if want := []string{"driver", "driver.decodeBatch", "driver.resolveExit"}; !reflect.DeepEqual(caps, want) {
 		t.Fatalf("caps = %v, want %v", caps, want)
 	}
 	if _, ok := methods["driver.resolveExit"]; !ok {
@@ -254,7 +254,7 @@ func TestHeartbeatCapabilities(t *testing.T) {
 	s := countingStrategy()
 	s.Heartbeat.Kind = func(tool string) string { return "k:" + tool }
 	caps, m := handlers(s)
-	if want := []string{"driver", "driver.toolKind"}; !reflect.DeepEqual(caps, want) {
+	if want := []string{"driver", "driver.decodeBatch", "driver.toolKind"}; !reflect.DeepEqual(caps, want) {
 		t.Fatalf("caps = %v, want %v", caps, want)
 	}
 	for _, name := range []string{"driver.toolPhase", "driver.modelFamily"} {
@@ -265,7 +265,7 @@ func TestHeartbeatCapabilities(t *testing.T) {
 	s.Heartbeat.Phase = func(string, json.RawMessage) string { return "" }
 	s.Heartbeat.Family = func(string) (string, int) { return "", 0 }
 	caps, _ = handlers(s)
-	want := []string{"driver", "driver.toolPhase", "driver.toolKind", "driver.modelFamily"}
+	want := []string{"driver", "driver.decodeBatch", "driver.toolPhase", "driver.toolKind", "driver.modelFamily"}
 	if !reflect.DeepEqual(caps, want) {
 		t.Fatalf("caps = %v, want %v", caps, want)
 	}
@@ -496,4 +496,40 @@ func upperASCII(p []byte) []byte {
 		out[i] = c
 	}
 	return out
+}
+
+func TestDecodeBatchEqualsPerLine(t *testing.T) {
+	_, m := handlers(countingStrategy())
+	lines := []string{"a", "b", "a", ""}
+	single := newHandle(t, m)
+	var want []string
+	for _, l := range lines {
+		want = append(want, marshal(t, call(t, m, "driver.decode", `{"decoder":`+strconv.Itoa(int(single))+`,"line":"`+l+`"}`)))
+	}
+	batch := newHandle(t, m)
+	lj, _ := json.Marshal(lines)
+	got := marshal(t, call(t, m, "driver.decodeBatch", `{"decoder":`+strconv.Itoa(int(batch))+`,"lines":`+string(lj)+`}`))
+	if w := "[" + strings.Join(want, ",") + "]"; got != w {
+		t.Fatalf("decodeBatch = %s, want %s", got, w)
+	}
+}
+
+func TestDecodeBatchNilLinesAreEmptyArrays(t *testing.T) {
+	s := countingStrategy()
+	s.NewDecoder = func() Decoder { return func(string) []event.Event { return nil } }
+	_, m := handlers(s)
+	h := strconv.Itoa(int(newHandle(t, m)))
+	if got := marshal(t, call(t, m, "driver.decodeBatch", `{"decoder":`+h+`,"lines":["a","b"]}`)); got != "[[],[]]" {
+		t.Fatalf("decodeBatch = %s, want [[],[]]", got)
+	}
+	if got := marshal(t, call(t, m, "driver.decodeBatch", `{"decoder":`+h+`,"lines":[]}`)); got != "[]" {
+		t.Fatalf("empty decodeBatch = %s, want []", got)
+	}
+}
+
+func TestDecodeBatchUnknownHandle(t *testing.T) {
+	_, m := handlers(countingStrategy())
+	if _, err := m["driver.decodeBatch"](json.RawMessage(`{"decoder":99,"lines":["x"]}`)); err == nil {
+		t.Fatal("want error for unknown handle")
+	}
 }
