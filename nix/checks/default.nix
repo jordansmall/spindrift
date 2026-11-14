@@ -366,7 +366,7 @@ let
     "dashboard-js:dashboard" = "a fileset root over the JS tree only";
     "default:." = "the coverage guards' path probes";
     "default:cmd/launcher" = "launcherGoModules' vendor source";
-    "default:nix/checks" = "the coverage guards, both in checks-docs";
+    "default:nix/checks" = "the coverage guards, all in checks-docs";
     "doctor-report-routing:cmd/launcher" = "greps internal/doctor/*.go and launchgates.go";
     "drivers:nix/checks/drivers" = "imports each Driver's check file by registry name";
     "equivalence:." = "harness flake fixtures' outPath";
@@ -471,6 +471,239 @@ let
       "negative control: an unlisted source tree named from nix/checks/drivers/ must be flagged under `drivers/<name>`";
     pkgs.runCommand "ci-comment-readers-cover-checks" { } "touch $out";
 
+  # Coverage guard (issue #7010): every core file the SDK parity tests or a
+  # Connector conformance suite reads must match .github/scripts/ci-connector-contract.
+  # The suite copies whole trees, so no per-file read list exists; the reads
+  # are derived from three inputs: the core paths quoted in sdk/**/*_test.go
+  # (a directory expands to its files), the *test/conformance kit packages a
+  # Connector's own tests import, and the path literals reachable from
+  # lib/connector-checks.nix (a .nix file is walked, a directory is not) plus
+  # each backend row's goTestRepoFiles. cmd/launcher is excluded from the walk:
+  # the conformance test compiles only internal/{forge,driver}/<name>'s import
+  # closure, which the first two inputs approximate, and listing the whole
+  # launcher would select every Connector on every launcher edit.
+  connectorContractScan =
+    let
+      inherit (pkgs.lib)
+        any
+        concatMap
+        elemAt
+        filter
+        hasPrefix
+        hasSuffix
+        isList
+        pathIsDirectory
+        removePrefix
+        splitString
+        unique
+        ;
+      inherit (pkgs.lib.filesystem) listFilesRecursive;
+      rootPath = ../../.;
+      rootRel = f: removePrefix "${toString rootPath}/" (toString f);
+      filesUnder =
+        rel:
+        let
+          path = rootPath + "/${rel}";
+        in
+        if builtins.pathExists path && pathIsDirectory path then
+          map rootRel (listFilesRecursive path)
+        else
+          [ rel ];
+      # Resolves `..` components of `dir/lit`; null when a `..` climbs above
+      # the root, so each caller drops the path explicitly.
+      resolve =
+        dir: lit:
+        let
+          parts = builtins.foldl' (
+            acc: c:
+            if acc == null then
+              null
+            else if c == "." then
+              acc
+            else if c != ".." then
+              acc ++ [ c ]
+            else if acc == [ ] then
+              null
+            else
+              pkgs.lib.init acc
+          ) [ ] (splitString "/" "${dir}/${lit}");
+        in
+        if parts == null then null else pkgs.lib.concatStringsSep "/" parts;
+      captures = re: text: map (g: elemAt g 0) (filter isList (builtins.split re text));
+      parityReads =
+        t:
+        concatMap (
+          lit:
+          let
+            p = resolve (builtins.dirOf t.rel) lit;
+          in
+          if p == null then [ ] else filesUnder p
+        ) (captures ''"((\.\./)+cmd/launcher/[^"]*)"'' t.text);
+      globsOf = f: filter (l: l != "" && !(hasPrefix "#" l)) (splitString "\n" (builtins.readFile f));
+      covered =
+        globs: p:
+        any (g: builtins.match (builtins.replaceStrings [ "." "*" ] [ "\\." ".*" ] g) p != null) globs;
+      textsUnder =
+        rel:
+        map (f: {
+          rel = rootRel f;
+          text = builtins.readFile f;
+        }) (filter (f: hasSuffix "_test.go" (toString f)) (listFilesRecursive (rootPath + "/${rel}")));
+      connectors = filter (n: builtins.pathExists (rootPath + "/connectors/${n}/flake.nix")) (
+        builtins.attrNames (builtins.readDir (rootPath + "/connectors"))
+      );
+      # forge/<n> for a backend, driver/<n> for a Driver. Kits are the
+      # forgetest and conformance packages; other *test imports (seamtest) are
+      # unrelated harnesses.
+      conformancePkgs =
+        n:
+        filter (d: builtins.pathExists (rootPath + "/cmd/launcher/internal/${d}")) [
+          "forge/${n}"
+          "driver/${n}"
+        ];
+      kitDirs = concatMap (
+        pkg:
+        concatMap (
+          t:
+          map (p: "cmd/launcher/internal/${p}") (
+            filter (p: builtins.match ".*/(forgetest|conformance)" p != null) (
+              captures ''"spindrift\.dev/launcher/internal/([^"]*)"'' t.text
+            )
+          )
+        ) (textsUnder "cmd/launcher/internal/${pkg}")
+      ) (concatMap conformancePkgs connectors);
+      checkNix = "lib/connector-checks.nix";
+      # `./x`/`../x` literals; the non-dot first character skips `../../${f}`
+      # and `../.` in shell text.
+      nixLiterals =
+        rel:
+        let
+          dir = builtins.dirOf rel;
+          lits = captures ''((\./|(\.\./)+)[A-Za-z0-9_][A-Za-z0-9_./+-]*)'' (
+            builtins.readFile (rootPath + "/${rel}")
+          );
+        in
+        filter (p: p != null && builtins.pathExists (rootPath + "/${p}")) (map (resolve dir) lits);
+      walked = map (n: n.key) (
+        builtins.genericClosure {
+          startSet = [ { key = checkNix; } ];
+          operator =
+            n:
+            if hasSuffix ".nix" n.key && !(pathIsDirectory (rootPath + "/${n.key}")) then
+              map (key: { inherit key; }) (nixLiterals n.key)
+            else
+              [ ];
+        }
+      );
+      backendRows = import ../../lib/backends/default.nix;
+      # connector-checks.nix copies these via `${../. + "/${f}"}`, which the
+      # literal scan cannot see.
+      goTestRepoFiles = concatMap (
+        n: (pkgs.lib.findFirst (r: r.name == n) { } backendRows).goTestRepoFiles or [ ]
+      ) connectors;
+      nixInputs = unique (
+        concatMap filesUnder (filter (k: k != "cmd/launcher") walked) ++ goTestRepoFiles
+      );
+    in
+    {
+      inherit
+        covered
+        globsOf
+        textsUnder
+        kitDirs
+        nixInputs
+        ;
+      findings =
+        globs:
+        {
+          tests,
+          kits,
+          nixFiles,
+        }:
+        unique (
+          filter (f: !(covered globs f)) (
+            concatMap parityReads tests ++ concatMap filesUnder kits ++ nixFiles
+          )
+        );
+    };
+
+  ci-connector-contract-covers-reads =
+    let
+      inherit (pkgs.lib)
+        assertMsg
+        concatStringsSep
+        elem
+        filter
+        hasPrefix
+        ;
+      inherit (connectorContractScan)
+        covered
+        globsOf
+        textsUnder
+        kitDirs
+        nixInputs
+        findings
+        ;
+      globs = globsOf ../../.github/scripts/ci-connector-contract;
+      dropMatching = rel: filter (g: !(covered [ g ] rel)) globs;
+      scannedReads = {
+        tests = textsUnder "sdk";
+        kits = pkgs.lib.unique kitDirs;
+        nixFiles = nixInputs;
+      };
+      noReads = {
+        tests = [ ];
+        kits = [ ];
+        nixFiles = [ ];
+      };
+      uncovered = findings globs scannedReads;
+      badGlobs = filter (g: builtins.match "[A-Za-z0-9_./*-]+" g == null) globs;
+      fakeTest = lit: {
+        rel = "sdk/x/parity_test.go";
+        text = ''const c = "${lit}"'';
+      };
+    in
+    assert assertMsg (badGlobs == [ ])
+      ".github/scripts/ci-connector-contract: only `*` wildcards are supported; ${concatStringsSep ", " badGlobs} uses another glob character, which this check's regex would read differently from bash";
+    assert assertMsg
+      (scannedReads.tests != [ ] && scannedReads.kits != [ ] && builtins.length nixInputs > 1)
+      "ci-connector-contract-covers-reads found no parity tests, kits or Nix inputs; the scan is vacuous";
+    assert assertMsg (uncovered == [ ])
+      "${concatStringsSep ", " uncovered} is read by the SDK parity tests or a Connector conformance suite but .github/scripts/ci-connector-contract does not match it, so a PR changing it would skip some Connector's conformance";
+    assert assertMsg (
+      let
+        dropped = filter (g: !(hasPrefix "cmd/launcher/internal/hostop" g)) globs;
+      in
+      filter (hasPrefix "cmd/launcher/internal/hostop") (findings dropped scannedReads) != [ ]
+    ) "negative control: dropping the hostop glob must flag a hostop file the parity tests read";
+    assert assertMsg (
+      findings globs (
+        noReads // { tests = [ (fakeTest "${dotDotPath 2}cmd/launcher/internal/zzz/z.go") ]; }
+      ) == [ "cmd/launcher/internal/zzz/z.go" ]
+    ) "negative control: an unmatched core path quoted in a parity test must be flagged";
+    assert assertMsg (
+      findings globs (
+        noReads // { tests = [ (fakeTest "${dotDotPath 2}cmd/launcher/internal/hostop/z.go") ]; }
+      ) == [ ]
+    ) "control: a matched core path quoted in a parity test must not be flagged";
+    assert assertMsg (
+      let
+        dropped = filter (g: !(covered [ g ] "sdk/go.mod")) globs;
+      in
+      filter (hasPrefix "sdk/") (findings dropped scannedReads) != [ ]
+    ) "negative control: dropping the sdk glob must flag an sdk file the suite copies";
+    assert assertMsg
+      (elem "nix/connector-wasm.nix" (findings (dropMatching "nix/connector-wasm.nix") scannedReads))
+      "negative control: dropping the glob for a Nix file the suite imports must flag it (the walk is recursive)";
+    assert assertMsg (elem ".github/workflows/agent-dispatch.yml" (
+      findings (dropMatching ".github/workflows/agent-dispatch.yml") scannedReads
+    )) "negative control: dropping the glob for a backend row's goTestRepoFiles entry must flag it";
+    assert assertMsg (
+      findings globs (noReads // { kits = [ "cmd/launcher/internal/forge/forgetest" ]; }) == [ ]
+      && findings [ ] (noReads // { kits = [ "cmd/launcher/internal/forge/forgetest" ]; }) != [ ]
+    ) "negative control: every file of a kit package must be matched";
+    pkgs.runCommand "ci-connector-contract-covers-reads" { } "touch $out";
+
   # Stale-name guard: every linuxOnlyCheckName must name a real source check,
   # or the darwin drop silently does nothing.
   linux-only-check-names-exist =
@@ -558,6 +791,7 @@ in
         linux-only-check-names-exist
         checks-docs-covers-docs-readers
         ci-comment-readers-cover-checks
+        ci-connector-contract-covers-reads
         ;
     };
 
@@ -565,13 +799,16 @@ in
 
   # CI's docs-only lane (issue #5155): the checks whose modules read docs
   # files, plus the guards that keep that membership and the comment-only
-  # reader list (issue #5158) complete.
+  # reader list (issue #5158) complete. ci-connector-contract-covers-reads
+  # reads test and Nix file text, comments included, so a comment-only edit
+  # must still run it.
   checks-docs = pkgs.runCommand "checks-docs" { } ''
     ${pkgs.lib.concatMapStringsSep "\n" (p: ": ${p}") (
       builtins.attrValues checksDocsSet
       ++ [
         checks-docs-covers-docs-readers
         ci-comment-readers-cover-checks
+        ci-connector-contract-covers-reads
       ]
     )}
     touch $out
