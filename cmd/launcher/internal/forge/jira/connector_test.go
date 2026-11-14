@@ -79,7 +79,7 @@ func newConnectorHarnessWith(t *testing.T, cloud bool, lc connectortracker.Lifec
 	t.Helper()
 	path := os.Getenv(connectorWasmEnv)
 	if path == "" {
-		t.Skipf("%s unset: no compiled jira Connector to test", connectorWasmEnv)
+		t.Skipf("%s unset: no compiled jira Connector to test; connectors/jira's connector-jira-conformance check runs it", connectorWasmEnv)
 	}
 	wasm, err := os.ReadFile(path)
 	if err != nil {

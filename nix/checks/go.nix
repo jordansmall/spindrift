@@ -228,16 +228,6 @@ let
       prefix = "drivers";
       pkgFor = name: "internal/driver/${name}";
       sharedFor = _: driverGoTestShared;
-      # A Driver with a Connector under connectors/<name> also runs its
-      # conformance test against that Connector, built from the batteries core.
-      setupFor =
-        name:
-        let
-          dir = ../../connectors + "/${name}";
-        in
-        pkgs.lib.optionalString (builtins.pathExists dir) ''
-          export SPINDRIFT_DRIVER_CONNECTOR_WASM=${(connectorFor dir).package pkgs}/${name}.wasm
-        '';
     };
   driverGoTests = driverGoTestsFor {
     files = launcherDir;
@@ -321,15 +311,8 @@ let
       prefix = "backends";
       pkgFor = name: "internal/forge/${name}";
       sharedFor = backendGoTestSharedFor;
-      # A backend with a Connector under connectors/<name> also runs its tracker
-      # and PRForge read conformance against that Connector (the wasm, and the
-      # Route table the test points at its scripted backend).
       setupFor =
         name:
-        let
-          dir = ../../connectors + "/${name}";
-          connector = connectorFor dir;
-        in
         # A backend test that drives core (doctor, say) reads through the
         # shared Fake's fixture Connector.
         ''
@@ -338,11 +321,7 @@ let
         + pkgs.lib.concatMapStrings (f: ''
           mkdir -p src/${builtins.dirOf f}
           cp ${../.. + "/${f}"} src/${f}
-        '') ((rowFor name).goTestRepoFiles or [ ])
-        + pkgs.lib.optionalString (builtins.pathExists dir) ''
-          export SPINDRIFT_BACKEND_CONNECTOR_WASM=${connector.package pkgs}/${name}.wasm
-          export SPINDRIFT_BACKEND_CONNECTOR_ROUTES=${pkgs.lib.escapeShellArg (builtins.toJSON connector.routes)}
-        '';
+        '') ((rowFor name).goTestRepoFiles or [ ]);
       nativeBuildInputs = goTestInputs;
     };
   backendGoTests = backendGoTestsFor {
@@ -798,45 +777,6 @@ let
     export GOFLAGS=
     cd src/sdk
   '';
-  # Every Connector under connectors/<name> is a Go module that replaces the
-  # SDK with ../../sdk, so gofmt, a wasip1 vet and a native go test run in that
-  # repo-relative layout. The wasm itself is not run natively (it is a reactor),
-  # but a Connector's unit tests swap its wasip1-only transport for a stub.
-  connectorsDir = ../../connectors;
-  connectorNames = builtins.attrNames (
-    pkgs.lib.filterAttrs (_: t: t == "directory") (builtins.readDir connectorsDir)
-  );
-  connectorGoChecks = pkgs.lib.listToAttrs (
-    pkgs.lib.concatMap (
-      name:
-      let
-        src = fs.toSource {
-          root = ../..;
-          fileset = fs.unions [
-            ../../sdk
-            (fs.fileFilter (f: f.hasExt "go" || f.name == "go.mod") (connectorsDir + "/${name}"))
-          ];
-        };
-        mk = suffix: script: {
-          name = "connector-${name}-go-${suffix}";
-          value = pkgs.runCommand "connector-${name}-go-${suffix}" { nativeBuildInputs = [ pkgs.go ]; } ''
-            cp -r ${src} src
-            chmod -R +w src
-            ${goCheckEnv}
-            export GOFLAGS=-mod=mod
-            cd src/connectors/${name}
-            ${script}
-            touch $out
-          '';
-        };
-      in
-      [
-        (mk "fmt" (gofmtCheck "."))
-        (mk "vet" "GOOS=wasip1 GOARCH=wasm go vet ./...")
-        (mk "test" "go test ./...")
-      ]
-    ) connectorNames
-  );
 in
 driverGoTests
 // backendGoTests
@@ -1392,7 +1332,6 @@ driverGoTests
     touch $out
   '';
 }
-// connectorGoChecks
 // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
   # The Connector host is bound into a sandbox as one file (issue #7013), so a
   # dynamic interpreter or library it needs would not be there.

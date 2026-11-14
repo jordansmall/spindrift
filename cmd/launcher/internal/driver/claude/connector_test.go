@@ -26,7 +26,7 @@ func connectorWasm(t testing.TB) string {
 	t.Helper()
 	wasm := os.Getenv(connectorWasmEnv)
 	if wasm == "" {
-		t.Skipf("%s is unset; it names the compiled claude Connector", connectorWasmEnv)
+		t.Skipf("%s unset: no compiled claude Connector to test; connectors/claude's connector-claude-conformance check runs it", connectorWasmEnv)
 	}
 	return wasm
 }
