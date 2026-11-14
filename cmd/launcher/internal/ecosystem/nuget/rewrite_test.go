@@ -9,12 +9,20 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
+func rowNamed(t *testing.T, name string) registryvocab.RewriteRow {
+	t.Helper()
+	for _, r := range Strategy.RewriteRows {
+		if r.Name == name {
+			return r
+		}
+	}
+	t.Fatalf("nuget Strategy has no %q row", name)
+	return registryvocab.RewriteRow{}
+}
+
 func indexRow(t *testing.T) registryvocab.RewriteRow {
 	t.Helper()
-	if len(Strategy.RewriteRows) == 0 {
-		t.Fatal("nuget Strategy has no RewriteRows")
-	}
-	return Strategy.RewriteRows[0]
+	return rowNamed(t, "nuget service index")
 }
 
 func rewriteContext() registryvocab.RewriteContext {
@@ -135,5 +143,168 @@ func TestRewriteServiceIndex_Unrecognisable(t *testing.T) {
 		if res.Outcome != registryvocab.RewriteNone || string(res.Body) != in {
 			t.Errorf("%q: outcome %v body %q, want none and untouched", in, res.Outcome, res.Body)
 		}
+	}
+}
+
+func registrationRowOf(t *testing.T) registryvocab.RewriteRow {
+	t.Helper()
+	return rowNamed(t, "nuget registration")
+}
+
+const registrationUpstream = "https://feed.example.test/api/v3/registration-semver2/"
+const registrationForwarded = "http://127.0.0.1:8123/feed-example-test/api/v3/registration-semver2/"
+
+// streamRegistrationDoc runs in through the registration row and returns the
+// rewritten body and every edit the stream offered.
+func streamRegistrationDoc(t *testing.T, in string) (string, []registryvocab.RewriteEdit) {
+	t.Helper()
+	var out strings.Builder
+	var edits []registryvocab.RewriteEdit
+	err := registrationRowOf(t).RewriteStream(&out, strings.NewReader(in), rewriteContext(), func(e registryvocab.RewriteEdit) { edits = append(edits, e) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out.String(), edits
+}
+
+// repointRegistrationLinks is the expected rewrite when every registration-dir
+// URL in in is a registry-written link.
+func repointRegistrationLinks(in string) string {
+	return strings.ReplaceAll(in, registrationUpstream, registrationForwarded)
+}
+
+func TestRegistrationMatches(t *testing.T) {
+	row := registrationRowOf(t)
+	const base = "/api/nuget/v3/repo"
+	cases := []struct {
+		path, base string
+		want       bool
+	}{
+		{base + "/registration-semver2/newtonsoft.json/index.json", base, true},
+		{base + "/registration-semver2/newtonsoft.json/page/1.0.0/13.0.3.json", base, true},
+		{base + "/registration5-gz-semver2/foo/index.json", base, true},
+		{base + "/registration5-semver1/foo/page/0.1.0/1.0.0.json", base, true},
+		{base + "/registration/foo/index.json", base, true},
+		{"/registration-semver2/foo/index.json", "/", true},
+		{"/registration-semver2/foo/page/1.0.0/2.0.0.json", "/", true},
+		{base + "/registration-semver2/Download/foo/1.0.0", base, false},
+		{base + "/registration-semver2/Download/foo/index.json", base, false},
+		{base + "/index.json", base, false},
+		{base, base, false},
+		{base + "/flat-container/foo/index.json", base, false},
+		{base + "/v3-flatcontainer/foo/1.0.0/foo.1.0.0.nupkg", base, false},
+		{base + "/registration-semver2/foo/index.json/extra", base, false},
+		{base + "/registration-semver2/index.json", base, false},
+		{base + "/registration-semver2/foo/page/1.0.0.json", base, false},
+		{base + "/registration-semver2/foo/page/1.0.0/2.0.0/x.json", base, false},
+		{base + "/registration-semver2/foo/pages/1.0.0/2.0.0.json", base, false},
+		{base + "/registration-semver2/foo/page/1.0.0/2.0.0", base, false},
+		{base + "/other/foo/index.json", base, false},
+		{"/other/registration-semver2/foo/index.json", base, false},
+		{"/registration-semver2/foo/index.json", base, false},
+		{"/other/registration-semver2/foo/index.json", "/", false},
+	}
+	for _, c := range cases {
+		if got := row.Matches(c.path, c.base); got != c.want {
+			t.Errorf("Matches(%q, %q) = %v, want %v", c.path, c.base, got, c.want)
+		}
+	}
+}
+
+func TestStreamRegistration(t *testing.T) {
+	const in = `{"@id":"https://feed.example.test/api/v3/registration-semver2/foo/index.json","@type":["catalog:CatalogRoot"],"count":1,` +
+		`"items":[{"@id":"https://feed.example.test/api/v3/registration-semver2/foo/page/1.0.0/2.0.0.json","count":1,` +
+		`"items":[{"@id":"https://feed.example.test/api/v3/registration-semver2/foo/1.0.0.json",` +
+		`"catalogEntry":{"id":"Foo","version":"1.0.0","projectUrl":"https://github.com/example/foo","description":"not a url"},` +
+		`"packageContent":"https://feed.example.test/api/v3/registration-semver2/Download/foo/1.0.0"}]}],` +
+		`"@context":{"@vocab":"http://schema.nuget.org/schema#"}}`
+	out, edits := streamRegistrationDoc(t, in)
+	if want := repointRegistrationLinks(in); out != want {
+		t.Errorf("body =\n%s\nwant\n%s", out, want)
+	}
+	var applied, declined int
+	for _, e := range edits {
+		if e.To == "" {
+			declined++
+		} else {
+			applied++
+		}
+	}
+	if applied != 4 || declined != 0 {
+		t.Errorf("applied/declined = %d/%d, want 4/0 (projectUrl and @vocab never offered)", applied, declined)
+	}
+}
+
+// A publisher-written catalogEntry URL on the match host is neither repointed
+// nor learned: learning "/" would admit every path on the registry host.
+func TestStreamRegistrationIgnoresCatalogEntryURLs(t *testing.T) {
+	const in = `{"@id":"https://feed.example.test/api/v3/registration-semver2/foo/page/1.0.0/2.0.0.json","items":[` +
+		`{"@id":"https://feed.example.test/api/v3/registration-semver2/foo/1.0.0.json",` +
+		`"catalogEntry":{"@id":"https://feed.example.test/api/v3/catalog/foo.json","projectUrl":"https://feed.example.test/",` +
+		`"iconUrl":"https://feed.example.test/artifactory/api/security/x","licenseUrl":"https://feed.example.test/license",` +
+		`"description":"https://feed.example.test/"},` +
+		`"packageContent":"https://feed.example.test/api/v3/registration-semver2/Download/foo/1.0.0"}]}`
+	out, edits := streamRegistrationDoc(t, in)
+	if want := repointRegistrationLinks(in); out != want {
+		t.Errorf("body =\n%s\nwant\n%s", out, want)
+	}
+	if len(edits) != 3 {
+		t.Errorf("edits = %+v, want only the page @id, leaf @id and packageContent", edits)
+	}
+	for _, e := range edits {
+		if e.LearnedPath == "/" || strings.Contains(e.From, "catalog") || strings.Contains(e.From, "security") || strings.HasSuffix(e.From, ".test/") {
+			t.Errorf("edit %+v offered a publisher-written URL", e)
+		}
+	}
+}
+
+// Registration documents nest items[] only to index -> page -> leaf; a link
+// deeper than that is not registry-written.
+func TestStreamRegistrationIgnoresLinksBeyondLeafDepth(t *testing.T) {
+	const in = `{"@id":"https://feed.example.test/api/v3/registration-semver2/foo/index.json","items":[{"items":[{"items":[` +
+		`{"@id":"https://feed.example.test/api/v3/registration-semver2/deep.json",` +
+		`"packageContent":"https://feed.example.test/api/v3/registration-semver2/Download/deep/1.0.0"}]}]}]}`
+	out, edits := streamRegistrationDoc(t, in)
+	want := strings.Replace(in, registrationUpstream, registrationForwarded, 1)
+	if out != want {
+		t.Errorf("body =\n%s\nwant only the root @id repointed:\n%s", out, want)
+	}
+	if len(edits) != 1 {
+		t.Errorf("edits = %+v, want only the root @id", edits)
+	}
+}
+
+// overCapBytes stands in for registryproxy's unexported maxRewriteBodyBytes
+// (1 MiB); the page below is built past it.
+const overCapBytes = 2 << 20
+
+// A page larger than the proxy's buffered-body cap must still be streamed and
+// repointed to its last byte, not relayed unrewritten.
+func TestStreamRegistrationRepointsOverCapPage(t *testing.T) {
+	var b strings.Builder
+	b.WriteString(`{"@id":"` + registrationUpstream + `foo/index.json","items":[{"@id":"` + registrationUpstream + `foo/page/0.0.1/9.9.9.json","items":[`)
+	const leaves = 10000
+	pad := strings.Repeat("x", 100)
+	for i := 0; i < leaves; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		v := "1.0.0-" + pad + strings.Repeat("y", i%7)
+		if i == leaves-1 {
+			v = "last"
+		}
+		b.WriteString(`{"@id":"` + registrationUpstream + `foo/` + v + `.json","packageContent":"` + registrationUpstream + `Download/foo/` + v + `"}`)
+	}
+	b.WriteString(`]}]}`)
+	in := b.String()
+	if len(in) <= overCapBytes {
+		t.Fatalf("test page is %d bytes, want over %d", len(in), overCapBytes)
+	}
+	out, _ := streamRegistrationDoc(t, in)
+	if !strings.Contains(out, `"packageContent":"`+registrationForwarded+`Download/foo/last"`) {
+		t.Errorf("last item's packageContent not repointed")
+	}
+	if out != repointRegistrationLinks(in) {
+		t.Errorf("over-cap page not repointed throughout")
 	}
 }

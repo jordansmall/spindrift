@@ -3,7 +3,9 @@ package nuget
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
+	"slices"
 	"strings"
 
 	"spindrift.dev/launcher/internal/ecosystem/ecosystemkit"
@@ -115,4 +117,82 @@ func rewriteServiceIndex(body []byte, rc registryvocab.RewriteContext) registryv
 		return unchanged
 	}
 	return registryvocab.RewriteResult{Body: bytes.TrimSuffix(buf.Bytes(), []byte("\n")), Edits: edits, Outcome: registryvocab.RewriteApplied}
+}
+
+// registrationRow repoints the registry-written links in a registration index
+// or page. Restore follows the page @ids and packageContent (the .nupkg download)
+// from these documents verbatim (#5961), and a package with many versions
+// outgrows the proxy's buffered-body cap, where an over-cap body would be
+// relayed unrewritten, so the row streams.
+//
+// Widening trigger: the predicate leaves the registry's other match-host links
+// (parent, registration, catalogEntry.@id) pointing upstream. If restore is
+// seen requesting one, widen the predicate to that field alone; a 401 on such
+// a URL is the trigger firing. A request for some
+// other document (search, the vulnerability index on a routed host) takes its
+// own row. A request that escapes the rewrite reaches the upstream with no
+// credential and fails visibly; it never succeeds with one attached.
+var registrationRow = registryvocab.RewriteRow{
+	Name:          "nuget registration",
+	Ecosystem:     nameNuGet,
+	Method:        http.MethodGet,
+	Matches:       registrationMatches,
+	RewriteStream: streamRegistration,
+}
+
+// registrationMatches accepts "<registration-dir>/<id>/index.json" and
+// "<registration-dir>/<id>/page/<lo>/<hi>.json" under base, where the
+// directory is one segment starting "registration" (Artifactory's
+// "registration-semver2", nuget.org's "registration5-gz-semver2"). The .nupkg
+// download "<dir>/Download/<id>/<version>" has four segments and so never
+// matches; it must reach the Forwarder unrewritten. An id arrives
+// percent-decoded and never contains '/'.
+func registrationMatches(routeRelativePath, base string) bool {
+	rel, ok := strings.CutPrefix(routeRelativePath, registryvocab.JoinBase(base, ""))
+	if !ok || !strings.HasPrefix(rel, "/") {
+		return false
+	}
+	segs := strings.Split(rel[1:], "/")
+	if slices.Contains(segs, "") || !strings.HasPrefix(segs[0], "registration") {
+		return false
+	}
+	switch len(segs) {
+	case 3:
+		return segs[2] == "index.json"
+	case 5:
+		return segs[2] == "page" && strings.HasSuffix(segs[4], ".json")
+	}
+	return false
+}
+
+// registrationMaxItemsDepth is the deepest items[] nesting a registration
+// document has: index -> page -> leaf.
+const registrationMaxItemsDepth = 2
+
+// streamRegistration repoints only the registry-written @id and packageContent
+// values at the document root and under items[] (the page and leaf links). A
+// publisher writes catalogEntry (projectUrl, iconUrl, licenseUrl), and a
+// match-host URL there must neither be repointed nor teach the proxy a path
+// (ADR 0047).
+func streamRegistration(dst io.Writer, src io.Reader, rc registryvocab.RewriteContext, onEdit func(registryvocab.RewriteEdit)) error {
+	return ecosystemkit.StreamRepointJSON(dst, src, rc, onEdit, isRegistrationLinkPath)
+}
+
+// isRegistrationLinkPath reports whether the string value just read is an @id
+// or packageContent member of the root object, of an items[] element, or of an
+// items[].items[] element, and of no other object. Every step to it is an
+// object keyed "items" then an array, so a valid path has odd length: pairs of
+// (items, array index) followed by the final key.
+func isRegistrationLinkPath(path []ecosystemkit.JSONPathStep) bool {
+	n := len(path)
+	if n%2 != 1 || n > 1+2*registrationMaxItemsDepth {
+		return false
+	}
+	for i := 0; i < n-1; i += 2 {
+		if !path[i].IsObject || path[i].Key != "items" || path[i+1].IsObject {
+			return false
+		}
+	}
+	last := path[n-1]
+	return last.IsObject && (last.Key == "@id" || last.Key == "packageContent")
 }

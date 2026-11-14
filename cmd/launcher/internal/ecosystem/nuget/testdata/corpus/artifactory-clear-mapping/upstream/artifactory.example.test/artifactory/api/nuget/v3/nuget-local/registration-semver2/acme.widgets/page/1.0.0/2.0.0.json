@@ -1,0 +1,24 @@
+{
+  "@id": "https://artifactory.example.test/artifactory/api/nuget/v3/nuget-local/registration-semver2/acme.widgets/page/1.0.0/2.0.0.json",
+  "@type": "catalog:CatalogPage",
+  "count": 1,
+  "lower": "1.0.0",
+  "upper": "2.0.0",
+  "parent": "https://artifactory.example.test/artifactory/api/nuget/v3/nuget-local/registration-semver2/acme.widgets/index.json",
+  "items": [
+    {
+      "@id": "https://artifactory.example.test/artifactory/api/nuget/v3/nuget-local/registration-semver2/acme.widgets/2.0.0.json",
+      "@type": "Package",
+      "catalogEntry": {
+        "id": "Acme.Widgets",
+        "version": "2.0.0",
+        "projectUrl": "https://github.com/example/widgets"
+      },
+      "packageContent": "https://artifactory.example.test/artifactory/api/nuget/v3/nuget-local/registration-semver2/Download/acme.widgets/2.0.0",
+      "registration": "https://artifactory.example.test/artifactory/api/nuget/v3/nuget-local/registration-semver2/acme.widgets/index.json"
+    }
+  ],
+  "@context": {
+    "@vocab": "http://schema.nuget.org/schema#"
+  }
+}
