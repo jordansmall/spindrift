@@ -696,6 +696,44 @@ contract_repo() {
   [ "$output" = '[]' ]
 }
 
+# The subflake's conformance test runs internal/{forge,driver}/<name>, so an
+# edit there selects <name> in --connectors mode only; classify still says code.
+@test "connector package: a forge/<name> edit selects that Connector" {
+  contract_repo
+  connector_names <<<'M	cmd/launcher/internal/forge/github/a.go
+'
+  [ "$output" = '["github"]' ]
+}
+
+@test "connector package: a driver/<name> edit selects that Connector" {
+  contract_repo
+  connector_names <<<'M	cmd/launcher/internal/driver/claude/a.go
+'
+  [ "$output" = '["claude"]' ]
+}
+
+@test "connector package: a git-quoted path selects that Connector" {
+  contract_repo
+  connector_names <<<'M	"cmd/launcher/internal/forge/jira/a b.go"
+'
+  [ "$output" = '["jira"]' ]
+}
+
+@test "connector package: a package with no Connector selects none" {
+  contract_repo
+  connector_names <<<'M	cmd/launcher/internal/forge/forgejo/a.go
+M	cmd/launcher/internal/driver/opencode/a.go
+'
+  [ "$output" = '[]' ]
+}
+
+@test "connector package: classify still treats the package as core" {
+  contract_repo
+  classify_at <<<'A	cmd/launcher/internal/forge/github/a.go
+'
+  [ "$output" = code ]
+}
+
 @test "connector contract: a Connector-only diff selects just that Connector" {
   contract_repo
   connector_names <<<'M	connectors/github/a.go
