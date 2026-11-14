@@ -29,7 +29,9 @@
 #
 # `--connectors OLD NEW` instead prints the sorted, unique Connector names any
 # path in the diff touches (both sides of a rename or copy) as a JSON array,
-# core paths or not. The name regex makes plain quoting safe, so no jq.
+# core paths or not. The name regex makes plain quoting safe, so no jq. A path
+# matching ci-connector-contract (the SDK, canonical types, Host calls) selects
+# every Connector with a flake.nix at NEW instead, since each one depends on it.
 set -euo pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -82,15 +84,18 @@ diff_paths() {
   esac
 }
 
-is_comment_reader() {
+# Whether path $2 matches a glob listed in the file $1 beside this script.
+matches_globs() {
   local glob
   while IFS= read -r glob; do
     case $glob in '' | '#'*) continue ;; esac
     # shellcheck disable=SC2053 # the glob is meant to match
-    [[ $1 == $glob ]] && return 0
-  done <"$script_dir/ci-comment-readers"
+    [[ $2 == $glob ]] && return 0
+  done <"$script_dir/$1"
   return 1
 }
+
+is_comment_reader() { matches_globs ci-comment-readers "$1"; }
 
 work=
 cleanup() { [ -z "$work" ] || rm -rf "$work"; }
@@ -130,12 +135,28 @@ is_comment_only() {
 
 if [ "$mode" = connectors ]; then
   names=()
+  contract=0
+  # Without revisions there is no set file to read, so the glob never runs.
+  scan_contract=0
+  if [ -n "$new_rev" ]; then scan_contract=1; fi
   while IFS=$'\t' read -r status path new_path; do
     diff_paths "$status" "$path" "${new_path:-}" || continue
     for p in "${paths[@]}"; do
       if connector_of "$p"; then names+=("$connector_name"); fi
+      # A git-quoted path loses its leading quote so the globs still anchor.
+      if [ "$scan_contract" -eq 1 ] && matches_globs ci-connector-contract "${p#\"}"; then contract=1; fi
     done
   done
+  if [ "$contract" -eq 1 ]; then
+    names=()
+    # Captured first: inside a process substitution a failed listing (an
+    # unfetched NEW) is ignored and prints [], skipping every Connector leg.
+    dirs=$(git ls-tree --full-tree -d --name-only "$new_rev" connectors/)
+    while IFS= read -r dir; do
+      # connector_of matches a path inside a Connector dir, so name a child.
+      if connector_of "$dir/x"; then names+=("$connector_name"); fi
+    done <<<"$dirs"
+  fi
   out=
   if [ "${#names[@]}" -gt 0 ]; then
     while IFS= read -r name; do out+=${out:+,}\"$name\"; done < <(printf '%s\n' "${names[@]}" | sort -u)
