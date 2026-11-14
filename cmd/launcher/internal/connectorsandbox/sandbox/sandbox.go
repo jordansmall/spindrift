@@ -35,13 +35,19 @@ type Sandbox struct {
 	r     Starter
 	label string
 
-	mu       sync.Mutex
-	started  bool
-	closed   bool
-	name     string
-	sessions *connectorhost.Sessions
-	start    time.Duration
-	err      error
+	mu        sync.Mutex
+	started   bool
+	closed    bool
+	name      string
+	startedOK bool
+	sessions  *connectorhost.Sessions
+	start     time.Duration
+	err       error
+
+	// stopMu guards stopped. It is not mu: Sessions' killer can fire kill
+	// while Close holds mu.
+	stopMu  sync.Mutex
+	stopped bool
 }
 
 var _ connectorsandbox.Loader = (*Sandbox)(nil)
@@ -68,19 +74,37 @@ func (s *Sandbox) ensure() (*connectorhost.Sessions, error) {
 		s.err = s.startError(err, "")
 		return nil, s.err
 	}
+	s.startedOK = true
 	// Not derived from a loader's ctx: the outcome is the whole run's, so one
 	// short or cancelled ctx must not decide it.
 	hctx, cancel := context.WithTimeout(context.Background(), helloTimeout)
 	defer cancel()
-	s.sessions, err = connectorhost.NewSessions(hctx, sb.Stdout, sb.Stdin, func() { _ = s.r.Kill(s.name) }, sb.Wait)
+	s.sessions, err = connectorhost.NewSessions(hctx, sb.Stdout, sb.Stdin, func() { _ = s.kill() }, sb.Wait)
 	if err != nil {
 		_ = sb.Stdin.Close()
-		_ = s.r.Kill(s.name)
+		_ = s.kill()
 		s.err = s.startError(err, sb.Stderr())
 	} else {
 		s.start = time.Since(began)
 	}
 	return s.sessions, s.err
+}
+
+// kill is the stop hook of a started sandbox. Closing its stdin is the first
+// signal and this the backstop, so it runs until it succeeds once however many
+// paths reach it. A failed stop is left unmarked so a later call, such as
+// Close's, retries and returns the real error.
+func (s *Sandbox) kill() error {
+	s.stopMu.Lock()
+	defer s.stopMu.Unlock()
+	if s.stopped {
+		return nil
+	}
+	if err := s.r.Kill(s.name); err != nil {
+		return err
+	}
+	s.stopped = true
+	return nil
 }
 
 func (s *Sandbox) startError(err error, stderr string) error {
@@ -137,8 +161,11 @@ func (s *Sandbox) Close(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closed = true
-	if s.sessions == nil {
+	if !s.startedOK {
 		return nil
 	}
-	return errors.Join(s.sessions.Close(ctx), s.r.Kill(s.name))
+	if s.sessions == nil {
+		return s.kill()
+	}
+	return errors.Join(s.sessions.Close(ctx), s.kill())
 }
