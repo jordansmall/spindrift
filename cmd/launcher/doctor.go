@@ -34,6 +34,7 @@ func cmdDoctor(opts doctorOptions, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return int(exitcode.DoctorUnclassified)
 	}
+	sweepOrphanedSandboxes(rc.config, stderr)
 	opts.interactive = isStdinTTY()
 	return doctorReport(rc, stdout, stderr, os.Stdin, opts)
 }

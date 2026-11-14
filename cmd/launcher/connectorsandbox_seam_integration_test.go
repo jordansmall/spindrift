@@ -98,12 +98,27 @@ type sandboxRig struct {
 	env                            map[string]string
 }
 
-// newSandboxRig builds a work dispatch of the given issues on runtime's fakes.
-// runs script the Boxes in the order they start; running names the containers
-// the podman fake reports as already running. The rig releases a held Box
-// through release.
-func newSandboxRig(t *testing.T, runtime string, shadow bool, runs []seamtest.PodmanRun, issues []int, running []string, extra ...string) sandboxRig {
+// sandboxRigOpts is what newSandboxRig varies; a struct so the bools cannot be
+// swapped silently (issue #3060).
+type sandboxRigOpts struct {
+	// shadow loads the Connector from a read shadow rather than a routed row.
+	shadow bool
+	// runs script the Boxes in the order they start; running names the
+	// containers the podman fake reports as already running; imageAbsent makes
+	// the OCI fakes report the Box image as not loaded.
+	runs        []seamtest.PodmanRun
+	issues      []int
+	running     []string
+	imageAbsent bool
+	// extra are launcher flags appended to the rig's.
+	extra []string
+}
+
+// newSandboxRig builds a work dispatch of o.issues on runtime's fakes. The rig
+// releases a held Box through release.
+func newSandboxRig(t *testing.T, runtime string, o sandboxRigOpts) sandboxRig {
 	t.Helper()
+	shadow, issues, imageAbsent, running := o.shadow, o.issues, o.imageAbsent, o.running
 	fixture := "launcher-run-input.json"
 	if runtime == "bwrap" {
 		fixture = "launcher-run-input-bwrap.json"
@@ -139,7 +154,7 @@ func newSandboxRig(t *testing.T, runtime string, shadow bool, runs []seamtest.Po
 		env[k] = v
 	}
 	release := filepath.Join(recDir, "release")
-	runs = slices.Clone(runs)
+	runs := slices.Clone(o.runs)
 	for i := range runs {
 		if runs[i].HoldUntil != "" {
 			runs[i].HoldUntil = release
@@ -149,7 +164,7 @@ func newSandboxRig(t *testing.T, runtime string, shadow bool, runs []seamtest.Po
 		}
 	}
 	for _, tool := range []string{"podman", "docker"} {
-		cfg := seamtest.PodmanConfig{Record: recDir + "/" + tool + ".jsonl", ImagePresent: true, ConnectorHost: host}
+		cfg := seamtest.PodmanConfig{Record: recDir + "/" + tool + ".jsonl", ImagePresent: !imageAbsent, ConnectorHost: host}
 		if tool == runtime {
 			cfg.Runs, cfg.Running = runs, running
 		}
@@ -169,7 +184,7 @@ func newSandboxRig(t *testing.T, runtime string, shadow bool, runs []seamtest.Po
 	if runtime == "bwrap" {
 		args = append([]string{"--network-mode", "host"}, args...)
 	}
-	flags := append(args, extra...)
+	flags := append(args, o.extra...)
 	return sandboxRig{
 		cmd:    seamtest.Cmd{Bin: bin, Args: append(slices.Clone(flags), "dispatch"), Env: env, CleanEnv: true, PathDirs: []string{fakeDir}, Dir: workDir},
 		recDir: recDir, release: release,
@@ -191,7 +206,7 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 	if x.signal != nil {
 		run.HoldUntil = "set by the rig"
 	}
-	rig := newSandboxRig(t, runtime, x.shadow, []seamtest.PodmanRun{run}, issues, nil, extra...)
+	rig := newSandboxRig(t, runtime, sandboxRigOpts{shadow: x.shadow, runs: []seamtest.PodmanRun{run}, issues: issues, extra: extra})
 	recPath := filepath.Join(rig.recDir, runtime+".jsonl")
 
 	p := seamtest.Start(t, rig.cmd)
@@ -203,11 +218,7 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 			return boxes > 0
 		})
 		p.Signal(t, x.signal)
-		// The dispatch gate observes the stop only at its next Launch or Settle and
-		// prints nothing while the Box is in flight, so there is no trace to wait
-		// on: give the relay goroutine time to close the stop channel before the
-		// Box is released, or the run could end unsignalled.
-		time.Sleep(300 * time.Millisecond)
+		awaitStopLatched()
 		if err := os.WriteFile(rig.release, nil, 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -255,50 +266,93 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 
 // TestSeamConnectorSandboxReapsOrphans starts a launcher while the runtime
 // still lists a sandbox a hard-killed launcher left behind, and asserts it
-// removes that one and nothing that merely resembles it. Only podman has a
-// seam to stage a leftover: bwrap lists cgroup directories under the host's
-// real cgroupfs, which a launcher subprocess cannot be pointed away from, so
-// bwrap's list-then-stop is pinned at the runner (runnertest SandboxOrphan).
+// removes that one and nothing that merely resembles it, whether or not the
+// Box image is loaded. Only podman has a seam to stage a leftover: bwrap lists
+// cgroup directories under the host's real cgroupfs, which a launcher
+// subprocess cannot be pointed away from, so bwrap's list-then-stop is pinned
+// at the runner (runnertest SandboxOrphan).
 func TestSeamConnectorSandboxReapsOrphans(t *testing.T) {
+	orphan, others := stageOrphan(t)
+	for _, imageAbsent := range []bool{false, true} {
+		t.Run(fmt.Sprintf("imageAbsent=%t", imageAbsent), func(t *testing.T) {
+			rig := newSandboxRig(t, "podman", sandboxRigOpts{
+				shadow: true, runs: []seamtest.PodmanRun{{Outcome: seamOutcome("ready")}}, issues: []int{7},
+				running: append([]string{orphan}, others...), imageAbsent: imageAbsent,
+			})
+			res := seamtest.Start(t, rig.cmd).Wait(t)
+			if imageAbsent {
+				// The sweep needs no image, so it lands even though the launcher
+				// then refuses to start without one.
+				if res.ExitCode == 0 {
+					t.Fatalf("exit code = 0 with the image absent; want non-zero\nstderr:\n%s", res.Stderr)
+				}
+				if out := res.Stdout + res.Stderr; !strings.Contains(out, imageAbsentRefusal) {
+					t.Errorf("output lacks the image-absent refusal %q:\n%s", imageAbsentRefusal, out)
+				}
+			} else {
+				res.WantExit(t, 0)
+			}
+
+			var reaped []string
+			for _, line := range strings.Split(res.Stderr, "\n") {
+				if name, ok := strings.CutPrefix(line, "==> reaped orphaned Connector sandbox: "); ok {
+					reaped = append(reaped, name)
+				}
+			}
+			if len(reaped) != 1 || reaped[0] != orphan {
+				t.Errorf("reaped %q, want only %q", reaped, orphan)
+			}
+			assertOrphanReaped(t, seamtest.ReadRecord(t, filepath.Join(rig.recDir, "podman.jsonl")), orphan, others)
+		})
+	}
+}
+
+// imageAbsentRefusal is the readiness error the OCI runner returns when the Box
+// image is not loaded.
+const imageAbsentRefusal = "image absent; run `spindrift build`"
+
+// stageOrphan is the name of a sandbox a hard-killed launcher left behind (its
+// owner pid is dead) and the running names a reap must leave alone: a sandbox
+// whose launcher still runs (this test process), a real Box, and names that only
+// resemble a sandbox's.
+func stageOrphan(t *testing.T) (orphan string, others []string) {
+	t.Helper()
 	dead := exec.Command("true")
 	if err := dead.Run(); err != nil {
 		t.Fatal(err)
 	}
-	orphan := fmt.Sprintf("%s%d-1700000000000000000", runner.ConnectorSandboxPrefix, dead.Process.Pid)
-	others := []string{
-		// A sandbox whose owning launcher still runs: this test process.
+	orphan = fmt.Sprintf("%s%d-1700000000000000000", runner.ConnectorSandboxPrefix, dead.Process.Pid)
+	others = []string{
 		fmt.Sprintf("%s%d-1700000000000000000", runner.ConnectorSandboxPrefix, os.Getpid()),
-		// A real running Box, named by the dispatch scheme, and names that only
-		// resemble a sandbox's.
 		dispatch.BoxName("99"),
 		"spindrift-box-connector-sandbox-7",
 		fmt.Sprintf("box-%s%d-1700000000000000000", runner.ConnectorSandboxPrefix, dead.Process.Pid),
 	}
-	rig := newSandboxRig(t, "podman", true, []seamtest.PodmanRun{{Outcome: seamOutcome("ready")}}, []int{7}, append([]string{orphan}, others...))
-	res := seamtest.Start(t, rig.cmd).Wait(t)
-	res.WantExit(t, 0)
+	return orphan, others
+}
 
-	var reaped []string
-	for _, line := range strings.Split(res.Stderr, "\n") {
-		if name, ok := strings.CutPrefix(line, "==> reaped orphaned Connector sandbox: "); ok {
-			reaped = append(reaped, name)
-		}
-	}
-	if len(reaped) != 1 || reaped[0] != orphan {
-		t.Errorf("reaped %q, want only %q", reaped, orphan)
-	}
-	for _, r := range seamtest.ReadRecord(t, filepath.Join(rig.recDir, "podman.jsonl")) {
+// assertOrphanReaped fails unless the runtime record shows the orphan removed
+// exactly once and no argv naming any of others.
+func assertOrphanReaped(t *testing.T, recs [][]string, orphan string, others []string) {
+	t.Helper()
+	for _, r := range recs {
 		line := strings.Join(r, " ")
 		for _, o := range others {
 			if strings.Contains(line, o) {
-				t.Errorf("the launcher touched %s: podman %s", o, line)
+				t.Errorf("touched %s: podman %s", o, line)
 			}
 		}
 	}
-	if got := countArgv(seamtest.ReadRecord(t, filepath.Join(rig.recDir, "podman.jsonl")), "rm", "-f", "id-"+orphan); got != 1 {
+	if got := countArgv(recs, "rm", "-f", "id-"+orphan); got != 1 {
 		t.Errorf("podman removed the orphan %d times, want once", got)
 	}
 }
+
+// awaitStopLatched gives a signalled launcher time to latch the stop. Its
+// dispatch gate observes the stop only at its next Launch or Settle and prints
+// nothing while a Box is in flight, so there is no trace to poll; releasing the
+// Box early would let the run end unsignalled.
+func awaitStopLatched() { time.Sleep(300 * time.Millisecond) }
 
 func countArgv(recs [][]string, want ...string) int {
 	n := 0
