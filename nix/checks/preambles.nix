@@ -121,6 +121,9 @@ let
     imageAttrName = "agent-image";
     runtime = builtins.head ociRow.runtimes;
     imageDrv = "/nix/store/ddd-image.drv";
+    connectorSandboxImagePath = "/nix/store/hhh-connector-sandbox";
+    connectorSandboxImageTag = "spindrift-connector-sandbox:cafe";
+    connectorSandboxImageDrv = "/nix/store/iii-connector-sandbox.drv";
     nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
     systems = {
       host = "aarch64-darwin";
@@ -593,6 +596,18 @@ runArtifactsRowChecks allRows
       out.IMAGE_DRV == "/nix/store/ddd-image.drv"
     ) "runArtifacts (oci) must set IMAGE_DRV, got: ${builtins.toJSON out}";
     assert assertMsg (
+      out.CONNECTOR_SANDBOX_IMAGE_ARCHIVE == "/nix/store/hhh-connector-sandbox"
+    ) "runArtifacts (oci) must set CONNECTOR_SANDBOX_IMAGE_ARCHIVE, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.CONNECTOR_SANDBOX_IMAGE_TAG == "spindrift-connector-sandbox:cafe"
+    ) "runArtifacts (oci) must set CONNECTOR_SANDBOX_IMAGE_TAG, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.CONNECTOR_SANDBOX_IMAGE_DRV == "/nix/store/iii-connector-sandbox.drv"
+    ) "runArtifacts (oci) must set CONNECTOR_SANDBOX_IMAGE_DRV, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.CONNECTOR_SANDBOX_FLAKE_ATTR == ".#packages.x86_64-linux.connector-sandbox-image"
+    ) "runArtifacts (oci) must set CONNECTOR_SANDBOX_FLAKE_ATTR, got: ${builtins.toJSON out}";
+    assert assertMsg (
       out.NIX_BUILDER_IMAGE == "docker.io/nixos/nix@sha256:aaaa"
     ) "runArtifacts (oci) must set NIX_BUILDER_IMAGE, got: ${builtins.toJSON out}";
     assert assertMsg (
@@ -685,6 +700,9 @@ runArtifactsRowChecks allRows
         imageAttrName = "agent-image";
         runtime = builtins.head ociRow.runtimes;
         imageDrv = "/nix/store/ddd-image.drv";
+        connectorSandboxImagePath = "/nix/store/hhh-connector-sandbox";
+        connectorSandboxImageTag = "spindrift-connector-sandbox:cafe";
+        connectorSandboxImageDrv = "/nix/store/iii-connector-sandbox.drv";
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
         systems = {
           host = "aarch64-darwin";
@@ -752,6 +770,9 @@ runArtifactsRowChecks allRows
       badDerived = builtins.tryEval (
         builtins.deepSeq (preambles.runArtifacts (args // { flakeImageAttr = "caller"; })) true
       );
+      badSandboxDerived = builtins.tryEval (
+        builtins.deepSeq (preambles.runArtifacts (args // { connectorSandboxFlakeAttr = "caller"; })) true
+      );
       # A runtime another row lists would render a self-contradictory document
       # (the bwrap row's keys under an OCI RUNTIME).
       badRuntime = builtins.tryEval (
@@ -767,6 +788,9 @@ runArtifactsRowChecks allRows
     assert assertMsg (
       !badDerived.success
     ) "runArtifacts must throw on a caller-passed flakeImageAttr, which it derives itself";
+    assert assertMsg (
+      !badSandboxDerived.success
+    ) "runArtifacts must throw on a caller-passed connectorSandboxFlakeAttr, which it derives itself";
     assert assertMsg (!badRuntime.success) "runArtifacts must throw on a runtime the row does not list";
     pkgs.runCommand "preambles-run-artifacts-rejects-unknown-arg" { } "touch $out";
 

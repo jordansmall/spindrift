@@ -2017,6 +2017,12 @@ in
         (import ../../lib/mkHarness.nix (ociHarnessArgs // { imageAttrName = "spindrift"; })).packages
       ).success
     ) "an imageAttrName colliding with a built-in package must be rejected";
+    assert assertMsg (
+      !(builtins.tryEval
+        (import ../../lib/mkHarness.nix (ociHarnessArgs // { imageAttrName = "connector-sandbox-image"; }))
+        .packages
+      ).success
+    ) "an imageAttrName colliding with the connector sandbox image must be rejected";
     pkgs.runCommand "mkharness-image-attr-name"
       {
         ociDoc = ociNamed.internals.runInputDocumentFile;
@@ -2285,6 +2291,7 @@ in
         "boxBin"
         "driverEntry"
         "daemonBin"
+        "connectorSandboxImage"
         "imageAttrName"
         "runInputDocumentFile"
         "backendBundleDirs"

@@ -30,12 +30,16 @@ type SharedArtifacts struct {
 
 // OCIArtifacts holds the artifacts the oci runner row renders (lib/runners/oci.nix).
 type OCIArtifacts struct {
-	FlakeImageAttr  Value `json:"FLAKE_IMAGE_ATTR,omitzero"`
-	ImageArchive    Value `json:"IMAGE_ARCHIVE,omitzero"`
-	ImageDrv        Value `json:"IMAGE_DRV,omitzero"`
-	ImageTag        Value `json:"IMAGE_TAG,omitzero"`
-	NixBuilderImage Value `json:"NIX_BUILDER_IMAGE,omitzero"`
-	NixVolume       Value `json:"NIX_VOLUME,omitzero"`
+	ConnectorSandboxFlakeAttr    Value `json:"CONNECTOR_SANDBOX_FLAKE_ATTR,omitzero"`
+	ConnectorSandboxImageArchive Value `json:"CONNECTOR_SANDBOX_IMAGE_ARCHIVE,omitzero"`
+	ConnectorSandboxImageDrv     Value `json:"CONNECTOR_SANDBOX_IMAGE_DRV,omitzero"`
+	ConnectorSandboxImageTag     Value `json:"CONNECTOR_SANDBOX_IMAGE_TAG,omitzero"`
+	FlakeImageAttr               Value `json:"FLAKE_IMAGE_ATTR,omitzero"`
+	ImageArchive                 Value `json:"IMAGE_ARCHIVE,omitzero"`
+	ImageDrv                     Value `json:"IMAGE_DRV,omitzero"`
+	ImageTag                     Value `json:"IMAGE_TAG,omitzero"`
+	NixBuilderImage              Value `json:"NIX_BUILDER_IMAGE,omitzero"`
+	NixVolume                    Value `json:"NIX_VOLUME,omitzero"`
 }
 
 // BwrapArtifacts holds the artifacts the bwrap runner row renders (lib/runners/bwrap.nix).
@@ -73,7 +77,7 @@ var SharedArtifactKeys = []string{"BOX_ARTIFACT", "BOX_ENV_VARS", "CHORE_CATALOG
 
 // FamilyArtifactKeys maps a runner family name to the keys its row renders.
 var FamilyArtifactKeys = map[string][]string{
-	"oci":   {"FLAKE_IMAGE_ATTR", "IMAGE_ARCHIVE", "IMAGE_DRV", "IMAGE_TAG", "NIX_BUILDER_IMAGE", "NIX_VOLUME"},
+	"oci":   {"CONNECTOR_SANDBOX_FLAKE_ATTR", "CONNECTOR_SANDBOX_IMAGE_ARCHIVE", "CONNECTOR_SANDBOX_IMAGE_DRV", "CONNECTOR_SANDBOX_IMAGE_TAG", "FLAKE_IMAGE_ATTR", "IMAGE_ARCHIVE", "IMAGE_DRV", "IMAGE_TAG", "NIX_BUILDER_IMAGE", "NIX_VOLUME"},
 	"bwrap": {"AGENT_ENV", "AGENT_ENV_DRV", "AGENT_FILES", "AGENT_FILES_DRV", "BAKED_PREFETCH", "FLAKE_IMAGE_ATTR", "GROUP_FILE", "GROUP_FILE_DRV", "IMAGE_TAG", "NIX_CONFIG_FILE", "NIX_CONFIG_FILE_DRV", "NIX_STORE_WRITABLE", "PASSWD_FILE", "PASSWD_FILE_DRV", "SYSCALL_FILTER", "SYSCALL_FILTER_DRV"},
 }
 

@@ -239,6 +239,7 @@ let
     boxBin
     orchestratorBin
     daemonBin
+    connectorHostLinuxBin
     launcherModuleSrc
     launcherCurrencyFileset
     launcherCurrencyBin
@@ -1314,6 +1315,14 @@ let
     syscallFilter
     ;
 
+  # The Connector sandbox image: connector-host alone, loaded into the runtime
+  # the way the Box image is (issue #7014).
+  connectorSandboxImageName = import ./connector-sandbox-image-name.nix;
+  connectorSandboxImage = import ./connector-sandbox-image.nix {
+    inherit pkgs;
+    connectorHost = connectorHostLinuxBin;
+  };
+
   # The canonical outcome contract as a host store path, so checks can diff it
   # against what a Consumer prompt lacking the contract gets injected with.
   # That is the proof the two cannot drift apart (issue #419).
@@ -1423,6 +1432,12 @@ let
   # only realizing it needs a Linux builder.
   imageDrv = builtins.unsafeDiscardStringContext image.drvPath;
 
+  # The Connector sandbox image's refs, derived like imagePath/imageHash/imageDrv
+  # above so the OCI runner can build, load and tag it the same way.
+  connectorSandboxImagePath = builtins.unsafeDiscardStringContext (toString connectorSandboxImage);
+  connectorSandboxImageTag = "${connectorSandboxImage.imageName}:${storeHashOf connectorSandboxImagePath}";
+  connectorSandboxImageDrv = builtins.unsafeDiscardStringContext connectorSandboxImage.drvPath;
+
   # bwrap runner store paths, context-discarded for the same reason. Reading
   # `.drvPath` instantiates each derivation at eval time (creating the .drv
   # file) but does not realize the output; `bwrap build` does that.
@@ -1502,6 +1517,9 @@ let
       runtime
       imageAttrName
       imageDrv
+      connectorSandboxImagePath
+      connectorSandboxImageTag
+      connectorSandboxImageDrv
       nixBuilderImage
       systems
       hostMediatedRemote
@@ -1885,6 +1903,8 @@ let
       throw "mkHarness: imageAttrName must not be empty"
     else if lib.hasInfix "." imageAttrName then
       throw "mkHarness: imageAttrName '${imageAttrName}' must not contain '.' -- it names a single flake package attribute, and a dotted name would be read as an attribute path"
+    else if imageAttrName == connectorSandboxImageName then
+      throw "mkHarness: imageAttrName '${imageAttrName}' collides with the Connector sandbox image package of the same name"
     else if basePackages ? ${imageAttrName} then
       throw "mkHarness: imageAttrName '${imageAttrName}' collides with the built-in package of the same name; pick a name outside: ${lib.concatStringsSep ", " (lib.attrNames basePackages)}"
     else
@@ -1956,7 +1976,7 @@ else
       # daemonBin is otherwise reachable only as apps.daemon.program, a
       # string -- exposed here so nix/checks/equivalence.nix's store-path
       # checks can compare and override it directly (issue #3621).
-      inherit daemonBin;
+      inherit daemonBin connectorSandboxImage;
 
       # The fully resolved roster, after dropOptedOut and the reviewEffort
       # step (issue #2512). Exposed for nix/checks/equivalence.nix's
@@ -1996,6 +2016,9 @@ else
             store-closure = agentClosure;
           }
           .${runnerRow.artifact};
+      }
+      // lib.optionalAttrs (isLinux && runnerRow.artifact == "oci-image") {
+        ${connectorSandboxImageName} = connectorSandboxImage;
       };
 
     apps.default = {

@@ -28,10 +28,14 @@
   runArtifacts =
     {
       flakeImageAttr,
+      connectorSandboxFlakeAttr,
       imagePath,
       imageHash,
       imageName,
       imageDrv,
+      connectorSandboxImagePath,
+      connectorSandboxImageTag,
+      connectorSandboxImageDrv,
       nixBuilderImage,
       ...
     }:
@@ -40,6 +44,10 @@
       IMAGE_ARCHIVE = imagePath;
       IMAGE_TAG = "${imageName}:${imageHash}";
       IMAGE_DRV = imageDrv;
+      CONNECTOR_SANDBOX_IMAGE_ARCHIVE = connectorSandboxImagePath;
+      CONNECTOR_SANDBOX_IMAGE_TAG = connectorSandboxImageTag;
+      CONNECTOR_SANDBOX_IMAGE_DRV = connectorSandboxImageDrv;
+      CONNECTOR_SANDBOX_FLAKE_ATTR = connectorSandboxFlakeAttr;
       NIX_BUILDER_IMAGE = nixBuilderImage;
       NIX_VOLUME = "spindrift-nix";
     };
