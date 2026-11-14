@@ -123,7 +123,8 @@ func runOnce(cfg execConfig, w io.Writer, child *atomic.Pointer[os.Process]) (in
 	if err != nil {
 		return 0, err
 	}
-	cmd.Stdout = w
+	sw := &stickyErrWriter{w: w}
+	cmd.Stdout = sw
 	// A non-*os.File writer gives the Driver a private pipe: under bwrap fd 1
 	// and fd 2 share one open file description, and a Driver setting O_NONBLOCK
 	// on an inherited fd 2 would make driver-exec's stdout writes fail EAGAIN.
@@ -135,6 +136,11 @@ func runOnce(cfg execConfig, w io.Writer, child *atomic.Pointer[os.Process]) (in
 	child.Store(cmd.Process)
 	runErr := cmd.Wait()
 	child.Store(nil)
+	// Wait prefers the process's ExitError over a copy error, so a Driver dying
+	// non-zero after the stream broke would otherwise hide the truncated log.
+	if sw.err != nil {
+		return 0, sw.err
+	}
 	if exitErr, ok := runErr.(*exec.ExitError); ok {
 		return exitErr.ExitCode(), nil
 	}
@@ -142,6 +148,21 @@ func runOnce(cfg execConfig, w io.Writer, child *atomic.Pointer[os.Process]) (in
 		return 0, runErr
 	}
 	return 0, nil
+}
+
+// stickyErrWriter remembers the first error from w. exec's copy goroutine is
+// its only writer, so reading err after Wait needs no lock.
+type stickyErrWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (s *stickyErrWriter) Write(p []byte) (int, error) {
+	n, err := s.w.Write(p)
+	if err != nil && s.err == nil {
+		s.err = err
+	}
+	return n, err
 }
 
 // logFileEmpty reports whether the file at path is absent or zero bytes.
