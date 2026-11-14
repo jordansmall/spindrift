@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/inputdoc"
@@ -439,6 +440,55 @@ func parseFlags(args []string) (remaining, schemaArgs []string, err error) {
 // changing parseFlags' signature.
 var globalSecretCmdTemplate string
 
+// secretTemplateCmd renders globalSecretCmdTemplate for env.
+func secretTemplateCmd(env string) string {
+	return strings.ReplaceAll(globalSecretCmdTemplate, "{name}", toKebab(env))
+}
+
+// connectorCredentialNeededThisRun reports whether this run reads through row:
+// its backend is the active CODE_FORGE or ISSUE_TRACKER, and the row is either
+// shadowed or routed. backendrows.Use keeps a non-shadow row (a jira Connector
+// imported by a native-Jira Consumer) that nothing reads until its cut-over, so
+// the SECRET_CMD template must not fetch, or fail on, its credential.
+func connectorCredentialNeededThisRun(row backendrows.Row) bool {
+	if resolvedKnob("CODE_FORGE") != row.Name && resolvedKnob("ISSUE_TRACKER") != row.Name {
+		return false
+	}
+	// An unknown row name yields the zero Strategy: not routed.
+	strategy, _ := backendkit.ByName(row.Name)
+	return row.Shadow || strategy.ConnectorRouted
+}
+
+// applyConnectorCredentials resolves each backend row's credential env the way
+// a core secret resolves. Connector modules declare these knobs, so
+// inputdoc.SecretKnobs never lists them, and the rows only exist once
+// backendrows.Use has run.
+func applyConnectorCredentials() error {
+	seen := map[string]bool{}
+	for _, row := range backendrows.All() {
+		env := row.CredentialEnv
+		if seen[env] {
+			continue
+		}
+		cmd := os.Getenv(env + "_CMD")
+		if cmd == "" {
+			if os.Getenv(env) != "" || globalSecretCmdTemplate == "" || !connectorCredentialNeededThisRun(row) {
+				continue
+			}
+			cmd = secretTemplateCmd(env)
+		}
+		seen[env] = true
+		value, err := resolveSecretCmd(env, cmd)
+		if err != nil {
+			return err
+		}
+		if err := os.Setenv(env, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // applySecretCmdFallback resolves globalSecretCmdTemplate, substituting
 // {name} with the kebab-case env name, for every secret knob this run needs
 // that still has no value. mainRun must call it after inputdoc.Resolve, not
@@ -468,7 +518,7 @@ func applySecretCmdFallback() error {
 		var errs []error
 		fetched := false
 		for _, env := range envs {
-			cmd := strings.ReplaceAll(globalSecretCmdTemplate, "{name}", toKebab(env))
+			cmd := secretTemplateCmd(env)
 			value, err := resolveSecretCmd(env, cmd)
 			if err != nil {
 				errs = append(errs, err)

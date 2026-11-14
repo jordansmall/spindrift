@@ -70,6 +70,10 @@ type Strategy struct {
 	NewReadOnlyCodeForge func(Shared, Lookup, forge.SanitizedParent, forge.IssueTracker) (forge.CodeForge, error)
 	NewLedger            func(Shared, Lookup) (LedgerSite, error)
 
+	// ConnectorRouted marks an adapter that reads through its non-shadow
+	// backend row's Connector. Without it a non-shadow row stays registered
+	// but unused.
+	ConnectorRouted bool
 	// LandedBanner is the clause the all-delivered banner puts after "==> all
 	// agents finished — ", for a backend that is a Code Forge. Nil on a
 	// tracker-only backend.

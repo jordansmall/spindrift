@@ -12,7 +12,8 @@ import (
 // Strategy is the github backend's Go half (ADR 0068). It has no knobs, so
 // its closures ignore the Lookup.
 var Strategy = backendkit.Strategy{
-	Descriptor: backend.GitHub,
+	Descriptor:      backend.GitHub,
+	ConnectorRouted: true,
 	ValidateTracker: func(s backendkit.Shared, _ backendkit.Lookup) error {
 		return backendkit.RequireRepoSlug(s, backend.GitHub.Name)
 	},
