@@ -40,6 +40,7 @@ type Sandbox struct {
 	closed   bool
 	name     string
 	sessions *connectorhost.Sessions
+	start    time.Duration
 	err      error
 }
 
@@ -61,6 +62,7 @@ func (s *Sandbox) ensure() (*connectorhost.Sessions, error) {
 	}
 	s.started = true
 	s.name = fmt.Sprintf("%s%d-%d", runner.ConnectorSandboxPrefix, os.Getpid(), time.Now().UnixNano())
+	began := time.Now()
 	sb, err := s.r.StartConnectorSandbox(s.name)
 	if err != nil {
 		s.err = s.startError(err, "")
@@ -75,6 +77,8 @@ func (s *Sandbox) ensure() (*connectorhost.Sessions, error) {
 		_ = sb.Stdin.Close()
 		_ = s.r.Kill(s.name)
 		s.err = s.startError(err, sb.Stderr())
+	} else {
+		s.start = time.Since(began)
 	}
 	return s.sessions, s.err
 }
@@ -114,6 +118,17 @@ func (s *Sandbox) Err() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.err
+}
+
+// Stats is the sandbox's start time and the exchanges it has carried, also after
+// Close; false when no load started it or its start failed.
+func (s *Sandbox) Stats() (connectorsandbox.Stats, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessions == nil {
+		return connectorsandbox.Stats{}, false
+	}
+	return connectorsandbox.Stats{Start: s.start, HopStats: s.sessions.Stats()}, true
 }
 
 // Close stops the sandbox if a load started one, and is a no-op otherwise. No

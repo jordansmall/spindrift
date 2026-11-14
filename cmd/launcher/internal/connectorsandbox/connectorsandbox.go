@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"sync/atomic"
+	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
 )
@@ -27,6 +28,16 @@ type Loader interface {
 	LoadNetwork(ctx context.Context, wasm []byte, n connectorhost.Network) (*connectorhost.Connector, error)
 	// Err is the sandbox's start failure, or nil.
 	Err() error
+	// Stats is what the sandbox cost the run; false when none started or its
+	// start failed.
+	Stats() (Stats, bool)
+}
+
+// Stats is what a run's Connector sandbox cost: Start is the runner start plus
+// the host's hello, and the embedded HopStats are the exchanges it carried.
+type Stats struct {
+	Start time.Duration
+	connectorhost.HopStats
 }
 
 // holder lets the atomic hold a nil Loader.
@@ -73,4 +84,13 @@ func Failure() error {
 		return l.Err()
 	}
 	return nil
+}
+
+// Report is the installed sandbox's Stats; false when none is installed, none
+// started, or its start failed.
+func Report() (Stats, bool) {
+	if l := installed(); l != nil {
+		return l.Stats()
+	}
+	return Stats{}, false
 }
