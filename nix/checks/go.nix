@@ -1253,6 +1253,13 @@ driverGoTests
         export SPINDRIFT_CONNECTOR_FIXTURES_DIR=${fixtures.connectorWasm}
         CGO_ENABLED=0 go build -o "$TMPDIR/connector-host" ./connector-host
         export SPINDRIFT_CONNECTOR_HOST="$TMPDIR/connector-host"
+        # The escape control runs the probe build unsandboxed; there is no flake
+        # here to build it from, and the tests expect <dir>/bin/connector-host.
+        mkdir -p "$TMPDIR/connector-host-escapeprobe/bin"
+        CGO_ENABLED=0 go build -tags escapeprobe -o "$TMPDIR/connector-host-escapeprobe/bin/connector-host" ./connector-host
+        # Compiled only under the tag, so no other run exercises the probe host.
+        go test -tags escapeprobe -run '^TestEscape' ./internal/connectorhost
+        export SPINDRIFT_CONNECTOR_HOST_ESCAPEPROBE="$TMPDIR/connector-host-escapeprobe/bin/connector-host"
         files=$(grep -rl --include='*_test.go' --exclude-dir=vendor '^//go:build integration' . || true)
         if [ -z "$files" ]; then
           echo "no integration-tagged test files found" >&2
