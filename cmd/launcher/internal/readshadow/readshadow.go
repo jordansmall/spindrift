@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/shadowrecord"
@@ -297,6 +298,12 @@ func (s *Shadow) close(ctx context.Context) {
 	if n := time.Duration(s.rec.Sum.Compared); n > 0 {
 		s.rec.Sum.NativeNsPerLine = int64(s.nativeNs / n)
 		s.rec.Sum.ShadowNsPerLine = int64(s.shadowNs / n)
+	}
+	if st, ok := connectorsandbox.Report(); ok {
+		s.rec.Sum.SandboxStartNs = int64(st.Start)
+		s.rec.Sum.SandboxCalls = st.Calls
+		s.rec.Sum.SandboxHostCalls = st.HostCalls
+		s.rec.Sum.SandboxHopNs = int64(st.Hop)
 	}
 	s.rec.Finish()
 }

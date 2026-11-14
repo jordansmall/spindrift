@@ -235,7 +235,10 @@ type ShadowDivergence struct {
 // compared call, and the counters below it alone fills: Forbidden (shadow calls
 // answered 403 that were not a rate limit), RateLimited and
 // SecondaryRateLimited (primary and secondary rate limits), and Skipped
-// (sampled calls dropped rather than delay the native path).
+// (sampled calls dropped rather than delay the native path). The Sandbox*
+// fields are the run's Connector sandbox, shared by every Connector the run
+// hosts, so run-wide totals when the summary is written; only the host-side
+// read shadow sets them, and only when a sandbox started.
 type ShadowSummary struct {
 	Driver               string `json:"driver"`
 	Loaded               bool   `json:"loaded"`
@@ -249,4 +252,8 @@ type ShadowSummary struct {
 	Skipped              int    `json:"skipped,omitempty"`
 	NativeNsPerLine      int64  `json:"native_ns_per_line"`
 	ShadowNsPerLine      int64  `json:"shadow_ns_per_line"`
+	SandboxStartNs       int64  `json:"sandbox_start_ns,omitempty"`
+	SandboxCalls         int64  `json:"sandbox_calls,omitempty"`
+	SandboxHostCalls     int64  `json:"sandbox_host_calls,omitempty"`
+	SandboxHopNs         int64  `json:"sandbox_hop_ns,omitempty"`
 }

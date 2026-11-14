@@ -2887,7 +2887,16 @@ the Driver replay, with these differences:
   `native_ns_per_line` and `shadow_ns_per_line` are the mean cost per compared
   call. It adds `skipped` (samples dropped), `forbidden` (403s that are not rate
   limits), `rate_limited` (primary) and `secondary_rate_limited`; each is
-  omitted at zero.
+  omitted at zero. Under `CONNECTOR_SANDBOX` it also carries the run's sandbox
+  cost: `sandbox_start_ns` (runner start through the connector host's hello),
+  `sandbox_calls` and `sandbox_host_calls` (exchanges, and `http_request` Host
+  calls plus refused Host-call frames, across the pipe) and `sandbox_hop_ns`
+  (their wall time less the Launcher's Host-call handling, guest execution
+  included); all are absent when no sandbox started. Only a host-side read
+  shadow writes them, so a sandboxed run with no `Shadow` backend row reports
+  no sandbox cost. Totals are run-wide, as one sandbox serves every Connector
+  the run hosts, and each shadowed backend repeats them on its own summary:
+  read one, do not sum them.
 
 The host classifies a 403 or 429 itself, since the guest sees only status and
 body, and marks the audit line: `shadow` is `true` on every entry a shadow
