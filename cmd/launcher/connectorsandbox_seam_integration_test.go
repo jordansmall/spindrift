@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/runner"
@@ -85,15 +86,23 @@ func TestSeamConnectorSandboxStoppedOnce(t *testing.T) {
 
 // sandboxRig is a launcher run wired to the family's fakes and ready to start.
 type sandboxRig struct {
-	cmd     seamtest.Cmd
-	recDir  string
+	cmd    seamtest.Cmd
+	recDir string
+	// release frees every Box scripted with HoldUntil.
 	release string
+	// The rest is what a daemon rig needs to run the same launcher as its child:
+	// the launcher binary and its flags (without the verb), the input document,
+	// the working directory and the fakes' environment.
+	bin, docPath, workDir, fakeDir string
+	flags                          []string
+	env                            map[string]string
 }
 
 // newSandboxRig builds a work dispatch of the given issues on runtime's fakes.
-// run scripts the first Box; running names the containers the podman fake
-// reports as already running. The rig releases a held Box through release.
-func newSandboxRig(t *testing.T, runtime string, shadow bool, run seamtest.PodmanRun, issues []int, running []string, extra ...string) sandboxRig {
+// runs script the Boxes in the order they start; running names the containers
+// the podman fake reports as already running. The rig releases a held Box
+// through release.
+func newSandboxRig(t *testing.T, runtime string, shadow bool, runs []seamtest.PodmanRun, issues []int, running []string, extra ...string) sandboxRig {
 	t.Helper()
 	fixture := "launcher-run-input.json"
 	if runtime == "bwrap" {
@@ -130,13 +139,15 @@ func newSandboxRig(t *testing.T, runtime string, shadow bool, run seamtest.Podma
 		env[k] = v
 	}
 	release := filepath.Join(recDir, "release")
-	if run.HoldUntil != "" {
-		run.HoldUntil = release
+	runs = slices.Clone(runs)
+	for i := range runs {
+		if runs[i].HoldUntil != "" {
+			runs[i].HoldUntil = release
+		}
+		runs[i].Files = map[string]string{
+			filepath.Join(hostpaths.OutboxDir(workDir, "7"), seambundle.FileName): seamBundle(t, bare),
+		}
 	}
-	run.Files = map[string]string{
-		filepath.Join(hostpaths.OutboxDir(workDir, "7"), seambundle.FileName): seamBundle(t, bare),
-	}
-	runs := []seamtest.PodmanRun{run}
 	for _, tool := range []string{"podman", "docker"} {
 		cfg := seamtest.PodmanConfig{Record: recDir + "/" + tool + ".jsonl", ImagePresent: true, ConnectorHost: host}
 		if tool == runtime {
@@ -158,11 +169,11 @@ func newSandboxRig(t *testing.T, runtime string, shadow bool, run seamtest.Podma
 	if runtime == "bwrap" {
 		args = append([]string{"--network-mode", "host"}, args...)
 	}
-	args = append(append(args, extra...), "dispatch")
+	flags := append(args, extra...)
 	return sandboxRig{
-		cmd:     seamtest.Cmd{Bin: bin, Args: args, Env: env, CleanEnv: true, PathDirs: []string{fakeDir}, Dir: workDir},
-		recDir:  recDir,
-		release: release,
+		cmd:    seamtest.Cmd{Bin: bin, Args: append(slices.Clone(flags), "dispatch"), Env: env, CleanEnv: true, PathDirs: []string{fakeDir}, Dir: workDir},
+		recDir: recDir, release: release,
+		bin: bin, docPath: docPath, workDir: workDir, fakeDir: fakeDir, flags: flags, env: env,
 	}
 }
 
@@ -180,8 +191,8 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 	if x.signal != nil {
 		run.HoldUntil = "set by the rig"
 	}
-	rig := newSandboxRig(t, runtime, x.shadow, run, issues, nil, extra...)
-	recPath := rig.recDir + "/" + runtime + ".jsonl"
+	rig := newSandboxRig(t, runtime, x.shadow, []seamtest.PodmanRun{run}, issues, nil, extra...)
+	recPath := filepath.Join(rig.recDir, runtime+".jsonl")
 
 	p := seamtest.Start(t, rig.cmd)
 	if x.signal != nil {
@@ -192,9 +203,10 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 			return boxes > 0
 		})
 		p.Signal(t, x.signal)
-		// The launcher latches the stop silently while the Box is in flight, so
-		// there is nothing to wait on: give the relay goroutine time to close the
-		// stop channel before the Box is released, or the run could end unsignalled.
+		// The dispatch gate observes the stop only at its next Launch or Settle and
+		// prints nothing while the Box is in flight, so there is no trace to wait
+		// on: give the relay goroutine time to close the stop channel before the
+		// Box is released, or the run could end unsignalled.
 		time.Sleep(300 * time.Millisecond)
 		if err := os.WriteFile(rig.release, nil, 0o644); err != nil {
 			t.Fatal(err)
@@ -206,9 +218,11 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 		t.Errorf("output lacks %q:\n%s", x.wantOut, out)
 	}
 
+	// The stopped line prints only after a successful stop, so a fail-then-retry
+	// still shows one; no failed-attempt warning too is what proves one hook run.
 	stopped := stoppedSandboxes(res.Stderr)
-	if len(stopped) != 1 {
-		t.Fatalf("the stop hook ran %d times (%q), want exactly once\nstderr:\n%s", len(stopped), stopped, res.Stderr)
+	if failed := strings.Count(res.Stderr, "warning: stopping Connector sandbox"); len(stopped) != 1 || failed != 0 {
+		t.Fatalf("the stop hook ran %d times (%q) with %d failed attempts, want exactly once\nstderr:\n%s", len(stopped), stopped, failed, res.Stderr)
 	}
 
 	recs := seamtest.ReadRecord(t, recPath)
@@ -254,11 +268,13 @@ func TestSeamConnectorSandboxReapsOrphans(t *testing.T) {
 	others := []string{
 		// A sandbox whose owning launcher still runs: this test process.
 		fmt.Sprintf("%s%d-1700000000000000000", runner.ConnectorSandboxPrefix, os.Getpid()),
-		// Boxes, whose names only resemble a sandbox's.
+		// A real running Box, named by the dispatch scheme, and names that only
+		// resemble a sandbox's.
+		dispatch.BoxName("99"),
 		"spindrift-box-connector-sandbox-7",
 		fmt.Sprintf("box-%s%d-1700000000000000000", runner.ConnectorSandboxPrefix, dead.Process.Pid),
 	}
-	rig := newSandboxRig(t, "podman", true, seamtest.PodmanRun{Outcome: seamOutcome("ready")}, []int{7}, append([]string{orphan}, others...))
+	rig := newSandboxRig(t, "podman", true, []seamtest.PodmanRun{{Outcome: seamOutcome("ready")}}, []int{7}, append([]string{orphan}, others...))
 	res := seamtest.Start(t, rig.cmd).Wait(t)
 	res.WantExit(t, 0)
 
@@ -271,7 +287,7 @@ func TestSeamConnectorSandboxReapsOrphans(t *testing.T) {
 	if len(reaped) != 1 || reaped[0] != orphan {
 		t.Errorf("reaped %q, want only %q", reaped, orphan)
 	}
-	for _, r := range seamtest.ReadRecord(t, rig.recDir+"/podman.jsonl") {
+	for _, r := range seamtest.ReadRecord(t, filepath.Join(rig.recDir, "podman.jsonl")) {
 		line := strings.Join(r, " ")
 		for _, o := range others {
 			if strings.Contains(line, o) {
@@ -279,7 +295,7 @@ func TestSeamConnectorSandboxReapsOrphans(t *testing.T) {
 			}
 		}
 	}
-	if got := countArgv(seamtest.ReadRecord(t, rig.recDir+"/podman.jsonl"), "rm", "-f", "id-"+orphan); got != 1 {
+	if got := countArgv(seamtest.ReadRecord(t, filepath.Join(rig.recDir, "podman.jsonl")), "rm", "-f", "id-"+orphan); got != 1 {
 		t.Errorf("podman removed the orphan %d times, want once", got)
 	}
 }
