@@ -698,41 +698,50 @@ plain child process of the Launcher.
 Measured with `BenchmarkConnectorSandboxDecode`, `BenchmarkConnectorSandboxLoad`,
 `BenchmarkConnectorSandboxStart` and `BenchmarkConnectorSandboxHostCall` in
 `cmd/launcher/internal/seamtest` (build tag `integration`; medians of 5; Linux
-amd64, Ryzen 9 5950X, 32 threads, go1.26.8, wazero v1.11.0; the claude
-Connector over the 769-line corpus; for the Host call, the `network.wasm`
-fixture against a local TLS backend, because the claude Connector makes no
-`http_request` Host call and that row needs a Connector that does). They sit with
-the seam tests rather than beside `BenchmarkConnectorDecode` because only the
-runner families and seam tests may import a family (ADR 0069). Run inside a
-dogfood Box on a shared host, so compare ratios within one run, not across runs.
+6.18 amd64, Ryzen 9 5950X, 32 threads, go1.26.8, wazero v1.11.0; rootless
+podman 5.8.9 on crun and cgroup v2; bubblewrap 0.12.0 with the
+`lib/seccomp.nix` filter; the claude Connector over the 769-line corpus; for
+the Host call, the `network.wasm` fixture against a local TLS backend, because
+the claude Connector makes no `http_request` Host call and that row needs a
+Connector that does). They sit with the seam tests rather than beside
+`BenchmarkConnectorDecode` because only the runner families and seam tests may
+import a family (ADR 0069). All four columns come from one run on a
+workstation, not a Box, so compare ratios within this table, not across runs.
 The connector host runs its guests on wazero's interpreter, so the in-process
 column is the interpreter and the columns compare like with like.
 
 | bench | in-process (interpreter) | process sandbox | podman | bwrap |
 |---|---|---|---|---|
-| Decode, per line | 16.48 ms | 17.25 ms | not measured | not measured |
-| Load (wasm bytes to ready Strategy) | 205.9 ms | 222.3 ms | not measured | not measured |
-| Sandbox start (runner start to the host's hello) | n/a | 3.25 ms | not measured | not measured |
-| One call making one `http_request` | 2.03 ms | 2.24 ms | not measured | not measured |
+| Decode, per line | 16.62 ms | 16.03 ms | 20.39 ms | 19.67 ms |
+| Load (wasm bytes to ready Strategy) | 187.6 ms | 192.7 ms | 190.6 ms | 181.5 ms |
+| Sandbox start (runner start to the host's hello) | n/a | 2.37 ms | 206.4 ms | 20.73 ms |
+| One call making one `http_request` | 1.82 ms | 1.96 ms | 2.34 ms | 2.22 ms |
 
-The process sandbox adds about 0.77 ms to a Decode line (5%) and 0.21 ms to a
-call that makes one Host call (10%); Load's 8% gap is within the sandbox row's
-own run-to-run spread (198 to 270 ms across the five runs). Starting the host
-and hearing its hello takes 3.25 ms, once per run. The sandbox's own clock
-around each exchange (`hop-ns/call`: 17.16 ms for a Decode line, 2.08 ms for
-the Host-call call) includes the guest's run, so it is not the pipe's cost alone;
-the difference between the columns is. All of it is small against the guest's own
-time in the interpreter.
+The process row is the pipe hop with no isolation, and it sits within noise of
+in-process: its Decode line is faster than in-process, inside the in-process
+row's own spread (15.2 to 17.9 ms across the five runs), and it adds 0.15 ms
+(8%) to the call that makes one Host call. Load does not differ across the
+columns beyond its run-to-run spread (151 to 204 ms).
 
-The process row is the pipe hop with no isolation. The podman and bwrap rows
-could not be measured here: the Box has no podman, and bwrap cannot create
-namespaces inside it. bwrap passes the child's stdio straight through, so its
-per-call hop should match the process row, but its start (namespace setup, the
-seccomp filter) is unmeasured. podman adds its attach relay (conmon) to every
-frame, which is also unmeasured. To fill them, run the same benchmarks on a
-host with podman and bwrap, for example during the dogfood ticket (#7020), using
-the run command and environment variables in the header of
-`cmd/launcher/internal/seamtest/sandbox_bench_test.go`.
+The isolating runtimes cost more than the pipe. Against the process row, podman
+adds 4.35 ms (27%) to a Decode line and 0.38 ms (19%) to the Host-call call;
+bwrap adds 3.64 ms (23%) and 0.26 ms (13%). The Host-call call makes two round
+trips over the same stdio yet gains well under half a millisecond, so most of a
+Decode line's added time is the guest running slower inside the sandbox, not
+the transport. That holds for bwrap too, whose stdio passes straight through
+like the process row's. The cause is not established here; the host's
+speculative-store-bypass mitigation is prctl-only, so seccomp does not switch
+it on. The sandbox's own clock around each exchange (`hop-ns/call`: 15.95,
+20.26 and 19.56 ms for a Decode line in the process, podman and bwrap rows;
+1.83, 2.18 and 2.07 ms for the Host-call call) includes the guest's run, so it
+is not the pipe's cost alone; the difference between the columns is.
+
+Start is paid once per run. The process host says hello in 2.37 ms, bwrap
+(namespaces and the seccomp filter) in 20.73 ms, and podman in 206.4 ms; a full
+podman start-and-stop cycle, the benchmark's ns/op, takes 584 ms. bwrap could
+not write its cgroup `pids.max` and `memory.max` on this host (the user's
+systemd scope does not delegate them), so its row ran with cgroup tracking but
+without those two limits.
 
 The macOS remote-attach hop (podman machine or Docker Desktop, where stdio
 crosses into the runner VM) is unmeasured until the human macOS check (#7021).
