@@ -48,6 +48,9 @@ func (r *signalRunner) ListRunning() ([]string, error)   { return nil, nil }
 func (r *signalRunner) RegistryProxyTransport() (registrymanifest.Endpoint, bool, error) {
 	return registrymanifest.NewUnixEndpoint(""), false, nil
 }
+func (r *signalRunner) StartConnectorSandbox(string) (runner.ConnectorSandbox, error) {
+	return runner.ConnectorSandbox{}, nil
+}
 func (r *signalRunner) Run(_ runner.Box) error {
 	isFirst := false
 	r.once.Do(func() { isFirst = true })

@@ -65,7 +65,7 @@ func integrationContainerName(t *testing.T) string {
 }
 
 func newIntegrationOCIAdapter(cli string) *ociAdapter {
-	return &ociAdapter{cli: cli, image: integrationTestImage}
+	return &ociAdapter{cli: cli, boxImg: imageSpec{tag: integrationTestImage}}
 }
 
 // ociProbeArgs reuses the real buildRunArgs output so every hardening and env
@@ -74,7 +74,7 @@ func newIntegrationOCIAdapter(cli string) *ociAdapter {
 func ociProbeArgs(a *ociAdapter, box runner.Box, script string) []string {
 	args := a.buildRunArgs(box)
 	args = args[:len(args)-2] // drop image + "/agent/entrypoint.sh"
-	return append(args, a.image, "sh", "-c", script)
+	return append(args, a.boxImg.tag, "sh", "-c", script)
 }
 
 // runProbe returns only the container's stdout: the runtime writes image-pull

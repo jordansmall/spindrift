@@ -40,13 +40,10 @@ func TestNewOCI_UsesConfigAndArtifacts(t *testing.T) {
 		t.Fatalf("New did not return *ociAdapter")
 	}
 	got := ociAdapter{
+		boxImg:          imageSpec{tag: a.boxImg.tag, archive: a.boxImg.archive, drv: a.boxImg.drv, flakeAttr: a.boxImg.flakeAttr},
 		cli:             a.cli,
-		image:           a.image,
-		imageArchive:    a.imageArchive,
-		imageDrv:        a.imageDrv,
 		nixBuilderImage: a.nixBuilderImage,
 		nixVolume:       a.nixVolume,
-		flakeImageAttr:  a.flakeImageAttr,
 		pwd:             a.pwd,
 		mountParams:     a.mountParams,
 		network:         a.network,
@@ -54,13 +51,10 @@ func TestNewOCI_UsesConfigAndArtifacts(t *testing.T) {
 		memoryLimit:     a.memoryLimit,
 	}
 	want := ociAdapter{
+		boxImg:          imageSpec{tag: "img:tag2", archive: "/nix/store/archive", drv: "/nix/store/drv", flakeAttr: ".#image"},
 		cli:             cfg.Runtime,
-		image:           "img:tag2",
-		imageArchive:    "/nix/store/archive",
-		imageDrv:        "/nix/store/drv",
 		nixBuilderImage: "builder@sha256:abc",
 		nixVolume:       "vol",
-		flakeImageAttr:  ".#image",
 		pwd:             "/pwd",
 		mountParams:     cfg.MountParams,
 		network:         cfg.OCINetwork("none", noHostLoopbackNetwork(runner.BinaryFor(cfg.Runtime))),
@@ -80,8 +74,8 @@ func TestStrategy_NilOCIPartIsZero(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := r.(*ociAdapter)
-	if a.image != "" || a.imageArchive != "" || a.imageDrv != "" ||
-		a.nixBuilderImage != "" || a.nixVolume != "" || a.flakeImageAttr != "" {
+	if a.boxImg.tag != "" || a.boxImg.archive != "" || a.boxImg.drv != "" ||
+		a.nixBuilderImage != "" || a.nixVolume != "" || a.boxImg.flakeAttr != "" {
 		t.Errorf("adapter artifacts = %+v, want all empty for a nil OCI part", a)
 	}
 }

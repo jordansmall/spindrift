@@ -57,6 +57,11 @@ func TestFactory_OrphanedIssues(t *testing.T) {
 			want:         []string{"42", "101"},
 		},
 		{
+			name:         "connector sandbox is not an orphaned Box",
+			runningNames: []string{"agent-issue-42", runner.ConnectorSandboxPrefix + "1"},
+			want:         []string{"42"},
+		},
+		{
 			name:         "no-prefix-match name is skipped",
 			runningNames: []string{"agent-issue-42", "some-other-container"},
 			want:         []string{"42"},

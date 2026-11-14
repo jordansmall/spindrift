@@ -1689,3 +1689,17 @@ func (a *bwrapBuildAdapter) ListRunning() ([]string, error) { return nil, nil }
 func (a *bwrapBuildAdapter) RegistryProxyTransport() (registrymanifest.Endpoint, bool, error) {
 	return registrymanifest.NewUnixEndpoint(""), false, nil
 }
+
+// errNoConnectorSandbox is the fail-closed answer until bwrap isolates the
+// Connector sandbox (issue #7015).
+var errNoConnectorSandbox = errors.New("bwrap cannot isolate a Connector sandbox yet (issue #7015)")
+
+// StartConnectorSandbox fails closed: a Connector must never run unsandboxed.
+func (a *bwrapAdapter) StartConnectorSandbox(string) (runner.ConnectorSandbox, error) {
+	return runner.ConnectorSandbox{}, errNoConnectorSandbox
+}
+
+// StartConnectorSandbox fails closed; the build adapter launches nothing.
+func (a *bwrapBuildAdapter) StartConnectorSandbox(string) (runner.ConnectorSandbox, error) {
+	return runner.ConnectorSandbox{}, errNoConnectorSandbox
+}

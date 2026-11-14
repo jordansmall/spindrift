@@ -954,8 +954,8 @@ func TestBootstrap_EnsureReadyError_AbortsBeforeLaunch(t *testing.T) {
 	t.Chdir(checkout)
 
 	lc, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
-	if err == nil || !strings.Contains(err.Error(), "nix build failed") {
-		t.Fatalf("bootstrap(ensureReady) = %v, want the EnsureReady \"nix build failed\" error", err)
+	if err == nil || !strings.Contains(err.Error(), "nix build of the spindrift image failed") {
+		t.Fatalf("bootstrap(ensureReady) = %v, want the EnsureReady \"nix build of the spindrift image failed\" error", err)
 	}
 	if lc != nil {
 		t.Fatalf("bootstrap() on EnsureReady error = %+v, want nil launch context", lc)

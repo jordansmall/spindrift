@@ -392,9 +392,11 @@ let
       prefix = "runners";
       pkgFor = name: "internal/runner/${name}";
       sharedFor = _: runnerGoTestShared;
-      # runnertest reads the prompt templates beside cmd/launcher.
+      # runnertest reads the prompt templates beside cmd/launcher; the
+      # Connector sandbox lifecycle contract loads a fixture Connector.
       setupFor = _: ''
         cp -r ${../../templates} src/templates
+        export SPINDRIFT_CONNECTOR_FIXTURES_DIR=${fixtures.connectorWasm}
       '';
       nativeBuildInputs = goTestInputs;
     };

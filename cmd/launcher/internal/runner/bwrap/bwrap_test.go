@@ -4459,3 +4459,14 @@ func TestBwrapIsReady_OlderVersionSnapshotOnlyReturnsNil(t *testing.T) {
 		t.Errorf("IsReady with only an older version's snapshot: want nil, got %v", err)
 	}
 }
+
+func TestStartConnectorSandbox_FailsClosed(t *testing.T) {
+	for name, r := range map[string]runner.Runner{
+		"run":   &bwrapAdapter{},
+		"build": &bwrapBuildAdapter{},
+	} {
+		if _, err := r.StartConnectorSandbox(runner.ConnectorSandboxPrefix + "x"); err == nil || !strings.Contains(err.Error(), "#7015") {
+			t.Errorf("%s adapter StartConnectorSandbox = %v, want an error naming #7015", name, err)
+		}
+	}
+}
