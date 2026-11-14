@@ -589,7 +589,7 @@ func (l searchLayer) SearchIssues(text string, state forge.IssueState, label str
 	res.Issues = res.Issues[:min(len(res.Issues), max(limit, 0))]
 	var issues []forge.Issue
 	for _, w := range res.Issues {
-		iss, err := w.issue(l.r.ids)
+		iss, err := w.issue(l.r.ids, singleRead)
 		if err != nil {
 			return nil, err
 		}
@@ -746,7 +746,7 @@ func (t *reads) list(label, status string) ([]forge.Issue, error) {
 	issues := make([]forge.Issue, len(res.Issues))
 	for i, w := range res.Issues {
 		var err error
-		if issues[i], err = w.issue(t.ids); err != nil {
+		if issues[i], err = w.issue(t.ids, listRead); err != nil {
 			return nil, err
 		}
 	}
@@ -769,7 +769,7 @@ func (t *reads) readIssue(num string) (forge.Issue, string, error) {
 	if err := t.call(context.Background(), "tracker.issue", numberedParams{t.target, num}, &w); err != nil {
 		return forge.Issue{}, "", err
 	}
-	got, err := w.issue(t.ids)
+	got, err := w.issue(t.ids, singleRead)
 	if err != nil {
 		return forge.Issue{}, "", err
 	}
@@ -825,9 +825,18 @@ func splitKey(id string) (string, int) {
 	return id[:i], n
 }
 
+// readKind is which read a wire issue answers.
+type readKind int
+
+const (
+	singleRead readKind = iota
+	// listRead may leave state empty, as native github's list projection does.
+	listRead
+)
+
 // issue converts a wire issue, failing closed on a state it does not know or a
 // number outside the id grammar (numbers become branch names).
-func (w wireIssue) issue(g idGrammar) (forge.Issue, error) {
+func (w wireIssue) issue(g idGrammar, read readKind) (forge.Issue, error) {
 	if !g.valid(w.Number) {
 		return forge.Issue{}, fmt.Errorf("%w: issue number %q is not %s", ErrAnswer, w.Number, g.name)
 	}
@@ -838,7 +847,9 @@ func (w wireIssue) issue(g idGrammar) (forge.Issue, error) {
 	case "closed":
 		state = forge.IssueClosed
 	default:
-		return forge.Issue{}, fmt.Errorf("%w: issue %s has unknown state %q", ErrAnswer, w.Number, w.State)
+		if w.State != "" || read != listRead {
+			return forge.Issue{}, fmt.Errorf("%w: issue %s has unknown state %q", ErrAnswer, w.Number, w.State)
+		}
 	}
 	iss := forge.Issue{
 		Number:   w.Number,

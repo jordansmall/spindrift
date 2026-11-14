@@ -48,7 +48,8 @@ type Query struct {
 	Status string `json:"status"`
 }
 
-// Issue is one tracker issue. State is "open" or "closed".
+// Issue is one tracker issue. State is "open" or "closed"; a listIssues answer
+// may leave Body and State empty.
 type Issue struct {
 	Number string   `json:"number"`
 	Title  string   `json:"title"`
