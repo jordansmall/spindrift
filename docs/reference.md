@@ -2762,7 +2762,9 @@ clipped to 8 KiB; the summary's `diverged` still counts every mismatch.
 **`shadow_summary`**, one per Pass, under `shadow_summary`: `driver`, `loaded`,
 `error`, `compared` (lines compared), `diverged`, `recorded` (divergence ops
 emitted), and `native_ns_per_line` and `shadow_ns_per_line`, the mean cost of
-decoding one line on each side. A run spans several Passes, so its totals are
+decoding one line on each side. The shadow decodes in batches of about 1 MiB
+of lines, so its figure is each batch call's time averaged over the lines
+compared. A run spans several Passes, so its totals are
 the sum over the summaries in its Pass logs. The Connector runs on wazero's
 interpreter, as in production; ADR 0073's interpreter-unless-measured
 decision means these cost fields are the measurement that decides whether a
