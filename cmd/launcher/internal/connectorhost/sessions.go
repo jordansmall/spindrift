@@ -35,6 +35,8 @@ type Sessions struct {
 	closing  atomic.Bool
 	killed   atomic.Bool
 	readDone chan struct{}
+
+	meter hopMeter
 }
 
 var errSessionKilled = errors.New("session ended by the launcher")
@@ -175,8 +177,12 @@ func (s *Sessions) engine(ctx context.Context, wasm []byte, host hostCalls) (eng
 	if err != nil {
 		return nil, err
 	}
-	return newRemoteEngine(ctx, wasm, host, hostLink{r: ss, w: ss, kill: ss.abort, wait: ss.await})
+	return newRemoteEngine(ctx, wasm, host, hostLink{r: ss, w: ss, kill: ss.abort, wait: ss.await, meter: &s.meter})
 }
+
+// Stats is what the exchanges over every session of the host have cost so far;
+// safe concurrently and after Close.
+func (s *Sessions) Stats() HopStats { return s.meter.stats() }
 
 func (s *Sessions) newSession() (*session, error) {
 	s.mu.Lock()

@@ -44,6 +44,29 @@ type hostLink struct {
 	kill func()
 	// wait blocks until the host has exited, once w is closed or kill ran.
 	wait func() error
+	// meter, when set, counts and times the link's exchanges.
+	meter *hopMeter
+}
+
+// HopStats is what a Sessions' exchanges cost, across load, handshake and call.
+type HopStats struct {
+	// Calls counts the exchanges.
+	Calls int64
+	// HostCalls counts the http_request and refusal frames the Launcher served.
+	HostCalls int64
+	// Hop is the exchanges' wall time less the time serving http_request
+	// frames. It includes the guest's execution in the host, which the
+	// Launcher cannot separate.
+	Hop time.Duration
+}
+
+// hopMeter accumulates HopStats; safe for concurrent use.
+type hopMeter struct {
+	calls, hostCalls, hop atomic.Int64
+}
+
+func (m *hopMeter) stats() HopStats {
+	return HopStats{Calls: m.calls.Load(), HostCalls: m.hostCalls.Load(), Hop: time.Duration(m.hop.Load())}
 }
 
 // processEngine starts cmd, a connector host, and runs a remote engine over one
@@ -170,6 +193,16 @@ func (e *remoteEngine) output(ctx context.Context, name string, lim limits, kind
 // it answers. The budget runs here as well as in the host, because a host that
 // hangs or a Host call that stalls cannot be trusted to enforce it.
 func (e *remoteEngine) exchange(ctx context.Context, name string, lim limits, kind byte, parts ...[]byte) ([]byte, error) {
+	// served is the time spent in Host-call handlers: network time to a backend,
+	// not hop.
+	var served time.Duration
+	if m := e.link.meter; m != nil {
+		start := time.Now()
+		defer func() {
+			m.calls.Add(1)
+			m.hop.Add(int64(time.Since(start) - served))
+		}()
+	}
 	ctx, cancel := context.WithTimeoutCause(ctx, lim.budget, ErrBudget)
 	defer cancel()
 	// A frame read cannot be interrupted, so the host is killed when ctx ends.
@@ -216,8 +249,12 @@ func (e *remoteEngine) exchange(ctx context.Context, name string, lim limits, ki
 			}
 			return nil, fmt.Errorf("%s: %w", name, hostErr)
 		case kindHTTPRequest:
+			e.countHostCall()
+			handled := time.Now()
 			err = e.serveHTTPRequest(ctx, payload, &hostErr)
+			served += time.Since(handled)
 		case kindRefuse:
+			e.countHostCall()
 			err = e.serveRefuse(payload, &hostErr)
 		default:
 			err = fmt.Errorf("%w: unexpected frame kind %d", ErrMalformedOutput, got)
@@ -245,6 +282,12 @@ func (e *remoteEngine) serveHTTPRequest(ctx context.Context, payload []byte, hos
 		return writeFrame(e.link.w, kindReplyFatal)
 	}
 	return writeFrame(e.link.w, kindReply, replyParts(status, body, header)...)
+}
+
+func (e *remoteEngine) countHostCall() {
+	if m := e.link.meter; m != nil {
+		m.hostCalls.Add(1)
+	}
 }
 
 // serveRefuse records the audit and fatal error for a Host call the host
