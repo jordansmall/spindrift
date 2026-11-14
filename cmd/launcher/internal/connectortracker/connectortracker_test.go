@@ -145,6 +145,37 @@ func TestTrackerTargetCarriesDialect(t *testing.T) {
 	}
 }
 
+func TestTrackerListIssuesAcceptsEmptyBodyAndState(t *testing.T) {
+	call, _ := stubGuest(t, map[string]string{"tracker.listIssues": `{"issues":[
+		{"number":"7","title":"a","labels":["priority:high"]},
+		{"number":"8","title":"b","body":"","state":"","labels":[]}]}`})
+	tr := mustTracker(t, call, &forge.IssueTrackerFake{}, testLifecycle, testTarget, nil, true)
+
+	got, err := tr.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("issues = %+v, want 2", got)
+	}
+	for _, iss := range got {
+		if iss.Body != "" || iss.State != "" {
+			t.Errorf("issue %s = %+v, want empty body and state", iss.Number, iss)
+		}
+	}
+	if got[0].Priority != forge.ResolvePriority([]string{"priority:high"}) {
+		t.Errorf("issue 7 priority = %v, want resolved from labels", got[0].Priority)
+	}
+}
+
+func TestTrackerIssueRejectsEmptyState(t *testing.T) {
+	call, _ := stubGuest(t, map[string]string{"tracker.issue": `{"number":"1","title":"a","labels":[]}`})
+	tr := mustTracker(t, call, &forge.IssueTrackerFake{}, testLifecycle, testTarget, nil, true)
+	if _, err := tr.Issue("1"); !errors.Is(err, ErrAnswer) {
+		t.Errorf("Issue err = %v, want ErrAnswer", err)
+	}
+}
+
 func TestTrackerRejectsBadIssues(t *testing.T) {
 	for name, body := range map[string]string{
 		"state":  `{"number":"1","state":"merged"}`,

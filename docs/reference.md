@@ -3250,7 +3250,9 @@ This is protocol version **0.3.0**. The host is
   | `tracker.createLabel` (optional, capability `tracker.labels`) | `{target, name, description, color}` | `{}`; a no-op where the tracker has no label registry |
 
   An issue is `{number, title, body, state, labels, closedAt, closedNotPlanned,
-  dedupMarker, status}`. `number` is a string id and `state` is `"open"` or `"closed"`.
+  dedupMarker, status}`. `number` is a string id and `state` is `"open"` or `"closed"`; a
+  `tracker.listIssues` answer may leave `body` and `state` empty (every listed
+  issue is open), as native github's list does.
   `closedAt` is RFC3339, `""` when the issue is open or the date is unknown;
   core ignores it and `closedNotPlanned` for an open issue. `status` is the
   workflow status name, `""` for a tracker without one. `dedupMarker` is
