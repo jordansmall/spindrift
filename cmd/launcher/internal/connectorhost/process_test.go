@@ -33,15 +33,15 @@ func TestHostBinaryExitsZeroWhenStdinClosesWithNoFrames(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("connector-host = %v, want exit 0 on stdin EOF", err)
 	}
-	if out.Len() != 0 {
-		t.Errorf("stdout = %q, want no frames", out.Bytes())
+	if want := []byte{0, 0, 0, 4, 0, 0, 0, 0}; !bytes.Equal(out.Bytes(), want) {
+		t.Errorf("stdout = %v, want only the hello chunk %v", out.Bytes(), want)
 	}
 }
 
 func TestHostBinaryExitsNonZeroOnAGarbageFrame(t *testing.T) {
 	cmd := fixturebuild.ConnectorHostCmd(t)
-	// A length of 2^32-1 is over the frame cap, so the host refuses the stream.
-	cmd.Stdin = bytes.NewReader([]byte{0xff, 0xff, 0xff, 0xff, 1})
+	// A length of 2^32-1 is over the chunk cap, so the host refuses the stream.
+	cmd.Stdin = bytes.NewReader([]byte{0xff, 0xff, 0xff, 0xff, 0, 0, 0, 1})
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	var exit *exec.ExitError

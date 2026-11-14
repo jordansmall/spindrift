@@ -15,10 +15,11 @@ import (
 const closeGrace = 5 * time.Second
 
 // LoadRemote is Load over an out-of-process connector host: it starts cmd, a
-// process running Serve on its stdin and stdout, sends it wasm and checks the
-// handshake. The module runs under the limits Load applies, in the host.
-// cmd.Stderr is the caller's; the host logs there and nothing else. The Connector
-// owns cmd from here: Close ends it, and a failed load kills it.
+// process running ServeSessions on its stdin and stdout, opens a session, sends
+// wasm and checks the handshake. The module runs under the limits Load applies,
+// in the host. cmd.Stderr is the caller's; the host logs there and nothing
+// else. The Connector owns cmd from here: Close ends it, and a failed load
+// kills it.
 func LoadRemote(ctx context.Context, wasm []byte, cmd *exec.Cmd) (*Connector, error) {
 	return loadWith(ctx, wasm, processEngine(cmd), nil)
 }
@@ -45,7 +46,8 @@ type hostLink struct {
 	wait func() error
 }
 
-// processEngine starts cmd and runs a remote engine over its stdin and stdout.
+// processEngine starts cmd, a connector host, and runs a remote engine over one
+// session of it. The Connector owns the process: closing it ends the host.
 func processEngine(cmd *exec.Cmd) engineFactory {
 	return func(ctx context.Context, wasm []byte, host hostCalls) (engine, error) {
 		in, err := cmd.StdinPipe()
@@ -60,16 +62,43 @@ func processEngine(cmd *exec.Cmd) engineFactory {
 		if err := cmd.Start(); err != nil {
 			return nil, err
 		}
-		return newRemoteEngine(ctx, wasm, host, hostLink{
-			r: out, w: in, wait: cmd.Wait,
-			kill: func() { _ = cmd.Process.Kill() },
-		})
+		// A host that never says hello would hold the load for ever otherwise.
+		helloCtx, cancel := context.WithTimeout(ctx, initBudget)
+		defer cancel()
+		s, err := NewSessions(helloCtx, out, in, func() { _ = cmd.Process.Kill() }, cmd.Wait)
+		if err != nil {
+			return nil, err
+		}
+		e, err := s.engine(ctx, wasm, host)
+		if err != nil {
+			_ = s.Close(context.WithoutCancel(ctx))
+			return nil, err
+		}
+		return &processConnector{engine: e, s: s}, nil
 	}
 }
 
+// processConnector is the engine of a Connector that owns its host process: its
+// abort kills the process and its close ends it.
+type processConnector struct {
+	engine
+	s *Sessions
+}
+
+func (p *processConnector) abort() { p.s.killHost() }
+
+func (p *processConnector) close(ctx context.Context) error {
+	err := p.engine.close(ctx)
+	if cerr := p.s.Close(ctx); err == nil {
+		err = cerr
+	}
+	return err
+}
+
 // remoteEngine is the engine whose module runs in a connector host. The call
-// path alone writes frames and abort only kills the host, so no lock guards the
-// stream beyond the Connector's mu.
+// path alone writes frames and abort only ends the link (the whole host, or one
+// session of a shared host), so no lock guards the stream beyond the
+// Connector's mu.
 type remoteEngine struct {
 	link hostLink
 	// host serves the Host calls the host sends back; nil when the grant is none.

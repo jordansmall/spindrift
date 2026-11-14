@@ -158,3 +158,17 @@ func LoadRemoteOver(ctx context.Context, wasm []byte, n *Network, r io.Reader, w
 	}
 	return loadWith(ctx, wasm, mk, n)
 }
+
+// WriteChunk and ReadChunk expose the session-layer codec.
+var (
+	WriteChunk = writeChunk
+	ReadChunk  = readChunk
+)
+
+// SetSessionBufCap shrinks the per-session buffer bound so a flood test needs
+// no 64 MiB of traffic.
+func SetSessionBufCap(n int) (restore func()) {
+	old := sessionBufCap
+	sessionBufCap = n
+	return func() { sessionBufCap = old }
+}

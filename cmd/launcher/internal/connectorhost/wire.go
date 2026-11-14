@@ -13,6 +13,14 @@ import (
 // prefixed frames over the host's stdin and stdout: a 4-byte big-endian length
 // n, 1 <= n <= maxFrame, then n bytes made of one kind byte and the payload.
 // Byte blobs ride raw, so a module is not base64'd.
+//
+// Below the frames, one host serves many Connectors over that one stream
+// (ServeSessions). The stream is chunks: a 4-byte big-endian length n,
+// 4 <= n <= 4+maxFrame, a 4-byte big-endian session id, then n-4 bytes of that
+// session's own byte stream, which carries the frames above. One Write on a
+// session is one chunk. An empty chunk ends its sender's direction of the
+// session, and a host's empty chunk for session 0 is its hello. The Launcher
+// numbers sessions from 1, each higher than the last.
 
 // maxFrame is the largest frame, the module's: the Launcher refuses to send
 // one that does not fit, and a reader checks a length against it before it
@@ -90,6 +98,46 @@ func readFrame(r io.Reader) (kind byte, payload []byte, err error) {
 		return 0, nil, err
 	}
 	return buf[0], buf[1:], nil
+}
+
+// writeChunk writes one session-layer chunk. Not safe for concurrent use: a
+// chunk is two writes, so callers serialize.
+func writeChunk(w io.Writer, session uint32, body []byte) error {
+	if len(body) > maxFrame {
+		return fmt.Errorf("chunk of %d bytes does not fit the %d byte cap", len(body), maxFrame)
+	}
+	hdr := binary.BigEndian.AppendUint32(nil, uint32(4+len(body)))
+	hdr = binary.BigEndian.AppendUint32(hdr, session)
+	if _, err := w.Write(hdr); err != nil {
+		return err
+	}
+	// An empty write blocks an io.Pipe until the next read.
+	if len(body) == 0 {
+		return nil
+	}
+	_, err := w.Write(body)
+	return err
+}
+
+// readChunk reads one chunk. io.EOF means the stream ended between chunks.
+func readChunk(r io.Reader) (session uint32, body []byte, err error) {
+	var hdr [4]byte
+	if _, err := io.ReadFull(r, hdr[:]); err != nil {
+		return 0, nil, err
+	}
+	n := binary.BigEndian.Uint32(hdr[:])
+	// Before the allocation: the length is the peer's to choose.
+	if n < 4 || n > 4+maxFrame {
+		return 0, nil, fmt.Errorf("%w: chunk length %d outside 4..%d", ErrMalformedOutput, n, 4+maxFrame)
+	}
+	buf := make([]byte, n)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		if errors.Is(err, io.EOF) {
+			err = io.ErrUnexpectedEOF
+		}
+		return 0, nil, err
+	}
+	return binary.BigEndian.Uint32(buf), buf[4:], nil
 }
 
 func u32(v int) []byte { return binary.BigEndian.AppendUint32(nil, uint32(v)) }
