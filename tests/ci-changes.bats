@@ -662,3 +662,98 @@ M	connectors/foo/a.go
   [ "$status" -eq 0 ]
   [ "$output" = '[]' ]
 }
+
+# A change to the Connector contract (ci-connector-contract) selects every
+# first-party Connector at the new revision, not only the ones the diff names.
+contract_repo() {
+  repo_with_base connectors/claude/flake.nix '{ }'
+  local c
+  for c in github jira; do
+    mkdir -p "connectors/$c"
+    printf '{ }' >"connectors/$c/flake.nix"
+  done
+  commit head
+}
+
+@test "connector contract: an SDK-only diff selects every Connector" {
+  contract_repo
+  connector_names <<<'M	sdk/connector.go
+'
+  [ "$output" = '["claude","github","jira"]' ]
+}
+
+@test "connector contract: a Host-call file diff selects every Connector" {
+  contract_repo
+  connector_names <<<'M	cmd/launcher/internal/connectorhost/hostcall.go
+'
+  [ "$output" = '["claude","github","jira"]' ]
+}
+
+@test "connector contract: a core diff outside the contract selects none" {
+  contract_repo
+  connector_names <<<'M	cmd/launcher/main.go
+'
+  [ "$output" = '[]' ]
+}
+
+@test "connector contract: a Connector-only diff selects just that Connector" {
+  contract_repo
+  connector_names <<<'M	connectors/github/a.go
+'
+  [ "$output" = '["github"]' ]
+}
+
+@test "connector contract: a contract diff beside a Connector diff names each once" {
+  contract_repo
+  connector_names <<<'M	sdk/connector.go
+M	connectors/jira/a.go
+M	connectors/claude/b.go
+'
+  [ "$output" = '["claude","github","jira"]' ]
+}
+
+@test "connector contract: a deleted contract file still selects every Connector" {
+  contract_repo
+  connector_names <<<'D	sdk/gone.go
+'
+  [ "$output" = '["claude","github","jira"]' ]
+}
+
+@test "connector contract: a rename out of the contract selects every Connector" {
+  contract_repo
+  connector_names <<<'R100	sdk/a.go	cmd/a.go
+'
+  [ "$output" = '["claude","github","jira"]' ]
+}
+
+@test "connector contract: a quoted contract path still selects every Connector" {
+  contract_repo
+  connector_names <<<'M	"sdk/\303\261.go"
+'
+  [ "$output" = '["claude","github","jira"]' ]
+}
+
+@test "connector contract: without revisions a contract diff selects none" {
+  run bash "$CI_CHANGES_SH" --connectors <<<'M	sdk/connector.go
+'
+  [ "$status" -eq 0 ]
+  [ "$output" = '[]' ]
+}
+
+@test "connector contract: a directory without a flake.nix is not listed" {
+  contract_repo
+  mkdir -p connectors/notyet
+  printf 'soon' >connectors/notyet/README.md
+  commit head2
+  run bash "$CI_CHANGES_SH" --connectors base head2 <<<'M	sdk/connector.go
+'
+  [ "$status" -eq 0 ]
+  [ "$output" = '["claude","github","jira"]' ]
+}
+
+@test "connector contract: an unknown NEW revision fails loudly" {
+  contract_repo
+  run bash "$CI_CHANGES_SH" --connectors base nosuchrev <<<'M	sdk/connector.go
+'
+  [ "$status" -ne 0 ]
+}

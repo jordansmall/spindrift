@@ -1,0 +1,26 @@
+# Paths that make up the Connector contract (ADR 0073): the SDK, the canonical
+# tracker/forge/event types, the Host calls, and the conformance kits and
+# checks that pin them. A diff touching any of them makes
+# `ci-changes.sh --connectors` select every first-party Connector, not only the
+# ones the diff names. One bash glob per line; `*` crosses `/`. Only `*` is a
+# wildcard (nix/checks/default.nix enforces it).
+# The suite's Nix inputs are listed too: `core/*` and agent-dispatch.yml are
+# reached via lib/connector-checks.nix and a backend row's goTestRepoFiles.
+sdk/*
+core/*
+cmd/launcher/internal/connectorhost/*
+cmd/launcher/internal/connectortracker/*
+cmd/launcher/internal/connectorforge/*
+cmd/launcher/internal/driver/driverkit/*
+cmd/launcher/internal/dispatchkind/*
+cmd/launcher/internal/hostop/*
+cmd/launcher/internal/forge/forgetest/*
+lib/connector-checks.nix
+lib/build-constants.nix
+lib/backends/*
+lib/jira-status-mapping.nix
+nix/checks/go-check-env.nix
+nix/connector-wasm.nix
+nix/fixtures/connector/*
+nix/fixtures/connector-wasm/*
+.github/workflows/agent-dispatch.yml
