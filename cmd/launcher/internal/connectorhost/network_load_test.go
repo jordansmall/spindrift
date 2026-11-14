@@ -41,6 +41,7 @@ type netLoader func(context.Context, []byte, connectorhost.Network) (*connectorh
 // netLoaders are the ways to load a network Connector; a grant behaves the same
 // under the interpreter and the compiler.
 var netLoaders = map[string]netLoader{
+	"remote":      remoteNetLoader(nil),
 	"interpreter": connectorhost.LoadNetwork,
 	"compiled": func(ctx context.Context, wasm []byte, n connectorhost.Network) (*connectorhost.Connector, error) {
 		return connectorhost.LoadNetworkCompiled(ctx, wasm, n, "")

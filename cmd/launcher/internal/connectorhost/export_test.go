@@ -1,9 +1,11 @@
 package connectorhost
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -104,3 +106,55 @@ func (t *HostCalls) Refuse(call, why string) error { return t.h.refuse(call, why
 
 // Failed reports whether the handler has audited a fatal failure.
 func (t *HostCalls) Failed() bool { return t.h.failed }
+
+// The wire codec, exposed so the external tests probe the frame format.
+const MaxFrame = maxFrame
+
+// Frame kinds exposed to the codec tests.
+const (
+	KindCall   = kindCall
+	KindResult = kindResult
+)
+
+// WriteFrame and ReadFrame expose the frame codec.
+var (
+	WriteFrame = writeFrame
+	ReadFrame  = readFrame
+)
+
+// FailureOverTheWire returns err as the Launcher rebuilds it after the host sent
+// it as a failure frame.
+func FailureOverTheWire(err error) error {
+	var buf bytes.Buffer
+	if werr := writeFrame(&buf, kindFailure, failureParts(err)...); werr != nil {
+		return werr
+	}
+	_, payload, rerr := readFrame(&buf)
+	if rerr != nil {
+		return rerr
+	}
+	return decodeFailure(payload)
+}
+
+// FailureFrameWithCode returns the error the Launcher rebuilds from a failure
+// frame carrying code and msg.
+func FailureFrameWithCode(code byte, msg string) error {
+	return decodeFailure(append([]byte{code}, msg...))
+}
+
+// LoadRemoteOver is LoadRemote or, for a non-nil n, LoadNetworkRemote over a
+// host the caller runs: r and w are the Launcher's ends of its stream, kill
+// stops the host and wait returns once it has exited.
+func LoadRemoteOver(ctx context.Context, wasm []byte, n *Network, r io.Reader, w io.WriteCloser, kill func(), wait func() error) (*Connector, error) {
+	l := hostLink{r: r, w: w, kill: kill, wait: wait}
+	mk := func(ctx context.Context, wasm []byte, host hostCalls) (engine, error) {
+		return newRemoteEngine(ctx, wasm, host, l)
+	}
+	if n == nil {
+		return loadWith(ctx, wasm, mk, nil)
+	}
+	if err := checkGrant(*n); err != nil {
+		return nil, err
+	}
+	return loadWith(ctx, wasm, mk, n)
+}

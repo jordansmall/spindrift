@@ -34,7 +34,13 @@ func fixture(t *testing.T, name string) []byte {
 
 func load(t *testing.T, name string) (*connectorhost.Connector, error) {
 	t.Helper()
-	c, err := connectorhost.Load(context.Background(), fixture(t, name))
+	return loadUsing(t, connectorhost.Load, name)
+}
+
+// loadUsing is load over the engine ld loads with.
+func loadUsing(t *testing.T, ld loader, name string) (*connectorhost.Connector, error) {
+	t.Helper()
+	c, err := ld(context.Background(), fixture(t, name))
 	if c != nil {
 		t.Cleanup(func() { _ = c.Close(context.Background()) })
 	}
@@ -67,21 +73,25 @@ func TestLoadAcceptsPreviousMinor(t *testing.T) {
 }
 
 func TestLoadRefusesFutureProtocol(t *testing.T) {
-	_, err := load(t, "future.wasm")
-	if !errors.Is(err, connectorhost.ErrProtocolUnsupported) {
-		t.Fatalf("err = %v, want ErrProtocolUnsupported", err)
-	}
-	var pe *connectorhost.ProtocolError
-	if !errors.As(err, &pe) {
-		t.Fatalf("err = %v, want a *ProtocolError", err)
-	}
-	if pe.Connector != "0.4.0" {
-		t.Errorf("ProtocolError.Connector = %q, want 0.4.0", pe.Connector)
-	}
-	for _, want := range []string{"0.4.0", "0.2.x", "0.3.x", connectorhost.ProtocolVersion} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q does not name %q", err, want)
-		}
+	for engine, ld := range loaders {
+		t.Run(engine, func(t *testing.T) {
+			_, err := loadUsing(t, ld, "future.wasm")
+			if !errors.Is(err, connectorhost.ErrProtocolUnsupported) {
+				t.Fatalf("err = %v, want ErrProtocolUnsupported", err)
+			}
+			var pe *connectorhost.ProtocolError
+			if !errors.As(err, &pe) {
+				t.Fatalf("err = %v, want a *ProtocolError", err)
+			}
+			if pe.Connector != "0.4.0" {
+				t.Errorf("ProtocolError.Connector = %q, want 0.4.0", pe.Connector)
+			}
+			for _, want := range []string{"0.4.0", "0.2.x", "0.3.x", connectorhost.ProtocolVersion} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not name %q", err, want)
+				}
+			}
+		})
 	}
 }
 
@@ -124,9 +134,14 @@ func TestLoadRefusesUngrantedImport(t *testing.T) {
 }
 
 func TestLoadRejectsGarbage(t *testing.T) {
-	_, err := connectorhost.Load(context.Background(), []byte("not a wasm module"))
-	if !errors.Is(err, connectorhost.ErrHandshake) {
-		t.Fatalf("err = %v, want ErrHandshake", err)
+	for engine, ld := range loaders {
+		t.Run(engine, func(t *testing.T) {
+			_, err := ld(context.Background(), []byte("not a wasm module"))
+			if !errors.Is(err, connectorhost.ErrHandshake) {
+				t.Fatalf("err = %v, want ErrHandshake", err)
+			}
+			assertOnlySentinel(t, err, nil)
+		})
 	}
 }
 
@@ -353,20 +368,24 @@ func TestHostileConnectorFailsWithItsOwnNamedError(t *testing.T) {
 		{"handshake with null capabilities", handshakeModule(`{"protocolVersion":"0.3.0","capabilities":null}`), connectorhost.ErrMalformedOutput},
 		{"JSON of the wrong shape", handshakeModule("[]"), connectorhost.ErrMalformedOutput},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			start := time.Now()
-			c, err := connectorhost.Load(context.Background(), tc.wasm)
-			if c != nil {
-				_ = c.Close(context.Background())
+	for engine, ld := range loaders {
+		t.Run(engine, func(t *testing.T) {
+			for _, tc := range tests {
+				t.Run(tc.name, func(t *testing.T) {
+					start := time.Now()
+					c, err := ld(context.Background(), tc.wasm)
+					if c != nil {
+						_ = c.Close(context.Background())
+					}
+					if d := time.Since(start); d > connectorhost.InitBudget+connectorhost.CallBudget+slack {
+						t.Fatalf("Load took %v with no caller deadline", d)
+					}
+					if !errors.Is(err, connectorhost.ErrHandshake) {
+						t.Errorf("err = %v, want ErrHandshake", err)
+					}
+					assertOnlySentinel(t, err, tc.want)
+				})
 			}
-			if d := time.Since(start); d > connectorhost.InitBudget+connectorhost.CallBudget+slack {
-				t.Fatalf("Load took %v with no caller deadline", d)
-			}
-			if !errors.Is(err, connectorhost.ErrHandshake) {
-				t.Errorf("err = %v, want ErrHandshake", err)
-			}
-			assertOnlySentinel(t, err, tc.want)
 		})
 	}
 }
@@ -488,23 +507,27 @@ func TestDeclaredTableMinimumIsCapped(t *testing.T) {
 		{"at the cap", maxTableEntries, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			w := withTable(t, handshakeModule(goodHandshake), tc.min)
-			start := time.Now()
-			c, err := connectorhost.Load(context.Background(), w)
-			if c != nil {
-				_ = c.Close(context.Background())
-			}
-			if tc.want == nil {
-				if err != nil {
-					t.Fatalf("err = %v, want nil", err)
-				}
-				return
-			}
-			if !errors.Is(err, tc.want) || !errors.Is(err, connectorhost.ErrHandshake) {
-				t.Fatalf("err = %v, want ErrHandshake wrapping %v", err, tc.want)
-			}
-			if d := time.Since(start); d > promptly {
-				t.Fatalf("Load took %v to refuse an over-cap table", d)
+			for engine, ld := range loaders {
+				t.Run(engine, func(t *testing.T) {
+					w := withTable(t, handshakeModule(goodHandshake), tc.min)
+					start := time.Now()
+					c, err := ld(context.Background(), w)
+					if c != nil {
+						_ = c.Close(context.Background())
+					}
+					if tc.want == nil {
+						if err != nil {
+							t.Fatalf("err = %v, want nil", err)
+						}
+						return
+					}
+					if !errors.Is(err, tc.want) || !errors.Is(err, connectorhost.ErrHandshake) {
+						t.Fatalf("err = %v, want ErrHandshake wrapping %v", err, tc.want)
+					}
+					if d := time.Since(start); d > promptly {
+						t.Fatalf("Load took %v to refuse an over-cap table", d)
+					}
+				})
 			}
 		})
 	}

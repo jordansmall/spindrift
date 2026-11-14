@@ -53,7 +53,7 @@ func (h *networkCalls) httpRequest(ctx context.Context, raw []byte, bufCap int) 
 }
 
 func (h *networkCalls) refuse(call, why string) error {
-	err := fmt.Errorf("%w: connector %q: %s.%s: %s", ErrMalformedOutput, h.n.Name, hostModule, call, why)
+	err := fmt.Errorf("%w: connector %q: %s.%s: %q", ErrMalformedOutput, h.n.Name, hostModule, call, why)
 	// No request completed, so this is the call's one audit entry.
 	h.n.recordFailure(DecisionRefused, err)
 	h.failed = true

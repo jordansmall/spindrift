@@ -30,6 +30,12 @@ func loadNetworkFixture(t *testing.T, wasm string) (*connectorhost.Connector, *b
 // loadNetworkFixtureWith lets tweak adjust the Network before the module loads.
 func loadNetworkFixtureWith(t *testing.T, wasm string, tweak func(*connectorhost.Network)) (c *connectorhost.Connector, b *backend, audit *bytes.Buffer, params map[string]string) {
 	t.Helper()
+	return loadNetworkFixtureVia(t, connectorhost.LoadNetwork, wasm, tweak)
+}
+
+// loadNetworkFixtureVia is loadNetworkFixtureWith over the engine ld loads with.
+func loadNetworkFixtureVia(t *testing.T, ld netLoader, wasm string, tweak func(*connectorhost.Network)) (c *connectorhost.Connector, b *backend, audit *bytes.Buffer, params map[string]string) {
+	t.Helper()
 	b = newBackend(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut {
 			fmt.Fprint(w, strings.Repeat("x", connectorhost.MaxHTTPResponse+1))
@@ -45,7 +51,7 @@ func loadNetworkFixtureWith(t *testing.T, wasm string, tweak func(*connectorhost
 	n := netFor(b, audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
 	n.Name = "fixture-network"
 	tweak(n)
-	c = loadNet(t, fixture(t, wasm), n)
+	c = loadNetWith(t, ld, fixture(t, wasm), n)
 	return c, b, audit, map[string]string{"url": b.URL + "/repos/x", "method": "GET"}
 }
 

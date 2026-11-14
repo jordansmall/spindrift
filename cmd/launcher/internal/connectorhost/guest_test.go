@@ -138,3 +138,14 @@ func loadWasm(t *testing.T, wasm []byte) *connectorhost.Connector {
 	t.Cleanup(func() { _ = c.Close(context.Background()) })
 	return c
 }
+
+// loadWasmUsing is loadWasm over the engine ld loads with.
+func loadWasmUsing(t *testing.T, ld loader, wasm []byte) *connectorhost.Connector {
+	t.Helper()
+	c, err := ld(context.Background(), wasm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
+	return c
+}
