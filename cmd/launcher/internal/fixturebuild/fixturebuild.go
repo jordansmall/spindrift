@@ -24,6 +24,10 @@ const (
 	// is the flake package that builds it (issue #7013).
 	connectorHostEnvVar = "SPINDRIFT_CONNECTOR_HOST"
 	connectorHostAttr   = "connector-host"
+	// escapeHostAttr and escapeImageAttr are the flake packages of the
+	// escape-probe host and its sandbox image (issue #7017).
+	escapeHostAttr  = "connector-host-escapeprobe"
+	escapeImageAttr = "connector-sandbox-image-escapeprobe"
 )
 
 // resolver carries the environment lookups resolve needs, so tests can
@@ -144,6 +148,51 @@ var ConnectorHost = sync.OnceValues(func() (string, error) {
 	}
 	return builtArtifact(connectorHostEnvVar, "the connector-host binary", connectorHostAttr, filepath.Join("bin", "connector-host"))
 })
+
+// buildOutcome is a nix build's result, kept whole so sync.OnceValues (at most
+// two results) can cache a skip reason alongside the path.
+type buildOutcome struct{ path, skipReason string }
+
+// escapeBuild is <out>/<rel> of the nix-built escape-probe flake package attr.
+// Unlike ConnectorHost it has no env override: only nix builds the escapeprobe
+// tag, and a host without nix skips the escape tests instead of failing them.
+func escapeBuild(attr, rel string) (buildOutcome, error) {
+	built, skip, err := ResolveBuild("", "", func(root string) []string {
+		return []string{root + "#" + attr}
+	})
+	if err != nil {
+		return buildOutcome{}, err
+	}
+	if skip != "" {
+		return buildOutcome{skipReason: "nix is not on PATH; it builds the escape-probe " + attr}, nil
+	}
+	return buildOutcome{path: filepath.Join(built, rel)}, nil
+}
+
+var escapeConnectorHost = sync.OnceValues(func() (buildOutcome, error) {
+	return escapeBuild(escapeHostAttr, filepath.Join("bin", "connector-host"))
+})
+
+var escapeSandboxImage = sync.OnceValues(func() (buildOutcome, error) {
+	return escapeBuild(escapeImageAttr, "")
+})
+
+// EscapeConnectorHost returns the connector-host built with the escapeprobe
+// tag (issue #7017): host primitives a sandbox escape test drives to prove a
+// containment boundary holds. A non-empty skipReason means nix is absent.
+// Computed once per test binary.
+func EscapeConnectorHost() (path, skipReason string, err error) {
+	r, err := escapeConnectorHost()
+	return r.path, r.skipReason, err
+}
+
+// EscapeSandboxImage returns the image archive of the Connector sandbox image
+// wrapping that host, loadable by podman or docker; see EscapeConnectorHost for
+// skipReason. It is built for Linux only, so on another system err is set.
+func EscapeSandboxImage() (path, skipReason string, err error) {
+	r, err := escapeSandboxImage()
+	return r.path, r.skipReason, err
+}
 
 // NewConnectorHostCmd is a fresh, unstarted connector-host child whose stderr
 // goes to stderr. An exec.Cmd runs once, so each host needs its own.

@@ -7,9 +7,12 @@
   pkgs,
   # The Linux build of connector-host (lib/harness-core.nix), not the host's.
   connectorHost,
+  # Overridden only by the escape-test image (issue #7017), so loading it never
+  # replaces the real one.
+  name ? "spindrift-connector-sandbox",
 }:
 pkgs.dockerTools.buildLayeredImage {
-  name = "spindrift-connector-sandbox";
+  inherit name;
   tag = "latest";
   contents = [ connectorHost ];
   config = {

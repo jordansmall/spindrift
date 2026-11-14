@@ -208,6 +208,12 @@
               connector-wasm-fixtures = fixtures.connectorWasm;
               # The static out-of-process Connector host (issue #7013).
               connector-host = fixtures.connectorHost;
+              # The test-only escape host (issue #7017); see nix/fixtures.nix.
+              connector-host-escapeprobe = fixtures.connectorHostEscape;
+            }
+            # Linux-only, as dockerTools is.
+            // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+              connector-sandbox-image-escapeprobe = fixtures.connectorSandboxImageEscape;
             }
             # A bwrap harness bakes FLAKE_IMAGE_ATTR as
             # `.#packages.<system>.<imageAttrName>` (issue #2672), agent-closure
