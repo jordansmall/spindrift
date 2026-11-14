@@ -154,7 +154,10 @@ func listIssues(t tracker.Target, query tracker.Query, limit int) ([]tracker.Iss
 			if r.PullRequest != nil {
 				continue
 			}
-			out = append(out, r.issue())
+			// Native lists via `gh issue list --json number,title,labels`: no body or state.
+			i := r.issue()
+			i.Body, i.State = "", ""
+			out = append(out, i)
 		}
 		return len(out) >= limit
 	})

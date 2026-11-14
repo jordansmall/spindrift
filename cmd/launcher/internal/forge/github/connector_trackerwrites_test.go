@@ -112,7 +112,7 @@ func testTrackerWrites(t *testing.T, w trackerWriteHarness) {
 	forgetest.RunTrackerContract(t, w)
 	t.Run("LabelRegistry", func(t *testing.T) { testLabelRegistry(t, w.h) })
 	t.Run("ResearchMarker", func(t *testing.T) { testResearchMarkerSurvives(t, w) })
-	t.Run("FindingDedup", func(t *testing.T) { testFindingDedupFindsFiledIssue(t, w) })
+	t.Run("FindingDedup", func(t *testing.T) { testFindingDedupMarkerSurvivesFiling(t, w) })
 }
 
 // A registry longer than one page lists whole, a created label joins it, and
@@ -149,9 +149,9 @@ func testResearchMarkerSurvives(t *testing.T, w trackerWriteHarness) {
 	}
 }
 
-// A finding's dedup marker survives filing: the backlog dedup index finds the
-// issue the Connector filed, and the new issue's URL names it.
-func testFindingDedupFindsFiledIssue(t *testing.T, w trackerWriteHarness) {
+// A finding's dedup marker survives filing: the filed issue reads back
+// carrying the marker's terms, and the new issue's URL names it.
+func testFindingDedupMarkerSurvivesFiling(t *testing.T, w trackerWriteHarness) {
 	title, body, labels := w.SeedIssueFilerTarget(false)
 	title += " (dedup)"
 	url, err := w.h.tr.(forge.HostPostedIssueFiler).PostIssue(title, body, labels)
@@ -165,13 +165,12 @@ func testFindingDedupFindsFiledIssue(t *testing.T, w trackerWriteHarness) {
 	if want := w.h.backend.web + "/issues/" + nums[0]; url != want {
 		t.Errorf("url = %q, want %q", url, want)
 	}
-	open, err := w.h.tr.ListOpenIssues()
+	got, err := w.h.tr.Issue(nums[0])
 	if err != nil {
-		t.Fatalf("ListOpenIssues: %v", err)
+		t.Fatalf("Issue(%s): %v", nums[0], err)
 	}
-	i := slices.IndexFunc(open, func(iss forge.Issue) bool { return iss.Number == nums[0] })
-	if i < 0 || !slices.Equal(dedupmarker.Parse(open[i].Body), dedupmarker.Parse(body)) {
-		t.Errorf("ListOpenIssues = %+v, want the filed issue %s carrying the marker's terms", open, nums[0])
+	if !slices.Equal(dedupmarker.Parse(got.Body), dedupmarker.Parse(body)) {
+		t.Errorf("Issue(%s) = %+v, want the marker's terms", nums[0], got)
 	}
 }
 
