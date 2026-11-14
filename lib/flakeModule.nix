@@ -516,8 +516,10 @@ in
                     Connector's name; mkHarness throws otherwise). A Driver outside the
                     core registry also sets `module`, a function of pkgs
                     returning the Driver Connector's wasm file path, e.g.
-                    `module = pkgs: "''${drv}/driver.wasm";`. Null declares no
-                    Driver.
+                    `module = pkgs: "''${drv}/driver.wasm";`. The Box loads
+                    in-process only a Driver Connector whose wasm is the
+                    batteries flake's own build (mkHarness derives that
+                    mark; a row cannot set it). Null declares no Driver.
                   '';
                 };
                 backend = mkOption {

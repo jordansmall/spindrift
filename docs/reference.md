@@ -2413,6 +2413,28 @@ fallback.
   generated from the core rows, because the Box's scrub list and the
   runner's off-argv set render from core rows only.
 
+A Driver row never sets `firstParty`; a row that does fails evaluation naming
+`driverRows.<name>`. `mkHarness` derives the mark: the wire row carries
+`"firstParty": true` only when its `module` evaluates to the same wasm store
+path the batteries flake itself builds for a Connector of that name (the list
+in `nix/connector-dirs.nix`). Overriding `module` on the public `claude` row, or
+renaming it, yields no mark. The mark rests on that store path, so on the Nix
+store and its substituters.
+
+The mark has one purpose. A Driver Connector decodes in-process inside the Box,
+which holds the agent's model credential and the repo, plus a forge token until
+#6757. The Box entry (`driverrows.UseFile`, used by driver-exec, the
+orchestrator and the box) still registers an unmarked module row, but loading
+that Driver fails with `driverrows.ErrNotFirstParty`, and there is no
+in-process fallback. The Box's other Drivers run normally, and an unmarked
+shadow row is skipped with that reason and never fails the run. So a Consumer's
+outside Driver row reaches the Launcher and is refused only when the Box loads
+it; third-party Driver Connectors wait for a design that decodes somewhere
+empty. The mark does not touch the Launcher: host-side `Use` is ungated,
+Backend Connectors (`github`, `jira`) carry none, and the mandatory Connector
+sandbox (#6763, not yet landed) will take every Launcher-hosted Connector with
+no first-party exception (ADR 0073 amendment, issue #7019).
+
 The `hooks` column (`lib/bash-hooks.nix`) is core-only, so an outside Driver
 gets no per-Driver guard hook rows yet. Runners stay outside the Connector
 seam (ADR 0073 point 8).

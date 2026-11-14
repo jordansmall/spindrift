@@ -1,9 +1,10 @@
 # ADR 0073 decision 11: a Connector's Nix must not reach outside its own
-# directory. A permanent monorepo must never quietly privilege first-party
-# Connectors; they reach core only through the `core` argument, as a
-# third-party Connector must. Fails when any *.nix under connectors/<name>/
-# (or the fixture Connector) holds a relative path literal that resolves above
-# that root.
+# directory. First-party Connectors reach core only through the `core`
+# argument, as a third-party Connector must. Their one privilege is the
+# first-party mark, which only lets the Box load a Driver Connector in-process;
+# the Launcher has no first-party exception (ADR 0073, #7019). Fails when any
+# *.nix under connectors/<name>/ (or the fixture Connector) holds a relative
+# path literal that resolves above that root.
 # Known limits: text-based, so comments and strings are matched too (an
 # over-report, the safe direction). Blind to absolute paths (an absolute
 # flake `path:/…` input included) and <nixpkgs> lookups, a path after `/` or

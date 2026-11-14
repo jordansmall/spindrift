@@ -640,3 +640,33 @@ only status and body otherwise, so it cannot read a header such as
 protocol 0.3, are unchanged. It exposes only response headers (`Set-Cookie`
 excluded), nothing of the request or the credential. The reference's
 Network Connectors entry has the ABI.
+
+## Amendment (issue #7019): first-party marks gate only the Box
+
+A Driver Connector the batteries flake builds carries a first-party mark on its
+wire row. `mkHarness` derives the mark and no row can set it: it renders the
+mark only when the row's `module` evaluates to the same wasm store path the
+batteries flake itself builds for a Connector of that name, and a row that sets
+`firstParty` at all fails evaluation. Overriding `module` on the public `claude`
+row, or renaming it, therefore yields no mark. The residual is that trust rests
+on the store path, so on the Nix store and its substituters.
+
+The mark has a single purpose, the Box-side gate. A Driver Connector decodes
+in-process inside the Box, and the Box is not an empty room: it holds the
+agent's model credential and the repo, plus a forge token until #6757. The gate
+sits in `driverrows.UseFile`, the entry driver-exec, the orchestrator and the
+box share. An unmarked module row still registers; loading that Driver fails
+with a named error (`driverrows.ErrNotFirstParty`) and no in-process fallback,
+while the Box's other Drivers run, and an unmarked shadow row is skipped with
+that reason. Third-party Driver Connectors wait for a later design that decodes
+somewhere empty.
+
+On the Launcher there is no first-party exception, and host-side `Use` is
+ungated. The mandatory Connector sandbox (decision 14, spec #6763) has not
+landed; once it does, every Launcher-hosted Connector moves into it. Only
+Driver Connectors carry the mark: Backend Connectors such as `github` and
+`jira` load in the Launcher and need none. This is the most-secure reading of
+#6763's "in-process only for first-party" (decided 2026-11-13).
+
+Decision 1 stands: trust no one, first-party included. The mark is a placement
+rule, not trust.
