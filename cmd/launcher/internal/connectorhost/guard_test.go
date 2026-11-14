@@ -135,3 +135,39 @@ func TestCallerCancellationPoisonsConnector(t *testing.T) {
 		t.Fatalf("err = %v, want ErrUnusable", err)
 	}
 }
+
+// A failed call releases the module itself; the Close that follows, and a
+// second one, must not release it again.
+func TestCloseAfterFailedCallIsIdempotent(t *testing.T) {
+	c := loadWasm(t, answeringGuest(nil, `{"result":null}`))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := c.Call(ctx, "m", nil, nil); err == nil {
+		t.Fatal("call under a cancelled context succeeded")
+	}
+	for range 2 {
+		if err := c.Close(context.Background()); err != nil {
+			t.Fatalf("Close = %v, want nil", err)
+		}
+	}
+}
+
+// The same, with a compilation cache, whose release is the engine's other half
+// of close.
+func TestCloseAfterFailedCallIsIdempotentCompiled(t *testing.T) {
+	c, err := connectorhost.LoadCompiled(context.Background(), answeringGuest(nil, `{"result":null}`), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := c.Call(ctx, "m", nil, nil); err == nil {
+		t.Fatal("call under a cancelled context succeeded")
+	}
+	for range 2 {
+		if err := c.Close(context.Background()); err != nil {
+			t.Fatalf("Close = %v, want nil", err)
+		}
+	}
+}

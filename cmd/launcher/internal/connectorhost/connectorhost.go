@@ -8,19 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
-
-	"github.com/tetratelabs/wazero"
-	"github.com/tetratelabs/wazero/api"
-	"github.com/tetratelabs/wazero/experimental"
-	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
-	"github.com/tetratelabs/wazero/sys"
 )
 
 // ProtocolVersion is the Connector protocol core speaks.
@@ -212,27 +203,15 @@ type Connector struct {
 	ProtocolVersion string
 	Capabilities    []string
 
-	rt wazero.Runtime
-	// cache is the compilation cache LoadCompiled configured, nil for Load. Its
-	// compiled engine outlives rt.Close, so Close releases it too.
-	cache  wazero.CompilationCache
-	mod    api.Module
-	mem    api.Memory
-	memCap *capAllocator
+	// engine runs the module; every call into it holds mu but Abort.
+	engine engine
 	// network is the grant LoadNetwork gave, nil for Load.
 	network *Network
-	// host serves network's Host calls; nil exactly when network is. Its failed
-	// flag says a Host call already audited this call's failure. Guarded by mu.
+	// host serves network's Host calls; nil for Load. Its failed flag says a
+	// Host call already audited this call's failure. Guarded by mu.
 	host *networkCalls
-	// hostErr is a Host call's fatal failure, set just before it panics to unwind
-	// the guest; invoke reports it in place of the trap. Reset by each invoke.
-	// Guarded by mu.
-	hostErr error
-	// respHeader is the last http_request's response headers, nil when it left
-	// none; http_response_header reads it. Reset by each invoke. Guarded by mu.
-	respHeader http.Header
-	// mu serializes guest calls, since a wazero module instance is not safe for
-	// concurrent use, and guards dead.
+	// mu serializes guest calls, since the engine is not safe for concurrent
+	// use, and guards dead.
 	mu   sync.Mutex
 	dead bool // a call failed or Close ran: the module is gone
 	// err is the failure that killed the module; nil after a plain Close.
@@ -249,149 +228,19 @@ func (c *Connector) Err() error {
 	return c.err
 }
 
-// Close releases the Connector's runtime and compilation cache; later calls
-// return ErrUnusable.
+// Close releases the Connector's engine; later calls return ErrUnusable.
 func (c *Connector) Close(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.dead = true
-	err := c.rt.Close(ctx)
-	if c.cache != nil {
-		err = errors.Join(err, c.cache.Close(ctx))
-	}
-	return err
+	return c.engine.close(ctx)
 }
 
 // Abort kills the module without taking mu, so it ends a call another goroutine
-// is inside; Close cannot, since call holds mu for the whole exchange. wazero,
-// built WithCloseOnContextDone, stops a running guest once its module closes,
-// and that call then fails and marks the Connector dead as any other failure.
-// mod is set once, in load, so reading it here without mu is safe.
-func (c *Connector) Abort() {
-	_ = c.mod.CloseWithExitCode(context.Background(), sys.ExitCodeContextCanceled)
-}
-
-// applyLimits returns ctx under l's wall-clock budget and raises the memory
-// ceiling to l.memory if that is higher; see capAllocator.
-func (c *Connector) applyLimits(ctx context.Context, l limits) (context.Context, context.CancelFunc) {
-	c.memCap.ceiling = max(c.memCap.ceiling, l.memory)
-	return context.WithTimeoutCause(ctx, l.budget, ErrBudget)
-}
-
-// invoke runs fn and names how it failed. ctx carries the budget applyLimits set, so
-// several invokes can share one.
-func (c *Connector) invoke(ctx context.Context, fn api.Function, name string, args ...uint64) ([]uint64, error) {
-	c.memCap.hit = false // a refusal the guest survived in an earlier call is not this call's cause
-	c.hostErr = nil
-	c.respHeader = nil
-	res, err := fn.Call(ctx, args...)
-	if err == nil {
-		return res, nil
-	}
-	if c.hostErr != nil {
-		return nil, fmt.Errorf("%s: %w", name, c.hostErr)
-	}
-	// With WithCloseOnContextDone a call cut off by its context surfaces as a
-	// sys.ExitError and closes the module, so the context is checked before the
-	// error is taken for a trap. A memory-cap refusal is a trap too (Go's runtime
-	// throws "out of memory" -> proc_exit(2)) and is told apart by the allocator.
-	switch {
-	case errors.Is(context.Cause(ctx), ErrBudget):
-		return nil, fmt.Errorf("%s: %w: %w", name, ErrBudget, err)
-	case ctx.Err() != nil:
-		return nil, fmt.Errorf("%s: %w: %w", name, ctx.Err(), err)
-	case c.memCap.hit:
-		return nil, fmt.Errorf("%s: %w: %w", name, ErrMemoryCap, err)
-	}
-	return nil, fmt.Errorf("%s: %w: %w", name, ErrTrap, err)
-}
-
-// export returns the named export if it has exactly the given signature.
-func (c *Connector) export(name string, params, results []api.ValueType) (api.Function, error) {
-	fn := c.mod.ExportedFunction(name)
-	if fn == nil {
-		return nil, fmt.Errorf("%s: %w: not exported", name, ErrExport)
-	}
-	def := fn.Definition()
-	if !slices.Equal(def.ParamTypes(), params) || !slices.Equal(def.ResultTypes(), results) {
-		return nil, fmt.Errorf("%s: %w: must have signature %s", name, ErrExport, signature(params, results))
-	}
-	return fn, nil
-}
-
-func signature(params, results []api.ValueType) string {
-	names := func(ts []api.ValueType) string {
-		s := make([]string, len(ts))
-		for i, t := range ts {
-			s[i] = api.ValueTypeName(t)
-		}
-		return strings.Join(s, ", ")
-	}
-	return "(" + names(params) + ") -> (" + names(results) + ")"
-}
-
-// memoryReader is the slice of api.Memory readOutput needs, so tests can fuzz
-// it against a fake memory.
-type memoryReader interface {
-	Read(offset, byteCount uint32) ([]byte, bool)
-}
-
-// readOutput reads the ptr<<32|len result of a guest call: the length is checked
-// before the read, the bytes must be valid UTF-8 JSON, and the copy is the
-// caller's since the guest may reuse its buffer on the next call.
-func readOutput(mem memoryReader, name string, packed, limit uint64) ([]byte, error) {
-	ptr, n := uint32(packed>>32), uint32(packed)
-	// Before mem.Read: the length is the guest's to choose.
-	if uint64(n) > limit {
-		return nil, fmt.Errorf("%s: %w: %d bytes, cap %d", name, ErrOutputTooLarge, n, limit)
-	}
-	raw, ok := mem.Read(ptr, n)
-	if !ok {
-		return nil, fmt.Errorf("%s: %w: result points outside module memory", name, ErrMalformedOutput)
-	}
-	// json.Valid accepts invalid UTF-8 inside strings.
-	if !utf8.Valid(raw) || !json.Valid(raw) {
-		return nil, fmt.Errorf("%s: %w: result is not valid UTF-8 JSON", name, ErrMalformedOutput)
-	}
-	return bytes.Clone(raw), nil
-}
-
-// capAllocator backs module memory with a hard byte cap. wazero checks a grow
-// against the module's declared maximum before it reaches the allocator and Go
-// modules declare none, so the cap lives here, and hit is how a refusal is told
-// from an ordinary trap. ceiling is the highest any call so far was allowed;
-// the guest's memory never shrinks, so a lower one would refuse a small call
-// even one page of growth after a large call.
-type capAllocator struct {
-	hit     bool
-	ceiling uint64
-}
-
-func (a *capAllocator) Allocate(_, _ uint64) experimental.LinearMemory {
-	return &capMemory{a: a}
-}
-
-type capMemory struct {
-	a   *capAllocator
-	buf []byte
-}
-
-func (m *capMemory) Reallocate(size uint64) []byte {
-	if size > m.a.ceiling {
-		m.a.hit = true
-		return nil
-	}
-	if size > uint64(cap(m.buf)) {
-		grown := make([]byte, size, max(size, min(2*uint64(cap(m.buf)), m.a.ceiling)))
-		copy(grown, m.buf)
-		m.buf = grown
-	}
-	// Bytes past len were never exposed to the guest, so they are still zero.
-	m.buf = m.buf[:size]
-	return m.buf
-}
-
-func (m *capMemory) Free() { m.buf = nil }
+// is inside; Close cannot, since call holds mu for the whole exchange. The call
+// then fails and marks the Connector dead as any other failure. engine is set
+// once, in loadWith, so reading it here without mu is safe.
+func (c *Connector) Abort() { c.engine.abort() }
 
 // encodeRequest is the one encoding of a connector_call request, so the size
 // check in call and logWindow measure the same bytes.
@@ -435,11 +284,15 @@ func (c *Connector) Call(ctx context.Context, method string, params, result any)
 	if c.host != nil {
 		c.host.failed = false
 	}
-	alloc, call, err := c.callExports()
-	if err != nil {
+	raw, err := c.engine.call(ctx, req)
+	if errors.Is(err, ErrExport) {
+		// The module lacks the call exports: nothing ran, so it stays usable.
 		return fail(err)
 	}
-	resp, err := c.exchange(ctx, alloc, call, req)
+	var resp *response
+	if err == nil {
+		resp, err = decodeResponse(raw)
+	}
 	if err == nil {
 		err = decodeResult(resp, result)
 	}
@@ -452,7 +305,7 @@ func (c *Connector) Call(ctx context.Context, method string, params, result any)
 			c.network.recordFailure(DecisionFailed, c.err)
 		}
 		// Not ctx: a cancelled caller must not stop the module being released.
-		_ = c.rt.Close(context.WithoutCancel(ctx))
+		_ = c.engine.close(context.WithoutCancel(ctx))
 		return c.err
 	}
 	if resp.Error != nil {
@@ -461,46 +314,10 @@ func (c *Connector) Call(ctx context.Context, method string, params, result any)
 	return nil
 }
 
-// callExports returns connector_alloc and connector_call. A module with
-// neither still loads, since a Connector need not answer calls.
-func (c *Connector) callExports() (alloc, call api.Function, err error) {
-	if alloc, err = c.export("connector_alloc", []api.ValueType{api.ValueTypeI32}, []api.ValueType{api.ValueTypeI32}); err != nil {
-		return nil, nil, err
-	}
-	call, err = c.export("connector_call", []api.ValueType{api.ValueTypeI32, api.ValueTypeI32}, []api.ValueType{api.ValueTypeI64})
-	return alloc, call, err
-}
-
 type response struct {
 	Result json.RawMessage `json:"result"`
 	Error  *string         `json:"error"`
 	Class  string          `json:"class"`
-}
-
-// exchange writes req into guest memory and returns the decoded response. The
-// caller holds mu. connector_alloc and connector_call share one budget, so
-// a hostile guest cannot hold the caller for two.
-func (c *Connector) exchange(ctx context.Context, alloc, call api.Function, req []byte) (*response, error) {
-	lim := limitsFor(len(req))
-	ctx, cancel := c.applyLimits(ctx, lim)
-	defer cancel()
-	res, err := c.invoke(ctx, alloc, "connector_alloc", uint64(len(req)))
-	if err != nil {
-		return nil, err
-	}
-	ptr := uint32(res[0])
-	if !c.mem.Write(ptr, req) {
-		return nil, fmt.Errorf("connector_alloc: %w: buffer points outside module memory", ErrMalformedOutput)
-	}
-	res, err = c.invoke(ctx, call, "connector_call", uint64(ptr), uint64(len(req)))
-	if err != nil {
-		return nil, err
-	}
-	raw, err := readOutput(c.mem, "connector_call", res[0], lim.output)
-	if err != nil {
-		return nil, err
-	}
-	return decodeResponse(raw)
 }
 
 // decodeResponse decodes the {result, error} envelope connector_call returned.
@@ -544,9 +361,7 @@ type handshake struct {
 // a wall-clock budget. A call's budget, memory cap and output cap each grow with
 // the size of its request (limitsFor), from the bases above.
 func Load(ctx context.Context, wasm []byte) (*Connector, error) {
-	// The interpreter, not wazero's compiler: its per-line cost is well inside
-	// the heartbeat's line rate (ADR 0073, amendment for #6798).
-	return loadWith(ctx, wasm, wazero.NewRuntimeConfigInterpreter(), nil, nil)
+	return loadWith(ctx, wasm, interpretedEngine(), nil)
 }
 
 // LoadNetwork is Load for a network Connector (ADR 0073): it also links the one
@@ -558,7 +373,7 @@ func LoadNetwork(ctx context.Context, wasm []byte, n Network) (*Connector, error
 	if err := checkGrant(n); err != nil {
 		return nil, err
 	}
-	return loadWith(ctx, wasm, wazero.NewRuntimeConfigInterpreter(), nil, &n)
+	return loadWith(ctx, wasm, interpretedEngine(), &n)
 }
 
 // checkGrant refuses a network grant before any module compiles for it.
@@ -576,8 +391,7 @@ func checkGrant(n Network) error {
 // A non-empty cacheDir keeps the compiled module on disk, shared across
 // processes; "" disables it.
 func LoadCompiled(ctx context.Context, wasm []byte, cacheDir string) (*Connector, error) {
-	cfg, cache := compiledConfig(cacheDir)
-	return loadWith(ctx, wasm, cfg, cache, nil)
+	return loadWith(ctx, wasm, compiledEngine(cacheDir), nil)
 }
 
 // LoadNetworkCompiled is LoadNetwork under the compiler, as LoadCompiled is to
@@ -587,102 +401,39 @@ func LoadNetworkCompiled(ctx context.Context, wasm []byte, n Network, cacheDir s
 	if err := checkGrant(n); err != nil {
 		return nil, err
 	}
-	cfg, cache := compiledConfig(cacheDir)
-	return loadWith(ctx, wasm, cfg, cache, &n)
+	return loadWith(ctx, wasm, compiledEngine(cacheDir), &n)
 }
 
-// compiledConfig returns wazero's compiler config and its compilation cache,
-// nil when cacheDir is "".
-func compiledConfig(cacheDir string) (wazero.RuntimeConfig, wazero.CompilationCache) {
-	cfg := wazero.NewRuntimeConfig()
-	if cacheDir == "" {
-		return cfg, nil
-	}
-	// The cache only speeds up the load, so a failure to build one is not a
-	// load failure.
-	cc, err := wazero.NewCompilationCacheWithDir(cacheDir)
-	if err != nil {
-		return cfg, nil
-	}
-	return cfg.WithCompilationCache(cc), cc
-}
-
-// loadWith takes ownership of cache, which may be nil. network is the Host call grant, nil for none.
-func loadWith(ctx context.Context, wasm []byte, cfg wazero.RuntimeConfig, cache wazero.CompilationCache, network *Network) (*Connector, error) {
-	// Reference types are off because table.grow is uncapped and one
-	// uninterruptible host operation. SIMD and multi-value are off so every value
-	// and block type takes one slot, which lets checkDeclaredSizes bound a frame's
-	// operand stack from the binary; the interpreter's stack has no ceiling of its
-	// own. Bulk memory stays on, Go's wasm backend emits memory.copy and
-	// memory.fill.
-	cfg = cfg.WithCloseOnContextDone(true).
-		WithCoreFeatures(api.CoreFeaturesV2 &^ (api.CoreFeatureReferenceTypes | api.CoreFeatureSIMD | api.CoreFeatureMultiValue))
-	rt := wazero.NewRuntimeWithConfig(ctx, cfg)
-	c := &Connector{rt: rt, memCap: &capAllocator{ceiling: memoryCapBytes}, network: network}
+// loadWith runs the module over the engine mk builds and checks its handshake.
+// network is the Host call grant, nil for none.
+func loadWith(ctx context.Context, wasm []byte, mk engineFactory, network *Network) (*Connector, error) {
+	c := &Connector{network: network}
+	// A nil *networkCalls in the interface would read as a grant.
+	var host hostCalls
 	if network != nil {
 		c.host = &networkCalls{n: network}
+		host = c.host
 	}
-	h, err := c.load(ctx, wasm)
+	e, err := mk(ctx, wasm, host)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrHandshake, err)
+	}
+	h, err := handshakeOver(ctx, e)
 	if err == nil {
 		err = CheckProtocol(h.ProtocolVersion)
 	}
 	if err != nil {
-		_ = rt.Close(context.WithoutCancel(ctx))
-		if cache != nil {
-			_ = cache.Close(context.WithoutCancel(ctx))
-		}
+		_ = e.close(context.WithoutCancel(ctx))
 		return nil, err
 	}
-	c.ProtocolVersion, c.Capabilities, c.cache = h.ProtocolVersion, h.Capabilities, cache
+	c.engine, c.ProtocolVersion, c.Capabilities = e, h.ProtocolVersion, h.Capabilities
 	return c, nil
 }
 
-// load compiles and instantiates wasm, runs _initialize, then the handshake.
-func (c *Connector) load(ctx context.Context, wasm []byte) (*handshake, error) {
+// handshakeOver runs and decodes e's handshake.
+func handshakeOver(ctx context.Context, e engine) (*handshake, error) {
 	fail := func(err error) (*handshake, error) { return nil, fmt.Errorf("%w: %w", ErrHandshake, err) }
-	if _, err := wasi_snapshot_preview1.Instantiate(ctx, c.rt); err != nil {
-		return fail(err)
-	}
-	if c.network != nil {
-		if err := c.instantiateNetwork(ctx); err != nil {
-			return fail(err)
-		}
-	}
-	if err := checkDeclaredSizes(wasm); err != nil {
-		return fail(err)
-	}
-	compiled, err := c.rt.CompileModule(ctx, wasm)
-	if err != nil {
-		return fail(err)
-	}
-	if c.mod, err = c.instantiate(ctx, compiled); err != nil {
-		return fail(err)
-	}
-	// Not mod.Memory(): on a module with no memory it is a non-nil handle on nil.
-	c.mem = c.mod.ExportedMemory("memory")
-	if c.mod.ExportedFunction("_initialize") != nil {
-		initFn, err := c.export("_initialize", nil, nil)
-		if err != nil {
-			return fail(err)
-		}
-		initCtx, cancel := c.applyLimits(ctx, initLimits)
-		defer cancel()
-		if _, err := c.invoke(initCtx, initFn, "_initialize"); err != nil {
-			return fail(err)
-		}
-	}
-	fn, err := c.export("connector_handshake", nil, []api.ValueType{api.ValueTypeI64})
-	if err != nil {
-		return fail(err)
-	}
-	lim := limitsFor(0)
-	hsCtx, cancel := c.applyLimits(ctx, lim)
-	defer cancel()
-	res, err := c.invoke(hsCtx, fn, "connector_handshake")
-	if err != nil {
-		return fail(err)
-	}
-	raw, err := readOutput(c.mem, "connector_handshake", res[0], lim.output)
+	raw, err := e.handshake(ctx)
 	if err != nil {
 		return fail(err)
 	}
@@ -706,23 +457,4 @@ func decodeHandshake(raw []byte) (*handshake, error) {
 		return nil, fmt.Errorf("connector_handshake: %w: protocolVersion and capabilities are required", ErrMalformedOutput)
 	}
 	return &h, nil
-}
-
-// instantiate links the module without running a start function (the scan
-// refuses a start section, so none is left), so a link failure is told from a
-// trap; _initialize runs separately, under a budget.
-func (c *Connector) instantiate(ctx context.Context, compiled wazero.CompiledModule) (api.Module, error) {
-	// Checked on the compiled module because an over-cap initial size reaching
-	// the allocator makes wazero panic with a slice-bounds error. A module has at
-	// most one memory (wazero's binary decoder rejects more), so requiring it
-	// exported leaves no unexported one for the allocator to see; an imported
-	// memory cannot link, WASI exporting none.
-	def, ok := compiled.ExportedMemories()["memory"]
-	if !ok {
-		return nil, fmt.Errorf("%w: module does not export memory", ErrExport)
-	}
-	if uint64(def.Min())<<16 > memoryCapBytes {
-		return nil, fmt.Errorf("%w: declared minimum of %d pages exceeds the %d byte cap", ErrMemoryCap, def.Min(), memoryCapBytes)
-	}
-	return c.rt.InstantiateModule(experimental.WithMemoryAllocator(ctx, c.memCap), compiled, wazero.NewModuleConfig().WithStartFunctions())
 }
