@@ -327,18 +327,35 @@ type memoryReader interface {
 func readOutput(mem memoryReader, name string, packed, limit uint64) ([]byte, error) {
 	ptr, n := uint32(packed>>32), uint32(packed)
 	// Before mem.Read: the length is the guest's to choose.
-	if uint64(n) > limit {
-		return nil, fmt.Errorf("%s: %w: %d bytes, cap %d", name, ErrOutputTooLarge, n, limit)
+	if err := checkOutputLen(name, uint64(n), limit); err != nil {
+		return nil, err
 	}
 	raw, ok := mem.Read(ptr, n)
 	if !ok {
 		return nil, fmt.Errorf("%s: %w: result points outside module memory", name, ErrMalformedOutput)
 	}
-	// json.Valid accepts invalid UTF-8 inside strings.
-	if !utf8.Valid(raw) || !json.Valid(raw) {
-		return nil, fmt.Errorf("%s: %w: result is not valid UTF-8 JSON", name, ErrMalformedOutput)
+	if err := checkOutputJSON(name, raw); err != nil {
+		return nil, err
 	}
 	return bytes.Clone(raw), nil
+}
+
+// checkOutputLen refuses a result of n bytes over limit.
+func checkOutputLen(name string, n, limit uint64) error {
+	if n > limit {
+		return fmt.Errorf("%s: %w: %d bytes, cap %d", name, ErrOutputTooLarge, n, limit)
+	}
+	return nil
+}
+
+// checkOutputJSON refuses a result that is not valid UTF-8 JSON. The remote
+// engine runs it too: the Launcher takes nothing a host sends at face value.
+func checkOutputJSON(name string, raw []byte) error {
+	// json.Valid accepts invalid UTF-8 inside strings.
+	if !utf8.Valid(raw) || !json.Valid(raw) {
+		return fmt.Errorf("%s: %w: result is not valid UTF-8 JSON", name, ErrMalformedOutput)
+	}
+	return nil
 }
 
 // instantiate links the module without running a start function (the scan
