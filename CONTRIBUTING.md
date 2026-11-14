@@ -132,6 +132,10 @@ SPINDRIFT_CONNECTOR_FIXTURES_DIR=$(nix build --no-link --print-out-paths ../..#c
   go test ./...
 ```
 
+The tests that run a Connector in a child `connector-host` take its binary from
+`SPINDRIFT_CONNECTOR_HOST`, falling back to `nix build .#connector-host`; they
+fail, not skip, when neither works.
+
 The `piseam` package (issue #5478) runs the locked `pi` binary against a stub
 OpenAI-compatible Provider. It takes `pi` from `SPINDRIFT_PI_BIN`, else builds
 `nixpkgs#pi-coding-agent` from the flake's locked inputs, and skips when

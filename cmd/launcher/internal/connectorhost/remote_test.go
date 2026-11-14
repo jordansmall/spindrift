@@ -16,11 +16,15 @@ import (
 // over each so the in-process and remote engines are held to the same errors.
 type loader func(ctx context.Context, wasm []byte) (*connectorhost.Connector, error)
 
-var loaders = map[string]loader{
-	"in-process": connectorhost.Load,
-	"remote": func(ctx context.Context, wasm []byte) (*connectorhost.Connector, error) {
-		return loadRemoteOver(ctx, wasm, nil, nil)
-	},
+func loadersFor(t testing.TB) map[string]loader {
+	return map[string]loader{
+		"in-process": connectorhost.Load,
+		"process":    processLoader(t),
+		"remote": func(ctx context.Context, wasm []byte) (*connectorhost.Connector, error) {
+			return loadRemoteOver(ctx, wasm, nil, nil)
+		},
+	}
+
 }
 
 // loadRemoteOver loads wasm through a connector host run as Serve in a
@@ -142,7 +146,7 @@ func TestFailuresKeepTheirSentinelOverTheWire(t *testing.T) {
 }
 
 func TestRemoteHostCloseIsCleanAndIdempotent(t *testing.T) {
-	c, err := loaders["remote"](context.Background(), fixture(t, "call.wasm"))
+	c, err := loadersFor(t)["remote"](context.Background(), fixture(t, "call.wasm"))
 	if err != nil {
 		t.Fatal(err)
 	}

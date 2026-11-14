@@ -7,6 +7,7 @@ package fixturebuild
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,10 @@ const (
 	connectorEnvVar = "SPINDRIFT_CONNECTOR_FIXTURES_DIR"
 	// connectorFlakeAttr is the flake package that builds that dir.
 	connectorFlakeAttr = "connector-wasm-fixtures"
+	// connectorHostEnvVar names the connector-host binary, and connectorHostAttr
+	// is the flake package that builds it (issue #7013).
+	connectorHostEnvVar = "SPINDRIFT_CONNECTOR_HOST"
+	connectorHostAttr   = "connector-host"
 )
 
 // resolver carries the environment lookups resolve needs, so tests can
@@ -102,23 +107,82 @@ func nixBuild(args ...string) (string, error) {
 	return path, nil
 }
 
-// ConnectorDir returns the directory of fixture Connector .wasm files:
-// $SPINDRIFT_CONNECTOR_FIXTURES_DIR when set, else the nix-built
-// connector-wasm-fixtures output. An unavailable nix is an error here, not a
-// skip, because no core test may skip the Connector seam (ADR 0067). The
-// answer is computed once per test binary, since the nix build is slow.
-var ConnectorDir = sync.OnceValues(func() (string, error) {
-	if dir := os.Getenv(connectorEnvVar); dir != "" {
-		return dir, nil
-	}
-	built, skip, err := ResolveBuild(connectorEnvVar, "a directory of fixture Connector .wasm files", func(root string) []string {
-		return []string{root + "#" + connectorFlakeAttr}
+// builtArtifact is <out>/<rel> of the nix-built flake package attr, for a test
+// artifact envVar did not name. An unavailable nix is an error, not a skip,
+// because no core test may skip the Connector seam (ADR 0067). Callers read
+// envVar themselves, by name, so launcher-env-coverage sees the read.
+func builtArtifact(envVar, hint, attr, rel string) (string, error) {
+	built, skip, err := ResolveBuild(envVar, hint, func(root string) []string {
+		return []string{root + "#" + attr}
 	})
 	if skip != "" {
 		return "", errors.New(skip)
 	}
-	return built, err
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(built, rel), nil
+}
+
+// ConnectorDir returns the directory of fixture Connector .wasm files:
+// $SPINDRIFT_CONNECTOR_FIXTURES_DIR when set, else the nix-built
+// connector-wasm-fixtures output. The answer is computed once per test binary,
+// since the nix build is slow.
+var ConnectorDir = sync.OnceValues(func() (string, error) {
+	if dir := os.Getenv(connectorEnvVar); dir != "" {
+		return dir, nil
+	}
+	return builtArtifact(connectorEnvVar, "a directory of fixture Connector .wasm files", connectorFlakeAttr, "")
 })
+
+// ConnectorHost returns the connector-host binary: $SPINDRIFT_CONNECTOR_HOST
+// when set, else <out>/bin/connector-host of the nix-built connector-host
+// package, computed once per test binary like ConnectorDir.
+var ConnectorHost = sync.OnceValues(func() (string, error) {
+	if bin := os.Getenv(connectorHostEnvVar); bin != "" {
+		return bin, nil
+	}
+	return builtArtifact(connectorHostEnvVar, "the connector-host binary", connectorHostAttr, filepath.Join("bin", "connector-host"))
+})
+
+// NewConnectorHostCmd is a fresh, unstarted connector-host child whose stderr
+// goes to stderr. An exec.Cmd runs once, so each host needs its own.
+func NewConnectorHostCmd(stderr io.Writer) (*exec.Cmd, error) {
+	bin, err := ConnectorHost()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(bin)
+	cmd.Stderr = stderr
+	return cmd, nil
+}
+
+// testLogger is the part of testing.TB ConnectorHostCmd needs; naming it keeps
+// the testing package out of this non-test file's imports.
+type testLogger interface {
+	Helper()
+	Fatal(args ...any)
+	Log(args ...any)
+}
+
+// ConnectorHostCmd is NewConnectorHostCmd with the host's stderr sent to the
+// test log, failing t when the binary cannot be resolved.
+func ConnectorHostCmd(t testLogger) *exec.Cmd {
+	t.Helper()
+	cmd, err := NewConnectorHostCmd(logWriter{t})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cmd
+}
+
+type logWriter struct{ t testLogger }
+
+func (w logWriter) Write(p []byte) (int, error) {
+	w.t.Helper()
+	w.t.Log(string(p))
+	return len(p), nil
+}
 
 // WazeroCacheDir is the per-user wazero compilation cache directory, or "" when
 // the user cache dir is unknown (no cache then).

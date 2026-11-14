@@ -73,7 +73,7 @@ func TestLoadAcceptsPreviousMinor(t *testing.T) {
 }
 
 func TestLoadRefusesFutureProtocol(t *testing.T) {
-	for engine, ld := range loaders {
+	for engine, ld := range loadersFor(t) {
 		t.Run(engine, func(t *testing.T) {
 			_, err := loadUsing(t, ld, "future.wasm")
 			if !errors.Is(err, connectorhost.ErrProtocolUnsupported) {
@@ -134,7 +134,7 @@ func TestLoadRefusesUngrantedImport(t *testing.T) {
 }
 
 func TestLoadRejectsGarbage(t *testing.T) {
-	for engine, ld := range loaders {
+	for engine, ld := range loadersFor(t) {
 		t.Run(engine, func(t *testing.T) {
 			_, err := ld(context.Background(), []byte("not a wasm module"))
 			if !errors.Is(err, connectorhost.ErrHandshake) {
@@ -368,7 +368,7 @@ func TestHostileConnectorFailsWithItsOwnNamedError(t *testing.T) {
 		{"handshake with null capabilities", handshakeModule(`{"protocolVersion":"0.3.0","capabilities":null}`), connectorhost.ErrMalformedOutput},
 		{"JSON of the wrong shape", handshakeModule("[]"), connectorhost.ErrMalformedOutput},
 	}
-	for engine, ld := range loaders {
+	for engine, ld := range loadersFor(t) {
 		t.Run(engine, func(t *testing.T) {
 			for _, tc := range tests {
 				t.Run(tc.name, func(t *testing.T) {
@@ -507,7 +507,7 @@ func TestDeclaredTableMinimumIsCapped(t *testing.T) {
 		{"at the cap", maxTableEntries, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			for engine, ld := range loaders {
+			for engine, ld := range loadersFor(t) {
 				t.Run(engine, func(t *testing.T) {
 					w := withTable(t, handshakeModule(goodHandshake), tc.min)
 					start := time.Now()

@@ -206,6 +206,8 @@
               seam-fixtures = fixtures.seamFixtures;
               # The fixture Connector .wasm files core's fake Driver loads (issue #6794).
               connector-wasm-fixtures = fixtures.connectorWasm;
+              # The static out-of-process Connector host (issue #7013).
+              connector-host = fixtures.connectorHost;
             }
             # A bwrap harness bakes FLAKE_IMAGE_ATTR as
             # `.#packages.<system>.<imageAttrName>` (issue #2672), agent-closure

@@ -38,14 +38,17 @@ func httpCallGuest(req string, respPtr, respCap int64, pass bool) []byte {
 
 type netLoader func(context.Context, []byte, connectorhost.Network) (*connectorhost.Connector, error)
 
-// netLoaders are the ways to load a network Connector; a grant behaves the same
-// under the interpreter and the compiler.
-var netLoaders = map[string]netLoader{
-	"remote":      remoteNetLoader(nil),
-	"interpreter": connectorhost.LoadNetwork,
-	"compiled": func(ctx context.Context, wasm []byte, n connectorhost.Network) (*connectorhost.Connector, error) {
-		return connectorhost.LoadNetworkCompiled(ctx, wasm, n, "")
-	},
+// netLoadersFor are the ways to load a network Connector; a grant behaves the
+// same under the interpreter and the compiler.
+func netLoadersFor(t testing.TB) map[string]netLoader {
+	return map[string]netLoader{
+		"remote":      remoteNetLoader(nil),
+		"process":     networkProcessLoader(t),
+		"interpreter": connectorhost.LoadNetwork,
+		"compiled": func(ctx context.Context, wasm []byte, n connectorhost.Network) (*connectorhost.Connector, error) {
+			return connectorhost.LoadNetworkCompiled(ctx, wasm, n, "")
+		},
+	}
 }
 
 func loadNet(t *testing.T, wasm []byte, n *connectorhost.Network) *connectorhost.Connector {
@@ -64,7 +67,7 @@ func loadNetWith(t *testing.T, load netLoader, wasm []byte, n *connectorhost.Net
 }
 
 func TestLoadNetworkGrantsHttpRequestAndKeepsTheCredentialOutOfTheGuest(t *testing.T) {
-	for name, load := range netLoaders {
+	for name, load := range netLoadersFor(t) {
 		t.Run(name, func(t *testing.T) { grantsHTTPRequest(t, load) })
 	}
 }
@@ -97,7 +100,7 @@ func grantsHTTPRequest(t *testing.T, load netLoader) {
 }
 
 func TestNetworkConnectorRefusalFailsClosedWithoutSending(t *testing.T) {
-	for name, load := range netLoaders {
+	for name, load := range netLoadersFor(t) {
 		t.Run(name, func(t *testing.T) { refusalFailsClosed(t, load) })
 	}
 }
@@ -212,7 +215,7 @@ func TestNetworkConnectorOutOfBoundsHostCallFailsClosed(t *testing.T) {
 }
 
 func TestLoadNetworkRejectsABadConfig(t *testing.T) {
-	for name, load := range netLoaders {
+	for name, load := range netLoadersFor(t) {
 		t.Run(name, func(t *testing.T) { rejectsABadConfig(t, load) })
 	}
 }

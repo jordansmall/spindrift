@@ -24,7 +24,7 @@ func TestHostileFixtureConnectorsFailClosed(t *testing.T) {
 		{"hostile-malformed.wasm", connectorhost.ErrMalformedOutput},
 		{"hostile-invalid.wasm", connectorhost.ErrMalformedOutput},
 	}
-	for engine, ld := range loaders {
+	for engine, ld := range loadersFor(t) {
 		t.Run(engine, func(t *testing.T) {
 			for _, tc := range tests {
 				t.Run(tc.fixture, func(t *testing.T) {

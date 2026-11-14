@@ -720,6 +720,14 @@ let
   # Fixture Connectors built as wasip1 reactors for the Connector host tests.
   connectorWasm = import ./connector-wasm.nix { inherit pkgs; };
 
+  # The out-of-process connector host (issue #7013) the Connector host tests
+  # spawn; built for the system the tests run on, hence hostPkgs = pkgs.
+  connectorHost =
+    (import ../lib/harness-core.nix {
+      inherit pkgs;
+      hostPkgs = pkgs;
+    }).connectorHostBin;
+
   # Issue #6796: a Consumer importing the fixture Driver Connector, and the
   # artifacts its row renders for the launcher (input document) and the Box
   # (rows file). The Go tests read these instead of hand-written rows. The
@@ -816,6 +824,7 @@ in
     multiDriverBatsHarness
     seamFixtures
     connectorWasm
+    connectorHost
     harness
     dogfoodBwrapHarness
     dogfoodOpencodeHarness
