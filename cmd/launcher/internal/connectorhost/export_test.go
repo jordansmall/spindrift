@@ -172,3 +172,11 @@ func SetSessionBufCap(n int) (restore func()) {
 	sessionBufCap = n
 	return func() { sessionBufCap = old }
 }
+
+// SetBatchCap shrinks the decodeBatch request cap for the test and returns the
+// restore.
+func SetBatchCap(n int) (restore func()) {
+	old := batchCap
+	batchCap = n
+	return func() { batchCap = old }
+}

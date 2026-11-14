@@ -171,6 +171,9 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 			return r.ExitCode, nil
 		}
 	}
+	if slices.Contains(c.Capabilities, decodeBatchMethod) {
+		s.NewBatchDecoder = c.newBatchDecoder
+	}
 	if slices.Contains(c.Capabilities, "driver.streamFilter") {
 		s.NewStreamFilter = c.newStreamFilter
 	}
@@ -233,45 +236,153 @@ func (c *Connector) bind(h *guestHandle, id uint32, freeMethod, key string) {
 	}, id)
 }
 
-func (c *Connector) newDecoder() driverkit.Decoder {
-	ctx := context.Background()
+// guestDecoder opens a guest decoder and binds its handle to free with the
+// Connector; on error the handle is unusable.
+func (c *Connector) guestDecoder(ctx context.Context) (*guestHandle, error) {
 	var r newDecoderResult
 	h := &guestHandle{}
-	// A Decoder has no error return, so a failed guest call yields a single
-	// KindUnparsed event carrying the line: the classifier then still sees it
-	// for terminal markers, and no guest-supplied event is trusted.
-	unparsed := func(line string) []driverkit.Event {
-		return []driverkit.Event{{Kind: driverkit.KindUnparsed, Text: strings.TrimSpace(line)}}
-	}
 	err := c.Call(ctx, "driver.newDecoder", struct{}{}, &r)
 	if err == nil {
 		c.bind(h, r.Decoder, "driver.freeDecoder", "decoder")
 	}
+	return h, err
+}
+
+func hostOpEvents(op *hostop.SpindriftOp) []driverkit.Event {
+	return []driverkit.Event{{Kind: driverkit.KindHostOp, HostOp: op}}
+}
+
+func (c *Connector) newDecoder() driverkit.Decoder {
+	ctx := context.Background()
+	h, err := c.guestDecoder(ctx)
 	return func(line string) []driverkit.Event {
-		// spindrift_op lines are core's own grammar, host-written into every
-		// Pass log. The guest sees them so its state can follow passes, but
+		// The guest sees spindrift_op lines so its state can follow passes, but
 		// core stays their only decoder: whatever the guest answers, or fails
 		// with, is discarded.
-		var op hostop.Event
-		if t := strings.TrimSpace(line); t != "" &&
-			json.Unmarshal([]byte(t), &op) == nil && op.Type == hostop.TypeSpindriftOp && op.SpindriftOp != nil {
+		if op := hostOp(line); op != nil {
 			if err == nil {
 				_ = c.Call(ctx, "driver.decode", map[string]any{"decoder": h.id, "line": line}, nil)
 			}
-			return []driverkit.Event{{Kind: driverkit.KindHostOp, HostOp: op.SpindriftOp}}
+			return hostOpEvents(op)
 		}
 		if err != nil {
-			return unparsed(line)
+			return unparsedEvents(line)
 		}
 		var raw json.RawMessage
 		if c.Call(ctx, "driver.decode", map[string]any{"decoder": h.id, "line": line}, &raw) != nil {
-			return unparsed(line)
+			return unparsedEvents(line)
 		}
 		evs, ok := guestEvents(raw)
 		if !ok {
-			return unparsed(line)
+			return unparsedEvents(line)
 		}
 		return evs
+	}
+}
+
+// hostOp returns the payload of a host-written spindrift_op line, or nil for
+// any other line.
+func hostOp(line string) *hostop.SpindriftOp {
+	var op hostop.Event
+	if t := strings.TrimSpace(line); t != "" &&
+		json.Unmarshal([]byte(t), &op) == nil && op.Type == hostop.TypeSpindriftOp {
+		return op.SpindriftOp
+	}
+	return nil
+}
+
+// batchCap is the most bytes one decodeBatch request may encode to. A var so a
+// test can shrink it: the interpreter takes tens of seconds on a real request.
+var batchCap = maxRequest
+
+const decodeBatchMethod = "driver.decodeBatch"
+
+// unparsedEvents is the result for a line whose guest call failed. A Decoder
+// has no error return, so a failure is a single KindUnparsed event carrying the
+// line: the classifier then still sees it for terminal markers, and no
+// guest-supplied event is trusted.
+func unparsedEvents(line string) []driverkit.Event {
+	return []driverkit.Event{{Kind: driverkit.KindUnparsed, Text: strings.TrimSpace(line)}}
+}
+
+// batchEnd returns the end of the run of lines, starting at from, whose
+// encodings sum to at most room. A run always holds at least one line: one too
+// large to fit alone is sent alone, and the host refuses it.
+func batchEnd(lines []string, from, room int) int {
+	end := from
+	for used := 0; end < len(lines); end++ {
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)   // as encodeRequest, so the size is what Call sends
+		_ = enc.Encode(lines[end]) // a string always encodes
+		n := buf.Len()             // the string's quotes, plus the newline Encode appends for a comma
+		if end > from && used+n > room {
+			break
+		}
+		used += n
+	}
+	return end
+}
+
+// batchEvents strictly decodes a decodeBatch response, which must be one array
+// element per line sent, else it reports false and the caller fails every line.
+// Each element is validated on its own: a rejected one becomes its line's one
+// unparsed event, as a rejected driver.decode does, and leaves the rest alone.
+func batchEvents(raw json.RawMessage, lines []string) ([][]driverkit.Event, bool) {
+	var elems []json.RawMessage
+	if json.Unmarshal(raw, &elems) != nil || len(elems) != len(lines) {
+		return nil, false
+	}
+	out := make([][]driverkit.Event, len(lines))
+	for i, e := range elems {
+		evs, ok := guestEvents(e)
+		if !ok {
+			evs = unparsedEvents(lines[i])
+		}
+		out[i] = evs
+	}
+	return out, true
+}
+
+// newBatchDecoder is newDecoder over many lines per call, line for line the
+// same results. A request that fails, or whose answer is not one array element
+// per line, fails all its lines; a rejected element fails only its own line.
+func (c *Connector) newBatchDecoder() driverkit.BatchDecoder {
+	ctx := context.Background()
+	h, err := c.guestDecoder(ctx)
+	// The widest handle, so the envelope is never undercounted; encoding this
+	// constant cannot fail.
+	empty, _ := encodeRequest(decodeBatchMethod, map[string]any{"decoder": uint32(math.MaxUint32), "lines": []string{}})
+	return func(lines []string) [][]driverkit.Event {
+		out := make([][]driverkit.Event, len(lines))
+		ops := make([]*hostop.SpindriftOp, len(lines))
+		for i, l := range lines {
+			ops[i] = hostOp(l)
+		}
+		for from := 0; from < len(lines); {
+			end := len(lines)
+			var evs [][]driverkit.Event // nil when the guest gave no usable answer
+			if err == nil {
+				end = batchEnd(lines, from, batchCap-len(empty))
+				var raw json.RawMessage
+				params := map[string]any{"decoder": h.id, "lines": lines[from:end]}
+				if c.Call(ctx, decodeBatchMethod, params, &raw) == nil {
+					evs, _ = batchEvents(raw, lines[from:end])
+				}
+			}
+			for i := from; i < end; i++ {
+				switch {
+				case ops[i] != nil:
+					out[i] = hostOpEvents(ops[i])
+				case evs == nil:
+					out[i] = unparsedEvents(lines[i])
+				default:
+					out[i] = evs[i-from]
+				}
+			}
+			from = end
+		}
+		return out
 	}
 }
 
