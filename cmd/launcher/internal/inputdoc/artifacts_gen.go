@@ -49,6 +49,8 @@ type BwrapArtifacts struct {
 	AgentFiles       Value `json:"AGENT_FILES,omitzero"`
 	AgentFilesDrv    Value `json:"AGENT_FILES_DRV,omitzero"`
 	BakedPrefetch    Value `json:"BAKED_PREFETCH,omitzero"`
+	ConnectorHost    Value `json:"CONNECTOR_HOST,omitzero"`
+	ConnectorHostDrv Value `json:"CONNECTOR_HOST_DRV,omitzero"`
 	FlakeImageAttr   Value `json:"FLAKE_IMAGE_ATTR,omitzero"`
 	GroupFile        Value `json:"GROUP_FILE,omitzero"`
 	GroupFileDrv     Value `json:"GROUP_FILE_DRV,omitzero"`
@@ -78,7 +80,7 @@ var SharedArtifactKeys = []string{"BOX_ARTIFACT", "BOX_ENV_VARS", "CHORE_CATALOG
 // FamilyArtifactKeys maps a runner family name to the keys its row renders.
 var FamilyArtifactKeys = map[string][]string{
 	"oci":   {"CONNECTOR_SANDBOX_FLAKE_ATTR", "CONNECTOR_SANDBOX_IMAGE_ARCHIVE", "CONNECTOR_SANDBOX_IMAGE_DRV", "CONNECTOR_SANDBOX_IMAGE_TAG", "FLAKE_IMAGE_ATTR", "IMAGE_ARCHIVE", "IMAGE_DRV", "IMAGE_TAG", "NIX_BUILDER_IMAGE", "NIX_VOLUME"},
-	"bwrap": {"AGENT_ENV", "AGENT_ENV_DRV", "AGENT_FILES", "AGENT_FILES_DRV", "BAKED_PREFETCH", "FLAKE_IMAGE_ATTR", "GROUP_FILE", "GROUP_FILE_DRV", "IMAGE_TAG", "NIX_CONFIG_FILE", "NIX_CONFIG_FILE_DRV", "NIX_STORE_WRITABLE", "PASSWD_FILE", "PASSWD_FILE_DRV", "SYSCALL_FILTER", "SYSCALL_FILTER_DRV"},
+	"bwrap": {"AGENT_ENV", "AGENT_ENV_DRV", "AGENT_FILES", "AGENT_FILES_DRV", "BAKED_PREFETCH", "CONNECTOR_HOST", "CONNECTOR_HOST_DRV", "FLAKE_IMAGE_ATTR", "GROUP_FILE", "GROUP_FILE_DRV", "IMAGE_TAG", "NIX_CONFIG_FILE", "NIX_CONFIG_FILE_DRV", "NIX_STORE_WRITABLE", "PASSWD_FILE", "PASSWD_FILE_DRV", "SYSCALL_FILTER", "SYSCALL_FILTER_DRV"},
 }
 
 // newFamilyPart allocates the family part for kind and returns it, or nil

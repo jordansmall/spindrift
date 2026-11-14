@@ -1453,6 +1453,8 @@ let
   nixConfigFileDrv = builtins.unsafeDiscardStringContext nixConfigFile.drvPath;
   syscallFilterPath = builtins.unsafeDiscardStringContext (toString syscallFilter);
   syscallFilterDrv = builtins.unsafeDiscardStringContext syscallFilter.drvPath;
+  connectorHostPath = builtins.unsafeDiscardStringContext (toString connectorHostLinuxBin);
+  connectorHostDrv = builtins.unsafeDiscardStringContext connectorHostLinuxBin.drvPath;
 
   # The bwrap freshness check (issue #2667) needs one comparable output path
   # standing in for everything that changes bwrap Box behavior. linkFarm
@@ -1554,6 +1556,7 @@ let
     # The syscall filter is independent of nix-in-box, so it always renders
     # its real path.
     inherit syscallFilterPath syscallFilterDrv;
+    inherit connectorHostPath connectorHostDrv;
   };
 
   # The rendered document as a host store-path JSON file. The generated

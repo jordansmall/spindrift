@@ -56,6 +56,10 @@
       # The build-time drv counterpart of syscallFilterPath above
       # (issue #2672), same reasoning as agentFilesDrv.
       syscallFilterDrv,
+      # The static Linux connector-host output dir and its drv: the bwrap
+      # adapter binds that one store path into a Connector sandbox.
+      connectorHostPath,
+      connectorHostDrv,
       ...
     }:
     {
@@ -80,6 +84,8 @@
       GROUP_FILE_DRV = groupFileDrv;
       NIX_CONFIG_FILE_DRV = nixConfigDrv;
       SYSCALL_FILTER_DRV = syscallFilterDrv;
+      CONNECTOR_HOST = connectorHostPath;
+      CONNECTOR_HOST_DRV = connectorHostDrv;
     };
 
   knobs = {
