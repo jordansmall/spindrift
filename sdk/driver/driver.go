@@ -214,6 +214,17 @@ func handlers(s Strategy) ([]string, map[string]method) {
 
 	decoders := map[uint32]Decoder{}
 	var next uint32
+	decodeLine := func(h uint32, line string) ([]event.Event, error) {
+		dec, ok := decoders[h]
+		if !ok {
+			return nil, fmt.Errorf("unknown decoder %d", h)
+		}
+		evs := dec(line)
+		if evs == nil {
+			evs = []event.Event{} // encode [] rather than null
+		}
+		return evs, nil
+	}
 
 	m := map[string]method{
 		"driver.describe": func(json.RawMessage) (any, error) {
@@ -249,15 +260,25 @@ func handlers(s Strategy) ([]string, map[string]method) {
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
 			}
-			dec, ok := decoders[p.Decoder]
-			if !ok {
-				return nil, fmt.Errorf("unknown decoder %d", p.Decoder)
+			return decodeLine(p.Decoder, p.Line)
+		},
+		"driver.decodeBatch": func(params json.RawMessage) (any, error) {
+			var p struct {
+				Decoder uint32   `json:"decoder"`
+				Lines   []string `json:"lines"`
 			}
-			evs := dec(p.Line)
-			if evs == nil {
-				evs = []event.Event{} // encode [] rather than null
+			if err := unmarshal(params, &p); err != nil {
+				return nil, err
 			}
-			return evs, nil
+			out := make([][]event.Event, len(p.Lines))
+			for i, line := range p.Lines {
+				evs, err := decodeLine(p.Decoder, line)
+				if err != nil {
+					return nil, err
+				}
+				out[i] = evs
+			}
+			return out, nil
 		},
 		"driver.freeDecoder": func(params json.RawMessage) (any, error) {
 			var p struct {
@@ -299,7 +320,7 @@ func handlers(s Strategy) ([]string, map[string]method) {
 			}{s.SessionFlags(p.Mode, p.RepoSlug, p.Issue, p.Home)}, nil
 		},
 	}
-	caps := []string{"driver"}
+	caps := []string{"driver", "driver.decodeBatch"}
 
 	if s.ResolveExit != nil {
 		caps = append(caps, "driver.resolveExit")
