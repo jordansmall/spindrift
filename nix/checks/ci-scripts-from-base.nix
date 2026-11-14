@@ -41,6 +41,7 @@ let
       "ci-ok.sh"
       "ci-go-tokens.go"
       "ci-comment-readers"
+      "ci-connector-contract"
     ];
     ci-ok = [
       "ci-changes.sh"
