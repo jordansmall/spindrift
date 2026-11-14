@@ -105,3 +105,13 @@ func assertSandboxListed(t *testing.T, r runner.Runner, name string, want bool) 
 		t.Errorf("ListRunning = %v: contains %q = %v, want %v", names, name, got, want)
 	}
 }
+
+// BwrapSandboxRender asserts the isolation of the argv a bwrap adapter renders
+// to start a Connector sandbox whose connector-host package is host. argv is
+// the whole argv after the bwrap binary.
+func BwrapSandboxRender(t *testing.T, argv []string, host string) {
+	t.Helper()
+	for _, v := range runner.BwrapSandboxViolations(argv, host) {
+		t.Errorf("sandbox argv %v: %s", argv, v)
+	}
+}
