@@ -3,12 +3,14 @@ package seamtest
 import (
 	"bytes"
 	"encoding/base64"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/runner"
 )
@@ -244,5 +246,40 @@ func TestUsePodmanPutsTheFakeOnPATH(t *testing.T) {
 	}
 	if got := ReadRecord(t, rec); len(got) != 1 || got[0][0] != "image" {
 		t.Errorf("record = %v; want the one image call", got)
+	}
+}
+
+func TestPodmanRunningContainersAreListedAndInspectable(t *testing.T) {
+	cfg := PodmanConfig{Record: filepath.Join(t.TempDir(), "rec"), Running: []string{"a", "b"}}
+	if code, out, _ := runPodman(t, cfg, "ps", "--filter", "status=running", "--format", "{{.Names}}"); code != 0 || out != "a\nb\n" {
+		t.Errorf("ps: exit %d, out %q; want 0, the running names", code, out)
+	}
+	code, out, _ := runPodman(t, cfg, "inspect", "--format={{json .}}", "b")
+	if code != 0 || !strings.Contains(out, `"ID":"id-b"`) || !strings.Contains(out, `"running"`) {
+		t.Errorf("inspect running: exit %d, out %q", code, out)
+	}
+	if code, _, _ := runPodman(t, cfg, "inspect", "--format={{json .}}", "c"); code != 1 {
+		t.Errorf("inspect other: exit %d; want 1", code)
+	}
+}
+
+func TestPodmanRunHoldsUntilReleased(t *testing.T) {
+	hold := filepath.Join(t.TempDir(), "release")
+	cfg := PodmanConfig{Record: filepath.Join(t.TempDir(), "rec"), Runs: []PodmanRun{{Outcome: "SPINDRIFT_OUTCOME issue=1 status=done\n", HoldUntil: hold}}}
+	done := make(chan string)
+	go func() {
+		_, out, _ := runPodman(t, cfg, "run", "--name", "a")
+		done <- out
+	}()
+	select {
+	case out := <-done:
+		t.Fatalf("run finished before its release: %q", out)
+	case <-time.After(200 * time.Millisecond):
+	}
+	if err := os.WriteFile(hold, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := <-done; out != cfg.Runs[0].Outcome {
+		t.Errorf("released run printed %q; want its outcome", out)
 	}
 }

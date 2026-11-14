@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestRunCapturesStreamsAndExitCode(t *testing.T) {
@@ -206,5 +208,16 @@ func TestWithBuildDirRemovesDir(t *testing.T) {
 	}
 	if _, err := os.Stat(inside); !os.IsNotExist(err) {
 		t.Fatalf("shared dir %q survives; stat err = %v", inside, err)
+	}
+}
+
+func TestStartSignalsARunningChild(t *testing.T) {
+	p := Start(t, Cmd{Bin: "sh", Args: []string{"-c", "trap 'echo got term; exit 7' TERM; echo up; while :; do sleep 0.05; done"}})
+	for deadline := time.Now().Add(10 * time.Second); !strings.Contains(p.Stdout(), "up") && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+	}
+	p.Signal(t, syscall.SIGTERM)
+	res := p.Wait(t)
+	if res.ExitCode != 7 || res.Stdout != "up\ngot term\n" {
+		t.Fatalf("got %+v", res)
 	}
 }

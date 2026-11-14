@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/runner"
@@ -33,6 +34,9 @@ type PodmanConfig struct {
 	// status a container runtime gives a run it could not start) with this
 	// message on stderr, scripting a sandbox start failure.
 	RefuseSandbox string `json:"refuse_sandbox"`
+	// Running names the containers `ps` lists and `inspect` finds, running,
+	// with the id "id-<name>": what a hard-killed launcher left behind.
+	Running []string `json:"running"`
 }
 
 // PodmanRun is one scripted `podman run`.
@@ -54,6 +58,9 @@ type PodmanRun struct {
 	// read-only Box's code-out bundle). The launcher empties the outbox before
 	// the run, so a test cannot pre-place the file.
 	Files map[string]string `json:"files"`
+	// HoldUntil is a path the run waits to exist before it writes anything
+	// else, so a test can signal the launcher while the Box is in flight.
+	HoldUntil string `json:"hold_until"`
 }
 
 // podmanMain serves both podman and docker; the invoked name picks the config.
@@ -88,10 +95,20 @@ func podmanFake(tool string, args []string, stdout, stderr io.Writer) int {
 			}
 			return 1
 		}
+	case "ps":
+		for _, n := range cfg.Running {
+			fmt.Fprintln(stdout, n)
+		}
+		return 0
 	case "inspect":
-		// Container liveness probe: no container exists. The not-found
-		// wording is what lets Kill tell this from an unreachable daemon.
+		// Container liveness probe: only a configured Running name exists.
+		// The not-found wording is what lets Kill tell this from an
+		// unreachable daemon.
 		name := args[len(args)-1]
+		if slices.Contains(cfg.Running, name) {
+			fmt.Fprintf(stdout, "{\"ID\":\"id-%s\",\"State\":{\"Status\":\"running\"}}\n", name)
+			return 0
+		}
 		fmt.Fprintf(stderr, "Error: no such object: %q\n", name)
 		return 1
 	case "run":
@@ -122,6 +139,9 @@ func podmanFake(tool string, args []string, stdout, stderr io.Writer) int {
 // boxOutput is what a scripted Box run prints: its intents, then its outcome.
 // It also materializes run.Files, the run's other observable effect.
 func boxOutput(run PodmanRun, args []string) (string, error) {
+	if err := holdUntil(run.HoldUntil); err != nil {
+		return "", err
+	}
 	for dst, src := range run.Files {
 		if err := copyFile(src, dst); err != nil {
 			return "", fmt.Errorf("box fake: copy %s to %s: %w", src, dst, err)
@@ -135,6 +155,20 @@ func boxOutput(run PodmanRun, args []string) (string, error) {
 	}
 	b.WriteString(withNonce(run.Outcome, args))
 	return b.String(), nil
+}
+
+// holdUntil blocks until path exists; a test that never releases it fails the
+// run instead of hanging it.
+func holdUntil(path string) error {
+	if path == "" {
+		return nil
+	}
+	for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("box fake: %s never appeared", path)
 }
 
 func withNonce(outcome string, args []string) string {

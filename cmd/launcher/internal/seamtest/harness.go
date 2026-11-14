@@ -167,12 +167,45 @@ type Result struct {
 	ExitCode       int
 }
 
-// Run executes c with a fresh temp HOME and PATH = PathDirs + parent PATH.
-// The rest of the parent environment is inherited (unless CleanEnv) so the Go toolchain and
-// nix-sandbox settings stay usable. Both streams are also logged to tb so a
-// failing test shows what the child said. A non-zero exit is a Result, not a
-// failure; only a failure to start fails tb.
-func Run(tb testing.TB, c Cmd) Result {
+// Proc is a started subprocess; Start returns one so a test can signal it
+// while it runs.
+type Proc struct {
+	cmd            *exec.Cmd
+	stdout, stderr syncBuffer
+}
+
+// syncBuffer is a bytes.Buffer a test can read while the child still writes.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// Stdout and Stderr are what the child has written so far.
+func (p *Proc) Stdout() string { return p.stdout.String() }
+func (p *Proc) Stderr() string { return p.stderr.String() }
+
+// Signal sends sig to the child alone, not its process group.
+func (p *Proc) Signal(tb testing.TB, sig os.Signal) {
+	tb.Helper()
+	if err := p.cmd.Process.Signal(sig); err != nil {
+		tb.Fatalf("seamtest: signal %s: %v", p.cmd.Path, err)
+	}
+}
+
+// Start launches c as Run does, without waiting for it. The caller must Wait.
+func Start(tb testing.TB, c Cmd) *Proc {
 	tb.Helper()
 	pathVal := strings.Join(append(append([]string{}, c.PathDirs...), os.Getenv("PATH")), string(os.PathListSeparator))
 	base := os.Environ()
@@ -183,24 +216,43 @@ func Run(tb testing.TB, c Cmd) Result {
 	for k, v := range c.Env {
 		env = append(env, k+"="+v)
 	}
-	cmd := exec.Command(c.Bin, c.Args...)
-	cmd.Dir = c.Dir
+	p := &Proc{cmd: exec.Command(c.Bin, c.Args...)}
+	p.cmd.Dir = c.Dir
 	// Later duplicates win in os/exec, so the overlay order above is the
 	// precedence order.
-	cmd.Env = env
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	p.cmd.Env = env
+	p.cmd.Stdout, p.cmd.Stderr = &p.stdout, &p.stderr
+	if err := p.cmd.Start(); err != nil {
+		tb.Fatalf("seamtest: run %s: %v", c.Bin, err)
+	}
+	return p
+}
+
+// Wait waits for the child and returns its captured output, logging both
+// streams to tb. A non-zero exit is a Result, not a failure.
+func (p *Proc) Wait(tb testing.TB) Result {
+	tb.Helper()
 	res := Result{}
-	if err := cmd.Run(); err != nil {
+	if err := p.cmd.Wait(); err != nil {
 		var ee *exec.ExitError
 		if !errors.As(err, &ee) {
-			tb.Fatalf("seamtest: run %s: %v", c.Bin, err)
+			tb.Fatalf("seamtest: run %s: %v", p.cmd.Path, err)
 		}
 		res.ExitCode = ee.ExitCode()
 	}
-	res.Stdout, res.Stderr = stdout.String(), stderr.String()
-	tb.Logf("seamtest: %s exit=%d\nstdout:\n%s\nstderr:\n%s", c.Bin, res.ExitCode, res.Stdout, res.Stderr)
+	res.Stdout, res.Stderr = p.Stdout(), p.Stderr()
+	tb.Logf("seamtest: %s exit=%d\nstdout:\n%s\nstderr:\n%s", p.cmd.Path, res.ExitCode, res.Stdout, res.Stderr)
 	return res
+}
+
+// Run executes c with a fresh temp HOME and PATH = PathDirs + parent PATH.
+// The rest of the parent environment is inherited (unless CleanEnv) so the Go toolchain and
+// nix-sandbox settings stay usable. Both streams are also logged to tb so a
+// failing test shows what the child said. A non-zero exit is a Result, not a
+// failure; only a failure to start fails tb.
+func Run(tb testing.TB, c Cmd) Result {
+	tb.Helper()
+	return Start(tb, c).Wait(tb)
 }
 
 // WantExit fails tb, showing both streams, unless the exit code is code.
