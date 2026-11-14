@@ -2,6 +2,7 @@ package readshadow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostop"
 )
@@ -555,5 +557,37 @@ func TestConnectorOpenedAfterCloseDeadlineIsStillClosed(t *testing.T) {
 	case <-closed:
 	case <-time.After(5 * time.Second):
 		t.Fatal("a Connector that finished loading after the close deadline was never closed")
+	}
+}
+
+// statsSandbox is a Connector sandbox that only reports its cost.
+type statsSandbox struct {
+	connectorsandbox.Loader
+	stats connectorsandbox.Stats
+}
+
+func (l statsSandbox) Stats() (connectorsandbox.Stats, bool) { return l.stats, true }
+
+func TestSummaryCarriesTheSandboxCost(t *testing.T) {
+	t.Cleanup(connectorsandbox.Use(statsSandbox{stats: connectorsandbox.Stats{
+		Start:    7 * time.Millisecond,
+		HopStats: connectorhost.HopStats{Calls: 5, HostCalls: 3, Hop: 11 * time.Millisecond},
+	}}))
+	r := newRig(t, 5, opensWith(Reads{}))
+	s := r.closeAndSummary(t)
+	if s.SandboxStartNs != int64(7*time.Millisecond) || s.SandboxCalls != 5 ||
+		s.SandboxHostCalls != 3 || s.SandboxHopNs != int64(11*time.Millisecond) {
+		t.Fatalf("summary = %+v", s)
+	}
+}
+
+func TestSummaryWithoutASandboxEncodesNoSandboxKey(t *testing.T) {
+	r := newRig(t, 5, opensWith(Reads{}))
+	b, err := json.Marshal(r.closeAndSummary(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "sandbox_") {
+		t.Fatalf("summary = %s, want no sandbox_ key", b)
 	}
 }
