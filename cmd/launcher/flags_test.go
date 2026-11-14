@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/inputdoc"
@@ -2708,5 +2709,228 @@ func TestMainRun_BareInvalidBoolFlag_ErrorsBeforeHelp(t *testing.T) {
 	}
 	if want := `invalid boolean value "no"`; !strings.Contains(stderr.String(), want) {
 		t.Errorf("stderr = %q, want it to contain %q", stderr.String(), want)
+	}
+}
+
+// stubSecretCmd stubs secretCmdRunner to record the commands it is asked to
+// run, and sets globalSecretCmdTemplate. The returned func yields the commands
+// recorded so far.
+func stubSecretCmd(t *testing.T, template string, run func(cmd string) (string, error)) func() []string {
+	t.Helper()
+	origRunner, origTemplate := secretCmdRunner, globalSecretCmdTemplate
+	t.Cleanup(func() { secretCmdRunner, globalSecretCmdTemplate = origRunner, origTemplate })
+	globalSecretCmdTemplate = template
+	var ran []string
+	secretCmdRunner = func(cmd string) (string, error) {
+		ran = append(ran, cmd)
+		return run(cmd)
+	}
+	return func() []string { return ran }
+}
+
+// useConnectorCredential installs one github backend row whose credential env
+// is SHADOW_TEST_TOKEN with every form of it unset, with github the active
+// backend, and stubs secretCmdRunner.
+func useConnectorCredential(t *testing.T, template string, run func(cmd string) (string, error)) func() []string {
+	t.Helper()
+	useShadowRow(t, "")
+	setKnob(t, "CODE_FORGE", "github")
+	setKnob(t, "ISSUE_TRACKER", "github")
+	return unsetCredential(t, template, run)
+}
+
+// unsetCredential unsets every form of SHADOW_TEST_TOKEN and stubs
+// secretCmdRunner.
+func unsetCredential(t *testing.T, template string, run func(cmd string) (string, error)) func() []string {
+	t.Helper()
+	t.Setenv("SHADOW_TEST_TOKEN", "")
+	t.Setenv("SHADOW_TEST_TOKEN_CMD", "")
+	return stubSecretCmd(t, template, run)
+}
+
+func failingVault(string) (string, error) { return "", errors.New("vault: no such item") }
+
+// useCredentialRows installs the rows of doc with SHADOW_TEST_TOKEN unset, and
+// stubs secretCmdRunner with run.
+func useCredentialRows(t *testing.T, doc, template string, run func(cmd string) (string, error)) func() []string {
+	t.Helper()
+	t.Cleanup(backendrows.Snapshot())
+	if err := backendrows.Use([]byte(doc), func(string) string { return "" }); err != nil {
+		t.Fatal(err)
+	}
+	return unsetCredential(t, template, run)
+}
+
+func credentialRowDoc(name, extra string) string {
+	return `[{"name":"` + name + `","module":"/nonexistent.wasm","credentialEnv":"SHADOW_TEST_TOKEN",
+"routes":[{"method":"GET","host":"` + name + `.example","path":"/x"}]` + extra + `}]`
+}
+
+// A non-shadow row whose adapter does not read through it (jira until its
+// cut-over) must not fetch or fail on the credential, even when its backend is
+// the active tracker.
+func TestApplyConnectorCredentials_TemplateSkipsUnroutedRow(t *testing.T) {
+	ran := useCredentialRows(t, credentialRowDoc("jira", ""), "vault get {name}", failingVault)
+	setKnob(t, "ISSUE_TRACKER", "jira")
+	if err := applyConnectorCredentials(); err != nil {
+		t.Fatal(err)
+	}
+	if got := ran(); len(got) != 0 {
+		t.Errorf("runner called: %q", got)
+	}
+}
+
+func TestApplyConnectorCredentials_TemplateSkipsInactiveBackend(t *testing.T) {
+	ran := useCredentialRows(t, credentialRowDoc("github", `,"shadow":true,"shadowEvery":3`), "vault get {name}", failingVault)
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "ISSUE_TRACKER", "jira")
+	if err := applyConnectorCredentials(); err != nil {
+		t.Fatal(err)
+	}
+	if got := ran(); len(got) != 0 {
+		t.Errorf("runner called: %q", got)
+	}
+}
+
+func TestApplyConnectorCredentials_TemplateRunsForShadowedRow(t *testing.T) {
+	ran := useCredentialRows(t, credentialRowDoc("jira", `,"shadow":true,"shadowEvery":3`), "vault get {name}", failingVault)
+	setKnob(t, "ISSUE_TRACKER", "jira")
+	err := applyConnectorCredentials()
+	if err == nil || !strings.Contains(err.Error(), "SHADOW_TEST_TOKEN") {
+		t.Fatalf("err = %v, want the template failure naming the env var", err)
+	}
+	if want := []string{"vault get shadow-test-token"}; !reflect.DeepEqual(ran(), want) {
+		t.Errorf("ran %q, want %q", ran(), want)
+	}
+}
+
+func TestApplyConnectorCredentials_ExplicitCmdRunsForInactiveRow(t *testing.T) {
+	ran := useCredentialRows(t, credentialRowDoc("jira", ""), "", failingVault)
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "ISSUE_TRACKER", "local")
+	t.Setenv("SHADOW_TEST_TOKEN_CMD", "vault get tok")
+	if err := applyConnectorCredentials(); err == nil {
+		t.Fatal("expected the failing explicit command to be fatal")
+	}
+	if want := []string{"vault get tok"}; !reflect.DeepEqual(ran(), want) {
+		t.Errorf("ran %q, want %q", ran(), want)
+	}
+}
+
+// The first row sharing an env is not needed, so it must not claim the env.
+func TestApplyConnectorCredentials_SharedEnvTemplateRunsForNeededRow(t *testing.T) {
+	doc := `[{"name":"jira","module":"/nonexistent.wasm","credentialEnv":"SHADOW_TEST_TOKEN",
+"routes":[{"method":"GET","host":"jira.example","path":"/a"}]},
+{"name":"github","module":"/nonexistent.wasm","credentialEnv":"SHADOW_TEST_TOKEN",
+"routes":[{"method":"GET","host":"github.example","path":"/b"}]}]`
+	ran := useCredentialRows(t, doc, "vault get {name}", func(string) (string, error) { return "tok", nil })
+	setKnob(t, "CODE_FORGE", "github")
+	setKnob(t, "ISSUE_TRACKER", "jira")
+	if err := applyConnectorCredentials(); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"vault get shadow-test-token"}; !reflect.DeepEqual(ran(), want) {
+		t.Errorf("ran %q, want %q", ran(), want)
+	}
+}
+
+func TestApplyConnectorCredentials_CmdEnvRuns(t *testing.T) {
+	ran := useConnectorCredential(t, "", func(string) (string, error) { return "from-cmd\n", nil })
+	t.Setenv("SHADOW_TEST_TOKEN_CMD", "vault get tok")
+	if err := applyConnectorCredentials(); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("SHADOW_TEST_TOKEN"); got != "from-cmd" {
+		t.Errorf("SHADOW_TEST_TOKEN = %q, want from-cmd", got)
+	}
+	if !reflect.DeepEqual(ran(), []string{"vault get tok"}) {
+		t.Errorf("ran %q", ran())
+	}
+}
+
+func TestApplyConnectorCredentials_CmdWinsOverPlain(t *testing.T) {
+	useConnectorCredential(t, "", func(string) (string, error) { return "from-cmd", nil })
+	t.Setenv("SHADOW_TEST_TOKEN", "plain")
+	t.Setenv("SHADOW_TEST_TOKEN_CMD", "vault get tok")
+	if err := applyConnectorCredentials(); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("SHADOW_TEST_TOKEN"); got != "from-cmd" {
+		t.Errorf("SHADOW_TEST_TOKEN = %q, want from-cmd", got)
+	}
+}
+
+func TestApplyConnectorCredentials_PlainWinsOverTemplate(t *testing.T) {
+	ran := useConnectorCredential(t, "vault get {name}", func(string) (string, error) { return "from-template", nil })
+	t.Setenv("SHADOW_TEST_TOKEN", "plain")
+	if err := applyConnectorCredentials(); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("SHADOW_TEST_TOKEN"); got != "plain" {
+		t.Errorf("SHADOW_TEST_TOKEN = %q, want plain", got)
+	}
+	if len(ran()) != 0 {
+		t.Errorf("runner called: %q", ran())
+	}
+}
+
+func TestApplyConnectorCredentials_TemplateFillsUnset(t *testing.T) {
+	ran := useConnectorCredential(t, "vault get {name}", func(string) (string, error) { return "from-template", nil })
+	if err := applyConnectorCredentials(); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("SHADOW_TEST_TOKEN"); got != "from-template" {
+		t.Errorf("SHADOW_TEST_TOKEN = %q, want from-template", got)
+	}
+	if !reflect.DeepEqual(ran(), []string{"vault get shadow-test-token"}) {
+		t.Errorf("ran %q", ran())
+	}
+}
+
+func TestApplyConnectorCredentials_FailureNamesEnvNotCommand(t *testing.T) {
+	useConnectorCredential(t, "", func(string) (string, error) {
+		return "", exec.Command("sh", "-c", "exit 3").Run()
+	})
+	t.Setenv("SHADOW_TEST_TOKEN_CMD", "vault get hunter2-item")
+	err := applyConnectorCredentials()
+	if err == nil {
+		t.Fatal("expected error for a failing command")
+	}
+	if !strings.Contains(err.Error(), "SHADOW_TEST_TOKEN") {
+		t.Errorf("error should name the env var, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "hunter2-item") {
+		t.Errorf("error leaks the command, got: %v", err)
+	}
+}
+
+func TestApplyConnectorCredentials_NeitherSetRunsNothing(t *testing.T) {
+	ran := useConnectorCredential(t, "", func(string) (string, error) { return "x", nil })
+	if err := applyConnectorCredentials(); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("SHADOW_TEST_TOKEN"); got != "" {
+		t.Errorf("SHADOW_TEST_TOKEN = %q, want unset", got)
+	}
+	if len(ran()) != 0 {
+		t.Errorf("runner called: %q", ran())
+	}
+}
+
+func TestApplyConnectorCredentials_SharedEnvRunsOnce(t *testing.T) {
+	ran := useConnectorCredential(t, "", func(string) (string, error) { return "from-cmd", nil })
+	doc := `[{"name":"a","module":"/nonexistent.wasm","credentialEnv":"SHADOW_TEST_TOKEN",
+"routes":[{"method":"GET","host":"a.example","path":"/a"}]},
+{"name":"b","module":"/nonexistent.wasm","credentialEnv":"SHADOW_TEST_TOKEN",
+"routes":[{"method":"GET","host":"b.example","path":"/b"}]}]`
+	if err := backendrows.Use([]byte(doc), func(string) string { return "" }); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHADOW_TEST_TOKEN_CMD", "vault get tok")
+	if err := applyConnectorCredentials(); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(ran(), []string{"vault get tok"}) {
+		t.Errorf("ran %q, want one run", ran())
 	}
 }

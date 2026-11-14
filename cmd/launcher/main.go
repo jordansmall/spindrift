@@ -2399,8 +2399,12 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return configErrorCode(verb, int(exitcode.ConfigInvalid))
 	}
 	launcherInput = resolved
-	// Runs after launcherInput is in place: CODE_FORGE and ISSUE_TRACKER may be
-	// set through the document alone.
+	// Both run after launcherInput is in place: CODE_FORGE and ISSUE_TRACKER may
+	// be set through the document alone.
+	if err := applyConnectorCredentials(); err != nil {
+		fmt.Fprintf(stderr, "%s\n", err)
+		return 1
+	}
 	if err := applySecretCmdFallback(); err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
