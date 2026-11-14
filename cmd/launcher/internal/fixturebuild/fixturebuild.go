@@ -24,6 +24,9 @@ const (
 	// is the flake package that builds it (issue #7013).
 	connectorHostEnvVar = "SPINDRIFT_CONNECTOR_HOST"
 	connectorHostAttr   = "connector-host"
+	// escapeHostEnvVar names the escape-probe host binary, laid out as
+	// <dir>/bin/connector-host.
+	escapeHostEnvVar = "SPINDRIFT_CONNECTOR_HOST_ESCAPEPROBE"
 	// escapeHostAttr and escapeImageAttr are the flake packages of the
 	// escape-probe host and its sandbox image (issue #7017).
 	escapeHostAttr  = "connector-host-escapeprobe"
@@ -154,33 +157,40 @@ var ConnectorHost = sync.OnceValues(func() (string, error) {
 type buildOutcome struct{ path, skipReason string }
 
 // escapeBuild is <out>/<rel> of the nix-built escape-probe flake package attr.
-// Unlike ConnectorHost it has no env override: only nix builds the escapeprobe
-// tag, and a host without nix skips the escape tests instead of failing them.
-func escapeBuild(attr, rel string) (buildOutcome, error) {
-	built, skip, err := ResolveBuild("", "", func(root string) []string {
+// A host without nix skips the escape tests instead of failing them. envVar
+// and hint name the override a skip reason offers; empty for an attr with none.
+func escapeBuild(attr, rel, envVar, hint string) (buildOutcome, error) {
+	built, skip, err := ResolveBuild(envVar, hint, func(root string) []string {
 		return []string{root + "#" + attr}
 	})
 	if err != nil {
 		return buildOutcome{}, err
 	}
 	if skip != "" {
-		return buildOutcome{skipReason: "nix is not on PATH; it builds the escape-probe " + attr}, nil
+		if envVar == "" {
+			skip = "nix is not on PATH"
+		}
+		return buildOutcome{skipReason: skip + "; it builds the escape-probe " + attr}, nil
 	}
 	return buildOutcome{path: filepath.Join(built, rel)}, nil
 }
 
 var escapeConnectorHost = sync.OnceValues(func() (buildOutcome, error) {
-	return escapeBuild(escapeHostAttr, filepath.Join("bin", "connector-host"))
+	if bin := os.Getenv(escapeHostEnvVar); bin != "" {
+		return buildOutcome{path: bin}, nil
+	}
+	return escapeBuild(escapeHostAttr, filepath.Join("bin", "connector-host"), escapeHostEnvVar, "the escape-probe connector-host binary")
 })
 
 var escapeSandboxImage = sync.OnceValues(func() (buildOutcome, error) {
-	return escapeBuild(escapeImageAttr, "")
+	return escapeBuild(escapeImageAttr, "", "", "")
 })
 
 // EscapeConnectorHost returns the connector-host built with the escapeprobe
 // tag (issue #7017): host primitives a sandbox escape test drives to prove a
-// containment boundary holds. A non-empty skipReason means nix is absent.
-// Computed once per test binary.
+// containment boundary holds. $SPINDRIFT_CONNECTOR_HOST_ESCAPEPROBE names the
+// binary when set (a nix build sandbox has no flake to build from). A non-empty
+// skipReason means nix is absent. Computed once per test binary.
 func EscapeConnectorHost() (path, skipReason string, err error) {
 	r, err := escapeConnectorHost()
 	return r.path, r.skipReason, err
