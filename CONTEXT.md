@@ -711,8 +711,9 @@ schema (ADR 0073). _Avoid_: plugin host, sandbox (that is the Box's runner).
 
 **Connector sandbox**:
 An empty container, started by the runner that starts Boxes, that hosts the
-Connector host so a runtime escape lands with nothing to steal: no mounts, no
-network, no credentials. `http_request` crosses back to the Launcher, which
+Connector host so a runtime escape lands with nothing to steal: no mounts beyond
+the read-only host binary, no network, no credentials. The Launcher sends the
+module and receives each `http_request` over the sandbox's attached stdio, and
 still enforces the Route table. Required before any third-party Connector runs
 (ADR 0073). _Avoid_: Box (that is the agent's container), plugin jail.
 
