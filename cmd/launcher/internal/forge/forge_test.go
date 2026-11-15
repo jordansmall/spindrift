@@ -778,3 +778,124 @@ func TestRateLimitError_MatchesSentinelAndCarriesReset(t *testing.T) {
 		t.Errorf("bare Error() = %q", got)
 	}
 }
+
+func TestRenderFailureDetail_ErrorLinesFromEarlierInTheLog(t *testing.T) {
+	log := "ts pkg> boom.go:9: error: the decisive cause\n" +
+		"ts pkg> --- FAIL: TestEarly (0.1s)\n" +
+		strings.Repeat("padding line of test output\n", 400) +
+		"last line\n"
+
+	t.Run("an error line behind the tail is kept under its own notice", func(t *testing.T) {
+		got := forge.RenderFailureDetail([]forge.FailureDetailEntry{{Name: "build", State: "FAILURE", Log: log}})
+		for _, want := range []string{
+			`[error lines from earlier in the log for "build"]`,
+			"error: the decisive cause\n",
+			"--- FAIL: TestEarly",
+			`[log excerpt for "build" trimmed`,
+			"last line",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("missing %q in:\n%s", want, got)
+			}
+		}
+		if strings.Contains(got, "ts pkg> padding") {
+			t.Errorf("kept ordinary lines from the log's head:\n%s", got)
+		}
+	})
+
+	t.Run("the excerpt stays within the cap", func(t *testing.T) {
+		noisy := strings.Repeat("ts pkg> error: noisy failure line\n", 400) + strings.Repeat("padding\n", 2000) + "last line\n"
+		got := forge.RenderFailureDetail([]forge.FailureDetailEntry{{Name: "build", State: "FAILURE", Log: noisy}})
+		// The error lines, their notice, and the tail share the cap; only the
+		// entry header, the trim notice, and the separator add to it.
+		overhead := len("build: FAILURE\n") + len("---\n") +
+			len(fmt.Sprintf("[log excerpt for %q trimmed to its last %d bytes or fewer]\n", "build", forge.MaxLogExcerptBytes))
+		if len(got) > forge.MaxLogExcerptBytes+overhead {
+			t.Errorf("len(got) = %d, want the excerpt within %d plus %d of header and notice", len(got), forge.MaxLogExcerptBytes, overhead)
+		}
+		if !strings.Contains(got, "last line") {
+			t.Errorf("lost the log's tail:\n%s", got)
+		}
+	})
+
+	t.Run("without an earlier error line there is no extra notice", func(t *testing.T) {
+		quiet := strings.Repeat("padding line of test output\n", 400) + "last line\n"
+		got := forge.RenderFailureDetail([]forge.FailureDetailEntry{{Name: "build", State: "FAILURE", Log: quiet}})
+		if strings.Contains(got, "error lines from earlier") {
+			t.Errorf("unexpected error-lines notice:\n%s", got)
+		}
+	})
+}
+
+// An error line inside the full-cap tail window but outside the shrunk tail
+// that shares the cap with the earlier lines must not fall between the two.
+func TestRenderFailureDetail_ErrorLineInTheGapBetweenSectionsIsKept(t *testing.T) {
+	early := strings.Repeat("ts pkg> error: early cause line padded out to a hundred bytes or so ........\n", 14)
+	log := early +
+		strings.Repeat("padding line of test output\n", 200) +
+		"ts pkg> --- FAIL: TestMid\n" +
+		strings.Repeat("padding line of test output\n", 110) +
+		"last line\n"
+	got := forge.RenderFailureDetail([]forge.FailureDetailEntry{{Name: "build", State: "FAILURE", Log: log}})
+	for _, want := range []string{"error lines from earlier", "--- FAIL: TestMid", "last line"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+// The tail reaches back past the half-cap window when the error lines take
+// little room; a line it shows must not also print under the error notice.
+func TestRenderFailureDetail_ErrorLineShownInTheTailIsNotRepeated(t *testing.T) {
+	early := strings.Repeat("ts pkg> error: early cause line padded out to a hundred bytes or so ........\n", 14)
+	log := early +
+		strings.Repeat("padding line of test output\n", 200) +
+		"ts pkg> --- FAIL: TestGap\n" +
+		strings.Repeat("padding line of test output\n", 85) +
+		"last line\n"
+	got := forge.RenderFailureDetail([]forge.FailureDetailEntry{{Name: "build", State: "FAILURE", Log: log}})
+	if n := strings.Count(got, "--- FAIL: TestGap"); n != 1 {
+		t.Errorf("TestGap line printed %d times, want once:\n%s", n, got)
+	}
+	if !strings.Contains(got, "error lines from earlier") {
+		t.Errorf("lost the early error lines:\n%s", got)
+	}
+}
+
+// An early error line too long for the error-line budget is skipped, and the
+// only other error line sits inside the tail; with nothing left to print the
+// error-lines notice is dropped and the tail gets the full cap back.
+func TestRenderFailureDetail_NoticeReportsFullCapWhenEveryEarlyErrorLineIsInTheTail(t *testing.T) {
+	log := "error: " + strings.Repeat("x", 3000) + "\n" +
+		strings.Repeat("padding line of test output\n", 60) +
+		"--- FAIL: TestInTail\n" +
+		strings.Repeat("padding line of test output\n", 90) +
+		"last line\n"
+	got := forge.RenderFailureDetail([]forge.FailureDetailEntry{{Name: "build", State: "FAILURE", Log: log}})
+	if strings.Contains(got, "error lines from earlier") {
+		t.Errorf("printed an error-lines notice with nothing to list:\n%s", got)
+	}
+	if want := fmt.Sprintf("last %d bytes or fewer", forge.MaxLogExcerptBytes); !strings.Contains(got, want) {
+		t.Errorf("missing %q in:\n%s", want, got)
+	}
+	if !strings.Contains(got, "--- FAIL: TestInTail") {
+		t.Errorf("lost the in-tail error line:\n%s", got)
+	}
+}
+
+// Many incidental early errors overflow the error-line budget; the earliest
+// win, since the first error is usually the cause and later ones cascade.
+func TestRenderFailureDetail_EarliestErrorLinesWinTheBudget(t *testing.T) {
+	var log strings.Builder
+	for i := 0; i < 200; i++ {
+		fmt.Fprintf(&log, "ts pkg> error: cascade %03d\n", i)
+	}
+	log.WriteString(strings.Repeat("padding line of test output\n", 200) + "last line\n")
+	got := forge.RenderFailureDetail([]forge.FailureDetailEntry{{Name: "build", State: "FAILURE", Log: log.String()}})
+	if !strings.Contains(got, "cascade 000\n") {
+		t.Errorf("lost the earliest error line:\n%s", got)
+	}
+	if strings.Contains(got, "cascade 199\n") {
+		t.Errorf("kept a late error line over the earliest:\n%s", got)
+	}
+}

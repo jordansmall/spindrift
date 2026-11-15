@@ -345,10 +345,22 @@ func testFailureDetailOnFailingCheck(t *testing.T, h PRForgeReadHarness) {
 	}
 
 	// The log's head and tail are distinguishable and it is over the cap, so
-	// only an excerpt that keeps the tail passes.
+	// only an excerpt that keeps the tail and the early error line passes.
+	// Each early line exercises one alternative of the error-line pattern the
+	// native adapter and the Connector SDK each carry a copy of, and the decoy
+	// matches none, so drift in either copy fails the contract on that harness.
 	const loggedNum = "291"
 	loggedURL := h.SeedOpenPR(loggedNum)
-	log := "HEAD-OF-LOG\n" + strings.Repeat("padding line of test output\n", 400) + "--- FAIL: TestX\nTAIL-OF-LOG\n"
+	const earlyError = "error: experimental Nix feature 'nix-command' is disabled"
+	earlyMatches := []string{
+		earlyError,
+		"--- FAIL: TestEarly",
+		"panic: boom",
+		"Error: mixed-case report",
+	}
+	const earlyDecoy = "FAILURES: 0 errors, fail soft, Panic: capital, no panic raised"
+	log := "HEAD-OF-LOG\n" + strings.Join(earlyMatches, "\n") + "\n" + earlyDecoy + "\n" +
+		strings.Repeat("padding line of test output\n", 400) + "--- FAIL: TestX\nTAIL-OF-LOG\n"
 	if len(log) <= 2*forge.MaxLogExcerptBytes {
 		t.Fatalf("contract log is %d bytes, want over twice the %d-byte excerpt cap", len(log), forge.MaxLogExcerptBytes)
 	}
@@ -360,6 +372,14 @@ func testFailureDetailOnFailingCheck(t *testing.T, h PRForgeReadHarness) {
 	}
 	if !strings.Contains(detail, "--- FAIL: TestX\nTAIL-OF-LOG") {
 		t.Errorf("FailureDetail(%q) = %q, want the tail of the failing job's log", loggedURL, detail)
+	}
+	for _, line := range earlyMatches {
+		if !strings.Contains(detail, line) {
+			t.Errorf("FailureDetail(%q) = %q, want the error line %q from before the tail window", loggedURL, detail, line)
+		}
+	}
+	if strings.Contains(detail, earlyDecoy) {
+		t.Errorf("FailureDetail(%q) = %q, kept the early line %q that is no error line", loggedURL, detail, earlyDecoy)
 	}
 	if strings.Contains(detail, "HEAD-OF-LOG") {
 		t.Errorf("FailureDetail(%q) = %q, kept the head of a log over the excerpt cap", loggedURL, detail)

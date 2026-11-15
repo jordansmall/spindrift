@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -317,7 +318,8 @@ const (
 const MaxFailureDetailBytes = 12000
 
 // MaxLogExcerptBytes bounds the slice of one failing job's log that
-// RenderFailureDetail keeps; failures print last, so it keeps the tail.
+// RenderFailureDetail keeps; failures print last, so it keeps the tail, plus
+// the error lines from earlier in the log (see errorLineRE) within that bound.
 const MaxLogExcerptBytes = 4000
 
 // JobLogKeepBytes is the tail of a job log an adapter hands the renderer: over
@@ -325,10 +327,53 @@ const MaxLogExcerptBytes = 4000
 // says it trimmed, yet bounded however long the job ran.
 const JobLogKeepBytes = 2 * MaxLogExcerptBytes
 
+// errorLineRE matches a log line that names a failure: a go test or nix check
+// FAIL, a panic, or an "error:" report. It is unanchored because GitHub
+// prefixes every line with a timestamp and nix -L with a "name> " tag. The
+// decisive error often sits well before the log's end, behind more output
+// than the tail keeps.
+var errorLineRE = regexp.MustCompile(`\bFAIL\b|\bpanic:|(?i:\berror:)`)
+
+// errorLines returns the whole, newline-terminated lines of s that match
+// errorLineRE, in order, up to budget bytes. It keeps the earliest lines, as
+// the first error is usually the cause and later ones cascade. A line that no
+// longer fits is skipped, so a giant line cannot crowd out the rest.
+func errorLines(s string, budget int) string {
+	var b strings.Builder
+	for {
+		i := strings.IndexByte(s, '\n')
+		if i < 0 {
+			break
+		}
+		line := s[:i+1]
+		s = s[i+1:]
+		if len(line) <= budget && errorLineRE.MatchString(line) {
+			b.WriteString(line)
+			budget -= len(line)
+		}
+	}
+	return b.String()
+}
+
+// hasErrorLine reports whether s holds any whole line errorLineRE matches.
+func hasErrorLine(s string) bool {
+	for {
+		i := strings.IndexByte(s, '\n')
+		if i < 0 {
+			return false
+		}
+		if errorLineRE.MatchString(s[:i+1]) {
+			return true
+		}
+		s = s[i+1:]
+	}
+}
+
 // TailBuffer is an io.Writer that keeps at least the last JobLogKeepBytes
-// written to it, so a job log can be streamed without being held whole. The
-// zero value is ready to use.
-type TailBuffer struct{ buf []byte }
+// written to it, so a job log can be streamed without being held whole, plus
+// the error lines (errorLineRE) of the head it dropped, up to
+// MaxLogExcerptBytes. The zero value is ready to use.
+type TailBuffer struct{ buf, errs []byte }
 
 // Write appends p and drops older bytes once the buffer doubles. It never fails.
 func (t *TailBuffer) Write(p []byte) (int, error) {
@@ -336,14 +381,23 @@ func (t *TailBuffer) Write(p []byte) (int, error) {
 	// Trim only once the buffer doubles, so a run of small writes does not
 	// copy on every call.
 	if len(t.buf) > 2*JobLogKeepBytes {
-		t.buf = bytes.Clone(t.buf[len(t.buf)-JobLogKeepBytes:])
+		cut := len(t.buf) - JobLogKeepBytes
+		// Cut after a newline so the dropped lines are scanned whole.
+		if i := bytes.LastIndexByte(t.buf[:cut], '\n'); i >= 0 {
+			cut = i + 1
+		}
+		t.errs = append(t.errs, errorLines(string(t.buf[:cut]), MaxLogExcerptBytes-len(t.errs))...)
+		t.buf = bytes.Clone(t.buf[cut:])
 	}
 	return len(p), nil
 }
 
-// String is the retained tail: everything written while that is under
-// 2*JobLogKeepBytes, else between JobLogKeepBytes and 2*JobLogKeepBytes bytes.
-func (t *TailBuffer) String() string { return string(t.buf) }
+// String is the error lines of the dropped head followed by the retained tail:
+// everything written while that is under 2*JobLogKeepBytes, else at least
+// JobLogKeepBytes of tail. A trim backs off to the last newline before its
+// cut, so with a newline only near the buffer's start it keeps up to one write
+// more than 2*JobLogKeepBytes; the next write then cuts hard.
+func (t *TailBuffer) String() string { return string(t.errs) + string(t.buf) }
 
 // FailureDetailEntry is one failing check or status, normalized from an
 // adapter's native shape into the fields RenderFailureDetail formats.
@@ -372,11 +426,12 @@ const minLogExcerptBytes = 400
 // summaries are capped (MaxNameBytes, MaxSummaryBytes); the room
 // MaxFailureDetailBytes leaves beyond the headers is split evenly across the
 // entries that have a log, each capped at MaxLogExcerptBytes, so every job
-// keeps the tail of its log where the error is. A trimmed excerpt says so,
-// naming its job and the cap it got. When the entries cannot all fit with at
-// least minLogExcerptBytes per log, the trailing ones are omitted whole and a
-// closing line names the first and counts them. Callers must filter entries
-// down to failing ones first.
+// keeps the tail of its log where the error is, preceded by any error lines
+// (errorLineRE) from before that tail, which share the cap. A trimmed excerpt
+// says so, naming its job and the cap it got. When the entries cannot all fit
+// with at least minLogExcerptBytes per log, the trailing ones are omitted
+// whole and a closing line names the first and counts them. Callers must
+// filter entries down to failing ones first.
 func RenderFailureDetail(entries []FailureDetailEntry) string {
 	const sep = "---\n"
 	names := make([]string, len(entries))
@@ -434,10 +489,37 @@ func RenderFailureDetail(entries []FailureDetailEntry) string {
 			// Tail the log without its trailing whitespace so a whitespace-only
 			// last excerptCap bytes cannot leave the excerpt empty; the notice
 			// still tracks the delivered length.
-			excerpt := logTail(strings.TrimRightFunc(log, unicode.IsSpace), excerptCap)
+			trimmed := strings.TrimRightFunc(log, unicode.IsSpace)
+			tailCap := excerptCap
 			if len(log) > excerptCap {
-				b.WriteString(excerptNotice(names[i], excerptCap))
+				// Error lines come from before the window a full-cap tail
+				// would show; when there are none, nothing changes. Otherwise
+				// they stop short of the half-cap window, which the tail
+				// (never under half the cap) always covers, so no error line
+				// is lost between the two sections.
+				notice := errorLinesNotice(names[i])
+				errBudget := excerptCap/2 - len(notice)
+				if hasErrorLine(trimmed[:len(trimmed)-len(logTail(trimmed, excerptCap))]) {
+					before := trimmed[:len(trimmed)-len(logTail(trimmed, excerptCap-excerptCap/2))]
+					if errs := errorLines(before, errBudget); errs != "" {
+						tailCap -= len(notice) + len(errs)
+						// The tail may reach back past the half-cap window; drop
+						// the lines it now shows so none prints twice. With none
+						// left the notice is dropped and the tail takes the full
+						// cap back; it holds the reduced tail, so no line is lost.
+						// Otherwise tailCap stays as computed: "or fewer" keeps
+						// its notice true.
+						if errs = errorLines(trimmed[:len(trimmed)-len(logTail(trimmed, tailCap))], errBudget); errs != "" {
+							b.WriteString(notice)
+							b.WriteString(errs)
+						} else {
+							tailCap = excerptCap
+						}
+					}
+				}
+				b.WriteString(excerptNotice(names[i], tailCap))
 			}
+			excerpt := logTail(trimmed, tailCap)
 			b.WriteString(strings.TrimSpace(excerpt))
 			b.WriteString("\n")
 		}
@@ -451,6 +533,10 @@ func RenderFailureDetail(entries []FailureDetailEntry) string {
 
 func excerptNotice(name string, n int) string {
 	return fmt.Sprintf("[log excerpt for %q trimmed to its last %d bytes or fewer]\n", name, n)
+}
+
+func errorLinesNotice(name string) string {
+	return fmt.Sprintf("[error lines from earlier in the log for %q]\n", name)
 }
 
 func omitNotice(first string, n int) string {

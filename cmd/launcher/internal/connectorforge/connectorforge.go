@@ -101,6 +101,7 @@ type (
 		Target Target `json:"target"`
 		JobID  string `json:"jobId"`
 		Tail   int    `json:"tail"`
+		Errors int    `json:"errorLines"`
 	}
 )
 
@@ -357,8 +358,9 @@ func (t *reads) FailureDetail(prURL string) (string, error) {
 // jobLog reads the tail of one job's log, or "" for no job, a Connector without
 // forge.jobLog, or any failed read: the log only enriches a detail that is
 // already in hand, and a caller treats an error as no detail at all. The guest
-// is asked for a tail of forge.JobLogKeepBytes so a long log never crosses the
-// output cap.
+// is asked for a tail of forge.JobLogKeepBytes, preceded by up to
+// forge.MaxLogExcerptBytes of the dropped head's error lines, so a long log
+// never crosses the output cap.
 //
 // The budget is checked before the call rather than carried as its context
 // deadline: a deadline expiring mid-call closes the Connector, costing every
@@ -370,7 +372,7 @@ func (t *reads) jobLog(deadline time.Time, jobID string) string {
 	var res struct {
 		Log string `json:"log"`
 	}
-	p := jobLogParams{t.target, jobID, forge.JobLogKeepBytes}
+	p := jobLogParams{t.target, jobID, forge.JobLogKeepBytes, forge.MaxLogExcerptBytes}
 	if err := t.call(context.Background(), "forge.jobLog", p, &res); err != nil {
 		return ""
 	}
