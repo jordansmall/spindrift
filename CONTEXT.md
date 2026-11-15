@@ -736,8 +736,17 @@ _Avoid_: bundled backend (every first-party backend is bundled), core adapter.
 **Shadow mode**:
 A migration stage in which the native implementation stays authoritative and
 its Connector processes the same inputs alongside, with every divergence
-recorded; a Connector cuts over after 20 consecutive dogfood runs with none
-(ADR 0073). _Avoid_: canary, dry run.
+recorded; a Connector moves to Primary mode after 20 consecutive dogfood runs
+with none (ADR 0073). _Avoid_: canary, dry run.
+
+**Primary mode**:
+The migration stage after Shadow mode, in which the Connector answers every
+read the native backend would, with no fallback: a Connector failure or audit
+refusal is recorded and fails the read. Writes stay native. Dropping the row's
+`primary` option restores the native reads; the native path is deleted
+(cut-over) after 20 consecutive dogfood runs with no Connector read error and
+no refusal (ADR 0073). _Avoid_: cut-over (the later deletion of the native
+path), promotion.
 
 **Connector protocol**:
 The versioned contract between the Connector host and Connectors: the
