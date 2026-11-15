@@ -61,6 +61,9 @@ type Row struct {
 	// call per read operation. ShadowEvery is required with Shadow.
 	Shadow      bool `json:"shadow,omitempty"`
 	ShadowEvery int  `json:"shadowEvery,omitempty"`
+	// Primary makes the Connector answer this backend's reads in place of the
+	// native adapter of the same name; writes stay native. Refused with Shadow.
+	Primary bool `json:"primary,omitempty"`
 }
 
 // BaseHost is the Route host that stands for the host of the row's BaseEnv URL.
@@ -152,8 +155,8 @@ const unsetHost = "unset.invalid"
 // resolves against unsetHost and the caller drops it. A Consumer importing every
 // Connector need not configure a tracker it does not use, and the row shares the
 // native adapter's base knob, which accepts plain http, so it must not fail a
-// Consumer that does not read through the Connector yet; a Shadow row opted in,
-// so every base error stands.
+// Consumer that does not read through the Connector yet; a Shadow or Primary row
+// opted in, so every base error stands.
 func resolveBase(row Row, lookup func(string) string) (_ Row, unconfigured bool, _ error) {
 	uses := func(routes []connectorhost.Route) bool {
 		return slices.ContainsFunc(routes, func(r connectorhost.Route) bool { return r.Host == BaseHost })
@@ -190,7 +193,7 @@ func resolveBase(row Row, lookup func(string) string) (_ Row, unconfigured bool,
 		err = fmt.Errorf("backend %q: %s must have a canonical path", row.Name, row.BaseEnv)
 	}
 	if err != nil {
-		if row.Shadow {
+		if row.Shadow || row.Primary {
 			return row, false, err
 		}
 		u, prefix, unconfigured = &url.URL{Scheme: "https", Host: unsetHost}, "", true
@@ -251,6 +254,8 @@ func validate(row Row, seen map[string]bool) error {
 		return fmt.Errorf("backend %q: the basic credentialScheme needs an identityEnv", row.Name)
 	case row.CredentialScheme != SchemeBasic && row.IdentityEnv != "":
 		return fmt.Errorf("backend %q: identityEnv applies only to the basic credentialScheme", row.Name)
+	case row.Primary && row.Shadow:
+		return fmt.Errorf("backend %q: primary and shadow are exclusive", row.Name)
 	case row.ShadowEvery < 0:
 		return fmt.Errorf("backend %q has a negative shadowEvery", row.Name)
 	case row.ShadowEvery > 0 && !row.Shadow:
