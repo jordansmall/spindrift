@@ -11,6 +11,9 @@
 # (GOTELEMETRY=off does not stop it) and an unsandboxed build's default
 # /homeless-shelter must stay absent or Nix's HOME guard fails every later
 # build (issue #6009).
+# NIX_CONF_DIR pins any real `nix` a check runs: an unsandboxed Box build reads
+# /etc/nix/nix.conf, which a sandboxed CI builder lacks, so the same call would
+# pass in one and fail in the other (issue #7083).
 ''
   export GOPROXY=off
   export GOFLAGS=-mod=vendor
@@ -18,6 +21,10 @@
   export GOMODCACHE="$TMPDIR/gomodcache"
   export GOCACHE="$TMPDIR/gocache"
   export HOME="$TMPDIR/home"
+  mkdir -p "$TMPDIR/nix-conf"
+  echo "experimental-features = nix-command flakes" >"$TMPDIR/nix-conf/nix.conf"
+  export NIX_CONF_DIR="$TMPDIR/nix-conf"
+  export NIX_USER_CONF_FILES=
   export CGO_ENABLED=0
   export GOMAXPROCS="''${NIX_BUILD_CORES:-0}"
   [ "$GOMAXPROCS" != 0 ] || GOMAXPROCS=4
