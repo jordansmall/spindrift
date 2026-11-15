@@ -52,7 +52,8 @@ The question was grilled on 2026-11-09. Specs #6750–#6759 carry the work.
    pins a Connector's content.
 4. **Outputs are untrusted.** Every result is schema-checked and size-capped,
    and text is handled like issue comments. A Connector that traps, exhausts its
-   budget or exceeds its memory fails closed with a named error.
+   budget (its own work; see the #7097 amendment) or exceeds its memory fails
+   closed with a named error.
 5. **The contract is translation primitives; core owns policy.** A method
    enters the Connector protocol only if answering it needs the backend's API.
    Moving into core:
@@ -581,10 +582,10 @@ is its own authority), under the same body cap, except that a body over the cap
 keeps its tail rather than failing the call (an oversized body is fatal to the
 Connector, and the tail of a log is the useful part). The audit line records the
 target as `redirect_host`. The hop asks for the tail with a `Range` suffix and is
-bounded to half the call's remaining budget, failing non-fatally (not killing
-the Connector) past it. `Route.String` shows the opt-in, so the Route-table
-diff `spindrift doctor` prints, and a baseline that lacks it, count it as a
-widening.
+bounded to half of what remains of the request's network timeout, failing
+non-fatally (not killing the Connector) past it. `Route.String` shows the
+opt-in, so the Route-table diff `spindrift doctor` prints, and a baseline that
+lacks it, count it as a widening.
 
 ## Amendment (issue #6863): a composed PR forge lets the Connector write PRs
 
@@ -860,3 +861,43 @@ runs, and primary cuts over (#6811, which deletes the native github read path)
 after 20 consecutive dogfood runs with zero Connector read errors and zero audit
 refusals. The reference's Backend primary mode section has the recipe. A `driver`
 row gets the same stage with #6999; until then eval refuses `primary` on one.
+
+## Amendment (issue #7097): a backend call's budget covers its own work, not GitHub's latency
+
+The #7091 Filer dedup scan reads 500 closed issues with their bodies, about
+3 MB over 5 pages. Decoding that alone needs more than the 5 s call budget
+under the interpreter (4 to 11 s per MiB), so a correct Connector failed
+closed on a correctly answered read. The budget had been charging the guest
+for time it spent waiting on GitHub and had no allowance for the bytes the
+host handed back.
+
+The bases are unchanged (30 s `_initialize`, 5 s handshake, 5 s plus 60 s per
+MiB of request for a method call), but the clock now measures guest work:
+
+- It stops while the guest is blocked in a host `http_request`, in-process and
+  under the Connector sandbox alike (the Launcher and the sandbox's own engine
+  each pause their budget, so the two paths agree).
+- Each `http_request`'s response bytes credit the budget at the same 60 s per
+  MiB, up to 32 MiB of responses per call (`maxResponseCredit`, at most 32
+  minutes).
+- Each `http_request` has a 60 s network timeout (`httpRequestTimeout`)
+  covering the send, a followed redirect hop and the body read. A timeout is a
+  plain send failure: the guest gets the status-0 send-failure reply, the
+  Connector stays usable, and the audit entry's reason names the timeout. A
+  redirect hop gets half of what remains of that timeout, or of the caller's
+  deadline if sooner.
+- One call may make at most 128 `http_request`s (`maxHTTPRequests`); the 129th
+  is refused and fails the call closed with `ErrHTTPRequestLimit`.
+
+Each bound exists because of another. wazero has no instruction budget, so
+wall-clock on guest time stays the only CPU bound, which is why the clock is
+paused for the wait rather than the budget being raised. A paused clock alone
+would let a guest buy unbounded wall-clock by issuing requests, hence the
+request cap; the credit cap keeps the guest-time bound finite however much the
+host delivers. A looping guest is still bounded: CPU time by the base, the
+request allowance and at most 32 minutes of response credit, network wait by
+128 times 60 s. The worst-case wall clock of one call is therefore 5 s plus 32
+minutes of credit plus 128 minutes of network wait, about 2 h 40 min (8 minutes
+more for a request at the 8 MiB cap). With this, the dedup scan completes in
+about 7 s under the interpreter
+(`TestConnector_DedupScanOf500IssuesFitsUnderTheInterpreter`).

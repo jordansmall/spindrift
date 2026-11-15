@@ -2944,10 +2944,10 @@ divergence on such mutable fields against timing before blaming the Connector.
 Shadow mode never fails a run. A Connector that cannot be loaded, a request its
 Route table refuses, and a Connector that fails closed or panics each end the
 shadow with an `error` in the summary, and the native path carries on. So does a
-request that outlives the Connector's per-call time budget (5 seconds plus a
-little per request byte), which cancels the in-flight request and fails the
-Connector. A rate limit also records an `error`, and suspends the shadow for
-the rest of the run, so it adds no load once GitHub pushes back; a plain 403
+request that outlives its 60-second network timeout; that is a send failure,
+not a fault, so the Connector stays usable and the audit entry names the
+timeout in its `reason`. A rate limit also records an `error`, and suspends the
+shadow for the rest of the run, so it adds no load once GitHub pushes back; a plain 403
 only counts toward `forbidden`. At the end of a run the launcher waits up to 30
 seconds for queued calls, then aborts the Connector and writes the summary.
 
@@ -3155,11 +3155,28 @@ This is protocol version **0.3.0**. The host is
   HTTP status to one, and an error with no class reports `permanent`.
 - **Limits.** Every call into the module runs under a wall-clock budget:
   30 seconds for `_initialize`, 5 seconds for the handshake, and one budget
-  shared by a call's `connector_alloc` and `connector_call`. Module memory is
-  capped: a declared minimum above 64 MiB is refused at load, and growth past
-  the cap fails the call. A method call's limits grow with its request, since
-  a correct Connector's time, memory and output grow with its input: its
-  budget is 5 seconds plus 60 seconds per MiB of request, its memory cap
+  shared by a call's `connector_alloc` and `connector_call`. The budget
+  measures guest work, not the backend's latency: its clock stops while the
+  guest is blocked in a host `http_request` (in-process, and under the
+  Connector sandbox, where the Launcher and the sandbox's own engine each
+  pause theirs), and each `http_request`'s response bytes add 60 seconds per
+  MiB to what is left, since the guest must decode them, up to 32 MiB of
+  responses per call (at most 32 minutes of credit). The network wait is
+  bounded instead, per request: each `http_request` has a 60-second timeout
+  covering the send, a followed redirect hop and the body read. A request
+  past it is a send failure, never a budget overrun: the guest gets the
+  status-0 send-failure reply, the Connector stays usable, and the audit
+  entry's `reason` names the timeout. One call may make at most 128
+  `http_request`s; the 129th is refused and fails the call closed with
+  `ErrHTTPRequestLimit` ("connector call exceeded its http_request limit"),
+  so a looping guest is bounded in CPU time by the budget and in network wait
+  by 128 times 60 seconds, so one call's worst-case wall clock is 5 seconds
+  plus 32 minutes of credit plus 128 minutes of network wait, about 2 hours
+  40 minutes (8 minutes more for a request at the 8 MiB cap). Module memory
+  is capped: a declared minimum above 64 MiB is refused at load, and growth
+  past the cap fails the call. A method call's limits grow with its request,
+  since a correct Connector's time, memory and output grow with its input:
+  its budget is 5 seconds plus 60 seconds per MiB of request, its memory cap
   64 MiB plus 16 bytes per request byte, and its response cap 8 MiB plus 6
   bytes per request byte (a `\u00XX` escape is the most one byte becomes).
   The handshake sends no request and gets these bases. The host encodes a
@@ -3288,8 +3305,9 @@ This is protocol version **0.3.0**. The host is
   whose canonical, unescaped path a route admits. It attaches the credential
   itself, never follows a redirect (unless the route sets `followRedirect`:
   GET only, one hop, sent without the credential or the guest's headers,
-  asking for the tail with a `Range` suffix and bounded to half the call's
-  remaining budget, failing non-fatally past it; the target host in the audit
+  asking for the tail with a `Range` suffix and bounded to half of what
+  remains of that request's 60-second timeout (or of the caller's deadline, if
+  sooner), failing non-fatally past it; the target host in the audit
   `redirect_host`), and caps the body at 4 MiB (or `respCap`, if smaller;
   a `followRedirect` route keeps the last bytes of a larger body instead
   of failing). An unmatched or malformed request is refused unsent with
@@ -3588,8 +3606,8 @@ This is protocol version **0.3.0**. The host is
   naming the Connector's version, core's range and core's own version. A
   module that is not valid wasm, imports something ungranted, declares sizes
   over the caps above, lacks the export or the `memory` export, has the wrong
-  signature, returns malformed JSON or runs past its time budget or the
-  caller's context deadline fails the handshake instead, and the error also
+  signature, returns malformed JSON or runs past its time budget (its own
+  work, not its network waits) or the caller's context deadline fails the handshake instead, and the error also
   matches `ErrHandshake`.
 - **Go SDK.** Module `spindrift.dev/sdk` under [`sdk/`](../sdk/), separate
   from the launcher module. A Connector calls `connector.Register(capabilities...)`
