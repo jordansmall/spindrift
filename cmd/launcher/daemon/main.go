@@ -946,13 +946,25 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// A Connector-routed tracker row's probe reads its credential from this
+	// process's env. Resolved ahead of the check-only return so a successor's
+	// smoke test also catches a missing or failing credential.
+	refreshConnectorCreds, err := resolveConnectorCredentials(doc, args.Kinds, stderr)
+	if err != nil {
+		return refuse(err)
+	}
+
 	// Stops before the lock and preflight: a freshly built successor
 	// smoke-tests itself this way beside the live daemon, which holds the lock.
-	// Keep it ahead of the demand build and token watcher too; no test can
-	// observe the watcher's goroutine.
+	// Keep it ahead of the demand build and token watchers too; only the
+	// Connector credential watcher has a test seam.
 	if args.CheckOnly {
 		fmt.Fprintln(stderr, "daemon: check-only: input and config are valid")
 		return 0
+	}
+
+	if refreshConnectorCreds != nil {
+		startConnectorCredentialWatch(refreshConnectorCreds, connectorCredentialRefresh)
 	}
 
 	// Built from the daemon's own resolved knobs, per kind row, once the

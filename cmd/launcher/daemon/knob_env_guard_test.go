@@ -23,10 +23,9 @@ import (
 // literal here, and clearKnobEnvT covers them by recording the keys the
 // registered Strategies read. backendRowSetting resolves the knob a backend
 // row names as its baseEnv: the row names its own knob, so the key is not
-// literal, and there is no registered set to record. The exemption covers
-// only the plain package-level func's own direct body — not a method of the
-// same name (see fd.Recv below), and not a func literal nested inside it,
-// which gets no exemption either.
+// literal, and there is no registered set to record. The exemption covers only the plain package-level
+// func's own direct body — not a method of the same name (see fd.Recv below),
+// and not a func literal nested inside it, which gets no exemption either.
 var knobEnvGuardAllowlist = map[string]string{
 	"warnStrippedChildEnv": "os.Getenv",
 	"childEnvValue":        "os.Getenv",
