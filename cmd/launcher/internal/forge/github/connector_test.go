@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -41,6 +42,7 @@ type restIssue struct {
 	body       string
 	labels     []string
 	blockedBy  []string
+	blocks     []string
 	failNative bool
 	// unlabeled names the labels removed from the issue, oldest first.
 	unlabeled []string
@@ -183,6 +185,10 @@ func (b *restBackend) serve(w http.ResponseWriter, r *http.Request) {
 		b.graphql(w, r, reject)
 		return
 	}
+	if r.URL.Path == "/search/issues" {
+		b.search(w, r, reject)
+		return
+	}
 	if b.serveWrite(w, r, reject) {
 		return
 	}
@@ -230,6 +236,18 @@ func (b *restBackend) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		deps := []map[string]any{}
 		for _, id := range i.blockedBy {
+			n, _ := strconv.Atoi(id)
+			deps = append(deps, map[string]any{"number": n})
+		}
+		writeJSON(w, deps)
+	case len(parts) == 3 && parts[1] == "dependencies" && parts[2] == "blocking":
+		i := b.find(parts[0])
+		if i == nil {
+			reject("no such issue")
+			return
+		}
+		deps := []map[string]any{}
+		for _, id := range i.blocks {
 			n, _ := strconv.Atoi(id)
 			deps = append(deps, map[string]any{"number": n})
 		}
@@ -791,6 +809,7 @@ func TestConnector_Contracts(t *testing.T) {
 		t.Run("Tracker", func(t *testing.T) { forgetest.RunTrackerReadContract(t, h) })
 		t.Run("PRForge", func(t *testing.T) { forgetest.RunPRForgeReadContract(t, h) })
 		t.Run("JobLogExcerpt", func(t *testing.T) { testJobLogExcerpt(t, h) })
+		t.Run("BlocksAndSearch", func(t *testing.T) { testBlocksAndSearch(t, h) })
 
 		// REST reports no minimized state, so the Connector must not attest
 		// comments; they stay on the native adapter.
@@ -943,5 +962,74 @@ func testJobLogExcerpt(t *testing.T, h *connectorHarness) {
 	}
 	if !redirected {
 		t.Errorf("audit lacks a sent log read with a followed redirect:\n%s", h.audit)
+	}
+}
+
+var (
+	searchLabelRE = regexp.MustCompile(`label:"([^"]*)"`)
+	searchTermRE  = regexp.MustCompile(`(?:^|\s)"([^"]*)"`)
+)
+
+// search answers the Connector's issue search: it checks the repo-scoped query
+// shape and matches the quoted terms against title and body.
+func (b *restBackend) search(w http.ResponseWriter, r *http.Request, reject func(string)) {
+	q := r.URL.Query()
+	text := q.Get("q")
+	if r.Method != http.MethodGet || !strings.HasPrefix(text, "repo:"+connectorRepo+" is:issue state:open ") {
+		reject("not a repo-scoped open issue search")
+		return
+	}
+	label := ""
+	if m := searchLabelRE.FindStringSubmatch(text); m != nil {
+		label = m[1]
+	}
+	var nums []int
+	for n := range b.issues {
+		nums = append(nums, n)
+	}
+	sort.Ints(nums)
+	var out []any
+	for _, n := range nums {
+		i := b.issues[n]
+		hit := !i.pull && (label == "" || hasLabel(i.labels, label))
+		for _, m := range searchTermRE.FindAllStringSubmatch(strings.ReplaceAll(text, `label:"`+label+`"`, ""), -1) {
+			hit = hit && strings.Contains(strings.ToLower(i.title+" "+i.body), strings.ToLower(m[1]))
+		}
+		if hit {
+			out = append(out, wireIssue(i))
+		}
+	}
+	writeJSON(w, map[string]any{"items": page(q, out)})
+}
+
+func (h *connectorHarness) SeedBlocks(num string, ids []string) {
+	h.mutate(num, func(i *restIssue) { i.blocks = ids })
+}
+
+// testBlocksAndSearch drives the Connector's blocks and issue-search reads
+// through the launcher's tracker view; the search route has no other user.
+func testBlocksAndSearch(t *testing.T, h *connectorHarness) {
+	h.SeedIssue(forge.Issue{Number: "810", Title: "flaky unit test", Labels: []string{"agent-review-finding"}})
+	h.SeedIssue(forge.Issue{Number: "811", Title: "other", Body: "mentions the flaky one"})
+	h.SeedBlocks("810", []string{"811"})
+
+	bl, ok := forge.As[forge.BlockersLister](h.tr)
+	if !ok {
+		t.Fatal("Connector tracker does not serve BlocksOf")
+	}
+	if got, err := bl.BlocksOf("810"); err != nil || len(got) != 1 || got[0].ID != "811" {
+		t.Errorf("BlocksOf = %v, %v; want [811]", got, err)
+	}
+	s, ok := forge.As[forge.IssueSearcher](h.tr)
+	if !ok {
+		t.Fatal("Connector tracker does not serve SearchIssues")
+	}
+	got, err := s.SearchIssues("flaky", forge.IssueOpen, "", 10)
+	if err != nil || len(got) != 2 {
+		t.Errorf("SearchIssues(flaky) = %v, %v; want 810 and 811", got, err)
+	}
+	got, err = s.SearchIssues("flaky", forge.IssueOpen, "agent-review-finding", 10)
+	if err != nil || len(got) != 1 || got[0].Number != "810" {
+		t.Errorf("SearchIssues(flaky, label) = %v, %v; want 810", got, err)
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -263,5 +264,106 @@ func TestRemovedLabelsFailsOnNon2xxAndBadNumber(t *testing.T) {
 	n := len(*got)
 	if _, err := removedLabels(tgt, "../x"); err == nil || len(*got) != n {
 		t.Errorf("bad number err = %v, requests %d -> %d; want refusal without a request", err, n, len(*got))
+	}
+}
+
+func TestBlocks(t *testing.T) {
+	got := stub(t, map[string]connector.Response{
+		"https://api.github.com/repos/o/r/issues/5/dependencies/blocking?per_page=100&page=1": ok(`[{"number":9},{"number":4}]`),
+	})
+	ids, err := blocks(tgt, "5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(ids, []string{"9", "4"}) || len(*got) != 1 {
+		t.Fatalf("ids = %v, requests = %d", ids, len(*got))
+	}
+	if _, err := blocks(tgt, "1/../x"); err == nil {
+		t.Fatal("bad number: want error")
+	}
+}
+
+// searchQuery returns the decoded q parameter of a /search/issues request.
+func searchQuery(t *testing.T, rawURL string) string {
+	t.Helper()
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Path != "/search/issues" {
+		t.Fatalf("url = %q, err = %v", rawURL, err)
+	}
+	return u.Query().Get("q")
+}
+
+func TestSearch(t *testing.T) {
+	var reqs []string
+	old := send
+	send = func(r connector.Request) (connector.Response, error) {
+		reqs = append(reqs, r.URL)
+		return ok(`{"items":[
+			{"number":3,"title":"a","body":"b","state":"open","labels":[{"name":"l"}]},
+			{"number":4,"title":"pr","state":"open","labels":[],"pull_request":{}},
+			{"number":5,"title":"c","state":"open","labels":[]}]}`), nil
+	}
+	t.Cleanup(func() { send = old })
+	issues, err := search(tgt, "  foo   bar ", "open", "a b", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []tracker.Issue{
+		{Number: "3", Title: "a", State: "open", Labels: []string{"l"}},
+		{Number: "5", Title: "c", State: "open", Labels: []string{}},
+	}
+	if !reflect.DeepEqual(issues, want) {
+		t.Fatalf("issues = %#v", issues)
+	}
+	if len(reqs) != 1 {
+		t.Fatalf("requests = %v", reqs)
+	}
+	const q = `repo:o/r is:issue state:open label:"a b" "foo" "bar" in:title,body`
+	if got := searchQuery(t, reqs[0]); got != q {
+		t.Fatalf("q = %q, want %q", got, q)
+	}
+	issues, err = search(tgt, "x", "closed", "", 1)
+	if err != nil || len(issues) != 1 {
+		t.Fatalf("issues = %v, err = %v", issues, err)
+	}
+	if got := searchQuery(t, reqs[1]); got != `repo:o/r is:issue state:closed "x" in:title,body` {
+		t.Fatalf("q = %q", got)
+	}
+}
+
+func TestSearchPages(t *testing.T) {
+	n := 0
+	old := send
+	send = func(connector.Request) (connector.Response, error) {
+		n++
+		return ok(`{"items":` + items(n*100, 100, false) + `}`), nil
+	}
+	t.Cleanup(func() { send = old })
+	issues, err := search(tgt, "x", "open", "", 150)
+	if err != nil || len(issues) != 150 || n != 2 {
+		t.Fatalf("len = %d, requests = %d, err = %v", len(issues), n, err)
+	}
+}
+
+func TestSearchRefusesUnsafeInputWithoutRequest(t *testing.T) {
+	cases := []struct{ text, state, label string }{
+		{`a" repo:x/y`, "open", ""},
+		{`a\`, "open", ""},
+		{"a\nb", "open", ""},
+		{"a", "open", `l" is:pr`},
+		{"   ", "open", ""},
+		{"a", "all", ""},
+	}
+	for _, c := range cases {
+		got := stub(t, nil)
+		if _, err := search(tgt, c.text, c.state, c.label, 5); err == nil {
+			t.Errorf("search(%+v): no error", c)
+		}
+		if len(*got) != 0 {
+			t.Errorf("search(%+v): sent %d requests", c, len(*got))
+		}
+	}
+	if _, err := search(tgt, "a", "open", "", 0); err == nil {
+		t.Error("limit 0: no error")
 	}
 }
