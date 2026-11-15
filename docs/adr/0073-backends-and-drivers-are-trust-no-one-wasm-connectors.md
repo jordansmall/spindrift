@@ -834,3 +834,29 @@ amendment's Decode row and its claim that the guest runs slower inside the
 sandbox. Its Load, Start and Host-call rows were timed in the same blocks and
 are not re-checked here. The benchmark header now gives the interleaved
 recipe.
+
+## Amendment (issue #6998): primary mode sits between shadow and cut-over
+
+Decision 13's "each shadow cuts over after 20 consecutive clean dogfood runs"
+becomes shadow, then primary, then cut-over. A shadow compares a sample and
+leaves the native result authoritative, so it never shows what the Connector
+does once the host depends on it: the reads a shadow skipped, the call volume of
+a daemon that relies on the answers, a load failure that the native path
+absorbs. Deleting the native path on shadow evidence alone would be the first
+time anything depended on the Connector.
+
+Primary mode is the row option `spindrift.connectors.<name>.primary`, off by
+default and exclusive with `shadow`. The Connector answers every read the native
+backend would, so cut-over (#6811) can delete the native read path; writes stay
+native. There is no fallback to the native read. A failure that fell back would be invisible, so
+a Connector that fails to load, or a request its Route table refuses, fails the
+read with its own error and is recorded: a per-process
+`primary-<backend>-<stamp>-<pid>.audit.jsonl` of Connector audit lines and a
+`.log` of failed reads. The stage is reversible by dropping `primary` from the
+row, with no code revert, and dogfood runs github there first.
+
+The bars become: a shadow moves to primary after 20 consecutive clean shadow
+runs, and primary cuts over (#6811, which deletes the native github read path)
+after 20 consecutive dogfood runs with zero Connector read errors and zero audit
+refusals. The reference's Backend primary mode section has the recipe. A `driver`
+row gets the same stage with #6999; until then eval refuses `primary` on one.
