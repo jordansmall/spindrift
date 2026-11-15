@@ -192,3 +192,30 @@ func TestRemoteResultThatRacesTheBudgetIsABudgetFailure(t *testing.T) {
 		t.Fatalf("err = %v, want ErrBudget for a result that arrived after the budget", err)
 	}
 }
+
+// The sandbox's own engine refuses the request past maxHTTPRequests first, so
+// only a host that skips that check reaches the Launcher's count: the bound that
+// remains when the sandbox host is compromised.
+func TestRemoteHostPastTheHTTPRequestLimitFailsTheCallBeforeTheNetwork(t *testing.T) {
+	host := &stubHost{}
+	e := &remoteEngine{
+		host: host,
+		link: scriptedLink(t, func(r io.Reader, w io.Writer) {
+			expect(t, r, kindCall)
+			for range maxHTTPRequests {
+				send(t, w, kindHTTPRequest, u32(64), []byte(`{}`))
+				expect(t, r, kindReply)
+			}
+			send(t, w, kindHTTPRequest, u32(64), []byte(`{}`))
+			expect(t, r, kindReplyFatal)
+			send(t, w, kindFailure, []byte{byte(slices.Index(failureSentinels, errRemoteHostCall))}, []byte("host call failed"))
+		}),
+	}
+	_, err := e.call(context.Background(), []byte(`{"method":"m"}`))
+	if !errors.Is(err, ErrHTTPRequestLimit) {
+		t.Fatalf("err = %v, want ErrHTTPRequestLimit", err)
+	}
+	if host.calls != maxHTTPRequests {
+		t.Fatalf("backend served %d requests, want %d: request %d must not reach it", host.calls, maxHTTPRequests, maxHTTPRequests+1)
+	}
+}

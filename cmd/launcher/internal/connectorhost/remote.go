@@ -203,8 +203,8 @@ func (e *remoteEngine) exchange(ctx context.Context, name string, lim limits, ki
 			m.hop.Add(int64(time.Since(start) - served))
 		}()
 	}
-	ctx, cancel := context.WithTimeoutCause(ctx, lim.budget, ErrBudget)
-	defer cancel()
+	ctx, b := newBudget(ctx, lim.budget)
+	defer b.close()
 	// A frame read cannot be interrupted, so the host is killed when ctx ends.
 	stop := context.AfterFunc(ctx, e.abort)
 	defer stop()
@@ -251,7 +251,7 @@ func (e *remoteEngine) exchange(ctx context.Context, name string, lim limits, ki
 		case kindHTTPRequest:
 			e.countHostCall()
 			handled := time.Now()
-			err = e.serveHTTPRequest(ctx, payload, &hostErr)
+			err = e.serveHTTPRequest(ctx, b, payload, &hostErr)
 			served += time.Since(handled)
 		case kindRefuse:
 			e.countHostCall()
@@ -268,7 +268,7 @@ func (e *remoteEngine) exchange(ctx context.Context, name string, lim limits, ki
 // serveHTTPRequest answers one http_request frame through the Host-call
 // handler. A fatal handler error is kept in hostErr and the host told to
 // unwind; err is only a stream or protocol failure.
-func (e *remoteEngine) serveHTTPRequest(ctx context.Context, payload []byte, hostErr *error) error {
+func (e *remoteEngine) serveHTTPRequest(ctx context.Context, b *budget, payload []byte, hostErr *error) error {
 	if e.host == nil {
 		return fmt.Errorf("%w: http_request without a grant", ErrMalformedOutput)
 	}
@@ -276,7 +276,7 @@ func (e *remoteEngine) serveHTTPRequest(ctx context.Context, payload []byte, hos
 	if err != nil {
 		return err
 	}
-	status, body, header, herr := e.host.httpRequest(ctx, raw, bufCap)
+	status, body, header, herr := b.httpRequest(ctx, e.host, raw, bufCap)
 	if herr != nil {
 		*hostErr = herr
 		return writeFrame(e.link.w, kindReplyFatal)
