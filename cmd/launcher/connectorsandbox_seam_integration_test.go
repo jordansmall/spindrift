@@ -469,9 +469,9 @@ func sandboxDoc(t *testing.T, docPath, module string, shadow bool, artifacts map
 }
 
 // bwrapSandboxArtifacts points the bwrap fixture's connector-host and syscall
-// filter at local files. The fixture names real store paths that a sandboxed
-// check build lacks, and a missing connector-host sends the launcher to a real
-// `nix build` that cannot run there.
+// filter at local files. The fixture names absent sentinel store paths, in a
+// Box as in CI, and a missing connector-host sends the launcher to `nix build`
+// its sentinel drv.
 func bwrapSandboxArtifacts(t *testing.T, host string) map[string]string {
 	t.Helper()
 	pkg := t.TempDir()
