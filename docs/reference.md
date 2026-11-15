@@ -2304,16 +2304,22 @@ is the fixture Connector in
   modules' files. Each row takes a single definition, so a Consumer cannot
   adjust a Connector's row additively; overriding it is `lib.mkForce` on the
   whole row.
-  The one exception is `shadow` (issues #6797, #6810): a definition that sets
-  only `spindrift.connectors.<name>.shadow = true` (and optionally
-  `shadowEvery`) is a Consumer's switch on the registered row, not a second
-  registration. With it on, the native Strategy or backend of the same name
-  stays authoritative. A `driver` row must name a core Driver and carry a
-  `module`; the Box replays each Pass log through it and records divergences.
-  A `backend` row samples every `shadowEvery`th read (default 10, minimum 1)
-  per operation through its Connector instead. A row with neither is refused.
-  spindrift's own dogfood is a pinned exception to mimicking a new Consumer: it
-  shadows the Connectors in `nix/dogfood-shadow.nix` until cut-over.
+  The exceptions are `shadow` (issues #6797, #6810) and `primary` (issue
+  #6998): a definition that sets only `spindrift.connectors.<name>.shadow =
+  true` (and optionally `shadowEvery`), or only `primary = true`, is a
+  Consumer's switch on the registered row, not a second registration. With
+  `shadow` on, the native Strategy or backend of the same name stays
+  authoritative. A `driver` row must name a core Driver and carry a `module`;
+  the Box replays each Pass log through it and records divergences. A
+  `backend` row samples every `shadowEvery`th read (default 10, minimum 1) per
+  operation through its Connector instead. With `primary` on, the Connector
+  answers every read the native backend would, with no fallback
+  (see [Backend primary mode](#backend-primary-mode)); a `driver` row cannot be
+  primary until #6999. `shadow` and `primary` are exclusive, and a row with
+  neither a `driver` nor a `backend` is refused. spindrift's own dogfood is a pinned
+  exception to mimicking a new Consumer: it shadows the Connectors in
+  `nix/dogfood-shadow.nix` and runs those in `nix/dogfood-primary.nix` as
+  primary, each until cut-over.
 - **Row-owned knobs.** A row's `knobs` attrset has the shape of a core row's
   (ADR 0068), keyed by env-schema key with an env-schema entry as value. The
   knobs fold into `spindrift.envSchema` on top of lib/env-schema.nix. Only that
@@ -2594,9 +2600,11 @@ row without it accepts nothing.
 #### The github Connector
 
 `connectors/github` is the github backend's tracker and forge read paths as a
-network Connector: it serves `tracker.listIssues`, `tracker.issue` and
-`tracker.nativeDeps` over GitHub REST, and `forge.prsForBranch`, `forge.pr` and
-`forge.checks` over REST plus one GraphQL rollup query, through `http_request`;
+network Connector: it serves `tracker.listIssues`, `tracker.issue`,
+`tracker.nativeDeps`, `tracker.blocks`, `tracker.searchIssues` and
+`tracker.labeled` over GitHub REST, `tracker.comments` over GraphQL, and
+`forge.prsForBranch`, `forge.pr`, `forge.checks` and `forge.ciRun` over REST plus
+one GraphQL rollup query, through `http_request`;
 the host attaches the credential. It also serves the forge branch and PR
 primitives (open, merge, compare, comment, branch lookup and delete, branch
 protection), declared as protocol 0.3.x, through eight further write-half
@@ -2609,39 +2617,44 @@ ride `POST /issues` (label add, comment, issue filing) and `POST /graphql`
 `DELETE /issues/{n}/labels/{name}`, whose escaped `/` in a name such as
 `agent/ready` the host refuses), plus two more routes: `GET` and `POST /labels`.
 Its read Route table is four routes on `api.github.com`: `GET
-/repos/{repo}/issues` (the list, issue and `dependencies/blocked_by` reads),
-`GET /repos/{repo}/pulls` (branch lookup, one PR), `POST /graphql` (the check
-rollup) and `GET /repos/{repo}/actions/jobs` (a failing job's log,
-`forge.jobLog`, for the fix pass's `CI FAILURE` detail; issue #6893). The last
-sets `followRedirect`, because GitHub answers a log read with a 302 to a
-pre-signed blob URL on a host that varies; the host follows that one hop with
-no credential, and doctor shows the opt-in as `(follows redirect)` on the
-route. One more read route, `GET /installation/repositories`, is not pinned to
-`{repo}`: it serves an App installation token's push permission to the
-read-only gate, and it lets any load of the Connector list every repository
-the installation reaches, with its permissions. The subtree-only Route model
+/repos/{repo}/issues` (the list, issue, `dependencies/blocked_by` and
+`blocking` reads), `GET /repos/{repo}/pulls` (branch lookup, one PR), `POST
+/graphql` (the check rollup, the CI run link and the issue comments) and `GET
+/repos/{repo}/actions/jobs` (a failing job's log, `forge.jobLog`, for the fix
+pass's `CI FAILURE` detail; issue #6893). The last sets `followRedirect`,
+because GitHub answers a log read with a 302 to a pre-signed blob URL on a host
+that varies; the host follows that one hop with no credential, and doctor shows
+the opt-in as `(follows redirect)` on the route. Two more read routes are not
+pinned to `{repo}`. `GET /installation/repositories` serves an App installation
+token's push permission to the read-only gate, and it lets any load of the
+Connector list every repository the installation reaches, with its permissions.
+`GET /search/issues` serves the issue search; a Route restricts no query string,
+so its path cannot name `{repo}`, which is acceptable because the route is
+read-only and the Connector always adds a `repo:` qualifier, quoting the
+caller's text so it cannot add one. The subtree-only Route model
 (ADR 0047) makes the table the narrowest, not an exact one: `/issues` also
 admits `GET /issues/comments/*` and `/issues/events`, and `/actions/jobs`
 every other GET under it, none of which a read uses; a Route restricts no
 body, so `POST /graphql` admits any GraphQL document, mutations included, and
-no Route can pin it to the repository: the Connector sends the rollup,
-repository-identity and token-grant queries, the draft-flip and auto-merge
-mutations, and the label-id query and removal mutation there (issues #6808,
-#6881, #6882). The write roots over-admit too: `POST /pulls` also admits
+no Route can pin it to the repository: the Connector sends the rollup, the
+issue-comments query, repository-identity and token-grant queries, the
+draft-flip and auto-merge mutations, and the label-id query and removal
+mutation there (issues
+#6808, #6881, #6882). The write roots over-admit too: `POST /pulls` also admits
 review and review-comment creation, and `PUT /pulls` update-branch. It skips
 pull requests in the REST issues list.
 
-It does not advertise `tracker.comments`: REST reports no minimized state, and
-a Connector that advertises the capability attests that it reports each
-comment's `minimized` faithfully. Comments therefore stay on the native
-adapter (GraphQL), which drops a maintainer-minimized comment. The native
-github adapter stays authoritative for dispatch reads and every write. The
-same holds for the forge reads: the Connector serves
-`OpenPRForBranch`, `PRForBranch`, `PRState`, `CheckState` and `FailureDetail`;
-`Mergeable`, `HeadCommitSHA`, `NeedsUpdate`, `ListPRFiles`, `CanAutoMerge` and
-every write stay native. The Connector is held to the tracker read contract
-(`forgetest.RunTrackerReadContract`, with a `StateSeeder` standing in for the
-writes a read-only tracker lacks) and the PR forge read contract
+It advertises `tracker.comments`, read over GraphQL because REST reports no
+minimized state: a Connector that advertises the capability attests that it
+reports each comment's `minimized` faithfully, so the launcher still drops a
+maintainer-minimized comment. Outside primary mode the native github adapter
+stays authoritative for every read and write; the forge reads the Connector
+serves (`OpenPRForBranch`, `PRForBranch`, `PRState`, `CheckState`,
+`FailureDetail`, the CI run link, `Mergeable`, `HeadCommitSHA`, `NeedsUpdate`,
+`ListPRFiles` and `CanAutoMerge`) are sampled by shadow mode or answered under
+primary mode, and every write stays native. The Connector is held to the tracker
+read contract (`forgetest.RunTrackerReadContract`, with a `StateSeeder` standing
+in for the writes a read-only tracker lacks) and the PR forge read contract
 (`forgetest.RunPRForgeReadContract`), which the Connector's subflake check
 `connector-<backend>-conformance` runs against it, through
 `SPINDRIFT_BACKEND_CONNECTOR_WASM` and `SPINDRIFT_BACKEND_CONNECTOR_ROUTES`. Its
@@ -2731,9 +2744,10 @@ the row's entry in the launcher input document's `backends` as `shadow` and
 `spindrift.connectors.<name>.shadowEvery` (default 10; `mkHarness` refuses a
 value below 1, or either field without the other). The github Connector's row
 reads with the host-only `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`. spindrift's own
-dogfood shadows the Connectors listed in `nix/dogfood-shadow.nix`, a pinned
-exception to mimicking a new Consumer; its accepted github Route table is
-baselined in `spindrift-connector-routes.json`.
+dogfood shadows the Connectors listed in `nix/dogfood-shadow.nix` and runs
+those in `nix/dogfood-primary.nix` (github) as primary, a pinned exception to
+mimicking a new Consumer; its accepted github Route table is baselined in
+`spindrift-connector-routes.json`.
 
 ##### Driver replay
 
@@ -2808,8 +2822,8 @@ crash or reboot, once the daemon is known to be down, rerun the recipe with
 fetched from CI with `gh run download` have all ended, so for them set
 `finished=1`: every log then counts as finished, an unended Pass or a missing
 summary counts dirty, and a satellite fetched without its primary is not
-skipped. Each shadow cuts over after 20 consecutive clean dogfood runs. The
-recipe counts them from the newest log back, with `logs` the directory of Pass
+skipped. A Driver shadow moves on to primary mode (#6999) after 20 consecutive clean
+dogfood runs. The recipe counts them from the newest log back, with `logs` the directory of Pass
 logs (`.spindrift/logs`, or a directory of artifacts fetched with `gh run
 download <run-id> -n agent-logs-<issue> -D logs`). It orders logs by the
 instant the `started` stamp in each log's `dispatch_start` names, UTC offset
@@ -2851,7 +2865,7 @@ done | LC_ALL=C sort -r | awk -F'\t' '
   $2 == "skip" { next }
   $2 != "clean" { exit }
   { n++ }
-  END { print n + 0, "consecutive clean runs (cut-over bar: 20)" }'
+  END { print n + 0, "consecutive clean runs (primary bar: 20)" }'
 ```
 
 Pass logs mix Driver JSON with host ops and may hold lines that are not JSON;
@@ -2968,8 +2982,8 @@ summary dirty. On the live host a reused pid of a dead launcher still reads as
 in flight, which skips a dirty run instead of counting it. `kill -0` also fails
 when the recipe runs as a different user from the launcher, so every live
 launcher's log reads as ended and counts dirty; run it as the daemon's user.
-The github shadow cuts over after 20 consecutive clean dogfood runs. The recipe
-counts them from the newest log back, with `logs` as above, and orders runs by
+The github shadow moved to primary mode after 20 consecutive clean dogfood
+runs. The recipe counts them from the newest log back, with `logs` as above, and orders runs by
 the UTC stamp in the file name, since `gh run download` resets file times and
 the stamp sorts lexically:
 
@@ -2991,6 +3005,81 @@ for f in "$logs"/shadow-"$backend"-*.log; do
          and all($sums[]; .loaded and (.error // "") == "" and .compared > 0
                           and .diverged == 0 and (.forbidden // 0) == 0)
       then "clean" else "dirty" end' "$f")
+  printf '%s\t%s\n' "$stamp" "$verdict"
+done | sort -r | awk -F'\t' '
+  $2 == "skip" { next }
+  $2 != "clean" { exit }
+  { n++ }
+  END { print n + 0, "consecutive clean runs (primary bar: 20)" }'
+```
+
+##### Backend primary mode
+
+A backend row with `primary` on (issue #6998) makes its Connector answer every
+read the native backend would, in every launcher process that builds the adapter
+(dispatch, research, the daemon, recover and doctor). Today that is the github
+row, on dogfood through `nix/dogfood-primary.nix`. Writes stay native. No read
+stays on `gh` except `Rebase`'s head and base branch lookup, which is part of
+that write (the Connector's PR read carries no base branch) and stays until
+cut-over (#6811) deletes the native path. Primary and
+shadow are exclusive, so a primary row samples nothing; evaluation refuses the two together, a
+`driver` row (until #6999), a row without a `backend`, and a name with no native
+backend, each naming the row.
+
+There is no fallback. A Connector that fails to load, or a request its Route
+table refuses, fails the read with the Connector's own error and the caller
+handles it as it would a `gh` failure. That is the point of the stage: a
+failure that a fallback would hide is counted instead. It reads with the same
+host-only `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` as the shadow, and the same
+read-only scope list applies. Dropping the github name from
+`nix/dogfood-primary.nix`, or `primary` from the row, restores the native reads
+with no code revert; the `primary = true` on the github mirror row in
+`nix/fixtures.nix` moves with it, or `connector-driver-rows-dogfood-shadows`
+fails.
+
+Each launcher process writes its own record pair under `.spindrift/logs/`, the
+directory CI uploads, once it makes its first primary read (a daemon writes one
+pair for its whole life). The stem is `primary-<backend>-<UTC stamp>-<pid>`,
+with the stamp as `20060102T150405Z`:
+
+- `<stem>.audit.jsonl` holds the Connector's [audit lines](#connector-protocol),
+  token introspection's included. `"decision":"refused"` marks a request the
+  Route table refused.
+- `<stem>.log` gets one JSON line, `{"op":"<verb>","error":"<err>"}`, per
+  failed routed read (`op` is the read's verb, such as `count demand`), a load
+  failure included; doctor and daemon reads record the same way. A record that
+  cannot be written goes to stderr. A process whose reads all succeeded writes
+  none.
+
+A run is **clean** when its `.audit.jsonl` holds at least one entry and no
+`refused` decision, and its `.log` is absent or empty. An audit file with no
+entries means the process made no Connector request that run, so it proves
+nothing and counts dirty. A process whose pid is still running is a run in
+flight, and the recipe skips it, with the same `kill -0` caveats and
+`finished=1` toggle as the shadow recipe above. Primary cuts over (#6811, which
+deletes the native github read path) after 20 consecutive clean dogfood runs.
+The recipe counts them from the newest record back, ordering by the stamp:
+
+```sh
+# primary=github
+logs=.spindrift/logs
+row=github
+finished=
+for f in "$logs"/primary-"$row"-*; do
+  case $f in *.audit.jsonl | *.log) ;; *) continue ;; esac
+  stem=${f%.audit.jsonl}; echo "${stem%.log}"
+done | sort -u | while read -r stem; do
+  name=${stem##*/primary-"$row"-}; stamp=${name%%-*}; pid=${name##*-}
+  live=
+  [ -n "$finished" ] || { kill -0 "$pid" 2>/dev/null && live=1; }
+  if [ -n "$live" ]; then verdict=skip
+  elif [ -s "$stem.log" ]; then verdict=dirty
+  elif [ -e "$stem.audit.jsonl" ] && jq -Rse '
+      [split("\n")[] | fromjson? | objects]
+      | length > 0 and all(.[]; .decision != "refused")' \
+      "$stem.audit.jsonl" >/dev/null
+  then verdict=clean
+  else verdict=dirty; fi
   printf '%s\t%s\n' "$stamp" "$verdict"
 done | sort -r | awk -F'\t' '
   $2 == "skip" { next }

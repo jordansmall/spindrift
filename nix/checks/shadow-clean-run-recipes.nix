@@ -1,6 +1,6 @@
 # Issue #7041: the shadow-mode "consecutive clean runs" recipes in
 # docs/reference.md are shell a human pastes, so nothing ran them. This
-# extracts both fenced blocks from the doc as written and runs each over small
+# extracts each fenced block from the doc as written and runs each over small
 # fixture log sets, so doc and check cannot drift.
 #
 # Cases pin: a run still in flight is skipped, not counted dirty (an unended
@@ -14,6 +14,10 @@
 # Stamps carry mixed UTC offsets, so they order by instant, not text. Each
 # recipe's `finished=` toggle is also run set to 1, for logs fetched from CI,
 # which have all ended: then an unended Pass or missing summary counts dirty.
+#
+# The primary-mode recipe (issue #6998) counts a process clean only with a
+# non-empty audit file free of refusals and an empty or absent `.log`; a live
+# pid is in flight, and `finished=1` counts it by its content.
 { pkgs, ... }:
 {
   shadow-clean-run-recipes =
@@ -36,8 +40,9 @@
         }
         extract driver=claude > claude.sh
         extract backend=github > github.sh
+        extract primary=github > primary.sh
         fail=0
-        for r in claude.sh github.sh; do
+        for r in claude.sh github.sh primary.sh; do
           if ! grep -q '^logs=\.spindrift/logs$' "$r"; then
             echo "FAIL: no recipe extracted into $r from docs/reference.md" >&2
             exit 1
@@ -71,9 +76,9 @@
         g_clean() { summary github "''${2:-0}" > "$1"; noise >> "$1"; }
         g_none() { noise > "$1"; }
 
-        run() { # <name> <recipe> <expected> <dir>
+        run() { # <name> <recipe> <expected> <dir> [bar]
           actual=$(cd "$4" && bash "$OLDPWD/$2" 2>&1)
-          if [ "$actual" = "$(printf '%s consecutive clean runs (cut-over bar: 20)' "$3")" ]; then
+          if [ "$actual" = "$(printf '%s consecutive clean runs (%s bar: 20)' "$3" "''${5:-primary}")" ]; then
             echo "ok   $1: $3"
           else
             echo "FAIL $1: want $3, got: $actual"
@@ -220,6 +225,67 @@
         g_clean "$d/$(stamp 20261114T100000Z $dead_pid)"
         g_none "$d/$(stamp 20261114T110000Z $$)"
         run github-finished-no-summary-dirty github-finished.sh 0 case-g6
+
+        # primary record pair: <dir> <stamp> <pid> then the audit lines
+        pstem() { echo "$1/primary-github-$2-$3"; }
+        p_audit() { # <stem> <decision>...
+          s=$1; shift
+          : > "$s.audit.jsonl"
+          for dec in "$@"; do
+            printf '{"route":"GET /repos","method":"GET","status":200,"decision":"%s"}\n' "$dec" >> "$s.audit.jsonl"
+          done
+        }
+        p_clean() { p_audit "$(pstem "$1" "$2" "$3")" allowed allowed; }
+        crun() { run "$1" "$2" "$3" "$4" cut-over; }
+
+        d=$(mkcase p1)
+        p_clean "$d" 20261114T090000Z $dead_pid
+        p_clean "$d" 20261114T100000Z $dead_pid
+        : > "$(pstem "$d" 20261114T100000Z $dead_pid).log" # an empty log is clean
+        p_clean "$d" 20261114T110000Z $dead_pid
+        crun primary-all-clean primary.sh 3 case-p1
+
+        d=$(mkcase p2)
+        p_clean "$d" 20261114T090000Z $dead_pid
+        p_audit "$(pstem "$d" 20261114T100000Z $dead_pid)" allowed refused
+        p_clean "$d" 20261114T110000Z $dead_pid
+        p_clean "$d" 20261114T120000Z $dead_pid
+        crun primary-refusal-ends-streak primary.sh 2 case-p2
+
+        d=$(mkcase p3)
+        p_clean "$d" 20261114T090000Z $dead_pid
+        p_clean "$d" 20261114T100000Z $dead_pid
+        echo '{"op":"Issue","error":"boom"}' > "$(pstem "$d" 20261114T100000Z $dead_pid).log"
+        p_clean "$d" 20261114T110000Z $dead_pid
+        crun primary-read-error-ends-streak primary.sh 1 case-p3
+
+        # A process that made no Connector request proves nothing.
+        d=$(mkcase p4)
+        p_clean "$d" 20261114T090000Z $dead_pid
+        p_audit "$(pstem "$d" 20261114T100000Z $dead_pid)"
+        p_clean "$d" 20261114T110000Z $dead_pid
+        crun primary-empty-audit-ends-streak primary.sh 1 case-p4
+
+        # A load failure leaves an error line and no audit file.
+        d=$(mkcase p5)
+        p_clean "$d" 20261114T090000Z $dead_pid
+        echo '{"op":"Issue","error":"load"}' > "$(pstem "$d" 20261114T100000Z $dead_pid).log"
+        p_clean "$d" 20261114T110000Z $dead_pid
+        crun primary-log-without-audit-ends-streak primary.sh 1 case-p5
+
+        # A live pid is in flight on a live host, but counts by content when
+        # the logs are fetched (finished=1).
+        d=$(mkcase p6)
+        p_clean "$d" 20261114T090000Z $dead_pid
+        p_clean "$d" 20261114T100000Z $dead_pid
+        p_audit "$(pstem "$d" 20261114T110000Z $$)" allowed refused
+        crun primary-in-flight-newest primary.sh 2 case-p6
+        crun primary-finished-refusal-dirty primary-finished.sh 0 case-p6
+
+        d=$(mkcase p7)
+        p_clean "$d" 20261114T090000Z $dead_pid
+        p_clean "$d" 20261114T100000Z $$
+        crun primary-finished-clean-counts primary-finished.sh 2 case-p7
 
         [ "$fail" = 0 ] || exit 1
         touch "$out"

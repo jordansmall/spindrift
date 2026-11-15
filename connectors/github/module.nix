@@ -1,8 +1,9 @@
 # The github Connector's flake-parts module: the Connector's tracker read path.
-# The native github adapter stays authoritative and every binary still uses it
-# for every decision. The backend row below does not replace it: it lets the
-# row's `shadow` option sample the Connector's reads beside the native ones
-# (ADR 0073 point 13), confined to the Route table in ./routes.nix.
+# The native github adapter stays authoritative unless the row opts in: the
+# backend row below does not replace it by itself. The row's `shadow` option
+# samples the Connector's reads beside the native ones, and `primary` makes the
+# Connector answer them (ADR 0073 point 13, amendment #6998), confined to the
+# Route table in ./routes.nix.
 { core }:
 { ... }:
 let
@@ -19,7 +20,7 @@ in
     env = "SPINDRIFT_GITHUB_CONNECTOR_TOKEN";
     group = "dispatch";
     secret = true;
-    doc = "bearer token the github Connector's backend row authorizes its sampled shadow reads with (must be read-only; scope list in docs/reference.md#backend-read-shadow); host-only, never reaches the Box; needed only when the row's `shadow` option is on";
+    doc = "bearer token the github Connector's backend row authorizes its shadow or primary reads with (must be read-only; scope list in docs/reference.md#backend-read-shadow); host-only, never reaches the Box; needed only when the row's `shadow` or `primary` option is on";
     flakeOption = false;
     boxEnv = false;
   };
