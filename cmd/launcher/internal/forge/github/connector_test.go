@@ -49,6 +49,10 @@ type restIssue struct {
 	unlabeled []string
 	pull      bool
 	comments  []string
+	// closed marks a closed issue; closedAt is its RFC3339 close time and
+	// notPlanned its "not_planned" state reason.
+	closed, notPlanned bool
+	closedAt           string
 	// thread is the comment thread the GraphQL comments read serves, oldest first.
 	thread []forge.Comment
 }
@@ -439,10 +443,17 @@ func (b *restBackend) list(w http.ResponseWriter, q url.Values) {
 		nums = append(nums, n)
 	}
 	sort.Ints(nums)
+	if q.Get("direction") == "desc" {
+		sort.Sort(sort.Reverse(sort.IntSlice(nums)))
+	}
+	state := q.Get("state")
+	if state == "" {
+		state = "open"
+	}
 	var out []any
 	for _, n := range nums {
 		i := b.issues[n]
-		if want := q.Get("labels"); want != "" && !hasLabel(i.labels, want) {
+		if want := q.Get("labels"); want != "" && !hasLabel(i.labels, want) || state != "all" && (state == "closed") != i.closed {
 			continue
 		}
 		out = append(out, wireIssue(i))
@@ -481,6 +492,13 @@ func wireIssue(i *restIssue) map[string]any {
 	}
 	m := map[string]any{
 		"number": i.num, "title": i.title, "body": i.body, "state": "open", "labels": labels,
+	}
+	if i.closed {
+		m["state"], m["closed_at"] = "closed", i.closedAt
+		m["state_reason"] = "completed"
+		if i.notPlanned {
+			m["state_reason"] = "not_planned"
+		}
 	}
 	if i.pull {
 		m["pull_request"] = map[string]any{"url": "https://example.invalid/pull"}
@@ -819,6 +837,7 @@ func TestConnector_Contracts(t *testing.T) {
 		t.Run("PRForge", func(t *testing.T) { forgetest.RunPRForgeReadContract(t, h) })
 		t.Run("JobLogExcerpt", func(t *testing.T) { testJobLogExcerpt(t, h) })
 		t.Run("BlocksAndSearch", func(t *testing.T) { testBlocksAndSearch(t, h) })
+		t.Run("LabeledScan", func(t *testing.T) { testLabeledScan(t, h) })
 
 		// The Connector reads comments over GraphQL, which reports minimized
 		// state, so it attests them and the Comments case runs against it.
@@ -1040,6 +1059,41 @@ func testBlocksAndSearch(t *testing.T, h *connectorHarness) {
 	got, err = s.SearchIssues("flaky", forge.IssueOpen, "agent-review-finding", 10)
 	if err != nil || len(got) != 1 || got[0].Number != "810" {
 		t.Errorf("SearchIssues(flaky, label) = %v, %v; want 810", got, err)
+	}
+}
+
+// SeedClosed seeds a closed issue carrying labels, closed at closedAt.
+func (h *connectorHarness) SeedClosed(num, title string, labels []string, closedAt string, notPlanned bool) {
+	h.SeedIssue(forge.Issue{Number: num, Title: title, Body: "body " + num, Labels: labels})
+	h.mutate(num, func(i *restIssue) { i.closed, i.closedAt, i.notPlanned = true, closedAt, notPlanned })
+}
+
+// testLabeledScan drives the dedup scan's open-or-closed labeled read through
+// the launcher's tracker view.
+func testLabeledScan(t *testing.T, h *connectorHarness) {
+	const label = "agent-scan-finding"
+	h.SeedIssue(forge.Issue{Number: "820", Title: "open one", Body: "body 820", Labels: []string{label}})
+	h.SeedClosed("821", "closed old", []string{label}, "2026-01-01T00:00:00Z", false)
+	h.SeedClosed("822", "closed np", []string{label, "x"}, "2026-02-03T04:05:06Z", true)
+	h.SeedClosed("823", "closed other label", []string{"x"}, "2026-02-03T04:05:06Z", true)
+
+	l, ok := forge.As[forge.LabeledBacklogLister](h.tr)
+	if !ok {
+		t.Fatal("Connector tracker does not serve ListIssuesWithLabels")
+	}
+	closed, err := l.ListIssuesWithLabels(forge.IssueClosed, []string{label})
+	if err != nil || len(closed) != 2 || closed[0].Number != "822" || closed[1].Number != "821" {
+		t.Fatalf("closed = %v, %v; want 822 then 821, newest first", closed, err)
+	}
+	if !closed[0].ClosedNotPlanned || !closed[0].ClosedAt.Equal(time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)) || closed[0].Body != "body 822" {
+		t.Errorf("issue 822 = %+v; want ClosedAt, ClosedNotPlanned and Body", closed[0])
+	}
+	if closed[1].ClosedNotPlanned {
+		t.Errorf("issue 821 = %+v; want a completed close", closed[1])
+	}
+	open, err := l.ListIssuesWithLabels(forge.IssueOpen, []string{label})
+	if err != nil || len(open) != 1 || open[0].Number != "820" {
+		t.Errorf("open = %v, %v; want 820", open, err)
 	}
 }
 

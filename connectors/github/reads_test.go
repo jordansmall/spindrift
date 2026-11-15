@@ -487,3 +487,69 @@ func TestComments_RefusesABadRepo(t *testing.T) {
 		t.Fatal("want an error for a repo that is not owner/name")
 	}
 }
+
+func TestLabeled(t *testing.T) {
+	got := stub(t, map[string]connector.Response{
+		"https://api.github.com/repos/o/r/issues?state=closed&labels=a+b&sort=created&direction=desc&per_page=100&page=1": ok(`[
+			{"number":9,"title":"np","body":"nb","state":"closed","state_reason":"not_planned","closed_at":"2026-01-02T03:04:05Z","labels":[{"name":"a b"}]},
+			{"number":8,"title":"pr","state":"closed","labels":[],"pull_request":{}},
+			{"number":7,"title":"done","body":null,"state":"closed","state_reason":"completed","closed_at":"2026-01-01T00:00:00Z","labels":[]},
+			{"number":6,"title":"odd","state":"closed","closed_at":null,"labels":[]}]`),
+	})
+	issues, err := labeled(tgt, "a b", "closed", 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []tracker.Issue{
+		{Number: "9", Title: "np", Body: "nb", State: "closed", Labels: []string{"a b"}, ClosedAt: "2026-01-02T03:04:05Z", ClosedNotPlanned: true},
+		{Number: "7", Title: "done", State: "closed", Labels: []string{}, ClosedAt: "2026-01-01T00:00:00Z"},
+		{Number: "6", Title: "odd", State: "closed", Labels: []string{}},
+	}
+	if !reflect.DeepEqual(issues, want) {
+		t.Fatalf("issues = %#v", issues)
+	}
+	if len(*got) != 1 {
+		t.Fatalf("requests = %d, want 1", len(*got))
+	}
+}
+
+func TestLabeledOpenCarriesNoCloseFields(t *testing.T) {
+	stub(t, map[string]connector.Response{
+		"https://api.github.com/repos/o/r/issues?state=open&labels=x&sort=created&direction=desc&per_page=100&page=1": ok(`[
+			{"number":5,"title":"t","state":"open","state_reason":"reopened","closed_at":"2026-01-01T00:00:00Z","labels":[]}]`),
+	})
+	issues, err := labeled(tgt, "x", "open", 5)
+	want := []tracker.Issue{{Number: "5", Title: "t", State: "open", Labels: []string{}}}
+	if err != nil || !reflect.DeepEqual(issues, want) {
+		t.Fatalf("issues = %#v, err = %v", issues, err)
+	}
+}
+
+func TestLabeledPagesAndCapsAtLimit(t *testing.T) {
+	n := 0
+	old := send
+	send = func(connector.Request) (connector.Response, error) {
+		n++
+		return ok(items(n*100, 100, false)), nil
+	}
+	t.Cleanup(func() { send = old })
+	issues, err := labeled(tgt, "x", "open", 150)
+	if err != nil || len(issues) != 150 || n != 2 {
+		t.Fatalf("len = %d, requests = %d, err = %v", len(issues), n, err)
+	}
+}
+
+func TestLabeledRefusesBadInputWithoutRequest(t *testing.T) {
+	got := stub(t, nil)
+	for _, c := range []struct {
+		state string
+		limit int
+	}{{"all", 5}, {"open", 0}} {
+		if _, err := labeled(tgt, "x", c.state, c.limit); err == nil {
+			t.Errorf("labeled(%+v): no error", c)
+		}
+	}
+	if len(*got) != 0 {
+		t.Errorf("sent %d requests", len(*got))
+	}
+}

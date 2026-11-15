@@ -3238,6 +3238,7 @@ This is protocol version **0.3.0**. The host is
   `"tracker.comments"`, `"tracker.nativeDeps"`, `"tracker.blocks"`,
   `"tracker.probe"`, `"tracker.statuses"`, `"tracker.createMeta"`,
   `"tracker.count"`, `"tracker.removedLabels"`, `"tracker.searchIssues"`,
+  `"tracker.labeled"`,
   `"tracker.transition"`, `"tracker.editLabels"`, `"tracker.comment"`,
   `"tracker.fileIssue"` and `"tracker.labels"`, serving the method of the
   same name (`"tracker.labels"` serves `tracker.listLabels` and
@@ -3266,6 +3267,7 @@ This is protocol version **0.3.0**. The host is
   | `tracker.countInterval` (with `tracker.count`) | `{}` | `{seconds}`, at least 1: how often core re-asks `tracker.count` |
   | `tracker.removedLabels` (optional) | `{target, number}` | `{labels}`: the names removed from the issue, oldest first |
   | `tracker.searchIssues` (optional) | `{target, text, state, label, limit}`, `label` `""` for any | `{issues}`, in match order |
+  | `tracker.labeled` (optional) | `{target, label, state, limit}`, `state` `open` or `closed` | `{issues}` carrying `label`, newest first, `closedAt` and `closedNotPlanned` filled for closed ones; core's finding dedup scan reads it, one call per label, closed issues included |
   | `tracker.transition` (optional) | `{target, number, state, mapping}`: `state` is the Dispatch state's canonical name (`dispatchable`, `in-progress`, `complete`, `failed`, `ambiguous`) and `mapping` is core's whole table, `{<state>: {status, resolution}}`, for every state that names a status; the Connector looks up `mapping[state]`, applies the rule that only `failed` and `ambiguous` may share a status (an error otherwise) and sends the resolution when it is non-empty | `{outcome, status, offered}`: `status` is the native status the Connector resolved `state` to (`""` when unmapped); `outcome` is `moved` (the native transition ran), `unavailable` (the workflow offers no transition to `status` from the issue's current status; `offered` names the statuses it does offer) or `unmapped` (`mapping` holds no non-empty status for `state`); an error for anything else, including a screen field the transition requires and the request does not fill |
   | `tracker.editLabels` (optional) | `{target, number, add, remove}` | `{}`; one edit that adds and removes the named labels |
   | `tracker.comment` (optional) | `{target, number, body, research}`: `body` is canonical Markdown without the research marker line, and `research` says the comment carries that marker | `{}`; one comment, the marker kept where the tracker can report it as `researchMarker` |
