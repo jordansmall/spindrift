@@ -8,6 +8,11 @@
 # There is deliberately no "code-comments" contract fixture: that policy was
 # inlined into the prompts (#3505, file removed in 78f2611f), so no rendered
 # artifact exists to copy.
+# Store paths the fixtures name but do not carry (the run-input docs discard
+# their artifacts' context) are rewritten to the zero-hash sentinel: a Box runs
+# with sandbox=false and sees the whole store, CI's sandbox does not, so a real
+# path passes in one and breaks in the other (issue #7082). A seam test that
+# needs a present artifact supplies its own through its input document.
 {
   pkgs,
   batsHarness,
@@ -36,6 +41,8 @@ let
   promptContractParityFixtures = pkgs.writeText "prompt-contract-parity-fixtures.json" (
     builtins.toJSON (import ../lib/prompt-contract.nix).parityFixtures
   );
+  sentinelHash = "00000000000000000000000000000000";
+  storePathRegex = "/nix/store/[0-9a-z]{32}-[0-9a-zA-Z+._?=-]+";
   files = {
     "outcome-contract.md" = internals.outcomeContractFile;
     "comms-contract.md" = internals.commsContractFile;
@@ -59,9 +66,23 @@ let
     "nix-checks-skill.md" = ../skills/nix-checks/SKILL.md;
   };
 in
-pkgs.runCommand "seam-fixtures" { passthru = { inherit files; }; } ''
-  mkdir -p $out
-  ${pkgs.lib.concatStringsSep "\n" (
-    pkgs.lib.mapAttrsToList (name: path: "cp -r ${path} $out/${name}") files
-  )}
-''
+pkgs.runCommand "seam-fixtures"
+  {
+    passthru = {
+      inherit files sentinelHash storePathRegex;
+    };
+  }
+  ''
+    mkdir -p $out
+    ${pkgs.lib.concatStringsSep "\n" (
+      pkgs.lib.mapAttrsToList (name: path: "cp -r ${path} $out/${name}") files
+    )}
+    chmod -R u+w $out
+    grep -rhoaE '${storePathRegex}' $out | sort -u \
+      | { grep -vxFf ${
+        pkgs.closureInfo { rootPaths = builtins.attrValues files; }
+      }/store-paths || true; } \
+      | sed -E 's|^/nix/store/([0-9a-z]{32})-.*|s#/nix/store/\1-#/nix/store/${sentinelHash}-#g|' \
+      >rewrite.sed
+    grep -rlaZE '/nix/store/[0-9a-z]{32}-' $out | xargs -0r sed -i -f rewrite.sed
+  ''
