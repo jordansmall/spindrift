@@ -52,6 +52,9 @@ var failingStatusContextStates = map[string]bool{
 // under a fine-grained PAT. The fetch is best-effort: a non-nil error means
 // the detail is unavailable, and callers should proceed without it.
 func (e *execClient) FailureDetail(url string) (string, error) {
+	if row, ok := primaryRow(); ok {
+		return e.failureDetailViaConnector(row, url)
+	}
 	parts := strings.Split(url, "/")
 	if len(parts) < 7 {
 		return "", fmt.Errorf("invalid PR URL: %s", url)

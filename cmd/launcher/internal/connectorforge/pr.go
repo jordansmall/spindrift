@@ -305,6 +305,9 @@ func (f *prForge) classifyMergeFailure(prURL string, cause error) error {
 
 // Rebase rebases the PR's head branch through core's git plumbing.
 func (f *prForge) Rebase(prURL string) error {
+	if f.push.git == nil {
+		return ErrNoGit
+	}
 	w, _, err := f.pr(prURL)
 	if err != nil {
 		return err

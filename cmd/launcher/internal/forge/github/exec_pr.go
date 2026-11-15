@@ -28,6 +28,9 @@ import (
 const rebaseForcePushTimeout = 5 * time.Minute
 
 func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
+	if row, ok := primaryRow(); ok {
+		return e.openPRForBranchViaConnector(row, branch)
+	}
 	cmd := exec.Command("gh", "pr", "list",
 		"--repo", e.repo,
 		"--head", branch,
@@ -53,6 +56,9 @@ func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 func (e *execClient) BranchExists(branch string) (bool, error) {
 	if branch == "" {
 		return false, fmt.Errorf("branch must not be empty")
+	}
+	if row, ok := primaryRow(); ok {
+		return e.branchExistsViaConnector(row, branch)
 	}
 	cmd := exec.Command("gh", "api",
 		fmt.Sprintf("repos/%s/git/matching-refs/heads/%s", e.repo, branch),
@@ -129,6 +135,9 @@ func (e *execClient) branchProtectedByRuleset(branch string) (bool, error) {
 }
 
 func (e *execClient) PRForBranch(branch string) (string, bool, error) {
+	if row, ok := primaryRow(); ok {
+		return e.prForBranchViaConnector(row, branch)
+	}
 	cmd := exec.Command("gh", "pr", "list",
 		"--repo", e.repo,
 		"--head", branch,
@@ -148,6 +157,9 @@ func (e *execClient) PRForBranch(branch string) (string, bool, error) {
 }
 
 func (e *execClient) PRState(url string) (forge.PRState, error) {
+	if row, ok := primaryRow(); ok {
+		return e.prStateViaConnector(row, url)
+	}
 	cmd := exec.Command("gh", "pr", "view", url, "--json", "state", "--jq", ".state")
 	out, err := cmd.Output()
 	if err != nil {
@@ -159,6 +171,9 @@ func (e *execClient) PRState(url string) (forge.PRState, error) {
 // MergeCommit returns the oid of the commit the merged PR at url landed as, ""
 // when GitHub reports none (an unmerged PR).
 func (e *execClient) MergeCommit(url string) (string, error) {
+	if row, ok := primaryRow(); ok {
+		return e.mergeCommitViaConnector(row, url)
+	}
 	cmd := exec.Command("gh", "pr", "view", url, "--json", "mergeCommit", "--jq", `.mergeCommit.oid // ""`)
 	out, err := cmd.Output()
 	if err != nil {
@@ -170,6 +185,9 @@ func (e *execClient) MergeCommit(url string) (string, error) {
 // CheckState returns the aggregate statusCheckRollup state of the PR's head
 // commit, or StateNone when no checks are registered.
 func (e *execClient) CheckState(url string) (forge.RollupState, error) {
+	if row, ok := primaryRow(); ok {
+		return e.checkStateViaConnector(row, url)
+	}
 	state, _, err := e.CheckRun(url)
 	return state, err
 }
@@ -198,6 +216,9 @@ type rollupQueryResult struct {
 // live work rather than a finished sibling workflow. Only runs under the PR's
 // own host, owner and repo count.
 func (e *execClient) CheckRun(url string) (forge.RollupState, string, error) {
+	if row, ok := primaryRow(); ok {
+		return e.checkRunViaConnector(row, url)
+	}
 	// Parse https://github.com/OWNER/REPO/pull/NUMBER
 	parts := strings.Split(url, "/")
 	if len(parts) < 7 {
@@ -250,6 +271,9 @@ func (e *execClient) CheckRun(url string) (forge.RollupState, string, error) {
 
 // HeadCommitSHA returns the PR's current head commit SHA.
 func (e *execClient) HeadCommitSHA(url string) (string, error) {
+	if row, ok := primaryRow(); ok {
+		return e.headCommitSHAViaConnector(row, url)
+	}
 	out, err := exec.Command("gh", "pr", "view", url, "--json", "headRefOid", "--jq", ".headRefOid").Output()
 	if err != nil {
 		return "", ghCommandErr(fmt.Sprintf("gh pr view %s headRefOid", url), err)
@@ -262,6 +286,9 @@ func (e *execClient) HeadCommitSHA(url string) (string, error) {
 // Merge can tell a genuine conflict (CONFLICTING) apart from a PR merely
 // blocked by pending or failing checks (MERGEABLE).
 func (e *execClient) Mergeable(url string) (forge.MergeableState, error) {
+	if row, ok := primaryRow(); ok {
+		return e.mergeableViaConnector(row, url)
+	}
 	parts := strings.Split(url, "/")
 	if len(parts) < 7 {
 		return forge.MergeableUnknown, fmt.Errorf("invalid PR URL: %s", url)
@@ -292,6 +319,9 @@ func (e *execClient) Mergeable(url string) (forge.MergeableState, error) {
 // to be up to date, which this project's PAT cannot even read (issue #936).
 // A fork-sourced head 404s here; the caller logs and swallows that error.
 func (e *execClient) NeedsUpdate(prURL string) (bool, error) {
+	if row, ok := primaryRow(); ok {
+		return e.needsUpdateViaConnector(row, prURL)
+	}
 	out, err := exec.Command("gh", "pr", "view", prURL,
 		"--json", "headRefName,baseRefName",
 		"--jq", "[.headRefName,.baseRefName]|@tsv",
@@ -327,6 +357,9 @@ func (e *execClient) NeedsUpdate(prURL string) (bool, error) {
 // endpoint works under a fine-grained PAT scoped to Pull requests RW; the
 // check-runs endpoint does not.
 func (e *execClient) ListPRFiles(url string) ([]string, error) {
+	if row, ok := primaryRow(); ok {
+		return e.listPRFilesViaConnector(row, url)
+	}
 	parts := strings.Split(url, "/")
 	if len(parts) < 7 {
 		return nil, fmt.Errorf("invalid PR URL: %s", url)

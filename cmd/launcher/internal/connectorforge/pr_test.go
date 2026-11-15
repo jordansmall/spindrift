@@ -361,6 +361,14 @@ func TestRebaseRebasesTheHeadBranch(t *testing.T) {
 	}
 }
 
+func TestRebaseWithoutGitFailsNamed(t *testing.T) {
+	h := newPRHarness(t, nil, map[string]any{"forge.pr": prJSON + `,"head":"agent/issue-1"}`})
+	h.f.(*prForge).push.git = nil
+	if err := h.f.Rebase(prURL7); !errors.Is(err, ErrNoGit) {
+		t.Fatalf("Rebase with no git = %v, want ErrNoGit", err)
+	}
+}
+
 func TestProbe(t *testing.T) {
 	h := newPRHarness(t, []string{capProbe}, map[string]any{"forge.probe": `{"repo":"o/r"}`})
 	if repo, err := h.f.Probe(); repo != "o/r" || err != nil {
