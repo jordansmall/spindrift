@@ -73,3 +73,21 @@ func TestReportIsTheInstalledLoadersStats(t *testing.T) {
 		t.Fatalf("Report = %v, %v; want %v, true", got, ok, want)
 	}
 }
+
+func TestInProcessLoadsCountsOnlyLoadsThatFallBack(t *testing.T) {
+	ctx := context.Background()
+	before := InProcessLoads()
+	_, _ = Load(ctx, notWasm)
+	_, _ = LoadNetwork(ctx, notWasm, connectorhost.Network{})
+	if got := InProcessLoads() - before; got != 2 {
+		t.Fatalf("in-process loads = %d, want 2", got)
+	}
+
+	t.Cleanup(Use(failingLoader{ErrConnectorSandboxStart}))
+	before = InProcessLoads()
+	_, _ = Load(ctx, notWasm)
+	_, _ = LoadNetwork(ctx, notWasm, connectorhost.Network{})
+	if got := InProcessLoads() - before; got != 0 {
+		t.Fatalf("in-process loads under a sandbox = %d, want 0", got)
+	}
+}
