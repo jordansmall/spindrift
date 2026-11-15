@@ -1,0 +1,186 @@
+2026-05-12T09:14:01.1000000Z ##[group]Run nix build .#checks.x86_64-linux.launcher-go-test -L
+2026-05-12T09:14:01.1000100Z nix build .#checks.x86_64-linux.launcher-go-test -L
+2026-05-12T09:14:01.1000200Z shell: /usr/bin/bash -e {0}
+2026-05-12T09:14:01.1000300Z ##[endgroup]
+2026-05-12T09:14:09.2000000Z launcher-go-test> unpacking sources
+2026-05-12T09:14:10.2000000Z launcher-go-test> building
+2026-05-12T09:14:11.3000000Z launcher-go-test> === RUN   TestSeamCase1
+2026-05-12T09:14:11.3100000Z launcher-go-test> --- PASS: TestSeamCase1 (0.01s)
+2026-05-12T09:14:12.3000000Z launcher-go-test> === RUN   TestSeamCase2
+2026-05-12T09:14:12.3100000Z launcher-go-test> --- PASS: TestSeamCase2 (0.02s)
+2026-05-12T09:14:13.3000000Z launcher-go-test> === RUN   TestSeamCase3
+2026-05-12T09:14:13.3100000Z launcher-go-test> --- PASS: TestSeamCase3 (0.03s)
+2026-05-12T09:14:14.3000000Z launcher-go-test> === RUN   TestSeamCase4
+2026-05-12T09:14:14.3100000Z launcher-go-test> --- PASS: TestSeamCase4 (0.04s)
+2026-05-12T09:14:15.3000000Z launcher-go-test> === RUN   TestSeamCase5
+2026-05-12T09:14:15.3100000Z launcher-go-test> --- PASS: TestSeamCase5 (0.05s)
+2026-05-12T09:14:16.3000000Z launcher-go-test> === RUN   TestSeamCase6
+2026-05-12T09:14:16.3100000Z launcher-go-test> --- PASS: TestSeamCase6 (0.06s)
+2026-05-12T09:14:17.3000000Z launcher-go-test> === RUN   TestSeamCase7
+2026-05-12T09:14:17.3100000Z launcher-go-test> --- PASS: TestSeamCase7 (0.07s)
+2026-05-12T09:14:18.3000000Z launcher-go-test> === RUN   TestSeamCase8
+2026-05-12T09:14:18.3100000Z launcher-go-test> --- PASS: TestSeamCase8 (0.08s)
+2026-05-12T09:14:19.3000000Z launcher-go-test> === RUN   TestSeamCase9
+2026-05-12T09:14:19.3100000Z launcher-go-test> --- PASS: TestSeamCase9 (0.09s)
+2026-05-12T09:14:10.3000000Z launcher-go-test> === RUN   TestSeamCase10
+2026-05-12T09:14:10.3100000Z launcher-go-test> --- PASS: TestSeamCase10 (0.010s)
+2026-05-12T09:14:11.3000000Z launcher-go-test> === RUN   TestSeamCase11
+2026-05-12T09:14:11.3100000Z launcher-go-test> --- PASS: TestSeamCase11 (0.011s)
+2026-05-12T09:14:12.3000000Z launcher-go-test> === RUN   TestSeamCase12
+2026-05-12T09:14:12.3100000Z launcher-go-test> --- PASS: TestSeamCase12 (0.012s)
+2026-05-12T09:14:20.4000000Z launcher-go-test> === RUN   TestSeamNixEval
+2026-05-12T09:14:20.4100000Z launcher-go-test>     seam_test.go:88: nix eval: exit status 1: error: experimental Nix feature 'nix-command' is disabled; add '--extra-experimental-features nix-command' to enable it
+2026-05-12T09:14:20.4200000Z launcher-go-test> --- FAIL: TestSeamNixEval (0.12s)
+2026-05-12T09:14:20.4300000Z launcher-go-test> FAIL
+2026-05-12T09:14:20.4400000Z launcher-go-test> FAIL	spindrift.dev/launcher/internal/seamtest	1.234s
+2026-05-12T09:14:21.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg1	0.1s
+2026-05-12T09:14:22.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg2	0.2s
+2026-05-12T09:14:23.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg3	0.3s
+2026-05-12T09:14:24.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg4	0.4s
+2026-05-12T09:14:25.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg5	0.5s
+2026-05-12T09:14:26.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg6	0.6s
+2026-05-12T09:14:27.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg7	0.7s
+2026-05-12T09:14:28.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg8	0.8s
+2026-05-12T09:14:29.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg9	0.0s
+2026-05-12T09:14:20.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg10	0.1s
+2026-05-12T09:14:21.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg11	0.2s
+2026-05-12T09:14:22.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg12	0.3s
+2026-05-12T09:14:23.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg13	0.4s
+2026-05-12T09:14:24.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg14	0.5s
+2026-05-12T09:14:25.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg15	0.6s
+2026-05-12T09:14:26.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg16	0.7s
+2026-05-12T09:14:27.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg17	0.8s
+2026-05-12T09:14:28.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg18	0.0s
+2026-05-12T09:14:29.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg19	0.1s
+2026-05-12T09:14:20.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg20	0.2s
+2026-05-12T09:14:21.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg21	0.3s
+2026-05-12T09:14:22.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg22	0.4s
+2026-05-12T09:14:23.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg23	0.5s
+2026-05-12T09:14:24.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg24	0.6s
+2026-05-12T09:14:25.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg25	0.7s
+2026-05-12T09:14:26.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg26	0.8s
+2026-05-12T09:14:27.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg27	0.0s
+2026-05-12T09:14:28.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg28	0.1s
+2026-05-12T09:14:29.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg29	0.2s
+2026-05-12T09:14:20.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg30	0.3s
+2026-05-12T09:14:21.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg31	0.4s
+2026-05-12T09:14:22.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg32	0.5s
+2026-05-12T09:14:23.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg33	0.6s
+2026-05-12T09:14:24.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg34	0.7s
+2026-05-12T09:14:25.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg35	0.8s
+2026-05-12T09:14:26.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg36	0.0s
+2026-05-12T09:14:27.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg37	0.1s
+2026-05-12T09:14:28.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg38	0.2s
+2026-05-12T09:14:29.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg39	0.3s
+2026-05-12T09:14:20.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg40	0.4s
+2026-05-12T09:14:21.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg41	0.5s
+2026-05-12T09:14:22.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg42	0.6s
+2026-05-12T09:14:23.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg43	0.7s
+2026-05-12T09:14:24.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg44	0.8s
+2026-05-12T09:14:25.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg45	0.0s
+2026-05-12T09:14:26.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg46	0.1s
+2026-05-12T09:14:27.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg47	0.2s
+2026-05-12T09:14:28.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg48	0.3s
+2026-05-12T09:14:29.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg49	0.4s
+2026-05-12T09:14:20.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg50	0.5s
+2026-05-12T09:14:21.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg51	0.6s
+2026-05-12T09:14:22.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg52	0.7s
+2026-05-12T09:14:23.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg53	0.8s
+2026-05-12T09:14:24.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg54	0.0s
+2026-05-12T09:14:25.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg55	0.1s
+2026-05-12T09:14:26.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg56	0.2s
+2026-05-12T09:14:27.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg57	0.3s
+2026-05-12T09:14:28.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg58	0.4s
+2026-05-12T09:14:29.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg59	0.5s
+2026-05-12T09:14:20.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg60	0.6s
+2026-05-12T09:14:21.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg61	0.7s
+2026-05-12T09:14:22.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg62	0.8s
+2026-05-12T09:14:23.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg63	0.0s
+2026-05-12T09:14:24.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg64	0.1s
+2026-05-12T09:14:25.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg65	0.2s
+2026-05-12T09:14:26.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg66	0.3s
+2026-05-12T09:14:27.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg67	0.4s
+2026-05-12T09:14:28.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg68	0.5s
+2026-05-12T09:14:29.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg69	0.6s
+2026-05-12T09:14:20.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg70	0.7s
+2026-05-12T09:14:21.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg71	0.8s
+2026-05-12T09:14:22.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg72	0.0s
+2026-05-12T09:14:23.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg73	0.1s
+2026-05-12T09:14:24.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg74	0.2s
+2026-05-12T09:14:25.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg75	0.3s
+2026-05-12T09:14:26.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg76	0.4s
+2026-05-12T09:14:27.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg77	0.5s
+2026-05-12T09:14:28.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg78	0.6s
+2026-05-12T09:14:29.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg79	0.7s
+2026-05-12T09:14:20.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg80	0.8s
+2026-05-12T09:14:21.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg81	0.0s
+2026-05-12T09:14:22.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg82	0.1s
+2026-05-12T09:14:23.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg83	0.2s
+2026-05-12T09:14:24.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg84	0.3s
+2026-05-12T09:14:25.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg85	0.4s
+2026-05-12T09:14:26.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg86	0.5s
+2026-05-12T09:14:27.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg87	0.6s
+2026-05-12T09:14:28.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg88	0.7s
+2026-05-12T09:14:29.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg89	0.8s
+2026-05-12T09:14:20.5000000Z launcher-go-test> ok  	spindrift.dev/launcher/internal/pkg90	0.0s
+2026-05-12T09:14:40.6000000Z error: builder for '/nix/store/0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-launcher-go-test.drv' failed with exit code 1;
+2026-05-12T09:14:40.6000100Z        last 25 log lines:
+2026-05-12T09:14:40.6101Z        > launcher-go-test> padding build output line 1 for the failed derivation
+2026-05-12T09:14:40.6102Z        > launcher-go-test> padding build output line 2 for the failed derivation
+2026-05-12T09:14:40.6103Z        > launcher-go-test> padding build output line 3 for the failed derivation
+2026-05-12T09:14:40.6104Z        > launcher-go-test> padding build output line 4 for the failed derivation
+2026-05-12T09:14:40.6105Z        > launcher-go-test> padding build output line 5 for the failed derivation
+2026-05-12T09:14:40.6106Z        > launcher-go-test> padding build output line 6 for the failed derivation
+2026-05-12T09:14:40.6107Z        > launcher-go-test> padding build output line 7 for the failed derivation
+2026-05-12T09:14:40.6108Z        > launcher-go-test> padding build output line 8 for the failed derivation
+2026-05-12T09:14:40.6109Z        > launcher-go-test> padding build output line 9 for the failed derivation
+2026-05-12T09:14:40.61010Z        > launcher-go-test> padding build output line 10 for the failed derivation
+2026-05-12T09:14:40.61011Z        > launcher-go-test> padding build output line 11 for the failed derivation
+2026-05-12T09:14:40.61012Z        > launcher-go-test> padding build output line 12 for the failed derivation
+2026-05-12T09:14:40.61013Z        > launcher-go-test> padding build output line 13 for the failed derivation
+2026-05-12T09:14:40.61014Z        > launcher-go-test> padding build output line 14 for the failed derivation
+2026-05-12T09:14:40.61015Z        > launcher-go-test> padding build output line 15 for the failed derivation
+2026-05-12T09:14:40.61016Z        > launcher-go-test> padding build output line 16 for the failed derivation
+2026-05-12T09:14:40.61017Z        > launcher-go-test> padding build output line 17 for the failed derivation
+2026-05-12T09:14:40.61018Z        > launcher-go-test> padding build output line 18 for the failed derivation
+2026-05-12T09:14:40.61019Z        > launcher-go-test> padding build output line 19 for the failed derivation
+2026-05-12T09:14:40.61020Z        > launcher-go-test> padding build output line 20 for the failed derivation
+2026-05-12T09:14:40.61021Z        > launcher-go-test> padding build output line 21 for the failed derivation
+2026-05-12T09:14:40.61022Z        > launcher-go-test> padding build output line 22 for the failed derivation
+2026-05-12T09:14:40.61023Z        > launcher-go-test> padding build output line 23 for the failed derivation
+2026-05-12T09:14:40.61024Z        > launcher-go-test> padding build output line 24 for the failed derivation
+2026-05-12T09:14:40.61025Z        > launcher-go-test> padding build output line 25 for the failed derivation
+2026-05-12T09:14:40.7000000Z        For full logs, run 'nix log /nix/store/0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-launcher-go-test.drv'.
+2026-05-12T09:14:41.0000000Z gate: 1 check failed
+2026-05-12T09:14:41.0000100Z ##[error]Process completed with exit code 1.
+2026-05-12T09:14:42.1000000Z Post job cleanup step 1: restoring cache key nix-store-1 and removing temporary directories
+2026-05-12T09:14:42.2000000Z Post job cleanup step 2: restoring cache key nix-store-2 and removing temporary directories
+2026-05-12T09:14:42.3000000Z Post job cleanup step 3: restoring cache key nix-store-3 and removing temporary directories
+2026-05-12T09:14:42.4000000Z Post job cleanup step 4: restoring cache key nix-store-4 and removing temporary directories
+2026-05-12T09:14:42.5000000Z Post job cleanup step 5: restoring cache key nix-store-5 and removing temporary directories
+2026-05-12T09:14:42.6000000Z Post job cleanup step 6: restoring cache key nix-store-6 and removing temporary directories
+2026-05-12T09:14:42.7000000Z Post job cleanup step 7: restoring cache key nix-store-7 and removing temporary directories
+2026-05-12T09:14:42.8000000Z Post job cleanup step 8: restoring cache key nix-store-8 and removing temporary directories
+2026-05-12T09:14:42.9000000Z Post job cleanup step 9: restoring cache key nix-store-9 and removing temporary directories
+2026-05-12T09:14:42.10000000Z Post job cleanup step 10: restoring cache key nix-store-10 and removing temporary directories
+2026-05-12T09:14:42.11000000Z Post job cleanup step 11: restoring cache key nix-store-11 and removing temporary directories
+2026-05-12T09:14:42.12000000Z Post job cleanup step 12: restoring cache key nix-store-12 and removing temporary directories
+2026-05-12T09:14:42.13000000Z Post job cleanup step 13: restoring cache key nix-store-13 and removing temporary directories
+2026-05-12T09:14:42.14000000Z Post job cleanup step 14: restoring cache key nix-store-14 and removing temporary directories
+2026-05-12T09:14:42.15000000Z Post job cleanup step 15: restoring cache key nix-store-15 and removing temporary directories
+2026-05-12T09:14:42.16000000Z Post job cleanup step 16: restoring cache key nix-store-16 and removing temporary directories
+2026-05-12T09:14:42.17000000Z Post job cleanup step 17: restoring cache key nix-store-17 and removing temporary directories
+2026-05-12T09:14:42.18000000Z Post job cleanup step 18: restoring cache key nix-store-18 and removing temporary directories
+2026-05-12T09:14:42.19000000Z Post job cleanup step 19: restoring cache key nix-store-19 and removing temporary directories
+2026-05-12T09:14:42.20000000Z Post job cleanup step 20: restoring cache key nix-store-20 and removing temporary directories
+2026-05-12T09:14:42.21000000Z Post job cleanup step 21: restoring cache key nix-store-21 and removing temporary directories
+2026-05-12T09:14:42.22000000Z Post job cleanup step 22: restoring cache key nix-store-22 and removing temporary directories
+2026-05-12T09:14:42.23000000Z Post job cleanup step 23: restoring cache key nix-store-23 and removing temporary directories
+2026-05-12T09:14:42.24000000Z Post job cleanup step 24: restoring cache key nix-store-24 and removing temporary directories
+2026-05-12T09:14:42.25000000Z Post job cleanup step 25: restoring cache key nix-store-25 and removing temporary directories
+2026-05-12T09:14:42.26000000Z Post job cleanup step 26: restoring cache key nix-store-26 and removing temporary directories
+2026-05-12T09:14:42.27000000Z Post job cleanup step 27: restoring cache key nix-store-27 and removing temporary directories
+2026-05-12T09:14:42.28000000Z Post job cleanup step 28: restoring cache key nix-store-28 and removing temporary directories
+2026-05-12T09:14:42.29000000Z Post job cleanup step 29: restoring cache key nix-store-29 and removing temporary directories
+2026-05-12T09:14:42.30000000Z Post job cleanup step 30: restoring cache key nix-store-30 and removing temporary directories
+2026-05-12T09:14:50.0000000Z Cleaning up orphan processes

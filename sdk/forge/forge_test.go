@@ -171,22 +171,29 @@ func TestJobLogIsOptional(t *testing.T) {
 }
 
 func TestJobLogWireAndTail(t *testing.T) {
-	const params = `{` + target + `,"jobId":"42","tail":%d}`
+	const params = `{` + target + `,"jobId":"42","tail":%d,"errorLines":%d}`
 	for name, c := range map[string]struct {
-		log  string
-		tail int
-		want string
+		log      string
+		tail     int
+		errLines int
+		want     string
 	}{
-		"whole log fits":     {"abc\ndef", 100, `{"log":"abc\ndef"}`},
-		"keeps the tail":     {"abcdef", 3, `{"log":"def"}`},
-		"no tail, no cut":    {"abcdef", 0, `{"log":"abcdef"}`},
-		"cut on rune start":  {"aéb", 2, `{"log":"b"}`}, // "é" is 2 bytes; a cut inside it drops the half
-		"empty log":          {"", 10, `{"log":""}`},
-		"negative tail":      {"abcdef", -1, `{"log":"abcdef"}`},
-		"tail longer than s": {"ab", 3, `{"log":"ab"}`},
+		"whole log fits":     {"abc\ndef", 100, 0, `{"log":"abc\ndef"}`},
+		"keeps the tail":     {"abcdef", 3, 0, `{"log":"def"}`},
+		"no tail, no cut":    {"abcdef", 0, 0, `{"log":"abcdef"}`},
+		"cut on rune start":  {"aéb", 2, 0, `{"log":"b"}`}, // "é" is 2 bytes; a cut inside it drops the half
+		"empty log":          {"", 10, 0, `{"log":""}`},
+		"negative tail":      {"abcdef", -1, 0, `{"log":"abcdef"}`},
+		"tail longer than s": {"ab", 3, 0, `{"log":"ab"}`},
+		"error lines of the dropped head lead the tail": {"error: a\nnoise\nFAIL b\nxxxxyyyy", 8, 100, `{"log":"error: a\nFAIL b\nxxxxyyyy"}`},
+		"a head line cut mid-line is not whole":         {"error: a\nerror: bb", 5, 100, `{"log":"error: a\nr: bb"}`},
+		"a line that does not fit is skipped":           {"error: aaaaaaaa\nFAIL b\nxxxx", 4, 8, `{"log":"FAIL b\nxxxx"}`},
+		"no matching head lines":                        {"noise\nmore\nxxxx", 4, 100, `{"log":"xxxx"}`},
+		"zero errorLines is the plain tail":             {"error: a\nxxxx", 4, 0, `{"log":"xxxx"}`},
+		"a log that fits gains no extra lines":          {"error: a\nxxxx", 100, 100, `{"log":"error: a\nxxxx"}`},
 	} {
 		_, m := handlers(jobLogReader(t, c.log))
-		if got := call(t, m, "forge.jobLog", fmt.Sprintf(params, c.tail)); got != c.want {
+		if got := call(t, m, "forge.jobLog", fmt.Sprintf(params, c.tail, c.errLines)); got != c.want {
 			t.Errorf("%s: got %s, want %s", name, got, c.want)
 		}
 	}

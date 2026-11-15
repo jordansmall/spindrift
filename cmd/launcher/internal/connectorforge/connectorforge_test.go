@@ -418,9 +418,10 @@ func TestFailureDetailCarriesTheFailingJobLog(t *testing.T) {
 		}
 	}
 	wantCall := recordedCall{"forge.jobLog", map[string]any{
-		"target": map[string]any{"api": "https://api.example", "repo": "o/r"},
-		"jobId":  "42",
-		"tail":   float64(forge.JobLogKeepBytes),
+		"target":     map[string]any{"api": "https://api.example", "repo": "o/r"},
+		"jobId":      "42",
+		"tail":       float64(forge.JobLogKeepBytes),
+		"errorLines": float64(forge.MaxLogExcerptBytes),
 	}}
 	if len(logCalls) != 1 || !reflect.DeepEqual(logCalls[0], wantCall) {
 		t.Errorf("jobLog calls = %v, want [%v]", logCalls, wantCall)

@@ -16,6 +16,8 @@ package forge
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strings"
 	"unicode/utf8"
 
 	"spindrift.dev/sdk/connector"
@@ -179,6 +181,7 @@ func handlers(r Reader) ([]string, map[string]method) {
 				Target Target `json:"target"`
 				JobID  string `json:"jobId"`
 				Tail   int    `json:"tail"`
+				Errors int    `json:"errorLines"`
 			}
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
@@ -189,22 +192,42 @@ func handlers(r Reader) ([]string, map[string]method) {
 			}
 			return struct {
 				Log string `json:"log"`
-			}{tailBytes(log, p.Tail)}, nil
+			}{tailBytes(log, p.Tail, p.Errors)}, nil
 		}
 	}
 	return []string{"forge"}, m
 }
 
+// errorLineRE mirrors the launcher's forge.errorLineRE: the SDK is its own
+// module and cannot import it, and the two must pick the same lines; the
+// shared PRForge contract (forgetest.testFailureDetailOnFailingCheck) pins
+// that on both.
+var errorLineRE = regexp.MustCompile(`\bFAIL\b|\bpanic:|(?i:\berror:)`)
+
 // tailBytes returns s's last n bytes, starting on a rune boundary; n <= 0
 // means no cut. Core asks for a tail so a long log cannot outgrow the call's
-// output cap once JSON-escaped.
-func tailBytes(s string, n int) string {
+// output cap once JSON-escaped. When it cuts, up to errBudget bytes of the
+// dropped head's whole error lines lead the tail, so a failure's cause near
+// the start of the log survives; errBudget <= 0 keeps the plain tail.
+func tailBytes(s string, n, errBudget int) string {
 	if n <= 0 || len(s) <= n {
 		return s
 	}
-	s = s[len(s)-n:]
-	for len(s) > 0 && !utf8.RuneStart(s[0]) {
-		s = s[1:]
+	tail := s[len(s)-n:]
+	for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
+		tail = tail[1:]
 	}
-	return s
+	head := s[:len(s)-len(tail)]
+	head = head[:strings.LastIndexByte(head, '\n')+1] // whole lines only
+	var b strings.Builder
+	for errBudget > 0 && head != "" {
+		i := strings.IndexByte(head, '\n')
+		line := head[:i+1]
+		head = head[i+1:]
+		if len(line) <= errBudget && errorLineRE.MatchString(line) {
+			b.WriteString(line)
+			errBudget -= len(line)
+		}
+	}
+	return b.String() + tail
 }

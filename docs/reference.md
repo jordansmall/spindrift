@@ -962,7 +962,8 @@ box as `CI_FAILURE_SUMMARY`. On GitHub that is the check runs' summaries and
 the commit statuses' descriptions, read off the same fine-grained-PAT-safe
 GraphQL `statusCheckRollup` root `CheckState` reads; on Forgejo it is the
 commit statuses' descriptions. Each failing Actions job's log is also fetched
-and its tail (capped at `MaxLogExcerptBytes`, with a notice when trimmed) is
+and its tail (capped at `MaxLogExcerptBytes`, with a notice when trimmed, and
+preceded by any error lines — `FAIL`, `panic:`, `error:` — from earlier in the log, within that cap) is
 appended, since a GitHub Actions check-run summary is usually empty.
 `fix-prompt.md` renders it as a `# CI FAILURE` section ahead of `# CONTEXT`,
 so the fix agent sees which checks failed and why without calling a forge CLI
@@ -3434,7 +3435,7 @@ This is protocol version **0.3.0**. The host is
   | `forge.prsForBranch` | `{target, branch}` | `{prs}`, every PR whose head is `branch`, any state, newest first |
   | `forge.pr` | `{target, number}` | a PR |
   | `forge.checks` | `{target, number}` | `{state, checks}`, the rollup of the PR's head commit |
-  | `forge.jobLog` | `{target, jobId, tail}` | `{log}`, the last `tail` bytes of a job's log; optional |
+  | `forge.jobLog` | `{target, jobId, tail, errorLines}` | `{log}`, the last `tail` bytes of a job's log, preceded by the error lines of the head it cut, up to `errorLines` bytes (none when `errorLines` is absent or 0); optional |
 
   A PR is `{number, url, state, merged}`, plus, for a PR-capable forge,
   `{draft, head, headSha, mergeable, mergeCommit}` (each omitted when empty;
@@ -3443,8 +3444,10 @@ This is protocol version **0.3.0**. The host is
   (omitted when empty) naming the job whose log `forge.jobLog` reads. A
   Connector without `forge.jobLog`, or whose log read fails, still serves
   failure detail, only without logs. Core keeps the policy, including how much
-  of a log to keep: it asks for twice `forge.MaxLogExcerptBytes` and cuts the
-  rest.
+  of a log to keep: it asks for twice `forge.MaxLogExcerptBytes` as `tail`
+  plus `forge.MaxLogExcerptBytes` of `errorLines`, so a cause near the log's
+  start survives the cut as it does natively, and cuts the rest. An error
+  line is a whole line matching `FAIL`, `panic:` or `error:`.
   [`connectorforge.New`](../cmd/launcher/internal/connectorforge/connectorforge.go)
   builds core's PR reads from such a Connector: it pins PR URLs to the
   forge's web host and the target repository, refuses an unknown rollup

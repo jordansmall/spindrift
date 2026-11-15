@@ -3,10 +3,12 @@ package github
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/seamtest"
 )
 
@@ -90,6 +92,90 @@ func TestFailureDetail_SlowJobLogsAreBoundedByTheBudget(t *testing.T) {
 	for _, s := range []string{"build", "boom", "test", "bang"} {
 		if !strings.Contains(got, s) {
 			t.Errorf("detail %q missing %q", got, s)
+		}
+	}
+}
+
+// A failed nix check prints its decisive error and the FAIL lines mid-log,
+// then more than the tail keeps (issue #7084); the detail still carries them.
+func TestFailureDetail_NixCheckLogKeepsTheErrorBehindTheTail(t *testing.T) {
+	const url = "https://github.com/o/r/pull/9"
+	contexts := `[{"__typename":"CheckRun","name":"checks","conclusion":"FAILURE","summary":"",` +
+		`"detailsUrl":"https://github.com/o/r/actions/runs/1/job/11"}]`
+	dir := t.TempDir()
+	logPath, err := filepath.Abs(filepath.Join("testdata", "job-log-nix-check-7016.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\ncase \"$2\" in\ngraphql) printf '%s' '" + contexts + "' ;;\n*) cat '" + logPath + "' ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	got, err := NewExecClient("o/r", testLabels).FailureDetail(url)
+	if err != nil {
+		t.Fatalf("FailureDetail: %v", err)
+	}
+	if len(got) > forge.MaxFailureDetailBytes {
+		t.Errorf("detail is %d bytes, want at most %d", len(got), forge.MaxFailureDetailBytes)
+	}
+	for _, s := range []string{
+		"error: experimental Nix feature 'nix-command' is disabled",
+		"--- FAIL: TestSeamNixEval",
+		"Cleaning up orphan processes",
+	} {
+		if !strings.Contains(got, s) {
+			t.Errorf("detail missing %q:\n%s", s, got)
+		}
+	}
+}
+
+// #7016 failed on three platform legs at once: each excerpt gets a third of
+// the budget, and its error-line half shrinks with it.
+func TestFailureDetail_NixCheckLogOnThreeLegsKeepsEachLegsError(t *testing.T) {
+	const url = "https://github.com/o/r/pull/9"
+	legs := []string{"checks (x86_64-linux)", "checks (aarch64-linux)", "checks (aarch64-darwin)"}
+	var runs []string
+	for i, leg := range legs {
+		runs = append(runs, `{"__typename":"CheckRun","name":"`+leg+`","conclusion":"FAILURE","summary":"",`+
+			`"detailsUrl":"https://github.com/o/r/actions/runs/1/job/`+strconv.Itoa(11+i)+`"}`)
+	}
+	contexts := "[" + strings.Join(runs, ",") + "]"
+	dir := t.TempDir()
+	logPath, err := filepath.Abs(filepath.Join("testdata", "job-log-nix-check-7016.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\ncase \"$2\" in\ngraphql) printf '%s' '" + contexts + "' ;;\n*) cat '" + logPath + "' ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	got, err := NewExecClient("o/r", testLabels).FailureDetail(url)
+	if err != nil {
+		t.Fatalf("FailureDetail: %v", err)
+	}
+	if len(got) > forge.MaxFailureDetailBytes {
+		t.Errorf("detail is %d bytes, want at most %d", len(got), forge.MaxFailureDetailBytes)
+	}
+	sections := strings.Split(got, "---\n")
+	if len(sections) < len(legs) {
+		t.Fatalf("detail has %d sections, want one per leg:\n%s", len(sections), got)
+	}
+	for i, leg := range legs {
+		section := sections[i]
+		if !strings.HasPrefix(section, leg+": ") {
+			t.Fatalf("section %d does not open with leg %q:\n%s", i, leg, section)
+		}
+		for _, s := range []string{
+			"error: experimental Nix feature 'nix-command' is disabled",
+			"--- FAIL: TestSeamNixEval",
+		} {
+			if !strings.Contains(section, s) {
+				t.Errorf("leg %q missing %q:\n%s", leg, s, section)
+			}
 		}
 	}
 }
