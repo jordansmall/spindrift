@@ -3295,10 +3295,13 @@ This is protocol version **0.3.0**. The host is
   an oversized body (`ErrResponseTooLarge`) and a pointer outside module
   memory fail closed: the call fails and the Connector is closed. A transport
   failure is not fatal: status `0` hands the guest a fixed reason, never
-  the error detail. The response body is arbitrary upstream bytes: the host
-  checks only its size and the status/length framing, while the Connector's
-  result is schema-checked as for any call. A route does not restrict the query
-  string. Each Host call writes one JSON line to the audit log, with `connector`,
+  the error detail. The detail (the unset credential variable, the
+  transport's error) stays host-side: when the call then fails, `Call`'s
+  error carries it, and so does a primary row's `.log`. The response body is
+  arbitrary upstream bytes: the host checks only its size and the
+  status/length framing, while the Connector's result is schema-checked as
+  for any call. A route does not restrict the query string. Each Host call
+  writes one JSON line to the audit log, with `connector`,
   `route`, `method`, `host`, `path`, `query`, `status`, `size` and `decision`
   (`sent`, `refused` or `failed`), plus `reason` on a refusal or failure, and,
   when set, `shadow` (`true` on an entry a read-shadow Connector wrote),
