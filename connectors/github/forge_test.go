@@ -289,3 +289,89 @@ func TestChecksIgnoresJobURLOfAnotherRepo(t *testing.T) {
 		t.Fatalf("job ids = %v, want %v", got, want)
 	}
 }
+
+func ciRunFor(t *testing.T, nodes string) string {
+	t.Helper()
+	stub(t, map[string]connector.Response{
+		graphqlURL: ok(`{"data":{"repository":{"pullRequest":{"url":"https://github.com/o/r/pull/7","commits":{"nodes":[{"commit":{"statusCheckRollup":{
+			"state":"PENDING","contexts":{"nodes":[` + nodes + `]}}}}]}}}}}`),
+	})
+	got, err := ciRun(ftgt, "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func TestCIRunPrefersTheRunStillInFlight(t *testing.T) {
+	got := ciRunFor(t, `
+		{"__typename":"CheckRun","status":"COMPLETED","detailsUrl":"https://github.com/o/r/actions/runs/1/job/10"},
+		{"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"https://github.com/o/r/actions/runs/2/job/20"}`)
+	if want := "https://github.com/o/r/actions/runs/2"; got != want {
+		t.Fatalf("ciRun = %q, want %q", got, want)
+	}
+}
+
+func TestCIRunFallsBackToTheFirstRunWhenAllComplete(t *testing.T) {
+	got := ciRunFor(t, `
+		{"__typename":"StatusContext","context":"ci","state":"SUCCESS"},
+		{"__typename":"CheckRun","status":"COMPLETED","detailsUrl":"https://github.com/o/r/actions/runs/1/job/10"},
+		{"__typename":"CheckRun","status":"COMPLETED","detailsUrl":"https://github.com/o/r/actions/runs/2/job/20"}`)
+	if want := "https://github.com/o/r/actions/runs/1"; got != want {
+		t.Fatalf("ciRun = %q, want %q", got, want)
+	}
+}
+
+func TestCIRunIgnoresRunsOutsideTheTargetRepo(t *testing.T) {
+	got := ciRunFor(t, `
+		{"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"http://github.com/o/r/actions/runs/1"},
+		{"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"https://github.com/other/r/actions/runs/2"},
+		{"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"https://github.com/o/other/actions/runs/3"},
+		{"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"https://app.example/checks/4"},
+		{"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"https://evil.example/o/r/actions/runs/9"},
+		{"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"https://github.com/o/r/actions/runs/5?x=1"},
+		{"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"https://github.com/o/r/actions/runs/6#frag"},
+		{"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"https://user@github.com/o/r/actions/runs/7"},
+		{"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"HTTPS://github.com/o/r/actions/runs/8"},
+		{"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":null}`)
+	if got != "" {
+		t.Fatalf("ciRun = %q, want \"\"", got)
+	}
+}
+
+func TestCIRunSkipsAnOffHostRunAheadOfTheTargetHostsRun(t *testing.T) {
+	got := ciRunFor(t, `
+		{"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"https://evil.example/o/r/actions/runs/9"},
+		{"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"https://github.com/o/r/actions/runs/2/job/20"}`)
+	if want := "https://github.com/o/r/actions/runs/2"; got != want {
+		t.Fatalf("ciRun = %q, want %q", got, want)
+	}
+}
+
+func TestCIRunWithoutRollupIsEmpty(t *testing.T) {
+	stub(t, map[string]connector.Response{
+		graphqlURL: ok(`{"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"statusCheckRollup":null}}]}}}}}`),
+	})
+	got, err := ciRun(ftgt, "7")
+	if err != nil || got != "" {
+		t.Fatalf("ciRun = %q, %v; want \"\", nil", got, err)
+	}
+}
+
+func TestCIRunIsEmptyWhenThePRReportsNoURL(t *testing.T) {
+	stub(t, map[string]connector.Response{
+		graphqlURL: ok(`{"data":{"repository":{"pullRequest":{"url":"","commits":{"nodes":[{"commit":{"statusCheckRollup":{
+			"state":"PENDING","contexts":{"nodes":[
+			{"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"https://github.com/o/r/actions/runs/1"}]}}}}]}}}}}`),
+	})
+	got, err := ciRun(ftgt, "7")
+	if err != nil || got != "" {
+		t.Fatalf("ciRun = %q, %v; want \"\", nil", got, err)
+	}
+}
+
+func TestRollupQueryAsksForCheckRunStatus(t *testing.T) {
+	if !strings.Contains(rollupQuery, "status") {
+		t.Fatal("rollup query does not select the CheckRun status")
+	}
+}

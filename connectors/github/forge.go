@@ -10,9 +10,9 @@ import (
 	"spindrift.dev/sdk/forge"
 )
 
-// rollupQuery is the one GraphQL document the Connector sends: REST check-runs
+// rollupQuery reads checks through the GraphQL rollup: REST check-runs
 // answer 403 under a fine-grained PAT, the rollup does not.
-const rollupQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:50){nodes{__typename ... on CheckRun{name conclusion summary detailsUrl} ... on StatusContext{context state description}}}}}}}}}}`
+const rollupQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){url commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:50){nodes{__typename ... on CheckRun{name conclusion status summary detailsUrl} ... on StatusContext{context state description}}}}}}}}}}`
 
 type rawPR struct {
 	Number   int     `json:"number"`
@@ -65,7 +65,7 @@ func forgePath(t forge.Target, rest string) string { return "/repos/" + t.Repo +
 func parseNumber(number string) (int, error) {
 	n, err := strconv.Atoi(number)
 	if err != nil || n < 1 || strconv.Itoa(n) != number {
-		return 0, fmt.Errorf("PR number %q is not a positive integer", number)
+		return 0, fmt.Errorf("number %q is not a positive integer", number)
 	}
 	return n, nil
 }
@@ -123,6 +123,7 @@ type rawContext struct {
 	Typename    string  `json:"__typename"`
 	Name        string  `json:"name"`
 	Conclusion  string  `json:"conclusion"`
+	Status      string  `json:"status"`
 	Summary     *string `json:"summary"`
 	DetailsURL  *string `json:"detailsUrl"`
 	Context     string  `json:"context"`
@@ -141,27 +142,33 @@ func (c rawContext) check(repo string) forge.Check {
 	return forge.Check{Kind: c.Typename}
 }
 
-func checks(t forge.Target, number string) (forge.Rollup, error) {
+// rollup is the head commit's statusCheckRollup.
+type rollup struct {
+	State    string `json:"state"`
+	Contexts struct {
+		Nodes []rawContext `json:"nodes"`
+	} `json:"contexts"`
+}
+
+// readRollup reads the PR's head-commit rollup, nil when it reports no checks,
+// and the PR's web URL (reported either way).
+func readRollup(t forge.Target, number string) (*rollup, string, error) {
 	n, err := parseNumber(number)
 	if err != nil {
-		return forge.Rollup{}, err
+		return nil, "", err
 	}
 	owner, name, err := splitRepo(t.Repo)
 	if err != nil {
-		return forge.Rollup{}, err
+		return nil, "", err
 	}
 	var data struct {
 		Repository *struct {
 			PullRequest *struct {
+				URL     string `json:"url"`
 				Commits struct {
 					Nodes []struct {
 						Commit struct {
-							StatusCheckRollup *struct {
-								State    string `json:"state"`
-								Contexts struct {
-									Nodes []rawContext `json:"nodes"`
-								} `json:"contexts"`
-							} `json:"statusCheckRollup"`
+							StatusCheckRollup *rollup `json:"statusCheckRollup"`
 						} `json:"commit"`
 					} `json:"nodes"`
 				} `json:"commits"`
@@ -170,23 +177,75 @@ func checks(t forge.Target, number string) (forge.Rollup, error) {
 	}
 	vars := map[string]any{"owner": owner, "repo": name, "number": n}
 	if err := graphql(t.API, rollupQuery, vars, &data); err != nil {
-		return forge.Rollup{}, err
+		return nil, "", err
 	}
 	repo := data.Repository
 	if repo == nil || repo.PullRequest == nil {
-		return forge.Rollup{}, fmt.Errorf("POST /graphql: no pull request %s#%s", t.Repo, number)
+		return nil, "", fmt.Errorf("POST /graphql: no pull request %s#%s", t.Repo, number)
+	}
+	nodes := repo.PullRequest.Commits.Nodes
+	if len(nodes) == 0 {
+		return nil, repo.PullRequest.URL, nil
+	}
+	return nodes[0].Commit.StatusCheckRollup, repo.PullRequest.URL, nil
+}
+
+func checks(t forge.Target, number string) (forge.Rollup, error) {
+	roll, _, err := readRollup(t, number)
+	if err != nil {
+		return forge.Rollup{}, err
 	}
 	out := forge.Rollup{Checks: []forge.Check{}}
-	nodes := repo.PullRequest.Commits.Nodes
-	if len(nodes) == 0 || nodes[0].Commit.StatusCheckRollup == nil {
+	if roll == nil {
 		return out, nil
 	}
-	roll := nodes[0].Commit.StatusCheckRollup
 	out.State = roll.State
 	for _, c := range roll.Contexts.Nodes {
 		out.Checks = append(out.Checks, c.check(t.Repo))
 	}
 	return out, nil
+}
+
+// runURLRE matches a whole Actions run URL, with the /job/<id> segment a
+// CheckRun's detailsUrl carries optional. It is anchored over the raw string, as
+// the native adapter's is, so a query, fragment, userinfo or upper-case scheme
+// is refused rather than normalised away. Group 1 is the host, group 2
+// owner/repo, group 3 the run path.
+var runURLRE = regexp.MustCompile(`^https://([^/]+)/([^/]+/[^/]+)(/actions/runs/\d+)(?:/job/\d+)?/?$`)
+
+// ciRun is the URL of the head commit's Actions run: the first run with a
+// CheckRun still not COMPLETED, else the first run, so the link follows live
+// work rather than a finished sibling workflow. Only runs of the target repo on
+// the PR's own host count; "" when there is none, or when the PR reports no
+// URL. The /job/<id> segment is dropped so the URL stays stable as a run's jobs
+// register.
+func ciRun(t forge.Target, number string) (string, error) {
+	roll, prURL, err := readRollup(t, number)
+	if err != nil || roll == nil {
+		return "", err
+	}
+	var host string
+	if p, err := url.Parse(prURL); err == nil {
+		host = p.Host
+	}
+	var first string
+	for _, c := range roll.Contexts.Nodes {
+		if c.Typename != "CheckRun" {
+			continue
+		}
+		m := runURLRE.FindStringSubmatch(deref(c.DetailsURL))
+		if m == nil || !strings.EqualFold(m[1], host) || !strings.EqualFold(m[2], t.Repo) {
+			continue
+		}
+		run := "https://" + m[1] + "/" + m[2] + m[3]
+		if c.Status != "COMPLETED" {
+			return run, nil
+		}
+		if first == "" {
+			first = run
+		}
+	}
+	return first, nil
 }
 
 // jobPathRE matches the path of a workflow job's web page, the detailsUrl of a

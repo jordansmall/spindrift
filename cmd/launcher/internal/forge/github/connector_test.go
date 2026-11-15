@@ -54,6 +54,7 @@ type scriptedContext struct {
 	TypeName    string `json:"__typename"`
 	Name        string `json:"name,omitempty"`
 	Conclusion  string `json:"conclusion,omitempty"`
+	Status      string `json:"status,omitempty"`
 	Summary     string `json:"summary,omitempty"`
 	DetailsURL  string `json:"detailsUrl,omitempty"`
 	Context     string `json:"context,omitempty"`
@@ -393,6 +394,7 @@ func (b *restBackend) graphql(w http.ResponseWriter, r *http.Request, reject fun
 		rollup = map[string]any{"state": state, "contexts": map[string]any{"nodes": nodes}}
 	}
 	writeJSON(w, map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{
+		"url":     b.prURL(p.num),
 		"commits": map[string]any{"nodes": []any{map[string]any{"commit": map[string]any{"statusCheckRollup": rollup}}}},
 	}}}})
 }
