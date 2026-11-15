@@ -20,6 +20,7 @@ import (
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/inputdoc"
+	"spindrift.dev/launcher/internal/secretcmd"
 )
 
 // MODEL must stay sonnet-5 and not regress to opus-4-8 or an older release
@@ -1154,21 +1155,6 @@ func TestParseFlags_CmdFlag_MissingValue(t *testing.T) {
 	}
 }
 
-// toKebab mirrors lib/renderers.nix's toKebab, which maps an env name to its
-// kebab-case vault-item form.
-func TestToKebab_ReplacesUnderscoresAndLowercases(t *testing.T) {
-	cases := map[string]string{
-		"GH_TOKEN":                "gh-token",
-		"CLAUDE_CODE_OAUTH_TOKEN": "claude-code-oauth-token",
-		"ANTHROPIC_API_KEY":       "anthropic-api-key",
-	}
-	for env, want := range cases {
-		if got := toKebab(env); got != want {
-			t.Errorf("toKebab(%q) = %q, want %q", env, got, want)
-		}
-	}
-}
-
 // resolveGlobalSecretCmd runs the same two-step sequence main() runs.
 // applySecretCmdFallback must run after launcherInput is in place, so it is not
 // folded into parseFlags. Callers that need a document must useDoc it first.
@@ -1181,7 +1167,7 @@ func resolveGlobalSecretCmd(t *testing.T, args []string) error {
 }
 
 // --secret-cmd is a templated fallback below every per-secret form: {name}
-// substitutes toKebab(env), and it fires only for a secret the run requires.
+// substitutes secretcmd.Template, and it fires only for a secret the run requires.
 // The fixture pre-satisfies the Claude/Anthropic pair and leaves the Jira and
 // Box tokens unneeded, so only GH_TOKEN should reach secretCmdRunner.
 func TestParseFlags_GlobalSecretCmd_RunsTemplate(t *testing.T) {
@@ -1812,7 +1798,7 @@ func TestApplySecretCmdFallback_DriverCredentials(t *testing.T) {
 				if strings.Contains(err.Error(), "rbw get") {
 					t.Errorf("error %q leaks the command string", err)
 				}
-				if !strings.Contains(err.Error(), secretCmdUnlockHint) {
+				if !strings.Contains(err.Error(), secretcmd.UnlockHint) {
 					t.Errorf("error %q lacks the unlock hint", err)
 				}
 			}
