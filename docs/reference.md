@@ -2896,11 +2896,13 @@ the Driver replay, with these differences:
   `sandbox_calls` and `sandbox_host_calls` (exchanges, and `http_request` Host
   calls plus refused Host-call frames, across the pipe) and `sandbox_hop_ns`
   (their wall time less the Launcher's Host-call handling, guest execution
-  included); all are absent when no sandbox started. Only a host-side read
-  shadow writes them, so a sandboxed run with no `Shadow` backend row reports
-  no sandbox cost. Totals are run-wide, as one sandbox serves every Connector
-  the run hosts, and each shadowed backend repeats them on its own summary:
-  read one, do not sum them.
+  included); all are absent when no sandbox started. The host-side summary
+  also always carries `in_process_loads`, the loads through the Launcher's
+  Connector routing point (`connectorsandbox`) that fell back to its own
+  process: `0` means none did. Only a host-side read shadow writes them, so a
+  sandboxed run with no `Shadow` backend row reports no sandbox cost. Totals
+  are run-wide, as one sandbox serves every Connector the run hosts, and each
+  shadowed backend repeats them on its own summary: read one, do not sum them.
 
 The host classifies a 403 or 429 itself, since the guest sees only status and
 body, and marks the audit line: `shadow` is `true` on every entry a shadow
@@ -3585,6 +3587,17 @@ Driver Connectors); a run that loads none starts none.
   `connector-host-escapeprobe-absent-from-release` check keeps the tag out of
   the Launcher, the daemon, the Box's binaries, the release `connector-host`
   and the release sandbox image.
+- **Dogfood.** spindrift's own dogfood turns `CONNECTOR_SANDBOX` on
+  (`connectorSandbox` in `nix/dogfood-defaults.nix`, which the fixtures mirror
+  inherits; the `connector-driver-rows-dogfood-sandbox` check asserts both
+  carry it), so its github read shadow and any Launcher-hosted claude Driver
+  load in the sandbox; its shadow and primary settings are unchanged. A
+  dogfood run's `shadow_summary` should show the sandbox's start and hop
+  totals and `in_process_loads` of `0` (see [Backend read
+  shadow](#backend-read-shadow)). The bar for making the sandbox mandatory and
+  removing the knob (issue #7022) is 20 consecutive clean dogfood runs with it
+  on, meaning no sandbox start failures and no divergences or audit refusals
+  attributable to the sandbox, plus the human macOS check (issue #7021).
 
 #### Pinned wazero
 
