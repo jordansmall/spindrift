@@ -616,6 +616,45 @@ func TestUseRoundTripsAndValidatesShadowRows(t *testing.T) {
 	}
 }
 
+func TestUseRoundTripsAndValidatesPrimaryRows(t *testing.T) {
+	primary := func() backendrows.Row {
+		r := row("gh", getRepos)
+		r.Primary = true
+		return r
+	}
+	t.Run("round trip", func(t *testing.T) {
+		isolate(t)
+		if err := backendrows.Use(rows(t, []backendrows.Row{primary()}), noEnv); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := backendrows.Lookup("gh")
+		if !got.Primary {
+			t.Errorf("Lookup = %+v, want primary", got)
+		}
+		if strings.Contains(string(rows(t, []backendrows.Row{row("x", getRepos)})), "primary") {
+			t.Error("a non-primary row renders a primary key")
+		}
+	})
+	t.Run("refused with shadow", func(t *testing.T) {
+		isolate(t)
+		r := primary()
+		r.Shadow, r.ShadowEvery = true, 20
+		err := backendrows.Use(rows(t, []backendrows.Row{r}), noEnv)
+		if err == nil || !strings.Contains(err.Error(), "primary and shadow are exclusive") || !strings.Contains(err.Error(), `"gh"`) {
+			t.Errorf("err = %v, want it to name gh and refuse primary with shadow", err)
+		}
+	})
+	t.Run("unusable base is refused", func(t *testing.T) {
+		isolate(t)
+		r := baseRow(baseSearch)
+		r.Primary = true
+		err := backendrows.Use(rows(t, []backendrows.Row{r}), envOf(""))
+		if err == nil || !strings.Contains(err.Error(), "SITE_BASE_URL is not set") {
+			t.Errorf("err = %v, want it to name SITE_BASE_URL as not set", err)
+		}
+	})
+}
+
 func TestLoadPassesShadowAndObserveToTheNetwork(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") }))
 	t.Cleanup(srv.Close)
