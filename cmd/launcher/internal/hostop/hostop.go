@@ -238,7 +238,9 @@ type ShadowDivergence struct {
 // (sampled calls dropped rather than delay the native path). The Sandbox*
 // fields are the run's Connector sandbox, shared by every Connector the run
 // hosts, so run-wide totals when the summary is written; only the host-side
-// read shadow sets them, and only when a sandbox started.
+// read shadow sets them, and only when a sandbox started. InProcessLoads is
+// likewise host-only but always set there, so an explicit 0 shows a sandboxed
+// run kept every Connector out of the Launcher's process.
 type ShadowSummary struct {
 	Driver               string `json:"driver"`
 	Loaded               bool   `json:"loaded"`
@@ -256,4 +258,5 @@ type ShadowSummary struct {
 	SandboxCalls         int64  `json:"sandbox_calls,omitempty"`
 	SandboxHostCalls     int64  `json:"sandbox_host_calls,omitempty"`
 	SandboxHopNs         int64  `json:"sandbox_hop_ns,omitempty"`
+	InProcessLoads       *int64 `json:"in_process_loads,omitempty"`
 }

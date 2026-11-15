@@ -591,3 +591,38 @@ func TestSummaryWithoutASandboxEncodesNoSandboxKey(t *testing.T) {
 		t.Fatalf("summary = %s, want no sandbox_ key", b)
 	}
 }
+
+// loadsThrough is an Open that routes its load through the Launcher's one
+// routing point, as the real one does.
+func loadsThrough(ctx context.Context, _ func(connectorhost.AuditEntry)) (Reads, error) {
+	_, _ = connectorsandbox.Load(ctx, []byte("not a wasm module"))
+	return Reads{}, nil
+}
+
+type sandboxedLoad struct{ statsSandbox }
+
+func (sandboxedLoad) Load(context.Context, []byte) (*connectorhost.Connector, error) {
+	return nil, errors.New("sandboxed")
+}
+
+func (sandboxedLoad) LoadNetwork(context.Context, []byte, connectorhost.Network) (*connectorhost.Connector, error) {
+	return nil, errors.New("sandboxed")
+}
+
+func TestSummaryCountsInProcessLoads(t *testing.T) {
+	summary := func() hostop.ShadowSummary {
+		r := newRig(t, 1, loadsThrough)
+		_, _ = r.Tracker(seededFake()).Issue("7")
+		return r.closeAndSummary(t)
+	}
+
+	before := connectorsandbox.InProcessLoads()
+	if s := summary(); s.InProcessLoads == nil || *s.InProcessLoads != before+1 {
+		t.Fatalf("in_process_loads = %v with no sandbox, want %d", s.InProcessLoads, before+1)
+	}
+
+	t.Cleanup(connectorsandbox.Use(sandboxedLoad{}))
+	if s := summary(); s.InProcessLoads == nil || *s.InProcessLoads != before+1 {
+		t.Fatalf("in_process_loads = %v under a sandbox, want the count unchanged at %d", s.InProcessLoads, before+1)
+	}
+}

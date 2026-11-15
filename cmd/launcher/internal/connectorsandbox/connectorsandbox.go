@@ -53,6 +53,16 @@ func Use(l Loader) (restore func()) {
 	return func() { current.Store(prev) }
 }
 
+// inProcess counts the loads that fell back to the Launcher's own address
+// space. It is not part of Report, which says nothing when no sandbox started.
+// It is never reset: tests read a before/after delta, so none that loads here
+// may run in parallel.
+var inProcess atomic.Int64
+
+// InProcessLoads is how many Connectors this process loaded in-process rather
+// than into a sandbox; a sandboxed Launcher leaves it at zero.
+func InProcessLoads() int64 { return inProcess.Load() }
+
 func installed() Loader {
 	if h := current.Load(); h != nil {
 		return h.l
@@ -65,6 +75,7 @@ func Load(ctx context.Context, wasm []byte) (*connectorhost.Connector, error) {
 	if l := installed(); l != nil {
 		return l.Load(ctx, wasm)
 	}
+	inProcess.Add(1)
 	return connectorhost.Load(ctx, wasm)
 }
 
@@ -74,6 +85,7 @@ func LoadNetwork(ctx context.Context, wasm []byte, n connectorhost.Network) (*co
 	if l := installed(); l != nil {
 		return l.LoadNetwork(ctx, wasm, n)
 	}
+	inProcess.Add(1)
 	return connectorhost.LoadNetwork(ctx, wasm, n)
 }
 
