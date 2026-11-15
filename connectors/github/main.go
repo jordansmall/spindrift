@@ -50,7 +50,6 @@ func init() {
 		BranchExists: branchExists,
 		DeleteBranch: deleteBranch,
 	})
-	// CIRun stays nil: nothing needs the CI run URL from the Connector.
 	forge.RegisterPRs(forge.PRs{
 		Open:             open,
 		Behind:           behind,
@@ -61,6 +60,7 @@ func init() {
 		AutoMergeAllowed: autoMergeAllowed,
 		EnqueueAutoMerge: enqueueAutoMerge,
 		BranchProtected:  branchProtected,
+		CIRun:            ciRun,
 		Probe:            probe,
 		TokenGrant:       tokenGrant,
 	})

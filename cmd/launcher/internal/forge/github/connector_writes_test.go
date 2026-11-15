@@ -474,9 +474,9 @@ func (h *connectorHarness) SeedProtection(branch string, classic, rulesets int) 
 func (h *connectorHarness) comments(url string) []string { return h.prView(url).comments }
 
 // declaredForgeCaps is exactly the forge capabilities the github Connector's
-// handshake declares: no CI run URL and no push-only mode.
+// handshake declares: no push-only mode.
 var declaredForgeCaps = []string{
-	"forge", "forge.branches", "forge.prs", "forge.draftPRs", "forge.autoMerge", "forge.branchProtection", "forge.probe", "forge.tokenGrant",
+	"forge", "forge.branches", "forge.prs", "forge.draftPRs", "forge.autoMerge", "forge.branchProtection", "forge.ciRun", "forge.probe", "forge.tokenGrant",
 }
 
 func testComposedCapabilities(t *testing.T, h *connectorHarness) {
@@ -491,11 +491,8 @@ func testComposedCapabilities(t *testing.T, h *connectorHarness) {
 		t.Errorf("handshake forge capabilities = %v, want %v", got, want)
 	}
 	c := h.caps
-	if c.PRForge == nil || c.DraftPRCreator == nil || c.BranchPusher == nil || c.BranchProtectionForge == nil || c.MergeCommitReader == nil || c.BranchDeleter == nil {
+	if c.PRForge == nil || c.DraftPRCreator == nil || c.BranchPusher == nil || c.BranchProtectionForge == nil || c.CIRunReporter == nil || c.MergeCommitReader == nil || c.BranchDeleter == nil {
 		t.Errorf("composed forge lacks a surface the Connector declares: %+v", c)
-	}
-	if c.CIRunReporter != nil {
-		t.Error("composed forge offers a CIRunReporter, but the Connector declares no forge.ciRun")
 	}
 }
 
