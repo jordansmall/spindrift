@@ -22,6 +22,9 @@ const ProtocolVersion = "0.3.0"
 // a connector_call adds an allowance per byte of the request the host sends
 // (limitsFor), since a correct Connector's time, memory and output grow with its
 // input, while a hostile one is still bounded by what the host chose to send.
+// The time budget also stops while the guest waits on an http_request and grows
+// with the response bytes delivered (budget), capped by maxHTTPRequests and
+// maxResponseCredit.
 const (
 	callBudget = 5 * time.Second
 	// initBudget covers _initialize, which boots Go's runtime inside the
@@ -37,7 +40,8 @@ const (
 	// \ grow), though control bytes and invalid UTF-8 grow up to 6x. It bounds every
 	// scaled limit below: at maxRequest a call gets at most 5 s + 8 min, 192 MiB
 	// of memory and 56 MiB of output, so a looping or leaking Connector cannot
-	// be handed more by a large request.
+	// be handed more by a large request. Response credit (maxResponseCredit) adds
+	// to the time, but only for bytes the host itself delivered.
 	maxRequest = 8 << 20
 	// The allowances per request byte, sized from the fixture Driver's decode under
 	// the interpreter: time is linear in request bytes at 4 to 11 s per MiB, peak
@@ -48,6 +52,12 @@ const (
 	budgetPerMiB         = 60 * time.Second
 	memoryPerRequestByte = 16
 	outputPerRequestByte = 6
+	// maxHTTPRequests bounds the http_requests in one call. The clock stops while
+	// one is served, so this, not the budget, bounds a guest looping on them.
+	maxHTTPRequests = 128
+	// maxResponseCredit bounds the response bytes one call earns budgetPerMiB for,
+	// so the credit is at most 32 min however much the host delivers.
+	maxResponseCredit = 32 << 20
 	// maxTableEntries bounds the tables' declared minimums together, since wazero
 	// allocates them in full at instantiation. A Go reactor declares ~6000 entries.
 	maxTableEntries = 1 << 16
@@ -103,6 +113,7 @@ var (
 	// wasm or an unlinkable import, matches only this. A context deadline that
 	// passed also matches context.DeadlineExceeded. A Host call that fails closed
 	// during the handshake (see ErrCall) surfaces here with its own sentinel.
+	// A call past maxHTTPRequests also matches ErrHTTPRequestLimit.
 	ErrHandshake = errors.New("connector handshake failed")
 	// ErrCall marks a failed connector_call. It wraps the specific cause, which
 	// still matches its own sentinel: ErrBudget, ErrTrap, ErrMemoryCap,
@@ -117,6 +128,7 @@ var (
 	// reason, a ResolveExit answer that breaks the invariant), matches only ErrCall
 	// and stays usable (the error is a *CallError carrying its Class); so does a
 	// request refused as ErrRequestTooLarge, which never reaches the guest.
+	// A call past maxHTTPRequests also matches ErrHTTPRequestLimit.
 	ErrCall = errors.New("connector call failed")
 	// ErrExport marks an export that is missing or lacks the signature the ABI
 	// gives it: connector_handshake takes nothing and returns an i64,
@@ -128,6 +140,9 @@ var (
 	// ErrBudget marks a call that ran past its wall-clock budget. wazero has no
 	// instruction budget, so wall-clock time is the only bound on a looping guest.
 	ErrBudget = errors.New("connector call exceeded its time budget")
+	// ErrHTTPRequestLimit marks a call that made more than maxHTTPRequests
+	// http_requests; the host refuses the one past the limit.
+	ErrHTTPRequestLimit = errors.New("connector call exceeded its http_request limit")
 	// ErrTrap marks a module that trapped or exited during a call. Go's wasip1
 	// runtime turns a panic into proc_exit(2), so a panic surfaces here too.
 	ErrTrap = errors.New("connector trapped")

@@ -26,6 +26,9 @@ const (
 	MaxModuleLocals = maxModuleLocals
 	CallBudget      = callBudget
 	InitBudget      = initBudget
+
+	MaxHTTPRequests   = maxHTTPRequests
+	MaxResponseCredit = maxResponseCredit
 )
 
 // The per-request-byte allowances, exposed with LimitsFor.
