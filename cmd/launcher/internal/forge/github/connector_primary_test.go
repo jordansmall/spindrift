@@ -340,6 +340,32 @@ func TestPrimaryRow_RoutedReadsRecordTheirFailures(t *testing.T) {
 	}
 }
 
+// A request the host admitted but could not send surfaces its host-side reason
+// in the read's error and the primary log, naming the credential variable and
+// never its value.
+func TestPrimaryRow_UnsetCredentialIsNamedInTheReadErrorAndRecord(t *testing.T) {
+	_, c, _, logDir := primaryHarness(t, useGithubRowPrimary)
+	t.Setenv(tokenCredentialEnv, "")
+
+	_, err := c.Issue("1")
+	want := tokenCredentialEnv + " is not set"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v, want it to name %q", err, want)
+	}
+
+	logs := primaryFiles(t, logDir, ".log")
+	if len(logs) != 1 {
+		t.Fatalf("primary logs = %v, want one", logs)
+	}
+	raw, _ := os.ReadFile(logs[0])
+	if !strings.Contains(string(raw), want) {
+		t.Errorf("primary log %q lacks %q", raw, want)
+	}
+	if strings.Contains(err.Error()+string(raw), connectorToken) {
+		t.Errorf("the credential value leaked into the error or log: %v / %q", err, raw)
+	}
+}
+
 // Under a primary row token introspection audits to the primary record, not the
 // plain row's token log.
 func TestPrimaryRow_TokenIntrospectionAuditsToThePrimaryRecord(t *testing.T) {
