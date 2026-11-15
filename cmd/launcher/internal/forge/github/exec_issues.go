@@ -119,6 +119,9 @@ func (e *execClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 // ListIssues it passes no --label filter, so issues with no dispatch label
 // yet are included.
 func (e *execClient) ListOpenIssues() ([]forge.Issue, error) {
+	if row, ok := primaryRow(); ok {
+		return e.listOpenIssuesViaConnector(row)
+	}
 	cmd := exec.Command("gh", "issue", "list",
 		"--repo", e.repo,
 		"--state", "open",
@@ -141,6 +144,9 @@ func (e *execClient) ListOpenIssues() ([]forge.Issue, error) {
 // merge, dedup-by-number, and partial-failure handling live in
 // forge.MergeLabeledIssues.
 func (e *execClient) ListIssuesWithLabels(state forge.IssueState, labels []string) ([]forge.Issue, error) {
+	if row, ok := primaryRow(); ok {
+		return e.listIssuesWithLabelsViaConnector(row, state, labels)
+	}
 	var ghState string
 	switch state {
 	case forge.IssueOpen, forge.IssueClosed:
@@ -171,6 +177,9 @@ func (e *execClient) ListIssuesWithLabels(state forge.IssueState, labels []strin
 }
 
 func (e *execClient) Issue(num string) (forge.Issue, error) {
+	if row, ok := primaryRow(); ok {
+		return e.issueViaConnector(row, num)
+	}
 	cmd := exec.Command("gh", "issue", "view", num,
 		"--repo", e.repo,
 		"--json", "number,title,body,state,labels",
@@ -215,6 +224,9 @@ type ghComment struct {
 // Comments returns issue num's comments oldest-first, the order gh emits them
 // in and the order forge.IssueText assumes when it windows to the last 10.
 func (e *execClient) Comments(num string) ([]forge.Comment, error) {
+	if row, ok := primaryRow(); ok {
+		return e.commentsViaConnector(row, num)
+	}
 	cmd := exec.Command("gh", "issue", "view", num,
 		"--repo", e.repo,
 		"--json", "comments",
@@ -302,8 +314,13 @@ func (e *execClient) AddLabels(num string, labels []string) error {
 var _ forge.IssueLabeler = (*execClient)(nil)
 
 // issueLabels skips the title/body/state fields Issue fetches; CompleteVerdict's
-// InProgress precondition check needs nothing but the labels.
+// InProgress precondition check needs nothing but the labels. Under a primary
+// row the Connector's Issue read answers it.
 func (e *execClient) issueLabels(num string) ([]string, error) {
+	if row, ok := primaryRow(); ok {
+		iss, err := e.issueViaConnector(row, num)
+		return iss.Labels, err
+	}
 	cmd := exec.Command("gh", "issue", "view", num,
 		"--repo", e.repo,
 		"--json", "labels",
@@ -359,6 +376,9 @@ var _ forge.NativeDepsReader = (*execClient)(nil)
 // NativeDepsOf reads issue num's blocked_by relationships from GitHub's
 // native issue-dependencies API.
 func (e *execClient) NativeDepsOf(num string) ([]string, error) {
+	if row, ok := primaryRow(); ok {
+		return e.nativeDepsViaConnector(row, num)
+	}
 	return e.nativeDependencyIDs(num, "blocked_by")
 }
 
@@ -367,6 +387,9 @@ func (e *execClient) NativeDepsOf(num string) ([]string, error) {
 // relationship, so unlike DepsOf there is no body-text fallback and a lookup
 // failure is returned directly (issue #1744).
 func (e *execClient) BlocksOf(num string) ([]forge.Dependency, error) {
+	if row, ok := primaryRow(); ok {
+		return e.blocksOfViaConnector(row, num)
+	}
 	ids, err := e.nativeDependencyIDs(num, "blocking")
 	if err != nil {
 		return nil, err
@@ -493,6 +516,9 @@ var _ forge.HostPostedIssueFiler = (*execClient)(nil)
 // is rejected rather than escaped; a backslash is rejected too, since the search
 // parser may read `\"` as an escaped quote.
 func (e *execClient) SearchIssues(text string, state forge.IssueState, label string, limit int) ([]forge.Issue, error) {
+	if row, ok := primaryRow(); ok {
+		return e.searchIssuesViaConnector(row, text, state, label, limit)
+	}
 	switch state {
 	case forge.IssueOpen, forge.IssueClosed:
 	default:

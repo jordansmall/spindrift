@@ -44,6 +44,9 @@ var ErrNotForge = errors.New("connector is not a forge")
 // ErrNoWebHost marks a New call with no web host to pin PR URLs to.
 var ErrNoWebHost = errors.New("no forge web host to pin PR URLs to")
 
+// ErrNoGit marks a Rebase on a NewReader view, which has no core git under it.
+var ErrNoGit = errors.New("connector forge reader has no git to rebase with")
+
 // ErrAnswer marks a Connector answer the core refuses (a malformed PR, a PR
 // other than the one asked for, or an unknown rollup state), as opposed to a
 // protocol failure, which wraps connectorhost.ErrCall.
@@ -135,6 +138,22 @@ func New(c *connectorhost.Connector, writes forge.PRForge, target Target, webHos
 		return nil, ErrNoWebHost
 	}
 	return newForge(classedCall(c, retry.Clock{}), writes, target, webHost), nil
+}
+
+// NewReader composes c's forge for a host that reads through the Connector
+// alone: the same PR and branch reads Compose offers, with no git and no native
+// writes under it. Only those reads are meant to be called: Rebase needs the git
+// Compose supplies and fails with ErrNoGit, and the writes would reach the
+// Connector.
+func NewReader(c *connectorhost.Connector, target Target, webHost string) (forge.CodeForge, error) {
+	if !slices.Contains(c.Capabilities, capForge) {
+		return nil, fmt.Errorf("%w: capabilities %v lack \"forge\"", ErrNotForge, c.Capabilities)
+	}
+	if webHost == "" {
+		return nil, ErrNoWebHost
+	}
+	p := &pushOnly{conn: c, call: classedCall(c, retry.Clock{}), target: target}
+	return composePR(p, c.Capabilities, webHost, false), nil
 }
 
 func newForge(call guestCall, writes forge.PRForge, target Target, webHost string) forge.PRForge {

@@ -29,15 +29,21 @@ var connectorClient *http.Client
 // the row's Connector answers, so the host needs no gh; backend rows are
 // opt-in, so without one (or under a shadow row) the native gh probe does and
 // the read-only token gate keeps detecting a write-capable token. A Connector
-// load is short-lived, with its audit record in the host's log directory.
+// load is short-lived, with its audit record in the host's log directory: the
+// run's primary record under a primary row.
 func introspectToken(token, repoSlug string) (backendkit.TokenIntrospection, error) {
 	row, ok := routedRow()
 	if !ok {
 		return nativeIntrospect(token, repoSlug)
 	}
-	audit, closeAudit := openAudit(tokenAuditLog)
+	auditName := tokenAuditLog
+	if row.Primary {
+		auditName = primaryRecordName(".audit.jsonl")
+	}
+	audit, closeAudit := openAudit(auditName)
 	defer closeAudit()
-	return introspectViaConnector(row, backendrows.Options{Audit: audit, Client: connectorClient}, token, repoSlug)
+	got, err := introspectViaConnector(row, backendrows.Options{Audit: audit, Client: connectorClient}, token, repoSlug)
+	return got, notePrimary(row, "introspect the token", err)
 }
 
 var nativeIntrospect = newTokenIntrospector(TokenOAuthScopes, TokenRepoPushPermission)
@@ -46,19 +52,26 @@ var nativeIntrospect = newTokenIntrospector(TokenOAuthScopes, TokenRepoPushPermi
 // written must not fail the check, so an unopenable file discards, as the
 // shadow logs do.
 func openAudit(name string) (io.Writer, func()) {
+	w, closeAudit, _ := openAuditFile(name)
+	return w, closeAudit
+}
+
+// openAuditFile is openAudit that also returns why the file could not be
+// opened, for a caller that must report a record it lost.
+func openAuditFile(name string) (io.Writer, func(), error) {
 	pwd, err := os.Getwd()
 	if err != nil {
-		return io.Discard, func() {}
+		return io.Discard, func() {}, err
 	}
 	dir := hostpaths.LogDir(pwd)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return io.Discard, func() {}
+		return io.Discard, func() {}, err
 	}
 	f, err := os.OpenFile(filepath.Join(dir, name), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
-		return io.Discard, func() {}
+		return io.Discard, func() {}, err
 	}
-	return f, func() { _ = f.Close() }
+	return f, func() { _ = f.Close() }, nil
 }
 
 // loadConnector loads row's Connector bound to repoSlug, and returns it with
