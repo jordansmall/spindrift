@@ -325,3 +325,42 @@ func TestNetworkFixtureFloodStopsAtTheHTTPRequestLimit(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+// A single http_request past the per-request timeout fails as a send failure
+// the guest sees, not as a spent call budget, and leaves the Connector usable.
+func TestNetworkFixtureRequestTimeoutIsASendFailureNotABudgetOverrun(t *testing.T) {
+	for name, ld := range netLoadersFor(t) {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			release := make(chan struct{})
+			b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/repos/stall" {
+					<-release
+				}
+				fmt.Fprint(w, "scripted "+r.URL.Path)
+			})
+			t.Cleanup(func() { close(release) })
+			audit := &bytes.Buffer{}
+			n := netFor(b, audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+			n.SetRequestTimeout(300 * time.Millisecond)
+			c := loadNetWith(t, ld, fixture(t, "network.wasm"), n)
+			err := c.Call(context.Background(), "fetch", map[string]string{"url": b.URL + "/repos/stall", "method": "GET"}, new(fetched))
+			if err == nil || !strings.Contains(err.Error(), connectorhost.ErrHTTPSend.Error()) {
+				t.Fatalf("err = %v, want the guest's send failure", err)
+			}
+			if !strings.Contains(err.Error(), "no response within 300ms") {
+				t.Errorf("err = %v, want the timeout named", err)
+			}
+			if errors.Is(err, connectorhost.ErrBudget) {
+				t.Errorf("err = %v, want no budget overrun", err)
+			}
+			if lines := auditLines(t, audit); len(lines) != 1 || !strings.Contains(lines[0].Reason, "no response within 300ms") {
+				t.Errorf("audit = %+v, want the timeout named in the audit reason", lines)
+			}
+			var out fetched
+			if err := c.Call(context.Background(), "fetch", map[string]string{"url": b.URL + "/repos/x", "method": "GET"}, &out); err != nil || out.Body != "scripted /repos/x" {
+				t.Errorf("second call = %+v, %v, want the Connector still usable", out, err)
+			}
+		})
+	}
+}

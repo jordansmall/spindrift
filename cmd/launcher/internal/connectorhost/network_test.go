@@ -685,3 +685,50 @@ func TestNetworkFollowRedirectHeadersAreTheHopsNotTheOrigins(t *testing.T) {
 		t.Fatalf("headers = %v, err %v, want the hop's", h, err)
 	}
 }
+
+func TestNetworkRequestTimeoutFailsAStalledSendNamingTheTimeout(t *testing.T) {
+	release := make(chan struct{})
+	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) { <-release })
+	t.Cleanup(func() { close(release) })
+	audit := &bytes.Buffer{}
+	n := netFor(b, audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+	n.SetRequestTimeout(200 * time.Millisecond)
+	_, _, err := n.Do(context.Background(), []byte(fmt.Sprintf(`{"method":"GET","url":"%s/repos/x"}`, b.URL)), 1<<10)
+	if !errors.Is(err, connectorhost.ErrHTTPSend) || errors.Is(err, connectorhost.ErrBudget) {
+		t.Fatalf("err = %v, want ErrHTTPSend and not ErrBudget", err)
+	}
+	if !strings.Contains(err.Error(), "no response within 200ms") {
+		t.Errorf("err = %v, want it to name the timeout", err)
+	}
+	if lines := auditLines(t, audit); len(lines) != 1 || !strings.Contains(lines[0].Reason, "no response within 200ms") {
+		t.Errorf("audit = %+v, want the timeout in the audit reason", lines)
+	}
+}
+
+func TestNetworkRequestTimeoutCutsABodyThatTrickles(t *testing.T) {
+	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "x")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+		panic(http.ErrAbortHandler)
+	})
+	n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+	n.SetRequestTimeout(200 * time.Millisecond)
+	_, _, err := n.Do(context.Background(), []byte(fmt.Sprintf(`{"method":"GET","url":"%s/repos/x"}`, b.URL)), 1<<10)
+	if !errors.Is(err, connectorhost.ErrHTTPSend) || !strings.Contains(err.Error(), "no response within 200ms") {
+		t.Fatalf("err = %v, want an ErrHTTPSend naming the timeout", err)
+	}
+}
+
+func TestNetworkRequestTimeoutLeavesACallersCancellationAlone(t *testing.T) {
+	release := make(chan struct{})
+	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) { <-release })
+	t.Cleanup(func() { close(release) })
+	n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, _, err := n.Do(ctx, []byte(fmt.Sprintf(`{"method":"GET","url":"%s/repos/x"}`, b.URL)), 1<<10)
+	if err == nil || strings.Contains(err.Error(), "no response within") {
+		t.Fatalf("err = %v, want a failure that does not blame the request timeout", err)
+	}
+}

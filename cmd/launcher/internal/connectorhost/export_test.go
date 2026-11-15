@@ -183,3 +183,7 @@ func SetBatchCap(n int) (restore func()) {
 	batchCap = n
 	return func() { batchCap = old }
 }
+
+// SetRequestTimeout sets the Network's per-http_request timeout, which is
+// unexported so only these tests shorten it.
+func (n *Network) SetRequestTimeout(d time.Duration) { n.requestTimeout = d }
