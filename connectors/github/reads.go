@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
+	"unicode"
 
 	"spindrift.dev/sdk/connector"
 	"spindrift.dev/sdk/tracker"
@@ -184,6 +186,17 @@ func issue(t tracker.Target, number string) (tracker.Issue, error) {
 }
 
 func nativeDeps(t tracker.Target, number string) ([]string, error) {
+	return dependencies(t, number, "blocked_by")
+}
+
+// blocks lists the issues number blocks, the reverse of nativeDeps.
+func blocks(t tracker.Target, number string) ([]string, error) {
+	return dependencies(t, number, "blocking")
+}
+
+// dependencies reads number's issue-dependency relationships in one direction,
+// "blocked_by" or "blocking", in the API's order.
+func dependencies(t tracker.Target, number, direction string) ([]string, error) {
 	base, err := numberPath(t, number)
 	if err != nil {
 		return nil, err
@@ -192,7 +205,7 @@ func nativeDeps(t tracker.Target, number string) ([]string, error) {
 		Number int `json:"number"`
 	}
 	ids := []string{}
-	path := fmt.Sprintf("%s/dependencies/blocked_by?per_page=%d", base, pageSize)
+	path := fmt.Sprintf("%s/dependencies/%s?per_page=%d", base, direction, pageSize)
 	err = pages(t.API, path, func(raw []rawDep) bool {
 		for _, r := range raw {
 			ids = append(ids, strconv.Itoa(r.Number))
@@ -232,4 +245,57 @@ func removedLabels(t tracker.Target, number string) ([]string, error) {
 		return nil, err
 	}
 	return names, nil
+}
+
+type searchPage struct {
+	Items []rawIssue `json:"items"`
+}
+
+// search returns up to limit issues whose title or body matches text. text
+// comes from an untrusted Box and lands in a GitHub search string, where a bare
+// qualifier such as "repo:other/x" or "is:pr" would widen the scope, so each
+// term is double-quoted into a literal phrase; text or a label that could
+// break out of the quoting is rejected rather than escaped, a backslash
+// included, since the search parser may read `\"` as an escaped quote.
+func search(t tracker.Target, text, state, label string, limit int) ([]tracker.Issue, error) {
+	if limit < 1 {
+		return nil, fmt.Errorf("search issues: limit %d < 1", limit)
+	}
+	if state != "open" && state != "closed" {
+		return nil, fmt.Errorf("search issues: unsupported issue state %q", state)
+	}
+	unsafe := func(r rune) bool { return r == '"' || r == '\\' || unicode.IsControl(r) }
+	if strings.ContainsFunc(text, unsafe) || strings.ContainsFunc(label, unsafe) {
+		return nil, fmt.Errorf("search issues: text and label must not contain a double quote, backslash or control character")
+	}
+	terms := strings.Fields(text)
+	if len(terms) == 0 {
+		return nil, fmt.Errorf("search issues: search text is empty")
+	}
+	for i, term := range terms {
+		terms[i] = `"` + term + `"`
+	}
+	q := "repo:" + t.Repo + " is:issue state:" + state
+	if label != "" {
+		q += ` label:"` + label + `"`
+	}
+	q += " " + strings.Join(terms, " ") + " in:title,body"
+	path := fmt.Sprintf("/search/issues?q=%s&per_page=%d", url.QueryEscape(q), pageSize)
+	var out []tracker.Issue
+	err := pagesOf(t.API, path, func(p searchPage) int { return len(p.Items) }, func(p searchPage) bool {
+		for _, r := range p.Items {
+			if r.PullRequest != nil {
+				continue
+			}
+			// Native searches via `gh issue list --json number,title,state,labels`: no body.
+			i := r.issue()
+			i.Body = ""
+			out = append(out, i)
+		}
+		return len(out) >= limit
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out[:min(limit, len(out))], nil
 }

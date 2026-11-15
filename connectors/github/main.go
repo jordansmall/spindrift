@@ -24,6 +24,8 @@ func init() {
 		ListIssues: listIssues,
 		Issue:      issue,
 		NativeDeps: nativeDeps,
+		Blocks:     blocks,
+		Search:     search,
 		// Probe and Count serve the tracker's doctor and daemon-demand reads.
 		// RemovedLabels serves recover's prior-claim read; core maps the names.
 		Probe:         trackerProbe,

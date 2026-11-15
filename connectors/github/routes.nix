@@ -1,7 +1,7 @@
 # Route paths are subtree roots (ADR 0047). `{repo}` stands for the repository's
 # owner/name slug, which core's `connectortracker.Routes` substitutes before
 # the table reaches `connectorhost.LoadNetwork`. The table covers every read
-# the Connector makes: the tracker reads (list, issue, blocked_by) under
+# the Connector makes: the tracker reads (list, issue, blocked_by, blocking) under
 # `/issues`, the forge PR reads (branch lookup, one PR) under `/pulls`, the
 # check rollup over `POST /graphql`, and a failing job's log under
 # `/actions/jobs`. The forge write half adds the PR and branch primitives: open
@@ -10,6 +10,12 @@
 # create (`GET` and `POST /labels`); label add, comment and issue filing ride
 # the `POST /issues` root, and label removal rides `POST /graphql`. An App
 # installation token's grant is read from `GET /installation/repositories`.
+#
+# `GET /search/issues` serves the issue search. Unlike every other REST route it
+# is not pinned to the repository: a Route restricts no query string, so the
+# path cannot name `{repo}`. That is acceptable because the route is read-only
+# and the Connector always sends a `repo:` qualifier, quoting the caller's text
+# so it cannot add one.
 #
 # It is the narrowest table the subtree-only Route model can express, not an
 # exact one: `/issues` also admits GET `/issues/comments/*` and `/issues/events`,
@@ -106,5 +112,10 @@
     method = "GET";
     host = "api.github.com";
     path = "/installation/repositories";
+  }
+  {
+    method = "GET";
+    host = "api.github.com";
+    path = "/search/issues";
   }
 ]
