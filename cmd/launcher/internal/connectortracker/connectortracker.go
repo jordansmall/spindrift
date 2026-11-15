@@ -1,13 +1,13 @@
 // Package connectortracker builds core's tracker reads (the forge.IssueTracker
 // list and issue reads and, when advertised, forge.CommentLister,
-// forge.NativeDepsReader, forge.BlockersLister, forge.IssueSearcher, the Probe
-// read, forge.StatusMappingChecker, forge.IssueTypeChecker and
-// forge.DemandCounter) from a tracker Connector, over the 0.2 tracker
-// primitives in sdk/tracker. A Connector that advertises the transition and
-// label-edit primitives performs the writes, while core keeps every lifecycle
-// decision (claim checks, the settled-label strip, fallback and refusal,
-// verdicts); any other write stays with the native adapter, which also stays
-// authoritative for every optional capability the protocol does not carry: the
+// forge.NativeDepsReader, forge.BlockersLister, forge.IssueSearcher,
+// forge.LabeledBacklogLister, the Probe read, forge.StatusMappingChecker,
+// forge.IssueTypeChecker and forge.DemandCounter) from a tracker Connector,
+// over the 0.2 tracker primitives in sdk/tracker. A Connector that advertises
+// the transition and label-edit primitives performs the writes, while core keeps
+// every lifecycle decision (claim checks, the settled-label strip, fallback and
+// refusal, verdicts); any other write stays with the native adapter, which also
+// stays authoritative for every optional capability the protocol does not carry: the
 // result is a stack of forge.Unwrapper layers over the native adapter, so
 // forge.As reaches those capabilities through it. The check and demand
 // capabilities are the exception: they come only from the Connector, and are
@@ -120,6 +120,12 @@ type (
 		Target Target `json:"target"`
 		Label  string `json:"label"`
 		Status string `json:"status"`
+		Limit  int    `json:"limit"`
+	}
+	labeledParams struct {
+		Target Target `json:"target"`
+		Label  string `json:"label"`
+		State  string `json:"state"`
 		Limit  int    `json:"limit"`
 	}
 	searchIssuesParams struct {
@@ -246,6 +252,11 @@ const (
 	CapRemovedLabels = "tracker.removedLabels"
 	// CapSearchIssues: the Connector serves tracker.searchIssues.
 	CapSearchIssues = "tracker.searchIssues"
+	// CapLabeled: the Connector serves tracker.labeled, the open or closed
+	// issues carrying one label, newest first, with the close date and
+	// not-planned flag on closed ones. Core's finding dedup scan reads it; no
+	// native fallback answers for a Connector that omits it under primary.
+	CapLabeled = "tracker.labeled"
 	// CapTransition: the Connector serves tracker.transition. With CapEditLabels
 	// it performs core's transitions and verdicts.
 	CapTransition = "tracker.transition"
@@ -603,6 +614,44 @@ func (l searchLayer) SearchIssues(text string, state forge.IssueState, label str
 	return issues, nil
 }
 
+// labeledLayer serves forge.LabeledBacklogLister from the Connector. It exists
+// only when the Connector advertises CapLabeled; otherwise the scan falls
+// through to the native adapter's lister, if it has one.
+type labeledLayer struct {
+	forge.IssueTracker
+	r *reads
+}
+
+func (l labeledLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
+
+// ListIssuesWithLabels merges one guest read per label, as the native adapter
+// does. The guest is asked for DedupScanLimit but is not trusted to honour it;
+// a bad number or state fails closed, as in issue().
+func (l labeledLayer) ListIssuesWithLabels(state forge.IssueState, labels []string) ([]forge.Issue, error) {
+	if state != forge.IssueOpen && state != forge.IssueClosed {
+		return nil, fmt.Errorf("connector tracker: unsupported issue state %q", state)
+	}
+	return forge.MergeLabeledIssues("connector tracker", labels, func(label string) ([]forge.Issue, error) {
+		var res struct {
+			Issues []wireIssue `json:"issues"`
+		}
+		p := labeledParams{Target: l.r.target, Label: label, State: state.Wire(), Limit: forge.DedupScanLimit}
+		if err := l.r.call(context.Background(), CapLabeled, p, &res); err != nil {
+			return nil, err
+		}
+		res.Issues = res.Issues[:min(len(res.Issues), forge.DedupScanLimit)]
+		issues := make([]forge.Issue, len(res.Issues))
+		for i, w := range res.Issues {
+			var err error
+			if issues[i], err = w.issue(l.r.ids, singleRead); err != nil {
+				return nil, err
+			}
+		}
+		forge.WarnDedupScanMayTruncate("connector tracker.labeled "+state.Wire(), label, len(issues))
+		return issues, nil
+	})
+}
+
 var (
 	_ forge.Unwrapper             = (*reads)(nil)
 	_ forge.FullyPaginated        = (*reads)(nil)
@@ -625,6 +674,8 @@ var (
 	_ forge.PriorClaimStateReader = priorClaimLayer{}
 	_ forge.Unwrapper             = searchLayer{}
 	_ forge.IssueSearcher         = searchLayer{}
+	_ forge.Unwrapper             = labeledLayer{}
+	_ forge.LabeledBacklogLister  = labeledLayer{}
 )
 
 // New builds core's tracker from a tracker Connector. writes answers every
@@ -632,9 +683,8 @@ var (
 // advertises both CapTransition and CapEditLabels, the label registry unless
 // CapLabels, comments unless CapComment, issue filing unless CapFileIssue, and
 // issue edits always. It also answers every optional capability the protocol
-// does not carry (see CapComments, CapNativeDeps, CapBlocks and
-// CapSearchIssues); Probe stays with it unless the Connector advertises
-// CapProbe. The doctor and demand checks (CapStatuses, CapCreateMeta, CapCount)
+// does not carry (see CapComments, CapNativeDeps, CapBlocks, CapSearchIssues and CapLabeled); Probe stays with it unless the
+// Connector advertises CapProbe. The doctor and demand checks (CapStatuses, CapCreateMeta, CapCount)
 // and recover's prior-claim read (CapRemovedLabels) are never answered
 // natively.
 // Look capabilities up with forge.As. Calls run under context.Background()
@@ -698,6 +748,9 @@ func newTracker(call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, 
 	}
 	if slices.Contains(caps, CapSearchIssues) {
 		it = searchLayer{it, r}
+	}
+	if slices.Contains(caps, CapLabeled) {
+		it = labeledLayer{it, r}
 	}
 	if slices.Contains(caps, CapTransition) && slices.Contains(caps, CapEditLabels) {
 		it = transitionLayer{it, r}
