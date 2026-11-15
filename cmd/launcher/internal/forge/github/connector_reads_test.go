@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
@@ -222,5 +224,39 @@ func TestUnsupportedWithout_MapsOnlyAMissingCapability(t *testing.T) {
 	}
 	if err := unsupportedWithout(nil, "read", missing); err != nil {
 		t.Errorf("nil = %v, want nil", err)
+	}
+}
+
+// TestConnector_DedupScanOf500IssuesFitsUnderTheInterpreter is the #7091 shape:
+// the Filer's closed labeled scan reads 500 issues with bodies, about 3 MB over
+// five pages, through the Connector under the launcher's interpreter (LoadNetwork).
+// The Connector's call budget must not charge the time its http_requests wait,
+// and its response-byte credit must cover the time the interpreter spends parsing.
+func TestConnector_DedupScanOf500IssuesFitsUnderTheInterpreter(t *testing.T) {
+	const (
+		label   = "agent-review-finding"
+		count   = 500
+		bodyLen = 6000
+	)
+	h := newConnectorHarness(t)
+	for n := range count {
+		num := fmt.Sprint(1000 + n)
+		h.SeedIssue(forge.Issue{Number: num, Title: "finding " + num, Body: num + ":" + strings.Repeat("x", bodyLen), Labels: []string{label}})
+		h.mutate(num, func(i *restIssue) { i.closed, i.closedAt = true, "2026-01-01T00:00:00Z" })
+	}
+	l, ok := forge.As[forge.LabeledBacklogLister](h.tr)
+	if !ok {
+		t.Fatal("Connector tracker does not serve ListIssuesWithLabels")
+	}
+	start := time.Now()
+	got, err := l.ListIssuesWithLabels(forge.IssueClosed, []string{label})
+	t.Logf("scan of %d issues took %s", len(got), time.Since(start))
+	if err != nil || len(got) != count {
+		t.Fatalf("closed scan = %d issues, %v; want %d", len(got), err, count)
+	}
+	for _, iss := range got {
+		if len(iss.Body) != len(iss.Number)+len(":")+bodyLen || !strings.HasPrefix(iss.Body, iss.Number+":") {
+			t.Fatalf("issue %s body is %d bytes; want it intact", iss.Number, len(iss.Body))
+		}
 	}
 }
