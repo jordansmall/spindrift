@@ -2,6 +2,7 @@ package connectorhost
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,12 @@ import (
 // maxHTTPResponse caps the response body http_request hands a guest, so a
 // hostile or buggy upstream cannot make the host buffer without bound.
 const maxHTTPResponse = 4 << 20
+
+// httpRequestTimeout bounds one http_request end to end: the send, a followed
+// redirect hop, and the body read. The call budget pauses while the host
+// serves a request, so this is all that stops a stalled upstream; it is
+// generous enough for a slow GitHub.
+const httpRequestTimeout = 60 * time.Second
 
 var (
 	// ErrRouteTable marks a Route table that does not validate: a path that
@@ -55,7 +62,7 @@ var (
 // FollowRedirect lets a GET route follow one redirect hop to a host the table
 // cannot name (a pre-signed blob URL). The hop is sent uncredentialed and
 // audited with its target host, asks for the body's tail with a Range suffix,
-// and is bounded to half the call's remaining budget (failing non-fatally past
+// and is bounded to half the request's remaining time (failing non-fatally past
 // it); String shows the opt-in, so a Route-table diff does too. A body over the
 // response cap keeps its tail rather than failing the call: that error is
 // fatal to the Connector, and the tail of a blob such as a job log is the
@@ -265,6 +272,8 @@ type Network struct {
 	Shadow bool
 	// Observe, when non-nil, is called with each entry after it is recorded.
 	Observe func(AuditEntry)
+	// requestTimeout bounds one http_request; zero means httpRequestTimeout.
+	requestTimeout time.Duration
 }
 
 // httpRequest is the wire form of a guest's http_request.
@@ -279,8 +288,8 @@ type httpRequest struct {
 const tailChunk = 32 << 10
 
 // redirectHopShare: a followed redirect hop gets 1/redirectHopShare of the
-// caller's remaining deadline, so a slow blob host fails non-fatally before
-// the call budget expires.
+// request's remaining time, so a slow blob host fails non-fatally before
+// the request timeout or the caller's deadline cuts the whole request.
 const redirectHopShare = 2
 
 // readTail reads r to EOF keeping only its last limit bytes, in memory bounded
@@ -382,16 +391,34 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 	}
 	entry.Route = matched.String()
 
+	timeout := cmp.Or(n.requestTimeout, httpRequestTimeout)
+	timeoutCause := fmt.Errorf("no response within %s", timeout)
+	ctx, cancelTimeout := context.WithTimeoutCause(ctx, timeout, timeoutCause)
+	defer cancelTimeout()
+	// sendFailed names the timeout when it, not the caller, ended the request;
+	// context.DeadlineExceeded alone would not say which clock ran out. what, if
+	// set, says which step failed. The timeout cannot end a request before it is
+	// sent, so the substitution is a no-op for the pre-send failures.
+	sendFailed := func(what string, cause error) error {
+		if errors.Is(context.Cause(ctx), timeoutCause) {
+			cause = timeoutCause
+		}
+		if what != "" {
+			what += ": "
+		}
+		return fmt.Errorf("%w: connector %q: %s%v", ErrHTTPSend, n.Name, what, cause)
+	}
+
 	req, rerr := http.NewRequestWithContext(ctx, in.Method, u.String(), strings.NewReader(in.Body))
 	if rerr != nil {
-		return 0, nil, nil, fmt.Errorf("%w: connector %q: %v", ErrHTTPSend, n.Name, rerr)
+		return 0, nil, nil, sendFailed("", rerr)
 	}
 	for k, v := range in.Headers {
 		req.Header.Set(k, v)
 	}
 	if n.Authorize != nil {
 		if aerr := n.Authorize(req); aerr != nil {
-			return 0, nil, nil, fmt.Errorf("%w: connector %q: authorize: %v", ErrHTTPSend, n.Name, aerr)
+			return 0, nil, nil, sendFailed("authorize", aerr)
 		}
 	}
 
@@ -402,7 +429,7 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, serr := client.Do(req)
 	if serr != nil {
-		return 0, nil, nil, fmt.Errorf("%w: connector %q: %v", ErrHTTPSend, n.Name, serr)
+		return 0, nil, nil, sendFailed("", serr)
 	}
 	if matched.FollowRedirect && resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		loc, lerr := resp.Location()
@@ -414,8 +441,9 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 			}
 			entry.RedirectHost = loc.Host
 			// A fresh request: the guest's headers and the credential must not leave the admitted host.
-			// The hop's budget covers its body read; expiring ctx instead would
-			// kill the Connector rather than fail with a plain ErrHTTPSend.
+			// The hop's share covers its body read; a caller's deadline expiring
+			// instead would kill the Connector rather than fail with a plain
+			// ErrHTTPSend.
 			hopCtx := ctx
 			if dl, ok := ctx.Deadline(); ok {
 				var cancel context.CancelFunc
@@ -424,7 +452,7 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 			}
 			hop, herr := http.NewRequestWithContext(hopCtx, http.MethodGet, loc.String(), nil)
 			if herr != nil {
-				return status, nil, nil, fmt.Errorf("%w: connector %q: %v", ErrHTTPSend, n.Name, herr)
+				return status, nil, nil, sendFailed("", herr)
 			}
 			// A server honouring the suffix range sends only the tail; one that
 			// ignores it sends the whole body, which readTail trims. A suffix
@@ -433,7 +461,7 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 			hop.Header.Set("Range", fmt.Sprintf("bytes=-%d", maxBody))
 			resp, serr = client.Do(hop)
 			if serr != nil {
-				return status, nil, nil, fmt.Errorf("%w: connector %q: redirect to %s: %v", ErrHTTPSend, n.Name, loc.Host, serr)
+				return status, nil, nil, sendFailed("redirect to "+loc.Host, serr)
 			}
 		} else {
 			entry.Reason = "redirect not followed: " + lerr.Error()
@@ -462,7 +490,7 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 	}
 	entry.RateLimit, entry.RetryAfter = rateLimitKind(status, resp.Header, data)
 	if rderr != nil {
-		return status, nil, nil, fmt.Errorf("%w: connector %q: reading response: %v", ErrHTTPSend, n.Name, rderr)
+		return status, nil, nil, sendFailed("reading response", rderr)
 	}
 	if len(data) > maxBody {
 		return status, nil, nil, fmt.Errorf("%w: connector %q: over %d bytes", ErrResponseTooLarge, n.Name, maxBody)
