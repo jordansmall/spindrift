@@ -940,7 +940,7 @@ func harnessEnvSecretLine(name, value string) string {
 
 // toKebab derives the "spindrift-<kebab-name>" vault key suffix from an env
 // var name, so GH_TOKEN becomes gh-token. Two other copies of this transform
-// share the name: flags.go's toKebab and lib/renderers.nix's toKebab.
+// share the name: secretcmd.Template and lib/renderers.nix's toKebab.
 func toKebab(name string) string {
 	return strings.ReplaceAll(strings.ToLower(name), "_", "-")
 }

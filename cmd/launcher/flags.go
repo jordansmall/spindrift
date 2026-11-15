@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"slices"
 	"strings"
 
@@ -17,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/launcherchecks"
+	"spindrift.dev/launcher/internal/secretcmd"
 )
 
 // version and revision are injected at build time via -ldflags.
@@ -100,12 +100,6 @@ func extractInputFlag(args []string) (path string, remaining []string, err error
 	return path, remaining, nil
 }
 
-// toKebab mirrors lib/renderers.nix's toKebab, so --secret-cmd's {name}
-// substitution matches each secret's vault item in harness.env.example.
-func toKebab(env string) string {
-	return strings.ToLower(strings.ReplaceAll(env, "_", "-"))
-}
-
 // isStdinTTY is a package var so tests can override it without a real TTY
 // (issue #1971).
 var isStdinTTY = func() bool {
@@ -126,41 +120,15 @@ var isInteractiveTTY = func() bool {
 
 // secretCmdRunner runs a secret-fetch command through the shell and returns
 // its raw stdout, captured as the secret and never printed. A package var so
-// tests can substitute a fake. Interactively the command inherits the
-// launcher's stdin and stderr, so a vault tool's unlock prompt reaches the
-// operator; otherwise stdin is /dev/null, so a blocking read fails fast.
+// tests can substitute a fake; it prompts only on an interactive TTY.
 var secretCmdRunner = func(cmd string) (string, error) {
-	c := exec.Command("sh", "-c", cmd)
-	if isInteractiveTTY() {
-		c.Stdin = os.Stdin
-		c.Stderr = os.Stderr
-	}
-	out, err := c.Output()
-	return string(out), err
+	return secretcmd.Run(cmd, isInteractiveTTY())
 }
 
-// secretCmdUnlockHint stays tool-agnostic because the command is opaque to
-// the launcher: rbw, op, pass, vault, or anything else that prints a secret
-// to stdout.
-const secretCmdUnlockHint = "your vault may be locked; unlock it (e.g. `rbw unlock`) and re-run"
-
-// resolveSecretCmd runs a secret-fetch command and returns its trimmed
-// stdout. Errors stay value-free: the command's stdout and stderr may carry a
-// partial secret, so neither ever reaches an error message or a log.
+// resolveSecretCmd resolves a `_CMD` credential through secretCmdRunner; see
+// secretcmd.Resolve for the value-free error contract.
 func resolveSecretCmd(env, cmd string) (string, error) {
-	out, err := secretCmdRunner(cmd)
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() >= 0 {
-			return "", fmt.Errorf("%s: command failed (exit %d) — %s", env, exitErr.ExitCode(), secretCmdUnlockHint)
-		}
-		return "", fmt.Errorf("%s: command failed — %s", env, secretCmdUnlockHint)
-	}
-	trimmed := strings.TrimRight(out, "\r\n")
-	if trimmed == "" {
-		return "", fmt.Errorf("%s: command produced no output — %s", env, secretCmdUnlockHint)
-	}
-	return trimmed, nil
+	return secretcmd.Resolve(env, cmd, secretCmdRunner)
 }
 
 // validateChoice checks a resolved value against the inputdoc.SchemaFlags row's
@@ -440,11 +408,6 @@ func parseFlags(args []string) (remaining, schemaArgs []string, err error) {
 // changing parseFlags' signature.
 var globalSecretCmdTemplate string
 
-// secretTemplateCmd renders globalSecretCmdTemplate for env.
-func secretTemplateCmd(env string) string {
-	return strings.ReplaceAll(globalSecretCmdTemplate, "{name}", toKebab(env))
-}
-
 // connectorCredentialNeededThisRun reports whether this run reads through row:
 // its backend is the active CODE_FORGE or ISSUE_TRACKER, and the row is either
 // shadowed or routed. backendrows.Use keeps a non-shadow row (a jira Connector
@@ -470,19 +433,16 @@ func applyConnectorCredentials() error {
 		if seen[env] {
 			continue
 		}
-		cmd := os.Getenv(env + "_CMD")
+		tmpl := ""
+		if connectorCredentialNeededThisRun(row) {
+			tmpl = globalSecretCmdTemplate
+		}
+		cmd := secretcmd.Command(env, tmpl)
 		if cmd == "" {
-			if os.Getenv(env) != "" || globalSecretCmdTemplate == "" || !connectorCredentialNeededThisRun(row) {
-				continue
-			}
-			cmd = secretTemplateCmd(env)
+			continue
 		}
 		seen[env] = true
-		value, err := resolveSecretCmd(env, cmd)
-		if err != nil {
-			return err
-		}
-		if err := os.Setenv(env, value); err != nil {
+		if err := secretcmd.Export(env, cmd, secretCmdRunner); err != nil {
 			return err
 		}
 	}
@@ -518,14 +478,10 @@ func applySecretCmdFallback() error {
 		var errs []error
 		fetched := false
 		for _, env := range envs {
-			cmd := secretTemplateCmd(env)
-			value, err := resolveSecretCmd(env, cmd)
-			if err != nil {
+			cmd := secretcmd.Template(globalSecretCmdTemplate, env)
+			if err := secretcmd.Export(env, cmd, secretCmdRunner); err != nil {
 				errs = append(errs, err)
 				continue
-			}
-			if err := os.Setenv(env, value); err != nil {
-				return err
 			}
 			fetched = true
 			break
