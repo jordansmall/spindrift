@@ -963,16 +963,20 @@ the commit statuses' descriptions, read off the same fine-grained-PAT-safe
 GraphQL `statusCheckRollup` root `CheckState` reads; on Forgejo it is the
 commit statuses' descriptions. Each failing Actions job's log is also fetched
 and its tail (capped at `MaxLogExcerptBytes`, with a notice when trimmed, and
-preceded by any error lines — `FAIL`, `panic:`, `error:` — from earlier in the log, within that cap) is
-appended, since a GitHub Actions check-run summary is usually empty.
-`fix-prompt.md` renders it as a `# CI FAILURE` section ahead of `# CONTEXT`,
-so the fix agent sees which checks failed and why without calling a forge CLI
-or API, then re-runs locally — which alone
-misses CI-only failures (flaky, environment-specific, or checks the repo's
-local CHECK step doesn't run). The fetch is best-effort: a failure
-to fetch it never blocks the fix pass, and `CI_FAILURE_SUMMARY` unset or empty
-leaves `fix-prompt.md` byte-identical to the no-detail case; the fix prompt's
-own CI read then finds the failing checks.
+preceded by any error lines — `FAIL`, `panic:`, `error:` — from earlier in
+the log, within that cap) is appended, since a GitHub Actions check-run summary
+is usually empty. `fix-prompt.md` renders it as a `# CI FAILURE` section
+ahead of `# CONTEXT`, so the fix agent sees which checks failed and why without
+calling a forge CLI or API, then re-runs locally — which alone misses CI-only
+failures (flaky, environment-specific, or checks the repo's local CHECK step
+doesn't run). When the failure will not reproduce in the Box, `fix-prompt.md`
+tells the pass to treat a check that fails identically on every platform leg as
+deterministic, to suspect the Box's sandbox-off builds and nix config first, and
+never to stress-run tests in parallel copies (which can exhaust the Box's pids
+or memory limits). The fetch is best-effort: a failure to fetch it never blocks
+the fix pass, and `CI_FAILURE_SUMMARY` unset or empty leaves `fix-prompt.md`
+byte-identical to the no-detail case; the fix prompt's own CI read then finds
+the failing checks.
 
 A fix box also resumes the *same Driver session* the initial run used,
 instead of cold-starting a fresh one: the launcher creates an ephemeral,

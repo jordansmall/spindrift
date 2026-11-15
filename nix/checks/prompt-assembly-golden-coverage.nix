@@ -53,8 +53,6 @@ let
       "skill_gate_selection_test.go TestAssembleAutoFormatAndLintGates; clause_contract_integration_test.go TestClauseContracts (fragments/auto-format.md entries)";
     "auto-lint.md" =
       "skill_gate_selection_test.go TestAssembleAutoFormatAndLintGates; clause_contract_integration_test.go TestClauseContracts (fragments/auto-lint.md entries)";
-    "ci-failure.md" =
-      "skill_gate_selection_test.go TestAssembleCIFailureSummaryGateSubstitutesItsValue; clause_contract_integration_test.go TestClauseContracts (fragments/ci-failure.md entries)";
     "local/research-verdict-relay.md" =
       "skill_gate_selection_test.go TestAssembleResearchVerdictRelaySelection; orchestrator TestMarkerFragmentParity";
   };

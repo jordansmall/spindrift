@@ -273,6 +273,10 @@ func goldenCells() []goldenCell {
 		{name: "fix-pass", mode: modeResume, setup: func(c *cellInputs) {
 			c.export("FIX_PASS", "1")
 		}},
+		{name: "fix-pass-ci-failure", mode: modeResume, setup: func(c *cellInputs) {
+			c.export("FIX_PASS", "1")
+			c.export("CI_FAILURE_SUMMARY", "- build (x86_64-linux): failure")
+		}},
 		{name: "github-read-only", mode: modeInitial, setup: func(c *cellInputs) {
 			c.readOnly()
 		}},
