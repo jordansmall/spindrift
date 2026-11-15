@@ -2,9 +2,25 @@
 # (ADR 0073). Pure so nix/checks/connectors.nix can pin the text:
 # builtins.tryEval cannot see thrown messages. `defs` is the module system's
 # definition list; each carries the `file` of the module that wrote it. A def
-# that sets nothing but `shadow` and its rate `shadowEvery` is a Consumer's
-# switch on a registered row (issues #6797, #6810), not a second registration.
+# that sets nothing but `shadow`, its rate `shadowEvery` or `primary` is a
+# Consumer's switch on a registered row (issues #6797, #6810, #6998), not a
+# second registration.
 rec {
+  # Why a row's `primary` (issue #6998) cannot stand, or null. `nativeNames` is
+  # the native backend registry's names; the Driver half arrives with #6999.
+  primaryError =
+    nativeNames: name: r:
+    if r.shadow then
+      "Connector '${name}': `primary` and `shadow` are exclusive on one row"
+    else if r.driver != null then
+      "Connector '${name}': `primary` on a `driver` row arrives with #6999"
+    else if r.backend == null then
+      "Connector '${name}': `primary` needs a `backend` row to answer reads"
+    else if !(builtins.elem name nativeNames) then
+      "Connector '${name}': `primary` needs a native backend of the same name to replace; none is registered"
+    else
+      null;
+
   duplicateError =
     name: defs:
     let
@@ -32,7 +48,9 @@ rec {
             d:
             builtins.isAttrs d.value
             && builtins.attrNames d.value != [ ]
-            && builtins.all (n: n == "shadow" || n == "shadowEvery") (builtins.attrNames d.value);
+            && builtins.all (n: n == "shadow" || n == "shadowEvery" || n == "primary") (
+              builtins.attrNames d.value
+            );
           err = duplicateError (builtins.elemAt loc (builtins.length loc - 1)) (
             builtins.filter (d: !(switchOnly d)) defs
           );

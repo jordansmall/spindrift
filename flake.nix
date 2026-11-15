@@ -68,10 +68,23 @@
         imports = [ core.flakeModules.default ] ++ connectorModules;
 
         # Pinned dogfood exception: shadow the Connectors listed in
-        # nix/dogfood-shadow.nix (the native Strategy stays authoritative).
-        spindrift.connectors = nixpkgs.lib.genAttrs (import ./nix/dogfood-shadow.nix) (_: {
-          shadow = true;
-        });
+        # nix/dogfood-shadow.nix (the native Strategy stays authoritative) and
+        # run those in nix/dogfood-primary.nix as primary.
+        spindrift.connectors =
+          let
+            shadowed = import ./nix/dogfood-shadow.nix;
+            primaries = import ./nix/dogfood-primary.nix;
+            both = nixpkgs.lib.intersectLists shadowed primaries;
+          in
+          assert
+            both == [ ]
+            || throw "nix/dogfood-shadow.nix and nix/dogfood-primary.nix both list: ${toString both}";
+          nixpkgs.lib.genAttrs shadowed (_: {
+            shadow = true;
+          })
+          // nixpkgs.lib.genAttrs primaries (_: {
+            primary = true;
+          });
 
         flake = { inherit (core) lib flakeModules; };
 
