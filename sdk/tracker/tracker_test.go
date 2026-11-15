@@ -152,6 +152,33 @@ func TestSearchCapabilityAndWireShape(t *testing.T) {
 	}
 }
 
+func TestLabeledCapabilityAndWireShape(t *testing.T) {
+	r := fakeReader(t)
+	if _, m := handlers(r); m["tracker.labeled"] != nil {
+		t.Error("labeled handler present without Reader.Labeled")
+	}
+	r.Labeled = func(tg Target, label, state string, limit int) ([]Issue, error) {
+		if tg != wantTarget || label != "bug" || state != "closed" || limit != 5 {
+			t.Errorf("Labeled(%v, %q, %q, %d)", tg, label, state, limit)
+		}
+		return []Issue{{Number: "8", Title: "t", State: "closed", ClosedAt: "2026-01-02T03:04:05Z", ClosedNotPlanned: true}}, nil
+	}
+	caps, m := handlers(r)
+	if want := []string{"tracker", "tracker.comments", "tracker.labeled"}; !reflect.DeepEqual(caps, want) {
+		t.Fatalf("caps = %v, want %v", caps, want)
+	}
+	got := call(t, m, "tracker.labeled", `{`+target+`,"label":"bug","state":"closed","limit":5}`)
+	if want := `{"issues":[{"number":"8","title":"t","body":"","state":"closed","labels":[],"closedAt":"2026-01-02T03:04:05Z","closedNotPlanned":true,"dedupMarker":"","status":""}]}`; got != want {
+		t.Errorf("tracker.labeled = %s, want %s", got, want)
+	}
+
+	r.Labeled = func(Target, string, string, int) ([]Issue, error) { return nil, nil }
+	_, m = handlers(r)
+	if got := call(t, m, "tracker.labeled", `{`+target+`}`); got != `{"issues":[]}` {
+		t.Errorf("empty labeled = %s, want an empty array", got)
+	}
+}
+
 func TestEmptyListsEncodeAsArrays(t *testing.T) {
 	r := Reader{
 		ListIssues: func(Target, Query, int) ([]Issue, error) { return nil, nil },

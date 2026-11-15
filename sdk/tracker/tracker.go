@@ -179,6 +179,14 @@ type Reader struct {
 	// "tracker.searchIssues" capability, and core searches through its native
 	// adapter instead.
 	Search func(t Target, text, state, label string, limit int) ([]Issue, error)
+
+	// Labeled is optional: it returns up to limit issues in state ("open" or
+	// "closed") carrying label, newest first. Unlike ListIssues it reads
+	// closed issues too, and it must fill ClosedAt and ClosedNotPlanned for
+	// them: core's dedup scan reads both. Setting it advertises
+	// "tracker.labeled"; leaving it nil makes core scan through its native
+	// adapter instead.
+	Labeled func(t Target, label, state string, limit int) ([]Issue, error)
 }
 
 type method = func(json.RawMessage) (any, error)
@@ -406,6 +414,25 @@ func handlers(r Reader) ([]string, map[string]method) {
 				return nil, err
 			}
 			issues, err := r.Search(p.Target, p.Text, p.State, p.Label, p.Limit)
+			if err != nil {
+				return nil, err
+			}
+			return issueList(issues), nil
+		}
+	}
+	if r.Labeled != nil {
+		caps = append(caps, "tracker.labeled")
+		m["tracker.labeled"] = func(params json.RawMessage) (any, error) {
+			var p struct {
+				Target Target `json:"target"`
+				Label  string `json:"label"`
+				State  string `json:"state"`
+				Limit  int    `json:"limit"`
+			}
+			if err := unmarshal(params, &p); err != nil {
+				return nil, err
+			}
+			issues, err := r.Labeled(p.Target, p.Label, p.State, p.Limit)
 			if err != nil {
 				return nil, err
 			}
