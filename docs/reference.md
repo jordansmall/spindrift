@@ -2950,16 +2950,18 @@ The shadow reads the credential from the host-only
 `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` (knob `githubConnectorToken`), a static
 token: the Connector host's backend path reads it from the environment per
 request and does not follow `GH_TOKEN_REFRESH_FILE`, so use a token that
-outlives the run. It can come from a vault like any core secret, through
-`SPINDRIFT_GITHUB_CONNECTOR_TOKEN_CMD` or the `SECRET_CMD` template (see
-[Runtime configuration](#runtime-configuration)); the template applies only
-while github is the active `CODE_FORGE` or `ISSUE_TRACKER`. On dogfood CI,
-pass it to the launcher from the `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` repository
-secret with an `env:` entry on the dispatch step of `agent-dispatch.yml` and the
-research step of `agent-research.yml`; a maintainer adds those entries by hand,
-since an agent's push credential cannot edit workflow files. With it unset the
-shadow sends nothing, and each run's summary carries the `error` and is not
-clean.
+outlives the run (once github is a primary row, the daemon's own probe
+re-resolves the command form instead, see [Daemon](#daemon)). It can come
+from a vault like any core secret, through
+`SPINDRIFT_GITHUB_CONNECTOR_TOKEN_CMD` or the `SECRET_CMD`
+template (see [Runtime configuration](#runtime-configuration)); the template
+applies only while github is the active `CODE_FORGE` or `ISSUE_TRACKER`. On
+dogfood CI, pass it to the launcher from the `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`
+repository secret with an `env:` entry on the dispatch step of
+`agent-dispatch.yml` and the research step of `agent-research.yml`; a
+maintainer adds those entries by hand, since an agent's push credential cannot
+edit workflow files. With it unset the shadow sends nothing, and each run's
+summary carries the `error` and is not clean.
 
 The token must be read-only. The Route table admits `POST /graphql`, whose body
 the host does not restrict, so the token's scope is the only barrier against a
@@ -11232,6 +11234,23 @@ document nor the environment takes its schema default (`ready-for-agent`,
 `github`, `.spindrift/issues`), as in a child. Because a 304 can repeat a
 count a child has already consumed, a probe that counted work followed by a child
 exiting 2 makes the next probe of that kind skip the cache and read fresh.
+
+When `ISSUE_TRACKER` is a Connector-routed backend (github today) and its
+row is not a shadow, the probe reads through that Connector, so the daemon
+resolves the row's host-only credential
+(`SPINDRIFT_GITHUB_CONNECTOR_TOKEN`) at start-up into its own environment,
+`<ENV>_CMD` ahead of the plain variable, and the `SECRET_CMD` template (read
+from the daemon's environment) when neither is set, as in the launcher. It
+does so only when an enabled kind probes the tracker; a shadow row, or a row
+for another backend, never runs its command. With no source set, or a command
+that fails, the daemon refuses to start, naming the variable, its `_CMD` form,
+and `SECRET_CMD`. A command-sourced credential is re-resolved every 30
+minutes, and a failed refresh keeps the previous value and logs a line naming
+the variable. That keeps a GitHub App installation token inside its hour only
+if the command mints a fresh token per call: a command that reads a cached
+token, such as a file a refresher rewrites every 45 minutes, can hand over one
+already 45 minutes old. A plain variable is read per request and never
+refreshed, so the operator owns its lifetime.
 
 The Jira probe reads a count without fetching any issue, and its mode
 follows `JIRA_EMAIL`. With an email set (Basic auth, Jira Cloud) it is one
