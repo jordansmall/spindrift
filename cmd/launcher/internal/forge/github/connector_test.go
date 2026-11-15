@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -48,6 +49,8 @@ type restIssue struct {
 	unlabeled []string
 	pull      bool
 	comments  []string
+	// thread is the comment thread the GraphQL comments read serves, oldest first.
+	thread []forge.Comment
 }
 
 // scriptedContext is one node of a statusCheckRollup contexts union, in the
@@ -340,7 +343,8 @@ func (b *restBackend) pulls(w http.ResponseWriter, r *http.Request, rest string,
 
 // graphql serves the repository-identity query, the pull-request mutations, and
 // the statusCheckRollup query for one PR, popping its next scripted rollup
-// state.
+// state, and an issue's comment thread (the one read that reports minimized
+// state), served commentPageSize at a time.
 func (b *restBackend) graphql(w http.ResponseWriter, r *http.Request, reject func(string)) {
 	if r.Method != http.MethodPost {
 		reject("graphql is POST only")
@@ -358,6 +362,7 @@ func (b *restBackend) graphql(w http.ResponseWriter, r *http.Request, reject fun
 			Repo   string `json:"repo"`
 			Number int    `json:"number"`
 			ID     string `json:"id"`
+			After  string `json:"after"`
 		} `json:"variables"`
 	}
 	if err := json.Unmarshal(raw, &req); err != nil {
@@ -378,6 +383,9 @@ func (b *restBackend) graphql(w http.ResponseWriter, r *http.Request, reject fun
 		return
 	case strings.Contains(req.Query, "autoMergeAllowed"):
 		b.repoQuery(w, req.Variables.Owner, req.Variables.Repo)
+		return
+	case strings.Contains(req.Query, "comments(first"):
+		b.commentsQuery(w, req.Variables.Owner+"/"+req.Variables.Repo, req.Variables.Number, req.Variables.After, reject)
 		return
 	case strings.HasPrefix(req.Query, "mutation"):
 		b.mutation(w, req.Query, req.Variables.ID, reject)
@@ -795,6 +803,7 @@ func (h *connectorHarness) auditEntries(t *testing.T) []connectorhost.AuditEntry
 
 var (
 	_ forgetest.StateSeeder        = (*connectorHarness)(nil)
+	_ forgetest.CommentCapable     = (*connectorHarness)(nil)
 	_ forgetest.PRForgeReadHarness = (*connectorHarness)(nil)
 )
 
@@ -811,10 +820,10 @@ func TestConnector_Contracts(t *testing.T) {
 		t.Run("JobLogExcerpt", func(t *testing.T) { testJobLogExcerpt(t, h) })
 		t.Run("BlocksAndSearch", func(t *testing.T) { testBlocksAndSearch(t, h) })
 
-		// REST reports no minimized state, so the Connector must not attest
-		// comments; they stay on the native adapter.
-		if _, ok := forge.As[forge.CommentLister](h.tr); ok {
-			t.Error("Connector tracker serves comments: it must not advertise tracker.comments")
+		// The Connector reads comments over GraphQL, which reports minimized
+		// state, so it attests them and the Comments case runs against it.
+		if _, ok := forge.As[forge.CommentLister](h.tr); !ok {
+			t.Error("Connector tracker does not serve comments: it must advertise tracker.comments")
 		}
 		cov.record(t, h)
 	})
@@ -1032,4 +1041,49 @@ func testBlocksAndSearch(t *testing.T, h *connectorHarness) {
 	if err != nil || len(got) != 1 || got[0].Number != "810" {
 		t.Errorf("SearchIssues(flaky, label) = %v, %v; want 810", got, err)
 	}
+}
+
+// commentPageSize is smaller than the 100 the Connector asks for, so the
+// contract's thread spans pages and proves the cursor is followed.
+const commentPageSize = 2
+
+// commentsQuery serves one page of an issue's thread. The cursor is the index
+// of the next comment.
+func (b *restBackend) commentsQuery(w http.ResponseWriter, repo string, num int, after string, reject func(string)) {
+	i := b.issues[num]
+	if repo != connectorRepo || i == nil {
+		writeJSON(w, map[string]any{"data": map[string]any{"repository": map[string]any{"issue": nil}}})
+		return
+	}
+	from := 0
+	if after != "" {
+		n, err := strconv.Atoi(after)
+		if err != nil {
+			reject("undecodable comments cursor " + after)
+			return
+		}
+		from = n
+	}
+	to := min(from+commentPageSize, len(i.thread))
+	nodes := []any{}
+	for _, c := range i.thread[min(from, to):to] {
+		var reason any
+		if c.MinimizedReason != "" {
+			reason = c.MinimizedReason
+		}
+		nodes = append(nodes, map[string]any{
+			"author": map[string]any{"login": c.Author}, "createdAt": c.CreatedAt, "body": c.Body,
+			"isMinimized": c.Minimized, "minimizedReason": reason, "authorAssociation": c.Association,
+		})
+	}
+	writeJSON(w, map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{
+		"comments": map[string]any{
+			"pageInfo": map[string]any{"hasNextPage": to < len(i.thread), "endCursor": strconv.Itoa(to)},
+			"nodes":    nodes,
+		},
+	}}}})
+}
+
+func (h *connectorHarness) SeedComments(num string, comments []forge.Comment) {
+	h.mutate(num, func(i *restIssue) { i.thread = slices.Clone(comments) })
 }

@@ -1,7 +1,7 @@
 // Command github is the GitHub tracker and forge as a Connector (ADR 0073):
-// REST reads, GraphQL queries for the check rollup and repository identity,
-// and the forge's branch and PR primitives (open, draft flips, comment, merge,
-// auto-merge, branch protection, probe, token grant; the flips and auto-merge
+// REST reads, GraphQL queries for the check rollup, issue comments and
+// repository identity, and the forge's branch and PR primitives (open, draft flips,
+// comment, merge, auto-merge, branch protection, probe, token grant; the flips and auto-merge
 // enqueue are GraphQL mutations), sent through the host's http_request Host
 // call, which attaches the credential. It also performs the tracker write
 // primitives: label edits, comments, issue filing and the label registry.
@@ -18,11 +18,11 @@ import (
 )
 
 func init() {
-	// Comments stays nil: REST reports no minimized state, so core keeps
-	// reading comments from the native (GraphQL) adapter.
 	tracker.Register(tracker.Reader{
 		ListIssues: listIssues,
 		Issue:      issue,
+		// Comments rides GraphQL, the one API that reports minimized state.
+		Comments:   commentsOf,
 		NativeDeps: nativeDeps,
 		Blocks:     blocks,
 		Search:     search,
