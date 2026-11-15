@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -119,10 +120,6 @@ type sandboxRigOpts struct {
 func newSandboxRig(t *testing.T, runtime string, o sandboxRigOpts) sandboxRig {
 	t.Helper()
 	shadow, issues, imageAbsent, running := o.shadow, o.issues, o.imageAbsent, o.running
-	fixture := "launcher-run-input.json"
-	if runtime == "bwrap" {
-		fixture = "launcher-run-input-bwrap.json"
-	}
 	connectors, err := fixturebuild.ConnectorDir()
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +128,11 @@ func newSandboxRig(t *testing.T, runtime string, o sandboxRigOpts) sandboxRig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	docPath := sandboxDoc(t, seamtest.Path(t, fixture), filepath.Join(connectors, "forge.wasm"), shadow)
+	fixture, artifacts := "launcher-run-input.json", map[string]string(nil)
+	if runtime == "bwrap" {
+		fixture, artifacts = "launcher-run-input-bwrap.json", bwrapSandboxArtifacts(t, host)
+	}
+	docPath := sandboxDoc(t, seamtest.Path(t, fixture), filepath.Join(connectors, "forge.wasm"), shadow, artifacts)
 
 	bin := seamtest.BuildLauncher(t)
 	fakeDir := seamtest.InstallFakes(t, "podman", "docker", "bwrap", "gh")
@@ -418,8 +419,9 @@ func sandboxName(argv []string) string {
 // on and a github backend row whose Connector is the wasm at module. The row
 // reads through GH_TOKEN. As a shadow row it loads on the run's first read, and
 // native stays authoritative; as a routed one the launch token gate loads it,
-// and its lack of a token grant refuses the launch.
-func sandboxDoc(t *testing.T, docPath, module string, shadow bool) string {
+// and its lack of a token grant refuses the launch. artifacts overrides keys of
+// the document's artifacts.
+func sandboxDoc(t *testing.T, docPath, module string, shadow bool, artifacts map[string]string) string {
 	t.Helper()
 	data, err := os.ReadFile(docPath)
 	if err != nil {
@@ -441,6 +443,16 @@ func sandboxDoc(t *testing.T, docPath, module string, shadow bool) string {
 	if shadow {
 		row["shadow"], row["shadowEvery"] = true, 1
 	}
+	if len(artifacts) > 0 {
+		var art map[string]string
+		if err := json.Unmarshal(doc["artifacts"], &art); err != nil {
+			t.Fatal(err)
+		}
+		maps.Copy(art, artifacts)
+		if doc["artifacts"], err = json.Marshal(art); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for k, v := range map[string]any{"settings": settings, "backends": []any{row}} {
 		if doc[k], err = json.Marshal(v); err != nil {
 			t.Fatal(err)
@@ -454,4 +466,24 @@ func sandboxDoc(t *testing.T, docPath, module string, shadow bool) string {
 		t.Fatal(err)
 	}
 	return scratch
+}
+
+// bwrapSandboxArtifacts points the bwrap fixture's connector-host and syscall
+// filter at local files. The fixture names real store paths that a sandboxed
+// check build lacks, and a missing connector-host sends the launcher to a real
+// `nix build` that cannot run there.
+func bwrapSandboxArtifacts(t *testing.T, host string) map[string]string {
+	t.Helper()
+	pkg := t.TempDir()
+	if err := os.Mkdir(filepath.Join(pkg, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(host, filepath.Join(pkg, "bin", "connector-host")); err != nil {
+		t.Fatal(err)
+	}
+	filter := filepath.Join(t.TempDir(), "syscall-filter.bpf")
+	if err := os.WriteFile(filter, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return map[string]string{"CONNECTOR_HOST": pkg, "SYSCALL_FILTER": filter}
 }
