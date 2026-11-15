@@ -171,20 +171,30 @@ func TestNetworkFixtureMalformedOutputFailsClosedAfterItsAuditedRequest(t *testi
 	}
 }
 
-// The guest sees a fixed reason for a failed send: an Authorize error may carry
-// the credential, and the fixture hands what the guest saw back in its error.
+// The guest sees a fixed reason for a failed send, never the Authorize detail.
+// The fixture hands what the guest saw back in its error, which is the
+// CallError's message; the host keeps the detail in Call's error and the audit
+// entry.
 func TestNetworkFixtureSendFailureShowsTheGuestOnlyAFixedReason(t *testing.T) {
+	const detail = "TOKEN_UNDER_TEST is not set"
 	c, _, audit, params := loadNetworkFixtureWith(t, "network.wasm", func(n *connectorhost.Network) {
-		n.Authorize = func(*http.Request) error { return errors.New("token s3cret-token expired") }
+		n.Authorize = func(*http.Request) error { return errors.New(detail) }
 	})
 	err := c.Call(context.Background(), "fetch", params, new(fetched))
-	if err == nil || !strings.Contains(err.Error(), connectorhost.ErrHTTPSend.Error()) {
-		t.Fatalf("err = %v, want the guest's failure to carry the fixed reason", err)
+	var ce *connectorhost.CallError
+	if !errors.As(err, &ce) {
+		t.Fatalf("err = %v, want the guest's CallError in the chain", err)
 	}
-	if strings.Contains(err.Error(), "s3cret-token") {
-		t.Errorf("err = %v: the Authorize error reached the guest", err)
+	if !strings.Contains(ce.Message, connectorhost.ErrHTTPSend.Error()) {
+		t.Errorf("guest message = %q, want the fixed reason", ce.Message)
 	}
-	if lines := auditLines(t, audit); len(lines) != 1 || !strings.Contains(lines[0].Reason, "s3cret-token") {
+	if strings.Contains(ce.Message, detail) {
+		t.Errorf("guest message = %q: the Authorize error reached the guest", ce.Message)
+	}
+	if !strings.Contains(err.Error(), detail) {
+		t.Errorf("err = %v, want the host-side detail kept in Call's error", err)
+	}
+	if lines := auditLines(t, audit); len(lines) != 1 || !strings.Contains(lines[0].Reason, detail) {
 		t.Errorf("audit = %+v, want the detail kept in the audit reason", lines)
 	}
 }

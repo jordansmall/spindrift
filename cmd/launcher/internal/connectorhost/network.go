@@ -251,7 +251,9 @@ type Network struct {
 	// Routes is the only traffic the Connector may send; see ValidateRoutes.
 	Routes []Route
 	// Authorize attaches the credential to an admitted request, after the
-	// guest's headers are copied so it wins over any the guest set.
+	// guest's headers are copied so it wins over any the guest set. Its error
+	// must name what failed (an unset variable, say) and never the credential:
+	// it reaches Call's error and the audit entry.
 	Authorize func(*http.Request) error
 	// Client is the transport. A redirect is never followed except the one hop
 	// of a FollowRedirect route; CheckRedirect is set on a copy, so the
