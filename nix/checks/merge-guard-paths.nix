@@ -35,6 +35,7 @@ let
     "nix/dogfood-defaults.nix"
     "lib/default-model-fixture.nix"
     "nix/dogfood-shadow.nix"
+    "nix/dogfood-primary.nix"
     "spindrift-connector-routes.json"
   ];
   rowKnobSources = map (r: r.source) (import ../../lib/row-knob-registries.nix);

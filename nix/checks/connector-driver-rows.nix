@@ -35,11 +35,12 @@ let
     driverRows.fixture = fixtureRow;
   };
   plain = mkHarness { };
-  # The dogfood's shadowed Connectors that are not core Drivers: backend rows,
-  # which carry `shadow` and `shadowEvery` themselves. Derived so no backend
-  # name is spelled in a test (ADR 0068, backend-name-guard).
-  backendShadows = pkgs.lib.filter (n: !(registry.entries ? ${n})) (import ../dogfood-shadow.nix);
+  # The dogfood's primary Connectors: backend rows, which carry `primary`
+  # themselves. Derived so no backend name is spelled in a test (ADR 0068,
+  # backend-name-guard).
+  backendPrimaries = import ../dogfood-primary.nix;
   claudeConnector = (import ../../connectors/claude).lib.connector { core = import ../../core; };
+  githubConnector = (import ../../connectors/github).lib.connector { core = import ../../core; };
   claudeRow = claudeConnector.driverRow pkgs.lib;
   shadowOn = mkHarness {
     driverRows.claude = claudeRow;
@@ -320,24 +321,24 @@ in
     ) "`shadow` on the claude Connector must reach mkHarness";
     pkgs.runCommand "connector-driver-rows-flake-module-shadow-option" { } "touch $out";
 
-  # Issues #6797, #6810: the dogfood shadows claude (Driver replay) and github
-  # (sampled reads). The real flake's default app (flake.nix's
+  # Issues #6797, #6810, #6998: the dogfood shadows claude (Driver replay) and
+  # runs github as primary. The real flake's default app (flake.nix's
   # `spindrift.connectors` through the module) must equal the direct mirror's,
-  # whose Box rows file and input document carry `shadow`; the app program
-  # embeds both, so dropping flake.nix's shadow wiring changes it. The mirror
-  # alone would not notice: it reads nix/dogfood-shadow.nix itself.
+  # whose Box rows file and input document carry `shadow` and `primary`; the app
+  # program embeds both, so dropping flake.nix's wiring changes it. The mirror
+  # alone would not notice: it reads the nix/dogfood-*.nix lists itself.
   connector-driver-rows-dogfood-shadows =
     assert assertMsg (config.apps.default.program == fixtures.harness.apps.default.program)
-      "flake.nix must shadow the nix/dogfood-shadow.nix Connectors: the dogfood app differs from the mirror (fixtures.harness)";
+      "flake.nix must wire the nix/dogfood-shadow.nix and nix/dogfood-primary.nix Connectors: the dogfood app differs from the mirror (fixtures.harness)";
     pkgs.runCommand "connector-driver-rows-dogfood-shadows" { nativeBuildInputs = [ pkgs.jq ]; } ''
       jq -e 'any(.[]; .name == "claude" and .shadow == true)' \
         ${fixtures.harness.internals.driverRowsFile}
       ${fixtures.runInputDocOf config.apps.default.program}
-      jq -e --argjson names '${builtins.toJSON backendShadows}' '
+      jq -e --argjson names '${builtins.toJSON backendPrimaries}' '
         [.backends[] | select(.name as $n | $names | index($n))] as $rows
         | ($names | length) > 0
           and ($rows | length) == ($names | length)
-          and all($rows[]; .shadow == true and .shadowEvery >= 1)
+          and all($rows[]; .primary == true and (has("shadow") | not) and (has("shadowEvery") | not))
       ' "$doc"
       touch $out
     '';
@@ -357,4 +358,134 @@ in
           || { echo "fixtures mirror: CONNECTOR_SANDBOX is not \"1\"" >&2; exit 1; }
         touch $out
       '';
+
+  # Issue #6998: `primary` is a switch on a registered backend row. Off, the
+  # input document carries no `primary` key; on, the row's entry says so.
+  connector-driver-rows-primary-reaches-document =
+    let
+      consumerWith =
+        modules:
+        fixtures.connectorConsumerVia (
+          [
+            ../../lib/flakeModule.nix
+            githubConnector.flakeModule
+          ]
+          ++ modules
+        );
+      programOf = c: c.apps.${system}.default.program;
+    in
+    pkgs.runCommand "connector-driver-rows-primary-reaches-document"
+      { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        ${fixtures.runInputDocOf (
+          programOf (consumerWith [ { spindrift.connectors.github.primary = true; } ])
+        )}
+        jq -e --argjson names '${builtins.toJSON backendPrimaries}' '[.backends[] | select(.name as $n | $names | index($n))]
+          | length == ($names | length) and all(.[]; .primary == true and (has("shadow") | not))' "$doc"
+        ${fixtures.runInputDocOf (programOf (consumerWith [ ]))}
+        jq -e 'all(.backends[]; has("primary") | not)' "$doc"
+        touch $out
+      '';
+
+  # Every refusal names the row; tryEval cannot read a thrown message, so the
+  # text is pinned on lib/connector-names.nix's primaryError and the module
+  # path is pinned to fail.
+  connector-driver-rows-primary-refusals =
+    let
+      names = import ../../lib/connector-names.nix;
+      consumerWith =
+        modules:
+        fixtures.connectorConsumerVia (
+          [
+            ../../lib/flakeModule.nix
+            githubConnector.flakeModule
+            claudeConnector.flakeModule
+          ]
+          ++ modules
+        );
+      evaluatesWith =
+        modules:
+        (builtins.tryEval (builtins.deepSeq (consumerWith modules).apps.${system}.default.program true))
+        .success;
+      # A backend row whose name has no native backend to replace.
+      nativeless = primary: {
+        spindrift.connectors.nativeless = {
+          inherit primary;
+          knobs.nativelessToken = {
+            env = "NATIVELESS_TOKEN";
+            group = "dispatch";
+            secret = true;
+            doc = "test knob";
+            flakeOption = false;
+            boxEnv = false;
+          };
+          backend = {
+            module = _: "/nativeless.wasm";
+            routes = [
+              {
+                method = "GET";
+                host = "example.invalid";
+                path = "/api";
+              }
+            ];
+            credential = "nativelessToken";
+          };
+        };
+      };
+      errorFor =
+        row:
+        names.primaryError [ "github" ] "row1" (
+          {
+            shadow = false;
+            driver = null;
+            backend = null;
+          }
+          // row
+        );
+      messages = map errorFor [
+        { shadow = true; }
+        { driver = { }; }
+        { }
+        { backend = { }; }
+      ];
+    in
+    assert assertMsg (builtins.all (
+      e: e != null && pkgs.lib.hasInfix "Connector 'row1'" e
+    ) messages) "every `primary` refusal must name the row";
+    assert assertMsg (
+      errorFor {
+        backend = { };
+        driver = null;
+      } != null
+    ) "a row with no native backend of its name must be refused";
+    assert assertMsg (
+      names.primaryError [ "row1" ] "row1" {
+        shadow = false;
+        driver = null;
+        backend = { };
+      } == null
+    ) "control: a backend row with a native backend must be accepted";
+    assert assertMsg (evaluatesWith [
+      (nativeless false)
+    ]) "control: the native-less row evaluates without `primary`";
+    assert assertMsg (
+      !(evaluatesWith [ (nativeless true) ])
+    ) "`primary` on a row with no native backend must fail evaluation";
+    assert assertMsg (evaluatesWith [
+      { spindrift.connectors.github.primary = true; }
+    ]) "control: `primary` on the github backend row must evaluate";
+    assert assertMsg (
+      !(evaluatesWith [
+        {
+          spindrift.connectors.github = {
+            primary = true;
+            shadow = true;
+          };
+        }
+      ])
+    ) "`primary` with `shadow` must fail evaluation";
+    assert assertMsg (
+      !(evaluatesWith [ { spindrift.connectors.claude.primary = true; } ])
+    ) "`primary` on a driver row must fail evaluation until #6999";
+    pkgs.runCommand "connector-driver-rows-primary-refusals" { } "touch $out";
 }

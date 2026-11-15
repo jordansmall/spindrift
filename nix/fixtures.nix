@@ -108,9 +108,10 @@ let
     # dogfoodBwrapHarness inherits it, so `.#dogfood-bwrap` layers too.
     multiDriver = true;
     # The Connector modules' work, done by hand: flake.nix registers claude's
-    # and github's rows and shadows them (nix/dogfood-shadow.nix), so the
-    # module path hands mkHarness all of it. A Driver row is shadowed by name
-    # in `shadowDrivers`; a backend row carries the flag itself.
+    # and github's rows, shadowing claude (nix/dogfood-shadow.nix) and running
+    # github as primary (nix/dogfood-primary.nix), so the module path hands
+    # mkHarness all of it. A Driver row is shadowed by name in `shadowDrivers`;
+    # a backend row carries the flag itself.
     driverRows = dogfoodDriverRows;
     shadowDrivers = builtins.filter (n: dogfoodDriverRows ? ${n}) dogfoodShadow;
     # Connector-shipped fragment files (issue #6857), as the module collects them.
@@ -121,11 +122,10 @@ let
       credentialEnv = "SPINDRIFT_GITHUB_CONNECTOR_TOKEN";
       credentialKnob = "githubConnectorToken";
       acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).github;
-      shadow = true;
-      shadowEvery = 10;
+      primary = true;
     };
-    # Registered but not shadowed: nothing reads jira through the Connector
-    # until the cut-over (issue #6753), so nix/dogfood-shadow.nix omits it.
+    # Registered but not primary: nothing reads jira through the Connector
+    # until the cut-over (issue #6753), so nix/dogfood-primary.nix omits it.
     backendRows.jira = {
       module = p: "${jiraConnector.package p}/jira.wasm";
       inherit (jiraConnector) routes;

@@ -617,6 +617,10 @@ let
     in
     if !(builtins.isBool on) then
       throw "mkHarness: backendRows.${name}.shadow must be a bool"
+    else if !(builtins.isBool (row.primary or false)) then
+      throw "mkHarness: backendRows.${name}.primary must be a bool"
+    else if (row.primary or false) && on then
+      throw "mkHarness: backendRows.${name} sets both `primary` and `shadow`"
     else if row ? shadowEvery && !(builtins.isInt row.shadowEvery && row.shadowEvery >= 1) then
       throw "mkHarness: backendRows.${name}.shadowEvery must be an integer of at least 1"
     else if row ? shadowEvery && !on then
@@ -686,6 +690,7 @@ let
       // lib.optionalAttrs (r ? identityEnv) { inherit (r) identityEnv; }
       // lib.optionalAttrs (r ? baseEnv) { inherit (r) baseEnv; }
       // lib.optionalAttrs (r ? shadow) { inherit (r) shadow; }
+      // lib.optionalAttrs (r.primary or false) { primary = true; }
       // lib.optionalAttrs (r ? shadowEvery) { inherit (r) shadowEvery; }
     ) (lib.mapAttrs checkBackendRow backendRows);
   driverEntry =

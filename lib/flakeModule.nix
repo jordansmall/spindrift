@@ -89,6 +89,16 @@ let
     else
       r
   ) (lib.filterAttrs (_: r: r.shadow) config.spindrift.connectors);
+  # connectorBackendRows filters every row through here, which forces each
+  # row's `primary` checks.
+  checkedConnectors = lib.mapAttrs (
+    name: r:
+    let
+      nativeNames = map (b: b.name) (import ./backends/default.nix);
+      err = if r.primary then (import ./connector-names.nix).primaryError nativeNames name r else null;
+    in
+    if err != null then throw err else r
+  ) config.spindrift.connectors;
   connectorBackendRows = lib.mapAttrs (
     name: r:
     let
@@ -133,7 +143,8 @@ let
         shadow = true;
         inherit (r) shadowEvery;
       }
-  ) (lib.filterAttrs (_: r: r.backend != null) config.spindrift.connectors);
+      // lib.optionalAttrs r.primary { primary = true; }
+  ) (lib.filterAttrs (_: r: r.backend != null) checkedConnectors);
   shadowConnectors = lib.attrNames (lib.filterAttrs (_: r: r.driver != null) shadowRows);
   # The fragment contributions Connectors register (issue #6857), a list in
   # Connector-name order; lib/fragment-paths.nix's `withConnectors` validates it.
@@ -666,6 +677,22 @@ in
                     authoritative. A row with neither throws. mkHarness
                     throws on any other mismatch. Off by default, which
                     leaves the Consumer's outputs byte-identical.
+                  '';
+                };
+                primary = mkOption {
+                  type = types.bool;
+                  default = false;
+                  description = ''
+                    Make this Connector authoritative over the native
+                    implementation of the same name (issue #6998). On a
+                    `backend` row it answers every read the native backend
+                    would, while writes stay native. A `driver` row would be the Driver in
+                    place of the native Strategy; that switch arrives with
+                    #6999, so it throws for now. Exclusive with
+                    `shadow`, and a row with no native implementation of its
+                    name throws, each naming the row. Off by default, which
+                    leaves the Consumer's outputs byte-identical. Dropping it
+                    restores the native reads.
                   '';
                 };
                 shadowEvery = mkOption {
