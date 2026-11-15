@@ -2843,7 +2843,7 @@ var clauseContracts = []clauseContract{
 		reason:   "a tracker with no in-Box client (jira) leaves linked issues unreadable, and the scout must be told so rather than try a client that does not exist (issue #6344); it renders into the agents JSON, so it is checked as raw source.",
 	},
 
-	// ci-failure.md: a fix-pass step no golden cell renders, so checked as raw source
+	// ci-failure.md: also pinned as raw source, beside the fix-pass-ci-failure golden
 	{
 		fragment: "fragments/ci-failure.md",
 		clause:   "a capped tail of the failing job's log",
@@ -2860,6 +2860,26 @@ var clauseContracts = []clauseContract{
 		clause:   "skip anything CI FAILURE",
 		absent:   true,
 		reason:   "a check with no log excerpt still has to be reproduced locally, so the template must not say to skip anything on CI FAILURE's account.",
+	},
+	{
+		fragment: "fix-prompt.md",
+		clause:   "Compare the platform legs CI FAILURE lists",
+		reason:   "a pass that never set the legs side by side missed that #7016's check failed identically on all three (issue #7084).",
+	},
+	{
+		fragment: "fix-prompt.md",
+		clause:   "fails the same way on every leg",
+		reason:   "a check red identically on every CI leg is deterministic; a pass that wrote it off as one platform's timing flake left PR #7016 red (issue #7084).",
+	},
+	{
+		fragment: "fix-prompt.md",
+		clause:   "Nix sandbox off",
+		reason:   "the Box builds with the sandbox off and its own nix config, so a failure that will not reproduce in-Box points there before timing or resource theories (issue #7084).",
+	},
+	{
+		fragment: "fix-prompt.md",
+		clause:   "Never stress-run tests in parallel copies",
+		reason:   "parallel stress copies exhausted the Box's pids limit and killed a fix pass (issue #7084).",
 	},
 
 	// issue-read.md

@@ -26,7 +26,20 @@ paragraph of commentary.
 
 ${PRINCIPLE_FIX_ROOT_CAUSES_STEP}No SCOUT, no implement-from-scratch. Go straight to:
 
-1. Reproduce the CI failure locally (see CHECK below).
+1. Reproduce the CI failure locally (see CHECK below). If it will not
+   reproduce in the Box:
+   - Compare the platform legs CI FAILURE lists against each other: a
+     check that fails the same way on every leg is deterministic, not a
+     flake — never write it off as timing or as one platform.
+   - Compare the error text in CI's log with your in-Box run; the line
+     that differs points at the cause.
+   - Suspect the Box's known divergences from CI first, before timing or
+     resource theories: the Box builds with the Nix sandbox off, so a
+     build can see store paths it never declared, and it runs under the
+     Box's own nix config (experimental features CI does not enable, for
+     one).
+   - Never stress-run tests in parallel copies; that can exhaust the
+     Box's pids or memory limits and kill the pass.
 2. Make the smallest change that fixes it. Do not refactor, redesign, or
    touch anything the failure doesn't implicate.
 3. Re-run the checks that were failing to confirm the fix.
