@@ -23,10 +23,14 @@ type hostCalls interface {
 }
 
 // networkCalls serves a Network's Host calls. failed records that a fatal
-// failure was audited here, so Call does not audit it a second time.
+// failure was audited here, so Call does not audit it a second time. sendErr
+// is the send error of the last request this Call made, in full, and nil if
+// that request was sent: the guest sees only the fixed reason, Call's error
+// the detail.
 type networkCalls struct {
-	n      *Network
-	failed bool
+	n       *Network
+	failed  bool
+	sendErr error
 }
 
 var _ hostCalls = (*networkCalls)(nil)
@@ -38,9 +42,12 @@ func (h *networkCalls) httpRequest(ctx context.Context, raw []byte, bufCap int) 
 	status, body, header, err := h.n.do(ctx, raw, min(bufCap, maxHTTPResponse))
 	switch {
 	case err == nil:
+		h.sendErr = nil
 	case errors.Is(err, ErrHTTPSend):
-		// A fixed reason: err carries the request URL and whatever Authorize said,
-		// which may be the credential. The detail is in the audit entry.
+		// A fixed reason for the guest: err carries the request URL and whatever
+		// Authorize said. The detail stays host-side: the audit entry and Call's
+		// returned error.
+		h.sendErr = err
 		return 0, []byte(ErrHTTPSend.Error()), nil, nil
 	default:
 		h.failed = true

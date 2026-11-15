@@ -261,7 +261,9 @@ func encodeRequest(method string, params any) ([]byte, error) {
 
 // Call sends one request through connector_call and decodes the response's
 // result into result, which may be nil to ignore it. A failure comes back
-// wrapping ErrCall and, for a guest failure, its own sentinel too.
+// wrapping ErrCall and, for a guest failure, its own sentinel too. A
+// failed call, or a Connector-reported error, also carries the host-side
+// reason of the last request the call admitted but could not send.
 //
 // Any failure of the exchange itself, or of the response it returned, leaves
 // the module in an unknown state: the Connector is closed and every later call
@@ -269,6 +271,13 @@ func encodeRequest(method string, params any) ([]byte, error) {
 // and does not.
 func (c *Connector) Call(ctx context.Context, method string, params, result any) error {
 	fail := func(err error) error { return fmt.Errorf("%w: %s: %w", ErrCall, method, err) }
+	// The guest sees only ErrHTTPSend's fixed text; the detail rides here.
+	failWithHost := func(err error) error {
+		if c.host != nil && c.host.sendErr != nil {
+			err = fmt.Errorf("%w; host: %w", err, c.host.sendErr)
+		}
+		return fail(err)
+	}
 	req, err := encodeRequest(method, params)
 	if err != nil {
 		return fail(err)
@@ -283,6 +292,7 @@ func (c *Connector) Call(ctx context.Context, method string, params, result any)
 	}
 	if c.host != nil {
 		c.host.failed = false
+		c.host.sendErr = nil
 	}
 	raw, err := c.engine.call(ctx, req)
 	if errors.Is(err, ErrExport) {
@@ -298,7 +308,7 @@ func (c *Connector) Call(ctx context.Context, method string, params, result any)
 	}
 	if err != nil {
 		c.dead = true
-		c.err = fail(err)
+		c.err = failWithHost(err)
 		// A Host call's fatal failure was audited where it happened; any other
 		// failed call (a rejected result, a trap, a budget or memory limit) has not.
 		if c.host != nil && !c.host.failed {
@@ -309,7 +319,7 @@ func (c *Connector) Call(ctx context.Context, method string, params, result any)
 		return c.err
 	}
 	if resp.Error != nil {
-		return fail(resp.callError())
+		return failWithHost(resp.callError())
 	}
 	return nil
 }
