@@ -299,3 +299,76 @@ func search(t tracker.Target, text, state, label string, limit int) ([]tracker.I
 	}
 	return out[:min(limit, len(out))], nil
 }
+
+// commentsQuery reads one page of an issue's comments, oldest first. GraphQL
+// is the only API that reports isMinimized and minimizedReason, which core
+// drops comments on.
+const commentsQuery = `query($owner:String!,$repo:String!,$number:Int!,$after:String){repository(owner:$owner,name:$repo){issue(number:$number){comments(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{author{login} createdAt body isMinimized minimizedReason authorAssociation}}}}}`
+
+// commentsOf returns every comment of issue number, oldest first, as `gh issue
+// view --json comments` does: the body is untouched, the research marker stays
+// in it, and a deleted author is the empty login. A thread longer than maxPages
+// pages fails rather than truncates.
+func commentsOf(t tracker.Target, number string) ([]tracker.Comment, error) {
+	n, err := parseNumber(number)
+	if err != nil {
+		return nil, err
+	}
+	owner, name, err := splitRepo(t.Repo)
+	if err != nil {
+		return nil, err
+	}
+	comments := []tracker.Comment{}
+	var after *string
+	for range maxPages {
+		var data struct {
+			Repository *struct {
+				Issue *struct {
+					Comments struct {
+						PageInfo struct {
+							HasNextPage bool   `json:"hasNextPage"`
+							EndCursor   string `json:"endCursor"`
+						} `json:"pageInfo"`
+						Nodes []struct {
+							Author *struct {
+								Login string `json:"login"`
+							} `json:"author"`
+							CreatedAt         string  `json:"createdAt"`
+							Body              string  `json:"body"`
+							IsMinimized       bool    `json:"isMinimized"`
+							MinimizedReason   *string `json:"minimizedReason"`
+							AuthorAssociation string  `json:"authorAssociation"`
+						} `json:"nodes"`
+					} `json:"comments"`
+				} `json:"issue"`
+			} `json:"repository"`
+		}
+		vars := map[string]any{"owner": owner, "repo": name, "number": n, "after": after}
+		if err := graphql(t.API, commentsQuery, vars, &data); err != nil {
+			return nil, err
+		}
+		if data.Repository == nil || data.Repository.Issue == nil {
+			return nil, fmt.Errorf("POST /graphql: no issue %s#%s", t.Repo, number)
+		}
+		page := data.Repository.Issue.Comments
+		for _, c := range page.Nodes {
+			out := tracker.Comment{
+				CreatedAt:       c.CreatedAt,
+				Body:            c.Body,
+				Minimized:       c.IsMinimized,
+				MinimizedReason: deref(c.MinimizedReason),
+				Association:     c.AuthorAssociation,
+			}
+			if c.Author != nil {
+				out.Author = c.Author.Login
+			}
+			comments = append(comments, out)
+		}
+		if !page.PageInfo.HasNextPage {
+			return comments, nil
+		}
+		cursor := page.PageInfo.EndCursor
+		after = &cursor
+	}
+	return nil, fmt.Errorf("POST /graphql: more than %d pages of comments on %s#%s", maxPages, t.Repo, number)
+}

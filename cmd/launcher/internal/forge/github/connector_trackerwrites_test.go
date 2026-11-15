@@ -36,6 +36,7 @@ var (
 	_ forgetest.NativeFailureIsolatable  = trackerWriteHarness{}
 	_ forgetest.PriorityCapable          = trackerWriteHarness{}
 	_ forgetest.HostPostedCommentHarness = trackerWriteHarness{}
+	_ forgetest.CommentCapable           = trackerWriteHarness{}
 	_ forgetest.IssueFilerHarness        = trackerWriteHarness{}
 )
 
@@ -50,8 +51,9 @@ func (w trackerWriteHarness) FailNativeDeps(n string)               { w.h.FailNa
 func (w trackerWriteHarness) SeedNativeDeps(n string, ids []string) {
 	w.h.SeedNativeDeps(n, ids)
 }
-func (trackerWriteHarness) IsolatesNativeFailure() {}
-func (trackerWriteHarness) IsPriorityCapable()     {}
+func (w trackerWriteHarness) SeedComments(n string, c []forge.Comment) { w.h.SeedComments(n, c) }
+func (trackerWriteHarness) IsolatesNativeFailure()                     {}
+func (trackerWriteHarness) IsPriorityCapable()                         {}
 
 // SeedCommentTarget is a seeded issue, or one GitHub has no record of.
 func (w trackerWriteHarness) SeedCommentTarget(failing bool) string {

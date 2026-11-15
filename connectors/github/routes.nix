@@ -22,8 +22,8 @@
 # which no read uses; the prior-claim read walks `/issues/{n}/timeline`.
 # `POST /graphql` is wider still: a Route restricts neither body nor query, so
 # it admits any GraphQL document, mutations included, and no Route can pin it
-# to the repository. The Connector sends the rollup query, repository-identity
-# queries, classic token-grant queries, the draft-flip and auto-merge
+# to the repository. The Connector sends the rollup query, the issue-comments
+# query, repository-identity queries, classic token-grant queries, the draft-flip and auto-merge
 # mutations, and the label-id query and removal mutation there (issues #6808,
 # #6881, #6882). Label removal cannot be a REST `DELETE`: the host refuses the
 # escaped `/` in a name such as `agent/ready`. Every REST write is pinned to

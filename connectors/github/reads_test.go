@@ -367,3 +367,123 @@ func TestSearchRefusesUnsafeInputWithoutRequest(t *testing.T) {
 		t.Error("limit 0: no error")
 	}
 }
+
+func gqlComments(hasNext bool, cursor string, nodes ...string) connector.Response {
+	return ok(fmt.Sprintf(`{"data":{"repository":{"issue":{"comments":{"pageInfo":{"hasNextPage":%t,"endCursor":%q},"nodes":[%s]}}}}}`,
+		hasNext, cursor, strings.Join(nodes, ",")))
+}
+
+// stubPages answers each POST /graphql with the next canned response.
+func stubPages(t *testing.T, resp ...connector.Response) *[]connector.Request {
+	t.Helper()
+	var got []connector.Request
+	old := send
+	send = func(r connector.Request) (connector.Response, error) {
+		got = append(got, r)
+		if len(got) > len(resp) {
+			return connector.Response{Status: 500, Body: []byte("{}")}, nil
+		}
+		return resp[len(got)-1], nil
+	}
+	t.Cleanup(func() { send = old })
+	return &got
+}
+
+func TestComments_MapsEveryField(t *testing.T) {
+	got := stubPages(t, gqlComments(false, "",
+		`{"author":{"login":"alice"},"createdAt":"2026-01-02T03:04:05Z","body":"live","isMinimized":false,"minimizedReason":null,"authorAssociation":"MEMBER"}`,
+		`{"author":{"login":"bob"},"createdAt":"2026-01-03T04:05:06Z","body":"noise\n<!-- spindrift-research -->","isMinimized":true,"minimizedReason":"SPAM","authorAssociation":"NONE"}`,
+		`{"author":null,"createdAt":"2026-01-04T05:06:07Z","body":"orphan","isMinimized":false,"minimizedReason":null,"authorAssociation":"CONTRIBUTOR"}`))
+	comments, err := commentsOf(tgt, "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []tracker.Comment{
+		{Author: "alice", CreatedAt: "2026-01-02T03:04:05Z", Body: "live", Association: "MEMBER"},
+		{Author: "bob", CreatedAt: "2026-01-03T04:05:06Z", Body: "noise\n<!-- spindrift-research -->", Minimized: true, MinimizedReason: "SPAM", Association: "NONE"},
+		{Author: "", CreatedAt: "2026-01-04T05:06:07Z", Body: "orphan", Association: "CONTRIBUTOR"},
+	}
+	if !reflect.DeepEqual(comments, want) {
+		t.Fatalf("comments = %#v", comments)
+	}
+	r := (*got)[0]
+	if r.Method != "POST" || r.URL != "https://api.github.com/graphql" ||
+		!strings.Contains(r.Body, `"owner":"o"`) || !strings.Contains(r.Body, `"repo":"r"`) || !strings.Contains(r.Body, `"number":7`) {
+		t.Fatalf("request = %#v", r)
+	}
+}
+
+func TestComments_PagesWithTheCursor(t *testing.T) {
+	node := func(body string) string {
+		return `{"author":{"login":"a"},"createdAt":"2026-01-01T00:00:00Z","body":"` + body + `","isMinimized":false,"minimizedReason":null,"authorAssociation":"OWNER"}`
+	}
+	got := stubPages(t, gqlComments(true, "CUR1", node("one"), node("two")), gqlComments(false, "", node("three")))
+	comments, err := commentsOf(tgt, "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bodies []string
+	for _, c := range comments {
+		bodies = append(bodies, c.Body)
+	}
+	if !reflect.DeepEqual(bodies, []string{"one", "two", "three"}) {
+		t.Fatalf("bodies = %q", bodies)
+	}
+	if len(*got) != 2 || strings.Contains((*got)[0].Body, "CUR1") || !strings.Contains((*got)[1].Body, `"after":"CUR1"`) {
+		t.Fatalf("requests = %#v", *got)
+	}
+}
+
+func TestComments_EmptyThreadIsNotNil(t *testing.T) {
+	stubPages(t, gqlComments(false, ""))
+	comments, err := commentsOf(tgt, "7")
+	if err != nil || comments == nil || len(comments) != 0 {
+		t.Fatalf("comments = %#v, err = %v", comments, err)
+	}
+}
+
+func TestComments_Failures(t *testing.T) {
+	for name, resp := range map[string]connector.Response{
+		"no such issue":  ok(`{"data":{"repository":{"issue":null}}}`),
+		"no repository":  ok(`{"data":{"repository":null}}`),
+		"graphql errors": ok(`{"data":null,"errors":[{"message":"rate limited"}]}`),
+		"http failure":   {Status: 502, Body: []byte("{}")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			stubPages(t, resp)
+			if _, err := commentsOf(tgt, "7"); err == nil {
+				t.Fatal("want an error: a failed read must not look like an empty thread")
+			}
+		})
+	}
+}
+
+func TestComments_RefusesAnUnboundedThread(t *testing.T) {
+	more := make([]connector.Response, maxPages+1)
+	for i := range more {
+		more[i] = gqlComments(true, "C")
+	}
+	stubPages(t, more...)
+	if _, err := commentsOf(tgt, "7"); err == nil {
+		t.Fatal("want an error past maxPages, not a truncated thread")
+	}
+}
+
+func TestComments_RefusesABadNumber(t *testing.T) {
+	got := stubPages(t)
+	for _, n := range []string{"", "0", "-1", "07", "1/2", "x"} {
+		if _, err := commentsOf(tgt, n); err == nil {
+			t.Errorf("number %q accepted", n)
+		}
+	}
+	if len(*got) != 0 {
+		t.Fatalf("a bad number reached the network: %#v", *got)
+	}
+}
+
+func TestComments_RefusesABadRepo(t *testing.T) {
+	stubPages(t)
+	if _, err := commentsOf(tracker.Target{API: tgt.API, Repo: "norepo"}, "7"); err == nil {
+		t.Fatal("want an error for a repo that is not owner/name")
+	}
+}
