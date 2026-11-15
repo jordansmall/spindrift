@@ -37,6 +37,9 @@ type wasmEngine struct {
 	// respHeader is the last http_request's response headers, nil when it left
 	// none; http_response_header reads it. Reset by each invoke.
 	respHeader http.Header
+	// budget is the running call's, set by applyLimits; calls are serialized under
+	// the Connector's mu, so one is live at a time.
+	budget *budget
 	// closed makes close idempotent: a failed call closes the engine before
 	// Connector.Close does.
 	closed bool
@@ -191,10 +194,17 @@ func (e *wasmEngine) close(ctx context.Context) error {
 }
 
 // applyLimits returns ctx under l's wall-clock budget and raises the memory
-// ceiling to l.memory if that is higher; see capAllocator.
+// ceiling to l.memory if that is higher; see capAllocator. It installs the
+// budget as e.budget for the call, and the cancel func clears it.
 func (e *wasmEngine) applyLimits(ctx context.Context, l limits) (context.Context, context.CancelFunc) {
 	e.memCap.ceiling = max(e.memCap.ceiling, l.memory)
-	return context.WithTimeoutCause(ctx, l.budget, ErrBudget)
+	var b *budget
+	ctx, b = newBudget(ctx, l.budget)
+	e.budget = b
+	return ctx, func() {
+		b.close()
+		e.budget = nil
+	}
 }
 
 // invoke runs fn and names how it failed. ctx carries the budget applyLimits set, so
@@ -456,7 +466,10 @@ func (e *wasmEngine) httpRequest(ctx context.Context, mem api.Memory, reqPtr, re
 	if !ok {
 		return e.malformed(hostRequest, "response buffer points outside module memory")
 	}
-	status, body, header, err := e.host.httpRequest(ctx, raw, int(min(respCap, maxHTTPResponse)))
+	if e.budget == nil { // only applyLimits installs it, so a guest running outside a call has none
+		return e.malformed(hostRequest, "http_request outside a connector call")
+	}
+	status, body, header, err := e.budget.httpRequest(ctx, e.host, raw, int(min(respCap, maxHTTPResponse)))
 	if err != nil {
 		return e.fatal(err)
 	}
