@@ -79,6 +79,10 @@ type rawIssue struct {
 		Name string `json:"name"`
 	} `json:"labels"`
 	PullRequest json.RawMessage `json:"pull_request"`
+	// StateReason and ClosedAt are null on an open issue, and ClosedAt may be
+	// null on a closed one; only labeled reads them.
+	StateReason *string `json:"state_reason"`
+	ClosedAt    *string `json:"closed_at"`
 }
 
 func (r rawIssue) issue() tracker.Issue {
@@ -371,4 +375,37 @@ func commentsOf(t tracker.Target, number string) ([]tracker.Comment, error) {
 		after = &cursor
 	}
 	return nil, fmt.Errorf("POST /graphql: more than %d pages of comments on %s#%s", maxPages, t.Repo, number)
+}
+
+// labeled returns up to limit issues in state carrying label, newest first,
+// with the close date and not-planned reason of a closed one: core's dedup
+// scan reads both. Native lists via `gh issue list --json
+// number,title,body,labels,stateReason,closedAt`, so the body stays.
+func labeled(t tracker.Target, label, state string, limit int) ([]tracker.Issue, error) {
+	if limit < 1 {
+		return nil, fmt.Errorf("list labeled issues: limit %d < 1", limit)
+	}
+	if state != "open" && state != "closed" {
+		return nil, fmt.Errorf("list labeled issues: unsupported issue state %q", state)
+	}
+	path := fmt.Sprintf("%s?state=%s&labels=%s&sort=created&direction=desc&per_page=%d", repoPath(t), state, url.QueryEscape(label), pageSize)
+	var out []tracker.Issue
+	err := pages(t.API, path, func(raw []rawIssue) bool {
+		for _, r := range raw {
+			if r.PullRequest != nil {
+				continue
+			}
+			i := r.issue()
+			if r.State == "closed" {
+				i.ClosedAt = deref(r.ClosedAt)
+				i.ClosedNotPlanned = deref(r.StateReason) == "not_planned"
+			}
+			out = append(out, i)
+		}
+		return len(out) >= limit
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out[:min(limit, len(out))], nil
 }
