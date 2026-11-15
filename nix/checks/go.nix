@@ -977,14 +977,15 @@ driverGoTests
 
   # go-check-env.nix's GOMAXPROCS bound (issue #3915), and its unset/0 fallback
   # against lib/image.nix's baked nix.conf `cores` (issue #3965), and its HOME
-  # redirect under $TMPDIR (issue #6009).
+  # redirect under $TMPDIR (issue #6009), and its pin of nix's configuration
+  # against whatever the builder's /etc/nix holds (issue #7083).
   go-check-env =
     let
       # Spliced inside shell double quotes: without the \\` escapes a
       # backtick would start command substitution.
       drift = "nix/checks/go-check-env.nix's fallback literal must match lib/image.nix's nix.conf \\`cores = ${imageNixCores}\\`";
     in
-    pkgs.runCommand "go-check-env" { } ''
+    pkgs.runCommand "go-check-env" { nativeBuildInputs = [ pkgs.nix ]; } ''
       check() {
         got=$(
           ${goCheckEnv}
@@ -1013,6 +1014,39 @@ driverGoTests
           exit 1
           ;;
       esac
+      assertNixPinned() {
+        feats=$(nix config show experimental-features 2>&1 || true)
+        for want in nix-command flakes; do
+          case " $feats " in
+            *" $want "*) ;;
+            *)
+              echo "$1: nix reports experimental-features=$feats, want $want; nix/checks/go-check-env.nix must pin nix's config (issue #7083)" >&2
+              exit 1
+              ;;
+          esac
+        done
+        case " $feats " in
+          *" ca-derivations "*)
+            echo "$1: nix reports experimental-features=$feats; the builder's nix config leaked through the pin (issue #7083)" >&2
+            exit 1
+            ;;
+        esac
+      }
+      hostile=$TMPDIR/hostile-nix
+      mkdir -p "$hostile/etc" "$hostile/xdg/nix"
+      echo "experimental-features = ca-derivations" >"$hostile/etc/nix.conf"
+      echo "experimental-features = ca-derivations" >"$hostile/user.conf"
+      echo "experimental-features = ca-derivations" >"$hostile/xdg/nix/nix.conf"
+      (
+        export NIX_CONF_DIR="$hostile/etc" NIX_USER_CONF_FILES="$hostile/user.conf" XDG_CONFIG_HOME="$hostile/xdg"
+        ${goCheckEnv}
+        assertNixPinned "hostile host nix config"
+      )
+      (
+        export NIX_CONF_DIR=/nonexistent
+        ${goCheckEnv}
+        assertNixPinned "no host nix config"
+      )
       touch $out
     '';
 
