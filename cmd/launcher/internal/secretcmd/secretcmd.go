@@ -56,6 +56,20 @@ func Command(env, tmpl string) string {
 	return Template(tmpl, env)
 }
 
+// IsSet reports whether env already holds a plain value.
+func IsSet(env string) bool {
+	return os.Getenv(env) != ""
+}
+
+// Pin records cmd as `<env>_CMD` unless one is already set, so a process that
+// inherits the environment re-resolves env instead of freezing its value.
+func Pin(env, cmd string) error {
+	if os.Getenv(env+"_CMD") != "" {
+		return nil
+	}
+	return os.Setenv(env+"_CMD", cmd)
+}
+
 // Export resolves cmd through run and sets env to the result; env is
 // untouched on failure.
 func Export(env, cmd string, run func(string) (string, error)) error {
