@@ -122,6 +122,7 @@ let
     // (import ./adr-numbers.nix common)
     // (import ./docs-edit-isolation.nix (common // { inherit checksAt baselineChecks; }))
     // (import ./seam-fixtures.nix common)
+    // (import ./seam-fixtures-store-paths.nix common)
     // (import ./event-stream-parity.nix common)
     // (import ./shadow-clean-run-recipes.nix common)
     // (import ./bare-bang-guard.nix common)
@@ -193,6 +194,8 @@ let
     "mkharness-agent-closure-tracks-prefetch"
     # Builds a bwrap harness whose packages exist only when isLinux.
     "mkharness-image-attr-name"
+    # Scans fixtures.seamFixtures, rendered off the Linux-only batsHarness.
+    "seam-fixtures-names-no-uncarried-store-path"
     # Same isLinux gate one hop further out: asserts config.packages carries
     # agent-closure, which flake.nix only re-exports when
     # fixtures.dogfoodBwrapHarness.packages has it.
