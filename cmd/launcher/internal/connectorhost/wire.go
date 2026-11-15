@@ -53,7 +53,7 @@ var errRemoteHostCall = errors.New("host call failed closed in the launcher")
 // sentinel an error maps to the first match of. Append only; code 0 is an error
 // that matches none, such as invalid wasm.
 var failureSentinels = []error{
-	nil, ErrBudget, ErrTrap, ErrMemoryCap, ErrDeclaredSize, ErrOutputTooLarge, ErrMalformedOutput, ErrExport, errRemoteHostCall,
+	nil, ErrBudget, ErrTrap, ErrMemoryCap, ErrDeclaredSize, ErrOutputTooLarge, ErrMalformedOutput, ErrExport, errRemoteHostCall, ErrHTTPRequestLimit,
 }
 
 // writeFrame writes one frame whose payload is parts joined.

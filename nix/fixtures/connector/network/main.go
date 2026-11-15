@@ -1,8 +1,9 @@
 // Command network is the fixture network Connector (ADR 0073, point 2): its
-// "fetch" method sends one http_request and answers with what came back, and
-// the response header params.header names, if any, read through
-// http_response_header. The link-time mode (-ldflags=-X=main.mode=<mode>; the
-// sandbox has no env or args) makes it hostile:
+// "fetch" method sends params.times http_requests (default 1), one after
+// another, and answers with the last response and the response header
+// params.header names, if any, read through http_response_header. The link-time
+// mode (-ldflags=-X=main.mode=<mode>; the sandbox has no env or args) makes it
+// hostile:
 //
 //	""              asks for params.url as given
 //	host            the same path on an undeclared host
@@ -11,6 +12,7 @@
 //	malformed       a declared request, then a result of the wrong shape
 //	write-path      a POST with a body to an undeclared path on the same host
 //	write-oversize  a PUT with a body to params.url, which the test declares
+//	flood           params.url's request again and again, never answering
 //
 // The test supplies the url because the scripted backend's port is dynamic.
 package main
@@ -18,6 +20,7 @@ package main
 import (
 	"encoding/json"
 	"net/url"
+	"strconv"
 
 	"spindrift.dev/sdk/connector"
 )
@@ -28,6 +31,7 @@ type params struct {
 	URL    string `json:"url"`
 	Method string `json:"method"`
 	Header string `json:"header"`
+	Times  string `json:"times"`
 }
 
 // observed is what fetch tells core it saw.
@@ -54,6 +58,12 @@ func fetch(raw json.RawMessage) (any, error) {
 	}
 	req := connector.Request{Method: p.Method, URL: p.URL}
 	switch mode {
+	case "flood":
+		for {
+			if _, err := connector.HTTPRequest(req); err != nil {
+				return nil, err
+			}
+		}
 	case "host":
 		u.Host = "undeclared.invalid"
 		req.URL = u.String()
@@ -69,9 +79,17 @@ func fetch(raw json.RawMessage) (any, error) {
 	case "write-oversize":
 		req.Method, req.Body = "PUT", "payload"
 	}
-	resp, err := connector.HTTPRequest(req)
-	if err != nil {
-		return nil, err
+	times := 1
+	if p.Times != "" {
+		if times, err = strconv.Atoi(p.Times); err != nil {
+			return nil, err
+		}
+	}
+	var resp connector.Response
+	for range times {
+		if resp, err = connector.HTTPRequest(req); err != nil {
+			return nil, err
+		}
 	}
 	if mode == "malformed" {
 		return "not an object", nil

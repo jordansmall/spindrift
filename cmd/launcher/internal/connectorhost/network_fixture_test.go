@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
 )
@@ -237,6 +239,86 @@ func TestNetworkFixtureReadsResponseHeadersThroughTheHostCall(t *testing.T) {
 			}
 			if (out.Header == nil) != (tc.want == nil) || (tc.want != nil && *out.Header != *tc.want) {
 				t.Errorf("header %q = %v, want %v", tc.header, out.Header, tc.want)
+			}
+		})
+	}
+}
+
+// The call budget measures guest work, so a backend that answers after the
+// budget's length does not cost the call its answer, on every engine.
+func TestNetworkFixtureSlowBackendDoesNotSpendTheCallBudget(t *testing.T) {
+	for name, ld := range netLoadersFor(t) {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+				time.Sleep(connectorhost.CallBudget + time.Second)
+				fmt.Fprint(w, "slow "+r.URL.Path)
+			})
+			n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+			c := loadNetWith(t, ld, fixture(t, "network.wasm"), n)
+			params := map[string]string{"url": b.URL + "/repos/x", "method": "GET"}
+			var out fetched
+			if err := c.Call(context.Background(), "fetch", params, &out); err != nil {
+				t.Fatal(err)
+			}
+			if out.Body != "slow /repos/x" {
+				t.Errorf("body = %q, want the backend's late answer", out.Body)
+			}
+		})
+	}
+}
+
+// The paused clock stays paused across several http_requests in one call: each
+// wait is under the budget but together they pass it, so only a clock that
+// resumes between requests (or never re-pauses) would spend the call.
+func TestNetworkFixtureSeveralSlowRequestsDoNotSpendTheCallBudget(t *testing.T) {
+	const times, each = 4, 2 * time.Second
+	if times*each <= connectorhost.CallBudget || each >= connectorhost.CallBudget {
+		t.Fatalf("%d x %s must pass CallBudget %s with each under it", times, each, connectorhost.CallBudget)
+	}
+	for name, ld := range netLoadersFor(t) {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+				time.Sleep(each)
+				fmt.Fprint(w, "slow "+r.URL.Path)
+			})
+			n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+			c := loadNetWith(t, ld, fixture(t, "network.wasm"), n)
+			params := map[string]string{"url": b.URL + "/repos/x", "method": "GET", "times": strconv.Itoa(times)}
+			var out fetched
+			if err := c.Call(context.Background(), "fetch", params, &out); err != nil {
+				t.Fatal(err)
+			}
+			if out.Body != "slow /repos/x" {
+				t.Errorf("body = %q, want the backend's late answer", out.Body)
+			}
+			if got := int(b.hits.Load()); got != times {
+				t.Errorf("backend saw %d requests, want %d", got, times)
+			}
+		})
+	}
+}
+
+// A guest that never stops sending http_requests stops at the limit, whichever
+// side of the sandbox counts it, with the sentinel intact.
+func TestNetworkFixtureFloodStopsAtTheHTTPRequestLimit(t *testing.T) {
+	for name, ld := range netLoadersFor(t) {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			b := newBackend(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") })
+			n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+			c := loadNetWith(t, ld, fixture(t, "network-flood.wasm"), n)
+			params := map[string]string{"url": b.URL + "/repos/x", "method": "GET"}
+			err := c.Call(context.Background(), "fetch", params, new(fetched))
+			if !errors.Is(err, connectorhost.ErrHTTPRequestLimit) {
+				t.Fatalf("err = %v, want ErrHTTPRequestLimit", err)
+			}
+			if want := fmt.Sprint(connectorhost.MaxHTTPRequests); !strings.Contains(err.Error(), want) {
+				t.Errorf("err = %v, want it to name the limit %s", err, want)
+			}
+			if got := int(b.hits.Load()); got != connectorhost.MaxHTTPRequests {
+				t.Errorf("backend saw %d requests, want %d", got, connectorhost.MaxHTTPRequests)
 			}
 		})
 	}
