@@ -700,7 +700,8 @@ in
                     stay native until its write switch (issue #6756); for jira
                     the whole tracker (reads, claim, transitions, labels,
                     comments and filed findings), authorized with the row's
-                    Basic credential. On a `driver`
+                    Basic credential; for forgejo the whole Code Forge, reads
+                    and writes, its tracker staying native. On a `driver`
                     row it is the Driver in place of the native Strategy, in
                     the Box during the Pass and on the host when it reads
                     Pass logs back; a Connector that fails to load fails the

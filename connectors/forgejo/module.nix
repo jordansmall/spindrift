@@ -1,7 +1,8 @@
 # The forgejo Connector's flake-parts module: the Forgejo forge half. The
-# native forgejo adapter stays authoritative and every binary still uses it for
-# every decision. The backend row below declares the Connector and its Route
-# table; nothing in the launcher reads forgejo through it yet.
+# native forgejo adapter stays authoritative unless a Consumer sets the row's
+# `primary`, which builds the Code Forge from the Connector instead (the
+# tracker stays native). The backend row below declares the Connector and its
+# Route table.
 { core }:
 { ... }:
 let
@@ -18,7 +19,7 @@ in
     env = "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN";
     group = "dispatch";
     secret = true;
-    doc = "bearer token the forgejo Connector's backend row authorizes its calls with (needs read access to the repository, its pull requests, commit statuses and branches, and write access to open, edit, merge and comment on pull requests and to delete branches); host-only, never reaches the Box; unused until the forgejo cut-over";
+    doc = "bearer token the forgejo Connector's backend row authorizes its calls with (needs read access to the repository, its pull requests, commit statuses and branches, and write access to open, edit, merge and comment on pull requests and to delete branches); host-only, never reaches the Box; used when the row sets primary, else unused";
     flakeOption = false;
     boxEnv = false;
   };

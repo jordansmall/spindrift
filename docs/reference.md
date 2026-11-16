@@ -2320,8 +2320,9 @@ is the fixture Connector in
   the Box replays each Pass log through it and records divergences. A
   `backend` row samples every `shadowEvery`th read (default 10, minimum 1) per
   operation through its Connector instead. With `primary` on, the Connector
-  answers every read the native backend would, with no fallback
-  (see [Backend primary mode](#backend-primary-mode)). A `driver` row with
+  answers the native backend's calls with no fallback: github's reads (see
+  [Backend primary mode](#backend-primary-mode)), forgejo's whole Code Forge
+  (see [The forgejo Connector](#the-forgejo-connector)). A `driver` row with
   `primary` on makes its Connector the Driver ahead of the native Strategy (see
   [Driver primary mode](#driver-primary-mode), issue #6999). `shadow` and
   `primary` are exclusive, and a row with neither a `driver` nor a `backend` is
@@ -2762,10 +2763,34 @@ authorizes with the host-only `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN` (the
 `forgejoConnectorToken` knob), with `FORGEJO_BASE_URL` as the base.
 `connector-forgejo-conformance` holds the forge half to the CodeForge, PRForge
 and host-mediation contracts in `cmd/launcher/internal/forge/forgejo`. The row
-is registered but neither shadowed nor primary: the native forgejo adapter
-stays authoritative, and the table is baselined in
+is registered and not shadowed, and the table is baselined in
 `spindrift-connector-routes.json` so doctor's `connector-routes-widened[forgejo]`
 row reports it as accepted.
+
+The native forgejo adapter builds the Code Forge unless the Consumer sets
+`spindrift.connectors.forgejo.primary = true`. Then, in every launcher process
+that builds it (dispatch, research, the daemon, recover and doctor), the Code
+Forge is the Connector's, with core's own git doing every git operation:
+
+- The Connector authorizes with `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`, resolved
+  by the launcher and the daemon like any secret knob (the value, `_CMD`, or
+  `SECRET_CMD`) and never reaches the Box. `FORGEJO_TOKEN` stays the
+  git credential, so both are needed.
+- `MERGE_METHOD` must be `rebase` or unset: the Connector merges by rebase only,
+  and the launcher refuses to build the forge for `squash` or `merge` rather
+  than ignore the knob.
+- There is no fallback. A Connector that fails to load, or a request its Route
+  table refuses, fails the operation with the Connector's own error, and the
+  native adapter never answers instead. The Connector's audit lines go to
+  `.spindrift/logs/connector-forgejo.audit.jsonl`.
+- The tracker stays native: labels, claims and comments still go through the
+  native adapter until the tracker switch.
+
+Dropping `primary` restores the native Code Forge with no code revert. The
+[forgejo integration harness](#forgejo-integration-harness) runs its lifecycle
+once more with `primary` set when `SPINDRIFT_BACKEND_CONNECTOR_WASM` and
+`SPINDRIFT_BACKEND_CONNECTOR_ROUTES` name a built Connector, fronting the
+harness Forgejo with a TLS proxy because the Connector refuses a non-https base.
 
 #### Shadow mode
 
@@ -3079,8 +3104,8 @@ Strategy with no code revert. A primary Driver emits no `shadow_summary`, so the
 
 ##### Backend primary mode
 
-A backend row with `primary` on (issues #6998, #7127) makes its Connector answer
-in place of the native backend, in every launcher process that builds the
+A backend row with `primary` on (issues #6998, #7127, #7128) makes its Connector
+answer in place of the native backend, in every launcher process that builds the
 adapter (dispatch, research, the daemon, recover and doctor). What it routes is
 per backend. The github row routes every read and, since the first write switch
 (issue #6883), these writes, with no `gh` fallback: the claim, un-claim and
@@ -3096,7 +3121,9 @@ label swaps in `.github/actions/agent-setup/action.yml` and
 leaks of the switch. The github row is on for dogfood through
 `nix/dogfood-primary.nix`. The jira row routes the whole tracker, so there is
 no native fallback to read from ([Switching jira to
-primary](#switching-jira-to-primary)). The rest of this section describes
+primary](#switching-jira-to-primary)). The forgejo row replaces the whole Code
+Forge, reads and writes, and leaves the tracker native; it is [documented with
+its Connector](#the-forgejo-connector). The rest of this section describes
 github's. On github, no read stays on `gh` except `Rebase`'s head and base
 branch lookup, which is part of
 that write (the Connector's PR read carries no base branch) and stays until
@@ -6256,9 +6283,19 @@ explicitly, **pre-release or on demand**, on a host with `podman` or
 `docker` and network egress to pull the image:
 
 ```sh
+wasm=$(nix run .#connector-dev -- forgejo build --no-link --print-out-paths)/forgejo.wasm
+routes=$(nix eval --impure --json --expr '((import ./connectors/forgejo).lib.connector { core = import ./core; }).routes')
 cd cmd/launcher
-go test -tags integration -run TestForgejoIntegration ./internal/forge/forgejo/
+SPINDRIFT_BACKEND_CONNECTOR_WASM=$wasm SPINDRIFT_BACKEND_CONNECTOR_ROUTES=$routes \
+  go test -tags integration -run TestForgejoIntegration ./internal/forge/forgejo/
 ```
+
+Run it from the repository root. The two Connector variables name the built
+forgejo Connector and its Route table, as `connectors/forgejo`'s
+`connector-forgejo-conformance` check exports them. Without them the `primary`
+subtest, which reruns the lifecycle through the Connector (see [The forgejo
+Connector](#the-forgejo-connector)), skips while the `native` subtest passes, so
+the run still reports green.
 
 The one `go test` run boots, seeds, runs the loop, asserts, and tears the
 container down — no external service and no credential beyond the throwaway
