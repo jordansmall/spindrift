@@ -22,24 +22,6 @@ type transitionLayer struct {
 
 func (l transitionLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
 
-// editLabels adds and removes labels in one call, dropping empty names and
-// skipping the call when nothing is left to do.
-func (l transitionLayer) editLabels(num string, add string, remove ...string) error {
-	p := editLabelsParams{Target: l.r.target, Number: num, Add: []string{}, Remove: []string{}}
-	if add != "" {
-		p.Add = append(p.Add, add)
-	}
-	for _, r := range remove {
-		if r != "" {
-			p.Remove = append(p.Remove, r)
-		}
-	}
-	if len(p.Add) == 0 && len(p.Remove) == 0 {
-		return nil
-	}
-	return l.r.call(context.Background(), CapEditLabels, p, &struct{}{})
-}
-
 // alreadyClaimedNative reports whether the issue's status already equals the
 // InProgress mapping. A from state mapped to the same status is exempt, so the
 // dispatch-workflow re-entry case is not mistaken for a stolen claim (#3887).
@@ -70,7 +52,12 @@ func (l transitionLayer) TransitionState(num string, from, to forge.DispatchStat
 			return err
 		}
 		if (!lc.StatusOnly && lc.Labels.AlreadyClaimed(from, to, iss.Labels)) || l.alreadyClaimedNative(issueStatus, from) {
-			return fmt.Errorf("tracker: issue %s: %w (%q)", num, forge.ErrAlreadyClaimed, issueStatus)
+			// A label-only tracker reports no status; name the claim label instead.
+			held := issueStatus
+			if held == "" {
+				held = lc.Labels.Label(to)
+			}
+			return fmt.Errorf("tracker: issue %s: %w (%q)", num, forge.ErrAlreadyClaimed, held)
 		}
 		if status != "" {
 			var stale []string
@@ -79,7 +66,7 @@ func (l transitionLayer) TransitionState(num string, from, to forge.DispatchStat
 					stale = append(stale, label)
 				}
 			}
-			if err := l.editLabels(num, "", stale...); err != nil {
+			if err := l.r.editLabels(num, nil, stale); err != nil {
 				return fmt.Errorf("tracker: issue %s: strip settled labels before claim: %w", num, err)
 			}
 		}
@@ -95,7 +82,7 @@ func (l transitionLayer) TransitionState(num string, from, to forge.DispatchStat
 	case transitionMoved:
 		// ListIssues matches a state by status or its fallback label, so a stale
 		// label must not survive; a cleanup failure must not undo the move.
-		if err := l.editLabels(num, "", removals...); err != nil {
+		if err := l.r.editLabels(num, nil, removals); err != nil {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: moved to %s but could not strip stale labels: %v\n", num, to, err)
 		}
 		return nil
@@ -114,7 +101,7 @@ func (l transitionLayer) TransitionState(num string, from, to forge.DispatchStat
 	if toLabel == "" {
 		return fmt.Errorf("tracker: no status mapping or fallback label configured for state %v", to)
 	}
-	return l.editLabels(num, toLabel, removals...)
+	return l.r.editLabels(num, []string{toLabel}, removals)
 }
 
 // mapping is the state-to-status table the Connector resolves a transition
@@ -161,7 +148,41 @@ func (l transitionLayer) CompleteVerdict(num string, verdict forge.Verdict) erro
 			return fmt.Errorf("tracker: issue %s: expected %q label, issue has %v", num, remove, iss.Labels)
 		}
 	}
-	return l.editLabels(num, add, remove)
+	return l.r.editLabels(num, []string{add}, []string{remove})
+}
+
+// editLabels adds and removes labels in one call, dropping empty names and
+// skipping the call when nothing is left to do.
+func (r *reads) editLabels(num string, add, remove []string) error {
+	p := editLabelsParams{Target: r.target, Number: num, Add: []string{}, Remove: []string{}}
+	for _, a := range add {
+		if a != "" {
+			p.Add = append(p.Add, a)
+		}
+	}
+	for _, rm := range remove {
+		if rm != "" {
+			p.Remove = append(p.Remove, rm)
+		}
+	}
+	if len(p.Add) == 0 && len(p.Remove) == 0 {
+		return nil
+	}
+	return r.call(context.Background(), CapEditLabels, p, &struct{}{})
+}
+
+// labelAddLayer adds labels to an existing issue through the Connector's
+// label-edit primitive. It exists whenever the Connector advertises
+// CapEditLabels, with or without CapTransition.
+type labelAddLayer struct {
+	forge.IssueTracker
+	r *reads
+}
+
+func (l labelAddLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
+
+func (l labelAddLayer) AddLabels(num string, labels []string) error {
+	return l.r.editLabels(num, labels, nil)
 }
 
 // labelsLayer serves the label registry from the Connector. It exists only when
@@ -246,6 +267,8 @@ func (l filerLayer) PostIssue(title, body string, labels []string) (string, erro
 
 var (
 	_ forge.Unwrapper            = transitionLayer{}
+	_ forge.Unwrapper            = labelAddLayer{}
+	_ forge.IssueLabeler         = labelAddLayer{}
 	_ forge.Unwrapper            = labelsLayer{}
 	_ forge.Unwrapper            = commentPostLayer{}
 	_ forge.HostPostedCommenter  = commentPostLayer{}

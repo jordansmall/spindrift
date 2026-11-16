@@ -604,3 +604,73 @@ func TestCommentAndFilingStayNativeWithoutCapabilities(t *testing.T) {
 		t.Errorf("native %d/%d, guest %v", len(fake.CommentCalls), len(fake.PostIssueCalls), g.methods())
 	}
 }
+
+func TestAddLabelsSendsOneEditAndSkipsEmpties(t *testing.T) {
+	g := &writeGuest{}
+	native := newNative()
+	tr := writeTracker(t, g, lifecycle(false), native, []string{CapEditLabels})
+	lb, ok := forge.As[forge.IssueLabeler](tr)
+	if !ok {
+		t.Fatal("no IssueLabeler with tracker.editLabels advertised")
+	}
+	if err := lb.AddLabels("7", []string{"a", "", "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := lb.AddLabels("7", []string{""}); err != nil {
+		t.Fatal(err)
+	}
+	edits := g.edits()
+	if len(edits) != 1 || len(g.calls) != 1 {
+		t.Fatalf("calls = %v, want one label edit", g.methods())
+	}
+	if got := strs(edits[0].params["add"]); !reflect.DeepEqual(got, []string{"a", "b"}) {
+		t.Errorf("add = %v", got)
+	}
+	if got := edits[0].params["number"]; got != "7" {
+		t.Errorf("number = %v", got)
+	}
+	if len(native.AddLabelsCalls) != 0 {
+		t.Errorf("native writes used: %+v", native.AddLabelsCalls)
+	}
+}
+
+func TestAddLabelsStaysNativeWithoutEditLabels(t *testing.T) {
+	g := &writeGuest{}
+	native := newNative()
+	native.SetIssue(forge.Issue{Number: "7"})
+	tr := writeTracker(t, g, lifecycle(false), native, []string{CapTransition})
+	lb, ok := forge.As[forge.IssueLabeler](tr)
+	if !ok {
+		t.Fatal("native IssueLabeler hidden")
+	}
+	if err := lb.AddLabels("7", []string{"a"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(native.AddLabelsCalls) != 1 || len(g.calls) != 0 {
+		t.Errorf("native calls = %d, guest calls = %v", len(native.AddLabelsCalls), g.methods())
+	}
+}
+
+func TestAddLabelsSurfacesConnectorError(t *testing.T) {
+	g := &writeGuest{editErr: errors.New("boom")}
+	tr := writeTracker(t, g, lifecycle(false), newNative(), []string{CapEditLabels})
+	lb, ok := forge.As[forge.IssueLabeler](tr)
+	if !ok {
+		t.Fatal("IssueLabeler hidden")
+	}
+	if err := lb.AddLabels("7", []string{"a"}); err == nil {
+		t.Fatal("want the Connector's error")
+	}
+}
+
+func TestClaimAlreadyClaimedWithoutStatusNamesTheLabel(t *testing.T) {
+	g := &writeGuest{transition: `{"outcome":"moved","offered":[]}`, issue: issueJSON("", "wip")}
+	tr := writeTracker(t, g, lifecycle(false), newNative(), writeCaps)
+	err := tr.TransitionState("7", forge.Dispatchable, forge.InProgress)
+	if !errors.Is(err, forge.ErrAlreadyClaimed) {
+		t.Fatalf("err = %v, want ErrAlreadyClaimed", err)
+	}
+	if !strings.Contains(err.Error(), `("wip")`) {
+		t.Errorf("err = %q, want it to name the in-progress label", err)
+	}
+}
