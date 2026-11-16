@@ -6,17 +6,19 @@
 # Consumer's switch on a registered row (issues #6797, #6810, #6998), not a
 # second registration.
 rec {
-  # Why a row's `primary` (issue #6998) cannot stand, or null. `nativeNames` is
-  # the native backend registry's names; the Driver half arrives with #6999.
+  # Why a row's `primary` (issues #6998, #6999) cannot stand, or null.
+  # `nativeNames` is the native backend registry's names, `nativeDriverNames`
+  # the core Driver registry's. A row with a `driver` is checked as a Driver, one
+  # with a `backend` as a backend, and a row with both as each.
   primaryError =
-    nativeNames: name: r:
+    nativeNames: nativeDriverNames: name: r:
     if r.shadow then
       "Connector '${name}': `primary` and `shadow` are exclusive on one row"
-    else if r.driver != null then
-      "Connector '${name}': `primary` on a `driver` row arrives with #6999"
-    else if r.backend == null then
+    else if r.driver == null && r.backend == null then
       "Connector '${name}': `primary` needs a `backend` row to answer reads"
-    else if !(builtins.elem name nativeNames) then
+    else if r.driver != null && !(builtins.elem name nativeDriverNames) then
+      "Connector '${name}': `primary` needs a native Driver of the same name to replace; none is registered"
+    else if r.backend != null && !(builtins.elem name nativeNames) then
       "Connector '${name}': `primary` needs a native backend of the same name to replace; none is registered"
     else
       null;

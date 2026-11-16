@@ -219,6 +219,7 @@ let
     "connector-driver-rows-dogfood-shadows"
     "connector-driver-rows-dogfood-sandbox"
     "connector-driver-rows-first-party-mark"
+    "connector-driver-rows-primary-driver"
   ];
 
   portableSourceChecks =

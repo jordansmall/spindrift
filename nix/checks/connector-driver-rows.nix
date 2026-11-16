@@ -387,6 +387,64 @@ in
         touch $out
       '';
 
+  # Issue #6999: `primary` on a `driver` row reaches both sides. The launcher
+  # input document (host) and the Box's rows file each carry the claude row
+  # with `primary`, its module and, in the Box, the first-party mark. Off, no
+  # `primary` key appears anywhere, so the Consumer's outputs are unchanged.
+  connector-driver-rows-primary-driver =
+    let
+      consumerWith =
+        modules:
+        fixtures.connectorConsumerVia (
+          [
+            ../../lib/flakeModule.nix
+            claudeConnector.flakeModule
+          ]
+          ++ modules
+        );
+      programOf = c: c.apps.${system}.default.program;
+      primaryBox = mkHarness {
+        driverRows.claude = claudeRow;
+        primaryDrivers = [ "claude" ];
+      };
+      plainBox = mkHarness { driverRows.claude = claudeRow; };
+      bothBox = mkHarness {
+        driverRows.claude = claudeRow;
+        shadowDrivers = [ "claude" ];
+        primaryDrivers = [ "claude" ];
+      };
+      outsideBox = mkHarness {
+        driverRows.fixture = fixtureRow;
+        primaryDrivers = [ "fixture" ];
+      };
+      moduleless = mkHarness {
+        driverRows.claude = removeAttrs claudeRow [ "module" ];
+        primaryDrivers = [ "claude" ];
+      };
+    in
+    assert assertMsg (evaluates primaryBox) "control: a primary claude row must evaluate";
+    assert assertMsg (
+      !(evaluates bothBox)
+    ) "a row both shadowed and primary must fail closed in mkHarness";
+    assert assertMsg (
+      !(evaluates outsideBox)
+    ) "`primary` on a Driver outside the core registry must fail closed";
+    assert assertMsg (!(evaluates moduleless)) "`primary` on a row without a module must fail closed";
+    pkgs.runCommand "connector-driver-rows-primary-driver" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      ${fixtures.runInputDocOf (
+        programOf (consumerWith [ { spindrift.connectors.claude.primary = true; } ])
+      )}
+      jq -e '[.drivers[] | select(.name == "claude")]
+        | length == 1 and all(.[]; .primary == true and has("module") and (has("shadow") | not))' "$doc"
+      jq -e '[.[] | select(.name == "claude")]
+        | length == 1 and all(.[]; .primary == true and has("module") and .firstParty == true and (has("shadow") | not))' \
+        ${primaryBox.internals.driverRowsFile}
+      ${fixtures.runInputDocOf (programOf (consumerWith [ ]))}
+      jq -e 'all((.drivers // [])[]; has("primary") | not)' "$doc"
+      jq -e 'all(.[]; has("primary") | not)' ${plainBox.internals.driverRowsFile}
+      touch $out
+    '';
+
   # Every refusal names the row; tryEval cannot read a thrown message, so the
   # text is pinned on lib/connector-names.nix's primaryError and the module
   # path is pinned to fail.
@@ -434,7 +492,7 @@ in
       };
       errorFor =
         row:
-        names.primaryError [ "github" ] "row1" (
+        names.primaryError [ "github" ] [ "claude" ] "row1" (
           {
             shadow = false;
             driver = null;
@@ -459,7 +517,7 @@ in
       } != null
     ) "a row with no native backend of its name must be refused";
     assert assertMsg (
-      names.primaryError [ "row1" ] "row1" {
+      names.primaryError [ "row1" ] [ "claude" ] "row1" {
         shadow = false;
         driver = null;
         backend = { };
@@ -484,8 +542,8 @@ in
         }
       ])
     ) "`primary` with `shadow` must fail evaluation";
-    assert assertMsg (
-      !(evaluatesWith [ { spindrift.connectors.claude.primary = true; } ])
-    ) "`primary` on a driver row must fail evaluation until #6999";
+    assert assertMsg (evaluatesWith [
+      { spindrift.connectors.claude.primary = true; }
+    ]) "control: `primary` on the claude driver row must evaluate";
     pkgs.runCommand "connector-driver-rows-primary-refusals" { } "touch $out";
 }
