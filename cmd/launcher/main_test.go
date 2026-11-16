@@ -1058,7 +1058,7 @@ func TestNewIssueTracker_Jira(t *testing.T) {
 	c.setRowKnob("JIRA_PROJECT_KEY", "PROJ")
 	c.setRowKnob("JIRA_TOKEN", "tok")
 
-	it := newIssueTracker(c)
+	it := mustBuild(newIssueTracker(c))
 	slug, err := it.Probe()
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
@@ -1083,7 +1083,7 @@ func TestNewIssueTracker_Forgejo(t *testing.T) {
 	c.setRowKnob("FORGEJO_TOKEN", "tok")
 	c.RepoSlug = "owner/repo"
 
-	it := newIssueTracker(c)
+	it := mustBuild(newIssueTracker(c))
 	slug, err := it.Probe()
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
@@ -1194,7 +1194,7 @@ body
 	c.setRowKnob("LOCAL_ISSUES_DIR", dir)
 	c = applyDispatchKind(c, dispatchkind.Research)
 
-	it := newIssueTracker(c)
+	it := mustBuild(newIssueTracker(c))
 	if err := it.CompleteVerdict("42", forge.Recommend); err != nil {
 		t.Fatalf("CompleteVerdict: %v", err)
 	}
@@ -1231,7 +1231,7 @@ body
 	c = applyDispatchKind(c, dispatchkind.Research)
 	c.ResearchVerdicts = `[{"verdict":"approve","label":"agent-research-approve","description":"looks good"}]`
 
-	it := newIssueTracker(c)
+	it := mustBuild(newIssueTracker(c))
 	if err := it.CompleteVerdict("42", forge.Verdict("approve")); err != nil {
 		t.Fatalf("CompleteVerdict: %v", err)
 	}
@@ -2642,7 +2642,7 @@ body
 	c.setRowKnob("LOCAL_ISSUES_DIR", dir)
 	c.Label = "ready-for-agent"
 
-	it := newIssueTracker(c)
+	it := mustBuild(newIssueTracker(c))
 	issues, err := it.ListIssues(forge.Dispatchable)
 	if err != nil {
 		t.Fatalf("ListIssues: %v", err)

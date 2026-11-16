@@ -559,13 +559,15 @@ func researchVerdictLabels(c config) forge.VerdictLabels {
 // newIssueTracker returns the IssueTracker adapter selected by ISSUE_TRACKER
 // (default "github"), carrying c.dispatchKind's label and verdict families
 // (ADR 0022). An unregistered name or a Strategy with no constructor is
-// unreachable post-validate, and there is no fallback: it panics.
-func newIssueTracker(c config) forge.IssueTracker {
+// unreachable post-validate, and there is no fallback: it panics. A Strategy
+// constructor may fail (a primary row's Connector that will not load), and
+// that error is the caller's.
+func newIssueTracker(c config) (forge.IssueTracker, error) {
 	s, ok := backendkit.ByName(c.IssueTracker)
 	if !ok || s.NewIssueTracker == nil {
 		panic(fmt.Sprintf("newIssueTracker: ISSUE_TRACKER=%q is not a registered tracker (validate should have rejected it)", c.IssueTracker))
 	}
-	return mustBuild(s.NewIssueTracker(backendShared(c), c.knobLookup))
+	return s.NewIssueTracker(backendShared(c), c.knobLookup)
 }
 
 // issueReader builds the Signal socket's host issue reader over the Dispatch's
