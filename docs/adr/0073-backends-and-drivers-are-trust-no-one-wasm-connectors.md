@@ -664,7 +664,9 @@ a label swap, the status-only refusal, the settled-label strip before a native
 claim, the already-claimed check, verdict completion, and research staying
 label-only. The Connector answers only whether a move happened, was unavailable
 or was unmapped. The production wiring waits for the #6753 cut-over: the native
-adapter stays authoritative until then, and `readshadow.go` still builds the
+adapter stays authoritative until then (amended by issue #7127: a jira row with
+`primary` builds its tracker from the Connector, status lifecycle included),
+and `readshadow.go` still builds the
 Connector tracker with dispatch labels alone, no status lifecycle.
 
 ## Amendment (issue #6855): host-posted comments and findings go through the Connector
@@ -852,11 +854,12 @@ time anything depended on the Connector.
 Primary mode is the row option `spindrift.connectors.<name>.primary`, off by
 default and exclusive with `shadow`. The Connector answers every read the native
 backend would, so cut-over (#6811) can delete the native read path; writes stay
-native. There is no fallback to the native read. A failure that fell back would be invisible, so
+native (amended by issue #7127: only on github, see the amendment below). There is no fallback to the native read. A failure that fell back would be invisible, so
 a Connector that fails to load, or a request its Route table refuses, fails the
 read with its own error and is recorded: a per-process
 `primary-<backend>-<stamp>-<pid>.audit.jsonl` of Connector audit lines (plus a
-sandbox totals line with no decision, #7116) and a `.log` of failed reads. The
+sandbox totals line with no decision, #7116) and a `.log` of failed reads
+(amended by issue #7127: jira's `.log` records every failed operation). The
 stage is reversible by dropping `primary` from the row, with no code revert,
 and dogfood runs github there first.
 
@@ -1029,3 +1032,23 @@ with no error, 39,411 lines compared, 0 divergences. Those runs predate the
 decode-cost fixes of #7107 and #7108; the Connector then cost about 48 ms per
 line against about 0.09 ms for the native Strategy, so primary on dogfood is
 also where the post-fix cost is first measured in production.
+
+## Amendment (issue #7127): jira's whole tracker goes through its Connector under primary
+
+What `primary` routes is per backend. A github row answers reads only, with
+writes native until its write switch (#6756). A jira row builds its whole
+tracker from the Connector in every launcher process that builds one (Pass,
+recover, doctor, reconcile, the daemon's demand counting, quickstart): reads,
+the claim, transitions under both lifecycles, labels, comments, host-posted
+comments, filed findings and the labeled dedup scan. Lifecycle decisions stay in
+core (`connectortracker`), as #6854 decided.
+
+There is no fallback, as for github: a Connector that fails to load, lacks a
+required capability, or has a route refused fails the operation with that
+error. A dead Connector is reloaded by the next call, with github's backoff. The
+records of #6998 hold for jira, in the shared `primaryrecord` package, except
+that the `.log` also records failed writes, names each `op` by the guest RPC
+method rather than the read's verb, and has no `reload the Connector` line (a
+failed reload is recorded under the method that needed it); the sandbox totals
+line stays github's. The native jira adapter is kept and still built and validated, so
+dropping `primary` reverts with no code change; its deletion is #6858.

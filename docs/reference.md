@@ -2660,7 +2660,8 @@ stays authoritative for every read and write; the forge reads the Connector
 serves (`OpenPRForBranch`, `PRForBranch`, `PRState`, `CheckState`,
 `FailureDetail`, the CI run link, `Mergeable`, `HeadCommitSHA`, `NeedsUpdate`,
 `ListPRFiles` and `CanAutoMerge`) are sampled by shadow mode or answered under
-primary mode, and every write stays native. The Connector is held to the tracker
+primary mode, and on github every write stays native (jira's primary row
+routes writes too). The Connector is held to the tracker
 read contract (`forgetest.RunTrackerReadContract`, with a `StateSeeder` standing
 in for the writes a read-only tracker lacks) and the PR forge read contract
 (`forgetest.RunPRForgeReadContract`), which the Connector's subflake check
@@ -2728,7 +2729,9 @@ Consumer adds them to `spindrift-connector-routes.json`. Its row authorizes
 with Basic credentials from the host-only
 `SPINDRIFT_JIRA_CONNECTOR_TOKEN` and `SPINDRIFT_JIRA_CONNECTOR_EMAIL`, with
 `JIRA_BASE_URL` as the base. The row is registered but not shadowed: the native
-jira adapter answers every call until the cut-over (issue #6753).
+jira adapter answers every call unless the row sets `primary`, which hands the
+whole tracker to the Connector ([Switching jira to
+primary](#switching-jira-to-primary)).
 
 The Connector also ships jira's tracker-axis fragment folder,
 `connectors/jira/fragments/jira/`, through
@@ -3073,11 +3076,15 @@ Strategy with no code revert. A primary Driver emits no `shadow_summary`, so the
 
 ##### Backend primary mode
 
-A backend row with `primary` on (issue #6998) makes its Connector answer every
-read the native backend would, in every launcher process that builds the adapter
-(dispatch, research, the daemon, recover and doctor). Today that is the github
-row, on dogfood through `nix/dogfood-primary.nix`. Writes stay native. No read
-stays on `gh` except `Rebase`'s head and base branch lookup, which is part of
+A backend row with `primary` on (issues #6998, #7127) makes its Connector answer
+in place of the native backend, in every launcher process that builds the
+adapter (dispatch, research, the daemon, recover and doctor). What it routes is
+per backend. The github row routes reads only: writes stay native until its
+write switch (#6756), and the row is on for dogfood through
+`nix/dogfood-primary.nix`. The jira row routes the whole tracker, so there is
+no native fallback to read from ([Switching jira to
+primary](#switching-jira-to-primary)). The rest of this section describes
+github's reads. On github, no read stays on `gh` except `Rebase`'s head and base branch lookup, which is part of
 that write (the Connector's PR read carries no base branch) and stays until
 cut-over (#6811) deletes the native path. Primary and shadow are exclusive, so a
 primary row samples nothing; evaluation refuses the two together, a row with
@@ -3110,16 +3117,21 @@ with the stamp as `20060102T150405Z`:
 - `<stem>.audit.jsonl` holds the Connector's [audit lines](#connector-protocol),
   token introspection's included. `"decision":"refused"` marks a request the
   Route table refused. With the Connector sandbox on, the process also appends
-  one totals line as it closes the sandbox, on a failed bootstrap too,
+  one totals line (github only, #7116) as it closes the sandbox, on a failed
+  bootstrap too,
   `{"sandbox_start_ns":N,"sandbox_calls":N,
   "sandbox_host_calls":N,"sandbox_hop_ns":N,"in_process_loads":N}`, the keys
   the read shadow's `shadow_summary` carries. It has no `decision`, and it is
   written only when a sandbox started and the file exists.
 - `<stem>.log` gets one JSON line, `{"op":"<verb>","error":"<err>"}`, per
   failed routed read (`op` is the read's verb, such as `count demand`), a load
-  failure included; doctor and daemon reads record the same way. A read that
-  replaces a Connector a failed call closed adds
-  `{"op":"reload the Connector","error":"<that failure>"}`. A record that
+  failure included; doctor and daemon reads record the same way. A github read
+  that replaces a Connector a failed call closed adds
+  `{"op":"reload the Connector","error":"<that failure>"}`. A jira row records
+  every failed operation, a write included, with `op` the guest RPC method
+  (such as `tracker.list` or `tracker.transition`) and `load the Connector` for
+  a first-load failure; a failed reload is recorded under the method that
+  needed it, with no `reload the Connector` line. A record that
   cannot be written goes to stderr. A process whose reads all succeeded writes
   none.
 
@@ -3160,6 +3172,44 @@ done | sort -r | awk -F'\t' '
   { n++ }
   END { print n + 0, "consecutive clean runs (cut-over bar: 20)" }'
 ```
+
+##### Switching jira to primary
+
+With `primary` on the jira row, the jira Connector builds the whole tracker:
+reads, the claim, transitions under both `JIRA_LIFECYCLE` modes, labels,
+comments, the comments the host posts and filed findings. Lifecycle policy (the
+status and resolution mapping, which transition a verdict takes) stays in core;
+the Connector only performs the operations. The native jira adapter is still
+built and validated but never consulted, so there is no fallback: a Connector that fails to load, or a request its
+Route table refuses, fails that operation. A Connector that died is reloaded by
+the next operation.
+
+To switch, set the row option in the flake that evaluates the Consumer, and set
+the row's two host-only credentials beside `JIRA_BASE_URL` and the project key:
+
+```nix
+spindrift.connectors.jira.primary = true;
+```
+
+```sh
+export SPINDRIFT_JIRA_CONNECTOR_TOKEN=...   # API token (Cloud) or password
+export SPINDRIFT_JIRA_CONNECTOR_EMAIL=...   # account email (Cloud) or username
+```
+
+The launcher and the daemon resolve the token like any secret (`SECRET_CMD`
+included) only while the row sets `primary`; the native `JIRA_TOKEN` and
+`JIRA_EMAIL` are not read for the row's authorization. `JIRA_TOKEN` must still
+be set to pass validation, though nothing uses it under `primary`, and the other
+native jira knobs stay required too, because the native adapter is still built
+and validated beside the Connector's own credentials.
+The row always authorizes with Basic, so a Server/Data Center site needs a
+username and password or token in those two variables, not a Bearer PAT. The API
+dialect still follows the native rule: Jira Cloud when `JIRA_EMAIL` is set,
+Server/Data Center otherwise. Each process appends the Connector's audit lines to
+`.spindrift/logs/primary-jira-<stamp>-<pid>.audit.jsonl` and every failed load or
+call to the matching `.log`. Dropping `primary` restores the
+native adapter with no code revert. The jira row is not on dogfood's
+`nix/dogfood-primary.nix`, so no streak recipe counts its runs yet.
 
 ### Connector protocol
 
