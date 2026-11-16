@@ -45,6 +45,15 @@ func TestConnectorStrategyCorpus(t *testing.T) {
 
 func loadConnectorStrategy(t *testing.T) driverkit.Strategy {
 	t.Helper()
+	s, err := loadConnector(t).DriverStrategy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func loadConnector(t *testing.T) *connectorhost.Connector {
+	t.Helper()
 	wasm, err := os.ReadFile(connectorWasm(t))
 	if err != nil {
 		t.Fatal(err)
@@ -55,11 +64,12 @@ func loadConnectorStrategy(t *testing.T) driverkit.Strategy {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close(context.Background()) })
-	s, err := c.DriverStrategy()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s
+	return c
+}
+
+// Raw, batch and per-line answers must agree for every line of the corpus.
+func TestConnectorDecodeRawCorpus(t *testing.T) {
+	conformance.CheckDecodeRaw(t, loadConnector(t), filepath.Join("testdata", "corpus"))
 }
 
 // The corpus exercises decoding and classification but not the Strategy's

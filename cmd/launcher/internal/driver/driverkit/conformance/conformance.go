@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -66,6 +67,9 @@ func RunConnector(t *testing.T, wasmPath string, corpusDir string) {
 		t.Fatalf("%s: %v", wasmPath, err)
 	}
 	Run(t, s, corpusDir)
+	if slices.Contains(c.Capabilities, connectorhost.DecodeRawMethod) {
+		t.Run("decodeRaw", func(t *testing.T) { CheckDecodeRaw(t, c, corpusDir) })
+	}
 }
 
 type modelCall struct {
@@ -395,6 +399,71 @@ func checkBatchDecode(t testing.TB, s driverkit.Strategy, dir string) {
 	if s.NewDecoder == nil {
 		return
 	}
+	perLine, batched, ok := decodeAnswers(t, s, passLines(t, dir))
+	if !ok {
+		return
+	}
+	sameBatched(t, batched, func(_, i int) string { return perLine[i] }, "batch", "per-line")
+}
+
+// sameBatched requires every batch size's answers to equal want's, and
+// logs the first difference as "<gotWho> decoded X, <wantWho> decoded Y".
+func sameBatched(t testing.TB, got map[int][]string, want func(size, i int) string, gotWho, wantWho string) {
+	t.Helper()
+	for size, keys := range got {
+		for i, key := range keys {
+			if w := want(size, i); key != w {
+				t.Errorf("batch size %d, line %d: %s decoded %s, %s decoded %s", size, i+1, gotWho, key, wantWho, w)
+				return
+			}
+		}
+	}
+}
+
+// CheckDecodeRaw requires, for every Pass-log line of every case under
+// corpusDir, that c's raw decoding answers as its JSON decoding does: the
+// per-line decoder against driver.decode, and the batch decoder at each size
+// checkBatchDecode uses against driver.decodeBatch. It fails when c does not
+// advertise driver.decodeRaw, so the comparison cannot pass vacuously.
+func CheckDecodeRaw(t *testing.T, c *connectorhost.Connector, corpusDir string) {
+	t.Helper()
+	if !slices.Contains(c.Capabilities, connectorhost.DecodeRawMethod) {
+		t.Fatalf("connector does not advertise %s (capabilities %v)", connectorhost.DecodeRawMethod, c.Capabilities)
+	}
+	raw, err := c.DriverStrategy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fallback, err := c.DriverStrategyWithout(connectorhost.DecodeRawMethod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range caseDirs(t, corpusDir) {
+		t.Run(name, func(t *testing.T) {
+			lines := passLines(t, filepath.Join(corpusDir, name))
+			rawLine, rawBatched, ok := decodeAnswers(t, raw, lines)
+			if !ok {
+				return
+			}
+			fallbackLine, fallbackBatched, ok := decodeAnswers(t, fallback, lines)
+			if !ok {
+				return
+			}
+			for i := range lines {
+				if rawLine[i] != fallbackLine[i] {
+					t.Errorf("line %d: raw per-line decoded %s, driver.decode decoded %s", i+1, rawLine[i], fallbackLine[i])
+					return
+				}
+			}
+			sameBatched(t, rawBatched, func(size, i int) string { return fallbackBatched[size][i] }, "raw", "driver.decodeBatch")
+		})
+	}
+}
+
+// passLines returns the case's Pass-log lines from the scan the Pass-log
+// readers use.
+func passLines(t testing.TB, dir string) []string {
+	t.Helper()
 	var lines []string
 	err := driverkit.ScanLog(filepath.Join(dir, "pass.jsonl"), logscan.SkipOversized, func(line string) {
 		lines = append(lines, line)
@@ -402,13 +471,22 @@ func checkBatchDecode(t testing.TB, s driverkit.Strategy, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	perLine := make([]string, len(lines))
+	return lines
+}
+
+// decodeAnswers decodes lines with one fresh per-line decoder, and with a fresh
+// batch decoder per batch size, returning eventsKey for every line from each.
+// ok is false once a batch decoder returned the wrong number of results.
+func decodeAnswers(t testing.TB, s driverkit.Strategy, lines []string) (perLine []string, batched map[int][]string, ok bool) {
+	t.Helper()
+	perLine = make([]string, len(lines))
 	decode := s.NewDecoder()
 	for i, l := range lines {
 		perLine[i] = eventsKey(t, decode(l))
 	}
+	batched = map[int][]string{}
 	for _, size := range []int{len(lines), (len(lines) + 1) / 2, 3} {
-		if size < 1 {
+		if _, done := batched[size]; size < 1 || done {
 			continue
 		}
 		batch := s.BatchDecoder()
@@ -418,17 +496,14 @@ func checkBatchDecode(t testing.TB, s driverkit.Strategy, dir string) {
 			if len(got) != end-start {
 				t.Errorf("batch size %d, from line %d: decoder returned %d results for %d lines",
 					size, start+1, len(got), end-start)
-				return
+				return nil, nil, false
 			}
-			for i, evs := range got {
-				if key := eventsKey(t, evs); key != perLine[start+i] {
-					t.Errorf("batch size %d, line %d: batch decoded %s, per-line decoded %s",
-						size, start+i+1, key, perLine[start+i])
-					return
-				}
+			for _, evs := range got {
+				batched[size] = append(batched[size], eventsKey(t, evs))
 			}
 		}
 	}
+	return perLine, batched, true
 }
 
 // eventsKey encodes a line's events for comparison; nil and empty agree.
