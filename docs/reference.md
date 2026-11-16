@@ -2319,12 +2319,14 @@ is the fixture Connector in
   `backend` row samples every `shadowEvery`th read (default 10, minimum 1) per
   operation through its Connector instead. With `primary` on, the Connector
   answers every read the native backend would, with no fallback
-  (see [Backend primary mode](#backend-primary-mode)); a `driver` row cannot be
-  primary until #6999. `shadow` and `primary` are exclusive, and a row with
-  neither a `driver` nor a `backend` is refused. spindrift's own dogfood is a pinned
-  exception to mimicking a new Consumer: it shadows the Connectors in
-  `nix/dogfood-shadow.nix` and runs those in `nix/dogfood-primary.nix` as
-  primary, each until cut-over.
+  (see [Backend primary mode](#backend-primary-mode)). A `driver` row with
+  `primary` on makes its Connector the Driver ahead of the native Strategy (see
+  [Driver primary mode](#driver-primary-mode), issue #6999). `shadow` and
+  `primary` are exclusive, and a row with neither a `driver` nor a `backend` is
+  refused. spindrift's own dogfood is a pinned exception to mimicking a new
+  Consumer: it shadows the Connectors in `nix/dogfood-shadow.nix` (none today)
+  and runs those in `nix/dogfood-primary.nix` (claude and github) as primary,
+  each until cut-over.
 - **Row-owned knobs.** A row's `knobs` attrset has the shape of a core row's
   (ADR 0068), keyed by env-schema key with an env-schema entry as value. The
   knobs fold into `spindrift.envSchema` on top of lib/env-schema.nix. Only that
@@ -2416,12 +2418,12 @@ into a rows file the Box entrypoint passes as `--driver-rows-file`
 (`DRIVER_ROWS_FILE` in the driver preamble); the handoff carries it on to the
 orchestrator and driver-exec. In the binaries, the `driverrows` package
 overlays those rows on the generated Driver Descriptors, and a row's Driver
-loads lazily through the Connector host. A native Strategy always wins, so
-`claude`'s stays authoritative even though its Connector contributes a row
-(without a `module` yet). With no outside rows nothing changes, and a binary
-with no rows to read falls back to the generated Descriptors
-(`descriptor_gen.go`); Quickstart has no input document and always uses that
-fallback.
+loads lazily through the Connector host. A native Strategy wins unless the row
+is `primary` ([Driver primary mode](#driver-primary-mode)), so `claude`'s stays
+authoritative for a Consumer that does not set it. With no outside rows nothing
+changes, and a binary with no rows to read falls back to the generated
+Descriptors (`descriptor_gen.go`); Quickstart has no input document and always
+uses that fallback.
 
 `mkHarness` fails evaluation on a row that:
 
@@ -2749,10 +2751,10 @@ the row's entry in the launcher input document's `backends` as `shadow` and
 `spindrift.connectors.<name>.shadowEvery` (default 10; `mkHarness` refuses a
 value below 1, or either field without the other). The github Connector's row
 reads with the host-only `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`. spindrift's own
-dogfood shadows the Connectors listed in `nix/dogfood-shadow.nix` and runs
-those in `nix/dogfood-primary.nix` (github) as primary, a pinned exception to
-mimicking a new Consumer; its accepted github Route table is baselined in
-`spindrift-connector-routes.json`.
+dogfood shadows the Connectors listed in `nix/dogfood-shadow.nix` (none today)
+and runs those in `nix/dogfood-primary.nix` (claude and github) as primary, a
+pinned exception to mimicking a new Consumer; its accepted github Route table is
+baselined in `spindrift-connector-routes.json`.
 
 ##### Driver replay
 
@@ -2827,10 +2829,12 @@ crash or reboot, once the daemon is known to be down, rerun the recipe with
 fetched from CI with `gh run download` have all ended, so for them set
 `finished=1`: every log then counts as finished, an unended Pass or a missing
 summary counts dirty, and a satellite fetched without its primary is not
-skipped. A Driver shadow moves on to primary mode (#6999) after 20 consecutive clean
-dogfood runs. The recipe counts them from the newest log back, with `logs` the directory of Pass
-logs (`.spindrift/logs`, or a directory of artifacts fetched with `gh run
-download <run-id> -n agent-logs-<issue> -D logs`). It orders logs by the
+skipped. A Driver shadow moves on to primary mode (#6999) after 20 consecutive
+clean dogfood runs; once a Driver is primary it emits no `shadow_summary`, so
+the recipe applies only while the Driver is shadowed. The recipe counts them
+from the newest log back, with `logs` the directory of Pass logs
+(`.spindrift/logs`, or a directory of artifacts fetched with `gh run download
+<run-id> -n agent-logs-<issue> -D logs`). It orders logs by the
 instant the `started` stamp in each log's `dispatch_start` names, UTC offset
 included, not by file time, which `gh run download` resets. Logs from older
 dispatches carry no stamp and so no `started`, and a malformed stamp reads as
@@ -3021,6 +3025,24 @@ done | sort -r | awk -F'\t' '
   END { print n + 0, "consecutive clean runs (primary bar: 20)" }'
 ```
 
+##### Driver primary mode
+
+A `driver` row with `primary` on (issue #6999) registers its Connector as the
+Driver ahead of the native Strategy of the same name, in the launcher (through
+the `drivers` of the launcher input document) and in the Box (through the Box
+rows file). It needs a `module` and a core Driver of its name, and excludes
+`shadow`. `mkHarness` takes the names as `primaryDrivers` and carries a primary
+row to both sides whichever Driver the Harness selects; a host whose packages
+cannot evaluate the module fails evaluation naming the row. The native Strategy
+stays linked in and remains the default for every Consumer that sets no
+`primary`. The Box still refuses a Connector that is not first-party.
+
+There is no fallback. A Connector that fails to load fails the run with an
+error naming the Driver (`DRIVER "claude": ...`). Dropping the name from
+`nix/dogfood-primary.nix`, or `primary` from the row, restores the native
+Strategy with no code revert. A primary Driver emits no `shadow_summary`, so the
+[streak recipe](#driver-replay) no longer counts its runs.
+
 ##### Backend primary mode
 
 A backend row with `primary` on (issue #6998) makes its Connector answer every
@@ -3029,10 +3051,11 @@ read the native backend would, in every launcher process that builds the adapter
 row, on dogfood through `nix/dogfood-primary.nix`. Writes stay native. No read
 stays on `gh` except `Rebase`'s head and base branch lookup, which is part of
 that write (the Connector's PR read carries no base branch) and stays until
-cut-over (#6811) deletes the native path. Primary and
-shadow are exclusive, so a primary row samples nothing; evaluation refuses the two together, a
-`driver` row (until #6999), a row without a `backend`, and a name with no native
-backend, each naming the row.
+cut-over (#6811) deletes the native path. Primary and shadow are exclusive, so a
+primary row samples nothing; evaluation refuses the two together, a row with
+neither a `backend` nor a `driver` (a Driver's primary mode is [its
+own](#driver-primary-mode)), and a name with no native backend, each naming the
+row.
 
 There is no fallback. A Connector that fails to load, or a request its Route
 table refuses, fails the read with the Connector's own error and the caller
