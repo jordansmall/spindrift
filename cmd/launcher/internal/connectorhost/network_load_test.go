@@ -326,19 +326,44 @@ func TestNetworkConnectorSendFailureKeepsItsHostSideReason(t *testing.T) {
 	}
 }
 
-// A send failure's reason reaches Call's error when the call then fails on an
-// undecodable envelope, not only when the Connector reports an error.
-func TestNetworkConnectorSendFailureReasonSurvivesAFailedCall(t *testing.T) {
-	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {})
-	var audit bytes.Buffer
-	n := netFor(b, &audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
-	n.Authorize = func(*http.Request) error { return errors.New(tokenUnset) }
-	req := fmt.Sprintf(`{"method":"GET","url":"%s/repos"}`, b.URL)
-	c := loadNet(t, httpCallGuestAnswering(req, netRespOff, 4096, `not json`), n)
-	err := c.Call(context.Background(), "m", nil, nil)
-	if !errors.Is(err, connectorhost.ErrCall) || !errors.Is(err, connectorhost.ErrHTTPSend) || !strings.Contains(err.Error(), tokenUnset) {
-		t.Fatalf("err = %v, want ErrCall, ErrHTTPSend and %q", err, tokenUnset)
+// The send failure is audited once, on the request's own entry; the fatal
+// call-failure entry describes only the Call's failure, while the error the
+// caller gets still names the host cause. Observers see the same entries.
+func TestNetworkConnectorSendFailureIsAuditedOnceOnAFatalCall(t *testing.T) {
+	for name, load := range netLoadersFor(t) {
+		t.Run(name, func(t *testing.T) {
+			b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {})
+			var audit bytes.Buffer
+			n := netFor(b, &audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/down"})
+			n.Authorize = failSendOn("/down")
+			var observed []connectorhost.AuditEntry
+			n.Observe = func(e connectorhost.AuditEntry) { observed = append(observed, e) }
+			c := loadNetWith(t, load, httpCallsGuest(`not json`, getReq(b, "/down")), n)
+			err := c.Call(context.Background(), "m", nil, nil)
+			if !errors.Is(err, connectorhost.ErrCall) || !errors.Is(err, connectorhost.ErrHTTPSend) || !strings.Contains(err.Error(), tokenUnset) {
+				t.Fatalf("err = %v, want ErrCall, ErrHTTPSend and %q", err, tokenUnset)
+			}
+			for what, entries := range map[string][]connectorhost.AuditEntry{"audit": auditLines(t, &audit), "observer": observed} {
+				if withDetail, callFailures := countSendDetailAndCallFailures(entries); withDetail != 1 || callFailures != 1 {
+					t.Errorf("%s has %d entries with the send detail and %d call-failure entries, want 1 and 1: %+v", what, withDetail, callFailures, entries)
+				}
+			}
+		})
 	}
+}
+
+// countSendDetailAndCallFailures counts the entries naming the send failure's
+// cause and the failed entries describing a failed Call.
+func countSendDetailAndCallFailures(entries []connectorhost.AuditEntry) (withDetail, callFailures int) {
+	for _, e := range entries {
+		if strings.Contains(e.Reason, tokenUnset) {
+			withDetail++
+		}
+		if e.Decision == connectorhost.DecisionFailed && strings.Contains(e.Reason, connectorhost.ErrCall.Error()) {
+			callFailures++
+		}
+	}
+	return withDetail, callFailures
 }
 
 // assertNoHostCause fails unless err carries nothing of an earlier request's
@@ -415,11 +440,19 @@ func TestNetworkConnectorSendFailureReasonDoesNotOutliveARefusedRequest(t *testi
 				"fatal: unrouted request":                {getReq(b, "/admin"), connectorhost.ErrRouteRefused},
 			} {
 				t.Run(caseName, func(t *testing.T) {
-					n := netFor(b, new(bytes.Buffer), route)
+					var audit bytes.Buffer
+					n := netFor(b, &audit, route)
 					n.Authorize = func(*http.Request) error { return errors.New(tokenUnset) }
 					err := loadNetWith(t, load, httpCallsGuest(survived, down, tc.second), n).Call(context.Background(), "m", nil, nil)
 					assertOnlySentinel(t, err, tc.want)
 					assertNoHostCause(t, err)
+					// The refusal is audited where it happened, after the send failure's own
+					// entry; the dead Call adds no call-failure entry on top.
+					lines := auditLines(t, &audit)
+					withDetail, callFailures := countSendDetailAndCallFailures(lines)
+					if len(lines) != 2 || withDetail != 1 || callFailures != 0 || lines[1].Decision != connectorhost.DecisionRefused {
+						t.Errorf("audit = %+v, want the send failure then one refused entry", lines)
+					}
 				})
 			}
 		})
@@ -514,20 +547,24 @@ func TestLoadStillRefusesAModuleLoadNetworkAccepts(t *testing.T) {
 // A result the host rejects after a sent request has no Host call to audit it,
 // so the Connector's own failure is the second entry.
 func TestNetworkConnectorRejectedResultIsAudited(t *testing.T) {
-	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "not an envelope") })
-	var audit bytes.Buffer
-	req := fmt.Sprintf(`{"method":"GET","url":"%s/repos"}`, b.URL)
-	c := loadNet(t, httpCallGuest(req, netRespOff, 4096, true), netFor(b, &audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"}))
-	err := c.Call(context.Background(), "m", nil, nil)
-	if !errors.Is(err, connectorhost.ErrMalformedOutput) {
-		t.Fatalf("err = %v, want ErrMalformedOutput", err)
-	}
-	lines := auditLines(t, &audit)
-	if len(lines) != 2 || lines[0].Decision != connectorhost.DecisionSent {
-		t.Fatalf("audit = %+v, want the sent request then one failure", lines)
-	}
-	if got := lines[1]; got.Decision != connectorhost.DecisionFailed || got.Connector != "demo" || got.Reason != err.Error() {
-		t.Errorf("second entry = %+v, want a failed entry for demo carrying %q", got, err)
+	for name, load := range netLoadersFor(t) {
+		t.Run(name, func(t *testing.T) {
+			b := newBackend(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "not an envelope") })
+			var audit bytes.Buffer
+			req := fmt.Sprintf(`{"method":"GET","url":"%s/repos"}`, b.URL)
+			c := loadNetWith(t, load, httpCallGuest(req, netRespOff, 4096, true), netFor(b, &audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"}))
+			err := c.Call(context.Background(), "m", nil, nil)
+			if !errors.Is(err, connectorhost.ErrMalformedOutput) {
+				t.Fatalf("err = %v, want ErrMalformedOutput", err)
+			}
+			lines := auditLines(t, &audit)
+			if len(lines) != 2 || lines[0].Decision != connectorhost.DecisionSent {
+				t.Fatalf("audit = %+v, want the sent request then one failure", lines)
+			}
+			if got := lines[1]; got.Decision != connectorhost.DecisionFailed || got.Connector != "demo" || got.Reason != err.Error() {
+				t.Errorf("second entry = %+v, want a failed entry for demo carrying %q", got, err)
+			}
+		})
 	}
 }
 
