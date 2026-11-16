@@ -55,6 +55,38 @@ func TestInstallConnectorSandbox_OffLoadsInProcess(t *testing.T) {
 	}
 }
 
+// countSandboxTotals swaps recordSandboxTotals for a call counter.
+func countSandboxTotals(t *testing.T) *int {
+	t.Helper()
+	calls := 0
+	prev := recordSandboxTotals
+	recordSandboxTotals = func() { calls++ }
+	t.Cleanup(func() { recordSandboxTotals = prev })
+	return &calls
+}
+
+// The closer is also what bootstrap's error-path defer runs, so the totals
+// must be recorded from it, not only from the success-path cleanup.
+func TestInstallConnectorSandbox_CloserRecordsPrimaryTotals(t *testing.T) {
+	t.Cleanup(connectorsandbox.Use(nil))
+	calls := countSandboxTotals(t)
+	c := baseConfig()
+	c.ConnectorSandbox = true
+	installConnectorSandbox(c, t.TempDir())()
+	if *calls != 1 {
+		t.Fatalf("recordSandboxTotals called %d times, want 1", *calls)
+	}
+}
+
+func TestInstallConnectorSandbox_OffCloserRecordsNothing(t *testing.T) {
+	t.Cleanup(connectorsandbox.Use(nil))
+	calls := countSandboxTotals(t)
+	installConnectorSandbox(baseConfig(), t.TempDir())()
+	if *calls != 0 {
+		t.Fatalf("recordSandboxTotals called %d times, want 0", *calls)
+	}
+}
+
 func TestInstallConnectorSandbox_StartFailureFailsTheRun(t *testing.T) {
 	t.Cleanup(connectorsandbox.Use(nil))
 	c := baseConfig()
