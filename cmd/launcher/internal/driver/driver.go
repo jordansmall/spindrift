@@ -127,7 +127,24 @@ func RegisterConnector(name string, load func() (driverkit.Strategy, error)) {
 	if Has(name) {
 		panic("driver: duplicate registration for " + name)
 	}
-	lazyDrivers[name] = sync.OnceValues(func() (Driver, error) {
+	lazyDrivers[name] = lazyDriver(name, load)
+}
+
+// RegisterPrimary makes the Connector load builds the Driver name, in place of
+// the native Strategy linked in under it. The native Strategy stays registered,
+// for NativeStrategy and a shadow, but New never falls back to it: a load
+// failure is the Driver's error. It panics unless a native Strategy holds name
+// and no Connector does yet.
+func RegisterPrimary(name string, load func() (driverkit.Strategy, error)) {
+	if _, lazy := lazyDrivers[name]; lazy || !HasNative(name) {
+		panic("driver: primary Connector needs a native Strategy and no other Connector for " + name)
+	}
+	lazyDrivers[name] = lazyDriver(name, load)
+}
+
+// lazyDriver wraps load so it runs once and its failure names the Driver.
+func lazyDriver(name string, load func() (driverkit.Strategy, error)) func() (Driver, error) {
+	return sync.OnceValues(func() (Driver, error) {
 		s, err := load()
 		if err != nil {
 			return nil, fmt.Errorf("DRIVER %q: %w", name, err)
@@ -206,11 +223,11 @@ func ResolveName(name string) string { return orDefault(name) }
 // to "claude".
 func New(name string) (Driver, error) {
 	name = orDefault(name)
-	if d, ok := registry[name]; ok {
-		return d, nil
-	}
 	if load, ok := lazyDrivers[name]; ok {
 		return load()
+	}
+	if d, ok := registry[name]; ok {
+		return d, nil
 	}
 	return nil, fmt.Errorf("unknown DRIVER %q; known drivers: %v", name, Names())
 }
@@ -288,7 +305,9 @@ func Names() []string {
 		names = append(names, name)
 	}
 	for name := range lazyDrivers {
-		names = append(names, name)
+		if !HasNative(name) { // a primary Connector shares its native Driver's name
+			names = append(names, name)
+		}
 	}
 	sort.Strings(names)
 	return names

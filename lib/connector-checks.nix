@@ -70,8 +70,14 @@ let
         else
           ''
             export SPINDRIFT_DRIVER_CONNECTOR_WASM=${connector.package pkgs}/${name}.wasm
+            export SPINDRIFT_DRIVER_CONNECTOR_NAME=${name}
           '';
       testPkg = if isBackend then "forge" else "driver";
+      # driverrows' primary-row corpus test runs the Connector; the Driver's own
+      # tests cannot, as they may not import the registry root.
+      testPkgs =
+        "./internal/${testPkg}/${name}/..."
+        + pkgs.lib.optionalString (!isBackend) " ./internal/driver/driverrows/...";
     in
     {
       "connector-${name}-go-fmt" = mk "fmt" ''
@@ -108,7 +114,7 @@ let
             export PATH="$TMPDIR/fakebin:$PATH"
             cd src/cmd/launcher
             ${setup}
-            go test ./internal/${testPkg}/${name}/...
+            go test ${testPkgs}
             touch $out
           '';
     };

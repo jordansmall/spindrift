@@ -29,6 +29,12 @@ type Row struct {
 	// names: the Box replays each Pass log through it and reports where it
 	// disagrees, while the native Strategy stays the Driver.
 	Shadow bool `json:"shadow,omitempty"`
+	// Primary makes Module the Driver the row names, in place of the native
+	// Strategy, which stays linked in: the Connector decodes in the Box and on
+	// the host alike. A Module that fails to load fails the run with an error
+	// naming the Driver; there is no fallback to the native Strategy. It needs a
+	// Module and a native Driver, and excludes Shadow.
+	Primary bool `json:"primary,omitempty"`
 	// FirstParty is rendered only by mkHarness, and only when Module is the wasm
 	// the batteries flake itself builds under this name; no Nix row can set it
 	// (mkHarness throws), though Go decodes it from any rows JSON. It
@@ -44,11 +50,18 @@ type Row struct {
 var ErrNotFirstParty = errors.New("Driver Connector is not first-party; the Box loads only the batteries flake's Connectors in-process")
 
 // Use applies the rows in raw, a JSON array of Row; empty raw is a no-op. Each
-// row replaces the Descriptor of the Driver it names. A row with a Module
-// registers a lazily loaded Driver unless a native Strategy already holds the
-// name, which always wins. A row with neither is an error, as is a repeated
-// name, and a row naming a native Driver must carry the Descriptor already in
-// force: native is authoritative for the Descriptor as it is for the Strategy.
+// row replaces the Descriptor of the Driver it names.
+//
+// A row with a Module registers a lazily loaded Driver unless a native
+// Strategy already holds the name, which wins. A Primary row is the exception:
+// it registers its Module as the Driver in place of the native Strategy.
+//
+// These are errors: a row with neither Module nor native Strategy, a repeated
+// name, a Primary row without a Module or a native Driver, a Primary row that
+// is also Shadow, and a row naming a native Driver whose Descriptor differs
+// from the one in force (native is authoritative for the Descriptor as it is
+// for the Strategy).
+//
 // A Shadow row registers no Driver: it records its Module as the native
 // Driver's shadow, and may sit beside the native Driver's own row. Without a
 // native Strategy or a Module, repeated, or with a Descriptor other than the
@@ -87,6 +100,9 @@ func use(raw json.RawMessage, p loadPolicy) error {
 	seenShadow := map[string]bool{}
 	skipped := map[string]string{}
 	for _, row := range rows {
+		if row.Primary && row.Shadow {
+			return fmt.Errorf("driver rows: Driver %q cannot be both shadow and primary", row.Name)
+		}
 		if row.Shadow {
 			if reason := shadowSkip(row, seenShadow[row.Name], p); reason != "" {
 				skipped[row.Name] = "shadow row skipped: " + reason
@@ -100,6 +116,14 @@ func use(raw json.RawMessage, p loadPolicy) error {
 		seen[row.Name] = true
 		if !driver.Has(row.Name) && row.Module == "" {
 			return fmt.Errorf("driver rows: Driver %q has no native Strategy and no module", row.Name)
+		}
+		if row.Primary {
+			if row.Module == "" {
+				return fmt.Errorf("driver rows: Driver %q is primary but has no module", row.Name)
+			}
+			if !driver.HasNative(row.Name) {
+				return fmt.Errorf("driver rows: Driver %q is primary but has no native Strategy", row.Name)
+			}
 		}
 		if driver.HasNative(row.Name) {
 			if cur, ok := driver.DescriptorFor(row.Name); ok && !sameDescriptor(cur, row.Descriptor) {
@@ -118,12 +142,15 @@ func use(raw json.RawMessage, p loadPolicy) error {
 			continue
 		}
 		driver.UseDescriptor(row.Descriptor)
-		if row.Module != "" && !driver.Has(row.Name) {
-			if p.refuses(row) {
-				driver.RegisterConnector(row.Name, refusal(row.Name))
-			} else {
-				driver.RegisterConnector(row.Name, loader(row.Name, row.Module))
-			}
+		load := loader(row.Name, row.Module)
+		if p.refuses(row) {
+			load = refusal(row.Name)
+		}
+		switch {
+		case row.Primary:
+			driver.RegisterPrimary(row.Name, load)
+		case row.Module != "" && !driver.Has(row.Name):
+			driver.RegisterConnector(row.Name, load)
 		}
 	}
 	return nil

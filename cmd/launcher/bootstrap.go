@@ -196,7 +196,10 @@ func bootstrapWith(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descri
 	if err != nil {
 		return nil, err
 	}
-	f := newDispatchFactory(c, pwd, r, it, lw, cf, caps)
+	f, err := newDispatchFactory(c, pwd, r, it, lw, cf, caps)
+	if err != nil {
+		return nil, err
+	}
 	var merge settle.MergeSettler
 	if mergeSettle != nil {
 		merge = mergeSettle
@@ -377,7 +380,10 @@ func researchLaunchStack(lc *launchContext) (forge.IssueTracker, *dispatch.Facto
 	rc := applyDispatchKind(lc.config, dispatchkind.Research)
 	it := newIssueTracker(rc)
 	lw := localloop.Wire(localloopConfig(rc), it)
-	f := newDispatchFactory(rc, lc.pwd, lc.runner, it, lw, lc.codeForge, lc.capabilities)
+	f, err := newDispatchFactory(rc, lc.pwd, lc.runner, it, lw, lc.codeForge, lc.capabilities)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 
 	// The SettleVerdict arm never reads its caps argument, so there is nothing
 	// worth resolving.

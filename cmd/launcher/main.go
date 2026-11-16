@@ -709,17 +709,6 @@ func buildRunnerForKind(c config, rc runner.Config, pwd string) (runner.Runner, 
 	return s.NewBuild(rc, c.artifacts, c.knobLookup, pwd)
 }
 
-// newDriver returns the Go Driver strategy selected by c.driver (ADR 0009).
-// validate already rejects an unrecognised DRIVER, so the error path here
-// falls back to the registry default.
-func newDriver(c config) driver.Driver {
-	d, err := driver.New(c.driver)
-	if err != nil {
-		d, _ = driver.New("")
-	}
-	return d
-}
-
 // localBaseBranchResolver returns resolveBoxEnvVar, except that under
 // CODE_FORGE=local it forwards BASE_BRANCH as the seam's Integration branch
 // (integration/<parent>, ADR 0033) once cf.BranchExists confirms it, so a Box
@@ -864,14 +853,20 @@ func dispatchConfig(c config, pwd string, it forge.IssueTracker, lw *localloop.W
 // newDispatchFactory constructs the dispatch.Factory for one top-level
 // dispatch entry point. A driver-cache failure degrades to no cache (fix boxes
 // cold-start) rather than failing the dispatch: the cache is a resume
-// optimization, not a correctness requirement (issue #427).
-func newDispatchFactory(c config, pwd string, r runner.Runner, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) *dispatch.Factory {
+// optimization, not a correctness requirement (issue #427). A Driver that
+// fails to load does fail it: validate already rejects an unrecognised DRIVER,
+// so that is a Connector that failed to load, with no native fallback.
+func newDispatchFactory(c config, pwd string, r runner.Runner, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) (*dispatch.Factory, error) {
+	drv, err := driver.New(c.driver)
+	if err != nil {
+		return nil, err
+	}
 	cfg := dispatchConfig(c, pwd, it, lw, cf, caps)
-	f, err := dispatch.NewFactory(cfg, pwd, r, newDriver(c), dispatch.RealClock())
+	f, err := dispatch.NewFactory(cfg, pwd, r, drv, dispatch.RealClock())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "==> driver cache unavailable (%v) -- fix boxes will cold-start\n", err)
 	}
-	return f
+	return f, nil
 }
 
 // settleConfig builds the subset of config a settle.Settle needs. Only a Code
