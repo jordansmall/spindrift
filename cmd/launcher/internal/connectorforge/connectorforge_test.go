@@ -481,3 +481,13 @@ func TestFailureDetailSkipsLogsOnceTheBudgetIsSpent(t *testing.T) {
 		}
 	}
 }
+
+// Forgejo names a PR's web page /<owner>/<repo>/pulls/<n>, where GitHub's is
+// /pull/<n>; both name the target repository's PR.
+func TestBranchReadsAcceptForgejoPullsPath(t *testing.T) {
+	f, _ := newTestForge(t, map[string]string{"forge.prsForBranch": `{"prs":[{"number":"8","url":"https://github.com/o/r/pulls/8","state":"open","merged":false}]}`})
+	pr, ok, err := f.OpenPRForBranch("b")
+	if err != nil || !ok || pr.URL != "https://github.com/o/r/pulls/8" {
+		t.Fatalf("OpenPRForBranch = (%+v, %v, %v), want the /pulls/ PR", pr, ok, err)
+	}
+}
