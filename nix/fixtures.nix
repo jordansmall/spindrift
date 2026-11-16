@@ -19,8 +19,11 @@ let
   rosterLib = import ../lib/roster.nix { inherit (pkgs) lib; };
 
   dogfoodShadow = import ./dogfood-shadow.nix;
+  dogfoodPrimary = import ./dogfood-primary.nix;
   githubConnector = (import ../connectors/github).lib.connector { core = import ../core; };
   jiraConnector = (import ../connectors/jira).lib.connector { core = import ../core; };
+  dogfoodDriverPrimaries = builtins.filter (n: dogfoodDriverRows ? ${n}) dogfoodPrimary;
+  dogfoodBackendPrimaries = builtins.filter (n: !(dogfoodDriverRows ? ${n})) dogfoodPrimary;
   dogfoodDriverRows = {
     claude =
       ((import ../connectors/claude).lib.connector { core = import ../core; }).driverRow
@@ -108,12 +111,14 @@ let
     # dogfoodBwrapHarness inherits it, so `.#dogfood-bwrap` layers too.
     multiDriver = true;
     # The Connector modules' work, done by hand: flake.nix registers claude's
-    # and github's rows, shadowing claude (nix/dogfood-shadow.nix) and running
-    # github as primary (nix/dogfood-primary.nix), so the module path hands
-    # mkHarness all of it. A Driver row is shadowed by name in `shadowDrivers`;
-    # a backend row carries the flag itself.
+    # and github's rows, shadowing the nix/dogfood-shadow.nix Connectors and
+    # running claude and github as primary (nix/dogfood-primary.nix), so the
+    # module path hands mkHarness all of it. A Driver row is shadowed or primary
+    # by name in `shadowDrivers` / `primaryDrivers`; a backend row carries the
+    # flag itself.
     driverRows = dogfoodDriverRows;
     shadowDrivers = builtins.filter (n: dogfoodDriverRows ? ${n}) dogfoodShadow;
+    primaryDrivers = dogfoodDriverPrimaries;
     # Connector-shipped fragment files (issue #6857), as the module collects them.
     connectorFragments = import ./connector-fragments.nix;
     backendRows.github = {
@@ -767,8 +772,8 @@ let
         packages = p: [ p.hello ];
         driverRows.fixture = row;
       };
-      # The batteries claude row, shadowed as the dogfood runs it: the one
-      # first-party Driver row, so driver-exec's Box-side rows file must
+      # The batteries claude row, shadowed (the dogfood now runs it primary):
+      # the one first-party Driver row, so driver-exec's Box-side rows file must
       # carry the mark for it to apply.
       claudeBoxHarness = import ../lib/mkHarness.nix {
         inherit nixpkgs system;
@@ -835,6 +840,8 @@ in
 {
   inherit
     dogfoodSkills
+    dogfoodDriverPrimaries
+    dogfoodBackendPrimaries
     ghFakeOverlay
     batsHarness
     multiDriverBatsHarness

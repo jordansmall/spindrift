@@ -68,8 +68,8 @@
         imports = [ core.flakeModules.default ] ++ connectorModules;
 
         # Pinned dogfood exception: shadow the Connectors listed in
-        # nix/dogfood-shadow.nix (the native Strategy stays authoritative) and
-        # run those in nix/dogfood-primary.nix as primary.
+        # nix/dogfood-shadow.nix (the native Strategy stays authoritative; the
+        # list may be empty) and run those in nix/dogfood-primary.nix as primary.
         spindrift.connectors =
           let
             shadowed = import ./nix/dogfood-shadow.nix;
