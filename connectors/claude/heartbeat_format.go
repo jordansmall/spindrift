@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"strings"
+
+	"spindrift.dev/sdk/driver"
 )
 
 // ModelFamily shortens a full model ID to its family label ("claude-opus-…"
@@ -46,7 +48,8 @@ func toolKind(name string) string {
 // authoritative until cut-over.
 func toolToPhase(name string, input json.RawMessage) string {
 	if isSubagentSpawnTool(name) {
-		switch strings.ToLower(subagentType(input)) {
+		in, _ := driver.Scan(string(input)) // unscannable input reads as no subagent_type
+		switch strings.ToLower(subagentType(in)) {
 		case "reviewer", "review-axis":
 			return "review"
 		case "scout", "plan":
