@@ -45,7 +45,7 @@ type daemonRigOpts struct {
 func newDaemonRigWith(t *testing.T, runtime string, o daemonRigOpts) sandboxRig {
 	t.Helper()
 	execDoctor := o.execDoctor
-	rig := newSandboxRig(t, runtime, sandboxRigOpts{shadow: true, runs: o.runs, issues: o.issues, running: o.running, imageAbsent: o.imageAbsent})
+	rig := newSandboxRig(t, runtime, sandboxRigOpts{mode: sandboxShadow, runs: o.runs, issues: o.issues, running: o.running, imageAbsent: o.imageAbsent})
 
 	setDocSettings(t, rig.docPath, map[string]string{
 		"REPO_SLUG": smokeRepo, "MAX_PARALLEL": "2", "DAEMON_IDLE_FLOOR": "1s", "DAEMON_IDLE_CAP": "2s",
