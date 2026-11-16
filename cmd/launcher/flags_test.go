@@ -2766,6 +2766,21 @@ func TestApplyConnectorCredentials_TemplateSkipsUnroutedRow(t *testing.T) {
 	}
 }
 
+// A jira row with `primary` is read through its Connector, so its credential
+// resolves like a routed row's even though the native jira Strategy is not
+// ConnectorRouted.
+func TestApplyConnectorCredentials_TemplateRunsForPrimaryJiraRow(t *testing.T) {
+	ran := useCredentialRows(t, credentialRowDoc("jira", `,"primary":true`), "vault get {name}", failingVault)
+	setKnob(t, "ISSUE_TRACKER", "jira")
+	err := applyConnectorCredentials()
+	if err == nil || !strings.Contains(err.Error(), "SHADOW_TEST_TOKEN") {
+		t.Fatalf("err = %v, want the template failure naming the env var", err)
+	}
+	if want := []string{"vault get shadow-test-token"}; !reflect.DeepEqual(ran(), want) {
+		t.Errorf("ran %q, want %q", ran(), want)
+	}
+}
+
 func TestApplyConnectorCredentials_TemplateSkipsInactiveBackend(t *testing.T) {
 	ran := useCredentialRows(t, credentialRowDoc("github", `,"shadow":true,"shadowEvery":3`), "vault get {name}", failingVault)
 	setKnob(t, "CODE_FORGE", "local")

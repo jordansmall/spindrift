@@ -206,6 +206,59 @@ func TestResolveConnectorCredentials_UnreadRowsNeverRunCmd(t *testing.T) {
 	})
 }
 
+const jiraTokenEnv = "SPINDRIFT_JIRA_CONNECTOR_TOKEN"
+
+func useJiraConnectorRow(t *testing.T, extra string) {
+	t.Helper()
+	t.Cleanup(backendrows.Snapshot())
+	raw := `[{"name":"jira","module":"/nonexistent.wasm","credentialEnv":"` + jiraTokenEnv + `",
+"routes":[{"method":"GET","host":"jira.example","path":"/x"}]` + extra + `}]`
+	if err := backendrows.Use([]byte(raw), func(string) string { return "" }); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(jiraTokenEnv, "")
+	t.Setenv(jiraTokenEnv+"_CMD", "")
+}
+
+// jira's native Strategy is not ConnectorRouted, so only its `primary` option
+// puts the row's credential in the Daemon's probe path.
+func TestResolveConnectorCredentials_JiraRowResolvesOnlyWhenPrimary(t *testing.T) {
+	for _, tc := range []struct {
+		name, extra string
+		wantRun     bool
+	}{
+		{"primary", `,"primary":true`, true},
+		{"not primary", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clearKnobEnvT(t)
+			useJiraConnectorRow(t, tc.extra)
+			t.Setenv("SECRET_CMD", "vault get {name}")
+			var ran []string
+			stubSecretCmd(t, func(cmd string) (string, error) { ran = append(ran, cmd); return "tok\n", nil })
+			if _, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": "jira"}), workKinds, &bytes.Buffer{}); err != nil {
+				t.Fatal(err)
+			}
+			if got := len(ran) > 0; got != tc.wantRun {
+				t.Errorf("secret command ran = %v (%q), want %v", got, ran, tc.wantRun)
+			}
+			if tc.wantRun && os.Getenv(jiraTokenEnv) != "tok" {
+				t.Errorf("%s = %q, want tok", jiraTokenEnv, os.Getenv(jiraTokenEnv))
+			}
+		})
+	}
+}
+
+func TestResolveConnectorCredentials_PrimaryJiraRowRefusesWithoutCredential(t *testing.T) {
+	clearKnobEnvT(t)
+	useJiraConnectorRow(t, `,"primary":true`)
+	stubSecretCmd(t, failIfRun(t))
+	_, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": "jira"}), workKinds, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), jiraTokenEnv) {
+		t.Fatalf("err = %v, want a refusal naming %s", err, jiraTokenEnv)
+	}
+}
+
 func TestResolveConnectorCredentials_RefreshReResolvesCmdCredentials(t *testing.T) {
 	clearKnobEnvT(t)
 	useGithubConnectorRow(t, "")
