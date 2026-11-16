@@ -98,7 +98,7 @@ var baseTransientPatterns = []driver.Pattern{
 // across lines a terminal marker seen first latches Terminal; safe for the
 // --agents case, which aborts before any API call. ChunkOversized scans an
 // oversized line in chunks, so a chunk of an oversized agent-content line
-// fails the whole-chunk JSON parse in parseTopLevel and is scanned as normal
+// fails the whole-chunk scan in decode and is scanned as normal
 // (known gap, issue #579 review).
 var ClassifyOptions = driver.ClassifyOptions{ChunkOversized: true, FirstMatch: true}
 
@@ -118,35 +118,35 @@ func classifyTurn(top *topLevel) (content, synthetic bool) {
 	if top == nil {
 		return false, false
 	}
-	var msg struct {
-		Model string `json:"model"`
-	}
-	if !decodeField(top.Message, &msg) {
+	model, ok := messageModel(top.Message)
+	if !ok {
 		return false, false
 	}
-	if top.Type == "assistant" && msg.Model == syntheticModelSentinel && errorPresent(top.Error) {
+	if top.Type == "assistant" && model == syntheticModelSentinel && errorPresent(top.Error) {
 		return false, true
 	}
 	return top.Type == "assistant" || top.Type == "user", false
+}
+
+// messageModel reads the model of a top-level "message" value; an absent or
+// null message has none, and one that is not an object fails the read.
+func messageModel(msg driver.Value) (string, bool) {
+	switch msg.Kind() {
+	case driver.Invalid, driver.Null:
+		return "", true
+	case driver.Object:
+		return field(msg, "model", driver.Value.DecodeString)
+	}
+	return "", false
 }
 
 // errorPresent reports whether a top-level "error" value is set. The CLI's
 // value is normally a string, but any other JSON type must not fail the
 // envelope parse (issue #5453). A missing field, null, or the JSON empty
 // string count as unset; any other value is present.
-func errorPresent(raw json.RawMessage) bool {
-	s := string(raw)
+func errorPresent(v driver.Value) bool {
+	s := v.Raw()
 	return s != "" && s != "null" && s != `""`
-}
-
-// isAgentContentEvent reports whether chunk is a stream-json line carrying
-// agent-authored content. Markers inside it are the agent's own work product,
-// so they must not be scanned. Non-JSON lines, other types, and the CLI's
-// synthetic terminator (issue #815) fall through. It is the test seam over
-// classifyTurn, which decoder.decodeLine calls on the live path.
-func isAgentContentEvent(chunk string) bool {
-	content, _ := classifyTurn(parseTopLevel(chunk))
-	return content
 }
 
 // extractResetsAt parses the first "resetsAt":UNIX_TIMESTAMP in content as a
