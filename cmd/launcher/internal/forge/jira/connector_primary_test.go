@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
@@ -15,6 +16,8 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/jira"
+	"spindrift.dev/launcher/internal/hostpaths"
+	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 func useJiraRow(t *testing.T, adjust func(*backendrows.Row)) {
@@ -36,30 +39,33 @@ func useJiraRow(t *testing.T, adjust func(*backendrows.Row)) {
 	}
 }
 
-func newJiraTracker(t *testing.T) error {
+func newJiraTracker(t *testing.T) (forge.IssueTracker, error) {
 	t.Helper()
 	t.Chdir(t.TempDir()) // the audit file lands under the host log dir
 	env := map[string]string{"JIRA_BASE_URL": "https://jira.example", "JIRA_PROJECT_KEY": "PROJ", "JIRA_TOKEN": "tok"}
-	_, err := jira.Strategy.NewIssueTracker(backendkit.Shared{}, func(k string) (string, bool) {
+	return jira.Strategy.NewIssueTracker(backendkit.Shared{}, func(k string) (string, bool) {
 		v, ok := env[k]
 		return v, ok
 	})
-	return err
 }
 
 // Under primary the Connector is the only tracker: one that cannot load fails
 // the constructor with its error rather than dropping to the native adapter.
 func TestPrimaryRowFailsWithTheLoadErrorAndNeverFallsBackToNative(t *testing.T) {
 	useJiraRow(t, func(r *backendrows.Row) { r.Primary = true })
-	if err := newJiraTracker(t); !errors.Is(err, os.ErrNotExist) {
+	if _, err := newJiraTracker(t); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("err = %v, want the module read error", err)
 	}
 }
 
 func TestPlainRowKeepsTheNativeAdapter(t *testing.T) {
 	useJiraRow(t, func(*backendrows.Row) {})
-	if err := newJiraTracker(t); err != nil {
+	tr, err := newJiraTracker(t)
+	if err != nil {
 		t.Fatalf("a non-primary row must not load its Connector, got %v", err)
+	}
+	if got := fmt.Sprintf("%T", tr); got != "*jira.jiraClient" {
+		t.Fatalf("tracker is %s, want the native *jira.jiraClient", got)
 	}
 }
 
@@ -76,6 +82,9 @@ func TestPrimaryRow_RefusedRouteFailsWithoutReachingTheBackend(t *testing.T) {
 			})
 			if _, err := h.tr.ListLabels(); !errors.Is(err, connectorhost.ErrRouteRefused) {
 				t.Fatalf("ListLabels err = %v, want ErrRouteRefused", err)
+			}
+			if log := primaryLog(t); !strings.Contains(log, connectorhost.ErrRouteRefused.Error()) {
+				t.Errorf("log = %q, want the refused route recorded", log)
 			}
 			h.seenMu.Lock()
 			defer h.seenMu.Unlock()
@@ -258,5 +267,32 @@ func TestPrimaryRow_LabeledListerReadsClosedNotPlannedFindings(t *testing.T) {
 				t.Errorf("open = %+v, err = %v, want only PROJ-2", open, err)
 			}
 		})
+	}
+}
+
+// primaryLog is the failed-operation record the process left under the host
+// log directory of the current working directory.
+func primaryLog(t *testing.T) string {
+	t.Helper()
+	pwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(hostpaths.LogDir(pwd), primaryrecord.Name("jira", ".log")))
+	if err != nil {
+		t.Fatalf("no primary log: %v", err)
+	}
+	return string(raw)
+}
+
+// A Connector that fails to load is recorded, so a primary run's failure is
+// not left to a caller that may swallow it (shell completion does).
+func TestPrimaryRow_LoadFailureIsRecorded(t *testing.T) {
+	useJiraRow(t, func(r *backendrows.Row) { r.Primary = true })
+	if _, err := newJiraTracker(t); err == nil {
+		t.Fatal("want the load error")
+	}
+	if log := primaryLog(t); !strings.Contains(log, `"op":"load the Connector"`) || !strings.Contains(log, "missing.wasm") {
+		t.Errorf("log = %q, want the op and the module read error", log)
 	}
 }

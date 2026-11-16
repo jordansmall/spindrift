@@ -105,3 +105,37 @@ func TestReloaderBacksOffAfterRepeatedLoadFailures(t *testing.T) {
 		t.Fatalf("success did not reset the count: loads=%d", loads)
 	}
 }
+
+type failingConn struct{ err error }
+
+func (f failingConn) Call(context.Context, string, any, any) error { return f.err }
+func (f failingConn) Err() error                                   { return nil }
+
+func TestReloaderNotesAFailedCallAndAFailedReload(t *testing.T) {
+	type noted struct {
+		method string
+		err    error
+	}
+	var got []noted
+	note := func(method string, err error) { got = append(got, noted{method, err}) }
+	callErr, loadErr := errors.New("route refused"), errors.New("read module")
+
+	r := &reloader{cur: failingConn{callErr}, note: note}
+	if err := r.call(context.Background(), "tracker.get", nil, nil); !errors.Is(err, callErr) {
+		t.Fatalf("err = %v, want the call error", err)
+	}
+	r = &reloader{cur: &fakeConn{dead: errors.New("trapped")}, note: note,
+		load: func() (conn, error) { return nil, loadErr }}
+	if err := r.call(context.Background(), "tracker.list", nil, nil); !errors.Is(err, loadErr) {
+		t.Fatalf("err = %v, want the load error", err)
+	}
+	r = &reloader{cur: &fakeConn{}, note: note}
+	if err := r.call(context.Background(), "tracker.ok", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []noted{{"tracker.get", callErr}, {"tracker.list", loadErr}}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("noted = %v, want %v", got, want)
+	}
+}

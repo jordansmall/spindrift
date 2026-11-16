@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
@@ -17,7 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/hostpaths"
+	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 // connectorClient is the transport the host-side Connector loads send with; nil
@@ -86,10 +85,8 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 		dialect = "cloud"
 	}
 	row.Routes = connectortracker.Routes(row.Routes, k.JiraProjectKey)
-	// The audit file stays open for the tracker's life, which is the process's.
-	audit, closeAudit := openAudit("connector-jira.audit.jsonl")
 	it, err := connectortracker.NewReloading(func() (*connectorhost.Connector, error) {
-		conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Audit: audit, Client: connectorClient})
+		conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Audit: primaryAudit.writer(), Client: connectorClient})
 		if err != nil {
 			return nil, err
 		}
@@ -98,7 +95,7 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 			return nil, err
 		}
 		return conn, nil
-	}, nil, connectortracker.Lifecycle{
+	}, recordPrimaryFailure, nil, connectortracker.Lifecycle{
 		Labels:        s.Labels,
 		VerdictLabels: s.VerdictLabels,
 		IssueType:     k.JiraIssueType,
@@ -111,26 +108,42 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 		Dialect: dialect,
 	})
 	if err != nil {
-		closeAudit()
+		recordPrimaryFailure("load the Connector", err)
 		return nil, err
 	}
 	return primaryTracker{it}, nil
 }
 
-// openAudit opens the Connector's audit file for appending. A record that
-// cannot be written must not fail the tracker, so an unopenable file discards.
-func openAudit(name string) (io.Writer, func()) {
-	pwd, err := os.Getwd()
-	if err != nil {
-		return io.Discard, func() {}
+// primaryAudit is the process's Connector audit file, opened on first use and
+// held until exit: a tracker is short-lived (completion, readcontext) or one of
+// several daemon kinds sharing the process, so none owns the handle. A record
+// that cannot be written must not fail the tracker, so an unopenable file
+// discards.
+var primaryAudit = &auditFile{}
+
+type auditFile struct {
+	once  sync.Once
+	w     io.Writer
+	close func()
+}
+
+func (a *auditFile) writer() io.Writer {
+	a.once.Do(func() {
+		a.w, a.close, _ = primaryrecord.OpenFile(primaryrecord.Name(backend.Jira.Name, ".audit.jsonl"))
+	})
+	return a.w
+}
+
+// release closes the file if it was opened and stops it opening later. Only
+// the test seam calls it; production holds the handle until exit.
+func (a *auditFile) release() {
+	a.once.Do(func() {})
+	if a.close != nil {
+		a.close()
 	}
-	dir := hostpaths.LogDir(pwd)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return io.Discard, func() {}
-	}
-	f, err := os.OpenFile(filepath.Join(dir, name), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
-	if err != nil {
-		return io.Discard, func() {}
-	}
-	return f, func() { _ = f.Close() }
+}
+
+// recordPrimaryFailure records a Connector failure in jira's primary .log.
+func recordPrimaryFailure(op string, err error) {
+	_ = primaryrecord.Note(backend.Jira.Name, op, err)
 }
