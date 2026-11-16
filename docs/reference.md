@@ -2278,9 +2278,10 @@ A Connector (ADR 0073) is a subflake that adds backend or Driver rows from
 outside core. This section covers the Nix shape and, under [Driver rows on a
 Connector](#driver-rows-on-a-connector) and [Backend rows on a
 Connector](#backend-rows-on-a-connector), how a row reaches the binaries. The
-root flake registers three Connectors, `connectors/claude`,
-`connectors/github` (see [The github Connector](#the-github-connector)) and
-`connectors/jira` (see [The jira Connector](#the-jira-connector)); what
+root flake registers four Connectors, `connectors/claude`,
+`connectors/github` (see [The github Connector](#the-github-connector)),
+`connectors/jira` (see [The jira Connector](#the-jira-connector)) and
+`connectors/forgejo` (see [The forgejo Connector](#the-forgejo-connector)); what
 the other registered facts mean at runtime is issue #6751. The worked example
 is the fixture Connector in
 [`nix/fixtures/connector/`](../nix/fixtures/connector/).
@@ -2730,6 +2731,33 @@ jira adapter answers every call until the cut-over (issue #6753).
 The Connector also ships jira's tracker-axis fragment folder,
 `connectors/jira/fragments/jira/`, through
 `spindrift.connectors.jira.fragments`.
+
+#### The forgejo Connector
+
+`connectors/forgejo` is the forgejo backend's forge path as a network Connector
+on protocol 0.3, with no tracker half: it serves `forge.prsForBranch`,
+`forge.pr` and `forge.checks` over Forgejo's REST API through `http_request`,
+plus the branch and PR primitives (branch lookup and delete, open, merge,
+compare, files, draft flip, comment, auto-merge, branch protection, and the
+repository probe). It advertises `forge.prs`, `forge.draftPRs`,
+`forge.autoMerge`, `forge.branchProtection` and `forge.probe`, and neither
+`forge.ciRun` nor `forge.tokenGrant`: Forgejo Actions logs are not on the REST
+API, so there is no job log. Forgejo has no draft flag, so a draft is a `WIP:`
+title; a merge uses the rebase style and deletes the branch; auto-merge asks
+`merge_when_checks_succeed` when the repository allows rebase merges. A
+transient merge failure is retried by core, not the Connector. Its Route table
+is the `{base}` host with `GET /api/v1/repos/{repo}` (the subtree root, which
+admits every read under the repository), `POST` and `PATCH` on `.../pulls`,
+`POST .../issues` and `DELETE .../branches`; the write roots admit more than
+the Connector sends, as `connectors/forgejo/routes.nix` explains. Its row
+authorizes with the host-only `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN` (the
+`forgejoConnectorToken` knob), with `FORGEJO_BASE_URL` as the base.
+`connector-forgejo-conformance` holds the forge half to the CodeForge, PRForge
+and host-mediation contracts in `cmd/launcher/internal/forge/forgejo`. The row
+is registered but neither shadowed nor primary: the native forgejo adapter
+stays authoritative, and the table is baselined in
+`spindrift-connector-routes.json` so doctor's `connector-routes-widened[forgejo]`
+row reports it as accepted.
 
 #### Shadow mode
 
