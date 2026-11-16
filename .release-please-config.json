@@ -26,6 +26,9 @@
     "connectors/claude": {
       "component": "claude"
     },
+    "connectors/forgejo": {
+      "component": "forgejo"
+    },
     "connectors/github": {
       "component": "github"
     },

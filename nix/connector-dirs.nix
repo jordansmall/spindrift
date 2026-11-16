@@ -2,6 +2,7 @@
 # root's own core, never its pinned one.
 [
   ../connectors/claude
+  ../connectors/forgejo
   ../connectors/github
   ../connectors/jira
 ]

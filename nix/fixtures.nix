@@ -21,6 +21,7 @@ let
   dogfoodShadow = import ./dogfood-shadow.nix;
   dogfoodPrimary = import ./dogfood-primary.nix;
   githubConnector = (import ../connectors/github).lib.connector { core = import ../core; };
+  forgejoConnector = (import ../connectors/forgejo).lib.connector { core = import ../core; };
   jiraConnector = (import ../connectors/jira).lib.connector { core = import ../core; };
   dogfoodDriverPrimaries = builtins.filter (n: dogfoodDriverRows ? ${n}) dogfoodPrimary;
   dogfoodBackendPrimaries = builtins.filter (n: !(dogfoodDriverRows ? ${n})) dogfoodPrimary;
@@ -128,6 +129,16 @@ let
       credentialKnob = "githubConnectorToken";
       acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).github;
       primary = true;
+    };
+    # Registered but not primary: the native forgejo adapter stays
+    # authoritative, so nix/dogfood-primary.nix omits it.
+    backendRows.forgejo = {
+      module = p: "${forgejoConnector.package p}/forgejo.wasm";
+      inherit (forgejoConnector) routes;
+      credentialEnv = "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN";
+      credentialKnob = "forgejoConnectorToken";
+      baseEnv = "FORGEJO_BASE_URL";
+      acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).forgejo;
     };
     # Registered but not primary: nothing reads jira through the Connector
     # until the cut-over (issue #6753), so nix/dogfood-primary.nix omits it.
