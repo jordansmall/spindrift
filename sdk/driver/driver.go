@@ -202,6 +202,9 @@ func wirePatterns(ps []Pattern) []wirePattern {
 	return out
 }
 
+// errDecodePanic marks a decoder panic that decodeLine recovered.
+var errDecodePanic = errors.New("decoder panicked")
+
 func unmarshal(params json.RawMessage, v any) error {
 	if err := json.Unmarshal(params, v); err != nil {
 		return fmt.Errorf("bad params: %w", err)
@@ -225,16 +228,34 @@ func handlers(s Strategy) ([]string, map[string]method) {
 
 	decoders := map[uint32]Decoder{}
 	var next uint32
-	decodeLine := func(h uint32, line string) ([]event.Event, error) {
+	decodeLine := func(h uint32, line string) (evs []event.Event, err error) {
 		dec, ok := decoders[h]
 		if !ok {
 			return nil, fmt.Errorf("unknown decoder %d", h)
 		}
-		evs := dec(line)
+		// A panic would trap the guest, failing every later line too; as an
+		// error it rejects this line's call alone.
+		defer func() {
+			if r := recover(); r != nil {
+				evs, err = nil, fmt.Errorf("%w: %v", errDecodePanic, r)
+			}
+		}()
+		evs = dec(line)
 		if evs == nil {
 			evs = []event.Event{} // encode [] rather than null
 		}
 		return evs, nil
+	}
+
+	// batchElem is line's element in a many-line answer. A panicking line's
+	// is not an events array, so the host rejects that element alone, as it
+	// does a rejected driver.decode.
+	batchElem := func(h uint32, line string) (any, error) {
+		evs, err := decodeLine(h, line)
+		if errors.Is(err, errDecodePanic) {
+			return err.Error(), nil
+		}
+		return evs, err
 	}
 
 	m := map[string]method{
@@ -281,13 +302,13 @@ func handlers(s Strategy) ([]string, map[string]method) {
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
 			}
-			out := make([][]event.Event, len(p.Lines))
+			out := make([]any, len(p.Lines))
 			for i, line := range p.Lines {
-				evs, err := decodeLine(p.Decoder, line)
+				elem, err := batchElem(p.Decoder, line)
 				if err != nil {
 					return nil, err
 				}
-				out[i] = evs
+				out[i] = elem
 			}
 			return out, nil
 		},
@@ -342,17 +363,17 @@ func handlers(s Strategy) ([]string, map[string]method) {
 		if err != nil {
 			return nil, fmt.Errorf("bad payload: decoder id: %w", err)
 		}
-		out := make([][]event.Event, 0, bytes.Count(rest, []byte{'\n'}))
+		out := make([]any, 0, bytes.Count(rest, []byte{'\n'}))
 		for len(rest) > 0 {
 			line, tail, ok := bytes.Cut(rest, []byte{'\n'})
 			if !ok {
 				return nil, errors.New("bad payload: final line has no newline")
 			}
-			evs, err := decodeLine(uint32(h), string(line))
+			elem, err := batchElem(uint32(h), string(line))
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, evs)
+			out = append(out, elem)
 			rest = tail
 		}
 		return out, nil

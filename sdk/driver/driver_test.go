@@ -686,3 +686,69 @@ func TestDecodeRawKeepsInvalidUTF8(t *testing.T) {
 func longLine(unit string) string {
 	return strings.Repeat(unit, (1<<20)/len(unit))
 }
+
+// panickyStrategy's decoder panics on the line "boom".
+func panickyStrategy() Strategy {
+	s := countingStrategy()
+	inner := s.NewDecoder
+	s.NewDecoder = func() Decoder {
+		d := inner()
+		return func(line string) []event.Event {
+			if line == "boom" {
+				panic("decoder bug")
+			}
+			return d(line)
+		}
+	}
+	return s
+}
+
+func TestDecodePanicRejectsTheCall(t *testing.T) {
+	_, m := handlers(panickyStrategy())
+	h := strconv.Itoa(int(newHandle(t, m)))
+	if _, err := m["driver.decode"](json.RawMessage(`{"decoder":` + h + `,"line":"boom"}`)); err == nil {
+		t.Fatal("decode of a panicking line succeeded, want an error")
+	}
+	// The decoder lives on for the lines after it.
+	if got := marshal(t, call(t, m, "driver.decode", `{"decoder":`+h+`,"line":"a"}`)); !strings.Contains(got, `"Text":"a:1"`) {
+		t.Fatalf("decode after a panic = %s", got)
+	}
+}
+
+// A panicking line must not take its batch down: the host reads a non-array
+// element as that line's rejection, so only its line becomes unparsed.
+func TestDecodeBatchPanicRejectsOnlyItsLine(t *testing.T) {
+	_, m := handlers(panickyStrategy())
+	h := strconv.Itoa(int(newHandle(t, m)))
+	res := call(t, m, "driver.decodeBatch", `{"decoder":`+h+`,"lines":["a","boom","b"]}`)
+	var elems []json.RawMessage
+	if err := json.Unmarshal([]byte(marshal(t, res)), &elems); err != nil || len(elems) != 3 {
+		t.Fatalf("decodeBatch = %s, want 3 elements (%v)", marshal(t, res), err)
+	}
+	if got := string(elems[0]); !strings.Contains(got, `"Text":"a:1"`) {
+		t.Fatalf("line 1 = %s", got)
+	}
+	if elems[1][0] == '[' {
+		t.Fatalf("panicking line = %s, want a non-array rejection", elems[1])
+	}
+	if got := string(elems[2]); !strings.Contains(got, `"Text":"b:2"`) {
+		t.Fatalf("line 3 = %s", got)
+	}
+}
+
+func TestDecodeRawPanicMatchesBatch(t *testing.T) {
+	lines := []string{"a", "boom", "b"}
+	_, m := handlers(panickyStrategy())
+	req := struct {
+		Decoder uint32   `json:"decoder"`
+		Lines   []string `json:"lines"`
+	}{newHandle(t, m), lines}
+	batch := marshal(t, call(t, m, "driver.decodeBatch", marshal(t, req)))
+	res, err := m["driver.decodeRaw"](rawPayload(newHandle(t, m), lines))
+	if err != nil {
+		t.Fatalf("decodeRaw with a panicking line: %v", err)
+	}
+	if got := marshal(t, res); got != batch {
+		t.Fatalf("decodeRaw = %s, want decodeBatch's %s", got, batch)
+	}
+}
