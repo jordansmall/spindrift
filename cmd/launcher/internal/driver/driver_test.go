@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -190,4 +191,58 @@ func TestSnapshotRestoresRegistryAndDescriptors(t *testing.T) {
 	if _, ok := descriptor("snapshotadded"); ok {
 		t.Error("restore left an added Descriptor")
 	}
+}
+
+func TestRegisterPrimaryReplacesNativeInNew(t *testing.T) {
+	t.Cleanup(Snapshot())
+	Register(driverkit.Strategy{Name: "prim"})
+	RegisterPrimary("prim", func() (driverkit.Strategy, error) {
+		return driverkit.Strategy{Name: "prim", SessionFlags: func(mode, _, _, _ string) string { return "from-connector:" + mode }}, nil
+	})
+	d, err := New("prim")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.SessionFlags("initial", "", "", ""); got != "from-connector:initial" {
+		t.Errorf("SessionFlags = %q, want the Connector's", got)
+	}
+	if !HasNative("prim") {
+		t.Error("HasNative(prim) = false, want the linked-in Strategy kept")
+	}
+	if _, ok := NativeStrategy("prim"); !ok {
+		t.Error("NativeStrategy(prim) not ok, want the linked-in Strategy kept")
+	}
+	if n := slices.Index(Names(), "prim"); n < 0 || slices.Index(Names()[n+1:], "prim") >= 0 {
+		t.Errorf("Names() = %v, want prim listed once", Names())
+	}
+}
+
+func TestRegisterPrimaryLoadFailureNamesDriverAndDoesNotFallBack(t *testing.T) {
+	t.Cleanup(Snapshot())
+	Register(driverkit.Strategy{Name: "prim"})
+	RegisterPrimary("prim", func() (driverkit.Strategy, error) { return driverkit.Strategy{}, errors.New("boom") })
+	d, err := New("prim")
+	if err == nil || !strings.Contains(err.Error(), `DRIVER "prim"`) || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("New(prim) = %v, %v, want an error naming DRIVER \"prim\"", d, err)
+	}
+}
+
+func TestRegisterPrimaryPanicsWithoutNativeOrOnRepeat(t *testing.T) {
+	t.Cleanup(Snapshot())
+	load := func() (driverkit.Strategy, error) { return driverkit.Strategy{}, nil }
+	mustPanic := func(what string, f func()) {
+		t.Helper()
+		defer func() {
+			if recover() == nil {
+				t.Errorf("%s did not panic", what)
+			}
+		}()
+		f()
+	}
+	mustPanic("RegisterPrimary without a native Strategy", func() { RegisterPrimary("nonative", load) })
+	RegisterConnector("lazyonly", load)
+	mustPanic("RegisterPrimary of a lazy-only name", func() { RegisterPrimary("lazyonly", load) })
+	Register(driverkit.Strategy{Name: "twice"})
+	RegisterPrimary("twice", load)
+	mustPanic("a repeated RegisterPrimary", func() { RegisterPrimary("twice", load) })
 }
