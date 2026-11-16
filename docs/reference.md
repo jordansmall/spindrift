@@ -2660,9 +2660,11 @@ stays authoritative for every read and write; the forge reads the Connector
 serves (`OpenPRForBranch`, `PRForBranch`, `PRState`, `CheckState`,
 `FailureDetail`, the CI run link, `Mergeable`, `HeadCommitSHA`, `NeedsUpdate`,
 `ListPRFiles` and `CanAutoMerge`) are sampled by shadow mode or answered under
-primary mode, and on github every write stays native (jira's primary row
-routes writes too). The Connector is held to the tracker
-read contract (`forgetest.RunTrackerReadContract`, with a `StateSeeder` standing
+primary mode. Under a github primary row, the writes of issue #6883 go through
+the Connector too (see [Backend primary mode](#backend-primary-mode)) and the
+rest stay native; jira's primary row routes every write. The Connector is held
+to the tracker read contract
+(`forgetest.RunTrackerReadContract`, with a `StateSeeder` standing
 in for the writes a read-only tracker lacks) and the PR forge read contract
 (`forgetest.RunPRForgeReadContract`), which the Connector's subflake check
 `connector-<backend>-conformance` runs against it, through
@@ -3079,12 +3081,23 @@ Strategy with no code revert. A primary Driver emits no `shadow_summary`, so the
 A backend row with `primary` on (issues #6998, #7127) makes its Connector answer
 in place of the native backend, in every launcher process that builds the
 adapter (dispatch, research, the daemon, recover and doctor). What it routes is
-per backend. The github row routes reads only: writes stay native until its
-write switch (#6756), and the row is on for dogfood through
+per backend. The github row routes every read and, since the first write switch
+(issue #6883), these writes, with no `gh` fallback: the claim, un-claim and
+reclaim and the settle transitions (`TransitionState`), research verdicts
+(`CompleteVerdict`), the butler's label adds (`AddLabels`, over
+`tracker.editLabels`), label creation (`CreateLabel`), and every host-posted
+issue comment (`Comment`). Issue filing (`PostIssue`), PRs (their comments and
+ready/draft flips included), merges and `CloseMergedIssue` stay native until
+their own switches (#6885, #6886, #6887); without `primary` every write stays
+native. The switch covers launcher-side writes only: the CI claim and release
+label swaps in `.github/actions/agent-setup/action.yml` and
+`.github/workflows/agent-dispatch.yml` still run `gh issue edit` and are not
+leaks of the switch. The github row is on for dogfood through
 `nix/dogfood-primary.nix`. The jira row routes the whole tracker, so there is
 no native fallback to read from ([Switching jira to
 primary](#switching-jira-to-primary)). The rest of this section describes
-github's reads. On github, no read stays on `gh` except `Rebase`'s head and base branch lookup, which is part of
+github's. On github, no read stays on `gh` except `Rebase`'s head and base
+branch lookup, which is part of
 that write (the Connector's PR read carries no base branch) and stays until
 cut-over (#6811) deletes the native path. Primary and shadow are exclusive, so a
 primary row samples nothing; evaluation refuses the two together, a row with
@@ -3093,8 +3106,8 @@ own](#driver-primary-mode)), and a name with no native backend, each naming the
 row.
 
 There is no fallback. A Connector that fails to load, or a request its Route
-table refuses, fails the read with the Connector's own error and the caller
-handles it as it would a `gh` failure. That is the point of the stage: a
+table refuses, fails the read or write with the Connector's own error and the
+caller handles it as it would a `gh` failure. That is the point of the stage: a
 failure that a fallback would hide is counted instead. A call that fails
 fatally (its time budget or memory cap, a trap, malformed output, a refused
 request) closes the shared Connector and fails its read with no retry; the next
@@ -3124,9 +3137,11 @@ with the stamp as `20060102T150405Z`:
   the read shadow's `shadow_summary` carries. It has no `decision`, and it is
   written only when a sandbox started and the file exists.
 - `<stem>.log` gets one JSON line, `{"op":"<verb>","error":"<err>"}`, per
-  failed routed read (`op` is the read's verb, such as `count demand`), a load
-  failure included; doctor and daemon reads record the same way. A github read
-  that replaces a Connector a failed call closed adds
+  failed routed read or write (`op` is its verb, such as `count demand`), a load
+  failure included; doctor and daemon reads record the same way. A github claim
+  that loses its race (`forge.ErrAlreadyClaimed`) is an expected outcome, not a
+  failure, and is not recorded. A github read that replaces a Connector a failed
+  call closed adds
   `{"op":"reload the Connector","error":"<that failure>"}`. A jira row records
   every failed operation, a write included, with `op` the guest RPC method
   (such as `tracker.list` or `tracker.transition`) and `load the Connector` for

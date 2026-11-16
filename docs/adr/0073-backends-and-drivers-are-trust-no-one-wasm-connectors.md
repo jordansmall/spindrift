@@ -1052,3 +1052,15 @@ method rather than the read's verb, and has no `reload the Connector` line (a
 failed reload is recorded under the method that needed it); the sandbox totals
 line stays github's. The native jira adapter is kept and still built and validated, so
 dropping `primary` reverts with no code change; its deletion is #6858.
+
+## Amendment (issue #6883): primary github carries the first write switch
+
+The #6998 and #7127 amendments' "writes stay native" no longer holds for every
+github write.
+Under `primary`, github's claim, un-claim and reclaim, settle transitions,
+research verdicts, butler label adds, label creation and host-posted issue
+comments go through the Connector, still with no fallback: a load failure,
+missing capability or refused route fails the write with its named error and is
+recorded in the primary log, so the clean-run recipe covers writes too. A lost
+claim race is an expected outcome and is not recorded. Issue filing, PRs, merges
+and `CloseMergedIssue` stay native until their switches (#6885, #6886, #6887).

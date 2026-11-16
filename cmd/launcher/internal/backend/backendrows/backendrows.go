@@ -62,8 +62,9 @@ type Row struct {
 	Shadow      bool `json:"shadow,omitempty"`
 	ShadowEvery int  `json:"shadowEvery,omitempty"`
 	// Primary makes the Connector answer in place of the native adapter of the
-	// same name: github's reads only (its writes stay native until #6756), the
-	// whole tracker for jira. Refused with Shadow.
+	// same name: github's reads and the writes docs/reference.md lists under
+	// "Backend primary mode" (the rest stay native until #6756), the whole
+	// tracker for jira. Refused with Shadow.
 	Primary bool `json:"primary,omitempty"`
 }
 

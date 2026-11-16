@@ -742,9 +742,10 @@ with none (ADR 0073). _Avoid_: canary, dry run.
 **Primary mode**:
 The migration stage after Shadow mode, in which the Connector answers in place
 of the native backend, with no fallback: a Connector failure or audit refusal is
-recorded and fails the operation. github's Connector answers reads only, its
-writes staying native until #6756; jira's answers the whole tracker. Dropping
-the row's `primary` option restores the native path; the native path is deleted
+recorded and fails the operation. github's Connector answers reads and the
+issue comment and label writes (#6883), its issue filing, PRs and merges staying
+native until #6756; jira's answers the whole tracker. Dropping the row's
+`primary` option restores the native path; the native path is deleted
 (cut-over) after 20 consecutive dogfood runs with no Connector read error and
 no refusal (ADR 0073). _Avoid_: cut-over (the later deletion of the native
 path), promotion.
