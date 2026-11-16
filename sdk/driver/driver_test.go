@@ -674,6 +674,8 @@ func linesHanded(t testing.TB, lines []string) []string {
 }
 
 // A JSON transport rewrites invalid UTF-8 to U+FFFD; the raw one must not.
+// This covers the input the decoder sees; the ToolInput test below, the output
+// the host receives.
 func TestDecodeRawKeepsInvalidUTF8(t *testing.T) {
 	lines := []string{"\xff\xfe", "a\xc3", "\x80", "\xed\xa0\x80"}
 	if got := linesHanded(t, lines); !slices.Equal(got, lines) {
@@ -750,5 +752,25 @@ func TestDecodeRawPanicMatchesBatch(t *testing.T) {
 	}
 	if got := marshal(t, res); got != batch {
 		t.Fatalf("decodeRaw = %s, want decodeBatch's %s", got, batch)
+	}
+}
+
+// The host refuses an answer that is not valid UTF-8, and decodeRaw passes a
+// line's invalid bytes through to a ToolInput that Marshal would copy as is.
+func TestDecodeRawToolInputIsValidUTF8(t *testing.T) {
+	s := countingStrategy()
+	s.NewDecoder = func() Decoder {
+		return func(line string) []event.Event {
+			return []event.Event{{ToolInput: json.RawMessage(line)}}
+		}
+	}
+	_, m := handlers(s)
+	res, err := m["driver.decodeRaw"](rawPayload(newHandle(t, m), []string{`{"p":"a` + "\xff\xfe\xc3(" + `"}`}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := marshal(t, res)
+	if want := `"ToolInput":{"p":"a` + "���(" + `"}`; !strings.Contains(got, want) {
+		t.Fatalf("decodeRaw = %q, want it to hold %q", got, want)
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"unicode/utf8"
 
 	"spindrift.dev/sdk/connector"
 	"spindrift.dev/sdk/event"
@@ -205,6 +206,21 @@ func wirePatterns(ps []Pattern) []wirePattern {
 // errDecodePanic marks a decoder panic that decodeLine recovered.
 var errDecodePanic = errors.New("decoder panicked")
 
+// toValidUTF8 replaces each invalid byte of b with U+FFFD, as encoding/json
+// does for a string.
+func toValidUTF8(b []byte) []byte {
+	if utf8.Valid(b) {
+		return b
+	}
+	out := make([]byte, 0, len(b)+8)
+	for len(b) > 0 {
+		r, n := utf8.DecodeRune(b)
+		out = utf8.AppendRune(out, r)
+		b = b[n:]
+	}
+	return out
+}
+
 func unmarshal(params json.RawMessage, v any) error {
 	if err := json.Unmarshal(params, v); err != nil {
 		return fmt.Errorf("bad params: %w", err)
@@ -243,6 +259,12 @@ func handlers(s Strategy) ([]string, map[string]method) {
 		evs = dec(line)
 		if evs == nil {
 			evs = []event.Event{} // encode [] rather than null
+		}
+		// driver.decodeRaw hands the decoder invalid UTF-8 a JSON transport
+		// would have replaced, and Marshal copies a RawMessage's bytes as they
+		// are, so the host would refuse the whole answer.
+		for i := range evs {
+			evs[i].ToolInput = toValidUTF8(evs[i].ToolInput)
 		}
 		return evs, nil
 	}
