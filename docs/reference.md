@@ -3036,8 +3036,14 @@ backend, each naming the row.
 There is no fallback. A Connector that fails to load, or a request its Route
 table refuses, fails the read with the Connector's own error and the caller
 handles it as it would a `gh` failure. That is the point of the stage: a
-failure that a fallback would hide is counted instead. It reads with the same
-host-only `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` as the shadow, and the same
+failure that a fallback would hide is counted instead. A call that fails
+fatally (its time budget or memory cap, a trap, malformed output, a refused
+request) closes the shared Connector and fails its read with no retry; the next
+read loads a fresh one (issue #7096), in the Connector sandbox when one is on,
+where the dead one's session is released. A failed load is retried by the next
+read until three loads have failed in a row, then at most once a minute. It
+reads with the same host-only `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` as the shadow,
+and the same
 read-only scope list applies. Dropping the github name from
 `nix/dogfood-primary.nix`, or `primary` from the row, restores the native reads
 with no code revert; the `primary = true` on the github mirror row in
@@ -3054,7 +3060,9 @@ with the stamp as `20060102T150405Z`:
   Route table refused.
 - `<stem>.log` gets one JSON line, `{"op":"<verb>","error":"<err>"}`, per
   failed routed read (`op` is the read's verb, such as `count demand`), a load
-  failure included; doctor and daemon reads record the same way. A record that
+  failure included; doctor and daemon reads record the same way. A read that
+  replaces a Connector a failed call closed adds
+  `{"op":"reload the Connector","error":"<that failure>"}`. A record that
   cannot be written goes to stderr. A process whose reads all succeeded writes
   none.
 
