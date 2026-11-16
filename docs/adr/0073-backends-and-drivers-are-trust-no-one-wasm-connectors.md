@@ -956,3 +956,52 @@ ranges touch: 11.3 to 12.4 s against 9.1 to 11.6 s), so the allocation counts
 carry the claim and the timing agrees with them. What remains is the decoder,
 which the single-pass scanner work targets. MB/s is not tabulated: the
 benchmark prints it to two places, which reads 0.05 to 0.08 on every row.
+
+## Amendment (issue #7107): Driver Connectors decode each line in one pass
+
+The claude Connector's decoder ran `encoding/json` over each line about eight
+to ten times (the top-level probe, the host-line check, turn classification,
+the result totals, the content envelope and array, each block), and every
+`Unmarshal` ran its own validation scan first. `sdk/driver`'s `Scan` now walks
+a line once, validating as it goes, into a flat tape of values. It unescapes
+only the strings a caller reads, and its `Decode*` helpers and `KeyMatches`
+keep `encoding/json`'s store and field-matching rules, so every probe still
+fails or succeeds exactly as its own `Unmarshal` did. Fuzz tests pin the
+scanner against `encoding/json` and the Connector against the native Strategy
+(`FuzzConnectorDecodeMatchesNative`). The interpreter stays (decision 14): this
+cuts the work, not the engine's safety.
+
+Before and after, both on one host in one session, one `go test -bench
+'ConnectorDecodeSize|ConnectorPostPass'` run each against a Connector built
+from `main` and from this change:
+
+| line | interpreter before | interpreter after | compiler before | compiler after |
+|---|---|---|---|---|
+| 245 B | 7.94 ms | 4.29 ms | 1.15 ms | 0.59 ms |
+| 1,005 B | 27.0 ms | 8.22 ms | 3.78 ms | 1.50 ms |
+| 8,153 B | 146 ms | 67.1 ms | 22.4 ms | 9.50 ms |
+| 65,297 B | 1.05 s | 475 ms | 179 ms | 79.6 ms |
+| 261,040 B | 5.34 s | 1.83 s | 791 ms | 283 ms |
+| 866,965 B | 16.8 s | 6.85 s | 2.51 s | 908 ms |
+
+A linear fit over the six sizes puts the interpreter at 19.4 µs per byte
+before and 7.9 µs after, and the compiler at 2.9 µs before and 1.0 µs after.
+The baseline reads below the #6849 fit's 23.3 µs because the host differs; the
+ratio within this run is what counts. `BenchmarkConnectorPostPass`'s `Decode`
+row, the whole dogfood corpus through one decoder, goes from 43.2 s to 19.4 s
+on the interpreter and from 5.85 s to 2.79 s on the compiler (native 81.5 ms
+and 67.0 ms, unchanged code, so that spread is the run's noise).
+
+The remaining per-byte cost in these runs was mostly outside the decoder: the
+guest still decoded `driver.decode`'s params, the line as one JSON string, with
+`encoding/json`, and encoded the events back. `driver.decodeRaw` (issue #7108,
+above) has since removed the line's escaping; the events are still encoded.
+
+A decoder panic no longer traps the guest. The SDK recovers it into a rejected
+`driver.decode`, which the host already turns into the line's one unparsed
+event; in `driver.decodeBatch` and `driver.decodeRaw` only that line's element
+is rejected.
+
+A line the scanner rejects is not a panic: it becomes a `KindError` event, as
+the native Strategy and the goldens require. Only a decoder panic becomes the
+line's one unparsed event (a rejected element in the batch answer).
