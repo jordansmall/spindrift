@@ -278,8 +278,9 @@ func seamGit(t *testing.T, env []string, dir string, args ...string) {
 
 // runSmoke runs the launcher on docPath and returns the Box-run argv the
 // runtime recorded, plus every gh call. For a butler case, ledgerRefs lists
-// the Ledger refs the sweep left on the remote.
-func runSmoke(t *testing.T, c smokeCase, docPath string) (boxRun []string, gh [][]string, ledgerRefs []string) {
+// the Ledger refs the sweep left on the remote. extra are launcher flags
+// appended before the subcommand.
+func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (boxRun []string, gh [][]string, ledgerRefs []string) {
 	t.Helper()
 	bin := seamtest.BuildLauncher(t)
 	fakeDir := seamtest.InstallFakes(t, "podman", "docker", "bwrap", "gh")
@@ -316,6 +317,7 @@ func runSmoke(t *testing.T, c smokeCase, docPath string) (boxRun []string, gh []
 	args := []string{"--input", docPath, "--repo-slug", smokeRepo, "--box-signal-carrier", "log",
 		"--user-name", "Seam Bot", "--user-email", "seam@example.com", "--no-build",
 		"--merge-policy", "immediate", "--merge-poll-interval", "1"}
+	args = append(args, extra...)
 	// bwrap would otherwise exec a real pasta helper to restore egress in the
 	// isolated netns; the fake bwrap needs no network.
 	if c.runtime == "bwrap" {
@@ -466,6 +468,38 @@ func TestSeamLauncherSmokeMatrix(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestSeamSmokeOptedInBoxCarriesNoForgeToken runs the work-podman document
+// with BOX_FORGE_CREDENTIAL=none while the launcher's own env holds GH_TOKEN
+// and BOX_GH_TOKEN (smokeSecrets): the Box run must still land, and its argv
+// must carry no forge token key, forwarded bare or by value (issue #7140).
+func TestSeamSmokeOptedInBoxCarriesNoForgeToken(t *testing.T) {
+	i := slices.IndexFunc(smokeMatrix, func(c smokeCase) bool { return c.name == "work-podman" })
+	if i < 0 {
+		t.Fatal("smokeMatrix has no work-podman row")
+	}
+	c := smokeMatrix[i]
+	boxRun, gh, _ := runSmoke(t, c, seamtest.Path(t, c.fixture), "--box-forge-credential", "none")
+	if boxRun == nil {
+		t.Fatalf("%s never ran a Box", c.runtime)
+	}
+	env, _ := argvEnv(boxRun, "-e")
+	for _, name := range []string{"GH_TOKEN", "BOX_GH_TOKEN", "GITEA_TOKEN", "FORGEJO_TOKEN", "BOX_FORGEJO_TOKEN"} {
+		if _, ok := env[name]; ok {
+			t.Errorf("Box argv carries %s under BOX_FORGE_CREDENTIAL=none: %q", name, boxRun)
+		}
+	}
+	if got := env["BOX_GH_TOKEN_OPTIONAL"]; got == nil || *got != "1" {
+		t.Errorf("BOX_GH_TOKEN_OPTIONAL = %v; want 1", got)
+	}
+	doc, err := inputdoc.Load(seamtest.Path(t, c.fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range checkForgeCalls(doc, c.kind, gh) {
+		t.Errorf("forge: %s", p)
 	}
 }
 
