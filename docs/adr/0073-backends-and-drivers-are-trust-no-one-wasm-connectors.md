@@ -864,7 +864,8 @@ The bars become: a shadow moves to primary after 20 consecutive clean shadow
 runs, and primary cuts over (#6811, which deletes the native github read path)
 after 20 consecutive dogfood runs with zero Connector read errors and zero audit
 refusals. The reference's Backend primary mode section has the recipe. A `driver`
-row gets the same stage with #6999; until then eval refuses `primary` on one.
+row gets the same stage with #6999; until then eval refuses `primary` on one
+(amended by issue #6999: it is accepted, see the amendment below).
 
 ## Amendment (issue #7097): a backend call's budget covers its own work, not GitHub's latency
 
@@ -1005,3 +1006,26 @@ is rejected.
 A line the scanner rejects is not a panic: it becomes a `KindError` event, as
 the native Strategy and the goldens require. Only a decoder panic becomes the
 line's one unparsed event (a rejected element in the batch answer).
+
+## Amendment (issue #6999): the claude Driver Connector is primary on dogfood
+
+A `driver` row with `primary` registers its Connector as the Driver ahead of
+the native Strategy of the same name. The row reaches both sides: the launcher
+input document's `drivers` (`driverrows.Use`) and the Box's rows file
+(`driverrows.UseFile`), whichever Driver the Harness selects. It needs a
+`module` and a core Driver of its name, and excludes `shadow`. The native
+Strategy stays linked in and is still the default for every Consumer that sets
+no `primary`. The Box still refuses a Connector that is not first-party.
+
+As for backends, there is no fallback: a Connector that fails to load fails the
+run with an error naming the Driver (`DRIVER "claude": ...`). The stage is
+reversible by dropping `claude` from `nix/dogfood-primary.nix`, with no code
+revert. A primary Driver emits no `shadow_summary`, so the shadow streak recipe
+applies only while a Driver is shadowed.
+
+Evidence for the cut-over (2026-11-16): 101 consecutive clean dogfood shadow
+runs against a bar of 20, 211 Passes with a `shadow_summary`, every one loaded
+with no error, 39,411 lines compared, 0 divergences. Those runs predate the
+decode-cost fixes of #7107 and #7108; the Connector then cost about 48 ms per
+line against about 0.09 ms for the native Strategy, so primary on dogfood is
+also where the post-fix cost is first measured in production.
