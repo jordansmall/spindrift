@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectortracker"
@@ -39,12 +40,15 @@ const (
 // seeders are promoted, so the harnesses below script the backend directly.
 type connectorHarness struct {
 	*fakeForgejo
-	t      *testing.T
-	audit  *bytes.Buffer
-	routes []connectorhost.Route
-	conn   *connectorhost.Connector
-	cf     forge.CodeForge
-	caps   forge.Capabilities
+	t     *testing.T
+	audit *bytes.Buffer
+	// auditPath is the production constructor's audit file, which audit is read
+	// from; empty when the Connector is composed directly.
+	auditPath string
+	routes    []connectorhost.Route
+	conn      *connectorhost.Connector
+	cf        forge.CodeForge
+	caps      forge.Capabilities
 }
 
 // loadForgejoConnector loads the compiled forgejo Connector with its declared
@@ -53,23 +57,11 @@ type connectorHarness struct {
 // built.
 func loadForgejoConnector(t *testing.T, host string, client *http.Client, audit *bytes.Buffer) (*connectorhost.Connector, []connectorhost.Route) {
 	t.Helper()
-	path := os.Getenv(connectorWasmEnv)
-	if path == "" {
-		t.Skipf("%s unset: no compiled forgejo Connector to test; connectors/forgejo's connector-forgejo-conformance check runs it", connectorWasmEnv)
-	}
-	var table []struct {
-		Method, Host, Path string
-		FollowRedirect     bool
-	}
-	if err := json.Unmarshal([]byte(os.Getenv(connectorRoutesEnv)), &table); err != nil {
-		t.Fatalf("%s: %v", connectorRoutesEnv, err)
-	}
+	path, table := declaredRoutes(t)
 	var declared []connectorhost.Route
 	for _, r := range table {
-		if r.Host != "{base}" {
-			t.Fatalf("route %s %s names host %q, want {base}", r.Method, r.Path, r.Host)
-		}
-		declared = append(declared, connectorhost.Route{Method: r.Method, Host: host, Path: r.Path, FollowRedirect: r.FollowRedirect})
+		r.Host = host
+		declared = append(declared, r)
 	}
 	routes := connectortracker.Routes(declared, connectorRepo)
 	wasm, err := os.ReadFile(path)
@@ -93,6 +85,31 @@ func loadForgejoConnector(t *testing.T, host string, client *http.Client, audit 
 	return conn, routes
 }
 
+// declaredRoutes is the compiled Connector's path and its declared Route table
+// with each host still {base}. It skips the test when no Connector was built.
+func declaredRoutes(t *testing.T) (string, []connectorhost.Route) {
+	t.Helper()
+	path := os.Getenv(connectorWasmEnv)
+	if path == "" {
+		t.Skipf("%s unset: no compiled forgejo Connector to test; connectors/forgejo's connector-forgejo-conformance check runs it", connectorWasmEnv)
+	}
+	var table []struct {
+		Method, Host, Path string
+		FollowRedirect     bool
+	}
+	if err := json.Unmarshal([]byte(os.Getenv(connectorRoutesEnv)), &table); err != nil {
+		t.Fatalf("%s: %v", connectorRoutesEnv, err)
+	}
+	var declared []connectorhost.Route
+	for _, r := range table {
+		if r.Host != backendrows.BaseHost {
+			t.Fatalf("route %s %s names host %q, want %s", r.Method, r.Path, r.Host, backendrows.BaseHost)
+		}
+		declared = append(declared, connectorhost.Route{Method: r.Method, Host: r.Host, Path: r.Path, FollowRedirect: r.FollowRedirect})
+	}
+	return path, declared
+}
+
 func composeForge(conn *connectorhost.Connector, api string, readOnlyBox bool) (forge.CodeForge, forge.Capabilities, error) {
 	return connectorforge.Compose(conn, connectorforge.Target{API: api, Repo: connectorRepo}, connectorforge.Git{
 		Credential:  gitexec.Credential{Username: "bot", Password: gitSecret},
@@ -108,7 +125,7 @@ func composeForge(conn *connectorhost.Connector, api string, readOnlyBox bool) (
 // for a read-only Box when readOnlyBox. The fake serves over TLS, since core
 // refuses a remote that is not https, with git pointed at its bare repository
 // through the environment: production git is https-only.
-func newConnectorHarness(t *testing.T, readOnlyBox bool) *connectorHarness {
+func newConnectorHarness(t *testing.T, readOnlyBox, production bool) *connectorHarness {
 	t.Helper()
 	for k, v := range map[string]string{
 		"GIT_AUTHOR_NAME": "Test Bot", "GIT_AUTHOR_EMAIL": "bot@example.com",
@@ -134,6 +151,14 @@ func newConnectorHarness(t *testing.T, readOnlyBox bool) *connectorHarness {
 	t.Setenv("GIT_CONFIG_VALUE_0", f.srv.URL+"/"+connectorRepo+".git")
 
 	h := &connectorHarness{fakeForgejo: f, t: t, audit: &bytes.Buffer{}}
+	if production {
+		var err error
+		if h.cf, h.routes, h.auditPath, err = productionForge(t, f.srv, readOnlyBox); err != nil {
+			t.Fatal(err)
+		}
+		h.caps = forge.ResolveCodeForge(h.cf)
+		return h
+	}
 	h.conn, h.routes = loadForgejoConnector(t, f.srv.Listener.Addr().String(), f.srv.Client(), h.audit)
 	var err error
 	if h.cf, h.caps, err = composeForge(h.conn, f.srv.URL, readOnlyBox); err != nil {
@@ -182,8 +207,15 @@ func (h composedCodeForgeHarness) Forge() forge.CodeForge { return h.cf }
 func (h composedCodeForgeHarness) Unreachable() forge.CodeForge {
 	h.t.Helper()
 	srv := httptest.NewTLSServer(http.NotFoundHandler())
-	conn, _ := loadForgejoConnector(h.t, srv.Listener.Addr().String(), srv.Client(), &bytes.Buffer{})
-	cf, _, err := composeForge(conn, srv.URL, false)
+	var cf forge.CodeForge
+	var err error
+	if h.auditPath != "" {
+		cf, _, _, err = productionForge(h.t, srv, false)
+	} else {
+		var conn *connectorhost.Connector
+		conn, _ = loadForgejoConnector(h.t, srv.Listener.Addr().String(), srv.Client(), &bytes.Buffer{})
+		cf, _, err = composeForge(conn, srv.URL, false)
+	}
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -329,6 +361,13 @@ func (c *routeCoverage) record(t *testing.T, h *connectorHarness) {
 		key[r.String()] = r.Method + " " + r.Path
 		c.routes[r.Method+" "+r.Path] = true
 	}
+	if h.auditPath != "" {
+		raw, err := os.ReadFile(h.auditPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.audit.Write(raw)
+	}
 	for _, line := range bytes.Split(bytes.TrimSpace(h.audit.Bytes()), []byte("\n")) {
 		if len(line) == 0 {
 			continue
@@ -356,42 +395,51 @@ func (c *routeCoverage) assertUsed(t *testing.T) {
 }
 
 // TestConnector_Contracts runs the shared contracts against the compiled
-// Connector: the whole Code Forge composed from it. A route no request in any
-// run used is broader than the Connector needs, so coverage is judged over all.
+// Connector: the whole Code Forge composed from it, both directly and as the
+// production constructor builds it under a primary forgejo row. A route no
+// request in any run used is broader than the Connector needs, so coverage is
+// judged over all.
 func TestConnector_Contracts(t *testing.T) {
 	var cov routeCoverage
 	t.Run("Capabilities", func(t *testing.T) {
-		h := newConnectorHarness(t, false)
+		h := newConnectorHarness(t, false, false)
 		testComposedCapabilities(t, h)
 		cov.record(t, h)
 	})
-	t.Run("PRForgeContract", func(t *testing.T) {
-		h := newConnectorHarness(t, false)
-		forgetest.RunPRForgeContract(t, composedPRHarness{h})
-		cov.record(t, h)
-	})
-	t.Run("CodeForgeContract", func(t *testing.T) {
-		h := newConnectorHarness(t, false)
-		forgetest.RunCodeForgeContract(t, composedCodeForgeHarness{h})
-		cov.record(t, h)
-	})
-	t.Run("HostMediationContract", func(t *testing.T) {
-		h := &composedHostMediationHarness{
-			connectorHarness: newConnectorHarness(t, true), fake: forge.NewFake(),
-			relayedSHA: map[string]string{}, seeded: map[string]bool{}, prSeq: 1500,
-		}
-		forgetest.RunHostMediationContract(t, h)
-		cov.record(t, h.connectorHarness)
-	})
-	t.Run("Writes", func(t *testing.T) {
-		h := newConnectorHarness(t, false)
-		t.Run("CommentPR", func(t *testing.T) { testCommentPR(t, h) })
-		t.Run("BranchLifecycle", func(t *testing.T) { testBranchLifecycle(t, h) })
-		t.Run("BranchProtection", func(t *testing.T) { testBranchProtection(t, h) })
-		t.Run("MergeTransientAndPermanent", func(t *testing.T) { testMergeTransientAndPermanent(t, h) })
-		t.Run("MergeRefusedWhileConflictCheckRuns", func(t *testing.T) { testMergeRefusedWhileConflictCheckRuns(t, h) })
-		cov.record(t, h)
-	})
+	for _, mode := range []struct {
+		name       string
+		production bool
+	}{{"Composed", false}, {"Production", true}} {
+		t.Run(mode.name, func(t *testing.T) {
+			t.Run("PRForgeContract", func(t *testing.T) {
+				h := newConnectorHarness(t, false, mode.production)
+				forgetest.RunPRForgeContract(t, composedPRHarness{h})
+				cov.record(t, h)
+			})
+			t.Run("CodeForgeContract", func(t *testing.T) {
+				h := newConnectorHarness(t, false, mode.production)
+				forgetest.RunCodeForgeContract(t, composedCodeForgeHarness{h})
+				cov.record(t, h)
+			})
+			t.Run("HostMediationContract", func(t *testing.T) {
+				h := &composedHostMediationHarness{
+					connectorHarness: newConnectorHarness(t, true, mode.production), fake: forge.NewFake(),
+					relayedSHA: map[string]string{}, seeded: map[string]bool{}, prSeq: 1500,
+				}
+				forgetest.RunHostMediationContract(t, h)
+				cov.record(t, h.connectorHarness)
+			})
+			t.Run("Writes", func(t *testing.T) {
+				h := newConnectorHarness(t, false, mode.production)
+				t.Run("CommentPR", func(t *testing.T) { testCommentPR(t, h) })
+				t.Run("BranchLifecycle", func(t *testing.T) { testBranchLifecycle(t, h) })
+				t.Run("BranchProtection", func(t *testing.T) { testBranchProtection(t, h) })
+				t.Run("MergeTransientAndPermanent", func(t *testing.T) { testMergeTransientAndPermanent(t, h) })
+				t.Run("MergeRefusedWhileConflictCheckRuns", func(t *testing.T) { testMergeRefusedWhileConflictCheckRuns(t, h) })
+				cov.record(t, h)
+			})
+		})
+	}
 	cov.assertUsed(t)
 }
 
