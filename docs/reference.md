@@ -2305,7 +2305,7 @@ is the fixture Connector in
   that imports the same core is unaffected) and contributes rows to
   `spindrift.connectors.<name>`. The module system's merge is the registry,
   and one row name registered by two modules fails evaluation with a one-line
-  `perSystem.spindrift.connectors.<name> is registered twice` error naming both
+  `spindrift.connectors.<name> is registered twice` error naming both
   modules' files. Each row takes a single definition, so a Consumer cannot
   adjust a Connector's row additively; overriding it is `lib.mkForce` on the
   whole row.
