@@ -99,11 +99,24 @@ type sandboxRig struct {
 	env                            map[string]string
 }
 
-// sandboxRigOpts is what newSandboxRig varies; a struct so the bools cannot be
+// sandboxMode is how the rig's github backend row is wired; the modes exclude
+// each other.
+type sandboxMode int
+
+const (
+	// sandboxRouted is a routed row, loaded at the launch token gate.
+	sandboxRouted sandboxMode = iota
+	// sandboxShadow loads the Connector from a read shadow rather than a routed row.
+	sandboxShadow
+	// sandboxPrimary makes the row the primary read path; like a routed row it
+	// loads at the launch token gate.
+	sandboxPrimary
+)
+
+// sandboxRigOpts is what newSandboxRig varies; a struct so its fields cannot be
 // swapped silently (issue #3060).
 type sandboxRigOpts struct {
-	// shadow loads the Connector from a read shadow rather than a routed row.
-	shadow bool
+	mode sandboxMode
 	// runs script the Boxes in the order they start; running names the
 	// containers the podman fake reports as already running; imageAbsent makes
 	// the OCI fakes report the Box image as not loaded.
@@ -119,7 +132,7 @@ type sandboxRigOpts struct {
 // releases a held Box through release.
 func newSandboxRig(t *testing.T, runtime string, o sandboxRigOpts) sandboxRig {
 	t.Helper()
-	shadow, issues, imageAbsent, running := o.shadow, o.issues, o.imageAbsent, o.running
+	issues, imageAbsent, running := o.issues, o.imageAbsent, o.running
 	connectors, err := fixturebuild.ConnectorDir()
 	if err != nil {
 		t.Fatal(err)
@@ -132,7 +145,7 @@ func newSandboxRig(t *testing.T, runtime string, o sandboxRigOpts) sandboxRig {
 	if runtime == "bwrap" {
 		fixture, artifacts = "launcher-run-input-bwrap.json", bwrapSandboxArtifacts(t, host)
 	}
-	docPath := sandboxDoc(t, seamtest.Path(t, fixture), filepath.Join(connectors, "forge.wasm"), shadow, artifacts)
+	docPath := sandboxDoc(t, seamtest.Path(t, fixture), filepath.Join(connectors, "forge.wasm"), o.mode, artifacts)
 
 	bin := seamtest.BuildLauncher(t)
 	fakeDir := seamtest.InstallFakes(t, "podman", "docker", "bwrap", "gh")
@@ -207,7 +220,11 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 	if x.signal != nil {
 		run.HoldUntil = "set by the rig"
 	}
-	rig := newSandboxRig(t, runtime, sandboxRigOpts{shadow: x.shadow, runs: []seamtest.PodmanRun{run}, issues: issues, extra: extra})
+	mode := sandboxRouted
+	if x.shadow {
+		mode = sandboxShadow
+	}
+	rig := newSandboxRig(t, runtime, sandboxRigOpts{mode: mode, runs: []seamtest.PodmanRun{run}, issues: issues, extra: extra})
 	recPath := filepath.Join(rig.recDir, runtime+".jsonl")
 
 	p := seamtest.Start(t, rig.cmd)
@@ -277,7 +294,7 @@ func TestSeamConnectorSandboxReapsOrphans(t *testing.T) {
 	for _, imageAbsent := range []bool{false, true} {
 		t.Run(fmt.Sprintf("imageAbsent=%t", imageAbsent), func(t *testing.T) {
 			rig := newSandboxRig(t, "podman", sandboxRigOpts{
-				shadow: true, runs: []seamtest.PodmanRun{{Outcome: seamOutcome("ready")}}, issues: []int{7},
+				mode: sandboxShadow, runs: []seamtest.PodmanRun{{Outcome: seamOutcome("ready")}}, issues: []int{7},
 				running: append([]string{orphan}, others...), imageAbsent: imageAbsent,
 			})
 			res := seamtest.Start(t, rig.cmd).Wait(t)
@@ -417,11 +434,11 @@ func sandboxName(argv []string) string {
 
 // sandboxDoc writes a copy of the input document at docPath with CONNECTOR_SANDBOX
 // on and a github backend row whose Connector is the wasm at module. The row
-// reads through GH_TOKEN. As a shadow row it loads on the run's first read, and
-// native stays authoritative; as a routed one the launch token gate loads it,
-// and its lack of a token grant refuses the launch. artifacts overrides keys of
-// the document's artifacts.
-func sandboxDoc(t *testing.T, docPath, module string, shadow bool, artifacts map[string]string) string {
+// reads through GH_TOKEN, and mode picks its shadow or primary keys. As a shadow
+// row it loads on the run's first read, and native stays authoritative; as a
+// routed one the launch token gate loads it, and its lack of a token grant
+// refuses the launch. artifacts overrides keys of the document's artifacts.
+func sandboxDoc(t *testing.T, docPath, module string, mode sandboxMode, artifacts map[string]string) string {
 	t.Helper()
 	data, err := os.ReadFile(docPath)
 	if err != nil {
@@ -436,12 +453,20 @@ func sandboxDoc(t *testing.T, docPath, module string, shadow bool, artifacts map
 		t.Fatal(err)
 	}
 	settings["CONNECTOR_SANDBOX"] = "true"
+	// A primary row loads at the read-only token gate, which refuses a Connector
+	// that cannot introspect the token before any read; no fixture can.
+	if mode == sandboxPrimary {
+		settings["BOX_FORGE_AND_ISSUE_ACCESS"] = "read-write"
+	}
 	row := map[string]any{
 		"name": "github", "module": module, "credentialEnv": "GH_TOKEN",
 		"routes": []map[string]string{{"method": "GET", "host": "api.github.com", "path": "/repos/{repo}"}},
 	}
-	if shadow {
+	switch mode {
+	case sandboxShadow:
 		row["shadow"], row["shadowEvery"] = true, 1
+	case sandboxPrimary:
+		row["primary"] = true
 	}
 	if len(artifacts) > 0 {
 		var art map[string]string
@@ -486,4 +511,65 @@ func bwrapSandboxArtifacts(t *testing.T, host string) map[string]string {
 		t.Fatal(err)
 	}
 	return map[string]string{"CONNECTOR_HOST": pkg, "SYSCALL_FILTER": filter}
+}
+
+// TestSeamConnectorSandboxPrimaryTotals runs a work dispatch under a primary
+// github row with the sandbox on, and pins the totals line the launcher appends
+// to the run's primary audit file once the sandbox has closed. No fixture
+// Connector is a tracker, so the run's first primary read (listing issues) is
+// refused as unsupported and the launcher exits 1: that read is the one thing
+// the .log holds, and the audit file holds no Connector decisions, only the
+// totals.
+func TestSeamConnectorSandboxPrimaryTotals(t *testing.T) {
+	rig := newSandboxRig(t, "podman", sandboxRigOpts{mode: sandboxPrimary, issues: []int{7}})
+	res := seamtest.Start(t, rig.cmd).Wait(t)
+	res.WantExit(t, 1)
+	if starts, _ := countRuns("podman", seamtest.ReadRecord(t, filepath.Join(rig.recDir, "podman.jsonl"))); starts != 1 {
+		t.Errorf("the runtime started %d Connector sandboxes, want 1", starts)
+	}
+
+	logDir := hostpaths.LogDir(rig.workDir)
+	audits, _ := filepath.Glob(filepath.Join(logDir, "primary-github-*.audit.jsonl"))
+	if len(audits) != 1 {
+		t.Fatalf("primary audit files = %v, want one\nstderr:\n%s", audits, res.Stderr)
+	}
+	raw, err := os.ReadFile(audits[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("primary audit has %d lines, want just the totals line:\n%s", len(lines), raw)
+	}
+	var totals map[string]int64
+	if err := json.Unmarshal([]byte(lines[0]), &totals); err != nil {
+		t.Fatalf("totals line %q: %v", lines[0], err)
+	}
+	for _, k := range []string{"sandbox_start_ns", "sandbox_calls", "sandbox_hop_ns"} {
+		if totals[k] <= 0 {
+			t.Errorf("%s = %d, want > 0 (%s)", k, totals[k], lines[0])
+		}
+	}
+	// The fixture's call count is deterministic: two sandbox calls per run.
+	if totals["sandbox_calls"] != 2 {
+		t.Errorf("sandbox_calls = %d, want 2 (%s)", totals["sandbox_calls"], lines[0])
+	}
+	// A routed read stays inside the sandbox, and the fixture asks the host
+	// for nothing; a primary run loads no Connector in-process.
+	for _, k := range []string{"sandbox_host_calls", "in_process_loads"} {
+		if v, ok := totals[k]; !ok || v != 0 {
+			t.Errorf("%s = %d (present %t), want 0 and present (%s)", k, v, ok, lines[0])
+		}
+	}
+	if len(totals) != 5 {
+		t.Errorf("totals line has keys %v, want the five totals", slices.Sorted(maps.Keys(totals)))
+	}
+
+	logs, _ := filepath.Glob(filepath.Join(logDir, "primary-github-*.log"))
+	if len(logs) != 1 {
+		t.Fatalf("primary logs = %v, want one", logs)
+	}
+	if b, _ := os.ReadFile(logs[0]); !strings.Contains(string(b), `"op":"list issues"`) || strings.Count(string(b), "\n") != 1 {
+		t.Errorf("primary log is not the one refused issue listing:\n%s", b)
+	}
 }
