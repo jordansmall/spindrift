@@ -275,6 +275,9 @@ func (e *execClient) StateLabels() forge.DispatchLabels {
 // check is read-then-edit, not atomic: another claimer can land between the
 // read and the edit.
 func (e *execClient) TransitionState(num string, from, to forge.DispatchState) error {
+	if row, ok := primaryRow(); ok {
+		return e.transitionViaConnector(row, num, from, to)
+	}
 	if to == forge.InProgress {
 		labels, err := e.issueLabels(num)
 		if err != nil {
@@ -300,6 +303,9 @@ func (e *execClient) TransitionState(num string, from, to forge.DispatchState) e
 // call carrying a --add-label flag per label, mirroring TransitionState's
 // exec and error-handling style.
 func (e *execClient) AddLabels(num string, labels []string) error {
+	if row, ok := primaryRow(); ok {
+		return e.addLabelsViaConnector(row, num, labels)
+	}
 	args := []string{"issue", "edit", num, "--repo", e.repo}
 	for _, l := range labels {
 		args = append(args, "--add-label", l)
@@ -344,6 +350,9 @@ func (e *execClient) issueLabels(num string) ([]string, error) {
 // instead of silently keeping InProgress alongside the verdict label. The check
 // is not atomic: another process can flip the label between the read and edit.
 func (e *execClient) CompleteVerdict(num string, verdict forge.Verdict) error {
+	if row, ok := primaryRow(); ok {
+		return e.completeVerdictViaConnector(row, num, verdict)
+	}
 	add := e.verdictLabels.Label(verdict)
 	if add == "" {
 		return fmt.Errorf("gh issue edit %s: no label configured for verdict %v", num, verdict)
@@ -475,6 +484,9 @@ func (e *execClient) CloseMergedIssue(num string) error {
 }
 
 func (e *execClient) Comment(num, body string) error {
+	if row, ok := primaryRow(); ok {
+		return e.commentViaConnector(row, num, body)
+	}
 	cmd := exec.Command("gh", "issue", "comment", num,
 		"--repo", e.repo,
 		"--body", body,

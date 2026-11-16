@@ -146,30 +146,34 @@ func routedRow() (backendrows.Row, bool) {
 // primaryRow is the github backend row when it is configured primary: the
 // issue and PR reads (listing and reading issues, the dedup scan, comments,
 // native dependencies, the issues one blocks, issue search, the PR, branch and
-// check reads) all go through it, with no gh fallback; writes stay native. It
-// is deliberately narrower than routedRow, which any non-shadow row satisfies,
-// so a plain row keeps gh answering those reads.
+// check reads) and the issue comment and label writes (claim, settle, verdict,
+// label adds and creation, host-posted comments) all go through it, with no gh
+// fallback; issue filing, PRs and merges stay native. It is deliberately
+// narrower than routedRow, which any non-shadow row satisfies, so a plain row
+// keeps gh answering those.
 func primaryRow() (backendrows.Row, bool) {
 	row, ok := backendrows.Lookup(backend.GitHub.Name)
 	return row, ok && row.Primary
 }
 
-// notePrimary records the error a primary-routed read returned and returns it
-// unchanged. A plain row records nothing.
+// notePrimary records the error a primary-routed read or write returned and
+// returns it unchanged. A plain row records nothing, and neither does a lost
+// claim race: forge.ErrAlreadyClaimed is core policy, not a Connector fault,
+// and an empty log is what marks a clean primary run.
 func notePrimary(row backendrows.Row, op string, err error) error {
-	if !row.Primary {
+	if !row.Primary || errors.Is(err, forge.ErrAlreadyClaimed) {
 		return err
 	}
 	return primaryrecord.Note(backend.GitHub.Name, op, err)
 }
 
-// readVia runs fn over the shared Connector for e's repository, and records a
-// failure under a primary row. A Connector lacking what the read needs (the
-// missing sentinel, or a capability fn names through errNoCapability) is
+// connectorOp runs fn over the shared Connector for e's repository, and records
+// a failure under a primary row. A Connector lacking what the operation needs
+// (the missing sentinel, or a capability fn names through errNoCapability) is
 // unsupported, never a reason to fall back to gh. Readers run concurrently, so
 // one can hold a Connector another reader's call then kills and see
 // connectorhost.ErrUnusable from it; the next read reloads.
-func (e *execClient) readVia(row backendrows.Row, missing error, verb string, fn func(conn *connectorhost.Connector, api string) error) error {
+func (e *execClient) connectorOp(row backendrows.Row, missing error, verb string, fn func(conn *connectorhost.Connector, api string) error) error {
 	sc, err := sharedConnectorFor(row, e.repo)
 	if err == nil {
 		err = unsupportedWithout(fn(sc.conn, sc.api), verb, missing, errNoCapability)
@@ -177,19 +181,24 @@ func (e *execClient) readVia(row backendrows.Row, missing error, verb string, fn
 	return notePrimary(row, verb, err)
 }
 
-// coreTracker as trackerRead's capName names a read of the core tracker
+// coreTracker as trackerOp's capName names an operation of the core tracker
 // contract, which every tracker Connector serves.
 const coreTracker = ""
 
-// trackerRead runs fn over a tracker view of conn that serves the read capName
-// names, or coreTracker. The view has no native tracker under it: a
-// capability it does not serve must fail rather than reach gh.
-func (e *execClient) trackerRead(row backendrows.Row, capName, verb string, fn func(forge.IssueTracker) error) error {
-	return e.readVia(row, connectortracker.ErrNotTracker, verb, func(conn *connectorhost.Connector, api string) error {
-		if capName != coreTracker && !slices.Contains(conn.Capabilities, capName) {
-			return fmt.Errorf("%w: %s", errNoCapability, capName)
+// trackerOp runs fn over a tracker view of conn that serves the capability
+// capName names (or coreTracker) and each of alsoCaps. The view has no native
+// tracker under it: a capability it does not serve must fail with
+// errNoCapability, never reach gh or the nil native tracker, which a write the
+// view has no layer for would otherwise panic on.
+func (e *execClient) trackerOp(row backendrows.Row, capName, verb string, fn func(forge.IssueTracker) error, alsoCaps ...string) error {
+	return e.connectorOp(row, connectortracker.ErrNotTracker, verb, func(conn *connectorhost.Connector, api string) error {
+		for _, c := range append([]string{capName}, alsoCaps...) {
+			if c != coreTracker && !slices.Contains(conn.Capabilities, c) {
+				return fmt.Errorf("%w: %s", errNoCapability, c)
+			}
 		}
-		tr, err := connectortracker.New(conn, nil, connectortracker.Lifecycle{Labels: e.labels}, connectortracker.Target{API: api, Repo: e.repo})
+		lc := connectortracker.Lifecycle{Labels: e.labels, VerdictLabels: e.verdictLabels}
+		tr, err := connectortracker.New(conn, nil, lc, connectortracker.Target{API: api, Repo: e.repo})
 		if err != nil {
 			return err
 		}
@@ -197,10 +206,10 @@ func (e *execClient) trackerRead(row backendrows.Row, capName, verb string, fn f
 	})
 }
 
-// trackerCapRead is trackerRead for a read through the optional interface T that
-// the capability capName puts on the tracker view.
-func trackerCapRead[T any](e *execClient, row backendrows.Row, capName, verb string, fn func(T) error) error {
-	return e.trackerRead(row, capName, verb, func(tr forge.IssueTracker) error {
+// trackerCapOp is trackerOp for an operation through the optional interface T
+// that the capability capName puts on the tracker view.
+func trackerCapOp[T any](e *execClient, row backendrows.Row, capName, verb string, fn func(T) error) error {
+	return e.trackerOp(row, capName, verb, func(tr forge.IssueTracker) error {
 		v, ok := forge.As[T](tr)
 		if !ok {
 			return fmt.Errorf("%w: %s", errNoCapability, capName)
@@ -215,7 +224,7 @@ func trackerCapRead[T any](e *execClient, row backendrows.Row, capName, verb str
 // sits under it: a read the Connector does not serve must fail rather than
 // reach gh.
 func (e *execClient) forgeRead(row backendrows.Row, verb string, fn func(forge.CodeForge, forge.Capabilities) error) error {
-	return e.readVia(row, connectorforge.ErrNotForge, verb, func(conn *connectorhost.Connector, api string) error {
+	return e.connectorOp(row, connectorforge.ErrNotForge, verb, func(conn *connectorhost.Connector, api string) error {
 		cf, err := connectorforge.NewReader(conn, connectorforge.Target{API: api, Repo: e.repo}, Host())
 		if err != nil {
 			return err
@@ -229,12 +238,12 @@ func (e *execClient) prRead(row backendrows.Row, verb string, fn func(forge.PRFo
 	return e.forgeRead(row, verb, func(_ forge.CodeForge, caps forge.Capabilities) error { return fn(caps.PRForge) })
 }
 
-// The via* helpers are the readVia, trackerRead, trackerCapRead, forgeRead and
+// The via* helpers are the connectorOp, trackerOp, trackerCapOp, forgeRead and
 // prRead entry points for a read that returns one value; the reads that return
 // two (a PR and whether it was found) call those directly.
 
 func viaRead[R any](e *execClient, row backendrows.Row, missing error, verb string, fn func(*connectorhost.Connector, string) (R, error)) (v R, err error) {
-	err = e.readVia(row, missing, verb, func(conn *connectorhost.Connector, api string) (rerr error) {
+	err = e.connectorOp(row, missing, verb, func(conn *connectorhost.Connector, api string) (rerr error) {
 		v, rerr = fn(conn, api)
 		return rerr
 	})
@@ -242,7 +251,7 @@ func viaRead[R any](e *execClient, row backendrows.Row, missing error, verb stri
 }
 
 func viaTracker[R any](e *execClient, row backendrows.Row, capName, verb string, fn func(forge.IssueTracker) (R, error)) (v R, err error) {
-	err = e.trackerRead(row, capName, verb, func(tr forge.IssueTracker) (rerr error) {
+	err = e.trackerOp(row, capName, verb, func(tr forge.IssueTracker) (rerr error) {
 		v, rerr = fn(tr)
 		return rerr
 	})
@@ -250,7 +259,7 @@ func viaTracker[R any](e *execClient, row backendrows.Row, capName, verb string,
 }
 
 func viaTrackerCap[T, R any](e *execClient, row backendrows.Row, capName, verb string, fn func(T) (R, error)) (v R, err error) {
-	err = trackerCapRead(e, row, capName, verb, func(t T) (rerr error) {
+	err = trackerCapOp(e, row, capName, verb, func(t T) (rerr error) {
 		v, rerr = fn(t)
 		return rerr
 	})
@@ -302,7 +311,7 @@ func (e *execClient) countReadyViaConnector(row backendrows.Row) (int, error) {
 }
 
 func (e *execClient) priorClaimStateViaConnector(row backendrows.Row, num string) (state forge.DispatchState, found bool, err error) {
-	err = trackerCapRead(e, row, connectortracker.CapRemovedLabels, "read an issue's removed labels", func(pr forge.PriorClaimStateReader) error {
+	err = trackerCapOp(e, row, connectortracker.CapRemovedLabels, "read an issue's removed labels", func(pr forge.PriorClaimStateReader) error {
 		var rerr error
 		state, found, rerr = pr.PriorClaimState(num)
 		return rerr
@@ -350,6 +359,40 @@ func (e *execClient) checkStateViaConnector(row backendrows.Row, prURL string) (
 
 func (e *execClient) failureDetailViaConnector(row backendrows.Row, prURL string) (string, error) {
 	return viaPR(e, row, "read a PR's failing checks", func(pf forge.PRForge) (string, error) { return pf.FailureDetail(prURL) })
+}
+
+// The tracker writes. Each fails with errNoCapability when the Connector lacks
+// the primitive behind it; a transition or verdict is the transition layer,
+// which needs the label-edit primitive for its stale-label strip.
+
+func (e *execClient) transitionViaConnector(row backendrows.Row, num string, from, to forge.DispatchState) error {
+	return e.trackerOp(row, connectortracker.CapTransition, "transition an issue", func(tr forge.IssueTracker) error {
+		return tr.TransitionState(num, from, to)
+	}, connectortracker.CapEditLabels)
+}
+
+func (e *execClient) completeVerdictViaConnector(row backendrows.Row, num string, verdict forge.Verdict) error {
+	return e.trackerOp(row, connectortracker.CapTransition, "settle a research verdict", func(tr forge.IssueTracker) error {
+		return tr.CompleteVerdict(num, verdict)
+	}, connectortracker.CapEditLabels)
+}
+
+func (e *execClient) addLabelsViaConnector(row backendrows.Row, num string, labels []string) error {
+	return trackerCapOp(e, row, connectortracker.CapEditLabels, "add labels to an issue", func(l forge.IssueLabeler) error {
+		return l.AddLabels(num, labels)
+	})
+}
+
+func (e *execClient) commentViaConnector(row backendrows.Row, num, body string) error {
+	return trackerCapOp(e, row, connectortracker.CapComment, "comment on an issue", func(c forge.HostPostedCommenter) error {
+		return c.Comment(num, body)
+	})
+}
+
+func (e *execClient) createLabelViaConnector(row backendrows.Row, name, description, color string) error {
+	return e.trackerOp(row, connectortracker.CapLabels, "create a label", func(tr forge.IssueTracker) error {
+		return tr.CreateLabel(name, description, color)
+	})
 }
 
 func (e *execClient) listLabelsViaConnector(row backendrows.Row) ([]string, error) {
