@@ -32,6 +32,8 @@ type prHarness struct {
 	caps  forge.Capabilities
 	calls []string
 	git   *recordingGit
+	// sleeps records each pause the composed forge asked its clock for.
+	sleeps []time.Duration
 }
 
 func newPRHarness(t *testing.T, caps []string, replies map[string]any) *prHarness {
@@ -44,6 +46,15 @@ func newPRHarness(t *testing.T, caps []string, replies map[string]any) *prHarnes
 			return errors.New("guest: no such method " + method)
 		case error:
 			return r
+		case []string:
+			// Successive calls answer successive entries; the last one repeats.
+			n := 0
+			for _, c := range h.calls[:len(h.calls)-1] {
+				if c == method {
+					n++
+				}
+			}
+			return json.Unmarshal([]byte(r[min(n, len(r)-1)]), result)
 		case string:
 			if result == nil {
 				return nil
@@ -52,7 +63,8 @@ func newPRHarness(t *testing.T, caps []string, replies map[string]any) *prHarnes
 		}
 		panic("bad reply")
 	}
-	p := &pushOnly{call: call, target: testTarget, git: h.git}
+	clock := retry.Clock{Now: time.Now, Sleep: func(d time.Duration) { h.sleeps = append(h.sleeps, d) }}
+	p := &pushOnly{call: call, clock: clock, target: testTarget, git: h.git}
 	h.f = composePR(p, caps, testWebHost, false /* relay */)
 	h.caps = forge.ResolveCodeForge(h.f)
 	return h
@@ -97,6 +109,56 @@ func TestMergeFailureIsClassifiedFromThePR(t *testing.T) {
 			h := newPRHarness(t, nil, map[string]any{"forge.merge": classed(connectorhost.Permanent), "forge.pr": tc.pr})
 			if err := h.f.Merge(prURL7); !tc.want(err) {
 				t.Fatalf("Merge = %v", err)
+			}
+		})
+	}
+}
+
+func TestMergeRereadsAConflictingPROnceAfterAPause(t *testing.T) {
+	conflicting, mergeable := prJSON+`,"mergeable":"CONFLICTING"}`, prJSON+`,"mergeable":"MERGEABLE"}`
+	for _, tc := range []struct {
+		name       string
+		reads      []string
+		want       error
+		wantSleeps int
+		wantPRRead int
+	}{
+		{"recomputed after the pause", []string{conflicting, mergeable}, forge.ErrMergeBlockedByChecks, 1, 2},
+		{"still conflicting", []string{conflicting, conflicting}, forge.ErrMergeConflict, 1, 2},
+		{"conflicting only once", []string{conflicting, conflicting, mergeable}, forge.ErrMergeConflict, 1, 2},
+		{"blocked by checks reads once", []string{mergeable, conflicting}, forge.ErrMergeBlockedByChecks, 0, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newPRHarness(t, nil, map[string]any{"forge.merge": classed(connectorhost.Permanent), "forge.pr": tc.reads})
+			if err := h.f.Merge(prURL7); !errors.Is(err, tc.want) {
+				t.Fatalf("Merge = %v, want %v", err, tc.want)
+			}
+			if len(h.sleeps) != tc.wantSleeps || (tc.wantSleeps > 0 && h.sleeps[0] != mergeRecheckDelay) {
+				t.Errorf("sleeps = %v, want %d of %v", h.sleeps, tc.wantSleeps, mergeRecheckDelay)
+			}
+			reads := 0
+			for _, c := range h.calls {
+				if c == "forge.pr" {
+					reads++
+				}
+			}
+			if reads != tc.wantPRRead {
+				t.Errorf("PR reads = %d, want %d (calls %v)", reads, tc.wantPRRead, h.calls)
+			}
+		})
+	}
+}
+
+func TestMergeDoesNotPauseForAMergedOrDraftPR(t *testing.T) {
+	for name, pr := range map[string]string{
+		"merged": `{"number":"7","url":"` + prURL7 + `","state":"closed","merged":true,"mergeable":"CONFLICTING"}`,
+		"draft":  prJSON + `,"draft":true,"mergeable":"CONFLICTING"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newPRHarness(t, nil, map[string]any{"forge.merge": classed(connectorhost.Permanent), "forge.pr": pr})
+			_ = h.f.Merge(prURL7)
+			if len(h.sleeps) != 0 {
+				t.Errorf("sleeps = %v, want none", h.sleeps)
 			}
 		})
 	}
