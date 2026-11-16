@@ -2,5 +2,6 @@
 # nix/checks/connector-ownership.nix checks each Connector has such a line.
 * @jordansmall
 /connectors/claude/ @jordansmall
+/connectors/forgejo/ @jordansmall
 /connectors/github/ @jordansmall
 /connectors/jira/ @jordansmall

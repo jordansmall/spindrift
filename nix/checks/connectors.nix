@@ -31,6 +31,11 @@ let
     coreModule
     claudeConnector.flakeModule
   ];
+  forgejoConnector = (import ../../connectors/forgejo).lib.connector { inherit core; };
+  withForgejo = fixtures.connectorConsumerVia [
+    coreModule
+    forgejoConnector.flakeModule
+  ];
   githubConnector = (import ../../connectors/github).lib.connector { inherit core; };
   withGithub = fixtures.connectorConsumerVia [
     coreModule
@@ -147,6 +152,18 @@ in
       routes == import ../../connectors/github/routes.nix
     ) "the github Connector's row must carry the Route table in connectors/github/routes.nix";
     pkgs.runCommand "connectors-github-contributes-routes" { } "touch $out";
+
+  connectors-forgejo-contributes-routes =
+    let
+      routes = (configOf withForgejo).connectors.forgejo.routes or null;
+    in
+    assert assertMsg (
+      routes != null
+    ) "the forgejo Connector must register spindrift.connectors.forgejo";
+    assert assertMsg (
+      routes == import ../../connectors/forgejo/routes.nix
+    ) "the forgejo Connector's row must carry the Route table in connectors/forgejo/routes.nix";
+    pkgs.runCommand "connectors-forgejo-contributes-routes" { } "touch $out";
 
   connectors-jira-contributes-routes =
     let
