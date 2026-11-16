@@ -43,7 +43,7 @@ func TestConnectorStrategyCorpus(t *testing.T) {
 	conformance.Run(t, loadConnectorStrategy(t), filepath.Join("testdata", "corpus"))
 }
 
-func loadConnectorStrategy(t *testing.T) driverkit.Strategy {
+func loadConnectorStrategy(t testing.TB) driverkit.Strategy {
 	t.Helper()
 	s, err := loadConnector(t).DriverStrategy()
 	if err != nil {
@@ -52,7 +52,7 @@ func loadConnectorStrategy(t *testing.T) driverkit.Strategy {
 	return s
 }
 
-func loadConnector(t *testing.T) *connectorhost.Connector {
+func loadConnector(t testing.TB) *connectorhost.Connector {
 	t.Helper()
 	wasm, err := os.ReadFile(connectorWasm(t))
 	if err != nil {
