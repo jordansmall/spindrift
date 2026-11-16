@@ -9,6 +9,7 @@
 package connector
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -44,19 +45,41 @@ func pack(ptr, length uint32) uint64 {
 	return uint64(ptr)<<32 | uint64(length)
 }
 
-var handlers map[string]func(json.RawMessage) (any, error)
+var (
+	handlers    map[string]func(json.RawMessage) (any, error)
+	rawHandlers map[string]func([]byte) (any, error)
+)
+
+func mustBeUnregistered(method string) {
+	_, dup := handlers[method]
+	if _, raw := rawHandlers[method]; dup || raw {
+		panic("connector: duplicate handler for method " + strconv.Quote(method))
+	}
+}
 
 // Handle registers fn as the handler for method, called through the host's
 // connector_call export. Call it from init(); registering a method twice
-// panics.
+// (raw or not) panics.
 func Handle(method string, fn func(params json.RawMessage) (any, error)) {
-	if _, dup := handlers[method]; dup {
-		panic("connector: duplicate handler for method " + strconv.Quote(method))
-	}
+	mustBeUnregistered(method)
 	if handlers == nil {
 		handlers = map[string]func(json.RawMessage) (any, error){}
 	}
 	handlers[method] = fn
+}
+
+// HandleRaw registers fn for a raw request, which the host frames as
+// "<method>\n<payload>" rather than a JSON envelope (every JSON request
+// starts with '{', so the first byte tells them apart). fn reads payload in
+// place with no JSON decode; payload aliases the call buffer, so fn must not
+// retain it past the call. The response is encoded as for Handle. Call it
+// from init(); registering a method twice (raw or not) panics.
+func HandleRaw(method string, fn func(payload []byte) (any, error)) {
+	mustBeUnregistered(method)
+	if rawHandlers == nil {
+		rawHandlers = map[string]func([]byte) (any, error){}
+	}
+	rawHandlers[method] = fn
 }
 
 type callRequest struct {
@@ -73,17 +96,35 @@ type errorBody struct {
 // success, {"error": "...", "class": "..."} on any failure. A handler error
 // reports the class of the *Error in its chain; any other failure (a handler
 // error with no class, a malformed request, an unknown method, an encode
-// failure) is Permanent.
+// failure) is Permanent. A request whose first byte is not '{' is raw; see
+// HandleRaw. The host's JSON encoding never emits leading whitespace, so a
+// request with any is raw, not JSON.
 func call(req []byte) []byte {
-	var r callRequest
-	if err := json.Unmarshal(req, &r); err != nil {
-		return errorResponse(Permanent, "malformed request: "+err.Error())
+	var (
+		res any
+		err error
+	)
+	if len(req) > 0 && req[0] != '{' {
+		method, payload, ok := bytes.Cut(req, []byte{'\n'})
+		if !ok {
+			return errorResponse(Permanent, "malformed request: raw request has no method line")
+		}
+		fn, ok := rawHandlers[string(method)]
+		if !ok {
+			return errorUnknownMethod(string(method))
+		}
+		res, err = fn(payload)
+	} else {
+		var r callRequest
+		if err := json.Unmarshal(req, &r); err != nil {
+			return errorResponse(Permanent, "malformed request: "+err.Error())
+		}
+		fn, ok := handlers[r.Method]
+		if !ok {
+			return errorUnknownMethod(r.Method)
+		}
+		res, err = fn(r.Params)
 	}
-	fn, ok := handlers[r.Method]
-	if !ok {
-		return errorResponse(Permanent, "unknown method "+strconv.Quote(r.Method))
-	}
-	res, err := fn(r.Params)
 	if err != nil {
 		class := Permanent
 		if ce := new(*Error); errors.As(err, ce) {
@@ -98,6 +139,10 @@ func call(req []byte) []byte {
 		return errorResponse(Permanent, "encode result: "+err.Error())
 	}
 	return out
+}
+
+func errorUnknownMethod(method string) []byte {
+	return errorResponse(Permanent, "unknown method "+strconv.Quote(method))
 }
 
 func errorResponse(class Class, msg string) []byte {
