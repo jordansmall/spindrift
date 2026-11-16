@@ -10,11 +10,7 @@ import (
 	"spindrift.dev/sdk/forge"
 )
 
-const (
-	pageSize = 100
-	// maxPages bounds every paging loop; a longer list fails rather than truncates.
-	maxPages = 50
-)
+const pageSize = 100
 
 type rawPR struct {
 	Number         int    `json:"number"`
@@ -22,22 +18,18 @@ type rawPR struct {
 	State          string `json:"state"`
 	Merged         bool   `json:"merged"`
 	MergeCommitSHA string `json:"merge_commit_sha"`
-	// Mergeable is absent while Forgejo has not computed it.
-	Mergeable *bool  `json:"mergeable"`
+	// Mergeable is a plain bool: false also covers a still-running conflict
+	// check and a WIP pull. Core's merge classification re-reads once.
+	Mergeable bool   `json:"mergeable"`
 	Draft     bool   `json:"draft"`
 	Title     string `json:"title"`
 	Head      struct {
 		Ref string `json:"ref"`
 		SHA string `json:"sha"`
 	} `json:"head"`
-}
-
-// isDraftTitle reports a leading WIP marker, case-insensitively, among
-// Forgejo's default work-in-progress prefixes: an instance may encode a draft
-// in the title alone.
-func isDraftTitle(title string) bool {
-	upper := strings.ToUpper(strings.TrimSpace(title))
-	return strings.HasPrefix(upper, "WIP:") || strings.HasPrefix(upper, "[WIP]")
+	Base struct {
+		Ref string `json:"ref"`
+	} `json:"base"`
 }
 
 func (r rawPR) pr() forge.PR {
@@ -49,13 +41,10 @@ func (r rawPR) pr() forge.PR {
 		Draft:     r.Draft || isDraftTitle(r.Title),
 		Head:      r.Head.Ref,
 		HeadSHA:   r.Head.SHA,
-		Mergeable: "UNKNOWN",
+		Mergeable: "CONFLICTING",
 	}
-	if r.Mergeable != nil {
-		p.Mergeable = "CONFLICTING"
-		if *r.Mergeable {
-			p.Mergeable = "MERGEABLE"
-		}
+	if r.Mergeable {
+		p.Mergeable = "MERGEABLE"
 	}
 	if p.Merged {
 		p.MergeCommit = r.MergeCommitSHA
@@ -78,11 +67,13 @@ func parseNumber(number string) (int, error) {
 // pageUntilEmpty reads path's pages until one is empty, the way the native
 // adapter does: Forgejo caps `limit` below pageSize on some instances, so a
 // short page does not mark the end. A page whose first item repeats the
-// previous page's ends the walk too, for a forge that ignores `page`.
-func pageUntilEmpty[T any](api, path string, q url.Values, key func(T) int) ([]T, error) {
+// previous page's ends the walk too, for a forge that ignores `page`. There is
+// no page bound: Forgejo caps each page at its own MAX_RESPONSE_ITEMS, so a
+// large repo's PR list legitimately runs past any fixed count.
+func pageUntilEmpty[T any, K comparable](api, path string, q url.Values, key func(T) K) ([]T, error) {
 	var items []T
-	prevFirst := 0
-	for page := 1; page <= maxPages; page++ {
+	var prevFirst K
+	for page := 1; ; page++ {
 		q.Set("limit", strconv.Itoa(pageSize))
 		q.Set("page", strconv.Itoa(page))
 		var batch []T
@@ -95,7 +86,6 @@ func pageUntilEmpty[T any](api, path string, q url.Values, key func(T) int) ([]T
 		prevFirst = key(batch[0])
 		items = append(items, batch...)
 	}
-	return nil, fmt.Errorf("GET %s: more than %d pages", path, maxPages)
 }
 
 // prsForBranch lists every PR and keeps those headed at branch: Forgejo's list
@@ -107,18 +97,14 @@ func prsForBranch(t forge.Target, branch string) ([]forge.PR, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Newest first: PR numbers only grow.
+	slices.SortFunc(raw, func(a, b rawPR) int { return b.Number - a.Number })
 	prs := []forge.PR{}
 	for _, r := range raw {
 		if r.Head.Ref == branch {
 			prs = append(prs, r.pr())
 		}
 	}
-	// Newest first: PR numbers only grow.
-	slices.SortFunc(prs, func(a, b forge.PR) int {
-		x, _ := strconv.Atoi(a.Number)
-		y, _ := strconv.Atoi(b.Number)
-		return y - x
-	})
 	return prs, nil
 }
 
@@ -298,14 +284,6 @@ func deleteBranch(t forge.Target, branch string) error {
 	if err != nil {
 		return err
 	}
-	path := forgePath(t, "/branches/"+p)
-	resp, err := request("DELETE", t.API, path, nil)
-	if err != nil {
-		return err
-	}
-	if !is2xx(resp.Status) {
-		// A 404 is classed not-found, which core counts as a delete done.
-		return statusError("DELETE", path, resp.Status)
-	}
-	return nil
+	// A 404 is classed not-found, which core counts as a delete done.
+	return call("DELETE", t.API, forgePath(t, "/branches/"+p), nil, nil)
 }

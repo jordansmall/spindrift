@@ -28,7 +28,8 @@ func statusError(method, path string, status int) error {
 
 func is2xx(status int) bool { return status >= 200 && status <= 299 }
 
-// call sends the request and decodes a 2xx JSON body into out.
+// call sends the request and decodes a 2xx JSON body into out; a nil out
+// ignores the body, which a write whose answer nobody reads need not carry.
 func call(method, api, path string, body []byte, out any) error {
 	resp, err := request(method, api, path, body)
 	if err != nil {
@@ -36,6 +37,9 @@ func call(method, api, path string, body []byte, out any) error {
 	}
 	if !is2xx(resp.Status) {
 		return statusError(method, path, resp.Status)
+	}
+	if out == nil {
+		return nil
 	}
 	if err := json.Unmarshal(resp.Body, out); err != nil {
 		return fmt.Errorf("%s %s: decode: %w", method, path, err)

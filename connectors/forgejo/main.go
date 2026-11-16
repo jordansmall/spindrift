@@ -1,9 +1,9 @@
 // Command forgejo is the Forgejo forge as a Connector (ADR 0073): the branch
-// primitives and the PR and commit-status reads over REST, sent through the
-// host's http_request Host call, which attaches the credential. The native
-// forgejo adapter stays authoritative; nothing routes a production call
-// through the Connector yet. The Connector returns raw fields only, and core
-// makes every policy decision.
+// primitives, the PR and commit-status reads, and the PR write primitives over
+// REST, sent through the host's http_request Host call, which attaches the
+// credential. The native forgejo adapter stays authoritative; nothing routes a
+// production call through the Connector yet. The Connector returns raw fields
+// only, and core makes every policy decision.
 package main
 
 import "spindrift.dev/sdk/forge"
@@ -20,6 +20,20 @@ func init() {
 		Remote:       remote,
 		BranchExists: branchExists,
 		DeleteBranch: deleteBranch,
+	})
+	// CIRun and TokenGrant are left unset: the Connector declares only what it
+	// implements.
+	forge.RegisterPRs(forge.PRs{
+		Open:             open,
+		Behind:           behind,
+		Files:            prFiles,
+		SetDraft:         setDraft,
+		Comment:          comment,
+		Merge:            merge,
+		AutoMergeAllowed: autoMergeAllowed,
+		EnqueueAutoMerge: enqueueAutoMerge,
+		BranchProtected:  branchProtected,
+		Probe:            probe,
 	})
 }
 

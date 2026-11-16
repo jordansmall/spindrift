@@ -18,7 +18,7 @@ in
     env = "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN";
     group = "dispatch";
     secret = true;
-    doc = "bearer token the forgejo Connector's backend row authorizes its calls with (needs read access to the repository's pull requests, commit statuses and branches, and write access to delete branches); host-only, never reaches the Box; unused until the forgejo cut-over";
+    doc = "bearer token the forgejo Connector's backend row authorizes its calls with (needs read access to the repository, its pull requests, commit statuses and branches, and write access to open, edit, merge and comment on pull requests and to delete branches); host-only, never reaches the Box; unused until the forgejo cut-over";
     flakeOption = false;
     boxEnv = false;
   };

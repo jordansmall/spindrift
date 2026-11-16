@@ -1,8 +1,9 @@
 {
   "forgejo": [
-    { "method": "GET", "host": "{base}", "path": "/api/v1/repos/{repo}/pulls" },
-    { "method": "GET", "host": "{base}", "path": "/api/v1/repos/{repo}/commits" },
-    { "method": "GET", "host": "{base}", "path": "/api/v1/repos/{repo}/branches" },
+    { "method": "GET", "host": "{base}", "path": "/api/v1/repos/{repo}" },
+    { "method": "POST", "host": "{base}", "path": "/api/v1/repos/{repo}/pulls" },
+    { "method": "PATCH", "host": "{base}", "path": "/api/v1/repos/{repo}/pulls" },
+    { "method": "POST", "host": "{base}", "path": "/api/v1/repos/{repo}/issues" },
     { "method": "DELETE", "host": "{base}", "path": "/api/v1/repos/{repo}/branches" }
   ],
   "github": [
