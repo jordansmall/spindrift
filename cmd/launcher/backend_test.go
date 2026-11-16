@@ -485,7 +485,7 @@ func TestUnregisteredBackendNameFailsWithoutGithubFallback(t *testing.T) {
 		}()
 		f()
 	}
-	assertPanics("newIssueTracker", func() { newIssueTracker(c) })
+	assertPanics("newIssueTracker", func() { mustBuild(newIssueTracker(c)) })
 	c.CodeForge = "nope"
 	assertPanics("newCodeForge", func() { newCodeForge(c, forge.SanitizedParent{}, forge.NewFake()) })
 }

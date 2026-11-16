@@ -378,7 +378,10 @@ func seedMirrorHook(c config, pwd string, seeder forge.MirrorSeeder) func() (str
 // Cleanup.
 func researchLaunchStack(lc *launchContext) (forge.IssueTracker, *dispatch.Factory, *settle.ResearchSettle, error) {
 	rc := applyDispatchKind(lc.config, dispatchkind.Research)
-	it := newIssueTracker(rc)
+	it, err := newIssueTracker(rc)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	lw := localloop.Wire(localloopConfig(rc), it)
 	f, err := newDispatchFactory(rc, lc.pwd, lc.runner, it, lw, lc.codeForge, lc.capabilities)
 	if err != nil {

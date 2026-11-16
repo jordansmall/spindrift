@@ -29,7 +29,10 @@ func cmdCompleteIssues() int {
 	if checkBackendsRegistered(c) != nil {
 		return 0
 	}
-	it := newIssueTracker(c)
+	it, err := newIssueTracker(c)
+	if err != nil {
+		return 0
+	}
 	printCompletionIssues(os.Stdout, it, completeIssuesTimeout)
 	return 0
 }

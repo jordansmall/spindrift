@@ -34,7 +34,10 @@ func newReadContext(kind *dispatchkind.Descriptor, selfContained bool) (readCont
 		// Carried so doctor can still report the bad name as a config finding.
 		return readContext{config: c}, err
 	}
-	it := newIssueTracker(c)
+	it, err := newIssueTracker(c)
+	if err != nil {
+		return readContext{config: c}, err
+	}
 	cf := newCodeForge(c, local.SanitizedParent{}, it)
 
 	// CODE_FORGE and ISSUE_TRACKER select their backend.Descriptor rows

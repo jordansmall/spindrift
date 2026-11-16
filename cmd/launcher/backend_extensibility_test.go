@@ -79,7 +79,7 @@ func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 		t.Errorf("validate() with ISSUE_TRACKER=CODE_FORGE=gitlab = %v, want nil", err)
 	}
 
-	it := newIssueTracker(c)
+	it := mustBuild(newIssueTracker(c))
 	if _, ok := it.(*forge.Fake); !ok {
 		t.Fatalf("newIssueTracker(gitlab) returned %T, want *forge.Fake (the row's constructor)", it)
 	}
