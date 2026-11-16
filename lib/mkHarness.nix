@@ -144,6 +144,12 @@
   # shadow row, so another Driver's image never bakes the wasm. Set by
   # lib/flakeModule.nix from `spindrift.connectors.<name>.shadow`.
   shadowDrivers ? [ ],
+  # Names of core Drivers whose Connector row (a `driverRows` entry carrying
+  # `module`) is primary (ADR 0073, issue #6999): the Connector is the Driver
+  # in place of the native Strategy, on the host and in the Box, whichever
+  # Driver the Harness selects, with no fallback. Set by lib/flakeModule.nix
+  # from `spindrift.connectors.<name>.primary`.
+  primaryDrivers ? [ ],
   # Set by lib/flakeModule.nix when more than one Driver is declared (ADR 0064,
   # issue #5053): the wrapper then layers harness.<driver>.env over harness.env.
   multiDriver ? false,
@@ -564,13 +570,31 @@ let
   # Forced whole, like checkedRows, whichever Driver the Harness selects.
   shadowNames = builtins.deepSeq checkedShadows checkedShadows;
   shadowActive = lib.elem driver shadowNames;
+  # A primary row replaces the native Strategy of the same name, so it needs a
+  # core Driver and a module, and is never also shadowed.
+  checkPrimary =
+    name:
+    if !(connectorEntries ? ${name}) then
+      throw "mkHarness: primaryDrivers names '${name}' but driverRows has no such Connector row"
+    else if !(driverRegistry.entries ? ${name}) then
+      throw "mkHarness: primaryDrivers names '${name}', which is outside the core registry and has no native Strategy to replace"
+    else if !(connectorEntries.${name} ? module) then
+      throw "mkHarness: primaryDrivers names '${name}' but its Connector row carries no `module`"
+    else if lib.elem name shadowNames then
+      throw "mkHarness: '${name}' is in both shadowDrivers and primaryDrivers"
+    else
+      name;
+  checkedPrimaries = map checkPrimary primaryDrivers;
+  primaryNames = builtins.deepSeq checkedPrimaries checkedPrimaries;
   driverEntries = driverRegistry.entries // connectorEntries;
   outsideRows = removeAttrs connectorEntries (lib.attrNames driverRegistry.entries);
   # The rows the launcher input document and the Box's rows file carry: the
   # Descriptor facts plus the wasm path. `p` supplies the module's pkgs, the
   # host's for the document and the Box's own for the image. The document
-  # carries outside rows only: the host never runs a shadow, and on a macOS
-  # host the wasm is not built.
+  # carries outside rows and primary rows only: the host never runs a shadow,
+  # and on a macOS host the wasm is not built. A primary row decodes on the
+  # host too, so a host that cannot evaluate its module fails evaluation here
+  # rather than reading Pass logs with the native Strategy.
   rowOf =
     p: r:
     driverRegistry.descriptorFacts r
@@ -578,7 +602,15 @@ let
       module = r.module p;
     }
     // lib.optionalAttrs (isBatteriesBuild p r) { firstParty = true; };
-  docDriverRows = p: lib.mapAttrsToList (_: rowOf p) outsideRows;
+  primaryRowOf =
+    p: name:
+    if
+      (builtins.tryEval (builtins.deepSeq (toString (connectorEntries.${name}.module p)) true)).success
+    then
+      rowOf p connectorEntries.${name} // { primary = true; }
+    else
+      throw "mkHarness: driverRows.${name} is primary, so its Connector module must evaluate for ${p.stdenv.hostPlatform.system}, and it does not";
+  docDriverRows = p: lib.mapAttrsToList (_: rowOf p) outsideRows ++ map (primaryRowOf p) primaryNames;
   boxDriverRows =
     p:
     docDriverRows p

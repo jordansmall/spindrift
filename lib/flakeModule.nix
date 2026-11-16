@@ -95,7 +95,12 @@ let
     name: r:
     let
       nativeNames = map (b: b.name) (import ./backends/default.nix);
-      err = if r.primary then (import ./connector-names.nix).primaryError nativeNames name r else null;
+      nativeDriverNames = lib.attrNames (import ./drivers/default.nix { inherit lib; }).entries;
+      err =
+        if r.primary then
+          (import ./connector-names.nix).primaryError nativeNames nativeDriverNames name r
+        else
+          null;
     in
     if err != null then throw err else r
   ) config.spindrift.connectors;
@@ -146,6 +151,10 @@ let
       // lib.optionalAttrs r.primary { primary = true; }
   ) (lib.filterAttrs (_: r: r.backend != null) checkedConnectors);
   shadowConnectors = lib.attrNames (lib.filterAttrs (_: r: r.driver != null) shadowRows);
+  # Driver rows asking for primary mode, already checked by checkedConnectors.
+  primaryDriverConnectors = lib.attrNames (
+    lib.filterAttrs (_: r: r.primary && r.driver != null) checkedConnectors
+  );
   # The fragment contributions Connectors register (issue #6857), a list in
   # Connector-name order; lib/fragment-paths.nix's `withConnectors` validates it.
   connectorFragments = lib.filter (f: f != null) (
@@ -684,15 +693,19 @@ in
                   default = false;
                   description = ''
                     Make this Connector authoritative over the native
-                    implementation of the same name (issue #6998). On a
-                    `backend` row it answers every read the native backend
-                    would, while writes stay native. A `driver` row would be the Driver in
-                    place of the native Strategy; that switch arrives with
-                    #6999, so it throws for now. Exclusive with
-                    `shadow`, and a row with no native implementation of its
-                    name throws, each naming the row. Off by default, which
-                    leaves the Consumer's outputs byte-identical. Dropping it
-                    restores the native reads.
+                    implementation of the same name (issues #6998, #6999).
+                    On a `backend` row it answers every read the native
+                    backend would, while writes stay native. On a `driver`
+                    row it is the Driver in place of the native Strategy, in
+                    the Box during the Pass and on the host when it reads
+                    Pass logs back; a Connector that fails to load fails the
+                    run, with no fallback to the native Strategy. A host that
+                    cannot evaluate the module fails evaluation naming the row.
+                    Exclusive with `shadow`, and a row with no native
+                    implementation of its name throws, each naming the row.
+                    Off by default, which leaves the Consumer's outputs
+                    byte-identical. Dropping it restores the native
+                    implementation.
                   '';
                 };
                 shadowEvery = mkOption {
@@ -855,6 +868,7 @@ in
       // lib.optionalAttrs (connectorBackendRows != { }) { backendRows = connectorBackendRows; }
       // lib.optionalAttrs (connectorFragments != [ ]) { inherit connectorFragments; }
       // lib.optionalAttrs (shadowConnectors != [ ]) { shadowDrivers = shadowConnectors; }
+      // lib.optionalAttrs (primaryDriverConnectors != [ ]) { primaryDrivers = primaryDriverConnectors; }
       // lib.optionalAttrs (byNameModels != null) { byName = byNameModels; }
       // lib.optionalAttrs (runDefaults != { }) { defaults = runDefaults; };
       # A set removed knob (lib/removed-knobs.nix), by its flake path or its
