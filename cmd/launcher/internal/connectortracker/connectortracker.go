@@ -840,6 +840,9 @@ func newTracker(call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, 
 	if slices.Contains(caps, CapTransition) && slices.Contains(caps, CapEditLabels) {
 		it = transitionLayer{it, r}
 	}
+	if slices.Contains(caps, CapEditLabels) {
+		it = labelAddLayer{it, r}
+	}
 	if slices.Contains(caps, CapLabels) {
 		it = labelsLayer{it, r}
 	}
