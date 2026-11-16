@@ -131,6 +131,27 @@ let
   # declared by two sources would lose a meaning unnoticed.
   counts = builtins.mapAttrs (_: builtins.length) (builtins.groupBy (e: e.name) entries);
   duplicates = builtins.filter (n: counts.${n} > 1) (builtins.attrNames counts);
+
+  # Gates that are on only when the Box has write access (BOX_WRITE_ENABLED):
+  # exactly those of the rows rendering a fragment that instructs an in-Box
+  # forge CLI (docs/in-box-forge-cli.md). The Go side proves the claim
+  # (promptassembly's TestReadWriteOnlyGatesNeverFireReadOnly), and
+  # nix/checks/in-box-forge-cli-allowlist.nix holds every such row to it.
+  readWriteOnly = [
+    "BOX_ACCESS_READ_WRITE"
+    "FILER_FILE_DIRECT_ANY"
+    "FILER_FILE_DIRECT_FORGEJO"
+    "FILER_FILE_DIRECT_GH"
+    "IF_BLOCKED_PR_RW_FORGEJO"
+    "IF_BLOCKED_PR_RW_GH"
+    "ISSUE_TRACKER_FORGEJO_READWRITE"
+    "ISSUE_TRACKER_GITHUB_READWRITE"
+    "ISSUE_TRACKER_READWRITE"
+    "OPEN_PR_CREATE_RW_FORGEJO"
+    "OPEN_PR_CREATE_RW_GH"
+    "PR_FORGE_READ_WRITE"
+  ];
+  undeclaredReadWriteOnly = builtins.filter (g: !(counts ? ${g})) readWriteOnly;
 in
 {
   # name -> one-line meaning, for every gate.
@@ -139,6 +160,12 @@ in
       builtins.listToAttrs entries
     else
       throw "gate-vocabulary: gate(s) declared more than once: ${builtins.concatStringsSep ", " duplicates}";
+
+  readWriteOnly =
+    if undeclaredReadWriteOnly == [ ] then
+      readWriteOnly
+    else
+      throw "gate-vocabulary: readWriteOnly names gate(s) outside the vocabulary: ${builtins.concatStringsSep ", " undeclaredReadWriteOnly}";
 
   # The baked-skill rows regen renders gates.go's SKILL-BAKED GATES block from.
   inherit skillBaked;

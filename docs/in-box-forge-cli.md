@@ -45,7 +45,13 @@ Every write use already has a host-mediated form under `read-only`: the PR
 intent, the issue intent, the outcome line's `note=`, and the research verdict
 relay (see [Read-only Box](reference.md#read-only-box-box_forge_and_issue_accessread-only)).
 The write rows above are therefore reachable only in a `read-write` Box, and
-disappear with that mode. A research Box with the Filer provisioned relays its
+disappear with that mode. The access column is checked, not just stated: every
+`lib/fragments.nix` row that can render one of these fragments (its legacy
+fill included) must be gated on a `readWriteOnly` gate from
+`lib/gate-vocabulary.nix`, which
+`prompt-contract-read-only-reaches-no-forge-cli` enforces and the promptassembly
+test `TestReadWriteOnlyGatesNeverFireReadOnly` proves never fires in a
+read-only Env. A research Box with the Filer provisioned relays its
 verdict even in `read-write`, and so does a Box on a tracker with no in-Box
 client (jira), which is why the research rows carry the Filer condition and
 every issue-side write row carries the tracker one.
