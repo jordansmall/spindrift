@@ -29,6 +29,7 @@ type jiraIssueRecord struct {
 	failGET    bool     // simulates the native-API error the issue's GET returns
 	status     string   // workflow status the payload reports and a status clause matches; "" is "Open"
 	resolution string   // resolution the last transition posted
+	done       bool     // the issue sits in statusCategory done, closed under resolution
 	posts      int      // transition POSTs received
 	// labelsAtPost are the labels the issue carried when the last transition POST
 	// arrived, so a test can tell a strip made before it from one made after.
@@ -101,6 +102,7 @@ type jiraHarness struct {
 
 var jqlLabelClause = regexp.MustCompile(`labels = "([^"]+)"`)
 var jqlStatusClause = regexp.MustCompile(`status = "([^"]+)"`)
+var jqlDoneClause = regexp.MustCompile(`statusCategory (!?=) Done`)
 
 // newJiraHarness builds a Server/DC harness; newJiraCloudHarness a Cloud one,
 // which the adapter selects by configuring an Email.
@@ -212,12 +214,17 @@ func (h *jiraHarness) payload(key string, rec *jiraIssueRecord, wantProps string
 			"status": map[string]any{
 				"name": statusOf(rec),
 				"statusCategory": map[string]any{
-					"key": "new",
+					"key": categoryOf(rec),
 				},
 			},
 			"labels":     rec.labels,
 			"issuelinks": links,
 		},
+	}
+	if rec.done {
+		fields := out["fields"].(map[string]any)
+		fields["resolution"] = map[string]any{"name": rec.resolution}
+		fields["resolutiondate"] = "2026-01-02T03:04:05.000+0000"
 	}
 	// Like real Jira, properties come back only when the request names them.
 	requested := map[string]json.RawMessage{}
@@ -656,6 +663,14 @@ const (
 	idOnly
 )
 
+// categoryOf is the status category a record reports.
+func categoryOf(rec *jiraIssueRecord) string {
+	if rec.done {
+		return "done"
+	}
+	return "new"
+}
+
 // statusOf is the workflow status a record reports.
 func statusOf(rec *jiraIssueRecord) string {
 	if rec.status == "" {
@@ -671,6 +686,7 @@ func statusOf(rec *jiraIssueRecord) string {
 // when no fields are requested.
 func (h *jiraHarness) matching(jql string, shape payloadShape, wantProps string) []map[string]any {
 	var wantLabel, wantStatus string
+	category := jqlDoneClause.FindStringSubmatch(jql)
 	if sub := jqlLabelClause.FindStringSubmatch(jql); sub != nil {
 		wantLabel = sub[1]
 	}
@@ -680,6 +696,9 @@ func (h *jiraHarness) matching(jql string, shape payloadShape, wantProps string)
 	var out []map[string]any
 	for _, num := range h.order {
 		rec := h.issues[num]
+		if category != nil && rec.done != (category[1] == "=") {
+			continue
+		}
 		if (wantLabel != "" || wantStatus != "") &&
 			!(wantLabel != "" && contains(rec.labels, wantLabel)) &&
 			!(wantStatus != "" && statusOf(rec) == wantStatus) {

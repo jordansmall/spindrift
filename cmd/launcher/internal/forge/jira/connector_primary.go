@@ -32,10 +32,12 @@ var loadRowConnector = backendrows.Load
 var errPrimaryCapabilities = errors.New("jira primary Connector lacks required capabilities")
 
 // primaryCapabilities are the capabilities a primary Connector must advertise:
-// without native writes, a missing one would reach a nil interface.
+// without native writes, a missing one would reach a nil interface, and a
+// missing CapLabeled would silently degrade the finding dedup to open issues.
 var primaryCapabilities = []string{
 	connectortracker.CapTransition, connectortracker.CapEditLabels, connectortracker.CapLabels,
 	connectortracker.CapComment, connectortracker.CapProbe, connectortracker.CapFileIssue,
+	connectortracker.CapLabeled,
 }
 
 func missingPrimaryCapabilities(have []string) []string {

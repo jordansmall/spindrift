@@ -102,7 +102,7 @@ func TestStatusMappingFor(t *testing.T) {
 // method core drives is refused at load rather than panicking on first use.
 func TestMissingPrimaryCapabilities(t *testing.T) {
 	full := []string{"tracker", connectortracker.CapTransition, connectortracker.CapEditLabels, connectortracker.CapLabels,
-		connectortracker.CapComment, connectortracker.CapProbe, connectortracker.CapFileIssue, connectortracker.CapComments}
+		connectortracker.CapComment, connectortracker.CapProbe, connectortracker.CapFileIssue, connectortracker.CapLabeled, connectortracker.CapComments}
 	if got := missingPrimaryCapabilities(full); len(got) != 0 {
 		t.Errorf("missing = %v from a full handshake, want none", got)
 	}

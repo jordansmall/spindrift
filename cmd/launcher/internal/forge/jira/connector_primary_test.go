@@ -229,3 +229,34 @@ func TestPrimaryRow_DependenciesAreNativeOnly(t *testing.T) {
 		})
 	}
 }
+
+// Under primary, the finding dedup scan must see issues closed as not planned:
+// without the Connector's labeled reader it falls back to an open-only listing
+// and the host refiles a finding a human declined.
+func TestPrimaryRow_LabeledListerReadsClosedNotPlannedFindings(t *testing.T) {
+	const finding = "agent-review-finding"
+	for _, fl := range connectorFlavours {
+		t.Run(fl.name, func(t *testing.T) {
+			h := newProductionHarness(t, fl.cloud, dispatchkind.TrackerWork, "", jira.LifecycleHybrid, "Task")
+			h.SeedIssue(forge.Issue{Number: "PROJ-1", Title: "declined", Labels: []string{finding}})
+			h.SeedIssue(forge.Issue{Number: "PROJ-2", Title: "still open", Labels: []string{finding}})
+			h.mutate("PROJ-1", func(r *jiraIssueRecord) { r.done, r.resolution = true, "Won't Do" })
+
+			lister, ok := forge.As[forge.LabeledBacklogLister](h.tr)
+			if !ok {
+				t.Fatal("primary tracker does not expose forge.LabeledBacklogLister")
+			}
+			closed, err := lister.ListIssuesWithLabels(forge.IssueClosed, []string{finding})
+			if err != nil || len(closed) != 1 {
+				t.Fatalf("closed = %+v, err = %v, want the one declined finding", closed, err)
+			}
+			if got := closed[0]; got.Number != "PROJ-1" || !got.ClosedNotPlanned || got.ClosedAt.IsZero() {
+				t.Errorf("closed[0] = %+v, want PROJ-1 closed not planned with a close time", got)
+			}
+			open, err := lister.ListIssuesWithLabels(forge.IssueOpen, []string{finding})
+			if err != nil || len(open) != 1 || open[0].Number != "PROJ-2" {
+				t.Errorf("open = %+v, err = %v, want only PROJ-2", open, err)
+			}
+		})
+	}
+}
