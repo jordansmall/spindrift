@@ -9,18 +9,23 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/dedupmarker"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/jira"
+	"spindrift.dev/launcher/internal/hostpaths"
 )
 
 const (
@@ -64,7 +69,9 @@ type connectorHarness struct {
 	cloud  bool
 	routes []connectorhost.Route
 	audit  *bytes.Buffer
-	tr     forge.IssueTracker
+	// auditPath, when set, is the file the tracker audits to in place of audit.
+	auditPath string
+	tr        forge.IssueTracker
 
 	seenMu sync.Mutex
 	seen   []string // "METHOD path" of every request the backend received
@@ -77,41 +84,17 @@ func newConnectorHarness(t *testing.T, cloud bool) *connectorHarness {
 
 func newConnectorHarnessWith(t *testing.T, cloud bool, lc connectortracker.Lifecycle) *connectorHarness {
 	t.Helper()
-	path := os.Getenv(connectorWasmEnv)
-	if path == "" {
-		t.Skipf("%s unset: no compiled jira Connector to test; connectors/jira's connector-jira-conformance check runs it", connectorWasmEnv)
-	}
+	h, path, table := newConnectorBackend(t, cloud, false)
 	wasm, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var table []struct{ Method, Host, Path string }
-	if err := json.Unmarshal([]byte(os.Getenv(connectorRoutesEnv)), &table); err != nil {
-		t.Fatalf("%s: %v", connectorRoutesEnv, err)
-	}
-
-	h := &connectorHarness{cloud: cloud, audit: &bytes.Buffer{}}
-	wantAuth := "Bearer " + connectorToken
-	if cloud {
-		req, _ := http.NewRequest(http.MethodGet, "https://example.invalid", nil)
-		req.SetBasicAuth(connectorEmail, connectorToken)
-		wantAuth = req.Header.Get("Authorization")
-	}
-	h.jiraHarness = newJiraBackend(t, cloud, func(next http.Handler) *httptest.Server {
-		return httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			h.record(r, wantAuth)
-			next.ServeHTTP(w, r)
-		}))
-	})
 	u, err := url.Parse(h.srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The table spells the site as {base}; the scripted backend stands in for it.
 	for _, r := range table {
-		if r.Host != "{base}" {
-			t.Fatalf("route %s %s names host %q, want {base}", r.Method, r.Path, r.Host)
-		}
 		h.routes = append(h.routes, connectorhost.Route{Method: r.Method, Host: u.Host, Path: r.Path})
 	}
 
@@ -144,6 +127,122 @@ func newConnectorHarnessWith(t *testing.T, cloud bool, lc connectortracker.Lifec
 	if err != nil {
 		t.Fatal(err)
 	}
+	return h
+}
+
+// newConnectorBackend serves the scripted backend over TLS for a Connector
+// harness and returns the compiled module's path and the route table, whose
+// hosts are still {base}. The backend checks that each request carries the
+// credential the host attaches: Basic in Cloud, and in Server too when
+// basicOnly (the production row has one scheme), else Bearer.
+func newConnectorBackend(t *testing.T, cloud, basicOnly bool) (*connectorHarness, string, []connectorhost.Route) {
+	t.Helper()
+	path := os.Getenv(connectorWasmEnv)
+	if path == "" {
+		t.Skipf("%s unset: no compiled jira Connector to test; connectors/jira's connector-jira-conformance check runs it", connectorWasmEnv)
+	}
+	var table []connectorhost.Route
+	if err := json.Unmarshal([]byte(os.Getenv(connectorRoutesEnv)), &table); err != nil {
+		t.Fatalf("%s: %v", connectorRoutesEnv, err)
+	}
+	for _, r := range table {
+		if r.Host != "{base}" {
+			t.Fatalf("route %s %s names host %q, want {base}", r.Method, r.Path, r.Host)
+		}
+	}
+
+	h := &connectorHarness{cloud: cloud, audit: &bytes.Buffer{}}
+	wantAuth := "Bearer " + connectorToken
+	if cloud || basicOnly {
+		req, _ := http.NewRequest(http.MethodGet, "https://example.invalid", nil)
+		req.SetBasicAuth(connectorEmail, connectorToken)
+		wantAuth = req.Header.Get("Authorization")
+	}
+	h.jiraHarness = newJiraBackend(t, cloud, func(next http.Handler) *httptest.Server {
+		return httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h.record(r, wantAuth)
+			next.ServeHTTP(w, r)
+		}))
+	})
+	return h, path, table
+}
+
+// connectorBuild is how a harness builds its tracker: Direct hands the compiled
+// Connector to connectortracker.New with a native adapter that fails every
+// call; Production is jira.Strategy.NewIssueTracker under a primary row, which
+// has no native adapter to fall back to.
+type connectorBuild struct {
+	name       string
+	production bool
+}
+
+var connectorBuilds = []connectorBuild{{"Direct", false}, {"Production", true}}
+
+// harness builds the harness for tracker kind tr under the given status
+// mapping and lifecycle, in testLabels.
+func (b connectorBuild) harness(t *testing.T, cloud bool, tr dispatchkind.Tracker, mapping, lifecycle, issueType string) *connectorHarness {
+	t.Helper()
+	if b.production {
+		return newProductionHarness(t, cloud, tr, mapping, lifecycle, issueType)
+	}
+	lc, err := connectorLifecycle(tr, testLabels, forge.ResearchVerdictLabels(), mapping, lifecycle, issueType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return newConnectorHarnessWith(t, cloud, lc)
+}
+
+// newProductionHarness drives the tracker the production constructor builds
+// from a primary jira row, as the launcher would: the row, the knobs and the
+// credential env are the operator's, only the site is the scripted backend.
+func newProductionHarness(t *testing.T, cloud bool, tr dispatchkind.Tracker, mapping, lifecycle, issueType string, adjust ...func(*backendrows.Row)) *connectorHarness {
+	t.Helper()
+	h, path, table := newConnectorBackend(t, cloud, true)
+	t.Chdir(t.TempDir()) // the tracker's audit file lands under the host log dir
+	pwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.auditPath = filepath.Join(hostpaths.LogDir(pwd), "connector-jira.audit.jsonl")
+
+	t.Setenv("SPINDRIFT_JIRA_CONNECTOR_TOKEN", connectorToken)
+	t.Setenv("SPINDRIFT_JIRA_CONNECTOR_EMAIL", connectorEmail)
+	r := backendrows.Row{
+		Name: "jira", Module: path, Routes: table,
+		CredentialEnv: "SPINDRIFT_JIRA_CONNECTOR_TOKEN", CredentialScheme: backendrows.SchemeBasic,
+		IdentityEnv: "SPINDRIFT_JIRA_CONNECTOR_EMAIL", BaseEnv: jira.JiraBaseURLEnv, Primary: true,
+	}
+	for _, f := range adjust {
+		f(&r)
+	}
+	row, err := json.Marshal([]backendrows.Row{r})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(backendrows.Snapshot())
+	env := map[string]string{
+		jira.JiraBaseURLEnv:       h.srv.URL,
+		jira.JiraProjectKeyEnv:    connectorProject,
+		jira.JiraIssueTypeEnv:     issueType,
+		jira.JiraStatusMappingEnv: mapping,
+		jira.JiraLifecycleEnv:     lifecycle,
+	}
+	if cloud {
+		env[jira.JiraEmailEnv] = connectorEmail
+	}
+	if err := backendrows.Use(row, func(k string) string { return env[k] }); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(jira.ConnectorClientForTest(h.srv.Client()))
+
+	h.tr, err = jira.Strategy.NewIssueTracker(
+		backendkit.Shared{Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(), Tracker: tr},
+		func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, _ := backendrows.Lookup("jira")
+	h.routes = connectortracker.Routes(live.Routes, connectorProject)
 	return h
 }
 
@@ -183,8 +282,16 @@ func (h *connectorHarness) mutate(num string, f func(*jiraIssueRecord)) {
 
 func (h *connectorHarness) auditEntries(t *testing.T) []connectorhost.AuditEntry {
 	t.Helper()
+	raw := h.audit.String()
+	if h.auditPath != "" {
+		b, err := os.ReadFile(h.auditPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw = string(b)
+	}
 	var out []connectorhost.AuditEntry
-	for _, l := range strings.Split(strings.TrimSpace(h.audit.String()), "\n") {
+	for _, l := range strings.Split(strings.TrimSpace(raw), "\n") {
 		if l == "" {
 			continue
 		}

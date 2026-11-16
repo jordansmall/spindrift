@@ -10,8 +10,10 @@ import (
 
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/dedupmarker"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/forge/jira"
 )
 
 // connectorHostHarness drives the host-posted comment and issue-filer contracts
@@ -67,20 +69,26 @@ func hostLifecycle() connectortracker.Lifecycle {
 	return connectortracker.Lifecycle{Labels: testLabels, IssueType: "Task"}
 }
 
+// The host-mediation and issue-filer contracts hold over both builds of the
+// tracker; the production one has no native adapter to fall back to.
 func TestConnector_HostPostedCommentContract(t *testing.T) {
 	if os.Getenv(connectorWasmEnv) == "" {
 		t.Skipf("%s unset: no compiled jira Connector to test", connectorWasmEnv)
 	}
-	admitted := map[string]int{}
-	for _, fl := range connectorFlavours {
-		t.Run(fl.name, func(t *testing.T) {
-			h := newConnectorHarnessWith(t, fl.cloud, hostLifecycle())
-			forgetest.RunHostPostedCommentContract(t, connectorHostHarness{h})
-			h.countAdmitted(t, admitted)
+	for _, b := range connectorBuilds {
+		t.Run(b.name, func(t *testing.T) {
+			admitted := map[string]int{}
+			for _, fl := range connectorFlavours {
+				t.Run(fl.name, func(t *testing.T) {
+					h := b.harness(t, fl.cloud, dispatchkind.TrackerWork, "", jira.LifecycleHybrid, "Task")
+					forgetest.RunHostPostedCommentContract(t, connectorHostHarness{h})
+					h.countAdmitted(t, admitted)
+				})
+			}
+			if admitted["POST /rest/api/2/issue"] == 0 {
+				t.Errorf("no comment write was admitted: admitted = %v", admitted)
+			}
 		})
-	}
-	if admitted["POST /rest/api/2/issue"] == 0 {
-		t.Errorf("no comment write was admitted: admitted = %v", admitted)
 	}
 }
 
@@ -88,16 +96,20 @@ func TestConnector_IssueFilerContract(t *testing.T) {
 	if os.Getenv(connectorWasmEnv) == "" {
 		t.Skipf("%s unset: no compiled jira Connector to test", connectorWasmEnv)
 	}
-	admitted := map[string]int{}
-	for _, fl := range connectorFlavours {
-		t.Run(fl.name, func(t *testing.T) {
-			h := newConnectorHarnessWith(t, fl.cloud, hostLifecycle())
-			forgetest.RunIssueFilerContract(t, connectorHostHarness{h})
-			h.countAdmitted(t, admitted)
+	for _, b := range connectorBuilds {
+		t.Run(b.name, func(t *testing.T) {
+			admitted := map[string]int{}
+			for _, fl := range connectorFlavours {
+				t.Run(fl.name, func(t *testing.T) {
+					h := b.harness(t, fl.cloud, dispatchkind.TrackerWork, "", jira.LifecycleHybrid, "Task")
+					forgetest.RunIssueFilerContract(t, connectorHostHarness{h})
+					h.countAdmitted(t, admitted)
+				})
+			}
+			if admitted["POST /rest/api/2/issue"] == 0 {
+				t.Errorf("no issue-filing write was admitted: admitted = %v", admitted)
+			}
 		})
-	}
-	if admitted["POST /rest/api/2/issue"] == 0 {
-		t.Errorf("no issue-filing write was admitted: admitted = %v", admitted)
 	}
 }
 
