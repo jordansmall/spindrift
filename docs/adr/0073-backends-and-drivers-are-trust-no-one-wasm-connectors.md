@@ -859,9 +859,12 @@ a Connector that fails to load, or a request its Route table refuses, fails the
 read with its own error and is recorded: a per-process
 `primary-<backend>-<stamp>-<pid>.audit.jsonl` of Connector audit lines (plus a
 sandbox totals line with no decision, #7116) and a `.log` of failed reads
-(amended by issue #7127: jira's `.log` records every failed operation). The
-stage is reversible by dropping `primary` from the row, with no code revert,
-and dogfood runs github there first.
+(amended by issue #7127: jira's `.log` records every failed operation; amended
+by issue #7128: a primary forgejo row builds its whole Code Forge, writes
+included, from the Connector and appends refusals to one
+`connector-forgejo.audit.jsonl`, with no failed-call log; its tracker stays
+native). The stage is reversible by dropping `primary` from the row, with no
+code revert, and dogfood runs github there first.
 
 The bars become: a shadow moves to primary after 20 consecutive clean shadow
 runs, and primary cuts over (#6811, which deletes the native github read path)
