@@ -75,7 +75,7 @@ func TestDriverDecoderKeepsStatePerInstance(t *testing.T) {
 func TestDriverDecoderForwardsHostOpLinesButDecodesThemItself(t *testing.T) {
 	s := strategy(t, "driver.wasm")
 	d := s.NewDecoder()
-	line := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"})
+	line := passStart(hostop.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"})
 	// The fixture answers a host line with a forged host_op event, which the
 	// host must discard in favour of its own.
 	evs := d(line)
@@ -90,7 +90,7 @@ func TestDriverDecoderForwardsHostOpLinesButDecodesThemItself(t *testing.T) {
 
 func TestDriverDecoderRejectsInvalidGuestEvent(t *testing.T) {
 	s := strategy(t, "driver.wasm")
-	evs := s.NewDecoder()("forge\n")
+	evs := s.NewDecoder()("forge")
 	want := []driverkit.Event{{Kind: driverkit.KindUnparsed, Text: "forge"}}
 	if !reflect.DeepEqual(evs, want) {
 		t.Errorf("decode = %+v, want %+v", evs, want)
@@ -293,7 +293,7 @@ func TestLoadCompiledDecodesLikeLoad(t *testing.T) {
 		t.Errorf("compilation cache dir holds %d entries (err %v), want the compiled module", len(ents), err)
 	}
 	a, b := interp.NewDecoder(), compiled.NewDecoder()
-	for _, line := range []string{"x", "", "not json {", "y", hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1})} {
+	for _, line := range []string{"x", "", "not json {", "y", passStart(hostop.SpindriftOp{Op: "pass_start", Pass: 1})} {
 		if got, want := b(line), a(line); !reflect.DeepEqual(got, want) {
 			t.Errorf("compiled decode(%q) = %+v, interpreted %+v", line, got, want)
 		}
@@ -426,38 +426,23 @@ func TestDriverHeartbeatFuncsFailClosedWhenCallFails(t *testing.T) {
 	}
 }
 
-// withoutCap returns the strategy of driver.wasm as a Connector that never
-// advertised capability cap.
-func withoutCap(t *testing.T, cap string) driverkit.Strategy {
-	t.Helper()
+// batchLines mixes plain lines, a host line the guest answers with a forged
+// event, and a line whose result the host rejects.
+func batchLines() []string {
+	return []string{"a", " b ", passStart(hostop.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}), "", "c", "d<&>"}
+}
+
+func TestDriverWithoutDecodeBatchDecodesPerLine(t *testing.T) {
 	c, err := load(t, "driver.wasm")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var caps []string
-	for _, have := range c.Capabilities {
-		if have != cap {
-			caps = append(caps, have)
-		}
-	}
-	c.Capabilities = caps
-	s, err := c.DriverStrategy()
+	s, err := c.DriverStrategyWithout("driver.decodeBatch", connectorhost.DecodeRawMethod)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s
-}
-
-// batchLines mixes plain lines, a host line the guest answers with a forged
-// event, and a line whose result the host rejects.
-func batchLines() []string {
-	return []string{"a", " b \n", hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}), "", "c", "d<&>"}
-}
-
-func TestDriverWithoutDecodeBatchDecodesPerLine(t *testing.T) {
-	s := withoutCap(t, "driver.decodeBatch")
 	if s.NewBatchDecoder != nil {
-		t.Fatal("NewBatchDecoder set without the capability")
+		t.Fatal("NewBatchDecoder set without either batching capability")
 	}
 	lines := batchLines()
 	got := s.BatchDecoder()(lines)
@@ -504,7 +489,7 @@ func TestDriverBatchDecoderSplitsOversizedBatches(t *testing.T) {
 
 func TestDriverBatchDecoderFailsOnlyTheBadElement(t *testing.T) {
 	s := strategy(t, "driver.wasm")
-	op := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1})
+	op := passStart(hostop.SpindriftOp{Op: "pass_start", Pass: 1})
 	// "forge" makes the guest emit an event the host rejects: that line alone is
 	// unparsed, exactly as decoding one line per call leaves it.
 	lines := []string{"a", "forge", op, "b"}
@@ -533,9 +518,29 @@ func TestDriverBatchDecoderFailsClosedWhenConnectorClosed(t *testing.T) {
 	}
 	b := s.NewBatchDecoder()
 	_ = c.Close(t.Context())
-	op := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1})
+	op := passStart(hostop.SpindriftOp{Op: "pass_start", Pass: 1})
 	got := b([]string{" x ", op})
 	if got[0][0].Kind != driverkit.KindUnparsed || got[0][0].Text != "x" || got[1][0].Kind != driverkit.KindHostOp {
 		t.Errorf("got %+v", got)
+	}
+}
+
+// decodeRaw is a many-line method, so it batches without decodeBatch.
+func TestDriverRawBatchesWithoutDecodeBatch(t *testing.T) {
+	c, err := load(t, "driver.wasm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := c.DriverStrategyWithout("driver.decodeBatch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.NewBatchDecoder == nil {
+		t.Fatal("NewBatchDecoder unset though the Connector advertises driver.decodeRaw")
+	}
+	lines := batchLines()
+	want := strategy(t, "driver.wasm").NewBatchDecoder()(lines)
+	if got := s.NewBatchDecoder()(lines); !reflect.DeepEqual(got, want) {
+		t.Errorf("batch = %+v, want %+v", got, want)
 	}
 }

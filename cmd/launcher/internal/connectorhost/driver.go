@@ -92,7 +92,20 @@ var guestKinds = []driverkit.Kind{
 // Strategy funcs carry no context or error return, so every guest call runs
 // under context.Background() and the funcs fail closed, as documented on each.
 func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
-	if !slices.Contains(c.Capabilities, "driver") {
+	return c.DriverStrategyWithout()
+}
+
+// DriverStrategyWithout is DriverStrategy as if the Connector had not
+// advertised caps, so a test can check a capability's answers against its
+// fallback's over one loaded Connector.
+func (c *Connector) DriverStrategyWithout(caps ...string) (driverkit.Strategy, error) {
+	has := func(name string) bool { return slices.Contains(c.Capabilities, name) && !slices.Contains(caps, name) }
+	// One decision per Strategy: decodeRaw, when advertised, carries every decode.
+	cd := c.jsonCodec()
+	if has(DecodeRawMethod) {
+		cd = c.rawCodec()
+	}
+	if !has("driver") {
 		return driverkit.Strategy{}, fmt.Errorf("%w: capabilities %v lack \"driver\"", ErrNotDriver, c.Capabilities)
 	}
 	ctx := context.Background()
@@ -123,7 +136,7 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 	}
 	s := driverkit.Strategy{
 		Name:                d.Name,
-		NewDecoder:          c.newDecoder,
+		NewDecoder:          func() driverkit.Decoder { return c.newDecoder(cd) },
 		TransientPatterns:   transient,
 		TerminalPatterns:    terminal,
 		WriteTool:           d.WriteTool,
@@ -147,7 +160,7 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 			return r.Flags
 		},
 	}
-	if slices.Contains(c.Capabilities, "driver.resolveExit") {
+	if has("driver.resolveExit") {
 		s.ResolveExit = func(logPath string, exitCode int) (int, error) {
 			// A Connector has no filesystem, so the host reads the log. Refusing
 			// one whose request passes maxRequest would silently turn resolveExit
@@ -171,16 +184,17 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 			return r.ExitCode, nil
 		}
 	}
-	if slices.Contains(c.Capabilities, decodeBatchMethod) {
-		s.NewBatchDecoder = c.newBatchDecoder
+	// decodeRaw is itself a many-line method, so it batches without decodeBatch.
+	if has(decodeBatchMethod) || has(DecodeRawMethod) {
+		s.NewBatchDecoder = func() driverkit.BatchDecoder { return c.newBatchDecoder(cd) }
 	}
-	if slices.Contains(c.Capabilities, "driver.streamFilter") {
+	if has("driver.streamFilter") {
 		s.NewStreamFilter = c.newStreamFilter
 	}
 	// These funcs have no error return. A failed call leaves the heartbeat
 	// uninformative rather than wrong: no phase, no kind, and the model id
 	// as its own label at the last rank.
-	if slices.Contains(c.Capabilities, "driver.toolPhase") {
+	if has("driver.toolPhase") {
 		s.Heartbeat.Phase = func(tool string, input json.RawMessage) string {
 			var r toolPhaseResult
 			if c.Call(ctx, "driver.toolPhase", map[string]any{"tool": tool, "input": input}, &r) != nil {
@@ -189,7 +203,7 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 			return r.Phase
 		}
 	}
-	if slices.Contains(c.Capabilities, "driver.toolKind") {
+	if has("driver.toolKind") {
 		s.Heartbeat.Kind = func(tool string) string {
 			var r toolKindResult
 			if c.Call(ctx, "driver.toolKind", map[string]any{"tool": tool}, &r) != nil {
@@ -198,7 +212,7 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 			return r.Kind
 		}
 	}
-	if slices.Contains(c.Capabilities, "driver.modelFamily") {
+	if has("driver.modelFamily") {
 		s.Heartbeat.Family = func(model string) (string, int) {
 			var r modelFamilyResult
 			if c.Call(ctx, "driver.modelFamily", map[string]any{"model": model}, &r) != nil {
@@ -252,7 +266,7 @@ func hostOpEvents(op *hostop.SpindriftOp) []driverkit.Event {
 	return []driverkit.Event{{Kind: driverkit.KindHostOp, HostOp: op}}
 }
 
-func (c *Connector) newDecoder() driverkit.Decoder {
+func (c *Connector) newDecoder(cd codec) driverkit.Decoder {
 	ctx := context.Background()
 	h, err := c.guestDecoder(ctx)
 	return func(line string) []driverkit.Event {
@@ -261,23 +275,103 @@ func (c *Connector) newDecoder() driverkit.Decoder {
 		// with, is discarded.
 		if op := hostOp(line); op != nil {
 			if err == nil {
-				_ = c.Call(ctx, "driver.decode", map[string]any{"decoder": h.id, "line": line}, nil)
+				cd.one(ctx, h.id, line)
 			}
 			return hostOpEvents(op)
 		}
 		if err != nil {
 			return unparsedEvents(line)
 		}
-		var raw json.RawMessage
-		if c.Call(ctx, "driver.decode", map[string]any{"decoder": h.id, "line": line}, &raw) != nil {
+		return cd.one(ctx, h.id, line)
+	}
+}
+
+// DecodeRawMethod is the capability a Connector advertises to decode Pass-log
+// lines handed over as raw bytes.
+const DecodeRawMethod = "driver.decodeRaw"
+
+const decodeBatchMethod = "driver.decodeBatch"
+
+// A codec is how a Connector's decodes reach the guest, chosen once per
+// Strategy. Every figure it holds comes from the framing its call sends, so
+// batchEnd cannot miscount a request.
+type codec struct {
+	// envelope is the bytes of a request holding no lines, at the widest handle,
+	// so it is never undercounted.
+	envelope int
+	// size is the bytes a line adds to a request.
+	size func(line string) int
+	// accepts is false for a line the framing cannot carry; it is never sent
+	// and decodes as unparsed.
+	accepts func(line string) bool
+	// batch sends lines to guest decoder id in one request and sets result to
+	// the answer, which batchEvents checks.
+	batch func(ctx context.Context, id uint32, lines []string, result *json.RawMessage) error
+	// one has guest decoder id decode one line; any failure, or an answer the
+	// host rejects, is the line's one unparsed event.
+	one func(ctx context.Context, id uint32, line string) []driverkit.Event
+}
+
+func (c *Connector) jsonCodec() codec {
+	// Encoding these constants cannot fail.
+	empty, _ := encodeRequest(decodeBatchMethod, map[string]any{"decoder": uint32(math.MaxUint32), "lines": []string{}})
+	return codec{
+		envelope: len(empty),
+		size:     jsonLineSize,
+		accepts:  func(string) bool { return true },
+		batch: func(ctx context.Context, id uint32, lines []string, result *json.RawMessage) error {
+			return c.Call(ctx, decodeBatchMethod, map[string]any{"decoder": id, "lines": lines}, result)
+		},
+		one: func(ctx context.Context, id uint32, line string) []driverkit.Event {
+			var raw json.RawMessage
+			if c.Call(ctx, "driver.decode", map[string]any{"decoder": id, "line": line}, &raw) != nil {
+				return unparsedEvents(line)
+			}
+			evs, ok := guestEvents(raw)
+			if !ok {
+				return unparsedEvents(line)
+			}
+			return evs
+		},
+	}
+}
+
+// rawCodec sends lines unescaped, "<id>\n" then each line and a newline, so the
+// guest sees them byte for byte. A line holding a newline would end early, so
+// it is refused: the guest never splits one line into two.
+func (c *Connector) rawCodec() codec {
+	cd := codec{
+		envelope: len(rawRequest(DecodeRawMethod, rawPayload(math.MaxUint32, nil))),
+		size:     func(line string) int { return len(line) + 1 },
+		accepts:  func(line string) bool { return !strings.Contains(line, "\n") },
+		batch: func(ctx context.Context, id uint32, lines []string, result *json.RawMessage) error {
+			return c.callRaw(ctx, DecodeRawMethod, rawPayload(id, lines), result)
+		},
+	}
+	cd.one = func(ctx context.Context, id uint32, line string) []driverkit.Event {
+		if !cd.accepts(line) {
 			return unparsedEvents(line)
 		}
-		evs, ok := guestEvents(raw)
+		// A one-line request: the answer is one element, as a batch's.
+		var raw json.RawMessage
+		if cd.batch(ctx, id, []string{line}, &raw) != nil {
+			return unparsedEvents(line)
+		}
+		evs, ok := batchEvents(raw, []string{line})
 		if !ok {
 			return unparsedEvents(line)
 		}
-		return evs
+		return evs[0]
 	}
+	return cd
+}
+
+func rawPayload(id uint32, lines []string) []byte {
+	payload := fmt.Appendf(nil, "%d\n", id)
+	for _, l := range lines {
+		payload = append(append(payload, l...), '\n')
+	}
+	return payload
 }
 
 // hostOp returns the payload of a host-written spindrift_op line, or nil for
@@ -295,8 +389,6 @@ func hostOp(line string) *hostop.SpindriftOp {
 // test can shrink it: the interpreter takes tens of seconds on a real request.
 var batchCap = maxRequest
 
-const decodeBatchMethod = "driver.decodeBatch"
-
 // unparsedEvents is the result for a line whose guest call failed. A Decoder
 // has no error return, so a failure is a single KindUnparsed event carrying the
 // line: the classifier then still sees it for terminal markers, and no
@@ -305,17 +397,27 @@ func unparsedEvents(line string) []driverkit.Event {
 	return []driverkit.Event{{Kind: driverkit.KindUnparsed, Text: strings.TrimSpace(line)}}
 }
 
-// batchEnd returns the end of the run of lines, starting at from, whose
-// encodings sum to at most room. A run always holds at least one line: one too
-// large to fit alone is sent alone, and the host refuses it.
-func batchEnd(lines []string, from, room int) int {
+// jsonLineSize is the bytes a line adds to a decodeBatch request: its JSON
+// string's quotes and escapes, plus the comma.
+func jsonLineSize(line string) int {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false) // as encodeRequest, so the size is what Call sends
+	_ = enc.Encode(line)     // a string always encodes
+	return buf.Len()         // the string's quotes, plus the newline Encode appends for a comma
+}
+
+// batchEnd returns the end of the run of lines, starting at from, that cd
+// carries in one request of at most room line bytes. A run always holds at
+// least one line: one too large to fit alone is sent alone, and the host
+// refuses it. A line cd does not accept ends the run before it.
+func batchEnd(lines []string, from, room int, cd codec) int {
 	end := from
 	for used := 0; end < len(lines); end++ {
-		var buf bytes.Buffer
-		enc := json.NewEncoder(&buf)
-		enc.SetEscapeHTML(false)   // as encodeRequest, so the size is what Call sends
-		_ = enc.Encode(lines[end]) // a string always encodes
-		n := buf.Len()             // the string's quotes, plus the newline Encode appends for a comma
+		if end > from && !cd.accepts(lines[end]) {
+			break
+		}
+		n := cd.size(lines[end])
 		if end > from && used+n > room {
 			break
 		}
@@ -347,12 +449,9 @@ func batchEvents(raw json.RawMessage, lines []string) ([][]driverkit.Event, bool
 // newBatchDecoder is newDecoder over many lines per call, line for line the
 // same results. A request that fails, or whose answer is not one array element
 // per line, fails all its lines; a rejected element fails only its own line.
-func (c *Connector) newBatchDecoder() driverkit.BatchDecoder {
+func (c *Connector) newBatchDecoder(cd codec) driverkit.BatchDecoder {
 	ctx := context.Background()
 	h, err := c.guestDecoder(ctx)
-	// The widest handle, so the envelope is never undercounted; encoding this
-	// constant cannot fail.
-	empty, _ := encodeRequest(decodeBatchMethod, map[string]any{"decoder": uint32(math.MaxUint32), "lines": []string{}})
 	return func(lines []string) [][]driverkit.Event {
 		out := make([][]driverkit.Event, len(lines))
 		ops := make([]*hostop.SpindriftOp, len(lines))
@@ -363,11 +462,13 @@ func (c *Connector) newBatchDecoder() driverkit.BatchDecoder {
 			end := len(lines)
 			var evs [][]driverkit.Event // nil when the guest gave no usable answer
 			if err == nil {
-				end = batchEnd(lines, from, batchCap-len(empty))
-				var raw json.RawMessage
-				params := map[string]any{"decoder": h.id, "lines": lines[from:end]}
-				if c.Call(ctx, decodeBatchMethod, params, &raw) == nil {
-					evs, _ = batchEvents(raw, lines[from:end])
+				end = from + 1 // a refused line goes in no request
+				if cd.accepts(lines[from]) {
+					end = batchEnd(lines, from, batchCap-cd.envelope, cd)
+					var raw json.RawMessage
+					if cd.batch(ctx, h.id, lines[from:end], &raw) == nil {
+						evs, _ = batchEvents(raw, lines[from:end])
+					}
 				}
 			}
 			for i := from; i < end; i++ {

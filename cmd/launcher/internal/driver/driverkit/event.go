@@ -230,6 +230,9 @@ type Tokens struct {
 // examples: docs/reference.md, Host-side event layer; change this rule and
 // that section together.
 //
+// The line excludes its terminator, which framers strip: a Connector that takes
+// raw lines decodes a line ending in a newline as unparsed.
+//
 // A shared reader takes a `func() Decoder` factory rather than a Decoder so a
 // stateful decoder gets fresh state per scan or writer.
 type Decoder func(line string) []Event

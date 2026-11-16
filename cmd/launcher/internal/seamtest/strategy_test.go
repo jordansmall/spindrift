@@ -105,7 +105,7 @@ func TestLineRoundTripsThroughTheDecoder(t *testing.T) {
 	if !strings.HasSuffix(line, "\n") {
 		t.Fatalf("Line %q has no trailing newline", line)
 	}
-	got := Strategy().NewDecoder()(line)
+	got := Strategy().NewDecoder()(strings.TrimSuffix(line, "\n")) // framers strip the terminator
 	if len(got) != 1 || got[0].Kind != want.Kind || got[0].MessageID != want.MessageID || got[0].Model != want.Model || got[0].Timestamp != want.Timestamp {
 		t.Errorf("decoded %+v, want %+v", got, want)
 	}

@@ -20,7 +20,7 @@ func TestBatchEndPacksRequestsUnderMaxRequest(t *testing.T) {
 	lines := []string{big, big, "small", big, strings.Repeat("x", maxRequest+1), "tail"}
 	var runs [][2]int
 	for from := 0; from < len(lines); {
-		end := batchEnd(lines, from, maxRequest-len(empty))
+		end := batchEnd(lines, from, maxRequest-len(empty), (*Connector)(nil).jsonCodec())
 		if end <= from {
 			t.Fatalf("batchEnd(%d) = %d, made no progress", from, end)
 		}
@@ -79,6 +79,20 @@ func TestBatchEventsRejectsOnlyTheBadElement(t *testing.T) {
 		}
 		if len(evs[1]) != 1 || evs[1][0].Kind != driverkit.KindUnparsed || evs[1][0].Text != "l1" {
 			t.Errorf("%s: bad element = %v, want one unparsed event carrying the line", name, evs[1])
+		}
+	}
+}
+
+// The guest routes any request whose first byte is not '{' as raw, so a JSON
+// request must never open with whitespace.
+func TestEncodeRequestStartsWithBrace(t *testing.T) {
+	for _, params := range []any{nil, map[string]any{}, "x", []string{" a"}} {
+		req, err := encodeRequest("m", params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(req) == 0 || req[0] != '{' {
+			t.Errorf("encodeRequest(%v) = %q, want a leading '{'", params, req)
 		}
 	}
 }

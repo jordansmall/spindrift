@@ -290,16 +290,34 @@ func encodeRequest(method string, params any) ([]byte, error) {
 // returns ErrUnusable. A Connector-reported error is an answer, not a failure,
 // and does not.
 func (c *Connector) Call(ctx context.Context, method string, params, result any) error {
+	req, err := encodeRequest(method, params)
+	if err != nil {
+		return fmt.Errorf("%w: %s: %w", ErrCall, method, err)
+	}
+	return c.exchange(ctx, method, req, result)
+}
+
+// callRaw is Call for a raw request, "<method>\n<payload>": the payload crosses
+// as bytes, never JSON-encoded. The request's length, method line included, is
+// what the size cap and limitsFor see, as for a JSON one.
+func (c *Connector) callRaw(ctx context.Context, method string, payload []byte, result any) error {
+	return c.exchange(ctx, method, rawRequest(method, payload), result)
+}
+
+// rawRequest is the framing callRaw sends, which a codec sizes its envelope by.
+func rawRequest(method string, payload []byte) []byte {
+	return append(append([]byte(method), '\n'), payload...)
+}
+
+// exchange sends the encoded request req and decodes the response, as Call
+// documents.
+func (c *Connector) exchange(ctx context.Context, method string, req []byte, result any) error {
 	fail := func(err error) error { return fmt.Errorf("%w: %s: %w", ErrCall, method, err) }
 	// The guest sees only ErrHTTPSend's fixed text; the detail rides here.
 	failWithHost := func(err error) error {
 		if c.host != nil && c.host.sendErr != nil {
 			err = fmt.Errorf("%w; host: %w", err, c.host.sendErr)
 		}
-		return fail(err)
-	}
-	req, err := encodeRequest(method, params)
-	if err != nil {
 		return fail(err)
 	}
 	if len(req) > maxRequest {
