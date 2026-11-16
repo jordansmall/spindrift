@@ -372,6 +372,26 @@ in
         touch $out
       '';
 
+  # Doctor's `connector-routes-widened[<name>]` reads each backend row's
+  # `routes` against its `acceptedRoutes`. The forgejo row is registered but
+  # neither primary nor shadowed, so only its place in the dogfood document
+  # (routes == baseline, host from FORGEJO_BASE_URL) is pinned here.
+  connector-driver-rows-dogfood-forgejo-route-table =
+    pkgs.runCommand "connector-driver-rows-dogfood-forgejo-route-table"
+      { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        ${fixtures.runInputDocOf config.apps.default.program}
+        jq -e --arg n forgejo '[.backends[] | select(.name == $n)]
+          | length == 1 and (.[0]
+            | (.routes | length) > 0
+              and .routes == .acceptedRoutes
+              and all(.routes[]; .host == "{base}")
+              and .baseEnv == "FORGEJO_BASE_URL"
+              and .credentialKnob == "forgejoConnectorToken"
+              and (has("primary") | not) and (has("shadow") | not))' "$doc"
+        touch $out
+      '';
+
   # Issue #6998: `primary` is a switch on a registered backend row. Off, the
   # input document carries no `primary` key; on, the row's entry says so.
   connector-driver-rows-primary-reaches-document =
