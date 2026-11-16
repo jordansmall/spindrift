@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"spindrift.dev/sdk/event"
 )
@@ -35,7 +36,7 @@ func countingStrategy() Strategy {
 	}
 }
 
-func call(t *testing.T, m map[string]func(json.RawMessage) (any, error), method, params string) any {
+func call(t testing.TB, m map[string]method, method, params string) any {
 	t.Helper()
 	res, err := m[method](json.RawMessage(params))
 	if err != nil {
@@ -44,7 +45,7 @@ func call(t *testing.T, m map[string]func(json.RawMessage) (any, error), method,
 	return res
 }
 
-func marshal(t *testing.T, v any) string {
+func marshal(t testing.TB, v any) string {
 	t.Helper()
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -56,7 +57,7 @@ func marshal(t *testing.T, v any) string {
 func TestCapabilities(t *testing.T) {
 	s := countingStrategy()
 	caps, methods := handlers(s)
-	if want := []string{"driver", "driver.decodeBatch"}; !reflect.DeepEqual(caps, want) {
+	if want := []string{"driver", "driver.decodeBatch", "driver.decodeRaw"}; !reflect.DeepEqual(caps, want) {
 		t.Fatalf("caps = %v, want %v", caps, want)
 	}
 	if _, ok := methods["driver.resolveExit"]; ok {
@@ -64,7 +65,7 @@ func TestCapabilities(t *testing.T) {
 	}
 	s.ResolveExit = func([]byte, int) (int, error) { return 0, nil }
 	caps, methods = handlers(s)
-	if want := []string{"driver", "driver.decodeBatch", "driver.resolveExit"}; !reflect.DeepEqual(caps, want) {
+	if want := []string{"driver", "driver.decodeBatch", "driver.decodeRaw", "driver.resolveExit"}; !reflect.DeepEqual(caps, want) {
 		t.Fatalf("caps = %v, want %v", caps, want)
 	}
 	if _, ok := methods["driver.resolveExit"]; !ok {
@@ -90,7 +91,7 @@ func TestDescribe(t *testing.T) {
 	}
 }
 
-func newHandle(t *testing.T, m map[string]func(json.RawMessage) (any, error)) uint32 {
+func newHandle(t testing.TB, m map[string]method) uint32 {
 	t.Helper()
 	var r struct {
 		Decoder uint32 `json:"decoder"`
@@ -254,7 +255,7 @@ func TestHeartbeatCapabilities(t *testing.T) {
 	s := countingStrategy()
 	s.Heartbeat.Kind = func(tool string) string { return "k:" + tool }
 	caps, m := handlers(s)
-	if want := []string{"driver", "driver.decodeBatch", "driver.toolKind"}; !reflect.DeepEqual(caps, want) {
+	if want := []string{"driver", "driver.decodeBatch", "driver.decodeRaw", "driver.toolKind"}; !reflect.DeepEqual(caps, want) {
 		t.Fatalf("caps = %v, want %v", caps, want)
 	}
 	for _, name := range []string{"driver.toolPhase", "driver.modelFamily"} {
@@ -265,7 +266,7 @@ func TestHeartbeatCapabilities(t *testing.T) {
 	s.Heartbeat.Phase = func(string, json.RawMessage) string { return "" }
 	s.Heartbeat.Family = func(string) (string, int) { return "", 0 }
 	caps, _ = handlers(s)
-	want := []string{"driver", "driver.decodeBatch", "driver.toolPhase", "driver.toolKind", "driver.modelFamily"}
+	want := []string{"driver", "driver.decodeBatch", "driver.decodeRaw", "driver.toolPhase", "driver.toolKind", "driver.modelFamily"}
 	if !reflect.DeepEqual(caps, want) {
 		t.Fatalf("caps = %v, want %v", caps, want)
 	}
@@ -331,7 +332,7 @@ func filterStrategy() Strategy {
 	return s
 }
 
-func newFilter(t *testing.T, m map[string]func(json.RawMessage) (any, error)) string {
+func newFilter(t *testing.T, m map[string]method) string {
 	t.Helper()
 	var r struct {
 		Filter uint32 `json:"filter"`
@@ -342,7 +343,7 @@ func newFilter(t *testing.T, m map[string]func(json.RawMessage) (any, error)) st
 	return strconv.Itoa(int(r.Filter))
 }
 
-func streamData(t *testing.T, m map[string]func(json.RawMessage) (any, error), method, params string) []byte {
+func streamData(t *testing.T, m map[string]method, method, params string) []byte {
 	t.Helper()
 	var r struct {
 		Data []byte `json:"data"`
@@ -532,4 +533,156 @@ func TestDecodeBatchUnknownHandle(t *testing.T) {
 	if _, err := m["driver.decodeBatch"](json.RawMessage(`{"decoder":99,"lines":["x"]}`)); err == nil {
 		t.Fatal("want error for unknown handle")
 	}
+}
+
+// rawPayload frames lines as a driver.decodeRaw payload.
+func rawPayload(h uint32, lines []string) []byte {
+	p := []byte(strconv.Itoa(int(h)) + "\n")
+	for _, l := range lines {
+		p = append(append(p, l...), '\n')
+	}
+	return p
+}
+
+// batchAndRaw decodes lines through decodeBatch and decodeRaw on separate
+// but equally fresh decoders and returns both encoded answers.
+func batchAndRaw(t testing.TB, lines []string) (batch string, rawOut string) {
+	t.Helper()
+	_, m := handlers(countingStrategy())
+	req := struct {
+		Decoder uint32   `json:"decoder"`
+		Lines   []string `json:"lines"`
+	}{newHandle(t, m), lines}
+	batch = marshal(t, call(t, m, "driver.decodeBatch", marshal(t, req)))
+	res, err := m["driver.decodeRaw"](rawPayload(newHandle(t, m), lines))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return batch, marshal(t, res)
+}
+
+func TestDecodeRawEqualsBatch(t *testing.T) {
+	cases := map[string][]string{
+		"plain":          {"a", "b", "a"},
+		"empty line":     {"a", "", "b", ""},
+		"carriage ret":   {"a\r", "\r\r", "b"},
+		"json escapes":   {`"\\\b\f\n\r\tA`, `{"x":"y"}`, `\"`, "\"", `\`},
+		"control bytes":  {"\x00\x01\x1f\x7f", "\t\v"},
+		"one empty line": {""},
+		"zero lines":     nil,
+		"1 MiB line":     {longLine("a\"\\\r\t{}")},
+	}
+	for name, lines := range cases {
+		t.Run(name, func(t *testing.T) {
+			b, r := batchAndRaw(t, lines)
+			if b != r {
+				t.Fatalf("decodeRaw = %s, want decodeBatch's %s", r, b)
+			}
+		})
+	}
+}
+
+func TestDecodeRawZeroLinesIsEmptyArray(t *testing.T) {
+	_, m := handlers(countingStrategy())
+	res, err := m["driver.decodeRaw"](rawPayload(newHandle(t, m), nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := marshal(t, res); got != "[]" {
+		t.Fatalf("zero lines = %s, want []", got)
+	}
+}
+
+func TestDecodeRawNilLinesAreEmptyArrays(t *testing.T) {
+	s := countingStrategy()
+	s.NewDecoder = func() Decoder { return func(string) []event.Event { return nil } }
+	_, m := handlers(s)
+	res, err := m["driver.decodeRaw"](rawPayload(newHandle(t, m), []string{"a", "b"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := marshal(t, res); got != "[[],[]]" {
+		t.Fatalf("decodeRaw = %s, want [[],[]]", got)
+	}
+}
+
+func TestDecodeRawBadPayload(t *testing.T) {
+	_, m := handlers(countingStrategy())
+	h := strconv.Itoa(int(newHandle(t, m)))
+	for name, payload := range map[string]string{
+		"unknown decoder":      "99\nx\n",
+		"no header newline":    h,
+		"empty payload":        "",
+		"bad decoder id":       "x\na\n",
+		"negative decoder id":  "-1\na\n",
+		"decoder id overflow":  "4294967296\na\n",
+		"final newline absent": h + "\na\nb",
+		"lone partial line":    h + "\na",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := m["driver.decodeRaw"]([]byte(payload)); err == nil {
+				t.Fatalf("payload %q: want error", payload)
+			}
+		})
+	}
+}
+
+// FuzzDecodeRaw checks decodeRaw against decodeBatch for lines cut from
+// arbitrary bytes; plain `go test` runs only the seeds. decodeBatch cannot
+// carry invalid UTF-8, so those lines are only checked to arrive intact.
+func FuzzDecodeRaw(f *testing.F) {
+	f.Add([]byte(""))
+	f.Add([]byte("a\n\nb\r\n"))
+	f.Add([]byte("\xff\"\\\b\f\x00\n{\"k\":1}"))
+	f.Add([]byte(longLine("\xff\"\\\r\x00{}") + "\nx"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var lines []string
+		if len(data) > 0 {
+			lines = strings.Split(string(data), "\n")
+		}
+		if got := linesHanded(t, lines); !slices.Equal(got, lines) {
+			t.Fatalf("decoder saw %q, want %q", got, lines)
+		}
+		if !utf8.Valid(data) {
+			return
+		}
+		b, r := batchAndRaw(t, lines)
+		if b != r {
+			t.Fatalf("lines %q: decodeRaw = %s, want decodeBatch's %s", lines, r, b)
+		}
+	})
+}
+
+// linesHanded runs lines through decodeRaw with a decoder that records what it
+// is handed.
+func linesHanded(t testing.TB, lines []string) []string {
+	t.Helper()
+	var seen []string
+	s := countingStrategy()
+	s.NewDecoder = func() Decoder {
+		return func(line string) []event.Event {
+			seen = append(seen, line)
+			return nil
+		}
+	}
+	_, m := handlers(s)
+	h := newHandle(t, m)
+	if _, err := m["driver.decodeRaw"](rawPayload(h, lines)); err != nil {
+		t.Fatal(err)
+	}
+	return seen
+}
+
+// A JSON transport rewrites invalid UTF-8 to U+FFFD; the raw one must not.
+func TestDecodeRawKeepsInvalidUTF8(t *testing.T) {
+	lines := []string{"\xff\xfe", "a\xc3", "\x80", "\xed\xa0\x80"}
+	if got := linesHanded(t, lines); !slices.Equal(got, lines) {
+		t.Fatalf("decoder saw %q, want %q", got, lines)
+	}
+}
+
+// longLine is a ~1 MiB line of repeats of unit, large enough to expose a
+// buffer that truncates or mis-frames big lines.
+func longLine(unit string) string {
+	return strings.Repeat(unit, (1<<20)/len(unit))
 }

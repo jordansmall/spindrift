@@ -11,8 +11,10 @@ package driver
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"strconv"
 
 	"spindrift.dev/sdk/connector"
 	"spindrift.dev/sdk/event"
@@ -161,7 +163,12 @@ var (
 	resultWire = map[ResultReader]string{ResultEvents: "events", LastMessage: "lastMessage"}
 )
 
-type method = func(json.RawMessage) (any, error)
+// method serves one request. Its argument is the request's params bytes: JSON
+// for every method but decodeRawMethod, whose bytes are the raw payload.
+type method = func([]byte) (any, error)
+
+// decodeRawMethod is registered with connector.HandleRaw, the rest with Handle.
+const decodeRawMethod = "driver.decodeRaw"
 
 // Register exports s as the Connector's Driver. Call it from init(). It
 // panics if Name, NewDecoder, ResultEvent or SessionFlags is unset.
@@ -169,7 +176,11 @@ func Register(s Strategy) {
 	caps, methods := handlers(s)
 	connector.Register(caps...)
 	for name, fn := range methods {
-		connector.Handle(name, fn)
+		if name == decodeRawMethod {
+			connector.HandleRaw(name, fn)
+		} else {
+			connector.Handle(name, func(p json.RawMessage) (any, error) { return fn(p) })
+		}
 	}
 }
 
@@ -227,7 +238,7 @@ func handlers(s Strategy) ([]string, map[string]method) {
 	}
 
 	m := map[string]method{
-		"driver.describe": func(json.RawMessage) (any, error) {
+		"driver.describe": func([]byte) (any, error) {
 			return struct {
 				Name                string            `json:"name"`
 				TransientPatterns   []wirePattern     `json:"transientPatterns"`
@@ -245,14 +256,14 @@ func handlers(s Strategy) ([]string, map[string]method) {
 				s.Heartbeat.KindOrder, s.Heartbeat.KindPlurals,
 			}, nil
 		},
-		"driver.newDecoder": func(json.RawMessage) (any, error) {
+		"driver.newDecoder": func([]byte) (any, error) {
 			next++
 			decoders[next] = s.NewDecoder()
 			return struct {
 				Decoder uint32 `json:"decoder"`
 			}{next}, nil
 		},
-		"driver.decode": func(params json.RawMessage) (any, error) {
+		"driver.decode": func(params []byte) (any, error) {
 			var p struct {
 				Decoder uint32 `json:"decoder"`
 				Line    string `json:"line"`
@@ -262,7 +273,7 @@ func handlers(s Strategy) ([]string, map[string]method) {
 			}
 			return decodeLine(p.Decoder, p.Line)
 		},
-		"driver.decodeBatch": func(params json.RawMessage) (any, error) {
+		"driver.decodeBatch": func(params []byte) (any, error) {
 			var p struct {
 				Decoder uint32   `json:"decoder"`
 				Lines   []string `json:"lines"`
@@ -280,7 +291,7 @@ func handlers(s Strategy) ([]string, map[string]method) {
 			}
 			return out, nil
 		},
-		"driver.freeDecoder": func(params json.RawMessage) (any, error) {
+		"driver.freeDecoder": func(params []byte) (any, error) {
 			var p struct {
 				Decoder uint32 `json:"decoder"`
 			}
@@ -290,7 +301,7 @@ func handlers(s Strategy) ([]string, map[string]method) {
 			delete(decoders, p.Decoder)
 			return nil, nil
 		},
-		"driver.resultEvent": func(params json.RawMessage) (any, error) {
+		"driver.resultEvent": func(params []byte) (any, error) {
 			var p struct {
 				Text string `json:"text"`
 			}
@@ -305,7 +316,7 @@ func handlers(s Strategy) ([]string, map[string]method) {
 				Event string `json:"event"`
 			}{string(b)}, nil
 		},
-		"driver.sessionFlags": func(params json.RawMessage) (any, error) {
+		"driver.sessionFlags": func(params []byte) (any, error) {
 			var p struct {
 				Mode     string `json:"mode"`
 				RepoSlug string `json:"repoSlug"`
@@ -320,11 +331,37 @@ func handlers(s Strategy) ([]string, map[string]method) {
 			}{s.SessionFlags(p.Mode, p.RepoSlug, p.Issue, p.Home)}, nil
 		},
 	}
-	caps := []string{"driver", "driver.decodeBatch"}
+	// The payload is "<decoder id>\n" then each line terminated by '\n', so a
+	// line is any bytes but '\n' and nothing in it is JSON-escaped.
+	m[decodeRawMethod] = func(payload []byte) (any, error) {
+		head, rest, ok := bytes.Cut(payload, []byte{'\n'})
+		if !ok {
+			return nil, errors.New("bad payload: no decoder line")
+		}
+		h, err := strconv.ParseUint(string(head), 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("bad payload: decoder id: %w", err)
+		}
+		out := make([][]event.Event, 0, bytes.Count(rest, []byte{'\n'}))
+		for len(rest) > 0 {
+			line, tail, ok := bytes.Cut(rest, []byte{'\n'})
+			if !ok {
+				return nil, errors.New("bad payload: final line has no newline")
+			}
+			evs, err := decodeLine(uint32(h), string(line))
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, evs)
+			rest = tail
+		}
+		return out, nil
+	}
+	caps := []string{"driver", "driver.decodeBatch", decodeRawMethod}
 
 	if s.ResolveExit != nil {
 		caps = append(caps, "driver.resolveExit")
-		m["driver.resolveExit"] = func(params json.RawMessage) (any, error) {
+		m["driver.resolveExit"] = func(params []byte) (any, error) {
 			var p struct {
 				Log      string `json:"log"`
 				ExitCode int    `json:"exitCode"`
@@ -378,13 +415,13 @@ func handlers(s Strategy) ([]string, map[string]method) {
 			}
 			return drain(sf), nil
 		}
-		m["driver.newStreamFilter"] = func(json.RawMessage) (any, error) {
+		m["driver.newStreamFilter"] = func([]byte) (any, error) {
 			nextFilter++
 			out := &bytes.Buffer{}
 			filters[nextFilter] = &streamFilter{f: s.NewStreamFilter(out), out: out}
 			return filterParams{nextFilter}, nil
 		}
-		m["driver.streamWrite"] = func(params json.RawMessage) (any, error) {
+		m["driver.streamWrite"] = func(params []byte) (any, error) {
 			var p struct {
 				filterParams
 				Data []byte `json:"data"`
@@ -394,11 +431,11 @@ func handlers(s Strategy) ([]string, map[string]method) {
 				return err
 			})
 		}
-		m["driver.streamFlush"] = func(params json.RawMessage) (any, error) {
+		m["driver.streamFlush"] = func(params []byte) (any, error) {
 			var p filterParams
 			return run(params, &p, &p.Filter, func(sf *streamFilter) error { return sf.f.Flush() })
 		}
-		m["driver.freeStreamFilter"] = func(params json.RawMessage) (any, error) {
+		m["driver.freeStreamFilter"] = func(params []byte) (any, error) {
 			var p filterParams
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
@@ -409,7 +446,7 @@ func handlers(s Strategy) ([]string, map[string]method) {
 	}
 	if h := s.Heartbeat; h.Phase != nil {
 		caps = append(caps, "driver.toolPhase")
-		m["driver.toolPhase"] = func(params json.RawMessage) (any, error) {
+		m["driver.toolPhase"] = func(params []byte) (any, error) {
 			var p struct {
 				Tool  string          `json:"tool"`
 				Input json.RawMessage `json:"input"`
@@ -424,7 +461,7 @@ func handlers(s Strategy) ([]string, map[string]method) {
 	}
 	if h := s.Heartbeat; h.Kind != nil {
 		caps = append(caps, "driver.toolKind")
-		m["driver.toolKind"] = func(params json.RawMessage) (any, error) {
+		m["driver.toolKind"] = func(params []byte) (any, error) {
 			var p struct {
 				Tool string `json:"tool"`
 			}
@@ -438,7 +475,7 @@ func handlers(s Strategy) ([]string, map[string]method) {
 	}
 	if h := s.Heartbeat; h.Family != nil {
 		caps = append(caps, "driver.modelFamily")
-		m["driver.modelFamily"] = func(params json.RawMessage) (any, error) {
+		m["driver.modelFamily"] = func(params []byte) (any, error) {
 			var p struct {
 				Model string `json:"model"`
 			}
