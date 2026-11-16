@@ -165,6 +165,7 @@
               git.merge.policy = dogfoodDefaults.defaults.mergeMode;
               git.merge.guardPaths = dogfoodDefaults.defaults.mergeGuardPaths;
               forge.boxAccess = dogfoodDefaults.defaults.boxForgeAndIssueAccess;
+              forge.boxForgeCredential = dogfoodDefaults.defaults.boxForgeCredential;
               agents.format.enable = dogfoodDefaults.defaults.autoFormat;
               agents.lint.enable = dogfoodDefaults.defaults.autoLint;
               # Driver map (ADR 0064, issue #5054); see nix/dogfood-defaults.nix.
