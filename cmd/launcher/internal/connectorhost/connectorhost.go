@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -229,18 +230,21 @@ type Connector struct {
 	// use, and guards dead.
 	mu   sync.Mutex
 	dead bool // a call failed or Close ran: the module is gone
-	// err is the failure that killed the module; nil after a plain Close.
-	err error
+	// err is the failure that killed the module; nil after a plain Close. Atomic
+	// so Err never waits on mu, which a call holds for its whole exchange.
+	err atomic.Pointer[error]
 }
 
 // Err returns the call failure that made the Connector unusable, nil while it
 // is usable or after only Close. It exists for callers whose guest-facing API
 // has no error return, such as a Decoder, which degrades a failed call to an
-// unparsed event.
+// unparsed event, and for a cache that replaces a Connector a call has killed.
+// It does not wait for an in-flight call.
 func (c *Connector) Err() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.err
+	if p := c.err.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 // Close releases the Connector's engine; later calls return ErrUnusable.
@@ -323,15 +327,16 @@ func (c *Connector) Call(ctx context.Context, method string, params, result any)
 	}
 	if err != nil {
 		c.dead = true
-		c.err = failWithHost(err)
+		err = failWithHost(err)
+		c.err.Store(&err)
 		// A Host call's fatal failure was audited where it happened; any other
 		// failed call (a rejected result, a trap, a budget or memory limit) has not.
 		if c.host != nil && !c.host.failed {
-			c.network.recordFailure(DecisionFailed, c.err)
+			c.network.recordFailure(DecisionFailed, err)
 		}
 		// Not ctx: a cancelled caller must not stop the module being released.
 		_ = c.engine.close(context.WithoutCancel(ctx))
-		return c.err
+		return err
 	}
 	if resp.Error != nil {
 		return failWithHost(resp.callError())
