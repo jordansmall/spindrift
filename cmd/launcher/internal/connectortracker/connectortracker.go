@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
@@ -693,10 +694,80 @@ var (
 // A 0.1 Connector predates the status selector, tracker.blocks and project-key
 // ids, so core ignores those capabilities for it and never sends a status.
 func New(c *connectorhost.Connector, writes forge.IssueTracker, lifecycle Lifecycle, target Target) (forge.IssueTracker, error) {
+	return newFrom(c, c.Call, writes, lifecycle, target)
+}
+
+// newFrom builds the tracker over c's handshake, routing calls through call.
+func newFrom(c *connectorhost.Connector, call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, target Target) (forge.IssueTracker, error) {
 	if !slices.Contains(c.Capabilities, "tracker") {
 		return nil, fmt.Errorf("%w: capabilities %v lack \"tracker\"", ErrNotTracker, c.Capabilities)
 	}
-	return newTracker(c.Call, writes, lifecycle, target, c.Capabilities, speaksV02(c.ProtocolVersion))
+	return newTracker(call, writes, lifecycle, target, c.Capabilities, speaksV02(c.ProtocolVersion))
+}
+
+// NewReloading is New for a tracker that lives as long as its process. A
+// Connector closes itself on a failed call, so a daemon or Console holding one
+// tracker would fail every later operation; here a call finding the Connector
+// dead reloads it first. The failing call is not retried, and a failed reload
+// fails the call that needed it with the load error. After maxLoadFailures
+// failed reloads in a row a Connector that cannot load is retried at most once
+// per loadRetryAfter, so a broken module is not recompiled on every call.
+// Capabilities come from the first handshake. A load error on the first load
+// is returned as is.
+func NewReloading(load func() (*connectorhost.Connector, error), writes forge.IssueTracker, lifecycle Lifecycle, target Target) (forge.IssueTracker, error) {
+	c, err := load()
+	if err != nil {
+		return nil, err
+	}
+	r := &reloader{load: func() (conn, error) { return load() }, cur: c}
+	return newFrom(c, r.call, writes, lifecycle, target)
+}
+
+// conn is the part of a Connector the reloader drives, a seam for its tests.
+type conn interface {
+	Call(ctx context.Context, method string, params, result any) error
+	Err() error
+}
+
+const (
+	maxLoadFailures = 3
+	loadRetryAfter  = time.Minute
+)
+
+// loadClock is a test seam for the reload cooldown.
+var loadClock = time.Now
+
+type reloader struct {
+	load func() (conn, error)
+	mu   sync.Mutex
+	cur  conn
+	// failures counts consecutive failed reloads; lastErr and lastFail
+	// describe the latest.
+	failures int
+	lastErr  error
+	lastFail time.Time
+}
+
+func (r *reloader) call(ctx context.Context, method string, params, result any) error {
+	r.mu.Lock()
+	if r.cur.Err() != nil {
+		if r.failures >= maxLoadFailures && loadClock().Sub(r.lastFail) < loadRetryAfter {
+			err := fmt.Errorf("connector load failed %d times in a row; retried %s after the last failure: %w", r.failures, loadRetryAfter, r.lastErr)
+			r.mu.Unlock()
+			return err
+		}
+		next, err := r.load()
+		if err != nil {
+			r.failures, r.lastErr, r.lastFail = r.failures+1, err, loadClock()
+			r.mu.Unlock()
+			return err
+		}
+		r.failures, r.lastErr = 0, nil
+		r.cur = next
+	}
+	cur := r.cur
+	r.mu.Unlock()
+	return cur.Call(ctx, method, params, result)
 }
 
 // speaksV02 reports whether a protocol version is 0.2 or later; one the
