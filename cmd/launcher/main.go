@@ -150,6 +150,13 @@ func (c config) kind() *dispatchkind.Descriptor {
 	return c.dispatchKind
 }
 
+// boxHoldsNoForgeCredential is BOX_FORGE_CREDENTIAL=none (issue #7140): the
+// Box gets no forge token, so dispatch forwards none and doctor's read-only
+// token gates stand down.
+func (c config) boxHoldsNoForgeCredential() bool {
+	return c.BoxForgeCredential == "none"
+}
+
 // effectiveBoxForgeAndIssueAccess is the effective BOX_FORGE_AND_ISSUE_ACCESS
 // handed to dispatch: the raw knob, forced "read-only" for a ReadOnlyBox kind
 // (issue #3906). c.BoxForgeAndIssueAccess itself stays raw for the
@@ -820,6 +827,7 @@ func dispatchConfig(c config, pwd string, it forge.IssueTracker, lw *localloop.W
 		ReviewEffortOverride:     reviewEffort,
 		Kind:                     c.kind().Name,
 		SelfContained:            c.selfContained,
+		NoForgeCredential:        c.boxHoldsNoForgeCredential(),
 		ForgeDescriptor:          caps.ForgeDescriptor,
 		TrackerDescriptor:        caps.TrackerDescriptor,
 		BoxForgeAndIssueAccess:   c.effectiveBoxForgeAndIssueAccess(),
@@ -1059,6 +1067,9 @@ func newLaunchGateConfigError(format string, args ...any) error {
 // mkHarness's readOnlyCapabilityOk assert (issue #2526) already proves this at
 // build time, so this gate only backstops a runtime override of those knobs.
 func checkReadOnlyCapabilityGate(c config) error {
+	if c.boxHoldsNoForgeCredential() && c.BoxForgeAndIssueAccess != "read-only" {
+		return newLaunchGateConfigError("BOX_FORGE_CREDENTIAL=none requires BOX_FORGE_AND_ISSUE_ACCESS=read-only")
+	}
 	if c.BoxForgeAndIssueAccess != "read-only" {
 		return nil
 	}
