@@ -91,7 +91,6 @@ func TestConnector_TrackerContract(t *testing.T) {
 	if os.Getenv(connectorWasmEnv) == "" {
 		t.Skipf("%s unset: no compiled jira Connector to test", connectorWasmEnv)
 	}
-	verdicts := forge.ResearchVerdictLabels()
 	const issueType = "Task"
 	full := `{"dispatchable":"To Do","inProgress":"In Progress","complete":{"status":"Done","resolution":"Fixed"},"failed":"Failed","ambiguous":"Needs Info"}`
 	allStatuses := []string{"To Do", "In Progress", "Done", "Failed", "Needs Info"}
@@ -110,52 +109,46 @@ func TestConnector_TrackerContract(t *testing.T) {
 		{"status", full, jira.LifecycleStatus, writeBackend{allStatuses, doneResolutionScreen}, true},
 	}
 
-	admitted := map[string]int{}
-	for _, fl := range connectorFlavours {
-		for _, m := range modes {
-			t.Run(fl.name+"/"+m.name, func(t *testing.T) {
-				work, err := connectorLifecycle(dispatchkind.TrackerWork, testLabels, verdicts, m.mapping, m.lifecycle, issueType)
-				if err != nil {
-					t.Fatal(err)
-				}
-				wh := newConnectorHarnessWith(t, fl.cloud, work)
-				m.backend.apply(wh)
-				if !m.mapped {
-					forgetest.RunTrackerContract(t, connectorWriteHarness{wh})
-					// The site-wide list is what a Box's label registry reads.
-					if got, err := wh.tr.ListLabels(); err != nil || !slices.Contains(got, testLabels.Failed) {
-						t.Errorf("ListLabels = %v, %v, want the labels the run left, including %q", got, err, testLabels.Failed)
+	admitted := map[string]map[string]int{}
+	for _, b := range connectorBuilds {
+		admitted[b.name] = map[string]int{}
+		for _, fl := range connectorFlavours {
+			for _, m := range modes {
+				t.Run(b.name+"/"+fl.name+"/"+m.name, func(t *testing.T) {
+					wh := b.harness(t, fl.cloud, dispatchkind.TrackerWork, m.mapping, m.lifecycle, issueType)
+					m.backend.apply(wh)
+					if !m.mapped {
+						forgetest.RunTrackerContract(t, connectorWriteHarness{wh})
+						// The site-wide list is what a Box's label registry reads.
+						if got, err := wh.tr.ListLabels(); err != nil || !slices.Contains(got, testLabels.Failed) {
+							t.Errorf("ListLabels = %v, %v, want the labels the run left, including %q", got, err, testLabels.Failed)
+						}
+					} else {
+						forgetest.RunTrackerWorkContract(t, connectorWriteHarness{wh})
+						rec := wh.issueRecord("PROJ-101")
+						if rec.status != "Done" || rec.resolution != "Fixed" {
+							t.Errorf("PROJ-101 ended in status %q resolution %q, want Done / Fixed: the claim and completion must move natively",
+								rec.status, rec.resolution)
+						}
+						if len(rec.labels) != 0 {
+							t.Errorf("PROJ-101 labels = %v, want the dispatch labels stripped after the native moves", rec.labels)
+						}
 					}
-				} else {
-					forgetest.RunTrackerWorkContract(t, connectorWriteHarness{wh})
-					rec := wh.issueRecord("PROJ-101")
-					if rec.status != "Done" || rec.resolution != "Fixed" {
-						t.Errorf("PROJ-101 ended in status %q resolution %q, want Done / Fixed: the claim and completion must move natively",
-							rec.status, rec.resolution)
-					}
-					if len(rec.labels) != 0 {
-						t.Errorf("PROJ-101 labels = %v, want the dispatch labels stripped after the native moves", rec.labels)
-					}
-				}
-				wh.countAdmitted(t, admitted)
+					wh.countAdmitted(t, admitted[b.name])
 
-				if m.mapped {
-					research, err := connectorLifecycle(dispatchkind.TrackerResearch, testLabels, verdicts, m.mapping, m.lifecycle, issueType)
-					if err != nil {
-						t.Fatal(err)
+					if m.mapped {
+						rh := b.harness(t, fl.cloud, dispatchkind.TrackerResearch, m.mapping, m.lifecycle, issueType)
+						m.backend.apply(rh)
+						forgetest.RunTrackerVerdictContract(t, connectorWriteHarness{rh})
+						rh.countAdmitted(t, admitted[b.name])
 					}
-					rh := newConnectorHarnessWith(t, fl.cloud, research)
-					m.backend.apply(rh)
-					forgetest.RunTrackerVerdictContract(t, connectorWriteHarness{rh})
-					rh.countAdmitted(t, admitted)
-				}
-			})
+				})
+			}
 		}
-	}
-
-	for _, route := range []string{"PUT /rest/api/2/issue", "POST /rest/api/2/issue", "GET /rest/api/2/label"} {
-		if admitted[route] == 0 {
-			t.Errorf("route %s admitted no request across the write runs", route)
+		for _, route := range []string{"PUT /rest/api/2/issue", "POST /rest/api/2/issue", "GET /rest/api/2/label"} {
+			if admitted[b.name][route] == 0 {
+				t.Errorf("%s: route %s admitted no request across the write runs", b.name, route)
+			}
 		}
 	}
 }
