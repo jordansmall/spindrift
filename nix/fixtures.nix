@@ -140,8 +140,8 @@ let
       baseEnv = "FORGEJO_BASE_URL";
       acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).forgejo;
     };
-    # Registered but not primary: nothing reads jira through the Connector
-    # until the cut-over (issue #6753), so nix/dogfood-primary.nix omits it.
+    # Registered but not primary: dogfood keeps jira on the native adapter, so
+    # nix/dogfood-primary.nix omits it.
     backendRows.jira = {
       module = p: "${jiraConnector.package p}/jira.wasm";
       inherit (jiraConnector) routes;

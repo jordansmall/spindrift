@@ -61,8 +61,9 @@ type Row struct {
 	// call per read operation. ShadowEvery is required with Shadow.
 	Shadow      bool `json:"shadow,omitempty"`
 	ShadowEvery int  `json:"shadowEvery,omitempty"`
-	// Primary makes the Connector answer this backend's reads in place of the
-	// native adapter of the same name; writes stay native. Refused with Shadow.
+	// Primary makes the Connector answer in place of the native adapter of the
+	// same name: github's reads only (its writes stay native until #6756), the
+	// whole tracker for jira. Refused with Shadow.
 	Primary bool `json:"primary,omitempty"`
 }
 

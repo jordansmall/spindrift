@@ -1,14 +1,15 @@
-# The jira Connector's flake-parts module: the Connector's tracker read path.
-# The native jira adapter stays authoritative and every binary still uses it
-# for every decision. The backend row below declares the Connector and its
-# Route table; nothing in the launcher reads jira through it yet. Leave the
-# row's `shadow` option off: the read shadow names a GitHub-shaped target (repo
-# slug, no dialect), not jira's project key and API dialect, until the
-# cut-over wires them (issue #6753).
+# The jira Connector's flake-parts module: the Connector's whole tracker path.
+# The native jira adapter stays the default and every binary uses it until a
+# Consumer sets `spindrift.connectors.jira.primary = true`; then the Connector
+# answers the whole tracker (reads, claim, transitions, labels, comments and
+# filed findings), with no native fallback, and dropping `primary` reverts.
+# Leave the row's `shadow` option off: the read shadow names a GitHub-shaped
+# target (repo slug, no dialect), not jira's project key and API dialect.
 #
 # The row authorizes with Basic credentials, the Jira Cloud form (account email
 # plus API token). Server/Data Center PATs are Bearer, which one row cannot
-# express beside Basic; that choice waits for the cut-over too.
+# express beside Basic, so a Server/Data Center site under `primary` needs a
+# username and password or token in the two knobs below, not a PAT.
 { core }:
 { ... }:
 let
@@ -26,14 +27,14 @@ in
       env = "SPINDRIFT_JIRA_CONNECTOR_TOKEN";
       group = "dispatch";
       secret = true;
-      doc = "API token the jira Connector's backend row authorizes its calls with, paired with SPINDRIFT_JIRA_CONNECTOR_EMAIL for Basic auth (needs permission to edit and transition issues in the project: the Connector writes labels and workflow transitions through it once the cut-over lands); host-only, never reaches the Box; unused until the jira cut-over (issue #6753)";
+      doc = "API token the jira Connector's backend row authorizes its calls with, paired with SPINDRIFT_JIRA_CONNECTOR_EMAIL for Basic auth (needs permission to edit and transition issues in the project: the Connector writes labels, comments and workflow transitions through it); host-only, never reaches the Box; read only while the jira row sets `primary`";
       flakeOption = false;
       boxEnv = false;
     };
     jiraConnectorEmail = {
       env = "SPINDRIFT_JIRA_CONNECTOR_EMAIL";
       group = "dispatch";
-      doc = "Jira Cloud account email the jira Connector's backend row pairs with SPINDRIFT_JIRA_CONNECTOR_TOKEN for Basic auth; host-only, never reaches the Box; unused until the jira cut-over (issue #6753)";
+      doc = "Jira Cloud account email (Server/Data Center: username) the jira Connector's backend row pairs with SPINDRIFT_JIRA_CONNECTOR_TOKEN for Basic auth; host-only, never reaches the Box; read only while the jira row sets `primary`";
       flakeOption = false;
       boxEnv = false;
     };
