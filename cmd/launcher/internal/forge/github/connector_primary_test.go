@@ -4,17 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 )
 
@@ -536,5 +541,115 @@ func TestPrimaryRow_CheckRunWithoutTheCapabilityFailsWithoutGh(t *testing.T) {
 	}
 	if n := calls(); n != 0 {
 		t.Errorf("CheckRun ran gh %d times", n)
+	}
+}
+
+// statsSandbox is a Connector sandbox that only reports its cost.
+type statsSandbox struct {
+	connectorsandbox.Loader
+	stats connectorsandbox.Stats
+	ok    bool
+}
+
+func (s statsSandbox) Stats() (connectorsandbox.Stats, bool) { return s.stats, s.ok }
+
+// primarySandboxHarness chdirs into a scratch directory, applies the row via
+// useRow, installs s as the Connector sandbox, and returns the audit file path
+// this process would write. A non-nil seed is written there first; nil leaves
+// the file absent.
+func primarySandboxHarness(t *testing.T, useRow func(*testing.T, string), s statsSandbox, seed []byte) (audit string) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Chdir(dir)
+	useRow(t, "example.test")
+	t.Cleanup(connectorsandbox.Use(s))
+	audit = filepath.Join(hostpaths.LogDir(dir), primaryRecordName(".audit.jsonl"))
+	if seed != nil {
+		if err := os.MkdirAll(filepath.Dir(audit), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(audit, seed, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return audit
+}
+
+const seededAudit = "{\"decision\":\"allowed\"}\n"
+
+var knownSandbox = statsSandbox{ok: true, stats: connectorsandbox.Stats{
+	Start:    7 * time.Millisecond,
+	HopStats: connectorhost.HopStats{Calls: 5, HostCalls: 3, Hop: 11 * time.Millisecond},
+}}
+
+func TestRecordPrimarySandboxTotals_AppendsOneLineToTheAuditFile(t *testing.T) {
+	audit := primarySandboxHarness(t, useGithubRowPrimary, knownSandbox, []byte(seededAudit))
+
+	RecordPrimarySandboxTotals()
+
+	b, err := os.ReadFile(audit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("audit file = %q, want the existing line and one totals line", b)
+	}
+	want := fmt.Sprintf(`{"sandbox_start_ns":%d,"sandbox_calls":5,"sandbox_host_calls":3,"sandbox_hop_ns":%d,"in_process_loads":%d}`,
+		int64(7*time.Millisecond), int64(11*time.Millisecond), connectorsandbox.InProcessLoads())
+	if lines[1] != want {
+		t.Errorf("totals line = %s, want %s", lines[1], want)
+	}
+	if got := primaryFiles(t, filepath.Dir(audit), ".log"); len(got) != 0 {
+		t.Errorf("recording totals created %v, want no .log", got)
+	}
+
+	// The docs promise the keys the read shadow's shadow_summary carries.
+	var keys map[string]any
+	if err := json.Unmarshal([]byte(lines[1]), &keys); err != nil {
+		t.Fatal(err)
+	}
+	summary := map[string]bool{}
+	st := reflect.TypeOf(hostop.ShadowSummary{})
+	for i := range st.NumField() {
+		name, _, _ := strings.Cut(st.Field(i).Tag.Get("json"), ",")
+		summary[name] = true
+	}
+	for k := range keys {
+		if !summary[k] {
+			t.Errorf("totals key %q is not a hostop.ShadowSummary json key", k)
+		}
+	}
+}
+
+func TestRecordPrimarySandboxTotals_WritesNothingWhenTheSandboxNeverStarted(t *testing.T) {
+	audit := primarySandboxHarness(t, useGithubRowPrimary, statsSandbox{}, []byte(seededAudit))
+
+	RecordPrimarySandboxTotals()
+
+	if b, _ := os.ReadFile(audit); string(b) != seededAudit {
+		t.Errorf("audit file = %q, want it untouched", b)
+	}
+}
+
+func TestRecordPrimarySandboxTotals_WritesNothingWithoutAPrimaryRow(t *testing.T) {
+	audit := primarySandboxHarness(t, func(t *testing.T, host string) { applyGithubRow(t, host, func(*backendrows.Row) {}) }, knownSandbox, []byte{})
+
+	RecordPrimarySandboxTotals()
+
+	if b, _ := os.ReadFile(audit); len(b) != 0 {
+		t.Errorf("audit file = %q, want it untouched", b)
+	}
+}
+
+// A process that never read through its primary Connector has no record pair,
+// and recording must not make one: a pair reads as a dirty run.
+func TestRecordPrimarySandboxTotals_CreatesNoRecordPair(t *testing.T) {
+	audit := primarySandboxHarness(t, useGithubRowPrimary, knownSandbox, nil)
+
+	RecordPrimarySandboxTotals()
+
+	if got := primaryFiles(t, filepath.Dir(audit), ""); len(got) != 0 {
+		t.Errorf("recording totals created %v, want no files", got)
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/github"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/localloop"
@@ -420,6 +421,9 @@ func (l *lazyRunner) Kill(name string) error {
 	return r.Kill(name)
 }
 
+// recordSandboxTotals is a var so a test can count the closer's calls.
+var recordSandboxTotals = github.RecordPrimarySandboxTotals
+
 // installConnectorSandbox makes every Connector this process hosts load into
 // one sandbox, under CONNECTOR_SANDBOX, and returns the func that stops it. The
 // install lasts the process, so sandboxVerdict can still read a start failure
@@ -432,7 +436,12 @@ func installConnectorSandbox(c config, pwd string) (closeSandbox func()) {
 		return runnerForKind(c, runnerConfig(c), pwd)
 	}}, connectorSandboxRunnerLabel(c))
 	connectorsandbox.Use(sb)
-	return func() { _ = sb.Close(context.Background()) }
+	// The totals follow Close so they are final, and live here so every exit
+	// path that closes the sandbox records them.
+	return func() {
+		_ = sb.Close(context.Background())
+		recordSandboxTotals()
+	}
 }
 
 // connectorSandboxRunnerLabel names the runner a Connector sandbox starts

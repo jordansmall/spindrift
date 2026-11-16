@@ -15,9 +15,10 @@
 # recipe's `finished=` toggle is also run set to 1, for logs fetched from CI,
 # which have all ended: then an unended Pass or missing summary counts dirty.
 #
-# The primary-mode recipe (issue #6998) counts a process clean only with a
-# non-empty audit file free of refusals and an empty or absent `.log`; a live
-# pid is in flight, and `finished=1` counts it by its content.
+# The primary-mode recipe (issue #6998) counts a process clean only with an
+# audit file holding at least one decision entry (the sandbox totals line is
+# not one) and no refusal, and an empty or absent `.log`; a live pid is in flight,
+# and `finished=1` counts it by its content.
 { pkgs, ... }:
 {
   shadow-clean-run-recipes =
@@ -236,6 +237,10 @@
           done
         }
         p_clean() { p_audit "$(pstem "$1" "$2" "$3")" allowed allowed; }
+        # The sandbox totals line a process appends at exit: no decision key.
+        p_totals() {
+          echo '{"sandbox_start_ns":1,"sandbox_calls":2,"sandbox_host_calls":3,"sandbox_hop_ns":4,"in_process_loads":0}' >> "$(pstem "$1" "$2" "$3").audit.jsonl"
+        }
         crun() { run "$1" "$2" "$3" "$4" cut-over; }
 
         d=$(mkcase p1)
@@ -265,6 +270,22 @@
         p_audit "$(pstem "$d" 20261114T100000Z $dead_pid)"
         p_clean "$d" 20261114T110000Z $dead_pid
         crun primary-empty-audit-ends-streak primary.sh 1 case-p4
+
+        # The sandbox totals line is not an entry: alone it proves nothing,
+        # and after real entries it leaves the run clean.
+        d=$(mkcase p4t)
+        p_clean "$d" 20261114T090000Z $dead_pid
+        p_audit "$(pstem "$d" 20261114T100000Z $dead_pid)"
+        p_totals "$d" 20261114T100000Z $dead_pid
+        p_clean "$d" 20261114T110000Z $dead_pid
+        p_totals "$d" 20261114T110000Z $dead_pid
+        crun primary-totals-only-audit-ends-streak primary.sh 1 case-p4t
+        d=$(mkcase p4c)
+        p_clean "$d" 20261114T090000Z $dead_pid
+        p_totals "$d" 20261114T090000Z $dead_pid
+        p_clean "$d" 20261114T100000Z $dead_pid
+        p_totals "$d" 20261114T100000Z $dead_pid
+        crun primary-totals-after-entries-counts primary.sh 2 case-p4c
 
         # A load failure leaves an error line and no audit file.
         d=$(mkcase p5)

@@ -3067,9 +3067,10 @@ with the stamp as `20060102T150405Z`:
   none.
 
 A run is **clean** when its `.audit.jsonl` holds at least one entry and no
-`refused` decision, and its `.log` is absent or empty. An audit file with no
-entries means the process made no Connector request that run, so it proves
-nothing and counts dirty. A process whose pid is still running is a run in
+`refused` decision, and its `.log` is absent or empty. Only lines with a
+`decision` are entries, so the sandbox totals line never counts. An audit file
+with no entries means the process made no Connector request that run, so it
+proves nothing and counts dirty. A process whose pid is still running is a run in
 flight, and the recipe skips it, with the same `kill -0` caveats and
 `finished=1` toggle as the shadow recipe above. Primary cuts over (#6811, which
 deletes the native github read path) after 20 consecutive clean dogfood runs.
@@ -3090,7 +3091,7 @@ done | sort -u | while read -r stem; do
   if [ -n "$live" ]; then verdict=skip
   elif [ -s "$stem.log" ]; then verdict=dirty
   elif [ -e "$stem.audit.jsonl" ] && jq -Rse '
-      [split("\n")[] | fromjson? | objects]
+      [split("\n")[] | fromjson? | objects | select(has("decision"))]
       | length > 0 and all(.[]; .decision != "refused")' \
       "$stem.audit.jsonl" >/dev/null
   then verdict=clean
