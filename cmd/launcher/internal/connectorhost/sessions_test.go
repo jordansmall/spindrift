@@ -391,3 +391,41 @@ func TestSessionsStatsCountHostCalls(t *testing.T) {
 		t.Errorf("Stats = %+v after %+v and one fetch, want one Host call over one more exchange", got, before)
 	}
 }
+
+// A Connector killed by a fatal call must not cost the host: its session is
+// released and the same Sessions loads a replacement that answers calls.
+func TestSessionsFatalCallReleasesTheSessionAndStillLoadsAReplacement(t *testing.T) {
+	for _, tc := range []struct {
+		fixture string
+		want    error
+	}{
+		{"hostile-trap.wasm", connectorhost.ErrTrap},
+		{"hostile-malformed.wasm", connectorhost.ErrMalformedOutput},
+	} {
+		t.Run(tc.fixture, func(t *testing.T) {
+			s := sessionsHost(t)
+			dead, err := s.Load(context.Background(), fixture(t, tc.fixture))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := dead.Call(context.Background(), "misbehave", nil, nil); !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+			if dead.Err() == nil {
+				t.Error("Err = nil after a fatal call, want the failure")
+			}
+			deadline := time.Now().Add(5 * time.Second)
+			for s.OpenSessions() != 0 && time.Now().Before(deadline) {
+				time.Sleep(10 * time.Millisecond)
+			}
+			if n := s.OpenSessions(); n != 0 {
+				t.Errorf("open sessions = %d after the Connector died, want 0", n)
+			}
+			fresh, err := s.Load(context.Background(), fixture(t, "call.wasm"))
+			if err != nil {
+				t.Fatalf("Load after a fatal call: %v", err)
+			}
+			echoes(t, fresh, "replacement")
+		})
+	}
+}
