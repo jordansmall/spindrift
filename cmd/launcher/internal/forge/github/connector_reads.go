@@ -34,12 +34,28 @@ var errNoCapability = errors.New("connector does not declare the capability")
 // sharedConnectors holds one loaded Connector per repository and row, so the
 // doctor, the daemon's demand probe and recover share a compile rather than
 // repeating it per call or per client. The row is process-global
-// (backendrows.Use) and a Connector serialises its own calls. A failed load
-// is not stored, so the next read retries it.
+// (backendrows.Use) and a Connector serialises its own calls. A Connector a
+// failed call has closed is replaced by a fresh load on the next read. A failed
+// load is retried by the next read until maxLoadFailures have failed in a row,
+// then at most once per loadRetryAfter.
 var sharedConnectors struct {
-	mu     sync.Mutex
-	loaded map[string]*sharedConnector
+	mu       sync.Mutex
+	loaded   map[string]*sharedConnector
+	failures map[string]loadFailures
 }
+
+// A failed load is retried by the next read until maxLoadFailures have failed
+// in a row; after that a Connector that cannot load is retried once per
+// loadRetryAfter rather than recompiled on every read. The cache is shared
+// with the long-lived daemon, so a transient failure must heal without a
+// restart.
+const (
+	maxLoadFailures = 3
+	loadRetryAfter  = time.Minute
+)
+
+// loadClock is a test seam for the load-retry cooldown.
+var loadClock = time.Now
 
 type sharedConnector struct {
 	conn       *connectorhost.Connector
@@ -47,17 +63,37 @@ type sharedConnector struct {
 	closeAudit func()
 }
 
+// loadFailures counts a key's consecutive failed loads and keeps the last error
+// and when it happened.
+type loadFailures struct {
+	n    int
+	err  error
+	last time.Time
+}
+
 // sharedConnectorFor returns the Connector loaded for row and repoSlug, loading
 // it on first use. It reads with the host's own credential.
 func sharedConnectorFor(row backendrows.Row, repoSlug string) (*sharedConnector, error) {
-	key, err := json.Marshal([]any{repoSlug, row})
+	raw, err := json.Marshal([]any{repoSlug, row})
 	if err != nil {
 		return nil, err
 	}
+	key := string(raw)
 	sharedConnectors.mu.Lock()
 	defer sharedConnectors.mu.Unlock()
-	if sc, ok := sharedConnectors.loaded[string(key)]; ok {
-		return sc, nil
+	if sc, ok := sharedConnectors.loaded[key]; ok {
+		deadErr := sc.conn.Err()
+		if deadErr == nil {
+			return sc, nil
+		}
+		// Only a failed call leaves a closed Connector cached (closeSharedConnectors
+		// deletes what it closes). The call that failed is not retried; this read
+		// loads a fresh one.
+		dropShared(key, sc)
+		notePrimary(row, "reload the Connector", deadErr)
+	}
+	if f := sharedConnectors.failures[key]; f.n >= maxLoadFailures && loadClock().Sub(f.last) < loadRetryAfter {
+		return nil, fmt.Errorf("connector load failed %d times in a row; retried %s after the last failure: %w", f.n, loadRetryAfter, f.err)
 	}
 	auditName := readsAuditLog
 	if row.Primary {
@@ -67,14 +103,26 @@ func sharedConnectorFor(row backendrows.Row, repoSlug string) (*sharedConnector,
 	conn, api, err := loadConnector(row, backendrows.Options{Audit: audit, Client: connectorClient}, repoSlug)
 	if err != nil {
 		closeAudit()
+		if sharedConnectors.failures == nil {
+			sharedConnectors.failures = map[string]loadFailures{}
+		}
+		sharedConnectors.failures[key] = loadFailures{n: sharedConnectors.failures[key].n + 1, err: err, last: loadClock()}
 		return nil, err
 	}
+	delete(sharedConnectors.failures, key)
 	sc := &sharedConnector{conn: conn, api: api, closeAudit: closeAudit}
 	if sharedConnectors.loaded == nil {
 		sharedConnectors.loaded = map[string]*sharedConnector{}
 	}
-	sharedConnectors.loaded[string(key)] = sc
+	sharedConnectors.loaded[key] = sc
 	return sc, nil
+}
+
+// dropShared closes sc and forgets it. The caller holds sharedConnectors.mu.
+func dropShared(key string, sc *sharedConnector) {
+	_ = sc.conn.Close(context.Background())
+	sc.closeAudit()
+	delete(sharedConnectors.loaded, key)
 }
 
 // closeSharedConnectors closes every shared Connector, for tests that swap the
@@ -83,10 +131,9 @@ func closeSharedConnectors() {
 	sharedConnectors.mu.Lock()
 	defer sharedConnectors.mu.Unlock()
 	for k, sc := range sharedConnectors.loaded {
-		_ = sc.conn.Close(context.Background())
-		sc.closeAudit()
-		delete(sharedConnectors.loaded, k)
+		dropShared(k, sc)
 	}
+	clear(sharedConnectors.failures)
 }
 
 // routedRow is the github backend row when one is configured and not in shadow
@@ -142,7 +189,9 @@ func notePrimary(row backendrows.Row, op string, err error) error {
 // readVia runs fn over the shared Connector for e's repository, and records a
 // failure under a primary row. A Connector lacking what the read needs (the
 // missing sentinel, or a capability fn names through errNoCapability) is
-// unsupported, never a reason to fall back to gh.
+// unsupported, never a reason to fall back to gh. Readers run concurrently, so
+// one can hold a Connector another reader's call then kills and see
+// connectorhost.ErrUnusable from it; the next read reloads.
 func (e *execClient) readVia(row backendrows.Row, missing error, verb string, fn func(conn *connectorhost.Connector, api string) error) error {
 	sc, err := sharedConnectorFor(row, e.repo)
 	if err == nil {

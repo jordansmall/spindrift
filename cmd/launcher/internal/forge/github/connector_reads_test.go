@@ -54,6 +54,23 @@ func withoutCapability(t *testing.T, capName string) {
 	}
 }
 
+// countLoads counts the row Connector loads. A non-nil failWith makes each load
+// fail with it instead of reaching the real loader.
+func countLoads(t *testing.T, failWith error) *int {
+	t.Helper()
+	loads := new(int)
+	old := loadRowConnector
+	t.Cleanup(func() { loadRowConnector = old })
+	loadRowConnector = func(ctx context.Context, row backendrows.Row, o backendrows.Options) (*connectorhost.Connector, error) {
+		*loads++
+		if failWith != nil {
+			return nil, failWith
+		}
+		return old(ctx, row, o)
+	}
+	return loads
+}
+
 // A shadow github row never routes: gh stays authoritative for every host
 // read, and the shadow compares gh against the Connector. One subtest per read
 // behind routedRow, so a site that consults the row directly and skips the
@@ -211,6 +228,44 @@ func TestExecClient_ConfiguredRowLoadsTheConnectorOnce(t *testing.T) {
 	}
 	if n := loads.Load(); n != 2 {
 		t.Errorf("Connector loaded %d times, want 2 (the failed attempt, then one shared load)", n)
+	}
+}
+
+// A Connector that fails on every load is not recompiled on every read: after
+// maxLoadFailures failed loads the reads fail with the last load error without
+// calling the loader, until loadRetryAfter has passed.
+func TestExecClient_RepeatedLoadFailuresStopReloading(t *testing.T) {
+	_, _, _ = routedHarness(t)
+	clock := time.Now()
+	oldClock := loadClock
+	t.Cleanup(func() { loadClock = oldClock })
+	loadClock = func() time.Time { return clock }
+	boom := errors.New("load failed")
+	loads := countLoads(t, boom)
+
+	c := NewExecClient(connectorRepo, testLabels)
+	for i := range 10 {
+		if _, err := c.ListLabels(); !errors.Is(err, boom) {
+			t.Fatalf("read %d = %v, want the load error", i, err)
+		}
+	}
+
+	if *loads != maxLoadFailures {
+		t.Errorf("loader called %d times over 10 reads, want %d", *loads, maxLoadFailures)
+	}
+
+	clock = clock.Add(loadRetryAfter + time.Second)
+	if _, err := c.ListLabels(); !errors.Is(err, boom) {
+		t.Fatalf("read after the cooldown = %v, want the load error", err)
+	}
+	if *loads != maxLoadFailures+1 {
+		t.Errorf("loader called %d times after the cooldown, want one more attempt (%d)", *loads, maxLoadFailures+1)
+	}
+	if _, err := c.ListLabels(); !errors.Is(err, boom) {
+		t.Fatalf("read right after the retry = %v, want the load error", err)
+	}
+	if *loads != maxLoadFailures+1 {
+		t.Errorf("loader called %d times, want the retry to restart the cooldown (%d)", *loads, maxLoadFailures+1)
 	}
 }
 

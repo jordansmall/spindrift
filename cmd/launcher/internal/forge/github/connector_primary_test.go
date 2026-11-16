@@ -284,6 +284,54 @@ func TestPrimaryRow_RefusedRouteFailsTheReadAndIsAudited(t *testing.T) {
 	}
 }
 
+// A read that kills the shared Connector still fails, and is recorded, but the
+// next read loads a fresh one instead of failing with "connector unusable".
+func TestPrimaryRow_FatalCallFailureReloadsTheConnectorForTheNextRead(t *testing.T) {
+	_, c, calls, logDir := primaryHarness(t, func(t *testing.T, host string) {
+		applyGithubRow(t, host, func(r *backendrows.Row) {
+			r.Primary = true
+			r.Routes = r.Routes[:0:0]
+			for _, rt := range allRoutes(t, host) {
+				if !strings.Contains(rt.Path, "/issues") {
+					r.Routes = append(r.Routes, rt)
+				}
+			}
+		})
+	})
+	loads := countLoads(t, nil)
+
+	if _, err := c.ListOpenIssues(); !errors.Is(err, connectorhost.ErrRouteRefused) {
+		t.Fatalf("ListOpenIssues = %v, want the route refusal", err)
+	}
+	if _, err := c.ListLabels(); err != nil {
+		t.Fatalf("the read after the fatal failure = %v, want it served by a fresh Connector", err)
+	}
+
+	if *loads != 2 {
+		t.Errorf("Connector loaded %d times, want 2 (the first, then one reload)", *loads)
+	}
+	if n := calls(); n != 0 {
+		t.Errorf("the reads ran gh %d times", n)
+	}
+	audits := primaryFiles(t, logDir, ".audit.jsonl")
+	if len(audits) != 1 {
+		t.Fatalf("primary audit files = %v, want one", audits)
+	}
+	if raw, _ := os.ReadFile(audits[0]); !strings.Contains(string(raw), `"decision":"refused"`) {
+		t.Errorf("primary audit %q lost the refused entry", raw)
+	}
+	logs := primaryFiles(t, logDir, ".log")
+	if len(logs) != 1 {
+		t.Fatalf("primary logs = %v, want one", logs)
+	}
+	rec, _ := os.ReadFile(logs[0])
+	for _, want := range []string{`"op":"list open issues"`, `"op":"reload the Connector"`} {
+		if !strings.Contains(string(rec), want) {
+			t.Errorf("primary log %q lacks %s", rec, want)
+		}
+	}
+}
+
 func allRoutes(t *testing.T, host string) []connectorhost.Route {
 	t.Helper()
 	_, routes := githubConnectorRoutes(t, host, connectorRepo)
