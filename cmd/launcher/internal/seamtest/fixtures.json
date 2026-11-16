@@ -17,6 +17,7 @@
   "prompt-contract-parity-fixtures.json",
   "prompt-contract-registry.json",
   "prompts",
+  "read-write-only-gates.json",
   "research-outcome-contract.md",
   "research-verdicts-parity.json"
 ]
