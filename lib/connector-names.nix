@@ -29,7 +29,7 @@ rec {
     if n < 2 then
       null
     else
-      "perSystem.spindrift.connectors.${name} is registered ${
+      "spindrift.connectors.${name} is registered ${
         if n == 2 then "twice" else "${toString n} times"
       }: by ${builtins.concatStringsSep " and by " (map (d: d.file) defs)}";
 
