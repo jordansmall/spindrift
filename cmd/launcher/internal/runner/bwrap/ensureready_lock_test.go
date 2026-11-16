@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -97,6 +98,43 @@ func TestBwrapRunEnsureReady_ConcurrentColdStartsVacuumOnce(t *testing.T) {
 	}
 }
 
+// realizeLockWaiter notes when EnsureReady, reporting on errc, issues the
+// build of lastDrv, the last closure it realizes before taking the realize
+// lock. The returned func waits for that, then reports whether EnsureReady
+// stayed blocked through a grace. The grace cannot start at EnsureReady's
+// call: each realize spawns the fake CLI, which on a loaded runner can outlast
+// it, so the holder would unlock before the waiter ever waited.
+func realizeLockWaiter(t *testing.T, lastDrv string, errc <-chan error) func() bool {
+	t.Helper()
+	realized := make(chan struct{})
+	inner := execCommand
+	t.Cleanup(func() { execCommand = inner })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if name == "nix" && slices.Contains(args, lastDrv+"^*") {
+			close(realized)
+		}
+		return inner(name, args...)
+	}
+	return func() bool {
+		select {
+		case err := <-errc:
+			t.Errorf("EnsureReady returned %v before realizing %s", err, lastDrv)
+			return false
+		case <-realized:
+		case <-time.After(10 * time.Second):
+			t.Errorf("EnsureReady did not realize %s", lastDrv)
+			return false
+		}
+		select {
+		case err := <-errc:
+			t.Errorf("EnsureReady returned %v while the realize lock was held", err)
+			return false
+		case <-time.After(300 * time.Millisecond):
+			return true
+		}
+	}
+}
+
 // A launcher that finds the realize lock held says so, then skips the copy
 // once the holder has installed the snapshot.
 func TestBwrapRunEnsureReady_WaiterSkipsVacuumAfterSiblingInstalls(t *testing.T) {
@@ -119,13 +157,11 @@ func TestBwrapRunEnsureReady_WaiterSkipsVacuumAfterSiblingInstalls(t *testing.T)
 	// fn runs on the test goroutine and uses only Error/Errorf; EnsureReady's
 	// goroutine only reports back on errc.
 	errc := make(chan error, 1)
+	blocked := realizeLockWaiter(t, f.a.prepare.syscallFilterDrv, errc)
 	out := runnertest.CaptureStdoutDuring(t, func() {
 		go func() { errc <- f.a.EnsureReady() }()
-		select {
-		case err := <-errc:
-			t.Errorf("EnsureReady returned %v while the realize lock was held", err)
+		if !blocked() {
 			return
-		case <-time.After(300 * time.Millisecond):
 		}
 		seedSnapshot(t, f.dbPath, "sibling's snapshot")
 		UnlockSnapshot(held)
@@ -346,13 +382,11 @@ func TestBwrapBuildEnsureReady_WaiterSkipsVacuumAfterSiblingInstalls(t *testing.
 	t.Cleanup(func() { UnlockSnapshot(held) })
 
 	errc := make(chan error, 1)
+	blocked := realizeLockWaiter(t, a.nixConfigFileDrv, errc)
 	out := runnertest.CaptureStdoutDuring(t, func() {
 		go func() { errc <- a.EnsureReady() }()
-		select {
-		case err := <-errc:
-			t.Errorf("EnsureReady returned %v while the realize lock was held", err)
+		if !blocked() {
 			return
-		case <-time.After(300 * time.Millisecond):
 		}
 		seedSnapshot(t, versionedDBPath(genDir), "sibling's snapshot")
 		UnlockSnapshot(held)
