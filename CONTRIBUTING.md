@@ -323,7 +323,8 @@ and in the in-box `box` program; the only bash left is the generated shim that
   claude Driver's host half (`spindrift.dev/connector/claude`);
   `connectors/github` is the github backend's tracker and forge read paths;
   `connectors/jira` is the jira backend's tracker read and write paths
-  (transitions, label edits, label list and create).
+  (transitions, label edits, label list and create); `connectors/forgejo` is
+  the forgejo backend's forge path (branch and PR primitives).
   Each subflake gets `connector-<name>-go-{fmt,vet,test}` and
   `connector-<name>-conformance` from `core.lib.connectorChecks`; core's root
   `checks` carry none of them.
