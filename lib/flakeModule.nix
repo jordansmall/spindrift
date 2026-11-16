@@ -695,11 +695,12 @@ in
                     Make this Connector authoritative over the native
                     implementation of the same name (issues #6998, #6999).
                     On a `backend` row it answers in place of the native
-                    backend: for github every read, while writes stay native
-                    until its write switch (issue #6756); for jira the whole
-                    tracker (reads, claim, transitions, labels, comments and
-                    filed findings), authorized with the row's Basic
-                    credential. On a `driver`
+                    backend: for github every read and the writes listed in
+                    docs/reference.md (Backend primary mode), while the rest
+                    stay native until its write switch (issue #6756); for jira
+                    the whole tracker (reads, claim, transitions, labels,
+                    comments and filed findings), authorized with the row's
+                    Basic credential. On a `driver`
                     row it is the Driver in place of the native Strategy, in
                     the Box during the Pass and on the host when it reads
                     Pass logs back; a Connector that fails to load fails the
