@@ -279,6 +279,7 @@ let
       "logscan"
       "outcome"
       "panicguard"
+      "primaryrecord"
       "readshadow"
       "registrymanifest"
       "registryprobe"

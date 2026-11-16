@@ -8,8 +8,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/hostpaths"
+	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 // RecordPrimarySandboxTotals appends the run's Connector sandbox cost to this
@@ -31,7 +33,7 @@ func RecordPrimarySandboxTotals() {
 		fmt.Fprintf(os.Stderr, "primary sandbox totals were not recorded: %v\n", err)
 		return
 	}
-	path := filepath.Join(hostpaths.LogDir(pwd), primaryRecordName(".audit.jsonl"))
+	path := filepath.Join(hostpaths.LogDir(pwd), primaryrecord.Name(backend.GitHub.Name, ".audit.jsonl"))
 	// Every field is an int64, so Marshal cannot fail.
 	line, _ := json.Marshal(struct {
 		StartNs        int64 `json:"sandbox_start_ns"`

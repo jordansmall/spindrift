@@ -3,17 +3,15 @@ package github
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectortracker"
-	"spindrift.dev/launcher/internal/hostpaths"
+	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 // tokenAuditLog is the file a short-lived Connector load's requests are
@@ -38,41 +36,15 @@ func introspectToken(token, repoSlug string) (backendkit.TokenIntrospection, err
 	}
 	auditName := tokenAuditLog
 	if row.Primary {
-		auditName = primaryRecordName(".audit.jsonl")
+		auditName = primaryrecord.Name(backend.GitHub.Name, ".audit.jsonl")
 	}
-	audit, closeAudit := openAudit(auditName)
+	audit, closeAudit, _ := primaryrecord.OpenFile(auditName)
 	defer closeAudit()
 	got, err := introspectViaConnector(row, backendrows.Options{Audit: audit, Client: connectorClient}, token, repoSlug)
 	return got, notePrimary(row, "introspect the token", err)
 }
 
 var nativeIntrospect = newTokenIntrospector(TokenOAuthScopes, TokenRepoPushPermission)
-
-// openAudit opens the named audit file for appending. A record that cannot be
-// written must not fail the check, so an unopenable file discards, as the
-// shadow logs do.
-func openAudit(name string) (io.Writer, func()) {
-	w, closeAudit, _ := openAuditFile(name)
-	return w, closeAudit
-}
-
-// openAuditFile is openAudit that also returns why the file could not be
-// opened, for a caller that must report a record it lost.
-func openAuditFile(name string) (io.Writer, func(), error) {
-	pwd, err := os.Getwd()
-	if err != nil {
-		return io.Discard, func() {}, err
-	}
-	dir := hostpaths.LogDir(pwd)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return io.Discard, func() {}, err
-	}
-	f, err := os.OpenFile(filepath.Join(dir, name), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
-	if err != nil {
-		return io.Discard, func() {}, err
-	}
-	return f, func() { _ = f.Close() }, nil
-}
 
 // loadConnector loads row's Connector bound to repoSlug, and returns it with
 // the API base URL its first Route names.
