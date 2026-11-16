@@ -674,6 +674,21 @@ withRowKnobs {
     # The launcher reads this knob directly too, so no boxEnvOnly.
     boxEnv = true;
   };
+  boxForgeCredential = {
+    env = "BOX_FORGE_CREDENTIAL";
+    group = "forge";
+    default = "forwarded";
+    doc = "whether the launcher forwards a forge credential into a read-only Box: `forwarded` (default) keeps today's token forwarding; `none` forwards neither GH_TOKEN, FORGEJO_TOKEN, nor a BOX_*_TOKEN substitute, so the Box clones the host-seeded mirror and reads through host-answered Signal-socket verbs. Only valid with BOX_FORGE_AND_ISSUE_ACCESS=read-only (evaluation and the launcher both refuse otherwise). An opt-in switch ahead of #6900 making `none` the default (issue #7140)";
+    choices = [
+      "forwarded"
+      "none"
+    ];
+    flakeOption = true;
+    legacySettingsExempt = true;
+    nixSubPath = "boxForgeCredential";
+    # The launcher computes what it forwards; the Box never reads this knob.
+    boxEnv = false;
+  };
   maxFixAttempts = {
     env = "MAX_FIX_ATTEMPTS";
     group = "dispatch";

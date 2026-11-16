@@ -15,6 +15,7 @@ func LoadKnobs(src KnobSource) Knobs {
 		AnthropicAPIKey:           src.Secret("ANTHROPIC_API_KEY"),
 		BaseBranch:                src.String("BASE_BRANCH"),
 		BoxForgeAndIssueAccess:    src.String("BOX_FORGE_AND_ISSUE_ACCESS"),
+		BoxForgeCredential:        src.String("BOX_FORGE_CREDENTIAL"),
 		BranchPrefix:              src.String("BRANCH_PREFIX"),
 		ButlerChoreClasses:        src.String("BUTLER_CHORE_CLASSES"),
 		ButlerChores:              src.String("BUTLER_CHORES"),

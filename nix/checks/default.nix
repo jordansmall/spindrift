@@ -86,6 +86,7 @@ let
     // (import ./awake-window.nix common)
     // (import ./chore-catalog.nix common)
     // (import ./read-only-capability.nix common)
+    // (import ./box-forge-credential.nix common)
     // (import ./network-mode.nix common)
     // (import ./nix-store-writable.nix common)
     // (import ./row-knobs.nix common)

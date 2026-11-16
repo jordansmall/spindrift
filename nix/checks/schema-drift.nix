@@ -120,6 +120,7 @@ let
         "mergeMethod"
         "syncMethod"
         "boxForgeAndIssueAccess"
+        "boxForgeCredential"
         "networkMode"
         "signalCarrier"
       ];
