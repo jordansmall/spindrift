@@ -1031,7 +1031,7 @@ func TestHostRepoDir_CodeForgeLocal_DefaultsAbsoluteAndFeedsLanding(t *testing.T
 	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", "")
 
 	c := loadConfig()
-	if cf := newCodeForge(c, local.SanitizedParent{}, nil); cf == nil {
+	if cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil); cf == nil {
 		t.Fatal("newCodeForge(CODE_FORGE=local) = nil")
 	}
 
@@ -2823,7 +2823,7 @@ func TestNewCodeForge_Git_ReturnsPushOnlyAdapter(t *testing.T) {
 	c.CodeForge = "git"
 	c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/owner/repo.git")
 
-	cf := newCodeForge(c, local.SanitizedParent{}, nil)
+	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
 
 	if _, ok := cf.(forge.PRForge); ok {
 		t.Error("newCodeForge(CODE_FORGE=git) satisfies PRForge, want the push-only git adapter to implement CodeForge only")
@@ -2840,7 +2840,7 @@ func TestNewCodeForge_Forgejo_IsPRForge(t *testing.T) {
 	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	c.setRowKnob("FORGEJO_TOKEN", "tok")
 
-	cf := newCodeForge(c, local.SanitizedParent{}, nil)
+	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
 
 	if cf == nil {
 		t.Fatal("newCodeForge(CODE_FORGE=forgejo) returned nil")
@@ -2858,7 +2858,7 @@ func TestNewCodeForge_Local_ReturnsBundleRelayAdapter(t *testing.T) {
 	c.CodeForge = "local"
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", filepath.Join(t.TempDir(), "repo.git"))
 
-	cf := newCodeForge(c, local.ResolveParent("1694", ""), nil)
+	cf := mustNewCodeForge(t, c, local.ResolveParent("1694", ""), nil)
 
 	if _, ok := cf.(forge.PRForge); ok {
 		t.Error("newCodeForge(CODE_FORGE=local) satisfies PRForge, want a push-only adapter")
@@ -2877,7 +2877,7 @@ func TestNewCodeForge_Github_ImplementsPRForge(t *testing.T) {
 	c := minimalValidConfig()
 	c.CodeForge = "github"
 
-	cf := newCodeForge(c, local.SanitizedParent{}, nil)
+	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
 
 	if _, ok := cf.(forge.PRForge); !ok {
 		t.Error("newCodeForge(CODE_FORGE=github) does not satisfy PRForge")
@@ -2893,7 +2893,7 @@ func TestNewCodeForge_GithubReadOnly_ImplementsBundleRelay(t *testing.T) {
 	c.CodeForge = "github"
 	c.BoxForgeAndIssueAccess = "read-only"
 
-	cf := newCodeForge(c, local.SanitizedParent{}, nil)
+	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
 
 	if _, ok := cf.(forge.BundleRelay); !ok {
 		t.Error("newCodeForge(CODE_FORGE=github, BOX_FORGE_AND_ISSUE_ACCESS=read-only) does not satisfy forge.BundleRelay")
@@ -2911,7 +2911,7 @@ func TestNewCodeForge_GithubReadWrite_DoesNotImplementBundleRelay(t *testing.T) 
 	c.CodeForge = "github"
 	c.BoxForgeAndIssueAccess = "read-write"
 
-	cf := newCodeForge(c, local.SanitizedParent{}, nil)
+	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
 
 	if _, ok := cf.(forge.BundleRelay); ok {
 		t.Error("newCodeForge(CODE_FORGE=github, BOX_FORGE_AND_ISSUE_ACCESS=read-write) satisfies forge.BundleRelay, want it hidden")
@@ -2927,7 +2927,7 @@ func TestNewCodeForge_GithubReadOnly_SatisfiesCapabilityGate(t *testing.T) {
 	c := minimalValidConfig()
 	c.CodeForge = "github"
 	c.BoxForgeAndIssueAccess = "read-only"
-	_ = newCodeForge(c, local.SanitizedParent{}, nil)
+	_ = mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
 
 	if err := checkReadOnlyCapabilityGate(c); err != nil {
 		t.Errorf("checkReadOnlyCapabilityGate() with CODE_FORGE=github/ISSUE_TRACKER=github, read-only = %v, want nil", err)
@@ -2945,7 +2945,7 @@ func TestNewCodeForge_ForgejoReadOnly_SatisfiesBundleRelayAndDraftPRCreator(t *t
 	c.setRowKnob("FORGEJO_TOKEN", "tok")
 	c.BoxForgeAndIssueAccess = "read-only"
 
-	cf := newCodeForge(c, local.SanitizedParent{}, nil)
+	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
 
 	if _, ok := cf.(forge.BundleRelay); !ok {
 		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-only) does not satisfy forge.BundleRelay")
@@ -2966,7 +2966,7 @@ func TestNewCodeForge_ForgejoReadWrite_HostPRButNoBundleRelay(t *testing.T) {
 	c.setRowKnob("FORGEJO_TOKEN", "tok")
 	c.BoxForgeAndIssueAccess = "read-write"
 
-	cf := newCodeForge(c, local.SanitizedParent{}, nil)
+	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
 
 	if _, ok := cf.(forge.BundleRelay); ok {
 		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-write) satisfies forge.BundleRelay, want it hidden")
@@ -3002,7 +3002,7 @@ func TestResolveCapabilities_HostCanOpenPR(t *testing.T) {
 			c.setRowKnob("FORGEJO_TOKEN", "tok")
 			c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/owner/repo.git")
 			c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", filepath.Join(t.TempDir(), "repo.git"))
-			cf := newCodeForge(c, local.ResolveParent("1694", ""), nil)
+			cf := mustNewCodeForge(t, c, local.ResolveParent("1694", ""), nil)
 			if cf == nil {
 				t.Fatalf("newCodeForge(CODE_FORGE=%s) = nil", tc.forge)
 			}
@@ -3024,7 +3024,7 @@ func TestNewCodeForge_LocalReadOnly_ReturnsPlainAdapter(t *testing.T) {
 	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", filepath.Join(t.TempDir(), "repo.git"))
 	c.BoxForgeAndIssueAccess = "read-only"
 
-	cf := newCodeForge(c, local.ResolveParent("1694", ""), nil)
+	cf := mustNewCodeForge(t, c, local.ResolveParent("1694", ""), nil)
 
 	if cf == nil {
 		t.Fatal("newCodeForge(CODE_FORGE=local, BOX_FORGE_AND_ISSUE_ACCESS=read-only) returned nil")
@@ -3046,7 +3046,7 @@ func TestNewCodeForge_GitReadOnly_ReturnsPlainAdapter(t *testing.T) {
 	c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/owner/repo.git")
 	c.BoxForgeAndIssueAccess = "read-only"
 
-	cf := newCodeForge(c, local.SanitizedParent{}, nil)
+	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
 
 	if cf == nil {
 		t.Fatal("newCodeForge(CODE_FORGE=git, BOX_FORGE_AND_ISSUE_ACCESS=read-only) returned nil")
@@ -3532,7 +3532,7 @@ func TestDispatchConfig_NonPRForge_OpenPRForIssueAlwaysReportsNotFound(t *testin
 	c := minimalValidConfig()
 	c.CodeForge = "git"
 	c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://example.com/repo.git")
-	cf := newCodeForge(c, local.SanitizedParent{}, nil)
+	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
 	if _, ok := cf.(forge.PRForge); ok {
 		t.Fatal("test setup: expected a non-PRForge Code Forge")
 	}
@@ -3558,7 +3558,7 @@ func TestDispatchConfig_NonPRForge_OpenPRForIssueAlwaysReportsNotFound(t *testin
 func seedMirrorDispatchConfig(t *testing.T, c config) dispatch.Config {
 	t.Helper()
 	it := forge.NewFake()
-	cf := newCodeForge(c, local.SanitizedParent{}, it)
+	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, it)
 	return dispatchConfig(c, t.TempDir(), it, testWired(it), cf, forge.ResolveCodeForge(cf))
 }
 
@@ -3946,7 +3946,7 @@ func TestDispatchConfig_ResolveEnv_BoxForgejoTokenOverridesForgejoToken(t *testi
 	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
-	cf := newCodeForge(c, local.SanitizedParent{}, nil)
+	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
 
 	cfg := dispatchConfig(c, "", forge.NewFake(), testWired(forge.NewFake()), cf, forge.Capabilities{})
 
@@ -3964,7 +3964,7 @@ func TestDispatchConfig_ResolveEnv_BoxForgejoTokenUnsetFallsThrough(t *testing.T
 	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("BOX_FORGEJO_TOKEN", "")
-	cf := newCodeForge(c, local.SanitizedParent{}, nil)
+	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
 
 	cfg := dispatchConfig(c, "", forge.NewFake(), testWired(forge.NewFake()), cf, forge.Capabilities{})
 
@@ -3982,7 +3982,7 @@ func TestDispatchConfig_ResolveEnv_BoxForgejoTokenDoesNotAffectOtherNames(t *tes
 	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("GH_TOKEN", "launcher-gh-tok")
 	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
-	cf := newCodeForge(c, local.SanitizedParent{}, nil)
+	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
 
 	cfg := dispatchConfig(c, "", forge.NewFake(), testWired(forge.NewFake()), cf, forge.Capabilities{})
 

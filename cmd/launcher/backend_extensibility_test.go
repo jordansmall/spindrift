@@ -84,7 +84,7 @@ func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 		t.Fatalf("newIssueTracker(gitlab) returned %T, want *forge.Fake (the row's constructor)", it)
 	}
 
-	cf := newCodeForge(c, forge.SanitizedParent{}, it)
+	cf := mustNewCodeForge(t, c, forge.SanitizedParent{}, it)
 	if _, ok := cf.(*forge.Fake); !ok {
 		t.Fatalf("newCodeForge(gitlab) returned %T, want *forge.Fake (the row's constructor)", cf)
 	}

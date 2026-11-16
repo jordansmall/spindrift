@@ -487,7 +487,7 @@ func TestUnregisteredBackendNameFailsWithoutGithubFallback(t *testing.T) {
 	}
 	assertPanics("newIssueTracker", func() { mustBuild(newIssueTracker(c)) })
 	c.CodeForge = "nope"
-	assertPanics("newCodeForge", func() { newCodeForge(c, forge.SanitizedParent{}, forge.NewFake()) })
+	assertPanics("newCodeForge", func() { _, _ = newCodeForge(c, forge.SanitizedParent{}, forge.NewFake()) })
 }
 
 func TestNewReadContext_UnregisteredBackendIsAnError(t *testing.T) {

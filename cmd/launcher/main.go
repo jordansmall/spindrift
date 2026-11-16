@@ -624,16 +624,18 @@ func issueScope(c config) string {
 // (host-mediated landing onto the Accumulation repo's Integration branch, ADR
 // 0033). parent is only the local seam's Integration-branch key (issue #1734);
 // every other forge ignores it. An unregistered name is unreachable
-// post-validate, and there is no fallback: it panics.
-func newCodeForge(c config, parent local.SanitizedParent, it forge.IssueTracker) forge.CodeForge {
+// post-validate, and there is no fallback: it panics. A constructor error is
+// returned, since a primary Connector row can fail at runtime (module missing,
+// handshake refused, unsupported MERGE_METHOD).
+func newCodeForge(c config, parent local.SanitizedParent, it forge.IssueTracker) (forge.CodeForge, error) {
 	s, ok := backendkit.ByName(c.CodeForge)
 	if !ok || s.NewCodeForge == nil {
 		panic(fmt.Sprintf("newCodeForge: CODE_FORGE=%q is not a registered code forge (validate should have rejected it)", c.CodeForge))
 	}
 	if c.BoxForgeAndIssueAccess == "read-only" && s.NewReadOnlyCodeForge != nil {
-		return mustBuild(s.NewReadOnlyCodeForge(backendShared(c), c.knobLookup, parent, it))
+		return s.NewReadOnlyCodeForge(backendShared(c), c.knobLookup, parent, it)
 	}
-	return mustBuild(s.NewCodeForge(backendShared(c), c.knobLookup, parent, it))
+	return s.NewCodeForge(backendShared(c), c.knobLookup, parent, it)
 }
 
 // dispatchCompletionBanner returns the forge-aware end-of-dispatch line, so
