@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorsandbox"
 )
 
 const fixturesEnv = "SPINDRIFT_CONNECTOR_FIXTURES_DIR"
@@ -677,5 +678,37 @@ func TestLoadPassesShadowAndObserveToTheNetwork(t *testing.T) {
 	}
 	if len(seen) != 1 || !seen[0].Shadow || seen[0].Status != 200 || !strings.Contains(audit.String(), `"shadow":true`) {
 		t.Errorf("observed %+v, audit %q", seen, audit.String())
+	}
+}
+
+// recordingLoader is a sandbox that records the network name of each load it is
+// handed.
+type recordingLoader struct {
+	connectorsandbox.Loader
+	networks []string
+}
+
+func (l *recordingLoader) LoadNetwork(_ context.Context, _ []byte, n connectorhost.Network) (*connectorhost.Connector, error) {
+	l.networks = append(l.networks, n.Name)
+	return nil, errors.New("recorded")
+}
+
+// A reload is a Load like any other, so under the Connector sandbox the
+// replacement is loaded into it too.
+func TestLoadRoutesEveryLoadThroughTheInstalledSandbox(t *testing.T) {
+	module := filepath.Join(t.TempDir(), "x.wasm")
+	if err := os.WriteFile(module, []byte("\x00asm"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l := &recordingLoader{}
+	t.Cleanup(connectorsandbox.Use(l))
+	r := backendrows.Row{Name: "fixture", Module: module, CredentialEnv: "TOKEN"}
+	for range 2 {
+		if _, err := backendrows.Load(context.Background(), r, backendrows.Options{Audit: &bytes.Buffer{}}); err == nil || err.Error() != "recorded" {
+			t.Fatalf("Load = %v, want the sandbox's error", err)
+		}
+	}
+	if len(l.networks) != 2 || l.networks[0] != "fixture" || l.networks[1] != "fixture" {
+		t.Errorf("sandbox saw loads %v, want two for fixture", l.networks)
 	}
 }
