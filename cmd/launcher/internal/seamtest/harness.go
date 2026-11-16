@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -155,6 +156,9 @@ type Cmd struct {
 	// variables (a dev shell or Box exports many) cannot leak into a program
 	// whose config is meant to come from its input document alone.
 	CleanEnv bool
+	// Unset names variables dropped from the child's env entirely, ambient or
+	// overlaid, for a test that must tell an absent key from a blank one.
+	Unset []string
 	// PathDirs are prepended to the parent PATH, in order.
 	PathDirs []string
 	// Dir is the working directory; empty inherits the parent's.
@@ -215,6 +219,12 @@ func Start(tb testing.TB, c Cmd) *Proc {
 	env := append(base, "HOME="+tb.TempDir(), "PATH="+pathVal)
 	for k, v := range c.Env {
 		env = append(env, k+"="+v)
+	}
+	if len(c.Unset) > 0 {
+		env = slices.DeleteFunc(env, func(kv string) bool {
+			name, _, _ := strings.Cut(kv, "=")
+			return slices.Contains(c.Unset, name)
+		})
 	}
 	p := &Proc{cmd: exec.Command(c.Bin, c.Args...)}
 	p.cmd.Dir = c.Dir

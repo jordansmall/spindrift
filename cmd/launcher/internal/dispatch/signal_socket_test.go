@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/signalsocket"
@@ -536,5 +537,74 @@ func TestSignalSocket_IssueRead_NilReaderIsUnsupported(t *testing.T) {
 	status, _ := getIssue(t, retryConfig(3, 0, 0), registrymanifest.NewUnixEndpoint(""))
 	if status != http.StatusNotImplemented {
 		t.Errorf("GET /issue with no reader = %d, want 501", status)
+	}
+}
+
+type fakeIssueSearcher struct{ texts []string }
+
+func (f *fakeIssueSearcher) SearchIssues(text string, _ forge.IssueState, _ string, _ int) (signalwire.IssueSearchReply, *signalwire.Reject) {
+	f.texts = append(f.texts, text)
+	return signalwire.IssueSearchReply{Issues: []signalwire.IssueSearchResult{{Number: "9", Title: "from the host searcher", State: "open"}}}, nil
+}
+
+// TestRunOnce_NoForgeCredential_ReadOnlyBoxStillAnswersIssueVerbs pins issue
+// #7140's opted-in read-only Box: no forge token name reaches its env, yet the
+// issue and issue-search verbs still answer over the Signal socket, because
+// the host-side reader and searcher hold the credential, not the Box.
+func TestRunOnce_NoForgeCredential_ReadOnlyBoxStillAnswersIssueVerbs(t *testing.T) {
+	tokenNames := []string{"GH_TOKEN", "BOX_GH_TOKEN", "FORGEJO_TOKEN", "BOX_FORGEJO_TOKEN"}
+	for _, n := range tokenNames {
+		t.Setenv(n, "secret-"+n)
+	}
+	reader := &fakeIssueReader{}
+	searcher := &fakeIssueSearcher{}
+	cfg := retryConfig(3, 0, 0)
+	cfg.SignalCarrier = "socket"
+	cfg.BoxForgeAndIssueAccess = "read-only"
+	cfg.NoForgeCredential = true
+	cfg.BoxEnvVars = "REPO_SLUG " + strings.Join(tokenNames, " ")
+	cfg.IssueReader = reader
+	cfg.IssueSearcher = searcher
+
+	fr := runner.NewFake()
+	fr.RegistryProxyTransportEndpoint = registrymanifest.NewUnixEndpoint("")
+	bodies := map[string]string{}
+	fr.RunFunc = func(box runner.Box) error {
+		for _, n := range tokenNames {
+			if v, ok := box.Env[n]; ok {
+				t.Errorf("box.Env[%s] = %q, want absent under NoForgeCredential", n, v)
+			}
+		}
+		client := &http.Client{Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", box.Sockets[0].Source)
+			},
+		}}
+		for verb, query := range map[string]string{"issue": "ref=7", "issue-search": "text=dupe&state=open"} {
+			resp, err := client.Get("http://signal/" + verb + "?" + query)
+			if err != nil {
+				t.Errorf("GET /%s: %v", verb, err)
+				continue
+			}
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close() //nolint:errcheck
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("GET /%s = %d %q, want 200", verb, resp.StatusCode, b)
+			}
+			bodies[verb] = string(b)
+		}
+		box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=" + box.Env["RUN_NONCE"] + "\n")) //nolint:errcheck
+		return nil
+	}
+
+	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
+	}
+	if !strings.Contains(bodies["issue"], "from the host reader") || len(reader.refs) != 1 || reader.refs[0] != "7" {
+		t.Errorf("issue verb: body %q, reader refs %v, want the reader's snapshot for ref 7", bodies["issue"], reader.refs)
+	}
+	if !strings.Contains(bodies["issue-search"], "from the host searcher") || len(searcher.texts) != 1 || searcher.texts[0] != "dupe" {
+		t.Errorf("issue-search verb: body %q, searched %v, want the searcher's hit for text dupe", bodies["issue-search"], searcher.texts)
 	}
 }
