@@ -123,15 +123,20 @@ func (h *forgejoCodeForgeHarness) FailNextRebase(ref string) {
 // the fake's merge route turns into the non-2xx response that the adapter's
 // classifyMergeFailure interprets.
 func (h *forgejoCodeForgeHarness) realMerge(num string) error {
-	h.t.Helper()
-	work := h.t.TempDir()
-	if out, err := exec.Command("git", "clone", h.repo.Bare, work).CombinedOutput(); err != nil {
+	return mergeIntoMain(h.t, h.repo.Bare, h.branchName(num))
+}
+
+// mergeIntoMain merges head into main in the bare repo with a real git merge,
+// failing on a conflict.
+func mergeIntoMain(t *testing.T, bare, head string) error {
+	t.Helper()
+	work := t.TempDir()
+	if out, err := exec.Command("git", "clone", bare, work).CombinedOutput(); err != nil {
 		return fmt.Errorf("git clone: %w: %s", err, out)
 	}
 	if out, err := exec.Command("git", "-C", work, "checkout", "main").CombinedOutput(); err != nil {
 		return fmt.Errorf("git checkout main: %w: %s", err, out)
 	}
-	head := h.branchName(num)
 	if out, err := exec.Command("git", "-C", work, "merge", "--no-ff", "origin/"+head, "-m", "merge "+head).CombinedOutput(); err != nil {
 		exec.Command("git", "-C", work, "merge", "--abort").Run()
 		return fmt.Errorf("merge conflict: %s", out)
