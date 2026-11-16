@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
 // GuestEvents exposes the unexported guestEvents to the external tests.
@@ -194,4 +196,15 @@ func (s *Sessions) OpenSessions() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.open)
+}
+
+// RawBatchDecoderAnswering is the raw batch decoder with every request
+// answered by answer instead of the guest, so a test can feed it a malformed one.
+func (c *Connector) RawBatchDecoderAnswering(answer string) driverkit.BatchDecoder {
+	cd := c.rawCodec()
+	cd.batch = func(_ context.Context, _ uint32, _ []string, result *json.RawMessage) error {
+		*result = json.RawMessage(answer)
+		return nil
+	}
+	return c.newBatchDecoder(cd)
 }
