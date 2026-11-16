@@ -35,10 +35,11 @@ let
     driverRows.fixture = fixtureRow;
   };
   plain = mkHarness { };
-  # The dogfood's primary Connectors: backend rows, which carry `primary`
-  # themselves. Derived so no backend name is spelled in a test (ADR 0068,
-  # backend-name-guard).
-  backendPrimaries = import ../dogfood-primary.nix;
+  # The dogfood's primary Connectors: backend rows carry `primary` themselves,
+  # Driver rows are named in mkHarness's `primaryDrivers`. Derived so no
+  # backend name is spelled in a test (ADR 0068, backend-name-guard).
+  backendPrimaries = fixtures.dogfoodBackendPrimaries;
+  driverPrimaries = fixtures.dogfoodDriverPrimaries;
   claudeConnector = (import ../../connectors/claude).lib.connector { core = import ../../core; };
   githubConnector = (import ../../connectors/github).lib.connector { core = import ../../core; };
   claudeRow = claudeConnector.driverRow pkgs.lib;
@@ -321,19 +322,31 @@ in
     ) "`shadow` on the claude Connector must reach mkHarness";
     pkgs.runCommand "connector-driver-rows-flake-module-shadow-option" { } "touch $out";
 
-  # Issues #6797, #6810, #6998: the dogfood shadows claude (Driver replay) and
-  # runs github as primary. The real flake's default app (flake.nix's
-  # `spindrift.connectors` through the module) must equal the direct mirror's,
-  # whose Box rows file and input document carry `shadow` and `primary`; the app
+  # Issues #6797, #6810, #6998, #6999: the dogfood runs claude (a Driver row)
+  # and github (a backend row) as primary and shadows nothing. The real flake's
+  # default app (flake.nix's `spindrift.connectors` through the module) must
+  # equal the direct mirror's, whose Box rows file and input document carry
+  # `primary` and no `shadow`; the app
   # program embeds both, so dropping flake.nix's wiring changes it. The mirror
   # alone would not notice: it reads the nix/dogfood-*.nix lists itself.
   connector-driver-rows-dogfood-shadows =
     assert assertMsg (config.apps.default.program == fixtures.harness.apps.default.program)
       "flake.nix must wire the nix/dogfood-shadow.nix and nix/dogfood-primary.nix Connectors: the dogfood app differs from the mirror (fixtures.harness)";
     pkgs.runCommand "connector-driver-rows-dogfood-shadows" { nativeBuildInputs = [ pkgs.jq ]; } ''
-      jq -e 'any(.[]; .name == "claude" and .shadow == true)' \
-        ${fixtures.harness.internals.driverRowsFile}
+      jq -e --argjson names '${builtins.toJSON driverPrimaries}' '
+        ($names | index("claude")) != null
+          and all(.[]; has("shadow") | not)
+          and ([.[] | select(.name as $n | $names | index($n))] as $rows
+            | ($rows | length) == ($names | length)
+              and all($rows[]; .primary == true and .firstParty == true and has("module")))
+      ' ${fixtures.harness.internals.driverRowsFile}
       ${fixtures.runInputDocOf config.apps.default.program}
+      jq -e --argjson names '${builtins.toJSON driverPrimaries}' '
+        ([.drivers[]? | select(.name as $n | $names | index($n))] as $rows
+          | ($rows | length) == ($names | length)
+            and all($rows[]; .primary == true and has("module")))
+          and all((.drivers // [])[]; has("shadow") | not)
+      ' "$doc"
       jq -e --argjson names '${builtins.toJSON backendPrimaries}' '
         [.backends[] | select(.name as $n | $names | index($n))] as $rows
         | ($names | length) > 0
@@ -516,6 +529,13 @@ in
         driver = null;
       } != null
     ) "a row with no native backend of its name must be refused";
+    assert assertMsg (
+      names.primaryError [ "github" ] [ "claude" ] "claude" {
+        shadow = false;
+        driver = { };
+        backend = { };
+      } != null
+    ) "a row with both a driver and a backend must still pass the backend checks";
     assert assertMsg (
       names.primaryError [ "row1" ] [ "claude" ] "row1" {
         shadow = false;
