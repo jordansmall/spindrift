@@ -38,6 +38,9 @@ var Strategy = backendkit.Strategy{
 		if err != nil {
 			return nil, err
 		}
+		if row, ok := primaryRow(); ok {
+			return newConnectorTracker(row, s, k)
+		}
 		mapping := statusMappingFor(s.Tracker, k.JiraStatusMapping)
 		statusMapping, err := ParseStatusMapping(mapping)
 		if err != nil {
