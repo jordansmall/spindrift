@@ -199,15 +199,39 @@ func listIssues(t tracker.Target, q tracker.Query, limit int) ([]tracker.Issue, 
 	if limit < 1 {
 		return nil, fmt.Errorf("list issues: limit %d < 1", limit)
 	}
+	return search(t, jql(t.Repo, q), limit)
+}
+
+// labeled returns up to limit issues in state carrying label, newest first. A
+// closed one carries its close date and not-planned reason, which core's dedup
+// scan reads: a finding closed as not planned must not be refiled.
+func labeled(t tracker.Target, label, state string, limit int) ([]tracker.Issue, error) {
+	if limit < 1 {
+		return nil, fmt.Errorf("list labeled issues: limit %d < 1", limit)
+	}
+	var category string
+	switch state {
+	case "open":
+		category = "!="
+	case "closed":
+		category = "="
+	default:
+		return nil, fmt.Errorf("list labeled issues: unsupported issue state %q", state)
+	}
+	return search(t, fmt.Sprintf("project = %q AND labels = %q AND statusCategory %s Done order by created desc", t.Repo, label, category), limit)
+}
+
+// search runs jql through the target's dialect and maps up to limit rows.
+func search(t tracker.Target, jql string, limit int) ([]tracker.Issue, error) {
 	var raw []rawIssue
 	var err error
 	switch t.Dialect {
 	case "cloud":
-		raw, err = searchCloud(t, jql(t.Repo, q), limit)
+		raw, err = searchCloud(t, jql, limit)
 	case "server":
-		raw, err = searchServer(t, jql(t.Repo, q), limit)
+		raw, err = searchServer(t, jql, limit)
 	default:
-		err = fmt.Errorf("list issues: unknown Jira dialect %q (want \"cloud\" or \"server\")", t.Dialect)
+		err = fmt.Errorf("search: unknown Jira dialect %q (want \"cloud\" or \"server\")", t.Dialect)
 	}
 	if err != nil {
 		return nil, err

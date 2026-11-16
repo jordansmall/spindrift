@@ -325,3 +325,73 @@ func TestReadWithEmptyBodyErrors(t *testing.T) {
 		t.Fatalf("err = %v, want a decode error", err)
 	}
 }
+
+func TestLabeledClosedCarriesCloseFields(t *testing.T) {
+	got := script(t, func(_ connector.Request, u *url.URL) (int, string) {
+		if u.Path != "/jira/rest/api/2/search/jql" {
+			return 404, "{}"
+		}
+		return 200, `{"isLast":true,"issues":[
+			{"key":"ENG-9","fields":{"summary":"np","description":"nb","status":{"statusCategory":{"key":"done"}},"labels":["agent-review-finding"],"resolution":{"name":"Won't Do"},"resolutiondate":"2026-01-02T03:04:05.000+0000"}},
+			{"key":"ENG-7","fields":{"summary":"done","status":{"statusCategory":{"key":"done"}},"labels":[],"resolution":{"name":"Done"},"resolutiondate":"2026-01-01T00:00:00.000+0000"}}]}`
+	})
+	issues, err := labeled(cloud, "agent-review-finding", "closed", 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 2 || issues[0].Number != "ENG-9" || issues[0].State != "closed" || !issues[0].ClosedNotPlanned ||
+		issues[0].ClosedAt != "2026-01-02T03:04:05Z" || issues[1].ClosedNotPlanned {
+		t.Fatalf("issues = %#v", issues)
+	}
+	const want = `project = "ENG" AND labels = "agent-review-finding" AND statusCategory = Done order by created desc`
+	if len(*got) != 1 || mustQuery(t, (*got)[0]).Get("jql") != want {
+		t.Fatalf("requests = %v, want one with jql %s", *got, want)
+	}
+}
+
+func TestLabeledOpenQueriesNotDone(t *testing.T) {
+	got := script(t, func(connector.Request, *url.URL) (int, string) {
+		return 200, `{"total":1,"issues":[` + issueJSON("ENG-5") + `]}`
+	})
+	issues, err := labeled(server, "x", "open", 5)
+	if err != nil || len(issues) != 1 || issues[0].State != "open" || issues[0].ClosedAt != "" || issues[0].ClosedNotPlanned {
+		t.Fatalf("issues = %#v, err = %v", issues, err)
+	}
+	const want = `project = "ENG" AND labels = "x" AND statusCategory != Done order by created desc`
+	if len(*got) != 1 || mustQuery(t, (*got)[0]).Get("jql") != want {
+		t.Fatalf("requests = %v, want one with jql %s", *got, want)
+	}
+}
+
+func TestLabeledCapsAtLimit(t *testing.T) {
+	script(t, func(connector.Request, *url.URL) (int, string) {
+		return 200, `{"isLast":true,"issues":[` + issueJSON("ENG-1") + `,` + issueJSON("ENG-2") + `]}`
+	})
+	issues, err := labeled(cloud, "x", "open", 1)
+	if err != nil || len(issues) != 1 {
+		t.Fatalf("issues = %v, err = %v", issues, err)
+	}
+}
+
+func TestLabeledRefusesBadInputWithoutRequest(t *testing.T) {
+	got := script(t, func(connector.Request, *url.URL) (int, string) { return 200, `{}` })
+	for _, c := range []struct {
+		state string
+		limit int
+	}{{"all", 5}, {"open", 0}} {
+		if _, err := labeled(cloud, "x", c.state, c.limit); err == nil {
+			t.Errorf("labeled(%+v): no error", c)
+		}
+	}
+	if len(*got) != 0 {
+		t.Errorf("sent %d requests", len(*got))
+	}
+}
+
+func TestLabeledUnknownDialectErrors(t *testing.T) {
+	script(t, func(connector.Request, *url.URL) (int, string) { return 200, `{}` })
+	tgt := tracker.Target{API: site, Repo: "ENG", Dialect: "datacenter"}
+	if _, err := labeled(tgt, "x", "open", 5); err == nil || !strings.Contains(err.Error(), `"datacenter"`) {
+		t.Fatalf("err = %v", err)
+	}
+}
