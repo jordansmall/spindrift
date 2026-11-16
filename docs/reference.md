@@ -3141,8 +3141,13 @@ This is protocol version **0.3.0**. The host is
   and `connector_call(ptr i32, len i32) -> i64`, which returns the response
   as `ptr << 32 | len`. The request is `{"method": "...", "params": {...}}`;
   the response is `{"result": ...}` or `{"error": "...", "class": "..."}`, and
-  an unknown method is an `error`. A module with neither export still loads; a call to
-  it fails with `ErrExport`. A Connector is safe for concurrent use: the host
+  an unknown method is an `error`. A raw request, which a method opts into
+  (today `driver.decodeRaw`), is instead the bytes `"<method>\n<payload>"`:
+  the method name, one newline, then the payload as-is with no JSON decode.
+  The guest reads any request whose first byte is not `{` as raw; the host's
+  JSON envelope always starts with `{`. The response is the same envelope. A
+  module with neither export still loads; a call to it fails with
+  `ErrExport`. A Connector is safe for concurrent use: the host
   makes one call at a time into the module. Every failed call wraps `ErrCall`
   and, for a guest failure, the specific error under Limits too, so
   `errors.Is` matches both. A Connector-reported `error` is an answer: it
@@ -3223,8 +3228,8 @@ This is protocol version **0.3.0**. The host is
 - **Driver capabilities.** A Driver Connector advertises
   capability `"driver"`, meaning it serves the first six methods below, and
   optionally `"driver.resolveExit"`, `"driver.toolPhase"`, `"driver.toolKind"`,
-  `"driver.modelFamily"`, (0.3.0) `"driver.decodeBatch"` and (0.1.1)
-  `"driver.streamFilter"`. The first five
+  `"driver.modelFamily"`, (0.3.0) `"driver.decodeBatch"`, `"driver.decodeRaw"`
+  and (0.1.1) `"driver.streamFilter"`. The first five
   each serve the method of the same name; `driver.streamFilter` serves the four
   stream methods. The
   host's `DriverStrategy` builds a
@@ -3246,6 +3251,7 @@ This is protocol version **0.3.0**. The host is
   | `driver.toolKind` (optional) | `{tool}` | `{kind}` |
   | `driver.modelFamily` (optional) | `{model}` | `{label, rank}` |
   | `driver.decodeBatch` (optional, `driver.decodeBatch`) | `{decoder, lines}` | an array with one event array per line |
+  | `driver.decodeRaw` (optional, `driver.decodeRaw`) | raw: `"driver.decodeRaw\n<decoder>\n"` then each line followed by `\n` | an array with one event array per line |
   | `driver.newStreamFilter` (optional, `driver.streamFilter`) | `{}` | `{filter}`, an opaque handle |
   | `driver.streamWrite` (optional, `driver.streamFilter`) | `{filter, data}` | `{data}` |
   | `driver.streamFlush` (optional, `driver.streamFilter`) | `{filter}` | `{data}` |
@@ -3266,6 +3272,16 @@ This is protocol version **0.3.0**. The host is
   `spindrift_op` line in a batch decodes as core's host op. A failed batch
   request, or an answer that is not one element per line, makes each of its
   lines one `unparsed` event; a rejected element makes only its own line one.
+  `driver.decodeRaw` is `driver.decodeBatch` with the lines sent as raw bytes
+  (see Calls) rather than a JSON array of escaped strings, so the guest reads
+  them in place. Its answer, limits and failure handling are the same, and the
+  host prefers it, for a batch and for the live heartbeat's one line, whenever
+  the Connector advertises it, falling back to `driver.decodeBatch` or
+  `driver.decode`. It alone is enough for the host to decode in batches; the
+  Connector need not also advertise `driver.decodeBatch`. A line holding a
+  newline cannot be framed: the host never sends it and decodes it as one
+  `unparsed` event. Every SDK Driver advertises it. It arrived within 0.3.z as
+  an additive capability, so it takes no version bump and no tag above.
   `driver.resolveExit` gets the Pass log's content,
   not a path: the host reads the file, because a Connector has no filesystem.
   The log crosses as a JSON string, so invalid UTF-8 in it reaches the guest
@@ -3619,8 +3635,10 @@ This is protocol version **0.3.0**. The host is
   matches `ErrHandshake`.
 - **Go SDK.** Module `spindrift.dev/sdk` under [`sdk/`](../sdk/), separate
   from the launcher module. A Connector calls `connector.Register(capabilities...)`
-  from `init()` and serves methods with `connector.Handle(method, fn)`. A
-  Driver instead calls `driver.Register(driver.Strategy{...})`, which
+  from `init()` and serves methods with `connector.Handle(method, fn)`, or a
+  raw method (see Calls) with `connector.HandleRaw(method, fn)`, whose `fn` gets
+  the payload bytes in place and must not keep them past the call. A Driver
+  instead calls `driver.Register(driver.Strategy{...})`, which
   registers its capabilities and every method above. Package `event` is a
   published copy of the canonical event vocabulary ([ADR 0065](adr/0065-drivers-decode-pass-logs-into-canonical-events.md)),
   kept in parity with driverkit by `sdk/event/parity_test.go` (the
@@ -3632,9 +3650,11 @@ This is protocol version **0.3.0**. The host is
   compiled from
   [`nix/fixtures/connector-wasm/seamtest-driver`](../nix/fixtures/connector-wasm/seamtest-driver),
   and `seamtest.Strategy()` loads it as the one Driver every core test runs
-  against; no native twin exists. Test binaries load it under wazero's compiler
-  with a per-user compilation cache (`connectorhost.LoadCompiled`), while the
-  launcher stays on the interpreter. The claude Connector (`connectors/claude`)
+  against; no native twin exists. `conformance.RunConnector` also runs
+  `conformance.CheckDecodeRaw` when the Connector advertises
+  `driver.decodeRaw`: its raw answers must equal the JSON fallback's. Test
+  binaries load it under wazero's compiler with a per-user compilation cache
+  (`connectorhost.LoadCompiled`), while the launcher stays on the interpreter. The claude Connector (`connectors/claude`)
   is proven the same way by `connector-claude-conformance` in its subflake,
   which sets `SPINDRIFT_DRIVER_CONNECTOR_WASM`.
 
