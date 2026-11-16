@@ -733,3 +733,56 @@ func TestBuildBoxEnvMirrorCloneCarriesNoRemoteCredential(t *testing.T) {
 		})
 	}
 }
+
+// Under NoForgeCredential no forge token name reaches the Box, whichever
+// backends the run pairs and whatever the launcher's env holds; the keys are
+// absent, not blank. Without it the same env forwards the tokens unchanged.
+func TestBuildBoxEnvNoForgeCredentialDropsEveryForgeToken(t *testing.T) {
+	t.Setenv("GH_TOKEN", "gh-secret")
+	t.Setenv("FORGEJO_TOKEN", "fj-secret")
+	t.Setenv("BOX_GH_TOKEN", "box-gh-secret")
+	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-secret")
+	var tokenNames []string
+	for _, d := range backend.Registry {
+		if d.BoxTokenEnvVar != "" {
+			tokenNames = append(tokenNames, d.TokenEnvVar, d.BoxTokenEnvVar)
+		}
+	}
+	for _, c := range []struct {
+		name           string
+		forge, tracker backend.Descriptor
+	}{
+		{"github", backend.GitHub, backend.GitHub},
+		{"forgejo", backend.Forgejo, backend.Forgejo},
+		{"local", backend.Local, backend.Local},
+		{"git", backend.Git, backend.Jira},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := Config{
+				BoxEnvVars:             "REPO_SLUG " + strings.Join(tokenNames, " "),
+				ForgeDescriptor:        c.forge,
+				TrackerDescriptor:      c.tracker,
+				BoxForgeAndIssueAccess: "read-only",
+			}
+			env := mustBuildBoxEnv(t, cfg, "3", "T", 0, "", "")
+			for _, n := range tokenNames {
+				if env[n] == "" {
+					t.Errorf("%s: want forwarded without the opt-in", n)
+				}
+			}
+			cfg.NoForgeCredential = true
+			env = mustBuildBoxEnv(t, cfg, "3", "T", 0, "", "")
+			for _, n := range tokenNames {
+				if v, ok := env[n]; ok {
+					t.Errorf("%s present under NoForgeCredential: %q", n, v)
+				}
+			}
+			if _, ok := env["REPO_SLUG"]; !ok {
+				t.Error("REPO_SLUG dropped; only forge tokens may be")
+			}
+			if env["BOX_GH_TOKEN_OPTIONAL"] != "1" {
+				t.Errorf("BOX_GH_TOKEN_OPTIONAL = %q, want 1", env["BOX_GH_TOKEN_OPTIONAL"])
+			}
+		})
+	}
+}

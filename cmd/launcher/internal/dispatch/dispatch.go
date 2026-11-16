@@ -172,6 +172,11 @@ type Config struct {
 	// repo exploration. Meaningful only when Kind == "research".
 	SelfContained bool
 
+	// NoForgeCredential is config.boxHoldsNoForgeCredential (issue #7140): the
+	// Box receives no forge token, so buildBoxEnv drops every Box-forwarded
+	// token name and sets BOX_GH_TOKEN_OPTIONAL.
+	NoForgeCredential bool
+
 	// ForgeDescriptor/TrackerDescriptor are the backend-registry rows for this
 	// run's CODE_FORGE/ISSUE_TRACKER pairing, read off the forge.Capabilities
 	// value ResolveCapabilities produced (issue #2945). Config carries only
@@ -302,6 +307,15 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 		}
 		env[name] = resolve(key, name)
 	}
+	if cfg.NoForgeCredential {
+		// Absent, not blank: an empty value still reaches the Box as a set name.
+		for _, d := range backend.Registry {
+			if d.BoxTokenEnvVar != "" {
+				delete(env, d.TokenEnvVar)
+				delete(env, d.BoxTokenEnvVar)
+			}
+		}
+	}
 	if backend.ClonesFromMirror(cfg.ForgeDescriptor, cfg.boxAccessForKind() == "read-only") {
 		// The Box clones the mirror and nothing in it reads the remote, so its
 		// userinfo (commonly a token) stays on the host.
@@ -407,7 +421,7 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 		env["BOX_FULLY_LOCAL"] = "1"
 	}
 	// Fail-closed opt-out: absent means the Box requires GH_TOKEN (issue #3325).
-	if !backend.NeedsGHToken(cfg.ForgeDescriptor, cfg.TrackerDescriptor, cfg.boxAccessForKind() == "read-only") {
+	if cfg.NoForgeCredential || !backend.NeedsGHToken(cfg.ForgeDescriptor, cfg.TrackerDescriptor, cfg.boxAccessForKind() == "read-only") {
 		env["BOX_GH_TOKEN_OPTIONAL"] = "1"
 	}
 	if trackerInBoxUnreachable {

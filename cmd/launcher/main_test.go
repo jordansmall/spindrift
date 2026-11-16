@@ -4471,6 +4471,7 @@ func minimalValidConfig() config {
 			CodeForge:              "github",
 			OverlapGate:            "defer",
 			BoxForgeAndIssueAccess: "read-write",
+			BoxForgeCredential:     "forwarded",
 			NetworkMode:            "open",
 			SignalCarrier:          "log",
 		},

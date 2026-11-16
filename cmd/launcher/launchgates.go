@@ -75,7 +75,7 @@ func readOnlyTokenGates(rows []backendkit.Strategy) []launchGate {
 		gates = append(gates, launchGate{
 			Name: readOnlyTokenGatePrefix + r.Name,
 			Applicable: func(c config) bool {
-				return c.BoxForgeAndIssueAccess == "read-only" && tokenGateApplicable(c, r.Descriptor)
+				return c.BoxForgeAndIssueAccess == "read-only" && !c.boxHoldsNoForgeCredential() && tokenGateApplicable(c, r.Descriptor)
 			},
 			Network:           true,
 			UnsupportedRemedy: "pin a " + r.Name + " Connector that serves forge.tokenGrant, or remove the " + r.Name + " backend row",
