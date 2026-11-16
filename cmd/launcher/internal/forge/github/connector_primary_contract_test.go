@@ -277,7 +277,7 @@ func (e *primaryContractEnv) ghCalls(t *testing.T) (verbs []string, refused [][]
 // assertSplit is the run's proof that reads and writes took the two paths: gh
 // refused nothing and made each wanted write, the Connector sent each wanted
 // read and none was refused, the backend saw nothing outside its API, and the
-// primary log holds exactly the wantFailed reads the contract injected.
+// primary log holds exactly the wantFailed failures the contract injected.
 func (e *primaryContractEnv) assertSplit(t *testing.T, wantFailed int, wantGH, wantReads []string) {
 	t.Helper()
 	verbs, refused := e.ghCalls(t)
@@ -349,17 +349,23 @@ func (p primaryTrackerHarness) SeedComments(n string, c []forge.Comment) { p.h.S
 func (primaryTrackerHarness) IsolatesNativeFailure()                     {}
 func (primaryTrackerHarness) IsPriorityCapable()                         {}
 
-// With a primary github row the tracker contract passes: every read is the
-// Connector's, and the claim, transition and verdict writes are gh's.
+// With a primary github row the tracker contract passes: every read and every
+// issue write (claim, transition, verdict, comment) is the Connector's, and gh
+// runs nothing.
 func TestPrimaryRow_TrackerContract(t *testing.T) {
 	e := newPrimaryContractEnv(t)
 
 	forgetest.RunTrackerContract(t, primaryTrackerHarness{e})
 
-	// The contract's one injected native-deps failure is the one recorded read.
-	e.assertSplit(t, 1,
-		[]string{"issue edit"},
-		[]string{"GET /repos/" + connectorRepo + "/issues", "GET /repos/" + connectorRepo + "/issues/302/dependencies/blocked_by", "POST /graphql"})
+	// Two failures are recorded: the injected native-deps read, and the verdict
+	// the contract settles on an issue that is no longer in progress. The lost
+	// claim race it also drives is core policy and stays out of the log.
+	e.assertSplit(t, 2,
+		nil,
+		[]string{"GET /repos/" + connectorRepo + "/issues", "GET /repos/" + connectorRepo + "/issues/302/dependencies/blocked_by", "POST /graphql", "POST /repos/" + connectorRepo + "/issues"})
+	if verbs, _ := e.ghCalls(t); len(verbs) > 0 {
+		t.Errorf("the tracker contract ran gh %q under a primary row", verbs)
+	}
 }
 
 // primaryPRHarness is the PRForge contract's harness over a primary row: the

@@ -553,6 +553,9 @@ func (e *execClient) ListLabels() ([]string, error) {
 // CreateLabel creates a label in the repository. color is hex without the
 // leading #.
 func (e *execClient) CreateLabel(name, description, color string) error {
+	if row, ok := primaryRow(); ok {
+		return e.createLabelViaConnector(row, name, description, color)
+	}
 	_, err := exec.Command("gh", "label", "create", name,
 		"--repo", e.repo,
 		"--description", description,
