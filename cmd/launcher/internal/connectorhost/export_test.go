@@ -187,3 +187,10 @@ func SetBatchCap(n int) (restore func()) {
 // SetRequestTimeout sets the Network's per-http_request timeout, which is
 // unexported so only these tests shorten it.
 func (n *Network) SetRequestTimeout(d time.Duration) { n.requestTimeout = d }
+
+// OpenSessions is how many sessions the Sessions still holds open.
+func (s *Sessions) OpenSessions() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.open)
+}
