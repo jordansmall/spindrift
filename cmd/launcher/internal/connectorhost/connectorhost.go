@@ -328,12 +328,14 @@ func (c *Connector) Call(ctx context.Context, method string, params, result any)
 	}
 	if err != nil {
 		c.dead = true
+		withoutHost := fail(err)
 		err = failWithHost(err)
 		c.err.Store(&err)
 		// A Host call's fatal failure was audited where it happened; any other
 		// failed call (a rejected result, a trap, a budget or memory limit) has not.
+		// The send detail stays off it: the request's own entry carries it.
 		if c.host != nil && !c.host.failed {
-			c.network.recordFailure(DecisionFailed, err)
+			c.network.recordFailure(DecisionFailed, withoutHost)
 		}
 		// Not ctx: a cancelled caller must not stop the module being released.
 		_ = c.engine.close(context.WithoutCancel(ctx))
