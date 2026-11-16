@@ -11,7 +11,8 @@ import (
 
 // Strategy is the jira backend's Go half (ADR 0068).
 var Strategy = backendkit.Strategy{
-	Descriptor: backend.Jira,
+	Descriptor:     backend.Jira,
+	PrimaryTracker: true,
 	ValidateTracker: func(_ backendkit.Shared, l backendkit.Lookup) error {
 		k, err := ReadKnobs(l)
 		if err != nil {

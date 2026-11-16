@@ -409,18 +409,18 @@ func parseFlags(args []string) (remaining, schemaArgs []string, err error) {
 var globalSecretCmdTemplate string
 
 // connectorCredentialNeededThisRun reports whether this run reads through row:
-// its backend is the active CODE_FORGE or ISSUE_TRACKER, and the row is
-// shadowed, primary, or routed. backendrows.Use keeps a row that is none of
-// those (a jira Connector imported by a native-Jira Consumer) that nothing
-// reads until its cut-over, so the SECRET_CMD template must not fetch, or fail
-// on, its credential.
+// the row is shadowed and its backend is the active CODE_FORGE or ISSUE_TRACKER,
+// or it is the active CODE_FORGE and backendkit.ForgeReadsThroughConnector, or
+// the active ISSUE_TRACKER and backendkit.TrackerReadsThroughConnector.
+// backendrows.Use keeps a row that is none of those (a jira Connector imported
+// by a native-Jira Consumer) that nothing reads until its cut-over, so the
+// SECRET_CMD template must not fetch, or fail on, its credential.
 func connectorCredentialNeededThisRun(row backendrows.Row) bool {
-	if resolvedKnob("CODE_FORGE") != row.Name && resolvedKnob("ISSUE_TRACKER") != row.Name {
-		return false
-	}
-	// An unknown row name yields the zero Strategy: not routed.
-	strategy, _ := backendkit.ByName(row.Name)
-	return row.Shadow || row.Primary || strategy.ConnectorRouted
+	isForge := resolvedKnob("CODE_FORGE") == row.Name
+	isTracker := resolvedKnob("ISSUE_TRACKER") == row.Name
+	return (row.Shadow && (isForge || isTracker)) ||
+		(isForge && backendkit.ForgeReadsThroughConnector(row.Name, row.Primary)) ||
+		(isTracker && backendkit.TrackerReadsThroughConnector(row.Name, row.Primary))
 }
 
 // applyConnectorCredentials resolves each backend row's credential env the way
