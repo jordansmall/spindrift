@@ -317,3 +317,14 @@ func parseResolved(t *testing.T, argv []string) ([]string, error) {
 	resolveTestInput(t)
 	return rest, nil
 }
+
+// mustNewCodeForge builds the CodeForge for c, failing the test on a
+// constructor error.
+func mustNewCodeForge(t *testing.T, c config, parent forge.SanitizedParent, it forge.IssueTracker) forge.CodeForge {
+	t.Helper()
+	cf, err := newCodeForge(c, parent, it)
+	if err != nil {
+		t.Fatalf("newCodeForge(CODE_FORGE=%s): %v", c.CodeForge, err)
+	}
+	return cf
+}

@@ -38,7 +38,10 @@ func newReadContext(kind *dispatchkind.Descriptor, selfContained bool) (readCont
 	if err != nil {
 		return readContext{config: c}, err
 	}
-	cf := newCodeForge(c, local.SanitizedParent{}, it)
+	cf, err := newCodeForge(c, local.SanitizedParent{}, it)
+	if err != nil {
+		return readContext{config: c}, err
+	}
 
 	// CODE_FORGE and ISSUE_TRACKER select their backend.Descriptor rows
 	// independently (ADR 0013).

@@ -1,11 +1,13 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -220,5 +222,29 @@ credential = { env = "`+envName+`" }
 
 	if err != nil {
 		t.Errorf("report row Probe() = %v after %s was unset, want the classify pass's cached nil error (shared memoized Probe, issue #3144)", err, envName)
+	}
+}
+
+// A primary forgejo row whose Connector cannot load fails newReadContext with
+// the load error rather than panicking: every read-only command (doctor,
+// reconcile, research) and daemon child builds its Code Forge through here.
+func TestNewReadContext_PrimaryForgejoLoadFailure_ReturnsError(t *testing.T) {
+	setFullyLocalEnv(t)
+	setKnob(t, "CODE_FORGE", "forgejo")
+	t.Setenv("FORGEJO_TOKEN", "tok")
+	t.Cleanup(backendrows.Snapshot())
+	doc := credentialRowDoc("forgejo", `,"primary":true`)
+	if err := backendrows.Use([]byte(doc), func(string) string { return "" }); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir())
+
+	rc, err := newReadContext(dispatchkind.Work, false)
+
+	if err == nil || !strings.Contains(err.Error(), "read module") || !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("newReadContext err = %v, want the Connector's module read error", err)
+	}
+	if rc.codeForge != nil {
+		t.Errorf("rc.codeForge = %T, want nil on a failed build", rc.codeForge)
 	}
 }
