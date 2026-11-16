@@ -290,6 +290,11 @@ func issueTrackerName(doc *inputdoc.Document) string {
 	return childKnob(doc, "ISSUE_TRACKER", os.Getenv("ISSUE_TRACKER"))
 }
 
+// codeForgeName is the CODE_FORGE a child resolves.
+func codeForgeName(doc *inputdoc.Document) string {
+	return childKnob(doc, "CODE_FORGE", os.Getenv("CODE_FORGE"))
+}
+
 // trackers is daemon.Config.Trackers for src: every kind with a Demand source
 // counts against the one ISSUE_TRACKER, so they share a rate-limit pause (ADR
 // 0059). The outbox kind shares it although its count never calls the tracker:
@@ -387,7 +392,7 @@ func resolveChildSharedKnobs(doc *inputdoc.Document) (childSharedKnobs, error) {
 	k.butlerChores = childKnob(doc, "BUTLER_CHORES", os.Getenv("BUTLER_CHORES"))
 	k.butlerEvery = childKnob(doc, "BUTLER_EVERY", os.Getenv("BUTLER_EVERY"))
 	k.butlerChoreClasses = childKnob(doc, "BUTLER_CHORE_CLASSES", os.Getenv("BUTLER_CHORE_CLASSES"))
-	k.codeForge = childKnob(doc, "CODE_FORGE", os.Getenv("CODE_FORGE"))
+	k.codeForge = codeForgeName(doc)
 	k.boxAccess = childKnob(doc, "BOX_FORGE_AND_ISSUE_ACCESS", os.Getenv("BOX_FORGE_AND_ISSUE_ACCESS"))
 	return k, nil
 }

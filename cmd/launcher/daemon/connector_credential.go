@@ -29,7 +29,7 @@ var secretCmdRunner = func(cmd string) (string, error) {
 }
 
 // resolveConnectorCredentials makes the credential env of each Connector row
-// the Daemon's tracker probe reads hold a value, from `_CMD` or the SECRET_CMD
+// the Daemon reads through hold a value, from `_CMD` or the SECRET_CMD
 // template as the Launcher does. refresh re-resolves those once, keeping the
 // old value on failure; it is nil when none were sourced.
 //
@@ -39,7 +39,12 @@ var secretCmdRunner = func(cmd string) (string, error) {
 // IdentityEnv has no `_CMD` form and is not resolved. That pin exports the
 // command to every Launcher child, which runs an explicit `_CMD` without its
 // needed-this-run check (connectorCredentialNeededThisRun); harmless while
-// children share the Daemon's ISSUE_TRACKER.
+// children share the Daemon's ISSUE_TRACKER and CODE_FORGE. A primary row of
+// the CODE_FORGE is included, though the Daemon's own probe reads only the
+// tracker: its children inherit the pinned `_CMD`, and refusing here fails fast.
+// Only a primary row counts as the forge (not backendkit.ForgeReadsThroughConnector),
+// so a plain routed row that is merely the default CODE_FORGE stays unresolved;
+// a routed non-primary row counts only as the tracker, as before.
 func resolveConnectorCredentials(doc *inputdoc.Document, kinds []daemon.Kind, stderr io.Writer) (refresh func(), err error) {
 	probes := false
 	for _, k := range kinds {
@@ -62,13 +67,16 @@ func resolveConnectorCredentials(doc *inputdoc.Document, kinds []daemon.Kind, st
 	}
 	type cmdCredential struct{ env, cmd string }
 	var sourced []cmdCredential
-	tracker := issueTrackerName(doc)
+	tracker, forge := issueTrackerName(doc), codeForgeName(doc)
 	tmpl := os.Getenv("SECRET_CMD")
 	seen := map[string]bool{}
 	for _, row := range backendrows.All() {
-		strat, _ := backendkit.ByName(row.Name)
 		env := row.CredentialEnv
-		if row.Name != tracker || row.Shadow || (!strat.ConnectorRouted && !row.Primary) || seen[env] {
+		readsTracker := row.Name == tracker && backendkit.TrackerReadsThroughConnector(row.Name, row.Primary)
+		// Only a primary forge row: a plain routed row that is merely the default
+		// CODE_FORGE must never be newly resolved.
+		readsForge := row.Name == forge && row.Primary
+		if !(readsTracker || readsForge) || row.Shadow || seen[env] {
 			continue
 		}
 		seen[env] = true
@@ -77,7 +85,7 @@ func resolveConnectorCredentials(doc *inputdoc.Document, kinds []daemon.Kind, st
 			if secretcmd.IsSet(env) {
 				continue
 			}
-			msg := fmt.Sprintf("the %s Connector row is read in-process but its credential is unset: set %s, %s_CMD, or SECRET_CMD", row.Name, env, env)
+			msg := fmt.Sprintf("the %s Connector row is read through its Connector this run but its credential is unset: set %s, %s_CMD, or SECRET_CMD", row.Name, env, env)
 			if row.CredentialKnob != "" {
 				msg += fmt.Sprintf(" (knob %s)", row.CredentialKnob)
 			}

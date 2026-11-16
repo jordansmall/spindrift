@@ -379,7 +379,7 @@ func TestMainRun_UnreadConnectorRowsNeitherRunCmdNorRefuseStart(t *testing.T) {
 			t.Cleanup(backendrows.Snapshot())
 			t.Setenv("SECRET_CMD", "rbw get spindrift-{name}")
 			stubSecretCmd(t, failIfRun(t))
-			docPath := writeConnectorDocT(t, tc.extra, map[string]string{"ISSUE_TRACKER": tc.tracker})
+			docPath := writeConnectorDocT(t, tc.extra, map[string]string{"ISSUE_TRACKER": tc.tracker, "CODE_FORGE": "local"})
 
 			var stdout, stderr bytes.Buffer
 			if got := mainRun([]string{"--input", docPath, "--check-only", "dispatch"}, &stdout, &stderr); got != 0 {
@@ -511,6 +511,50 @@ func TestMainRun_StartsTheConnectorCredentialWatcherForACmdSourcedRow(t *testing
 			wantStarted := tc.name == "running"
 			if got := len(*started) == 1 && (*started)[0] != nil; got != wantStarted {
 				t.Errorf("watcher started with a refresh = %v (%d starts), want %v", got, len(*started), wantStarted)
+			}
+		})
+	}
+}
+
+// A primary forgejo row is read as the CODE_FORGE, not the ISSUE_TRACKER, so
+// the credential gate must key on both; a plain forgejo row is never read
+// through its Connector and stays unresolved.
+func TestResolveConnectorCredentials_ForgejoRowResolvesOnlyWhenPrimary(t *testing.T) {
+	for _, tc := range []struct {
+		name, extra, template, forge string
+		wantRan, wantErr             bool
+	}{
+		{"primary resolves", `,"primary":true`, "rbw get {name}", "forgejo", true, false},
+		{"primary unset refuses", `,"primary":true`, "", "forgejo", false, true},
+		{"plain skipped", ``, "rbw get {name}", "forgejo", false, false},
+		// primary switches only the Code Forge: a forgejo tracker stays native.
+		{"primary tracker only skipped", `,"primary":true`, "rbw get {name}", "git", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clearKnobEnvT(t)
+			t.Cleanup(backendrows.Snapshot())
+			raw := `[{"name":"forgejo","module":"/nonexistent.wasm","credentialEnv":"` + connectorTokenEnv + `",
+"routes":[{"method":"GET","host":"codeberg.org","path":"/api/v1/x"}]` + tc.extra + `}]`
+			if err := backendrows.Use([]byte(raw), func(string) string { return "" }); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(connectorTokenEnv, "")
+			t.Setenv(connectorTokenEnv+"_CMD", "")
+			t.Setenv("SECRET_CMD", tc.template)
+			var ran bool
+			stubSecretCmd(t, func(string) (string, error) { ran = true; return "tok\n", nil })
+			tracker := "local"
+			if tc.forge != "forgejo" {
+				tracker = "forgejo"
+			}
+			doc := demandDocT(map[string]string{"CODE_FORGE": tc.forge, "ISSUE_TRACKER": tracker})
+
+			_, err := resolveConnectorCredentials(doc, workKinds, &bytes.Buffer{})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, want error: %v", err, tc.wantErr)
+			}
+			if ran != tc.wantRan {
+				t.Errorf("secret command ran = %v, want %v", ran, tc.wantRan)
 			}
 		})
 	}
