@@ -176,9 +176,9 @@ func (t *reads) onWebHost(u *url.URL) bool {
 }
 
 // prNumber extracts the PR number from raw, which must be an https URL on the
-// target's web host of the form /<owner>/<repo>/pull/<n> naming the target
-// repository (host and repo case-insensitive, as forges are) with nothing else
-// attached.
+// target's web host of the form /<owner>/<repo>/pull/<n> (Forgejo's is
+// /pulls/<n>) naming the target repository (host and repo case-insensitive, as
+// forges are) with nothing else attached.
 func (t *reads) prNumber(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -188,9 +188,9 @@ func (t *reads) prNumber(raw string) (string, error) {
 		return "", fmt.Errorf("PR URL %q is not a plain https URL on %s", raw, t.webHost)
 	}
 	parts := strings.Split(u.Path, "/")
-	if len(parts) != 5 || parts[0] != "" || parts[3] != "pull" || !isPRNumber(parts[4]) ||
+	if len(parts) != 5 || parts[0] != "" || (parts[3] != "pull" && parts[3] != "pulls") || !isPRNumber(parts[4]) ||
 		!strings.EqualFold(parts[1]+"/"+parts[2], t.target.Repo) {
-		return "", fmt.Errorf("PR URL %q is not /%s/pull/<n>", raw, t.target.Repo)
+		return "", fmt.Errorf("PR URL %q is not /%s/pull/<n> or /%s/pulls/<n>", raw, t.target.Repo, t.target.Repo)
 	}
 	return parts[4], nil
 }
