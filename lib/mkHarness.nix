@@ -1891,6 +1891,17 @@ let
     else
       true;
 
+  # BOX_FORGE_CREDENTIAL=none withholds the forge credential from a Box that
+  # has no write token anyway; under read-write the Box needs its own token, so
+  # the pairing is contradictory (issue #7140).
+  forgeCredentialOk =
+    if
+      mergedDefaults.boxForgeCredential == "none" && mergedDefaults.boxForgeAndIssueAccess != "read-only"
+    then
+      throw "spindrift: BOX_FORGE_CREDENTIAL=none requires BOX_FORGE_AND_ISSUE_ACCESS=read-only (got ${mergedDefaults.boxForgeAndIssueAccess}). Set defaults.boxForgeAndIssueAccess = \"read-only\" (perSystem.spindrift.forge.boxAccess), or set BOX_FORGE_CREDENTIAL to \"forwarded\" (forge.boxForgeCredential)."
+    else
+      true;
+
   # A selected backend row's `validateKnobs` (lib/backends/jira.nix: its
   # JIRA_STATUS_MAPPING parse, which mirrors jira.go's ParseStatusMapping,
   # issue #2539) fails the build here. Only the selected rows run, so the
@@ -1965,6 +1976,7 @@ else
   assert networkModeCoherenceOk;
   assert nixStoreWritableCoherenceOk;
   assert readOnlyCapabilityOk;
+  assert forgeCredentialOk;
   assert backendKnobsOk;
   assert daemonAwakeWindowOk;
   assert butlerChoresPromptOk;
