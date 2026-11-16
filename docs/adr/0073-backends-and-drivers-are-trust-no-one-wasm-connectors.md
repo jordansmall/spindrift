@@ -796,9 +796,12 @@ without those two limits.
 The macOS remote-attach hop (podman machine or Docker Desktop, where stdio
 crosses into the runner VM) is unmeasured until the human macOS check (#7021).
 
-A real run reports the same costs in the host-side read shadow's
-`shadow_summary` (`sandbox_start_ns`, `sandbox_calls`, `sandbox_host_calls`,
-`sandbox_hop_ns`); see [the reference](../reference.md).
+A real dogfood run reports the same costs (`sandbox_start_ns`,
+`sandbox_calls`, `sandbox_host_calls`, `sandbox_hop_ns`, and
+`in_process_loads`) in the totals line that ends its primary record's audit
+file (#7116). Since #6998 made github primary, dogfood writes no read shadow
+`shadow_summary`, which carries the same keys for a shadow row. See [the
+reference](../reference.md#backend-primary-mode).
 
 ## Amendment (issue #7074): the sandboxes do not slow Decode
 
@@ -852,9 +855,10 @@ backend would, so cut-over (#6811) can delete the native read path; writes stay
 native. There is no fallback to the native read. A failure that fell back would be invisible, so
 a Connector that fails to load, or a request its Route table refuses, fails the
 read with its own error and is recorded: a per-process
-`primary-<backend>-<stamp>-<pid>.audit.jsonl` of Connector audit lines and a
-`.log` of failed reads. The stage is reversible by dropping `primary` from the
-row, with no code revert, and dogfood runs github there first.
+`primary-<backend>-<stamp>-<pid>.audit.jsonl` of Connector audit lines (plus a
+sandbox totals line with no decision, #7116) and a `.log` of failed reads. The
+stage is reversible by dropping `primary` from the row, with no code revert,
+and dogfood runs github there first.
 
 The bars become: a shadow moves to primary after 20 consecutive clean shadow
 runs, and primary cuts over (#6811, which deletes the native github read path)
