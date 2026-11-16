@@ -271,11 +271,10 @@ in
         );
     in
     assert assertMsg (
-      message == "perSystem.spindrift.connectors.dup is registered twice: by a.nix and by b.nix"
+      message == "spindrift.connectors.dup is registered twice: by a.nix and by b.nix"
     ) "the duplicate-name message must name the option path and both sources; got ${toString message}";
     assert assertMsg (
-      threeMessage
-      == "perSystem.spindrift.connectors.dup is registered 3 times: by a.nix and by b.nix and by c.nix"
+      threeMessage == "spindrift.connectors.dup is registered 3 times: by a.nix and by b.nix and by c.nix"
     ) "the duplicate-name message must count three definitions; got ${toString threeMessage}";
     assert assertMsg (
       connectorNames.duplicateError "dup" [ { file = "a.nix"; } ] == null
