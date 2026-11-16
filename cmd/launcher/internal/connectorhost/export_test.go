@@ -20,6 +20,7 @@ var EncodeRequest = encodeRequest
 const (
 	MaxOutput       = maxOutput
 	MaxRequest      = maxRequest
+	MaxHeaderName   = maxHeaderName
 	MemoryCapBytes  = memoryCapBytes
 	MaxTableEntries = maxTableEntries
 	MaxFrameSlots   = maxFrameSlots

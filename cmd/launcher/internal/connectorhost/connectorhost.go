@@ -263,7 +263,8 @@ func encodeRequest(method string, params any) ([]byte, error) {
 // result into result, which may be nil to ignore it. A failure comes back
 // wrapping ErrCall and, for a guest failure, its own sentinel too. A
 // failed call, or a Connector-reported error, also carries the host-side
-// reason of the last request the call admitted but could not send.
+// reason of the call's last http_request, if it was admitted but could not be
+// sent.
 //
 // Any failure of the exchange itself, or of the response it returned, leaves
 // the module in an unknown state: the Connector is closed and every later call

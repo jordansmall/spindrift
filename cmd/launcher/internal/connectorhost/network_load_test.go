@@ -16,6 +16,7 @@ const (
 	netReqOff  = 12288
 	netRespOff = 16384
 	survived   = `{"result":"survived"}`
+	tokenUnset = "CONNECTOR_TOKEN is not set"
 )
 
 // httpCallGuest is a network Connector whose connector_call sends req through
@@ -33,43 +34,97 @@ func httpCallGuest(req string, respPtr, respCap int64, pass bool) []byte {
 // httpCallGuestAnswering is httpCallGuest whose fixed envelope is answer; an
 // empty answer passes the host's answer through instead.
 func httpCallGuestAnswering(req string, respPtr, respCap int64, answer string) []byte {
-	return httpCallsGuest(answer, guestRequest{req, respPtr, respCap})
+	return httpCallsGuest(answer, guestRequest{req: req, respPtr: respPtr, respCap: respCap})
 }
 
 // guestRequest is one http_request a guest makes: the request bytes and the
-// response buffer it names.
+// response buffer it names. A nonzero reqLen is passed as the request length
+// in place of len(req), to name a request the engine must refuse before it
+// reads memory.
 type guestRequest struct {
 	req              string
 	respPtr, respCap int64
+	reqLen           int64
 }
 
-// httpCallsGuest is a network Connector whose connector_call makes reqs in
-// order and drops every answer but the last. An empty answer passes the last
-// answer through as the envelope; otherwise the fixed envelope answer is
-// returned.
-func httpCallsGuest(answer string, reqs ...guestRequest) []byte {
+// getReq is a GET of path on b, answered into the usual response buffer.
+func getReq(b *backend, path string) guestRequest {
+	return guestRequest{
+		req:     fmt.Sprintf(`{"method":"GET","url":"%s%s"}`, b.URL, path),
+		respPtr: netRespOff,
+		respCap: 4096,
+	}
+}
+
+// failSendOn is an Authorize that fails the request for path, so it is never
+// sent, and passes any other.
+func failSendOn(path string) func(*http.Request) error {
+	return func(r *http.Request) error {
+		if r.URL.Path == path {
+			return errors.New(tokenUnset)
+		}
+		return nil
+	}
+}
+
+// httpCallsGuest is a network Connector whose connector_call makes the
+// requests in order and drops every answer but the last. An empty answer
+// passes the last answer through as the envelope; otherwise the fixed
+// envelope answer is returned.
+func httpCallsGuest(answer string, first guestRequest, rest ...guestRequest) []byte {
+	return buildHTTPGuest(answer, append([]guestRequest{first}, rest...), nil)
+}
+
+// headerRefusalGuest is httpCallsGuest of one request that, after it, looks up
+// a response header whose name is nameLen bytes: over maxHeaderName, the
+// engine refuses the Host call before it reads the name.
+func headerRefusalGuest(answer string, nameLen int64, req guestRequest) []byte {
+	return buildHTTPGuest(answer, []guestRequest{req}, &headerLookup{nameLen})
+}
+
+// headerLookup is a spindrift.http_response_header call a guest makes after
+// its last request, for a header name of nameLen bytes.
+type headerLookup struct{ nameLen int64 }
+
+// buildHTTPGuest is the one encoder behind both guests. A non-nil lookup adds
+// the spindrift.http_response_header import (index 1, after http_request) and
+// a call to it after the last request.
+func buildHTTPGuest(answer string, reqs []guestRequest, lookup *headerLookup) []byte {
 	hs, fns := connectorFns([]string{"network"}, allocOff, 0)
 	data := []dataSeg{{0, hs}, {respOff, []byte(answer)}}
 	var body []byte
 	off := int64(netReqOff)
 	for i, r := range reqs {
+		n := int64(len(r.req))
+		if r.reqLen != 0 {
+			n = r.reqLen
+		}
 		data = append(data, dataSeg{int(off), []byte(r.req)})
-		body = append(append(append(append(body, i32Const(off)...), i32Const(int64(len(r.req)))...), i32Const(r.respPtr)...), i32Const(r.respCap)...)
+		body = append(append(append(append(body, i32Const(off)...), i32Const(n)...), i32Const(r.respPtr)...), i32Const(r.respCap)...)
 		body = append(body, 0x10, 0x00)
 		off += int64(len(r.req))
 		if i < len(reqs)-1 {
 			body = append(body, 0x1a)
 		}
 	}
+	imports := []guestImport{{"spindrift", "http_request", []byte{i32, i32, i32, i32}, []byte{i64}}}
+	last := reqs[len(reqs)-1]
+	if lookup != nil {
+		body = append(body, 0x1a)
+		for _, v := range []int64{netReqOff, lookup.nameLen, last.respPtr, last.respCap} {
+			body = append(body, i32Const(v)...)
+		}
+		body = append(body, 0x10, 0x01)
+		imports = append(imports, guestImport{"spindrift", "http_response_header", []byte{i32, i32, i32, i32}, []byte{i64}})
+	}
 	if answer == "" {
 		body = append(append(body, i64Const(0xffffffff)...), 0x83)
-		body = append(append(body, i64Const(reqs[len(reqs)-1].respPtr<<32)...), 0x84)
+		body = append(append(body, i64Const(last.respPtr<<32)...), 0x84)
 	} else {
 		body = append(append(body, 0x1a), i64Const(respOff<<32|int64(len(answer)))...)
 	}
 	fns[fnCall].body = body
-	imp := guestImport{"spindrift", "http_request", []byte{i32, i32, i32, i32}, []byte{i64}}
-	return guestModuleWith([]guestImport{imp}, data, fns...)
+	return guestModuleWith(imports, data, fns...)
 }
 
 type netLoader func(context.Context, []byte, connectorhost.Network) (*connectorhost.Connector, error)
@@ -232,7 +287,6 @@ func TestNetworkConnectorTransportFailureIsReturnedToTheGuest(t *testing.T) {
 // host-side cause, never the credential.
 func TestNetworkConnectorSendFailureKeepsItsHostSideReason(t *testing.T) {
 	const secret = "s3cret-token"
-	const unset = "CONNECTOR_TOKEN is not set"
 	closed := newBackend(t, func(w http.ResponseWriter, r *http.Request) {})
 	closed.Close()
 	for name, tc := range map[string]struct {
@@ -241,9 +295,9 @@ func TestNetworkConnectorSendFailureKeepsItsHostSideReason(t *testing.T) {
 		want      string
 	}{
 		"credential unset": {
-			authorize: func(*http.Request) error { return errors.New(unset) },
+			authorize: func(*http.Request) error { return errors.New(tokenUnset) },
 			backend:   newBackend(t, func(w http.ResponseWriter, r *http.Request) {}),
-			want:      unset,
+			want:      tokenUnset,
 		},
 		"transport": {
 			authorize: func(r *http.Request) error { r.Header.Set("Authorization", "Bearer "+secret); return nil },
@@ -275,16 +329,25 @@ func TestNetworkConnectorSendFailureKeepsItsHostSideReason(t *testing.T) {
 // A send failure's reason reaches Call's error when the call then fails on an
 // undecodable envelope, not only when the Connector reports an error.
 func TestNetworkConnectorSendFailureReasonSurvivesAFailedCall(t *testing.T) {
-	const unset = "CONNECTOR_TOKEN is not set"
 	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {})
 	var audit bytes.Buffer
 	n := netFor(b, &audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
-	n.Authorize = func(*http.Request) error { return errors.New(unset) }
+	n.Authorize = func(*http.Request) error { return errors.New(tokenUnset) }
 	req := fmt.Sprintf(`{"method":"GET","url":"%s/repos"}`, b.URL)
 	c := loadNet(t, httpCallGuestAnswering(req, netRespOff, 4096, `not json`), n)
 	err := c.Call(context.Background(), "m", nil, nil)
-	if !errors.Is(err, connectorhost.ErrCall) || !errors.Is(err, connectorhost.ErrHTTPSend) || !strings.Contains(err.Error(), unset) {
-		t.Fatalf("err = %v, want ErrCall, ErrHTTPSend and %q", err, unset)
+	if !errors.Is(err, connectorhost.ErrCall) || !errors.Is(err, connectorhost.ErrHTTPSend) || !strings.Contains(err.Error(), tokenUnset) {
+		t.Fatalf("err = %v, want ErrCall, ErrHTTPSend and %q", err, tokenUnset)
+	}
+}
+
+// assertNoHostCause fails unless err carries nothing of an earlier request's
+// send failure. It keys on ErrHTTPSend and the cause's own text, not the
+// wrapper's format; the SurvivesA... tests are its positive control.
+func assertNoHostCause(t *testing.T, err error) {
+	t.Helper()
+	if errors.Is(err, connectorhost.ErrHTTPSend) || strings.Contains(err.Error(), tokenUnset) {
+		t.Errorf("err = %v, want no host cause from an earlier request", err)
 	}
 }
 
@@ -293,7 +356,6 @@ func TestNetworkConnectorSendFailureReasonSurvivesAFailedCall(t *testing.T) {
 func TestNetworkConnectorSendFailureReasonDoesNotOutliveASentRequest(t *testing.T) {
 	for name, load := range netLoadersFor(t) {
 		t.Run(name, func(t *testing.T) {
-			const unset = "CONNECTOR_TOKEN is not set"
 			b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusNotFound)
 				fmt.Fprint(w, `{"error":"not found"}`)
@@ -301,21 +363,83 @@ func TestNetworkConnectorSendFailureReasonDoesNotOutliveASentRequest(t *testing.
 			n := netFor(b, new(bytes.Buffer),
 				connectorhost.Route{Method: "GET", Host: b.host(), Path: "/down"},
 				connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
-			n.Authorize = func(r *http.Request) error {
-				if r.URL.Path == "/down" {
-					return errors.New(unset)
-				}
-				return nil
-			}
-			wasm := httpCallsGuest("",
-				guestRequest{fmt.Sprintf(`{"method":"GET","url":"%s/down"}`, b.URL), netRespOff, 4096},
-				guestRequest{fmt.Sprintf(`{"method":"GET","url":"%s/repos"}`, b.URL), netRespOff, 4096})
+			n.Authorize = failSendOn("/down")
+			wasm := httpCallsGuest("", getReq(b, "/down"), getReq(b, "/repos"))
 			err := loadNetWith(t, load, wasm, n).Call(context.Background(), "m", nil, nil)
 			if !errors.Is(err, connectorhost.ErrCall) || !strings.Contains(err.Error(), "not found") {
 				t.Fatalf("err = %v, want the guest's 404 error", err)
 			}
-			if errors.Is(err, connectorhost.ErrHTTPSend) || strings.Contains(err.Error(), "host:") || strings.Contains(err.Error(), unset) {
-				t.Errorf("err = %v, want no host cause from the earlier request", err)
+			assertNoHostCause(t, err)
+		})
+	}
+}
+
+// Request 1 is sent and request 2 fails to send: the Call's error names
+// request 2's host cause when the call then fails on an undecodable envelope.
+func TestNetworkConnectorSendFailureReasonSurvivesAnEarlierSentRequest(t *testing.T) {
+	for name, load := range netLoadersFor(t) {
+		t.Run(name, func(t *testing.T) {
+			b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+			})
+			n := netFor(b, new(bytes.Buffer),
+				connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"},
+				connectorhost.Route{Method: "GET", Host: b.host(), Path: "/down"})
+			n.Authorize = failSendOn("/down")
+			wasm := httpCallsGuest(`not json`, getReq(b, "/repos"), getReq(b, "/down"))
+			err := loadNetWith(t, load, wasm, n).Call(context.Background(), "m", nil, nil)
+			if !errors.Is(err, connectorhost.ErrCall) || !errors.Is(err, connectorhost.ErrHTTPSend) || !strings.Contains(err.Error(), tokenUnset) {
+				t.Fatalf("err = %v, want ErrCall, ErrHTTPSend and %q", err, tokenUnset)
+			}
+		})
+	}
+}
+
+// A request the host refuses after one that failed to send is what the Call's
+// error names, not the earlier request's host cause.
+func TestNetworkConnectorSendFailureReasonDoesNotOutliveARefusedRequest(t *testing.T) {
+	for name, load := range netLoadersFor(t) {
+		t.Run(name, func(t *testing.T) {
+			b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {})
+			route := connectorhost.Route{Method: "GET", Host: b.host(), Path: "/down"}
+			down := getReq(b, "/down")
+			outOfBounds, oversized := down, down
+			outOfBounds.respPtr = page - 16
+			oversized.reqLen = connectorhost.MaxRequest + 1
+			for caseName, tc := range map[string]struct {
+				second guestRequest
+				want   error
+			}{
+				"refused: out-of-bounds response buffer": {outOfBounds, connectorhost.ErrMalformedOutput},
+				"refused: oversized request":             {oversized, connectorhost.ErrMalformedOutput},
+				"fatal: unrouted request":                {getReq(b, "/admin"), connectorhost.ErrRouteRefused},
+			} {
+				t.Run(caseName, func(t *testing.T) {
+					n := netFor(b, new(bytes.Buffer), route)
+					n.Authorize = func(*http.Request) error { return errors.New(tokenUnset) }
+					err := loadNetWith(t, load, httpCallsGuest(survived, down, tc.second), n).Call(context.Background(), "m", nil, nil)
+					assertOnlySentinel(t, err, tc.want)
+					assertNoHostCause(t, err)
+				})
+			}
+		})
+	}
+}
+
+// A refused http_response_header is no request: the host cause of the last
+// request, which failed to send, stays on the Call's error.
+func TestNetworkConnectorSendFailureReasonSurvivesARefusedHeaderLookup(t *testing.T) {
+	for name, load := range netLoadersFor(t) {
+		t.Run(name, func(t *testing.T) {
+			b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {})
+			n := netFor(b, new(bytes.Buffer), connectorhost.Route{Method: "GET", Host: b.host(), Path: "/down"})
+			n.Authorize = failSendOn("/down")
+			// Only the interpreter and compiled loaders reach networkCalls.refuse
+			// here; remote and process reject the header call earlier, so those
+			// subtests pass without exercising the call == hostRequest guard.
+			err := loadNetWith(t, load, headerRefusalGuest(survived, connectorhost.MaxHeaderName+1, getReq(b, "/down")), n).Call(context.Background(), "m", nil, nil)
+			if !errors.Is(err, connectorhost.ErrHTTPSend) || !strings.Contains(err.Error(), "host:") || !strings.Contains(err.Error(), tokenUnset) {
+				t.Fatalf("err = %v, want ErrHTTPSend and the host cause %q", err, tokenUnset)
 			}
 		})
 	}
