@@ -68,7 +68,7 @@ func resolveConnectorCredentials(doc *inputdoc.Document, kinds []daemon.Kind, st
 	for _, row := range backendrows.All() {
 		strat, _ := backendkit.ByName(row.Name)
 		env := row.CredentialEnv
-		if row.Name != tracker || row.Shadow || !strat.ConnectorRouted || seen[env] {
+		if row.Name != tracker || row.Shadow || (!strat.ConnectorRouted && !row.Primary) || seen[env] {
 			continue
 		}
 		seen[env] = true
