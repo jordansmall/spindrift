@@ -901,3 +901,54 @@ minutes of credit plus 128 minutes of network wait, about 2 h 40 min (8 minutes
 more for a request at the 8 MiB cap). With this, the dedup scan completes in
 about 7 s under the interpreter
 (`TestConnector_DedupScanOf500IssuesFitsUnderTheInterpreter`).
+
+## Amendment (issue #7108): Pass-log lines reach a Driver Connector as raw bytes
+
+A native profile of the claude Connector (1 MB of real lines from issue-6998's
+Pass log) put about 30% of Decode in the JSON envelope: `driver.decodeBatch`
+carried each line as a JSON-escaped string, so the host escaped and the guest
+unescaped every byte of the log before the decoder saw it. The decoder itself
+is the other ~65%.
+
+A Driver gains the optional capability `driver.decodeRaw`. Its request is not
+JSON but the bytes `"driver.decodeRaw\n<decoder>\n"` followed by each line and
+a terminating `\n`; the lines are never escaped. The answer is
+`driver.decodeBatch`'s, one event list per line. The host prefers it for both
+batch and per-line decoding when the Connector advertises it and falls back to
+`driver.decodeBatch` / `driver.decode` otherwise, so an older Connector still
+loads. A line that itself contains a newline is refused, since the framing could
+not carry it. Every SDK Driver advertises it, and the conformance suite checks
+each raw answer against the JSON fallback's.
+
+Measured under the interpreter, one session on one host (AMD Ryzen 9 5950X, 32
+threads, Go 1.26.8, linux/amd64), base f21d42bcb against this change, claude
+wasm built from each tree. The two sides ran alternately, four rounds each, one
+iteration per round (an interpreter iteration is 9 to 50 s); medians:
+
+```sh
+SPINDRIFT_DRIVER_CONNECTOR_WASM=/tmp/claude-<before|after>.wasm \
+  go test -run '^$' -bench 'Connector(DecodeBatch|PostPass)/.*/interpreter' \
+  -benchmem -benchtime 1x ./internal/driver/claude/
+```
+
+| benchmark | time before | time after | B/op before → after | allocs/op before → after |
+|---|---|---|---|---|
+| DecodeBatch, corpus 6798 | 12.01 s (15.6 ms/line) | 9.26 s (12.0 ms/line), −22.9% | 281 MB → 225 MB, −19.9% | 9.60 M → 7.25 M, −24.5% |
+| DecodeBatch, corpus dogfood | 48.7 s (76.5 ms/line) | 39.2 s (61.6 ms/line), −19.5% | 1045 MB → 830 MB, −20.5% | 39.9 M → 31.4 M, −21.2% |
+| PostPass, Decode | 46.3 s | 32.7 s, −29.4% | 960 MB → 695 MB, −27.6% | 36.6 M → 25.8 M, −29.4% |
+| PostPass, DecodeAndReads | 43.6 s | 33.0 s, −24.4% | 934 MB → 681 MB, −27.1% | 36.7 M → 26.5 M, −27.9% |
+
+The PostPass rows measure one raw request per line, not batches:
+`driverkit.DecodeLog`, which the post-Pass readers use, decodes through the
+Strategy's per-line decoder, so each line is its own `driver.decodeRaw` call.
+They still gain what the DecodeBatch rows do, because the saving is the
+escaping, not the batching.
+
+The envelope's share is gone from the allocations (−21% to −29%, stable to
+under 0.01% across rounds) and from the wall clock (−20% to −29%), close to the
+~30% the profile attributed to it. The wall clock is noisy on this
+host (rounds spread about ±10%, and the 6798 corpus's before and after
+ranges touch: 11.3 to 12.4 s against 9.1 to 11.6 s), so the allocation counts
+carry the claim and the timing agrees with them. What remains is the decoder,
+which the single-pass scanner work targets. MB/s is not tabulated: the
+benchmark prints it to two places, which reads 0.05 to 0.08 on every row.
