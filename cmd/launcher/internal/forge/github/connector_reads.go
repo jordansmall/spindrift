@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
-	"strconv"
 	"sync"
 	"time"
 
@@ -18,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 // readsAuditLog records the requests of the shared Connector the host-side
@@ -97,9 +96,9 @@ func sharedConnectorFor(row backendrows.Row, repoSlug string) (*sharedConnector,
 	}
 	auditName := readsAuditLog
 	if row.Primary {
-		auditName = primaryRecordName(".audit.jsonl")
+		auditName = primaryrecord.Name(backend.GitHub.Name, ".audit.jsonl")
 	}
-	audit, closeAudit := openAudit(auditName)
+	audit, closeAudit, _ := primaryrecord.OpenFile(auditName)
 	conn, api, err := loadConnector(row, backendrows.Options{Audit: audit, Client: connectorClient}, repoSlug)
 	if err != nil {
 		closeAudit()
@@ -155,35 +154,13 @@ func primaryRow() (backendrows.Row, bool) {
 	return row, ok && row.Primary
 }
 
-// primaryRecordStem names this process's primary-mode record files, stamped
-// once so a human can count clean primary runs: an empty .log and no refused
-// entry in the .audit.jsonl is a clean one.
-var primaryRecordStem = sync.OnceValue(func() string {
-	return "primary-github-" + time.Now().UTC().Format("20060102T150405Z") + "-" + strconv.Itoa(os.Getpid())
-})
-
-func primaryRecordName(suffix string) string { return primaryRecordStem() + suffix }
-
-// notePrimary appends the error a primary-routed read returned to the run's
-// primary log and returns err unchanged. A plain row records nothing. A record
-// that cannot be written goes to stderr instead, so the failure is not lost.
+// notePrimary records the error a primary-routed read returned and returns it
+// unchanged. A plain row records nothing.
 func notePrimary(row backendrows.Row, op string, err error) error {
-	if err == nil || !row.Primary {
+	if !row.Primary {
 		return err
 	}
-	line, _ := json.Marshal(struct {
-		Op    string `json:"op"`
-		Error string `json:"error"`
-	}{op, err.Error()})
-	w, closeLog, oerr := openAuditFile(primaryRecordName(".log"))
-	defer closeLog()
-	if oerr == nil {
-		_, oerr = w.Write(append(line, '\n'))
-	}
-	if oerr != nil {
-		fmt.Fprintf(os.Stderr, "primary read %q failed (%v) and its record was not written: %v\n", op, err, oerr)
-	}
-	return err
+	return primaryrecord.Note(backend.GitHub.Name, op, err)
 }
 
 // readVia runs fn over the shared Connector for e's repository, and records a

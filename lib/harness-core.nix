@@ -76,6 +76,7 @@ let
     "gitexec"
     "gitremote"
     "hostpaths"
+    "primaryrecord"
     "seambundle"
   ];
   # connectorforgetest is a test kit importing forge/forgetest, which the Box

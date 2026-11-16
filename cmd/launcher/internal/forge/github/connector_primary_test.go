@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
@@ -21,6 +21,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
+	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 func useGithubRowPrimary(t *testing.T, host string) {
@@ -470,41 +471,6 @@ func TestPrimaryRow_IssueLabelsComeFromTheConnector(t *testing.T) {
 	}
 }
 
-// A primary record that cannot be written falls back to stderr, naming both
-// the failed read and why the record was lost.
-func TestNotePrimary_UnwritableRecordNamesBothErrors(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
-	logDir := hostpaths.LogDir(dir)
-	if err := os.MkdirAll(filepath.Dir(logDir), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(logDir, nil, 0o644); err != nil { // a file where the log directory belongs
-		t.Fatal(err)
-	}
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	old := os.Stderr
-	os.Stderr = w
-	readErr := errors.New("the read broke")
-
-	got := notePrimary(backendrows.Row{Primary: true}, "read an issue", readErr)
-
-	os.Stderr = old
-	_ = w.Close()
-	raw, _ := io.ReadAll(r)
-	if got != readErr {
-		t.Errorf("notePrimary = %v, want the read error unchanged", got)
-	}
-	for _, want := range []string{"read an issue", "the read broke", "not a directory"} {
-		if !strings.Contains(string(raw), want) {
-			t.Errorf("stderr %q lacks %q", raw, want)
-		}
-	}
-}
-
 // CheckRun is the merge wait's CI poll: under a primary row it reads the state
 // and the in-flight run link from the Connector, never gh.
 func TestPrimaryRow_CheckRunComesFromTheConnector(t *testing.T) {
@@ -563,7 +529,7 @@ func primarySandboxHarness(t *testing.T, useRow func(*testing.T, string), s stat
 	t.Chdir(dir)
 	useRow(t, "example.test")
 	t.Cleanup(connectorsandbox.Use(s))
-	audit = filepath.Join(hostpaths.LogDir(dir), primaryRecordName(".audit.jsonl"))
+	audit = filepath.Join(hostpaths.LogDir(dir), primaryrecord.Name(backend.GitHub.Name, ".audit.jsonl"))
 	if seed != nil {
 		if err := os.MkdirAll(filepath.Dir(audit), 0o755); err != nil {
 			t.Fatal(err)
