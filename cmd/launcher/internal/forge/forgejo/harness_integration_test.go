@@ -10,6 +10,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -20,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
 )
@@ -499,10 +504,94 @@ func assertNotListed(t *testing.T, tr forge.IssueTracker, state forge.DispatchSt
 // TestForgejoIntegration_DispatchLifecycle boots a throwaway Forgejo from its
 // OCI image and drives claim, work, PR, merge, complete through the forgejo
 // adapters, so a green run exercises the real REST wire format rather than the
-// httptest fake TestForgejoClient_TrackerContract runs against. It is opt-in
-// behind the "integration" tag and self-skips where no daemon is reachable.
+// httptest fake TestForgejoClient_TrackerContract runs against. It runs twice:
+// "native" builds the Code Forge from the native adapter, "primary" from the
+// forgejo Connector under a primary row. It is opt-in behind the "integration"
+// tag and self-skips where no daemon is reachable.
 func TestForgejoIntegration_DispatchLifecycle(t *testing.T) {
 	cli := requireForgejoRuntime(t)
+	t.Run("native", func(t *testing.T) { runDispatchLifecycle(t, cli, nativeCodeForge) })
+	t.Run("primary", func(t *testing.T) {
+		declaredRoutes(t) // skip before booting a container when no Connector was built
+		runDispatchLifecycle(t, cli, primaryCodeForge)
+	})
+}
+
+// codeForgeBuilder builds the Code Forge under test for a seeded repo and
+// returns the rewrite a PR URL read from Forgejo needs before that forge sees it.
+type codeForgeBuilder func(t *testing.T, baseURL, token, repo string) (forge.CodeForge, func(prURL string) string)
+
+func nativeCodeForge(_ *testing.T, baseURL, token, repo string) (forge.CodeForge, func(string) string) {
+	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+		BaseURL:     baseURL,
+		Repo:        repo,
+		Token:       token,
+		BaseBranch:  "main",
+		UserName:    "Harness",
+		UserEmail:   "harness@harness.local",
+		MergeMethod: "rebase",
+	}, nil)
+	return cf, func(prURL string) string { return prURL }
+}
+
+// forgejoDefaultRootURL is the ROOT_URL a harness Forgejo emits in its links,
+// as the image defaults it from DOMAIN and HTTP_PORT.
+const forgejoDefaultRootURL = "http://localhost:3000"
+
+// primaryCodeForge builds the Code Forge through the production constructor
+// under a primary forgejo row. The Connector and its row refuse a base URL that
+// is not https, which the harness Forgejo is not, so a TLS reverse proxy fronts
+// it. Forgejo's own links name its ROOT_URL, so the proxy rewrites them to the
+// proxy's address, as Forgejo behind a real TLS front end would emit.
+func primaryCodeForge(t *testing.T, baseURL, token, repo string) (forge.CodeForge, func(string) string) {
+	t.Helper()
+	backend, err := url.Parse(baseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(backend)
+	director := proxy.Director
+	proxy.Director = func(r *http.Request) {
+		director(r)
+		r.Host = backend.Host
+		r.Header.Del("Accept-Encoding") // the body is rewritten below, so keep it uncompressed
+	}
+	var rewrite *strings.Replacer
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return err
+		}
+		body = []byte(rewrite.Replace(string(body)))
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		resp.ContentLength = int64(len(body))
+		resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
+		if link := resp.Header.Get("Link"); link != "" {
+			resp.Header.Set("Link", rewrite.Replace(link))
+		}
+		return nil
+	}
+	front := httptest.NewTLSServer(proxy)
+	t.Cleanup(front.Close)
+	rewrite = strings.NewReplacer(forgejoDefaultRootURL, front.URL, baseURL, front.URL)
+
+	useForgejoRow(t, front.URL, func(*backendrows.Row) {})
+	t.Setenv(connectorCredentialEnv, token)
+	t.Setenv("GIT_SSL_NO_VERIFY", "true") // the proxy's certificate is self-signed
+	t.Cleanup(forgejo.SetConnectorClient(front.Client()))
+	t.Chdir(t.TempDir())
+
+	l := mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: front.URL, forgejo.ForgejoTokenEnv: token})
+	s := backendkit.Shared{RepoSlug: repo, BaseBranch: "main", GitUserName: "Harness", GitUserEmail: "harness@harness.local", MergeMethod: "rebase"}
+	cf, err := forgejo.Strategy.NewCodeForge(s, l, forge.SanitizedParent{}, nil)
+	if err != nil {
+		t.Fatalf("primary Code Forge: %v", err)
+	}
+	return cf, rewrite.Replace
+}
+
+func runDispatchLifecycle(t *testing.T, cli string, build codeForgeBuilder) {
 	baseURL, token := bootForgejo(t, cli)
 
 	repo := seedRepo(t, baseURL, token)
@@ -515,15 +604,7 @@ func TestForgejoIntegration_DispatchLifecycle(t *testing.T) {
 		Labels:        testLabels,
 		VerdictLabels: forge.ResearchVerdictLabels(),
 	})
-	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:     baseURL,
-		Repo:        repo,
-		Token:       token,
-		BaseBranch:  "main",
-		UserName:    "Harness",
-		UserEmail:   "harness@harness.local",
-		MergeMethod: "rebase",
-	}, nil)
+	cf, webURL := build(t, baseURL, token, repo)
 	prf, ok := cf.(forge.PRForge)
 	if !ok {
 		t.Fatalf("forgejo CodeForge does not implement forge.PRForge")
@@ -562,7 +643,7 @@ func TestForgejoIntegration_DispatchLifecycle(t *testing.T) {
 
 	// OpenPRForBranch must find a PR that is still a draft under the
 	// WIP-title convention, not just a ready one (issue #2408).
-	prURL := openPR(t, baseURL, token, repo, branch, "main", "WIP: harness")
+	prURL := webURL(openPR(t, baseURL, token, repo, branch, "main", "WIP: harness"))
 	if state, err := prf.PRState(prURL); err != nil {
 		t.Fatalf("PRState (open): %v", err)
 	} else if state != forge.PROpen {
