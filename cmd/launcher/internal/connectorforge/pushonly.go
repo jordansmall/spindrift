@@ -87,9 +87,7 @@ func classedCall(c *connectorhost.Connector, clock retry.Clock) guestCall {
 
 // classify is classedCall over any raw call, a seam for tests.
 func classify(raw guestCall, clock retry.Clock) guestCall {
-	if clock.Sleep == nil {
-		clock = retry.RealClock()
-	}
+	clock = realIfZero(clock)
 	b := retry.LinearBackoff{Unit: callBackoffUnit, Clock: clock}
 	return func(ctx context.Context, method string, params, result any) error {
 		attempt := 0
@@ -121,8 +119,10 @@ func classify(raw guestCall, clock retry.Clock) guestCall {
 // questions (the remote's identity, branch existence and deletion) and git
 // runs in core's own plumbing against the Connector's clone URL.
 type pushOnly struct {
-	conn   *connectorhost.Connector
-	call   guestCall
+	conn *connectorhost.Connector
+	call guestCall
+	// clock paces the recheck of a conflicting merge.
+	clock  retry.Clock
 	target Target
 	git    forge.CodeForge
 	// cloneURL and cred are what core's own git (relayClone) clones with; both
@@ -155,7 +155,7 @@ func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge,
 	if g.Plumbing == nil {
 		return nil, forge.Capabilities{}, errors.New("connectorforge: Git.Plumbing is nil")
 	}
-	p := &pushOnly{conn: c, call: classedCall(c, g.Clock), target: target}
+	p := newPushOnly(c, target, g.Clock)
 	remote, err := p.remote()
 	if err != nil {
 		return nil, forge.Capabilities{}, err
@@ -271,4 +271,18 @@ func (p *pushOnly) relayClone(op string) func(dir string) error {
 // pushBranch creates branch from localRef in the repo at srcDir, create-only.
 func (p *pushOnly) pushBranch(srcDir, localRef, branch, base string) error {
 	return bundlerelay.PushBranch("connector forge", srcDir, localRef, branch, base, p.cred, p.relayClone("push branch"))
+}
+
+// newPushOnly builds a pushOnly whose clock, a zero one included, sleeps.
+func newPushOnly(c *connectorhost.Connector, target Target, clock retry.Clock) *pushOnly {
+	clock = realIfZero(clock)
+	return &pushOnly{conn: c, call: classedCall(c, clock), clock: clock, target: target}
+}
+
+// realIfZero is clock, or retry.RealClock() when it carries no Sleep.
+func realIfZero(clock retry.Clock) retry.Clock {
+	if clock.Sleep == nil {
+		return retry.RealClock()
+	}
+	return clock
 }

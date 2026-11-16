@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
@@ -262,7 +263,8 @@ func (f *prForge) EnqueueAutoMerge(prURL string) error {
 // here (classedCall never retries a merge) but reported as
 // forge.ErrMergeTransient, which the Lander's merge loop retries. A rate limit,
 // an auth failure or a refused route is returned as is; every other failure is
-// classified by re-reading the PR (see classifyMergeFailure).
+// classified by re-reading the PR, once more after a pause when it reads
+// conflicting (see classifyMergeFailure).
 func (f *prForge) Merge(prURL string) error {
 	err := f.numbered("forge.merge", prURL, nil)
 	switch {
@@ -280,11 +282,30 @@ func (f *prForge) Merge(prURL string) error {
 	return f.classifyMergeFailure(prURL, err)
 }
 
-// classifyMergeFailure tells a conflict from a PR merely blocked by checks from
-// the PR's own mergeable state. A PR that already merged landed by another path
+// mergeRecheckDelay is how long classifyMergeFailure waits before re-reading a
+// PR classed conflicting. A forge may recompute mergeability asynchronously
+// after a push and report a conflict while it runs (Forgejo reports false, not
+// unknown), so a refusal straight after a rebase can read as a conflict that is
+// not there. A Connector cannot sleep in the guest, so the pause lives in core.
+const mergeRecheckDelay = 5 * time.Second
+
+// classifyMergeFailure classifies a merge failure from the PR's state; one
+// classed a conflict is re-read once after mergeRecheckDelay and classified
+// from that second read.
+func (f *prForge) classifyMergeFailure(prURL string, cause error) error {
+	err := f.classifyFromPR(prURL, cause)
+	if !errors.Is(err, forge.ErrMergeConflict) {
+		return err
+	}
+	f.push.clock.Sleep(mergeRecheckDelay)
+	return f.classifyFromPR(prURL, cause)
+}
+
+// classifyFromPR tells a conflict from a PR merely blocked by checks from the
+// PR's own mergeable state. A PR that already merged landed by another path
 // (nil); a draft is an error with no sentinel; so is any state that cannot be
 // told apart.
-func (f *prForge) classifyMergeFailure(prURL string, cause error) error {
+func (f *prForge) classifyFromPR(prURL string, cause error) error {
 	w, state, err := f.pr(prURL)
 	if err != nil {
 		return fmt.Errorf("connector forge: merge %s: %w (PR lookup failed: %w)", prURL, cause, err)

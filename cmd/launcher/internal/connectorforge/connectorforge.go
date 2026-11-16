@@ -153,7 +153,7 @@ func NewReader(c *connectorhost.Connector, target Target, webHost string) (forge
 	if webHost == "" {
 		return nil, ErrNoWebHost
 	}
-	p := &pushOnly{conn: c, call: classedCall(c, retry.Clock{}), target: target}
+	p := newPushOnly(c, target, retry.Clock{})
 	return composePR(p, c.Capabilities, webHost, false), nil
 }
 
