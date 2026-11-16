@@ -26,6 +26,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/jira"
 	"spindrift.dev/launcher/internal/hostpaths"
+	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 const (
@@ -203,7 +204,7 @@ func newProductionHarness(t *testing.T, cloud bool, tr dispatchkind.Tracker, map
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.auditPath = filepath.Join(hostpaths.LogDir(pwd), "connector-jira.audit.jsonl")
+	h.auditPath = filepath.Join(hostpaths.LogDir(pwd), primaryrecord.Name("jira", ".audit.jsonl"))
 
 	t.Setenv("SPINDRIFT_JIRA_CONNECTOR_TOKEN", connectorToken)
 	t.Setenv("SPINDRIFT_JIRA_CONNECTOR_EMAIL", connectorEmail)

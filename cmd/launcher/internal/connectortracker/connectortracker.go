@@ -708,18 +708,15 @@ func newFrom(c *connectorhost.Connector, call guestCall, writes forge.IssueTrack
 // NewReloading is New for a tracker that lives as long as its process. A
 // Connector closes itself on a failed call, so a daemon or Console holding one
 // tracker would fail every later operation; here a call finding the Connector
-// dead reloads it first. The failing call is not retried, and a failed reload
-// fails the call that needed it with the load error. After maxLoadFailures
-// failed reloads in a row a Connector that cannot load is retried at most once
-// per loadRetryAfter, so a broken module is not recompiled on every call.
-// Capabilities come from the first handshake. A load error on the first load
-// is returned as is.
-func NewReloading(load func() (*connectorhost.Connector, error), writes forge.IssueTracker, lifecycle Lifecycle, target Target) (forge.IssueTracker, error) {
+// dead reloads it first. Capabilities come from the first handshake. A load
+// error on the first load is returned as is. A non-nil note sees every later
+// failure the Connector causes, by the method that met it.
+func NewReloading(load func() (*connectorhost.Connector, error), note func(method string, err error), writes forge.IssueTracker, lifecycle Lifecycle, target Target) (forge.IssueTracker, error) {
 	c, err := load()
 	if err != nil {
 		return nil, err
 	}
-	r := &reloader{load: func() (conn, error) { return load() }, cur: c}
+	r := &reloader{load: func() (conn, error) { return load() }, cur: c, note: note}
 	return newFrom(c, r.call, writes, lifecycle, target)
 }
 
@@ -737,6 +734,11 @@ const (
 // loadClock is a test seam for the reload cooldown.
 var loadClock = time.Now
 
+// reloader reloads a dead Connector before the call that finds it. The failing
+// call is not retried, and a failed reload fails the call that needed it with
+// the load error. After maxLoadFailures failed reloads in a row a Connector
+// that cannot load is retried at most once per loadRetryAfter, so a broken
+// module is not recompiled on every call.
 type reloader struct {
 	load func() (conn, error)
 	mu   sync.Mutex
@@ -746,13 +748,25 @@ type reloader struct {
 	failures int
 	lastErr  error
 	lastFail time.Time
+	note     func(method string, err error)
 }
 
+// call passes every failure the Connector causes to note, by method: a failed
+// reload, a refused retry, or a failed call. Errors core raises itself, such as
+// a refused lifecycle transition, never reach it.
 func (r *reloader) call(ctx context.Context, method string, params, result any) error {
+	err := r.callOnce(ctx, method, params, result)
+	if err != nil && r.note != nil {
+		r.note(method, err)
+	}
+	return err
+}
+
+func (r *reloader) callOnce(ctx context.Context, method string, params, result any) error {
 	r.mu.Lock()
 	if r.cur.Err() != nil {
 		if r.failures >= maxLoadFailures && loadClock().Sub(r.lastFail) < loadRetryAfter {
-			err := fmt.Errorf("connector load failed %d times in a row; retried %s after the last failure: %w", r.failures, loadRetryAfter, r.lastErr)
+			err := fmt.Errorf("connector load failed %d times in a row; next retry allowed %s after the last failure: %w", r.failures, loadRetryAfter, r.lastErr)
 			r.mu.Unlock()
 			return err
 		}
