@@ -33,16 +33,43 @@ func httpCallGuest(req string, respPtr, respCap int64, pass bool) []byte {
 // httpCallGuestAnswering is httpCallGuest whose fixed envelope is answer; an
 // empty answer passes the host's answer through instead.
 func httpCallGuestAnswering(req string, respPtr, respCap int64, answer string) []byte {
+	return httpCallsGuest(answer, guestRequest{req, respPtr, respCap})
+}
+
+// guestRequest is one http_request a guest makes: the request bytes and the
+// response buffer it names.
+type guestRequest struct {
+	req              string
+	respPtr, respCap int64
+}
+
+// httpCallsGuest is a network Connector whose connector_call makes reqs in
+// order and drops every answer but the last. An empty answer passes the last
+// answer through as the envelope; otherwise the fixed envelope answer is
+// returned.
+func httpCallsGuest(answer string, reqs ...guestRequest) []byte {
 	hs, fns := connectorFns([]string{"network"}, allocOff, 0)
-	body := append(append(append(append(i32Const(netReqOff), i32Const(int64(len(req)))...), i32Const(respPtr)...), i32Const(respCap)...), 0x10, 0x00)
+	data := []dataSeg{{0, hs}, {respOff, []byte(answer)}}
+	var body []byte
+	off := int64(netReqOff)
+	for i, r := range reqs {
+		data = append(data, dataSeg{int(off), []byte(r.req)})
+		body = append(append(append(append(body, i32Const(off)...), i32Const(int64(len(r.req)))...), i32Const(r.respPtr)...), i32Const(r.respCap)...)
+		body = append(body, 0x10, 0x00)
+		off += int64(len(r.req))
+		if i < len(reqs)-1 {
+			body = append(body, 0x1a)
+		}
+	}
 	if answer == "" {
-		body = append(append(append(body, i64Const(0xffffffff)...), 0x83), append(i64Const(respPtr<<32), 0x84)...)
+		body = append(append(body, i64Const(0xffffffff)...), 0x83)
+		body = append(append(body, i64Const(reqs[len(reqs)-1].respPtr<<32)...), 0x84)
 	} else {
 		body = append(append(body, 0x1a), i64Const(respOff<<32|int64(len(answer)))...)
 	}
 	fns[fnCall].body = body
 	imp := guestImport{"spindrift", "http_request", []byte{i32, i32, i32, i32}, []byte{i64}}
-	return guestModuleWith([]guestImport{imp}, []dataSeg{{0, hs}, {respOff, []byte(answer)}, {netReqOff, []byte(req)}}, fns...)
+	return guestModuleWith([]guestImport{imp}, data, fns...)
 }
 
 type netLoader func(context.Context, []byte, connectorhost.Network) (*connectorhost.Connector, error)
@@ -258,6 +285,39 @@ func TestNetworkConnectorSendFailureReasonSurvivesAFailedCall(t *testing.T) {
 	err := c.Call(context.Background(), "m", nil, nil)
 	if !errors.Is(err, connectorhost.ErrCall) || !errors.Is(err, connectorhost.ErrHTTPSend) || !strings.Contains(err.Error(), unset) {
 		t.Fatalf("err = %v, want ErrCall, ErrHTTPSend and %q", err, unset)
+	}
+}
+
+// Request 1 fails to send and request 2 is sent: the host cause of request 1
+// must not ride on the error of a call that ends on request 2's answer.
+func TestNetworkConnectorSendFailureReasonDoesNotOutliveASentRequest(t *testing.T) {
+	for name, load := range netLoadersFor(t) {
+		t.Run(name, func(t *testing.T) {
+			const unset = "CONNECTOR_TOKEN is not set"
+			b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"error":"not found"}`)
+			})
+			n := netFor(b, new(bytes.Buffer),
+				connectorhost.Route{Method: "GET", Host: b.host(), Path: "/down"},
+				connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+			n.Authorize = func(r *http.Request) error {
+				if r.URL.Path == "/down" {
+					return errors.New(unset)
+				}
+				return nil
+			}
+			wasm := httpCallsGuest("",
+				guestRequest{fmt.Sprintf(`{"method":"GET","url":"%s/down"}`, b.URL), netRespOff, 4096},
+				guestRequest{fmt.Sprintf(`{"method":"GET","url":"%s/repos"}`, b.URL), netRespOff, 4096})
+			err := loadNetWith(t, load, wasm, n).Call(context.Background(), "m", nil, nil)
+			if !errors.Is(err, connectorhost.ErrCall) || !strings.Contains(err.Error(), "not found") {
+				t.Fatalf("err = %v, want the guest's 404 error", err)
+			}
+			if errors.Is(err, connectorhost.ErrHTTPSend) || strings.Contains(err.Error(), "host:") || strings.Contains(err.Error(), unset) {
+				t.Errorf("err = %v, want no host cause from the earlier request", err)
+			}
+		})
 	}
 }
 
