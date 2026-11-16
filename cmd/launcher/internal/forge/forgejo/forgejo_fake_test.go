@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"regexp"
 	"sort"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/forgetest"
 )
 
 type fakePull struct {
@@ -71,6 +73,30 @@ type fakeForgejo struct {
 	// real git merge conflict. The nil default keeps slice 5's plain
 	// in-memory flip.
 	mergeHook func(num string) error
+
+	// The remaining fields serve the compiled Connector's suite
+	// (connector_test.go); the native harnesses leave them zero.
+	//
+	// web is the base of every html_url the fake serves (https://forge.test
+	// when empty), repo the bare repository behind the branch routes, and token
+	// the credential every request must carry (empty accepts any).
+	web       string
+	repo      *forgetest.GitRepoFixture
+	token     string
+	protected map[string]bool // branch to the protected flag its route serves
+	// comments is each pull's posted comment bodies; mergeStatuses scripts the
+	// statuses the next merge requests answer, in order, before the real answer
+	// resumes; merges counts merge requests; nextNum numbers created pulls.
+	comments      map[string][]string
+	mergeStatuses []int
+	// mergeableReads scripts a pull's mergeable flag per GET, in order, before
+	// the pull's own flag resumes.
+	mergeableReads map[string][]bool
+	merges         int
+	nextNum        int
+	// unexpected is every request no route served and every one the credential
+	// check rejected.
+	unexpected []string
 }
 
 var (
@@ -82,10 +108,19 @@ var (
 	fakeForgejoJobLogRe    = regexp.MustCompile(`^/owner/repo/actions/runs/[0-9]+/jobs/[0-9]+/logs$`)
 	fakeForgejoRepoRootRe  = regexp.MustCompile(`^/api/v1/repos/owner/repo$`)
 	fakeForgejoCompareRe   = regexp.MustCompile(`^/api/v1/repos/owner/repo/compare/`)
+	fakeForgejoBranchRe    = regexp.MustCompile(`^/api/v1/repos/owner/repo/branches/(.+)$`)
+	fakeForgejoCommentRe   = regexp.MustCompile(`^/api/v1/repos/owner/repo/issues/([0-9]+)/comments$`)
 	fakeForgejoIssueNumRe  = regexp.MustCompile(`issue-(\d+)`)
 )
 
 func newFakeForgejo(t *testing.T) *fakeForgejo {
+	t.Helper()
+	return startFakeForgejo(t, httptest.NewServer)
+}
+
+// startFakeForgejo serves the fake with start, httptest.NewServer or
+// httptest.NewTLSServer.
+func startFakeForgejo(t *testing.T, start func(http.Handler) *httptest.Server) *fakeForgejo {
 	t.Helper()
 	f := &fakeForgejo{
 		pulls:         map[string]*fakePull{},
@@ -94,8 +129,11 @@ func newFakeForgejo(t *testing.T) *fakeForgejo {
 		failingChecks: map[string][]fakeStatus{},
 		jobLogs:       map[string]string{},
 		enqueued:      map[string]bool{},
+		protected:     map[string]bool{},
+		comments:      map[string][]string{},
+		nextNum:       900,
 	}
-	f.srv = httptest.NewServer(http.HandlerFunc(f.handle))
+	f.srv = start(http.HandlerFunc(f.handle))
 	t.Cleanup(f.srv.Close)
 	return f
 }
@@ -129,11 +167,20 @@ func (f *fakeForgejo) SeedDraftPR(num string) string {
 }
 
 func (f *fakeForgejo) seedPull(num string, draft bool) string {
+	return f.seedPullHead(num, "agent/issue-"+num, draft)
+}
+
+// seedPullHead is seedPull for a head other than agent/issue-<num>.
+func (f *fakeForgejo) seedPullHead(num, head string, draft bool) string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	n, _ := strconv.Atoi(num)
-	url := "https://forge.test/owner/repo/pulls/" + num
+	web := f.web
+	if web == "" {
+		web = "https://forge.test"
+	}
+	url := web + "/owner/repo/pulls/" + num
 	sha := "sha" + num
 	title := "Issue " + num
 	if draft {
@@ -146,7 +193,7 @@ func (f *fakeForgejo) seedPull(num string, draft bool) string {
 		Merged:    false,
 		Mergeable: true,
 		Title:     title,
-		HeadRef:   "agent/issue-" + num,
+		HeadRef:   head,
 		HeadSHA:   sha,
 		BaseRef:   "main",
 	}
@@ -208,6 +255,17 @@ func (f *fakeForgejo) SetMergeable(num string, mergeable bool) {
 	if p, ok := f.pulls[num]; ok {
 		p.Mergeable = mergeable
 	}
+}
+
+// ScriptMergeableReads makes num's next GETs report these mergeable flags in
+// order, the way a real server's async conflict check reads false, then true.
+func (f *fakeForgejo) ScriptMergeableReads(num string, reads ...bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.mergeableReads == nil {
+		f.mergeableReads = map[string][]bool{}
+	}
+	f.mergeableReads[num] = append(f.mergeableReads[num], reads...)
 }
 
 // SeedNeedsUpdate scripts the compare route's total_commits, nonzero for true
@@ -278,9 +336,15 @@ func pullPayload(p *fakePull) map[string]any {
 }
 
 func (f *fakeForgejo) handle(w http.ResponseWriter, r *http.Request) {
+	if f.token != "" && r.Header.Get("Authorization") != "Bearer "+f.token {
+		f.reject(w, r)
+		return
+	}
 	switch {
 	case r.Method == http.MethodGet && fakeForgejoRepoRootRe.MatchString(r.URL.Path):
 		f.handleRepoRoot(w, r)
+	case r.Method == http.MethodPost && fakeForgejoPullsListRe.MatchString(r.URL.Path):
+		f.handleCreatePull(w, r)
 	case r.Method == http.MethodGet && fakeForgejoPullsListRe.MatchString(r.URL.Path):
 		f.handlePullsList(w, r)
 	case r.Method == http.MethodPost && fakeForgejoPullMergeRe.MatchString(r.URL.Path):
@@ -297,9 +361,23 @@ func (f *fakeForgejo) handle(w http.ResponseWriter, r *http.Request) {
 		f.handleJobLog(w, r)
 	case r.Method == http.MethodGet && fakeForgejoCompareRe.MatchString(r.URL.Path):
 		f.handleCompare(w, r)
+	case r.Method == http.MethodGet && fakeForgejoBranchRe.MatchString(r.URL.Path):
+		f.handleGetBranch(w, fakeForgejoBranchRe.FindStringSubmatch(r.URL.Path)[1])
+	case r.Method == http.MethodDelete && fakeForgejoBranchRe.MatchString(r.URL.Path):
+		f.handleDeleteBranch(w, r, fakeForgejoBranchRe.FindStringSubmatch(r.URL.Path)[1])
+	case r.Method == http.MethodPost && fakeForgejoCommentRe.MatchString(r.URL.Path):
+		f.handleComment(w, r, fakeForgejoCommentRe.FindStringSubmatch(r.URL.Path)[1])
 	default:
-		http.NotFound(w, r)
+		f.reject(w, r)
 	}
+}
+
+// reject records a request the fake does not serve, or serves to no credential.
+func (f *fakeForgejo) reject(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	f.unexpected = append(f.unexpected, r.Method+" "+r.URL.RequestURI())
+	f.mu.Unlock()
+	http.NotFound(w, r)
 }
 
 func (f *fakeForgejo) handleRepoRoot(w http.ResponseWriter, _ *http.Request) {
@@ -348,12 +426,19 @@ func (f *fakeForgejo) handlePullsList(w http.ResponseWriter, r *http.Request) {
 func (f *fakeForgejo) handleGetPull(w http.ResponseWriter, _ *http.Request, num string) {
 	f.mu.Lock()
 	p, ok := f.pulls[num]
+	payload := map[string]any(nil)
+	if ok {
+		payload = pullPayload(p)
+		if reads := f.mergeableReads[num]; len(reads) > 0 {
+			payload["mergeable"], f.mergeableReads[num] = reads[0], reads[1:]
+		}
+	}
 	f.mu.Unlock()
 	if !ok {
 		http.NotFound(w, nil)
 		return
 	}
-	json.NewEncoder(w).Encode(pullPayload(p))
+	json.NewEncoder(w).Encode(payload)
 }
 
 func (f *fakeForgejo) handlePatchPull(w http.ResponseWriter, r *http.Request, num string) {
@@ -385,6 +470,14 @@ func (f *fakeForgejo) handleMerge(w http.ResponseWriter, r *http.Request, num st
 	json.NewDecoder(r.Body).Decode(&body)
 
 	f.mu.Lock()
+	f.merges++
+	if len(f.mergeStatuses) > 0 {
+		status := f.mergeStatuses[0]
+		f.mergeStatuses = f.mergeStatuses[1:]
+		f.mu.Unlock()
+		w.WriteHeader(status)
+		return
+	}
 	_, ok := f.pulls[num]
 	f.mu.Unlock()
 	if !ok {
@@ -430,6 +523,12 @@ func (f *fakeForgejo) handleCommitStatus(w http.ResponseWriter, _ *http.Request,
 	}
 	queue := f.checkQueues[num]
 	if len(queue) == 0 {
+		// A failing status makes the combined state failure, as on a real
+		// server, so a failing check is seen without a scripted queue.
+		if failing := f.failingChecks[num]; len(failing) > 0 {
+			json.NewEncoder(w).Encode(map[string]any{"state": "failure", "total_count": len(failing)})
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]any{"state": "", "total_count": 0})
 		return
 	}
@@ -478,4 +577,79 @@ func (f *fakeForgejo) handleJobLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Write([]byte(log))
+}
+
+func (f *fakeForgejo) branchExists(branch string) bool {
+	return f.repo != nil && exec.Command("git", "-C", f.repo.Bare, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch).Run() == nil
+}
+
+func (f *fakeForgejo) handleGetBranch(w http.ResponseWriter, branch string) {
+	if !f.branchExists(branch) {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	f.mu.Lock()
+	protected := f.protected[branch]
+	f.mu.Unlock()
+	json.NewEncoder(w).Encode(map[string]any{"name": branch, "protected": protected})
+}
+
+func (f *fakeForgejo) handleDeleteBranch(w http.ResponseWriter, r *http.Request, branch string) {
+	if !f.branchExists(branch) {
+		http.NotFound(w, r)
+		return
+	}
+	if out, err := exec.Command("git", "-C", f.repo.Bare, "branch", "-D", branch).CombinedOutput(); err != nil {
+		http.Error(w, string(out), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleCreatePull opens a pull for a head branch that exists, and refuses one
+// whose head already has an open pull, as Forgejo does.
+func (f *fakeForgejo) handleCreatePull(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Title string `json:"title"`
+		Head  string `json:"head"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+	if !f.branchExists(body.Head) {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	f.mu.Lock()
+	for _, p := range f.pulls {
+		if p.HeadRef == body.Head && p.State == "open" {
+			f.mu.Unlock()
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+	}
+	f.nextNum++
+	num := strconv.Itoa(f.nextNum)
+	f.mu.Unlock()
+
+	f.seedPullHead(num, body.Head, false)
+	f.mu.Lock()
+	f.pulls[num].Title = body.Title
+	payload := pullPayload(f.pulls[num])
+	f.mu.Unlock()
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(payload)
+}
+
+func (f *fakeForgejo) handleComment(w http.ResponseWriter, r *http.Request, num string) {
+	var body struct {
+		Body string `json:"body"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.pulls[num]; !ok {
+		http.NotFound(w, r)
+		return
+	}
+	f.comments[num] = append(f.comments[num], body.Body)
+	w.WriteHeader(http.StatusCreated)
 }

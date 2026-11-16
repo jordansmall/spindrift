@@ -55,6 +55,13 @@ type PRForgeHarness interface {
 	AutoMergeEnqueued(url string) bool
 }
 
+// NoJobLogs marks a harness whose forge serves no CI job log, such as a
+// Connector that leaves forge.jobLog unset, so the failure-detail case checks
+// the failing check's name and conclusion but not a log excerpt.
+type NoJobLogs interface {
+	HasNoJobLogs()
+}
+
 // PushOnlyCodeForgeProvider is implemented by harnesses that can also produce
 // a push-only CodeForge from the same adapter, so the discovery scenario can
 // prove a push-only forge fails the PRForge type assertion. A github CodeForge
@@ -342,6 +349,9 @@ func testFailureDetailOnFailingCheck(t *testing.T, h PRForgeReadHarness) {
 	}
 	if !strings.Contains(detail, "build") || !strings.Contains(detail, "FAILURE") {
 		t.Fatalf("FailureDetail(%q) = %q, want it to mention the failing check's name and conclusion", failingURL, detail)
+	}
+	if _, ok := h.(NoJobLogs); ok {
+		return
 	}
 
 	// The log's head and tail are distinguishable and it is over the cap, so
