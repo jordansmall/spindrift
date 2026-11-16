@@ -24,9 +24,10 @@ type hostCalls interface {
 
 // networkCalls serves a Network's Host calls. failed records that a fatal
 // failure was audited here, so Call does not audit it a second time. sendErr
-// is the send error of the last request this Call made, in full, and nil if
-// that request was sent: the guest sees only the fixed reason, Call's error
-// the detail.
+// is the full send error of the Call's last http_request if that request
+// failed to send, and nil if it was sent, refused or failed fatally, or if
+// none was made yet; a refused http_response_header leaves it as is. The guest
+// sees only the fixed reason, Call's error the detail.
 type networkCalls struct {
 	n       *Network
 	failed  bool
@@ -36,20 +37,19 @@ type networkCalls struct {
 var _ hostCalls = (*networkCalls)(nil)
 
 func (h *networkCalls) httpRequest(ctx context.Context, raw []byte, bufCap int) (int, []byte, http.Header, error) {
+	h.sendErr = nil
 	if len(raw) > maxRequest {
 		return 0, nil, nil, h.refuse(hostRequest, fmt.Sprintf("request of %d bytes, cap %d", len(raw), maxRequest))
 	}
 	status, body, header, err := h.n.do(ctx, raw, min(bufCap, maxHTTPResponse))
 	switch {
-	case err == nil:
-		h.sendErr = nil
 	case errors.Is(err, ErrHTTPSend):
 		// A fixed reason for the guest: err carries the request URL and whatever
 		// Authorize said. The detail stays host-side: the audit entry and Call's
 		// returned error.
 		h.sendErr = err
 		return 0, []byte(ErrHTTPSend.Error()), nil, nil
-	default:
+	case err != nil:
 		h.failed = true
 		return 0, nil, nil, err
 	}
@@ -64,5 +64,10 @@ func (h *networkCalls) refuse(call, why string) error {
 	// No request completed, so this is the call's one audit entry.
 	h.n.recordFailure(DecisionRefused, err)
 	h.failed = true
+	// Engines refuse a bad http_request without entering httpRequest, so the
+	// clear there may not have run; a refused header lookup is no request.
+	if call == hostRequest {
+		h.sendErr = nil
+	}
 	return err
 }
