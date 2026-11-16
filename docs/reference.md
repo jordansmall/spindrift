@@ -2918,10 +2918,11 @@ the Driver replay, with these differences:
   included); all are absent when no sandbox started. The host-side summary
   also always carries `in_process_loads`, the loads through the Launcher's
   Connector routing point (`connectorsandbox`) that fell back to its own
-  process: `0` means none did. Only a host-side read shadow writes them, so a
-  sandboxed run with no `Shadow` backend row reports no sandbox cost. Totals
-  are run-wide, as one sandbox serves every Connector the run hosts, and each
-  shadowed backend repeats them on its own summary: read one, do not sum them.
+  process: `0` means none did. A host-side read shadow writes them on its
+  `shadow_summary`; a primary row's process writes them as a totals line on
+  its [primary record](#backend-primary-mode). Totals are run-wide, as one
+  sandbox serves every Connector the run hosts, and each shadowed backend
+  repeats them on its own summary: read one, do not sum them.
 
 The host classifies a 403 or 429 itself, since the guest sees only status and
 body, and marks the audit line: `shadow` is `true` on every entry a shadow
@@ -3057,7 +3058,12 @@ with the stamp as `20060102T150405Z`:
 
 - `<stem>.audit.jsonl` holds the Connector's [audit lines](#connector-protocol),
   token introspection's included. `"decision":"refused"` marks a request the
-  Route table refused.
+  Route table refused. With the Connector sandbox on, the process also appends
+  one totals line as it closes the sandbox, on a failed bootstrap too,
+  `{"sandbox_start_ns":N,"sandbox_calls":N,
+  "sandbox_host_calls":N,"sandbox_hop_ns":N,"in_process_loads":N}`, the keys
+  the read shadow's `shadow_summary` carries. It has no `decision`, and it is
+  written only when a sandbox started and the file exists.
 - `<stem>.log` gets one JSON line, `{"op":"<verb>","error":"<err>"}`, per
   failed routed read (`op` is the read's verb, such as `count demand`), a load
   failure included; doctor and daemon reads record the same way. A read that
@@ -3740,11 +3746,12 @@ Driver Connectors); a run that loads none starts none.
 - **Dogfood.** spindrift's own dogfood turns `CONNECTOR_SANDBOX` on
   (`connectorSandbox` in `nix/dogfood-defaults.nix`, which the fixtures mirror
   inherits; the `connector-driver-rows-dogfood-sandbox` check asserts both
-  carry it), so its github read shadow and any Launcher-hosted claude Driver
-  load in the sandbox; its shadow and primary settings are unchanged. A
-  dogfood run's `shadow_summary` should show the sandbox's start and hop
-  totals and `in_process_loads` of `0` (see [Backend read
-  shadow](#backend-read-shadow)). The bar for making the sandbox mandatory and
+  carry it), so its github primary Connector and any Launcher-hosted claude
+  Driver load in the sandbox; its shadow and primary settings are unchanged. A
+  dogfood run's primary record, `primary-github-<stamp>-<pid>.audit.jsonl`,
+  should end with a totals line showing the sandbox's start and hop totals and
+  `in_process_loads` of `0` (see [Backend primary
+  mode](#backend-primary-mode)). The bar for making the sandbox mandatory and
   removing the knob (issue #7022) is 20 consecutive clean dogfood runs with it
   on, meaning no sandbox start failures and no divergences or audit refusals
   attributable to the sandbox, plus the human macOS check (issue #7021).
