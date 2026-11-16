@@ -88,7 +88,7 @@ func TestPRsForBranch(t *testing.T) {
 	want := []forge.PR{
 		{Number: "5", URL: "https://forge.test/o/r/pulls/5", State: "open", Head: "agent/issue-1", HeadSHA: "h5", Mergeable: "MERGEABLE"},
 		{Number: "3", URL: "https://forge.test/o/r/pulls/3", State: "closed", Merged: true, Head: "agent/issue-1", HeadSHA: "h3", Mergeable: "CONFLICTING", MergeCommit: "m3"},
-		{Number: "1", URL: "https://forge.test/o/r/pulls/1", State: "closed", Head: "agent/issue-1", HeadSHA: "h1", Mergeable: "UNKNOWN"},
+		{Number: "1", URL: "https://forge.test/o/r/pulls/1", State: "closed", Head: "agent/issue-1", HeadSHA: "h1", Mergeable: "CONFLICTING"},
 	}
 	if !reflect.DeepEqual(prs, want) {
 		t.Fatalf("prs = %#v", prs)
@@ -125,7 +125,7 @@ func TestPR(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := forge.PR{Number: "5", URL: "https://forge.test/o/r/pulls/5", State: "open", Head: "b", HeadSHA: "s5", Mergeable: "UNKNOWN"}
+	want := forge.PR{Number: "5", URL: "https://forge.test/o/r/pulls/5", State: "open", Head: "b", HeadSHA: "s5", Mergeable: "CONFLICTING"}
 	if p != want {
 		t.Fatalf("pr = %#v", p)
 	}
@@ -338,5 +338,26 @@ func TestDeleteBranchMissingIsNotFound(t *testing.T) {
 	var ce *connector.Error
 	if !errors.As(err, &ce) || ce.Class != connector.NotFound {
 		t.Fatalf("err = %#v", err)
+	}
+}
+
+func TestPRsForBranchWalksPastFiftyPages(t *testing.T) {
+	const pages = 60
+	old := send
+	send = func(r connector.Request) (connector.Response, error) {
+		page, _ := strconv.Atoi(strings.Split(strings.Split(r.URL, "page=")[1], "&")[0])
+		if page > pages {
+			return ok(`[]`), nil
+		}
+		ref := "other"
+		if page == 1 || page == pages {
+			ref = "b"
+		}
+		return ok(`[{"number":` + strconv.Itoa(page) + `,"html_url":"u","state":"open","head":{"ref":"` + ref + `","sha":"s"}}]`), nil
+	}
+	t.Cleanup(func() { send = old })
+	prs, err := prsForBranch(ftgt, "b")
+	if err != nil || len(prs) != 2 || prs[0].Number != strconv.Itoa(pages) {
+		t.Fatalf("prs = %#v, err = %v", prs, err)
 	}
 }

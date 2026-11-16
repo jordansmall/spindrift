@@ -4,28 +4,40 @@
 # to each route path, before the table reaches `connectorhost.LoadNetwork`
 # (lib/connector-routes.nix, `backendrows.BaseHost`). `{repo}` is the
 # repository's owner/name slug, which core substitutes. The table covers every
-# request the Connector makes: the PR list and one PR under `/pulls`, the
-# head commit's combined status and statuses under `/commits`, and a branch's
-# lookup and delete under `/branches`.
+# request the Connector makes. The reads are the repository itself (the probe
+# and the allowed merge styles), the PR list, one PR and its files, the compare
+# for how far a PR is behind, the head commit's statuses, and a branch's lookup
+# and protection flag. The writes are open and merge a PR and the draft flip
+# under `/pulls`, a PR's comment under `/issues`, and a branch's delete under
+# `/branches`.
 #
 # It is the narrowest table the subtree-only Route model can express, not an
-# exact one: `/commits` also admits any other GET under a commit, and
-# `/branches` also admits GET of the branch list.
+# exact one. The repository read cannot be pinned to the repository document
+# itself: its root also admits every GET under the repository, which is why the
+# other reads need no root of their own, and the Connector sends only the ones
+# above. The write roots over-admit too: `POST /pulls` also admits review
+# creation, `PATCH /pulls` any PR edit, and `POST /issues` any issue's comment
+# or label add.
 [
   {
     method = "GET";
     host = "{base}";
+    path = "/api/v1/repos/{repo}";
+  }
+  {
+    method = "POST";
+    host = "{base}";
     path = "/api/v1/repos/{repo}/pulls";
   }
   {
-    method = "GET";
+    method = "PATCH";
     host = "{base}";
-    path = "/api/v1/repos/{repo}/commits";
+    path = "/api/v1/repos/{repo}/pulls";
   }
   {
-    method = "GET";
+    method = "POST";
     host = "{base}";
-    path = "/api/v1/repos/{repo}/branches";
+    path = "/api/v1/repos/{repo}/issues";
   }
   {
     method = "DELETE";
