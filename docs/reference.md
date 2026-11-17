@@ -4845,8 +4845,8 @@ only where applicable — see [Issue Tracker backends](#issue-tracker-backends))
 - cmd/launcher/*.go
 ```
 
-With `OVERLAP_GATE=defer` (the default), dispatch holds a Dispatchable issue
-whose declared touch-set intersects the touch-set of any currently
+With the overlap gate at `defer` (the default), dispatch holds a Dispatchable
+issue whose declared touch-set intersects the touch-set of any currently
 `agent-in-progress` issue (its declared `## Touches` plus the files changed in
 its open PR), retrying once the colliding issue completes. An issue with no
 `## Touches` section, or one whose touches never intersect an in-progress
@@ -4856,7 +4856,8 @@ fails an issue. A claimed issue (`spindrift dispatch
 Dispatchable label, so instead of holding it the launcher writes the
 blocked-claim marker naming the collider and the workflow releases it to
 `ready-for-agent` for a human re-trigger. Advise-only kinds (research, butler)
-skip the gate. Set `OVERLAP_GATE=off` to disable the check entirely.
+skip the gate. Pass `--overlap-gate off` (or set `dispatch.overlapGate` to
+`off`) to disable the check entirely.
 
 This bounds wasted work from parallel issues that rewrite the same generated
 surface (schema-derived artifacts, a shared config file) and collide
