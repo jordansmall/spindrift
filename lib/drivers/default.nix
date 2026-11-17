@@ -487,9 +487,10 @@ let
     + lib.escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}"
     + "\n"
     # renderPreamble emits this var only when the entry declares
-    # agentFilesDirRelative (opencode only), leaving it unset rather than empty
-    # so promptassembly's file-rewrite loop (issue #2153) is a true no-op
-    # for claude, whose subagents use no on-disk files.
+    # agentFilesDirRelative (declared by any Driver whose subagents use on-disk
+    # agent files), leaving it unset rather than empty so promptassembly's
+    # file-rewrite loop (issue #2153) is a true no-op for claude, whose
+    # subagents use none.
     + lib.optionalString (driverEntry ? agentFilesDirRelative) (
       "DRIVER_AGENT_FILES_DIR="
       + lib.escapeShellArg "/home/agent/${driverEntry.agentFilesDirRelative}"
