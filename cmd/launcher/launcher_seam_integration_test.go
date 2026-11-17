@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostpaths"
@@ -474,7 +475,8 @@ func TestSeamLauncherSmokeMatrix(t *testing.T) {
 // TestSeamSmokeOptedInBoxCarriesNoForgeToken runs the work-podman document
 // with BOX_FORGE_CREDENTIAL=none while the launcher's own env holds GH_TOKEN
 // and BOX_GH_TOKEN (smokeSecrets): the Box run must still land, and its argv
-// must carry no forge token key, forwarded bare or by value (issue #7140).
+// must carry no forge token key, forwarded bare or by value (issue #7140),
+// and the host's open-PR answer for branch recovery (issue #7146).
 func TestSeamSmokeOptedInBoxCarriesNoForgeToken(t *testing.T) {
 	i := slices.IndexFunc(smokeMatrix, func(c smokeCase) bool { return c.name == "work-podman" })
 	if i < 0 {
@@ -493,6 +495,9 @@ func TestSeamSmokeOptedInBoxCarriesNoForgeToken(t *testing.T) {
 	}
 	if got := env["BOX_GH_TOKEN_OPTIONAL"]; got == nil || *got != "1" {
 		t.Errorf("BOX_GH_TOKEN_OPTIONAL = %v; want 1", got)
+	}
+	if got := env[branchrecovery.HostOpenPREnv]; got == nil || *got != branchrecovery.HostOpenPROpen {
+		t.Errorf("%s = %v; want %s (the fake forge lists an open PR on the branch)", branchrecovery.HostOpenPREnv, got, branchrecovery.HostOpenPROpen)
 	}
 	doc, err := inputdoc.Load(seamtest.Path(t, c.fixture))
 	if err != nil {

@@ -22,6 +22,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/boxclone"
+	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/markergate"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/seambundle"
@@ -2297,6 +2298,154 @@ func TestBoxSeamBranchRecoveryGhFailureAborts(t *testing.T) {
 	}
 }
 
+// seamForgeTokenVars is every name a forge token reaches the Box under,
+// launcher-forwarded or not.
+var seamForgeTokenVars = []string{"GH_TOKEN", "GITEA_TOKEN", "FORGEJO_TOKEN", "BOX_GH_TOKEN", "BOX_FORGEJO_TOKEN"}
+
+// seamTokenlessCase is a BOX_FORGE_CREDENTIAL=none Box on the github forge,
+// read-only as every such Box is (it relays a bundle, never pushes): no token
+// in its env and a gh fake whose `pr list` fails the way an
+// unauthenticated gh does, so only the host's BOX_HOST_OPEN_PR can answer the
+// open-PR question. hostOpenPR is that variable's value, "" leaving it unset.
+func seamTokenlessCase(t *testing.T, repo, hostOpenPR string, runs []seamtest.DriverRun) (seamCase, string) {
+	t.Helper()
+	ghRec := filepath.Join(t.TempDir(), "gh.rec")
+	env := map[string]string{"BOX_GH_TOKEN_OPTIONAL": "1", "BOX_HOST_SEEDED_MIRROR": "1", branchrecovery.HostOpenPREnv: hostOpenPR}
+	mergeEnv(env, seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{
+		Record:  ghRec,
+		Replies: []seamtest.GhReply{{Args: []string{"pr", "list"}, Exit: 4}},
+	}))
+	return seamCase{repo: repo, relay: true, snapshot: true, env: env, fakes: []string{"gh"}, unset: seamForgeTokenVars, driverRuns: runs}, ghRec
+}
+
+// seamDumpEnvNames is the Driver side effect that writes the names in its env
+// to path, proving what the Box holds.
+func seamDumpEnvNames(path string) string {
+	return "env | cut -d= -f1 >'" + path + "'"
+}
+
+func seamWantNoForgeToken(t *testing.T, envDump string) {
+	t.Helper()
+	names := strings.Fields(string(readSeamFile(t, envDump)))
+	for _, name := range seamForgeTokenVars {
+		if slices.Contains(names, name) {
+			t.Errorf("the Box env carries %s; want it absent", name)
+		}
+	}
+}
+
+// Under BOX_FORGE_CREDENTIAL=none the Box holds no forge token, so branch
+// recovery takes the open-PR answer from the host's BOX_HOST_OPEN_PR. The gh
+// fake's `pr list` fails, so a forge call would abort the run. The Box is
+// read-only, so origin never moves: open adopts the prior branch and relays it
+// rebased as a bundle, none resets it to main with nothing to relay, and a
+// failed host lookup aborts rather than reading as "no PR".
+func TestBoxSeamBranchRecoveryTokenlessAnswersFromTheHost(t *testing.T) {
+	cases := []struct {
+		name       string
+		hostOpenPR string
+		wantExit   int
+		wantAdopt  bool
+		wantSay    string
+	}{
+		{
+			name: "open PR adopts the prior branch and rebases it", hostOpenPR: branchrecovery.HostOpenPROpen, wantAdopt: true,
+			wantSay: "open PR exists on " + seamBranch + "; skipping force-reset",
+		},
+		{
+			name: "no PR resets the prior branch and starts fresh", hostOpenPR: branchrecovery.HostOpenPRNone,
+			wantSay: "stale remote branch " + seamBranch + " found (no open PR); force-resetting to main",
+		},
+		{name: "an unanswered lookup aborts recovery", hostOpenPR: branchrecovery.HostOpenPRUnknown, wantExit: 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			repo := seamPriorBranchRepo(t, true, true)
+			prior := seamOriginRef(t, repo)
+			envDump := filepath.Join(t.TempDir(), "box.env")
+			sc, ghRec := seamTokenlessCase(t, repo, c.hostOpenPR, []seamtest.DriverRun{{
+				Sh: seamDumpEnvNames(envDump), Stdout: seamResult(seamOutcomeLine("done", "recovered")),
+			}})
+			r := runBoxSeam(t, sc)
+			r.res.WantExit(t, c.wantExit)
+			if seamGhAskedPRList(t, ghRec) {
+				t.Error("the Box ran `gh pr list`; want the host's answer to stand in for it")
+			}
+			if c.wantExit != 0 {
+				for _, want := range []string{"box: branch-recovery:", branchrecovery.HostOpenPREnv + `="` + c.hostOpenPR + `"`, "aborting to protect any open PR"} {
+					if !strings.Contains(r.res.Stderr, want) {
+						t.Errorf("stderr lacks %q:\n%s", want, r.res.Stderr)
+					}
+				}
+				if got := seamOriginRef(t, repo); got != prior {
+					t.Errorf("origin %s = %s; want the prior tip %s", seamBranch, got, prior)
+				}
+				if len(r.driverRec) != 0 || len(r.orchRec) != 0 {
+					t.Errorf("driver calls %v, orchestrator calls %v; want none past the abort", r.driverRec, r.orchRec)
+				}
+				return
+			}
+			if !strings.Contains(r.res.Stdout, c.wantSay) {
+				t.Errorf("stdout lacks %q\n%s", c.wantSay, r.res.Stdout)
+			}
+			seamWantNoForgeToken(t, envDump)
+			mainTip := seamRevParse(t, repo, "origin/main")
+			_, err := os.Stat(filepath.Join(repo, "branch.txt"))
+			if (err == nil) != c.wantAdopt {
+				t.Errorf("branch.txt present = %v; want %v", err == nil, c.wantAdopt)
+			}
+			if got := seamOriginRef(t, repo); got != prior {
+				t.Errorf("origin %s = %s; want the prior tip %s (a read-only Box never pushes)", seamBranch, got, prior)
+			}
+			heads := seamBundleHeads(t, repo, r.outboxDir)
+			if !c.wantAdopt {
+				if got := seamRevParse(t, repo, seamBranch); got != mainTip {
+					t.Errorf("local %s = %s; want origin/main %s", seamBranch, got, mainTip)
+				}
+				if heads != nil {
+					t.Errorf("bundle heads = %v; want no bundle", heads)
+				}
+				return
+			}
+			local := seamRevParse(t, repo, seamBranch)
+			if got := heads["refs/heads/"+seamBranch]; got != local {
+				t.Errorf("bundle head %s = %q; want the rebased local branch %s (heads %v)", seamBranch, got, local, heads)
+			}
+			if parent := seamRevParse(t, repo, seamBranch+"~1"); parent != mainTip {
+				t.Errorf("relayed branch's parent = %s; want the advanced origin/main %s", parent, mainTip)
+			}
+		})
+	}
+}
+
+// The adopted branch's pre-work rebase conflicts, and the conflict-resolve
+// pass still runs and the main run still follows, with no forge token in the
+// Box and no `gh pr list` behind the open-PR answer.
+func TestBoxSeamConflictResolveRunsForATokenlessBox(t *testing.T) {
+	repo := seamConflictRepo(t)
+	envDump := filepath.Join(t.TempDir(), "box.env")
+	sc, ghRec := seamTokenlessCase(t, repo, branchrecovery.HostOpenPROpen, []seamtest.DriverRun{
+		{Sh: seamResolveRebase(repo), Stdout: seamResult("resolved")},
+		{Sh: seamDumpEnvNames(envDump), Stdout: seamResult(seamOutcomeLine("done", "after the conflict pass"))},
+	})
+	r := runBoxSeam(t, sc)
+	r.res.WantExit(t, 0)
+	if !strings.Contains(r.res.Stdout, "==> pre-work rebase conflict resolved by agent") {
+		t.Errorf("stdout lacks the conflict-resolved line\n%s", r.res.Stdout)
+	}
+	if len(r.orchRec) != 2 || len(r.driverRec) != 2 {
+		t.Fatalf("orchestrator calls %v, Driver calls %v; want the conflict pass and the main run", r.orchRec, r.driverRec)
+	}
+	r.wantConflictPass(t)
+	if seamRebaseInProgress(repo) {
+		t.Error("a rebase is still in progress")
+	}
+	if seamGhAskedPRList(t, ghRec) {
+		t.Error("the Box ran `gh pr list`; want the host's answer to stand in for it")
+	}
+	seamWantNoForgeToken(t, envDump)
+}
+
 func seamGitOut(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	out, err := exec.Command("git", seamGitArgs(dir, args...)...).Output()
@@ -2540,8 +2689,6 @@ func TestBoxSeamOptedInReadOnlyBoxRunsWithNoForgeCredential(t *testing.T) {
 			"CODE_FORGE": "git", "CODE_FORGE_REMOTE_URL": "https://unreachable.invalid/o/r.git",
 		}, ""},
 	}
-	// Every name a forge token reaches the Box under, launcher-forwarded or not.
-	tokenVars := []string{"GH_TOKEN", "GITEA_TOKEN", "FORGEJO_TOKEN", "BOX_GH_TOKEN", "BOX_FORGEJO_TOKEN"}
 	for _, c := range cases {
 		t.Run(c.forge, func(t *testing.T) {
 			repo := seamRepo(t)
@@ -2551,18 +2698,13 @@ func TestBoxSeamOptedInReadOnlyBoxRunsWithNoForgeCredential(t *testing.T) {
 			env := map[string]string{"BOX_HOST_SEEDED_MIRROR": "1", "BOX_GH_TOKEN_OPTIONAL": "1"}
 			mergeEnv(env, c.env, ghEnv, seamtest.WriteFakeConfig(t, "fj", seamtest.FjConfig{Record: fjRec}))
 			// The Driver runs in the Box's env; dump its names to prove what it holds.
-			sh := seamCommitWork(repo) + " && env | cut -d= -f1 >'" + envDump + "'"
+			sh := seamCommitWork(repo) + " && " + seamDumpEnvNames(envDump)
 			r := runBoxSeam(t, seamCase{
-				repo: repo, relay: true, env: env, fakes: []string{"gh", "fj"}, unset: tokenVars,
+				repo: repo, relay: true, env: env, fakes: []string{"gh", "fj"}, unset: seamForgeTokenVars,
 				driverRuns: []seamtest.DriverRun{{Sh: sh, Stdout: seamResult(seamOutcomeLine("ready", "done"))}},
 			})
 			r.res.WantExit(t, 0)
-			names := strings.Fields(string(readSeamFile(t, envDump)))
-			for _, name := range tokenVars {
-				if slices.Contains(names, name) {
-					t.Errorf("the Box env carries %s; want it absent", name)
-				}
-			}
+			seamWantNoForgeToken(t, envDump)
 			for _, argv := range seamtest.ReadRecord(t, fjRec) {
 				if slices.Contains(argv, "add-key") {
 					t.Errorf("a mirror Box ran fj auth add-key: %q", argv)
