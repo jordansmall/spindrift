@@ -515,11 +515,12 @@ func bwrapSandboxArtifacts(t *testing.T, host string) map[string]string {
 
 // TestSeamConnectorSandboxPrimaryTotals runs a work dispatch under a primary
 // github row with the sandbox on, and pins the totals line the launcher appends
-// to the run's primary audit file once the sandbox has closed. No fixture
-// Connector is a tracker, so the run's first primary read (listing issues) is
-// refused as unsupported and the launcher exits 1: that read is the one thing
-// the .log holds, and the audit file holds no Connector decisions, only the
-// totals.
+// to the run's primary audit file once the sandbox has closed. The fixture
+// Connector declares no forge.tokenGrant, so the startup write gate warns and
+// continues; it is no tracker either, so the run's first primary read (listing
+// issues) is refused as unsupported and the launcher exits 1. The gate's
+// token introspection and that read are the two things the .log holds, and the
+// audit file holds no Connector decisions, only the totals.
 func TestSeamConnectorSandboxPrimaryTotals(t *testing.T) {
 	rig := newSandboxRig(t, "podman", sandboxRigOpts{mode: sandboxPrimary, issues: []int{7}})
 	res := seamtest.Start(t, rig.cmd).Wait(t)
@@ -550,9 +551,10 @@ func TestSeamConnectorSandboxPrimaryTotals(t *testing.T) {
 			t.Errorf("%s = %d, want > 0 (%s)", k, totals[k], lines[0])
 		}
 	}
-	// The fixture's call count is deterministic: two sandbox calls per run.
-	if totals["sandbox_calls"] != 2 {
-		t.Errorf("sandbox_calls = %d, want 2 (%s)", totals["sandbox_calls"], lines[0])
+	// The fixture's call count is deterministic: four sandbox calls per run,
+	// the write gate's token introspection included.
+	if totals["sandbox_calls"] != 4 {
+		t.Errorf("sandbox_calls = %d, want 4 (%s)", totals["sandbox_calls"], lines[0])
 	}
 	// A routed read stays inside the sandbox, and the fixture asks the host
 	// for nothing; a primary run loads no Connector in-process.
@@ -569,7 +571,12 @@ func TestSeamConnectorSandboxPrimaryTotals(t *testing.T) {
 	if len(logs) != 1 {
 		t.Fatalf("primary logs = %v, want one", logs)
 	}
-	if b, _ := os.ReadFile(logs[0]); !strings.Contains(string(b), `"op":"list issues"`) || strings.Count(string(b), "\n") != 1 {
-		t.Errorf("primary log is not the one refused issue listing:\n%s", b)
+	b, _ := os.ReadFile(logs[0])
+	logLines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(logLines) != 2 || !strings.Contains(logLines[0], `"op":"introspect the token"`) || !strings.Contains(logLines[1], `"op":"list issues"`) {
+		t.Errorf("primary log is not the token introspection then the refused issue listing:\n%s", b)
+	}
+	if out := res.Stdout + res.Stderr; !strings.Contains(out, "could not be determined") || !strings.Contains(out, "forge.tokenGrant") {
+		t.Errorf("the write gate did not warn that the capability is undetermined:\n%s", out)
 	}
 }
