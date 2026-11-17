@@ -1439,7 +1439,7 @@ func TestAllIssueIntentLinesInLog_DedupsSubagentEcho(t *testing.T) {
 }
 
 // Issue #2976: a token-bearing line with an undecodable payload is dropped but
-// counted via rejectedCount, exactly as a nonce mismatch is. Both are
+// counted in the returned Rejections, exactly as a nonce mismatch is. Both are
 // token-bearing lines that failed to verify per classifySignalAt.
 func TestAllIssueIntentLinesInLog_MalformedBase64CountedAsRejected(t *testing.T) {
 	genuine := base64.StdEncoding.EncodeToString([]byte(`{"title":"genuine"}`))
