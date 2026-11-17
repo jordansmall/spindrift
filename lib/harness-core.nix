@@ -29,9 +29,9 @@ let
   );
 
   # internal/driver's non-test Go files, minus the conformance kit: it imports
-  # internal/golden and internal/passmachine, which no in-box fileset carries,
-  # and `go mod vendor` loads every package in the tree, not just subPackages.
-  # Nothing in-box imports it (Driver packages call it from _test.go only).
+  # internal/golden, which no in-box fileset carries, and `go mod vendor` loads
+  # every package in the tree, not just subPackages.
+  # Nothing in-box imports the kit (Driver packages call it from _test.go only).
   # bundle/runners.go registers the runner families, which no Box constructs;
   # bundle/backends.go registers the backends, which only the Box looks up (the
   # Box adds it back through backendBundleFiles); bundle/ecosystems.go registers
