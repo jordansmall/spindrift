@@ -255,7 +255,7 @@ func (c *Connector) bind(h *guestHandle, id uint32, freeMethod, key string) {
 func (c *Connector) guestDecoder(ctx context.Context) (*guestHandle, error) {
 	var r newDecoderResult
 	h := &guestHandle{}
-	err := c.Call(ctx, "driver.newDecoder", struct{}{}, &r)
+	err := c.Call(ctx, "driver.newDecoder", map[string]any{"now": c.now()}, &r)
 	if err == nil {
 		c.bind(h, r.Decoder, "driver.freeDecoder", "decoder")
 	}

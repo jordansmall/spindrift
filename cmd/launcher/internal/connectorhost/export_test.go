@@ -208,3 +208,6 @@ func (c *Connector) RawBatchDecoderAnswering(answer string) driverkit.BatchDecod
 	}
 	return c.newBatchDecoder(cd)
 }
+
+// SetClock replaces the wall clock the Connector hands a guest decoder.
+func (c *Connector) SetClock(now func() time.Time) { c.now = now }
