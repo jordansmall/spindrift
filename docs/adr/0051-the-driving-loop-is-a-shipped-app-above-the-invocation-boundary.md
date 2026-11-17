@@ -17,8 +17,9 @@ named the cost of a long-lived launcher directly: "launcher-half staleness stops
 being a latency problem and becomes a correctness one … a long-lived process
 orchestrating fresh Boxes with stale code, with no incidental restart to rescue
 it." Today that incidental restart *is* the drained-queue exit. The same ADR
-records that `launcher build` is the only snapshot-reclaim point, so "a launcher
-that hot-swaps for hours without restarting holds every generation it ever
+recorded `launcher build` as the only snapshot-reclaim point (issue #6008 later
+added a second, after a cold prepare, but the swap still never reclaims), so "a
+launcher that hot-swaps for hours without restarting holds every generation it ever
 swapped to" — a cost accepted precisely because the process was short-lived.
 `--daemon` inverts that assumption and inherits the leak.
 
@@ -26,7 +27,8 @@ swapped to" — a cost accepted precisely because the process was short-lived.
 generated per-Consumer by `mkHarness` beside `apps.default`, which re-invokes
 the launcher as a fresh process on every iteration.** Each wake is a new
 invocation, so the freshness boundary, the incidental restart, and the
-`build`-time generation reclaim all keep working unchanged.
+generation reclaim at `build` and after a cold prepare all keep working
+unchanged.
 
 The governing principle: **a stateless supervisor may re-invoke freely; a
 stateful launcher must drain and exit.** The launcher holds in-flight Boxes and
@@ -59,8 +61,8 @@ each freed slot — which is precisely what a driving loop does, running inside
 the process whose exit ADR 0019 made the freshness boundary. The whole
 multi-Box freshness apparatus (the probe's image dimension, ADR 0043's
 hot-swap, `ErrImageStale`, exit 4, the snapshot generations that accumulate
-because `build` is the only reclaim point) exists to keep that long-lived pool
-fresh.
+because reclaim runs only at `build` and after a cold prepare, never at the
+swap) exists to keep that long-lived pool fresh.
 
 The shared state the in-process pool appears to need is already external. The
 overlap gate builds its snapshot from `it.ListIssues(forge.InProgress)` plus
