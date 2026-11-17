@@ -265,6 +265,28 @@ func (l filerLayer) PostIssue(title, body string, labels []string) (string, erro
 	return res.URL, nil
 }
 
+// closerLayer closes a merged issue through the Connector. It exists only when
+// the Connector advertises CapCloseIssue; the Connector's close is
+// unconditional, so the already-closed no-op the interface promises is core's
+// own read.
+type closerLayer struct {
+	forge.IssueTracker
+	r *reads
+}
+
+func (l closerLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
+
+func (l closerLayer) CloseMergedIssue(num string) error {
+	iss, err := l.r.Issue(num)
+	if err != nil {
+		return err
+	}
+	if iss.State == forge.IssueClosed {
+		return nil
+	}
+	return l.r.call(context.Background(), CapCloseIssue, closeIssueParams{l.r.target, num}, &struct{}{})
+}
+
 var (
 	_ forge.Unwrapper            = transitionLayer{}
 	_ forge.Unwrapper            = labelAddLayer{}
@@ -274,4 +296,6 @@ var (
 	_ forge.HostPostedCommenter  = commentPostLayer{}
 	_ forge.Unwrapper            = filerLayer{}
 	_ forge.HostPostedIssueFiler = filerLayer{}
+	_ forge.Unwrapper            = closerLayer{}
+	_ forge.MergeCloser          = closerLayer{}
 )

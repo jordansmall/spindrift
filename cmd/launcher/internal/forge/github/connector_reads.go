@@ -385,6 +385,12 @@ func (e *execClient) commentViaConnector(row backendrows.Row, num, body string) 
 	})
 }
 
+func (e *execClient) closeMergedIssueViaConnector(row backendrows.Row, num string) error {
+	return trackerCapOp(e, row, connectortracker.CapCloseIssue, "close a merged issue", func(c forge.MergeCloser) error {
+		return c.CloseMergedIssue(num)
+	})
+}
+
 func (e *execClient) fileIssueViaConnector(row backendrows.Row, title, body string, labels []string) (string, error) {
 	return viaTrackerCap(e, row, connectortracker.CapFileIssue, "file an issue", func(f forge.HostPostedIssueFiler) (string, error) {
 		return f.PostIssue(title, body, labels)
