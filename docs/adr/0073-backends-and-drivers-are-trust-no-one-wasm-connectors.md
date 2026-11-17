@@ -1102,3 +1102,28 @@ Connector serves with a GraphQL mutation over the `POST /graphql` route it
 already declares. The Connector merges by rebase only, so a primary row refuses
 any other `MERGE_METHOD`, as the forgejo row does. The native paths stay until
 #6888.
+
+## Amendment (issue #7209): a primary github Connector holds a push-capable credential
+
+Under `primary`, the github row's credential has to write Contents as well as
+Issues and Pull requests: GitHub refuses a fine-grained token the ready and
+draft flips (`markPullRequestReadyForReview`, `convertPullRequestToDraft`)
+without Contents write, and core's git already presents the same credential for
+push. The Route table admits `POST /graphql` with an unrestricted body, so the
+untrusted Connector can exercise a credential that can push to the repository,
+not just write issues and PRs. This widens what the trust-no-one boundary has to
+rely on. The Connector still never holds the credential (the host attaches it
+per request and it never reaches the Box), but the credential's scope is what a
+hostile Connector can exercise through the host.
+
+What bounds it is the token's scope (a fine-grained token on the one
+repository, with Metadata read, Issues, Pull requests and Contents read and
+write, and Checks and Commit statuses read), the Route table's host and path
+allowlist and its diff on update, and the launch gate, which states the
+requirement and refuses a classic token without `repo` or `public_repo` before
+a claim. The gate only warns for the recommended fine-grained token and for an
+installation token, whose permissions it cannot read, so for those the token's
+scope and the Route table are the whole bound. Having
+the host restrict which GraphQL operations a Connector may send would let
+primary mode keep a narrower token; that is possible future work, out of scope
+here.
