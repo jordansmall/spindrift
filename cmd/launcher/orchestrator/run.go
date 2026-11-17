@@ -113,8 +113,9 @@ type passOutcome struct {
 	checkHasOutcome bool
 	exitCode        int
 	pass            int
-	// usage is zero where the caller doesn't track per-pass usage (issue
-	// #2983); the legacy single loop never calls passReport.
+	// usage is this pass's passReport totals (issue #2983), zero when that
+	// best-effort extraction finds nothing or a resumed session booked no
+	// increment over its baseline (issue #6706).
 	usage usage.Usage
 	// landDelta is the terminal land pass's post-approval tree delta (issue
 	// #3244), nil on every non-land pass. On a land pass it is always
