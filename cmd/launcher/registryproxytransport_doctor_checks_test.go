@@ -101,10 +101,12 @@ func withRegistryProxyTransportFake(t *testing.T, fake *runner.Fake) {
 	t.Cleanup(func() { registryProxyTransportFn = orig })
 }
 
-// The not-configured arm must not call the seam at all. A dispatch only probes
-// the transport when a registry proxy is configured (dispatch/box.go's
-// `if len(d.cfg.RegistryProxyRoutes) > 0` gate), so doctor must not start a
-// container to answer a question a dispatch would never ask.
+// The not-configured arm must not call the seam at all. A dispatch probes for
+// the registry proxy only when routes are configured (`needRegistryProxy` in
+// dispatch/box.go), so this row must not start a container to answer a
+// question no dispatch asks on the registry proxy's behalf. A dispatch under
+// BOX_SIGNAL_CARRIER=socket still probes with no routes; the
+// signal-socket-transport row reports that.
 func TestRegistryProxyTransportCheck_UnsetFileReportsNotConfiguredWithoutProbing(t *testing.T) {
 	fake := runner.NewFake()
 	withRegistryProxyTransportFake(t, fake)
