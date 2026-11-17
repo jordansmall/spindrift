@@ -41,8 +41,9 @@ var ErrPRForgeUnsupported = errors.New("connector forge is neither push-only nor
 var ErrRemoteCredentials = errors.New("connector remote URL carries credentials")
 
 // ErrRemoteHost marks a Connector remote URL that is not https or names a host
-// outside the Connector's declared routes. Core attaches its git credential to
-// the clone URL's host, so this is the check that credential rides on.
+// outside core's web host (Git.WebHost) or, without one, the Connector's
+// declared routes. Core attaches its git credential to the clone URL's host,
+// so this is the check that credential rides on.
 var ErrRemoteHost = errors.New("connector remote URL is not https on a declared host")
 
 // The retry schedule for every Connector call core makes: three attempts, two
@@ -69,6 +70,11 @@ type Git struct {
 	// BundleCommitSubjects, and only on a forge declaring "forge.draftPRs",
 	// matching the native read-only constructors.
 	ReadOnlyBox bool
+	// WebHost is the forge's web and git host (host[:port]) from core's own
+	// config, GH_HOST for github. When set, both remote URLs must name it
+	// instead of a declared route host: a forge whose API host differs
+	// (api.github.com) declares no route on it, and core already trusts it.
+	WebHost string
 }
 
 // notRetried are the methods whose request is not idempotent: a retry after a
@@ -125,6 +131,8 @@ type pushOnly struct {
 	clock  retry.Clock
 	target Target
 	git    forge.CodeForge
+	// webHost is Git.WebHost: when set, the only host checkURL accepts.
+	webHost string
 	// cloneURL and cred are what core's own git (relayClone) clones with; both
 	// are set only once cloneURL passed the host check.
 	cloneURL string
@@ -141,8 +149,9 @@ type pushOnly struct {
 // Capabilities are the composed forge resolved by type, so they and any later
 // type probe (doctor's, for one) agree on exactly what it offers.
 // The remote's identity is read once here, and refused (and audited) unless
-// both its URLs are plain https on a host the Connector declared, so the git
-// credential never reaches a host the Connector merely named.
+// both its URLs are plain https on Git.WebHost or, without one, a host the
+// Connector declared, so the git credential never reaches a host the Connector
+// merely named.
 func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge, forge.Capabilities, error) {
 	has := func(capName string) bool { return slices.Contains(c.Capabilities, capName) }
 	isPushOnly := has(capPushOnly)
@@ -156,6 +165,7 @@ func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge,
 		return nil, forge.Capabilities{}, errors.New("connectorforge: Git.Plumbing is nil")
 	}
 	p := newPushOnly(c, target, g.Clock)
+	p.webHost = g.WebHost
 	remote, err := p.remote()
 	if err != nil {
 		return nil, forge.Capabilities{}, err
@@ -188,9 +198,9 @@ func (p *pushOnly) remote() (wireRemote, error) {
 	return r, nil
 }
 
-// checkURL refuses raw unless it is an https URL, with no userinfo, on a
-// declared host. The errors describe the URL without its userinfo: they reach
-// the audit log.
+// checkURL refuses raw unless it is an https URL, with no userinfo, on the web
+// host or, without one, a declared host. The errors describe the URL without
+// its userinfo: they reach the audit log.
 func (p *pushOnly) checkURL(name, raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -199,6 +209,9 @@ func (p *pushOnly) checkURL(name, raw string) error {
 	hasUser := u.User != nil
 	u.User = nil
 	declared := p.conn.DeclaredHosts()
+	if p.webHost != "" {
+		declared = []string{p.webHost}
+	}
 	switch {
 	case hasUser:
 		return fmt.Errorf("%w: %s %q", ErrRemoteCredentials, name, u.String())

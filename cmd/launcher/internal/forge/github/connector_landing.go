@@ -96,6 +96,8 @@ func (e *execClient) forgeGit(row backendrows.Row, verb string, readOnlyBox bool
 		cf, caps, err := connectorforge.Compose(conn, connectorforge.Target{API: api, Repo: e.repo}, connectorforge.Git{
 			Credential:  cred,
 			ReadOnlyBox: readOnlyBox,
+			// The Routes name only api.github.com; git and the web are on Host().
+			WebHost: Host(),
 			Plumbing: func(cloneURL string, cred gitexec.Credential) forge.CodeForge {
 				plumbing = &coreGit{
 					CodeForge: git.NewGitClient(cloneURL, e.baseBranch, e.userName, e.userEmail, git.WithCredential(cred)),

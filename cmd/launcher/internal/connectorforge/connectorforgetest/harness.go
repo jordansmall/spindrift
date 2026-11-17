@@ -226,6 +226,9 @@ type base struct {
 	Audit *bytes.Buffer
 	// Credential is core's git credential handed to Compose.
 	Credential gitexec.Credential
+	// WebHost is the web host core hands Compose; empty checks the remote
+	// against the Connector's declared hosts.
+	WebHost string
 
 	wasm        string
 	eng         Engine
@@ -276,7 +279,7 @@ func newBase(t *testing.T, eng Engine, wasm string, methods []string, readOnly b
 
 func (h *base) git() connectorforge.Git {
 	return connectorforge.Git{
-		Credential: h.Credential, ReadOnlyBox: h.readOnlyBox,
+		Credential: h.Credential, ReadOnlyBox: h.readOnlyBox, WebHost: h.WebHost,
 		Plumbing: func(u string, cred gitexec.Credential) forge.CodeForge {
 			h.mu.Lock()
 			h.plumbing = append(h.plumbing, PlumbingCall{u, cred})

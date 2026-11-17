@@ -96,6 +96,41 @@ func TestComposeHandsPlumbingTheCloneURLAndCredentialOnlyWhenTheRemoteIsAccepted
 	}
 }
 
+// A forge whose API and git live on different hosts (api.github.com and
+// github.com) declares only the API host: with core's web host given, the
+// remote is checked against that host instead.
+func TestComposeAcceptsARemoteOnCoresWebHostOutsideTheDeclaredRoutes(t *testing.T) {
+	const web = "github.example"
+	h := connectorforgetest.New(t)
+	h.Backend.SetRemote("https://"+web+"/o/r.git", "https://"+web+"/o/r")
+	if _, _, err := h.Compose(); !errors.Is(err, connectorforge.ErrRemoteHost) {
+		t.Fatalf("Compose without a web host = %v, want ErrRemoteHost", err)
+	}
+
+	h.WebHost = web
+	cf, _, err := h.Compose()
+	if err != nil {
+		t.Fatalf("Compose with web host %q = %v", web, err)
+	}
+	calls := h.PlumbingCalls()
+	if got := calls[len(calls)-1].CloneURL; got != "https://"+web+"/o/r.git" {
+		t.Errorf("plumbing clone URL = %q, want the web host's", got)
+	}
+	if _, err := cf.Probe(); err != nil {
+		t.Errorf("Probe = %v, want the same remote accepted", err)
+	}
+}
+
+// Core's web host replaces the declared hosts rather than widening them: a
+// remote on a route host that is not the web host is refused.
+func TestComposeWithAWebHostRefusesARemoteOnAnotherDeclaredHost(t *testing.T) {
+	h := connectorforgetest.New(t)
+	h.WebHost = "github.example"
+	if _, _, err := h.Compose(); !errors.Is(err, connectorforge.ErrRemoteHost) {
+		t.Fatalf("Compose = %v, want ErrRemoteHost for a remote on %s", err, h.Backend.Host)
+	}
+}
+
 func TestComposeRefusesAHostileRemote(t *testing.T) {
 	const secret = "s3cr3t"
 	cases := []struct {
