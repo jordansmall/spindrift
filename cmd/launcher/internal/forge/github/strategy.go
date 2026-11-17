@@ -39,6 +39,9 @@ var Strategy = backendkit.Strategy{
 		return open, err
 	},
 	NewLedger: func(s backendkit.Shared, _ backendkit.Lookup) (backendkit.LedgerSite, error) {
+		if row, ok := primaryRow(); ok {
+			return NewExecClient(s.RepoSlug, s.Labels, codeForgeOpts(s)...).ledgerSiteViaConnector(row)
+		}
 		url, gitArgs := GitRemote(s.RepoSlug)
 		return backendkit.LedgerSite{URL: url, GitArgs: gitArgs}, nil
 	},

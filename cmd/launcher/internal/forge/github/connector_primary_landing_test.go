@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/forge/forgetest"
 )
 
 // landingBranch is the agent branch the landing writes act on.
@@ -244,5 +246,60 @@ func TestGitCredential_ReadsTheRowEnvAtUse(t *testing.T) {
 	t.Setenv(tokenCredentialEnv, "")
 	if _, err := gitCredential(row); err == nil || !strings.Contains(err.Error(), tokenCredentialEnv+" is not set") {
 		t.Errorf("gitCredential with the env unset = %v, want %q", err, tokenCredentialEnv+" is not set")
+	}
+}
+
+// The PR-body Closes gate is core policy; the Connector carries the body to the
+// backend byte for byte, so the keyword survives the host-side open.
+func TestPrimaryRow_CreateDraftPRCarriesTheClosesBodyIntact(t *testing.T) {
+	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+	h.backend.repo.SeedBranch(landingBranch, "9")
+	const body = "Fixes the thing.\n\nCloses #9\n"
+
+	url, created, err := primaryWriteClient().CreateDraftPR("title", body, "main", landingBranch)
+
+	if err != nil || !created {
+		t.Fatalf("CreateDraftPR = (%q, %v, %v), want a created PR", url, created, err)
+	}
+	if got := h.prView(url); got.body != body || got.title != "title" || !got.draft {
+		t.Errorf("backend PR = title %q body %q draft %v, want the supplied body on a draft", got.title, got.body, got.draft)
+	}
+	if n := calls(); n != 0 {
+		t.Errorf("ran gh %d times", n)
+	}
+}
+
+// The butler patch PR path: push the branch, open the draft PR for it, then
+// delete the branch again when the patch is abandoned, all through the
+// Connector and core's git with no gh call.
+func TestPrimaryRow_ButlerPatchPathRunsThroughTheConnector(t *testing.T) {
+	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+	src := t.TempDir()
+	forgetest.Run(t, "", "clone", h.backend.repo.Bare, src)
+	forgetest.Run(t, src, "checkout", "-b", "work")
+	forgetest.WriteFile(t, filepath.Join(src, "patch.txt"), "patch\n")
+	forgetest.Run(t, src, "add", "patch.txt")
+	forgetest.Run(t, src, "commit", "-m", "patch")
+	c := primaryGitClient()
+
+	if err := c.PushBranch(src, "work", landingBranch, "main"); err != nil {
+		t.Fatalf("PushBranch: %v", err)
+	}
+	url, created, err := c.CreateDraftPR("patch", "Closes #9", "main", landingBranch)
+	if err != nil || !created {
+		t.Fatalf("CreateDraftPR = (%q, %v, %v), want a created PR", url, created, err)
+	}
+	if pr, ok, err := c.OpenPRForBranch(landingBranch); err != nil || !ok || pr.URL != url {
+		t.Errorf("OpenPRForBranch = (%+v, %v, %v), want the draft PR %q", pr, ok, err, url)
+	}
+	if err := c.DeleteBranch(landingBranch, "main"); err != nil {
+		t.Fatalf("DeleteBranch: %v", err)
+	}
+
+	if ok, err := c.BranchExists(landingBranch); err != nil || ok {
+		t.Errorf("BranchExists after DeleteBranch = (%v, %v), want (false, nil)", ok, err)
+	}
+	if n := calls(); n != 0 {
+		t.Errorf("the patch path ran gh %d times under a primary row", n)
 	}
 }

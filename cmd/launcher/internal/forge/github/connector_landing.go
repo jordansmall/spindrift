@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
@@ -17,8 +18,8 @@ import (
 
 // gitCredential is the credential core's own git presents to the Connector's
 // clone URL under row. It is read from the row's env at each operation, so a
-// rotated token is honoured, and an unset one fails here by name rather than
-// reaching git as an empty password.
+// rotated token is honoured (the Ledger site holds one for a chore run), and an
+// unset one fails here by name rather than reaching git as an empty password.
 func gitCredential(row backendrows.Row) (gitexec.Credential, error) {
 	token := os.Getenv(row.CredentialEnv)
 	if token == "" {
@@ -191,4 +192,16 @@ func (e *execClient) seedMirrorViaConnector(row backendrows.Row, dir string) err
 	return e.forgeGit(row, "seed the mirror", false, func(_ forge.CodeForge, _ forge.Capabilities, g *coreGit) error {
 		return g.seedMirror(dir)
 	})
+}
+
+// ledgerSiteViaConnector is the butler Ledger's remote under a primary row: the
+// clone URL Compose validated and the row's credential, so the Ledger's git
+// carries no gh credential helper.
+func (e *execClient) ledgerSiteViaConnector(row backendrows.Row) (backendkit.LedgerSite, error) {
+	var site backendkit.LedgerSite
+	err := e.forgeGit(row, "reach the Ledger", false, func(_ forge.CodeForge, _ forge.Capabilities, g *coreGit) error {
+		site = backendkit.LedgerSite{URL: g.cloneURL, Credential: g.cred}
+		return nil
+	})
+	return site, err
 }
