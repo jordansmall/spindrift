@@ -121,7 +121,8 @@ empty, and no new query surface is needed to decide what to run. (Superseded
 by [ADR 0059](0059-the-daemon-schedules-from-tracker-demand-not-child-exits.md);
 see the amendment below.)
 
-**Research capacity is a floor, not a ceiling.** `RESEARCH_RESERVATION`
+**Research capacity is a floor, not a ceiling.** (Amended by issue #6703;
+see the end of this paragraph.) `RESEARCH_RESERVATION`
 guarantees research at least that many slots *while research has queued work*;
 work may occupy at most `MAX_PARALLEL − RESEARCH_RESERVATION` during that
 time. When either kind has nothing queued the other bursts into the whole
@@ -129,6 +130,22 @@ pool. The reservation binds only while both kinds have work, which is the only
 moment a policy is needed. The knob spans the spectrum rather than being a
 special case: `0` is work-first with research taking leftovers, `MAX_PARALLEL`
 is research-first.
+(Amended by issue #6703: the reservation is an ordering, not a cap on work
+and not a guarantee of slots. While fewer than `RESEARCH_RESERVATION`
+research children are running, each starting slot is offered to
+research before work; otherwise to work before research. Recover is
+always offered a slot first and the butler always last, whichever way
+the reservation tips. The reservation never preempts a running child
+and holds no slot open: research whose Demand count is fresh but which is
+gated (as by a jam) or has no Start budget left
+([ADR 0059](0059-the-daemon-schedules-from-tracker-demand-not-child-exits.md))
+passes the slot to the next startable kind, normally work, and that child
+keeps it for its whole run, so the preference re-applies on whichever slot
+turns over next. While research is offered ahead of work, a stale research
+count is re-probed before work starts, rather than work taking the slot on
+stale data. So the reservation binds only while research has work it can
+start, not merely work queued. The `0` and `MAX_PARALLEL` sentence above
+still holds as an ordering statement.)
 
 Research starving is the failure worth guarding against, because research is
 the pipeline stage *ahead* of work: starve it and workers receive exactly the
