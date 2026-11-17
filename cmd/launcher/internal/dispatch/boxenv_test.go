@@ -735,10 +735,12 @@ func TestBuildBoxEnvMirrorCloneCarriesNoRemoteCredential(t *testing.T) {
 	}
 }
 
-// Under NoForgeCredential no forge token name reaches the Box, whichever
-// backends the run pairs and whatever the launcher's env holds; the keys are
-// absent, not blank. Without it the same env forwards the tokens unchanged.
-func TestBuildBoxEnvNoForgeCredentialDropsEveryForgeToken(t *testing.T) {
+// A read-only Box holds no forge credential (issue #6900): no forge token name
+// reaches it, whichever backends the run pairs and whatever the launcher's env
+// holds; the keys are absent, not blank. A read-write Box forwards the same
+// env unchanged, and a ReadOnlyBox kind drops them even under a read-write
+// knob.
+func TestBuildBoxEnvReadOnlyBoxDropsEveryForgeToken(t *testing.T) {
 	t.Setenv("GH_TOKEN", "gh-secret")
 	t.Setenv("FORGEJO_TOKEN", "fj-secret")
 	t.Setenv("BOX_GH_TOKEN", "box-gh-secret")
@@ -763,39 +765,44 @@ func TestBuildBoxEnvNoForgeCredentialDropsEveryForgeToken(t *testing.T) {
 				BoxEnvVars:             "REPO_SLUG " + strings.Join(tokenNames, " "),
 				ForgeDescriptor:        c.forge,
 				TrackerDescriptor:      c.tracker,
-				BoxForgeAndIssueAccess: "read-only",
+				BoxForgeAndIssueAccess: "read-write",
 			}
 			env := mustBuildBoxEnv(t, cfg, "3", "T", 0, "", "")
 			for _, n := range tokenNames {
 				if env[n] == "" {
-					t.Errorf("%s: want forwarded without the opt-in", n)
+					t.Errorf("read-write: %s want forwarded", n)
 				}
 			}
-			cfg.NoForgeCredential = true
-			env = mustBuildBoxEnv(t, cfg, "3", "T", 0, "", "")
-			for _, n := range tokenNames {
-				if v, ok := env[n]; ok {
-					t.Errorf("%s present under NoForgeCredential: %q", n, v)
+			readOnly := cfg
+			readOnly.BoxForgeAndIssueAccess = "read-only"
+			kind := cfg
+			kind.Kind = "butler"
+			for name, cfg := range map[string]Config{"read-only knob": readOnly, "ReadOnlyBox kind under a read-write knob": kind} {
+				env := mustBuildBoxEnv(t, cfg, "3", "T", 0, "", "")
+				for _, n := range tokenNames {
+					if v, ok := env[n]; ok {
+						t.Errorf("%s: %s present: %q", name, n, v)
+					}
 				}
-			}
-			if _, ok := env["REPO_SLUG"]; !ok {
-				t.Error("REPO_SLUG dropped; only forge tokens may be")
-			}
-			if env["BOX_GH_TOKEN_OPTIONAL"] != "1" {
-				t.Errorf("BOX_GH_TOKEN_OPTIONAL = %q, want 1", env["BOX_GH_TOKEN_OPTIONAL"])
+				if _, ok := env["REPO_SLUG"]; !ok {
+					t.Errorf("%s: REPO_SLUG dropped; only forge tokens may be", name)
+				}
+				if env["BOX_GH_TOKEN_OPTIONAL"] != "1" {
+					t.Errorf("%s: BOX_GH_TOKEN_OPTIONAL = %q, want 1", name, env["BOX_GH_TOKEN_OPTIONAL"])
+				}
 			}
 		})
 	}
 }
 
-// Under NoForgeCredential the Box cannot ask the forge whether its branch has
+// A read-only Box cannot ask the forge whether its branch has
 // an open PR, so the host answers in BOX_HOST_OPEN_PR; a failed lookup must
 // arrive as "unknown", never "none" (issue #7146).
 func TestBuildBoxEnvHostOpenPR(t *testing.T) {
 	errLookup := errors.New("forge down")
 	for _, c := range []struct {
 		name          string
-		noCred        bool
+		readOnly      bool
 		kind          string
 		selfContained bool
 		lookup        func(string) (bool, error)
@@ -803,18 +810,21 @@ func TestBuildBoxEnvHostOpenPR(t *testing.T) {
 		wantAbsent    bool
 		wantCalled    bool
 	}{
-		{name: "open", noCred: true, lookup: func(string) (bool, error) { return true, nil }, want: branchrecovery.HostOpenPROpen, wantCalled: true},
-		{name: "not open", noCred: true, lookup: func(string) (bool, error) { return false, nil }, want: branchrecovery.HostOpenPRNone, wantCalled: true},
-		{name: "error", noCred: true, lookup: func(string) (bool, error) { return false, errLookup }, want: branchrecovery.HostOpenPRUnknown, wantCalled: true},
-		{name: "error with found", noCred: true, lookup: func(string) (bool, error) { return true, errLookup }, want: branchrecovery.HostOpenPRUnknown, wantCalled: true},
-		{name: "nil lookup", noCred: true, want: branchrecovery.HostOpenPRUnknown},
-		{name: "forwarded credential", lookup: func(string) (bool, error) { return true, nil }, wantAbsent: true},
-		{name: "advise-only kind", noCred: true, kind: "research", lookup: func(string) (bool, error) { return true, nil }, wantAbsent: true},
-		{name: "self-contained", noCred: true, selfContained: true, lookup: func(string) (bool, error) { return true, nil }, wantAbsent: true},
+		{name: "open", readOnly: true, lookup: func(string) (bool, error) { return true, nil }, want: branchrecovery.HostOpenPROpen, wantCalled: true},
+		{name: "not open", readOnly: true, lookup: func(string) (bool, error) { return false, nil }, want: branchrecovery.HostOpenPRNone, wantCalled: true},
+		{name: "error", readOnly: true, lookup: func(string) (bool, error) { return false, errLookup }, want: branchrecovery.HostOpenPRUnknown, wantCalled: true},
+		{name: "error with found", readOnly: true, lookup: func(string) (bool, error) { return true, errLookup }, want: branchrecovery.HostOpenPRUnknown, wantCalled: true},
+		{name: "nil lookup", readOnly: true, want: branchrecovery.HostOpenPRUnknown},
+		{name: "read-write Box", lookup: func(string) (bool, error) { return true, nil }, wantAbsent: true},
+		{name: "advise-only kind", readOnly: true, kind: "research", lookup: func(string) (bool, error) { return true, nil }, wantAbsent: true},
+		{name: "self-contained", readOnly: true, selfContained: true, lookup: func(string) (bool, error) { return true, nil }, wantAbsent: true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			var calls []string
-			cfg := Config{Kind: c.kind, NoForgeCredential: c.noCred, SelfContained: c.selfContained}
+			cfg := Config{Kind: c.kind, SelfContained: c.selfContained, BoxForgeAndIssueAccess: "read-write"}
+			if c.readOnly {
+				cfg.BoxForgeAndIssueAccess = "read-only"
+			}
 			if c.lookup != nil {
 				cfg.OpenPRForIssue = func(k string) (bool, error) {
 					calls = append(calls, k)
