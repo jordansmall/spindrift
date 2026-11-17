@@ -1088,3 +1088,17 @@ credential, and core never sends a PR write over git. Still no fallback. A
 primary rebase syncs onto `BASE_BRANCH`, since the Connector's PR read carries
 no base. Merges, auto-merge and `CloseMergedIssue` stay native until switch 4
 (#6887).
+
+## Amendment (issue #6887): primary github merges through the Connector
+
+Switch 4 of #6756 extends the #6886 amendment and completes the github write
+switches. Under `primary`, github's merge, auto-merge enqueue and close of a
+merged issue go through the Connector, still with no fallback, under every
+`MERGE_MODE`. The merge deletes its head branch through the Connector after it
+lands, as `gh pr merge --delete-branch` did; that delete is best effort,
+because the PR has landed by then. The write half shipped no issue close, so the
+tracker protocol gains an optional `tracker.closeIssue`, which the github
+Connector serves with a GraphQL mutation over the `POST /graphql` route it
+already declares. The Connector merges by rebase only, so a primary row refuses
+any other `MERGE_METHOD`, as the forgejo row does. The native paths stay until
+#6888.

@@ -3114,10 +3114,16 @@ read-only bundle relay (`RelayBundle`, `CommitSubjects`), `Rebase`, the
 read-only Box's mirror seed and the butler Ledger push in core's git against
 the Connector's clone URL with the row's credential, never `gh auth
 git-credential`. A primary rebase syncs onto `BASE_BRANCH`, because the
-Connector's PR read carries no base. Merges, auto-merge and `CloseMergedIssue`
-stay native until switch 4 (#6887); without `primary` every write stays
-native. The switches cover launcher-side writes
-only: the CI claim and release label swaps in
+Connector's PR read carries no base. Since switch 4 (#6887) it also routes
+`Merge`, which then deletes the PR's head branch through the Connector as `gh pr
+merge --delete-branch` did, `EnqueueAutoMerge` under `MERGE_MODE=auto`, and the
+close of a merged issue (`CloseMergedIssue`, over `tracker.closeIssue`), so every
+`MERGE_MODE` settles through the Connector. The Connector merges by rebase only:
+a primary row refuses any other `MERGE_METHOD` with `ErrPrimaryMergeMethod`
+when it builds the Code Forge, as the forgejo row does. A transient merge failure is retried by core's merge
+loop, and a head-branch delete that fails after the merge landed is recorded and
+warned, never a failed merge. Without `primary` every write stays native. The
+switches cover launcher-side writes only: the CI claim and release label swaps in
 `.github/actions/agent-setup/action.yml` and
 `.github/workflows/agent-dispatch.yml` still run `gh issue edit` and are not
 leaks of the switches. The github row is on for dogfood through
