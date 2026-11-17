@@ -9,6 +9,10 @@
 > legitimately wears a label from each family, and claiming still never consults
 > the other.
 
+> **Amended by PR #3635.** Research is no longer purely advise-only: a
+> `reject` verdict closes its issue on `github` and `forgejo`. See the
+> amendment at the end.
+
 Issues arrive under-specified: a worker Agent dispatched onto a thin issue
 burns its run rediscovering context a reviewer could have written down, and
 some issues (Filer findings included) are false positives that should never
@@ -24,6 +28,9 @@ one appended, marker-carrying, structured comment (verdict, context for a
 worker, open questions) and never edits the issue body, never promotes an
 issue to dispatchable, never closes one: a human acts on the verdict,
 preserving the rule that a human is the launch button.
+(Amended by PR #3635: a `reject` verdict now closes its issue
+automatically on `github` and `forgejo`; the rest of this paragraph
+stands. See the amendment at the end.)
 
 Kinds share the four canonical lifecycle states; research maps them to its
 own disjoint label family on `github`: `agent-research` (dual-role standing
@@ -73,6 +80,8 @@ token: the research pipeline takes an optional second fine-grained PAT scoped
 Issues RW + Contents R + Metadata R (falling back to the main token when
 unset), so a fully injection-steered researcher cannot push code, open a PR,
 or merge — the blast radius collapses to a bad comment a human reads anyway.
+(Amended by PR #3635: a steered `reject` now also closes the issue and keeps
+the Filer from refiling its finding; see the amendment at the end.)
 
 ## Considered Options
 
@@ -87,6 +96,8 @@ or merge — the blast radius collapses to a bad comment a human reads anyway.
   prompt injection into a dispatched work Box; auto-close silently destroys
   real bug reports on a wrong verdict. Advise-only → acting is a one-line
   change later; the reverse is a policy retreat after an incident.
+  (Amended by PR #3635: only the auto-close half was reversed; auto-promoting
+  `recommend` stays rejected. See the amendment at the end.)
 - **New lifecycle states** (`Researchable → Researched → Dispatchable`) —
   rejected: forces four more states on every tracker adapter for an optional
   activity and hard-wires research as a phase of the worker pipeline, when
@@ -218,3 +229,40 @@ through the same configurable-verdict path this ADR and its #2201
 amendment established, and applies exactly one terminal label — the
 absence of a repo changes what the Box can explore, not the verdict
 contract or the one-comment rule.
+
+## Amendment (PR #3635, 2026-09-20): rejected research issues close automatically
+
+Applying `agent-research-reject` now closes the issue, never as completed
+since research lands no code: `.github/workflows/agent-research-close.yml`
+closes it as **not planned**, and its `.forgejo` mirror closes it with the
+label alone recording why, as Forgejo has no close reason. The close fires on
+the label, whoever applies it, and re-applying it to an already-closed issue
+does nothing on either tracker. Who can apply the label is unchanged: a
+triage-role human, or the research token writing the verdict. The blast
+radius of an injection-steered researcher widens, though, from a bad comment
+to a closed issue whose finding the Filer will not refile. The close exists
+only on those two trackers; on `local` and `jira` a human still closes a
+reject.
+[Closing a rejected research issue](../reference.md#closing-a-rejected-research-issue)
+has the mechanics.
+
+The reason is the Filer: it suppresses refiling only for a *closed* issue
+carrying `agent-research-reject`, so while the close waited on a human, every
+still-open rejection left the same false positive free to be filed again.
+
+This answers, rather than dismisses, the "silently destroys real bug reports"
+objection. A wrong reject destroys nothing: the issue, the label, and the
+verdict comment with its reason all remain. Nor is it silent: the
+researcher's verdict comment precedes its verdict label, and the close
+notifies the issue's subscribers. The real new cost is that a wrong
+reject also suppresses Filer refiles of the same finding, so the error
+compounds until someone notices. The recovery is to reopen the issue, which
+ends the closed-plus-`agent-research-reject` match, so the Filer dedups it
+as an ordinary open, already-tracked issue. Remove `agent-research-reject`
+too, so a later close does not restore the suppression, then promote by hand
+or re-research via `agent-research-trigger` or `agent-research`.
+
+Auto-promoting `recommend` is still rejected. Closing a reject grants the
+researcher no dispatch authority, so the argument against graduating prompt
+injection into a dispatched work Box stands, and a human remains the launch
+button.
