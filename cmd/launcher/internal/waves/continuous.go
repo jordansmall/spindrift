@@ -23,7 +23,8 @@ import (
 // a ticker retries drainRefill() on this interval so a transient refill miss
 // gets retried without waiting for an unrelated Box to finish. Three minutes
 // rather than the original 30s (issue #2874), because each tick spends a share
-// of the tracker's rate-limit budget. Issue #1638 makes it an operator knob.
+// of the tracker's rate-limit budget. It is hardcoded; issue #1638 tracks
+// making it an operator knob.
 const defaultPollInterval = 3 * time.Minute
 
 func resolvePollInterval(override time.Duration) time.Duration {
