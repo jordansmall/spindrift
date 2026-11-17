@@ -2607,11 +2607,13 @@ protection), declared as protocol 0.3.x, through eight further write-half
 routes, each pinned to `{repo}`: `POST` and `PUT /pulls`, `POST /issues`,
 `GET /compare`, `/git/matching-refs/heads`, `/branches` and `/rules/branches`,
 and `DELETE /git/refs/heads`. The tracker write primitives (add and remove a
-label, post a comment, file an issue, list and create the repository's labels)
-ride `POST /issues` (label add, comment, issue filing) and `POST /graphql`
-(label removal, as `gh issue edit --remove-label` does: REST removes by
-`DELETE /issues/{n}/labels/{name}`, whose escaped `/` in a name such as
-`agent/ready` the host refuses), plus two more routes: `GET` and `POST /labels`.
+label, post a comment, file an issue, close an issue, list and create the
+repository's labels) ride `POST /issues` (label add, comment, issue filing) and
+`POST /graphql` (label removal, as `gh issue edit --remove-label` does: REST
+removes by `DELETE /issues/{n}/labels/{name}`, whose escaped `/` in a name such
+as `agent/ready` the host refuses; and the issue close, a `closeIssue`
+mutation with `stateReason: COMPLETED`, since no REST close route is declared),
+plus two more routes: `GET` and `POST /labels`.
 Its read Route table is four routes on `api.github.com`: `GET
 /repos/{repo}/issues` (the list, issue, `dependencies/blocked_by` and
 `blocking` reads), `GET /repos/{repo}/pulls` (branch lookup, one PR), `POST
@@ -2635,9 +2637,9 @@ every other GET under it, none of which a read uses; a Route restricts no
 body, so `POST /graphql` admits any GraphQL document, mutations included, and
 no Route can pin it to the repository: the Connector sends the rollup, the
 issue-comments query, repository-identity and token-grant queries, the
-draft-flip and auto-merge mutations, and the label-id query and removal
-mutation there (issues
-#6808, #6881, #6882). The write roots over-admit too: `POST /pulls` also admits
+draft-flip and auto-merge mutations, the label-id query and removal mutation, and
+the issue-close query and mutation there (issues #6808, #6881, #6882, #6887).
+The write roots over-admit too: `POST /pulls` also admits
 review and review-comment creation, and `PUT /pulls` update-branch. It skips
 pull requests in the REST issues list.
 
@@ -3549,11 +3551,11 @@ This is protocol version **0.3.0**. The host is
   `"tracker.comments"`, `"tracker.nativeDeps"`, `"tracker.blocks"`,
   `"tracker.probe"`, `"tracker.statuses"`, `"tracker.createMeta"`,
   `"tracker.count"`, `"tracker.removedLabels"`, `"tracker.searchIssues"`,
-  `"tracker.labeled"`,
-  `"tracker.transition"`, `"tracker.editLabels"`, `"tracker.comment"`,
-  `"tracker.fileIssue"` and `"tracker.labels"`, serving the method of the
-  same name (`"tracker.labels"` serves `tracker.listLabels` and
-  `tracker.createLabel`), and `"tracker.ids.projectKey"` (see **Issue
+  `"tracker.labeled"`, `"tracker.transition"`, `"tracker.editLabels"`,
+  `"tracker.comment"`, `"tracker.fileIssue"`, `"tracker.closeIssue"` and
+  `"tracker.labels"`, serving the method of the same name (`"tracker.labels"`
+  serves `tracker.listLabels` and `tracker.createLabel`), and
+  `"tracker.ids.projectKey"` (see **Issue
   ids**). Advertising `"tracker.comments"` attests that each comment's
   `minimized` and `minimizedReason` are faithful; a Connector whose API cannot
   report minimized state leaves it out, and core reads comments from its native
@@ -3583,6 +3585,7 @@ This is protocol version **0.3.0**. The host is
   | `tracker.editLabels` (optional) | `{target, number, add, remove}` | `{}`; one edit that adds and removes the named labels |
   | `tracker.comment` (optional) | `{target, number, body, research}`: `body` is canonical Markdown without the research marker line, and `research` says the comment carries that marker | `{}`; one comment, the marker kept where the tracker can report it as `researchMarker` |
   | `tracker.fileIssue` (optional) | `{target, title, body, labels, dedupMarker, issueType}`: `body` is canonical Markdown without the dedup marker line, `dedupMarker` that line verbatim (`""` for none), and `issueType` the type core files as | `{url}`, the new issue's browse URL; the marker kept where `tracker.issue` returns it as `dedupMarker` |
+  | `tracker.closeIssue` (optional) | `{target, number}` | `{}`; closes the issue as completed, never as not planned; core calls it only on an open issue |
   | `tracker.listLabels` (optional, capability `tracker.labels`) | `{target}` | `{labels}`, every label the tracker knows |
   | `tracker.createLabel` (optional, capability `tracker.labels`) | `{target, name, description, color}` | `{}`; a no-op where the tracker has no label registry |
 

@@ -24,9 +24,10 @@
 # it admits any GraphQL document, mutations included, and no Route can pin it
 # to the repository. The Connector sends the rollup query, the issue-comments
 # query, repository-identity queries, classic token-grant queries, the draft-flip and auto-merge
-# mutations, and the label-id query and removal mutation there (issues #6808,
-# #6881, #6882). Label removal cannot be a REST `DELETE`: the host refuses the
-# escaped `/` in a name such as `agent/ready`. Every REST write is pinned to
+# mutations, the label-id query and removal mutation, and the issue-id query
+# and close mutation there (issues #6808, #6881, #6882, #6887). Label removal
+# cannot be a REST `DELETE`: the host refuses the escaped `/` in a name such as
+# `agent/ready`. Every REST write is pinned to
 # `{repo}`. The write roots over-admit too: `POST /pulls` also admits review
 # and review-comment creation, and `PUT /pulls` update-branch.
 # `/actions/jobs` is a root too: the log read is `GET /actions/jobs/{id}/logs`,

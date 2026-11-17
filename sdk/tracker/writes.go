@@ -15,6 +15,7 @@ const (
 	CapLabels     = "tracker.labels"
 	CapComment    = "tracker.comment"
 	CapFileIssue  = "tracker.fileIssue"
+	CapCloseIssue = "tracker.closeIssue"
 
 	// The methods behind CapLabels; they ride on it rather than being
 	// advertised themselves.
@@ -104,6 +105,11 @@ type Writer struct {
 	// FileIssue declares CapFileIssue. It creates the issue r describes and
 	// returns its browse URL.
 	FileIssue func(t Target, r IssueRequest) (url string, err error)
+
+	// CloseIssue declares CapCloseIssue. It closes the issue as completed,
+	// never as not planned. Core reads the issue first and calls it only on
+	// an open one.
+	CloseIssue func(t Target, number string) error
 
 	// ListLabels declares CapLabels. It returns the names of the labels the
 	// tracker's registry holds.
@@ -207,6 +213,19 @@ func writeHandlers(w Writer) ([]string, map[string]method) {
 			return struct {
 				URL string `json:"url"`
 			}{url}, nil
+		}
+	}
+	if w.CloseIssue != nil {
+		caps = append(caps, CapCloseIssue)
+		m[CapCloseIssue] = func(params json.RawMessage) (any, error) {
+			var p struct {
+				Target Target `json:"target"`
+				Number string `json:"number"`
+			}
+			if err := unmarshal(params, &p); err != nil {
+				return nil, err
+			}
+			return done(w.CloseIssue(p.Target, p.Number))
 		}
 	}
 	if w.ListLabels != nil {

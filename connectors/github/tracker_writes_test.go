@@ -328,3 +328,72 @@ func TestCreateLabelFailsOnExisting(t *testing.T) {
 		t.Error("422: want error, as gh label create without --force")
 	}
 }
+
+// closeFake answers the issue-id query with lookup and the close mutation
+// with an empty success.
+func closeFake(t *testing.T, lookup string) *[]connector.Request {
+	t.Helper()
+	var got []connector.Request
+	old := send
+	t.Cleanup(func() { send = old })
+	send = func(r connector.Request) (connector.Response, error) {
+		got = append(got, r)
+		if r.URL != graphqlURL {
+			return connector.Response{Status: 404, Body: []byte("{}")}, nil
+		}
+		if strings.Contains(r.Body, "closeIssue") {
+			return ok(`{"data":{"closeIssue":{"clientMutationId":null}}}`), nil
+		}
+		return ok(lookup), nil
+	}
+	return &got
+}
+
+func TestCloseIssueClosesAsCompleted(t *testing.T) {
+	got := closeFake(t, `{"data":{"repository":{"issue":{"id":"I_7"}}}}`)
+	if err := closeIssue(tgt, "7"); err != nil {
+		t.Fatal(err)
+	}
+	if len(*got) != 2 {
+		t.Fatalf("calls = %d, want 2: %+v", len(*got), *got)
+	}
+	q := gqlOf(t, (*got)[0])
+	if want := map[string]any{"owner": "o", "repo": "r", "number": float64(7)}; !reflect.DeepEqual(q.Variables, want) {
+		t.Errorf("lookup variables = %#v, want %#v", q.Variables, want)
+	}
+	m := (*got)[1]
+	if m.Method != "POST" || m.URL != graphqlURL {
+		t.Errorf("mutation call = %s %s", m.Method, m.URL)
+	}
+	g := gqlOf(t, m)
+	if !strings.Contains(g.Query, "closeIssue") || !strings.Contains(g.Query, "stateReason:COMPLETED") {
+		t.Errorf("mutation does not close as completed: %s", g.Query)
+	}
+	if want := map[string]any{"id": "I_7"}; !reflect.DeepEqual(g.Variables, want) {
+		t.Errorf("mutation variables = %#v, want %#v", g.Variables, want)
+	}
+}
+
+func TestCloseIssueMissingIssueIsNotFound(t *testing.T) {
+	for _, lookup := range []string{
+		`{"data":{"repository":{"issue":null}}}`,
+		`{"data":{"repository":null}}`,
+	} {
+		got := closeFake(t, lookup)
+		err := closeIssue(tgt, "7")
+		var ce *connector.Error
+		if !errors.As(err, &ce) || ce.Class != connector.NotFound {
+			t.Errorf("lookup %s: err = %v, want NotFound", lookup, err)
+		}
+		if len(*got) != 1 {
+			t.Errorf("lookup %s: calls = %d, want only the lookup", lookup, len(*got))
+		}
+	}
+}
+
+func TestCloseIssueRejectsBadNumber(t *testing.T) {
+	got := stub(t, nil)
+	if err := closeIssue(tgt, "x"); err == nil || len(*got) != 0 {
+		t.Errorf("err = %v, calls = %d, want an error and no calls", err, len(*got))
+	}
+}
