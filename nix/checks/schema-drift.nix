@@ -2681,7 +2681,7 @@ checkedMerge {
       "option-surface-doc-row-anchor-guard (issue #3067): renderOptionSurfaceTableDoc must throw for a synthetic key (\"allowUnfree\") that appears only inside the config row's prose, never as a first-column row name -- it did not throw, so the match is no longer anchored to the first column";
     pkgs.runCommand "option-surface-doc-row-anchor-guard" { } "touch $out";
 
-  # The four editorial rows carry a literal em dash in their domain-path cell
+  # The five editorial rows carry a literal em dash in their domain-path cell
   # rather than a real path, so a registry key whose name collides with one
   # (`settings` here) would render a silently wrong domain path unless that
   # row's cell is checked by value against the registry path (issues #3067,
