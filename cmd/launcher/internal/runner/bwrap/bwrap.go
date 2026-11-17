@@ -178,10 +178,11 @@ func bwrapPart(art inputdoc.Artifacts) inputdoc.BwrapArtifacts {
 	return *art.Bwrap
 }
 
-// New constructs a bwrap adapter for the run command from cfg, art (the bwrap
-// part of the Launcher input artifacts), the family knobs read through l (the
-// error is a malformed family knob), and pwd (the launcher's own working
-// directory); call NewBuild for the build command.
+// New constructs a bwrap adapter for every runner-building command but build,
+// through main.go's runnerForKind, from cfg, art (the bwrap part of the
+// Launcher input artifacts), the family knobs read through l (the error is a
+// malformed family knob), and pwd (the launcher's own working directory); call
+// NewBuild for the build command.
 // By default (any cfg.NetworkMode except the "host" opt-out, issue #2666) the
 // adapter isolates the sandbox into its own network namespace, with egress
 // restored via a hardened pasta helper (ADR 0042), matching rootless podman.
