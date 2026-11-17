@@ -31,7 +31,7 @@ func HostKey(hostport string) string {
 // the manifest's wire shape (ADR 0045); a new field without json:"-" changes
 // every manifest byte for byte. RegistryName tells two sub-registries on one
 // host apart when their index paths are interchangeable: cargo's
-// [registries.<name>] key, an npm scope, a uv index name, else "".
+// [registries.<name>] key, else "".
 type Subtree struct {
 	Ecosystem    string `json:"ecosystem"` // a registered Strategy's Name: "cargo" | "npm" | "yarn" | "pnpm" | "go" | "gradle"
 	Path         string `json:"path"`      // leading "/", no trailing "/"; "/" is the whole host
