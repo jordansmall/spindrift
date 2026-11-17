@@ -12,9 +12,10 @@ import (
 
 // Internal seam: a pure body-text matrix; the Settle draft-PR rows pin only the
 // append and already-closed cases.
-// Only a tracker row with ClosesRefTracker (github) gets a "Closes #<num>"
-// reference. A local tracker closes issues through its own axis
-// (ADR 0029), never through GitHub's auto-close-on-merge keyword.
+// Pins ensureClosesReference's ClosesRefTracker allow-list (issue #2341): only
+// the github row gets a "Closes #<num>" reference. The jira, local, and forgejo
+// rows get none, forgejo too though it is non-local; the ClosesRefTracker field
+// doc gives each row's reason.
 func TestInternalSeam_EnsureClosesReference(t *testing.T) {
 	const num = "1919"
 	tests := []struct {
