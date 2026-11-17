@@ -12,6 +12,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
@@ -134,6 +135,46 @@ func TestPrimaryRow_SeedMirrorRunsInCoreGit(t *testing.T) {
 	}
 	if strings.Contains(string(cfg), connectorToken) || strings.Contains(string(cfg), "credential") {
 		t.Errorf("mirror config carries the credential:\n%s", cfg)
+	}
+}
+
+// splitWebHost moves the repository's web URL, and so its clone URL, onto
+// GH_HOST while the API stays on the backend's host, as github.com and
+// api.github.com split on GitHub. The row's Routes declare only the API host.
+func splitWebHost(t *testing.T, h *connectorHarness) {
+	t.Helper()
+	const web = "github.example"
+	h.backend.mu.Lock()
+	h.backend.web = "https://" + web + "/" + connectorRepo
+	h.backend.mu.Unlock()
+	t.Setenv("GH_HOST", web)
+	t.Setenv("GIT_CONFIG_VALUE_0", h.backend.web+".git")
+}
+
+// The mirror seeds when git's host is GH_HOST and no declared route names it.
+func TestPrimaryRow_SeedMirrorWhenTheWebHostIsNotAnAPIRoute(t *testing.T) {
+	h, _, _, _ := primaryHarness(t, useGithubRowPrimary)
+	splitWebHost(t, h)
+	dir := filepath.Join(t.TempDir(), "mirror")
+
+	if err := primaryGitClient().SeedMirror(dir); err != nil {
+		t.Fatalf("SeedMirror: %v", err)
+	}
+	if got, want := forgetest.RevParse(t, dir, "main"), forgetest.RevParse(t, h.backend.repo.Bare, "main"); got != want {
+		t.Errorf("mirror main = %s, want %s", got, want)
+	}
+}
+
+// No git operation a primary row composes refuses a remote on GH_HOST.
+func TestPrimaryRow_GitOpsAcceptARemoteOnGHHost(t *testing.T) {
+	for _, op := range primaryGitOps {
+		t.Run(op.name, func(t *testing.T) {
+			h, _, _, _ := primaryHarness(t, useGithubRowPrimary)
+			splitWebHost(t, h)
+			if err := op.run(h, t); errors.Is(err, connectorforge.ErrRemoteHost) {
+				t.Errorf("err = %v, want the GH_HOST remote accepted", err)
+			}
+		})
 	}
 }
 
