@@ -357,7 +357,7 @@ func TestParse_BlockPathInvalidIsError(t *testing.T) {
 
 // npmrcFileResolver keys its lookup on the route's match host, not
 // UpstreamURL, since npmrc has no analogous upstream-URL concept
-// (credresolver.go).
+// (credresolver/resolver.go).
 func TestParse_NpmrcSourceMapsToCredresolverConfig(t *testing.T) {
 	const doc = `
 [[routes]]
