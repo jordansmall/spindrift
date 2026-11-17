@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -221,11 +222,13 @@ type Config struct {
 	ReviewModelOverride  string
 	ReviewEffortOverride string
 
-	// OpenPRForIssue reports whether an open PR already exists for the issue's
-	// agent branch, so a box whose work already landed a PR is never held and
-	// retried on a transient classification (issue #565). Callers may rely on
-	// it being non-nil: a push-only Code Forge resolves to false inside
-	// dispatchConfig's closure rather than leaving it nil.
+	// OpenPRForIssue reports whether an open PR already exists for the agent
+	// branch of a dispatch key (an issue number or a chore key), so a box
+	// whose work already landed a PR is never held and retried on a transient
+	// classification (issue #565), and answers BOX_HOST_OPEN_PR under
+	// NoForgeCredential (issue #7146). Callers may rely on it being non-nil:
+	// a push-only Code Forge resolves to false inside dispatchConfig's
+	// closure rather than leaving it nil.
 	OpenPRForIssue func(number string) (bool, error)
 
 	// IssueTextFor resolves the subject issue's body, plus its recent
@@ -384,6 +387,12 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 	if cfg.SelfContained {
 		env["SELF_CONTAINED"] = "1"
 	}
+	// The Box has no forge token to ask for its open PR itself (issue #7146);
+	// self-contained and advise-only Boxes never recover a branch. A failed
+	// lookup must reach the Box as "unknown", never "none".
+	if cfg.NoForgeCredential && !cfg.SelfContained && !d.AdviseOnly {
+		env[branchrecovery.HostOpenPREnv] = hostOpenPR(cfg, key)
+	}
 	if fixPass > 0 {
 		env["FIX_PASS"] = strconv.Itoa(fixPass)
 	}
@@ -465,4 +474,20 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 		env["BOX_REVIEW_EFFORT_OVERRIDE"] = cfg.ReviewEffortOverride
 	}
 	return env, nil
+}
+
+// hostOpenPR renders the open-PR lookup as the Box's BOX_HOST_OPEN_PR value.
+func hostOpenPR(cfg Config, key string) string {
+	if cfg.OpenPRForIssue == nil {
+		return branchrecovery.HostOpenPRUnknown
+	}
+	open, err := cfg.OpenPRForIssue(key)
+	switch {
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "    ?? %s: open-PR lookup failed: %v; the Box will abort branch recovery\n", key, err)
+		return branchrecovery.HostOpenPRUnknown
+	case open:
+		return branchrecovery.HostOpenPROpen
+	}
+	return branchrecovery.HostOpenPRNone
 }

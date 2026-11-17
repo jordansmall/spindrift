@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -782,6 +783,59 @@ func TestBuildBoxEnvNoForgeCredentialDropsEveryForgeToken(t *testing.T) {
 			}
 			if env["BOX_GH_TOKEN_OPTIONAL"] != "1" {
 				t.Errorf("BOX_GH_TOKEN_OPTIONAL = %q, want 1", env["BOX_GH_TOKEN_OPTIONAL"])
+			}
+		})
+	}
+}
+
+// Under NoForgeCredential the Box cannot ask the forge whether its branch has
+// an open PR, so the host answers in BOX_HOST_OPEN_PR; a failed lookup must
+// arrive as "unknown", never "none" (issue #7146).
+func TestBuildBoxEnvHostOpenPR(t *testing.T) {
+	errLookup := errors.New("forge down")
+	for _, c := range []struct {
+		name          string
+		noCred        bool
+		kind          string
+		selfContained bool
+		lookup        func(string) (bool, error)
+		want          string
+		wantAbsent    bool
+		wantCalled    bool
+	}{
+		{name: "open", noCred: true, lookup: func(string) (bool, error) { return true, nil }, want: branchrecovery.HostOpenPROpen, wantCalled: true},
+		{name: "not open", noCred: true, lookup: func(string) (bool, error) { return false, nil }, want: branchrecovery.HostOpenPRNone, wantCalled: true},
+		{name: "error", noCred: true, lookup: func(string) (bool, error) { return false, errLookup }, want: branchrecovery.HostOpenPRUnknown, wantCalled: true},
+		{name: "error with found", noCred: true, lookup: func(string) (bool, error) { return true, errLookup }, want: branchrecovery.HostOpenPRUnknown, wantCalled: true},
+		{name: "nil lookup", noCred: true, want: branchrecovery.HostOpenPRUnknown},
+		{name: "forwarded credential", lookup: func(string) (bool, error) { return true, nil }, wantAbsent: true},
+		{name: "advise-only kind", noCred: true, kind: "research", lookup: func(string) (bool, error) { return true, nil }, wantAbsent: true},
+		{name: "self-contained", noCred: true, selfContained: true, lookup: func(string) (bool, error) { return true, nil }, wantAbsent: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var calls []string
+			cfg := Config{Kind: c.kind, NoForgeCredential: c.noCred, SelfContained: c.selfContained}
+			if c.lookup != nil {
+				cfg.OpenPRForIssue = func(k string) (bool, error) {
+					calls = append(calls, k)
+					return c.lookup(k)
+				}
+			}
+			env := mustBuildBoxEnv(t, cfg, "3", "T", 0, "", "")
+			got, ok := env[branchrecovery.HostOpenPREnv]
+			if c.wantAbsent {
+				if ok {
+					t.Errorf("BOX_HOST_OPEN_PR = %q, want absent", got)
+				}
+			} else if got != c.want {
+				t.Errorf("BOX_HOST_OPEN_PR = %q, want %q", got, c.want)
+			}
+			if c.wantCalled {
+				if len(calls) != 1 || calls[0] != env["DISPATCH_KEY"] {
+					t.Errorf("OpenPRForIssue calls = %v, want one with DISPATCH_KEY %q", calls, env["DISPATCH_KEY"])
+				}
+			} else if len(calls) != 0 {
+				t.Errorf("OpenPRForIssue called %v, want no lookup", calls)
 			}
 		})
 	}
