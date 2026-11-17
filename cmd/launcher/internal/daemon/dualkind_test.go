@@ -258,11 +258,12 @@ func TestPoolReservationKeepsResearchFloorWhileBothKindsHaveWork(t *testing.T) {
 }
 
 // TestPoolWorkBurstsIntoWholePoolWhenResearchQueueEmpty pins the burst
-// contract: a reservation is a floor, not a ceiling. Slots: 2,
-// Reservation: 1; research empties on its first check (and, with a
-// frozen fake clock, never becomes runnable again), so both slots settle
-// into running work. The reservation is a live running count, so any slot
-// turning over while no research runs prefers research until that gate lands.
+// contract: a reservation orders which kind a starting slot tries first and
+// never holds a slot for research that has nothing queued. Slots: 2,
+// Reservation: 1; research empties on its first check (and, with a frozen
+// fake clock, never becomes runnable again), so both slots settle into
+// running work. The reservation is a live running count, so any slot turning
+// over while no research runs prefers research until that gate lands.
 func TestPoolWorkBurstsIntoWholePoolWhenResearchQueueEmpty(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &scriptedRunner{
