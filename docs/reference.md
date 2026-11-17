@@ -7383,10 +7383,12 @@ late merges (below); on a local tracker it is also the authority that closes
 a local issue once it has landed (ADR 0029). (Settle closes an
 already-resolved local issue directly, since that outcome has nothing landed
 for reconcile to observe — issue #4017.) It is observational — it never lands
-code. On `github`/`jira` it prints a plain "no issues to close" line instead
-of acting; `dispatch` also auto-invokes it as a final step whenever
-`ISSUE_TRACKER=local`, so the common loop (dispatch → immediate-merge → issue
-closes) needs no extra command.
+code. On a tracker the Box can reach (`github`, `jira`), the standalone
+`spindrift reconcile` prints a plain "no issues to close" line for its issue
+bookkeeping instead of acting, and the end-of-`dispatch` sweep skips that
+bookkeeping silently. On a local tracker, a `dispatch` run that names no issues
+on the command line also runs that bookkeeping as its final step, so the common
+loop (dispatch → immediate-merge → issue closes) needs no extra command.
 
 On every tracker, reconcile first records late merges when the Code Forge
 has PRs (`github`, `forgejo`): for each Dispatch Record claimed in the last
