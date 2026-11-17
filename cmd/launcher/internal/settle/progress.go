@@ -17,9 +17,10 @@ type Status string
 const StatusMergeByHand = Status(dispatchrecord.ReasonMergeByHand)
 
 const (
-	StatusPostForcePushWait Status = "post-force-push-wait"
-	StatusPostForcePushRed  Status = "post-force-push-red"
-	StatusMarkReadyFailed   Status = "mark-ready-failed"
+	StatusPostForcePushWait       Status = "post-force-push-wait"
+	StatusPostForcePushRed        Status = "post-force-push-red"
+	StatusMarkReadyFailed         Status = "mark-ready-failed"
+	StatusMarkReadyTransientRetry Status = "mark-ready-transient-retry"
 
 	StatusGateTerminal         Status = "gate-terminal"
 	StatusBudgetExhausted      Status = "budget-exhausted"

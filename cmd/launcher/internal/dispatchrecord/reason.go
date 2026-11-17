@@ -23,6 +23,7 @@ const (
 
 	// Failed.
 	ReasonLandingFailed      = "landing-failed"
+	ReasonMarkReadyFailed    = "mark-ready-failed"
 	ReasonGateTerminal       = "gate-terminal"
 	ReasonCIRed              = "ci-red"
 	ReasonFixExhausted       = "fix-exhausted"
@@ -124,6 +125,7 @@ var reasons = []ReasonRow{
 	{Name: ReasonRecoverDeclined, State: StateComplete, Gloss: "recover declined the stranded bundle"},
 
 	{Name: ReasonLandingFailed, State: StateFailed, Gloss: "the PR could not land"},
+	{Name: ReasonMarkReadyFailed, State: StateFailed, Gloss: "the green PR could not be marked ready, so it was neither merged nor handed off"},
 	{Name: ReasonGateTerminal, State: StateFailed, Gloss: "a gate failed terminally"},
 	{Name: ReasonCIRed, State: StateFailed, Gloss: "CI red with no fix pass budget"},
 	{Name: ReasonFixExhausted, State: StateFailed, Gloss: "the fix passes ran out with CI still red"},

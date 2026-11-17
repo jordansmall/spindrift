@@ -111,6 +111,12 @@ var errLandingNeverGreen = errors.New("settle: force-pushed head never went gree
 // timeout or API error.
 var errForcePushRed = fmt.Errorf("%w: CI went red", errLandingNeverGreen)
 
+// errForcePushMarkReadyFailed marks the ready flip that restores a PR after a
+// force-push and fails past its transient retries. The PR is a draft again, so
+// selfHeal fails the landing as it does for the first flip rather than settling
+// merge-blocked (issue #7205).
+var errForcePushMarkReadyFailed = errors.New("ready flip after the force-push failed")
+
 // selfHealGate is the PR Lander's landing: it polls the merge gate,
 // dispatching fix boxes on genuine red up to MaxFixAttempts times, then applies
 // the merge mode. It swaps agent-complete only once the landing path settles
@@ -155,9 +161,12 @@ func (s prLander) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr
 			// downgraded to manual must not stay stranded as a draft. It also
 			// precedes any mergeability read, since Forgejo reports a draft pull
 			// unmergeable; a PR that does conflict is demoted again by the
-			// conflict response, as an immediate merge's conflict is.
-			if mrErr := s.pr.MarkReady(pr); mrErr != nil {
-				s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMarkReadyFailed, Detail: fmt.Sprintf("!! %v", mrErr)})
+			// conflict response, as an immediate merge's conflict is. A flip that
+			// still fails after its transient retries fails the landing: a draft
+			// can neither merge nor be handed to a human, so settling complete
+			// would strand it (issue #7205).
+			if mrErr := s.markReady(num, gen, pr); mrErr != nil {
+				return s.failMarkReady(num, gen, pr, mrErr)
 			}
 			// A hold takes the PR away from the merge below, so a human gets it
 			// instead; under immediate that PR must still merge into its base
@@ -196,6 +205,9 @@ func (s prLander) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr
 				}
 				if errors.Is(err, errLandingNeverGreen) {
 					return s.failForcePushedHead(num, pr, err, "")
+				}
+				if errors.Is(err, errForcePushMarkReadyFailed) {
+					return s.failMarkReady(num, gen, pr, err)
 				}
 				s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeBlocked, Detail: fmt.Sprintf("!! %v", err)})
 				s.it.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
@@ -272,6 +284,31 @@ func (s prLander) failForcePushedHead(num, pr string, err error, budgetNote stri
 	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusLandingFailed, Detail: fmt.Sprintf("!! %v", err)})
 	s.it.Comment(num, fmt.Sprintf("landing failed: %v%s — no green PR exists at the current head", err, budgetNote))
 	s.transitionState(num, ForReason(dispatchrecord.ReasonLandingFailed), err.Error())
+	return landingFailed, err.Error(), nil
+}
+
+// markReady flips pr to ready, retrying a forge.ErrMarkReadyTransient failure
+// on the same transient budget the merge uses. errAbandoned passes through
+// untouched.
+func (s prLander) markReady(num string, gen uint64, pr string) error {
+	transients := s.newRetryLoop(num, gen)
+	return transients.run(StatusMarkReadyTransientRetry, "", pr,
+		func() error { return s.pr.MarkReady(pr) },
+		func(err error) bool { return !errors.Is(err, forge.ErrMarkReadyTransient) }, nil)
+}
+
+// failMarkReady settles a green PR whose ready flip failed: Failed with
+// dispatchrecord.ReasonMarkReadyFailed. The PR is still a draft, so it is
+// neither merged nor handed to a human, under any merge mode or hold.
+func (s prLander) failMarkReady(num string, gen uint64, pr string, err error) (landingResult, string, error) {
+	// A non-transient failure, or the last transient one, returns from the
+	// retry loop with no stop check, so a mark landing in that call lands here.
+	if s.terminated(num, gen) {
+		return landingFailed, "", errAbandoned
+	}
+	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMarkReadyFailed, Detail: fmt.Sprintf("!! %v", err)})
+	s.it.Comment(num, fmt.Sprintf("marking %s ready failed after green CI: %v — it is still a draft, so it was neither merged nor handed off", pr, err))
+	s.transitionState(num, ForReason(dispatchrecord.ReasonMarkReadyFailed), err.Error())
 	return landingFailed, err.Error(), nil
 }
 
@@ -850,9 +887,9 @@ func (s prLander) rewaitAfterForcePush(num string, gen uint64, pr string) error 
 	if obs.outcome == gateGreen {
 		// Restore ready (issue #1863). MarkReady is idempotent, so calling it
 		// unconditionally beats threading a was-it-ever-demoted flag through
-		// for the stale-base path that never demoted. Best-effort.
-		if mrErr := s.pr.MarkReady(pr); mrErr != nil {
-			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMarkReadyFailed, Detail: fmt.Sprintf("!! %v", mrErr)})
+		// for the stale-base path that never demoted.
+		if mrErr := s.markReady(num, gen, pr); mrErr != nil {
+			return fmt.Errorf("%w: %w", errForcePushMarkReadyFailed, mrErr)
 		}
 	}
 	return rewaitGateResultErr(obs.outcome, gReason, pr)
