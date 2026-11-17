@@ -1746,7 +1746,7 @@ in
 
   # Issue #3447: an explicit `roster` carrying `reviewer` but no `review-axis`
   # must not silently fall back to the Driver's ungoverned default. mkHarness
-  # fires an eval-time lib.warnIf and records it as data on
+  # fires an eval-time lib.warn (via warnAll's fold) and records it as data on
   # `internals.rosterWarnings`, so this check need not capture stderr.
   roster-explicit-roster-without-review-axis-warns =
     let
