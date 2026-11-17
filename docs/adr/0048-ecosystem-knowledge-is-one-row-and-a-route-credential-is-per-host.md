@@ -159,6 +159,21 @@ option" instead.
    packages are `cargo`, `npmfamily`, `gomod` and `gradle`. `go` is a Go
    keyword, so the go ecosystem's package is `gomod`, but its Strategy is
    still named `"go"`.
+
+   *Amended by issue #5992:* core keeps two exceptions, the frozen
+   routes-file keys in `frozenkeys.go` and `RouteLocalURL`. The keys are
+   the retired `gradle-path`, `go-path` and `cargo-registries`, and
+   cargo's live `registries`, which `registryroutes` emits when it
+   translates `cargo-registries`. `registryroutes` parses or emits them
+   and must not import a Strategy, and `registryvocab` stays
+   ecosystem-neutral, so core is the one package both sides can import;
+   gradle, go and cargo read their keys back from there. The retired set
+   is frozen (#5952), and `registries` exists only to translate one of
+   them, so the list does not grow. `RouteLocalURL` names no ecosystem but
+   is not a kit helper, since kit helpers serve ecosystem packages and its
+   callers are binding and conformance code: `bindregistry` builds each
+   host rewrite with it, and the `ecosystemtest` kit checks rewrites
+   against it.
 2. **The npm family is one package with three Strategies.** npm, yarn
    and pnpm share `npmFamilyBinding`, the YAML scalar helpers and the
    tarball rewrite. In one package that sharing is internal, not a
