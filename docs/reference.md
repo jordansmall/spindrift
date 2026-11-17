@@ -3700,6 +3700,10 @@ This is protocol version **0.3.0**. The host is
   refuses the answer unless both URLs are `https`, carry no userinfo and name a
   host of the Connector's Route table (case-insensitive, port included);
   otherwise the git credential would go to whatever host the Connector named.
+  A backend whose git host is not its API host passes core's own web host
+  instead (`Git.WebHost`; github passes `GH_HOST`, else `github.com`, since its
+  Routes name only `api.github.com`), and then both URLs must name exactly that
+  host and no Route host is accepted (issue #7195).
   A refusal is audited as one line with `decision` `refused` and `reason`
   `forge.remote: <error>`, the error printing the URL without its userinfo,
   and no route, host or status. It matches `ErrRemoteCredentials` or
