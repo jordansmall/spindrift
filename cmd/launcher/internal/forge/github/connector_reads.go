@@ -144,13 +144,9 @@ func routedRow() (backendrows.Row, bool) {
 }
 
 // primaryRow is the github backend row when it is configured primary: the
-// issue and PR reads (listing and reading issues, the dedup scan, comments,
-// native dependencies, the issues one blocks, issue search, the PR, branch and
-// check reads) and the issue comment and label writes (claim, settle, verdict,
-// label adds and creation, host-posted comments) all go through it, with no gh
-// fallback; issue filing, PRs and merges stay native. It is deliberately
-// narrower than routedRow, which any non-shadow row satisfies, so a plain row
-// keeps gh answering those.
+// reads and the writes docs/reference.md lists under "Backend primary mode" go
+// through it, with no gh fallback. It is deliberately narrower than routedRow,
+// which any non-shadow row satisfies, so a plain row keeps gh answering those.
 func primaryRow() (backendrows.Row, bool) {
 	row, ok := backendrows.Lookup(backend.GitHub.Name)
 	return row, ok && row.Primary
@@ -386,6 +382,12 @@ func (e *execClient) addLabelsViaConnector(row backendrows.Row, num string, labe
 func (e *execClient) commentViaConnector(row backendrows.Row, num, body string) error {
 	return trackerCapOp(e, row, connectortracker.CapComment, "comment on an issue", func(c forge.HostPostedCommenter) error {
 		return c.Comment(num, body)
+	})
+}
+
+func (e *execClient) fileIssueViaConnector(row backendrows.Row, title, body string, labels []string) (string, error) {
+	return viaTrackerCap(e, row, connectortracker.CapFileIssue, "file an issue", func(f forge.HostPostedIssueFiler) (string, error) {
+		return f.PostIssue(title, body, labels)
 	})
 }
 

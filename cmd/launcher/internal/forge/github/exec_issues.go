@@ -499,8 +499,12 @@ func (e *execClient) Comment(num, body string) error {
 
 // PostIssue files an issue against this adapter's own repo, never a
 // caller-supplied one, per the do-not-trust-the-agent-target invariant (issues
-// #2028, #1949). It returns the created issue's URL from gh's stdout.
+// #2028, #1949). It returns the created issue's URL: the Connector's html_url
+// under a primary row, else gh's stdout.
 func (e *execClient) PostIssue(title, body string, labels []string) (string, error) {
+	if row, ok := primaryRow(); ok {
+		return e.fileIssueViaConnector(row, title, body, labels)
+	}
 	args := []string{"issue", "create",
 		"--repo", e.repo,
 		"--title", title,
