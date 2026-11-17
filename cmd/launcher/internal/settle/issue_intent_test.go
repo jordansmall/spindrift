@@ -188,8 +188,6 @@ func TestParseIssueIntent_ConcurrenceIsBoundedAndBacktickNeutralized(t *testing.
 			if in.Concurrence != tc.want {
 				t.Errorf("Concurrence = %q, want %q", in.Concurrence, tc.want)
 			}
-			// promotionNote re-sanitizes an already-parsed value, so a
-			// second pass must change nothing.
 			if again := sanitizeConcurrence(in.Concurrence); again != in.Concurrence {
 				t.Errorf("sanitizeConcurrence not idempotent: %q -> %q", in.Concurrence, again)
 			}
@@ -409,11 +407,11 @@ func TestFileIssueIntents_RealLocalTracker_FilesIssueOnDisk(t *testing.T) {
 	}
 }
 
-// The provenance label comes from the caller, not from a label baked into the
-// routine. "some-other-caller-label" is a deliberate placeholder, not ADR
-// 0041's real "agent-research-finding" (which isn't registered in
-// lib/labels.nix). A research-settle caller (issue #2590) needs this seam:
-// fileIssueIntentsDetailed is a package-level function, not a *Settle method.
+// The provenance label comes from the caller, not from a label baked into
+// the routine. "some-other-caller-label" is a deliberate placeholder, not
+// ADR 0041's real "agent-research-finding". ResearchSettle.Settle passes its
+// own label through this seam, so fileIssueIntentsDetailed is a package-level
+// function, not a *Settle method.
 func TestFileIssueIntents_ArbitraryProvenanceLabel(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/55"
@@ -502,8 +500,8 @@ func TestSettle_FilesIssueIntents_OnBlockedOutcome(t *testing.T) {
 	if len(fc.PostIssueCalls) != 1 {
 		t.Errorf("PostIssueCalls = %+v, want exactly 1", fc.PostIssueCalls)
 	}
-	// Guards gate.go's own literal argument on the blocked path too. See the
-	// matching assertion in TestSettle_FilesIssueIntents_OnReadyOutcome.
+	// Guards gate.go's Config.FindingLabel read on the blocked path too. See
+	// the matching assertion in TestSettle_FilesIssueIntents_OnReadyOutcome.
 	if len(fc.PostIssueCalls) == 1 && (len(fc.PostIssueCalls[0].Labels) != 1 || fc.PostIssueCalls[0].Labels[0] != "agent-review-finding") {
 		t.Errorf("PostIssueCalls[0].Labels = %v, want [agent-review-finding]", fc.PostIssueCalls[0].Labels)
 	}
