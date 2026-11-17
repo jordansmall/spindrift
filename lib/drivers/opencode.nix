@@ -91,10 +91,12 @@ in
 
   bin = "opencode";
 
-  # The github-copilot Provider is OAuth-only (ADR 0009 amendment, #260) and
-  # reads the credential from OPENCODE_AUTH_CONTENT. Other opencode Providers
-  # carry their own apiKey via the {env:} config leg, so the rule applies only
-  # when some model is Copilot.
+  # An API-key Provider with a secret env-schema row rides it as plain Box env,
+  # which opencode reads natively; no config file carries a key. Only the
+  # github-copilot/ prefix has a rule here: it is OAuth-only (ADR 0009
+  # amendment, #260) and reads the credential from OPENCODE_AUTH_CONTENT. Every
+  # other Provider has no credential gate (see #7055), so a missing key is not
+  # caught at launch.
   credentials = [
     {
       env = [ "OPENCODE_AUTH_CONTENT" ];
