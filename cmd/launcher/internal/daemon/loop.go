@@ -185,13 +185,13 @@ type Config struct {
 	// MEMORY_LIMIT x MAX_PARALLEL sizing. Must be non-empty.
 	Kinds []Kind
 
-	// Reservation is the minimum number of children of the reserved-priority
-	// kind (the row carrying dispatchkind.PriorityReserved) the pool keeps
-	// running. It is a floor, not a ceiling: the reserved kind is preferred only
-	// while it has queued work, and either tier bursts into the whole pool when
-	// the other has backed off into an empty result. Zero is normal-first with
-	// the reserved kind on the leftovers; Slots is reserved-first. Must be
-	// 0 <= Reservation <= Slots.
+	// Reservation is the running-child count of the reserved-priority kind (the
+	// row carrying dispatchkind.PriorityReserved) below which a starting slot
+	// tries that kind first. It never preempts a running child and holds no slot
+	// open: the reserved kind is preferred only while it has queued work, and
+	// either tier bursts into the whole pool when the other has backed off into
+	// an empty result. Zero is normal-first with the reserved kind on the
+	// leftovers; Slots is reserved-first. Must be 0 <= Reservation <= Slots.
 	Reservation int
 
 	Slots int
