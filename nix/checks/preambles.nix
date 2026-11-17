@@ -96,26 +96,13 @@ let
     syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
   };
 
-  # Shared by preambles-run-artifacts-oci and the OCI case of
-  # preambles-run-artifacts-image-attr-name below.
+  # The OCI row's runArtifacts fixture, shared by the checks below.
   ociRunArtifactsBase = {
     row = ociRow;
     driverEntry = {
       name = "claude";
       skillsDirRelative = ".claude/skills";
     };
-    agentFilesPath = "/nix/store/aaa-agent-files";
-    agentEnvPath = "/nix/store/bbb-agent-env";
-    passwdFilePath = "/nix/store/eee-passwd";
-    groupFilePath = "/nix/store/fff-group";
-    # Required (no default) even though the OCI branch never reads them
-    # (issue #2672), like nixStoreWritable and syscallFilterPath below.
-    agentFilesDrv = "/nix/store/aaa-agent-files.drv";
-    agentEnvDrv = "/nix/store/bbb-agent-env.drv";
-    passwdFileDrv = "/nix/store/eee-passwd.drv";
-    groupFileDrv = "/nix/store/fff-group.drv";
-    agentClosurePath = "/nix/store/ggg-agent-closure";
-    prefetch = "";
     imagePath = "/nix/store/ccc-image";
     imageHash = "deadbeef";
     launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
@@ -146,16 +133,6 @@ let
     choreCatalog = "chore-a chore-b";
     roleModels = ''{"reviewer":"claude-opus-4"}'';
     driverVersion = "1.2.3";
-    # OCI's writable-store mechanism (lib/image.nix) never reads this
-    # artifact, so false is a placeholder, required only because
-    # nixStoreWritable has no default (issue #2665).
-    nixStoreWritable = false;
-    # Required (no default) even though the OCI branch never reads it
-    # (issue #2670).
-    syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
-    syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
-    connectorHostPath = "/nix/store/jjj-connector-host";
-    connectorHostDrv = "/nix/store/jjj-connector-host.drv";
   };
 in
 runArtifactsRowChecks allRows
@@ -661,7 +638,13 @@ runArtifactsRowChecks allRows
     ) "runArtifacts (oci) must name the spindrift-nix volume, got: ${builtins.toJSON out}";
     assert
       let
-        leaked = builtins.filter (k: out ? ${k}) [
+        # Rendered from dummyRunArtifactArgs, the stand-in for the union
+        # mkHarness passes, so a bwrap key the OCI row emits only when its
+        # input is present leaks too.
+        union = preambles.runArtifacts (
+          preambles.dummyRunArtifactArgs // { inherit (ociRunArtifactsBase) row runtime; }
+        );
+        leaked = builtins.filter (k: union ? ${k}) [
           "AGENT_FILES"
           "PASSWD_FILE"
           "GROUP_FILE"
@@ -679,7 +662,7 @@ runArtifactsRowChecks allRows
         ];
       in
       assertMsg (leaked == [ ])
-        "runArtifacts (oci) must not set bwrap-only keys ${builtins.toJSON leaked}, got: ${builtins.toJSON out}";
+        "runArtifacts (oci) must not set bwrap-only keys ${builtins.toJSON leaked}, got: ${builtins.toJSON union}";
     pkgs.runCommand "preambles-run-artifacts-oci" { } "touch $out";
 
   # Issue #262 AC1: a driver-scoped image name must reach IMAGE_TAG, so an
@@ -687,60 +670,21 @@ runArtifactsRowChecks allRows
   # archive rather than the plain spindrift one.
   preambles-run-artifacts-oci-driver-scoped-image-name =
     let
-      out = preambles.runArtifacts {
-        row = ociRow;
-        driverEntry = {
-          name = "opencode";
-          skillsDirRelative = ".claude/skills";
-        };
-        agentFilesPath = "/nix/store/aaa-agent-files";
-        agentEnvPath = "/nix/store/bbb-agent-env";
-        passwdFilePath = "/nix/store/eee-passwd";
-        groupFilePath = "/nix/store/fff-group";
-        # Required (no default) even though the OCI branch never reads them
-        # (issue #2672), like nixStoreWritable and syscallFilterPath below.
-        agentFilesDrv = "/nix/store/aaa-agent-files.drv";
-        agentEnvDrv = "/nix/store/bbb-agent-env.drv";
-        passwdFileDrv = "/nix/store/eee-passwd.drv";
-        groupFileDrv = "/nix/store/fff-group.drv";
-        agentClosurePath = "/nix/store/ggg-agent-closure";
-        prefetch = "";
-        imagePath = "/nix/store/ccc-image";
-        imageHash = "deadbeef";
-        launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
-        imageName = "spindrift-opencode";
-        imageAttrName = "agent-image";
-        runtime = builtins.head ociRow.runtimes;
-        imageDrv = "/nix/store/ddd-image.drv";
-        connectorSandboxImagePath = "/nix/store/hhh-connector-sandbox";
-        connectorSandboxImageTag = "spindrift-connector-sandbox:cafe";
-        connectorSandboxImageDrv = "/nix/store/iii-connector-sandbox.drv";
-        nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
-        systems = {
-          host = "aarch64-darwin";
-          linux = "x86_64-linux";
-        };
-        boxEnvVars = "MODEL";
-        hostMediatedRemote = false;
-        outboxRelayCapable = true;
-        inBoxUnreachableTracker = false;
-        fullyLocal = false;
-        trackerAxisRead = "FORGEJO";
-        trackerAxisWrite = "FORGEJO";
-        trackerAxisFiler = "FORGEJO";
-        forgeBackend = "FORGEJO";
-        filerEnabled = true;
-        workerProvisioned = false;
-        scoutProvisioned = false;
-        choreCatalog = "chore-a chore-b";
-        roleModels = ''{"reviewer":"claude-opus-4"}'';
-        driverVersion = "1.2.3";
-        nixStoreWritable = false;
-        syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
-        syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
-        connectorHostPath = "/nix/store/jjj-connector-host";
-        connectorHostDrv = "/nix/store/jjj-connector-host.drv";
-      };
+      out = preambles.runArtifacts (
+        ociRunArtifactsBase
+        // {
+          driverEntry = {
+            name = "opencode";
+            skillsDirRelative = ".claude/skills";
+          };
+          imageName = "spindrift-opencode";
+          trackerAxisRead = "FORGEJO";
+          trackerAxisWrite = "FORGEJO";
+          trackerAxisFiler = "FORGEJO";
+          forgeBackend = "FORGEJO";
+          filerEnabled = true;
+        }
+      );
     in
     assert assertMsg (
       out.IMAGE_TAG == "spindrift-opencode:deadbeef"
