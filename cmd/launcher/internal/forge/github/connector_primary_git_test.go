@@ -8,11 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/ledger"
 )
 
 // primaryGitClient is the production execClient for a primary row, with the
@@ -308,5 +311,49 @@ func TestPrimaryRow_HostMediationContract(t *testing.T) {
 
 	if n := calls(); n != 0 {
 		t.Errorf("the contract ran gh %d times under a primary row", n)
+	}
+}
+
+// The butler Ledger's site under a primary row is the Connector's clone URL
+// and the row's credential, with no gh credential helper: the Ledger's own git
+// pushes a Ledger entry to the repository with them.
+func TestPrimaryRow_LedgerSiteIsConnectorCloneURLAndCoreCredential(t *testing.T) {
+	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+	seen := gitCredentialLog(t)
+
+	site, err := Strategy.NewLedger(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels}, nil)
+	if err != nil {
+		t.Fatalf("NewLedger: %v", err)
+	}
+
+	if len(site.GitArgs) != 0 {
+		t.Errorf("GitArgs = %v, want none under a primary row", site.GitArgs)
+	}
+	if site.Credential.Username != "x-access-token" || site.Credential.Password != connectorToken {
+		t.Errorf("Credential = %+v, want the row's token", site.Credential)
+	}
+	r, err := ledger.NewRemote(t.TempDir(), site.URL, site.Credential, site.GitArgs...)
+	if err != nil {
+		t.Fatalf("a Ledger over the site cannot reach the repository: %v", err)
+	}
+	const chore = "chore-primary"
+	commit, err := r.Append(chore, "", ledger.State{Phase: ledger.Claimed}, time.Now())
+	if err != nil {
+		t.Fatalf("pushing a Ledger entry over the site: %v", err)
+	}
+	if got := forgetest.RevParse(t, h.backend.repo.Bare, ledger.RefPrefix+chore); got != commit {
+		t.Errorf("Ledger ref = %s, want the pushed %s", got, commit)
+	}
+	requireCoreCredential(t, seen, calls)
+}
+
+func TestPrimaryRow_LedgerSiteNamesAnUnsetCredential(t *testing.T) {
+	primaryHarness(t, useGithubRowPrimary)
+	t.Setenv(tokenCredentialEnv, "")
+
+	_, err := Strategy.NewLedger(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels}, nil)
+
+	if err == nil || !strings.Contains(err.Error(), tokenCredentialEnv+" is not set") {
+		t.Errorf("NewLedger = %v, want the unset credential named", err)
 	}
 }
