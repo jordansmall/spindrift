@@ -5156,8 +5156,15 @@ artifact, not a growing transcript:
   `--max-slices` cap fires makes `--max-slices + 1` total `driver-exec`
   invocations, not `--max-slices`. `--max-review-rounds` tracks a separate
   `reviewRounds` counter that only increments when a review pass's verdict is
-  `BLOCK`. The loop stops the instant a pass's log carries a terminal
-  `SPINDRIFT_OUTCOME` line — unconditionally, ahead of either cap.
+  `BLOCK`. On the legacy single loop, any pass whose log carries a terminal
+  `SPINDRIFT_OUTCOME` line stops the loop the instant it ends —
+  unconditionally, ahead of either cap. With the code-owned review pass
+  enabled (the default), a review pass's outcome line is never consulted, and
+  an implement, fix, or land pass's outcome line stops the loop ahead of
+  either cap, save one case (issue #5972): a `status=ready` an implement or
+  fix pass prints before a review pass has returned `APPROVE` is premature, so
+  the loop follows it with a review pass, or with the terminal land pass once
+  `--max-slices` has fired.
 
   Because both counters advance over the same pass sequence,
   `--max-review-rounds` can only actually reach `N` rounds — rather than
