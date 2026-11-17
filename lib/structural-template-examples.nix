@@ -24,9 +24,7 @@ let
   };
 
   # The inherited fields come from defaultRoster rather than hand-copied text,
-  # so the example cannot drift from the real defaults (issue #2572). Omit
-  # promptFile and normalizeRoster injects `reviewer-prompt.md`, but the
-  # shipped file is `review-prompt.md`.
+  # so the example cannot drift from the real defaults (issue #2572).
   rosterExample = [
     {
       name = "scout";
