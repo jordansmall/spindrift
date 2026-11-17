@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/driver/claude"
@@ -192,4 +193,40 @@ func TestConnectorShadowRunIsClean(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A clock-time reset resolves as the native decoder does, against the host's
+// wall clock, not the Connector's 2022 one.
+func TestConnectorResolvesResetTimeAgainstHostClock(t *testing.T) {
+	s := loadConnectorStrategy(t)
+	const line = `{"type":"result","result":"You've hit your session limit · resets 6:30pm (UTC)","is_error":false}`
+
+	for name, decode := range map[string]func() [][]driverkit.Event{
+		"decoder":       func() [][]driverkit.Event { return [][]driverkit.Event{s.NewDecoder()(line)} },
+		"batch decoder": func() [][]driverkit.Event { return s.NewBatchDecoder()([]string{line}) },
+	} {
+		// The grace edge or UTC midnight can fall between the two native
+		// decoders, so the guest may match either.
+		before := resetAt(claude.NewDecoder()(line))
+		evs := decode()
+		after := resetAt(claude.NewDecoder()(line))
+
+		got := resetAt(evs[0])
+		if got == nil || before == nil || after == nil {
+			t.Fatalf("%s: ResetAt guest=%v native before=%v after=%v: %+v", name, got, before, after, evs)
+		}
+		if !got.Equal(*before) && !got.Equal(*after) {
+			t.Errorf("%s: ResetAt = %v; want %v or %v", name, got, before, after)
+		}
+	}
+}
+
+func resetAt(evs []driverkit.Event) *time.Time {
+	var at *time.Time
+	for _, e := range evs {
+		if e.ResetAt != nil {
+			at = e.ResetAt
+		}
+	}
+	return at
 }
