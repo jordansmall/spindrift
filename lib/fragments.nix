@@ -546,16 +546,15 @@ let
       var = "CI_FAILURE_STEP";
       extraSubstVars = [ "CI_FAILURE_SUMMARY" ];
     }
-    # The fix-pass CI-read step forks on CODE_FORGE (issue #1963): each forge's
-    # fix-ci-read fragment points the agent at the host-injected CI FAILURE
-    # section instead of a forge CLI. Exactly one gate is on, so
-    # fix-prompt.md concatenates both vars and only the active one renders.
-    # One slot (issue #5647, ADR 0068): the forge's folder carries the file.
+    # One slot (issue #5647, ADR 0068): each forge's folder carries its own
+    # fix-ci-read fragment, which points the agent at the host-injected CI
+    # FAILURE section instead of a forge CLI (issue #1963).
     {
       axis = "forge";
       fragment = "fix-ci-read.md";
       var = "FIX_CI_READ_STEP";
     }
+    # Deprecation-window fills for override prompts still naming the old vars.
     {
       gate = "FIX_CI_READ_GH";
       fragment = "github/fix-ci-read.md";
