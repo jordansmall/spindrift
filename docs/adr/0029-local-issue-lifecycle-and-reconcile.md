@@ -29,10 +29,13 @@ Closed issues stay in the folder, excluded from `ListOpenIssues`/`ListIssues`.
 **Closing is driven by a new observational sweep, `reconcile`, which is the sole
 closing authority.** (Amended by issue #4017: sole closer of anything that
 landed; settle closes an already-resolved issue directly — see the Amendment
-below.) Reconcile is `local`-tracker-specific, auto-invoked at the
-end of a `dispatch` run and available standalone (`spindrift reconcile`) for the
-between-runs cases — a runner that died, or a PR sitting in approval limbo. It
-**never lands code**. Per open local issue it:
+below.) Reconcile's issue bookkeeping is `local`-tracker-specific (amended by
+issue #4813: its late-merge recording runs on every tracker whose Code Forge
+has PRs — see the issue #4813 Amendment). It is auto-invoked at the end of a
+`dispatch` run that names no issues on the command line (one-shot, continuous,
+or a single `ISSUE_NUMBER`) and available standalone (`spindrift reconcile`)
+for the between-runs cases — a runner that died, or a PR sitting in approval
+limbo. It **never lands code**. Per open local issue it:
 
 - **closes** when the recorded `landing` PR is merged;
 - **discovers** a PR by agent branch (reusing `ResolveOpenPR`/adopt discovery)
@@ -106,7 +109,9 @@ on the Target repo.
 ## Consequences
 
 - `reconcile` is an additive subcommand (MINOR under ADR 0010); `dispatch` gains
-  a final `local`-only reconcile step, and `Reconcile` enters the glossary.
+  a final `local`-only reconcile step (amended by issue #4813: only its issue
+  bookkeeping stays `local`-only; its late-merge recording runs on any
+  PR-capable Code Forge), and `Reconcile` enters the glossary.
 - The `IssueTracker` seam grows one optional method for recording the landing;
   `github`/`jira` do not implement it, discovered by type assertion like
   `PRForge`.
@@ -162,3 +167,21 @@ reaches the bound posts one give-up comment naming `spindrift recover <n>`.
 - A bare `agent-in-progress` label is still never adopted. Queue mode
   touches only `agent-failed` issues.
 - `agent-recover.yml` and `spindrift recover <n>` behave as before.
+
+## Amendment (issue #4813): reconcile records late merges on every tracker
+
+Reconcile's late-merge recording is not `local`-only. On any Code Forge with
+PRs (`github`, `forgejo`), whatever the tracker, it records late merges: a
+Dispatch Record claimed in the last 14 days and settled `complete` with its PR
+left open, whose PR has since merged, gets a second `dispatch_settled` (reason
+`merged`), so `spindrift stats` counts the landing. It stays observational and
+never lands code.
+
+Only the end-of-`dispatch` sweep is throttled, to one per 15 minutes
+(`settle.LateMergeSweepInterval`) per working directory, claimed through
+`.spindrift/late-merge-sweep.lock`; a failed claim or sweep only warns. The
+standalone `spindrift reconcile` always sweeps. The issue bookkeeping described
+above (closing, abandoned-flagging, orphan reset — `reconcileIssues`) is
+unchanged and still `local`-only, gated on the tracker descriptor's
+in-Box-unreachable axis rather than the tracker name; a late-merge failure never
+skips it.
