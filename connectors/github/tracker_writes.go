@@ -69,6 +69,28 @@ func editLabels(t tracker.Target, number string, add, remove []string) error {
 	return removeLabels(t, number, remove)
 }
 
+// issueVars is the owner/repo/number variable set every issue-node GraphQL
+// query takes.
+func issueVars(t tracker.Target, number string) (map[string]any, error) {
+	owner, repo, err := splitRepo(t.Repo)
+	if err != nil {
+		return nil, err
+	}
+	n, err := parseNumber(number)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"owner": owner, "repo": repo, "number": n}, nil
+}
+
+func errNoRepository(t tracker.Target) error {
+	return connector.Errorf(connector.NotFound, "POST /graphql: no repository %s", t.Repo)
+}
+
+func errNoIssue(t tracker.Target, number string) error {
+	return connector.Errorf(connector.NotFound, "POST /graphql: no issue %s in %s", number, t.Repo)
+}
+
 // removeLabels resolves the issue and label node ids in one query, then removes
 // the labels in one mutation. A label the repository lacks is already absent,
 // the state asked for; a missing issue is an error.
@@ -77,18 +99,13 @@ func removeLabels(t tracker.Target, number string, remove []string) error {
 	if len(names) == 0 {
 		return nil
 	}
-	owner, repo, err := splitRepo(t.Repo)
-	if err != nil {
-		return err
-	}
-	n, err := parseNumber(number)
+	vars, err := issueVars(t, number)
 	if err != nil {
 		return err
 	}
 	// Names travel as variables, never interpolated into the document.
 	decls := "$owner:String!,$repo:String!,$number:Int!"
 	sel := "issue(number:$number){id}"
-	vars := map[string]any{"owner": owner, "repo": repo, "number": n}
 	for i, name := range names {
 		v := "n" + strconv.Itoa(i)
 		decls += ",$" + v + ":String!"
@@ -102,7 +119,7 @@ func removeLabels(t tracker.Target, number string, remove []string) error {
 		return err
 	}
 	if data.Repository == nil {
-		return connector.Errorf(connector.NotFound, "POST /graphql: no repository %s", t.Repo)
+		return errNoRepository(t)
 	}
 	var issue *struct {
 		ID string `json:"id"`
@@ -113,7 +130,7 @@ func removeLabels(t tracker.Target, number string, remove []string) error {
 		}
 	}
 	if issue == nil {
-		return connector.Errorf(connector.NotFound, "POST /graphql: no issue %s in %s", number, t.Repo)
+		return errNoIssue(t, number)
 	}
 	var ids []string
 	for i := range names {
@@ -178,6 +195,37 @@ func fileIssue(t tracker.Target, r tracker.IssueRequest) (string, error) {
 		return "", errors.New("github: create issue response carried no html_url")
 	}
 	return created.HTMLURL, nil
+}
+
+// closeIssue closes the issue as completed over GraphQL, as `gh issue close
+// --reason completed` does: the id query and the mutation both ride the
+// /graphql route already declared.
+func closeIssue(t tracker.Target, number string) error {
+	vars, err := issueVars(t, number)
+	if err != nil {
+		return err
+	}
+	var data struct {
+		Repository *struct {
+			Issue *struct {
+				ID string `json:"id"`
+			} `json:"issue"`
+		} `json:"repository"`
+	}
+	if err := graphql(t.API,
+		"query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){id}}}",
+		vars, &data); err != nil {
+		return err
+	}
+	if data.Repository == nil {
+		return errNoRepository(t)
+	}
+	if data.Repository.Issue == nil {
+		return errNoIssue(t, number)
+	}
+	return graphql(t.API,
+		"mutation($id:ID!){closeIssue(input:{issueId:$id,stateReason:COMPLETED}){clientMutationId}}",
+		map[string]any{"id": data.Repository.Issue.ID}, nil)
 }
 
 func labelsPath(t tracker.Target) string { return "/repos/" + t.Repo + "/labels" }

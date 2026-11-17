@@ -40,6 +40,7 @@ func init() {
 		EditLabels:  editLabels,
 		Comment:     issueComment,
 		FileIssue:   fileIssue,
+		CloseIssue:  closeIssue,
 		ListLabels:  listLabels,
 		CreateLabel: createLabel,
 	})

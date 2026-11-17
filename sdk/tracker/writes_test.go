@@ -46,15 +46,21 @@ func fakeWriter(t *testing.T) Writer {
 			}
 			return "https://x/browse/ENG-9", nil
 		},
+		CloseIssue: func(tg Target, number string) error {
+			if tg != wantTarget || number != "3" {
+				t.Errorf("CloseIssue(%v, %q)", tg, number)
+			}
+			return nil
+		},
 	}
 }
 
 func TestWriteCapabilities(t *testing.T) {
 	caps, m := writeHandlers(fakeWriter(t))
-	if want := []string{CapTransition, CapEditLabels, CapComment, CapFileIssue, CapLabels}; !reflect.DeepEqual(caps, want) {
+	if want := []string{CapTransition, CapEditLabels, CapComment, CapFileIssue, CapCloseIssue, CapLabels}; !reflect.DeepEqual(caps, want) {
 		t.Fatalf("caps = %v, want %v", caps, want)
 	}
-	for _, name := range []string{"tracker.transition", "tracker.editLabels", "tracker.listLabels", "tracker.createLabel", "tracker.comment", "tracker.fileIssue"} {
+	for _, name := range []string{"tracker.transition", "tracker.editLabels", "tracker.listLabels", "tracker.createLabel", "tracker.comment", "tracker.fileIssue", "tracker.closeIssue"} {
 		if m[name] == nil {
 			t.Errorf("method %s missing", name)
 		}
@@ -122,6 +128,13 @@ func TestFileIssue(t *testing.T) {
 	}
 }
 
+func TestCloseIssue(t *testing.T) {
+	_, m := writeHandlers(fakeWriter(t))
+	if got := call(t, m, "tracker.closeIssue", `{`+target+`,"number":"3"}`); got != `{}` {
+		t.Errorf("got %s, want {}", got)
+	}
+}
+
 func TestListLabels(t *testing.T) {
 	_, m := writeHandlers(fakeWriter(t))
 	if got, want := call(t, m, "tracker.listLabels", `{`+target+`}`), `{"labels":["x","y"]}`; got != want {
@@ -165,6 +178,7 @@ func TestWriteErrorsPass(t *testing.T) {
 		CreateLabel: func(Target, string, string, string) error { return boom },
 		Comment:     func(Target, string, CommentRequest) error { return boom },
 		FileIssue:   func(Target, IssueRequest) (string, error) { return "", boom },
+		CloseIssue:  func(Target, string) error { return boom },
 	})
 	for name, params := range map[string]string{
 		"tracker.transition":  `{` + target + `,"number":"3"}`,
@@ -173,6 +187,7 @@ func TestWriteErrorsPass(t *testing.T) {
 		"tracker.createLabel": `{` + target + `,"name":"n"}`,
 		"tracker.comment":     `{` + target + `,"number":"3"}`,
 		"tracker.fileIssue":   `{` + target + `}`,
+		"tracker.closeIssue":  `{` + target + `,"number":"3"}`,
 	} {
 		if _, err := m[name](json.RawMessage(params)); !errors.Is(err, boom) {
 			t.Errorf("%s: err = %v, want boom", name, err)
