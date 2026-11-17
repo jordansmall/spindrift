@@ -829,7 +829,6 @@ func dispatchConfig(c config, pwd string, it forge.IssueTracker, lw *localloop.W
 		ReviewEffortOverride:     reviewEffort,
 		Kind:                     c.kind().Name,
 		SelfContained:            c.selfContained,
-		NoForgeCredential:        c.boxHoldsNoForgeCredential(),
 		ForgeDescriptor:          caps.ForgeDescriptor,
 		TrackerDescriptor:        caps.TrackerDescriptor,
 		BoxForgeAndIssueAccess:   c.effectiveBoxForgeAndIssueAccess(),

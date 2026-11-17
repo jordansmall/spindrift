@@ -2302,7 +2302,7 @@ func TestBoxSeamBranchRecoveryGhFailureAborts(t *testing.T) {
 // launcher-forwarded or not.
 var seamForgeTokenVars = []string{"GH_TOKEN", "GITEA_TOKEN", "FORGEJO_TOKEN", "BOX_GH_TOKEN", "BOX_FORGEJO_TOKEN"}
 
-// seamTokenlessCase is a BOX_FORGE_CREDENTIAL=none Box on the github forge,
+// seamTokenlessCase is a credential-free Box on the github forge,
 // read-only as every such Box is (it relays a bundle, never pushes): no token
 // in its env and a gh fake whose `pr list` fails the way an
 // unauthenticated gh does, so only the host's BOX_HOST_OPEN_PR can answer the
@@ -2334,7 +2334,7 @@ func seamWantNoForgeToken(t *testing.T, envDump string) {
 	}
 }
 
-// Under BOX_FORGE_CREDENTIAL=none the Box holds no forge token, so branch
+// A read-only Box holds no forge token, so branch
 // recovery takes the open-PR answer from the host's BOX_HOST_OPEN_PR. The gh
 // fake's `pr list` fails, so a forge call would abort the run. The Box is
 // read-only, so origin never moves: open adopts the prior branch and relays it
@@ -2665,14 +2665,19 @@ func TestBoxSeamLocalForgeClonesTheMountWithoutGh(t *testing.T) {
 	}
 }
 
-// Under read-only the launcher mounts a host-seeded mirror and, under
-// BOX_FORGE_CREDENTIAL=none, forwards no forge token at all: the Box env has no
+// Under read-only the launcher mounts a host-seeded mirror and, by default
+// (issue #6900), forwards no forge token at all: the Box env has no
 // token key (absent, not blank), it runs no `gh auth setup-git` or `fj auth add-key`,
 // the clone's origin is the mount rather than the forge URL, and the branch
 // still leaves as a bundle. This harness carries Signals on the log carrier,
-// so dispatch's TestRunOnce_NoForgeCredential_ReadOnlyBoxStillAnswersIssueVerbs
+// so dispatch's TestRunOnce_ReadOnlyBoxStillAnswersIssueVerbs
 // covers the socket read verbs.
-func TestBoxSeamOptedInReadOnlyBoxRunsWithNoForgeCredential(t *testing.T) {
+//
+// The cases hand-build the tokenless env (unset: seamForgeTokenVars); the
+// launcher-side stripping is proven by dispatch's
+// TestBuildBoxEnvReadOnlyBoxDropsEveryForgeToken and
+// TestSeamSmokeReadOnlyBoxCarriesNoForgeToken.
+func TestBoxSeamReadOnlyBoxRunsWithNoForgeCredential(t *testing.T) {
 	cases := []struct {
 		forge    string
 		env      map[string]string

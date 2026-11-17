@@ -23,18 +23,6 @@ func TestBoxHoldsNoForgeCredential(t *testing.T) {
 	}
 }
 
-func TestDispatchConfig_CarriesNoForgeCredential(t *testing.T) {
-	c := minimalValidConfig()
-	c.BoxForgeAndIssueAccess = "read-only"
-	if dispatchConfig(c, "", nil, nil, nil, forge.Capabilities{}).NoForgeCredential {
-		t.Error("NoForgeCredential = true without the opt-in")
-	}
-	c.BoxForgeCredential = "none"
-	if !dispatchConfig(c, "", nil, nil, nil, forge.Capabilities{}).NoForgeCredential {
-		t.Error("NoForgeCredential = false under BOX_FORGE_CREDENTIAL=none")
-	}
-}
-
 // A Box with write access and no credential could not push.
 func TestReadOnlyCapabilityGate_RefusesNoCredentialUnderReadWrite(t *testing.T) {
 	c := minimalValidConfig()

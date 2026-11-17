@@ -547,11 +547,11 @@ func (f *fakeIssueSearcher) SearchIssues(text string, _ forge.IssueState, _ stri
 	return signalwire.IssueSearchReply{Issues: []signalwire.IssueSearchResult{{Number: "9", Title: "from the host searcher", State: "open"}}}, nil
 }
 
-// TestRunOnce_NoForgeCredential_ReadOnlyBoxStillAnswersIssueVerbs pins issue
-// #7140's opted-in read-only Box: no forge token name reaches its env, yet the
+// TestRunOnce_ReadOnlyBoxStillAnswersIssueVerbs pins issue
+// #6900's read-only Box: no forge token name reaches its env, yet the
 // issue and issue-search verbs still answer over the Signal socket, because
 // the host-side reader and searcher hold the credential, not the Box.
-func TestRunOnce_NoForgeCredential_ReadOnlyBoxStillAnswersIssueVerbs(t *testing.T) {
+func TestRunOnce_ReadOnlyBoxStillAnswersIssueVerbs(t *testing.T) {
 	tokenNames := []string{"GH_TOKEN", "BOX_GH_TOKEN", "FORGEJO_TOKEN", "BOX_FORGEJO_TOKEN"}
 	for _, n := range tokenNames {
 		t.Setenv(n, "secret-"+n)
@@ -561,7 +561,6 @@ func TestRunOnce_NoForgeCredential_ReadOnlyBoxStillAnswersIssueVerbs(t *testing.
 	cfg := retryConfig(3, 0, 0)
 	cfg.SignalCarrier = "socket"
 	cfg.BoxForgeAndIssueAccess = "read-only"
-	cfg.NoForgeCredential = true
 	cfg.BoxEnvVars = "REPO_SLUG " + strings.Join(tokenNames, " ")
 	cfg.IssueReader = reader
 	cfg.IssueSearcher = searcher
@@ -572,7 +571,7 @@ func TestRunOnce_NoForgeCredential_ReadOnlyBoxStillAnswersIssueVerbs(t *testing.
 	fr.RunFunc = func(box runner.Box) error {
 		for _, n := range tokenNames {
 			if v, ok := box.Env[n]; ok {
-				t.Errorf("box.Env[%s] = %q, want absent under NoForgeCredential", n, v)
+				t.Errorf("box.Env[%s] = %q, want absent for a read-only Box", n, v)
 			}
 		}
 		client := &http.Client{Transport: &http.Transport{

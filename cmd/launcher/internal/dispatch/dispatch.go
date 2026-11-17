@@ -173,11 +173,6 @@ type Config struct {
 	// repo exploration. Meaningful only when Kind == "research".
 	SelfContained bool
 
-	// NoForgeCredential is config.boxHoldsNoForgeCredential (issue #7140): the
-	// Box receives no forge token, so buildBoxEnv drops every Box-forwarded
-	// token name and sets BOX_GH_TOKEN_OPTIONAL.
-	NoForgeCredential bool
-
 	// ForgeDescriptor/TrackerDescriptor are the backend-registry rows for this
 	// run's CODE_FORGE/ISSUE_TRACKER pairing, read off the forge.Capabilities
 	// value ResolveCapabilities produced (issue #2945). Config carries only
@@ -225,10 +220,10 @@ type Config struct {
 	// OpenPRForIssue reports whether an open PR already exists for the agent
 	// branch of a dispatch key (an issue number or a chore key), so a box
 	// whose work already landed a PR is never held and retried on a transient
-	// classification (issue #565), and answers BOX_HOST_OPEN_PR under
-	// NoForgeCredential (issue #7146). Callers may rely on it being non-nil:
-	// a push-only Code Forge resolves to false inside dispatchConfig's
-	// closure rather than leaving it nil.
+	// classification (issue #565), and answers BOX_HOST_OPEN_PR for a
+	// read-only Box (issues #7146, #6900). Callers may rely on it being
+	// non-nil: a push-only Code Forge resolves to false inside
+	// dispatchConfig's closure rather than leaving it nil.
 	OpenPRForIssue func(number string) (bool, error)
 
 	// IssueTextFor resolves the subject issue's body, plus its recent
@@ -301,6 +296,7 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 	if resolve == nil {
 		resolve = func(_, name string) string { return os.Getenv(name) }
 	}
+	readOnly := cfg.boxAccessForKind() == "read-only"
 	isChore := subj.key.IsChore()
 	key := subj.key.String()
 	env := make(map[string]string)
@@ -310,7 +306,7 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 		}
 		env[name] = resolve(key, name)
 	}
-	if cfg.NoForgeCredential {
+	if readOnly {
 		// Absent, not blank: an empty value still reaches the Box as a set name.
 		for _, d := range backend.Registry {
 			if d.BoxTokenEnvVar != "" {
@@ -319,7 +315,7 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 			}
 		}
 	}
-	if backend.ClonesFromMirror(cfg.ForgeDescriptor, cfg.boxAccessForKind() == "read-only") {
+	if backend.ClonesFromMirror(cfg.ForgeDescriptor, readOnly) {
 		// The Box clones the mirror and nothing in it reads the remote, so its
 		// userinfo (commonly a token) stays on the host.
 		if u, ok := env["CODE_FORGE_REMOTE_URL"]; ok {
@@ -390,7 +386,7 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 	// The Box has no forge token to ask for its open PR itself (issue #7146);
 	// self-contained and advise-only Boxes never recover a branch. A failed
 	// lookup must reach the Box as "unknown", never "none".
-	if cfg.NoForgeCredential && !cfg.SelfContained && !d.AdviseOnly {
+	if readOnly && !cfg.SelfContained && !d.AdviseOnly {
 		env[branchrecovery.HostOpenPREnv] = hostOpenPR(cfg, key)
 	}
 	if fixPass > 0 {
@@ -430,7 +426,8 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 		env["BOX_FULLY_LOCAL"] = "1"
 	}
 	// Fail-closed opt-out: absent means the Box requires GH_TOKEN (issue #3325).
-	if cfg.NoForgeCredential || !backend.NeedsGHToken(cfg.ForgeDescriptor, cfg.TrackerDescriptor, cfg.boxAccessForKind() == "read-only") {
+	// readOnly short-circuits first, so the pairing is judged as read-write.
+	if readOnly || !backend.NeedsGHToken(cfg.ForgeDescriptor, cfg.TrackerDescriptor, false /* readOnly */) {
 		env["BOX_GH_TOKEN_OPTIONAL"] = "1"
 	}
 	if trackerInBoxUnreachable {

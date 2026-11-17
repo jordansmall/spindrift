@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
@@ -127,6 +128,16 @@ func checkRuntimeArgv(doc *inputdoc.Document, kind string, argv []string) []stri
 		}
 	}
 	secretNames := []string{"GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"}
+	// A read-only Box (the default) holds no forge credential (issue #6900), so
+	// the forge token names BOX_ENV_VARS lists never reach its argv.
+	d, _ := dispatchkind.ByName(kind)
+	readOnlyBox := d.ReadOnlyBox || doc.Settings["BOX_FORGE_AND_ISSUE_ACCESS"] != "read-write"
+	forgeTokens := map[string]bool{}
+	for _, b := range backend.Registry {
+		if b.BoxTokenEnvVar != "" {
+			forgeTokens[b.TokenEnvVar], forgeTokens[b.BoxTokenEnvVar] = true, true
+		}
+	}
 	for _, name := range strings.Fields(doc.Artifacts.Shared.BoxEnvVars.String()) {
 		got, ok := env[name]
 		want, inDoc := doc.Settings[name]
@@ -138,6 +149,10 @@ func checkRuntimeArgv(doc *inputdoc.Document, kind string, argv []string) []stri
 			want, inDoc = "read-only", true
 		}
 		switch {
+		case readOnlyBox && forgeTokens[name]:
+			if ok {
+				bad = append(bad, fmt.Sprintf("read-only Box got forge token %s on argv", name))
+			}
 		case bwrap && slices.Contains(secretNames, name):
 			if ok {
 				bad = append(bad, fmt.Sprintf("bwrap put secret %s on argv", name))
@@ -472,25 +487,25 @@ func TestSeamLauncherSmokeMatrix(t *testing.T) {
 	}
 }
 
-// TestSeamSmokeOptedInBoxCarriesNoForgeToken runs the work-podman document
-// with BOX_FORGE_CREDENTIAL=none while the launcher's own env holds GH_TOKEN
+// TestSeamSmokeReadOnlyBoxCarriesNoForgeToken runs the work-podman document
+// under the default read-only access while the launcher's own env holds GH_TOKEN
 // and BOX_GH_TOKEN (smokeSecrets): the Box run must still land, and its argv
-// must carry no forge token key, forwarded bare or by value (issue #7140),
-// and the host's open-PR answer for branch recovery (issue #7146).
-func TestSeamSmokeOptedInBoxCarriesNoForgeToken(t *testing.T) {
+// must carry no forge token key, forwarded bare or by value (issues #7140,
+// #6900), and the host's open-PR answer for branch recovery (issue #7146).
+func TestSeamSmokeReadOnlyBoxCarriesNoForgeToken(t *testing.T) {
 	i := slices.IndexFunc(smokeMatrix, func(c smokeCase) bool { return c.name == "work-podman" })
 	if i < 0 {
 		t.Fatal("smokeMatrix has no work-podman row")
 	}
 	c := smokeMatrix[i]
-	boxRun, gh, _ := runSmoke(t, c, seamtest.Path(t, c.fixture), "--box-forge-credential", "none")
+	boxRun, gh, _ := runSmoke(t, c, seamtest.Path(t, c.fixture))
 	if boxRun == nil {
 		t.Fatalf("%s never ran a Box", c.runtime)
 	}
 	env, _ := argvEnv(boxRun, "-e")
 	for _, name := range []string{"GH_TOKEN", "BOX_GH_TOKEN", "GITEA_TOKEN", "FORGEJO_TOKEN", "BOX_FORGEJO_TOKEN"} {
 		if _, ok := env[name]; ok {
-			t.Errorf("Box argv carries %s under BOX_FORGE_CREDENTIAL=none: %q", name, boxRun)
+			t.Errorf("Box argv carries %s under read-only access: %q", name, boxRun)
 		}
 	}
 	if got := env["BOX_GH_TOKEN_OPTIONAL"]; got == nil || *got != "1" {
