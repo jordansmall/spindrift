@@ -469,6 +469,9 @@ func (e *execClient) PriorClaimState(num string) (forge.DispatchState, bool, err
 // case is a true no-op instead of leaning on gh's exit code for a redundant
 // close.
 func (e *execClient) CloseMergedIssue(num string) error {
+	if row, ok := primaryRow(); ok {
+		return e.closeMergedIssueViaConnector(row, num)
+	}
 	iss, err := e.Issue(num)
 	if err != nil {
 		return err

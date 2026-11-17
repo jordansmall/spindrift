@@ -107,7 +107,7 @@ func flatten(t *testing.T, lines []string, all map[string][]string) []string {
 var methodConsts = map[string]string{
 	"CapTransition": CapTransition, "CapEditLabels": CapEditLabels,
 	"CapListLabels": CapListLabels, "CapCreateLabel": CapCreateLabel,
-	"CapComment": CapComment, "CapFileIssue": CapFileIssue,
+	"CapComment": CapComment, "CapFileIssue": CapFileIssue, "CapCloseIssue": CapCloseIssue,
 }
 
 // handlerParams renders the anonymous `var p struct{...}` each method handler
@@ -208,7 +208,7 @@ func TestWriteCapabilitiesMatchCore(t *testing.T) {
 	for name, want := range map[string]string{
 		"CapTransition": CapTransition, "CapEditLabels": CapEditLabels, "CapLabels": CapLabels,
 		"CapListLabels": CapListLabels, "CapCreateLabel": CapCreateLabel,
-		"CapComment": CapComment, "CapFileIssue": CapFileIssue,
+		"CapComment": CapComment, "CapFileIssue": CapFileIssue, "CapCloseIssue": CapCloseIssue,
 		"transitionMoved": TransitionMoved, "transitionUnavailable": TransitionUnavailable,
 		"transitionUnmapped": TransitionUnmapped,
 	} {
@@ -231,6 +231,7 @@ func TestWriteParamsMatchCore(t *testing.T) {
 		"tracker.createLabel": "createLabelParams",
 		"tracker.comment":     "commentParams",
 		"tracker.fileIssue":   "fileIssueParams",
+		"tracker.closeIssue":  "closeIssueParams",
 	} {
 		want, ok := sdk[method]
 		if !ok || len(want) == 0 {

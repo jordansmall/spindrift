@@ -398,6 +398,12 @@ func (b *restBackend) graphql(w http.ResponseWriter, r *http.Request, reject fun
 	case strings.Contains(req.Query, "comments(first"):
 		b.commentsQuery(w, req.Variables.Owner+"/"+req.Variables.Repo, req.Variables.Number, req.Variables.After, reject)
 		return
+	case strings.Contains(req.Query, "issue(number:$number){id}"):
+		b.issueID(w, req.Variables.Owner+"/"+req.Variables.Repo, req.Variables.Number)
+		return
+	case strings.Contains(req.Query, "closeIssue(input"):
+		b.closeIssue(w, req.Query, req.Variables.ID, reject)
+		return
 	case strings.HasPrefix(req.Query, "mutation"):
 		b.mutation(w, req.Query, req.Variables.ID, reject)
 		return

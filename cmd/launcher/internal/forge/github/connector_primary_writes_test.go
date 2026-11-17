@@ -42,6 +42,9 @@ var primaryWrites = []struct {
 	{"CreateLabel", forge.Issue{Number: "7"},
 		func(c *execClient) error { return c.CreateLabel("fresh-label", "a new label", "ededed") },
 		nil},
+	{"CloseMergedIssue", forge.Issue{Number: "7"},
+		func(c *execClient) error { return c.CloseMergedIssue("7") },
+		func(i *restIssue) bool { return i.closed && !i.notPlanned }},
 	{"PostIssue", forge.Issue{Number: "7"},
 		func(c *execClient) error {
 			_, err := c.PostIssue("a finding", "its body", []string{"agent-butler-finding"})
@@ -219,6 +222,7 @@ func TestPrimaryRow_MissingCapabilityFailsTheWrite(t *testing.T) {
 		{"Comment", "tracker.comment"},
 		{"CreateLabel", "tracker.labels"},
 		{"PostIssue", "tracker.fileIssue"},
+		{"CloseMergedIssue", "tracker.closeIssue"},
 	} {
 		t.Run(tc.write+"/"+tc.capName, func(t *testing.T) {
 			h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)

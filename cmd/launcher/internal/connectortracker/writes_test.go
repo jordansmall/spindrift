@@ -25,6 +25,7 @@ type writeGuest struct {
 	commentErr    error
 	fileURL       string
 	fileErr       error
+	closeErr      error
 	calls         []recordedCall
 }
 
@@ -53,6 +54,8 @@ func (g *writeGuest) call(_ context.Context, method string, params, result any) 
 			return g.fileErr
 		}
 		return json.Unmarshal([]byte(g.fileURL), result)
+	case CapCloseIssue:
+		return g.closeErr
 	case "tracker.listLabels":
 		return json.Unmarshal([]byte(`{"labels":["a","b"]}`), result)
 	case "tracker.createLabel":
@@ -582,6 +585,61 @@ func TestPostIssueGuestErrorPropagates(t *testing.T) {
 	filer, _ := forge.As[forge.HostPostedIssueFiler](tr)
 	if _, err := filer.PostIssue("t", "b", nil); err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+func TestCloseMergedIssueClosesAnOpenIssueThroughTheConnector(t *testing.T) {
+	g := &writeGuest{issue: issueJSON("")}
+	tr := writeTracker(t, g, lifecycle(false), nil, postCaps(CapCloseIssue))
+	closer, ok := forge.As[forge.MergeCloser](tr)
+	if !ok {
+		t.Fatal("no MergeCloser")
+	}
+	if err := closer.CloseMergedIssue("7"); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.methods(); !reflect.DeepEqual(got, []string{"tracker.issue", CapCloseIssue}) {
+		t.Fatalf("calls = %v, want a read then the close", got)
+	}
+	if p := g.last().params; p["number"] != "7" {
+		t.Errorf("close params = %+v", p)
+	}
+}
+
+func TestCloseMergedIssueSkipsAClosedIssue(t *testing.T) {
+	g := &writeGuest{issue: `{"number":"7","title":"t","state":"closed","labels":[]}`}
+	tr := writeTracker(t, g, lifecycle(false), nil, postCaps(CapCloseIssue))
+	closer, _ := forge.As[forge.MergeCloser](tr)
+	if err := closer.CloseMergedIssue("7"); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.methods(); !reflect.DeepEqual(got, []string{"tracker.issue"}) {
+		t.Errorf("calls = %v, want only the read", got)
+	}
+}
+
+func TestCloseMergedIssueCloseErrorPropagates(t *testing.T) {
+	g := &writeGuest{issue: issueJSON(""), closeErr: errors.New("boom")}
+	tr := writeTracker(t, g, lifecycle(false), nil, postCaps(CapCloseIssue))
+	closer, _ := forge.As[forge.MergeCloser](tr)
+	if err := closer.CloseMergedIssue("7"); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("close err = %v", err)
+	}
+}
+
+func TestCloseMergedIssueReadErrorPropagates(t *testing.T) {
+	g := &writeGuest{issueErr: errors.New("gone")}
+	tr := writeTracker(t, g, lifecycle(false), nil, postCaps(CapCloseIssue))
+	closer, _ := forge.As[forge.MergeCloser](tr)
+	if err := closer.CloseMergedIssue("7"); err == nil || !strings.Contains(err.Error(), "gone") || len(g.calls) != 1 {
+		t.Errorf("read err = %v, calls %v", err, g.methods())
+	}
+}
+
+func TestNoMergeCloserWithoutTheCapability(t *testing.T) {
+	tr := writeTracker(t, &writeGuest{}, lifecycle(false), nil, postCaps(CapFileIssue))
+	if _, ok := forge.As[forge.MergeCloser](tr); ok {
+		t.Error("MergeCloser exposed without CapCloseIssue")
 	}
 }
 

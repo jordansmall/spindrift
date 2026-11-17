@@ -193,6 +193,10 @@ type (
 		Target Target `json:"target"`
 		issueRequest
 	}
+	closeIssueParams struct {
+		Target Target `json:"target"`
+		Number string `json:"number"`
+	}
 	createMetaParams struct {
 		Target    Target `json:"target"`
 		IssueType string `json:"issueType"`
@@ -275,6 +279,9 @@ const (
 	// CapFileIssue: the Connector serves tracker.fileIssue, filing a host
 	// finding and answering its browse URL.
 	CapFileIssue = "tracker.fileIssue"
+	// CapCloseIssue: the Connector serves tracker.closeIssue, closing an open
+	// issue as completed.
+	CapCloseIssue = "tracker.closeIssue"
 )
 
 // The outcomes of tracker.transition that are not an error.
@@ -682,12 +689,13 @@ var (
 // New builds core's tracker from a tracker Connector. writes answers every
 // write the Connector does not perform: transitions and verdicts unless it
 // advertises both CapTransition and CapEditLabels, the label registry unless
-// CapLabels, comments unless CapComment, issue filing unless CapFileIssue, and
-// issue edits always. It also answers every optional capability the protocol
-// does not carry (see CapComments, CapNativeDeps, CapBlocks, CapSearchIssues and CapLabeled); Probe stays with it unless the
-// Connector advertises CapProbe. The doctor and demand checks (CapStatuses, CapCreateMeta, CapCount)
-// and recover's prior-claim read (CapRemovedLabels) are never answered
-// natively.
+// CapLabels, comments unless CapComment, issue filing unless CapFileIssue,
+// issue closing unless CapCloseIssue, and issue edits always. It also answers
+// every optional capability the protocol does not carry (see CapComments,
+// CapNativeDeps, CapBlocks, CapSearchIssues and CapLabeled); Probe stays with
+// it unless the Connector advertises CapProbe. The doctor and demand checks
+// (CapStatuses, CapCreateMeta, CapCount) and recover's prior-claim read
+// (CapRemovedLabels) are never answered natively.
 // Look capabilities up with forge.As. Calls run under context.Background()
 // because IssueTracker methods carry no context.
 //
@@ -848,6 +856,9 @@ func newTracker(call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, 
 	}
 	if slices.Contains(caps, CapComment) {
 		it = commentPostLayer{it, r}
+	}
+	if slices.Contains(caps, CapCloseIssue) {
+		it = closerLayer{it, r}
 	}
 	if slices.Contains(caps, CapFileIssue) {
 		it = filerLayer{it, r}

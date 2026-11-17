@@ -375,6 +375,32 @@ func (b *restBackend) mutation(w http.ResponseWriter, query, id string, reject f
 	writeJSON(w, map[string]any{"data": map[string]any{field: map[string]any{"clientMutationId": nil}}})
 }
 
+// issueID serves the node-id query closeIssue sends before its mutation.
+func (b *restBackend) issueID(w http.ResponseWriter, slug string, number int) {
+	var issue any
+	if i := b.issues[number]; i != nil && !i.pull && slug == connectorRepo {
+		issue = map[string]any{"id": "I_" + strconv.Itoa(number)}
+	}
+	writeJSON(w, map[string]any{"data": map[string]any{"repository": map[string]any{"issue": issue}}})
+}
+
+// closeIssue applies the closeIssue mutation; the Connector must close as
+// completed, never as not planned.
+func (b *restBackend) closeIssue(w http.ResponseWriter, query, id string, reject func(string)) {
+	n, err := strconv.Atoi(strings.TrimPrefix(id, "I_"))
+	i := b.issues[n]
+	if err != nil || i == nil || i.pull {
+		reject("closeIssue on no such issue node")
+		return
+	}
+	if !strings.Contains(query, "stateReason:COMPLETED") {
+		reject("closeIssue without the completed state reason")
+		return
+	}
+	i.closed, i.notPlanned = true, false
+	writeJSON(w, map[string]any{"data": map[string]any{"closeIssue": map[string]any{"clientMutationId": nil}}})
+}
+
 // routeCoverage accumulates, across the harnesses of one test, which of the
 // Connector's declared Routes admitted a request.
 type routeCoverage struct {
