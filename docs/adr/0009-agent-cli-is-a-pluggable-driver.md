@@ -95,7 +95,10 @@ openai-compatible stack without the headers the sanctioned integration uses.
 A PAT/`GITHUB_TOKEN` flow was upstream-rejected as not planned. The
 generated-config `{env:}` leg therefore remains valid for genuine apiKey
 providers (Anthropic, OpenAI) under the opencode Driver, but is a non-path
-for Copilot specifically.
+for Copilot specifically. (Amended by issue #6727: the `{env:}` config leg
+was never built. An API-key Provider with a secret env-schema row in
+`lib/env-schema.nix` gets its key forwarded as plain Box env, read natively
+by opencode; no config file is involved.)
 
 The rejected "opaque `auth.json` blob env var" option turns out to be
 opencode's own supported mechanism, not a spindrift workaround: when
@@ -194,7 +197,9 @@ The three legs fall into three distinct auth shapes:
   `github-copilot` slice?). If that holds, Azure needs no new secret env var
   at all — it reuses `opencodeAuthContent` plus a non-secret
   `AZURE_RESOURCE_NAME` env knob; if it does not, the fallback is a plain
-  `AZURE_API_KEY` secret knob in the `offArgvKeys`/`{env:}` idiom.
+  `AZURE_API_KEY` secret knob in the `offArgvKeys`/`{env:}` idiom. (Amended
+  by issue #6727: no `{env:}` idiom exists; such a knob would be a plain
+  secret env-schema row, as `ANTHROPIC_API_KEY` is.)
 
 **env-schema / gating shape owed (per leg):** each new knob follows the
 `opencodeAuthContent`/`anthropicAPIKey` pattern in `lib/env-schema.nix`
