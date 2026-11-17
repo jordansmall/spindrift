@@ -680,8 +680,8 @@ func forgeLandedLine(c config) string {
 	return fmt.Sprintf("==> all agents finished — %s.\n", s.LandedBanner(backendShared(c)))
 }
 
-// runnerConfig builds the runner.Config a runner adapter needs. Shared by the
-// `run` and `build` entry points; build never calls Run, so leaving
+// runnerConfig builds the runner.Config a runner adapter needs. Shared by every
+// runner-building command, `build` included; build never calls Run, so leaving
 // PromptDir/SkillsDir populated is harmless there.
 func runnerConfig(c config) runner.Config {
 	return runner.Config{

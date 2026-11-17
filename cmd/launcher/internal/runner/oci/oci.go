@@ -46,8 +46,8 @@ type ociAdapter struct {
 // execCommand is the test seam for the host `nix build` EnsureReady runs.
 var execCommand = exec.Command
 
-// Strategy is the oci family's entry in the runner registry; its build
-// command constructs the same adapter as its run command.
+// Strategy is the oci family's entry in the runner registry; New and NewBuild
+// construct the same adapter.
 var Strategy = runner.Strategy{
 	Name:     runner.KindOCI,
 	New:      newRunner,
@@ -235,8 +235,9 @@ func (a *ociAdapter) realizeImage(img imageSpec) error {
 		return a.buildInContainer(img)
 	}
 
-	// Reachable only from `build`, which skips main.go's validate(); under
-	// `run` validate() already guaranteed the runtime, so the container
+	// Reachable only from `build`, which skips main.go's validate(); the
+	// bootstrap commands (console, recover, dispatch, research, butler) call
+	// validate() first, which guarantees the runtime, so the container
 	// fallback above would have succeeded.
 	fmt.Fprintf(os.Stderr, `==> cannot build the %s.
 

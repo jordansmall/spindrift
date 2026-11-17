@@ -19,9 +19,10 @@ type KnobLookup = func(env string) (value string, ok bool)
 // CONTEXT.md "Runner Strategy"). Name is the family's RUNNER_KIND string.
 type Strategy struct {
 	Name string
-	// New constructs the Runner for the run command; a malformed family knob
-	// read through l is an error. Each family reads only its own part of art:
-	// only the selected RUNNER_KIND's part is non-nil.
+	// New constructs the Runner for every runner-building command but build,
+	// through main.go's runnerForKind; a malformed family knob read through l
+	// is an error. Each family reads only its own part of art: only the
+	// selected RUNNER_KIND's part is non-nil.
 	New func(cfg Config, art inputdoc.Artifacts, l KnobLookup, pwd string) (Runner, error)
 	// NewBuild constructs the Runner for the build command.
 	NewBuild func(cfg Config, art inputdoc.Artifacts, l KnobLookup, pwd string) (Runner, error)
