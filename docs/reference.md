@@ -7667,7 +7667,11 @@ run), reads the parent and linked issues and searches for duplicates through
 host-answered [Signal socket](#signal-socket-box_signal_carriersocket) verbs
 (`driver-exec signal issue` and `issue-search`), and gets CI detail injected into
 its prompt as `CI FAILURE`. Under the `log` carrier the issue-read verbs are
-unavailable and the prompts render their `*-unreadable` fragments. The
+unavailable and the prompts render their `*-unreadable` fragments. Branch
+recovery's open-PR question is answered by the Launcher before the Box starts
+(issue #7146): it forwards `BOX_HOST_OPEN_PR` as `open` (adopt and rebase the
+existing branch), `none` (reset it and start fresh), or `unknown` when its
+lookup failed, which aborts recovery as a failed `gh pr list` would. The
 `prompt-contract-read-only-reaches-no-forge-cli` check pins that no fragment a
 `read-only` Box reaches instructs a forge CLI.
 
