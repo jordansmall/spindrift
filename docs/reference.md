@@ -764,7 +764,7 @@ into the image's `AGENTS_JSON_TEMPLATE` at eval time, so setting
 `SCOUT_MODEL`/`FILER_MODEL`/`WORKER_MODEL` at dispatch time neither retiers
 nor adds/drops that subagent, and changing one needs a rebuild (`spindrift
 build`). The one exception is the code-owned review pass: a dispatch-time
-`REVIEW_MODEL`/`REVIEW_EFFORT` overrides its baked model and effort per run
+`--review-model`/`--review-effort` overrides its baked model and effort per run
 with no rebuild (issue #3171; see [In-box orchestrator](#in-box-orchestrator)).
 
 spindrift's own dogfood Consumer config (`nix/dogfood-defaults.nix`) is a
@@ -1298,7 +1298,7 @@ What the Driver carries:
   included, and its level wins over the baked reviewer `reasoningEffort` and
   the coordinator `EFFORT` fallback, so the review pass's `--thinking` agrees
   with it. Unlike a baked role's effort, which always yields to a suffix, an
-  explicit dispatch-time `REVIEW_EFFORT` wins over it, since it is the
+  explicit dispatch-time `--review-effort` wins over it, since it is the
   dedicated effort knob. A tail that is not a level (`ollama/llama:8b`) stays
   part of the model id and changes nothing.
 - **Usage by role.** The decoder attributes each child's usage to the agent's
@@ -4192,7 +4192,7 @@ When a vault's naming isn't uniform, fall back to the per-secret
 | `DRIVER_BASH_TIMEOUT_MS`  | — (empty, no baked default) | per-call Bash timeout in milliseconds (flake option `agents.drivers.<name>.bashTimeoutMs`, issue #4409; the top-level `agents.bashTimeoutMs` is deprecated), exported in the Box under the env var names the active `DRIVER`'s registry entry declares in `bashTimeoutEnv` — on `claude`, `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS`; on `opencode`, `OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS` (issue #5351), which sets opencode's default, and spindrift's opencode guard plugin caps a longer model-set per-call `timeout` at that same value (issue #5381), and, like Claude Code's maximum, leaves a shorter per-call `timeout` alone; unlike that maximum, the cap holds only while opencode loads the plugin, which it skips with a logged error if the import fails. A Driver declaring none (pi) ignores it. Unset exports nothing, so the Driver keeps its own limits (Claude Code: a 10-minute maximum; opencode: a 2-minute default); a value that is not a positive integer is skipped with a warning in the Box log |
 | `SCOUT_MODEL`             | (baked; see [Default models](#default-models)) | scout subagent model tier (empty drops the scout entry from `--agents`); image-time only — a change needs a rebuild, and a dispatch-time value neither retiers nor drops the baked scout. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `REVIEW_MODEL`            | (baked; see [Default models](#default-models)) | reviewer subagent model tier (empty at image time drops the reviewer entry from `--agents`; empty at dispatch sets no override and leaves the baked roster unchanged); the `--agents` reviewer entry is image-time only — a change needs a rebuild, and a dispatch-time value neither retiers, adds, nor drops the `--agents` reviewer entry itself. **Deprecated as an image-time knob** — superseded by the [`roster`](#subagent-roster) option; the dispatch-time override below is not deprecated. The code-owned review pass, not an inline reviewer subagent, consumes the roster reviewer entry: it binds its model from this value (falling back to the coordinator model when unset); only a kind with its own reviewer prompt (the butler) keeps the entry as an inline reviewer subagent. An explicit dispatch-time `--review-model ...` overrides the baked roster value per run, no rebuild needed (issue #3171) — precedence is dispatch-time flag > baked roster reviewer entry > coordinator-model fallback. Under the `pi` Driver a dispatch-time value ending in a `:<level>` suffix also sets the review pass's effort to that level unless `REVIEW_EFFORT` is set (see [The pi Driver](#the-pi-driver)) |
-| `REVIEW_EFFORT`           | — (empty, no baked default) | value for the code-owned review pass's own effort argument to the Driver; pass-through only, no normalization, same accepted values as `EFFORT` for the active Driver. Reaches the review pass via the handoff document's `ReviewEffort` field (issue #2975), not a direct flag — `driver-exec assemble-prompt` extracts it from the roster's `reviewer` entry, and `driver-exec` applies it only on the reviewer-role pass (see the code-owned review pass discussion under [In-box orchestrator](#in-box-orchestrator)). Overrides the roster reviewer entry's own effort (`rosterDefaults.reviewer.effort` by default) the same way `REVIEW_MODEL` overrides the reviewer's model — empty means follow the roster, a non-empty value overrides it. Like `REVIEW_MODEL`, an explicit dispatch-time `--review-effort ...` overrides the baked value per run, no rebuild needed (issue #3171) — precedence is dispatch-time flag > baked roster reviewer entry > coordinator fallback; unset or empty at dispatch leaves the baked chain unchanged. Under the `pi` Driver an explicit value also wins over a `:<level>` suffix on a dispatch-time `REVIEW_MODEL` |
+| `REVIEW_EFFORT`           | — (empty, no baked default) | value for the code-owned review pass's own effort argument to the Driver; pass-through only, no normalization, same accepted values as `EFFORT` for the active Driver. Reaches the review pass via the handoff document's `ReviewEffort` field (issue #2975), not a direct flag — `driver-exec assemble-prompt` extracts it from the roster's `reviewer` entry, and `driver-exec` applies it only on the reviewer-role pass (see the code-owned review pass discussion under [In-box orchestrator](#in-box-orchestrator)). Overrides the roster reviewer entry's own effort (`rosterDefaults.reviewer.effort` by default) the same way `REVIEW_MODEL` overrides the reviewer's model — empty means follow the roster, a non-empty value overrides it. Like `REVIEW_MODEL`, an explicit dispatch-time `--review-effort ...` overrides the baked value per run, no rebuild needed (issue #3171) — precedence is dispatch-time flag > baked roster reviewer entry > coordinator fallback; unset or empty at dispatch leaves the baked chain unchanged. Under the `pi` Driver an explicit value also wins over a `:<level>` suffix on a dispatch-time `--review-model` |
 | `FILER_MODEL`             | (baked; see [Default models](#default-models)) | filer subagent model tier; empty (default) means the filer is not provisioned — setting a model is the opt-in (recommended: the same model as the `scout` default, see [Default models](#default-models)); see [Filer](#filer). Image-time only — a change needs a rebuild, and a dispatch-time value neither provisions, retiers, nor drops the baked filer. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `WORKER_MODEL`            | (baked; see [Default models](#default-models)) | implement-capable worker subagent model tier (empty drops the worker entry from `--agents`); when set, the implementor runs IMPLEMENT as a coordinator and delegates one slice at a time to it. Image-time only — a change needs a rebuild, and a dispatch-time value neither provisions, retiers, nor drops the baked worker. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | host directory mounted over `/agent/prompts` for zero-rebuild prompt iteration; declaratively configurable via the `perSystem.spindrift.agents.promptDir` flake option or `settings`, or hot-overridden at dispatch time via `--prompt-dir` (the env var exits 6 like any knob env var). The knob itself is a versioned surface; the template an override directory replaces is not — see [`VERSIONING.md`](../VERSIONING.md)'s prompt-template carve-out |
@@ -5250,9 +5250,9 @@ variable the shim exports (the nix-baked roster reflecting
 `REVIEW_MODEL`/`REVIEW_EFFORT` — see the table above)
 before stripping that entry from what becomes `--agents`, so the review pass
 never provisions its own `reviewer` subagent. An operator's explicit
-dispatch-time `REVIEW_MODEL`/`REVIEW_EFFORT` — forwarded by the launcher as
-`BOX_REVIEW_MODEL_OVERRIDE`/`BOX_REVIEW_EFFORT_OVERRIDE` only when actually
-set at dispatch time, never a baked default — binds over the extracted
+dispatch-time `--review-model`/`--review-effort` — forwarded by the launcher
+as `BOX_REVIEW_MODEL_OVERRIDE`/`BOX_REVIEW_EFFORT_OVERRIDE` only when actually
+passed, never a baked default — binds over the extracted
 values last (issue #3171), so a per-run override needs no image rebuild. `driver-exec`'s role-aware
 resolution applies `ReviewModel`/`ReviewEffort` only on the reviewer-role
 pass, overriding the coordinator's own `Model`/`Effort` field by field: an
@@ -9254,7 +9254,7 @@ read-only (the butler). Other non-secret values, such as `GIT_USER_EMAIL` or
 `JIRA_EMAIL`, appear as set, and CI uploads `.spindrift/logs/` as an Actions
 artifact. `role_models` is the baked roster (run artifact
 `ROLE_MODELS`) plus `main` from the effective `MODEL` and `reviewer` from a
-dispatch-time `REVIEW_MODEL`; `driver_version` is run artifact
+dispatch-time `--review-model`; `driver_version` is run artifact
 `DRIVER_VERSION`, the Driver CLI package version.
 
 **Prompt template hashes.** The host forwards the Record ID into every Box it
