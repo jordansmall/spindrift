@@ -15,6 +15,16 @@ import (
 	"spindrift.dev/launcher/internal/bundleout"
 )
 
+// The host's open-PR answer reaches a tokenless Box in HostOpenPREnv. Producer
+// (dispatch) and consumer (box) share these so a one-sided rename cannot turn
+// every answer into the abort branch.
+const (
+	HostOpenPREnv     = "BOX_HOST_OPEN_PR"
+	HostOpenPROpen    = "open"
+	HostOpenPRNone    = "none"
+	HostOpenPRUnknown = "unknown"
+)
+
 // Config is what the decision reads from the Box's environment.
 type Config struct {
 	WorkDir    string
