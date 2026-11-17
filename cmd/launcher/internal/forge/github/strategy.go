@@ -69,6 +69,7 @@ func codeForgeOpts(s backendkit.Shared) []ExecOption {
 	return []ExecOption{
 		WithMergeMethod(s.MergeMethod),
 		WithSyncMethod(s.SyncMethod),
+		WithBaseBranch(s.BaseBranch),
 		WithCommitIdentity(s.GitUserName, s.GitUserEmail),
 	}
 }
