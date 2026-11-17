@@ -3109,18 +3109,20 @@ Strategy with no code revert. A primary Driver emits no `shadow_summary`, so the
 A backend row with `primary` on (issues #6998, #7127, #7128) makes its Connector
 answer in place of the native backend, in every launcher process that builds the
 adapter (dispatch, research, the daemon, recover and doctor). What it routes is
-per backend. The github row routes every read and, since the first write switch
-(issue #6883), these writes, with no `gh` fallback: the claim, un-claim and
-reclaim and the settle transitions (`TransitionState`), research verdicts
-(`CompleteVerdict`), the butler's label adds (`AddLabels`, over
-`tracker.editLabels`), label creation (`CreateLabel`), and every host-posted
-issue comment (`Comment`). Issue filing (`PostIssue`), PRs (their comments and
-ready/draft flips included), merges and `CloseMergedIssue` stay native until
-their own switches (#6885, #6886, #6887); without `primary` every write stays
-native. The switch covers launcher-side writes only: the CI claim and release
-label swaps in `.github/actions/agent-setup/action.yml` and
+per backend. The github row routes every read and, since the first two write
+switches (issues #6883 and #6885), these writes, with no `gh` fallback: the
+claim, un-claim and reclaim and the settle transitions (`TransitionState`),
+research verdicts (`CompleteVerdict`), the butler's label adds (`AddLabels`,
+over `tracker.editLabels`), label creation (`CreateLabel`), every host-posted
+issue comment (`Comment`), and host-posted issue filing (`PostIssue`, over
+`tracker.fileIssue`: the filer's, research's, the butler's and relayed review
+findings). PRs (their comments and ready/draft flips included), merges and
+`CloseMergedIssue` stay native until their own switches (#6886, #6887); without
+`primary` every write stays native. The switches cover launcher-side writes
+only: the CI claim and release label swaps in
+`.github/actions/agent-setup/action.yml` and
 `.github/workflows/agent-dispatch.yml` still run `gh issue edit` and are not
-leaks of the switch. The github row is on for dogfood through
+leaks of the switches. The github row is on for dogfood through
 `nix/dogfood-primary.nix`. The jira row routes the whole tracker, so there is
 no native fallback to read from ([Switching jira to
 primary](#switching-jira-to-primary)). The forgejo row replaces the whole Code
