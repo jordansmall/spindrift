@@ -20,7 +20,7 @@ in
     env = "SPINDRIFT_GITHUB_CONNECTOR_TOKEN";
     group = "dispatch";
     secret = true;
-    doc = "bearer token the github Connector's backend row authorizes its shadow or primary reads with (must be read-only; scope list in docs/reference.md#backend-read-shadow); host-only, never reaches the Box; needed only when the row's `shadow` or `primary` option is on";
+    doc = "bearer token the github Connector's backend row authorizes its shadow or primary reads and, under primary, writes with (read-only under `shadow`, scope list in docs/reference.md#backend-read-shadow; write-capable under `primary`, permission table in docs/reference.md#backend-primary-mode); host-only, never reaches the Box; needed only when the row's `shadow` or `primary` option is on";
     flakeOption = false;
     boxEnv = false;
   };

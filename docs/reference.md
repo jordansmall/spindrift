@@ -3022,8 +3022,9 @@ maintainer adds those entries by hand, since an agent's push credential cannot
 edit workflow files. With it unset the shadow sends nothing, and each run's
 summary carries the `error` and is not clean.
 
-Under a shadow row the token must be read-only (a primary github row needs
-a write-capable one, see [Backend primary mode](#backend-primary-mode)). The
+In shadow mode the token must be read-only. That rule is shadow's alone: a
+primary github row needs a write-capable credential, with its own permission
+table in [Backend primary mode](#backend-primary-mode). The
 Route table admits `POST /graphql`, whose body the host does not restrict, so
 the token's scope is the only barrier against a mutation from the untrusted
 Connector. Use a fine-grained personal access token scoped to the one
@@ -3151,26 +3152,47 @@ reads with the same host-only `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` as the shadow,
 but under primary the credential must also write: issues, PRs and branches
 through the Connector, and core's own git (push, relay, rebase, mirror seed and
 Ledger push) presents it too. [The shadow's read-only scope
-list](#backend-read-shadow) no longer applies: use a fine-grained token scoped
-to the one repository with Issues, Pull requests and Contents set to read and
-write, plus the read permissions that list names for the rest (Metadata,
-Checks, Commit statuses). The Route table admits `POST /graphql`, so the
-token's write scope is reachable by the Connector; scope it to the one
-repository. The `primary-connector-write-github` gate checks this at startup
-under `ISSUE_TRACKER=github`, but it is advisory for most credentials. It
-refuses (config invalid, for launch, `doctor` and the daemon's doctor
-preflight) a classic token (`ghp_`, `gho_`) whose scopes lack `repo` or
-`public_repo`, naming `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`, and, as a
-connectivity failure, a token whose introspection itself fails outright. It
-only warns for the recommended fine-grained PAT, which cannot be introspected;
-for an App installation token (`ghs_`), whose introspection reports repository
-push (Contents write), not the Issues permission; for a Connector that declares
-no `forge.tokenGrant`, so introspection is unsupported; and for an unset
-credential, whose issue writes will fail. Dropping the github name from
-`nix/dogfood-primary.nix`, or `primary` from the row, restores the native reads
-with no code revert; the `primary = true` on the github mirror row in
-`nix/fixtures.nix` moves with it, or `connector-driver-rows-dogfood-shadows`
-fails.
+list](#backend-read-shadow) does not apply. Use a fine-grained personal access
+token scoped to the one repository with these repository permissions:
+
+| Permission | Access | Why |
+|---|---|---|
+| Metadata | read | repository lookup; GitHub grants it to every token |
+| Issues | read and write | issue comments, labels, the claim and settle transitions, research verdicts, filed issues; PR comments, which post through the issue comments endpoint |
+| Pull requests | read and write | draft PR creation and the PR reads |
+| Contents | read and write | the ready/draft flip: GitHub refuses `markPullRequestReadyForReview` and `convertPullRequestToDraft` to a fine-grained PAT without it, even with Pull requests write; branch deletes; also core's own git (push, relay, rebase, mirror seed, Ledger push) |
+| Checks | read | the CI state reads |
+| Commit statuses | read | the CI state reads |
+
+A classic token needs the `repo` scope (`public_repo` for a public repository).
+
+The Route table admits `POST /graphql`, whose body the host does not restrict.
+So under primary the untrusted Connector can exercise a credential that can
+push to the repository, not only write issues and PRs, and the token's scope is
+the only barrier. [ADR 0073's #7209
+amendment](adr/0073-backends-and-drivers-are-trust-no-one-wasm-connectors.md#amendment-issue-7209-a-primary-github-connector-holds-a-push-capable-credential)
+records the trade-off.
+
+The `primary-connector-write-github` gate checks the credential at startup when
+`ISSUE_TRACKER` or `CODE_FORGE` is `github`, but it is advisory for most
+credentials. It refuses (config invalid, for launch, `doctor` and the daemon's
+doctor preflight) a classic token (`ghp_`, `gho_`) whose scopes lack `repo` or
+`public_repo`, naming `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` and the write the
+Connector needs, and, as a connectivity failure, a token whose introspection
+itself fails outright. It only warns for the recommended fine-grained PAT,
+which cannot be introspected; for an App installation token (`ghs_`), whose
+introspection reports repository push (Contents write), not the Issues or Pull
+requests permissions; for a Connector that declares no `forge.tokenGrant`, so
+introspection is unsupported; and for an unset credential. The refusal and
+every warning name the primary set above when `CODE_FORGE` is `github`; with
+only `ISSUE_TRACKER` on `github`, the Connector carries no PR writes, so they
+name Issues write and drop Pull requests and Contents. `spindrift doctor`
+reports the same.
+
+Dropping the github name from `nix/dogfood-primary.nix`, or `primary` from the
+row, restores the native reads with no code revert; the `primary = true` on the
+github mirror row in `nix/fixtures.nix` moves with it, or
+`connector-driver-rows-dogfood-shadows` fails.
 
 Each launcher process writes its own record pair under `.spindrift/logs/`, the
 directory CI uploads, once it makes its first primary read (a daemon writes one
