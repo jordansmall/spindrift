@@ -6561,9 +6561,7 @@ func TestDoctor_ReadOnlyTokenGates_BothBackendsActiveOnDifferentAxes(t *testing.
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
-	// walkGateRegistry (issue #2942) reports each passing gate with a generic
-	// "ok: <name>" line rather than the row's own readOnlyGateOkMessage text;
-	// the generic lines prove both gates ran just as well.
+	// walkGateRegistry (issue #2942) emits each passing gate's "ok: <name>" line.
 	if !strings.Contains(out, "ok: read-only-token-github") {
 		t.Errorf("want the github gate's success line, got %q", out)
 	}
