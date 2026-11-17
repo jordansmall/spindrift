@@ -1782,10 +1782,12 @@ in
     '';
 
   # The agent-image drvPath must be a pure function of flake content, not the
-  # Consumer's host system (issue #597). ADR 0019's freshness probe compares a
-  # fresh `.#packages.<linuxSystem>.agent-image.drvPath` against the baked
-  # IMAGE_DRV, so a host-tagged drvPath reports "rebuild needed" forever on a
-  # macOS Consumer (issue #598). Two calls differing only in `system` show it.
+  # Consumer's host system (issue #597). ADR 0019's freshness probe keys on
+  # the Linux-twin image tag, an outPath hash, against the IMAGE_TAG the
+  # host-`system` Harness baked (issue #587; cmd/launcher/internal/freshness).
+  # Equal drvPaths imply equal tags; a host-tagged drvPath moves the tag, so
+  # the probe reports "rebuild needed" forever on a macOS Consumer (issue
+  # #598). Two calls differing only in `system` show it.
   skills-content-form-drvpath-host-independent =
     let
       inherit (pkgs.lib) assertMsg;
