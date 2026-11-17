@@ -74,8 +74,8 @@ func TestRegistry_SecondTerminateDoesNotErasePriorGenerationsMark(t *testing.T) 
 	}
 }
 
-// The headless dispatch path constructs no Registry at all, so every method
-// must be safe on a nil *Registry and report "not terminated".
+// A nil *Registry must stay inert: every method is safe to call and reports
+// "not terminated". Only tests reach the nil receivers (see Registry).
 func TestRegistry_NilIsInert(t *testing.T) {
 	var r *Registry
 	r.Mark("42") // must not panic
