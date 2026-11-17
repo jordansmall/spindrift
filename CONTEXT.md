@@ -1346,12 +1346,13 @@ push-only `local` Code Forge it parses the recorded string into a
 like a PR; a `BranchRef` still an ancestor of its own Integration branch is
 repaired in place (landing upgraded, seam closed) rather than left stuck
 open, and one that isn't prints a stuck verdict naming the branch (issue
-#1809). Auto-invoked at the end of a `dispatch` run and available standalone
-(`spindrift reconcile`) for the between-runs cases: a runner that died, or a
-PR in approval limbo. Does not itself merge — landing stays with `dispatch`
-and the explicit `recover` gesture. _Avoid_: sync, sweep, cleanup, recover
-(the operator's explicit per-issue adopt-and-merge gesture, a different
-act).
+#1809). Auto-invoked at the end of a `dispatch` run that names no issues on
+the command line (one-shot, continuous, or a single `ISSUE_NUMBER`), and
+available standalone (`spindrift reconcile`) for the between-runs cases: a
+runner that died, or a PR in approval limbo. Does not itself merge — landing
+stays with `dispatch` and the explicit `recover` gesture. _Avoid_: sync, sweep,
+cleanup, recover (the operator's explicit per-issue adopt-and-merge gesture, a
+different act).
 
 **Recoverable**:
 A first-class terminal lifecycle state (ADR 0039) a `CODE_FORGE=local`
