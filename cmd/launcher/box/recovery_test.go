@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"reflect"
 	"testing"
 
@@ -74,5 +75,69 @@ func TestRecoveryConfig_QueriesOpenPROnlyWhereTheBoxCan(t *testing.T) {
 				t.Errorf("open-PR query passed = %v, want %v", got, want)
 			}
 		})
+	}
+}
+
+// queryFor runs the box with BOX_HOST_OPEN_PR=hostAnswer and returns the open-PR
+// query it handed to recovery (nil when none was passed).
+func queryFor(t *testing.T, forge, hostAnswer string) func() (bool, error) {
+	t.Helper()
+	// An empty PATH makes any gh invocation fail, so a host answer that wrongly
+	// reached the forge CLI cannot pass as a clean "open" or "none".
+	t.Setenv("PATH", t.TempDir())
+	f := newFixture(t)
+	f.env.CodeForge = forge
+	f.knobs[branchrecovery.HostOpenPREnv] = hostAnswer
+	var q func() (bool, error)
+	rec := f.d.Recover
+	f.d.Recover = func(cfg branchrecovery.Config, openPR func() (bool, error), w io.Writer) (branchrecovery.Outcome, error) {
+		q = openPR
+		return rec(cfg, openPR, w)
+	}
+	f.run()
+	return q
+}
+
+func TestOpenPRQuery_AnswersFromTheHostVerdict(t *testing.T) {
+	for answer, want := range map[string]bool{"open": true, "none": false} {
+		t.Run(answer, func(t *testing.T) {
+			q := queryFor(t, "github", answer)
+			if q == nil {
+				t.Fatal("no open-PR query passed")
+			}
+			if got, err := q(); err != nil || got != want {
+				t.Errorf("query = (%v, %v), want (%v, nil)", got, err, want)
+			}
+		})
+	}
+}
+
+func TestOpenPRQuery_AnUnusableHostVerdictIsAnError(t *testing.T) {
+	for _, answer := range []string{"unknown", "garbage"} {
+		t.Run(answer, func(t *testing.T) {
+			q := queryFor(t, "github", answer)
+			if q == nil {
+				t.Fatal("no open-PR query passed")
+			}
+			if got, err := q(); err == nil || got {
+				t.Errorf("query = (%v, %v), want an error and no PR", got, err)
+			}
+		})
+	}
+}
+
+func TestOpenPRQuery_HostVerdictNeverAddsAQueryWhereNoneRan(t *testing.T) {
+	if q := queryFor(t, "forgejo", "open"); q != nil {
+		t.Error("forgejo Box was handed an open-PR query")
+	}
+}
+
+func TestOpenPRQuery_UnsetHostVerdictKeepsTheForgeQuery(t *testing.T) {
+	q := queryFor(t, "github", "")
+	if q == nil {
+		t.Fatal("no open-PR query passed")
+	}
+	if _, err := q(); err == nil {
+		t.Error("query succeeded with no gh on PATH; the strategy was not consulted")
 	}
 }

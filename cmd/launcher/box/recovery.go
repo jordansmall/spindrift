@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/branchrecovery"
@@ -36,12 +38,24 @@ func (r *boxRun) recoveryConfig() branchrecovery.Config {
 
 // openPRQuery is the CODE_FORGE Strategy's in-box open-PR query bound to this
 // Box's repo and branch; nil when the forge is unregistered or cannot be asked.
-// A failed query is an error, never "no PR": the caller must not force-reset
-// on it.
+// A tokenless Box answers from the host's BOX_HOST_OPEN_PR instead (issue
+// #7146). A failed query is an error, never "no PR": the caller must not
+// force-reset on it.
 func (r *boxRun) openPRQuery() func() (bool, error) {
 	s, ok := backendkit.ByName(r.codeForge())
 	if !ok || s.OpenPRForBranch == nil {
 		return nil
+	}
+	if v := r.d.Getenv(branchrecovery.HostOpenPREnv); v != "" {
+		return func() (bool, error) {
+			switch v {
+			case branchrecovery.HostOpenPROpen:
+				return true, nil
+			case branchrecovery.HostOpenPRNone:
+				return false, nil
+			}
+			return false, fmt.Errorf("host could not answer whether a PR is open (BOX_HOST_OPEN_PR=%q)", v)
+		}
 	}
 	return func() (bool, error) {
 		return s.OpenPRForBranch(r.d.Getenv("REPO_SLUG"), r.env.Branch)
