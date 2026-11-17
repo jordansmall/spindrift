@@ -526,7 +526,7 @@ withRowKnobs {
   boxGhToken = {
     env = "BOX_GH_TOKEN";
     secret = true;
-    doc = "opt-in two-actor separation (ADR 0016): a second machine user's fine-grained PAT for the Box only — the launcher keeps using its own GH_TOKEN for merges, labels, and all host-side forge calls, while the Box receives this value as its GH_TOKEN instead; empty (default) leaves the single-token flow unchanged. Pair with a repository ruleset that bars this user from updating the base branch and bypass-lists only the launcher's user — see docs/reference.md's two-actor separation recipe";
+    doc = "DEPRECATED: only a read-write Box reads it; a read-only Box receives no forge token (issue #6900); removed with read-write in #6902. opt-in two-actor separation (ADR 0016): a second machine user's fine-grained PAT for the Box only — the launcher keeps using its own GH_TOKEN for merges, labels, and all host-side forge calls, while the Box receives this value as its GH_TOKEN instead; empty (default) leaves the single-token flow unchanged. Pair with a repository ruleset that bars this user from updating the base branch and bypass-lists only the launcher's user — see docs/reference.md's two-actor separation recipe";
     boxEnv = false;
   };
   claudeOAuthToken = {
@@ -677,9 +677,12 @@ withRowKnobs {
   boxForgeCredential = {
     env = "BOX_FORGE_CREDENTIAL";
     group = "forge";
-    default = "forwarded";
-    doc = "whether the launcher forwards a forge credential into a read-only Box: `forwarded` (default) keeps today's token forwarding; `none` forwards neither GH_TOKEN, FORGEJO_TOKEN, nor a BOX_*_TOKEN substitute, so the Box clones the host-seeded mirror and reads through host-answered Signal-socket verbs. Only valid with BOX_FORGE_AND_ISSUE_ACCESS=read-only (evaluation and the launcher both refuse otherwise). An opt-in switch ahead of #6900 making `none` the default (issue #7140)";
+    # "" is the unset choice, so any explicit value, `forwarded` included, can
+    # be told apart and warned on.
+    default = "";
+    doc = "DEPRECATED, no effect, and removed in #6902: every read-only Box already holds no forge credential (issue #6900), and a read-write Box always receives its token. Setting it to either value (`forwarded` or `none`) warns at build time, at run time, and in spindrift doctor and changes nothing";
     choices = [
+      ""
       "forwarded"
       "none"
     ];

@@ -150,12 +150,6 @@ func (c config) kind() *dispatchkind.Descriptor {
 	return c.dispatchKind
 }
 
-// boxHoldsNoForgeCredential is BOX_FORGE_CREDENTIAL=none (issue #7140): the
-// Box gets no forge token, so dispatch forwards none.
-func (c config) boxHoldsNoForgeCredential() bool {
-	return c.BoxForgeCredential == "none"
-}
-
 // effectiveBoxForgeAndIssueAccess is the effective BOX_FORGE_AND_ISSUE_ACCESS
 // handed to dispatch: the raw knob, forced "read-only" for a ReadOnlyBox kind
 // (issue #3906). c.BoxForgeAndIssueAccess itself stays raw for the
@@ -183,6 +177,26 @@ func boxAccessReadWriteNotice(c config) (string, bool) {
 // notice is advisory and stdout is the run's product.
 func warnBoxAccessReadWrite(c config, stderr io.Writer) {
 	if msg, ok := boxAccessReadWriteNotice(c); ok {
+		fmt.Fprintln(stderr, msg)
+	}
+}
+
+// boxForgeCredentialNotice is the deprecation notice for a set
+// BOX_FORGE_CREDENTIAL (issue #6900), whatever its value: unset is "" because
+// the schema carries no default. It shares the daemon's decided marker with
+// the read-write notice: the daemon prints the notice itself, so a child it
+// spawns stays quiet.
+func boxForgeCredentialNotice(c config) (string, bool) {
+	if c.BoxForgeCredential == "" || inputdoc.BoxAccessNoticeDecided() {
+		return "", false
+	}
+	return inputdoc.BoxForgeCredentialNotice, true
+}
+
+// warnBoxForgeCredential prints the deprecation notice to stderr, like
+// warnBoxAccessReadWrite.
+func warnBoxForgeCredential(c config, stderr io.Writer) {
+	if msg, ok := boxForgeCredentialNotice(c); ok {
 		fmt.Fprintln(stderr, msg)
 	}
 }
@@ -1067,9 +1081,6 @@ func newLaunchGateConfigError(format string, args ...any) error {
 // mkHarness's readOnlyCapabilityOk assert (issue #2526) already proves this at
 // build time, so this gate only backstops a runtime override of those knobs.
 func checkReadOnlyCapabilityGate(c config) error {
-	if c.boxHoldsNoForgeCredential() && c.BoxForgeAndIssueAccess != "read-only" {
-		return newLaunchGateConfigError("BOX_FORGE_CREDENTIAL=none requires BOX_FORGE_AND_ISSUE_ACCESS=read-only")
-	}
 	if c.BoxForgeAndIssueAccess != "read-only" {
 		return nil
 	}

@@ -101,6 +101,7 @@ func bootstrapWith(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descri
 		return nil, fmt.Errorf("%w: %w", errConfigInvalid, err)
 	}
 	warnBoxAccessReadWrite(seedConfig, os.Stderr)
+	warnBoxForgeCredential(seedConfig, os.Stderr)
 
 	// Ahead of every gate so a start that fails one still reaps.
 	sweepOrphanedSandboxes(seedConfig, os.Stderr)

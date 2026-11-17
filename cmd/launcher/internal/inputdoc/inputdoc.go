@@ -206,6 +206,11 @@ func BoxAccessNoticeDecided() bool { return os.Getenv(BoxAccessNoticeDecidedEnv)
 // boxAccessWarnings carries the same text for the build.
 const BoxAccessReadWriteNotice = "spindrift: BOX_FORGE_AND_ISSUE_ACCESS=read-write is deprecated and will be removed in a later minor release (issue #6757). The default is now read-only, where the launcher host-mediates every Box write. To move, set perSystem.spindrift.forge.boxAccess = \"read-only\" (or defaults.boxForgeAndIssueAccess), or unset it; see MIGRATING.md, \"The Box's forge access defaults to read-only (issue #6899)\"."
 
+// BoxForgeCredentialNotice is the run-time deprecation notice for a set
+// BOX_FORGE_CREDENTIAL (issue #6900); lib/mkHarness.nix's
+// boxForgeCredentialWarnings carries the same text for the build.
+const BoxForgeCredentialNotice = "spindrift: BOX_FORGE_CREDENTIAL is deprecated and has no effect, and will be removed in a later minor release (issue #6902). Every read-only Box now holds no forge credential (issue #6900), whatever its value, and a read-write Box always receives its token. Unset forge.boxForgeCredential (defaults.boxForgeCredential) and drop --box-forge-credential."
+
 // DriverMarker is the DriverWarnedEnv value for an (ambient, baked) pair. It
 // names both so a child baking a different Driver than the daemon still warns.
 func DriverMarker(ambient, baked string) string { return ambient + "/" + baked }
