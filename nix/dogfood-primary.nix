@@ -11,8 +11,8 @@
 # spindrift-connector-routes.json. github's primary also carries #6756's
 # switches as they land: the writes docs/reference.md lists under "Backend
 # primary mode" go through the Connector. Each switch opens the next one's
-# observation window, so dogfood runs from switch 2 (#6885) on count toward
-# #6886's bar.
+# observation window, so dogfood runs from switch 3 (#6886) on count toward
+# #6887's bar.
 [
   "claude"
   "github"
