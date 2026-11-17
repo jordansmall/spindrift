@@ -10,6 +10,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -41,6 +42,12 @@ var primaryWrites = []struct {
 	{"CreateLabel", forge.Issue{Number: "7"},
 		func(c *execClient) error { return c.CreateLabel("fresh-label", "a new label", "ededed") },
 		nil},
+	{"PostIssue", forge.Issue{Number: "7"},
+		func(c *execClient) error {
+			_, err := c.PostIssue("a finding", "its body", []string{"agent-butler-finding"})
+			return err
+		},
+		nil},
 }
 
 func primaryWriteClient() *execClient {
@@ -71,6 +78,47 @@ func TestPrimaryRow_TrackerWritesGoThroughTheConnector(t *testing.T) {
 				t.Errorf("CreateLabel did not reach the backend: labels %v", h.backend.labels)
 			}
 		})
+	}
+}
+
+// A host-filed finding lands in the Connector's backend with its labels, and
+// the Connector-routed backlog read returns the dedup marker the launcher
+// appended, so finding dedup and butler promotion see it as a gh-filed one.
+// settle's own sweep is not driven here: the backend go-test fileset leaves
+// settle out (nix/checks/go.nix backendGoTestShared).
+func TestPrimaryRow_PostedIssueKeepsItsMarkerAndLabels(t *testing.T) {
+	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+	c := primaryWriteClient()
+	marker := dedupmarker.Build([]string{"pkg/a.go"})
+	labels := []string{"agent-butler-finding", "ready-for-agent"}
+
+	url, err := c.PostIssue("a finding", dedupmarker.Append("Finding detail.", marker), labels)
+	if err != nil {
+		t.Fatalf("PostIssue: %v", err)
+	}
+
+	backlog, err := c.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-butler-finding"})
+	if err != nil {
+		t.Fatalf("ListIssuesWithLabels: %v", err)
+	}
+	if len(backlog) != 1 {
+		t.Fatalf("backlog = %+v, want the one filed issue", backlog)
+	}
+	got := backlog[0]
+	// The butler reads the filed issue's number off the URL's last path segment.
+	if want := h.backend.web + "/issues/" + got.Number; url != want {
+		t.Errorf("url = %q, want %q", url, want)
+	}
+	if terms := dedupmarker.Parse(got.Body); !slices.Equal(terms, []string{"pkg/a.go"}) {
+		t.Errorf("backlog body %q parses to dedup terms %v, want [pkg/a.go]", got.Body, terms)
+	}
+	for _, l := range labels {
+		if !slices.Contains(got.Labels, l) {
+			t.Errorf("label %q missing from %v", l, got.Labels)
+		}
+	}
+	if n := calls(); n != 0 {
+		t.Errorf("filing ran gh %d times under a primary row", n)
 	}
 }
 
@@ -170,6 +218,7 @@ func TestPrimaryRow_MissingCapabilityFailsTheWrite(t *testing.T) {
 		{"AddLabels", "tracker.editLabels"},
 		{"Comment", "tracker.comment"},
 		{"CreateLabel", "tracker.labels"},
+		{"PostIssue", "tracker.fileIssue"},
 	} {
 		t.Run(tc.write+"/"+tc.capName, func(t *testing.T) {
 			h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
