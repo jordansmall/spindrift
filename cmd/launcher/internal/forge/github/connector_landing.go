@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorforge"
@@ -25,27 +27,86 @@ func gitCredential(row backendrows.Row) (gitexec.Credential, error) {
 	return gitexec.Credential{Username: "x-access-token", Password: token}, nil
 }
 
+// coreGit is the plumbing a primary row composes over the Connector's clone
+// URL: the stock git adapter, except that Rebase honours SYNC_METHOD as the
+// native path does. It keeps the validated URL and credential so core's own
+// clones (the Box's mirror, the sync) use exactly what Compose vetted.
+type coreGit struct {
+	forge.CodeForge
+	e        *execClient
+	cloneURL string
+	cred     gitexec.Credential
+}
+
+// clone is the clone step syncBranch takes: core's git, the credential on the
+// environment, never the URL, argv or the clone's config.
+func (g *coreGit) clone(dir string) error {
+	args := append([]string{"clone"}, gitexec.NoAutoMaintenance("--config")...)
+	args = append(args, "--no-single-branch", g.cloneURL, dir)
+	if out, err := runRedacted(g.cred.Apply(exec.Command("git", args...))); err != nil {
+		return fmt.Errorf("github: rebase: git clone %s: %w: %s", forge.RedactURLCredentials(g.cloneURL), err, out)
+	}
+	return nil
+}
+
+// Rebase syncs head onto core's base branch: the Connector's PR read carries
+// the head only.
+func (g *coreGit) Rebase(head string) error {
+	base := g.e.baseBranch
+	for _, ref := range []string{head, base} {
+		if ref == "" || strings.HasPrefix(ref, "-") {
+			return fmt.Errorf("github: rebase: invalid git ref %q", ref)
+		}
+	}
+	return g.e.syncBranch(head, base, g.clone, g.cred)
+}
+
+// seedMirror bare-clones the Connector's repository for the Box's mirror. As
+// the native seed, the pins are command-scope, so nothing persists into a repo
+// the Box mounts.
+func (g *coreGit) seedMirror(dir string) error {
+	args := append(gitexec.NoAutoMaintenance("-c"), "clone", "--bare", g.cloneURL, dir)
+	if out, err := runRedacted(g.cred.Apply(exec.Command("git", args...))); err != nil {
+		return fmt.Errorf("github: seed mirror: git clone %s: %w: %s", forge.RedactURLCredentials(g.cloneURL), err, out)
+	}
+	return nil
+}
+
 // forgeWrite runs fn over the Connector's full Code Forge, with core's own git
 // doing every git operation. Nothing native sits under it: a surface the
 // Connector does not declare must fail with errNoCapability, never reach gh.
-// readOnlyBox is for the Box's bundle relay; the other callers pass false.
+// readOnlyBox is for the Box's bundle relay and its commit-subject read; the
+// other callers pass false.
 func (e *execClient) forgeWrite(row backendrows.Row, verb string, readOnlyBox bool, fn func(forge.CodeForge, forge.Capabilities) error) error {
+	return e.forgeGit(row, verb, readOnlyBox, func(cf forge.CodeForge, caps forge.Capabilities, _ *coreGit) error {
+		return fn(cf, caps)
+	})
+}
+
+// forgeGit is forgeWrite for the callers that also run git of their own over
+// the clone URL Compose validated.
+func (e *execClient) forgeGit(row backendrows.Row, verb string, readOnlyBox bool, fn func(forge.CodeForge, forge.Capabilities, *coreGit) error) error {
 	return e.connectorOp(row, connectorforge.ErrNotForge, verb, func(conn *connectorhost.Connector, api string) error {
 		cred, err := gitCredential(row)
 		if err != nil {
 			return err
 		}
+		var plumbing *coreGit
 		cf, caps, err := connectorforge.Compose(conn, connectorforge.Target{API: api, Repo: e.repo}, connectorforge.Git{
 			Credential:  cred,
 			ReadOnlyBox: readOnlyBox,
 			Plumbing: func(cloneURL string, cred gitexec.Credential) forge.CodeForge {
-				return git.NewGitClient(cloneURL, "", e.userName, e.userEmail, git.WithCredential(cred))
+				plumbing = &coreGit{
+					CodeForge: git.NewGitClient(cloneURL, e.baseBranch, e.userName, e.userEmail, git.WithCredential(cred)),
+					e:         e, cloneURL: cloneURL, cred: cred,
+				}
+				return plumbing
 			},
 		})
 		if err != nil {
 			return err
 		}
-		return fn(cf, caps)
+		return fn(cf, caps, plumbing)
 	})
 }
 
@@ -90,4 +151,44 @@ func (e *execClient) createDraftPRViaConnector(row backendrows.Row, title, body,
 		return cerr
 	})
 	return url, created, err
+}
+
+func (e *execClient) pushBranchViaConnector(row backendrows.Row, srcDir, localRef, branch, base string) error {
+	return e.forgeWrite(row, "push a branch", false, func(_ forge.CodeForge, caps forge.Capabilities) error {
+		if caps.BranchPusher == nil {
+			return fmt.Errorf("%w: forge.draftPRs", errNoCapability)
+		}
+		return caps.BranchPusher.PushBranch(srcDir, localRef, branch, base)
+	})
+}
+
+func (e *execClient) relayBundleViaConnector(row backendrows.Row, outboxDir, ref string) error {
+	return e.forgeWrite(row, "relay a bundle", true, func(_ forge.CodeForge, caps forge.Capabilities) error {
+		if caps.BundleRelay == nil {
+			return fmt.Errorf("%w: forge.draftPRs", errNoCapability)
+		}
+		return caps.BundleRelay.RelayBundle(outboxDir, ref)
+	})
+}
+
+func (e *execClient) commitSubjectsViaConnector(row backendrows.Row, outboxDir, base, ref string) (subjects []string, err error) {
+	err = e.forgeWrite(row, "read a bundle's commit subjects", true, func(_ forge.CodeForge, caps forge.Capabilities) error {
+		if caps.BundleCommitSubjects == nil {
+			return fmt.Errorf("%w: forge.draftPRs", errNoCapability)
+		}
+		var serr error
+		subjects, serr = caps.BundleCommitSubjects.CommitSubjects(outboxDir, base, ref)
+		return serr
+	})
+	return subjects, err
+}
+
+func (e *execClient) rebaseViaConnector(row backendrows.Row, prURL string) error {
+	return e.forgeWrite(row, "rebase a PR", false, func(cf forge.CodeForge, _ forge.Capabilities) error { return cf.Rebase(prURL) })
+}
+
+func (e *execClient) seedMirrorViaConnector(row backendrows.Row, dir string) error {
+	return e.forgeGit(row, "seed the mirror", false, func(_ forge.CodeForge, _ forge.Capabilities, g *coreGit) error {
+		return g.seedMirror(dir)
+	})
 }

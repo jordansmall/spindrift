@@ -584,6 +584,9 @@ func (e *execClient) CreateLabel(name, description, color string) error {
 // or server fault, or that rebaseForcePushTimeout kills, wraps
 // ErrTransientPushFailure.
 func (e *execClient) Rebase(prURL string) error {
+	if row, ok := primaryRow(); ok {
+		return e.rebaseViaConnector(row, prURL)
+	}
 	out, err := exec.Command("gh", "pr", "view", prURL,
 		"--json", "headRefName,baseRefName",
 		"--jq", "[.headRefName,.baseRefName]|@tsv",
@@ -595,15 +598,20 @@ func (e *execClient) Rebase(prURL string) error {
 	if len(fields) != 2 {
 		return fmt.Errorf("gh pr view: unexpected output %q", string(out))
 	}
-	head, base := fields[0], fields[1]
+	return e.syncBranch(fields[0], fields[1], e.httpsClone("rebase"), gitexec.Credential{})
+}
 
+// syncBranch is Rebase's git half: clone with clone, sync head onto
+// origin/<base> the way e.syncMethod says, and force-push with cred (the zero
+// Credential leaves the push to the clone's own persisted helper).
+func (e *execClient) syncBranch(head, base string, clone func(dir string) error, cred gitexec.Credential) error {
 	dir, err := os.MkdirTemp("", "spindrift-rebase-*")
 	if err != nil {
 		return fmt.Errorf("mkdtemp: %w", err)
 	}
 	defer os.RemoveAll(dir)
 
-	if err := e.httpsClone("rebase")(dir); err != nil {
+	if err := clone(dir); err != nil {
 		return err
 	}
 
@@ -633,7 +641,7 @@ func (e *execClient) Rebase(prURL string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), rebaseForcePushTimeout)
 	defer cancel()
-	return gitplumbing.GitForcePush(ctx, dir, gitexec.Credential{})
+	return gitplumbing.GitForcePush(ctx, dir, cred)
 }
 
 // runRedacted runs cmd and returns its trimmed, credential-redacted stdout+stderr.
@@ -696,6 +704,9 @@ func (e *execClient) httpsClone(op string) func(dir string) error {
 // repo the Box mounts, and command scope (unlike repo-local config) lets an
 // outer insteadOf route the clone, as it does the Ledger's.
 func (e *execClient) SeedMirror(dir string) error {
+	if row, ok := primaryRow(); ok {
+		return e.seedMirrorViaConnector(row, dir)
+	}
 	url, gitArgs := GitRemote(e.repo)
 	args := append(slices.Clone(gitArgs), gitexec.NoAutoMaintenance("-c")...)
 	args = append(args, "clone", "--bare", url, dir)
@@ -709,6 +720,9 @@ func (e *execClient) SeedMirror(dir string) error {
 // at srcDir, over HTTPS through the gh credential helper (issue #4071, ADR
 // 0057); refuses if branch already exists, or is base (issue #4104).
 func (e *execClient) PushBranch(srcDir, localRef, branch, base string) error {
+	if row, ok := primaryRow(); ok {
+		return e.pushBranchViaConnector(row, srcDir, localRef, branch, base)
+	}
 	return bundlerelay.PushBranch("github", srcDir, localRef, branch, base, gitexec.Credential{}, e.httpsClone("push branch"))
 }
 
