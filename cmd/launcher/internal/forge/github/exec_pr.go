@@ -468,11 +468,17 @@ func (e *execClient) EnqueueAutoMerge(prURL string) error {
 // prints a notice to stderr but exits 0, so the caller can call this
 // unconditionally on every green PR.
 func (e *execClient) MarkReady(prURL string) error {
+	if row, ok := primaryRow(); ok {
+		return e.markReadyViaConnector(row, prURL)
+	}
 	return runGHReadyToggle(prURL, "pr", "ready", prURL)
 }
 
 // CommentPR posts a comment on the PR itself.
 func (e *execClient) CommentPR(prURL, body string) error {
+	if row, ok := primaryRow(); ok {
+		return e.commentPRViaConnector(row, prURL, body)
+	}
 	cmd := exec.Command("gh", "pr", "comment", prURL, "--body", body)
 	if _, err := cmd.Output(); err != nil {
 		return ghCommandErr(fmt.Sprintf("gh pr comment %s", prURL), err)
@@ -483,6 +489,9 @@ func (e *execClient) CommentPR(prURL, body string) error {
 // MarkDraft flips the PR back to draft. Idempotent the same way MarkReady is:
 // gh pr ready --undo on a PR that is already a draft exits 0.
 func (e *execClient) MarkDraft(prURL string) error {
+	if row, ok := primaryRow(); ok {
+		return e.markDraftViaConnector(row, prURL)
+	}
 	return runGHReadyToggle(prURL, "pr", "ready", "--undo", prURL)
 }
 
@@ -709,6 +718,9 @@ func (e *execClient) DeleteBranch(branch, base string) error {
 	if err := forge.ValidateBranchDelete("github", branch, base); err != nil {
 		return err
 	}
+	if row, ok := primaryRow(); ok {
+		return e.deleteBranchViaConnector(row, branch, base)
+	}
 	cmd := exec.Command("gh", "api", "-X", "DELETE",
 		fmt.Sprintf("repos/%s/git/refs/heads/%s", e.repo, branch))
 	if _, err := cmd.Output(); err != nil {
@@ -723,6 +735,9 @@ func (e *execClient) DeleteBranch(branch, base string) error {
 // (Open checks BundleRelay first) is what keeps a read-write land from ever
 // making a host-side create that conflicts with the Box's own.
 func (e *execClient) CreateDraftPR(title, body, base, head string) (string, bool, error) {
+	if row, ok := primaryRow(); ok {
+		return e.createDraftPRViaConnector(row, title, body, base, head)
+	}
 	var stderr bytes.Buffer
 	cmd := exec.Command("gh", "pr", "create",
 		"--repo", e.repo,

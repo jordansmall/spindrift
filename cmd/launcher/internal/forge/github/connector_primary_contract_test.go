@@ -387,6 +387,6 @@ func TestPrimaryRow_PRForgeContract(t *testing.T) {
 	forgetest.RunPRForgeContract(t, primaryPRHarness{composedPRHarness{e.h}, e.c})
 
 	e.assertSplit(t, 0,
-		[]string{"pr merge", "pr ready"},
+		[]string{"pr merge"},
 		[]string{"GET /repos/" + connectorRepo + "/pulls", "GET /repos/" + connectorRepo + "/compare/", "POST /graphql"})
 }
