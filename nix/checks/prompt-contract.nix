@@ -1018,11 +1018,12 @@ in
       "every non-outcome markerChannels row's token must match some validateMarkers row's marker, offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-marker-channels-token-matches-validate-markers" { } "touch $out";
 
-  # sharedObligationViolationsFor (issue #2699) checks that both branches of a
-  # paired prompt fork carry every substring a shared obligation
-  # declares. It takes contentBySource as an explicit argument so these tests
-  # can prove the check actually fails, on fixture content independent of the
-  # real registry (exercised separately below, against the on-disk fragments).
+  # sharedObligationViolationsFor (issue #2699) checks that every branch an
+  # obligation declares carries each of its requiredSubstrings. It takes
+  # contentBySource as an explicit argument so these tests can prove the check
+  # actually fails, on fixture content independent of the real registry
+  # (exercised separately below, against the on-disk fragments). The fixture
+  # uses two branches so a test can show only the offending one is named.
   prompt-contract-shared-obligation-violations-for-detects-missing-substring =
     let
       contentBySource = {
@@ -1090,7 +1091,7 @@ in
       "touch $out";
 
   # Acceptance criterion (issue #2699): a violation's pre-rendered `message`
-  # must name both the offending fork branch and the obligation it is missing.
+  # must name both the offending branch and the obligation it is missing.
   # The other tests in this group assert only on `.branchId` and list length,
   # so an edit dropping either id from the message template would stay green
   # everywhere else.
@@ -1156,9 +1157,9 @@ in
       };
 
   # Enforcing check (issue #2699): the real registry's rows must hold against
-  # the on-disk fragment content every branch declares, so an edit to either
-  # fragment file that drops a shared obligation the other branch still
-  # carries fails loudly, naming the branch and the missing substrings.
+  # the on-disk fragment content every branch declares, so an edit to a
+  # declared fragment file that drops a substring its obligation requires
+  # fails loudly, naming the branch and the missing substrings.
   prompt-contract-shared-obligations-satisfied =
     let
       violations = promptContract.sharedObligationViolations;
