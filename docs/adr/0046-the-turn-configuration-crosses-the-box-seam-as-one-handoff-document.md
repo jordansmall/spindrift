@@ -1,5 +1,12 @@
 # The turn's configuration crosses the box seam as one handoff document, not a flag fan-out
 
+> **Amended by [ADR 0058](0058-the-box-main-is-a-go-program-above-a-generated-shim.md):**
+> `entrypoint.sh` is now a shim that `exec`s `box`, which assembles the prompt
+> in-process (`promptassembly.WriteAssembly`) and runs `orchestrator` as a
+> child process, so the seam below now runs `entrypoint.sh` → `box` →
+> `orchestrator` → `driver-exec`. `driver-exec assemble-prompt` is still a
+> verb but no longer produces a Box's Handoff.
+
 [ADR 0035](0035-the-in-box-orchestrator-loop-is-a-go-program-above-driver-exec-not-entrypoint-prose.md)
 put `orchestrator` between `entrypoint.sh` and `driver-exec`, and had it
 forward the same flag surface `entrypoint.sh`'s direct call to `driver-exec`
@@ -31,29 +38,35 @@ one JSON document, `promptassembly.Handoff`, instead of a flag fan-out.
 `entrypoint.sh` selects the invoker (`orchestrator` or `driver-exec`
 directly, per ADR 0035's `ORCHESTRATOR` gate) and passes the document
 through unread; it no longer re-extracts fields out of it or re-writes temp
-files to shuttle them onward.
+files to shuttle them onward. (Amended by issue #4291: commit 46aa8cb8e
+removed the gate and the direct path, per ADR 0035's #4291 amendment, so
+`box`'s `execOrchestrator` always runs `orchestrator`.)
 
 Concretely:
 
 - **One producer per Driver pass that precedes a Handoff, one consumer
-  grammar.** `driver-exec assemble-prompt` is the main producer: it already
-  loads the fragment registry and renders the prompt, so writing the handoff
-  alongside `Result.Handoff` costs it nothing new — every field Assemble
-  itself computes (`SessionMode`, `Invoker`, `ReviewModel`/`ReviewEffort`
-  extracted from the roster's `reviewer` entry, `AdvisoryReviewer` from the
-  kind + `ORCHESTRATOR` gate) or that arrives as pure passthrough from its
-  own flags (`--model`, `--driver`, `--max-slices`, the `--argv-*` family,
-  ...) lands in the same struct it writes to disk.
+  grammar.** `driver-exec assemble-prompt` is the main producer (amended by
+  issue #4294: `box` now assembles in-process): it already loads the
+  fragment registry and renders the prompt, so writing the handoff alongside
+  `Result.Handoff` costs it nothing new — every field Assemble itself
+  computes (`SessionMode`, `Invoker`, `ReviewModel`/`ReviewEffort` extracted
+  from the roster's `reviewer` entry, `AdvisoryReviewer` from the kind +
+  `ORCHESTRATOR` gate; amended by issue #4291: commit 46aa8cb8e removed
+  `Invoker`, and commit 7f48e9bb5 dropped the gate, so `AdvisoryReviewer`
+  follows the kind's reviewer prompt alone) or that arrives as pure
+  passthrough from its own flags (`--model`, `--driver`, `--max-slices`,
+  the `--argv-*` family, ...) lands in the same struct it writes to disk.
   `box`'s conflict-resolve pass (`cmd/launcher/box/conflict.go`) is the
-  narrower second producer (issue #2975 slice 2; amended by issue #4295, which
-  moved it from the deleted `driver-exec env-handoff` verb and the
-  entrypoint's `phase_conflict_resolve` into `box`): the one Driver pass that
-  runs before prompt assembly — the pre-work rebase-fixup pass — has no gates
-  to compute, so it builds the same `Handoff` shape straight from box's
-  passthrough fields with no `promptassembly.Assemble` call at all. Both
-  write the identical JSON shape; `orchestrator` and `driver-exec` load it
-  through the same `promptassembly.LoadHandoffFile` and don't know or care
-  which producer wrote it.
+  narrower second producer (issue #2975 slice 2; amended by issue #4295:
+  commit 693ee9866 moved it into `box` from the entrypoint's
+  `phase_conflict_resolve`, and commit 89ff93368 deleted the `driver-exec
+  env-handoff` verb it used): the one Driver pass that runs before prompt
+  assembly — the pre-work rebase-fixup pass — has no gates to compute, so it
+  builds the same `Handoff` shape straight from box's passthrough fields with
+  no `promptassembly.Assemble` call at all. Both write the identical JSON
+  shape; `orchestrator` and `driver-exec` load it through the same
+  `promptassembly.LoadHandoffFile` and don't know or care which producer
+  wrote it.
 - **Per-pass flags are only what genuinely varies per pass.** `--handoff-file`
   (required on both binaries), `--prompt-file` (falls back to the handoff's
   own `PromptFile` when empty — only a seeded run-state pass overrides it),
@@ -81,7 +94,12 @@ Concretely:
   `argv-agents-flag`/`argv-effort-flag`/`argv-model-omit-empty`) as their two
   producers' own CLI surface, so that duplication survives this ADR — what's
   unified is the one `Handoff` shape both producers write and both consumers
-  read, not the flags that populate it.
+  read, not the flags that populate it. (Amended by issues #4295 and #4434:
+  commit 89ff93368 deleted `envhandoff_cmd.go`, ending that duplication, and
+  commits e155fbb0f, 03dd703ba, and d500448c0 declare the seven flags once, in
+  `promptassembly.AssemblyFlags.BindFlags`
+  (`cmd/launcher/internal/promptassembly/flags.go`), which `driver-exec
+  assemble-prompt` and `box` share.)
 - **The orchestrator's own forward list is deleted, not shrunk.**
   `orchestrator` no longer declares `--model`/`--driver`/`--review-*`/cap
   flags at all; there is nothing left to keep in sync with `driver-exec`'s
@@ -131,13 +149,13 @@ Concretely:
   owning its own flag grammar outright. `box`'s conflict-resolve pass's
   narrower field set (it leaves `PromptFile`, `AgentsFile`,
   `ReviewPromptFile`, `ReviewModel`, `ReviewEffort`, and
-  `SessionMode`/`Invoker` unset, since the one pass it serves needs none of
-  them) means a `Handoff` loaded from that
-  producer is a valid but sparser document than one `assemble-prompt`
-  writes — every consumer already treats those fields as legitimately empty
-  (a review pass is enabled only when `ReviewPromptFile` is non-empty, so an
-  unset one already meant "no review pass" before this ADR), so the sparser
-  shape needs no new handling, only correct defaults on the read side.
+  `SessionMode` unset, since the one pass it serves needs none of them) means
+  a `Handoff` loaded from that producer is a valid but sparser document than
+  one `assemble-prompt` writes — every consumer already treats those fields
+  as legitimately empty (a review pass is enabled only when
+  `ReviewPromptFile` is non-empty, so an unset one already meant "no review
+  pass" before this ADR), so the sparser shape needs no new handling, only
+  correct defaults on the read side.
   Documented, not hidden, since a shared shape with two producers is
   precisely how a *third* future producer could reintroduce the drift this
   ADR closes if this weren't spelled out for it.
@@ -147,6 +165,6 @@ Concretely:
   was made, not as it was later revised.
 - The end-to-end shape is now testable as data: a fixture `Handoff` JSON
   file drives `entrypoint` → `orchestrator` → `driver-exec` (with a faked
-  Driver) across an implement pass and a review pass to an outcome, without
-  needing to reconstruct the equivalent flag invocation by hand for every
-  test case.
+  Driver; amended by issue #4292: now through `box`) across an implement
+  pass and a review pass to an outcome, without needing to reconstruct the
+  equivalent flag invocation by hand for every test case.
