@@ -4948,8 +4948,10 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
         │
         └─ back on the host, the launcher runs the MERGE GATE for that issue:
            ├─ poll CI on the PR head until green (or red, or timeout)
-           ├─ green → flip the PR out of draft, apply MERGE_MODE, then swap
-           │          issue to agent-complete once the landing path settles:
+           ├─ green → flip the PR out of draft (a flip that keeps failing
+           │          settles agent-failed, reason mark-ready-failed), apply
+           │          MERGE_MODE, then swap issue to agent-complete once the
+           │          landing path settles:
            │           manual    → leave the green PR for a human (default)
            │           immediate → rebase-merge the PR now (rebase-retry and
            │                       an agent conflict-resolve box keep the
@@ -4974,9 +4976,9 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
            │                               MAX_REBASE_ATTEMPTS), and once the
            │                               resolved head re-reaches green,
            │                               flip it back to ready before the
-           │                               retried merge — both flips are
-           │                               best-effort, same as the
-           │                               draft-out-at-green flip above
+           │                               retried merge — a failed flip back
+           │                               to ready settles agent-failed like
+           │                               the draft-out-at-green flip above
            └─ post an aggregate usage/cost comment to the issue
 ```
 
@@ -5812,8 +5814,10 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
                                  push-wait — is still running)          enqueued, or handed off)
                                        │
                                        ├─ Box exits ≠0 (after retries) ─┐
-                                       └─ CI red after MAX_FIX_ATTEMPTS ─┤
-                                          or merge otherwise fails       ▼
+                                       ├─ CI red after MAX_FIX_ATTEMPTS ─┤
+                                       │  or merge otherwise fails       │
+                                       └─ green PR still a draft after ──┤
+                                          ready-flip retries             ▼
                                                                     agent-failed
                                                                     (human triage;
                                                                      re-label to retry)
@@ -5832,7 +5836,17 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   `forgejo`); `manual` (the default) leaves the green PR open for a human.
   Only once that settles does the merge gate swap `agent-in-progress` →
   `agent-complete` — the agent's work is done. `Closes #N` in the PR body
-  closes the issue whenever the PR merges.
+  closes the issue whenever the PR merges. The flip out of draft comes first,
+  before the hold checks and `MERGE_MODE`: a transient failure (a 5xx or network
+  error from GitHub, through `gh` or a Connector, or from Forgejo) is retried
+  on the `TRANSIENT_RETRY_MAX` budget, while a refusal such as a token-scope
+  403 is not retried. A failure that persists or is refused
+  settles `agent-failed` with reason `mark-ready-failed` and a comment that
+  marking the PR ready failed after green CI — it is still a draft, so it was
+  neither merged nor handed off. This holds under every `MERGE_MODE` and under
+  a merge-guard or tuning hold, and for the flip that restores a PR to ready
+  after a conflict force-push (issue #1863). A PR that is already ready and
+  then fails to merge keeps `agent-complete` with the merge-blocked note.
   (Dependency ordering keys off the PR actually being merged, not this label —
   see [`Readiness.Ready`](../cmd/launcher/internal/waves/blocker.go).)
   The conflict-resolve box runs under the repo's devShell when the
@@ -6404,7 +6418,8 @@ matched against every added, modified, and deleted path. A hit **downgrades
 that merge to manual, regardless of `MERGE_MODE`**: no merge happens, a PR
 comment names the matched path(s) and the knob, and the issue lands at
 `agent-complete` with a merge-blocked-style note — the same outcome as a
-merge failure after green, never a demotion to `agent-failed`. The guard
+merge failure after green, and no demotion to `agent-failed` unless the
+guarded PR's ready flip keeps failing (`mark-ready-failed`). The guard
 downgrades, it never blocks: the cost of a hit is one human read.
 
 The default is:
@@ -6461,8 +6476,8 @@ while a rebase that cannot run (`MAX_REBASE_ATTEMPTS=0`, or a non-conflict
 rebase failure) leaves the PR in draft, posts the merge-blocked comment and
 the hold's own guard or tuning comment together, and settles `merge-blocked`.
 A PR that is merely behind its base is not rebased here (though on Forgejo a
-draft whose `MarkReady` failed, or a conflict check outlasting the re-read
-wait, also reads as a conflict), and drift after the hand-off is not handled.
+conflict check outlasting the re-read wait also reads as a conflict), and
+drift after the hand-off is not handled.
 `manual` and `auto` hand off without the check.
 
 The changed-path list is read **host-side**, the same way the merge gate
@@ -9388,8 +9403,8 @@ so a tokened log it settles (an older `spindrift recover`, say) reads
   (a butler Chore filed its findings), and `recover-declined`;
 - `failed`: `landing-failed`, `mark-ready-failed` (the green PR could not be
   marked ready, so it was neither merged nor handed off), `gate-terminal`,
-  `ci-red` (CI red with no fix pass
-  budget), `fix-exhausted`, `budget-exhausted`, `fix-failed`, `fix-no-op`,
+  `ci-red` (CI red with no fix pass budget), `fix-exhausted`,
+  `budget-exhausted`, `fix-failed`, `fix-no-op`,
   `relay-failed` (also recover's park), `draft-pr-failed` (the relay landed,
   the draft-PR create failed), `blocked`, `no-outcome` (the Box printed no
   outcome line), `merge-unverified` (a merge `verifyMerged`'s reads

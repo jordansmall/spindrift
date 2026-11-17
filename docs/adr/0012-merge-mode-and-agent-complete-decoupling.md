@@ -150,3 +150,18 @@ correctly recognized.
   global knob and out of scope here; and relabeling a GitHub-`auto`-merged issue
   from `agent-complete` is unnecessary — the merge closes the issue, and no logic
   keys on a post-merge label swap.
+
+## Amendment (issue #7205): a draft PR is not a green PR a human can merge
+
+The rule that a merge failing after green stays `agent-complete` assumes the
+PR is one a human can pick up and merge, which means it is no longer a draft.
+Settle flipped the draft PR to ready on a best-effort basis and carried on, so
+a failed flip left a draft behind `agent-complete`: neither merged, nor handed
+off, nor mergeable without someone noticing it was still a draft.
+
+Settle now flips the PR to ready first, before the hold and merge-mode checks,
+and retries a transient failure on the transient retry budget. A flip that
+still fails settles the issue `agent-failed` with reason `mark-ready-failed`,
+under every merge mode and under a hold; the flip that restores ready after a
+conflict force-push fails the same way. A ready PR whose merge then fails keeps
+the behaviour above: `agent-complete` with the merge-blocked note.
