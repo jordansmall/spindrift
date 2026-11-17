@@ -4605,21 +4605,21 @@ runners differ:
   because bwrap builds `/etc` from an empty directory (no hosts file) and
   `resolv.conf` names pasta's DNS forwarder, which only answers names the
   host's upstream resolver serves. Put the IP literal in `baseUrl`. To
-  deliberately reopen the same-host case, set `NETWORK_MODE=host` — the
-  documented bwrap-only opt-out that restores the pre-#2666 shared-host-netns
-  behavior — at the cost of losing the isolation this issue adds for the
-  whole Box, not just the model-server path.
+  deliberately reopen the same-host case, pass `--network-mode host` (or set
+  `infra.network.mode` to `host`) — the documented bwrap-only opt-out that
+  restores the pre-#2666 shared-host-netns behavior — at the cost of losing
+  the isolation this issue adds for the whole Box, not just the model-server
+  path.
 - **`no-host-loopback`, podman — reopen it with the raw escape hatch.**
   `NETWORK_MODE=no-host-loopback` renders plain `--network=pasta`, which
   denies host-loopback. For a backend that needs both restricted egress
-  *and* a reopened host-loopback hole, drop down to the raw `PODMAN_NETWORK`
-  knob instead — it's passed verbatim to `--network` and accepts a compound
-  value `network.mode` can't express: `PODMAN_NETWORK=pasta:--map-gw` or
-  `PODMAN_NETWORK=slirp4netns:allow_host_loopback=true`. (Remember
-  `NETWORK_MODE` and `PODMAN_NETWORK` are mutually exclusive at eval time —
-  using the raw knob for this means leaving `NETWORK_MODE` unset; an
-  explicit `NETWORK_MODE=open` still throws when paired with the raw
-  knob.)
+  *and* a reopened host-loopback hole, drop down to the raw
+  `infra.network.podman` setting (`--podman-network` at dispatch) instead —
+  it's passed verbatim to `--network` and accepts a compound value
+  `network.mode` can't express, such as `pasta:--map-gw` or
+  `slirp4netns:allow_host_loopback=true`. (Leave `infra.network.mode` unset
+  when you use it: the two settings are mutually exclusive at `nix eval`,
+  where even an explicit `open` beside the raw knob throws.)
   Plain-default host-loopback reach is rootless-podman-version/
   `containers.conf`-dependent — verify it against your podman rather than
   assume it.
@@ -4630,8 +4630,9 @@ runners differ:
   `no-host-loopback` would (pasta-backed, egress works, host loopback
   blocked), so the distinct choice has no distinct rendering to reject into.
   A same-host local Provider is reachable under neither `open` nor
-  `no-host-loopback` on bwrap; reopen it with `NETWORK_MODE=host` instead
-  (see the `open`, bwrap bullet above), which also reopens general
+  `no-host-loopback` on bwrap; reopen it with `--network-mode host` (or
+  `infra.network.mode` set to `host`) instead (see the `open`, bwrap bullet
+  above), which also reopens general
   host-loopback/LAN reachability, not just for a local Provider.
 
 Reopening host loopback under a restricted-egress config is a deliberate
