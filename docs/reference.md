@@ -2821,8 +2821,9 @@ After each Pass, `driver-exec` replays the Pass log through the Connector and
 compares it with the native Strategy on three things:
 
 - `events`: the decoded events of each line, canonically encoded. `ResetAt` is
-  compared by presence only, since the Connector's clock is a fixed epoch and
-  never matches the native one.
+  compared exactly, as both sides resolve it against the host's wall clock; the
+  two read it microseconds apart, so a replay at a reset's grace edge can
+  rarely diverge.
 - `resolveExit`: the exit code each side resolves from the log and the native
   exit.
 - `resultEvent`: the result text, with the native `ReadResult` as the
@@ -3409,7 +3410,7 @@ This is protocol version **0.3.0**. The host is
   | Method | Params | Result |
   |---|---|---|
   | `driver.describe` | `{}` | `{name, transientPatterns, terminalPatterns, writeTool, classify, totals, defaultTopLevelRole, result, kindOrder, kindPlurals}`; a pattern is `{substr, reason}`, `classify` is `{chunkOversized, firstMatch}`, `totals` is `"perCall"` or `"session"`, `result` is `"events"` or `"lastMessage"`, and `kindOrder` and `kindPlurals` are the count line's kind vocabulary |
-  | `driver.newDecoder` | `{}` | `{decoder}`, an opaque handle |
+  | `driver.newDecoder` | `{now}` (optional) | `{decoder}`, an opaque handle |
   | `driver.decode` | `{decoder, line}` | an array of canonical events |
   | `driver.freeDecoder` | `{decoder}` | `null` |
   | `driver.resultEvent` | `{text}` | `{event}`, one log line |
@@ -3424,6 +3425,11 @@ This is protocol version **0.3.0**. The host is
   | `driver.streamWrite` (optional, `driver.streamFilter`) | `{filter, data}` | `{data}` |
   | `driver.streamFlush` (optional, `driver.streamFilter`) | `{filter}` | `{data}` |
   | `driver.freeStreamFilter` (optional, `driver.streamFilter`) | `{filter}` | `null` |
+
+  `driver.newDecoder` takes `now`, the host's wall clock as RFC 3339, which
+  the decoder resolves a relative time such as "resets 3pm" against: a guest's
+  own clock is a fixed fake epoch. A guest given no `now` uses its own clock;
+  a malformed `now` fails the call.
 
   The decode output is the canonical event schema of [ADR
   0065](adr/0065-drivers-decode-pass-logs-into-canonical-events.md).
@@ -3788,7 +3794,8 @@ This is protocol version **0.3.0**. The host is
 - **Versioning.** The protocol version is `0.y.z` and independent of
   spindrift's release version. A `0.y` bump is breaking; a `0.y.z` bump is
   additive. Protocol 0.3 has not shipped in a release, so moving
-  `forge.openPR` behind `forge.draftPRs` within 0.3 takes no bump. Core
+  `forge.openPR` behind `forge.draftPRs`, or giving `driver.newDecoder` an
+  optional `now`, within 0.3 takes no bump. Core
   accepts its current `0.y` and the one before it, so today 0.3.z and 0.2.z.
   That overlap is what protects a third-party Connector, not core's CI, which
   runs only first-party Connectors' conformance: a third-party Connector has
