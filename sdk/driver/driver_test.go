@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"spindrift.dev/sdk/event"
@@ -19,7 +20,7 @@ import (
 func countingStrategy() Strategy {
 	return Strategy{
 		Name: "fake",
-		NewDecoder: func() Decoder {
+		NewDecoder: func(time.Time) Decoder {
 			n := 0
 			return func(line string) []event.Event {
 				n++
@@ -102,6 +103,51 @@ func newHandle(t testing.TB, m map[string]method) uint32 {
 	return r.Decoder
 }
 
+// nowCapturing is a Strategy whose NewDecoder records the now it is handed.
+func nowCapturing() (Strategy, *time.Time) {
+	got := new(time.Time)
+	s := countingStrategy()
+	s.NewDecoder = func(now time.Time) Decoder {
+		*got = now
+		return func(string) []event.Event { return nil }
+	}
+	return s, got
+}
+
+func TestNewDecoderReceivesHostNow(t *testing.T) {
+	s, got := nowCapturing()
+	_, m := handlers(s)
+	call(t, m, "driver.newDecoder", `{"now":"2026-11-17T02:20:00Z"}`)
+	if want := time.Date(2026, 11, 17, 2, 20, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("now = %v, want %v", *got, want)
+	}
+}
+
+// A 0.2.z host sends {} (or nothing).
+func TestNewDecoderFallsBackToGuestClock(t *testing.T) {
+	for _, params := range []string{"{}", "null", ""} {
+		s, got := nowCapturing()
+		_, m := handlers(s)
+		before := time.Now()
+		call(t, m, "driver.newDecoder", params)
+		after := time.Now()
+		if got.Before(before) || got.After(after) {
+			t.Fatalf("params %q: now = %v, want the guest clock within [%v, %v]", params, *got, before, after)
+		}
+	}
+}
+
+func TestNewDecoderRejectsMalformedNow(t *testing.T) {
+	s, got := nowCapturing()
+	_, m := handlers(s)
+	if _, err := m["driver.newDecoder"]([]byte(`{"now":"garbage"}`)); err == nil {
+		t.Fatal("malformed now: want an error")
+	}
+	if !got.IsZero() {
+		t.Fatalf("NewDecoder called with %v despite the error", *got)
+	}
+}
+
 func TestDecoderStatePerHandle(t *testing.T) {
 	_, m := handlers(countingStrategy())
 	a, b := newHandle(t, m), newHandle(t, m)
@@ -124,7 +170,7 @@ func TestDecoderStatePerHandle(t *testing.T) {
 
 func TestDecodeNilIsEmptyArray(t *testing.T) {
 	s := countingStrategy()
-	s.NewDecoder = func() Decoder { return func(string) []event.Event { return nil } }
+	s.NewDecoder = func(time.Time) Decoder { return func(string) []event.Event { return nil } }
 	_, m := handlers(s)
 	h := newHandle(t, m)
 	got := marshal(t, call(t, m, "driver.decode", `{"decoder":`+strconv.Itoa(int(h))+`,"line":"z"}`))
@@ -517,7 +563,7 @@ func TestDecodeBatchEqualsPerLine(t *testing.T) {
 
 func TestDecodeBatchNilLinesAreEmptyArrays(t *testing.T) {
 	s := countingStrategy()
-	s.NewDecoder = func() Decoder { return func(string) []event.Event { return nil } }
+	s.NewDecoder = func(time.Time) Decoder { return func(string) []event.Event { return nil } }
 	_, m := handlers(s)
 	h := strconv.Itoa(int(newHandle(t, m)))
 	if got := marshal(t, call(t, m, "driver.decodeBatch", `{"decoder":`+h+`,"lines":["a","b"]}`)); got != "[[],[]]" {
@@ -595,7 +641,7 @@ func TestDecodeRawZeroLinesIsEmptyArray(t *testing.T) {
 
 func TestDecodeRawNilLinesAreEmptyArrays(t *testing.T) {
 	s := countingStrategy()
-	s.NewDecoder = func() Decoder { return func(string) []event.Event { return nil } }
+	s.NewDecoder = func(time.Time) Decoder { return func(string) []event.Event { return nil } }
 	_, m := handlers(s)
 	res, err := m["driver.decodeRaw"](rawPayload(newHandle(t, m), []string{"a", "b"}))
 	if err != nil {
@@ -659,7 +705,7 @@ func linesHanded(t testing.TB, lines []string) []string {
 	t.Helper()
 	var seen []string
 	s := countingStrategy()
-	s.NewDecoder = func() Decoder {
+	s.NewDecoder = func(time.Time) Decoder {
 		return func(line string) []event.Event {
 			seen = append(seen, line)
 			return nil
@@ -693,8 +739,8 @@ func longLine(unit string) string {
 func panickyStrategy() Strategy {
 	s := countingStrategy()
 	inner := s.NewDecoder
-	s.NewDecoder = func() Decoder {
-		d := inner()
+	s.NewDecoder = func(now time.Time) Decoder {
+		d := inner(now)
 		return func(line string) []event.Event {
 			if line == "boom" {
 				panic("decoder bug")
@@ -759,7 +805,7 @@ func TestDecodeRawPanicMatchesBatch(t *testing.T) {
 // line's invalid bytes through to a ToolInput that Marshal would copy as is.
 func TestDecodeRawToolInputIsValidUTF8(t *testing.T) {
 	s := countingStrategy()
-	s.NewDecoder = func() Decoder {
+	s.NewDecoder = func(time.Time) Decoder {
 		return func(line string) []event.Event {
 			return []event.Event{{ToolInput: json.RawMessage(line)}}
 		}

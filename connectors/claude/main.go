@@ -10,7 +10,7 @@ import "spindrift.dev/sdk/driver"
 func init() {
 	driver.Register(driver.Strategy{
 		Name:              "claude",
-		NewDecoder:        NewDecoder,
+		NewDecoder:        newDecoderAt,
 		TransientPatterns: TransientPatterns,
 		TerminalPatterns:  TerminalPatterns,
 		Classify:          ClassifyOptions,

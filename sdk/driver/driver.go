@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"time"
 	"unicode/utf8"
 
 	"spindrift.dev/sdk/connector"
@@ -55,8 +56,12 @@ type Strategy struct {
 	Name string
 
 	// NewDecoder returns a fresh Decoder, called once per log the host reads;
-	// the Decoder may keep state across lines.
-	NewDecoder func() Decoder
+	// the Decoder may keep state across lines. now is the host's wall clock
+	// when the host sends one (the guest's own clock is a fixed fake epoch
+	// under the host's wasm runtime); an absent or zero now falls back to the
+	// guest's time.Now(), and a malformed one fails the call. A decoder that
+	// resolves relative times resolves them against it.
+	NewDecoder func(now time.Time) Decoder
 
 	// TransientPatterns mark a failure worth retrying; TerminalPatterns one
 	// that is not.
@@ -299,9 +304,20 @@ func handlers(s Strategy) ([]string, map[string]method) {
 				s.Heartbeat.KindOrder, s.Heartbeat.KindPlurals,
 			}, nil
 		},
-		"driver.newDecoder": func([]byte) (any, error) {
+		"driver.newDecoder": func(params []byte) (any, error) {
+			var p struct {
+				Now time.Time `json:"now"`
+			}
+			if len(params) > 0 {
+				if err := unmarshal(params, &p); err != nil {
+					return nil, err
+				}
+			}
+			if p.Now.IsZero() {
+				p.Now = time.Now()
+			}
 			next++
-			decoders[next] = s.NewDecoder()
+			decoders[next] = s.NewDecoder(p.Now)
 			return struct {
 				Decoder uint32 `json:"decoder"`
 			}{next}, nil

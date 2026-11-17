@@ -6,6 +6,7 @@ package main
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	"spindrift.dev/sdk/driver"
 	"spindrift.dev/sdk/event"
@@ -15,7 +16,7 @@ func init() {
 	driver.Register(driver.Strategy{
 		Name:      "claude",
 		WriteTool: "Write",
-		NewDecoder: func() driver.Decoder {
+		NewDecoder: func(time.Time) driver.Decoder {
 			return func(line string) []event.Event {
 				line = strings.TrimSpace(line)
 				if line == "" {

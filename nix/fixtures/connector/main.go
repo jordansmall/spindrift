@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"spindrift.dev/sdk/driver"
 	"spindrift.dev/sdk/event"
@@ -28,7 +29,7 @@ func init() {
 		// Each decoder numbers the lines it has seen and stamps the role a host
 		// pass_start line set. The line "forge" makes it emit an event the host
 		// must reject; a host line makes it emit one the host must discard.
-		NewDecoder: func() driver.Decoder {
+		NewDecoder: func(time.Time) driver.Decoder {
 			n := 0
 			role := ""
 			return func(line string) []event.Event {
