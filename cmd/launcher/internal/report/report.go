@@ -156,9 +156,9 @@ func (r *Record) UnmarshalJSON(data []byte) error {
 // EventBox, EventSettled, EventNotDue, EventModel, EventCIWait and
 // EventImageBuild are the Record.Event values this package ever writes.
 // Naming them once here and using the name everywhere else (internal/daemon's
-// parser, dispatch loop, and pool event stream) means a typo in the wire value
-// is a compile error, not a silent parse miss on the reading side — issue
-// #3627's review finding. The JSON on the wire is unchanged: these are still
+// parser, dispatch loop, and pool event stream) means a typo in the name is a
+// compile error, not a silent parse miss on the reading side — issue #3627's
+// review finding. The JSON on the wire is unchanged: these are still
 // the bare strings "box"/"settled"/"not_due"/"model"/"ci_wait"/"image_build".
 const (
 	EventBox     = "box"
@@ -219,9 +219,11 @@ func Events() []string {
 	}
 }
 
-// ImageBuildState is an image_build record's State. The type keeps a typo in a
-// state a compile error (issue #3627); Record.State stays a plain string
-// because ci_wait shares it. Only the daemon parses it.
+// ImageBuildState is an image_build record's State. The type keeps the state
+// vocabulary apart from other strings, so a plain string variable does not
+// compile where a state is expected; a misspelled literal still compiles, and
+// only daemon.ParseRecord's runtime check rejects it. Record.State stays a
+// plain string because ci_wait shares it.
 type ImageBuildState string
 
 const (
