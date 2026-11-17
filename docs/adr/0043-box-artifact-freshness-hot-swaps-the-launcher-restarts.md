@@ -8,7 +8,8 @@
 > below still holds for continuous dispatch, which remains for operators who
 > want no daemon and is the Console's engine. The unreclaimed snapshot
 > generations this ADR accepts as a cost stop accumulating under the daemon,
-> since `build` runs between invocations.
+> since each daemon child is a fresh invocation whose bwrap bootstrap
+> `EnsureReady` reclaims them after a cold prepare (ADR 0042, issue #6008).
 
 [ADR 0019](0019-dispatch-exits-at-the-wave-boundary.md) made the launcher
 invocation the image-freshness boundary: a continuous run that finds itself
@@ -173,11 +174,16 @@ generation still needed there, so `SnapshotGeneration` never calls
 `reclaimStaleSnapshots` at all: a hot-swapping launcher simply accumulates
 one generation per swap, unreclaimed for the rest of the process's life, and
 the actual bound is swap count over process lifetime, not concurrent Box
-count. `launcher build` remains the only reclaim point, so a launcher that
-hot-swaps for hours without restarting holds every generation it ever swapped
-to. This is accepted for the same reason the two-mechanism cost above is
-accepted — pending a real reference-counted reclaim design, which is out of
-scope for #2682 — and it interacts with ADR 0042's accepted
+count. Reclaim runs only at `launcher build` and after a cold prepare in the
+bwrap run path's `EnsureReady`, never on the warm path or the swap, so a
+launcher that hot-swaps for hours without restarting holds every generation
+it ever swapped to, because continuous dispatch's bootstrap `EnsureReady` runs
+once, before any swap. (Amended by issue #6008, which added the cold-prepare
+reclaim: it can reclaim a generation an idle `Dispatch` still references, and
+`Run` then recovers it as ADR 0042's #6008 amendment describes.) This is
+accepted for the same reason the two-mechanism cost above is accepted —
+pending a real reference-counted reclaim design, which is out of scope for
+#2682 — and it interacts with ADR 0042's accepted
 garbage-collection race rather than worsening it: a generation, live-Box or
 not, is exactly the thing a host `nix-store --gc` could already invalidate
 underneath.
