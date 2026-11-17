@@ -55,7 +55,7 @@ func TestPrimaryConnectorWriteGate_RefusesAReadOnlyCredential(t *testing.T) {
 	if !errors.Is(err, errLaunchGateConfigInvalid) {
 		t.Fatalf("err = %v, want errLaunchGateConfigInvalid", err)
 	}
-	for _, want := range []string{connectorWriteTokenEnv, "write", "owner/repo"} {
+	for _, want := range []string{connectorWriteTokenEnv, "owner/repo", "Issues", "Pull requests", "Contents"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("err = %q, want it to name %q", err, want)
 		}
@@ -72,6 +72,87 @@ func TestPrimaryConnectorWriteGate_RefusesAReadOnlyCredential(t *testing.T) {
 	}
 	if v := daemon.ClassifyPreflight(code); v.Healthy {
 		t.Errorf("ClassifyPreflight(%d) is healthy, want the daemon to refuse", code)
+	}
+}
+
+// prSideOnlyConfig is a config whose tracker is not github but whose code
+// forge is, so the Connector carries only the PR writes.
+func prSideOnlyConfig() config {
+	c := minimalValidConfig()
+	c.IssueTracker, c.CodeForge = "forgejo", "github"
+	return c
+}
+
+func TestPrimaryConnectorWriteGate_OneSideRefusesAReadOnlyCredential(t *testing.T) {
+	cases := map[string]struct {
+		tracker, forge string
+		want, bad      []string
+	}{
+		"PR side only": {
+			tracker: "forgejo", forge: "github",
+			want: []string{"Issues", "Pull requests", "Contents", "ready"},
+			bad:  []string{"issues (comments"},
+		},
+		"tracker only": {
+			tracker: "github", forge: "forgejo",
+			want: []string{"Issues", "issues (comments"},
+			bad:  []string{"pull requests (", "Pull requests", "Contents"},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			useGithubConnectorRow(t, true, func(string, string) (backendkit.TokenIntrospection, error) {
+				return backendkit.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
+			})
+			c := minimalValidConfig()
+			c.IssueTracker, c.CodeForge = tc.tracker, tc.forge
+			_, err := walkPrimaryWriteGate(c, walkEnforce)
+			if !errors.Is(err, errLaunchGateConfigInvalid) {
+				t.Fatalf("err = %v, want errLaunchGateConfigInvalid", err)
+			}
+			for _, want := range append([]string{connectorWriteTokenEnv}, tc.want...) {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("err = %q, want it to name %q", err, want)
+				}
+			}
+			for _, bad := range tc.bad {
+				if strings.Contains(err.Error(), bad) {
+					t.Errorf("err = %q, want no %q for the side github does not serve", err, bad)
+				}
+			}
+		})
+	}
+}
+
+func TestPrimaryConnectorWriteGate_PRSideOnlyUndeterminableWarnsWithFullSet(t *testing.T) {
+	useGithubConnectorRow(t, true, func(string, string) (backendkit.TokenIntrospection, error) {
+		return backendkit.TokenIntrospection{Reason: "fine-grained PAT"}, nil
+	})
+	out, err := walkPrimaryWriteGate(prSideOnlyConfig(), walkEnforce)
+	if err != nil {
+		t.Fatalf("err = %v, want nil: undeterminable scopes warn", err)
+	}
+	for _, want := range []string{"WARNING:", "fine-grained PAT", "Issues", "Pull requests", "Contents", "Checks", "Commit statuses"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q, want %q", out, want)
+		}
+	}
+}
+
+func TestPrimaryConnectorWriteGate_PRSideOnlyInstallationTokenWarns(t *testing.T) {
+	useGithubConnectorRow(t, true, func(string, string) (backendkit.TokenIntrospection, error) {
+		t.Error("introspector called for an installation token, want it skipped")
+		return backendkit.TokenIntrospection{}, nil
+	})
+	t.Setenv(connectorWriteTokenEnv, "ghs_installationtoken")
+	out, err := walkPrimaryWriteGate(prSideOnlyConfig(), walkEnforce)
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	for _, want := range []string{"WARNING:", "Pull requests", "Contents"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q, want %q", out, want)
+		}
 	}
 }
 
@@ -137,9 +218,10 @@ func TestPrimaryConnectorWriteGate_NotApplicable(t *testing.T) {
 	cases := map[string]struct {
 		primary bool
 		tracker string
+		forge   string
 	}{
-		"shadow row":         {primary: false, tracker: "github"},
-		"non-github tracker": {primary: true, tracker: "forgejo"},
+		"shadow row":                   {primary: false, tracker: "github", forge: "github"},
+		"non-github tracker and forge": {primary: true, tracker: "forgejo", forge: "forgejo"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -149,7 +231,7 @@ func TestPrimaryConnectorWriteGate_NotApplicable(t *testing.T) {
 				return backendkit.TokenIntrospection{Introspectable: true}, nil
 			})
 			c := minimalValidConfig()
-			c.IssueTracker = tc.tracker
+			c.IssueTracker, c.CodeForge = tc.tracker, tc.forge
 			out, err := walkPrimaryWriteGate(c, walkEnforce)
 			if err != nil || called || out != "" {
 				t.Errorf("err = %v, called = %v, output = %q, want the gate skipped", err, called, out)
@@ -172,7 +254,7 @@ func TestPrimaryConnectorWriteGate_InstallationTokenWarnsWithoutIntrospecting(t 
 	if called {
 		t.Error("introspector called for an installation token, want it skipped")
 	}
-	for _, want := range []string{"WARNING:", connectorWriteTokenEnv, "Contents", "Issues"} {
+	for _, want := range []string{"WARNING:", connectorWriteTokenEnv, "Contents", "Issues", "Pull requests"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output = %q, want %q", out, want)
 		}
@@ -190,7 +272,7 @@ func TestPrimaryConnectorWriteGate_UnsetCredentialWarns(t *testing.T) {
 	if err != nil || called {
 		t.Fatalf("err = %v, called = %v, want a warning only", err, called)
 	}
-	for _, want := range []string{"WARNING:", connectorWriteTokenEnv, "not set"} {
+	for _, want := range []string{"WARNING:", connectorWriteTokenEnv, "not set", "Issues", "Pull requests", "Contents", "Checks", "Commit statuses"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output = %q, want %q", out, want)
 		}
@@ -198,25 +280,29 @@ func TestPrimaryConnectorWriteGate_UnsetCredentialWarns(t *testing.T) {
 }
 
 func TestPrimaryConnectorWriteGate_DoctorReportsWriteCapability(t *testing.T) {
+	fullSet := []string{"Issues", "Pull requests", "Contents"}
 	cases := map[string]struct {
-		writeCapable bool
-		wantErr      bool
-		want         string
+		result  backendkit.TokenIntrospection
+		wantErr bool
+		want    []string
 	}{
-		"read-only":     {writeCapable: false, wantErr: true, want: "MISSING: " + primaryConnectorWriteGateName},
-		"write-capable": {writeCapable: true, want: "ok: " + primaryConnectorWriteGateName},
+		"read-only":      {result: backendkit.TokenIntrospection{Introspectable: true}, wantErr: true, want: append([]string{"MISSING: " + primaryConnectorWriteGateName}, fullSet...)},
+		"undeterminable": {result: backendkit.TokenIntrospection{Reason: "fine-grained PAT"}, want: append([]string{"WARNING:", "fine-grained PAT"}, fullSet...)},
+		"write-capable":  {result: backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true}, want: []string{"ok: " + primaryConnectorWriteGateName}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			useGithubConnectorRow(t, true, func(string, string) (backendkit.TokenIntrospection, error) {
-				return backendkit.TokenIntrospection{Introspectable: true, WriteCapable: tc.writeCapable}, nil
+				return tc.result, nil
 			})
 			out, err := walkPrimaryWriteGate(minimalValidConfig(), walkReport)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("err = %v, wantErr = %v", err, tc.wantErr)
 			}
-			if !strings.Contains(out, tc.want) {
-				t.Errorf("report = %q, want %q", out, tc.want)
+			for _, want := range tc.want {
+				if !strings.Contains(out, want) {
+					t.Errorf("report = %q, want %q", out, want)
+				}
 			}
 		})
 	}
