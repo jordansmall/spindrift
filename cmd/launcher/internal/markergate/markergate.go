@@ -18,8 +18,8 @@ import (
 // signalCarrierSocket is the BOX_SIGNAL_CARRIER value (issue #3725) that
 // routes the PR-intent presence check through the Signal socket's status
 // route instead of a log scan (issue #3726). Every other value, including
-// the default "log" and the empty string an older caller might still pass,
-// keeps the log scan.
+// the legacy "log" opt-out and an empty string reaching this package (only
+// an older host launcher forwards nothing, issue #4376), keeps the log scan.
 const signalCarrierSocket = "socket"
 
 // Marker identifies which required-marker gate row a decision is for.
