@@ -157,6 +157,13 @@ func newRESTBackend(t *testing.T) *restBackend {
 	return b
 }
 
+// hitCount is how many requests the server has received so far.
+func (b *restBackend) hitCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.hits
+}
+
 func (b *restBackend) serve(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

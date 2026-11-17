@@ -379,14 +379,17 @@ type primaryPRHarness struct {
 func (p primaryPRHarness) Forge() forge.PRForge       { return p.c }
 func (p primaryPRHarness) CodeForge() forge.CodeForge { return p.c }
 
-// With a primary github row the PRForge contract passes: PR and check reads are
-// the Connector's, and merge, ready, draft and auto-merge are gh's.
+// With a primary github row the PRForge contract passes: PR and check reads and
+// every PR write, merge included, are the Connector's, and gh runs nothing.
 func TestPrimaryRow_PRForgeContract(t *testing.T) {
 	e := newPrimaryContractEnv(t)
 
 	forgetest.RunPRForgeContract(t, primaryPRHarness{composedPRHarness{e.h}, e.c})
 
 	e.assertSplit(t, 0,
-		[]string{"pr merge"},
-		[]string{"GET /repos/" + connectorRepo + "/pulls", "GET /repos/" + connectorRepo + "/compare/", "POST /graphql"})
+		nil,
+		[]string{"GET /repos/" + connectorRepo + "/pulls", "GET /repos/" + connectorRepo + "/compare/", "POST /graphql", "PUT /repos/" + connectorRepo + "/pulls/"})
+	if verbs, _ := e.ghCalls(t); len(verbs) > 0 {
+		t.Errorf("the PRForge contract ran gh %q under a primary row", verbs)
+	}
 }

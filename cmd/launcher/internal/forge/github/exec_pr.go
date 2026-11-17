@@ -385,6 +385,9 @@ func (e *execClient) ListPRFiles(url string) ([]string, error) {
 }
 
 func (e *execClient) Merge(url string) error {
+	if row, ok := primaryRow(); ok {
+		return e.mergeViaConnector(row, url)
+	}
 	var stderr bytes.Buffer
 	cmd := exec.Command("gh", "pr", "merge", url, mergeMethodFlag(e.mergeMethod), "--delete-branch")
 	cmd.Stderr = &stderr
@@ -457,6 +460,9 @@ func (e *execClient) CanAutoMerge() (bool, error) {
 // EnqueueAutoMerge enqueues GitHub's native auto-merge for the PR, which merges
 // once every branch-protection requirement is met.
 func (e *execClient) EnqueueAutoMerge(prURL string) error {
+	if row, ok := primaryRow(); ok {
+		return e.enqueueAutoMergeViaConnector(row, prURL)
+	}
 	cmd := exec.Command("gh", "pr", "merge", prURL, "--auto", mergeMethodFlag(e.mergeMethod), "--delete-branch")
 	if _, err := cmd.Output(); err != nil {
 		return ghCommandErr(fmt.Sprintf("gh pr merge --auto %s", prURL), err)

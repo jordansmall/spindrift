@@ -29,9 +29,15 @@ var Strategy = backendkit.Strategy{
 		return NewExecClient(s.RepoSlug, s.Labels, WithVerdictLabels(s.VerdictLabels)), nil
 	},
 	NewCodeForge: func(s backendkit.Shared, _ backendkit.Lookup, _ forge.SanitizedParent, _ forge.IssueTracker) (forge.CodeForge, error) {
+		if err := checkPrimaryMergeMethodAtBuild(s); err != nil {
+			return nil, err
+		}
 		return NewExecClient(s.RepoSlug, s.Labels, codeForgeOpts(s)...), nil
 	},
 	NewReadOnlyCodeForge: func(s backendkit.Shared, _ backendkit.Lookup, _ forge.SanitizedParent, _ forge.IssueTracker) (forge.CodeForge, error) {
+		if err := checkPrimaryMergeMethodAtBuild(s); err != nil {
+			return nil, err
+		}
 		return NewReadOnlyCodeForge(s.RepoSlug, s.Labels, codeForgeOpts(s)...), nil
 	},
 	OpenPRForBranch: func(repoSlug, branch string) (bool, error) {
@@ -66,6 +72,15 @@ var Strategy = backendkit.Strategy{
 		return strings.EqualFold(host, Host()) && strings.EqualFold(slug, s.RepoSlug)
 	},
 	IntrospectToken: introspectToken,
+}
+
+// checkPrimaryMergeMethodAtBuild refuses an unhonourable MERGE_METHOD at launch
+// under a primary row, as the forgejo row does, rather than at the first merge.
+func checkPrimaryMergeMethodAtBuild(s backendkit.Shared) error {
+	if _, ok := primaryRow(); !ok {
+		return nil
+	}
+	return checkPrimaryMergeMethod(s.MergeMethod)
 }
 
 func codeForgeOpts(s backendkit.Shared) []ExecOption {
