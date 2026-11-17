@@ -52,8 +52,9 @@ func eventTime(ev Event) time.Time {
 const finishSlack = time.Second
 
 // priorRunInfix joins a Pass log's path to the N of the copy a later Dispatch's
-// launcher moves it to. The launcher owns the naming: see quarantinePriorRunLogs
-// in cmd/launcher/internal/dispatch/box.go (fmt.Sprintf("%s.prior-run.%d", ...)).
+// launcher moves it to. The launcher owns the naming: quarantinePriorRunLogs in
+// cmd/launcher/internal/dispatch/box.go passes the ".prior-run" stem to
+// renameToFirstFreeSuffix.
 const priorRunInfix = ".prior-run."
 
 // modifiedAfterFinish reports whether a Dispatch's tab must answer superseded
