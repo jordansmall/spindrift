@@ -380,3 +380,28 @@ func (f *prForge) Probe() (string, error) {
 func (f *prForge) BranchExists(branch string) (bool, error) { return f.push.BranchExists(branch) }
 
 func (f *prForge) DeleteBranch(branch, base string) error { return f.push.DeleteBranch(branch, base) }
+
+// HeadBranch reads the head branch of the PR at prURL through the Connector.
+// forge.PRForge carries no accessor for it, so this reaches the composed
+// forge's own PR read. The unwrap is hand-rolled because forge.AsCodeForge
+// outside the resolver trips TestNoCapabilityProbeOutsideResolver.
+func HeadBranch(cf forge.CodeForge, prURL string) (string, error) {
+	for cf != nil {
+		if f, ok := cf.(*prForge); ok {
+			w, _, err := f.pr(prURL)
+			if err != nil {
+				return "", err
+			}
+			if w.Head == "" {
+				return "", fmt.Errorf("%w: PR %s has no head branch", ErrAnswer, w.Number)
+			}
+			return w.Head, nil
+		}
+		u, ok := cf.(forge.CodeForgeUnwrapper)
+		if !ok {
+			break
+		}
+		cf = u.UnwrapCodeForge()
+	}
+	return "", errors.New("connector forge: not a Connector PR forge")
+}

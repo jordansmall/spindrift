@@ -1,9 +1,12 @@
 package github
 
 import (
+	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -91,6 +94,89 @@ func TestEnqueueAutoMerge_MergeMethod(t *testing.T) {
 				t.Fatalf("argv = %q, want --delete-branch present", argv)
 			}
 		})
+	}
+}
+
+// Under a primary row the Connector merges by rebase only, so another
+// MERGE_METHOD is refused by name before any Connector or gh call rather than
+// silently ignored.
+func TestPrimaryRow_MergeMethodOtherThanRebaseIsRefused(t *testing.T) {
+	for _, method := range []string{"merge", "squash"} {
+		for _, op := range []struct {
+			name string
+			run  func(c *execClient, url string) error
+		}{
+			{"Merge", func(c *execClient, u string) error { return c.Merge(u) }},
+			{"EnqueueAutoMerge", func(c *execClient, u string) error { return c.EnqueueAutoMerge(u) }},
+		} {
+			t.Run(op.name+"/"+method, func(t *testing.T) {
+				h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+				url := h.SeedLandablePR("9")
+				before := h.backend.hitCount()
+				c := NewExecClient(connectorRepo, testLabels, WithMergeMethod(method))
+
+				err := op.run(c, url)
+
+				if !errors.Is(err, ErrPrimaryMergeMethod) || !strings.Contains(err.Error(), method) {
+					t.Errorf("err = %v, want ErrPrimaryMergeMethod naming %q", err, method)
+				}
+				if after := h.backend.hitCount(); after != before || calls() != 0 {
+					t.Errorf("the refused call reached the backend (%d requests) or gh (%d)", after-before, calls())
+				}
+			})
+		}
+	}
+}
+
+// A primary row refuses MERGE_METHOD at forge build time, as the forgejo row
+// does, so a misconfigured launch fails before any Box starts. The read-only
+// Box forge is refused too: forgejo builds both through one refusal.
+func TestStrategy_PrimaryRowRefusesMergeMethodAtBuild(t *testing.T) {
+	builds := map[string]func(backendkit.Shared) (forge.CodeForge, error){
+		"NewCodeForge": func(s backendkit.Shared) (forge.CodeForge, error) {
+			return Strategy.NewCodeForge(s, nil, forge.SanitizedParent{}, nil)
+		},
+		"NewReadOnlyCodeForge": func(s backendkit.Shared) (forge.CodeForge, error) {
+			return Strategy.NewReadOnlyCodeForge(s, nil, forge.SanitizedParent{}, nil)
+		},
+	}
+	for name, build := range builds {
+		for _, tc := range []struct {
+			method  string
+			primary bool
+			refused bool
+		}{
+			{"squash", true, true},
+			{"merge", true, true},
+			{"rebase", true, false},
+			{"", true, false},
+			{"squash", false, false},
+		} {
+			t.Run(name+"/"+tc.method+"/primary="+strconv.FormatBool(tc.primary), func(t *testing.T) {
+				if tc.primary {
+					useGithubRowPrimary(t, "127.0.0.1:1")
+				} else {
+					useGithubRowAt(t, "127.0.0.1:1")
+				}
+
+				_, err := build(backendkit.Shared{RepoSlug: connectorRepo, MergeMethod: tc.method})
+
+				if tc.refused != errors.Is(err, ErrPrimaryMergeMethod) || (!tc.refused && err != nil) {
+					t.Errorf("err = %v, want refused=%v", err, tc.refused)
+				}
+			})
+		}
+	}
+}
+
+// An explicit rebase is the Connector's own method and passes.
+func TestPrimaryRow_MergeMethodRebasePasses(t *testing.T) {
+	h, _, _, _ := primaryHarness(t, useGithubRowPrimary)
+	url := h.SeedLandablePR("9")
+	c := NewExecClient(connectorRepo, testLabels, WithMergeMethod("rebase"))
+
+	if err := c.Merge(url); err != nil || !h.Merged(url) {
+		t.Errorf("Merge = %v (merged %v), want a landed merge", err, h.Merged(url))
 	}
 }
 

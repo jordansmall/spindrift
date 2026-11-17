@@ -3,6 +3,8 @@ package github
 import (
 	"context"
 	"errors"
+	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -10,7 +12,9 @@ import (
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 )
 
@@ -41,6 +45,19 @@ var primaryLandingWrites = []struct {
 		func(h *connectorHarness, _ *execClient, u string) bool {
 			return slices.Equal(h.comments(u), []string{"needs a human"})
 		}},
+	{"Merge",
+		func(h *connectorHarness) string { return h.SeedLandablePR("9") },
+		func(c *execClient, u string) error { return c.Merge(u) },
+		// gh pr merge --delete-branch removes the head with the merge, so the
+		// Connector path must too.
+		func(h *connectorHarness, c *execClient, u string) bool {
+			exists, err := c.BranchExists(landingBranch)
+			return h.Merged(u) && h.backend.repo.Landed("9") && err == nil && !exists
+		}},
+	{"EnqueueAutoMerge",
+		func(h *connectorHarness) string { return h.SeedOpenPR("9") },
+		func(c *execClient, u string) error { return c.EnqueueAutoMerge(u) },
+		func(h *connectorHarness, _ *execClient, u string) bool { return h.prView(u).enqueued }},
 	{"CreateDraftPR",
 		func(h *connectorHarness) string { h.backend.repo.SeedBranch(landingBranch, "9"); return "" },
 		func(c *execClient, _ string) error {
@@ -111,19 +128,15 @@ func TestPrimaryRow_CreateDraftPRAdoptsAnOpenPR(t *testing.T) {
 // DeleteBranch refuses the base branch before any call is made.
 func TestPrimaryRow_DeleteBranchRefusesTheBaseBranch(t *testing.T) {
 	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
-	h.backend.mu.Lock()
-	before := h.backend.hits
-	h.backend.mu.Unlock()
+	before := h.backend.hitCount()
 
 	err := primaryWriteClient().DeleteBranch("main", "main")
 
 	if err == nil {
 		t.Fatal("DeleteBranch(base) succeeded, want a refusal")
 	}
-	h.backend.mu.Lock()
-	defer h.backend.mu.Unlock()
-	if h.backend.hits != before || calls() != 0 {
-		t.Errorf("the refused delete reached the backend (%d requests) or gh (%d)", h.backend.hits-before, calls())
+	if after := h.backend.hitCount(); after != before || calls() != 0 {
+		t.Errorf("the refused delete reached the backend (%d requests) or gh (%d)", after-before, calls())
 	}
 }
 
@@ -208,6 +221,7 @@ func TestPrimaryRow_MissingCapabilityFailsTheLandingWrite(t *testing.T) {
 		{"CreateDraftPR", "forge.draftPRs", errNoCapability},
 		{"DeleteBranch", "forge.branches", backendkit.ErrUnsupported},
 		{"MarkReady", "forge.branches", backendkit.ErrUnsupported},
+		{"Merge", "forge.prs", connectorforge.ErrPRForgeUnsupported},
 	} {
 		t.Run(tc.write+"/"+tc.capName, func(t *testing.T) {
 			h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
@@ -224,6 +238,103 @@ func TestPrimaryRow_MissingCapabilityFailsTheLandingWrite(t *testing.T) {
 				t.Errorf("the unsupported write ran gh %d times", n)
 			}
 		})
+	}
+}
+
+// A Connector without forge.autoMerge fails the enqueue by name instead of
+// reaching gh.
+func TestPrimaryRow_EnqueueAutoMergeWithoutTheCapabilityFails(t *testing.T) {
+	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+	withoutCapability(t, "forge.autoMerge")
+	url := h.SeedOpenPR("9")
+
+	err := primaryWriteClient().EnqueueAutoMerge(url)
+
+	if err == nil || !strings.Contains(err.Error(), "auto-merge is unavailable") {
+		t.Errorf("err = %v, want the auto-merge capability refusal", err)
+	}
+	if n := calls(); n != 0 {
+		t.Errorf("the unsupported enqueue ran gh %d times", n)
+	}
+}
+
+// A transient merge failure surfaces as the class core's merge loop retries,
+// and nothing is deleted for a merge that did not land.
+func TestPrimaryRow_MergeTransientFailureIsRetryable(t *testing.T) {
+	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+	url := h.SeedLandablePR("9")
+	h.scriptMerge(http.StatusBadGateway)
+	c := primaryWriteClient()
+
+	err := c.Merge(url)
+
+	if !errors.Is(err, forge.ErrMergeTransient) {
+		t.Fatalf("Merge on a 502 = %v, want forge.ErrMergeTransient", err)
+	}
+	if ok, berr := c.BranchExists(landingBranch); berr != nil || !ok {
+		t.Errorf("BranchExists after a failed merge = (%v, %v), want the branch kept", ok, berr)
+	}
+	if n := calls(); n != 0 {
+		t.Errorf("ran gh %d times", n)
+	}
+	if err := c.Merge(url); err != nil || !h.Merged(url) {
+		t.Errorf("core's retry = %v (merged %v), want a landed merge", err, h.Merged(url))
+	}
+}
+
+// The branch delete after a landed merge is best effort: a Connector that
+// refuses it must not turn a merged PR into a failed settle.
+func TestPrimaryRow_MergeSurvivesAFailedBranchDelete(t *testing.T) {
+	h, _, calls, logDir := primaryHarness(t, func(t *testing.T, host string) {
+		applyGithubRow(t, host, func(r *backendrows.Row) {
+			r.Primary = true
+			r.Routes = r.Routes[:0:0]
+			for _, rt := range allRoutes(t, host) {
+				if rt.Method != "DELETE" {
+					r.Routes = append(r.Routes, rt)
+				}
+			}
+		})
+	})
+	url := h.SeedLandablePR("9")
+
+	if err := primaryWriteClient().Merge(url); err != nil {
+		t.Fatalf("Merge = %v, want nil: the PR landed", err)
+	}
+	if !h.Merged(url) {
+		t.Error("the PR did not merge")
+	}
+	if n := calls(); n != 0 {
+		t.Errorf("ran gh %d times", n)
+	}
+	// stderr carries the same failure as a warning; only the log is asserted.
+	logs := primaryFiles(t, logDir, ".log")
+	if len(logs) != 1 {
+		t.Fatalf("primary logs = %v, want one recording the failed delete", logs)
+	}
+	raw, err := os.ReadFile(logs[0])
+	if err != nil || !strings.Contains(string(raw), "delete a merged PR's head branch") {
+		t.Errorf("primary log = %q (%v), want the failed head-branch delete", raw, err)
+	}
+}
+
+// A head the repository already deleted is done, not a fault: nothing is
+// recorded for a clean primary run.
+func TestPrimaryRow_MergeWithTheHeadAlreadyGoneRecordsNothing(t *testing.T) {
+	h, _, calls, logDir := primaryHarness(t, useGithubRowPrimary)
+	url := h.SeedOpenPR("9")
+
+	if err := primaryWriteClient().Merge(url); err != nil {
+		t.Fatalf("Merge = %v, want nil", err)
+	}
+	if !h.Merged(url) {
+		t.Error("the PR did not merge")
+	}
+	if n := calls(); n != 0 {
+		t.Errorf("ran gh %d times", n)
+	}
+	if logs := primaryFiles(t, logDir, ".log"); len(logs) != 0 {
+		t.Errorf("primary logs = %v, want none for an already-deleted head", logs)
 	}
 }
 
@@ -301,5 +412,30 @@ func TestPrimaryRow_ButlerPatchPathRunsThroughTheConnector(t *testing.T) {
 	}
 	if n := calls(); n != 0 {
 		t.Errorf("the patch path ran gh %d times under a primary row", n)
+	}
+}
+
+// A push-only Connector composes without a PR forge: Merge fails by the named
+// capability instead of reaching the push-only forge's Merge.
+func TestPrimaryRow_MergeOnAPushOnlyConnectorNamesTheMissingCapability(t *testing.T) {
+	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+	withoutCapability(t, "forge.prs")
+	old := loadRowConnector
+	loadRowConnector = func(ctx context.Context, row backendrows.Row, o backendrows.Options) (*connectorhost.Connector, error) {
+		conn, err := old(ctx, row, o)
+		if conn != nil {
+			conn.Capabilities = append(conn.Capabilities, "forge.pushOnly")
+		}
+		return conn, err
+	}
+	url := h.SeedLandablePR("9")
+
+	err := primaryWriteClient().Merge(url)
+
+	if !errors.Is(err, backendkit.ErrUnsupported) || !strings.Contains(err.Error(), "forge.prs") {
+		t.Errorf("Merge = %v, want unsupported naming forge.prs", err)
+	}
+	if h.Merged(url) || calls() != 0 {
+		t.Errorf("merged = %v, gh calls = %d, want neither", h.Merged(url), calls())
 	}
 }
