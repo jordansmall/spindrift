@@ -28,8 +28,9 @@ func init() {
 		},
 		// Each decoder numbers the lines it has seen and stamps the role a host
 		// pass_start line set. The line "forge" makes it emit an event the host
-		// must reject; a host line makes it emit one the host must discard.
-		NewDecoder: func(time.Time) driver.Decoder {
+		// must reject; a host line makes it emit one the host must discard. The line
+		// "now" emits the instant the host built the decoder against, in RFC 3339.
+		NewDecoder: func(now time.Time) driver.Decoder {
 			n := 0
 			role := ""
 			return func(line string) []event.Event {
@@ -40,6 +41,9 @@ func init() {
 					return []event.Event{{Kind: event.KindHostOp}}
 				}
 				n++
+				if strings.TrimSpace(line) == "now" {
+					return []event.Event{{Kind: event.KindText, Text: now.UTC().Format(time.RFC3339)}}
+				}
 				if strings.TrimSpace(line) == "forge" {
 					return []event.Event{{Kind: event.KindHostOp}}
 				}

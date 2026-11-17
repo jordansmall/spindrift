@@ -226,6 +226,9 @@ type Connector struct {
 	// host serves network's Host calls; nil for Load. Its failed flag says a
 	// Host call already audited this call's failure. Guarded by mu.
 	host *networkCalls
+	// now is the wall clock a guest decoder is built against: the guest's own
+	// clock is wazero's fixed fake epoch (ADR 0073).
+	now func() time.Time
 	// mu serializes guest calls, since the engine is not safe for concurrent
 	// use, and guards dead.
 	mu   sync.Mutex
@@ -459,7 +462,7 @@ func LoadNetworkCompiled(ctx context.Context, wasm []byte, n Network, cacheDir s
 // loadWith runs the module over the engine mk builds and checks its handshake.
 // network is the Host call grant, nil for none.
 func loadWith(ctx context.Context, wasm []byte, mk engineFactory, network *Network) (*Connector, error) {
-	c := &Connector{network: network}
+	c := &Connector{network: network, now: time.Now}
 	// A nil *networkCalls in the interface would read as a grant.
 	var host hostCalls
 	if network != nil {
