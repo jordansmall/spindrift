@@ -264,16 +264,19 @@ the artifact base path is registry-specific, not a fixed shape.
 
 > **Update.** Issue #3179 moved the path-allowlist patterns themselves onto
 > the shared table, as a `Patterns` field on each `ecosystem.Row`
-> (`cmd/launcher/internal/ecosystem/ecosystem.go`; the row is now
+> (`cmd/launcher/internal/ecosystem/ecosystem.go`; the row has since become
 > `ecosystem.Strategy`, one package per ecosystem, per ADR 0048's
 > 2026-10-22 amendment), and deleted
 > `registryproxy`'s own `bindings` table. Every reference above to
 > `allowlist.go` as the home of the patterns — and every line number cited
-> against that file — is historical as of this amendment; `allowlist.go`
-> still exists but now only matches a path against the registered
-> Strategies' patterns (`ecosystem.Registered()`).
-> No pattern's value changed, so none of the allowlist-policy claims above
-> are affected.
+> against that file — is historical as of this amendment. #3179's move
+> changed no pattern's value, so none of the allowlist-policy claims above
+> were affected by it. A later change (commit 33c42206c, which retired
+> `upstream-base-url` and `enforce-allowlist`) deleted `allowlist.go`, the
+> advisory allowlist arm, and the per-row `Patterns` outright; per
+> [ADR 0047](0047-registry-routes-host-rooted-enforced-by-construction.md)
+> ("Enforcement is unconditional, not advisory or scoped-credential"), the
+> enforced derived path-set is now the only policy.
 
 ## Consequences
 
@@ -559,7 +562,8 @@ agree, rather than one field required to be pathless and checked for it.
 **The path allowlist is inert for path-prefixed registries.** This sharpens the
 "logged rather than enforced" caveat above into something stronger than it
 reads. The patterns anchor at the registry root — `^/config\.json$`,
-`^/3/[A-Za-z0-9_-]/[A-Za-z0-9_-]{3}$` (`allowlist.go:29-33`) — which is correct for a registry
+`^/3/[A-Za-z0-9_-]/[A-Za-z0-9_-]{3}$` (then `allowlist.go:29-33`, since
+deleted per the #3179 update above) — which is correct for a registry
 served at an origin root, and never matches one served under a path. Under
 Artifactory, cargo's index request arrives as
 `/artifactory/api/cargo/cargo-crates-remote/index/config.json` and matches
