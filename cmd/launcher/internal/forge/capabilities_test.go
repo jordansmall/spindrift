@@ -186,8 +186,8 @@ func TestResolveCapabilities_SeamListerAndFullyPaginated(t *testing.T) {
 }
 
 // The two descriptors pass through independently, one per role, mirroring
-// main.go's resolveCapabilitySignals, which looks up two separate
-// backend.Descriptor rows rather than one merged row.
+// newReadContext in cmd/launcher/readcontext.go, which looks up the forge and
+// tracker backend.Descriptor rows separately (ADR 0013), not one merged row.
 func TestResolveCapabilities_DescriptorPassthrough(t *testing.T) {
 	forgeDesc := backend.Descriptor{Name: "github", ValidAsCodeForge: true}
 	trackerDesc := backend.Descriptor{Name: "jira", ValidAsTracker: true}
