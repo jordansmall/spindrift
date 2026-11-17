@@ -693,9 +693,9 @@ and the bwrap runner are unaffected, having no sharing layer at all.
 
 **Every layer that could have caught this passes.** The host half is genuinely
 correct, which is precisely why nothing complained. `runOnce` aborts the whole
-dispatch if the proxy cannot bind (`box.go:241`), so a Box that starts at all
+dispatch if the proxy cannot bind (`dispatch/box.go`), so a Box that starts at all
 proves a real socket exists. `candidateSocketMount` stats that source and
-requires `os.ModeSocket` before emitting a mount spec (`mount.go:95-96`), so the
+requires `os.ModeSocket` before emitting a mount spec (`runner/mount.go`), so the
 mount is issued against a verified socket. `spindrift doctor` resolves the
 credential and validates the upstream URL, but inspects only host-side state.
 The projection is the one fact none of them observe, and it is the one that is
@@ -807,7 +807,7 @@ confirms the path exists and is socket-mode, and `probeRegistrySocketConnect`
 confirms a connection actually completes — a stat-only check would call the
 passthrough-inode case above "capable" when it is exactly the broken case
 this probe exists to catch. `RegistryProxyTransport`
-(`cmd/launcher/internal/runner/oci.go`) reads the probe container's exit
+(`cmd/launcher/internal/runner/oci/oci.go`) reads the probe container's exit
 code as the verdict — but the verdict is not the plain 0/1 the verbs
 themselves would produce on their own terms. An old `driver-exec` — built
 before these verbs existed — has no notion of `probe-registry-socket` at
@@ -892,7 +892,7 @@ free.** A unix socket's access control is filesystem permissions on its path
 path. The TCP fallback has no equivalent, and it binds every interface rather
 than loopback (`dispatch/box.go`): the Box dials the host by name, resolved
 either by the runtime itself or by `--add-host <host>:host-gateway` —
-`probeRegistryTCPReachable` decides which (`runner/oci.go`) — and on a plain
+`probeRegistryTCPReachable` decides which (`runner/oci/oci.go`) — and on a plain
 Linux docker bridge that name resolves to the bridge IP (e.g. `172.17.0.1`),
 so a loopback-only bind would leave nothing on the address the Box dials.
 That widens what the gate has to cover, from any local process on the host to
@@ -918,7 +918,7 @@ string — fail closed, not fall open.
 **The secret reaches the Box the same way the launcher's other bearer tokens
 do.** `REGISTRY_PROXY_TCP_SECRET` is a bearer-token-shaped credential, so it
 joins `GH_TOKEN`/`CLAUDE_CODE_OAUTH_TOKEN`/`ANTHROPIC_API_KEY` in
-`offArgvKeys` (`cmd/launcher/internal/runner/bwrap.go`), the set of
+`offArgvKeys` (`cmd/launcher/internal/runner/offargv.go`), the set of
 `box.Env` keys kept off a container CLI's argv — `docker`/`podman run`'s
 argv, unlike an unshared socket, is visible via `ps`/`/proc` to any local
 user for the container's entire lifetime. The OCI adapter's `ociRunEnv`
@@ -956,8 +956,8 @@ than from a literal argv assignment.
   route the TCP fallback needs — under podman's pasta the route is genuinely
   blocked, so the Box would silently lose all registry access with no
   diagnostic; under docker, where `no-host-loopback` renders as plain
-  `bridge` (documented elsewhere in `oci.go` as "an inert-but-correct render,
-  not a functional guarantee"), the fallback would instead wire a working
+  `bridge` (which `docs/reference.md` documents as an inert-but-correct
+  render, not yet a functional guarantee), the fallback would instead wire a working
   host-loopback route the operator's own network mode explicitly asked to
   deny. Composing the two knobs silently was wrong in both directions. The
   fix makes them mutually exclusive by construction instead:
@@ -1338,8 +1338,8 @@ described as taking, were wrong.
 **Which shape #3110 met, and why.** That directory is not simply `$TMPDIR`.
 Both socket paths spindrift mints prefer `os.TempDir()` and fall back to the
 short, unshared `/tmp` when the resulting path would overflow `sun_path` —
-`registryProxySocketDir` for the proxy socket (`box.go:466-483`) and
-`probeSocketDir` for the probe's own (`oci.go:432-451`), both added for
+`registryProxySocketDir` for the proxy socket (`dispatch/box.go`) and
+`probeSocketDir` for the probe's own (`runner/oci/oci.go`), both added for
 issue #3077, whose triggering case is exactly macOS's per-user `$TMPDIR`
 nested under `nix develop`'s own `nix-shell.XXXXXX/` prefix. That fallback
 predates the #3110 amendment, and it is how a real dispatch reaches the
@@ -1399,7 +1399,7 @@ The #3111 amendment's TCP fallback binds `0.0.0.0:0`, and so do the two
 listeners that share its route: the signal socket's TCP arm
 (`dispatch/signal_socket.go`) and the throwaway listener
 `probeRegistryTCPReachable` dials back into (`listenTCPProbe`,
-`runner/oci.go`). On a host with a routable NIC that publishes each port to
+`runner/oci/oci.go`). On a host with a routable NIC that publishes each port to
 the LAN for the life of the Dispatch. Narrowing the bind to the address the
 Box dials was considered and rejected; the exposure is accepted instead.
 
