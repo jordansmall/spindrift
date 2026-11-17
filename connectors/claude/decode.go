@@ -46,16 +46,10 @@ func toolTarget(fields map[string]string, tool string, input driver.Value) strin
 	return target
 }
 
-// NewDecoder returns a fresh claude stream-json decoder. It is stateful (task
+// newDecoderAt returns a fresh claude stream-json decoder. It is stateful (task
 // roles, the active top-level role, the result-echo latch), so each scan or
-// writer takes its own.
-// connectorhost.Load gives every guest wazero's fake clocks, so time.Now() is a
-// fixed instant at runtime too, and a "resets <time>" suffix resolves against
-// that epoch until the host supplies a real clock (issue #6751).
-func NewDecoder() driver.Decoder { return newDecoderAt(time.Now()) }
-
-// newDecoderAt pins the clock that resolves a plain-text "resets <time>
-// (UTC)" suffix, so tests do not depend on the wall clock (issue #2443).
+// writer takes its own. now resolves a plain-text "resets <time> (UTC)" suffix:
+// the host supplies it at runtime, and tests pin it (issue #2443).
 func newDecoderAt(now time.Time) driver.Decoder {
 	d := &decoder{
 		now:       now,
