@@ -150,11 +150,6 @@ in
     # makes no forge or tracker writes, and the launcher relays branch, draft
     # PR, and comment writes host-side.
     boxForgeAndIssueAccess = "read-only";
-    # Pinned dogfood exception (issue #7140): the dogfood otherwise mimics a new
-    # Consumer, but forwards no forge token into the Box, so its runs exercise
-    # the switch and start the observation issue #6900 needs. Kept until #6900
-    # makes credential-free the default for every read-only Box.
-    boxForgeCredential = "none";
     # On darwin and windows podman runs in a fixed-RAM VM and needs the cap
     # (issue #712); native Linux shares host RAM with the container, so no cap
     # is needed there (issue #2379).
