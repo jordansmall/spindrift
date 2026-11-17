@@ -132,7 +132,7 @@ func (r *run) compare(ctx context.Context, shadow driverkit.Strategy, failed fun
 		r.shadowTime += shadowSpent
 		for i, l := range batch {
 			r.Sum.Compared++
-			r.Check("events", l.no, l.line, eventsJSON(nativeEvs[i]), eventsJSON(shadowEvs[i]))
+			r.Check("events", l.no, l.line, shadowrecord.EncodeJSON(nativeEvs[i]), shadowrecord.EncodeJSON(shadowEvs[i]))
 		}
 	}
 	lineNo := 0
@@ -172,20 +172,6 @@ func (r *run) compare(ctx context.Context, shadow driverkit.Strategy, failed fun
 		return
 	}
 	r.Check("resultEvent", 0, text, nativeRes, shadowRes)
-}
-
-// eventsJSON encodes evs for comparison. ResetAt is reduced to its presence:
-// a Connector's clock is a fixed epoch, so a "resets <time>" line resolves to a
-// different instant by design (issue #6751).
-func eventsJSON(evs []driverkit.Event) json.RawMessage {
-	norm := make([]driverkit.Event, len(evs))
-	copy(norm, evs)
-	for i := range norm {
-		if norm[i].ResetAt != nil {
-			norm[i].ResetAt = &time.Time{}
-		}
-	}
-	return shadowrecord.EncodeJSON(norm)
 }
 
 // resolveExit encodes a Strategy's resolved exit code. A nil ResolveExit keeps
