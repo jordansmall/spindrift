@@ -1067,3 +1067,11 @@ missing capability or refused route fails the write with its named error and is
 recorded in the primary log, so the clean-run recipe covers writes too. A lost
 claim race is an expected outcome and is not recorded. Issue filing, PRs, merges
 and `CloseMergedIssue` stay native until their switches (#6885, #6886, #6887).
+
+## Amendment (issue #6885): primary github files host-posted issues through the Connector
+
+Switch 2 of #6756 extends the #6883 amendment. Under `primary`, every
+host-posted github issue (the filer's, research's, the butler's and relayed
+review findings) is filed through the Connector's `tracker.fileIssue`, still
+with no fallback. PRs, merges and `CloseMergedIssue` stay native until their
+switches (#6886, #6887).

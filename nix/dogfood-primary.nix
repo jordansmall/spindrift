@@ -8,9 +8,11 @@
 # mirror hardcodes each row (`primaryDrivers` for a Driver row via
 # `dogfoodDriverRows`, `backendRows.github.primary` for a backend row). A
 # backend Connector's accepted Route table is baselined in
-# spindrift-connector-routes.json. github's primary also carries switch 1 of
-# #6756 (issue #6883): the writes docs/reference.md lists under "Backend
-# primary mode" go through the Connector, so #6885's observation starts here.
+# spindrift-connector-routes.json. github's primary also carries #6756's
+# switches as they land: the writes docs/reference.md lists under "Backend
+# primary mode" go through the Connector. Each switch opens the next one's
+# observation window, so dogfood runs from switch 2 (#6885) on count toward
+# #6886's bar.
 [
   "claude"
   "github"
