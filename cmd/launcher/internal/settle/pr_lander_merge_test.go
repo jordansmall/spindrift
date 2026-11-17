@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
@@ -28,6 +29,7 @@ func mergeCases() []prCase {
 	errTransient := forge.ErrTransientPushFailure
 	errRepoGone := errors.New("git push --force-with-lease: exit status 128: remote: Repository not found.")
 	errDenied := errors.New("gh pr ready --undo: permission denied")
+	errReadyDenied := errors.New("HTTP 403: Resource not accessible by integration")
 	fourGreen := []forge.RollupState{green, green, green, green} // the initial gate reads a pair, and so does each re-wait after a force-push
 	pollTimesOut := func(_ *testing.T, _ *forge.Fake, c *Config) { c.MergePollTimeout = 0 }
 	stale := func(_ *testing.T, fc *forge.Fake, c *Config) {
@@ -143,15 +145,95 @@ func mergeCases() []prCase {
 			wantSteps: []Step{stepAt(testPR, StatusMarkDraftFailed, "!! "+errDenied.Error())}, wantRebases: 1,
 		},
 		{
-			name:         "a failed restore to ready is logged and the merge goes on",
-			wantStatuses: []Status{detailOnly, StatusMarkReadyFailed, StatusRebaseRetry, StatusPostForcePushWait, StatusMarkReadyFailed, StatusVerifiedMerged},
+			// The green flip succeeds; the restore after the force-push fails, so
+			// the PR is left a draft and the retried merge is never attempted.
+			name:         "a failed restore to ready after a force-push fails the issue without a second merge",
+			wantStatuses: []Status{detailOnly, StatusRebaseRetry, StatusPostForcePushWait, StatusMarkReadyFailed, StatusFailed},
 			checks:       fourGreen,
 			maxRebase:    3, mergeErrs: []error{errConflict},
 			setup: func(_ *testing.T, fc *forge.Fake, _ *Config) {
-				fc.MarkReadyErr = errors.New("gh pr ready: permission denied")
+				fc.MarkReadyErrs = []error{nil}
+				fc.MarkReadyErr = errReadyDenied
 			},
-			want: merged, wantLabels: complete, wantMerged: testPR, wantCalls: rebased,
-			wantSteps: []Step{stepAt(testPR, StatusMarkReadyFailed, "!! gh pr ready: permission denied")}, wantRebases: 1,
+			want:         settledAs(dispatchrecord.ReasonMarkReadyFailed, errForcePushMarkReadyFailed.Error()+": "+errReadyDenied.Error()),
+			wantPRClosed: true, wantLabels: failed, wantNoLabels: complete,
+			wantCalls:    []string{ready, merge, draft, ready},
+			wantComments: []string{"marking " + testPR + " ready failed after green CI: " + errForcePushMarkReadyFailed.Error() + ": " + errReadyDenied.Error() + " — it is still a draft"}, wantRebases: 1,
+		},
+		{
+			name:         "a persistent mark-ready failure fails the issue and never merges",
+			wantStatuses: []Status{detailOnly, StatusMarkReadyFailed, StatusFailed},
+			setup:        func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.MarkReadyErr = errReadyDenied },
+			want:         settledAs(dispatchrecord.ReasonMarkReadyFailed, errReadyDenied.Error()),
+			wantPRClosed: true, wantLabels: failed, wantNoLabels: complete, wantCalls: []string{ready},
+			wantComments: []string{"marking " + testPR + " ready failed after green CI: " + errReadyDenied.Error() + " — it is still a draft"},
+		},
+		{
+			name: "a persistent mark-ready failure fails the issue under manual merge mode", mergeMode: "manual",
+			wantStatuses: []Status{detailOnly, StatusMarkReadyFailed, StatusFailed},
+			setup:        func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.MarkReadyErr = errReadyDenied },
+			want:         settledAs(dispatchrecord.ReasonMarkReadyFailed, errReadyDenied.Error()),
+			wantPRClosed: true, wantLabels: failed, wantNoLabels: complete, wantCalls: []string{ready},
+			wantComments: []string{"marking " + testPR + " ready failed after green CI: " + errReadyDenied.Error()},
+		},
+		{
+			name:    "a persistent mark-ready failure fails the issue instead of handing a draft to a human",
+			tracker: backend.GitHub, labels: []string{"agent-in-progress", "agent-tuning-finding"},
+			wantStatuses: []Status{detailOnly, StatusMarkReadyFailed, StatusFailed},
+			setup:        func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.MarkReadyErr = errReadyDenied },
+			want:         settledAs(dispatchrecord.ReasonMarkReadyFailed, errReadyDenied.Error()),
+			wantPRClosed: true, wantLabels: failed, wantNoLabels: complete, wantCalls: []string{ready},
+			wantComments: []string{"marking " + testPR + " ready failed after green CI: " + errReadyDenied.Error()}, wantPRComments: []string{},
+		},
+		{
+			name: "a persistent mark-ready failure fails the issue under auto merge mode", mergeMode: "auto",
+			wantStatuses: []Status{detailOnly, StatusMarkReadyFailed, StatusFailed},
+			setup:        func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.MarkReadyErr = errReadyDenied },
+			want:         settledAs(dispatchrecord.ReasonMarkReadyFailed, errReadyDenied.Error()),
+			wantPRClosed: true, wantLabels: failed, wantNoLabels: complete, wantCalls: []string{ready},
+			wantComments: []string{"marking " + testPR + " ready failed after green CI: " + errReadyDenied.Error()},
+		},
+		{
+			name:  "a persistent mark-ready failure fails the issue instead of handing a guarded PR to a human",
+			guard: ".github/**", files: []string{".github/workflows/ci.yml"},
+			wantStatuses: []Status{detailOnly, StatusMarkReadyFailed, StatusFailed},
+			setup:        func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.MarkReadyErr = errReadyDenied },
+			want:         settledAs(dispatchrecord.ReasonMarkReadyFailed, errReadyDenied.Error()),
+			wantPRClosed: true, wantLabels: failed, wantNoLabels: complete, wantCalls: []string{ready},
+			wantComments: []string{"marking " + testPR + " ready failed after green CI: " + errReadyDenied.Error()},
+		},
+		{
+			name:         "a transient mark-ready failure restoring ready after a force-push is retried and the merge lands",
+			wantStatuses: []Status{detailOnly, StatusRebaseRetry, StatusPostForcePushWait, StatusMarkReadyTransientRetry, StatusVerifiedMerged},
+			checks:       fourGreen,
+			maxRebase:    3, mergeErrs: []error{errConflict},
+			setup: func(t *testing.T, fc *forge.Fake, c *Config) {
+				backoff(3)(t, fc, c)
+				fc.MarkReadyErrs = []error{nil, fmt.Errorf("gh pr ready: 502: %w", forge.ErrMarkReadyTransient)}
+			},
+			want: merged, wantLabels: complete, wantNoLabels: failed, wantMerged: testPR,
+			wantCalls: []string{ready, merge, draft, ready, ready, merge}, wantRebases: 1,
+		},
+		{
+			name:         "a transient mark-ready failure is retried and the merge lands",
+			wantStatuses: []Status{detailOnly, StatusMarkReadyTransientRetry, StatusVerifiedMerged},
+			setup: func(t *testing.T, fc *forge.Fake, c *Config) {
+				backoff(3)(t, fc, c)
+				fc.MarkReadyErrs = []error{fmt.Errorf("gh pr ready: 502: %w", forge.ErrMarkReadyTransient)}
+			},
+			want: merged, wantLabels: complete, wantNoLabels: failed, wantMerged: testPR, wantCalls: []string{ready, ready, merge},
+			wantStepsLike: []Step{stepAt(testPR, StatusMarkReadyTransientRetry, "attempt=1/3 ")},
+		},
+		{
+			name:         "a mark-ready failure that stays transient fails the issue once the retries are spent",
+			wantStatuses: []Status{detailOnly, StatusMarkReadyTransientRetry, StatusMarkReadyTransientRetry, StatusMarkReadyFailed, StatusFailed},
+			setup: func(t *testing.T, fc *forge.Fake, c *Config) {
+				backoff(2)(t, fc, c)
+				fc.MarkReadyErr = fmt.Errorf("gh pr ready: 502: %w", forge.ErrMarkReadyTransient)
+			},
+			want:         settledAs(dispatchrecord.ReasonMarkReadyFailed, "gh pr ready: 502: "+forge.ErrMarkReadyTransient.Error()),
+			wantPRClosed: true, wantLabels: failed, wantNoLabels: complete, wantCalls: []string{ready, ready, ready},
+			wantComments: []string{"marking " + testPR + " ready failed after green CI: gh pr ready: 502"},
 		},
 		{
 			name:         "a plain rebase whose re-wait times out never retries the merge",

@@ -9386,7 +9386,9 @@ so a tokened log it settles (an older `spindrift recover`, say) reads
   be read), `merge-blocked` (the merge or the auto-merge enqueue failed after green; the PR stays open),
   `already-resolved`, `verdict` (research posted its verdict), `findings-filed`
   (a butler Chore filed its findings), and `recover-declined`;
-- `failed`: `landing-failed`, `gate-terminal`, `ci-red` (CI red with no fix pass
+- `failed`: `landing-failed`, `mark-ready-failed` (the green PR could not be
+  marked ready, so it was neither merged nor handed off), `gate-terminal`,
+  `ci-red` (CI red with no fix pass
   budget), `fix-exhausted`, `budget-exhausted`, `fix-failed`, `fix-no-op`,
   `relay-failed` (also recover's park), `draft-pr-failed` (the relay landed,
   the draft-PR create failed), `blocked`, `no-outcome` (the Box printed no

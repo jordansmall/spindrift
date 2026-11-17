@@ -2,6 +2,7 @@ package settle
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -40,6 +41,27 @@ func terminateCases() []prCase {
 		c.PreflightStaleBase = true
 		fc.SetNeedsUpdate(testPR, true)
 	}
+
+	errReadyDenied := errors.New("HTTP 403: Resource not accessible by integration")
+	transientReady := fmt.Errorf("gh pr ready: 502: %w", forge.ErrMarkReadyTransient)
+	// stopInReadyBackoff lands the stop in the backoff that follows the nth
+	// MarkReady call, past the gate's own confirm sleeps.
+	stopInReadyBackoff := func(nth int) (func(*testing.T, *forge.Fake, *Config), func(*forge.Fake, *dispatch.Fake, func())) {
+		armed := false
+		return func(_ *testing.T, _ *forge.Fake, c *Config) {
+				c.Policy = retry.Policy{Max: 3, Unit: 5 * time.Second}
+				c.Clock = dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) {
+					if armed {
+						stopNow()
+					}
+				}}
+			}, func(fc *forge.Fake, _ *dispatch.Fake, mark func()) {
+				stopNow = mark
+				fc.On("MarkReady", func(n int) { armed = n == nth })
+			}
+	}
+	gateBackoffSetup, gateBackoffMid := stopInReadyBackoff(1)
+	rewaitBackoffSetup, rewaitBackoffMid := stopInReadyBackoff(2)
 
 	var polls int
 
@@ -118,6 +140,44 @@ func terminateCases() []prCase {
 			name: "a stop during the ready flip abandons before the manual hand-off", mergeMode: "manual",
 			wantStatuses: []Status{detailOnly, StatusAgentComplete},
 			midCall:      stopOn("MarkReady"), wantAbandoned: true, wantCalls: flip,
+		},
+		{
+			// A non-transient failure returns from the retry loop with no stop
+			// check, so failMarkReady must re-check the mark itself.
+			name:         "a stop during a failing ready flip abandons instead of failing the landing",
+			wantStatuses: []Status{detailOnly},
+			setup:        func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.MarkReadyErr = errReadyDenied },
+			midCall:      stopOn("MarkReady"), wantAbandoned: true, wantCalls: flip,
+		},
+		{
+			name:         "a stop during the last transient ready flip abandons instead of failing the landing",
+			wantStatuses: []Status{detailOnly},
+			setup: func(_ *testing.T, fc *forge.Fake, c *Config) {
+				c.Policy = retry.Policy{Max: 0, Unit: time.Second}
+				fc.MarkReadyErr = transientReady
+			},
+			midCall: stopOn("MarkReady"), wantAbandoned: true, wantCalls: flip,
+		},
+		{
+			name:         "a stop during a ready-flip transient backoff abandons instead of flipping again",
+			wantStatuses: []Status{detailOnly, StatusMarkReadyTransientRetry},
+			setup: func(t *testing.T, fc *forge.Fake, c *Config) {
+				gateBackoffSetup(t, fc, c)
+				fc.MarkReadyErrs = []error{transientReady}
+			},
+			midCall: gateBackoffMid, wantAbandoned: true, wantCalls: flip,
+		},
+		{
+			name:         "a stop during the post-force-push ready-flip backoff abandons instead of failing",
+			wantStatuses: []Status{detailOnly, StatusRebaseRetry, StatusPostForcePushWait, StatusMarkReadyTransientRetry},
+			checks:       []forge.RollupState{green, green, green, green},
+			maxRebase:    5, mergeErrs: []error{errConflict},
+			setup: func(t *testing.T, fc *forge.Fake, c *Config) {
+				rewaitBackoffSetup(t, fc, c)
+				fc.MarkReadyErrs = []error{nil, transientReady}
+			},
+			midCall: rewaitBackoffMid, wantAbandoned: true, wantRebases: 1,
+			wantCalls: []string{"MarkReady:" + testPR, "Merge:" + testPR, "MarkDraft:" + testPR, "MarkReady:" + testPR},
 		},
 		{
 			// The mark lands ahead of the hold's own PR comment, which still fires.

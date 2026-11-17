@@ -153,14 +153,6 @@ func TestSettle_PRLander(t *testing.T) {
 			want:         merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge,
 		},
 		{
-			name:         "mark-ready failure does not block the merge",
-			wantStatuses: []Status{detailOnly, StatusMarkReadyFailed, StatusVerifiedMerged},
-			setup: func(_ *testing.T, fc *forge.Fake, _ *Config) {
-				fc.MarkReadyErr = errors.New("HTTP 403: Resource not accessible by integration")
-			},
-			want: merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge,
-		},
-		{
 			name: "auto mode marks ready before enqueueing the auto-merge", mergeMode: "auto",
 			wantStatuses: []Status{detailOnly, StatusAutoMergeEnqueued},
 			want:         autoEnqueued, wantLabels: complete, wantCalls: []string{"MarkReady:" + testPR, "EnqueueAutoMerge:" + testPR},
