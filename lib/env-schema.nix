@@ -922,7 +922,7 @@ withRowKnobs {
     env = "RESEARCH_RESERVATION";
     group = "dispatch";
     default = 1;
-    doc = "the minimum number of research Dispatches the daemon keeps running out of its MAX_PARALLEL slots -- a floor, not a ceiling: research is preferred only while research has queued work, and either kind bursts into the whole pool when the other has backed off into an empty result; 0 is work-first with research on the leftovers, and a value equal to MAX_PARALLEL is research-first; read by the daemon only, the launcher itself ignores it, and inert when the daemon is restricted to one kind by its positional verb; must not exceed MAX_PARALLEL, which the daemon rejects at startup. Not a tuned final answer -- issue #3541 put the final default out of scope";
+    doc = "the count of running research Dispatches below which a starting daemon slot tries research before work, out of MAX_PARALLEL's pool -- an ordering preference, not a held seat: it never preempts a running child, and the slot is offered to work whenever research cannot start at that moment (nothing queued, rate-limit paused, jam-gated, or its Start budget spent; a stale research count is re-probed first), and either kind bursts into the whole pool when the other has backed off into an empty result; 0 is work-first with research on the leftovers, and a value equal to MAX_PARALLEL is research-first; read by the daemon only, the launcher itself ignores it, and inert when the daemon is restricted to one kind by its positional verb; must not exceed MAX_PARALLEL, which the daemon rejects at startup. Not a tuned final answer -- issue #3541 put the final default out of scope";
     flakeOption = true;
     launcherIgnores = true;
     intKind = "nonneg";
