@@ -1,4 +1,5 @@
-# Shared bats helpers. Sourced by every *.bats file.
+# Shared bats helpers (seam-fixture vars, dispatch-env setup), loaded with
+# `load helper` by the suites that use them.
 #
 # The nix bats check derivations export the paths these helpers depend on:
 # FAKES_DIR and SPINDRIFT_SEAM_FIXTURES_DIR (the rendered contracts and
