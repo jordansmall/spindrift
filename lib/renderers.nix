@@ -1865,8 +1865,7 @@ rec {
           "";
       # The knob's placed flake path (Driver-valued knobs land under
       # agents.drivers.<name>). Since ADR 0037 Pass 1 the settings path is that
-      # path. Empty for a knob with no flake-settings surface, such as
-      # ISSUE_NUMBER or SPINDRIFT_PROMPT_DIR.
+      # path. Empty for a knob with no flake-settings surface.
       flagSettingsPath = key: e: if e.flakeOption or false then placedPath "<name>" key e else "";
       # Mirrors FlagEntry.LauncherIgnores in
       # cmd/launcher/internal/inputdoc/flagtable.go, where the axis is documented
