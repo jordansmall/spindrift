@@ -119,8 +119,8 @@ func TestAssembleValidateRejectsRemovedFragmentVar(t *testing.T) {
 	}
 }
 
-// The on-disk agent-file path (opencode) renders prompts separately from
-// renderAgentsJSON and must reject a removed token too.
+// The on-disk agent-file path renders prompts separately from renderAgentsJSON
+// and must reject a removed token too.
 func TestAssembleValidateRejectsRemovedFragmentVarInAgentFile(t *testing.T) {
 	dir := t.TempDir()
 	writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")

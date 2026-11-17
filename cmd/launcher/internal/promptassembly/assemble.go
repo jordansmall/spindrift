@@ -105,15 +105,16 @@ type Handoff struct {
 	ReviewPromptFile string
 	// ReviewModel is extracted from AgentsJSONTemplate's "reviewer" key
 	// regardless of dispatch kind or FixPass. It stays empty when the template
-	// has no reviewer model, mirroring jq's `.reviewer.model // empty`. Under
-	// opencode (DRIVER_AGENT_FILES_DIR) the baked reviewer.md `model:` overwrites
-	// it (issue #5350). An explicit dispatch-time REVIEW_MODEL (issue #3171)
-	// binds over both last.
+	// has no reviewer model, mirroring jq's `.reviewer.model // empty`. Under a
+	// Driver with on-disk agent files (DRIVER_AGENT_FILES_DIR) the baked
+	// reviewer.md `model:` overwrites it (issue #5350). An explicit
+	// dispatch-time REVIEW_MODEL (issue #3171) binds over both last.
 	ReviewModel string
 	// ReviewEffort mirrors ReviewModel, from the same reviewer key's "effort"
 	// field under the same condition, is likewise overwritten by reviewer.md's
-	// `reasoningEffort:` under opencode (issue #5350), and is overridden last by
-	// an explicit dispatch-time REVIEW_EFFORT (issue #3171).
+	// `reasoningEffort:` under a Driver with on-disk agent files (issue #5350),
+	// and is overridden last by an explicit dispatch-time REVIEW_EFFORT (issue
+	// #3171).
 	ReviewEffort string
 	// AdvisoryReviewer is true when the kind supplies its own reviewer prompt
 	// (butler, ADR 0056): its inline reviewer only
@@ -743,11 +744,10 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	}
 
 	// The on-disk agent-file rewrite is the twin of the --agents JSON loop
-	// above, for a Driver (opencode) whose subagents use baked agent files.
-	// It must run after that loop: an existing reviewer.md's frontmatter
-	// model and effort overwrite whatever the JSON path set in ReviewModel
-	// and ReviewEffort, and a missing reviewer.md leaves the JSON-path
-	// values unchanged.
+	// above, for a Driver whose subagents use on-disk agent files. It must run
+	// after that loop: an existing reviewer.md's frontmatter model and effort
+	// overwrite whatever the JSON path set in ReviewModel and ReviewEffort,
+	// and a missing reviewer.md leaves the JSON-path values unchanged.
 	if e.DriverAgentFilesDir != "" {
 		if err := rewriteAgentFiles(e, bodies.vars, &removed, &result.Handoff.ReviewModel, &result.Handoff.ReviewEffort, bodies.kind.Prompts.Reviewer); err != nil {
 			return Result{}, err
@@ -786,8 +786,9 @@ const reviewFanoutAgent = "review-axis"
 const reviewFanoutFallbackAgent = "general-purpose"
 
 // reviewFanoutAgentFor resolves code-review-baked.md's REVIEW_FANOUT_AGENT
-// from what this run provisions: the --agents JSON driver (claude) by a
-// template key, the agent-files driver (opencode) by an on-disk <name>.md.
+// from what this run provisions: an --agents JSON Driver such as claude by a
+// template key, a Driver with on-disk agent files such as opencode by a
+// <name>.md in that directory.
 // A roster can omit the entry (issue #392's reviewModel="" opt-out), and
 // naming an agent the driver session never defines errors after burning turns.
 func reviewFanoutAgentFor(e Env) string {
@@ -973,9 +974,9 @@ func frontmatterOf(data []byte) string {
 }
 
 // frontmatterScalar extracts the `key:` YAML scalar (`model`,
-// `reasoningEffort`) from a baked opencode reviewer.md's frontmatter. The baked
-// shape is always a double-quoted scalar, e.g. `model: "opus"`, so a prefix cut
-// plus a quote trim replaces the original's jq unwrap without a JSON parse.
+// `reasoningEffort`) from a baked reviewer.md's frontmatter. The baked shape
+// is always a double-quoted scalar, e.g. `model: "opus"`, so a prefix cut plus
+// a quote trim replaces the original's jq unwrap without a JSON parse.
 // Returns "" when the frontmatter has no such line.
 func frontmatterScalar(frontmatter, key string) string {
 	prefix := key + ": "
@@ -987,16 +988,16 @@ func frontmatterScalar(frontmatter, key string) string {
 	return ""
 }
 
-// rewriteAgentFiles is renderAgentsJSON's twin for a Driver (opencode) whose
-// subagents use on-disk agent files. Call it only when DriverAgentFilesDir is
-// set. reviewer.md's `model:` and `reasoningEffort:` scalars overwrite
+// rewriteAgentFiles is renderAgentsJSON's twin for a Driver whose subagents
+// use on-disk agent files. Call it only when DriverAgentFilesDir is set.
+// reviewer.md's `model:` and `reasoningEffort:` scalars overwrite
 // *reviewModel and *reviewEffort (each "" when its key is absent) and the file
 // is removed; a missing one leaves both untouched. A kind with its own
-// reviewer prompt (reviewerPrompt != "") keeps reviewer.md
-// instead, since it never gets the code-owned review pass this removal makes
-// room for — the rewrite loop below then rewrites it from that kind's prompt
-// like any other agent file. Names are rewritten in sorted order, so Go map
-// order cannot vary results.
+// reviewer prompt (reviewerPrompt != "") keeps reviewer.md instead, since it
+// never gets the code-owned review pass this removal makes room for — the
+// rewrite loop below then rewrites it from that kind's prompt like any other
+// agent file. Names are rewritten in sorted order, so Go map order cannot vary
+// results.
 func rewriteAgentFiles(e Env, vars map[string]body, removed *removedVarScan, reviewModel, reviewEffort *string, reviewerPrompt string) error {
 	if reviewerPrompt == "" {
 		reviewerPath := filepath.Join(e.DriverAgentFilesDir, "reviewer.md")
@@ -1045,8 +1046,8 @@ func rewriteAgentFiles(e Env, vars map[string]body, removed *removedVarScan, rev
 			return fmt.Errorf("read agent prompt file %s: %w", promptFiles[name], err)
 		}
 		removed.check(fmt.Sprintf("agent %q prompt", name), renderedBody)
-		// Unlike renderAgentsJSON, no addFragmentRenders: no golden pins opencode
-		// agent files, so recording these would claim coverage no golden backs.
+		// Unlike renderAgentsJSON, no addFragmentRenders: no golden pins agent
+		// files, so recording these would claim coverage no golden backs.
 		rendered := renderedBody.text()
 
 		frontmatter := frontmatterOf(agentFileData)
