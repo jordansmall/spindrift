@@ -634,9 +634,11 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// A Box-inbound request's Host header could otherwise match either route, an
-// ambiguity the file's author should resolve rather than the parser guessing
-// "first wins".
+// registrypathset.ApplyToRoute looks up each route's path set by its
+// match-host, so a second route for that host enforces the same path set under
+// another prefix with a competing credential. Both routes would stay live, so
+// the parser refuses to pick one and leaves the file's author to resolve which
+// credential serves that host.
 func TestParse_DuplicateMatchHostIsErrorNamingHost(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -656,11 +658,10 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// The proxy's route selection (registryvocab.HostKey) lowercases and strips
-// the port before comparing, so "H.Example", "h.example:443" and "h.example"
-// all collapse onto one key at request time. Letting the raw-string check here
-// accept the file would silently shadow the second and third routes with the
-// first.
+// registryvocab.HostKey lowercases and strips the port, so "H.Example",
+// "h.example:443" and "h.example" all fold to the one key ApplyToRoute looks up
+// a path set by: the same credential ambiguity as an exact duplicate, which a
+// raw-string check here would miss.
 func TestParse_DuplicateMatchHostAfterNormalizationIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -684,8 +685,8 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// An inbound "Host: [::1]:443" normalizes (net.SplitHostPort) to "::1", so
-// "[::1]" must normalize the same way or it would never match its own route.
+// HostKey strips the brackets and port, so "[::1]" and "[::1]:443" are one
+// host to route-to-registry matching and must collide here too.
 func TestParse_DuplicateMatchHostBracketedIPv6WithAndWithoutPortIsError(t *testing.T) {
 	const doc = `
 [[routes]]
