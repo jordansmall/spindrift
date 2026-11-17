@@ -66,7 +66,12 @@ Concretely:
   amendment below); either set to `0` disables that cap. The loop
   terminates the instant a pass's own log carries a terminal
   `SPINDRIFT_OUTCOME` line — unconditionally, ahead of either cap — or as
-  soon as a pass's verdict is anything but `BLOCK`.
+  soon as a pass's verdict is anything but `BLOCK`. (Amended by issue #2037:
+  with the code-owned review pass, a review pass's outcome line is never
+  consulted. Amended by issue #5972: a `status=ready` an implement or fix
+  pass prints before a review pass has returned `APPROVE` is premature, so a
+  review pass, or the terminal land pass once `max-slices` has fired,
+  follows it.)
 - **The Driver stays pluggable (ADR 0009).** The orchestrator only ever talks
   to `driver-exec` via the same flag surface entrypoint.sh's direct call
   already used (`--prompt-file`/`--agents-file`/`--session-file`/`--log-path`,
