@@ -19,9 +19,9 @@ func TestReviewFanoutAgentFollowsProvisionedAgents(t *testing.T) {
 		"fragments/fanout.md": "[${REVIEW_FANOUT_AGENT}]",
 	})
 
-	// The table covers both driver mechanisms: the --agents JSON driver
-	// (claude) provisions by template key, and the agent-files driver
-	// (opencode) by an on-disk <name>.md.
+	// The table covers both Driver mechanisms: an --agents JSON Driver such
+	// as claude provisions by template key, and an agent-files Driver such as
+	// opencode by an on-disk <name>.md.
 	cases := []struct {
 		name string
 		env  func(t *testing.T, base Env) Env
