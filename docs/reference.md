@@ -3007,13 +3007,15 @@ maintainer adds those entries by hand, since an agent's push credential cannot
 edit workflow files. With it unset the shadow sends nothing, and each run's
 summary carries the `error` and is not clean.
 
-The token must be read-only. The Route table admits `POST /graphql`, whose body
-the host does not restrict, so the token's scope is the only barrier against a
-mutation from the untrusted Connector. Use a fine-grained personal access token
-scoped to the one repository, with repository permissions Metadata, Issues,
-Pull requests, Checks and Commit statuses set to read and nothing with write.
-Do not reuse the dispatch PAT or a classic token: a classic token's `repo`
-scope grants write, so it cannot be read-only for a private repository.
+Under a shadow row the token must be read-only (a primary github row needs
+a write-capable one, see [Backend primary mode](#backend-primary-mode)). The
+Route table admits `POST /graphql`, whose body the host does not restrict, so
+the token's scope is the only barrier against a mutation from the untrusted
+Connector. Use a fine-grained personal access token scoped to the one
+repository, with repository permissions Metadata, Issues, Pull requests, Checks
+and Commit statuses set to read and nothing with write. Do not reuse the
+dispatch PAT or a classic token: a classic token's `repo` scope grants write,
+so it cannot be read-only for a private repository.
 
 A run is **clean** when its `shadow-<backend>-*.log` holds one `shadow_summary`
 with `loaded: true`, no `error`, `compared` above zero, `diverged` zero and no
@@ -3116,8 +3118,23 @@ read loads a fresh one (issue #7096), in the Connector sandbox when one is on,
 where the dead one's session is released. A failed load is retried by the next
 read until three loads have failed in a row, then at most once a minute. It
 reads with the same host-only `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` as the shadow,
-and the same
-read-only scope list applies. Dropping the github name from
+but under primary the credential must also write issues, so [the shadow's
+read-only scope list](#backend-read-shadow) no longer applies: use a
+fine-grained token scoped to the one repository with Issues set to read and
+write, plus the read permissions that list names (Metadata, Pull requests,
+Checks, Commit statuses). The Route table admits `POST /graphql`, so the
+token's write scope is reachable by the Connector; scope it to the one
+repository. The `primary-connector-write-github` gate checks this at startup
+under `ISSUE_TRACKER=github`, but it is advisory for most credentials. It
+refuses (config invalid, for launch, `doctor` and the daemon's doctor
+preflight) a classic token (`ghp_`, `gho_`) whose scopes lack `repo` or
+`public_repo`, naming `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`, and, as a
+connectivity failure, a token whose introspection itself fails outright. It
+only warns for the recommended fine-grained PAT, which cannot be introspected;
+for an App installation token (`ghs_`), whose introspection reports repository
+push (Contents write), not the Issues permission; for a Connector that declares
+no `forge.tokenGrant`, so introspection is unsupported; and for an unset
+credential, whose issue writes will fail. Dropping the github name from
 `nix/dogfood-primary.nix`, or `primary` from the row, restores the native reads
 with no code revert; the `primary = true` on the github mirror row in
 `nix/fixtures.nix` moves with it, or `connector-driver-rows-dogfood-shadows`
