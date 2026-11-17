@@ -3117,9 +3117,17 @@ research verdicts (`CompleteVerdict`), the butler's label adds (`AddLabels`,
 over `tracker.editLabels`), label creation (`CreateLabel`), every host-posted
 issue comment (`Comment`), and host-posted issue filing (`PostIssue`, over
 `tracker.fileIssue`: the filer's, research's, the butler's and relayed review
-findings). PRs (their comments and ready/draft flips included), merges and
-`CloseMergedIssue` stay native until their own switches (#6886, #6887); without
-`primary` every write stays native. The switches cover launcher-side writes
+findings). Since switch 3 (#6886) it also routes PR writes (`MarkReady`,
+`MarkDraft`, `CommentPR`, and host-side `CreateDraftPR`, which adopts the
+branch's open PR when a create fails) and branch delete (`DeleteBranch`, the
+butler patch path's) over the Connector, and runs push (`PushBranch`), the
+read-only bundle relay (`RelayBundle`, `CommitSubjects`), `Rebase`, the
+read-only Box's mirror seed and the butler Ledger push in core's git against
+the Connector's clone URL with the row's credential, never `gh auth
+git-credential`. A primary rebase syncs onto `BASE_BRANCH`, because the
+Connector's PR read carries no base. Merges, auto-merge and `CloseMergedIssue`
+stay native until switch 4 (#6887); without `primary` every write stays
+native. The switches cover launcher-side writes
 only: the CI claim and release label swaps in
 `.github/actions/agent-setup/action.yml` and
 `.github/workflows/agent-dispatch.yml` still run `gh issue edit` and are not
@@ -3129,11 +3137,8 @@ no native fallback to read from ([Switching jira to
 primary](#switching-jira-to-primary)). The forgejo row replaces the whole Code
 Forge, reads and writes, and leaves the tracker native; it is [documented with
 its Connector](#the-forgejo-connector). The rest of this section describes
-github's. On github, no read stays on `gh` except `Rebase`'s head and base
-branch lookup, which is part of
-that write (the Connector's PR read carries no base branch) and stays until
-cut-over (#6811) deletes the native path. Primary and shadow are exclusive, so a
-primary row samples nothing; evaluation refuses the two together, a row with
+github's. On github, no read stays on `gh`. Primary and shadow are exclusive,
+so a primary row samples nothing; evaluation refuses the two together, a row with
 neither a `backend` nor a `driver` (a Driver's primary mode is [its
 own](#driver-primary-mode)), and a name with no native backend, each naming the
 row.
@@ -3148,10 +3153,12 @@ read loads a fresh one (issue #7096), in the Connector sandbox when one is on,
 where the dead one's session is released. A failed load is retried by the next
 read until three loads have failed in a row, then at most once a minute. It
 reads with the same host-only `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` as the shadow,
-but under primary the credential must also write issues, so [the shadow's
-read-only scope list](#backend-read-shadow) no longer applies: use a
-fine-grained token scoped to the one repository with Issues set to read and
-write, plus the read permissions that list names (Metadata, Pull requests,
+but under primary the credential must also write: issues, PRs and branches
+through the Connector, and core's own git (push, relay, rebase, mirror seed and
+Ledger push) presents it too. [The shadow's read-only scope
+list](#backend-read-shadow) no longer applies: use a fine-grained token scoped
+to the one repository with Issues, Pull requests and Contents set to read and
+write, plus the read permissions that list names for the rest (Metadata,
 Checks, Commit statuses). The Route table admits `POST /graphql`, so the
 token's write scope is reachable by the Connector; scope it to the one
 repository. The `primary-connector-write-github` gate checks this at startup

@@ -1075,3 +1075,16 @@ host-posted github issue (the filer's, research's, the butler's and relayed
 review findings) is filed through the Connector's `tracker.fileIssue`, still
 with no fallback. PRs, merges and `CloseMergedIssue` stay native until their
 switches (#6886, #6887).
+
+## Amendment (issue #6886): primary github lands PRs through the Connector and core's git
+
+Switch 3 of #6756 extends the #6885 amendment. Under `primary`, github's PR
+writes (ready and draft flips, comments, host-side draft-PR creation) and
+branch delete go through the Connector, and push, the read-only bundle relay,
+`Rebase`, the read-only Box's mirror seed and the butler Ledger push run in
+core's git against the Connector's clone URL, authenticated by the row's
+credential rather than `gh auth git-credential`: the Connector never sees a git
+credential, and core never sends a PR write over git. Still no fallback. A
+primary rebase syncs onto `BASE_BRANCH`, since the Connector's PR read carries
+no base. Merges, auto-merge and `CloseMergedIssue` stay native until switch 4
+(#6887).
