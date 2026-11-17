@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -124,6 +125,32 @@ func TestDivergentConnectorIsReportedWithLineAndBothResults(t *testing.T) {
 	}
 	if len(first.Native) == 0 || len(first.Shadow) == 0 || bytes.Equal(first.Native, first.Shadow) {
 		t.Errorf("divergence results native=%s shadow=%s, want two differing results", first.Native, first.Shadow)
+	}
+}
+
+// ResetAt is compared exactly: a native event that differs from the
+// Connector's only in ResetAt is an events divergence.
+func TestEventsDivergeOnResetAt(t *testing.T) {
+	reset := time.Date(2026, 11, 17, 18, 30, 0, 0, time.UTC)
+	native := nativeStrategy()
+	native.NewDecoder = func() driverkit.Decoder {
+		n := 0
+		return func(line string) []driverkit.Event {
+			n++
+			return []driverkit.Event{{Kind: driverkit.KindText, Text: strconv.Itoa(n) + ":" + line, ResetAt: &reset}}
+		}
+	}
+	// driver.wasm decodes each line to the text "<n>:<line>", so ResetAt is
+	// the only difference.
+	divs, sum := replay(t, native, fixture(t, "driver.wasm"), passLog(t, 1), 0)
+	var events int
+	for _, d := range divs {
+		if d.Check == "events" {
+			events++
+		}
+	}
+	if sum.Compared != 1 || events != 1 {
+		t.Fatalf("Compared = %d, events divergences = %d, want 1 and 1", sum.Compared, events)
 	}
 }
 
@@ -284,21 +311,6 @@ func TestPanicBecomesSummaryError(t *testing.T) {
 	_, sum := replay(t, native, fixture(t, "driver.wasm"), passLog(t, 20), 0)
 	if !sum.Loaded || !strings.Contains(sum.Error, "panic: boom") {
 		t.Errorf("summary = %+v, want the panic in Error", sum)
-	}
-}
-
-// A Connector's clock is a fixed epoch, so only whether a reset time was
-// resolved can be compared, not its value.
-func TestEventsJSONComparesResetAtPresenceOnly(t *testing.T) {
-	at := func(year int) *time.Time { v := time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC); return &v }
-	ev := func(r *time.Time) []driverkit.Event {
-		return []driverkit.Event{{Kind: driverkit.KindError, ResetAt: r}}
-	}
-	if !bytes.Equal(eventsJSON(ev(at(2026))), eventsJSON(ev(at(1970)))) {
-		t.Error("two different reset times compared unequal")
-	}
-	if bytes.Equal(eventsJSON(ev(at(2026))), eventsJSON(ev(nil))) {
-		t.Error("a resolved and an unresolved reset time compared equal")
 	}
 }
 
