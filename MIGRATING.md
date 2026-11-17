@@ -1,5 +1,34 @@
 # Migration Guide
 
+## A read-only Box holds no forge credential (issue #6900)
+
+The launcher now forwards no forge token to any `read-only` Box: `GH_TOKEN`,
+`FORGEJO_TOKEN`, `BOX_GH_TOKEN` and `BOX_FORGEJO_TOKEN` are all absent from
+its environment. The Box clones a mirror the launcher fetched host-side, reads
+the issue through host-answered Signal-socket verbs, and the launcher does
+every forge write with its own token. See [Credential-free read-only
+Box](docs/reference.md#credential-free-read-only-box).
+
+What changed for a Consumer:
+
+- **`BOX_GH_TOKEN` and `BOX_FORGEJO_TOKEN` are deprecated.** Only a
+  `read-write` Box reads them (two-actor separation). A `read-only` run no
+  longer requires them, so the Box-token check in the entry below is gone; you
+  can delete both from `harness.env`.
+- **The read-only token gate is gone.** The `read-only-token-github` and
+  `read-only-token-forgejo` launch gates no longer run, so `spindrift doctor`
+  neither requires nor reports a Box token, and the launcher no longer
+  introspects its scopes.
+- **`BOX_FORGE_CREDENTIAL` is a deprecated no-op.** It was the opt-in
+  (issue #7140) for this behaviour, which is now the only one. Any explicit
+  value, `forwarded` or `none`, warns at build, at launch and in doctor and
+  changes nothing; `none` with `read-write` is no longer refused. Unset it
+  (`forge.boxForgeCredential`, `--box-forge-credential`). Issue #6902 removes
+  it.
+
+A `read-write` Box still receives its token, and `BOX_GH_TOKEN` or
+`BOX_FORGEJO_TOKEN` still substitutes for it there.
+
 ## The Box's forge access defaults to read-only (issue #6899)
 
 `BOX_FORGE_AND_ISSUE_ACCESS` (`perSystem.spindrift.forge.boxAccess`,
@@ -18,13 +47,10 @@ says.
 
 If you never set the knob, check three things before you update:
 
-- **A distinct, read-scoped Box token.** On `github` and `forgejo` the launcher
-  refuses to start a read-only run unless `BOX_GH_TOKEN` (GitHub) or
-  `BOX_FORGEJO_TOKEN` (Forgejo) is set and differs from the launcher's own
-  `GH_TOKEN` or `FORGEJO_TOKEN`. Where the forge can report token scopes
-  (GitHub), a write-capable Box token is rejected too. See [Read-only Box
-  token](docs/reference.md#read-only-box-token). `local` and `git` have no Box
-  token row.
+- **No Box token.** A read-only Box needs no `BOX_GH_TOKEN` or
+  `BOX_FORGEJO_TOKEN`; it holds no forge credential at all (issue #6900, above).
+  The launcher's own token must cover every write it now makes (see [Read-only
+  Box token](docs/reference.md#read-only-box-token)).
 - **The labels.** The four triage labels must exist, as before (see [Label
   lifecycle](docs/reference.md#label-lifecycle)). A deployment with a Filer
   also needs `agent-review-finding`, because the host files what the Box

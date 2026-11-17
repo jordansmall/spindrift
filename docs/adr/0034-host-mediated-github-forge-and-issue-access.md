@@ -102,7 +102,9 @@ With every write host-mediated, the Box never needs `Pull requests` or
 token](../reference.md#read-only-box-token) for the full table. This is
 the concrete, code-enforced version of the property two-actor separation
 approximates with a ruleset: a token that cannot write has no PR to open and
-nothing to merge, regardless of what the prompt tells it to do.
+nothing to merge, regardless of what the prompt tells it to do. (Amended by
+issue #6900: a read-only Box now receives no forge token at all, so there is no
+`GH_TOKEN` left to scope.)
 
 ## Two routes to the same guarantee
 
@@ -117,7 +119,7 @@ neither depends on the other:
 | Box can open a PR? | yes — the ruleset only blocks the *base branch* | no — the token has no `Pull requests` scope |
 | Box can comment? | yes, unaffected | no — the Launcher posts every comment |
 | cost | a second machine account + a second secret | more host-side work per issue; requires the selected forge/tracker to implement the three capabilities above, plus a second, reduced-scope `BOX_GH_TOKEN` |
-| enforcement point | GitHub, at ref-update time | spindrift, at startup — the capability gate refuses to run without the host-mediation seams, and the token gate (issue #1950) refuses to start unless the Box's own token is distinct from the Launcher's and, where introspectable, carries no write scope |
+| enforcement point | GitHub, at ref-update time | spindrift, at startup — the capability gate refuses to run without the host-mediation seams, and the token gate (issue #1950) refuses to start unless the Box's own token is distinct from the Launcher's and, where introspectable, carries no write scope (Amended by issue #6900: the token gate is retired; a read-only Box holds no token) |
 
 Read-only is not two-actor separation with extra steps — a Box under
 read-only can still be paired with `BOX_GH_TOKEN` and a ruleset for
@@ -150,7 +152,8 @@ surprise reversal.
 - The Box's `GH_TOKEN` under `read-only` needs only Contents R, Issues R,
   Metadata R — a strictly smaller grant than the read-write PAT table, and
   provisionable the same way `BOX_GH_TOKEN` is under two-actor separation
-  (a second token, same secret-sourcing mechanism).
+  (a second token, same secret-sourcing mechanism). (Amended by issue #6900: a
+  read-only Box is forwarded no token, so nothing is provisioned for it.)
 - `docs/reference.md` gains the [Read-only
   Box](../reference.md#read-only-box-box_forge_and_issue_accessread-only)
   section and the [Read-only Box
@@ -247,6 +250,11 @@ host-mediated in the happy path, but the Box's own credential could still
 `git push`/`gh pr create` directly if anything ever called it outside those
 mediated paths. "The Box's `GH_TOKEN` collapses to Contents R + Issues R +
 Metadata R" (above) described the intended provisioning, not an enforced one.
+
+*Amended by issue #6900:* the gate described in the rest of this section is
+retired, because a read-only Box is forwarded no forge token and
+`BOX_FORGE_CREDENTIAL` is a deprecated no-op; there is no Box token left to
+scope-check. The text below records the original decision.
 
 `checkReadOnlyTokenGate` closes that gap: under `read-only`, startup now
 aborts with a named error unless `BOX_GH_TOKEN` is set **and** differs

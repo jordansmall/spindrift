@@ -85,7 +85,9 @@ package, and its Nix row owns its knobs.
 6. **One read-only token gate.** The row names `TokenEnvVar` and
    `BoxTokenEnvVar`. One gate runs over every distinct active backend with a
    Box token. It warns when the Strategy has no `IntrospectToken`, so a new
-   backend gets a gate by default rather than none.
+   backend gets a gate by default rather than none. (Amended by issue #6900:
+   the read-only token gate is retired, as a read-only Box holds no token;
+   `IntrospectToken` remains for the primary Connector write gate.)
 7. **Per-adapter test derivations, for every registry.**
    `driverGoTestsFor` generalises to one helper mapped over any registry's
    names. It lands in two stages, as ADR 0066 did:

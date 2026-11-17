@@ -130,15 +130,7 @@ apply — `read-only-capability`, `network-mode-runtime`, and
 `--box-signal-carrier socket` — or the flag left unset, which now means
 `socket` — under `NETWORK_MODE=none`, the one pairing the socket carrier
 can never work under; see [Signal
-socket](#signal-socket-box_signal_carriersocket)). A
-`read-only-token-<backend>` row applies only under
-`BOX_FORGE_AND_ISSUE_ACCESS=read-only`, and only for a backend whose
-token `CODE_FORGE` or `ISSUE_TRACKER` uses — normally one, and none under
-[`BOX_FORGE_CREDENTIAL=none`](#credential-free-read-only-box-box_forge_credentialnone). Token rows
-come last, and a failing one stops the walk, so any later token row
-never renders. Under `read-write` no token row applies; doctor instead
-reports `ok: BOX_FORGE_AND_ISSUE_ACCESS=read-write — read-only token
-gate is a no-op` earlier in the report. These are the same gates
+socket](#signal-socket-box_signal_carriersocket)). These are the same gates
 `dispatch`'s bootstrap and `preview` enforce before launching a Box.
 
 **Registry-proxy rows**
@@ -221,13 +213,7 @@ and never affect the exit code; see
   it, since their own rows were suppressed), the `created:` lines, and the
   still-missing-after-creation lines. `ok:` rows and `advisory:` rows —
   including a Required row demoted to advisory by an indeterminate probe
-  (issue #2962) — print only under `--verbose` or its short form `-v`, as
-  do the read-only token gates' (`read-only-token-github`,
-  `read-only-token-forgejo`) own `WARNING:` lines on a passing gate under
-  `BOX_FORGE_AND_ISSUE_ACCESS=read-only` when the Box token's write
-  capability couldn't be introspected — suppressed only in this report,
-  since the same gates still print those lines during `dispatch`'s and
-  `preview`'s own enforcement, which carries no quiet mode of its own.
+  (issue #2962) — print only under `--verbose` or its short form `-v`.
   Together `--verbose`/`-v` reproduce the full pre-#3777 report; exit
   codes and the on-failure stderr summary are unchanged, so a redirected
   stdout still loses nothing.
@@ -2636,8 +2622,9 @@ because GitHub answers a log read with a 302 to a pre-signed blob URL on a host
 that varies; the host follows that one hop with no credential, and doctor shows
 the opt-in as `(follows redirect)` on the route. Two more read routes are not
 pinned to `{repo}`. `GET /installation/repositories` serves an App installation
-token's push permission to the read-only gate, and it lets any load of the
-Connector list every repository the installation reaches, with its permissions.
+token's push permission to the primary Connector write gate, and it lets any
+load of the Connector list every repository the installation reaches, with its
+permissions.
 `GET /search/issues` serves the issue search; a Route restricts no query string,
 so its path cannot name `{repo}`, which is acceptable because the route is
 read-only and the Connector always adds a `repo:` qualifier, quoting the
@@ -2689,7 +2676,7 @@ the `MERGE_MODE=auto` preflight (`forge.autoMerge`), the issue list by dispatch
 state (the core tracker list, which doctor's recoverable-issue row and dispatch
 both read), the label list (`tracker.labels`), the daemon's demand count
 (`tracker.count`), recover's prior-claim read (`tracker.removedLabels`) and
-the read-only gate's token introspection (`forge.tokenGrant`) go through the
+the primary write gate's token introspection (`forge.tokenGrant`) go through the
 Connector and never run `gh`. They share one loaded Connector per repository
 for the life of the process; token introspection loads its own, with the
 candidate token as its credential. A Connector that does not declare one
@@ -4126,7 +4113,7 @@ per-secret `_CMD` example above in one line. A per-secret `<SECRET>_CMD`
 With one exception (the `opencode` bullet below), the template is attempted
 only for a secret this run actually needs — e.g. `JIRA_TOKEN` only when
 `ISSUE_TRACKER=jira`, `FORGEJO_TOKEN` only when `CODE_FORGE` or
-`ISSUE_TRACKER` is `forgejo`, and never for the opt-in Box tokens
+`ISSUE_TRACKER` is `forgejo`, and never for the opt-in, deprecated, `read-write`-only Box tokens
 `BOX_GH_TOKEN` (ADR 0016) and `BOX_FORGEJO_TOKEN` — so an operator who
 doesn't use those features never gets an unwanted vault lookup for them.
 The active Driver's credential is likewise the only one fetched; a
@@ -4180,7 +4167,7 @@ When a vault's naming isn't uniform, fall back to the per-secret
 | `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `CODE_FORGE_ACCUMULATION_REPO_DIR` | `.spindrift/accum.git` under the launcher's working directory when `CODE_FORGE=local` (auto-created and seeded); an explicit value overrides it | host path to the bare Accumulation repo, mounted read-only into the Box and landed into host-side |
 | `BOX_FORGE_AND_ISSUE_ACCESS` | `read-only` (baked; issue #6899)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-only` (the default: the Launcher host-mediates every write — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)) or `read-write` (the Box writes directly; deprecated, warns at build, dispatch, daemon start and `spindrift doctor`, and a later minor release removes it, issue #6757; see [MIGRATING.md](../MIGRATING.md)), coherence-checked against the selected forge/tracker's registry capability bits at `nix build` (Consumer eval) time (issue #2526) — `read-only` is permitted only when the selected forge implements bundle-relay (and host-side draft-PR-create when it has pull requests) and the selected tracker implements host-posted comments; `local`, `github`, and `forgejo` satisfy both sides of the check today, the plain `git` forge satisfies the forge side by bundle relay alone (issue #6898), and the `jira` tracker satisfies the tracker side (paired with a `github`, `forgejo`, or `git` Code Forge, issues #6355, #6898); a Go startup gate remains only as a backstop for a runtime override past what nix already validated |
-| `BOX_FORGE_CREDENTIAL` | `forwarded` (baked via `forge.boxForgeCredential`) | an opt-in on the read-only Box (issue #7140): `forwarded` keeps today's Box forge token; `none` forwards no forge credential, so the Box clones the host-seeded mirror and reads through host-answered Signal-socket verbs, and the read-only token gates stop applying. Valid only with `BOX_FORGE_AND_ISSUE_ACCESS=read-only` (evaluation and the launcher fail otherwise); see [Credential-free read-only Box](#credential-free-read-only-box-box_forge_credentialnone) |
+| `BOX_FORGE_CREDENTIAL` | unset (baked via `forge.boxForgeCredential`) | DEPRECATED, no effect, and removed in issue #6902: every `read-only` Box already holds no forge credential (issue #6900), and a `read-write` Box always receives its token. Any explicit value (`forwarded` or `none`) warns at build, launch and `spindrift doctor` and changes nothing; unset it |
 | `BOX_SIGNAL_CARRIER`     | `socket` (per-run only; not bakeable) | transport for the three mid-run signal channels (comment, PR intent, issue intent) crossing the launcher/Box seam: `socket` (the default — routed over a launcher-owned Signal socket, see [ADR 0052](adr/0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md) and [Signal socket](#signal-socket-box_signal_carriersocket) below) or `log` (the opt-out — nonce-guarded marker lines in the Box log, as before; stays selectable through the whole 0.22 minor). Unset counts as `socket`, so it fails at launcher startup under `NETWORK_MODE=none`, and when each Dispatch starts under `no-host-loopback` where the transport needs TCP; pass `--box-signal-carrier log` there (the daemon reads `BOX_SIGNAL_CARRIER` from its own environment and forwards it to each child as that flag) |
 | `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
 | `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query (per-run only; not bakeable) |
@@ -6475,6 +6462,11 @@ updating the base branch. It is the only configuration in which the merge
 guard is literally uninfluenceable by the Agent, at the cost of a second
 account and a second secret to provision.
 
+`BOX_GH_TOKEN` (and `BOX_FORGEJO_TOKEN`, below) matters only to a `read-write`
+Box, which is deprecated: a `read-only` Box holds no forge credential, so
+there is no Box token to split from the launcher's and nothing to rule out.
+The knobs are deprecated along with it.
+
 **Setup:**
 
 1. Create a **second GitHub user** (or bot account) distinct from the one
@@ -6555,9 +6547,8 @@ which Forgejo user each belongs to, and only one is whitelisted:
 | `BOX_FORGEJO_TOKEN` (Box)  | second, non-whitelisted user | No — the rule blocks it, even via PR merge |
 | `FORGEJO_TOKEN` (launcher) | primary, whitelisted user  | Yes — the rule's sole whitelisted actor |
 
-Unlike GitHub, **Forgejo exposes no endpoint to introspect a token's granted
-scopes**, so the launcher cannot verify `BOX_FORGEJO_TOKEN`'s write capability
-at startup the way `BOX_GH_TOKEN` is checked under `read-only`. The
+**Forgejo exposes no endpoint to introspect a token's granted scopes**, so the
+launcher cannot verify `BOX_FORGEJO_TOKEN`'s write capability at startup. The
 branch-protection rule is the enforcement boundary regardless; provision the
 Box user's PAT with least privilege and verify its scope yourself before
 relying on it.
@@ -6806,7 +6797,7 @@ escalated findings into the PR body, exactly as when the filer is off.
 Under [`BOX_FORGE_AND_ISSUE_ACCESS=read-only`](#read-only-box-box_forge_and_issue_accessread-only)
 (issue #2019; unconditional since #4291 removed the orchestrator switch), the filer's write mechanism
 swaps: instead of `gh label create`/`gh issue create` (both writes a
-read-only token can't make), it prints one nonce-guarded, base64-encoded
+read-only Box can't make), it prints one nonce-guarded, base64-encoded
 `SPINDRIFT_ISSUE_INTENT` stdout line per issue to file, and reports `QUEUED`
 rather than `FILED <url>` — the issue isn't filed until the Launcher relays
 it, host-side, once the Box exits, so no URL is known yet. The Launcher
@@ -7651,9 +7642,8 @@ its Integration branch, so the operator sees it there.
 Issue Tracker to parity with the host-mediated model `local` has always used
 (ADR 0032, ADR 0033, and [ADR
 0034](adr/0034-host-mediated-github-forge-and-issue-access.md) for the
-`github` extension). The Box's `GH_TOKEN` collapses to
-**read-only** — Contents R, Issues R, Metadata R (see [Read-only Box
-token](#read-only-box-token) below) — and every write the Box would
+`github` extension). The Box holds **no forge credential** (issue #6900; see
+[Read-only Box token](#read-only-box-token)), and every write the Box would
 otherwise make in-box instead travels out as a stdout block or a bundle for
 the Launcher to apply with its own, separately-scoped write token:
 
@@ -7690,37 +7680,30 @@ Every way the shipped prompts still tell a Box to run a forge CLI, and which of
 them a `read-only` Box reaches, is inventoried in [In-Box forge CLI
 uses](in-box-forge-cli.md).
 
-#### Credential-free read-only Box (`BOX_FORGE_CREDENTIAL=none`)
+#### Credential-free read-only Box
 
-`BOX_FORGE_CREDENTIAL=none` (`--box-forge-credential`, flake option
-`forge.boxForgeCredential`; default `forwarded`) is an opt-in that forwards no
-forge credential into a `read-only` Box (issue #7140). The Launcher sets neither
-`GH_TOKEN` nor `FORGEJO_TOKEN` in the Box, and no `BOX_GH_TOKEN` or
-`BOX_FORGEJO_TOKEN` substitute either; it sets `BOX_GH_TOKEN_OPTIONAL=1`
-instead. The knob is valid only under `BOX_FORGE_AND_ISSUE_ACCESS=read-only`:
-with `read-write`, evaluation fails (`BOX_FORGE_CREDENTIAL=none requires
-BOX_FORGE_AND_ISSUE_ACCESS=read-only`) and so does the Launcher's startup
-capability gate.
-
-The `read-only-token-<backend>` gates stop applying, so the Launcher and
-`spindrift doctor` neither require nor report a Box token. The Box instead
-clones the host-seeded mirror (`gh auth setup-git` and `fj auth add-key` never
-run), reads the parent and linked issues and searches for duplicates through
-host-answered [Signal socket](#signal-socket-box_signal_carriersocket) verbs
-(`driver-exec signal issue` and `issue-search`), and gets CI detail injected into
-its prompt as `CI FAILURE`. Under the `log` carrier the issue-read verbs are
-unavailable and the prompts render their `*-unreadable` fragments. Branch
-recovery's open-PR question is answered by the Launcher before the Box starts
-(issue #7146): it forwards `BOX_HOST_OPEN_PR` as `open` (adopt and rebase the
-existing branch), `none` (reset it and start fresh), or `unknown` when its
-lookup failed, which aborts recovery as a failed `gh pr list` would. The
+A `read-only` Box holds no forge credential (issue #6900), whatever the
+backend. The Launcher sets none of `GH_TOKEN`, `FORGEJO_TOKEN`, `BOX_GH_TOKEN`
+or `BOX_FORGEJO_TOKEN` in it, and sets `BOX_GH_TOKEN_OPTIONAL=1` instead.
+The Box clones the host-seeded mirror (`gh auth setup-git` and `fj auth
+add-key` never run), reads the parent and linked issues and searches for
+duplicates through host-answered [Signal
+socket](#signal-socket-box_signal_carriersocket) verbs (`driver-exec signal
+issue` and `issue-search`), and gets CI detail injected into its prompt as
+`CI FAILURE`. Under the `log` carrier the issue-read verbs are unavailable and
+the prompts render their `*-unreadable` fragments. Branch recovery's open-PR
+question is answered by the Launcher before the Box starts (issue #7146): it
+forwards `BOX_HOST_OPEN_PR` as `open` (adopt and rebase the existing branch),
+`none` (reset it and start fresh), or `unknown` when its lookup failed, which
+aborts recovery as a failed `gh pr list` would. The
 `prompt-contract-read-only-reaches-no-forge-cli` check pins that no fragment a
 `read-only` Box reaches instructs a forge CLI.
 
-spindrift's own dogfood pins `none`, an exception to mimicking a new Consumer
-(`nix/dogfood-defaults.nix`). It is the switch half of issue #6900, which will
-make a credential-free Box the default for every `read-only` Box and turn this
-knob into a deprecated no-op.
+There is no Box token to provision, verify or report: the Launcher and
+`spindrift doctor` neither require nor read `BOX_GH_TOKEN` or
+`BOX_FORGEJO_TOKEN` under `read-only`, and the `read-only-token-<backend>`
+launch gates (issue #1950) no longer exist. `BOX_FORGE_CREDENTIAL` (issue
+#7140's opt-in) is a deprecated no-op: unset it.
 
 A Connector-backed forge host-mediates the same way when it declares
 `forge.draftPRs`: core relays the bundle in its own git and only the draft-PR
@@ -7868,40 +7851,17 @@ fragments render the no-write path whenever it is absent, for any reason
 (issue #1951) — an unset, typo'd, or forwarding-glitched value can never
 fall open into the write-capable path.
 
-A second startup gate (issue #1950) checks the *token*, not just the forge/
-tracker shape: `read-only` also aborts unless `BOX_GH_TOKEN` is set and differs
-from the Launcher's own `GH_TOKEN` (unless
-[`BOX_FORGE_CREDENTIAL=none`](#credential-free-read-only-box-box_forge_credentialnone),
-which forwards no Box token and skips the gate). Where the Box token can be introspected —
-a classic/OAuth PAT (`X-OAuth-Scopes`) or a GitHub App installation token (the
-repo endpoint's `permissions.push` field) — it's rejected if it carries write
-access; a fine-grained PAT can't be introspected reliably, so it's accepted with
-a loud warning instead. The introspection runs through the github backend's
-Connector when a `github` backend row is configured and not in shadow mode (a
-shadow row keeps `gh` answering), so the host needs no `gh` (a Connector that
-does not declare `forge.tokenGrant` leaves the token unverifiable, so launch
-refuses and names the remedy rather than let an unverified read-only token reach
-the Box); without that row the native `gh` probe answers. The Connector reads a
-classic or OAuth token's scopes header over `POST /graphql` (a viewer query) and
-an installation token's `permissions.push` from `GET /installation/repositories`
-(GraphQL's `viewerPermission` is null for an App), so it needs no REST Route
-for `/user` or the repository.  `spindrift doctor` reports this gate's outcome
-the same way it reports labels and forge connectivity, and reports a gate
-its Connector cannot serve as `unsupported` (even in a quiet run), never a
-failure. `read-write` never inspects `BOX_GH_TOKEN` either way.
-
 `read-only` is an **alternative route to the same guarantee** [two-actor
 separation](#two-actor-separation-opt-in-hard-mode) provides: a Box that
 cannot unilaterally land on the base branch. Two-actor separation gets there
-by capability plus an out-of-band repository ruleset (the Box's token could
-still open a PR and merge it; the ruleset is what stops it). Read-only gets
-there by capability alone — the Box's token cannot open a PR or merge one in
-the first place, because it never receives a token that can. Pick two-actor
-separation when the Box still needs to author the PR/comment content itself
-(the common case today); pick read-only for the strongest available posture,
-at the cost of the Launcher doing more host-side work per issue. The two are
-not mutually exclusive but are also not additive: `read-only` alone already
-removes the capability two-actor separation was closing off with a ruleset.
+by capability plus an out-of-band repository ruleset (a `read-write` Box's
+token could still open a PR and merge it; the ruleset is what stops it).
+Read-only gets there by capability alone — the Box holds no forge credential,
+so it cannot open a PR or merge one in the first place, at the cost of the
+Launcher doing more host-side work per issue. The two are not additive:
+`read-only` alone already removes the capability two-actor separation was
+closing off with a ruleset, which is why two-actor separation now matters only
+to the deprecated `read-write` Box.
 
 ### Signal socket (`BOX_SIGNAL_CARRIER=socket`)
 
@@ -8148,7 +8108,9 @@ boundary does and does not promise.
    Driver](#self-inflicted-secret-reads-are-denied-per-driver).
 3. **`GH_TOKEN` is the accepted residual.** `GH_TOKEN` is vault-sourceable
    like any other secret (point 1 above), but sourcing only controls how it
-   *reaches* the Box — once there, it stays a live environment variable for
+   *reaches* a `read-write` Box (the deprecated mode; a `read-only` Box,
+   the default, receives no token at all) — once there, it stays a live
+   environment variable for
    the run's duration, because the Box is a first-class GitHub actor: it runs
    `git push`, `gh pr create`, `gh issue view`/`comment`/`create`/`list`,
    `gh label create`, and CI-log inspection during the fix pass, all
@@ -8159,12 +8121,12 @@ boundary does and does not promise.
    token from the Box, but it caps the blast radius of a leaked one by
    barring the Box's user from ever updating the base branch — see
    [Two-actor separation](#two-actor-separation-opt-in-hard-mode).
-4. **The strongest available posture is zero GitHub token in the Box.**
-   `CODE_FORGE=local` + `ISSUE_TRACKER=local` (ADR 0033, ADR 0032) mean the
-   Box never receives a GitHub token at all: the repo and issue content
-   arrive as read-only mounts, commits leave as a bundle the host relays,
-   and every GitHub call happens Launcher-side. Available today for the
-   private, fully offline loop — see [Local issue
+4. **The strongest available posture is zero GitHub token in the Box, and
+   it is the default.** A `read-only` Box holds no forge credential (issue
+   #6900), and `CODE_FORGE=local` + `ISSUE_TRACKER=local` (ADR 0033, ADR
+   0032) work the same way: the repo and issue content arrive as read-only
+   mounts, commits leave as a bundle the host relays, and every GitHub call
+   happens Launcher-side. See [Local issue
    tracker](#local-issue-tracker-issue_trackerlocal) and [Local code
    forge](#local-code-forge-code_forgelocal).
 
@@ -8194,27 +8156,14 @@ issues on the host.
 ### Read-only Box token
 
 Under [`BOX_FORGE_AND_ISSUE_ACCESS=read-only`](#read-only-box-box_forge_and_issue_accessread-only)
-the Box's `GH_TOKEN` drops to the smallest scope that still lets it read the
-repo and the issue through `gh` (the clone itself no longer needs it: the Box
-clones the host-fetched mirror) — it never opens a PR, pushes a branch, or posts a
-comment, so it needs none of the write permissions the table above grants:
-
-| permission | level | why                                       |
-| ---------- | ----- | ------------------------------------------ |
-| Contents   | Read  | read the repo in-box — never push          |
-| Issues     | Read  | read the issue and its comments — never write |
-| Metadata   | Read  | mandatory baseline, auto-selected          |
-
-Provision this token (a fine-grained PAT or a GitHub App installation, same
-as above) scoped to **only the Target repository**, and hand it to the Box
-the same way `BOX_GH_TOKEN` reaches it under [two-actor
-separation](#two-actor-separation-opt-in-hard-mode) — the Launcher keeps
-using its own, separately-scoped `GH_TOKEN` (the table above) for every
-host-side write the Box no longer makes. A fully injection-steered Box
-holding only this token cannot open a PR, push a branch, or comment,
-regardless of what the prompt tells it to do — the same enforcement-boundary
-property the [research token](#research-token-least-privilege-optional)
-gets from a Contents-Read-only grant.
+the Box holds no forge token at all (issue #6900), so there is no read-scoped
+Box token to provision: the Box clones the host-fetched mirror and reads the
+issue through host-answered Signal-socket verbs, and the Launcher applies every
+write with its own `GH_TOKEN`, scoped by the table above. A fully
+injection-steered Box cannot open a PR, push a branch, or comment, because it
+holds nothing that could. `BOX_GH_TOKEN` and `BOX_FORGEJO_TOKEN` are
+deprecated and read only by a `read-write` Box, where
+[two-actor separation](#two-actor-separation-opt-in-hard-mode) uses them.
 
 ### GitHub App installation token (recommended)
 
@@ -8340,10 +8289,11 @@ deliberate, not oversights — write them down so you can honour them:
    agent as prompt input. The trust boundary is the label, not the issue or
    comment author. The launcher drops comments a maintainer has minimized on
    GitHub from the transcript it renders, but that is a mitigation for that
-   transcript only: the Box's token can still read the full thread, and the
-   agent still fetches parent and linked issues itself, minimized comments
-   included. What bounds the blast radius is what the token allows and
-   nothing more, because the Box has no host access.
+   transcript only: a read-write Box's token can still read the full thread,
+   and the agent still fetches parent and linked issues itself, minimized
+   comments included. What bounds the blast radius is what the Box's token
+   allows, or under read-only the host-mediated relays, and nothing more,
+   because the Box has no host access.
    Decided comment-trust policy, not yet enforced (the vetted-transcript filter
    is #382; until it lands, every comment reaches the agent on every tracker):
    the filter will keep only comments whose GitHub `author_association` is
@@ -8936,7 +8886,7 @@ verdict comment. Treat the guards as defense in depth on top of the prompt
 and the Filer relay, not as token-level enforcement: under `read-write` the
 Box still holds the ordinary write-capable token, and a direct API call
 gets around the shims. Real enforcement still means
-`BOX_FORGE_AND_ISSUE_ACCESS=read-only` with a read-only Box token.
+`BOX_FORGE_AND_ISSUE_ACCESS=read-only` (the Box then holds no forge credential).
 
 Auto-promotion (ADR 0056, issue #3880) adds `ready-for-agent` (or your
 configured `LABEL`) to a finding at settle, host-side, when every one of
