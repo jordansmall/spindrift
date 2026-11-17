@@ -371,9 +371,10 @@ in
     assert assertMsg (out == mapping) "parse must return all five keys unchanged";
     pkgs.runCommand "jira-status-mapping-parse-valid-all-keys" { } "touch $out";
 
-  # Go's json.Unmarshal of "null" into map[string]string leaves the map nil
-  # with no error, so ParseStatusMapping("null") returns an empty mapping
-  # rather than erroring.
+  # Go's json.Unmarshal of "null" into `any` yields nil with no error, and
+  # ParseStatusMapping returns an empty mapping when it sees that nil, before
+  # its object type assertion, so ParseStatusMapping("null") is a no-op rather
+  # than an error.
   jira-status-mapping-parse-null-is-noop =
     let
       out = jsm.parse "null";
