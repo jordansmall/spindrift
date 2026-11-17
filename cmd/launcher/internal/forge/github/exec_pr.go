@@ -477,7 +477,11 @@ func (e *execClient) MarkReady(prURL string) error {
 	if row, ok := primaryRow(); ok {
 		return e.markReadyViaConnector(row, prURL)
 	}
-	return runGHReadyToggle(prURL, "pr", "ready", prURL)
+	err := runGHReadyToggle(prURL, "pr", "ready", prURL)
+	if err != nil && gitplumbing.IsMergeTransient(err.Error()) {
+		return fmt.Errorf("%w: %w", err, forge.ErrMarkReadyTransient)
+	}
+	return err
 }
 
 // CommentPR posts a comment on the PR itself.

@@ -213,7 +213,14 @@ func (f *prForge) setDraft(prURL string, draft bool) error {
 	return f.call(context.Background(), "forge.setDraft", p, nil)
 }
 
-func (f *prForge) MarkReady(prURL string) error { return f.setDraft(prURL, false) }
+func (f *prForge) MarkReady(prURL string) error {
+	err := f.setDraft(prURL, false)
+	if err != nil && connectorhost.ErrorClass(err) == connectorhost.Transient {
+		return fmt.Errorf("%w: %w", err, forge.ErrMarkReadyTransient)
+	}
+	return err
+}
+
 func (f *prForge) MarkDraft(prURL string) error { return f.setDraft(prURL, true) }
 
 func (f *prForge) CommentPR(prURL, body string) error {

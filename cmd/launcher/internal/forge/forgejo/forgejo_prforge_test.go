@@ -2,6 +2,7 @@ package forgejo_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -997,6 +998,60 @@ func markReadyAgainst(t *testing.T, title string, draft bool) (patches []map[str
 	})
 	err = pr.MarkReady("https://forge.test/owner/repo/pulls/206")
 	return patches, err
+}
+
+// markReadyFailing serves a draft PR whose GET or PATCH answers status, so the
+// adapter's one classification point sees a failure from either call.
+func markReadyFailing(t *testing.T, failGET bool, status int) error {
+	t.Helper()
+	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && failGET:
+			w.WriteHeader(status)
+		case r.Method == http.MethodGet:
+			w.Write([]byte(pullJSON(206, "open", false, true, true, "WIP: add feature", "agent/issue-206", "abc123", "main")))
+		default:
+			w.WriteHeader(status)
+		}
+	})
+	return pr.MarkReady("https://forge.test/owner/repo/pulls/206")
+}
+
+func TestMarkReady_ServerErrorWrapsErrMarkReadyTransient(t *testing.T) {
+	for _, failGET := range []bool{false, true} {
+		err := markReadyFailing(t, failGET, http.StatusBadGateway)
+		if !errors.Is(err, forge.ErrMarkReadyTransient) {
+			t.Errorf("failGET=%v: 502 error = %v, want errors.Is ErrMarkReadyTransient", failGET, err)
+		}
+	}
+}
+
+func TestMarkReady_ClientErrorIsNotTransient(t *testing.T) {
+	for _, status := range []int{http.StatusForbidden, http.StatusNotFound, http.StatusUnprocessableEntity} {
+		for _, failGET := range []bool{false, true} {
+			err := markReadyFailing(t, failGET, status)
+			if err == nil || errors.Is(err, forge.ErrMarkReadyTransient) {
+				t.Errorf("failGET=%v status %d: error = %v, want a non-transient failure", failGET, status, err)
+			}
+		}
+	}
+}
+
+func TestMarkReady_NetworkErrorWrapsErrMarkReadyTransient(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	url := srv.URL
+	srv.Close()
+	err := newPRForgeAt(t, url).MarkReady("https://forge.test/owner/repo/pulls/206")
+	if !errors.Is(err, forge.ErrMarkReadyTransient) {
+		t.Fatalf("connection-refused error = %v, want errors.Is ErrMarkReadyTransient", err)
+	}
+}
+
+func TestMarkReady_EmptyTitleIsNotTransient(t *testing.T) {
+	_, err := markReadyAgainst(t, "WIP:", true)
+	if err == nil || errors.Is(err, forge.ErrMarkReadyTransient) {
+		t.Fatalf("empty-title error = %v, want a non-transient failure", err)
+	}
 }
 
 func TestMarkReady_MarkerOnlyTitleRefusesPatch(t *testing.T) {

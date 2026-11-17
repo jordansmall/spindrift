@@ -600,3 +600,53 @@ fi
 		t.Fatalf("CommentPR error must surface gh's stderr; got: %v", err)
 	}
 }
+
+func TestMarkReady_TransientFailureWrapsErrMarkReadyTransient(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "ready" ]; then
+  printf 'HTTP 502: Bad Gateway\n' >&2
+  exit 1
+fi
+`)
+
+	c := NewExecClient("owner/repo", testLabels)
+	err := c.MarkReady("https://github.com/owner/repo/pull/42")
+	if !errors.Is(err, forge.ErrMarkReadyTransient) {
+		t.Fatalf("MarkReady error must be errors.Is forge.ErrMarkReadyTransient; got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "HTTP 502: Bad Gateway") {
+		t.Fatalf("MarkReady error must surface gh's stderr; got: %v", err)
+	}
+	if err := c.MarkDraft("https://github.com/owner/repo/pull/42"); errors.Is(err, forge.ErrMarkReadyTransient) {
+		t.Fatalf("MarkDraft must not carry the mark-ready sentinel; got: %v", err)
+	}
+}
+
+// The classifier is gitplumbing's, shared with Merge: it knows "unexpected EOF",
+// which isTransientForgeError does not.
+func TestMarkReady_UnexpectedEOFWrapsErrMarkReadyTransient(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "ready" ]; then
+  printf 'Post "https://api.github.com/graphql": unexpected EOF\n' >&2
+  exit 1
+fi
+`)
+
+	c := NewExecClient("owner/repo", testLabels)
+	err := c.MarkReady("https://github.com/owner/repo/pull/42")
+	if !errors.Is(err, forge.ErrMarkReadyTransient) {
+		t.Fatalf("MarkReady error must be errors.Is forge.ErrMarkReadyTransient; got: %v", err)
+	}
+}
+
+func TestMarkReady_PersistentFailureIsNotTransient(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "ready" ]; then
+  printf 'HTTP 403: Resource not accessible by integration\n' >&2
+  exit 1
+fi
+`)
+
+	c := NewExecClient("owner/repo", testLabels)
+	err := c.MarkReady("https://github.com/owner/repo/pull/42")
+	if err == nil || errors.Is(err, forge.ErrMarkReadyTransient) {
+		t.Fatalf("a 403 must fail without the transient sentinel; got: %v", err)
+	}
+}

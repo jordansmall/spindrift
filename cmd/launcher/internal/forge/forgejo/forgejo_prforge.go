@@ -1,6 +1,7 @@
 package forgejo
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/rest"
 )
 
 type forgejoPullRef struct {
@@ -522,13 +524,31 @@ func (f *forgejoCodeForge) EnqueueAutoMerge(prURL string) error {
 	return f.postMerge(index, map[string]any{"merge_when_checks_succeed": true})
 }
 
-// MarkReady flips the PR out of draft by PATCHing its title with the WIP prefix
+// MarkReady flips the PR out of draft, classifying a 5xx or transport failure
+// as forge.ErrMarkReadyTransient.
+func (f *forgejoCodeForge) MarkReady(prURL string) error {
+	err := f.markReady(prURL)
+	if isTransientMarkReady(err) {
+		return fmt.Errorf("%w: %w", err, forge.ErrMarkReadyTransient)
+	}
+	return err
+}
+
+// isTransientMarkReady reports a 5xx or a transport failure (*url.Error, which
+// rest.Client.Do chains via %w). A 4xx is a definitive refusal.
+func isTransientMarkReady(err error) bool {
+	var status rest.StatusError
+	var transport *url.Error
+	return (errors.As(err, &status) && status.Status >= 500) || errors.As(err, &transport)
+}
+
+// markReady flips the PR out of draft by PATCHing its title with the WIP prefix
 // stripped. A PR that is already not a draft is a no-op issuing no request. The
-// gate is isDraftPull, not isDraftTitle, so MarkReady can act on every draft
+// gate is isDraftPull, not isDraftTitle, so it can act on every draft
 // OpenPRForBranch adopts, including one signaled by the draft field alone.
 // A title that strips to empty is an error: Forgejo silently ignores an
 // empty-title PATCH, which would leave the PR a draft.
-func (f *forgejoCodeForge) MarkReady(prURL string) error {
+func (f *forgejoCodeForge) markReady(prURL string) error {
 	p, err := f.getPull(prURL)
 	if err != nil {
 		return err
