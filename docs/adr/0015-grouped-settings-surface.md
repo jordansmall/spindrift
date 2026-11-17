@@ -1,5 +1,15 @@
 # Grouped `settings.<section>.<knob>` flake option surface
 
+> **Superseded in part by [ADR 0037](0037-flake-surface-is-a-domain-tree-decoupled-from-the-cli-taxonomy.md).**
+> The `settings.<section>.<knob>` layout is replaced by a domain tree directly
+> under `perSystem.spindrift.*`; the old section names survive only as
+> deprecated aliases, frozen in `lib/legacy-settings-section.nix` (the
+> `groupToAttr` map below no longer exists). ADR 0037 also re-cut the schema
+> `group` field into domains, so a section no longer matches a `group`
+> heading. `groupOrder` now lives in
+> `lib/renderers.nix`, not `cmd/launcher/flags.go`. Module-system typo
+> protection and the flat `defaults` map forwarded to `mkHarness` still stand.
+
 The flat `perSystem.spindrift.defaults.<knob>` surface is replaced with a
 grouped `perSystem.spindrift.settings.<section>.<knob>` surface, where each
 section corresponds to a `group` heading in `lib/env-schema.nix` (and in
