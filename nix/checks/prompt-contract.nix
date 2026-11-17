@@ -1,8 +1,11 @@
 # Eval-level checks for lib/prompt-contract.nix (issues #2245, #2246, #2405).
 # Each check diffs a registry row against the real on-disk source, or asserts
-# a cross-row invariant. It deliberately pins no registry's row count, row
-# order, or per-row literal field values: those can only fail on a deliberate
-# data edit, never on a real behavioral bug.
+# a cross-row invariant, such as every row of a registry sharing one fixed
+# value. By default no check pins a registry's row count, row order, or one
+# row's own literal field values, since such a pin fails only on a deliberate
+# data edit, never on a behavioral bug. The exceptions are deliberate
+# tripwires, each under a comment naming the decision (and its issue) or the
+# generated consumer it protects.
 { pkgs, ... }:
 let
   promptContract = import ../../lib/prompt-contract.nix;
@@ -879,6 +882,8 @@ in
       "markerChannels' ids must be exactly [${concatStringsSep ", " expected}] in that order, got: [${concatStringsSep ", " out}]";
     pkgs.runCommand "prompt-contract-marker-channels-ids-known" { } "touch $out";
 
+  # issue #2974: defense is a closed enum; this catches a typo'd value, as
+  # the forbiddenMarkers kind/enforce checks do.
   prompt-contract-marker-channels-every-row-defense-known-value =
     let
       bad = builtins.filter (
@@ -895,6 +900,7 @@ in
       "every markerChannels row's defense must be one of \"structural\"/\"nonce\"/\"fold\", offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-marker-channels-every-row-defense-known-value" { } "touch $out";
 
+  # issue #2974: carrier is a closed enum too, checked the same way.
   prompt-contract-marker-channels-every-row-carrier-known-value =
     let
       bad = builtins.filter (
@@ -931,6 +937,8 @@ in
     pkgs.runCommand "prompt-contract-marker-channels-only-signal-rows-carry-socket-fields" { }
       "touch $out";
 
+  # issue #3726: a cross-row invariant -- every socket-carrying row shares
+  # the Signal socket's one fixed socketCarrier and socketDefense (ADR 0052).
   prompt-contract-marker-channels-socket-fields-have-known-value =
     let
       withSocketFields = builtins.filter (
