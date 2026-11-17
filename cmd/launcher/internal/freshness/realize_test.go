@@ -107,9 +107,9 @@ func TestRealizeTip_CallsRealizeOnce(t *testing.T) {
 	}
 }
 
-// The fake blocks inside Start so the test can prove RealizeTip is
-// fire-and-forget rather than merely eventually async: it must return while
-// Start is still blocked.
+// Start runs synchronously, but the fake blocks inside the wait function it
+// returns, so the test can prove RealizeTip is fire-and-forget rather than
+// merely eventually async: it must return while that wait is still blocked.
 func TestRealizeTip_ReturnsBeforeRealizeCompletes(t *testing.T) {
 	block := make(chan struct{})
 	rf := NewRealizerFake()
@@ -130,7 +130,7 @@ func TestRealizeTip_ReturnsBeforeRealizeCompletes(t *testing.T) {
 
 	select {
 	case <-rf.Done:
-		t.Fatal("Start completed before being unblocked")
+		t.Fatal("Start's wait function completed before being unblocked")
 	default:
 	}
 
@@ -139,7 +139,7 @@ func TestRealizeTip_ReturnsBeforeRealizeCompletes(t *testing.T) {
 	select {
 	case <-rf.Done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("Start did not complete after being unblocked")
+		t.Fatal("Start's wait function did not complete after being unblocked")
 	}
 }
 
