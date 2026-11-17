@@ -86,6 +86,24 @@ func TestMergeMapsTransientToTheRetriedSentinel(t *testing.T) {
 	}
 }
 
+func TestMarkReadyMapsTransientToTheRetriedSentinel(t *testing.T) {
+	h := newPRHarness(t, nil, map[string]any{"forge.setDraft": classed(connectorhost.Transient)})
+	err := h.pr().MarkReady(prURL7)
+	if !errors.Is(err, forge.ErrMarkReadyTransient) {
+		t.Fatalf("MarkReady = %v, want ErrMarkReadyTransient", err)
+	}
+	if connectorhost.ErrorClass(err) != connectorhost.Transient {
+		t.Errorf("class lost: %v", err)
+	}
+	if !strings.HasSuffix(err.Error(), forge.ErrMarkReadyTransient.Error()) {
+		t.Errorf("MarkReady = %q, want the sentinel text last, as the github adapter renders it", err)
+	}
+	h = newPRHarness(t, nil, map[string]any{"forge.setDraft": classed(connectorhost.Transient)})
+	if err := h.pr().MarkDraft(prURL7); errors.Is(err, forge.ErrMarkReadyTransient) {
+		t.Errorf("MarkDraft = %v, must not carry the mark-ready sentinel", err)
+	}
+}
+
 func TestMergeFailureIsClassifiedFromThePR(t *testing.T) {
 	for _, tc := range []struct {
 		name string

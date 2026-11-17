@@ -78,6 +78,9 @@ type PRForgeFake struct {
 	// EnqueueAutoMergeCalls records all PR URLs passed to EnqueueAutoMerge.
 	EnqueueAutoMergeCalls []string
 
+	// MarkReadyErrs scripts MarkReady one entry per call (a nil entry is a
+	// success), ahead of MarkReadyErr, so a test can fail once then recover.
+	MarkReadyErrs []error
 	// MarkReadyErr, if non-nil, is returned by MarkReady.
 	MarkReadyErr error
 	// MarkReadyCalls records all PR URLs passed to MarkReady, in order.
@@ -463,8 +466,8 @@ func (pf *PRForgeFake) MarkReady(prURL string) error {
 		defer pf.mu.Unlock()
 		pf.LandingCallLog = append(pf.LandingCallLog, "MarkReady:"+prURL)
 		pf.MarkReadyCalls = append(pf.MarkReadyCalls, prURL)
-		if pf.MarkReadyErr != nil {
-			return nil, pf.MarkReadyErr
+		if err := popErr(&pf.MarkReadyErrs, pf.MarkReadyErr); err != nil {
+			return nil, err
 		}
 		pf.drafts[prURL] = false
 		return nil, nil

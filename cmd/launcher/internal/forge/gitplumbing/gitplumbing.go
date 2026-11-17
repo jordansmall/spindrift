@@ -75,8 +75,9 @@ var mergeTransientMarkers = slices.Concat(sharedTransientMarkers, []string{
 })
 
 // IsMergeTransient reports whether gh's stderr indicates a transient
-// transport or server failure rather than a genuine merge rejection. Callers
-// check IsMergeConflict first: a conflict's stderr is classified by mergeable
+// transport or server failure rather than a genuine merge rejection. It
+// classifies `gh pr ready` failures the same way. Callers check
+// IsMergeConflict first: a conflict's stderr is classified by mergeable
 // state, not by these markers.
 func IsMergeTransient(stderr string) bool {
 	return MatchesAnyMarker(stderr+"\n", mergeTransientMarkers)

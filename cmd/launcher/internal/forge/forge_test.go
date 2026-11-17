@@ -899,3 +899,22 @@ func TestRenderFailureDetail_EarliestErrorLinesWinTheBudget(t *testing.T) {
 		t.Errorf("kept a late error line over the earliest:\n%s", got)
 	}
 }
+
+func TestFakeMarkReadyErrsDrainPerCallThenFallBack(t *testing.T) {
+	f := forge.NewFake()
+	f.MarkReadyErrs = []error{forge.ErrMarkReadyTransient, nil}
+	f.MarkReadyErr = errors.New("persistent")
+	url := "https://github.com/o/r/pull/1"
+	if err := f.MarkReady(url); !errors.Is(err, forge.ErrMarkReadyTransient) {
+		t.Fatalf("call 1 = %v, want ErrMarkReadyTransient", err)
+	}
+	if err := f.MarkReady(url); err != nil {
+		t.Fatalf("call 2 = %v, want nil (queued nil entry)", err)
+	}
+	if err := f.MarkReady(url); err == nil || err.Error() != "persistent" {
+		t.Fatalf("call 3 = %v, want fallback MarkReadyErr", err)
+	}
+	if len(f.MarkReadyCalls) != 3 {
+		t.Errorf("MarkReadyCalls = %v, want all 3 recorded", f.MarkReadyCalls)
+	}
+}

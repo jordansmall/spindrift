@@ -53,6 +53,11 @@ func WorkflowPermissionRemedy(num string) string {
 // backoff.
 var ErrMergeTransient = errors.New("transient merge failure")
 
+// ErrMarkReadyTransient is returned by MarkReady when the draft-to-ready flip
+// fails for a transient transport or server reason rather than a genuine
+// refusal (permission, closed PR). Callers may retry with backoff.
+var ErrMarkReadyTransient = errors.New("transient mark-ready failure")
+
 // ErrAuthFailure means the forge credentials are missing or invalid: Probe
 // returns it, as do the REST adapters on a 401 or 403. Callers should name the
 // selected backend's token (doctor's Config.TokenHint).
