@@ -18,7 +18,7 @@ own `--seccomp FD` flag, unconditional for every bwrap Box.
 `lib/seccomp.nix` compiles the filter with libseccomp
 (`seccomp_init`/`seccomp_rule_add`/`seccomp_export_bpf`) rather than hand-
 assembling BPF, and the launcher (`bwrapAdapter.Run` in
-`cmd/launcher/internal/runner/bwrap.go`) opens the resulting file and passes
+`cmd/launcher/internal/runner/bwrap/bwrap.go`) opens the resulting file and passes
 its fd via `cmd.ExtraFiles`. Three questions had to be settled to get there.
 
 - **Denylist, not a podman-style full allowlist.** podman's own default
