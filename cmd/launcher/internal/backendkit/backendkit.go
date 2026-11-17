@@ -138,9 +138,10 @@ type Strategy struct {
 	KnobsFromRemote func(remote string) map[string]string
 	AcquireToken    func(Shared, Lookup, TokenPrompt) (string, error)
 
-	// IntrospectToken probes a Box token for write capability, scoped to repoSlug
-	// where the probe itself is repo-scoped. Nil means the backend cannot
-	// introspect its Box token, and the read-only gate warns.
+	// IntrospectToken probes the launcher's own forge token for write capability,
+	// scoped to repoSlug where the probe itself is repo-scoped. Nil means the
+	// backend cannot introspect it, and the primary Connector write gate warns
+	// instead of refusing.
 	IntrospectToken TokenIntrospector
 }
 

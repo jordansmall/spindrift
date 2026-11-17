@@ -124,7 +124,7 @@ func bootstrapWith(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descri
 		}()
 	}
 
-	// Ahead of the gate walk, whose token gates already load a Connector.
+	// Ahead of the gate walk, whose network gates may load a Connector.
 	closeSandbox := installConnectorSandbox(seedConfig, pwd)
 	defer func() {
 		if err != nil {
@@ -400,7 +400,7 @@ func researchLaunchStack(lc *launchContext) (forge.IssueTracker, *dispatch.Facto
 
 // lazyRunner is the Connector sandbox's Starter: it builds its runner on the
 // first start, so a run that loads no Connector builds none. It cannot borrow
-// bootstrap's own runner, which is built after the token gates that already
+// bootstrap's own runner, which is built after the network gates that may
 // load Connectors.
 type lazyRunner struct {
 	build func() (runner.Runner, error)

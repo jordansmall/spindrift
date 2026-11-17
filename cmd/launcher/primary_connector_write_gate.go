@@ -36,10 +36,9 @@ func warnPrimaryWriteUndetermined(w io.Writer, env, reason string) {
 // transitions, the claim and verdicts with it, and a read-only token would
 // fail them only after the claim. A credential whose capability cannot be
 // read (a fine-grained PAT, an installation token, an unsupported hook, an
-// unset env) warns rather than refuses, as the read-only token gate does. The
-// env is final by now: mainRun resolves each row's _CMD form before any verb
-// runs, so an empty value is not set, and backendrows.Use only checks that the
-// row names a credential env.
+// unset env) warns rather than refuses. The env is final by now: mainRun
+// resolves each row's _CMD form before any verb runs, so an empty value is not
+// set, and backendrows.Use only checks that the row names a credential env.
 func checkPrimaryConnectorWriteGate(c config, w io.Writer) error {
 	row, ok := backendrows.Lookup(backend.GitHub.Name)
 	if !ok {

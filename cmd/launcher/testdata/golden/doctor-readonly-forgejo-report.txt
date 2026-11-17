@@ -26,5 +26,3 @@ ok: recover kind: on — CODE_FORGE=forgejo relays a read-only Box's outbox bund
 ok: read-only-capability
 ok: network-mode-runtime
 ok: signal-carrier-network-mode
-WARNING: the Forgejo backend cannot introspect a token's scopes (no IntrospectToken hook), so BOX_FORGEJO_TOKEN's write capability could not be determined. read-only trusts that it was provisioned with read-only scope; verify this yourself before relying on it.
-ok: read-only-token-forgejo

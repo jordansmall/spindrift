@@ -18,7 +18,7 @@ type gatedContext struct {
 // newGatedContext splices the runner's launch prerequisites between
 // gateRegistry's non-Network and Network halves rather than appending them
 // after, so preview and real dispatch stop at the same first failure and the
-// token gates' live network calls never run ahead of a runner-prerequisite
+// network gates' live calls never run ahead of a runner-prerequisite
 // failure.
 func newGatedContext(w io.Writer, kind *dispatchkind.Descriptor, selfContained bool) (gatedContext, error) {
 	rc, err := newReadContext(kind, selfContained)

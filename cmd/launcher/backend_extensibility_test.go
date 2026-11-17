@@ -41,16 +41,10 @@ func fakeGitlabRow() backendkit.Strategy {
 }
 
 // withExtraStrategies registers extra beside the shipped Strategies for the
-// test and rebuilds gateRegistry's token gates, which are built once at
-// package init. Cleanup restores both.
+// test; cleanup restores the registry.
 func withExtraStrategies(t *testing.T, extra ...backendkit.Strategy) {
 	t.Helper()
-	restore := backendkit.ReplaceRegistryForTest(append(backendkit.Strategies(), extra...))
-	rebuildTokenGates()
-	t.Cleanup(func() {
-		restore()
-		rebuildTokenGates()
-	})
+	t.Cleanup(backendkit.ReplaceRegistryForTest(append(backendkit.Strategies(), extra...)))
 }
 
 // TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges pins issue #2267
@@ -107,16 +101,6 @@ func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 	}
 	if hintRow.DoctorSlugHint != "GITLAB_BASE_URL" {
 		t.Errorf("doctorSlugHint = %q, want %q", hintRow.DoctorSlugHint, "GITLAB_BASE_URL")
-	}
-
-	found := false
-	for _, g := range gateRegistry {
-		if g.Name == "read-only-token-gitlab" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("gateRegistry has no read-only-token-gitlab gate for the fake Strategy")
 	}
 }
 

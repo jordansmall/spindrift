@@ -151,8 +151,7 @@ func (c config) kind() *dispatchkind.Descriptor {
 }
 
 // boxHoldsNoForgeCredential is BOX_FORGE_CREDENTIAL=none (issue #7140): the
-// Box gets no forge token, so dispatch forwards none and doctor's read-only
-// token gates stand down.
+// Box gets no forge token, so dispatch forwards none.
 func (c config) boxHoldsNoForgeCredential() bool {
 	return c.BoxForgeCredential == "none"
 }

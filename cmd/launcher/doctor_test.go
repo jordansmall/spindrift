@@ -18,7 +18,7 @@ import (
 
 // The full configErr/runErr to exit-code mapping for `spindrift doctor`
 // (issue #2569): configErr always wins with 2, as do runErrs wrapping
-// errReadOnlyGateMisconfigured or errLaunchGateConfigInvalid (issue #2942);
+// errLaunchGateConfigInvalid (issue #2942);
 // 0 for a clean run, 3 for doctor.ErrConnectivity, 4 for
 // doctor.ErrRequiredLabelsMissing, 1 for anything else.
 func TestDoctorExitCodeFor(t *testing.T) {
@@ -32,11 +32,10 @@ func TestDoctorExitCodeFor(t *testing.T) {
 		{"nil, nil", nil, nil, 0},
 		{"ErrConnectivity", nil, fmt.Errorf("%w: boom", doctor.ErrConnectivity), 3},
 		{"ErrRequiredLabelsMissing", nil, fmt.Errorf("%w: boom", doctor.ErrRequiredLabelsMissing), 4},
-		{"errReadOnlyGateMisconfigured runErr", nil, fmt.Errorf("%w: boom", errReadOnlyGateMisconfigured), 2},
 		{"errLaunchGateConfigInvalid runErr", nil, fmt.Errorf("%w: boom", errLaunchGateConfigInvalid), 2},
 		// Exit 1 is deliberately unreachable from a real doctorReport call
 		// after #2569 and #2942: doctor.Run's probes and the read-only
-		// token, capability, and network-mode gates classify every real
+		// capability and network-mode gates classify every real
 		// runErr, leaving exit 1 for a programming error. This
 		// pure-translator row is the only coverage it can get.
 		{"other error", nil, errors.New("boom"), 1},
@@ -173,59 +172,6 @@ func TestDoctorReport_ErrRequiredLabelsMissing_ExitsFour(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "agent-in-progress") {
 		t.Errorf("want stderr to name the missing label(s), got %q", stderr.String())
-	}
-}
-
-// Regression test for a bug a review on issue #2569 flagged:
-// BOX_FORGE_AND_ISSUE_ACCESS=read-only with BOX_GH_TOKEN unset used to exit 1
-// through doctorExitCodeFor's default branch, contradicting docs/reference.md
-// and MIGRATING.md, which say a config/auth failure is always 2 or 3. The
-// gate's "unset" error now wraps errReadOnlyGateMisconfigured, so it exits 2.
-func TestDoctorReport_ReadOnlyTokenGate_UnsetBoxToken_ExitsTwo(t *testing.T) {
-	f := forge.NewFake()
-	f.ProbeRepo = "owner/repo"
-	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
-
-	c := minimalValidConfig()
-	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
-		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.BoxForgeAndIssueAccess = "read-only"
-	t.Setenv("BOX_GH_TOKEN", "")
-
-	var stdout, stderr bytes.Buffer
-	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), doctorOptions{interactive: false, verbose: true})
-
-	if got != 2 {
-		t.Errorf("want exit 2, got %d", got)
-	}
-	if !strings.Contains(stderr.String(), "BOX_GH_TOKEN") {
-		t.Errorf("want stderr to name BOX_GH_TOKEN, got %q", stderr.String())
-	}
-}
-
-// The sibling misconfiguration the same review flagged: BOX_GH_TOKEN set but
-// byte-for-byte identical to the Launcher's own GH_TOKEN, which defeats
-// read-only just as surely as leaving it unset. Must also exit 2.
-func TestDoctorReport_ReadOnlyTokenGate_BoxTokenEqualsLauncherToken_ExitsTwo(t *testing.T) {
-	f := forge.NewFake()
-	f.ProbeRepo = "owner/repo"
-	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
-
-	c := minimalValidConfig()
-	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
-		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.BoxForgeAndIssueAccess = "read-only"
-	c.GhToken = "shared-token"
-	t.Setenv("BOX_GH_TOKEN", "shared-token")
-
-	var stdout, stderr bytes.Buffer
-	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), doctorOptions{interactive: false, verbose: true})
-
-	if got != 2 {
-		t.Errorf("want exit 2, got %d", got)
-	}
-	if !strings.Contains(stderr.String(), "BOX_GH_TOKEN") {
-		t.Errorf("want stderr to name BOX_GH_TOKEN, got %q", stderr.String())
 	}
 }
 
@@ -563,85 +509,8 @@ func TestDoctorGateRegistryReport_CollectAll_ReportsEveryFailingNonNetworkGate(t
 	}
 }
 
-// Restores the pre-#2942 behavior (origin/main's deleted
-// reportReadOnlyTokenGate) that a review round found silently dropped: under
-// read-write, doctor prints one explicit no-op line for the read-only token
-// gate, worded exactly as `git show 9a03d542^:cmd/launcher/doctor.go` had it.
-// The gate is Applicable()-skipped, so no per-backend "ok:" line appears.
-func TestRunDoctor_ReadWrite_PrintsExplicitTokenGateNoOpLine(t *testing.T) {
-	f := forge.NewFake()
-	f.ProbeRepo = "owner/repo"
-	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
-
-	c := minimalValidConfig() // boxForgeAndIssueAccess: read-write, codeForge/issueTracker: github
-	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
-		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-
-	var buf bytes.Buffer
-	_, report := doctorCheckSets(c)
-	if err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	out := buf.String()
-	want := "ok: BOX_FORGE_AND_ISSUE_ACCESS=read-write — read-only token gate is a no-op\n"
-	if !strings.Contains(out, want) {
-		t.Errorf("runDoctor() output = %q, want it to contain the restored no-op line %q", out, want)
-	}
-	if strings.Contains(out, "read-only-token-github") {
-		t.Errorf("runDoctor() output = %q, want no per-backend read-only-token-github line under read-write", out)
-	}
-}
-
-// The read-only sibling: printing the read-write no-op line under read-only
-// would falsely claim the deployment is read-write. BOX_GH_TOKEN is left unset
-// so the read-only-token-github gate fails before any live introspection call,
-// and runDoctor's returned error is ignored because only the printed line
-// matters here.
-func TestRunDoctor_ReadOnly_OmitsReadWriteNoOpLine(t *testing.T) {
-	f := forge.NewFake()
-	f.ProbeRepo = "owner/repo"
-	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
-
-	c := minimalValidConfig() // codeForge/issueTracker: github
-	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
-		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.BoxForgeAndIssueAccess = "read-only"
-	t.Setenv("BOX_GH_TOKEN", "")
-
-	var buf bytes.Buffer
-	_, report := doctorCheckSets(c)
-	_ = runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
-
-	if strings.Contains(buf.String(), "BOX_FORGE_AND_ISSUE_ACCESS=read-write") {
-		t.Errorf("runDoctor() output = %q, want no read-write no-op line under read-only", buf.String())
-	}
-}
-
-// Pins the read-write no-op line's guard: an invalid boxForgeAndIssueAccess
-// value is neither "read-only" nor "read-write", so the line must not print.
-// A `!= "read-only"` guard would wrongly print it for any non-read-only value.
-func TestRunDoctor_InvalidBoxForgeAndIssueAccess_OmitsReadWriteNoOpLine(t *testing.T) {
-	f := forge.NewFake()
-	f.ProbeRepo = "owner/repo"
-	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
-
-	c := minimalValidConfig() // codeForge/issueTracker: github
-	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
-		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.BoxForgeAndIssueAccess = "banana"
-
-	var buf bytes.Buffer
-	_, report := doctorCheckSets(c)
-	_ = runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
-
-	if strings.Contains(buf.String(), "BOX_FORGE_AND_ISSUE_ACCESS=read-write") {
-		t.Errorf("runDoctor() output = %q, want no read-write no-op line for an invalid boxForgeAndIssueAccess value", buf.String())
-	}
-}
-
 // Regression test for the gap issue #2942 closes: doctor used to report only
-// the two read-only token gates, so a relay-incapable CODE_FORGE with read-only access (a
+// the connector write gate, so a relay-incapable CODE_FORGE with read-only access (a
 // forge with no bundle-relay implementation) passed doctor clean even though it fails
 // the same gate at dispatch. checkReadOnlyCapabilityGate wraps
 // errLaunchGateConfigInvalid, so the exit is 2, not the internal-error 1.
@@ -826,11 +695,9 @@ func TestRunDoctor_ReportsRecoverKind(t *testing.T) {
 			c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 				"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 			c.CodeForge, c.BoxForgeAndIssueAccess, c.MaxRecoverAttempts = tc.codeForge, tc.access, 3
-			t.Setenv("BOX_GH_TOKEN", "")
 
 			var buf bytes.Buffer
-			// The error is ignored: a read-only gate may fail with no token,
-			// but only the printed row matters here.
+			// The error is ignored: only the printed row matters here.
 			_ = runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, nil)
 			if !strings.Contains(buf.String(), tc.want) {
 				t.Errorf("runDoctor() output = %q, want it to contain %q", buf.String(), tc.want)
@@ -938,12 +805,9 @@ func TestRunDoctor_ReadWriteBoxAccess_PrintsDeprecationNotice(t *testing.T) {
 }
 
 func TestRunDoctor_ReadOnlyBoxAccess_NoDeprecationNotice(t *testing.T) {
-	t.Setenv("BOX_GH_TOKEN", "")
-	// The fixture has no distinct BOX_GH_TOKEN, so the read-only token gate
-	// refuses; the notice must still be absent from what was printed before it.
 	out, err := runDoctorWithAccess(t, "read-only")
-	if err == nil || !strings.Contains(err.Error(), "read-only token gate misconfigured") {
-		t.Fatalf("runDoctor() error = %v, want the read-only token gate refusal", err)
+	if err != nil {
+		t.Fatalf("runDoctor() error = %v, want nil: a read-only Box holds no token for doctor to refuse", err)
 	}
 	if strings.Contains(out, inputdoc.BoxAccessReadWriteNotice) {
 		t.Errorf("runDoctor() output = %q, want no notice for read-only", out)

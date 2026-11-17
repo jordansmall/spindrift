@@ -189,11 +189,10 @@ func TestNewGatedContext_FailingRegistryGate_SurfacesGateError(t *testing.T) {
 
 // newGatedContext must keep its interleaved gate order (capability,
 // network-mode, signal-carrier-network-mode, bwrap-pasta, bwrap-overlay,
-// gh-token, forgejo-token), not gateRegistry's order followed by the bwrap
-// gates. Both bwrap-pasta and the token gate are primed to fail, so
-// bwrap-pasta's error winning proves the walk stops before the token gate's
-// live network call.
-func TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates(t *testing.T) {
+// then the Network gates), not gateRegistry's order followed by the bwrap
+// gates. bwrap-pasta is primed to fail, so its error winning proves the walk
+// stops before any Network gate's live call.
+func TestNewGatedContext_BwrapPastaGateRunsBeforeNetworkGates(t *testing.T) {
 	// A PATH holding only a fake "true" satisfies RUNTIME's required-knob check
 	// while leaving pasta absent, so bwrap.ValidatePasta() fails whatever this
 	// host has installed.
@@ -212,8 +211,6 @@ func TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates(t *testing.T) {
 	setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 	setArtifact(t, "RUNNER_KIND", "bwrap")
 	setKnob(t, "NETWORK_MODE", "open") // not host/none, so the pasta launch gate actually calls bwrap.ValidatePasta()
-	// BOX_GH_TOKEN stays unset so the read-only-token-github gate
-	// (readonly_token_gate.go) would also fail if the walk reached it.
 
 	var w bytes.Buffer
 	gc, err := newGatedContext(&w, dispatchkind.Work, false)
@@ -222,22 +219,22 @@ func TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates(t *testing.T) {
 		t.Fatal("newGatedContext() = nil error, want the bwrap pasta launch gate's pasta-missing rejection")
 	}
 	if !strings.Contains(err.Error(), "pasta") {
-		t.Errorf("newGatedContext() error = %q, want it to mention pasta (bwrap launch gate), not a token gate", err.Error())
+		t.Errorf("newGatedContext() error = %q, want it to mention pasta (bwrap launch gate), not a network gate", err.Error())
 	}
 	if strings.Contains(err.Error(), "BOX_GH_TOKEN") {
-		t.Errorf("newGatedContext() error = %q, want it to stop at bwrap-pasta before ever reaching the token gate", err.Error())
+		t.Errorf("newGatedContext() error = %q, want it to stop at bwrap-pasta before ever reaching the network gates", err.Error())
 	}
 	if !reflect.DeepEqual(gc, gatedContext{}) {
 		t.Errorf("newGatedContext() on gate error = %+v, want the zero gatedContext", gc)
 	}
 }
 
-// The pair of TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates, for the
+// The pair of TestNewGatedContext_BwrapPastaGateRunsBeforeNetworkGates, for the
 // second bwrap gate. ValidateOverlay() has no injectable exec seam from this
 // package and ends in a real kernel probe that passes on any host with
 // unprivileged-userns-overlayfs, so the only deterministic failure is bwrap
 // absent from PATH. NETWORK_MODE=host makes the pasta launch gate a no-op.
-func TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates(t *testing.T) {
+func TestNewGatedContext_BwrapOverlayGateRunsBeforeNetworkGates(t *testing.T) {
 	// A PATH holding only a fake "true" satisfies RUNTIME's required-knob check
 	// while leaving bwrap absent, so ValidateOverlay()'s exec("bwrap", ...)
 	// fails before it can probe overlay support.
@@ -258,8 +255,6 @@ func TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates(t *testing.T) {
 	setKnob(t, "NETWORK_MODE", "host") // the pasta launch gate no-ops (issue #2666), isolating the overlay gate's failure
 	setArtifact(t, "NIX_STORE_WRITABLE", "true")
 	setArtifact(t, "NIX_CONFIG_FILE", "/nix/store/somehash-nix.conf")
-	// BOX_GH_TOKEN stays unset so the read-only-token-github gate would also
-	// fail if the walk reached it.
 
 	var w bytes.Buffer
 	gc, err := newGatedContext(&w, dispatchkind.Work, false)
@@ -268,10 +263,10 @@ func TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates(t *testing.T) {
 		t.Fatal("newGatedContext() = nil error, want the bwrap overlay launch gate's overlay-probe rejection")
 	}
 	if !strings.Contains(err.Error(), "overlay") {
-		t.Errorf("newGatedContext() error = %q, want it to mention overlay (bwrap launch gate), not a token gate", err.Error())
+		t.Errorf("newGatedContext() error = %q, want it to mention overlay (bwrap launch gate), not a network gate", err.Error())
 	}
 	if strings.Contains(err.Error(), "BOX_GH_TOKEN") {
-		t.Errorf("newGatedContext() error = %q, want it to stop at bwrap-overlay before ever reaching the token gate", err.Error())
+		t.Errorf("newGatedContext() error = %q, want it to stop at bwrap-overlay before ever reaching the network gates", err.Error())
 	}
 	if !reflect.DeepEqual(gc, gatedContext{}) {
 		t.Errorf("newGatedContext() on gate error = %+v, want the zero gatedContext", gc)

@@ -46,9 +46,8 @@ var smokeRuntimeSettings = map[string]string{
 }
 
 // smokeSecrets are exported to the launcher's own environment; none may land
-// on a runner argv. BOX_GH_TOKEN is the distinct read-only Box credential the
-// read-only default (the launch token gate) requires, as a migrated Consumer
-// supplies it.
+// on a runner argv. BOX_GH_TOKEN is a Box-side credential name a migrated
+// Consumer may still export; the launcher must never forward it to a runner.
 var smokeSecrets = map[string]string{"GH_TOKEN": "fake-token", "BOX_GH_TOKEN": "fake-box-token", "CLAUDE_CODE_OAUTH_TOKEN": "fake-oauth"}
 
 // tmpOverlay is argvEnv's mount source for a bwrap --tmp-overlay target.
