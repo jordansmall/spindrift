@@ -585,7 +585,7 @@ func TestGateRegistry_FullWalkChecksEachActiveBackendOnce(t *testing.T) {
 
 func TestGateRegistry_TokenGatesComeFromStrategiesInRegistrationOrder(t *testing.T) {
 	_, network := splitGateRegistryByNetwork(gateRegistry)
-	want := []string{"read-only-token-github", "read-only-token-forgejo"}
+	want := []string{"read-only-token-github", "read-only-token-forgejo", primaryConnectorWriteGateName}
 	if got := gateNames(network); !reflect.DeepEqual(got, want) {
 		t.Errorf("network gates = %v, want %v", got, want)
 	}

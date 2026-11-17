@@ -93,10 +93,11 @@ func readOnlyTokenGates(rows []backendkit.Strategy) []launchGate {
 // gates are excluded on purpose: they are Runner prerequisites, run at launch
 // by checkRunnerLaunchPrerequisites and reported by doctor through
 // prerequisiteChecks, with richer dynamic Tier and remedy semantics. The
-// read-only token gates follow, one per backend row with a Box token. It is
-// built once at package init from the registered Strategies, so a test that swaps
-// the registry must rebuild it (see swapIntrospector).
-var gateRegistry = append([]launchGate{
+// read-only token gates follow, one per backend row with a Box token, and the
+// primary github Connector write gate closes the list. It is built once at
+// package init from the registered Strategies, so a test that swaps the
+// registry must rebuild it (see swapIntrospector).
+var gateRegistry = append(append([]launchGate{
 	{Name: "read-only-capability", Check: func(c config, _ io.Writer) error {
 		return checkReadOnlyCapabilityGate(c)
 	}},
@@ -106,7 +107,16 @@ var gateRegistry = append([]launchGate{
 	{Name: "signal-carrier-network-mode", Check: func(c config, _ io.Writer) error {
 		return checkSignalCarrierNetworkModeGate(c)
 	}},
-}, readOnlyTokenGates(backendkit.Strategies())...)
+}, readOnlyTokenGates(backendkit.Strategies())...), primaryConnectorWriteGate)
+
+// primaryConnectorWriteGate closes gateRegistry, after the read-only token
+// gates (checkPrimaryConnectorWriteGate).
+var primaryConnectorWriteGate = launchGate{
+	Name:       primaryConnectorWriteGateName,
+	Applicable: primaryGithubApplies,
+	Network:    true,
+	Check:      checkPrimaryConnectorWriteGate,
+}
 
 // splitGateRegistryByNetwork partitions registry into its non-network and
 // network gates, preserving registry order within each. The split reads each

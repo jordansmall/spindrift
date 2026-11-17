@@ -255,15 +255,26 @@ func swapIntrospector(t *testing.T, name string, f backendkit.TokenIntrospector)
 }
 
 // rebuildTokenGates rebuilds gateRegistry's read-only token gates from the
-// registry as it stands.
+// registry as it stands, restoring them to their original position: before the
+// primary Connector write gate, as the registry-order test pins.
 func rebuildTokenGates() {
-	kept := make([]launchGate, 0, len(gateRegistry))
+	var kept []launchGate
+	at := -1
 	for _, g := range gateRegistry {
-		if !strings.HasPrefix(g.Name, readOnlyTokenGatePrefix) {
-			kept = append(kept, g)
+		if strings.HasPrefix(g.Name, readOnlyTokenGatePrefix) {
+			if at < 0 {
+				at = len(kept)
+			}
+			continue
 		}
+		kept = append(kept, g)
 	}
-	gateRegistry = append(kept, readOnlyTokenGates(backendkit.Strategies())...)
+	if at < 0 {
+		at = len(kept)
+	}
+	rebuilt := append([]launchGate{}, kept[:at]...)
+	rebuilt = append(rebuilt, readOnlyTokenGates(backendkit.Strategies())...)
+	gateRegistry = append(rebuilt, kept[at:]...)
 }
 
 // Forgejo's Strategy has no IntrospectToken, so a distinct Box token is
