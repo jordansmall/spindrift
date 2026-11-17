@@ -1171,7 +1171,7 @@ The most children of one [[Dispatch kind]] the [[Daemon]] lets into discovery
 at once: `Ready` from its [[Demand]] minus the slots already starting that kind
 but not yet claimed. One queued issue starts one child, not one per free slot;
 a claim releases the budget and the kind is re-probed.
-_Avoid_: quota, reservation (that is `RESEARCH_RESERVATION`'s floor).
+_Avoid_: quota, reservation (that is `RESEARCH_RESERVATION`'s slot preference).
 
 **Awake window**:
 The daily wall-clock span during which the [[Daemon]] may *start* a launcher
