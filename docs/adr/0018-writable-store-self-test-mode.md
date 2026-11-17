@@ -76,7 +76,7 @@ the nix layer keeps `throw`/`assert` only, per the existing warning idiom.
 
 This is OCI-runner behavior only. The bwrap runner (ADR 0006) binds the
 host's `/nix/store` read-only directly into the sandbox
-(`--ro-bind /nix/store /nix/store`, `cmd/launcher/internal/runner/bwrap.go`)
+(`--ro-bind /nix/store /nix/store`, `cmd/launcher/internal/runner/bwrap/bwrap.go`)
 rather than baking a store into a built image — there is no writable
 container layer to isolate a self-test write into, and no per-run image to
 carry a chowned directory. Making the bwrap store writable would mean
