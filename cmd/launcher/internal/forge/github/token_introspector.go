@@ -15,8 +15,8 @@ var ghTokenWriteScopes = map[string]bool{
 	"public_repo": true,
 }
 
-// notIntrospectableReason is the read-only gate's explanation for a GitHub
-// token whose grants cannot be determined.
+// notIntrospectableReason is the primary Connector write gate's explanation for
+// a GitHub token whose grants cannot be determined.
 const notIntrospectableReason = "e.g. a fine-grained PAT, whose granted permissions GitHub exposes no endpoint to introspect"
 
 // newTokenIntrospector builds the Strategy's IntrospectToken, which dispatches

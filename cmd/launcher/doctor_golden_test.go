@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/inputdoc"
@@ -25,9 +24,7 @@ import (
 //     doctor.Run emits (cmd/launcher/internal/doctor/doctor.go) rather than a
 //     PATH-dependent "ok: runtime ... found on PATH" one.
 //   - c.BoxForgeAndIssueAccess stays "read-write" (minimalValidConfig's
-//     default), so runDoctor prints the fixed token-gate no-op line
-//     (cmd/launcher/doctor.go) and skips every read-only-token gate, which
-//     would otherwise make a live network call.
+//     default), so runDoctor prints the fixed deprecation notice.
 //   - f.Labels carries every triage and advisory-tier label name
 //     (doctor.AdvisoryLabelNames) the doctor.Run label check enumerates, so
 //     every label row reads "ok:" and the run ends on the single all-present
@@ -63,20 +60,14 @@ func TestRunDoctor_HealthyReport_Golden(t *testing.T) {
 }
 
 // TestRunDoctor_ReadOnlyGitHub_Golden and TestRunDoctor_ReadOnlyForgejo_Golden
-// pin the verbose report for a read-only deployment, where runDoctor runs the
-// read-only token gate for the active backend instead of the read-write no-op
-// line. The goldens were captured before the gates moved onto the backend rows.
+// pin the verbose report for a read-only deployment, which carries no Box
+// token row.
 func TestRunDoctor_ReadOnlyGitHub_Golden(t *testing.T) {
 	f, c := healthyGoldenFixture()
 	c.BoxForgeAndIssueAccess = "read-only"
 	c.CodeForge = "github"
 	c.IssueTracker = "github"
 	c.GhToken = "launcher-gh-tok"
-	t.Setenv("BOX_GH_TOKEN", "box-gh-tok")
-
-	swapIntrospector(t, "github", func(string, string) (backendkit.TokenIntrospection, error) {
-		return backendkit.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
-	})
 
 	assertDoctorGolden(t, f, c, "testdata/golden/doctor-readonly-github-report.txt")
 }
@@ -88,7 +79,6 @@ func TestRunDoctor_ReadOnlyForgejo_Golden(t *testing.T) {
 	c.IssueTracker = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
-	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
 
 	assertDoctorGolden(t, f, c, "testdata/golden/doctor-readonly-forgejo-report.txt")
 }
@@ -125,46 +115,6 @@ func TestRunDoctor_HealthyReport_Quiet_PrintsOnlyTheDeprecationNotice(t *testing
 	if got, want := buf.String(), inputdoc.BoxAccessReadWriteNotice+"\n"; got != want {
 		t.Errorf("runDoctor() quiet output = %q, want only the deprecation notice %q", got, want)
 	}
-}
-
-// TestDoctorReport_ReadOnlyForgejo_Healthy_QuietSuppressesTokenGateWarning
-// pins a defect found on issue #3777: a passing
-// read-only-token-forgejo gate writes its "WARNING: …" line straight to
-// checkW via checkReadOnlyTokenGate (readonly_token_gate.go), which bypasses
-// the Reporter entirely, so a healthy read-only Forgejo deployment printed a
-// line under quiet and violated AC1 ("a healthy doctor writes nothing to
-// stdout"). Forgejo needs no introspection stub because its row has no
-// IntrospectToken hook, so it is the cheaper fixture for pinning this.
-func TestDoctorReport_ReadOnlyForgejo_Healthy_QuietSuppressesTokenGateWarning(t *testing.T) {
-	f, c := healthyGoldenFixture()
-	c.BoxForgeAndIssueAccess = "read-only"
-	c.CodeForge = "forgejo"
-	c.IssueTracker = "forgejo"
-	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
-	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
-	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
-
-	t.Run("quiet", func(t *testing.T) {
-		var stdout, stderr bytes.Buffer
-		got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), doctorOptions{interactive: false, verbose: false})
-		if got != 0 {
-			t.Errorf("doctorReport() exit = %d, want 0", got)
-		}
-		if stdout.String() != "" {
-			t.Errorf("doctorReport() quiet stdout = %q, want empty", stdout.String())
-		}
-	})
-
-	t.Run("verbose", func(t *testing.T) {
-		var stdout, stderr bytes.Buffer
-		got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), doctorOptions{interactive: false, verbose: true})
-		if got != 0 {
-			t.Errorf("doctorReport() exit = %d, want 0", got)
-		}
-		if !strings.Contains(stdout.String(), "WARNING: the Forgejo backend cannot introspect a token's scopes (no IntrospectToken hook)") {
-			t.Errorf("doctorReport() verbose stdout = %q, want it to contain the token gate WARNING line", stdout.String())
-		}
-	})
 }
 
 // healthyGoldenFixture builds the all-green forge.Fake and config the golden

@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// Pins issue #1950's read-only token gate. A scripted fake `gh` stands in for
+// Pins the token-introspection probe. A scripted fake `gh` stands in for
 // a live GitHub call so the test still runs the real gh-shelling code path.
 func TestTokenOAuthScopes_ParsesXOAuthScopesHeader(t *testing.T) {
 	dir := prependFakeGH(t, `printf 'HTTP/2.0 200 OK\nX-OAuth-Scopes: repo, read:org\n\n{}'`)
@@ -101,7 +101,7 @@ exit 1
 }
 
 // A missing permissions object is an ambiguous signal, not a "no push access"
-// signal. checkReadOnlyTokenGate aborts startup on an introspection error, so
+// signal. checkPrimaryConnectorWriteGate aborts startup on an introspection error, so
 // returning an error here keeps an unreadable signal fail-closed.
 func TestTokenRepoPushPermission_MissingPermissionsFieldFailsClosed(t *testing.T) {
 	prependFakeGH(t, `printf '{"full_name":"owner/repo"}'`)

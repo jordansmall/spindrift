@@ -26,4 +26,3 @@ ok: recover kind: on — CODE_FORGE=github relays a read-only Box's outbox bundl
 ok: read-only-capability
 ok: network-mode-runtime
 ok: signal-carrier-network-mode
-ok: read-only-token-github

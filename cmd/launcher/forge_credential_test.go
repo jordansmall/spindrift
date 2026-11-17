@@ -53,9 +53,9 @@ func TestChoiceKnobRegistry_ValidatesBoxForgeCredential(t *testing.T) {
 	}
 }
 
-// Under the opt-in the Box holds no token, so no per-row read-only token gate
-// applies and doctor neither fails on an unset BOX_GH_TOKEN nor names it.
-func TestDoctor_NoForgeCredential_NeitherRequiresNorNamesBoxToken(t *testing.T) {
+// A read-only Box holds no forge token, so doctor neither fails on an unset
+// BOX_GH_TOKEN nor names it.
+func TestDoctor_ReadOnly_NeitherRequiresNorNamesBoxToken(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
@@ -64,14 +64,7 @@ func TestDoctor_NoForgeCredential_NeitherRequiresNorNamesBoxToken(t *testing.T) 
 	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 	c.BoxForgeAndIssueAccess = "read-only"
-	c.BoxForgeCredential = "none"
 	t.Setenv("BOX_GH_TOKEN", "")
-
-	for _, g := range gateRegistry {
-		if strings.HasPrefix(g.Name, readOnlyTokenGatePrefix) && (g.Applicable == nil || g.Applicable(c)) {
-			t.Errorf("gate %s applies under BOX_FORGE_CREDENTIAL=none", g.Name)
-		}
-	}
 
 	var buf bytes.Buffer
 	_, report := doctorCheckSets(c)

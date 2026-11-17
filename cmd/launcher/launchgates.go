@@ -2,11 +2,8 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"io"
 
-	"spindrift.dev/launcher/internal/backend"
-	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
 )
 
@@ -19,85 +16,31 @@ type launchGate struct {
 	// Applicable reports whether g is relevant to c at all; nil means always.
 	// An inapplicable gate is skipped entirely, with no Check call and no
 	// report line, so doctor never prints "ok" for a check that never ran.
-	// The token gates derive it from their backend row (readOnlyTokenGates).
 	Applicable func(c config) bool
 	// Network marks a gate whose Check makes a live network call. Once one
 	// fails, walkGateRegistry stops even in walkReport mode, since a later
 	// probe is moot.
 	Network bool
-	// UnsupportedRemedy names how to make an unverifiable gate verifiable. A
-	// gate whose Check wraps backendkit.ErrUnsupported is reported as unsupported
-	// by doctor but refuses the launch under walkEnforce: a security gate that
-	// cannot run must not fail open.
-	UnsupportedRemedy string
-	Check             func(c config, w io.Writer) error
+	Check   func(c config, w io.Writer) error
 }
 
-// walkMode selects what walkGateRegistry does with a failing or unsupported
-// gate.
+// walkMode selects what walkGateRegistry does with a failing gate.
 type walkMode int
 
 const (
-	// walkEnforce is the launch path: stop at the first failure, and treat a
-	// gate the backend's Connector cannot serve as a failure.
+	// walkEnforce is the launch path: stop at the first failure.
 	walkEnforce walkMode = iota
-	// walkReport is doctor's path: enumerate every broken non-network gate,
-	// and render an unsupported gate as such without failing.
+	// walkReport is doctor's path: enumerate every broken non-network gate.
 	walkReport
 )
-
-// tokenGateApplicable reports whether c's codeForge or issueTracker resolves to
-// a backend sharing desc's TokenEnvVar. Matching on TokenEnvVar rather than
-// desc.Name makes an unregistered name miss, but only while every caller passes
-// a desc with a non-empty TokenEnvVar; a token-less desc (backend.Local,
-// backend.Git) would match every lookup miss, since both sides are empty.
-func tokenGateApplicable(c config, desc backend.Descriptor) bool {
-	forgeRow, _ := backendkit.ByName(c.CodeForge)
-	trackerRow, _ := backendkit.ByName(c.IssueTracker)
-	return forgeRow.TokenEnvVar == desc.TokenEnvVar || trackerRow.TokenEnvVar == desc.TokenEnvVar
-}
-
-// readOnlyTokenGatePrefix precedes the backend row name in each read-only token
-// gate's Name.
-const readOnlyTokenGatePrefix = "read-only-token-"
-
-// readOnlyTokenGates returns one network gate per row with a BoxTokenEnvVar,
-// in row order and named read-only-token-<Name>. The gate applies under
-// read-only access when c's codeForge or issueTracker shares the row's token
-// (tokenGateApplicable), so a renamed row on the same token still triggers it,
-// and a tracker and forge on one backend share a single gate.
-func readOnlyTokenGates(rows []backendkit.Strategy) []launchGate {
-	var gates []launchGate
-	for _, r := range rows {
-		if r.BoxTokenEnvVar == "" {
-			continue
-		}
-		gates = append(gates, launchGate{
-			Name: readOnlyTokenGatePrefix + r.Name,
-			Applicable: func(c config) bool {
-				return c.BoxForgeAndIssueAccess == "read-only" && !c.boxHoldsNoForgeCredential() && tokenGateApplicable(c, r.Descriptor)
-			},
-			Network:           true,
-			UnsupportedRemedy: "pin a " + r.Name + " Connector that serves forge.tokenGrant, or remove the " + r.Name + " backend row",
-			Check: func(c config, w io.Writer) error {
-				_, err := checkReadOnlyTokenGate(c, r, w)
-				return err
-			},
-		})
-	}
-	return gates
-}
 
 // gateRegistry is the ordered set of launch gates shared by the gated tier's
 // enforcement path and doctor's reporting path. The runner family's launch
 // gates are excluded on purpose: they are Runner prerequisites, run at launch
 // by checkRunnerLaunchPrerequisites and reported by doctor through
 // prerequisiteChecks, with richer dynamic Tier and remedy semantics. The
-// read-only token gates follow, one per backend row with a Box token, and the
-// primary github Connector write gate closes the list. It is built once at
-// package init from the registered Strategies, so a test that swaps the
-// registry must rebuild it (see swapIntrospector).
-var gateRegistry = append(append([]launchGate{
+// primary github Connector write gate closes the list.
+var gateRegistry = append([]launchGate{
 	{Name: "read-only-capability", Check: func(c config, _ io.Writer) error {
 		return checkReadOnlyCapabilityGate(c)
 	}},
@@ -107,10 +50,9 @@ var gateRegistry = append(append([]launchGate{
 	{Name: "signal-carrier-network-mode", Check: func(c config, _ io.Writer) error {
 		return checkSignalCarrierNetworkModeGate(c)
 	}},
-}, readOnlyTokenGates(backendkit.Strategies())...), primaryConnectorWriteGate)
+}, primaryConnectorWriteGate)
 
-// primaryConnectorWriteGate closes gateRegistry, after the read-only token
-// gates (checkPrimaryConnectorWriteGate).
+// primaryConnectorWriteGate closes gateRegistry (checkPrimaryConnectorWriteGate).
 var primaryConnectorWriteGate = launchGate{
 	Name:       primaryConnectorWriteGateName,
 	Applicable: primaryGithubApplies,
@@ -145,20 +87,6 @@ func walkGateRegistry(registry []launchGate, c config, checkW io.Writer, rep *do
 			continue
 		}
 		err := g.Check(c, checkW)
-		if errors.Is(err, backendkit.ErrUnsupported) && mode == walkEnforce {
-			// Fail closed. The new error deliberately does not wrap
-			// ErrUnsupported, which Blocking classifications treat as
-			// non-blocking.
-			err = fmt.Errorf("%s cannot be verified, so the launch is refused: %s; %s", g.Name, doctor.UnsupportedReason(err), g.UnsupportedRemedy)
-			rep.Finding(doctor.Required, "%s: %s", g.Name, err)
-			return err
-		}
-		if errors.Is(err, backendkit.ErrUnsupported) {
-			// Report mode: no failure; the gate itself already warned that it
-			// could not verify.
-			rep.Unsupported("%s (%s)", g.Name, doctor.UnsupportedReason(err))
-			continue
-		}
 		if err != nil {
 			errs = append(errs, err)
 			rep.Finding(doctor.Required, "%s: %s", g.Name, err)

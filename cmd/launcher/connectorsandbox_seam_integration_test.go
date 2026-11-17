@@ -37,7 +37,7 @@ const stoppedLine = "==> stopped Connector sandbox: "
 type sandboxExit struct {
 	name string
 	// shadow loads the Connector lazily from a read shadow, during the run; a
-	// routed row loads it from the launch token gate, before the run starts.
+	// routed row loads it at launch, before the run starts.
 	shadow bool
 	// box is the scripted Box run.
 	box seamtest.PodmanRun
@@ -62,7 +62,7 @@ type sandboxExit struct {
 var sandboxExits = []sandboxExit{
 	{name: "success", shadow: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, wantBox: true, wantOut: "verified-merged"},
 	{name: "failed-run", shadow: true, box: seamtest.PodmanRun{Exit: 1}, wantBox: true, wantOut: "(box-failed)"},
-	{name: "launcher-error", shadow: false, wantExit: 1, wantOut: "forge.tokenGrant"},
+	{name: "launcher-error", shadow: false, wantExit: 1, wantOut: "cannot list issues"},
 	{name: "blocked-run", shadow: true, box: seamtest.PodmanRun{Outcome: seamOutcome("blocked")}, wantBox: true, wantOut: "(blocked)"},
 	{name: "sigint", shadow: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, signal: syscall.SIGINT, wantExit: 7, wantBox: true, wantOut: "verified-merged"},
 	{name: "sigterm", shadow: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, signal: syscall.SIGTERM, wantExit: 7, wantBox: true, wantOut: "verified-merged"},
@@ -104,12 +104,12 @@ type sandboxRig struct {
 type sandboxMode int
 
 const (
-	// sandboxRouted is a routed row, loaded at the launch token gate.
+	// sandboxRouted is a routed row, loaded at launch.
 	sandboxRouted sandboxMode = iota
 	// sandboxShadow loads the Connector from a read shadow rather than a routed row.
 	sandboxShadow
 	// sandboxPrimary makes the row the primary read path; like a routed row it
-	// loads at the launch token gate.
+	// loads at launch.
 	sandboxPrimary
 )
 
@@ -436,7 +436,7 @@ func sandboxName(argv []string) string {
 // on and a github backend row whose Connector is the wasm at module. The row
 // reads through GH_TOKEN, and mode picks its shadow or primary keys. As a shadow
 // row it loads on the run's first read, and native stays authoritative; as a
-// routed one the launch token gate loads it, and its lack of a token grant
+// routed one it loads at launch, and its lack of the tracker capability
 // refuses the launch. artifacts overrides keys of the document's artifacts.
 func sandboxDoc(t *testing.T, docPath, module string, mode sandboxMode, artifacts map[string]string) string {
 	t.Helper()
@@ -453,11 +453,6 @@ func sandboxDoc(t *testing.T, docPath, module string, mode sandboxMode, artifact
 		t.Fatal(err)
 	}
 	settings["CONNECTOR_SANDBOX"] = "true"
-	// A primary row loads at the read-only token gate, which refuses a Connector
-	// that cannot introspect the token before any read; no fixture can.
-	if mode == sandboxPrimary {
-		settings["BOX_FORGE_AND_ISSUE_ACCESS"] = "read-write"
-	}
 	row := map[string]any{
 		"name": "github", "module": module, "credentialEnv": "GH_TOKEN",
 		"routes": []map[string]string{{"method": "GET", "host": "api.github.com", "path": "/repos/{repo}"}},

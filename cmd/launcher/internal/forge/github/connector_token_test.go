@@ -165,7 +165,7 @@ func ghTokenStub(t *testing.T, userStatus int, scopes *string, repoBody string) 
 esac`)
 }
 
-// A shadow github row never routes the token gate: gh stays authoritative, and
+// A shadow github row never routes token introspection: gh stays authoritative, and
 // the shadow compares gh against the Connector.
 func TestIntrospectToken_ShadowRowRunsNative(t *testing.T) {
 	b := newTokenBackend(t, "ghp_abc")

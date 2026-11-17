@@ -180,7 +180,7 @@ func doctorExitCodeFor(configErr, runErr error) int {
 		return int(exitcode.DoctorConfigInvalid)
 	case runErr == nil:
 		return int(exitcode.DoctorHealthy)
-	case errors.Is(runErr, errReadOnlyGateMisconfigured), errors.Is(runErr, errLaunchGateConfigInvalid):
+	case errors.Is(runErr, errLaunchGateConfigInvalid):
 		return int(exitcode.DoctorConfigInvalid)
 	case errors.Is(runErr, doctor.ErrConnectivity):
 		return int(exitcode.DoctorConnectivity)
@@ -198,10 +198,10 @@ func doctorExitCodeFor(configErr, runErr error) int {
 // checkW is separate from rep: it's a gate Check's own operator-facing writer
 // (issue #2942 AC5). For `spindrift doctor`, doctorReport hands it rep's own
 // AdvisoryWriter() rather than raw stdout, so a passing gate's own prose
-// (e.g. the read-only token gates' WARNING: line on a Box token that cannot
-// be introspected) obeys the same quiet gate as an advisory: row instead of
-// bypassing the Reporter (issue #3777). The two params stay distinct since
-// only one of them is the report stream.
+// (e.g. the primary Connector write gate's WARNING: line on a credential
+// whose capability cannot be read) obeys the same quiet gate as an advisory:
+// row instead of bypassing the Reporter (issue #3777). The two params stay
+// distinct since only one of them is the report stream.
 func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.Reporter, checkW io.Writer, stdin io.Reader, interactive bool, extraChecks []doctor.Check, requiredLabels ...string) error {
 	row, _ := backendkit.ByName(c.IssueTracker)
 	if err := doctor.Run(it, cf, doctor.Config{
@@ -222,13 +222,7 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.
 	}, rep, bufio.NewScanner(stdin), interactive, extraChecks); err != nil {
 		return err
 	}
-	// The read-only token gates are Applicable only under read-only (issue
-	// #2942), so walkSplitGateRegistry prints nothing for them here. Without this line
-	// read-write would never mention the token gate. It stays doctor-only:
-	// printing it from gatedContext would add stdout noise to preview and
-	// bootstrap, which must stay quiet.
 	if c.BoxForgeAndIssueAccess == "read-write" {
-		rep.Success("BOX_FORGE_AND_ISSUE_ACCESS=read-write — read-only token gate is a no-op")
 		if msg, ok := boxAccessReadWriteNotice(c); ok {
 			// Passthrough, not an Advisory: a quiet doctor would hide the notice.
 			rep.Passthrough("%s\n", msg)
