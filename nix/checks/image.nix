@@ -49,12 +49,11 @@ let
   # extend to the model literals nearby (issue #2435 AC2); see that fixture.
   rosterDefaults =
     (import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; }).rosterDefaults;
-  # output-cap-env-marker's bashMaxOutputLength pin is cross-checked here
+  # output-cap-env-marker's pinnedBashMaxOutputLength is cross-checked here
   # against lib/output-caps.nix's single source, so drift throws at eval
   # time instead of the check silently passing on a stale number (issue
-  # #3679). maxMcpOutputTokens below has no single source to cross-check
-  # against -- it's hand-typed only in lib/image.nix (issue #3707 tracks
-  # the doc claiming otherwise).
+  # #3679). pinnedMaxMcpOutputTokens below has no single source to
+  # cross-check against -- it's hand-typed only in lib/image.nix.
   outputCaps = import ../../lib/output-caps.nix;
   pinnedBashMaxOutputLength =
     let
@@ -1101,10 +1100,13 @@ in
       '';
 
   # See "Claude Code output caps" in docs/reference.md for these values and
-  # why they are set (issue #1987). The literals below are a deliberate
-  # independent pin on the *built* image, not derived from lib/output-caps.nix
-  # (issue #3679) -- changing a cap means editing lib/output-caps.nix *and*
-  # this check.
+  # why they are set (issue #1987). The pins are independent literals, a
+  # deliberate check on the *built* image rather than values derived from
+  # lib/output-caps.nix (issue #3679; the Bash pin is only compared against
+  # it at eval time, see pinnedBashMaxOutputLength) -- changing
+  # BASH_MAX_OUTPUT_LENGTH means editing lib/output-caps.nix, and changing
+  # MAX_MCP_OUTPUT_TOKENS means editing lib/image.nix, each alongside this
+  # file's matching pin.
   output-cap-env-marker =
     pkgs.runCommand "output-cap-env-marker" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
