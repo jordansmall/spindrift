@@ -864,6 +864,11 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if msg := boxAccessNotice(shared.boxAccess, args.Kinds); msg != "" {
 		fmt.Fprintln(stderr, msg)
 	}
+	// Children inherit the decided marker and stay quiet, so the daemon prints
+	// this deprecation (issue #6900) once for all of them.
+	if shared.boxForgeCredential != "" {
+		fmt.Fprintln(stderr, inputdoc.BoxForgeCredentialNotice)
+	}
 	doctorFlags, err := doctorPreflightFlags(args.Kinds, args.ExplicitSelector)
 	if err != nil {
 		return refuse(err)

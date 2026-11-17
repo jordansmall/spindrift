@@ -1287,7 +1287,7 @@ var daemonKnobEnvVars = []string{
 	"ISSUE_TRACKER", "LABEL", "IN_PROGRESS_LABEL",
 	"COMPLETE_LABEL", "FAILED_LABEL", "REPO_SLUG",
 	"GH_TOKEN_REFRESH_FILE", "SECRET_CMD",
-	"CODE_FORGE", "BOX_FORGE_AND_ISSUE_ACCESS", "DRIVER",
+	"CODE_FORGE", "BOX_FORGE_AND_ISSUE_ACCESS", "BOX_FORGE_CREDENTIAL", "DRIVER",
 }
 
 // clearKnobEnvT clears the daemon's knob env vars for the duration of the
@@ -4930,6 +4930,37 @@ func TestMainRun_BoxAccessNoticeOnStderr(t *testing.T) {
 				t.Fatalf("mainRun() = %d, want 0; stderr = %q", got, stderr.String())
 			}
 			if n := strings.Count(stderr.String(), inputdoc.BoxAccessReadWriteNotice); n != tc.want {
+				t.Errorf("notice count = %d, want %d; stderr = %q", n, tc.want, stderr.String())
+			}
+		})
+	}
+}
+
+// Each daemon child stays quiet on the deprecated BOX_FORGE_CREDENTIAL because
+// the parent decided; the parent must therefore print it itself.
+func TestMainRun_BoxForgeCredentialNoticeOnStderr(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value string
+		want  int
+	}{{"set", "anything", 1}, {"unset", "", 0}} {
+		t.Run(tc.name, func(t *testing.T) {
+			clearKnobEnvT(t)
+			checkOnlyNoNetworkT(t)
+			settings := map[string]string{
+				"DAEMON_APP":   ".#dogfood",
+				"BASE_BRANCH":  "main",
+				"MAX_PARALLEL": "1",
+			}
+			if tc.value != "" {
+				settings["BOX_FORGE_CREDENTIAL"] = tc.value
+			}
+			docPath := writeInputDocT(t, settings)
+			var stdout, stderr bytes.Buffer
+			if got := mainRun([]string{"--input", docPath, "--check-only", "dispatch"}, &stdout, &stderr); got != 0 {
+				t.Fatalf("mainRun() = %d, want 0; stderr = %q", got, stderr.String())
+			}
+			if n := strings.Count(stderr.String(), inputdoc.BoxForgeCredentialNotice); n != tc.want {
 				t.Errorf("notice count = %d, want %d; stderr = %q", n, tc.want, stderr.String())
 			}
 		})

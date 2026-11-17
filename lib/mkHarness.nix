@@ -1827,6 +1827,12 @@ let
     lib.optional (mergedDefaults.boxForgeAndIssueAccess == "read-write")
       "spindrift: BOX_FORGE_AND_ISSUE_ACCESS=read-write is deprecated and will be removed in a later minor release (issue #6757). The default is now read-only, where the launcher host-mediates every Box write. To move, set perSystem.spindrift.forge.boxAccess = \"read-only\" (or defaults.boxForgeAndIssueAccess), or unset it; see MIGRATING.md, \"The Box's forge access defaults to read-only (issue #6899)\".";
 
+  # Unset is "", so any explicit value warns, `forwarded` included. The launcher
+  # prints the same text at run time (inputdoc.BoxForgeCredentialNotice).
+  boxForgeCredentialWarnings =
+    lib.optional (mergedDefaults.boxForgeCredential != "")
+      "spindrift: BOX_FORGE_CREDENTIAL is deprecated and has no effect, and will be removed in a later minor release (issue #6902). Every read-only Box now holds no forge credential (issue #6900), whatever its value, and a read-write Box always receives its token. Unset forge.boxForgeCredential (defaults.boxForgeCredential) and drop --box-forge-credential.";
+
   # The same warnings as data, so a check can assert on them without
   # capturing stderr.
   rosterWarnings =
@@ -1842,6 +1848,7 @@ let
       lib.optional (legacyKnobsSet != [ ]) deprecationMsg
       ++ rosterWarnings
       ++ boxAccessWarnings
+      ++ boxForgeCredentialWarnings
       ++ deprecatedFragmentVarWarnings
     );
 
@@ -1888,17 +1895,6 @@ let
       throw "mkHarness: BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected CODE_FORGE=${mergedDefaults.codeForge} does not implement bundle-relay (forge.BundleRelay) for the Box's finished branch hand-off"
     else if !(issueTrackerRow.hostPostingCapable or false) then
       throw "mkHarness: BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected ISSUE_TRACKER=${mergedDefaults.issueTracker} does not implement host-posted comments and issue-filing (forge.HostPostedCommenter / forge.HostPostedIssueFiler)"
-    else
-      true;
-
-  # BOX_FORGE_CREDENTIAL=none withholds the forge credential from a Box that
-  # has no write token anyway; under read-write the Box needs its own token, so
-  # the pairing is contradictory (issue #7140).
-  forgeCredentialOk =
-    if
-      mergedDefaults.boxForgeCredential == "none" && mergedDefaults.boxForgeAndIssueAccess != "read-only"
-    then
-      throw "spindrift: BOX_FORGE_CREDENTIAL=none requires BOX_FORGE_AND_ISSUE_ACCESS=read-only (got ${mergedDefaults.boxForgeAndIssueAccess}). Set defaults.boxForgeAndIssueAccess = \"read-only\" (perSystem.spindrift.forge.boxAccess), or set BOX_FORGE_CREDENTIAL to \"forwarded\" (forge.boxForgeCredential)."
     else
       true;
 
@@ -1976,7 +1972,6 @@ else
   assert networkModeCoherenceOk;
   assert nixStoreWritableCoherenceOk;
   assert readOnlyCapabilityOk;
-  assert forgeCredentialOk;
   assert backendKnobsOk;
   assert daemonAwakeWindowOk;
   assert butlerChoresPromptOk;
@@ -2054,7 +2049,12 @@ else
         kindPrompts
         ;
 
-      inherit rosterWarnings deprecatedFragmentVarWarnings boxAccessWarnings;
+      inherit
+        rosterWarnings
+        deprecatedFragmentVarWarnings
+        boxAccessWarnings
+        boxForgeCredentialWarnings
+        ;
     };
 
     packages =

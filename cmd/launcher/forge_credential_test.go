@@ -2,54 +2,50 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/inputdoc"
 )
 
-func TestBoxHoldsNoForgeCredential(t *testing.T) {
+// The knob is a deprecated no-op (issue #6900): setting it to either value
+// warns, because a Consumer pinning "forwarded" must also learn read-only no
+// longer forwards a token; unset stays quiet.
+func TestBoxForgeCredentialNotice_WarnsWhenSet(t *testing.T) {
 	for _, tc := range []struct {
 		value string
 		want  bool
-	}{{"", false}, {"forwarded", false}, {"none", true}} {
+	}{{"", false}, {"forwarded", true}, {"none", true}} {
 		c := minimalValidConfig()
 		c.BoxForgeCredential = tc.value
-		if got := c.boxHoldsNoForgeCredential(); got != tc.want {
-			t.Errorf("BOX_FORGE_CREDENTIAL=%q: boxHoldsNoForgeCredential() = %v, want %v", tc.value, got, tc.want)
+		msg, ok := boxForgeCredentialNotice(c)
+		if ok != tc.want {
+			t.Errorf("BOX_FORGE_CREDENTIAL=%q: notice shown = %v, want %v", tc.value, ok, tc.want)
+		}
+		if ok && msg != inputdoc.BoxForgeCredentialNotice {
+			t.Errorf("BOX_FORGE_CREDENTIAL=%q: notice = %q, want inputdoc.BoxForgeCredentialNotice", tc.value, msg)
 		}
 	}
 }
 
-// A Box with write access and no credential could not push.
-func TestReadOnlyCapabilityGate_RefusesNoCredentialUnderReadWrite(t *testing.T) {
+func TestBoxForgeCredentialNotice_QuietUnderDaemonChild(t *testing.T) {
+	t.Setenv(inputdoc.BoxAccessNoticeDecidedEnv, "1")
 	c := minimalValidConfig()
-	c.BoxForgeAndIssueAccess = "read-write"
 	c.BoxForgeCredential = "none"
-	err := checkReadOnlyCapabilityGate(c)
-	if err == nil {
-		t.Fatal("checkReadOnlyCapabilityGate() = nil, want a refusal")
-	}
-	const want = "BOX_FORGE_CREDENTIAL=none requires BOX_FORGE_AND_ISSUE_ACCESS=read-only"
-	if !strings.Contains(err.Error(), want) {
-		t.Errorf("error = %q, want it to contain %q", err, want)
-	}
-	if !errors.Is(err, errLaunchGateConfigInvalid) {
-		t.Errorf("error %v should classify as errLaunchGateConfigInvalid", err)
-	}
-	c.BoxForgeAndIssueAccess = "read-only"
-	if err := checkReadOnlyCapabilityGate(c); err != nil {
-		t.Errorf("read-only + none = %v, want nil", err)
+	if msg, ok := boxForgeCredentialNotice(c); ok {
+		t.Errorf("notice = %q under the decided marker, want none", msg)
 	}
 }
 
-func TestChoiceKnobRegistry_ValidatesBoxForgeCredential(t *testing.T) {
+// The knob changes nothing, so none no longer conflicts with read-write.
+func TestReadOnlyCapabilityGate_AcceptsNoCredentialUnderReadWrite(t *testing.T) {
 	c := minimalValidConfig()
-	c.BoxForgeCredential = "banana"
-	if len(validateChoiceKnobsErrors(c, choiceKnobRegistry)) == 0 {
-		t.Error("BOX_FORGE_CREDENTIAL=banana passed choice validation")
+	c.BoxForgeAndIssueAccess = "read-write"
+	c.BoxForgeCredential = "none"
+	if err := checkReadOnlyCapabilityGate(c); err != nil {
+		t.Errorf("checkReadOnlyCapabilityGate() = %v, want nil", err)
 	}
 }
 
@@ -74,5 +70,15 @@ func TestDoctor_ReadOnly_NeitherRequiresNorNamesBoxToken(t *testing.T) {
 	}
 	if err != nil {
 		t.Errorf("doctor failed: %v", err)
+	}
+}
+
+func TestChoiceKnobRegistry_ValidatesBoxForgeCredential(t *testing.T) {
+	for value, wantErr := range map[string]bool{"": false, "forwarded": false, "none": false, "banana": true} {
+		c := minimalValidConfig()
+		c.BoxForgeCredential = value
+		if got := len(validateChoiceKnobsErrors(c, choiceKnobRegistry)) != 0; got != wantErr {
+			t.Errorf("BOX_FORGE_CREDENTIAL=%q: choice validation failed = %v, want %v", value, got, wantErr)
+		}
 	}
 }

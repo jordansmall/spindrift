@@ -222,6 +222,9 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.
 	}, rep, bufio.NewScanner(stdin), interactive, extraChecks); err != nil {
 		return err
 	}
+	if msg, ok := boxForgeCredentialNotice(c); ok {
+		rep.Passthrough("%s\n", msg)
+	}
 	if c.BoxForgeAndIssueAccess == "read-write" {
 		if msg, ok := boxAccessReadWriteNotice(c); ok {
 			// Passthrough, not an Advisory: a quiet doctor would hide the notice.

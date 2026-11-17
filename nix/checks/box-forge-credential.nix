@@ -1,7 +1,8 @@
-# Issue #7140: BOX_FORGE_CREDENTIAL=none is an opt-in for a read-only Box and
-# is meaningless under read-write, where the Box writes with its own token.
-# lib/mkHarness.nix throws at eval time for that pairing; these cases go
-# through the real mkHarness.nix entry point (see read-only-capability.nix).
+# Issue #6900: BOX_FORGE_CREDENTIAL (#7140's opt-in) is a deprecated no-op,
+# since every read-only Box already holds no forge credential. mkHarness warns
+# on any explicit value and exposes the message as
+# `internals.boxForgeCredentialWarnings`; no pairing with the access mode
+# throws any more. Removal is tracked in #6902.
 {
   pkgs,
   nixpkgs,
@@ -9,57 +10,63 @@
   ...
 }:
 let
-  inherit (pkgs.lib) assertMsg;
-  inherit (import ../../lib/builtins-compat.nix) hasInfix;
+  inherit (pkgs.lib) assertMsg hasInfix;
 
-  mkHarnessWith =
+  harnessWith =
     defaults:
-    (import ../../lib/mkHarness.nix {
+    import ../../lib/mkHarness.nix {
       inherit nixpkgs system;
       packages = p: [ p.hello ];
       inherit defaults;
-    });
+    };
+  warnings = defaults: (harnessWith defaults).internals.boxForgeCredentialWarnings;
   evals =
     defaults:
-    (builtins.tryEval (builtins.seq (mkHarnessWith defaults).spindrift.drvPath "reached")).success;
+    (builtins.tryEval (builtins.seq (harnessWith defaults).spindrift.drvPath "reached")).success;
+  goSrc = builtins.readFile ../../cmd/launcher/internal/inputdoc/inputdoc.go;
 in
 {
-  box-forge-credential-none-rejects-read-write =
-    assert assertMsg
-      (
-        !evals {
-          boxForgeAndIssueAccess = "read-write";
-          boxForgeCredential = "none";
-        }
-      )
-      "mkHarness.nix must throw when BOX_FORGE_CREDENTIAL=none and BOX_FORGE_AND_ISSUE_ACCESS=read-write";
-    # tryEval discards the message, so pin its stable name in the source.
-    assert assertMsg
-      (hasInfix "spindrift: BOX_FORGE_CREDENTIAL=none requires BOX_FORGE_AND_ISSUE_ACCESS=read-only" (
-        builtins.readFile ../../lib/mkHarness.nix
-      ))
-      "lib/mkHarness.nix lost the named BOX_FORGE_CREDENTIAL=none error";
-    pkgs.runCommand "box-forge-credential-none-rejects-read-write" { } "touch $out";
+  box-forge-credential-unset-is-silent =
+    assert assertMsg (warnings { } == [ ]) "an unset BOX_FORGE_CREDENTIAL must not warn";
+    pkgs.runCommand "box-forge-credential-unset-is-silent" { } "touch $out";
 
-  box-forge-credential-none-accepts-read-only =
-    assert assertMsg
-      (evals {
-        boxForgeAndIssueAccess = "read-only";
-        boxForgeCredential = "none";
-      })
-      "mkHarness.nix must not throw when BOX_FORGE_CREDENTIAL=none and BOX_FORGE_AND_ISSUE_ACCESS=read-only";
-    pkgs.runCommand "box-forge-credential-none-accepts-read-only" { } "touch $out";
+  box-forge-credential-set-warns =
+    let
+      forNone = warnings { boxForgeCredential = "none"; };
+      forForwarded = warnings { boxForgeCredential = "forwarded"; };
+    in
+    assert assertMsg (
+      builtins.length forNone == 1 && builtins.length forForwarded == 1
+    ) "BOX_FORGE_CREDENTIAL=none and =forwarded must each record exactly one warning";
+    assert assertMsg (hasInfix "deprecated and has no effect" (
+      builtins.head forNone
+    )) "the notice must say the knob is a deprecated no-op";
+    assert assertMsg (
+      hasInfix "#6900" (builtins.head forNone) && hasInfix "#6902" (builtins.head forNone)
+    ) "the notice must name issues #6900 and #6902";
+    # The Go string literal and builtins.toJSON escape this ASCII text alike
+    # (only `"` is escaped), so the Go const is the build notice verbatim.
+    assert assertMsg (hasInfix (builtins.toJSON (builtins.head forNone)) goSrc)
+      "lib/mkHarness.nix boxForgeCredentialWarnings and BoxForgeCredentialNotice in cmd/launcher/internal/inputdoc/inputdoc.go must carry the same text";
+    pkgs.runCommand "box-forge-credential-set-warns" { } "touch $out";
 
-  box-forge-credential-forwarded-accepts-both-access-modes =
-    assert assertMsg
-      (
-        evals {
-          boxForgeAndIssueAccess = "read-write";
-          boxForgeCredential = "forwarded";
-        }
-        && evals { boxForgeCredential = "forwarded"; }
-        && evals { }
-      )
-      "mkHarness.nix must not throw for BOX_FORGE_CREDENTIAL=forwarded or unset under either access mode";
-    pkgs.runCommand "box-forge-credential-forwarded-accepts-both-access-modes" { } "touch $out";
+  box-forge-credential-changes-no-pairing =
+    assert assertMsg (builtins.all evals (
+      builtins.concatMap
+        (access: [
+          {
+            boxForgeAndIssueAccess = access;
+            boxForgeCredential = "none";
+          }
+          {
+            boxForgeAndIssueAccess = access;
+            boxForgeCredential = "forwarded";
+          }
+        ])
+        [
+          "read-only"
+          "read-write"
+        ]
+    )) "mkHarness.nix must evaluate BOX_FORGE_CREDENTIAL under either access mode";
+    pkgs.runCommand "box-forge-credential-changes-no-pairing" { } "touch $out";
 }
