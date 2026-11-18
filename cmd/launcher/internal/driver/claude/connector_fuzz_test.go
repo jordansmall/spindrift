@@ -1,6 +1,7 @@
 package claude_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 )
@@ -117,18 +119,42 @@ func connectorSeedInputs(t testing.TB) []string {
 // a plain test wherever SPINDRIFT_DRIVER_CONNECTOR_WASM is set, as in
 // connectors/claude's conformance check.
 func FuzzConnectorDecodeMatchesNative(f *testing.F) {
-	c := loadConnector(f)
-	conn, err := c.DriverStrategy()
+	wasm, err := os.ReadFile(connectorWasm(f))
 	if err != nil {
 		f.Fatal(err)
 	}
+	var c *connectorhost.Connector
+	var conn driverkit.Strategy
+	load := func(t testing.TB) {
+		t.Helper()
+		if c != nil {
+			_ = c.Close(context.Background())
+		}
+		var err error
+		if c, err = connectorhost.LoadCompiled(context.Background(), wasm, ""); err != nil {
+			t.Fatal(err)
+		}
+		if conn, err = c.DriverStrategy(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	load(f)
+	f.Cleanup(func() { _ = c.Close(context.Background()) })
 	for _, in := range connectorSeedInputs(f) {
 		f.Add(in)
 	}
 	f.Fuzz(func(t *testing.T, input string) {
+		// One worker shares c across inputs; a dead Connector would turn every
+		// later input, the minimiser's candidates included, into a divergence.
+		if c.Err() != nil {
+			load(t)
+		}
 		native, got := claude.Strategy.NewDecoder(), conn.NewDecoder()
 		for i, line := range strings.Split(input, "\n") {
 			nEvs, gEvs := native(line), got(line)
+			if err := c.Err(); err != nil {
+				t.Fatalf("line %d %q: claude Connector died: %v", i, line, err)
+			}
 			g, gErr := wireForm(gEvs)
 			n, nErr := wireForm(nEvs)
 			if gErr != nil && nErr != nil {
@@ -138,7 +164,7 @@ func FuzzConnectorDecodeMatchesNative(f *testing.F) {
 				t.Fatalf("line %d %q\n connector wire error: %v\n native wire error: %v", i, line, gErr, nErr)
 			}
 			if !reflect.DeepEqual(g, n) {
-				t.Fatalf("line %d %q\n connector: %.400v\n native:    %.400v\n connector error: %v", i, line, g, n, c.Err())
+				t.Fatalf("line %d %q\n connector: %.400v\n native:    %.400v", i, line, g, n)
 			}
 		}
 	})
