@@ -93,6 +93,12 @@ func TestConnector_CountReadyMatchesNative(t *testing.T) {
 		pull   bool
 	}
 	ready, active := []string{testLabels.Dispatchable}, []string{testLabels.InProgress}
+	many := func(first, n int, pull bool) (items []item) {
+		for i := first; i < first+n; i++ {
+			items = append(items, item{strconv.Itoa(i), ready, pull})
+		}
+		return items
+	}
 	for _, fx := range []struct {
 		name  string
 		items []item
@@ -103,6 +109,11 @@ func TestConnector_CountReadyMatchesNative(t *testing.T) {
 			{"1", ready, false}, {"2", ready, true}, {"3", active, false},
 			{"4", ready, false}, {"5", nil, false}, {"6", ready, false},
 		}, 3},
+		// Past ResultPageLimit both counts stop at it, as ListIssues does.
+		{"over the cap", many(1, forge.ResultPageLimit+30, false), forge.ResultPageLimit},
+		// Seeded last, the pull requests are the newest-updated and crowd page
+		// 1, so the cap is only met on page 2.
+		{"pull requests crowding page one", append(many(101, forge.ResultPageLimit+20, false), many(1, 40, true)...), forge.ResultPageLimit},
 	} {
 		t.Run(fx.name, func(t *testing.T) {
 			h := newConnectorHarness(t)
