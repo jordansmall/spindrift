@@ -796,11 +796,11 @@ func (s prLander) preflightStaleBase(num string, gen uint64, pr string, d dispat
 	}
 	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusStaleBaseRebase, Detail: fmt.Sprintf("attempt=1/%d", s.cfg.MaxRebaseAttempts)})
 	cf := s.cfForNum(num)
-	rbErr := cf.Rebase(pr)
+	rbErr := s.rebase(cf, num, pr)
 	for pushRetries := 0; rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && pushRetries < s.cfg.MaxRebaseAttempts; pushRetries++ {
 		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusRebasePushRetry, Detail: fmt.Sprintf("attempt=%d/%d  !! %v", pushRetries+1, s.cfg.MaxRebaseAttempts, rbErr)})
 		s.transientBackoff().Do(pushRetries + 1)
-		rbErr = cf.Rebase(pr)
+		rbErr = s.rebase(cf, num, pr)
 	}
 	if rbErr != nil {
 		isConflict := errors.Is(rbErr, forge.ErrMergeConflict)

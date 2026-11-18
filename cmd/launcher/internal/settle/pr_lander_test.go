@@ -45,6 +45,23 @@ func (sh prShape) build(fc *forge.Fake) (forge.IssueTracker, forge.CodeForge) {
 	return fc, fc
 }
 
+// pinningForge is a PR forge that reads the PR head from a source core does not
+// trust (issue #6961): the Lander must rebase through RebasePRHead, naming the
+// agent branch it derived itself. refuse is that method's scripted refusal.
+type pinningForge struct {
+	*forge.Fake
+	heads  []string
+	refuse error
+}
+
+func (p *pinningForge) RebasePRHead(prURL, head string) error {
+	p.heads = append(p.heads, head)
+	if p.refuse != nil {
+		return p.refuse
+	}
+	return p.Fake.Rebase(prURL)
+}
+
 // checkFn is a row's check hook: an assertion on the fakes after Settle returns.
 type checkFn = func(*testing.T, *forge.Fake, *dispatch.Fake)
 
@@ -65,6 +82,7 @@ type prCase struct {
 	body      string             // the issue's body going in
 	files     []string           // the PR's changed files; default src/main.go
 	setup     func(*testing.T, *forge.Fake, *Config)
+	pinned    *pinningForge // wraps the fake as a PRHeadRebaser forge whose refusal the row scripts
 
 	maxRebase        int                               // MAX_REBASE_ATTEMPTS
 	maxFix           int                               // MAX_FIX_ATTEMPTS
@@ -383,6 +401,10 @@ func TestSettle_PRLander(t *testing.T) {
 			tracker, cf := tc.shape.build(fc)
 			if runURLForge != nil {
 				cf = runURLForge
+			}
+			if tc.pinned != nil {
+				tc.pinned.Fake = fc
+				cf = tc.pinned
 			}
 			if tc.afterMerge != nil {
 				cf = readErrAfterMerge{fc, tc.afterMerge}

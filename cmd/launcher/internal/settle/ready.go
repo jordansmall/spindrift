@@ -91,12 +91,12 @@ func (s *Settle) rebaseOnConflict(num, ref string, cf forge.CodeForge, conflictE
 	}
 	budget.attempts++
 	s.cfg.Progress.Step(Step{Key: num, Landing: ref, Status: StatusRebaseRetry, Detail: fmt.Sprintf("attempt=%d/%d", budget.attempts, s.cfg.MaxRebaseAttempts)})
-	rbErr := cf.Rebase(ref)
+	rbErr := s.rebase(cf, num, ref)
 	for rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && budget.pushRetries < s.cfg.MaxRebaseAttempts {
 		budget.pushRetries++
 		s.cfg.Progress.Step(Step{Key: num, Landing: ref, Status: StatusRebasePushRetry, Detail: fmt.Sprintf("attempt=%d/%d  !! %v", budget.pushRetries, s.cfg.MaxRebaseAttempts, rbErr)})
 		s.transientBackoff().Do(budget.pushRetries)
-		rbErr = cf.Rebase(ref)
+		rbErr = s.rebase(cf, num, ref)
 	}
 	if rbErr != nil {
 		if errors.Is(rbErr, forge.ErrTransientPushFailure) {
