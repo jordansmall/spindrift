@@ -23,7 +23,7 @@ func TestSelectiveListDispatch_AllLabeledNoPrompt(t *testing.T) {
 	c.Label = "ready-for-agent"
 	c.MaxParallel = 4
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "12", Title: "first", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "15", Title: "second", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "18", Title: "third", Labels: []string{c.Label}})
@@ -54,7 +54,7 @@ func TestSelectiveListDispatch_UnlabeledWarnsAndPrompts(t *testing.T) {
 	c.Label = "ready-for-agent"
 	c.MaxParallel = 4
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "12", Title: "labeled", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "15", Title: "unlabeled", Labels: []string{}})
 
@@ -88,7 +88,7 @@ func TestSelectiveListDispatch_UnlabeledAbortOnN(t *testing.T) {
 	c.Label = "ready-for-agent"
 	c.MaxParallel = 4
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "15", Title: "unlabeled", Labels: []string{}})
 
 	fr := runner.NewFake()
@@ -116,7 +116,7 @@ func TestSelectiveListDispatch_YesFlagSkipsPrompt(t *testing.T) {
 			c.Label = "ready-for-agent"
 			c.MaxParallel = 4
 
-			fc := forge.NewFake()
+			fc := forge.NewFake(dispatchLabels(c))
 			fc.SetIssue(forge.Issue{Number: "15", Title: "unlabeled", Labels: []string{}})
 
 			fr := runner.NewFake()
@@ -143,7 +143,7 @@ func TestSelectiveListDispatch_NonInteractiveAbort(t *testing.T) {
 	c.Label = "ready-for-agent"
 	c.MaxParallel = 4
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "15", Title: "unlabeled", Labels: []string{}})
 
 	fr := runner.NewFake()
@@ -178,7 +178,7 @@ func TestSelectiveListDispatch_InteractiveEOFAborts(t *testing.T) {
 	c.Label = "ready-for-agent"
 	c.MaxParallel = 4
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "15", Title: "unlabeled", Labels: []string{}})
 
 	fr := runner.NewFake()
@@ -205,7 +205,7 @@ func TestSelectiveListDispatch_BlockerOrderedAhead(t *testing.T) {
 	c.Label = "ready-for-agent"
 	c.MaxParallel = 4
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	// A closed #99 is one whose PR merged and auto-closed it, so it counts as done.
 	fc.SetIssue(forge.Issue{Number: "99", Title: "blocker", State: "CLOSED", Labels: []string{c.Label}})
 	// #99 is in the list and closed, so #15's edge is satisfied.
@@ -239,7 +239,7 @@ func TestSelectiveListDispatch_InListUnmergedBlocker_DispatchesOnlyBlocker(t *te
 	c.Label = "ready-for-agent"
 	c.MaxParallel = 4
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "12", Title: "blocker", State: "OPEN", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "15", Title: "dependent", Labels: []string{c.Label},
 		Body: "## Blocked by\n- #12\n"})
@@ -274,7 +274,7 @@ func TestSelectiveListDispatch_UnmetExternalEviction(t *testing.T) {
 	c.Label = "ready-for-agent"
 	c.MaxParallel = 4
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "15", Title: "dependent", Labels: []string{c.Label},
 		Body: "## Blocked by\n- #99\n"})
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Labels: []string{}})
@@ -304,7 +304,7 @@ func TestPreviewIssues_WithList_ShowsAnnotations(t *testing.T) {
 	c.Label = "ready-for-agent"
 	c.RepoSlug = "owner/repo"
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "99", Title: "blocker issue", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "15", Title: "dependent", Labels: []string{c.Label},
 		Body: "## Blocked by\n- #99\n"})
@@ -335,7 +335,7 @@ func TestPreviewIssues_WithList_DepsOfCheckFailure_AnnotatesDistinctly(t *testin
 	c.Label = "ready-for-agent"
 	c.RepoSlug = "owner/repo"
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "12", Title: "deps-of-failed", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "15", Title: "clean", Labels: []string{c.Label}})
 
@@ -360,7 +360,7 @@ func TestPreviewIssues_WithList_ShowsEviction(t *testing.T) {
 	c.Label = "ready-for-agent"
 	c.RepoSlug = "owner/repo"
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "15", Title: "dependent", Labels: []string{c.Label},
 		Body: "## Blocked by\n- #200\n"})
 	fc.SetIssue(forge.Issue{Number: "200", State: "OPEN", Labels: []string{}})
@@ -381,7 +381,7 @@ func TestPreviewIssues_WithList_ShowsUnlabeledWarning(t *testing.T) {
 	c.Label = "ready-for-agent"
 	c.RepoSlug = "owner/repo"
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "15", Title: "unlabeled", Labels: []string{}})
 
 	var buf bytes.Buffer
@@ -406,7 +406,7 @@ func TestPreviewIssues_WithList_NoMutatingCalls(t *testing.T) {
 	c.Label = "ready-for-agent"
 	c.RepoSlug = "owner/repo"
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "12", Title: "first", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "15", Title: "second", Labels: []string{c.Label}})
 
@@ -597,7 +597,7 @@ func TestSelectiveListDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched(t *tes
 	c.Label = "ready-for-agent"
 	c.MaxParallel = 4
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "12", Title: "deps-of-failed", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "15", Title: "clean", Labels: []string{c.Label}})
 
@@ -714,7 +714,7 @@ func TestSelectiveListDispatch_UnknownID_FailsFastDispatchesNothing(t *testing.T
 	c.Label = "ready-for-agent"
 	c.MaxParallel = 4
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "12", Title: "resolvable", Labels: []string{c.Label}})
 	// SPIN-99 is never registered, so Issue("SPIN-99") errors.
 
@@ -745,7 +745,7 @@ func TestFetchSelectiveIssues_MixedNumericAndSlugIDs_PreservesOrder(t *testing.T
 	c := baseConfig()
 	c.Label = "ready-for-agent"
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "12", Title: "numeric", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "SPIN-7", Title: "slug", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "15", Title: "numeric-again", Labels: []string{c.Label}})
@@ -781,7 +781,7 @@ func (n normalizingTracker) Issue(num string) (forge.Issue, error) {
 func TestFetchSelectiveIssues_RepeatedUnlabeledCountedOnce(t *testing.T) {
 	c := baseConfig()
 	c.Label = "ready-for-agent"
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "12", Title: "bare"})
 	issues, unlabeled, repeated, err := fetchSelectiveIssues(c, fc, []string{"12", "12"})
 	if err != nil {
@@ -798,7 +798,7 @@ func TestFetchSelectiveIssues_RepeatedUnlabeledCountedOnce(t *testing.T) {
 func TestFetchSelectiveIssues_RepeatedKeepsFirstOccurrenceOrder(t *testing.T) {
 	c := baseConfig()
 	c.Label = "ready-for-agent"
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "12", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "15", Labels: []string{c.Label}})
 	issues, _, repeated, err := fetchSelectiveIssues(c, fc, []string{"12", "15", "12"})
@@ -816,7 +816,7 @@ func TestFetchSelectiveIssues_RepeatedKeepsFirstOccurrenceOrder(t *testing.T) {
 func TestFetchSelectiveIssues_TrackerNormalizedNumberCollapses(t *testing.T) {
 	c := baseConfig()
 	c.Label = "ready-for-agent"
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "12", Labels: []string{c.Label}})
 	issues, _, repeated, err := fetchSelectiveIssues(c, normalizingTracker{fc}, []string{"12", "012"})
 	if err != nil {
@@ -836,7 +836,7 @@ func TestSelectiveListDispatch_RepeatedNumberRunsOnce(t *testing.T) {
 	c.Label = "ready-for-agent"
 	c.MaxParallel = 1
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "12", Title: "first", Labels: []string{c.Label}})
 
 	fr := runner.NewFake()
@@ -863,7 +863,7 @@ func TestSelectiveListDispatch_RepeatedUnlabeledPromptsOnce(t *testing.T) {
 	c.Label = "ready-for-agent"
 	c.MaxParallel = 1
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "12", Title: "bare"})
 
 	fr := runner.NewFake()

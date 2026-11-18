@@ -69,7 +69,7 @@ func TestDispatchWave_ClaimsGatedByMaxParallel(t *testing.T) {
 	c.MaxParallel = 1
 	label := "agent-trigger"
 
-	inner := forge.NewFake()
+	inner := forge.NewFake(dispatchLabels(c, label))
 	inner.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	inner.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 

@@ -18,7 +18,7 @@ func TestDrainMaxJobs_SkipsBlockedDispatchesNext(t *testing.T) {
 	c.MaxParallel = 2
 	c.MaxJobs = 1
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c, label))
 	// Issue #1 is blocked by #3 (open, no complete label).
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
@@ -195,7 +195,7 @@ func TestDrainMaxJobs_MaxJobsCapHonored(t *testing.T) {
 	c.MaxParallel = 3
 	c.MaxJobs = 1
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}})
@@ -269,7 +269,7 @@ func TestDrainMaxJobs_ZeroMeansUncapped(t *testing.T) {
 	c.MaxParallel = 3
 	c.MaxJobs = 0
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}})
@@ -738,7 +738,7 @@ func TestDrainMaxJobs_Claimed_OverlapDeferral_WritesBlockedMarker(t *testing.T) 
 	c.MaxParallel = 1
 	c.OverlapGate = "defer"
 
-	fc := claimedOverlapFixture()
+	fc := claimedOverlapFixture(c)
 
 	fr := runner.NewFake()
 
@@ -793,7 +793,7 @@ func TestDrainMaxJobs_Claimed_OverlapDeferral_MarkerSurvivesRefetchFailure(t *te
 	c.MaxParallel = 1
 	c.OverlapGate = "defer"
 
-	fc := claimedOverlapFixture()
+	fc := claimedOverlapFixture(c)
 	it := &touchesFailOnRefetch{IssueTracker: fc, num: "10"}
 
 	fr := runner.NewFake()
@@ -823,8 +823,8 @@ func TestDrainMaxJobs_Claimed_OverlapDeferral_MarkerSurvivesRefetchFailure(t *te
 
 // claimedOverlapFixture holds claimed #10 and in-progress #20, both declaring
 // lib/foo.nix.
-func claimedOverlapFixture() *forge.Fake {
-	fc := forge.NewFake()
+func claimedOverlapFixture(c Config) *forge.Fake {
+	fc := forge.NewFake(dispatchLabels(c, testInProgressLabel))
 	fc.SetIssue(forge.Issue{
 		Number: "10",
 		Body:   "## Touches\n- lib/foo.nix",

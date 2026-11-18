@@ -4056,7 +4056,12 @@ func TestTea_DetailModalKey_BulkPickAllStaysUnbound(t *testing.T) {
 // requiring one "p" per row. It is a standalone key, not a trailing "a" after
 // "p" (issue #1838 replaced that leader chord).
 func TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue(t *testing.T) {
-	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f := forge.NewFake(forge.DispatchLabels{
+		Dispatchable: "ready-for-agent",
+		InProgress:   "agent-in-progress",
+		Complete:     "agent-complete",
+		Failed:       "agent-failed",
+	})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
 	f.SetIssue(forge.Issue{Number: "43", Title: "also ready", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
 	launch := newTestLauncher(t, f)
