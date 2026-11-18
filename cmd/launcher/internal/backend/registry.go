@@ -229,6 +229,15 @@ func NeedsGHToken(forge, tracker Descriptor, readOnly bool) bool {
 		!forge.ValidAsCodeForge
 }
 
+// ClosesRef reports whether a `Closes #N` in a PR body on forge auto-closes
+// tracker's issue N: forge has pull requests and is the same backend as the
+// tracker, so the two share an issue namespace (github+github,
+// forgejo+forgejo). Any other pairing names a foreign tracker's number, or a
+// key the forge never parses. An unknown name's zero row is false.
+func ClosesRef(forge, tracker Descriptor) bool {
+	return forge.OutboxRelayCapable && tracker.ValidAsTracker && forge.Name == tracker.Name
+}
+
 // OutboxRelayBackends lists, sorted, the CODE_FORGE names RelaysOutbox accepts.
 func OutboxRelayBackends() []string {
 	var names []string

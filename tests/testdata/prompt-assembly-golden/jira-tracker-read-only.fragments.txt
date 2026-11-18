@@ -19,7 +19,6 @@ open-pr-create-outbox.md
 open-pr-push-outbox.md
 outcome-landing-outbox.md
 outcome-ready-means-outbox.md
-pr-body-closes.md
 review-loop-orchestrator-no-filer.md
 review-loop-orchestrator.md
 scout-absent.md

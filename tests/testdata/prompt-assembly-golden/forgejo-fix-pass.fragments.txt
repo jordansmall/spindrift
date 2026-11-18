@@ -15,5 +15,4 @@ land-git-stop-read-write.md
 open-pr-push-git.md
 outcome-landing-git.md
 outcome-ready-means-git.md
-pr-body-closes.md
 skill-preamble.md

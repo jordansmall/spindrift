@@ -48,7 +48,8 @@ func trackerArmRegistry(t *testing.T) (Registry, Env) {
 // (host-posted comment). Under the
 // log carrier no tracker but local can read a linked issue (unreadable arm).
 // The PR-body ref pair keys on LocalIssueReference, and only local carries
-// files for it, so github and jira always close the issue.
+// files for it. PR_BODY_CLOSES needs the forge to share the tracker's issue
+// namespace: github on github and forgejo on forgejo close, the rest do not.
 func TestAssembleTrackerArmSelectsBackendFolder(t *testing.T) {
 	forgejo := func(e *Env) {
 		e.IssueTracker, e.TrackerAxisRead, e.TrackerAxisWrite, e.TrackerAxisFiler = "forgejo", "FORGEJO", "FORGEJO", "FORGEJO"
@@ -60,6 +61,7 @@ func TestAssembleTrackerArmSelectsBackendFolder(t *testing.T) {
 		e.IssueTracker, e.TrackerAxisRead, e.TrackerAxisWrite, e.TrackerAxisFiler = "jira", "JIRA", "GITHUB", "GH"
 	}
 	readOnly := func(e *Env) { e.BoxWriteEnabled = false }
+	forgejoForge := func(e *Env) { e.CodeForge = "forgejo" }
 	localRef := func(e *Env) { e.LocalIssueReference = true }
 	logCarrier := func(e *Env) { e.SignalCarrier = "log" }
 	with := func(fs ...func(*Env)) func(*Env) {
@@ -78,15 +80,16 @@ func TestAssembleTrackerArmSelectsBackendFolder(t *testing.T) {
 		{"github read-write", with(), "read:SHARED-READ|rw:GH-BLOCKED|relay:|unwritable:|pr:CLOSES|"},
 		{"github read-only relays through the github folder", readOnly, "read:SHARED-READ|rw:|relay:GH-RELAY|unwritable:|pr:CLOSES|"},
 		{"github ignores LocalIssueReference", localRef, "read:SHARED-READ|rw:GH-BLOCKED|relay:|unwritable:|pr:CLOSES|"},
-		{"forgejo read-write", forgejo, "read:SHARED-READ|rw:FJ-BLOCKED|relay:|unwritable:|pr:CLOSES|"},
-		{"forgejo read-only falls back to the shared relay", with(forgejo, readOnly), "read:SHARED-READ|rw:|relay:SHARED-RELAY|unwritable:|pr:CLOSES|"},
+		{"forgejo read-write", forgejo, "read:SHARED-READ|rw:FJ-BLOCKED|relay:|unwritable:|pr:|"},
+		{"forgejo tracker on a forgejo forge closes", with(forgejo, forgejoForge), "read:SHARED-READ|rw:FJ-BLOCKED|relay:|unwritable:|pr:CLOSES|"},
+		{"forgejo read-only falls back to the shared relay", with(forgejo, readOnly), "read:SHARED-READ|rw:|relay:SHARED-RELAY|unwritable:|pr:|"},
 		{"local relays even on a write-capable box", local, "read:LOCAL-READ|rw:|relay:LOCAL-RELAY|unwritable:|pr:LOCAL-NOREF|"},
 		{"local with LocalIssueReference", with(local, localRef), "read:LOCAL-READ|rw:|relay:LOCAL-RELAY|unwritable:|pr:LOCAL-REF|"},
-		{"jira read-write", jira, "read:SHARED-READ|rw:|relay:|unwritable:UNWRITABLE|pr:CLOSES|"},
-		{"jira read-only falls back to the shared relay", with(jira, readOnly), "read:SHARED-READ|rw:|relay:SHARED-RELAY|unwritable:|pr:CLOSES|"},
-		{"jira ignores LocalIssueReference", with(jira, localRef), "read:SHARED-READ|rw:|relay:|unwritable:UNWRITABLE|pr:CLOSES|"},
+		{"jira read-write", jira, "read:SHARED-READ|rw:|relay:|unwritable:UNWRITABLE|pr:|"},
+		{"jira read-only falls back to the shared relay", with(jira, readOnly), "read:SHARED-READ|rw:|relay:SHARED-RELAY|unwritable:|pr:|"},
+		{"jira ignores LocalIssueReference", with(jira, localRef), "read:SHARED-READ|rw:|relay:|unwritable:UNWRITABLE|pr:|"},
 		{"github without a socket cannot read linked issues", logCarrier, "read:UNREADABLE|rw:GH-BLOCKED|relay:|unwritable:|pr:CLOSES|"},
-		{"jira without a socket cannot read linked issues", with(jira, logCarrier), "read:UNREADABLE|rw:|relay:|unwritable:UNWRITABLE|pr:CLOSES|"},
+		{"jira without a socket cannot read linked issues", with(jira, logCarrier), "read:UNREADABLE|rw:|relay:|unwritable:UNWRITABLE|pr:|"},
 		{"local reads its own folder without a socket", with(local, logCarrier), "read:LOCAL-READ|rw:|relay:LOCAL-RELAY|unwritable:|pr:LOCAL-NOREF|"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

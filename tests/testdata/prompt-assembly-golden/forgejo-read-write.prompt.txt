@@ -504,9 +504,6 @@ OPEN A PULL REQUEST below.
 
 2. `fj pr create --base main --head agent/issue-7 --body "<summary>" "WIP: <conventional title>"` — the `WIP: ` prefix opens it as a draft; the launcher strips it and flips the PR ready once CI is green (it watches CI host-side via the forgejo PRForge, so there is nothing left for you to watch here). Do NOT run `gh pr create`.
 
-3. Body MUST contain `Closes #7`. Summarize what changed and
-   flag anything a reviewer should know.
-
 The PR opens as a **draft** and stays a **draft** — the launcher flips it to
 ready once CI reaches green (the launcher already gates on CI green itself, so
 there is nothing left for you to watch or confirm here), then applies its
