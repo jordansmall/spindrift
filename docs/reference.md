@@ -876,11 +876,10 @@ comment discipline to opt into.
 The `OPEN A PULL REQUEST` ticket-reference line is the one row with three
 mutually exclusive fragments (`pr-body-closes.md` /
 `local/pr-body-issue-ref.md` / `local/pr-body-no-issue-ref.md`) instead of one
-on/off pair: `ISSUE_TRACKER` and
-`LOCAL_ISSUE_REFERENCE` together pick exactly one gate, so issue-prompt.md
-concatenates all three substitution variables and only the active one ever
-renders — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal)
-for the three cases.
+on/off pair: `ISSUE_TRACKER`, `CODE_FORGE`, and `LOCAL_ISSUE_REFERENCE`
+together turn on at most one gate, so issue-prompt.md concatenates all three
+substitution variables and at most one ever renders — see [PR-body ticket
+reference](#pr-body-ticket-reference-local_issue_reference) for the cases.
 
 The caveman-default step is keyed on the baked skill itself rather than a
 separate knob: whenever `DRIVER_SKILLS_DIR/caveman/SKILL.md` is present at
@@ -7517,13 +7516,28 @@ slug can be numeric (`.../42.md` → slug `42`). An unconditional
 `Closes #${ISSUE_NUMBER}` in the PR body — the `github`-tracker default — would
 therefore risk silently closing real GitHub issue #42 on the Target repo, on
 top of leaking a private ticket slug into a PR body on the shared remote. To
-avoid both, the PR-body reference is a three-way conditional fragment (see
-the Conditional fragment registry above) keyed on `ISSUE_TRACKER` and the
-`LOCAL_ISSUE_REFERENCE` global setting (grouped settings surface, ADR 0015;
-`issues.localReference`):
+avoid both, the PR-body reference is a conditional fragment (see the
+Conditional fragment registry above) keyed on `ISSUE_TRACKER`, `CODE_FORGE`,
+and the `LOCAL_ISSUE_REFERENCE` global setting (grouped settings surface, ADR
+0015; `issues.localReference`). `Closes #${ISSUE_NUMBER}` is asked for only
+when the Code Forge shares the tracker's issue namespace — the tracker and
+the forge are the same backend and that backend has pull requests
+(`backend.ClosesRef`), so the merge's auto-close lands on the right issue:
 
-- `ISSUE_TRACKER=github`: unchanged — the PR body still MUST contain
-  `Closes #${ISSUE_NUMBER}`.
+- `ISSUE_TRACKER=github`, `CODE_FORGE=github`: the PR body MUST contain
+  `Closes #${ISSUE_NUMBER}`, and the host appends one if the agent left it
+  out (in read-only mode, the default).
+- `ISSUE_TRACKER=forgejo`, `CODE_FORGE=forgejo`: the PR body MUST contain
+  `Closes #${ISSUE_NUMBER}`; Forgejo's own keyword auto-close is what closes
+  the issue when a human or the forge merges the PR.
+- Any other pairing — a `github` or `forgejo` tracker on the other forge, or
+  on a `git` forge, which opens no PR: no closing keyword. The issue number is
+  a foreign namespace to the forge, so `Closes #42` would close an unrelated
+  issue there. The host's own `Closes` backstop still keys on the tracker
+  alone, so it appends one for a `github` tracker on a `forgejo` forge until
+  issue #7058 makes it pairwise.
+- `ISSUE_TRACKER=jira`: no closing keyword. No forge parses a key like
+  `ENG-123`, so a `Closes` line would close nothing.
 - `ISSUE_TRACKER=local`, `LOCAL_ISSUE_REFERENCE` off (**default**): the PR
   body has no reference to the ticket at all — no slug, no `Closes`/`Fixes`.
 - `ISSUE_TRACKER=local`, `LOCAL_ISSUE_REFERENCE` on: the PR body carries
