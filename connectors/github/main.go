@@ -26,8 +26,9 @@ func init() {
 		NativeDeps: nativeDeps,
 		Blocks:     blocks,
 		Search:     search,
-		// Labeled serves the finding dedup scan, which reads closed issues too.
-		Labeled: labeled,
+		// LabeledPage serves the finding dedup scan, which reads closed issues
+		// too, one REST page per call.
+		LabeledPage: labeledPage,
 		// Probe and Count serve the tracker's doctor and daemon-demand reads.
 		// RemovedLabels serves recover's prior-claim read; core maps the names.
 		Probe:         trackerProbe,
