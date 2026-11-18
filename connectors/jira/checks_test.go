@@ -133,7 +133,7 @@ func TestCreateMetaTypeNotOfferedSkipsFieldWalk(t *testing.T) {
 func TestCountCloudPostsTheUnorderedListIssuesJQL(t *testing.T) {
 	q := tracker.Query{Label: "agent-trigger"}
 	got := script(t, func(connector.Request, *url.URL) (int, string) { return 200, `{"count":7}` })
-	n, err := count(cloud, q)
+	n, err := count(cloud, q, 0, false)
 	if err != nil || n != 7 {
 		t.Fatalf("count = %d, %v", n, err)
 	}
@@ -153,7 +153,7 @@ func TestCountCloudPostsTheUnorderedListIssuesJQL(t *testing.T) {
 func TestCountServerReadsSearchTotalWithZeroRows(t *testing.T) {
 	q := tracker.Query{Status: "Ready"}
 	got := script(t, func(connector.Request, *url.URL) (int, string) { return 200, `{"total":4,"issues":[]}` })
-	n, err := count(server, q)
+	n, err := count(server, q, 0, false)
 	if err != nil || n != 4 {
 		t.Fatalf("count = %d, %v", n, err)
 	}
@@ -166,7 +166,7 @@ func TestCountServerReadsSearchTotalWithZeroRows(t *testing.T) {
 }
 
 func TestCountRejectsUnknownDialect(t *testing.T) {
-	if _, err := count(tracker.Target{API: site, Repo: "ENG", Dialect: "x"}, tracker.Query{}); err == nil {
+	if _, err := count(tracker.Target{API: site, Repo: "ENG", Dialect: "x"}, tracker.Query{}, 0, false); err == nil {
 		t.Fatal("want error")
 	}
 }

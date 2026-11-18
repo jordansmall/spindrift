@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -180,6 +181,12 @@ func TestCountLayer(t *testing.T) {
 	if p["label"] != "ready-for-agent" || p["status"] != "Ready" {
 		t.Errorf("count params = %v, want both selectors", p)
 	}
+	if p["fresh"] != true || p["limit"] != float64(forge.ResultPageLimit) {
+		t.Errorf("count params = %v, want fresh true and limit %d", p, forge.ResultPageLimit)
+	}
+	if p := (*calls)[2].params; p["fresh"] != false {
+		t.Errorf("second count params = %v, want fresh false", p)
+	}
 }
 
 func TestCountLayerNoSelectorMakesNoCall(t *testing.T) {
@@ -276,5 +283,18 @@ func TestAbsentPriorClaimStaysAbsent(t *testing.T) {
 	c := forge.ResolveCapabilities(nil, tr, backend.Descriptor{}, backend.Descriptor{})
 	if c.PriorClaimStateReader != nil || len(*calls) != 0 {
 		t.Errorf("PriorClaimStateReader = %v with %d calls; want none", c.PriorClaimStateReader, len(*calls))
+	}
+}
+
+func TestCountLayerClampsToResultPageLimit(t *testing.T) {
+	call, _ := stubGuest(t, map[string]string{
+		"tracker.countInterval": `{"seconds":5}`,
+		"tracker.count":         fmt.Sprintf(`{"count":%d}`, forge.ResultPageLimit+40),
+	})
+	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapCount}, true)
+	dc, _ := forge.As[forge.DemandCounter](tr)
+	n, err := dc.CountReady(false)
+	if err != nil || n != forge.ResultPageLimit {
+		t.Errorf("CountReady = %d, %v; want %d, nil", n, err, forge.ResultPageLimit)
 	}
 }
