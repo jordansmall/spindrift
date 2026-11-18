@@ -224,8 +224,8 @@ func TestMainRun_Research_RoutesThroughBootstrap(t *testing.T) {
 		if code != int(exitcode.ConfigInvalid) {
 			t.Errorf("mainRun(%v) code = %d, want %d", argv, code, int(exitcode.ConfigInvalid))
 		}
-		if !strings.Contains(stderr.String(), "REPO_SLUG") {
-			t.Errorf("mainRun(%v) stderr = %q, want a REPO_SLUG validation error", argv, stderr.String())
+		if !strings.Contains(stderr.String(), "--repo-slug") {
+			t.Errorf("mainRun(%v) stderr = %q, want a --repo-slug validation error", argv, stderr.String())
 		}
 	}
 }
@@ -264,8 +264,8 @@ func TestMainRun_Dispatch_MissingRepoSlugUnderLocalForge_ExitsConfigInvalid(t *t
 	if stdout.Len() != 0 {
 		t.Errorf("mainRun(dispatch) stdout = %q, want empty", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "REPO_SLUG") {
-		t.Errorf("mainRun(dispatch) stderr = %q, want a REPO_SLUG validation error", stderr.String())
+	if !strings.Contains(stderr.String(), "--repo-slug") {
+		t.Errorf("mainRun(dispatch) stderr = %q, want a --repo-slug validation error", stderr.String())
 	}
 }
 
@@ -377,8 +377,8 @@ func TestMainRun_Recover_StripsFlagsBeforeIssueID(t *testing.T) {
 	if code != int(exitcode.ConfigInvalid) {
 		t.Errorf("mainRun(recover --yes) code = %d, want %d (queue-mode bootstrap exit code)", code, int(exitcode.ConfigInvalid))
 	}
-	if !strings.Contains(stderr.String(), "REPO_SLUG") {
-		t.Errorf("mainRun(recover --yes) stderr = %q, want a REPO_SLUG validation error (queue mode reached bootstrap; --yes not read as an issue ID)", stderr.String())
+	if !strings.Contains(stderr.String(), "--repo-slug") {
+		t.Errorf("mainRun(recover --yes) stderr = %q, want a --repo-slug validation error (queue mode reached bootstrap; --yes not read as an issue ID)", stderr.String())
 	}
 
 	stdout.Reset()
@@ -387,8 +387,8 @@ func TestMainRun_Recover_StripsFlagsBeforeIssueID(t *testing.T) {
 	if code != 1 {
 		t.Errorf("mainRun(recover --yes 42) code = %d, want 1", code)
 	}
-	if !strings.Contains(stderr.String(), "REPO_SLUG") {
-		t.Errorf("mainRun(recover --yes 42) stderr = %q, want a REPO_SLUG validation error (issue ID resolved as 42, past the usage check)", stderr.String())
+	if !strings.Contains(stderr.String(), "--repo-slug") {
+		t.Errorf("mainRun(recover --yes 42) stderr = %q, want a --repo-slug validation error (issue ID resolved as 42, past the usage check)", stderr.String())
 	}
 }
 
@@ -403,8 +403,8 @@ func TestMainRun_Recover_AcceptsNonNumericIssueID(t *testing.T) {
 	if code != 1 {
 		t.Errorf("mainRun(recover SPIN-42) code = %d, want 1", code)
 	}
-	if !strings.Contains(stderr.String(), "REPO_SLUG") {
-		t.Errorf("mainRun(recover SPIN-42) stderr = %q, want a REPO_SLUG validation error (non-numeric ID must still reach bootstrap)", stderr.String())
+	if !strings.Contains(stderr.String(), "--repo-slug") {
+		t.Errorf("mainRun(recover SPIN-42) stderr = %q, want a --repo-slug validation error (non-numeric ID must still reach bootstrap)", stderr.String())
 	}
 }
 
@@ -426,8 +426,8 @@ func TestMainRun_Preview_StripsFlagsBeforeIssueID(t *testing.T) {
 		if code != 1 {
 			t.Errorf("mainRun(%v) code = %d, want 1", argv, code)
 		}
-		if !strings.Contains(stderr.String(), "REPO_SLUG") {
-			t.Errorf("mainRun(%v) stderr = %q, want a REPO_SLUG validation error", argv, stderr.String())
+		if !strings.Contains(stderr.String(), "--repo-slug") {
+			t.Errorf("mainRun(%v) stderr = %q, want a --repo-slug validation error", argv, stderr.String())
 		}
 	}
 }
@@ -553,8 +553,8 @@ func TestMainRun_Console_RoutesThroughBootstrap(t *testing.T) {
 	if code != 1 {
 		t.Errorf("mainRun([console]) code = %d, want 1", code)
 	}
-	if !strings.Contains(stderr.String(), "REPO_SLUG") {
-		t.Errorf("mainRun([console]) stderr = %q, want a REPO_SLUG validation error", stderr.String())
+	if !strings.Contains(stderr.String(), "--repo-slug") {
+		t.Errorf("mainRun([console]) stderr = %q, want a --repo-slug validation error", stderr.String())
 	}
 }
 
@@ -739,8 +739,8 @@ func TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument(t *testing.T) {
 	if code != int(exitcode.ConfigInvalid) {
 		t.Fatalf("mainRun code = %d, want %d; stderr=%s", code, int(exitcode.ConfigInvalid), stderr.String())
 	}
-	if strings.Contains(stderr.String(), "REPO_SLUG") {
-		t.Errorf("stderr = %q, want REPO_SLUG resolved from the document (no REPO_SLUG complaint)", stderr.String())
+	if strings.Contains(stderr.String(), "pass --repo-slug") {
+		t.Errorf("stderr = %q, want repo slug resolved from the document (no repo-slug remedy)", stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "set ") {
 		t.Errorf("stderr = %q, want validate() to fail on some later required field", stderr.String())
@@ -752,8 +752,8 @@ func TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument(t *testing.T) {
 	if code != int(exitcode.ConfigInvalid) {
 		t.Fatalf("mainRun code = %d, want %d; stderr=%s", code, int(exitcode.ConfigInvalid), stderr.String())
 	}
-	if strings.Contains(stderr.String(), "REPO_SLUG") {
-		t.Errorf("stderr = %q, want REPO_SLUG resolved (flag overrides document)", stderr.String())
+	if strings.Contains(stderr.String(), "pass --repo-slug") {
+		t.Errorf("stderr = %q, want repo slug resolved (flag overrides document)", stderr.String())
 	}
 }
 
@@ -1620,10 +1620,10 @@ func TestValidate_RepoSlugRequired(t *testing.T) {
 	c.RepoSlug = ""
 	err := validate(c)
 	if err == nil {
-		t.Fatal("validate() must require REPO_SLUG when empty")
+		t.Fatal("validate() must require a repo slug when empty")
 	}
-	if !strings.Contains(err.Error(), "REPO_SLUG") {
-		t.Errorf("error should mention REPO_SLUG, got: %v", err)
+	if !strings.Contains(err.Error(), "--repo-slug") {
+		t.Errorf("error should mention --repo-slug, got: %v", err)
 	}
 }
 
@@ -2321,10 +2321,10 @@ func TestValidate_ResearchSelfContainedGithubTrackerStillRequiresRepoSlug(t *tes
 	c.RepoSlug = ""
 	err := validate(c)
 	if err == nil {
-		t.Fatal("validate() must still require REPO_SLUG for self-contained research with a github issue tracker")
+		t.Fatal("validate() must still require a repo slug for self-contained research with a github issue tracker")
 	}
-	if !strings.Contains(err.Error(), "REPO_SLUG") {
-		t.Errorf("error should mention REPO_SLUG, got: %v", err)
+	if !strings.Contains(err.Error(), "--repo-slug") {
+		t.Errorf("error should mention --repo-slug, got: %v", err)
 	}
 }
 

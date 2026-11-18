@@ -119,13 +119,13 @@ func requiredValue(name, msg string, missing func() bool) doctor.Check {
 func RequiredKnobChecks(c Config, d Deps) []doctor.Check {
 	sig := d.Signals(c.CodeForge, c.IssueTracker)
 	return []doctor.Check{
-		requiredValue("repo-slug", "set REPO_SLUG=owner/repo (the target GitHub repository)", func() bool {
+		requiredValue("repo-slug", "pass --repo-slug owner/repo or set forge.repoSlug (the target GitHub repository)", func() bool {
 			return !repoRequirementExempt(sig, c) && c.RepoSlug == ""
 		}),
-		requiredValue("git-user-name", "set GIT_USER_NAME, or configure git user.name on the host", func() bool {
+		requiredValue("git-user-name", "pass --user-name or set git.user.name, or configure git user.name on the host", func() bool {
 			return c.GitUserName == ""
 		}),
-		requiredValue("git-user-email", "set GIT_USER_EMAIL, or configure git user.email on the host", func() bool {
+		requiredValue("git-user-email", "pass --user-email or set git.user.email, or configure git user.email on the host", func() bool {
 			return c.GitUserEmail == ""
 		}),
 		requiredValue("gh-token", "set GH_TOKEN (fine-grained PAT scoped to the single target repo: Issues RW, Contents RW, Pull requests RW, Metadata R)", func() bool {
