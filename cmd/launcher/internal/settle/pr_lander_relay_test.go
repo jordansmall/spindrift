@@ -372,10 +372,11 @@ func blockedHandoffCases() []prCase {
 			check:   allOf(g.relayedBundle(), openedDraftPR("feat: add widget", "Adds a widget.\n\nCloses #1")), wantComments: []string{"stuck"},
 		}),
 		blocked(prCase{
-			name:   "a blocked hand-off's PR intent that already closes the issue gets no second reference",
-			result: withIntent("feat: add widget\n\nAdds a widget. Closes #1"),
-			want:   withDraftPR,
-			check:  openedDraftPR("feat: add widget", "Adds a widget. Closes #1"), wantComments: []string{"stuck"},
+			name:    "a blocked hand-off's PR intent that already closes the issue gets no second reference",
+			tracker: backend.GitHub,
+			result:  withIntent("feat: add widget\n\nAdds a widget. Closes #1"),
+			want:    withDraftPR,
+			check:   openedDraftPR("feat: add widget", "Adds a widget. Closes #1"), wantComments: []string{"stuck"},
 		}),
 		// A local tracker closes issues through its own axis (ADR 0029), not GitHub's auto-close on merge.
 		blocked(prCase{

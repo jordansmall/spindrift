@@ -281,7 +281,7 @@ func (h hostPatchForge) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 // to fall it back to promote. The same-backend leg keeps "Closes #N" and the
 // agent/issue-N branch pointing at the filed issue: ISSUE_TRACKER=forgejo
 // with CODE_FORGE=github would otherwise close an unrelated GitHub issue N
-// on merge, the hazard ensureClosesReference guards on the work path
+// on merge, the hazard closeOnlyOwnIssue guards on the work path
 // (#2341). nil whenever any leg is missing: WithPatchForge(nil, nil) is
 // "never opted in", so the rung stays off (issue #4074).
 func butlerPatchForge(caps forge.Capabilities) butler.PatchForge {

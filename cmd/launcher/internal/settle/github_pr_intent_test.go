@@ -84,7 +84,7 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges(t *testin
 	}
 }
 
-// ensureClosesReference dedups: when the box's own PR-intent body already
+// closeOnlyOwnIssue dedups: when the box's own PR-intent body already
 // carries a GitHub-recognized closing keyword for the issue, settle must not
 // append a second "Closes #<num>".
 func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_ClosesAlreadyPresent(t *testing.T) {
