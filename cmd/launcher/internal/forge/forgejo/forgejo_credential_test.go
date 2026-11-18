@@ -20,7 +20,7 @@ const credToken = "s3cr3t-forgejo-token-6860"
 // elsewhere in a git config.
 var urlUserinfo = regexp.MustCompile(`://[^/\s]*@`)
 
-// exitTail matches the ": <git output>" cloneOutputTail appends after the exit
+// exitTail matches the ": <git output>" RedactedOutputTail appends after the exit
 // status.
 var exitTail = regexp.MustCompile(`exit status \d+: \S`)
 
