@@ -80,6 +80,11 @@ by-name check with a descriptor enablement row.
   under-counts, possibly to 0.)
   When Demand said `Ready > 0` but the child exits 2, the next probe drops
   `If-None-Match` and reads fresh.
+  (Amended by issue #6982: a github backend row routes the probe through the
+  github Connector's `tracker.count`, which carries core's `limit` and the
+  `fresh` flag. The Connector keeps the same sort, page-1 ETag, five-page
+  bound and `forge.ResultPageLimit` clamp in guest state, so a Connector
+  reload after a failed call costs one full read.)
 - **forgejo** reads `x-total-count` from a `limit=1` page. It keeps
   `definedLabels`' pre-check, cached across probes: Forgejo silently drops an
   unresolved `labels=` filter (#3952), so an undefined label would otherwise
