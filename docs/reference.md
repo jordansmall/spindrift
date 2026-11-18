@@ -2530,12 +2530,12 @@ optional); `credentialKnob` is the Consumer knob that names `credentialEnv`,
 and doctor shows it. The launcher and the daemon validate and
 store the rows (the `backendrows` package: `Use` validates the rows whole and
 exits `config-invalid` on a bad one). `Lookup` finds a row and `Load` binds its
-module to its Route table through the Connector host. Only the read shadow
-([Shadow mode](#shadow-mode)) calls them today; a Connector backend cannot yet
-be selected as the tracker or forge (issues #6807 and #6810). The host
-reads the credential from its own environment at each request and attaches it
-on a route match; the module never sees it. The Box's binaries read no backend
-rows, since the Box never brokers a forge credential.
+module to its Route table through the Connector host. The read shadow
+([Shadow mode](#shadow-mode)) and primary mode ([Backend primary
+mode](#backend-primary-mode)) call them. The host reads the credential from
+its own environment at each request and attaches it on a route match; the
+module never sees it. The Box's binaries read no backend rows, since the Box
+never brokers a forge credential.
 
 A backend without a row is built from the generated registry as before, and a
 binary with no document, Quickstart included, has no rows. With no backend row
@@ -2798,11 +2798,16 @@ the row's entry in the launcher input document's `backends` as `shadow` and
 `shadowEvery`, the sampling rate from the row option
 `spindrift.connectors.<name>.shadowEvery` (default 10; `mkHarness` refuses a
 value below 1, or either field without the other). The github Connector's row
-reads with the host-only `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`. spindrift's own
-dogfood shadows the Connectors listed in `nix/dogfood-shadow.nix` (none today)
-and runs those in `nix/dogfood-primary.nix` (claude and github) as primary, a
-pinned exception to mimicking a new Consumer; its accepted github Route table is
-baselined in `spindrift-connector-routes.json`.
+and its `githubConnectorToken` knob (the host-only
+`SPINDRIFT_GITHUB_CONNECTOR_TOKEN`) exist only while `shadow` or `primary` is
+on (issue #6912). With both off the input document carries no github backend
+row, github reads stay on native `gh`, the env schema has no such variable, and
+doctor prints no `connector-routes[github]` or
+`connector-routes-widened[github]` row. spindrift's own dogfood shadows the
+Connectors listed in `nix/dogfood-shadow.nix` (none today) and runs those in
+`nix/dogfood-primary.nix` (claude and github) as primary, a pinned exception to
+mimicking a new Consumer; its accepted github Route table is baselined in
+`spindrift-connector-routes.json`.
 
 ##### Driver replay
 
@@ -3128,7 +3133,9 @@ switches cover launcher-side writes only: the CI claim and release label swaps i
 `.github/actions/agent-setup/action.yml` and
 `.github/workflows/agent-dispatch.yml` still run `gh issue edit` and are not
 leaks of the switches. The github row is on for dogfood through
-`nix/dogfood-primary.nix`. The jira row routes the whole tracker, so there is
+`nix/dogfood-primary.nix`; the row and its `githubConnectorToken` knob exist
+only while `shadow` or `primary` is on (issue #6912, [Shadow
+mode](#shadow-mode)). The jira row routes the whole tracker, so there is
 no native fallback to read from ([Switching jira to
 primary](#switching-jira-to-primary)). The forgejo row replaces the whole Code
 Forge, reads and writes, and leaves the tracker native; it is [documented with
