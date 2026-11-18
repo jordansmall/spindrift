@@ -26,6 +26,7 @@ func mergeCases() []prCase {
 	draft := "MarkDraft:" + testPR
 	merge := "Merge:" + testPR
 	conflicted := []string{ready, merge, draft}
+	restored := []string{ready, merge, draft, ready} // a demotion whose rebase could not proceed is put back to ready
 	rebased := []string{ready, merge, draft, ready, merge}
 	errTransient := forge.ErrTransientPushFailure
 	errHeadRefused := fmt.Errorf("%w: PR head %q is not the agent branch", connectorforge.ErrAnswer, "release")
@@ -43,6 +44,7 @@ func mergeCases() []prCase {
 	errRepoGone := errors.New("git push --force-with-lease: exit status 128: remote: Repository not found.")
 	errDenied := errors.New("gh pr ready --undo: permission denied")
 	errReadyDenied := errors.New("HTTP 403: Resource not accessible by integration")
+	errRestoreDenied := fmt.Errorf("%w: %w", errRestoreReadyFailed, errReadyDenied)
 	fourGreen := []forge.RollupState{green, green, green, green} // the initial gate reads a pair, and so does each re-wait after a force-push
 	pollTimesOut := func(_ *testing.T, _ *forge.Fake, c *Config) { c.MergePollTimeout = 0 }
 	stale := func(_ *testing.T, fc *forge.Fake, c *Config) {
@@ -104,7 +106,7 @@ func mergeCases() []prCase {
 			name:         "a rebase that fails without a conflict leaves the merge blocked",
 			wantStatuses: []Status{detailOnly, StatusRebaseRetry, StatusRebaseFailed, StatusMergeBlocked},
 			maxRebase:    3, mergeErrs: []error{errConflict}, rebaseErr: errors.New("rebase failed: dirty worktree"),
-			want: blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: conflicted,
+			want: blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: restored,
 			wantSteps:    []Step{stepAt(testPR, StatusRebaseFailed, "!! rebase failed: dirty worktree")},
 			wantComments: []string{"merge blocked after green CI: rebase failed: dirty worktree"}, wantRebases: 1,
 		},
@@ -113,7 +115,7 @@ func mergeCases() []prCase {
 			wantStatuses: []Status{detailOnly, StatusRebaseRetry, StatusPostForcePushWait, StatusMergeBlocked},
 			checks:       fourGreen,
 			maxRebase:    1, mergeErrs: []error{errConflict, errConflict},
-			want: blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: append(append([]string(nil), rebased...), draft),
+			want: blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: append(append([]string(nil), rebased...), draft, ready),
 			wantComments: []string{"merge blocked after green CI: merge conflict"}, wantRebases: 1,
 		},
 		{
@@ -168,10 +170,25 @@ func mergeCases() []prCase {
 				fc.MarkReadyErrs = []error{nil}
 				fc.MarkReadyErr = errReadyDenied
 			},
-			want:         settledAs(dispatchrecord.ReasonMarkReadyFailed, errForcePushMarkReadyFailed.Error()+": "+errReadyDenied.Error()),
+			want:         settledAs(dispatchrecord.ReasonMarkReadyFailed, errRestoreDenied.Error()),
 			wantPRClosed: true, wantLabels: failed, wantNoLabels: complete,
 			wantCalls:    []string{ready, merge, draft, ready},
-			wantComments: []string{"marking " + testPR + " ready failed after green CI: " + errForcePushMarkReadyFailed.Error() + ": " + errReadyDenied.Error() + " — it is still a draft"}, wantRebases: 1,
+			wantComments: []string{markReadyFailedComment(errRestoreDenied)}, wantRebases: 1,
+		},
+		{
+			// No rebase runs, so the demotion is the only change: a failed restore
+			// must not settle merge-blocked on a draft (issue #7224).
+			name:         "a failed restore to ready after a demotion whose rebase could not proceed fails the issue",
+			wantStatuses: []Status{detailOnly, StatusMarkReadyFailed, StatusFailed},
+			maxRebase:    0, mergeErrs: []error{errConflict},
+			setup: func(_ *testing.T, fc *forge.Fake, _ *Config) {
+				fc.MarkReadyErrs = []error{nil}
+				fc.MarkReadyErr = errReadyDenied
+			},
+			want:         settledAs(dispatchrecord.ReasonMarkReadyFailed, errRestoreDenied.Error()),
+			wantPRClosed: true, wantLabels: failed, wantNoLabels: complete,
+			wantCalls:    []string{ready, merge, draft, ready},
+			wantComments: []string{markReadyFailedComment(errRestoreDenied)},
 		},
 		{
 			name:         "a persistent mark-ready failure fails the issue and never merges",
@@ -179,7 +196,7 @@ func mergeCases() []prCase {
 			setup:        func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.MarkReadyErr = errReadyDenied },
 			want:         settledAs(dispatchrecord.ReasonMarkReadyFailed, errReadyDenied.Error()),
 			wantPRClosed: true, wantLabels: failed, wantNoLabels: complete, wantCalls: []string{ready},
-			wantComments: []string{"marking " + testPR + " ready failed after green CI: " + errReadyDenied.Error() + " — it is still a draft"},
+			wantComments: []string{markReadyFailedComment(errReadyDenied)},
 		},
 		{
 			name: "a persistent mark-ready failure fails the issue under manual merge mode", mergeMode: "manual",
@@ -312,7 +329,7 @@ func mergeCases() []prCase {
 			wantStatuses: []Status{detailOnly, StatusRebaseRetry, StatusRebasePushRetry, StatusRebasePushRetry, StatusRebasePushRetriesExhausted, StatusMergeBlocked},
 			wantComments: []string{"merge blocked after green CI: transient push failure"},
 			maxRebase:    2, mergeErrs: []error{errConflict}, setup: with(backoff(0), sleepsInto(&retrySleeps), withRebaseErrs(errTransient, errTransient, errTransient)),
-			want: blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: conflicted, wantRebases: 3,
+			want: blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: restored, wantRebases: 3,
 			check:     sleptThrough(&retrySleeps, pollSleep, 3*time.Second, 5*time.Second),
 			wantSteps: []Step{stepAt(testPR, StatusRebasePushRetriesExhausted, fmt.Sprintf("attempts=2  !! %v", errTransient))},
 		},
@@ -321,7 +338,7 @@ func mergeCases() []prCase {
 			wantStatuses: []Status{detailOnly, StatusRebaseRetry, StatusRebaseFailed, StatusMergeBlocked},
 			wantComments: []string{"merge blocked after green CI: git push --force-with-lease"},
 			maxRebase:    3, mergeErrs: []error{errConflict}, setup: with(backoff(0), sleepsInto(&retrySleeps), withRebaseErrs(errRepoGone, nil)),
-			want: blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: conflicted, wantRebases: 1,
+			want: blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: restored, wantRebases: 1,
 			wantSteps: []Step{stepAt(testPR, StatusRebaseFailed, "!! "+errRepoGone.Error())},
 			check:     sleptThrough(&retrySleeps, pollSleep), // the backoff fires between retries, never before the first attempt
 		},
@@ -329,7 +346,7 @@ func mergeCases() []prCase {
 			name:         "no rebase attempts leaves a conflict blocked without a push retry",
 			wantStatuses: []Status{detailOnly, StatusMergeBlocked},
 			maxRebase:    0, mergeErrs: []error{errConflict}, setup: with(backoff(0), sleepsInto(&retrySleeps), withRebaseErrs(errTransient)),
-			want: blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: conflicted,
+			want: blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: restored,
 			wantComments: []string{"merge blocked after green CI"},
 			check:        sleptThrough(&retrySleeps, pollSleep),
 		},
@@ -429,7 +446,7 @@ func mergeCases() []prCase {
 			name:         "a conflict rebase refused for its head leaves the merge blocked",
 			wantStatuses: []Status{detailOnly, StatusRebaseRetry, StatusRebaseFailed, StatusMergeBlocked},
 			maxRebase:    3, mergeErrs: []error{errConflict}, pinned: pinRefuseConflict,
-			want: blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: conflicted,
+			want: blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: restored,
 			wantSteps:    []Step{stepAt(testPR, StatusRebaseFailed, "!! "+errHeadRefused.Error())},
 			wantComments: []string{"merge blocked after green CI: " + errHeadRefused.Error()},
 			check:        wantHeads(pinRefuseConflict, agentBranch),

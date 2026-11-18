@@ -3,6 +3,7 @@ package settle
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -30,6 +31,7 @@ func healCases() []prCase {
 	pollTimesOut := func(_ *testing.T, _ *forge.Fake, c *Config) { c.MergePollTimeout = 0 }
 	wentRed := "CI went red after force-push on " + testPR
 	conflicted := []string{"MarkReady:" + testPR, "Merge:" + testPR, "MarkDraft:" + testPR}
+	restored := append(append([]string(nil), conflicted...), "MarkReady:"+testPR) // a demotion whose rebase could not proceed is put back to ready
 	mergedAfterFix := append(append([]string(nil), conflicted...), "MarkReady:"+testPR, "Merge:"+testPR)
 
 	// Snapshot the labels as the conflict-resolve Box starts: the swap to
@@ -156,7 +158,7 @@ func healCases() []prCase {
 			name:         "a conflict that exhausts the rebase budget before any force-push keeps the issue complete",
 			wantStatuses: []Status{detailOnly, StatusMergeBlocked},
 			mergeErrs:    []error{errConflict},
-			want:         prSettlement(dispatchrecord.ReasonMergeBlocked), wantLabels: complete, wantNoLabels: failed, wantCalls: conflicted,
+			want:         prSettlement(dispatchrecord.ReasonMergeBlocked), wantLabels: complete, wantNoLabels: failed, wantCalls: restored,
 			wantComments: []string{"merge blocked after green CI: merge conflict"},
 		},
 		{
@@ -340,14 +342,34 @@ func handOffCases() []prCase {
 		}{
 			{"no rebase attempts", func(_ *forge.Fake, c *Config) { c.MaxRebaseAttempts = 0 }, 0, []Status{StatusHandoffConflict, StatusMergeBlocked}},
 			{"rebase fails without a conflict", func(fc *forge.Fake, _ *Config) { fc.RebaseErr = errors.New("non-fast-forward") }, 1, []Status{StatusHandoffConflict, StatusRebaseRetry, StatusRebaseFailed, StatusMergeBlocked}},
+			{"transient push retries exhausted", func(fc *forge.Fake, c *Config) {
+				c.MaxRebaseAttempts = 2
+				fc.RebaseErrs = slices.Repeat([]error{forge.ErrTransientPushFailure}, 3)
+			}, 3, []Status{StatusHandoffConflict, StatusRebaseRetry, StatusRebasePushRetry, StatusRebasePushRetry, StatusRebasePushRetriesExhausted, StatusMergeBlocked}},
 		} {
 			cases = append(cases, e.row("conflict/unresolvable/"+tc.name, prCase{
 				mergeable: forge.MergeableConflicting, want: prSettlement(dispatchrecord.ReasonMergeBlocked), wantStatuses: tc.statuses,
 				setup:      func(_ *testing.T, fc *forge.Fake, c *Config) { tc.setup(fc, c) },
-				wantLabels: complete, wantNoLabels: failed, wantCalls: blocked, wantPRComments: holdNote,
+				wantLabels: complete, wantNoLabels: failed, wantCalls: respond, wantPRComments: holdNote,
 				wantComments: []string{"merge blocked after green CI"}, wantRebases: tc.wantRebase,
 			}))
 		}
+
+		// The restore after the conflict demotion is the PR's last chance to be
+		// ready: failing it leaves a draft no human can merge (issue #7224).
+		errReadyDenied := errors.New("HTTP 403: Resource not accessible by integration")
+		errRestoreDenied := fmt.Errorf("%w: %w", errRestoreReadyFailed, errReadyDenied)
+		cases = append(cases, e.row("conflict/unresolvable/restore to ready fails", prCase{
+			mergeable: forge.MergeableConflicting, wantStatuses: []Status{StatusHandoffConflict, StatusMarkReadyFailed, StatusFailed},
+			setup: func(_ *testing.T, fc *forge.Fake, c *Config) {
+				c.MaxRebaseAttempts = 0
+				fc.MarkReadyErrs = []error{nil}
+				fc.MarkReadyErr = errReadyDenied
+			},
+			want:         settledAs(dispatchrecord.ReasonMarkReadyFailed, errRestoreDenied.Error()),
+			wantPRClosed: true, wantLabels: failed, wantNoLabels: complete, wantCalls: respond,
+			wantComments: []string{markReadyFailedComment(errRestoreDenied) + ", so it was neither merged nor handed off"},
+		}))
 
 		cases = append(cases, e.row("conflict/resolve-already-running", prCase{
 			mergeable: forge.MergeableConflicting, rebaseErr: errConflict,

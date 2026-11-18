@@ -27,6 +27,12 @@ func baseConfig() Config {
 
 const testPR = "https://github.com/owner/repo/pull/42"
 
+// markReadyFailedComment is the issue comment for a ready flip that failed with
+// cause, leaving testPR a draft.
+func markReadyFailedComment(cause error) string {
+	return "marking " + testPR + " ready failed after green CI: " + cause.Error() + " — it is still a draft"
+}
+
 // testBranchPrefix is the BRANCH_PREFIX default; baseConfig sets it on Config.
 const testBranchPrefix = "agent/issue-"
 
