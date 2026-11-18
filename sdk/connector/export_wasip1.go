@@ -2,7 +2,10 @@
 
 package connector
 
-import "unsafe"
+import (
+	"runtime"
+	"unsafe"
+)
 
 // result keeps the last returned buffer reachable so the GC cannot free it
 // before the host has read it out of linear memory.
@@ -35,6 +38,9 @@ func connectorCall(ptr, length uint32) uint64 {
 		result = errorResponse(Permanent, "connector_call does not match the last connector_alloc")
 	} else {
 		result = call(input[:length])
+		if reclaimDue(int(length)) {
+			runtime.GC()
+		}
 	}
 	return pack(uint32(uintptr(unsafe.Pointer(unsafe.SliceData(result)))), uint32(len(result)))
 }
