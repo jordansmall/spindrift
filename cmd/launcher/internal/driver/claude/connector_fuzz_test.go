@@ -50,6 +50,8 @@ var connectorSeedLines = []string{
 	`{"type":"system","timestamp":"2025-01-02T03:04:05Z"}`,
 	`{"type":"spindrift_op","spindrift_op":{"op":"pass_start","role":"reviewer"}}`,
 	`{"type":"spindrift_op","spindrift_op":{"op":"settle","role":5}}`,
+	`{"type":"spindrift_op","spindrift_op":{"op":"settle","pass":"x"}}`,
+	`{"type":"spindrift_op","spindrift_op":{"op":"pass_start","role":"implement","pass":"2"}}`,
 	`  {"type":"assistant","message":{"content":[]}}  `,
 	"\t", ``, `null`, `5`, `"string"`, `[]`, `{}`,
 	`plain text line: API Error: 529 overloaded_error`,
@@ -63,6 +65,12 @@ func connectorSeedInputs(t testing.TB) []string {
 	t.Helper()
 	inputs := []string{strings.Join(connectorSeedLines, "\n")}
 	inputs = append(inputs, connectorSeedLines...)
+	// A mistyped pass_start still moves the role the next line is attributed to.
+	inputs = append(inputs, strings.Join([]string{
+		`{"type":"spindrift_op","spindrift_op":{"op":"pass_start","role":"review"}}`,
+		`{"type":"spindrift_op","spindrift_op":{"op":"pass_start","role":"implement","pass":"2"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}`,
+	}, "\n"))
 	for _, n := range []int{10000, 10001} {
 		open := strings.Repeat(`{"a":`, n)
 		inputs = append(inputs,
@@ -121,13 +129,6 @@ func FuzzConnectorDecodeMatchesNative(f *testing.F) {
 		native, got := claude.Strategy.NewDecoder(), conn.NewDecoder()
 		for i, line := range strings.Split(input, "\n") {
 			nEvs, gEvs := native(line), got(line)
-			// The guest's host-op check reads only op and role, so an op
-			// mistyped in any other field is a host line to it but a KindError
-			// natively, a divergence that predates #7107. The host writes these
-			// lines itself and never mistypes one; skip that case.
-			if hostOpLine(line) && len(gEvs) == 0 && len(nEvs) == 1 && nEvs[0].Kind == driverkit.KindError {
-				continue
-			}
 			g, gErr := wireForm(gEvs)
 			n, nErr := wireForm(nEvs)
 			if gErr != nil && nErr != nil {
@@ -141,19 +142,6 @@ func FuzzConnectorDecodeMatchesNative(f *testing.F) {
 			}
 		}
 	})
-}
-
-// hostOpLine reports whether line is a spindrift_op line whose op and role
-// decode, the part of a host op the guest reads.
-func hostOpLine(line string) bool {
-	var l struct {
-		Type string `json:"type"`
-		Op   *struct {
-			Op   string `json:"op"`
-			Role string `json:"role"`
-		} `json:"spindrift_op"`
-	}
-	return json.Unmarshal([]byte(line), &l) == nil && l.Type == "spindrift_op" && l.Op != nil
 }
 
 // wireForm is evs as the wire carries them: the JSON the Connector's events
