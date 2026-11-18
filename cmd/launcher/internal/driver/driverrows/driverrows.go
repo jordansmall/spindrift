@@ -58,9 +58,10 @@ var ErrNotFirstParty = errors.New("Driver Connector is not first-party; the Box 
 //
 // These are errors: a row with neither Module nor native Strategy, a repeated
 // name, a Primary row without a Module or a native Driver, a Primary row that
-// is also Shadow, and a row naming a native Driver whose Descriptor differs
-// from the one in force (native is authoritative for the Descriptor as it is
-// for the Strategy).
+// is also Shadow, a Primary row and a Shadow row for one Driver (in either
+// order, even a Shadow row that would be skipped), and a row naming a native
+// Driver whose Descriptor differs from the one in force (native is
+// authoritative for the Descriptor as it is for the Strategy).
 //
 // A Shadow row registers no Driver: it records its Module as the native
 // Driver's shadow, and may sit beside the native Driver's own row. Without a
@@ -97,11 +98,15 @@ func use(raw json.RawMessage, p loadPolicy) error {
 		return fmt.Errorf("driver rows: %w", err)
 	}
 	seen := map[string]bool{}
+	seenPrimary := map[string]bool{}
 	seenShadow := map[string]bool{}
 	skipped := map[string]string{}
 	for _, row := range rows {
 		if row.Primary && row.Shadow {
 			return fmt.Errorf("driver rows: Driver %q cannot be both shadow and primary", row.Name)
+		}
+		if row.Primary && seenShadow[row.Name] || row.Shadow && seenPrimary[row.Name] {
+			return fmt.Errorf("driver rows: Driver %q has both a primary row and a shadow row", row.Name)
 		}
 		if row.Shadow {
 			if reason := shadowSkip(row, seenShadow[row.Name], p); reason != "" {
@@ -118,6 +123,7 @@ func use(raw json.RawMessage, p loadPolicy) error {
 			return fmt.Errorf("driver rows: Driver %q has no native Strategy and no module", row.Name)
 		}
 		if row.Primary {
+			seenPrimary[row.Name] = true
 			if row.Module == "" {
 				return fmt.Errorf("driver rows: Driver %q is primary but has no module", row.Name)
 			}
