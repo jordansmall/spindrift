@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 
+	"spindrift.dev/sdk/connector"
 	"spindrift.dev/sdk/forge"
 )
 
@@ -144,8 +145,10 @@ func comment(t forge.Target, number, body string) error {
 }
 
 // postMerge always rebases: the protocol carries no method, and rebase is the
-// native adapter's default. Its status class is returned as is: core reads the
-// PR after a refusal to tell why, and retries only a Transient one.
+// native adapter's default. A 405 or 409 is the forge refusing an unmergeable
+// PR, reported as NotMergeable: core re-reads the PR to tell why only for that
+// class, and retries only a Transient failure. enqueueAutoMerge shares it, so a
+// refused enqueue reports NotMergeable too; core branches on it only for merge.
 func postMerge(t forge.Target, number string, extra map[string]any) error {
 	if _, err := parseNumber(number); err != nil {
 		return err
@@ -154,7 +157,24 @@ func postMerge(t forge.Target, number string, extra map[string]any) error {
 	for k, v := range extra {
 		body[k] = v
 	}
-	return call("POST", t.API, forgePath(t, "/pulls/"+number+"/merge"), marshal(body), nil)
+	path := forgePath(t, "/pulls/"+number+"/merge")
+	resp, err := request("POST", t.API, path, marshal(body))
+	if err != nil {
+		return err
+	}
+	switch {
+	case is2xx(resp.Status):
+		return nil
+	case resp.Status == 405 || resp.Status == 409:
+		var m struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(resp.Body, &m) == nil && m.Message != "" {
+			return connector.Errorf(connector.NotMergeable, "POST %s: status %d: %s", path, resp.Status, m.Message)
+		}
+		return connector.Errorf(connector.NotMergeable, "POST %s: status %d", path, resp.Status)
+	}
+	return statusError("POST", path, resp.Status)
 }
 
 func merge(t forge.Target, number string) error { return postMerge(t, number, nil) }

@@ -134,7 +134,10 @@ func TestMerge(t *testing.T) {
 }
 
 func TestMergeFailureClasses(t *testing.T) {
-	for code, want := range map[int]connector.Class{502: connector.Transient, 405: connector.ClassForStatus(405), 409: connector.ClassForStatus(409)} {
+	for code, want := range map[int]connector.Class{
+		502: connector.Transient, 405: connector.NotMergeable, 409: connector.NotMergeable,
+		403: connector.ClassForStatus(403), 404: connector.ClassForStatus(404),
+	} {
 		stub(t, map[string]connector.Response{repoAPI + "/pulls/5/merge": status(code)})
 		err := merge(ftgt, "5")
 		var ce *connector.Error
@@ -144,6 +147,17 @@ func TestMergeFailureClasses(t *testing.T) {
 	}
 	if connector.ClassForStatus(405) == connector.Transient {
 		t.Error("a refused merge must not be transient")
+	}
+}
+
+func TestMergeRefusalKeepsMessage(t *testing.T) {
+	stub(t, map[string]connector.Response{repoAPI + "/pulls/5/merge": {Status: 405, Body: []byte(`{"message":"Please try again later"}`)}})
+	if err := merge(ftgt, "5"); err == nil || !strings.Contains(err.Error(), ": Please try again later") {
+		t.Errorf("err = %v, want the forge message", err)
+	}
+	stub(t, map[string]connector.Response{repoAPI + "/pulls/5/merge": {Status: 409, Body: []byte("<html>")}})
+	if err := merge(ftgt, "5"); err == nil || !strings.HasSuffix(err.Error(), "status 409") {
+		t.Errorf("err = %v, want the bare form", err)
 	}
 }
 
