@@ -3,7 +3,9 @@ package github
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -49,6 +51,9 @@ type restIssue struct {
 	unlabeled []string
 	pull      bool
 	comments  []string
+	// updated is the backend clock's reading at the issue's last mutation; the
+	// update sort orders by it.
+	updated int
 	// closed marks a closed issue; closedAt is its RFC3339 close time and
 	// notPlanned its "not_planned" state reason.
 	closed, notPlanned bool
@@ -130,6 +135,16 @@ type restBackend struct {
 	hits   int
 	tokens map[string]bool
 	auths  []string
+	// clock stamps restIssue.updated; lists records each issues-list read.
+	clock int
+	lists []listRead
+}
+
+// listRead is one issues-list request: its query, the If-None-Match it
+// carried ("" when none), and the status it answered.
+type listRead struct {
+	query, ifNoneMatch string
+	status             int
 }
 
 // newRESTBackend starts the backend and a real bare repository. Production git
@@ -225,12 +240,11 @@ func (b *restBackend) serve(w http.ResponseWriter, r *http.Request) {
 		reject("not a read of the repo's issues")
 		return
 	}
-	q := r.URL.Query()
 	switch parts := strings.Split(strings.TrimPrefix(rest, "/"), "/"); {
 	case rest == "" && b.listStatus != 0:
 		w.WriteHeader(b.listStatus)
 	case rest == "":
-		b.list(w, q)
+		b.list(w, r)
 	case len(parts) == 1:
 		if i := b.find(parts[0]); i != nil {
 			writeJSON(w, wireIssue(i))
@@ -450,14 +464,24 @@ func (b *restBackend) find(num string) *restIssue {
 	return b.issues[n]
 }
 
-func (b *restBackend) list(w http.ResponseWriter, q url.Values) {
+// list orders by number unless sort=updated, as GitHub does, answers every 200
+// with a strong ETag over the page body, and answers a matching If-None-Match
+// with a bare 304.
+func (b *restBackend) list(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
 	var nums []int
 	for n := range b.issues {
 		nums = append(nums, n)
 	}
-	sort.Ints(nums)
+	sort.Slice(nums, func(a, c int) bool {
+		x, y := b.issues[nums[a]], b.issues[nums[c]]
+		if q.Get("sort") == "updated" && x.updated != y.updated {
+			return x.updated < y.updated
+		}
+		return x.num < y.num
+	})
 	if q.Get("direction") == "desc" {
-		sort.Sort(sort.Reverse(sort.IntSlice(nums)))
+		slices.Reverse(nums)
 	}
 	state := q.Get("state")
 	if state == "" {
@@ -471,7 +495,23 @@ func (b *restBackend) list(w http.ResponseWriter, q url.Values) {
 		}
 		out = append(out, wireIssue(i))
 	}
-	writeJSON(w, page(q, out))
+	body, err := json.Marshal(page(q, out))
+	if err != nil {
+		panic(err)
+	}
+	etag := fmt.Sprintf(`"%x"`, sha256.Sum256(body))
+	rec := listRead{query: r.URL.RawQuery, ifNoneMatch: r.Header.Get("If-None-Match"), status: http.StatusOK}
+	if rec.ifNoneMatch == etag {
+		rec.status = http.StatusNotModified
+	}
+	b.lists = append(b.lists, rec)
+	if rec.status == http.StatusNotModified {
+		w.WriteHeader(rec.status)
+		return
+	}
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
 }
 
 func hasLabel(labels []string, want string) bool {
@@ -792,6 +832,8 @@ func (h *connectorHarness) mutate(num string, f func(*restIssue)) {
 		h.backend.issues[n] = i
 	}
 	f(i)
+	h.backend.clock++
+	i.updated = h.backend.clock
 }
 
 func (h *connectorHarness) SeedIssue(iss forge.Issue) {
