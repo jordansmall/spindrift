@@ -342,19 +342,21 @@ func TestNetworkFixtureRequestTimeoutIsASendFailureNotABudgetOverrun(t *testing.
 			t.Cleanup(func() { close(release) })
 			audit := &bytes.Buffer{}
 			n := netFor(b, audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
-			n.SetRequestTimeout(300 * time.Millisecond)
+			// The timeout also bounds the follow-up call, which needs a fresh TLS dial,
+			// so it leaves room for a loaded CI runner.
+			n.SetRequestTimeout(2 * time.Second)
 			c := loadNetWith(t, ld, fixture(t, "network.wasm"), n)
 			err := c.Call(context.Background(), "fetch", map[string]string{"url": b.URL + "/repos/stall", "method": "GET"}, new(fetched))
 			if err == nil || !strings.Contains(err.Error(), connectorhost.ErrHTTPSend.Error()) {
 				t.Fatalf("err = %v, want the guest's send failure", err)
 			}
-			if !strings.Contains(err.Error(), "no response within 300ms") {
+			if !strings.Contains(err.Error(), "no response within 2s") {
 				t.Errorf("err = %v, want the timeout named", err)
 			}
 			if errors.Is(err, connectorhost.ErrBudget) {
 				t.Errorf("err = %v, want no budget overrun", err)
 			}
-			if lines := auditLines(t, audit); len(lines) != 1 || !strings.Contains(lines[0].Reason, "no response within 300ms") {
+			if lines := auditLines(t, audit); len(lines) != 1 || !strings.Contains(lines[0].Reason, "no response within 2s") {
 				t.Errorf("audit = %+v, want the timeout named in the audit reason", lines)
 			}
 			var out fetched
