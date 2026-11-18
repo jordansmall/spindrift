@@ -47,6 +47,23 @@ func requireCoreCredential(t *testing.T, seen string, calls func() int) {
 	}
 }
 
+// requireNoCoreGit fails when core's credentialed git ran. The log also holds
+// credential-less lines from the scripted backend serving the PR read, which
+// shells out to git itself, so the row's token is what marks core's git.
+func requireNoCoreGit(t *testing.T, seen string) {
+	t.Helper()
+	log, err := os.ReadFile(seen)
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(log), connectorToken) {
+		t.Errorf("core's git ran for a refused head: %q", log)
+	}
+}
+
 // Under a primary row the read-only Box's bundle relay and commit subjects run
 // in core's git with the row's credential.
 func TestPrimaryRow_BundleRelayRunsInCoreGit(t *testing.T) {
@@ -396,5 +413,53 @@ func TestPrimaryRow_LedgerSiteNamesAnUnsetCredential(t *testing.T) {
 
 	if err == nil || !strings.Contains(err.Error(), tokenCredentialEnv+" is not set") {
 		t.Errorf("NewLedger = %v, want the unset credential named", err)
+	}
+}
+
+// RebasePRHead under a primary row rebases when the head the Connector names
+// is the one the caller expects, in core's git.
+func TestPrimaryRow_RebasePRHeadMatchRebases(t *testing.T) {
+	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+	seen := gitCredentialLog(t)
+	url := h.SeedLandablePR("14")
+	h.backend.repo.AdvanceBase()
+	branch := forge.AgentBranchName(h.BranchPrefix(), "14")
+
+	if err := primaryGitClient().RebasePRHead(url, branch); err != nil {
+		t.Fatalf("RebasePRHead: %v", err)
+	}
+	if !h.backend.repo.Rebased(branch) {
+		t.Error("the PR branch does not contain the advanced base")
+	}
+	requireCoreCredential(t, seen, calls)
+}
+
+// A head the Connector names that differs from the expected one is refused
+// before any git runs.
+func TestPrimaryRow_RebasePRHeadMismatchIsRefusedBeforeGit(t *testing.T) {
+	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+	url := h.SeedLandablePR("15")
+	h.backend.repo.AdvanceBase()
+	seen := gitCredentialLog(t)
+	branch := forge.AgentBranchName(h.BranchPrefix(), "15")
+
+	err := primaryGitClient().RebasePRHead(url, forge.AgentBranchName(h.BranchPrefix(), "999"))
+	if !errors.Is(err, connectorforge.ErrAnswer) {
+		t.Fatalf("RebasePRHead = %v, want connectorforge.ErrAnswer", err)
+	}
+	requireNoCoreGit(t, seen)
+	if h.backend.repo.Rebased(branch) {
+		t.Error("the PR branch was rebased")
+	}
+	if n := calls(); n != 0 {
+		t.Errorf("gh ran %d times", n)
+	}
+}
+
+// The production github Code Forge exposes the head-pinned rebase, so the
+// Lander finds it through forge.ResolveCodeForge.
+func TestExecClient_ResolvesPRHeadRebaser(t *testing.T) {
+	if forge.ResolveCodeForge(primaryGitClient()).PRHeadRebaser == nil {
+		t.Error("ResolveCodeForge found no PRHeadRebaser on the github Code Forge")
 	}
 }

@@ -611,6 +611,18 @@ func (e *execClient) Rebase(prURL string) error {
 	return e.syncBranch(fields[0], fields[1], e.httpsClone("rebase"), gitexec.Credential{})
 }
 
+// RebasePRHead is forge.PRHeadRebaser. Under a primary row the PR's head is
+// read from a guest Connector core does not trust, so the composed forge
+// refuses a head other than the one the caller expects. Without one the head
+// comes from gh, which core trusts, so head is not needed and the native
+// Rebase runs unchanged.
+func (e *execClient) RebasePRHead(prURL, head string) error {
+	if row, ok := primaryRow(); ok {
+		return e.rebasePRHeadViaConnector(row, prURL, head)
+	}
+	return e.Rebase(prURL)
+}
+
 // syncBranch is Rebase's git half: clone with clone, sync head onto
 // origin/<base> the way e.syncMethod says, and force-push with cred (the zero
 // Credential leaves the push to the clone's own persisted helper).
