@@ -16,6 +16,10 @@ const (
 	NotFound Class = "not-found"
 	// Auth is a credential the remote refused or that lacks standing.
 	Auth Class = "auth"
+	// NotMergeable is a merge the forge refused because the pull request is not
+	// mergeable as it stands: a conflict, a missing required check or review, or
+	// a draft, closed, or merged state. Core re-reads the PR on this class only.
+	NotMergeable Class = "not-mergeable"
 	// Permanent is every other failure, and the class of any answer that names
 	// none or a class core does not know: core never retries what it cannot read.
 	Permanent Class = "permanent"
@@ -44,7 +48,7 @@ func ErrorClass(err error) Class {
 func (r *response) callError() *CallError {
 	c := Class(r.Class)
 	switch c {
-	case Transient, RateLimited, NotFound, Auth, Permanent:
+	case Transient, RateLimited, NotFound, Auth, NotMergeable, Permanent:
 	default:
 		c = Permanent
 	}

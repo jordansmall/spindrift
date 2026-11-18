@@ -18,6 +18,10 @@ const (
 	NotFound Class = "not-found"
 	// Auth is a credential the remote refused or that lacks standing.
 	Auth Class = "auth"
+	// NotMergeable is a merge the forge refused because the pull request is not
+	// mergeable as it stands: a conflict, a missing required check or review, or
+	// a draft, closed, or merged state. Core re-reads the PR on this class only.
+	NotMergeable Class = "not-mergeable"
 	// Permanent is every other failure; a retry cannot help. It is the class
 	// of an error that carries none.
 	Permanent Class = "permanent"

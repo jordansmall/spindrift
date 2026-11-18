@@ -130,6 +130,7 @@ func TestReportedErrorDefaultsToPermanent(t *testing.T) {
 		{"unknown class", `{"error":"boom","class":"exploded"}`, connectorhost.Permanent},
 		{"empty class", `{"error":"boom","class":""}`, connectorhost.Permanent},
 		{"known class", `{"error":"boom","class":"auth"}`, connectorhost.Auth},
+		{"not-mergeable class", `{"error":"boom","class":"not-mergeable"}`, connectorhost.NotMergeable},
 	} {
 		if got := connectorhost.ErrorClass(connectorhost.ReportedError(tc.body)); got != tc.want {
 			t.Errorf("%s: class = %q, want %q", tc.name, got, tc.want)
