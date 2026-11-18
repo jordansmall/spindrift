@@ -202,12 +202,15 @@ func listIssues(t tracker.Target, q tracker.Query, limit int) ([]tracker.Issue, 
 	return search(t, jql(t.Repo, q), limit)
 }
 
-// labeled returns up to limit issues in state carrying label, newest first. A
-// closed one carries its close date and not-planned reason, which core's dedup
-// scan reads: a finding closed as not planned must not be refiled.
-func labeled(t tracker.Target, label, state string, limit int) ([]tracker.Issue, error) {
+// labeledPage returns one page of issues in state carrying label, newest
+// first, and the cursor for the next ("" at the end). A closed one carries its
+// close date and not-planned reason, which core's dedup scan reads: a finding
+// closed as not planned must not be refiled. One call is one HTTP request, so
+// the cursor is Jira's own (cloud nextPageToken, server startAt) and no row is
+// lost to truncating a page that continues; core walks the pages.
+func labeledPage(t tracker.Target, label, state, cursor string, limit int) ([]tracker.Issue, string, error) {
 	if limit < 1 {
-		return nil, fmt.Errorf("list labeled issues: limit %d < 1", limit)
+		return nil, "", fmt.Errorf("list labeled issues: limit %d < 1", limit)
 	}
 	var category string
 	switch state {
@@ -216,9 +219,93 @@ func labeled(t tracker.Target, label, state string, limit int) ([]tracker.Issue,
 	case "closed":
 		category = "="
 	default:
-		return nil, fmt.Errorf("list labeled issues: unsupported issue state %q", state)
+		return nil, "", fmt.Errorf("list labeled issues: unsupported issue state %q", state)
 	}
-	return search(t, fmt.Sprintf("project = %q AND labels = %q AND statusCategory %s Done order by created desc", t.Repo, label, category), limit)
+	jql := fmt.Sprintf("project = %q AND labels = %q AND statusCategory %s Done order by created desc", t.Repo, label, category)
+	var raw []rawIssue
+	var next string
+	var err error
+	switch t.Dialect {
+	case "cloud":
+		raw, next, err = cloudPage(t, jql, limit, cursor)
+	case "server":
+		raw, next, err = serverPage(t, jql, limit, cursor)
+	default:
+		err = fmt.Errorf("list labeled issues: unknown Jira dialect %q (want \"cloud\" or \"server\")", t.Dialect)
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	out := make([]tracker.Issue, len(raw))
+	for i, r := range raw {
+		out[i] = r.issue()
+	}
+	return out, next, nil
+}
+
+// cloudPage fetches one /search/jql page; its next is the response's token.
+func cloudPage(t tracker.Target, jql string, limit int, token string) ([]rawIssue, string, error) {
+	var p searchPayload
+	if err := get(t, "/rest/api/2/search/jql?"+cloudQuery(jql, limit, token).Encode(), &p); err != nil {
+		return nil, "", err
+	}
+	if p.IsLast {
+		return p.Issues, "", nil
+	}
+	return p.Issues, p.NextPageToken, nil
+}
+
+// serverPage fetches one /search page at the cursor "<startAt>:<firstKey>"
+// (firstKey is the previous page's first issue, "" on the first page); its next
+// is the offset after the rows received plus this page's first key, or "" once
+// total is reached. Carrying the key lets a stateless call catch a server that
+// ignores startAt and replays a page, as searchServer does.
+func serverPage(t tracker.Target, jql string, limit int, cursor string) ([]rawIssue, string, error) {
+	startAt, prevFirstKey := 0, ""
+	if cursor != "" {
+		offset, key, _ := strings.Cut(cursor, ":")
+		n, err := strconv.Atoi(offset)
+		if err != nil || n < 0 {
+			return nil, "", fmt.Errorf("list labeled issues: malformed cursor %q", cursor)
+		}
+		startAt, prevFirstKey = n, key
+	}
+	var p searchPayload
+	if err := get(t, "/rest/api/2/search?"+serverQuery(jql, limit, startAt).Encode(), &p); err != nil {
+		return nil, "", err
+	}
+	if len(p.Issues) == 0 && startAt < p.Total {
+		return nil, "", fmt.Errorf("list labeled issues: search returned an empty page at startAt %d before total %d", startAt, p.Total)
+	}
+	if prevFirstKey != "" && len(p.Issues) > 0 && p.Issues[0].Key == prevFirstKey {
+		return nil, "", fmt.Errorf("list labeled issues: search repeated the page starting at %s for startAt %d", prevFirstKey, startAt)
+	}
+	if end := startAt + len(p.Issues); end < p.Total {
+		return p.Issues, strconv.Itoa(end) + ":" + p.Issues[0].Key, nil
+	}
+	return p.Issues, "", nil
+}
+
+func cloudQuery(jql string, limit int, token string) url.Values {
+	q := url.Values{
+		"jql":        {jql},
+		"fields":     {"summary,description,status,labels,resolution,resolutiondate"},
+		"properties": {dedupPropertyKey},
+		"maxResults": {strconv.Itoa(min(limit, pageSize))},
+	}
+	if token != "" {
+		q.Set("nextPageToken", token)
+	}
+	return q
+}
+
+func serverQuery(jql string, limit, startAt int) url.Values {
+	return url.Values{
+		"jql":        {jql},
+		"properties": {dedupPropertyKey},
+		"startAt":    {strconv.Itoa(startAt)},
+		"maxResults": {strconv.Itoa(min(limit, pageSize))},
+	}
 }
 
 // search runs jql through the target's dialect and maps up to limit rows.
@@ -252,17 +339,8 @@ func searchCloud(t tracker.Target, jql string, limit int) ([]rawIssue, error) {
 	var all []rawIssue
 	token := ""
 	for range maxPages {
-		q := url.Values{
-			"jql":        {jql},
-			"fields":     {"summary,description,status,labels,resolution,resolutiondate"},
-			"properties": {dedupPropertyKey},
-			"maxResults": {strconv.Itoa(min(limit, pageSize))},
-		}
-		if token != "" {
-			q.Set("nextPageToken", token)
-		}
 		var p searchPayload
-		if err := get(t, "/rest/api/2/search/jql?"+q.Encode(), &p); err != nil {
+		if err := get(t, "/rest/api/2/search/jql?"+cloudQuery(jql, limit, token).Encode(), &p); err != nil {
 			return nil, err
 		}
 		all = append(all, p.Issues...)
@@ -287,14 +365,8 @@ func searchServer(t tracker.Target, jql string, limit int) ([]rawIssue, error) {
 		// Advance by rows received, not a fixed stride: the server may cap the
 		// page below maxResults.
 		startAt := len(all)
-		q := url.Values{
-			"jql":        {jql},
-			"properties": {dedupPropertyKey},
-			"startAt":    {strconv.Itoa(startAt)},
-			"maxResults": {strconv.Itoa(min(limit, pageSize))},
-		}
 		var p searchPayload
-		if err := get(t, "/rest/api/2/search?"+q.Encode(), &p); err != nil {
+		if err := get(t, "/rest/api/2/search?"+serverQuery(jql, limit, startAt).Encode(), &p); err != nil {
 			return nil, err
 		}
 		if len(p.Issues) == 0 && startAt < p.Total {
