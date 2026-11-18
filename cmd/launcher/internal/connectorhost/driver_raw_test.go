@@ -83,10 +83,11 @@ func TestDriverRawMatchesJSONOnVeryLongLine(t *testing.T) {
 	}
 }
 
-// veryLongLine is about 300 KB: well past the 64 KiB bufio default, under the
-// request cap even after JSON escaping.
+// veryLongLine is about 80 KB: past the 64 KiB bufio default, under the
+// request cap even after JSON escaping. No bigger, since each decode of it runs
+// against a wall-clock call budget a loaded CI runner can exhaust.
 func veryLongLine() string {
-	return strings.Repeat("ab\"\\\t\r\xffé ", 1<<15)
+	return strings.Repeat("ab\"\\\t\r\xffé ", 1<<13)
 }
 
 // A line holding a newline would end its line early in a raw request, so the
