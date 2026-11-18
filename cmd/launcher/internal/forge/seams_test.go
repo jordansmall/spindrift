@@ -2,6 +2,7 @@ package forge_test
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -199,6 +200,24 @@ func TestFake_CloseIssue_SetsIssueClosed(t *testing.T) {
 	}
 	if len(f.CloseIssueCalls) != 1 || f.CloseIssueCalls[0] != "42" {
 		t.Errorf("CloseIssueCalls = %v, want [42]", f.CloseIssueCalls)
+	}
+}
+
+func TestFake_TransitionState_RefusesEmptyTargetLabel(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
+
+	err := f.TransitionState("42", forge.Dispatchable, forge.InProgress)
+	if err == nil || !strings.Contains(err.Error(), "no status mapping or fallback label configured for state") {
+		t.Fatalf("TransitionState err = %v, want no-mapping refusal", err)
+	}
+
+	iss, ierr := f.Issue("42")
+	if ierr != nil {
+		t.Fatalf("Issue: %v", ierr)
+	}
+	if len(iss.Labels) != 1 || iss.Labels[0] != "ready-for-agent" {
+		t.Errorf("Labels = %v, want unchanged [ready-for-agent]", iss.Labels)
 	}
 }
 
