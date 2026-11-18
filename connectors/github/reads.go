@@ -25,9 +25,17 @@ var send = connector.HTTPRequest
 // request sends one request to api+path. The host attaches the credential, so
 // none is set here. The status is the caller's to judge.
 func request(method, api, path string, body []byte) (connector.Response, error) {
+	return requestWith(method, api, path, body, nil)
+}
+
+// requestWith is request plus extra headers, such as If-None-Match.
+func requestWith(method, api, path string, body []byte, extra map[string]string) (connector.Response, error) {
 	headers := map[string]string{
 		"Accept":               "application/vnd.github+json",
 		"X-GitHub-Api-Version": "2022-11-28",
+	}
+	for k, v := range extra {
+		headers[k] = v
 	}
 	if body != nil {
 		headers["Content-Type"] = "application/json"
@@ -140,7 +148,8 @@ func pagesOf[B any](api, path string, size func(B) int, visit func(B) bool) erro
 	return fmt.Errorf("GET %s: more than %d pages", path, maxPages)
 }
 
-// listQuery selects the open issues q names; count walks the same set.
+// listQuery selects the open issues q names, oldest first; count sizes the
+// same set through its own update-ordered countQuery.
 func listQuery(q tracker.Query) string {
 	s := "?state=open&sort=created&direction=asc&per_page=" + strconv.Itoa(pageSize)
 	if q.Label != "" {
