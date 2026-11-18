@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/bundleout"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/homelayout"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/outcomebackstop"
@@ -2486,5 +2487,28 @@ func TestPass_UsesOrchestratorResultTextWithoutDecodingTheLog(t *testing.T) {
 	}
 	if _, err := os.Stat(resultFile); !os.IsNotExist(err) {
 		t.Errorf("result-text file left behind: stat err = %v", err)
+	}
+}
+
+// A Driver that cannot render its session flags must stop the run: the
+// "initial" pass would otherwise start unpinned.
+func TestRun_SessionFlagsErrorIsDriverPhaseError(t *testing.T) {
+	defer driver.Snapshot()()
+	boom := errors.New("session store unreadable")
+	driver.Register(driverkit.Strategy{
+		Name:         "flagfail",
+		SessionFlags: func(string, string, string, string) (string, error) { return "", boom },
+	})
+	f := newFixture(t)
+	f.useDriver("flagfail")
+	orchestrated := 0
+	f.d.Orchestrate = func([]string) int { orchestrated++; return 0 }
+	rc, err := run(f.in, f.env, f.d)
+	var pe *phaseError
+	if !errors.As(err, &pe) || pe.phase != "driver" || !errors.Is(err, boom) {
+		t.Fatalf("run() = %d, %v; want a driver phaseError wrapping %v", rc, err, boom)
+	}
+	if orchestrated != 0 {
+		t.Errorf("orchestrator ran %d times after a SessionFlags failure", orchestrated)
 	}
 }
