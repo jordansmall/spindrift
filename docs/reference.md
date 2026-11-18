@@ -3779,14 +3779,20 @@ This is protocol version **0.3.0**. The host is
 
   Core pins every PR URL to the remote's web host, fails closed on an unknown
   `mergeable` value, and rebases a PR by reading its `head` and running the
-  rebase in its own git plumbing. A failed `forge.merge` is classified in
-  core: `transient` matches `forge.ErrMergeTransient`, so the Lander retries
-  it as for a native forge, and any other class re-reads the PR and maps its
-  `mergeable` state onto the same conflict and blocked-by-checks errors the
-  native adapters return. A merge the Connector aims at a path its Route table
-  does not declare is refused unsent and audited, and returns
-  `connectorhost.ErrRouteRefused` unclassified. The SDK's
-  `forge.RegisterPRs(forge.PRs{...})` serves the methods.
+  rebase in its own git plumbing. The Lander pins that rebase to the agent
+  branch it derives from `BRANCH_PREFIX` and the issue number: a `head`
+  naming any other branch, the base or `release` included, is refused with
+  `ErrAnswer` and audited under `forge.pr` before git runs, and the PR
+  is left unmerged, blocked, with the issue still `agent-complete` (issue
+  #6961). A plain, unpinned `Rebase` on a composed Connector forge is refused
+  with `ErrAnswer` too, before the guest is asked. A failed `forge.merge`
+  is classified in core: `transient` matches `forge.ErrMergeTransient`,
+  so the Lander retries it as for a native forge, and any other class
+  re-reads the PR and maps its `mergeable` state onto the same conflict and
+  blocked-by-checks errors the native adapters return. A merge the Connector
+  aims at a path its Route table does not declare is refused unsent and
+  audited, and returns `connectorhost.ErrRouteRefused` unclassified. The
+  SDK's `forge.RegisterPRs(forge.PRs{...})` serves the methods.
 
   **Host mediation.** A Connector declaring `forge.draftPRs` can serve a
   [read-only Box](#read-only-box-box_forge_and_issue_accessread-only), the Box
