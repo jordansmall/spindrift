@@ -268,25 +268,21 @@ func (f *prForge) EnqueueAutoMerge(prURL string) error {
 
 // Merge asks the Connector to merge the PR. A transient failure is not retried
 // here (classedCall never retries a merge) but reported as
-// forge.ErrMergeTransient, which the Lander's merge loop retries. A rate limit,
-// an auth failure or a refused route is returned as is; every other failure is
-// classified by re-reading the PR, once more after a pause when it reads
-// conflicting (see classifyMergeFailure).
+// forge.ErrMergeTransient, which the Lander's merge loop retries. Only a
+// connectorhost.NotMergeable refusal is classified by re-reading the PR, once
+// more after a pause when it reads conflicting (see classifyMergeFailure);
+// every other failure, a rate limit, auth failure or refused route included, is
+// returned as is.
 func (f *prForge) Merge(prURL string) error {
 	err := f.numbered("forge.merge", prURL, nil)
-	switch {
-	case err == nil:
-		return nil
-	case errors.Is(err, forge.ErrRateLimit), errors.Is(err, forge.ErrAuthFailure):
-		return err
-	case errors.Is(err, connectorhost.ErrRouteRefused):
-		// The host closed the Connector for an undeclared request, so a re-read
-		// could only fail and bury the refusal.
-		return err
-	case connectorhost.ErrorClass(err) == connectorhost.Transient:
+	switch connectorhost.ErrorClass(err) {
+	case connectorhost.Transient:
 		return fmt.Errorf("%w: %w", forge.ErrMergeTransient, err)
+	case connectorhost.NotMergeable:
+		return f.classifyMergeFailure(prURL, err)
+	default:
+		return err
 	}
-	return f.classifyMergeFailure(prURL, err)
 }
 
 // mergeRecheckDelay is how long classifyMergeFailure waits before re-reading a
