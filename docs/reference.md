@@ -113,7 +113,7 @@ row.
   the launcher's flags, or a host or enclosing sandbox that bars
   unprivileged user/network namespaces), and when the namespace comes up
   with no usable network, each naming the
-  `NETWORK_MODE=host` opt-out; the launch gate runs the same probe.
+  `--network-mode host` opt-out; the launch gate runs the same probe.
 - For every non-bwrap runner kind (never under bwrap), a
   `podman-machine-memory` row, Required tier — unlike the bwrap rows above,
   which stay informational, this row's failure fails `spindrift doctor`
