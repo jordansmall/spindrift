@@ -138,7 +138,7 @@ func (m *Mediation) Open(num, branch string, result dispatch.Result, fallback Fa
 			return "", false, TextSourceUnknown, ErrNoPRIntent
 		}
 	}
-	body = ensureClosesReference(body, num, m.tracker)
+	body = closeOnlyOwnIssue(body, num, m.tracker)
 	// One append site for all three text sources (issue #3244), so none of
 	// them can silently lose the delta line.
 	body = appendLandDeltaSummary(body, result.Passes)

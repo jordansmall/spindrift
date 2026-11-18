@@ -196,8 +196,17 @@ var closingKeywordPattern = regexp.MustCompile(`(?i)\b(?:close|closes|closed|fix
 // need a digit right after "#" or the URL's last path segment (assumed for the
 // URL form, not verified), and U+200B is invisible.
 func defuseClosingKeywords(s string) string {
+	return defuseClosingKeywordsExcept(s, "")
+}
+
+// defuseClosingKeywordsExcept is defuseClosingKeywords but spares bare
+// "#<keep>" references; keep "" spares nothing.
+func defuseClosingKeywordsExcept(s, keep string) string {
 	const zeroWidthSpace = "\u200b" // U+200B ZERO WIDTH SPACE
 	return closingKeywordPattern.ReplaceAllStringFunc(s, func(match string) string {
+		if keep != "" && closesOwn(closingKeywordPattern.FindStringSubmatch(match), keep) {
+			return match
+		}
 		numStart := len(match)
 		for numStart > 0 && match[numStart-1] >= '0' && match[numStart-1] <= '9' {
 			numStart--
@@ -206,24 +215,31 @@ func defuseClosingKeywords(s string) string {
 	})
 }
 
+// closesOwn reports whether a closingKeywordPattern submatch is the bare
+// "#<num>" form naming num; the append and defuse decisions share it.
+func closesOwn(sub []string, num string) bool { return sub[1] == num }
+
 func hasClosingReference(body, num string) bool {
 	for _, match := range closingKeywordPattern.FindAllStringSubmatch(body, -1) {
-		if match[1] == num {
+		if closesOwn(match, num) {
 			return true
 		}
 	}
 	return false
 }
 
-// ensureClosesReference appends "Closes #<num>" to body so a merge auto-closes
-// the issue, unless body already closes it. The tracker row's ClosesRefTracker
-// is a positive allow-list (issue #2341), not "anything but local": a forgejo
-// tracker's issue numbers are a foreign namespace, so a Closes keyword would
-// hit an unrelated GitHub issue.
-func ensureClosesReference(body, num string, tracker backend.Descriptor) string {
+// closeOnlyOwnIssue leaves body closing only the dispatched issue: body may
+// be Box-authored, so every other closing reference is defused (issue #7079),
+// then "Closes #<num>" is appended unless body already closes it. The tracker
+// row's ClosesRefTracker is a positive allow-list (issue #2341), not "anything
+// but local": a forgejo tracker's issue numbers are a foreign namespace, so
+// without it the own "#<num>" is defused too and nothing is appended. #7058's
+// pairwise tracker/forge fact will replace ClosesRefTracker here.
+func closeOnlyOwnIssue(body, num string, tracker backend.Descriptor) string {
 	if !tracker.ClosesRefTracker {
-		return body
+		return defuseClosingKeywords(body)
 	}
+	body = defuseClosingKeywordsExcept(body, num)
 	if hasClosingReference(body, num) {
 		return body
 	}

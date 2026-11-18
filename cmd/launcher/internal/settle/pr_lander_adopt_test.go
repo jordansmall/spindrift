@@ -143,6 +143,7 @@ func adoptCases() []prCase {
 		}),
 		adopts(prCase{
 			name:         "an adopted PR intent that already closes the issue is not given a second reference",
+			tracker:      backend.GitHub,
 			wantStatuses: []Status{detailOnly, StatusAdopted, StatusVerifiedMerged},
 			result:       boxRun(true, synthetic, ready, "feat: add widget\n\nCloses #1"),
 			check:        openedDraftPR("feat: add widget", "Closes #1"),
