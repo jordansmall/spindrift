@@ -110,6 +110,28 @@ func hostOp(top *topLevel) *hostop.SpindriftOp {
 	return op
 }
 
+// hostLineOp returns the op and role of a type:"spindrift_op" line whose payload
+// is an object, by the rule driver.HostLineOf (sdk/driver/hostline.go) applies
+// on the Connector side; this is a hand copy, as cmd/launcher cannot import the
+// SDK. decodeLine calls it only after hostOp has failed, so what it accepts is
+// a host op with a mistyped field, never scanned as agent text. It re-parses
+// line because top keeps only the last copy of a repeated key.
+func hostLineOp(top *topLevel, line string) *hostop.SpindriftOp {
+	if top == nil || top.Type != hostop.TypeSpindriftOp {
+		return nil
+	}
+	var probe struct {
+		SpindriftOp *struct {
+			Op   string `json:"op"`
+			Role string `json:"role"`
+		} `json:"spindrift_op"`
+	}
+	if json.Unmarshal([]byte(line), &probe) != nil || probe.SpindriftOp == nil {
+		return nil
+	}
+	return &hostop.SpindriftOp{Op: probe.SpindriftOp.Op, Role: probe.SpindriftOp.Role}
+}
+
 // topLevelTimestamp returns the epoch milliseconds of the line's top-level
 // "timestamp". A line with no top-level type is ignored, and a timestamp
 // nested inside tool_result content is never read, so the usage reader's event
@@ -135,6 +157,10 @@ func (d *decoder) decodeLine(line string, top *topLevel) []driverkit.Event {
 	if op := hostOp(top); op != nil {
 		d.topRole = nextActiveTopLevelRole(d.topRole, op)
 		return []driverkit.Event{{Kind: driverkit.KindHostOp, HostOp: op}}
+	}
+	if probe := hostLineOp(top, line); probe != nil {
+		d.topRole = nextActiveTopLevelRole(d.topRole, probe)
+		return nil
 	}
 
 	content, synthetic := classifyTurn(top)

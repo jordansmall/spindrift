@@ -600,6 +600,21 @@ func TestClassify_AnyHostOpIsNotScanned(t *testing.T) {
 	}
 }
 
+// A host op whose op decodes but another field is mistyped is still never scanned.
+func TestClassify_MistypedFieldHostOpIsNotScanned(t *testing.T) {
+	logPath := claude.WriteLog(t,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}`,
+		`{"type":"spindrift_op","spindrift_op":{"op":"run_state_error","error":"rate_limit_error","pass":"x"}}`)
+
+	c, err := newDriver().ClassifyTransient(logPath)
+	if err != nil {
+		t.Fatalf("Classify() error: %v", err)
+	}
+	if c.Class != driverkit.Terminal || c.Reason != driverkit.TaskFailed {
+		t.Errorf("Classify() = %+v, want Terminal/TaskFailed", c)
+	}
+}
+
 func TestClassify(t *testing.T) {
 	for _, tc := range classifyTests {
 		t.Run(tc.name, func(t *testing.T) {
