@@ -125,7 +125,7 @@ func classify(raw guestCall, clock retry.Clock) guestCall {
 // questions (the remote's identity, branch existence and deletion) and git
 // runs in core's own plumbing against the Connector's clone URL.
 type pushOnly struct {
-	conn *connectorhost.Connector
+	conn hostPolicy
 	call guestCall
 	// clock paces the recheck of a conflicting merge.
 	clock  retry.Clock
@@ -298,4 +298,12 @@ func realIfZero(clock retry.Clock) retry.Clock {
 		return retry.RealClock()
 	}
 	return clock
+}
+
+// hostPolicy is the part of *connectorhost.Connector core's own refusals read:
+// the declared route hosts and the audit log. An interface so a test can stand
+// in without a wasm guest.
+type hostPolicy interface {
+	DeclaredHosts() []string
+	AuditRefusal(method string, refusal error) error
 }

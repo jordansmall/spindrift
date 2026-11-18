@@ -333,6 +333,22 @@ func (f *prForge) classifyFromPR(prURL string, cause error) error {
 
 // Rebase rebases the PR's head branch through core's git plumbing.
 func (f *prForge) Rebase(prURL string) error {
+	return f.rebase(prURL, "")
+}
+
+// RebasePRHead is Rebase pinned to head, the agent branch core derived: the PR's
+// head comes from the guest, so a different one is refused before any git runs
+// (issue #6961).
+func (f *prForge) RebasePRHead(prURL, head string) error {
+	if head == "" {
+		return fmt.Errorf("%w: RebasePRHead called with no expected head", ErrAnswer)
+	}
+	return f.rebase(prURL, head)
+}
+
+// rebase rebases the PR's head branch; a non-empty want is the only head it may
+// be.
+func (f *prForge) rebase(prURL, want string) error {
 	if f.push.git == nil {
 		return ErrNoGit
 	}
@@ -342,6 +358,9 @@ func (f *prForge) Rebase(prURL string) error {
 	}
 	if w.Head == "" {
 		return fmt.Errorf("%w: PR %s has no head branch", ErrAnswer, w.Number)
+	}
+	if want != "" && w.Head != want {
+		return f.push.conn.AuditRefusal("forge.pr", fmt.Errorf("%w: PR %s head %q is not the agent branch %q", ErrAnswer, w.Number, w.Head, want))
 	}
 	return f.push.git.Rebase(w.Head)
 }

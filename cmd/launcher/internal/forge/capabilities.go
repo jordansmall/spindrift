@@ -23,6 +23,7 @@ type Capabilities struct {
 	BranchProtectionForge   BranchProtectionForge
 	BundleCommitSubjects    BundleCommitSubjects
 	MergeCommitReader       MergeCommitReader
+	PRHeadRebaser           PRHeadRebaser
 
 	// One field per optional IssueTracker-side interface. The same directory
 	// scan covers these fields.
@@ -76,6 +77,7 @@ func ResolveCodeForge(cf CodeForge) Capabilities {
 	c.BranchProtectionForge, _ = AsCodeForge[BranchProtectionForge](cf)
 	c.BundleCommitSubjects, _ = AsCodeForge[BundleCommitSubjects](cf)
 	c.MergeCommitReader, _ = AsCodeForge[MergeCommitReader](cf)
+	c.PRHeadRebaser, _ = AsCodeForge[PRHeadRebaser](cf)
 
 	return c
 }
