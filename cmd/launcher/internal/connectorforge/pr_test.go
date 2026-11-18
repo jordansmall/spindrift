@@ -109,31 +109,48 @@ func TestMarkReadyMapsTransientToTheRetriedSentinel(t *testing.T) {
 }
 
 func TestMergeFailureIsClassifiedFromThePR(t *testing.T) {
+	notMergeable := classed(connectorhost.NotMergeable)
 	for _, tc := range []struct {
-		name string
-		pr   string
-		want func(error) bool
+		name   string
+		err    error
+		pr     string
+		reread bool
+		want   func(error) bool
 	}{
-		{"conflicting", prJSON + `,"mergeable":"CONFLICTING"}`, func(e error) bool { return errors.Is(e, forge.ErrMergeConflict) }},
-		{"blocked by checks", prJSON + `,"mergeable":"MERGEABLE"}`, func(e error) bool { return errors.Is(e, forge.ErrMergeBlockedByChecks) }},
-		{"already merged", `{"number":"7","url":"` + prURL7 + `","state":"closed","merged":true}`, func(e error) bool { return e == nil }},
-		{"closed", `{"number":"7","url":"` + prURL7 + `","state":"closed","merged":false,"mergeable":"MERGEABLE"}`, func(e error) bool {
-			return e != nil && !errors.Is(e, forge.ErrMergeConflict) && !errors.Is(e, forge.ErrMergeBlockedByChecks)
-		}},
-		{"draft", prJSON + `,"draft":true,"mergeable":"CONFLICTING"}`, func(e error) bool {
-			return e != nil && !errors.Is(e, forge.ErrMergeConflict) && !errors.Is(e, forge.ErrMergeBlockedByChecks)
-		}},
-		{"undetermined", prJSON + `,"mergeable":"UNKNOWN"}`, func(e error) bool {
-			return e != nil && !errors.Is(e, forge.ErrMergeConflict) && !errors.Is(e, forge.ErrMergeBlockedByChecks)
-		}},
+		{"conflicting", notMergeable, prJSON + `,"mergeable":"CONFLICTING"}`, true, func(e error) bool { return errors.Is(e, forge.ErrMergeConflict) }},
+		{"blocked by checks", notMergeable, prJSON + `,"mergeable":"MERGEABLE"}`, true, func(e error) bool { return errors.Is(e, forge.ErrMergeBlockedByChecks) }},
+		{"already merged", notMergeable, `{"number":"7","url":"` + prURL7 + `","state":"closed","merged":true}`, true, func(e error) bool { return e == nil }},
+		{"closed", notMergeable, `{"number":"7","url":"` + prURL7 + `","state":"closed","merged":false,"mergeable":"MERGEABLE"}`, true, notSentinel},
+		{"draft", notMergeable, prJSON + `,"draft":true,"mergeable":"CONFLICTING"}`, true, notSentinel},
+		{"undetermined", notMergeable, prJSON + `,"mergeable":"UNKNOWN"}`, true, notSentinel},
+		{"merge method not allowed on a mergeable PR", &connectorhost.CallError{Class: connectorhost.Permanent, Message: "Merge method not allowed"}, prJSON + `,"mergeable":"MERGEABLE"}`, false, notSentinel},
+		{"permanent on a conflicting PR", classed(connectorhost.Permanent), prJSON + `,"mergeable":"CONFLICTING"}`, false, notSentinel},
+		{"not found", classed(connectorhost.NotFound), prJSON + `,"mergeable":"CONFLICTING"}`, false, notSentinel},
+		{"unclassified", connectorhost.ErrBudget, prJSON + `,"mergeable":"CONFLICTING"}`, false, notSentinel},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newPRHarness(t, nil, map[string]any{"forge.merge": classed(connectorhost.Permanent), "forge.pr": tc.pr})
+			h := newPRHarness(t, nil, map[string]any{"forge.merge": tc.err, "forge.pr": tc.pr})
 			if err := h.f.Merge(prURL7); !tc.want(err) {
 				t.Fatalf("Merge = %v", err)
 			}
+			reads := 0
+			for _, c := range h.calls {
+				if c == "forge.pr" {
+					reads++
+				}
+			}
+			if (reads > 0) != tc.reread {
+				t.Errorf("PR reads = %d, want a re-read: %t (calls %v)", reads, tc.reread, h.calls)
+			}
+			if !tc.reread && (len(h.calls) != 1 || len(h.sleeps) != 0) {
+				t.Errorf("calls = %v, sleeps = %v, want the merge only", h.calls, h.sleeps)
+			}
 		})
 	}
+}
+
+func notSentinel(e error) bool {
+	return e != nil && !errors.Is(e, forge.ErrMergeConflict) && !errors.Is(e, forge.ErrMergeBlockedByChecks)
 }
 
 func TestMergeRereadsAConflictingPROnceAfterAPause(t *testing.T) {
@@ -151,7 +168,7 @@ func TestMergeRereadsAConflictingPROnceAfterAPause(t *testing.T) {
 		{"blocked by checks reads once", []string{mergeable, conflicting}, forge.ErrMergeBlockedByChecks, 0, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newPRHarness(t, nil, map[string]any{"forge.merge": classed(connectorhost.Permanent), "forge.pr": tc.reads})
+			h := newPRHarness(t, nil, map[string]any{"forge.merge": classed(connectorhost.NotMergeable), "forge.pr": tc.reads})
 			if err := h.f.Merge(prURL7); !errors.Is(err, tc.want) {
 				t.Fatalf("Merge = %v, want %v", err, tc.want)
 			}
@@ -177,7 +194,7 @@ func TestMergeDoesNotPauseForAMergedOrDraftPR(t *testing.T) {
 		"draft":  prJSON + `,"draft":true,"mergeable":"CONFLICTING"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			h := newPRHarness(t, nil, map[string]any{"forge.merge": classed(connectorhost.Permanent), "forge.pr": pr})
+			h := newPRHarness(t, nil, map[string]any{"forge.merge": classed(connectorhost.NotMergeable), "forge.pr": pr})
 			_ = h.f.Merge(prURL7)
 			if len(h.sleeps) != 0 {
 				t.Errorf("sleeps = %v, want none", h.sleeps)
@@ -323,7 +340,7 @@ func TestCheckRunDropsAForeignRunLink(t *testing.T) {
 }
 
 func TestMergeFailureKeepsTheCauseWhenThePRLookupFails(t *testing.T) {
-	h := newPRHarness(t, nil, map[string]any{"forge.merge": classed(connectorhost.Permanent), "forge.pr": classed(connectorhost.Permanent)})
+	h := newPRHarness(t, nil, map[string]any{"forge.merge": classed(connectorhost.NotMergeable), "forge.pr": classed(connectorhost.Permanent)})
 	err := h.f.Merge(prURL7)
 	if err == nil || errors.Is(err, forge.ErrMergeConflict) || errors.Is(err, forge.ErrMergeBlockedByChecks) {
 		t.Fatalf("Merge = %v, want a non-sentinel error", err)
