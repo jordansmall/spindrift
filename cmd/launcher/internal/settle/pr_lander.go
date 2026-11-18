@@ -111,11 +111,12 @@ var errLandingNeverGreen = errors.New("settle: force-pushed head never went gree
 // timeout or API error.
 var errForcePushRed = fmt.Errorf("%w: CI went red", errLandingNeverGreen)
 
-// errForcePushMarkReadyFailed marks the ready flip that restores a PR after a
-// force-push and fails past its transient retries. The PR is a draft again, so
+// errRestoreReadyFailed marks the ready flip that restores a demoted PR and
+// fails past its transient retries: after a force-push, or after a conflict
+// demotion whose rebase could not proceed. The PR is a draft again, so
 // selfHeal fails the landing as it does for the first flip rather than settling
-// merge-blocked (issue #7205).
-var errForcePushMarkReadyFailed = errors.New("ready flip after the force-push failed")
+// merge-blocked (issues #7205, #7224).
+var errRestoreReadyFailed = errors.New("ready flip restoring a demoted PR failed")
 
 // selfHealGate is the PR Lander's landing: it polls the merge gate,
 // dispatching fix boxes on genuine red up to MaxFixAttempts times, then applies
@@ -206,7 +207,7 @@ func (s prLander) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr
 				if errors.Is(err, errLandingNeverGreen) {
 					return s.failForcePushedHead(num, pr, err, "")
 				}
-				if errors.Is(err, errForcePushMarkReadyFailed) {
+				if errors.Is(err, errRestoreReadyFailed) {
 					return s.failMarkReady(num, gen, pr, err)
 				}
 				s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeBlocked, Detail: fmt.Sprintf("!! %v", err)})
@@ -672,8 +673,9 @@ func (s prLander) resolveBeforeHandOff(num string, gen uint64, pr string, d disp
 // rebase it (retrying a transient push failure), fall back to a conflict-resolve
 // dispatch when the rebase itself conflicts, and wait for the force-pushed head
 // to go green. budget is the caller's, shared across that caller's own calls
-// (mergeImmediate's loop), so the caller decides how far it reaches; an
-// exhausted budget returns conflictErr unchanged.
+// (mergeImmediate's loop), so the caller decides how far it reaches. Every
+// error path that never ran a resolve restores the PR to ready first; a failed
+// restore returns errRestoreReadyFailed in place of the rebase error.
 // resolved reports that a conflict-resolve dispatch ran, so the caller's next
 // conflict is the same one read from a stale snapshot and must not be rebased
 // again.
@@ -683,8 +685,10 @@ func (s prLander) respondToConflict(num string, gen uint64, pr string, d dispatc
 		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMarkDraftFailed, Detail: fmt.Sprintf("!! %v", mdErr)})
 	}
 	var resolve func() error
+	resolveRan := false
 	if d != nil {
 		resolve = func() error {
+			resolveRan = true
 			if crErr := s.resolveConflict(num, gen, pr, d); crErr != nil {
 				return crErr
 			}
@@ -692,6 +696,13 @@ func (s prLander) respondToConflict(num string, gen uint64, pr string, d dispatc
 		}
 	}
 	resolved, err = s.rebaseOnConflict(num, pr, cf, conflictErr, budget, resolve)
+	if err != nil && !resolveRan {
+		// This call pushed nothing, so its demotion is its only change, and a
+		// merge-blocked hand-off must not leave a draft (issue #7224).
+		if rrErr := s.restoreReady(num, gen, pr); rrErr != nil {
+			return false, rrErr
+		}
+	}
 	if err != nil || resolved {
 		return resolved, err
 	}
@@ -888,11 +899,21 @@ func (s prLander) rewaitAfterForcePush(num string, gen uint64, pr string) error 
 		// Restore ready (issue #1863). MarkReady is idempotent, so calling it
 		// unconditionally beats threading a was-it-ever-demoted flag through
 		// for the stale-base path that never demoted.
-		if mrErr := s.markReady(num, gen, pr); mrErr != nil {
-			return fmt.Errorf("%w: %w", errForcePushMarkReadyFailed, mrErr)
+		if err := s.restoreReady(num, gen, pr); err != nil {
+			return err
 		}
 	}
 	return rewaitGateResultErr(obs.outcome, gReason, pr)
+}
+
+// restoreReady flips a demoted PR back to ready, tagging a failure as
+// errRestoreReadyFailed so selfHealGate fails the landing instead of settling
+// merge-blocked on a draft.
+func (s prLander) restoreReady(num string, gen uint64, pr string) error {
+	if err := s.markReady(num, gen, pr); err != nil {
+		return fmt.Errorf("%w: %w", errRestoreReadyFailed, err)
+	}
+	return nil
 }
 
 // forcePushRedErr is the error for a force-pushed head on pr whose CI went red.
