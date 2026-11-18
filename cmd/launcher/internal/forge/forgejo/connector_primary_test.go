@@ -12,6 +12,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
@@ -186,6 +187,53 @@ func TestNoPrimaryRow_BuildsTheNativeForge(t *testing.T) {
 				if got := nativeForgeType(cf); !strings.Contains(got, "forgejo") || strings.Contains(got, "connectorforge") {
 					t.Errorf("readOnlyBox=%v: built %s, want the native forgejo adapter", readOnlyBox, got)
 				}
+			}
+		})
+	}
+}
+
+// The production forgejo forge, composed under a primary row, exposes the
+// head-pinned rebase to the Lander, refuses a PR whose guest-named head is not
+// the derived agent branch, and refuses a plain Rebase, each before any branch
+// is pushed (issue #6961). A matching head rebases.
+func TestPrimaryRow_RebasePRHeadIsPinnedToTheAgentBranch(t *testing.T) {
+	for _, readOnlyBox := range []bool{false, true} {
+		t.Run(map[bool]string{false: "writable", true: "read-only"}[readOnlyBox], func(t *testing.T) {
+			h := newConnectorHarness(t, readOnlyBox, true)
+			rebaser := h.caps.PRHeadRebaser
+			if rebaser == nil {
+				t.Fatal("ResolveCodeForge found no PRHeadRebaser on the production forgejo forge")
+			}
+			url := h.seedLandable("21")
+			h.repo.SeedBranch("release", "rel")
+			h.repo.AdvanceBase()
+			branch := forge.AgentBranchName(h.BranchPrefix(), "21")
+			before := h.repo.BranchSHA(branch)
+
+			for name, err := range map[string]error{
+				"foreign head": rebaser.RebasePRHead(url, "release"),
+				"other agent":  rebaser.RebasePRHead(url, forge.AgentBranchName(h.BranchPrefix(), "999")),
+				"plain rebase": h.cf.Rebase(url),
+			} {
+				if !errors.Is(err, connectorforge.ErrAnswer) {
+					t.Errorf("%s: err = %v, want connectorforge.ErrAnswer", name, err)
+				}
+			}
+			if got := h.repo.BranchSHA(branch); got != before || h.repo.Rebased(branch) {
+				t.Error("a refused rebase moved the PR branch")
+			}
+			if h.repo.Rebased("release") {
+				t.Error("the foreign branch was rebased")
+			}
+
+			if readOnlyBox {
+				return
+			}
+			if err := rebaser.RebasePRHead(url, branch); err != nil {
+				t.Fatalf("RebasePRHead(matching head) = %v", err)
+			}
+			if !h.repo.Rebased(branch) {
+				t.Error("the matching head was not rebased")
 			}
 		})
 	}
