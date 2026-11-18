@@ -318,6 +318,42 @@ func TestPrimaryRow_MergeSurvivesAFailedBranchDelete(t *testing.T) {
 	}
 }
 
+// A merged same-repository PR has its head branch deleted.
+func TestPrimaryRow_MergeDeletesASameRepoHead(t *testing.T) {
+	h, _, _, _ := primaryHarness(t, useGithubRowPrimary)
+	url := h.SeedLandablePR("9")
+
+	if err := primaryWriteClient().Merge(url); err != nil {
+		t.Fatalf("Merge = %v, want nil", err)
+	}
+	if got, want := h.deletedRefs(), []string{"refs/heads/" + landingBranch}; !slices.Equal(got, want) {
+		t.Errorf("deleted refs = %v, want %v", got, want)
+	}
+}
+
+// A cross-repository PR's head is not in the base repository, so the merge
+// deletes nothing: a same-named base-repo branch would be someone else's.
+func TestPrimaryRow_MergeLeavesACrossRepoHeadAlone(t *testing.T) {
+	h, _, _, logDir := primaryHarness(t, useGithubRowPrimary)
+	url := h.SeedLandableForkPR("9")
+
+	if err := primaryWriteClient().Merge(url); err != nil {
+		t.Fatalf("Merge = %v, want nil", err)
+	}
+	if !h.Merged(url) {
+		t.Error("the PR did not merge")
+	}
+	if got := h.deletedRefs(); len(got) != 0 {
+		t.Errorf("deleted refs = %v, want none for a fork PR", got)
+	}
+	if ok, err := primaryWriteClient().BranchExists(landingBranch); err != nil || !ok {
+		t.Errorf("BranchExists(%s) = (%v, %v), want the base repo's same-named branch kept", landingBranch, ok, err)
+	}
+	if logs := primaryFiles(t, logDir, ".log"); len(logs) != 0 {
+		t.Errorf("primary logs = %v, want none", logs)
+	}
+}
+
 // A head the repository already deleted is done, not a fault: nothing is
 // recorded for a clean primary run.
 func TestPrimaryRow_MergeWithTheHeadAlreadyGoneRecordsNothing(t *testing.T) {

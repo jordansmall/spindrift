@@ -387,6 +387,22 @@ func TestHeadCommitSHAAndMergeCommit(t *testing.T) {
 	}
 }
 
+func TestHeadOfDecodesCrossRepo(t *testing.T) {
+	for name, tc := range map[string]struct {
+		extra string
+		want  bool
+	}{
+		"cross-repo": {`,"crossRepo":true`, true},
+		"absent":     {``, false},
+	} {
+		h := newPRHarness(t, nil, map[string]any{"forge.pr": prJSON + `,"head":"agent/7"` + tc.extra + `}`})
+		head, cross, err := HeadOf(h.f, prURL7)
+		if head != "agent/7" || cross != tc.want || err != nil {
+			t.Errorf("%s: HeadOf = (%q, %v, %v), want (agent/7, %v, nil)", name, head, cross, err, tc.want)
+		}
+	}
+}
+
 func TestNeedsUpdateAndListPRFiles(t *testing.T) {
 	for reply, want := range map[string]bool{`{"behindBy":0}`: false, `{"behindBy":3}`: true} {
 		h := newPRHarness(t, nil, map[string]any{"forge.behind": reply})

@@ -248,9 +248,15 @@ func (e *execClient) mergeViaConnector(row backendrows.Row, prURL string) error 
 		return err
 	}
 	err = e.forgeWrite(row, "delete a merged PR's head branch", false, func(cf forge.CodeForge, caps forge.Capabilities) error {
-		head, herr := connectorforge.HeadBranch(cf, prURL)
+		head, crossRepo, herr := connectorforge.HeadOf(cf, prURL)
 		if herr != nil {
 			return herr
+		}
+		// `gh pr merge --delete-branch` leaves a cross-repository PR's head
+		// alone; deleting by name here would hit a same-named base-repo
+		// branch instead.
+		if crossRepo {
+			return nil
 		}
 		if caps.BranchDeleter == nil {
 			return fmt.Errorf("%w: forge.branches", errNoCapability)
