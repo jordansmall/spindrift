@@ -457,6 +457,39 @@ func TestPrimaryRowValidation(t *testing.T) {
 	}
 }
 
+func TestPrimaryAndShadowRowsForSameDriverRefused(t *testing.T) {
+	drivertest.Isolate(t)
+	driver.Register(driverkit.Strategy{Name: "claude"})
+	desc, _ := driver.DescriptorFor("claude")
+	primary := driverrows.Row{Descriptor: desc, Module: "/m/claude.wasm", Primary: true, FirstParty: true}
+	shadow := driverrows.Row{Descriptor: desc, Module: "/m/claude.wasm", Shadow: true, FirstParty: true}
+	unmarked := shadow
+	unmarked.FirstParty = false
+	for name, doc := range map[string][]driverrows.Row{
+		"primary then shadow":          {primary, shadow},
+		"shadow then primary":          {shadow, primary},
+		"primary then unmarked shadow": {primary, unmarked},
+		"unmarked shadow then primary": {unmarked, primary},
+		"primary then repeated shadow": {primary, shadow, shadow},
+		"repeated shadow then primary": {shadow, shadow, primary},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for who, apply := range map[string]func() error{
+				"host": func() error { return driverrows.Use(rows(t, doc)) },
+				"box":  func() error { return useFile(t, rows(t, doc)) },
+			} {
+				t.Run(who, func(t *testing.T) {
+					defer driver.Snapshot()()
+					err := apply()
+					if err == nil || !strings.Contains(err.Error(), `Driver "claude" has both a primary row and a shadow row`) {
+						t.Errorf("err = %v, want the primary-and-shadow refusal", err)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestPrimaryRowReplacesNativeDriver(t *testing.T) {
 	drivertest.Isolate(t)
 	wasm := fixtureWasm(t, "driver.wasm")
