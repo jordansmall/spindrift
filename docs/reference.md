@@ -3904,7 +3904,7 @@ Driver Connectors); a run that loads none starts none.
 
 - **Isolation.** The sandbox image is built minimal, holding only
   `connector-host`, and carries no `Env`. On an OCI runtime the Launcher runs
-  it as `run -i --rm --name spindrift-connector-sandbox-<pid>-<nanos>
+  it as `run -i --rm --name spindrift-connector-sandbox-<owner>-<pid>-<nanos>
   --network=none --cap-drop=all --security-opt=no-new-privileges --read-only
   --pids-limit=128 --memory=512m`: no `-t` (a tty would corrupt the frame
   stream), no env, no host volumes or bind mounts (podman adds its default in-memory tmpfs under a read-only root), no network. These are fixed, not the Box's knobs,
@@ -3936,15 +3936,26 @@ Driver Connectors); a run that loads none starts none.
   (ahead of its token, network and push gates), or a daemon's start through
   its `doctor` preflight (so any `spindrift doctor` too), lists running
   sandboxes by the `spindrift-connector-sandbox-` prefix and kills each one
-  whose `<pid>`, the Launcher that started it, is no longer alive, logging
-  `==> reaped orphaned Connector sandbox: <name>`. Unlike an
-  orphaned Box, which Console startup only lists (issue #1619), an orphaned
-  sandbox is killed: it holds no work worth inspecting. Liveness is checked in
-  the sweeping process's pid namespace, so a sandbox whose Launcher runs in
-  another pid namespace on the same runtime daemon looks orphaned and is
-  killed too. Box names never match the prefix, so the sweep never touches a
-  Box; Box orphan detection likewise skips sandbox names. Under bwrap, `Kill`
-  reaches a sandbox or Box an earlier Launcher started through its cgroup.
+  whose `<owner>` is this Launcher's own and whose `<pid>`, the Launcher that
+  started it, is no longer alive, logging `==> reaped orphaned Connector
+  sandbox: <name>`. Unlike an orphaned Box, which Console startup only lists
+  (issue #1619), an orphaned sandbox is killed: it holds no work worth
+  inspecting. `<owner>` is a 12-hex-digit digest of the Launcher's identity:
+  on Linux its boot id and pid namespace, on macOS its boot session UUID. A
+  sandbox whose `<owner>` differs was started by a Launcher in another pid
+  namespace or on another host sharing the runtime daemon, and the sweep
+  skips it silently, since its `<pid>` means nothing here. A sandbox with no
+  owner identity, named by an older Launcher (`<pid>-<nanos>`) or with the
+  `unowned` token a Launcher that could not read its identity uses, is
+  skipped too, printing `note: skipped Connector sandbox with no owner
+  identity (remove it by hand if orphaned): <name>` on each sweep while it
+  runs; remove a genuine leftover with `docker rm -f` or `podman rm -f`, or
+  under bwrap by killing the processes in its `spindrift-<name>` cgroup. A
+  sweep that cannot read its own identity, or runs on a host with none,
+  reaps nothing. Box names never match the prefix, so the sweep never
+  touches a Box; Box orphan detection likewise skips sandbox names. Under
+  bwrap, `Kill` reaches a sandbox or Box an earlier Launcher started through
+  its cgroup.
 - **What stays in-process.** The Box (`driver-exec`) still loads its Driver
   Connectors in its own process. `doctor`, `preview` and the daemon process's
   own probes are not runs, so they load in-process too.
