@@ -122,12 +122,40 @@ func TestInternalSeam_DefuseClosingKeywords(t *testing.T) {
 			name:    "Resolved keyword",
 			subject: "resolved #7",
 		},
+		{
+			name:    "cross-repo reference",
+			subject: "Closes o/r#998",
+		},
+		{
+			name:    "issue URL reference",
+			subject: "Closes https://github.com/o/r/issues/997",
+		},
+		{
+			name:    "issue URL under a forge subpath",
+			subject: "Closes https://git.example/forgejo/o/r/issues/999",
+		},
+		{
+			name:    "Forgejo pulls URL reference",
+			subject: "Closes https://git.example/o/r/pulls/996",
+		},
+		{
+			name:    "comma-joined issue URLs",
+			subject: "Closes https://github.com/o/r/issues/999,https://github.com/o/r/issues/1",
+		},
+		{
+			name:    "issue URL with a query holding a second issue path",
+			subject: "Closes https://github.com/o/r/issues/999?x=/issues/1",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := defuseClosingKeywords(tt.subject)
 			if closingKeywordPattern.MatchString(got) {
 				t.Errorf("defuseClosingKeywords(%q) = %q, still matches closingKeywordPattern", tt.subject, got)
+			}
+			// Not matching is vacuous for a reference the pattern never saw.
+			if got == tt.subject {
+				t.Errorf("defuseClosingKeywords(%q) left the reference live", tt.subject)
 			}
 			// The digits and keyword text must survive: defusing only hides
 			// them from the scanner behind a zero-width space.
