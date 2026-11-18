@@ -47,6 +47,62 @@ func TestDriverDecodesALargeLineWithoutWedging(t *testing.T) {
 	}
 }
 
+// The guest is a Go wasip1 reactor that never runs the GC on its own, so the
+// SDK must collect between connector_calls: otherwise a long log decoded on one
+// Connector grows past the memory cap, the Connector dies ("exceeded its memory
+// cap") partway through a run and every later line goes undecoded.
+func TestDriverDecodesALongRunWithoutExhaustingMemory(t *testing.T) {
+	const total = 96 << 20 // well past the 64 MiB base memory cap
+	line := strings.Repeat("a", 4<<10)
+	load := func(t *testing.T) (*connectorhost.Connector, driverkit.Strategy) {
+		t.Helper()
+		c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = c.Close(context.Background()) })
+		s, err := c.DriverStrategy()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c, s
+	}
+	t.Run("line by line", func(t *testing.T) {
+		c, s := load(t)
+		d := s.NewDecoder()
+		sent := 0
+		for i := 1; sent < total; i++ {
+			evs := d(line)
+			if err := c.Err(); err != nil {
+				t.Fatalf("call %d after %d MiB: Connector unusable: %v", i, sent>>20, err)
+			}
+			if len(evs) != 1 {
+				t.Fatalf("call %d after %d MiB: %d events, want 1", i, sent>>20, len(evs))
+			}
+			sent += len(line)
+		}
+	})
+	t.Run("1 MiB batches", func(t *testing.T) {
+		c, s := load(t)
+		d := s.NewBatchDecoder()
+		batch := make([]string, (1<<20)/len(line)) // the shadow's flushBytes
+		for i := range batch {
+			batch[i] = line
+		}
+		sent := 0
+		for i := 1; sent < total; i++ {
+			res := d(batch)
+			if err := c.Err(); err != nil {
+				t.Fatalf("call %d after %d MiB: Connector unusable: %v", i, sent>>20, err)
+			}
+			if len(res) != len(batch) {
+				t.Fatalf("call %d after %d MiB: %d results for %d lines", i, sent>>20, len(res), len(batch))
+			}
+			sent += len(batch) * len(line)
+		}
+	})
+}
+
 // The guest's encoder writes each of <, > and & as a 6-byte \u00XX escape, so a
 // correct decode of such a line answers with about 6 times the line, past the
 // base cap. The host sends the line raw, so the request stays near 1.5 MiB.
