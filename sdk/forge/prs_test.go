@@ -18,7 +18,7 @@ func fakePRs(t *testing.T) PRs {
 				t.Errorf("Open(%v, %+v)", tg, p)
 			}
 			return PR{Number: "9", URL: "https://forge.example/o/r/pull/9", State: "open", Draft: true,
-				Head: "agent/issue-3", HeadSHA: "abc", Mergeable: "MERGEABLE", MergeCommit: "def"}, nil
+				Head: "agent/issue-3", HeadSHA: "abc", Mergeable: "MERGEABLE", MergeCommit: "def", CrossRepo: true}, nil
 		},
 		Behind: func(tg Target, n string) (int, error) {
 			if tg != wantTarget || n != "9" {
@@ -109,7 +109,7 @@ func TestPRWireShapes(t *testing.T) {
 	cases := []struct{ method, params, want string }{
 		{"forge.openPR", `{` + target + `,"pr":{"title":"T","body":"B","base":"main","head":"agent/issue-3","draft":true}}`,
 			`{"number":"9","url":"https://forge.example/o/r/pull/9","state":"open","merged":false,` +
-				`"draft":true,"head":"agent/issue-3","headSha":"abc","mergeable":"MERGEABLE","mergeCommit":"def"}`},
+				`"draft":true,"head":"agent/issue-3","headSha":"abc","mergeable":"MERGEABLE","mergeCommit":"def","crossRepo":true}`},
 		{"forge.behind", `{` + target + `,"number":"9"}`, `{"behindBy":4}`},
 		{"forge.prFiles", `{` + target + `,"number":"9"}`, `{"files":["a.go","b/c.go"]}`},
 		{"forge.setDraft", `{` + target + `,"number":"9","draft":false}`, `{}`},

@@ -3704,8 +3704,10 @@ This is protocol version **0.3.0**. The host is
   | `forge.jobLog` | `{target, jobId, tail, errorLines}` | `{log}`, the last `tail` bytes of a job's log, preceded by the error lines of the head it cut, up to `errorLines` bytes (none when `errorLines` is absent or 0); optional |
 
   A PR is `{number, url, state, merged}`, plus, for a PR-capable forge,
-  `{draft, head, headSha, mergeable, mergeCommit}` (each omitted when empty;
-  `mergeable` is `MERGEABLE`, `CONFLICTING` or `UNKNOWN`); a check is
+  `{draft, head, headSha, mergeable, mergeCommit, crossRepo}` (each omitted
+  when empty; `mergeable` is `MERGEABLE`, `CONFLICTING` or `UNKNOWN`;
+  `crossRepo` is true when the PR's head lives in a different repository than
+  its base, and absent means same-repo); a check is
   `{kind, name, conclusion, summary, jobId}`, with `kind` `"CheckRun"` or `"StatusContext"`, and `jobId`
   (omitted when empty) naming the job whose log `forge.jobLog` reads. A
   Connector without `forge.jobLog`, or whose log read fails, still serves
@@ -3850,8 +3852,9 @@ This is protocol version **0.3.0**. The host is
   spindrift's release version. A `0.y` bump is breaking; a `0.y.z` bump is
   additive. Protocol 0.3 has not shipped in a release, so moving
   `forge.openPR` behind `forge.draftPRs`, giving `driver.newDecoder` an
-  optional `now`, giving `tracker.labeled` an optional `cursor` and `next`, or
-  adding the `not-mergeable` error class within 0.3 takes no bump. An older
+  optional `now`, giving `tracker.labeled` an optional `cursor` and `next`,
+  giving a PR an optional `crossRepo`, or adding the `not-mergeable` error
+  class within 0.3 takes no bump. An older
   Connector ignores `cursor` and sends no `next`, so core reads its one page
   as before. An older Connector that reports a real not-mergeable refusal as
   `permanent` now fails the merge at once instead of polling for checks, which
