@@ -62,8 +62,8 @@ func TestStrategyResultEventRoundTrips(t *testing.T) {
 	if got, err := d.ResultText(log); err != nil || got != "STATUS: ok\n" {
 		t.Errorf("ResultText = %q, %v; want one line STATUS: ok", got, err)
 	}
-	if got := d.SessionFlags("initial", "o/r", "1", ""); got != "" {
-		t.Errorf("SessionFlags = %q, want empty", got)
+	if got, err := d.SessionFlags("initial", "o/r", "1", ""); err != nil || got != "" {
+		t.Errorf("SessionFlags = %q, %v; want empty", got, err)
 	}
 	if got, err := d.ResolveExit(log, 7); err != nil || got != 7 {
 		t.Errorf("ResolveExit = %d, %v; want 7", got, err)

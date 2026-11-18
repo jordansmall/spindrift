@@ -288,7 +288,11 @@ func (f *fixture) sessionID() string {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	return strings.TrimPrefix(d.SessionFlags("initial", f.knobs["REPO_SLUG"], f.env.IssueNumber, ""), "--session-id ")
+	flags, err := d.SessionFlags("initial", f.knobs["REPO_SLUG"], f.env.IssueNumber, "")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return strings.TrimPrefix(flags, "--session-id ")
 }
 
 func (f *fixture) readOnlyRelay() {

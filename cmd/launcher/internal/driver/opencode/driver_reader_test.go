@@ -244,7 +244,7 @@ func TestOpencodeSessionFlags(t *testing.T) {
 	d := newDriver()
 	title := func(t *testing.T, slug, issue string) string {
 		t.Helper()
-		got := d.SessionFlags("initial", slug, issue, t.TempDir())
+		got := sessionFlags(t, d, "initial", slug, issue, t.TempDir())
 		v, ok := strings.CutPrefix(got, "--title ")
 		if !ok || v == "" || strings.ContainsAny(v, " \t'\"") {
 			t.Fatalf("initial = %q; want --title <single token>", got)
@@ -264,7 +264,7 @@ func TestOpencodeSessionFlags(t *testing.T) {
 
 	t.Run("resume with no store is cold", func(t *testing.T) {
 		t.Setenv("OPENCODE_DB", filepath.Join(t.TempDir(), "opencode.db"))
-		if got := d.SessionFlags("resume", "owner/repo", "7", t.TempDir()); got != "" {
+		if got := sessionFlags(t, d, "resume", "owner/repo", "7", t.TempDir()); got != "" {
 			t.Errorf("got %q; want empty", got)
 		}
 	})
@@ -278,7 +278,7 @@ func TestOpencodeSessionFlags(t *testing.T) {
 			{"ses_archived", nil, want, 500, 600},
 			{"ses_other", nil, title(t, "owner/repo", "8"), 700, nil},
 		})
-		if got := d.SessionFlags("resume", "owner/repo", "7", t.TempDir()); got != "--session ses_new" {
+		if got := sessionFlags(t, d, "resume", "owner/repo", "7", t.TempDir()); got != "--session ses_new" {
 			t.Errorf("got %q; want --session ses_new", got)
 		}
 	})
@@ -288,7 +288,7 @@ func TestOpencodeSessionFlags(t *testing.T) {
 			{"ses_other", nil, title(t, "owner/repo", "8"), 100, nil},
 			{"ses_child", "ses_other", title(t, "owner/repo", "7"), 200, nil},
 		})
-		if got := d.SessionFlags("resume", "owner/repo", "7", t.TempDir()); got != "" {
+		if got := sessionFlags(t, d, "resume", "owner/repo", "7", t.TempDir()); got != "" {
 			t.Errorf("got %q; want empty", got)
 		}
 	})
@@ -300,7 +300,7 @@ func TestOpencodeSessionFlags(t *testing.T) {
 		})
 		var got string
 		stderr := testutil.CaptureStderr(t, func() {
-			got = d.SessionFlags("resume", "owner/repo", "7", t.TempDir())
+			got = sessionFlags(t, d, "resume", "owner/repo", "7", t.TempDir())
 		})
 		if got != "" {
 			t.Errorf("got %q; want empty", got)
@@ -314,7 +314,7 @@ func TestOpencodeSessionFlags(t *testing.T) {
 		openOpencodeStore(t, `CREATE TABLE session (id text PRIMARY KEY)`)
 		var got string
 		stderr := testutil.CaptureStderr(t, func() {
-			got = d.SessionFlags("resume", "owner/repo", "7", t.TempDir())
+			got = sessionFlags(t, d, "resume", "owner/repo", "7", t.TempDir())
 		})
 		if got != "" {
 			t.Errorf("got %q; want empty", got)
@@ -327,7 +327,7 @@ func TestOpencodeSessionFlags(t *testing.T) {
 	t.Run("resume with no match stays silent", func(t *testing.T) {
 		seedOpencodeStore(t, nil)
 		stderr := testutil.CaptureStderr(t, func() {
-			d.SessionFlags("resume", "owner/repo", "7", t.TempDir())
+			sessionFlags(t, d, "resume", "owner/repo", "7", t.TempDir())
 		})
 		if stderr != "" {
 			t.Errorf("stderr = %q; want empty", stderr)
@@ -337,7 +337,7 @@ func TestOpencodeSessionFlags(t *testing.T) {
 	t.Run("resume does not create the store", func(t *testing.T) {
 		dir := filepath.Join(t.TempDir(), "session")
 		t.Setenv("OPENCODE_DB", filepath.Join(dir, "opencode.db"))
-		d.SessionFlags("resume", "owner/repo", "7", t.TempDir())
+		sessionFlags(t, d, "resume", "owner/repo", "7", t.TempDir())
 		if _, err := os.Stat(dir); !os.IsNotExist(err) {
 			t.Errorf("resume created state at OPENCODE_DB: %v", err)
 		}
@@ -345,7 +345,7 @@ func TestOpencodeSessionFlags(t *testing.T) {
 
 	t.Run("resume reads OPENCODE_DB, not a path under home", func(t *testing.T) {
 		seedOpencodeStore(t, [][5]any{{"ses_env", nil, title(t, "owner/repo", "7"), 100, nil}})
-		if got := d.SessionFlags("resume", "owner/repo", "7", t.TempDir()); got != "--session ses_env" {
+		if got := sessionFlags(t, d, "resume", "owner/repo", "7", t.TempDir()); got != "--session ses_env" {
 			t.Errorf("got %q; want --session ses_env", got)
 		}
 	})
@@ -353,11 +353,11 @@ func TestOpencodeSessionFlags(t *testing.T) {
 	t.Run("resume with OPENCODE_DB unset or empty is cold", func(t *testing.T) {
 		seedOpencodeStore(t, [][5]any{{"ses_a", nil, title(t, "owner/repo", "7"), 100, nil}})
 		t.Setenv("OPENCODE_DB", "")
-		if got := d.SessionFlags("resume", "owner/repo", "7", t.TempDir()); got != "" {
+		if got := sessionFlags(t, d, "resume", "owner/repo", "7", t.TempDir()); got != "" {
 			t.Errorf("empty: got %q; want empty", got)
 		}
 		os.Unsetenv("OPENCODE_DB")
-		if got := d.SessionFlags("resume", "owner/repo", "7", t.TempDir()); got != "" {
+		if got := sessionFlags(t, d, "resume", "owner/repo", "7", t.TempDir()); got != "" {
 			t.Errorf("unset: got %q; want empty", got)
 		}
 	})
@@ -365,7 +365,7 @@ func TestOpencodeSessionFlags(t *testing.T) {
 	t.Run("unknown modes render nothing", func(t *testing.T) {
 		seedOpencodeStore(t, [][5]any{{"ses_a", nil, title(t, "owner/repo", "7"), 100, nil}})
 		for _, mode := range []string{"", "continue", "bogus"} {
-			if got := d.SessionFlags(mode, "owner/repo", "7", t.TempDir()); got != "" {
+			if got := sessionFlags(t, d, mode, "owner/repo", "7", t.TempDir()); got != "" {
 				t.Errorf("SessionFlags(%q) = %q; want empty", mode, got)
 			}
 		}

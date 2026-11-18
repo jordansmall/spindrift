@@ -2,6 +2,7 @@ package pi_test
 
 import (
 	"fmt"
+	"testing"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/driver/pi"
@@ -41,3 +42,12 @@ const (
 	agentEnd   = `{"type":"agent_end","messages":[],"willRetry":false}`
 	settled    = `{"type":"agent_settled","aborted":false}`
 )
+
+func sessionFlags(t *testing.T, d driverkit.Driver, mode, slug, issue, home string) string {
+	t.Helper()
+	got, err := d.SessionFlags(mode, slug, issue, home)
+	if err != nil {
+		t.Fatalf("SessionFlags(%q): %v", mode, err)
+	}
+	return got
+}

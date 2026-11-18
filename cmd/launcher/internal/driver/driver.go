@@ -97,8 +97,9 @@ type Driver interface {
 	// session, "resume" resumes it (rendering nothing when the Driver's session
 	// store lacks it and its CLI cannot create one), and any other mode renders
 	// nothing. home is the Box's HOME; a Driver whose store path comes from
-	// elsewhere ignores it.
-	SessionFlags(mode, repoSlug, issue, home string) string
+	// elsewhere ignores it. An error means the flags could not be rendered; the
+	// caller must not start the session without them.
+	SessionFlags(mode, repoSlug, issue, home string) (string, error)
 }
 
 // registry is populated by the bundle package's init(); this package imports

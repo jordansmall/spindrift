@@ -54,11 +54,19 @@ type Strategy struct {
 	// CLI's own grammar, such that Result reads it back.
 	ResultEvent func(text string) ([]byte, error)
 	// SessionFlags renders the CLI's session flags for mode; see
-	// driver.Driver.SessionFlags.
-	SessionFlags func(mode, repoSlug, issue, home string) string
+	// driver.Driver.SessionFlags, including its error contract.
+	SessionFlags func(mode, repoSlug, issue, home string) (string, error)
 	// NewStreamFilter wraps the writer a Pass log is teed to with a filter over the
 	// CLI's stdout; nil is the identity, bytes passing through untouched.
 	NewStreamFilter func(w io.Writer) StreamFilter
+}
+
+// InfallibleSessionFlags adapts a session-flags func that cannot fail to
+// Strategy.SessionFlags.
+func InfallibleSessionFlags(f func(mode, repoSlug, issue, home string) string) func(mode, repoSlug, issue, home string) (string, error) {
+	return func(mode, repoSlug, issue, home string) (string, error) {
+		return f(mode, repoSlug, issue, home), nil
+	}
 }
 
 // BatchDecoder returns a fresh batch decoder: the Strategy's own when it has

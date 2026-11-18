@@ -150,14 +150,14 @@ func (c *Connector) DriverStrategyWithout(caps ...string) (driverkit.Strategy, e
 			err := c.Call(ctx, "driver.resultEvent", map[string]any{"text": text}, &r)
 			return []byte(r.Event), err
 		},
-		SessionFlags: func(mode, repoSlug, issue, home string) string {
+		SessionFlags: func(mode, repoSlug, issue, home string) (string, error) {
 			var r sessionFlagsResult
 			err := c.Call(ctx, "driver.sessionFlags",
 				map[string]any{"mode": mode, "repoSlug": repoSlug, "issue": issue, "home": home}, &r)
 			if err != nil {
-				panic(err) // no error return: a wrong flag string would start a mis-configured session
+				return "", err // an error, not a bare "": an empty "initial" drops the session pin
 			}
-			return r.Flags
+			return r.Flags, nil
 		},
 	}
 	if has("driver.resolveExit") {

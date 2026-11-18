@@ -20,5 +20,5 @@ var Strategy = driverkit.Strategy{
 	DefaultTopLevelRole: driverkit.ImplementorRole,
 	Result:              driverkit.ResultEvents,
 	ResultEvent:         ResultEvent,
-	SessionFlags:        SessionFlags,
+	SessionFlags:        driverkit.InfallibleSessionFlags(SessionFlags),
 }
