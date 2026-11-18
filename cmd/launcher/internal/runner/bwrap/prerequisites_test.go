@@ -201,16 +201,16 @@ func TestPrerequisites_OverlayRemedyHint(t *testing.T) {
 	}
 }
 
-// Telling an operator to set NETWORK_MODE=host when it already is host is
+// Telling an operator to pass --network-mode host when it already is host is
 // nonsensical, so the hint appears only while the row is Required.
 func TestPrerequisites_NetworkIsolationRemedyHint(t *testing.T) {
 	adv := prereq(t, runner.Config{NetworkMode: runner.NetworkModeHost}, inputdoc.BwrapArtifacts{}, nil, "bwrap-network-isolation")
-	if strings.Contains(adv.Remedy, "set NETWORK_MODE=host") {
-		t.Errorf("Advisory Remedy should not tell operator to set NETWORK_MODE=host, got: %s", adv.Remedy)
+	if strings.Contains(adv.Remedy, "pass --network-mode host") {
+		t.Errorf("Advisory Remedy should not tell operator to pass --network-mode host, got: %s", adv.Remedy)
 	}
 	req := prereq(t, runner.Config{NetworkMode: runner.NetworkModeOpen}, inputdoc.BwrapArtifacts{}, nil, "bwrap-network-isolation")
-	if !strings.Contains(req.Remedy, "set NETWORK_MODE=host") {
-		t.Errorf("Required Remedy should tell operator to set NETWORK_MODE=host, got: %s", req.Remedy)
+	if !strings.Contains(req.Remedy, "pass --network-mode host") {
+		t.Errorf("Required Remedy should tell operator to pass --network-mode host, got: %s", req.Remedy)
 	}
 	// The probe also fails when pasta is installed but its namespace is
 	// unusable, so the fixed remedy must not tell the operator to install it

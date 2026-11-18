@@ -10,8 +10,9 @@ import (
 )
 
 // hostNetOptOut is the shared tail of every refusal that offers
-// NETWORK_MODE=host as the way out of the pasta requirement.
-const hostNetOptOut = "set NETWORK_MODE=host to explicitly opt into the shared-network-namespace behaviour"
+// --network-mode host as the way out of the pasta requirement. The
+// NETWORK_MODE env var is refused by the launcher, so never name it here.
+const hostNetOptOut = "pass --network-mode host (or set infra.network.mode = \"host\") to explicitly opt into the shared-network-namespace behaviour"
 
 // ValidatePasta checks that pasta is on PATH, can create a network namespace
 // on this host, and leaves it with an UP interface, an IPv4 address and a
@@ -27,7 +28,7 @@ func ValidatePasta() error {
 // netns_probe.go) so the check needs no host tool inside the namespace.
 func validatePastaWith(lookPath func(string) (string, error), run func(string, ...string) *exec.Cmd, flags []string) error {
 	if _, err := lookPath("pasta"); err != nil {
-		return fmt.Errorf("pasta not found on PATH — required to give a bwrap Box its own network namespace with the host loopback blocked (issue #2666); install pasta (the passt project) on PATH, or set NETWORK_MODE=host to explicitly opt into the pre-#2666 shared-network-namespace behaviour")
+		return errors.New("pasta not found on PATH — required to give a bwrap Box its own network namespace with the host loopback blocked (issue #2666); install pasta (the passt project) on PATH, or " + hostNetOptOut)
 	}
 	exe, err := os.Executable()
 	if err != nil {
