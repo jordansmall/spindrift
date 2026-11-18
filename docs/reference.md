@@ -7567,14 +7567,15 @@ the forge are the same backend and that backend has pull requests
   `Closes #${ISSUE_NUMBER}`, and the host appends one if the agent left it
   out (in read-only mode, the default).
 - `ISSUE_TRACKER=forgejo`, `CODE_FORGE=forgejo`: the PR body MUST contain
-  `Closes #${ISSUE_NUMBER}`; Forgejo's own keyword auto-close is what closes
-  the issue when a human or the forge merges the PR.
+  `Closes #${ISSUE_NUMBER}`, and the host appends one if the agent left it
+  out (in read-only mode, the default); Forgejo's own keyword auto-close is
+  what closes the issue when a human or the forge merges the PR.
 - Any other pairing — a `github` or `forgejo` tracker on the other forge, or
   on a `git` forge, which opens no PR: no closing keyword. The issue number is
   a foreign namespace to the forge, so `Closes #42` would close an unrelated
-  issue there. The host's own `Closes` backstop still keys on the tracker
-  alone, so it appends one for a `github` tracker on a `forgejo` forge until
-  issue #7058 makes it pairwise.
+  issue there. The host's `Closes` backstop reads the same pairing, so it
+  appends none either; the issue closes through the tracker's `MergeCloser`
+  when the PR merges.
 - `ISSUE_TRACKER=jira`: no closing keyword. No forge parses a key like
   `ENG-123`, so a `Closes` line would close nothing.
 - `ISSUE_TRACKER=local`, `LOCAL_ISSUE_REFERENCE` off (**default**): the PR
