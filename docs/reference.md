@@ -3622,7 +3622,7 @@ This is protocol version **0.3.0**. The host is
   | `tracker.countInterval` (with `tracker.count`) | `{}` | `{seconds}`, at least 1: how often core re-asks `tracker.count` |
   | `tracker.removedLabels` (optional) | `{target, number}` | `{labels}`: the names removed from the issue, oldest first |
   | `tracker.searchIssues` (optional) | `{target, text, state, label, limit}`, `label` `""` for any | `{issues}`, in match order |
-  | `tracker.labeled` (optional) | `{target, label, state, limit}`, `state` `open` or `closed` | `{issues}` carrying `label`, newest first, `closedAt` and `closedNotPlanned` filled for closed ones; core's finding dedup scan reads it, one call per label, closed issues included |
+  | `tracker.labeled` (optional) | `{target, label, state, limit, cursor}`, `state` `open` or `closed`, `cursor` an opaque string, `""` for the first page | `{issues, next}`, `issues` carrying `label`, newest first, `closedAt` and `closedNotPlanned` filled for closed ones; `next` is the opaque cursor of the following page, `""` at the end. Core's finding dedup scan reads it, closed issues included: per label it repeats the call with `next` as `cursor` until `next` is empty, so a Connector that never sets `next` gets one call. A repeated `next`, or a page whose issues were all read already, fails that label closed, and a walk past core's page or byte bound keeps what it read and stops with a warning |
   | `tracker.transition` (optional) | `{target, number, state, mapping}`: `state` is the Dispatch state's canonical name (`dispatchable`, `in-progress`, `complete`, `failed`, `ambiguous`) and `mapping` is core's whole table, `{<state>: {status, resolution}}`, for every state that names a status; the Connector looks up `mapping[state]`, applies the rule that only `failed` and `ambiguous` may share a status (an error otherwise) and sends the resolution when it is non-empty | `{outcome, status, offered}`: `status` is the native status the Connector resolved `state` to (`""` when unmapped); `outcome` is `moved` (the native transition ran), `unavailable` (the workflow offers no transition to `status` from the issue's current status; `offered` names the statuses it does offer) or `unmapped` (`mapping` holds no non-empty status for `state`); an error for anything else, including a screen field the transition requires and the request does not fill |
   | `tracker.editLabels` (optional) | `{target, number, add, remove}` | `{}`; one edit that adds and removes the named labels |
   | `tracker.comment` (optional) | `{target, number, body, research}`: `body` is canonical Markdown without the research marker line, and `research` says the comment carries that marker | `{}`; one comment, the marker kept where the tracker can report it as `researchMarker` |
@@ -3850,8 +3850,10 @@ This is protocol version **0.3.0**. The host is
   spindrift's release version. A `0.y` bump is breaking; a `0.y.z` bump is
   additive. Protocol 0.3 has not shipped in a release, so moving
   `forge.openPR` behind `forge.draftPRs`, giving `driver.newDecoder` an
-  optional `now`, or adding the `not-mergeable` error class within 0.3 takes
-  no bump. An older Connector that reports a real not-mergeable refusal as
+  optional `now`, giving `tracker.labeled` an optional `cursor` and `next`, or
+  adding the `not-mergeable` error class within 0.3 takes no bump. An older
+  Connector ignores `cursor` and sends no `next`, so core reads its one page
+  as before. An older Connector that reports a real not-mergeable refusal as
   `permanent` now fails the merge at once instead of polling for checks, which
   fails fast and loses nothing. Core
   accepts its current `0.y` and the one before it, so today 0.3.z and 0.2.z.

@@ -16,6 +16,8 @@ package connectortracker
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -128,6 +130,7 @@ type (
 		Label  string `json:"label"`
 		State  string `json:"state"`
 		Limit  int    `json:"limit"`
+		Cursor string `json:"cursor,omitempty"`
 	}
 	searchIssuesParams struct {
 		Target Target `json:"target"`
@@ -637,32 +640,104 @@ type labeledLayer struct {
 
 func (l labeledLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
 
+// labeledMaxPages bounds one label's cursor walk so a guest minting fresh
+// cursors forever cannot hold the scan open; labeledMaxBytes bounds what the
+// walk may hold, as the host's output cap only bounds one page. Variables so a
+// test can lower them.
+var (
+	labeledMaxPages = 1000
+	labeledMaxBytes = 64 << 20
+)
+
+// labeledAnswer is a tracker.labeled reply. It decodes inside the call, so a
+// malformed one passes through the reloader's note like any other Connector
+// failure, and records the answer's size for the walk's byte budget.
+type labeledAnswer struct {
+	Issues []wireIssue `json:"issues"`
+	Next   string      `json:"next"`
+	size   int
+}
+
+func (a *labeledAnswer) UnmarshalJSON(b []byte) error {
+	type plain labeledAnswer
+	if err := json.Unmarshal(b, (*plain)(a)); err != nil {
+		return fmt.Errorf("%w: tracker.labeled: %w", ErrAnswer, err)
+	}
+	a.size = len(b)
+	return nil
+}
+
 // ListIssuesWithLabels merges one guest read per label, as the native adapter
-// does. The guest is asked for DedupScanLimit but is not trusted to honour it;
-// a bad number or state fails closed, as in issue().
+// does; walkLabeled reads one label.
 func (l labeledLayer) ListIssuesWithLabels(state forge.IssueState, labels []string) ([]forge.Issue, error) {
 	if state != forge.IssueOpen && state != forge.IssueClosed {
 		return nil, fmt.Errorf("connector tracker: unsupported issue state %q", state)
 	}
+	source := "connector tracker.labeled " + state.Wire()
 	return forge.MergeLabeledIssues("connector tracker", labels, func(label string) ([]forge.Issue, error) {
-		var res struct {
-			Issues []wireIssue `json:"issues"`
-		}
-		p := labeledParams{Target: l.r.target, Label: label, State: state.Wire(), Limit: forge.DedupScanLimit}
-		if err := l.r.call(context.Background(), CapLabeled, p, &res); err != nil {
+		return l.walkLabeled(state, source, label)
+	})
+}
+
+// walkLabeled walks one label by cursor: every call asks for DedupScanLimit and
+// core repeats it with the answer's next until next is empty, so a Connector
+// that never sets next (one that predates paging) gets one call. A page is
+// not trusted to honour the limit and is kept whole. A repeated cursor, or a
+// page whose issues were all read already, fails the label closed rather than
+// loop; a walk past the page or byte bound keeps what it read and warns, as an
+// error would drop the whole label. A bad number or state fails closed, as in
+// issue().
+func (l labeledLayer) walkLabeled(state forge.IssueState, source, label string) ([]forge.Issue, error) {
+	var issues []forge.Issue
+	sent := map[[sha256.Size]byte]bool{}
+	seen := map[string]bool{}
+	bytesRead := 0
+	cursor := ""
+	for page := 1; ; page++ {
+		sent[sha256.Sum256([]byte(cursor))] = true
+		p := labeledParams{Target: l.r.target, Label: label, State: state.Wire(), Limit: forge.DedupScanLimit, Cursor: cursor}
+		var ans labeledAnswer
+		if err := l.r.call(context.Background(), CapLabeled, p, &ans); err != nil {
 			return nil, err
 		}
-		res.Issues = res.Issues[:min(len(res.Issues), forge.DedupScanLimit)]
-		issues := make([]forge.Issue, len(res.Issues))
-		for i, w := range res.Issues {
-			var err error
-			if issues[i], err = w.issue(l.r.ids, singleRead); err != nil {
+		bytesRead += ans.size
+		// An empty page is not a replay: a github REST page can hold only pull
+		// requests, which that Connector skips, so it answers none with a next.
+		// The page and byte bounds still stop a guest that loops on them.
+		fresh := len(ans.Issues) == 0
+		for _, w := range ans.Issues {
+			iss, err := w.issue(l.r.ids, singleRead)
+			if err != nil {
 				return nil, err
 			}
+			fresh = fresh || !seen[iss.Number]
+			seen[iss.Number] = true
+			issues = append(issues, iss)
 		}
-		forge.WarnDedupScanMayTruncate("connector tracker.labeled "+state.Wire(), label, len(issues))
-		return issues, nil
-	})
+		if ans.Next == "" {
+			if page == 1 {
+				forge.WarnDedupScanMayTruncate(source, label, len(issues))
+			}
+			return issues, nil
+		}
+		if sent[sha256.Sum256([]byte(ans.Next))] {
+			return nil, fmt.Errorf("%w: tracker.labeled returned on page %d a cursor it had returned already; refusing to loop", ErrAnswer, page)
+		}
+		// New rows mid-walk legitimately shift an offset-paged tracker by a
+		// row or two; a page with nothing new is a guest replaying one.
+		if !fresh {
+			return nil, fmt.Errorf("%w: tracker.labeled returned page %d with only issues already read; refusing to loop", ErrAnswer, page)
+		}
+		if page == labeledMaxPages {
+			forge.WarnDedupScanStopped(source, label, "page", page, len(issues))
+			return issues, nil
+		}
+		if bytesRead >= labeledMaxBytes {
+			forge.WarnDedupScanStopped(source, label, "byte", page, len(issues))
+			return issues, nil
+		}
+		cursor = ans.Next
+	}
 }
 
 var (
