@@ -188,8 +188,9 @@ func TestDispatch_ClaimedBlocked_StopPreClosed_ReturnsErrSignalledStopAndWritesM
 	if readErr != nil {
 		t.Fatalf("reading blocked marker: %v", readErr)
 	}
-	if got := string(b); got != "#3 (native)" {
-		t.Errorf("blocked marker = %q, want %q", got, "#3 (native)")
+	const want = "it is blocked by #3 (native), not yet `agent-complete` or closed. Re-trigger once the blocker is resolved."
+	if got := string(b); got != want {
+		t.Errorf("blocked marker = %q, want %q", got, want)
 	}
 }
 
