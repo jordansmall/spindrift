@@ -302,7 +302,8 @@ func (tf *IssueTrackerFake) Issue(num string) (Issue, error) {
 // A claim also errors on ErrAlreadyClaimed without mutating labels when num
 // already carries InProgress (#3887), so a test on the Fake pins the same
 // contract the real adapters must honor. The check is not atomic against a
-// concurrent claim, as for the real adapters.
+// concurrent claim, as for the real adapters. After that check, a target
+// state with no label is refused, as connectortracker does (#6995).
 //
 // That policy runs here in core, as for every Connector-backed tracker: the
 // backend only answers the transition primitive, serves the issue read, and
@@ -333,7 +334,11 @@ func (tf *IssueTrackerFake) TransitionState(num string, from, to DispatchState) 
 	if dl.AlreadyClaimed(from, to, labels) {
 		return fmt.Errorf("fake: issue %s: %w (%q)", num, ErrAlreadyClaimed, dl.Label(to))
 	}
-	return tf.editLabels(num, []string{dl.Label(to)}, TransitionRemoveLabels(dl, vl, from, to), nil)
+	toLabel := dl.Label(to)
+	if toLabel == "" {
+		return fmt.Errorf("fake: no status mapping or fallback label configured for state %v", to)
+	}
+	return tf.editLabels(num, []string{toLabel}, TransitionRemoveLabels(dl, vl, from, to), nil)
 }
 
 // labelSets snapshots the dispatch and verdict labels under tf.mu.
