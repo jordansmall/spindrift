@@ -136,22 +136,17 @@ func TestNeedsGHToken(t *testing.T) {
 }
 
 func TestClosesRef(t *testing.T) {
-	cases := []struct {
-		name           string
-		forge, tracker Descriptor
-		want           bool
-	}{
-		{"github/github", GitHub, GitHub, true},
-		{"forgejo/forgejo", Forgejo, Forgejo, true},
-		{"github tracker, forgejo forge", Forgejo, GitHub, false},
-		{"forgejo tracker, github forge", GitHub, Forgejo, false},
-		{"jira tracker, github forge", GitHub, Jira, false},
-		{"local/local", Local, Local, false},
-		{"zero descriptors", Descriptor{}, Descriptor{}, false},
+	closing := map[[2]string]bool{
+		{"github", "github"}:   true,
+		{"forgejo", "forgejo"}: true,
 	}
-	for _, c := range cases {
-		if got := ClosesRef(c.forge, c.tracker); got != c.want {
-			t.Errorf("%s: ClosesRef(%q, %q) = %v, want %v", c.name, c.forge.Name, c.tracker.Name, got, c.want)
+	rows := append([]Descriptor{{}}, Registry...)
+	for _, forge := range rows {
+		for _, tracker := range rows {
+			want := closing[[2]string{forge.Name, tracker.Name}]
+			if got := ClosesRef(forge, tracker); got != want {
+				t.Errorf("ClosesRef(forge %q, tracker %q) = %v, want %v", forge.Name, tracker.Name, got, want)
+			}
 		}
 	}
 }

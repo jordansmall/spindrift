@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/connectorforge/connectorforgetest"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchrecord"
@@ -171,7 +170,7 @@ func readOnlySettle(t *testing.T, caps forge.Capabilities, cf forge.CodeForge, o
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	if cf == nil {
 		cf = fc
-		caps = forge.ResolveCapabilities(cf, fc, backend.Descriptor{}, githubTrackerRow)
+		caps = forge.ResolveCapabilities(cf, fc, githubRow, githubRow)
 	}
 	rec := &ProgressRecorder{}
 	cfg := baseConfig()

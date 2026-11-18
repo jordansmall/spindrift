@@ -233,7 +233,10 @@ func NeedsGHToken(forge, tracker Descriptor, readOnly bool) bool {
 // tracker's issue N: forge has pull requests and is the same backend as the
 // tracker, so the two share an issue namespace (github+github,
 // forgejo+forgejo). Any other pairing names a foreign tracker's number, or a
-// key the forge never parses. An unknown name's zero row is false.
+// key the forge never parses. An unknown name's zero row is false. Settle's
+// host append (closeOnlyOwnIssue), the prompt's PR_BODY_CLOSES gate, and
+// the closing-keyword defuse of the Box-authored PR body (#7079) all read it,
+// so a change here moves all three.
 func ClosesRef(forge, tracker Descriptor) bool {
 	return forge.OutboxRelayCapable && tracker.ValidAsTracker && forge.Name == tracker.Name
 }

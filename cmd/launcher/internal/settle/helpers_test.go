@@ -87,6 +87,7 @@ func row(t *testing.T, name string) backend.Descriptor {
 	return d
 }
 
-// githubTrackerRow is the real github row, so the github-shaped fixtures
-// (AsNoLandingRecorder) track every tracker-row fact settle reads.
-var githubTrackerRow, _ = backend.ByName("github")
+// githubRow is the real github row, passed as both the forge and tracker
+// descriptor, so the github-shaped fixtures (AsNoLandingRecorder) track every
+// row fact settle reads.
+var githubRow, _ = backend.ByName("github")
