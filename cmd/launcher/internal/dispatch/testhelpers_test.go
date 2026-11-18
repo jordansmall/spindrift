@@ -208,7 +208,7 @@ func (d fakeDriver) decodeClassified(logPath string) (driverkit.PassLog, error) 
 	return driverkit.New(s).Decode(tmp)
 }
 
-func (d fakeDriver) SessionFlags(mode, repoSlug, issue, home string) string {
+func (d fakeDriver) SessionFlags(mode, repoSlug, issue, home string) (string, error) {
 	return d.base().SessionFlags(mode, repoSlug, issue, home)
 }
 

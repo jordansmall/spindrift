@@ -60,8 +60,8 @@ func fakeStrategy() Strategy {
 		Name:        "fake",
 		NewDecoder:  tabDecoder,
 		ResultEvent: func(text string) ([]byte, error) { return []byte("result\t" + text + "\t0\n"), nil },
-		SessionFlags: func(mode, repoSlug, issue, home string) string {
-			return strings.Join([]string{mode, repoSlug, issue, home}, "|")
+		SessionFlags: func(mode, repoSlug, issue, home string) (string, error) {
+			return strings.Join([]string{mode, repoSlug, issue, home}, "|"), nil
 		},
 	}
 }
@@ -460,8 +460,21 @@ func TestStrategyDriverReadPasses(t *testing.T) {
 }
 
 func TestStrategyDriverSessionFlags(t *testing.T) {
-	got := New(fakeStrategy()).SessionFlags("initial", "o/r", "12", "/home/agent")
+	got, err := New(fakeStrategy()).SessionFlags("initial", "o/r", "12", "/home/agent")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if want := "initial|o/r|12|/home/agent"; got != want {
 		t.Errorf("SessionFlags = %q, want %q", got, want)
+	}
+}
+
+func TestInfallibleSessionFlags(t *testing.T) {
+	f := InfallibleSessionFlags(func(mode, repoSlug, issue, home string) string {
+		return mode + repoSlug + issue + home
+	})
+	got, err := f("m", "r", "i", "h")
+	if got != "mrih" || err != nil {
+		t.Fatalf("got (%q, %v), want (\"mrih\", nil)", got, err)
 	}
 }

@@ -114,18 +114,25 @@ func TestConnectorSessionFlags(t *testing.T) {
 		{"jordansmall/spindrift", "6795"},
 		{"", ""},
 	} {
-		want := claude.Strategy.SessionFlags("initial", c.slug, c.issue, home)
+		want, err := claude.Strategy.SessionFlags("initial", c.slug, c.issue, home)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !strings.HasPrefix(want, "--session-id ") {
 			t.Fatalf("native initial = %q", want)
 		}
-		if got := conn.SessionFlags("initial", c.slug, c.issue, home); got != want {
-			t.Errorf("initial %q#%q = %q; want %q", c.slug, c.issue, got, want)
+		if got, err := conn.SessionFlags("initial", c.slug, c.issue, home); err != nil || got != want {
+			t.Errorf("initial %q#%q = %q, %v; want %q", c.slug, c.issue, got, err, want)
 		}
 	}
 
 	// A Connector cannot see home, so it never renders --resume; the native
 	// Strategy does once the transcript exists. Deliberate divergence.
-	id := strings.TrimPrefix(claude.Strategy.SessionFlags("initial", "owner/repo", "7", home), "--session-id ")
+	initial, err := claude.Strategy.SessionFlags("initial", "owner/repo", "7", home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := strings.TrimPrefix(initial, "--session-id ")
 	proj := filepath.Join(home, ".claude", "projects", "x")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
 		t.Fatal(err)
@@ -133,13 +140,13 @@ func TestConnectorSessionFlags(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(proj, id+".jsonl"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := conn.SessionFlags("resume", "owner/repo", "7", home); got != "" {
-		t.Errorf("connector resume = %q; want empty", got)
+	if got, err := conn.SessionFlags("resume", "owner/repo", "7", home); err != nil || got != "" {
+		t.Errorf("connector resume = %q, %v; want empty", got, err)
 	}
 
 	for _, mode := range []string{"", "fix", "bogus"} {
-		if got := conn.SessionFlags(mode, "owner/repo", "7", home); got != "" {
-			t.Errorf("connector mode %q = %q; want empty", mode, got)
+		if got, err := conn.SessionFlags(mode, "owner/repo", "7", home); err != nil || got != "" {
+			t.Errorf("connector mode %q = %q, %v; want empty", mode, got, err)
 		}
 	}
 }

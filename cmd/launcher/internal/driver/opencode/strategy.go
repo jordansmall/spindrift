@@ -23,5 +23,5 @@ var Strategy = driverkit.Strategy{
 	Result:            driverkit.LastMessage,
 	ResolveExit:       ResolveExit,
 	ResultEvent:       ResultEvent,
-	SessionFlags:      SessionFlags,
+	SessionFlags:      driverkit.InfallibleSessionFlags(SessionFlags),
 }

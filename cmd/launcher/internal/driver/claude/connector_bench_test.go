@@ -462,8 +462,8 @@ func BenchmarkConnectorFixedCalls(b *testing.B) {
 	}{
 		{"NewDecoder", func(s driverkit.Strategy) error { s.NewDecoder(); return nil }},
 		{"SessionFlags", func(s driverkit.Strategy) error {
-			s.SessionFlags("initial", "jordansmall/spindrift", "6849", home)
-			return nil
+			_, err := s.SessionFlags("initial", "jordansmall/spindrift", "6849", home)
+			return err
 		}},
 		{"ResultEvent", func(s driverkit.Strategy) error {
 			_, err := s.ResultEvent("SPINDRIFT_OUTCOME issue=6849 landing=none status=reject")

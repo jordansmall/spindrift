@@ -120,8 +120,8 @@ func TestDriverResultEventAndSessionFlags(t *testing.T) {
 	if err != nil || string(b) != "result done\n" {
 		t.Errorf("ResultEvent = %q, %v", b, err)
 	}
-	if got := s.SessionFlags("implement", "o/r", "7", "/home/x"); got != "implement|o/r|7|/home/x" {
-		t.Errorf("SessionFlags = %q", got)
+	if got, err := s.SessionFlags("implement", "o/r", "7", "/home/x"); err != nil || got != "implement|o/r|7|/home/x" {
+		t.Errorf("SessionFlags = %q, %v", got, err)
 	}
 }
 
@@ -214,20 +214,34 @@ func TestDriverStrategyRefusesUnknownPatternReason(t *testing.T) {
 	}
 }
 
-func TestDriverSessionFlagsPanicsWhenCallFails(t *testing.T) {
+func TestDriverSessionFlagsErrorsWhenConnectorClosed(t *testing.T) {
 	c := loadWasm(t, answeringGuest([]string{"driver"}, `{"result":{"name":"x"}}`))
 	s, err := c.DriverStrategy()
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = c.Close(t.Context())
-	defer func() {
-		if err, _ := recover().(error); !errors.Is(err, connectorhost.ErrCall) {
-			t.Errorf("recovered %v, want an ErrCall panic", err)
-		}
-	}()
-	s.SessionFlags("implement", "o/r", "7", "/home/x")
-	t.Error("SessionFlags returned after a failed guest call")
+	flags, err := s.SessionFlags("implement", "o/r", "7", "/home/x")
+	if flags != "" || !errors.Is(err, connectorhost.ErrCall) {
+		t.Errorf("SessionFlags = %q, %v; want empty flags and an ErrCall error", flags, err)
+	}
+}
+
+func TestDriverSessionFlagsErrorsWhenConnectorPoisoned(t *testing.T) {
+	c := loadWasm(t, answeringGuest([]string{"driver"}, `{"result":{"name":"x"}}`))
+	s, err := c.DriverStrategy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := c.Call(ctx, "m", nil, nil); !errors.Is(err, connectorhost.ErrCall) {
+		t.Fatalf("poisoning call err = %v, want ErrCall", err)
+	}
+	flags, err := s.SessionFlags("implement", "o/r", "7", "/home/x")
+	if flags != "" || !errors.Is(err, connectorhost.ErrCall) || !errors.Is(err, connectorhost.ErrUnusable) {
+		t.Errorf("SessionFlags = %q, %v; want empty flags and ErrCall+ErrUnusable", flags, err)
+	}
 }
 
 func TestGuestEventsFailClosed(t *testing.T) {

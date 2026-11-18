@@ -568,7 +568,11 @@ func (r *boxRun) pass(handoff, driverName, prompt, sessionMode string) (int, err
 	defer os.Remove(promptFile)
 	// A resume renders here, not before the first run: only then does the
 	// session's transcript exist for it to resume.
-	sessionFile, err := writeTemp("box-session-", d.SessionFlags(sessionMode, r.d.Getenv("REPO_SLUG"), r.env.IssueNumber, r.d.Getenv("HOME")))
+	flags, err := d.SessionFlags(sessionMode, r.d.Getenv("REPO_SLUG"), r.env.IssueNumber, r.d.Getenv("HOME"))
+	if err != nil {
+		return 0, phaseErr("driver", err)
+	}
+	sessionFile, err := writeTemp("box-session-", flags)
 	if err != nil {
 		return 0, phaseErr("driver", err)
 	}

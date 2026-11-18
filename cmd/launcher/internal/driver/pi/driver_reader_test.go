@@ -206,12 +206,12 @@ func TestSessionFlags(t *testing.T) {
 	home := t.TempDir()
 	want := "--session-id " + driverkit.SessionUUID("owner/repo", "42")
 	for _, mode := range []string{"initial", "resume"} {
-		if got := newDriver().SessionFlags(mode, "owner/repo", "42", home); got != want {
+		if got := sessionFlags(t, newDriver(), mode, "owner/repo", "42", home); got != want {
 			t.Errorf("SessionFlags(%q) = %q, want %q", mode, got, want)
 		}
 	}
 	for _, mode := range []string{"", "bogus"} {
-		if got := newDriver().SessionFlags(mode, "owner/repo", "42", home); got != "" {
+		if got := sessionFlags(t, newDriver(), mode, "owner/repo", "42", home); got != "" {
 			t.Errorf("SessionFlags(%q) = %q, want empty", mode, got)
 		}
 	}
