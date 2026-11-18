@@ -108,6 +108,7 @@ var readCases = []struct {
 	{"DepsOf", testDepsOf},
 	{"DispatchOrder", testDispatchOrder},
 	{"LabelToPriority", testLabelToPriority},
+	{"IssueFields", testIssueFields},
 	{"Comments", testComments},
 	{"DemandCount", testDemandCount},
 }
@@ -399,6 +400,60 @@ func testLabelToPriority(t *testing.T, h Harness) {
 		}
 		requirePriority(t, tr, id(h, tc.num), want)
 	}
+}
+
+// testIssueFields checks that Title, Body and seeded Labels survive the read
+// contract. It reads both Issue and ListIssues because the native github
+// adapter converts the two through separate code paths.
+func testIssueFields(t *testing.T, h Harness) {
+	tr := h.Tracker()
+	num := id(h, "801")
+	seed := forge.Issue{
+		Number: num,
+		Title:  "fields title",
+		Body:   "fields body\nsecond line",
+		Labels: []string{"area-docs", "needs-review"},
+	}
+	h.SeedIssue(seed)
+	seedState(t, h, num, forge.Dispatchable)
+
+	// Labels is a subset check: the tracker adds its own dispatch-state label.
+	check := func(path string, got forge.Issue) {
+		t.Helper()
+		if got.Title != seed.Title {
+			t.Errorf("%s Title = %q, want %q", path, got.Title, seed.Title)
+		}
+		for _, l := range seed.Labels {
+			if !slices.Contains(got.Labels, l) {
+				t.Errorf("%s Labels = %v, missing %q", path, got.Labels, l)
+			}
+		}
+	}
+
+	one, err := tr.Issue(num)
+	if err != nil {
+		t.Fatalf("Issue(%s): %v", num, err)
+	}
+	check("Issue", one)
+	if one.Body != seed.Body {
+		t.Errorf("Issue Body = %q, want %q", one.Body, seed.Body)
+	}
+
+	listed, err := tr.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues(Dispatchable): %v", err)
+	}
+	for _, iss := range listed {
+		if iss.Number == num {
+			// Body is empty or exact: the github list read fetches no body, other trackers fill it.
+			check("ListIssues", iss)
+			if iss.Body != "" && iss.Body != seed.Body {
+				t.Errorf("ListIssues Body = %q, want empty or %q", iss.Body, seed.Body)
+			}
+			return
+		}
+	}
+	t.Fatalf("ListIssues(Dispatchable) = %v, missing %s", numbers(listed), num)
 }
 
 func requirePriority(t *testing.T, tr forge.IssueTracker, num string, want forge.Priority) {
