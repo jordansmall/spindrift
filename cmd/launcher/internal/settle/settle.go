@@ -241,3 +241,12 @@ func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 func (s *Settle) agentBranch(num string) string {
 	return forge.AgentBranchName(s.cfg.BranchPrefix, num)
 }
+
+// rebase rebases ref through cf, pinned to num's agent branch when cf resolves
+// PRHeadRebaser; such a forge's plain Rebase is refused (issue #6961).
+func (s *Settle) rebase(cf forge.CodeForge, num, ref string) error {
+	if r := forge.ResolveCodeForge(cf).PRHeadRebaser; r != nil {
+		return r.RebasePRHead(ref, s.agentBranch(num))
+	}
+	return cf.Rebase(ref)
+}

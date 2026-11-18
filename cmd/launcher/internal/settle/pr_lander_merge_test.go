@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
@@ -27,6 +28,18 @@ func mergeCases() []prCase {
 	conflicted := []string{ready, merge, draft}
 	rebased := []string{ready, merge, draft, ready, merge}
 	errTransient := forge.ErrTransientPushFailure
+	errHeadRefused := fmt.Errorf("%w: PR head %q is not the agent branch", connectorforge.ErrAnswer, "release")
+	agentBranch := forge.AgentBranchName(testBranchPrefix, "1")
+	pinOK, pinRefuse := &pinningForge{}, &pinningForge{refuse: errHeadRefused}
+	pinOKConflict, pinRefuseConflict := &pinningForge{}, &pinningForge{refuse: errHeadRefused}
+	wantHeads := func(p *pinningForge, want string) checkFn {
+		return func(t *testing.T, _ *forge.Fake, _ *dispatch.Fake) {
+			t.Helper()
+			if len(p.heads) != 1 || p.heads[0] != want {
+				t.Errorf("RebasePRHead heads = %v, want exactly [%s]", p.heads, want)
+			}
+		}
+	}
 	errRepoGone := errors.New("git push --force-with-lease: exit status 128: remote: Repository not found.")
 	errDenied := errors.New("gh pr ready --undo: permission denied")
 	errReadyDenied := errors.New("HTTP 403: Resource not accessible by integration")
@@ -386,6 +399,40 @@ func mergeCases() []prCase {
 			maxRebase:    3, setup: with(stale, withRebaseErrs(errRepoGone, nil)),
 			want: blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: []string{ready}, wantRebases: 1,
 			wantSteps: []Step{stepAt(testPR, StatusStaleBaseRebaseFailed, "!! "+errRepoGone.Error())}, check: noDraft,
+		},
+		{
+			name:         "a stale-base rebase is pinned to the agent branch",
+			wantStatuses: []Status{detailOnly, StatusStaleBaseRebase, StatusPostForcePushWait, StatusVerifiedMerged},
+			checks:       fourGreen,
+			maxRebase:    3, setup: stale, pinned: pinOK,
+			want: merged, wantLabels: complete, wantMerged: testPR, wantCalls: []string{ready, ready, merge}, wantRebases: 1,
+			check: wantHeads(pinOK, agentBranch),
+		},
+		{
+			name:         "a stale-base rebase refused for its head fails hard",
+			wantStatuses: []Status{detailOnly, StatusStaleBaseRebase, StatusStaleBaseRebaseFailed, StatusMergeBlocked},
+			maxRebase:    3, setup: stale, pinned: pinRefuse,
+			want: blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: []string{ready},
+			wantSteps:    []Step{stepAt(testPR, StatusStaleBaseRebaseFailed, "!! "+errHeadRefused.Error())},
+			wantComments: []string{"merge blocked after green CI: " + errHeadRefused.Error()},
+			check:        wantHeads(pinRefuse, agentBranch),
+		},
+		{
+			name:         "a conflict rebase is pinned to the agent branch",
+			wantStatuses: []Status{detailOnly, StatusRebaseRetry, StatusPostForcePushWait, StatusVerifiedMerged},
+			checks:       fourGreen,
+			maxRebase:    1, mergeErrs: []error{errConflict}, pinned: pinOKConflict,
+			want: merged, wantLabels: complete, wantNoLabels: failed, wantMerged: testPR, wantCalls: rebased, wantRebases: 1,
+			check: wantHeads(pinOKConflict, agentBranch),
+		},
+		{
+			name:         "a conflict rebase refused for its head leaves the merge blocked",
+			wantStatuses: []Status{detailOnly, StatusRebaseRetry, StatusRebaseFailed, StatusMergeBlocked},
+			maxRebase:    3, mergeErrs: []error{errConflict}, pinned: pinRefuseConflict,
+			want: blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: conflicted,
+			wantSteps:    []Step{stepAt(testPR, StatusRebaseFailed, "!! "+errHeadRefused.Error())},
+			wantComments: []string{"merge blocked after green CI: " + errHeadRefused.Error()},
+			check:        wantHeads(pinRefuseConflict, agentBranch),
 		},
 		{
 			name:         "a transient push failure on the stale-base rebase retries without demoting",
