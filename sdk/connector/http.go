@@ -34,12 +34,12 @@ type Response struct {
 	Body   []byte
 }
 
-// respBuf is the one buffer the host writes responses into. A fresh
-// MaxHTTPResponse buffer per call is never reclaimed by the guest's heap and
-// exhausts the host's memory cap after about 120 requests. Reuse is safe
-// because a guest runs one call at a time and the host call does not yield;
-// Body is copied out so a caller holding an earlier Response is never
-// overwritten.
+// respBuf is the one buffer the host writes responses into. The SDK collects
+// garbage only between connector_calls, so a fresh MaxHTTPResponse buffer per
+// request would pile up within one call (up to 128 requests) and exhaust the
+// host's memory cap. Reuse is safe because a guest runs one call at a time and
+// the host call does not yield; Body is copied out so a caller holding an
+// earlier Response is never overwritten.
 var respBuf []byte
 
 // hostCall is the http_request Host call, swapped by tests. It writes the
@@ -73,6 +73,7 @@ func HTTPRequest(req Request) (Response, error) {
 	if status == 0 {
 		return Response{}, errors.New(string(buf[:n]))
 	}
+	addReclaimBytes(n)
 	return Response{Status: status, Body: bytes.Clone(buf[:n])}, nil
 }
 
