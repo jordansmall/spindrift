@@ -113,6 +113,7 @@ let
     "filer-dedup.md" = [
       "github"
       "forgejo"
+      "jira"
       "local"
     ];
     "filer-direct-file.md" = [

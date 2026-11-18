@@ -63,7 +63,8 @@ func TestAssembleTrackerArmSelectsBackendFolder(t *testing.T) {
 	readOnly := func(e *Env) { e.BoxWriteEnabled = false }
 	forgejoForge := func(e *Env) { e.CodeForge = "forgejo" }
 	localRef := func(e *Env) { e.LocalIssueReference = true }
-	logCarrier := func(e *Env) { e.SignalCarrier = "log" }
+	logCarrier := func(e *Env) { e.SignalCarrier, e.SignalIssueRead = "log", false }
+	noSignal := func(e *Env) { e.SignalIssueRead = false }
 	with := func(fs ...func(*Env)) func(*Env) {
 		return func(e *Env) {
 			for _, f := range fs {
@@ -88,6 +89,7 @@ func TestAssembleTrackerArmSelectsBackendFolder(t *testing.T) {
 		{"jira read-write", jira, "read:SHARED-READ|rw:|relay:|unwritable:UNWRITABLE|pr:|"},
 		{"jira read-only falls back to the shared relay", with(jira, readOnly), "read:SHARED-READ|rw:|relay:SHARED-RELAY|unwritable:|pr:|"},
 		{"jira ignores LocalIssueReference", with(jira, localRef), "read:SHARED-READ|rw:|relay:|unwritable:UNWRITABLE|pr:|"},
+		{"github on the socket without the host read signal cannot read linked issues", noSignal, "read:UNREADABLE|rw:GH-BLOCKED|relay:|unwritable:|pr:CLOSES|"},
 		{"github without a socket cannot read linked issues", logCarrier, "read:UNREADABLE|rw:GH-BLOCKED|relay:|unwritable:|pr:CLOSES|"},
 		{"jira without a socket cannot read linked issues", with(jira, logCarrier), "read:UNREADABLE|rw:|relay:|unwritable:UNWRITABLE|pr:|"},
 		{"local reads its own folder without a socket", with(local, logCarrier), "read:LOCAL-READ|rw:|relay:LOCAL-RELAY|unwritable:|pr:LOCAL-NOREF|"},
@@ -95,6 +97,7 @@ func TestAssembleTrackerArmSelectsBackendFolder(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			reg, env := trackerArmRegistry(t)
 			env.SignalCarrier = "socket"
+			env.SignalIssueRead = true
 			tc.mutate(&env)
 
 			result, err := Assemble(env, reg)

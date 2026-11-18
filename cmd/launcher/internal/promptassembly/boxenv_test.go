@@ -17,6 +17,8 @@ type boxEnvRow struct {
 var boxEnvRows = []boxEnvRow{
 	{"AgentsJSONTemplate", "AGENTS_JSON_TEMPLATE", "string"},
 	{"FilerEnabled", "BOX_FILER_ENABLED", "presence"},
+	{"SignalIssueRead", "BOX_SIGNAL_ISSUE_READ", "presence"},
+	{"SignalIssueSearch", "BOX_SIGNAL_ISSUE_SEARCH", "presence"},
 	{"WorkerProvisioned", "BOX_WORKER_PROVISIONED", "presence"},
 	{"ScoutProvisioned", "BOX_SCOUT_PROVISIONED", "presence"},
 	{"IssueTracker", "ISSUE_TRACKER", "string"},

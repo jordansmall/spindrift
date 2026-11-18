@@ -55,12 +55,11 @@ func trackerGates(e Env) map[string]bool {
 	// The backend-agnostic form of "the Box can read the tracker": gates a
 	// slot whose shared fragment serves every reachable tracker.
 	g["ISSUE_TRACKER_REACHABLE"] = !row.InBoxUnreachableTracker
-	// The Signal socket's issue read (issue #6894) answers for every tracker
-	// the host can read, i.e. every reachable one. Local has no host reader and
-	// keeps its folder fragment, its linked issues being injected host-side
-	// (ADR 0050). Under the log carrier there is no socket, so a non-local
-	// tracker has no way to read a linked issue.
-	verb := e.SignalCarrier == "socket" && !row.InBoxUnreachableTracker
+	// Whether the Signal socket's issue read answers is the host's call: it
+	// forwards BOX_SIGNAL_ISSUE_READ when it built a reader for this dispatch
+	// (issues #6894, #6924). Local has no host reader and keeps its folder
+	// fragment, its linked issues being injected host-side (ADR 0050).
+	verb := e.SignalIssueRead
 	g["ISSUE_TRACKER_LINKS_REACHABLE"] = verb
 	g["ISSUE_TRACKER_LINKS_READABLE"] = row.InBoxUnreachableTracker || verb
 	g["ISSUE_TRACKER_LINKS_UNREADABLE"] = !g["ISSUE_TRACKER_LINKS_READABLE"]
@@ -73,11 +72,10 @@ func trackerGates(e Env) map[string]bool {
 	g["ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE"] = githubIssueRead && !verb
 	g["ISSUE_TRACKER_FORGEJO_LINKS_READABLE"] = itRead == "FORGEJO" && verb
 	g["ISSUE_TRACKER_FORGEJO_LINKS_UNREADABLE"] = itRead == "FORGEJO" && !verb
-	// The Signal socket's issue-search (issue #6895) answers for github and
-	// forgejo; jira has no searcher and local keeps its own folder search. The
-	// Filer's dedup step forks on whether a search reaches the Box, so jira and
-	// every tracker under the log carrier take the no-search arm.
-	searchVerb := verb && !unwritable
+	// Likewise the issue-search verb follows BOX_SIGNAL_ISSUE_SEARCH, set when
+	// the host has a searcher (issues #6895, #6924); local keeps its own folder
+	// search. The Filer's dedup step forks on whether a search reaches the Box.
+	searchVerb := e.SignalIssueSearch
 	g["ISSUE_TRACKER_SEARCHABLE"] = searchVerb || itRead == "LOCAL"
 	g["ISSUE_TRACKER_UNSEARCHABLE"] = !g["ISSUE_TRACKER_SEARCHABLE"]
 	// The deprecated per-backend dedup rows, as for the issue read above.

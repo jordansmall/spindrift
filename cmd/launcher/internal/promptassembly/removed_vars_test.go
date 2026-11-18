@@ -252,6 +252,7 @@ func TestAssembleValidateDeprecatedAndRemovedVarStillErrors(t *testing.T) {
 func issueReadEnv(env Env, tracker, axis string) Env {
 	env.IssueTracker = tracker
 	env.SignalCarrier = "socket"
+	env.SignalIssueRead = true
 	env.TrackerAxisRead, env.TrackerAxisWrite, env.TrackerAxisFiler = axis, axis, axis
 	return env
 }
@@ -383,6 +384,7 @@ func TestAssembleDeprecatedIssueReadVarOnLogCarrierRendersUnreadable(t *testing.
 				reg, env := syntheticRegistry(t, rows, files)
 				env = issueReadEnv(env, "jira", "GITHUB")
 				env.SignalCarrier = "log"
+				env.SignalIssueRead = false
 				env.DispatchKind = s.kind
 				if s.agent != "" {
 					env.AgentsJSONTemplate = `{"` + s.agent + `":{"model":"x"}}`

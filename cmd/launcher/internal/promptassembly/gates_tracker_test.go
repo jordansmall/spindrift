@@ -788,75 +788,87 @@ func TestGatesIssueTrackerReachable(t *testing.T) {
 }
 
 // TestGatesIssueTrackerLinksReadable pins the gates that select the
-// issue-read wording: the Signal socket's issue read covers every reachable
-// tracker (github, forgejo, jira) and exists only under the socket carrier;
-// local keeps its own folder fragment in both carriers (issue #6894).
+// issue-read wording: they follow the host's BOX_SIGNAL_ISSUE_READ signal
+// alone, not the carrier or the backend row; local keeps its own folder
+// fragment with or without it (issues #6894, #6924).
 func TestGatesIssueTrackerLinksReadable(t *testing.T) {
 	for _, tc := range []struct {
-		tracker, read, carrier string
-		verb                   bool // the socket verb covers this tracker and carrier
-		readable               bool
+		name          string
+		tracker, read string
+		carrier       string
+		signal        bool // SignalIssueRead
+		readable      bool
 	}{
-		{"", "GITHUB", "socket", true, true},
-		{"github", "GITHUB", "socket", true, true},
-		{"forgejo", "FORGEJO", "socket", true, true},
-		{"jira", "JIRA", "socket", true, true},
-		{"local", "LOCAL", "socket", false, true},
-		{"github", "GITHUB", "log", false, false},
-		{"forgejo", "FORGEJO", "log", false, false},
-		{"jira", "JIRA", "log", false, false},
-		{"local", "LOCAL", "log", false, true},
-		{"github", "GITHUB", "", false, false},
+		{"unset tracker, signal", "", "GITHUB", "socket", true, true},
+		{"github socket, signal", "github", "GITHUB", "socket", true, true},
+		{"forgejo socket, signal", "forgejo", "FORGEJO", "socket", true, true},
+		{"jira socket, signal", "jira", "JIRA", "socket", true, true},
+		{"github socket, no signal", "github", "GITHUB", "socket", false, false},
+		{"jira socket, no signal", "jira", "JIRA", "socket", false, false},
+		{"local socket, no signal", "local", "LOCAL", "socket", false, true},
+		{"github log, no signal", "github", "GITHUB", "log", false, false},
+		{"forgejo log, no signal", "forgejo", "FORGEJO", "log", false, false},
+		{"local log, no signal", "local", "LOCAL", "log", false, true},
+		{"github empty carrier, no signal", "github", "GITHUB", "", false, false},
+		{"github log, signal", "github", "GITHUB", "log", true, true},
 	} {
-		g := Gates(Env{IssueTracker: tc.tracker, TrackerAxisRead: tc.read, SignalCarrier: tc.carrier})
-		for gate, want := range map[string]bool{
-			"ISSUE_TRACKER_LINKS_READABLE":           tc.readable,
-			"ISSUE_TRACKER_LINKS_UNREADABLE":         !tc.readable,
-			"ISSUE_TRACKER_LINKS_REACHABLE":          tc.verb,
-			"ISSUE_TRACKER_GITHUB_LINKS_READABLE":    (tc.read == "GITHUB" || tc.read == "JIRA") && tc.verb,
-			"ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE":  (tc.read == "GITHUB" || tc.read == "JIRA") && !tc.verb,
-			"ISSUE_TRACKER_FORGEJO_LINKS_READABLE":   tc.read == "FORGEJO" && tc.verb,
-			"ISSUE_TRACKER_FORGEJO_LINKS_UNREADABLE": tc.read == "FORGEJO" && !tc.verb,
-		} {
-			if got := g[gate]; got != want {
-				t.Errorf("Gates(IssueTracker=%q, SignalCarrier=%q)[%s] = %v, want %v", tc.tracker, tc.carrier, gate, got, want)
+		t.Run(tc.name, func(t *testing.T) {
+			g := Gates(Env{IssueTracker: tc.tracker, TrackerAxisRead: tc.read, SignalCarrier: tc.carrier, SignalIssueRead: tc.signal})
+			for gate, want := range map[string]bool{
+				"ISSUE_TRACKER_LINKS_READABLE":           tc.readable,
+				"ISSUE_TRACKER_LINKS_UNREADABLE":         !tc.readable,
+				"ISSUE_TRACKER_LINKS_REACHABLE":          tc.signal,
+				"ISSUE_TRACKER_GITHUB_LINKS_READABLE":    (tc.read == "GITHUB" || tc.read == "JIRA") && tc.signal,
+				"ISSUE_TRACKER_GITHUB_LINKS_UNREADABLE":  (tc.read == "GITHUB" || tc.read == "JIRA") && !tc.signal,
+				"ISSUE_TRACKER_FORGEJO_LINKS_READABLE":   tc.read == "FORGEJO" && tc.signal,
+				"ISSUE_TRACKER_FORGEJO_LINKS_UNREADABLE": tc.read == "FORGEJO" && !tc.signal,
+			} {
+				if got := g[gate]; got != want {
+					t.Errorf("[%s] = %v, want %v", gate, got, want)
+				}
 			}
-		}
+		})
 	}
 }
 
 // TestGatesIssueTrackerSearchable pins the gates that select the Filer's
-// dedup step (issue #6895): a search reaches the Box through the Signal
-// socket's issue-search verb on github and forgejo, or through local's own
-// folder search. Jira (no searcher) and any tracker under the log carrier
-// (no socket) take the no-search arm.
+// dedup step: a search reaches the Box through the host's
+// BOX_SIGNAL_ISSUE_SEARCH signal (any tracker whose host searcher exists,
+// jira included) or through local's own folder search; every other
+// combination takes the no-search arm (issues #6895, #6924).
 func TestGatesIssueTrackerSearchable(t *testing.T) {
 	for _, tc := range []struct {
-		tracker, read, carrier string
-		searchable             bool
+		name          string
+		tracker, read string
+		carrier       string
+		signal        bool // SignalIssueSearch
+		searchable    bool
 	}{
-		{"github", "GITHUB", "socket", true},
-		{"forgejo", "FORGEJO", "socket", true},
-		{"jira", "GITHUB", "socket", false},
-		{"local", "LOCAL", "socket", true},
-		{"github", "GITHUB", "log", false},
-		{"forgejo", "FORGEJO", "log", false},
-		{"jira", "GITHUB", "log", false},
-		{"local", "LOCAL", "log", true},
+		{"github socket, signal", "github", "GITHUB", "socket", true, true},
+		{"forgejo socket, signal", "forgejo", "FORGEJO", "socket", true, true},
+		{"jira socket, signal", "jira", "JIRA", "socket", true, true},
+		{"github socket, no signal", "github", "GITHUB", "socket", false, false},
+		{"jira socket, no signal", "jira", "JIRA", "socket", false, false},
+		{"local socket, no signal", "local", "LOCAL", "socket", false, true},
+		{"github log, no signal", "github", "GITHUB", "log", false, false},
+		{"forgejo log, no signal", "forgejo", "FORGEJO", "log", false, false},
+		{"local log, no signal", "local", "LOCAL", "log", false, true},
 	} {
-		g := Gates(Env{IssueTracker: tc.tracker, TrackerAxisRead: tc.read, SignalCarrier: tc.carrier})
-		for gate, want := range map[string]bool{
-			"ISSUE_TRACKER_SEARCHABLE":           tc.searchable,
-			"ISSUE_TRACKER_UNSEARCHABLE":         !tc.searchable,
-			"ISSUE_TRACKER_GITHUB_SEARCHABLE":    tc.read == "GITHUB" && tc.searchable,
-			"ISSUE_TRACKER_GITHUB_UNSEARCHABLE":  tc.read == "GITHUB" && !tc.searchable,
-			"ISSUE_TRACKER_FORGEJO_SEARCHABLE":   tc.read == "FORGEJO" && tc.searchable,
-			"ISSUE_TRACKER_FORGEJO_UNSEARCHABLE": tc.read == "FORGEJO" && !tc.searchable,
-		} {
-			if got := g[gate]; got != want {
-				t.Errorf("Gates(IssueTracker=%q, SignalCarrier=%q)[%s] = %v, want %v", tc.tracker, tc.carrier, gate, got, want)
+		t.Run(tc.name, func(t *testing.T) {
+			g := Gates(Env{IssueTracker: tc.tracker, TrackerAxisRead: tc.read, SignalCarrier: tc.carrier, SignalIssueSearch: tc.signal})
+			for gate, want := range map[string]bool{
+				"ISSUE_TRACKER_SEARCHABLE":           tc.searchable,
+				"ISSUE_TRACKER_UNSEARCHABLE":         !tc.searchable,
+				"ISSUE_TRACKER_GITHUB_SEARCHABLE":    tc.read == "GITHUB" && tc.signal,
+				"ISSUE_TRACKER_GITHUB_UNSEARCHABLE":  tc.read == "GITHUB" && !tc.signal,
+				"ISSUE_TRACKER_FORGEJO_SEARCHABLE":   tc.read == "FORGEJO" && tc.signal,
+				"ISSUE_TRACKER_FORGEJO_UNSEARCHABLE": tc.read == "FORGEJO" && !tc.signal,
+			} {
+				if got := g[gate]; got != want {
+					t.Errorf("[%s] = %v, want %v", gate, got, want)
+				}
 			}
-		}
+		})
 	}
 }
 
