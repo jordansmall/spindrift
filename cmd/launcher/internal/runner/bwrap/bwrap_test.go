@@ -2940,6 +2940,37 @@ func TestBwrapListRunning_ReturnsLiveBoxNames(t *testing.T) {
 	}
 }
 
+// The orphan sweep (issue #7069) parses Connector sandbox names back from
+// cgroup dir names, so the current name format must survive ListRunning intact.
+// The name is spelled out because the runner family builds without the
+// connectorsandbox package that owns the format.
+func TestBwrapListRunning_ReturnsConnectorSandboxName(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/x", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	name := runner.ConnectorSandboxPrefix + "0123456789ab-4242-1700000000000000000"
+	dir := filepath.Join(cgroupFSRoot, "/x", "spindrift-"+name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("12345\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := (&bwrapAdapter{}).ListRunning()
+	if err != nil {
+		t.Fatalf("ListRunning: unexpected error: %v", err)
+	}
+	if want := []string{name}; !reflect.DeepEqual(got, want) {
+		t.Errorf("ListRunning: got %v, want %v", got, want)
+	}
+}
+
 // ListRunning considers only entries with the "spindrift-" prefix, ignoring
 // unrelated directories sharing the delegated cgroup subtree.
 func TestBwrapListRunning_IgnoresNonSpindriftDirs(t *testing.T) {

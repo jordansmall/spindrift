@@ -1,42 +1,81 @@
 package sandbox
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// sandboxName is a sandbox's runtime name. It embeds the owning Launcher's pid
-// so a later sweep can tell a live run's sandbox from an orphan; ownerPID reads
-// it back.
-func sandboxName(pid int, t time.Time) string {
-	return fmt.Sprintf("%s%d-%d", runner.ConnectorSandboxPrefix, pid, t.UnixNano())
+// unowned is the owner token of a sandbox whose Launcher could not read its
+// identity. It is never hex, so no sweep matches it.
+const unowned = "unowned"
+
+const ownerLen = 12
+
+// ownerID is a short digest of this process's namespaceIdentity. It is a
+// variable so tests can replace it.
+var ownerID = sync.OnceValues(func() (string, error) {
+	id, err := namespaceIdentity()
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(id))
+	return hex.EncodeToString(sum[:])[:ownerLen], nil
+})
+
+// Name is a new sandbox's runtime name for the Launcher process pid.
+func Name(pid int, t time.Time) string {
+	owner, err := ownerID()
+	if err != nil {
+		owner = unowned
+	}
+	return sandboxName(owner, pid, t)
 }
 
-// ownerPID is the pid name embeds, or false for a name that is not a sandbox's.
-func ownerPID(name string) (int, bool) {
+// sandboxName is a sandbox's runtime name. It embeds the owning Launcher's pid
+// namespace identity and pid so a later sweep can tell a live run's sandbox
+// from an orphan; parseName reads them back.
+func sandboxName(owner string, pid int, t time.Time) string {
+	return fmt.Sprintf("%s%s-%d-%d", runner.ConnectorSandboxPrefix, owner, pid, t.UnixNano())
+}
+
+// parseName is the owner and pid name embeds, or false for a name that is not
+// a sandbox's. An empty owner means the name carries no namespace identity, so
+// it must never be reaped.
+func parseName(name string) (owner string, pid int, ok bool) {
 	rest, ok := strings.CutPrefix(name, runner.ConnectorSandboxPrefix)
 	if !ok {
-		return 0, false
+		return "", 0, false
 	}
-	pidStr, nano, ok := strings.Cut(rest, "-")
-	if !ok {
-		return 0, false
+	parts := strings.Split(rest, "-")
+	switch len(parts) {
+	case 2:
+	case 3:
+		if parts[0] == "" {
+			return "", 0, false
+		}
+		owner = parts[0]
+		parts = parts[1:]
+	default:
+		return "", 0, false
 	}
-	if _, err := strconv.ParseInt(nano, 10, 64); err != nil {
-		return 0, false
+	if _, err := strconv.ParseInt(parts[1], 10, 64); err != nil {
+		return "", 0, false
 	}
-	pid, err := strconv.Atoi(pidStr)
+	pid, err := strconv.Atoi(parts[0])
 	if err != nil || pid <= 0 {
-		return 0, false
+		return "", 0, false
 	}
-	return pid, true
+	return owner, pid, true
 }
 
 // Reaper is the part of a runner.Runner ReapOrphans needs.
@@ -47,20 +86,32 @@ type Reaper interface {
 
 // ReapOrphans kills the Connector sandboxes whose owning Launcher is gone,
 // which only a hard kill of the Launcher or the runtime CLI leaves behind.
-// Other Launcher runs may be live at once, so a sandbox whose owner still runs
-// is left alone. Liveness is judged in this process's pid namespace, so a
-// sandbox owned by a Launcher in another pid namespace sharing the same runtime
-// looks orphaned. A reused pid can only leave an orphan unreaped. It is
-// best-effort: failures are noted on w, never returned.
+// Other Launcher runs may be live at once, and a shared runtime daemon lists
+// sandboxes from every pid namespace, so only a sandbox whose owner identity
+// matches this process's (Linux: boot id and pid namespace; macOS: boot
+// session UUID; elsewhere there is none, so nothing is reaped) and whose pid
+// is dead is reaped. A foreign-owner sandbox is skipped, one with no owner
+// identity (legacy or unowned) is skipped with a note, and an unreadable
+// identity reaps nothing. A reused pid can only leave an orphan unreaped. It
+// is best-effort: failures are noted on w, never returned.
 func ReapOrphans(r Reaper, w io.Writer) {
+	me, err := ownerID()
+	if err != nil {
+		fmt.Fprintf(w, "warning: reading this Launcher's owner identity, reaping no Connector sandboxes: %v\n", err)
+		return
+	}
 	names, err := r.ListRunning()
 	if err != nil {
 		fmt.Fprintf(w, "warning: listing Connector sandboxes to reap: %v\n", err)
 		return
 	}
 	for _, n := range names {
-		pid, ok := ownerPID(n)
-		if !ok || pidAlive(pid) {
+		owner, pid, ok := parseName(n)
+		if ok && (owner == "" || owner == unowned) {
+			fmt.Fprintf(w, "note: skipped Connector sandbox with no owner identity (remove it by hand if orphaned): %s\n", n)
+			continue
+		}
+		if !ok || owner != me || pidAlive(pid) {
 			continue
 		}
 		if err := r.Kill(n); err != nil {
@@ -72,7 +123,7 @@ func ReapOrphans(r Reaper, w io.Writer) {
 }
 
 // pidAlive treats any error but ESRCH as alive; EPERM means the process
-// exists but is not ours.
-func pidAlive(pid int) bool {
+// exists but is not ours. It is a variable so tests can replace it.
+var pidAlive = func(pid int) bool {
 	return !errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
 }

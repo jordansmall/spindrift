@@ -72,7 +72,7 @@ func (s *Sandbox) ensure() (*connectorhost.Sessions, error) {
 	}
 	s.started = true
 	began := time.Now()
-	s.name = sandboxName(os.Getpid(), time.Now())
+	s.name = Name(os.Getpid(), time.Now())
 	sb, err := s.r.StartConnectorSandbox(s.name)
 	if err != nil {
 		s.err = s.startError(err, "")
