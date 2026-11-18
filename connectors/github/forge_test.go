@@ -375,3 +375,27 @@ func TestRollupQueryAsksForCheckRunStatus(t *testing.T) {
 		t.Fatal("rollup query does not select the CheckRun status")
 	}
 }
+
+func TestRawPRCrossRepo(t *testing.T) {
+	for name, tc := range map[string]struct {
+		body string
+		want bool
+	}{
+		"same repo":      {`{"head":{"repo":{"full_name":"o/r"}},"base":{"repo":{"full_name":"o/r"}}}`, false},
+		"case differs":   {`{"head":{"repo":{"full_name":"O/R"}},"base":{"repo":{"full_name":"o/r"}}}`, false},
+		"fork":           {`{"head":{"repo":{"full_name":"fork/r"}},"base":{"repo":{"full_name":"o/r"}}}`, true},
+		"deleted fork":   {`{"head":{"repo":null},"base":{"repo":{"full_name":"o/r"}}}`, true},
+		"base unknown":   {`{"head":{"repo":null},"base":{"repo":null}}`, false},
+		"no repo fields": {`{"head":{"ref":"b"},"base":{"ref":"main"}}`, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var r rawPR
+			if err := json.Unmarshal([]byte(tc.body), &r); err != nil {
+				t.Fatal(err)
+			}
+			if got := r.pr().CrossRepo; got != tc.want {
+				t.Fatalf("CrossRepo = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

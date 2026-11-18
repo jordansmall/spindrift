@@ -74,6 +74,7 @@ type (
 		HeadSHA     string `json:"headSha,omitempty"`
 		Mergeable   string `json:"mergeable,omitempty"`
 		MergeCommit string `json:"mergeCommit,omitempty"`
+		CrossRepo   bool   `json:"crossRepo,omitempty"`
 	}
 	wireCheck struct {
 		Kind       string `json:"kind"`

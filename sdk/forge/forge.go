@@ -48,6 +48,9 @@ type PR struct {
 	HeadSHA     string `json:"headSha,omitempty"`
 	Mergeable   string `json:"mergeable,omitempty"`
 	MergeCommit string `json:"mergeCommit,omitempty"`
+	// CrossRepo is true when the head lives in a different repository than
+	// the base; absent means same-repo.
+	CrossRepo bool `json:"crossRepo,omitempty"`
 }
 
 // Check is one context of a head commit's status-check rollup, in GitHub

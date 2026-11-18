@@ -23,16 +23,31 @@ type rawPR struct {
 	// NodeID is the GraphQL id the draft-flip mutations take.
 	NodeID string `json:"node_id"`
 	Head   struct {
-		Ref string `json:"ref"`
-		SHA string `json:"sha"`
+		Ref  string     `json:"ref"`
+		SHA  string     `json:"sha"`
+		Repo *rawPRRepo `json:"repo"`
 	} `json:"head"`
 	// Base.Ref is the branch the PR targets.
 	Base struct {
-		Ref string `json:"ref"`
+		Ref  string     `json:"ref"`
+		Repo *rawPRRepo `json:"repo"`
 	} `json:"base"`
 	// Mergeable is null while GitHub is still computing it.
 	Mergeable      *bool  `json:"mergeable"`
 	MergeCommitSHA string `json:"merge_commit_sha"`
+}
+
+type rawPRRepo struct {
+	FullName string `json:"full_name"`
+}
+
+// crossRepo reports a head in another repository. A null head.repo is a
+// deleted fork; with no base.repo to compare, nothing is flagged.
+func (r rawPR) crossRepo() bool {
+	if r.Base.Repo == nil {
+		return false
+	}
+	return r.Head.Repo == nil || !strings.EqualFold(r.Head.Repo.FullName, r.Base.Repo.FullName)
 }
 
 func (r rawPR) pr() forge.PR {
@@ -44,6 +59,7 @@ func (r rawPR) pr() forge.PR {
 		Draft:     r.Draft,
 		Head:      r.Head.Ref,
 		HeadSHA:   r.Head.SHA,
+		CrossRepo: r.crossRepo(),
 		Mergeable: "UNKNOWN",
 	}
 	if r.Mergeable != nil {
