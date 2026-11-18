@@ -178,21 +178,31 @@ func (s *Settle) parkDraftPRFailure(num, branch string, err error) {
 }
 
 // closingKeywordPattern matches GitHub's closing keywords (close, fix, resolve
-// and their inflections) and the "#<digits>" reference they close. Callers
-// compare the captured digits against their own num rather than interpolating
-// it into the pattern, so "#19195" never matches a reference to "1919".
-var closingKeywordPattern = regexp.MustCompile(`(?i)\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved):?\s+#(\d+)\b`)
+// and their inflections) and the reference they close: a bare "#<digits>", an
+// "owner/repo#<digits>", or a URL ending in /issues/N, /pull/N or /pulls/N (on
+// any forge, whatever subpath it is served under). The URL ends at its first
+// /issues/N and never spans , ; ? or #, so joined URLs cannot hide all but the
+// last reference. Only the bare form fills capture group 1, because only it can
+// name the dispatched issue: callers compare the captured digits against their
+// own num rather than interpolating it into the pattern, so "#19195" never
+// matches a reference to "1919", and a cross-repo or URL reference is never
+// mistaken for the own issue even when it names this repo.
+var closingKeywordPattern = regexp.MustCompile(`(?i)\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved):?\s+(?:#(\d+)\b|[\w.-]+/[\w.-]+#\d+\b|https?://[^\s,;?#]+?/(?:issues|pulls?)/\d+\b)`)
 
 // defuseClosingKeywords breaks every closing-keyword reference in s by
-// inserting a zero-width space after the "#" (issue #2447). s holds untrusted
-// box-authored commit subjects that reconstructPRText embeds verbatim, so
-// "fix: closes #999" would otherwise auto-close an unrelated issue on merge.
-// GitHub's scanner needs a digit right after "#", and U+200B is invisible.
+// inserting a zero-width space before the reference's number (issue #2447). s
+// holds untrusted box-authored text, so "fix: closes #999" would otherwise
+// auto-close an unrelated issue on merge. The forges' scanners (GitHub, Forgejo)
+// need a digit right after "#" or the URL's last path segment (assumed for the
+// URL form, not verified), and U+200B is invisible.
 func defuseClosingKeywords(s string) string {
-	const zeroWidthSpace = "​" // U+200B ZERO WIDTH SPACE
+	const zeroWidthSpace = "\u200b" // U+200B ZERO WIDTH SPACE
 	return closingKeywordPattern.ReplaceAllStringFunc(s, func(match string) string {
-		hashIdx := strings.IndexByte(match, '#')
-		return match[:hashIdx+1] + zeroWidthSpace + match[hashIdx+1:]
+		numStart := len(match)
+		for numStart > 0 && match[numStart-1] >= '0' && match[numStart-1] <= '9' {
+			numStart--
+		}
+		return match[:numStart] + zeroWidthSpace + match[numStart:]
 	})
 }
 
