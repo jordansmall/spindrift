@@ -155,7 +155,7 @@ func testRebaseIncorporatesBase(t *testing.T, h CodeForgeHarness) {
 	const num = "103"
 	ref := h.SeedLandable(num)
 	h.AdvanceBase()
-	if err := h.Forge().Rebase(ref); err != nil {
+	if err := rebase(h, num, ref); err != nil {
 		t.Fatalf("Rebase(%q): %v", ref, err)
 	}
 	if !h.Rebased(num) {
@@ -168,7 +168,7 @@ func testRebaseConflict(t *testing.T, h CodeForgeHarness) {
 	const num = "104"
 	ref := h.SeedLandable(num)
 	h.FailNextRebase(ref)
-	err := h.Forge().Rebase(ref)
+	err := rebase(h, num, ref)
 	if !errors.Is(err, forge.ErrMergeConflict) {
 		t.Fatalf("Rebase(%q): want forge.ErrMergeConflict, got %v", ref, err)
 	}
@@ -208,4 +208,10 @@ func testPushOnlyMergeModeMapping(t *testing.T, h CodeForgeHarness) {
 	if !h.Landed(num) {
 		t.Fatalf("Merge(%q) reported success but %s's marker never reached the base branch", ref, num)
 	}
+}
+
+// rebase runs h's Rebase the way settle does, pinned to num's agent branch
+// (issue #6961).
+func rebase(h CodeForgeHarness, num, ref string) error {
+	return forge.RebasePinned(h.Forge(), ref, forge.AgentBranchName(h.BranchPrefix(), num))
 }

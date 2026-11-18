@@ -592,10 +592,13 @@ func (e *execClient) CreateLabel(name, description, color string) error {
 // only when the sync stops on unmerged paths; any other sync failure is
 // returned wrapping git's own output. A force-push that fails with a transport
 // or server fault, or that rebaseForcePushTimeout kills, wraps
-// ErrTransientPushFailure.
+// ErrTransientPushFailure. Under a primary row the head comes from a guest
+// Connector, so an unpinned Rebase is refused there; RebasePRHead is the way in.
 func (e *execClient) Rebase(prURL string) error {
 	if row, ok := primaryRow(); ok {
-		return e.rebaseViaConnector(row, prURL)
+		return e.forgeWrite(row, "rebase a PR", false, func(cf forge.CodeForge, _ forge.Capabilities) error {
+			return cf.Rebase(prURL)
+		})
 	}
 	out, err := exec.Command("gh", "pr", "view", prURL,
 		"--json", "headRefName,baseRefName",
@@ -614,8 +617,8 @@ func (e *execClient) Rebase(prURL string) error {
 // RebasePRHead is forge.PRHeadRebaser. Under a primary row the PR's head is
 // read from a guest Connector core does not trust, so the composed forge
 // refuses a head other than the one the caller expects. Without one the head
-// comes from gh, which core trusts, so head is not needed and the native
-// Rebase runs unchanged.
+// comes from gh, which core trusts, so head is unused and the native Rebase
+// runs.
 func (e *execClient) RebasePRHead(prURL, head string) error {
 	if row, ok := primaryRow(); ok {
 		return e.rebasePRHeadViaConnector(row, prURL, head)

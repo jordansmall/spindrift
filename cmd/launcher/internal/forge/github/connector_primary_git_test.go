@@ -204,10 +204,10 @@ func mergeCommits(t *testing.T, bare, branch string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// Rebase under a primary row syncs the PR's head onto core's base branch in
+// RebasePRHead under a primary row syncs the PR's head onto core's base branch in
 // core's git, with SYNC_METHOD choosing between rebase and merge, and a real
 // conflict is forge.ErrMergeConflict.
-func TestPrimaryRow_RebaseRunsInCoreGit(t *testing.T) {
+func TestPrimaryRow_RebasePRHeadRunsInCoreGit(t *testing.T) {
 	for _, tc := range []struct {
 		method     string
 		wantMerges string
@@ -219,8 +219,8 @@ func TestPrimaryRow_RebaseRunsInCoreGit(t *testing.T) {
 			h.backend.repo.AdvanceBase()
 			branch := forge.AgentBranchName(h.BranchPrefix(), "11")
 
-			if err := primaryGitClient(WithSyncMethod(tc.method)).Rebase(url); err != nil {
-				t.Fatalf("Rebase: %v", err)
+			if err := primaryGitClient(WithSyncMethod(tc.method)).RebasePRHead(url, branch); err != nil {
+				t.Fatalf("RebasePRHead: %v", err)
 			}
 
 			if !h.backend.repo.Rebased(branch) {
@@ -236,15 +236,15 @@ func TestPrimaryRow_RebaseRunsInCoreGit(t *testing.T) {
 
 // A conflicting sync under a primary row surfaces forge.ErrMergeConflict, as
 // the native path does, and never reaches gh.
-func TestPrimaryRow_RebaseConflictIsErrMergeConflict(t *testing.T) {
+func TestPrimaryRow_RebasePRHeadConflictIsErrMergeConflict(t *testing.T) {
 	for _, method := range []string{"rebase", "merge"} {
 		t.Run(method, func(t *testing.T) {
 			h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
 			url := h.SeedLandablePR("12")
 			h.backend.repo.ConflictBase("12")
 
-			if err := primaryGitClient(WithSyncMethod(method)).Rebase(url); !errors.Is(err, forge.ErrMergeConflict) {
-				t.Errorf("Rebase = %v, want forge.ErrMergeConflict", err)
+			if err := primaryGitClient(WithSyncMethod(method)).RebasePRHead(url, forge.AgentBranchName(h.BranchPrefix(), "12")); !errors.Is(err, forge.ErrMergeConflict) {
+				t.Errorf("RebasePRHead = %v, want forge.ErrMergeConflict", err)
 			}
 			if n := calls(); n != 0 {
 				t.Errorf("gh ran %d times", n)
@@ -273,8 +273,8 @@ var primaryGitOps = []struct {
 	{"PushBranch", func(h *connectorHarness, t *testing.T) error {
 		return primaryGitClient().PushBranch(t.TempDir(), "work", landingBranch, "main")
 	}},
-	{"Rebase", func(h *connectorHarness, t *testing.T) error {
-		return primaryGitClient().Rebase(h.SeedLandablePR("13"))
+	{"RebasePRHead", func(h *connectorHarness, t *testing.T) error {
+		return primaryGitClient().RebasePRHead(h.SeedLandablePR("13"), forge.AgentBranchName(h.BranchPrefix(), "13"))
 	}},
 	{"SeedMirror", func(h *connectorHarness, t *testing.T) error {
 		return primaryGitClient().SeedMirror(filepath.Join(t.TempDir(), "mirror"))
@@ -461,5 +461,28 @@ func TestPrimaryRow_RebasePRHeadMismatchIsRefusedBeforeGit(t *testing.T) {
 func TestExecClient_ResolvesPRHeadRebaser(t *testing.T) {
 	if forge.ResolveCodeForge(primaryGitClient()).PRHeadRebaser == nil {
 		t.Error("ResolveCodeForge found no PRHeadRebaser on the github Code Forge")
+	}
+}
+
+// A plain Rebase under a primary row has no expected head to pin against the
+// guest's, so it is refused with nothing pushed (issue #6961).
+func TestPrimaryRow_PlainRebaseIsRefused(t *testing.T) {
+	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+	url := h.SeedLandablePR("16")
+	h.backend.repo.AdvanceBase()
+	seen := gitCredentialLog(t)
+	branch := forge.AgentBranchName(h.BranchPrefix(), "16")
+
+	if err := primaryGitClient().Rebase(url); !errors.Is(err, connectorforge.ErrAnswer) || !strings.Contains(err.Error(), "unpinned") {
+		t.Fatalf("Rebase = %v, want connectorforge.ErrAnswer naming the unpinned refusal", err)
+	}
+	if _, serr := os.Stat(seen); serr == nil {
+		t.Error("git ran for an unpinned rebase")
+	}
+	if h.backend.repo.Rebased(branch) {
+		t.Error("the PR branch was rebased")
+	}
+	if n := calls(); n != 0 {
+		t.Errorf("gh ran %d times", n)
 	}
 }
