@@ -413,6 +413,29 @@ func TestDecodeMistypedHostOpFallsThroughToError(t *testing.T) {
 	wantKinds(t, evs, driverkit.KindError)
 }
 
+// An op that decodes but carries a mistyped other field is still a host line:
+// it yields no events, so the classifier never scans its text, and a pass_start
+// still moves the top-level role (the Connector's host-line rule).
+func TestDecodeMistypedFieldHostOpYieldsNoEvents(t *testing.T) {
+	evs := newDecoderAt(decodeNow)(`{"type":"spindrift_op","spindrift_op":{"op":"settle","pass":"x"}}`)
+	if len(evs) != 0 {
+		t.Fatalf("events = %+v, want none", evs)
+	}
+}
+
+func TestDecodeMistypedFieldPassStartStillMovesRole(t *testing.T) {
+	d := newDecoderAt(decodeNow)
+	d(hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpPassStart, Role: "review"}))
+	if evs := d(`{"type":"spindrift_op","spindrift_op":{"op":"pass_start","role":"implement","pass":"2"}}`); len(evs) != 0 {
+		t.Fatalf("events = %+v, want none", evs)
+	}
+	evs := d(`{"type":"assistant","message":{"id":"m","content":[{"type":"text","text":"hi"}]}}`)
+	wantKinds(t, evs, driverkit.KindStart, driverkit.KindModel, driverkit.KindText, driverkit.KindUsage)
+	if evs[2].Role != driverkit.ImplementorRole {
+		t.Errorf("text role = %q, want %q", evs[2].Role, driverkit.ImplementorRole)
+	}
+}
+
 func TestDecodeMistypedModelIsErrorKeepsTimestamp(t *testing.T) {
 	evs := newDecoderAt(decodeNow)(`{"type":"assistant","timestamp":"2026-08-11T19:00:00.000Z","message":{"model":7,"content":[{"type":"text","text":"hi"}]}}`)
 	wantKinds(t, evs, driverkit.KindError)
