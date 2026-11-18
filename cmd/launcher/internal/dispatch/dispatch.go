@@ -456,6 +456,16 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 	if cfg.FilerEnabled {
 		env["BOX_FILER_ENABLED"] = "1"
 	}
+	// The prompt offers each issue verb only where the socket serves it
+	// (issue #6924); the log carrier has no socket.
+	if cfg.signalCarrierSocket() {
+		if cfg.IssueReader != nil {
+			env["BOX_SIGNAL_ISSUE_READ"] = "1"
+		}
+		if cfg.IssueSearcher != nil {
+			env["BOX_SIGNAL_ISSUE_SEARCH"] = "1"
+		}
+	}
 	if cfg.WorkerProvisioned {
 		env["BOX_WORKER_PROVISIONED"] = "1"
 	}

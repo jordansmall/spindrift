@@ -593,8 +593,8 @@ func newIssueTracker(c config) (forge.IssueTracker, error) {
 // issueReader builds the Signal socket's host issue reader over the Dispatch's
 // tracker. The scope comes from resolved config, never the request (ADR
 // 0052); a tracker with none gets no reader. A tracker that has a read scope
-// hook but resolved none is a misconfiguration, so it says so on warn: the
-// prompt still offers the verb, and every call would answer 501.
+// hook but resolved none is a misconfiguration: the warning reports it, and the
+// unset BOX_SIGNAL_ISSUE_READ makes the prompt withhold the verb.
 func issueReader(c config, it forge.IssueTracker, warn io.Writer) signalsocket.IssueReader {
 	s, ok := backendkit.ByName(c.IssueTracker)
 	if !ok {
