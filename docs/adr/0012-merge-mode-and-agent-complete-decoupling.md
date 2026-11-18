@@ -163,5 +163,7 @@ Settle now flips the PR to ready first, before the hold and merge-mode checks,
 and retries a transient failure on the transient retry budget. A flip that
 still fails settles the issue `agent-failed` with reason `mark-ready-failed`,
 under every merge mode and under a hold; the flip that restores ready after a
-conflict force-push fails the same way. A ready PR whose merge then fails keeps
-the behaviour above: `agent-complete` with the merge-blocked note.
+conflict force-push fails the same way, and so does the restore when the
+conflict response could not force-push at all (amended by issue #7224), so a
+merge-blocked hand-off is never a draft. A ready PR whose merge then fails
+keeps the behaviour above: `agent-complete` with the merge-blocked note.
