@@ -626,11 +626,14 @@ create adopts the branch's open PR as not created, which is what a retried
 hand-off needs. Without the capability, Settle blocks a read-only hand-off as it
 does for a native PR forge without bundle relay.
 
-Error classes stay the five of the Connector protocol and core decides on each:
+Error classes stay those of the Connector protocol (the five here; Amended by
+issue #6960: six, adding `not-mergeable`) and core decides on each:
 `transient` retries, except for the non-idempotent `forge.merge`, `forge.openPR`
 and `forge.comment`, which run once (a merge's `transient` becomes
 `ErrMergeTransient`), `rate-limited` feeds core's rate-limit hold, `auth` is an auth failure,
-`not-found` on a retried delete is success, and `permanent` returns as it came.
+`not-found` on a retried delete is success, `not-mergeable` on `forge.merge`
+re-reads the PR to tell a conflict from a check block, and `permanent` returns
+as it came.
 
 Interfaces that exist only for the local forge, the integration tip
 (`LandingRef`), landing containment (`LandingContainmentQuery`), `LandingRepair`
@@ -1127,3 +1130,26 @@ scope and the Route table are the whole bound. Having
 the host restrict which GraphQL operations a Connector may send would let
 primary mode keep a narrower token; that is possible future work, out of scope
 here.
+
+## Amendment (issue #6960): a merge refusal has its own error class
+
+The Connector protocol gains a sixth error class, `not-mergeable`: the forge
+refused a merge because the PR is not mergeable as it stands (a conflict, a
+missing required check or review, a draft, closed or merged PR). Core's
+`forge.merge` re-read used to run for every class but `transient`, so a
+`permanent` failure that had nothing to do with mergeability (a disallowed
+merge method, say) polled the PR for checks that would never change it. Now
+only `not-mergeable` re-reads the PR, pausing for a second read when the first
+reads conflicting; `transient` still becomes `ErrMergeTransient`, and every
+other class, or a host-side failure with no class, returns as it came after one
+call. The forgejo Connector reports a 405 or 409 refusal as `not-mergeable`;
+the github Connector does so for a 405 only when its message says "not
+mergeable", names a status check, or says a review is required, so a 405 such
+as "Rebase merges are not allowed on this repository." stays `permanent`, and
+a github 409, which used to reach the re-read, now returns `permanent` too.
+
+The change is additive within the unshipped protocol 0.3 and takes no bump; an
+unknown class still reads as `permanent` on the host. An older Connector that
+reports a real not-mergeable refusal as `permanent` now fails the merge at
+once instead of polling for checks. That fails fast and loses no data, and
+the cost is accepted.

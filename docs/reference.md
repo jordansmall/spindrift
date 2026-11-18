@@ -3357,18 +3357,23 @@ This is protocol version **0.3.0**. The host is
   wraps `ErrCall` alone and the Connector stays usable; see Error class.
 - **Error class.** Every `error` response carries a canonical `class`, on
   every primitive of both axes, and the Connector reports it while core
-  decides on retries. The five values: `transient` (a retry may clear it: a
+  decides on retries. The six values: `transient` (a retry may clear it: a
   timeout, a 5xx, a dropped connection), `rate-limited` (refused for sending
   too much), `not-found` (the subject does not exist), `auth` (the credential
-  was refused or lacks standing), `permanent` (anything else). A missing
-  `class` (a 0.2 Connector) or an unknown one reads as `permanent`: core never
-  retries a class it does not know. Core retries `transient` with linear
-  backoff (in `connectorforge`) and returns every other class at once;
-  `rate-limited` stays with core's own rate-limit holds. The host surfaces
-  the class on a `*CallError` under `ErrCall`, and `ErrorClass(err)` reads it
-  (empty for a host-side failure such as `ErrBudget`). The Go SDK's
-  `connector.Errorf(class, ...)` attaches a class, `ClassForStatus` maps an
-  HTTP status to one, and an error with no class reports `permanent`.
+  was refused or lacks standing), `not-mergeable` (a forge refused a merge
+  because the PR is not mergeable as it stands: a conflict, a missing required
+  check or review, a draft, closed or merged PR), `permanent` (anything
+  else). A missing `class` (a 0.2 Connector) or an unknown one reads as
+  `permanent`: core never retries a class it does not know. Core retries
+  `transient` with linear backoff (in `connectorforge`) and returns every
+  other class at once, except that a `not-mergeable` merge refusal makes
+  `Merge` re-read the PR to tell a conflict from a check block (see the
+  forge axis); `rate-limited` stays with core's own rate-limit holds. The
+  host surfaces the class on a `*CallError` under `ErrCall`, and
+  `ErrorClass(err)` reads it (empty for a host-side failure such as
+  `ErrBudget`). The Go SDK's `connector.Errorf(class, ...)` attaches a
+  class, `ClassForStatus` maps an HTTP status to one, and an error with no
+  class reports `permanent`.
 - **Limits.** Every call into the module runs under a wall-clock budget:
   30 seconds for `_initialize`, 5 seconds for the handshake, and one budget
   shared by a call's `connector_alloc` and `connector_call`. The budget
@@ -3787,12 +3792,15 @@ This is protocol version **0.3.0**. The host is
   #6961). A plain, unpinned `Rebase` on a composed Connector forge is refused
   with `ErrAnswer` too, before the guest is asked. A failed `forge.merge`
   is classified in core: `transient` matches `forge.ErrMergeTransient`,
-  so the Lander retries it as for a native forge, and any other class
-  re-reads the PR and maps its `mergeable` state onto the same conflict and
-  blocked-by-checks errors the native adapters return. A merge the Connector
-  aims at a path its Route table does not declare is refused unsent and
-  audited, and returns `connectorhost.ErrRouteRefused` unclassified. The
-  SDK's `forge.RegisterPRs(forge.PRs{...})` serves the methods.
+  so the Lander retries it as for a native forge, and `not-mergeable`
+  re-reads the PR (pausing for a second read when the first reads
+  conflicting) and maps its `mergeable` state onto the same conflict and
+  blocked-by-checks errors the native adapters return. Every other class,
+  and a host-side failure with no class, returns as it came after one
+  Connector call and no PR read. A merge the Connector aims at a path its
+  Route table does not declare is refused unsent and audited, and returns
+  `connectorhost.ErrRouteRefused` unclassified. The SDK's
+  `forge.RegisterPRs(forge.PRs{...})` serves the methods.
 
   **Host mediation.** A Connector declaring `forge.draftPRs` can serve a
   [read-only Box](#read-only-box-box_forge_and_issue_accessread-only), the Box
@@ -3834,13 +3842,17 @@ This is protocol version **0.3.0**. The host is
   `forge.RateLimitError`, which feeds its rate-limit hold, and `auth` onto
   `forge.ErrAuthFailure`; `connectorhost.ErrorClass` still reads the class
   from either. A `transient` `forge.merge` failure becomes
-  `forge.ErrMergeTransient`, the Lander's merge retry. Any other class
-  returns as it came. No backend is selected through `Compose` yet.
+  `forge.ErrMergeTransient`, the Lander's merge retry, and a `not-mergeable`
+  one re-reads the PR (see the forge axis above). Any other class returns as it
+  came. No backend is selected through `Compose` yet.
 - **Versioning.** The protocol version is `0.y.z` and independent of
   spindrift's release version. A `0.y` bump is breaking; a `0.y.z` bump is
   additive. Protocol 0.3 has not shipped in a release, so moving
-  `forge.openPR` behind `forge.draftPRs`, or giving `driver.newDecoder` an
-  optional `now`, within 0.3 takes no bump. Core
+  `forge.openPR` behind `forge.draftPRs`, giving `driver.newDecoder` an
+  optional `now`, or adding the `not-mergeable` error class within 0.3 takes
+  no bump. An older Connector that reports a real not-mergeable refusal as
+  `permanent` now fails the merge at once instead of polling for checks, which
+  fails fast and loses nothing. Core
   accepts its current `0.y` and the one before it, so today 0.3.z and 0.2.z.
   That overlap is what protects a third-party Connector, not core's CI, which
   runs only first-party Connectors' conformance: a third-party Connector has
