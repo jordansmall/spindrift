@@ -300,10 +300,10 @@ func (e *execClient) canAutoMergeViaConnector(row backendrows.Row) (bool, error)
 	})
 }
 
-// countReadyViaConnector has no fresh flag: the Connector keeps no validator
-// cache, so every count reads the tracker.
-func (e *execClient) countReadyViaConnector(row backendrows.Row) (int, error) {
-	return viaTrackerCap(e, row, connectortracker.CapCount, "count demand", func(dc forge.DemandCounter) (int, error) { return dc.CountReady(false) })
+// countReadyViaConnector forwards fresh so the Connector can bypass any
+// conditional-request cache it keeps.
+func (e *execClient) countReadyViaConnector(row backendrows.Row, fresh bool) (int, error) {
+	return viaTrackerCap(e, row, connectortracker.CapCount, "count demand", func(dc forge.DemandCounter) (int, error) { return dc.CountReady(fresh) })
 }
 
 func (e *execClient) priorClaimStateViaConnector(row backendrows.Row, num string) (state forge.DispatchState, found bool, err error) {

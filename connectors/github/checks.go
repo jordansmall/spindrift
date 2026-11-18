@@ -25,7 +25,7 @@ func trackerProbe(t tracker.Target) (int, error) {
 // count sizes exactly the set listIssues(q) returns, pull requests excluded.
 // Count takes no freshness flag, so there is no conditional-request cache to
 // keep the way the native adapter's demand probe has.
-func count(t tracker.Target, q tracker.Query) (int, error) {
+func count(t tracker.Target, q tracker.Query, _ int, _ bool) (int, error) {
 	n := 0
 	err := pages(t.API, repoPath(t)+listQuery(q), func(raw []rawIssue) bool {
 		for _, r := range raw {

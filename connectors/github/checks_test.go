@@ -43,7 +43,7 @@ func TestCountSizesTheListIssuesSet(t *testing.T) {
 		listBase + "&labels=ready&page=3": ok(items(201, 5, false)),
 	})
 	q := tracker.Query{Label: "ready"}
-	n, err := count(tgt, q)
+	n, err := count(tgt, q, 0, false)
 	if err != nil || n != 165 {
 		t.Fatalf("count = %d, %v; want 165, nil", n, err)
 	}
@@ -55,14 +55,14 @@ func TestCountSizesTheListIssuesSet(t *testing.T) {
 
 func TestCountWithoutLabelCountsEveryOpenIssue(t *testing.T) {
 	stub(t, map[string]connector.Response{listBase + "&page=1": ok(items(1, 3, false))})
-	if n, err := count(tgt, tracker.Query{}); err != nil || n != 3 {
+	if n, err := count(tgt, tracker.Query{}, 0, false); err != nil || n != 3 {
 		t.Fatalf("count = %d, %v; want 3, nil", n, err)
 	}
 }
 
 func TestCountFailsOnNon2xx(t *testing.T) {
 	stub(t, map[string]connector.Response{listBase + "&page=1": {Status: 500}})
-	if _, err := count(tgt, tracker.Query{}); err == nil {
+	if _, err := count(tgt, tracker.Query{}, 0, false); err == nil {
 		t.Fatal("want error")
 	}
 }

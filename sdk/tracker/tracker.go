@@ -160,8 +160,11 @@ type Reader struct {
 	// ListIssues(q) would return, read without walking them. It may be
 	// approximate where the API only offers an approximate count; a demand
 	// probe tolerates lag. Setting it advertises "tracker.count" and requires
-	// CountInterval.
-	Count func(t Target, q Query) (int, error)
+	// CountInterval. limit is how many issues core will use: it clamps the
+	// answer, so a count need not walk past it (0 when core sent none). fresh
+	// asks the Connector to bypass any conditional-request cache it keeps; core
+	// sets it after a count a child contradicted (ADR 0059).
+	Count func(t Target, q Query, limit int, fresh bool) (int, error)
 
 	// CountInterval is how often core re-asks Count, chosen for the API's rate
 	// limits. It is required, at least one second, when Count is set.
@@ -362,11 +365,13 @@ func handlers(r Reader) ([]string, map[string]method) {
 			var p struct {
 				Target Target `json:"target"`
 				Query
+				Limit int  `json:"limit"`
+				Fresh bool `json:"fresh"`
 			}
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
 			}
-			n, err := r.Count(p.Target, p.Query)
+			n, err := r.Count(p.Target, p.Query, p.Limit, p.Fresh)
 			if err != nil {
 				return nil, err
 			}

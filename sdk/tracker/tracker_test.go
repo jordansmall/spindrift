@@ -296,7 +296,7 @@ func jiraReader(t *testing.T) Reader {
 			Fields:     []CreateField{{ID: "summary", Name: "Summary", Required: true, HasDefaultValue: false}},
 		}, nil
 	}
-	r.Count = func(tg Target, q Query) (int, error) {
+	r.Count = func(tg Target, q Query, _ int, _ bool) (int, error) {
 		if tg != wantTarget || q != (Query{Label: "ready", Status: "In Review"}) {
 			t.Errorf("Count(%v, %+v)", tg, q)
 		}
@@ -371,7 +371,7 @@ func TestDoctorBadParamsAndErrors(t *testing.T) {
 	boom := errors.New("boom")
 	r := jiraReader(t)
 	r.Probe = func(Target) (int, error) { return 0, boom }
-	r.Count = func(Target, Query) (int, error) { return 0, boom }
+	r.Count = func(Target, Query, int, bool) (int, error) { return 0, boom }
 	_, m = handlers(r)
 	for _, name := range []string{"tracker.probe", "tracker.count"} {
 		if _, err := m[name](json.RawMessage(`{` + target + `}`)); !errors.Is(err, boom) {
@@ -423,5 +423,24 @@ func TestRemovedLabels(t *testing.T) {
 	_, m = handlers(r)
 	if _, err := m["tracker.removedLabels"](json.RawMessage(`{` + target + `,"number":"3"}`)); !errors.Is(err, boom) {
 		t.Errorf("err = %v, want boom", err)
+	}
+}
+
+func TestCountWireForwardsLimitAndFresh(t *testing.T) {
+	r := jiraReader(t)
+	var gotLimit int
+	var gotFresh bool
+	r.Count = func(_ Target, _ Query, limit int, fresh bool) (int, error) {
+		gotLimit, gotFresh = limit, fresh
+		return 3, nil
+	}
+	_, m := handlers(r)
+	call(t, m, "tracker.count", `{`+target+`,"label":"ready","status":"In Review","limit":50,"fresh":true}`)
+	if gotLimit != 50 || !gotFresh {
+		t.Errorf("Count got limit=%d fresh=%v, want 50 true", gotLimit, gotFresh)
+	}
+	call(t, m, "tracker.count", `{`+target+`,"label":"ready","status":"In Review"}`)
+	if gotLimit != 0 || gotFresh {
+		t.Errorf("absent params: limit=%d fresh=%v, want 0 false", gotLimit, gotFresh)
 	}
 }

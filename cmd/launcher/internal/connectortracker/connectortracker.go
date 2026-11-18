@@ -205,6 +205,8 @@ type (
 		Target Target `json:"target"`
 		Label  string `json:"label"`
 		Status string `json:"status"`
+		Limit  int    `json:"limit"`
+		Fresh  bool   `json:"fresh"`
 	}
 	wireCreateMeta struct {
 		IssueTypes []string          `json:"issueTypes"`
@@ -503,9 +505,12 @@ func (l countLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
 
 func (l countLayer) ProbeInterval() time.Duration { return l.interval }
 
-// CountReady counts the set ListIssues(Dispatchable) selects; a state with no
+// CountReady counts the set ListIssues(Dispatchable) selects, never past
+// forge.ResultPageLimit (the most issues core uses; the Connector gets it as
+// limit and may stop early, core clamps regardless). fresh is forwarded so the
+// Connector can bypass a conditional-request cache. A state with no
 // selector is empty, not every open issue.
-func (l countLayer) CountReady(bool) (int, error) {
+func (l countLayer) CountReady(fresh bool) (int, error) {
 	label, status := l.r.lifecycle.Labels.Label(forge.Dispatchable), l.r.lifecycle.Statuses[forge.Dispatchable]
 	if label == "" && status == "" {
 		return 0, nil
@@ -513,13 +518,13 @@ func (l countLayer) CountReady(bool) (int, error) {
 	var res struct {
 		Count int `json:"count"`
 	}
-	if err := l.r.call(context.Background(), CapCount, countParams{l.r.target, label, status}, &res); err != nil {
+	if err := l.r.call(context.Background(), CapCount, countParams{Target: l.r.target, Label: label, Status: status, Limit: forge.ResultPageLimit, Fresh: fresh}, &res); err != nil {
 		return 0, err
 	}
 	if res.Count < 0 {
 		return 0, fmt.Errorf("%w: tracker.count answered %d", ErrAnswer, res.Count)
 	}
-	return res.Count, nil
+	return min(res.Count, forge.ResultPageLimit), nil
 }
 
 // maxCountInterval bounds the cadence a Connector may ask for.

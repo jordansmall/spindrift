@@ -3612,7 +3612,7 @@ This is protocol version **0.3.0**. The host is
   | `tracker.probe` (optional) | `{target}` | `{status}`, the HTTP status of one authenticated read; an error only when the request could not be sent |
   | `tracker.statuses` (optional) | `{target}` | `{statuses}`, the name of every status in the project's workflows |
   | `tracker.createMeta` (optional) | `{target, issueType}` | `{issueTypes, fields}`: every issue type the project offers, and the create fields (`{fieldId, name, required, hasDefaultValue}`) of `issueType`, none when it is not offered |
-  | `tracker.count` (optional) | `{target, label, status}`, selecting as `tracker.listIssues` does | `{count}`, possibly approximate |
+  | `tracker.count` (optional) | `{target, label, status, limit, fresh}`, selecting as `tracker.listIssues` does; `limit` is how many issues core will use (it clamps every Connector's answer to it, a Jira server total included, so the count need not walk past it), `fresh` asks the Connector to bypass any conditional-request cache (core sets it after a count a child contradicted) | `{count}`, possibly approximate |
   | `tracker.countInterval` (with `tracker.count`) | `{}` | `{seconds}`, at least 1: how often core re-asks `tracker.count` |
   | `tracker.removedLabels` (optional) | `{target, number}` | `{labels}`: the names removed from the issue, oldest first |
   | `tracker.searchIssues` (optional) | `{target, text, state, label, limit}`, `label` `""` for any | `{issues}`, in match order |

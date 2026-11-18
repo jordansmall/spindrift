@@ -56,7 +56,7 @@ type demandCache struct {
 // does not cover them; ADR 0059 covers the resulting staleness and over-count.
 func (e *execClient) CountReady(fresh bool) (int, error) {
 	if row, ok := routedRow(); ok {
-		return e.countReadyViaConnector(row)
+		return e.countReadyViaConnector(row, fresh)
 	}
 	e.demandMu.Lock()
 	defer e.demandMu.Unlock()
