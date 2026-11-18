@@ -235,52 +235,93 @@ func TestUseBakedGithubRow_NothingBakedAppliesNoRow(t *testing.T) {
 	}
 }
 
+// A wiring error fires on every host, including one that keeps the native gh.
 func TestUseBakedGithubRow_RefusesMalformedRoutes(t *testing.T) {
-	t.Cleanup(backendrows.Snapshot())
-	env := map[string]string{connectorWasmEnv: "/x/github.wasm", connectorRoutesEnv: "not json"}
-	err := useBakedGithubRow(func(k string) string { return env[k] })
-	if err == nil || !strings.Contains(err.Error(), connectorRoutesEnv) {
-		t.Fatalf("useBakedGithubRow = %v, want an error naming %s", err, connectorRoutesEnv)
+	for _, host := range []string{"", "ghe.corp"} {
+		t.Run("GH_HOST="+host, func(t *testing.T) {
+			t.Cleanup(backendrows.Snapshot())
+			env := map[string]string{connectorWasmEnv: "/x/github.wasm", connectorRoutesEnv: "not json", "GH_HOST": host}
+			err := useBakedGithubRow(func(k string) string { return env[k] })
+			if err == nil || !strings.Contains(err.Error(), connectorRoutesEnv) {
+				t.Fatalf("useBakedGithubRow = %v, want an error naming %s", err, connectorRoutesEnv)
+			}
+		})
 	}
 }
 
 // A half-baked build (one var without the other) is a wiring bug: it names the
-// missing variable rather than applying a row with no module or no routes.
+// missing variable rather than applying a row with no module or no routes, on
+// every host.
 func TestUseBakedGithubRow_RefusesOneVarWithoutTheOther(t *testing.T) {
-	for _, tc := range []struct{ set, missing string }{
-		{connectorRoutesEnv, connectorWasmEnv},
-		{connectorWasmEnv, connectorRoutesEnv},
-	} {
-		t.Run(tc.missing, func(t *testing.T) {
-			t.Cleanup(backendrows.Snapshot())
-			if err := backendrows.Use(nil, nil); err != nil {
-				t.Fatal(err)
-			}
-			env := map[string]string{tc.set: "[]"}
-			err := useBakedGithubRow(func(k string) string { return env[k] })
-			if err == nil || !strings.Contains(err.Error(), tc.missing) {
-				t.Fatalf("useBakedGithubRow = %v, want an error naming %s", err, tc.missing)
-			}
-			if _, ok := backendrows.Lookup("github"); ok {
-				t.Error("a github row is applied from half a bake")
-			}
-		})
+	for _, host := range []string{"", "ghe.corp"} {
+		for _, tc := range []struct{ set, missing string }{
+			{connectorRoutesEnv, connectorWasmEnv},
+			{connectorWasmEnv, connectorRoutesEnv},
+		} {
+			t.Run(tc.missing+"/GH_HOST="+host, func(t *testing.T) {
+				t.Cleanup(backendrows.Snapshot())
+				if err := backendrows.Use(nil, nil); err != nil {
+					t.Fatal(err)
+				}
+				env := map[string]string{tc.set: "[]", "GH_HOST": host}
+				err := useBakedGithubRow(func(k string) string { return env[k] })
+				if err == nil || !strings.Contains(err.Error(), tc.missing) {
+					t.Fatalf("useBakedGithubRow = %v, want an error naming %s", err, tc.missing)
+				}
+				if _, ok := backendrows.Lookup("github"); ok {
+					t.Error("a github row is applied from half a bake")
+				}
+			})
+		}
+	}
+}
+
+func bakedEnv(host string) map[string]string {
+	return map[string]string{
+		connectorWasmEnv:   "/x/github.wasm",
+		connectorRoutesEnv: `[{"method":"POST","host":"api.github.com","path":"/graphql"}]`,
+		"GH_HOST":          host,
 	}
 }
 
 // The baked row names the wizard's token as the Connector's credential.
 func TestUseBakedGithubRow_AppliesTheGithubRow(t *testing.T) {
 	t.Cleanup(backendrows.Snapshot())
-	env := map[string]string{
-		connectorWasmEnv:   "/x/github.wasm",
-		connectorRoutesEnv: `[{"method":"POST","host":"api.github.com","path":"/graphql"}]`,
-	}
+	env := bakedEnv("")
 	if err := useBakedGithubRow(func(k string) string { return env[k] }); err != nil {
 		t.Fatal(err)
 	}
 	row, ok := backendrows.Lookup("github")
 	if !ok || row.Module != "/x/github.wasm" || row.CredentialEnv != "GH_TOKEN" || len(row.Routes) != 1 {
 		t.Errorf("row = %+v, %v; want the baked module, GH_TOKEN and the one route", row, ok)
+	}
+}
+
+// The baked routes pin api.github.com, so a GH_HOST naming another host keeps
+// the native gh, which honours GH_HOST itself; github.com, in any letter case,
+// applies the row, as does no GH_HOST at all (TestUseBakedGithubRow_AppliesTheGithubRow).
+func TestUseBakedGithubRow_AppliesOnlyForGithubDotCom(t *testing.T) {
+	for _, tc := range []struct {
+		host    string
+		applied bool
+	}{
+		{"github.com", true},
+		{"GitHub.com", true},
+		{"ghe.corp", false},
+	} {
+		t.Run(tc.host, func(t *testing.T) {
+			t.Cleanup(backendrows.Snapshot())
+			if err := backendrows.Use(nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			env := bakedEnv(tc.host)
+			if err := useBakedGithubRow(func(k string) string { return env[k] }); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := backendrows.Lookup("github"); ok != tc.applied {
+				t.Errorf("row applied = %v under GH_HOST=%q, want %v", ok, tc.host, tc.applied)
+			}
+		})
 	}
 }
 
