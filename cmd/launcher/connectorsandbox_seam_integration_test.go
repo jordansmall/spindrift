@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/connectorsandbox/sandbox"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/hostpaths"
@@ -330,21 +331,28 @@ func TestSeamConnectorSandboxReapsOrphans(t *testing.T) {
 const imageAbsentRefusal = "image absent; run `spindrift build`"
 
 // stageOrphan is the name of a sandbox a hard-killed launcher left behind (its
-// owner pid is dead) and the running names a reap must leave alone: a sandbox
-// whose launcher still runs (this test process), a real Box, and names that only
-// resemble a sandbox's.
+// owner pid is dead) and the names a reap must leave alone: a sandbox whose
+// launcher still runs (this test process), a real Box, names that only resemble
+// a sandbox's, and two sandboxes with a dead pid it must not claim: one from an
+// older Launcher (no owner) and one from another pid namespace.
 func stageOrphan(t *testing.T) (orphan string, others []string) {
 	t.Helper()
 	dead := exec.Command("true")
 	if err := dead.Run(); err != nil {
 		t.Fatal(err)
 	}
-	orphan = fmt.Sprintf("%s%d-1700000000000000000", runner.ConnectorSandboxPrefix, dead.Process.Pid)
+	deadPid := dead.Process.Pid
+	stamp := time.Unix(0, 1700000000000000000)
+	nano := stamp.UnixNano()
+	orphan = sandbox.Name(deadPid, stamp)
+	_, tail, _ := strings.Cut(strings.TrimPrefix(orphan, runner.ConnectorSandboxPrefix), "-")
 	others = []string{
-		fmt.Sprintf("%s%d-1700000000000000000", runner.ConnectorSandboxPrefix, os.Getpid()),
+		sandbox.Name(os.Getpid(), stamp),
+		fmt.Sprintf("%s%d-%d", runner.ConnectorSandboxPrefix, deadPid, nano),
+		runner.ConnectorSandboxPrefix + "feedfacecafe-" + tail,
 		dispatch.BoxName("99"),
 		"spindrift-box-connector-sandbox-7",
-		fmt.Sprintf("box-%s%d-1700000000000000000", runner.ConnectorSandboxPrefix, dead.Process.Pid),
+		fmt.Sprintf("box-%s%d-%d", runner.ConnectorSandboxPrefix, deadPid, nano),
 	}
 	return orphan, others
 }
