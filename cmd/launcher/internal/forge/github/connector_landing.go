@@ -190,6 +190,15 @@ func (e *execClient) rebaseViaConnector(row backendrows.Row, prURL string) error
 	return e.forgeWrite(row, "rebase a PR", false, func(cf forge.CodeForge, _ forge.Capabilities) error { return cf.Rebase(prURL) })
 }
 
+func (e *execClient) rebasePRHeadViaConnector(row backendrows.Row, prURL, head string) error {
+	return e.forgeWrite(row, "rebase a PR", false, func(_ forge.CodeForge, caps forge.Capabilities) error {
+		if caps.PRHeadRebaser == nil {
+			return fmt.Errorf("%w: forge.prs", errNoCapability)
+		}
+		return caps.PRHeadRebaser.RebasePRHead(prURL, head)
+	})
+}
+
 func (e *execClient) seedMirrorViaConnector(row backendrows.Row, dir string) error {
 	return e.forgeGit(row, "seed the mirror", false, func(_ forge.CodeForge, _ forge.Capabilities, g *coreGit) error {
 		return g.seedMirror(dir)
