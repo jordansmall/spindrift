@@ -14,7 +14,6 @@
   hostPostingCapable = true;
   labelRegistry = true;
   issuesWearLabels = true;
-  closesRefTracker = true;
   goTestRepoFiles = [ ".github/workflows/agent-dispatch.yml" ];
   goTestBuildsOn = "git";
   quickstart = {
