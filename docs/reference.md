@@ -1682,7 +1682,9 @@ contract:
   keeps the exit code unchanged.
 - `ResultEvent` — encodes text as one newline-terminated NDJSON event in the
   CLI's grammar, such that `Result` reads it back.
-- `SessionFlags` — renders the CLI's session flags for a mode.
+- `SessionFlags` — renders the CLI's session flags for a mode, or an error
+  when they cannot be rendered; the caller must not start the session without
+  them.
 
 Two rules are shared rather than per Driver: a non-empty transcript ends
 with a newline, and per-model usage rows sort by the rank `Family` returns,
