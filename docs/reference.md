@@ -2734,18 +2734,24 @@ The Connector also ships jira's tracker-axis fragment folder,
 
 `connectors/forgejo` is the forgejo backend's forge path as a network Connector
 on protocol 0.3, with no tracker half: it serves `forge.prsForBranch`,
-`forge.pr` and `forge.checks` over Forgejo's REST API through `http_request`,
-plus the branch and PR primitives (branch lookup and delete, open, merge,
-compare, files, draft flip, comment, auto-merge, branch protection, and the
-repository probe). It advertises `forge.prs`, `forge.draftPRs`,
-`forge.autoMerge`, `forge.branchProtection` and `forge.probe`, and neither
-`forge.ciRun` nor `forge.tokenGrant`: Forgejo Actions logs are not on the REST
-API, so there is no job log. Forgejo has no draft flag, so a draft is a `WIP:`
+`forge.pr`, `forge.checks` and `forge.jobLog` over Forgejo's REST API through
+`http_request`, plus the branch and PR primitives (branch lookup and delete,
+open, merge, compare, files, draft flip, comment, auto-merge, branch
+protection, and the repository probe). It advertises `forge.prs`,
+`forge.draftPRs`, `forge.autoMerge`, `forge.branchProtection` and
+`forge.probe`, and neither `forge.ciRun` nor `forge.tokenGrant`. A failing
+job's log comes from the Actions API Forgejo 16 added, since web routes ignore
+API tokens: the status link's run number resolves to a run, its job index to a
+job, and then the job's log is read; an older instance answers 404 and the
+failure detail carries no log. Forgejo has no draft flag, so a draft is a `WIP:`
 title; a merge uses the rebase style and deletes the branch; auto-merge asks
 `merge_when_checks_succeed` when the repository allows rebase merges. A
 transient merge failure is retried by core, not the Connector. Its Route table
-is the `{base}` host with `GET /api/v1/repos/{repo}` (the subtree root, which
-admits every read under the repository), `POST` and `PATCH` on `.../pulls`,
+is the `{base}` host with `GET /api/v1/repos/{repo}/actions/jobs` (a failing
+job's log, with `followRedirect` set: Forgejo serves the log directly, and the
+opt-in is what hands a log over the response cap back as its tail rather than
+failing the read), `GET /api/v1/repos/{repo}` (the subtree root, which admits
+every other read under the repository), `POST` and `PATCH` on `.../pulls`,
 `POST .../issues` and `DELETE .../branches`; the write roots admit more than
 the Connector sends, as `connectors/forgejo/routes.nix` explains. Its row
 authorizes with the host-only `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN` (the
