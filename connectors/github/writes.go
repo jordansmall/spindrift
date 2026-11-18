@@ -225,13 +225,44 @@ func comment(t forge.Target, number, body string) error {
 }
 
 // merge always rebases: the protocol carries no method, and rebase is the
-// native adapter's default.
+// native adapter's default. GitHub answers 405 both for a genuine refusal
+// (failing checks, missing review) and for a disallowed method, so only a 405
+// whose message names the former is NotMergeable, the class core re-reads the
+// PR for; a repo with rebase disabled must fail fast instead.
 func merge(t forge.Target, number string) error {
 	if _, err := parseNumber(number); err != nil {
 		return err
 	}
-	_, err := fetch("PUT", t.API, forgePath(t, "/pulls/"+number+"/merge"), []byte(`{"merge_method":"rebase"}`))
-	return err
+	path := forgePath(t, "/pulls/"+number+"/merge")
+	resp, err := request("PUT", t.API, path, []byte(`{"merge_method":"rebase"}`))
+	if err != nil {
+		return err
+	}
+	if is2xx(resp.Status) {
+		return nil
+	}
+	if resp.Status == 405 {
+		var m struct {
+			Message string `json:"message"`
+		}
+		_ = json.Unmarshal(resp.Body, &m)
+		switch {
+		case refusesPRState(m.Message):
+			return connector.Errorf(connector.NotMergeable, "PUT %s: status 405: %s", path, m.Message)
+		case m.Message != "":
+			return connector.Errorf(connector.Permanent, "PUT %s: status 405: %s", path, m.Message)
+		}
+	}
+	return statusError("PUT", path, resp.Status)
+}
+
+// refusesPRState reports whether a 405 message blames the PR's own state
+// (checks, review, conflicts) rather than the repository's merge settings.
+func refusesPRState(message string) bool {
+	message = strings.ToLower(message)
+	return strings.Contains(message, "not mergeable") ||
+		strings.Contains(message, "status check") ||
+		strings.Contains(message, "review is required")
 }
 
 func enqueueAutoMerge(t forge.Target, number string) error {

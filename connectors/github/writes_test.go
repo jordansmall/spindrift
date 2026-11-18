@@ -340,11 +340,37 @@ func TestMerge(t *testing.T) {
 	if r := (*got)[0]; r.Method != "PUT" || r.Body != `{"merge_method":"rebase"}` {
 		t.Fatalf("request = %#v", r)
 	}
-	for status, want := range map[int]connector.Class{502: connector.Transient, 405: connector.Permanent, 409: connector.Permanent} {
-		stub(t, map[string]connector.Response{url: {Status: status, Body: []byte("{}")}})
-		if got := classOf(t, merge(ftgt, "5")); got != want {
-			t.Errorf("status %d: class = %v, want %v", status, got, want)
+	for name, c := range map[string]struct {
+		status int
+		body   string
+		want   connector.Class
+	}{
+		"502":                   {502, "{}", connector.Transient},
+		"409":                   {409, "{}", connector.Permanent},
+		"409 not mergeable":     {409, `{"message":"Pull Request is not mergeable"}`, connector.Permanent},
+		"405 not mergeable":     {405, `{"message":"Pull Request is not mergeable"}`, connector.NotMergeable},
+		"405 status check":      {405, `{"message":"Required status check \"ci\" is expected."}`, connector.NotMergeable},
+		"405 ruleset":           {405, `{"message":"Repository rule violations found\n\nRequired status check \"ci\" is expected."}`, connector.NotMergeable},
+		"405 review":            {405, `{"message":"At least 1 approving review is required by reviewers with write access."}`, connector.NotMergeable},
+		"405 method disallowed": {405, `{"message":"Rebase merges are not allowed on this repository."}`, connector.Permanent},
+		"405 review mention":    {405, `{"message":"Reviewers cannot merge their own review."}`, connector.Permanent},
+		"405 empty body":        {405, "", connector.Permanent},
+		"405 non-JSON body":     {405, "<html>nope</html>", connector.Permanent},
+		"405 empty object":      {405, "{}", connector.Permanent},
+	} {
+		stub(t, map[string]connector.Response{url: {Status: c.status, Body: []byte(c.body)}})
+		if got := classOf(t, merge(ftgt, "5")); got != c.want {
+			t.Errorf("%s: class = %v, want %v", name, got, c.want)
 		}
+	}
+}
+
+func TestMergeMethodDisallowedKeepsMessage(t *testing.T) {
+	const msg = "Rebase merges are not allowed on this repository."
+	stub(t, map[string]connector.Response{apiRepo + "/pulls/5/merge": {Status: 405, Body: []byte(`{"message":"` + msg + `"}`)}})
+	err := merge(ftgt, "5")
+	if got := classOf(t, err); got != connector.Permanent || !strings.Contains(err.Error(), msg) {
+		t.Fatalf("class = %v, err = %v", got, err)
 	}
 }
 
