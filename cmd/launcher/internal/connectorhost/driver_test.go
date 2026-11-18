@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"testing"
@@ -53,6 +54,45 @@ func TestDriverStrategyDescribe(t *testing.T) {
 	}
 	if want := []driverkit.Pattern{{Substr: "bad flag", Reason: driverkit.UnsupportedFlag}}; !reflect.DeepEqual(s.TerminalPatterns, want) {
 		t.Errorf("TerminalPatterns = %v, want %v", s.TerminalPatterns, want)
+	}
+}
+
+// A handle nothing else holds is unreachable once its decoder reads h.id, so a
+// collection mid-call must not free the guest decoder under it.
+func TestDriverOneShotDecoderOutlivesItsCall(t *testing.T) {
+	c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
+	s, err := c.DriverStrategy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := debug.SetGCPercent(1)
+	t.Cleanup(func() { debug.SetGCPercent(old) })
+	text := func(evs []driverkit.Event) string {
+		if len(evs) != 1 || evs[0].Kind != driverkit.KindText {
+			return fmt.Sprintf("%+v", evs)
+		}
+		return evs[0].Text
+	}
+	for i := range 10 {
+		// Large, so encoding the request is a long window for a collection to land in.
+		line := fmt.Sprintf("line %d", i) + strings.Repeat("<>&", 256<<10)
+		runtime.GC() // a collection is then due within the first allocations of the decode
+		if got := text(s.NewDecoder()(line)); got != "1:"+line {
+			t.Fatalf("one-shot decode %d = %.40q, want text 1:%.20s...", i, got, line)
+		}
+		// Coverage only: the batch path never failed here without the fix.
+		runtime.GC()
+		batch := s.BatchDecoder()([]string{line})
+		if len(batch) != 1 {
+			t.Fatalf("one-shot batch decode %d = %d results, want 1", i, len(batch))
+		}
+		if got := text(batch[0]); got != "1:"+line {
+			t.Fatalf("one-shot batch decode %d = %.40q, want text 1:%.20s...", i, got, line)
+		}
 	}
 }
 
