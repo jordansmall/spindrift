@@ -295,15 +295,17 @@ func TestFailedStopIsRetriedByCloseAndReported(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A cancelled ctx makes Sessions.Close kill the host through its killer,
-	// which discards the error; Close's own stop must still surface it.
+	// which discards the error; Close's own stop must still surface it. The
+	// host may exit on its stdin closing before the killer runs, so only
+	// Close's own Kill is certain.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := s.Close(ctx); !errors.Is(err, f.KillErr) {
 		t.Fatalf("Close = %v, want the Kill error", err)
 	}
 	before := killCount(f)
-	if before < 2 {
-		t.Fatalf("Kill calls = %v, want the killer path and Close's retry", f.KillCalls)
+	if before < 1 {
+		t.Fatalf("Kill calls = %v, want at least Close's own", f.KillCalls)
 	}
 	warn := "warning: stopping Connector sandbox " + s.name + ": " + f.KillErr.Error()
 	if !strings.Contains(out.String(), warn) {

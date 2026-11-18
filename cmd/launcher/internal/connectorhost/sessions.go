@@ -212,10 +212,19 @@ func (s *Sessions) Close(ctx context.Context) error {
 	s.mu.Unlock()
 	s.closing.Store(true)
 	_ = s.w.Close()
-	timer := time.AfterFunc(closeGrace, s.killHost)
-	defer timer.Stop()
-	stop := context.AfterFunc(ctx, s.killHost)
-	defer stop()
+	graceKilled, ctxKilled := make(chan struct{}), make(chan struct{})
+	timer := time.AfterFunc(closeGrace, func() { defer close(graceKilled); s.killHost() })
+	stop := context.AfterFunc(ctx, func() { defer close(ctxKilled); s.killHost() })
+	// A killer that already fired runs on its own goroutine and may still be
+	// mid-kill once the host is reaped: wait for it, so no kill outlives Close.
+	defer func() {
+		if !timer.Stop() {
+			<-graceKilled
+		}
+		if !stop() {
+			<-ctxKilled
+		}
+	}()
 	// The host's stdout ends when it exits, and the reads finish before it is
 	// reaped.
 	<-s.readDone
