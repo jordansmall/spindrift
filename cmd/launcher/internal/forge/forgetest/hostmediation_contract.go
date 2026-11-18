@@ -370,7 +370,7 @@ func testHostPostedIssueFilingFails(t *testing.T, ih IssueFilerHarness) {
 // Box clones it credential-free and commits on a new branch, and the bundle
 // it writes lands through the host's relay.
 func testMirrorSeedCloneRelayLands(t *testing.T, h HostMediationHarness, mh MirrorSeedHarness) {
-	ms, ok := h.CodeForge().(forge.MirrorSeeder)
+	ms, ok := forge.AsCodeForge[forge.MirrorSeeder](h.CodeForge())
 	if !ok {
 		t.Fatal("harness's CodeForge does not implement forge.MirrorSeeder")
 	}
@@ -412,7 +412,7 @@ func testMirrorSeedCloneRelayLands(t *testing.T, h HostMediationHarness, mh Mirr
 // returns an error that does not carry the host's credential.
 func testMirrorSeedFails(t *testing.T, mh MirrorSeedHarness) {
 	cf, secret := mh.UnseedableCodeForge()
-	ms, ok := cf.(forge.MirrorSeeder)
+	ms, ok := forge.AsCodeForge[forge.MirrorSeeder](cf)
 	if !ok {
 		t.Fatal("harness's UnseedableCodeForge does not implement forge.MirrorSeeder")
 	}
