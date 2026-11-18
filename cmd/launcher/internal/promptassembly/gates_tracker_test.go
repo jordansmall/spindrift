@@ -3,6 +3,7 @@ package promptassembly
 import (
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
@@ -500,75 +501,84 @@ func TestGatesFilerWriteMechanismResearch(t *testing.T) {
 	}
 }
 
-// TestGatesPRBodyReference covers the PR-body ticket-reference gates: exactly
+// TestGatesPRBodyReference covers the PR-body ticket-reference gates: at most
 // one of PR_BODY_CLOSES/PR_BODY_LOCAL_REF/PR_BODY_LOCAL_NOREF is ever on,
-// picked from ISSUE_TRACKER x LOCAL_ISSUE_REFERENCE. Jira falls into github's
-// else branch.
+// picked from ISSUE_TRACKER x CODE_FORGE x LOCAL_ISSUE_REFERENCE. PR_BODY_CLOSES
+// is on only when the forge shares the tracker's issue namespace; an unset
+// CODE_FORGE reads as github.
 func TestGatesPRBodyReference(t *testing.T) {
+	closes := map[string]bool{"PR_BODY_CLOSES": true, "PR_BODY_LOCAL_REF": false, "PR_BODY_LOCAL_NOREF": false}
+	none := map[string]bool{"PR_BODY_CLOSES": false, "PR_BODY_LOCAL_REF": false, "PR_BODY_LOCAL_NOREF": false}
+	localRef := map[string]bool{"PR_BODY_CLOSES": false, "PR_BODY_LOCAL_REF": true, "PR_BODY_LOCAL_NOREF": false}
+	localNoref := map[string]bool{"PR_BODY_CLOSES": false, "PR_BODY_LOCAL_REF": false, "PR_BODY_LOCAL_NOREF": true}
 	cases := []struct {
 		name                string
 		issueTracker        string
+		codeForge           string
 		localIssueReference bool
 		want                map[string]bool
 	}{
-		{
-			name:         "github always closes",
-			issueTracker: "github",
-			want: map[string]bool{
-				"PR_BODY_CLOSES":      true,
-				"PR_BODY_LOCAL_REF":   false,
-				"PR_BODY_LOCAL_NOREF": false,
-			},
-		},
-		{
-			name:                "github ignores LOCAL_ISSUE_REFERENCE",
-			issueTracker:        "github",
-			localIssueReference: true,
-			want: map[string]bool{
-				"PR_BODY_CLOSES":      true,
-				"PR_BODY_LOCAL_REF":   false,
-				"PR_BODY_LOCAL_NOREF": false,
-			},
-		},
-		{
-			name:         "jira falls into the same else branch as github",
-			issueTracker: "jira",
-			want: map[string]bool{
-				"PR_BODY_CLOSES":      true,
-				"PR_BODY_LOCAL_REF":   false,
-				"PR_BODY_LOCAL_NOREF": false,
-			},
-		},
-		{
-			name:         "local default: no reference",
-			issueTracker: "local",
-			want: map[string]bool{
-				"PR_BODY_CLOSES":      false,
-				"PR_BODY_LOCAL_REF":   false,
-				"PR_BODY_LOCAL_NOREF": true,
-			},
-		},
-		{
-			name:                "local opt-in: breadcrumb reference",
-			issueTracker:        "local",
-			localIssueReference: true,
-			want: map[string]bool{
-				"PR_BODY_CLOSES":      false,
-				"PR_BODY_LOCAL_REF":   true,
-				"PR_BODY_LOCAL_NOREF": false,
-			},
-		},
+		{"github tracker on an unset forge closes", "github", "", false, closes},
+		{"github tracker on a github forge closes", "github", "github", false, closes},
+		{"github tracker ignores LOCAL_ISSUE_REFERENCE", "github", "github", true, closes},
+		{"forgejo tracker on a forgejo forge closes", "forgejo", "forgejo", false, closes},
+		{"forgejo tracker on a github forge gets no Closes step", "forgejo", "github", false, none},
+		{"github tracker on a forgejo forge gets no Closes step", "github", "forgejo", false, none},
+		{"jira tracker on a github forge gets no Closes step", "jira", "github", false, none},
+		{"jira tracker on a forgejo forge gets no Closes step", "jira", "forgejo", false, none},
+		{"github tracker on an unknown forge gets no Closes step", "github", "nosuchforge", false, none},
+		{"local default: no reference", "local", "", false, localNoref},
+		{"local opt-in: breadcrumb reference", "local", "", true, localRef},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := Gates(Env{IssueTracker: tc.issueTracker, LocalIssueReference: tc.localIssueReference})
+			got := Gates(Env{IssueTracker: tc.issueTracker, CodeForge: tc.codeForge, LocalIssueReference: tc.localIssueReference})
 			for k, want := range tc.want {
 				if got[k] != want {
-					t.Errorf("Gates(IssueTracker=%q, LocalIssueReference=%v)[%q] = %v, want %v", tc.issueTracker, tc.localIssueReference, k, got[k], want)
+					t.Errorf("Gates(IssueTracker=%q, CodeForge=%q, LocalIssueReference=%v)[%q] = %v, want %v",
+						tc.issueTracker, tc.codeForge, tc.localIssueReference, k, got[k], want)
 				}
 			}
 		})
+	}
+}
+
+// TestGatesPRBodyClosesPairs walks every tracker x forge row pair against a
+// hand-written set of the pairs that close, so a new row, or a change that
+// splits the prompt from the host's intent, fails here rather than silently
+// shipping or dropping a Closes step.
+func TestGatesPRBodyClosesPairs(t *testing.T) {
+	closing := map[[2]string]bool{
+		{"github", "github"}:   true,
+		{"forgejo", "forgejo"}: true,
+	}
+	for _, tr := range backend.Registry {
+		if !tr.ValidAsTracker {
+			continue
+		}
+		for _, fg := range backend.Registry {
+			if !fg.ValidAsCodeForge {
+				continue
+			}
+			for _, localRef := range []bool{false, true} {
+				got := Gates(Env{IssueTracker: tr.Name, CodeForge: fg.Name, LocalIssueReference: localRef})
+				if want := closing[[2]string{tr.Name, fg.Name}]; got["PR_BODY_CLOSES"] != want {
+					t.Errorf("tracker %q on forge %q (LocalIssueReference=%v): PR_BODY_CLOSES = %v, want %v",
+						tr.Name, fg.Name, localRef, got["PR_BODY_CLOSES"], want)
+				}
+				on := 0
+				for _, k := range []string{"PR_BODY_CLOSES", "PR_BODY_LOCAL_REF", "PR_BODY_LOCAL_NOREF"} {
+					if got[k] {
+						on++
+					}
+				}
+				if on > 1 {
+					t.Errorf("tracker %q on forge %q (LocalIssueReference=%v): %d PR-body reference gates on, want at most 1",
+						tr.Name, fg.Name, localRef, on)
+				}
+			}
+		}
 	}
 }
 

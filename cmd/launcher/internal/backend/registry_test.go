@@ -135,6 +135,27 @@ func TestNeedsGHToken(t *testing.T) {
 	}
 }
 
+func TestClosesRef(t *testing.T) {
+	cases := []struct {
+		name           string
+		forge, tracker Descriptor
+		want           bool
+	}{
+		{"github/github", GitHub, GitHub, true},
+		{"forgejo/forgejo", Forgejo, Forgejo, true},
+		{"github tracker, forgejo forge", Forgejo, GitHub, false},
+		{"forgejo tracker, github forge", GitHub, Forgejo, false},
+		{"jira tracker, github forge", GitHub, Jira, false},
+		{"local/local", Local, Local, false},
+		{"zero descriptors", Descriptor{}, Descriptor{}, false},
+	}
+	for _, c := range cases {
+		if got := ClosesRef(c.forge, c.tracker); got != c.want {
+			t.Errorf("%s: ClosesRef(%q, %q) = %v, want %v", c.name, c.forge.Name, c.tracker.Name, got, c.want)
+		}
+	}
+}
+
 // Under read-only a git Box clones the host-seeded mirror, so its gh credential
 // helper never runs and only a GitHub tracker or forge token keeps GH_TOKEN
 // required (#6898).

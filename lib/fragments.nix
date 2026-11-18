@@ -567,11 +567,12 @@ let
       legacyFragment = "fix-ci-read-forgejo.md";
       var = "FIX_CI_READ_FORGEJO_STEP";
     }
-    # The PR-body ticket-reference step (issue #1429, ADR 0029): exactly one
+    # The PR-body ticket-reference step (issue #1429, ADR 0029): at most one
     # of the three gates is on, so issue-prompt.md concatenates all three
-    # vars. github and jira share `Closes #${ISSUE_NUMBER}` (a jira key is not
-    # a bare number, so GitHub auto-close cannot match it); local's opt-in
-    # emits a `Local-issue: <slug>` breadcrumb, never a `Closes`/`Fixes` word.
+    # vars. PR_BODY_CLOSES is on only when the Code Forge shares the tracker's
+    # issue namespace (backend.ClosesRef: github+github, forgejo+forgejo); jira
+    # and cross-backend pairs get no step. local's opt-in emits a
+    # `Local-issue: <slug>` breadcrumb, never a `Closes`/`Fixes` word.
     {
       gate = "PR_BODY_CLOSES";
       fragment = "pr-body-closes.md";

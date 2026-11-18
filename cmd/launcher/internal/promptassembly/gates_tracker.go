@@ -143,21 +143,24 @@ func trackerGates(e Env) map[string]bool {
 	// file-issues-direct.md renders whenever either direct fork is on.
 	g["FILER_FILE_DIRECT_ANY"] = filerFileDirectGH || filerFileDirectForgejo
 
-	// Exactly one of these is ever on, picked from ISSUE_TRACKER crossed with
-	// LOCAL_ISSUE_REFERENCE. jira falls into the same else branch as github.
+	// At most one of these is ever on, picked from ISSUE_TRACKER x CODE_FORGE x
+	// LOCAL_ISSUE_REFERENCE. Closes is on only when the forge shares the
+	// tracker's issue namespace. settle's ensureClosesReference still reads
+	// ClosesRefTracker alone until #7058.
+	forgeRow, _ := backend.ByName(e.CodeForge)
+	if e.CodeForge == "" {
+		forgeRow = backend.GitHub
+	}
 	prBodyLocalRef := false
 	prBodyLocalNoref := false
-	prBodyCloses := false
 	if row.SlugIssueRefTracker {
 		if e.LocalIssueReference {
 			prBodyLocalRef = true
 		} else {
 			prBodyLocalNoref = true
 		}
-	} else {
-		prBodyCloses = true
 	}
-	g["PR_BODY_CLOSES"] = prBodyCloses
+	g["PR_BODY_CLOSES"] = backend.ClosesRef(forgeRow, row)
 	g["PR_BODY_LOCAL_REF"] = prBodyLocalRef
 	g["PR_BODY_LOCAL_NOREF"] = prBodyLocalNoref
 
