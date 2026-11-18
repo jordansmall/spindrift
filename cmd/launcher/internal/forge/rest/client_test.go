@@ -607,25 +607,25 @@ func TestDoWithHeaderErrorReturnsNoHeaders(t *testing.T) {
 	}
 }
 
-func TestGetSameHost(t *testing.T) {
-	var gotAuth string
+func TestGetStream(t *testing.T) {
+	var gotAuth, gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
+		gotAuth, gotPath = r.Header.Get("Authorization"), r.URL.Path
+		if r.URL.Path == "/api/missing" {
+			http.NotFound(w, r)
+			return
+		}
 		w.Write([]byte("0123456789"))
 	}))
 	defer srv.Close()
 	c := New(srv.URL, TokenAuth{Scheme: "token", Token: "tok"}, "t", nil, nil)
 
 	var body strings.Builder
-	if err := c.GetSameHost(srv.URL+"/web/page", &body); err != nil || body.String() != "0123456789" || gotAuth != "token tok" {
-		t.Fatalf("GetSameHost = %q, %v (auth %q), want the body streamed to the writer with the credential", body.String(), err, gotAuth)
+	if err := c.GetStream("/api/logs", &body); err != nil || body.String() != "0123456789" || gotAuth != "token tok" || gotPath != "/api/logs" {
+		t.Fatalf("GetStream = %q, %v (auth %q, path %q), want the body streamed to the writer with the credential", body.String(), err, gotAuth, gotPath)
 	}
-	gotAuth = ""
 	body.Reset()
-	if err := c.GetSameHost("http://other.invalid/web/page", &body); err == nil {
-		t.Fatal("foreign host: want an error")
-	}
-	if gotAuth != "" || body.Len() != 0 {
-		t.Fatalf("refused URL: credential sent %q, body written %q", gotAuth, body.String())
+	if err := c.GetStream("/api/missing", &body); err == nil || body.Len() != 0 {
+		t.Fatalf("404: err = %v, body %q, want an error and nothing written", err, body.String())
 	}
 }

@@ -363,10 +363,7 @@ func (f *forgejoCodeForge) FailureDetail(prURL string) (string, error) {
 		if !forgejoFailingStatusStates[s.State] {
 			continue
 		}
-		var log string
-		if time.Now().Before(deadline) {
-			log = f.jobLog(s.TargetURL)
-		}
+		log := f.jobLog(s.TargetURL, deadline)
 		entries = append(entries, forge.FailureDetailEntry{
 			Name:    s.Context,
 			State:   strings.ToUpper(s.State),
@@ -381,59 +378,83 @@ func (f *forgejoCodeForge) FailureDetail(prURL string) (string, error) {
 // <owner>/<repo>/actions/runs/<n>/jobs/<m>.
 const jobPathSegs = 7
 
-// jobLogURL returns the raw-log URL for targetURL when it is a Forgejo Actions
-// job page, <base>/<owner>/<repo>/actions/runs/<n>/jobs/<m>, of the configured
-// repo; the second result is false for any other link.
-func (f *forgejoCodeForge) jobLogURL(targetURL string) (string, bool) {
+// jobLink returns the run number and job index of targetURL when it is a
+// Forgejo Actions job page, <owner>/<repo>/actions/runs/<n>/jobs/<m>, of the
+// configured repo; the final result is false for any other link. Forgejo
+// serves the link relative to the instance, subpath included, and the link is
+// remote-supplied, so an absolute one must be on the configured host.
+func (f *forgejoCodeForge) jobLink(targetURL string) (run, job uint64, ok bool) {
 	u, err := url.Parse(targetURL)
 	if err != nil {
-		return "", false
+		return 0, 0, false
 	}
 	base, err := url.Parse(f.rest.BaseURL())
-	if err != nil {
-		return "", false
+	if err != nil || (u.Host != "" && !strings.EqualFold(u.Host, base.Host)) {
+		return 0, 0, false
 	}
 	// The segments ahead of the job path must be the base URL's own subpath
-	// exactly: the link is remote-supplied and the credential rides the GET.
+	// exactly.
 	var baseSegs []string
 	if p := strings.Trim(base.Path, "/"); p != "" {
 		baseSegs = strings.Split(p, "/")
 	}
 	segs := strings.Split(strings.Trim(u.Path, "/"), "/")
 	if len(segs) != len(baseSegs)+jobPathSegs || !slices.Equal(segs[:len(baseSegs)], baseSegs) {
-		return "", false
+		return 0, 0, false
 	}
 	tail := segs[len(baseSegs):]
-	owner, repo, runID, jobID := tail[0], tail[1], tail[4], tail[6]
-	if !strings.EqualFold(owner+"/"+repo, f.repo) || tail[2] != "actions" || tail[3] != "runs" || tail[5] != "jobs" {
-		return "", false
+	if !strings.EqualFold(tail[0]+"/"+tail[1], f.repo) || tail[2] != "actions" || tail[3] != "runs" || tail[5] != "jobs" {
+		return 0, 0, false
 	}
-	for _, n := range []string{runID, jobID} {
-		if _, err := strconv.ParseUint(n, 10, 64); err != nil {
-			return "", false
-		}
+	run, err = strconv.ParseUint(tail[4], 10, 64)
+	if err != nil || run == 0 { // Forgejo applies run_number only when > 0
+		return 0, 0, false
 	}
-	u.RawQuery, u.Fragment = "", ""
-	u.Path = "/" + strings.Join(segs, "/") + "/logs"
-	u.RawPath = ""
-	return u.String(), true
+	job, err = strconv.ParseUint(tail[6], 10, 64)
+	return run, job, err == nil
 }
 
 // jobLog fetches the log of the Actions job targetURL names, or "" when the
-// link is not such a job, is on another host, or the read fails: the log is an
-// extra, so FailureDetail never fails because of it. Forgejo serves the raw
-// log from the web route <job page>/logs, outside /api/v1, and only on
-// instances recent enough to have it; older ones answer 404, which lands here.
-// The log is streamed into a forge.TailBuffer, so a log of any size yields its
-// tail. rest.GetSameHost pins the request to the configured host so the
-// credential cannot follow a status link elsewhere.
-func (f *forgejoCodeForge) jobLog(targetURL string) string {
-	logURL, ok := f.jobLogURL(targetURL)
-	if !ok {
+// link is not such a job or the read fails: the log is an extra, so
+// FailureDetail never fails because of it. The log is read over the REST API
+// (Forgejo 16+) because web routes ignore API tokens: the link's run number
+// resolves to the run's API id, whose jobs list yields the job id; both index
+// the run's jobs by id order (models/actions GetRunJobsByRunID). An older
+// instance has no such routes and answers 404, which lands here. The log is
+// streamed into a forge.TailBuffer, so a log of any size yields its tail. Each
+// of the three reads is skipped once deadline has passed; rest.Do takes no
+// context, so the check bounds where a read starts, not its retries.
+func (f *forgejoCodeForge) jobLog(targetURL string, deadline time.Time) string {
+	run, job, ok := f.jobLink(targetURL)
+	if !ok || time.Now().After(deadline) {
+		return ""
+	}
+	var runs struct {
+		WorkflowRuns []struct {
+			ID uint64 `json:"id"`
+		} `json:"workflow_runs"`
+	}
+	q := url.Values{"run_number": {strconv.FormatUint(run, 10)}}
+	err := f.rest.Do(http.MethodGet, f.repoPath()+"/actions/runs?"+q.Encode(), nil, &runs)
+	if err != nil || len(runs.WorkflowRuns) == 0 {
+		return ""
+	}
+	if time.Now().After(deadline) {
+		return ""
+	}
+	var jobs []struct {
+		ID uint64 `json:"id"`
+	}
+	runPath := f.repoPath() + "/actions/runs/" + strconv.FormatUint(runs.WorkflowRuns[0].ID, 10) + "/jobs"
+	err = f.rest.Do(http.MethodGet, runPath, nil, &jobs)
+	if err != nil || job >= uint64(len(jobs)) {
+		return ""
+	}
+	if time.Now().After(deadline) {
 		return ""
 	}
 	var tail forge.TailBuffer
-	if err := f.rest.GetSameHost(logURL, &tail); err != nil {
+	if err := f.rest.GetStream(f.repoPath()+"/actions/jobs/"+strconv.FormatUint(jobs[job].ID, 10)+"/logs", &tail); err != nil {
 		return ""
 	}
 	return tail.String()

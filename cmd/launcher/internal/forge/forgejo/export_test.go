@@ -47,3 +47,8 @@ func SetConnectorClient(c *http.Client) (restore func()) {
 	connectorClient = c
 	return func() { connectorClient = old }
 }
+
+// JobLog calls the job-log read directly, so a test can hand it a deadline.
+func JobLog(cf forge.PRForge, targetURL string, deadline time.Time) string {
+	return cf.(*forgejoCodeForge).jobLog(targetURL, deadline)
+}

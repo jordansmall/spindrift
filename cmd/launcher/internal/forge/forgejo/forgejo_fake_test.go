@@ -61,7 +61,7 @@ type fakeForgejo struct {
 	shaToNum      map[string]string    // head SHA to PR number
 	checkQueues   map[string][]forge.RollupState
 	failingChecks map[string][]fakeStatus
-	jobLogs       map[string]string // job-page path to the raw log its /logs route serves
+	jobLogs       map[int]string // run number to the raw log of that run's second job
 	enqueued      map[string]bool
 	autoMergeOK   bool
 
@@ -105,7 +105,9 @@ var (
 	fakeForgejoPullMergeRe = regexp.MustCompile(`^/api/v1/repos/owner/repo/pulls/([0-9]+)/merge$`)
 	fakeForgejoStatusRe    = regexp.MustCompile(`^/api/v1/repos/owner/repo/commits/([^/]+)/status$`)
 	fakeForgejoStatusesRe  = regexp.MustCompile(`^/api/v1/repos/owner/repo/commits/([^/]+)/statuses$`)
-	fakeForgejoJobLogRe    = regexp.MustCompile(`^/owner/repo/actions/runs/[0-9]+/jobs/[0-9]+/logs$`)
+	fakeForgejoRunsRe      = regexp.MustCompile(`^/api/v1/repos/owner/repo/actions/runs$`)
+	fakeForgejoRunJobsRe   = regexp.MustCompile(`^/api/v1/repos/owner/repo/actions/runs/([0-9]+)/jobs$`)
+	fakeForgejoJobLogRe    = regexp.MustCompile(`^/api/v1/repos/owner/repo/actions/jobs/([0-9]+)/logs$`)
 	fakeForgejoRepoRootRe  = regexp.MustCompile(`^/api/v1/repos/owner/repo$`)
 	fakeForgejoCompareRe   = regexp.MustCompile(`^/api/v1/repos/owner/repo/compare/`)
 	fakeForgejoBranchRe    = regexp.MustCompile(`^/api/v1/repos/owner/repo/branches/(.+)$`)
@@ -127,7 +129,7 @@ func startFakeForgejo(t *testing.T, start func(http.Handler) *httptest.Server) *
 		shaToNum:      map[string]string{},
 		checkQueues:   map[string][]forge.RollupState{},
 		failingChecks: map[string][]fakeStatus{},
-		jobLogs:       map[string]string{},
+		jobLogs:       map[int]string{},
 		enqueued:      map[string]bool{},
 		protected:     map[string]bool{},
 		comments:      map[string][]string{},
@@ -221,21 +223,35 @@ func (f *fakeForgejo) SeedFailingCheck(url, name, conclusion, summary string) {
 }
 
 // SeedFailingCheckLog is SeedFailingCheck for a check that ran as an Actions
-// job: the status carries the job page as its target_url and the job's /logs
-// web route serves log, as Forgejo does.
+// job: the status carries the job page as a relative target_url, as Forgejo
+// does, and the log is served only through the REST chain (run number, run id,
+// job id). The ids are offset from one another and the target is the run's
+// second job, so a path that confuses them or the job index finds no log.
 func (f *fakeForgejo) SeedFailingCheckLog(url, name, log string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	num := prNumFromURL(url)
-	jobPath := fmt.Sprintf("/owner/repo/actions/runs/%d/jobs/%d", len(f.jobLogs)+1, len(f.jobLogs)+1)
-	f.jobLogs[jobPath] = log
+	run := len(f.jobLogs) + 1
+	f.jobLogs[run] = log
 	f.failingChecks[num] = append(f.failingChecks[num], fakeStatus{
 		Context:     name,
 		State:       "failure",
 		Description: "job failed",
-		TargetURL:   f.srv.URL + jobPath,
+		TargetURL:   fmt.Sprintf("/owner/repo/actions/runs/%d/jobs/1", run),
 	})
 }
+
+// The id each seeded run number maps to: run ids, the two job ids of a run's
+// jobs list (decoy first, target second), all distinct from the run number.
+const (
+	fakeRunIDOffset       = 100
+	fakeTargetJobIDOffset = 200
+	fakeDecoyJobIDOffset  = 900
+)
+
+func fakeRunID(run int) int       { return run + fakeRunIDOffset }
+func fakeDecoyJobID(run int) int  { return run + fakeDecoyJobIDOffset }
+func fakeTargetJobID(run int) int { return run + fakeTargetJobIDOffset }
 
 // SeedAutoMergeAllowed sets the auto-merge eligibility the repo GET route
 // reports through allow_merge_commits, allow_rebase, and allow_squash_merge.
@@ -358,7 +374,11 @@ func (f *fakeForgejo) handle(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && fakeForgejoStatusesRe.MatchString(r.URL.Path):
 		f.handleCommitStatuses(w, r, fakeForgejoStatusesRe.FindStringSubmatch(r.URL.Path)[1])
 	case r.Method == http.MethodGet && fakeForgejoJobLogRe.MatchString(r.URL.Path):
-		f.handleJobLog(w, r)
+		f.handleJobLog(w, r, fakeForgejoJobLogRe.FindStringSubmatch(r.URL.Path)[1])
+	case r.Method == http.MethodGet && fakeForgejoRunsRe.MatchString(r.URL.Path):
+		f.handleRuns(w, r)
+	case r.Method == http.MethodGet && fakeForgejoRunJobsRe.MatchString(r.URL.Path):
+		f.handleRunJobs(w, r, fakeForgejoRunJobsRe.FindStringSubmatch(r.URL.Path)[1])
 	case r.Method == http.MethodGet && fakeForgejoCompareRe.MatchString(r.URL.Path):
 		f.handleCompare(w, r)
 	case r.Method == http.MethodGet && fakeForgejoBranchRe.MatchString(r.URL.Path):
@@ -568,11 +588,35 @@ func (f *fakeForgejo) handleCommitStatuses(w http.ResponseWriter, _ *http.Reques
 	json.NewEncoder(w).Encode(statuses)
 }
 
-func (f *fakeForgejo) handleJobLog(w http.ResponseWriter, r *http.Request) {
+func (f *fakeForgejo) handleRuns(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	log, ok := f.jobLogs[strings.TrimSuffix(r.URL.Path, "/logs")]
-	if !ok {
+	run, err := strconv.Atoi(r.URL.Query().Get("run_number"))
+	if _, ok := f.jobLogs[run]; err != nil || !ok {
+		w.Write([]byte(`{"workflow_runs":[]}`))
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]any{"workflow_runs": []map[string]int{{"id": fakeRunID(run)}}})
+}
+
+func (f *fakeForgejo) handleRunJobs(w http.ResponseWriter, r *http.Request, runID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id, _ := strconv.Atoi(runID)
+	run := id - fakeRunIDOffset
+	if _, ok := f.jobLogs[run]; !ok || fakeRunID(run) != id {
+		http.NotFound(w, r)
+		return
+	}
+	json.NewEncoder(w).Encode([]map[string]int{{"id": fakeDecoyJobID(run)}, {"id": fakeTargetJobID(run)}})
+}
+
+func (f *fakeForgejo) handleJobLog(w http.ResponseWriter, r *http.Request, jobID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id, _ := strconv.Atoi(jobID)
+	log, ok := f.jobLogs[id-fakeTargetJobIDOffset]
+	if !ok || fakeTargetJobID(id-fakeTargetJobIDOffset) != id {
 		http.NotFound(w, r)
 		return
 	}
