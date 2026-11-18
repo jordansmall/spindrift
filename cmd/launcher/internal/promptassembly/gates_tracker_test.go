@@ -979,3 +979,27 @@ func TestGatesPRBodyIssueRefKeysOnKnob(t *testing.T) {
 		}
 	}
 }
+
+// TestGatesPRBodyClosesMatchesBackend pins PR_BODY_CLOSES to
+// backend.ClosesRef, the predicate settle's host Closes append reads, so prompt
+// and host cannot drift.
+func TestGatesPRBodyClosesMatchesBackend(t *testing.T) {
+	for _, tr := range backend.Registry {
+		if !tr.ValidAsTracker {
+			continue
+		}
+		for _, fg := range backend.Registry {
+			if !fg.ValidAsCodeForge {
+				continue
+			}
+			got := Gates(Env{IssueTracker: tr.Name, CodeForge: fg.Name})["PR_BODY_CLOSES"]
+			if want := backend.ClosesRef(fg, tr); got != want {
+				t.Errorf("tracker %q on forge %q: PR_BODY_CLOSES = %v, want backend.ClosesRef = %v", tr.Name, fg.Name, got, want)
+			}
+		}
+	}
+	// An empty CODE_FORGE reads as github.
+	if !Gates(Env{IssueTracker: "github"})["PR_BODY_CLOSES"] {
+		t.Error("github tracker on an empty CODE_FORGE: PR_BODY_CLOSES = false, want true")
+	}
+}

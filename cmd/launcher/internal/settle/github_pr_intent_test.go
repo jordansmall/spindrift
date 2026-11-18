@@ -123,9 +123,9 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_ClosesAlr
 	}
 }
 
-// Pins the ClosesRefTracker gate (issue #2341): with ISSUE_TRACKER=local and
-// CODE_FORGE=github, a valid real combination, the local tracker row is not a
-// closes-ref tracker, so settle must not append a "Closes #<num>". The local
+// Pins the backend.ClosesRef gate (issues #2341, #7058): with ISSUE_TRACKER=local
+// and CODE_FORGE=github, a valid real combination, the local tracker is not the
+// forge's issue namespace, so settle must not append a "Closes #<num>". The local
 // adapter closes issues through its own axis (ADR 0029), not GitHub's
 // auto-close-on-merge convention.
 func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_LocalTrackerNotInjected(t *testing.T) {

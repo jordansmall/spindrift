@@ -12,44 +12,52 @@ import (
 
 // Internal seam: a pure body-text matrix; the Settle draft-PR rows pin only the
 // append and already-closed cases.
-// Pins closeOnlyOwnIssue's ClosesRefTracker allow-list (issue #2341): only
-// the github row gets a "Closes #<num>" reference. The jira, local, and forgejo
-// rows get none, forgejo too though it is non-local; the ClosesRefTracker field
-// doc gives each row's reason.
+// Pins closeOnlyOwnIssue's body handling (append, dedup, defuse, empty body)
+// and that it appends only when backend.ClosesRef(forge, tracker) holds, the
+// same predicate the prompt's PR_BODY_CLOSES gate uses (issue #7058). A zero
+// Descriptor on either side fails closed.
 func TestInternalSeam_CloseOnlyOwnIssue(t *testing.T) {
 	const num = "1919"
 	tests := []struct {
 		name    string
 		body    string
+		forge   string // backend row name; "" is the zero Descriptor
 		tracker string // backend row name; "" is the zero Descriptor
 		want    string
 	}{
-		{"github tracker, no closes reference, appends", "Adds a widget.", "github", "Adds a widget.\n\nCloses #1919"},
-		{"github tracker, already has Closes, unchanged", "Adds a widget.\n\nCloses #1919", "github", "Adds a widget.\n\nCloses #1919"},
-		{"github tracker, already has Fixes, unchanged", "Adds a widget.\n\nFixes #1919", "github", "Adds a widget.\n\nFixes #1919"},
-		{"github tracker, already has colon-form Closes, unchanged", "Adds a widget.\n\nCloses: #1919", "github", "Adds a widget.\n\nCloses: #1919"},
-		{"github tracker, other closes defused, own stays live, no duplicate", "Fixes #1919. Closes #999", "github", "Fixes #1919. Closes #\u200b999"},
-		{"github tracker, cross-repo ref to own number defused, appends", "Closes o/r#1919", "github", "Closes o/r#\u200b1919\n\nCloses #1919"},
-		{"github tracker, URL ref to own number defused, appends", "Closes https://github.com/o/r/issues/1919", "github", "Closes https://github.com/o/r/issues/\u200b1919\n\nCloses #1919"},
-		{"github tracker, closes references a different number, appends", "Adds a widget.\n\nCloses #191", "github", "Adds a widget.\n\nCloses #\u200b191\n\nCloses #1919"},
-		{"github tracker, closes references a longer number, appends", "Adds a widget.\n\nCloses #19195", "github", "Adds a widget.\n\nCloses #\u200b19195\n\nCloses #1919"},
-		{"github tracker, empty body, becomes exactly Closes", "", "github", "Closes #1919"},
-		{"local tracker, no closes reference, unchanged", "Adds a widget.", "local", "Adds a widget."},
-		{"local tracker, closing keywords defused, nothing appended", "Fixes #1919. Closes #999", "local", "Fixes #\u200b1919. Closes #\u200b999"},
-		{"forgejo tracker, closing keywords defused, nothing appended", "Fixes #1919. Closes #999", "forgejo", "Fixes #\u200b1919. Closes #\u200b999"},
-		{"forgejo tracker, no closes reference, unchanged", "Adds a widget.", "forgejo", "Adds a widget."},
-		{"jira tracker, no closes reference, unchanged", "Adds a widget.", "jira", "Adds a widget."},
-		{"jira tracker, closing keyword defused, nothing appended", "Fixes #1919", "jira", "Fixes #\u200b1919"},
-		{"zero descriptor fails closed, unchanged", "Adds a widget.", "", "Adds a widget."},
+		{"github pair, no closes reference, appends", "Adds a widget.", "github", "github", "Adds a widget.\n\nCloses #1919"},
+		{"github pair, already has Closes, unchanged", "Adds a widget.\n\nCloses #1919", "github", "github", "Adds a widget.\n\nCloses #1919"},
+		{"github pair, already has Fixes, unchanged", "Adds a widget.\n\nFixes #1919", "github", "github", "Adds a widget.\n\nFixes #1919"},
+		{"github pair, already has colon-form Closes, unchanged", "Adds a widget.\n\nCloses: #1919", "github", "github", "Adds a widget.\n\nCloses: #1919"},
+		{"github pair, other closes defused, own stays live, no duplicate", "Fixes #1919. Closes #999", "github", "github", "Fixes #1919. Closes #\u200b999"},
+		{"github pair, cross-repo ref to own number defused, appends", "Closes o/r#1919", "github", "github", "Closes o/r#\u200b1919\n\nCloses #1919"},
+		{"github pair, URL ref to own number defused, appends", "Closes https://github.com/o/r/issues/1919", "github", "github", "Closes https://github.com/o/r/issues/\u200b1919\n\nCloses #1919"},
+		{"github pair, closes references a different number, appends", "Adds a widget.\n\nCloses #191", "github", "github", "Adds a widget.\n\nCloses #\u200b191\n\nCloses #1919"},
+		{"github pair, closes references a longer number, appends", "Adds a widget.\n\nCloses #19195", "github", "github", "Adds a widget.\n\nCloses #\u200b19195\n\nCloses #1919"},
+		{"github pair, empty body, becomes exactly Closes", "", "github", "github", "Closes #1919"},
+		{"forgejo pair, no closes reference, appends", "Adds a widget.", "forgejo", "forgejo", "Adds a widget.\n\nCloses #1919"},
+		{"forgejo pair, other closes defused, own stays live", "Fixes #1919. Closes #999", "forgejo", "forgejo", "Fixes #1919. Closes #\u200b999"},
+		{"github tracker on a forgejo forge, unchanged", "Adds a widget.", "forgejo", "github", "Adds a widget."},
+		{"github tracker on a forgejo forge, closing keywords defused, nothing appended", "Fixes #1919. Closes #999", "forgejo", "github", "Fixes #\u200b1919. Closes #\u200b999"},
+		{"local tracker, no closes reference, unchanged", "Adds a widget.", "github", "local", "Adds a widget."},
+		{"local tracker, closing keywords defused, nothing appended", "Fixes #1919. Closes #999", "github", "local", "Fixes #\u200b1919. Closes #\u200b999"},
+		{"forgejo tracker on a github forge, closing keywords defused, nothing appended", "Fixes #1919. Closes #999", "github", "forgejo", "Fixes #\u200b1919. Closes #\u200b999"},
+		{"jira tracker, no closes reference, unchanged", "Adds a widget.", "github", "jira", "Adds a widget."},
+		{"jira tracker, closing keyword defused, nothing appended", "Fixes #1919", "github", "jira", "Fixes #\u200b1919"},
+		{"zero forge descriptor fails closed, unchanged", "Adds a widget.", "", "github", "Adds a widget."},
+		{"zero tracker descriptor fails closed, unchanged", "Adds a widget.", "github", "", "Adds a widget."},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var tracker backend.Descriptor
-			if tt.tracker != "" {
-				tracker = row(t, tt.tracker)
+			var forgeRow, trackerRow backend.Descriptor
+			if tt.forge != "" {
+				forgeRow = row(t, tt.forge)
 			}
-			got := closeOnlyOwnIssue(tt.body, num, tracker)
+			if tt.tracker != "" {
+				trackerRow = row(t, tt.tracker)
+			}
+			got := closeOnlyOwnIssue(tt.body, num, forgeRow, trackerRow)
 			if got != tt.want {
 				t.Errorf("closeOnlyOwnIssue(%q, %q) = %q, want %q", tt.body, num, got, tt.want)
 			}
@@ -57,18 +65,20 @@ func TestInternalSeam_CloseOnlyOwnIssue(t *testing.T) {
 	}
 }
 
-// The gate is a fact of the tracker row alone: the Code Forge row never
-// changes it, so a github tracker with a forgejo forge still injects (#6880).
-func TestMediation_Open_ClosesGateFollowsTrackerRow(t *testing.T) {
+// The gate is backend.ClosesRef(forge, tracker), the predicate the prompt's
+// PR_BODY_CLOSES uses: a Closes keyword only auto-closes when the forge shares
+// the tracker's issue namespace, so a github tracker on a forgejo, local, or
+// git forge appends nothing (#7058).
+func TestMediation_Open_ClosesGateFollowsClosesRef(t *testing.T) {
 	tests := []struct {
 		tracker, forge string
 		wantCloses     bool
 	}{
 		{"github", "github", true},
-		{"github", "forgejo", true},
-		{"github", "local", true},
-		{"github", "git", true},
-		{"forgejo", "forgejo", false},
+		{"github", "forgejo", false},
+		{"github", "local", false},
+		{"github", "git", false},
+		{"forgejo", "forgejo", true},
 		{"forgejo", "local", false},
 		{"forgejo", "github", false},
 		{"jira", "github", false},

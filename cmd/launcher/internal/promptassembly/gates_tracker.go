@@ -143,8 +143,7 @@ func trackerGates(e Env) map[string]bool {
 
 	// At most one of these is ever on, picked from ISSUE_TRACKER x CODE_FORGE x
 	// LOCAL_ISSUE_REFERENCE. Closes is on only when the forge shares the
-	// tracker's issue namespace. settle's closeOnlyOwnIssue still reads
-	// ClosesRefTracker alone until #7058.
+	// tracker's issue namespace.
 	forgeRow, _ := backend.ByName(e.CodeForge)
 	if e.CodeForge == "" {
 		forgeRow = backend.GitHub

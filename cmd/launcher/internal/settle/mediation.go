@@ -56,7 +56,8 @@ var errCreateDraftPR = errors.New("draft PR create failed")
 // Mediation coordinates the host-mediated relay-then-create-PR hand-off.
 type Mediation struct {
 	it         forge.IssueTracker
-	tracker    backend.Descriptor
+	forgeRow   backend.Descriptor
+	trackerRow backend.Descriptor
 	outboxDir  func(num string) string
 	baseBranch string
 
@@ -97,7 +98,7 @@ func (s *Settle) mediationFor(num string, gen uint64) (branch string, m *Mediati
 // NewMediation builds a Mediation from caps' relay and PR-creating fields
 // (issue #2945) rather than asserting them from cf itself.
 func NewMediation(caps forge.Capabilities, it forge.IssueTracker, outboxDir func(num string) string, baseBranch string) *Mediation {
-	m := &Mediation{it: it, tracker: caps.TrackerDescriptor, outboxDir: outboxDir, baseBranch: baseBranch}
+	m := &Mediation{it: it, forgeRow: caps.ForgeDescriptor, trackerRow: caps.TrackerDescriptor, outboxDir: outboxDir, baseBranch: baseBranch}
 	m.br, m.dpc, m.bcs = caps.BundleRelay, caps.DraftPRCreator, caps.BundleCommitSubjects
 	return m
 }
@@ -138,7 +139,7 @@ func (m *Mediation) Open(num, branch string, result dispatch.Result, fallback Fa
 			return "", false, TextSourceUnknown, ErrNoPRIntent
 		}
 	}
-	body = closeOnlyOwnIssue(body, num, m.tracker)
+	body = closeOnlyOwnIssue(body, num, m.forgeRow, m.trackerRow)
 	// One append site for all three text sources (issue #3244), so none of
 	// them can silently lose the delta line.
 	body = appendLandDeltaSummary(body, result.Passes)

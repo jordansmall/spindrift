@@ -230,13 +230,14 @@ func hasClosingReference(body, num string) bool {
 
 // closeOnlyOwnIssue leaves body closing only the dispatched issue: body may
 // be Box-authored, so every other closing reference is defused (issue #7079),
-// then "Closes #<num>" is appended unless body already closes it. The tracker
-// row's ClosesRefTracker is a positive allow-list (issue #2341), not "anything
-// but local": a forgejo tracker's issue numbers are a foreign namespace, so
-// without it the own "#<num>" is defused too and nothing is appended. #7058's
-// pairwise tracker/forge fact will replace ClosesRefTracker here.
-func closeOnlyOwnIssue(body, num string, tracker backend.Descriptor) string {
-	if !tracker.ClosesRefTracker {
+// then "Closes #<num>" is appended unless body already closes it.
+// backend.ClosesRef is a positive allow-list (issues #2341, #7058), not
+// "anything but local": a Closes keyword only auto-closes when the forge
+// shares the tracker's issue namespace, so without it the own "#<num>" is
+// defused too and nothing is appended. It is the same predicate the prompt's
+// PR_BODY_CLOSES gate reads, so the Box and the host agree.
+func closeOnlyOwnIssue(body, num string, forgeRow, trackerRow backend.Descriptor) string {
+	if !backend.ClosesRef(forgeRow, trackerRow) {
 		return defuseClosingKeywords(body)
 	}
 	body = defuseClosingKeywordsExcept(body, num)
