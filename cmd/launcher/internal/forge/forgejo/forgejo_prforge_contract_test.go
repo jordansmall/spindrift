@@ -39,7 +39,7 @@ func TestForgejoCodeForge_PRForgeContract(t *testing.T) {
 }
 
 // The fake's job-log support backs the failure-detail log excerpt: the status
-// carries the job page and the web /logs route serves the raw log.
+// carries a relative job link and the REST chain behind it serves the raw log.
 func TestForgejoFakeServesFailingCheckLog(t *testing.T) {
 	h := newPRForgeHarness(t)
 	prURL := h.SeedOpenPR("42")

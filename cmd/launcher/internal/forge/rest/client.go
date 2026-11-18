@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 	"unicode"
@@ -273,26 +272,12 @@ func (c *Client) DoWithHeader(method, path string, body, out any) (http.Header, 
 	return nil, fmt.Errorf("%s: %s %s: maxAttempts must be >= 1 (got %d)", c.backend, method, path, c.maxAttempts)
 }
 
-// GetSameHost GETs the absolute URL rawURL with the client's credential and
-// streams its body to w, so a caller bounds a large body (a CI job log) by what
-// w keeps rather than by a read cap. It is for routes outside the API
-// prefix (a web page's raw output) that the path-relative Do cannot reach.
-// The URL must share the base URL's scheme and host: the credential is applied
-// to whatever is requested, so a URL a remote party supplied (a CI status
-// link) must never reach another host. A single attempt, with no retry.
-func (c *Client) GetSameHost(rawURL string, w io.Writer) error {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return fmt.Errorf("%s: parse URL: %w", c.backend, err)
-	}
-	base, err := url.Parse(c.baseURL)
-	if err != nil {
-		return fmt.Errorf("%s: parse base URL: %w", c.backend, err)
-	}
-	if !strings.EqualFold(u.Scheme, base.Scheme) || !strings.EqualFold(u.Host, base.Host) {
-		return fmt.Errorf("%s: refusing GET %s: not on the configured host", c.backend, u.Path)
-	}
-	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+// GetStream GETs path relative to the base URL with the client's credential
+// and streams the body to w, so a caller bounds a large body (a CI job log) by
+// what w keeps rather than by a read cap. Unlike Do it does not decode the
+// body as JSON. A single attempt, with no retry.
+func (c *Client) GetStream(path string, w io.Writer) error {
+	req, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return fmt.Errorf("%s: build request: %w", c.backend, err)
 	}
@@ -301,14 +286,14 @@ func (c *Client) GetSameHost(rawURL string, w io.Writer) error {
 	}
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		return fmt.Errorf("%s: GET %s: %w", c.backend, u.Path, err)
+		return fmt.Errorf("%s: GET %s: %w", c.backend, path, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("%s: GET %s: unexpected %w", c.backend, u.Path, StatusError{Status: resp.StatusCode})
+		return fmt.Errorf("%s: GET %s: unexpected %w", c.backend, path, StatusError{Status: resp.StatusCode})
 	}
 	if _, err := io.Copy(w, resp.Body); err != nil {
-		return fmt.Errorf("%s: read %s: %w", c.backend, u.Path, err)
+		return fmt.Errorf("%s: read %s: %w", c.backend, path, err)
 	}
 	return nil
 }

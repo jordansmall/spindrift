@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1289,9 +1288,9 @@ func TestCommentPR_PostsToIssueCommentEndpoint(t *testing.T) {
 	}
 }
 
-// jobLogHandler serves one failing status whose target_url is the Actions job
-// page at jobURL, plus whatever logs does for the job's /logs route.
-func jobLogHandler(jobURL string, logs http.HandlerFunc) http.HandlerFunc {
+// jobLogHandler serves one failing status whose target_url is jobURL, and
+// hands every other request below the pull and its statuses to api.
+func jobLogHandler(jobURL string, api http.HandlerFunc) http.HandlerFunc {
 	return pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/repos/owner/repo/commits/abc123/statuses" {
 			b, _ := json.Marshal([]map[string]any{{
@@ -1301,26 +1300,37 @@ func jobLogHandler(jobURL string, logs http.HandlerFunc) http.HandlerFunc {
 			w.Write(b)
 			return
 		}
-		logs(w, r)
+		api(w, r)
 	})
 }
 
+// actionsAPI serves the REST chain behind a job link of run number 7, job
+// index 1: the run's API id (107) and its jobs list, whose second job (202)
+// owns log, behind a decoy. It appends each request it sees, with the
+// credential it carried, to calls.
+func actionsAPI(log string, calls *[]string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		*calls = append(*calls, r.Header.Get("Authorization")+" "+r.URL.RequestURI())
+		switch r.URL.RequestURI() {
+		case "/api/v1/repos/owner/repo/actions/runs?run_number=7":
+			w.Write([]byte(`{"workflow_runs":[{"id":107}]}`))
+		case "/api/v1/repos/owner/repo/actions/runs/107/jobs":
+			w.Write([]byte(`[{"id":901},{"id":202}]`))
+		case "/api/v1/repos/owner/repo/actions/jobs/202/logs":
+			w.Write([]byte(log))
+		default:
+			http.NotFound(w, r)
+		}
+	}
+}
+
+// Forgejo 16 serves a status's target_url relative; the log is read through
+// the REST chain (run number, run id, job id) because web routes ignore API
+// tokens, and every request in the chain carries the credential.
 func TestFailureDetail_IncludesJobLogTail(t *testing.T) {
-	var srvURL string
-	var gotAuth string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		jobLogHandler(srvURL+"/owner/repo/actions/runs/7/jobs/2", func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/owner/repo/actions/runs/7/jobs/2/logs" {
-				http.NotFound(w, r)
-				return
-			}
-			gotAuth = r.Header.Get("Authorization")
-			w.Write([]byte(strings.Repeat("noise\n", 2000) + "FAIL TestThing: boom\n"))
-		})(w, r)
-	}))
-	t.Cleanup(srv.Close)
-	srvURL = srv.URL
-	pr := newPRForgeAt(t, srv.URL)
+	var calls []string
+	pr := newPRForgeTestForge(t, jobLogHandler("/owner/repo/actions/runs/7/jobs/1",
+		actionsAPI(strings.Repeat("noise\n", 2000)+"FAIL TestThing: boom\n", &calls)))
 	got, err := pr.FailureDetail("https://forge.test/owner/repo/pulls/206")
 	if err != nil {
 		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
@@ -1328,23 +1338,25 @@ func TestFailureDetail_IncludesJobLogTail(t *testing.T) {
 	if !strings.Contains(got, "FAIL TestThing: boom") {
 		t.Fatalf("FailureDetail(...) = %q, want the log tail", got)
 	}
-	if gotAuth != "token tok" {
-		t.Fatalf("logs request Authorization = %q, want the adapter credential", gotAuth)
+	want := []string{
+		"token tok /api/v1/repos/owner/repo/actions/runs?run_number=7",
+		"token tok /api/v1/repos/owner/repo/actions/runs/107/jobs",
+		"token tok /api/v1/repos/owner/repo/actions/jobs/202/logs",
+	}
+	if !slices.Equal(calls, want) {
+		t.Fatalf("requests = %q, want %q", calls, want)
 	}
 }
 
 // A multi-MiB log still yields its tail: the body is streamed into a bounded
-// buffer, not read whole, and the renderer says it trimmed.
+// buffer, not read whole, and the renderer says it trimmed. The link is
+// absolute on the configured host, which is also accepted.
 func TestFailureDetail_HugeJobLogStillYieldsItsTail(t *testing.T) {
 	var srvURL string
+	var calls []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		jobLogHandler(srvURL+"/owner/repo/actions/runs/7/jobs/2", func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/owner/repo/actions/runs/7/jobs/2/logs" {
-				http.NotFound(w, r)
-				return
-			}
-			w.Write([]byte(strings.Repeat("noise line\n", (5<<20)/len("noise line\n")) + "FAIL TestHuge: boom\n"))
-		})(w, r)
+		jobLogHandler(srvURL+"/owner/repo/actions/runs/7/jobs/1",
+			actionsAPI(strings.Repeat("noise line\n", (5<<20)/len("noise line\n"))+"FAIL TestHuge: boom\n", &calls))(w, r)
 	}))
 	t.Cleanup(srv.Close)
 	srvURL = srv.URL
@@ -1365,7 +1377,7 @@ func TestFailureDetail_ForeignHostJobURLIsNotFetched(t *testing.T) {
 		t.Errorf("foreign host got request %s %s (Authorization=%q)", r.Method, r.URL.Path, r.Header.Get("Authorization"))
 	}))
 	t.Cleanup(foreign.Close)
-	pr := newPRForgeTestForge(t, jobLogHandler(foreign.URL+"/owner/repo/actions/runs/7/jobs/2", func(w http.ResponseWriter, r *http.Request) {
+	pr := newPRForgeTestForge(t, jobLogHandler(foreign.URL+"/owner/repo/actions/runs/7/jobs/1", func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected request %s", r.URL.Path)
 	}))
 	got, err := pr.FailureDetail("https://forge.test/owner/repo/pulls/206")
@@ -1377,42 +1389,34 @@ func TestFailureDetail_ForeignHostJobURLIsNotFetched(t *testing.T) {
 	}
 }
 
-func TestFailureDetail_NonJobTargetURLIsNotFetched(t *testing.T) {
-	var srvURL string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		jobLogHandler(srvURL+"/owner/repo/actions/runs/7", func(w http.ResponseWriter, r *http.Request) {
-			t.Errorf("unexpected request %s", r.URL.Path)
-		})(w, r)
-	}))
-	t.Cleanup(srv.Close)
-	srvURL = srv.URL
-	if _, err := newPRForgeAt(t, srv.URL).FailureDetail("https://forge.test/owner/repo/pulls/206"); err != nil {
-		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
+func TestFailureDetail_UnfetchableJobLinksRenderWithoutALog(t *testing.T) {
+	for name, link := range map[string]string{
+		"not a job page":      "/owner/repo/actions/runs/7",
+		"another repo":        "/other/thing/actions/runs/7/jobs/1",
+		"non-numeric job":     "/owner/repo/actions/runs/7/jobs/x",
+		"run zero":            "/owner/repo/actions/runs/0/jobs/0",
+		"foreign path prefix": "/some/other/endpoint/owner/repo/actions/runs/7/jobs/1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			pr := newPRForgeTestForge(t, jobLogHandler(link, func(w http.ResponseWriter, r *http.Request) {
+				t.Errorf("unexpected request %s (Authorization=%q)", r.URL.Path, r.Header.Get("Authorization"))
+			}))
+			got, err := pr.FailureDetail("https://forge.test/owner/repo/pulls/206")
+			if err != nil {
+				t.Fatalf("FailureDetail(...) unexpected error: %v", err)
+			}
+			if !strings.Contains(got, "exit status 1") {
+				t.Fatalf("FailureDetail(...) = %q, want the status summary still rendered", got)
+			}
+		})
 	}
 }
 
-func TestFailureDetail_OtherRepoJobURLIsNotFetched(t *testing.T) {
-	var srvURL string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		jobLogHandler(srvURL+"/other/thing/actions/runs/7/jobs/2", func(w http.ResponseWriter, r *http.Request) {
-			t.Errorf("unexpected request %s", r.URL.Path)
-		})(w, r)
-	}))
-	t.Cleanup(srv.Close)
-	srvURL = srv.URL
-	if _, err := newPRForgeAt(t, srv.URL).FailureDetail("https://forge.test/owner/repo/pulls/206"); err != nil {
-		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
-	}
-}
-
-func TestFailureDetail_LogsRouteMissingStillSucceeds(t *testing.T) {
-	var srvURL string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		jobLogHandler(srvURL+"/owner/repo/actions/runs/7/jobs/2", http.NotFound)(w, r)
-	}))
-	t.Cleanup(srv.Close)
-	srvURL = srv.URL
-	got, err := newPRForgeAt(t, srv.URL).FailureDetail("https://forge.test/owner/repo/pulls/206")
+// An instance without the Actions API (pre-16) answers 404, which lands as no
+// log, not a failed detail.
+func TestFailureDetail_ActionsAPIMissingStillSucceeds(t *testing.T) {
+	pr := newPRForgeTestForge(t, jobLogHandler("/owner/repo/actions/runs/7/jobs/1", http.NotFound))
+	got, err := pr.FailureDetail("https://forge.test/owner/repo/pulls/206")
 	if err != nil {
 		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
 	}
@@ -1421,44 +1425,13 @@ func TestFailureDetail_LogsRouteMissingStillSucceeds(t *testing.T) {
 	}
 }
 
-// A status target_url is remote-supplied: path segments before
-// <owner>/<repo>/actions/... that are not the configured base's own must not
-// earn a credentialed request, or a hostile link could aim the token at any
-// route on the configured host.
-func TestFailureDetail_ForeignPathPrefixJobURLIsNotFetched(t *testing.T) {
-	var srvURL string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		jobLogHandler(srvURL+"/some/other/endpoint/owner/repo/actions/runs/7/jobs/2", func(w http.ResponseWriter, r *http.Request) {
-			t.Errorf("unexpected request %s (Authorization=%q)", r.URL.Path, r.Header.Get("Authorization"))
-		})(w, r)
-	}))
-	t.Cleanup(srv.Close)
-	srvURL = srv.URL
-	got, err := newPRForgeAt(t, srv.URL).FailureDetail("https://forge.test/owner/repo/pulls/206")
-	if err != nil {
-		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
-	}
-	if !strings.Contains(got, "exit status 1") {
-		t.Fatalf("FailureDetail(...) = %q, want the status summary still rendered", got)
-	}
-}
-
 // A Forgejo served under a subpath keeps working: the configured base's path
-// is the prefix the job link must carry.
+// is the prefix the job link must carry, and the API chain sits under it too.
 func TestFailureDetail_SubpathBaseJobURLIsFetched(t *testing.T) {
-	var srvURL string
-	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		jobLogHandler(srvURL+"/forge/owner/repo/actions/runs/7/jobs/2", func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/owner/repo/actions/runs/7/jobs/2/logs" {
-				http.NotFound(w, r)
-				return
-			}
-			w.Write([]byte("FAIL TestSub: boom\n"))
-		})(w, r)
-	})
+	var calls []string
+	inner := jobLogHandler("/forge/owner/repo/actions/runs/7/jobs/1", actionsAPI("FAIL TestSub: boom\n", &calls))
 	srv := httptest.NewServer(http.StripPrefix("/forge", inner))
 	t.Cleanup(srv.Close)
-	srvURL = srv.URL
 	got, err := newPRForgeAt(t, srv.URL+"/forge").FailureDetail("https://forge.test/owner/repo/pulls/206")
 	if err != nil {
 		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
@@ -1468,26 +1441,48 @@ func TestFailureDetail_SubpathBaseJobURLIsFetched(t *testing.T) {
 	}
 }
 
+// A link that lacks the base's subpath is refused, not read at the root.
+func TestFailureDetail_SubpathBaseWithoutPrefixIsNotFetched(t *testing.T) {
+	inner := jobLogHandler("/owner/repo/actions/runs/7/jobs/1", func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s", r.URL.Path)
+	})
+	srv := httptest.NewServer(http.StripPrefix("/forge", inner))
+	t.Cleanup(srv.Close)
+	if _, err := newPRForgeAt(t, srv.URL+"/forge").FailureDetail("https://forge.test/owner/repo/pulls/206"); err != nil {
+		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
+	}
+}
+
 func TestFailureDetail_SkipsJobLogsOnceTheBudgetIsSpent(t *testing.T) {
 	t.Cleanup(forgejo.SetJobLogsBudget(-time.Second))
-	var srvURL string
-	var logHits atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		jobLogHandler(srvURL+"/owner/repo/actions/runs/7/jobs/2", func(w http.ResponseWriter, r *http.Request) {
-			logHits.Add(1)
-			w.Write([]byte("FAIL TestThing: boom\n"))
-		})(w, r)
-	}))
-	t.Cleanup(srv.Close)
-	srvURL = srv.URL
-	got, err := newPRForgeAt(t, srv.URL).FailureDetail("https://forge.test/owner/repo/pulls/206")
+	var calls []string
+	pr := newPRForgeTestForge(t, jobLogHandler("/owner/repo/actions/runs/7/jobs/1",
+		actionsAPI("FAIL TestThing: boom\n", &calls)))
+	got, err := pr.FailureDetail("https://forge.test/owner/repo/pulls/206")
 	if err != nil {
 		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
 	}
 	if !strings.Contains(got, "ci/build") || strings.Contains(got, "boom") {
 		t.Fatalf("FailureDetail(...) = %q, want the failing status without a log", got)
 	}
-	if logHits.Load() != 0 {
-		t.Fatalf("log route hit %d times, want 0", logHits.Load())
+	if len(calls) != 0 {
+		t.Fatalf("log chain requested %q, want no requests", calls)
+	}
+}
+
+func TestJobLog_PastDeadlineSendsNoRequest(t *testing.T) {
+	var calls []string
+	srv := httptest.NewServer(actionsAPI("FAIL TestThing: boom\n", &calls))
+	t.Cleanup(srv.Close)
+	cf := newPRForgeAt(t, srv.URL)
+	link := "/owner/repo/actions/runs/7/jobs/1"
+	if got := forgejo.JobLog(cf, link, time.Now().Add(-time.Second)); got != "" {
+		t.Fatalf("JobLog past its deadline = %q, want empty", got)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("log chain requested %q, want no requests", calls)
+	}
+	if got := forgejo.JobLog(cf, link, time.Now().Add(time.Minute)); !strings.Contains(got, "boom") {
+		t.Fatalf("JobLog within its deadline = %q, want the log tail", got)
 	}
 }
