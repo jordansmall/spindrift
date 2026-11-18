@@ -1,6 +1,10 @@
 package forge
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"unicode/utf8"
+)
 
 // CODE_FORGE_REMOTE_URL commonly carries embedded credentials
 // (https://oauth2:<token>@host/repo.git) for hosts without a credential helper,
@@ -46,4 +50,47 @@ func TestRedactURLCredentials_StripsUserinfo(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRedactedOutputTail(t *testing.T) {
+	const maxTail = 512 // mirrors RedactedOutputTail's limit
+
+	t.Run("short output is kept whole", func(t *testing.T) {
+		if got, want := RedactedOutputTail([]byte("  fatal: nope\n")), ": fatal: nope"; got != want {
+			t.Errorf("RedactedOutputTail = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("blank output renders nothing", func(t *testing.T) {
+		if got := RedactedOutputTail([]byte(" \n")); got != "" {
+			t.Errorf("RedactedOutputTail = %q, want empty", got)
+		}
+	})
+
+	t.Run("long output keeps only the tail", func(t *testing.T) {
+		out := strings.Repeat("a", maxTail) + "END"
+		got := RedactedOutputTail([]byte(out))
+		if want := ": ..." + out[len(out)-maxTail:]; got != want {
+			t.Errorf("RedactedOutputTail tail = %q, want %q", got, want)
+		}
+		if strings.Contains(got, "a"+strings.Repeat("a", maxTail)) {
+			t.Errorf("RedactedOutputTail kept more than %d bytes of output", maxTail)
+		}
+	})
+
+	t.Run("a cut inside a multibyte rune advances to a rune boundary", func(t *testing.T) {
+		// "é" is two bytes; the naive cut at len-maxTail lands on its
+		// continuation byte.
+		out := "é" + strings.Repeat("a", maxTail-1)
+		if utf8.RuneStart(out[len(out)-maxTail]) {
+			t.Fatal("fixture cut does not land mid-rune")
+		}
+		got := RedactedOutputTail([]byte(out))
+		if !utf8.ValidString(got) {
+			t.Errorf("RedactedOutputTail returned invalid UTF-8: %q", got)
+		}
+		if want := ": ..." + strings.Repeat("a", maxTail-1); got != want {
+			t.Errorf("RedactedOutputTail = %q, want %q", got, want)
+		}
+	})
 }

@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/bundlerelay"
@@ -303,29 +302,10 @@ func (f *forgejoCodeForge) cloneInto(op, shapeFlag string) func(dir string) erro
 	return func(dir string) error {
 		out, err := f.cred.Apply(exec.Command("git", "clone", shapeFlag, f.remote, dir)).CombinedOutput()
 		if err != nil {
-			return fmt.Errorf("forgejo: %s: git clone %s: %w%s", op, forge.RedactURLCredentials(f.remote), err, cloneOutputTail(out))
+			return fmt.Errorf("forgejo: %s: git clone %s: %w%s", op, forge.RedactURLCredentials(f.remote), err, forge.RedactedOutputTail(out))
 		}
 		return nil
 	}
-}
-
-// cloneOutputTail renders the tail of git's output as ": <text>" so a seed
-// failure names its cause (auth, not-found, network). It is redacted because
-// git echoes the remote URL and the error reaches issue comments.
-func cloneOutputTail(out []byte) string {
-	const maxTail = 512
-	msg := strings.TrimSpace(forge.RedactURLCredentials(string(out)))
-	if msg == "" {
-		return ""
-	}
-	if len(msg) > maxTail {
-		cut := len(msg) - maxTail
-		for cut < len(msg) && !utf8.RuneStart(msg[cut]) {
-			cut++
-		}
-		msg = "..." + msg[cut:]
-	}
-	return ": " + msg
 }
 
 // SeedMirror clones the target repo bare into dir with the launcher's own
