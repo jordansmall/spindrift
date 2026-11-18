@@ -250,16 +250,9 @@ func (h composedCodeForgeHarness) FailNextRebase(ref string) {
 // PRForge is the one the composed Code Forge resolves.
 type composedPRHarness struct{ *connectorHarness }
 
-var (
-	_ forgetest.PRForgeHarness = composedPRHarness{}
-	_ forgetest.NoJobLogs      = composedPRHarness{}
-)
+var _ forgetest.PRForgeHarness = composedPRHarness{}
 
 func (h composedPRHarness) Forge() forge.PRForge { return h.caps.PRForge }
-
-// HasNoJobLogs: a Forgejo Actions job's log is a web route outside the Route
-// table, so the Connector leaves forge.jobLog unset.
-func (composedPRHarness) HasNoJobLogs() {}
 
 // composedHostMediationHarness is the harness the host-mediation contract runs
 // against: the Code Forge composed for a read-only Box, so core relays the Box's
@@ -455,6 +448,7 @@ func TestConnector_Contracts(t *testing.T) {
 				t.Run("BranchProtection", func(t *testing.T) { testBranchProtection(t, h) })
 				t.Run("MergeTransientAndPermanent", func(t *testing.T) { testMergeTransientAndPermanent(t, h) })
 				t.Run("MergeRefusedWhileConflictCheckRuns", func(t *testing.T) { testMergeRefusedWhileConflictCheckRuns(t, h) })
+				t.Run("HugeJobLogKeepsItsTail", func(t *testing.T) { testHugeJobLogKeepsItsTail(t, h) })
 				cov.record(t, h)
 			})
 		})
@@ -582,6 +576,28 @@ func testMergeTransientAndPermanent(t *testing.T, h *connectorHarness) {
 			t.Error("a refused merge landed")
 		}
 	})
+}
+
+// A job log over the host's response cap (connectorhost's maxHTTPResponse,
+// 4 MiB) arrives as its tail, not as a failed read: only a followRedirect Route
+// makes the host keep the tail of an oversize body.
+func testHugeJobLogKeepsItsTail(t *testing.T, h *connectorHarness) {
+	url := h.SeedOpenPR("425")
+	noise := "noise line\n"
+	h.SeedFailingCheckLog(url, "ci/build", "HEAD-MARKER\n"+strings.Repeat(noise, (5<<20)/len(noise))+"FAIL TestHuge: boom\n")
+
+	got, err := h.caps.PRForge.FailureDetail(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"FAIL TestHuge: boom", "[log excerpt for \"ci/build\" trimmed"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("FailureDetail lacks %q", want)
+		}
+	}
+	if strings.Contains(got, "HEAD-MARKER") {
+		t.Error("FailureDetail kept the head of a log over the response cap")
+	}
 }
 
 // Forgejo reports mergeable=false, not unknown, while its async conflict check
