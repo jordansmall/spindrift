@@ -26,6 +26,16 @@
     kind = "presence";
   }
   {
+    field = "SignalIssueRead";
+    env = "BOX_SIGNAL_ISSUE_READ";
+    kind = "presence";
+  }
+  {
+    field = "SignalIssueSearch";
+    env = "BOX_SIGNAL_ISSUE_SEARCH";
+    kind = "presence";
+  }
+  {
     field = "WorkerProvisioned";
     env = "BOX_WORKER_PROVISIONED";
     kind = "presence";

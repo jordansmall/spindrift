@@ -2,6 +2,7 @@ package promptassembly
 
 import (
 	"encoding/json"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -44,6 +45,11 @@ func fragReadOnly(e *Env) { e.BoxWriteEnabled = false }
 func fragResearch(e *Env) { e.DispatchKind = "research" }
 
 func fragSocket(e *Env) { e.SignalCarrier = "socket" }
+
+// fragIssueRead and fragIssueSearch stand for the host forwarding
+// BOX_SIGNAL_ISSUE_READ / BOX_SIGNAL_ISSUE_SEARCH (issue #6924).
+func fragIssueRead(e *Env)   { e.SignalIssueRead = true }
+func fragIssueSearch(e *Env) { e.SignalIssueSearch = true }
 
 func fragWorker(e *Env) { e.WorkerProvisioned = true }
 
@@ -167,10 +173,10 @@ func TestAssembleIssueReadSelection(t *testing.T) {
 		t.Run(kind.name, func(t *testing.T) {
 			with := func(fs ...func(*Env)) []func(*Env) { return append(fs, kind.mutate...) }
 			assertSelection(t, rows, targetPrompt, []selectionCase{
-				{"github", with(fragSocket), []string{"IR_GITHUB"}},
+				{"github", with(fragSocket, fragIssueRead), []string{"IR_GITHUB"}},
 				{"local", with(fragSocket, fragLocalTracker), []string{"IR_LOCAL"}},
-				{"forgejo", with(fragSocket, fragForgejoTracker), []string{"IR_FORGEJO"}},
-				{"jira", with(fragSocket, fragJiraTracker), []string{"IR_GITHUB"}},
+				{"forgejo", with(fragSocket, fragIssueRead, fragForgejoTracker), []string{"IR_FORGEJO"}},
+				{"jira", with(fragSocket, fragIssueRead, fragJiraTracker), []string{"IR_GITHUB"}},
 				{"github log", with(), []string{"IR_GITHUB_LOG", "IR_UNREADABLE"}},
 				{"local log", with(fragLocalTracker), []string{"IR_LOCAL"}},
 				{"forgejo log", with(fragForgejoTracker), []string{"IR_FORGEJO_LOG", "IR_UNREADABLE"}},
@@ -333,11 +339,11 @@ func TestAssembleFilerPromptSelection(t *testing.T) {
 		{"ISSUE_TRACKER_LOCAL", "DEDUP_LOCAL"},
 		{"ISSUE_TRACKER_UNSEARCHABLE", "DEDUP_NONE"},
 	}, targetFiler, []selectionCase{
-		{"github read-write", []func(*Env){fragSocket}, []string{"FILE_GITHUB", "DEDUP_GITHUB"}},
+		{"github read-write", []func(*Env){fragSocket, fragIssueSearch}, []string{"FILE_GITHUB", "DEDUP_GITHUB"}},
 		{"github read-write log", nil, []string{"FILE_GITHUB", "DEDUP_NONE"}},
 		{"github read-only", []func(*Env){fragReadOnly}, []string{"FILE_RELAY_LOG", "DEDUP_NONE"}},
-		{"github read-only socket", []func(*Env){fragReadOnly, fragSocket}, []string{"FILE_RELAY_SOCKET", "DEDUP_GITHUB"}},
-		{"forgejo read-write", []func(*Env){fragForgejoTracker, fragSocket}, []string{"FILE_FORGEJO", "DEDUP_FORGEJO"}},
+		{"github read-only socket", []func(*Env){fragReadOnly, fragSocket, fragIssueSearch}, []string{"FILE_RELAY_SOCKET", "DEDUP_GITHUB"}},
+		{"forgejo read-write", []func(*Env){fragForgejoTracker, fragSocket, fragIssueSearch}, []string{"FILE_FORGEJO", "DEDUP_FORGEJO"}},
 		{"forgejo read-write log", []func(*Env){fragForgejoTracker}, []string{"FILE_FORGEJO", "DEDUP_NONE"}},
 		{"jira", []func(*Env){fragJiraTracker}, []string{"FILE_RELAY_LOG", "DEDUP_NONE"}},
 		{"jira socket", []func(*Env){fragJiraTracker, fragSocket}, []string{"FILE_RELAY_SOCKET", "DEDUP_NONE"}},
@@ -592,16 +598,21 @@ func TestAssembleScoutIssueReadFollowsCarrier(t *testing.T) {
 		"fragments/reachable.md":  "[REACHABLE]",
 		"fragments/unreadable.md": "[UNREADABLE]",
 	})
-	for _, tc := range []struct{ tracker, carrier, want, wantNot string }{
-		{"github", "socket", "[REACHABLE]", "[UNREADABLE]"},
-		{"jira", "socket", "[REACHABLE]", "[UNREADABLE]"},
-		{"local", "socket", "", "[REACHABLE]"},
-		{"github", "log", "[UNREADABLE]", "[REACHABLE]"},
-		{"jira", "log", "[UNREADABLE]", "[REACHABLE]"},
+	for _, tc := range []struct {
+		tracker, carrier, want, wantNot string
+		read                            bool // the host forwarded BOX_SIGNAL_ISSUE_READ
+	}{
+		{"github", "socket", "[REACHABLE]", "[UNREADABLE]", true},
+		{"jira", "socket", "[REACHABLE]", "[UNREADABLE]", true},
+		{"github", "socket", "[UNREADABLE]", "[REACHABLE]", false},
+		{"local", "socket", "", "[REACHABLE]", false},
+		{"github", "log", "[UNREADABLE]", "[REACHABLE]", false},
+		{"jira", "log", "[UNREADABLE]", "[REACHABLE]", false},
 	} {
 		env := env0
 		env.IssueTracker = tc.tracker
 		env.SignalCarrier = tc.carrier
+		env.SignalIssueRead = tc.read
 		env.AgentsJSONTemplate = rosterScoutOnly
 		env.AgentsPromptFiles = `{"scout":"scout-prompt.md"}`
 		res, err := Assemble(env, reg)
@@ -612,5 +623,55 @@ func TestAssembleScoutIssueReadFollowsCarrier(t *testing.T) {
 		if !strings.Contains(scout, tc.want) || strings.Contains(scout, tc.wantNot) || (tc.want == "" && strings.Contains(scout, "[UNREADABLE]")) {
 			t.Errorf("%s/%s scout prompt = %q, want %q and not %s", tc.tracker, tc.carrier, scout, tc.want, tc.wantNot)
 		}
+	}
+}
+
+// Jira reads its own tracker folder and the dedup row is not Shared, so a jira
+// Filer with a search verb forwarded needs jira/filer-dedup.md to get a search
+// step rather than an empty FILER_DEDUP_STEP (issue #6924). The jira fragment
+// is the shipped file, so a missing or search-less one fails here.
+func TestAssembleFilerDedupJiraSearchable(t *testing.T) {
+	shipped, err := os.ReadFile("../../../../templates/default/prompts/fragments/jira/filer-dedup.md")
+	if err != nil {
+		t.Fatalf("shipped jira filer-dedup fragment: %v", err)
+	}
+	jira := func(e *Env) {
+		e.IssueTracker, e.TrackerAxisRead, e.TrackerAxisWrite, e.TrackerAxisFiler = "jira", "JIRA", "GITHUB", "GH"
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate []func(*Env)
+		want   string
+	}{
+		{"github with search", []func(*Env){fragSocket, fragIssueSearch}, "GH-DEDUP"},
+		{"jira with search", []func(*Env){jira, fragSocket, fragIssueSearch}, "driver-exec signal issue-search -state open"},
+		{"jira without search", []func(*Env){jira, fragSocket}, "NO-SEARCH"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reg, env := syntheticRegistry(t,
+				[]FragmentRow{
+					{Axis: "tracker", Gate: "ISSUE_TRACKER_SEARCHABLE", Fragment: "filer-dedup.md", Var: "DEDUP_STEP"},
+					{Gate: "ISSUE_TRACKER_UNSEARCHABLE", Fragment: "filer-dedup-unwritable.md", Var: "DEDUP_STEP"},
+				},
+				map[string]string{
+					"issue-prompt.md":                     "dedup:${DEDUP_STEP}|\n",
+					"fragments/github/filer-dedup.md":     "GH-DEDUP",
+					"fragments/jira/filer-dedup.md":       string(shipped),
+					"fragments/filer-dedup-unwritable.md": "NO-SEARCH",
+				})
+			for _, m := range tc.mutate {
+				m(&env)
+			}
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+			if !strings.Contains(result.Prompt, tc.want) {
+				t.Errorf("Prompt = %q, want it to contain %q", result.Prompt, tc.want)
+			}
+			if tc.name == "jira without search" && strings.Contains(result.Prompt, "issue-search") {
+				t.Errorf("Prompt = %q, want no search step without the verb", result.Prompt)
+			}
+		})
 	}
 }

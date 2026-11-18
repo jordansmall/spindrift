@@ -75,6 +75,13 @@ type cellInputs struct {
 func (c *cellInputs) export(k, v string) { c.vars[k] = v }
 func (c *cellInputs) unset(k string)     { delete(c.vars, k) }
 
+// hostIssueVerbs stands for the host forwarding the Signal socket's issue
+// read and search signals (issue #6924), as it does for github and forgejo.
+func (c *cellInputs) hostIssueVerbs() {
+	c.export("BOX_SIGNAL_ISSUE_READ", "1")
+	c.export("BOX_SIGNAL_ISSUE_SEARCH", "1")
+}
+
 func (c *cellInputs) bakeSkill(name string) {
 	if !slices.Contains(c.skills, name) {
 		c.skills = append(c.skills, name)
@@ -353,10 +360,19 @@ func goldenCells() []goldenCell {
 			}
 		}},
 		{name: "jira-tracker-filer", mode: modeInitial, review: true, setup: func(c *cellInputs) {
-			// A tracker with no in-Box client: the Filer's dedup runs no
-			// tracker search (issue #6354).
+			// No BOX_SIGNAL_ISSUE_SEARCH (log carrier, no host searcher
+			// forwarded): the Filer's dedup runs no tracker search (issues
+			// #6354, #6924).
 			c.export("ISSUE_TRACKER", "jira")
 			c.filerOn()
+		}},
+		{name: "jira-tracker-filer-signal-socket", mode: modeInitial, review: true, setup: func(c *cellInputs) {
+			// A Jira Filer whose host built a searcher runs jira's own dedup
+			// fragment through the socket verb (issue #6924).
+			c.export("ISSUE_TRACKER", "jira")
+			c.filerOn()
+			c.export("BOX_SIGNAL_CARRIER", "socket")
+			c.hostIssueVerbs()
 		}},
 		{name: "orchestrator-filer-on", mode: modeInitial, review: true, setup: func(c *cellInputs) {
 			c.filerOn()
@@ -399,6 +415,7 @@ func goldenCells() []goldenCell {
 			c.dispatch("research")
 			c.readOnly()
 			c.export("BOX_SIGNAL_CARRIER", "socket")
+			c.hostIssueVerbs()
 		}},
 		{name: "local-tracker-research-signal-socket", mode: modeInitial, setup: func(c *cellInputs) {
 			c.dispatch("research")
@@ -410,10 +427,12 @@ func goldenCells() []goldenCell {
 			c.forgejoTracker()
 			c.readOnly()
 			c.export("BOX_SIGNAL_CARRIER", "socket")
+			c.hostIssueVerbs()
 		}},
 		{name: "github-read-only-signal-socket", mode: modeInitial, setup: func(c *cellInputs) {
 			c.readOnly()
 			c.export("BOX_SIGNAL_CARRIER", "socket")
+			c.hostIssueVerbs()
 		}},
 		{name: "orchestrator-filer-on-read-only", mode: modeInitial, review: true, setup: func(c *cellInputs) {
 			c.filerOn()
@@ -430,11 +449,13 @@ func goldenCells() []goldenCell {
 			c.filerOn()
 			c.readOnly()
 			c.export("BOX_SIGNAL_CARRIER", "socket")
+			c.hostIssueVerbs()
 		}},
 		{name: "research-filer-on-signal-socket", mode: modeInitial, setup: func(c *cellInputs) {
 			c.dispatch("research")
 			c.filerOn()
 			c.export("BOX_SIGNAL_CARRIER", "socket")
+			c.hostIssueVerbs()
 		}},
 		{name: "butler-bugs", mode: modeInitial, setup: func(c *cellInputs) {
 			c.butler("bugs")
@@ -477,6 +498,7 @@ func goldenCells() []goldenCell {
 			c.forgejoTracker()
 			c.filerOn()
 			c.export("BOX_SIGNAL_CARRIER", "socket")
+			c.hostIssueVerbs()
 		}},
 		{name: "forgejo-readonly-orchestrator-filer-on", mode: modeInitial, review: true, setup: func(c *cellInputs) {
 			// A relay Filer reads through the tracker too; under the log
@@ -514,6 +536,7 @@ func goldenCells() []goldenCell {
 			c.export("BOX_FILER_ENABLED", "1")
 			c.unset("BOX_OUTBOX_RELAY_CAPABLE")
 			c.export("BOX_SIGNAL_CARRIER", "socket")
+			c.hostIssueVerbs()
 		}},
 		{name: "butler-docs-drift-filer-on-signal-socket", mode: modeInitial, setup: func(c *cellInputs) {
 			c.butler("docs-drift")
@@ -521,6 +544,7 @@ func goldenCells() []goldenCell {
 			c.export("BOX_FILER_ENABLED", "1")
 			c.unset("BOX_OUTBOX_RELAY_CAPABLE")
 			c.export("BOX_SIGNAL_CARRIER", "socket")
+			c.hostIssueVerbs()
 		}},
 	}
 }

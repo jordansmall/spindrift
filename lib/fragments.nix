@@ -399,13 +399,14 @@ let
     # Step 2's tracker searches fork on whether a search reaches the Box, not
     # on FILER_FILE_DIRECT_GH: a relay Filer still searches through the tracker.
     # The search is the Signal socket's issue-search verb (issue #6895), so
-    # github and forgejo run it under the socket carrier and local keeps its
-    # folder search. jira (no searcher, issue #6354) and any tracker under the
-    # log carrier (no socket) take the no-search arm: the host's dedup over
-    # relayed intents is the whole check. The two arms share a var, like the
-    # issue-read arms below.
-    # One slot (issue #5647, ADR 0068): each backend's search commands differ
-    # in more than its name, so each folder carries its own file.
+    # the search arm renders wherever the host built a searcher
+    # (BOX_SIGNAL_ISSUE_SEARCH, issue #6924) and local keeps its folder
+    # search. Everything else (no searcher, or the log carrier) takes the
+    # no-search arm: the host's dedup over relayed intents is the whole check.
+    # The two arms share a var, like the issue-read arms below.
+    # One slot (issue #5647, ADR 0068): the slot is per tracker folder, so each
+    # searchable backend carries its own file, even where (jira, github) the
+    # text matches.
     {
       axis = "tracker";
       gate = "ISSUE_TRACKER_SEARCHABLE";

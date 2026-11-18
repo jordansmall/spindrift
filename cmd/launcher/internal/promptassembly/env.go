@@ -113,6 +113,13 @@ type Env struct {
 	// selects which variant of each signal fragment renders (issue #3726).
 	SignalCarrier string // $BOX_SIGNAL_CARRIER
 
+	// SignalIssueRead and SignalIssueSearch are true when the host built an issue
+	// reader / searcher for this dispatch, so the Signal socket's `signal issue`
+	// and `signal issue-search` verbs answer. Positive-only: absent means the verb
+	// is not offered (issue #6924).
+	SignalIssueRead   bool // $BOX_SIGNAL_ISSUE_READ
+	SignalIssueSearch bool // $BOX_SIGNAL_ISSUE_SEARCH
+
 	// PromptsDir, AgentsPromptFiles, and DriverAgentFilesDir locate the
 	// fragment/prompt files and the per-Driver agent-file rewrite target.
 	PromptsDir          string // --prompts-dir, from $PROMPTS_DIR (default "/agent/prompts"; SPINDRIFT_PROMPT_DIR override resolved before this phase)

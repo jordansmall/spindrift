@@ -1271,7 +1271,8 @@ in
     pkgs.runCommand "filer-prompt-dedup-searches-all-open-issues" { }
       ''
         for f in ${../../templates/default/prompts/fragments/github/filer-dedup.md} \
-          ${../../templates/default/prompts/fragments/forgejo/filer-dedup.md}; do
+          ${../../templates/default/prompts/fragments/forgejo/filer-dedup.md} \
+          ${../../templates/default/prompts/fragments/jira/filer-dedup.md}; do
           grep -q -- 'driver-exec signal issue-search -state open' "$f"
           if grep -qE '(^|[^a-z])gh |curl|_TOKEN' "$f"; then
             echo "$f: the dedup search must not call a forge CLI, curl or a token" >&2
@@ -1398,6 +1399,11 @@ in
         jq -r '.filer.prompt // empty' "$g/forgejo-orchestrator-filer-on-signal-socket.agents.json" >socket.txt
         grep -q 'signal issue-search -state open' socket.txt || {
           echo "forgejo-orchestrator-filer-on-signal-socket: filer prompt lost its issue-search dedup (issue #6895)" >&2
+          exit 1
+        }
+        jq -r '.filer.prompt // empty' "$g/jira-tracker-filer-signal-socket.agents.json" >jira-socket.txt
+        grep -q 'signal issue-search -state open' jira-socket.txt || {
+          echo "jira-tracker-filer-signal-socket: filer prompt lost its issue-search dedup (issue #6924)" >&2
           exit 1
         }
         for cell in forgejo-orchestrator-filer-on forgejo-readonly-orchestrator-filer-on; do

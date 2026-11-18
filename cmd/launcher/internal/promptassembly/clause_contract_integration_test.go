@@ -2593,6 +2593,11 @@ var clauseContracts = []clauseContract{
 		reason:   "the Filer's dedup runs through the Signal socket verb, never a REST call with the Forgejo token (issue #6895).",
 	},
 	{
+		fragment: "jira/filer-dedup.md",
+		clause:   "driver-exec signal issue-search -state open",
+		reason:   "a jira Filer whose host built a searcher searches open issues through the Signal socket verb before filing (issue #6924).",
+	},
+	{
 		fragment: "filer-relay-reason-readonly.md",
 		clause:   "Your token is read-only",
 		reason:   "a read-only Box's relay states its real reason, the token it was given (issue #6354).",
