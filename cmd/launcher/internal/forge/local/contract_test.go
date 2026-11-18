@@ -41,6 +41,7 @@ func (h *localHarness) SeedIssue(iss forge.Issue) {
 	writeLocalIssue(h.t, h.dir, iss.Number, localIssue{
 		frontmatter: localFrontmatter{
 			Title:   iss.Title,
+			Labels:  iss.Labels,
 			Created: created.Format(time.RFC3339),
 		},
 		body: iss.Body,
