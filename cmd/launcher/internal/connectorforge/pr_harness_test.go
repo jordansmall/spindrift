@@ -3,9 +3,11 @@ package connectorforge_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -307,4 +309,86 @@ func TestAutoMergeAllowedNeedsTheCapability(t *testing.T) {
 
 func TestComposedForgePRForgeContract_RemoteEngine(t *testing.T) {
 	forgetest.RunPRForgeContract(t, connectorforgetest.NewPRRemote(t))
+}
+
+func TestEveryComposedForgeOffersTheMirrorSeedWhateverTheBox(t *testing.T) {
+	for name, caps := range map[string]forge.Capabilities{
+		"read-write":      connectorforgetest.NewPR(t).Capabilities(),
+		"read-only":       connectorforgetest.NewHostMediationVariant(t, connectorforgetest.MinimalPRWasm).Capabilities(),
+		"push-only":       connectorforgetest.New(t).Capabilities(),
+		"read-only+relay": connectorforgetest.NewHostMediation(t).Capabilities(),
+	} {
+		if caps.MirrorSeeder == nil {
+			t.Errorf("%s: MirrorSeeder is nil, want core's bare clone offered", name)
+		}
+	}
+}
+
+func TestSeedMirrorClonesTheRepoBareWithCoresCredential(t *testing.T) {
+	h := connectorforgetest.NewHostMediation(t)
+	seen := gitCredentialLog(t)
+	dir := filepath.Join(t.TempDir(), "mirror")
+	if err := h.Capabilities().MirrorSeeder.SeedMirror(dir); err != nil {
+		t.Fatalf("SeedMirror: %v", err)
+	}
+	if out, err := exec.Command("git", "-C", dir, "rev-parse", "--is-bare-repository").Output(); err != nil || strings.TrimSpace(string(out)) != "true" {
+		t.Errorf("mirror is not a bare repo: (%q, %v)", out, err)
+	}
+	if got, want := forgetest.RevParse(t, dir, "refs/heads/main"), forgetest.RevParse(t, h.Repo.Bare, "refs/heads/main"); got != want {
+		t.Errorf("mirror main = %s, want %s", got, want)
+	}
+	log, err := os.ReadFile(seen)
+	if err != nil || !strings.Contains(string(log), h.Credential.Username+":"+h.Credential.Password) {
+		t.Errorf("seed's git ran without core's credential: (%q, %v)", log, err)
+	}
+}
+
+// pointGitAtMissingRepo repoints the harness's insteadOf rewrite at a repo that
+// does not exist, so the next clone fails.
+func pointGitAtMissingRepo(t *testing.T) {
+	t.Helper()
+	n, err := strconv.Atoi(os.Getenv("GIT_CONFIG_COUNT"))
+	if err != nil {
+		t.Fatalf("GIT_CONFIG_COUNT: %v", err)
+	}
+	for i := 0; i < n; i++ {
+		key := fmt.Sprintf("GIT_CONFIG_KEY_%d", i)
+		if strings.HasSuffix(os.Getenv(key), ".insteadOf") {
+			t.Setenv(key, "url."+filepath.Join(t.TempDir(), "missing.git")+".insteadOf")
+			return
+		}
+	}
+	t.Fatal("harness set no insteadOf rewrite")
+}
+
+func TestRelayCloneFailureNamesGitsCauseWithoutTheCredential(t *testing.T) {
+	h := connectorforgetest.NewHostMediation(t)
+	const ref = "agent/issue-9003"
+	outbox := h.SeedBundle(ref)
+	pointGitAtMissingRepo(t)
+	_, err := h.Capabilities().BundleCommitSubjects.CommitSubjects(outbox, "main", ref)
+	if err == nil {
+		t.Fatal("CommitSubjects against a missing repo succeeded")
+	}
+	if !strings.Contains(err.Error(), "fatal") {
+		t.Errorf("error %q does not name git's cause", err)
+	}
+	if strings.Contains(err.Error(), h.Credential.Password) {
+		t.Errorf("error %q carries core's credential", err)
+	}
+}
+
+func TestSeedMirrorFailureNamesGitsCauseWithoutTheCredential(t *testing.T) {
+	h := connectorforgetest.NewHostMediation(t)
+	pointGitAtMissingRepo(t)
+	err := h.Capabilities().MirrorSeeder.SeedMirror(filepath.Join(t.TempDir(), "mirror"))
+	if err == nil {
+		t.Fatal("SeedMirror against a missing repo succeeded")
+	}
+	if !strings.Contains(err.Error(), "fatal") {
+		t.Errorf("error %q does not name git's cause", err)
+	}
+	if strings.Contains(err.Error(), h.Credential.Password) {
+		t.Errorf("error %q carries core's credential", err)
+	}
 }
