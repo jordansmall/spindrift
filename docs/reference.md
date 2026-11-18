@@ -2689,7 +2689,8 @@ token's grant ride `POST /graphql`; an App installation token's grant reads `GET
 /installation/repositories`, the one Route these checks add. Quickstart, which
 runs before any Consumer flake, bakes the github Connector into its package and
 applies it as a row whose credential is `GH_TOKEN`; a `go run` of quickstart
-bakes in nothing and keeps `gh`.
+bakes in nothing and keeps `gh`, as does a quickstart run under a `GH_HOST` other
+than `github.com`, since the baked Routes target `api.github.com`.
 
 #### The jira Connector
 
