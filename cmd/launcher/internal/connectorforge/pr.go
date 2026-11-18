@@ -331,24 +331,20 @@ func (f *prForge) classifyFromPR(prURL string, cause error) error {
 	return fmt.Errorf("connector forge: merge %s: %w (mergeable state %q undetermined)", prURL, cause, w.Mergeable)
 }
 
-// Rebase rebases the PR's head branch through core's git plumbing.
+// Rebase is refused: the PR's head comes from the guest, so rebasing and
+// force-pushing it unpinned could rewrite main or release with core's
+// credential. Callers use RebasePRHead (issue #6961).
 func (f *prForge) Rebase(prURL string) error {
-	return f.rebase(prURL, "")
+	return fmt.Errorf("%w: an unpinned rebase of %s is refused, the head comes from the guest; use RebasePRHead", ErrAnswer, prURL)
 }
 
-// RebasePRHead is Rebase pinned to head, the agent branch core derived: the PR's
-// head comes from the guest, so a different one is refused before any git runs
-// (issue #6961).
+// RebasePRHead rebases the PR's head branch through core's git plumbing, pinned
+// to head, the agent branch core derived: the PR's head comes from the guest, so
+// a different one is refused before any git runs (issue #6961).
 func (f *prForge) RebasePRHead(prURL, head string) error {
 	if head == "" {
 		return fmt.Errorf("%w: RebasePRHead called with no expected head", ErrAnswer)
 	}
-	return f.rebase(prURL, head)
-}
-
-// rebase rebases the PR's head branch; a non-empty want is the only head it may
-// be.
-func (f *prForge) rebase(prURL, want string) error {
 	if f.push.git == nil {
 		return ErrNoGit
 	}
@@ -359,8 +355,8 @@ func (f *prForge) rebase(prURL, want string) error {
 	if w.Head == "" {
 		return fmt.Errorf("%w: PR %s has no head branch", ErrAnswer, w.Number)
 	}
-	if want != "" && w.Head != want {
-		return f.push.conn.AuditRefusal("forge.pr", fmt.Errorf("%w: PR %s head %q is not the agent branch %q", ErrAnswer, w.Number, w.Head, want))
+	if w.Head != head {
+		return f.push.conn.AuditRefusal("forge.pr", fmt.Errorf("%w: PR %s head %q is not the agent branch %q", ErrAnswer, w.Number, w.Head, head))
 	}
 	return f.push.git.Rebase(w.Head)
 }

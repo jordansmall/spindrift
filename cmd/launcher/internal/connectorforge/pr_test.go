@@ -473,22 +473,39 @@ func TestCreateDraftPR(t *testing.T) {
 
 func TestRebaseRebasesTheHeadBranch(t *testing.T) {
 	h := newPRHarness(t, nil, map[string]any{"forge.pr": prJSON + `,"head":"agent/issue-1"}`})
-	if err := h.f.Rebase(prURL7); err != nil {
+	if err := h.caps.PRHeadRebaser.RebasePRHead(prURL7, "agent/issue-1"); err != nil {
 		t.Fatal(err)
 	}
 	if len(h.git.rebased) != 1 || h.git.rebased[0] != "agent/issue-1" {
 		t.Errorf("rebased = %v, want [agent/issue-1]", h.git.rebased)
 	}
 	h = newPRHarness(t, nil, map[string]any{"forge.pr": prJSON + `}`})
-	if err := h.f.Rebase(prURL7); !errors.Is(err, ErrAnswer) || len(h.git.rebased) != 0 {
-		t.Errorf("Rebase with no head = %v, rebased %v; want ErrAnswer and no rebase", err, h.git.rebased)
+	if err := h.caps.PRHeadRebaser.RebasePRHead(prURL7, "agent/issue-1"); !errors.Is(err, ErrAnswer) || len(h.git.rebased) != 0 {
+		t.Errorf("RebasePRHead with no head = %v, rebased %v; want ErrAnswer and no rebase", err, h.git.rebased)
+	}
+}
+
+// A plain Rebase has no expected head to pin, so it refuses before reading the
+// PR or running any git (issue #6961).
+func TestPlainRebaseIsRefused(t *testing.T) {
+	for _, head := range []string{"agent/issue-7", "main", "release"} {
+		h := newPRHarness(t, nil, map[string]any{"forge.pr": prJSON + `,"head":"` + head + `"}`})
+		if err := h.f.Rebase(prURL7); !errors.Is(err, ErrAnswer) {
+			t.Errorf("Rebase with head %q = %v, want ErrAnswer", head, err)
+		}
+		if len(h.git.rebased) != 0 {
+			t.Errorf("Rebase with head %q rebased %v, want none", head, h.git.rebased)
+		}
+		if len(h.calls) != 0 {
+			t.Errorf("Rebase with head %q called %v, want no Connector call", head, h.calls)
+		}
 	}
 }
 
 func TestRebaseWithoutGitFailsNamed(t *testing.T) {
 	h := newPRHarness(t, nil, map[string]any{"forge.pr": prJSON + `,"head":"agent/issue-1"}`})
 	h.f.(*prForge).push.git = nil
-	if err := h.f.Rebase(prURL7); !errors.Is(err, ErrNoGit) {
+	if err := h.caps.PRHeadRebaser.RebasePRHead(prURL7, "agent/issue-1"); !errors.Is(err, ErrNoGit) {
 		t.Fatalf("Rebase with no git = %v, want ErrNoGit", err)
 	}
 }

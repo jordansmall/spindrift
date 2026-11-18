@@ -711,11 +711,11 @@ func testBaseMovedOn(t *testing.T, h *connectorHarness) {
 	if err := h.cf.Merge(landing); err != nil || !h.backend.repo.Landed("412") {
 		t.Errorf("Merge onto an advanced base: err=%v landed=%v", err, h.backend.repo.Landed("412"))
 	}
-	if err := h.cf.Rebase(behind); err != nil {
-		t.Fatalf("Rebase: %v", err)
+	if err := h.caps.PRHeadRebaser.RebasePRHead(behind, branch); err != nil {
+		t.Fatalf("RebasePRHead: %v", err)
 	}
 	if !h.backend.repo.Rebased(branch) {
-		t.Error("branch does not contain the base after Rebase")
+		t.Error("branch does not contain the base after RebasePRHead")
 	}
 }
 

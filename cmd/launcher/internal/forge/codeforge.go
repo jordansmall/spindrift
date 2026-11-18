@@ -229,12 +229,23 @@ type MergeCommitReader interface {
 	MergeCommit(url string) (string, error)
 }
 
-// PRHeadRebaser is a PR forge whose PR head branch is read from a source core
-// does not trust (a guest Connector): the caller names the head it expects, the
-// agent branch core derives itself, and a PR whose head differs is refused before
-// any git runs (issue #6961).
+// PRHeadRebaser is a PR forge that rebases a PR's head branch. The caller names
+// the head it expects, the agent branch core derives. An implementation that
+// reads the PR's head from a source core does not trust (a guest Connector)
+// refuses a differing head before any git runs and refuses a plain Rebase
+// outright; one reading the head from core's own API may ignore it (issue
+// #6961).
 type PRHeadRebaser interface {
 	RebasePRHead(prURL, head string) error
+}
+
+// RebasePinned rebases ref through cf, pinned to head whenever cf resolves
+// PRHeadRebaser: the policy that keeps a rebase off any branch but the agent's.
+func RebasePinned(cf CodeForge, ref, head string) error {
+	if r := ResolveCodeForge(cf).PRHeadRebaser; r != nil {
+		return r.RebasePRHead(ref, head)
+	}
+	return cf.Rebase(ref)
 }
 
 // AgentBranchName is the one place the agent branch name is built from its

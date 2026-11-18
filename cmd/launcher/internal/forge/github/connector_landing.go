@@ -186,10 +186,6 @@ func (e *execClient) commitSubjectsViaConnector(row backendrows.Row, outboxDir, 
 	return subjects, err
 }
 
-func (e *execClient) rebaseViaConnector(row backendrows.Row, prURL string) error {
-	return e.forgeWrite(row, "rebase a PR", false, func(cf forge.CodeForge, _ forge.Capabilities) error { return cf.Rebase(prURL) })
-}
-
 func (e *execClient) rebasePRHeadViaConnector(row backendrows.Row, prURL, head string) error {
 	return e.forgeWrite(row, "rebase a PR", false, func(_ forge.CodeForge, caps forge.Capabilities) error {
 		if caps.PRHeadRebaser == nil {
