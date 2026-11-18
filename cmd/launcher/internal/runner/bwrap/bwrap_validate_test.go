@@ -43,7 +43,7 @@ func TestValidatePastaWith_Usable(t *testing.T) {
 	}
 }
 
-// The error must name both pasta and the NETWORK_MODE=host opt-out (issue
+// The error must name both pasta and the --network-mode host opt-out (issue
 // #2666), so the launcher refuses to start rather than silently falling back
 // to a shared host network namespace.
 func TestValidatePastaWith_NotFound(t *testing.T) {
@@ -54,7 +54,7 @@ func TestValidatePastaWith_NotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("validatePastaWith() should error when pasta is absent from PATH")
 	}
-	want := "pasta not found on PATH — required to give a bwrap Box its own network namespace with the host loopback blocked (issue #2666); install pasta (the passt project) on PATH, or set NETWORK_MODE=host to explicitly opt into the pre-#2666 shared-network-namespace behaviour"
+	want := "pasta not found on PATH — required to give a bwrap Box its own network namespace with the host loopback blocked (issue #2666); install pasta (the passt project) on PATH, or pass --network-mode host (or set infra.network.mode = \"host\") to explicitly opt into the shared-network-namespace behaviour"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
 	}
@@ -73,7 +73,7 @@ func TestValidatePastaWith_NamespaceUnconfigured(t *testing.T) {
 	if err == nil {
 		t.Fatal("validatePastaWith() should error when the namespace has no default route")
 	}
-	for _, want := range []string{"no IPv4 default route via an UP interface", "NETWORK_MODE=host", "unusable", "#5981", "--config-net"} {
+	for _, want := range []string{"no IPv4 default route via an UP interface", "--network-mode host", "unusable", "#5981", "--config-net"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error = %q, want it to contain %q", err.Error(), want)
 		}
@@ -93,7 +93,7 @@ func TestValidatePastaWith_CannotCreateNamespace(t *testing.T) {
 	if err == nil {
 		t.Fatal("validatePastaWith() should error when pasta cannot create the namespace")
 	}
-	for _, want := range []string{"Operation not permitted", "exit status 1", "NETWORK_MODE=host", "unprivileged user"} {
+	for _, want := range []string{"Operation not permitted", "exit status 1", "--network-mode host", "unprivileged user"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error = %q, want it to contain %q", err.Error(), want)
 		}
@@ -451,7 +451,7 @@ func TestValidatePastaWith_ExitsWithoutRunningProbe(t *testing.T) {
 	if err == nil {
 		t.Fatal("validatePastaWith() should error when pasta exits 0 without the probe marker")
 	}
-	for _, want := range []string{"exited without running", "passt install", "NETWORK_MODE=host"} {
+	for _, want := range []string{"exited without running", "passt install", "--network-mode host"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error = %q, want it to contain %q", err.Error(), want)
 		}

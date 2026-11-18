@@ -394,7 +394,7 @@ func TestRealBwrapStrategy_DefaultNetworkModeMissingPastaFailsLaunch(t *testing.
 	if err == nil {
 		t.Fatal("newGatedContext() = nil, want the pasta error when pasta is absent from PATH")
 	}
-	for _, want := range []string{"pasta", "NETWORK_MODE=host"} {
+	for _, want := range []string{"pasta", "--network-mode host"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error = %q, want it to mention %q", err.Error(), want)
 		}
