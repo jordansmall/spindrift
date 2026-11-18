@@ -153,6 +153,30 @@ in
     ) "the github Connector's row must carry the Route table in connectors/github/routes.nix";
     pkgs.runCommand "connectors-github-contributes-routes" { } "touch $out";
 
+  # Issue #6912: the github Connector registers its token knob only with
+  # `shadow` or `primary` on. Only attr presence is tested;
+  # connectors/github/module.nix says why.
+  connectors-github-knob-gated-on-switches =
+    let
+      withShadow = fixtures.connectorConsumerVia [
+        coreModule
+        githubConnector.flakeModule
+        { spindrift.connectors.github.shadow = true; }
+      ];
+      shadowSchema = (configOf withShadow).envSchema;
+    in
+    assert assertMsg (
+      !((configOf withGithub).envSchema ? githubConnectorToken)
+    ) "with shadow and primary off the env schema must not carry githubConnectorToken";
+    assert assertMsg (
+      !((configOf withGithub).connectors.github.knobs ? githubConnectorToken)
+    ) "with shadow and primary off the github row must not carry the githubConnectorToken knob";
+    assert assertMsg (
+      shadowSchema ? githubConnectorToken
+      && shadowSchema.githubConnectorToken.env == "SPINDRIFT_GITHUB_CONNECTOR_TOKEN"
+    ) "with shadow on the env schema must carry githubConnectorToken";
+    pkgs.runCommand "connectors-github-knob-gated-on-switches" { } "touch $out";
+
   connectors-forgejo-contributes-routes =
     let
       routes = (configOf withForgejo).connectors.forgejo.routes or null;

@@ -42,6 +42,15 @@ let
   driverPrimaries = fixtures.dogfoodDriverPrimaries;
   claudeConnector = (import ../../connectors/claude).lib.connector { core = import ../../core; };
   githubConnector = (import ../../connectors/github).lib.connector { core = import ../../core; };
+  githubProgramWith =
+    modules:
+    (fixtures.connectorConsumerVia (
+      [
+        ../../lib/flakeModule.nix
+        githubConnector.flakeModule
+      ]
+      ++ modules
+    )).apps.${system}.default.program;
   claudeRow = claudeConnector.driverRow pkgs.lib;
   shadowOn = mkHarness {
     driverRows.claude = claudeRow;
@@ -392,31 +401,35 @@ in
         touch $out
       '';
 
-  # Issue #6998: `primary` is a switch on a registered backend row. Off, the
-  # input document carries no `primary` key; on, the row's entry says so.
+  # Issue #6998: `primary` is a switch on a registered backend row; on, the
+  # row's entry says so. Off, the github row is not registered at all
+  # (connector-driver-rows-github-row-gated-on-switches).
   connector-driver-rows-primary-reaches-document =
-    let
-      consumerWith =
-        modules:
-        fixtures.connectorConsumerVia (
-          [
-            ../../lib/flakeModule.nix
-            githubConnector.flakeModule
-          ]
-          ++ modules
-        );
-      programOf = c: c.apps.${system}.default.program;
-    in
     pkgs.runCommand "connector-driver-rows-primary-reaches-document"
       { nativeBuildInputs = [ pkgs.jq ]; }
       ''
-        ${fixtures.runInputDocOf (
-          programOf (consumerWith [ { spindrift.connectors.github.primary = true; } ])
-        )}
+        ${fixtures.runInputDocOf (githubProgramWith [ { spindrift.connectors.github.primary = true; } ])}
         jq -e --argjson names '${builtins.toJSON backendPrimaries}' '[.backends[] | select(.name as $n | $names | index($n))]
           | length == ($names | length) and all(.[]; .primary == true and (has("shadow") | not))' "$doc"
-        ${fixtures.runInputDocOf (programOf (consumerWith [ ]))}
-        jq -e 'all(.backends[]; has("primary") | not)' "$doc"
+        touch $out
+      '';
+
+  # Issue #6912: the github Connector registers its backend row only with
+  # `shadow` or `primary` on. Both off, the document has no `backends` key;
+  # `shadow` on, it carries one row with its sampling, Route table, and the
+  # accepted baseline doctor diffs that table against.
+  connector-driver-rows-github-row-gated-on-switches =
+    pkgs.runCommand "connector-driver-rows-github-row-gated-on-switches"
+      { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        ${fixtures.runInputDocOf (githubProgramWith [ ])}
+        jq -e 'has("backends") | not' "$doc"
+        ${fixtures.runInputDocOf (githubProgramWith [ { spindrift.connectors.github.shadow = true; } ])}
+        jq -e --slurpfile b ${../../spindrift-connector-routes.json} '
+          .backends | length == 1 and (.[0]
+          | .shadow == true and has("shadowEvery")
+            and (.routes | length) > 0
+            and .acceptedRoutes == $b[0].github)' "$doc"
         touch $out
       '';
 
