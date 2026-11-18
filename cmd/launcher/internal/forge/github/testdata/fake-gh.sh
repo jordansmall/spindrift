@@ -4,8 +4,13 @@
 # scripted response, so every call sees the previous calls' writes.
 DIR="$STATE_DIR/issues"
 
+# The trailing "." keeps a final newline alive through awk and the command
+# substitution; tab and CR come from printf because POSIX sed has no \t escape.
 json_escape() {
-	printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' '
+	tab=$(printf '\t')
+	cr=$(printf '\r')
+	out=$(printf '%s.' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e "s/$tab/\\\\t/g" -e "s/$cr/\\\\r/g" | awk 'NR > 1 { printf "\\n" } { printf "%s", $0 }')
+	printf '%s' "${out%.}"
 }
 
 ordered_nums() {
