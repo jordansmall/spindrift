@@ -1,5 +1,6 @@
 {
   "forgejo": [
+    { "method": "GET", "host": "{base}", "path": "/api/v1/repos/{repo}/actions/jobs", "followRedirect": true },
     { "method": "GET", "host": "{base}", "path": "/api/v1/repos/{repo}" },
     { "method": "POST", "host": "{base}", "path": "/api/v1/repos/{repo}/pulls" },
     { "method": "PATCH", "host": "{base}", "path": "/api/v1/repos/{repo}/pulls" },

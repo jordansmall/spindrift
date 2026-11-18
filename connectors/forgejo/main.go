@@ -9,12 +9,11 @@ package main
 import "spindrift.dev/sdk/forge"
 
 func init() {
-	// JobLog is left unset: a Forgejo Actions job's log is a web route, not
-	// part of the REST API the Route table covers.
 	forge.Register(forge.Reader{
 		PRsForBranch: prsForBranch,
 		PR:           pr,
 		Checks:       checks,
+		JobLog:       jobLog,
 	})
 	forge.RegisterBranches(forge.Branches{
 		Remote:       remote,
