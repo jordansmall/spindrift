@@ -5018,7 +5018,9 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
            │                               flip it back to ready before the
            │                               retried merge — a failed flip back
            │                               to ready settles agent-failed like
-           │                               the draft-out-at-green flip above
+           │                               the draft-out-at-green flip above;
+           │                               a rebase that cannot force-push
+           │                               restores ready first (issue #7224)
            └─ post an aggregate usage/cost comment to the issue
 ```
 
@@ -5885,8 +5887,12 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   marking the PR ready failed after green CI — it is still a draft, so it was
   neither merged nor handed off. This holds under every `MERGE_MODE` and under
   a merge-guard or tuning hold, and for the flip that restores a PR to ready
-  after a conflict force-push (issue #1863). A PR that is already ready and
-  then fails to merge keeps `agent-complete` with the merge-blocked note.
+  after a conflict force-push (issue #1863) and for the one that restores it
+  when the conflict response could not force-push — rebase budget spent
+  (`MAX_REBASE_ATTEMPTS=0` included), transient push retries exhausted, or a
+  non-conflict rebase failure (issue #7224). A PR that is already ready and
+  then fails to merge keeps `agent-complete` with the merge-blocked note, so a
+  merge-blocked hand-off is always a ready PR, never a draft.
   (Dependency ordering keys off the PR actually being merged, not this label —
   see [`Readiness.Ready`](../cmd/launcher/internal/waves/blocker.go).)
   The conflict-resolve box runs under the repo's devShell when the
@@ -6512,9 +6518,12 @@ restored to ready. The hold's comment follows and the issue is marked
 `agent-complete` with the hold's settle reason. A failed response settles as
 it would on the merge path: a failed conflict-resolve Box or a resolved head
 out of fix budget fails the landing (`agent-failed`, never `agent-complete`),
-while a rebase that cannot run (`MAX_REBASE_ATTEMPTS=0`, or a non-conflict
-rebase failure) leaves the PR in draft, posts the merge-blocked comment and
-the hold's own guard or tuning comment together, and settles `merge-blocked`.
+while a rebase that cannot force-push (`MAX_REBASE_ATTEMPTS=0`,
+exhausted push retries, or a non-conflict rebase failure)
+restores the PR to ready (issue #7224), posts the merge-blocked comment and
+the hold's own guard or tuning comment together, and settles `merge-blocked`;
+a restore that keeps failing settles `agent-failed` with reason
+`mark-ready-failed` instead.
 A PR that is merely behind its base is not rebased here (though on Forgejo a
 conflict check outlasting the re-read wait also reads as a conflict), and
 drift after the hand-off is not handled.
