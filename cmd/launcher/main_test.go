@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,6 +37,7 @@ import (
 	"spindrift.dev/launcher/internal/driver/drivertest"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/exitcode"
+	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
@@ -3600,6 +3602,49 @@ func TestDispatchConfig_SeedMirror_ReadOnlyBoxKindWithReadWriteKnobStillMirrors(
 			c.BoxForgeAndIssueAccess = "read-write"
 			if cfg := seedMirrorDispatchConfig(t, c); cfg.SeedMirror == nil {
 				t.Error("dispatchConfig().SeedMirror = nil, want a host-side fetch for a ReadOnlyBox kind")
+			}
+		})
+	}
+}
+
+// A forgejo row with primary builds its Code Forge, read-only included, from
+// the row's Connector rather than the native adapter, so the composed forge
+// must itself offer the MirrorSeeder the host-side fetch keys on.
+func TestDispatchConfig_SeedMirror_ForgejoPrimaryRow(t *testing.T) {
+	dir, err := fixturebuild.ConnectorDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Compose reads the clone URL from the repo endpoint, so a stub serves it.
+	var backendSrv *httptest.Server
+	backendSrv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, `{"clone_url":"%[1]s/owner/repo.git","html_url":"%[1]s/owner/repo"}`, backendSrv.URL)
+	}))
+	t.Cleanup(backendSrv.Close)
+	// The connector dials with the default transport, which must trust the stub.
+	// The global swap means this test and its subtests must not run in parallel.
+	defer func(old http.RoundTripper) { http.DefaultTransport = old }(http.DefaultTransport)
+	http.DefaultTransport = backendSrv.Client().Transport
+	u, err := url.Parse(backendSrv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	useConnectorRows(t, backendrows.Row{
+		Name: "forgejo", Module: filepath.Join(dir, "forge-pr.wasm"), CredentialEnv: "FIXTURE_TOKEN",
+		Routes: []connectorhost.Route{{Method: "GET", Host: u.Host, Path: "/repos"}}, Primary: true,
+	})
+	t.Chdir(t.TempDir()) // the Connector's audit file lands under the working directory
+	t.Setenv("FIXTURE_TOKEN", "connector-token")
+	readOnly := minimalValidConfig()
+	readOnly.BoxForgeAndIssueAccess = "read-only"
+	butlerKind := applyDispatchKind(minimalValidConfig(), dispatchkind.Butler)
+	butlerKind.BoxForgeAndIssueAccess = "read-write"
+	for name, c := range map[string]config{"read-only": readOnly, "ReadOnlyBox kind under read-write": butlerKind} {
+		t.Run(name, func(t *testing.T) {
+			c.CodeForge = "forgejo"
+			c.setRowKnob("FORGEJO_BASE_URL", backendSrv.URL)
+			if cfg := seedMirrorDispatchConfig(t, c); cfg.SeedMirror == nil {
+				t.Error("dispatchConfig().SeedMirror = nil, want a host-side fetch for a primary forgejo row")
 			}
 		})
 	}
