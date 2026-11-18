@@ -8101,10 +8101,12 @@ issue rejected (foreign_ref): ...`), so the verb is a canonical read, not
 a `gh` passthrough. It takes exactly one positional ref and no flags
 (anything else is a usage failure reported on `/issue/usage`), and works
 over both the unix and the TCP+secret carriers.
-The work, research and scout issue-read fragments instruct it for every
-tracker with a host-side issue read (github, forgejo, jira) under the
-`socket` carrier; under `log` there is no socket, so they render their
-`*-unreadable` sibling, and `local` keeps its host-injected linked issues.
+The work, research and scout issue-read fragments instruct it only when
+the host built an issue reader for a `socket`-carrier dispatch and
+forwarded `BOX_SIGNAL_ISSUE_READ` (issue #6924), so no prompt offers a
+verb the socket would answer `501`; otherwise, and always under `log`,
+they render their `*-unreadable` sibling, and `local` keeps its
+host-injected linked issues.
 
 `driver-exec signal issue-search [-state open|closed] [-label <label>]
 <text...>` is the matching search (issue #6895), for a dedup check before
@@ -8128,12 +8130,13 @@ size. Empty text is a usage failure reported on `/issue-search/usage`.
 
 The Filer's dedup step runs the six searches (site key and all open issues,
 then closed issues under each of the four provenance labels) through this verb
-under `socket`, on github and forgejo trackers. Jira and any tracker under the
-`log` carrier, which has no socket, render the no-search fragment instead and
-rely on the host's site-key dedup (so under `log` an open issue matching the
-subject or a closed provenance issue no longer suppresses filing in-Box; the
-host-side site-key and line-range dedup still applies); a `rejected (...)`
-reply is treated the same way.
+whenever the host built a searcher for a `socket`-carrier dispatch and
+forwarded `BOX_SIGNAL_ISSUE_SEARCH` (issue #6924). A tracker that cannot
+search and any tracker under the `log` carrier, which has no socket, render
+the no-search fragment instead and rely on the host's site-key dedup (so under
+`log` an open issue matching the subject or a closed provenance issue no
+longer suppresses filing in-Box; the host-side site-key and line-range dedup
+still applies); a `rejected (...)` reply is treated the same way.
 
 The prompts instruct the verb under `socket` (issue #3726): prompt assembly
 picks each of the three signal fragments — the research verdict comment, the
