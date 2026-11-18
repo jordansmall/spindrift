@@ -1,6 +1,7 @@
 package connectorforge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -34,6 +35,8 @@ type prHarness struct {
 	git   *recordingGit
 	// sleeps records each pause the composed forge asked its clock for.
 	sleeps []time.Duration
+	// audit receives the refusals core audits.
+	audit bytes.Buffer
 }
 
 func newPRHarness(t *testing.T, caps []string, replies map[string]any) *prHarness {
@@ -64,7 +67,8 @@ func newPRHarness(t *testing.T, caps []string, replies map[string]any) *prHarnes
 		panic("bad reply")
 	}
 	clock := retry.Clock{Now: time.Now, Sleep: func(d time.Duration) { h.sleeps = append(h.sleeps, d) }}
-	p := &pushOnly{call: call, clock: clock, target: testTarget, git: h.git}
+	conn := auditStub{&h.audit}
+	p := &pushOnly{conn: conn, call: call, clock: clock, target: testTarget, git: h.git}
 	h.f = composePR(p, caps, testWebHost, false /* relay */)
 	h.caps = forge.ResolveCodeForge(h.f)
 	return h
@@ -397,6 +401,46 @@ func TestMarkDraftCommentAndURLPinning(t *testing.T) {
 	}
 }
 
+func TestRebasePRHeadPinsTheHeadBranch(t *testing.T) {
+	const want = "agent/issue-7"
+	reply := func(head string) map[string]any {
+		return map[string]any{"forge.pr": prJSON + `,"head":"` + head + `"}`}
+	}
+	t.Run("rebases the expected head", func(t *testing.T) {
+		h := newPRHarness(t, nil, reply(want))
+		if err := h.caps.PRHeadRebaser.RebasePRHead(prURL7, want); err != nil {
+			t.Fatal(err)
+		}
+		if len(h.git.rebased) != 1 || h.git.rebased[0] != want {
+			t.Errorf("rebased = %v, want [%s]", h.git.rebased, want)
+		}
+	})
+	for _, tc := range []struct{ name, head, want string }{
+		{"refuses an unrelated head", "release", want},
+		{"refuses a head equal to the base", "main", want},
+		{"refuses another agent branch", "agent/issue-999", want},
+		{"refuses an empty expected head", want, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newPRHarness(t, nil, reply(tc.head))
+			err := h.caps.PRHeadRebaser.RebasePRHead(prURL7, tc.want)
+			if !errors.Is(err, ErrAnswer) {
+				t.Fatalf("RebasePRHead = %v, want ErrAnswer", err)
+			}
+			if len(h.git.rebased) != 0 {
+				t.Errorf("rebased = %v, want none", h.git.rebased)
+			}
+		})
+	}
+	t.Run("audits the refusal", func(t *testing.T) {
+		h := newPRHarness(t, nil, reply("release"))
+		_ = h.caps.PRHeadRebaser.RebasePRHead(prURL7, want)
+		if got := h.audit.String(); !strings.Contains(got, "refused") || !strings.Contains(got, "forge.pr") {
+			t.Errorf("audit = %q, want a refused forge.pr entry", got)
+		}
+	})
+}
+
 func TestCreateDraftPR(t *testing.T) {
 	created := prJSON + `}`
 	h := newPRHarness(t, []string{capDraftPRs}, map[string]any{"forge.openPR": created})
@@ -458,4 +502,14 @@ func TestProbe(t *testing.T) {
 	if _, err := h.f.Probe(); !errors.Is(err, ErrAnswer) {
 		t.Fatalf("Probe with no repo = %v, want ErrAnswer", err)
 	}
+}
+
+// auditStub records AuditRefusal entries in place of a network Connector's log.
+type auditStub struct{ audit *bytes.Buffer }
+
+func (auditStub) DeclaredHosts() []string { return nil }
+
+func (s auditStub) AuditRefusal(method string, refusal error) error {
+	s.audit.WriteString("refused " + method + ": " + refusal.Error() + "\n")
+	return refusal
 }

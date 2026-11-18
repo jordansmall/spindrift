@@ -229,6 +229,14 @@ type MergeCommitReader interface {
 	MergeCommit(url string) (string, error)
 }
 
+// PRHeadRebaser is a PR forge whose PR head branch is read from a source core
+// does not trust (a guest Connector): the caller names the head it expects, the
+// agent branch core derives itself, and a PR whose head differs is refused before
+// any git runs (issue #6961).
+type PRHeadRebaser interface {
+	RebasePRHead(prURL, head string) error
+}
+
 // AgentBranchName is the one place the agent branch name is built from its
 // prefix (issue #444). It is core policy, not a forge method: every caller,
 // host-side and in-Box, passes the configured BRANCH_PREFIX.
