@@ -237,7 +237,8 @@ func patterns(ws []wirePattern) ([]driverkit.Pattern, error) {
 }
 
 // guestHandle is the heap object whose reachability tracks a guest decoder or
-// filter.
+// filter. A caller keeps it reachable until every guest call passing its id
+// returns, or bind's cleanup can free the guest object mid-call.
 type guestHandle struct{ id uint32 }
 
 // bind sets the handle's guest id and frees it with freeMethod once the handle
@@ -270,6 +271,9 @@ func (c *Connector) newDecoder(cd codec) driverkit.Decoder {
 	ctx := context.Background()
 	h, err := c.guestDecoder(ctx)
 	return func(line string) []driverkit.Event {
+		// Once h.id is read h is otherwise dead, and bind's cleanup could free the
+		// guest decoder before the call reaches it.
+		defer runtime.KeepAlive(h)
 		// The guest sees spindrift_op lines so its state can follow passes, but
 		// core stays their only decoder: whatever the guest answers, or fails
 		// with, is discarded.
@@ -453,6 +457,7 @@ func (c *Connector) newBatchDecoder(cd codec) driverkit.BatchDecoder {
 	ctx := context.Background()
 	h, err := c.guestDecoder(ctx)
 	return func(lines []string) [][]driverkit.Event {
+		defer runtime.KeepAlive(h) // as in newDecoder
 		out := make([][]driverkit.Event, len(lines))
 		ops := make([]*hostop.SpindriftOp, len(lines))
 		for i, l := range lines {
