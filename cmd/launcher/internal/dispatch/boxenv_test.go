@@ -850,3 +850,43 @@ func TestBuildBoxEnvHostOpenPR(t *testing.T) {
 		})
 	}
 }
+
+// Issue #6924: the prompt offers the `signal issue` / `signal issue-search`
+// verbs only where the socket serves them, so each signal is positive-only and
+// requires both the socket carrier and a host-built reader/searcher.
+func TestBuildBoxEnvForwardsIssueSignals(t *testing.T) {
+	cases := []struct {
+		name                 string
+		carrier              string
+		reader               signalsocket.IssueReader
+		searcher             signalsocket.IssueSearcher
+		wantRead, wantSearch bool
+	}{
+		{"socket with both", "socket", &fakeIssueReader{}, &fakeIssueSearcher{}, true, true},
+		{"socket reader only", "socket", &fakeIssueReader{}, nil, true, false},
+		{"socket with neither", "socket", nil, nil, false, false},
+		{"log carrier with both", "log", &fakeIssueReader{}, &fakeIssueSearcher{}, false, false},
+		{"default carrier with both", "", &fakeIssueReader{}, &fakeIssueSearcher{}, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := mustBuildBoxEnv(t, Config{
+				SignalCarrier: tc.carrier,
+				IssueReader:   tc.reader,
+				IssueSearcher: tc.searcher,
+			}, "3", "T", 0, "", "")
+			for name, want := range map[string]bool{
+				"BOX_SIGNAL_ISSUE_READ":   tc.wantRead,
+				"BOX_SIGNAL_ISSUE_SEARCH": tc.wantSearch,
+			} {
+				got, ok := env[name]
+				switch {
+				case want && got != "1":
+					t.Errorf("%s: got %q, want %q", name, got, "1")
+				case !want && ok:
+					t.Errorf("%s: got %q, want absent", name, got)
+				}
+			}
+		})
+	}
+}
