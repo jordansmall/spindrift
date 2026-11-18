@@ -335,7 +335,7 @@ func TestLabeledClosedCarriesCloseFields(t *testing.T) {
 			{"key":"ENG-9","fields":{"summary":"np","description":"nb","status":{"statusCategory":{"key":"done"}},"labels":["agent-review-finding"],"resolution":{"name":"Won't Do"},"resolutiondate":"2026-01-02T03:04:05.000+0000"}},
 			{"key":"ENG-7","fields":{"summary":"done","status":{"statusCategory":{"key":"done"}},"labels":[],"resolution":{"name":"Done"},"resolutiondate":"2026-01-01T00:00:00.000+0000"}}]}`
 	})
-	issues, err := labeled(cloud, "agent-review-finding", "closed", 30)
+	issues, _, err := labeledPage(cloud, "agent-review-finding", "closed", "", 30)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +353,7 @@ func TestLabeledOpenQueriesNotDone(t *testing.T) {
 	got := script(t, func(connector.Request, *url.URL) (int, string) {
 		return 200, `{"total":1,"issues":[` + issueJSON("ENG-5") + `]}`
 	})
-	issues, err := labeled(server, "x", "open", 5)
+	issues, _, err := labeledPage(server, "x", "open", "", 5)
 	if err != nil || len(issues) != 1 || issues[0].State != "open" || issues[0].ClosedAt != "" || issues[0].ClosedNotPlanned {
 		t.Fatalf("issues = %#v, err = %v", issues, err)
 	}
@@ -363,13 +363,101 @@ func TestLabeledOpenQueriesNotDone(t *testing.T) {
 	}
 }
 
-func TestLabeledCapsAtLimit(t *testing.T) {
-	script(t, func(connector.Request, *url.URL) (int, string) {
-		return 200, `{"isLast":true,"issues":[` + issueJSON("ENG-1") + `,` + issueJSON("ENG-2") + `]}`
+func TestLabeledBoundsPageRequestByLimit(t *testing.T) {
+	got := script(t, func(connector.Request, *url.URL) (int, string) {
+		return 200, `{"isLast":true,"issues":[` + issueJSON("ENG-1") + `]}`
 	})
-	issues, err := labeled(cloud, "x", "open", 1)
-	if err != nil || len(issues) != 1 {
-		t.Fatalf("issues = %v, err = %v", issues, err)
+	if _, _, err := labeledPage(cloud, "x", "open", "", 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(*got) != 1 || mustQuery(t, (*got)[0]).Get("maxResults") != "1" {
+		t.Fatalf("requests = %v, want one with maxResults=1", *got)
+	}
+}
+
+func TestLabeledCloudChainsByNextPageToken(t *testing.T) {
+	got := script(t, func(_ connector.Request, u *url.URL) (int, string) {
+		if u.Query().Get("nextPageToken") == "tok1" {
+			return 200, `{"isLast":true,"issues":[` + issueJSON("ENG-2") + `]}`
+		}
+		return 200, `{"isLast":false,"nextPageToken":"tok1","issues":[` + issueJSON("ENG-1") + `,` + issueJSON("ENG-3") + `]}`
+	})
+	first, next, err := labeledPage(cloud, "x", "open", "", 2)
+	if err != nil || next != "tok1" || len(first) != 2 {
+		t.Fatalf("first = %v, next = %q, err = %v; want the HTTP page's two rows and tok1", first, next, err)
+	}
+	last, next, err := labeledPage(cloud, "x", "open", next, 2)
+	if err != nil || next != "" || len(last) != 1 || last[0].Number != "ENG-2" {
+		t.Fatalf("last = %v, next = %q, err = %v", last, next, err)
+	}
+	if mustQuery(t, (*got)[0]).Has("nextPageToken") || mustQuery(t, (*got)[1]).Get("nextPageToken") != "tok1" {
+		t.Fatalf("requests = %v, want the cursor sent as nextPageToken on the second only", *got)
+	}
+}
+
+func TestLabeledCloudIsLastEndsDespiteToken(t *testing.T) {
+	script(t, func(connector.Request, *url.URL) (int, string) {
+		return 200, `{"isLast":true,"nextPageToken":"stale","issues":[` + issueJSON("ENG-1") + `]}`
+	})
+	if _, next, err := labeledPage(cloud, "x", "open", "", 5); err != nil || next != "" {
+		t.Fatalf("next = %q, err = %v, want end", next, err)
+	}
+}
+
+func TestLabeledServerAdvancesStartAtByRowsReceived(t *testing.T) {
+	got := script(t, func(_ connector.Request, u *url.URL) (int, string) {
+		if u.Query().Get("startAt") == "2" {
+			return 200, `{"total":3,"issues":[` + issueJSON("ENG-3") + `]}`
+		}
+		return 200, `{"total":3,"issues":[` + issueJSON("ENG-1") + `,` + issueJSON("ENG-2") + `]}`
+	})
+	_, next, err := labeledPage(server, "x", "open", "", 5)
+	if err != nil || next != "2:ENG-1" {
+		t.Fatalf("next = %q, err = %v, want 2:ENG-1", next, err)
+	}
+	issues, next, err := labeledPage(server, "x", "open", next, 5)
+	if err != nil || next != "" || len(issues) != 1 {
+		t.Fatalf("issues = %v, next = %q, err = %v", issues, next, err)
+	}
+	if mustQuery(t, (*got)[0]).Get("startAt") != "0" || mustQuery(t, (*got)[1]).Get("startAt") != "2" {
+		t.Fatalf("requests = %v, want startAt 0 then 2", *got)
+	}
+}
+
+func TestLabeledServerEmptyPageBeforeTotalErrors(t *testing.T) {
+	script(t, func(connector.Request, *url.URL) (int, string) { return 200, `{"total":4,"issues":[]}` })
+	if _, _, err := labeledPage(server, "x", "open", "2:ENG-1", 5); err == nil || !strings.Contains(err.Error(), "list labeled issues: search returned an empty page") {
+		t.Fatalf("err = %v, want an empty-page error", err)
+	}
+}
+
+func TestLabeledServerMalformedCursorErrorsWithoutRequest(t *testing.T) {
+	got := script(t, func(connector.Request, *url.URL) (int, string) { return 200, `{}` })
+	for _, cursor := range []string{"abc", "-1", "1.5", "x:ENG-1", ":ENG-1"} {
+		if _, _, err := labeledPage(server, "x", "open", cursor, 5); err == nil || !strings.Contains(err.Error(), "list labeled issues: malformed cursor") {
+			t.Errorf("cursor %q: err = %v, want a malformed-cursor error", cursor, err)
+		}
+	}
+	if len(*got) != 0 {
+		t.Errorf("sent %d requests", len(*got))
+	}
+}
+
+func TestLabeledServerRepeatedPageErrors(t *testing.T) {
+	// A server that ignores startAt answers the same rows under every cursor.
+	var rows []string
+	for i := range 100 {
+		rows = append(rows, issueJSON(fmt.Sprintf("ENG-%d", i+1)))
+	}
+	script(t, func(connector.Request, *url.URL) (int, string) {
+		return 200, `{"total":600,"issues":[` + strings.Join(rows, ",") + `]}`
+	})
+	_, next, err := labeledPage(server, "x", "open", "", 100)
+	if err != nil || next != "100:ENG-1" {
+		t.Fatalf("first: next = %q, err = %v", next, err)
+	}
+	if _, _, err := labeledPage(server, "x", "open", next, 100); err == nil || !strings.Contains(err.Error(), "repeated the page starting at ENG-1") {
+		t.Fatalf("second: err = %v, want a repeated-page error", err)
 	}
 }
 
@@ -379,8 +467,8 @@ func TestLabeledRefusesBadInputWithoutRequest(t *testing.T) {
 		state string
 		limit int
 	}{{"all", 5}, {"open", 0}} {
-		if _, err := labeled(cloud, "x", c.state, c.limit); err == nil {
-			t.Errorf("labeled(%+v): no error", c)
+		if _, _, err := labeledPage(cloud, "x", c.state, "", c.limit); err == nil {
+			t.Errorf("labeledPage(%+v): no error", c)
 		}
 	}
 	if len(*got) != 0 {
@@ -391,7 +479,7 @@ func TestLabeledRefusesBadInputWithoutRequest(t *testing.T) {
 func TestLabeledUnknownDialectErrors(t *testing.T) {
 	script(t, func(connector.Request, *url.URL) (int, string) { return 200, `{}` })
 	tgt := tracker.Target{API: site, Repo: "ENG", Dialect: "datacenter"}
-	if _, err := labeled(tgt, "x", "open", 5); err == nil || !strings.Contains(err.Error(), `"datacenter"`) {
+	if _, _, err := labeledPage(tgt, "x", "open", "", 5); err == nil || !strings.Contains(err.Error(), `list labeled issues: unknown Jira dialect "datacenter"`) {
 		t.Fatalf("err = %v", err)
 	}
 }
