@@ -104,8 +104,8 @@ func TestDoctorReport_ConfigInvalid_NamesEveryBrokenKnob(t *testing.T) {
 	if !strings.Contains(stderr.String(), "MERGE_MODE") {
 		t.Errorf("want stderr to name the MERGE_MODE problem, got %q", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "GIT_USER_NAME") {
-		t.Errorf("want stderr to also name the GIT_USER_NAME problem, got %q", stderr.String())
+	if !strings.Contains(stderr.String(), "--user-name") {
+		t.Errorf("want stderr to also name the --user-name problem, got %q", stderr.String())
 	}
 }
 

@@ -99,8 +99,8 @@ func TestMainRun_Recover_DaemonChildArgvReachesQueueMode(t *testing.T) {
 	if code != int(exitcode.ConfigInvalid) {
 		t.Errorf("mainRun(%v) code = %d, want %d (queue mode reached bootstrap)", cmd.Argv[i+1:], code, int(exitcode.ConfigInvalid))
 	}
-	if !strings.Contains(stderr.String(), "REPO_SLUG") {
-		t.Errorf("stderr = %q, want a REPO_SLUG validation error", stderr.String())
+	if !strings.Contains(stderr.String(), "--repo-slug") {
+		t.Errorf("stderr = %q, want a --repo-slug validation error", stderr.String())
 	}
 }
 

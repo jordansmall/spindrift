@@ -99,9 +99,9 @@ func TestLauncherChecks_RepoSlug_Fails(t *testing.T) {
 	ch := checkByName(t, launcherChecks(c), "repo-slug")
 	_, err := ch.Probe()
 	if err == nil {
-		t.Fatal("repo-slug Probe() must fail when REPO_SLUG is empty")
+		t.Fatal("repo-slug Probe() must fail when the repo slug is empty")
 	}
-	if err.Error() != "set REPO_SLUG=owner/repo (the target GitHub repository)" {
+	if err.Error() != "pass --repo-slug owner/repo or set forge.repoSlug (the target GitHub repository)" {
 		t.Errorf("repo-slug Probe() error = %q, want exact validate() text", err.Error())
 	}
 }
@@ -148,7 +148,7 @@ func TestLauncherChecks_RepoSlug_SelfContainedResearchGithubTrackerStillFails(t 
 	c.RepoSlug = ""
 	ch := checkByName(t, launcherChecks(c), "repo-slug")
 	if _, err := ch.Probe(); err == nil {
-		t.Fatal("repo-slug Probe() must still require REPO_SLUG for self-contained research with a github issue tracker")
+		t.Fatal("repo-slug Probe() must still require a repo slug for self-contained research with a github issue tracker")
 	}
 }
 
@@ -180,7 +180,7 @@ func TestLauncherChecks_GitUserName_FailsAndPasses(t *testing.T) {
 	c.GitUserName = ""
 	ch := checkByName(t, launcherChecks(c), "git-user-name")
 	_, err := ch.Probe()
-	if err == nil || err.Error() != "set GIT_USER_NAME, or configure git user.name on the host" {
+	if err == nil || err.Error() != "pass --user-name or set git.user.name, or configure git user.name on the host" {
 		t.Errorf("git-user-name Probe() = %v, want exact validate() text", err)
 	}
 
@@ -196,7 +196,7 @@ func TestLauncherChecks_GitUserEmail_FailsAndPasses(t *testing.T) {
 	c.GitUserEmail = ""
 	ch := checkByName(t, launcherChecks(c), "git-user-email")
 	_, err := ch.Probe()
-	if err == nil || err.Error() != "set GIT_USER_EMAIL, or configure git user.email on the host" {
+	if err == nil || err.Error() != "pass --user-email or set git.user.email, or configure git user.email on the host" {
 		t.Errorf("git-user-email Probe() = %v, want exact validate() text", err)
 	}
 

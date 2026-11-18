@@ -31,8 +31,8 @@ func TestBootstrap_PropagatesValidateError(t *testing.T) {
 	if lc != nil {
 		t.Errorf("bootstrap() launch context = %+v, want nil on validate error", lc)
 	}
-	if err == nil || !strings.Contains(err.Error(), "REPO_SLUG") {
-		t.Fatalf("bootstrap() error = %v, want a REPO_SLUG validation error", err)
+	if err == nil || !strings.Contains(err.Error(), "--repo-slug") {
+		t.Fatalf("bootstrap() error = %v, want a --repo-slug validation error", err)
 	}
 }
 

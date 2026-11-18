@@ -100,7 +100,7 @@ func TestRequiredKnobChecks_RepoSlug(t *testing.T) {
 	if err == nil {
 		t.Fatal("repo-slug Probe() must fail when RepoSlug is empty")
 	}
-	want := "set REPO_SLUG=owner/repo (the target GitHub repository)"
+	want := "pass --repo-slug owner/repo or set forge.repoSlug (the target GitHub repository)"
 	if err.Error() != want {
 		t.Errorf("repo-slug Probe() error = %q, want %q", err.Error(), want)
 	}
@@ -123,7 +123,7 @@ func TestRequiredKnobChecks_GitUserName(t *testing.T) {
 	if err == nil {
 		t.Fatal("git-user-name Probe() must fail when GitUserName is empty")
 	}
-	want := "set GIT_USER_NAME, or configure git user.name on the host"
+	want := "pass --user-name or set git.user.name, or configure git user.name on the host"
 	if err.Error() != want {
 		t.Errorf("git-user-name Probe() error = %q, want %q", err.Error(), want)
 	}
@@ -143,7 +143,7 @@ func TestRequiredKnobChecks_GitUserEmail(t *testing.T) {
 	if err == nil {
 		t.Fatal("git-user-email Probe() must fail when GitUserEmail is empty")
 	}
-	want := "set GIT_USER_EMAIL, or configure git user.email on the host"
+	want := "pass --user-email or set git.user.email, or configure git user.email on the host"
 	if err.Error() != want {
 		t.Errorf("git-user-email Probe() error = %q, want %q", err.Error(), want)
 	}

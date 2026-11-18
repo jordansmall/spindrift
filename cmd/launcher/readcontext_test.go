@@ -171,10 +171,10 @@ func TestReadContext_Validation_InvalidConfig_ReturnsConfigErrNamingBrokenKnob(t
 	v := rc.validation()
 
 	if v.configErr == nil {
-		t.Fatal("validation().configErr = nil, want a non-nil error for GIT_USER_NAME unset")
+		t.Fatal("validation().configErr = nil, want a non-nil error for an unset commit user name")
 	}
-	if !strings.Contains(v.configErr.Error(), "GIT_USER_NAME") {
-		t.Errorf("validation().configErr = %q, want it to name the broken GIT_USER_NAME knob", v.configErr)
+	if !strings.Contains(v.configErr.Error(), "--user-name") {
+		t.Errorf("validation().configErr = %q, want it to name the missing commit user name", v.configErr)
 	}
 }
 
