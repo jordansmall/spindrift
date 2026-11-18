@@ -896,3 +896,31 @@ func containsLabel(labels []string, target string) bool {
 	}
 	return false
 }
+
+func TestFake_DepsOf_NativeThroughShapeWrappers(t *testing.T) {
+	shapes := map[string]func(*forge.Fake) forge.IssueTracker{
+		"bare":                func(f *forge.Fake) forge.IssueTracker { return f },
+		"AsIssueFiler":        (*forge.Fake).AsIssueFiler,
+		"AsNoLandingRecorder": (*forge.Fake).AsNoLandingRecorder,
+		"AsLocalShaped":       (*forge.Fake).AsLocalShaped,
+		"AsLocalIssueFiler":   (*forge.Fake).AsLocalIssueFiler,
+		"AsForgejoShaped":     (*forge.Fake).AsForgejoShaped,
+		"AsSeamListed":        (*forge.Fake).AsSeamListed,
+		"AsFullyPaginated":    (*forge.Fake).AsFullyPaginated,
+	}
+	for name, wrap := range shapes {
+		t.Run(name, func(t *testing.T) {
+			f := forge.NewFake()
+			f.SetIssue(forge.Issue{Number: "1", Body: "Blocked by #9"})
+			f.NativeDeps = map[string][]string{"1": {"7"}}
+
+			deps, err := forge.DepsOf(wrap(f), "1")
+			if err != nil {
+				t.Fatalf("DepsOf: %v", err)
+			}
+			if len(deps) != 1 || deps[0].ID != "7" || deps[0].Source != forge.DepSourceNative {
+				t.Errorf("want native dep 7, got %v", deps)
+			}
+		})
+	}
+}

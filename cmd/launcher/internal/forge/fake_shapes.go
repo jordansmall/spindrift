@@ -2,16 +2,36 @@ package forge
 
 import "fmt"
 
+// wrappedFake is embedded by every IssueTracker shape wrapper below (issue
+// #6831). Embedding the IssueTracker interface value hides the Fake's
+// capabilities, NativeDepsOf among them; promoting it back here keeps
+// forge.DepsOf reading native dependencies through any shape.
+type wrappedFake struct{ f *Fake }
+
+func (w wrappedFake) NativeDepsOf(num string) ([]string, error) { return w.f.NativeDepsOf(num) }
+
+var (
+	_ NativeDepsReader = issueFilerTracker{}
+	_ NativeDepsReader = noLandingIssueTracker{}
+	_ NativeDepsReader = localShapedIssueTracker{}
+	_ NativeDepsReader = localIssueFilerTracker{}
+	_ NativeDepsReader = forgejoShapedIssueTracker{}
+	_ NativeDepsReader = seamListedIssueTracker{}
+	_ NativeDepsReader = fullyPaginatedIssueTracker{}
+)
+
 // issueFilerTracker adds HostPostedIssueFiler to a Fake (issue #2028, issue
 // #1964). It stays gated behind AsIssueFiler so a bare *Fake used as an
 // IssueTracker elsewhere never silently satisfies HostPostedIssueFiler too.
 type issueFilerTracker struct {
 	IssueTracker
-	f *Fake
+	wrappedFake
 }
 
 // AsIssueFiler returns f wrapped so it satisfies IssueTracker and HostPostedIssueFiler.
-func (f *Fake) AsIssueFiler() IssueTracker { return issueFilerTracker{IssueTracker: f, f: f} }
+func (f *Fake) AsIssueFiler() IssueTracker {
+	return issueFilerTracker{IssueTracker: f, wrappedFake: wrappedFake{f}}
+}
 
 func (i issueFilerTracker) PostIssue(title, body string, labels []string) (string, error) {
 	return i.f.postIssue(title, body, labels, func() error {
@@ -35,17 +55,22 @@ var _ IssueLabeler = issueFilerTracker{}
 // noLandingIssueTracker hides a Fake's RecordLanding and CloseIssue so a
 // type assertion against either reports absence, matching the github and
 // jira adapters, which implement neither (ADR 0029).
-type noLandingIssueTracker struct{ IssueTracker }
+type noLandingIssueTracker struct {
+	IssueTracker
+	wrappedFake
+}
 
 // AsNoLandingRecorder returns f in the github adapter's shape: no LandingRecorder or IssueCloser.
-func (f *Fake) AsNoLandingRecorder() IssueTracker { return noLandingIssueTracker{f} }
+func (f *Fake) AsNoLandingRecorder() IssueTracker {
+	return noLandingIssueTracker{IssueTracker: f, wrappedFake: wrappedFake{f}}
+}
 
 // localShapedIssueTracker matches the real local adapter (issue #1892):
 // IssueCloser but never MergeCloser, even when paired with a PRForge Code
 // Forge, since ISSUE_TRACKER=local + CODE_FORGE=github is a valid pairing.
 type localShapedIssueTracker struct {
 	IssueTracker
-	f *Fake
+	wrappedFake
 }
 
 func (l localShapedIssueTracker) RecordLanding(num, landing string) error {
@@ -64,7 +89,7 @@ func (l localShapedIssueTracker) CloseIssue(num string) error {
 
 // AsLocalShaped returns f in the local adapter's shape: LandingRecorder, LandingPassRecorder, and IssueCloser, but no MergeCloser.
 func (f *Fake) AsLocalShaped() IssueTracker {
-	return localShapedIssueTracker{IssueTracker: f, f: f}
+	return localShapedIssueTracker{IssueTracker: f, wrappedFake: wrappedFake{f}}
 }
 
 // localIssueFilerTracker is the real local adapter's actual combined shape
@@ -73,7 +98,7 @@ func (f *Fake) AsLocalShaped() IssueTracker {
 // rather than *Fake, so it promotes neither RecordLanding nor CloseIssue.
 type localIssueFilerTracker struct {
 	IssueTracker
-	f *Fake
+	wrappedFake
 }
 
 func (l localIssueFilerTracker) RecordLanding(num, landing string) error {
@@ -96,7 +121,7 @@ func (l localIssueFilerTracker) PostIssue(title, body string, labels []string) (
 
 // AsLocalIssueFiler returns f in the local adapter's combined shape, AsLocalShaped plus HostPostedIssueFiler (issue #2592).
 func (f *Fake) AsLocalIssueFiler() IssueTracker {
-	return localIssueFilerTracker{IssueTracker: f, f: f}
+	return localIssueFilerTracker{IssueTracker: f, wrappedFake: wrappedFake{f}}
 }
 
 var _ HostPostedIssueFiler = localIssueFilerTracker{}
@@ -109,7 +134,7 @@ var _ IssueCloser = localIssueFilerTracker{}
 // *Fake.
 type forgejoShapedIssueTracker struct {
 	IssueTracker
-	f *Fake
+	wrappedFake
 }
 
 func (fs forgejoShapedIssueTracker) CloseMergedIssue(num string) error {
@@ -127,7 +152,7 @@ func (fs forgejoShapedIssueTracker) AddLabels(num string, labels []string) error
 
 // AsForgejoShaped returns f in the forgejo adapter's shape: MergeCloser and IssueLabeler, but no LandingRecorder or IssueCloser.
 func (f *Fake) AsForgejoShaped() IssueTracker {
-	return forgejoShapedIssueTracker{IssueTracker: f, f: f}
+	return forgejoShapedIssueTracker{IssueTracker: f, wrappedFake: wrappedFake{f}}
 }
 
 var _ IssueLabeler = forgejoShapedIssueTracker{}
@@ -136,27 +161,30 @@ var _ IssueLabeler = forgejoShapedIssueTracker{}
 // kept separate so localShapedIssueTracker's callers do not gain it too.
 type seamListedIssueTracker struct {
 	IssueTracker
-	f *Fake
+	wrappedFake
 }
 
 func (s seamListedIssueTracker) AllIssues() ([]Issue, error) { return s.f.allIssues() }
 
 // AsSeamListed returns f in the local adapter's grouping shape: IssueTracker plus SeamLister.
 func (f *Fake) AsSeamListed() IssueTracker {
-	return seamListedIssueTracker{IssueTracker: f, f: f}
+	return seamListedIssueTracker{IssueTracker: f, wrappedFake: wrappedFake{f}}
 }
 
 var _ SeamLister = seamListedIssueTracker{}
 
 // fullyPaginatedIssueTracker matches the forgejo and jira adapters, which
 // wrap their list calls in a page-walking loop. A bare *Fake stays single-page.
-type fullyPaginatedIssueTracker struct{ IssueTracker }
+type fullyPaginatedIssueTracker struct {
+	IssueTracker
+	wrappedFake
+}
 
 func (fullyPaginatedIssueTracker) WalksAllPages() bool { return true }
 
 // AsFullyPaginated returns f in the forgejo and jira adapters' shape: IssueTracker plus FullyPaginated.
 func (f *Fake) AsFullyPaginated() IssueTracker {
-	return fullyPaginatedIssueTracker{IssueTracker: f}
+	return fullyPaginatedIssueTracker{IssueTracker: f, wrappedFake: wrappedFake{f}}
 }
 
 var _ FullyPaginated = fullyPaginatedIssueTracker{}
