@@ -67,16 +67,17 @@ CI failure detail from the launcher-injected `CI FAILURE` section
 Parent and linked issue reads have already moved: `issue-read.md`,
 `research-issue-read.md` and `scout-issue-read.md` name `driver-exec signal
 issue <ref>` (issue #6894), a Signal-socket verb the host answers from the
-Dispatch's tracker, and no forge CLI. They render for every tracker with a
-host-side issue read (github, forgejo, jira) under the `socket` carrier; under
-the `log` carrier, which has no socket, the `*-unreadable` sibling renders
-instead, and `local` keeps its own folder fragment.
+Dispatch's tracker, and no forge CLI. They render only when the host built an
+issue reader for a `socket`-carrier dispatch and forwarded
+`BOX_SIGNAL_ISSUE_READ` (issue #6924); otherwise, and always under the `log`
+carrier, which has no socket, the `*-unreadable` sibling renders instead, and
+`local` keeps its own folder fragment.
 
-The Filer's dedup has moved the same way: `github/filer-dedup.md` and
-`forgejo/filer-dedup.md` run `driver-exec signal issue-search` (issue #6895),
-which the host answers for github and forgejo trackers under the `socket`
-carrier. Jira (no searcher) and any tracker under `log` render
-`filer-dedup-unwritable.md`, which runs no search: host-side dedup over
-relayed intents matches by exact site key and overlapping line range only,
-never by subject, so subject-level suppression is lost there. `local` keeps
-its own folder fragment.
+The Filer's dedup has moved the same way: `github/filer-dedup.md`,
+`forgejo/filer-dedup.md` and `jira/filer-dedup.md` run `driver-exec signal
+issue-search` (issues #6895, #6924) wherever the host built a searcher and
+forwarded `BOX_SIGNAL_ISSUE_SEARCH`. A tracker without one, and any tracker
+under `log`, render `filer-dedup-unwritable.md`, which runs no search:
+host-side dedup over relayed intents matches by exact site key and
+overlapping line range only, never by subject, so subject-level suppression
+is lost there. `local` keeps its own folder fragment.
