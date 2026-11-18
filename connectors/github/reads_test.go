@@ -496,7 +496,7 @@ func TestLabeled(t *testing.T) {
 			{"number":7,"title":"done","body":null,"state":"closed","state_reason":"completed","closed_at":"2026-01-01T00:00:00Z","labels":[]},
 			{"number":6,"title":"odd","state":"closed","closed_at":null,"labels":[]}]`),
 	})
-	issues, err := labeled(tgt, "a b", "closed", 30)
+	issues, next, err := labeledPage(tgt, "a b", "closed", "", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,8 +508,8 @@ func TestLabeled(t *testing.T) {
 	if !reflect.DeepEqual(issues, want) {
 		t.Fatalf("issues = %#v", issues)
 	}
-	if len(*got) != 1 {
-		t.Fatalf("requests = %d, want 1", len(*got))
+	if len(*got) != 1 || next != "" {
+		t.Fatalf("requests = %d, next = %q, want 1 and no next", len(*got), next)
 	}
 }
 
@@ -518,24 +518,67 @@ func TestLabeledOpenCarriesNoCloseFields(t *testing.T) {
 		"https://api.github.com/repos/o/r/issues?state=open&labels=x&sort=created&direction=desc&per_page=100&page=1": ok(`[
 			{"number":5,"title":"t","state":"open","state_reason":"reopened","closed_at":"2026-01-01T00:00:00Z","labels":[]}]`),
 	})
-	issues, err := labeled(tgt, "x", "open", 5)
+	issues, _, err := labeledPage(tgt, "x", "open", "", 100)
 	want := []tracker.Issue{{Number: "5", Title: "t", State: "open", Labels: []string{}}}
 	if err != nil || !reflect.DeepEqual(issues, want) {
 		t.Fatalf("issues = %#v, err = %v", issues, err)
 	}
 }
 
-func TestLabeledPagesAndCapsAtLimit(t *testing.T) {
-	n := 0
-	old := send
-	send = func(connector.Request) (connector.Response, error) {
-		n++
-		return ok(items(n*100, 100, false)), nil
+func TestLabeledPageCursorIsTheRESTPageNumber(t *testing.T) {
+	base := "https://api.github.com/repos/o/r/issues?state=open&labels=x&sort=created&direction=desc&per_page=100&page="
+	got := stub(t, map[string]connector.Response{
+		base + "1": ok(items(1000, 100, false)),
+		base + "2": ok(items(2000, 3, false)),
+	})
+	issues, next, err := labeledPage(tgt, "x", "open", "", 500)
+	if err != nil || len(issues) != 100 || next != "2" {
+		t.Fatalf("page 1: len = %d, next = %q, err = %v", len(issues), next, err)
 	}
-	t.Cleanup(func() { send = old })
-	issues, err := labeled(tgt, "x", "open", 150)
-	if err != nil || len(issues) != 150 || n != 2 {
-		t.Fatalf("len = %d, requests = %d, err = %v", len(issues), n, err)
+	issues, next, err = labeledPage(tgt, "x", "open", next, 500)
+	if err != nil || len(issues) != 3 || next != "" {
+		t.Fatalf("page 2: len = %d, next = %q, err = %v", len(issues), next, err)
+	}
+	if len(*got) != 2 || (*got)[1].URL != base+"2" {
+		t.Fatalf("requests = %#v", *got)
+	}
+}
+
+func TestLabeledPageBoundsPerPageByLimit(t *testing.T) {
+	base := "https://api.github.com/repos/o/r/issues?state=open&labels=x&sort=created&direction=desc&per_page=10&page="
+	got := stub(t, map[string]connector.Response{
+		base + "1": ok(items(1, 10, false)),
+		base + "2": ok(items(100, 4, false)),
+	})
+	issues, next, err := labeledPage(tgt, "x", "open", "", 10)
+	if err != nil || len(issues) != 10 || next != "2" {
+		t.Fatalf("page 1: len = %d, next = %q, err = %v", len(issues), next, err)
+	}
+	issues, next, err = labeledPage(tgt, "x", "open", next, 10)
+	if err != nil || len(issues) != 4 || next != "" || len(*got) != 2 {
+		t.Fatalf("page 2: len = %d, next = %q, err = %v, requests = %d", len(issues), next, err, len(*got))
+	}
+}
+
+func TestLabeledPageKeepsGoingPastASkippedPRPage(t *testing.T) {
+	stub(t, map[string]connector.Response{
+		"https://api.github.com/repos/o/r/issues?state=open&labels=x&sort=created&direction=desc&per_page=100&page=1": ok(items(1, 100, true)),
+	})
+	issues, next, err := labeledPage(tgt, "x", "open", "", 500)
+	if err != nil || len(issues) != 0 || next != "2" {
+		t.Fatalf("len = %d, next = %q, err = %v", len(issues), next, err)
+	}
+}
+
+func TestLabeledPageRefusesBadCursorWithoutRequest(t *testing.T) {
+	got := stub(t, nil)
+	for _, c := range []string{"x", "0", "-1", "1.5", " 2"} {
+		if _, _, err := labeledPage(tgt, "x", "open", c, 5); err == nil || !strings.Contains(err.Error(), "list labeled issues: malformed cursor") {
+			t.Errorf("cursor %q: err = %v, want a malformed-cursor error", c, err)
+		}
+	}
+	if len(*got) != 0 {
+		t.Errorf("sent %d requests", len(*got))
 	}
 }
 
@@ -545,8 +588,8 @@ func TestLabeledRefusesBadInputWithoutRequest(t *testing.T) {
 		state string
 		limit int
 	}{{"all", 5}, {"open", 0}} {
-		if _, err := labeled(tgt, "x", c.state, c.limit); err == nil {
-			t.Errorf("labeled(%+v): no error", c)
+		if _, _, err := labeledPage(tgt, "x", c.state, "", c.limit); err == nil {
+			t.Errorf("labeledPage(%+v): no error", c)
 		}
 	}
 	if len(*got) != 0 {

@@ -386,35 +386,51 @@ func commentsOf(t tracker.Target, number string) ([]tracker.Comment, error) {
 	return nil, fmt.Errorf("POST /graphql: more than %d pages of comments on %s#%s", maxPages, t.Repo, number)
 }
 
-// labeled returns up to limit issues in state carrying label, newest first,
-// with the close date and not-planned reason of a closed one: core's dedup
-// scan reads both. Native lists via `gh issue list --json
-// number,title,body,labels,stateReason,closedAt`, so the body stays.
-func labeled(t tracker.Target, label, state string, limit int) ([]tracker.Issue, error) {
+// labeledPage returns one REST page of the issues in state carrying label,
+// newest first, with the close date and not-planned reason of a closed one:
+// core's dedup scan reads both. The cursor is GitHub's own page number at
+// per_page=min(limit, pageSize) ("" is page 1), so a walk must keep limit
+// constant. next is the following page while the raw page was full, so one
+// call is one request and a page is never cut short. A page may hold fewer
+// issues than that because pull requests are skipped. Native lists via
+// `gh issue list --json number,title,body,labels,stateReason,closedAt`, so
+// the body stays.
+func labeledPage(t tracker.Target, label, state, cursor string, limit int) ([]tracker.Issue, string, error) {
 	if limit < 1 {
-		return nil, fmt.Errorf("list labeled issues: limit %d < 1", limit)
+		return nil, "", fmt.Errorf("list labeled issues: limit %d < 1", limit)
 	}
 	if state != "open" && state != "closed" {
-		return nil, fmt.Errorf("list labeled issues: unsupported issue state %q", state)
+		return nil, "", fmt.Errorf("list labeled issues: unsupported issue state %q", state)
 	}
-	path := fmt.Sprintf("%s?state=%s&labels=%s&sort=created&direction=desc&per_page=%d", repoPath(t), state, url.QueryEscape(label), pageSize)
-	var out []tracker.Issue
-	err := pages(t.API, path, func(raw []rawIssue) bool {
-		for _, r := range raw {
-			if r.PullRequest != nil {
-				continue
-			}
-			i := r.issue()
-			if r.State == "closed" {
-				i.ClosedAt = deref(r.ClosedAt)
-				i.ClosedNotPlanned = deref(r.StateReason) == "not_planned"
-			}
-			out = append(out, i)
+	page := 1
+	if cursor != "" {
+		n, err := strconv.Atoi(cursor)
+		if err != nil || n < 1 {
+			return nil, "", fmt.Errorf("list labeled issues: malformed cursor %q", cursor)
 		}
-		return len(out) >= limit
-	})
-	if err != nil {
-		return nil, err
+		page = n
 	}
-	return out[:min(limit, len(out))], nil
+	perPage := min(limit, pageSize)
+	path := fmt.Sprintf("%s?state=%s&labels=%s&sort=created&direction=desc&per_page=%d&page=%d", repoPath(t), state, url.QueryEscape(label), perPage, page)
+	var raw []rawIssue
+	if err := call("GET", t.API, path, nil, &raw); err != nil {
+		return nil, "", err
+	}
+	var out []tracker.Issue
+	for _, r := range raw {
+		if r.PullRequest != nil {
+			continue
+		}
+		i := r.issue()
+		if r.State == "closed" {
+			i.ClosedAt = deref(r.ClosedAt)
+			i.ClosedNotPlanned = deref(r.StateReason) == "not_planned"
+		}
+		out = append(out, i)
+	}
+	next := ""
+	if len(raw) >= perPage {
+		next = strconv.Itoa(page + 1)
+	}
+	return out, next, nil
 }
