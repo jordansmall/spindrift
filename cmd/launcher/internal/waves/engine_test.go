@@ -26,7 +26,8 @@ func TestWriteBlockedMarker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(b); got != "#11 (native), #13 (body)" {
-		t.Errorf("expected %q, got %q", "#11 (native), #13 (body)", got)
+	const want = "it is blocked by #11 (native), #13 (body), not yet `agent-complete` or closed. Re-trigger once the blockers are resolved."
+	if got := string(b); got != want {
+		t.Errorf("expected %q, got %q", want, got)
 	}
 }

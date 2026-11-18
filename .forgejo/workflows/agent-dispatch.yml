@@ -104,14 +104,14 @@ jobs:
             --git-user-name "${{ steps.setup.outputs.git-user-name }}" \
             --git-user-email "${{ steps.setup.outputs.git-user-email }}"
 
-      # The launcher parses the two blocker formats and, when this claimed issue
-      # is blocked by an unmet dependency, drops .spindrift/logs/blocked.txt
-      # naming the blockers instead of working it. Detect that marker, then undo
-      # the up-front claim (back to ready-for-agent) and say why. No recovery —
-      # the operator re-triggers once the blocker resolves. always() so a failed
-      # build (no marker) is a no-op. The label swap runs through the
-      # forgejo-label-swap composite (Forgejo REST); `fj` has no label verb and
-      # is not guaranteed on the runner.
+      # When the launcher will not work this claimed issue (an unmet dependency,
+      # an overlap with an in-progress issue, or a blocker check that failed
+      # transiently) it drops .spindrift/logs/blocked.txt holding a one-line
+      # reason. Detect that marker, then undo the up-front claim (back to
+      # ready-for-agent) and post that reason. No recovery — the operator
+      # re-triggers. always() so a failed build (no marker) is a no-op. The
+      # label swap runs through the forgejo-label-swap composite (Forgejo
+      # REST); `fj` has no label verb and is not guaranteed on the runner.
       - name: Detect a blocked marker
         id: blocked
         if: always()
@@ -145,10 +145,8 @@ jobs:
           add-labels: ready-for-agent
           remove-labels: agent-in-progress
           comment: >-
-            🚧 Agent made no changes: this issue is blocked by
-            ${{ steps.blocked.outputs.blockers }} (not yet `agent-complete` or
-            closed). Released back to `ready-for-agent`; re-trigger once the
-            blocker is resolved.
+            🚧 Agent made no changes and released this issue back to
+            `ready-for-agent`: ${{ steps.blocked.outputs.blockers }}
 
       - name: Upload run logs
         if: always()

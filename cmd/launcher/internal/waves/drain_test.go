@@ -597,8 +597,9 @@ func TestDrainMaxJobs_ClaimedIssue_MarkerAnnotatesSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading blocked marker: %v", err)
 	}
-	if got := string(b); got != "#3 (native)" {
-		t.Errorf("blocked marker = %q, want %q", got, "#3 (native)")
+	const want = "it is blocked by #3 (native), not yet `agent-complete` or closed. Re-trigger once the blocker is resolved."
+	if got := string(b); got != want {
+		t.Errorf("blocked marker = %q, want %q", got, want)
 	}
 }
 
@@ -694,9 +695,9 @@ func TestDrainMaxJobs_HoldsDepsOfCheckFailedIssue(t *testing.T) {
 
 // When the OriginClaimed path's own DepsOf call failed (#1103), an empty
 // edges[num] must never read as confirmed zero blockers, so drain writes
-// .spindrift/logs/blocked.txt and the release workflow reverts the claim and
-// retries later.
-func TestDrainMaxJobs_ClaimedIssue_DepsOfFailedWritesRetryMarker(t *testing.T) {
+// .spindrift/logs/blocked.txt and the release workflow reverts the claim; the
+// operator re-triggers (nothing retries in CI).
+func TestDrainMaxJobs_ClaimedIssue_DepsOfFailedWritesTransientMarker(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
 	c.MaxParallel = 1
@@ -722,8 +723,9 @@ func TestDrainMaxJobs_ClaimedIssue_DepsOfFailedWritesRetryMarker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading blocked marker: %v", err)
 	}
-	if !strings.Contains(string(b), "retry") {
-		t.Errorf("blocked marker = %q, want it to explain the claim will retry", string(b))
+	const want = "the blocker check failed transiently. Re-trigger to run it again."
+	if string(b) != want {
+		t.Errorf("blocked marker = %q, want %q", b, want)
 	}
 
 	if len(fr.RunCalls) != 0 {
@@ -759,7 +761,7 @@ func TestDrainMaxJobs_Claimed_OverlapDeferral_WritesBlockedMarker(t *testing.T) 
 	if err != nil {
 		t.Fatalf("blocked marker not written: %v", err)
 	}
-	const want = "overlapping touches with in-progress #20"
+	const want = overlapMarker20
 	if string(b) != want {
 		t.Errorf("marker = %q, want %q", b, want)
 	}
@@ -811,8 +813,8 @@ func TestDrainMaxJobs_Claimed_OverlapDeferral_MarkerSurvivesRefetchFailure(t *te
 	if err != nil {
 		t.Fatalf("blocked marker not written: %v", err)
 	}
-	if !strings.Contains(string(b), "in-progress #20") {
-		t.Errorf("marker = %q, want it to name collider #20", b)
+	if want := overlapMarker20; string(b) != want {
+		t.Errorf("marker = %q, want %q", b, want)
 	}
 	// The fake fails from the third fetch on; any other count means it no
 	// longer models a re-fetch and must be re-pinned.
@@ -838,3 +840,5 @@ func claimedOverlapFixture(c Config) *forge.Fake {
 	})
 	return fc
 }
+
+const overlapMarker20 = "its touches overlap in-progress #20. Re-trigger once #20 is resolved."

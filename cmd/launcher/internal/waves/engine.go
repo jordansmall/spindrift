@@ -38,31 +38,40 @@ func transitionState(d dispatch.Dispatcher, it forge.IssueTracker, num string, v
 }
 
 // blockedMarker is the file under .spindrift/logs/ that tells the dispatching
-// pipeline to release a claimed issue whose blocker is unmet.
+// pipeline to release a claimed issue that cannot run yet. Its content is a
+// whole reason sentence the release workflow posts after "released this issue
+// back to `ready-for-agent`: ", so it starts lowercase and names how to
+// re-trigger. It is one line: Forgejo passes it through a $GITHUB_OUTPUT
+// heredoc.
 const blockedMarker = "blocked.txt"
 
-// writeBlockedMarker records the unmet blockers as a "#a (native), #b (body)"
-// list the workflow interpolates into its release comment.
+// writeBlockedMarker names the unmet blockers as "#a (native), #b (body)".
 func writeBlockedMarker(pwd string, blockers []string, sources map[string]forge.DepSource) error {
 	refs := make([]string, len(blockers))
 	for i, b := range blockers {
 		refs[i] = forge.Ref(b, sources[b])
 	}
-	return writeMarker(pwd, strings.Join(refs, ", "))
+	resolved := "the blocker is resolved."
+	if len(blockers) > 1 {
+		resolved = "the blockers are resolved."
+	}
+	return writeMarker(pwd, "it is blocked by "+strings.Join(refs, ", ")+
+		", not yet `agent-complete` or closed. Re-trigger once "+resolved)
 }
 
 // writeDepsOfFailedMarker records a transient DepsOf failure (#1103) in place
 // of a named blocker, so the workflow's release-the-claim step still fires.
+// Nothing retries in CI; the operator re-triggers.
 func writeDepsOfFailedMarker(pwd string) error {
-	return writeMarker(pwd, "a transient blocker check failure (will retry)")
+	return writeMarker(pwd, "the blocker check failed transiently. Re-trigger to run it again.")
 }
 
 // writeOverlapMarker names the in-progress collider that deferred a claimed
-// issue. The text must end on the collider: the release workflow interpolates
-// it into "blocked by ${blockers} (not yet agent-complete or closed)". The
-// collider's touch-set is its declared touches plus its open PR's changed files.
+// issue. The collider's touch-set is its declared touches plus its open PR's
+// changed files.
 func writeOverlapMarker(pwd, collider string) error {
-	return writeMarker(pwd, "overlapping touches with in-progress #"+collider)
+	return writeMarker(pwd, "its touches overlap in-progress #"+collider+
+		". Re-trigger once #"+collider+" is resolved.")
 }
 
 func writeMarker(pwd, text string) error {
@@ -270,8 +279,8 @@ outer:
 				switch {
 				case depsOfFailed[num]:
 					// edges[num] is unreliable, not a confirmed zero-blocker
-					// result (#1103), so write the marker anyway and let the
-					// release workflow revert the claim for a later retry.
+					// result (#1103), so write the marker anyway: the release
+					// workflow reverts the claim and the operator re-triggers.
 					if err := writeDepsOfFailedMarker(pwd); err != nil {
 						return err
 					}

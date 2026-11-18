@@ -66,31 +66,31 @@ parse_output() {
 }
 
 @test "newline-less native blocker list closes the heredoc cleanly" {
-  printf '%s' '#12 (native)' > "$work/.spindrift/logs/blocked.txt"
+  printf '%s' "it is blocked by #12 (native), not yet \`agent-complete\` or closed. Re-trigger once the blocker is resolved." > "$work/.spindrift/logs/blocked.txt"
   run_step
   run parse_output blocked
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
   run parse_output blockers
   [ "$status" -eq 0 ]
-  [ "$output" = "#12 (native)" ]
+  [ "$output" = "it is blocked by #12 (native), not yet \`agent-complete\` or closed. Re-trigger once the blocker is resolved." ]
 }
 
 @test "newline-less transient-failure marker closes the heredoc cleanly" {
-  printf '%s' 'a transient blocker check failure (will retry)' > "$work/.spindrift/logs/blocked.txt"
+  printf '%s' 'the blocker check failed transiently. Re-trigger to run it again.' > "$work/.spindrift/logs/blocked.txt"
   run_step
   run parse_output blocked
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
   run parse_output blockers
   [ "$status" -eq 0 ]
-  [ "$output" = "a transient blocker check failure (will retry)" ]
+  [ "$output" = "the blocker check failed transiently. Re-trigger to run it again." ]
 }
 
 @test "marker already ending in a newline yields the same value, no blank line" {
-  printf '%s\n' '#12 (native), #13 (native)' > "$work/.spindrift/logs/blocked.txt"
+  printf '%s\n' "it is blocked by #12 (native), #13 (native), not yet \`agent-complete\` or closed. Re-trigger once the blockers are resolved." > "$work/.spindrift/logs/blocked.txt"
   run_step
   run parse_output blockers
   [ "$status" -eq 0 ]
-  [ "$output" = "#12 (native), #13 (native)" ]
+  [ "$output" = "it is blocked by #12 (native), #13 (native), not yet \`agent-complete\` or closed. Re-trigger once the blockers are resolved." ]
 }
