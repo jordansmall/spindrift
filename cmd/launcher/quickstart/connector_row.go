@@ -3,10 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/forge/github"
 )
 
 // The env vars nix/quickstart.nix's wrapper sets to the github Connector's
@@ -23,6 +25,8 @@ const (
 // never reach gh. With neither var set (a plain `go run`) it applies none and
 // the native gh answers, as backend rows are opt-in. The wizard's token is the
 // row's credential: runQuickstart exports it as GH_TOKEN before the probe.
+// The baked routes pin api.github.com, so under any other GH_HOST it applies
+// none either and gh, which honours GH_HOST, answers.
 func useBakedGithubRow(getenv func(string) string) error {
 	wasm, routes := getenv(connectorWasmEnv), getenv(connectorRoutesEnv)
 	if wasm == "" && routes == "" {
@@ -36,6 +40,10 @@ func useBakedGithubRow(getenv func(string) string) error {
 	var table []connectorhost.Route
 	if err := json.Unmarshal([]byte(routes), &table); err != nil {
 		return fmt.Errorf("%s: %w", connectorRoutesEnv, err)
+	}
+	// After the wiring checks, so a broken bake errors on every host.
+	if !strings.EqualFold(github.HostFrom(getenv), github.DefaultHost) {
+		return nil
 	}
 	doc, err := json.Marshal([]backendrows.Row{{
 		Name:          backend.GitHub.Name,
