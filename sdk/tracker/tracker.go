@@ -188,8 +188,19 @@ type Reader struct {
 	// closed issues too, and it must fill ClosedAt and ClosedNotPlanned for
 	// them: core's dedup scan reads both. Setting it advertises
 	// "tracker.labeled"; leaving it nil makes core scan through its native
-	// adapter instead.
+	// adapter instead. It answers a single page: core reads no further, so
+	// a backlog larger than limit is truncated; use LabeledPage to page.
+	//
+	// Deprecated: use LabeledPage, which pages by cursor; Labeled answers one
+	// page with no next, so core's scan of a large label stops at limit.
 	Labeled func(t Target, label, state string, limit int) ([]Issue, error)
+
+	// LabeledPage is the paged Labeled: it returns up to limit issues
+	// starting at cursor ("" for the first page) and next, the opaque cursor
+	// of the following page, or "" at the end. Core repeats the call with
+	// next as cursor until next is "". Setting it advertises
+	// "tracker.labeled" and takes precedence over Labeled.
+	LabeledPage func(t Target, label, state, cursor string, limit int) (issues []Issue, next string, err error)
 }
 
 type method = func(json.RawMessage) (any, error)
@@ -425,7 +436,7 @@ func handlers(r Reader) ([]string, map[string]method) {
 			return issueList(issues), nil
 		}
 	}
-	if r.Labeled != nil {
+	if r.Labeled != nil || r.LabeledPage != nil {
 		caps = append(caps, "tracker.labeled")
 		m["tracker.labeled"] = func(params json.RawMessage) (any, error) {
 			var p struct {
@@ -433,15 +444,23 @@ func handlers(r Reader) ([]string, map[string]method) {
 				Label  string `json:"label"`
 				State  string `json:"state"`
 				Limit  int    `json:"limit"`
+				Cursor string `json:"cursor"`
 			}
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
 			}
-			issues, err := r.Labeled(p.Target, p.Label, p.State, p.Limit)
+			if r.LabeledPage == nil {
+				issues, err := r.Labeled(p.Target, p.Label, p.State, p.Limit)
+				if err != nil {
+					return nil, err
+				}
+				return issueList(issues), nil
+			}
+			issues, next, err := r.LabeledPage(p.Target, p.Label, p.State, p.Cursor, p.Limit)
 			if err != nil {
 				return nil, err
 			}
-			return issueList(issues), nil
+			return pagedIssueList(issues, next), nil
 		}
 	}
 	if r.IDs == ProjectKeyIDs {
@@ -471,14 +490,19 @@ func idList(fn func(Target, string) ([]string, error)) method {
 }
 
 // issueList is the {"issues": [...]} reply of the issue-list reads.
-func issueList(issues []Issue) any {
+func issueList(issues []Issue) any { return pagedIssueList(issues, "") }
+
+// pagedIssueList adds the opaque next-page cursor, omitted when empty so an
+// unpaged reply is byte-identical to issueList's.
+func pagedIssueList(issues []Issue, next string) any {
 	out := make([]Issue, 0, len(issues)) // encode [] rather than null
 	for _, i := range issues {
 		out = append(out, normalize(i))
 	}
 	return struct {
 		Issues []Issue `json:"issues"`
-	}{out}
+		Next   string  `json:"next,omitempty"`
+	}{out, next}
 }
 
 // normalize makes Labels encode as [] rather than null.

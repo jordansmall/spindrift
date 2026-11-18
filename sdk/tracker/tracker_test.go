@@ -179,6 +179,44 @@ func TestLabeledCapabilityAndWireShape(t *testing.T) {
 	}
 }
 
+func TestLabeledPageCursorAndPrecedence(t *testing.T) {
+	r := fakeReader(t)
+	r.LabeledPage = func(tg Target, label, state, cursor string, limit int) ([]Issue, string, error) {
+		if tg != wantTarget || label != "bug" || state != "open" || limit != 2 {
+			t.Errorf("LabeledPage(%v, %q, %q, %q, %d)", tg, label, state, cursor, limit)
+		}
+		if cursor == "" {
+			return []Issue{{Number: "1"}}, "c2", nil
+		}
+		return []Issue{{Number: "2"}}, "", nil
+	}
+	r.Labeled = func(Target, string, string, int) ([]Issue, error) {
+		t.Error("Labeled called although LabeledPage is set")
+		return nil, nil
+	}
+	caps, m := handlers(r)
+	if want := []string{"tracker", "tracker.comments", "tracker.labeled"}; !reflect.DeepEqual(caps, want) {
+		t.Fatalf("caps = %v, want %v", caps, want)
+	}
+	const issue = `"title":"","body":"","state":"","labels":[],"closedAt":"","closedNotPlanned":false,"dedupMarker":"","status":""`
+	base := `{` + target + `,"label":"bug","state":"open","limit":2`
+	if got, want := call(t, m, "tracker.labeled", base+`}`), `{"issues":[{"number":"1",`+issue+`}],"next":"c2"}`; got != want {
+		t.Errorf("first page = %s, want %s", got, want)
+	}
+	if got, want := call(t, m, "tracker.labeled", base+`,"cursor":"c2"}`), `{"issues":[{"number":"2",`+issue+`}]}`; got != want {
+		t.Errorf("last page = %s, want %s", got, want)
+	}
+}
+
+func TestLabeledOnlyOmitsNext(t *testing.T) {
+	r := fakeReader(t)
+	r.Labeled = func(Target, string, string, int) ([]Issue, error) { return nil, nil }
+	_, m := handlers(r)
+	if got := call(t, m, "tracker.labeled", `{`+target+`,"cursor":"x"}`); got != `{"issues":[]}` {
+		t.Errorf("labeled-only = %s, want no next key", got)
+	}
+}
+
 func TestEmptyListsEncodeAsArrays(t *testing.T) {
 	r := Reader{
 		ListIssues: func(Target, Query, int) ([]Issue, error) { return nil, nil },
