@@ -19,6 +19,7 @@ func reconcileConfig() config {
 	c := baseConfig()
 	c.BranchPrefix = "agent/issue-"
 	c.MaxFixAttempts = 3
+	c.Label = "ready-for-agent"
 	return c
 }
 

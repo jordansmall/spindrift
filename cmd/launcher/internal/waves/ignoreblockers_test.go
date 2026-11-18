@@ -19,7 +19,7 @@ func TestDrainMaxJobs_IgnoreBlockers_DispatchesDespiteUnmetBlocker(t *testing.T)
 	c.MaxParallel = 1
 	c.IgnoreBlockers = true
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c, label))
 	// Issue #3 is open and carries no complete label, so an ordinary wave
 	// would hold #1 for a later invocation.
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
@@ -54,7 +54,7 @@ func TestDrainMaxJobs_IgnoreBlockers_FailedBlockerDoesNotCascade(t *testing.T) {
 	c.MaxParallel = 1
 	c.IgnoreBlockers = true
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}})
 
@@ -86,7 +86,7 @@ func TestDrainMaxJobs_Selective_RerunHint_UsesConfigVerb(t *testing.T) {
 	c.MaxJobs = 1
 	c.Verb = "research"
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{Number: "10", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "15", Labels: []string{label}})
 
@@ -117,11 +117,10 @@ func TestDrainMaxJobs_Selective_RerunHint_UsesConfigVerb(t *testing.T) {
 // than holding, so it must write no blocked marker.
 func TestDrainMaxJobs_IgnoreBlockers_ClaimedIssueWritesNoBlockedMarker(t *testing.T) {
 	c := baseConfig()
-	label := "agent-research"
 	c.MaxParallel = 1
 	c.IgnoreBlockers = true
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c, testInProgressLabel))
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{testInProgressLabel}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
 
@@ -131,7 +130,7 @@ func TestDrainMaxJobs_IgnoreBlockers_ClaimedIssueWritesNoBlockedMarker(t *testin
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
-	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
+	claimer := NewLabelClaimer(fc, testInProgressLabel, testInProgressLabel)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "claimed issue"},
 	}, edges, nil, nil, OriginClaimed, claimer, nil); err != nil {
@@ -151,19 +150,18 @@ func TestDrainMaxJobs_IgnoreBlockers_ClaimedIssueWritesNoBlockedMarker(t *testin
 // overlap gate too.
 func TestDrainMaxJobs_IgnoreBlockers_ClaimedIssueSkipsOverlapGate(t *testing.T) {
 	c := baseConfig()
-	label := "agent-research"
 	c.MaxParallel = 1
 	c.IgnoreBlockers = true
 	c.OverlapGate = "defer"
 
-	fc := claimedOverlapFixture()
+	fc := claimedOverlapFixture(c)
 
 	fr := runner.NewFake()
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
-	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
+	claimer := NewLabelClaimer(fc, testInProgressLabel, testInProgressLabel)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "10", Title: "claimed issue"},
 	}, nil, nil, nil, OriginClaimed, claimer, nil); err != nil {
