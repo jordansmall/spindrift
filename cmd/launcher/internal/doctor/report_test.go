@@ -66,7 +66,7 @@ func TestReporter_Passthrough_PrintsVerbatimWithNoTrailingNewline(t *testing.T) 
 // that motivated the Reporter type: a success row, and a finding welded to
 // its remedy line.
 func TestReporter_Results_PrintsFindingAndRemedyForFailure(t *testing.T) {
-	const remedy = "set GIT_USER_NAME, or configure git user.name on the host"
+	const remedy = "pass --user-name or set git.user.name, or configure git user.name on the host"
 	results := []Result{
 		{
 			Check: Check{
@@ -130,7 +130,7 @@ func TestReporter_Quiet_KeepsPassthroughVerbatim(t *testing.T) {
 }
 
 func TestReporter_Quiet_Results_KeepsRequiredFindingAndItsRemedy(t *testing.T) {
-	const remedy = "set GIT_USER_NAME, or configure git user.name on the host"
+	const remedy = "pass --user-name or set git.user.name, or configure git user.name on the host"
 	results := []Result{
 		{
 			Check: Check{

@@ -35,8 +35,8 @@ type Check struct {
 	// Reporter.Results passes its first return value to SuccessMsg, so a Probe
 	// need not stash that value in a variable a sibling closure captures.
 	Probe func() (any, error)
-	// Remedy is a short hint printed alongside a failure, e.g. "set
-	// GIT_USER_NAME, or configure git user.name on the host".
+	// Remedy is a short hint printed alongside a failure, e.g. "pass
+	// --user-name or set git.user.name, or configure git user.name on the host".
 	Remedy string
 	// SuccessMsg overrides the "ok: <Name>" line on success, so a check can
 	// report a probe-derived detail such as a live-fetched repo slug. output

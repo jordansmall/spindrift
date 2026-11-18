@@ -270,11 +270,11 @@ func TestReporter_Results_SuccessMsgReceivesProbeOutput(t *testing.T) {
 	}
 }
 
-const gitUserNameErrText = "GIT_USER_NAME is unset"
+const gitUserNameErrText = "git user name is unset"
 
 // gitUserNameRemedy is a Remedy that says something its paired probe error
 // does not, so remedySuffix keeps it rather than suppressing it as a repeat.
-const gitUserNameRemedy = "set GIT_USER_NAME, or configure git user.name on the host"
+const gitUserNameRemedy = "pass --user-name or set git.user.name, or configure git user.name on the host"
 
 func TestReporter_Results_PrintsNameErrAndRemedyForFailure(t *testing.T) {
 	results := []Result{
@@ -290,7 +290,7 @@ func TestReporter_Results_PrintsNameErrAndRemedyForFailure(t *testing.T) {
 	var buf bytes.Buffer
 	NewReporter(&buf, true).Results(results)
 
-	want := "MISSING: git-user-name: GIT_USER_NAME is unset\n" +
+	want := "MISSING: git-user-name: git user name is unset\n" +
 		"  remedy: " + gitUserNameRemedy + "\n"
 	if buf.String() != want {
 		t.Fatalf("Results() wrote %q, want %q", buf.String(), want)
@@ -423,7 +423,7 @@ func TestReporter_Results_SkipsRemedyLineWhenIdenticalToErrText(t *testing.T) {
 	var buf bytes.Buffer
 	NewReporter(&buf, true).Results(results)
 
-	want := "MISSING: git-user-name: GIT_USER_NAME is unset\n"
+	want := "MISSING: git-user-name: git user name is unset\n"
 	if buf.String() != want {
 		t.Fatalf("Results() wrote %q, want %q (no duplicate remedy line)", buf.String(), want)
 	}
@@ -567,7 +567,7 @@ func TestReporter_Results_TierAndDegradedDriveRowPrefix(t *testing.T) {
 			name:  "required tier bare error renders MISSING",
 			check: Check{Name: "git-user-name", Tier: Required},
 			err:   errors.New(gitUserNameErrText),
-			want:  "MISSING: git-user-name: GIT_USER_NAME is unset\n",
+			want:  "MISSING: git-user-name: git user name is unset\n",
 		},
 		{
 			name:  "advisory tier bare error renders advisory, not MISSING",
