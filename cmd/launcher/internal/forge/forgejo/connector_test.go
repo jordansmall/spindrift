@@ -203,8 +203,12 @@ var _ forgetest.CodeForgeHarness = composedCodeForgeHarness{}
 
 func (h composedCodeForgeHarness) Forge() forge.CodeForge { return h.cf }
 
-// Unreachable composes against a second backend, then closes it so Probe fails.
-func (h composedCodeForgeHarness) Unreachable() forge.CodeForge {
+// Unreachable is closedBackendForge: Probe fails against the closed backend.
+func (h composedCodeForgeHarness) Unreachable() forge.CodeForge { return h.closedBackendForge() }
+
+// closedBackendForge composes against a second backend, then closes it. Its
+// clone URL is outside the insteadOf rewrite, so git cannot reach it either.
+func (h *connectorHarness) closedBackendForge() forge.CodeForge {
 	h.t.Helper()
 	srv := httptest.NewTLSServer(http.NotFoundHandler())
 	var cf forge.CodeForge
@@ -270,7 +274,10 @@ type composedHostMediationHarness struct {
 	prSeq      int
 }
 
-var _ forgetest.HostMediationHarness = (*composedHostMediationHarness)(nil)
+var (
+	_ forgetest.HostMediationHarness = (*composedHostMediationHarness)(nil)
+	_ forgetest.MirrorSeedHarness    = (*composedHostMediationHarness)(nil)
+)
 
 func (h *composedHostMediationHarness) Tracker() forge.IssueTracker { return h.fake.AsIssueFiler() }
 
@@ -334,6 +341,18 @@ func (h *composedHostMediationHarness) CommentPosted(num, body string) bool {
 		}
 	}
 	return false
+}
+
+func (h *composedHostMediationHarness) MirrorBase() string { return "main" }
+
+func (h *composedHostMediationHarness) RefSHA(ref string) string {
+	return forgetest.RevParse(h.t, h.repo.Bare, "refs/heads/"+ref)
+}
+
+// UnseedableCodeForge's backend is closed, and its clone URL has no insteadOf
+// rewrite to a local repository, so the clone fails.
+func (h *composedHostMediationHarness) UnseedableCodeForge() (forge.CodeForge, string) {
+	return h.closedBackendForge(), gitSecret
 }
 
 // routeCoverage accumulates, across the harnesses of one test, which of the
