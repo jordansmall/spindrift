@@ -268,18 +268,32 @@ func retryTransient(attempts int, b retry.LinearBackoff, fn func() error) error 
 	}
 }
 
-// relayClone is the `git clone` step bundlerelay's helpers take, run in core's
-// git over the validated clone URL with core's credential: the Connector never
-// sees git or the credential. op names the caller; the credential rides the
-// environment, never the URL, and the clone's output stays out of the error.
-func (p *pushOnly) relayClone(op string) func(dir string) error {
+// cloneInto is a `git clone` step run in core's git over the validated clone
+// URL with core's credential: the Connector never sees git or the credential.
+// op names the caller and shapeFlag the clone's shape; the credential rides
+// the environment, never the URL, and the error carries only redacted output.
+func (p *pushOnly) cloneInto(op, shapeFlag string) func(dir string) error {
 	return func(dir string) error {
-		if _, err := p.cred.Apply(exec.Command("git", "clone", "--no-single-branch", p.cloneURL, dir)).CombinedOutput(); err != nil {
-			return fmt.Errorf("connector forge: %s: git clone %s: %w", op, forge.RedactURLCredentials(p.cloneURL), err)
+		out, err := p.cred.Apply(exec.Command("git", "clone", shapeFlag, p.cloneURL, dir)).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("connector forge: %s: git clone %s: %w%s", op, forge.RedactURLCredentials(p.cloneURL), err, forge.RedactedOutputTail(out))
 		}
 		return nil
 	}
 }
+
+// relayClone is the clone step bundlerelay's helpers take.
+func (p *pushOnly) relayClone(op string) func(dir string) error {
+	return p.cloneInto(op, "--no-single-branch")
+}
+
+// SeedMirror clones the repo bare into dir for a credential-less Box,
+// whatever the Box kind: the caller decides when a mirror is wanted.
+func (p *pushOnly) SeedMirror(dir string) error {
+	return p.cloneInto("seed mirror", "--bare")(dir)
+}
+
+var _ forge.MirrorSeeder = (*pushOnly)(nil)
 
 // pushBranch creates branch from localRef in the repo at srcDir, create-only.
 func (p *pushOnly) pushBranch(srcDir, localRef, branch, base string) error {

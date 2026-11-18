@@ -423,3 +423,8 @@ func HeadBranch(cf forge.CodeForge, prURL string) (string, error) {
 	}
 	return "", errors.New("connector forge: not a Connector PR forge")
 }
+
+// SeedMirror clones the repo bare through core's git, as the push-only forge does.
+func (f *prForge) SeedMirror(dir string) error { return f.push.SeedMirror(dir) }
+
+var _ forge.MirrorSeeder = (*prForge)(nil)

@@ -71,6 +71,7 @@ func AutoMergeAllowed(c *connectorhost.Connector, t Target) (bool, error) {
 	return readOnlyForge(c, t).autoMergeAllowed()
 }
 
+// readOnlyForge holds only reads (push is nil): never hand it out as a Code Forge.
 func readOnlyForge(c *connectorhost.Connector, t Target) *prForge {
 	return &prForge{reads: &reads{call: classedCall(c, retry.Clock{}), target: t}}
 }
