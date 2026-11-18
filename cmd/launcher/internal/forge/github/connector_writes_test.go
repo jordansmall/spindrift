@@ -124,6 +124,7 @@ func (b *restBackend) serveWrite(w http.ResponseWriter, r *http.Request, reject 
 		writeJSON(w, refs)
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, repo+"/git/refs/heads/"):
 		ref := "refs/heads/" + strings.TrimPrefix(path, repo+"/git/refs/heads/")
+		b.deletedRefs = append(b.deletedRefs, ref)
 		if _, err := b.gitOut("rev-parse", "--verify", "--quiet", ref); err != nil {
 			writeJSONStatus(w, http.StatusUnprocessableEntity, map[string]string{"message": "Reference does not exist"})
 			return true
@@ -489,6 +490,23 @@ func (h *connectorHarness) SeedLandablePR(num string) string {
 	h.t.Helper()
 	h.backend.repo.SeedBranch(forge.AgentBranchName(h.BranchPrefix(), num), num)
 	return h.SeedOpenPR(num)
+}
+
+// SeedLandableForkPR is SeedLandablePR for a PR whose head lives in a fork:
+// the base repository still holds a branch of the same name, which is not the
+// PR's head.
+func (h *connectorHarness) SeedLandableForkPR(num string) string {
+	h.t.Helper()
+	url := h.SeedLandablePR(num)
+	h.mutatePR(num, func(p *restPR) { p.fork = forkRepo })
+	return url
+}
+
+// deletedRefs snapshots the refs the backend was asked to delete.
+func (h *connectorHarness) deletedRefs() []string {
+	h.backend.mu.Lock()
+	defer h.backend.mu.Unlock()
+	return slices.Clone(h.backend.deletedRefs)
 }
 
 func (h *connectorHarness) SeedProtection(branch string, classic, rulesets int) {

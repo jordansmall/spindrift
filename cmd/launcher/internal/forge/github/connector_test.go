@@ -35,6 +35,7 @@ const (
 	connectorRoutesEnv = "SPINDRIFT_BACKEND_CONNECTOR_ROUTES"
 	connectorToken     = "connector-test-token"
 	connectorRepo      = "owner/repo"
+	forkRepo           = "someone/repo"
 	gitSecret          = "git-secret"
 )
 
@@ -97,6 +98,9 @@ type restPR struct {
 	comments []string
 	rollups  []string
 	contexts []scriptedContext
+	// fork is the full name of the repository the head lives in when it is not
+	// the base repository; empty is a same-repository PR.
+	fork string
 }
 
 // restBackend serves exactly the REST and GraphQL requests the github Connector
@@ -127,6 +131,8 @@ type restBackend struct {
 	// merge requests answer, in order, before the real answer resumes.
 	merges        int
 	mergeStatuses []int
+	// deletedRefs is every ref a git/refs DELETE request named, accepted or not.
+	deletedRefs []string
 	// labels is the repository's label registry; hits counts every request the
 	// server received, accepted or not; tokens are extra Authorization values
 	// it accepts beside connectorToken's, and auths the Authorization of each
@@ -314,11 +320,15 @@ func (b *restBackend) wirePR(p *restPR) map[string]any {
 	if p.merged {
 		mergeCommit = p.mergeSHA
 	}
+	headRepo := connectorRepo
+	if p.fork != "" {
+		headRepo = p.fork
+	}
 	return map[string]any{
 		"number": p.num, "html_url": b.prURL(p.num), "state": state, "merged_at": mergedAt, "draft": p.draft,
 		"node_id": nodeID(p.num), "mergeable": mergeable, "merge_commit_sha": mergeCommit,
-		"head": map[string]string{"ref": p.branch, "sha": b.headSHA(p)},
-		"base": map[string]string{"ref": p.base},
+		"head": map[string]any{"ref": p.branch, "sha": b.headSHA(p), "repo": map[string]string{"full_name": headRepo}},
+		"base": map[string]any{"ref": p.base, "repo": map[string]string{"full_name": connectorRepo}},
 	}
 }
 
