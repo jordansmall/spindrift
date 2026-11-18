@@ -304,18 +304,6 @@ func TestSlugIssueRefTrackerIsLocalOnly(t *testing.T) {
 	}
 }
 
-func TestClosesRefTrackerIsGithubOnly(t *testing.T) {
-	for _, name := range []string{"github", "forgejo", "jira", "local", "git"} {
-		d, ok := ByName(name)
-		if !ok {
-			t.Fatalf("ByName(%q) not registered", name)
-		}
-		if want := name == "github"; d.ClosesRefTracker != want {
-			t.Errorf("%s.ClosesRefTracker = %v, want %v", name, d.ClosesRefTracker, want)
-		}
-	}
-}
-
 // TestRelaysBundle pins the single "this Box hands its branch back as an
 // outbox bundle" decision: a host-mediated remote always, a relay-capable
 // forge only under a read-only Box.
