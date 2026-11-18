@@ -9,6 +9,70 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.32.0 — 2026-11-18
+
+Boxes now default to read-only and carry no forge token, and the first
+Connectors ship: plug-in modules that can stand in for the github, forgejo
+and jira backends and the claude Driver.
+
+**⚠ Breaking changes** this release: Boxes default to read-only with no forge
+token inside, and the unreleased Connector protocol and SDK moved on.
+
+- **⚠ Breaking: Boxes are read-only by default.** If you never set
+  `BOX_FORGE_AND_ISSUE_ACCESS`, your Boxes now run `read-only`. The agent
+  hands back its branch as a bundle, and the launcher pushes it, opens the
+  draft PR, posts the comments and swaps the labels with its own token.
+  Before you upgrade, make sure that token covers those writes and that the
+  triage labels exist (plus `agent-review-finding` if you run a Filer);
+  `spindrift doctor` checks both and offers to create the labels. To keep the
+  old behaviour for now, set `forge.boxAccess = "read-write"` or pass
+  `--box-access read-write`. It still works but warns as deprecated, and a
+  later release removes it. `MIGRATING.md` walks through it.
+- **⚠ Breaking: a read-only Box holds no forge token.** `GH_TOKEN`,
+  `FORGEJO_TOKEN`, `BOX_GH_TOKEN` and `BOX_FORGEJO_TOKEN` no longer reach a
+  read-only Box, even with `forge.boxForgeCredential = "forwarded"`. The Box
+  clones a mirror the launcher fetched for it, and asks the launcher for the
+  issue, linked issues and duplicate searches. You can drop `BOX_GH_TOKEN`
+  and `BOX_FORGEJO_TOKEN` from `harness.env` (only `read-write` uses them
+  now), and `doctor` no longer asks for a Box token. `BOX_FORGE_CREDENTIAL`
+  is now a no-op that warns; unset it.
+- **Fix passes see why CI failed.** When CI goes red, the fix pass now gets
+  the tail of each failing Actions job's log on GitHub and Forgejo, with any
+  earlier `FAIL`, `panic:` or `error:` lines kept, next to the check
+  summaries. The agent works from that instead of reaching for a forge CLI,
+  and its prompt says what to do when a failure won't reproduce locally.
+- **Connectors, opt-in.** A backend or Driver can now be served by a
+  Connector, a WebAssembly module core loads and runs. Set
+  `spindrift.connectors.<name>.shadow = true` to sample calls through it and
+  log where it disagrees with the built-in code, or `primary = true` to hand
+  it over. Primary github serves every read and launcher-side write, forgejo
+  its whole Code Forge, jira every tracker call; a primary github or forgejo
+  row only merges by rebase. Each Connector can reach only the hosts its Route
+  table allows, and `doctor` lists the tables and flags any widening. Turn on
+  `CONNECTOR_SANDBOX` to run a run's Connectors in one locked-down container
+  (or bwrap jail) instead of inside the launcher. The first Connector
+  versions are claude 0.2.0, github 0.2.0, forgejo 0.1.1 and jira 0.1.1.
+- **⚠ Breaking: Connector protocol and SDK changes.** This only matters if
+  you built a Connector against unreleased `main`. Core now refuses one that
+  declares protocol 0.0.x or 0.1.x, and `Strategy.NewDecoder` in
+  `spindrift.dev/sdk/driver` takes the host's clock. Rebuild against this
+  release's SDK, which now ships as its own Go module with a conformance
+  suite you can run against your Connector.
+- **NuGet through the Registry proxy.** Private NuGet feeds work like the
+  other ecosystems: the proxy binds `nuget.config` and rewrites the feed's
+  service index and registration documents to point back through it.
+  nuget.org counts as a public default and needs no route.
+- **Landing and claim fixes.** A green PR that can't be flipped out of draft
+  now fails the landing with a comment naming the error, instead of settling
+  `agent-complete` behind a PR nobody can merge; transient flip errors are
+  retried first. A claim that Jira's workflow refuses, from the daemon or the
+  Console, now leaves one comment saying why. On `CODE_FORGE=git`, a token in
+  `CODE_FORGE_REMOTE_URL` no longer lands in git's argv or a clone's remote
+  URL; if that URL names only a user and a credential helper holds the
+  password, drop the user from the URL.
+
+---
+
 ## 0.31.0 — 2026-11-08
 
 Your flake is now the only place settings come from: the launcher stops
