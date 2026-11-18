@@ -361,3 +361,131 @@ func TestPRsForBranchWalksPastFiftyPages(t *testing.T) {
 		t.Fatalf("prs = %#v, err = %v", prs, err)
 	}
 }
+
+func TestJobIDFromTargetURL(t *testing.T) {
+	for _, tc := range []struct {
+		name, api, target, want string
+	}{
+		{"relative", "https://forge.test", "/o/r/actions/runs/12/jobs/3", "12/3"},
+		{"case-insensitive repo", "https://forge.test", "/O/R/actions/runs/1/jobs/0", "1/0"},
+		{"sub-path base", "https://forge.test/forge", "/forge/o/r/actions/runs/12/jobs/3", "12/3"},
+		{"absolute on base host", "https://forge.test", "https://forge.test/o/r/actions/runs/12/jobs/3", ""},
+		{"absolute on another host", "https://forge.test", "https://evil.test/o/r/actions/runs/12/jobs/3", ""},
+		{"another repo", "https://forge.test", "/o/other/actions/runs/12/jobs/3", ""},
+		{"non-numeric run", "https://forge.test", "/o/r/actions/runs/x/jobs/3", ""},
+		{"non-numeric job", "https://forge.test", "/o/r/actions/runs/12/jobs/x", ""},
+		{"run zero", "https://forge.test", "/o/r/actions/runs/0/jobs/0", ""},
+		{"signed job", "https://forge.test", "/o/r/actions/runs/12/jobs/-1", ""},
+		{"wrong sub-path", "https://forge.test/forge", "/other/o/r/actions/runs/12/jobs/3", ""},
+		{"missing sub-path", "https://forge.test/forge", "/o/r/actions/runs/12/jobs/3", ""},
+		{"too few segments", "https://forge.test", "/o/r/actions/runs/12", ""},
+		{"too many segments", "https://forge.test", "/o/r/actions/runs/12/jobs/3/x", ""},
+		{"wrong literal", "https://forge.test", "/o/r/pulls/runs/12/jobs/3", ""},
+		{"empty", "https://forge.test", "", ""},
+	} {
+		if got := jobID(forge.Target{API: tc.api, Repo: "o/r"}, tc.target); got != tc.want {
+			t.Errorf("%s: jobID(%q) = %q, want %q", tc.name, tc.target, got, tc.want)
+		}
+	}
+}
+
+func TestChecksSetsJobID(t *testing.T) {
+	stub(t, map[string]connector.Response{
+		repoAPI + "/pulls/7": ok(prJSON),
+		statusURL:            ok(`{"state":"failure","total_count":2}`),
+		listURL + "1": ok(`[
+			{"id":2,"context":"ci/build","state":"failure","target_url":"/o/r/actions/runs/5/jobs/1"},
+			{"id":1,"context":"ci/other","state":"success","target_url":"https://elsewhere.test/x"}]`),
+		listURL + "2": ok(`[]`),
+	})
+	ro, err := checks(ftgt, "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ro.Checks[0].JobID != "5/1" || ro.Checks[1].JobID != "" {
+		t.Fatalf("job ids = %q, %q", ro.Checks[0].JobID, ro.Checks[1].JobID)
+	}
+}
+
+const (
+	runsURL = repoAPI + "/actions/runs?run_number=5"
+	jobsURL = repoAPI + "/actions/runs/903/jobs"
+)
+
+func TestJobLog(t *testing.T) {
+	got := stub(t, map[string]connector.Response{
+		runsURL:                           ok(`{"workflow_runs":[{"id":903}],"total_count":1}`),
+		jobsURL:                           ok(`[{"id":40},{"id":41}]`),
+		repoAPI + "/actions/jobs/41/logs": {Status: 200, Body: []byte("--- FAIL: TestX\n")},
+	})
+	log, err := jobLog(ftgt, "5/1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if log != "--- FAIL: TestX\n" {
+		t.Fatalf("log = %q", log)
+	}
+	want := []string{runsURL, jobsURL, repoAPI + "/actions/jobs/41/logs"}
+	if len(*got) != len(want) {
+		t.Fatalf("requests = %#v", *got)
+	}
+	for i, r := range *got {
+		if r.URL != want[i] || r.Method != "GET" || r.Body != "" {
+			t.Errorf("request %d = %#v, want GET %s", i, r, want[i])
+		}
+		if !strings.HasPrefix(r.URL, repoAPI+"/") {
+			t.Errorf("request %d leaves the repository API: %s", i, r.URL)
+		}
+	}
+}
+
+func TestJobLogUnderSubPathBase(t *testing.T) {
+	api := "https://forge.test/forge"
+	prefix := api + "/api/v1/repos/o/r"
+	got := stub(t, map[string]connector.Response{
+		prefix + "/actions/runs?run_number=5": ok(`{"workflow_runs":[{"id":903}]}`),
+		prefix + "/actions/runs/903/jobs":     ok(`[{"id":40},{"id":41}]`),
+		prefix + "/actions/jobs/41/logs":      {Status: 200, Body: []byte("boom\n")},
+	})
+	log, err := jobLog(forge.Target{API: api, Repo: "o/r"}, "5/1")
+	if err != nil || log != "boom\n" {
+		t.Fatalf("log = %q, err = %v", log, err)
+	}
+	if len(*got) != 3 {
+		t.Fatalf("requests = %#v", *got)
+	}
+}
+
+func TestJobLogErrors(t *testing.T) {
+	logURL := repoAPI + "/actions/jobs/40/logs"
+	for name, resp := range map[string]map[string]connector.Response{
+		"no run":         {runsURL: ok(`{"workflow_runs":[]}`)},
+		"run 404":        {},
+		"job missing":    {runsURL: ok(`{"workflow_runs":[{"id":903}]}`), jobsURL: ok(`[{"id":40}]`)},
+		"no jobs":        {runsURL: ok(`{"workflow_runs":[{"id":903}]}`), jobsURL: ok(`[]`)},
+		"log 404":        {runsURL: ok(`{"workflow_runs":[{"id":903}]}`), jobsURL: ok(`[{"id":40},{"id":41}]`)},
+		"log 410":        {runsURL: ok(`{"workflow_runs":[{"id":903}]}`), jobsURL: ok(`[{"id":40},{"id":41}]`), repoAPI + "/actions/jobs/41/logs": status(410)},
+		"bad runs":       {runsURL: ok(`not json`)},
+		"runs read 404s": {logURL: ok("x")},
+	} {
+		stub(t, resp)
+		if _, err := jobLog(ftgt, "5/1"); err == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+}
+
+func TestJobLogBadIDRefusedWithoutRequest(t *testing.T) {
+	got := stub(t, nil)
+	for _, id := range []string{"", "5", "5/", "/1", "5/1/2", "x/1", "5/x", "-5/1", "5/-1", "0x5/1", "5/1?x=y", " 5/1", "5/1\n", "0/0", "0/1"} {
+		if _, err := jobLog(ftgt, id); err == nil {
+			t.Errorf("jobLog(%q): want error", id)
+		}
+	}
+	if _, err := jobLog(forge.Target{API: ftgt.API, Repo: "norepo"}, "5/1"); err == nil {
+		t.Error("bad repo: want error")
+	}
+	if len(*got) != 0 {
+		t.Fatalf("requests sent: %#v", *got)
+	}
+}

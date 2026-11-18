@@ -130,6 +130,7 @@ type rawStatus struct {
 	Context     string `json:"context"`
 	State       string `json:"state"`
 	Description string `json:"description"`
+	TargetURL   string `json:"target_url"`
 }
 
 // latestStatuses is every context's newest status, in first-seen order. The
@@ -198,6 +199,7 @@ func checks(t forge.Target, number string) (forge.Rollup, error) {
 	for _, s := range statuses {
 		out.Checks = append(out.Checks, forge.Check{
 			Kind: "StatusContext", Name: s.Context, Conclusion: strings.ToUpper(s.State), Summary: s.Description,
+			JobID: jobID(t, s.TargetURL),
 		})
 	}
 	out.State = state
@@ -226,8 +228,7 @@ func resolveWarning(statuses []rawStatus) string {
 // request, and no credential. A userinfo in the base is dropped, since core
 // refuses a remote carrying one and git authenticates out of band.
 func remote(t forge.Target) (forge.Remote, error) {
-	owner, name, ok := strings.Cut(t.Repo, "/")
-	if !ok || !validSegment(owner) || !validSegment(name) {
+	if !validRepo(t.Repo) {
 		return forge.Remote{}, fmt.Errorf("repo %q is not owner/name", t.Repo)
 	}
 	u, err := url.Parse(t.API)
@@ -239,6 +240,11 @@ func remote(t forge.Target) (forge.Remote, error) {
 	u.RawPath = ""
 	web := u.String()
 	return forge.Remote{CloneURL: web + ".git", WebURL: web}, nil
+}
+
+func validRepo(repo string) bool {
+	owner, name, ok := strings.Cut(repo, "/")
+	return ok && validSegment(owner) && validSegment(name)
 }
 
 func validSegment(s string) bool {
@@ -286,4 +292,107 @@ func deleteBranch(t forge.Target, branch string) error {
 	}
 	// A 404 is classed not-found, which core counts as a delete done.
 	return call("DELETE", t.API, forgePath(t, "/branches/"+p), nil, nil)
+}
+
+// jobPathSegs counts the segments of a job page path below the base URL:
+// <owner>/<repo>/actions/runs/<n>/jobs/<m>.
+const jobPathSegs = 7
+
+// jobID is "<run number>/<job index>" for a status link that is an Actions job
+// page of the target repo, else "". The link is remote-supplied, so only a
+// relative one (no scheme, no host) is accepted, as Forgejo emits it; the
+// segments ahead of the job path must be the base URL's own sub-path exactly
+// and the repo must match: the log read is authorised for the target repo
+// alone.
+func jobID(t forge.Target, targetURL string) string {
+	u, err := url.Parse(targetURL)
+	if err != nil || u.Scheme != "" || u.Host != "" {
+		return ""
+	}
+	base, err := url.Parse(t.API)
+	if err != nil {
+		return ""
+	}
+	var baseSegs []string
+	if p := strings.Trim(base.Path, "/"); p != "" {
+		baseSegs = strings.Split(p, "/")
+	}
+	segs := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(segs) != len(baseSegs)+jobPathSegs || !slices.Equal(segs[:len(baseSegs)], baseSegs) {
+		return ""
+	}
+	tail := segs[len(baseSegs):]
+	if !strings.EqualFold(tail[0]+"/"+tail[1], t.Repo) || tail[2] != "actions" || tail[3] != "runs" || tail[5] != "jobs" {
+		return ""
+	}
+	run, err := strconv.ParseUint(tail[4], 10, 64)
+	if err != nil || run == 0 { // Forgejo applies run_number only when > 0
+		return ""
+	}
+	job, err := strconv.ParseUint(tail[6], 10, 64)
+	if err != nil {
+		return ""
+	}
+	return strconv.FormatUint(run, 10) + "/" + strconv.FormatUint(job, 10)
+}
+
+// parseJobID splits a jobID's "<run>/<job>", refusing run 0 (run_number is only applied when > 0).
+func parseJobID(id string) (run, job uint64, err error) {
+	r, j, ok := strings.Cut(id, "/")
+	if ok {
+		if run, err = strconv.ParseUint(r, 10, 64); err == nil {
+			job, err = strconv.ParseUint(j, 10, 64)
+		}
+	}
+	if !ok || err != nil || run == 0 {
+		return 0, 0, fmt.Errorf("job id %q is not <run>/<job>", id)
+	}
+	return run, job, nil
+}
+
+// jobLog reads a job's log through the REST API: web routes ignore API
+// tokens. The status link names the run by its per-repo number and the job by
+// its index, so each is resolved to an API id first. Both index the run's jobs
+// by id order (models/actions GetRunJobsByRunID). A pre-16 instance has none of
+// these routes and answers 404, an error core drops: no log, not a failed
+// detail.
+func jobLog(t forge.Target, id string) (string, error) {
+	run, job, err := parseJobID(id)
+	if err != nil {
+		return "", err
+	}
+	if !validRepo(t.Repo) {
+		return "", fmt.Errorf("repo %q is not owner/name", t.Repo)
+	}
+	var runs struct {
+		WorkflowRuns []struct {
+			ID uint64 `json:"id"`
+		} `json:"workflow_runs"`
+	}
+	q := url.Values{"run_number": {strconv.FormatUint(run, 10)}}
+	if err := call("GET", t.API, forgePath(t, "/actions/runs?"+q.Encode()), nil, &runs); err != nil {
+		return "", err
+	}
+	if len(runs.WorkflowRuns) == 0 {
+		return "", fmt.Errorf("no workflow run numbered %d", run)
+	}
+	var jobs []struct {
+		ID uint64 `json:"id"`
+	}
+	runPath := forgePath(t, "/actions/runs/"+strconv.FormatUint(runs.WorkflowRuns[0].ID, 10)+"/jobs")
+	if err := call("GET", t.API, runPath, nil, &jobs); err != nil {
+		return "", err
+	}
+	if job >= uint64(len(jobs)) {
+		return "", fmt.Errorf("run %d has no job at index %d", run, job)
+	}
+	logPath := forgePath(t, "/actions/jobs/"+strconv.FormatUint(jobs[job].ID, 10)+"/logs")
+	resp, err := request("GET", t.API, logPath, nil)
+	if err != nil {
+		return "", err
+	}
+	if !is2xx(resp.Status) {
+		return "", statusError("GET", logPath, resp.Status)
+	}
+	return string(resp.Body), nil
 }
