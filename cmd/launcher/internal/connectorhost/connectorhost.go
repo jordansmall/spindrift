@@ -82,7 +82,14 @@ type limits struct {
 }
 
 // initLimits are the limits of _initialize, which sends no request.
-var initLimits = limits{budget: initBudget, memory: memoryCapBytes, output: maxOutput}
+var initLimits = limits{budget: initBudget, memory: memoryCap, output: maxOutput}
+
+// memoryCap is the base memory cap: a var only so tests can lower it.
+// initLimits copies it at package init, so a writer updates both.
+var memoryCap uint64 = memoryCapBytes
+
+// guestEnv is the guest's environment: nil in production, set only from tests.
+var guestEnv map[string]string
 
 // limitsFor returns the ceilings for a call whose request is requestBytes long;
 // the handshake, which sends none, gets the bases. requestBytes never exceeds
@@ -91,7 +98,7 @@ func limitsFor(requestBytes int) limits {
 	n := uint64(requestBytes)
 	return limits{
 		budget: callBudget + time.Duration(n)*budgetPerMiB>>20,
-		memory: memoryCapBytes + n*memoryPerRequestByte,
+		memory: memoryCap + n*memoryPerRequestByte,
 		output: maxOutput + n*outputPerRequestByte,
 	}
 }
