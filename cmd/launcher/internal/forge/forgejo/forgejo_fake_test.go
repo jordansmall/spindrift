@@ -97,6 +97,8 @@ type fakeForgejo struct {
 	// unexpected is every request no route served and every one the credential
 	// check rejected.
 	unexpected []string
+	// trk is the issue tracker half (forgejo_fake_tracker_test.go).
+	trk fakeTracker
 }
 
 var (
@@ -134,6 +136,7 @@ func startFakeForgejo(t *testing.T, start func(http.Handler) *httptest.Server) *
 		protected:     map[string]bool{},
 		comments:      map[string][]string{},
 		nextNum:       900,
+		trk:           newFakeTracker(),
 	}
 	f.srv = start(http.HandlerFunc(f.handle))
 	t.Cleanup(f.srv.Close)
@@ -357,6 +360,7 @@ func (f *fakeForgejo) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
+	case f.serveTracker(w, r):
 	case r.Method == http.MethodGet && fakeForgejoRepoRootRe.MatchString(r.URL.Path):
 		f.handleRepoRoot(w, r)
 	case r.Method == http.MethodPost && fakeForgejoPullsListRe.MatchString(r.URL.Path):
