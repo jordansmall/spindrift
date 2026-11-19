@@ -564,8 +564,8 @@ in
       '';
 
   # Issue #6998: `primary` is a switch on a registered backend row; on, the
-  # row's entry says so. Off, the github row is not registered at all
-  # (connector-driver-rows-github-row-gated-on-switches).
+  # row's entry says so. Off, the entry carries no `primary`
+  # (connector-driver-rows-github-row-unconditional).
   connector-driver-rows-primary-reaches-document =
     pkgs.runCommand "connector-driver-rows-primary-reaches-document"
       { nativeBuildInputs = [ pkgs.jq ]; }
@@ -576,16 +576,21 @@ in
         touch $out
       '';
 
-  # Issue #6912: the github Connector registers its backend row only with
-  # `shadow` or `primary` on. Both off, the document has no `backends` key;
-  # `shadow` on, it carries one row with its sampling, Route table, and the
-  # accepted baseline doctor diffs that table against.
-  connector-driver-rows-github-row-gated-on-switches =
-    pkgs.runCommand "connector-driver-rows-github-row-gated-on-switches"
+  # Issue #7139: the github Connector registers its backend row whatever
+  # `shadow` and `primary` say. Both off, the document carries one row with its
+  # Route table and the accepted baseline doctor diffs that table against, and
+  # neither flag; `shadow` on adds its sampling.
+  connector-driver-rows-github-row-unconditional =
+    pkgs.runCommand "connector-driver-rows-github-row-unconditional"
       { nativeBuildInputs = [ pkgs.jq ]; }
       ''
         ${fixtures.runInputDocOf (githubProgramWith [ ])}
-        jq -e 'has("backends") | not' "$doc"
+        jq -e --slurpfile b ${../../spindrift-connector-routes.json} '
+          .backends | length == 1 and (.[0]
+          | .credentialKnob == "githubConnectorToken"
+            and (has("primary") | not) and (has("shadow") | not)
+            and (.routes | length) > 0
+            and .acceptedRoutes == $b[0].github)' "$doc"
         ${fixtures.runInputDocOf (githubProgramWith [ { spindrift.connectors.github.shadow = true; } ])}
         jq -e --slurpfile b ${../../spindrift-connector-routes.json} '
           .backends | length == 1 and (.[0]

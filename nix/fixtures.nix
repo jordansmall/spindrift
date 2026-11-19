@@ -728,6 +728,7 @@ let
   # Parameterised on the module so core-entry.nix can evaluate the one
   # unchanged config through two entry points (issue #6765).
   moduleConsumerVia = module: consumerVia { } [ module ];
+  moduleConsumerWith = consumerVia { };
   moduleConsumer = moduleConsumerVia ../lib/flakeModule.nix;
   # `debug = true` exposes the flake-level config (`.debug.config`) that the
   # plain outputs hide, for checks reading Connector registrations (#6766).
@@ -909,6 +910,7 @@ in
     minimalDirect
     moduleConsumer
     moduleConsumerVia
+    moduleConsumerWith
     connectorConsumerVia
     driverConnectorConsumer
     driverConnectorArtifacts

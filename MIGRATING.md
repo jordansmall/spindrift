@@ -22,6 +22,8 @@ What changed for a github Consumer:
   nothing changes either way.
 - **`shadow` is unchanged.** A shadow row stays native-authoritative and
   sampled, and keeps its read-only token rule.
+- **Importing `core.flakeModules.default` directly keeps native `gh`.** Only
+  the root `flakeModules.default` carries the github row.
 
 ## The native claude Strategy is gone: claude runs through its Connector (issue #6799)
 
