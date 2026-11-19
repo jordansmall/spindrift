@@ -866,7 +866,9 @@ by issue #7128: a primary forgejo row builds its whole Code Forge, writes
 included, from the Connector and appends refusals to one
 `connector-forgejo.audit.jsonl`, with no failed-call log; its tracker stays
 native). The stage is reversible by dropping `primary` from the row, with no
-code revert, and dogfood runs github there first.
+code revert (amended by issue #7139: not on github, whose row routes through
+the Connector with or without `primary`, see the amendment below), and
+dogfood runs github there first.
 
 The bars become: a shadow moves to primary after 20 consecutive clean shadow
 runs, and primary cuts over (#6811, which deletes the native github read path)
@@ -1195,3 +1197,27 @@ Evidence (issue #6999, 2026-11-17): 41 consecutive dogfood runs in claude
 primary mode, 16 work Boxes and 25 research dispatches, with no launcher-side
 `DRIVER "claude": ...` line in any. #6825, the resets-time clock, was a blocker
 and is closed.
+
+## Amendment (issue #7139): github runs through its Connector for every Consumer
+
+The github Connector becomes the default backend for every Consumer, ahead of
+the cut-over (#6811, #6888). It is gated on the #6998 amendment's bar applied to
+the last write switch: 20 consecutive dogfood runs exercising the #6887 writes
+with zero Connector write errors and zero audit refusals, recorded on #6887. A
+non-shadow github row now routes every covered read and write through the
+Connector whether or not `primary` is set, so `primary` on a github row is a
+no-op kept so existing configs still evaluate. The root `flakeModules.default`
+carries the row for every Consumer. There is still no automatic native
+fallback: a load failure or a refused route fails with its named error.
+
+The native adapter stays in the build, so reverting the change restores native
+routing, until #6811 and #6888 delete it. Three cases keep native `gh`. A
+shadow row stays native-authoritative and sampled, as before. A Consumer that
+imports `core.flakeModules.default` directly carries no github row. And under
+a `GH_HOST` other than `github.com` the row is dropped, because the
+Connector's Routes pin `api.github.com`; quickstart applies the same rule.
+
+Every run whose `CODE_FORGE` or `ISSUE_TRACKER` is github now needs
+`SPINDRIFT_GITHUB_CONNECTOR_TOKEN`, write-capable under the #7209 amendment,
+and a non-shadow github row refuses `MERGE_METHOD=merge` and `squash` at
+launch, since the Connector merges by rebase only.
