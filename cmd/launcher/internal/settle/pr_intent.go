@@ -177,60 +177,107 @@ func (s *Settle) parkDraftPRFailure(num, branch string, err error) {
 	s.transitionState(num, ForReason(dispatchrecord.ReasonDraftPRFailed), "draft PR create failed; work preserved in outbox")
 }
 
-// closingKeywordPattern matches GitHub's closing keywords (close, fix, resolve
-// and their inflections) and the reference they close: a bare "#<digits>", an
-// "owner/repo#<digits>", or a URL ending in /issues/N, /pull/N or /pulls/N (on
-// any forge, whatever subpath it is served under). The URL ends at its first
-// /issues/N and never spans , ; ? or #, so joined URLs cannot hide all but the
-// last reference. Only the bare form fills capture group 1, because only it can
-// name the dispatched issue: callers compare the captured digits against their
-// own num rather than interpolating it into the pattern, so "#19195" never
-// matches a reference to "1919", and a cross-repo or URL reference is never
-// mistaken for the own issue even when it names this repo.
-var closingKeywordPattern = regexp.MustCompile(`(?i)\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved):?\s+(?:#(\d+)\b|[\w.-]+/[\w.-]+#\d+\b|https?://[^\s,;?#]+?/(?:issues|pulls?)/\d+\b)`)
+// closingKeywords finds the nine default closing keywords (close, fix,
+// resolve and their inflections) case-insensitively. It is unanchored, so it
+// also hits inside "prefix" and "closest"; keywordBounded decides whole words.
+// Defusing splits the keyword, not the reference: the keyword set is closed,
+// reference syntaxes are open-ended (issues #2447, #7079, #7248). Rules:
+//   - Forgejo (modules/references/references.go): makeKeywordsPat wants the
+//     keyword right before the reference, so a split keyword defuses every
+//     form after it; mdstripper makes "**Closes** #N" and "_Closes #N_" live.
+//   - GitHub is closed-source and documents only "KEYWORD #N", "KEYWORD
+//     OWNER/REPO#N" and the colon variant. GH-N, !N, NBSP, scheme-less, www.
+//     and multi-/issues/N URLs rest unverified on one assumption: a U+200B
+//     inside the keyword stops it matching.
+//   - Not covered: Forgejo's configurable CLOSE_KEYWORDS, and HTML character
+//     references ("Clo&#115;es"), which pass through undecoded.
+var closingKeywords = regexp.MustCompile(`(?i)close[sd]?|fix(?:e[sd])?|resolve[sd]?`)
 
-// defuseClosingKeywords breaks every closing-keyword reference in s by
-// inserting a zero-width space before the reference's number (issue #2447). s
-// holds untrusted box-authored text, so "fix: closes #999" would otherwise
-// auto-close an unrelated issue on merge. The forges' scanners (GitHub, Forgejo)
-// need a digit right after "#" or the URL's last path segment (assumed for the
-// URL form, not verified), and U+200B is invisible.
+// keywordBounded reports whether s[start:end] is a whole word: RE2 has no
+// lookbehind, and consuming the boundary runes would swallow an adjacent
+// keyword ("fix fix"). Only ASCII letters and digits are non-boundaries, since
+// GitHub's boundary is unverified and a wider one would leave "见Closes #9"
+// live; "_", "*", "(", NBSP and U+200B all count as boundaries.
+func keywordBounded(s string, start, end int) bool {
+	if start > 0 && isASCIIAlnum(s[start-1]) {
+		return false
+	}
+	if end < len(s) && isASCIIAlnum(s[end]) {
+		return false
+	}
+	return true
+}
+
+func isASCIIAlnum(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+// defuseClosingKeywords inserts U+200B after the first letter of every closing
+// keyword in s, whatever follows it. s holds untrusted box-authored text, so
+// "fix: closes #999" would otherwise auto-close an unrelated issue on merge.
+// Identifiers and URL path segments split too ("close_fd", "fix-login.md"), and
+// a split link target breaks the link; the text is read on the forge, not
+// copied, so that cost is accepted.
 func defuseClosingKeywords(s string) string {
-	return defuseClosingKeywordsExcept(s, "")
+	out, _ := defuseClosingKeywordsExcept(s, "")
+	return out
 }
 
-// defuseClosingKeywordsExcept is defuseClosingKeywords but spares bare
-// "#<keep>" references; keep "" spares nothing.
-func defuseClosingKeywordsExcept(s, keep string) string {
+// defuseClosingKeywordsExcept is defuseClosingKeywords but spares each keyword
+// for which followedByRef(rest, keep) holds and the Forgejo keyword prefix is
+// met, and reports whether it spared any. keep "" spares nothing.
+func defuseClosingKeywordsExcept(s, keep string) (string, bool) {
 	const zeroWidthSpace = "\u200b" // U+200B ZERO WIDTH SPACE
-	return closingKeywordPattern.ReplaceAllStringFunc(s, func(match string) string {
-		if keep != "" && closesOwn(closingKeywordPattern.FindStringSubmatch(match), keep) {
-			return match
+	var b strings.Builder
+	last, kept := 0, false
+	for _, m := range closingKeywords.FindAllStringIndex(s, -1) {
+		start, end := m[0], m[1]
+		if !keywordBounded(s, start, end) {
+			continue
 		}
-		numStart := len(match)
-		for numStart > 0 && match[numStart-1] >= '0' && match[numStart-1] <= '9' {
-			numStart--
+		if keep != "" && isASCII(s[start:end]) && keywordPrefixed(s, start) && followedByRef(s[end:], keep) {
+			kept = true
+			continue
 		}
-		return match[:numStart] + zeroWidthSpace + match[numStart:]
-	})
+		b.WriteString(s[last : start+1])
+		b.WriteString(zeroWidthSpace)
+		last = start + 1
+	}
+	b.WriteString(s[last:])
+	return b.String(), kept
 }
 
-// closesOwn reports whether a closingKeywordPattern submatch is the bare
-// "#<num>" form naming num; the append and defuse decisions share it.
-func closesOwn(sub []string, num string) bool { return sub[1] == num }
-
-func hasClosingReference(body, num string) bool {
-	for _, match := range closingKeywordPattern.FindAllStringSubmatch(body, -1) {
-		if closesOwn(match, num) {
-			return true
-		}
+// keywordPrefixed reports whether the byte before s[start:] satisfies Forgejo's
+// makeKeywordsPat prefix `(?:\s|^|\(|\[)` in the raw text: "x_Closes #1" never
+// closes there, so sparing it would leave no live closing reference.
+func keywordPrefixed(s string, start int) bool {
+	if start == 0 {
+		return true
+	}
+	switch s[start-1] {
+	case ' ', '\t', '\n', '\f', '\r', '(', '[':
+		return true
 	}
 	return false
 }
 
+// refTerminator is the tail of Forgejo's issueNumericPattern, which wants
+// whitespace or punctuation after the number: what must follow "#N" for it to
+// be a reference at all ("#1919abc" is none).
+var refTerminator = regexp.MustCompile(`^(?:\s|$|\)|\]|'|"|[:;,.?!]\s|[:;,.?!]$)`)
+
+// followedByRef reports whether rest starts with `:?`, exactly one space, then
+// a "#<num>" reference: Forgejo's makeKeywordsPat, `<keywords>:? $`, so
+// "Closes#9", "Closes:#9", NBSP, a tab or two spaces never close there.
+func followedByRef(rest, num string) bool {
+	after, ok := strings.CutPrefix(strings.TrimPrefix(rest, ":"), " #"+num)
+	return ok && refTerminator.MatchString(after)
+}
+
 // closeOnlyOwnIssue leaves body closing only the dispatched issue: body may
-// be Box-authored, so every other closing reference is defused (issue #7079),
-// then "Closes #<num>" is appended unless body already closes it.
+// be Box-authored, so every closing keyword is defused (issue #7079) except
+// each one naming "#<num>" (followedByRef), and "Closes #<num>" is appended
+// when none did.
 // backend.ClosesRef is a positive allow-list (issues #2341, #7058), not
 // "anything but local": a Closes keyword only auto-closes when the forge
 // shares the tracker's issue namespace, so without it the own "#<num>" is
@@ -240,8 +287,8 @@ func closeOnlyOwnIssue(body, num string, forgeRow, trackerRow backend.Descriptor
 	if !backend.ClosesRef(forgeRow, trackerRow) {
 		return defuseClosingKeywords(body)
 	}
-	body = defuseClosingKeywordsExcept(body, num)
-	if hasClosingReference(body, num) {
+	body, kept := defuseClosingKeywordsExcept(body, num)
+	if kept {
 		return body
 	}
 	if strings.TrimSpace(body) == "" {
@@ -264,4 +311,16 @@ func parsePRIntent(result dispatch.Result) (title, body string, ok bool) {
 		return "", "", false
 	}
 	return title, strings.TrimPrefix(rest, "\n"), true
+}
+
+// isASCII reports whether s holds only ASCII bytes. Go's (?i) folds U+017F
+// "ſ" to "s", so closingKeywords matches "cloſes", which a forge need not read
+// as a keyword; sparing it could leave the body with no live closing reference.
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
 }

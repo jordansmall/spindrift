@@ -306,7 +306,7 @@ func TestMediation_Open_LandDelta_Unknown(t *testing.T) {
 	if strings.Contains(body, "\n\n## forged section") {
 		t.Errorf("Body = %q, want the embedded newline collapsed rather than forging a new section", body)
 	}
-	if hasClosingReference(body, "999") {
+	if liveClosingRef(body, "999") {
 		t.Errorf("Body = %q, want the embedded closing keyword defused, not left live against #999", body)
 	}
 	if !strings.Contains(body, "post-approval land delta: unknown (no reviewed-commit anchor") {
