@@ -1,0 +1,10 @@
+go: downloading github.com/tetratelabs/wazero v1.11.0
+go: finding module for package spindrift.dev/launcher/internal/forge/github
+go: example.com/b/p1 imports
+	example.com/b/p2 imports
+	spindrift.dev/launcher/absent/pkg: no required module provides package spindrift.dev/launcher/absent/pkg; to add it:
+	go get spindrift.dev/launcher/absent/pkg
+go: example.com/b/p3 tested by
+	example.com/b/p3.test imports
+	spindrift.dev/launcher/other/pkg: no required module provides package spindrift.dev/launcher/other/pkg; to add it:
+	go get spindrift.dev/launcher/other/pkg

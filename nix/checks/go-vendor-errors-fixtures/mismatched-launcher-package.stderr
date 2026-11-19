@@ -1,0 +1,2 @@
+go: example.com/a/p1 imports
+	spindrift.dev/launcher/absent/pkg: no required module provides package spindrift.dev/launcher/other/pkg; to add it:
