@@ -352,6 +352,7 @@ func TestMerge(t *testing.T) {
 		"405 status check":      {405, `{"message":"Required status check \"ci\" is expected."}`, connector.NotMergeable},
 		"405 ruleset":           {405, `{"message":"Repository rule violations found\n\nRequired status check \"ci\" is expected."}`, connector.NotMergeable},
 		"405 review":            {405, `{"message":"At least 1 approving review is required by reviewers with write access."}`, connector.NotMergeable},
+		"405 merge conflicts":   {405, `{"message":"Pull Request has merge conflicts"}`, connector.NotMergeable},
 		"405 method disallowed": {405, `{"message":"Rebase merges are not allowed on this repository."}`, connector.Permanent},
 		"405 review mention":    {405, `{"message":"Reviewers cannot merge their own review."}`, connector.Permanent},
 		"405 empty body":        {405, "", connector.Permanent},

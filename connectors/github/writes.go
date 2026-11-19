@@ -226,9 +226,10 @@ func comment(t forge.Target, number, body string) error {
 
 // merge always rebases: the protocol carries no method, and rebase is the
 // native adapter's default. GitHub answers 405 both for a genuine refusal
-// (failing checks, missing review) and for a disallowed method, so only a 405
-// whose message names the former is NotMergeable, the class core re-reads the
-// PR for; a repo with rebase disabled must fail fast instead.
+// (failing checks, missing review, merge conflicts) and for a disallowed
+// method, so only a 405 whose message names the former is NotMergeable, the
+// class core re-reads the PR for; a repo with rebase disabled must fail fast
+// instead.
 func merge(t forge.Target, number string) error {
 	if _, err := parseNumber(number); err != nil {
 		return err
@@ -262,6 +263,7 @@ func refusesPRState(message string) bool {
 	message = strings.ToLower(message)
 	return strings.Contains(message, "not mergeable") ||
 		strings.Contains(message, "status check") ||
+		strings.Contains(message, "merge conflicts") ||
 		strings.Contains(message, "review is required")
 }
 
