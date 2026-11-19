@@ -7,7 +7,7 @@ import (
 
 func workEnv() map[string]string {
 	return map[string]string{
-		"GH_TOKEN": "tok", "REPO_SLUG": "owner/repo",
+		"REPO_SLUG":    "owner/repo",
 		"DISPATCH_KEY": "42", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "implementing",
 		"ISSUE_NUMBER": "42", "GIT_USER_NAME": "agent", "GIT_USER_EMAIL": "agent@example.com",
 	}
@@ -39,7 +39,6 @@ func TestEnvGuards_MissingVarIsNamed(t *testing.T) {
 		drop    string
 		wantMsg string
 	}{
-		{workEnv, "GH_TOKEN", "GH_TOKEN is required"},
 		{workEnv, "DISPATCH_KEY", "DISPATCH_KEY is required"},
 		{workEnv, "DISPATCH_KEYING", "DISPATCH_KEYING is required"},
 		{workEnv, "DISPATCH_ANNOUNCE_VERB", "DISPATCH_ANNOUNCE_VERB is required"},
@@ -71,7 +70,7 @@ func TestEnvGuards_MissingVarIsNamed(t *testing.T) {
 
 func TestEnvGuards_ReportsTheFirstMissingInBashOrder(t *testing.T) {
 	err := guardErr(map[string]string{})
-	if err == nil || err.Error() != "GH_TOKEN is required" {
+	if err == nil || err.Error() != "DISPATCH_KEY is required" {
 		t.Fatalf("err = %v", err)
 	}
 	env := workEnv()
@@ -105,16 +104,15 @@ func TestEnvGuards_ForgeVarsExemptions(t *testing.T) {
 		wantMsg string
 	}{
 		{"fully local", map[string]string{"BOX_FULLY_LOCAL": "1"}, true, ""},
-		{"local tracker without BOX_FULLY_LOCAL", map[string]string{"ISSUE_TRACKER": "local", "BOX_TRACKER_AXIS_READ": "LOCAL"}, false, "GH_TOKEN is required"},
-		{"local forge without BOX_FULLY_LOCAL", map[string]string{"CODE_FORGE": "local"}, false, "GH_TOKEN is required"},
+		{"local tracker without BOX_FULLY_LOCAL", map[string]string{"ISSUE_TRACKER": "local", "BOX_TRACKER_AXIS_READ": "LOCAL"}, false, "REPO_SLUG (owner/repo) is required"},
+		{"local forge without BOX_FULLY_LOCAL", map[string]string{"CODE_FORGE": "local"}, false, "REPO_SLUG (owner/repo) is required"},
 		{"self-contained with unreachable tracker", map[string]string{"SELF_CONTAINED": "1", "BOX_IN_BOX_UNREACHABLE_TRACKER": "1"}, true, ""},
-		{"self-contained on a reachable tracker", map[string]string{"SELF_CONTAINED": "1"}, false, "GH_TOKEN is required"},
-		{"unreachable tracker without self-contained", map[string]string{"BOX_IN_BOX_UNREACHABLE_TRACKER": "1"}, false, "GH_TOKEN is required"},
-		{"self-contained other than 1", map[string]string{"SELF_CONTAINED": "true", "BOX_IN_BOX_UNREACHABLE_TRACKER": "1"}, false, "GH_TOKEN is required"},
+		{"self-contained on a reachable tracker", map[string]string{"SELF_CONTAINED": "1"}, false, "REPO_SLUG (owner/repo) is required"},
+		{"unreachable tracker without self-contained", map[string]string{"BOX_IN_BOX_UNREACHABLE_TRACKER": "1"}, false, "REPO_SLUG (owner/repo) is required"},
+		{"self-contained other than 1", map[string]string{"SELF_CONTAINED": "true", "BOX_IN_BOX_UNREACHABLE_TRACKER": "1"}, false, "REPO_SLUG (owner/repo) is required"},
 	}
 	for _, c := range cases {
 		env := workEnv()
-		delete(env, "GH_TOKEN")
 		delete(env, "REPO_SLUG")
 		for k, v := range c.set {
 			env[k] = v
@@ -142,7 +140,6 @@ func TestEnvGuards_ExemptDispatchStillRequiresTheRest(t *testing.T) {
 	for _, drop := range []string{"ISSUE_NUMBER", "GIT_USER_NAME", "GIT_USER_EMAIL"} {
 		t.Run(drop, func(t *testing.T) {
 			env := workEnv()
-			delete(env, "GH_TOKEN")
 			delete(env, "REPO_SLUG")
 			delete(env, drop)
 			env["BOX_FULLY_LOCAL"] = "1"
@@ -150,21 +147,5 @@ func TestEnvGuards_ExemptDispatchStillRequiresTheRest(t *testing.T) {
 				t.Fatalf("err = %v", err)
 			}
 		})
-	}
-}
-
-func TestEnvGuards_GHTokenOptional(t *testing.T) {
-	env := workEnv()
-	delete(env, "GH_TOKEN")
-	if err := guardErr(env); err == nil || err.Error() != "GH_TOKEN is required" {
-		t.Errorf("no GH_TOKEN without opt-out: err = %v", err)
-	}
-	env["BOX_GH_TOKEN_OPTIONAL"] = "1"
-	if err := guardErr(env); err != nil {
-		t.Errorf("forgejo-style env without GH_TOKEN: err = %v", err)
-	}
-	delete(env, "REPO_SLUG")
-	if err := guardErr(env); err == nil || err.Error() != "REPO_SLUG (owner/repo) is required" {
-		t.Errorf("opt-out must keep REPO_SLUG required: err = %v", err)
 	}
 }

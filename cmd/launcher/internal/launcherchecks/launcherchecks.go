@@ -39,9 +39,6 @@ type Config struct {
 	// REPO_SLUG/GH_TOKEN exemption (repoRequirementExempt below).
 	ResearchDispatch bool
 	SelfContained    bool
-	// BoxReadOnly is the effective BOX_FORGE_AND_ISSUE_ACCESS == read-only: a
-	// forge that clones the host-seeded mirror then needs no GH_TOKEN of its own.
-	BoxReadOnly bool
 }
 
 // Signals carries the two capability bits the repo-slug/gh-token exemption
@@ -92,7 +89,7 @@ func repoRequirementExempt(sig Signals, c Config) bool {
 func ghTokenRequired(c Config, d Deps) bool {
 	tracker, _ := d.Backend(c.IssueTracker)
 	forge, _ := d.Backend(c.CodeForge)
-	return backend.NeedsGHToken(forge.Descriptor, tracker.Descriptor, c.BoxReadOnly)
+	return backend.NeedsGHToken(forge.Descriptor, tracker.Descriptor)
 }
 
 // requiredValue builds a Required-tier Check row whose Remedy and Probe error

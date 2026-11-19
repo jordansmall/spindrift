@@ -22,7 +22,7 @@ ok: label "agent-butler-finding" present
 ok: label "agent-butler-patch" present
 ok: label "agent-tuning-finding" present
 ok: all triage, research, priority, ambiguous-spec, and butler labels present
-ok: recover kind: on — CODE_FORGE=github relays a read-only Box's outbox bundle
+ok: recover kind: on — CODE_FORGE=github relays the Box's outbox bundle
 ok: read-only-capability
 ok: network-mode-runtime
 ok: signal-carrier-network-mode

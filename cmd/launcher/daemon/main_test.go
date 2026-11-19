@@ -523,16 +523,10 @@ func TestGateKinds(t *testing.T) {
 			want: []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)},
 		},
 		{
-			name:      "explicit read-write drops recover for github",
-			kinds:     everyWithRecover,
-			codeForge: "github", boxAccess: "read-write",
-			want: []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)},
-		},
-		{
 			name:             "explicit recover with relay disabled fails on the sentinel",
 			kinds:            []daemon.Kind{recoverKind},
 			explicitSelector: true,
-			codeForge:        "github", boxAccess: "read-write",
+			codeForge:        "local", boxAccess: "read-only",
 			wantErr:    true,
 			wantErrIs:  errNoOutboxRelay,
 			wantErrMsg: "recover selected but",

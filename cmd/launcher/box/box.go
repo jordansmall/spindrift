@@ -184,7 +184,7 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	// relays a bundle but has no PR (issues #2094, #2267, #6898). needsBox is
 	// the wider bundle hand-off, git included.
 	r.relay = env.OutboxRelayCapable
-	r.needsBox = env.HostMediatedRemote || backend.RelaysBundle(r.forgeDescriptor(), true)
+	r.needsBox = env.HostMediatedRemote || backend.RelaysBundle(r.forgeDescriptor())
 
 	if err := r.exportStartEnv(); err != nil {
 		return 0, err

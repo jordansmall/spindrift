@@ -195,7 +195,7 @@ func TestRequiredKnobChecks_GHToken_ByPairing(t *testing.T) {
 		{"github", "forgejo", true},
 		{"forgejo", "github", true},
 		{"jira", "github", true},
-		{"forgejo", "git", true},
+		{"forgejo", "git", false},
 		{"forgejo", "local", false},
 		{"jira", "local", false},
 		{"github", "local", true},
@@ -598,9 +598,9 @@ func TestRequiredKnobChecks_DriverCredentials_PiAuthContentRejectsOtherOAuth(t *
 	}
 }
 
-// A git forge under read-only clones the host-seeded mirror, so GH_TOKEN is
-// required only when the tracker is GitHub (#6898).
-func TestRequiredKnobChecks_GHToken_GitReadOnlyMirror(t *testing.T) {
+// A git forge clones the host-seeded mirror, so GH_TOKEN is required only when
+// the tracker is GitHub (#6898).
+func TestRequiredKnobChecks_GHToken_GitMirror(t *testing.T) {
 	rows := map[string]Backend{
 		"git":    {Descriptor: backend.Git},
 		"jira":   {Descriptor: backend.Jira},
@@ -608,16 +608,14 @@ func TestRequiredKnobChecks_GHToken_GitReadOnlyMirror(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		tracker      string
-		readOnly     bool
 		wantRequired bool
 	}{
-		{"jira", true, false},
-		{"jira", false, true},
-		{"github", true, true},
+		{"jira", false},
+		{"github", true},
 	} {
 		c := minimalValidConfig()
 		c.GHToken = ""
-		c.IssueTracker, c.CodeForge, c.BoxReadOnly = tc.tracker, "git", tc.readOnly
+		c.IssueTracker, c.CodeForge = tc.tracker, "git"
 		d := minimalDeps()
 		d.Backend = func(name string) (Backend, bool) {
 			b, ok := rows[name]
@@ -625,7 +623,7 @@ func TestRequiredKnobChecks_GHToken_GitReadOnlyMirror(t *testing.T) {
 		}
 		_, err := checkByName(t, RequiredKnobChecks(c, d), "gh-token").Probe()
 		if (err != nil) != tc.wantRequired {
-			t.Errorf("tracker=%s readOnly=%v: gh-token Probe() err = %v, wantRequired %v", tc.tracker, tc.readOnly, err, tc.wantRequired)
+			t.Errorf("tracker=%s: gh-token Probe() err = %v, wantRequired %v", tc.tracker, err, tc.wantRequired)
 		}
 	}
 }

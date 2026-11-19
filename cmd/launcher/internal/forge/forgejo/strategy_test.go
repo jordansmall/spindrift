@@ -63,32 +63,6 @@ func TestStrategyValidateCodeForgeIgnoresSlug(t *testing.T) {
 	}
 }
 
-func TestStrategyCloneURL(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		env  map[string]string
-		want string
-	}{
-		{"default base", map[string]string{"FORGEJO_TOKEN": "t"}, "https://t@codeberg.org/o/r.git"},
-		{"trims slash", map[string]string{"FORGEJO_TOKEN": "t", "FORGEJO_BASE_URL": "http://f.test:3000/"}, "http://t@f.test:3000/o/r.git"},
-		{"schemeless base", map[string]string{"FORGEJO_TOKEN": "t", "FORGEJO_BASE_URL": "f.test"}, "f.test://t@f.test/o/r.git"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := forgejo.Strategy.CloneURL(backendkit.Shared{RepoSlug: "o/r"}, mapLookup(tc.env))
-			if err != nil || got != tc.want {
-				t.Errorf("CloneURL = %q, %v, want %q", got, err, tc.want)
-			}
-		})
-	}
-}
-
-func TestStrategyCloneURLRequiresToken(t *testing.T) {
-	_, err := forgejo.Strategy.CloneURL(backendkit.Shared{RepoSlug: "o/r"}, mapLookup(nil))
-	if err == nil || !strings.Contains(err.Error(), "FORGEJO_TOKEN is required when CODE_FORGE=forgejo") {
-		t.Errorf("err = %v, want one naming FORGEJO_TOKEN", err)
-	}
-}
-
 func TestStrategyWebURL(t *testing.T) {
 	for _, tc := range []struct {
 		name, slug, want string

@@ -1,39 +1,20 @@
 package boxclone_test
 
 import (
-	"errors"
-
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 )
 
 // Library tests never import the driver bundle (ADR 0066 decision 8), so these
-// stand in for the bundled backends under their real names. Each returns a
-// fixed URL (git echoes its knob) and keeps only the required-knob failure a
-// boxclone test relies on; the real URL logic is tested in each backend's own
-// package. forgejo's URL carries its token so the banner-redaction test still
-// has something to redact.
+// stand in for the bundled backends under their real names, keeping only the
+// web URL the mirror clone's "forge" remote reads; the real URL logic is
+// tested in each backend's own package.
 func init() {
-	stub := func(name string, clone func(backendkit.Shared, backendkit.Lookup) (string, error), web func(backendkit.Shared, backendkit.Lookup) string) {
-		s := backendkit.Strategy{Descriptor: backend.Descriptor{Name: name}, CloneURL: clone, WebURL: web}
-		backendkit.Register(s)
+	stub := func(name string, web func(backendkit.Shared, backendkit.Lookup) string) {
+		backendkit.Register(backendkit.Strategy{Descriptor: backend.Descriptor{Name: name}, WebURL: web})
 	}
-	stub("github", func(s backendkit.Shared, _ backendkit.Lookup) (string, error) {
-		return "https://github.com/" + s.RepoSlug + ".git", nil
-	}, func(s backendkit.Shared, _ backendkit.Lookup) string { return "https://github.com/" + s.RepoSlug })
-	stub("git", func(_ backendkit.Shared, l backendkit.Lookup) (string, error) {
-		u, _ := l("CODE_FORGE_REMOTE_URL")
-		if u == "" {
-			return "", errors.New("CODE_FORGE_REMOTE_URL is required when CODE_FORGE=git")
-		}
-		return u, nil
-	}, nil)
-	stub("forgejo", func(s backendkit.Shared, l backendkit.Lookup) (string, error) {
-		tok, _ := l("FORGEJO_TOKEN")
-		if tok == "" {
-			return "", errors.New("FORGEJO_TOKEN is required when CODE_FORGE=forgejo")
-		}
-		return "https://" + tok + "@forgejo.invalid/" + s.RepoSlug + ".git", nil
-	}, func(s backendkit.Shared, _ backendkit.Lookup) string { return "https://forgejo.invalid/" + s.RepoSlug })
-	stub("jira", nil, nil)
+	stub("github", func(s backendkit.Shared, _ backendkit.Lookup) string { return "https://github.com/" + s.RepoSlug })
+	stub("git", nil)
+	stub("forgejo", func(s backendkit.Shared, _ backendkit.Lookup) string { return "https://forgejo.invalid/" + s.RepoSlug })
+	stub("jira", nil)
 }

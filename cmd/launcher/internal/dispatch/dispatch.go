@@ -122,9 +122,8 @@ type Config struct {
 	// SeedMirror, when non-nil, runs before every Pass (Run, Fix and
 	// ResolveConflict alike) and returns the host path of the freshly seeded
 	// mirror to mount at /repo; an error fails the Pass. Nil means the dispatch
-	// needs no host-seeded mirror (the Box clones the forge itself, or never
-	// clones, as self-contained research), so the Box gets no /repo and no
-	// BOX_HOST_SEEDED_MIRROR.
+	// needs no host-seeded mirror (self-contained research never clones), so
+	// the Box gets no /repo.
 	// release is non-nil on success and runs once the Pass's Box has exited.
 	// The hook may hand each Pass its own mirror (github, forgejo: release
 	// removes it, and only that Pass's) or re-seed one shared mirror (local, git:
@@ -296,7 +295,6 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 	if resolve == nil {
 		resolve = func(_, name string) string { return os.Getenv(name) }
 	}
-	readOnly := cfg.boxAccessForKind() == "read-only"
 	isChore := subj.key.IsChore()
 	key := subj.key.String()
 	env := make(map[string]string)
@@ -306,16 +304,14 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 		}
 		env[name] = resolve(key, name)
 	}
-	if readOnly {
-		// Absent, not blank: an empty value still reaches the Box as a set name.
-		for _, d := range backend.Registry {
-			if d.BoxTokenEnvVar != "" {
-				delete(env, d.TokenEnvVar)
-				delete(env, d.BoxTokenEnvVar)
-			}
+	// Absent, not blank: an empty value still reaches the Box as a set name.
+	for _, d := range backend.Registry {
+		if d.BoxTokenEnvVar != "" {
+			delete(env, d.TokenEnvVar)
+			delete(env, d.BoxTokenEnvVar)
 		}
 	}
-	if backend.ClonesFromMirror(cfg.ForgeDescriptor, readOnly) {
+	if cfg.ForgeDescriptor.HostSeededMirror {
 		// The Box clones the mirror and nothing in it reads the remote, so its
 		// userinfo (commonly a token) stays on the host.
 		if u, ok := env["CODE_FORGE_REMOTE_URL"]; ok {
@@ -386,7 +382,7 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 	// The Box has no forge token to ask for its open PR itself (issue #7146);
 	// self-contained and advise-only Boxes never recover a branch. A failed
 	// lookup must reach the Box as "unknown", never "none".
-	if readOnly && !cfg.SelfContained && !d.AdviseOnly {
+	if !cfg.SelfContained && !d.AdviseOnly {
 		env[branchrecovery.HostOpenPREnv] = hostOpenPR(cfg, key)
 	}
 	if fixPass > 0 {
@@ -407,22 +403,12 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 	if cfg.ForgeDescriptor.OutboxRelayCapable {
 		env["BOX_OUTBOX_RELAY_CAPABLE"] = "1"
 	}
-	// The launcher mounts /repo exactly when it sets SeedMirror, so this is
-	// the Box's single signal to clone /repo rather than the forge.
-	if cfg.SeedMirror != nil {
-		env["BOX_HOST_SEEDED_MIRROR"] = "1"
-	}
 	// Both seams of this run are local (ADR 0033). main.go's
 	// resolveCapabilitySignals computes the same boolean over the same two
 	// fields for the FULLY_LOCAL prompt gate, so changing one without the
 	// other silently desyncs BOX_FULLY_LOCAL from FULLY_LOCAL.
 	if forgeHostMediatedRemote && trackerInBoxUnreachable {
 		env["BOX_FULLY_LOCAL"] = "1"
-	}
-	// Fail-closed opt-out: absent means the Box requires GH_TOKEN (issue #3325).
-	// readOnly short-circuits first, so the pairing is judged as read-write.
-	if readOnly || !backend.NeedsGHToken(cfg.ForgeDescriptor, cfg.TrackerDescriptor, false /* readOnly */) {
-		env["BOX_GH_TOKEN_OPTIONAL"] = "1"
 	}
 	if trackerInBoxUnreachable {
 		env["BOX_IN_BOX_UNREACHABLE_TRACKER"] = "1"

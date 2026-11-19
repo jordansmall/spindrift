@@ -1128,16 +1128,6 @@ func TestSeedMirrorHook_Git_ReadOnlySeedsFromRemote(t *testing.T) {
 	}
 }
 
-// git under read-write clones and pushes the remote itself, so no mirror.
-func TestSeedMirrorHook_Git_ReadWrite_Nil(t *testing.T) {
-	c := baseConfig()
-	c.CodeForge = "git"
-	c.BoxForgeAndIssueAccess = "read-write"
-	if hook := seedMirrorHook(c, "/nonexistent/pwd", nil); hook != nil {
-		t.Error("seedMirrorHook(CODE_FORGE=git, read-write) = non-nil, want nil")
-	}
-}
-
 // git has no Accumulation repo to seed at launch even when it hosts a mirror.
 func TestSeedAccumulationRepoIfHostSeeded_GitReadOnly_NoOp(t *testing.T) {
 	c := baseConfig()
@@ -1267,18 +1257,6 @@ func TestSeedMirrorHook_HostFetch_DirMountsReadOnlyAtRepo(t *testing.T) {
 			}
 			if !found {
 				t.Errorf("no %s mount for MirrorDir %s", runner.MirrorTarget, dir)
-			}
-		})
-	}
-}
-
-// Under read-write the Box clones directly: there is no hook, so no MirrorDir
-// and no /repo mount.
-func TestSeedMirrorHook_HostFetch_NilUnderReadWrite(t *testing.T) {
-	for _, codeForge := range []string{"github", "forgejo"} {
-		t.Run(codeForge, func(t *testing.T) {
-			if hook := seedMirrorHook(hostFetchConfigFor(codeForge, "read-write"), t.TempDir(), stubSeeder{}); hook != nil {
-				t.Errorf("seedMirrorHook(%s, read-write) = non-nil, want nil", codeForge)
 			}
 		})
 	}

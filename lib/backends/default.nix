@@ -66,15 +66,9 @@
 # test enforces it against DraftPRCreator.
 
 # hostSeededMirror means the Box clones from a per-Pass mirror the launcher
-# seeds and mounts at /repo whenever it hands its branch back as a bundle
-# (backend.ClonesFromMirror): always for local, under read-only for git
-# (issue #6898). Each row's Strategy.SeedMirror does the seeding.
-
-# inBoxGHCredentialHelper marks a CODE_FORGE whose Box clone runs
-# `gh auth setup-git`; github and git (its remote URL may be github.com), not
-# forgejo (token URL, ADR 0038) or local (filesystem mount, ADR 0033; issue #4452).
-# A Box cloning the host-seeded mirror (BOX_HOST_SEEDED_MIRROR) skips it whatever
-# the forge, since the clone reads /repo and needs no credential (issue #6897).
+# seeds and mounts at /repo: local and git. Each row's Strategy.SeedMirror does
+# the seeding (issue #6898); github and forgejo get theirs through
+# forge.MirrorSeeder instead.
 
 # A row may also carry `knobs`: an attrset keyed by env-schema key, each value
 # an env-schema entry. lib/row-knobs.nix folds them into lib/env-schema.nix, so
