@@ -187,6 +187,23 @@ func SetBatchCap(n int) (restore func()) {
 	return func() { batchCap = old }
 }
 
+// SetMemoryCap sets the in-process engine's base memory cap and returns the
+// restore. A remote engine's child keeps its own cap, which applyLimits only
+// raises.
+func SetMemoryCap(n uint64) (restore func()) {
+	old := memoryCap
+	memoryCap, initLimits.memory = n, n
+	return func() { memoryCap, initLimits.memory = old, old }
+}
+
+// SetGuestEnv sets the environment of Connectors the in-process engine loads
+// after it and returns the restore; a remote engine's child keeps its own.
+func SetGuestEnv(env map[string]string) (restore func()) {
+	old := guestEnv
+	guestEnv = env
+	return func() { guestEnv = old }
+}
+
 // SetRequestTimeout sets the Network's per-http_request timeout, which is
 // unexported so only these tests shorten it.
 func (n *Network) SetRequestTimeout(d time.Duration) { n.requestTimeout = d }

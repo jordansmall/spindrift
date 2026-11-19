@@ -100,7 +100,7 @@ func newWasmEngine(ctx context.Context, wasm []byte, cfg wazero.RuntimeConfig, c
 	e := &wasmEngine{
 		rt:     wazero.NewRuntimeWithConfig(ctx, cfg),
 		cache:  cache,
-		memCap: &capAllocator{ceiling: memoryCapBytes},
+		memCap: &capAllocator{ceiling: memoryCap},
 		host:   host,
 	}
 	if err := e.load(ctx, wasm); err != nil {
@@ -384,10 +384,14 @@ func (e *wasmEngine) instantiate(ctx context.Context, compiled wazero.CompiledMo
 	if !ok {
 		return nil, fmt.Errorf("%w: module does not export memory", ErrExport)
 	}
-	if uint64(def.Min())<<16 > memoryCapBytes {
-		return nil, fmt.Errorf("%w: declared minimum of %d pages exceeds the %d byte cap", ErrMemoryCap, def.Min(), memoryCapBytes)
+	if uint64(def.Min())<<16 > memoryCap {
+		return nil, fmt.Errorf("%w: declared minimum of %d pages exceeds the %d byte cap", ErrMemoryCap, def.Min(), memoryCap)
 	}
-	return e.rt.InstantiateModule(experimental.WithMemoryAllocator(ctx, e.memCap), compiled, wazero.NewModuleConfig().WithStartFunctions())
+	mc := wazero.NewModuleConfig().WithStartFunctions()
+	for k, v := range guestEnv {
+		mc = mc.WithEnv(k, v)
+	}
+	return e.rt.InstantiateModule(experimental.WithMemoryAllocator(ctx, e.memCap), compiled, mc)
 }
 
 // hostModule, hostRequest and hostResponseHeader name the Host calls a network
