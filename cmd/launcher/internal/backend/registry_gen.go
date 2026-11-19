@@ -49,7 +49,7 @@ var Jira = Descriptor{
 	DisplayName:            "Jira",
 	ValidAsTracker:         true,
 	TokenEnvVar:            "JIRA_TOKEN",
-	DoctorTokenHint:        "JIRA_TOKEN",
+	DoctorTokenHint:        "SPINDRIFT_JIRA_CONNECTOR_TOKEN",
 	DoctorSlugHint:         "JIRA_BASE_URL / JIRA_PROJECT_KEY",
 	InBoxUnwritableTracker: true,
 	HostPostingCapable:     true,

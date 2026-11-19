@@ -1,16 +1,12 @@
 package main
 
 import (
-	"encoding/json"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
@@ -78,7 +74,7 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 			validAsCodeForge: false,
 			tokenEnvVar:      "JIRA_TOKEN",
 			boxTokenEnvVar:   "",
-			doctorTokenHint:  "JIRA_TOKEN",
+			doctorTokenHint:  "SPINDRIFT_JIRA_CONNECTOR_TOKEN",
 			doctorSlugHint:   "JIRA_BASE_URL / JIRA_PROJECT_KEY",
 
 			hasValidateTracker: true,
@@ -173,15 +169,19 @@ func TestBackendByNameUnknown(t *testing.T) {
 	}
 }
 
-// A malformed JIRA_STATUS_MAPPING must fall back to an empty map and still
-// yield a non-nil tracker, matching main.go's newIssueTracker "jira" case.
+// A malformed JIRA_STATUS_MAPPING is an error from the Connector-built tracker,
+// not a silent fall back to the label-only lifecycle: the Connector has no
+// native adapter to degrade to, and callers validate the mapping first.
 func TestJiraNewIssueTrackerMalformedStatusMapping(t *testing.T) {
 	row, ok := backendkit.ByName("jira")
 	if !ok {
 		t.Fatal("backendkit.ByName(\"jira\") ok=false")
 	}
-	if row.NewIssueTracker == nil {
-		t.Fatal("jira row.NewIssueTracker is nil")
+	t.Cleanup(backendrows.Snapshot())
+	doc := `[{"name":"jira","module":"/nonexistent.wasm","credentialEnv":"JIRA_TOKEN",
+"routes":[{"method":"GET","host":"jira.example","path":"/x"}]}]`
+	if err := backendrows.Use([]byte(doc), func(string) string { return "" }); err != nil {
+		t.Fatal(err)
 	}
 	c := config{Knobs: inputdoc.Knobs{
 		RowKnobs: map[string]string{
@@ -191,14 +191,8 @@ func TestJiraNewIssueTrackerMalformedStatusMapping(t *testing.T) {
 			"JIRA_STATUS_MAPPING": "{not valid json",
 		},
 	}}
-	defer func() {
-		if r := recover(); r != nil {
-			t.Fatalf("newIssueTracker panicked: %v", r)
-		}
-	}()
-	tracker := mustBuild(row.NewIssueTracker(backendShared(c), c.knobLookup))
-	if tracker == nil {
-		t.Fatal("newIssueTracker returned nil tracker")
+	if _, err := row.NewIssueTracker(backendShared(c), c.knobLookup); err == nil || !strings.Contains(err.Error(), "JIRA_STATUS_MAPPING") {
+		t.Fatalf("err = %v, want one naming JIRA_STATUS_MAPPING", err)
 	}
 }
 
@@ -223,171 +217,6 @@ func TestStrategiesCoverRegistry(t *testing.T) {
 		if _, ok := backend.ByName(s.Name); !ok {
 			t.Errorf("backend.ByName(%q) ok=false, want true (registered Strategy missing from backend.Registry)", s.Name)
 		}
-	}
-}
-
-// JIRA_INCLUDE_COMMENTS is a deprecated no-op: the thread reaches the prompt
-// once, via CommentLister, whether or not it is set (issue #3747).
-func TestJiraIncludeCommentsIsNoOp(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/rest/api/2/issue/PROJ-7":
-			w.Write([]byte(`{"key": "PROJ-7", "fields": {"summary": "s", "description": "desc", "status": {"name": "To Do"}, "labels": []}}`))
-		case "/rest/api/2/issue/PROJ-7/comment":
-			w.Write([]byte(`{"comments": [{"body": "INJECTED"}]}`))
-		default:
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-	}))
-	defer srv.Close()
-
-	row, ok := backendkit.ByName("jira")
-	if !ok {
-		t.Fatal("backendkit.ByName(\"jira\") ok=false")
-	}
-	for _, include := range []bool{false, true} {
-		c := config{Knobs: inputdoc.Knobs{
-			RowKnobs: map[string]string{
-				"JIRA_BASE_URL":         srv.URL,
-				"JIRA_PROJECT_KEY":      "PROJ",
-				"JIRA_TOKEN":            "tok",
-				"JIRA_INCLUDE_COMMENTS": boolKnob(include),
-			},
-		}}
-		text, err := forge.IssueText(mustBuild(row.NewIssueTracker(backendShared(c), c.knobLookup)), "PROJ-7", io.Discard)
-		if err != nil {
-			t.Fatalf("include=%v: IssueText: %v", include, err)
-		}
-		if n := strings.Count(text, "INJECTED"); n != 1 {
-			t.Errorf("include=%v: %d occurrences of the comment, want 1:\n%s", include, n, text)
-		}
-	}
-}
-
-// fakeJiraWorkflow serves one issue whose labels track PUT updates and
-// records every request, so a test sees both the wire calls a tracker made and
-// the label state it left behind.
-type fakeJiraWorkflow struct {
-	mu          sync.Mutex
-	labels      []string
-	transitions int
-	jqls        []string
-	status      string // the issue's workflow status; empty means "To Do"
-}
-
-func (f *fakeJiraWorkflow) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	switch {
-	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/transitions"):
-		f.transitions++
-		w.WriteHeader(http.StatusNoContent)
-	case strings.HasSuffix(r.URL.Path, "/transitions"):
-		w.Write([]byte(`{"transitions": [{"id": "21", "to": {"name": "In Progress"}}]}`))
-	case strings.HasSuffix(r.URL.Path, "/search"):
-		f.jqls = append(f.jqls, r.URL.Query().Get("jql"))
-		w.Write([]byte(`{"issues": [], "total": 0}`))
-	case r.Method == http.MethodPut:
-		var body struct {
-			Update struct {
-				Labels []map[string]string `json:"labels"`
-			} `json:"update"`
-		}
-		json.NewDecoder(r.Body).Decode(&body)
-		for _, op := range body.Update.Labels {
-			if rm, ok := op["remove"]; ok {
-				kept := []string{}
-				for _, l := range f.labels {
-					if l != rm {
-						kept = append(kept, l)
-					}
-				}
-				f.labels = kept
-			}
-			if add, ok := op["add"]; ok {
-				f.labels = append(f.labels, add)
-			}
-		}
-		w.WriteHeader(http.StatusNoContent)
-	default:
-		labels, _ := json.Marshal(append([]string{}, f.labels...))
-		status := f.status
-		if status == "" {
-			status = "To Do"
-		}
-		w.Write([]byte(`{"key": "PROJ-1", "fields": {"summary": "s", "description": "d", "status": {"name": "` + status + `"}, "labels": ` + string(labels) + `}}`))
-	}
-}
-
-// JIRA_STATUS_MAPPING maps the work lifecycle only: the research tracker must
-// ride the label fallback, so a claim adds agent-research-in-progress (which
-// CompleteVerdict then requires) instead of posting a workflow transition
-// (issue #4919). The work tracker keeps the native path.
-func TestJiraStatusMappingAppliesToWorkTrackerOnly(t *testing.T) {
-	const mapping = `{"dispatchable":"To Do","inProgress":"In Progress"}`
-	row, ok := backendkit.ByName("jira")
-	if !ok {
-		t.Fatal(`backendkit.ByName("jira") ok=false`)
-	}
-
-	cases := []struct {
-		name           string
-		kind           *dispatchkind.Descriptor
-		status         string
-		wantTransition bool
-		wantStatusJQL  bool
-	}{
-		{"research", dispatchkind.Research, "To Do", false, false},
-		{"research on a work in-progress issue", dispatchkind.Research, "In Progress", false, false},
-		{"work", dispatchkind.Work, "To Do", true, true},
-		{"recover", dispatchkind.Recover, "To Do", true, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			fake := &fakeJiraWorkflow{status: tc.status}
-			srv := httptest.NewServer(fake)
-			defer srv.Close()
-
-			c := applyDispatchKind(config{Knobs: inputdoc.Knobs{
-				RowKnobs: map[string]string{
-					"JIRA_BASE_URL":       srv.URL,
-					"JIRA_PROJECT_KEY":    "PROJ",
-					"JIRA_TOKEN":          "tok",
-					"JIRA_STATUS_MAPPING": mapping,
-				},
-				Label:           "ready-for-agent",
-				InProgressLabel: "agent-in-progress",
-				CompleteLabel:   "agent-complete",
-				FailedLabel:     "agent-failed",
-			}}, tc.kind)
-			tracker := mustBuild(row.NewIssueTracker(backendShared(c), c.knobLookup))
-
-			if err := tracker.TransitionState("PROJ-1", forge.Dispatchable, forge.InProgress); err != nil {
-				t.Fatalf("TransitionState: %v", err)
-			}
-			if got := fake.transitions > 0; got != tc.wantTransition {
-				t.Errorf("workflow transition posted = %v, want %v", got, tc.wantTransition)
-			}
-
-			if tc.kind == dispatchkind.Research {
-				if len(fake.labels) != 1 || fake.labels[0] != "agent-research-in-progress" {
-					t.Errorf("labels after claim = %v, want [agent-research-in-progress]", fake.labels)
-				}
-				if err := tracker.CompleteVerdict("PROJ-1", forge.Recommend); err != nil {
-					t.Errorf("CompleteVerdict: %v", err)
-				}
-			}
-
-			if _, err := tracker.ListIssues(forge.Dispatchable); err != nil {
-				t.Fatalf("ListIssues: %v", err)
-			}
-			if len(fake.jqls) != 1 {
-				t.Fatalf("searches = %d, want 1", len(fake.jqls))
-			}
-			if got := strings.Contains(fake.jqls[0], "status ="); got != tc.wantStatusJQL {
-				t.Errorf("JQL %q has a status clause = %v, want %v", fake.jqls[0], got, tc.wantStatusJQL)
-			}
-		})
 	}
 }
 

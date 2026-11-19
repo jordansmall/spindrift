@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
-	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
@@ -27,34 +26,28 @@ func TestStrategyShape(t *testing.T) {
 }
 
 // TestStrategyNewIssueTracker_JiraIssueTypeReachesPostIssue proves the
-// JIRA_ISSUE_TYPE knob flows through ReadKnobs into the client PostIssue
-// creates with; the harness accepts Task and Bug and rejects Epic.
+// JIRA_ISSUE_TYPE knob flows through ReadKnobs into the Connector tracker
+// PostIssue creates with; the harness accepts Task and Bug and rejects Epic.
 func TestStrategyNewIssueTracker_JiraIssueTypeReachesPostIssue(t *testing.T) {
-	h := newJiraHarness(t)
 	for _, tc := range []struct {
-		name    string
-		env     map[string]string
-		wantErr bool
+		name      string
+		issueType string
+		wantErr   bool
 	}{
-		{"unset defaults to Task", nil, false},
-		{"Bug", map[string]string{"JIRA_ISSUE_TYPE": "Bug"}, false},
-		{"Epic is rejected by the project", map[string]string{"JIRA_ISSUE_TYPE": "Epic"}, true},
+		{"Task", "Task", false},
+		{"Bug", "Bug", false},
+		{"Epic is rejected by the project", "Epic", true},
 	} {
-		env := map[string]string{"JIRA_BASE_URL": h.srv.URL, "JIRA_PROJECT_KEY": "PROJ", "JIRA_TOKEN": "tok"}
-		for k, v := range tc.env {
-			env[k] = v
-		}
-		tr, err := jira.Strategy.NewIssueTracker(backendkit.Shared{}, func(k string) (string, bool) {
-			v, ok := env[k]
-			return v, ok
+		t.Run(tc.name, func(t *testing.T) {
+			h := newProductionHarness(t, false, dispatchkind.TrackerWork, "", jira.LifecycleHybrid, tc.issueType)
+			filer, ok := forge.As[forge.HostPostedIssueFiler](h.tr)
+			if !ok {
+				t.Fatal("Connector tracker does not file issues")
+			}
+			if _, err := filer.PostIssue("t", "b", nil); (err != nil) != tc.wantErr {
+				t.Errorf("PostIssue err = %v, wantErr %v", err, tc.wantErr)
+			}
 		})
-		if err != nil {
-			t.Fatalf("%s: NewIssueTracker: %v", tc.name, err)
-		}
-		_, err = tr.(forge.HostPostedIssueFiler).PostIssue("t", "b", nil)
-		if (err != nil) != tc.wantErr {
-			t.Errorf("%s: PostIssue err = %v, wantErr %v", tc.name, err, tc.wantErr)
-		}
 	}
 }
 

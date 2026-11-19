@@ -220,15 +220,14 @@ func useJiraConnectorRow(t *testing.T, extra string) {
 	t.Setenv(jiraTokenEnv+"_CMD", "")
 }
 
-// jira's native Strategy is not ConnectorRouted, so only its `primary` option
-// puts the row's credential in the Daemon's probe path.
-func TestResolveConnectorCredentials_JiraRowResolvesOnlyWhenPrimary(t *testing.T) {
+// jira's Strategy is ConnectorRouted, so its row's credential is in the
+// Daemon's probe path with or without `primary`.
+func TestResolveConnectorCredentials_JiraRowResolvesWithOrWithoutPrimary(t *testing.T) {
 	for _, tc := range []struct {
 		name, extra string
-		wantRun     bool
 	}{
-		{"primary", `,"primary":true`, true},
-		{"not primary", "", false},
+		{"primary", `,"primary":true`},
+		{"not primary", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			clearKnobEnvT(t)
@@ -239,10 +238,10 @@ func TestResolveConnectorCredentials_JiraRowResolvesOnlyWhenPrimary(t *testing.T
 			if _, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": "jira"}), workKinds, &bytes.Buffer{}); err != nil {
 				t.Fatal(err)
 			}
-			if got := len(ran) > 0; got != tc.wantRun {
-				t.Errorf("secret command ran = %v (%q), want %v", got, ran, tc.wantRun)
+			if len(ran) == 0 {
+				t.Error("secret command did not run, want the jira credential resolved")
 			}
-			if tc.wantRun && os.Getenv(jiraTokenEnv) != "tok" {
+			if os.Getenv(jiraTokenEnv) != "tok" {
 				t.Errorf("%s = %q, want tok", jiraTokenEnv, os.Getenv(jiraTokenEnv))
 			}
 		})

@@ -11,11 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
@@ -150,69 +150,29 @@ func TestBuildDemandSources_GitHubReadsAmbientRepoSlug(t *testing.T) {
 	}
 }
 
-// jira builds a source per probed kind that counts through a zero-row search
-// whose JQL is the one ListIssues would run: the project and the kind's own
-// dispatchable label, plus the work lifecycle's status mapping for work only
-// (research states ride the label fallback, issue #4919).
-func TestBuildDemandSources_JiraCountsWithPerKindLabelAndWorkOnlyStatusMapping(t *testing.T) {
+// jira's tracker is its Connector, so with no jira row loaded (the Consumer
+// imported no Connector module, or its JIRA_BASE_URL was unusable) no kind gets
+// a source and each is told how to configure one, never a native fallback.
+func TestBuildDemandSources_JiraWithoutAConnectorRowHasNoSource(t *testing.T) {
 	clearKnobEnvT(t)
-	var mu sync.Mutex
-	var jqls []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/rest/api/2/search" {
-			http.NotFound(w, r)
-			return
-		}
-		mu.Lock()
-		jqls = append(jqls, r.URL.Query().Get("jql"))
-		mu.Unlock()
-		_, _ = w.Write([]byte(`{"total": 7, "issues": []}`))
-	}))
-	defer srv.Close()
-
-	src, _ := buildDemandSources(demandDocT(map[string]string{
+	t.Cleanup(backendrows.Snapshot())
+	if err := backendrows.Use(nil, func(string) string { return "" }); err != nil {
+		t.Fatal(err)
+	}
+	src, missing := buildDemandSources(demandDocT(map[string]string{
 		"ISSUE_TRACKER":       "jira",
-		"JIRA_BASE_URL":       srv.URL,
+		"JIRA_BASE_URL":       "https://jira.example",
 		"JIRA_PROJECT_KEY":    "PROJ",
 		"JIRA_TOKEN":          "tok",
 		"JIRA_STATUS_MAPPING": `{"dispatchable":"To Do"}`,
 		"LABEL":               "ready-for-agent",
 	}), allDemandKinds)
-	if len(src) != 2 {
-		t.Fatalf("sources = %v, want work and research", src)
+	if len(src) != 0 {
+		t.Fatalf("sources = %v, want none", src)
 	}
-	for kind, label := range map[daemon.Kind]string{
-		daemon.KindOf(dispatchkind.Work):     "ready-for-agent",
-		daemon.KindOf(dispatchkind.Research): "agent-research",
-	} {
-		c, ok := src[kind]
-		if !ok {
-			t.Fatalf("no demand source for %s", kind)
-		}
-		if got := c.ProbeInterval(); got != 5*time.Minute {
-			t.Errorf("%s ProbeInterval() = %v, want 5m", kind, got)
-		}
-		mu.Lock()
-		jqls = nil
-		mu.Unlock()
-		got, err := c.CountReady(false)
-		if err != nil || got != 7 {
-			t.Errorf("%s CountReady() = %d, %v; want 7, nil", kind, got, err)
-		}
-		mu.Lock()
-		seen := append([]string(nil), jqls...)
-		mu.Unlock()
-		if len(seen) != 1 {
-			t.Fatalf("%s: %d searches, want 1", kind, len(seen))
-		}
-		for _, want := range []string{`project = "PROJ"`, `labels = "` + label + `"`} {
-			if !strings.Contains(seen[0], want) {
-				t.Errorf("%s JQL %q lacks %s", kind, seen[0], want)
-			}
-		}
-		hasStatus := strings.Contains(seen[0], `status = "To Do"`)
-		if isWork := kind == daemon.KindOf(dispatchkind.Work); hasStatus != isWork {
-			t.Errorf("%s JQL %q: status clause present = %v, want %v", kind, seen[0], hasStatus, isWork)
+	for _, d := range []*dispatchkind.Descriptor{dispatchkind.Work, dispatchkind.Research} {
+		if got := missing[daemon.KindOf(d)]; !strings.Contains(got, "flake module") {
+			t.Errorf("%s missing reason = %q, want it to name the Connector's flake module", d.Name, got)
 		}
 	}
 }
@@ -568,10 +528,6 @@ func TestTrackers_KindsShareTheIssueTrackerName(t *testing.T) {
 // A document value that is empty does not count as a setting the child reads:
 // the child resolves the ambient value, so the daemon's count must too.
 func TestBuildDemandSources_EmptyDocumentValueFallsBackToAmbient(t *testing.T) {
-	jiraSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"total": 1, "issues": []}`))
-	}))
-	defer jiraSrv.Close()
 	localDir := t.TempDir()
 
 	tests := []struct {
@@ -595,14 +551,6 @@ func TestBuildDemandSources_EmptyDocumentValueFallsBackToAmbient(t *testing.T) {
 			name:    "forgejo REPO_SLUG and FORGEJO_BASE_URL",
 			doc:     map[string]string{"ISSUE_TRACKER": "forgejo", "REPO_SLUG": "", "FORGEJO_BASE_URL": ""},
 			ambient: map[string]string{"REPO_SLUG": "o/r", "FORGEJO_BASE_URL": "http://forgejo.example", "FORGEJO_TOKEN": "tok"},
-		},
-		{
-			name: "jira JIRA_BASE_URL",
-			doc: map[string]string{
-				"ISSUE_TRACKER": "jira", "JIRA_BASE_URL": "", "JIRA_PROJECT_KEY": "PROJ",
-				"JIRA_STATUS_MAPPING": `{"dispatchable":"To Do"}`,
-			},
-			ambient: map[string]string{"JIRA_BASE_URL": jiraSrv.URL, "JIRA_TOKEN": "tok"},
 		},
 		{
 			name:    "local LOCAL_ISSUES_DIR",

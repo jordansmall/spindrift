@@ -2752,12 +2752,11 @@ func credentialRowDoc(name, extra string) string {
 "routes":[{"method":"GET","host":"` + name + `.example","path":"/x"}]` + extra + `}]`
 }
 
-// A non-shadow row whose adapter does not read through it (jira until its
-// cut-over) must not fetch or fail on the credential, even when its backend is
-// the active tracker.
-func TestApplyConnectorCredentials_TemplateSkipsUnroutedRow(t *testing.T) {
+// A non-shadow row that is not the active tracker (a jira Connector imported by
+// a Consumer on another tracker) must not fetch or fail on the credential.
+func TestApplyConnectorCredentials_TemplateSkipsRowNothingReads(t *testing.T) {
 	ran := useCredentialRows(t, credentialRowDoc("jira", ""), "vault get {name}", failingVault)
-	setKnob(t, "ISSUE_TRACKER", "jira")
+	setKnob(t, "ISSUE_TRACKER", "local")
 	if err := applyConnectorCredentials(); err != nil {
 		t.Fatal(err)
 	}
@@ -2766,18 +2765,21 @@ func TestApplyConnectorCredentials_TemplateSkipsUnroutedRow(t *testing.T) {
 	}
 }
 
-// A jira row with `primary` is read through its Connector, so its credential
-// resolves like a routed row's even though the native jira Strategy is not
-// ConnectorRouted.
-func TestApplyConnectorCredentials_TemplateRunsForPrimaryJiraRow(t *testing.T) {
-	ran := useCredentialRows(t, credentialRowDoc("jira", `,"primary":true`), "vault get {name}", failingVault)
-	setKnob(t, "ISSUE_TRACKER", "jira")
-	err := applyConnectorCredentials()
-	if err == nil || !strings.Contains(err.Error(), "SHADOW_TEST_TOKEN") {
-		t.Fatalf("err = %v, want the template failure naming the env var", err)
-	}
-	if want := []string{"vault get shadow-test-token"}; !reflect.DeepEqual(ran(), want) {
-		t.Errorf("ran %q, want %q", ran(), want)
+// jira's tracker is its Connector, so the active jira tracker's credential
+// resolves like a routed row's with or without `primary`.
+func TestApplyConnectorCredentials_TemplateRunsForJiraRow(t *testing.T) {
+	for name, extra := range map[string]string{"primary": `,"primary":true`, "plain": ""} {
+		t.Run(name, func(t *testing.T) {
+			ran := useCredentialRows(t, credentialRowDoc("jira", extra), "vault get {name}", failingVault)
+			setKnob(t, "ISSUE_TRACKER", "jira")
+			err := applyConnectorCredentials()
+			if err == nil || !strings.Contains(err.Error(), "SHADOW_TEST_TOKEN") {
+				t.Fatalf("err = %v, want the template failure naming the env var", err)
+			}
+			if want := []string{"vault get shadow-test-token"}; !reflect.DeepEqual(ran(), want) {
+				t.Errorf("ran %q, want %q", ran(), want)
+			}
+		})
 	}
 }
 

@@ -58,14 +58,22 @@ func TestPrimaryRowFailsWithTheLoadErrorAndNeverFallsBackToNative(t *testing.T) 
 	}
 }
 
-func TestPlainRowKeepsTheNativeAdapter(t *testing.T) {
+// The Connector is jira's only tracker whether or not the row is primary.
+func TestPlainRowBuildsTheConnectorTracker(t *testing.T) {
 	useJiraRow(t, func(*backendrows.Row) {})
-	tr, err := newJiraTracker(t)
-	if err != nil {
-		t.Fatalf("a non-primary row must not load its Connector, got %v", err)
+	if _, err := newJiraTracker(t); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("err = %v, want the module read error: a non-primary row loads its Connector too", err)
 	}
-	if got := fmt.Sprintf("%T", tr); got != "*jira.jiraClient" {
-		t.Fatalf("tracker is %s, want the native *jira.jiraClient", got)
+}
+
+func TestNoJiraRowIsAnActionableErrorNotANativeFallback(t *testing.T) {
+	t.Cleanup(backendrows.Snapshot())
+	if err := backendrows.Use(nil, func(string) string { return "" }); err != nil {
+		t.Fatal(err)
+	}
+	_, err := newJiraTracker(t)
+	if err == nil || !strings.Contains(err.Error(), "flake module") || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("err = %v, want one naming the Connector's flake module and an https JIRA_BASE_URL", err)
 	}
 }
 

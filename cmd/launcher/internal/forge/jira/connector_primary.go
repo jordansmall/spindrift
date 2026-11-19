@@ -26,11 +26,11 @@ var connectorClient *http.Client
 // loadRowConnector loads a backend row's Connector; a test seam.
 var loadRowConnector = backendrows.Load
 
-// errPrimaryCapabilities is a primary Connector whose handshake omits a method
+// errPrimaryCapabilities is a Connector whose handshake omits a method
 // core drives with no native adapter behind it.
 var errPrimaryCapabilities = errors.New("jira primary Connector lacks required capabilities")
 
-// primaryCapabilities are the capabilities a primary Connector must advertise:
+// primaryCapabilities are the capabilities the jira Connector must advertise:
 // without native writes, a missing one would reach a nil interface, and a
 // missing CapLabeled would silently degrade the finding dedup to open issues.
 var primaryCapabilities = []string{
@@ -65,14 +65,7 @@ func (p primaryTracker) Unwrap() forge.IssueTracker { return p.IssueTracker }
 // BodyGrammar mirrors the native adapter: links are authoritative.
 func (primaryTracker) BodyGrammar() forge.BodyGrammar { return forge.BodyGrammarNativeDepsOnly }
 
-// primaryRow is the jira backend row when it is configured primary: every
-// tracker operation goes through its Connector, with no native fallback.
-func primaryRow() (backendrows.Row, bool) {
-	row, ok := backendrows.Lookup(backend.Jira.Name)
-	return row, ok && row.Primary
-}
-
-// newConnectorTracker builds jira's tracker from a primary row's Connector.
+// newConnectorTracker builds jira's tracker from the jira row's Connector.
 // Lifecycle policy stays core's; the Connector only performs the operations.
 // There are no native writes (nil), so nothing falls back to the adapter.
 func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (forge.IssueTracker, error) {
