@@ -19,10 +19,6 @@ import (
 	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
-// readsAuditLog records the requests of the shared Connector the host-side
-// reads go through, beside the other Connector logs.
-const readsAuditLog = "connector-github-reads.log"
-
 // loadRowConnector loads a backend row's Connector; a test seam.
 var loadRowConnector = backendrows.Load
 
@@ -89,16 +85,12 @@ func sharedConnectorFor(row backendrows.Row, repoSlug string) (*sharedConnector,
 		// deletes what it closes). The call that failed is not retried; this read
 		// loads a fresh one.
 		dropShared(key, sc)
-		notePrimary(row, "reload the Connector", deadErr)
+		notePrimary("reload the Connector", deadErr)
 	}
 	if f := sharedConnectors.failures[key]; f.n >= maxLoadFailures && loadClock().Sub(f.last) < loadRetryAfter {
 		return nil, fmt.Errorf("connector load failed %d times in a row; retried %s after the last failure: %w", f.n, loadRetryAfter, f.err)
 	}
-	auditName := readsAuditLog
-	if row.Primary {
-		auditName = primaryrecord.Name(backend.GitHub.Name, ".audit.jsonl")
-	}
-	audit, closeAudit, _ := primaryrecord.OpenFile(auditName)
+	audit, closeAudit, _ := primaryrecord.OpenFile(primaryrecord.Name(backend.GitHub.Name, ".audit.jsonl"))
 	conn, api, err := loadConnector(row, backendrows.Options{Audit: audit, Client: connectorClient}, repoSlug)
 	if err != nil {
 		closeAudit()
@@ -136,35 +128,34 @@ func closeSharedConnectors() {
 }
 
 // routedRow is the github backend row when one is configured and not in shadow
-// mode. Backend rows are opt-in: without one, or under a shadow row (native
-// stays authoritative), the host's gh answers.
+// mode: every read and write the Connector serves goes through it, with no gh
+// fallback. Without a row, or under a shadow row (native stays authoritative),
+// the host's gh answers.
 func routedRow() (backendrows.Row, bool) {
 	row, ok := backendrows.Lookup(backend.GitHub.Name)
 	return row, ok && !row.Shadow
 }
 
-// primaryRow is the github backend row when it is configured primary: the
-// reads and the writes docs/reference.md lists under "Backend primary mode" go
-// through it, with no gh fallback. It is deliberately narrower than routedRow,
-// which any non-shadow row satisfies, so a plain row keeps gh answering those.
-func primaryRow() (backendrows.Row, bool) {
-	row, ok := backendrows.Lookup(backend.GitHub.Name)
-	return row, ok && row.Primary
+// Routed reports whether the github row is configured and not shadow: the one
+// rule for whether the Connector, not gh, serves github.
+func Routed() bool {
+	_, ok := routedRow()
+	return ok
 }
 
-// notePrimary records the error a primary-routed read or write returned and
-// returns it unchanged. A plain row records nothing, and neither does a lost
-// claim race: forge.ErrAlreadyClaimed is core policy, not a Connector fault,
-// and an empty log is what marks a clean primary run.
-func notePrimary(row backendrows.Row, op string, err error) error {
-	if !row.Primary || errors.Is(err, forge.ErrAlreadyClaimed) {
+// notePrimary records the error a routed read or write returned and returns
+// it unchanged. A lost claim race records nothing: forge.ErrAlreadyClaimed is
+// core policy, not a Connector fault, and an empty log is what marks a clean
+// run.
+func notePrimary(op string, err error) error {
+	if errors.Is(err, forge.ErrAlreadyClaimed) {
 		return err
 	}
 	return primaryrecord.Note(backend.GitHub.Name, op, err)
 }
 
 // connectorOp runs fn over the shared Connector for e's repository, and records
-// a failure under a primary row. A Connector lacking what the operation needs
+// a failure under a routed row. A Connector lacking what the operation needs
 // (the missing sentinel, or a capability fn names through errNoCapability) is
 // unsupported, never a reason to fall back to gh. Readers run concurrently, so
 // one can hold a Connector another reader's call then kills and see
@@ -174,7 +165,7 @@ func (e *execClient) connectorOp(row backendrows.Row, missing error, verb string
 	if err == nil {
 		err = unsupportedWithout(fn(sc.conn, sc.api), verb, missing, errNoCapability)
 	}
-	return notePrimary(row, verb, err)
+	return notePrimary(verb, err)
 }
 
 // coreTracker as trackerOp's capName names an operation of the core tracker

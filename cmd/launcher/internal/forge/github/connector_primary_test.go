@@ -161,49 +161,53 @@ func TestPrimaryRow_ReadsGoThroughTheConnector(t *testing.T) {
 	if len(primaryFiles(t, logDir, ".audit.jsonl")) != 1 {
 		t.Errorf("want one primary audit file, got %v", primaryFiles(t, logDir, ".audit.jsonl"))
 	}
-	if _, err := os.Stat(filepath.Join(logDir, readsAuditLog)); err == nil {
-		t.Errorf("a primary row wrote %s", readsAuditLog)
-	}
 }
 
-// A plain non-shadow row still runs gh for the reads only a primary row
-// routes; a shadow row routes none of them.
-func TestPrimaryReads_StayOnGhWithoutAPrimaryRow(t *testing.T) {
-	for rowName, useRow := range map[string]func(*testing.T, string){"plain": useGithubRowAt, "shadow": useGithubRowShadow} {
-		for _, tc := range primaryReads {
-			// Any non-shadow row routes ListIssues, so a plain row never reaches gh.
-			if tc.name == "ListIssues" && rowName == "plain" {
-				continue
+// A plain non-shadow row routes every read through the Connector, never gh.
+func TestPlainRow_ReadsGoThroughTheConnector(t *testing.T) {
+	for _, tc := range primaryReads {
+		t.Run(tc.name, func(t *testing.T) {
+			_, c, calls, _ := primaryHarness(t, useGithubRowAt)
+
+			_ = tc.read(c, "https://github.com/owner/repo/pull/1")
+
+			if n := calls(); n != 0 {
+				t.Errorf("%s under a plain row ran gh %d times", tc.name, n)
 			}
-			t.Run(rowName+"/"+tc.name, func(t *testing.T) {
-				_, c, calls, logDir := primaryHarness(t, useRow)
-
-				_ = tc.read(c, "https://github.com/owner/repo/pull/1")
-
-				if calls() == 0 {
-					t.Errorf("%s under a %s row never reached gh", tc.name, rowName)
-				}
-				if m, _ := filepath.Glob(filepath.Join(logDir, "primary-github-*")); len(m) != 0 {
-					t.Errorf("a non-primary row wrote primary records %v", m)
-				}
-			})
-		}
+		})
 	}
 }
 
-// A plain row's Connector keeps its audit in the reads log.
-func TestPlainRow_KeepsTheReadsAuditLog(t *testing.T) {
+// A shadow row stays native-authoritative: every read runs gh and writes no
+// primary record.
+func TestShadowRow_ReadsStayOnGh(t *testing.T) {
+	for _, tc := range primaryReads {
+		t.Run(tc.name, func(t *testing.T) {
+			_, c, calls, logDir := primaryHarness(t, useGithubRowShadow)
+
+			_ = tc.read(c, "https://github.com/owner/repo/pull/1")
+
+			if calls() == 0 {
+				t.Errorf("%s under a shadow row never reached gh", tc.name)
+			}
+			if m, _ := filepath.Glob(filepath.Join(logDir, "primary-github-*")); len(m) != 0 {
+				t.Errorf("a shadow row wrote primary records %v", m)
+			}
+		})
+	}
+}
+
+// A plain row's Connector audits to the run's primary record, like a primary
+// row's.
+func TestPlainRow_AuditsToThePrimaryRecord(t *testing.T) {
 	_, c, _, logDir := primaryHarness(t, useGithubRowAt)
 
 	if _, err := c.ListIssues(forge.Dispatchable); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := os.Stat(filepath.Join(logDir, readsAuditLog)); err != nil {
-		t.Errorf("a plain row's reads audit log: %v", err)
-	}
-	if m := primaryFiles(t, logDir, ""); len(m) != 0 {
-		t.Errorf("a plain row wrote primary records %v", m)
+	if len(primaryFiles(t, logDir, ".audit.jsonl")) != 1 {
+		t.Errorf("want one primary audit file, got %v", primaryFiles(t, logDir, ".audit.jsonl"))
 	}
 }
 
@@ -360,7 +364,7 @@ func TestPrimaryRow_MissingCapabilityFailsTheReadWithoutGh(t *testing.T) {
 	}
 }
 
-// The reads any non-shadow row routes are recorded under a primary row too: a
+// Every read a non-shadow row routes records its failure: a
 // Connector that fails to load lands a line in the primary log for each.
 func TestPrimaryRow_RoutedReadsRecordTheirFailures(t *testing.T) {
 	for name, read := range map[string]func(c *execClient) error{
@@ -420,8 +424,7 @@ func TestPrimaryRow_UnsetCredentialIsNamedInTheReadErrorAndRecord(t *testing.T) 
 	}
 }
 
-// Under a primary row token introspection audits to the primary record, not the
-// plain row's token log.
+// Under a routed row token introspection audits to the primary record.
 func TestPrimaryRow_TokenIntrospectionAuditsToThePrimaryRecord(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
@@ -439,9 +442,6 @@ func TestPrimaryRow_TokenIntrospectionAuditsToThePrimaryRecord(t *testing.T) {
 	logDir := hostpaths.LogDir(dir)
 	if len(primaryFiles(t, logDir, ".audit.jsonl")) != 1 {
 		t.Errorf("primary audit files = %v, want one", primaryFiles(t, logDir, ".audit.jsonl"))
-	}
-	if _, err := os.Stat(filepath.Join(logDir, tokenAuditLog)); err == nil {
-		t.Errorf("a primary row wrote %s", tokenAuditLog)
 	}
 }
 
@@ -598,8 +598,8 @@ func TestRecordPrimarySandboxTotals_WritesNothingWhenTheSandboxNeverStarted(t *t
 	}
 }
 
-func TestRecordPrimarySandboxTotals_WritesNothingWithoutAPrimaryRow(t *testing.T) {
-	audit := primarySandboxHarness(t, func(t *testing.T, host string) { applyGithubRow(t, host, func(*backendrows.Row) {}) }, knownSandbox, []byte{})
+func TestRecordPrimarySandboxTotals_WritesNothingUnderAShadowRow(t *testing.T) {
+	audit := primarySandboxHarness(t, useGithubRowShadow, knownSandbox, []byte{})
 
 	RecordPrimarySandboxTotals()
 
@@ -617,5 +617,15 @@ func TestRecordPrimarySandboxTotals_CreatesNoRecordPair(t *testing.T) {
 
 	if got := primaryFiles(t, filepath.Dir(audit), ""); len(got) != 0 {
 		t.Errorf("recording totals created %v, want no files", got)
+	}
+}
+
+func TestRecordPrimarySandboxTotals_AppendsUnderAPlainRow(t *testing.T) {
+	audit := primarySandboxHarness(t, useGithubRowAt, knownSandbox, []byte(seededAudit))
+
+	RecordPrimarySandboxTotals()
+
+	if b, _ := os.ReadFile(audit); len(strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")) != 2 {
+		t.Errorf("audit file = %q, want the existing line and one totals line", b)
 	}
 }

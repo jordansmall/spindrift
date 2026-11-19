@@ -15,13 +15,13 @@ import (
 )
 
 // RecordPrimarySandboxTotals appends the run's Connector sandbox cost to this
-// process's primary audit file, the only home a primary run has for it: a
-// primary row writes no read shadow summary. Call it once, after the sandbox
+// process's primary audit file, the only home a routed run has for it: a
+// routed row writes no read shadow summary. Call it once, after the sandbox
 // closed, so the totals are final. It writes nothing unless the audit file
 // already exists, since a pair for a process that never read through its
-// primary Connector would count as a dirty run, and never touches the .log.
+// routed Connector would count as a dirty run, and never touches the .log.
 func RecordPrimarySandboxTotals() {
-	if _, ok := primaryRow(); !ok {
+	if _, ok := routedRow(); !ok {
 		return
 	}
 	st, ok := connectorsandbox.Report()

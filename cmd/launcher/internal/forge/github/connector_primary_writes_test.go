@@ -141,8 +141,9 @@ func TestPrimaryRow_ClaimOfAClaimedIssueIsRefused(t *testing.T) {
 	}
 }
 
-// Without a primary row the same writes still run gh.
-func TestTrackerWrites_StayOnGhWithoutAPrimaryRow(t *testing.T) {
+// A plain non-shadow row routes the same writes through the Connector; a
+// shadow row keeps them on gh.
+func TestTrackerWrites_PlainRowRoutesShadowStaysOnGh(t *testing.T) {
 	for rowName, useRow := range map[string]func(*testing.T, string){"plain": useGithubRowAt, "shadow": useGithubRowShadow} {
 		for _, tc := range primaryWrites {
 			t.Run(rowName+"/"+tc.name, func(t *testing.T) {
@@ -151,8 +152,11 @@ func TestTrackerWrites_StayOnGhWithoutAPrimaryRow(t *testing.T) {
 
 				_ = tc.write(primaryWriteClient())
 
-				if calls() == 0 {
-					t.Errorf("%s under a %s row never reached gh", tc.name, rowName)
+				if rowName == "plain" && calls() != 0 {
+					t.Errorf("%s under a plain row ran gh %d times", tc.name, calls())
+				}
+				if rowName == "shadow" && calls() == 0 {
+					t.Errorf("%s under a shadow row never reached gh", tc.name)
 				}
 			})
 		}
@@ -252,17 +256,16 @@ func TestPrimaryRow_MissingCapabilityFailsTheWrite(t *testing.T) {
 // primary log empty; any other failed write is recorded.
 func TestNotePrimary_SkipsALostClaimRace(t *testing.T) {
 	_, _, _, logDir := primaryHarness(t, useGithubRowPrimary)
-	row := backendrows.Row{Primary: true}
 
 	claimed := fmt.Errorf("tracker: issue 7: %w", forge.ErrAlreadyClaimed)
-	if got := notePrimary(row, "transition an issue", claimed); got != claimed {
+	if got := notePrimary("transition an issue", claimed); got != claimed {
 		t.Errorf("notePrimary = %v, want the error unchanged", got)
 	}
 	if logs := primaryFiles(t, logDir, ".log"); len(logs) != 0 {
 		t.Errorf("a lost claim race wrote primary logs %v", logs)
 	}
 
-	_ = notePrimary(row, "transition an issue", errors.New("boom"))
+	_ = notePrimary("transition an issue", errors.New("boom"))
 	if logs := primaryFiles(t, logDir, ".log"); len(logs) != 1 {
 		t.Errorf("a failed write wrote primary logs %v, want one", logs)
 	}

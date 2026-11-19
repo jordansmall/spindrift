@@ -80,7 +80,7 @@ type execClient struct {
 	syncMethod    string // "", "rebase", or "merge"; "" behaves as "rebase"
 	userName      string // committer identity Rebase sets on its clone; empty keeps ambient git config
 	userEmail     string
-	baseBranch    string // core's BASE_BRANCH; the base a primary row's Rebase syncs onto
+	baseBranch    string // core's BASE_BRANCH; the base a routed row's Rebase syncs onto
 
 	demandMu    sync.Mutex // guards demandCache; CountReady is the only user
 	demandCache *demandCache
@@ -108,7 +108,7 @@ func WithSyncMethod(method string) ExecOption {
 	return func(e *execClient) { e.syncMethod = method }
 }
 
-// WithBaseBranch sets the branch a primary row's Rebase syncs a PR onto: the
+// WithBaseBranch sets the branch a routed row's Rebase syncs a PR onto: the
 // Connector's PR read carries no base, so core's own BASE_BRANCH stands in.
 func WithBaseBranch(branch string) ExecOption {
 	return func(e *execClient) { e.baseBranch = branch }

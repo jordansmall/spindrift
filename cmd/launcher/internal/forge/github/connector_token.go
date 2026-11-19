@@ -14,10 +14,6 @@ import (
 	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
-// tokenAuditLog is the file a short-lived Connector load's requests are
-// recorded in, beside the shadow Connectors' logs.
-const tokenAuditLog = "connector-github-token.log"
-
 // connectorClient is the transport the host-side Connector loads send with; nil
 // means the default client. It is a test seam, as a real host reaches the real
 // API host.
@@ -27,21 +23,16 @@ var connectorClient *http.Client
 // the row's Connector answers, so the host needs no gh; backend rows are
 // opt-in, so without one (or under a shadow row) the native gh probe does and
 // the primary write gate keeps detecting a write-incapable token. A Connector
-// load is short-lived, with its audit record in the host's log directory: the
-// run's primary record under a primary row.
+// load is short-lived, with its audit record in the run's primary record.
 func introspectToken(token, repoSlug string) (backendkit.TokenIntrospection, error) {
 	row, ok := routedRow()
 	if !ok {
 		return nativeIntrospect(token, repoSlug)
 	}
-	auditName := tokenAuditLog
-	if row.Primary {
-		auditName = primaryrecord.Name(backend.GitHub.Name, ".audit.jsonl")
-	}
-	audit, closeAudit, _ := primaryrecord.OpenFile(auditName)
+	audit, closeAudit, _ := primaryrecord.OpenFile(primaryrecord.Name(backend.GitHub.Name, ".audit.jsonl"))
 	defer closeAudit()
 	got, err := introspectViaConnector(row, backendrows.Options{Audit: audit, Client: connectorClient}, token, repoSlug)
-	return got, notePrimary(row, "introspect the token", err)
+	return got, notePrimary("introspect the token", err)
 }
 
 var nativeIntrospect = newTokenIntrospector(TokenOAuthScopes, TokenRepoPushPermission)

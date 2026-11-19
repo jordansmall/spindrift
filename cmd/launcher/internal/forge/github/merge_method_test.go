@@ -2,7 +2,6 @@ package github
 
 import (
 	"errors"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -128,10 +127,12 @@ func TestPrimaryRow_MergeMethodOtherThanRebaseIsRefused(t *testing.T) {
 	}
 }
 
-// A primary row refuses MERGE_METHOD at forge build time, as the forgejo row
-// does, so a misconfigured launch fails before any Box starts. The read-only
-// Box forge is refused too: forgejo builds both through one refusal.
-func TestStrategy_PrimaryRowRefusesMergeMethodAtBuild(t *testing.T) {
+// A routed (non-shadow) row refuses MERGE_METHOD at forge build time, as the
+// forgejo row does, so a misconfigured launch fails before any Box starts;
+// `primary` changes nothing. A shadow row merges natively, so it refuses
+// nothing. The read-only Box forge is refused too: forgejo builds both through
+// one refusal.
+func TestStrategy_RoutedRowRefusesMergeMethodAtBuild(t *testing.T) {
 	builds := map[string]func(backendkit.Shared) (forge.CodeForge, error){
 		"NewCodeForge": func(s backendkit.Shared) (forge.CodeForge, error) {
 			return Strategy.NewCodeForge(s, nil, forge.SanitizedParent{}, nil)
@@ -140,24 +141,27 @@ func TestStrategy_PrimaryRowRefusesMergeMethodAtBuild(t *testing.T) {
 			return Strategy.NewReadOnlyCodeForge(s, nil, forge.SanitizedParent{}, nil)
 		},
 	}
+	rows := map[string]func(*testing.T, string){
+		"plain":   useGithubRowAt,
+		"primary": useGithubRowPrimary,
+		"shadow":  useGithubRowShadow,
+	}
 	for name, build := range builds {
 		for _, tc := range []struct {
 			method  string
-			primary bool
+			row     string
 			refused bool
 		}{
-			{"squash", true, true},
-			{"merge", true, true},
-			{"rebase", true, false},
-			{"", true, false},
-			{"squash", false, false},
+			{"squash", "plain", true},
+			{"merge", "plain", true},
+			{"rebase", "plain", false},
+			{"", "plain", false},
+			{"squash", "primary", true},
+			{"rebase", "primary", false},
+			{"squash", "shadow", false},
 		} {
-			t.Run(name+"/"+tc.method+"/primary="+strconv.FormatBool(tc.primary), func(t *testing.T) {
-				if tc.primary {
-					useGithubRowPrimary(t, "127.0.0.1:1")
-				} else {
-					useGithubRowAt(t, "127.0.0.1:1")
-				}
+			t.Run(name+"/"+tc.method+"/"+tc.row, func(t *testing.T) {
+				rows[tc.row](t, "127.0.0.1:1")
 
 				_, err := build(backendkit.Shared{RepoSlug: connectorRepo, MergeMethod: tc.method})
 

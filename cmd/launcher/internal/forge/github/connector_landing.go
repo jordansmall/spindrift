@@ -28,7 +28,7 @@ func gitCredential(row backendrows.Row) (gitexec.Credential, error) {
 	return gitexec.Credential{Username: "x-access-token", Password: token}, nil
 }
 
-// coreGit is the plumbing a primary row composes over the Connector's clone
+// coreGit is the plumbing a routed row composes over the Connector's clone
 // URL: the stock git adapter, except that Rebase honours SYNC_METHOD as the
 // native path does. It keeps the validated URL and credential so core's own
 // clones (the Box's mirror, the sync) use exactly what Compose vetted.
@@ -201,7 +201,7 @@ func (e *execClient) seedMirrorViaConnector(row backendrows.Row, dir string) err
 	})
 }
 
-// ledgerSiteViaConnector is the butler Ledger's remote under a primary row: the
+// ledgerSiteViaConnector is the butler Ledger's remote under a routed row: the
 // clone URL Compose validated and the row's credential, so the Ledger's git
 // carries no gh credential helper.
 func (e *execClient) ledgerSiteViaConnector(row backendrows.Row) (backendkit.LedgerSite, error) {

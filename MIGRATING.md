@@ -1,5 +1,28 @@
 # Migration Guide
 
+## The github Connector is the default for every Consumer (issue #7139)
+
+Every non-shadow github row now routes its covered reads and writes through the
+github Connector, with or without `primary`, and with no `gh` fallback. See [The
+github Connector](docs/reference.md#the-github-connector) and [Backend primary
+mode](docs/reference.md#backend-primary-mode). The native adapter stays in the
+build until #6811 and #6888 delete it, so reverting the change restores native
+routing.
+
+What changed for a github Consumer:
+
+- **Set `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`.** Every run whose `CODE_FORGE` or
+  `ISSUE_TRACKER` is `github` needs it, where it used to be needed only under
+  `shadow` or `primary`. It must be write-capable: see the permission table in
+  [Backend primary mode](docs/reference.md#backend-primary-mode). Without
+  it the run fails.
+- **`MERGE_METHOD=merge` and `squash` are refused at launch.** The Connector
+  merges by rebase only. Drop the setting, or use `rebase`.
+- **`spindrift.connectors.github.primary` is a no-op.** Keep it or delete it;
+  nothing changes either way.
+- **`shadow` is unchanged.** A shadow row stays native-authoritative and
+  sampled, and keeps its read-only token rule.
+
 ## The native claude Strategy is gone: claude runs through its Connector (issue #6799)
 
 claude's host half is its Connector for every Consumer; the native Strategy is
