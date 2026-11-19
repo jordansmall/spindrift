@@ -63,8 +63,9 @@ type Row struct {
 	ShadowEvery int  `json:"shadowEvery,omitempty"`
 	// Primary makes the Connector answer in place of the native adapter of the
 	// same name: github's reads and the writes docs/reference.md lists under
-	// "Backend primary mode" (the rest stay native until #6756), the whole
-	// tracker for jira. Refused with Shadow.
+	// "Backend primary mode" (the rest stay native until #6756).
+	// Refused with Shadow; Nix evaluation (lib/flakeModule.nix) also refuses it
+	// on jira, which always runs through its Connector.
 	Primary bool `json:"primary,omitempty"`
 }
 
@@ -155,10 +156,10 @@ const unsetHost = "unset.invalid"
 // ValidateRoutes judges the table the Connector will actually be held to.
 // unconfigured reports an unset or unusable base on a non-Shadow row: it
 // resolves against unsetHost and the caller drops it. A Consumer importing every
-// Connector need not configure a tracker it does not use, and the row shares the
-// native adapter's base knob, which accepts plain http, so it must not fail a
-// Consumer that does not read through the Connector yet; a Shadow or Primary row
-// opted in, so every base error stands.
+// Connector need not configure a tracker it does not use, so an unset or
+// unusable base must not fail it; a Shadow or Primary row opted in, so every
+// base error stands. A dropped jira base surfaces as errNoConnectorRow when the
+// jira tracker is built (forge/jira/strategy.go).
 func resolveBase(row Row, lookup func(string) string) (_ Row, unconfigured bool, _ error) {
 	uses := func(routes []connectorhost.Route) bool {
 		return slices.ContainsFunc(routes, func(r connectorhost.Route) bool { return r.Host == BaseHost })

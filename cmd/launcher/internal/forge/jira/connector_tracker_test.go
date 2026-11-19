@@ -20,7 +20,7 @@ import (
 	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
-func useJiraRow(t *testing.T, adjust func(*backendrows.Row)) {
+func useJiraRow(t *testing.T) {
 	t.Helper()
 	row := backendrows.Row{
 		Name:          "jira",
@@ -28,7 +28,6 @@ func useJiraRow(t *testing.T, adjust func(*backendrows.Row)) {
 		Routes:        []connectorhost.Route{{Method: "GET", Host: "jira.example", Path: "/rest"}},
 		CredentialEnv: "JIRA_TOKEN",
 	}
-	adjust(&row)
 	doc, err := json.Marshal([]backendrows.Row{row})
 	if err != nil {
 		t.Fatal(err)
@@ -49,20 +48,12 @@ func newJiraTracker(t *testing.T) (forge.IssueTracker, error) {
 	})
 }
 
-// Under primary the Connector is the only tracker: one that cannot load fails
-// the constructor with its error rather than dropping to the native adapter.
-func TestPrimaryRowFailsWithTheLoadErrorAndNeverFallsBackToNative(t *testing.T) {
-	useJiraRow(t, func(r *backendrows.Row) { r.Primary = true })
+// The Connector is the only tracker: one that cannot load fails the
+// constructor with its error rather than degrading to anything else.
+func TestConnectorTrackerFailsWithTheLoadError(t *testing.T) {
+	useJiraRow(t)
 	if _, err := newJiraTracker(t); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("err = %v, want the module read error", err)
-	}
-}
-
-// The Connector is jira's only tracker whether or not the row is primary.
-func TestPlainRowBuildsTheConnectorTracker(t *testing.T) {
-	useJiraRow(t, func(*backendrows.Row) {})
-	if _, err := newJiraTracker(t); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("err = %v, want the module read error: a non-primary row loads its Connector too", err)
 	}
 }
 
@@ -72,15 +63,15 @@ func TestNoJiraRowIsAnActionableErrorNotANativeFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := newJiraTracker(t)
-	if err == nil || !strings.Contains(err.Error(), "flake module") || !strings.Contains(err.Error(), "https") {
-		t.Fatalf("err = %v, want one naming the Connector's flake module and an https JIRA_BASE_URL", err)
+	if err == nil || !strings.Contains(err.Error(), "flake module") || !strings.Contains(err.Error(), "JIRA_BASE_URL") {
+		t.Fatalf("err = %v, want one naming the Connector's flake module and a JIRA_BASE_URL", err)
 	}
 }
 
 // A route the op needs, left out of the row's table, is refused by the host
-// before any request leaves, and the failure is the tracker's: there is no
-// native adapter to answer instead.
-func TestPrimaryRow_RefusedRouteFailsWithoutReachingTheBackend(t *testing.T) {
+// before any request leaves, and the failure is the tracker's: nothing else
+// answers instead.
+func TestConnectorTracker_RefusedRouteFailsWithoutReachingTheBackend(t *testing.T) {
 	for _, fl := range connectorFlavours {
 		t.Run(fl.name, func(t *testing.T) {
 			h := newProductionHarness(t, fl.cloud, dispatchkind.TrackerWork, "", jira.LifecycleHybrid, "Task", func(r *backendrows.Row) {
@@ -103,10 +94,9 @@ func TestPrimaryRow_RefusedRouteFailsWithoutReachingTheBackend(t *testing.T) {
 	}
 }
 
-// #6378: a status-mode refusal reads the same from the Connector-backed tracker
-// as from the native one, so the comment settle and reconcile post on the card
-// (forge.CommentRefusal) is the same sentence.
-func TestPrimaryRow_StatusOnlyRefusalMatchesNative(t *testing.T) {
+// #6378: a status-mode refusal is one sentence, so the comment settle and
+// reconcile post on the card (forge.CommentRefusal) match it.
+func TestConnectorTracker_StatusOnlyRefusalSentence(t *testing.T) {
 	const mapping = `{"dispatchable":"To Do","inProgress":"In Progress","complete":"Done"}`
 	for _, fl := range connectorFlavours {
 		t.Run(fl.name, func(t *testing.T) {
@@ -148,7 +138,7 @@ func TestPrimaryRow_StatusOnlyRefusalMatchesNative(t *testing.T) {
 // from (recover_queue_test.go's sharedFailedStatus fake simulates this).
 // It pins the listing property that fake assumes, standing in for running
 // recover's skip itself.
-func TestPrimaryRow_SharedFailedStatusListsTheAmbiguousCardUnderFailed(t *testing.T) {
+func TestConnectorTracker_SharedFailedStatusListsTheAmbiguousCardUnderFailed(t *testing.T) {
 	const mapping = `{"failed":"Needs Info","ambiguous":"Needs Info"}`
 	for _, fl := range connectorFlavours {
 		t.Run(fl.name, func(t *testing.T) {
@@ -182,11 +172,11 @@ func TestPrimaryRow_SharedFailedStatusListsTheAmbiguousCardUnderFailed(t *testin
 }
 
 // A claim whose target status the workflow does not offer is refused with the
-// native adapter's sentence (#6378), and the claimer's refusal comment
+// pinned sentence (#6378), and the claimer's refusal comment
 // (forge.CommentRefusal) lands on the card, which a refused status-mode claim
 // leaves no label on. The jira fileset holds no waves, whose once-per-text
 // dedup is tracker-agnostic and tested there.
-func TestPrimaryRow_RefusedStatusClaimMatchesNativeAndIsCommented(t *testing.T) {
+func TestConnectorTracker_RefusedStatusClaimIsCommented(t *testing.T) {
 	const mapping = `{"dispatchable":"To Do","inProgress":"In Progress","complete":"Done"}`
 	const text = `issue PROJ-1 could not move from status "To Do" to "In Progress": the workflow offers transitions to "To Do"`
 	for _, b := range connectorBuilds {
@@ -224,10 +214,10 @@ func TestPrimaryRow_RefusedStatusClaimMatchesNativeAndIsCommented(t *testing.T) 
 	}
 }
 
-// Jira's native links are authoritative, so under primary a body that merely
-// says "Blocked by #12" adds no dependency and a failed native read is the
-// answer, as BodyGrammarNativeDepsOnly makes it for the native adapter.
-func TestPrimaryRow_DependenciesAreNativeOnly(t *testing.T) {
+// Jira's native links are authoritative, so a body that merely says
+// "Blocked by #12" adds no dependency and a failed native read is the answer,
+// as BodyGrammarNativeDepsOnly makes it.
+func TestConnectorTracker_DependenciesAreNativeOnly(t *testing.T) {
 	for _, fl := range connectorFlavours {
 		t.Run(fl.name, func(t *testing.T) {
 			h := newProductionHarness(t, fl.cloud, dispatchkind.TrackerWork, "", jira.LifecycleHybrid, "Task")
@@ -247,10 +237,10 @@ func TestPrimaryRow_DependenciesAreNativeOnly(t *testing.T) {
 	}
 }
 
-// Under primary, the finding dedup scan must see issues closed as not planned:
+// The finding dedup scan must see issues closed as not planned:
 // without the Connector's labeled reader it falls back to an open-only listing
 // and the host refiles a finding a human declined.
-func TestPrimaryRow_LabeledListerReadsClosedNotPlannedFindings(t *testing.T) {
+func TestConnectorTracker_LabeledListerReadsClosedNotPlannedFindings(t *testing.T) {
 	const finding = "agent-review-finding"
 	for _, fl := range connectorFlavours {
 		t.Run(fl.name, func(t *testing.T) {
@@ -261,7 +251,7 @@ func TestPrimaryRow_LabeledListerReadsClosedNotPlannedFindings(t *testing.T) {
 
 			lister, ok := forge.As[forge.LabeledBacklogLister](h.tr)
 			if !ok {
-				t.Fatal("primary tracker does not expose forge.LabeledBacklogLister")
+				t.Fatal("tracker does not expose forge.LabeledBacklogLister")
 			}
 			closed, err := lister.ListIssuesWithLabels(forge.IssueClosed, []string{finding})
 			if err != nil || len(closed) != 1 {
@@ -293,10 +283,10 @@ func primaryLog(t *testing.T) string {
 	return string(raw)
 }
 
-// A Connector that fails to load is recorded, so a primary run's failure is
+// A Connector that fails to load is recorded, so a run's failure is
 // not left to a caller that may swallow it (shell completion does).
-func TestPrimaryRow_LoadFailureIsRecorded(t *testing.T) {
-	useJiraRow(t, func(r *backendrows.Row) { r.Primary = true })
+func TestConnectorTracker_LoadFailureIsRecorded(t *testing.T) {
+	useJiraRow(t)
 	if _, err := newJiraTracker(t); err == nil {
 		t.Fatal("want the load error")
 	}

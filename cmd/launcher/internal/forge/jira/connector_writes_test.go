@@ -18,9 +18,9 @@ import (
 
 // connectorWriteHarness is the Connector harness for the write contract. It
 // forwards only what the contract drives and leaves out forgetest.StateSeeder,
-// so the contract moves state through TransitionState; the native adapter
-// behind connectortracker.New still fails every call, so a write that reaches
-// it fails the run.
+// so the contract moves state through TransitionState; the native writes
+// behind connectortracker.New still fail every call, so a write that reaches
+// them fails the run.
 type connectorWriteHarness struct{ h *connectorHarness }
 
 func (w connectorWriteHarness) Tracker() forge.IssueTracker { return w.h.tr }
@@ -369,8 +369,8 @@ func transitionCases() []transitionCase {
 	}
 }
 
-// The native adapter's status-only and transition cases, run against the
-// Connector: every decision is core's, so each outcome must match.
+// The status-only and transition cases, run against the Connector: every
+// decision is core's, so each outcome must match.
 func TestConnector_TransitionCases(t *testing.T) {
 	for _, fl := range connectorFlavours {
 		for _, tc := range transitionCases() {
@@ -439,10 +439,9 @@ func TestConnector_TransitionCases(t *testing.T) {
 	}
 }
 
-// A transition whose mapping is unavailable gives core the same outcome through
-// the Connector as through the native adapter: hybrid falls back to the label,
-// status refuses with what the workflow offers.
-func TestConnector_UnavailableTransitionMatchesNative(t *testing.T) {
+// A transition whose mapping is unavailable on the issue's workflow: hybrid
+// falls back to the label, status refuses with what the workflow offers.
+func TestConnector_UnavailableTransition(t *testing.T) {
 	const mapping = `{"dispatchable":"To Do","complete":"Done"}`
 	for _, fl := range connectorFlavours {
 		for _, lifecycle := range []string{jira.LifecycleHybrid, jira.LifecycleStatus} {
@@ -453,70 +452,33 @@ func TestConnector_UnavailableTransitionMatchesNative(t *testing.T) {
 				}
 				h := newConnectorHarnessWith(t, fl.cloud, lc)
 				h.workflowStatuses = []string{"Blocked", "To Do"}
-				targets, err := jira.ParseStatusMapping(mapping)
-				if err != nil {
-					t.Fatal(err)
-				}
-				email := ""
-				if fl.cloud {
-					email = connectorEmail
-				}
-				native := jira.NewJiraClient(jira.JiraConfig{
-					BaseURL:       h.srv.URL,
-					ProjectKey:    connectorProject,
-					Email:         email,
-					Token:         connectorToken,
-					Labels:        testLabels,
-					StatusMapping: targets,
-					StatusOnly:    lifecycle == jira.LifecycleStatus,
-					HTTPClient:    h.srv.Client(),
-				})
 
-				// The same issue per side, reseeded identically between them.
-				sides := []struct {
-					name string
-					key  string
-					tr   forge.IssueTracker
-				}{{"native", "PROJ-1", native}, {"connector", "PROJ-1", h.tr}}
-				outcomes := map[string]struct {
-					err    error
-					labels []string
-				}{}
-				for _, s := range sides {
-					h.SeedIssue(forge.Issue{Number: s.key, Title: "t", Labels: []string{testLabels.InProgress}})
-					h.mutate(s.key, func(r *jiraIssueRecord) { r.status = "In Review" })
-					err := s.tr.TransitionState(s.key, forge.InProgress, forge.Complete)
-					outcomes[s.name] = struct {
-						err    error
-						labels []string
-					}{err, sorted(h.issueRecord(s.key).labels)}
-					if rec := h.issueRecord(s.key); rec.status != "In Review" {
-						t.Errorf("%s moved the issue to %q, want it left in In Review", s.name, rec.status)
-					}
+				h.SeedIssue(forge.Issue{Number: "PROJ-1", Title: "t", Labels: []string{testLabels.InProgress}})
+				h.mutate("PROJ-1", func(r *jiraIssueRecord) { r.status = "In Review" })
+				err = h.tr.TransitionState("PROJ-1", forge.InProgress, forge.Complete)
+				rec := h.issueRecord("PROJ-1")
+				if rec.status != "In Review" {
+					t.Errorf("moved the issue to %q, want it left in In Review", rec.status)
 				}
 
-				n, c := outcomes["native"], outcomes["connector"]
-				if !slices.Equal(n.labels, c.labels) {
-					t.Errorf("labels: native %v, connector %v", n.labels, c.labels)
-				}
 				if lifecycle == jira.LifecycleHybrid {
-					if n.err != nil || c.err != nil {
-						t.Fatalf("hybrid errors: native %v, connector %v, want none", n.err, c.err)
+					if err != nil {
+						t.Fatalf("hybrid err = %v, want none", err)
 					}
-					if want := []string{testLabels.Complete}; !slices.Equal(c.labels, want) {
-						t.Errorf("labels = %v, want the fallback %v", c.labels, want)
+					if want := []string{testLabels.Complete}; !slices.Equal(sorted(rec.labels), want) {
+						t.Errorf("labels = %v, want the fallback %v", rec.labels, want)
 					}
 					return
 				}
-				var nRef, cRef *forge.TransitionRefusedError
-				if !errors.As(n.err, &nRef) || !errors.As(c.err, &cRef) {
-					t.Fatalf("status errors: native %v, connector %v, want both a TransitionRefusedError", n.err, c.err)
+				var ref *forge.TransitionRefusedError
+				if !errors.As(err, &ref) {
+					t.Fatalf("status err = %v, want a TransitionRefusedError", err)
 				}
-				if !reflect.DeepEqual(nRef, cRef) || cRef.From != "In Review" || cRef.To != "Done" || !slices.Equal(cRef.Offered, []string{"Blocked", "To Do"}) {
-					t.Errorf("refusals differ or are incomplete: native %+v, connector %+v", nRef, cRef)
+				if ref.From != "In Review" || ref.To != "Done" || !slices.Equal(ref.Offered, []string{"Blocked", "To Do"}) {
+					t.Errorf("refusal = %+v, want In Review -> Done offering [Blocked To Do]", ref)
 				}
-				if !slices.Equal(c.labels, []string{testLabels.InProgress}) {
-					t.Errorf("labels = %v, want the seeded label untouched", c.labels)
+				if !slices.Equal(rec.labels, []string{testLabels.InProgress}) {
+					t.Errorf("labels = %v, want the seeded label untouched", rec.labels)
 				}
 			})
 		}

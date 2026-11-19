@@ -32,19 +32,6 @@ func exerciseDoctorReads(t *testing.T, tr forge.IssueTracker) {
 	}
 }
 
-// nativeJira is the native adapter over the Connector harness's backend, which
-// the adapter reaches through the backend's TLS client.
-func nativeJira(h *connectorHarness, cfg jira.JiraConfig) forge.IssueTracker {
-	cfg.BaseURL = h.srv.URL
-	cfg.ProjectKey = connectorProject
-	cfg.Token = connectorToken
-	cfg.HTTPClient = h.srv.Client()
-	if h.cloud {
-		cfg.Email = connectorEmail
-	}
-	return jira.NewJiraClient(cfg)
-}
-
 func (h *connectorHarness) setMyself(status int) {
 	h.mutex(func() { h.myselfStatus = status })
 }
@@ -55,28 +42,33 @@ func (h *connectorHarness) mutex(f func()) {
 	f()
 }
 
-func TestConnector_ProbeMatchesNative(t *testing.T) {
+// Probe maps the site's answer to /myself: a good credential names the
+// project, 401 and 403 are an auth failure, and any other failure reads as a
+// project the credential cannot reach.
+func TestConnector_Probe(t *testing.T) {
 	for _, fl := range connectorFlavours {
 		t.Run(fl.name, func(t *testing.T) {
 			h := newConnectorHarness(t, fl.cloud)
-			native := nativeJira(h, jira.JiraConfig{})
-			for _, status := range []int{0, 401, 403, 404, 500} {
-				h.setMyself(status)
-				wantSlug, wantErr := native.Probe()
-				gotSlug, gotErr := h.tr.Probe()
-				if gotSlug != wantSlug {
-					t.Errorf("status %d: Probe slug = %q, native %q", status, gotSlug, wantSlug)
+			for _, tc := range []struct {
+				status       int
+				auth, absent bool
+				fails        bool
+			}{
+				{status: 0},
+				{status: 401, auth: true, fails: true},
+				{status: 403, auth: true, fails: true},
+				{status: 404, absent: true, fails: true},
+				{status: 500, absent: true, fails: true},
+			} {
+				h.setMyself(tc.status)
+				slug, err := h.tr.Probe()
+				if (err != nil) != tc.fails ||
+					errors.Is(err, forge.ErrAuthFailure) != tc.auth ||
+					errors.Is(err, forge.ErrRepoNotFound) != tc.absent {
+					t.Errorf("status %d: Probe err = %v, want fails=%v auth=%v absent=%v", tc.status, err, tc.fails, tc.auth, tc.absent)
 				}
-				if (gotErr == nil) != (wantErr == nil) ||
-					errors.Is(gotErr, forge.ErrAuthFailure) != errors.Is(wantErr, forge.ErrAuthFailure) ||
-					errors.Is(gotErr, forge.ErrRepoNotFound) != errors.Is(wantErr, forge.ErrRepoNotFound) {
-					t.Errorf("status %d: Probe err = %v, native %v", status, gotErr, wantErr)
-				}
-				if status == 0 && (gotErr != nil || gotSlug != connectorProject) {
-					t.Errorf("good credential: Probe = (%q, %v), want (%q, nil)", gotSlug, gotErr, connectorProject)
-				}
-				if status == 401 && !errors.Is(gotErr, forge.ErrAuthFailure) {
-					t.Errorf("auth failure: Probe err = %v, want forge.ErrAuthFailure", gotErr)
+				if tc.status == 0 && slug != connectorProject {
+					t.Errorf("good credential: Probe slug = %q, want %q", slug, connectorProject)
 				}
 			}
 		})
@@ -89,8 +81,9 @@ type doctorFixture struct {
 	issueType    string
 	workflow     []string
 	fields       []metaField
-	failStatuses bool // statuses endpoint answers 403
-	wantFail     bool // the doctor reports a finding on the native side
+	failStatuses bool   // statuses endpoint answers 403
+	wantFail     bool   // the doctor reports a finding
+	wantFinding  string // substring of the finding wantFail expects
 }
 
 var doctorFixtures = []doctorFixture{
@@ -102,18 +95,20 @@ var doctorFixtures = []doctorFixture{
 		fields:    []metaField{{FieldID: "summary", Name: "Summary", Required: true}},
 	},
 	{
-		name:      "status missing",
-		mapping:   `{"dispatchable":"To Do","inProgress":"Wip","complete":"Dnoe","failed":"Blocked","ambiguous":"blocked"}`,
-		issueType: "Task",
-		workflow:  []string{"To Do", "Done"},
-		wantFail:  true,
+		name:        "status missing",
+		mapping:     `{"dispatchable":"To Do","inProgress":"Wip","complete":"Dnoe","failed":"Blocked","ambiguous":"blocked"}`,
+		issueType:   "Task",
+		workflow:    []string{"To Do", "Done"},
+		wantFail:    true,
+		wantFinding: "does not have: \"Blocked\", \"Dnoe\", \"Wip\"",
 	},
 	{
-		name:      "issue type not offered",
-		mapping:   `{"dispatchable":"To Do"}`,
-		issueType: "Story",
-		workflow:  []string{"To Do"},
-		wantFail:  true,
+		name:        "issue type not offered",
+		mapping:     `{"dispatchable":"To Do"}`,
+		issueType:   "Story",
+		workflow:    []string{"To Do"},
+		wantFail:    true,
+		wantFinding: "is not an issue type of project PROJ (offered: Task, Bug",
 	},
 	{
 		name:      "required field unfilled",
@@ -124,7 +119,8 @@ var doctorFixtures = []doctorFixture{
 			{FieldID: "priority", Name: "Priority", Required: true, HasDefaultValue: true},
 			{FieldID: "customfield_10010", Name: "Team", Required: true},
 		},
-		wantFail: true,
+		wantFail:    true,
+		wantFinding: "\"Team\" (customfield_10010)",
 	},
 	{
 		name:         "statuses unreadable",
@@ -132,13 +128,14 @@ var doctorFixtures = []doctorFixture{
 		issueType:    "Task",
 		failStatuses: true,
 		wantFail:     true,
+		wantFinding:  "status-mapping: degraded",
 	},
 }
 
 // A check row is a pure function of what the tracker's check reads return, so
-// the Connector reports the same findings as the native adapter when the two
-// rows, built from each tracker's resolved capabilities, fail alike.
-func TestConnector_DoctorChecksMatchNative(t *testing.T) {
+// each fixture's findings are the rows' verdicts over the scripted site: the
+// passing fixture reports every row ok, each other one at least one finding.
+func TestConnector_DoctorChecks(t *testing.T) {
 	for _, fl := range connectorFlavours {
 		for _, fx := range doctorFixtures {
 			t.Run(fl.name+"/"+fx.name, func(t *testing.T) {
@@ -158,19 +155,14 @@ func TestConnector_DoctorChecksMatchNative(t *testing.T) {
 					h.metaFields = fx.fields
 					h.statusesFail = fx.failStatuses
 				})
-				native := nativeJira(h, jira.JiraConfig{StatusMapping: mapping, IssueType: fx.issueType, Labels: testLabels})
 
-				want := doctorFindings(native)
 				got := doctorFindings(h.tr)
-				if !slices.Equal(got, want) {
-					t.Errorf("Connector findings differ from native\n got: %q\nwant: %q", got, want)
+				failing := slices.ContainsFunc(got, func(s string) bool { return !strings.HasSuffix(s, ": ok") })
+				if fx.wantFinding != "" && !slices.ContainsFunc(got, func(s string) bool { return strings.Contains(s, fx.wantFinding) }) {
+					t.Errorf("findings %q: none contains %q", got, fx.wantFinding)
 				}
-				failing := slices.ContainsFunc(want, func(s string) bool { return !strings.HasSuffix(s, ": ok") })
-				if !failing && fx.wantFail {
-					t.Errorf("fixture %q reports nothing natively: it does not fail", fx.name)
-				}
-				if failing && !fx.wantFail {
-					t.Errorf("fixture %q should pass natively, got %q", fx.name, want)
+				if failing != fx.wantFail {
+					t.Errorf("findings %q: failing = %v, want %v", got, failing, fx.wantFail)
 				}
 			})
 		}

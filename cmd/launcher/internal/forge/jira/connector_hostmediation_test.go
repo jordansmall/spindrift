@@ -3,7 +3,6 @@ package jira_test
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -17,9 +16,8 @@ import (
 )
 
 // connectorHostHarness drives the host-posted comment and issue-filer contracts
-// through the compiled Connector. The native jiraHarness methods read back
-// through the native client, which is unset here, so each read goes through the
-// Connector's tracker instead: that is what proves the stored form restores to
+// through the compiled Connector. Each read-back goes through the
+// Connector's tracker, which proves the stored form restores to
 // what the caller posted.
 type connectorHostHarness struct{ *connectorHarness }
 
@@ -30,6 +28,21 @@ var (
 
 func (h connectorHostHarness) Tracker() forge.IssueTracker           { return h.tr }
 func (h connectorHostHarness) IssueFilerTracker() forge.IssueTracker { return h.tr }
+
+func (h connectorHostHarness) SeedCommentTarget(failing bool) (num string) {
+	if failing {
+		return "PROJ-999" // never seeded: the fake 404s the comment POST
+	}
+	h.SeedIssue(forge.Issue{Number: "PROJ-1", Title: "comment target"})
+	return "PROJ-1"
+}
+
+func (h connectorHostHarness) SeedIssueFilerTarget(failing bool) (title, body string, labels []string) {
+	if failing {
+		return failingIssueTitle, "body", nil
+	}
+	return "widget: filed issue", "Filed by the host-mediation contract.", []string{"bug"}
+}
 
 func (h connectorHostHarness) CommentPosted(num, body string) bool {
 	cl, ok := forge.As[forge.CommentLister](h.tr)
@@ -70,7 +83,7 @@ func hostLifecycle() connectortracker.Lifecycle {
 }
 
 // The host-mediation and issue-filer contracts hold over both builds of the
-// tracker; the production one has no native adapter to fall back to.
+// tracker; the production one has no fallback.
 func TestConnector_HostPostedCommentContract(t *testing.T) {
 	if os.Getenv(connectorWasmEnv) == "" {
 		t.Skipf("%s unset: no compiled jira Connector to test", connectorWasmEnv)
@@ -224,67 +237,39 @@ func TestConnector_FindingDedupFindsAConnectorFiledIssue(t *testing.T) {
 	}
 }
 
-// The wiki-markup goldens come out of the Connector exactly as out of the
-// native adapter. The marker line of research-verdict and filed-findings is
-// lifted into a property, so the stored text is the golden minus that first
-// line.
-func TestConnector_WikiMarkupGoldens(t *testing.T) {
+// A body with no marker stores no property.
+func TestConnector_PostIssueWithoutMarkerStoresNoProperty(t *testing.T) {
 	if os.Getenv(connectorWasmEnv) == "" {
 		t.Skipf("%s unset: no compiled jira Connector to test", connectorWasmEnv)
 	}
-	inputs, err := filepath.Glob(filepath.Join("testdata", "wikimarkup", "*.md"))
-	if err != nil || len(inputs) == 0 {
-		t.Fatalf("no wikimarkup inputs found: %v", err)
+	for _, fl := range connectorFlavours {
+		t.Run(fl.name, func(t *testing.T) {
+			h := newConnectorHarnessWith(t, fl.cloud, hostLifecycle())
+			if _, err := h.tr.(forge.HostPostedIssueFiler).PostIssue("plain", "just text", nil); err != nil {
+				t.Fatalf("PostIssue: %v", err)
+			}
+			if props := h.issueRecord("PROJ-1").props; len(props) != 0 {
+				t.Errorf("props = %v, want none for a marker-less body", props)
+			}
+		})
+	}
+}
+
+func TestConnector_PostIssueRejectedCreateIsAnError(t *testing.T) {
+	if os.Getenv(connectorWasmEnv) == "" {
+		t.Skipf("%s unset: no compiled jira Connector to test", connectorWasmEnv)
 	}
 	for _, fl := range connectorFlavours {
-		for _, in := range inputs {
-			name := strings.TrimSuffix(filepath.Base(in), ".md")
-			t.Run(fl.name+"/"+name, func(t *testing.T) {
-				md, err := os.ReadFile(in)
-				if err != nil {
-					t.Fatal(err)
-				}
-				wiki, err := os.ReadFile(strings.TrimSuffix(in, ".md") + ".wiki")
-				if err != nil {
-					t.Fatal(err)
-				}
-				want := string(wiki)
-				if name == "research-verdict" || name == "filed-findings" {
-					_, want, _ = strings.Cut(want, "\n")
-				}
-
-				h := newConnectorHarnessWith(t, fl.cloud, hostLifecycle())
-				nat := newJiraHarness(t)
-				if fl.cloud {
-					nat = newJiraCloudHarness(t)
-				}
-				var got, native string
-				if name == "filed-findings" {
-					filer := func(tr forge.IssueTracker) {
-						if _, err := tr.(forge.HostPostedIssueFiler).PostIssue("filed", string(md), nil); err != nil {
-							t.Fatalf("PostIssue: %v", err)
-						}
-					}
-					filer(h.tr)
-					filer(nat.Tracker())
-					got, native = h.issueRecord("PROJ-1").body, nat.issues["PROJ-1"].body
-				} else {
-					h.SeedIssue(forge.Issue{Number: "PROJ-1", Title: "t"})
-					nat.SeedIssue(forge.Issue{Number: "PROJ-1", Title: "t"})
-					for _, tr := range []forge.IssueTracker{h.tr, nat.Tracker()} {
-						if err := tr.(forge.HostPostedCommenter).Comment("PROJ-1", string(md)); err != nil {
-							t.Fatalf("Comment: %v", err)
-						}
-					}
-					got, native = h.storedComments("PROJ-1")[0].Body, nat.issues["PROJ-1"].comments[0].Body
-				}
-				if got != want {
-					t.Errorf("Connector stored\n%q\nwant the golden\n%q", got, want)
-				}
-				if got != native {
-					t.Errorf("Connector stored\n%q\nnative stored\n%q", got, native)
-				}
-			})
-		}
+		t.Run(fl.name, func(t *testing.T) {
+			h := newConnectorHarnessWith(t, fl.cloud, hostLifecycle())
+			if _, err := h.tr.(forge.HostPostedIssueFiler).PostIssue(failingIssueTitle, "body", nil); err == nil {
+				t.Fatal("PostIssue of a create Jira rejects with 400: got nil error")
+			}
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			if len(h.issues) != 0 {
+				t.Errorf("a rejected create left %d issues", len(h.issues))
+			}
+		})
 	}
 }

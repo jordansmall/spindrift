@@ -38,12 +38,13 @@ const (
 	jiraTimeLayout     = "2006-01-02T15:04:05.000-0700"
 )
 
-// failingWrites is the native adapter's role in a read-only contract run: the
-// reads must never reach it.
+// failingWrites fills connectortracker's native-writes slot with an
+// implementation that fails every call, so a read-only contract run errors if
+// a read reaches a write.
 type failingWrites struct{ t *testing.T }
 
 func (w failingWrites) fail(name string) error {
-	w.t.Errorf("read contract called the native adapter's %s", name)
+	w.t.Errorf("read contract reached the native writes' %s", name)
 	return nil
 }
 
@@ -169,9 +170,8 @@ func newConnectorBackend(t *testing.T, cloud, basicOnly bool) (*connectorHarness
 }
 
 // connectorBuild is how a harness builds its tracker: Direct hands the compiled
-// Connector to connectortracker.New with a native adapter that fails every
-// call; Production is jira.Strategy.NewIssueTracker under a primary row, which
-// has no native adapter to fall back to.
+// Connector to connectortracker.New with native writes that fail every call;
+// Production is jira.Strategy.NewIssueTracker, which has no fallback.
 type connectorBuild struct {
 	name       string
 	production bool
@@ -194,7 +194,7 @@ func (b connectorBuild) harness(t *testing.T, cloud bool, tr dispatchkind.Tracke
 }
 
 // newProductionHarness drives the tracker the production constructor builds
-// from a primary jira row, as the launcher would: the row, the knobs and the
+// from a jira row, as the launcher would: the row, the knobs and the
 // credential env are the operator's, only the site is the scripted backend.
 func newProductionHarness(t *testing.T, cloud bool, tr dispatchkind.Tracker, mapping, lifecycle, issueType string, adjust ...func(*backendrows.Row)) *connectorHarness {
 	t.Helper()
@@ -211,7 +211,7 @@ func newProductionHarness(t *testing.T, cloud bool, tr dispatchkind.Tracker, map
 	r := backendrows.Row{
 		Name: "jira", Module: path, Routes: table,
 		CredentialEnv: "SPINDRIFT_JIRA_CONNECTOR_TOKEN", CredentialScheme: backendrows.SchemeBasic,
-		IdentityEnv: "SPINDRIFT_JIRA_CONNECTOR_EMAIL", BaseEnv: jira.JiraBaseURLEnv, Primary: true,
+		IdentityEnv: "SPINDRIFT_JIRA_CONNECTOR_EMAIL", BaseEnv: jira.JiraBaseURLEnv,
 	}
 	for _, f := range adjust {
 		f(&r)
@@ -457,24 +457,13 @@ func TestConnector_KeyRoundTripsAndOutOfGrammarIsRefused(t *testing.T) {
 	}
 }
 
-// The Connector returns the dedup and research markers as fields; core must
-// restore them to exactly the text the native adapter reads back.
-func TestConnector_MarkersMatchNative(t *testing.T) {
+// The Connector returns the dedup and research markers as fields; core
+// restores them to the text a reader greps for: the dedup marker closes the
+// issue body and the research marker opens the marked comment only.
+func TestConnector_MarkersRestoredOnRead(t *testing.T) {
 	for _, fl := range connectorFlavours {
 		t.Run(fl.name, func(t *testing.T) {
 			h := newConnectorHarness(t, fl.cloud)
-			email := ""
-			if fl.cloud {
-				email = connectorEmail
-			}
-			native := jira.NewJiraClient(jira.JiraConfig{
-				BaseURL:    h.srv.URL,
-				ProjectKey: connectorProject,
-				Email:      email,
-				Token:      connectorToken,
-				Labels:     testLabels,
-				HTTPClient: h.srv.Client(),
-			})
 
 			marker := dedupmarker.Build([]string{"alpha", "beta"})
 			h.SeedIssue(forge.Issue{Number: "PROJ-7", Title: "finding", Body: "the finding text"})
@@ -490,47 +479,28 @@ func TestConnector_MarkersMatchNative(t *testing.T) {
 				r.comments[0].Properties = []jiraWireProperty{{Key: "spindrift-research", Value: true}}
 			})
 
-			nIss, err := native.Issue("PROJ-7")
+			iss, err := h.tr.Issue("PROJ-7")
 			if err != nil {
-				t.Fatalf("native Issue: %v", err)
+				t.Fatalf("Issue: %v", err)
 			}
-			cIss, err := h.tr.Issue("PROJ-7")
-			if err != nil {
-				t.Fatalf("Connector Issue: %v", err)
-			}
-			if !strings.Contains(nIss.Body, marker) {
-				t.Fatalf("native body lacks the dedup marker %q:\n%s", marker, nIss.Body)
-			}
-			if cIss.Body != nIss.Body {
-				t.Errorf("Connector body differs from native\n got: %q\nwant: %q", cIss.Body, nIss.Body)
+			if !strings.HasPrefix(iss.Body, "the finding text") || !strings.HasSuffix(iss.Body, marker) {
+				t.Errorf("body = %q, want the text closed by the dedup marker %q", iss.Body, marker)
 			}
 
-			nCom, err := native.(forge.CommentLister).Comments("PROJ-7")
-			if err != nil {
-				t.Fatalf("native Comments: %v", err)
-			}
 			cl, ok := forge.As[forge.CommentLister](h.tr)
 			if !ok {
 				t.Fatal("Connector tracker does not serve comments")
 			}
-			cCom, err := cl.Comments("PROJ-7")
+			got, err := cl.Comments("PROJ-7")
 			if err != nil {
-				t.Fatalf("Connector Comments: %v", err)
+				t.Fatalf("Comments: %v", err)
 			}
-			if len(nCom) != 2 || !strings.HasPrefix(nCom[0].Body, forge.ResearchMarker+"\n") || strings.Contains(nCom[1].Body, forge.ResearchMarker) {
-				t.Fatalf("native comments do not carry the research marker on the marked comment only: %+v", nCom)
+			want := []forge.Comment{
+				{Author: "alice", CreatedAt: "2026-01-02T03:04:05Z", Body: forge.ResearchMarker + "\n## Verdict\n\nstatus=recommend"},
+				{Author: "bob", CreatedAt: "2026-01-03T04:05:06Z", Body: "plain reply"},
 			}
-			// The native adapter passes Jira's created time through; the Connector
-			// re-spells the same instant as RFC3339.
-			for i, c := range nCom {
-				at, err := time.Parse(jiraTimeLayout, c.CreatedAt)
-				if err != nil {
-					t.Fatalf("native comment created %q: %v", c.CreatedAt, err)
-				}
-				nCom[i].CreatedAt = at.Format(time.RFC3339)
-			}
-			if !slices.Equal(cCom, nCom) {
-				t.Errorf("Connector comments differ from native\n got: %+v\nwant: %+v", cCom, nCom)
+			if !slices.Equal(got, want) {
+				t.Errorf("comments differ\n got: %+v\nwant: %+v", got, want)
 			}
 		})
 	}
@@ -538,7 +508,7 @@ func TestConnector_MarkersMatchNative(t *testing.T) {
 
 // IsPriorityCapable: core resolves the agent-priority-* label family for every
 // Connector-backed tracker, so jira issues read through the Connector carry a
-// tier where the native adapter leaves them PriorityNormal.
+// tier rather than defaulting to PriorityNormal.
 func (h *connectorHarness) IsPriorityCapable() {}
 
 // Jira reports a comment's created time in its own layout; the Connector

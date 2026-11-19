@@ -376,8 +376,8 @@ and in the in-box `box` program; the only bash left is the generated shim that
   under `cmd/launcher/internal/ecosystem/<ecosystem>/testdata/corpus/` and
   `cmd/launcher/internal/ecosystemtest/testdata/corpus/`, and the Jira
   wiki-markup golden test (`TestToWikiMarkup_Goldens` in
-  `cmd/launcher/internal/forge/jira`) to overwrite the `.wiki` goldens under
-  `cmd/launcher/internal/forge/jira/testdata/wikimarkup/` —
+  `connectors/jira`) to overwrite the `.wiki` goldens under
+  `connectors/jira/testdata/wikimarkup/` —
   the update-mode counterpart to the `launcher-go-seam-test` check). Add a
   check when you add a guarantee.
 - **`templates/default/`** — the consumer starter (`nix flake init -t`).

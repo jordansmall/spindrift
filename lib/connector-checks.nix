@@ -27,7 +27,11 @@ let
       # go.mod replaces the SDK with ../../sdk, so both trees keep that layout.
       connectorSrc = fs.toSource {
         root = src;
-        fileset = fs.fileFilter (f: f.hasExt "go" || f.name == "go.mod") src;
+        fileset = fs.unions [
+          (fs.fileFilter (f: f.hasExt "go" || f.name == "go.mod") src)
+          # A Connector's goldens, read by its own tests.
+          (fs.maybeMissing (src + "/testdata"))
+        ];
       };
       mk =
         suffix: script:
