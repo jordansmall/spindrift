@@ -655,7 +655,11 @@ let
       # derivation. cgo off, like the shipped binary.
       CGO_ENABLED=0 go build -o "$TMPDIR/connector-host" ./connector-host
       export SPINDRIFT_CONNECTOR_HOST="$TMPDIR/connector-host"
-      go test ${corePkgs}
+      # -timeout bounds each package binary, not the whole run.
+      # internal/connectorhost runs up to 569s green on aarch64-darwin and past
+      # Go's 10m default on slow runners; 30m clears that and still backstops a
+      # real hang.
+      go test -timeout 30m ${corePkgs}
       touch $out
     '';
   # Copies the core source and its vendor tree; ends with src as the working
