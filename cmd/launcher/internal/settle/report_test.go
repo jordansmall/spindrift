@@ -134,7 +134,7 @@ func TestRecoverOpenPR_CompleteThenDemoted_EmitsSingleFailedSettledRecord(t *tes
 	// #1652). openAfterMerge reports the PR still OPEN after a successful
 	// Merge, so verifyMerged's successful reads genuinely contradict it.
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
-	s := newTestSettle(c, fc, openAfterMerge{fc})
+	s := newTestSettle(c, fc, openAfterMerge{roFake{fc}})
 
 	recoverOpenPR(t, s, &dispatch.Fake{RecordIDResult: "work:9@t"}, "9", testPR)
 
@@ -193,7 +193,7 @@ func TestResearchSettle_Fail_CarriesNoteIntoSettledRecord(t *testing.T) {
 	fc := newResearchFake("42")
 	result := dispatch.Result{Resolved: outcome.Resolved{Found: false}}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false, testResearchFindingLabel)
+	s := NewResearchSettle(fc, researchVerdictLabels, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	recs := readRecords()
@@ -219,8 +219,8 @@ func TestResearchSettle_Recommend_EmitsSettledRecordWithVerdictNote(t *testing.T
 		},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false, testResearchFindingLabel)
-	s.Settle(dispatch.NewFake(), "42", 0, result)
+	s := NewResearchSettle(fc, researchVerdictLabels, testResearchFindingLabel)
+	s.Settle(dispatch.NewFake(), "42", 0, relayedVerdict(result))
 
 	recs := readRecords()
 	if len(recs) != 1 {
@@ -291,10 +291,11 @@ func TestInternalSeam_FlushSettled_UnsettledLatchedPRDoesNotLeak(t *testing.T) {
 	}
 }
 
-// readWriteRecords settles a read-write run for issue 77 whose Box printed
-// status and claimed landing, and returns the settled records. setup seeds the
-// forge; the agent branch is forge.AgentBranchName(testBranchPrefix, "77").
-func readWriteRecords(t *testing.T, status, landing string, setup func(fc *forge.Fake)) []report.Record {
+// noRelayRecords settles a run on a forge with no outbox relay for issue 77
+// whose Box printed status and claimed landing, and returns the settled
+// records. setup seeds the forge; the agent branch is
+// forge.AgentBranchName(testBranchPrefix, "77").
+func noRelayRecords(t *testing.T, status, landing string, setup func(fc *forge.Fake)) []report.Record {
 	t.Helper()
 	readRecords := testutil.InstallPipeReporter(t)
 
@@ -310,44 +311,6 @@ func readWriteRecords(t *testing.T, status, landing string, setup func(fc *forge
 		},
 	})
 	return withoutCIWait(readRecords())
-}
-
-// The read-write ready path names the agent branch's open PR, resolved
-// host-side; the Box's landing= is only what the gate watches.
-func TestSettle_ReadWriteReady_BranchPR_Latched(t *testing.T) {
-	recs := readWriteRecords(t, "ready", testPR, func(fc *forge.Fake) {
-		fc.SetPR(forge.AgentBranchName(testBranchPrefix, "77"), forge.PR{URL: testPR})
-		fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-	})
-	if len(recs) != 1 || recs[0].PRURL != testPR {
-		t.Fatalf("records = %+v, want one record with PRURL=%s", recs, testPR)
-	}
-}
-
-// A Box-supplied landing= that no branch PR backs must never reach the record,
-// whether or not the forge can answer a check read for it.
-func TestSettle_ReadWriteReady_LandingWithoutBranchPR_NotLatched(t *testing.T) {
-	for _, landing := range []string{"https://evil.example/x", testPR, "123", "agent/issue-77", "javascript:alert(1)", "ftp://x/y"} {
-		recs := readWriteRecords(t, "ready", landing, func(fc *forge.Fake) {
-			fc.SetCheckStates(landing, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-		})
-		if len(recs) != 1 || recs[0].PRURL != "" {
-			t.Errorf("landing %q: records = %+v, want one record with empty PRURL", landing, recs)
-		}
-	}
-}
-
-// A Box-supplied landing= differing from the branch's open PR does not
-// displace it on the record.
-func TestSettle_ReadWriteReady_LandingDiffersFromBranchPR_BranchPRWins(t *testing.T) {
-	const evil = "https://evil.example/x"
-	recs := readWriteRecords(t, "ready", evil, func(fc *forge.Fake) {
-		fc.SetPR(forge.AgentBranchName(testBranchPrefix, "77"), forge.PR{URL: testPR})
-		fc.SetCheckStates(evil, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-	})
-	if len(recs) != 1 || recs[0].PRURL != testPR {
-		t.Fatalf("records = %+v, want one record with PRURL=%s", recs, testPR)
-	}
 }
 
 // A host-proven PR latches where the host produced it, so a first CheckState
@@ -372,10 +335,9 @@ func TestSettle_GithubReadOnly_ReadyOpenedPR_LatchedDespiteCheckStateError(t *te
 		PRIntentFound: true,
 	}
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc, fc.AsGithubReadOnly())
 	s.Settle(dispatch.NewFake(), issNum, 0, result)
 
 	recs := withoutCIWait(readRecords())
@@ -402,19 +364,8 @@ func TestRecoverOpenPR_CheckStateError_StillCarriesPR(t *testing.T) {
 	}
 }
 
-// A read-write Box that opened its draft PR and then stopped blocked has the
-// PR resolved host-side from the branch, never from its own landing=.
-func TestSettle_ReadWriteBlocked_PROnBranch_SettledRecordCarriesPR(t *testing.T) {
-	recs := readWriteRecords(t, "blocked", "https://evil.example/x", func(fc *forge.Fake) {
-		fc.SetPR(forge.AgentBranchName(testBranchPrefix, "77"), forge.PR{URL: testPR})
-	})
-	if len(recs) != 1 || recs[0].PRURL != testPR || recs[0].State != "failed" {
-		t.Fatalf("records = %+v, want one failed record with PRURL=%s", recs, testPR)
-	}
-}
-
-func TestSettle_ReadWriteBlocked_NoPR_NoPRURL(t *testing.T) {
-	recs := readWriteRecords(t, "blocked", "https://evil.example/x", func(*forge.Fake) {})
+func TestSettle_NoRelayForgeBlocked_NoPR_NoPRURL(t *testing.T) {
+	recs := noRelayRecords(t, "blocked", "https://evil.example/x", func(*forge.Fake) {})
 	if len(recs) != 1 || recs[0].PRURL != "" || recs[0].State != "failed" {
 		t.Fatalf("records = %+v, want one failed record with empty PRURL", recs)
 	}
@@ -422,9 +373,9 @@ func TestSettle_ReadWriteBlocked_NoPR_NoPRURL(t *testing.T) {
 
 // The agent branch is reused across retries, so a PR an earlier run left
 // closed must not be named on this run's record.
-func TestSettle_ReadWriteBlocked_ClosedEarlierPR_NoPRURL(t *testing.T) {
+func TestSettle_NoRelayForgeBlocked_ClosedEarlierPR_NoPRURL(t *testing.T) {
 	const old = "https://github.com/owner/repo/pull/1"
-	recs := readWriteRecords(t, "blocked", "", func(fc *forge.Fake) {
+	recs := noRelayRecords(t, "blocked", "", func(fc *forge.Fake) {
 		fc.SetPR(forge.AgentBranchName(testBranchPrefix, "77"), forge.PR{URL: old})
 		fc.SetPRState(old, forge.PRClosed)
 	})
@@ -435,9 +386,9 @@ func TestSettle_ReadWriteBlocked_ClosedEarlierPR_NoPRURL(t *testing.T) {
 
 // status=merged is off-script, so the branch lookup that backs its verification
 // must not name a closed earlier PR on the record the run settles failed with.
-func TestSettle_ReadWriteMerged_ClosedEarlierPR_NoPRURL(t *testing.T) {
+func TestSettle_NoRelayForgeMerged_ClosedEarlierPR_NoPRURL(t *testing.T) {
 	const old = "https://github.com/owner/repo/pull/1"
-	recs := readWriteRecords(t, "merged", "", func(fc *forge.Fake) {
+	recs := noRelayRecords(t, "merged", "", func(fc *forge.Fake) {
 		fc.SetPR(forge.AgentBranchName(testBranchPrefix, "77"), forge.PR{URL: old})
 		fc.SetPRState(old, forge.PRClosed)
 	})
@@ -448,8 +399,8 @@ func TestSettle_ReadWriteMerged_ClosedEarlierPR_NoPRURL(t *testing.T) {
 
 // A failed branch lookup leaves the record without a PR rather than failing
 // the settle.
-func TestSettle_ReadWriteBlocked_PRLookupError_NoPRURL(t *testing.T) {
-	recs := readWriteRecords(t, "blocked", "", func(fc *forge.Fake) {
+func TestSettle_NoRelayForgeBlocked_PRLookupError_NoPRURL(t *testing.T) {
+	recs := noRelayRecords(t, "blocked", "", func(fc *forge.Fake) {
 		fc.SetPR(forge.AgentBranchName(testBranchPrefix, "77"), forge.PR{URL: testPR})
 		fc.OpenPRForBranchErr = errors.New("503")
 	})
@@ -479,10 +430,9 @@ func TestSettle_GithubReadOnly_BlockedDraftPR_SettledRecordCarriesPR(t *testing.
 		PRIntentFound: true,
 	}
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc, fc.AsGithubReadOnly())
 	s.Settle(dispatch.NewFake(), issNum, 0, result)
 
 	recs := withoutCIWait(readRecords())

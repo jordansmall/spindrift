@@ -179,6 +179,9 @@ func seamDispatch(t *testing.T, root, num string, fr *runner.Fake) *dispatch.Dis
 func seamForge(num string) *forge.Fake {
 	fc := forge.NewFake(ambiguousDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: num, Labels: []string{"agent-in-progress"}})
+	// The host opens the draft PR from the relayed branch's commits.
+	fc.CommitSubjectsResult = []string{"feat: work"}
+	fc.CreateDraftPRURL = testPR
 	return fc
 }
 

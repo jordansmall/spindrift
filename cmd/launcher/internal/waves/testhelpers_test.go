@@ -116,8 +116,15 @@ func testFactory(t *testing.T, dir string, r runner.Runner) *dispatch.Factory {
 }
 
 func newSettle(it forge.IssueTracker, cf forge.CodeForge) *settle.Settle {
+	// The Box never opens its own PR, so every PR forge relays its bundle and
+	// the host opens the draft PR.
+	if g, ok := cf.(interface{ AsGithubReadOnly() forge.CodeForge }); ok {
+		cf = g.AsGithubReadOnly()
+	}
 	return settle.New(settle.Config{
 		MergeMode:         "immediate",
+		BaseBranch:        "main",
+		OutboxDir:         func(string) string { return "/outbox" },
 		CompleteLabel:     testCompleteLabel,
 		MergePollInterval: 0,
 		MergePollTimeout:  100,

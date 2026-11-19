@@ -43,8 +43,13 @@ func TestNew_ReadsPRForgeAndLandingRecorderFromConfigCapabilities(t *testing.T) 
 
 // newTestSettle derives cfg.Capabilities through the same
 // forge.ResolveCapabilities call production code uses, so tests that only care
-// about pr/landing behavior need not wire Capabilities by hand.
+// about pr/landing behavior need not wire Capabilities by hand. A bare *Fake
+// is wrapped to the host-mediating shape every PR Lander forge has, since the
+// Box never opens its own PR.
 func newTestSettle(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
+	if f, ok := cf.(*forge.Fake); ok {
+		cf = f.AsGithubReadOnly()
+	}
 	cfg.Capabilities = forge.ResolveCapabilities(cf, it, githubRow, githubRow)
 	return New(cfg, it, cf)
 }

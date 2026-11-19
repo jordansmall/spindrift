@@ -27,10 +27,9 @@ func TestSettle_BlockHandoffReturnsInProgressHandoffBlockedWithoutPR(t *testing.
 	fc.SetIssue(forge.Issue{Number: num, Labels: []string{"agent-in-progress"}})
 	fc.RelayBundleErr = forge.ErrBundleNotFound
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(n string) string { return "/outbox/" + n }
 	c.BaseBranch = "main"
-	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc, fc.AsGithubReadOnly())
 
 	got := s.Settle(dispatch.NewFake(), num, 0, settleReadyResult(num, "agent/issue-1919"))
 
@@ -68,7 +67,7 @@ func TestRecoverOpenPR_CompleteThenDemotedReturnsFailed(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
-	s := newTestSettle(c, fc, openAfterMerge{fc})
+	s := newTestSettle(c, fc, openAfterMerge{roFake{fc}})
 
 	got := recoverOpenPR(t, s, &dispatch.Fake{RecordIDResult: "work:9@t"}, "9", testPR)
 
@@ -125,10 +124,10 @@ func TestResearchSettle_ReturnsVerdictSettlement(t *testing.T) {
 		Found:   true,
 		Outcome: outcome.Outcome{Issue: "42", Landing: "none", Status: "recommend", Note: "grounded"},
 	}}
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false, testResearchFindingLabel)
+	s := NewResearchSettle(fc, researchVerdictLabels, testResearchFindingLabel)
 
 	var got Settlement
-	testutil.CaptureStdout(t, func() { got = s.Settle(dispatch.NewFake(), "42", 0, result) })
+	testutil.CaptureStdout(t, func() { got = s.Settle(dispatch.NewFake(), "42", 0, relayedVerdict(result)) })
 
 	want := Settlement{Verdict: ForReason(dispatchrecord.ReasonVerdict), Note: "verdict recommend"}
 	if got != want {
@@ -138,7 +137,7 @@ func TestResearchSettle_ReturnsVerdictSettlement(t *testing.T) {
 
 func TestResearchSettle_MissingOutcomeReturnsResearchFailed(t *testing.T) {
 	fc := newResearchFake("42")
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false, testResearchFindingLabel)
+	s := NewResearchSettle(fc, researchVerdictLabels, testResearchFindingLabel)
 
 	var got Settlement
 	testutil.CaptureStdout(t, func() { got = s.Settle(dispatch.NewFake(), "42", 0, dispatch.Result{}) })
@@ -149,10 +148,14 @@ func TestResearchSettle_MissingOutcomeReturnsResearchFailed(t *testing.T) {
 }
 
 func settleReadyResult(num, branch string) dispatch.Result {
-	return dispatch.Result{Resolved: outcome.Resolved{
-		Found:   true,
-		Outcome: outcome.Outcome{Issue: num, Landing: branch, Status: "ready", Note: "ok"},
-	}}
+	return dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: num, Landing: branch, Status: "ready", Note: "ok"},
+		},
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+	}
 }
 
 func TestSettlement_Delivered(t *testing.T) {

@@ -70,7 +70,7 @@ func TestSettleEntryPoints_EnsureFilingLabelPerKind(t *testing.T) {
 			"research", dispatchkind.Research.FindingLabel, doctor.TriageLabelMeta[dispatchkind.Research.FindingLabel],
 			func() *forge.Fake { return newResearchFake("1") },
 			func(fc *forge.Fake, label string) {
-				NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, false, label).Settle(dispatch.NewFake(), "1", 0, withIntents(resolved("recommend")))
+				NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, label).Settle(dispatch.NewFake(), "1", 0, withIntents(resolved("recommend")))
 			},
 		},
 		{

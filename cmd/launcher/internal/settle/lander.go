@@ -14,8 +14,6 @@ type lander interface {
 	// landingRef turns a ready outcome into the ref land takes; ok is false
 	// when the run is already settled (abandoned, or a failed host handoff).
 	landingRef(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) (ref string, ok bool)
-	// latchOpenPR records num's open PR on its settled record.
-	latchOpenPR(num string)
 	// settleReportedMerge settles an off-script status=merged outcome.
 	settleReportedMerge(num string)
 	// salvage settles a run cut short whose evidence says its work finished;

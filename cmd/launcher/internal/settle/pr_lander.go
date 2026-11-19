@@ -31,46 +31,22 @@ func (s prLander) land(d dispatch.Dispatcher, num string, gen uint64, pr string,
 	return landing, reason, err
 }
 
-// landingRef returns the PR to land. A read-only Box never opens its own PR
-// in-box (issue #1919), so the outcome's landing= carries the branch name, not
-// a PR URL, and selfHeal cannot watch CI on it; the host opens the draft PR.
+// landingRef returns the PR to land. A Box never opens its own PR in-box (issue
+// #1919), so the outcome's landing= carries the branch name, not a PR URL, and
+// selfHeal cannot watch CI on it; the host opens the draft PR.
 func (s prLander) landingRef(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) (string, bool) {
-	pr := result.Resolved.Outcome.Landing
-	if s.readOnly {
-		var handoffErr error
-		pr, handoffErr = s.hostMediateDraftPR(num, gen, result)
-		if errors.Is(handoffErr, errAbandoned) {
-			return "", false
-		}
-		if handoffErr != nil {
-			s.postUsageComment(num, d)
-			return "", false
-		}
-		// Record the host-opened PR URL. A no-op for every tracker but
-		// local's, which may pair ISSUE_TRACKER=local with a read-only PR forge.
-		s.recordLanding(num, pr, result.Passes)
+	pr, handoffErr := s.hostMediateDraftPR(num, gen, result)
+	if errors.Is(handoffErr, errAbandoned) {
+		return "", false
 	}
-	// A read-write Box opened its PR before printing ready.
-	s.latchOpenPR(num)
+	if handoffErr != nil {
+		s.postUsageComment(num, d)
+		return "", false
+	}
+	// Record the host-opened PR URL. A no-op for every tracker but local's,
+	// which may pair ISSUE_TRACKER=local with a PR forge.
+	s.recordLanding(num, pr, result.Passes)
 	return pr, true
-}
-
-// latchOpenPR latches the open PR on num's agent branch. The branch is reused
-// across retries, so only an open PR counts: an earlier run's closed PR must
-// not be named on this run's record (ResolveOpenPR, unlike PRForBranch,
-// ignores it). A no-op for read-only; read-only latches at Open's source.
-func (s prLander) latchOpenPR(num string) {
-	if s.readOnly {
-		return
-	}
-	res, err := forge.ResolveOpenPR(s.cf, s.agentBranch(num))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: could not resolve PR for settled record: %v\n", num, err)
-		return
-	}
-	if res.Found {
-		s.latchPR(num, res.URL)
-	}
 }
 
 // settleReportedMerge verifies the merge against the PR on the agent branch,
@@ -1002,16 +978,11 @@ func (s prLander) retryVerifyRead(num, landing string, read func() error) bool {
 // says the work finished: the driver's last genuine success self-report
 // contradicts either the ADR 0036 synthetic status=blocked backstop (issues
 // #2223, #2224) or a missing outcome line (issue #2253), where no backstop is
-// stitched in. The self-report is unauthenticated input, so this trusts it only
-// for a read-only Box and returns false on any doubt, leaving the caller's
-// handling to run. True means the issue is settled: adopted, abandoned, or
-// failed unreviewed.
+// stitched in. The self-report is unauthenticated input, so this returns false
+// on any doubt, leaving the caller's handling to run. True means the issue is
+// settled: adopted, abandoned, or failed unreviewed.
 func (s prLander) salvage(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
-	if !s.readOnly {
-		return false
-	}
-	// situationFor stats the outbox, so it runs only after the cheap check
-	// above. openPRFound is false: this function never looks for an open PR.
+	// openPRFound is false: this function never looks for an open PR.
 	sit := s.situationFor(num, false, result)
 	if !sit.SelfReportSuccess {
 		return false

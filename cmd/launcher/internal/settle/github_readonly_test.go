@@ -27,7 +27,6 @@ func TestSettle_GithubReadOnly_BlockedPostsNoteAsComment(t *testing.T) {
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc)
 	s.Settle(d, issNum, 0, result)
 

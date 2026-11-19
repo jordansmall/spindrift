@@ -85,11 +85,6 @@ type Config struct {
 	// returns New's cf, the only instance elsewhere.
 	CodeForgeForIssue func(num string) forge.CodeForge
 
-	// ReadOnly mirrors BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1917): the
-	// Box holds no write token, so its blocked-note comment travels via the
-	// outcome note= field whatever the tracker implements.
-	ReadOnly bool
-
 	// BaseBranch is the branch hostMediateDraftPR opens against (issue #1919),
 	// since a read-only Box never runs the PR-create itself. Unused outside
 	// that path.
@@ -157,8 +152,6 @@ type Settle struct {
 	landingPass forge.LandingPassRecorder
 	// ciRun is nil for forges that cannot report a CI run URL.
 	ciRun forge.CIRunReporter
-	// readOnly mirrors Config.ReadOnly (issue #1917). See postBlockedNoteComment.
-	readOnly bool
 	// Every CI-watch, fix-pass, and merge-gate checkpoint checks term, so a
 	// Terminate that lands mid-settle (ADR 0024, issue #649) abandons the settle
 	// instead of corrupting issue state Terminate already reclaimed.
@@ -228,7 +221,7 @@ func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	if clock.Sleep == nil {
 		clock = dispatch.RealClock()
 	}
-	s := &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, landingPass: landingPass, ciRun: ciRun, readOnly: cfg.ReadOnly, cfForNum: cfForNum, clock: clock, term: terminate.NewRegistry()}
+	s := &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, landingPass: landingPass, ciRun: ciRun, cfForNum: cfForNum, clock: clock, term: terminate.NewRegistry()}
 	if pr != nil {
 		s.lander = prLander{s}
 	} else {

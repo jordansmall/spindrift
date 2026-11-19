@@ -57,7 +57,6 @@ func TestSettle_LocalReadOnly_BlockedRelaysBundleWithoutDraftPR(t *testing.T) {
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc, fc.AsLocal())
@@ -85,35 +84,6 @@ func TestSettle_LocalReadOnly_BlockedRelaysBundleWithoutDraftPR(t *testing.T) {
 	}
 }
 
-// Read-write never consults BundleRelay on a blocked outcome on the push-only
-// CODE_FORGE=local forge. The github counterpart is a TestSettle_PRLander row.
-func TestSettle_LocalReadWrite_BlockedUnaffectedByHostMediation(t *testing.T) {
-	const issNum = "1946"
-
-	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
-
-	d := dispatch.NewFake()
-	result := dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: forge.AgentBranchName(testBranchPrefix, issNum), Status: "blocked", Note: "push rejected"},
-		},
-		PRIntent:      "feat: add widget\n\nAdds a widget.",
-		PRIntentFound: true,
-	}
-
-	c := baseConfig() // Config.ReadOnly defaults false
-	c.OutboxDir = func(num string) string { return "/outbox/" + num }
-	c.BaseBranch = "main"
-	s := newTestSettle(c, fc, fc.AsLocal())
-	s.Settle(d, issNum, 0, result)
-
-	if len(fc.RelayBundleCalls) != 0 {
-		t.Errorf("RelayBundle must not be called under read-write, got %+v", fc.RelayBundleCalls)
-	}
-}
-
 // A relay failure on the push-only CODE_FORGE=local forge still leaves the
 // recorded blocked/agent-failed outcome alone; local has no CreateDraftPR to
 // skip. The github counterpart is a TestSettle_PRLander row.
@@ -134,7 +104,6 @@ func TestSettle_LocalReadOnly_BlockedRelayFailureStaysBlocked(t *testing.T) {
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc, fc.AsLocal())
@@ -167,7 +136,6 @@ func TestSettle_LocalReadOnly_BlockedRelayAbsentBundleLogsBenign(t *testing.T) {
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc, fc.AsLocal())

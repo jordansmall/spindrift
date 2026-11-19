@@ -1,12 +1,15 @@
 package connectorforgetest
 
 import (
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/seambundle"
 )
 
 const (
@@ -108,3 +111,21 @@ func (h *PRHarness) AutoMergeEnqueued(url string) bool { return h.Backend.PR(h.n
 // CONFLICTING and a merge is refused with a 405 naming the conflicts, until the
 // conflict response demotes it.
 func (h *PRHarness) SeedConflicting(url string) { h.Backend.SetConflicting(h.number(url), true) }
+
+// NewPRHostMediated is NewPRVariant composed for a Box that never pushes, so
+// core relays the Box's bundle and opens the draft PR in its own git.
+func NewPRHostMediated(t *testing.T, wasm string) *PRHarness {
+	t.Helper()
+	return &PRHarness{newBase(t, inProcess, wasm, prMethods, readOnlyBox)}
+}
+
+// SeedLandablePRWithBundle is SeedLandablePR plus an outbox bundle carrying the
+// branch's commit. The branch is already on the remote, so the relay is a no-op
+// push and the draft-PR open adopts the seeded PR.
+func (h *PRHarness) SeedLandablePRWithBundle(num string) (url, outbox string) {
+	h.t.Helper()
+	url = h.SeedLandablePR(num)
+	outbox = h.t.TempDir()
+	forgetest.Run(h.t, h.Repo.Bare, "bundle", "create", filepath.Join(outbox, seambundle.FileName), "main.."+forge.AgentBranchName(prefix, num))
+	return url, outbox
+}

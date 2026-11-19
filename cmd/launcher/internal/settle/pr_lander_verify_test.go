@@ -16,7 +16,7 @@ import (
 // the read failure lands exactly on verifyMerged's reads, as a forge that
 // merges and then drops the next API calls would.
 type readErrAfterMerge struct {
-	*forge.Fake
+	roFake
 	arm func(*forge.Fake)
 }
 
@@ -108,10 +108,9 @@ func verifyCases() []prCase {
 			// failing must leave it there, neither demoted nor closed.
 			prCase{
 				name:  "a merged self-report whose " + r.name + " read keeps failing leaves the issue in progress",
-				shape: shapeReadOnly, labels: []string{"agent-in-progress", "agent-complete"},
+				shape: shapeGithub, labels: []string{"agent-in-progress", "agent-complete"},
 				result: mergedReport,
 				setup: func(_ *testing.T, fc *forge.Fake, c *Config) {
-					c.ReadOnly = true
 					c.Policy.Max = 2
 					fc.SetPRState(testPR, forge.PRMerged)
 					r.persistent(fc)
@@ -136,10 +135,9 @@ func verifyCases() []prCase {
 	cases = append(cases,
 		prCase{
 			name:  "a merged self-report whose PRForBranch lookup keeps failing leaves the issue in progress",
-			shape: shapeReadOnly, labels: []string{"agent-in-progress", "agent-complete"},
+			shape: shapeGithub, labels: []string{"agent-in-progress", "agent-complete"},
 			result: mergedReport,
 			setup: func(_ *testing.T, fc *forge.Fake, c *Config) {
-				c.ReadOnly = true
 				c.Policy.Max = 2
 				fc.PRForBranchErr = down
 			},
@@ -159,10 +157,9 @@ func verifyCases() []prCase {
 		},
 		prCase{
 			name:  "a merged self-report whose PRForBranch lookup fails once retries, then verifies",
-			shape: shapeReadOnly, labels: []string{"agent-in-progress", "agent-complete"},
+			shape: shapeGithub, labels: []string{"agent-in-progress", "agent-complete"},
 			result: mergedReport,
 			setup: func(_ *testing.T, fc *forge.Fake, c *Config) {
-				c.ReadOnly = true
 				c.Policy.Max = 2
 				fc.SetPRState(testPR, forge.PRMerged)
 				fc.PRForBranchErrs = []error{blip}
@@ -181,10 +178,9 @@ func verifyCases() []prCase {
 		// A lookup that succeeds and finds nothing is the one case that demotes.
 		prCase{
 			name:  "a merged self-report with no PR on the branch demotes to agent-failed",
-			shape: shapeReadOnly, labels: []string{"agent-in-progress", "agent-complete"},
+			shape: shapeGithub, labels: []string{"agent-in-progress", "agent-complete"},
 			result: mergedReport, noPR: true,
 			want:       Settlement{Verdict: ForReason(dispatchrecord.ReasonNoPR), Note: "no PR found on branch to verify merge"},
-			setup:      func(_ *testing.T, _ *forge.Fake, c *Config) { c.ReadOnly = true },
 			wantLabels: []string{"agent-failed"}, wantCalls: []string{}, wantPRClosed: true,
 			wantStatuses: []Status{detailOnly, StatusFailed},
 			wantSteps:    []Step{stepAt(branch, StatusFailed, "!! no PR found on branch to verify merge")},

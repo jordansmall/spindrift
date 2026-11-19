@@ -60,8 +60,9 @@ func fixCases() []prCase {
 	flipThenMerge := []string{"MarkReady:" + testPR, "Merge:" + testPR}
 	redGreen := []forge.RollupState{red, green, green}
 	reds := []forge.RollupState{red, red, red, red}
-	outbox := func(_ *testing.T, _ *forge.Fake, c *Config) {
-		c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	// The first relay is the host hand-off's own; a fix pass's is the second.
+	outbox := func(_ *testing.T, fc *forge.Fake, _ *Config) {
+		fc.RelayBundleErrs = []error{nil}
 	}
 	unmoved := []string{"sha-1", "sha-1", "sha-1", "sha-1"}
 	fixFailed := settledAs(dispatchrecord.ReasonFixFailed, "fix-failed: fix pass 1 exited non-zero")
@@ -267,27 +268,27 @@ func fixCases() []prCase {
 		// A read-only fix Box holds no push-capable token and bundles its work
 		// instead (issue #1979): the relay must land it before CI is re-polled.
 		{
-			name: "a read-only fix pass relays its bundle before CI is re-polled", shape: shapeReadOnly,
+			name: "a read-only fix pass relays its bundle before CI is re-polled", shape: shapeGithub,
 			wantStatuses: []Status{detailOnly, detailOnly, StatusVerifiedMerged},
 			maxFix:       3, checks: redGreen, setup: outbox,
 			want: merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge,
-			wantSteps: []Step{fixPassStep(1, 3)}, wantFixes: 1, check: relays(oneRelay),
+			wantSteps: []Step{fixPassStep(1, 3)}, wantFixes: 1, check: relays(oneRelay, oneRelay),
 		},
 		{
 			// A read-only Box's direct-push visibility never moves, so the relay
 			// must run ahead of the no-op check or every pass reads as a no-op.
-			name: "a read-only fix pass relays before the no-op check reads the head", shape: shapeReadOnly,
+			name: "a read-only fix pass relays before the no-op check reads the head", shape: shapeGithub,
 			wantStatuses: []Status{detailOnly, detailOnly, StatusFixNoOp, StatusFailed},
 			maxFix:       3, checks: redGreen,
 			setup: func(t *testing.T, fc *forge.Fake, c *Config) {
 				outbox(t, fc, c)
 				fc.SetHeadCommitSHAs(testPR, unmoved)
 			},
-			want: fixNoOp, wantPRClosed: true, wantLabels: failed, wantFixes: 1, check: relays(oneRelay), wantComments: noOpComment,
+			want: fixNoOp, wantPRClosed: true, wantLabels: failed, wantFixes: 1, check: relays(oneRelay, oneRelay), wantComments: noOpComment,
 		},
 		{
 			// Nothing to recover, so it is logged and must never park the issue.
-			name: "a read-only fix pass whose bundle is missing falls through to fix-no-op", shape: shapeReadOnly,
+			name: "a read-only fix pass whose bundle is missing falls through to fix-no-op", shape: shapeGithub,
 			wantStatuses: []Status{detailOnly, detailOnly, StatusFixRelayFailed, StatusFixNoOp, StatusFailed},
 			maxFix:       1, checks: []forge.RollupState{red, red},
 			setup: func(t *testing.T, fc *forge.Fake, c *Config) {
@@ -295,13 +296,13 @@ func fixCases() []prCase {
 				fc.SetHeadCommitSHAs(testPR, unmoved)
 				fc.RelayBundleErr = forge.ErrBundleNotFound
 			},
-			want: fixNoOp, wantPRClosed: true, wantLabels: failed, wantFixes: 1, check: relays(oneRelay), wantComments: noOpComment,
+			want: fixNoOp, wantPRClosed: true, wantLabels: failed, wantFixes: 1, check: relays(oneRelay, oneRelay), wantComments: noOpComment,
 			wantSteps: []Step{stepAt(testPR, StatusFixRelayFailed, "!! relay bundle failed: "+forge.ErrBundleNotFound.Error())},
 		},
 		{
 			// The bundle is intact in the outbox but unrelayed, so the head never
 			// moved: parked for recover, not misread as a fix-no-op (issue #6074).
-			name: "a read-only fix pass whose relay fails parkably parks for recover", shape: shapeReadOnly,
+			name: "a read-only fix pass whose relay fails parkably parks for recover", shape: shapeGithub,
 			wantStatuses: []Status{detailOnly, detailOnly, StatusRelayFailed, StatusFailed},
 			maxFix:       3, checks: []forge.RollupState{red, red},
 			setup: func(t *testing.T, fc *forge.Fake, c *Config) {
@@ -319,12 +320,12 @@ func fixCases() []prCase {
 						t.Errorf("comment %q promises a relay retry recover never makes", cc.Body)
 					}
 				}
-				relays(oneRelay)(t, fc, nil)
+				relays(oneRelay, oneRelay)(t, fc, nil)
 			},
 		},
 		{
 			// The one parkable failure whose recover hint would hit the same wall.
-			name: "a read-only fix pass refused for workflow scope parks with the scope remedy", shape: shapeReadOnly,
+			name: "a read-only fix pass refused for workflow scope parks with the scope remedy", shape: shapeGithub,
 			wantStatuses: []Status{detailOnly, detailOnly, StatusRelayFailed, StatusFailed},
 			maxFix:       3, checks: []forge.RollupState{red, red},
 			setup: func(t *testing.T, fc *forge.Fake, c *Config) {
@@ -339,7 +340,7 @@ func fixCases() []prCase {
 			// A mark landing in the relay's final attempt is not a backoff, so the
 			// retry loop returns an exhausted error rather than errAbandoned (issue
 			// #3523): the park must see the mark and leave the released issue alone.
-			name: "a stop during a read-only fix pass's final relay attempt abandons", shape: shapeReadOnly,
+			name: "a stop during a read-only fix pass's final relay attempt abandons", shape: shapeGithub,
 			wantStatuses: []Status{detailOnly, detailOnly, StatusRelayRetry, StatusRelayRetry, StatusRelayRetry},
 			maxFix:       3, checks: []forge.RollupState{red, red},
 			setup: func(t *testing.T, fc *forge.Fake, c *Config) {

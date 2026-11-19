@@ -41,7 +41,7 @@ type Settle int
 
 const (
 	SettleMerge   Settle = iota // work's full merge gate, settle.New
-	SettleVerdict               // research's one-shot verdict comment, settle.NewResearchSettle*
+	SettleVerdict               // research's one-shot verdict comment, settle.NewResearchSettle
 	SettleLedger                // butler's one-shot run: files findings, writes the Ledger's done commit (ADR 0056)
 )
 

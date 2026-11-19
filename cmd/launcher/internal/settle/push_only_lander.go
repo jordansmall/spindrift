@@ -131,9 +131,6 @@ func (s pushOnlyLander) landingRef(_ dispatch.Dispatcher, _ string, _ uint64, re
 	return result.Resolved.Outcome.Landing, true
 }
 
-// latchOpenPR is a no-op: a push-only forge has no PR to latch.
-func (s pushOnlyLander) latchOpenPR(string) {}
-
 // settleReportedMerge has no PR state to verify. It prints the host-derived
 // branch, never the Agent-controlled o.Landing, so landing= carries the same
 // provenance as the PR arm.

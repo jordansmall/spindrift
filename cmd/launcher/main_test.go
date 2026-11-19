@@ -4102,26 +4102,6 @@ func createIntegrationBranchForTest(t *testing.T, bare, fromBranch, newBranch st
 	return sha
 }
 
-// settleConfig's ReadOnly field mirrors c.BoxForgeAndIssueAccess (issue
-// #1917): "read-only" threads true and "read-write" threads false,
-// so settle.Settle's blocked-note relay gate sees the mode directly.
-func TestSettleConfig_ReadOnlyThreadsFromBoxForgeAndIssueAccess(t *testing.T) {
-	fc := forge.NewFake()
-
-	c := minimalValidConfig()
-	c.BoxForgeAndIssueAccess = "read-only"
-	sc := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc, forge.Capabilities{})
-	if !sc.ReadOnly {
-		t.Error("settleConfig(read-only).ReadOnly = false, want true")
-	}
-
-	cRW := minimalValidConfig()
-	scRW := settleConfig(cRW, localloop.Wire(localloopConfig(cRW), fc), fc, forge.Capabilities{})
-	if scRW.ReadOnly {
-		t.Error("settleConfig(read-write).ReadOnly = true, want false")
-	}
-}
-
 // settleConfig sets Unclaimed true for the butler kind (issue #4076): a
 // landed patch PR's finding issue was never claimed, so there is no
 // Dispatcher to run a fix pass, and the gate must treat red CI as terminal.

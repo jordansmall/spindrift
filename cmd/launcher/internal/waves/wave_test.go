@@ -134,6 +134,8 @@ func TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.CreateDraftPRURL = prURL
+	fc.CommitSubjectsResult = []string{"feat: work"}
 
 	var count int32
 	cfc := &countingForge{Fake: fc, claimCount: &count}
@@ -351,6 +353,8 @@ func TestDispatchWave_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{Number: "1"})
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.CreateDraftPRURL = prURL
+	fc.CommitSubjectsResult = []string{"feat: work"}
 
 	fr := runner.NewFake()
 	fr.RunFunc = func(box runner.Box) error {

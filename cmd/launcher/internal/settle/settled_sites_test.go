@@ -45,7 +45,7 @@ func TestResearchSettle_VerdictAppendsSettled(t *testing.T) {
 	d, path := stampedFake(t, "research:42@x")
 	result := dispatch.Result{Resolved: outcome.Resolved{Found: true, Outcome: outcome.Outcome{Issue: "42", Status: "recommend"}}}
 
-	NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false, testResearchFindingLabel).Settle(d, "42", 0, result)
+	NewResearchSettle(fc, researchVerdictLabels, testResearchFindingLabel).Settle(d, "42", 0, relayedVerdict(result))
 
 	assertOneSettled(t, path, "research:42@x", "complete", "verdict", read())
 }
@@ -55,7 +55,7 @@ func TestResearchSettle_FailAppendsSettled(t *testing.T) {
 	fc := newResearchFake("42")
 	d, path := stampedFake(t, "research:42@x")
 
-	NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false, testResearchFindingLabel).Settle(d, "42", 0, dispatch.Result{})
+	NewResearchSettle(fc, researchVerdictLabels, testResearchFindingLabel).Settle(d, "42", 0, dispatch.Result{})
 
 	assertOneSettled(t, path, "research:42@x", "failed", "research-failed", read())
 }
