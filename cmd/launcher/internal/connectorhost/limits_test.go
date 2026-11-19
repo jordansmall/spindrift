@@ -47,16 +47,26 @@ func TestDriverDecodesALargeLineWithoutWedging(t *testing.T) {
 	}
 }
 
-// The guest is a Go wasip1 reactor that never runs the GC on its own, so the
-// SDK must collect between connector_calls: otherwise a long log decoded on one
-// Connector grows past the memory cap, the Connector dies ("exceeded its memory
-// cap") partway through a run and every later line goes undecoded.
+// The guest is a Go wasip1 reactor that never finishes a GC cycle on its own,
+// so the SDK must collect between connector_calls: otherwise a long log decoded
+// on one Connector grows past the memory cap, the Connector dies ("exceeded its
+// memory cap") partway through a run and every later line goes undecoded.
+//
+// To show a missing reclaim within a few MiB, the guest runs with GOGC=off
+// under a 40 MiB base cap, so only the SDK's runtime.GC() ever collects. That
+// proves the explicit reclaim bounds the heap; it does not exercise the
+// production default, GOGC on, where a background cycle starts but never
+// finishes. Keep the cap above 20 MiB: even with the reclaim, a 1 MiB batch
+// fails there.
 func TestDriverDecodesALongRunWithoutExhaustingMemory(t *testing.T) {
-	const total = 96 << 20 // well past the 64 MiB base memory cap
+	const total = 14 << 20
+	t.Cleanup(connectorhost.SetMemoryCap(40 << 20))
+	t.Cleanup(connectorhost.SetGuestEnv(map[string]string{"GOGC": "off"}))
+	cache := t.TempDir() // compiling driver.wasm is most of a short subtest
 	line := strings.Repeat("a", 4<<10)
 	load := func(t *testing.T) (*connectorhost.Connector, driverkit.Strategy) {
 		t.Helper()
-		c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), t.TempDir())
+		c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), cache)
 		if err != nil {
 			t.Fatal(err)
 		}
