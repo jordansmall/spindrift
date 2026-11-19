@@ -1211,8 +1211,9 @@ rec {
       # must fail the build rather than render as if the field were never set.
       # goVar names the generated var and is not a Descriptor field; knobs are
       # folded into the env schema by lib/row-knobs.nix, cliPackage and
-      # validateKnobs are read by lib/mkHarness.nix, and core, goTestRepoFiles and
-      # goTestBuildsOn are read by nix/checks/go.nix, not rendered here.
+      # validateKnobs are read by lib/mkHarness.nix, core, goTestRepoFiles and
+      # goTestBuildsOn are read by nix/checks/go.nix, and connectorOnly by
+      # lib/flakeModule.nix, not rendered here.
       knownFields = [
         "goVar"
         "knobs"
@@ -1221,6 +1222,7 @@ rec {
         "goTestRepoFiles"
         "goTestBuildsOn"
         "core"
+        "connectorOnly"
       ]
       ++ map (f: f.attr) rowFields;
       quickstartAxes = [

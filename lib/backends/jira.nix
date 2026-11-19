@@ -6,6 +6,7 @@
   goVar = "Jira";
   displayName = "Jira";
   validAsTracker = true;
+  connectorOnly = true;
   tokenEnvVar = "JIRA_TOKEN";
   doctorTokenHint = "SPINDRIFT_JIRA_CONNECTOR_TOKEN";
   doctorSlugHint = "JIRA_BASE_URL / JIRA_PROJECT_KEY";

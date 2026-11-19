@@ -113,6 +113,12 @@
 # build keeps (ADR 0068, decision 7); every other row is stripped from the core run.
 # Like `knobs`, the generated Descriptor ignores all three.
 
+# connectorOnly (optional bool) marks a backend whose only implementation is
+# its Connector: there is no native adapter for a Connector row's `primary` to
+# replace, so lib/flakeModule.nix leaves the name out of the set `primary` is
+# checked against (jira, issue #6858). Like `knobs`, the generated Descriptor
+# ignores it.
+
 # labelRegistry marks a tracker whose labels are registered objects that
 # ListLabels/CreateLabel manage; local and jira omit it (issue #4400).
 # issuesWearLabels marks a tracker whose issue labels are reliable

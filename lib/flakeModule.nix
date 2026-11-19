@@ -94,7 +94,7 @@ let
   checkedConnectors = lib.mapAttrs (
     name: r:
     let
-      nativeNames = map (b: b.name) (import ./backends/default.nix);
+      nativeNames = (import ./connector-names.nix).nativeBackendNames;
       nativeDriverNames = lib.attrNames (import ./drivers/default.nix { inherit lib; }).entries;
       err =
         if r.primary then
