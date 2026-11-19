@@ -163,12 +163,12 @@ func TestTrackerWrites_PlainRowRoutesShadowStaysOnGh(t *testing.T) {
 	}
 }
 
-// A Connector that fails to load fails each primary write with the load error,
+// A Connector that fails to load fails each routed write with the load error,
 // never reaching gh.
-func TestPrimaryRow_LoadFailureFailsTheWrite(t *testing.T) {
+func TestPlainRow_LoadFailureFailsTheWrite(t *testing.T) {
 	for _, tc := range primaryWrites {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+			_, _, calls, _ := primaryHarness(t, useGithubRowAt)
 			boom := errors.New("github connector failed to load")
 			old := loadRowConnector
 			t.Cleanup(func() { loadRowConnector = old })
@@ -188,12 +188,11 @@ func TestPrimaryRow_LoadFailureFailsTheWrite(t *testing.T) {
 
 // A write outside the row's Routes is refused by the host: it fails with that
 // refusal and never falls back to gh.
-func TestPrimaryRow_RefusedRouteFailsTheWrite(t *testing.T) {
+func TestPlainRow_RefusedRouteFailsTheWrite(t *testing.T) {
 	for _, tc := range primaryWrites {
 		t.Run(tc.name, func(t *testing.T) {
 			h, _, calls, _ := primaryHarness(t, func(t *testing.T, host string) {
 				applyGithubRow(t, host, func(r *backendrows.Row) {
-					r.Primary = true
 					r.Routes = r.Routes[:0:0]
 					for _, rt := range allRoutes(t, host) {
 						if !strings.Contains(rt.Path, "/issues") && !strings.Contains(rt.Path, "/labels") {

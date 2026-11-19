@@ -211,12 +211,12 @@ func TestPlainRow_AuditsToThePrimaryRecord(t *testing.T) {
 	}
 }
 
-// A Connector that fails to load fails each primary read with the load error,
+// A Connector that fails to load fails each routed read with the load error,
 // never reaching gh, and each failure lands in the run's primary log.
-func TestPrimaryRow_LoadFailureFailsTheReadAndIsRecorded(t *testing.T) {
+func TestPlainRow_LoadFailureFailsTheReadAndIsRecorded(t *testing.T) {
 	for _, tc := range primaryReads {
 		t.Run(tc.name, func(t *testing.T) {
-			_, c, calls, logDir := primaryHarness(t, useGithubRowPrimary)
+			_, c, calls, logDir := primaryHarness(t, useGithubRowAt)
 			boom := errors.New("github connector failed to load")
 			old := loadRowConnector
 			t.Cleanup(func() { loadRowConnector = old })
@@ -253,10 +253,9 @@ func TestPrimaryRow_LoadFailureFailsTheReadAndIsRecorded(t *testing.T) {
 
 // A request outside the row's Routes is refused by the host: the read fails
 // with that refusal, never falls back to gh, and the primary audit shows it.
-func TestPrimaryRow_RefusedRouteFailsTheReadAndIsAudited(t *testing.T) {
+func TestPlainRow_RefusedRouteFailsTheReadAndIsAudited(t *testing.T) {
 	_, c, calls, logDir := primaryHarness(t, func(t *testing.T, host string) {
 		applyGithubRow(t, host, func(r *backendrows.Row) {
-			r.Primary = true
 			r.Routes = r.Routes[:0:0]
 			for _, rt := range allRoutes(t, host) {
 				if !strings.Contains(rt.Path, "/issues") {
