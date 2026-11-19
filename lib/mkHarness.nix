@@ -141,14 +141,17 @@
   # `module`) runs in shadow mode (ADR 0073, issue #6797): the native Strategy
   # stays authoritative while the Box replays each Pass log through the
   # module and records divergences. Only the Harness's own `driver` gets its
-  # shadow row, so another Driver's image never bakes the wasm. Set by
-  # lib/flakeModule.nix from `spindrift.connectors.<name>.shadow`.
+  # shadow row, so another Driver's image never bakes the shadow wasm. A
+  # Driver with no native Strategy (lib/drivers/default.nix's connectorHosted)
+  # has nothing to shadow and is refused. Set by lib/flakeModule.nix from
+  # `spindrift.connectors.<name>.shadow`.
   shadowDrivers ? [ ],
   # Names of core Drivers whose Connector row (a `driverRows` entry carrying
   # `module`) is primary (ADR 0073, issue #6999): the Connector is the Driver
   # in place of the native Strategy, on the host and in the Box, whichever
-  # Driver the Harness selects, with no fallback. Set by lib/flakeModule.nix
-  # from `spindrift.connectors.<name>.primary`.
+  # Driver the Harness selects, with no fallback. A connectorHosted Driver is
+  # always that and is refused here. Set by lib/flakeModule.nix from
+  # `spindrift.connectors.<name>.primary`.
   primaryDrivers ? [ ],
   # Set by lib/flakeModule.nix when more than one Driver is declared (ADR 0064,
   # issue #5053): the wrapper then layers harness.<driver>.env over harness.env.
@@ -550,11 +553,13 @@ let
   # Forced whole, so every row is checked whichever Driver the Harness selects.
   connectorEntries = builtins.deepSeq checkedRows checkedRows;
   # A shadow replays through the row's module and compares against the native
-  # Strategy of the same name, so it needs both a core Driver and a module. A
+  # Strategy of the same name, so it needs both a native Driver and a module. A
   # backend row is shadowed by `shadow` on the row itself, not listed here.
   checkShadow =
     name:
-    if !(connectorEntries ? ${name}) then
+    if lib.elem name driverRegistry.connectorHosted then
+      throw "mkHarness: shadowDrivers names '${name}', whose host half is its Connector: there is no native Strategy to compare against"
+    else if !(connectorEntries ? ${name}) then
       throw "mkHarness: shadowDrivers names '${name}' but driverRows has no such Connector row${
         lib.optionalString (
           backendRows ? ${name}
@@ -571,10 +576,12 @@ let
   shadowNames = builtins.deepSeq checkedShadows checkedShadows;
   shadowActive = lib.elem driver shadowNames;
   # A primary row replaces the native Strategy of the same name, so it needs a
-  # core Driver and a module, and is never also shadowed.
+  # native Driver and a module, and is never also shadowed.
   checkPrimary =
     name:
-    if !(connectorEntries ? ${name}) then
+    if lib.elem name driverRegistry.connectorHosted then
+      throw "mkHarness: primaryDrivers names '${name}', whose host half is its Connector: there is no native Strategy to replace, its Connector is always the Driver"
+    else if !(connectorEntries ? ${name}) then
       throw "mkHarness: primaryDrivers names '${name}' but driverRows has no such Connector row"
     else if !(driverRegistry.entries ? ${name}) then
       throw "mkHarness: primaryDrivers names '${name}', which is outside the core registry and has no native Strategy to replace"
@@ -591,10 +598,10 @@ let
   # The rows the launcher input document and the Box's rows file carry: the
   # Descriptor facts plus the wasm path. `p` supplies the module's pkgs, the
   # host's for the document and the Box's own for the image. The document
-  # carries outside rows and primary rows only: the host never runs a shadow,
-  # and on a macOS host the wasm is not built. A primary row decodes on the
-  # host too, so a host that cannot evaluate its module fails evaluation here
-  # rather than reading Pass logs with the native Strategy.
+  # carries outside rows, every connectorHosted row and primary rows only: the
+  # host never runs a shadow. Those rows decode on the host too, so a host that
+  # cannot evaluate a module fails evaluation here rather than reading Pass
+  # logs with no Driver.
   rowOf =
     p: r:
     driverRegistry.descriptorFacts r
@@ -602,15 +609,33 @@ let
       module = r.module p;
     }
     // lib.optionalAttrs (isBatteriesBuild p r) { firstParty = true; };
+  moduleEvaluates = p: r: (builtins.tryEval (builtins.deepSeq (toString (r.module p)) true)).success;
   primaryRowOf =
     p: name:
-    if
-      (builtins.tryEval (builtins.deepSeq (toString (connectorEntries.${name}.module p)) true)).success
-    then
+    if moduleEvaluates p connectorEntries.${name} then
       rowOf p connectorEntries.${name} // { primary = true; }
     else
       throw "mkHarness: driverRows.${name} is primary, so its Connector module must evaluate for ${p.stdenv.hostPlatform.system}, and it does not";
-  docDriverRows = p: lib.mapAttrsToList (_: rowOf p) outsideRows ++ map (primaryRowOf p) primaryNames;
+  # A connectorHosted Driver has no native Strategy, so its Connector row is
+  # always rendered, whichever Driver the Harness selects: the Consumer's own
+  # `driverRows` entry when it sets one, else the batteries flake's. It carries
+  # no `primary` mark; the Go side registers it as the only host half.
+  hostedRowOf =
+    p: name:
+    let
+      row = connectorEntries.${name} or batteriesRows.${name} or null;
+    in
+    if row == null || !(row ? module) then
+      throw "mkHarness: the ${name} Driver's host half is its Connector, but neither driverRows.${name} nor the batteries flake supplies a row with a `module`"
+    else if moduleEvaluates p row then
+      rowOf p row
+    else
+      throw "mkHarness: the ${name} Driver's host half is its Connector, so its module must evaluate for ${p.stdenv.hostPlatform.system}, and it does not";
+  docDriverRows =
+    p:
+    lib.mapAttrsToList (_: rowOf p) outsideRows
+    ++ map (hostedRowOf p) driverRegistry.connectorHosted
+    ++ map (primaryRowOf p) primaryNames;
   boxDriverRows =
     p:
     docDriverRows p
@@ -1016,14 +1041,14 @@ let
   # agent/entrypoint.sh's DRIVER_* vars and function definitions (ADR 0009),
   # shared between the image preamble and the bats harness file (issue #433)
   # so neither can drift from the other.
-  # DRIVER_ROWS_FILE is appended here, not rendered by the registry, because
-  # only a Connector's outside or shadow rows have a rows file; its string context
-  # pulls the file and the wasm into the image closure.
-  driverPreamble =
-    driverRegistry.renderPreamble driverEntry
-    + lib.optionalString (
-      outsideRows != { } || shadowActive
-    ) "DRIVER_ROWS_FILE=${lib.escapeShellArg driverRowsFile}\n";
+  # DRIVER_ROWS_FILE is appended here, not rendered by the registry: the rows
+  # file is the Harness's own, not a Driver fact. Its string context pulls the
+  # file and the wasm into the image closure. Always present, because a
+  # connectorHosted Driver's Connector row is always in it.
+  driverPreambleWith =
+    rowsFile:
+    driverRegistry.renderPreamble driverEntry + "DRIVER_ROWS_FILE=${lib.escapeShellArg rowsFile}\n";
+  driverPreamble = driverPreambleWith driverRowsFile;
 
   # The baked /agent/* path literals and their fallback-preserving preamble
   # (issue #2531). lib/image.nix's agentFiles copy destinations read the same
@@ -1377,8 +1402,12 @@ let
   # The Driver's registry-rendered preamble as a host store-path file. The
   # bats harness prepends it before exec-ing the entrypoint (issues
   # #433/#624) so tests exercise the exact bytes mkHarness bakes into the
-  # image, not hand-copied duplicates or entrypoint fallback literals.
-  driverPreambleFile = hostPkgs.writeText "driver-preamble.sh" imageDriver.driverPreamble;
+  # image, not hand-copied duplicates or entrypoint fallback literals. Its rows
+  # file is rendered with hostPkgs: on a Linux host that is the image's own
+  # file, and on a darwin host the image's holds a Linux wasm it cannot build.
+  driverPreambleFile = hostPkgs.writeText "driver-preamble.sh" (
+    driverPreambleWith (driverRowsFileWith hostPkgs)
+  );
 
   # The baked /agent/* path literals' fallback preamble as a host store-path
   # file (issue #2531), prepended by the bats harness for the same reason, so

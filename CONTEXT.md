@@ -1464,7 +1464,7 @@ other kind falls back to a BLOCK-dominant fold, because a verdict can only
 otherwise reach a non-review pass's transcript through a nested subagent's
 `tool_result`, not a top-level message of its own. Issue #2980 scoped that
 fold structurally: the claude Driver's `RenderTranscript`
-(`driver/claude/decode.go`) tags a `tool_result` line with a
+(`connectors/claude/decode.go`) tags a `tool_result` line with a
 completed subagent's own role only when it structurally answers that
 subagent's Task/Agent spawn, and the fold now reads only lines tagged
 `[reviewer]` — a plain Bash/Read `tool_result`, or one tagged with some

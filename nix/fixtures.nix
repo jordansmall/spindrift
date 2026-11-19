@@ -113,10 +113,10 @@ let
     multiDriver = true;
     # The Connector modules' work, done by hand: flake.nix registers claude's
     # and github's rows, shadowing the nix/dogfood-shadow.nix Connectors and
-    # running claude and github as primary (nix/dogfood-primary.nix), so the
-    # module path hands mkHarness all of it. A Driver row is shadowed or primary
-    # by name in `shadowDrivers` / `primaryDrivers`; a backend row carries the
-    # flag itself.
+    # running those in nix/dogfood-primary.nix as primary, so the module path
+    # hands mkHarness all of it. A Driver row is shadowed or primary by name in
+    # `shadowDrivers` / `primaryDrivers`; a backend row carries the flag
+    # itself. claude's row is neither: it has no native Strategy (issue #6799).
     driverRows = dogfoodDriverRows;
     shadowDrivers = builtins.filter (n: dogfoodDriverRows ? ${n}) dogfoodShadow;
     primaryDrivers = dogfoodDriverPrimaries;
@@ -783,14 +783,13 @@ let
         packages = p: [ p.hello ];
         driverRows.fixture = row;
       };
-      # The batteries claude row, shadowed (the dogfood now runs it primary):
-      # the one first-party Driver row, so driver-exec's Box-side rows file must
-      # carry the mark for it to apply.
+      # A Consumer that registers no Driver Connector: its rows file still
+      # carries the batteries claude row, always on (issue #6799) and the one
+      # first-party Driver row, so driver-exec's Box-side rows file must carry
+      # the mark for it to apply.
       claudeBoxHarness = import ../lib/mkHarness.nix {
         inherit nixpkgs system;
         packages = p: [ p.hello ];
-        driverRows = dogfoodDriverRows;
-        shadowDrivers = [ "claude" ];
       };
     in
     pkgs.runCommand "driver-connector-artifacts" { nativeBuildInputs = [ pkgs.jq ]; } ''

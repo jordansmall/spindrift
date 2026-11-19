@@ -1,6 +1,7 @@
 # The Driver registry (ADR 0009): one entry per in-box agent CLI. Rendering
 # lives here (issue #624) so per-Driver files like ./claude.nix stay pure data.
-# The Go launcher keeps a matching host-side registry keyed by the same names;
+# The Go launcher keeps a matching host-side registry keyed by the same names,
+# less the connectorHosted Drivers, which have no native Strategy;
 # cmd/launcher/internal/driver/parity_test.go asserts the two never drift on
 # names, because each half validates its own entries independently. The
 # Go-read facts beyond the name reach Go through the generated Descriptors,
@@ -35,7 +36,8 @@ let
   # package has no such path.
   # module (a function of pkgs returning the Driver Connector's wasm file path,
   # ADR 0073) is carried only by a Connector's row (lib/flakeModule.nix's
-  # spindrift.connectors.<name>.driver); a core row has a native Strategy.
+  # spindrift.connectors.<name>.driver); a core row has a native Strategy
+  # unless its name is in connectorHosted.
   # Every optional attribute is listed in optionalAttrs below.
   requiredAttrs = [
     "name"
@@ -385,6 +387,13 @@ let
     pi = assertRow "pi" (import ./pi.nix { inherit lib; });
   };
 
+  # Core Drivers whose host half is a Connector (ADR 0073, issue #6799): they
+  # keep their in-box half here but have no native Go Strategy, so nothing can
+  # be primary or shadow for them and every Consumer's host and Box load the
+  # Connector.
+  connectorHosted = [ "claude" ];
+  nativeDriverNames = lib.filter (n: !(lib.elem n connectorHosted)) (builtins.attrNames entries);
+
   # Names rendered into the preamble are interpolated into shell, so each must
   # be a plain identifier; `what` labels the offending field in the error.
   assertShellIdent =
@@ -516,6 +525,8 @@ in
 {
   inherit
     entries
+    connectorHosted
+    nativeDriverNames
     assertShape
     assertArgvShape
     assertRow

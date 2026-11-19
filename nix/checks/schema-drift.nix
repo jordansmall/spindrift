@@ -1220,6 +1220,7 @@ checkedMerge {
         "SPINDRIFT_CONNECTOR_FIXTURES_DIR" # test-only override read by internal/fixturebuild (issue #6794)
         "SPINDRIFT_CONNECTOR_HOST" # test-only override read by internal/fixturebuild (issue #7013)
         "SPINDRIFT_CONNECTOR_HOST_ESCAPEPROBE" # test-only override read by internal/fixturebuild (issue #7017)
+        "SPINDRIFT_CLAUDE_CONNECTOR_WASM" # test-only override read by internal/fixturebuild (issue #6799)
         "UPDATE_GOLDENS" # test-only regen switch read by internal/golden (issue #4781)
         "SPINDRIFT_BACKEND_CONNECTOR_WASM" # nix/quickstart.nix wrapper's baked github Connector (issue #6884)
         "SPINDRIFT_BACKEND_CONNECTOR_ROUTES" # nix/quickstart.nix wrapper's baked github Route table (issue #6884)

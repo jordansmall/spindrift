@@ -53,18 +53,57 @@ let
       ++ modules
     )).apps.${system}.default.program;
   claudeRow = claudeConnector.driverRow pkgs.lib;
-  shadowOn = mkHarness {
-    driverRows.claude = claudeRow;
-    shadowDrivers = [ "claude" ];
+  # opencode rejects the schema's bare claude ids (issue #5355), so each
+  # Harness selecting it names its models; the worker's is dropped silently.
+  opencodeDefaults = fixtures.opencodeNamespacedDefaults;
+  opencodeModels = {
+    models.default = fixtures.opencodeDefaultModel;
+    models.roster = (import ../../lib/roster.nix { inherit (pkgs) lib; }).defaultRoster {
+      models = {
+        scout = opencodeDefaults.scoutModel;
+        filer = opencodeDefaults.filerModel;
+        reviewer = opencodeDefaults.reviewModel;
+        worker = "";
+      };
+    };
   };
-  shadowOff = mkHarness { driverRows.claude = claudeRow; };
+  # claude has no native Strategy (issue #6799), so shadow and primary mode
+  # are exercised on a native Driver, opencode, whose Connector row is core's
+  # row plus a wasm: the fixture's, which is not the batteries build.
+  opencodeRow = registry.entries.opencode // {
+    module = fixtureRow.module;
+  };
+  shadowOn = mkHarness {
+    driver = "opencode";
+    defaults = opencodeDefaults;
+    driverRows.opencode = opencodeRow;
+    shadowDrivers = [ "opencode" ];
+  };
+  plainOpencode = mkHarness {
+    driver = "opencode";
+    defaults = opencodeDefaults;
+  };
+  shadowOff = mkHarness {
+    driver = "opencode";
+    defaults = opencodeDefaults;
+    driverRows.opencode = opencodeRow;
+  };
   shadowOther = mkHarness {
     driver = "fixture";
     driverRows = {
-      claude = claudeRow;
+      opencode = opencodeRow;
       fixture = fixtureRow;
     };
-    shadowDrivers = [ "claude" ];
+    shadowDrivers = [ "opencode" ];
+  };
+  # A Consumer module wiring opencode's Connector row, as a Connector's own
+  # flake module would.
+  opencodeConnectorModule = extra: {
+    spindrift.connectors.opencode = {
+      driver = opencodeRow;
+    }
+    // extra;
+    perSystem.spindrift.agents.drivers.opencode = opencodeModels;
   };
   # Forces the validation chain without a build.
   evaluates =
@@ -121,7 +160,6 @@ in
         driverRows.claude = claudeRow // {
           module = fixtureRow.module;
         };
-        shadowDrivers = [ "claude" ];
       };
       renamed = withRows {
         renamed = claudeRow // {
@@ -149,34 +187,38 @@ in
         };
       }))
     ) "the batteries row carrying `firstParty` must fail closed: the mark is derived, never claimed";
-    assert assertMsg (preambleEvaluates shadowOn) "control: the batteries claude row must evaluate";
+    assert assertMsg (preambleEvaluates (mkHarness {
+      driverRows.claude = claudeRow;
+    })) "control: the batteries claude row must evaluate";
     assert assertMsg (preambleEvaluates swapped)
       "control: a batteries row with another module must evaluate";
     assert assertMsg (evaluates renamed) "control: a renamed batteries row must evaluate";
     pkgs.runCommand "connector-driver-rows-first-party-mark" { nativeBuildInputs = [ pkgs.jq ]; } ''
-      line=$(grep '^DRIVER_ROWS_FILE=' ${shadowOn.internals.driverPreambleFile})
-      eval "$line"
-      jq -e 'length == 1 and .[0].name == "claude" and .[0].firstParty == true' "$DRIVER_ROWS_FILE"
+      # The batteries claude row, which every Harness renders, is the one
+      # first-party row.
+      jq -e 'length == 1 and .[0].name == "claude" and .[0].firstParty == true' ${plain.internals.driverRowsFile}
 
       # The batteries row's name with a Consumer's wasm, and the batteries wasm
       # under a Consumer's name, are not first-party.
       jq -e 'length == 1 and .[0].name == "claude" and (.[0] | has("firstParty") | not)' ${swapped.internals.driverRowsFile}
-      jq -e 'length == 1 and .[0].name == "renamed" and (.[0] | has("firstParty") | not)' ${renamed.internals.driverRowsFile}
-      jq -e '[.drivers[] | has("firstParty")] | any | not' ${renamed.internals.runInputDocumentFile}
+      jq -e '[.[] | select(.name == "renamed")] | length == 1 and (.[0] | has("firstParty") | not)' ${renamed.internals.driverRowsFile}
+      jq -e '[.drivers[] | select(.name == "renamed") | has("firstParty")] | any | not' ${renamed.internals.runInputDocumentFile}
 
-      # A third-party Connector's row, and the input document, stay unmarked.
-      jq -e 'length == 1 and (.[0] | has("firstParty") | not)' ${withFixture.internals.driverRowsFile}
-      jq -e '[.drivers[] | has("firstParty")] | any | not' ${withFixture.internals.runInputDocumentFile}
+      # A third-party Connector's row stays unmarked, in the document too.
+      jq -e '[.[] | select(.name == "fixture")] | length == 1 and (.[0] | has("firstParty") | not)' ${withFixture.internals.driverRowsFile}
+      jq -e '[.drivers[] | select(.name == "fixture") | has("firstParty")] | any | not' ${withFixture.internals.runInputDocumentFile}
       touch $out
     '';
 
   connector-driver-rows-core-name-must-match-core =
     assert assertMsg (evaluates (withRows {
-      claude = registry.entries.claude;
+      claude = claudeRow;
     })) "control: a Connector row equal to core's claude row must evaluate";
     assert assertMsg (
       !(evaluates (withRows {
-        claude = driftedClaude;
+        claude = claudeRow // {
+          inherit (driftedClaude) credentials;
+        };
       }))
     ) "a Connector row naming a core Driver with different facts must fail closed";
     pkgs.runCommand "connector-driver-rows-core-name-must-match-core" { } "touch $out";
@@ -195,7 +237,6 @@ in
   connector-driver-rows-outside-row-reaches-document-and-box =
     let
       h = withFixture.internals;
-      plainDoc = plain.internals.runInputDocumentFile;
     in
     assert assertMsg (
       h.driverEntry.name == "fixture"
@@ -204,19 +245,15 @@ in
       { nativeBuildInputs = [ pkgs.jq ]; }
       ''
         doc=${h.runInputDocumentFile}
-        jq -e '.drivers | length == 1 and .[0].name == "fixture"' "$doc"
+        jq -e '[.drivers[].name] == ["fixture", "claude"]' "$doc"
         wasm=$(jq -r '.drivers[0].module' "$doc")
         test -f "$wasm"
         case "$wasm" in */driver.wasm) ;; *) echo "unexpected module $wasm" >&2; exit 1 ;; esac
 
         line=$(grep '^DRIVER_ROWS_FILE=' ${h.driverPreambleFile})
         eval "$line"
-        jq -e --arg w "$wasm" '. == [{name: "fixture", credentials: [{env: ["ANTHROPIC_API_KEY"], remedy: "set ANTHROPIC_API_KEY"}], module: $w}]' "$DRIVER_ROWS_FILE"
-
-        # No Connector Driver rows: no `drivers` key and no preamble line, so
-        # existing documents and images stay byte-identical.
-        jq -e 'has("drivers") | not' ${plainDoc}
-        if grep -q DRIVER_ROWS_FILE ${plain.internals.driverPreambleFile}; then exit 1; fi
+        jq -e --arg w "$wasm" '.[0] == {name: "fixture", credentials: [{env: ["ANTHROPIC_API_KEY"], remedy: "set ANTHROPIC_API_KEY"}], module: $w}
+          and [.[].name] == ["fixture", "claude"]' "$DRIVER_ROWS_FILE"
         touch $out
       '';
 
@@ -236,7 +273,7 @@ in
       { nativeBuildInputs = [ pkgs.jq ]; }
       ''
         ${fixtures.runInputDocOf (programOf withRow)}
-        jq -e '.drivers | length == 1 and .[0].name == "fixture"' "$doc"
+        jq -e '[.drivers[].name] == ["fixture", "claude"]' "$doc"
         touch $out
       '';
 
@@ -246,43 +283,48 @@ in
   connector-driver-rows-shadow-reaches-box-only =
     let
       on = shadowOn.internals;
-      facts = pkgs.writeText "claude-facts.json" (
-        builtins.toJSON (registry.descriptorFacts registry.entries.claude)
+      facts = pkgs.writeText "opencode-facts.json" (
+        builtins.toJSON (registry.descriptorFacts registry.entries.opencode)
       );
     in
     pkgs.runCommand "connector-driver-rows-shadow-reaches-box-only" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
         line=$(grep '^DRIVER_ROWS_FILE=' ${on.driverPreambleFile})
         eval "$line"
+        # claude's always-rendered row precedes the shadow row.
         jq -e --slurpfile facts ${facts} '
-          length == 1 and .[0].shadow == true
-          and (.[0].module | endswith("/claude.wasm"))
-          and .[0].firstParty == true
-          and (.[0] | del(.module, .shadow, .firstParty)) == $facts[0]
+          [.[].name] == ["claude", "opencode"]
+          and (.[1] | .shadow == true
+            and (.module | endswith("/driver.wasm"))
+            and (has("firstParty") | not)
+            and (del(.module, .shadow)) == $facts[0])
+          and (.[0] | has("shadow") | not)
         ' "$DRIVER_ROWS_FILE"
-        test -f "$(jq -r '.[0].module' "$DRIVER_ROWS_FILE")"
+        test -f "$(jq -r '.[1].module' "$DRIVER_ROWS_FILE")"
 
-        # The host never runs the shadow, so its document carries no row.
-        jq -e 'has("drivers") | not' ${on.runInputDocumentFile}
+        # The host never runs the shadow, so its document carries claude's row
+        # alone.
+        jq -e '[.drivers[].name] == ["claude"]' ${on.runInputDocumentFile}
         touch $out
       '';
 
   connector-driver-rows-shadow-off-is-unchanged =
     assert assertMsg (
-      shadowOff.internals.driverPreambleFile.drvPath == plain.internals.driverPreambleFile.drvPath
+      shadowOff.internals.driverPreambleFile.drvPath == plainOpencode.internals.driverPreambleFile.drvPath
     ) "a Connector row without `shadow` must leave the Box preamble unchanged";
     assert assertMsg (
-      shadowOff.internals.runInputDocumentFile.drvPath == plain.internals.runInputDocumentFile.drvPath
+      shadowOff.internals.runInputDocumentFile.drvPath
+      == plainOpencode.internals.runInputDocumentFile.drvPath
     ) "a Connector row without `shadow` must leave the input document unchanged";
     pkgs.runCommand "connector-driver-rows-shadow-off-is-unchanged" { } "touch $out";
 
-  # claude is shadowed but the Harness runs the fixture Driver: its rows file
-  # carries the fixture row alone, so the image never bakes claude.wasm.
+  # opencode is shadowed but the Harness runs the fixture Driver: its rows file
+  # carries no shadow row, so the image never bakes the shadowed wasm.
   connector-driver-rows-shadow-only-for-selected-driver =
     pkgs.runCommand "connector-driver-rows-shadow-only-for-selected-driver"
       { nativeBuildInputs = [ pkgs.jq ]; }
       ''
-        jq -e 'length == 1 and .[0].name == "fixture" and (.[0] | has("shadow") | not)' \
+        jq -e '[.[].name] == ["fixture", "claude"] and all(.[]; has("shadow") | not)' \
           ${shadowOther.internals.driverRowsFile}
         touch $out
       '';
@@ -291,8 +333,8 @@ in
     assert assertMsg (preambleEvaluates shadowOn) "control: a core row with a module must shadow";
     assert assertMsg (
       !(preambleEvaluates (mkHarness {
-        shadowDrivers = [ "claude" ];
-        driverRows.claude = registry.entries.claude;
+        shadowDrivers = [ "opencode" ];
+        driverRows.opencode = registry.entries.opencode;
       }))
     ) "a shadow row without a module must fail closed";
     assert assertMsg (
@@ -303,7 +345,7 @@ in
     ) "a shadow row outside the core registry has no native Strategy and must fail closed";
     assert assertMsg (
       !(preambleEvaluates (mkHarness {
-        shadowDrivers = [ "claude" ];
+        shadowDrivers = [ "opencode" ];
       }))
     ) "shadowing a Connector with no row must fail closed";
     pkgs.runCommand "connector-driver-rows-shadow-needs-core-driver-with-module" { } "touch $out";
@@ -311,6 +353,20 @@ in
   # The flake option is the switch; mkHarness only hears of it when on, and the
   # Connector's own module may be the only other writer of its row.
   connector-driver-rows-flake-module-shadow-option =
+    let
+      consumerWith = modules: fixtures.connectorConsumerVia ([ ../../lib/flakeModule.nix ] ++ modules);
+      shadowed = consumerWith [ (opencodeConnectorModule { shadow = true; }) ];
+      programOf = c: c.apps.${system}.default.program;
+    in
+    assert assertMsg (
+      programOf shadowed != programOf (consumerWith [ (opencodeConnectorModule { }) ])
+    ) "`shadow` on a native Driver's Connector must reach mkHarness";
+    pkgs.runCommand "connector-driver-rows-flake-module-shadow-option" { } "touch $out";
+
+  # claude's host half is its Connector (issue #6799): the Consumer switches
+  # `shadow` and `primary` have no native Strategy to compare against or
+  # replace, so each fails evaluation, in mkHarness and through the module.
+  connector-driver-rows-claude-refuses-shadow-and-primary =
     let
       consumerWith =
         modules:
@@ -321,35 +377,138 @@ in
           ]
           ++ modules
         );
-      shadowed = consumerWith [ { spindrift.connectors.claude.shadow = true; } ];
-      programOf = c: c.apps.${system}.default.program;
+      evaluatesWith =
+        modules:
+        (builtins.tryEval (builtins.deepSeq (consumerWith modules).apps.${system}.default.program true))
+        .success;
     in
+    assert assertMsg (evaluatesWith [ ]) "control: the claude Connector with no switch must evaluate";
     assert assertMsg (
-      programOf (consumerWith [ ]) == fixtures.moduleConsumer.apps.${system}.default.program
-    ) "the claude Connector without `shadow` must leave the module's app unchanged";
+      !(evaluatesWith [ { spindrift.connectors.claude.shadow = true; } ])
+    ) "`shadow` on the claude Connector must fail evaluation";
     assert assertMsg (
-      programOf shadowed != programOf (consumerWith [ ])
-    ) "`shadow` on the claude Connector must reach mkHarness";
-    pkgs.runCommand "connector-driver-rows-flake-module-shadow-option" { } "touch $out";
+      !(evaluatesWith [ { spindrift.connectors.claude.primary = true; } ])
+    ) "`primary` on the claude Connector must fail evaluation";
+    assert assertMsg (
+      !(preambleEvaluates (mkHarness {
+        driverRows.claude = claudeRow;
+        shadowDrivers = [ "claude" ];
+      }))
+    ) "mkHarness must refuse `shadowDrivers = [ \"claude\" ]`";
+    assert assertMsg (
+      !(preambleEvaluates (mkHarness {
+        shadowDrivers = [ "claude" ];
+      }))
+    ) "mkHarness must refuse `shadowDrivers = [ \"claude\" ]` with no row too";
+    assert assertMsg (
+      !(evaluates (mkHarness {
+        driverRows.claude = claudeRow;
+        primaryDrivers = [ "claude" ];
+      }))
+    ) "mkHarness must refuse `primaryDrivers = [ \"claude\" ]`";
+    assert assertMsg (
+      !(evaluates (mkHarness {
+        primaryDrivers = [ "claude" ];
+      }))
+    ) "mkHarness must refuse `primaryDrivers = [ \"claude\" ]` with no row too";
+    pkgs.runCommand "connector-driver-rows-claude-refuses-shadow-and-primary" { } "touch $out";
 
-  # Issues #6797, #6810, #6998, #6999: the dogfood runs claude (a Driver row)
-  # and github (a backend row) as primary and shadows nothing. The real flake's
-  # default app (flake.nix's `spindrift.connectors` through the module) must
-  # equal the direct mirror's, whose Box rows file and input document carry
-  # `primary` and no `shadow`; the app
-  # program embeds both, so dropping flake.nix's wiring changes it. The mirror
-  # alone would not notice: it reads the nix/dogfood-*.nix lists itself.
+  # Issue #6799: claude's Connector row is rendered for every Consumer, with no
+  # `driverRows` at all and whichever Driver is selected. The row is the
+  # batteries wasm, marked first-party, and neither shadow nor primary, in both
+  # the launcher input document and the Box's rows file.
+  connector-driver-rows-claude-row-always-rendered =
+    let
+      row = pkgs.lib.removeSuffix "\n" ''
+        jq -e --arg w '${builtins.unsafeDiscardStringContext (claudeRow.module pkgs)}' '
+          [.[] | select(.name == "claude")]
+          | length == 1
+            and (.[0] | .module == $w and .firstParty == true
+              and (has("shadow") | not) and (has("primary") | not))'
+      '';
+      docRow = pkgs.lib.removeSuffix "\n" ''
+        jq -e --arg w '${builtins.unsafeDiscardStringContext (claudeRow.module pkgs)}' '
+          [.drivers[] | select(.name == "claude")]
+          | length == 1
+            and (.[0] | .module == $w and .firstParty == true
+              and (has("shadow") | not) and (has("primary") | not))'
+      '';
+      other = mkHarness {
+        driver = "opencode";
+        defaults = opencodeDefaults;
+      };
+    in
+    pkgs.runCommand "connector-driver-rows-claude-row-always-rendered"
+      { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        ${row} ${plain.internals.driverRowsFile}
+        ${docRow} ${plain.internals.runInputDocumentFile}
+        ${row} ${other.internals.driverRowsFile}
+        ${docRow} ${other.internals.runInputDocumentFile}
+        jq -e 'length == 1' ${plain.internals.driverRowsFile}
+        grep -q '^DRIVER_ROWS_FILE=' ${plain.internals.driverPreambleFile}
+        grep -q '^DRIVER_ROWS_FILE=' ${other.internals.driverPreambleFile}
+        touch $out
+      '';
+
+  # Issue #6799: claude's host half is its Connector, so mkHarness needs a row
+  # for it with a module that evaluates for the host, from the Consumer's
+  # `driverRows` or else the batteries flake. checkConnectorRow admits a
+  # core-named row without `module` (its facts equal core's) and `module` is
+  # lazy, so each guard in `hostedRowOf` is reached and must still throw.
+  connector-driver-rows-claude-hosted-row-needs-evaluating-module =
+    let
+      overridden = claudeRow // {
+        module = _: "/nix/store/consumer-override-claude.wasm";
+      };
+    in
+    assert assertMsg (evaluates (withRows {
+      claude = claudeRow;
+    })) "control: a claude row with a module must evaluate";
+    assert assertMsg (evaluates plain)
+      "control: no driverRows must fall back to the batteries flake's claude row";
+    assert assertMsg (
+      !(evaluates (withRows {
+        claude = registry.entries.claude;
+      }))
+    ) "a claude row with no module must fail evaluation";
+    assert assertMsg (
+      !(evaluates (withRows {
+        claude = claudeRow // {
+          module = _: throw "claude module does not evaluate";
+        };
+      }))
+    ) "a claude row whose module does not evaluate must fail evaluation";
+    pkgs.runCommand "connector-driver-rows-claude-hosted-row-needs-evaluating-module"
+      { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        jq -e '[.[] | select(.name == "claude")]
+          | length == 1 and .[0].module == "/nix/store/consumer-override-claude.wasm"' \
+          ${(withRows { claude = overridden; }).internals.driverRowsFile}
+        touch $out
+      '';
+
+  # Issues #6797, #6810, #6998, #6999, #6799: the dogfood runs github (a
+  # backend row) as primary and shadows nothing; claude's Connector row is
+  # always rendered but, with no native Strategy, is neither shadow nor
+  # primary. The real flake's default app (flake.nix's `spindrift.connectors`
+  # through the module) must equal the direct mirror's, whose Box rows file and
+  # input document carry `primary` on the primaries only and no `shadow`; the
+  # app program embeds both, so dropping flake.nix's wiring changes it. The
+  # mirror alone would not notice: it reads the nix/dogfood-*.nix lists itself.
   connector-driver-rows-dogfood-shadows =
     assert assertMsg (config.apps.default.program == fixtures.harness.apps.default.program)
       "flake.nix must wire the nix/dogfood-shadow.nix and nix/dogfood-primary.nix Connectors: the dogfood app differs from the mirror (fixtures.harness)";
     pkgs.runCommand "connector-driver-rows-dogfood-shadows" { nativeBuildInputs = [ pkgs.jq ]; } ''
       jq -e --argjson names '${builtins.toJSON driverPrimaries}' '
-        ($names | index("claude")) != null
-          and all(.[]; has("shadow") | not)
+        all(.[]; has("shadow") | not)
           and ([.[] | select(.name as $n | $names | index($n))] as $rows
             | ($rows | length) == ($names | length)
               and all($rows[]; .primary == true and .firstParty == true and has("module")))
       ' ${fixtures.harness.internals.driverRowsFile}
+      jq -e '[.[] | select(.name == "claude")]
+        | length == 1 and (.[0] | .firstParty == true and has("module")
+          and (has("shadow") | not) and (has("primary") | not))' ${fixtures.harness.internals.driverRowsFile}
       ${fixtures.runInputDocOf config.apps.default.program}
       jq -e --argjson names '${builtins.toJSON driverPrimaries}' '
         ([.drivers[]? | select(.name as $n | $names | index($n))] as $rows
@@ -357,6 +516,8 @@ in
             and all($rows[]; .primary == true and has("module")))
           and all((.drivers // [])[]; has("shadow") | not)
       ' "$doc"
+      jq -e '[.drivers[] | select(.name == "claude")]
+        | length == 1 and (.[0] | has("module") and (has("shadow") | not) and (has("primary") | not))' "$doc"
       jq -e --argjson names '${builtins.toJSON backendPrimaries}' '
         [.backends[] | select(.name as $n | $names | index($n))] as $rows
         | ($names | length) > 0
@@ -435,41 +596,35 @@ in
       '';
 
   # Issue #6999: `primary` on a `driver` row reaches both sides. The launcher
-  # input document (host) and the Box's rows file each carry the claude row
-  # with `primary`, its module and, in the Box, the first-party mark. Off, no
-  # `primary` key appears anywhere, so the Consumer's outputs are unchanged.
+  # input document (host) and the Box's rows file each carry the opencode row
+  # with `primary` and its module (never the first-party mark: the fixture's
+  # wasm is not the batteries build). Off, no `primary` key appears anywhere,
+  # so the Consumer's outputs are unchanged. claude is not eligible
+  # (connector-driver-rows-claude-refuses-shadow-and-primary).
   connector-driver-rows-primary-driver =
     let
-      consumerWith =
-        modules:
-        fixtures.connectorConsumerVia (
-          [
-            ../../lib/flakeModule.nix
-            claudeConnector.flakeModule
-          ]
-          ++ modules
-        );
+      consumerWith = modules: fixtures.connectorConsumerVia ([ ../../lib/flakeModule.nix ] ++ modules);
       programOf = c: c.apps.${system}.default.program;
       primaryBox = mkHarness {
-        driverRows.claude = claudeRow;
-        primaryDrivers = [ "claude" ];
+        driverRows.opencode = opencodeRow;
+        primaryDrivers = [ "opencode" ];
       };
-      plainBox = mkHarness { driverRows.claude = claudeRow; };
+      plainBox = mkHarness { driverRows.opencode = opencodeRow; };
       bothBox = mkHarness {
-        driverRows.claude = claudeRow;
-        shadowDrivers = [ "claude" ];
-        primaryDrivers = [ "claude" ];
+        driverRows.opencode = opencodeRow;
+        shadowDrivers = [ "opencode" ];
+        primaryDrivers = [ "opencode" ];
       };
       outsideBox = mkHarness {
         driverRows.fixture = fixtureRow;
         primaryDrivers = [ "fixture" ];
       };
       moduleless = mkHarness {
-        driverRows.claude = removeAttrs claudeRow [ "module" ];
-        primaryDrivers = [ "claude" ];
+        driverRows.opencode = registry.entries.opencode;
+        primaryDrivers = [ "opencode" ];
       };
     in
-    assert assertMsg (evaluates primaryBox) "control: a primary claude row must evaluate";
+    assert assertMsg (evaluates primaryBox) "control: a primary opencode row must evaluate";
     assert assertMsg (
       !(evaluates bothBox)
     ) "a row both shadowed and primary must fail closed in mkHarness";
@@ -479,14 +634,15 @@ in
     assert assertMsg (!(evaluates moduleless)) "`primary` on a row without a module must fail closed";
     pkgs.runCommand "connector-driver-rows-primary-driver" { nativeBuildInputs = [ pkgs.jq ]; } ''
       ${fixtures.runInputDocOf (
-        programOf (consumerWith [ { spindrift.connectors.claude.primary = true; } ])
+        programOf (consumerWith [ (opencodeConnectorModule { primary = true; }) ])
       )}
-      jq -e '[.drivers[] | select(.name == "claude")]
+      jq -e '[.drivers[] | select(.name == "opencode")]
         | length == 1 and all(.[]; .primary == true and has("module") and (has("shadow") | not))' "$doc"
-      jq -e '[.[] | select(.name == "claude")]
-        | length == 1 and all(.[]; .primary == true and has("module") and .firstParty == true and (has("shadow") | not))' \
+      jq -e '[.drivers[] | select(.name == "claude")] | length == 1 and (.[0] | has("primary") | not)' "$doc"
+      jq -e '[.[] | select(.name == "opencode")]
+        | length == 1 and all(.[]; .primary == true and has("module") and (has("firstParty") | not) and (has("shadow") | not))' \
         ${primaryBox.internals.driverRowsFile}
-      ${fixtures.runInputDocOf (programOf (consumerWith [ ]))}
+      ${fixtures.runInputDocOf (programOf (consumerWith [ (opencodeConnectorModule { }) ]))}
       jq -e 'all((.drivers // [])[]; has("primary") | not)' "$doc"
       jq -e 'all(.[]; has("primary") | not)' ${plainBox.internals.driverRowsFile}
       touch $out
@@ -540,7 +696,7 @@ in
       };
       errorFor =
         row:
-        names.primaryError [ "github" ] [ "claude" ] "row1" (
+        names.primaryError [ "github" ] registry.nativeDriverNames "row1" (
           {
             shadow = false;
             driver = null;
@@ -565,14 +721,14 @@ in
       } != null
     ) "a row with no native backend of its name must be refused";
     assert assertMsg (
-      names.primaryError [ "github" ] [ "claude" ] "claude" {
+      names.primaryError [ "github" ] registry.nativeDriverNames "opencode" {
         shadow = false;
         driver = { };
         backend = { };
       } != null
     ) "a row with both a driver and a backend must still pass the backend checks";
     assert assertMsg (
-      names.primaryError [ "row1" ] [ "claude" ] "row1" {
+      names.primaryError [ "row1" ] registry.nativeDriverNames "row1" {
         shadow = false;
         driver = null;
         backend = { };
@@ -597,9 +753,6 @@ in
         }
       ])
     ) "`primary` with `shadow` must fail evaluation";
-    assert assertMsg (evaluatesWith [
-      { spindrift.connectors.claude.primary = true; }
-    ]) "control: `primary` on the claude driver row must evaluate";
     # jira has no native adapter (connectorOnly), so its Connector row is
     # refused `primary` with the "no native backend" message.
     assert assertMsg (evaluatesWith [
@@ -622,5 +775,22 @@ in
       }
       == "Connector 'jira': `primary` needs a native backend of the same name to replace; none is registered"
     ) "the jira refusal must be the existing no-native-backend message";
+    assert assertMsg (
+      !(evaluatesWith [ { spindrift.connectors.claude.primary = true; } ])
+    ) "`primary` on the claude driver row must fail evaluation: it has no native Strategy";
+    assert assertMsg (
+      names.primaryError [ "github" ] registry.nativeDriverNames "claude" {
+        shadow = false;
+        driver = { };
+        backend = null;
+      } != null
+    ) "a Driver row with no native Strategy of its name must be refused";
+    assert assertMsg (
+      names.primaryError [ "github" ] registry.nativeDriverNames "opencode" {
+        shadow = false;
+        driver = { };
+        backend = null;
+      } == null
+    ) "control: a Driver row with a native Strategy must be accepted";
     pkgs.runCommand "connector-driver-rows-primary-refusals" { } "touch $out";
 }

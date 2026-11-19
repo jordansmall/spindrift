@@ -21,8 +21,8 @@ nix flake check -L              # same, streaming build logs (aka --print-build-
 nix build .#checks.$(nix eval --raw --impure --expr builtins.currentSystem).launcher-go-test -L
                                 # core launcher Go tests: no Driver, bundle or main in its source
 nix build .#checks.$(nix eval --raw --impure --expr builtins.currentSystem).launcher-binaries-go-test -L
-                                # the tests of the mains, which link every Driver through the bundle
-nix build .#checks.$(nix eval --raw --impure --expr builtins.currentSystem).drivers-claude-go-test -L
+                                # the tests of the mains, which link every native Driver through the bundle (claude is its Connector row)
+nix build .#checks.$(nix eval --raw --impure --expr builtins.currentSystem).drivers-opencode-go-test -L
                                 # one Driver's own tests (drivers-<name>-go-test); skips its Connector conformance
 nix build .#checks.$(nix eval --raw --impure --expr builtins.currentSystem).backends-github-go-test -L
                                 # one backend's own tests (backends-<name>-go-test); skips its Connector conformance
@@ -285,7 +285,7 @@ and in the in-box `box` program; the only bash left is the generated shim that
   registry; each family's constructors live in a sibling subpackage, e.g.
   `runner/oci`, registered by the Bundle, `driver/bundle`),
   `driver` (the Driver interface and registry; each
-  Driver's own behavior lives in a sibling subpackage, e.g. `driver/claude`),
+  Driver's own behavior lives in a sibling subpackage, e.g. `driver/opencode`),
   `dispatchkind` (the Dispatch kind descriptors; `kinds_gen.go` is generated
   from `lib/dispatch-kinds/default.nix`),
   `backend` (the Descriptor registry; `registry_gen.go` is generated from
