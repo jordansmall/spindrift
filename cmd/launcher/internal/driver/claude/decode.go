@@ -67,19 +67,20 @@ func (d *decoder) decode(line string) []driverkit.Event {
 	return evs
 }
 
-// topLevel is the one top-level parse of a line that the host-op probe,
-// classifyTurn and topLevelTimestamp share (issue #5438). Type is typed because
-// every probe needs it as a string; the other fields stay raw so each probe
-// decodes only its own, and a mistyped field fails only the probe that reads
-// it. A struct, not a map, keeps encoding/json's case-insensitive key matching.
+// topLevel is the one top-level parse of a line that classifyTurn and
+// topLevelTimestamp share (issue #5438); the host-op probe reads only its Type.
+// Type is typed because every probe needs it as a string; the other fields
+// stay raw so each probe decodes only its own, and a mistyped field fails only
+// the probe that reads it. A struct, not a map, keeps encoding/json's
+// case-insensitive key matching.
 // Unlike per-probe decodes, a repeated raw key keeps only its last copy; the
-// claude CLI never writes one.
+// claude CLI never writes one. Host ops are decoded from the whole line instead
+// (hostOp), so a repeated spindrift_op key merges as connectorhost's does.
 type topLevel struct {
-	Type        string          `json:"type"`
-	SpindriftOp json.RawMessage `json:"spindrift_op"`
-	Error       json.RawMessage `json:"error"`
-	Message     json.RawMessage `json:"message"`
-	Timestamp   json.RawMessage `json:"timestamp"`
+	Type      string          `json:"type"`
+	Error     json.RawMessage `json:"error"`
+	Message   json.RawMessage `json:"message"`
+	Timestamp json.RawMessage `json:"timestamp"`
 }
 
 // parseTopLevel returns nil when line does not decode into a topLevel. JSON
@@ -98,27 +99,19 @@ func decodeField(raw json.RawMessage, v any) bool {
 	return len(raw) == 0 || json.Unmarshal(raw, v) == nil
 }
 
-// hostOp returns the host-written op on a type:"spindrift_op" line, else nil.
-func hostOp(top *topLevel) *hostop.SpindriftOp {
-	if top == nil {
-		return nil
-	}
-	var op *hostop.SpindriftOp
-	if top.Type != hostop.TypeSpindriftOp || !decodeField(top.SpindriftOp, &op) {
-		return nil
-	}
-	return op
-}
-
-// hostLineOp returns the op and role of a type:"spindrift_op" line whose payload
-// is an object, by the rule driver.HostLineOf (sdk/driver/hostline.go) applies
-// on the Connector side; this is a hand copy, as cmd/launcher cannot import the
-// SDK. decodeLine calls it only after hostOp has failed, so what it accepts is
-// a host op with a mistyped field, never scanned as agent text. It re-parses
-// line because top keeps only the last copy of a repeated key.
-func hostLineOp(top *topLevel, line string) *hostop.SpindriftOp {
+// hostOp returns the op of a type:"spindrift_op" line, else nil. It decodes the
+// whole line into hostop.Event, connectorhost's rule, so a repeated
+// spindrift_op key merges as it does there; wellTyped reports that decode
+// succeeded. For a host op with a mistyped field, the op and role come from a
+// hand copy of driver.HostLineOf (sdk/driver/hostline.go), as cmd/launcher
+// cannot import the SDK, and decodeLine emits no events for it.
+func hostOp(top *topLevel, line string) (op *hostop.SpindriftOp, wellTyped bool) {
 	if top == nil || top.Type != hostop.TypeSpindriftOp {
-		return nil
+		return nil, false
+	}
+	var ev hostop.Event
+	if json.Unmarshal([]byte(line), &ev) == nil {
+		return ev.SpindriftOp, true
 	}
 	var probe struct {
 		SpindriftOp *struct {
@@ -127,9 +120,9 @@ func hostLineOp(top *topLevel, line string) *hostop.SpindriftOp {
 		} `json:"spindrift_op"`
 	}
 	if json.Unmarshal([]byte(line), &probe) != nil || probe.SpindriftOp == nil {
-		return nil
+		return nil, false
 	}
-	return &hostop.SpindriftOp{Op: probe.SpindriftOp.Op, Role: probe.SpindriftOp.Role}
+	return &hostop.SpindriftOp{Op: probe.SpindriftOp.Op, Role: probe.SpindriftOp.Role}, false
 }
 
 // topLevelTimestamp returns the epoch milliseconds of the line's top-level
@@ -154,13 +147,12 @@ func topLevelTimestamp(line string, top *topLevel) (int64, bool) {
 func (d *decoder) decodeLine(line string, top *topLevel) []driverkit.Event {
 	// Host-written; knob values and the settle note are operator or Box text:
 	// scanning them could turn a terminal failure into retries.
-	if op := hostOp(top); op != nil {
+	if op, wellTyped := hostOp(top, line); op != nil {
 		d.topRole = nextActiveTopLevelRole(d.topRole, op)
+		if !wellTyped {
+			return nil
+		}
 		return []driverkit.Event{{Kind: driverkit.KindHostOp, HostOp: op}}
-	}
-	if probe := hostLineOp(top, line); probe != nil {
-		d.topRole = nextActiveTopLevelRole(d.topRole, probe)
-		return nil
 	}
 
 	content, synthetic := classifyTurn(top)
