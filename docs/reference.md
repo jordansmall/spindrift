@@ -1003,12 +1003,12 @@ above.
 The actual pin/resume verb lives behind the Driver seam (ADR 0009): on the
 initial run the claude Driver pins a deterministic session id (derived from
 `REPO_SLUG` + `ISSUE_NUMBER`, so no state beyond those two env vars is needed
-to recompute it) via `--session-id`; the fix box recomputes the same id and
-passes `--resume` only when that session's transcript is actually present
-under the mounted directory. When it is not — the cache was evicted, this is
-the first fix pass after a crash, or the branch was rebased out from under
-the session — the fix box falls back cleanly to the cold-context fix flow
-above, with no error.
+to recompute it) via `--session-id`. The claude Connector's `SessionFlags`
+renders no `--resume`, because a Connector's guest cannot see the transcript
+under `HOME` to check that it is present. A claude resume therefore falls back
+to the cold-context fix flow above, with no error, for every Consumer: the
+claude Connector is the only claude Driver (ADR 0073, issue #6799). The
+mounted session directory and the pinned id are unchanged.
 
 opencode cannot pin a session id at creation (`opencode run --session <id>`
 only continues an existing opencode-generated `ses_…` id), so its initial run
@@ -1412,7 +1412,7 @@ Driver entry declares:
   decoder its Pass-log readers share (see [Host-side event layer](#host-side-event-layer)).
   That package (`cmd/launcher/internal/driver/<name>`) also ships a
   canonical `testdata/outcome-fixture.jsonl` pinned by an
-  `outcome_fixture_test.go`, as claude and opencode do.
+  `outcome_fixture_test.go`, as opencode does.
   It proves itself with the conformance kit
   (`cmd/launcher/internal/driver/driverkit/conformance`): its corpus lives in
   `testdata/corpus/<case>/` there (see [Driver Pass-log
@@ -1422,6 +1422,8 @@ Driver entry declares:
   `TestDriverTestClosuresStandAlone` guards. Its tests run in their own
   `drivers-<name>-go-test` check, generated from the registry row — build it
   while iterating (`nix build .#checks.<system>.drivers-<name>-go-test -L`).
+  `claude` has no such check: it has no native package, and its Go and
+  conformance checks run in its Connector subflake.
   A Driver edit reruns that Driver's own check; `launcher-binaries-go-test`
   (the tests of the packages that link the bundle, the bundle's own tests,
   and the registry's cross-Driver guards); and every derivation built from
@@ -1764,7 +1766,9 @@ track later edits to those fixtures (the corpus pins behaviour, so a fixture
 edit must not move a golden). The Driver's own `TestCorpus` calls
 `conformance.Run` (`cmd/launcher/internal/driver/driverkit/conformance`) with
 its exported `Strategy`, which drives the Driver over each log and compares
-its output to goldens beside it:
+its output to goldens beside it (claude's corpus lives in
+`connectors/claude/testdata/corpus`, where driverrows' `TestCorpus` replays it
+through the wasm under `connector-claude-conformance`):
 `classification.golden.json` (transient-vs-terminal classification),
 `usage.golden.json` (token and cost report),
 `heartbeat.golden.json` (heartbeat lines and `OnModel` calls),
@@ -2318,10 +2322,12 @@ is the fixture Connector in
   `primary` on makes its Connector the Driver ahead of the native Strategy (see
   [Driver primary mode](#driver-primary-mode), issue #6999). `shadow` and
   `primary` are exclusive, and a row with neither a `driver` nor a `backend` is
-  refused. spindrift's own dogfood is a pinned exception to mimicking a new
-  Consumer: it shadows the Connectors in `nix/dogfood-shadow.nix` (none today)
-  and runs those in `nix/dogfood-primary.nix` (claude and github) as primary,
-  each until cut-over.
+  refused. `claude` takes neither: it has no native Strategy to shadow or lead
+  (issue #6799), and its Connector is always the claude Driver, so
+  `spindrift.connectors.claude.shadow` and `.primary` fail evaluation.
+  spindrift's own dogfood is a pinned exception to mimicking a new Consumer: it
+  shadows the Connectors in `nix/dogfood-shadow.nix` (none today) and runs those
+  in `nix/dogfood-primary.nix` (github) as primary, each until cut-over.
 - **Row-owned knobs.** A row's `knobs` attrset has the shape of a core row's
   (ADR 0068), keyed by env-schema key with an env-schema entry as value. The
   knobs fold into `spindrift.envSchema` on top of lib/env-schema.nix. Only that
@@ -2414,11 +2420,20 @@ into a rows file the Box entrypoint passes as `--driver-rows-file`
 orchestrator and driver-exec. In the binaries, the `driverrows` package
 overlays those rows on the generated Driver Descriptors, and a row's Driver
 loads lazily through the Connector host. A native Strategy wins unless the row
-is `primary` ([Driver primary mode](#driver-primary-mode)), so `claude`'s stays
-authoritative for a Consumer that does not set it. With no outside rows nothing
-changes, and a binary with no rows to read falls back to the generated
-Descriptors (`descriptor_gen.go`); Quickstart has no input document and always
-uses that fallback.
+is `primary` ([Driver primary mode](#driver-primary-mode)).
+
+`claude` has no native Strategy (issue #6799), so its Connector is the claude
+Driver for every Consumer. `mkHarness` always renders the `claude` row, the
+Consumer's own `driverRows.claude` if it sets one and otherwise the batteries
+flake's, into both the input document and the Box rows file, whichever Driver
+the Harness selects, and `DRIVER_ROWS_FILE` is always in the driver preamble. A
+host that cannot evaluate the row's module fails evaluation naming the row. A
+claude Connector that fails to load fails the run with `DRIVER "claude": ...`,
+with no fallback, and a binary given no row for it fails with `DRIVER "claude":
+no Driver row supplies its Connector module`. Quickstart has no input document,
+so it checks `DRIVER` against the generated Descriptors alone. For the other
+Drivers, with no outside rows nothing changes, and a binary with no rows to
+read falls back to the generated Descriptors (`descriptor_gen.go`).
 
 `mkHarness` fails evaluation on a row that:
 
@@ -2818,8 +2833,10 @@ harness Forgejo with a TLS proxy because the Connector refuses a non-https base.
 #### Shadow mode
 
 A Connector can run beside the native code it will replace before it replaces
-it (ADR 0073 point 13). In shadow mode the native Strategy stays
-authoritative: the run's exit code, result text and every decision come from
+it (ADR 0073 point 13). claude has no native Strategy left to shadow (issue
+#6799), so Driver shadow now serves opencode and pi until they cut over, and
+`mkHarness` refuses `claude` in `shadowDrivers`. In shadow mode the native
+Strategy stays authoritative: the run's exit code, result text and every decision come from
 it, and the Connector's answer is only compared and recorded. The switch is
 the row option `spindrift.connectors.<name>.shadow`, set `true` as a bare
 definition by whoever owns the flake that evaluates the row (see **Module**).
@@ -2839,7 +2856,7 @@ row, github reads stay on native `gh`, the env schema has no such variable, and
 doctor prints no `connector-routes[github]` or
 `connector-routes-widened[github]` row. spindrift's own dogfood shadows the
 Connectors listed in `nix/dogfood-shadow.nix` (none today) and runs those in
-`nix/dogfood-primary.nix` (claude and github) as primary, a pinned exception to
+`nix/dogfood-primary.nix` (github) as primary, a pinned exception to
 mimicking a new Consumer; its accepted github Route table is baselined in
 `spindrift-connector-routes.json`.
 
@@ -2919,8 +2936,11 @@ fetched from CI with `gh run download` have all ended, so for them set
 summary counts dirty, and a satellite fetched without its primary is not
 skipped. A Driver shadow moves on to primary mode (#6999) after 20 consecutive
 clean dogfood runs; once a Driver is primary it emits no `shadow_summary`, so
-the recipe applies only while the Driver is shadowed. The recipe counts them
-from the newest log back, with `logs` the directory of Pass logs
+the recipe applies only while the Driver is shadowed. claude cut over this way
+(issue #6799), on 41 consecutive clean dogfood runs in primary mode (16 work
+Boxes and 25 research dispatches) before its native Strategy was deleted. The
+recipe counts them from the newest log back, with `logs` the directory of Pass
+logs
 (`.spindrift/logs`, or a directory of artifacts fetched with `gh run download
 <run-id> -n agent-logs-<issue> -D logs`). It orders logs by the
 instant the `started` stamp in each log's `dispatch_start` names, UTC offset
@@ -3126,12 +3146,15 @@ rows file). It needs a `module` and a core Driver of its name, and excludes
 row to both sides whichever Driver the Harness selects; a host whose packages
 cannot evaluate the module fails evaluation naming the row. The native Strategy
 stays linked in and remains the default for every Consumer that sets no
-`primary`. The Box still refuses a Connector that is not first-party.
+`primary`. claude is the exception: it has no native Strategy (issue #6799), so
+its row is always rendered and `primaryDrivers` refuses it. The Box still
+refuses a Connector that is not first-party.
 
 There is no fallback. A Connector that fails to load fails the run with an
-error naming the Driver (`DRIVER "claude": ...`). Dropping the name from
+error naming the Driver (`DRIVER "<name>": ...`). Dropping the name from
 `nix/dogfood-primary.nix`, or `primary` from the row, restores the native
-Strategy with no code revert. A primary Driver emits no `shadow_summary`, so the
+Strategy with no code revert, except for claude, whose native Strategy is gone.
+A primary Driver emits no `shadow_summary`, so the
 [streak recipe](#driver-replay) no longer counts its runs.
 
 ##### Backend primary mode
@@ -4022,8 +4045,8 @@ Driver Connectors); a run that loads none starts none.
 - **Dogfood.** spindrift's own dogfood turns `CONNECTOR_SANDBOX` on
   (`connectorSandbox` in `nix/dogfood-defaults.nix`, which the fixtures mirror
   inherits; the `connector-driver-rows-dogfood-sandbox` check asserts both
-  carry it), so its github primary Connector and any Launcher-hosted claude
-  Driver load in the sandbox; its shadow and primary settings are unchanged. A
+  carry it), so its github primary Connector and the Launcher-hosted claude
+  Driver Connector load in the sandbox; its shadow and primary settings are unchanged. A
   dogfood run's primary record, `primary-github-<stamp>-<pid>.audit.jsonl`,
   should end with a totals line showing the sandbox's start and hop totals and
   `in_process_loads` of `0` (see [Backend primary

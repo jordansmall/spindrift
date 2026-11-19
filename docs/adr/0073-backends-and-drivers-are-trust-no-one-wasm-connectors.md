@@ -282,20 +282,19 @@ on this: about 50 s a read. One path is already interactive: the console's
 `RenderTranscript` read (`internal/console/transcript.go`) would take about
 50 s on the largest Pass after a cut-over to the interpreter.
 
-To re-run, use the command in the header of
-`cmd/launcher/internal/driver/claude/connector_bench_test.go` with `-count 5`,
-the wasm built as `nix/checks/go.nix`'s `setupFor` builds it.
+The benchmark (`connector_bench_test.go`) was deleted with the native Strategy
+in #6799 and no longer exists in-tree; git history keeps it for a re-run.
 
 ### Re-measured on dogfood-sized Pass logs (issue #6849)
 
 The 769-line corpus above averages 0.7 KB a line. Dogfood Pass logs average
 about 5 KB a line, with tool results up to 850 KB. The new corpus,
-`cmd/launcher/internal/driver/claude/testdata/dogfood/` (`NOTES.md`), is two
+`connectors/claude/testdata/dogfood/` (`NOTES.md`), is two
 synthetic Passes: 636 lines, 2.96 MB; the largest (`large-pass`) is 511 lines,
 2.57 MB. Medians of 3, same machine and toolchain, run inside a dogfood Box on
 a shared host, so the old corpus re-measured at 19.0 ms/line on the
 interpreter against 15.3 ms above. Compare ratios within one run, not across
-runs. To re-run, use the same header command with `-count 3`.
+runs. The benchmark is gone (see above); history keeps it.
 
 | bench, per line | native | interpreter | compiler |
 |---|---|---|---|
@@ -942,7 +941,7 @@ iteration per round (an interpreter iteration is 9 to 50 s); medians:
 ```sh
 SPINDRIFT_DRIVER_CONNECTOR_WASM=/tmp/claude-<before|after>.wasm \
   go test -run '^$' -bench 'Connector(DecodeBatch|PostPass)/.*/interpreter' \
-  -benchmem -benchtime 1x ./internal/driver/claude/
+  -benchmem -benchtime 1x ./internal/driver/claude/  # deleted in #6799; recover from git history
 ```
 
 | benchmark | time before | time after | B/op before → after | allocs/op before → after |
@@ -1161,3 +1160,38 @@ is deleted: the jira Connector is jira's only tracker, with or without
 `primary`, and a jira row that sets `primary` fails evaluation because there is
 no native backend of the same name to replace. A Connector that omits a
 required tracker capability fails the run instead of degrading.
+
+## Amendment (issue #6799): claude cuts over
+
+The native claude Strategy is deleted, and the claude Connector is the claude
+Driver for every Consumer. `mkHarness` always renders its row, the Consumer's
+own `driverRows.claude` if set and otherwise the batteries flake's, into the
+launcher input document's `drivers` and the Box rows file, whichever Driver the
+Harness selects, so a Consumer that imports only core still gets the
+first-party wasm. A host that cannot evaluate the module fails evaluation
+naming the row. A claude Connector that fails to load fails the run with
+`DRIVER "claude": ...`, with no fallback, and a binary given no row for it
+fails with `DRIVER "claude": no Driver row supplies its Connector module`.
+Quickstart has no input document and validates `DRIVER` against the generated
+Descriptors alone.
+
+With no native Strategy there is nothing to shadow or lead, so `mkHarness`
+refuses `claude` in `shadowDrivers` and `primaryDrivers`, and
+`spindrift.connectors.claude.shadow` and `.primary` fail evaluation. Dogfood's
+claude row sets neither, and `nix/dogfood-primary.nix` now lists only github.
+The shadow plumbing (the switch, the comparator, divergence records and the
+per-Pass summary) stays for opencode and pi (#6874, #6876) and is deleted by
+#6879 once the last Driver has cut over. The claude corpus and goldens moved
+byte-identical to `connectors/claude/testdata`, and
+`connector-claude-conformance` runs them through the wasm.
+
+One consequence is visible. The claude Connector's `SessionFlags` renders no
+`--resume`, since a guest cannot see the transcript under `HOME` to check that
+it exists. A "resume" session mode therefore falls back to the cold-context
+flow. That was already true on dogfood under primary mode and now holds for
+every Consumer; restoring resume is tracked in #6824.
+
+Evidence (issue #6999, 2026-11-17): 41 consecutive dogfood runs in claude
+primary mode, 16 work Boxes and 25 research dispatches, with no launcher-side
+`DRIVER "claude": ...` line in any. #6825, the resets-time clock, was a blocker
+and is closed.
