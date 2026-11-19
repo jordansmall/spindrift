@@ -27,7 +27,7 @@ func fakeGitlabRow() backendkit.Strategy {
 		},
 		ValidateTracker: func(s backendkit.Shared, _ backendkit.Lookup) error {
 			if s.RepoSlug == "" {
-				return fmt.Errorf("set REPO_SLUG for ISSUE_TRACKER=gitlab")
+				return fmt.Errorf("pass --repo-slug owner/repo or set forge.repoSlug when ISSUE_TRACKER=gitlab")
 			}
 			return nil
 		},

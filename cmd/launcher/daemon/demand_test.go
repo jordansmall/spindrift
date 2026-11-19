@@ -518,7 +518,7 @@ func TestBuildDemandSources_TokenCmdFormHintNamesKnobNotValue(t *testing.T) {
 }
 
 // The hint explains a blank token; a different validation failure (here the
-// missing REPO_SLUG) must not claim the _CMD form is the problem.
+// missing repo slug) must not claim the _CMD form is the problem.
 func TestBuildDemandSources_TokenCmdHintOnlyForTokenErrors(t *testing.T) {
 	clearKnobEnvT(t)
 	t.Setenv("GH_TOKEN_CMD", "rbw get hush-hush-entry")
@@ -526,8 +526,8 @@ func TestBuildDemandSources_TokenCmdHintOnlyForTokenErrors(t *testing.T) {
 		"ISSUE_TRACKER": "github", "LABEL": "ready-for-agent",
 	}), allDemandKinds)
 	got := missing[daemon.KindOf(dispatchkind.Work)]
-	if !strings.Contains(got, "REPO_SLUG") {
-		t.Fatalf("reason = %q, want the REPO_SLUG error", got)
+	if !strings.Contains(got, "forge.repoSlug") || strings.Contains(got, "REPO_SLUG") {
+		t.Fatalf("reason = %q, want the repo-slug error naming forge.repoSlug, not REPO_SLUG", got)
 	}
 	if strings.Contains(got, "_CMD") {
 		t.Errorf("reason = %q, want no _CMD hint on a slug error", got)
@@ -712,7 +712,7 @@ func TestBuildDemandSources_MissingReasonPerProbedKind(t *testing.T) {
 		// builds a source and has no entry.
 		wantWork, wantResearch string
 	}{
-		{"github without slug", map[string]string{"ISSUE_TRACKER": "github", "LABEL": "ready-for-agent"}, "REPO_SLUG", "REPO_SLUG"},
+		{"github without slug", map[string]string{"ISSUE_TRACKER": "github", "LABEL": "ready-for-agent"}, "forge.repoSlug", "forge.repoSlug"},
 		{"forgejo without token", map[string]string{"ISSUE_TRACKER": "forgejo", "REPO_SLUG": "o/r", "FORGEJO_BASE_URL": "http://x", "LABEL": "ready-for-agent"}, "FORGEJO_TOKEN", "FORGEJO_TOKEN"},
 		{"unknown tracker", map[string]string{"ISSUE_TRACKER": "bogus", "LABEL": "ready-for-agent"}, `unknown ISSUE_TRACKER "bogus"`, `unknown ISSUE_TRACKER "bogus"`},
 		{"fully configured", map[string]string{"ISSUE_TRACKER": "local", "LOCAL_ISSUES_DIR": t.TempDir(), "LABEL": "ready-for-agent"}, "", ""},
