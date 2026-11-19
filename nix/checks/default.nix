@@ -221,6 +221,8 @@ let
     "connector-driver-rows-dogfood-sandbox"
     "connector-driver-rows-first-party-mark"
     "connector-driver-rows-primary-driver"
+    "connector-driver-rows-claude-row-always-rendered"
+    "connector-driver-rows-claude-hosted-row-needs-evaluating-module"
   ];
 
   portableSourceChecks =

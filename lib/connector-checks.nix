@@ -4,7 +4,9 @@
 # lane runs it via `nix run .#connector-dev -- <name> flake check`. It covers
 # the Connector's Go fmt, wasip1 vet and unit tests, plus the launcher's
 # conformance test for its Driver or backend run against the Connector's wasm.
-# It runs `go test ./internal/{driver,forge}/<name>/...` inside core's launcher,
+# It runs `go test ./internal/{driver,forge}/<name>/...` inside core's launcher
+# (a Driver with no native package, lib/drivers/default.nix's connectorHosted,
+# runs the driverrows tests alone, over the corpus beside the Connector),
 # so it works only for a Connector named after a core Driver or backend package.
 {
   nixpkgs,
@@ -25,11 +27,12 @@ let
       isBackend = connector ? routes;
 
       # go.mod replaces the SDK with ../../sdk, so both trees keep that layout.
+      # The Connector's own tests read testdata beside them (jira's goldens,
+      # claude's corpus and dogfood logs); a Connector without one has none.
       connectorSrc = fs.toSource {
         root = src;
         fileset = fs.unions [
           (fs.fileFilter (f: f.hasExt "go" || f.name == "go.mod") src)
-          # A Connector's goldens, read by its own tests.
           (fs.maybeMissing (src + "/testdata"))
         ];
       };
@@ -75,12 +78,28 @@ let
           ''
             export SPINDRIFT_DRIVER_CONNECTOR_WASM=${connector.package pkgs}/${name}.wasm
             export SPINDRIFT_DRIVER_CONNECTOR_NAME=${name}
+          ''
+          # fixturebuild.ClaudeConnectorWasm reads this claude-named variable; a
+          # second connectorHosted Driver must not register claude's under its wasm.
+          + pkgs.lib.optionalString (connectorHosted && name == "claude") ''
+            export SPINDRIFT_CLAUDE_CONNECTOR_WASM=${connector.package pkgs}/${name}.wasm
+          ''
+          + pkgs.lib.optionalString connectorHosted ''
+            mkdir -p ../../connectors/${name}
+            cp -r ${src}/testdata ../../connectors/${name}/testdata
           '';
+      # A Driver with no native package has this Connector alone as its host
+      # half: driverrows' TestCorpus registers the claude wasm and replays the
+      # corpus beside the Connector, in place of the native-vs-Connector
+      # comparison a Driver with a native Strategy gets.
+      connectorHosted =
+        !isBackend
+        && pkgs.lib.elem name (import ./drivers/default.nix { inherit (pkgs) lib; }).connectorHosted;
       testPkg = if isBackend then "forge" else "driver";
       # driverrows' primary-row corpus test runs the Connector; the Driver's own
       # tests cannot, as they may not import the registry root.
       testPkgs =
-        "./internal/${testPkg}/${name}/..."
+        pkgs.lib.optionalString (!connectorHosted) "./internal/${testPkg}/${name}/..."
         + pkgs.lib.optionalString (!isBackend) " ./internal/driver/driverrows/...";
     in
     {
@@ -118,7 +137,20 @@ let
             export PATH="$TMPDIR/fakebin:$PATH"
             cd src/cmd/launcher
             ${setup}
-            go test ${testPkgs}
+            ${
+              if connectorHosted then
+                ''
+                  # go test exits 0 when TestCorpus skips, so require its PASS line.
+                  log=$(go test -v ${testPkgs} 2>&1) || { printf '%s\n' "$log"; exit 1; }
+                  printf '%s\n' "$log"
+                  grep -q '^--- PASS: TestCorpus ' <<<"$log" || {
+                    echo "connector-${name}-conformance: TestCorpus did not pass (skipped or never ran)" >&2
+                    exit 1
+                  }
+                ''
+              else
+                "go test ${testPkgs}"
+            }
             touch $out
           '';
     };

@@ -5,7 +5,9 @@
 # ones the diff names. One bash glob per line; `*` crosses `/`. Only `*` is a
 # wildcard (nix/checks/default.nix enforces it).
 # The suite's Nix inputs are listed too: `core/*` and agent-dispatch.yml are
-# reached via lib/connector-checks.nix and a backend row's goTestRepoFiles.
+# reached via lib/connector-checks.nix and a backend row's goTestRepoFiles, and a
+# Driver Connector's suite reads the Driver registry (lib/drivers/*) and the
+# files its rows reference.
 sdk/*
 core/*
 cmd/launcher/internal/connectorhost/*
@@ -24,3 +26,7 @@ nix/connector-wasm.nix
 nix/fixtures/connector/*
 nix/fixtures/connector-wasm/*
 .github/workflows/agent-dispatch.yml
+lib/drivers/*
+lib/credential-paths.nix
+agent/opencode-guards.js
+agent/pi-hook-bridge.js

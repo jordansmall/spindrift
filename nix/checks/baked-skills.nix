@@ -199,6 +199,11 @@ in
       {
         nativeBuildInputs = [ pkgs.go ];
         launcherSrc = ../../cmd/launcher;
+        # driver-exec's TestMain registers claude from its compiled Connector
+        # (issue #6799); there is no flake beside the copied tree to build it.
+        SPINDRIFT_CLAUDE_CONNECTOR_WASM = "${
+          ((import ../../connectors/claude).lib.connector { core = import ../../core; }).package pkgs
+        }/claude.wasm";
         promptsDir = ../../templates/default/prompts;
         vendorModules = launcherGoModules;
         inherit

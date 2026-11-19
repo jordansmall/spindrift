@@ -117,9 +117,6 @@ let
         ecosystemBundleFile
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
-        ) ../cmd/launcher/internal/driver/claude)
-        (lib.fileset.fileFilter (
-          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/driver/opencode)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
@@ -360,9 +357,6 @@ let
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/orchestrator)
         driverTreeFiles
-        (lib.fileset.fileFilter (
-          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
-        ) ../cmd/launcher/internal/driver/claude)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/driver/opencode)

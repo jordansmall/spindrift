@@ -40,7 +40,7 @@ _render_content_block() {
       ;;
     tool_result)
       # Loosely follows the Go renderer: resultText in
-      # cmd/launcher/internal/driver/claude/decode_content.go extracts the
+      # connectors/claude/decode_content.go extracts the
       # text, and SummarizeToolOutput in
       # cmd/launcher/internal/driver/driverkit/read_transcript.go adds the
       # placeholder and error prefix (its "[" escape and rune cut are not

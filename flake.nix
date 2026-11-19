@@ -220,6 +220,10 @@
               seam-fixtures = fixtures.seamFixtures;
               # The fixture Connector .wasm files core's fake Driver loads (issue #6794).
               connector-wasm-fixtures = fixtures.connectorWasm;
+              # The compiled claude Connector, claude.wasm at its root: the
+              # Go tests' TestMain registers it (fixturebuild.ClaudeConnectorWasm
+              # builds this attr when SPINDRIFT_CLAUDE_CONNECTOR_WASM is unset).
+              claude-connector = ((import ./connectors/claude).lib.connector { inherit core; }).package pkgs;
               # The static out-of-process Connector host (issue #7013).
               connector-host = fixtures.connectorHost;
               # The test-only escape host (issue #7017); see nix/fixtures.nix.

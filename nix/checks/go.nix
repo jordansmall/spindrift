@@ -11,7 +11,10 @@ let
   inherit (fixtures) consumerFormatter;
   fs = pkgs.lib.fileset;
   driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
-  driverNames = builtins.attrNames driverRegistry.entries;
+  # Native Strategies only: a connectorHosted Driver has no package, source
+  # directory or go test derivation here (its Connector is checked by
+  # lib/connector-checks.nix).
+  driverNames = driverRegistry.nativeDriverNames;
   backendNames = map (row: row.name) (import ../../lib/backends/default.nix);
   runnerNames = map (row: row.name) (import ../../lib/runners/index.nix { }).rows;
   driverDir = name: ../../cmd/launcher/internal/driver + "/${name}";
@@ -593,7 +596,17 @@ let
     # cmd/launcher/main_test.go.
     ${pkgs.lib.optionalString (builtins.pathExists ../../README.md) "cp ${../../README.md} src/README.md"}
     cp -r ${../../lib} src/lib
+    # The claude Connector's corpus and goldens, read by tests in the core run
+    # (driverrows), the binaries run and internal/seamtest.
+    mkdir -p src/connectors/claude
+    cp -r ${../../connectors/claude/testdata} src/connectors/claude/testdata
+    ${claudeConnectorEnv}
   '';
+  # TestMain and the driverrows corpus test register claude from its compiled
+  # Connector (drivertest.UseClaudeConnector); without this they would try to
+  # `nix build` it inside the sandbox.
+  claudeConnectorWasm = "${(connectorFor ../../connectors/claude).package pkgs}/claude.wasm";
+  claudeConnectorEnv = "export SPINDRIFT_CLAUDE_CONNECTOR_WASM=${claudeConnectorWasm}";
   goTestInputs = [
     pkgs.go
     pkgs.git
@@ -1058,17 +1071,18 @@ driverGoTests
     launcher-console-isolation
     ;
 
-  # The packages that link every Driver through the bundle (bundleBinaryDirs),
-  # the bundle's own tests, the registry root's cross-Driver guard tests and the
-  # forge package's contract guard, which needs every backend directory, the
-  # forge package's capability-probe guard, which needs package main's files, and
-  # the host-profile advisory guard, which needs package main's
-  # route-resolution file, and the seamtest guard that no package outside the
-  # Drivers builds a native Strategy; the whole tree is copied, so a Driver edit
-  # reruns this. It also gofmts and vets those packages (not the adapters', which
-  # their own go-test does), so launcher-go-fmt and launcher-go-vet need not
-  # see them. Each full-tree guard must run and print its PASS line: go test
-  # exits 0 with "[no tests to run]" when -run matches nothing (a renamed guard).
+  # The packages that link every native Driver through the bundle
+  # (bundleBinaryDirs; claude is a Connector, not linked), the bundle's own
+  # tests, the registry root's cross-Driver guard tests and the forge package's
+  # contract guard, which needs every backend directory, the forge package's
+  # capability-probe guard, which needs package main's files, and the
+  # host-profile advisory guard, which needs package main's route-resolution
+  # file, and the seamtest guard that no package outside the Drivers builds a
+  # native Strategy; the whole tree is copied, so a Driver edit reruns this. It
+  # also gofmts and vets those packages (not the adapters', which their own
+  # go-test does), so launcher-go-fmt and launcher-go-vet need not see them.
+  # Each full-tree guard must run and print its PASS line: go test exits 0 with
+  # "[no tests to run]" when -run matches nothing (a renamed guard).
   launcher-binaries-go-test =
     let
       binaryPkgs = ". ${
@@ -1271,6 +1285,9 @@ driverGoTests
         SPINDRIFT_PI_BRIDGE = ../../agent/pi-hook-bridge.js;
         SPINDRIFT_PI_HOOKS_DIR = import ../../lib/agent-hooks.nix pkgs;
         SPINDRIFT_PI_ENV_FILES = driverRegistry.renderEnvFiles driverRegistry.entries.pi.envFiles;
+        # The root package's TestMain registers claude from its compiled
+        # Connector (issue #6799); there is no flake beside the copied tree.
+        SPINDRIFT_CLAUDE_CONNECTOR_WASM = claudeConnectorWasm;
       }
       ''
         mkdir -p src/cmd

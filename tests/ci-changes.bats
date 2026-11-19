@@ -706,10 +706,13 @@ contract_repo() {
 }
 
 @test "connector package: a driver/<name> edit selects that Connector" {
-  contract_repo
-  connector_names <<<'M	cmd/launcher/internal/driver/claude/a.go
+  repo_with_base README '{ }'
+  mkdir -p connectors/opencode
+  printf '{ }' >connectors/opencode/flake.nix
+  commit head
+  connector_names <<<'M	cmd/launcher/internal/driver/opencode/a.go
 '
-  [ "$output" = '["claude"]' ]
+  [ "$output" = '["opencode"]' ]
 }
 
 @test "connector package: a git-quoted path selects that Connector" {

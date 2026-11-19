@@ -95,7 +95,7 @@ let
     name: r:
     let
       nativeNames = (import ./connector-names.nix).nativeBackendNames;
-      nativeDriverNames = lib.attrNames (import ./drivers/default.nix { inherit lib; }).entries;
+      nativeDriverNames = (import ./drivers/default.nix { inherit lib; }).nativeDriverNames;
       err =
         if r.primary then
           (import ./connector-names.nix).primaryError nativeNames nativeDriverNames name r
