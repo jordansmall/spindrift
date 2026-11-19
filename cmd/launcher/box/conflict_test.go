@@ -216,8 +216,8 @@ func TestConflictResolve_ResolvedRunsOneSessionlessPassThenTheMainRun(t *testing
 	if p.session != "" {
 		t.Errorf("session file = %q, want empty (sessionless)", p.session)
 	}
-	if _, ok := p.argv["--manifest-path"]; ok {
-		t.Errorf("manifest path passed with no outbox mounted: %v", p.argv)
+	if got := p.argv["--manifest-path"]; got != f.in.OutboxDir+"/manifest.json" {
+		t.Errorf("manifest path = %q, want the outbox manifest: %v", got, p.argv)
 	}
 	h := f.passHandoff(t)
 	want := f.in.Assembly.Passthrough
@@ -332,25 +332,6 @@ func TestConflictResolve_ResolveOnlyWithCleanRebaseSkipsThePass(t *testing.T) {
 	f.knobs["CONFLICT_RESOLVE_PR_URL"] = "https://example/pr/1"
 	if rc := f.run(); rc != 0 || len(f.events) != 0 {
 		t.Fatalf("rc = %d events = %v", rc, f.events)
-	}
-}
-
-func TestConflictResolve_PublishGoesThroughBranchRecovery(t *testing.T) {
-	for _, write := range []bool{true, false} {
-		f := newCRFixture(t)
-		f.finishRebase()
-		f.recovery.Adopted = true
-		f.run()
-		want := []branchrecovery.Config{{
-			WorkDir: f.in.WorkDir, Branch: "agent/issue-42", BaseBranch: "main",
-			CodeForge: "github", Push: write, OutboxDir: f.in.OutboxDir,
-		}}
-		if !reflect.DeepEqual(f.publishCfgs, want) {
-			t.Fatalf("write=%v: publish configs = %+v, want %+v", write, f.publishCfgs, want)
-		}
-		if got, want := f.events, []string{"pass", "publish", "assemble", "main-run"}; !reflect.DeepEqual(got, want) {
-			t.Fatalf("write=%v: events = %v, want %v", write, got, want)
-		}
 	}
 }
 
@@ -528,5 +509,21 @@ func TestConflictResolve_SummaryComesFromTheOrchestratorResultText(t *testing.T)
 	}
 	if !strings.Contains(f.stdout(), "==> conflict-resolve pass summary:\n  | rebased, check green\n") {
 		t.Errorf("stdout = %q", f.stdout())
+	}
+}
+func TestConflictResolve_PublishGoesThroughBranchRecovery(t *testing.T) {
+	f := newCRFixture(t)
+	f.finishRebase()
+	f.recovery.Adopted = true
+	f.run()
+	want := []branchrecovery.Config{{
+		WorkDir: f.in.WorkDir, Branch: "agent/issue-42", BaseBranch: "main",
+		CodeForge: "github", OutboxDir: f.in.OutboxDir,
+	}}
+	if !reflect.DeepEqual(f.publishCfgs, want) {
+		t.Fatalf("publish configs = %+v, want %+v", f.publishCfgs, want)
+	}
+	if got, want := f.events, []string{"pass", "publish", "assemble", "main-run"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("events = %v, want %v", got, want)
 	}
 }

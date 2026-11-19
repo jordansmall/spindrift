@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"strings"
 
 	"spindrift.dev/launcher/internal/bundleout"
 )
@@ -32,11 +31,6 @@ type Config struct {
 	BaseBranch string
 	// CodeForge is CODE_FORGE, defaulted to github by the caller; narration only.
 	CodeForge string
-	// Push is BOX_WRITE_ENABLED: the Box holds a push-capable token. A
-	// read-only Box relays through the outbox bundle instead (issue #1979:
-	// a force-push there 403s before the agent ever runs), behind the same
-	// fail-closed gate the OPEN A PULL REQUEST contract uses (issue #1918).
-	Push      bool
 	OutboxDir string
 }
 
@@ -63,15 +57,7 @@ type Outcome struct {
 func Recover(cfg Config, openPR func() (bool, error), w io.Writer) (Outcome, error) {
 	var out Outcome
 	base := "origin/" + cfg.BaseBranch
-	remoteOID, remoteExists := cfg.remoteTip()
-	if remoteExists {
-		if err := cfg.seedRemoteReflog(w, remoteOID); err != nil {
-			return out, err
-		}
-	}
-	// A leftover origin/<branch> is recorded in the new branch's reflog before
-	// the reset: the push's --force-if-includes refuses a remote tip the local
-	// reflog never held.
+	remoteExists := cfg.remoteExists()
 	fresh := func() error {
 		if !remoteExists {
 			return cfg.git(w, "checkout", "-b", cfg.Branch, base)
@@ -129,12 +115,9 @@ func Recover(cfg Config, openPR func() (bool, error), w io.Writer) (Outcome, err
 }
 
 // Publish lands the just-rebased branch so a later step never sees the stale
-// pre-rebase state: a lease-guarded force-push when the Box is push-capable,
-// else the outbox bundle (issue #1808), which no-ops with no commits ahead.
+// pre-rebase state, as the outbox bundle (issue #1808), which no-ops with no
+// commits ahead.
 func Publish(cfg Config, w io.Writer) error {
-	if cfg.Push {
-		return cfg.git(w, "push", "--force-with-lease", "--force-if-includes", "origin", cfg.Branch)
-	}
 	return bundleout.Run(bundleout.Config{
 		Repo:      cfg.WorkDir,
 		Base:      "origin/" + cfg.BaseBranch,
@@ -143,30 +126,11 @@ func Publish(cfg Config, w io.Writer) error {
 	}, w)
 }
 
-// seedRemoteReflog gives a cloned origin/<branch> the reflog entry clone never
-// writes. --force-if-includes stops its walk of the local reflog at the
-// remote-tracking ref's newest entry, and with no entry that cutoff is an
-// uninitialized stack value (git remote.c is_reachable_in_reflog), so the push
-// is refused at random — reliably on aarch64. The seed predates every local
-// branch entry, so the walk always reaches them.
-func (cfg Config) seedRemoteReflog(w io.Writer, oid string) error {
-	ref := "refs/remotes/origin/" + cfg.Branch
-	if cfg.git(io.Discard, "reflog", "exists", ref) == nil {
-		return nil
-	}
-	return cfg.git(w, "reflog", "write", ref, oid, oid, "branchrecovery: observed at clone")
-}
-
-// remoteTip returns origin/<branch>'s tip OID; a failed probe means no remote
-// branch.
-func (cfg Config) remoteTip() (oid string, ok bool) {
+// remoteExists reports whether origin/<branch> resolves.
+func (cfg Config) remoteExists() bool {
 	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+cfg.Branch)
 	cmd.Dir = cfg.WorkDir
-	tip, err := cmd.Output()
-	if err != nil {
-		return "", false
-	}
-	return strings.TrimSpace(string(tip)), true
+	return cmd.Run() == nil
 }
 
 func (cfg Config) git(w io.Writer, args ...string) error {

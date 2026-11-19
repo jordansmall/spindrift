@@ -42,9 +42,9 @@ func readonlyShimDir(home string) string {
 
 // installReadonlyGuards installs the read-only guards (issues #2463, #2465,
 // #2509): a git push hook plus command shims for gh and fj, every guard and
-// rejection message coming from the forbiddenMarkers registry. A read-write
-// Box needs none, and a self-contained dispatch has no forge to guard. An argv0
-// absent from PATH is skipped by Install, so a github Box with no fj is fine.
+// rejection message coming from the forbiddenMarkers registry. A
+// self-contained dispatch has no forge to guard. An argv0 absent from PATH is
+// skipped by Install, so a github Box with no fj is fine.
 func (r *boxRun) installReadonlyGuards() error {
 	env, d := r.env, r.d
 	if env.SelfContained {

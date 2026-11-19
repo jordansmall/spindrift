@@ -11,9 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"time"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/boxclone"
@@ -29,7 +27,6 @@ import (
 	"spindrift.dev/launcher/internal/outcomebackstop"
 	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/promptassembly"
-	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/signalwire"
 	"spindrift.dev/launcher/internal/toolchain"
 )
@@ -461,18 +458,7 @@ func (r *boxRun) bundleOut() error {
 	return nil
 }
 
-// backstopConfig reads the operator rebase/backoff knobs only here: the
-// entrypoint dereferenced them only inside emit_outcome_backstop, so a
-// malformed value is fatal only on a run that reaches the verb.
 func (r *boxRun) backstopConfig(recoveryAttempted bool) (outcomebackstop.Config, error) {
-	var knobs [3]int
-	for i, name := range []string{"MAX_REBASE_ATTEMPTS", "TRANSIENT_BACKOFF_SECS", "HOLD_JITTER_SECS"} {
-		n, err := strconv.Atoi(r.d.Getenv(name))
-		if err != nil {
-			return outcomebackstop.Config{}, fmt.Errorf("%s: %w", name, err)
-		}
-		knobs[i] = n
-	}
 	if r.in.WorkDir == "" || r.env.Branch == "" {
 		return outcomebackstop.Config{}, fmt.Errorf("work dir and BRANCH are required")
 	}
@@ -485,10 +471,6 @@ func (r *boxRun) backstopConfig(recoveryAttempted bool) (outcomebackstop.Config,
 		HostMediatedRemote: r.env.HostMediatedRemote,
 		RelayCapable:       r.forgeDescriptor().RelayCapable,
 		RecoveryAttempted:  recoveryAttempted,
-		MaxAttempts:        knobs[0],
-		Backoff:            time.Duration(knobs[1]) * time.Second,
-		Jitter:             time.Duration(knobs[2]) * time.Second,
-		Clock:              retry.RealClock(),
 		RunStateFilePath:   r.in.RunStateFile,
 	}, nil
 }

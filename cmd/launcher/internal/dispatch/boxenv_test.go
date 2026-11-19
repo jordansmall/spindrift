@@ -191,41 +191,11 @@ func TestBuildBoxEnvSetsRunNonce(t *testing.T) {
 	}
 }
 
-// Issue #1951: the host decides write-enabled once and forwards one positive
-// signal, so the Box never re-derives it from the defaultable
-// BOX_FORGE_AND_ISSUE_ACCESS string.
-func TestBuildBoxEnvSetsWriteEnabledSignal(t *testing.T) {
-	if _, ok := mustBuildBoxEnv(t, Config{BoxForgeAndIssueAccess: "read-write"}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; !ok {
-		t.Error("BOX_WRITE_ENABLED should be set when BoxForgeAndIssueAccess=read-write")
-	}
-	if _, ok := mustBuildBoxEnv(t, Config{BoxForgeAndIssueAccess: "read-only"}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; ok {
-		t.Error("BOX_WRITE_ENABLED should be absent when BoxForgeAndIssueAccess=read-only")
-	}
-	// This case is the fail-closed property the signal exists for. validate()
-	// rejects an empty or malformed BoxForgeAndIssueAccess upstream, but the
-	// property has to hold in buildBoxEnv itself rather than depend on the
-	// caller.
-	if _, ok := mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; ok {
-		t.Error("BOX_WRITE_ENABLED should be absent when BoxForgeAndIssueAccess is empty/malformed")
-	}
-	// Issue #3906: a ReadOnlyBox kind (butler) must never see
-	// BOX_WRITE_ENABLED, even given a raw read-write value directly on
-	// Config — buildBoxEnv's own fail-closed check, independent of main.go's
-	// upstream forcing.
-	if _, ok := mustBuildBoxEnv(t, Config{Kind: "butler", BoxForgeAndIssueAccess: "read-write"}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; ok {
-		t.Error("BOX_WRITE_ENABLED should be absent for a butler Config even when BoxForgeAndIssueAccess=read-write")
-	}
-	// A non-ReadOnlyBox kind is unaffected by the #3906 check.
-	if _, ok := mustBuildBoxEnv(t, Config{Kind: "work", BoxForgeAndIssueAccess: "read-write"}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; !ok {
-		t.Error("BOX_WRITE_ENABLED should still be set for a work Config with BoxForgeAndIssueAccess=read-write")
-	}
-}
-
 // Issue #3906: BOX_FORGE_AND_ISSUE_ACCESS is boxEnv=true (lib/env-schema.nix),
 // so it reaches the Box through the BoxEnvVars forwarding loop as a raw
 // value. A butler Config must forward the forced "read-only" there too, not
 // the raw knob, or the Box sees a write-capable BOX_FORGE_AND_ISSUE_ACCESS
-// alongside an absent BOX_WRITE_ENABLED.
+// in the Box.
 func TestBuildBoxEnvForcesForgeAndIssueAccessForReadOnlyBoxKind(t *testing.T) {
 	cfg := Config{
 		Kind:                   "butler",

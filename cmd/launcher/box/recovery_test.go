@@ -16,7 +16,7 @@ func TestRecoverBranch_RunsForAWorkDispatchWithTheEnvsConfig(t *testing.T) {
 	f.run()
 	want := []branchrecovery.Config{{
 		WorkDir: f.in.WorkDir, Branch: "agent/issue-42", BaseBranch: "main",
-		CodeForge: "github", Push: false, OutboxDir: f.in.OutboxDir,
+		CodeForge: "github", OutboxDir: f.in.OutboxDir,
 	}}
 	if !reflect.DeepEqual(f.recoverCfgs, want) {
 		t.Fatalf("recover configs = %+v, want %+v", f.recoverCfgs, want)

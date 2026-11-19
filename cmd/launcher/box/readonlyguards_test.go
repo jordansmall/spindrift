@@ -110,18 +110,6 @@ func assertExecutable(t *testing.T, path string) {
 	}
 }
 
-func TestReadonlyGuards_ReadWriteInstallsNothing(t *testing.T) {
-	g := newGuardsFixture(t)
-	g.env.OutboxRelayCapable = true
-	g.run()
-	if _, err := os.Stat(g.shimDir); err == nil {
-		t.Fatal("shim dir exists on a read-write Box")
-	}
-	if os.Getenv("PATH") != g.path || g.pushurl() != "" {
-		t.Fatalf("PATH or pushurl changed on a read-write Box: PATH=%q pushurl=%q", os.Getenv("PATH"), g.pushurl())
-	}
-}
-
 func TestReadonlyGuards_SelfContainedInstallsNothing(t *testing.T) {
 	g := newGuardsFixture(t)
 	g.env.SelfContained = true

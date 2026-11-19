@@ -1,7 +1,7 @@
 // Package outcomebackstop decides what a Box emits when the Driver's run, plus
 // one resume pass if attempted, produced no parseable SPINDRIFT_OUTCOME line
 // (issue #2157). The status comes from the git-observed evidence Run gathers
-// while salvaging and pushing, never from the driver's own possibly malformed
+// while salvaging, never from the driver's own possibly malformed
 // text, so a run that landed clean still resolves to ready (issue #2380). It
 // also demotes a status=already-resolved line the same evidence contradicts
 // (issue #4016).
@@ -14,11 +14,9 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/outcome"
-	"spindrift.dev/launcher/internal/retry"
 )
 
 // Config is everything Run needs to decide and emit the backstop outcome.
@@ -35,21 +33,11 @@ type Config struct {
 	// remote to push to in-box at all (ADR 0033: CODE_FORGE=local, #2267).
 	HostMediatedRemote bool
 	// RelayCapable reports whether the active CODE_FORGE backend relays a
-	// read-only Box's outbox bundle (#1918, #6898: every registered backend).
+	// Box's outbox bundle (#1918, #6898: every registered backend).
 	RelayCapable bool
-	// WriteEnabled reports whether BOX_WRITE_ENABLED was present. A read-only
-	// github or forgejo Box holds no push token by design.
-	WriteEnabled bool
 	// RecoveryAttempted reports whether a resume pass already ran and also
 	// produced no outcome.
 	RecoveryAttempted bool
-	// MaxAttempts bounds the push retry loop; values < 1 clamp to 1.
-	MaxAttempts int
-	// Backoff and Jitter feed retry.LinearBackoff{Unit,Jitter}; a negative
-	// value clamps to zero there, not here.
-	Backoff, Jitter time.Duration
-	// Clock is the retry sleep seam; the zero value defaults to retry.RealClock().
-	Clock retry.Clock
 	// Git runs `git -C Repo <args>` returning (stdout, stderr, err); nil
 	// defaults to a real exec.Command runner.
 	Git func(args ...string) (string, string, error)
@@ -60,30 +48,26 @@ type Config struct {
 }
 
 // relayNote is the note suffix for an arm whose branch leaves via the outbox
-// bundle rather than an in-box push; "" means the push arm.
+// bundle; "" means the forge has no relay, so the branch goes nowhere.
 func (cfg Config) relayNote() string {
 	switch {
 	case cfg.HostMediatedRemote:
 		return "; branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)"
-	case !cfg.WriteEnabled && cfg.RelayCapable:
-		return "; branch relayed via outbox bundle (read-only Box)"
+	case cfg.RelayCapable:
+		return "; branch relayed via outbox bundle"
 	}
 	return ""
 }
 
-// Run salvages a dirty tree, pushes Branch when there is a writable remote, and
-// always emits one synthetic SPINDRIFT_OUTCOME line so the launcher gets a
-// terminal signal to classify (issue #593). Status lands on "ready" only when
-// the tree ended up clean, there was work to preserve, and it was relayed or
-// pushed; every other case stays "blocked" (issue #2380, ADR 0036).
+// Run salvages a dirty tree and always emits one synthetic SPINDRIFT_OUTCOME
+// line so the launcher gets a terminal signal to classify (issue #593). Status
+// lands on "ready" only when the tree ended up clean, there was work to
+// preserve, and it was relayed; every other case stays "blocked" (issue #2380,
+// ADR 0036).
 func Run(cfg Config, w io.Writer) error {
 	git := cfg.Git
 	if git == nil {
 		git = realGit(cfg.Repo)
-	}
-	clock := cfg.Clock
-	if clock.Sleep == nil {
-		clock = retry.RealClock()
 	}
 
 	note := "driver exited without emitting an outcome"
@@ -112,23 +96,16 @@ func Run(cfg Config, w io.Writer) error {
 	switch {
 	case !salvageOK:
 		// A tree that could not be checked or cleaned is not a landed state.
-	case countErr != nil && relay != "":
+	case relay == "":
+		note += "; no outbox relay for this forge"
+	case countErr != nil:
 		// bundleout fails on the same rev-list error and writes no bundle
 		// (bundleout.go), so nothing is relayed.
-	case countErr == nil && count == 0:
-		// An unknown count on the push arm falls through to the push: a
-		// successful push is its own evidence, and a needless attempt beats a
-		// "no work to preserve" note reporting the wrong thing (#593).
+	case count == 0:
 		note += "; no work to preserve"
-	case relay != "":
+	default:
 		note += relay
 		if !unresolvedBlock {
-			status = "ready"
-		}
-	default:
-		var pushed bool
-		note, pushed = pushWithRetry(git, clock, cfg, note)
-		if pushed && !unresolvedBlock {
 			status = "ready"
 		}
 	}
@@ -188,56 +165,12 @@ func commitCount(git func(args ...string) (string, string, error), base, branch 
 	return n, nil
 }
 
-// pushWithRetry best-effort pushes Branch with bounded retry-with-backoff on a
-// transient failure (issue #2095), appending a "push failed" note once every
-// attempt is exhausted, or at once on a lease refusal no retry can clear; a
-// successful push adds no note.
-func pushWithRetry(git func(args ...string) (string, string, error), clock retry.Clock, cfg Config, note string) (string, bool) {
-	attempts := cfg.MaxAttempts
-	if attempts < 1 {
-		attempts = 1
-	}
-	b := retry.LinearBackoff{Unit: cfg.Backoff, Jitter: cfg.Jitter, Clock: clock}
-
-	for attempt := 1; ; attempt++ {
-		// The agent's own fetches re-arm a bare lease, making it a plain
-		// --force; --force-if-includes refuses a remote tip never integrated.
-		_, stderr, err := git("push", "--force-with-lease", "--force-if-includes", "origin", cfg.Branch)
-		if err == nil {
-			return note, true
-		}
-		if attempt >= attempts || leaseRejected(stderr) {
-			return note + fmt.Sprintf("; push failed after %d attempt(s): %s", attempt, lastLine(stderr)), false
-		}
-		b.Do(attempt)
-	}
-}
-
-// leaseRejected reports a --force-with-lease / --force-if-includes refusal:
-// the remote tip is not one this run integrated, so a retry cannot succeed.
-// Both strings are git's push status text (transport.c), which git does not
-// translate; a miss only falls back to the ordinary retry loop.
-func leaseRejected(stderr string) bool {
-	return strings.Contains(stderr, "(remote ref updated since checkout)") ||
-		strings.Contains(stderr, "(stale info)")
-}
-
-// firstLine suits rev-list: git leads with the "fatal:" cause and trails hint
-// lines, the reverse of push's trailing status text that lastLine picks.
+// firstLine picks the "fatal:" cause git leads rev-list stderr with, ahead of
+// its trailing hint lines.
 func firstLine(s string) string {
 	for _, l := range strings.FieldsFunc(s, func(r rune) bool { return r == '\n' || r == '\r' }) {
 		if strings.TrimSpace(l) != "" {
 			return l
-		}
-	}
-	return ""
-}
-
-func lastLine(s string) string {
-	lines := strings.Split(s, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if strings.TrimSpace(lines[i]) != "" {
-			return lines[i]
 		}
 	}
 	return ""

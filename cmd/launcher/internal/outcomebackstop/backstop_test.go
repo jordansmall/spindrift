@@ -5,13 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"spindrift.dev/launcher/internal/outcome"
-	"spindrift.dev/launcher/internal/retry"
 )
 
 // fakeGit records every invocation's args and looks up (stdout, stderr, err)
@@ -48,19 +45,7 @@ func (f *fakeGit) countCalls(subcommand string) int {
 	return n
 }
 
-// fakeClock records every Sleep duration without actually sleeping.
-type fakeClock struct {
-	slept []time.Duration
-}
-
-func (f *fakeClock) clock() retry.Clock {
-	return retry.Clock{
-		Now:   func() time.Time { return time.Unix(0, 0) },
-		Sleep: func(d time.Duration) { f.slept = append(f.slept, d) },
-	}
-}
-
-func baseConfig(git *fakeGit, clk *fakeClock) Config {
+func baseConfig(git *fakeGit) Config {
 	return Config{
 		Repo:         "/repo",
 		Issue:        "42",
@@ -68,15 +53,13 @@ func baseConfig(git *fakeGit, clk *fakeClock) Config {
 		Base:         "origin/main",
 		Kind:         "work",
 		RelayCapable: true,
-		Clock:        clk.clock(),
 		Git:          git.run,
 	}
 }
 
 func TestRun_ResearchKind(t *testing.T) {
 	git := &fakeGit{}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
+	cfg := baseConfig(git)
 	cfg.Kind = "research"
 
 	var buf bytes.Buffer
@@ -101,9 +84,7 @@ func TestRun_EmitsSyntheticFlagOnBlocked(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "0\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
+	cfg := baseConfig(git)
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -131,11 +112,8 @@ func TestRun_EmitsSyntheticFlagOnReady(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "1\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
+	cfg := baseConfig(git)
 	cfg.RelayCapable = true
-	cfg.MaxAttempts = 3
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -158,9 +136,7 @@ func TestRun_NoCommits(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "0\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
+	cfg := baseConfig(git)
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -182,10 +158,8 @@ func TestRun_CodeForgeLocal(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "1\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
+	cfg := baseConfig(git)
 	cfg.HostMediatedRemote = true
-	cfg.WriteEnabled = true
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -207,17 +181,15 @@ func TestRun_ReadOnlyGithub(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "1\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
+	cfg := baseConfig(git)
 	cfg.RelayCapable = true
-	cfg.WriteEnabled = false
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	line := buf.String()
-	if !strings.Contains(line, "branch relayed via outbox bundle (read-only Box)") {
+	if !strings.Contains(line, "branch relayed via outbox bundle") {
 		t.Fatalf("unexpected note: %q", line)
 	}
 	if !strings.Contains(line, "status=ready") {
@@ -228,189 +200,12 @@ func TestRun_ReadOnlyGithub(t *testing.T) {
 	}
 }
 
-func TestRun_WritablePushSuccess(t *testing.T) {
-	git := &fakeGit{responses: map[string]fakeResult{
-		"rev-list": {stdout: "1\n"},
-	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
-	cfg.RelayCapable = true
-	cfg.MaxAttempts = 3
-
-	var buf bytes.Buffer
-	if err := Run(cfg, &buf); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	line := buf.String()
-	if git.countCalls("push") != 1 {
-		t.Fatalf("expected exactly one push, got %v", git.calls)
-	}
-	want := []string{"push", "--force-with-lease", "--force-if-includes", "origin", "agent/issue-42"}
-	for _, c := range git.calls {
-		if len(c) > 0 && c[0] == "push" {
-			if !reflect.DeepEqual(c, want) {
-				t.Fatalf("push args = %v, want %v", c, want)
-			}
-		}
-	}
-	if strings.Contains(line, "push failed") {
-		t.Fatalf("unexpected push failure note: %q", line)
-	}
-	if !strings.Contains(line, "landing=agent/issue-42") {
-		t.Fatalf("expected landing=branch, got %q", line)
-	}
-	if !strings.Contains(line, "status=ready") {
-		t.Fatalf("expected status=ready, got %q", line)
-	}
-}
-
-func TestRun_PushFailsEveryAttempt(t *testing.T) {
-	git := &fakeGit{responses: map[string]fakeResult{
-		"rev-list": {stdout: "1\n"},
-		"push":     {stderr: "line one\nfatal: some failure\n", err: fmt.Errorf("exit status 1")},
-	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
-	cfg.RelayCapable = true
-	cfg.MaxAttempts = 2
-
-	var buf bytes.Buffer
-	if err := Run(cfg, &buf); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	line := buf.String()
-	if git.countCalls("push") != 2 {
-		t.Fatalf("expected 2 push attempts, got %v", git.calls)
-	}
-	if !strings.Contains(line, "push failed after 2 attempt(s): fatal: some failure") {
-		t.Fatalf("unexpected note: %q", line)
-	}
-	if !strings.Contains(line, "status=blocked") {
-		t.Fatalf("expected status=blocked, got %q", line)
-	}
-	if len(clk.slept) != 1 {
-		t.Fatalf("expected exactly one sleep between the two attempts, got %v", clk.slept)
-	}
-}
-
-func TestRun_PushLeaseRejectionFailsFast(t *testing.T) {
-	for _, reason := range []string{"remote ref updated since checkout", "stale info"} {
-		t.Run(reason, func(t *testing.T) {
-			rejected := " ! [rejected]        agent/issue-42 -> agent/issue-42 (" + reason + ")\n"
-			git := &fakeGit{responses: map[string]fakeResult{
-				"rev-list": {stdout: "1\n"},
-				"push":     {stderr: "To origin\n" + rejected, err: fmt.Errorf("exit status 1")},
-			}}
-			clk := &fakeClock{}
-			cfg := baseConfig(git, clk)
-			cfg.WriteEnabled = true
-			cfg.MaxAttempts = 3
-
-			var buf bytes.Buffer
-			if err := Run(cfg, &buf); err != nil {
-				t.Fatalf("Run: %v", err)
-			}
-			if n := git.countCalls("push"); n != 1 {
-				t.Fatalf("expected exactly one push, got %d: %v", n, git.calls)
-			}
-			if len(clk.slept) != 0 {
-				t.Fatalf("expected no backoff sleep, got %v", clk.slept)
-			}
-			if !strings.Contains(buf.String(), "push failed after 1 attempt(s): ") || !strings.Contains(buf.String(), reason) {
-				t.Fatalf("unexpected note: %q", buf.String())
-			}
-		})
-	}
-}
-
-func TestRun_PushTransientThenSucceeds(t *testing.T) {
-	attempt := 0
-	git := &fakeGit{}
-	git.responses = map[string]fakeResult{}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
-	cfg.RelayCapable = true
-	cfg.MaxAttempts = 3
-	// The responses map returns the same result for every call, so varying the
-	// push result per attempt needs a closure.
-	cfg.Git = func(args ...string) (string, string, error) {
-		git.calls = append(git.calls, append([]string(nil), args...))
-		if len(args) == 0 {
-			return "", "", nil
-		}
-		switch args[0] {
-		case "rev-list":
-			return "1\n", "", nil
-		case "push":
-			attempt++
-			if attempt == 1 {
-				return "", "transient failure\n", fmt.Errorf("exit status 1")
-			}
-			return "", "", nil
-		}
-		return "", "", nil
-	}
-
-	var buf bytes.Buffer
-	if err := Run(cfg, &buf); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	line := buf.String()
-	if git.countCalls("push") != 2 {
-		t.Fatalf("expected 2 push attempts, got %v", git.calls)
-	}
-	if strings.Contains(line, "push failed") {
-		t.Fatalf("unexpected push failure note: %q", line)
-	}
-	if !strings.Contains(line, "status=ready") {
-		t.Fatalf("expected status=ready, got %q", line)
-	}
-	if len(clk.slept) != 1 {
-		t.Fatalf("expected one sleep before the retry, got %v", clk.slept)
-	}
-}
-
-func TestRun_MaxAttemptsClampsToOne(t *testing.T) {
-	git := &fakeGit{responses: map[string]fakeResult{
-		"rev-list": {stdout: "1\n"},
-		"push":     {stderr: "nope\n", err: fmt.Errorf("exit status 1")},
-	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
-	cfg.RelayCapable = true
-	cfg.MaxAttempts = 0
-
-	var buf bytes.Buffer
-	if err := Run(cfg, &buf); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	line := buf.String()
-	if git.countCalls("push") != 1 {
-		t.Fatalf("expected exactly 1 push attempt, got %v", git.calls)
-	}
-	if !strings.Contains(line, "push failed after 1 attempt(s): nope") {
-		t.Fatalf("unexpected note: %q", line)
-	}
-	if !strings.Contains(line, "status=blocked") {
-		t.Fatalf("expected status=blocked, got %q", line)
-	}
-	if len(clk.slept) != 0 {
-		t.Fatalf("expected no sleep on a single-attempt clamp, got %v", clk.slept)
-	}
-}
-
 func TestRun_SalvageSucceeds(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"status":   {stdout: " M some/file.go\n"},
 		"rev-list": {stdout: "1\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
+	cfg := baseConfig(git)
 	cfg.RelayCapable = true
 
 	var buf bytes.Buffer
@@ -432,9 +227,7 @@ func TestRun_SalvageFails(t *testing.T) {
 		"commit":   {err: fmt.Errorf("nothing to commit")},
 		"rev-list": {stdout: "1\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
+	cfg := baseConfig(git)
 	cfg.RelayCapable = true
 
 	var buf bytes.Buffer
@@ -455,9 +248,7 @@ func TestRun_SalvageStatusFails(t *testing.T) {
 		"status":   {err: fmt.Errorf("index corrupt")},
 		"rev-list": {stdout: "1\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
+	cfg := baseConfig(git)
 	cfg.RelayCapable = true
 
 	var buf bytes.Buffer
@@ -482,15 +273,15 @@ func TestRun_SalvageStatusFails(t *testing.T) {
 // Run's switch keeps a status failure from reporting ready under them.
 func TestRun_SalvageStatusFailsBlocksRelayArms(t *testing.T) {
 	for name, mutate := range map[string]func(*Config){
-		"host-mediated": func(c *Config) { c.HostMediatedRemote = true; c.WriteEnabled = true },
-		"read-only":     func(c *Config) { c.RelayCapable = true; c.WriteEnabled = false },
+		"host-mediated": func(c *Config) { c.HostMediatedRemote = true },
+		"read-only":     func(c *Config) { c.RelayCapable = true },
 	} {
 		t.Run(name, func(t *testing.T) {
 			git := &fakeGit{responses: map[string]fakeResult{
 				"status":   {err: fmt.Errorf("index corrupt")},
 				"rev-list": {stdout: "1\n"},
 			}}
-			cfg := baseConfig(git, &fakeClock{})
+			cfg := baseConfig(git)
 			mutate(&cfg)
 
 			var buf bytes.Buffer
@@ -514,9 +305,7 @@ func TestRun_SalvageAddFailsSkipsCommit(t *testing.T) {
 		"add":      {err: fmt.Errorf("index locked")},
 		"rev-list": {stdout: "1\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
+	cfg := baseConfig(git)
 	cfg.RelayCapable = true
 
 	var buf bytes.Buffer
@@ -535,34 +324,6 @@ func TestRun_SalvageAddFailsSkipsCommit(t *testing.T) {
 	}
 }
 
-func TestRun_RevListErrorPushArmTreatedAsWorkExists(t *testing.T) {
-	git := &fakeGit{responses: map[string]fakeResult{
-		"rev-list": {err: fmt.Errorf("bad revision")},
-	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
-	cfg.RelayCapable = true
-
-	var buf bytes.Buffer
-	if err := Run(cfg, &buf); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	line := buf.String()
-	if strings.Contains(line, "no work to preserve") {
-		t.Fatalf("did not expect 'no work to preserve' note: %q", line)
-	}
-	if !strings.Contains(line, "status=ready") {
-		t.Fatalf("expected status=ready (push succeeds by default), got %q", line)
-	}
-	if !strings.Contains(line, "could not count commits on") || !strings.Contains(line, "bad revision") {
-		t.Fatalf("expected the rev-list error in the note, got %q", line)
-	}
-	if git.countCalls("push") != 1 {
-		t.Fatalf("expected a push attempt when rev-list errors, got %v", git.calls)
-	}
-}
-
 // The note is one physical line of the SPINDRIFT_OUTCOME protocol: git's
 // multi-line stderr must not split it, or the host parses only the first line.
 func TestRun_RevListMultiLineStderrKeepsOutcomeOneLine(t *testing.T) {
@@ -571,10 +332,8 @@ func TestRun_RevListMultiLineStderrKeepsOutcomeOneLine(t *testing.T) {
 		"'git <command> [<revision>...] -- [<file>...]'\n"
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stderr: revListStderr, err: fmt.Errorf("exit status 128")},
-		"push":     {stderr: "boom\n", err: fmt.Errorf("exit status 1")},
 	}}
-	cfg := baseConfig(git, &fakeClock{})
-	cfg.WriteEnabled = true
+	cfg := baseConfig(git)
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -587,9 +346,6 @@ func TestRun_RevListMultiLineStderrKeepsOutcomeOneLine(t *testing.T) {
 	if !strings.Contains(out, "fatal: ambiguous argument") {
 		t.Fatalf("expected the rev-list cause in the note, got %q", out)
 	}
-	if !strings.Contains(out, "push failed") {
-		t.Fatalf("expected the push failure to survive the rev-list note, got %q", out)
-	}
 }
 
 // A CRLF-terminated stderr must not leak a CR into the one-line outcome.
@@ -597,8 +353,7 @@ func TestRun_RevListCRLFStderrDropsCR(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stderr: "fatal: x\r\nhint\r\n", err: fmt.Errorf("exit status 128")},
 	}}
-	cfg := baseConfig(git, &fakeClock{})
-	cfg.WriteEnabled = true
+	cfg := baseConfig(git)
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -617,8 +372,7 @@ func TestRun_RevListEmptyStderrLeavesNoDanglingColon(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {err: fmt.Errorf("bad revision")},
 	}}
-	cfg := baseConfig(git, &fakeClock{})
-	cfg.WriteEnabled = true
+	cfg := baseConfig(git)
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -633,39 +387,11 @@ func TestRun_RevListEmptyStderrLeavesNoDanglingColon(t *testing.T) {
 	}
 }
 
-func TestRun_RevListUnparseablePushArmTreatedAsWorkExists(t *testing.T) {
-	git := &fakeGit{responses: map[string]fakeResult{
-		"rev-list": {stdout: "not-a-number\n"},
-	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
-	cfg.RelayCapable = true
-
-	var buf bytes.Buffer
-	if err := Run(cfg, &buf); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	line := buf.String()
-	if strings.Contains(line, "no work to preserve") {
-		t.Fatalf("did not expect 'no work to preserve' note: %q", line)
-	}
-	if !strings.Contains(line, "status=ready") {
-		t.Fatalf("expected status=ready (push succeeds by default), got %q", line)
-	}
-	if !strings.Contains(line, "could not count commits on") || !strings.Contains(line, "not-a-number") {
-		t.Fatalf("expected the parse error in the note, got %q", line)
-	}
-	if git.countCalls("push") != 1 {
-		t.Fatalf("expected a push attempt when rev-list is unparseable, got %v", git.calls)
-	}
-}
-
 // relayArms and countFailures cross every relay arm with every way the commit
 // count can fail, shared by Run's and DemoteAlreadyResolved's relay-arm tests.
 var relayArms = map[string]func(*Config){
-	"host-mediated": func(c *Config) { c.HostMediatedRemote = true; c.WriteEnabled = true },
-	"read-only":     func(c *Config) { c.RelayCapable = true; c.WriteEnabled = false },
+	"host-mediated": func(c *Config) { c.HostMediatedRemote = true },
+	"read-only":     func(c *Config) { c.RelayCapable = true },
 }
 
 var countFailures = map[string]fakeResult{
@@ -680,7 +406,7 @@ func TestRun_RevListFailureBlocksRelayArms(t *testing.T) {
 		for failName, resp := range countFailures {
 			t.Run(armName+"/"+failName, func(t *testing.T) {
 				git := &fakeGit{responses: map[string]fakeResult{"rev-list": resp}}
-				cfg := baseConfig(git, &fakeClock{})
+				cfg := baseConfig(git)
 				mutate(&cfg)
 
 				var buf bytes.Buffer
@@ -709,8 +435,7 @@ func TestRun_RecoveryAttempted(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "0\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
+	cfg := baseConfig(git)
 	cfg.RecoveryAttempted = true
 
 	var buf bytes.Buffer
@@ -733,9 +458,7 @@ func TestRun_Issue2380_LandedAndPushedResolvesReady(t *testing.T) {
 		"status":   {stdout: ""},
 		"rev-list": {stdout: "3\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
+	cfg := baseConfig(git)
 	cfg.RelayCapable = true
 
 	var buf bytes.Buffer
@@ -771,10 +494,8 @@ func TestRun_UnresolvedBlockOverridesHostMediatedRemote(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "1\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
+	cfg := baseConfig(git)
 	cfg.HostMediatedRemote = true
-	cfg.WriteEnabled = true
 	cfg.RunStateFilePath = runStatePath
 
 	var buf bytes.Buffer
@@ -796,10 +517,8 @@ func TestRun_MissingRunStateFileBehavesAsUnset(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "1\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
+	cfg := baseConfig(git)
 	cfg.HostMediatedRemote = true
-	cfg.WriteEnabled = true
 	cfg.RunStateFilePath = filepath.Join(t.TempDir(), "does-not-exist.json")
 
 	var buf bytes.Buffer
@@ -811,10 +530,8 @@ func TestRun_MissingRunStateFileBehavesAsUnset(t *testing.T) {
 	git2 := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "1\n"},
 	}}
-	clk2 := &fakeClock{}
-	cfg2 := baseConfig(git2, clk2)
+	cfg2 := baseConfig(git2)
 	cfg2.HostMediatedRemote = true
-	cfg2.WriteEnabled = true
 
 	var buf2 bytes.Buffer
 	if err := Run(cfg2, &buf2); err != nil {
@@ -839,10 +556,8 @@ func TestRun_ApproveVerdictBehavesAsUnset(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "1\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
+	cfg := baseConfig(git)
 	cfg.HostMediatedRemote = true
-	cfg.WriteEnabled = true
 	cfg.RunStateFilePath = runStatePath
 
 	var buf bytes.Buffer
@@ -854,10 +569,8 @@ func TestRun_ApproveVerdictBehavesAsUnset(t *testing.T) {
 	git2 := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "1\n"},
 	}}
-	clk2 := &fakeClock{}
-	cfg2 := baseConfig(git2, clk2)
+	cfg2 := baseConfig(git2)
 	cfg2.HostMediatedRemote = true
-	cfg2.WriteEnabled = true
 
 	var buf2 bytes.Buffer
 	if err := Run(cfg2, &buf2); err != nil {
@@ -882,10 +595,8 @@ func TestRun_UnresolvedBlockNoteIsAdditive(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "1\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
+	cfg := baseConfig(git)
 	cfg.HostMediatedRemote = true
-	cfg.WriteEnabled = true
 	cfg.RunStateFilePath = runStatePath
 
 	var buf bytes.Buffer
@@ -901,48 +612,9 @@ func TestRun_UnresolvedBlockNoteIsAdditive(t *testing.T) {
 	}
 }
 
-// Issue #2459 for the writable-remote push arm: a push that succeeds outright
-// still leaves status=blocked when the run-state artifact records an
-// unresolved BLOCK verdict.
-func TestRun_UnresolvedBlockOverridesSuccessfulPush(t *testing.T) {
-	dir := t.TempDir()
-	runStatePath := filepath.Join(dir, "run-state.json")
-	if err := os.WriteFile(runStatePath, []byte(`{"last_verdict": "BLOCK"}`), 0o644); err != nil {
-		t.Fatalf("write run state: %v", err)
-	}
-
-	git := &fakeGit{responses: map[string]fakeResult{
-		"rev-list": {stdout: "1\n"},
-	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
-	cfg.RelayCapable = true
-	cfg.MaxAttempts = 3
-	cfg.RunStateFilePath = runStatePath
-
-	var buf bytes.Buffer
-	if err := Run(cfg, &buf); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	line := buf.String()
-	if git.countCalls("push") != 1 {
-		t.Fatalf("expected exactly one push, got %v", git.calls)
-	}
-	if strings.Contains(line, "push failed") {
-		t.Fatalf("unexpected push failure note: %q", line)
-	}
-	if !strings.Contains(line, "status=blocked") {
-		t.Fatalf("expected status=blocked despite successful push, got %q", line)
-	}
-	if !strings.Contains(line, "reviewer's blocking findings were never cleared") {
-		t.Fatalf("expected reviewer-blocking-findings note, got %q", line)
-	}
-}
-
-// Issue #2459 for the read-only outbox-relay arm (!cfg.WriteEnabled &&
-// cfg.RelayCapable): an unresolved BLOCK verdict keeps status=blocked
-// even under otherwise-ready relay conditions.
+// Issue #2459 for the outbox-relay arm (cfg.RelayCapable): an unresolved
+// BLOCK verdict keeps status=blocked even under otherwise-ready relay
+// conditions.
 func TestRun_UnresolvedBlockOverridesOutboxRelay(t *testing.T) {
 	dir := t.TempDir()
 	runStatePath := filepath.Join(dir, "run-state.json")
@@ -953,9 +625,7 @@ func TestRun_UnresolvedBlockOverridesOutboxRelay(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "1\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = false
+	cfg := baseConfig(git)
 	cfg.RelayCapable = true
 	cfg.RunStateFilePath = runStatePath
 
@@ -964,7 +634,7 @@ func TestRun_UnresolvedBlockOverridesOutboxRelay(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	line := buf.String()
-	if !strings.Contains(line, "branch relayed via outbox bundle (read-only Box)") {
+	if !strings.Contains(line, "branch relayed via outbox bundle") {
 		t.Fatalf("expected relay note, got %q", line)
 	}
 	if !strings.Contains(line, "status=blocked") {
@@ -991,9 +661,7 @@ func TestDemoteAlreadyResolved_ZeroCommitsNoOp(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "0\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
+	cfg := baseConfig(git)
 
 	var buf bytes.Buffer
 	if err := DemoteAlreadyResolved(cfg, alreadyResolvedLine(), &buf); err != nil {
@@ -1007,47 +675,6 @@ func TestDemoteAlreadyResolved_ZeroCommitsNoOp(t *testing.T) {
 	}
 }
 
-// Issue #4016: 3 commits ahead on a writable remote demotes to blocked, tries
-// to preserve the work with a push, and names the commit count and branch in
-// the note.
-func TestDemoteAlreadyResolved_CommitsExistPushesAndDemotes(t *testing.T) {
-	git := &fakeGit{responses: map[string]fakeResult{
-		"rev-list": {stdout: "3\n"},
-	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
-
-	var buf bytes.Buffer
-	if err := DemoteAlreadyResolved(cfg, alreadyResolvedLine(), &buf); err != nil {
-		t.Fatalf("DemoteAlreadyResolved: %v", err)
-	}
-	if git.countCalls("push") != 1 {
-		t.Fatalf("expected exactly one push, got %v", git.calls)
-	}
-	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("expected exactly one output line, got %q", buf.String())
-	}
-	line := lines[0]
-	o, err := outcome.Parse(line)
-	if err != nil {
-		t.Fatalf("outcome.Parse(%q): %v", line, err)
-	}
-	if !o.Synthetic {
-		t.Fatalf("expected Synthetic == true, got %+v", o)
-	}
-	if o.Status != outcome.StatusBlocked {
-		t.Fatalf("expected Status == blocked, got %+v", o)
-	}
-	if o.Landing != cfg.Branch {
-		t.Fatalf("expected Landing == %q, got %+v", cfg.Branch, o)
-	}
-	if !strings.Contains(o.Note, "3 commits") || !strings.Contains(o.Note, cfg.Branch) {
-		t.Fatalf("expected note naming '3 commits' and the branch, got %q", o.Note)
-	}
-}
-
 // Issue #4016: under a read-only outbox-relay Box, the commits still exist so
 // the claim still demotes, but there is no push token to preserve them with —
 // the later bundle-out step relays instead.
@@ -1055,9 +682,7 @@ func TestDemoteAlreadyResolved_ReadOnlyOutboxRelayNoPush(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "3\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = false
+	cfg := baseConfig(git)
 	cfg.RelayCapable = true
 
 	var buf bytes.Buffer
@@ -1071,7 +696,7 @@ func TestDemoteAlreadyResolved_ReadOnlyOutboxRelayNoPush(t *testing.T) {
 	if !strings.Contains(line, "status=blocked") {
 		t.Fatalf("expected status=blocked, got %q", line)
 	}
-	if !strings.Contains(line, "branch relayed via outbox bundle (read-only Box)") {
+	if !strings.Contains(line, "branch relayed via outbox bundle") {
 		t.Fatalf("expected relay note, got %q", line)
 	}
 }
@@ -1082,10 +707,8 @@ func TestDemoteAlreadyResolved_HostMediatedRemoteNoPush(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "3\n"},
 	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
+	cfg := baseConfig(git)
 	cfg.HostMediatedRemote = true
-	cfg.WriteEnabled = true
 
 	var buf bytes.Buffer
 	if err := DemoteAlreadyResolved(cfg, alreadyResolvedLine(), &buf); err != nil {
@@ -1107,9 +730,7 @@ func TestDemoteAlreadyResolved_HostMediatedRemoteNoPush(t *testing.T) {
 // leaves the claim untouched — nothing to demote.
 func TestDemoteAlreadyResolved_PriorReadyNoOp(t *testing.T) {
 	git := &fakeGit{}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
+	cfg := baseConfig(git)
 
 	priorLine := outcome.Outcome{Issue: "42", Landing: cfg.Branch, Status: "ready"}.Line()
 
@@ -1129,9 +750,7 @@ func TestDemoteAlreadyResolved_PriorReadyNoOp(t *testing.T) {
 // untouched, same as a non-already-resolved status.
 func TestDemoteAlreadyResolved_UnparseablePriorLineNoOp(t *testing.T) {
 	git := &fakeGit{}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
+	cfg := baseConfig(git)
 
 	var buf bytes.Buffer
 	if err := DemoteAlreadyResolved(cfg, "", &buf); err != nil {
@@ -1142,33 +761,6 @@ func TestDemoteAlreadyResolved_UnparseablePriorLineNoOp(t *testing.T) {
 	}
 }
 
-// Issue #4016: an unresolvable commit count fails closed — the claim demotes
-// anyway rather than let an unresolvable count wave the already-resolved
-// claim through.
-func TestDemoteAlreadyResolved_CommitCountErrorDemotes(t *testing.T) {
-	git := &fakeGit{responses: map[string]fakeResult{
-		"rev-list": {err: fmt.Errorf("bad revision")},
-	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
-
-	var buf bytes.Buffer
-	if err := DemoteAlreadyResolved(cfg, alreadyResolvedLine(), &buf); err != nil {
-		t.Fatalf("DemoteAlreadyResolved: %v", err)
-	}
-	line := buf.String()
-	if !strings.Contains(line, "status=blocked") {
-		t.Fatalf("expected status=blocked, got %q", line)
-	}
-	if !strings.Contains(line, "could not be counted") {
-		t.Fatalf("expected a could-not-be-counted note, got %q", line)
-	}
-	if git.countCalls("push") != 1 {
-		t.Fatalf("expected a push attempt on the fail-closed path, got %v", git.calls)
-	}
-}
-
 // The demote path shares Run's reason: a failed count writes no bundle, so a
 // relay arm must not claim the branch was relayed.
 func TestDemoteAlreadyResolved_RevListFailureBlocksRelayArms(t *testing.T) {
@@ -1176,7 +768,7 @@ func TestDemoteAlreadyResolved_RevListFailureBlocksRelayArms(t *testing.T) {
 		for failName, resp := range countFailures {
 			t.Run(armName+"/"+failName, func(t *testing.T) {
 				git := &fakeGit{responses: map[string]fakeResult{"rev-list": resp}}
-				cfg := baseConfig(git, &fakeClock{})
+				cfg := baseConfig(git)
 				mutate(&cfg)
 
 				var buf bytes.Buffer
@@ -1206,10 +798,8 @@ func TestDemoteAlreadyResolved_RevListFailureBlocksRelayArms(t *testing.T) {
 // advise-only short-circuit.
 func TestDemoteAlreadyResolved_AdviseOnlyKindNoOp(t *testing.T) {
 	git := &fakeGit{}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
+	cfg := baseConfig(git)
 	cfg.Kind = "research"
-	cfg.WriteEnabled = true
 
 	var buf bytes.Buffer
 	if err := DemoteAlreadyResolved(cfg, alreadyResolvedLine(), &buf); err != nil {
@@ -1223,27 +813,22 @@ func TestDemoteAlreadyResolved_AdviseOnlyKindNoOp(t *testing.T) {
 	}
 }
 
-func TestRun_NegativeBackoffJitterClampsAndDoesNotPanic(t *testing.T) {
-	git := &fakeGit{responses: map[string]fakeResult{
-		"rev-list": {stdout: "1\n"},
-		"push":     {stderr: "boom\n", err: fmt.Errorf("exit status 1")},
-	}}
-	clk := &fakeClock{}
-	cfg := baseConfig(git, clk)
-	cfg.WriteEnabled = true
-	cfg.RelayCapable = true
-	cfg.MaxAttempts = 2
-	cfg.Backoff = -5 * time.Second
-	cfg.Jitter = -3 * time.Second
+// A forge with no outbox relay leaves the branch nowhere to go, and the Box
+// never pushes, so the backstop must not claim ready.
+func TestRun_NoRelayForgeBlocks(t *testing.T) {
+	git := &fakeGit{responses: map[string]fakeResult{"rev-list": {stdout: "2\n"}}}
+	cfg := baseConfig(git)
+	cfg.RelayCapable = false
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if len(clk.slept) != 1 {
-		t.Fatalf("expected exactly one sleep, got %v", clk.slept)
+	line := buf.String()
+	if !strings.Contains(line, "status=blocked") || !strings.Contains(line, "no outbox relay for this forge") {
+		t.Fatalf("expected blocked with the no-relay note, got %q", line)
 	}
-	if clk.slept[0] != 0 {
-		t.Fatalf("expected clamped sleep duration of 0, got %v", clk.slept[0])
+	if git.countCalls("push") != 0 {
+		t.Fatalf("expected no push, got %v", git.calls)
 	}
 }

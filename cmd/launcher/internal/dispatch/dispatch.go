@@ -396,12 +396,6 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 		env["CI_FAILURE_SUMMARY"] = ciFailureSummary
 	}
 	env["RUN_NONCE"] = nonce
-	// Exact match, never != "read-only" (issue #1951): an unset, typo'd, or
-	// forwarding-glitched value must not fall open into the write-capable
-	// prompt path.
-	if cfg.boxAccessForKind() == "read-write" {
-		env["BOX_WRITE_ENABLED"] = "1"
-	}
 	// Forwarded so box's in-process outcome backstop keys its
 	// decision off explicit signals rather than a raw CODE_FORGE name
 	// comparison (issue #2267).

@@ -24,7 +24,6 @@ import (
 	"spindrift.dev/launcher/internal/outcomebackstop"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/readonlyguards"
-	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/signalwire"
 	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/testutil/repopath"
@@ -134,7 +133,6 @@ func newFixture(t *testing.T) *fixture {
 	t.Setenv("TMPDIR", dir)
 	f := &fixture{t: t, dir: dir, driverName: "claude", backstopOut: syntheticLine + "\n"}
 	f.knobs = map[string]string{
-		"MAX_REBASE_ATTEMPTS": "3", "TRANSIENT_BACKOFF_SECS": "2", "HOLD_JITTER_SECS": "1",
 		"REPO_SLUG": "owner/repo", "HOME": filepath.Join(dir, "home"),
 		// What checkEnvGuards requires of a work dispatch.
 		"GH_TOKEN": "tok", "DISPATCH_KEY": "42", "DISPATCH_KEYING": "issue",
@@ -351,10 +349,17 @@ func (f *fixture) run() int {
 	return rc
 }
 
-func (f *fixture) stdout() string { return f.out.String() }
+// emptyGuardsLine is what the always-on guards install narrates against the
+// fixture's empty registry; stdout and lines drop it so each test asserts only
+// the line it is about.
+const emptyGuardsLine = "readonly-guards: installed 0 command-shim(s) ([]), hook installed=false\n"
+
+func (f *fixture) stdout() string {
+	return strings.TrimPrefix(f.out.String(), emptyGuardsLine)
+}
 
 func (f *fixture) lines() []string {
-	return strings.Split(strings.TrimSuffix(f.out.String(), "\n"), "\n")
+	return strings.Split(strings.TrimSuffix(f.stdout(), "\n"), "\n")
 }
 
 func countLine(lines []string, want string) int {
@@ -586,17 +591,12 @@ func TestBackstop_ConfigMapping(t *testing.T) {
 	f := newFixture(t)
 	f.env.DispatchKind = ""
 	f.env.HostMediatedRemote = true
-	f.env.OutboxRelayCapable = true
 	f.firstRun("done\n", 0)
 	f.resumes = []resumeScript{{result: "done\n"}}
 
 	f.run()
 
 	got := f.backstopCfgs[0]
-	if got.Clock.Sleep == nil {
-		t.Error("backstop Clock unset, want retry.RealClock()")
-	}
-	got.Clock = retry.Clock{}
 	want := outcomebackstop.Config{
 		Repo:               f.in.WorkDir,
 		Issue:              "42",
@@ -605,55 +605,11 @@ func TestBackstop_ConfigMapping(t *testing.T) {
 		Kind:               "work",
 		HostMediatedRemote: true,
 		RelayCapable:       true,
-		WriteEnabled:       true,
 		RecoveryAttempted:  true,
-		MaxAttempts:        3,
-		Backoff:            2e9,
-		Jitter:             1e9,
 		RunStateFilePath:   f.in.RunStateFile,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("backstop config = %+v, want %+v", got, want)
-	}
-}
-
-func TestBackstop_NegativeBackoffAndJitterPassThrough(t *testing.T) {
-	f := newFixture(t)
-	f.knobs["TRANSIENT_BACKOFF_SECS"] = "-5"
-	f.knobs["HOLD_JITTER_SECS"] = "-1"
-	f.firstRun("done\n", 0)
-	f.resumes = []resumeScript{{result: "done\n"}}
-
-	f.run()
-
-	if len(f.backstopCfgs) != 1 || f.backstopCfgs[0].Backoff >= 0 || f.backstopCfgs[0].Jitter >= 0 {
-		t.Fatalf("cfgs = %+v, want negatives handed to the backstop, which clamps them (see outcomebackstop tests)", f.backstopCfgs)
-	}
-}
-
-func TestBackstop_MalformedKnobIsFatalOnlyWhenTheVerbRuns(t *testing.T) {
-	for _, knob := range []string{"MAX_REBASE_ATTEMPTS", "TRANSIENT_BACKOFF_SECS", "HOLD_JITTER_SECS"} {
-		for _, bad := range []string{"", "abc"} {
-			f := newFixture(t)
-			f.knobs[knob] = bad
-			f.firstRun("done\n", 0)
-			f.resumes = []resumeScript{{result: "done\n"}}
-			_, err := run(f.in, f.env, f.d)
-			if err == nil || !strings.Contains(err.Error(), knob) {
-				t.Errorf("%s=%q: error = %v, want one naming the knob", knob, bad, err)
-			}
-		}
-	}
-
-	// Advise-only: neither backstop nor demotion reads the knobs.
-	f := newFixture(t)
-	for _, knob := range []string{"MAX_REBASE_ATTEMPTS", "TRANSIENT_BACKOFF_SECS", "HOLD_JITTER_SECS"} {
-		delete(f.knobs, knob)
-	}
-	f.env.DispatchKind = "research"
-	f.firstRun(blockedLine+"\n", 0)
-	if _, err := run(f.in, f.env, f.d); err != nil {
-		t.Fatalf("advise-only run read an operator knob: %v", err)
 	}
 }
 
@@ -920,7 +876,6 @@ func TestPRIntent_NeverFires(t *testing.T) {
 		name  string
 		setup func(f *fixture)
 	}{
-		{"read-write run", func(f *fixture) { f.env.OutboxRelayCapable = true }},
 		{"CODE_FORGE=git (not relay capable)", func(f *fixture) { f.env.OutboxRelayCapable = false }},
 		{"CODE_FORGE=local (host mediated, not relay capable)", func(f *fixture) {
 			f.env.OutboxRelayCapable = false
@@ -1061,7 +1016,6 @@ func TestSettle_BundleOutPredicate(t *testing.T) {
 		setup func(f *fixture)
 		want  int
 	}{
-		{"read-write github", func(f *fixture) {}, 0},
 		{"host mediated (local)", func(f *fixture) { f.env.HostMediatedRemote = true }, 1},
 		{"read-only relay-capable", func(f *fixture) { f.readOnlyRelay() }, 1},
 		{"git (bundle relay, no PRs)", func(f *fixture) { f.env.CodeForge = "git" }, 1},
@@ -1144,6 +1098,9 @@ func TestOrchestratorArgv_ManifestPathOnlyWhenOutboxMounted(t *testing.T) {
 	for _, needs := range []bool{false, true} {
 		f := newFixture(t)
 		f.env.HostMediatedRemote = needs
+		if !needs {
+			f.env.CodeForge = "unregistered"
+		}
 		f.firstRun("no marker\n", 0)
 		f.resumes = []resumeScript{{result: readyLine + "\n"}}
 		f.run()
@@ -1314,7 +1271,7 @@ func TestFirstRun_ManifestPathOnlyWhenOutboxMounted(t *testing.T) {
 		setup func(*fixture)
 		want  bool
 	}{
-		{"read-write box with no host-mediated remote", func(*fixture) {}, false},
+		{"forge with no outbox relay", func(f *fixture) { f.env.CodeForge = "unregistered" }, false},
 		{"host-mediated remote", func(f *fixture) { f.env.HostMediatedRemote = true }, true},
 		{"read-only outbox-relay-capable box", func(f *fixture) { f.readOnlyRelay() }, true},
 	} {
@@ -1733,6 +1690,12 @@ func assemblyFixture(t *testing.T, skills ...string) assemblyInputs {
 		}
 		return p
 	}
+	// The read-only research prompt must carry the verdict marker, which the
+	// real contract file supplies.
+	researchContract := filepath.Join(dir, "research-outcome-contract.md")
+	if err := os.WriteFile(researchContract, []byte("# research-outcome-contract.md\n\nSPINDRIFT_COMMENT\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	skillsDir := filepath.Join(dir, "skills")
 	for _, s := range skills {
 		if err := os.MkdirAll(filepath.Join(skillsDir, s), 0o755); err != nil {
@@ -1753,7 +1716,7 @@ func assemblyFixture(t *testing.T, skills ...string) assemblyInputs {
 			CommsContractFile:           contract("comms-contract.md"),
 			CheckContractFile:           contract("check-contract.md"),
 			OutcomeContractFile:         contract("outcome-contract.md"),
-			ResearchOutcomeContractFile: contract("research-outcome-contract.md"),
+			ResearchOutcomeContractFile: researchContract,
 			Passthrough: promptassembly.Passthrough{
 				Driver: "claude", Model: "opus",
 				ArgvShape: promptassembly.ArgvShape{PromptStyle: "flag", ModelFlag: "--model", Order: []string{"prompt", "model"}},

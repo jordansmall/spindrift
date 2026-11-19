@@ -6,15 +6,14 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/outcome"
-	"spindrift.dev/launcher/internal/retry"
 )
 
 // DemoteAlreadyResolved corrects an agent's status=already-resolved claim to
 // status=blocked when Base..Branch already carries commits (issue #4016): an
 // already-resolved report means "no branch work needed", which the commits
-// contradict. It reuses Run's own preserve-the-work decision (relay note or
-// pushWithRetry per mode) so the demoted commits land the same place a
-// genuinely blocked run's would, then emits one synthetic blocked line.
+// contradict. It reuses Run's own relay note so the demoted commits land the
+// same place a genuinely blocked run's would, then emits one synthetic blocked
+// line.
 //
 // A prior line that fails to parse, isn't already-resolved, or belongs to an
 // advise-only dispatch kind (which never cuts a branch) leaves the claim
@@ -33,10 +32,6 @@ func DemoteAlreadyResolved(cfg Config, priorOutcomeLine string, w io.Writer) err
 	if git == nil {
 		git = realGit(cfg.Repo)
 	}
-	clock := cfg.Clock
-	if clock.Sleep == nil {
-		clock = retry.RealClock()
-	}
 
 	count, countErr := commitCount(git, cfg.Base, cfg.Branch)
 	var note string
@@ -49,17 +44,9 @@ func DemoteAlreadyResolved(cfg Config, priorOutcomeLine string, w io.Writer) err
 		return nil
 	default:
 		note = fmt.Sprintf("agent reported already-resolved but %d commits exist on %s", count, cfg.Branch)
-	}
-
-	relay := cfg.relayNote()
-	switch {
-	case countErr != nil && relay != "":
-		// bundleout fails on the same count error and writes no bundle, so
-		// nothing is relayed.
-	case relay != "":
-		note += relay
-	default:
-		note, _ = pushWithRetry(git, clock, cfg, note)
+		// bundleout fails on the same count error and writes no bundle, so only
+		// this arm has a relay to note.
+		note += cfg.relayNote()
 	}
 
 	return emit(w, cfg.Issue, cfg.Branch, outcome.StatusBlocked, note)
