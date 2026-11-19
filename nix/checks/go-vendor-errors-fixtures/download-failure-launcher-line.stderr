@@ -1,0 +1,5 @@
+go: example.com/a/p1 imports
+	spindrift.dev/launcher/absent/pkg: no required module provides package spindrift.dev/launcher/absent/pkg; to add it:
+	go get spindrift.dev/launcher/absent/pkg
+go: example.com/a/p2 imports
+	spindrift.dev/launcher/absent/pkg: github.com/tetratelabs/wazero@v1.11.0: reading github.com/tetratelabs/wazero/go.mod at revision v1.11.0: stream error: stream ID 1; INTERNAL_ERROR

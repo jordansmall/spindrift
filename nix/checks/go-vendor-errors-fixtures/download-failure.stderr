@@ -1,0 +1,5 @@
+go: downloading github.com/tetratelabs/wazero v1.11.0
+go: example.com/a/p1 imports
+	spindrift.dev/launcher/absent/pkg: github.com/tetratelabs/wazero@v1.11.0: Get "http://127.0.0.1:1/github.com/tetratelabs/wazero/@v/v1.11.0.mod": dial tcp 127.0.0.1:1: connect: connection refused
+go: example.com/a/p2 imports
+	github.com/tetratelabs/wazero: github.com/tetratelabs/wazero@v1.11.0: Get "http://127.0.0.1:1/github.com/tetratelabs/wazero/@v/v1.11.0.zip": dial tcp 127.0.0.1:1: connect: connection refused
