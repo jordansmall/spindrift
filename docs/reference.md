@@ -2739,8 +2739,8 @@ The Connector also ships jira's tracker-axis fragment folder,
 
 #### The forgejo Connector
 
-`connectors/forgejo` is the forgejo backend's forge path as a network Connector
-on protocol 0.3, with no tracker half: it serves `forge.prsForBranch`,
+`connectors/forgejo` is the forgejo backend's forge and tracker paths as a
+network Connector on protocol 0.3. Its forge half serves `forge.prsForBranch`,
 `forge.pr`, `forge.checks` and `forge.jobLog` over Forgejo's REST API through
 `http_request`, plus the branch and PR primitives (branch lookup and delete,
 open, merge, compare, files, draft flip, comment, auto-merge, branch
@@ -2753,18 +2753,37 @@ job, and then the job's log is read; an older instance answers 404 and the
 failure detail carries no log. Forgejo has no draft flag, so a draft is a `WIP:`
 title; a merge uses the rebase style and deletes the branch; auto-merge asks
 `merge_when_checks_succeed` when the repository allows rebase merges. A
-transient merge failure is retried by core, not the Connector. Its Route table
-is the `{base}` host with `GET /api/v1/repos/{repo}/actions/jobs` (a failing
+transient merge failure is retried by core, not the Connector.
+
+Its tracker half serves `tracker.listIssues`, `tracker.issue`,
+`tracker.comments`, `tracker.nativeDeps` and `tracker.blocks`, and performs the
+writes core asks for, advertising `tracker.transition`, `tracker.editLabels`,
+`tracker.comment`, `tracker.fileIssue`, `tracker.closeIssue` and
+`tracker.labels` (`tracker.listLabels` and `tracker.createLabel` ride on it). It
+advertises `tracker.comments` because Forgejo has no minimized comments, so
+`minimized` is faithfully always false. Forgejo has no issue statuses, so
+`tracker.transition` always answers unmapped and core swaps labels itself;
+`tracker.editLabels` reads the issue and puts its whole label set by name.
+`tracker.fileIssue` resolves label names to ids against the repository's labels
+and the owner's org labels, and applies them by name when the org lookup is
+refused.
+
+Its Route table is the `{base}` host with
+`GET /api/v1/repos/{repo}/actions/jobs` (a failing
 job's log, with `followRedirect` set: Forgejo serves the log directly, and the
 opt-in is what hands a log over the response cap back as its tail rather than
 failing the read), `GET /api/v1/repos/{repo}` (the subtree root, which admits
 every other read under the repository), `POST` and `PATCH` on `.../pulls`,
-`POST .../issues` and `DELETE .../branches`; the write roots admit more than
+`POST`, `PUT` and `PATCH` on `.../issues`, `POST .../labels` and
+`DELETE .../branches`, plus an unpinned read-only `GET /api/v1/orgs` for org
+labels, since core substitutes only `{repo}`; the write roots admit more than
 the Connector sends, as `connectors/forgejo/routes.nix` explains. Its row
 authorizes with the host-only `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN` (the
 `forgejoConnectorToken` knob), with `FORGEJO_BASE_URL` as the base.
 `connector-forgejo-conformance` holds the forge half to the CodeForge, PRForge
-and host-mediation contracts in `cmd/launcher/internal/forge/forgejo`. The row
+and host-mediation contracts, and the tracker half to the tracker,
+host-posted-comment and issue-filer contracts, in
+`cmd/launcher/internal/forge/forgejo`. The row
 is registered and not shadowed, and the table is baselined in
 `spindrift-connector-routes.json` so doctor's `connector-routes-widened[forgejo]`
 row reports it as accepted.
