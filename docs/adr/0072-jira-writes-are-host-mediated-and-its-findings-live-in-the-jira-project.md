@@ -193,3 +193,15 @@ was written. `JIRA_STATUS_MAPPING` now takes an `ambiguous` key, and
 `failed` and `ambiguous` (both mean a human must act) may map to one status.
 Any other two keys sharing a status are rejected at eval and at launcher
 startup.
+
+## Amendment (2026-11-19, issue #6858): the policy is unchanged, enforced through the Connector only
+
+The lifecycle policy above stands: the status mapping, the `hybrid` and
+`status` modes, the label fallback and the transition-refused settle all
+behave as decided. What changed is who enforces it. The native jira adapter is
+deleted, so core's `TransitionState` and `CompleteVerdict` now drive the jira
+Connector's `tracker.transition` and `tracker.editLabels` primitives on every
+`ISSUE_TRACKER=jira` run, and wherever this record says "the adapter" it now
+means that Connector. `JIRA_TOKEN` is still a required knob but nothing reads
+it; the Connector authorizes with `SPINDRIFT_JIRA_CONNECTOR_TOKEN` and
+`SPINDRIFT_JIRA_CONNECTOR_EMAIL`.

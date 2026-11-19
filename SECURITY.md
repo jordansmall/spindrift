@@ -39,8 +39,8 @@ rationale is in [`docs/reference.md`](docs/reference.md#threat-model).
   triage role. The trust boundary is the label, not the issue or comment author —
   once labeled, the body and **every comment from any GitHub user** feed the agent
   as prompt input. Treat every label-applier as a trusted operator. Third-party
-  comments reach the agent only as listed, attributed comments (the github,
-  forgejo, and jira adapters' comment listers); no adapter folds a third-party
+  comments reach the agent only as listed, attributed comments (the github
+  and forgejo adapters' and the jira Connector's comment listers); no adapter folds a third-party
   comment into the issue body (the local adapter's body-inlined thread is
   written only by the launcher and the Box). The launcher drops comments a
   maintainer has minimized on GitHub from the transcript it renders, but

@@ -1,8 +1,7 @@
 // Command jira is the Jira tracker as a Connector (ADR 0073): REST calls sent
 // through the host's http_request Host call, which attaches the credential.
-// The native jira adapter stays authoritative unless the backend row is set
-// `primary`, which routes every tracker operation here. The
-// Connector returns raw fields only (state, status, close time, the
+// The Connector is jira's only implementation: every tracker operation runs
+// here. The Connector returns raw fields only (state, status, close time, the
 // entity-property markers, link keys, the doctor and daemon checks' raw data)
 // and performs the writes core asks for, one transition, label edit, comment or
 // filed issue at a time; core makes every lifecycle decision. The Connector

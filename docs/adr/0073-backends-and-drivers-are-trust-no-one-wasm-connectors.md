@@ -1153,3 +1153,11 @@ unknown class still reads as `permanent` on the host. An older Connector that
 reports a real not-mergeable refusal as `permanent` now fails the merge at
 once instead of polling for checks. That fails fast and loses no data, and
 the cost is accepted.
+
+## Amendment (2026-11-19, issue #6858): jira's native adapter is deleted
+
+The #7127 amendment kept the native jira adapter so `primary` could revert. It
+is deleted: the jira Connector is jira's only tracker, with or without
+`primary`, and a jira row that sets `primary` fails evaluation because there is
+no native backend of the same name to replace. A Connector that omits a
+required tracker capability fails the run instead of degrading.
