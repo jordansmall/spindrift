@@ -1,12 +1,16 @@
-// Command forgejo is the Forgejo forge as a Connector (ADR 0073): the branch
-// primitives, the PR and commit-status reads, and the PR write primitives over
-// REST, sent through the host's http_request Host call, which attaches the
-// credential. The native forgejo adapter stays authoritative; nothing routes a
-// production call through the Connector yet. The Connector returns raw fields
-// only, and core makes every policy decision.
+// Command forgejo is the Forgejo forge and tracker as a Connector (ADR 0073):
+// the branch primitives, the PR and commit-status reads, the PR write
+// primitives, and the tracker reads (issues, comments, native dependencies)
+// over REST, sent through the host's http_request Host call, which attaches
+// the credential. The native forgejo adapter stays authoritative; nothing
+// routes a production call through the Connector yet. The Connector returns
+// raw fields only, and core makes every policy decision.
 package main
 
-import "spindrift.dev/sdk/forge"
+import (
+	"spindrift.dev/sdk/forge"
+	"spindrift.dev/sdk/tracker"
+)
 
 func init() {
 	forge.Register(forge.Reader{
@@ -33,6 +37,13 @@ func init() {
 		EnqueueAutoMerge: enqueueAutoMerge,
 		BranchProtected:  branchProtected,
 		Probe:            probe,
+	})
+	tracker.Register(tracker.Reader{
+		ListIssues: listIssues,
+		Issue:      issue,
+		Comments:   comments,
+		NativeDeps: nativeDeps,
+		Blocks:     blocks,
 	})
 }
 
