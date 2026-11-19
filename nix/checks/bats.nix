@@ -27,7 +27,7 @@ let
 
   # Issue #2464. entrypoint.sh hands it to box's
   # `--forbidden-markers-registry` flag, which installs the read-only guards on
-  # every non-BOX_WRITE_ENABLED run, so each suite that exports
+  # every run, so each suite that exports
   # PROMPT_CONTRACT_REGISTRY_FILE needs this sibling var too.
   forbiddenMarkersRegistryJsonFile = pkgs.writeText "forbidden-markers-registry.json" (
     builtins.toJSON (import ../../lib/prompt-contract.nix).forbiddenMarkers

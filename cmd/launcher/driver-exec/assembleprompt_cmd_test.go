@@ -23,16 +23,17 @@ import (
 // so every one is set explicitly, even to "", or a leftover value in the test
 // process's own environment leaks into the run. Blanking the generated
 // promptassembly.BoxEnvVarNames keeps that true as rows are added (issue
-// #4044). It passes an empty registry: the mechanics it covers (flag parsing,
-// output files, composition, run state) hold for any registry, and a test that
-// cares about a row's effect supplies its own.
+// #4044). Its registry holds only the PR-intent row: every dispatch is
+// read-only, so without it the validator's pr-intent warning lands on stdout
+// and corrupts a composition report streamed there. The mechanics it covers
+// (flag parsing, output files, composition, run state) hold for any other
+// registry, and a test that cares about a row's effect supplies its own.
 func coveredCellArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput string) []string {
 	t.Helper()
 	for _, name := range promptassembly.BoxEnvVarNames {
 		t.Setenv(name, "")
 	}
 	t.Setenv("ISSUE_TRACKER", "github")
-	t.Setenv("BOX_WRITE_ENABLED", "1")
 	t.Setenv("CODE_FORGE", "github")
 	t.Setenv("DISPATCH_KIND", "work")
 	t.Setenv("FIX_PASS", "0")
@@ -52,7 +53,9 @@ func coveredCellArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput
 		"--auto-lint-skill-baked=true",
 		"--prompts-dir", repopath.PromptsDir(),
 		"--skills-found", "caveman, tdd, commit, code-review",
-		"--registry", testutil.WriteRegistry(t, nil),
+		"--registry", testutil.WriteRegistry(t, []promptassembly.FragmentRow{{
+			Gate: "BOX_ACCESS_READ_ONLY_LOG", Fragment: "open-pr-create-outbox.md", Var: "OPEN_PR_CREATE_READ_ONLY_STEP",
+		}}),
 		"--validate-markers-registry", repopath.ValidateMarkersJSON(),
 		"--prompt-output", promptOutput,
 		"--agents-json-output", agentsJSONOutput,
@@ -277,7 +280,6 @@ func TestRunAssemblePrompt_ValidatorRejectBlocksOutputs(t *testing.T) {
 
 			args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
 			t.Setenv("DISPATCH_KIND", "research")
-			t.Setenv("BOX_WRITE_ENABLED", "")
 			t.Setenv("BOX_SIGNAL_CARRIER", tc.carrier)
 			args = replaceArg(args, "--prompts-dir", researchPromptDirLackingSpindriftComment(t))
 
@@ -312,7 +314,6 @@ func TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs(t *testing.T) {
 			handoffOutput := filepath.Join(dir, "handoff.json")
 
 			args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-			t.Setenv("BOX_WRITE_ENABLED", "")
 			t.Setenv("BOX_SIGNAL_CARRIER", tc.carrier)
 			args = replaceArg(args, "--prompts-dir", issuePromptDirLackingSpindriftPRIntent(t))
 

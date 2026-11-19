@@ -9,6 +9,8 @@ argv
 <stream-log>
 --state-file
 <run-state>
+--manifest-path
+<outbox>/manifest.json
 session
 --session-id 922720ce-df74-ac9f-5358-a7ac2aa4fced
 devshell

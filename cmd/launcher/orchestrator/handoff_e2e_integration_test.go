@@ -108,7 +108,6 @@ func TestHandoffEndToEnd(t *testing.T) {
 	// non-empty, which dispatches the orchestrator into its implement, review
 	// and land loop.
 	t.Setenv("ISSUE_TRACKER", "github")
-	t.Setenv("BOX_WRITE_ENABLED", "1")
 	t.Setenv("CODE_FORGE", "github")
 	t.Setenv("DISPATCH_KIND", "work")
 	t.Setenv("FIX_PASS", "0")
