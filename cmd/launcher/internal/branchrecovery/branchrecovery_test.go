@@ -3,9 +3,7 @@ package branchrecovery_test
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -59,7 +57,7 @@ func newFixture(t *testing.T) *fixture {
 	testutil.GitRun(t, f.work, "config", "user.email", "t@example.com")
 	f.cfg = branchrecovery.Config{
 		WorkDir: f.work, Branch: branch, BaseBranch: "main",
-		CodeForge: "github", Push: true, OutboxDir: f.outbox,
+		CodeForge: "github", OutboxDir: f.outbox,
 	}
 	return f
 }
@@ -143,11 +141,11 @@ func TestRecoverAdoptsOpenPR(t *testing.T) {
 	if out != (branchrecovery.Outcome{Adopted: true}) {
 		t.Errorf("outcome = %+v", out)
 	}
-	head := testutil.GitOutput(t, f.work, "rev-parse", "HEAD")
-	if got := f.originRef(t, "refs/heads/"+branch); got != head || got == before {
-		t.Errorf("origin branch = %s, want rebased HEAD %s (was %s)", got, head, before)
+	if got := f.originRef(t, "refs/heads/"+branch); got != before {
+		t.Errorf("origin branch moved: %s -> %s", before, got)
 	}
 	testutil.GitRun(t, f.work, "merge-base", "--is-ancestor", "origin/main", "HEAD")
+	testutil.GitRun(t, f.work, "bundle", "verify", f.bundlePath())
 	if _, err := os.Stat(filepath.Join(f.work, "prior.txt")); err != nil {
 		t.Errorf("prior work lost: %v", err)
 	}
@@ -156,26 +154,6 @@ func TestRecoverAdoptsOpenPR(t *testing.T) {
 			t.Errorf("narration missing %q: %s", s, w.String())
 		}
 	}
-}
-
-func TestRecoverAdoptReadOnlyRelaysBundle(t *testing.T) {
-	f := newFixture(t)
-	f.cfg.Push = false
-	f.withPriorBranch(t, "prior.txt", "prior\n")
-	f.advanceMain(t, "main2.txt", "m2\n")
-	before := f.originRef(t, "refs/heads/"+branch)
-
-	out, err := branchrecovery.Recover(f.cfg, answer(true), &bytes.Buffer{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !out.Adopted || out.Conflict {
-		t.Errorf("outcome = %+v", out)
-	}
-	if got := f.originRef(t, "refs/heads/"+branch); got != before {
-		t.Errorf("origin branch moved: %s -> %s", before, got)
-	}
-	testutil.GitRun(t, f.work, "bundle", "verify", f.bundlePath())
 }
 
 func TestRecoverAdoptConflictDefersPublish(t *testing.T) {
@@ -196,79 +174,6 @@ func TestRecoverAdoptConflictDefersPublish(t *testing.T) {
 	}
 	if got := f.originRef(t, "refs/heads/"+branch); got != before {
 		t.Errorf("published despite conflict: %s -> %s", before, got)
-	}
-}
-
-func TestRecoverStaleBranchForceReset(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		push       bool
-		wantOrigin func(f *fixture, t *testing.T) string
-	}{
-		{"push", true, func(f *fixture, t *testing.T) string { return f.originRef(t, "main") }},
-		{"read-only", false, func(f *fixture, t *testing.T) string { return f.originRef(t, "refs/heads/"+branch) }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := newFixture(t)
-			f.cfg.Push = tc.push
-			f.withPriorBranch(t, "prior.txt", "prior\n")
-			f.advanceMain(t, "main2.txt", "m2\n")
-			want := tc.wantOrigin(f, t)
-
-			var w bytes.Buffer
-			out, err := branchrecovery.Recover(f.cfg, answer(false), &w)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if out != (branchrecovery.Outcome{}) {
-				t.Errorf("outcome = %+v", out)
-			}
-			if got := f.originRef(t, "refs/heads/"+branch); got != want {
-				t.Errorf("origin branch = %s, want %s", got, want)
-			}
-			if got, want := testutil.GitOutput(t, f.work, "rev-parse", "HEAD"), f.originRef(t, "main"); got != want {
-				t.Errorf("HEAD = %s, want origin/main %s", got, want)
-			}
-			if _, err := os.Stat(f.bundlePath()); !os.IsNotExist(err) {
-				t.Errorf("bundle written for empty range: %v", err)
-			}
-			if !strings.Contains(w.String(), "force-resetting to main") {
-				t.Errorf("narration: %s", w.String())
-			}
-		})
-	}
-}
-
-// A concurrent Box that pushed the branch after this clone fetched makes the
-// lease stale, so either publish must fail rather than clobber its work.
-func TestRecoverPublishRejectedByLease(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		open bool
-		want string
-	}{
-		{"reset", false, "publishing reset branch failed"},
-		{"adopted", true, "publishing rebased branch failed"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := newFixture(t)
-			f.withPriorBranch(t, "prior.txt", "prior\n")
-			other := filepath.Join(t.TempDir(), "other")
-			testutil.GitRun(t, filepath.Dir(other), "clone", "-q", "-b", branch, f.origin, other)
-			testutil.GitRun(t, other, "config", "user.name", "Test")
-			testutil.GitRun(t, other, "config", "user.email", "t@example.com")
-			commit(t, other, "concurrent.txt", "c\n")
-			testutil.GitRun(t, other, "push", "-q", "origin", branch)
-			ahead := f.originRef(t, "refs/heads/"+branch)
-
-			_, err := branchrecovery.Recover(f.cfg, answer(tc.open), &bytes.Buffer{})
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("err = %v, want %q", err, tc.want)
-			}
-			if got := f.originRef(t, "refs/heads/"+branch); got != ahead {
-				t.Errorf("origin branch clobbered: %s -> %s", ahead, got)
-			}
-		})
 	}
 }
 
@@ -318,109 +223,46 @@ func TestRecoverWithoutOpenPRQueryStartsFresh(t *testing.T) {
 	}
 }
 
-// The agent's later `git push --force-with-lease --force-if-includes` refuses a
-// remote tip that never appears in the local branch's reflog, so a fresh start
-// over a leftover remote branch must have recorded that tip.
-func TestRecoverFreshOverRemoteBranchAllowsForceIfIncludesPush(t *testing.T) {
-	push := func(t *testing.T, f *fixture) error {
-		t.Helper()
-		testutil.GitRun(t, f.work, "fetch", "-q", "origin")
-		out, err := exec.Command("git", "-C", f.work, "push", "--force-with-lease", "--force-if-includes", "-u", "origin", branch).CombinedOutput()
-		if err != nil {
-			t.Logf("push: %s", out)
-		}
-		return err
+func TestRecoverStaleBranchForceReset(t *testing.T) {
+	f := newFixture(t)
+	f.withPriorBranch(t, "prior.txt", "prior\n")
+	f.advanceMain(t, "main2.txt", "m2\n")
+	want := f.originRef(t, "refs/heads/"+branch)
+
+	var w bytes.Buffer
+	out, err := branchrecovery.Recover(f.cfg, answer(false), &w)
+	if err != nil {
+		t.Fatal(err)
 	}
-	recoverFresh := func(t *testing.T) *fixture {
-		t.Helper()
-		f := newFixture(t)
-		f.withPriorBranch(t, "prior.txt", "prior\n")
-		if _, err := branchrecovery.Recover(f.cfg, nil, &bytes.Buffer{}); err != nil {
-			t.Fatal(err)
-		}
-		return f
+	if out != (branchrecovery.Outcome{}) {
+		t.Errorf("outcome = %+v", out)
 	}
-
-	t.Run("supersedes the stale tip", func(t *testing.T) {
-		f := recoverFresh(t)
-		commit(t, f.work, "work.txt", "work\n")
-		if err := push(t, f); err != nil {
-			t.Fatalf("push rejected: %v", err)
-		}
-		if got, want := f.originRef(t, "refs/heads/"+branch), testutil.GitOutput(t, f.work, "rev-parse", "HEAD"); got != want {
-			t.Errorf("origin branch = %s, want local tip %s", got, want)
-		}
-	})
-
-	t.Run("still rejects a foreign commit pushed afterwards", func(t *testing.T) {
-		f := recoverFresh(t)
-		other := filepath.Join(t.TempDir(), "other")
-		testutil.GitRun(t, filepath.Dir(other), "clone", "-q", "-b", branch, f.origin, other)
-		testutil.GitRun(t, other, "config", "user.name", "Test")
-		testutil.GitRun(t, other, "config", "user.email", "t@example.com")
-		commit(t, other, "foreign.txt", "f\n")
-		testutil.GitRun(t, other, "push", "-q", "origin", branch)
-		foreign := f.originRef(t, "refs/heads/"+branch)
-
-		commit(t, f.work, "work.txt", "work\n")
-		if err := push(t, f); err == nil {
-			t.Fatal("push succeeded over a foreign commit")
-		}
-		if got := f.originRef(t, "refs/heads/"+branch); got != foreign {
-			t.Errorf("foreign commit clobbered: %s -> %s", foreign, got)
-		}
-	})
-}
-
-// A clone leaves origin/<branch> without a reflog, which leaves git's
-// --force-if-includes cutoff uninitialized; Recover must seed one.
-func TestRecoverSeedsTheRemoteTrackingReflog(t *testing.T) {
-	for _, queryable := range []bool{true, false} {
-		t.Run(fmt.Sprintf("queryable=%t", queryable), func(t *testing.T) {
-			f := newFixture(t)
-			f.withPriorBranch(t, "prior.txt", "prior\n")
-			ref := "refs/remotes/origin/" + branch
-			testutil.GitRun(t, f.work, "reflog", "drop", ref)
-			var openPR func() (bool, error)
-			if queryable {
-				openPR = answer(true)
-			}
-			if _, err := branchrecovery.Recover(f.cfg, openPR, &bytes.Buffer{}); err != nil {
-				t.Fatal(err)
-			}
-			if err := exec.Command("git", "-C", f.work, "reflog", "exists", ref).Run(); err != nil {
-				t.Errorf("%s has no reflog after Recover", ref)
-			}
-		})
+	if got := f.originRef(t, "refs/heads/"+branch); got != want {
+		t.Errorf("origin branch = %s, want %s", got, want)
+	}
+	if got, want := testutil.GitOutput(t, f.work, "rev-parse", "HEAD"), f.originRef(t, "main"); got != want {
+		t.Errorf("HEAD = %s, want origin/main %s", got, want)
+	}
+	if _, err := os.Stat(f.bundlePath()); !os.IsNotExist(err) {
+		t.Errorf("bundle written for empty range: %v", err)
+	}
+	if !strings.Contains(w.String(), "force-resetting to main") {
+		t.Errorf("narration: %s", w.String())
 	}
 }
 
-func TestPublish(t *testing.T) {
-	for _, push := range []bool{true, false} {
-		name := "bundle"
-		if push {
-			name = "push"
-		}
-		t.Run(name, func(t *testing.T) {
-			f := newFixture(t)
-			f.cfg.Push = push
-			testutil.GitRun(t, f.work, "checkout", "-q", "-b", branch)
-			commit(t, f.work, "work.txt", "work\n")
+// Publish hands the rebased branch back as an outbox bundle and never moves
+// the remote.
+func TestPublishWritesTheOutboxBundle(t *testing.T) {
+	f := newFixture(t)
+	testutil.GitRun(t, f.work, "checkout", "-q", "-b", branch)
+	commit(t, f.work, "work.txt", "work\n")
 
-			if err := branchrecovery.Publish(f.cfg, &bytes.Buffer{}); err != nil {
-				t.Fatal(err)
-			}
-			_, bundleErr := os.Stat(f.bundlePath())
-			pushed := testutil.GitOutput(t, f.origin, "branch", "--list", branch) != ""
-			if push && (!pushed || bundleErr == nil) {
-				t.Errorf("push mechanism: pushed=%v bundleErr=%v", pushed, bundleErr)
-			}
-			if !push {
-				if pushed || bundleErr != nil {
-					t.Errorf("bundle mechanism: pushed=%v bundleErr=%v", pushed, bundleErr)
-				}
-				testutil.GitRun(t, f.work, "bundle", "verify", f.bundlePath())
-			}
-		})
+	if err := branchrecovery.Publish(f.cfg, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
 	}
+	if got := testutil.GitOutput(t, f.origin, "branch", "--list", branch); got != "" {
+		t.Errorf("branch pushed: %q", got)
+	}
+	testutil.GitRun(t, f.work, "bundle", "verify", f.bundlePath())
 }

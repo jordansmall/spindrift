@@ -2533,7 +2533,7 @@ func TestBoxSeamSettleBundleOut(t *testing.T) {
 		},
 		{
 			name: "read-only already-resolved with commits is demoted and bundled", relay: true, wantBundle: true, lastOnly: true,
-			wantLine: `landing=agent/issue-7 status=blocked synthetic=true note=.*already-resolved but 1 commits exist on agent/issue-7.*relayed via outbox bundle \(read-only Box\)`,
+			wantLine: `landing=agent/issue-7 status=blocked synthetic=true note=.*already-resolved but 1 commits exist on agent/issue-7.*relayed via outbox bundle$`,
 			runs:     func(repo string) []seamtest.DriverRun { return commits(repo, resolved, 0) },
 		},
 		{

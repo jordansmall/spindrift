@@ -244,7 +244,7 @@ func TestRun_NoOutboxDirForGithubReadWrite(t *testing.T) {
 
 // Issue #3906: a butler (ReadOnlyBox kind) Dispatch must get the outbox-relay
 // treatment even under a raw read-write BoxForgeAndIssueAccess, since
-// needsOutbox and buildBoxEnv's BOX_WRITE_ENABLED gate must never desync —
+// needsOutbox and buildBoxEnv's read-only token scrub must never desync —
 // this pins the OutboxRelayCapable side of that shared fail-closed check.
 func TestRun_PopulatesBoxOutboxDir_ButlerReadWrite(t *testing.T) {
 	dir := tempLogDir(t)
