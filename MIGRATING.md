@@ -1,5 +1,26 @@
 # Migration Guide
 
+## The native jira adapter is gone: jira runs through its Connector (issue #6858)
+
+`ISSUE_TRACKER=jira` is built from the jira Connector alone; the native jira
+adapter is deleted. See [Running jira through its
+Connector](docs/reference.md#running-jira-through-its-connector).
+
+What changed for a Jira Consumer:
+
+- **Import the Connector's flake module** (`connectors/jira`) and set
+  `JIRA_BASE_URL` to a base the row accepts (see [Running jira through its
+  Connector](docs/reference.md#running-jira-through-its-connector)). Without
+  the module, or with a base the Connector row rejects,
+  the run fails with `ISSUE_TRACKER=jira needs the jira Connector`.
+- **Set `SPINDRIFT_JIRA_CONNECTOR_TOKEN` and `SPINDRIFT_JIRA_CONNECTOR_EMAIL`.**
+  The Connector authorizes with them (Basic) on every jira run. A Server/Data
+  Center site needs a username and password or token there, not a Bearer PAT.
+- **`JIRA_TOKEN` is unused.** It is still required at startup, so leave it
+  set. `JIRA_EMAIL` still selects the API dialect (Cloud when set).
+- **`spindrift.connectors.jira.primary` is refused.** Delete it: the
+  Connector is always the tracker.
+
 ## A read-only Box holds no forge credential (issue #6900)
 
 The launcher now forwards no forge token to any `read-only` Box: `GH_TOKEN`,
@@ -579,7 +600,7 @@ positive integer.
 ## `JIRA_INCLUDE_COMMENTS` is a deprecated no-op (issue #3747)
 
 Jira comments always reach the agent's prompt, the last 10, attributed,
-through the Jira adapter's comment lister, whether or not the knob is set.
+through the jira Connector's comment lister, whether or not the knob is set.
 The knob used to additionally inline an unattributed copy of every comment
 into the issue description; that copy is gone, so the description no longer
 carries comment text (including any `## Touches` section a commenter wrote).

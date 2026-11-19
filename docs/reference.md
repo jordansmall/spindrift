@@ -2309,7 +2309,10 @@ is the fixture Connector in
   operation through its Connector instead. With `primary` on, the Connector
   answers the native backend's calls with no fallback: github's reads (see
   [Backend primary mode](#backend-primary-mode)), forgejo's whole Code Forge
-  (see [The forgejo Connector](#the-forgejo-connector)). A `driver` row with
+  (see [The forgejo Connector](#the-forgejo-connector)). jira takes no
+  `primary`: it has no native backend to replace, and its Connector is always
+  the tracker (see [Running jira through its
+  Connector](#running-jira-through-its-connector)). A `driver` row with
   `primary` on makes its Connector the Driver ahead of the native Strategy (see
   [Driver primary mode](#driver-primary-mode), issue #6999). `shadow` and
   `primary` are exclusive, and a row with neither a `driver` nor a `backend` is
@@ -2509,8 +2512,9 @@ evaluation. They render into the row as `credentialScheme`, `identityEnv` and
 `baseEnv`, only when set (a bearer row with no `base` renders as before). A
 `base` knob left unset, or set to anything but a bare https URL with a
 canonical path, leaves a non-shadow row unapplied, so core falls back to the
-native backend for it (the knob is the native adapter's own, which accepts
-plain http); a shadow row with an unset or unusable base fails at load.
+native backend for it; a Connector-only backend such as jira has none, so the
+run fails naming the https requirement. A shadow row with an unset or unusable
+base fails at load.
 
 Evaluation fails, naming the Connector and the route, on a Route table the host
 would refuse at load: a method that is not an uppercase token, a bad
@@ -2538,10 +2542,12 @@ its own environment at each request and attaches it on a route match; the
 module never sees it. The Box's binaries read no backend rows, since the Box
 never brokers a forge credential.
 
-A backend without a row is built from the generated registry as before, and a
+A backend without a row is built from the generated registry as before, except
+jira, which has no native backend and needs its Connector row, and a
 binary with no document, Quickstart included, has no rows. With no backend row
-the document is byte-identical to before. Nothing selects a Connector backend
-as `ISSUE_TRACKER` or `CODE_FORGE` yet (issue #6807).
+the document is byte-identical to before. Only jira is selected through its
+row: `ISSUE_TRACKER=jira` builds the tracker from the Connector, and no other
+backend is selected by its Connector alone yet (issue #6807).
 
 `nix/checks/connector-backend-rows.nix` pins the rows: the fixture's reaches the
 input document, a bad credential (a core knob, one of the Connector's own that is
@@ -2654,7 +2660,7 @@ serves (`OpenPRForBranch`, `PRForBranch`, `PRState`, `CheckState`,
 `ListPRFiles` and `CanAutoMerge`) are sampled by shadow mode or answered under
 primary mode. Under a github primary row, the writes of issue #6883 go through
 the Connector too (see [Backend primary mode](#backend-primary-mode)) and the
-rest stay native; jira's primary row routes every write. The Connector is held
+rest stay native; the jira Connector routes every write. The Connector is held
 to the tracker read contract
 (`forgetest.RunTrackerReadContract`, with a `StateSeeder` standing
 in for the writes a read-only tracker lacks) and the PR forge read contract
@@ -2723,10 +2729,9 @@ the table beyond a Consumer's accepted baseline, so doctor's
 Consumer adds them to `spindrift-connector-routes.json`. Its row authorizes
 with Basic credentials from the host-only
 `SPINDRIFT_JIRA_CONNECTOR_TOKEN` and `SPINDRIFT_JIRA_CONNECTOR_EMAIL`, with
-`JIRA_BASE_URL` as the base. The row is registered but not shadowed: the native
-jira adapter answers every call unless the row sets `primary`, which hands the
-whole tracker to the Connector ([Switching jira to
-primary](#switching-jira-to-primary)).
+`JIRA_BASE_URL` as the base. The row is not shadowed and takes no `primary`:
+the Connector answers every jira call ([Running jira through its
+Connector](#running-jira-through-its-connector)).
 
 The Connector also ships jira's tracker-axis fragment folder,
 `connectors/jira/fragments/jira/`, through
@@ -3143,11 +3148,11 @@ switches cover launcher-side writes only: the CI claim and release label swaps i
 leaks of the switches. The github row is on for dogfood through
 `nix/dogfood-primary.nix`; the row and its `githubConnectorToken` knob exist
 only while `shadow` or `primary` is on (issue #6912, [Shadow
-mode](#shadow-mode)). The jira row routes the whole tracker, so there is
-no native fallback to read from ([Switching jira to
-primary](#switching-jira-to-primary)). The forgejo row replaces the whole Code
-Forge, reads and writes, and leaves the tracker native; it is [documented with
-its Connector](#the-forgejo-connector). The rest of this section describes
+mode](#shadow-mode)). The jira row is not a primary row: it routes the whole
+tracker with no native backend to fall back to or shadow ([Running jira through
+its Connector](#running-jira-through-its-connector)). The forgejo row replaces
+the whole Code Forge, reads and writes, and leaves the tracker native; it is
+[documented with its Connector](#the-forgejo-connector). The rest of this section describes
 github's. On github, no read stays on `gh`. Primary and shadow are exclusive,
 so a primary row samples nothing; evaluation refuses the two together, a row with
 neither a `backend` nor a `driver` (a Driver's primary mode is [its
@@ -3275,43 +3280,41 @@ done | sort -r | awk -F'\t' '
   END { print n + 0, "consecutive clean runs (cut-over bar: 20)" }'
 ```
 
-##### Switching jira to primary
+##### Running jira through its Connector
 
-With `primary` on the jira row, the jira Connector builds the whole tracker:
-reads, the claim, transitions under both `JIRA_LIFECYCLE` modes, labels,
-comments, the comments the host posts and filed findings. Lifecycle policy (the
-status and resolution mapping, which transition a verdict takes) stays in core;
-the Connector only performs the operations. The native jira adapter is still
-built and validated but never consulted, so there is no fallback: a Connector that fails to load, or a request its
-Route table refuses, fails that operation. A Connector that died is reloaded by
-the next operation.
+The jira Connector builds every `ISSUE_TRACKER=jira` tracker: reads, the claim,
+transitions under both `JIRA_LIFECYCLE` modes, labels, comments, the comments
+the host posts and filed findings. Lifecycle policy (the status and resolution
+mapping, which transition a verdict takes) stays in core; the Connector only
+performs the operations. No native jira adapter remains (issue #6858), so there
+is no fallback: a Connector that fails to load, or a request its Route table
+refuses, fails that operation. A Connector that died is reloaded by the next
+operation. The row sets no `primary`: jira is Connector-only, and a jira row
+that sets it fails evaluation, because there is no native backend of the same
+name to replace.
 
-To switch, set the row option in the flake that evaluates the Consumer, and set
-the row's two host-only credentials beside `JIRA_BASE_URL` and the project key:
-
-```nix
-spindrift.connectors.jira.primary = true;
-```
+Import the Connector's flake module (`connectors/jira`) in the Consumer, set
+`JIRA_BASE_URL` to the site's https URL and `JIRA_PROJECT_KEY`, and set the
+row's two host-only credentials:
 
 ```sh
 export SPINDRIFT_JIRA_CONNECTOR_TOKEN=...   # API token (Cloud) or password
 export SPINDRIFT_JIRA_CONNECTOR_EMAIL=...   # account email (Cloud) or username
 ```
 
-The launcher and the daemon resolve the token like any secret (`SECRET_CMD`
-included) only while the row sets `primary`; the native `JIRA_TOKEN` and
-`JIRA_EMAIL` are not read for the row's authorization. `JIRA_TOKEN` must still
-be set to pass validation, though nothing uses it under `primary`, and the other
-native jira knobs stay required too, because the native adapter is still built
-and validated beside the Connector's own credentials.
-The row always authorizes with Basic, so a Server/Data Center site needs a
-username and password or token in those two variables, not a Bearer PAT. The API
-dialect still follows the native rule: Jira Cloud when `JIRA_EMAIL` is set,
-Server/Data Center otherwise. Each process appends the Connector's audit lines to
+Without the module a run fails with `ISSUE_TRACKER=jira needs the jira
+Connector`, and a `JIRA_BASE_URL` that is not an https URL is refused the same
+way: the Connector never speaks plain http. The launcher and the daemon read
+the token on every jira run and resolve it like any secret (`SECRET_CMD`
+included). `JIRA_TOKEN` is still required at startup but unused since the
+native adapter's removal (#6858), and the other jira knobs stay required as
+before. The row always authorizes with Basic, so a Server/Data Center site needs
+a username and password or token in those two variables, not a Bearer PAT. The
+API dialect follows `JIRA_EMAIL`: Jira Cloud when it is set, Server/Data Center
+otherwise. Each process appends the Connector's audit lines to
 `.spindrift/logs/primary-jira-<stamp>-<pid>.audit.jsonl` and every failed load or
-call to the matching `.log`. Dropping `primary` restores the
-native adapter with no code revert. The jira row is not on dogfood's
-`nix/dogfood-primary.nix`, so no streak recipe counts its runs yet.
+call to the matching `.log`. The jira row is not on dogfood's
+`nix/dogfood-primary.nix`, so no streak recipe counts its runs.
 
 ### Connector protocol
 
@@ -3678,7 +3681,7 @@ This is protocol version **0.3.0**. The host is
   nothing, without a guest call. Advertised comments flow into the existing
   `IssueText` trust handling, so a comment the Connector marks `minimized` is
   dropped as for a native adapter. Doctor's and the daemon's checks are judged
-  in core with the native jira adapter's own rules: a `tracker.probe` status of
+  in core with jira's rules: a `tracker.probe` status of
   401 or 403 is an auth failure and any other non-2xx an unreachable tracker;
   the mapped statuses missing from `tracker.statuses` fail the status-mapping
   row; `tracker.createMeta` feeds the issue-type rows; and `tracker.count`
@@ -3690,12 +3693,16 @@ This is protocol version **0.3.0**. The host is
   named like the Complete or Failed label to that state, and a Connector
   without `tracker.removedLabels` offers none. Probe is part of
   every tracker, so without `tracker.probe` it stays on the native adapter, as
-  does the label list without `tracker.labels`. The
+  does the label list without `tracker.labels`. The jira row has no native
+  adapter behind it: its handshake must advertise `tracker.transition`,
+  `tracker.editLabels`, `tracker.labels`, `tracker.comment`, `tracker.probe`,
+  `tracker.fileIssue` and `tracker.labeled`, and one missing fails the run. The
   SDK's `tracker.Register(tracker.Reader{...})` serves the methods. A 0.1
   Connector predates the `status` selector, `tracker.blocks` and project-key
   ids: core never sends it a `status`, ignores those two capabilities, and
-  fails a read whose Dispatch state has only a status selector. Only the read
-  shadow ([Shadow mode](#shadow-mode)) uses `connectortracker` in production.
+  fails a read whose Dispatch state has only a status selector. The read
+  shadow ([Shadow mode](#shadow-mode)) and the jira row use `connectortracker`
+  in production.
 - **Forge capabilities.** A forge Connector advertises `"forge"`, meaning it
   serves the first three methods below. Every `params` carries `target`,
   `{api, repo}`, as for the tracker. The Connector only translates: it returns
@@ -4174,9 +4181,9 @@ credential (`SPINDRIFT_GITHUB_CONNECTOR_TOKEN`,
 `SPINDRIFT_JIRA_CONNECTOR_TOKEN`) resolves the same way: `<ENV>_CMD`, then
 the plain env var, then the `SECRET_CMD` template. The template applies
 only to a row this run reads through: its backend is the active
-`CODE_FORGE` or `ISSUE_TRACKER`, and the row is shadowed or routed (only
-github routes). An explicit `<ENV>_CMD` runs regardless. The jira row's
-paired identity env, `SPINDRIFT_JIRA_CONNECTOR_EMAIL`, gets no `_CMD` or
+`CODE_FORGE` or `ISSUE_TRACKER`, and the row is shadowed or routed (github
+under `primary`, jira always). An explicit `<ENV>_CMD` runs regardless. The
+jira row's paired identity env, `SPINDRIFT_JIRA_CONNECTOR_EMAIL`, gets no `_CMD` or
 template resolution. The token has no `--<secret>-cmd` or `--<secret>-file`
 flag, and a failing command or template fails startup naming the env var,
 not the command. See `spindrift --help --all` for the full
@@ -6198,12 +6205,15 @@ such block and are experimental, so you select them by editing
   by default, or `status`) are non-secret, set via
   `issues.jira`
   (baked) or their env vars (runtime) — see the [flake options
-  reference](flake-options.md). `JIRA_TOKEN` is a secret env var alongside
-  `GH_TOKEN`: a Jira API token used alone as a Bearer PAT (Server/Data
-  Center), or paired with the non-secret `JIRA_EMAIL` for Basic auth (Cloud).
-  Setting `JIRA_EMAIL` also selects Jira Cloud's search APIs: listing pages
-  `GET /rest/api/2/search/jql` by `nextPageToken`, while Server/Data Center
-  keeps `/rest/api/2/search` paged by `startAt`.
+  reference](flake-options.md). The jira Connector does every call
+  ([Running jira through its
+  Connector](#running-jira-through-its-connector)), authenticating with
+  `SPINDRIFT_JIRA_CONNECTOR_TOKEN` and `SPINDRIFT_JIRA_CONNECTOR_EMAIL`.
+  `JIRA_TOKEN` is a secret env var that is still required at startup but
+  unused since the native adapter's removal (#6858).
+  `JIRA_EMAIL` selects the Connector's API dialect: set, it is Jira Cloud's
+  search APIs, listing pages `GET /rest/api/2/search/jql` by `nextPageToken`;
+  unset, Server/Data Center keeps `/rest/api/2/search` paged by `startAt`.
   `spindrift doctor`'s `Probe()` check validates Jira auth and reachability
   independently of the GitHub Code Forge probe. Two more rows read the
   project's create metadata: `issue-type` (required) fails when
@@ -6267,8 +6277,8 @@ such block and are experimental, so you select them by editing
   its frontmatter `state` field.
 
   A research verdict on Jira is always host-posted. The Box has no Jira
-  client and `JIRA_TOKEN` never reaches it, so even under `read-write`
-  and with the Filer off the verdict relays through the Launcher
+  client and the Connector's credentials never reach it, so even under
+  `read-write` and with the Filer off the verdict relays through the Launcher
   (`SPINDRIFT_COMMENT`, OUTCOME `landing=none`) rather than
   `gh issue comment`, and a run whose relayed verdict is missing fails to
   `agent-research-failed` instead of applying a bare verdict label (issue
@@ -11647,7 +11657,9 @@ a child would find. Jira offers no conditional request, hence the longer
 `JIRA_STATUS_MAPPING` the way a child does, but a token supplied only
 through its `-file` or `-cmd` form is invisible to it, and a missing base
 URL, project key or token, or a malformed mapping, leaves the kind
-exit-driven.
+exit-driven. The count itself is the jira Connector's `tracker.count`,
+authorized with `SPINDRIFT_JIRA_CONNECTOR_TOKEN` and
+`SPINDRIFT_JIRA_CONNECTOR_EMAIL`; `JIRA_TOKEN` only has to be present.
 
 Whenever a tracker-probed kind is left exit-driven this way — an unknown
 `ISSUE_TRACKER`, a missing knob, or a tracker with no Demand adapter — the

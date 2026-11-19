@@ -421,9 +421,9 @@ The seam that supplies work and carries dispatch state: listing dispatchable
 issues, reading an issue's body/title/state, transitioning its Dispatch state,
 and posting comments. One of two independent axes (the other is the Code Forge).
 Implemented adapters: `github` (issues via `gh`), `forgejo` (Forgejo/Gitea REST
-API; Codeberg the default instance), `jira`, and `local` (issues as files in the
-Target repo, no server). The launcher reasons in canonical
-Dispatch states, never in a backend's native mechanism.
+API; Codeberg the default instance), `jira` (through its Connector), and
+`local` (issues as files in the Target repo, no server). The launcher reasons
+in canonical Dispatch states, never in a backend's native mechanism.
 _Avoid_: issue source, ticketing, backlog.
 
 **Content plane**:
@@ -653,8 +653,8 @@ main-package glue Guard absorbs); naming its outcome type Verdict.
 The executable contract for the forge seams: a shared `forgetest` suite that
 every adapter of a seam interface — the shared test Fake included — must pass,
 run hermetically via per-adapter scripted-backend harnesses (stubbed `gh`
-exec, `httptest` Jira, tempdir local tracker) with seeding and fault-injection
-hooks. Replaces fidelity-by-comment in the Fake ("mirroring the real
+exec, the compiled jira Connector over `httptest` Jira, tempdir local tracker)
+with seeding and fault-injection hooks. Replaces fidelity-by-comment in the Fake ("mirroring the real
 adapter's…") with a test failure on drift. Three contracts, landed in order:
 Issue Tracker (#1544), Code Forge (#1545), PRForge (#1546). Decided
 2026-07-18.
@@ -745,8 +745,9 @@ of the native backend, with no fallback: a Connector failure or audit refusal is
 recorded and fails the operation. github's Connector answers reads and the
 issue comment, label and issue-filing writes (#6883, #6885), its PR writes,
 branch delete and git push, relay and Ledger push (#6886), its merges staying
-native until #6887; jira's answers the whole tracker; forgejo's
-replaces the whole Code Forge, reads and writes, its tracker staying native.
+native until #6887; forgejo's replaces the whole Code Forge, reads and writes,
+its tracker staying native. jira has no native path and takes no `primary`: its
+Connector is always the tracker (#6858).
 Dropping the row's `primary` option restores the native path; the native path
 is deleted (cut-over) after 20 consecutive dogfood runs with no Connector read
 error and no refusal (ADR 0073). _Avoid_: cut-over (the later deletion of the

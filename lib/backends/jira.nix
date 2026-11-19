@@ -78,7 +78,7 @@
     jiraEmail = {
       env = "JIRA_EMAIL";
       group = "issues";
-      doc = "Jira Cloud account email, paired with JIRA_TOKEN for Basic auth; setting it also selects Jira Cloud's search APIs; leave empty for Bearer-token auth (Jira Server/Data Center PATs, which keep the v2 /search)";
+      doc = "selects the jira Connector's API dialect: set it (a Jira Cloud account email) for Jira Cloud's search APIs, leave empty for Server/Data Center, which keeps the v2 /search; the Connector authenticates with SPINDRIFT_JIRA_CONNECTOR_EMAIL and SPINDRIFT_JIRA_CONNECTOR_TOKEN, not this";
       flakeOption = true;
       nixSubPath = "jira.email";
       boxEnv = false;
@@ -106,7 +106,7 @@
       env = "JIRA_TOKEN";
       secret = true;
       hostConfig = true;
-      doc = "Jira API token (Cloud: paired with JIRA_EMAIL for Basic auth; Server/Data Center: used alone as a Bearer PAT); required when ISSUE_TRACKER=jira";
+      doc = "still required when ISSUE_TRACKER=jira but unused since the native adapter's removal (#6858); the jira Connector authenticates with SPINDRIFT_JIRA_CONNECTOR_TOKEN";
       boxEnv = false;
     };
   };
