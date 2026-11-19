@@ -129,8 +129,8 @@ func closeSharedConnectors() {
 
 // routedRow is the github backend row when one is configured and not in shadow
 // mode: every read and write the Connector serves goes through it, with no gh
-// fallback. Without a row, or under a shadow row (native stays authoritative),
-// the host's gh answers.
+// fallback. Without a row, under a shadow row (native stays authoritative), or
+// under a GH_HOST other than github.com (host.go's gate), the host's gh answers.
 func routedRow() (backendrows.Row, bool) {
 	row, ok := backendrows.Lookup(backend.GitHub.Name)
 	return row, ok && !row.Shadow

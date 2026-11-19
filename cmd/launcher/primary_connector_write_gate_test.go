@@ -323,3 +323,30 @@ func TestPrimaryConnectorWriteGate_AppliesToAPlainRow(t *testing.T) {
 		t.Fatalf("err = %v, want errLaunchGateConfigInvalid", err)
 	}
 }
+
+// Under a GH_HOST other than github.com the github row is not applied (its
+// Routes pin api.github.com), so the write gate does not apply and the
+// connector credential is not needed this run.
+func TestPrimaryConnectorWriteGate_GitHubEnterpriseHostAppliesNoRow(t *testing.T) {
+	row := backendrows.Row{Name: "github", Module: "/x/github.wasm", CredentialEnv: connectorWriteTokenEnv, Routes: []connectorhost.Route{fixtureGetRepos}}
+	ghe := func(k string) string {
+		if k == "GH_HOST" {
+			return "ghe.example.com"
+		}
+		return ""
+	}
+	useConnectorRowsWith(t, ghe, row)
+	c := minimalValidConfig()
+	c.IssueTracker, c.CodeForge = "github", "github"
+	if primaryGithubApplies(c) {
+		t.Error("the write gate applies under GH_HOST=ghe.example.com")
+	}
+	if rows := backendrows.All(); len(rows) != 0 {
+		t.Errorf("rows = %+v, want none, so no credential is fetched or sent", rows)
+	}
+
+	useConnectorRowsWith(t, func(string) string { return "" }, row)
+	if _, ok := backendrows.Lookup("github"); !ok {
+		t.Error("the github row is dropped under the default host")
+	}
+}

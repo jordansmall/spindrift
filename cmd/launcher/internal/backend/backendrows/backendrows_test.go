@@ -25,6 +25,7 @@ func isolate(t *testing.T) {
 	t.Helper()
 	backendrows.Reset()
 	t.Cleanup(backendrows.Reset)
+	t.Cleanup(backendrows.Snapshot())
 }
 
 func rows(t *testing.T, v any) json.RawMessage {
@@ -710,5 +711,52 @@ func TestLoadRoutesEveryLoadThroughTheInstalledSandbox(t *testing.T) {
 	}
 	if len(l.networks) != 2 || l.networks[0] != "fixture" || l.networks[1] != "fixture" {
 		t.Errorf("sandbox saw loads %v, want two for fixture", l.networks)
+	}
+}
+
+func TestUseDropsARowItsGateRefuses(t *testing.T) {
+	isolate(t)
+	backendrows.RegisterGate("gated", func(lookup func(string) string) bool { return lookup("GATE_OPEN") != "" })
+	raw := rows(t, []backendrows.Row{row("gated", getRepos)})
+	if err := backendrows.Use(raw, noEnv); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := backendrows.Lookup("gated"); ok {
+		t.Error("a row whose gate answers false is applied")
+	}
+	open := func(k string) string {
+		if k == "GATE_OPEN" {
+			return "1"
+		}
+		return ""
+	}
+	if err := backendrows.Use(raw, open); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := backendrows.Lookup("gated"); !ok {
+		t.Error("a row whose gate answers true is dropped")
+	}
+}
+
+func TestUseValidatesARowItsGateRefuses(t *testing.T) {
+	isolate(t)
+	backendrows.RegisterGate("gated", func(func(string) string) bool { return false })
+	bad := row("gated")
+	bad.Routes = nil
+	if err := backendrows.Use(rows(t, []backendrows.Row{bad}), noEnv); err == nil {
+		t.Error("an invalid row passed validation because its gate refuses it")
+	}
+}
+
+func TestSnapshotRestoreDropsAGateRegisteredAfterIt(t *testing.T) {
+	isolate(t)
+	restore := backendrows.Snapshot()
+	backendrows.RegisterGate("gated", func(func(string) string) bool { return false })
+	restore()
+	if err := backendrows.Use(rows(t, []backendrows.Row{row("gated", getRepos)}), noEnv); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := backendrows.Lookup("gated"); !ok {
+		t.Error("a gate registered after Snapshot survives its restore")
 	}
 }

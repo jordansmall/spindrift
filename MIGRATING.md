@@ -20,8 +20,13 @@ What changed for a github Consumer:
   merges by rebase only. Drop the setting, or use `rebase`.
 - **`spindrift.connectors.github.primary` is a no-op.** Keep it or delete it;
   nothing changes either way.
-- **`shadow` is unchanged.** A shadow row stays native-authoritative and
-  sampled, and keeps its read-only token rule.
+- **`shadow` is unchanged on github.com.** A shadow row stays
+  native-authoritative and sampled, and keeps its read-only token rule. Under a
+  `GH_HOST` other than `github.com` the row is dropped, so reads are no longer
+  sampled there.
+- **GitHub Enterprise keeps native `gh`.** Under a `GH_HOST` other than
+  `github.com` the row is dropped, because the Connector's Routes pin
+  `api.github.com`. The run keeps native `gh` and fetches no connector token.
 - **Importing `core.flakeModules.default` directly keeps native `gh`.** Only
   the root `flakeModules.default` carries the github row.
 
