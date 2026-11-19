@@ -11,6 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/forge/github"
 )
 
 // primaryConnectorWriteGateName names the gate in gateRegistry.
@@ -27,7 +28,7 @@ type githubSide struct {
 
 // primaryGithubSides lists the sides of the Connector that carry github writes
 // under c: the issue tracker (issue writes) and the code forge (PR writes; a
-// primary row alone routes those, and the github forge package serves only
+// routed row serves those, and the github forge package serves only
 // CODE_FORGE=github). Empty means the gate does not apply.
 func primaryGithubSides(c config) []githubSide {
 	var sides []githubSide
@@ -45,12 +46,11 @@ func primaryGithubSides(c config) []githubSide {
 	return sides
 }
 
-// primaryGithubApplies reports whether the github backend row is primary and
-// the Connector carries github writes. It looks the row up per call:
+// primaryGithubApplies reports whether the github backend row is routed (not
+// shadow) and the Connector carries github writes. It looks the row up per call:
 // backendrows loads after package init, when gateRegistry is built.
 func primaryGithubApplies(c config) bool {
-	row, ok := backendrows.Lookup(backend.GitHub.Name)
-	return ok && row.Primary && len(primaryGithubSides(c)) > 0
+	return github.Routed() && len(primaryGithubSides(c)) > 0
 }
 
 // primaryGithubWrites describes what the Connector writes with the credential

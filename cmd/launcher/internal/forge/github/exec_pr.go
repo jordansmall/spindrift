@@ -28,7 +28,7 @@ import (
 const rebaseForcePushTimeout = 5 * time.Minute
 
 func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.openPRForBranchViaConnector(row, branch)
 	}
 	cmd := exec.Command("gh", "pr", "list",
@@ -57,7 +57,7 @@ func (e *execClient) BranchExists(branch string) (bool, error) {
 	if branch == "" {
 		return false, fmt.Errorf("branch must not be empty")
 	}
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.branchExistsViaConnector(row, branch)
 	}
 	cmd := exec.Command("gh", "api",
@@ -135,7 +135,7 @@ func (e *execClient) branchProtectedByRuleset(branch string) (bool, error) {
 }
 
 func (e *execClient) PRForBranch(branch string) (string, bool, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.prForBranchViaConnector(row, branch)
 	}
 	cmd := exec.Command("gh", "pr", "list",
@@ -157,7 +157,7 @@ func (e *execClient) PRForBranch(branch string) (string, bool, error) {
 }
 
 func (e *execClient) PRState(url string) (forge.PRState, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.prStateViaConnector(row, url)
 	}
 	cmd := exec.Command("gh", "pr", "view", url, "--json", "state", "--jq", ".state")
@@ -171,7 +171,7 @@ func (e *execClient) PRState(url string) (forge.PRState, error) {
 // MergeCommit returns the oid of the commit the merged PR at url landed as, ""
 // when GitHub reports none (an unmerged PR).
 func (e *execClient) MergeCommit(url string) (string, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.mergeCommitViaConnector(row, url)
 	}
 	cmd := exec.Command("gh", "pr", "view", url, "--json", "mergeCommit", "--jq", `.mergeCommit.oid // ""`)
@@ -185,7 +185,7 @@ func (e *execClient) MergeCommit(url string) (string, error) {
 // CheckState returns the aggregate statusCheckRollup state of the PR's head
 // commit, or StateNone when no checks are registered.
 func (e *execClient) CheckState(url string) (forge.RollupState, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.checkStateViaConnector(row, url)
 	}
 	state, _, err := e.CheckRun(url)
@@ -216,7 +216,7 @@ type rollupQueryResult struct {
 // live work rather than a finished sibling workflow. Only runs under the PR's
 // own host, owner and repo count.
 func (e *execClient) CheckRun(url string) (forge.RollupState, string, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.checkRunViaConnector(row, url)
 	}
 	// Parse https://github.com/OWNER/REPO/pull/NUMBER
@@ -271,7 +271,7 @@ func (e *execClient) CheckRun(url string) (forge.RollupState, string, error) {
 
 // HeadCommitSHA returns the PR's current head commit SHA.
 func (e *execClient) HeadCommitSHA(url string) (string, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.headCommitSHAViaConnector(row, url)
 	}
 	out, err := exec.Command("gh", "pr", "view", url, "--json", "headRefOid", "--jq", ".headRefOid").Output()
@@ -286,7 +286,7 @@ func (e *execClient) HeadCommitSHA(url string) (string, error) {
 // Merge can tell a genuine conflict (CONFLICTING) apart from a PR merely
 // blocked by pending or failing checks (MERGEABLE).
 func (e *execClient) Mergeable(url string) (forge.MergeableState, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.mergeableViaConnector(row, url)
 	}
 	parts := strings.Split(url, "/")
@@ -319,7 +319,7 @@ func (e *execClient) Mergeable(url string) (forge.MergeableState, error) {
 // to be up to date, which this project's PAT cannot even read (issue #936).
 // A fork-sourced head 404s here; the caller logs and swallows that error.
 func (e *execClient) NeedsUpdate(prURL string) (bool, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.needsUpdateViaConnector(row, prURL)
 	}
 	out, err := exec.Command("gh", "pr", "view", prURL,
@@ -357,7 +357,7 @@ func (e *execClient) NeedsUpdate(prURL string) (bool, error) {
 // endpoint works under a fine-grained PAT scoped to Pull requests RW; the
 // check-runs endpoint does not.
 func (e *execClient) ListPRFiles(url string) ([]string, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.listPRFilesViaConnector(row, url)
 	}
 	parts := strings.Split(url, "/")
@@ -385,7 +385,7 @@ func (e *execClient) ListPRFiles(url string) ([]string, error) {
 }
 
 func (e *execClient) Merge(url string) error {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.mergeViaConnector(row, url)
 	}
 	var stderr bytes.Buffer
@@ -460,7 +460,7 @@ func (e *execClient) CanAutoMerge() (bool, error) {
 // EnqueueAutoMerge enqueues GitHub's native auto-merge for the PR, which merges
 // once every branch-protection requirement is met.
 func (e *execClient) EnqueueAutoMerge(prURL string) error {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.enqueueAutoMergeViaConnector(row, prURL)
 	}
 	cmd := exec.Command("gh", "pr", "merge", prURL, "--auto", mergeMethodFlag(e.mergeMethod), "--delete-branch")
@@ -474,7 +474,7 @@ func (e *execClient) EnqueueAutoMerge(prURL string) error {
 // prints a notice to stderr but exits 0, so the caller can call this
 // unconditionally on every green PR.
 func (e *execClient) MarkReady(prURL string) error {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.markReadyViaConnector(row, prURL)
 	}
 	err := runGHReadyToggle(prURL, "pr", "ready", prURL)
@@ -486,7 +486,7 @@ func (e *execClient) MarkReady(prURL string) error {
 
 // CommentPR posts a comment on the PR itself.
 func (e *execClient) CommentPR(prURL, body string) error {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.commentPRViaConnector(row, prURL, body)
 	}
 	cmd := exec.Command("gh", "pr", "comment", prURL, "--body", body)
@@ -499,7 +499,7 @@ func (e *execClient) CommentPR(prURL, body string) error {
 // MarkDraft flips the PR back to draft. Idempotent the same way MarkReady is:
 // gh pr ready --undo on a PR that is already a draft exits 0.
 func (e *execClient) MarkDraft(prURL string) error {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.markDraftViaConnector(row, prURL)
 	}
 	return runGHReadyToggle(prURL, "pr", "ready", "--undo", prURL)
@@ -572,7 +572,7 @@ func (e *execClient) ListLabels() ([]string, error) {
 // CreateLabel creates a label in the repository. color is hex without the
 // leading #.
 func (e *execClient) CreateLabel(name, description, color string) error {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.createLabelViaConnector(row, name, description, color)
 	}
 	_, err := exec.Command("gh", "label", "create", name,
@@ -592,10 +592,10 @@ func (e *execClient) CreateLabel(name, description, color string) error {
 // only when the sync stops on unmerged paths; any other sync failure is
 // returned wrapping git's own output. A force-push that fails with a transport
 // or server fault, or that rebaseForcePushTimeout kills, wraps
-// ErrTransientPushFailure. Under a primary row the head comes from a guest
+// ErrTransientPushFailure. Under a routed row the head comes from a guest
 // Connector, so an unpinned Rebase is refused there; RebasePRHead is the way in.
 func (e *execClient) Rebase(prURL string) error {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.forgeWrite(row, "rebase a PR", false, func(cf forge.CodeForge, _ forge.Capabilities) error {
 			return cf.Rebase(prURL)
 		})
@@ -614,13 +614,13 @@ func (e *execClient) Rebase(prURL string) error {
 	return e.syncBranch(fields[0], fields[1], e.httpsClone("rebase"), gitexec.Credential{})
 }
 
-// RebasePRHead is forge.PRHeadRebaser. Under a primary row the PR's head is
+// RebasePRHead is forge.PRHeadRebaser. Under a routed row the PR's head is
 // read from a guest Connector core does not trust, so the composed forge
 // refuses a head other than the one the caller expects. Without one the head
 // comes from gh, which core trusts, so head is unused and the native Rebase
 // runs.
 func (e *execClient) RebasePRHead(prURL, head string) error {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.rebasePRHeadViaConnector(row, prURL, head)
 	}
 	return e.Rebase(prURL)
@@ -729,7 +729,7 @@ func (e *execClient) httpsClone(op string) func(dir string) error {
 // repo the Box mounts, and command scope (unlike repo-local config) lets an
 // outer insteadOf route the clone, as it does the Ledger's.
 func (e *execClient) SeedMirror(dir string) error {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.seedMirrorViaConnector(row, dir)
 	}
 	url, gitArgs := GitRemote(e.repo)
@@ -745,7 +745,7 @@ func (e *execClient) SeedMirror(dir string) error {
 // at srcDir, over HTTPS through the gh credential helper (issue #4071, ADR
 // 0057); refuses if branch already exists, or is base (issue #4104).
 func (e *execClient) PushBranch(srcDir, localRef, branch, base string) error {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.pushBranchViaConnector(row, srcDir, localRef, branch, base)
 	}
 	return bundlerelay.PushBranch("github", srcDir, localRef, branch, base, gitexec.Credential{}, e.httpsClone("push branch"))
@@ -757,7 +757,7 @@ func (e *execClient) DeleteBranch(branch, base string) error {
 	if err := forge.ValidateBranchDelete("github", branch, base); err != nil {
 		return err
 	}
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.deleteBranchViaConnector(row, branch, base)
 	}
 	cmd := exec.Command("gh", "api", "-X", "DELETE",
@@ -774,7 +774,7 @@ func (e *execClient) DeleteBranch(branch, base string) error {
 // (Open checks BundleRelay first) is what keeps a read-write land from ever
 // making a host-side create that conflicts with the Box's own.
 func (e *execClient) CreateDraftPR(title, body, base, head string) (string, bool, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.createDraftPRViaConnector(row, title, body, base, head)
 	}
 	var stderr bytes.Buffer

@@ -186,7 +186,7 @@ func TestResolveConnectorCredentials_UnreadRowsNeverRunCmd(t *testing.T) {
 			t.Setenv(connectorTokenEnv+"_CMD", "fetch-token")
 			t.Setenv("SECRET_CMD", "rbw get spindrift-{name}")
 			stubSecretCmd(t, failIfRun(t))
-			refresh, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": tc.tracker}), tc.kinds, &bytes.Buffer{})
+			refresh, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": tc.tracker, "CODE_FORGE": "local"}), tc.kinds, &bytes.Buffer{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -556,5 +556,25 @@ func TestResolveConnectorCredentials_ForgejoRowResolvesOnlyWhenPrimary(t *testin
 				t.Errorf("secret command ran = %v, want %v", ran, tc.wantRan)
 			}
 		})
+	}
+}
+
+// A routed github row is read as the CODE_FORGE through its Connector with or
+// without `primary`, so its credential resolves even with a native tracker.
+func TestResolveConnectorCredentials_GithubForgeRowResolvesWithoutPrimary(t *testing.T) {
+	clearKnobEnvT(t)
+	useGithubConnectorRow(t, "")
+	t.Setenv(connectorTokenEnv, "")
+	t.Setenv(connectorTokenEnv+"_CMD", "")
+	t.Setenv("SECRET_CMD", "rbw get {name}")
+	var ran bool
+	stubSecretCmd(t, func(string) (string, error) { ran = true; return "tok\n", nil })
+	doc := demandDocT(map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "local"})
+
+	if _, err := resolveConnectorCredentials(doc, workKinds, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if !ran {
+		t.Error("secret command did not run, want the github credential resolved")
 	}
 }

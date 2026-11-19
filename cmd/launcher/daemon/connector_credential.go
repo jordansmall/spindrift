@@ -39,12 +39,11 @@ var secretCmdRunner = func(cmd string) (string, error) {
 // IdentityEnv has no `_CMD` form and is not resolved. That pin exports the
 // command to every Launcher child, which runs an explicit `_CMD` without its
 // needed-this-run check (connectorCredentialNeededThisRun); harmless while
-// children share the Daemon's ISSUE_TRACKER and CODE_FORGE. A primary row of
+// children share the Daemon's ISSUE_TRACKER and CODE_FORGE. A routed row of
 // the CODE_FORGE is included, though the Daemon's own probe reads only the
 // tracker: its children inherit the pinned `_CMD`, and refusing here fails fast.
-// Only a primary row counts as the forge (not backendkit.ForgeReadsThroughConnector),
-// so a plain routed row that is merely the default CODE_FORGE stays unresolved;
-// a routed non-primary row counts only as the tracker, as before.
+// A forge row counts when backendkit.ForgeReadsThroughConnector: primary, or an
+// adapter that routes its non-shadow row itself (github), as flags.go gates it.
 func resolveConnectorCredentials(doc *inputdoc.Document, kinds []daemon.Kind, stderr io.Writer) (refresh func(), err error) {
 	probes := false
 	for _, k := range kinds {
@@ -73,9 +72,7 @@ func resolveConnectorCredentials(doc *inputdoc.Document, kinds []daemon.Kind, st
 	for _, row := range backendrows.All() {
 		env := row.CredentialEnv
 		readsTracker := row.Name == tracker && backendkit.TrackerReadsThroughConnector(row.Name)
-		// Only a primary forge row: a plain routed row that is merely the default
-		// CODE_FORGE must never be newly resolved.
-		readsForge := row.Name == forge && row.Primary
+		readsForge := row.Name == forge && backendkit.ForgeReadsThroughConnector(row.Name, row.Primary)
 		if !(readsTracker || readsForge) || row.Shadow || seen[env] {
 			continue
 		}

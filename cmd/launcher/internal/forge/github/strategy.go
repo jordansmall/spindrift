@@ -45,7 +45,7 @@ var Strategy = backendkit.Strategy{
 		return open, err
 	},
 	NewLedger: func(s backendkit.Shared, _ backendkit.Lookup) (backendkit.LedgerSite, error) {
-		if row, ok := primaryRow(); ok {
+		if row, ok := routedRow(); ok {
 			return NewExecClient(s.RepoSlug, s.Labels, codeForgeOpts(s)...).ledgerSiteViaConnector(row)
 		}
 		url, gitArgs := GitRemote(s.RepoSlug)
@@ -75,9 +75,9 @@ var Strategy = backendkit.Strategy{
 }
 
 // checkPrimaryMergeMethodAtBuild refuses an unhonourable MERGE_METHOD at launch
-// under a primary row, as the forgejo row does, rather than at the first merge.
+// under a routed row, as the forgejo row does, rather than at the first merge.
 func checkPrimaryMergeMethodAtBuild(s backendkit.Shared) error {
-	if _, ok := primaryRow(); !ok {
+	if _, ok := routedRow(); !ok {
 		return nil
 	}
 	return checkPrimaryMergeMethod(s.MergeMethod)

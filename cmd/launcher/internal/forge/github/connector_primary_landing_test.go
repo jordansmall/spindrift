@@ -140,8 +140,9 @@ func TestPrimaryRow_DeleteBranchRefusesTheBaseBranch(t *testing.T) {
 	}
 }
 
-// Without a primary row the same writes still run gh.
-func TestLandingWrites_StayOnGhWithoutAPrimaryRow(t *testing.T) {
+// A plain non-shadow row routes the same writes through the Connector; a
+// shadow row keeps them on gh.
+func TestLandingWrites_PlainRowRoutesShadowStaysOnGh(t *testing.T) {
 	for rowName, useRow := range map[string]func(*testing.T, string){"plain": useGithubRowAt, "shadow": useGithubRowShadow} {
 		for _, tc := range primaryLandingWrites {
 			t.Run(rowName+"/"+tc.name, func(t *testing.T) {
@@ -150,8 +151,11 @@ func TestLandingWrites_StayOnGhWithoutAPrimaryRow(t *testing.T) {
 
 				_ = tc.write(primaryWriteClient(), url)
 
-				if calls() == 0 {
-					t.Errorf("%s under a %s row never reached gh", tc.name, rowName)
+				if rowName == "plain" && calls() != 0 {
+					t.Errorf("%s under a plain row ran gh %d times", tc.name, calls())
+				}
+				if rowName == "shadow" && calls() == 0 {
+					t.Errorf("%s under a shadow row never reached gh", tc.name)
 				}
 			})
 		}

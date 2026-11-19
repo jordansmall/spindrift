@@ -119,7 +119,7 @@ func (e *execClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 // ListIssues it passes no --label filter, so issues with no dispatch label
 // yet are included.
 func (e *execClient) ListOpenIssues() ([]forge.Issue, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.listOpenIssuesViaConnector(row)
 	}
 	cmd := exec.Command("gh", "issue", "list",
@@ -144,7 +144,7 @@ func (e *execClient) ListOpenIssues() ([]forge.Issue, error) {
 // merge, dedup-by-number, and partial-failure handling live in
 // forge.MergeLabeledIssues.
 func (e *execClient) ListIssuesWithLabels(state forge.IssueState, labels []string) ([]forge.Issue, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.listIssuesWithLabelsViaConnector(row, state, labels)
 	}
 	var ghState string
@@ -177,7 +177,7 @@ func (e *execClient) ListIssuesWithLabels(state forge.IssueState, labels []strin
 }
 
 func (e *execClient) Issue(num string) (forge.Issue, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.issueViaConnector(row, num)
 	}
 	cmd := exec.Command("gh", "issue", "view", num,
@@ -224,7 +224,7 @@ type ghComment struct {
 // Comments returns issue num's comments oldest-first, the order gh emits them
 // in and the order forge.IssueText assumes when it windows to the last 10.
 func (e *execClient) Comments(num string) ([]forge.Comment, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.commentsViaConnector(row, num)
 	}
 	cmd := exec.Command("gh", "issue", "view", num,
@@ -275,7 +275,7 @@ func (e *execClient) StateLabels() forge.DispatchLabels {
 // check is read-then-edit, not atomic: another claimer can land between the
 // read and the edit.
 func (e *execClient) TransitionState(num string, from, to forge.DispatchState) error {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.transitionViaConnector(row, num, from, to)
 	}
 	if to == forge.InProgress {
@@ -303,7 +303,7 @@ func (e *execClient) TransitionState(num string, from, to forge.DispatchState) e
 // call carrying a --add-label flag per label, mirroring TransitionState's
 // exec and error-handling style.
 func (e *execClient) AddLabels(num string, labels []string) error {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.addLabelsViaConnector(row, num, labels)
 	}
 	args := []string{"issue", "edit", num, "--repo", e.repo}
@@ -320,10 +320,10 @@ func (e *execClient) AddLabels(num string, labels []string) error {
 var _ forge.IssueLabeler = (*execClient)(nil)
 
 // issueLabels skips the title/body/state fields Issue fetches; CompleteVerdict's
-// InProgress precondition check needs nothing but the labels. Under a primary
+// InProgress precondition check needs nothing but the labels. Under a routed
 // row the Connector's Issue read answers it.
 func (e *execClient) issueLabels(num string) ([]string, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		iss, err := e.issueViaConnector(row, num)
 		return iss.Labels, err
 	}
@@ -350,7 +350,7 @@ func (e *execClient) issueLabels(num string) ([]string, error) {
 // instead of silently keeping InProgress alongside the verdict label. The check
 // is not atomic: another process can flip the label between the read and edit.
 func (e *execClient) CompleteVerdict(num string, verdict forge.Verdict) error {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.completeVerdictViaConnector(row, num, verdict)
 	}
 	add := e.verdictLabels.Label(verdict)
@@ -385,7 +385,7 @@ var _ forge.NativeDepsReader = (*execClient)(nil)
 // NativeDepsOf reads issue num's blocked_by relationships from GitHub's
 // native issue-dependencies API.
 func (e *execClient) NativeDepsOf(num string) ([]string, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.nativeDepsViaConnector(row, num)
 	}
 	return e.nativeDependencyIDs(num, "blocked_by")
@@ -396,7 +396,7 @@ func (e *execClient) NativeDepsOf(num string) ([]string, error) {
 // relationship, so unlike DepsOf there is no body-text fallback and a lookup
 // failure is returned directly (issue #1744).
 func (e *execClient) BlocksOf(num string) ([]forge.Dependency, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.blocksOfViaConnector(row, num)
 	}
 	ids, err := e.nativeDependencyIDs(num, "blocking")
@@ -469,7 +469,7 @@ func (e *execClient) PriorClaimState(num string) (forge.DispatchState, bool, err
 // case is a true no-op instead of leaning on gh's exit code for a redundant
 // close.
 func (e *execClient) CloseMergedIssue(num string) error {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.closeMergedIssueViaConnector(row, num)
 	}
 	iss, err := e.Issue(num)
@@ -487,7 +487,7 @@ func (e *execClient) CloseMergedIssue(num string) error {
 }
 
 func (e *execClient) Comment(num, body string) error {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.commentViaConnector(row, num, body)
 	}
 	cmd := exec.Command("gh", "issue", "comment", num,
@@ -503,9 +503,9 @@ func (e *execClient) Comment(num, body string) error {
 // PostIssue files an issue against this adapter's own repo, never a
 // caller-supplied one, per the do-not-trust-the-agent-target invariant (issues
 // #2028, #1949). It returns the created issue's URL: the Connector's html_url
-// under a primary row, else gh's stdout.
+// under a routed row, else gh's stdout.
 func (e *execClient) PostIssue(title, body string, labels []string) (string, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.fileIssueViaConnector(row, title, body, labels)
 	}
 	args := []string{"issue", "create",
@@ -535,7 +535,7 @@ var _ forge.HostPostedIssueFiler = (*execClient)(nil)
 // is rejected rather than escaped; a backslash is rejected too, since the search
 // parser may read `\"` as an escaped quote.
 func (e *execClient) SearchIssues(text string, state forge.IssueState, label string, limit int) ([]forge.Issue, error) {
-	if row, ok := primaryRow(); ok {
+	if row, ok := routedRow(); ok {
 		return e.searchIssuesViaConnector(row, text, state, label, limit)
 	}
 	switch state {

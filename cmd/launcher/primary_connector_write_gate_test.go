@@ -307,3 +307,19 @@ func TestPrimaryConnectorWriteGate_DoctorReportsWriteCapability(t *testing.T) {
 		})
 	}
 }
+
+// A plain non-shadow github row routes the same writes as a primary one, so the
+// gate refuses its read-only credential too.
+func TestPrimaryConnectorWriteGate_AppliesToAPlainRow(t *testing.T) {
+	useConnectorRows(t, backendrows.Row{Name: "github", Module: "/x/github.wasm", CredentialEnv: connectorWriteTokenEnv, Routes: []connectorhost.Route{fixtureGetRepos}})
+	t.Setenv(connectorWriteTokenEnv, "connector-token")
+	swapIntrospector(t, "github", func(string, string) (backendkit.TokenIntrospection, error) {
+		return backendkit.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
+	})
+
+	_, err := walkPrimaryWriteGate(minimalValidConfig(), walkEnforce)
+
+	if !errors.Is(err, errLaunchGateConfigInvalid) {
+		t.Fatalf("err = %v, want errLaunchGateConfigInvalid", err)
+	}
+}
