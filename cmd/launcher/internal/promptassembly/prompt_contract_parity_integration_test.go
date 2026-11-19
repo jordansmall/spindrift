@@ -89,10 +89,12 @@ func parityCell(t *testing.T, f parityFixture) promptassembly.Env {
 	case "pr-intent":
 		override["issue-prompt.md"] = withMarker(f.MarkerPresent, "SPINDRIFT_PR_INTENT",
 			"issue stub with ", "issue stub, no PR-intent marker here")
-		// The row gates on any dispatch that lands code; the butler is
-		// advise-only, so it closes the gate without arming the research rows.
+		// The row gates on any dispatch that lands code; research is
+		// advise-only, so it closes the gate. Its own verdict-comment row is
+		// armed, hence the SPINDRIFT_COMMENT it carries.
 		if !f.Gate {
-			env.DispatchKind = "butler"
+			env.DispatchKind = "research"
+			override["research-prompt.md"] = "research stub with SPINDRIFT_COMMENT\n"
 		}
 	case "issue-intent":
 		override["filer-prompt.md"] = withMarker(f.MarkerPresent, "SPINDRIFT_ISSUE_INTENT",

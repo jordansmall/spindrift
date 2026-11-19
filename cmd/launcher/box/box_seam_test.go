@@ -160,7 +160,7 @@ func seamCloneRoute(t *testing.T, workDir, home string, env map[string]string) {
 	t.Helper()
 	origin := seamOriginPath(workDir)
 	d, _ := backend.ByName(env["CODE_FORGE"])
-	if backend.ClonesFromMirror(d, env["BOX_WRITE_ENABLED"] == "") {
+	if backend.ClonesFromMirror(d, true) {
 		// The launcher mounts a mirror for this forge (local, git under
 		// read-only) and sets the flag with it.
 		env["BOX_HOST_SEEDED_MIRROR"] = "1"
@@ -267,7 +267,6 @@ func seamBaseEnv(t *testing.T) map[string]string {
 		"BASE_BRANCH":            "main",
 		"RUN_NONCE":              seamNonce,
 		"BOX_SIGNAL_CARRIER":     "log",
-		"BOX_WRITE_ENABLED":      "1",
 		"MAX_REBASE_ATTEMPTS":    "1",
 		"TRANSIENT_BACKOFF_SECS": "0",
 		"HOLD_JITTER_SECS":       "0",
@@ -388,7 +387,6 @@ func runBoxSeam(t *testing.T, c seamCase) seamRun {
 		"HOME":                   home,
 	})
 	if c.relay {
-		env["BOX_WRITE_ENABLED"] = ""
 		env["BOX_OUTBOX_RELAY_CAPABLE"] = "1"
 	}
 	orchCfg := seamtest.OrchestratorConfig{Record: orchRec}
@@ -850,7 +848,7 @@ func normaliseDriverInvocation(t *testing.T, s seamtest.Snapshot, baseEnv map[st
 func readonlyWorkEnv(extra map[string]string) map[string]string {
 	env := map[string]string{
 		"DISPATCH_KIND": "work", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "implementing",
-		"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7", "BOX_WRITE_ENABLED": "",
+		"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7",
 	}
 	mergeEnv(env, extra)
 	return env
@@ -881,18 +879,14 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 		// fj puts an fj fake on PATH, so a read-only Box shims it as well.
 		fj bool
 	}{
-		{"work", map[string]string{
-			"DISPATCH_KIND": "work", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "implementing",
-			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7",
-		}, false, false, false},
 		{"work-registry", map[string]string{
 			"DISPATCH_KIND": "work", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "implementing",
-			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7",
-		}, true, false, false},
+			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7", "BOX_OUTBOX_RELAY_CAPABLE": "1",
+		}, true, true, false},
 		{"work-readonly", map[string]string{
 			"DISPATCH_KIND": "work", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "implementing",
 			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7",
-			"BOX_WRITE_ENABLED": "", "BOX_OUTBOX_RELAY_CAPABLE": "1",
+			"BOX_OUTBOX_RELAY_CAPABLE": "1",
 		}, false, true, false},
 		{"work-readonly-forgejo", readonlyWorkEnv(map[string]string{
 			"BOX_OUTBOX_RELAY_CAPABLE": "1", "CODE_FORGE": "forgejo", "BOX_FORGE_BACKEND": "FORGEJO",
@@ -1801,7 +1795,7 @@ func TestBoxSeamReadonlyGuardsAndForgejoCLI(t *testing.T) {
 	const token = "s3cr3t-forgejo-token"
 	cases := []struct {
 		name  string
-		relay bool // read-only with the outbox relay (BOX_WRITE_ENABLED off, relay capable)
+		relay bool // the outbox relay is on (BOX_OUTBOX_RELAY_CAPABLE)
 		env   map[string]string
 		fj    bool // an fj fake is on PATH
 		// shims are the shims the run must have installed; none means the shim
@@ -1811,7 +1805,6 @@ func TestBoxSeamReadonlyGuardsAndForgejoCLI(t *testing.T) {
 		// fjArgv is the add-key call fj must have recorded; nil means none.
 		fjArgv []string
 	}{
-		{name: "read-write github", env: map[string]string{}},
 		{name: "read-only github with outbox relay", relay: true, shims: []string{"gh"}, hook: true},
 		{
 			name: "read-only forgejo", relay: true, fj: true,
@@ -1823,25 +1816,17 @@ func TestBoxSeamReadonlyGuardsAndForgejoCLI(t *testing.T) {
 			fjArgv: []string{"-H", "https://forge.example", "auth", "add-key", "spindrift-agent"},
 		},
 		{
-			name: "read-write forgejo", fj: true,
-			env: map[string]string{
-				"CODE_FORGE": "forgejo", "BOX_FORGE_BACKEND": "FORGEJO",
-				"FORGEJO_TOKEN": token, "GIT_USER_NAME": "bot",
-			},
-			fjArgv: []string{"-H", "https://codeberg.org", "auth", "add-key", "bot"},
-		},
-		{
 			// Fully local is still read-only: it gets the guards.
 			name: "read-only local",
 			env: map[string]string{
-				"BOX_WRITE_ENABLED": "", "CODE_FORGE": "local",
+				"CODE_FORGE":               "local",
 				"BOX_HOST_MEDIATED_REMOTE": "1", "BOX_FULLY_LOCAL": "1",
 			},
 			shims: []string{"gh"}, hook: true,
 		},
 		{
 			name:  "read-only git backend",
-			env:   map[string]string{"BOX_WRITE_ENABLED": "", "CODE_FORGE": "git"},
+			env:   map[string]string{"CODE_FORGE": "git"},
 			shims: []string{"gh"}, hook: true,
 		},
 		{name: "read-only self-contained", relay: true, env: map[string]string{"SELF_CONTAINED": "1"}},
@@ -2116,8 +2101,8 @@ func seamGhAskedPRList(t *testing.T, rec string) bool {
 }
 
 // Branch recovery through the real box binary against a real origin and the
-// gh fake: the prior branch is adopted, force-reset or ignored, and the result
-// is read off the pushed ref or the relayed bundle.
+// gh fake: the prior branch is adopted, left alone or ignored, and the result
+// is read off the unmoved origin ref or the relayed bundle.
 func TestBoxSeamBranchRecovery(t *testing.T) {
 	forgejo := map[string]string{
 		"CODE_FORGE": "forgejo", "BOX_FORGE_BACKEND": "FORGEJO",
@@ -2131,8 +2116,7 @@ func TestBoxSeamBranchRecovery(t *testing.T) {
 	const (
 		unchanged = "unchanged" // origin still holds the prior run's tip
 		absent    = "absent"    // origin never gets an agent branch
-		rebased   = "rebased"   // origin holds the prior tip rebased onto origin/main
-		reset     = "reset"     // origin holds origin/main itself
+		rebased   = "rebased"   // the bundle holds the prior tip rebased onto origin/main
 	)
 	cases := []struct {
 		name    string
@@ -2152,11 +2136,6 @@ func TestBoxSeamBranchRecovery(t *testing.T) {
 	}{
 		{name: "no prior branch", wantBranch: seamBranch, wantRef: absent},
 		{
-			name: "prior branch with an open PR is rebased and force-pushed", prior: true, advance: true, openPR: true,
-			wantBranch: seamBranch, wantRef: rebased, wantAsked: true,
-			wantSay: "open PR exists on " + seamBranch + "; skipping force-reset",
-		},
-		{
 			name: "read-only prior branch with an open PR is relayed as a bundle", prior: true, advance: true, openPR: true, relay: true,
 			wantBranch: seamBranch, wantRef: unchanged, wantBundle: rebased, wantAsked: true,
 			wantSay: "open PR exists on " + seamBranch + "; skipping force-reset",
@@ -2164,11 +2143,6 @@ func TestBoxSeamBranchRecovery(t *testing.T) {
 		{
 			name: "read-only adopted branch with nothing ahead of base relays nothing", prior: true, advance: true, openPR: true, relay: true, noWork: true,
 			wantBranch: seamBranch, wantRef: unchanged, wantAsked: true,
-		},
-		{
-			name: "stale prior branch with no open PR is force-reset", prior: true, advance: true,
-			wantBranch: seamBranch, wantRef: reset, wantAsked: true,
-			wantSay: "stale remote branch " + seamBranch + " found (no open PR); force-resetting to main",
 		},
 		{
 			name: "read-only stale prior branch is left alone", prior: true, advance: true, relay: true,
@@ -2239,20 +2213,6 @@ func TestBoxSeamBranchRecovery(t *testing.T) {
 			case unchanged:
 				if origin != prior {
 					t.Errorf("origin %s = %s; want the prior tip %s", seamBranch, origin, prior)
-				}
-			case reset:
-				if origin != mainTip {
-					t.Errorf("origin %s = %s; want origin/main %s", seamBranch, origin, mainTip)
-				}
-			case rebased:
-				if local := seamRevParse(t, repo, seamBranch); origin != local {
-					t.Errorf("origin %s = %s; want the rebased local branch %s", seamBranch, origin, local)
-				}
-				if parent := seamRevParse(t, repo, "origin/"+seamBranch+"~1"); parent != mainTip {
-					t.Errorf("pushed branch's parent = %s; want the advanced origin/main %s", parent, mainTip)
-				}
-				if got := seamGitOut(t, repo, "log", "-1", "--format=%s", seamBranch); strings.TrimSpace(got) != "prior run work" {
-					t.Errorf("pushed tip = %q; want the prior run's commit", got)
 				}
 			}
 
@@ -2495,10 +2455,6 @@ func TestBoxSeamSettleBundleOut(t *testing.T) {
 			runs: func(string) []seamtest.DriverRun { return []seamtest.DriverRun{{Stdout: seamResult(ready)}} },
 		},
 		{
-			name: "read-write github never bundles", noOutbox: true,
-			runs: func(string) []seamtest.DriverRun { return []seamtest.DriverRun{{Stdout: seamResult(ready)}} },
-		},
-		{
 			name: "read-only github with commits", relay: true, wantBundle: true,
 			runs: func(repo string) []seamtest.DriverRun { return commits(repo, ready, 0) },
 		},
@@ -2508,7 +2464,7 @@ func TestBoxSeamSettleBundleOut(t *testing.T) {
 			// as a bundle, never a push (#6898).
 			name: "read-only git with commits and no credential", wantBundle: true, noPush: true,
 			env: map[string]string{
-				"CODE_FORGE": "git", "BOX_WRITE_ENABLED": "", "GH_TOKEN": "", "BOX_GH_TOKEN_OPTIONAL": "1",
+				"CODE_FORGE": "git", "GH_TOKEN": "", "BOX_GH_TOKEN_OPTIONAL": "1",
 				"CODE_FORGE_REMOTE_URL": "https://unreachable.invalid/o/r.git",
 			},
 			runs: func(repo string) []seamtest.DriverRun { return commits(repo, ready, 0) },
@@ -2767,10 +2723,9 @@ func TestBoxSeamSelfContainedClonesNothing(t *testing.T) {
 	}
 }
 
-// The assembled work prompt tells the agent how to publish: rebase onto base
-// first, report a persistent failure as blocked with a comment, and treat a
-// genuine workflow-file change as a hard stop.
-// with a comment, and treat a genuine workflow-file change as a hard stop.
+// The assembled work prompt tells the agent how to hand its branch off: rebase
+// onto base first, never push itself, report a persistent failure as blocked,
+// and treat a genuine workflow-file change as a hard stop.
 func TestBoxSeamPromptCarriesPushDiscipline(t *testing.T) {
 	r := runBoxSeam(t, seamCase{
 		repo:       seamRepo(t),
@@ -2780,7 +2735,7 @@ func TestBoxSeamPromptCarriesPushDiscipline(t *testing.T) {
 	prompt := r.assembledPrompt(t)
 	for _, want := range []string{
 		"git rebase", "git fetch", // rebase onto base before pushing
-		"status=blocked", "gh issue comment", // a persistent push failure
+		"status=blocked", "git bundle create", // a persistent failure; the host relays the branch
 		".github/workflows", "workflow", // workflow changes are a hard stop
 	} {
 		if !strings.Contains(prompt, want) {

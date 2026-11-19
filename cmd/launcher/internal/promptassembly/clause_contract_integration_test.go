@@ -785,13 +785,6 @@ var clauseContracts = []clauseContract{
 		reason:   "with no surviving finding the step is skipped and nothing already fixed or dropped is re-filed (issues #2701, #3826).",
 	},
 
-	// file-issues-direct.md, file-issues-relay.md, file-issues-relay-socket.md
-	{
-		fragment: "file-issues-direct.md",
-		clause:   "the issue number, and the branch (or PR URL, once one is open) for provenance.",
-		reason:   "only the direct carrier can hold a PR URL, so only it offers one; the sentence's head is held equal across the filer variants by twinContracts (issues #3826, #3827, #6184).",
-	},
-
 	// land-pass-order-orchestrator.md
 	{
 		fragment: "land-pass-order-orchestrator.md",
@@ -2026,29 +2019,7 @@ var clauseContracts = []clauseContract{
 		reason:   "the unreadable arm must not name a client the Box does not have.",
 	},
 
-	// research verdict: posted directly where the Box may write, relayed otherwise
-	{
-		fragment: "github/research-verdict.md",
-		clause:   "gh issue comment",
-		reason:   "a read-write github Box posts the verdict itself, as exactly one comment.",
-	},
-	{
-		fragment: "github/research-verdict.md",
-		clause:   "SPINDRIFT_COMMENT",
-		absent:   true,
-		reason:   "a Box that posts the verdict itself has no relayed line to print.",
-	},
-	{
-		fragment: "forgejo/research-verdict.md",
-		clause:   "fj issue comment",
-		reason:   "a read-write forgejo Box posts the verdict through fj.",
-	},
-	{
-		fragment: "forgejo/research-verdict.md",
-		clause:   "gh issue comment",
-		absent:   true,
-		reason:   "gh targets GitHub, not a Forgejo instance.",
-	},
+	// research verdict: relayed to the launcher
 	{
 		fragment: "research-verdict-relay.md",
 		pattern:  regexp.MustCompile(`SPINDRIFT_COMMENT \S+ <base64-encoded verdict comment body`),
@@ -2073,38 +2044,6 @@ var clauseContracts = []clauseContract{
 	},
 
 	// research outcome landing
-	{
-		fragment: "github/research-outcome-landing.md",
-		clause:   "`landing` is the URL of the comment you just posted",
-		reason:   "a Box that posts the verdict itself reports the comment's URL as the landing.",
-	},
-	{
-		fragment: "github/research-outcome-landing.md",
-		clause:   "`gh issue comment` prints it",
-		reason:   "the URL comes from the comment command's own output.",
-	},
-	{
-		fragment: "github/research-outcome-landing.md",
-		clause:   "landing=none",
-		absent:   true,
-		reason:   "landing=none belongs to the relayed arm, where the Box never learns the comment's URL.",
-	},
-	{
-		fragment: "forgejo/research-outcome-landing.md",
-		clause:   "posted with `fj issue comment`",
-		reason:   "a forgejo Box that posts the verdict itself names fj as the source of the landing URL.",
-	},
-	{
-		fragment: "forgejo/research-outcome-landing.md",
-		clause:   "`landing=none` if it printed no URL",
-		reason:   "fj issue comment may print no URL, and the landing is then none.",
-	},
-	{
-		fragment: "forgejo/research-outcome-landing.md",
-		clause:   "gh issue comment",
-		absent:   true,
-		reason:   "gh targets GitHub, not a Forgejo instance.",
-	},
 	{
 		fragment: "research-outcome-landing-relayed.md",
 		clause:   "the launcher posts your relayed verdict host-side once you exit",
@@ -2162,16 +2101,6 @@ var clauseContracts = []clauseContract{
 
 	// blocked-run issue comment
 	{
-		fragment: "github/issue-blocked-comment.md",
-		clause:   "gh issue comment",
-		reason:   "a read-write github Box comments what is done and what remains itself.",
-	},
-	{
-		fragment: "forgejo/issue-blocked-comment.md",
-		clause:   "fj issue comment",
-		reason:   "a read-write forgejo Box comments what is done and what remains through fj.",
-	},
-	{
 		fragment: "issue-blocked-comment-relay.md",
 		clause:   "the launcher posts it as the issue comment",
 		reason:   "a read-only Box cannot comment, so the SPINDRIFT_OUTCOME note is the comment the launcher posts for it.",
@@ -2180,23 +2109,6 @@ var clauseContracts = []clauseContract{
 		fragment: "local/issue-blocked-comment-relay.md",
 		clause:   "the launcher posts the SPINDRIFT_OUTCOME",
 		reason:   "a local tracker has no in-Box client, so the SPINDRIFT_OUTCOME note is the comment the launcher posts for the Box.",
-	},
-	{
-		fragment: "issue-blocked-comment-unwritable.md",
-		clause:   "no client that can post a comment to this tracker",
-		reason:   "a tracker with no in-Box client (jira) relays the blocked comment through the host, and the agent must be told why it does nothing here.",
-	},
-	{
-		fragment: "issue-blocked-comment-unwritable.md",
-		clause:   "gh issue comment",
-		absent:   true,
-		reason:   "a jira work Box has no in-Box client, so the IF BLOCKED step relays through the host and never names `gh issue comment` (issue #5263).",
-	},
-	{
-		fragment: "issue-blocked-comment-unwritable.md",
-		clause:   "GitHub token",
-		absent:   true,
-		reason:   "the unwritable arm is not about a read-only GitHub token; it has no client at all.",
 	},
 
 	// push and PR open/blocked arms: the Box hands off
@@ -2236,19 +2148,19 @@ var clauseContracts = []clauseContract{
 		fragment: "if-blocked-triage-outbox.md",
 		clause:   "Push failure — check the actual cause before reporting it",
 		absent:   true,
-		reason:   "the push-failure triage belongs to the read-write arm; a read-only Box's denial is expected.",
+		reason:   "a Box never pushes, so the push-failure triage never renders; its denial is expected.",
 	},
 	{
 		fragment: "if-blocked-triage-outbox.md",
 		clause:   "git diff origin/",
 		absent:   true,
-		reason:   "the workflows diff triage belongs to the read-write arm, since a read-only Box pushes nothing to be rejected.",
+		reason:   "the workflows diff triage never renders, since a Box pushes nothing to be rejected.",
 	},
 	{
 		fragment: "if-blocked-triage-outbox.md",
 		clause:   "**Genuine `.github/workflows/` change:**",
 		absent:   true,
-		reason:   "the workflow-scope diagnosis belongs to the read-write arm, since a read-only Box pushes nothing to be rejected.",
+		reason:   "the workflow-scope diagnosis never renders, since a Box pushes nothing to be rejected.",
 	},
 	{
 		fragment: "if-blocked-push-outbox.md",
@@ -2259,7 +2171,7 @@ var clauseContracts = []clauseContract{
 		fragment: "if-blocked-push-outbox.md",
 		clause:   "Push what you have (or note if even that is impossible)",
 		absent:   true,
-		reason:   "the push-what-you-have step belongs to the read-write arm.",
+		reason:   "the push-what-you-have step never renders, since a Box has no push to fall back on.",
 	},
 	{
 		fragment: "if-blocked-push-outbox.md",
@@ -2278,7 +2190,7 @@ var clauseContracts = []clauseContract{
 		fragment: "open-pr-create-outbox.md",
 		clause:   "gh pr create --draft --base",
 		absent:   true,
-		reason:   "a read-only Box cannot open the PR, so only the read-write fragment may carry the invocation.",
+		reason:   "a Box cannot open the PR, so no rendered fragment may carry the invocation.",
 	},
 	{
 		fragment: "open-pr-create-outbox.md",
@@ -2301,7 +2213,7 @@ var clauseContracts = []clauseContract{
 		fragment: "if-blocked-pr-outbox.md",
 		clause:   "gh pr create --draft",
 		absent:   true,
-		reason:   "a read-only Box cannot open the PR, so only the read-write fragment may carry the invocation.",
+		reason:   "a Box cannot open the PR, so no rendered fragment may carry the invocation.",
 	},
 	{
 		fragment: "if-blocked-pr-none.md",
@@ -2356,11 +2268,6 @@ var clauseContracts = []clauseContract{
 
 	// Filer arms
 	{
-		fragment: "file-issues-direct.md",
-		clause:   "use the filer's returned issue URLs",
-		reason:   "a direct Filer returns real issue URLs, which replace the raw findings in the PR body.",
-	},
-	{
 		fragment: "file-issues-relay.md",
 		clause:   "queued for filing",
 		reason:   "a relayed Filer knows no issue URL yet, so the PR body only notes that the findings were queued.",
@@ -2381,45 +2288,6 @@ var clauseContracts = []clauseContract{
 		clause:   "the filer's returned issue URLs",
 		absent:   true,
 		reason:   "a relayed Filer returns no issue URLs.",
-	},
-	{
-		fragment: "github/filer-direct-file.md",
-		clause:   "gh issue create",
-		reason:   "a direct github Filer files each finding with gh.",
-	},
-	{
-		fragment: "github/filer-direct-file.md",
-		clause:   "SPINDRIFT_ISSUE_INTENT",
-		absent:   true,
-		reason:   "a direct Filer files with its own token, so it prints no relayed intent line.",
-	},
-	{
-		fragment: "github/filer-direct-file.md",
-		clause:   "fj issue create",
-		absent:   true,
-		reason:   "fj targets Forgejo, not GitHub.",
-	},
-	{
-		fragment: "github/filer-direct-label.md",
-		clause:   "gh label create",
-		reason:   "a direct github Filer ensures the provenance label exists with gh.",
-	},
-	{
-		fragment: "forgejo/filer-direct-file.md",
-		clause:   "fj issue create",
-		reason:   "a direct forgejo Filer files each finding with fj.",
-	},
-	{
-		fragment: "forgejo/filer-direct-file.md",
-		clause:   "gh issue create",
-		absent:   true,
-		reason:   "gh targets GitHub, not a Forgejo instance.",
-	},
-	{
-		fragment: "forgejo/filer-direct-label.md",
-		clause:   "gh label create",
-		absent:   true,
-		reason:   "gh targets GitHub, not a Forgejo instance.",
 	},
 	{
 		fragment: "filer-file-relay.md",
@@ -2485,13 +2353,13 @@ var clauseContracts = []clauseContract{
 	{
 		fragment: "filer-relay-reason-unwritable.md",
 		clause:   "This issue tracker has no in-Box client",
-		reason:   "a read-write Box on a tracker with no in-Box client relays because of the tracker, since its prompt later tells it to push with a token that is not read-only (issue #6354).",
+		reason:   "a Box on a tracker with no in-Box client relays because of the tracker, not because of its token (issue #6354).",
 	},
 	{
 		fragment: "filer-relay-reason-unwritable.md",
 		clause:   "token is read-only",
 		absent:   true,
-		reason:   "a read-write Box must never be told its token is read-only, which contradicts the push it is later told to make (issue #6354).",
+		reason:   "the relay reason is the tracker, so the Box must not be told its token is the cause (issue #6354).",
 	},
 	{
 		fragment: "filer-dedup-unwritable.md",
@@ -2789,13 +2657,6 @@ var clauseContracts = []clauseContract{
 		reason:   "by default a local ticket is private, so the public PR body must not leak its slug or number (issue #2352).",
 	},
 
-	// issue-blocked-comment-unwritable.md
-	{
-		fragment: "issue-blocked-comment-unwritable.md",
-		clause:   "the launcher posts the SPINDRIFT_OUTCOME `note=` field",
-		reason:   "a write-capable Box with no tracker client (jira) must be told the launcher posts the IF BLOCKED comment from the note field, so it does not try to comment itself (issue #5263).",
-	},
-
 	// research-prompt.md, research-self-contained-prompt.md (verdict renderings)
 	{
 		fragment: "research-prompt.md",
@@ -2964,7 +2825,7 @@ var sharedClauses = []sharedClause{
 		},
 	},
 	{
-		fragments: []string{"file-issues-direct.md", "file-issues-relay.md", "file-issues-relay-socket.md"},
+		fragments: []string{"file-issues-relay.md", "file-issues-relay-socket.md"},
 		clauseContract: clauseContract{
 			clause: splicedFragment("file-issues-triage-recap"),
 			to:     "It is pre-provisioned",
@@ -3397,7 +3258,7 @@ const (
 	outcomeColonReason   = "the parser tolerates a colon after the token, so the prompt must not list it as an invalid (lost) form (issues #2012, #5298)."
 	outcomePrefixReason  = "lastInLog only recognizes a line that starts with the prefix, so text before the token hides the whole line (issue #1901); the rule's own wording and the column-one consequence are pinned (issue #3224)."
 	outcomeEnumReason    = "Parse() does not enforce a status enum, so ready or blocked is a prompt-level contract and the prompt must call a value like SUCCESS wrong, without claiming it is lost since it still parses (issues #1901, #3224)."
-	ifBlockedReason      = "the Driver never flips a PR to ready (only the launcher does, at green; issue #1651), so a blocked run has nothing to revert to draft; the closing SPINDRIFT_OUTCOME line renders from a read-write and read-only fragment pair, so both are checked (issues #1653, #1933)."
+	ifBlockedReason      = "the Driver never flips a PR to ready (only the launcher does, at green; issue #1651), so a blocked run has nothing to revert to draft; the closing SPINDRIFT_OUTCOME line is checked in each fragment that renders it (issues #1653, #1933)."
 	fixDraftRevertReason = "the Driver never flips a PR to ready, so the fix prompt's override bullet must not tell a blocked fix pass to convert the PR back to draft; it never left draft (issue #1653)."
 	deadSkillReason      = "a prompt naming a skill the Box does not carry is dead text (issue #120)."
 	contractBlockReason  = "a prompt missing a harness-owned contract block ships an agent that never emits the outcome line (issue #419)."
@@ -3474,14 +3335,6 @@ const (
 	relaySendParagraphEnd    = "Best-effort: filing must never block"
 )
 
-// The filer variants share one head, so their twin contracts share its scope
-// and reason.
-const (
-	fileIssuesHeadFrom    = "# FILE ISSUES"
-	fileIssuesHeadThrough = "the issue number, and the branch"
-	fileIssuesHeadReason  = "the filer variants share a head (the heading, the triage-recap splice, and the provisioning sentence up to its provenance clause); the provenance clause is the first divergence, since only the direct carrier can hold a PR URL (issues #3826, #3827)."
-)
-
 // twinContracts binds the hand-mirrored fragment pairs to each other. Text is
 // compared after whitespace normalization (the old tests that compared bytes
 // let no re-wrap pass; a re-wrap is harmless to the model), so a one-sided
@@ -3525,20 +3378,6 @@ var twinContracts = []twinContract{
 		b:      "review-loop-orchestrator-no-filer.md",
 		editA:  []twinEdit{{old: "FILE ISSUES, ", new: ""}},
 		reason: "the Filer and no-Filer review-loop twins differ only in the FILE ISSUES mentions; a rewording must land in both (issue #5300).",
-	},
-	{
-		a:       "file-issues-direct.md",
-		b:       "file-issues-relay.md",
-		from:    fileIssuesHeadFrom,
-		through: fileIssuesHeadThrough,
-		reason:  fileIssuesHeadReason,
-	},
-	{
-		a:       "file-issues-direct.md",
-		b:       "file-issues-relay-socket.md",
-		from:    fileIssuesHeadFrom,
-		through: fileIssuesHeadThrough,
-		reason:  fileIssuesHeadReason,
 	},
 }
 
