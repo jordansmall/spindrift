@@ -51,10 +51,6 @@ func TestGatesSignalCarrierConjunctions(t *testing.T) {
 			env:  Env{TrackerAxisRead: "FORGEJO", TrackerAxisWrite: "FORGEJO", BoxWriteEnabled: false},
 		},
 		{
-			base: "BOX_ACCESS_READ_ONLY",
-			env:  Env{BoxWriteEnabled: false},
-		},
-		{
 			base: "FILER_FILE_RELAY",
 			env:  Env{FilerEnabled: true, BoxWriteEnabled: false},
 		},
@@ -101,7 +97,6 @@ func TestGatesSignalCarrierConjunctions(t *testing.T) {
 		{name: "ISSUE_TRACKER_GITHUB_READONLY off", base: "ISSUE_TRACKER_GITHUB_READONLY", env: Env{TrackerAxisRead: "GITHUB", TrackerAxisWrite: "GITHUB", BoxWriteEnabled: true}},
 		{name: "ISSUE_TRACKER_LOCAL off", base: "ISSUE_TRACKER_LOCAL", env: Env{TrackerAxisRead: "GITHUB"}},
 		{name: "ISSUE_TRACKER_FORGEJO_READONLY off", base: "ISSUE_TRACKER_FORGEJO_READONLY", env: Env{TrackerAxisRead: "FORGEJO", TrackerAxisWrite: "FORGEJO", BoxWriteEnabled: true}},
-		{name: "BOX_ACCESS_READ_ONLY off", base: "BOX_ACCESS_READ_ONLY", env: Env{BoxWriteEnabled: true}},
 		{name: "FILER_FILE_RELAY off", base: "FILER_FILE_RELAY", env: Env{FilerEnabled: false}},
 	}
 	for _, tc := range offCases {

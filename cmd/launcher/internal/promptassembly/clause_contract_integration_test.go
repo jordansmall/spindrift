@@ -1670,25 +1670,10 @@ var clauseContracts = []clauseContract{
 	},
 	{
 		fragment: "issue-prompt.md",
-		clause:   "LAND_GIT_STOP_READ_WRITE_STEP",
-		reason:   codeForgeGitReason,
-	},
-	{
-		fragment: "issue-prompt.md",
 		clause:   "LAND_GIT_STOP_READ_ONLY_STEP",
 		reason:   codeForgeGitReason,
 	},
 	{
-		fragment: "land-git-stop-read-write.md",
-		clause:   "landing=agent/issue-7 status=ready",
-		reason:   codeForgeGitReason,
-	},
-	{
-		fragment: "land-git-stop-read-write.md",
-		clause:   "Do not open a pull request and do not attempt to merge",
-		reason:   codeForgeGitReason,
-	},
-	{
 		fragment: "land-git-stop-read-only.md",
 		clause:   "landing=agent/issue-7 status=ready",
 		reason:   codeForgeGitReason,
@@ -1697,29 +1682,9 @@ var clauseContracts = []clauseContract{
 		fragment: "land-git-stop-read-only.md",
 		clause:   "Do not open a pull request and do not attempt to merge",
 		reason:   codeForgeGitReason,
-	},
-
-	{
-		fragment: "issue-prompt.md",
-		from:     "# OPEN A PULL REQUEST",
-		to:       "# OUTCOME",
-		clause:   "OPEN_PR_CREATE_DIRECT_STEP",
-		reason:   openDraftReason,
-	},
-	{
-		fragment: "github/open-pr-create.md",
-		clause:   "gh pr create --draft",
-		reason:   openDraftReason,
 	},
 
 	// issue-prompt.md: OUTCOME
-	{
-		fragment: "issue-prompt.md",
-		from:     "# OUTCOME",
-		to:       "# IF BLOCKED",
-		clause:   "OUTCOME_LANDING_READ_WRITE_STEP",
-		reason:   outcomeLandingReason,
-	},
 	{
 		fragment: "issue-prompt.md",
 		from:     "# OUTCOME",
@@ -1732,11 +1697,6 @@ var clauseContracts = []clauseContract{
 		from:     "# OUTCOME",
 		to:       "# IF BLOCKED",
 		clause:   "OUTCOME_LANDING_READ_ONLY_SOCKET_STEP",
-		reason:   outcomeLandingReason,
-	},
-	{
-		fragment: "outcome-landing-git.md",
-		clause:   "status=ready",
 		reason:   outcomeLandingReason,
 	},
 	{
@@ -1907,20 +1867,9 @@ var clauseContracts = []clauseContract{
 		reason:   ifBlockedReason,
 	},
 	{
-		fragment: "if-blocked-outcome-landing-git.md",
-		clause:   "--undo",
-		absent:   true,
-		reason:   ifBlockedReason,
-	},
-	{
 		fragment: "if-blocked-outcome-landing-outbox.md",
 		clause:   "--undo",
 		absent:   true,
-		reason:   ifBlockedReason,
-	},
-	{
-		fragment: "if-blocked-outcome-landing-git.md",
-		pattern:  regexp.MustCompile(`SPINDRIFT_OUTCOME .* status=blocked`),
 		reason:   ifBlockedReason,
 	},
 	{
@@ -2250,12 +2199,7 @@ var clauseContracts = []clauseContract{
 		reason:   "the unwritable arm is not about a read-only GitHub token; it has no client at all.",
 	},
 
-	// push and PR open/blocked arms: a read-write Box acts, a read-only one hands off
-	{
-		fragment: "open-pr-push-git.md",
-		clause:   "git push --force-with-lease --force-if-includes -u origin",
-		reason:   "a read-write Box pushes its branch itself, and --force-if-includes keeps the lease from overwriting a commit someone else pushed.",
-	},
+	// push and PR open/blocked arms: the Box hands off
 	{
 		fragment: "open-pr-push-outbox.md",
 		clause:   "the harness relays your committed branch out",
@@ -2266,16 +2210,6 @@ var clauseContracts = []clauseContract{
 		clause:   "git push --force-with-lease",
 		absent:   true,
 		reason:   "a read-only Box holds no push-capable token, so the fragment must not instruct a push.",
-	},
-	{
-		fragment: "commit-push-git.md",
-		clause:   "git push --force-with-lease --force-if-includes -u origin",
-		reason:   "a read-write Box pushes after rebasing, and --force-if-includes keeps the lease from overwriting a commit someone else pushed.",
-	},
-	{
-		fragment: "commit-push-git.md",
-		clause:   "one retry only",
-		reason:   "a rejected push retries once and then follows IF BLOCKED, so the agent does not loop on a push it cannot land.",
 	},
 	{
 		fragment: "commit-push-outbox.md",
@@ -2292,16 +2226,6 @@ var clauseContracts = []clauseContract{
 		clause:   "git push --force-with-lease",
 		absent:   true,
 		reason:   "a read-only Box holds no push-capable token, so the fragment must not instruct a push.",
-	},
-	{
-		fragment: "if-blocked-triage-git.md",
-		clause:   "Push failure — check the actual cause before reporting it",
-		reason:   "a read-write Box's rejected push has a real cause to diagnose before it is reported, not a guess.",
-	},
-	{
-		fragment: "if-blocked-triage-git.md",
-		clause:   ".github/workflows/",
-		reason:   "the token lacks workflow scope by design, so a rejected push touching workflows is a human-review case, not a retry.",
 	},
 	{
 		fragment: "if-blocked-triage-outbox.md",
@@ -2327,17 +2251,6 @@ var clauseContracts = []clauseContract{
 		reason:   "the workflow-scope diagnosis belongs to the read-write arm, since a read-only Box pushes nothing to be rejected.",
 	},
 	{
-		fragment: "if-blocked-push-git.md",
-		clause:   "Push what you have (or note if even that is impossible)",
-		reason:   "a blocked read-write Box still pushes its work so none is stranded.",
-	},
-	{
-		fragment: "if-blocked-push-git.md",
-		clause:   "seam.bundle",
-		absent:   true,
-		reason:   "a read-write Box pushes directly; the bundle hand-off belongs to no arm of this fragment.",
-	},
-	{
 		fragment: "if-blocked-push-outbox.md",
 		clause:   "the harness relays your committed branch out",
 		reason:   "a blocked read-only Box leaves its work committed and the harness relays it, so it takes no push or bundle action.",
@@ -2357,29 +2270,6 @@ var clauseContracts = []clauseContract{
 
 	// open-PR create arms
 	{
-		fragment: "github/open-pr-create.md",
-		clause:   "fj pr create",
-		absent:   true,
-		reason:   "fj targets Forgejo, not GitHub.",
-	},
-	{
-		fragment: "github/open-pr-create.md",
-		clause:   "SPINDRIFT_PR_INTENT",
-		absent:   true,
-		reason:   "a Box that opens the PR itself has no PR-intent line to print.",
-	},
-	{
-		fragment: "forgejo/open-pr-create.md",
-		clause:   "2. `fj pr create",
-		reason:   "a read-write forgejo Box opens its draft through fj as step 2.",
-	},
-	{
-		fragment: "forgejo/open-pr-create.md",
-		clause:   "2. `gh pr create",
-		absent:   true,
-		reason:   "gh targets GitHub, not a Forgejo instance; only the closing reminder may name it.",
-	},
-	{
 		fragment: "open-pr-create-outbox.md",
 		pattern:  regexp.MustCompile(`SPINDRIFT_PR_INTENT \S+ <base64-encoded title`),
 		reason:   "a read-only Box prints its PR as one nonce-guarded line the launcher finds by this run's nonce (issue #1938).",
@@ -2395,17 +2285,6 @@ var clauseContracts = []clauseContract{
 		pattern:  regexp.MustCompile(`SPINDRIFT_PR_INTENT_(BEGIN|END)`),
 		absent:   true,
 		reason:   "the PR intent is one line; a BEGIN/END block form is not the grammar the launcher reads.",
-	},
-	{
-		fragment: "github/if-blocked-pr.md",
-		clause:   "gh pr view --json url",
-		reason:   "a blocked read-write github Box checks for an existing PR before opening a draft.",
-	},
-	{
-		fragment: "github/if-blocked-pr.md",
-		clause:   "SPINDRIFT_PR_INTENT",
-		absent:   true,
-		reason:   "a Box that opens the PR itself has no PR-intent line to print.",
 	},
 	{
 		fragment: "if-blocked-pr-outbox.md",
@@ -2451,11 +2330,6 @@ var clauseContracts = []clauseContract{
 		fragment: "issue-prompt.md",
 		clause:   "3. Leave the issue in-progress — do NOT close it.",
 		reason:   "the IF BLOCKED arms before this step end at step 2 or 3, so it must stay numbered 3 whichever arm renders.",
-	},
-	{
-		fragment: "if-blocked-outcome-landing-git.md",
-		clause:   "landing=<pr-url> status=blocked",
-		reason:   "a blocked read-write Box has a PR, so its outcome line carries the PR URL placeholder.",
 	},
 	{
 		fragment: "if-blocked-outcome-landing-branch.md",
@@ -2965,13 +2839,6 @@ var clauseContracts = []clauseContract{
 		clause:   "self-contained research dispatch",
 		absent:   true,
 		reason:   "the repo-backed research prompt must not claim the self-contained dispatch's no-repo premise, or the agent would skip the clone it has (ADR 0022, issue #2202).",
-	},
-
-	// land-git-stop-read-write.md
-	{
-		fragment: "land-git-stop-read-write.md",
-		clause:   "2. Print exactly one line",
-		reason:   "a read-write CODE_FORGE=git Box pushes first, so its stop step is step 2; the numbering must follow the push step it renders after (issue #2526).",
 	},
 
 	// land-git-stop-read-only.md
@@ -3523,8 +3390,7 @@ const (
 	backgroundGateReason = "the never-background rule (issue #571) must cover CHECK's long build and test gates: an agent that backgrounds a gate and ends its turn never emits SPINDRIFT_OUTCOME (issues #3221, #3505)."
 	checkRestatedReason  = "the elaborated check guidance lives in the check-hygiene skill (issues #3220, #3223); a restated copy in CHECK is the duplication that move removed, so its absence is pinned, not just the anchor's presence."
 	codeCommentsReason   = "the code-comments policy renders inside the pass that writes code; the ${CODE_COMMENTS_STEP} anchor, its fragment and the skill pointer are gone, and prompt-code-comments-inlined owns equality against SKILL.md (issue #3505)."
-	codeForgeGitReason   = "CODE_FORGE=git (issue #330) skips PR creation and CI-watch and emits a branch ref where a PR URL would go; the stop step lives in a read-write and read-only fragment pair, so the section carries only the LAND_GIT_STOP_*_STEP references (issue #2526)."
-	openDraftReason      = "the draft bit is the readiness signal the entrypoint backstop and launcher trust, so the PR must never open non-draft (issue #1614); the invocation lives in github/open-pr-create.md, so the section carries only the OPEN_PR_CREATE_DIRECT_STEP reference (issue #1919)."
+	codeForgeGitReason   = "CODE_FORGE=git (issue #330) skips PR creation and CI-watch and emits a branch ref where a PR URL would go; the stop step lives in a fragment, so the section carries only the LAND_GIT_STOP_READ_ONLY_STEP reference (issue #2526)."
 	outcomeLandingReason = "the Driver's OUTCOME step prints status=ready without ever calling `gh pr ready`, because the launcher owns the draft to ready flip (issue #1651); the print instruction lives in the OUTCOME_LANDING_READ_*_STEP fragments (issues #1653, #3224)."
 	socketNoMarkerReason = "the socket carrier prints no PR-intent marker line, so its fragments must not point back at one (issue #1653)."
 	outcomeGrammarReason = "an agent following the prompt must see the accepted grammar and status enum, not infer it from one worked example; landing is <landing-ref> because it carries a branch name, not a PR URL, under read-only (issues #1901, #1919)."

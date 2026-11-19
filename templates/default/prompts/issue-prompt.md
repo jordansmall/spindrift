@@ -114,7 +114,7 @@ ${CHECK_HYGIENE_STEP}${NIX_CHECKS_STEP}${PRINCIPLE_FIX_ROOT_CAUSES_STEP}${AUTO_F
 ${COMMIT_BAKED_STEP}${COMMIT_UNBAKED_STEP}Prefer several small focused commits over one big one — commit each logical
 unit (domain change, then wiring, then tests) so each stands alone.
 
-${COMMIT_REWORK_ORCHESTRATOR_STEP}${COMMIT_PUSH_READ_WRITE_STEP}${COMMIT_PUSH_HOST_MEDIATED_STEP}${COMMIT_PUSH_READ_ONLY_STEP}# REVIEW
+${COMMIT_REWORK_ORCHESTRATOR_STEP}${COMMIT_PUSH_HOST_MEDIATED_STEP}${COMMIT_PUSH_READ_ONLY_STEP}# REVIEW
 
 ${REVIEW_LOOP_ORCHESTRATOR_STEP}${LAND_PASS_ORDER_ORCHESTRATOR_STEP}${FILE_ISSUES_DIRECT_STEP}${FILE_ISSUES_RELAY_STEP}${FILE_ISSUES_RELAY_SOCKET_STEP}# LAND THE CHANGE
 
@@ -124,7 +124,7 @@ unsure):
 **`CODE_FORGE=git`** (push-only Code Forge — no PR, no CI-watch, no merge
 gate): skip OPEN A PULL REQUEST below entirely.
 
-${LAND_GIT_PUSH_READ_WRITE_STEP}${LAND_GIT_STOP_READ_WRITE_STEP}${LAND_GIT_STOP_READ_ONLY_STEP}**`CODE_FORGE=local`** (host-mediated Code Forge — no PR, no CI-watch, no
+${LAND_GIT_STOP_READ_ONLY_STEP}**`CODE_FORGE=local`** (host-mediated Code Forge — no PR, no CI-watch, no
 network; the launcher lands your branch after this container exits): skip
 OPEN A PULL REQUEST below entirely. Do not push directly — the repo you
 cloned from is mounted read-only — and do not bundle your commits yourself:
@@ -147,7 +147,7 @@ OPEN A PULL REQUEST below.
 
 # OPEN A PULL REQUEST
 
-${OPEN_PR_PUSH_READ_WRITE_STEP}${OPEN_PR_PUSH_READ_ONLY_STEP}${OPEN_PR_CREATE_DIRECT_STEP}${OPEN_PR_CREATE_READ_ONLY_STEP}${OPEN_PR_CREATE_READ_ONLY_SOCKET_STEP}${PR_BODY_CLOSES_STEP}${PR_BODY_ISSUE_REF_STEP}${PR_BODY_NO_ISSUE_REF_STEP}The PR opens as a **draft** and stays a **draft** — the launcher flips it to
+${OPEN_PR_PUSH_READ_ONLY_STEP}${OPEN_PR_CREATE_READ_ONLY_STEP}${OPEN_PR_CREATE_READ_ONLY_SOCKET_STEP}${PR_BODY_CLOSES_STEP}${PR_BODY_ISSUE_REF_STEP}${PR_BODY_NO_ISSUE_REF_STEP}The PR opens as a **draft** and stays a **draft** — the launcher flips it to
 ready once CI reaches green (the launcher already gates on CI green itself, so
 there is nothing left for you to watch or confirm here), then applies its
 configured `MERGE_MODE`, subject to its merge guard: it merges the PR, queues
@@ -161,7 +161,7 @@ CI-green decision, the ready flip, any merge, and the complete-label swap.
 `CODE_FORGE=local` already printed their outcome line and stopped under LAND
 THE CHANGE above.)
 
-${OUTCOME_LANDING_READ_WRITE_STEP}${OUTCOME_LANDING_READ_ONLY_STEP}${OUTCOME_LANDING_READ_ONLY_SOCKET_STEP}Grammar: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=<status> note=<text>`
+${OUTCOME_LANDING_READ_ONLY_STEP}${OUTCOME_LANDING_READ_ONLY_SOCKET_STEP}Grammar: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=<status> note=<text>`
 — one line, space-delimited fields, `note` last (`note` may itself contain
 spaces and `=`). The only valid `status` values here are `ready` and `blocked`
 — no other word belongs in that field (`status=ambiguous` and
@@ -190,16 +190,16 @@ This must be the literal final message — nothing after it, no prose summary,
 no background task. The launcher parses this one line to learn your PR; if
 it is missing, the run is wasted.
 
-${OUTCOME_READY_MEANS_READ_WRITE_STEP}${OUTCOME_READY_MEANS_READ_ONLY_STEP}${OUTCOME_READY_MEANS_READ_ONLY_SOCKET_STEP}
+${OUTCOME_READY_MEANS_READ_ONLY_STEP}${OUTCOME_READY_MEANS_READ_ONLY_SOCKET_STEP}
 # IF BLOCKED
 
 If you can't finish (review never clears, checks stay red after repeated fixes,
 or any other blocker):
 
-${IF_BLOCKED_TRIAGE_READ_WRITE_STEP}${IF_BLOCKED_TRIAGE_HOST_MEDIATED_STEP}${IF_BLOCKED_TRIAGE_READ_ONLY_STEP}Then:
+${IF_BLOCKED_TRIAGE_HOST_MEDIATED_STEP}${IF_BLOCKED_TRIAGE_READ_ONLY_STEP}Then:
 
-${IF_BLOCKED_PUSH_READ_WRITE_STEP}${IF_BLOCKED_PUSH_HOST_MEDIATED_STEP}${IF_BLOCKED_PUSH_READ_ONLY_STEP}${IF_BLOCKED_PR_DIRECT_STEP}${IF_BLOCKED_NO_PR_STEP}${IF_BLOCKED_PR_READ_ONLY_STEP}${IF_BLOCKED_PR_READ_ONLY_SOCKET_STEP}3. Leave the issue in-progress — do NOT close it.
+${IF_BLOCKED_PUSH_HOST_MEDIATED_STEP}${IF_BLOCKED_PUSH_READ_ONLY_STEP}${IF_BLOCKED_NO_PR_STEP}${IF_BLOCKED_PR_READ_ONLY_STEP}${IF_BLOCKED_PR_READ_ONLY_SOCKET_STEP}3. Leave the issue in-progress — do NOT close it.
 ${ISSUE_BLOCKED_COMMENT_STEP}${ISSUE_BLOCKED_COMMENT_RELAY_STEP}${ISSUE_BLOCKED_COMMENT_UNWRITABLE_STEP}5. Print exactly one line and stop — raw plain text, not wrapped in
    backticks, a code fence, or any other markdown formatting:
 
-${IF_BLOCKED_OUTCOME_LANDING_READ_WRITE_STEP}${IF_BLOCKED_OUTCOME_LANDING_BRANCH_STEP}${IF_BLOCKED_OUTCOME_LANDING_READ_ONLY_STEP}
+${IF_BLOCKED_OUTCOME_LANDING_BRANCH_STEP}${IF_BLOCKED_OUTCOME_LANDING_READ_ONLY_STEP}

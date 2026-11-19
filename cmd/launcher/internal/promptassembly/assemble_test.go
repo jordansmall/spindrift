@@ -1825,7 +1825,7 @@ func TestAssembleAxisRowResolvesBackendFolder(t *testing.T) {
 			func(e *Env) {}, "[]", ""},
 		{"gate off renders empty", FragmentRow{Gate: "NO_SUCH_GATE", Axis: "tracker", Fragment: "step.md", Var: "STEP"},
 			func(e *Env) {}, "[]", ""},
-		{"gate on renders the axis file", FragmentRow{Gate: "BOX_ACCESS_READ_WRITE", Axis: "tracker", Fragment: "step.md", Var: "STEP"},
+		{"gate on renders the axis file", FragmentRow{Gate: "BOX_ACCESS_READ_ONLY_LOG", Axis: "tracker", Fragment: "step.md", Var: "STEP"},
 			func(e *Env) {}, "[github-step\n\n]", "github/step.md"},
 	}
 	for _, tc := range cases {

@@ -165,40 +165,6 @@ func TestAssembleAxisValuesAreNotRejected(t *testing.T) {
 	}
 }
 
-// The CODE_FORGE=git block's three steps hang off box access alone: a
-// read-write Box pushes and then stops, a read-only Box only stops (its
-// eval-time assert, issue #2526, makes read-only plus git unbuildable, so the
-// read-only push step is gone). The fragments number themselves, so which
-// pair renders is what keeps the numbering contiguous.
-func TestAssembleLandGitStepsFollowBoxAccess(t *testing.T) {
-	reg, env := syntheticRegistry(t,
-		[]FragmentRow{
-			{Gate: "BOX_ACCESS_READ_WRITE", Fragment: "push.md", Var: "LAND_GIT_PUSH_READ_WRITE_STEP"},
-			{Gate: "BOX_ACCESS_READ_WRITE", Fragment: "stop-rw.md", Var: "LAND_GIT_STOP_READ_WRITE_STEP"},
-			{Gate: "BOX_ACCESS_READ_ONLY", Fragment: "stop-ro.md", Var: "LAND_GIT_STOP_READ_ONLY_STEP"},
-		},
-		map[string]string{
-			"issue-prompt.md":      "[${LAND_GIT_PUSH_READ_WRITE_STEP}${LAND_GIT_STOP_READ_WRITE_STEP}${LAND_GIT_STOP_READ_ONLY_STEP}]\n",
-			"fragments/push.md":    "PUSH,",
-			"fragments/stop-rw.md": "STOP-RW,",
-			"fragments/stop-ro.md": "STOP-RO,",
-		})
-
-	for want, boxWrite := range map[string]bool{
-		"[PUSH,STOP-RW,]": true,
-		"[STOP-RO,]":      false,
-	} {
-		env.BoxWriteEnabled = boxWrite
-		result, err := Assemble(env, reg)
-		if err != nil {
-			t.Fatalf("Assemble(BoxWriteEnabled=%v): %v", boxWrite, err)
-		}
-		if got := unseparated(result.Prompt); got != want {
-			t.Errorf("BoxWriteEnabled=%v: Prompt = %q, want %q", boxWrite, got, want)
-		}
-	}
-}
-
 // Each of the four skills is baked independently (issue #2354), matching
 // Gates() and lib/image.nix's per-skill baking, so a real Consumer can bake
 // any subset: a partial combination renders exactly the arms its own flags

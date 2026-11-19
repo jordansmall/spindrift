@@ -16,8 +16,7 @@ let
     ISSUE_TRACKER_GITHUB_READONLY = "the GitHub write axis, read-only Box or forced relay";
     ISSUE_TRACKER_LOCAL = "the tracker reads through the local axis";
     ISSUE_TRACKER_FORGEJO_READONLY = "the Forgejo write axis, read-only Box or forced relay";
-    BOX_ACCESS_READ_ONLY = "the Box has no write access";
-    PR_FORGE_READ_ONLY = "a read-only Box on a forge with pull requests";
+    PR_FORGE_READ_ONLY = "the Box is on a forge with pull requests";
     FILER_FILE_RELAY = "the Filer files issues through the host relay";
     RESEARCH_VERDICT_RELAYED = "a research verdict is posted through the host relay";
   };
@@ -104,14 +103,9 @@ let
     PR_BODY_ISSUE_REF = "the PR body carries an issue reference (opt-in knob)";
     PR_BODY_NO_ISSUE_REF = "the PR body carries no issue reference (opt-in knob off)";
 
-    BOX_ACCESS_READ_WRITE = "the Box has write access";
-    OPEN_PR_CREATE_RW_GH = "a writable Box opens its PR with gh";
-    OPEN_PR_CREATE_RW_FORGEJO = "a writable Box opens its PR with fj";
-    PR_FORGE_READ_WRITE = "a writable Box on a forge with pull requests";
+    BOX_ACCESS_READ_ONLY_LOG = "the signal carrier is log (selects the PR-intent and landing steps)";
+    BOX_ACCESS_READ_ONLY_SOCKET = "the signal carrier is socket (selects the PR-intent and landing steps)";
     NO_PR_FORGE = "the forge has no pull requests";
-    IF_BLOCKED_PR_RW_GH = "a blocked writable Box opens its PR with gh";
-    IF_BLOCKED_PR_RW_FORGEJO = "a blocked writable Box opens its PR with fj";
-    BOX_PUSH_READ_WRITE = "a writable Box pushes its branch itself";
     HOST_MEDIATED_PUSH = "the launcher lands the branch host-side";
     OUTBOX_PUSH_READ_ONLY = "a read-only Box pushes through the outbox";
     FIX_CI_READ_GH = "the fix pass on a github forge works from the host's CI FAILURE";
@@ -138,18 +132,12 @@ let
   # (promptassembly's TestReadWriteOnlyGatesNeverFireReadOnly), and
   # nix/checks/in-box-forge-cli-allowlist.nix holds every such row to it.
   readWriteOnly = [
-    "BOX_ACCESS_READ_WRITE"
     "FILER_FILE_DIRECT_ANY"
     "FILER_FILE_DIRECT_FORGEJO"
     "FILER_FILE_DIRECT_GH"
-    "IF_BLOCKED_PR_RW_FORGEJO"
-    "IF_BLOCKED_PR_RW_GH"
     "ISSUE_TRACKER_FORGEJO_READWRITE"
     "ISSUE_TRACKER_GITHUB_READWRITE"
     "ISSUE_TRACKER_READWRITE"
-    "OPEN_PR_CREATE_RW_FORGEJO"
-    "OPEN_PR_CREATE_RW_GH"
-    "PR_FORGE_READ_WRITE"
   ];
   undeclaredReadWriteOnly = builtins.filter (g: !(counts ? ${g})) readWriteOnly;
 in

@@ -197,10 +197,6 @@ func TestAssembleDeprecatedForgeSlotVarsRenderAsBefore(t *testing.T) {
 	}{
 		{"fix ci read", "work", "fix-prompt.md", "${FIX_CI_READ_STEP}",
 			"${FIX_CI_READ_GITHUB_STEP}${FIX_CI_READ_FORGEJO_STEP}", 1},
-		{"open pr create", "work", "issue-prompt.md", "${OPEN_PR_CREATE_DIRECT_STEP}",
-			"${OPEN_PR_CREATE_READ_WRITE_STEP}${OPEN_PR_CREATE_READ_WRITE_FORGEJO_STEP}", 0},
-		{"if blocked pr", "work", "issue-prompt.md", "${IF_BLOCKED_PR_DIRECT_STEP}",
-			"${IF_BLOCKED_PR_READ_WRITE_STEP}${IF_BLOCKED_PR_READ_WRITE_FORGEJO_STEP}", 0},
 		{"pr body", "work", "issue-prompt.md", "${PR_BODY_ISSUE_REF_STEP}${PR_BODY_NO_ISSUE_REF_STEP}",
 			"${PR_BODY_LOCAL_REF_STEP}${PR_BODY_LOCAL_NOREF_STEP}", 0},
 		{"commit push", "work", "issue-prompt.md", "${COMMIT_PUSH_HOST_MEDIATED_STEP}",

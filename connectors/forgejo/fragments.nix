@@ -10,9 +10,7 @@
     "filer-direct-file.md" = [ "forgejo" ];
     "filer-direct-label.md" = [ "forgejo" ];
     "fix-ci-read.md" = [ "forgejo" ];
-    "if-blocked-pr.md" = [ "forgejo" ];
     "issue-blocked-comment.md" = [ "forgejo" ];
-    "open-pr-create.md" = [ "forgejo" ];
     "research-outcome-landing.md" = [ "forgejo" ];
     "research-verdict.md" = [ "forgejo" ];
   };

@@ -81,7 +81,6 @@ func Gates(e Env) map[string]bool {
 		"ISSUE_TRACKER_GITHUB_READONLY",
 		"ISSUE_TRACKER_LOCAL",
 		"ISSUE_TRACKER_FORGEJO_READONLY",
-		"BOX_ACCESS_READ_ONLY",
 		"PR_FORGE_READ_ONLY",
 		"FILER_FILE_RELAY",
 		"RESEARCH_VERDICT_RELAYED",
@@ -89,6 +88,11 @@ func Gates(e Env) map[string]bool {
 		g[base+"_LOG"] = g[base] && !socket
 		g[base+"_SOCKET"] = g[base] && socket
 	}
+
+	// The carrier pair of the Box-side PR-intent and landing steps. No base
+	// gate: every Box is read-only, so the carrier alone picks the arm.
+	g["BOX_ACCESS_READ_ONLY_LOG"] = !socket
+	g["BOX_ACCESS_READ_ONLY_SOCKET"] = socket
 
 	g["AUTO_FORMAT"] = e.AutoFormat
 	g["AUTO_LINT"] = e.AutoLint

@@ -287,10 +287,7 @@ func goldenCells() []goldenCell {
 		{name: "github-read-only", mode: modeInitial, setup: func(c *cellInputs) {
 			c.readOnly()
 		}},
-		{name: "forgejo-read-write", mode: modeInitial, setup: func(c *cellInputs) {
-			c.forgejoForge()
-		}, check: checkForgejoBlockedKeepsTrackerGh},
-		{name: "git-read-write", mode: modeInitial, setup: func(c *cellInputs) {
+		{name: "git-forge", mode: modeInitial, setup: func(c *cellInputs) {
 			c.gitForge()
 		}, check: func(t *testing.T, prompt string) {
 			// A git Box has no PR to view or draft: IF BLOCKED must land the
@@ -311,10 +308,6 @@ func goldenCells() []goldenCell {
 					t.Errorf("IF BLOCKED names %q for a git Box", bad)
 				}
 			}
-		}},
-		{name: "local-forge-read-write", mode: modeInitial, setup: func(c *cellInputs) {
-			c.localForge()
-			c.localTracker()
 		}},
 		{name: "local-forge-read-only", mode: modeInitial, setup: func(c *cellInputs) {
 			c.localForge()

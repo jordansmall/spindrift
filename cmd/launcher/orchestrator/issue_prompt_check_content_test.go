@@ -81,8 +81,8 @@ func TestIssuePromptCheckOutcomeScopedToOwningPass(t *testing.T) {
 }
 
 // Issue #5285: the IF BLOCKED intro is ungated, so it must not name a push
-// retry a CODE_FORGE=local read-write Box never performs. The push case lives
-// in the gated fragments/if-blocked-triage-git.md.
+// retry a CODE_FORGE=local Box never performs. The push case lives
+// in the gated fragments/if-blocked-triage-outbox.md.
 func TestIssuePromptIfBlockedIntroIsPushNeutral(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "issue-prompt.md"))
@@ -100,17 +100,17 @@ func TestIssuePromptIfBlockedIntroIsPushNeutral(t *testing.T) {
 	}
 }
 
-// Issue #6238: the push-triage fragment renders on every BOX_PUSH_READ_WRITE
+// Issue #6238: the push-triage fragment renders on every OUTBOX_PUSH_READ_ONLY
 // tracker, including jira and local where the Box cannot comment. Reporting is
 // deferred to step 4 of IF BLOCKED, which forks per tracker.
-func TestIfBlockedTriageGitDefersReportToStep4(t *testing.T) {
+func TestIfBlockedTriageOutboxDefersReportToStep4(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
-	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/if-blocked-triage-git.md"))
+	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/if-blocked-triage-outbox.md"))
 
 	if strings.Contains(strings.ToLower(normalized), "comment on the issue") {
-		t.Error("if-blocked-triage-git.md tells the agent to comment on the issue; jira/local Boxes cannot, so defer to step 4")
+		t.Error("if-blocked-triage-outbox.md tells the agent to comment on the issue; jira/local Boxes cannot, so defer to step 4")
 	}
 	if !strings.Contains(normalized, "step 4") {
-		t.Error("if-blocked-triage-git.md must defer the workflow-scope report to step 4")
+		t.Error("if-blocked-triage-outbox.md must defer the workflow-scope report to step 4")
 	}
 }

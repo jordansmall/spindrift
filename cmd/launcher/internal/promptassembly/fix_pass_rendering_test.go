@@ -141,39 +141,32 @@ func TestAssembleRendersIssuePlaceholders(t *testing.T) {
 }
 
 // RUN_NONCE reaches the prompt only where a log-carried PR-intent line
-// needs it (issues #1937, #5131): the read-only log carrier substitutes it;
-// the socket carrier and read-write runs, which have no nonce-bearing line,
-// never mention it.
+// needs it (issues #1937, #5131): the log carrier substitutes it; the socket
+// carrier, which has no nonce-bearing line, never mentions it.
 func TestAssembleRunNonceRendersOnlyOnReadOnlyLogCarrier(t *testing.T) {
 	const nonce = "deadbeefcafe1234"
 	reg, env0 := syntheticRegistry(t,
 		[]FragmentRow{
 			{Gate: "BOX_ACCESS_READ_ONLY_LOG", Fragment: "ro-log.md", Var: "RO_LOG_STEP"},
 			{Gate: "BOX_ACCESS_READ_ONLY_SOCKET", Fragment: "ro-socket.md", Var: "RO_SOCKET_STEP"},
-			{Gate: "BOX_ACCESS_READ_WRITE", Fragment: "rw.md", Var: "RW_STEP"},
 		},
 		map[string]string{
-			"issue-prompt.md":        "${RO_LOG_STEP}${RO_SOCKET_STEP}${RW_STEP}\n",
+			"issue-prompt.md":        "${RO_LOG_STEP}${RO_SOCKET_STEP}\n",
 			"fragments/ro-log.md":    "SYN-RO-LOG nonce=${RUN_NONCE}",
 			"fragments/ro-socket.md": "SYN-RO-SOCKET",
-			"fragments/rw.md":        "SYN-RW",
 		})
 
 	for _, tc := range []struct {
 		name      string
-		readOnly  bool
 		carrier   string
 		marker    string
 		wantNonce bool
 	}{
-		{"read-only log", true, "log", "SYN-RO-LOG", true},
-		{"read-only socket", true, "socket", "SYN-RO-SOCKET", false},
-		{"read-write log", false, "log", "SYN-RW", false},
-		{"read-write socket", false, "socket", "SYN-RW", false},
+		{"log", "log", "SYN-RO-LOG", true},
+		{"socket", "socket", "SYN-RO-SOCKET", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := env0
-			env.BoxWriteEnabled = !tc.readOnly
 			env.SignalCarrier = tc.carrier
 			env.RunNonce = nonce
 			got, err := Assemble(env, reg)
