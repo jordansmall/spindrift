@@ -125,7 +125,7 @@ withRowKnobs {
     env = "MERGE_METHOD";
     group = "git";
     default = "rebase";
-    doc = "how the final integration commits land on green: merge (merge commit), squash, or rebase; maps to GitHub's native merge_method on github and to the Forgejo merge API's Do field on forgejo (github and forgejo Code Forge merge paths only)";
+    doc = "how the final integration commits land on green: merge (merge commit), squash, or rebase; maps to the Forgejo merge API's Do field on forgejo; the github Connector merges by rebase only and refuses merge or squash at launch unless the github row is in shadow mode (github and forgejo Code Forge merge paths only)";
     choices = [
       "merge"
       "squash"

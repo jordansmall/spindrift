@@ -695,9 +695,9 @@ in
                     Make this Connector authoritative over the native
                     implementation of the same name (issues #6998, #6999).
                     On a `backend` row it answers in place of the native
-                    backend: for github every read and the writes listed in
-                    docs/reference.md (Backend primary mode), while the rest
-                    stay native until its write switch (issue #6756); for jira
+                    backend: for github it is a no-op, the Connector being
+                    github's default for every Consumer (issue #7139), so
+                    setting or dropping it changes nothing; for jira
                     the whole tracker (reads, claim, transitions, labels,
                     comments and filed findings), authorized with the row's
                     Basic credential; for forgejo the whole Code Forge, reads
@@ -710,8 +710,8 @@ in
                     Exclusive with `shadow`, and a row with no native
                     implementation of its name throws, each naming the row.
                     Off by default, which leaves the Consumer's outputs
-                    byte-identical. Dropping it restores the native
-                    implementation.
+                    byte-identical. Except on github, dropping it restores
+                    the native implementation.
                   '';
                 };
                 shadowEvery = mkOption {
