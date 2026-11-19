@@ -674,17 +674,17 @@ func TestTuningChoreLabel_IsInButlerLabelNames(t *testing.T) {
 // row — off is a normal configuration, never a warning.
 func TestRunDoctor_ReportsRecoverKind(t *testing.T) {
 	tests := []struct {
-		name, codeForge, access string
-		want                    string
+		name, codeForge string
+		want            string
 	}{
-		{"github read-only is on", "github", "read-only",
-			"ok: recover kind: on — CODE_FORGE=github relays a read-only Box's outbox bundle\n"},
-		{"forgejo read-only is on", "forgejo", "read-only",
-			"ok: recover kind: on — CODE_FORGE=forgejo relays a read-only Box's outbox bundle\n"},
-		{"github read-write is off", "github", "read-write",
-			"ok: recover kind: off — CODE_FORGE=github with BOX_FORGE_AND_ISSUE_ACCESS=read-write is not a read-only pull-request forge; run `spindrift recover <n>` by hand\n"},
-		{"local read-only is off", "local", "read-only",
-			"ok: recover kind: off — CODE_FORGE=local with BOX_FORGE_AND_ISSUE_ACCESS=read-only is not a read-only pull-request forge; run `spindrift recover <n>` by hand\n"},
+		{"github is on", "github",
+			"ok: recover kind: on — CODE_FORGE=github relays the Box's outbox bundle\n"},
+		{"forgejo is on", "forgejo",
+			"ok: recover kind: on — CODE_FORGE=forgejo relays the Box's outbox bundle\n"},
+		{"local is off", "local",
+			"ok: recover kind: off — CODE_FORGE=local is not a pull-request forge; run `spindrift recover <n>` by hand\n"},
+		{"git is off", "git",
+			"ok: recover kind: off — CODE_FORGE=git is not a pull-request forge; run `spindrift recover <n>` by hand\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -694,7 +694,7 @@ func TestRunDoctor_ReportsRecoverKind(t *testing.T) {
 			c := minimalValidConfig()
 			c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 				"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-			c.CodeForge, c.BoxForgeAndIssueAccess, c.MaxRecoverAttempts = tc.codeForge, tc.access, 3
+			c.CodeForge, c.MaxRecoverAttempts = tc.codeForge, 3
 
 			var buf bytes.Buffer
 			// The error is ignored: only the printed row matters here.

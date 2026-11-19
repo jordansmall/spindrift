@@ -7887,7 +7887,7 @@ On `github` and `forgejo` a `read-only` Box does not clone the forge at all.
 Before every Pass the Launcher fetches the Target repo host-side with its own
 credential (the clone the bundle relay already uses) into a fresh per-Pass
 `.spindrift/mirror/pass-*/repo.git`, mounts it read-only at `/repo` on both
-runners, forwards `BOX_HOST_SEEDED_MIRROR=1`, and removes it once that Pass's
+runners, and removes it once that Pass's
 Box exits. The Box clones `/repo`, so the clone runs no `gh auth setup-git` and
 takes no forge URL, and a private repo works. The clone keeps a credential-free
 `forge` remote beside `origin` (the mount) so `gh` and `fj` still resolve the
@@ -7912,7 +7912,7 @@ uses](in-box-forge-cli.md).
 
 A `read-only` Box holds no forge credential (issue #6900), whatever the
 backend. The Launcher sets none of `GH_TOKEN`, `FORGEJO_TOKEN`, `BOX_GH_TOKEN`
-or `BOX_FORGEJO_TOKEN` in it, and sets `BOX_GH_TOKEN_OPTIONAL=1` instead.
+or `BOX_FORGEJO_TOKEN` in it.
 The Box clones the host-seeded mirror (`gh auth setup-git` and `fj auth
 add-key` never run), reads the parent and linked issues and searches for
 duplicates through host-answered [Signal

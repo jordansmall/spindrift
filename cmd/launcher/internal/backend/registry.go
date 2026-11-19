@@ -39,34 +39,21 @@ type Descriptor struct {
 	HostMediatedRemote bool
 
 	// HostSeededMirror is true for a backend whose Box clones from a mirror the
-	// host seeds fresh before each Pass and mounts at /repo, rather than from
-	// its network remote, whenever the Box hands its branch back as a bundle
-	// (ClonesFromMirror): always for local (ADR 0033), under a read-only Box
-	// for git (issue #6898), whose Box holds no credential for the remote. Read
-	// only host-side, to pick the Strategy's seeding hook; the Box keys on
-	// BOX_HOST_SEEDED_MIRROR, which dispatch sets for any forge with a seed
-	// hook. github and forgejo do not set it: they get a per-Pass host-fetched
-	// mirror under read-only, via forge.MirrorSeeder (issue #6897).
+	// host seeds fresh before each Pass and mounts at /repo: local (ADR 0033)
+	// and git (issue #6898), whose Box holds no credential for the remote. Read
+	// only host-side, to pick the Strategy's seeding hook. github and forgejo
+	// do not set it: they get a per-Pass host-fetched mirror via
+	// forge.MirrorSeeder (issue #6897).
 	HostSeededMirror bool
 
 	// OutboxRelayCapable is true for a backend whose CODE_FORGE has pull
-	// requests: the promptassembly IF BLOCKED PR gates read it that way,
-	// read-write Boxes included (issue #5276), and recover-kind enablement
-	// follows it (RelaysOutbox). It does not decide the outbox mount or the
-	// relay: RelaysBundle does, from RelayCapable (issues #1918, #6898).
+	// requests: the promptassembly IF BLOCKED PR gates read it that way, and
+	// recover-kind enablement follows it (RelaysOutbox). It does not decide
+	// the outbox mount or the relay: RelaysBundle does, from RelayCapable
+	// (issues #1918, #6898).
 	// TestRelayCapableMatchesReadOnlyForgeInterfaces (cmd/launcher) fails when
 	// it diverges from the read-only forge implementing DraftPRCreator.
 	OutboxRelayCapable bool
-
-	// InBoxGHCredentialHelper is true for a CODE_FORGE whose Box clone runs
-	// `gh auth setup-git`, so gh's credential helper authenticates the clone and
-	// fetch. git keeps it because CODE_FORGE_REMOTE_URL may point at github.com;
-	// forgejo clones with a FORGEJO_TOKEN URL (ADR 0038) and has no GH_TOKEN,
-	// local clones a filesystem mount (ADR 0033), as does any Box the launcher
-	// mounted a host-seeded mirror into (BOX_HOST_SEEDED_MIRROR), which skips
-	// the helper whatever the forge. Read by the Box's cloneConfig
-	// (cmd/launcher/box/clone.go).
-	InBoxGHCredentialHelper bool
 
 	// InBoxUnreachableTracker is true only for a tracker with no in-box
 	// reachability at all (ADR 0032: "local"). Issue #3471 retired the /issues
@@ -209,15 +196,12 @@ func ForgeBackendSignal(codeForge string) string {
 }
 
 // NeedsGHToken reports whether a forge/tracker pairing reaches GitHub: a GitHub
-// tracker or forge token, or a forge whose Box clone runs `gh auth setup-git`
-// (InBoxGHCredentialHelper: github, git). local clones a mount, so it frees
-// GH_TOKEN when paired with a non-GitHub tracker (issue #4494); so does a git
-// Box under read-only, which clones the host-seeded mirror instead (issue
-// #6898). An unknown name's zero row fails closed.
-func NeedsGHToken(forge, tracker Descriptor, readOnly bool) bool {
+// tracker or forge token. local and git clone a host-seeded mirror, so they
+// free GH_TOKEN when paired with a non-GitHub tracker (issues #4494, #6898).
+// An unknown name's zero row fails closed.
+func NeedsGHToken(forge, tracker Descriptor) bool {
 	return tracker.TokenEnvVar == GitHub.TokenEnvVar ||
 		forge.TokenEnvVar == GitHub.TokenEnvVar ||
-		(forge.InBoxGHCredentialHelper && !ClonesFromMirror(forge, readOnly)) ||
 		!forge.ValidAsCodeForge
 }
 
@@ -247,38 +231,20 @@ func OutboxRelayBackends() []string {
 
 // RelaysBundle reports whether a Box on forge d hands its finished branch back
 // as an outbox bundle the host relays, rather than pushing: a
-// HostMediatedRemote forge always (ADR 0033), a RelayCapable one only under a
-// read-only Box (issues #1918, #6898). The launcher's outbox mount and the
-// Box's relay, push guard, and outcome backstop all decide through this.
-func RelaysBundle(d Descriptor, readOnly bool) bool {
-	return d.HostMediatedRemote || (d.RelayCapable && readOnly)
+// HostMediatedRemote forge, or a RelayCapable one (ADR 0033, issues #1918,
+// #6898). The launcher's outbox mount and the Box's relay, push guard, and
+// outcome backstop all decide through this.
+func RelaysBundle(d Descriptor) bool {
+	return d.HostMediatedRemote || d.RelayCapable
 }
 
-// ClonesFromMirror reports whether a Box on forge d clones from the host-seeded
-// per-Pass mirror mounted at /repo instead of its remote: a HostSeededMirror
-// forge whose Box relays its branch back as a bundle (RelaysBundle).
-func ClonesFromMirror(d Descriptor, readOnly bool) bool {
-	return d.HostSeededMirror && RelaysBundle(d, readOnly)
-}
-
-// RelaysOutbox reports whether a Box under codeForge and boxAccess is a
-// pull-request forge's read-only Box, whose outbox bundle the host relays into
-// a PR (issue #4656): an OutboxRelayCapable CODE_FORGE under
-// BOX_FORGE_AND_ISSUE_ACCESS=read-only. It gates the recover kind, so read-only
-// `git`, which relays a bundle but opens no PR, is false (see RelaysBundle).
-// Both arguments are resolved knob values; an unset CODE_FORGE is not
-// defaulted here, so "" is not a backend and relays nothing.
-func RelaysOutbox(codeForge, boxAccess string) bool {
+// RelaysOutbox reports whether a Box under codeForge is a pull-request forge's
+// Box, whose outbox bundle the host relays into a PR (issue #4656): an
+// OutboxRelayCapable CODE_FORGE. It gates the recover kind, so `git`, which
+// relays a bundle but opens no PR, is false (see RelaysBundle). codeForge is a
+// resolved knob value; an unset CODE_FORGE is not defaulted here, so "" is not
+// a backend and relays nothing.
+func RelaysOutbox(codeForge string) bool {
 	d, ok := ByName(codeForge)
-	return ok && d.OutboxRelayCapable && boxAccess == "read-only"
-}
-
-// ResearchVerdictRelayed reports whether a research run's verdict is posted
-// host-side rather than by the Box: the Filer is provisioned, or the tracker
-// has no in-box write path (issue #5245). The prompt gates and the research
-// settle must agree on it, so both call this. An unregistered or empty
-// issueTracker reads as the zero Descriptor and so contributes false.
-func ResearchVerdictRelayed(issueTracker string, filerEnabled bool) bool {
-	row, _ := ByName(issueTracker)
-	return filerEnabled || row.InBoxUnwritableTracker
+	return ok && d.OutboxRelayCapable
 }

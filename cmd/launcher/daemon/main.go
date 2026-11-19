@@ -140,8 +140,8 @@ func parseArgs(args []string) (parsedArgs, error) {
 }
 
 // errNoOutboxRelay is why a recover kind is disabled: the forge is not a
-// read-only pull-request forge, so no stranded bundle awaits landing as a PR.
-var errNoOutboxRelay = fmt.Errorf("no pull-request outbox to recover (recover needs CODE_FORGE %s with BOX_FORGE_AND_ISSUE_ACCESS=read-only)", strings.Join(backend.OutboxRelayBackends(), " or "))
+// pull-request forge, so no stranded bundle awaits landing as a PR.
+var errNoOutboxRelay = fmt.Errorf("no pull-request outbox to recover (recover needs CODE_FORGE %s)", strings.Join(backend.OutboxRelayBackends(), " or "))
 
 // gateKnobs are the resolved knob values gateKinds judges each kind's
 // Enablement row by.
@@ -183,8 +183,8 @@ func gateKinds(kinds []daemon.Kind, explicitSelector bool, knobs gateKnobs) ([]d
 				disabled = chore.ErrNoChores
 			}
 		case dispatchkind.EnabledByOutboxRelay:
-			if !backend.RelaysOutbox(knobs.codeForge, knobs.boxAccess) {
-				disabled = fmt.Errorf("CODE_FORGE=%s with BOX_FORGE_AND_ISSUE_ACCESS=%s: %w", knobs.codeForge, knobs.boxAccess, errNoOutboxRelay)
+			if !backend.RelaysOutbox(knobs.codeForge) {
+				disabled = fmt.Errorf("CODE_FORGE=%s: %w", knobs.codeForge, errNoOutboxRelay)
 			}
 		default:
 			return nil, fmt.Errorf("%s: unknown enablement %d", d.Verb, d.Enablement)

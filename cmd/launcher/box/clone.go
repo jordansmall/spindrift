@@ -35,15 +35,13 @@ func (r *boxRun) cloneTarget() error {
 func (r *boxRun) cloneConfig() boxclone.Config {
 	g := r.d.Getenv
 	return boxclone.Config{
-		CodeForge:          r.codeForge(),
-		GHCredentialHelper: r.forgeDescriptor().InBoxGHCredentialHelper,
-		HostSeededMirror:   g("BOX_HOST_SEEDED_MIRROR") != "",
-		RepoSlug:           g("REPO_SLUG"),
-		Lookup:             envLookup(g),
-		RepoMountDir:       r.in.RepoMountDir,
-		WorkDir:            r.in.WorkDir,
-		GitUserName:        g("GIT_USER_NAME"),
-		GitUserEmail:       g("GIT_USER_EMAIL"),
+		CodeForge:    r.codeForge(),
+		RepoSlug:     g("REPO_SLUG"),
+		Lookup:       envLookup(g),
+		RepoMountDir: r.in.RepoMountDir,
+		WorkDir:      r.in.WorkDir,
+		GitUserName:  g("GIT_USER_NAME"),
+		GitUserEmail: g("GIT_USER_EMAIL"),
 	}
 }
 

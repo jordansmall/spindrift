@@ -507,9 +507,6 @@ func TestSeamSmokeReadOnlyBoxCarriesNoForgeToken(t *testing.T) {
 			t.Errorf("Box argv carries %s under read-only access: %q", name, boxRun)
 		}
 	}
-	if got := env["BOX_GH_TOKEN_OPTIONAL"]; got == nil || *got != "1" {
-		t.Errorf("BOX_GH_TOKEN_OPTIONAL = %v; want 1", got)
-	}
 	if got := env[branchrecovery.HostOpenPREnv]; got == nil || *got != branchrecovery.HostOpenPROpen {
 		t.Errorf("%s = %v; want %s (the fake forge lists an open PR on the branch)", branchrecovery.HostOpenPREnv, got, branchrecovery.HostOpenPROpen)
 	}

@@ -772,12 +772,11 @@ func signalSocketDir() (string, error) {
 }
 
 // needsOutbox reports whether cfg's dispatch needs a writable per-issue outbox
-// directory: HostMediatedRemote unconditionally (ADR 0033, CODE_FORGE=local),
-// or RelayCapable under BOX_FORGE_AND_ISSUE_ACCESS=read-only (issues #1918,
-// #6898), where the harness bundles the Box's finished branch to seam.bundle
-// post-driver (issue #2082) for the launcher's BundleRelay to pick up.
+// directory: the harness bundles the Box's finished branch to seam.bundle
+// post-driver (issue #2082) for the launcher's BundleRelay to pick up, whenever
+// the forge relays a bundle (backend.RelaysBundle; issues #1918, #6898).
 func needsOutbox(cfg Config) bool {
-	return backend.RelaysBundle(cfg.ForgeDescriptor, cfg.boxAccessForKind() == "read-only")
+	return backend.RelaysBundle(cfg.ForgeDescriptor)
 }
 
 // resetOutboxDir empties dir and recreates it: the writable outbox mount must

@@ -11,11 +11,11 @@ import (
 )
 
 func TestRun_CallsRunnerWithCorrectBox(t *testing.T) {
-	t.Setenv("GH_TOKEN", "secret")
+	t.Setenv("EXAMPLE_VAR", "secret")
 	dir := tempLogDir(t)
 
 	fr := runner.NewFake()
-	cfg := Config{BoxEnvVars: "GH_TOKEN"}
+	cfg := Config{BoxEnvVars: "EXAMPLE_VAR"}
 	f, err := NewFactory(cfg, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
@@ -41,8 +41,8 @@ func TestRun_CallsRunnerWithCorrectBox(t *testing.T) {
 	if box.Env["ISSUE_NUMBER"] != "42" {
 		t.Errorf("Box.Env[ISSUE_NUMBER]: got %q, want %q", box.Env["ISSUE_NUMBER"], "42")
 	}
-	if box.Env["GH_TOKEN"] != "secret" {
-		t.Errorf("Box.Env[GH_TOKEN]: got %q, want %q", box.Env["GH_TOKEN"], "secret")
+	if box.Env["EXAMPLE_VAR"] != "secret" {
+		t.Errorf("Box.Env[EXAMPLE_VAR]: got %q, want %q", box.Env["EXAMPLE_VAR"], "secret")
 	}
 }
 
@@ -207,70 +207,6 @@ func TestRun_PopulatesBoxOutboxDir_GithubReadOnly(t *testing.T) {
 	outboxDir := fr.RunCalls[0].OutboxDir
 	if outboxDir == "" {
 		t.Fatal("Box.OutboxDir: got empty, want the per-issue outbox dir")
-	}
-	info, err := os.Stat(outboxDir)
-	if err != nil || !info.IsDir() {
-		t.Errorf("Box.OutboxDir %q: want an existing directory, stat err=%v", outboxDir, err)
-	}
-}
-
-// An explicit BOX_FORGE_AND_ISSUE_ACCESS=read-write pushes in-box and never
-// consults an outbox.
-func TestRun_NoOutboxDirForGithubReadWrite(t *testing.T) {
-	dir := tempLogDir(t)
-
-	fr := runner.NewFake()
-	f, err := NewFactory(Config{
-		ForgeDescriptor:        backend.Descriptor{RelayCapable: true, OutboxRelayCapable: true},
-		BoxForgeAndIssueAccess: "read-write",
-	}, dir, fr, fakeDriver{}, RealClock())
-	if err != nil {
-		t.Fatalf("NewFactory: %v", err)
-	}
-	defer f.Cleanup()
-
-	d := f.New("80", "T")
-	if result := d.Run(); !result.ok() {
-		t.Fatalf("Run: want succeeded, got %+v", result)
-	}
-
-	if len(fr.RunCalls) != 1 {
-		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
-	}
-	if got := fr.RunCalls[0].OutboxDir; got != "" {
-		t.Errorf("Box.OutboxDir: got %q, want empty for github read-write", got)
-	}
-}
-
-// Issue #3906: a butler (ReadOnlyBox kind) Dispatch must get the outbox-relay
-// treatment even under a raw read-write BoxForgeAndIssueAccess, since
-// needsOutbox and buildBoxEnv's read-only token scrub must never desync —
-// this pins the OutboxRelayCapable side of that shared fail-closed check.
-func TestRun_PopulatesBoxOutboxDir_ButlerReadWrite(t *testing.T) {
-	dir := tempLogDir(t)
-
-	fr := runner.NewFake()
-	f, err := NewFactory(Config{
-		Kind:                   "butler",
-		ForgeDescriptor:        backend.Descriptor{RelayCapable: true, OutboxRelayCapable: true},
-		BoxForgeAndIssueAccess: "read-write",
-	}, dir, fr, fakeDriver{}, RealClock())
-	if err != nil {
-		t.Fatalf("NewFactory: %v", err)
-	}
-	defer f.Cleanup()
-
-	d := f.New("82", "T")
-	if result := d.Run(); !result.ok() {
-		t.Fatalf("Run: want succeeded, got %+v", result)
-	}
-
-	if len(fr.RunCalls) != 1 {
-		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
-	}
-	outboxDir := fr.RunCalls[0].OutboxDir
-	if outboxDir == "" {
-		t.Fatal("Box.OutboxDir: got empty, want the per-issue outbox dir for a butler Dispatch")
 	}
 	info, err := os.Stat(outboxDir)
 	if err != nil || !info.IsDir() {

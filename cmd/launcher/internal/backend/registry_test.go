@@ -121,15 +121,16 @@ func TestNeedsGHToken(t *testing.T) {
 		{"forgejo tracker, github forge", GitHub, Forgejo, true},
 		{"github tracker, forgejo forge", Forgejo, GitHub, true},
 		{"jira tracker, forgejo forge", Forgejo, Jira, false},
-		{"git forge, forgejo tracker", Git, Forgejo, true},
-		{"git forge, jira tracker", Git, Jira, true},
+		{"git forge, forgejo tracker", Git, Forgejo, false},
+		{"git forge, jira tracker", Git, Jira, false},
+		{"git forge, github tracker", Git, GitHub, true},
 		{"local forge, forgejo tracker", Local, Forgejo, false},
 		{"local forge, jira tracker", Local, Jira, false},
 		{"local forge, github tracker", Local, GitHub, true},
 		{"unknown forge", Descriptor{}, Forgejo, true},
 	}
 	for _, c := range cases {
-		if got := NeedsGHToken(c.forge, c.tracker, false); got != c.want {
+		if got := NeedsGHToken(c.forge, c.tracker); got != c.want {
 			t.Errorf("%s: NeedsGHToken(%q, %q) = %v, want %v", c.name, c.forge.Name, c.tracker.Name, got, c.want)
 		}
 	}
@@ -148,43 +149,6 @@ func TestClosesRef(t *testing.T) {
 				t.Errorf("ClosesRef(forge %q, tracker %q) = %v, want %v", forge.Name, tracker.Name, got, want)
 			}
 		}
-	}
-}
-
-// Under read-only a git Box clones the host-seeded mirror, so its gh credential
-// helper never runs and only a GitHub tracker or forge token keeps GH_TOKEN
-// required (#6898).
-func TestNeedsGHTokenReadOnlyMirror(t *testing.T) {
-	cases := []struct {
-		name           string
-		forge, tracker Descriptor
-		want           bool
-	}{
-		{"git forge, jira tracker", Git, Jira, false},
-		{"git forge, forgejo tracker", Git, Forgejo, false},
-		{"git forge, local tracker", Git, Local, false},
-		{"git forge, github tracker", Git, GitHub, true},
-		{"github forge, jira tracker", GitHub, Jira, true},
-		{"unknown forge", Descriptor{}, Jira, true},
-	}
-	for _, c := range cases {
-		if got := NeedsGHToken(c.forge, c.tracker, true); got != c.want {
-			t.Errorf("%s: NeedsGHToken(%q, %q, readOnly) = %v, want %v", c.name, c.forge.Name, c.tracker.Name, got, c.want)
-		}
-	}
-}
-
-// TestInBoxGHCredentialHelper pins the exact set of CODE_FORGE backends whose
-// Box clone runs `gh auth setup-git` (see Descriptor.InBoxGHCredentialHelper).
-func TestInBoxGHCredentialHelper(t *testing.T) {
-	var got []string
-	for _, d := range Registry {
-		if d.InBoxGHCredentialHelper {
-			got = append(got, d.Name)
-		}
-	}
-	if want := []string{"github", "git"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("InBoxGHCredentialHelper set = %v, want %v", got, want)
 	}
 }
 
@@ -226,54 +190,6 @@ func TestTrackerAxisAndForgeBackendSignals(t *testing.T) {
 	}
 }
 
-// TestRelaysOutbox pins the one predicate for "a read-only Box's outbox
-// bundle gets relayed" (issue #4656): an OutboxRelayCapable CODE_FORGE under
-// read-only access, and nothing else.
-func TestRelaysOutbox(t *testing.T) {
-	cases := []struct {
-		codeForge, boxAccess string
-		want                 bool
-	}{
-		{"github", "read-only", true},
-		{"forgejo", "read-only", true},
-		{"github", "read-write", false},
-		{"forgejo", "read-write", false},
-		{"local", "read-only", false},
-		{"git", "read-only", false},
-		{"nope", "read-only", false},
-		{"", "read-only", false},
-		{"github", "", false},
-	}
-	for _, tc := range cases {
-		if got := RelaysOutbox(tc.codeForge, tc.boxAccess); got != tc.want {
-			t.Errorf("RelaysOutbox(%q, %q) = %v, want %v", tc.codeForge, tc.boxAccess, got, tc.want)
-		}
-	}
-}
-
-func TestResearchVerdictRelayed(t *testing.T) {
-	cases := []struct {
-		tracker string
-		filer   bool
-		want    bool
-	}{
-		{"github", false, false},
-		{"github", true, true},
-		{"forgejo", false, false},
-		{"local", false, false},
-		{"jira", false, true},
-		{"jira", true, true},
-		{"", false, false},
-		{"", true, true},
-		{"nonesuch", false, false},
-	}
-	for _, tc := range cases {
-		if got := ResearchVerdictRelayed(tc.tracker, tc.filer); got != tc.want {
-			t.Errorf("ResearchVerdictRelayed(%q, %v) = %v, want %v", tc.tracker, tc.filer, got, tc.want)
-		}
-	}
-}
-
 // TestQuickstartBlocks pins the shipped rows' quickstart declarations; every
 // block must name the tracker axis, since quickstart's answer is the tracker.
 func TestQuickstartBlocks(t *testing.T) {
@@ -304,55 +220,28 @@ func TestSlugIssueRefTrackerIsLocalOnly(t *testing.T) {
 	}
 }
 
-// TestRelaysBundle pins the single "this Box hands its branch back as an
-// outbox bundle" decision: a host-mediated remote always, a relay-capable
-// forge only under a read-only Box.
-func TestRelaysBundle(t *testing.T) {
-	cases := []struct {
-		name     string
-		desc     Descriptor
-		readOnly bool
-		want     bool
-	}{
-		{"local read-write", Local, false, true},
-		{"local read-only", Local, true, true},
-		{"github read-write", GitHub, false, false},
-		{"github read-only", GitHub, true, true},
-		{"forgejo read-only", Forgejo, true, true},
-		{"git read-write", Git, false, false},
-		{"git read-only", Git, true, true},
-		{"relay-incapable read-only", Descriptor{}, true, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := RelaysBundle(tc.desc, tc.readOnly); got != tc.want {
-				t.Fatalf("RelaysBundle(%s, readOnly=%v) = %v, want %v", tc.name, tc.readOnly, got, tc.want)
-			}
-		})
+// TestRelaysOutbox pins the one predicate for "a Box's outbox bundle gets
+// relayed into a PR" (issue #4656): an OutboxRelayCapable CODE_FORGE.
+func TestRelaysOutbox(t *testing.T) {
+	for codeForge, want := range map[string]bool{
+		"github": true, "forgejo": true,
+		"local": false, "git": false, "nope": false, "": false,
+	} {
+		if got := RelaysOutbox(codeForge); got != want {
+			t.Errorf("RelaysOutbox(%q) = %v, want %v", codeForge, got, want)
+		}
 	}
 }
 
-// TestClonesFromMirror pins when the Box clones from the host-seeded mirror:
-// only a HostSeededMirror forge whose Box hands its branch back as a bundle.
-func TestClonesFromMirror(t *testing.T) {
-	cases := []struct {
-		name     string
-		desc     Descriptor
-		readOnly bool
-		want     bool
-	}{
-		{"local read-write", Local, false, true},
-		{"local read-only", Local, true, true},
-		{"git read-write", Git, false, false},
-		{"git read-only", Git, true, true},
-		{"github read-only", GitHub, true, false},
-		{"forgejo read-only", Forgejo, true, false},
+// TestRelaysBundle pins the single "this Box hands its branch back as an
+// outbox bundle" decision: a host-mediated remote or a relay-capable forge.
+func TestRelaysBundle(t *testing.T) {
+	for _, d := range []Descriptor{Local, GitHub, Forgejo, Git} {
+		if !RelaysBundle(d) {
+			t.Errorf("RelaysBundle(%s) = false, want true", d.Name)
+		}
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := ClonesFromMirror(tc.desc, tc.readOnly); got != tc.want {
-				t.Fatalf("ClonesFromMirror(%s, readOnly=%v) = %v, want %v", tc.name, tc.readOnly, got, tc.want)
-			}
-		})
+	if RelaysBundle(Descriptor{}) {
+		t.Error("RelaysBundle of a relay-incapable forge = true, want false")
 	}
 }

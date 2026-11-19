@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"reflect"
@@ -27,7 +26,7 @@ func TestCloneRunsWithTheEnvsConfigAndGithubDefault(t *testing.T) {
 	lookup := got.Lookup
 	got.Lookup = nil
 	want := boxclone.Config{
-		CodeForge: "github", GHCredentialHelper: true, RepoSlug: "owner/repo", RepoMountDir: "/repo",
+		CodeForge: "github", RepoSlug: "owner/repo", RepoMountDir: "/repo",
 		WorkDir: f.in.WorkDir, GitUserName: fixtureGitUserName, GitUserEmail: "agent@example.com",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -123,51 +122,5 @@ func TestCloneRunsBeforeBranchRecovery(t *testing.T) {
 	f.run()
 	if strings.Join(order, ",") != "clone,recover" {
 		t.Errorf("order = %v", order)
-	}
-}
-
-func TestCloneConfig_RunsGhCredentialHelperOnlyWhereTheForgeWantsIt(t *testing.T) {
-	for forge, want := range map[string]bool{
-		"": true, "github": true, "git": true,
-		"forgejo": false, "local": false,
-		// Unreachable: the host validates CODE_FORGE against its choices.
-		// An unregistered forge never gets gh's helper, and CloneURL fails
-		// closed on it.
-		"bogus": false,
-	} {
-		t.Run("forge="+forge, func(t *testing.T) {
-			f := newFixture(t)
-			f.env.CodeForge = forge
-			f.run()
-			if len(f.cloneCfgs) != 1 {
-				t.Fatalf("clone configs = %+v, want one", f.cloneCfgs)
-			}
-			if got := f.cloneCfgs[0].GHCredentialHelper; got != want {
-				t.Errorf("GHCredentialHelper = %v, want %v", got, want)
-			}
-		})
-	}
-}
-
-// BOX_HOST_SEEDED_MIRROR is the launcher's word that it mounted a mirror at
-// RepoMountDir; the forge row no longer decides it.
-func TestCloneConfig_HostSeededMirrorFollowsTheEnv(t *testing.T) {
-	for _, forge := range []string{"github", "forgejo", "local"} {
-		for _, set := range []bool{true, false} {
-			t.Run(fmt.Sprintf("forge=%s/set=%v", forge, set), func(t *testing.T) {
-				f := newFixture(t)
-				f.env.CodeForge = forge
-				if set {
-					f.knobs["BOX_HOST_SEEDED_MIRROR"] = "1"
-				}
-				f.run()
-				if len(f.cloneCfgs) != 1 {
-					t.Fatalf("clone configs = %+v, want one", f.cloneCfgs)
-				}
-				if got := f.cloneCfgs[0].HostSeededMirror; got != set {
-					t.Errorf("HostSeededMirror = %v, want %v", got, set)
-				}
-			})
-		}
 	}
 }

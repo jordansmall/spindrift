@@ -51,11 +51,6 @@ var Strategy = backendkit.Strategy{
 		url, gitArgs := GitRemote(s.RepoSlug)
 		return backendkit.LedgerSite{URL: url, GitArgs: gitArgs}, nil
 	},
-	// The Box clones from literal github.com, not Host(): GH_HOST is the
-	// host's gh setting and never reached the Box's clone.
-	CloneURL: func(s backendkit.Shared, _ backendkit.Lookup) (string, error) {
-		return "https://github.com/" + s.RepoSlug + ".git", nil
-	},
 	WebURL: func(s backendkit.Shared, _ backendkit.Lookup) string {
 		if s.RepoSlug == "" {
 			return ""

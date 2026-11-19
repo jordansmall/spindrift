@@ -1,7 +1,6 @@
 package git
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -47,16 +46,6 @@ var Strategy = backendkit.Strategy{
 			return err
 		}
 		return SeedMirror(k.CodeForgeRemoteURL, s.BaseBranch, dir)
-	},
-	CloneURL: func(_ backendkit.Shared, l backendkit.Lookup) (string, error) {
-		k, err := ReadKnobs(l)
-		if err != nil {
-			return "", err
-		}
-		if k.CodeForgeRemoteURL == "" {
-			return "", errors.New("CODE_FORGE_REMOTE_URL is required when CODE_FORGE=git")
-		}
-		return k.CodeForgeRemoteURL, nil
 	},
 	RemoteMatch: func(_ backendkit.Shared, l backendkit.Lookup, remote string) bool {
 		k, err := ReadKnobs(l)

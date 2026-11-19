@@ -10,7 +10,6 @@ import (
 	"slices"
 	"sync"
 
-	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/sandbox"
@@ -243,15 +242,14 @@ func (lc *launchContext) settler() settle.Settler {
 	return lc.merge
 }
 
-// hostSeedsMirror reports whether c's Box clones from a host-seeded mirror
-// mounted at /repo (backend.ClonesFromMirror). Research needs it too, unless
-// it is self-contained (issue #2439). The read-only decision is dispatch's own
-// (effectiveBoxForgeAndIssueAccess), so launcher and Box agree per kind. A
-// github or forgejo Box's per-Pass fetched mirror is a different arm of
-// seedMirrorHook, gated on a forge.MirrorSeeder rather than the registry row.
+// hostSeedsMirror reports whether c's Box clones from a registry-row
+// host-seeded mirror mounted at /repo (Descriptor.HostSeededMirror). Research
+// needs it too, unless it is self-contained (issue #2439). A github or forgejo
+// Box's per-Pass fetched mirror is a different arm of seedMirrorHook, gated on
+// a forge.MirrorSeeder rather than the registry row.
 func hostSeedsMirror(c config) bool {
 	row, _ := backendkit.ByName(c.CodeForge)
-	return backend.ClonesFromMirror(row.Descriptor, c.effectiveBoxForgeAndIssueAccess() == "read-only") && !c.selfContained
+	return row.HostSeededMirror && !c.selfContained
 }
 
 // seedAccumulationRepoIfHostSeeded makes the bare Accumulation repo (ADR 0033)
@@ -316,17 +314,17 @@ func newScratchMirrorDir(pwd string) (string, error) {
 
 // seedMirrorHook is dispatch.Config.SeedMirror: it prepares the dir to mount
 // read-only at /repo before each Pass, so a Box clones the base as it stands
-// now rather than as of launch (issue #6896). Nil when the Box clones from its
-// remote instead.
+// now rather than as of launch (issue #6896). Nil only for a self-contained
+// Box, which clones nothing, or a forge that is neither host-seeded nor a
+// forge.MirrorSeeder.
 //
-// Two arms. A host-seeded backend (local; git under read-only) re-seeds one
-// shared mirror through the forge Strategy's SeedMirror: the Accumulation repo
-// for a forge with a HostRepoDir, else a per-process scratch dir. It does not
-// take the Accumulation lock, because bootstrap's flock stays held for the
-// whole run and a second open file would conflict with it. Otherwise, a
-// read-only Box (which has no forge credential to clone with) gets a fresh
-// bare mirror the launcher fetches with its own credential through seeder
-// (issue #6897). Read-write Boxes clone directly.
+// Two arms. A host-seeded backend (local, git) re-seeds one shared mirror
+// through the forge Strategy's SeedMirror: the Accumulation repo for a forge
+// with a HostRepoDir, else a per-process scratch dir. It does not take the
+// Accumulation lock, because bootstrap's flock stays held for the whole run
+// and a second open file would conflict with it. Otherwise the Box, which has
+// no forge credential to clone with, gets a fresh bare mirror the launcher
+// fetches with its own credential through seeder (issue #6897).
 func seedMirrorHook(c config, pwd string, seeder forge.MirrorSeeder) func() (string, func(), error) {
 	if hostSeedsMirror(c) {
 		row, _ := backendkit.ByName(c.CodeForge)
@@ -344,9 +342,7 @@ func seedMirrorHook(c config, pwd string, seeder forge.MirrorSeeder) func() (str
 			return dir, func() {}, row.SeedMirror(backendShared(c), c.knobLookup, pwd, dir)
 		}
 	}
-	// Effective access, not the adapter: a ReadOnlyBox kind under a read-write
-	// knob still holds the read-write adapter, which also seeds.
-	if c.selfContained || seeder == nil || c.effectiveBoxForgeAndIssueAccess() != "read-only" {
+	if c.selfContained || seeder == nil {
 		return nil
 	}
 	return func() (string, func(), error) {

@@ -1196,7 +1196,6 @@ rec {
         (optional "inBoxUnwritableTracker" "InBoxUnwritableTracker" false)
         (optional "slugIssueRefTracker" "SlugIssueRefTracker" false)
         (optional "outboxRelayCapable" "OutboxRelayCapable" false)
-        (optional "inBoxGHCredentialHelper" "InBoxGHCredentialHelper" false)
         (optional "relayCapable" "RelayCapable" false)
         (optional "hostPostingCapable" "HostPostingCapable" false)
         (optional "labelRegistry" "LabelRegistry" false)

@@ -3558,43 +3558,19 @@ func seedMirrorDispatchConfig(t *testing.T, c config) dispatch.Config {
 }
 
 // SeedMirror is built inside dispatchConfig, so every dispatch entry point
-// re-seeds per Pass (issue #6896): wherever the Box clones from a host-seeded
-// mirror (backend.ClonesFromMirror: local always, git under read-only), and
-// for github and forgejo under read-only, where the Box has no credential to
-// clone with (issue #6897).
-func TestDispatchConfig_SeedMirror_SetPerBackendAndAccess(t *testing.T) {
+// re-seeds per Pass (issue #6896) for every code forge: local and git from
+// their registry-row seeding hook, github and forgejo from a host-side fetch
+// (issue #6897).
+func TestDispatchConfig_SeedMirror_SetPerBackend(t *testing.T) {
 	for _, row := range backendkit.Strategies() {
 		if !row.ValidAsCodeForge {
 			continue
 		}
-		hostFetches := row.Name == "github" || row.Name == "forgejo"
-		for _, access := range []string{"read-only", "read-write"} {
-			t.Run(row.Name+"/"+access, func(t *testing.T) {
-				c := minimalValidConfig()
-				c.CodeForge = row.Name
-				c.BoxForgeAndIssueAccess = access
-				cfg := seedMirrorDispatchConfig(t, c)
-				readOnly := access == "read-only"
-				want := backend.ClonesFromMirror(row.Descriptor, readOnly) || (hostFetches && readOnly)
-				if got := cfg.SeedMirror != nil; got != want {
-					t.Errorf("dispatchConfig().SeedMirror non-nil = %v, want %v", got, want)
-				}
-			})
-		}
-	}
-}
-
-// A ReadOnlyBox kind is forced read-only whatever the knob says, but
-// newCodeForge keys on the raw knob and so still builds the read-write adapter;
-// the mirror must follow the effective access, not the adapter.
-func TestDispatchConfig_SeedMirror_ReadOnlyBoxKindWithReadWriteKnobStillMirrors(t *testing.T) {
-	for _, name := range []string{"github", "forgejo"} {
-		t.Run(name, func(t *testing.T) {
-			c := applyDispatchKind(minimalValidConfig(), dispatchkind.Butler)
-			c.CodeForge = name
-			c.BoxForgeAndIssueAccess = "read-write"
+		t.Run(row.Name, func(t *testing.T) {
+			c := minimalValidConfig()
+			c.CodeForge = row.Name
 			if cfg := seedMirrorDispatchConfig(t, c); cfg.SeedMirror == nil {
-				t.Error("dispatchConfig().SeedMirror = nil, want a host-side fetch for a ReadOnlyBox kind")
+				t.Error("dispatchConfig().SeedMirror = nil, want a seeded mirror")
 			}
 		})
 	}

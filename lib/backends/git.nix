@@ -8,11 +8,10 @@
   core = true;
   displayName = "Git";
   validAsCodeForge = true;
-  inBoxGHCredentialHelper = true;
   # Bundle relay only (issue #6898): git has no pull requests, so no draft-PR
   # seam and no outboxRelayCapable.
   relayCapable = true;
-  # Under read-only the Box clones from a per-Pass mirror the launcher seeds
+  # The Box clones from a per-Pass mirror the launcher seeds
   # from the remote with the host credential (issue #6898).
   hostSeededMirror = true;
   knobs = {

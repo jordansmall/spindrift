@@ -264,7 +264,7 @@ rec {
     # (cmd/launcher/box/readonlyguards.go) installs the command-shim guards,
     # via the readonlyguards package, on every read-only Box with a forge to
     # guard, while the git-hook guard stays gated on the bundle hand-off
-    # (backend.RelaysBundle: host-mediated, or relayCapable under read-only).
+    # (backend.RelaysBundle: host-mediated, or relayCapable).
     # No backend leaves both false today (issue #2927), but the gate stays.
     {
       id = "forbidden-fj-pr-create";

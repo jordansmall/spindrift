@@ -83,7 +83,7 @@ type Enablement int
 const (
 	EnabledAlways        Enablement = iota + 1 // drawn whenever selected
 	EnabledByChores                            // drawn only while BUTLER_CHORES enables at least one Chore; the daemon resolves that, since this leaf package cannot import chore
-	EnabledByOutboxRelay                       // drawn only when CODE_FORGE relays a read-only Box's outbox bundle (OutboxRelayCapable) and BOX_FORGE_AND_ISSUE_ACCESS=read-only; never on local or read-write; the daemon resolves it, since this leaf package cannot import backend
+	EnabledByOutboxRelay                       // drawn only when CODE_FORGE relays the Box's outbox bundle into a PR (OutboxRelayCapable); never on local or git; the daemon resolves it, since this leaf package cannot import backend
 )
 
 // DemandSource is how the daemon learns whether a kind has work waiting.

@@ -2,9 +2,7 @@ package boxclone_test
 
 import (
 	"bytes"
-	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -59,10 +57,12 @@ func newFixture(t *testing.T) *fixture {
 	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(gh), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Set only after seeding: it also makes git distrust the seed repo.
+	t.Setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	f.cfg = boxclone.Config{
-		CodeForge: "github", GHCredentialHelper: true, RepoSlug: "o/r", WorkDir: f.work,
+		CodeForge: "github", RepoSlug: "o/r", RepoMountDir: f.origin, WorkDir: f.work,
 		GitUserName: "Box Agent", GitUserEmail: "box@example.com",
 	}
 	f.cfg.Lookup = mapLookup(f.knobs)
@@ -75,13 +75,6 @@ func mapLookup(m map[string]string) backendkit.Lookup {
 		v, ok := m[k]
 		return v, ok
 	}
-}
-
-// redirect makes git rewrite urlPrefix to the local origin, so a clone only
-// succeeds when the Box built exactly that URL.
-func (f *fixture) redirect(t *testing.T, urlPrefix string) {
-	t.Helper()
-	testutil.GitRun(t, filepath.Dir(f.work), "config", "--file", f.globalCfg, "url."+f.origin+".insteadOf", urlPrefix)
 }
 
 func (f *fixture) ghCalls(t *testing.T) string {
@@ -100,92 +93,9 @@ func (f *fixture) originURL(t *testing.T) string {
 	t.Helper()
 	return testutil.GitOutput(t, f.work, "config", "--get", "remote.origin.url")
 }
-
-func TestCloneGithubDefaultClonesGithubURLAndSetsUpGhCredentials(t *testing.T) {
-	f := newFixture(t)
-	f.redirect(t, "https://github.com/o/r.git")
-	var out bytes.Buffer
-	if err := boxclone.Clone(f.cfg, &out, &out); err != nil {
-		t.Fatalf("Clone: %v\n%s", err, out.String())
-	}
-	if got := f.originURL(t); got != "https://github.com/o/r.git" {
-		t.Errorf("origin url = %q", got)
-	}
-	if got := f.ghCalls(t); got != "auth setup-git" {
-		t.Errorf("gh argv = %q, want %q", got, "auth setup-git")
-	}
-	testutil.GitRun(t, f.work, "rev-parse", "--verify", "refs/remotes/origin/main")
-}
-
-func TestCloneGitForgeClonesFromRemoteURL(t *testing.T) {
-	f := newFixture(t)
-	f.redirect(t, "https://git.example.test/o/r.git")
-	f.cfg.CodeForge = "git"
-	f.knobs["CODE_FORGE_REMOTE_URL"] = "https://git.example.test/o/r.git"
-	if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
-		t.Fatal(err)
-	}
-	if got := f.originURL(t); got != f.knobs["CODE_FORGE_REMOTE_URL"] {
-		t.Errorf("origin url = %q, want %q", got, f.knobs["CODE_FORGE_REMOTE_URL"])
-	}
-}
-
-func TestCloneGitForgeRequiresRemoteURL(t *testing.T) {
-	f := newFixture(t)
-	f.cfg.CodeForge = "git"
-	err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "CODE_FORGE_REMOTE_URL is required when CODE_FORGE=git") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestCloneGithubIgnoresStrayRemoteURL(t *testing.T) {
-	f := newFixture(t)
-	f.redirect(t, "https://github.com/o/r.git")
-	f.knobs["CODE_FORGE_REMOTE_URL"] = "https://stray.example.test/x.git"
-	if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
-		t.Fatal(err)
-	}
-	if got := f.originURL(t); got != "https://github.com/o/r.git" {
-		t.Errorf("origin url = %q, want the github URL", got)
-	}
-}
-
-func TestCloneForgejoClonesStrategyURLAndSkipsGh(t *testing.T) {
-	f := newFixture(t)
-	f.redirect(t, "https://tok123@forgejo.invalid/o/r.git")
-	f.cfg.CodeForge = "forgejo"
-	f.cfg.GHCredentialHelper = false
-	f.knobs["FORGEJO_TOKEN"] = "tok123"
-	var out bytes.Buffer
-	if err := boxclone.Clone(f.cfg, &out, &out); err != nil {
-		t.Fatalf("Clone: %v\n%s", err, out.String())
-	}
-	if got := f.originURL(t); got != "https://tok123@forgejo.invalid/o/r.git" {
-		t.Errorf("origin url = %q", got)
-	}
-	if got := f.ghCalls(t); got != "" {
-		t.Errorf("gh was invoked: %q", got)
-	}
-}
-
-func TestCloneForgejoRequiresToken(t *testing.T) {
-	f := newFixture(t)
-	f.cfg.CodeForge = "forgejo"
-	f.cfg.GHCredentialHelper = false
-	err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "FORGEJO_TOKEN is required when CODE_FORGE=forgejo") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
 func TestCloneLocalClonesMountSkipsGhAndTrustsBothPaths(t *testing.T) {
 	f := newFixture(t)
-	t.Setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
 	f.cfg.CodeForge = "local"
-	f.cfg.GHCredentialHelper = false
-	f.cfg.HostSeededMirror = true
-	f.cfg.RepoMountDir = f.origin
 	if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
@@ -204,71 +114,38 @@ func TestCloneLocalClonesMountSkipsGhAndTrustsBothPaths(t *testing.T) {
 			t.Errorf("safe.directory %q missing %q", safe, want)
 		}
 	}
+	testutil.GitRun(t, f.work, "rev-parse", "--verify", "refs/remotes/origin/main")
 }
 
 func TestCloneSetsIdentityRepoLocallyAndLeavesGlobalConfigAlone(t *testing.T) {
-	for _, forge := range []string{"github", "git", "forgejo"} {
-		t.Run(forge, func(t *testing.T) {
-			f := newFixture(t)
-			f.cfg.CodeForge = forge
-			switch forge {
-			case "github":
-				f.cfg.GHCredentialHelper = true
-				f.redirect(t, "https://github.com/o/r.git")
-			case "git":
-				f.cfg.GHCredentialHelper = true
-				f.knobs["CODE_FORGE_REMOTE_URL"] = "https://git.example.test/o/r.git"
-				f.redirect(t, f.knobs["CODE_FORGE_REMOTE_URL"])
-			case "forgejo":
-				f.knobs["FORGEJO_TOKEN"] = "tok"
-				f.redirect(t, "https://tok@forgejo.invalid/o/r.git")
-			}
-			before, err := os.ReadFile(f.globalCfg)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
-				t.Fatal(err)
-			}
-			if got := testutil.GitOutput(t, f.work, "config", "--local", "user.name"); got != "Box Agent" {
-				t.Errorf("local user.name = %q", got)
-			}
-			if got := testutil.GitOutput(t, f.work, "config", "--local", "user.email"); got != "box@example.com" {
-				t.Errorf("local user.email = %q", got)
-			}
-			after, err := os.ReadFile(f.globalCfg)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !bytes.Equal(before, after) {
-				t.Errorf("global config changed:\n%s", after)
-			}
-		})
-	}
-}
-
-func TestCloneBannerRedactsTokenBearingURL(t *testing.T) {
 	f := newFixture(t)
-	f.redirect(t, "https://sekrit@forgejo.invalid/o/r.git")
-	f.cfg.CodeForge = "forgejo"
-	f.cfg.GHCredentialHelper = false
-	f.knobs["FORGEJO_TOKEN"] = "sekrit"
-	var out, errOut bytes.Buffer
-	if err := boxclone.Clone(f.cfg, &out, &errOut); err != nil {
+	before, err := os.ReadFile(f.globalCfg)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "==> cloning https://forgejo.invalid/o/r.git") {
-		t.Errorf("banner missing: %q", out.String())
+	if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(out.String()+errOut.String(), "sekrit") {
-		t.Errorf("token leaked: stdout %q stderr %q", out.String(), errOut.String())
+	if got := testutil.GitOutput(t, f.work, "config", "--local", "user.name"); got != "Box Agent" {
+		t.Errorf("local user.name = %q", got)
+	}
+	if got := testutil.GitOutput(t, f.work, "config", "--local", "user.email"); got != "box@example.com" {
+		t.Errorf("local user.email = %q", got)
+	}
+	// safe.directory is the one global entry the clone adds; the identity
+	// must stay out of the global file.
+	after, err := os.ReadFile(f.globalCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(after, before) || bytes.Contains(bytes.TrimPrefix(after, before), []byte("user")) {
+		t.Errorf("global config gained more than safe.directory:\n%s", after)
 	}
 }
 
 func TestCloneGitFailureGoesToStderrNotStdout(t *testing.T) {
 	f := newFixture(t)
-	f.cfg.CodeForge = "git"
-	f.knobs["CODE_FORGE_REMOTE_URL"] = filepath.Join(t.TempDir(), "missing.git")
+	f.cfg.RepoMountDir = filepath.Join(t.TempDir(), "missing.git")
 	var out, errOut bytes.Buffer
 	if err := boxclone.Clone(f.cfg, &out, &errOut); err == nil {
 		t.Fatal("Clone of a missing repo succeeded")
@@ -284,82 +161,11 @@ func TestCloneGitFailureGoesToStderrNotStdout(t *testing.T) {
 	}
 }
 
-// CloneURL hands the selected Strategy the slug and the
-// config's Lookup, and returns its answer or error untouched.
-func TestCloneURLDelegatesToTheStrategy(t *testing.T) {
-	knobs := map[string]string{"FORGEJO_TOKEN": "t"}
-	for _, tc := range []struct {
-		cfg  boxclone.Config
-		want string
-	}{
-		{boxclone.Config{CodeForge: "github", RepoSlug: "o/r"}, "https://github.com/o/r.git"},
-		{boxclone.Config{CodeForge: "forgejo", RepoSlug: "o/r"}, "https://t@forgejo.invalid/o/r.git"},
-	} {
-		t.Run(tc.cfg.CodeForge, func(t *testing.T) {
-			tc.cfg.Lookup = mapLookup(knobs)
-			got, err := boxclone.CloneURL(tc.cfg)
-			if err != nil || got != tc.want {
-				t.Errorf("CloneURL = %q, %v; want %q", got, err, tc.want)
-			}
-		})
-	}
-	_, err := boxclone.CloneURL(boxclone.Config{CodeForge: "git", Lookup: mapLookup(nil)})
-	if err == nil || !strings.Contains(err.Error(), "CODE_FORGE_REMOTE_URL is required") {
-		t.Errorf("err = %v, want the Strategy's own error", err)
-	}
-}
-
-// A CODE_FORGE the Box cannot clone from must never fall back to a github URL.
-func TestCloneURLFailsClosed(t *testing.T) {
-	for _, forge := range []string{"", "gitlab", "jira"} {
-		t.Run("forge="+forge, func(t *testing.T) {
-			got, err := boxclone.CloneURL(boxclone.Config{CodeForge: forge, RepoSlug: "o/r"})
-			if err == nil || !strings.Contains(err.Error(), "CODE_FORGE") {
-				t.Errorf("err = %v, want one naming CODE_FORGE", err)
-			}
-			if strings.Contains(got, "github.com") {
-				t.Errorf("CloneURL = %q, must not be a github URL", got)
-			}
-		})
-	}
-}
-
-func TestCloneSkipsGhWhenCredentialHelperIsOffRegardlessOfForge(t *testing.T) {
+// The mirror clone needs neither the forge's remote URL nor a credential: a
+// git Box has no GH_TOKEN to authenticate with (#6898).
+func TestCloneIgnoresForgeRemoteURLAndSkipsGh(t *testing.T) {
 	f := newFixture(t)
-	f.redirect(t, "https://github.com/o/r.git")
-	f.cfg.GHCredentialHelper = false
-	if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
-		t.Fatal(err)
-	}
-	if got := f.ghCalls(t); got != "" {
-		t.Errorf("gh was invoked: %q", got)
-	}
-}
-
-func TestCloneAddsNoSafeDirectoryUnlessRemoteIsHostSeeded(t *testing.T) {
-	f := newFixture(t)
-	f.redirect(t, "https://github.com/o/r.git")
-	if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("git", "config", "--file", f.globalCfg, "--get-all", "safe.directory")
-	// --get-all exits 1 only for an unset key; any other failure must not pass.
-	out, err := cmd.Output()
-	var exit *exec.ExitError
-	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
-		t.Errorf("safe.directory lookup = %q, %v; want unset (exit 1)", out, err)
-	}
-}
-
-// A forge that clones the mirror needs neither its remote URL nor a gh
-// credential: a read-only git Box has no GH_TOKEN to authenticate with (#6898).
-func TestCloneFromMirrorIgnoresForgeCloneURLAndSkipsGh(t *testing.T) {
-	f := newFixture(t)
-	t.Setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
 	f.cfg.CodeForge = "git"
-	f.cfg.GHCredentialHelper = true
-	f.cfg.HostSeededMirror = true
-	f.cfg.RepoMountDir = f.origin
 	f.knobs["CODE_FORGE_REMOTE_URL"] = "https://unreachable.invalid/o/r.git"
 	if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
@@ -372,17 +178,13 @@ func TestCloneFromMirrorIgnoresForgeCloneURLAndSkipsGh(t *testing.T) {
 	}
 }
 
-func TestCloneHostSeededMirrorNeedsNoForgeCredential(t *testing.T) {
+func TestCloneNeedsNoForgeCredential(t *testing.T) {
 	for _, forge := range []string{"github", "forgejo"} {
 		t.Run(forge, func(t *testing.T) {
 			f := newFixture(t)
-			t.Setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
-			// GHCredentialHelper stays on for github and no FORGEJO_TOKEN is
-			// set: the mirror must skip both, and a clone that reached the
-			// forge URL would have nothing redirecting it to origin.
+			// No FORGEJO_TOKEN is set: a clone that reached the forge URL
+			// would have nothing redirecting it to origin.
 			f.cfg.CodeForge = forge
-			f.cfg.HostSeededMirror = true
-			f.cfg.RepoMountDir = f.origin
 			var out bytes.Buffer
 			if err := boxclone.Clone(f.cfg, &out, &out); err != nil {
 				t.Fatalf("Clone: %v\n%s", err, out.String())

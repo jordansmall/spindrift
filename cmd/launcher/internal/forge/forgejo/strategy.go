@@ -66,28 +66,6 @@ var Strategy = backendkit.Strategy{
 		}
 		return backendkit.LedgerSite{URL: GitRemoteURL(k.ForgejoBaseURL, s.RepoSlug), Credential: GitCredential(k.ForgejoToken)}, nil
 	},
-	// Hand-built rather than GitRemoteURL: this mirrors the Box's former shell
-	// clone exactly, including the schemeless-base case GitRemoteURL handles
-	// differently. The Box's envLookup maps a blank FORGEJO_BASE_URL to unset,
-	// so the codeberg default here agrees with identityBase treating blank as
-	// no identity.
-	CloneURL: func(s backendkit.Shared, l backendkit.Lookup) (string, error) {
-		k, err := ReadKnobs(l)
-		if err != nil {
-			return "", err
-		}
-		if k.ForgejoToken == "" {
-			return "", fmt.Errorf("%s is required when CODE_FORGE=forgejo", ForgejoTokenEnv)
-		}
-		base := strings.TrimSuffix(k.ForgejoBaseURL, "/")
-		scheme, rest, ok := strings.Cut(base, "://")
-		if !ok {
-			// Mirrors the shell's ${base%%://*} / ${base#*://}, which yield
-			// the whole string for both when there is no scheme.
-			scheme, rest = base, base
-		}
-		return fmt.Sprintf("%s://%s@%s/%s.git", scheme, k.ForgejoToken, rest, s.RepoSlug), nil
-	},
 	WebURL: func(s backendkit.Shared, l backendkit.Lookup) string {
 		base := identityBase(l)
 		if s.RepoSlug == "" || base == "" {

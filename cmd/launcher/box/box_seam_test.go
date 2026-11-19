@@ -20,8 +20,6 @@ import (
 	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/backend"
-	"spindrift.dev/launcher/internal/boxclone"
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/driver/drivertest"
 	"spindrift.dev/launcher/internal/markergate"
@@ -149,44 +147,11 @@ func seamOriginCommit(t *testing.T, workDir, msg string, files map[string]string
 	seamGit(t, scratch, "push", "-q", "origin", "main")
 }
 
-// seamCloneRoute points the clone box makes at the origin behind workDir: a
-// Box the launcher gave a host-seeded mirror (BOX_HOST_SEEDED_MIRROR) clones
-// from REPO_MOUNT_DIR and gets no URL rewrite, so a clone that wrongly reached
-// for the forge URL fails; every other Box clones from a URL the HOME
-// gitconfig rewrites to the origin, which keeps the test off the global
-// gitconfig and covers the clone's later fetch and the Box's pushes. It fills
-// the env vars box reads the URL from.
-func seamCloneRoute(t *testing.T, workDir, home string, env map[string]string) {
-	t.Helper()
-	origin := seamOriginPath(workDir)
-	d, _ := backend.ByName(env["CODE_FORGE"])
-	if backend.ClonesFromMirror(d, true) {
-		// The launcher mounts a mirror for this forge (local, git under
-		// read-only) and sets the flag with it.
-		env["BOX_HOST_SEEDED_MIRROR"] = "1"
-	}
-	if env["BOX_HOST_SEEDED_MIRROR"] != "" {
-		env["REPO_MOUNT_DIR"] = origin
-		return
-	}
-	if env["CODE_FORGE"] == "git" && env["CODE_FORGE_REMOTE_URL"] == "" {
-		env["CODE_FORGE_REMOTE_URL"] = "https://git.example/o/r.git"
-	}
-	url, err := boxclone.CloneURL(boxclone.Config{
-		CodeForge: env["CODE_FORGE"], RepoSlug: env["REPO_SLUG"],
-		Lookup: func(k string) (string, bool) { v := env[k]; return v, v != "" },
-	})
-	if err != nil {
-		return // box rejects the config itself
-	}
-	f, err := os.OpenFile(filepath.Join(home, ".gitconfig"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	if _, err := fmt.Fprintf(f, "[url %q]\n\tinsteadOf = %s\n", origin, url); err != nil {
-		t.Fatal(err)
-	}
+// seamCloneRoute points the clone box makes at the origin behind workDir: the
+// Box clones the host-seeded mirror mounted at REPO_MOUNT_DIR, which the seam
+// stands in for with the origin itself.
+func seamCloneRoute(workDir string, env map[string]string) {
+	env["REPO_MOUNT_DIR"] = seamOriginPath(workDir)
 }
 
 // seamCommitWork is the Driver side effect that leaves one commit on the
@@ -271,7 +236,6 @@ func seamBaseEnv(t *testing.T) map[string]string {
 		"TRANSIENT_BACKOFF_SECS": "0",
 		"HOLD_JITTER_SECS":       "0",
 		// What checkEnvGuards requires of every dispatch.
-		"GH_TOKEN":       "tok",
 		"REPO_SLUG":      seamSlug,
 		"GIT_USER_NAME":  "spindrift-agent",
 		"GIT_USER_EMAIL": "agent@example.com",
@@ -406,7 +370,7 @@ func runBoxSeam(t *testing.T, c seamCase) seamRun {
 		seamtest.WriteFakeConfig(t, "claude", seamtest.DriverConfig{Record: driverRec, Runs: c.driverRuns}),
 		seamtest.WriteFakeConfig(t, "orchestrator", orchCfg))
 	seamQuietHome(t, home)
-	seamCloneRoute(t, c.repo, home, env)
+	seamCloneRoute(c.repo, env)
 	nixRec := filepath.Join(tmp, "nix.rec")
 	if c.nix != nil {
 		nixCfg := *c.nix
@@ -893,7 +857,7 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 			"FORGEJO_TOKEN": "s3cr3t-forgejo-token", "FORGEJO_BASE_URL": "https://forge.example/",
 		}), false, true, true},
 		{"work-readonly-local", readonlyWorkEnv(map[string]string{
-			"CODE_FORGE": "local", "BOX_HOST_SEEDED_MIRROR": "1", "BOX_HOST_MEDIATED_REMOTE": "1", "BOX_FULLY_LOCAL": "1",
+			"CODE_FORGE": "local", "BOX_HOST_MEDIATED_REMOTE": "1", "BOX_FULLY_LOCAL": "1",
 			"GH_TOKEN": "", "REPO_SLUG": "",
 		}), false, true, false},
 		{"work-readonly-git", readonlyWorkEnv(map[string]string{"CODE_FORGE": "git"}), false, true, false},
@@ -958,7 +922,7 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 				Snapshot: snapshots,
 			}))
 			if c.env["SELF_CONTAINED"] != "1" {
-				seamCloneRoute(t, workDir, home, base)
+				seamCloneRoute(workDir, base)
 			}
 			launch := map[string]string{}
 			mergeEnv(launch, base, entrypointExports())
@@ -1955,7 +1919,6 @@ func TestBoxSeamEnvGuardNamesTheMissingVariable(t *testing.T) {
 		env  map[string]string
 		want string
 	}{
-		{"GH_TOKEN", map[string]string{"GH_TOKEN": ""}, "GH_TOKEN is required"},
 		{"REPO_SLUG", map[string]string{"REPO_SLUG": ""}, "REPO_SLUG (owner/repo) is required"},
 		{"DISPATCH_KEY", map[string]string{"DISPATCH_KEY": ""}, "DISPATCH_KEY is required"},
 		{"ISSUE_NUMBER", map[string]string{"ISSUE_NUMBER": ""}, "ISSUE_NUMBER is required"},
@@ -1979,14 +1942,14 @@ func TestBoxSeamEnvGuardNamesTheMissingVariable(t *testing.T) {
 }
 
 // Fully-local and self-contained-with-no-reachable-tracker dispatches have no
-// forge to resolve GH_TOKEN or REPO_SLUG against, so the guard skips both.
+// forge to resolve REPO_SLUG against, so the guard skips it.
 func TestBoxSeamEnvGuardExemptsForgelessDispatches(t *testing.T) {
 	cases := []struct {
 		name string
 		env  map[string]string
 	}{
 		{"fully local", map[string]string{
-			"BOX_FULLY_LOCAL": "1", "CODE_FORGE": "local", "BOX_HOST_SEEDED_MIRROR": "1", "ISSUE_TRACKER": "local",
+			"BOX_FULLY_LOCAL": "1", "CODE_FORGE": "local", "ISSUE_TRACKER": "local",
 			"BOX_HOST_MEDIATED_REMOTE": "1", "GH_TOKEN": "", "REPO_SLUG": "",
 		}},
 		{"self-contained research, unreachable tracker", mergedEnv(seamResearchEnv, map[string]string{
@@ -2273,7 +2236,7 @@ var seamForgeTokenVars = []string{"GH_TOKEN", "GITEA_TOKEN", "FORGEJO_TOKEN", "B
 func seamTokenlessCase(t *testing.T, repo, hostOpenPR string, runs []seamtest.DriverRun) (seamCase, string) {
 	t.Helper()
 	ghRec := filepath.Join(t.TempDir(), "gh.rec")
-	env := map[string]string{"BOX_GH_TOKEN_OPTIONAL": "1", "BOX_HOST_SEEDED_MIRROR": "1", branchrecovery.HostOpenPREnv: hostOpenPR}
+	env := map[string]string{branchrecovery.HostOpenPREnv: hostOpenPR}
 	mergeEnv(env, seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{
 		Record:  ghRec,
 		Replies: []seamtest.GhReply{{Args: []string{"pr", "list"}, Exit: 4}},
@@ -2422,7 +2385,7 @@ func seamGitOut(t *testing.T, dir string, args ...string) string {
 // in the outbox, and what outcome line the harness leaves behind, for each
 // posture that relays code through it.
 func TestBoxSeamSettleBundleOut(t *testing.T) {
-	local := map[string]string{"CODE_FORGE": "local", "BOX_HOST_SEEDED_MIRROR": "1", "BOX_HOST_MEDIATED_REMOTE": "1"}
+	local := map[string]string{"CODE_FORGE": "local", "BOX_HOST_MEDIATED_REMOTE": "1"}
 	ready := seamOutcomeLine("ready", "done")
 	resolved := seamOutcomeLine("already-resolved", "dup")
 	const falseReady = `status=blocked note=.*ready.*no commits exist on agent/issue-7`
@@ -2464,7 +2427,7 @@ func TestBoxSeamSettleBundleOut(t *testing.T) {
 			// as a bundle, never a push (#6898).
 			name: "read-only git with commits and no credential", wantBundle: true, noPush: true,
 			env: map[string]string{
-				"CODE_FORGE": "git", "GH_TOKEN": "", "BOX_GH_TOKEN_OPTIONAL": "1",
+				"CODE_FORGE": "git", "GH_TOKEN": "",
 				"CODE_FORGE_REMOTE_URL": "https://unreachable.invalid/o/r.git",
 			},
 			runs: func(repo string) []seamtest.DriverRun { return commits(repo, ready, 0) },
@@ -2599,15 +2562,17 @@ func TestBoxSeamClonesTheTargetOntoTheAgentBranch(t *testing.T) {
 			t.Errorf("repo-local %s = %q; want %q", key, got, want)
 		}
 	}
-	if got := seamtest.ReadRecord(t, ghRec); len(got) == 0 || !reflect.DeepEqual(got[0], []string{"auth", "setup-git"}) {
-		t.Errorf("gh calls = %q; want `auth setup-git` first", got)
+	for _, argv := range seamtest.ReadRecord(t, ghRec) {
+		if len(argv) >= 2 && argv[0] == "auth" && argv[1] == "setup-git" {
+			t.Errorf("clone ran gh auth setup-git: %q", argv)
+		}
 	}
 }
 
 func TestBoxSeamLocalForgeClonesTheMountWithoutGh(t *testing.T) {
 	repo := seamRepo(t)
 	ghEnv, ghRec := seamGhRecord(t)
-	env := map[string]string{"CODE_FORGE": "local", "BOX_HOST_SEEDED_MIRROR": "1", "BOX_HOST_MEDIATED_REMOTE": "1"}
+	env := map[string]string{"CODE_FORGE": "local", "BOX_HOST_MEDIATED_REMOTE": "1"}
 	mergeEnv(env, ghEnv)
 	r := runBoxSeam(t, seamCase{
 		repo: repo, env: env, fakes: []string{"gh"},
@@ -2634,7 +2599,7 @@ func TestBoxSeamLocalForgeClonesTheMountWithoutGh(t *testing.T) {
 //
 // The cases hand-build the tokenless env (unset: seamForgeTokenVars); the
 // launcher-side stripping is proven by dispatch's
-// TestBuildBoxEnvReadOnlyBoxDropsEveryForgeToken and
+// TestBuildBoxEnvDropsEveryForgeToken and
 // TestSeamSmokeReadOnlyBoxCarriesNoForgeToken.
 func TestBoxSeamReadOnlyBoxRunsWithNoForgeCredential(t *testing.T) {
 	cases := []struct {
@@ -2659,7 +2624,7 @@ func TestBoxSeamReadOnlyBoxRunsWithNoForgeCredential(t *testing.T) {
 			ghEnv, ghRec := seamGhRecord(t)
 			fjRec := filepath.Join(t.TempDir(), "fj.rec")
 			envDump := filepath.Join(t.TempDir(), "box.env")
-			env := map[string]string{"BOX_HOST_SEEDED_MIRROR": "1", "BOX_GH_TOKEN_OPTIONAL": "1"}
+			env := map[string]string{}
 			mergeEnv(env, c.env, ghEnv, seamtest.WriteFakeConfig(t, "fj", seamtest.FjConfig{Record: fjRec}))
 			// The Driver runs in the Box's env; dump its names to prove what it holds.
 			sh := seamCommitWork(repo) + " && " + seamDumpEnvNames(envDump)
