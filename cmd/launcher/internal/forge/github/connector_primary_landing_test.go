@@ -162,12 +162,12 @@ func TestLandingWrites_PlainRowRoutesShadowStaysOnGh(t *testing.T) {
 	}
 }
 
-// A Connector that fails to load fails each primary landing write with the
+// A Connector that fails to load fails each routed landing write with the
 // load error, never reaching gh.
-func TestPrimaryRow_LoadFailureFailsTheLandingWrite(t *testing.T) {
+func TestPlainRow_LoadFailureFailsTheLandingWrite(t *testing.T) {
 	for _, tc := range primaryLandingWrites {
 		t.Run(tc.name, func(t *testing.T) {
-			h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+			h, _, calls, _ := primaryHarness(t, useGithubRowAt)
 			url := tc.seed(h)
 			boom := errors.New("github connector failed to load")
 			old := loadRowConnector
@@ -188,12 +188,11 @@ func TestPrimaryRow_LoadFailureFailsTheLandingWrite(t *testing.T) {
 
 // A landing write outside the row's Routes is refused by the host and fails
 // with that refusal, never falling back to gh.
-func TestPrimaryRow_RefusedRouteFailsTheLandingWrite(t *testing.T) {
+func TestPlainRow_RefusedRouteFailsTheLandingWrite(t *testing.T) {
 	for _, tc := range primaryLandingWrites {
 		t.Run(tc.name, func(t *testing.T) {
 			h, _, calls, _ := primaryHarness(t, func(t *testing.T, host string) {
 				applyGithubRow(t, host, func(r *backendrows.Row) {
-					r.Primary = true
 					r.Routes = r.Routes[:0:0]
 					for _, rt := range allRoutes(t, host) {
 						if !strings.Contains(rt.Path, "/pulls") && !strings.Contains(rt.Path, "/git/") && !strings.Contains(rt.Path, "/graphql") {

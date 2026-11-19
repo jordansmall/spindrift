@@ -340,35 +340,41 @@ func TestPrimaryRow_GitOpsNameAnUnsetCredential(t *testing.T) {
 	}
 }
 
-// primaryHostMediationHarness is the host-mediation contract's harness with the
-// production read-only forge, under a primary row, as the code forge. The
+// routedHostMediationHarness is the host-mediation contract's harness with the
+// Strategy's read-only Code Forge, under a plain row, as the code forge. The
 // tracker half is a forge.Fake built before primaryHarness changes directory,
 // which the fake's first use depends on.
-type primaryHostMediationHarness struct {
+type routedHostMediationHarness struct {
 	*composedHostMediationHarness
 	cf forge.CodeForge
 	tr forge.IssueTracker
 }
 
-func (h *primaryHostMediationHarness) CodeForge() forge.CodeForge  { return h.cf }
-func (h *primaryHostMediationHarness) Tracker() forge.IssueTracker { return h.tr }
+func (h *routedHostMediationHarness) CodeForge() forge.CodeForge  { return h.cf }
+func (h *routedHostMediationHarness) Tracker() forge.IssueTracker { return h.tr }
 
-// The host-mediation contract holds for the production forge under a primary
+// The host-mediation contract holds for the production forge under a plain
 // row, with core's git doing the relay and no gh call.
-func TestPrimaryRow_HostMediationContract(t *testing.T) {
+func TestPlainRow_HostMediationContract(t *testing.T) {
 	fake := forge.NewFake()
 	tr := fake.AsIssueFiler()
 	_, _ = fake.ListOpenIssues() // loads the shared fake Connector from the package directory
-	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+	h, _, calls, _ := primaryHarness(t, useGithubRowAt)
 	base := &composedHostMediationHarness{
 		connectorHarness: h, fake: fake,
 		relayedSHA: map[string]string{}, seeded: map[string]bool{}, prSeq: 1500,
 	}
+	cf, err := Strategy.NewReadOnlyCodeForge(backendkit.Shared{
+		RepoSlug: connectorRepo, Labels: testLabels, BaseBranch: "main", GitUserName: "Test Bot", GitUserEmail: "bot@example.com",
+	}, nil, forge.SanitizedParent{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	forgetest.RunHostMediationContract(t, &primaryHostMediationHarness{base, primaryReadOnlyForge(), tr})
+	forgetest.RunHostMediationContract(t, &routedHostMediationHarness{base, cf, tr})
 
 	if n := calls(); n != 0 {
-		t.Errorf("the contract ran gh %d times under a primary row", n)
+		t.Errorf("the contract ran gh %d times under a plain row", n)
 	}
 }
 

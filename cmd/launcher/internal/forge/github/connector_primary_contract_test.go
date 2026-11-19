@@ -1,293 +1,61 @@
 package github
 
 import (
-	"bytes"
-	"crypto/tls"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
 	"net/http"
-	"net/url"
+	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 )
 
-// The primary-row contract runs: the production execClient under a primary
-// github row, so its reads are the Connector's and its writes run gh. That gh
-// is this test binary (see TestMain) doing what gh does for each write: it
-// speaks the scripted REST backend's API, so a read and a write see one state.
-// It serves only the commands the writes make, so a read that fell back to gh is
-// refused, recorded, and fails the run.
+// The contract runs: the Strategy's production constructors under a plain github
+// row, so every read and write is the Connector's. The gh on PATH is the
+// harness's trap (countGH): any call to it is a native fallback and fails the run.
 
-const (
-	fakeGHAPIEnv = "SPINDRIFT_TEST_FAKE_GH_API"
-	fakeGHLogEnv = "SPINDRIFT_TEST_FAKE_GH_LOG"
-)
-
-var errFakeGHRefused = errors.New("command outside the writes a primary row leaves to gh")
-
-type fakeGHCall struct {
-	Args    []string `json:"args"`
-	Refused bool     `json:"refused"`
-}
-
-func fakeGHMain(args []string) int {
-	g := fakeGH{
-		api: os.Getenv(fakeGHAPIEnv),
-		client: &http.Client{Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // the scripted backend's self-signed cert
-		}},
-	}
-	err := g.run(args)
-	refused := errors.Is(err, errFakeGHRefused)
-	if line, merr := json.Marshal(fakeGHCall{Args: args, Refused: refused}); merr == nil {
-		if f, ferr := os.OpenFile(os.Getenv(fakeGHLogEnv), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); ferr == nil {
-			_, _ = f.Write(append(line, '\n'))
-			_ = f.Close()
-		}
-	}
-	switch {
-	case err == nil:
-		return 0
-	case refused:
-		fmt.Fprintf(os.Stderr, "fake gh %v: %v\n", args, err)
-		return 99
-	}
-	fmt.Fprintln(os.Stderr, "gh:", err)
-	return 1
-}
-
-type fakeGH struct {
-	api    string
-	client *http.Client
-}
-
-func ghFlag(args []string, name string) string {
-	if i := slices.Index(args, name); i >= 0 && i+1 < len(args) {
-		return args[i+1]
-	}
-	return ""
-}
-
-func ghFlags(args []string, name string) (out []string) {
-	for i := 0; i+1 < len(args); i++ {
-		if args[i] == name {
-			out = append(out, args[i+1])
-		}
-	}
-	return out
-}
-
-func (g fakeGH) run(args []string) error {
-	if len(args) < 2 {
-		return errFakeGHRefused
-	}
-	switch rest := args[2:]; args[0] + " " + args[1] {
-	case "issue edit":
-		return g.issueEdit(rest)
-	case "pr merge":
-		return g.prMerge(rest)
-	case "pr ready":
-		return g.prReady(rest)
-	}
-	return errFakeGHRefused
-}
-
-func (g fakeGH) do(method, path string, body any) ([]byte, error) {
-	var in io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return nil, err
-		}
-		in = bytes.NewReader(raw)
-	}
-	req, err := http.NewRequest(method, g.api+"/"+strings.TrimPrefix(path, "/"), in)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+connectorToken)
-	resp, err := g.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	out, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, bytes.TrimSpace(out))
-	}
-	return out, nil
-}
-
-// graphql runs a mutation, failing on the errors array GitHub answers 200 with.
-func (g fakeGH) graphql(query string, vars map[string]any) error {
-	out, err := g.do(http.MethodPost, "graphql", map[string]any{"query": query, "variables": vars})
-	if err != nil {
-		return err
-	}
-	var resp struct{ Errors []struct{ Message string } }
-	if json.Unmarshal(out, &resp) == nil && len(resp.Errors) > 0 {
-		return errors.New(resp.Errors[0].Message)
-	}
-	return nil
-}
-
-func (g fakeGH) issueEdit(args []string) error {
-	repo, num := ghFlag(args, "--repo"), args[0]
-	if add := ghFlags(args, "--add-label"); len(add) > 0 {
-		if _, err := g.do(http.MethodPost, "repos/"+repo+"/issues/"+num+"/labels", map[string]any{"labels": add}); err != nil {
-			return err
-		}
-	}
-	if remove := ghFlags(args, "--remove-label"); len(remove) > 0 {
-		ids := make([]string, len(remove))
-		for i, l := range remove {
-			ids[i] = "LA_" + l
-		}
-		return g.graphql(`mutation($id:ID!,$ids:[ID!]!){removeLabelsFromLabelable(input:{labelableId:$id,labelIds:$ids}){clientMutationId}}`,
-			map[string]any{"id": "I_" + num, "ids": ids})
-	}
-	return nil
-}
-
-// prPath splits a PR URL into its REST pull-request path and number.
-func prPath(prURL string) (path, num string, err error) {
-	u, err := url.Parse(prURL)
-	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if err != nil || len(parts) != 4 || parts[2] != "pull" {
-		return "", "", fmt.Errorf("not a pull request URL: %q", prURL)
-	}
-	return "repos/" + parts[0] + "/" + parts[1] + "/pulls/" + parts[3], parts[3], nil
-}
-
-func (g fakeGH) pull(prURL string) (path, num string, p struct {
-	Draft bool
-	Head  struct{ Ref string }
-	Base  struct{ Ref string }
-}, err error) {
-	path, num, err = prPath(prURL)
-	if err != nil {
-		return
-	}
-	out, err := g.do(http.MethodGet, path, nil)
-	if err == nil {
-		err = json.Unmarshal(out, &p)
-	}
-	return
-}
-
-func (g fakeGH) prMerge(args []string) error {
-	path, num, err := prPath(args[0])
-	if err != nil {
-		return err
-	}
-	method := "rebase"
-	for _, m := range []string{"merge", "squash"} {
-		if slices.Contains(args, "--"+m) {
-			method = m
-		}
-	}
-	if slices.Contains(args, "--auto") {
-		return g.graphql(`mutation($id:ID!){enablePullRequestAutoMerge(input:{pullRequestId:$id,mergeMethod:REBASE}){clientMutationId}}`,
-			map[string]any{"id": nodeID(atoi(num))})
-	}
-	_, err = g.do(http.MethodPut, path+"/merge", map[string]any{"merge_method": method})
-	return err
-}
-
-// prReady is gh pr ready: a PR already in the wanted state is a no-op.
-func (g fakeGH) prReady(args []string) error {
-	undo := slices.Contains(args, "--undo")
-	_, num, p, err := g.pull(args[len(args)-1])
-	if err != nil {
-		return err
-	}
-	if p.Draft == undo {
-		return nil
-	}
-	mutation := `mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){clientMutationId}}`
-	if undo {
-		mutation = `mutation($id:ID!){convertPullRequestToDraft(input:{pullRequestId:$id}){clientMutationId}}`
-	}
-	return g.graphql(mutation, map[string]any{"id": nodeID(atoi(num))})
-}
-
-// primaryContractEnv is a primary github row over the scripted backend with the
-// fake gh first on PATH, and the production execClient to drive.
-type primaryContractEnv struct {
+// routedContractEnv is a plain github row over the scripted backend, with the
+// tracker and Code Forge the Strategy builds for it.
+type routedContractEnv struct {
 	h      *connectorHarness
-	c      *execClient
+	shared backendkit.Shared
+	tr     forge.IssueTracker
+	cf     forge.CodeForge
+	calls  func() int
 	logDir string
-	ghLog  string
 }
 
-func newPrimaryContractEnv(t *testing.T) *primaryContractEnv {
+func newRoutedContractEnv(t *testing.T) *routedContractEnv {
 	t.Helper()
-	h, _, _, logDir := primaryHarness(t, useGithubRowPrimary)
-	exe, err := os.Executable()
+	h, _, calls, logDir := primaryHarness(t, useGithubRowAt)
+	s := backendkit.Shared{
+		RepoSlug: connectorRepo, Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(),
+		BaseBranch: "main", GitUserName: "Test Bot", GitUserEmail: "bot@example.com",
+	}
+	tr, err := Strategy.NewIssueTracker(s, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bin := t.TempDir()
-	if err := os.Symlink(exe, filepath.Join(bin, "gh")); err != nil {
+	cf, err := Strategy.NewCodeForge(s, nil, forge.SanitizedParent{}, tr)
+	if err != nil {
 		t.Fatal(err)
 	}
-	e := &primaryContractEnv{
-		h: h, logDir: logDir, ghLog: filepath.Join(t.TempDir(), "gh-calls.jsonl"),
-		c: NewExecClient(connectorRepo, testLabels, WithVerdictLabels(forge.ResearchVerdictLabels())),
-	}
-	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
-	t.Setenv(fakeGHAPIEnv, h.backend.URL)
-	t.Setenv(fakeGHLogEnv, e.ghLog)
-	return e
+	return &routedContractEnv{h: h, shared: s, tr: tr, cf: cf, calls: calls, logDir: logDir}
 }
 
-// ghCalls is every gh invocation so far, as its first two arguments joined, and
-// those the fake refused.
-func (e *primaryContractEnv) ghCalls(t *testing.T) (verbs []string, refused [][]string) {
+// assertSplit is the run's proof that the contract stayed on the Connector: gh
+// never ran, the Connector sent each wanted read and none was refused, the
+// backend saw nothing outside its API, and the primary log holds exactly the
+// wantFailed failures the contract injected.
+func (e *routedContractEnv) assertSplit(t *testing.T, wantFailed int, wantReads []string) {
 	t.Helper()
-	raw, err := os.ReadFile(e.ghLog)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		t.Fatal(err)
-	}
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		if line == "" {
-			continue
-		}
-		var c fakeGHCall
-		if err := json.Unmarshal([]byte(line), &c); err != nil {
-			t.Fatalf("gh call log line %q: %v", line, err)
-		}
-		verbs = append(verbs, strings.Join(c.Args[:min(2, len(c.Args))], " "))
-		if c.Refused {
-			refused = append(refused, c.Args)
-		}
-	}
-	return verbs, refused
-}
-
-// assertSplit is the run's proof that reads and writes took the two paths: gh
-// refused nothing and made each wanted write, the Connector sent each wanted
-// read and none was refused, the backend saw nothing outside its API, and the
-// primary log holds exactly the wantFailed failures the contract injected.
-func (e *primaryContractEnv) assertSplit(t *testing.T, wantFailed int, wantGH, wantReads []string) {
-	t.Helper()
-	verbs, refused := e.ghCalls(t)
-	if len(refused) > 0 {
-		t.Errorf("gh was asked for reads a primary row must route to the Connector: %q", refused)
-	}
-	for _, w := range wantGH {
-		if !slices.ContainsFunc(verbs, func(v string) bool { return strings.HasPrefix(v, w) }) {
-			t.Errorf("gh never ran %q; ran %q", w, verbs)
-		}
+	if n := e.calls(); n != 0 {
+		t.Errorf("the contract ran gh %d times under a plain row", n)
 	}
 
 	audits := primaryFiles(t, e.logDir, ".audit.jsonl")
@@ -330,66 +98,96 @@ func (e *primaryContractEnv) assertSplit(t *testing.T, wantFailed int, wantGH, w
 	}
 }
 
-// primaryTrackerHarness is the tracker contract's harness over a primary row.
-type primaryTrackerHarness struct{ *primaryContractEnv }
+// routedTrackerHarness is the tracker contract's harness over a plain row.
+type routedTrackerHarness struct{ *routedContractEnv }
 
 var (
-	_ forgetest.Harness                 = primaryTrackerHarness{}
-	_ forgetest.NativeCapable           = primaryTrackerHarness{}
-	_ forgetest.NativeFailureIsolatable = primaryTrackerHarness{}
-	_ forgetest.PriorityCapable         = primaryTrackerHarness{}
-	_ forgetest.CommentCapable          = primaryTrackerHarness{}
+	_ forgetest.Harness                 = routedTrackerHarness{}
+	_ forgetest.NativeCapable           = routedTrackerHarness{}
+	_ forgetest.NativeFailureIsolatable = routedTrackerHarness{}
+	_ forgetest.PriorityCapable         = routedTrackerHarness{}
+	_ forgetest.CommentCapable          = routedTrackerHarness{}
 )
 
-func (p primaryTrackerHarness) Tracker() forge.IssueTracker              { return p.c }
-func (p primaryTrackerHarness) SeedIssue(i forge.Issue)                  { p.h.SeedIssue(i) }
-func (p primaryTrackerHarness) FailNativeDeps(n string)                  { p.h.FailNativeDeps(n) }
-func (p primaryTrackerHarness) SeedNativeDeps(n string, ids []string)    { p.h.SeedNativeDeps(n, ids) }
-func (p primaryTrackerHarness) SeedComments(n string, c []forge.Comment) { p.h.SeedComments(n, c) }
-func (primaryTrackerHarness) IsolatesNativeFailure()                     {}
-func (primaryTrackerHarness) IsPriorityCapable()                         {}
+func (p routedTrackerHarness) Tracker() forge.IssueTracker              { return p.tr }
+func (p routedTrackerHarness) SeedIssue(i forge.Issue)                  { p.h.SeedIssue(i) }
+func (p routedTrackerHarness) FailNativeDeps(n string)                  { p.h.FailNativeDeps(n) }
+func (p routedTrackerHarness) SeedNativeDeps(n string, ids []string)    { p.h.SeedNativeDeps(n, ids) }
+func (p routedTrackerHarness) SeedComments(n string, c []forge.Comment) { p.h.SeedComments(n, c) }
+func (routedTrackerHarness) IsolatesNativeFailure()                     {}
+func (routedTrackerHarness) IsPriorityCapable()                         {}
 
-// With a primary github row the tracker contract passes: every read and every
+// With a plain github row the tracker contract passes: every read and every
 // issue write (claim, transition, verdict, comment) is the Connector's, and gh
 // runs nothing.
-func TestPrimaryRow_TrackerContract(t *testing.T) {
-	e := newPrimaryContractEnv(t)
+func TestPlainRow_TrackerContract(t *testing.T) {
+	e := newRoutedContractEnv(t)
 
-	forgetest.RunTrackerContract(t, primaryTrackerHarness{e})
+	forgetest.RunTrackerContract(t, routedTrackerHarness{e})
 
 	// Two failures are recorded: the injected native-deps read, and the verdict
 	// the contract settles on an issue that is no longer in progress. The lost
 	// claim race it also drives is core policy and stays out of the log.
 	e.assertSplit(t, 2,
-		nil,
 		[]string{"GET /repos/" + connectorRepo + "/issues", "GET /repos/" + connectorRepo + "/issues/302/dependencies/blocked_by", "POST /graphql", "POST /repos/" + connectorRepo + "/issues"})
-	if verbs, _ := e.ghCalls(t); len(verbs) > 0 {
-		t.Errorf("the tracker contract ran gh %q under a primary row", verbs)
-	}
 }
 
-// primaryPRHarness is the PRForge contract's harness over a primary row: the
+// routedPRHarness is the PRForge contract's harness over a plain row: the
 // seeds and oracles are the scripted backend's, the PRForge under test the
-// execClient.
-type primaryPRHarness struct {
+// Strategy's Code Forge.
+type routedPRHarness struct {
 	composedPRHarness
-	c *execClient
+	cf forge.CodeForge
 }
 
-func (p primaryPRHarness) Forge() forge.PRForge       { return p.c }
-func (p primaryPRHarness) CodeForge() forge.CodeForge { return p.c }
+func (p routedPRHarness) Forge() forge.PRForge       { return p.cf.(forge.PRForge) }
+func (p routedPRHarness) CodeForge() forge.CodeForge { return p.cf }
 
-// With a primary github row the PRForge contract passes: PR and check reads and
+// With a plain github row the PRForge contract passes: PR and check reads and
 // every PR write, merge included, are the Connector's, and gh runs nothing.
-func TestPrimaryRow_PRForgeContract(t *testing.T) {
-	e := newPrimaryContractEnv(t)
+func TestPlainRow_PRForgeContract(t *testing.T) {
+	e := newRoutedContractEnv(t)
 
-	forgetest.RunPRForgeContract(t, primaryPRHarness{composedPRHarness{e.h}, e.c})
+	forgetest.RunPRForgeContract(t, routedPRHarness{composedPRHarness{e.h}, e.cf})
 
 	e.assertSplit(t, 0,
-		nil,
 		[]string{"GET /repos/" + connectorRepo + "/pulls", "GET /repos/" + connectorRepo + "/compare/", "POST /graphql", "PUT /repos/" + connectorRepo + "/pulls/"})
-	if verbs, _ := e.ghCalls(t); len(verbs) > 0 {
-		t.Errorf("the PRForge contract ran gh %q under a primary row", verbs)
+}
+
+// routedCodeForgeHarness is the CodeForge contract's harness over a plain row:
+// the Strategy's Code Forge under test, the scripted backend's repo the oracle.
+type routedCodeForgeHarness struct {
+	composedCodeForgeHarness
+	cf forge.CodeForge
+}
+
+func (h routedCodeForgeHarness) Forge() forge.CodeForge { return h.cf }
+
+// Unreachable swaps the row for one whose backend is already closed and builds
+// the Strategy's Code Forge over it, so Probe fails on the production path. The
+// swap outlives the call (the forge resolves its row per call); no contract case
+// after Probe needs the reachable backend.
+func (h routedCodeForgeHarness) Unreachable() forge.CodeForge {
+	h.t.Helper()
+	srv := httptest.NewTLSServer(http.NotFoundHandler())
+	host := srv.Listener.Addr().String()
+	srv.Close()
+	useGithubRowAt(h.t, host)
+	cf, err := Strategy.NewCodeForge(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels}, nil, forge.SanitizedParent{}, nil)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return cf
+}
+
+// With a plain github row the CodeForge contract passes: merge, rebase (core's
+// git) and probe all run, and gh runs nothing.
+func TestPlainRow_CodeForgeContract(t *testing.T) {
+	e := newRoutedContractEnv(t)
+
+	forgetest.RunCodeForgeContract(t, routedCodeForgeHarness{composedCodeForgeHarness{e.h}, e.cf})
+
+	if n := e.calls(); n != 0 {
+		t.Errorf("the CodeForge contract ran gh %d times under a plain row", n)
 	}
 }
