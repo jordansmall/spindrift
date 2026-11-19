@@ -5,7 +5,11 @@
     { "method": "POST", "host": "{base}", "path": "/api/v1/repos/{repo}/pulls" },
     { "method": "PATCH", "host": "{base}", "path": "/api/v1/repos/{repo}/pulls" },
     { "method": "POST", "host": "{base}", "path": "/api/v1/repos/{repo}/issues" },
-    { "method": "DELETE", "host": "{base}", "path": "/api/v1/repos/{repo}/branches" }
+    { "method": "DELETE", "host": "{base}", "path": "/api/v1/repos/{repo}/branches" },
+    { "method": "PUT", "host": "{base}", "path": "/api/v1/repos/{repo}/issues" },
+    { "method": "PATCH", "host": "{base}", "path": "/api/v1/repos/{repo}/issues" },
+    { "method": "POST", "host": "{base}", "path": "/api/v1/repos/{repo}/labels" },
+    { "method": "GET", "host": "{base}", "path": "/api/v1/orgs" }
   ],
   "github": [
     { "method": "GET", "host": "api.github.com", "path": "/repos/{repo}/issues" },

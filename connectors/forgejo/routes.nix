@@ -7,10 +7,13 @@
 # request the Connector makes. The reads are the repository itself (the probe
 # and the allowed merge styles), the PR list, one PR and its files, the compare
 # for how far a PR is behind, the head commit's statuses, a failing job's log
-# (its run and jobs lists, then the log), and a branch's lookup
-# and protection flag. The writes are open and merge a PR and the draft flip
-# under `/pulls`, a PR's comment under `/issues`, and a branch's delete under
-# `/branches`.
+# (its run and jobs lists, then the log), a branch's lookup and protection
+# flag, the issue list, one issue, its comments and native dependencies, the
+# repository's labels, and the owner's org labels under `/orgs`. The writes
+# are open and merge a PR and the draft flip under `/pulls`, a PR's and an
+# issue's comment and the filing of an issue under `/issues`, an issue's label
+# replace and close under `/issues`, a label's create under `/labels`, and a
+# branch's delete under `/branches`.
 #
 # It is the narrowest table the subtree-only Route model can express, not an
 # exact one. The repository read cannot be pinned to the repository document
@@ -21,7 +24,11 @@
 # arrives as its tail, not as a failed read. Forgejo serves the log directly,
 # with no redirect; `followRedirect` is what selects tail mode. The write roots
 # over-admit too: `POST /pulls` also admits review creation, `PATCH /pulls` any
-# PR edit, and `POST /issues` any issue's comment or label add.
+# PR edit, `POST /issues` any issue's comment or label add, `PUT /issues` any
+# issue's label replace, `PATCH /issues` any issue edit, and `POST /labels` any
+# label create. The org-label read cannot be pinned to the owner, since core
+# substitutes only `{repo}`: `GET /orgs` admits every org read, as the GitHub
+# table's unpinned `GET /search/issues` does; the route admits no write.
 [
   {
     method = "GET";
@@ -53,5 +60,25 @@
     method = "DELETE";
     host = "{base}";
     path = "/api/v1/repos/{repo}/branches";
+  }
+  {
+    method = "PUT";
+    host = "{base}";
+    path = "/api/v1/repos/{repo}/issues";
+  }
+  {
+    method = "PATCH";
+    host = "{base}";
+    path = "/api/v1/repos/{repo}/issues";
+  }
+  {
+    method = "POST";
+    host = "{base}";
+    path = "/api/v1/repos/{repo}/labels";
+  }
+  {
+    method = "GET";
+    host = "{base}";
+    path = "/api/v1/orgs";
   }
 ]

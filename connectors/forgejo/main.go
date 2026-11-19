@@ -1,10 +1,13 @@
 // Command forgejo is the Forgejo forge and tracker as a Connector (ADR 0073):
 // the branch primitives, the PR and commit-status reads, the PR write
-// primitives, and the tracker reads (issues, comments, native dependencies)
-// over REST, sent through the host's http_request Host call, which attaches
-// the credential. The native forgejo adapter stays authoritative; nothing
-// routes a production call through the Connector yet. The Connector returns
-// raw fields only, and core makes every policy decision.
+// primitives, the tracker reads (issues, comments, native dependencies), and
+// the tracker writes (label edits, comments, filing, closing, the label
+// registry) over REST, sent through the host's http_request Host call, which
+// attaches the credential. The native forgejo adapter stays authoritative;
+// nothing routes a production call through the Connector yet. Forgejo has no
+// statuses, so a transition always answers unmapped and core swaps labels.
+// The Connector returns raw fields only, and core makes every policy
+// decision.
 package main
 
 import (
@@ -44,6 +47,15 @@ func init() {
 		Comments:   comments,
 		NativeDeps: nativeDeps,
 		Blocks:     blocks,
+	})
+	tracker.RegisterWrites(tracker.Writer{
+		Transition:  transition,
+		EditLabels:  editLabels,
+		Comment:     issueComment,
+		FileIssue:   fileIssue,
+		CloseIssue:  closeIssue,
+		ListLabels:  listLabels,
+		CreateLabel: createLabel,
 	})
 }
 
