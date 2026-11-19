@@ -426,6 +426,20 @@ API; Codeberg the default instance), `jira` (through its Connector), and
 in canonical Dispatch states, never in a backend's native mechanism.
 _Avoid_: issue source, ticketing, backlog.
 
+**Tracker scope**:
+The one place an Issue Tracker's issues come from: the issues repo on
+`github` and `forgejo` (today always the Target repo), the project on `jira`.
+Core derives it and fills the Connector's `Target.Repo` from it (ADR 0075).
+_Avoid_: board, issue repo.
+
+**Issue route**:
+The typed selectors that narrow one instance's slice of a shared Tracker
+scope to the issues for its own Target repo — `label`, plus any kind the
+tracker's row declares (Jira: `component`). The instance ANDs it into every
+tracker list and stamps it on every issue it files (ADR 0075). Distinct from
+a Registry route.
+_Avoid_: filter, JQL, board.
+
 **Content plane**:
 An issue's body and comments — the text a Dispatch reads to do its work and
 the comment it writes back — as distinct from the Dispatch lifecycle (its
