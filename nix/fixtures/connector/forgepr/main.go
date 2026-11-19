@@ -55,23 +55,32 @@ func init() {
 // failure is Transient, so core may retry it; a non-2xx status is classified
 // by status.
 func call(method, url string, body any) ([]byte, error) {
+	resp, err := send(method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Status/100 != 2 {
+		return nil, statusErr(resp.Status)
+	}
+	return resp.Body, nil
+}
+
+// send issues the request and returns the backend's answer whatever its status.
+func send(method, url string, body any) (connector.Response, error) {
 	req := connector.Request{Method: method, URL: url}
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return nil, err
+			return connector.Response{}, err
 		}
 		req.Body = string(b)
 		req.Headers = map[string]string{"Content-Type": "application/json"}
 	}
 	resp, err := connector.HTTPRequest(req)
 	if err != nil {
-		return nil, connector.Errorf(connector.Transient, "forge backend unreachable: %w", err)
+		return connector.Response{}, connector.Errorf(connector.Transient, "forge backend unreachable: %w", err)
 	}
-	if resp.Status/100 != 2 {
-		return nil, statusErr(resp.Status)
-	}
-	return resp.Body, nil
+	return resp, nil
 }
 
 func statusErr(status int) error {
@@ -265,9 +274,20 @@ func mergeURL(t forge.Target, number string) string {
 	return repoURL(t) + "/pulls/" + number + "/merge"
 }
 
+// merge follows the forgejo Connector, which classes any merge 405 NotMergeable
+// so core re-reads the PR to tell a conflict from the rest.
 func merge(t forge.Target, number string) error {
-	_, err := call(http.MethodPost, mergeURL(t, number), map[string]any{"Do": "rebase"})
-	return err
+	resp, err := send(http.MethodPost, mergeURL(t, number), map[string]any{"Do": "rebase"})
+	if err != nil {
+		return err
+	}
+	if resp.Status == http.StatusMethodNotAllowed {
+		return connector.Errorf(connector.NotMergeable, "forge backend answered status %d", resp.Status)
+	}
+	if resp.Status/100 != 2 {
+		return statusErr(resp.Status)
+	}
+	return nil
 }
 
 func enqueueAutoMerge(t forge.Target, number string) error {

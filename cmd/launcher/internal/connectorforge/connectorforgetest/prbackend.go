@@ -23,17 +23,18 @@ type prStore struct {
 }
 
 type pull struct {
-	number     int
-	head, base string
-	draft      bool
-	merged     bool
-	closed     bool
-	enqueued   bool
-	behind     int
-	files      []string
-	comments   []string
-	mergeSHA   string
-	statuses   []status
+	number      int
+	head, base  string
+	draft       bool
+	merged      bool
+	closed      bool
+	enqueued    bool
+	conflicting bool
+	behind      int
+	files       []string
+	comments    []string
+	mergeSHA    string
+	statuses    []status
 	// sequence scripts the rollup state per status request, in order; once it is
 	// exhausted the state is empty. steady answers every request when no
 	// sequence is scripted.
@@ -132,6 +133,13 @@ func (b *Backend) edit(number int, fn func(*pull)) {
 	fn(p)
 }
 
+// SetConflicting makes PR number read as conflicting with its base and refuse
+// every merge with GitHub's 405 "Pull Request has merge conflicts" body, until
+// the PR is demoted to draft.
+func (b *Backend) SetConflicting(number int, conflicting bool) {
+	b.edit(number, func(p *pull) { p.conflicting = conflicting })
+}
+
 // SetCheckStates scripts the rollup states successive status requests for PR
 // number answer, then the empty state.
 func (b *Backend) SetCheckStates(number int, states []string) {
@@ -221,7 +229,7 @@ func (b *Backend) wirePull(p *pull) map[string]any {
 	}
 	return map[string]any{
 		"number": p.number, "html_url": b.web + "/pull/" + strconv.Itoa(p.number),
-		"state": state, "merged": p.merged, "draft": p.draft, "mergeable": !p.merged && !p.closed,
+		"state": state, "merged": p.merged, "draft": p.draft, "mergeable": !p.merged && !p.closed && !p.conflicting,
 		"merge_commit_sha": merge,
 		"head":             map[string]string{"ref": p.head, "sha": b.headSHA(p)},
 		"base":             map[string]string{"ref": p.base},
@@ -335,6 +343,9 @@ func (b *Backend) servePull(w http.ResponseWriter, r *http.Request, number, sub 
 			return
 		}
 		p.draft = in.Draft
+		if in.Draft {
+			p.conflicting = false // the fixture rebase is a no-op on the seeded branch, so the demote PATCH is what clears the conflict
+		}
 		reply(w, http.StatusOK, b.wirePull(p))
 	case sub == "files" && r.Method == http.MethodGet:
 		out := []map[string]string{}
@@ -357,6 +368,11 @@ func (b *Backend) mergeLocked(w http.ResponseWriter, r *http.Request, p *pull) {
 	}
 	if json.NewDecoder(r.Body).Decode(&in) != nil {
 		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	if p.conflicting {
+		// The JSON body mirrors GitHub's wire body for this refusal.
+		reply(w, http.StatusMethodNotAllowed, map[string]string{"message": "Pull Request has merge conflicts"})
 		return
 	}
 	if p.draft || p.merged || p.closed {
