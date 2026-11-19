@@ -153,10 +153,9 @@ in
     ) "the github Connector's row must carry the Route table in connectors/github/routes.nix";
     pkgs.runCommand "connectors-github-contributes-routes" { } "touch $out";
 
-  # Issue #6912: the github Connector registers its token knob only with
-  # `shadow` or `primary` on. Only attr presence is tested;
-  # connectors/github/module.nix says why.
-  connectors-github-knob-gated-on-switches =
+  # Issue #7139: the github Connector registers its row and token knob whatever
+  # `shadow` and `primary` say, so every Consumer that imports it has them.
+  connectors-github-row-unconditional =
     let
       withShadow = fixtures.connectorConsumerVia [
         coreModule
@@ -166,16 +165,19 @@ in
       shadowSchema = (configOf withShadow).envSchema;
     in
     assert assertMsg (
-      !((configOf withGithub).envSchema ? githubConnectorToken)
-    ) "with shadow and primary off the env schema must not carry githubConnectorToken";
-    assert assertMsg (
-      !((configOf withGithub).connectors.github.knobs ? githubConnectorToken)
-    ) "with shadow and primary off the github row must not carry the githubConnectorToken knob";
+      (configOf withGithub).envSchema ? githubConnectorToken
+    ) "with shadow and primary off the env schema must still carry githubConnectorToken";
+    assert assertMsg
+      (
+        (configOf withGithub).connectors.github.knobs ? githubConnectorToken
+        && (configOf withGithub).connectors.github.backend != null
+      )
+      "with shadow and primary off the github row must carry the githubConnectorToken knob and its backend";
     assert assertMsg (
       shadowSchema ? githubConnectorToken
       && shadowSchema.githubConnectorToken.env == "SPINDRIFT_GITHUB_CONNECTOR_TOKEN"
     ) "with shadow on the env schema must carry githubConnectorToken";
-    pkgs.runCommand "connectors-github-knob-gated-on-switches" { } "touch $out";
+    pkgs.runCommand "connectors-github-row-unconditional" { } "touch $out";
 
   connectors-forgejo-contributes-routes =
     let

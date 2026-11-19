@@ -39,9 +39,12 @@
       # ADR 0073: each Connector subflake is plain-imported here and handed
       # this root's own core, never its pinned one.
       connectorDirs = import ./nix/connector-dirs.nix;
-      connectorModules = map (
-        dir: ((import dir).lib.connector { inherit core; }).flakeModule
-      ) connectorDirs;
+      connectorModuleOf = dir: ((import dir).lib.connector { inherit core; }).flakeModule;
+      connectorModules = map connectorModuleOf connectorDirs;
+
+      # Every Consumer of `spindrift.flakeModules.default` carries the github
+      # row (#7139): the Connector answers github's reads and writes for all.
+      githubConnectorModule = connectorModuleOf ./connectors/github;
 
       # Every mkHarness call handed this wrapped input shares one lazy nixpkgs
       # instantiation per system instead of paying its own fixed-point evaluation
@@ -86,7 +89,15 @@
             primary = true;
           });
 
-        flake = { inherit (core) lib flakeModules; };
+        flake = {
+          inherit (core) lib;
+          flakeModules = core.flakeModules // {
+            default.imports = [
+              core.flakeModules.default
+              githubConnectorModule
+            ];
+          };
+        };
 
         # The dogfood above consumes this same templates/default toolchain and
         # prompt, so an edit here changes both.
@@ -140,6 +151,7 @@
                   ;
                 baselineChecks = checksResult.checks;
                 rootFlakeModule = inputs.self.flakeModules.default;
+                inherit githubConnectorModule;
                 fixtures = fixturesAt root;
                 nixpkgs = nixpkgsShared;
               };
