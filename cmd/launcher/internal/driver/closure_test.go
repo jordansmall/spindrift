@@ -21,6 +21,17 @@ import (
 // restated here.
 var registry = reflect.TypeOf(driver.Descriptor{}).PkgPath()
 
+// connectorCorpora maps each Connector-only Driver, which has no package under
+// driver/, to its corpus directory; driverrows's TestCorpus replays it.
+var connectorCorpora = map[string]string{
+	"claude": filepath.Join("..", "..", "..", "..", "connectors", "claude", "testdata", "corpus"),
+}
+
+// nativeNames is the registered Drivers that have a package under driver/.
+func nativeNames() []string {
+	return slices.DeleteFunc(driver.DescriptorNames(), func(n string) bool { _, ok := connectorCorpora[n]; return ok })
+}
+
 // goList runs `go list args...` and returns its stdout, failing the test with
 // go's stderr when it exits non-zero.
 func goList(t *testing.T, args ...string) string {
@@ -77,7 +88,7 @@ func forbiddenInClosure(out string, forbidden func(path string) bool) []string {
 // tested without the others. The Driver list comes from the registry, so a
 // new Driver is covered the moment it registers.
 func TestDriverTestClosuresStandAlone(t *testing.T) {
-	names := driver.DescriptorNames()
+	names := nativeNames()
 	if len(names) == 0 {
 		t.Fatal("driver.DescriptorNames() is empty; nothing to guard")
 	}
@@ -186,14 +197,24 @@ func corpusProblems(root string, names []string) []string {
 
 // TestEveryDriverRunsItsCorpus pins issue #5506: registering a Driver without
 // a corpus and the test that replays it must fail, and so must a corpus no
-// registered Driver owns.
+// registered Driver owns. A Connector-only Driver keeps its corpus beside its
+// Connector and is replayed by driverrows's TestCorpus.
 func TestEveryDriverRunsItsCorpus(t *testing.T) {
 	names := driver.DescriptorNames()
 	if len(names) == 0 {
 		t.Fatal("driver.DescriptorNames() is empty; nothing to guard")
 	}
-	for _, p := range corpusProblems(".", names) {
+	for _, p := range corpusProblems(".", nativeNames()) {
 		t.Error(p)
+	}
+	for name, dir := range connectorCorpora {
+		cases, err := os.ReadDir(dir)
+		if err != nil || !slices.ContainsFunc(cases, func(e os.DirEntry) bool { return e.IsDir() }) {
+			t.Errorf("%s: %s holds no case directory (%v)", name, dir, err)
+		}
+	}
+	if ok, err := callsConformanceRun(filepath.Join("driverrows", "connector_corpus_test.go")); err != nil || !ok {
+		t.Errorf("driverrows/connector_corpus_test.go does not define TestCorpus calling conformance.Run (%v)", err)
 	}
 }
 

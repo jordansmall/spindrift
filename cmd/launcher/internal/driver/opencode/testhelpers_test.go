@@ -7,8 +7,7 @@ import (
 )
 
 // WriteLog writes lines to a temp log file and returns its path. Exported so
-// external test files in package opencode_test can share it (mirrors
-// driver/claude/testhelpers_test.go).
+// external test files in package opencode_test can share it.
 func WriteLog(t *testing.T, lines ...string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "test.log")

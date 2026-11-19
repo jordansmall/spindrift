@@ -1,8 +1,8 @@
 // Command claude is the claude Driver's host half as a Connector (ADR 0073),
-// ported from the native Strategy in cmd/launcher/internal/driver/claude. The
-// native Strategy stays authoritative until cut-over (#6751), so the two must
-// be kept in step; the shared corpus (decoding, classification) and
-// connector_test.go there (describe data, session flags, result event) pin both.
+// ported from the native Strategy, which issue #6799 deleted: this Connector is
+// now the only claude Driver. The corpus under testdata and its tests
+// (decode_test.go, classify_test.go, session_test.go for the session flags,
+// dogfood_corpus_test.go) pin it.
 package main
 
 import "spindrift.dev/sdk/driver"

@@ -348,8 +348,10 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	}
 
 	driverName, _ := env.LookupEnv("DRIVER")
-	if _, err := driver.New(driverName); err != nil {
-		return err
+	// Quickstart has no input document, so a Connector-only Driver has no
+	// registered Strategy; its Descriptor is what names it.
+	if _, ok := driver.DescriptorFor(driver.ResolveName(driverName)); !ok {
+		return driver.UnknownError(driverName, driver.DescriptorNames())
 	}
 
 	detectedRuntime, err := runner.Probe(env.LookPath)
@@ -930,11 +932,11 @@ const harnessEnvPreamble = "" +
 func harnessEnvSecretLine(name, value string) string {
 	return fmt.Sprintf(
 		"# Preferred: fetch this from a vault instead of the plaintext value below —\n"+
-			"# %s_CMD=\"rbw get spindrift-%s\" (or an op/pass/vault\n"+
+			"# %s_CMD=%q (or an op/pass/vault\n"+
 			"# read); the command's stdout wins over %s and is never baked,\n"+
 			"# logged, or written to disk.\n"+
 			"%s=%s\n\n",
-		name, toKebab(name), name, name, value,
+		name, "rbw get spindrift-"+toKebab(name), name, name, value,
 	)
 }
 

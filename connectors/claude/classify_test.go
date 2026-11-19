@@ -1,24 +1,11 @@
-package claude
+package main
 
 import (
 	"testing"
 	"time"
+
+	"spindrift.dev/sdk/driver"
 )
-
-// TestIsAgentContentEvent_SyntheticSentinel confirms the synthetic-terminator
-// guard is keyed on the named syntheticModelSentinel const, not a coincidental
-// inline literal (issue #820).
-func TestIsAgentContentEvent_SyntheticSentinel(t *testing.T) {
-	sentinelLine := `{"type":"assistant","message":{"model":"` + syntheticModelSentinel + `"},"error":"server_error"}`
-	if got := isAgentContentEvent(sentinelLine); got {
-		t.Errorf("isAgentContentEvent(sentinel) = %v, want false", got)
-	}
-
-	genuineLine := `{"type":"assistant","message":{"model":"claude-sonnet-4-6"},"error":"server_error"}`
-	if got := isAgentContentEvent(genuineLine); !got {
-		t.Errorf("isAgentContentEvent(genuine model) = %v, want true", got)
-	}
-}
 
 // TestClassifyTurn_NonStringError pins how the top-level "error" field is read
 // when it is not a string (issue #5453): an object counts as present, while
@@ -43,7 +30,8 @@ func TestClassifyTurn_NonStringError(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			content, synth := classifyTurn(parseTopLevel(tt.line))
+			root, _ := driver.Scan(tt.line)
+			content, synth := classifyTurn(readTopLevel(root))
 			if content != tt.wantContent || synth != tt.wantSynth {
 				t.Errorf("classifyTurn = (%v, %v), want (%v, %v)", content, synth, tt.wantContent, tt.wantSynth)
 			}
@@ -152,27 +140,6 @@ func TestParseResetsAtText(t *testing.T) {
 			got := parseResetsAtText(tt.content, rowNow)
 			assertTimePtrEqual(t, got, tt.want)
 		})
-	}
-}
-
-// Pinning now makes the ResetAt of a dateless plain-text OAuth marker exactly
-// assertable (issue #2443). This test pins the plain-text marker;
-// TestClassify_OAuthPlainTextResetsAt_ExactEpoch covers all three markers.
-func TestClassifyAt_PinnedClock_PlainTextResetsAt(t *testing.T) {
-	now := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
-	logPath := WriteLog(t, `You've hit your session limit · resets 6:30pm (UTC)`)
-
-	c, err := ClassifyAt(logPath, now)
-	if err != nil {
-		t.Fatalf("ClassifyAt() error: %v", err)
-	}
-
-	want := time.Date(2026, 8, 12, 18, 30, 0, 0, time.UTC)
-	if c.ResetAt == nil {
-		t.Fatal("ResetAt: got nil, want non-nil")
-	}
-	if !c.ResetAt.Equal(want) {
-		t.Errorf("ResetAt: got %v, want %v", *c.ResetAt, want)
 	}
 }
 

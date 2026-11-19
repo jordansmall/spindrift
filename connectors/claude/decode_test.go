@@ -185,14 +185,14 @@ func TestDecodeMatchesReference(t *testing.T) {
 	})
 	t.Run("corpus", func(t *testing.T) {
 		var files []string
-		_ = filepath.WalkDir("../../cmd/launcher/internal/driver/claude/testdata", func(p string, _ fs.DirEntry, err error) error {
+		_ = filepath.WalkDir("testdata", func(p string, _ fs.DirEntry, err error) error {
 			if err == nil && strings.HasSuffix(p, ".jsonl") {
 				files = append(files, p)
 			}
 			return nil
 		})
 		if len(files) == 0 {
-			t.Skip("native Strategy corpus not in this source tree")
+			t.Skip("corpus not in this source tree")
 		}
 		for _, name := range files {
 			f, err := os.Open(name)

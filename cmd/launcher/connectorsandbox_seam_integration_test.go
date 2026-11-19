@@ -554,10 +554,12 @@ func TestSeamConnectorSandboxPrimaryTotals(t *testing.T) {
 			t.Errorf("%s = %d, want > 0 (%s)", k, totals[k], lines[0])
 		}
 	}
-	// The fixture's call count is deterministic: four sandbox calls per run,
-	// the write gate's token introspection included.
-	if totals["sandbox_calls"] != 4 {
-		t.Errorf("sandbox_calls = %d, want 4 (%s)", totals["sandbox_calls"], lines[0])
+	// The call count is deterministic: four from the github fixture, the write
+	// gate's token introspection included, and three from claude's Driver
+	// Connector, which every run loads in the sandbox now that it is the Driver
+	// (issue #6799).
+	if totals["sandbox_calls"] != 7 {
+		t.Errorf("sandbox_calls = %d, want 7 (%s)", totals["sandbox_calls"], lines[0])
 	}
 	// A routed read stays inside the sandbox, and the fixture asks the host
 	// for nothing; a primary run loads no Connector in-process.

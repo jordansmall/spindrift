@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/driver/drivertest"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/github"
 )
@@ -149,6 +150,10 @@ func TestMain(m *testing.M) {
 }
 
 func runMain(m *testing.M) int {
+	if err := drivertest.UseClaudeConnector(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	script := "#!/bin/sh\nprintf 'HTTP/2.0 200 OK\\nX-OAuth-Scopes: public_repo\\n\\n{}'\n"
 	api := newGithubAPI()
 	defer api.Close()

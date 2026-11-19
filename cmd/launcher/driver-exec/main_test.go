@@ -585,19 +585,20 @@ func TestMainRunLoadsFirstPartyMarkedDriverRow(t *testing.T) {
 }
 
 // TestMainRunUnmarkedRowDoesNotBlockOtherDriver pins that an unmarked third-party
-// row only refuses its own Driver: the run selecting native claude still runs.
+// row only refuses its own Driver: the run selecting native opencode still runs.
 func TestMainRunUnmarkedRowDoesNotBlockOtherDriver(t *testing.T) {
 	rc, _ := shadowRun(t, `[{"name":"outsider","module":"/m/outsider.wasm"}]`, 3)
 	if rc != 3 {
-		t.Errorf("exit code = %d, want the native claude's 3", rc)
+		t.Errorf("exit code = %d, want the native opencode's 3", rc)
 	}
 }
 
-// TestMainRunAppliesFirstPartyShadowRowFromNix pins that the shadow row the
-// Nix renders for the batteries claude Connector carries the first-party mark,
-// so driver-exec applies it (loads the real claude wasm) rather than skipping
-// it as unmarked.
-func TestMainRunAppliesFirstPartyShadowRowFromNix(t *testing.T) {
+// TestMainRunAppliesFirstPartyClaudeRowFromNix pins that the plain claude row
+// the Nix renders for the batteries claude Connector carries the first-party
+// mark, so driver-exec applies it (claude has no native Strategy, so it can
+// only be a Connector row) rather than refusing it, and that no shadow replay
+// rides along.
+func TestMainRunAppliesFirstPartyClaudeRowFromNix(t *testing.T) {
 	rows := os.Getenv("SPINDRIFT_FIXTURE_CLAUDE_ROWS_FILE")
 	if rows == "" {
 		t.Skip("SPINDRIFT_FIXTURE_CLAUDE_ROWS_FILE is unset")
@@ -606,21 +607,21 @@ func TestMainRunAppliesFirstPartyShadowRowFromNix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rc, out := shadowRun(t, string(b), 3)
+	rc, out := shadowRunDriver(t, "claude", string(b), `{"type":"system","subtype":"init"}`, 3)
 	if rc != 3 {
-		t.Errorf("exit code = %d, want the native 3", rc)
+		t.Errorf("exit code = %d, want the Connector's resolved 3", rc)
 	}
-	if _, sum := shadowOps(t, out); !sum.Loaded || sum.Error != "" || sum.Driver != "claude" {
-		t.Errorf("summary = %+v, want the claude shadow row applied and loaded", sum)
+	if strings.Contains(out, "shadow_") {
+		t.Errorf("stdout carries a shadow op for a plain claude row: %q", out)
 	}
 }
 
-// shadowRun drives mainRun for the claude Driver over a fake CLI exiting rc,
+// shadowRun drives mainRun for the opencode Driver over a fake CLI exiting rc,
 // with rows (empty for none) as the handoff's Driver rows file, and returns the
 // exit code and stdout.
 func shadowRun(t *testing.T, rows string, rc int) (int, string) {
 	t.Helper()
-	return shadowRunDriver(t, "", rows, `{"type":"system","subtype":"init"}`, rc)
+	return shadowRunDriver(t, "opencode", rows, `{"type":"system","subtype":"init"}`, rc)
 }
 
 // shadowRunDriver is shadowRun for the named Driver, whose fake CLI writes
@@ -683,7 +684,7 @@ func TestMainRunShadowedRunFailureIsSummarisedWithoutReplay(t *testing.T) {
 		replayed = true
 	}
 	t.Cleanup(func() { shadowReplay = prev })
-	rc := shadowRunDriverTo(t, "", claudeShadowRow(t, module), `{"type":"system","subtype":"init"}`, 3, &out)
+	rc := shadowRunDriverTo(t, "opencode", nativeShadowRow(t, module), `{"type":"system","subtype":"init"}`, 3, &out)
 	if rc != 1 {
 		t.Errorf("exit code = %d, want 1", rc)
 	}
@@ -691,14 +692,14 @@ func TestMainRunShadowedRunFailureIsSummarisedWithoutReplay(t *testing.T) {
 		t.Error("the truncated log was replayed")
 	}
 	_, sum := shadowOps(t, out.buf.String())
-	if !strings.Contains(sum.Error, "broken pipe") || sum.Loaded || sum.Driver != "claude" {
-		t.Errorf("summary = %+v, want a dirty claude summary naming the broken pipe", sum)
+	if !strings.Contains(sum.Error, "broken pipe") || sum.Loaded || sum.Driver != "opencode" {
+		t.Errorf("summary = %+v, want a dirty opencode summary naming the broken pipe", sum)
 	}
 }
 
-func claudeShadowRow(t *testing.T, module string) string {
+func nativeShadowRow(t *testing.T, module string) string {
 	t.Helper()
-	return shadowRow(t, "claude", module)
+	return shadowRow(t, "opencode", module)
 }
 
 func shadowRow(t *testing.T, name, module string) string {
@@ -759,13 +760,13 @@ func TestMainRunShadowReportsDivergenceAndKeepsNativeExit(t *testing.T) {
 	if dir == "" {
 		t.Skip("SPINDRIFT_CONNECTOR_FIXTURES_DIR is unset")
 	}
-	rc, out := shadowRun(t, claudeShadowRow(t, filepath.Join(dir, "driver.wasm")), 3)
+	rc, out := shadowRun(t, nativeShadowRow(t, filepath.Join(dir, "driver.wasm")), 3)
 	if rc != 3 {
 		t.Errorf("exit code = %d, want the native 3", rc)
 	}
 	divs, sum := shadowOps(t, out)
-	if !sum.Loaded || sum.Error != "" || sum.Driver != "claude" || sum.Compared == 0 {
-		t.Errorf("summary = %+v, want a clean claude replay", sum)
+	if !sum.Loaded || sum.Error != "" || sum.Driver != "opencode" || sum.Compared == 0 {
+		t.Errorf("summary = %+v, want a clean opencode replay", sum)
 	}
 	if len(divs) == 0 || divs[0].Line == "" || len(divs[0].Native) == 0 || len(divs[0].Shadow) == 0 {
 		t.Errorf("divergences = %+v, want line with native and shadow results", divs)
@@ -776,7 +777,7 @@ func TestMainRunShadowLoadFailureIsSummarisedNotFatal(t *testing.T) {
 	garbage := filepath.Join(t.TempDir(), "garbage.wasm")
 	writeTestFile(t, garbage, "not wasm")
 	for name, module := range map[string]string{"missing": filepath.Join(t.TempDir(), "absent.wasm"), "garbage": garbage} {
-		rc, out := shadowRun(t, claudeShadowRow(t, module), 3)
+		rc, out := shadowRun(t, nativeShadowRow(t, module), 3)
 		if rc != 3 {
 			t.Errorf("%s: exit code = %d, want 3", name, rc)
 		}
@@ -787,7 +788,7 @@ func TestMainRunShadowLoadFailureIsSummarisedNotFatal(t *testing.T) {
 }
 
 func TestMainRunMalformedShadowRowIsSummarisedNotFatal(t *testing.T) {
-	rc, out := shadowRun(t, claudeShadowRow(t, ""), 3)
+	rc, out := shadowRun(t, nativeShadowRow(t, ""), 3)
 	if rc != 3 {
 		t.Errorf("exit code = %d, want 3", rc)
 	}
@@ -795,8 +796,8 @@ func TestMainRunMalformedShadowRowIsSummarisedNotFatal(t *testing.T) {
 	if sum.Loaded || !strings.Contains(sum.Error, "shadow row skipped") {
 		t.Errorf("summary = %+v, want Loaded=false naming the skipped row", sum)
 	}
-	if sum.Driver != "claude" {
-		t.Errorf("summary Driver = %q, want the defaulted name claude", sum.Driver)
+	if sum.Driver != "opencode" {
+		t.Errorf("summary Driver = %q, want the handoff Driver", sum.Driver)
 	}
 }
 

@@ -1,4 +1,4 @@
-package claude
+package main
 
 import (
 	"testing"

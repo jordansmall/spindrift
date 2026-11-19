@@ -149,7 +149,7 @@ func benchWasm(b *testing.B) []byte {
 // pass logs, the lines BenchmarkConnectorDecode/corpus=6798 decodes.
 func claudeCorpusLines(b *testing.B) []string {
 	b.Helper()
-	paths, err := filepath.Glob(filepath.Join("..", "driver", "claude", "testdata", "corpus", "*", "pass.jsonl"))
+	paths, err := filepath.Glob(filepath.Join("..", "..", "..", "..", "connectors", "claude", "testdata", "corpus", "*", "pass.jsonl"))
 	if err != nil || len(paths) == 0 {
 		b.Fatalf("claude corpus pass logs: %v (found %d)", err, len(paths))
 	}

@@ -221,7 +221,9 @@ func orDefault(name string) string {
 func ResolveName(name string) string { return orDefault(name) }
 
 // New returns the registered Driver strategy for name. An empty name defaults
-// to "claude".
+// to "claude". A name with a Descriptor but no Driver is a Connector-only
+// Driver (claude) that no Driver row supplied a module for; that is an error,
+// never a fallback.
 func New(name string) (Driver, error) {
 	name = orDefault(name)
 	if load, ok := lazyDrivers[name]; ok {
@@ -230,7 +232,15 @@ func New(name string) (Driver, error) {
 	if d, ok := registry[name]; ok {
 		return d, nil
 	}
-	return nil, fmt.Errorf("unknown DRIVER %q; known drivers: %v", name, Names())
+	if _, ok := descriptor(name); ok {
+		return nil, fmt.Errorf("DRIVER %q: no Driver row supplies its Connector module", name)
+	}
+	return nil, UnknownError(name, Names())
+}
+
+// UnknownError is the error for a DRIVER name that no known Driver answers to.
+func UnknownError(name string, known []string) error {
+	return fmt.Errorf("unknown DRIVER %q; known drivers: %v", name, known)
 }
 
 // UseDescriptor makes d the Descriptor of the Driver it names, replacing the

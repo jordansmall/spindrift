@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/driver/drivertest"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/seamtest"
 )
@@ -133,6 +134,8 @@ func TestHandoffEndToEnd(t *testing.T) {
 		"--driver", "claude",
 		"--driver-bin", fakeClaude,
 		"--driver-flags", "",
+		// claude is a Connector, so the subprocesses open it from a rows file.
+		"--driver-rows-file", drivertest.ClaudeRowsFile(t),
 		// driver-exec's default is the Box's /tmp/heartbeat.log, which the
 		// darwin Nix build sandbox does not let a check write.
 		"--heartbeat-log", filepath.Join(dir, "heartbeat.log"),

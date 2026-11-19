@@ -24,6 +24,11 @@ const (
 	// is the flake package that builds it (issue #7013).
 	connectorHostEnvVar = "SPINDRIFT_CONNECTOR_HOST"
 	connectorHostAttr   = "connector-host"
+	// claudeWasmEnvVar names the compiled claude Connector, and claudeWasmAttr
+	// is the flake package that builds it as <out>/claude.wasm. claude has no
+	// native Strategy, so every core test that decodes claude needs the wasm.
+	claudeWasmEnvVar = "SPINDRIFT_CLAUDE_CONNECTOR_WASM"
+	claudeWasmAttr   = "claude-connector"
 	// escapeHostEnvVar names the escape-probe host binary, laid out as
 	// <dir>/bin/connector-host.
 	escapeHostEnvVar = "SPINDRIFT_CONNECTOR_HOST_ESCAPEPROBE"
@@ -150,6 +155,16 @@ var ConnectorHost = sync.OnceValues(func() (string, error) {
 		return bin, nil
 	}
 	return builtArtifact(connectorHostEnvVar, "the connector-host binary", connectorHostAttr, filepath.Join("bin", "connector-host"))
+})
+
+// ClaudeConnectorWasm returns the compiled claude Connector:
+// $SPINDRIFT_CLAUDE_CONNECTOR_WASM when set, else <out>/claude.wasm of the
+// nix-built claude-connector package, computed once per test binary.
+var ClaudeConnectorWasm = sync.OnceValues(func() (string, error) {
+	if wasm := os.Getenv(claudeWasmEnvVar); wasm != "" {
+		return wasm, nil
+	}
+	return builtArtifact(claudeWasmEnvVar, "the compiled claude Connector (claude.wasm)", claudeWasmAttr, "claude.wasm")
 })
 
 // buildOutcome is a nix build's result, kept whole so sync.OnceValues (at most
