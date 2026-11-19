@@ -72,7 +72,7 @@ func resolveConnectorCredentials(doc *inputdoc.Document, kinds []daemon.Kind, st
 	seen := map[string]bool{}
 	for _, row := range backendrows.All() {
 		env := row.CredentialEnv
-		readsTracker := row.Name == tracker && backendkit.TrackerReadsThroughConnector(row.Name, row.Primary)
+		readsTracker := row.Name == tracker && backendkit.TrackerReadsThroughConnector(row.Name)
 		// Only a primary forge row: a plain routed row that is merely the default
 		// CODE_FORGE must never be newly resolved.
 		readsForge := row.Name == forge && row.Primary

@@ -74,10 +74,6 @@ type Strategy struct {
 	// backend row's Connector. Without it a non-shadow row stays registered
 	// but unused.
 	ConnectorRouted bool
-	// PrimaryTracker marks an adapter whose issue tracker a primary backend
-	// row builds from the Connector. Without it primary switches only the
-	// Code Forge.
-	PrimaryTracker bool
 	// LandedBanner is the clause the all-delivered banner puts after "==> all
 	// agents finished — ", for a backend that is a Code Forge. Nil on a
 	// tracker-only backend.
@@ -296,10 +292,10 @@ func ForgeReadsThroughConnector(name string, primary bool) bool {
 }
 
 // TrackerReadsThroughConnector reports whether the issue tracker of the
-// backend row named name reads through its Connector: the adapter routes it,
-// or the row is primary and the adapter is PrimaryTracker. A primary forgejo
-// row switches its Code Forge alone, so its tracker stays native.
-func TrackerReadsThroughConnector(name string, primary bool) bool {
+// backend row named name reads through its Connector: the adapter routes it.
+// A primary forgejo row switches its Code Forge alone, so its tracker stays
+// native.
+func TrackerReadsThroughConnector(name string) bool {
 	strat, _ := ByName(name)
-	return strat.ConnectorRouted || (primary && strat.PrimaryTracker)
+	return strat.ConnectorRouted
 }

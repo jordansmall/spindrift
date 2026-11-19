@@ -7,7 +7,7 @@
   displayName = "Jira";
   validAsTracker = true;
   tokenEnvVar = "JIRA_TOKEN";
-  doctorTokenHint = "JIRA_TOKEN";
+  doctorTokenHint = "SPINDRIFT_JIRA_CONNECTOR_TOKEN";
   doctorSlugHint = "JIRA_BASE_URL / JIRA_PROJECT_KEY";
   # The Box has no Jira client and JIRA_TOKEN is host-only, so the research
   # verdict (issue #5245) and a work run's IF BLOCKED comment (issue #5263)

@@ -5,12 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/backendkit"
-	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/jira"
 )
@@ -144,43 +141,6 @@ func TestTransitionRefusedError_NoOffers(t *testing.T) {
 	want := `issue ENG-1 could not move from status "A" to "B": the workflow offers no transitions`
 	if err.Error() != want {
 		t.Errorf("Error() = %q, want %q", err.Error(), want)
-	}
-}
-
-// Research states always ride labels, so JIRA_LIFECYCLE=status must not reach
-// the research tracker (ADR 0022).
-func TestStrategyNewIssueTracker_StatusLifecycleSkipsResearchTracker(t *testing.T) {
-	for _, tc := range []struct {
-		tracker    dispatchkind.Tracker
-		wantLabels bool
-	}{
-		{dispatchkind.TrackerWork, false},
-		{dispatchkind.TrackerResearch, true},
-	} {
-		var jql string
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			jql, _ = url.QueryUnescape(r.URL.Query().Get("jql"))
-			fmt.Fprint(w, `{"issues":[],"startAt":0,"total":0}`)
-		}))
-		env := map[string]string{
-			"JIRA_BASE_URL": srv.URL, "JIRA_PROJECT_KEY": "PROJ", "JIRA_TOKEN": "tok",
-			"JIRA_LIFECYCLE":      "status",
-			"JIRA_STATUS_MAPPING": `{"dispatchable":"To Do","inProgress":"In Progress","complete":"Done","failed":"Failed","ambiguous":"Blocked"}`,
-		}
-		tr, err := jira.Strategy.NewIssueTracker(backendkit.Shared{Tracker: tc.tracker, Labels: testLabels}, func(k string) (string, bool) {
-			v, ok := env[k]
-			return v, ok
-		})
-		if err != nil {
-			t.Fatalf("NewIssueTracker: %v", err)
-		}
-		if _, err := tr.ListIssues(forge.Dispatchable); err != nil {
-			t.Fatalf("ListIssues: %v", err)
-		}
-		srv.Close()
-		if has := strings.Contains(jql, `labels = "ready-for-agent"`); has != tc.wantLabels {
-			t.Errorf("tracker %v: jql %q label clause = %v, want %v", tc.tracker, jql, has, tc.wantLabels)
-		}
 	}
 }
 

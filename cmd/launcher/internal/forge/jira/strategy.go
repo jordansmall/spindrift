@@ -1,18 +1,27 @@
 package jira
 
 import (
+	"errors"
 	"fmt"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 )
 
+// errNoConnectorRow is the jira tracker with no backend row loaded: the Connector
+// is the only implementation, and backendrows.Use also drops a row whose
+// JIRA_BASE_URL resolveBase rejects.
+var errNoConnectorRow = errors.New("ISSUE_TRACKER=jira needs the jira Connector: import its flake module " +
+	"in the Consumer and set JIRA_BASE_URL to a base its row accepts " +
+	"(docs/reference.md, Running jira through its Connector)")
+
 // Strategy is the jira backend's Go half (ADR 0068).
 var Strategy = backendkit.Strategy{
-	Descriptor:     backend.Jira,
-	PrimaryTracker: true,
+	Descriptor:      backend.Jira,
+	ConnectorRouted: true,
 	ValidateTracker: func(_ backendkit.Shared, l backendkit.Lookup) error {
 		k, err := ReadKnobs(l)
 		if err != nil {
@@ -39,27 +48,11 @@ var Strategy = backendkit.Strategy{
 		if err != nil {
 			return nil, err
 		}
-		if row, ok := primaryRow(); ok {
-			return newConnectorTracker(row, s, k)
+		row, ok := backendrows.Lookup(backend.Jira.Name)
+		if !ok {
+			return nil, errNoConnectorRow
 		}
-		mapping := statusMappingFor(s.Tracker, k.JiraStatusMapping)
-		statusMapping, err := ParseStatusMapping(mapping)
-		if err != nil {
-			// Callers validate the mapping first, so fall back to unmapped
-			// (label-only lifecycle).
-			statusMapping = map[forge.DispatchState]StatusTarget{}
-		}
-		return NewJiraClient(JiraConfig{
-			BaseURL:       k.JiraBaseURL,
-			ProjectKey:    k.JiraProjectKey,
-			IssueType:     k.JiraIssueType,
-			Email:         k.JiraEmail,
-			Token:         k.JiraToken,
-			StatusMapping: statusMapping,
-			StatusOnly:    statusOnlyFor(s.Tracker, k.JiraLifecycle),
-			Labels:        s.Labels,
-			VerdictLabels: s.VerdictLabels,
-		}), nil
+		return newConnectorTracker(row, s, k)
 	},
 }
 

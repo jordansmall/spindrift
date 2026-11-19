@@ -413,14 +413,14 @@ var globalSecretCmdTemplate string
 // or it is the active CODE_FORGE and backendkit.ForgeReadsThroughConnector, or
 // the active ISSUE_TRACKER and backendkit.TrackerReadsThroughConnector.
 // backendrows.Use keeps a row that is none of those (a jira Connector imported
-// by a native-Jira Consumer) that nothing reads until its cut-over, so the
+// by a Consumer whose ISSUE_TRACKER is not jira) that nothing reads, so the
 // SECRET_CMD template must not fetch, or fail on, its credential.
 func connectorCredentialNeededThisRun(row backendrows.Row) bool {
 	isForge := resolvedKnob("CODE_FORGE") == row.Name
 	isTracker := resolvedKnob("ISSUE_TRACKER") == row.Name
 	return (row.Shadow && (isForge || isTracker)) ||
 		(isForge && backendkit.ForgeReadsThroughConnector(row.Name, row.Primary)) ||
-		(isTracker && backendkit.TrackerReadsThroughConnector(row.Name, row.Primary))
+		(isTracker && backendkit.TrackerReadsThroughConnector(row.Name))
 }
 
 // applyConnectorCredentials resolves each backend row's credential env the way

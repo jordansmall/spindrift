@@ -1045,28 +1045,21 @@ func TestHostRepoDir_CodeForgeLocal_DefaultsAbsoluteAndFeedsLanding(t *testing.T
 	}
 }
 
-// ISSUE_TRACKER=jira selects a tracker backed by the Jira REST API instead of
-// the GitHub gh-exec adapter.
-func TestNewIssueTracker_Jira(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"accountId":"abc"}`))
-	}))
-	defer srv.Close()
-
+// ISSUE_TRACKER=jira builds the tracker from the jira Connector only: with no
+// jira row loaded it is an actionable error, never a native client.
+func TestNewIssueTracker_JiraNeedsTheConnectorRow(t *testing.T) {
+	t.Cleanup(backendrows.Snapshot())
+	if err := backendrows.Use(nil, func(string) string { return "" }); err != nil {
+		t.Fatal(err)
+	}
 	c := minimalValidConfig()
 	c.IssueTracker = "jira"
-	c.setRowKnob("JIRA_BASE_URL", srv.URL)
+	c.setRowKnob("JIRA_BASE_URL", "https://jira.example")
 	c.setRowKnob("JIRA_PROJECT_KEY", "PROJ")
 	c.setRowKnob("JIRA_TOKEN", "tok")
 
-	it := mustBuild(newIssueTracker(c))
-	slug, err := it.Probe()
-	if err != nil {
-		t.Fatalf("Probe: %v", err)
-	}
-	if slug != "PROJ" {
-		t.Errorf("Probe() = %q, want the Jira adapter (PROJ)", slug)
+	if _, err := newIssueTracker(c); err == nil || !strings.Contains(err.Error(), "flake module") {
+		t.Fatalf("err = %v, want one naming the jira Connector's flake module", err)
 	}
 }
 
@@ -4679,7 +4672,7 @@ func TestDoctor_AuthFailure_NotDoublyReported(t *testing.T) {
 	}
 }
 
-// The auth-failure remediation text names JIRA_TOKEN, not GH_TOKEN, when the
+// The auth-failure remediation text names SPINDRIFT_JIRA_CONNECTOR_TOKEN, not GH_TOKEN, when the
 // issue tracker is jira; the generic message would misdirect an operator
 // debugging a Jira probe.
 func TestDoctor_AuthFailure_Jira(t *testing.T) {
@@ -4693,8 +4686,8 @@ func TestDoctor_AuthFailure_Jira(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "JIRA_TOKEN") {
-		t.Errorf("want error to mention JIRA_TOKEN, got: %v", err)
+	if !strings.Contains(err.Error(), "SPINDRIFT_JIRA_CONNECTOR_TOKEN") {
+		t.Errorf("want error to mention SPINDRIFT_JIRA_CONNECTOR_TOKEN, got: %v", err)
 	}
 }
 
