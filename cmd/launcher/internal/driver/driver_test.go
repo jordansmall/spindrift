@@ -246,3 +246,19 @@ func TestRegisterPrimaryPanicsWithoutNativeOrOnRepeat(t *testing.T) {
 	RegisterPrimary("twice", load)
 	mustPanic("a repeated RegisterPrimary", func() { RegisterPrimary("twice", load) })
 }
+
+// A Descriptor without a registered Driver is a Connector-only Driver whose
+// row never arrived; the error says so, not "unknown".
+func TestNewDescriptorWithoutDriverNamesTheMissingRow(t *testing.T) {
+	t.Cleanup(Snapshot())
+	UseDescriptor(Descriptor{Name: "rowless"})
+	for _, name := range []string{"rowless", "claude"} {
+		want := `DRIVER "` + name + `": no Driver row supplies its Connector module`
+		if _, err := New(name); err == nil || err.Error() != want {
+			t.Errorf("New(%q) = %v, want %q", name, err, want)
+		}
+	}
+	if _, err := New("bogus"); err == nil || !strings.Contains(err.Error(), "unknown DRIVER") {
+		t.Errorf("New(bogus) = %v, want the unknown-DRIVER error", err)
+	}
+}

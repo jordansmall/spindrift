@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/driver/drivertest"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/runner"
@@ -56,7 +57,7 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
-	seamtest.Main(m)
+	seamtest.MainWith(m, drivertest.UseClaudeConnector)
 }
 
 // c.runtime names a binary that does not exist rather than

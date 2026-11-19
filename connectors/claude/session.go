@@ -7,7 +7,7 @@ import (
 
 // sessionUUID folds a hash of repoSlug and issue to the 8-4-4-4-12 shape the
 // claude CLI accepts as a session id. It matches core's driverkit.SessionUUID,
-// so the id is the same one the native Strategy derives.
+// so the id is the one core derives for the same inputs.
 func sessionUUID(repoSlug, issue string) string {
 	sum := sha256.Sum256([]byte("spindrift-session:" + repoSlug + ":" + issue))
 	h := hex.EncodeToString(sum[:])[:32]
@@ -16,7 +16,7 @@ func sessionUUID(repoSlug, issue string) string {
 
 // SessionFlags renders the claude CLI's session flags. The session id is
 // derived from repoSlug and issue alone, so no state is stored between runs.
-// "resume" always renders nothing here: the native Strategy checks for the
+// "resume" always renders nothing here: it needs a check for the
 // session transcript under home, but a Connector cannot see home, so the caller
 // falls back to the cold-context flow until the host supplies that fact.
 func SessionFlags(mode, repoSlug, issue, _ string) string {

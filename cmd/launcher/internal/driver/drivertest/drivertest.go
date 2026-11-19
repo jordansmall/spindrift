@@ -1,16 +1,25 @@
 // Package drivertest holds the assertion a binary's test runs to prove it
-// links the Driver bundle.
+// links the Driver bundle, and the TestMain hook that registers the claude
+// Connector, the one Driver the bundle does not link.
 package drivertest
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverrows"
+	"spindrift.dev/launcher/internal/fixturebuild"
 )
 
 // RequireBundled fails t unless the calling binary registers exactly the
-// Drivers the Nix registry declares and refuses any other name.
+// Drivers the Nix registry declares and refuses any other name: the bundle's
+// native Drivers plus claude, registered by UseClaudeConnector.
 func RequireBundled(t testing.TB) {
 	t.Helper()
 	if got, want := driver.Names(), driver.DescriptorNames(); !slices.Equal(got, want) {
@@ -27,4 +36,60 @@ func RequireBundled(t testing.TB) {
 func Isolate(t testing.TB) {
 	t.Helper()
 	t.Cleanup(driver.Snapshot())
+}
+
+// claudeRows is the one-row Driver rows document for the claude Connector;
+// firstParty marks the row as the Nix renders it into the Box's rows file.
+func claudeRows(firstParty bool) ([]byte, error) {
+	wasm, err := fixturebuild.ClaudeConnectorWasm()
+	if err != nil {
+		return nil, fmt.Errorf("claude Connector: %w", err)
+	}
+	desc, ok := driver.DescriptorFor("claude")
+	if !ok {
+		return nil, errors.New("claude Connector: no generated Descriptor for claude")
+	}
+	return json.Marshal([]driverrows.Row{{Descriptor: desc, Module: wasm, FirstParty: firstParty}})
+}
+
+// UseClaudeConnector registers the claude Driver from the compiled claude
+// Connector through the production path: a one-row Driver rows document applied
+// by driverrows.Use. claude has no native Strategy, so a binary's tests that
+// resolve it need this in TestMain. An unresolvable wasm is an error, never a
+// skip (ADR 0067); the Connector itself loads lazily, on the first New.
+func UseClaudeConnector() error {
+	raw, err := claudeRows(false)
+	if err != nil {
+		return err
+	}
+	return driverrows.Use(raw)
+}
+
+// ClaudeRowsFile writes the first-party claude Driver row the Nix renders into
+// the Box's rows file and returns its path, for a test that runs a built
+// binary: the in-process registration of UseClaudeConnector does not reach a
+// subprocess, which opens its registry from this file.
+func ClaudeRowsFile(t testing.TB) string {
+	t.Helper()
+	raw, err := claudeRows(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "driver-rows.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// RunWithClaudeConnector is TestMain's body: it registers the claude Connector
+// and runs the tests, or reports why it could not and fails the binary.
+//
+//	func TestMain(m *testing.M) { os.Exit(drivertest.RunWithClaudeConnector(m)) }
+func RunWithClaudeConnector(m *testing.M) int {
+	if err := UseClaudeConnector(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return m.Run()
 }

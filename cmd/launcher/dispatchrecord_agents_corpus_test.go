@@ -16,6 +16,10 @@ import (
 // These live in the root package, not dispatchrecord: only bundle binaries
 // may reach Driver packages in their test closure (bundle_guard_test.go).
 
+// claudeSubagentsCorpus is the claude Connector's corpus case, as corpusRecord
+// reads it: relative to internal/driver.
+const claudeSubagentsCorpus = "../../../../connectors/claude/testdata/corpus/real-fix-pass-subagents"
+
 // corpusRecord ingests a real Driver corpus pass log under a stamp naming that
 // Driver, after the given lines (an explicit pass_start where the corpus has none).
 func corpusRecord(t *testing.T, drv, corpus string, before ...string) dispatchrecord.Record {
@@ -50,7 +54,7 @@ func corpusRecord(t *testing.T, drv, corpus string, before ...string) dispatchre
 }
 
 func TestParseLogRealClaudeSubagentsBreakDownThePass(t *testing.T) {
-	const dir = "claude/testdata/corpus/real-fix-pass-subagents"
+	const dir = claudeSubagentsCorpus
 	rec := corpusRecord(t, "claude", dir)
 	b, err := os.ReadFile(filepath.Join("internal", "driver", dir, "usage.golden.json"))
 	if err != nil {

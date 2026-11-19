@@ -255,17 +255,6 @@ func (f *fixture) firstRun(text string, rc int, rawLines ...string) {
 	f.first = resumeScript{result: text, rawLines: rawLines, rc: rc}
 }
 
-// transcript makes the pinned session's transcript exist under HOME, so a
-// resume's session flags resume it.
-func (f *fixture) transcript() {
-	f.t.Helper()
-	dir := filepath.Join(f.knobs["HOME"], ".claude", "projects", "x")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		f.t.Fatal(err)
-	}
-	f.write(filepath.Join(dir, f.sessionID()+".jsonl"), "")
-}
-
 // useDriver points the handoff at name, so passes are logged in that Driver's
 // stream format and settled by its ResolveExit.
 func (f *fixture) useDriver(name string) {
@@ -282,10 +271,10 @@ func (f *fixture) useDriver(name string) {
 	f.driverName = name
 }
 
-// sessionID stays claude's: it names the transcript file transcript() places
-// under claude's .claude/projects, and opencode pins no session id.
+// sessionID is the id the fixture's Driver pins at "initial"; opencode pins
+// none, so only claude and pi fit.
 func (f *fixture) sessionID() string {
-	d, err := driver.New("claude")
+	d, err := driver.New(f.driverName)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -453,16 +442,19 @@ func TestOutcomeNudge_ResumeAlsoMissing_BackstopNotesRecovery(t *testing.T) {
 	}
 }
 
+// The resume tests run under pi: its "resume" renders a flag from the id alone,
+// while claude's Connector cannot see a transcript under a HOME the guest lacks
+// and never renders one. They prove the Box's resume plumbing, not a Driver's.
 func TestOutcomeNudge_ResumeTargetsPinnedSessionWithStrippedHandoff(t *testing.T) {
 	f := newFixture(t)
-	f.transcript()
+	f.useDriver("pi")
 	f.firstRun("no marker\n", 0)
 	f.resumes = []resumeScript{{result: readyLine + "\n"}}
 
 	f.run()
 
 	call := f.calls[0]
-	if want := "--resume " + f.sessionID(); call.session != want {
+	if want := "--session-id " + f.sessionID(); call.session != want {
 		t.Errorf("session file = %q, want %q", call.session, want)
 	}
 	if got := call.argv["--handoff-file"]; got == f.handoffFile {
@@ -793,7 +785,7 @@ func TestPRIntent_GenuineMarkerPresent_NoResume(t *testing.T) {
 
 func TestPRIntent_Missing_ResumeSuppliesIt(t *testing.T) {
 	f := newFixture(t)
-	f.transcript()
+	f.useDriver("pi")
 	prIntentGateMissing(f)
 	f.resumes = []resumeScript{{result: readyLine + "\n", rawLines: []string{prIntentLine}}}
 
@@ -809,7 +801,7 @@ func TestPRIntent_Missing_ResumeSuppliesIt(t *testing.T) {
 	if strings.Contains(out, "spindrift_op") {
 		t.Errorf("give-up op emitted although the resume supplied the marker:\n%s", out)
 	}
-	if call := f.calls[0]; call.session != "--resume "+f.sessionID() || string(call.handoff["ReviewPromptFile"]) != `""` {
+	if call := f.calls[0]; call.session != "--session-id "+f.sessionID() || string(call.handoff["ReviewPromptFile"]) != `""` {
 		t.Errorf("resume not narrowed: %+v", call)
 	}
 	if !strings.Contains(f.calls[0].prompt, readyLine) {
@@ -1294,27 +1286,25 @@ func TestFirstRun_PassesTheSharedHandoffAndPromptFileContent(t *testing.T) {
 	}
 }
 
+// The "resume" rows differ by Driver: pi renders from the id alone, while
+// claude's Connector cannot see a transcript under a HOME the guest lacks, so
+// it renders nothing and the Box falls back to the cold-context flow.
 func TestFirstRun_SessionFlagsFollowTheHandoffSessionMode(t *testing.T) {
-	setMode := func(f *fixture, mode string) {
-		f.write(f.handoffFile, `{"Driver":"claude","SessionMode":"`+mode+`","PromptFile":"`+filepath.Join(f.dir, "prompt.md")+`"}`)
-	}
 	cases := []struct {
-		name       string
-		mode       string
-		transcript bool
-		want       func(id string) string
+		name   string
+		driver string
+		mode   string
+		want   func(id string) string
 	}{
-		{"initial pins the session", "initial", false, func(id string) string { return "--session-id " + id }},
-		{"resume with a transcript", "resume", true, func(id string) string { return "--resume " + id }},
-		{"resume without a transcript", "resume", false, func(string) string { return "" }},
+		{"initial pins the session", "claude", "initial", func(id string) string { return "--session-id " + id }},
+		{"claude resume renders nothing", "claude", "resume", func(string) string { return "" }},
+		{"pi resume reopens the pinned session", "pi", "resume", func(id string) string { return "--session-id " + id }},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFixture(t)
-			setMode(f, c.mode)
-			if c.transcript {
-				f.transcript()
-			}
+			f.write(f.handoffFile, `{"Driver":"`+c.driver+`","SessionMode":"`+c.mode+`","PromptFile":"`+filepath.Join(f.dir, "prompt.md")+`"}`)
+			f.driverName = c.driver
 			f.run()
 			if want := c.want(f.sessionID()); f.firstCall.session != want {
 				t.Errorf("session file = %q, want %q", f.firstCall.session, want)

@@ -1,21 +1,22 @@
-package claude_test
+package main
 
 import (
 	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
-
-	"spindrift.dev/launcher/internal/driver/claude"
-	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
 // dogfoodLines returns each non-empty line of every dogfood pass log, keyed by
 // case name.
 func dogfoodLines(t testing.TB) map[string][][]byte {
 	t.Helper()
+	paths, err := filepath.Glob(filepath.Join("testdata", "dogfood", "*", "pass.jsonl"))
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("dogfood pass logs: %v (found %d)", err, len(paths))
+	}
 	out := map[string][][]byte{}
-	for _, p := range passLogPaths(t, "dogfood") {
+	for _, p := range paths {
 		data, err := os.ReadFile(p)
 		if err != nil {
 			t.Fatal(err)
@@ -87,23 +88,5 @@ func TestDogfoodCorpusShape(t *testing.T) {
 	}
 	if big < 4 {
 		t.Errorf("%d lines of 100 KB or more, want a tail of at least 4", big)
-	}
-}
-
-// Padding must not push a line outside the claude grammar.
-func TestDogfoodCorpusDecodes(t *testing.T) {
-	for name, lines := range dogfoodLines(t) {
-		decode := claude.Strategy.NewDecoder()
-		for i, l := range lines {
-			evs := decode(string(l))
-			if len(evs) == 0 {
-				t.Fatalf("%s line %d (%d B) decoded to no events", name, i+1, len(l))
-			}
-			for _, ev := range evs {
-				if ev.Kind == driverkit.KindUnparsed {
-					t.Fatalf("%s line %d (%d B) is unparsed", name, i+1, len(l))
-				}
-			}
-		}
 	}
 }

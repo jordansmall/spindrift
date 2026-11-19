@@ -562,6 +562,10 @@ func scratchDoc(t *testing.T, docPath string, edit func(artifacts map[string]str
 	var raw struct {
 		Settings  map[string]string `json:"settings"`
 		Artifacts map[string]string `json:"artifacts"`
+		// Carried through untouched: claude's Connector row is the Driver, so a
+		// copy without it cannot run.
+		Drivers  json.RawMessage `json:"drivers,omitempty"`
+		Backends json.RawMessage `json:"backends,omitempty"`
 	}
 	data, err := os.ReadFile(docPath)
 	if err != nil {

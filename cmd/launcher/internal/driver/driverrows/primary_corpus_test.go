@@ -35,6 +35,9 @@ func TestPrimaryRowConnectorPassesCorpus(t *testing.T) {
 	if name == "" {
 		t.Fatalf("%s must be set with %s", connectorNameEnv, connectorWasmEnv)
 	}
+	if name == "claude" {
+		t.Skip("claude has no native Strategy to replace; TestCorpus runs its Connector")
+	}
 	desc, ok := driver.DescriptorFor(name)
 	if !ok {
 		t.Fatalf("%s has no Descriptor", name)

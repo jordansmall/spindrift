@@ -38,7 +38,20 @@ var fakes = map[string]func(args []string) int{
 //
 //	func TestMain(m *testing.M) { seamtest.Main(m) }
 func Main(m *testing.M) {
+	MainWith(m, nil)
+}
+
+// MainWith is Main that runs setup first when the binary runs the tests, not
+// when it runs a fake, and fails the binary if setup does. A test binary that
+// registers a Driver here keeps its fake children from doing so.
+func MainWith(m *testing.M, setup func() error) {
 	os.Exit(dispatch(filepath.Base(os.Args[0]), os.Args[1:], func() int {
+		if setup != nil {
+			if err := setup(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return 1
+			}
+		}
 		return withBuildDir(m.Run)
 	}))
 }

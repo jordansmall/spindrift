@@ -23,6 +23,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/boxclone"
 	"spindrift.dev/launcher/internal/branchrecovery"
+	"spindrift.dev/launcher/internal/driver/drivertest"
 	"spindrift.dev/launcher/internal/markergate"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/seambundle"
@@ -30,7 +31,7 @@ import (
 	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
-func TestMain(m *testing.M) { seamtest.Main(m) }
+func TestMain(m *testing.M) { seamtest.MainWith(m, drivertest.UseClaudeConnector) }
 
 const (
 	seamIssue  = "7"
@@ -239,7 +240,7 @@ func seamBoxArgs(t *testing.T, workDir, outboxDir, skillsDir string) []string {
 		"--argv-prompt-style=flag", "--argv-prompt-flag=-p", "--argv-model-flag=--model",
 		"--argv-model-omit-empty=0", "--argv-agents-flag=--agents", "--argv-effort-flag=--effort",
 		"--argv-order=prompt model agents session driverFlags effort",
-		"--model=", "--effort=", "--driver=claude", "--driver-bin=claude", "--driver-flags=", "--driver-rows-file=",
+		"--model=", "--effort=", "--driver=claude", "--driver-bin=claude", "--driver-flags=", "--driver-rows-file=" + drivertest.ClaudeRowsFile(t),
 		"--heartbeat-log=", "--max-budget-tokens=0", "--max-budget-usd=0",
 		"--driver-session-cache-dir=", "--driver-env-files=", "--branch-prefix=agent/issue-",
 		"--driver-bash-timeout-ms=", "--driver-bash-timeout-env=",
@@ -554,7 +555,9 @@ func TestBoxSeamMissingOutcomeIsNudgedOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := [][]string{{"--resume", r.sessionID, "-p", nudge}}
+	// The claude Connector renders no --resume (it cannot see the transcript
+	// under HOME), so a nudge is a cold pass until the host supplies that fact.
+	want := [][]string{{"-p", nudge}}
 	if !reflect.DeepEqual(r.resumes(), want) {
 		t.Errorf("resumes = %q; want %q", r.resumes(), want)
 	}
@@ -580,8 +583,8 @@ func TestBoxSeamUnrecoveredOutcomeIsBackstopped(t *testing.T) {
 	r.res.WantExit(t, 0)
 	r.wantFirstRun(t)
 
-	if res := r.resumes(); len(res) != 1 || len(res[0]) != 4 || !reflect.DeepEqual(res[0][:2], []string{"--resume", r.sessionID}) || res[0][2] != "-p" {
-		t.Errorf("resumes = %q; want exactly one `--resume %s -p <nudge>`", res, r.sessionID)
+	if res := r.resumes(); len(res) != 1 || len(res[0]) != 2 || res[0][0] != "-p" {
+		t.Errorf("resumes = %q; want exactly one `-p <nudge>` (no --resume: the Connector cannot see the transcript)", res)
 	}
 	want := unrecoveredOutcome("")
 	if got := outcomeLines(r.res.Stdout); !reflect.DeepEqual(got, []string{want}) {
@@ -673,7 +676,7 @@ func TestBoxSeamPRIntentNudgeTaken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := [][]string{{"--resume", r.sessionID, "-p", nudge}}
+	want := [][]string{{"-p", nudge}}
 	if !reflect.DeepEqual(r.resumes(), want) {
 		t.Errorf("resumes = %q; want %q", r.resumes(), want)
 	}

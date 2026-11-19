@@ -196,7 +196,7 @@ func addUsage(dst *dispatchrecord.PassAgent, src dispatchrecord.PassAgent) {
 // Over a real claude log, grouping by agent adds the subagents' input and cache
 // tokens on top of the ungrouped total (see recordstats.GroupAgents).
 func TestGroupAgentsOverRealClaudeLogAddsSubagentTokens(t *testing.T) {
-	rec := corpusRecord(t, "claude", "claude/testdata/corpus/real-fix-pass-subagents")
+	rec := corpusRecord(t, "claude", claudeSubagentsCorpus)
 	var want, got, sub dispatchrecord.PassAgent
 	var wantUSD, gotUSD float64
 	var wantTurns, gotTurns int
