@@ -25,7 +25,9 @@
 # the docs and comment-only exemptions, so no edit under it is ever docs: the
 # connector-escape guard reads its Nix text. Any other path under connectors/
 # is core, hence code. Connector and docs paths only give `connector`; one
-# core path gives `code`.
+# core path gives `code`. The Connector of a connectorHosted Driver (the list
+# in lib/drivers/default.nix at the new revision) is core too: every Consumer's
+# harness evaluates it. An unreadable list makes every Connector core.
 #
 # `--connectors OLD NEW` instead prints the sorted, unique Connector names any
 # path in the diff touches (both sides of a rename or copy) as a JSON array,
@@ -82,6 +84,34 @@ connector_of() {
   [[ $1 =~ ^\"?connectors/($connector_name_re)/. ]] || return 1
   connector_name=${BASH_REMATCH[1]}
   flake_at_new "$connector_name"
+}
+
+# Fills hosted from the single-line `connectorHosted = [ "a" "b" ];` in
+# lib/drivers/default.nix at the new revision. hosted_ok stays 0 (fail closed)
+# when the line is missing, repeated, or anything but quoted names.
+declare -A hosted=()
+hosted_loaded=0
+hosted_ok=0
+load_hosted() {
+  [ "$hosted_loaded" -eq 0 ] || return 0
+  hosted_loaded=1
+  local src line body name
+  local line_re='^[[:space:]]*connectorHosted = \[(.*)\];[[:space:]]*$'
+  local body_re="^([[:space:]]*\"$connector_name_re\")*[[:space:]]*\$"
+  src=$(git show "$new_rev:lib/drivers/default.nix" 2>/dev/null) || return 0
+  line=$(grep -E "$line_re" <<<"$src") || return 0
+  [[ $line =~ $line_re ]] || return 0
+  body=${BASH_REMATCH[1]}
+  [[ $body =~ $body_re ]] || return 0
+  body=${body//\"/ }
+  for name in $body; do hosted[$name]=1; done
+  hosted_ok=1
+}
+
+# Whether the Connector in connector_name is core's to evaluate.
+connector_is_core() {
+  load_hosted
+  [ "$hosted_ok" -eq 0 ] || [ -n "${hosted[$connector_name]:-}" ]
 }
 
 # Sets paths to the paths a name-status line touches; fails on an unknown
@@ -193,6 +223,10 @@ while IFS=$'\t' read -r status path new_path; do
   fi
   for p in "${paths[@]}"; do
     if connector_of "$p"; then
+      if connector_is_core; then
+        echo code
+        exit 0
+      fi
       connector_seen=1
       continue
     fi

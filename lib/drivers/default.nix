@@ -390,7 +390,8 @@ let
   # Core Drivers whose host half is a Connector (ADR 0073, issue #6799): they
   # keep their in-box half here but have no native Go Strategy, so nothing can
   # be primary or shadow for them and every Consumer's host and Box load the
-  # Connector.
+  # Connector. Keep this a one-line literal list: ci-changes.sh parses it, and
+  # a reflow fails closed to the full CI matrix.
   connectorHosted = [ "claude" ];
   nativeDriverNames = lib.filter (n: !(lib.elem n connectorHosted)) (builtins.attrNames entries);
 

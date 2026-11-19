@@ -454,8 +454,14 @@ true
 # A path only counts when connectors/<name>/flake.nix exists at the new
 # revision, so the synthetic diffs below run against a repo whose `head` holds
 # `foo` and `bar`.
+# Classify mode also reads the connectorHosted list from lib/drivers/default.nix
+# at head and fails closed without it, so these repos carry one (none hosted).
+DRIVERS_NIX='{
+  connectorHosted = [ ];
+}'
+
 connector_repo() {
-  repo_with_base connectors/foo/flake.nix '{ }'
+  repo_with_base connectors/foo/flake.nix '{ }' lib/drivers/default.nix "$DRIVERS_NIX"
   mkdir -p connectors/bar
   printf '{ }' >connectors/bar/flake.nix
   commit head
@@ -464,7 +470,7 @@ connector_repo() {
 # A Connector edit needs foo's flake.nix at both revisions, so it is committed
 # in base.
 connector_edit() {
-  repo_with_base connectors/foo/flake.nix '{ }' "$1" "$2"
+  repo_with_base connectors/foo/flake.nix '{ }' lib/drivers/default.nix "$DRIVERS_NIX" "$1" "$2"
   printf '%s' "$3" >"$1"
   commit head
   classify_revs
@@ -661,6 +667,108 @@ M	connectors/foo/a.go
   run bash "$CI_CHANGES_SH" --connectors <<<"$diff"
   [ "$status" -eq 0 ]
   [ "$output" = '[]' ]
+}
+
+# A Connector of a connectorHosted Driver is evaluated by every Consumer's
+# harness, so classify says code for it; --connectors still selects its leg.
+hosted_repo() {
+  repo_with_base README x
+  mkdir -p connectors/claude connectors/foo lib/drivers
+  printf '{ }' | tee connectors/claude/flake.nix >connectors/foo/flake.nix
+  [ $# -eq 0 ] || printf '%s' "$1" >lib/drivers/default.nix
+  commit head
+}
+
+@test "connector hosted: a hosted Driver's Connector path classifies as code and is still named" {
+  hosted_repo '{
+  connectorHosted = [ "claude" ];
+}'
+  diff='M	connectors/claude/package.nix
+'
+  classify_at <<<"$diff"
+  [ "$output" = code ]
+  connector_names <<<"$diff"
+  [ "$output" = '["claude"]' ]
+}
+
+@test "connector hosted: a non-hosted Connector still classifies as connector" {
+  hosted_repo '{
+  connectorHosted = [ "claude" ];
+}'
+  classify_at <<<'M	connectors/foo/a.go
+'
+  [ "$output" = connector ]
+}
+
+@test "connector hosted: every name in a multi-name list is core" {
+  hosted_repo '{
+  connectorHosted = [ "claude" "foo" ];
+}'
+  classify_at <<<'M	connectors/foo/a.go
+'
+  [ "$output" = code ]
+}
+
+@test "connector hosted: an empty list leaves every Connector a connector" {
+  hosted_repo '{
+  connectorHosted = [ ];
+}'
+  classify_at <<<'M	connectors/claude/a.go
+'
+  [ "$output" = connector ]
+}
+
+@test "fail closed: a missing drivers file makes every Connector core" {
+  hosted_repo
+  classify_at <<<'M	connectors/foo/a.go
+'
+  [ "$output" = code ]
+}
+
+@test "fail closed: a missing connectorHosted line makes every Connector core" {
+  hosted_repo '{ other = [ "claude" ]; }'
+  classify_at <<<'M	connectors/foo/a.go
+'
+  [ "$output" = code ]
+}
+
+@test "fail closed: a multi-line connectorHosted makes every Connector core" {
+  hosted_repo '{
+  connectorHosted = [
+    "claude"
+  ];
+}'
+  classify_at <<<'M	connectors/foo/a.go
+'
+  [ "$output" = code ]
+}
+
+@test "fail closed: a non-literal connectorHosted makes every Connector core" {
+  hosted_repo '{
+  connectorHosted = [ "claude" ] ++ extra;
+}'
+  classify_at <<<'M	connectors/foo/a.go
+'
+  [ "$output" = code ]
+}
+
+@test "fail closed: a repeated connectorHosted line makes every Connector core" {
+  hosted_repo '{
+  connectorHosted = [ "claude" ];
+  connectorHosted = [ "claude" ];
+}'
+  classify_at <<<'M	connectors/foo/a.go
+'
+  [ "$output" = code ]
+}
+
+@test "fail closed: a connectorHosted line with a trailing comment makes every Connector core" {
+  hosted_repo '{
+  connectorHosted = [ "claude" ]; # x
+}'
+  classify_at <<<'M	connectors/foo/a.go
+'
+  [ "$output" = code ]
 }
 
 # A change to the Connector contract (ci-connector-contract) selects every
