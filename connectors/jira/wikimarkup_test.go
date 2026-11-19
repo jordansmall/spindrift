@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestToWikiMarkup(t *testing.T) {
 	for _, tc := range []struct{ name, in, want string }{
@@ -96,5 +101,38 @@ func TestToWikiMarkup_PassesThroughByteIdentical(t *testing.T) {
 		if got := toWikiMarkup(in); got != in {
 			t.Errorf("toWikiMarkup(%q) = %q, want unchanged", in, got)
 		}
+	}
+}
+
+// Each testdata/wikimarkup/<name>.md is converted and diffed against
+// <name>.wiki. Regenerate with UPDATE_GOLDENS=1 (nix run .#regen-goldens).
+func TestToWikiMarkup_Goldens(t *testing.T) {
+	inputs, err := filepath.Glob(filepath.Join("testdata", "wikimarkup", "*.md"))
+	if err != nil || len(inputs) == 0 {
+		t.Fatalf("no wikimarkup inputs found: %v", err)
+	}
+	for _, in := range inputs {
+		name := strings.TrimSuffix(filepath.Base(in), ".md")
+		t.Run(name, func(t *testing.T) {
+			md, err := os.ReadFile(in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := strings.TrimSuffix(in, ".md") + ".wiki"
+			got := toWikiMarkup(string(md))
+			if os.Getenv("UPDATE_GOLDENS") != "" {
+				if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			want, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != string(want) {
+				t.Errorf("%s differs\n got: %q\nwant: %q", path, got, want)
+			}
+		})
 	}
 }

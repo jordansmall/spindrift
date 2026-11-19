@@ -5,17 +5,13 @@ import (
 	"strings"
 )
 
-// This file is a copy of cmd/launcher/internal/forge/jira/wikimarkup.go, which
-// a connector module cannot import. It must stay identical in logic to the
-// native converter until the #6753 cut-over retires that copy; the goldens
-// under that package's testdata/wikimarkup are the oracle.
-
 // toWikiMarkup converts the Markdown subset spindrift emits into Jira wiki
 // markup, which Server/DC renders for API-posted text: ATX headings, nested
 // lists, bold/italic, inline and fenced code, links, blockquotes, rules and
 // pipe tables. It is a pure, line-oriented string-to-string function; a line
 // holding a "<!-- spindrift-" marker and any syntax it does not model pass
-// through byte-identical, so a body with no markup is a no-op.
+// through byte-identical, so a body with no markup is a no-op. The goldens
+// under testdata/wikimarkup pin it (`nix run .#regen-goldens` rewrites them).
 func toWikiMarkup(md string) string {
 	return strings.Join(convertBlocks(strings.Split(md, "\n")), "\n")
 }

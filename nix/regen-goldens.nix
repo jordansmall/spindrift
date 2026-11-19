@@ -11,7 +11,7 @@
 # cmd/launcher/internal/ecosystem/<ecosystem>/corpus_test.go,
 # cmd/launcher/internal/ecosystemtest/ecosystemtest_test.go,
 # cmd/launcher/internal/digestkit/digestkit_test.go,
-# cmd/launcher/internal/forge/jira/wikimarkup_test.go,
+# connectors/jira/wikimarkup_test.go,
 # cmd/launcher/internal/<chore>/digest_corpus_test.go) with
 # UPDATE_GOLDENS=1, which flips their compare helpers from fail to
 # overwrite. Separate from nix/regen.nix's regen verb because these
@@ -56,7 +56,7 @@ pkgs.writeShellApplication {
     # (internal/driver/<driver>/testdata/corpus), each Digest corpus
     # (internal/*/testdata/digest, plus the digestkit's own testdata/corpus),
     # every Ecosystem corpus (internal/ecosystem{/*,test}/testdata/corpus),
-    # and the Jira wiki-markup goldens (internal/forge/jira/testdata/wikimarkup),
+    # and the Jira Connector's wiki-markup goldens (connectors/jira/testdata/wikimarkup),
     # so goldens written through them land in the repo.
     mkdir -p "$scratch/src/cmd"
     cp -r "$root/cmd/launcher" "$scratch/src/cmd/launcher"
@@ -127,9 +127,14 @@ pkgs.writeShellApplication {
       rm -rf "$scratch/src/$eco_corpus"
       ln -s "$root/$eco_corpus" "$scratch/src/$eco_corpus"
     done
-    # Fixed path, not globbed: the one Jira backend owns this family, and
-    # TestToWikiMarkup_Goldens reads testdata/wikimarkup relative to its package.
-    jira_goldens=cmd/launcher/internal/forge/jira/testdata/wikimarkup
+    # The jira Connector's goldens: its module sits beside a symlinked sdk (go.mod
+    # replaces spindrift.dev/sdk with ../../sdk) and reads testdata/wikimarkup
+    # through a symlink back into the checkout.
+    jira_goldens=connectors/jira/testdata/wikimarkup
+    ln -s "$root/sdk" "$scratch/src/sdk"
+    mkdir -p "$scratch/src/connectors"
+    cp -r "$root/connectors/jira" "$scratch/src/connectors/jira"
+    chmod -R +w "$scratch/src/connectors/jira"
     rm -rf "$scratch/src/$jira_goldens"
     ln -s "$root/$jira_goldens" "$scratch/src/$jira_goldens"
 
@@ -154,7 +159,7 @@ pkgs.writeShellApplication {
     go test -count=1 -run '^TestDigestCorpus$' "''${digest_pkgs[@]}"
     go test -count=1 -run '^TestRunReplaysCorpusIntoGoldens$' ./internal/digestkit
     go test -count=1 -run '^TestCorpus$' "''${eco_pkgs[@]}"
-    go test -count=1 -run '^TestToWikiMarkup_Goldens$' ./internal/forge/jira
+    (cd "$scratch/src/connectors/jira" && GOFLAGS=-mod=mod GOPROXY=off go test -count=1 -run '^TestToWikiMarkup_Goldens$' .)
     go test -count=1 -run '^TestDogfoodCorpusRegenerates$' ./internal/driver/claude
     go test -count=1 -run '^TestContractFixture$' ./internal/daemon
     # Rewrites the generated spans in docs/reference.md (the docs link above).

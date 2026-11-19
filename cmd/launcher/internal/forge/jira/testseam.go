@@ -15,6 +15,7 @@ func ConnectorClientForTest(c *http.Client) (restore func()) {
 	return func() { connectorClient = old; resetPrimaryAudit() }
 }
 
+// resetPrimaryAudit swaps primaryAudit (named for the primaryrecord file family).
 func resetPrimaryAudit() {
 	primaryAudit.release()
 	primaryAudit = &auditFile{}

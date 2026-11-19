@@ -26,22 +26,22 @@ var connectorClient *http.Client
 // loadRowConnector loads a backend row's Connector; a test seam.
 var loadRowConnector = backendrows.Load
 
-// errPrimaryCapabilities is a Connector whose handshake omits a method
-// core drives with no native adapter behind it.
-var errPrimaryCapabilities = errors.New("jira primary Connector lacks required capabilities")
+// errConnectorCapabilities is a Connector whose handshake omits a method
+// core drives, with nothing behind it to fall back to.
+var errConnectorCapabilities = errors.New("jira Connector lacks required capabilities")
 
-// primaryCapabilities are the capabilities the jira Connector must advertise:
-// without native writes, a missing one would reach a nil interface, and a
+// connectorCapabilities are the capabilities the jira Connector must advertise:
+// a missing one would reach a nil interface, and a
 // missing CapLabeled would silently degrade the finding dedup to open issues.
-var primaryCapabilities = []string{
+var connectorCapabilities = []string{
 	connectortracker.CapTransition, connectortracker.CapEditLabels, connectortracker.CapLabels,
 	connectortracker.CapComment, connectortracker.CapProbe, connectortracker.CapFileIssue,
 	connectortracker.CapLabeled,
 }
 
-func missingPrimaryCapabilities(have []string) []string {
+func missingConnectorCapabilities(have []string) []string {
 	var missing []string
-	for _, c := range primaryCapabilities {
+	for _, c := range connectorCapabilities {
 		if !slices.Contains(have, c) {
 			missing = append(missing, c)
 		}
@@ -49,25 +49,24 @@ func missingPrimaryCapabilities(have []string) []string {
 	return missing
 }
 
-func checkPrimaryCapabilities(have []string) error {
-	if missing := missingPrimaryCapabilities(have); len(missing) > 0 {
-		return fmt.Errorf("%w: %s", errPrimaryCapabilities, strings.Join(missing, ", "))
+func checkConnectorCapabilities(have []string) error {
+	if missing := missingConnectorCapabilities(have); len(missing) > 0 {
+		return fmt.Errorf("%w: %s", errConnectorCapabilities, strings.Join(missing, ", "))
 	}
 	return nil
 }
 
-// primaryTracker keeps jira's native-only body grammar, which the Connector
+// connectorTracker keeps jira's body grammar, which the Connector
 // layers cannot declare; Unwrap leaves their capabilities reachable.
-type primaryTracker struct{ forge.IssueTracker }
+type connectorTracker struct{ forge.IssueTracker }
 
-func (p primaryTracker) Unwrap() forge.IssueTracker { return p.IssueTracker }
+func (p connectorTracker) Unwrap() forge.IssueTracker { return p.IssueTracker }
 
-// BodyGrammar mirrors the native adapter: links are authoritative.
-func (primaryTracker) BodyGrammar() forge.BodyGrammar { return forge.BodyGrammarNativeDepsOnly }
+// BodyGrammar: Jira's native links are authoritative.
+func (connectorTracker) BodyGrammar() forge.BodyGrammar { return forge.BodyGrammarNativeDepsOnly }
 
 // newConnectorTracker builds jira's tracker from the jira row's Connector.
 // Lifecycle policy stays core's; the Connector only performs the operations.
-// There are no native writes (nil), so nothing falls back to the adapter.
 func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (forge.IssueTracker, error) {
 	wl, err := WorkLifecycle(s.Tracker, k.JiraStatusMapping, k.JiraLifecycle)
 	if err != nil {
@@ -83,7 +82,7 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 		if err != nil {
 			return nil, err
 		}
-		if err := checkPrimaryCapabilities(conn.Capabilities); err != nil {
+		if err := checkConnectorCapabilities(conn.Capabilities); err != nil {
 			_ = conn.Close(context.Background())
 			return nil, err
 		}
@@ -104,14 +103,14 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 		recordPrimaryFailure("load the Connector", err)
 		return nil, err
 	}
-	return primaryTracker{it}, nil
+	return connectorTracker{it}, nil
 }
 
-// primaryAudit is the process's Connector audit file, opened on first use and
-// held until exit: a tracker is short-lived (completion, readcontext) or one of
-// several daemon kinds sharing the process, so none owns the handle. A record
-// that cannot be written must not fail the tracker, so an unopenable file
-// discards.
+// primaryAudit (named for the primaryrecord file family) is the process's
+// Connector audit file, opened on first use and held until exit: a tracker is
+// short-lived (completion, readcontext) or one of several daemon kinds sharing
+// the process, so none owns the handle. A record that cannot be written must
+// not fail the tracker, so an unopenable file discards.
 var primaryAudit = &auditFile{}
 
 type auditFile struct {
@@ -136,7 +135,7 @@ func (a *auditFile) release() {
 	}
 }
 
-// recordPrimaryFailure records a Connector failure in jira's primary .log.
+// recordPrimaryFailure records a Connector failure in the primaryrecord .log.
 func recordPrimaryFailure(op string, err error) {
 	_ = primaryrecord.Note(backend.Jira.Name, op, err)
 }

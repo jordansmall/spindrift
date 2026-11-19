@@ -5,7 +5,7 @@
 
 ## Context for a worker
 
-- The adapter posts bodies verbatim in `cmd/launcher/internal/forge/jira/jira.go:412`.
+- The Connector posts bodies verbatim in `connectors/jira/writes.go`.
   - Nested detail with *emphasis* and a snake_case_name left alone.
   - See [the ADR](https://example.com/docs/adr/0013_jira.md) for the contract.
 - Related: https://example.com/issues/6348?x=a_b_c&y=*z*

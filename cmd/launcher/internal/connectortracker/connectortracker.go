@@ -957,7 +957,7 @@ func (t *reads) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
 	}
 	if label == "" && status == "" {
 		// Both empty means every open issue to the Connector; a state with no
-		// selector is empty, as in native jira's stateJQL.
+		// selector matches nothing.
 		return nil, nil
 	}
 	return t.list(label, status)
@@ -1020,7 +1020,7 @@ type idGrammar struct {
 	// less is a stable id order standing in for creation order: decimal ids
 	// numerically; project keys by project, then number. A key's number
 	// reflects when it was keyed, so a moved issue sorts away from where
-	// native jira's "order by created" puts it.
+	// its creation time would put it.
 	less func(a, b string) bool
 }
 

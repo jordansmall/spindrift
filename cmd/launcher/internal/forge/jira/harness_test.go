@@ -3,7 +3,6 @@ package jira_test
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -13,8 +12,6 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/forge/forgetest"
-	"spindrift.dev/launcher/internal/forge/jira"
 )
 
 type jiraIssueRecord struct {
@@ -97,47 +94,21 @@ type jiraHarness struct {
 
 	cloud bool // serves Cloud's search/jql + approximate-count; rejects v2 /search (410)
 	srv   *httptest.Server
-	tr    forge.IssueTracker
 }
 
 var jqlLabelClause = regexp.MustCompile(`labels = "([^"]+)"`)
 var jqlStatusClause = regexp.MustCompile(`status = "([^"]+)"`)
 var jqlDoneClause = regexp.MustCompile(`statusCategory (!?=) Done`)
 
-// newJiraHarness builds a Server/DC harness; newJiraCloudHarness a Cloud one,
-// which the adapter selects by configuring an Email.
-func newJiraHarness(t *testing.T) *jiraHarness { return newJiraHarnessMode(t, false) }
-
-func newJiraCloudHarness(t *testing.T) *jiraHarness { return newJiraHarnessMode(t, true) }
-
-func newJiraHarnessMode(t *testing.T, cloud bool) *jiraHarness {
-	h := newJiraBackend(t, cloud, httptest.NewServer)
-	email := ""
-	if cloud {
-		email = "bot@example.com"
-	}
-	h.tr = jira.NewJiraClient(jira.JiraConfig{
-		BaseURL:       h.srv.URL,
-		ProjectKey:    "PROJ",
-		Email:         email,
-		Token:         "tok",
-		Labels:        testLabels,
-		VerdictLabels: forge.ResearchVerdictLabels(),
-	})
-	return h
-}
-
-// newJiraBackend serves the scripted Jira API from start's server, with no
-// native tracker: the Connector harness needs TLS, which the Connector host
-// requires of every route.
+// newJiraBackend serves the scripted Jira API from start's server; the
+// Connector harness needs TLS, which the Connector host requires of every
+// route.
 func newJiraBackend(t *testing.T, cloud bool, start func(http.Handler) *httptest.Server) *jiraHarness {
 	h := &jiraHarness{cloud: cloud, issues: map[string]*jiraIssueRecord{}}
 	h.srv = start(http.HandlerFunc(h.handle))
 	t.Cleanup(h.srv.Close)
 	return h
 }
-
-func (h *jiraHarness) Tracker() forge.IssueTracker { return h.tr }
 
 func (h *jiraHarness) SeedIssue(iss forge.Issue) {
 	h.mu.Lock()
@@ -604,57 +575,6 @@ func removeString(ss []string, s string) []string {
 	return out
 }
 
-func TestJiraClient_TrackerContract(t *testing.T) {
-	forgetest.RunTrackerContract(t, newJiraHarness(t))
-}
-
-func TestJiraClient_TrackerContract_Cloud(t *testing.T) {
-	forgetest.RunTrackerContract(t, newJiraCloudHarness(t))
-}
-
-// seedAndListPaged seeds n Dispatchable issues PROJ-1..PROJ-n and asserts
-// ListIssues returns every one in creation order: h.order's append sequence
-// stands in for Jira's created-time ordering.
-func seedAndListPaged(t *testing.T, h *jiraHarness, n int) {
-	t.Helper()
-	var want []string
-	for i := 1; i <= n; i++ {
-		num := fmt.Sprintf("PROJ-%d", i)
-		want = append(want, num)
-		h.SeedIssue(forge.Issue{
-			Number: num,
-			Title:  "paged",
-			Labels: []string{testLabels.Dispatchable},
-		})
-	}
-
-	issues, err := h.Tracker().ListIssues(forge.Dispatchable)
-	if err != nil {
-		t.Fatalf("ListIssues(Dispatchable): %v", err)
-	}
-	if len(issues) != n {
-		t.Fatalf("ListIssues(Dispatchable) returned %d issues, want %d", len(issues), n)
-	}
-	for i, iss := range issues {
-		if iss.Number != want[i] {
-			t.Fatalf("ListIssues(Dispatchable)[%d].Number = %q, want %q (creation order not preserved)", i, iss.Number, want[i])
-		}
-	}
-}
-
-// Seeding more than forge.ResultPageLimit issues forces doSearch (issue #2265)
-// to walk at least two real pages.
-func TestJiraClient_ListIssues_PaginatesAcrossMultipleRealPages(t *testing.T) {
-	for name, newHarness := range map[string]func(*testing.T) *jiraHarness{
-		"DC":    newJiraHarness,
-		"Cloud": newJiraCloudHarness,
-	} {
-		t.Run(name, func(t *testing.T) {
-			seedAndListPaged(t, newHarness(t), forge.ResultPageLimit+30)
-		})
-	}
-}
-
 // payloadShape picks how much of each issue the harness search returns.
 type payloadShape int
 
@@ -722,66 +642,103 @@ func pageWindow(out []map[string]any, start, size int) []map[string]any {
 	return out[start:end]
 }
 
-// A server that caps pages below the requested maxResults must not make
-// doSearch skip rows: the walk advances by rows received, not a fixed stride.
-func TestJiraClient_ListIssues_PaginatesAcrossServerCappedPages(t *testing.T) {
-	h := newJiraHarness(t)
-	h.pageCap = 30
-	seedAndListPaged(t, h, 75)
+// testLabels mirrors the lifecycle-label set in lib/env-schema.nix (issue
+// #460).
+var testLabels = forge.DispatchLabels{
+	Dispatchable: "ready-for-agent",
+	InProgress:   "agent-in-progress",
+	Complete:     "agent-complete",
+	Failed:       "agent-failed",
 }
 
-// The server's page cap must never touch the maxResults=0 zero-row page
-// CountReady reads the total from.
-func TestJiraClient_CountReady_FullTotalUnderPageCap(t *testing.T) {
-	h := newJiraHarness(t)
-	h.pageCap = 30
-	const seeded = 75
-	for i := 1; i <= seeded; i++ {
-		h.SeedIssue(forge.Issue{
-			Number: fmt.Sprintf("PROJ-%d", i),
-			Title:  "counted",
-			Labels: []string{testLabels.Dispatchable},
-		})
-	}
-
-	dc, ok := h.Tracker().(forge.DemandCounter)
-	if !ok {
-		t.Fatal("tracker does not implement forge.DemandCounter")
-	}
-	got, err := dc.CountReady(false)
-	if err != nil {
-		t.Fatalf("CountReady: %v", err)
-	}
-	if got != seeded {
-		t.Errorf("CountReady = %d, want %d (the full total, not the page cap)", got, seeded)
-	}
+// metaField is one create-screen field as Jira's createmeta reports it.
+type metaField struct {
+	FieldID         string `json:"fieldId"`
+	Name            string `json:"name"`
+	Required        bool   `json:"required"`
+	HasDefaultValue bool   `json:"hasDefaultValue"`
 }
 
-func TestJiraClient_ResearchMarker_RoundTripsThroughProperty(t *testing.T) {
-	h := newJiraHarness(t)
-	h.SeedIssue(forge.Issue{Number: "PROJ-9", Title: "t"})
-	body := forge.ResearchMarker + "\n## Verdict\n\nstatus=recommend"
-	if err := h.tr.Comment("PROJ-9", body); err != nil {
-		t.Fatalf("Comment: %v", err)
-	}
+type metaType struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
 
-	stored := h.issues["PROJ-9"].comments
-	if len(stored) != 1 || strings.Contains(stored[0].Body, forge.ResearchMarker) {
-		t.Fatalf("stored visible text must not carry the marker: %+v", stored)
-	}
-	got, err := h.tr.(forge.CommentLister).Comments("PROJ-9")
-	if err != nil {
-		t.Fatalf("Comments: %v", err)
-	}
-	if len(got) != 1 || !strings.HasPrefix(got[0].Body, forge.ResearchMarker+"\n") {
-		t.Fatalf("Comments = %+v, want marker restored on top", got)
-	}
+var (
+	createMetaTypesRe  = regexp.MustCompile(`^/rest/api/2/issue/createmeta/([^/]+)/issuetypes$`)
+	createMetaFieldsRe = regexp.MustCompile(`^/rest/api/2/issue/createmeta/([^/]+)/issuetypes/([^/]+)$`)
+)
 
-	text, err := forge.IssueText(h.tr, "PROJ-9", io.Discard)
-	if err != nil {
-		t.Fatalf("IssueText: %v", err)
+// createMeta serves the per-project create-metadata endpoints in the two wire
+// shapes Jira ships: Cloud nests rows under "issueTypes"/"fields" and counts
+// with "total"; Server/DC nests them under "values" and ends with "isLast".
+func (h *jiraHarness) createMeta(w http.ResponseWriter, r *http.Request) {
+	var rows []any
+	if m := createMetaTypesRe.FindStringSubmatch(r.URL.Path); m != nil && m[1] == "PROJ" {
+		for i, name := range h.issueTypes() {
+			rows = append(rows, metaType{ID: strconv.Itoa(10001 + i), Name: name})
+		}
+		h.writeMetaPage(w, r, "issueTypes", rows)
+		return
 	}
-	if !strings.Contains(text, forge.ResearchMarker) {
-		t.Errorf("issue text lacks the research marker:\n%s", text)
+	if m := createMetaFieldsRe.FindStringSubmatch(r.URL.Path); m != nil && m[1] == "PROJ" {
+		for _, f := range h.metaFields {
+			rows = append(rows, f)
+		}
+		h.writeMetaPage(w, r, "fields", rows)
+		return
 	}
+	w.WriteHeader(http.StatusNotFound)
+}
+
+func (h *jiraHarness) writeMetaPage(w http.ResponseWriter, r *http.Request, cloudKey string, rows []any) {
+	start, _ := strconv.Atoi(r.URL.Query().Get("startAt"))
+	size, _ := strconv.Atoi(r.URL.Query().Get("maxResults"))
+	if size <= 0 || (h.metaPageSize > 0 && size > h.metaPageSize) {
+		size = h.metaPageSize
+	}
+	if size <= 0 {
+		size = len(rows)
+	}
+	end := min(start+size, len(rows))
+	page := []any{}
+	if start < len(rows) {
+		page = rows[start:end]
+	}
+	body := map[string]any{"startAt": start, "maxResults": size, "total": len(rows)}
+	if h.cloud {
+		body[cloudKey] = page
+	} else {
+		body["values"] = page
+		body["isLast"] = end >= len(rows)
+	}
+	json.NewEncoder(w).Encode(body)
+}
+
+var projectStatusesPathRe = regexp.MustCompile(`^/rest/api/2/project/([^/]+)/statuses$`)
+
+// projectStatuses serves the per-issue-type status list Jira's project
+// statuses endpoint returns: the same workflow statuses repeat under each type.
+func (h *jiraHarness) projectStatuses(w http.ResponseWriter, r *http.Request) {
+	h.statusCalls++ // handle holds h.mu
+	if h.statusesFail {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+	if projectStatusesPathRe.FindStringSubmatch(r.URL.Path)[1] != "PROJ" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	type status struct {
+		Name string `json:"name"`
+	}
+	var statuses []status
+	for _, n := range h.workflowStatuses {
+		statuses = append(statuses, status{Name: n})
+	}
+	out := []map[string]any{}
+	for _, ty := range h.issueTypes() {
+		out = append(out, map[string]any{"name": ty, "statuses": statuses})
+	}
+	json.NewEncoder(w).Encode(out)
 }

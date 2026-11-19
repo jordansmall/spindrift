@@ -127,8 +127,8 @@ type Reader struct {
 	// Setting it advertises "tracker.comments", which attests that each
 	// comment's Minimized and MinimizedReason are reported faithfully; core
 	// drops minimized comments on that flag. A Connector whose API cannot
-	// report minimized state leaves it nil, and core reads comments from its
-	// native adapter instead.
+	// report minimized state leaves it nil, and core reads comments from the
+	// native adapter of the same name where one exists (jira has none).
 	Comments func(t Target, number string) ([]Comment, error)
 
 	// NativeDeps is optional: it returns the ids of the issues number blocks
