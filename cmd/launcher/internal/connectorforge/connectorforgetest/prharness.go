@@ -103,3 +103,8 @@ func (h *PRHarness) SeedNeedsUpdate(url string, needsUpdate bool) {
 }
 
 func (h *PRHarness) AutoMergeEnqueued(url string) bool { return h.Backend.PR(h.number(url)).Enqueued }
+
+// SeedConflicting makes url's PR conflict with its base: the PR read reports
+// CONFLICTING and a merge is refused with a 405 naming the conflicts, until the
+// conflict response demotes it.
+func (h *PRHarness) SeedConflicting(url string) { h.Backend.SetConflicting(h.number(url), true) }

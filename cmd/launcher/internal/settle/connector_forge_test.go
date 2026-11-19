@@ -275,3 +275,38 @@ func TestSettle_NoDraftPRCapabilityCannotHostMediateThroughConnectorForge(t *tes
 		t.Errorf("BranchExists = (%v, %v), want the branch unpushed", exists, err)
 	}
 }
+
+// A Connector that refuses the merge of a CONFLICTING PR with the forge's
+// "merge conflicts" 405 (classed NotMergeable, issue #7270) reaches the
+// conflict response, not the generic merge-blocked hand-off.
+func TestSettle_ConflictingMergeRefusalRespondsToConflictThroughConnectorForge(t *testing.T) {
+	h := connectorforgetest.NewPR(t)
+	url := h.SeedLandablePR("1")
+	h.SeedConflicting(url)
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	rec := &ProgressRecorder{}
+	cfg := baseConfig()
+	cfg.MergeMode = "immediate"
+	cfg.MaxRebaseAttempts = 1
+	cfg.Progress = rec
+	cfg.Capabilities = h.Capabilities()
+	s := New(cfg, fc, h.CodeForge())
+
+	gen := s.term.Begin("1")
+	settled := s.Settle(dispatch.NewFake(), "1", gen, settleReadyResult("1", url))
+
+	if got := statusesOf(rec, StatusRebaseRetry, StatusMergeBlocked, StatusVerifiedMerged); !slices.Equal(got, []Status{StatusRebaseRetry, StatusVerifiedMerged}) {
+		t.Errorf("conflict-response statuses = %v, want the rebase then the verified merge, never merge-blocked; steps = %+v", got, rec.Steps())
+	}
+	if want := (Settlement{Verdict: ForReason(dispatchrecord.ReasonMerged), PRURL: url}); settled != want {
+		t.Errorf("Settle = %+v, want %+v", settled, want)
+	}
+	if !h.Merged(url) {
+		t.Error("PR not merged after the conflict response")
+	}
+	if !h.Rebased("1") {
+		t.Error("branch not rebased by the conflict response")
+	}
+}
