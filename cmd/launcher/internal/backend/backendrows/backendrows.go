@@ -137,7 +137,7 @@ func Use(raw json.RawMessage, lookup func(string) string) error {
 		if err != nil {
 			return fmt.Errorf("backend rows: %w", err)
 		}
-		if !unconfigured {
+		if !unconfigured && gateAllows(resolved.Name, lookup) {
 			next[resolved.Name] = resolved
 		}
 	}
@@ -145,6 +145,25 @@ func Use(raw json.RawMessage, lookup func(string) string) error {
 	defer mu.Unlock()
 	applied = next
 	return nil
+}
+
+var gates = map[string]func(lookup func(string) string) bool{}
+
+// RegisterGate has Use drop, after validating it, the row named name whenever
+// applies answers false for the run's settings. It is host selection by
+// configuration: a backend whose Routes cannot serve the settings leaves its
+// native adapter in charge, and no later reader sees a row. Call it from init.
+func RegisterGate(name string, applies func(lookup func(string) string) bool) {
+	mu.Lock()
+	defer mu.Unlock()
+	gates[name] = applies
+}
+
+func gateAllows(name string, lookup func(string) string) bool {
+	mu.RLock()
+	applies, ok := gates[name]
+	mu.RUnlock()
+	return !ok || applies(lookup)
 }
 
 // unsetHost is the placeholder base host an unconfigured non-Shadow row
@@ -351,16 +370,17 @@ func Load(ctx context.Context, row Row, o Options) (*connectorhost.Connector, er
 	})
 }
 
-// Snapshot captures the applied rows and returns the function that restores
-// them, for a test that applies rows to the process-global set. It is not in
-// export_test.go because cmd/launcher's own tests need it.
+// Snapshot captures the applied rows and registered gates and returns the
+// function that restores them, for a test that applies rows to the
+// process-global set. It is not in export_test.go because cmd/launcher's own
+// tests need it.
 func Snapshot() (restore func()) {
 	mu.Lock()
 	defer mu.Unlock()
-	saved := maps.Clone(applied)
+	saved, savedGates := maps.Clone(applied), maps.Clone(gates)
 	return func() {
 		mu.Lock()
 		defer mu.Unlock()
-		applied = saved
+		applied, gates = saved, savedGates
 	}
 }

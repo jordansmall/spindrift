@@ -578,3 +578,33 @@ func TestResolveConnectorCredentials_GithubForgeRowResolvesWithoutPrimary(t *tes
 		t.Error("secret command did not run, want the github credential resolved")
 	}
 }
+
+// Under a GH_HOST other than github.com the github gate drops the row (its
+// Routes pin api.github.com), so gh serves it and the Daemon resolves no
+// Connector credential for it.
+func TestResolveConnectorCredentials_GithubRowGatedOffUnderGHEHostRunsNoCmd(t *testing.T) {
+	clearKnobEnvT(t)
+	t.Cleanup(backendrows.Snapshot())
+	raw := `[{"name":"github","module":"/nonexistent.wasm","credentialEnv":"` + connectorTokenEnv + `",
+"routes":[{"method":"GET","host":"api.github.com","path":"/repos/{repo}/issues"}]}]`
+	ghe := func(k string) string {
+		if k == "GH_HOST" {
+			return "ghe.example.com"
+		}
+		return ""
+	}
+	if err := backendrows.Use([]byte(raw), ghe); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(connectorTokenEnv, "")
+	t.Setenv(connectorTokenEnv+"_CMD", "fetch-token")
+	stubSecretCmd(t, failIfRun(t))
+
+	refresh, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": "github"}), workKinds, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refresh != nil {
+		t.Error("a credential refresh was set up for a row the GH_HOST gate dropped")
+	}
+}

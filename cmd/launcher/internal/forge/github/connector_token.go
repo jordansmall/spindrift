@@ -20,10 +20,11 @@ import (
 var connectorClient *http.Client
 
 // introspectToken is the Strategy's IntrospectToken. With a github backend row
-// the row's Connector answers, so the host needs no gh; backend rows are
-// opt-in, so without one (or under a shadow row) the native gh probe does and
-// the primary write gate keeps detecting a write-incapable token. A Connector
-// load is short-lived, with its audit record in the run's primary record.
+// the row's Connector answers, so the host needs no gh; without one (host.go's
+// gate drops it under another GH_HOST) or under a shadow row the native gh probe
+// does and the primary write gate keeps detecting a write-incapable token. A
+// Connector load is short-lived, with its audit record in the run's primary
+// record.
 func introspectToken(token, repoSlug string) (backendkit.TokenIntrospection, error) {
 	row, ok := routedRow()
 	if !ok {

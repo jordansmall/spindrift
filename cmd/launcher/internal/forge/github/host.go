@@ -1,6 +1,12 @@
 package github
 
-import "os"
+import (
+	"os"
+	"strings"
+
+	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backend/backendrows"
+)
 
 // DefaultHost is the host Host returns when GH_HOST is unset.
 const DefaultHost = "github.com"
@@ -16,4 +22,13 @@ func HostFrom(getenv func(string) string) string {
 		return host
 	}
 	return DefaultHost
+}
+
+func init() {
+	// The row's Routes pin api.github.com. Under any other GH_HOST no row
+	// applies, so the native gh (which honours GH_HOST) answers and the row's
+	// credential is neither fetched nor sent to a host it never targeted.
+	backendrows.RegisterGate(backend.GitHub.Name, func(lookup func(string) string) bool {
+		return strings.EqualFold(HostFrom(lookup), DefaultHost)
+	})
 }
