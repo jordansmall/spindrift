@@ -40,8 +40,8 @@ func TestStrategyLedgerIsGitRemote(t *testing.T) {
 
 func TestStrategyValidateTrackerRequiresSlug(t *testing.T) {
 	err := Strategy.ValidateTracker(backendkit.Shared{}, nil)
-	if err == nil || err.Error() != "set REPO_SLUG when ISSUE_TRACKER=github" {
-		t.Errorf("err = %v, want the REPO_SLUG message", err)
+	if err == nil || err.Error() != "pass --repo-slug owner/repo or set forge.repoSlug when ISSUE_TRACKER=github" {
+		t.Errorf("err = %v, want the repo-slug remedy", err)
 	}
 	if err := Strategy.ValidateTracker(backendkit.Shared{RepoSlug: "o/r"}, nil); err != nil {
 		t.Errorf("err = %v, want nil with a slug", err)

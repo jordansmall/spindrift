@@ -262,11 +262,11 @@ func Strategies() []Strategy {
 // can wrap it without pulling either into the Box binary.
 var ErrUnsupported = errors.New("check unsupported: the backend's connector does not offer the capability")
 
-// ErrRepoSlugRequired is the blank-REPO_SLUG failure RequireRepoSlug wraps.
-var ErrRepoSlugRequired = errors.New("set REPO_SLUG")
+// ErrRepoSlugRequired is the blank-repo-slug failure RequireRepoSlug wraps.
+var ErrRepoSlugRequired = errors.New("pass --repo-slug owner/repo or set forge.repoSlug")
 
 // RequireRepoSlug is the ValidateTracker check shared by the backends whose
-// issue tracker is keyed on REPO_SLUG.
+// issue tracker is keyed on the repo slug.
 func RequireRepoSlug(s Shared, trackerName string) error {
 	if s.RepoSlug == "" {
 		return fmt.Errorf("%w when ISSUE_TRACKER=%s", ErrRepoSlugRequired, trackerName)

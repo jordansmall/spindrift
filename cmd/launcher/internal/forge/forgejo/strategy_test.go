@@ -48,8 +48,8 @@ func TestStrategyLedgerURLUsesLookupBaseURL(t *testing.T) {
 func TestStrategyValidateTrackerRequiresSlug(t *testing.T) {
 	l := mapLookup(map[string]string{"FORGEJO_BASE_URL": "https://forge.example", "FORGEJO_TOKEN": "tok"})
 	err := forgejo.Strategy.ValidateTracker(backendkit.Shared{}, l)
-	if err == nil || err.Error() != "set REPO_SLUG when ISSUE_TRACKER=forgejo" {
-		t.Errorf("err = %v, want the REPO_SLUG message", err)
+	if err == nil || err.Error() != "pass --repo-slug owner/repo or set forge.repoSlug when ISSUE_TRACKER=forgejo" {
+		t.Errorf("err = %v, want the repo-slug remedy", err)
 	}
 	if err := forgejo.Strategy.ValidateTracker(backendkit.Shared{RepoSlug: "o/r"}, l); err != nil {
 		t.Errorf("err = %v, want nil with a slug", err)
