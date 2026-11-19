@@ -13,10 +13,9 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// The tracker is github-shaped (AsNoLandingRecorder) because a local
-// tracker's blocked path posts an extra note comment
-// (TestSettle_LocalForge_BlockedPostsNoteAsComment) that would break this
-// comment count.
+// A blocked outcome with no note posts only the usage comment; a note adds
+// the host-side note comment (TestSettle_LocalForge_BlockedPostsNoteAsComment)
+// that would break this comment count.
 func TestSettle_PostsUsageComment_Blocked(t *testing.T) {
 	const issNum = "42"
 	const prURL = "https://github.com/owner/repo/pull/99"
@@ -29,7 +28,7 @@ func TestSettle_PostsUsageComment_Blocked(t *testing.T) {
 	result := dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked"},
 		},
 	}
 
@@ -89,7 +88,7 @@ func TestSettle_UsageMissing_NoCrash(t *testing.T) {
 	result := dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "no result"},
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked"},
 		},
 	}
 
@@ -110,9 +109,10 @@ func TestSettle_PostsUsageComment_Ready(t *testing.T) {
 	const issNum = "55"
 	const prURL = "https://github.com/owner/repo/pull/55"
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.CreateDraftPRURL = prURL
 
 	d := dispatch.NewFake()
 	d.UsageReportBody = "## Run usage\n\nbreakdown included"
@@ -121,6 +121,8 @@ func TestSettle_PostsUsageComment_Ready(t *testing.T) {
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
 		},
+		PRIntent:      "feat: work\n\nbody",
+		PRIntentFound: true,
 	}
 
 	c := baseConfig()
@@ -275,7 +277,7 @@ func TestSettle_DoesNotRecordBoxLanding_OnNonLandedOutcome(t *testing.T) {
 	}
 }
 
-// A ready outcome on a read-write forge must not persist the Box's PR URL
+// A ready outcome on a forge with no outbox relay must not persist the Box's PR URL
 // either; only host-derived landings are recorded (issue #5005).
 func TestSettle_DoesNotRecordBoxLanding_OnReadyOutcome(t *testing.T) {
 	const issNum = "55"
@@ -346,7 +348,6 @@ func hostLandedPassFixtureOver(t *testing.T, fc *forge.Fake, tracker forge.Issue
 	fc.SetCheckStates(draftPRRetryURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(string) string { return t.TempDir() }
 	c.BaseBranch = "main"
 	_, c.Clock = recordingClock()

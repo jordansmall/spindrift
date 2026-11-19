@@ -59,7 +59,6 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges(t *testin
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
@@ -108,7 +107,6 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_ClosesAlr
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
@@ -149,7 +147,6 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_LocalTrac
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsGithubReadOnly())
@@ -187,7 +184,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentAndRelayFailureParksFailed(t *test
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
@@ -231,7 +227,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits(t *testing
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
@@ -289,7 +284,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_CallsCommi
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
@@ -331,7 +325,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_DefusesInj
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
@@ -377,7 +370,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_PostsIssue
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
@@ -418,7 +410,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsButCreateDraftPRFailsP
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
@@ -465,7 +456,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsButAdoptsExistingPR_No
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
@@ -517,7 +507,6 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_NoReconst
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
@@ -553,7 +542,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_LocalTrack
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsGithubReadOnly())
@@ -590,7 +578,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentAndReconstructionFailsBlocksNotFai
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
@@ -655,7 +642,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentAndZeroCommitSubjectsBlocksNotFail
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
@@ -732,7 +718,6 @@ func TestSettle_GithubReadOnly_CodeForgeLacksCommitSubjectsBlocksNotFails(t *tes
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), wrapper)
@@ -789,7 +774,6 @@ func TestSettle_GithubReadOnly_RelayFailureParksFailedBeforeCreatingPR(t *testin
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
@@ -799,40 +783,6 @@ func TestSettle_GithubReadOnly_RelayFailureParksFailedBeforeCreatingPR(t *testin
 		t.Errorf("CreateDraftPR must not be called when the relay fails, got %+v", fc.CreateDraftPRCalls)
 	}
 	assertOutboxParked(t, fc, issNum)
-}
-
-// The read-write path (Config.ReadOnly false) never consults BundleRelay or
-// DraftPRCreator even when the Code Forge implements them: the Box already
-// opened its own PR in-box, so o.Landing is a real URL to watch CI on.
-func TestSettle_GithubReadWrite_UnaffectedByHostMediation(t *testing.T) {
-	const issNum = "1919"
-	const prURL = "https://github.com/owner/repo/pull/1919"
-
-	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-
-	d := dispatch.NewFake()
-	result := dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
-		},
-	}
-
-	c := baseConfig() // Config.ReadOnly defaults false
-	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
-	s.Settle(d, issNum, 0, result)
-
-	if len(fc.RelayBundleCalls) != 0 {
-		t.Errorf("RelayBundle must not be called under read-write, got %+v", fc.RelayBundleCalls)
-	}
-	if len(fc.CreateDraftPRCalls) != 0 {
-		t.Errorf("CreateDraftPR must not be called under read-write, got %+v", fc.CreateDraftPRCalls)
-	}
-	if fc.Merged != prURL {
-		t.Errorf("expected Merge(%q) to have run against the box's own PR; fc.Merged=%q", prURL, fc.Merged)
-	}
 }
 
 // Issue #1949's fix for a confirmed live exploit: a prompt-injected read-only
@@ -861,7 +811,6 @@ func TestSettle_GithubReadOnly_HostileLandingIgnored_UsesAgentBranch(t *testing.
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
@@ -901,7 +850,6 @@ func TestSettle_GithubReadOnly_MergedStatus_HostileLandingIgnored_UsesAgentBranc
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	rec := &ProgressRecorder{}
 	c.Progress = rec
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
@@ -942,7 +890,6 @@ func TestSettle_GithubReadOnly_OpenWiringErrorBlocksNotFails(t *testing.T) {
 		PRIntentFound: true,
 	}
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = nil
 	c.BaseBranch = "main"
 	c.Progress = &ProgressRecorder{}

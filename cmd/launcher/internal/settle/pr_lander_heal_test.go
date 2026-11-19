@@ -144,9 +144,10 @@ func healCases() []prCase {
 		{
 			name:         "a failed relay after a conflict-resolve ends failed without a fix pass",
 			wantStatuses: []Status{detailOnly, StatusRebaseRetry, StatusConflictResolve, StatusLandingFailed, StatusFailed},
-			shape:        shapeReadOnly, maxRebase: 3, maxFix: 2, mergeErrs: []error{errConflict}, rebaseErr: errConflict,
+			shape:        shapeGithub, maxRebase: 3, maxFix: 2, mergeErrs: []error{errConflict}, rebaseErr: errConflict,
 			setup: func(_ *testing.T, fc *forge.Fake, c *Config) {
 				c.OutboxDir = func(num string) string { return "/outbox/" + num }
+				fc.RelayBundleErrs = []error{nil}
 				fc.RelayBundleErr = errors.New("bundle missing")
 			},
 			want:         settledAs(dispatchrecord.ReasonLandingFailed, neverGreen+"relay after conflict-resolve failed: relay bundle failed: bundle missing"),

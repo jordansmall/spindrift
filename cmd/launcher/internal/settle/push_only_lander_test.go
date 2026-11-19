@@ -475,7 +475,6 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 				}}
 			},
 			setup: func(e *pushOnlyEnv) {
-				e.c.ReadOnly = true
 				e.c.Policy = retry.Policy{Max: 3, Unit: time.Second}
 				e.fc.RelayBundleErr = errBlip
 				_, e.c.Clock = stopOnRelayBackoff(&e.s, e.fc, "1")

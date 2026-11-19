@@ -2,7 +2,6 @@ package settle
 
 import (
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -55,7 +54,6 @@ func TestSettle_PRLanderThroughConnectorForge(t *testing.T) {
 	merged := Settlement{Verdict: ForReason(dispatchrecord.ReasonMerged)}
 	for _, tc := range []struct {
 		name          string
-		wasm          string
 		mode          string
 		want          func(url string) Settlement
 		wantMerged    bool
@@ -63,46 +61,31 @@ func TestSettle_PRLanderThroughConnectorForge(t *testing.T) {
 		wantLanded    bool
 		wantCanAuto   bool
 		wantStatus    Status
-		wantComment   string
 		wantMergeReqs int
 	}{
 		{
-			name: "immediate merges the PR", wasm: connectorforgetest.PRWasm, mode: "immediate",
+			name: "immediate merges the PR", mode: "immediate",
 			want:       func(url string) Settlement { return Settlement{Verdict: merged.Verdict, PRURL: url} },
 			wantMerged: true, wantLanded: true, wantCanAuto: true, wantMergeReqs: 1,
 		},
 		{
-			name: "auto enqueues without merging", wasm: connectorforgetest.PRWasm, mode: "auto",
+			name: "auto enqueues without merging", mode: "auto",
 			want: func(url string) Settlement {
 				return Settlement{Verdict: ForReason(dispatchrecord.ReasonAutoMergeEnqueued), PRURL: url}
 			},
 			wantEnqueued: true, wantCanAuto: true, wantMergeReqs: 1, wantStatus: StatusAutoMergeEnqueued,
 		},
 		{
-			name: "manual leaves the PR open and ready", wasm: connectorforgetest.PRWasm, mode: "manual",
+			name: "manual leaves the PR open and ready", mode: "manual",
 			want: func(url string) Settlement {
 				return Settlement{Verdict: ForReason(dispatchrecord.ReasonManual), PRURL: url}
 			},
 			wantCanAuto: true, wantStatus: StatusAgentComplete,
 		},
-		{
-			name: "immediate without forge.ciRun merges with no run link", wasm: connectorforgetest.MinimalPRWasm, mode: "immediate",
-			want:       func(url string) Settlement { return Settlement{Verdict: merged.Verdict, PRURL: url} },
-			wantMerged: true, wantLanded: true, wantMergeReqs: 1,
-		},
-		{
-			name: "auto without forge.autoMerge blocks the merge", wasm: connectorforgetest.MinimalPRWasm, mode: "auto",
-			want: func(url string) Settlement {
-				return Settlement{Verdict: ForReason(dispatchrecord.ReasonMergeBlocked), PRURL: url}
-			},
-			wantStatus: StatusAutoMergeEnqueueFailed, wantComment: "auto-merge enqueue failed",
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := connectorforgetest.NewPRVariant(t, tc.wasm)
-			url := h.SeedLandablePR("1")
-			// Allowed on the backend, so the minimal row proves the missing
-			// capability, not the repo setting, is what disables auto-merge.
+			h := connectorforgetest.NewPRHostMediated(t, connectorforgetest.PRWasm)
+			url, outbox := h.SeedLandablePRWithBundle("1")
 			h.Backend.SetAutoMergeAllowed(true)
 
 			fc := forge.NewFake(testDispatchLabels)
@@ -110,6 +93,8 @@ func TestSettle_PRLanderThroughConnectorForge(t *testing.T) {
 			rec := &ProgressRecorder{}
 			cfg := baseConfig()
 			cfg.MergeMode = tc.mode
+			cfg.BaseBranch = "main"
+			cfg.OutboxDir = func(string) string { return outbox }
 			cfg.Progress = rec
 			cfg.Capabilities = h.Capabilities()
 			s := New(cfg, fc, h.CodeForge())
@@ -122,7 +107,7 @@ func TestSettle_PRLanderThroughConnectorForge(t *testing.T) {
 			}
 
 			gen := s.term.Begin("1")
-			got := s.Settle(dispatch.NewFake(), "1", gen, settleReadyResult("1", url))
+			got := s.Settle(dispatch.NewFake(), "1", gen, settleReadyResult("1", handoffBranch))
 
 			if want := tc.want(url); got != want {
 				t.Errorf("Settle = %+v, want %+v", got, want)
@@ -149,13 +134,6 @@ func TestSettle_PRLanderThroughConnectorForge(t *testing.T) {
 			if tc.wantStatus != detailOnly && !slices.ContainsFunc(rec.Steps(), func(st Step) bool { return st.Status == tc.wantStatus }) {
 				t.Errorf("no %q progress step; steps = %+v", tc.wantStatus, rec.Steps())
 			}
-			var gotComment string
-			for _, c := range fc.CommentCalls {
-				gotComment += c.Body
-			}
-			if tc.wantComment == "" && gotComment != "" || !strings.Contains(gotComment, tc.wantComment) {
-				t.Errorf("comments = %+v, want one containing %q", fc.CommentCalls, tc.wantComment)
-			}
 		})
 	}
 }
@@ -175,7 +153,7 @@ func readOnlySettle(t *testing.T, caps forge.Capabilities, cf forge.CodeForge, o
 	rec := &ProgressRecorder{}
 	cfg := baseConfig()
 	cfg.Capabilities = caps
-	cfg.ReadOnly, cfg.BaseBranch, cfg.Progress = true, "main", rec
+	cfg.BaseBranch, cfg.Progress = "main", rec
 	cfg.OutboxDir = func(string) string { return outbox }
 	cfg.Policy = retry.Policy{Max: maxRetries, Unit: time.Second}
 	s := New(cfg, fc, cf)
@@ -280,8 +258,8 @@ func TestSettle_NoDraftPRCapabilityCannotHostMediateThroughConnectorForge(t *tes
 // "merge conflicts" 405 (classed NotMergeable, issue #7270) reaches the
 // conflict response, not the generic merge-blocked hand-off.
 func TestSettle_ConflictingMergeRefusalRespondsToConflictThroughConnectorForge(t *testing.T) {
-	h := connectorforgetest.NewPR(t)
-	url := h.SeedLandablePR("1")
+	h := connectorforgetest.NewPRHostMediated(t, connectorforgetest.PRWasm)
+	url, outbox := h.SeedLandablePRWithBundle("1")
 	h.SeedConflicting(url)
 
 	fc := forge.NewFake(testDispatchLabels)
@@ -289,13 +267,15 @@ func TestSettle_ConflictingMergeRefusalRespondsToConflictThroughConnectorForge(t
 	rec := &ProgressRecorder{}
 	cfg := baseConfig()
 	cfg.MergeMode = "immediate"
+	cfg.BaseBranch = "main"
+	cfg.OutboxDir = func(string) string { return outbox }
 	cfg.MaxRebaseAttempts = 1
 	cfg.Progress = rec
 	cfg.Capabilities = h.Capabilities()
 	s := New(cfg, fc, h.CodeForge())
 
 	gen := s.term.Begin("1")
-	settled := s.Settle(dispatch.NewFake(), "1", gen, settleReadyResult("1", url))
+	settled := s.Settle(dispatch.NewFake(), "1", gen, settleReadyResult("1", handoffBranch))
 
 	if got := statusesOf(rec, StatusRebaseRetry, StatusMergeBlocked, StatusVerifiedMerged); !slices.Equal(got, []Status{StatusRebaseRetry, StatusVerifiedMerged}) {
 		t.Errorf("conflict-response statuses = %v, want the rebase then the verified merge, never merge-blocked; steps = %+v", got, rec.Steps())

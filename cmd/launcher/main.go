@@ -928,7 +928,6 @@ func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge, caps forge.
 			}
 			return lw.CodeForgeForIssue(num)
 		},
-		ReadOnly:   c.BoxForgeAndIssueAccess == "read-only",
 		BaseBranch: c.BaseBranch,
 	}
 }
@@ -968,11 +967,7 @@ func newSettlers(strategy dispatchkind.Settle, c config, it forge.IssueTracker, 
 		return s, nil, s.Registry(), nil
 	case dispatchkind.SettleVerdict:
 		vl := researchVerdictLabels(c)
-		verdictRelayed := backend.ResearchVerdictRelayed(c.IssueTracker, resolveAgentPresenceSignals(c.driver).filerEnabled)
-		if c.BoxForgeAndIssueAccess == "read-only" {
-			return nil, settle.NewResearchSettleReadOnly(it, vl, verdictRelayed, c.kind().FindingLabel), terminate.NewRegistry(), nil
-		}
-		return nil, settle.NewResearchSettle(it, vl, verdictRelayed, c.kind().FindingLabel), terminate.NewRegistry(), nil
+		return nil, settle.NewResearchSettle(it, vl, c.kind().FindingLabel), terminate.NewRegistry(), nil
 	default:
 		return nil, nil, nil, fmt.Errorf("no settler wired for settle strategy %d (kind %q)", strategy, c.kind().Name)
 	}

@@ -135,16 +135,17 @@ func mergeCases() []prCase {
 			},
 		},
 		{
-			name:         "a conflict-resolve Box in a read-only Box relays its bundle before the merge retries",
+			name:         "a conflict-resolve Box relays its bundle again before the merge retries",
 			wantStatuses: []Status{detailOnly, StatusRebaseRetry, StatusConflictResolve, StatusPostForcePushWait, StatusVerifiedMerged},
 			checks:       fourGreen,
-			shape:        shapeReadOnly, maxRebase: 3, mergeErrs: []error{errConflict}, rebaseErr: errConflict,
+			shape:        shapeGithub, maxRebase: 3, mergeErrs: []error{errConflict}, rebaseErr: errConflict,
 			setup: func(_ *testing.T, _ *forge.Fake, c *Config) {
 				c.OutboxDir = func(num string) string { return "/outbox/" + num }
 			},
 			want: merged, wantLabels: complete, wantMerged: testPR, wantCalls: rebased, wantResolves: 1, wantRebases: 1,
 			check: func(t *testing.T, fc *forge.Fake, _ *dispatch.Fake) {
-				want := []forge.RelayBundleCall{{OutboxDir: "/outbox/1", Ref: forge.AgentBranchName(testBranchPrefix, "1")}}
+				call := forge.RelayBundleCall{OutboxDir: "/outbox/1", Ref: forge.AgentBranchName(testBranchPrefix, "1")}
+				want := []forge.RelayBundleCall{call, call} // the draft-PR hand-off, then after the conflict-resolve
 				if !slices.Equal(fc.RelayBundleCalls, want) {
 					t.Errorf("RelayBundle calls = %+v, want %+v", fc.RelayBundleCalls, want)
 				}

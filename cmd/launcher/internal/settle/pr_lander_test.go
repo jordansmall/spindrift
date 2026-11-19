@@ -15,41 +15,35 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// prShape picks the capability shape the tracker and Code Forge fakes take,
-// which is what steers New toward the PR Lander.
+// prShape picks the capability shape the tracker fake takes, which is what
+// steers New toward the PR Lander. The Code Forge is always a read-only Box's
+// PR forge, which relays a bundle in.
 type prShape int
 
 const (
-	shapeGithub   prShape = iota // the bare fake: a PR forge plus every optional tracker capability
-	shapeForgejo                 // forgejo's tracker (no LandingRecorder) over a PR forge
-	shapeLocalPR                 // local's tracker (LandingRecorder) paired with a PR forge
-	shapeReadOnly                // the bare tracker over a read-only Box's PR forge, which relays a bundle in
-
-	shapeGithubReadOnly // github's tracker (no LandingRecorder) over a read-only Box's PR forge, so its PRs carry a Closes reference
-	shapeLocalReadOnly  // local's tracker over a read-only Box's PR forge
+	shapeGithub         prShape = iota // the bare fake: every optional tracker capability
+	shapeForgejo                       // forgejo's tracker (no LandingRecorder)
+	shapeLocalPR                       // local's tracker (LandingRecorder)
+	shapeGithubReadOnly                // github's tracker (no LandingRecorder), so its PRs carry a Closes reference
 )
 
 func (sh prShape) build(fc *forge.Fake) (forge.IssueTracker, forge.CodeForge) {
 	switch sh {
 	case shapeForgejo:
-		return fc.AsForgejoShaped(), fc
+		return fc.AsForgejoShaped(), fc.AsGithubReadOnly()
 	case shapeLocalPR:
-		return fc.AsLocalShaped(), fc
+		return fc.AsLocalShaped(), fc.AsGithubReadOnly()
 	case shapeGithubReadOnly:
 		return fc.AsNoLandingRecorder(), fc.AsGithubReadOnly()
-	case shapeLocalReadOnly:
-		return fc.AsLocalShaped(), fc.AsGithubReadOnly()
-	case shapeReadOnly:
-		return fc, fc.AsGithubReadOnly()
 	}
-	return fc, fc
+	return fc, fc.AsGithubReadOnly()
 }
 
 // pinningForge is a PR forge that reads the PR head from a source core does not
 // trust (issue #6961): the Lander must rebase through RebasePRHead, naming the
 // agent branch it derived itself. refuse is that method's scripted refusal.
 type pinningForge struct {
-	*forge.Fake
+	roFake
 	heads  []string
 	refuse error
 }
@@ -373,6 +367,7 @@ func TestSettle_PRLander(t *testing.T) {
 				labels = tc.labels
 			}
 			fc.SetIssue(forge.Issue{Number: "1", Labels: labels, Body: tc.body})
+			fc.CreateDraftPRURL = testPR
 			if !tc.noPR {
 				fc.SetPR(forge.AgentBranchName(testBranchPrefix, "1"), forge.PR{URL: testPR})
 			}
@@ -400,14 +395,14 @@ func TestSettle_PRLander(t *testing.T) {
 			}
 			tracker, cf := tc.shape.build(fc)
 			if runURLForge != nil {
-				cf = runURLForge
+				cf = roRunURL{runURLForge}
 			}
 			if tc.pinned != nil {
 				tc.pinned.Fake = fc
 				cf = tc.pinned
 			}
 			if tc.afterMerge != nil {
-				cf = readErrAfterMerge{fc, tc.afterMerge}
+				cf = readErrAfterMerge{roFake{fc}, tc.afterMerge}
 			}
 			s := newTestSettle(c, tracker, cf)
 			s.cfg.Capabilities.TrackerDescriptor = tc.tracker

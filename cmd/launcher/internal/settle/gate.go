@@ -71,12 +71,9 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	// issue (issue #4016, ADR 0039). The Box's harness demotes one it can
 	// count commits for to a synthetic blocked line; an outbox bundle is the
 	// launcher's own evidence of commits the claim still stands over.
-	demotedResolved := o.Status == outcome.StatusBlocked && result.Resolved.Provenance == outcome.ProvenanceSynthetic &&
-		result.Resolved.SelfReportFound && result.Resolved.SelfReport.Status == outcome.StatusAlreadyResolved
 	if o.Status == outcome.StatusAlreadyResolved && s.bundlePresent(num) {
 		o.Status = outcome.StatusBlocked
 		o.Note = fmt.Sprintf("agent reported already-resolved but a bundle of commits exists for %s", s.agentBranch(num))
-		demotedResolved = true
 	}
 
 	switch o.Status {
@@ -100,21 +97,10 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// be stranded once the container exits. Applies to PR-shaped and
 		// push-only forges alike (issue #1946). Best-effort and additive:
 		// failure never changes the blocked outcome recorded above.
-		if s.readOnly && errors.Is(s.relayBlockedWork(num, gen, result), errAbandoned) {
+		if errors.Is(s.relayBlockedWork(num, gen, result), errAbandoned) {
 			return
 		}
-		// A read-write Box may have opened its draft PR before stopping.
-		s.lander.latchOpenPR(num)
-		if demotedResolved {
-			// postBlockedNoteComment skips a writable tracker's read-write run
-			// on the assumption the Box commented itself, but an agent that
-			// believed it was done never did, so post directly.
-			if err := s.it.Comment(num, o.Note); err != nil {
-				fmt.Fprintf(os.Stderr, "    ?? #%s: could not post already-resolved-demoted comment: %v\n", num, err)
-			}
-		} else {
-			s.postBlockedNoteComment(num, o.Note)
-		}
+		s.postBlockedNoteComment(num, o.Note)
 		s.postUsageComment(num, d)
 	case outcome.StatusReady:
 		// A ready the land pass did not report is not trusted (issue #5973):
@@ -148,9 +134,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// The Box detected an internally-contradictory issue and halted before
 		// scouting (issue #2275). This is a successful, non-crash stop, so it
 		// must never fall through to agent-failed. The Box has no fragment to
-		// post this comment in-box, so settle always posts o.Note host-side,
-		// unlike postBlockedNoteComment's relay, gated on landing, readOnly
-		// and InBoxUnwritableTracker.
+		// post this comment in-box, so settle posts o.Note host-side.
 		if o.Note != "" {
 			if err := s.it.Comment(num, o.Note); err != nil {
 				fmt.Fprintf(os.Stderr, "    ?? #%s: could not post ambiguous-spec comment: %v\n", num, err)
@@ -453,14 +437,11 @@ func (s *Settle) keyFor(num string) dispatchkey.Key {
 	return dispatchkey.Issue(num)
 }
 
-// postBlockedNoteComment posts note when the Box had no way to post it in-box:
-// the local content plane (ADR 0032, issue #1692), a read-only github/jira
-// Box stripped of its write token (issue #1917), or a tracker the Box can never
-// write even read-write (InBoxUnwritableTracker, jira; issue #5263).
+// postBlockedNoteComment posts note host-side: the Box has no write token, so
+// its blocked note travels via the outcome note= field (issue #1917).
 // Best-effort, matching postUsageComment's log-but-don't-propagate contract.
 func (s *Settle) postBlockedNoteComment(num, note string) {
-	inBoxUnwritable := s.cfg.Capabilities.TrackerDescriptor.InBoxUnwritableTracker
-	if (s.landing == nil && !s.readOnly && !inBoxUnwritable) || note == "" {
+	if note == "" {
 		return
 	}
 	if err := s.it.Comment(num, note); err != nil {

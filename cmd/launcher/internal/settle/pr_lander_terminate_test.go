@@ -253,7 +253,7 @@ func terminateCases() []prCase {
 			midCall: armSleep, wantAbandoned: true, wantFixes: 1,
 		},
 		{
-			name: "a fix pass that succeeds under a stop relays no bundle", shape: shapeReadOnly,
+			name: "a fix pass that succeeds under a stop relays no bundle beyond the draft-PR hand-off", shape: shapeGithub,
 			wantStatuses: []Status{detailOnly, detailOnly},
 			maxFix:       3, checks: []forge.RollupState{red},
 			setup: func(_ *testing.T, _ *forge.Fake, c *Config) {
@@ -261,8 +261,8 @@ func terminateCases() []prCase {
 			},
 			midCall: stopInBox("Fix"), wantAbandoned: true, wantFixes: 1,
 			check: func(t *testing.T, fc *forge.Fake, _ *dispatch.Fake) {
-				if len(fc.RelayBundleCalls) != 0 {
-					t.Errorf("RelayBundle calls = %+v, want none for a released issue", fc.RelayBundleCalls)
+				if len(fc.RelayBundleCalls) != 1 {
+					t.Errorf("RelayBundle calls = %+v, want only the hand-off relay for a released issue", fc.RelayBundleCalls)
 				}
 			},
 		},

@@ -210,13 +210,6 @@ func adoptCases() []prCase {
 			setup:        g.readOnly(0, func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.RelayBundleErr = errBundleMissing }),
 			want:         boxBlocked, wantComments: noteComment,
 		}),
-		{
-			name: "a success fingerprint under a read-write Code Forge is not adopted", noPR: true,
-			wantStatuses: []Status{detailOnly, StatusBlocked},
-			result:       boxRun(true, synthetic, ready, ""),
-			want:         boxBlocked, wantPRClosed: true, wantComments: noteComment,
-			check: draftPRCalls(0), wantLabels: failed, wantNoLabels: complete,
-		},
 		refuses(prCase{
 			name:         "no outcome line and no self-report is not adopted",
 			wantStatuses: []Status{StatusMissing},
@@ -247,7 +240,7 @@ func adoptCases() []prCase {
 		adopts(prCase{
 			name: "recover records the adopted PR but clears the recorded pass despite the run's passes", entry: entryRelayed,
 			wantStatuses: []Status{StatusAdopted, StatusVerifiedMerged},
-			shape:        shapeLocalReadOnly,
+			shape:        shapeLocalPR,
 			result:       &dispatch.Result{Resolved: selfReportReady().Resolved, Passes: implementThenLandPasses()},
 			check: func(t *testing.T, fc *forge.Fake, _ *dispatch.Fake) {
 				t.Helper()

@@ -21,22 +21,6 @@ type ResearchSettle struct {
 	// findingLabel is the label a filed research finding wears, read from the
 	// dispatched kind's row.
 	findingLabel string
-	// landing is it's optional LandingRecorder (ADR 0029), non-nil only for the
-	// local adapter, so it doubles as this Settle's "is local" test (ADR 0032,
-	// issue #1692): a local Box has no in-box tracker client, so its verdict
-	// comment arrives as a SPINDRIFT_COMMENT block this Settle posts host-side.
-	landing forge.LandingRecorder
-	// readOnly mirrors BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1917): the
-	// Box has no in-box write token, so its verdict comment travels the same
-	// SPINDRIFT_COMMENT relay. The mode drives this rather than a type
-	// assertion, because github implements no LandingRecorder.
-	readOnly bool
-	// verdictRelayed: the Box was told to relay its verdict via
-	// SPINDRIFT_COMMENT even in read-write mode -- the Filer is provisioned
-	// (issue #2593, ADR 0041) or the tracker is one the Box cannot write
-	// (InBoxUnwritableTracker, issue #5245) -- so a missing relayed comment
-	// must fail here rather than fall through to CompleteVerdict.
-	verdictRelayed bool
 	// verdicts is the configured verdict-to-label vocabulary (ADR 0022, issue
 	// #2201) Settle validates the posted Status against, from RESEARCH_VERDICTS
 	// or the compiled forge.ResearchVerdictLabels default.
@@ -45,20 +29,11 @@ type ResearchSettle struct {
 
 var _ Settler = (*ResearchSettle)(nil)
 
-// NewResearchSettle constructs a ResearchSettle for the explicit read-write
-// BOX_FORGE_AND_ISSUE_ACCESS path. verdictRelayed forces the SPINDRIFT_COMMENT
-// relay even here, so a missing verdict comment must fail.
-func NewResearchSettle(it forge.IssueTracker, verdicts forge.VerdictLabels, verdictRelayed bool, findingLabel string) *ResearchSettle {
-	landing, _ := forge.As[forge.LandingRecorder](it)
-	return &ResearchSettle{it: it, progress: StdoutProgress{}, landing: landing, findingLabel: findingLabel, verdicts: verdicts, verdictRelayed: verdictRelayed}
-}
-
-// NewResearchSettleReadOnly constructs a ResearchSettle for a Dispatch under
-// BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1917): the Box has no write
-// token, so this Settle posts the relayed comment before the verdict label.
-func NewResearchSettleReadOnly(it forge.IssueTracker, verdicts forge.VerdictLabels, verdictRelayed bool, findingLabel string) *ResearchSettle {
-	landing, _ := forge.As[forge.LandingRecorder](it)
-	return &ResearchSettle{it: it, progress: StdoutProgress{}, landing: landing, findingLabel: findingLabel, readOnly: true, verdicts: verdicts, verdictRelayed: verdictRelayed}
+// NewResearchSettle constructs a ResearchSettle. The Box holds no write token
+// and relays its verdict comment as a SPINDRIFT_COMMENT block, so this Settle
+// posts it before the verdict label.
+func NewResearchSettle(it forge.IssueTracker, verdicts forge.VerdictLabels, findingLabel string) *ResearchSettle {
+	return &ResearchSettle{it: it, progress: StdoutProgress{}, findingLabel: findingLabel, verdicts: verdicts}
 }
 
 // WithProgress sends r's progress steps to p instead of stdout. Returns r so a
@@ -103,7 +78,7 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 			r.progress.Step(Step{Key: num, Status: StatusCommentPostFailed, Detail: fmt.Sprintf("!! %v", err)})
 			return Settlement{}
 		}
-	} else if r.landing != nil || r.readOnly || r.verdictRelayed {
+	} else {
 		return r.fail(d, num, commentFailureNote(result.CommentRejected))
 	}
 	if err := r.it.CompleteVerdict(num, verdict); err != nil {

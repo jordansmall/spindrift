@@ -17,7 +17,7 @@ import (
 // when commits exist. This pins the in-box demotion route: the harness
 // already rewrote the outcome line to a synthetic status=blocked when its
 // SYNTHETIC backstop found commits on the branch, but the driver's own last
-// genuine self-report still says already-resolved. Read-write, no landing
+// genuine self-report still says already-resolved. No outbox relay, no landing
 // recorder: settle must post the note itself (the agent never got the
 // chance to comment) and never close.
 func TestSettle_SyntheticBlockedDemotedFromAlreadyResolved_PostsCommentFailsNotCloses(t *testing.T) {
@@ -96,7 +96,6 @@ func TestSettle_GenuineAlreadyResolvedWithBundlePresent_DemotesRelaysNotCloses(t
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return outbox }
 	c.BaseBranch = "main"
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
@@ -610,7 +609,6 @@ func TestSettle_GithubReadOnly_AlreadyResolvedZeroCommits_ClosesAsComplete(t *te
 	}
 
 	c := baseConfig()
-	c.ReadOnly = true
 	s := newTestSettle(c, fc, fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 

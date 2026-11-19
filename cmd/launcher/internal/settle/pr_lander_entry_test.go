@@ -35,7 +35,7 @@ func entryCases() []prCase {
 				Found:   true,
 				Outcome: outcome.Outcome{Issue: "1", Landing: testPR, Status: "blocked", Note: "tests failing; expr=1 mismatch"},
 			}},
-			want:         Settlement{Verdict: ForReason(dispatchrecord.ReasonBlocked), PRURL: testPR, Note: "tests failing; expr=1 mismatch"},
+			want:         Settlement{Verdict: ForReason(dispatchrecord.ReasonBlocked), Note: "tests failing; expr=1 mismatch"},
 			wantPRClosed: true,
 			wantLabels:   []string{"agent-failed"},
 			wantSteps:    []Step{stepAt(testPR, StatusBlocked, "!! tests failing; expr=1 mismatch")},

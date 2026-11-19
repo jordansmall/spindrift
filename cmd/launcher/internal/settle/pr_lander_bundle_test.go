@@ -132,7 +132,7 @@ func bundleCases() []prCase {
 		}),
 		// A blocked hand-off never reaches the landing, so its bundle stays.
 		{
-			name: "a blocked hand-off keeps the bundle", shape: shapeReadOnly, noPR: true, result: handoffResult("blocked"),
+			name: "a blocked hand-off keeps the bundle", shape: shapeGithub, noPR: true, result: handoffResult("blocked"),
 			wantStatuses: []Status{detailOnly, StatusBlocked},
 			setup:        g.readOnly(0, func(t *testing.T, fc *forge.Fake, c *Config) { g.bundled(t, fc, c) }),
 			want:         Settlement{Verdict: ForReason(dispatchrecord.ReasonBlocked), PRURL: testPR, Note: "stuck"}, wantPRClosed: true, wantLabels: failed, wantComments: []string{"stuck"},
@@ -140,7 +140,7 @@ func bundleCases() []prCase {
 		},
 		// Recover's relay arm lands through the same gate and drops the bundle too.
 		{
-			name: "a relayed branch that merges drops the bundle", shape: shapeReadOnly, noPR: true,
+			name: "a relayed branch that merges drops the bundle", shape: shapeGithub, noPR: true,
 			wantStatuses: []Status{StatusAdopted, StatusVerifiedMerged},
 			entry:        entryRelayed, checks: registered,
 			setup: g.readOnly(0, func(t *testing.T, fc *forge.Fake, c *Config) { g.bundled(t, fc, c) }),

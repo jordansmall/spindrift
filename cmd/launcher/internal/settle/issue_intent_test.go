@@ -995,12 +995,15 @@ func TestSettle_IssueIntentFilingFailure_DoesNotBlockOutcome(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.PostIssueErr = errFake
+	fc.CreateDraftPRURL = prURL
 
 	result := dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
 		},
+		PRIntent:          "feat: work\n\nbody",
+		PRIntentFound:     true,
 		IssueIntentsFound: true,
 		IssueIntents: []string{
 			`{"title":"fix(auth): validate token expiry","body":"body"}`,

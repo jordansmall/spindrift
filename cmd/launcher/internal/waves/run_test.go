@@ -219,6 +219,8 @@ func TestRun_Discovered_DependencyEdge_DispatchesDependentOnNextInvocation(t *te
 	fc.SetIssue(forge.Issue{Number: "2", Body: "depends on #1", Labels: []string{label}})
 	fc.SetPR("agent/issue-1", forge.PR{URL: prURL})
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.CreateDraftPRURL = prURL
+	fc.CommitSubjectsResult = []string{"feat: work"}
 
 	fr := runner.NewFake()
 	fr.RunFunc = func(box runner.Box) error {

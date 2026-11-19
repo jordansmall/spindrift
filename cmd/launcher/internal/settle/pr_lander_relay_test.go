@@ -92,7 +92,6 @@ func (g *handoffRig) setup(retries int, mod func(*testing.T, *forge.Fake, *Confi
 // opens the draft PR at testPR.
 func (g *handoffRig) readOnly(retries int, mod func(*testing.T, *forge.Fake, *Config)) func(*testing.T, *forge.Fake, *Config) {
 	return g.setup(retries, func(t *testing.T, fc *forge.Fake, c *Config) {
-		c.ReadOnly = true
 		c.BaseBranch = "main"
 		fc.CreateDraftPRURL = testPR
 		if mod != nil {
@@ -104,11 +103,11 @@ func (g *handoffRig) readOnly(retries int, mod func(*testing.T, *forge.Fake, *Co
 func (g *handoffRig) captureStop(_ *forge.Fake, _ *dispatch.Fake, mark func()) { g.stop = mark }
 
 // stopAfterRelay lands the operator's stop in the first clock sleep once the
-// relay has been attempted, so it falls inside the relay's backoff and never
-// in an earlier gate or confirm sleep.
-func (g *handoffRig) stopAfterRelay(fc *forge.Fake) {
+// relay has been attempted n times, so it falls inside the relay's backoff
+// and never in an earlier gate or confirm sleep.
+func (g *handoffRig) stopAfterRelay(fc *forge.Fake, n int) {
 	g.onSleep = func() {
-		if len(fc.RelayBundleCalls) > 0 {
+		if len(fc.RelayBundleCalls) >= n {
 			g.stop()
 		}
 	}
@@ -179,7 +178,13 @@ func relayCases() []prCase {
 	blipRelay := func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.RelayBundleErr = errBlip }
 	stoppedRelay := func(_ *testing.T, fc *forge.Fake, _ *Config) {
 		fc.RelayBundleErr = errBlip
-		g.stopAfterRelay(fc)
+		g.stopAfterRelay(fc, 1)
+	}
+	// The draft-PR hand-off relays first; the stop is for the later relay.
+	stoppedAfterHandoff := func(_ *testing.T, fc *forge.Fake, _ *Config) {
+		fc.RelayBundleErrs = []error{nil}
+		fc.RelayBundleErr = errBlip
+		g.stopAfterRelay(fc, 2)
 	}
 	scripted := make([]error, 4)
 	for i := range scripted {
@@ -189,7 +194,7 @@ func relayCases() []prCase {
 	cases := []prCase{
 		{
 			// Pins issue #4649 on the draft-PR mediation path.
-			name: "a ready relay that fails transiently is retried, then the draft PR opens", shape: shapeReadOnly, noPR: true,
+			name: "a ready relay that fails transiently is retried, then the draft PR opens", shape: shapeGithub, noPR: true,
 			wantStatuses: []Status{detailOnly, StatusRelayRetry, StatusRelayRetry, StatusVerifiedMerged},
 			result:       handoffResult("ready"),
 			setup:        g.readOnly(3, func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.RelayBundleErrs = failThenSucceed(2) }),
@@ -201,7 +206,7 @@ func relayCases() []prCase {
 			// Issue #4651: the Box's bundle stays in the outbox for `spindrift recover`.
 			name:         "a ready relay that fails every attempt parks failed with the last error and the bundle preserved",
 			wantStatuses: []Status{detailOnly, StatusRelayRetry, StatusRelayRetry, StatusRelayRetry, StatusRelayFailed},
-			shape:        shapeReadOnly, noPR: true, result: handoffResult("ready"),
+			shape:        shapeGithub, noPR: true, result: handoffResult("ready"),
 			setup: g.readOnly(3, func(t *testing.T, fc *forge.Fake, c *Config) {
 				g.bundled(t, fc, c)
 				fc.RelayBundleErrs = scripted
@@ -214,7 +219,7 @@ func relayCases() []prCase {
 			check: allOf(relayCalls(4), draftPRCalls(0), g.bundle(bundleKept)),
 		},
 		{
-			name: "a ready relay with no retry budget is attempted once", shape: shapeReadOnly, noPR: true,
+			name: "a ready relay with no retry budget is attempted once", shape: shapeGithub, noPR: true,
 			wantStatuses: []Status{detailOnly, StatusRelayFailed},
 			result:       handoffResult("ready"), setup: g.readOnly(0, blipRelay),
 			want: parked, wantPRClosed: true, wantLabels: failed, wantNoLabels: notLive, wantComments: recoverComment(errBlip),
@@ -223,7 +228,7 @@ func relayCases() []prCase {
 		{
 			// Issue #5411: a Workflows-permission refusal parks with the cause and
 			// both remedies, not the generic "retry relaying" advice a retry cannot honour.
-			name: "a ready relay refused for workflow scope parks at once with the scope remedy", shape: shapeReadOnly, noPR: true,
+			name: "a ready relay refused for workflow scope parks at once with the scope remedy", shape: shapeGithub, noPR: true,
 			wantStatuses: []Status{detailOnly, StatusRelayFailed},
 			result:       handoffResult("ready"),
 			setup: g.readOnly(2, func(_ *testing.T, fc *forge.Fake, _ *Config) {
@@ -235,7 +240,7 @@ func relayCases() []prCase {
 		},
 		{
 			// A Box that wrote no bundle has nothing preserved to recover.
-			name: "a ready relay whose bundle is missing stays blocked in progress without a retry", shape: shapeReadOnly, noPR: true,
+			name: "a ready relay whose bundle is missing stays blocked in progress without a retry", shape: shapeGithub, noPR: true,
 			wantStatuses: []Status{detailOnly, StatusMergeBlocked},
 			result:       handoffResult("ready"),
 			setup: g.readOnly(2, func(_ *testing.T, fc *forge.Fake, _ *Config) {
@@ -247,7 +252,7 @@ func relayCases() []prCase {
 		},
 		{
 			// Issue #4649: the retries are bounded and the last error still reaches the log.
-			name: "a blocked hand-off's relay is retried to the bound and logs the last error", shape: shapeReadOnly, noPR: true,
+			name: "a blocked hand-off's relay is retried to the bound and logs the last error", shape: shapeGithub, noPR: true,
 			wantStatuses: []Status{detailOnly, StatusBlocked, StatusRelayRetry, StatusRelayRetry, StatusRelayRetry},
 			result:       handoffResult("blocked"), setup: g.readOnly(3, blipRelay),
 			want: boxBlocked, wantPRClosed: true, wantLabels: failed, wantComments: []string{"stuck"},
@@ -258,13 +263,13 @@ func relayCases() []prCase {
 		{
 			// A stop landing in the relay's backoff must surface as an abandon, not
 			// be wrapped into a landing failure that demotes the released issue (#3523).
-			name: "a stop during a ready relay's backoff abandons without opening the draft PR", shape: shapeReadOnly, noPR: true,
+			name: "a stop during a ready relay's backoff abandons without opening the draft PR", shape: shapeGithub, noPR: true,
 			wantStatuses: []Status{detailOnly, StatusRelayRetry},
 			result:       handoffResult("ready"), setup: g.readOnly(3, stoppedRelay), midCall: g.captureStop,
 			wantAbandoned: true, check: allOf(relayCalls(1), draftPRCalls(0)),
 		},
 		{
-			name: "a stop during a recovered branch's relay backoff abandons without an error", shape: shapeReadOnly, noPR: true,
+			name: "a stop during a recovered branch's relay backoff abandons without an error", shape: shapeGithub, noPR: true,
 			wantStatuses: []Status{StatusRelayRetry},
 			entry:        entryRelayed,
 			setup:        g.readOnly(3, stoppedRelay), midCall: g.captureStop,
@@ -273,7 +278,7 @@ func relayCases() []prCase {
 		{
 			name:         "a stop during a blocked hand-off's relay backoff is logged as abandoned, not as a failure",
 			wantStatuses: []Status{detailOnly, StatusBlocked, StatusRelayRetry},
-			shape:        shapeReadOnly, noPR: true, result: handoffResult("blocked"),
+			shape:        shapeGithub, noPR: true, result: handoffResult("blocked"),
 			setup: g.readOnly(3, stoppedRelay), midCall: g.captureStop,
 			// The blocked outcome is recorded ahead of the relay; the stop only withholds the blocked note.
 			want: boxBlocked, wantPRClosed: true, wantLabels: failed,
@@ -283,36 +288,36 @@ func relayCases() []prCase {
 		{
 			// Issue #4649 against #3523: the relay after a conflict-resolve must not
 			// be wrapped into errLandingNeverGreen and demote the released issue.
-			name: "a stop during the relay that follows a conflict-resolve abandons", shape: shapeReadOnly,
+			name: "a stop during the relay that follows a conflict-resolve abandons", shape: shapeGithub,
 			wantStatuses: []Status{detailOnly, StatusRebaseRetry, StatusConflictResolve, StatusRelayRetry},
 			maxRebase:    3, mergeErrs: []error{forge.ErrMergeConflict}, rebaseErr: forge.ErrMergeConflict,
-			setup: g.setup(3, stoppedRelay), midCall: g.captureStop,
-			wantAbandoned: true, wantResolves: 1, wantRebases: 1, check: relayCalls(1),
+			setup: g.setup(3, stoppedAfterHandoff), midCall: g.captureStop,
+			wantAbandoned: true, wantResolves: 1, wantRebases: 1, check: relayCalls(2),
 			wantCalls: []string{"MarkReady:" + testPR, "Merge:" + testPR, "MarkDraft:" + testPR},
 		},
 		{
 			// Issue #4649: the abandon is immediate, instead of logging fix-relay-failed
 			// and sleeping through the no-op check's confirm poll.
-			name: "a stop during a fix pass's relay backoff abandons without the confirm pause", shape: shapeReadOnly,
+			name: "a stop during a fix pass's relay backoff abandons without the confirm pause", shape: shapeGithub,
 			wantStatuses: []Status{detailOnly, detailOnly, StatusRelayRetry},
 			maxFix:       3, checks: []forge.RollupState{red, red},
 			setup: g.setup(3, func(_ *testing.T, fc *forge.Fake, c *Config) {
 				fc.SetHeadCommitSHAs(testPR, []string{"sha-1", "sha-1", "sha-1", "sha-1"})
-				stoppedRelay(nil, fc, c)
+				stoppedAfterHandoff(nil, fc, c)
 			}),
 			midCall: g.captureStop, wantAbandoned: true, wantFixes: 1,
 			// The red first poll sleeps nothing, so the lone backoff slice is the only
 			// sleep; a second one is the no-op check's confirm poll.
-			check: allOf(relayCalls(1), g.slept(1)),
+			check: allOf(relayCalls(2), g.slept(1)),
 		},
 	}
 	return cases
 }
 
-// blockedHandoffCases are the rows where a Box reaches IF BLOCKED: a read-only
-// Box's branch is relayed in and its draft PR opened as additive work beside
-// the blocked report (issue #1933), never in place of it, while a read-write
-// Box pushed in-box and the host mediates nothing.
+// blockedHandoffCases are the rows where a Box reaches IF BLOCKED: the Box's
+// branch is relayed in and its draft PR opened as additive work beside the
+// blocked report (issue #1933), never in place of it, while a forge with no
+// outbox relay mediates nothing.
 func blockedHandoffCases() []prCase {
 	g := &handoffRig{}
 	boxBlocked := Settlement{Verdict: ForReason(dispatchrecord.ReasonBlocked), Note: "stuck"}
@@ -380,7 +385,7 @@ func blockedHandoffCases() []prCase {
 		}),
 		// A local tracker closes issues through its own axis (ADR 0029), not GitHub's auto-close on merge.
 		blocked(prCase{
-			name: "a blocked hand-off onto a local tracker injects no closing keyword", shape: shapeLocalReadOnly,
+			name: "a blocked hand-off onto a local tracker injects no closing keyword", shape: shapeLocalPR,
 			want:  withDraftPR,
 			check: openedDraftPR("feat: add widget", "Adds a widget."), wantComments: []string{"stuck"},
 		}),
@@ -406,12 +411,7 @@ func blockedHandoffCases() []prCase {
 			wantNoStderr: []string{"<nil>"},
 		}),
 		unmediated(prCase{
-			name: "a blocked read-write box is not relayed or noted by the host", tracker: backend.GitHub,
-			result: handoffResult("blocked"), want: boxBlocked,
-			check: allOf(relayCalls(0), draftPRCalls(0)),
-		}),
-		unmediated(prCase{
-			name: "a blocked read-write box on a tracker it cannot write has its note posted by the host", tracker: backend.Jira,
+			name: "a blocked box with no relay on a tracker it cannot write has its note posted by the host", tracker: backend.Jira,
 			result: unwritable(outcome.Resolved{Found: true, Outcome: outcome.Outcome{Issue: "1", Status: "blocked", Note: unwritableNote}}),
 			want:   Settlement{Verdict: ForReason(dispatchrecord.ReasonBlocked), Note: unwritableNote}, wantComments: []string{unwritableNote},
 			check: noteOnIssue,

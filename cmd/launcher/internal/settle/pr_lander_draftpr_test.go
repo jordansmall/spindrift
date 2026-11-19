@@ -51,7 +51,7 @@ func draftPRCases() []prCase {
 	reconstructed.PRIntent, reconstructed.PRIntentFound = "", false
 	announced := []string{"This PR was reconstructed host-side"}
 	handedOff := func(c prCase) prCase {
-		c.shape, c.noPR = shapeReadOnly, true
+		c.shape, c.noPR = shapeGithub, true
 		if c.result == nil {
 			c.result = handoffResult("ready")
 		}
@@ -59,7 +59,7 @@ func draftPRCases() []prCase {
 		return c
 	}
 	parks := func(c prCase) prCase {
-		c.shape, c.noPR = shapeReadOnly, true
+		c.shape, c.noPR = shapeGithub, true
 		if c.result == nil {
 			c.result = handoffResult("ready")
 		}
@@ -190,7 +190,7 @@ func draftPRCases() []prCase {
 		// A stop during the create's backoff is an abandon, not a failure: no
 		// comment, no park, and no lookup or re-create after the stop.
 		{
-			name: "a stop during a draft PR create's backoff abandons without a re-create", shape: shapeReadOnly, noPR: true,
+			name: "a stop during a draft PR create's backoff abandons without a re-create", shape: shapeGithub, noPR: true,
 			wantStatuses: []Status{detailOnly, StatusDraftPRRetry},
 			result:       handoffResult("ready"),
 			setup: g.readOnly(3, func(_ *testing.T, fc *forge.Fake, _ *Config) {
@@ -203,7 +203,7 @@ func draftPRCases() []prCase {
 		// The final create makes the PR and the stop lands before its backoff:
 		// the lookup after the stop must not run, so nothing is adopted (#5172).
 		{
-			name: "a stop before the final lookup abandons with no retry budget", shape: shapeReadOnly, noPR: true,
+			name: "a stop before the final lookup abandons with no retry budget", shape: shapeGithub, noPR: true,
 			wantStatuses: []Status{detailOnly, StatusDraftPRFinalLookup},
 			result:       handoffResult("ready"),
 			setup: g.readOnly(0, func(_ *testing.T, fc *forge.Fake, _ *Config) {
@@ -222,7 +222,7 @@ func draftPRCases() []prCase {
 			}),
 		},
 		{
-			name: "a stop before the final lookup abandons after the retry budget", shape: shapeReadOnly, noPR: true,
+			name: "a stop before the final lookup abandons after the retry budget", shape: shapeGithub, noPR: true,
 			wantStatuses: []Status{detailOnly, StatusDraftPRRetry, StatusDraftPRRetry, StatusDraftPRFinalLookup},
 			result:       handoffResult("ready"),
 			setup: g.readOnly(2, func(_ *testing.T, fc *forge.Fake, _ *Config) {
