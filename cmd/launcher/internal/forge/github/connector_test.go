@@ -650,8 +650,6 @@ type connectorHarness struct {
 	caps    forge.Capabilities
 }
 
-func newConnectorHarness(t *testing.T) *connectorHarness { return newComposedHarness(t, false) }
-
 // loadGithubConnector loads the compiled github Connector with its declared
 // Route table bound to host and to repo. The table names the real API host; the
 // scripted backend stands in for it.
@@ -723,10 +721,9 @@ func loadGithubConnectorAs(t *testing.T, host, repo string, client *http.Client,
 
 // composeForge composes the Code Forge over conn for the repository target
 // names.
-func composeForge(conn *connectorhost.Connector, api, targetRepo string, readOnlyBox bool) (forge.CodeForge, forge.Capabilities, error) {
+func composeForge(conn *connectorhost.Connector, api, targetRepo string) (forge.CodeForge, forge.Capabilities, error) {
 	return connectorforge.Compose(conn, connectorforge.Target{API: api, Repo: targetRepo}, connectorforge.Git{
-		Credential:  gitexec.Credential{Username: "bot", Password: gitSecret},
-		ReadOnlyBox: readOnlyBox,
+		Credential: gitexec.Credential{Username: "bot", Password: gitSecret},
 		Plumbing: func(u string, cred gitexec.Credential) forge.CodeForge {
 			return git.NewGitClient(u, "main", "Test Bot", "bot@example.com", git.WithCredential(cred))
 		},
@@ -735,21 +732,20 @@ func composeForge(conn *connectorhost.Connector, api, targetRepo string, readOnl
 }
 
 // newComposedHarness loads the Connector and composes the Code Forge over it.
-// readOnlyBox is the Box's mode: a read-only Box relays its bundle.
-func newComposedHarness(t *testing.T, readOnlyBox bool) *connectorHarness {
-	return newHarnessFor(t, readOnlyBox, connectorRepo)
+func newComposedHarness(t *testing.T) *connectorHarness {
+	return newHarnessFor(t, connectorRepo)
 }
 
 // newHarnessFor is newComposedHarness with the composed forge's Target naming
 // targetRepo while the Route table stays pinned to connectorRepo: the hostile
 // fixture for a Connector that reaches outside its declared repository.
-func newHarnessFor(t *testing.T, readOnlyBox bool, targetRepo string) *connectorHarness {
-	return newHarnessWith(t, readOnlyBox, targetRepo, connectortracker.Lifecycle{Labels: testLabels}, nil)
+func newHarnessFor(t *testing.T, targetRepo string) *connectorHarness {
+	return newHarnessWith(t, targetRepo, connectortracker.Lifecycle{Labels: testLabels}, nil)
 }
 
 // newHarnessWith is newHarnessFor with the tracker's lifecycle and the
 // credential the Connector's requests carry (nil means stampConnectorToken).
-func newHarnessWith(t *testing.T, readOnlyBox bool, targetRepo string, lc connectortracker.Lifecycle, authorize func(*http.Request) error) *connectorHarness {
+func newHarnessWith(t *testing.T, targetRepo string, lc connectortracker.Lifecycle, authorize func(*http.Request) error) *connectorHarness {
 	t.Helper()
 	if authorize == nil {
 		authorize = stampConnectorToken
@@ -767,7 +763,7 @@ func newHarnessWith(t *testing.T, readOnlyBox bool, targetRepo string, lc connec
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.cf, h.caps, err = composeForge(conn, b.URL, targetRepo, readOnlyBox)
+	h.cf, h.caps, err = composeForge(conn, b.URL, targetRepo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -897,7 +893,7 @@ var (
 func TestConnector_Contracts(t *testing.T) {
 	var cov routeCoverage
 	t.Run("Reads", func(t *testing.T) {
-		h := newConnectorHarness(t)
+		h := newComposedHarness(t)
 		t.Run("Tracker", func(t *testing.T) { forgetest.RunTrackerReadContract(t, h) })
 		t.Run("PRForge", func(t *testing.T) { forgetest.RunPRForgeReadContract(t, h) })
 		t.Run("JobLogExcerpt", func(t *testing.T) { testJobLogExcerpt(t, h) })
@@ -912,7 +908,7 @@ func TestConnector_Contracts(t *testing.T) {
 		cov.record(t, h)
 	})
 	t.Run("ComposedForge", func(t *testing.T) {
-		h := newComposedHarness(t, false)
+		h := newComposedHarness(t)
 		t.Run("Capabilities", func(t *testing.T) { testComposedCapabilities(t, h) })
 		t.Run("PRForgeContract", func(t *testing.T) { forgetest.RunPRForgeContract(t, composedPRHarness{h}) })
 		for _, c := range []struct {
@@ -938,7 +934,7 @@ func TestConnector_Contracts(t *testing.T) {
 		cov.record(t, h)
 	})
 	t.Run("CodeForgeContract", func(t *testing.T) {
-		h := newComposedHarness(t, false)
+		h := newComposedHarness(t)
 		forgetest.RunCodeForgeContract(t, composedCodeForgeHarness{h})
 		cov.record(t, h)
 	})
@@ -969,7 +965,7 @@ func TestConnector_Contracts(t *testing.T) {
 // copies from ci_rollup.go: one context of every CheckRun conclusion and
 // StatusContext state must render exactly as the native adapter renders them.
 func TestConnector_FailureDetailMatchesNative(t *testing.T) {
-	h := newConnectorHarness(t)
+	h := newComposedHarness(t)
 	var native []failureDetailContext
 	var nodes []scriptedContext
 	for _, c := range []string{"SUCCESS", "NEUTRAL", "SKIPPED", "FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE"} {
@@ -997,7 +993,7 @@ func TestConnector_FailureDetailMatchesNative(t *testing.T) {
 }
 
 func TestConnector_ListIssuesOmitsPullRequests(t *testing.T) {
-	h := newConnectorHarness(t)
+	h := newComposedHarness(t)
 	h.SeedIssue(forge.Issue{Number: "11", Title: "issue"})
 	h.SeedState("11", forge.Dispatchable)
 	h.SeedIssue(forge.Issue{Number: "12", Title: "pull request"})

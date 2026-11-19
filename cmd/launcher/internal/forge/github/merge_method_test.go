@@ -130,15 +130,11 @@ func TestRoutedRow_MergeMethodOtherThanRebaseIsRefused(t *testing.T) {
 // A routed (non-shadow) row refuses MERGE_METHOD at forge build time, as the
 // forgejo row does, so a misconfigured launch fails before any Box starts;
 // `primary` changes nothing. A shadow row merges natively, so it refuses
-// nothing. The read-only Box forge is refused too: forgejo builds both through
-// one refusal.
+// nothing.
 func TestStrategy_RoutedRowRefusesMergeMethodAtBuild(t *testing.T) {
 	builds := map[string]func(backendkit.Shared) (forge.CodeForge, error){
 		"NewCodeForge": func(s backendkit.Shared) (forge.CodeForge, error) {
 			return Strategy.NewCodeForge(s, nil, forge.SanitizedParent{}, nil)
-		},
-		"NewReadOnlyCodeForge": func(s backendkit.Shared) (forge.CodeForge, error) {
-			return Strategy.NewReadOnlyCodeForge(s, nil, forge.SanitizedParent{}, nil)
 		},
 	}
 	rows := map[string]func(*testing.T, string){

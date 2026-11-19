@@ -29,7 +29,7 @@ func TestSettle_BlockHandoffReturnsInProgressHandoffBlockedWithoutPR(t *testing.
 	c := baseConfig()
 	c.OutboxDir = func(n string) string { return "/outbox/" + n }
 	c.BaseBranch = "main"
-	s := newTestSettle(c, fc, fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc, fc.AsGithub())
 
 	got := s.Settle(dispatch.NewFake(), num, 0, settleReadyResult(num, "agent/issue-1919"))
 

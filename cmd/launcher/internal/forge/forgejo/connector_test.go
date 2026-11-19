@@ -110,10 +110,9 @@ func declaredRoutes(t *testing.T) (string, []connectorhost.Route) {
 	return path, declared
 }
 
-func composeForge(conn *connectorhost.Connector, api string, readOnlyBox bool) (forge.CodeForge, forge.Capabilities, error) {
+func composeForge(conn *connectorhost.Connector, api string) (forge.CodeForge, forge.Capabilities, error) {
 	return connectorforge.Compose(conn, connectorforge.Target{API: api, Repo: connectorRepo}, connectorforge.Git{
-		Credential:  gitexec.Credential{Username: "bot", Password: gitSecret},
-		ReadOnlyBox: readOnlyBox,
+		Credential: gitexec.Credential{Username: "bot", Password: gitSecret},
 		Plumbing: func(u string, cred gitexec.Credential) forge.CodeForge {
 			return git.NewGitClient(u, "main", "Test Bot", "bot@example.com", git.WithCredential(cred))
 		},
@@ -121,11 +120,11 @@ func composeForge(conn *connectorhost.Connector, api string, readOnlyBox bool) (
 	})
 }
 
-// newConnectorHarness loads the Connector and composes the Code Forge over it,
-// for a read-only Box when readOnlyBox. The fake serves over TLS, since core
+// newConnectorHarness loads the Connector and composes the Code Forge over it.
+// The fake serves over TLS, since core
 // refuses a remote that is not https, with git pointed at its bare repository
 // through the environment: production git is https-only.
-func newConnectorHarness(t *testing.T, readOnlyBox, production bool) *connectorHarness {
+func newConnectorHarness(t *testing.T, production bool) *connectorHarness {
 	t.Helper()
 	for k, v := range map[string]string{
 		"GIT_AUTHOR_NAME": "Test Bot", "GIT_AUTHOR_EMAIL": "bot@example.com",
@@ -153,7 +152,7 @@ func newConnectorHarness(t *testing.T, readOnlyBox, production bool) *connectorH
 	h := &connectorHarness{fakeForgejo: f, t: t, audit: &bytes.Buffer{}}
 	if production {
 		var err error
-		if h.cf, h.routes, h.auditPath, err = productionForge(t, f.srv, readOnlyBox); err != nil {
+		if h.cf, h.routes, h.auditPath, err = productionForge(t, f.srv); err != nil {
 			t.Fatal(err)
 		}
 		h.caps = forge.ResolveCodeForge(h.cf)
@@ -161,7 +160,7 @@ func newConnectorHarness(t *testing.T, readOnlyBox, production bool) *connectorH
 	}
 	h.conn, h.routes = loadForgejoConnector(t, f.srv.Listener.Addr().String(), f.srv.Client(), h.audit)
 	var err error
-	if h.cf, h.caps, err = composeForge(h.conn, f.srv.URL, readOnlyBox); err != nil {
+	if h.cf, h.caps, err = composeForge(h.conn, f.srv.URL); err != nil {
 		t.Fatal(err)
 	}
 	return h
@@ -214,11 +213,11 @@ func (h *connectorHarness) closedBackendForge() forge.CodeForge {
 	var cf forge.CodeForge
 	var err error
 	if h.auditPath != "" {
-		cf, _, _, err = productionForge(h.t, srv, false)
+		cf, _, _, err = productionForge(h.t, srv)
 	} else {
 		var conn *connectorhost.Connector
 		conn, _ = loadForgejoConnector(h.t, srv.Listener.Addr().String(), srv.Client(), &bytes.Buffer{})
-		cf, _, err = composeForge(conn, srv.URL, false)
+		cf, _, err = composeForge(conn, srv.URL)
 	}
 	if err != nil {
 		h.t.Fatal(err)
@@ -414,7 +413,7 @@ func (c *routeCoverage) assertUsed(t *testing.T) {
 func TestConnector_Contracts(t *testing.T) {
 	var cov routeCoverage
 	t.Run("Capabilities", func(t *testing.T) {
-		h := newConnectorHarness(t, false, false)
+		h := newConnectorHarness(t, false)
 		testComposedCapabilities(t, h)
 		cov.record(t, h)
 	})
@@ -424,25 +423,25 @@ func TestConnector_Contracts(t *testing.T) {
 	}{{"Composed", false}, {"Production", true}} {
 		t.Run(mode.name, func(t *testing.T) {
 			t.Run("PRForgeContract", func(t *testing.T) {
-				h := newConnectorHarness(t, false, mode.production)
+				h := newConnectorHarness(t, mode.production)
 				forgetest.RunPRForgeContract(t, composedPRHarness{h})
 				cov.record(t, h)
 			})
 			t.Run("CodeForgeContract", func(t *testing.T) {
-				h := newConnectorHarness(t, false, mode.production)
+				h := newConnectorHarness(t, mode.production)
 				forgetest.RunCodeForgeContract(t, composedCodeForgeHarness{h})
 				cov.record(t, h)
 			})
 			t.Run("HostMediationContract", func(t *testing.T) {
 				h := &composedHostMediationHarness{
-					connectorHarness: newConnectorHarness(t, true, mode.production), fake: forge.NewFake(),
+					connectorHarness: newConnectorHarness(t, mode.production), fake: forge.NewFake(),
 					relayedSHA: map[string]string{}, seeded: map[string]bool{}, prSeq: 1500,
 				}
 				forgetest.RunHostMediationContract(t, h)
 				cov.record(t, h.connectorHarness)
 			})
 			t.Run("Writes", func(t *testing.T) {
-				h := newConnectorHarness(t, false, mode.production)
+				h := newConnectorHarness(t, mode.production)
 				t.Run("CommentPR", func(t *testing.T) { testCommentPR(t, h) })
 				t.Run("BranchLifecycle", func(t *testing.T) { testBranchLifecycle(t, h) })
 				t.Run("BranchProtection", func(t *testing.T) { testBranchProtection(t, h) })

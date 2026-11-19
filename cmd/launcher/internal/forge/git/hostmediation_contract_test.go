@@ -27,7 +27,7 @@ func newBundleRelayHarness(t *testing.T) *bundleRelayHarness {
 	return &bundleRelayHarness{
 		t:          t,
 		repo:       repo,
-		cf:         NewReadOnlyGitClient(repo.Bare, "main", "Test Bot", "bot@example.com"),
+		cf:         NewGitClient(repo.Bare, "main", "Test Bot", "bot@example.com"),
 		relayedSHA: map[string]string{},
 	}
 }
@@ -51,20 +51,17 @@ func TestGit_BundleRelayContract(t *testing.T) {
 	forgetest.RunBundleRelayContract(t, newBundleRelayHarness(t))
 }
 
-// TestReadOnlyGitClientIsBundleOnly pins that git relays bundles but, having
-// no PRs, never advertises the PR pair settle keys read-only handling off.
-func TestReadOnlyGitClientIsBundleOnly(t *testing.T) {
-	cf := NewReadOnlyGitClient("unused", "main", "n", "e")
+// TestGitClientIsBundleOnly pins that git relays bundles but, having no PRs,
+// never advertises the PR pair settle keys PR handling off.
+func TestGitClientIsBundleOnly(t *testing.T) {
+	cf := NewGitClient("unused", "main", "n", "e")
 	if _, ok := cf.(forge.BundleRelay); !ok {
-		t.Error("read-only git CodeForge must implement forge.BundleRelay")
+		t.Error("git CodeForge must implement forge.BundleRelay")
 	}
 	if _, ok := cf.(forge.DraftPRCreator); ok {
-		t.Error("read-only git CodeForge must not implement forge.DraftPRCreator")
+		t.Error("git CodeForge must not implement forge.DraftPRCreator")
 	}
 	if _, ok := cf.(forge.BundleCommitSubjects); ok {
-		t.Error("read-only git CodeForge must not implement forge.BundleCommitSubjects")
-	}
-	if _, ok := NewGitClient("unused", "main", "n", "e").(forge.BundleRelay); ok {
-		t.Error("read-write git CodeForge must not implement forge.BundleRelay")
+		t.Error("git CodeForge must not implement forge.BundleCommitSubjects")
 	}
 }

@@ -44,7 +44,7 @@ func TestResolveCapabilities_CodeForgeShapes(t *testing.T) {
 	})
 
 	t.Run("github-read-only", func(t *testing.T) {
-		cf := NewFake().AsGithubReadOnly()
+		cf := NewFake().AsGithub()
 		// AsNoLandingRecorder wraps the tracker behind the IssueTracker
 		// interface, so the wrapper's method set does not promote *Fake's
 		// embedded BranchProtectionForge. A bare NewFake() does promote it,

@@ -361,7 +361,7 @@ func hostLandedPassFixtureOver(t *testing.T, fc *forge.Fake, tracker forge.Issue
 		PRIntentFound: true,
 		Passes:        passes,
 	}
-	return newTestSettle(c, tracker, fc.AsGithubReadOnly()), result
+	return newTestSettle(c, tracker, fc.AsGithub()), result
 }
 
 // settleHostLanded settles a host-landed run over passes and returns the Fake

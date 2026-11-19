@@ -20,7 +20,7 @@ func TestNew_ImplementsSettler(t *testing.T) {
 // do implement forge.PRForge and forge.LandingRecorder.
 func TestNew_ReadsPRForgeAndLandingRecorderFromConfigCapabilities(t *testing.T) {
 	fc := forge.NewFake()
-	cf := fc.AsGithubReadOnly()
+	cf := fc.AsGithub()
 	it := fc.AsLocalShaped()
 
 	got := New(Config{Capabilities: forge.Capabilities{}}, it, cf)
@@ -48,7 +48,7 @@ func TestNew_ReadsPRForgeAndLandingRecorderFromConfigCapabilities(t *testing.T) 
 // Box never opens its own PR.
 func newTestSettle(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	if f, ok := cf.(*forge.Fake); ok {
-		cf = f.AsGithubReadOnly()
+		cf = f.AsGithub()
 	}
 	cfg.Capabilities = forge.ResolveCapabilities(cf, it, githubRow, githubRow)
 	return New(cfg, it, cf)

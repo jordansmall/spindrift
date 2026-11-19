@@ -49,30 +49,26 @@ func useForgejoRow(t *testing.T, baseURL string, adjust func(*backendrows.Row)) 
 	}
 }
 
-// buildForge runs the production constructor for a Box that cannot push when
-// readOnlyBox, with core's git token distinct from the Connector's credential.
-func buildForge(srv *httptest.Server, readOnlyBox bool, mergeMethod string) (forge.CodeForge, error) {
+// buildForge runs the production constructor with core's git token distinct
+// from the Connector's credential.
+func buildForge(srv *httptest.Server, mergeMethod string) (forge.CodeForge, error) {
 	l := mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: srv.URL, forgejo.ForgejoTokenEnv: gitSecret})
 	s := backendkit.Shared{RepoSlug: connectorRepo, BaseBranch: "main", GitUserName: "Test Bot", GitUserEmail: "bot@example.com", MergeMethod: mergeMethod}
-	build := forgejo.Strategy.NewCodeForge
-	if readOnlyBox {
-		build = forgejo.Strategy.NewReadOnlyCodeForge
-	}
-	return build(s, l, forge.SanitizedParent{}, nil)
+	return forgejo.Strategy.NewCodeForge(s, l, forge.SanitizedParent{}, nil)
 }
 
 // productionForge builds the Code Forge the way the launcher does under a
 // primary forgejo row pointing at the compiled Connector and srv. It returns
 // the row's resolved Route table and the Connector's audit file, which core
 // writes under the working directory's log directory.
-func productionForge(t *testing.T, srv *httptest.Server, readOnlyBox bool) (forge.CodeForge, []connectorhost.Route, string, error) {
+func productionForge(t *testing.T, srv *httptest.Server) (forge.CodeForge, []connectorhost.Route, string, error) {
 	t.Helper()
 	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
 	t.Setenv(connectorCredentialEnv, connectorToken)
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	dir := t.TempDir()
 	t.Chdir(dir)
-	cf, err := buildForge(srv, readOnlyBox, "")
+	cf, err := buildForge(srv, "")
 	row, _ := backendrows.Lookup("forgejo")
 	return cf, connectortracker.Routes(row.Routes, connectorRepo), filepath.Join(dir, ".spindrift", "logs", "connector-forgejo.audit.jsonl"), err
 }
@@ -80,22 +76,20 @@ func productionForge(t *testing.T, srv *httptest.Server, readOnlyBox bool) (forg
 func nativeForgeType(cf forge.CodeForge) string { return reflect.TypeOf(cf).String() }
 
 // A Connector that fails to load fails the construction with its error and
-// builds no forge, native or otherwise, whether the Box can push or not.
+// builds no forge, native or otherwise.
 func TestPrimaryRow_LoadFailureFailsConstruction(t *testing.T) {
-	for _, readOnlyBox := range []bool{false, true} {
-		srv := httptest.NewTLSServer(nil)
-		t.Cleanup(srv.Close)
-		useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Module = filepath.Join(t.TempDir(), "absent.wasm") })
-		t.Chdir(t.TempDir())
+	srv := httptest.NewTLSServer(nil)
+	t.Cleanup(srv.Close)
+	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Module = filepath.Join(t.TempDir(), "absent.wasm") })
+	t.Chdir(t.TempDir())
 
-		cf, err := buildForge(srv, readOnlyBox, "")
+	cf, err := buildForge(srv, "")
 
-		if err == nil || !strings.Contains(err.Error(), "read module") {
-			t.Errorf("readOnlyBox=%v: err = %v, want the module read error", readOnlyBox, err)
-		}
-		if cf != nil {
-			t.Errorf("readOnlyBox=%v: built a %s despite the load failure", readOnlyBox, nativeForgeType(cf))
-		}
+	if err == nil || !strings.Contains(err.Error(), "read module") {
+		t.Errorf("err = %v, want the module read error", err)
+	}
+	if cf != nil {
+		t.Errorf("built a %s despite the load failure", nativeForgeType(cf))
 	}
 }
 
@@ -109,7 +103,7 @@ func TestPrimaryRow_LoadErrorIsReturnedAsIs(t *testing.T) {
 	}))
 	t.Chdir(t.TempDir())
 
-	if cf, err := buildForge(srv, false, ""); !errors.Is(err, boom) || cf != nil {
+	if cf, err := buildForge(srv, ""); !errors.Is(err, boom) || cf != nil {
 		t.Errorf("buildForge = (%v, %v), want (nil, the load error)", cf, err)
 	}
 }
@@ -127,7 +121,7 @@ func TestPrimaryRow_RefusedRouteFailsTheOperation(t *testing.T) {
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	t.Chdir(t.TempDir())
 
-	cf, err := buildForge(srv, false, "")
+	cf, err := buildForge(srv, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +152,7 @@ func TestPrimaryRow_RefusesAMergeMethodTheConnectorCannotHonour(t *testing.T) {
 	t.Cleanup(srv.Close)
 	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
 	for _, method := range []string{"squash", "merge"} {
-		cf, err := buildForge(srv, false, method)
+		cf, err := buildForge(srv, method)
 		if !errors.Is(err, forgejo.ErrPrimaryMergeMethod) || !strings.Contains(err.Error(), "MERGE_METHOD") || cf != nil {
 			t.Errorf("MERGE_METHOD=%s: buildForge = (%v, %v), want (nil, ErrPrimaryMergeMethod)", method, cf, err)
 		}
@@ -182,14 +176,12 @@ func TestNoPrimaryRow_BuildsTheNativeForgeAndTracker(t *testing.T) {
 			if plain != nil {
 				useForgejoRow(t, srv.URL, plain)
 			}
-			for _, readOnlyBox := range []bool{false, true} {
-				cf, err := buildForge(srv, readOnlyBox, "squash")
-				if err != nil {
-					t.Fatal(err)
-				}
-				if got := nativeForgeType(cf); !strings.Contains(got, "forgejo") || strings.Contains(got, "connectorforge") {
-					t.Errorf("readOnlyBox=%v: built %s, want the native forgejo adapter", readOnlyBox, got)
-				}
+			cf, err := buildForge(srv, "squash")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := nativeForgeType(cf); !strings.Contains(got, "forgejo") || strings.Contains(got, "connectorforge") {
+				t.Errorf("built %s, want the native forgejo adapter", got)
 			}
 			tr, err := buildTracker(srv)
 			if err != nil {
@@ -207,45 +199,37 @@ func TestNoPrimaryRow_BuildsTheNativeForgeAndTracker(t *testing.T) {
 // the derived agent branch, and refuses a plain Rebase, each before any branch
 // is pushed (issue #6961). A matching head rebases.
 func TestPrimaryRow_RebasePRHeadIsPinnedToTheAgentBranch(t *testing.T) {
-	for _, readOnlyBox := range []bool{false, true} {
-		t.Run(map[bool]string{false: "writable", true: "read-only"}[readOnlyBox], func(t *testing.T) {
-			h := newConnectorHarness(t, readOnlyBox, true)
-			rebaser := h.caps.PRHeadRebaser
-			if rebaser == nil {
-				t.Fatal("ResolveCodeForge found no PRHeadRebaser on the production forgejo forge")
-			}
-			url := h.seedLandable("21")
-			h.repo.SeedBranch("release", "rel")
-			h.repo.AdvanceBase()
-			branch := forge.AgentBranchName(h.BranchPrefix(), "21")
-			before := h.repo.BranchSHA(branch)
+	h := newConnectorHarness(t, true)
+	rebaser := h.caps.PRHeadRebaser
+	if rebaser == nil {
+		t.Fatal("ResolveCodeForge found no PRHeadRebaser on the production forgejo forge")
+	}
+	url := h.seedLandable("21")
+	h.repo.SeedBranch("release", "rel")
+	h.repo.AdvanceBase()
+	branch := forge.AgentBranchName(h.BranchPrefix(), "21")
+	before := h.repo.BranchSHA(branch)
 
-			for name, err := range map[string]error{
-				"foreign head": rebaser.RebasePRHead(url, "release"),
-				"other agent":  rebaser.RebasePRHead(url, forge.AgentBranchName(h.BranchPrefix(), "999")),
-				"plain rebase": h.cf.Rebase(url),
-			} {
-				if !errors.Is(err, connectorforge.ErrAnswer) {
-					t.Errorf("%s: err = %v, want connectorforge.ErrAnswer", name, err)
-				}
-			}
-			if got := h.repo.BranchSHA(branch); got != before || h.repo.Rebased(branch) {
-				t.Error("a refused rebase moved the PR branch")
-			}
-			if h.repo.Rebased("release") {
-				t.Error("the foreign branch was rebased")
-			}
-
-			if readOnlyBox {
-				return
-			}
-			if err := rebaser.RebasePRHead(url, branch); err != nil {
-				t.Fatalf("RebasePRHead(matching head) = %v", err)
-			}
-			if !h.repo.Rebased(branch) {
-				t.Error("the matching head was not rebased")
-			}
-		})
+	for name, err := range map[string]error{
+		"foreign head": rebaser.RebasePRHead(url, "release"),
+		"other agent":  rebaser.RebasePRHead(url, forge.AgentBranchName(h.BranchPrefix(), "999")),
+		"plain rebase": h.cf.Rebase(url),
+	} {
+		if !errors.Is(err, connectorforge.ErrAnswer) {
+			t.Errorf("%s: err = %v, want connectorforge.ErrAnswer", name, err)
+		}
+	}
+	if got := h.repo.BranchSHA(branch); got != before || h.repo.Rebased(branch) {
+		t.Error("a refused rebase moved the PR branch")
+	}
+	if h.repo.Rebased("release") {
+		t.Error("the foreign branch was rebased")
+	}
+	if err := rebaser.RebasePRHead(url, branch); err != nil {
+		t.Fatalf("RebasePRHead(matching head) = %v", err)
+	}
+	if !h.repo.Rebased(branch) {
+		t.Error("the matching head was not rebased")
 	}
 }
 

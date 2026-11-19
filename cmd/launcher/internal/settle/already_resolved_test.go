@@ -98,7 +98,7 @@ func TestSettle_GenuineAlreadyResolvedWithBundlePresent_DemotesRelaysNotCloses(t
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return outbox }
 	c.BaseBranch = "main"
-	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithub())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CloseMergedIssueCalls) != 0 {
@@ -609,7 +609,7 @@ func TestSettle_GithubReadOnly_AlreadyResolvedZeroCommits_ClosesAsComplete(t *te
 	}
 
 	c := baseConfig()
-	s := newTestSettle(c, fc, fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc, fc.AsGithub())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CreateDraftPRCalls) != 0 {

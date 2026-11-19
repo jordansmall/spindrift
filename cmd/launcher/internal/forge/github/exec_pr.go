@@ -596,7 +596,7 @@ func (e *execClient) CreateLabel(name, description, color string) error {
 // Connector, so an unpinned Rebase is refused there; RebasePRHead is the way in.
 func (e *execClient) Rebase(prURL string) error {
 	if row, ok := routedRow(); ok {
-		return e.forgeWrite(row, "rebase a PR", false, func(cf forge.CodeForge, _ forge.Capabilities) error {
+		return e.forgeWrite(row, "rebase a PR", func(cf forge.CodeForge, _ forge.Capabilities) error {
 			return cf.Rebase(prURL)
 		})
 	}
@@ -769,10 +769,7 @@ func (e *execClient) DeleteBranch(branch, base string) error {
 }
 
 // CreateDraftPR opens a draft PR from head onto base. head and base are
-// branch names in e.repo, never a fork's owner:branch form. Read-write and
-// read-only settle alike may call it (issue #4071); settle's own gating
-// (Open checks BundleRelay first) is what keeps a read-write land from ever
-// making a host-side create that conflicts with the Box's own.
+// branch names in e.repo, never a fork's owner:branch form.
 func (e *execClient) CreateDraftPR(title, body, base, head string) (string, bool, error) {
 	if row, ok := routedRow(); ok {
 		return e.createDraftPRViaConnector(row, title, body, base, head)

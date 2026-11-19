@@ -222,32 +222,33 @@ func (l localForge) LandingContained(landing Landing, scope SeedScope) (bool, er
 var _ CodeForge = localForge{}
 var _ BundleRelay = localForge{}
 
-// githubReadOnlyForge matches github.readOnlyCodeForge (issue #1919): the
+// githubForge matches github.execClient (issue #1919): the
 // CodeForge and PRForge methods *Fake already exposes, plus BundleRelay and
 // DraftPRCreator. Unlike localForge and pushOnlyForge, nothing needs hiding.
-type githubReadOnlyForge struct{ *Fake }
+type githubForge struct{ *Fake }
 
-// AsGithubReadOnly returns f in the github read-only adapter's shape: CodeForge, PRForge, BundleRelay, and DraftPRCreator.
-func (f *Fake) AsGithubReadOnly() CodeForge { return githubReadOnlyForge{f} }
+// AsGithub returns f in the github adapter's shape: CodeForge, PRForge,
+// BundleRelay, and DraftPRCreator.
+func (f *Fake) AsGithub() CodeForge { return githubForge{f} }
 
-func (g githubReadOnlyForge) RelayBundle(outboxDir, ref string) error {
+func (g githubForge) RelayBundle(outboxDir, ref string) error {
 	return g.Fake.relayBundle(outboxDir, ref)
 }
 
-func (g githubReadOnlyForge) CreateDraftPR(title, body, base, head string) (string, bool, error) {
+func (g githubForge) CreateDraftPR(title, body, base, head string) (string, bool, error) {
 	return g.Fake.createDraftPR(title, body, base, head)
 }
 
-func (g githubReadOnlyForge) CommitSubjects(outboxDir, base, ref string) ([]string, error) {
+func (g githubForge) CommitSubjects(outboxDir, base, ref string) ([]string, error) {
 	return g.Fake.commitSubjects(outboxDir, base, ref)
 }
 
-var _ CodeForge = githubReadOnlyForge{}
-var _ PRForge = githubReadOnlyForge{}
-var _ BundleRelay = githubReadOnlyForge{}
-var _ DraftPRCreator = githubReadOnlyForge{}
-var _ BundleCommitSubjects = githubReadOnlyForge{}
-var _ BranchProtectionForge = githubReadOnlyForge{}
+var _ CodeForge = githubForge{}
+var _ PRForge = githubForge{}
+var _ BundleRelay = githubForge{}
+var _ DraftPRCreator = githubForge{}
+var _ BundleCommitSubjects = githubForge{}
+var _ BranchProtectionForge = githubForge{}
 var _ LandingRef = localForge{}
 var _ LandingRepair = localForge{}
 var _ LandingContainmentQuery = localForge{}

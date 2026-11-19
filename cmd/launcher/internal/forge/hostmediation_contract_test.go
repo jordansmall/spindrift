@@ -10,7 +10,7 @@ import (
 
 // fakeHostMediationHarness adapts forge.Fake to forgetest.HostMediationHarness
 // and forgetest.IssueFilerHarness -- the Fake models every adapter's shape at
-// once here since AsGithubReadOnly()/AsIssueFiler() both wrap the same
+// once here since AsGithub()/AsIssueFiler() both wrap the same
 // underlying scripted fields the github/forgejo real-backend harnesses drive
 // through git/HTTP instead.
 type fakeHostMediationHarness struct {
@@ -23,7 +23,7 @@ func newFakeHostMediationHarness() *fakeHostMediationHarness {
 	f := forge.NewFake(testLabels)
 	return &fakeHostMediationHarness{
 		f:  f,
-		cf: f.AsGithubReadOnly(),
+		cf: f.AsGithub(),
 		tr: f.AsIssueFiler(),
 	}
 }

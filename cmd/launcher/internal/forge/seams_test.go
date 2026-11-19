@@ -92,14 +92,14 @@ func TestFake_AsLocal_HidesBranchProtectionForge(t *testing.T) {
 
 // The github-shaped Fake must report the values SetBranchProtected scripts,
 // which is the wiring the branch-protection doctor row needs (issue #2570).
-func TestFake_AsGithubReadOnly_ImplementsBranchProtectionForge(t *testing.T) {
+func TestFake_AsGithub_ImplementsBranchProtectionForge(t *testing.T) {
 	f := forge.NewFake()
 	f.SetBranchProtected("main", true)
-	cf := f.AsGithubReadOnly()
+	cf := f.AsGithub()
 
 	bp, ok := cf.(forge.BranchProtectionForge)
 	if !ok {
-		t.Fatal("AsGithubReadOnly() does not satisfy BranchProtectionForge")
+		t.Fatal("AsGithub() does not satisfy BranchProtectionForge")
 	}
 	protected, err := bp.BranchProtected("main")
 	if err != nil {
@@ -156,7 +156,7 @@ func TestFake_DoesNotImplementCIRunReporter(t *testing.T) {
 }
 
 // The read-only issue-filing relay (issue #2018) is reachable only through
-// the AsIssueFiler wrapper, matching createDraftPR's AsGithubReadOnly-only
+// the AsIssueFiler wrapper, matching createDraftPR's AsGithub-only
 // restriction.
 func TestFake_AsIssueFiler_ImplementsHostPostedIssueFiler(t *testing.T) {
 	f := forge.NewFake()

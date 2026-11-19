@@ -30,13 +30,13 @@ const (
 func (sh prShape) build(fc *forge.Fake) (forge.IssueTracker, forge.CodeForge) {
 	switch sh {
 	case shapeForgejo:
-		return fc.AsForgejoShaped(), fc.AsGithubReadOnly()
+		return fc.AsForgejoShaped(), fc.AsGithub()
 	case shapeLocalPR:
-		return fc.AsLocalShaped(), fc.AsGithubReadOnly()
+		return fc.AsLocalShaped(), fc.AsGithub()
 	case shapeGithubReadOnly:
-		return fc.AsNoLandingRecorder(), fc.AsGithubReadOnly()
+		return fc.AsNoLandingRecorder(), fc.AsGithub()
 	}
-	return fc, fc.AsGithubReadOnly()
+	return fc, fc.AsGithub()
 }
 
 // pinningForge is a PR forge that reads the PR head from a source core does not

@@ -36,7 +36,7 @@ func (h composedCodeForgeHarness) Unreachable() forge.CodeForge {
 		}}})
 	}))
 	conn, _ := loadGithubConnector(h.t, srv.Listener.Addr().String(), connectorRepo, srv.Client(), &bytes.Buffer{})
-	cf, _, err := composeForge(conn, srv.URL, connectorRepo, false)
+	cf, _, err := composeForge(conn, srv.URL, connectorRepo)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ var _ forgetest.HostMediationHarness = (*composedHostMediationHarness)(nil)
 
 func newComposedHostMediationHarness(t *testing.T) *composedHostMediationHarness {
 	return &composedHostMediationHarness{
-		connectorHarness: newComposedHarness(t, true), fake: forge.NewFake(),
+		connectorHarness: newComposedHarness(t), fake: forge.NewFake(),
 		relayedSHA: map[string]string{}, seeded: map[string]bool{}, prSeq: 1500,
 	}
 }
@@ -262,7 +262,7 @@ func (h *connectorHarness) mergeRequests() int {
 // merge refused by the host before it is sent, with the refusal named and
 // audited, never mistaken for a retryable or conflict failure.
 func TestConnector_UndeclaredRepoMergeIsRefusedUnsentAndAudited(t *testing.T) {
-	h := newHarnessFor(t, false, hostileRepo)
+	h := newHarnessFor(t, hostileRepo)
 	landable := h.SeedLandablePR("431")
 	url := strings.Replace(landable, "/"+connectorRepo+"/", "/"+hostileRepo+"/", 1)
 	h.audit.Reset()

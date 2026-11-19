@@ -184,7 +184,7 @@ func TestReadOnlyCodeForge_RelayBundle_AuthenticatesOverHTTPSNotSSH(t *testing.T
 	branch := "agent/issue-4647"
 	wantSHA := forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
 
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
+	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{})
 	if err := cf.(forge.BundleRelay).RelayBundle(outbox, branch); err != nil {
 		t.Fatalf("RelayBundle: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestReadOnlyCodeForge_CommitSubjects_AuthenticatesOverHTTPSNotSSH(t *testin
 	branch := "agent/issue-4647"
 	forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
 
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
+	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{})
 	subjects, err := cf.(forge.BundleCommitSubjects).CommitSubjects(outbox, "main", branch)
 	if err != nil {
 		t.Fatalf("CommitSubjects: %v", err)
@@ -275,7 +275,7 @@ func TestExecClient_Rebase_AuthenticatesOverHTTPSNotSSH(t *testing.T) {
 // invocation, not a token captured when the relay was constructed.
 func TestReadOnlyCodeForge_RelayBundle_HonoursRefreshedGHToken(t *testing.T) {
 	repo, srv := newRelayHTTPSHarness(t)
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
+	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{})
 	relay := func(branch string) error {
 		outbox := t.TempDir()
 		forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
@@ -329,7 +329,7 @@ func TestReadOnlyCodeForge_RelayBundle_IgnoresAmbientSSHRewrite(t *testing.T) {
 			branch := "agent/issue-4665"
 			wantSHA := forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
 
-			cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
+			var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{})
 			if err := cf.(forge.BundleRelay).RelayBundle(outbox, branch); err != nil {
 				t.Fatalf("RelayBundle: %v", err)
 			}

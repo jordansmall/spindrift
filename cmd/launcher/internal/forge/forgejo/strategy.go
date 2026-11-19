@@ -45,19 +45,9 @@ var Strategy = backendkit.Strategy{
 			return nil, err
 		}
 		if row, ok := primaryRow(); ok {
-			return newConnectorCodeForge(row, s, k, boxWritable)
+			return newConnectorCodeForge(row, s, k)
 		}
 		return NewForgejoCodeForge(codeForgeConfig(s, k), it), nil
-	},
-	NewReadOnlyCodeForge: func(s backendkit.Shared, l backendkit.Lookup, _ forge.SanitizedParent, it forge.IssueTracker) (forge.CodeForge, error) {
-		k, err := ReadKnobs(l)
-		if err != nil {
-			return nil, err
-		}
-		if row, ok := primaryRow(); ok {
-			return newConnectorCodeForge(row, s, k, boxReadOnly)
-		}
-		return NewReadOnlyForgejoCodeForge(codeForgeConfig(s, k), it), nil
 	},
 	NewLedger: func(s backendkit.Shared, l backendkit.Lookup) (backendkit.LedgerSite, error) {
 		k, err := ReadKnobs(l)

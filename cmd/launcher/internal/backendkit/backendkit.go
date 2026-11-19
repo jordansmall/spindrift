@@ -65,10 +65,9 @@ type Strategy struct {
 	ValidateTracker   func(Shared, Lookup) error
 	ValidateCodeForge func(Shared, Lookup) error
 
-	NewIssueTracker      func(Shared, Lookup) (forge.IssueTracker, error)
-	NewCodeForge         func(Shared, Lookup, forge.SanitizedParent, forge.IssueTracker) (forge.CodeForge, error)
-	NewReadOnlyCodeForge func(Shared, Lookup, forge.SanitizedParent, forge.IssueTracker) (forge.CodeForge, error)
-	NewLedger            func(Shared, Lookup) (LedgerSite, error)
+	NewIssueTracker func(Shared, Lookup) (forge.IssueTracker, error)
+	NewCodeForge    func(Shared, Lookup, forge.SanitizedParent, forge.IssueTracker) (forge.CodeForge, error)
+	NewLedger       func(Shared, Lookup) (LedgerSite, error)
 
 	// ConnectorRouted marks an adapter that reads through its non-shadow
 	// backend row's Connector. Without it a non-shadow row stays registered

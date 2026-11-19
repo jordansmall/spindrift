@@ -56,26 +56,6 @@ func newRelayHTTPSHarness(t *testing.T) (*forgetest.GitRepoFixture, *httpsRelayS
 	return repo, srv
 }
 
-// A read-write Box pushes in-box, so if NewExecClient satisfied
-// forge.BundleRelay, settle's relay-before-merge (ready.go) would try to relay
-// a bundle the Box never wrote and block every read-write github land.
-func TestExecClient_DoesNotImplementBundleRelay(t *testing.T) {
-	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{})
-	if _, ok := cf.(forge.BundleRelay); ok {
-		t.Error("NewExecClient satisfies forge.BundleRelay, want it hidden for read-write")
-	}
-}
-
-// The read-only adapter implements every PRForge method NewExecClient does, by
-// embedding it. It still opens PRs and watches CI as read-write does; only the
-// finished branch's hand-off differs (issue #1918).
-func TestReadOnlyCodeForge_ImplementsPRForge(t *testing.T) {
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
-	if _, ok := cf.(forge.PRForge); !ok {
-		t.Error("NewReadOnlyCodeForge does not satisfy forge.PRForge")
-	}
-}
-
 // Unlike local's RelayBundle, which only imports into its own bare backing
 // repo, this one must push to the real remote so the host-side draft-PR create
 // and the ready-flip/rebase-merge operate on a real remote branch.
@@ -85,7 +65,7 @@ func TestReadOnlyCodeForge_RelayBundle_PushesRefToOrigin(t *testing.T) {
 	branch := "agent/issue-1918"
 	wantSHA := forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
 
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
+	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{})
 	br, ok := cf.(forge.BundleRelay)
 	if !ok {
 		t.Fatal("github read-only CodeForge does not implement forge.BundleRelay")
@@ -107,7 +87,7 @@ func TestReadOnlyCodeForge_RelayBundle_CloneFailureSurfacesStderr(t *testing.T) 
 	outbox := t.TempDir()
 	forgetest.WriteFile(t, filepath.Join(outbox, seambundle.FileName), "not a bundle")
 
-	cf := NewReadOnlyCodeForge("owner/missing", forge.DispatchLabels{})
+	var cf forge.CodeForge = NewExecClient("owner/missing", forge.DispatchLabels{})
 	br := cf.(forge.BundleRelay)
 
 	err := br.RelayBundle(outbox, "agent/issue-1918")
@@ -126,7 +106,7 @@ func TestReadOnlyCodeForge_CommitSubjects_CloneFailureSurfacesStderr(t *testing.
 	outbox := t.TempDir()
 	forgetest.WriteFile(t, filepath.Join(outbox, seambundle.FileName), "not a bundle")
 
-	cf := NewReadOnlyCodeForge("owner/missing", forge.DispatchLabels{})
+	var cf forge.CodeForge = NewExecClient("owner/missing", forge.DispatchLabels{})
 	cs := cf.(forge.BundleCommitSubjects)
 
 	_, err := cs.CommitSubjects(outbox, "main", "agent/issue-1918")
@@ -144,7 +124,7 @@ func TestReadOnlyCodeForge_RelayBundle_MissingBundleErrors(t *testing.T) {
 	newRelayHarness(t)
 	outbox := t.TempDir()
 
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
+	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{})
 	br := cf.(forge.BundleRelay)
 
 	err := br.RelayBundle(outbox, "agent/issue-1918")
@@ -163,7 +143,7 @@ func TestReadOnlyCodeForge_RelayBundle_MalformedBundleErrors(t *testing.T) {
 	outbox := t.TempDir()
 	forgetest.WriteFile(t, filepath.Join(outbox, seambundle.FileName), "not a bundle")
 
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
+	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{})
 	br := cf.(forge.BundleRelay)
 
 	err := br.RelayBundle(outbox, "agent/issue-1918")
@@ -183,7 +163,7 @@ func TestReadOnlyCodeForge_CommitSubjects_ReturnsSubjectsReadOnly(t *testing.T) 
 	branch := "agent/issue-1918"
 	forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
 
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
+	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{})
 	cs, ok := cf.(forge.BundleCommitSubjects)
 	if !ok {
 		t.Fatal("github read-only CodeForge does not implement forge.BundleCommitSubjects")
@@ -209,7 +189,7 @@ func TestReadOnlyCodeForge_CommitSubjects_MissingBundleErrors(t *testing.T) {
 	newRelayHarness(t)
 	outbox := t.TempDir()
 
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
+	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{})
 	cs := cf.(forge.BundleCommitSubjects)
 
 	_, err := cs.CommitSubjects(outbox, "main", "agent/issue-1918")
@@ -228,7 +208,7 @@ func TestReadOnlyCodeForge_CommitSubjects_MalformedBundleErrors(t *testing.T) {
 	outbox := t.TempDir()
 	forgetest.WriteFile(t, filepath.Join(outbox, seambundle.FileName), "not a bundle")
 
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
+	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{})
 	cs := cf.(forge.BundleCommitSubjects)
 
 	_, err := cs.CommitSubjects(outbox, "main", "agent/issue-1918")
@@ -240,13 +220,12 @@ func TestReadOnlyCodeForge_CommitSubjects_MalformedBundleErrors(t *testing.T) {
 	}
 }
 
-// This is the host-side counterpart to the Box's own in-box `gh pr create`
-// under read-write (issue #1919). created=true distinguishes a fresh create
-// from the adoption path below (issue #2447).
+// created=true distinguishes a fresh create from the adoption path below
+// (issue #2447).
 func TestReadOnlyCodeForge_CreateDraftPR_ReturnsURL(t *testing.T) {
 	newRelayHarness(t)
 
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
+	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{})
 	dpc, ok := cf.(forge.DraftPRCreator)
 	if !ok {
 		t.Fatal("github read-only CodeForge does not implement forge.DraftPRCreator")
@@ -269,7 +248,7 @@ func TestReadOnlyCodeForge_CreateDraftPR_ReturnsURL(t *testing.T) {
 func TestReadOnlyCodeForge_CreateDraftPR_Errors(t *testing.T) {
 	newRelayHarness(t)
 
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
+	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{})
 	dpc := cf.(forge.DraftPRCreator)
 
 	if _, _, err := dpc.CreateDraftPR("feat: add widget", "body", "main", "fail-head"); err == nil {
@@ -297,7 +276,7 @@ pr-view)
 esac
 `)
 
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
+	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{})
 	dpc := cf.(forge.DraftPRCreator)
 
 	url, created, err := dpc.CreateDraftPR("feat: add widget", "body", "main", "agent/issue-2407")
@@ -328,7 +307,7 @@ pr-list)
 esac
 `)
 
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
+	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{})
 	dpc := cf.(forge.DraftPRCreator)
 
 	_, _, err := dpc.CreateDraftPR("feat: add widget", "body", "main", "agent/issue-2407")
@@ -349,7 +328,7 @@ func TestReadOnlyCodeForge_RelayBundle_ReRelayForceUpdatesRef(t *testing.T) {
 	branch := "agent/issue-1918"
 	forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
 
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{})
+	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{})
 	br := cf.(forge.BundleRelay)
 	if err := br.RelayBundle(outbox, branch); err != nil {
 		t.Fatalf("RelayBundle (first attempt): %v", err)

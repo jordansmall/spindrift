@@ -27,10 +27,6 @@ func routedGitClient(opts ...ExecOption) *execClient {
 	}, opts...)...)
 }
 
-func routedReadOnlyForge(opts ...ExecOption) *readOnlyCodeForge {
-	return &readOnlyCodeForge{execClient: routedGitClient(opts...)}
-}
-
 // A git step presents the row env's token as core's credential, and no gh
 // credential helper ran.
 func requireCoreCredential(t *testing.T, seen string, calls func() int) {
@@ -69,7 +65,7 @@ func requireNoCoreGit(t *testing.T, seen string) {
 func TestRoutedRow_BundleRelayRunsInCoreGit(t *testing.T) {
 	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
 	seen := gitCredentialLog(t)
-	f := routedReadOnlyForge()
+	f := routedGitClient()
 	const ref = "agent/issue-9002"
 	outbox := t.TempDir()
 	want := forgetest.SeedRelayBundle(t, h.backend.repo.Bare, "main", outbox, ref)
@@ -91,7 +87,7 @@ func TestRoutedRow_BundleRelayRunsInCoreGit(t *testing.T) {
 // A Box that wrote no bundle is the benign case under primary too.
 func TestRoutedRow_RelayOfNoBundleIsBenign(t *testing.T) {
 	routedLogHarness(t, useGithubRowRouted)
-	f := routedReadOnlyForge()
+	f := routedGitClient()
 
 	if err := f.RelayBundle(t.TempDir(), "agent/issue-1"); !errors.Is(err, forge.ErrBundleNotFound) {
 		t.Errorf("RelayBundle(empty outbox) = %v, want forge.ErrBundleNotFound", err)
@@ -262,12 +258,12 @@ var routedGitOps = []struct {
 	{"RelayBundle", func(h *connectorHarness, t *testing.T) error {
 		outbox := t.TempDir()
 		forgetest.SeedRelayBundle(t, h.backend.repo.Bare, "main", outbox, landingBranch)
-		return routedReadOnlyForge().RelayBundle(outbox, landingBranch)
+		return routedGitClient().RelayBundle(outbox, landingBranch)
 	}},
 	{"CommitSubjects", func(h *connectorHarness, t *testing.T) error {
 		outbox := t.TempDir()
 		forgetest.SeedRelayBundle(t, h.backend.repo.Bare, "main", outbox, landingBranch)
-		_, err := routedReadOnlyForge().CommitSubjects(outbox, "main", landingBranch)
+		_, err := routedGitClient().CommitSubjects(outbox, "main", landingBranch)
 		return err
 	}},
 	{"PushBranch", func(h *connectorHarness, t *testing.T) error {
@@ -375,7 +371,7 @@ func TestPlainRow_HostMediationContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cf, err := Strategy.NewReadOnlyCodeForge(s, nil, forge.SanitizedParent{}, nil)
+	cf, err := Strategy.NewCodeForge(s, nil, forge.SanitizedParent{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

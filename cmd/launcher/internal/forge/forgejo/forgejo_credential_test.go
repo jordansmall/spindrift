@@ -25,12 +25,11 @@ var urlUserinfo = regexp.MustCompile(`://[^/\s]*@`)
 var exitTail = regexp.MustCompile(`exit status \d+: \S`)
 
 // credHarness serves an authenticated smart-HTTP remote (user oauth2, password
-// = the Forgejo token) with git tracing on, and builds both adapters over it
+// = the Forgejo token) with git tracing on, and builds the adapter over it
 // with the credential-free URL, as the production fallback remote now is.
 type credHarness struct {
 	bare  string
-	rw    forge.CodeForge
-	ro    forge.CodeForge
+	cf    forge.CodeForge
 	trace func() string
 }
 
@@ -54,8 +53,7 @@ func newCredHarness(t *testing.T) *credHarness {
 	}
 	return &credHarness{
 		bare: bare,
-		rw:   forgejo.NewForgejoCodeForgeForTest(cfg, nil, url),
-		ro:   forgejo.NewReadOnlyForgejoCodeForgeForTest(cfg, nil, url),
+		cf:   forgejo.NewForgejoCodeForgeForTest(cfg, nil, url),
 		trace: func() string {
 			b, err := os.ReadFile(traceFile)
 			if err != nil {
@@ -105,7 +103,7 @@ func assertCloneConfigCredentialFree(t *testing.T, cf forge.CodeForge) {
 
 func TestForgejoCodeForge_RelayCloneConfigCarriesNoToken(t *testing.T) {
 	h := newCredHarness(t)
-	assertCloneConfigCredentialFree(t, h.rw)
+	assertCloneConfigCredentialFree(t, h.cf)
 	h.assertTokenOutOfBand(t)
 }
 
@@ -126,7 +124,7 @@ func TestForgejoCodeForge_RemoteOverrideUserinfoIsSplitOff(t *testing.T) {
 func TestForgejoCodeForge_CredentialAttachesOverHTTP(t *testing.T) {
 	h := newCredHarness(t)
 
-	if ok, err := h.rw.BranchExists("main"); err != nil || !ok {
+	if ok, err := h.cf.BranchExists("main"); err != nil || !ok {
 		t.Fatalf("BranchExists(main) = %v, %v; want true, nil", ok, err)
 	}
 
@@ -138,14 +136,14 @@ func TestForgejoCodeForge_CredentialAttachesOverHTTP(t *testing.T) {
 	forgetest.Run(t, src, "commit", "-m", "feature")
 	wantSHA := forgetest.RevParse(t, src, "work")
 
-	bp := h.rw.(forge.BranchPusher)
+	bp := h.cf.(forge.BranchPusher)
 	if err := bp.PushBranch(src, "work", "agent/issue-9001", "main"); err != nil {
 		t.Fatalf("PushBranch: %v", err)
 	}
 	if got := forgetest.RevParse(t, h.bare, "refs/heads/agent/issue-9001"); got != wantSHA {
 		t.Errorf("refs/heads/agent/issue-9001 = %s, want %s", got, wantSHA)
 	}
-	if ok, err := h.rw.BranchExists("agent/issue-9001"); err != nil || !ok {
+	if ok, err := h.cf.BranchExists("agent/issue-9001"); err != nil || !ok {
 		t.Fatalf("BranchExists(pushed branch) = %v, %v; want true, nil", ok, err)
 	}
 
@@ -161,8 +159,8 @@ func TestReadOnlyForgejoCodeForge_RelayBundleCredentialAttachesOverHTTP(t *testi
 		t.Fatal(err)
 	}
 
-	br := h.ro.(forge.BundleRelay)
-	if _, err := h.ro.(forge.BundleCommitSubjects).CommitSubjects(outbox, "main", branch); err != nil {
+	br := h.cf.(forge.BundleRelay)
+	if _, err := h.cf.(forge.BundleCommitSubjects).CommitSubjects(outbox, "main", branch); err != nil {
 		t.Fatalf("CommitSubjects: %v", err)
 	}
 	if err := br.RelayBundle(outbox, branch); err != nil {
@@ -209,7 +207,7 @@ func TestForgejoCodeForge_WrongTokenErrorsDoNotLeakIt(t *testing.T) {
 // nor URL userinfo in its config.
 func TestForgejoCodeForge_SeedMirrorAuthenticatesAndPersistsNoToken(t *testing.T) {
 	h := newCredHarness(t)
-	ms, ok := h.ro.(forge.MirrorSeeder)
+	ms, ok := h.cf.(forge.MirrorSeeder)
 	if !ok {
 		t.Fatal("read-only forgejo CodeForge does not implement forge.MirrorSeeder")
 	}
@@ -233,7 +231,7 @@ func TestForgejoCodeForge_SeedMirrorAuthenticatesAndPersistsNoToken(t *testing.T
 // A failed seed names git's cause, redacted of any URL userinfo and the token.
 func TestForgejoCodeForge_SeedMirrorFailureNamesCauseWithoutToken(t *testing.T) {
 	h := newCredHarness(t)
-	cf := forgejo.NewReadOnlyForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL: newFakeForgejo(t).URL(), Repo: "owner/repo", Token: credToken, BaseBranch: "main",
 	}, nil, h.bare+"-missing")
 	err := cf.(forge.MirrorSeeder).SeedMirror(filepath.Join(t.TempDir(), "repo.git"))

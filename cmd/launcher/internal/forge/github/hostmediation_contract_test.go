@@ -52,7 +52,7 @@ func newHostMediationHarness(t *testing.T) *hostMediationHarness {
 		repo:       repo,
 		stateDir:   stateDir,
 		base:       "main",
-		cf:         NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}),
+		cf:         NewExecClient("owner/repo", forge.DispatchLabels{}),
 		tr:         NewExecClient("owner/repo", forge.DispatchLabels{}),
 		relayedSHA: map[string]string{},
 	}
@@ -161,5 +161,5 @@ func (h *hostMediationHarness) RefSHA(ref string) string {
 
 // UnseedableCodeForge targets a repo the relay server has no directory for.
 func (h *hostMediationHarness) UnseedableCodeForge() (forge.CodeForge, string) {
-	return NewReadOnlyCodeForge("owner/missing", forge.DispatchLabels{}), "relay-token"
+	return NewExecClient("owner/missing", forge.DispatchLabels{}), "relay-token"
 }

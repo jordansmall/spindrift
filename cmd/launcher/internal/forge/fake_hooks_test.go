@@ -17,7 +17,7 @@ func TestFake_HooksFireOnInstrumentedMethods(t *testing.T) {
 	_, _, _ = f.OpenPRForBranch("b")
 	_ = f.TransitionState("1", Dispatchable, InProgress)
 	_ = f.Comment("1", "c")
-	_, _, _ = f.AsGithubReadOnly().(DraftPRCreator).CreateDraftPR("t", "b", "main", "h")
+	_, _, _ = f.AsGithub().(DraftPRCreator).CreateDraftPR("t", "b", "main", "h")
 	_ = f.AsLocal().(BundleRelay).RelayBundle("/o", "ref")
 
 	for m, n := range fired {

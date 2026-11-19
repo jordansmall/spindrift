@@ -28,9 +28,9 @@ type prForge struct {
 }
 
 // composePR wraps the validated push-only pieces p as a PR forge for a Connector
-// advertising caps, pinning PR URLs to webHost. relay adds the read-only Box's
-// bundle relay over the draft surface (see Git.ReadOnlyBox).
-func composePR(p *pushOnly, caps []string, webHost string, relay bool) forge.CodeForge {
+// advertising caps, pinning PR URLs to webHost. It adds no relay layer: Compose
+// does, since NewReader's forge has no clone to relay into.
+func composePR(p *pushOnly, caps []string, webHost string) forge.CodeForge {
 	f := &prForge{
 		reads:     &reads{call: p.call, target: p.target, webHost: webHost},
 		push:      p,
@@ -46,11 +46,6 @@ func composePR(p *pushOnly, caps []string, webHost string, relay bool) forge.Cod
 	}
 	if slices.Contains(caps, capDraftPRs) {
 		cf = draftPRLayer{cf, f, p}
-		// Settle reads BundleRelay as "the Box handed off a bundle", so only a
-		// read-only Box is offered it.
-		if relay {
-			cf = relayLayer{cf, p}
-		}
 	}
 	return cf
 }
@@ -76,7 +71,7 @@ type (
 		f *prForge
 		p *pushOnly
 	}
-	// relayLayer is the read-only Box's hand-off: core relays the bundle and
+	// relayLayer is the Box's hand-off: core relays the bundle and
 	// reads its commit subjects in its own git, so the Connector never sees
 	// either.
 	relayLayer struct {

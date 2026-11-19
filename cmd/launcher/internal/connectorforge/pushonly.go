@@ -65,11 +65,6 @@ type Git struct {
 	Plumbing func(cloneURL string, cred gitexec.Credential) forge.CodeForge
 	// Clock paces the retry backoff; the zero value is retry.RealClock().
 	Clock retry.Clock
-	// ReadOnlyBox is set when the Box cannot push (BOX_FORGE_AND_ISSUE_ACCESS=
-	// read-only), so core relays its bundle: Compose then offers BundleRelay and
-	// BundleCommitSubjects, and only on a forge declaring "forge.draftPRs",
-	// matching the native read-only constructors.
-	ReadOnlyBox bool
 	// WebHost is the forge's web and git host (host[:port]) from core's own
 	// config, GH_HOST for github. When set, both remote URLs must name it
 	// instead of a declared route host: a forge whose API host differs
@@ -144,10 +139,10 @@ type pushOnly struct {
 // BranchDeleter and no PRForge) or "forge" with "forge.prs" (a PR forge: the PR
 // surface, branch deletion and the merge commit, plus a CIRunReporter and
 // BranchProtectionForge only when declared, and a DraftPRCreator and
-// BranchPusher only on "forge.draftPRs"; with Git.ReadOnlyBox that surface also
-// relays the Box's bundle and reads its commit subjects). The returned
-// Capabilities are the composed forge resolved by type, so they and any later
-// type probe (doctor's, for one) agree on exactly what it offers.
+// BranchPusher only on "forge.draftPRs", which also relays the Box's bundle and
+// reads its commit subjects). The returned Capabilities are the composed forge
+// resolved by type, so they and any later type probe (doctor's, for one) agree
+// on exactly what it offers.
 // The remote's identity is read once here, and refused (and audited) unless
 // both its URLs are plain https on Git.WebHost or, without one, a host the
 // Connector declared, so the git credential never reaches a host the Connector
@@ -176,7 +171,10 @@ func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge,
 	if !isPushOnly {
 		// remote() accepted the web URL, so it parses with a host.
 		web, _ := url.Parse(remote.WebURL)
-		cf = composePR(p, c.Capabilities, web.Host, g.ReadOnlyBox)
+		cf = composePR(p, c.Capabilities, web.Host)
+		if has(capDraftPRs) {
+			cf = relayLayer{cf, p}
+		}
 	}
 	return cf, forge.ResolveCodeForge(cf), nil
 }

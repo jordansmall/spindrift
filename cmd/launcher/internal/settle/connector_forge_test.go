@@ -84,7 +84,7 @@ func TestSettle_PRLanderThroughConnectorForge(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := connectorforgetest.NewPRHostMediated(t, connectorforgetest.PRWasm)
+			h := connectorforgetest.NewPR(t)
 			url, outbox := h.SeedLandablePRWithBundle("1")
 			h.Backend.SetAutoMergeAllowed(true)
 
@@ -258,7 +258,7 @@ func TestSettle_NoDraftPRCapabilityCannotHostMediateThroughConnectorForge(t *tes
 // "merge conflicts" 405 (classed NotMergeable, issue #7270) reaches the
 // conflict response, not the generic merge-blocked hand-off.
 func TestSettle_ConflictingMergeRefusalRespondsToConflictThroughConnectorForge(t *testing.T) {
-	h := connectorforgetest.NewPRHostMediated(t, connectorforgetest.PRWasm)
+	h := connectorforgetest.NewPR(t)
 	url, outbox := h.SeedLandablePRWithBundle("1")
 	h.SeedConflicting(url)
 

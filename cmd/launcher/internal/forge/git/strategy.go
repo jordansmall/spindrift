@@ -33,13 +33,6 @@ var Strategy = backendkit.Strategy{
 		}
 		return NewGitClient(k.CodeForgeRemoteURL, s.BaseBranch, s.GitUserName, s.GitUserEmail), nil
 	},
-	NewReadOnlyCodeForge: func(s backendkit.Shared, l backendkit.Lookup, _ forge.SanitizedParent, _ forge.IssueTracker) (forge.CodeForge, error) {
-		k, err := ReadKnobs(l)
-		if err != nil {
-			return nil, err
-		}
-		return NewReadOnlyGitClient(k.CodeForgeRemoteURL, s.BaseBranch, s.GitUserName, s.GitUserEmail), nil
-	},
 	SeedMirror: func(s backendkit.Shared, l backendkit.Lookup, _, dir string) error {
 		k, err := ReadKnobs(l)
 		if err != nil {

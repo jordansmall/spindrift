@@ -33,11 +33,10 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 		outboxRelayCapable      bool
 		inBoxUnreachableTracker bool
 
-		hasValidateTracker      bool
-		hasValidateCodeForge    bool
-		hasNewIssueTracker      bool
-		hasNewCodeForge         bool
-		hasNewReadOnlyCodeForge bool
+		hasValidateTracker   bool
+		hasValidateCodeForge bool
+		hasNewIssueTracker   bool
+		hasNewCodeForge      bool
 	}{
 		{
 			name:               "github",
@@ -47,10 +46,9 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 			boxTokenEnvVar:     "BOX_GH_TOKEN",
 			outboxRelayCapable: true,
 
-			hasValidateTracker:      true,
-			hasNewIssueTracker:      true,
-			hasNewCodeForge:         true,
-			hasNewReadOnlyCodeForge: true,
+			hasValidateTracker: true,
+			hasNewIssueTracker: true,
+			hasNewCodeForge:    true,
 		},
 		{
 			name:               "forgejo",
@@ -62,11 +60,10 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 			doctorSlugHint:     "FORGEJO_BASE_URL",
 			outboxRelayCapable: true,
 
-			hasValidateTracker:      true,
-			hasValidateCodeForge:    true,
-			hasNewIssueTracker:      true,
-			hasNewCodeForge:         true,
-			hasNewReadOnlyCodeForge: true,
+			hasValidateTracker:   true,
+			hasValidateCodeForge: true,
+			hasNewIssueTracker:   true,
+			hasNewCodeForge:      true,
 		},
 		{
 			name:             "jira",
@@ -98,9 +95,8 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 			validAsCodeForge: true,
 			hostSeededMirror: true,
 
-			hasValidateCodeForge:    true,
-			hasNewCodeForge:         true,
-			hasNewReadOnlyCodeForge: true,
+			hasValidateCodeForge: true,
+			hasNewCodeForge:      true,
 		},
 	}
 
@@ -155,9 +151,6 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 			}
 			if (row.NewCodeForge != nil) != tc.hasNewCodeForge {
 				t.Errorf("newCodeForge present = %v, want %v", row.NewCodeForge != nil, tc.hasNewCodeForge)
-			}
-			if (row.NewReadOnlyCodeForge != nil) != tc.hasNewReadOnlyCodeForge {
-				t.Errorf("newReadOnlyCodeForge present = %v, want %v", row.NewReadOnlyCodeForge != nil, tc.hasNewReadOnlyCodeForge)
 			}
 		})
 	}

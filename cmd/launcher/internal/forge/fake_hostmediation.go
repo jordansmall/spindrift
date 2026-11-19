@@ -6,7 +6,7 @@ import "net/http"
 // HostPostedIssueFiler, LandingRef, LandingRepair, and LandingContainmentQuery
 // interfaces read or write. Its backing methods stay unexported so a bare *Fake
 // used as a CodeForge or IssueTracker cannot satisfy those gated interfaces by
-// accident; only the wrappers AsLocal, AsGithubReadOnly, AsIssueFiler, and
+// accident; only the wrappers AsLocal, AsGithub, AsIssueFiler, and
 // AsLocalIssueFiler return reach them, through promotion.
 type HostMediationFake struct {
 	*core
@@ -17,12 +17,12 @@ type HostMediationFake struct {
 	RelayBundleErrs []error
 	// RelayBundleErr, if non-nil, fails every RelayBundle call, scripting
 	// CODE_FORGE=local's missing or malformed bundle failure (ADR 0033).
-	// Only AsLocal() and AsGithubReadOnly() reach it.
+	// Only AsLocal() and AsGithub() reach it.
 	RelayBundleErr   error
 	RelayBundleCalls []RelayBundleCall
 
 	// CreateDraftPRURL is the URL a successful CreateDraftPR returns (issue
-	// #1919). Only AsGithubReadOnly() reaches it.
+	// #1919). Only AsGithub() reaches it.
 	CreateDraftPRURL string
 	CreateDraftPRErr error
 	// CreateDraftPRErrs, if non-empty, scripts the first len(CreateDraftPRErrs)
@@ -42,7 +42,7 @@ type HostMediationFake struct {
 
 	// CommitSubjectsResult scripts the subjects settle's PR-intent fallback
 	// (issue #2447) rebuilds a draft PR's title and body from. Only
-	// AsGithubReadOnly() reaches it.
+	// AsGithub() reaches it.
 	CommitSubjectsResult []string
 	CommitSubjectsErr    error
 	CommitSubjectsCalls  []CommitSubjectsCall

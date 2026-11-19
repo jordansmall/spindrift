@@ -162,9 +162,8 @@ func (s *Settle) transientBackoff() retry.LinearBackoff {
 
 // relayBoxBundle relays num's outbox bundle in via the Code Forge's optional
 // forge.BundleRelay hook (issue #1919), for callers whose Box may have bundled
-// instead of pushing. A read-write Code Forge never implements BundleRelay, so
-// this is a no-op there: its Box already pushed during its own run. ref is the
-// branch it relays, empty when the Code Forge is not a BundleRelay.
+// instead of pushing. ref is the branch it relays, empty (and a no-op) when the
+// Code Forge is not a BundleRelay.
 func (s *Settle) relayBoxBundle(num string, gen uint64) (ref string, err error) {
 	cf := s.cfForNum(num)
 	br := forge.ResolveCodeForge(cf).BundleRelay

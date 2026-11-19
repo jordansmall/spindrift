@@ -34,12 +34,6 @@ var Strategy = backendkit.Strategy{
 		}
 		return NewExecClient(s.RepoSlug, s.Labels, codeForgeOpts(s)...), nil
 	},
-	NewReadOnlyCodeForge: func(s backendkit.Shared, _ backendkit.Lookup, _ forge.SanitizedParent, _ forge.IssueTracker) (forge.CodeForge, error) {
-		if err := checkRoutedMergeMethodAtBuild(s); err != nil {
-			return nil, err
-		}
-		return NewReadOnlyCodeForge(s.RepoSlug, s.Labels, codeForgeOpts(s)...), nil
-	},
 	OpenPRForBranch: func(repoSlug, branch string) (bool, error) {
 		_, open, err := NewExecClient(repoSlug, forge.DispatchLabels{}).OpenPRForBranch(branch)
 		return open, err

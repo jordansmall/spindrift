@@ -2898,21 +2898,6 @@ func TestNewCodeForge_GithubReadOnly_ImplementsBundleRelay(t *testing.T) {
 	}
 }
 
-// An explicit read-write keeps today's github adapter byte for byte: it must
-// never satisfy forge.BundleRelay, or settle's generic relay-before-merge
-// (ready.go) would try to relay a bundle a read-write Box never wrote.
-func TestNewCodeForge_GithubReadWrite_DoesNotImplementBundleRelay(t *testing.T) {
-	c := minimalValidConfig()
-	c.CodeForge = "github"
-	c.BoxForgeAndIssueAccess = "read-write"
-
-	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
-
-	if _, ok := cf.(forge.BundleRelay); ok {
-		t.Error("newCodeForge(CODE_FORGE=github, BOX_FORGE_AND_ISSUE_ACCESS=read-write) satisfies forge.BundleRelay, want it hidden")
-	}
-}
-
 // github on both axes under read-only passes checkReadOnlyCapabilityGate:
 // github's backend registry row (issue #2526) carries RelayCapable and
 // HostPostingCapable, so the gate, now a registry lookup by name rather than a
@@ -2947,30 +2932,6 @@ func TestNewCodeForge_ForgejoReadOnly_SatisfiesBundleRelayAndDraftPRCreator(t *t
 	}
 	if _, ok := cf.(forge.DraftPRCreator); !ok {
 		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-only) does not satisfy forge.DraftPRCreator")
-	}
-}
-
-// The explicit read-write forgejo adapter now pushes branches and opens draft
-// PRs host-side too (issue #4071), so only forge.BundleRelay stays
-// read-only-only: settle's generic relay-before-merge (ready.go) would
-// otherwise try to relay a bundle a read-write Box never wrote.
-func TestNewCodeForge_ForgejoReadWrite_HostPRButNoBundleRelay(t *testing.T) {
-	c := minimalValidConfig()
-	c.CodeForge = "forgejo"
-	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
-	c.setRowKnob("FORGEJO_TOKEN", "tok")
-	c.BoxForgeAndIssueAccess = "read-write"
-
-	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
-
-	if _, ok := cf.(forge.BundleRelay); ok {
-		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-write) satisfies forge.BundleRelay, want it hidden")
-	}
-	if _, ok := cf.(forge.DraftPRCreator); !ok {
-		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-write) does not satisfy forge.DraftPRCreator")
-	}
-	if _, ok := cf.(forge.BranchPusher); !ok {
-		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-write) does not satisfy forge.BranchPusher")
 	}
 }
 

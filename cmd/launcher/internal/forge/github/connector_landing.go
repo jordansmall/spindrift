@@ -76,17 +76,15 @@ func (g *coreGit) seedMirror(dir string) error {
 // forgeWrite runs fn over the Connector's full Code Forge, with core's own git
 // doing every git operation. Nothing native sits under it: a surface the
 // Connector does not declare must fail with errNoCapability, never reach gh.
-// readOnlyBox is for the Box's bundle relay and its commit-subject read; the
-// other callers pass false.
-func (e *execClient) forgeWrite(row backendrows.Row, verb string, readOnlyBox bool, fn func(forge.CodeForge, forge.Capabilities) error) error {
-	return e.forgeGit(row, verb, readOnlyBox, func(cf forge.CodeForge, caps forge.Capabilities, _ *coreGit) error {
+func (e *execClient) forgeWrite(row backendrows.Row, verb string, fn func(forge.CodeForge, forge.Capabilities) error) error {
+	return e.forgeGit(row, verb, func(cf forge.CodeForge, caps forge.Capabilities, _ *coreGit) error {
 		return fn(cf, caps)
 	})
 }
 
 // forgeGit is forgeWrite for the callers that also run git of their own over
 // the clone URL Compose validated.
-func (e *execClient) forgeGit(row backendrows.Row, verb string, readOnlyBox bool, fn func(forge.CodeForge, forge.Capabilities, *coreGit) error) error {
+func (e *execClient) forgeGit(row backendrows.Row, verb string, fn func(forge.CodeForge, forge.Capabilities, *coreGit) error) error {
 	return e.connectorOp(row, connectorforge.ErrNotForge, verb, func(conn *connectorhost.Connector, api string) error {
 		cred, err := gitCredential(row)
 		if err != nil {
@@ -94,8 +92,7 @@ func (e *execClient) forgeGit(row backendrows.Row, verb string, readOnlyBox bool
 		}
 		var plumbing *coreGit
 		cf, caps, err := connectorforge.Compose(conn, connectorforge.Target{API: api, Repo: e.repo}, connectorforge.Git{
-			Credential:  cred,
-			ReadOnlyBox: readOnlyBox,
+			Credential: cred,
 			// The Routes name only api.github.com; git and the web are on Host().
 			WebHost: Host(),
 			Plumbing: func(cloneURL string, cred gitexec.Credential) forge.CodeForge {
@@ -115,7 +112,7 @@ func (e *execClient) forgeGit(row backendrows.Row, verb string, readOnlyBox bool
 
 // prWrite is forgeWrite for the writes on forge.PRForge.
 func (e *execClient) prWrite(row backendrows.Row, verb string, fn func(forge.PRForge) error) error {
-	return e.forgeWrite(row, verb, false, func(_ forge.CodeForge, caps forge.Capabilities) error {
+	return e.forgeWrite(row, verb, func(_ forge.CodeForge, caps forge.Capabilities) error {
 		if caps.PRForge == nil {
 			return fmt.Errorf("%w: forge.prs", errNoCapability)
 		}
@@ -136,7 +133,7 @@ func (e *execClient) commentPRViaConnector(row backendrows.Row, prURL, body stri
 }
 
 func (e *execClient) deleteBranchViaConnector(row backendrows.Row, branch, base string) error {
-	return e.forgeWrite(row, "delete a branch", false, func(_ forge.CodeForge, caps forge.Capabilities) error {
+	return e.forgeWrite(row, "delete a branch", func(_ forge.CodeForge, caps forge.Capabilities) error {
 		if caps.BranchDeleter == nil {
 			return fmt.Errorf("%w: forge.branches", errNoCapability)
 		}
@@ -145,7 +142,7 @@ func (e *execClient) deleteBranchViaConnector(row backendrows.Row, branch, base 
 }
 
 func (e *execClient) createDraftPRViaConnector(row backendrows.Row, title, body, base, head string) (url string, created bool, err error) {
-	err = e.forgeWrite(row, "open a draft PR", false, func(_ forge.CodeForge, caps forge.Capabilities) error {
+	err = e.forgeWrite(row, "open a draft PR", func(_ forge.CodeForge, caps forge.Capabilities) error {
 		if caps.DraftPRCreator == nil {
 			return fmt.Errorf("%w: forge.draftPRs", errNoCapability)
 		}
@@ -157,7 +154,7 @@ func (e *execClient) createDraftPRViaConnector(row backendrows.Row, title, body,
 }
 
 func (e *execClient) pushBranchViaConnector(row backendrows.Row, srcDir, localRef, branch, base string) error {
-	return e.forgeWrite(row, "push a branch", false, func(_ forge.CodeForge, caps forge.Capabilities) error {
+	return e.forgeWrite(row, "push a branch", func(_ forge.CodeForge, caps forge.Capabilities) error {
 		if caps.BranchPusher == nil {
 			return fmt.Errorf("%w: forge.draftPRs", errNoCapability)
 		}
@@ -166,7 +163,7 @@ func (e *execClient) pushBranchViaConnector(row backendrows.Row, srcDir, localRe
 }
 
 func (e *execClient) relayBundleViaConnector(row backendrows.Row, outboxDir, ref string) error {
-	return e.forgeWrite(row, "relay a bundle", true, func(_ forge.CodeForge, caps forge.Capabilities) error {
+	return e.forgeWrite(row, "relay a bundle", func(_ forge.CodeForge, caps forge.Capabilities) error {
 		if caps.BundleRelay == nil {
 			return fmt.Errorf("%w: forge.draftPRs", errNoCapability)
 		}
@@ -175,7 +172,7 @@ func (e *execClient) relayBundleViaConnector(row backendrows.Row, outboxDir, ref
 }
 
 func (e *execClient) commitSubjectsViaConnector(row backendrows.Row, outboxDir, base, ref string) (subjects []string, err error) {
-	err = e.forgeWrite(row, "read a bundle's commit subjects", true, func(_ forge.CodeForge, caps forge.Capabilities) error {
+	err = e.forgeWrite(row, "read a bundle's commit subjects", func(_ forge.CodeForge, caps forge.Capabilities) error {
 		if caps.BundleCommitSubjects == nil {
 			return fmt.Errorf("%w: forge.draftPRs", errNoCapability)
 		}
@@ -187,7 +184,7 @@ func (e *execClient) commitSubjectsViaConnector(row backendrows.Row, outboxDir, 
 }
 
 func (e *execClient) rebasePRHeadViaConnector(row backendrows.Row, prURL, head string) error {
-	return e.forgeWrite(row, "rebase a PR", false, func(_ forge.CodeForge, caps forge.Capabilities) error {
+	return e.forgeWrite(row, "rebase a PR", func(_ forge.CodeForge, caps forge.Capabilities) error {
 		if caps.PRHeadRebaser == nil {
 			return fmt.Errorf("%w: forge.prs", errNoCapability)
 		}
@@ -196,7 +193,7 @@ func (e *execClient) rebasePRHeadViaConnector(row backendrows.Row, prURL, head s
 }
 
 func (e *execClient) seedMirrorViaConnector(row backendrows.Row, dir string) error {
-	return e.forgeGit(row, "seed the mirror", false, func(_ forge.CodeForge, _ forge.Capabilities, g *coreGit) error {
+	return e.forgeGit(row, "seed the mirror", func(_ forge.CodeForge, _ forge.Capabilities, g *coreGit) error {
 		return g.seedMirror(dir)
 	})
 }
@@ -206,7 +203,7 @@ func (e *execClient) seedMirrorViaConnector(row backendrows.Row, dir string) err
 // carries no gh credential helper.
 func (e *execClient) ledgerSiteViaConnector(row backendrows.Row) (backendkit.LedgerSite, error) {
 	var site backendkit.LedgerSite
-	err := e.forgeGit(row, "reach the Ledger", false, func(_ forge.CodeForge, _ forge.Capabilities, g *coreGit) error {
+	err := e.forgeGit(row, "reach the Ledger", func(_ forge.CodeForge, _ forge.Capabilities, g *coreGit) error {
 		site = backendkit.LedgerSite{URL: g.cloneURL, Credential: g.cred}
 		return nil
 	})
@@ -236,7 +233,7 @@ func (e *execClient) mergeViaConnector(row backendrows.Row, prURL string) error 
 	if err := e.checkRoutedMergeMethod(); err != nil {
 		return err
 	}
-	err := e.forgeWrite(row, "merge a PR", false, func(cf forge.CodeForge, caps forge.Capabilities) error {
+	err := e.forgeWrite(row, "merge a PR", func(cf forge.CodeForge, caps forge.Capabilities) error {
 		// A push-only Connector composes without a PR forge; its Merge must
 		// not be reachable.
 		if caps.PRForge == nil {
@@ -247,7 +244,7 @@ func (e *execClient) mergeViaConnector(row backendrows.Row, prURL string) error 
 	if err != nil {
 		return err
 	}
-	err = e.forgeWrite(row, "delete a merged PR's head branch", false, func(cf forge.CodeForge, caps forge.Capabilities) error {
+	err = e.forgeWrite(row, "delete a merged PR's head branch", func(cf forge.CodeForge, caps forge.Capabilities) error {
 		head, crossRepo, herr := connectorforge.HeadOf(cf, prURL)
 		if herr != nil {
 			return herr

@@ -28,7 +28,7 @@ func routedHarness(t *testing.T) (h *connectorHarness, c *execClient, calls func
 // harnessWithRow is routedHarness with the github row applied by useRow.
 func harnessWithRow(t *testing.T, useRow func(t *testing.T, host string)) (h *connectorHarness, c *execClient, calls func() int) {
 	t.Helper()
-	h = newConnectorHarness(t)
+	h = newComposedHarness(t)
 	useRow(t, h.backend.host)
 	old := connectorClient
 	connectorClient = h.backend.Client()
@@ -293,7 +293,7 @@ func TestConnector_DedupScanOf500IssuesFitsUnderTheInterpreter(t *testing.T) {
 		count   = 500
 		bodyLen = 6000
 	)
-	h := newConnectorHarness(t)
+	h := newComposedHarness(t)
 	for n := range count {
 		num := fmt.Sprint(1000 + n)
 		h.SeedIssue(forge.Issue{Number: num, Title: "finding " + num, Body: num + ":" + strings.Repeat("x", bodyLen), Labels: []string{label}})

@@ -23,7 +23,6 @@ func relayCapabilityViolations() []string {
 		}
 		c := minimalValidConfig()
 		c.CodeForge = row.Name
-		c.BoxForgeAndIssueAccess = "read-only"
 		cf, err := newCodeForge(c, local.SanitizedParent{}, forge.NewFake())
 		if err != nil {
 			out = append(out, row.Name+": newCodeForge: "+err.Error())
@@ -58,9 +57,7 @@ func relayCapabilityViolations() []string {
 // read-only forge implements: BundleRelay iff RelayCapable, DraftPRCreator iff
 // BundleCommitSubjects, no PR capability without RelayCapable, and
 // OutboxRelayCapable iff DraftPRCreator.
-// Read-only is the only scope that holds: since issue #4071 the read-write
-// github and forgejo adapters implement DraftPRCreator without a bundle relay,
-// so probing them would flag both rows. A nix-only row with no Go row is
+// A nix-only row with no Go row is
 // already caught by TestBackendRowsCoverRegistry plus nix/checks/schema-drift.nix's
 // backend-registry-gen.
 func TestRelayCapableMatchesReadOnlyForgeInterfaces(t *testing.T) {

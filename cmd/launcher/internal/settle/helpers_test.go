@@ -95,23 +95,23 @@ func row(t *testing.T, name string) backend.Descriptor {
 var githubRow, _ = backend.ByName("github")
 
 // roFake is a *forge.Fake that keeps the host-mediation surface of
-// AsGithubReadOnly while a wrapper overrides other methods: the Box never
+// AsGithub while a wrapper overrides other methods: the Box never
 // pushes, so every PR Lander forge relays bundles and opens the draft PR.
 type roFake struct{ *forge.Fake }
 
 func (r roFake) RelayBundle(outboxDir, ref string) error {
-	return r.AsGithubReadOnly().(forge.BundleRelay).RelayBundle(outboxDir, ref)
+	return r.AsGithub().(forge.BundleRelay).RelayBundle(outboxDir, ref)
 }
 
 func (r roFake) CreateDraftPR(title, body, base, head string) (string, bool, error) {
-	return r.AsGithubReadOnly().(forge.DraftPRCreator).CreateDraftPR(title, body, base, head)
+	return r.AsGithub().(forge.DraftPRCreator).CreateDraftPR(title, body, base, head)
 }
 
 func (r roFake) CommitSubjects(outboxDir, base, ref string) ([]string, error) {
-	return r.AsGithubReadOnly().(forge.BundleCommitSubjects).CommitSubjects(outboxDir, base, ref)
+	return r.AsGithub().(forge.BundleCommitSubjects).CommitSubjects(outboxDir, base, ref)
 }
 
-// roRunURL keeps host mediation on a RunURLFake, which AsGithubReadOnly would
+// roRunURL keeps host mediation on a RunURLFake, which AsGithub would
 // otherwise hide behind a wrapper that has no RunURL.
 type roRunURL struct{ *forge.RunURLFake }
 

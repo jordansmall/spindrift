@@ -645,9 +645,6 @@ func newCodeForge(c config, parent local.SanitizedParent, it forge.IssueTracker)
 	if !ok || s.NewCodeForge == nil {
 		panic(fmt.Sprintf("newCodeForge: CODE_FORGE=%q is not a registered code forge (validate should have rejected it)", c.CodeForge))
 	}
-	if c.BoxForgeAndIssueAccess == "read-only" && s.NewReadOnlyCodeForge != nil {
-		return s.NewReadOnlyCodeForge(backendShared(c), c.knobLookup, parent, it)
-	}
 	return s.NewCodeForge(backendShared(c), c.knobLookup, parent, it)
 }
 

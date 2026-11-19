@@ -15,7 +15,7 @@ import (
 // number,title,labels`, so Body and State come back empty; the Connector must
 // list the same projection or every sampled ListIssues diverges.
 func TestConnector_DispatchableListMatchesNativeProjection(t *testing.T) {
-	conn := newConnectorHarness(t)
+	conn := newComposedHarness(t)
 	native := newGithubHarness(t)
 
 	dispatch := testLabels.Label(forge.Dispatchable)

@@ -32,7 +32,7 @@ var (
 
 func newTrackerHarness(t *testing.T) trackerHarness {
 	t.Helper()
-	h := newConnectorHarness(t, false, true)
+	h := newConnectorHarness(t, true)
 	tr, err := buildTracker(h.srv)
 	if err != nil {
 		t.Fatal(err)

@@ -19,8 +19,7 @@ func TestStrategyShape(t *testing.T) {
 	if s.ValidateTracker == nil || s.NewIssueTracker == nil {
 		t.Error("jira must fill ValidateTracker and NewIssueTracker")
 	}
-	if s.ValidateCodeForge != nil || s.NewCodeForge != nil ||
-		s.NewReadOnlyCodeForge != nil || s.NewLedger != nil {
+	if s.ValidateCodeForge != nil || s.NewCodeForge != nil || s.NewLedger != nil {
 		t.Error("jira is a tracker-only backend")
 	}
 }

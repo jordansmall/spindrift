@@ -6,44 +6,26 @@ import (
 	"spindrift.dev/launcher/internal/gitexec"
 )
 
-// readOnlyCodeForge exists so that only the read-only constructor satisfies
-// forge.BundleRelay and forge.BundleCommitSubjects, which settle type-asserts
-// (ready.go): a read-write Box pushes and opens its own PR in-box, so settle
-// must never relay a bundle or reconstruct commit subjects for it. Both
-// forge.DraftPRCreator and forge.BranchPusher live on the embedded
-// *execClient instead (issue #4071) -- read-write and read-only alike get
-// them, and readOnlyCodeForge picks them up by promotion.
-type readOnlyCodeForge struct {
-	*execClient
-}
-
-// NewReadOnlyCodeForge returns the gh-exec adapter for
-// BOX_FORGE_AND_ISSUE_ACCESS=read-only. It adds the host-mediated bundle
-// hand-off to NewExecClient, which a Box that cannot push needs (issue #1918).
-func NewReadOnlyCodeForge(repo string, labels forge.DispatchLabels, opts ...ExecOption) forge.CodeForge {
-	return &readOnlyCodeForge{execClient: NewExecClient(repo, labels, opts...)}
-}
-
 // RelayBundle imports ref from the bundle in outboxDir into a fresh clone and
 // force-pushes it to origin over HTTPS, authenticated by the gh credential
 // helper (see GitRemote), not gh's per-host git_protocol. A
 // missing bundle returns forge.ErrBundleNotFound, the benign "Box wrote
 // nothing" case; a bundle that is present but unreadable or fails `git bundle
 // verify` returns an error so a broken hand-off blocks the seam (issue #2096).
-func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
+func (c *execClient) RelayBundle(outboxDir, ref string) error {
 	if row, ok := routedRow(); ok {
-		return c.execClient.relayBundleViaConnector(row, outboxDir, ref)
+		return c.relayBundleViaConnector(row, outboxDir, ref)
 	}
 	return bundlerelay.Relay("github", outboxDir, ref, gitexec.Credential{}, c.httpsClone("relay bundle"))
 }
 
 // CommitSubjects returns the bundle's one-line commit subjects for ref
-// relative to base, oldest first, for settle's read-only PR-intent fallback
+// relative to base, oldest first, for settle's PR-intent fallback
 // (issue #2447). It never checks anything out or pushes, so it cannot mutate
 // the remote.
-func (c *readOnlyCodeForge) CommitSubjects(outboxDir, base, ref string) ([]string, error) {
+func (c *execClient) CommitSubjects(outboxDir, base, ref string) ([]string, error) {
 	if row, ok := routedRow(); ok {
-		return c.execClient.commitSubjectsViaConnector(row, outboxDir, base, ref)
+		return c.commitSubjectsViaConnector(row, outboxDir, base, ref)
 	}
 	return bundlerelay.CommitSubjects("github", outboxDir, base, ref, c.httpsClone("commit subjects"))
 }
@@ -71,7 +53,7 @@ func GitRemote(repo string) (url string, gitArgs []string) {
 	}
 }
 
-var _ forge.BundleCommitSubjects = (*readOnlyCodeForge)(nil)
-var _ forge.BundleRelay = (*readOnlyCodeForge)(nil)
-var _ forge.MergeCommitReader = (*readOnlyCodeForge)(nil)
-var _ forge.MirrorSeeder = (*readOnlyCodeForge)(nil)
+var _ forge.BundleCommitSubjects = (*execClient)(nil)
+var _ forge.BundleRelay = (*execClient)(nil)
+var _ forge.MergeCommitReader = (*execClient)(nil)
+var _ forge.MirrorSeeder = (*execClient)(nil)

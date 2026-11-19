@@ -45,7 +45,7 @@ func newQueueRecoverFixture(t *testing.T) *queueRecoverFixture {
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 	dir := tempLogDir(t)
 	t.Chdir(dir)
-	return &queueRecoverFixture{c: c, fc: fc, tracker: fc, cf: fc.AsGithubReadOnly(), dir: dir}
+	return &queueRecoverFixture{c: c, fc: fc, tracker: fc, cf: fc.AsGithub(), dir: dir}
 }
 
 // addFailed seeds an agent-failed issue with a bundle and a self-report line.

@@ -16,17 +16,17 @@ func TestFake_BareFakeDoesNotSatisfyBundleCommitSubjects(t *testing.T) {
 	}
 }
 
-func TestFake_AsGithubReadOnlySatisfiesBundleCommitSubjects(t *testing.T) {
-	cf := NewFake().AsGithubReadOnly()
+func TestFake_AsGithubSatisfiesBundleCommitSubjects(t *testing.T) {
+	cf := NewFake().AsGithub()
 	if _, ok := cf.(BundleCommitSubjects); !ok {
-		t.Fatal("AsGithubReadOnly() must satisfy BundleCommitSubjects")
+		t.Fatal("AsGithub() must satisfy BundleCommitSubjects")
 	}
 }
 
 // An unscripted Fake mirrors RelayBundle's own zero-value default when
 // RelayBundleErr is unset.
 func TestFake_CommitSubjectsDefaultsToNilNil(t *testing.T) {
-	cf := NewFake().AsGithubReadOnly().(BundleCommitSubjects)
+	cf := NewFake().AsGithub().(BundleCommitSubjects)
 	subjects, err := cf.CommitSubjects("outbox", "main", "branch")
 	if subjects != nil || err != nil {
 		t.Fatalf("got (%v, %v), want (nil, nil)", subjects, err)
@@ -36,7 +36,7 @@ func TestFake_CommitSubjectsDefaultsToNilNil(t *testing.T) {
 func TestFake_CommitSubjectsResultScriptsSuccess(t *testing.T) {
 	fc := NewFake()
 	fc.CommitSubjectsResult = []string{"a", "b"}
-	cf := fc.AsGithubReadOnly().(BundleCommitSubjects)
+	cf := fc.AsGithub().(BundleCommitSubjects)
 
 	subjects, err := cf.CommitSubjects("outbox", "main", "branch")
 	if err != nil {
@@ -51,7 +51,7 @@ func TestFake_CommitSubjectsErrScriptsFailure(t *testing.T) {
 	fc := NewFake()
 	wantErr := errors.New("boom")
 	fc.CommitSubjectsErr = wantErr
-	cf := fc.AsGithubReadOnly().(BundleCommitSubjects)
+	cf := fc.AsGithub().(BundleCommitSubjects)
 
 	subjects, err := cf.CommitSubjects("outbox", "main", "branch")
 	if !errors.Is(err, wantErr) {
@@ -64,7 +64,7 @@ func TestFake_CommitSubjectsErrScriptsFailure(t *testing.T) {
 
 func TestFake_CommitSubjectsCallsRecordsInvocations(t *testing.T) {
 	fc := NewFake()
-	cf := fc.AsGithubReadOnly().(BundleCommitSubjects)
+	cf := fc.AsGithub().(BundleCommitSubjects)
 
 	if _, err := cf.CommitSubjects("outbox1", "main", "branch1"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
