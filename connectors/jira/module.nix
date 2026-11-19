@@ -1,14 +1,13 @@
 # The jira Connector's flake-parts module: the Connector's whole tracker path.
-# The native jira adapter stays the default and every binary uses it until a
-# Consumer sets `spindrift.connectors.jira.primary = true`; then the Connector
-# answers the whole tracker (reads, claim, transitions, labels, comments and
-# filed findings), with no native fallback, and dropping `primary` reverts.
+# The Connector is jira's only tracker: it answers every read, claim, transition,
+# label, comment and filed finding of an ISSUE_TRACKER=jira run, and `primary` is
+# refused on the row because no native adapter remains to replace.
 # Leave the row's `shadow` option off: the read shadow names a GitHub-shaped
 # target (repo slug, no dialect), not jira's project key and API dialect.
 #
 # The row authorizes with Basic credentials, the Jira Cloud form (account email
 # plus API token). Server/Data Center PATs are Bearer, which one row cannot
-# express beside Basic, so a Server/Data Center site under `primary` needs a
+# express beside Basic, so a Server/Data Center site needs a
 # username and password or token in the two knobs below, not a PAT.
 { core }:
 { ... }:
@@ -27,14 +26,14 @@ in
       env = "SPINDRIFT_JIRA_CONNECTOR_TOKEN";
       group = "dispatch";
       secret = true;
-      doc = "API token the jira Connector's backend row authorizes its calls with, paired with SPINDRIFT_JIRA_CONNECTOR_EMAIL for Basic auth (needs permission to edit and transition issues in the project: the Connector writes labels, comments and workflow transitions through it); host-only, never reaches the Box; read only while the jira row sets `primary`";
+      doc = "API token the jira Connector's backend row authorizes its calls with, paired with SPINDRIFT_JIRA_CONNECTOR_EMAIL for Basic auth (needs permission to edit and transition issues in the project: the Connector writes labels, comments and workflow transitions through it); host-only, never reaches the Box; read on every ISSUE_TRACKER=jira run";
       flakeOption = false;
       boxEnv = false;
     };
     jiraConnectorEmail = {
       env = "SPINDRIFT_JIRA_CONNECTOR_EMAIL";
       group = "dispatch";
-      doc = "Jira Cloud account email (Server/Data Center: username) the jira Connector's backend row pairs with SPINDRIFT_JIRA_CONNECTOR_TOKEN for Basic auth; host-only, never reaches the Box; read only while the jira row sets `primary`";
+      doc = "Jira Cloud account email (Server/Data Center: username) the jira Connector's backend row pairs with SPINDRIFT_JIRA_CONNECTOR_TOKEN for Basic auth; host-only, never reaches the Box; read on every ISSUE_TRACKER=jira run";
       flakeOption = false;
       boxEnv = false;
     };
@@ -50,7 +49,7 @@ in
     credential = "jiraConnectorToken";
     scheme = "basic";
     identity = "jiraConnectorEmail";
-    # The site URL is the native adapter's own JIRA_BASE_URL; the base is not a
+    # The site URL is core's JIRA_BASE_URL; the base is not a
     # secret, so a core knob may carry it.
     base = "jiraBaseURL";
   };

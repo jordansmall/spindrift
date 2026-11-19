@@ -42,6 +42,7 @@ let
   driverPrimaries = fixtures.dogfoodDriverPrimaries;
   claudeConnector = (import ../../connectors/claude).lib.connector { core = import ../../core; };
   githubConnector = (import ../../connectors/github).lib.connector { core = import ../../core; };
+  jiraConnector = (import ../../connectors/jira).lib.connector { core = import ../../core; };
   githubProgramWith =
     modules:
     (fixtures.connectorConsumerVia (
@@ -497,6 +498,7 @@ in
   connector-driver-rows-primary-refusals =
     let
       names = import ../../lib/connector-names.nix;
+      inherit (names) nativeBackendNames;
       consumerWith =
         modules:
         fixtures.connectorConsumerVia (
@@ -598,5 +600,27 @@ in
     assert assertMsg (evaluatesWith [
       { spindrift.connectors.claude.primary = true; }
     ]) "control: `primary` on the claude driver row must evaluate";
+    # jira has no native adapter (connectorOnly), so its Connector row is
+    # refused `primary` with the "no native backend" message.
+    assert assertMsg (evaluatesWith [
+      jiraConnector.flakeModule
+    ]) "control: the jira Connector row evaluates without `primary`";
+    assert assertMsg (
+      !(evaluatesWith [
+        jiraConnector.flakeModule
+        { spindrift.connectors.jira.primary = true; }
+      ])
+    ) "`primary` on the jira row must fail evaluation: no native backend remains";
+    assert assertMsg (
+      !(builtins.elem "jira" nativeBackendNames)
+    ) "jira must stay out of the native backend names the module checks `primary` against";
+    assert assertMsg (
+      names.primaryError nativeBackendNames [ ] "jira" {
+        shadow = false;
+        driver = null;
+        backend = { };
+      }
+      == "Connector 'jira': `primary` needs a native backend of the same name to replace; none is registered"
+    ) "the jira refusal must be the existing no-native-backend message";
     pkgs.runCommand "connector-driver-rows-primary-refusals" { } "touch $out";
 }

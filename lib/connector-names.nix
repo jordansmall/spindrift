@@ -6,6 +6,13 @@
 # Consumer's switch on a registered row (issues #6797, #6810, #6998), not a
 # second registration.
 rec {
+  # Names of the backends with a native adapter. A `connectorOnly` backend
+  # (jira) has none, so its Connector row cannot be `primary`. One source for
+  # the module and nix/checks/connector-driver-rows.nix.
+  nativeBackendNames = map (b: b.name) (
+    builtins.filter (b: !(b.connectorOnly or false)) (import ./backends/default.nix)
+  );
+
   # Why a row's `primary` (issues #6998, #6999) cannot stand, or null.
   # `nativeNames` is the native backend registry's names, `nativeDriverNames`
   # the core Driver registry's. A row with a `driver` is checked as a Driver, one
