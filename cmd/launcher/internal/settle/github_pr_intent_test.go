@@ -250,7 +250,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits(t *testing
 	if !strings.Contains(call.Body, "Reconstructed host-side") {
 		t.Errorf("Body = %q, want it to contain the reconstructed-host-side explanation", call.Body)
 	}
-	if !strings.Contains(call.Body, "- feat: add widget") || !strings.Contains(call.Body, "- fix: typo") {
+	if !strings.Contains(call.Body, "- feat: add widget") || !strings.Contains(call.Body, "- f"+zwsp+"ix: typo") {
 		t.Errorf("Body = %q, want it to bullet both commit subjects", call.Body)
 	}
 	if !strings.HasSuffix(strings.TrimRight(call.Body, "\n"), "Closes #1919") {
@@ -341,13 +341,13 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_DefusesInj
 		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", fc.CreateDraftPRCalls)
 	}
 	body := fc.CreateDraftPRCalls[0].Body
-	if hasClosingReference(body, otherNum) {
+	if liveClosingRef(body, otherNum) {
 		t.Errorf("Body = %q, must not carry a live closing reference to unrelated issue #%s", body, otherNum)
 	}
-	if !strings.Contains(body, otherNum) || !strings.Contains(body, "closes") {
-		t.Errorf("Body = %q, want the defused subject to still be visually recognizable (contain %q and \"closes\")", body, otherNum)
+	if !strings.Contains(body, otherNum) || !strings.Contains(body, "c"+zwsp+"loses") {
+		t.Errorf("Body = %q, want the defused subject to still be visually recognizable (contain %q and %q)", body, otherNum, "c"+zwsp+"loses")
 	}
-	if !hasClosingReference(body, issNum) {
+	if !liveClosingRef(body, issNum) {
 		t.Errorf("Body = %q, want a live Closes reference to the landed issue #%s", body, issNum)
 	}
 }
