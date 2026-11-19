@@ -423,6 +423,26 @@ func TestDecodeMistypedFieldHostOpYieldsNoEvents(t *testing.T) {
 	}
 }
 
+// A repeated spindrift_op key merges as core's connectorhost.hostOp does: a
+// mistyped field in any copy makes it a no-event host line, and a field one
+// copy omits comes from the other.
+func TestDecodeRepeatedHostOpKeyFollowsCore(t *testing.T) {
+	const head = `{"type":"spindrift_op",`
+	for _, line := range []string{
+		head + `"spindrift_op":{"op":"settle","pass":"x"},"spindrift_op":{"op":"settle"}}`,
+		head + `"spindrift_op":{"op":"settle"},"spindrift_op":{"op":"settle","pass":"x"}}`,
+	} {
+		if evs := newDecoderAt(decodeNow)(line); len(evs) != 0 {
+			t.Errorf("%s: events = %+v, want none", line, evs)
+		}
+	}
+	evs := newDecoderAt(decodeNow)(head + `"spindrift_op":{"op":"pass_start","role":"review"},"spindrift_op":{"op":"settle"}}`)
+	wantKinds(t, evs, driverkit.KindHostOp)
+	if got := *evs[0].HostOp; got.Op != "settle" || got.Role != "review" {
+		t.Errorf("host op = %+v, want settle/review", got)
+	}
+}
+
 func TestDecodeMistypedFieldPassStartStillMovesRole(t *testing.T) {
 	d := newDecoderAt(decodeNow)
 	d(hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpPassStart, Role: "review"}))
