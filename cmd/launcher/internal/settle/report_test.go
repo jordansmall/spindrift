@@ -337,7 +337,7 @@ func TestSettle_GithubReadOnly_ReadyOpenedPR_LatchedDespiteCheckStateError(t *te
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := newTestSettle(c, fc, fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc, fc.AsGithub())
 	s.Settle(dispatch.NewFake(), issNum, 0, result)
 
 	recs := withoutCIWait(readRecords())
@@ -432,7 +432,7 @@ func TestSettle_GithubReadOnly_BlockedDraftPR_SettledRecordCarriesPR(t *testing.
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := newTestSettle(c, fc, fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc, fc.AsGithub())
 	s.Settle(dispatch.NewFake(), issNum, 0, result)
 
 	recs := withoutCIWait(readRecords())

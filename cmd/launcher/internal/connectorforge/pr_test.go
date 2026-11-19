@@ -69,7 +69,7 @@ func newPRHarness(t *testing.T, caps []string, replies map[string]any) *prHarnes
 	clock := retry.Clock{Now: time.Now, Sleep: func(d time.Duration) { h.sleeps = append(h.sleeps, d) }}
 	conn := auditStub{&h.audit}
 	p := &pushOnly{conn: conn, call: call, clock: clock, target: testTarget, git: h.git}
-	h.f = composePR(p, caps, testWebHost, false /* relay */)
+	h.f = composePR(p, caps, testWebHost)
 	h.caps = forge.ResolveCodeForge(h.f)
 	return h
 }

@@ -20,9 +20,6 @@ func TestStrategyShape(t *testing.T) {
 	if Strategy.ValidateCodeForge == nil || Strategy.NewCodeForge == nil {
 		t.Error("git must fill ValidateCodeForge and NewCodeForge")
 	}
-	if Strategy.NewReadOnlyCodeForge == nil {
-		t.Error("git must fill NewReadOnlyCodeForge: it is RelayCapable (issue #6898)")
-	}
 	if Strategy.ValidateTracker != nil || Strategy.NewIssueTracker != nil ||
 		Strategy.NewLedger != nil {
 		t.Error("git is a code-forge-only backend")

@@ -32,7 +32,7 @@ func NewPR(t *testing.T) *PRHarness { return NewPRVariant(t, PRWasm) }
 // NewPRVariant loads the named fixture PR Connector wasm file.
 func NewPRVariant(t *testing.T, wasm string) *PRHarness {
 	t.Helper()
-	return &PRHarness{newBase(t, inProcess, wasm, prMethods, writableBox)}
+	return &PRHarness{newBase(t, inProcess, wasm, prMethods)}
 }
 
 // Forge returns the PRForge Compose resolved.
@@ -111,13 +111,6 @@ func (h *PRHarness) AutoMergeEnqueued(url string) bool { return h.Backend.PR(h.n
 // CONFLICTING and a merge is refused with a 405 naming the conflicts, until the
 // conflict response demotes it.
 func (h *PRHarness) SeedConflicting(url string) { h.Backend.SetConflicting(h.number(url), true) }
-
-// NewPRHostMediated is NewPRVariant composed for a Box that never pushes, so
-// core relays the Box's bundle and opens the draft PR in its own git.
-func NewPRHostMediated(t *testing.T, wasm string) *PRHarness {
-	t.Helper()
-	return &PRHarness{newBase(t, inProcess, wasm, prMethods, readOnlyBox)}
-}
 
 // SeedLandablePRWithBundle is SeedLandablePR plus an outbox bundle carrying the
 // branch's commit. The branch is already on the remote, so the relay is a no-op

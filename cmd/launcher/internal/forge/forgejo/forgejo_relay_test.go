@@ -36,7 +36,7 @@ func newReadOnlyRelayHarness(t *testing.T) (*forgetest.GitRepoFixture, forge.Cod
 
 	fake := newFakeForgejo(t)
 
-	cf := forgejo.NewReadOnlyForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:    fake.URL(),
 		Repo:       "owner/repo",
 		Token:      "tok",
@@ -45,31 +45,6 @@ func newReadOnlyRelayHarness(t *testing.T) (*forgetest.GitRepoFixture, forge.Cod
 		UserEmail:  "bot@example.com",
 	}, nil, repo.Bare)
 	return repo, cf
-}
-
-// A read-write Box (BOX_FORGE_AND_ISSUE_ACCESS=read-write) pushes in-box, so
-// if NewForgejoCodeForge satisfied forge.BundleRelay, settle's generic
-// relay-before-merge (ready.go) would try to relay a bundle that Box never
-// wrote and block every read-write land.
-func TestNewForgejoCodeForge_DoesNotImplementBundleRelay(t *testing.T) {
-	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
-		BaseURL: "https://codeberg.org",
-		Repo:    "owner/repo",
-		Token:   "tok",
-	}, nil)
-	if _, ok := cf.(forge.BundleRelay); ok {
-		t.Error("NewForgejoCodeForge satisfies forge.BundleRelay, want it hidden for read-write")
-	}
-}
-
-// The read-only adapter keeps every PRForge method NewForgejoCodeForge has,
-// by embedding. It opens PRs and watches CI exactly as read-write does. Only
-// the finished branch's hand-off differs.
-func TestNewReadOnlyForgejoCodeForge_ImplementsPRForge(t *testing.T) {
-	_, cf := newReadOnlyRelayHarness(t)
-	if _, ok := cf.(forge.PRForge); !ok {
-		t.Error("NewReadOnlyForgejoCodeForge does not satisfy forge.PRForge")
-	}
 }
 
 func TestReadOnlyForgejoCodeForge_RelayBundle_PushesRefToOrigin(t *testing.T) {
@@ -250,7 +225,7 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_ReturnsURL(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cf := forgejo.NewReadOnlyForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
 		BaseURL: srv.URL,
 		Repo:    "owner/repo",
 		Token:   "tok",
@@ -294,7 +269,7 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_Errors(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cf := forgejo.NewReadOnlyForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
 		BaseURL: srv.URL,
 		Repo:    "owner/repo",
 		Token:   "tok",
@@ -335,7 +310,7 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingOnConflict(t *test
 	}))
 	defer srv.Close()
 
-	cf := forgejo.NewReadOnlyForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
 		BaseURL: srv.URL,
 		Repo:    "owner/repo",
 		Token:   "tok",
@@ -381,7 +356,7 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingDraftOnConflict(t 
 	}))
 	defer srv.Close()
 
-	cf := forgejo.NewReadOnlyForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
 		BaseURL: srv.URL,
 		Repo:    "owner/repo",
 		Token:   "tok",
@@ -419,7 +394,7 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_ConflictWithoutOpenPRReturnsOrig
 	}))
 	defer srv.Close()
 
-	cf := forgejo.NewReadOnlyForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
 		BaseURL: srv.URL,
 		Repo:    "owner/repo",
 		Token:   "tok",

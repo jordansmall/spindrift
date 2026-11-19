@@ -109,7 +109,7 @@ func TestMediation_Open_ClosesGateFollowsClosesRef(t *testing.T) {
 			fc := forge.NewFake(testDispatchLabels)
 			fc.CreateDraftPRURL = "https://example.test/pull/1919"
 			it := fc.AsNoLandingRecorder()
-			caps := forge.ResolveCapabilities(fc.AsGithubReadOnly(), it, row(t, tt.forge), row(t, tt.tracker))
+			caps := forge.ResolveCapabilities(fc.AsGithub(), it, row(t, tt.forge), row(t, tt.tracker))
 			m := NewMediation(caps, it, func(num string) string { return "/outbox/" + num }, "main")
 			result := dispatch.Result{PRIntent: "feat: add widget\n\nAdds a widget.", PRIntentFound: true}
 			if _, _, _, err := m.Open("1919", "agent/issue-1919", result, FallbackNone); err != nil {
@@ -148,7 +148,7 @@ func TestMediation_Open_IntentClosingKeywordsDefused(t *testing.T) {
 			fc := forge.NewFake(testDispatchLabels)
 			fc.CreateDraftPRURL = "https://example.test/pull/42"
 			it := fc.AsNoLandingRecorder()
-			caps := forge.ResolveCapabilities(fc.AsGithubReadOnly(), it, row(t, "github"), row(t, tc.tracker))
+			caps := forge.ResolveCapabilities(fc.AsGithub(), it, row(t, "github"), row(t, tc.tracker))
 			m := NewMediation(caps, it, func(num string) string { return "/outbox/" + num }, "main")
 			result := dispatch.Result{PRIntent: intent, PRIntentFound: true}
 			if _, _, _, err := m.Open("42", "agent/issue-42", result, FallbackNone); err != nil {

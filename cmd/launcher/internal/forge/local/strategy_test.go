@@ -23,7 +23,7 @@ func TestStrategyShape(t *testing.T) {
 		Strategy.NewCodeForge == nil || Strategy.NewLedger == nil || Strategy.HostRepoDir == nil {
 		t.Error("local must fill ValidateCodeForge, NewIssueTracker, NewCodeForge, NewLedger, HostRepoDir")
 	}
-	if Strategy.ValidateTracker != nil || Strategy.NewReadOnlyCodeForge != nil {
+	if Strategy.ValidateTracker != nil {
 		t.Error("local has no tracker validator and no read-only forge")
 	}
 }

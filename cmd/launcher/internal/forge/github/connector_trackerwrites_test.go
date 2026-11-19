@@ -41,7 +41,7 @@ var (
 )
 
 func newTrackerWriteHarness(t *testing.T) trackerWriteHarness {
-	return trackerWriteHarness{newHarnessWith(t, false, connectorRepo, trackerWriteLifecycle, nil)}
+	return trackerWriteHarness{newHarnessWith(t, connectorRepo, trackerWriteLifecycle, nil)}
 }
 
 func (w trackerWriteHarness) Tracker() forge.IssueTracker           { return w.h.tr }
@@ -194,7 +194,7 @@ func TestConnector_UndeclaredTrackerWritesAreRefusedUnsentAndAudited(t *testing.
 		{"listLabels", func(tr forge.IssueTracker) error { _, err := tr.ListLabels(); return err }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			h := newComposedHarness(t, false)
+			h := newComposedHarness(t)
 			tr, err := connectortracker.New(h.conn, failingWrites{t}, trackerWriteLifecycle,
 				connectortracker.Target{API: h.backend.URL, Repo: hostileRepo})
 			if err != nil {
@@ -243,7 +243,7 @@ func TestConnector_TrackerWriteCarriesARotatedToken(t *testing.T) {
 	}
 	rotate(connectorToken)
 	token := tokenrefresh.Follow("", file)
-	h := newHarnessWith(t, false, connectorRepo, trackerWriteLifecycle, func(r *http.Request) error {
+	h := newHarnessWith(t, connectorRepo, trackerWriteLifecycle, func(r *http.Request) error {
 		r.Header.Set("Authorization", "Bearer "+token())
 		return nil
 	})
@@ -284,7 +284,7 @@ func TestConnector_TrackerWriteCarriesARotatedToken(t *testing.T) {
 func TestConnectorClaimRemovesSlashBearingLabel(t *testing.T) {
 	lc := trackerWriteLifecycle
 	lc.Labels.Dispatchable = "agent/ready"
-	h := newHarnessWith(t, false, connectorRepo, lc, nil)
+	h := newHarnessWith(t, connectorRepo, lc, nil)
 	h.SeedIssue(forge.Issue{Number: "930", Title: "slash label", Labels: []string{"agent/ready", "keep me"}})
 
 	if err := h.tr.TransitionState("930", forge.Dispatchable, forge.InProgress); err != nil {

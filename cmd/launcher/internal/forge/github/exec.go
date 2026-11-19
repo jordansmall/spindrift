@@ -86,8 +86,8 @@ type execClient struct {
 	demandCache *demandCache
 }
 
-// ExecOption sets one optional execClient field. NewExecClient and
-// NewReadOnlyCodeForge apply these in order.
+// ExecOption sets one optional execClient field. NewExecClient applies
+// these in order.
 type ExecOption func(*execClient)
 
 // WithVerdictLabels configures CompleteVerdict, the research dispatch kind's

@@ -230,7 +230,7 @@ func TestComposedForgeHostMediationContract(t *testing.T) {
 	forgetest.RunHostMediationContract(t, connectorforgetest.NewHostMediation(t))
 }
 
-func TestReadOnlyBoxRelaysAndOpensTheDraftWithoutTheConnectorSeeingGit(t *testing.T) {
+func TestBoxRelaysAndOpensTheDraftWithoutTheConnectorSeeingGit(t *testing.T) {
 	h := connectorforgetest.NewHostMediation(t)
 	caps := h.Capabilities()
 	if caps.BundleRelay == nil || caps.BundleCommitSubjects == nil || caps.DraftPRCreator == nil || caps.BranchPusher == nil {
@@ -285,14 +285,14 @@ func TestReadOnlyBoxRelaysAndOpensTheDraftWithoutTheConnectorSeeingGit(t *testin
 	}
 }
 
-func TestBundleRelayIsOfferedOnlyToAReadOnlyBoxOnADraftPRForge(t *testing.T) {
-	rw := connectorforgetest.NewPR(t).Capabilities()
-	if rw.BundleRelay != nil || rw.BundleCommitSubjects != nil || rw.DraftPRCreator == nil || rw.BranchPusher == nil {
-		t.Errorf("read-write capabilities = %+v, want DraftPRCreator and BranchPusher and no bundle relay", rw)
+func TestBundleRelayIsOfferedOnlyOnADraftPRForge(t *testing.T) {
+	full := connectorforgetest.NewPR(t).Capabilities()
+	if full.BundleRelay == nil || full.BundleCommitSubjects == nil || full.DraftPRCreator == nil || full.BranchPusher == nil {
+		t.Errorf("capabilities = %+v, want the host-mediated surface on a forge.draftPRs forge", full)
 	}
-	ro := connectorforgetest.NewHostMediationVariant(t, connectorforgetest.MinimalPRWasm).Capabilities()
-	if ro.BundleRelay != nil || ro.BundleCommitSubjects != nil || ro.DraftPRCreator != nil || ro.BranchPusher != nil {
-		t.Errorf("read-only capabilities without forge.draftPRs = %+v, want none of the host-mediated surface", ro)
+	minimal := connectorforgetest.NewPRVariant(t, connectorforgetest.MinimalPRWasm).Capabilities()
+	if minimal.BundleRelay != nil || minimal.BundleCommitSubjects != nil || minimal.DraftPRCreator != nil || minimal.BranchPusher != nil {
+		t.Errorf("capabilities without forge.draftPRs = %+v, want none of the host-mediated surface", minimal)
 	}
 }
 
@@ -311,12 +311,11 @@ func TestComposedForgePRForgeContract_RemoteEngine(t *testing.T) {
 	forgetest.RunPRForgeContract(t, connectorforgetest.NewPRRemote(t))
 }
 
-func TestEveryComposedForgeOffersTheMirrorSeedWhateverTheBox(t *testing.T) {
+func TestEveryComposedForgeOffersTheMirrorSeed(t *testing.T) {
 	for name, caps := range map[string]forge.Capabilities{
-		"read-write":      connectorforgetest.NewPR(t).Capabilities(),
-		"read-only":       connectorforgetest.NewHostMediationVariant(t, connectorforgetest.MinimalPRWasm).Capabilities(),
-		"push-only":       connectorforgetest.New(t).Capabilities(),
-		"read-only+relay": connectorforgetest.NewHostMediation(t).Capabilities(),
+		"pr":         connectorforgetest.NewPR(t).Capabilities(),
+		"pr-minimal": connectorforgetest.NewPRVariant(t, connectorforgetest.MinimalPRWasm).Capabilities(),
+		"push-only":  connectorforgetest.New(t).Capabilities(),
 	} {
 		if caps.MirrorSeeder == nil {
 			t.Errorf("%s: MirrorSeeder is nil, want core's bare clone offered", name)

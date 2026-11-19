@@ -83,7 +83,7 @@ func newHostMediationHarness(t *testing.T) *hostMediationHarness {
 	h.srv = httptest.NewServer(http.HandlerFunc(h.handle))
 	t.Cleanup(h.srv.Close)
 
-	h.cf = forgejo.NewReadOnlyForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
+	h.cf = forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:    h.srv.URL,
 		Repo:       "owner/repo",
 		Token:      "tok",
@@ -285,7 +285,7 @@ func (h *hostMediationHarness) RefSHA(ref string) string {
 
 // UnseedableCodeForge's remote is a path with no repo behind it.
 func (h *hostMediationHarness) UnseedableCodeForge() (forge.CodeForge, string) {
-	return forgejo.NewReadOnlyForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
+	return forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL: h.srv.URL,
 		Repo:    "owner/repo",
 		Token:   "mirror-secret-token",

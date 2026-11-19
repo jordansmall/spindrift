@@ -22,7 +22,7 @@ func TestStrategyShape(t *testing.T) {
 		t.Error("github declares no code-forge validator")
 	}
 	if Strategy.NewIssueTracker == nil || Strategy.NewCodeForge == nil ||
-		Strategy.NewReadOnlyCodeForge == nil || Strategy.NewLedger == nil || Strategy.OpenPRForBranch == nil {
+		Strategy.NewLedger == nil || Strategy.OpenPRForBranch == nil {
 		t.Error("github must fill every constructor")
 	}
 }

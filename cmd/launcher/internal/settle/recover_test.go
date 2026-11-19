@@ -45,7 +45,7 @@ func newRecoverEnv(t *testing.T, bundle bool) *recoverEnv {
 	c.BaseBranch = "main"
 	steps := &ProgressRecorder{}
 	c.Progress = steps
-	return &recoverEnv{fc: fc, c: c, outbox: outbox, steps: steps, s: newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())}
+	return &recoverEnv{fc: fc, c: c, outbox: outbox, steps: steps, s: newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithub())}
 }
 
 func (e *recoverEnv) in(openPR string, resolved outcome.Resolved, passes []passmanifest.Entry, strict bool) RecoverInput {

@@ -174,7 +174,7 @@ func TestRecoverByNumber_RelayedBranchAdoptedMergesAndCompletes(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	cf := fc.AsGithubReadOnly()
+	cf := fc.AsGithub()
 	ws := testNewSettle(c, fc, testWired(fc), cf)
 	err := recoverByNumber(c, fc, cf, capsFor(fc, cf), dir, testFactory(t, dir, nil), ws, ws.Registry(), "42", io.Discard, io.Discard)
 

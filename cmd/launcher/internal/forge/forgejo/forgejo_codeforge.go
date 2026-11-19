@@ -93,8 +93,7 @@ type forgejoCodeForge struct {
 	git         forge.CodeForge
 	mergeMethod string
 	// remote is the credential-free clone/push URL the git adapter uses, kept
-	// here with its cred so the read-only wrapper can clone it directly for
-	// RelayBundle.
+	// here with its cred so RelayBundle can clone it directly.
 	remote string
 	cred   gitexec.Credential
 	// mergeRecheckDelay is the pause before Merge re-reads a pull that
@@ -338,9 +337,6 @@ func (f *forgejoCodeForge) DeleteBranch(branch, base string) error {
 // (forgejoWIPPrefix), which MarkReady strips before merge. A retried create
 // for the same head adopts that branch's open PR and reports created=false,
 // so a caller (issues #2407, #2447) knows the title and body are not its own.
-// Read-write and read-only settle alike may call it (issue #4071); settle's
-// own gating (Open checks BundleRelay first) is what keeps a read-write land
-// from ever making a host-side create that conflicts with the Box's own.
 func (f *forgejoCodeForge) CreateDraftPR(title, body, base, head string) (string, bool, error) {
 	reqBody := map[string]any{
 		"title": forgejoWIPPrefix + " " + title,

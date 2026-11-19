@@ -507,9 +507,8 @@ func TestSettle_FilesIssueIntents_OnBlockedOutcome(t *testing.T) {
 	}
 }
 
-// The common read-write path (the Filer files directly via `gh issue create`
-// in-box, so the box log carries no SPINDRIFT_ISSUE_INTENT line at all) drives
-// no PostIssue call through Settle, byte-for-byte the pre-#2019 behavior.
+// A Box log carrying no SPINDRIFT_ISSUE_INTENT line at all (nothing to file)
+// drives no PostIssue call through Settle.
 func TestSettle_NoIssueIntentsFound_NoFilingAttempted(t *testing.T) {
 	const issNum = "2019"
 	const prURL = "https://github.com/owner/repo/pull/2019"

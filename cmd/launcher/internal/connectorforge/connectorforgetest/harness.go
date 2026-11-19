@@ -30,10 +30,6 @@ import (
 )
 
 const (
-	// readOnlyBox and writableBox name newBase's Box-mode argument.
-	readOnlyBox = true
-	writableBox = false
-
 	// Repo is the repository the scripted backend serves.
 	Repo = "o/r"
 	// Token is the bearer token the host attaches to every Connector request.
@@ -230,16 +226,15 @@ type base struct {
 	// against the Connector's declared hosts.
 	WebHost string
 
-	wasm        string
-	eng         Engine
-	methods     []string
-	readOnlyBox bool
-	target      connectorforge.Target
-	mu          sync.Mutex
-	sleeps      []time.Duration
-	plumbing    []PlumbingCall
-	cf          forge.CodeForge
-	caps        forge.Capabilities
+	wasm     string
+	eng      Engine
+	methods  []string
+	target   connectorforge.Target
+	mu       sync.Mutex
+	sleeps   []time.Duration
+	plumbing []PlumbingCall
+	cf       forge.CodeForge
+	caps     forge.Capabilities
 }
 
 // PlumbingCall is one call Compose made to build core's git plumbing.
@@ -250,7 +245,7 @@ type PlumbingCall struct {
 
 // newBase starts the backend, loads the fixture Connector wasm file and
 // composes the forge with the default, valid remote.
-func newBase(t *testing.T, eng Engine, wasm string, methods []string, readOnly bool) *base {
+func newBase(t *testing.T, eng Engine, wasm string, methods []string) *base {
 	t.Helper()
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
 	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
@@ -260,7 +255,7 @@ func newBase(t *testing.T, eng Engine, wasm string, methods []string, readOnly b
 	repo := forgetest.NewGitRepoFixture(t, "main")
 	s := load(t, eng, repo.Bare, wasm, methods)
 	h := &base{
-		t: t, eng: eng, wasm: wasm, methods: methods, readOnlyBox: readOnly, Repo: repo, Backend: s.backend, Conn: s.conn, Audit: s.audit, target: s.target,
+		t: t, eng: eng, wasm: wasm, methods: methods, Repo: repo, Backend: s.backend, Conn: s.conn, Audit: s.audit, target: s.target,
 		Credential: gitexec.Credential{Username: "bot", Password: "git-secret"},
 	}
 	// Production code is https-only, so git is pointed at the bare repo through
@@ -279,7 +274,7 @@ func newBase(t *testing.T, eng Engine, wasm string, methods []string, readOnly b
 
 func (h *base) git() connectorforge.Git {
 	return connectorforge.Git{
-		Credential: h.Credential, ReadOnlyBox: h.readOnlyBox, WebHost: h.WebHost,
+		Credential: h.Credential, WebHost: h.WebHost,
 		Plumbing: func(u string, cred gitexec.Credential) forge.CodeForge {
 			h.mu.Lock()
 			h.plumbing = append(h.plumbing, PlumbingCall{u, cred})
@@ -325,7 +320,7 @@ type Harness struct{ *base }
 // forge with the default, valid remote.
 func New(t *testing.T) *Harness {
 	t.Helper()
-	return &Harness{newBase(t, inProcess, "forge.wasm", pushOnlyMethods, writableBox)}
+	return &Harness{newBase(t, inProcess, "forge.wasm", pushOnlyMethods)}
 }
 
 // Forge returns the composed forge.

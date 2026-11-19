@@ -45,22 +45,13 @@ func primaryRow() (backendrows.Row, bool) {
 	return row, ok && row.Primary
 }
 
-// boxMode names newConnectorCodeForge's Box access: a read-only Box relays its
-// bundle instead of pushing.
-type boxMode bool
-
-const (
-	boxWritable boxMode = false
-	boxReadOnly boxMode = true
-)
-
 // newConnectorCodeForge composes the Code Forge from row's Connector and the
 // capabilities its handshake advertises, with core's own git doing every git
 // operation. Every failure is returned as is: a primary row never falls back to
 // the native adapter. The Connector authorizes with the row's credential; git
 // keeps the native token. The Connector and its audit file live for the
 // process.
-func newConnectorCodeForge(row backendrows.Row, s backendkit.Shared, k Knobs, mode boxMode) (forge.CodeForge, error) {
+func newConnectorCodeForge(row backendrows.Row, s backendkit.Shared, k Knobs) (forge.CodeForge, error) {
 	if MergeStyle(s.MergeMethod) != "rebase" {
 		return nil, fmt.Errorf("%w (got %q)", ErrPrimaryMergeMethod, s.MergeMethod)
 	}
@@ -72,8 +63,7 @@ func newConnectorCodeForge(row backendrows.Row, s backendkit.Shared, k Knobs, mo
 		return nil, err
 	}
 	cf, _, err := connectorforge.Compose(conn, connectorforge.Target{API: strings.TrimSuffix(k.ForgejoBaseURL, "/"), Repo: s.RepoSlug}, connectorforge.Git{
-		Credential:  GitCredential(k.ForgejoToken),
-		ReadOnlyBox: mode == boxReadOnly,
+		Credential: GitCredential(k.ForgejoToken),
 		Plumbing: func(cloneURL string, cred gitexec.Credential) forge.CodeForge {
 			return git.NewGitClient(cloneURL, s.BaseBranch, s.GitUserName, s.GitUserEmail, git.WithCredential(cred))
 		},

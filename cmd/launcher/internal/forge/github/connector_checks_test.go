@@ -55,7 +55,7 @@ func errClass(err error) [3]bool {
 
 func TestConnector_ProbeMatchesNative(t *testing.T) {
 	for _, status := range []int{200, 401, 404} {
-		h := newConnectorHarness(t)
+		h := newComposedHarness(t)
 		if status != 200 {
 			h.backend.listStatus = status
 		}
@@ -116,7 +116,7 @@ func TestConnector_CountReadyMatchesNative(t *testing.T) {
 		{"pull requests crowding page one", append(many(101, forge.ResultPageLimit+20, false), many(1, 40, true)...), forge.ResultPageLimit},
 	} {
 		t.Run(fx.name, func(t *testing.T) {
-			h := newConnectorHarness(t)
+			h := newComposedHarness(t)
 			calls := countGH(t)
 			for _, it := range fx.items {
 				h.SeedIssue(forge.Issue{Number: it.num, Title: it.num, Labels: it.labels})
@@ -154,7 +154,7 @@ func TestConnector_CountReadyMatchesNative(t *testing.T) {
 }
 
 func TestConnector_CountReadyFailsWhenTheListDoes(t *testing.T) {
-	h := newConnectorHarness(t)
+	h := newComposedHarness(t)
 	h.backend.listStatus = 500
 	dc, _ := forge.As[forge.DemandCounter](h.tr)
 	if _, err := dc.CountReady(false); err == nil {
@@ -163,7 +163,7 @@ func TestConnector_CountReadyFailsWhenTheListDoes(t *testing.T) {
 }
 
 func TestConnector_ProbeIntervalMatchesNative(t *testing.T) {
-	h := newConnectorHarness(t)
+	h := newComposedHarness(t)
 	dc, ok := forge.As[forge.DemandCounter](h.tr)
 	if !ok {
 		t.Fatal("Connector tracker does not serve the demand count")
@@ -190,7 +190,7 @@ func TestConnector_PriorClaimStateMatchesNative(t *testing.T) {
 		{"no removals", nil, 0, false},
 	} {
 		t.Run(fx.name, func(t *testing.T) {
-			h := newConnectorHarness(t)
+			h := newComposedHarness(t)
 			h.SeedIssue(forge.Issue{Number: "7", Title: "t"})
 			h.mutate("7", func(i *restIssue) { i.unlabeled = fx.removed })
 			calls := countGH(t)
@@ -222,7 +222,7 @@ func TestConnector_PriorClaimStateMatchesNative(t *testing.T) {
 }
 
 func TestConnector_PriorClaimStateFailsWhenTheTimelineDoes(t *testing.T) {
-	h := newConnectorHarness(t)
+	h := newComposedHarness(t)
 	pr, _ := forge.As[forge.PriorClaimStateReader](h.tr)
 	if _, found, err := pr.PriorClaimState("99"); err == nil || found {
 		t.Fatalf("PriorClaimState of a missing issue = %v, %v; want an error", found, err)
@@ -412,7 +412,7 @@ func TestConnector_ListLabelsMatchesNative(t *testing.T) {
 		{"past one page", 150},
 	} {
 		t.Run(fx.name, func(t *testing.T) {
-			h := newConnectorHarness(t)
+			h := newComposedHarness(t)
 			var want []string
 			for i := range fx.n {
 				want = append(want, "label-"+strconv.Itoa(i))

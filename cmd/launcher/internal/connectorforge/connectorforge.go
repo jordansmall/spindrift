@@ -155,7 +155,7 @@ func NewReader(c *connectorhost.Connector, target Target, webHost string) (forge
 		return nil, ErrNoWebHost
 	}
 	p := newPushOnly(c, target, retry.Clock{})
-	return composePR(p, c.Capabilities, webHost, false), nil
+	return composePR(p, c.Capabilities, webHost), nil
 }
 
 func newForge(call guestCall, writes forge.PRForge, target Target, webHost string) forge.PRForge {
