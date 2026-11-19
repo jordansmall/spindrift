@@ -188,11 +188,11 @@ type Config struct {
 	// defaults (RESEARCH_VERDICTS unset).
 	ResearchVerdicts forge.VerdictLabels
 
-	// TokenHint and SlugHint name the env vars Run points an operator at in its
+	// TokenHint and SlugHint name the knobs Run points an operator at in its
 	// auth-failure and repo-not-found remediation text. The caller resolves them
 	// because internal/doctor cannot see package main's backend registry, which
-	// owns the backend-to-env-var mapping. Empty means the github-shaped default
-	// (GH_TOKEN / --repo-slug REPO_SLUG).
+	// owns the backend-to-knob mapping. Empty means the github-shaped default
+	// (GH_TOKEN / --repo-slug / forge.repoSlug).
 	TokenHint string
 	SlugHint  string
 
@@ -230,7 +230,7 @@ type Config struct {
 // extraChecks are advisory. stdin is the caller's own scanner, so Quickstart can
 // hand one over mid-flow without losing already-buffered input.
 func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, stdin *bufio.Scanner, interactive bool, extraChecks []Check) (err error) {
-	tokenHint, slugHint := "GH_TOKEN", "--repo-slug / REPO_SLUG"
+	tokenHint, slugHint := "GH_TOKEN", "--repo-slug / forge.repoSlug"
 	if c.TokenHint != "" {
 		tokenHint, slugHint = c.TokenHint, c.SlugHint
 	}
