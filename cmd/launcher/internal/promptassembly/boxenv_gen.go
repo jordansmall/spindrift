@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-// EnvFromEnviron reads Env's 48 Box-env-sourced fields directly from the
+// EnvFromEnviron reads Env's 47 Box-env-sourced fields directly from the
 // process environment (lib/promptassembly-boxenv.nix, issue #2979): fields
 // driver-exec/assembleprompt_cmd.go previously populated from a
 // hand-declared CLI flag that agent/entrypoint.sh forwarded 1:1 from the
@@ -30,7 +30,6 @@ func EnvFromEnviron() Env {
 		TrackerAxisRead:      os.Getenv("BOX_TRACKER_AXIS_READ"),
 		TrackerAxisWrite:     os.Getenv("BOX_TRACKER_AXIS_WRITE"),
 		TrackerAxisFiler:     os.Getenv("BOX_TRACKER_AXIS_FILER"),
-		BoxWriteEnabled:      os.Getenv("BOX_WRITE_ENABLED") != "",
 		LocalIssueReference:  os.Getenv("LOCAL_ISSUE_REFERENCE") != "",
 		CodeForge:            os.Getenv("CODE_FORGE"),
 		ForgeBackend:         os.Getenv("BOX_FORGE_BACKEND"),
@@ -85,7 +84,6 @@ var BoxEnvVarNames = []string{
 	"BOX_TRACKER_AXIS_READ",
 	"BOX_TRACKER_AXIS_WRITE",
 	"BOX_TRACKER_AXIS_FILER",
-	"BOX_WRITE_ENABLED",
 	"LOCAL_ISSUE_REFERENCE",
 	"CODE_FORGE",
 	"BOX_FORGE_BACKEND",
@@ -127,7 +125,7 @@ var BoxEnvVarNames = []string{
 
 // boxenvAtoi parses an int-kind Box env var, degrading to 0 on empty or
 // malformed input. Unlike inputdoc's knobResolver.PositiveInt, which falls
-// back to a per-key schema default, these 48 rows are
+// back to a per-key schema default, these 47 rows are
 // deliberately outside lib/env-schema.nix (see
 // lib/promptassembly-boxenv.nix's header) and so have no schema default
 // to degrade to.

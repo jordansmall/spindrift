@@ -25,7 +25,6 @@ func coveredEnv() Env {
 		TrackerAxisFiler:     "GH",
 		CodeForge:            "github",
 		ForgeBackend:         "GH",
-		BoxWriteEnabled:      true,
 		OutboxRelayCapable:   true,
 		DispatchKind:         "work",
 		FixPass:              0,

@@ -1,11 +1,7 @@
 # Pins, as a shrink-only allowlist, every shipped prompt/skill template that
 # instructs the in-Box agent to use a forge CLI (issue #6892, parent #6757):
-# once the Box holds no forge credential these instructions must go, so a new
-# one fails the check and a cleaned-up one must leave the list.
-#
-# The second check proves none of them is reachable under read-only (issue
-# #7140): a read-only Box holds no forge credential, so every row that can
-# render one must be gated on a lib/gate-vocabulary.nix `readWriteOnly` gate.
+# the Box holds no forge credential, so a new one fails the check. The
+# allowlist is empty (issue #6901 removed the last read-write fragments).
 { pkgs, ... }:
 let
   inherit (pkgs.lib)
@@ -22,13 +18,9 @@ let
     toLower
     unique
     ;
-
   templatesDir = ../../templates/default;
 
   connectorFragments = import ../connector-fragments.nix;
-  fragmentPaths = (import ../../lib/fragment-paths.nix).withConnectors connectorFragments;
-  fragmentRows = import ../../lib/fragments.nix;
-  inherit (import ../../lib/gate-vocabulary.nix) readWriteOnly;
 
   # The Box sees a Connector's fragment files under prompts/fragments/ (issue
   # #6857), so the corpus keys them there, keeping the allowlist spelling.
@@ -144,19 +136,8 @@ let
     files:
     builtins.attrNames (pkgs.lib.filterAttrs (_: text: builtins.any instructs (clausesOf text)) files);
 
-  # The page says why each must go.
-  allowlist =
-    let
-      both = name: [
-        "prompts/fragments/github/${name}.md"
-        "prompts/fragments/forgejo/${name}.md"
-      ];
-    in
-    both "research-verdict"
-    ++ both "research-outcome-landing"
-    ++ both "issue-blocked-comment"
-    ++ both "filer-direct-label"
-    ++ both "filer-direct-file";
+  # Empty: every use is gone. A new instructing template fails as unlisted.
+  allowlist = [ ];
 
   verdict =
     { files, allowlist }:
@@ -167,38 +148,6 @@ let
       unlisted = filter (f: !(builtins.elem f allowlist)) found;
       stale = filter (f: !(builtins.elem f found)) allowlist;
     };
-
-  fragmentsPrefix = "prompts/fragments/";
-
-  # Why each of `found` may render in a read-only Box. A file outside
-  # prompts/fragments/ (a top-level prompt or a skill) renders whatever the
-  # access mode, and a fragment no row renders is not provably unreachable, so
-  # both fail closed. An ungated row has gate "", which is in no gate list.
-  readOnlyReachable =
-    {
-      found,
-      rows,
-      readWriteOnly,
-      pathsOf,
-    }:
-    builtins.concatMap (
-      file:
-      let
-        rendering = filter (r: builtins.elem (removePrefix fragmentsPrefix file) (pathsOf r)) rows;
-        loose = filter (r: !(builtins.elem r.gate readWriteOnly)) rendering;
-      in
-      if !hasPrefix fragmentsPrefix file then
-        [ "${file}: not a prompts/fragments/ file, so it renders in every access mode" ]
-      else if rendering == [ ] then
-        [ "${file}: no row in lib/fragments.nix renders it" ]
-      else
-        map (
-          r:
-          "${file}: row ${r.fragment} is ${
-            if r.gate == "" then "ungated" else "gated on ${r.gate}, which is not read-write-only"
-          }"
-        ) loose
-    ) found;
 
   # The page's inventory table and the allowlist are two lists of the same
   # files; this ties them. Rows are the "| " lines under "## Inventory" up to
@@ -375,56 +324,9 @@ let
     allowlist = filter (f: f != "prompts/fragments/one.md") fixtureDocAllowlist;
   };
 
-  fixtureRows = [
-    {
-      gate = "RW_ONLY";
-      fragment = "rw.md";
-    }
-    {
-      gate = "BOTH";
-      fragment = "both.md";
-    }
-    {
-      gate = "";
-      fragment = "ungated.md";
-    }
-    {
-      gate = "RW_ONLY";
-      fragment = "later.md";
-      legacyFragment = "legacy.md";
-    }
-    {
-      gate = "BOTH";
-      fragment = "legacy.md";
-    }
-  ];
-  fixtureReach =
-    found:
-    readOnlyReachable {
-      inherit found;
-      rows = fixtureRows;
-      readWriteOnly = [ "RW_ONLY" ];
-      pathsOf = r: [ r.fragment ] ++ optional (r ? legacyFragment) r.legacyFragment;
-    };
-  fixtureReachGreen = fixtureReach [ "${fragmentsPrefix}rw.md" ];
-  fixtureReachGated = fixtureReach [ "${fragmentsPrefix}both.md" ];
-  fixtureReachUngated = fixtureReach [ "${fragmentsPrefix}ungated.md" ];
-  fixtureReachNonFragment = fixtureReach [ "prompts/issue-prompt.md" ];
-  fixtureReachUnrendered = fixtureReach [ "${fragmentsPrefix}orphan.md" ];
-  # One file two rows render: the second row's legacyFragment is the first's file.
-  fixtureReachLegacy = fixtureReach [ "${fragmentsPrefix}legacy.md" ];
-
   real = verdict {
     files = corpus;
     inherit allowlist;
-  };
-  realReach = readOnlyReachable {
-    found = instructing corpus;
-    rows = fragmentRows;
-    inherit readWriteOnly;
-    # A deprecated row's legacyFragment renders too (when its primary is
-    # missing from an override's prompt dir), so it counts as reachable.
-    pathsOf = r: fragmentPaths.pathsOf r ++ optional (r ? legacyFragment) r.legacyFragment;
   };
   realDrift = drift {
     docText = builtins.readFile ../../docs/in-box-forge-cli.md;
@@ -516,8 +418,9 @@ in
         fixtureDriftNotAllowlisted == noDrift // { missingFromAllowlist = [ "prompts/fragments/one.md" ]; }
       )
       "in-box-forge-cli-allowlist: an inventory row with no allowlist entry must land in missingFromAllowlist, got: ${builtins.toJSON fixtureDriftNotAllowlisted}";
-    assert assertMsg (corpus != { } && allowlist != [ ])
-      "in-box-forge-cli-allowlist: expected a non-empty templates/default corpus and allowlist -- check is vacuous";
+    assert assertMsg (
+      corpus != { }
+    ) "in-box-forge-cli-allowlist: expected a non-empty templates/default corpus -- check is vacuous";
     pkgs.runCommand "in-box-forge-cli-allowlist" { } ''
       fail=0
       ${section "templates that instruct a forge CLI and are not allowlisted:"
@@ -535,31 +438,6 @@ in
       ${section "docs/in-box-forge-cli.md inventory rows with no allowlist entry:"
         "remove the row from the page, or add the allowlist entry in nix/checks/in-box-forge-cli-allowlist.nix"
         realDrift.missingFromAllowlist
-      }
-      [ "$fail" = 0 ] || exit 1
-      touch $out
-    '';
-
-  prompt-contract-read-only-reaches-no-forge-cli =
-    assert assertMsg (fixtureReachGreen == [ ])
-      "prompt-contract-read-only-reaches-no-forge-cli: a fragment rendered only by a read-write-only row must pass, got: ${builtins.toJSON fixtureReachGreen}";
-    assert assertMsg (builtins.length fixtureReachGated == 1)
-      "prompt-contract-read-only-reaches-no-forge-cli: a row gated outside readWriteOnly must be reported, got: ${builtins.toJSON fixtureReachGated}";
-    assert assertMsg (builtins.length fixtureReachUngated == 1)
-      "prompt-contract-read-only-reaches-no-forge-cli: an ungated row must be reported, got: ${builtins.toJSON fixtureReachUngated}";
-    assert assertMsg (builtins.length fixtureReachNonFragment == 1)
-      "prompt-contract-read-only-reaches-no-forge-cli: an instructing file outside prompts/fragments/ must be reported, got: ${builtins.toJSON fixtureReachNonFragment}";
-    assert assertMsg (builtins.length fixtureReachUnrendered == 1)
-      "prompt-contract-read-only-reaches-no-forge-cli: a fragment no row renders must be reported, got: ${builtins.toJSON fixtureReachUnrendered}";
-    assert assertMsg (builtins.length fixtureReachLegacy == 1)
-      "prompt-contract-read-only-reaches-no-forge-cli: a row that renders the file as its legacyFragment must be checked too, got: ${builtins.toJSON fixtureReachLegacy}";
-    assert assertMsg (allowlist != [ ] && readWriteOnly != [ ])
-      "prompt-contract-read-only-reaches-no-forge-cli: expected a non-empty allowlist and readWriteOnly -- check is vacuous";
-    pkgs.runCommand "prompt-contract-read-only-reaches-no-forge-cli" { } ''
-      fail=0
-      ${section "templates that instruct a forge CLI yet may render in a read-only Box:"
-        "gate every row rendering it on a readWriteOnly gate (lib/gate-vocabulary.nix), or stop instructing the forge CLI (see docs/in-box-forge-cli.md)"
-        realReach
       }
       [ "$fail" = 0 ] || exit 1
       touch $out

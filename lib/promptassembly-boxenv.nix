@@ -66,11 +66,6 @@
     kind = "string";
   }
   {
-    field = "BoxWriteEnabled";
-    env = "BOX_WRITE_ENABLED";
-    kind = "presence";
-  }
-  {
     field = "LocalIssueReference";
     env = "LOCAL_ISSUE_REFERENCE";
     kind = "presence";

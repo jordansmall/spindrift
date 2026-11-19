@@ -107,24 +107,19 @@ let
   # empty list is legitimate: a folder without a row's file renders empty
   # (ADR 0068), and a `shared` row's root file stands in for every folder.
   shipped = {
-    "filer-direct-label.md" = [ "github" ];
     "filer-dedup.md" = [
       "github"
       "jira"
       "local"
     ];
-    "filer-direct-file.md" = [ "github" ];
     "fix-ci-read.md" = [ "github" ];
     "pr-body-issue-ref.md" = [ "local" ];
     "pr-body-no-issue-ref.md" = [ "local" ];
     "issue-read.md" = [ "local" ];
     "research-issue-read.md" = [ "local" ];
     "scout-issue-read.md" = [ ];
-    "research-verdict.md" = [ "github" ];
     "research-verdict-relay.md" = [ "local" ];
     "research-verdict-relay-socket.md" = [ "local" ];
-    "research-outcome-landing.md" = [ "github" ];
-    "issue-blocked-comment.md" = [ "github" ];
     "issue-blocked-comment-relay.md" = [ "local" ];
   };
 

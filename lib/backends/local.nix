@@ -21,8 +21,8 @@
   hostPostingCapable = true;
   trackerAxisRead = "LOCAL";
   # Explicitly empty, not omitted: local has no write step, so
-  # gates_tracker.go's ISSUE_TRACKER_*_READWRITE/READONLY gates match neither
-  # the "GITHUB" nor the "FORGEJO" arm.
+  # gates_tracker.go's ISSUE_TRACKER_*_READONLY gates match neither the
+  # "GITHUB" nor the "FORGEJO" arm.
   trackerAxisWrite = "";
   knobs = {
     localIssuesDir = {

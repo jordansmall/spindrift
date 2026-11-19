@@ -26,37 +26,15 @@ this repo's own dev skills, not shipped to the Boxes of other repos.
 
 ## Inventory
 
-Fragment paths are under `templates/default/prompts/fragments/`, except the
-`forgejo/` files (shipped by the forgejo Connector from
-`connectors/forgejo/fragments/`) and `jira/issue-blocked-comment-relay.md`
-(from `connectors/jira/fragments/`); the Box sees each at the same relative
-path.
-`github/` and `forgejo/` variants of one use share a row. The access column
-comes from each row's gate in `lib/fragments.nix` (and the gate's definition in
-`cmd/launcher/internal/promptassembly/`).
-
-| intent | fragment(s) | rendered by | access modes | r/w | planned replacement |
-| ------ | ----------- | ----------- | ------------ | --- | ------------------- |
-| comment on the issue with what is done and what remains when blocked | `github/issue-blocked-comment.md`, `forgejo/issue-blocked-comment.md` | work, implement pass | `read-write`, on a tracker with an in-Box client | write | removed along with `read-write` mode |
-| post the research verdict comment | `github/research-verdict.md`, `forgejo/research-verdict.md` | research | `read-write`, without a Filer, on a tracker with an in-Box client | write | removed along with `read-write` mode |
-| report the posted verdict comment's URL as the outcome's `landing` | `github/research-outcome-landing.md`, `forgejo/research-outcome-landing.md` | research | `read-write`, without a Filer, on a tracker with an in-Box client | write | removed along with `read-write` mode |
-| ensure the finding label exists before filing | `github/filer-direct-label.md`, `forgejo/filer-direct-label.md` | Filer pass (work only) | `read-write`, on a tracker with an in-Box client | write | removed along with `read-write` mode |
-| file a finding as an issue directly | `github/filer-direct-file.md`, `forgejo/filer-direct-file.md` | Filer pass (work only) | `read-write`, on a tracker with an in-Box client | write | removed along with `read-write` mode |
-
-Every write use already has a host-mediated form under `read-only`: the PR
-intent, the issue intent, the outcome line's `note=`, and the research verdict
-relay (see [Read-only Box](reference.md#read-only-box-box_forge_and_issue_accessread-only)).
-The write rows above are therefore reachable only in a `read-write` Box, and
-disappear with that mode. The access column is checked, not just stated: every
-`lib/fragments.nix` row that can render one of these fragments (its legacy
-fill included) must be gated on a `readWriteOnly` gate from
-`lib/gate-vocabulary.nix`, which
-`prompt-contract-read-only-reaches-no-forge-cli` enforces and the promptassembly
-test `TestReadWriteOnlyGatesNeverFireReadOnly` proves never fires in a
-read-only Env. A research Box with the Filer provisioned relays its
-verdict even in `read-write`, and so does a Box on a tracker with no in-Box
-client (jira), which is why the research rows carry the Filer condition and
-every issue-side write row carries the tracker one.
+Empty. Issue #6901 removed the `read-write` Box access mode, and with it the
+last fragments that told the agent to use a forge CLI: the in-Box issue
+comment, research verdict, landing report and the Filer's direct label and
+file steps. Every write now has a host-mediated form: the PR intent, the
+issue intent, the outcome line's `note=`, and the research verdict relay (see
+[Read-only Box](reference.md#read-only-box-box_forge_and_issue_accessread-only)).
+Fragment paths would be listed as the Box sees them, under
+`templates/default/prompts/fragments/` or a Connector's `fragments/` folder,
+one row per use, with the `github/` and `forgejo/` variants sharing a row.
 
 ## Reachable under `read-only`
 

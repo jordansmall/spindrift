@@ -182,12 +182,12 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	if r.carrier == "" {
 		r.carrier = "log"
 	}
-	// relay is the read-only PR hand-off: an empty BOX_WRITE_ENABLED plus a
-	// forge with pull requests (OutboxRelayCapable), so the PR-intent nudge
-	// never fires for git, which relays a bundle but has no PR (issues #2094,
-	// #2267, #6898). needsBox is the wider bundle hand-off, git included.
-	r.relay = !env.BoxWriteEnabled && env.OutboxRelayCapable
-	r.needsBox = env.HostMediatedRemote || backend.RelaysBundle(r.forgeDescriptor(), !env.BoxWriteEnabled)
+	// relay is the PR hand-off: a forge with pull requests
+	// (OutboxRelayCapable), so the PR-intent nudge never fires for git, which
+	// relays a bundle but has no PR (issues #2094, #2267, #6898). needsBox is
+	// the wider bundle hand-off, git included.
+	r.relay = env.OutboxRelayCapable
+	r.needsBox = env.HostMediatedRemote || backend.RelaysBundle(r.forgeDescriptor(), true)
 
 	if err := r.exportStartEnv(); err != nil {
 		return 0, err
@@ -484,7 +484,6 @@ func (r *boxRun) backstopConfig(recoveryAttempted bool) (outcomebackstop.Config,
 		Kind:               r.kind,
 		HostMediatedRemote: r.env.HostMediatedRemote,
 		RelayCapable:       r.forgeDescriptor().RelayCapable,
-		WriteEnabled:       r.env.BoxWriteEnabled,
 		RecoveryAttempted:  recoveryAttempted,
 		MaxAttempts:        knobs[0],
 		Backoff:            time.Duration(knobs[1]) * time.Second,

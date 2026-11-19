@@ -157,7 +157,6 @@ func TestWriteAssemblyReviewPromptOnlyWhenRendered(t *testing.T) {
 		out := writeTestOutputs(t)
 		reg, env := writeRegistry(t)
 		env.DispatchKind = "research"
-		env.BoxWriteEnabled = true
 		result, err := WriteAssembly(env, reg, nil, testPassthrough(), out, &strings.Builder{})
 		if err != nil {
 			t.Fatalf("WriteAssembly: %v", err)
@@ -177,7 +176,6 @@ func TestWriteAssemblyReviewPromptOnlyWhenRendered(t *testing.T) {
 func TestWriteAssemblyValidateRejectWritesNoHandoff(t *testing.T) {
 	reg, env := writeRegistry(t)
 	env.DispatchKind = "research"
-	env.BoxWriteEnabled = false
 	out := writeTestOutputs(t)
 	rows := []ValidateMarkerRow{{
 		ID: "always-missing", Marker: "NO-SUCH-MARKER-ANYWHERE", Severity: "reject",
@@ -203,7 +201,6 @@ func TestWriteAssemblyValidateRejectWritesNoHandoff(t *testing.T) {
 func TestWriteAssemblyWarningsGoToWriter(t *testing.T) {
 	reg, env := writeRegistry(t)
 	env.DispatchKind = "research"
-	env.BoxWriteEnabled = false
 	rows := []ValidateMarkerRow{{
 		ID: "warn-row", Marker: "NO-SUCH-MARKER-ANYWHERE", Severity: "warn",
 		When: "readOnlyResearch", Message: "warn-message",

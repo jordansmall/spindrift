@@ -9,7 +9,7 @@ import (
 // Every gate the validateMarkers rows key off of is off here, so Validate must
 // neither reject nor warn whatever the Prompt and AgentsJSON contain.
 func TestValidateNoGatesActive(t *testing.T) {
-	e := Env{DispatchKind: "work", BoxWriteEnabled: true}
+	e := Env{DispatchKind: "butler"}
 	result := Result{Prompt: "no markers anywhere", AgentsJSON: ""}
 
 	warnings, err := Validate(e, result, testValidateMarkerRows())
@@ -24,7 +24,7 @@ func TestValidateNoGatesActive(t *testing.T) {
 // Pins the verdict-comment-relay row: a read-only research dispatch whose
 // rendered prompt lacks SPINDRIFT_COMMENT must reject.
 func TestValidateReadOnlyResearchReject(t *testing.T) {
-	e := Env{DispatchKind: "research", BoxWriteEnabled: false}
+	e := Env{DispatchKind: "research"}
 	result := Result{Prompt: "research stub, no verdict-comment marker here"}
 
 	warnings, err := Validate(e, result, testValidateMarkerRows())
@@ -39,37 +39,7 @@ func TestValidateReadOnlyResearchReject(t *testing.T) {
 
 // The verdict-comment-relay row's no-false-positive case.
 func TestValidateReadOnlyResearchPass(t *testing.T) {
-	e := Env{DispatchKind: "research", BoxWriteEnabled: false}
-	result := Result{Prompt: "research stub\n\nPost your verdict with SPINDRIFT_COMMENT here"}
-
-	_, err := Validate(e, result, testValidateMarkerRows())
-	if err != nil {
-		t.Fatalf("Validate() error = %v, want nil", err)
-	}
-}
-
-// The verdict-comment-relay row's other trigger (issue #2593): a research
-// dispatch with the Filer provisioned forces FILER_FILE_RELAY even when
-// BoxWriteEnabled is true, per gates_tracker.go's researchForceRelay. A
-// missing SPINDRIFT_COMMENT there loses the verdict unrecoverably, so this
-// rejects even though the Box is writable.
-func TestValidateReadWriteResearchFilerRelayReject(t *testing.T) {
-	e := Env{DispatchKind: "research", BoxWriteEnabled: true, FilerEnabled: true}
-	result := Result{Prompt: "research stub, no verdict-comment marker here"}
-
-	warnings, err := Validate(e, result, testValidateMarkerRows())
-	if err == nil {
-		t.Fatal("Validate() error = nil, want non-nil")
-	}
-	mustContain(t, err.Error(), "SPINDRIFT_COMMENT")
-	if warnings != nil {
-		t.Fatalf("Validate() warnings = %v, want nil", warnings)
-	}
-}
-
-// The issue #2593 gate's no-false-positive case.
-func TestValidateReadWriteResearchFilerRelayPass(t *testing.T) {
-	e := Env{DispatchKind: "research", BoxWriteEnabled: true, FilerEnabled: true}
+	e := Env{DispatchKind: "research"}
 	result := Result{Prompt: "research stub\n\nPost your verdict with SPINDRIFT_COMMENT here"}
 
 	_, err := Validate(e, result, testValidateMarkerRows())
@@ -100,7 +70,7 @@ func TestValidateReviewPromptReject(t *testing.T) {
 // Result.ReviewPromptText (a research or fix-pass dispatch) leaves the
 // reviewer-verdict gate inactive whatever the content.
 func TestValidateReviewPromptNoFalsePositive(t *testing.T) {
-	e := Env{BoxWriteEnabled: true}
+	e := Env{DispatchKind: "butler"}
 	result := Result{ReviewPromptText: ""}
 
 	warnings, err := Validate(e, result, testValidateMarkerRows())
@@ -115,7 +85,7 @@ func TestValidateReviewPromptNoFalsePositive(t *testing.T) {
 // Pins the pr-intent row: a read-only, non-research prompt missing
 // SPINDRIFT_PR_INTENT warns rather than rejects.
 func TestValidateBoxAccessReadOnlyWarn(t *testing.T) {
-	e := Env{DispatchKind: "work", BoxWriteEnabled: false}
+	e := Env{DispatchKind: "work"}
 	result := Result{Prompt: "issue stub, no PR-intent marker here"}
 
 	warnings, err := Validate(e, result, testValidateMarkerRows())
@@ -133,7 +103,6 @@ func TestValidateBoxAccessReadOnlyWarn(t *testing.T) {
 func TestValidateFilerFileRelayWarn(t *testing.T) {
 	e := Env{
 		DispatchKind:       "work",
-		BoxWriteEnabled:    false,
 		AgentsJSONTemplate: `{"filer":{"model":"m"}}`,
 		FilerEnabled:       true,
 	}
@@ -155,7 +124,7 @@ func TestValidateFilerFileRelayWarn(t *testing.T) {
 // and Prompt already carries SPINDRIFT_COMMENT so verdict-comment-relay does
 // not reject first.
 func TestValidateResearchFileRelayWarn(t *testing.T) {
-	e := Env{DispatchKind: "research", FilerEnabled: true, BoxWriteEnabled: true}
+	e := Env{DispatchKind: "research", FilerEnabled: true}
 	result := Result{
 		Prompt:     "research stub with SPINDRIFT_COMMENT present, no issue-intent marker here",
 		AgentsJSON: `{"filer":{"prompt":"already has SPINDRIFT_ISSUE_INTENT"}}`,
@@ -176,7 +145,7 @@ func TestValidateResearchFileRelayWarn(t *testing.T) {
 // the marker so the issue-intent row stays quiet, and Prompt carries
 // SPINDRIFT_COMMENT so verdict-comment-relay does not reject first.
 func TestValidateResearchFileRelayNoFalsePositiveMarkerPresent(t *testing.T) {
-	e := Env{DispatchKind: "research", FilerEnabled: true, BoxWriteEnabled: true}
+	e := Env{DispatchKind: "research", FilerEnabled: true}
 	result := Result{
 		Prompt:     "research stub ... SPINDRIFT_ISSUE_INTENT ... SPINDRIFT_COMMENT ... present",
 		AgentsJSON: `{"filer":{"prompt":"already has SPINDRIFT_ISSUE_INTENT"}}`,
@@ -194,8 +163,11 @@ func TestValidateResearchFileRelayNoFalsePositiveMarkerPresent(t *testing.T) {
 // A work-kind dispatch leaves the research-issue-intent gate inactive however
 // FilerEnabled is set, so a missing marker draws no warning.
 func TestValidateResearchFileRelayNoFalsePositiveGateOff(t *testing.T) {
-	e := Env{DispatchKind: "work", FilerEnabled: true, BoxWriteEnabled: true}
-	result := Result{Prompt: "issue stub, no issue-intent marker here"}
+	e := Env{DispatchKind: "work", FilerEnabled: true}
+	result := Result{
+		Prompt:     "issue stub with SPINDRIFT_PR_INTENT, no issue-intent marker here",
+		AgentsJSON: `{"filer":{"prompt":"filer stub with SPINDRIFT_ISSUE_INTENT"}}`,
+	}
 
 	warnings, err := Validate(e, result, testValidateMarkerRows())
 	if err != nil {
@@ -210,7 +182,7 @@ func TestValidateResearchFileRelayNoFalsePositiveGateOff(t *testing.T) {
 // Validate's outcome, proving it dispatches on the row's Severity and When
 // data rather than a hardcoded per-id switch.
 func TestValidateDataDrivenSeverity(t *testing.T) {
-	e := Env{DispatchKind: "work", BoxWriteEnabled: false}
+	e := Env{DispatchKind: "work"}
 	result := Result{Prompt: "issue stub, no PR-intent marker here"}
 
 	rows := testValidateMarkerRows()
@@ -298,7 +270,7 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 	}
 
 	t.Run("readOnlyResearch reject", func(t *testing.T) {
-		e := Env{DispatchKind: "research", BoxWriteEnabled: false}
+		e := Env{DispatchKind: "research"}
 		result := Result{Prompt: "research stub, no verdict-comment marker here"}
 
 		_, err := Validate(e, result, rows)
@@ -328,7 +300,7 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 	})
 
 	t.Run("boxAccessReadOnly warn", func(t *testing.T) {
-		e := Env{DispatchKind: "work", BoxWriteEnabled: false}
+		e := Env{DispatchKind: "work"}
 		result := Result{Prompt: "issue stub, no PR-intent marker here"}
 
 		warnings, err := Validate(e, result, rows)
@@ -347,7 +319,6 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 	t.Run("filerFileRelay warn", func(t *testing.T) {
 		e := Env{
 			DispatchKind:       "work",
-			BoxWriteEnabled:    false,
 			AgentsJSONTemplate: `{"filer":{"model":"m"}}`,
 			FilerEnabled:       true,
 		}
@@ -379,7 +350,7 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 // is unaffected.
 func TestValidateVerdictCommentRelaySignalCarrier(t *testing.T) {
 	rows := testValidateMarkerRows()
-	baseEnv := Env{DispatchKind: "research", BoxWriteEnabled: false}
+	baseEnv := Env{DispatchKind: "research"}
 
 	t.Run("socket mode rejects on the marker alone", func(t *testing.T) {
 		e := baseEnv
@@ -420,7 +391,7 @@ func TestValidateVerdictCommentRelaySignalCarrier(t *testing.T) {
 // TestValidateVerdictCommentRelaySignalCarrier.
 func TestValidatePrIntentSignalCarrier(t *testing.T) {
 	rows := testValidateMarkerRows()
-	baseEnv := Env{DispatchKind: "work", BoxWriteEnabled: false}
+	baseEnv := Env{DispatchKind: "work"}
 
 	t.Run("socket mode warns on the marker alone", func(t *testing.T) {
 		e := baseEnv
@@ -476,7 +447,6 @@ func TestValidateIssueIntentSignalCarrier(t *testing.T) {
 	const promptKeepsPrIntentQuiet = "issue stub already ran driver-exec signal pr-intent and logged SPINDRIFT_PR_INTENT"
 	baseEnv := Env{
 		DispatchKind:       "work",
-		BoxWriteEnabled:    false,
 		AgentsJSONTemplate: `{"filer":{"model":"m"}}`,
 		FilerEnabled:       true,
 	}
@@ -545,7 +515,7 @@ func TestValidateResearchIssueIntentSignalCarrier(t *testing.T) {
 		commentQuiet     = "already ran driver-exec signal comment and logged SPINDRIFT_COMMENT"
 		filerPromptQuiet = `{"filer":{"prompt":"already ran driver-exec signal issue-intent and logged SPINDRIFT_ISSUE_INTENT"}}`
 	)
-	baseEnv := Env{DispatchKind: "research", FilerEnabled: true, BoxWriteEnabled: true}
+	baseEnv := Env{DispatchKind: "research", FilerEnabled: true}
 
 	t.Run("socket mode warns on the marker alone", func(t *testing.T) {
 		e := baseEnv

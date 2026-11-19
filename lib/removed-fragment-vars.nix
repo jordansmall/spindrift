@@ -91,9 +91,7 @@
     replacement = "FILER_DEDUP_STEP";
   };
   RESEARCH_VERDICT_GITHUB_STEP = {
-    issue = 5647;
-    severity = "deprecated";
-    replacement = "RESEARCH_VERDICT_STEP";
+    issue = 6901;
   };
   RESEARCH_VERDICT_GITHUB_READONLY_STEP = {
     issue = 5647;
@@ -116,9 +114,7 @@
     replacement = "RESEARCH_VERDICT_RELAY_SOCKET_STEP";
   };
   RESEARCH_VERDICT_FORGEJO_STEP = {
-    issue = 5647;
-    severity = "deprecated";
-    replacement = "RESEARCH_VERDICT_STEP";
+    issue = 6901;
   };
   RESEARCH_VERDICT_FORGEJO_READONLY_STEP = {
     issue = 5647;
@@ -131,19 +127,13 @@
     replacement = "RESEARCH_VERDICT_RELAY_SOCKET_STEP";
   };
   RESEARCH_OUTCOME_LANDING_GITHUB_STEP = {
-    issue = 5647;
-    severity = "deprecated";
-    replacement = "RESEARCH_OUTCOME_LANDING_STEP";
+    issue = 6901;
   };
   RESEARCH_OUTCOME_LANDING_FORGEJO_STEP = {
-    issue = 5647;
-    severity = "deprecated";
-    replacement = "RESEARCH_OUTCOME_LANDING_STEP";
+    issue = 6901;
   };
   ISSUE_BLOCKED_COMMENT_GITHUB_STEP = {
-    issue = 5647;
-    severity = "deprecated";
-    replacement = "ISSUE_BLOCKED_COMMENT_STEP";
+    issue = 6901;
   };
   ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP = {
     issue = 5647;
@@ -156,9 +146,7 @@
     replacement = "ISSUE_BLOCKED_COMMENT_RELAY_STEP";
   };
   ISSUE_BLOCKED_COMMENT_FORGEJO_STEP = {
-    issue = 5647;
-    severity = "deprecated";
-    replacement = "ISSUE_BLOCKED_COMMENT_STEP";
+    issue = 6901;
   };
   ISSUE_BLOCKED_COMMENT_FORGEJO_READONLY_STEP = {
     issue = 5647;
@@ -166,24 +154,16 @@
     replacement = "ISSUE_BLOCKED_COMMENT_RELAY_STEP";
   };
   FILER_FILE_DIRECT_STEP = {
-    issue = 5647;
-    severity = "deprecated";
-    replacement = "FILER_DIRECT_FILE_STEP";
+    issue = 6901;
   };
   FILER_FILE_DIRECT_FORGEJO_STEP = {
-    issue = 5647;
-    severity = "deprecated";
-    replacement = "FILER_DIRECT_FILE_STEP";
+    issue = 6901;
   };
   FILER_LABEL_DIRECT_STEP = {
-    issue = 5647;
-    severity = "deprecated";
-    replacement = "FILER_DIRECT_LABEL_STEP";
+    issue = 6901;
   };
   FILER_LABEL_DIRECT_FORGEJO_STEP = {
-    issue = 5647;
-    severity = "deprecated";
-    replacement = "FILER_DIRECT_LABEL_STEP";
+    issue = 6901;
   };
   FIX_CI_READ_GITHUB_STEP = {
     issue = 5647;
@@ -263,6 +243,27 @@
     issue = 6901;
   };
   IF_BLOCKED_OUTCOME_LANDING_READ_WRITE_STEP = {
+    issue = 6901;
+  };
+  RESEARCH_VERDICT_STEP = {
+    issue = 6901;
+  };
+  RESEARCH_OUTCOME_LANDING_STEP = {
+    issue = 6901;
+  };
+  ISSUE_BLOCKED_COMMENT_STEP = {
+    issue = 6901;
+  };
+  ISSUE_BLOCKED_COMMENT_UNWRITABLE_STEP = {
+    issue = 6901;
+  };
+  FILE_ISSUES_DIRECT_STEP = {
+    issue = 6901;
+  };
+  FILER_DIRECT_FILE_STEP = {
+    issue = 6901;
+  };
+  FILER_DIRECT_LABEL_STEP = {
     issue = 6901;
   };
 }

@@ -7,11 +7,6 @@
   dir = ./fragments;
   shipped = {
     "filer-dedup.md" = [ "forgejo" ];
-    "filer-direct-file.md" = [ "forgejo" ];
-    "filer-direct-label.md" = [ "forgejo" ];
     "fix-ci-read.md" = [ "forgejo" ];
-    "issue-blocked-comment.md" = [ "forgejo" ];
-    "research-outcome-landing.md" = [ "forgejo" ];
-    "research-verdict.md" = [ "forgejo" ];
   };
 }

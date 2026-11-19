@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
-	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
 // TestGatesIssueTrackerReadAxis covers the issue-read step gate: exactly one of
@@ -118,8 +117,8 @@ func TestGatesIssueTrackerReadAxis(t *testing.T) {
 }
 
 // TestGatesIssueTrackerWriteAxis covers the issue-blocked-comment and
-// research-verdict write-step gates: github and forgejo fork on
-// BOX_WRITE_ENABLED, local has no direct write path at all.
+// research-verdict write-axis gates: github and forgejo each name their axis,
+// local has no direct write path at all, and jira borrows github's.
 // Every case sets a non-empty TrackerAxisRead so the itRead=="" version-skew
 // fallback (issue #2533), covered in TestGatesIssueTrackerReadAxis, stays off.
 func TestGatesIssueTrackerWriteAxis(t *testing.T) {
@@ -127,370 +126,62 @@ func TestGatesIssueTrackerWriteAxis(t *testing.T) {
 		name             string
 		trackerAxisRead  string
 		trackerAxisWrite string
-		boxWriteEnabled  bool
 		want             map[string]bool
 	}{
-		{
-			name:             "github read-write",
-			trackerAxisRead:  "GITHUB",
-			trackerAxisWrite: "GITHUB",
-			boxWriteEnabled:  true,
-			want: map[string]bool{
-				"ISSUE_TRACKER_GITHUB_READWRITE":  true,
-				"ISSUE_TRACKER_GITHUB_READONLY":   false,
-				"ISSUE_TRACKER_FORGEJO_READWRITE": false,
-				"ISSUE_TRACKER_FORGEJO_READONLY":  false,
-			},
-		},
-		{
-			name:             "github read-only",
-			trackerAxisRead:  "GITHUB",
-			trackerAxisWrite: "GITHUB",
-			boxWriteEnabled:  false,
-			want: map[string]bool{
-				"ISSUE_TRACKER_GITHUB_READWRITE":  false,
-				"ISSUE_TRACKER_GITHUB_READONLY":   true,
-				"ISSUE_TRACKER_FORGEJO_READWRITE": false,
-				"ISSUE_TRACKER_FORGEJO_READONLY":  false,
-			},
-		},
-		{
-			name:             "forgejo read-write",
-			trackerAxisRead:  "FORGEJO",
-			trackerAxisWrite: "FORGEJO",
-			boxWriteEnabled:  true,
-			want: map[string]bool{
-				"ISSUE_TRACKER_GITHUB_READWRITE":  false,
-				"ISSUE_TRACKER_GITHUB_READONLY":   false,
-				"ISSUE_TRACKER_FORGEJO_READWRITE": true,
-				"ISSUE_TRACKER_FORGEJO_READONLY":  false,
-			},
-		},
-		{
-			name:             "forgejo read-only",
-			trackerAxisRead:  "FORGEJO",
-			trackerAxisWrite: "FORGEJO",
-			boxWriteEnabled:  false,
-			want: map[string]bool{
-				"ISSUE_TRACKER_GITHUB_READWRITE":  false,
-				"ISSUE_TRACKER_GITHUB_READONLY":   false,
-				"ISSUE_TRACKER_FORGEJO_READWRITE": false,
-				"ISSUE_TRACKER_FORGEJO_READONLY":  true,
-			},
-		},
-		{
-			name:             "local has no direct write-step path, write-enabled or not",
-			trackerAxisRead:  "LOCAL",
-			trackerAxisWrite: "",
-			boxWriteEnabled:  true,
-			want: map[string]bool{
-				"ISSUE_TRACKER_GITHUB_READWRITE":  false,
-				"ISSUE_TRACKER_GITHUB_READONLY":   false,
-				"ISSUE_TRACKER_FORGEJO_READWRITE": false,
-				"ISSUE_TRACKER_FORGEJO_READONLY":  false,
-			},
-		},
+		{"github", "GITHUB", "GITHUB", map[string]bool{
+			"ISSUE_TRACKER_GITHUB_READONLY": true, "ISSUE_TRACKER_FORGEJO_READONLY": false,
+		}},
+		{"forgejo", "FORGEJO", "FORGEJO", map[string]bool{
+			"ISSUE_TRACKER_GITHUB_READONLY": false, "ISSUE_TRACKER_FORGEJO_READONLY": true,
+		}},
+		{"local has no direct write-step path", "LOCAL", "", map[string]bool{
+			"ISSUE_TRACKER_GITHUB_READONLY": false, "ISSUE_TRACKER_FORGEJO_READONLY": false,
+		}},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := Gates(Env{TrackerAxisRead: tc.trackerAxisRead, TrackerAxisWrite: tc.trackerAxisWrite, BoxWriteEnabled: tc.boxWriteEnabled})
+			got := Gates(Env{TrackerAxisRead: tc.trackerAxisRead, TrackerAxisWrite: tc.trackerAxisWrite})
 			for k, want := range tc.want {
 				if got[k] != want {
-					t.Errorf("Gates(TrackerAxisRead=%q, TrackerAxisWrite=%q, BoxWriteEnabled=%v)[%q] = %v, want %v", tc.trackerAxisRead, tc.trackerAxisWrite, tc.boxWriteEnabled, k, got[k], want)
+					t.Errorf("Gates(TrackerAxisRead=%q, TrackerAxisWrite=%q)[%q] = %v, want %v", tc.trackerAxisRead, tc.trackerAxisWrite, k, got[k], want)
 				}
 			}
 		})
 	}
 }
 
-// TestGatesIssueTrackerWriteAxisResearch covers the research special-case
-// (ADR 0041 / issue #2593) on top of the write-step gates above: a research
-// dispatch with the Filer provisioned always forces the _READONLY arm
-// regardless of BOX_WRITE_ENABLED, because the research-verdict fragments
-// share these four gates with the work-path issue-blocked-comment ones.
-func TestGatesIssueTrackerWriteAxisResearch(t *testing.T) {
+// TestGatesFilerRelay covers the filer's write-mechanism gates: the Filer
+// always files through the host relay (ADR 0041), so the relay gates follow
+// FilerEnabled alone, and each dispatch kind lights only its own label gate.
+func TestGatesFilerRelay(t *testing.T) {
 	cases := []struct {
-		name             string
-		filerEnabled     bool
-		trackerAxisRead  string
-		trackerAxisWrite string
-		boxWriteEnabled  bool
-		want             map[string]bool
+		name         string
+		kind         string
+		filerEnabled bool
+		want         map[string]bool
 	}{
-		{
-			name:             "research + filer + github read-write forces READONLY",
-			filerEnabled:     true,
-			trackerAxisRead:  "GITHUB",
-			trackerAxisWrite: "GITHUB",
-			boxWriteEnabled:  true,
-			want: map[string]bool{
-				"ISSUE_TRACKER_GITHUB_READWRITE":  false,
-				"ISSUE_TRACKER_GITHUB_READONLY":   true,
-				"ISSUE_TRACKER_FORGEJO_READWRITE": false,
-				"ISSUE_TRACKER_FORGEJO_READONLY":  false,
-			},
-		},
-		{
-			name:             "research + filer + github read-only stays READONLY",
-			filerEnabled:     true,
-			trackerAxisRead:  "GITHUB",
-			trackerAxisWrite: "GITHUB",
-			boxWriteEnabled:  false,
-			want: map[string]bool{
-				"ISSUE_TRACKER_GITHUB_READWRITE":  false,
-				"ISSUE_TRACKER_GITHUB_READONLY":   true,
-				"ISSUE_TRACKER_FORGEJO_READWRITE": false,
-				"ISSUE_TRACKER_FORGEJO_READONLY":  false,
-			},
-		},
-		{
-			name:             "research + filer + forgejo read-write forces READONLY",
-			filerEnabled:     true,
-			trackerAxisRead:  "FORGEJO",
-			trackerAxisWrite: "FORGEJO",
-			boxWriteEnabled:  true,
-			want: map[string]bool{
-				"ISSUE_TRACKER_GITHUB_READWRITE":  false,
-				"ISSUE_TRACKER_GITHUB_READONLY":   false,
-				"ISSUE_TRACKER_FORGEJO_READWRITE": false,
-				"ISSUE_TRACKER_FORGEJO_READONLY":  true,
-			},
-		},
-		{
-			name:             "research without filer renders exactly as today (read-write)",
-			filerEnabled:     false,
-			trackerAxisRead:  "GITHUB",
-			trackerAxisWrite: "GITHUB",
-			boxWriteEnabled:  true,
-			want: map[string]bool{
-				"ISSUE_TRACKER_GITHUB_READWRITE":  true,
-				"ISSUE_TRACKER_GITHUB_READONLY":   false,
-				"ISSUE_TRACKER_FORGEJO_READWRITE": false,
-				"ISSUE_TRACKER_FORGEJO_READONLY":  false,
-			},
-		},
-		{
-			name:             "research without filer renders exactly as today (read-only)",
-			filerEnabled:     false,
-			trackerAxisRead:  "GITHUB",
-			trackerAxisWrite: "GITHUB",
-			boxWriteEnabled:  false,
-			want: map[string]bool{
-				"ISSUE_TRACKER_GITHUB_READWRITE":  false,
-				"ISSUE_TRACKER_GITHUB_READONLY":   true,
-				"ISSUE_TRACKER_FORGEJO_READWRITE": false,
-				"ISSUE_TRACKER_FORGEJO_READONLY":  false,
-			},
-		},
+		{"filer not configured: everything off", "work", false, map[string]bool{
+			"FILER_FILE_RELAY": false, "FILER_FILE_RELAY_WORK": false,
+			"FILER_FILE_RELAY_RESEARCH": false, "FILER_FILE_RELAY_BUTLER": false,
+		}},
+		{"work", "work", true, map[string]bool{
+			"FILER_FILE_RELAY": true, "FILER_FILE_RELAY_WORK": true,
+			"FILER_FILE_RELAY_RESEARCH": false, "FILER_FILE_RELAY_BUTLER": false,
+		}},
+		{"research", "research", true, map[string]bool{
+			"FILER_FILE_RELAY": true, "FILER_FILE_RELAY_WORK": false,
+			"FILER_FILE_RELAY_RESEARCH": true, "FILER_FILE_RELAY_BUTLER": false,
+		}},
+		{"butler", "butler", true, map[string]bool{
+			"FILER_FILE_RELAY": true, "FILER_FILE_RELAY_WORK": false,
+			"FILER_FILE_RELAY_RESEARCH": false, "FILER_FILE_RELAY_BUTLER": true,
+		}},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			env := Env{
-				DispatchKind:     "research",
-				FilerEnabled:     tc.filerEnabled,
-				TrackerAxisRead:  tc.trackerAxisRead,
-				TrackerAxisWrite: tc.trackerAxisWrite,
-				BoxWriteEnabled:  tc.boxWriteEnabled,
-			}
-			got := Gates(env)
-			for k, want := range tc.want {
-				if got[k] != want {
-					t.Errorf("Gates(%+v)[%q] = %v, want %v", env, k, got[k], want)
-				}
-			}
-		})
-	}
-}
-
-// TestGatesFilerWriteMechanism covers the filer's write-mechanism gates: relay
-// only activates on read-only access, and a writable Box keeps the direct
-// gh/fj path, which forks on TrackerAxisFiler. Every case sets a non-empty
-// TrackerAxisRead so the itRead=="" version-skew fallback (issue #2533) stays off.
-func TestGatesFilerWriteMechanism(t *testing.T) {
-	cases := []struct {
-		name             string
-		filerEnabled     bool
-		trackerAxisRead  string
-		trackerAxisFiler string
-		boxWriteEnabled  bool
-		want             map[string]bool
-	}{
-		{
-			name:            "filer not configured: everything off",
-			filerEnabled:    false,
-			trackerAxisRead: "GITHUB",
-			want: map[string]bool{
-				"FILER_FILE_DIRECT_GH":      false,
-				"FILER_FILE_DIRECT_FORGEJO": false,
-				"FILER_FILE_RELAY":          false,
-				"FILER_FILE_RELAY_WORK":     false,
-				"FILER_FILE_RELAY_RESEARCH": false,
-				"FILER_FILE_DIRECT_ANY":     false,
-			},
-		},
-		{
-			name:             "read-only: relay",
-			filerEnabled:     true,
-			trackerAxisRead:  "GITHUB",
-			trackerAxisFiler: "GH",
-			boxWriteEnabled:  false,
-			want: map[string]bool{
-				"FILER_FILE_DIRECT_GH":      false,
-				"FILER_FILE_DIRECT_FORGEJO": false,
-				"FILER_FILE_RELAY":          true,
-				"FILER_FILE_RELAY_WORK":     true,
-				"FILER_FILE_RELAY_RESEARCH": false,
-				"FILER_FILE_DIRECT_ANY":     false,
-			},
-		},
-		{
-			name:             "read-write: direct gh (github tracker)",
-			filerEnabled:     true,
-			trackerAxisRead:  "GITHUB",
-			trackerAxisFiler: "GH",
-			boxWriteEnabled:  true,
-			want: map[string]bool{
-				"FILER_FILE_DIRECT_GH":      true,
-				"FILER_FILE_DIRECT_FORGEJO": false,
-				"FILER_FILE_RELAY":          false,
-				"FILER_FILE_RELAY_WORK":     false,
-				"FILER_FILE_RELAY_RESEARCH": false,
-				"FILER_FILE_DIRECT_ANY":     true,
-			},
-		},
-		{
-			name:             "read-write: direct forgejo (forgejo tracker)",
-			filerEnabled:     true,
-			trackerAxisRead:  "FORGEJO",
-			trackerAxisFiler: "FORGEJO",
-			boxWriteEnabled:  true,
-			want: map[string]bool{
-				"FILER_FILE_DIRECT_GH":      false,
-				"FILER_FILE_DIRECT_FORGEJO": true,
-				"FILER_FILE_RELAY":          false,
-				"FILER_FILE_RELAY_WORK":     false,
-				"FILER_FILE_RELAY_RESEARCH": false,
-				"FILER_FILE_DIRECT_ANY":     true,
-			},
-		},
-		{
-			name:             "local tracker's filer suffix rides GH",
-			filerEnabled:     true,
-			trackerAxisRead:  "LOCAL",
-			trackerAxisFiler: "GH",
-			boxWriteEnabled:  true,
-			want: map[string]bool{
-				"FILER_FILE_DIRECT_GH":      true,
-				"FILER_FILE_DIRECT_FORGEJO": false,
-				"FILER_FILE_RELAY":          false,
-				"FILER_FILE_RELAY_WORK":     false,
-				"FILER_FILE_RELAY_RESEARCH": false,
-				"FILER_FILE_DIRECT_ANY":     true,
-			},
-		},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			got := Gates(Env{
-				FilerEnabled:     tc.filerEnabled,
-				TrackerAxisRead:  tc.trackerAxisRead,
-				TrackerAxisFiler: tc.trackerAxisFiler,
-				BoxWriteEnabled:  tc.boxWriteEnabled,
-			})
-			for k, want := range tc.want {
-				if got[k] != want {
-					t.Errorf("Gates(%+v)[%q] = %v, want %v", tc, k, got[k], want)
-				}
-			}
-		})
-	}
-}
-
-// TestGatesFilerWriteMechanismResearch covers the research special-case
-// (ADR 0041 / issue #2593): a research dispatch with the Filer provisioned
-// always relays, regardless of BOX_WRITE_ENABLED. Relay fires even in
-// read-write mode, which the work-path rule would never produce.
-func TestGatesFilerWriteMechanismResearch(t *testing.T) {
-	cases := []struct {
-		name             string
-		filerEnabled     bool
-		trackerAxisRead  string
-		trackerAxisFiler string
-		boxWriteEnabled  bool
-		want             map[string]bool
-	}{
-		{
-			name:             "read-write: still relay",
-			filerEnabled:     true,
-			trackerAxisRead:  "GITHUB",
-			trackerAxisFiler: "GH",
-			boxWriteEnabled:  true,
-			want: map[string]bool{
-				"FILER_FILE_DIRECT_GH":      false,
-				"FILER_FILE_DIRECT_FORGEJO": false,
-				"FILER_FILE_RELAY":          true,
-				"FILER_FILE_RELAY_WORK":     false,
-				"FILER_FILE_RELAY_RESEARCH": true,
-				"FILER_FILE_DIRECT_ANY":     false,
-			},
-		},
-		{
-			name:             "read-only: still relay",
-			filerEnabled:     true,
-			trackerAxisRead:  "GITHUB",
-			trackerAxisFiler: "GH",
-			boxWriteEnabled:  false,
-			want: map[string]bool{
-				"FILER_FILE_DIRECT_GH":      false,
-				"FILER_FILE_DIRECT_FORGEJO": false,
-				"FILER_FILE_RELAY":          true,
-				"FILER_FILE_RELAY_WORK":     false,
-				"FILER_FILE_RELAY_RESEARCH": true,
-				"FILER_FILE_DIRECT_ANY":     false,
-			},
-		},
-		{
-			name:            "filer not configured: research special-case never fires",
-			filerEnabled:    false,
-			trackerAxisRead: "GITHUB",
-			want: map[string]bool{
-				"FILER_FILE_DIRECT_GH":      false,
-				"FILER_FILE_DIRECT_FORGEJO": false,
-				"FILER_FILE_RELAY":          false,
-				"FILER_FILE_RELAY_WORK":     false,
-				"FILER_FILE_RELAY_RESEARCH": false,
-				"FILER_FILE_DIRECT_ANY":     false,
-			},
-		},
-		{
-			name:             "forgejo tracker + filer: relay, not direct-forgejo",
-			filerEnabled:     true,
-			trackerAxisRead:  "FORGEJO",
-			trackerAxisFiler: "FORGEJO",
-			boxWriteEnabled:  true,
-			want: map[string]bool{
-				"FILER_FILE_DIRECT_GH":      false,
-				"FILER_FILE_DIRECT_FORGEJO": false,
-				"FILER_FILE_RELAY":          true,
-				"FILER_FILE_RELAY_WORK":     false,
-				"FILER_FILE_RELAY_RESEARCH": true,
-				"FILER_FILE_DIRECT_ANY":     false,
-			},
-		},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			env := Env{
-				DispatchKind:     "research",
-				FilerEnabled:     tc.filerEnabled,
-				TrackerAxisRead:  tc.trackerAxisRead,
-				TrackerAxisFiler: tc.trackerAxisFiler,
-				BoxWriteEnabled:  tc.boxWriteEnabled,
-			}
+			env := Env{DispatchKind: tc.kind, FilerEnabled: tc.filerEnabled, TrackerAxisRead: "GITHUB", TrackerAxisFiler: "GH"}
 			got := Gates(env)
 			for k, want := range tc.want {
 				if got[k] != want {
@@ -582,29 +273,24 @@ func TestGatesPRBodyClosesPairs(t *testing.T) {
 	}
 }
 
-// TestGatesResearchVerdictRelayed pins that RESEARCH_VERDICT_RELAYED is the
-// union of the paths that render a relayed research-verdict step (a read-only
-// github/forgejo Box, a local tracker, a Filer-forced relay), scoped to the
-// verdict contract (ContractVerdict; issue #5130).
+// TestGatesResearchVerdictRelayed pins that RESEARCH_VERDICT_RELAYED is on for
+// every research dispatch, whatever the tracker or Filer, and off for the
+// kinds that post no verdict (ContractVerdict only; issue #5130).
 func TestGatesResearchVerdictRelayed(t *testing.T) {
 	cases := []struct {
 		name         string
 		kind         string
 		filerEnabled bool
 		read, write  string
-		boxWrite     bool
 		want         bool
 	}{
-		{"github read-write", "research", false, "GITHUB", "GITHUB", true, false},
-		{"github read-only", "research", false, "GITHUB", "GITHUB", false, true},
-		{"github read-write forced relay by Filer", "research", true, "GITHUB", "GITHUB", true, true},
-		{"forgejo read-write", "research", false, "FORGEJO", "FORGEJO", true, false},
-		{"forgejo read-only", "research", false, "FORGEJO", "FORGEJO", false, true},
-		{"forgejo read-write forced relay by Filer", "research", true, "FORGEJO", "FORGEJO", true, true},
-		{"local", "research", false, "LOCAL", "", true, true},
-		{"work github read-only", "work", false, "GITHUB", "GITHUB", false, false},
-		{"work local", "work", false, "LOCAL", "", true, false},
-		{"butler github read-only", "butler", false, "GITHUB", "GITHUB", false, false},
+		{"github", "research", false, "GITHUB", "GITHUB", true},
+		{"github with the Filer", "research", true, "GITHUB", "GITHUB", true},
+		{"forgejo", "research", false, "FORGEJO", "FORGEJO", true},
+		{"local", "research", false, "LOCAL", "", true},
+		{"work", "work", false, "GITHUB", "GITHUB", false},
+		{"work local", "work", false, "LOCAL", "", false},
+		{"butler", "butler", false, "GITHUB", "GITHUB", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -613,7 +299,6 @@ func TestGatesResearchVerdictRelayed(t *testing.T) {
 				FilerEnabled:     tc.filerEnabled,
 				TrackerAxisRead:  tc.read,
 				TrackerAxisWrite: tc.write,
-				BoxWriteEnabled:  tc.boxWrite,
 			}
 			if got := Gates(env)["RESEARCH_VERDICT_RELAYED"]; got != tc.want {
 				t.Errorf("Gates(%+v)[RESEARCH_VERDICT_RELAYED] = %v, want %v", env, got, tc.want)
@@ -622,148 +307,37 @@ func TestGatesResearchVerdictRelayed(t *testing.T) {
 	}
 }
 
-// TestGatesJiraResearchAlwaysRelays pins that a jira research dispatch uses the
-// relayed verdict form with the Filer off or on (issue #5245), while jira stays
-// on the GITHUB write axis, and a jira work dispatch is not relayed.
-func TestGatesJiraResearchAlwaysRelays(t *testing.T) {
+// TestGatesJiraRelays pins that a jira dispatch relays in every kind (issue
+// #5245): jira stays on the GITHUB write axis for the blocked-comment relay,
+// reads through its own axis, and the Filer files through the relay (issue
+// #6354).
+func TestGatesJiraRelays(t *testing.T) {
 	cases := []struct {
-		name         string
-		kind         string
-		filerEnabled bool
-		wantReadOnly bool
-		wantRelayed  bool
+		name        string
+		kind        string
+		filer       bool
+		wantRelayed bool
 	}{
-		{"research, Filer off", "research", false, true, true},
-		{"research, Filer on", "research", true, true, true},
-		{"work, Filer off", "work", false, false, false},
-		{"butler, Filer off", "butler", false, false, false},
+		{"research, Filer off", "research", false, true},
+		{"research, Filer on", "research", true, true},
+		{"work, Filer off", "work", false, false},
+		{"work, Filer on", "work", true, false},
+		{"butler, Filer off", "butler", false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			g := Gates(Env{
-				DispatchKind:    tc.kind,
-				IssueTracker:    "jira",
-				FilerEnabled:    tc.filerEnabled,
-				BoxWriteEnabled: true,
-			})
+			g := Gates(Env{DispatchKind: tc.kind, IssueTracker: "jira", FilerEnabled: tc.filer})
 			if g["ISSUE_TRACKER_GITHUB"] {
 				t.Error("ISSUE_TRACKER_GITHUB = true, want false (jira reads through its own axis)")
 			}
-			if g["ISSUE_TRACKER_GITHUB_READONLY"] != tc.wantReadOnly {
-				t.Errorf("ISSUE_TRACKER_GITHUB_READONLY = %v, want %v", g["ISSUE_TRACKER_GITHUB_READONLY"], tc.wantReadOnly)
-			}
-			if g["ISSUE_TRACKER_GITHUB_READWRITE"] {
-				t.Error("ISSUE_TRACKER_GITHUB_READWRITE = true, want false (no in-box jira write path)")
+			if !g["ISSUE_TRACKER_GITHUB_READONLY"] {
+				t.Error("ISSUE_TRACKER_GITHUB_READONLY = false, want true (jira borrows the GITHUB write axis)")
 			}
 			if g["RESEARCH_VERDICT_RELAYED"] != tc.wantRelayed {
 				t.Errorf("RESEARCH_VERDICT_RELAYED = %v, want %v", g["RESEARCH_VERDICT_RELAYED"], tc.wantRelayed)
 			}
-		})
-	}
-}
-
-// TestGatesJiraWorkFilerAlwaysRelays pins that a jira work dispatch with the
-// Filer on files through the relay in every access mode (issue #6354): the Box
-// has no in-box jira write path, so the direct gh fork must never fire.
-func TestGatesJiraWorkFilerAlwaysRelays(t *testing.T) {
-	for _, boxWrite := range []bool{true, false} {
-		g := Gates(Env{
-			DispatchKind:    "work",
-			IssueTracker:    "jira",
-			FilerEnabled:    true,
-			BoxWriteEnabled: boxWrite,
-		})
-		want := map[string]bool{
-			"FILER_FILE_RELAY":          true,
-			"FILER_FILE_RELAY_WORK":     true,
-			"FILER_FILE_DIRECT_GH":      false,
-			"FILER_FILE_DIRECT_FORGEJO": false,
-			"FILER_FILE_DIRECT_ANY":     false,
-		}
-		for gate, w := range want {
-			if g[gate] != w {
-				t.Errorf("boxWrite=%v: %s = %v, want %v", boxWrite, gate, g[gate], w)
-			}
-		}
-	}
-}
-
-// TestGatesUnwritableReadWrite pins ISSUE_TRACKER_UNWRITABLE_READWRITE (issue
-// #5263): true only where the Box has a write token that cannot reach the
-// tracker, and exactly one blocked-comment gate fires per cell. The research
-// cell stays off: its forced relay takes the _READONLY arm.
-func TestGatesUnwritableReadWrite(t *testing.T) {
-	cases := []struct {
-		name     string
-		kind     string
-		tracker  string
-		read     string
-		write    string
-		boxWrite bool
-		want     bool
-	}{
-		{"jira read-write", "work", "jira", "JIRA", "GITHUB", true, true},
-		{"jira research read-write", "research", "jira", "JIRA", "GITHUB", true, false},
-		{"jira read-only", "work", "jira", "JIRA", "GITHUB", false, false},
-		{"github read-write", "work", "github", "GITHUB", "GITHUB", true, false},
-		{"forgejo read-write", "work", "forgejo", "FORGEJO", "FORGEJO", true, false},
-		{"local", "work", "local", "LOCAL", "", true, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			g := Gates(Env{
-				DispatchKind:     tc.kind,
-				IssueTracker:     tc.tracker,
-				TrackerAxisRead:  tc.read,
-				TrackerAxisWrite: tc.write,
-				BoxWriteEnabled:  tc.boxWrite,
-			})
-			if g["ISSUE_TRACKER_UNWRITABLE_READWRITE"] != tc.want {
-				t.Errorf("ISSUE_TRACKER_UNWRITABLE_READWRITE = %v, want %v", g["ISSUE_TRACKER_UNWRITABLE_READWRITE"], tc.want)
-			}
-			n := 0
-			for _, k := range []string{
-				"ISSUE_TRACKER_GITHUB_READWRITE", "ISSUE_TRACKER_GITHUB_READONLY",
-				"ISSUE_TRACKER_LOCAL", "ISSUE_TRACKER_FORGEJO_READWRITE",
-				"ISSUE_TRACKER_FORGEJO_READONLY", "ISSUE_TRACKER_UNWRITABLE_READWRITE",
-			} {
-				if g[k] {
-					n++
-				}
-			}
-			if n != 1 {
-				t.Errorf("%d blocked-comment gates true, want exactly 1", n)
-			}
-		})
-	}
-}
-
-// TestGatesResearchVerdictRelayedCarrierSplit pins that the relayed gate
-// splits into exactly one of _LOG/_SOCKET by Signal carrier, and that
-// neither half is on when the base gate is off.
-func TestGatesResearchVerdictRelayedCarrierSplit(t *testing.T) {
-	cases := []struct {
-		name            string
-		carrier         string
-		boxWrite        bool
-		wantLog, wantSk bool
-	}{
-		{"log carrier", "log", false, true, false},
-		{"empty carrier means log", "", false, true, false},
-		{"socket carrier", "socket", false, false, true},
-		{"socket carrier, relay off", "socket", true, false, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			g := Gates(Env{
-				DispatchKind:     "research",
-				SignalCarrier:    tc.carrier,
-				TrackerAxisRead:  "GITHUB",
-				TrackerAxisWrite: "GITHUB",
-				BoxWriteEnabled:  tc.boxWrite,
-			})
-			if g["RESEARCH_VERDICT_RELAYED_LOG"] != tc.wantLog || g["RESEARCH_VERDICT_RELAYED_SOCKET"] != tc.wantSk {
-				t.Errorf("_LOG/_SOCKET = %v/%v, want %v/%v", g["RESEARCH_VERDICT_RELAYED_LOG"], g["RESEARCH_VERDICT_RELAYED_SOCKET"], tc.wantLog, tc.wantSk)
+			if g["FILER_FILE_RELAY"] != tc.filer {
+				t.Errorf("FILER_FILE_RELAY = %v, want %v", g["FILER_FILE_RELAY"], tc.filer)
 			}
 		})
 	}
@@ -896,73 +470,33 @@ func TestGatesIssueTrackerWritable(t *testing.T) {
 	}
 }
 
-// TestGatesBackendAgnosticReadWriteAndRelayed pins ISSUE_TRACKER_READWRITE and
-// ISSUE_TRACKER_RELAYED as the exact unions of the backend-named gates they
-// replace on the slot rows, across every tracker, access mode, dispatch kind
-// and Filer setting. Each gate keeps its own backend-named siblings, which
-// the deprecated rows still read.
-func TestGatesBackendAgnosticReadWriteAndRelayed(t *testing.T) {
-	for _, tracker := range []string{"github", "forgejo", "local", "jira"} {
-		for _, boxWrite := range []bool{true, false} {
-			for _, kd := range dispatchkind.All {
-				for _, filer := range []bool{true, false} {
-					for _, carrier := range []string{"log", "socket"} {
-						env := Env{
-							IssueTracker:    tracker,
-							BoxWriteEnabled: boxWrite,
-							DispatchKind:    kd.Name,
-							FilerEnabled:    filer,
-							SignalCarrier:   carrier,
-						}
-						g := Gates(env)
-						wantRW := g["ISSUE_TRACKER_GITHUB_READWRITE"] || g["ISSUE_TRACKER_FORGEJO_READWRITE"]
-						wantRelayed := g["ISSUE_TRACKER_GITHUB_READONLY"] || g["ISSUE_TRACKER_LOCAL"] || g["ISSUE_TRACKER_FORGEJO_READONLY"]
-						if g["ISSUE_TRACKER_READWRITE"] != wantRW {
-							t.Errorf("Gates(%+v)[ISSUE_TRACKER_READWRITE] = %v, want %v", env, g["ISSUE_TRACKER_READWRITE"], wantRW)
-						}
-						if g["ISSUE_TRACKER_RELAYED"] != wantRelayed {
-							t.Errorf("Gates(%+v)[ISSUE_TRACKER_RELAYED] = %v, want %v", env, g["ISSUE_TRACKER_RELAYED"], wantRelayed)
-						}
-						if g["ISSUE_TRACKER_RELAYED_LOG"] != (wantRelayed && carrier == "log") ||
-							g["ISSUE_TRACKER_RELAYED_SOCKET"] != (wantRelayed && carrier == "socket") {
-							t.Errorf("Gates(%+v) ISSUE_TRACKER_RELAYED _LOG/_SOCKET = %v/%v for relayed=%v",
-								env, g["ISSUE_TRACKER_RELAYED_LOG"], g["ISSUE_TRACKER_RELAYED_SOCKET"], wantRelayed)
-						}
-					}
-				}
-			}
-		}
+// TestGatesResearchVerdictRelayedCarrierSplit pins that the relayed gate
+// splits into exactly one of _LOG/_SOCKET by Signal carrier, and that
+// neither half is on for a kind that posts no verdict.
+func TestGatesResearchVerdictRelayedCarrierSplit(t *testing.T) {
+	cases := []struct {
+		name            string
+		kind            string
+		carrier         string
+		wantLog, wantSk bool
+	}{
+		{"log carrier", "research", "log", true, false},
+		{"empty carrier means log", "research", "", true, false},
+		{"socket carrier", "research", "socket", false, true},
+		{"socket carrier, no verdict", "work", "socket", false, false},
 	}
-}
-
-// TestGatesFilerDirectFollowsFilerFolder pins the filer-axis slot rows, gated
-// on FILER_FILE_DIRECT_ANY, to the deprecated per-backend gates: GH is on
-// exactly when a direct Filer's folder is github, FORGEJO when it is forgejo,
-// for every tracker, with and without explicit axis fields.
-func TestGatesFilerDirectFollowsFilerFolder(t *testing.T) {
-	axes := []struct{ read, write, filer string }{{"", "", ""}, {"GITHUB", "GITHUB", "GH"}, {"FORGEJO", "FORGEJO", "FORGEJO"}, {"LOCAL", "", "GH"}}
-	for _, tracker := range []string{"github", "forgejo", "local", "jira"} {
-		for _, ax := range axes {
-			for _, boxWrite := range []bool{true, false} {
-				for _, kd := range dispatchkind.All {
-					for _, filer := range []bool{true, false} {
-						env := Env{IssueTracker: tracker, TrackerAxisRead: ax.read, TrackerAxisWrite: ax.write, TrackerAxisFiler: ax.filer,
-							BoxWriteEnabled: boxWrite, DispatchKind: kd.Name, FilerEnabled: filer}
-						g := Gates(env)
-						folder, err := FragmentRow{Axis: "filer"}.axisFolder(env)
-						if err != nil {
-							t.Fatal(err)
-						}
-						if want := g["FILER_FILE_DIRECT_ANY"] && folder == "github"; g["FILER_FILE_DIRECT_GH"] != want {
-							t.Errorf("Gates(%+v)[FILER_FILE_DIRECT_GH] = %v, want %v", env, g["FILER_FILE_DIRECT_GH"], want)
-						}
-						if want := g["FILER_FILE_DIRECT_ANY"] && folder == "forgejo"; g["FILER_FILE_DIRECT_FORGEJO"] != want {
-							t.Errorf("Gates(%+v)[FILER_FILE_DIRECT_FORGEJO] = %v, want %v", env, g["FILER_FILE_DIRECT_FORGEJO"], want)
-						}
-					}
-				}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := Gates(Env{
+				DispatchKind:     tc.kind,
+				SignalCarrier:    tc.carrier,
+				TrackerAxisRead:  "GITHUB",
+				TrackerAxisWrite: "GITHUB",
+			})
+			if g["RESEARCH_VERDICT_RELAYED_LOG"] != tc.wantLog || g["RESEARCH_VERDICT_RELAYED_SOCKET"] != tc.wantSk {
+				t.Errorf("_LOG/_SOCKET = %v/%v, want %v/%v", g["RESEARCH_VERDICT_RELAYED_LOG"], g["RESEARCH_VERDICT_RELAYED_SOCKET"], tc.wantLog, tc.wantSk)
 			}
-		}
+		})
 	}
 }
 

@@ -277,8 +277,8 @@ let
       fragment = "worker-scout-brief.md";
       var = "WORKER_SCOUT_BRIEF_STEP";
     }
-    # The triage recap opening all three FILE ISSUES rows below, spliced in
-    # rather than copied three times (issue #6184); issue-prompt.md never
+    # The triage recap opening both FILE ISSUES rows below, spliced in rather
+    # than copied into each (issue #6184); issue-prompt.md never
     # names its var.
     {
       gate = "FILER_ENABLED";
@@ -286,30 +286,16 @@ let
       var = "FILE_ISSUES_TRIAGE_RECAP_STEP";
     }
 
-    # The write-mechanism split (issue #2019): a filer under read-only holds
-    # no write token, so its label and file steps emit the host-mediated
-    # SPINDRIFT_ISSUE_INTENT relay instead of gh label create/gh issue create.
-    # Only the write mechanism is gated here; the filer's authoring judgment
-    # stays in filer-prompt.md's unconditional dedup/title/body steps (the
-    # dedup search commands fork separately on the read axis, below).
+    # The Filer files through the host-mediated SPINDRIFT_ISSUE_INTENT relay,
+    # never gh issue create (ADR 0041, issue #2019). Only the write mechanism
+    # is gated here; the filer's authoring judgment stays in filer-prompt.md's
+    # unconditional dedup/title/body steps (the dedup search commands fork
+    # separately on the read axis, below).
 
-    # The direct case forks again on ISSUE_TRACKER (issue #1963): fj has no
-    # label verb and `fj issue create` has no --label flag, so forgejo renders
-    # the *-forgejo fragments (curl against the REST API for the label).
-    # file-issues-direct.md names no gh/fj command, so it alone stays on the
-    # combined FILER_FILE_DIRECT_ANY gate.
-    {
-      gate = "FILER_FILE_DIRECT_ANY";
-      fragment = "file-issues-direct.md";
-      var = "FILE_ISSUES_DIRECT_STEP";
-    }
-    # The work relay's stated reason (issue #6354): a read-only Box has no
-    # write token, but an unwritable tracker (Jira) has no in-Box client in any
-    # access mode, so a read-write Box there must not be told its token is
-    # read-only. The readonly arm holds only because the work relay runs on a
-    # writable tracker just when the Box is read-only (gates_tracker.go's
-    # filerFileRelay); revisit it if that gate changes. Both arms share a var
-    # and splice into the relay parents below.
+    # The work relay's stated reason (issue #6354): a Box has no write token,
+    # but an unwritable tracker (Jira) has no in-Box client at all, so it must
+    # not be told its token is read-only. Both arms share a var and splice into
+    # the relay parents below.
     {
       gate = "ISSUE_TRACKER_WRITABLE";
       fragment = "filer-relay-reason-readonly.md";
@@ -340,28 +326,6 @@ let
       fragment = "file-issues-relay-socket.md";
       var = "FILE_ISSUES_RELAY_SOCKET_STEP";
       signalChannel = "issue-intent";
-    }
-    # One slot per direct step (issue #5647, ADR 0068): fj has no label verb,
-    # so each Filer folder carries its own file, and the gate is the combined
-    # one because the folder already picks the arm.
-    {
-      axis = "filer";
-      gate = "FILER_FILE_DIRECT_ANY";
-      fragment = "filer-direct-label.md";
-      var = "FILER_DIRECT_LABEL_STEP";
-    }
-    # Deprecation-window fills for override prompts still naming the old vars.
-    {
-      gate = "FILER_FILE_DIRECT_GH";
-      fragment = "github/filer-direct-label.md";
-      legacyFragment = "filer-label-direct.md";
-      var = "FILER_LABEL_DIRECT_STEP";
-    }
-    {
-      gate = "FILER_FILE_DIRECT_FORGEJO";
-      fragment = "forgejo/filer-direct-label.md";
-      legacyFragment = "filer-label-direct-forgejo.md";
-      var = "FILER_LABEL_DIRECT_FORGEJO_STEP";
     }
     # filer-label-relay.md splits by dispatch kind (issue #2593): the relay
     # mechanism is identical for work and research, but the label the launcher
@@ -396,8 +360,8 @@ let
       fragment = "filer-label-relay-butler-records.md";
       var = "FILER_LABEL_RELAY_BUTLER_RECORDS_STEP";
     }
-    # Step 2's tracker searches fork on whether a search reaches the Box, not
-    # on FILER_FILE_DIRECT_GH: a relay Filer still searches through the tracker.
+    # Step 2's tracker searches fork on whether a search reaches the Box: a
+    # relay Filer still searches through the tracker.
     # The search is the Signal socket's issue-search verb (issue #6895), so
     # the search arm renders wherever the host built a searcher
     # (BOX_SIGNAL_ISSUE_SEARCH, issue #6924) and local keeps its folder
@@ -451,24 +415,6 @@ let
       var = "FILER_DEDUP_SEARCH_LOCAL_STEP";
     }
     {
-      axis = "filer";
-      gate = "FILER_FILE_DIRECT_ANY";
-      fragment = "filer-direct-file.md";
-      var = "FILER_DIRECT_FILE_STEP";
-    }
-    {
-      gate = "FILER_FILE_DIRECT_GH";
-      fragment = "github/filer-direct-file.md";
-      legacyFragment = "filer-file-direct.md";
-      var = "FILER_FILE_DIRECT_STEP";
-    }
-    {
-      gate = "FILER_FILE_DIRECT_FORGEJO";
-      fragment = "forgejo/filer-direct-file.md";
-      legacyFragment = "filer-file-direct-forgejo.md";
-      var = "FILER_FILE_DIRECT_FORGEJO_STEP";
-    }
-    {
       gate = "FILER_FILE_RELAY_LOG";
       fragment = "filer-file-relay.md";
       var = "FILER_FILE_RELAY_STEP";
@@ -481,10 +427,7 @@ let
       signalChannel = "issue-intent";
     }
     # The research-only filing step (issue #2593, ADR 0041): reuses the
-    # FILER_FILE_RELAY gate, which gates_tracker.go makes unconditionally true
-    # for a research dispatch with a Filer, so no separate gate is needed. A
-    # research prompt must never render a direct-file fragment in any mode;
-    # `researchDirectFileCheckOk` (issue #2595) backstops that at build time.
+    # FILER_FILE_RELAY gate, so no separate gate is needed.
     {
       gate = "FILER_FILE_RELAY_LOG";
       fragment = "research-file-issues-relay.md";
@@ -749,30 +692,15 @@ let
     # SPINDRIFT_COMMENT block on stdout and the work blocked-note rides the
     # outcome line's note= field; settle posts both host-side.
 
-    # github and forgejo split further on BOX_FORGE_AND_ISSUE_ACCESS
-    # (issues #1917, #1963): a read-only Box holds no write token, so it gets
-    # the same host-mediated relay local always has. The read steps above are
-    # not split on access, since a read-only token still permits `gh issue
-    # view` / `fj issue view`; only the deprecation fills gate per backend.
-    {
-      axis = "tracker";
-      gate = "ISSUE_TRACKER_READWRITE";
-      fragment = "research-verdict.md";
-      var = "RESEARCH_VERDICT_STEP";
-    }
-    # The carrier (issue #3726) is orthogonal to the tracker backend: a
-    # read-only/local research Box relays its verdict either as a stdout
-    # SPINDRIFT_COMMENT log line or over the Signal socket, so the relay
-    # slot forks in two on BOX_SIGNAL_CARRIER via the _LOG/_SOCKET gate pair
-    # gates.go computes. The registry only allows one gate per row, so the
-    # conjunction itself lives in gates.go, not here. The read-write rows
-    # are untouched: a write-capable Box posts the comment with its own
-    # tracker client and never uses either carrier. github and forgejo share
-    # one relay body; local keeps its own.
+    # The research verdict relay (issue #3726): a Box has no in-box tracker
+    # write, so its verdict travels either as a stdout SPINDRIFT_COMMENT log
+    # line or over the Signal socket. The slot forks in two on
+    # BOX_SIGNAL_CARRIER via the _LOG/_SOCKET gate pair gates.go computes.
+    # github and forgejo share one relay body; local keeps its own.
     {
       axis = "tracker";
       shared = true;
-      gate = "ISSUE_TRACKER_RELAYED_LOG";
+      gate = "BOX_ACCESS_READ_ONLY_LOG";
       fragment = "research-verdict-relay.md";
       var = "RESEARCH_VERDICT_RELAY_STEP";
       signalChannel = "comment";
@@ -780,19 +708,13 @@ let
     {
       axis = "tracker";
       shared = true;
-      gate = "ISSUE_TRACKER_RELAYED_SOCKET";
+      gate = "BOX_ACCESS_READ_ONLY_SOCKET";
       fragment = "research-verdict-relay-socket.md";
       var = "RESEARCH_VERDICT_RELAY_SOCKET_STEP";
       signalChannel = "comment";
     }
     # Deprecation-window fill for override prompts that still name the
     # per-backend vars (issue #5647); shipped prompts use the slot vars above.
-    {
-      gate = "ISSUE_TRACKER_GITHUB_READWRITE";
-      fragment = "github/research-verdict.md";
-      legacyFragment = "research-verdict-github.md";
-      var = "RESEARCH_VERDICT_GITHUB_STEP";
-    }
     {
       gate = "ISSUE_TRACKER_GITHUB_READONLY_LOG";
       fragment = "research-verdict-relay.md";
@@ -822,12 +744,6 @@ let
       signalChannel = "comment";
     }
     {
-      gate = "ISSUE_TRACKER_FORGEJO_READWRITE";
-      fragment = "forgejo/research-verdict.md";
-      legacyFragment = "research-verdict-forgejo.md";
-      var = "RESEARCH_VERDICT_FORGEJO_STEP";
-    }
-    {
       gate = "ISSUE_TRACKER_FORGEJO_READONLY_LOG";
       fragment = "research-verdict-relay.md";
       legacyFragment = "research-verdict-forgejo-readonly.md";
@@ -841,27 +757,8 @@ let
       var = "RESEARCH_VERDICT_FORGEJO_READONLY_SOCKET_STEP";
       signalChannel = "comment";
     }
-    # The research OUTCOME's `landing` guidance (issue #5130): only a
-    # write-capable Box posts the comment itself and sees a URL; every
-    # relayed path (read-only, local, Filer-forced) reports landing=none.
-    {
-      axis = "tracker";
-      gate = "ISSUE_TRACKER_READWRITE";
-      fragment = "research-outcome-landing.md";
-      var = "RESEARCH_OUTCOME_LANDING_STEP";
-    }
-    {
-      gate = "ISSUE_TRACKER_GITHUB_READWRITE";
-      fragment = "github/research-outcome-landing.md";
-      legacyFragment = "research-outcome-landing-github.md";
-      var = "RESEARCH_OUTCOME_LANDING_GITHUB_STEP";
-    }
-    {
-      gate = "ISSUE_TRACKER_FORGEJO_READWRITE";
-      fragment = "forgejo/research-outcome-landing.md";
-      legacyFragment = "research-outcome-landing-forgejo.md";
-      var = "RESEARCH_OUTCOME_LANDING_FORGEJO_STEP";
-    }
+    # The research OUTCOME's `landing` guidance (issue #5130): the Box never
+    # posts the comment itself, so it never sees a URL and reports landing=none.
     # The relayed variant forks on carrier: only the socket acknowledges a
     # relay (`signal comment accepted`), so the log wording says what counts.
     {
@@ -876,34 +773,14 @@ let
       var = "RESEARCH_OUTCOME_LANDING_RELAYED_SOCKET_STEP";
       signalChannel = "comment";
     }
-    # The work IF BLOCKED comment step: a write-capable Box comments itself;
-    # a relayed one (read-only, local) rides the outcome line's note= field.
-    {
-      axis = "tracker";
-      gate = "ISSUE_TRACKER_READWRITE";
-      fragment = "issue-blocked-comment.md";
-      var = "ISSUE_BLOCKED_COMMENT_STEP";
-    }
+    # The work IF BLOCKED comment step: the Box never comments itself, so the
+    # note rides the outcome line's note= field and settle posts it host-side.
     {
       axis = "tracker";
       shared = true;
-      gate = "ISSUE_TRACKER_RELAYED";
       extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       fragment = "issue-blocked-comment-relay.md";
       var = "ISSUE_BLOCKED_COMMENT_RELAY_STEP";
-    }
-    # A tracker the Box reads but cannot write (jira, issue #5263): the same
-    # host-posted note= relay as local, but only on a write-capable Box.
-    {
-      gate = "ISSUE_TRACKER_UNWRITABLE_READWRITE";
-      fragment = "issue-blocked-comment-unwritable.md";
-      var = "ISSUE_BLOCKED_COMMENT_UNWRITABLE_STEP";
-    }
-    {
-      gate = "ISSUE_TRACKER_GITHUB_READWRITE";
-      fragment = "github/issue-blocked-comment.md";
-      legacyFragment = "issue-blocked-comment-github.md";
-      var = "ISSUE_BLOCKED_COMMENT_GITHUB_STEP";
     }
     {
       axis = "tracker";
@@ -919,12 +796,6 @@ let
       fragment = "local/issue-blocked-comment-relay.md";
       legacyFragment = "issue-blocked-comment-local.md";
       var = "ISSUE_BLOCKED_COMMENT_LOCAL_STEP";
-    }
-    {
-      gate = "ISSUE_TRACKER_FORGEJO_READWRITE";
-      fragment = "forgejo/issue-blocked-comment.md";
-      legacyFragment = "issue-blocked-comment-forgejo.md";
-      var = "ISSUE_BLOCKED_COMMENT_FORGEJO_STEP";
     }
     {
       gate = "ISSUE_TRACKER_FORGEJO_READONLY";

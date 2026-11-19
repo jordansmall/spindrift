@@ -51,7 +51,6 @@ func newCRFixture(t *testing.T) *crFixture {
 	f.knobs["ISSUE_NUMBER"] = "42"
 	f.knobs["BASE_BRANCH"] = "main"
 	f.knobs["BRANCH"] = "agent/issue-42"
-	f.env.BoxWriteEnabled = true
 	if err := os.MkdirAll(filepath.Join(f.in.WorkDir, ".git", "rebase-merge"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +340,6 @@ func TestConflictResolve_PublishGoesThroughBranchRecovery(t *testing.T) {
 		f := newCRFixture(t)
 		f.finishRebase()
 		f.recovery.Adopted = true
-		f.env.BoxWriteEnabled = write
 		f.run()
 		want := []branchrecovery.Config{{
 			WorkDir: f.in.WorkDir, Branch: "agent/issue-42", BaseBranch: "main",

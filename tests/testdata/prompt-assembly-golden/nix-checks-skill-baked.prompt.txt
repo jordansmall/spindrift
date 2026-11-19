@@ -655,8 +655,10 @@ Then:
    describes.
 
 3. Leave the issue in-progress — do NOT close it.
-4. Comment on the issue with what's done and what remains:
-   `gh issue comment 7 --body "<what's done, what remains>"`.
+4. Your GitHub token is read-only here — you cannot comment on the issue
+   yourself. Put what's done and what remains in the SPINDRIFT_OUTCOME
+   `note=` field below; the launcher posts it as the issue comment,
+   host-side, once you exit.
 
 5. Print exactly one line and stop — raw plain text, not wrapped in
    backticks, a code fence, or any other markdown formatting:

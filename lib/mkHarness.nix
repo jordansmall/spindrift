@@ -1141,12 +1141,6 @@ let
     };
   };
 
-  # One spelling of "is this a FILER_FILE_DIRECT*-gated row", shared by
-  # readOnlyReachableFragmentRows and directFileFragmentRows below
-  # (issue #2595). Two spellings meant a new FILER_FILE_DIRECT_* gate could
-  # miss one list and wrongly stay inside the forbidden-marker scan.
-  isDirectFileGate = row: lib.hasInfix "FILER_FILE_DIRECT" row.gate;
-
   # Ungated fragments whose only forbidden-marker text is a negation. Every Box
   # is read-only, so a row with no gate has no read-only gate name to prove it.
   negationOnlyFragments = [ "open-pr-push-outbox.md" ];
@@ -1164,10 +1158,7 @@ let
     !(
       lib.hasInfix "READ_ONLY" row.gate
       || lib.hasInfix "READONLY" row.gate
-      || lib.hasInfix "READWRITE" row.gate
-      || lib.hasInfix "READ_WRITE" row.gate
       || lib.hasInfix "HOST_MEDIATED" row.gate
-      || isDirectFileGate row
       || builtins.elem row.fragment negationOnlyFragments
     )
   ) fragments;
@@ -1305,39 +1296,6 @@ let
         lib.concatMapStringsSep "\n" (
           v: "  ${v.source}: \${${v.name}} (removed in issue #${toString v.issue})"
         ) removedFragmentVarViolations
-      }";
-
-  # The FILER_FILE_DIRECT*-gated fragment rows (issue #2595, ADR 0041): the
-  # ones telling the agent to run `gh issue create` and friends directly,
-  # never rendered into a research prompt by design. lib/fragments.nix's
-  # research-file-issues-relay.md row says why.
-  directFileFragmentRows = builtins.filter isDirectFileGate fragments;
-
-  # The research prompts scanned for a direct-file placeholder (issue #2595):
-  # every prompt of a row whose Contract renders the verdict set into it (a key
-  # of renderByContract). Named so nix/checks/prompts.nix can read it back
-  # through `internals` below and assert its keys still cover every
-  # research*-prompt.md file on disk.
-  researchPromptContentByName = lib.listToAttrs (
-    map (e: lib.nameValuePair e.file e.text) (
-      builtins.filter (e: renderByContract ? ${e.contract}) kindPrompts
-    )
-  );
-
-  researchDirectFileViolations = promptContract.buildTimeResearchDirectFileViolations {
-    inherit directFileFragmentRows researchPromptContentByName;
-  };
-
-  # Forces researchDirectFileViolations' evaluation, the way
-  # forbiddenMarkerCheckOk does; asserted ahead of the returned attrset.
-  researchDirectFileCheckOk =
-    if researchDirectFileViolations == [ ] then
-      true
-    else
-      throw "mkHarness: a research prompt must never render a direct-file filing fragment (ADR 0041, docs/adr/0041-research-filing-is-host-mediated-and-relay-only.md: research filing is host-mediated and relay-only) -- issues are filed via the SPINDRIFT_ISSUE_INTENT relay, never gh/fj directly, in a research dispatch:\n${
-        lib.concatMapStringsSep "\n" (
-          v: "  ${v.promptName}: references direct-file fragment '${v.fragment}' via \${${v.var}}"
-        ) researchDirectFileViolations
       }";
 
   # The image build lives in lib/image.nix (issue #514); the image derivation
@@ -2045,7 +2003,6 @@ else
   assert kindPromptKeysOk;
   assert forbiddenMarkerCheckOk;
   assert removedFragmentVarCheckOk;
-  assert researchDirectFileCheckOk;
   assert repoSlugCoherenceOk;
   assert choicesCheckOk;
   assert networkModeCoherenceOk;
@@ -2116,17 +2073,10 @@ else
       # fileset value, not just the realized store path (issue #2677).
       inherit launcherCurrencyFileset;
 
-      # Exposed for nix/checks/prompts.nix (issue #2595), so its checks run
-      # against a real mkHarness build's computed values rather than a
-      # reimplemented predicate that could drift from this file: the two row
-      # lists must agree on every FILER_FILE_DIRECT*-gated row, and
-      # researchPromptContentByName's keys must cover every prompt on disk.
-      inherit
-        directFileFragmentRows
-        readOnlyReachableFragmentRows
-        researchPromptContentByName
-        kindPrompts
-        ;
+      # Exposed for nix/checks/prompts.nix, so its checks run against a real
+      # mkHarness build's computed values rather than a reimplemented
+      # predicate that could drift from this file.
+      inherit readOnlyReachableFragmentRows kindPrompts;
 
       inherit
         rosterWarnings

@@ -31,7 +31,6 @@ func (r *boxRun) recoveryConfig() branchrecovery.Config {
 		Branch:     r.env.Branch,
 		BaseBranch: r.env.BaseBranch,
 		CodeForge:  r.codeForge(),
-		Push:       r.env.BoxWriteEnabled,
 		OutboxDir:  r.in.OutboxDir,
 	}
 }

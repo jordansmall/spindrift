@@ -25,7 +25,6 @@ var boxEnvRows = []boxEnvRow{
 	{"TrackerAxisRead", "BOX_TRACKER_AXIS_READ", "string"},
 	{"TrackerAxisWrite", "BOX_TRACKER_AXIS_WRITE", "string"},
 	{"TrackerAxisFiler", "BOX_TRACKER_AXIS_FILER", "string"},
-	{"BoxWriteEnabled", "BOX_WRITE_ENABLED", "presence"},
 	{"LocalIssueReference", "LOCAL_ISSUE_REFERENCE", "presence"},
 	{"CodeForge", "CODE_FORGE", "string"},
 	{"ForgeBackend", "BOX_FORGE_BACKEND", "string"},

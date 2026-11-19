@@ -137,7 +137,7 @@ func TestAssembleRejectsUnsupportedCells(t *testing.T) {
 
 // Axis resolution lives in nix (issue #2533) and upstream validation, so
 // checkCoveredCell no longer rejects a bogus tracker or forge (issue #2540),
-// and every CodeForge x BoxWriteEnabled cell beyond github read-write renders.
+// and every CodeForge cell beyond github renders.
 // A future change re-adding allowlist validation here must show up as a
 // deliberate edit to this test.
 func TestAssembleAxisValuesAreNotRejected(t *testing.T) {
@@ -148,9 +148,7 @@ func TestAssembleAxisValuesAreNotRejected(t *testing.T) {
 		{"bogus issue tracker", func(e *Env) { e.IssueTracker = "bogus-tracker" }},
 		{"bogus code forge", func(e *Env) { e.CodeForge = "bogus-forge" }},
 		{"unset tracker, forge and kind", func(e *Env) { e.IssueTracker = ""; e.CodeForge = ""; e.DispatchKind = "" }},
-		{"forgejo read-write", func(e *Env) { e.CodeForge = "forgejo" }},
-		{"forgejo read-only", func(e *Env) { e.CodeForge = "forgejo"; e.BoxWriteEnabled = false }},
-		{"github read-only", func(e *Env) { e.BoxWriteEnabled = false }},
+		{"forgejo forge", func(e *Env) { e.CodeForge = "forgejo" }},
 		{"git forge", func(e *Env) { e.CodeForge = "git" }},
 		{"local forge", func(e *Env) { e.CodeForge = "local" }},
 	}

@@ -125,10 +125,6 @@ func TestAssembleDeprecatedSlotVarsRenderAsBefore(t *testing.T) {
 			"${SCOUT_ISSUE_READ_GITHUB_STEP}${SCOUT_ISSUE_READ_FORGEJO_STEP}"},
 		{"filer", "work", "filer-prompt.md", "${FILER_DEDUP_STEP}",
 			"${FILER_DEDUP_SEARCH_STEP}${FILER_DEDUP_SEARCH_FORGEJO_STEP}${FILER_DEDUP_SEARCH_LOCAL_STEP}"},
-		{"filer file", "work", "filer-prompt.md", "${FILER_DIRECT_FILE_STEP}",
-			"${FILER_FILE_DIRECT_STEP}${FILER_FILE_DIRECT_FORGEJO_STEP}"},
-		{"filer label", "work", "filer-prompt.md", "${FILER_DIRECT_LABEL_STEP}",
-			"${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}"},
 	}
 	trackers := []struct{ tracker, axis string }{{"github", "GITHUB"}, {"forgejo", "FORGEJO"}, {"local", "LOCAL"}, {"jira", "GITHUB"}}
 	for _, s := range slots {
@@ -143,7 +139,7 @@ func TestAssembleDeprecatedSlotVarsRenderAsBefore(t *testing.T) {
 }
 
 // The same guarantee for the verdict, landing and blocked-comment slots
-// (issue #5647), which fork on write access and signal carrier as well as on
+// (issue #5647), which fork on signal carrier as well as on
 // the tracker: every combination must render as the per-backend vars did.
 func TestAssembleDeprecatedAccessSlotVarsRenderAsBefore(t *testing.T) {
 	prompts, reg := seamPrompts(t)
@@ -151,43 +147,38 @@ func TestAssembleDeprecatedAccessSlotVarsRenderAsBefore(t *testing.T) {
 		name, kind, file, slot, old string
 	}{
 		{"verdict", "research", "research-prompt.md",
-			"${RESEARCH_VERDICT_STEP}${RESEARCH_VERDICT_RELAY_STEP}${RESEARCH_VERDICT_RELAY_SOCKET_STEP}",
-			"${RESEARCH_VERDICT_GITHUB_STEP}${RESEARCH_VERDICT_GITHUB_READONLY_STEP}${RESEARCH_VERDICT_GITHUB_READONLY_SOCKET_STEP}" +
-				"${RESEARCH_VERDICT_LOCAL_STEP}${RESEARCH_VERDICT_LOCAL_SOCKET_STEP}${RESEARCH_VERDICT_FORGEJO_STEP}" +
+			"${RESEARCH_VERDICT_RELAY_STEP}${RESEARCH_VERDICT_RELAY_SOCKET_STEP}",
+			"${RESEARCH_VERDICT_GITHUB_READONLY_STEP}${RESEARCH_VERDICT_GITHUB_READONLY_SOCKET_STEP}" +
+				"${RESEARCH_VERDICT_LOCAL_STEP}${RESEARCH_VERDICT_LOCAL_SOCKET_STEP}" +
 				"${RESEARCH_VERDICT_FORGEJO_READONLY_STEP}${RESEARCH_VERDICT_FORGEJO_READONLY_SOCKET_STEP}"},
-		{"landing", "research", "research-prompt.md", "${RESEARCH_OUTCOME_LANDING_STEP}",
-			"${RESEARCH_OUTCOME_LANDING_GITHUB_STEP}${RESEARCH_OUTCOME_LANDING_FORGEJO_STEP}"},
 		{"blocked comment", "work", "issue-prompt.md",
-			"${ISSUE_BLOCKED_COMMENT_STEP}${ISSUE_BLOCKED_COMMENT_RELAY_STEP}",
-			"${ISSUE_BLOCKED_COMMENT_GITHUB_STEP}${ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP}${ISSUE_BLOCKED_COMMENT_LOCAL_STEP}" +
-				"${ISSUE_BLOCKED_COMMENT_FORGEJO_STEP}${ISSUE_BLOCKED_COMMENT_FORGEJO_READONLY_STEP}"},
+			"${ISSUE_BLOCKED_COMMENT_RELAY_STEP}",
+			"${ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP}${ISSUE_BLOCKED_COMMENT_LOCAL_STEP}" +
+				"${ISSUE_BLOCKED_COMMENT_FORGEJO_READONLY_STEP}"},
 	}
 	trackers := []struct{ tracker, axis string }{{"github", "GITHUB"}, {"forgejo", "FORGEJO"}, {"local", "LOCAL"}, {"jira", "GITHUB"}}
 	for _, s := range slots {
 		for _, tr := range trackers {
-			for _, boxWrite := range []bool{true, false} {
-				for _, carrier := range []string{"log", "socket"} {
-					name := fmt.Sprintf("%s/%s/write=%v/%s", s.name, tr.tracker, boxWrite, carrier)
-					t.Run(name, func(t *testing.T) {
-						env := seamEnv(prompts)
-						env.DispatchKind = s.kind
-						env.IssueTracker = tr.tracker
-						env.TrackerAxisRead, env.TrackerAxisWrite, env.TrackerAxisFiler = tr.axis, tr.axis, tr.axis
-						if tr.tracker == "local" {
-							env.TrackerAxisWrite = ""
-						}
-						env.BoxWriteEnabled = boxWrite
-						env.SignalCarrier = carrier
-						assertOverrideRendersAsSlot(t, reg, prompts, env, s.file, s.slot, s.old)
-					})
-				}
+			for _, carrier := range []string{"log", "socket"} {
+				name := fmt.Sprintf("%s/%s/%s", s.name, tr.tracker, carrier)
+				t.Run(name, func(t *testing.T) {
+					env := seamEnv(prompts)
+					env.DispatchKind = s.kind
+					env.IssueTracker = tr.tracker
+					env.TrackerAxisRead, env.TrackerAxisWrite, env.TrackerAxisFiler = tr.axis, tr.axis, tr.axis
+					if tr.tracker == "local" {
+						env.TrackerAxisWrite = ""
+					}
+					env.SignalCarrier = carrier
+					assertOverrideRendersAsSlot(t, reg, prompts, env, s.file, s.slot, s.old)
+				})
 			}
 		}
 	}
 }
 
 // The forge-axis, host-mediated and PR-body slots (issue #5647) fork on the
-// code forge, on write access and on the local PR-body opt-in rather than on
+// code forge and on the local PR-body opt-in rather than on
 // the tracker, so each combination must render as the per-backend vars did.
 func TestAssembleDeprecatedForgeSlotVarsRenderAsBefore(t *testing.T) {
 	prompts, reg := seamPrompts(t)
@@ -219,27 +210,24 @@ func TestAssembleDeprecatedForgeSlotVarsRenderAsBefore(t *testing.T) {
 	for _, s := range slots {
 		for _, f := range forges {
 			for _, tr := range trackers {
-				for _, boxWrite := range []bool{true, false} {
-					for _, ref := range []bool{true, false} {
-						name := fmt.Sprintf("%s/%s/%s/write=%v/ref=%v", s.name, f.name, tr.tracker, boxWrite, ref)
-						t.Run(name, func(t *testing.T) {
-							env := seamEnv(prompts)
-							env.FixPass = s.fixPass
-							env.DispatchKind = s.kind
-							env.IssueTracker = tr.tracker
-							env.TrackerAxisRead, env.TrackerAxisWrite, env.TrackerAxisFiler = tr.axis, tr.axis, tr.axis
-							if tr.tracker == "local" {
-								env.TrackerAxisWrite = ""
-							}
-							env.CodeForge = f.name
-							env.ForgeBackend = f.backend
-							env.OutboxRelayCapable = f.outboxCapable
-							env.HostMediatedRemote = f.hostMedia
-							env.BoxWriteEnabled = boxWrite
-							env.LocalIssueReference = ref
-							assertOverrideRendersAsSlot(t, reg, prompts, env, s.file, s.slot, s.old)
-						})
-					}
+				for _, ref := range []bool{true, false} {
+					name := fmt.Sprintf("%s/%s/%s/ref=%v", s.name, f.name, tr.tracker, ref)
+					t.Run(name, func(t *testing.T) {
+						env := seamEnv(prompts)
+						env.FixPass = s.fixPass
+						env.DispatchKind = s.kind
+						env.IssueTracker = tr.tracker
+						env.TrackerAxisRead, env.TrackerAxisWrite, env.TrackerAxisFiler = tr.axis, tr.axis, tr.axis
+						if tr.tracker == "local" {
+							env.TrackerAxisWrite = ""
+						}
+						env.CodeForge = f.name
+						env.ForgeBackend = f.backend
+						env.OutboxRelayCapable = f.outboxCapable
+						env.HostMediatedRemote = f.hostMedia
+						env.LocalIssueReference = ref
+						assertOverrideRendersAsSlot(t, reg, prompts, env, s.file, s.slot, s.old)
+					})
 				}
 			}
 		}
@@ -253,7 +241,7 @@ func TestAssembleDeprecatedForgeSlotVarsRenderAsBefore(t *testing.T) {
 func TestAssembleDeprecatedBlockedCommentReadOnlyVarFollowsTrackerFolder(t *testing.T) {
 	_, reg := seamPrompts(t)
 	prompts := repopath.MergedPromptsDir(t)
-	const slot = "${ISSUE_BLOCKED_COMMENT_STEP}${ISSUE_BLOCKED_COMMENT_RELAY_STEP}"
+	const slot = "${ISSUE_BLOCKED_COMMENT_RELAY_STEP}"
 	const old = "${ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP}"
 	for _, tc := range []struct{ tracker, read, want string }{
 		{"jira", "JIRA", "You have no client that can post a comment to this tracker"},
@@ -264,7 +252,6 @@ func TestAssembleDeprecatedBlockedCommentReadOnlyVarFollowsTrackerFolder(t *test
 			env.DispatchKind = "work"
 			env.IssueTracker = tc.tracker
 			env.TrackerAxisRead, env.TrackerAxisWrite, env.TrackerAxisFiler = tc.read, "GITHUB", "GITHUB"
-			env.BoxWriteEnabled = false
 			want, err := Assemble(env, reg)
 			if err != nil {
 				t.Fatalf("Assemble: %v", err)

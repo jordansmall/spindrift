@@ -12,10 +12,9 @@ let
   # Base gates only; the _LOG/_SOCKET variants promptassembly/gates.go derives
   # from each (narrowed by the BOX_SIGNAL_CARRIER knob) are expanded below.
   signalSplit = {
-    ISSUE_TRACKER_RELAYED = "every tracker write goes through the host relay";
-    ISSUE_TRACKER_GITHUB_READONLY = "the GitHub write axis, read-only Box or forced relay";
+    ISSUE_TRACKER_GITHUB_READONLY = "the tracker writes through the GitHub axis (relayed via the host)";
     ISSUE_TRACKER_LOCAL = "the tracker reads through the local axis";
-    ISSUE_TRACKER_FORGEJO_READONLY = "the Forgejo write axis, read-only Box or forced relay";
+    ISSUE_TRACKER_FORGEJO_READONLY = "the tracker writes through the Forgejo axis (relayed via the host)";
     PR_FORGE_READ_ONLY = "the Box is on a forge with pull requests";
     FILER_FILE_RELAY = "the Filer files issues through the host relay";
     RESEARCH_VERDICT_RELAYED = "a research verdict is posted through the host relay";
@@ -90,13 +89,6 @@ let
     ISSUE_TRACKER_FORGEJO_UNSEARCHABLE = "the Forgejo axis without BOX_SIGNAL_ISSUE_SEARCH";
     ISSUE_TRACKER_WRITABLE = "the Box can write the tracker directly";
     ISSUE_TRACKER_UNWRITABLE = "the tracker takes no in-Box writes (jira)";
-    ISSUE_TRACKER_GITHUB_READWRITE = "the GitHub write axis, writable Box, no forced relay";
-    ISSUE_TRACKER_UNWRITABLE_READWRITE = "an unwritable tracker on a writable Box, no forced relay (comments relay via note=)";
-    ISSUE_TRACKER_FORGEJO_READWRITE = "the Forgejo write axis, writable Box, no forced relay";
-    ISSUE_TRACKER_READWRITE = "the Box writes the tracker directly, whatever the backend";
-    FILER_FILE_DIRECT_GH = "the Filer files issues directly with gh";
-    FILER_FILE_DIRECT_FORGEJO = "the Filer files issues directly with fj";
-    FILER_FILE_DIRECT_ANY = "the Filer files issues directly, with either client";
     PR_BODY_CLOSES = "the PR body closes the issue with a Closes line";
     PR_BODY_LOCAL_REF = "the PR body cites a local issue by slug (reference opted in)";
     PR_BODY_LOCAL_NOREF = "a local-issue PR body carries no issue reference";
@@ -125,21 +117,6 @@ let
   # declared by two sources would lose a meaning unnoticed.
   counts = builtins.mapAttrs (_: builtins.length) (builtins.groupBy (e: e.name) entries);
   duplicates = builtins.filter (n: counts.${n} > 1) (builtins.attrNames counts);
-
-  # Gates that are on only when the Box has write access (BOX_WRITE_ENABLED):
-  # exactly those of the rows rendering a fragment that instructs an in-Box
-  # forge CLI (docs/in-box-forge-cli.md). The Go side proves the claim
-  # (promptassembly's TestReadWriteOnlyGatesNeverFireReadOnly), and
-  # nix/checks/in-box-forge-cli-allowlist.nix holds every such row to it.
-  readWriteOnly = [
-    "FILER_FILE_DIRECT_ANY"
-    "FILER_FILE_DIRECT_FORGEJO"
-    "FILER_FILE_DIRECT_GH"
-    "ISSUE_TRACKER_FORGEJO_READWRITE"
-    "ISSUE_TRACKER_GITHUB_READWRITE"
-    "ISSUE_TRACKER_READWRITE"
-  ];
-  undeclaredReadWriteOnly = builtins.filter (g: !(counts ? ${g})) readWriteOnly;
 in
 {
   # name -> one-line meaning, for every gate.
@@ -148,12 +125,6 @@ in
       builtins.listToAttrs entries
     else
       throw "gate-vocabulary: gate(s) declared more than once: ${builtins.concatStringsSep ", " duplicates}";
-
-  readWriteOnly =
-    if undeclaredReadWriteOnly == [ ] then
-      readWriteOnly
-    else
-      throw "gate-vocabulary: readWriteOnly names gate(s) outside the vocabulary: ${builtins.concatStringsSep ", " undeclaredReadWriteOnly}";
 
   # The baked-skill rows regen renders gates.go's SKILL-BAKED GATES block from.
   inherit skillBaked;

@@ -166,7 +166,6 @@ func newFixture(t *testing.T) *fixture {
 		Branch:               "agent/issue-42",
 		BaseBranch:           "main",
 		RunNonce:             "n0nce",
-		BoxWriteEnabled:      true,
 	}
 	f.firstRun(readyLine+"\n", 0)
 	f.d = deps{
@@ -286,7 +285,6 @@ func (f *fixture) sessionID() string {
 }
 
 func (f *fixture) readOnlyRelay() {
-	f.env.BoxWriteEnabled = false
 	f.env.OutboxRelayCapable = true
 }
 
@@ -589,7 +587,6 @@ func TestBackstop_ConfigMapping(t *testing.T) {
 	f.env.DispatchKind = ""
 	f.env.HostMediatedRemote = true
 	f.env.OutboxRelayCapable = true
-	f.env.BoxWriteEnabled = true
 	f.firstRun("done\n", 0)
 	f.resumes = []resumeScript{{result: "done\n"}}
 
@@ -923,10 +920,9 @@ func TestPRIntent_NeverFires(t *testing.T) {
 		name  string
 		setup func(f *fixture)
 	}{
-		{"read-write run", func(f *fixture) { f.env.BoxWriteEnabled = true; f.env.OutboxRelayCapable = true }},
-		{"CODE_FORGE=git (not relay capable)", func(f *fixture) { f.env.BoxWriteEnabled = false; f.env.OutboxRelayCapable = false }},
+		{"read-write run", func(f *fixture) { f.env.OutboxRelayCapable = true }},
+		{"CODE_FORGE=git (not relay capable)", func(f *fixture) { f.env.OutboxRelayCapable = false }},
 		{"CODE_FORGE=local (host mediated, not relay capable)", func(f *fixture) {
-			f.env.BoxWriteEnabled = false
 			f.env.OutboxRelayCapable = false
 			f.env.HostMediatedRemote = true
 		}},
@@ -1068,8 +1064,8 @@ func TestSettle_BundleOutPredicate(t *testing.T) {
 		{"read-write github", func(f *fixture) {}, 0},
 		{"host mediated (local)", func(f *fixture) { f.env.HostMediatedRemote = true }, 1},
 		{"read-only relay-capable", func(f *fixture) { f.readOnlyRelay() }, 1},
-		{"read-only git (bundle relay, no PRs)", func(f *fixture) { f.env.BoxWriteEnabled = false; f.env.CodeForge = "git" }, 1},
-		{"read-only not relay-capable", func(f *fixture) { f.env.BoxWriteEnabled = false; f.env.CodeForge = "unregistered" }, 0},
+		{"git (bundle relay, no PRs)", func(f *fixture) { f.env.CodeForge = "git" }, 1},
+		{"read-only not relay-capable", func(f *fixture) { f.env.CodeForge = "unregistered" }, 0},
 		{"advise-only skips even when needed", func(f *fixture) { f.readOnlyRelay(); f.env.DispatchKind = "research" }, 0},
 	}
 	for _, c := range cases {
@@ -1107,7 +1103,6 @@ func TestSettle_BundleOutConfigMapping(t *testing.T) {
 
 func TestSettle_BundleOutRelaysTheBackstopLine(t *testing.T) {
 	f := newFixture(t)
-	f.env.BoxWriteEnabled = false
 	f.env.OutboxRelayCapable = true
 	f.firstRun("done\n", 0)
 	f.backstopOut = blockedLine + "\n"
@@ -1772,7 +1767,7 @@ func assemblyFixture(t *testing.T, skills ...string) assemblyInputs {
 func coveredWorkEnv() promptassembly.Env {
 	return promptassembly.Env{
 		IssueTracker: "github", TrackerAxisRead: "GITHUB", TrackerAxisWrite: "GITHUB", TrackerAxisFiler: "GH",
-		CodeForge: "github", ForgeBackend: "GH", BoxWriteEnabled: true, DispatchKind: "work",
+		CodeForge: "github", ForgeBackend: "GH", DispatchKind: "work",
 		IssueNumber: "42", IssueTitle: "Do it", Branch: "agent/issue-42", BaseBranch: "main",
 		InProgressLabel: "agent-in-progress", CompleteLabel: "agent-complete", RunNonce: "n0nce",
 	}

@@ -2766,6 +2766,7 @@ func TestBoxSeamSelfContainedClonesNothing(t *testing.T) {
 		t.Errorf("a self-contained run cloned a repo into %s", repo)
 	}
 }
+
 // The assembled work prompt tells the agent how to publish: rebase onto base
 // first, report a persistent failure as blocked with a comment, and treat a
 // genuine workflow-file change as a hard stop.

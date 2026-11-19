@@ -14,7 +14,7 @@ import (
 const (
 	whenReadOnlyResearch  = "readOnlyResearch"
 	whenReviewPrompt      = "reviewPrompt"
-	whenBoxAccessReadOnly = "boxAccessReadOnly"
+	whenNotAdviseOnly     = "boxAccessReadOnly" // value kept: lib/prompt-contract.nix rows key on it
 	whenFilerFileRelay    = "filerFileRelay"
 	whenResearchFileRelay = "researchFileRelay"
 )
@@ -111,15 +111,15 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 			// concept the butler (also AdviseOnly, ADR 0056) never shares -- it
 			// files findings and writes the Ledger's done commit, posting no
 			// comment on any issue at all.
-			gateActive = verdictContract(d) && (!e.BoxWriteEnabled || gates["FILER_FILE_RELAY"])
+			gateActive = verdictContract(d)
 			haystack = result.Prompt
 		case whenReviewPrompt:
 			// ReviewPromptText, not Handoff.ReviewPromptFile: the latter became
 			// a real on-disk path and no longer holds rendered text (#2975).
 			gateActive = result.ReviewPromptText != ""
 			haystack = result.ReviewPromptText
-		case whenBoxAccessReadOnly:
-			gateActive = !e.BoxWriteEnabled && !d.AdviseOnly
+		case whenNotAdviseOnly:
+			gateActive = !d.AdviseOnly
 			haystack = result.Prompt
 		case whenFilerFileRelay:
 			gateActive = gates["FILER_FILE_RELAY"]
