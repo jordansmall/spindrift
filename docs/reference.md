@@ -1452,7 +1452,9 @@ Driver entry declares:
   it to `driverGoTestShared` in `nix/checks/go.nix`. The check vendors from a
   source without any Driver directory under the launcher's `launcherVendorHash`,
   so a Driver importing a third-party module no other launcher package uses
-  makes that vendor derivation mismatch the hash.
+  makes that vendor derivation mismatch the hash. A module download failure
+  instead fails it with `go mod vendor: unexpected stderr (likely a module
+  download failure):` and the failing line, not a hash mismatch.
   An Ecosystem package (`internal/ecosystem/<name>`) works the same way: each
   directory beneath `internal/ecosystem` other than `ecosystemkit` and
   `testdata` yields an `ecosystems-<name>-go-test` derivation with no hand-named

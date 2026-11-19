@@ -96,7 +96,9 @@ let
   # drvPath nor the core go test's (a plain launcherGoModules would, its src
   # being the whole tree). Fixed-output with the same vendorHash, so its
   # outPath equals launcherGoModules' and nothing is fetched twice. `go mod
-  # vendor -e` tolerates the packages that import the absent directories.
+  # vendor -e` tolerates the packages that import the absent directories, but
+  # also hides download failures, so go-vendor-errors.sh fails on any other
+  # stderr line.
   # Gotcha: a Driver, runner family, ecosystem, bundled backend or main
   # importing a third-party module no other package uses changes the vendored
   # set, and the narrowed derivation then mismatches launcherVendorHash.
@@ -107,7 +109,22 @@ let
         root = launcherDir;
         fileset = coreFiles files;
       };
-      preBuild = "goModVendorFlags=(-e)";
+      # nixpkgs' goModules buildPhase with stderr captured for the classifier.
+      # It drops the vendor/-exists guard (coreFiles never holds vendor/),
+      # NIX_DEBUG's -v and goModVendorFlags, so goModVendorFlags set on
+      # launcherGoModules is ignored here; re-check it on a nixpkgs bump.
+      buildPhase = ''
+        runHook preBuild
+        export GIT_SSL_CAINFO=$NIX_SSL_CERT_FILE
+        status=0
+        go mod vendor -e 2>"$TMPDIR/vendor.err" || status=$?
+        bash ${./go-vendor-errors.sh} "$TMPDIR/vendor.err"
+        [ "$status" -eq 0 ] || exit "$status"
+
+        mkdir -p vendor
+
+        runHook postBuild
+      '';
     });
   nixSrc = fs.toSource {
     root = ../..;
