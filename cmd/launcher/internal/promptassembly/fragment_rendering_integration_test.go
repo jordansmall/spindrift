@@ -42,17 +42,6 @@ func TestAssembleOutcomeRendering(t *testing.T) {
 		wantNot string
 	}{
 		{
-			name: "read-write OUTCOME landing keeps the pr-url placeholder",
-			check: func(t *testing.T, prompt string) {
-				if !strings.Contains(prompt, "landing=<pr-url> status=ready") {
-					t.Error("prompt missing the pr-url landing line")
-				}
-				if !regexp.MustCompile(`(?m)status=ready note=<short reason>$`).MatchString(prompt) {
-					t.Error("prompt has no line ending status=ready note=<short reason>")
-				}
-			},
-		},
-		{
 			name:  "read-only OUTCOME landing reports the branch, never a pr-url",
 			setup: (*cellInputs).readOnly,
 			check: func(t *testing.T, prompt string) {

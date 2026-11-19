@@ -56,7 +56,7 @@ let
     );
 
   # Every regular *.md file under the fragments tree, keyed by its path
-  # relative to the root ("auto-format.md", "github/open-pr-create.md"), the
+  # relative to the root ("auto-format.md", "github/fix-ci-read.md"), the
   # spelling lib/fragment-paths.nix's scanPathsOf produces.
   fragmentFiles =
     let

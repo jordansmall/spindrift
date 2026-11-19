@@ -933,80 +933,35 @@ let
       legacyFragment = "issue-blocked-comment-forgejo-readonly.md";
       var = "ISSUE_BLOCKED_COMMENT_FORGEJO_READONLY_STEP";
     }
-    # The LAND THE CHANGE CODE_FORGE=git push step (issue #2510): the
-    # forbidden-marker check (lib/prompt-contract.nix) flags any raw, un-gated
-    # "git push" imperative in the shared templates, so this one moved into a
-    # gated fragment. There is no read-only arm: a read-only git Box pushes
-    # nothing (issue #6898), the host relays its bundle, so only the stop step
-    # below renders there.
+    # The CODE_FORGE=git block's closing "print one line and stop" step. A Box
+    # never pushes (issue #6898): the host relays its bundle.
     {
-      gate = "BOX_ACCESS_READ_WRITE";
-      fragment = "land-git-push-git.md";
-      var = "LAND_GIT_PUSH_READ_WRITE_STEP";
-    }
-    # The CODE_FORGE=git block's closing "print one line and stop" step:
-    # identical body either way, but its list number depends on whether the
-    # push step above precedes it. Read-write must read "2.", read-only "1.",
-    # or read-only renders an orphaned "2." with no "1." before it.
-    {
-      gate = "BOX_ACCESS_READ_WRITE";
-      fragment = "land-git-stop-read-write.md";
-      var = "LAND_GIT_STOP_READ_WRITE_STEP";
-    }
-    {
-      gate = "BOX_ACCESS_READ_ONLY";
       fragment = "land-git-stop-read-only.md";
       var = "LAND_GIT_STOP_READ_ONLY_STEP";
     }
-    # The OPEN A PULL REQUEST push step (issue #1918): a read-only Box holds
-    # no push-capable token, so it writes its finished branch as a seam bundle
+    # The OPEN A PULL REQUEST push step (issue #1918): a Box holds no
+    # push-capable token, so it writes its finished branch as a seam bundle
     # to the outbox and the launcher's BundleRelay force-pushes it host-side.
-    {
-      gate = "BOX_ACCESS_READ_WRITE";
-      fragment = "open-pr-push-git.md";
-      var = "OPEN_PR_PUSH_READ_WRITE_STEP";
-    }
-    # Ungated by host mediation though its text is false on local read-only
+    # Ungated by host mediation though its text is false on local
     # (issue #6281): LAND THE CHANGE tells CODE_FORGE=local to skip OPEN A PULL
     # REQUEST, and open-pr-create-outbox.md below is that Box's last PR-intent
     # marker carrier once the IF BLOCKED PR-intent rows stop rendering there
     # (prompt-contract.nix's `pr-intent` row warns without one).
     {
-      gate = "BOX_ACCESS_READ_ONLY";
       fragment = "open-pr-push-outbox.md";
       var = "OPEN_PR_PUSH_READ_ONLY_STEP";
     }
-    # The OPEN A PULL REQUEST create step (issue #1919): a read-only Box
-    # cannot run `gh pr create`, so it emits title and body as one
-    # nonce-guarded, base64-encoded SPINDRIFT_PR_INTENT stdout line, and the
-    # launcher opens the draft PR. Issue #1938 moved that off a multi-line
-    # block, which never survived Claude Code's stream-json transport.
-
-    # The read-write case forks on CODE_FORGE (issue #1963): `gh pr create`
-    # for github, `fj pr create` for forgejo. Read-only never forks, because
-    # SPINDRIFT_PR_INTENT is opened host-side whichever forge backend answers.
-    # One slot (issue #5647, ADR 0068): the forge's folder carries the file.
-    {
-      axis = "forge";
-      gate = "BOX_ACCESS_READ_WRITE";
-      fragment = "open-pr-create.md";
-      var = "OPEN_PR_CREATE_DIRECT_STEP";
-    }
-    {
-      gate = "OPEN_PR_CREATE_RW_GH";
-      fragment = "github/open-pr-create.md";
-      legacyFragment = "open-pr-create-git.md";
-      var = "OPEN_PR_CREATE_READ_WRITE_STEP";
-    }
-    {
-      gate = "OPEN_PR_CREATE_RW_FORGEJO";
-      fragment = "forgejo/open-pr-create.md";
-      legacyFragment = "open-pr-create-forgejo.md";
-      var = "OPEN_PR_CREATE_READ_WRITE_FORGEJO_STEP";
-    }
-    # The carrier (issue #3726) forks the PR-intent send itself: a read-only
-    # Box emits the nonce-guarded SPINDRIFT_PR_INTENT stdout line above, or
-    # sends the same intent over the Signal socket via `driver-exec signal
+    # The OPEN A PULL REQUEST create step (issue #1919): a Box cannot run
+    # `gh pr create`, so it emits title and body as one nonce-guarded,
+    # base64-encoded SPINDRIFT_PR_INTENT stdout line, and the launcher opens
+    # the draft PR. Issue #1938 moved that off a multi-line block, which never
+    # survived Claude Code's stream-json transport. SPINDRIFT_PR_INTENT is
+    # opened host-side whichever forge backend answers, so the step never
+    # forks on CODE_FORGE.
+    #
+    # The carrier (issue #3726) forks the PR-intent send itself: the Box
+    # emits the nonce-guarded SPINDRIFT_PR_INTENT stdout line above, or sends
+    # the same intent over the Signal socket via `driver-exec signal
     # pr-intent`, per BOX_SIGNAL_CARRIER's _LOG/_SOCKET gate pair.
     {
       gate = "BOX_ACCESS_READ_ONLY_LOG";
@@ -1021,17 +976,12 @@ let
       signalChannel = "pr-intent";
     }
     # The OUTCOME section's landing= value and status=ready close
-    # (issue #1919): a read-only Box never opens the PR, so it never learns a
-    # URL. Its landing= carries the branch name, and "status=ready" means
-    # "branch relayed, PR-intent ready to open" rather than "PR already open".
-    # The read-only rows fork on the carrier (issue #6232): the socket Box
-    # prints no PR-intent line, so its status=ready rests on an accepted
+    # (issue #1919): a Box never opens the PR, so it never learns a URL. Its
+    # landing= carries the branch name, and "status=ready" means "branch
+    # relayed, PR-intent ready to open" rather than "PR already open". The
+    # rows fork on the carrier (issue #6232): the socket Box prints no
+    # PR-intent line, so its status=ready rests on an accepted
     # `driver-exec signal pr-intent` call instead.
-    {
-      gate = "BOX_ACCESS_READ_WRITE";
-      fragment = "outcome-landing-git.md";
-      var = "OUTCOME_LANDING_READ_WRITE_STEP";
-    }
     {
       gate = "BOX_ACCESS_READ_ONLY_LOG";
       fragment = "outcome-landing-outbox.md";
@@ -1043,11 +993,6 @@ let
       var = "OUTCOME_LANDING_READ_ONLY_SOCKET_STEP";
     }
     {
-      gate = "BOX_ACCESS_READ_WRITE";
-      fragment = "outcome-ready-means-git.md";
-      var = "OUTCOME_READY_MEANS_READ_WRITE_STEP";
-    }
-    {
       gate = "BOX_ACCESS_READ_ONLY_LOG";
       fragment = "outcome-ready-means-outbox.md";
       var = "OUTCOME_READY_MEANS_READ_ONLY_STEP";
@@ -1057,18 +1002,12 @@ let
       fragment = "outcome-ready-means-outbox-socket.md";
       var = "OUTCOME_READY_MEANS_READ_ONLY_SOCKET_STEP";
     }
-    # The COMMIT section's push step (issue #2462): a read-only Box has no
-    # push-capable token, so the rebase+push+retry block must not render for
-    # it. The pre-commit rebase-and-recheck step still renders either way: a
-    # stale base is a stale base regardless of write access.
-    {
-      gate = "BOX_PUSH_READ_WRITE";
-      fragment = "commit-push-git.md";
-      var = "COMMIT_PUSH_READ_WRITE_STEP";
-    }
-    # Host-mediated, read-write or read-only (issues #5251, #6259): the clone
-    # source is read-only and the launcher lands the branch host-side, whatever
-    # the Box's write access.
+    # The COMMIT section's push step (issue #2462): a Box has no push-capable
+    # token. The pre-commit rebase-and-recheck step still renders either way:
+    # a stale base is a stale base regardless of how the branch lands.
+    #
+    # Host-mediated (issues #5251, #6259): the clone source is read-only and
+    # the launcher lands the branch host-side.
     {
       gate = "HOST_MEDIATED_PUSH";
       fragment = "commit-push-host-mediated.md";
@@ -1085,20 +1024,14 @@ let
       fragment = "commit-push-outbox.md";
       var = "COMMIT_PUSH_READ_ONLY_STEP";
     }
-    # The IF BLOCKED push-failure triage block (issue #2462): it presupposes a
-    # push was attempted, which never applies to a read-only Box, and defers
-    # its report to step 4 (issue #6238). A denied push there is the expected
-    # result of holding no write token, not evidence of a broken or
-    # under-scoped one, so it must never be triaged or escalated as such.
-    # These IF BLOCKED rows key on host mediation and PR-ness, never on
-    # BOX_ACCESS_READ_ONLY, so a read-only local Box gets the host-mediated
+    # The IF BLOCKED push-failure triage block (issue #2462): it defers its
+    # report to step 4 (issue #6238). A denied push is the expected result of
+    # holding no write token, not evidence of a broken or under-scoped one, so
+    # it must never be triaged or escalated as such. These IF BLOCKED rows key
+    # on host mediation and PR-ness, so a local Box gets the host-mediated
     # text (issue #6281).
-    {
-      gate = "BOX_PUSH_READ_WRITE";
-      fragment = "if-blocked-triage-git.md";
-      var = "IF_BLOCKED_TRIAGE_READ_WRITE_STEP";
-    }
-    # Host-mediated at either access (#5251, #6281): no push exists to triage.
+    #
+    # Host-mediated (#5251, #6281): no push exists to triage.
     {
       gate = "HOST_MEDIATED_PUSH";
       fragment = "if-blocked-triage-host-mediated.md";
@@ -1115,15 +1048,9 @@ let
       fragment = "if-blocked-triage-outbox.md";
       var = "IF_BLOCKED_TRIAGE_READ_ONLY_STEP";
     }
-    # The IF BLOCKED push step (issue #1933): a read-only Box holds no
-    # push-capable token on the failure path either, so "Push what you have"
-    # must not attempt a `git push` there.
-    {
-      gate = "BOX_PUSH_READ_WRITE";
-      fragment = "if-blocked-push-git.md";
-      var = "IF_BLOCKED_PUSH_READ_WRITE_STEP";
-    }
-    # Host-mediated at either access (#5251, #6281): hand the branch to the harness.
+    # The IF BLOCKED push step (issue #1933): a Box holds no push-capable
+    # token on the failure path either, so "Push what you have" hands the
+    # branch to the harness (host-mediated, #5251, #6281) or the outbox.
     {
       gate = "HOST_MEDIATED_PUSH";
       fragment = "if-blocked-push-host-mediated.md";
@@ -1140,31 +1067,11 @@ let
       fragment = "if-blocked-push-outbox.md";
       var = "IF_BLOCKED_PUSH_READ_ONLY_STEP";
     }
-    # The IF BLOCKED PR check/create step (issue #1933): a read-only Box holds
-    # no PR-create-capable token on the failure path either, so it emits a
+    # The IF BLOCKED PR check/create step (issue #1933): a Box holds no
+    # PR-create-capable token on the failure path either, so it emits a
     # SPINDRIFT_PR_INTENT line instead of running `gh pr view`/`gh pr create`.
-    # The read-write case forks on CODE_FORGE (issue #5099), as the OPEN A PULL
-    # REQUEST create step does: a forgejo Box has no `gh` for the PR check. A
-    # git or local Box has no PR at all (issue #5233), so it gets a no-PR step
-    # in the same slot.
-    {
-      axis = "forge";
-      gate = "PR_FORGE_READ_WRITE";
-      fragment = "if-blocked-pr.md";
-      var = "IF_BLOCKED_PR_DIRECT_STEP";
-    }
-    {
-      gate = "IF_BLOCKED_PR_RW_GH";
-      fragment = "github/if-blocked-pr.md";
-      legacyFragment = "if-blocked-pr-git.md";
-      var = "IF_BLOCKED_PR_READ_WRITE_STEP";
-    }
-    {
-      gate = "IF_BLOCKED_PR_RW_FORGEJO";
-      fragment = "forgejo/if-blocked-pr.md";
-      legacyFragment = "if-blocked-pr-forgejo.md";
-      var = "IF_BLOCKED_PR_READ_WRITE_FORGEJO_STEP";
-    }
+    # A git or local Box has no PR at all (issue #5233), so it gets a no-PR
+    # step in the same slot.
     {
       gate = "NO_PR_FORGE";
       fragment = "if-blocked-pr-none.md";
@@ -1184,14 +1091,9 @@ let
       signalChannel = "pr-intent";
     }
     # The IF BLOCKED section's closing SPINDRIFT_OUTCOME line (issue #1933): a
-    # read-only Box never opens a PR on the blocked path either, so it never
-    # learns a URL and must report the branch name instead. So does a
-    # read-write Box on a PR-less forge (issue #5233).
-    {
-      gate = "PR_FORGE_READ_WRITE";
-      fragment = "if-blocked-outcome-landing-git.md";
-      var = "IF_BLOCKED_OUTCOME_LANDING_READ_WRITE_STEP";
-    }
+    # Box never opens a PR on the blocked path either, so it never learns a
+    # URL and must report the branch name instead. So does a Box on a PR-less
+    # forge (issue #5233).
     {
       gate = "NO_PR_FORGE";
       fragment = "if-blocked-outcome-landing-branch.md";

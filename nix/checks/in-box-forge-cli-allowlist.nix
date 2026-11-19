@@ -152,9 +152,7 @@ let
         "prompts/fragments/forgejo/${name}.md"
       ];
     in
-    both "open-pr-create"
-    ++ both "if-blocked-pr"
-    ++ both "research-verdict"
+    both "research-verdict"
     ++ both "research-outcome-landing"
     ++ both "issue-blocked-comment"
     ++ both "filer-direct-label"

@@ -37,8 +37,6 @@ comes from each row's gate in `lib/fragments.nix` (and the gate's definition in
 
 | intent | fragment(s) | rendered by | access modes | r/w | planned replacement |
 | ------ | ----------- | ----------- | ------------ | --- | ------------------- |
-| open the draft pull request | `github/open-pr-create.md`, `forgejo/open-pr-create.md` | work, implement pass | `read-write` | write | removed along with `read-write` mode |
-| check for an existing pull request and open a draft one when blocked | `github/if-blocked-pr.md`, `forgejo/if-blocked-pr.md` | work, implement pass | `read-write` | write | removed along with `read-write` mode |
 | comment on the issue with what is done and what remains when blocked | `github/issue-blocked-comment.md`, `forgejo/issue-blocked-comment.md` | work, implement pass | `read-write`, on a tracker with an in-Box client | write | removed along with `read-write` mode |
 | post the research verdict comment | `github/research-verdict.md`, `forgejo/research-verdict.md` | research | `read-write`, without a Filer, on a tracker with an in-Box client | write | removed along with `read-write` mode |
 | report the posted verdict comment's URL as the outcome's `landing` | `github/research-outcome-landing.md`, `forgejo/research-outcome-landing.md` | research | `read-write`, without a Filer, on a tracker with an in-Box client | write | removed along with `read-write` mode |

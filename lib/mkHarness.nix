@@ -1147,6 +1147,10 @@ let
   # miss one list and wrongly stay inside the forbidden-marker scan.
   isDirectFileGate = row: lib.hasInfix "FILER_FILE_DIRECT" row.gate;
 
+  # Ungated fragments whose only forbidden-marker text is a negation. Every Box
+  # is read-only, so a row with no gate has no read-only gate name to prove it.
+  negationOnlyFragments = [ "open-pr-push-outbox.md" ];
+
   # The fragment rows the forbidden-marker scan reaches (issue #2510): every
   # row except those whose gate name already proves the fragment is
   # access-mode-aware, so a legitimate negation ("do NOT `git push`") in the
@@ -1162,9 +1166,9 @@ let
       || lib.hasInfix "READONLY" row.gate
       || lib.hasInfix "READWRITE" row.gate
       || lib.hasInfix "READ_WRITE" row.gate
-      || lib.hasInfix "_RW_" row.gate
       || lib.hasInfix "HOST_MEDIATED" row.gate
       || isDirectFileGate row
+      || builtins.elem row.fragment negationOnlyFragments
     )
   ) fragments;
 

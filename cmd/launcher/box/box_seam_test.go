@@ -2766,9 +2766,9 @@ func TestBoxSeamSelfContainedClonesNothing(t *testing.T) {
 		t.Errorf("a self-contained run cloned a repo into %s", repo)
 	}
 }
-
-// The assembled work prompt tells the agent how to publish: rebase before the
-// push, retry a rejected push once, report a persistent failure as blocked
+// The assembled work prompt tells the agent how to publish: rebase onto base
+// first, report a persistent failure as blocked with a comment, and treat a
+// genuine workflow-file change as a hard stop.
 // with a comment, and treat a genuine workflow-file change as a hard stop.
 func TestBoxSeamPromptCarriesPushDiscipline(t *testing.T) {
 	r := runBoxSeam(t, seamCase{
@@ -2779,7 +2779,6 @@ func TestBoxSeamPromptCarriesPushDiscipline(t *testing.T) {
 	prompt := r.assembledPrompt(t)
 	for _, want := range []string{
 		"git rebase", "git fetch", // rebase onto base before pushing
-		"rejected", "retry", // one retry on a rejected push
 		"status=blocked", "gh issue comment", // a persistent push failure
 		".github/workflows", "workflow", // workflow changes are a hard stop
 	} {

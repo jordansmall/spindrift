@@ -343,8 +343,6 @@ What breaks in an override prompt directory:
   | `FILER_FILE_DIRECT_STEP`, `FILER_FILE_DIRECT_FORGEJO_STEP` | `FILER_DIRECT_FILE_STEP` |
   | `FILER_LABEL_DIRECT_STEP`, `FILER_LABEL_DIRECT_FORGEJO_STEP` | `FILER_DIRECT_LABEL_STEP` |
   | `FIX_CI_READ_GITHUB_STEP`, `FIX_CI_READ_FORGEJO_STEP` | `FIX_CI_READ_STEP` |
-  | `OPEN_PR_CREATE_READ_WRITE_STEP`, `OPEN_PR_CREATE_READ_WRITE_FORGEJO_STEP` | `OPEN_PR_CREATE_DIRECT_STEP` |
-  | `IF_BLOCKED_PR_READ_WRITE_STEP`, `IF_BLOCKED_PR_READ_WRITE_FORGEJO_STEP` | `IF_BLOCKED_PR_DIRECT_STEP` |
   | `PR_BODY_LOCAL_REF_STEP` | `PR_BODY_ISSUE_REF_STEP` |
   | `PR_BODY_LOCAL_NOREF_STEP` | `PR_BODY_NO_ISSUE_REF_STEP` |
   | `COMMIT_PUSH_LOCAL_STEP` | `COMMIT_PUSH_HOST_MEDIATED_STEP` |
@@ -352,7 +350,7 @@ What breaks in an override prompt directory:
   | `IF_BLOCKED_PUSH_LOCAL_STEP` | `IF_BLOCKED_PUSH_HOST_MEDIATED_STEP` |
 
   `lib/removed-fragment-vars.nix` is the authoritative list. Variables not in
-  the table, such as `COMMIT_PUSH_READ_WRITE_STEP`, are unchanged.
+  the table, such as `COMMIT_PUSH_READ_ONLY_STEP`, are unchanged.
 - The fragment files moved. Most per-backend files are now in the backend's
   folder under a shorter name, and the files that were the same for several
   backends collapsed into one root file:
@@ -385,10 +383,6 @@ What breaks in an override prompt directory:
   | `issue-blocked-comment-local.md` | `local/issue-blocked-comment-relay.md` |
   | `fix-ci-read-github.md` | `github/fix-ci-read.md` |
   | `fix-ci-read-forgejo.md` | `forgejo/fix-ci-read.md` |
-  | `open-pr-create-git.md` | `github/open-pr-create.md` |
-  | `open-pr-create-forgejo.md` | `forgejo/open-pr-create.md` |
-  | `if-blocked-pr-git.md` | `github/if-blocked-pr.md` |
-  | `if-blocked-pr-forgejo.md` | `forgejo/if-blocked-pr.md` |
   | `pr-body-local-ref.md` | `local/pr-body-issue-ref.md` |
   | `pr-body-local-noref.md` | `local/pr-body-no-issue-ref.md` |
   | `commit-push-local.md` | `commit-push-host-mediated.md` |

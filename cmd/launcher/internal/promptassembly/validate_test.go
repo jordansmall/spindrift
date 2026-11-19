@@ -52,7 +52,7 @@ func TestValidateReadOnlyResearchPass(t *testing.T) {
 // dispatch with the Filer provisioned forces FILER_FILE_RELAY even when
 // BoxWriteEnabled is true, per gates_tracker.go's researchForceRelay. A
 // missing SPINDRIFT_COMMENT there loses the verdict unrecoverably, so this
-// rejects even though BOX_ACCESS_READ_ONLY is false.
+// rejects even though the Box is writable.
 func TestValidateReadWriteResearchFilerRelayReject(t *testing.T) {
 	e := Env{DispatchKind: "research", BoxWriteEnabled: true, FilerEnabled: true}
 	result := Result{Prompt: "research stub, no verdict-comment marker here"}

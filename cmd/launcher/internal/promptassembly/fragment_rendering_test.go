@@ -258,68 +258,46 @@ func TestAssembleBlockedCommentSelection(t *testing.T) {
 	})
 }
 
-// Landing the branch forks on Box access, the forge and the carrier: a
-// read-write Box pushes and opens the PR itself with its forge's client, a
-// read-only one hands the branch to the harness and emits a PR-intent line,
-// and a git forge opens no PR at all.
+// Landing the branch forks on the carrier and the push route: the Box hands
+// the branch to the harness (host-mediated) or the outbox, emits a PR-intent
+// line over the carrier, and reports the branch on a forge with no PRs. It
+// never forks on the forge's client.
 func TestAssembleLandingSelection(t *testing.T) {
 	assertSelection(t, []gatedRow{
-		{"BOX_ACCESS_READ_WRITE", "OPEN_PUSH_RW"},
-		{"BOX_ACCESS_READ_ONLY", "OPEN_PUSH_RO"},
-		{"OPEN_PR_CREATE_RW_GH", "OPEN_CREATE_GITHUB"},
-		{"OPEN_PR_CREATE_RW_FORGEJO", "OPEN_CREATE_FORGEJO"},
 		{"BOX_ACCESS_READ_ONLY_LOG", "OPEN_CREATE_RO_LOG"},
 		{"BOX_ACCESS_READ_ONLY_SOCKET", "OPEN_CREATE_RO_SOCKET"},
-		{"BOX_PUSH_READ_WRITE", "COMMIT_PUSH_RW"},
 		{"OUTBOX_PUSH_READ_ONLY", "COMMIT_PUSH_RO"},
-		{"BOX_PUSH_READ_WRITE", "BLOCKED_TRIAGE_RW"},
 		{"OUTBOX_PUSH_READ_ONLY", "BLOCKED_TRIAGE_RO"},
-		{"BOX_PUSH_READ_WRITE", "BLOCKED_PUSH_RW"},
 		{"OUTBOX_PUSH_READ_ONLY", "BLOCKED_PUSH_RO"},
-		{"IF_BLOCKED_PR_RW_GH", "BLOCKED_PR_GITHUB"},
-		{"IF_BLOCKED_PR_RW_FORGEJO", "BLOCKED_PR_FORGEJO"},
 		{"NO_PR_FORGE", "BLOCKED_PR_NONE"},
 		{"PR_FORGE_READ_ONLY_LOG", "BLOCKED_PR_RO_LOG"},
 		{"PR_FORGE_READ_ONLY_SOCKET", "BLOCKED_PR_RO_SOCKET"},
-		{"PR_FORGE_READ_WRITE", "BLOCKED_LANDING_PR"},
 		{"NO_PR_FORGE", "BLOCKED_LANDING_BRANCH"},
 		{"PR_FORGE_READ_ONLY", "BLOCKED_LANDING_RO"},
 	}, targetPrompt, []selectionCase{
-		{"github read-write", nil, []string{
-			"OPEN_PUSH_RW", "OPEN_CREATE_GITHUB", "COMMIT_PUSH_RW", "BLOCKED_TRIAGE_RW", "BLOCKED_PUSH_RW",
-			"BLOCKED_PR_GITHUB", "BLOCKED_LANDING_PR",
-		}},
-		{"github read-only", []func(*Env){fragReadOnly}, []string{
-			"OPEN_PUSH_RO", "OPEN_CREATE_RO_LOG", "COMMIT_PUSH_RO", "BLOCKED_TRIAGE_RO", "BLOCKED_PUSH_RO",
+		{"github", nil, []string{
+			"OPEN_CREATE_RO_LOG", "COMMIT_PUSH_RO", "BLOCKED_TRIAGE_RO", "BLOCKED_PUSH_RO",
 			"BLOCKED_PR_RO_LOG", "BLOCKED_LANDING_RO",
 		}},
-		{"github read-only socket", []func(*Env){fragReadOnly, fragSocket}, []string{
-			"OPEN_PUSH_RO", "OPEN_CREATE_RO_SOCKET", "COMMIT_PUSH_RO", "BLOCKED_TRIAGE_RO", "BLOCKED_PUSH_RO",
+		{"github socket", []func(*Env){fragSocket}, []string{
+			"OPEN_CREATE_RO_SOCKET", "COMMIT_PUSH_RO", "BLOCKED_TRIAGE_RO", "BLOCKED_PUSH_RO",
 			"BLOCKED_PR_RO_SOCKET", "BLOCKED_LANDING_RO",
 		}},
-		{"forgejo read-write", []func(*Env){fragForgejoTracker, fragForgejoForge}, []string{
-			"OPEN_PUSH_RW", "OPEN_CREATE_FORGEJO", "COMMIT_PUSH_RW", "BLOCKED_TRIAGE_RW", "BLOCKED_PUSH_RW",
-			"BLOCKED_PR_FORGEJO", "BLOCKED_LANDING_PR",
-		}},
-		{"forgejo read-only stays forge-agnostic", []func(*Env){fragForgejoTracker, fragForgejoForge, fragReadOnly}, []string{
-			"OPEN_PUSH_RO", "OPEN_CREATE_RO_LOG", "COMMIT_PUSH_RO", "BLOCKED_TRIAGE_RO", "BLOCKED_PUSH_RO",
+		{"forgejo stays forge-agnostic", []func(*Env){fragForgejoTracker, fragForgejoForge}, []string{
+			"OPEN_CREATE_RO_LOG", "COMMIT_PUSH_RO", "BLOCKED_TRIAGE_RO", "BLOCKED_PUSH_RO",
 			"BLOCKED_PR_RO_LOG", "BLOCKED_LANDING_RO",
 		}},
 	})
 }
 
 // A git Code Forge has no PR, so a blocked run opens none and reports the
-// branch (issue #5233); the Box still pushes it.
+// branch (issue #5233).
 func TestAssembleGitForgeBlockedSelection(t *testing.T) {
 	assertSelection(t, []gatedRow{
-		{"BOX_PUSH_READ_WRITE", "BLOCKED_PUSH_RW"},
-		{"IF_BLOCKED_PR_RW_GH", "BLOCKED_PR_GITHUB"},
 		{"NO_PR_FORGE", "BLOCKED_PR_NONE"},
-		{"PR_FORGE_READ_WRITE", "BLOCKED_LANDING_PR"},
 		{"NO_PR_FORGE", "BLOCKED_LANDING_BRANCH"},
 	}, targetPrompt, []selectionCase{
-		{"git forge", []func(*Env){fragGitForge}, []string{"BLOCKED_PUSH_RW", "BLOCKED_PR_NONE", "BLOCKED_LANDING_BRANCH"}},
-		{"git forge read-only", []func(*Env){fragGitForge, fragReadOnly}, []string{"BLOCKED_PR_NONE", "BLOCKED_LANDING_BRANCH"}},
+		{"git forge", []func(*Env){fragGitForge}, []string{"BLOCKED_PR_NONE", "BLOCKED_LANDING_BRANCH"}},
 	})
 }
 

@@ -196,24 +196,16 @@
     replacement = "FIX_CI_READ_STEP";
   };
   OPEN_PR_CREATE_READ_WRITE_STEP = {
-    issue = 5647;
-    severity = "deprecated";
-    replacement = "OPEN_PR_CREATE_DIRECT_STEP";
+    issue = 6901;
   };
   OPEN_PR_CREATE_READ_WRITE_FORGEJO_STEP = {
-    issue = 5647;
-    severity = "deprecated";
-    replacement = "OPEN_PR_CREATE_DIRECT_STEP";
+    issue = 6901;
   };
   IF_BLOCKED_PR_READ_WRITE_STEP = {
-    issue = 5647;
-    severity = "deprecated";
-    replacement = "IF_BLOCKED_PR_DIRECT_STEP";
+    issue = 6901;
   };
   IF_BLOCKED_PR_READ_WRITE_FORGEJO_STEP = {
-    issue = 5647;
-    severity = "deprecated";
-    replacement = "IF_BLOCKED_PR_DIRECT_STEP";
+    issue = 6901;
   };
   COMMIT_PUSH_LOCAL_STEP = {
     issue = 5647;
@@ -239,5 +231,38 @@
     issue = 5647;
     severity = "deprecated";
     replacement = "PR_BODY_NO_ISSUE_REF_STEP";
+  };
+  COMMIT_PUSH_READ_WRITE_STEP = {
+    issue = 6901;
+  };
+  LAND_GIT_PUSH_READ_WRITE_STEP = {
+    issue = 6901;
+  };
+  LAND_GIT_STOP_READ_WRITE_STEP = {
+    issue = 6901;
+  };
+  OPEN_PR_PUSH_READ_WRITE_STEP = {
+    issue = 6901;
+  };
+  OPEN_PR_CREATE_DIRECT_STEP = {
+    issue = 6901;
+  };
+  OUTCOME_LANDING_READ_WRITE_STEP = {
+    issue = 6901;
+  };
+  OUTCOME_READY_MEANS_READ_WRITE_STEP = {
+    issue = 6901;
+  };
+  IF_BLOCKED_TRIAGE_READ_WRITE_STEP = {
+    issue = 6901;
+  };
+  IF_BLOCKED_PUSH_READ_WRITE_STEP = {
+    issue = 6901;
+  };
+  IF_BLOCKED_PR_DIRECT_STEP = {
+    issue = 6901;
+  };
+  IF_BLOCKED_OUTCOME_LANDING_READ_WRITE_STEP = {
+    issue = 6901;
   };
 }

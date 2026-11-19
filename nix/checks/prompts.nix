@@ -158,7 +158,7 @@ let
       '';
 
   # Exempt-gate counterpart fixture: same shape, but the broken content is
-  # injected into open-pr-create-outbox.md (gated on "BOX_ACCESS_READ_ONLY",
+  # injected into open-pr-create-outbox.md (gated on "BOX_ACCESS_READ_ONLY_LOG",
   # which is exempt from the fragment-body forbidden-marker scan per lib/
   # mkHarness.nix's readOnlyReachableFragmentRows filter) instead of a
   # plain, non-exempt gate.
@@ -434,12 +434,12 @@ let
     '';
 
   # Shell function for merge-mode-clause-stated-once and its negative test:
-  # `merge_mode_scan DIR` fails unless only the two land-git-stop fragments
-  # under DIR, at any depth, name MERGE_MODE (issue #6159).
+  # `merge_mode_scan DIR` fails unless only the land-git-stop fragment
+  # under DIR, at any depth, names MERGE_MODE (issue #6159).
   mergeModeScan = ''
     merge_mode_scan() {
       got=$(cd "$1" && grep -rl --include='*.md' 'MERGE_MODE' . | sed 's|^\./||' | LC_ALL=C sort)
-      want=$(printf '%s\n' land-git-stop-read-only.md land-git-stop-read-write.md)
+      want=land-git-stop-read-only.md
       [ "$got" = "$want" ] || {
         echo "fragments naming MERGE_MODE: '$got', want '$want'; point at OPEN A PULL REQUEST instead of restating it (issue #5312)" >&2
         return 1
@@ -1169,11 +1169,11 @@ in
       '';
 
   # The after-rebase block (fetch / merge-base / rebase plus the After-rebase
-  # rule paragraph) is duplicated in commit-push-git.md,
-  # commit-push-outbox.md and commit-push-host-mediated.md; only the git copy's
-  # trailing " Then push:" and the local copy's missing CI clause (a local
-  # forge has no CI) differ. Nothing structural ties the copies together, so
-  # diff them (issue #4412, found during #4408; local copy issue #5251).
+  # rule paragraph) is duplicated in commit-push-outbox.md and
+  # commit-push-host-mediated.md; only the local copy's missing CI clause (a
+  # local forge has no CI) differs. Nothing structural ties the copies
+  # together, so diff them (issue #4412, found during #4408; local copy issue
+  # #5251).
   commit-push-after-rebase-rule-parity = pkgs.runCommand "commit-push-after-rebase-rule-parity" { } ''
     slice() {
       end="$3" awk 'prev=="```" && $0=="git fetch origin"{f=1; print prev} f{print} f && $0 ~ ENVIRON["end"]{exit} {prev=$0}' "$1" > "$2"
@@ -1182,14 +1182,8 @@ in
         exit 1
       }
     }
-    slice ${../../templates/default/prompts/fragments/commit-push-git.md} git-block.txt 'let CI be the final gate\.'
     slice ${../../templates/default/prompts/fragments/commit-push-outbox.md} outbox-block.txt 'let CI be the final gate\.'
     slice ${../../templates/default/prompts/fragments/commit-push-host-mediated.md} local-block.txt 'Otherwise skip it\.$'
-    sed -i '$ s/ Then push:$//' git-block.txt
-    diff git-block.txt outbox-block.txt || {
-      echo "commit-push-git.md and commit-push-outbox.md after-rebase blocks have drifted; keep them byte-identical (bar the git copy's trailing ' Then push:')" >&2
-      exit 1
-    }
     sed '$ s/ and let CI be the final gate\.$/./' outbox-block.txt > outbox-sans-ci.txt
     diff outbox-sans-ci.txt local-block.txt || {
       echo "commit-push-host-mediated.md's after-rebase block has drifted from commit-push-outbox.md's; keep them byte-identical (bar the CI clause)" >&2
@@ -1855,36 +1849,10 @@ in
         touch $out
       '';
 
-  # The OPEN A PULL REQUEST read-write create step forks on CODE_FORGE (issue
-  # #1963, OPEN_PR_CREATE_RW_GH/OPEN_PR_CREATE_RW_FORGEJO computed in
-  # promptassembly): the github fragment keeps `gh pr create` and never
-  # invokes `fj pr create`, and the forgejo fragment the reverse. The forgejo
-  # pin matches the invocation `gh pr create --`, since that fragment's
-  # "Do NOT run `gh pr create`" reminder names the bare command (issue #5066).
-  open-pr-create-fragments-fork-forge-on-read-write =
-    pkgs.runCommand "open-pr-create-fragments-fork-forge-on-read-write" { }
-      ''
-        grep -q 'gh pr create' ${../../templates/default/prompts/fragments/github/open-pr-create.md}
-        ! grep -q 'fj pr create' ${../../templates/default/prompts/fragments/github/open-pr-create.md} || {
-          echo "github/open-pr-create.md invokes fj pr create (issue #1963)" >&2
-          exit 1
-        }
-        grep -q 'fj pr create' ${mergedPrompts}/fragments/forgejo/open-pr-create.md
-        ! grep -qE -e 'fj pr create[^`]*--title' ${mergedPrompts}/fragments/forgejo/open-pr-create.md || {
-          echo "forgejo/open-pr-create.md passes --title to fj pr create, which takes the title positionally (issue #5098)" >&2
-          exit 1
-        }
-        ! grep -q 'gh pr create --' ${mergedPrompts}/fragments/forgejo/open-pr-create.md || {
-          echo "forgejo/open-pr-create.md invokes gh pr create (issues #1963, #5066)" >&2
-          exit 1
-        }
-        touch $out
-      '';
-
   # The post-green MERGE_MODE clause is stated once, in issue-prompt.md's OPEN
   # A PULL REQUEST paragraph (issue #5312); the forgejo create step and the
-  # outcome-ready fragments point at it. Only the two land-git-stop fragments
-  # name MERGE_MODE, for the different CODE_FORGE=git push-mode clause. The
+  # outcome-ready fragments point at it. Only the land-git-stop fragment
+  # names MERGE_MODE, for the different CODE_FORGE=git push-mode clause. The
   # scan covers fragments/ and its per-backend subdirectories (issue #6159),
   # but a copy worded without the token still slips past it.
   merge-mode-clause-stated-once = pkgs.runCommand "merge-mode-clause-stated-once" { } ''
@@ -1898,7 +1866,7 @@ in
     pkgs.runCommand "merge-mode-clause-stated-once-catches-copy" { }
       ''
         ${mergeModeScan}
-        for plant in outcome-ready-means-git.md forgejo/open-pr-create.md; do
+        for plant in outcome-ready-means-outbox.md open-pr-create-outbox.md; do
           rm -rf frags
           cp -r ${mergedPrompts}/fragments frags
           chmod -R u+w frags
@@ -1908,32 +1876,6 @@ in
             exit 1
           fi
         done
-        touch $out
-      '';
-
-  # The IF BLOCKED draft-PR step forks on CODE_FORGE (issue #5099,
-  # IF_BLOCKED_PR_RW_GH/IF_BLOCKED_PR_RW_FORGEJO): the github fragment keeps
-  # `gh pr view` and never invokes `fj pr`, and the forgejo fragment never
-  # invokes `gh pr` and opens the draft with `fj pr create` and a positional `WIP: ` title. fj has no
-  # `--title` flag (issue #5098), so the forgejo fragment must not use it.
-  if-blocked-pr-fragments-fork-forge-on-read-write =
-    pkgs.runCommand "if-blocked-pr-fragments-fork-forge-on-read-write" { }
-      ''
-        grep -q 'gh pr view' ${../../templates/default/prompts/fragments/github/if-blocked-pr.md}
-        ! grep -q 'fj pr' ${../../templates/default/prompts/fragments/github/if-blocked-pr.md} || {
-          echo "github/if-blocked-pr.md invokes fj pr (issue #5099)" >&2
-          exit 1
-        }
-        ! grep -q 'gh pr' ${mergedPrompts}/fragments/forgejo/if-blocked-pr.md || {
-          echo "forgejo/if-blocked-pr.md invokes gh pr (issue #5099)" >&2
-          exit 1
-        }
-        grep -q 'fj pr create' ${mergedPrompts}/fragments/forgejo/if-blocked-pr.md
-        grep -q 'WIP: ' ${mergedPrompts}/fragments/forgejo/if-blocked-pr.md
-        ! grep -q -e '--title' ${mergedPrompts}/fragments/forgejo/if-blocked-pr.md || {
-          echo "forgejo/if-blocked-pr.md uses --title; fj takes the title positionally (issue #5098)" >&2
-          exit 1
-        }
         touch $out
       '';
 
@@ -2040,11 +1982,11 @@ in
       (
         !evaluates {
           fragmentsDir =
-            dirWithAppended ../../templates/default/prompts/fragments "github/open-pr-create.md"
+            dirWithAppended ../../templates/default/prompts/fragments "github/fix-ci-read.md"
               "\${COMMIT_STEP}";
         }
       )
-      "mkHarness.nix must throw when a per-backend fragment file (github/open-pr-create.md) of an overridden fragmentsDir references the removed \${COMMIT_STEP}";
+      "mkHarness.nix must throw when a per-backend fragment file (github/fix-ci-read.md) of an overridden fragmentsDir references the removed \${COMMIT_STEP}";
     # Only a row no Consumer *Prompt parameter binds is read from kindPromptsDir.
     assert assertMsg
       (
@@ -2065,7 +2007,7 @@ in
         mkdir -p $out
         cp -r ${../../templates/default/prompts/fragments}/. $out/
         chmod -R u+w $out
-        rm $out/land-git-stop-read-only.md
+        rm $out/open-pr-create-outbox.md
       '';
     }) "a fragmentsDir missing a row's fragment file must still evaluate (it renders empty)";
     assert assertMsg (
@@ -2193,7 +2135,7 @@ in
     pkgs.runCommand "build-time-reject-forbidden-marker-fragment" { } "touch $out";
 
   # The exempt-gate counterpart: the same forbidden-marker substring, but in
-  # a fragment gated on an exempt gate (BOX_ACCESS_READ_ONLY). Many shipped
+  # a fragment gated on an exempt gate (BOX_ACCESS_READ_ONLY_LOG). Many shipped
   # fragments carry forbidden-marker text as a negation ("do NOT git push")
   # because they are the read-only half of an access-mode pair, so the scan
   # must not false-positive on them.
@@ -2213,7 +2155,7 @@ in
       );
     in
     assert assertMsg ok.success
-      "mkHarness.nix must not throw when a fragment gated on an exempt gate (BOX_ACCESS_READ_ONLY) carries a forbidden marker as literal fragment-body text";
+      "mkHarness.nix must not throw when a fragment gated on an exempt gate (BOX_ACCESS_READ_ONLY_LOG) carries a forbidden marker as literal fragment-body text";
     pkgs.runCommand "build-time-forbidden-marker-fragment-exempt-gate-not-triggered" { } "touch $out";
 
   # The gh-api-mutation-kind counterpart (issue #2513): a plain, non-exempt

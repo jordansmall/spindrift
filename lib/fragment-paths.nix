@@ -126,8 +126,6 @@ let
     "research-outcome-landing.md" = [ "github" ];
     "issue-blocked-comment.md" = [ "github" ];
     "issue-blocked-comment-relay.md" = [ "local" ];
-    "open-pr-create.md" = [ "github" ];
-    "if-blocked-pr.md" = [ "github" ];
   };
 
   axisRows = builtins.filter (r: (r.axis or "") != "") (import ./fragments.nix);

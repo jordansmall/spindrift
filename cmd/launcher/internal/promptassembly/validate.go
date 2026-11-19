@@ -111,7 +111,7 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 			// concept the butler (also AdviseOnly, ADR 0056) never shares -- it
 			// files findings and writes the Ledger's done commit, posting no
 			// comment on any issue at all.
-			gateActive = verdictContract(d) && (gates["BOX_ACCESS_READ_ONLY"] || gates["FILER_FILE_RELAY"])
+			gateActive = verdictContract(d) && (!e.BoxWriteEnabled || gates["FILER_FILE_RELAY"])
 			haystack = result.Prompt
 		case whenReviewPrompt:
 			// ReviewPromptText, not Handoff.ReviewPromptFile: the latter became
@@ -119,7 +119,7 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 			gateActive = result.ReviewPromptText != ""
 			haystack = result.ReviewPromptText
 		case whenBoxAccessReadOnly:
-			gateActive = gates["BOX_ACCESS_READ_ONLY"] && !d.AdviseOnly
+			gateActive = !e.BoxWriteEnabled && !d.AdviseOnly
 			haystack = result.Prompt
 		case whenFilerFileRelay:
 			gateActive = gates["FILER_FILE_RELAY"]

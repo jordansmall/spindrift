@@ -225,14 +225,14 @@ in
         {
           name = "acme-forgejo";
           dir = forkDir;
-          shipped."if-blocked-pr.md" = [ "forgejo" ];
+          shipped."fix-ci-read.md" = [ "forgejo" ];
         }
       ];
       forgejoSameName = harnessWith [
         {
           name = "forgejo";
           dir = forkDir;
-          shipped."if-blocked-pr.md" = [ "forgejo" ];
+          shipped."fix-ci-read.md" = [ "forgejo" ];
         }
       ];
       jiraFork = harnessWith [
@@ -256,10 +256,10 @@ in
     ) "fragment-paths: a Consumer registering jira's fragment under another name must evaluate";
     pkgs.runCommand "fragment-paths-fork-dedupe" { } ''
       fallbackIntact() {
-        cmp ${forkDir}/forgejo/if-blocked-pr.md "$1"/if-blocked-pr.md
+        cmp ${forkDir}/forgejo/fix-ci-read.md "$1"/fix-ci-read.md
         for f in ${../../connectors/forgejo/fragments/forgejo}/*; do
           b=$(basename "$f")
-          [ "$b" = if-blocked-pr.md ] || cmp "$f" "$1"/"$b"
+          [ "$b" = fix-ci-read.md ] || cmp "$f" "$1"/"$b"
         done
       }
       fallbackIntact ${forgejoDir}

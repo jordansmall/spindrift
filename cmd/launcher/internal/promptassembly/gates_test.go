@@ -371,128 +371,54 @@ func TestGatesWorkerScoutBrief(t *testing.T) {
 	}
 }
 
-// Exactly one of BOX_ACCESS_READ_WRITE and BOX_ACCESS_READ_ONLY is ever on for
-// the OPEN A PULL REQUEST push step, selected solely by BOX_WRITE_ENABLED,
-// independent of ISSUE_TRACKER and CODE_FORGE.
-func TestGatesBoxAccess(t *testing.T) {
-	cases := []struct {
-		name            string
-		boxWriteEnabled bool
-		want            map[string]bool
-	}{
-		{
-			name:            "write-enabled",
-			boxWriteEnabled: true,
-			want: map[string]bool{
-				"BOX_ACCESS_READ_WRITE": true,
-				"BOX_ACCESS_READ_ONLY":  false,
-			},
-		},
-		{
-			name:            "read-only",
-			boxWriteEnabled: false,
-			want: map[string]bool{
-				"BOX_ACCESS_READ_WRITE": false,
-				"BOX_ACCESS_READ_ONLY":  true,
-			},
-		},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			got := Gates(Env{BoxWriteEnabled: tc.boxWriteEnabled})
-			for k, want := range tc.want {
-				if got[k] != want {
-					t.Errorf("Gates(BoxWriteEnabled=%v)[%q] = %v, want %v", tc.boxWriteEnabled, k, got[k], want)
-				}
+// The PR-intent and landing steps fork on the signal carrier alone: no Box
+// writes the forge, so BOX_ACCESS_READ_ONLY_LOG/_SOCKET are exactly the log and
+// socket arms, independent of ISSUE_TRACKER and CODE_FORGE.
+func TestGatesBoxAccessCarrierPair(t *testing.T) {
+	for carrier, want := range map[string]map[string]bool{
+		"":       {"BOX_ACCESS_READ_ONLY_LOG": true, "BOX_ACCESS_READ_ONLY_SOCKET": false},
+		"log":    {"BOX_ACCESS_READ_ONLY_LOG": true, "BOX_ACCESS_READ_ONLY_SOCKET": false},
+		"socket": {"BOX_ACCESS_READ_ONLY_LOG": false, "BOX_ACCESS_READ_ONLY_SOCKET": true},
+	} {
+		got := Gates(Env{SignalCarrier: carrier})
+		for k, w := range want {
+			if got[k] != w {
+				t.Errorf("Gates(SignalCarrier=%q)[%q] = %v, want %v", carrier, k, got[k], w)
 			}
-		})
+		}
 	}
 }
 
 // ForgeBackend is nix's precomputed equivalent of CODE_FORGE, resolved
 // upstream rather than re-derived by Gates (issue #2533).
-// Only forgejo diverges from the shared gh-flavored path.
-// OPEN_PR_CREATE_RW_<suffix> forks further on BOX_ACCESS_READ_WRITE, while
-// FIX_CI_READ_<suffix> fires on the resolved backend regardless of box access.
+// Only forgejo diverges from the shared gh-flavored path: FIX_CI_READ_<suffix>
+// fires on the resolved backend.
 func TestGatesCodeForgeBackend(t *testing.T) {
 	cases := []struct {
-		name            string
-		forgeBackend    string
-		codeForge       string
-		boxWriteEnabled bool
-		want            map[string]bool
+		name         string
+		forgeBackend string
+		codeForge    string
+		want         map[string]bool
 	}{
 		{
-			name:            "empty CODE_FORGE resolves upstream to GH, read-write",
-			forgeBackend:    "GH",
-			boxWriteEnabled: true,
-			want: map[string]bool{
-				"OPEN_PR_CREATE_RW_GH":      true,
-				"OPEN_PR_CREATE_RW_FORGEJO": false,
-				"FIX_CI_READ_GH":            true,
-				"FIX_CI_READ_FORGEJO":       false,
-			},
+			name:         "empty CODE_FORGE resolves upstream to GH",
+			forgeBackend: "GH",
+			want:         map[string]bool{"FIX_CI_READ_GH": true, "FIX_CI_READ_FORGEJO": false},
 		},
 		{
-			name:            "github explicit, read-write",
-			forgeBackend:    "GH",
-			boxWriteEnabled: true,
-			want: map[string]bool{
-				"OPEN_PR_CREATE_RW_GH":      true,
-				"OPEN_PR_CREATE_RW_FORGEJO": false,
-				"FIX_CI_READ_GH":            true,
-				"FIX_CI_READ_FORGEJO":       false,
-			},
-		},
-		{
-			name:            "github explicit, read-only: OPEN_PR_CREATE_RW off, FIX_CI_READ still on",
-			forgeBackend:    "GH",
-			boxWriteEnabled: false,
-			want: map[string]bool{
-				"OPEN_PR_CREATE_RW_GH":      false,
-				"OPEN_PR_CREATE_RW_FORGEJO": false,
-				"FIX_CI_READ_GH":            true,
-				"FIX_CI_READ_FORGEJO":       false,
-			},
-		},
-		{
-			name:            "forgejo, read-write",
-			forgeBackend:    "FORGEJO",
-			boxWriteEnabled: true,
-			want: map[string]bool{
-				"OPEN_PR_CREATE_RW_GH":      false,
-				"OPEN_PR_CREATE_RW_FORGEJO": true,
-				"FIX_CI_READ_GH":            false,
-				"FIX_CI_READ_FORGEJO":       true,
-			},
-		},
-		{
-			name:            "forgejo, read-only: OPEN_PR_CREATE_RW off, FIX_CI_READ still on",
-			forgeBackend:    "FORGEJO",
-			boxWriteEnabled: false,
-			want: map[string]bool{
-				"OPEN_PR_CREATE_RW_GH":      false,
-				"OPEN_PR_CREATE_RW_FORGEJO": false,
-				"FIX_CI_READ_GH":            false,
-				"FIX_CI_READ_FORGEJO":       true,
-			},
+			name:         "forgejo",
+			forgeBackend: "FORGEJO",
+			want:         map[string]bool{"FIX_CI_READ_GH": false, "FIX_CI_READ_FORGEJO": true},
 		},
 		{
 			// An empty ForgeBackend is what a version-skew dispatch leaves
 			// behind: a host launcher predating issue #2533 never sets
 			// BOX_FORGE_BACKEND, which has no baked default. Gates repeats
 			// entrypoint.sh's old "${CODE_FORGE:-github}" default, so the run
-			// gets the GH arm instead of no PR-create or CI-read step at all.
-			name:            "empty ForgeBackend falls open to GH default",
-			forgeBackend:    "",
-			boxWriteEnabled: true,
-			want: map[string]bool{
-				"OPEN_PR_CREATE_RW_GH":      true,
-				"OPEN_PR_CREATE_RW_FORGEJO": false,
-				"FIX_CI_READ_GH":            true,
-				"FIX_CI_READ_FORGEJO":       false,
-			},
+			// gets the GH arm instead of no CI-read step at all.
+			name:         "empty ForgeBackend falls open to GH default",
+			forgeBackend: "",
+			want:         map[string]bool{"FIX_CI_READ_GH": true, "FIX_CI_READ_FORGEJO": false},
 		},
 		{
 			// Same version-skew shape, but CodeForge says "forgejo" (it is
@@ -500,25 +426,19 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 			// fallback must re-derive from CodeForge: a hardcoded GH arm
 			// would tell the agent to drive `gh` against a Forgejo forge
 			// (issue #2533 review).
-			name:            "empty ForgeBackend with CodeForge=forgejo falls open to FORGEJO",
-			forgeBackend:    "",
-			codeForge:       "forgejo",
-			boxWriteEnabled: true,
-			want: map[string]bool{
-				"OPEN_PR_CREATE_RW_GH":      false,
-				"OPEN_PR_CREATE_RW_FORGEJO": true,
-				"FIX_CI_READ_GH":            false,
-				"FIX_CI_READ_FORGEJO":       true,
-			},
+			name:         "empty ForgeBackend with CodeForge=forgejo falls open to FORGEJO",
+			forgeBackend: "",
+			codeForge:    "forgejo",
+			want:         map[string]bool{"FIX_CI_READ_GH": false, "FIX_CI_READ_FORGEJO": true},
 		},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := Gates(Env{ForgeBackend: tc.forgeBackend, CodeForge: tc.codeForge, BoxWriteEnabled: tc.boxWriteEnabled})
+			got := Gates(Env{ForgeBackend: tc.forgeBackend, CodeForge: tc.codeForge})
 			for k, want := range tc.want {
 				if got[k] != want {
-					t.Errorf("Gates(ForgeBackend=%q, CodeForge=%q, BoxWriteEnabled=%v)[%q] = %v, want %v", tc.forgeBackend, tc.codeForge, tc.boxWriteEnabled, k, got[k], want)
+					t.Errorf("Gates(ForgeBackend=%q, CodeForge=%q)[%q] = %v, want %v", tc.forgeBackend, tc.codeForge, k, got[k], want)
 				}
 			}
 		})
@@ -527,8 +447,8 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 
 // A git Code Forge has no PR, so a git Box must not be told to run `gh pr view`
 // or report landing=<pr-url> on the IF BLOCKED path (issue #5233); a no-PR forge
-// gets the no-PR step at any access (issue #6281). OutboxRelayCapable stands in
-// for "this forge has PRs".
+// gets the no-PR step (issue #6281). OutboxRelayCapable stands in for "this
+// forge has PRs".
 func TestGatesIfBlockedPRForkOnForgeHavingPRs(t *testing.T) {
 	cases := []struct {
 		name string
@@ -536,51 +456,24 @@ func TestGatesIfBlockedPRForkOnForgeHavingPRs(t *testing.T) {
 		want map[string]bool
 	}{
 		{
-			name: "github read-write",
-			env:  Env{ForgeBackend: "GH", BoxWriteEnabled: true, OutboxRelayCapable: true},
-			want: map[string]bool{
-				"IF_BLOCKED_PR_RW_GH": true, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": true, "PR_FORGE_READ_ONLY": false, "NO_PR_FORGE": false,
-				"OPEN_PR_CREATE_RW_GH": true,
-			},
-		},
-		{
-			name: "forgejo read-write",
-			env:  Env{ForgeBackend: "FORGEJO", BoxWriteEnabled: true, OutboxRelayCapable: true},
-			want: map[string]bool{
-				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": true, "PR_FORGE_READ_WRITE": true, "PR_FORGE_READ_ONLY": false, "NO_PR_FORGE": false,
-			},
-		},
-		{
-			// The git forge resolves to the GH backend upstream, so
-			// OPEN_PR_CREATE_RW_GH stays true; only the IF BLOCKED gates
-			// split on OutboxRelayCapable.
-			name: "git read-write",
-			env:  Env{ForgeBackend: "GH", CodeForge: "git", BoxWriteEnabled: true},
-			want: map[string]bool{
-				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": false, "PR_FORGE_READ_ONLY": false, "NO_PR_FORGE": true,
-				"OPEN_PR_CREATE_RW_GH": true,
-			},
-		},
-		{
-			name: "forgejo read-write without relay bit",
-			env:  Env{ForgeBackend: "FORGEJO", BoxWriteEnabled: true},
-			want: map[string]bool{
-				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": false, "PR_FORGE_READ_ONLY": false, "NO_PR_FORGE": true,
-			},
-		},
-		{
-			name: "github read-only",
+			name: "github",
 			env:  Env{ForgeBackend: "GH", OutboxRelayCapable: true},
-			want: map[string]bool{
-				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": false, "PR_FORGE_READ_ONLY": true, "NO_PR_FORGE": false,
-			},
+			want: map[string]bool{"PR_FORGE_READ_ONLY": true, "NO_PR_FORGE": false},
 		},
 		{
-			name: "git read-only",
+			name: "forgejo",
+			env:  Env{ForgeBackend: "FORGEJO", OutboxRelayCapable: true},
+			want: map[string]bool{"PR_FORGE_READ_ONLY": true, "NO_PR_FORGE": false},
+		},
+		{
+			name: "git",
 			env:  Env{ForgeBackend: "GH", CodeForge: "git"},
-			want: map[string]bool{
-				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": false, "PR_FORGE_READ_ONLY": false, "NO_PR_FORGE": true,
-			},
+			want: map[string]bool{"PR_FORGE_READ_ONLY": false, "NO_PR_FORGE": true},
+		},
+		{
+			name: "forgejo without relay bit",
+			env:  Env{ForgeBackend: "FORGEJO"},
+			want: map[string]bool{"PR_FORGE_READ_ONLY": false, "NO_PR_FORGE": true},
 		},
 	}
 	for _, tc := range cases {
@@ -640,12 +533,11 @@ func TestGatesChoreInput(t *testing.T) {
 	}
 }
 
-// A host-mediated remote (a read-only clone source, ADR 0033) never lets a
-// read-write Box push, so the push gates flip to the host-mediated arm, while
-// the unset relay bit puts its PR step on the no-PR arm (issue #5251). The
-// COMMIT push-row gates (HOST_MEDIATED_PUSH, OUTBOX_PUSH_READ_ONLY) are pinned
-// here too. A read-only host-mediated row lands the same way and its PR step
-// goes no-PR as well (issue #6281), so the PR-step gates are pinned too.
+// A host-mediated remote (a read-only clone source, ADR 0033) lands the branch
+// host-side, so the push gates flip to the host-mediated arm, while the unset
+// relay bit puts its PR step on the no-PR arm (issues #5251, #6281). The COMMIT
+// push-row gates (HOST_MEDIATED_PUSH, OUTBOX_PUSH_READ_ONLY) are pinned here
+// too, so are the PR-step gates.
 func TestGatesHostMediatedLanding(t *testing.T) {
 	cases := []struct {
 		name string
@@ -653,51 +545,19 @@ func TestGatesHostMediatedLanding(t *testing.T) {
 		want map[string]bool
 	}{
 		{
-			name: "host-mediated read-write",
-			env:  Env{BoxWriteEnabled: true, HostMediatedRemote: true},
-			want: map[string]bool{
-				"HOST_MEDIATED_PUSH":    true,
-				"OUTBOX_PUSH_READ_ONLY": false,
-				"BOX_PUSH_READ_WRITE":   false,
-				"IF_BLOCKED_PR_RW_GH":   false,
-				"NO_PR_FORGE":           true,
-			},
-		},
-		{
-			name: "github read-write",
-			env:  Env{BoxWriteEnabled: true, ForgeBackend: "GH", OutboxRelayCapable: true},
-			want: map[string]bool{
-				"HOST_MEDIATED_PUSH":    false,
-				"OUTBOX_PUSH_READ_ONLY": false,
-				"BOX_PUSH_READ_WRITE":   true,
-				"IF_BLOCKED_PR_RW_GH":   true,
-			},
-		},
-		{
-			name: "forgejo read-write",
-			env:  Env{BoxWriteEnabled: true, ForgeBackend: "FORGEJO", OutboxRelayCapable: true},
-			want: map[string]bool{
-				"HOST_MEDIATED_PUSH":    false,
-				"OUTBOX_PUSH_READ_ONLY": false,
-				"BOX_PUSH_READ_WRITE":   true,
-			},
-		},
-		{
-			name: "read-only",
-			env:  Env{BoxWriteEnabled: false},
+			name: "outbox",
+			env:  Env{},
 			want: map[string]bool{
 				"HOST_MEDIATED_PUSH":    false,
 				"OUTBOX_PUSH_READ_ONLY": true,
-				"BOX_PUSH_READ_WRITE":   false,
 			},
 		},
 		{
-			name: "read-only host-mediated",
-			env:  Env{BoxWriteEnabled: false, HostMediatedRemote: true},
+			name: "host-mediated",
+			env:  Env{HostMediatedRemote: true},
 			want: map[string]bool{
 				"HOST_MEDIATED_PUSH":    true,
 				"OUTBOX_PUSH_READ_ONLY": false,
-				"BOX_PUSH_READ_WRITE":   false,
 				"NO_PR_FORGE":           true,
 			},
 		},
@@ -717,7 +577,7 @@ func TestGatesHostMediatedLanding(t *testing.T) {
 // pushGates is the push/triage family, copied by hand from the COMMIT_PUSH_*,
 // IF_BLOCKED_PUSH_* and IF_BLOCKED_TRIAGE_* rows in lib/fragments.nix. Nothing
 // cross-checks the copy: a new gate in that family must be added here too.
-var pushGates = []string{"BOX_PUSH_READ_WRITE", "HOST_MEDIATED_PUSH", "OUTBOX_PUSH_READ_ONLY"}
+var pushGates = []string{"HOST_MEDIATED_PUSH", "OUTBOX_PUSH_READ_ONLY"}
 
 // Exactly one fragment of each push/triage family renders per env: the
 // template slots are bare placeholder runs, so the gates alone enforce
@@ -727,36 +587,32 @@ var pushGates = []string{"BOX_PUSH_READ_WRITE", "HOST_MEDIATED_PUSH", "OUTBOX_PU
 // #6303). The gate set is listed here, not read from the registry, so the test
 // pins Gates() alone.
 func TestGatesPushRowsPartition(t *testing.T) {
-	for _, write := range []bool{false, true} {
-		for _, mediated := range []bool{false, true} {
-			got := Gates(Env{BoxWriteEnabled: write, HostMediatedRemote: mediated})
-			var on []string
-			for _, g := range pushGates {
-				if got[g] {
-					on = append(on, g)
-				}
+	for _, mediated := range []bool{false, true} {
+		got := Gates(Env{HostMediatedRemote: mediated})
+		var on []string
+		for _, g := range pushGates {
+			if got[g] {
+				on = append(on, g)
 			}
-			if len(on) != 1 {
-				t.Errorf("push family (write=%v mediated=%v): gates on = %v, want exactly 1 of %v", write, mediated, on, pushGates)
-			}
+		}
+		if len(on) != 1 {
+			t.Errorf("push family (mediated=%v): gates on = %v, want exactly 1 of %v", mediated, on, pushGates)
 		}
 	}
 }
 
 // Every IF BLOCKED slot renders exactly one fragment per reachable env (issue
-// #6281): a read-only Box on a no-PR host-mediated forge gets the same
-// host-mediated triage/push and no-PR step/landing as a read-write one, never
-// the outbox text. Slot gate sets are copied by hand, not read from the
-// registry, so the test pins Gates() alone and a new slot gate must be added
-// here too; the PR slot's read-only gates are the
-// log/socket carrier pair. IF_BLOCKED_PR_RW_GH / _FORGEJO are a nested
-// per-backend fork inside the read-write arm, not slot alternatives.
+// #6281): a Box on a no-PR host-mediated forge gets host-mediated triage/push
+// and a no-PR step/landing, never the outbox text. Slot gate sets are copied
+// by hand, not read from the registry, so the test pins Gates() alone and a
+// new slot gate must be added here too; the PR slot's gates are the
+// log/socket carrier pair.
 func TestGatesIfBlockedSlotsPartition(t *testing.T) {
 	slots := map[string][]string{
 		"triage":  pushGates,
 		"push":    pushGates,
-		"pr":      {"PR_FORGE_READ_WRITE", "NO_PR_FORGE", "PR_FORGE_READ_ONLY_LOG", "PR_FORGE_READ_ONLY_SOCKET"},
-		"landing": {"PR_FORGE_READ_WRITE", "NO_PR_FORGE", "PR_FORGE_READ_ONLY"},
+		"pr":      {"NO_PR_FORGE", "PR_FORGE_READ_ONLY_LOG", "PR_FORGE_READ_ONLY_SOCKET"},
+		"landing": {"NO_PR_FORGE", "PR_FORGE_READ_ONLY"},
 	}
 	cells := []struct {
 		name       string
@@ -765,13 +621,10 @@ func TestGatesIfBlockedSlotsPartition(t *testing.T) {
 		pr         string
 		landing    string
 	}{
-		{"github read-write", Env{BoxWriteEnabled: true, ForgeBackend: "GH", OutboxRelayCapable: true}, "BOX_PUSH_READ_WRITE", "PR_FORGE_READ_WRITE", "PR_FORGE_READ_WRITE"},
-		{"forgejo read-write", Env{BoxWriteEnabled: true, ForgeBackend: "FORGEJO", OutboxRelayCapable: true}, "BOX_PUSH_READ_WRITE", "PR_FORGE_READ_WRITE", "PR_FORGE_READ_WRITE"},
-		{"git read-write", Env{BoxWriteEnabled: true, ForgeBackend: "GH", CodeForge: "git"}, "BOX_PUSH_READ_WRITE", "NO_PR_FORGE", "NO_PR_FORGE"},
-		{"local read-write", Env{BoxWriteEnabled: true, CodeForge: "local", HostMediatedRemote: true}, "HOST_MEDIATED_PUSH", "NO_PR_FORGE", "NO_PR_FORGE"},
-		{"github read-only", Env{ForgeBackend: "GH", OutboxRelayCapable: true}, "OUTBOX_PUSH_READ_ONLY", "PR_FORGE_READ_ONLY", "PR_FORGE_READ_ONLY"},
-		{"forgejo read-only", Env{ForgeBackend: "FORGEJO", OutboxRelayCapable: true}, "OUTBOX_PUSH_READ_ONLY", "PR_FORGE_READ_ONLY", "PR_FORGE_READ_ONLY"},
-		{"local read-only", Env{CodeForge: "local", HostMediatedRemote: true}, "HOST_MEDIATED_PUSH", "NO_PR_FORGE", "NO_PR_FORGE"},
+		{"git", Env{ForgeBackend: "GH", CodeForge: "git"}, "OUTBOX_PUSH_READ_ONLY", "NO_PR_FORGE", "NO_PR_FORGE"},
+		{"github", Env{ForgeBackend: "GH", OutboxRelayCapable: true}, "OUTBOX_PUSH_READ_ONLY", "PR_FORGE_READ_ONLY", "PR_FORGE_READ_ONLY"},
+		{"forgejo", Env{ForgeBackend: "FORGEJO", OutboxRelayCapable: true}, "OUTBOX_PUSH_READ_ONLY", "PR_FORGE_READ_ONLY", "PR_FORGE_READ_ONLY"},
+		{"local", Env{CodeForge: "local", HostMediatedRemote: true}, "HOST_MEDIATED_PUSH", "NO_PR_FORGE", "NO_PR_FORGE"},
 	}
 	for _, c := range cells {
 		for _, carrier := range []string{"", "socket"} {

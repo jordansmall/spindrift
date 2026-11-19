@@ -252,11 +252,11 @@ verdict:` line the REVIEW section below reads.
   (`git log origin/main..agent/issue-7` lists them), and
   rewriting that history here is expected.
 
-**Always rebase onto the latest base immediately before every push** — never
-push from a stale base. This keeps the branch's tested tree current with any
-siblings that landed while you worked: the launcher does not re-rebase a green
-PR for you, so a fresh base at push time is the branch's freshness guarantee
-(a stale base also produces phantom diffs that trip push guards):
+**Always rebase onto the latest base immediately before finishing** — never
+leave the branch on a stale base. This keeps the branch's tested tree current
+with any siblings that landed while you worked: the launcher does not
+re-rebase a green PR for you, so a fresh base is the branch's freshness
+guarantee (a stale base also produces phantom diffs that trip push guards):
 
 ```
 git fetch origin
@@ -270,32 +270,12 @@ conflicts or brought in changes to files this branch touches — compare
 is the SHA the `git merge-base` line printed (what the base brought in),
 against `git diff --name-only origin/main...HEAD` (what the branch
 touches). A rebase that reports the branch already up to date brought in
-nothing. Otherwise skip it and let CI be the final gate. Then push:
+nothing. Otherwise skip it and let CI be the final gate.
 
-```
-git push --force-with-lease --force-if-includes -u origin agent/issue-7   # first push
-git push --force-with-lease --force-if-includes                        # subsequent
-```
-
-`git fetch origin` above refreshes `origin/agent/issue-7`, so
-`--force-with-lease` alone would overwrite a commit someone else pushed to
-the branch; `--force-if-includes` is what refuses it. Never drop it, and
-never fall back to a bare `--force`.
-
-**If a push is rejected**, do NOT silently strand the commits. Retry exactly
-once:
-
-1. `git fetch origin`
-2. `git merge-base HEAD origin/main` — note the SHA it prints.
-3. `git rebase origin/main` — resolve any conflicts, then re-run
-   the full check gate only under the same after-rebase rule.
-4. `git push --force-with-lease --force-if-includes` — one retry only.
-
-If the push still fails after the retry, do not overwrite whatever is on
-`origin/agent/issue-7` (no bare `--force`). Follow IF BLOCKED, and if
-`git log HEAD..origin/agent/issue-7` lists commits this run did not write, name
-them — it also lists this run's own earlier pushes as they stood before the
-rebase, which are not someone else's.
+Your token is read-only and you take no code-out action yourself — do NOT
+`git push` and do NOT run `git bundle create`. Leave your work committed on
+the branch: after you exit the harness relays your committed branch out and
+the launcher pushes it host-side with its own token.
 
 # REVIEW
 
@@ -557,9 +537,7 @@ unsure):
 **`CODE_FORGE=git`** (push-only Code Forge — no PR, no CI-watch, no merge
 gate): skip OPEN A PULL REQUEST below entirely.
 
-1. `git push --force-with-lease --force-if-includes -u origin agent/issue-7` (if not already pushed).
-
-2. Print exactly one line as your final output and stop — raw plain text, not
+1. Print exactly one line as your final output and stop — raw plain text, not
    wrapped in backticks, a code fence, or any other markdown formatting:
 
    SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=<short reason>
@@ -591,9 +569,47 @@ OPEN A PULL REQUEST below.
 
 # OPEN A PULL REQUEST
 
-1. `git push --force-with-lease --force-if-includes -u origin agent/issue-7`
+1. Your token is read-only and you take no code-out action yourself — do NOT
+   `git push` and do NOT run `git bundle create`. Leave your work committed on
+   the branch: after you exit the harness relays your committed branch out and
+   the launcher pushes it host-side with its own token.
 
-2. `gh pr create --draft --base main --head agent/issue-7 --title "<conventional title>" --body "<summary>"`
+2. Your token is read-only — do NOT `gh pr create`. Send your intended draft
+   PR's title and body over the Signal socket instead, so the launcher opens
+   the draft PR host-side once you exit. Send it in one call, the body on
+   stdin — never write the body to a file in one call and send it in the next:
+
+```sh
+driver-exec signal pr-intent -title '<conventional title>' <<'SPINDRIFT_SIGNAL_EOF'
+<PR body>
+SPINDRIFT_SIGNAL_EOF
+```
+
+   The closing `SPINDRIFT_SIGNAL_EOF` must sit alone at column one — an
+   indented copy never ends the heredoc.
+
+   The flags are exactly `-title` (required) and `-body-file`
+   (optional). There is no `-nonce` flag, and the run's nonce goes
+   neither on this command nor on the outcome line. `-body-file <file>`
+   is the fallback for a body that already sits in a file; without it the
+   body is read from stdin. The title is its own flag, so the launcher
+   never has to guess where the title ends; quote a title containing
+   backticks in single quotes, so the shell does not run them as a command
+   substitution. A title containing a single quote needs `'\''` in its
+   place (closing the quote, an escaped quote, reopening it). The quotes
+   around the delimiter keep `$` and backticks in the body literal, and
+   the distinctive delimiter stops a bare `EOF` line in quoted issue or
+   comment text from ending the body early.
+
+   Run the command bare — never through `tail`, `head`, or `2>&1 |`. The
+   command's exit code is the acceptance, and a pipe replaces it with the
+   last piped command's own. A zero exit prints `signal pr-intent accepted:
+   <n> bytes, <hash>, sequence <n>`, and the intent is taken. A non-zero exit
+   prints `signal pr-intent rejected (<status>): <reason>` — the intent was
+   NOT taken, so read the reason, fix it, and send the command again.
+
+   Sending the command again replaces the earlier intent rather than racing
+   it, so correcting a title or body costs one more call, never the run.
 
 The PR opens as a **draft** and stays a **draft** — the launcher flips it to
 ready once CI reaches green (the launcher already gates on CI green itself, so
@@ -612,7 +628,12 @@ THE CHANGE above.)
 Print exactly one line as your final output — raw plain text, not wrapped in
 backticks, a code fence, or any other markdown formatting:
 
-SPINDRIFT_OUTCOME issue=7 landing=<pr-url> status=ready note=<short reason>
+SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=<short reason>
+
+landing is your branch name here, not a PR URL — your token is read-only, so
+you never open the PR and never learn its URL. The launcher opens the draft
+PR host-side from the intent your `driver-exec signal pr-intent` call queued
+and records the real PR URL as this seam's landing itself.
 
 Grammar: `SPINDRIFT_OUTCOME issue=7 landing=<landing-ref> status=<status> note=<text>`
 — one line, space-delimited fields, `note` last (`note` may itself contain
@@ -643,10 +664,16 @@ This must be the literal final message — nothing after it, no prose summary,
 no background task. The launcher parses this one line to learn your PR; if
 it is missing, the run is wasted.
 
-`status=ready` = branch pushed, PR open, left in draft; the launcher takes it
-from there as OPEN A PULL REQUEST above describes.
-Do NOT run `gh pr ready`, `gh issue edit ... --add-label agent-complete`,
-or `gh pr merge`.
+`status=ready` = your branch is written to the outbox and
+`driver-exec signal pr-intent` exited zero (`signal pr-intent accepted: ...`),
+so your PR intent is queued — not that a PR already exists. The launcher
+relays your branch, opens the draft PR from that intent, then takes it from
+there as OPEN A PULL REQUEST above describes. If the command never exited
+zero, no intent is queued: follow IF BLOCKED below instead, which ends in
+`status=blocked` with a `note=` naming the rejection. You never run
+`gh pr create`, `gh pr ready`,
+`gh issue edit ... --add-label agent-complete`, or `gh pr merge` — your
+token cannot.
 
 
 # IF BLOCKED
@@ -654,34 +681,67 @@ or `gh pr merge`.
 If you can't finish (review never clears, checks stay red after repeated fixes,
 or any other blocker):
 
-**Push failure — check the actual cause before reporting it.** Do not guess.
-Run:
-
-```
-git diff origin/main -- '.github/workflows/'
-```
-
-- **No diff (phantom delta):** The pre-push rebase-and-retry above should have
-  cleared this. If the push still fails, capture and report the actual push
-  error output.
-- **Genuine `.github/workflows/` change:** The agent's token intentionally
-  lacks `workflow` scope — this is a deliberate security boundary. Do NOT
-  attempt to acquire broader scope or route around it. Through step 4 below,
-  report which changes were made and why they require human review with
-  `workflow` scope, then emit `status=blocked`.
-- **Any other rejection:** Report the literal push error output. Never
-  attribute a failure to a cause you have not verified.
+**A denied `git push` here is expected, not itself the blocker.** A read-only
+Box holds no push-capable token in the failure path any more than in the
+happy path, so a 403 or other permission denial on a write is the outcome you
+were always going to get — never diagnose it as a broken or under-scoped
+token, and never report it to a human as a token-permission problem needing
+`workflow` or any other scope. Skip the `.github/workflows/` diff triage the
+read-write path runs; step 4 below already covers reporting what's done and
+what remains. Look instead for the actual
+reason you can't finish — review never clearing, CI staying red after
+repeated fixes, or similar — and report that.
 
 Then:
 
-1. Push what you have (or note if even that is impossible):
-   `git push --force-with-lease --force-if-includes -u origin agent/issue-7` — never a bare
-   `--force`. If that is rejected, leave the remote commits in place and note it.
+1. Your token is read-only and you take no code-out action yourself — do NOT
+   `git push` and do NOT run `git bundle create` (or note if you have nothing
+   committed to hand off). Leave what you have committed on the branch: after
+   you exit the harness relays your committed branch out and the launcher
+   pushes it host-side with its own token.
 
-2. Check whether a PR already exists on this branch (`gh pr view --json url`).
-   If not, open one as a draft (`--draft`). If it does, leave it as-is — the
-   Driver never flips a PR to ready, so it is already draft and there is
-   nothing to revert.
+2. Your token is read-only — do NOT `gh pr view` or `gh pr create`. Send
+   your intended draft PR's title and body over the Signal socket instead,
+   so the launcher opens the draft PR host-side once you exit. Send it
+   in one call, the body on stdin — never write the body to a file in
+   one call and send it in the next:
+
+```sh
+driver-exec signal pr-intent -title '<conventional title>' <<'SPINDRIFT_SIGNAL_EOF'
+<PR body>
+SPINDRIFT_SIGNAL_EOF
+```
+
+   The closing `SPINDRIFT_SIGNAL_EOF` must sit alone at column one — an
+   indented copy never ends the heredoc.
+
+   The flags are exactly `-title` (required) and `-body-file`
+   (optional). There is no `-nonce` flag, and the run's nonce goes
+   neither on this command nor on the outcome line. `-body-file <file>`
+   is the fallback for a body that already sits in a file; without it the
+   body is read from stdin. The title is its own flag, so the launcher
+   never has to guess where the title ends; quote a title containing
+   backticks in single quotes, so the shell does not run them as a command
+   substitution. A title containing a single quote needs `'\''` in its
+   place (closing the quote, an escaped quote, reopening it). The quotes
+   around the delimiter keep `$` and backticks in the body literal, and
+   the distinctive delimiter stops a bare `EOF` line in quoted issue or
+   comment text from ending the body early.
+
+   Run the command bare — never through `tail`, `head`, or `2>&1 |`. The
+   command's exit code is the acceptance, and a pipe replaces it with the
+   last piped command's own. A zero exit prints `signal pr-intent accepted:
+   <n> bytes, <hash>, sequence <n>`, and the intent is taken. A non-zero exit
+   prints `signal pr-intent rejected (<status>): <reason>` — the intent was
+   NOT taken, so read the reason, fix it, and send the command again.
+
+   Sending the command again replaces the earlier intent rather than racing
+   it, so correcting a title or body costs one more call, never the run.
+
+   If it never exits zero, even after you fixed each rejection's reason and
+   sent it again — here or before you reached IF BLOCKED — stop resending
+   and go on to step 5, naming the rejection in `note=` alongside what's
+   done and what remains.
 
 3. Leave the issue in-progress — do NOT close it.
 4. You have no client that can post a comment to this tracker. Do nothing
@@ -692,4 +752,7 @@ Then:
 5. Print exactly one line and stop — raw plain text, not wrapped in
    backticks, a code fence, or any other markdown formatting:
 
-   SPINDRIFT_OUTCOME issue=7 landing=<pr-url> status=blocked note=<short reason>
+   SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=<short reason>
+
+   landing is your branch name here, not a PR URL — your token is read-only,
+   so you never open the PR and never learn its URL.
