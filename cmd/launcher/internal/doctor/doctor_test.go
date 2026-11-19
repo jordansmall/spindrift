@@ -202,6 +202,25 @@ func TestRun_IssueTrackerProbeError_SentinelTextNotDuplicated(t *testing.T) {
 	}
 }
 
+// The launcher refuses REPO_SLUG as an env var (#6623), so the default
+// repo-not-found hint must name the flag and the config key instead.
+func TestRun_RepoNotFound_DefaultSlugHintNamesFlagAndConfigKey(t *testing.T) {
+	it := forge.NewFake()
+	it.ProbeErr = fmt.Errorf("%w", forge.ErrRepoNotFound)
+
+	var buf bytes.Buffer
+	err := Run(it, forge.NewFake(), defaultDoctorConfig(), NewReporter(&buf, true), bufio.NewScanner(strings.NewReader("")), false, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "--repo-slug / forge.repoSlug") {
+		t.Errorf("want hint naming --repo-slug / forge.repoSlug, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "REPO_SLUG") {
+		t.Errorf("want no REPO_SLUG env var in hint, got: %v", err)
+	}
+}
+
 func TestRun_IssueTrackerRateLimit_CodeForgeProbeDoesNotRun(t *testing.T) {
 	it := forge.NewFake()
 	it.ProbeErr = forge.ErrRateLimit
