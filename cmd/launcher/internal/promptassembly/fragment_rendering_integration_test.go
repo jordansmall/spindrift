@@ -42,8 +42,7 @@ func TestAssembleOutcomeRendering(t *testing.T) {
 		wantNot string
 	}{
 		{
-			name:  "read-only OUTCOME landing reports the branch, never a pr-url",
-			setup: (*cellInputs).readOnly,
+			name: "OUTCOME landing reports the branch, never a pr-url",
 			check: func(t *testing.T, prompt string) {
 				if !strings.Contains(prompt, "landing=agent/issue-7 status=ready") {
 					t.Error("prompt missing the branch landing line")
@@ -52,7 +51,7 @@ func TestAssembleOutcomeRendering(t *testing.T) {
 					t.Error("prompt has no line ending status=ready note=<short reason>")
 				}
 				if strings.Contains(section(t, prompt, "# OUTCOME", "# IF BLOCKED"), "landing=<pr-url>") {
-					t.Error("read-only OUTCOME section names a landing=<pr-url> placeholder")
+					t.Error("OUTCOME section names a landing=<pr-url> placeholder")
 				}
 			},
 		},

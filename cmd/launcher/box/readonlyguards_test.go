@@ -43,7 +43,6 @@ func newGuardsFixture(t *testing.T) *guardsFixture {
 	g.reg = newRegFake()
 	g.firstRun(blockedLine+"\n", 0)
 	g.d.Registry = g.reg.deps()
-	g.env.BoxWriteEnabled = false
 	g.write(g.in.ForbiddenMarkersFile, guardsRegistry)
 	g.bin = filepath.Join(g.dir, "bin")
 	if err := os.MkdirAll(g.bin, 0o755); err != nil {
@@ -113,7 +112,6 @@ func assertExecutable(t *testing.T, path string) {
 
 func TestReadonlyGuards_ReadWriteInstallsNothing(t *testing.T) {
 	g := newGuardsFixture(t)
-	g.env.BoxWriteEnabled = true
 	g.env.OutboxRelayCapable = true
 	g.run()
 	if _, err := os.Stat(g.shimDir); err == nil {

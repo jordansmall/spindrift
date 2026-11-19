@@ -100,7 +100,6 @@ func TestBackendCLI_RunsForSelfContained(t *testing.T) {
 
 func TestBackendCLI_RunsRegardlessOfWriteMode(t *testing.T) {
 	g := newFJFixture(t)
-	g.env.BoxWriteEnabled = false
 	g.run()
 	if len(g.fj) != 1 {
 		t.Fatalf("fj ran %d times on a read-only Box, want 1", len(g.fj))

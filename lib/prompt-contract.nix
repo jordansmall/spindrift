@@ -424,45 +424,6 @@ rec {
     in
     (violationsIn fragmentHitsByFile) ++ (violationsIn templateHitsByFile);
 
-  # Asserts a research prompt never carries the envsubst placeholder for one
-  # of lib/fragments.nix's FILER_FILE_DIRECT*-gated rows, which would file
-  # issues directly instead of through the SPINDRIFT_ISSUE_INTENT relay (issue
-  # #2595, ADR 0041). True by construction today; this is the backstop that
-  # turns a future regression into a build failure. Unconditional, like above.
-  buildTimeResearchDirectFileViolations =
-    { directFileFragmentRows, researchPromptContentByName }:
-    let
-      hasDirectPlaceholder =
-        var: content:
-        let
-          pattern = "\\$[{]" + builtinsCompat.escapeRegex var + "[}]";
-        in
-        # Not hasInfix: escapeRegex would emit `\{`/`\}`, which Nix's ERE
-        # engine rejects outright, so the braces are hand-wrapped in a
-        # character class. Braced spelling only, so a bare `$VAR` placeholder
-        # would not match.
-        builtins.length (builtins.split pattern content) > 1;
-    in
-    builtins.concatMap (
-      promptName:
-      let
-        content = researchPromptContentByName.${promptName};
-      in
-      builtins.concatMap (
-        row:
-        if hasDirectPlaceholder row.var content then
-          [
-            {
-              inherit promptName;
-              fragment = row.fragment;
-              var = row.var;
-            }
-          ]
-        else
-          [ ]
-      ) directFileFragmentRows
-    ) (builtins.attrNames researchPromptContentByName);
-
   # Asserts every _LOG/_SOCKET fragment pair fork (issue #3726) actually
   # instructs the verb its carrier requires: a _SOCKET-gated fragment must
   # contain "driver-exec signal <channel>", and a _LOG-gated fragment must
@@ -471,8 +432,8 @@ rec {
   # never a hand-listed filename table, so a new paired fragment only needs
   # that one field to be covered here. Rows with no `signalChannel` (every
   # non-signal fragment) are silently skipped. Takes the fragment rows and a
-  # content map as arguments, like buildTimeResearchDirectFileViolations
-  # above, so a check can hand it synthetic content and prove it really fails.
+  # content map as arguments, so a check can hand it synthetic content and
+  # prove it really fails.
   buildTimeSignalFragmentViolations =
     { fragmentRows, fragmentContentByFile }:
     let

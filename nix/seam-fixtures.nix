@@ -31,9 +31,6 @@ let
   gateVocabularyJson = pkgs.writeText "gate-vocabulary.json" (
     builtins.toJSON (builtins.attrNames (import ../lib/gate-vocabulary.nix).gates)
   );
-  readWriteOnlyGatesJson = pkgs.writeText "read-write-only-gates.json" (
-    builtins.toJSON (import ../lib/gate-vocabulary.nix).readWriteOnly
-  );
   promptContractRegistryJson = pkgs.writeText "prompt-contract-registry.json" (
     builtins.toJSON (import ../lib/prompt-contract.nix).validateMarkers
   );
@@ -56,7 +53,6 @@ let
     "fragments-registry.json" = registryJson;
     "forbidden-markers-registry.json" = forbiddenMarkersRegistryJson;
     "gate-vocabulary.json" = gateVocabularyJson;
-    "read-write-only-gates.json" = readWriteOnlyGatesJson;
     "prompt-contract-registry.json" = promptContractRegistryJson;
     "prompt-contract-parity-fixtures.json" = promptContractParityFixtures;
     "research-verdicts-parity.json" = researchVerdictsParity;

@@ -334,14 +334,9 @@ What breaks in an override prompt directory:
   | `RESEARCH_ISSUE_READ_GITHUB_STEP`, `RESEARCH_ISSUE_READ_LOCAL_STEP`, `RESEARCH_ISSUE_READ_FORGEJO_STEP` | `RESEARCH_ISSUE_READ_STEP` |
   | `SCOUT_ISSUE_READ_GITHUB_STEP`, `SCOUT_ISSUE_READ_FORGEJO_STEP` | `SCOUT_ISSUE_READ_STEP` |
   | `FILER_DEDUP_SEARCH_STEP`, `FILER_DEDUP_SEARCH_FORGEJO_STEP`, `FILER_DEDUP_SEARCH_LOCAL_STEP` | `FILER_DEDUP_STEP` |
-  | `RESEARCH_VERDICT_GITHUB_STEP`, `RESEARCH_VERDICT_FORGEJO_STEP` | `RESEARCH_VERDICT_STEP` |
   | `RESEARCH_VERDICT_GITHUB_READONLY_STEP`, `RESEARCH_VERDICT_FORGEJO_READONLY_STEP`, `RESEARCH_VERDICT_LOCAL_STEP` | `RESEARCH_VERDICT_RELAY_STEP` |
   | `RESEARCH_VERDICT_GITHUB_READONLY_SOCKET_STEP`, `RESEARCH_VERDICT_FORGEJO_READONLY_SOCKET_STEP`, `RESEARCH_VERDICT_LOCAL_SOCKET_STEP` | `RESEARCH_VERDICT_RELAY_SOCKET_STEP` |
-  | `RESEARCH_OUTCOME_LANDING_GITHUB_STEP`, `RESEARCH_OUTCOME_LANDING_FORGEJO_STEP` | `RESEARCH_OUTCOME_LANDING_STEP` |
-  | `ISSUE_BLOCKED_COMMENT_GITHUB_STEP`, `ISSUE_BLOCKED_COMMENT_FORGEJO_STEP` | `ISSUE_BLOCKED_COMMENT_STEP` |
   | `ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP`, `ISSUE_BLOCKED_COMMENT_FORGEJO_READONLY_STEP`, `ISSUE_BLOCKED_COMMENT_LOCAL_STEP` | `ISSUE_BLOCKED_COMMENT_RELAY_STEP` |
-  | `FILER_FILE_DIRECT_STEP`, `FILER_FILE_DIRECT_FORGEJO_STEP` | `FILER_DIRECT_FILE_STEP` |
-  | `FILER_LABEL_DIRECT_STEP`, `FILER_LABEL_DIRECT_FORGEJO_STEP` | `FILER_DIRECT_LABEL_STEP` |
   | `FIX_CI_READ_GITHUB_STEP`, `FIX_CI_READ_FORGEJO_STEP` | `FIX_CI_READ_STEP` |
   | `PR_BODY_LOCAL_REF_STEP` | `PR_BODY_ISSUE_REF_STEP` |
   | `PR_BODY_LOCAL_NOREF_STEP` | `PR_BODY_NO_ISSUE_REF_STEP` |
@@ -365,20 +360,10 @@ What breaks in an override prompt directory:
   | `filer-dedup-search.md` | `github/filer-dedup.md` |
   | `filer-dedup-search-forgejo.md` | `forgejo/filer-dedup.md` |
   | `filer-dedup-search-local.md` | `local/filer-dedup.md` |
-  | `filer-file-direct.md` | `github/filer-direct-file.md` |
-  | `filer-file-direct-forgejo.md` | `forgejo/filer-direct-file.md` |
-  | `filer-label-direct.md` | `github/filer-direct-label.md` |
-  | `filer-label-direct-forgejo.md` | `forgejo/filer-direct-label.md` |
-  | `research-verdict-github.md` | `github/research-verdict.md` |
-  | `research-verdict-forgejo.md` | `forgejo/research-verdict.md` |
   | `research-verdict-github-readonly.md`, `research-verdict-forgejo-readonly.md` | `research-verdict-relay.md` |
   | `research-verdict-github-readonly-socket.md`, `research-verdict-forgejo-readonly-socket.md` | `research-verdict-relay-socket.md` |
   | `research-verdict-local.md` | `local/research-verdict-relay.md` |
   | `research-verdict-local-socket.md` | `local/research-verdict-relay-socket.md` |
-  | `research-outcome-landing-github.md` | `github/research-outcome-landing.md` |
-  | `research-outcome-landing-forgejo.md` | `forgejo/research-outcome-landing.md` |
-  | `issue-blocked-comment-github.md` | `github/issue-blocked-comment.md` |
-  | `issue-blocked-comment-forgejo.md` | `forgejo/issue-blocked-comment.md` |
   | `issue-blocked-comment-github-readonly.md`, `issue-blocked-comment-forgejo-readonly.md` | `issue-blocked-comment-relay.md` |
   | `issue-blocked-comment-local.md` | `local/issue-blocked-comment-relay.md` |
   | `fix-ci-read-github.md` | `github/fix-ci-read.md` |

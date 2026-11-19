@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -128,9 +127,6 @@ func (c *cellInputs) filerOn() {
 	c.export("BOX_FILER_ENABLED", "1")
 }
 
-// readOnly mirrors `unset BOX_WRITE_ENABLED`.
-func (c *cellInputs) readOnly() { c.unset("BOX_WRITE_ENABLED") }
-
 func (c *cellInputs) forgejoForge() { c.export("CODE_FORGE", "forgejo") }
 
 // gitForge mirrors a git dispatch: the launcher sets BOX_OUTBOX_RELAY_CAPABLE
@@ -166,14 +162,13 @@ func (c *cellInputs) butler(chore string) {
 }
 
 // defaultCell is every cell's starting point: lib/env-schema.nix's boxEnv
-// defaults, a github issue worked by a work dispatch, writes enabled, no
+// defaults, a github issue worked by a work dispatch, no
 // roster, and six baked skills.
 func defaultCell() *cellInputs {
 	c := &cellInputs{
 		vars: map[string]string{
 			"ISSUE_TRACKER":            "github",
 			"CODE_FORGE":               "github",
-			"BOX_WRITE_ENABLED":        "1",
 			"BOX_OUTBOX_RELAY_CAPABLE": "1",
 			"BOX_SIGNAL_CARRIER":       "log",
 			"ISSUE_NUMBER":             "7",
@@ -201,30 +196,6 @@ type goldenCell struct {
 	// check holds assertions on the produced prompt that guard a cell's reason
 	// to exist against an update-mode regeneration silently changing it.
 	check func(t *testing.T, prompt string)
-}
-
-// blanketGhBan matches a sentence that forbids `gh` outright ("Do NOT run
-// `gh`.", "Never use gh."), but not a scoped one such as "Do NOT use `gh` for
-// the pull request".
-var blanketGhBan = regexp.MustCompile("(?i)\\b(do not|don't|never)\\s+(run|use)\\s+`?gh`?\\s*[.;!]")
-
-// checkForgejoBlockedKeepsTrackerGh guards the Forgejo IF BLOCKED section
-// (#6229): the default GitHub tracker still comments through `gh issue
-// comment`, so the PR step must not ban `gh` wholesale. The ban wraps across
-// lines in the fragment, hence the whitespace normalisation.
-func checkForgejoBlockedKeepsTrackerGh(t *testing.T, prompt string) {
-	t.Helper()
-	_, blocked, ok := strings.Cut(prompt, "# IF BLOCKED")
-	if !ok {
-		t.Fatal("prompt lacks an IF BLOCKED section")
-	}
-	if !strings.Contains(blocked, "gh issue comment 7") {
-		t.Error("IF BLOCKED lacks the tracker gh issue comment step")
-	}
-	flat := strings.Join(strings.Fields(blocked), " ")
-	if ban := blanketGhBan.FindString(flat); ban != "" {
-		t.Errorf("IF BLOCKED bans gh outright (%q), contradicting the tracker comment step", ban)
-	}
 }
 
 func goldenCells() []goldenCell {
@@ -285,7 +256,6 @@ func goldenCells() []goldenCell {
 			c.export("CI_FAILURE_SUMMARY", "- build (x86_64-linux): failure")
 		}},
 		{name: "github-read-only", mode: modeInitial, setup: func(c *cellInputs) {
-			c.readOnly()
 		}},
 		{name: "git-forge", mode: modeInitial, setup: func(c *cellInputs) {
 			c.gitForge()
@@ -312,11 +282,9 @@ func goldenCells() []goldenCell {
 		{name: "local-forge-read-only", mode: modeInitial, setup: func(c *cellInputs) {
 			c.localForge()
 			c.localTracker()
-			c.readOnly()
 		}},
 		{name: "forgejo-read-only", mode: modeInitial, setup: func(c *cellInputs) {
 			c.forgejoForge()
-			c.readOnly()
 		}},
 		{name: "local-tracker-no-issue-ref", mode: modeInitial, setup: func(c *cellInputs) {
 			c.localTracker()
@@ -343,7 +311,6 @@ func goldenCells() []goldenCell {
 			// relay step comes from jira's own folder, not the shared root body
 			// that names ${FORGE_DISPLAY_NAME}'s token (issue #6857).
 			c.export("ISSUE_TRACKER", "jira")
-			c.readOnly()
 		}, check: func(t *testing.T, prompt string) {
 			if !strings.Contains(prompt, "You have no client that can post a comment to this tracker") {
 				t.Error("jira read-only prompt lacks the no-comment-client blocked step")
@@ -406,7 +373,6 @@ func goldenCells() []goldenCell {
 		// target fragment pair needs.
 		{name: "github-read-only-research-signal-socket", mode: modeInitial, setup: func(c *cellInputs) {
 			c.dispatch("research")
-			c.readOnly()
 			c.export("BOX_SIGNAL_CARRIER", "socket")
 			c.hostIssueVerbs()
 		}},
@@ -418,18 +384,15 @@ func goldenCells() []goldenCell {
 		{name: "forgejo-tracker-readonly-research-signal-socket", mode: modeInitial, setup: func(c *cellInputs) {
 			c.dispatch("research")
 			c.forgejoTracker()
-			c.readOnly()
 			c.export("BOX_SIGNAL_CARRIER", "socket")
 			c.hostIssueVerbs()
 		}},
 		{name: "github-read-only-signal-socket", mode: modeInitial, setup: func(c *cellInputs) {
-			c.readOnly()
 			c.export("BOX_SIGNAL_CARRIER", "socket")
 			c.hostIssueVerbs()
 		}},
 		{name: "orchestrator-filer-on-read-only", mode: modeInitial, review: true, setup: func(c *cellInputs) {
 			c.filerOn()
-			c.readOnly()
 		}, check: func(t *testing.T, prompt string) {
 			// Guards the cell's reason to exist against an update-mode
 			// regeneration silently flipping it to the socket fragment.
@@ -440,7 +403,6 @@ func goldenCells() []goldenCell {
 		}},
 		{name: "orchestrator-filer-on-signal-socket", mode: modeInitial, review: true, setup: func(c *cellInputs) {
 			c.filerOn()
-			c.readOnly()
 			c.export("BOX_SIGNAL_CARRIER", "socket")
 			c.hostIssueVerbs()
 		}},
@@ -499,17 +461,15 @@ func goldenCells() []goldenCell {
 			c.forgejoForge()
 			c.forgejoTracker()
 			c.filerOn()
-			c.readOnly()
 		}},
 		{name: "local-tracker-orchestrator-filer-on", mode: modeInitial, review: true, setup: func(c *cellInputs) {
 			c.localTracker()
 			c.filerOn()
-			c.readOnly()
 		}},
 		{name: "forgejo-fix-pass", mode: modeResume, setup: func(c *cellInputs) {
 			c.export("FIX_PASS", "1")
 			c.forgejoForge()
-		}, check: checkForgejoBlockedKeepsTrackerGh},
+		}},
 		{name: "principle-skills-baked", mode: modeInitial, setup: func(c *cellInputs) {
 			c.provisionAgents(roster)
 			// Dogfood-only, like nix-checks: no stock Consumer image bakes them.

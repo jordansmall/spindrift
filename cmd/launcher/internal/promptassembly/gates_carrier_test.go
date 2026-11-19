@@ -40,7 +40,7 @@ func TestGatesSignalCarrierConjunctions(t *testing.T) {
 	}{
 		{
 			base: "ISSUE_TRACKER_GITHUB_READONLY",
-			env:  Env{TrackerAxisRead: "GITHUB", TrackerAxisWrite: "GITHUB", BoxWriteEnabled: false},
+			env:  Env{TrackerAxisRead: "GITHUB", TrackerAxisWrite: "GITHUB"},
 		},
 		{
 			base: "ISSUE_TRACKER_LOCAL",
@@ -48,11 +48,11 @@ func TestGatesSignalCarrierConjunctions(t *testing.T) {
 		},
 		{
 			base: "ISSUE_TRACKER_FORGEJO_READONLY",
-			env:  Env{TrackerAxisRead: "FORGEJO", TrackerAxisWrite: "FORGEJO", BoxWriteEnabled: false},
+			env:  Env{TrackerAxisRead: "FORGEJO", TrackerAxisWrite: "FORGEJO"},
 		},
 		{
 			base: "FILER_FILE_RELAY",
-			env:  Env{FilerEnabled: true, BoxWriteEnabled: false},
+			env:  Env{FilerEnabled: true},
 		},
 	}
 	for _, tc := range cases {
@@ -94,9 +94,9 @@ func TestGatesSignalCarrierConjunctions(t *testing.T) {
 		base string
 		env  Env
 	}{
-		{name: "ISSUE_TRACKER_GITHUB_READONLY off", base: "ISSUE_TRACKER_GITHUB_READONLY", env: Env{TrackerAxisRead: "GITHUB", TrackerAxisWrite: "GITHUB", BoxWriteEnabled: true}},
+		{name: "ISSUE_TRACKER_GITHUB_READONLY off", base: "ISSUE_TRACKER_GITHUB_READONLY", env: Env{TrackerAxisRead: "FORGEJO", TrackerAxisWrite: "FORGEJO"}},
 		{name: "ISSUE_TRACKER_LOCAL off", base: "ISSUE_TRACKER_LOCAL", env: Env{TrackerAxisRead: "GITHUB"}},
-		{name: "ISSUE_TRACKER_FORGEJO_READONLY off", base: "ISSUE_TRACKER_FORGEJO_READONLY", env: Env{TrackerAxisRead: "FORGEJO", TrackerAxisWrite: "FORGEJO", BoxWriteEnabled: true}},
+		{name: "ISSUE_TRACKER_FORGEJO_READONLY off", base: "ISSUE_TRACKER_FORGEJO_READONLY", env: Env{TrackerAxisRead: "GITHUB", TrackerAxisWrite: "GITHUB"}},
 		{name: "FILER_FILE_RELAY off", base: "FILER_FILE_RELAY", env: Env{FilerEnabled: false}},
 	}
 	for _, tc := range offCases {

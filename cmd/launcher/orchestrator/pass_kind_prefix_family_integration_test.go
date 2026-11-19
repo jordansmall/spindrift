@@ -22,13 +22,13 @@ import (
 // the one axis this test varies across its two Assemble calls.
 func guardEnv(issueText string) promptassembly.Env {
 	return promptassembly.Env{
-		IssueTracker:         "github",
-		TrackerAxisRead:      "GITHUB",
-		TrackerAxisWrite:     "GITHUB",
-		TrackerAxisFiler:     "GH",
-		CodeForge:            "github",
-		ForgeBackend:         "GH",
-		BoxWriteEnabled:      true,
+		IssueTracker:     "github",
+		TrackerAxisRead:  "GITHUB",
+		TrackerAxisWrite: "GITHUB",
+		TrackerAxisFiler: "GH",
+		CodeForge:        "github",
+		ForgeBackend:     "GH",
+
 		DispatchKind:         "work",
 		FixPass:              0,
 		SkillsFound:          "caveman, tdd, commit, code-review",

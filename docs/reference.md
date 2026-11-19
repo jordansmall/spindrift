@@ -7924,8 +7924,8 @@ question is answered by the Launcher before the Box starts (issue #7146): it
 forwards `BOX_HOST_OPEN_PR` as `open` (adopt and rebase the existing branch),
 `none` (reset it and start fresh), or `unknown` when its lookup failed, which
 aborts recovery as a failed `gh pr list` would. The
-`prompt-contract-read-only-reaches-no-forge-cli` check pins that no fragment a
-`read-only` Box reaches instructs a forge CLI.
+`in-box-forge-cli-allowlist` check pins that no shipped template instructs a
+forge CLI.
 
 There is no Box token to provision, verify or report: the Launcher and
 `spindrift doctor` neither require nor read `BOX_GH_TOKEN` or

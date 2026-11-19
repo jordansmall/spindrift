@@ -192,23 +192,19 @@ func TestAssembleResearchSkillStepGates(t *testing.T) {
 	}
 }
 
-// The research verdict's carrier forks on tracker backend and access (issue
-// #2708): a writable github Box posts it itself, while a read-only github Box
-// or a local tracker (no in-box client to post with, whatever BoxWriteEnabled
-// says) relays it as a SPINDRIFT_COMMENT line, the local tracker from its own
-// folder's fragment. The relay line carries the run nonce, and both bases
+// The research verdict's relay forks on tracker backend (issue #2708): a
+// github Box relays it as a SPINDRIFT_COMMENT line, the local tracker from its
+// own folder's fragment. The relay line carries the run nonce, and both bases
 // (self-contained included) fork the same way, since the gates read the
-// tracker and BoxWriteEnabled alone.
+// tracker alone.
 func TestAssembleResearchVerdictRelaySelection(t *testing.T) {
 	reg, env := syntheticRegistry(t,
 		[]FragmentRow{
-			{Axis: "tracker", Gate: "ISSUE_TRACKER_READWRITE", Fragment: "research-verdict.md", Var: "RESEARCH_VERDICT_STEP"},
-			{Axis: "tracker", Shared: true, Gate: "ISSUE_TRACKER_RELAYED_LOG", Fragment: "research-verdict-relay.md", Var: "RESEARCH_VERDICT_RELAY_STEP"},
+			{Axis: "tracker", Shared: true, Gate: "BOX_ACCESS_READ_ONLY_LOG", Fragment: "research-verdict-relay.md", Var: "RESEARCH_VERDICT_RELAY_STEP"},
 		},
 		map[string]string{
-			"research-prompt.md":                        "[${RESEARCH_VERDICT_STEP}${RESEARCH_VERDICT_RELAY_STEP}]\n",
-			"research-self-contained-prompt.md":         "[${RESEARCH_VERDICT_STEP}${RESEARCH_VERDICT_RELAY_STEP}]\n",
-			"fragments/github/research-verdict.md":      "DIRECT,",
+			"research-prompt.md":                        "[${RESEARCH_VERDICT_RELAY_STEP}]\n",
+			"research-self-contained-prompt.md":         "[${RESEARCH_VERDICT_RELAY_STEP}]\n",
 			"fragments/research-verdict-relay.md":       "SHARED-RELAY(${RUN_NONCE}),",
 			"fragments/local/research-verdict-relay.md": "LOCAL-RELAY(${RUN_NONCE}),",
 		})
@@ -217,16 +213,12 @@ func TestAssembleResearchVerdictRelaySelection(t *testing.T) {
 	cases := []struct {
 		name          string
 		local         bool
-		boxWrite      bool
 		selfContained bool
 		want          string
 	}{
-		{"github read-write", false, true, false, "[DIRECT,]"},
-		{"github read-only", false, false, false, "[SHARED-RELAY(run-nonce-abc123),]"},
-		{"self-contained github read-write", false, true, true, "[DIRECT,]"},
-		{"self-contained github read-only", false, false, true, "[SHARED-RELAY(run-nonce-abc123),]"},
-		{"local, box write enabled", true, true, false, "[LOCAL-RELAY(run-nonce-abc123),]"},
-		{"local, read-only", true, false, false, "[LOCAL-RELAY(run-nonce-abc123),]"},
+		{"github", false, false, "[SHARED-RELAY(run-nonce-abc123),]"},
+		{"self-contained github", false, true, "[SHARED-RELAY(run-nonce-abc123),]"},
+		{"local", true, false, "[LOCAL-RELAY(run-nonce-abc123),]"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -234,7 +226,6 @@ func TestAssembleResearchVerdictRelaySelection(t *testing.T) {
 			if tc.local {
 				env.IssueTracker, env.TrackerAxisRead, env.TrackerAxisWrite = "local", "LOCAL", ""
 			}
-			env.BoxWriteEnabled = tc.boxWrite
 			env.SelfContained = tc.selfContained
 			result, err := Assemble(env, reg)
 			if err != nil {

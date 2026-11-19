@@ -65,7 +65,7 @@ func parityCell(t *testing.T, f parityFixture) promptassembly.Env {
 	t.Helper()
 	env := promptassembly.Env{
 		IssueTracker: "github", TrackerAxisRead: "GITHUB", TrackerAxisWrite: "GITHUB", TrackerAxisFiler: "GH",
-		CodeForge: "github", ForgeBackend: "GH", BoxWriteEnabled: true, DispatchKind: "work",
+		CodeForge: "github", ForgeBackend: "GH", DispatchKind: "work",
 		IssueNumber: "7", IssueTitle: "Do the thing", Branch: "agent/issue-7", BaseBranch: "main",
 		InProgressLabel: "agent-in-progress", CompleteLabel: "agent-complete", RunNonce: "n0nce",
 		AgentsPromptFiles: parityPromptMap,
@@ -76,7 +76,7 @@ func parityCell(t *testing.T, f parityFixture) promptassembly.Env {
 		override["research-prompt.md"] = withMarker(f.MarkerPresent, "SPINDRIFT_COMMENT",
 			"research stub\n\nPost your verdict with ", "research stub, no verdict-comment marker here")
 		if f.Gate {
-			env.DispatchKind, env.BoxWriteEnabled = "research", false
+			env.DispatchKind = "research"
 		}
 	case "reviewer-verdict":
 		override["review-prompt.md"] = withMarker(f.MarkerPresent, "VERDICT: APPROVE or BLOCK",
@@ -89,14 +89,18 @@ func parityCell(t *testing.T, f parityFixture) promptassembly.Env {
 	case "pr-intent":
 		override["issue-prompt.md"] = withMarker(f.MarkerPresent, "SPINDRIFT_PR_INTENT",
 			"issue stub with ", "issue stub, no PR-intent marker here")
-		env.BoxWriteEnabled = !f.Gate
+		// The row gates on any dispatch that lands code; the butler is
+		// advise-only, so it closes the gate without arming the research rows.
+		if !f.Gate {
+			env.DispatchKind = "butler"
+		}
 	case "issue-intent":
 		override["filer-prompt.md"] = withMarker(f.MarkerPresent, "SPINDRIFT_ISSUE_INTENT",
 			"filer stub with ", "filer stub, no issue-intent marker here")
-		// FILER_FILE_RELAY needs the filer and a read-only Box at once, so
-		// turning writes on alone closes the gate while the filer's prompt
-		// stays populated and markerPresent still matters.
-		env.AgentsJSONTemplate, env.FilerEnabled, env.BoxWriteEnabled = parityFiler, true, !f.Gate
+		// FILER_FILE_RELAY needs the filer alone, so dropping the filer closes
+		// the gate while the filer's prompt stays populated and markerPresent
+		// still matters.
+		env.AgentsJSONTemplate, env.FilerEnabled = parityFiler, f.Gate
 	case "research-issue-intent":
 		// The research case of FILER_FILE_RELAY (ADR 0041) also arms the
 		// verdict-comment-relay row, which scans this same research prompt

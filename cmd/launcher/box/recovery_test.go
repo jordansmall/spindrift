@@ -13,7 +13,6 @@ import (
 func TestRecoverBranch_RunsForAWorkDispatchWithTheEnvsConfig(t *testing.T) {
 	f := newFixture(t)
 	f.env.CodeForge = ""
-	f.env.BoxWriteEnabled = false
 	f.run()
 	want := []branchrecovery.Config{{
 		WorkDir: f.in.WorkDir, Branch: "agent/issue-42", BaseBranch: "main",

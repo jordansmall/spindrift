@@ -68,10 +68,6 @@ type Env struct {
 	TrackerAxisWrite string
 	TrackerAxisFiler string
 
-	// BoxWriteEnabled is the launcher's host-side resolution of
-	// BOX_FORGE_AND_ISSUE_ACCESS, forwarded only when writes are permitted.
-	BoxWriteEnabled bool // $BOX_WRITE_ENABLED presence
-
 	// HostMediatedRemote and OutboxRelayCapable are per-dispatch presence facts
 	// the launcher forwards: the CODE_FORGE has no writable remote at all, and
 	// it is a PR-shaped forge (github, forgejo), which the PR gates key on.

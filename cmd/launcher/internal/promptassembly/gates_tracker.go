@@ -16,24 +16,17 @@ func trackerGates(e Env) map[string]bool {
 	// launcher predating #2533 leaves itRead empty; nothing else ever does.
 	// Fall back to e.IssueTracker's own arm, not to github, which would
 	// contradict itself for a local or forgejo tracker.
-	itRead, itWrite, itFiler := e.TrackerAxisRead, e.TrackerAxisWrite, e.TrackerAxisFiler
+	itRead, itWrite := e.TrackerAxisRead, e.TrackerAxisWrite
 	if itRead == "" {
-		itRead, itWrite, itFiler = issueTrackerAxisFallback(e.IssueTracker)
+		itRead, itWrite, _ = issueTrackerAxisFallback(e.IssueTracker)
 	}
 
-	// ADR 0041 / issue #2593: an advise-only dispatch with the Filer provisioned
-	// always uses the relay form, regardless of BOX_WRITE_ENABLED. So does a
-	// research verdict on a tracker the Box cannot write (jira, issue #5245): it
-	// borrows the GITHUB write axis, but has no in-box write path. The butler
-	// posts no verdict, so that term is scoped to ContractVerdict. Env forwards
-	// IssueTracker as the empty string by default; resolve it to the default.
+	// Env forwards IssueTracker as the empty string by default; resolve it to
+	// the default.
 	trackerName := e.IssueTracker
 	if trackerName == "" {
 		trackerName = defaultIssueTracker
 	}
-	d := e.descriptor()
-	researchForceRelay := (d.AdviseOnly && e.FilerEnabled) ||
-		(verdictContract(d) && backend.ResearchVerdictRelayed(trackerName, e.FilerEnabled))
 
 	// At most one of these three fires; jira (itRead "JIRA") fires none, as no
 	// fragment row is keyed on a jira read gate.
@@ -41,15 +34,9 @@ func trackerGates(e Env) map[string]bool {
 	g["ISSUE_TRACKER_LOCAL"] = itRead == "LOCAL"
 	g["ISSUE_TRACKER_FORGEJO"] = itRead == "FORGEJO"
 
-	// A tracker with a direct write-step path (itWrite non-empty) forks on
-	// BOX_WRITE_ENABLED; local (itWrite empty) renders neither pair, since its
-	// write step always goes through the relay. These gates also drive the
-	// research-verdict fragments, so researchForceRelay flips a would-be
-	// _READWRITE case to its _READONLY sibling (ADR 0041, issue #2593).
 	// A tracker with InBoxUnwritableTracker (jira) borrows the GITHUB write
-	// axis but no write token reaches it, so its read-write arm is
-	// ISSUE_TRACKER_UNWRITABLE_READWRITE, not _GITHUB_READWRITE: the work IF
-	// BLOCKED comment relays through the host's note= field (issue #5263).
+	// axis but no write token reaches it (issue #5263). Local (itWrite empty)
+	// renders neither write-axis gate.
 	row, _ := backend.ByName(trackerName)
 	unwritable := row.InBoxUnwritableTracker
 	// The backend-agnostic form of "the Box can read the tracker": gates a
@@ -84,49 +71,21 @@ func trackerGates(e Env) map[string]bool {
 	g["ISSUE_TRACKER_FORGEJO_SEARCHABLE"] = itRead == "FORGEJO" && searchVerb
 	g["ISSUE_TRACKER_FORGEJO_UNSEARCHABLE"] = itRead == "FORGEJO" && !searchVerb
 	// InBoxUnwritableTracker (not local, which also lacks an in-Box client but
-	// takes the writable arm) picks the FILER_RELAY_REASON fragment in every
-	// access mode (issue #6354).
+	// takes the writable arm) picks the FILER_RELAY_REASON fragment
+	// (issue #6354).
 	g["ISSUE_TRACKER_WRITABLE"] = !unwritable
 	g["ISSUE_TRACKER_UNWRITABLE"] = unwritable
-	g["ISSUE_TRACKER_GITHUB_READWRITE"] = itWrite == "GITHUB" && e.BoxWriteEnabled && !researchForceRelay && !unwritable
-	g["ISSUE_TRACKER_UNWRITABLE_READWRITE"] = unwritable && e.BoxWriteEnabled && !researchForceRelay
-	g["ISSUE_TRACKER_GITHUB_READONLY"] = itWrite == "GITHUB" && (!e.BoxWriteEnabled || researchForceRelay)
-	g["ISSUE_TRACKER_FORGEJO_READWRITE"] = itWrite == "FORGEJO" && e.BoxWriteEnabled && !researchForceRelay
-	g["ISSUE_TRACKER_FORGEJO_READONLY"] = itWrite == "FORGEJO" && (!e.BoxWriteEnabled || researchForceRelay)
+	g["ISSUE_TRACKER_GITHUB_READONLY"] = itWrite == "GITHUB"
+	g["ISSUE_TRACKER_FORGEJO_READONLY"] = itWrite == "FORGEJO"
 
-	// Backend-agnostic forms of the pairs above, for slot rows whose
-	// per-folder fragments replace the backend-named gates: READWRITE is the
-	// union of the two _READWRITE gates, RELAYED the union of every relayed
-	// path (read-only, local, Filer-forced).
-	g["ISSUE_TRACKER_READWRITE"] = itWrite != "" && e.BoxWriteEnabled && !researchForceRelay && !unwritable
-	g["ISSUE_TRACKER_RELAYED"] = itWrite == "" || !e.BoxWriteEnabled || researchForceRelay
+	// Selects the research OUTCOME's landing=none variant (issue #5130): scoped
+	// to ContractVerdict because the butler is AdviseOnly too but posts no
+	// verdict.
+	g["RESEARCH_VERDICT_RELAYED"] = verdictContract(e.descriptor())
 
-	// Selects the research OUTCOME's landing=none variant (issue #5130): the
-	// union of the paths that render a relayed research-verdict fragment,
-	// scoped to ContractVerdict because the butler is AdviseOnly too but
-	// posts no verdict.
-	g["RESEARCH_VERDICT_RELAYED"] = verdictContract(e.descriptor()) && g["ISSUE_TRACKER_RELAYED"]
-
-	// On a work dispatch the relay activates on a read-only Box; a writable
-	// Box keeps the direct gh/fj path, forked further on itFiler.
-	// researchForceRelay (ADR 0041, #2593) activates the relay
-	// unconditionally, so it has to be checked first. So does a tracker the
-	// Box cannot write (InBoxUnwritableTracker), which has no direct path
-	// (issue #6354).
-	filerFileRelay := false
-	filerFileDirectGH := false
-	filerFileDirectForgejo := false
-	if e.FilerEnabled {
-		if researchForceRelay || unwritable {
-			filerFileRelay = true
-		} else if !e.BoxWriteEnabled {
-			filerFileRelay = true
-		} else if itFiler == "FORGEJO" {
-			filerFileDirectForgejo = true
-		} else {
-			filerFileDirectGH = true
-		}
-	}
+	// The Filer never files directly: with it on the roster, every filing goes
+	// through the host relay (ADR 0041).
+	filerFileRelay := e.FilerEnabled
 	g["FILER_FILE_RELAY"] = filerFileRelay
 	// The relay mechanism is kind-agnostic, but the label prose it selects
 	// isn't (filer-label-relay*.md), so each kind gets its own gate, named by
@@ -135,11 +94,6 @@ func trackerGates(e Env) map[string]bool {
 		g[kd.FilerRelayGate] = false
 	}
 	g[e.descriptor().FilerRelayGate] = filerFileRelay
-	g["FILER_FILE_DIRECT_GH"] = filerFileDirectGH
-	g["FILER_FILE_DIRECT_FORGEJO"] = filerFileDirectForgejo
-
-	// file-issues-direct.md renders whenever either direct fork is on.
-	g["FILER_FILE_DIRECT_ANY"] = filerFileDirectGH || filerFileDirectForgejo
 
 	// At most one of these is ever on, picked from ISSUE_TRACKER x CODE_FORGE x
 	// LOCAL_ISSUE_REFERENCE. Closes is on only when the forge shares the

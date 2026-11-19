@@ -9,7 +9,6 @@
 }:
 let
   inherit (fixtures)
-    harness
     promptHarness
     fixPromptHarness
     researchPromptHarness
@@ -2244,64 +2243,6 @@ in
       "mkHarness.nix must throw when the shared `filerPrompt` template carries a forbidden marker ('gh issue create') as literal text";
     pkgs.runCommand "build-time-reject-forbidden-marker-filer-template" { } "touch $out";
 
-  # Build-time research-direct-file check (issue #2595, ADR 0041, "Research
-  # filing is host-mediated and relay-only"): a research prompt must never
-  # statically carry a FILER_FILE_DIRECT*-gated fragment's envsubst
-  # placeholder, since research issues are always filed through the
-  # SPINDRIFT_ISSUE_INTENT relay, never `gh`/`fj` straight from the agent.
-  build-time-reject-research-direct-file-prompt =
-    let
-      inherit (pkgs.lib) assertMsg;
-      broken = builtins.tryEval (
-        (import ../../lib/mkHarness.nix {
-          inherit nixpkgs system;
-          packages = p: [ p.hello ];
-          researchPrompt = "some research prompt text with \${FILER_FILE_DIRECT_STEP} embedded";
-        }).spindrift
-      );
-    in
-    assert assertMsg (!broken.success)
-      "mkHarness.nix must throw when researchPrompt statically carries a direct-file fragment's \${VAR} placeholder (ADR 0041)";
-    pkgs.runCommand "build-time-reject-research-direct-file-prompt" { } "touch $out";
-
-  # Same as above for researchSelfContainedPrompt (issue #2202): #2595's
-  # acceptance criteria names both research prompt kinds, and the two are
-  # separately hand-keyed entries in lib/mkHarness.nix's
-  # researchPromptContentByName, so a check that only overrides
-  # researchPrompt would never notice the self-contained entry dropped.
-  build-time-reject-research-direct-file-self-contained-prompt =
-    let
-      inherit (pkgs.lib) assertMsg;
-      broken = builtins.tryEval (
-        (import ../../lib/mkHarness.nix {
-          inherit nixpkgs system;
-          packages = p: [ p.hello ];
-          researchSelfContainedPrompt = "some self-contained research prompt text with \${FILER_FILE_DIRECT_STEP} embedded";
-        }).spindrift
-      );
-    in
-    assert assertMsg (!broken.success)
-      "mkHarness.nix must throw when researchSelfContainedPrompt statically carries a direct-file fragment's \${VAR} placeholder (ADR 0041)";
-    pkgs.runCommand "build-time-reject-research-direct-file-self-contained-prompt" { } "touch $out";
-
-  # The "not triggered" counterpart: the real, unmodified default templates
-  # must build clean today, since lib/fragments.nix's DIRECT-gated rows never
-  # wire their var into either research prompt template. Proves the current
-  # configuration passes, not only the deliberately-broken fixtures above.
-  build-time-research-direct-file-not-triggered =
-    let
-      inherit (pkgs.lib) assertMsg;
-      ok = builtins.tryEval (
-        (import ../../lib/mkHarness.nix {
-          inherit nixpkgs system;
-          packages = p: [ p.hello ];
-        }).spindrift
-      );
-    in
-    assert assertMsg ok.success
-      "mkHarness.nix must not throw for the real, unmodified research prompt templates -- neither carries a direct-file fragment's \${VAR} placeholder today (ADR 0041)";
-    pkgs.runCommand "build-time-research-direct-file-not-triggered" { } "touch $out";
-
   # Anti-drift registry check (issue #2709, slice 1): before
   # lib/prompt-coverage.nix existed, caveman coverage was decided by hand per
   # template, so a prompt kind added later would silently default to
@@ -2504,47 +2445,6 @@ in
       touch $out
     '';
 
-  # Regression test for lib/mkHarness.nix's isDirectFileGate (issue #2595
-  # review finding A): its two call sites once spelled the gate test
-  # differently, so a future FILER_FILE_DIRECT_GITLAB would reach one and
-  # miss the other. Reads back the harness' own computed rows, and uses the
-  # inert skill-preamble.md so a leak fails here, not as a marker error.
-  mkharness-read-only-reachable-fragment-rows-excludes-hypothetical-direct-file-gate =
-    let
-      inherit (pkgs.lib) assertMsg;
-      syntheticGate = "FILER_FILE_DIRECT_GITLAB";
-      vocabulary = import ../../lib/gate-vocabulary.nix;
-      syntheticRow = {
-        gate = syntheticGate;
-        fragment = "skill-preamble.md";
-        var = "FILER_FILE_DIRECT_GITLAB_STEP";
-      };
-      testHarness = import ../../lib/mkHarness.nix {
-        inherit nixpkgs system;
-        packages = p: [ p.hello ];
-        fragments = (import ../../lib/fragments.nix) ++ [ syntheticRow ];
-        # The synthetic gate is hypothetical, so the Gate vocabulary has to be
-        # told about it or mkHarness rejects the fixture.
-        gateVocabulary = vocabulary // {
-          gates = vocabulary.gates // {
-            ${syntheticGate} = "hypothetical direct-file gate (fixture)";
-          };
-        };
-      };
-      directRows = testHarness.internals.directFileFragmentRows;
-      readOnlyReachableRows = testHarness.internals.readOnlyReachableFragmentRows;
-      leakedIntoReadOnlyReachable = builtins.filter (
-        row: row.gate == syntheticGate
-      ) readOnlyReachableRows;
-    in
-    assert assertMsg (builtins.any (row: row.gate == syntheticGate) directRows)
-      "directFileFragmentRows must pick up a synthetic ${syntheticGate}-gated row via the shared hasInfix \"FILER_FILE_DIRECT\" predicate -- fixture is broken";
-    assert assertMsg (leakedIntoReadOnlyReachable == [ ])
-      "readOnlyReachableFragmentRows must exclude a synthetic ${syntheticGate}-gated row the same way it excludes FILER_FILE_DIRECT_GH/_FORGEJO/_ANY (lib/mkHarness.nix's isDirectFileGate predicate), but it leaked through";
-    pkgs.runCommand "mkharness-read-only-reachable-fragment-rows-excludes-hypothetical-direct-file-gate"
-      { }
-      "touch $out";
-
   # Grep pin (issue #3227): covers research-prompt.md. See
   # mkAdviseOnlyEnumerationDedupCheck above for the contract this pins.
   mkharness-prompt-research-advise-only-enumeration-dedup = mkAdviseOnlyEnumerationDedupCheck {
@@ -2560,37 +2460,6 @@ in
         name = "mkharness-prompt-research-self-contained-advise-only-enumeration-dedup";
         file = "research-self-contained-prompt.md";
       };
-
-  # Anti-drift check for lib/mkHarness.nix's researchPromptContentByName
-  # (issue #2595 review finding B): it hand-keys exactly the research prompt
-  # names its direct-file scan covers, so a third research*-prompt.md would
-  # silently miss the scan. Compares the real on-disk directory against the
-  # harness' own computed keys, so either direction fails loudly.
-  mkharness-research-prompt-content-by-name-covers-every-research-prompt-file =
-    let
-      inherit (pkgs.lib)
-        assertMsg
-        concatStringsSep
-        filterAttrs
-        hasPrefix
-        hasSuffix
-        ;
-      promptsDir = ../../templates/default/prompts;
-      dirEntries = builtins.readDir promptsDir;
-      onDiskResearchPromptFiles = builtins.attrNames (
-        filterAttrs (
-          name: type: type == "regular" && hasPrefix "research" name && hasSuffix "-prompt.md" name
-        ) dirEntries
-      );
-      coveredNames = builtins.attrNames harness.internals.researchPromptContentByName;
-      sort = builtins.sort (a: b: a < b);
-    in
-    assert assertMsg (onDiskResearchPromptFiles != [ ])
-      "mkharness-research-prompt-content-by-name-covers-every-research-prompt-file: expected at least one research*-prompt.md file under templates/default/prompts/, got none -- fixture is vacuous";
-    assert assertMsg (sort coveredNames == sort onDiskResearchPromptFiles)
-      "lib/mkHarness.nix's researchPromptContentByName must cover exactly every research*-prompt.md file under templates/default/prompts/ (issue #2595 review finding B); on disk: [${concatStringsSep ", " (sort onDiskResearchPromptFiles)}], covered: [${concatStringsSep ", " (sort coveredNames)}]";
-    pkgs.runCommand "mkharness-research-prompt-content-by-name-covers-every-research-prompt-file" { }
-      "touch $out";
 
   # Issue #3227: research-prompt.md's EXPLORE section has the researcher run
   # the repo's own suite, a check gate that must still end in a printed
@@ -2735,7 +2604,6 @@ in
       byFile = file: builtins.filter (e: e.file == file) kindPrompts;
       stub = builtins.head (byFile "stub-prompt.md");
       warning = builtins.head stubbed.internals.deprecatedFragmentVarWarnings;
-      researchNames = builtins.attrNames stubbed.internals.researchPromptContentByName;
       markerChecks = pkgs.lib.mapAttrsToList (
         param: file:
         let
@@ -2758,15 +2626,6 @@ in
     assert assertMsg (
       builtins.length (byFile "issue-prompt.md") == 1
     ) "the real rows' prompts must still be baked alongside the stub";
-    assert assertMsg (
-      !(builtins.elem "stub-prompt.md" researchNames)
-    ) "a non-verdict row's prompt must stay out of researchPromptContentByName";
-    assert assertMsg
-      (builtins.all (f: builtins.elem f researchNames) [
-        "research-prompt.md"
-        "research-self-contained-prompt.md"
-      ])
-      "researchPromptContentByName must cover both research prompts, got: ${builtins.toJSON researchNames}";
     assert builtins.all (x: x) markerChecks;
     pkgs.runCommand "mkharness-kind-row-prompts-baked-and-wired" { } ''
       d=${stubbed.internals.promptDir}

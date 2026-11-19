@@ -47,7 +47,7 @@ func readonlyShimDir(home string) string {
 // absent from PATH is skipped by Install, so a github Box with no fj is fine.
 func (r *boxRun) installReadonlyGuards() error {
 	env, d := r.env, r.d
-	if env.BoxWriteEnabled || env.SelfContained {
+	if env.SelfContained {
 		return nil
 	}
 	rows, err := promptassembly.LoadForbiddenMarkersFile(r.in.ForbiddenMarkersFile)

@@ -40,8 +40,6 @@ func fragLocalTracker(e *Env) {
 	e.TrackerAxisWrite = ""
 }
 
-func fragReadOnly(e *Env) { e.BoxWriteEnabled = false }
-
 func fragResearch(e *Env) { e.DispatchKind = "research" }
 
 func fragSocket(e *Env) { e.SignalCarrier = "socket" }
@@ -186,12 +184,10 @@ func TestAssembleIssueReadSelection(t *testing.T) {
 	}
 }
 
-// The research verdict is posted by the Box only on a writable tracker; every
-// read-only or local run relays it over the log or socket carrier.
+// The research verdict is relayed over the log or socket carrier on every
+// tracker; the tracker picks only the folder file.
 func TestAssembleResearchVerdictSelection(t *testing.T) {
 	assertSelection(t, []gatedRow{
-		{"ISSUE_TRACKER_GITHUB_READWRITE", "RV_GITHUB"},
-		{"ISSUE_TRACKER_FORGEJO_READWRITE", "RV_FORGEJO"},
 		{"ISSUE_TRACKER_GITHUB_READONLY_LOG", "RV_GITHUB_RO_LOG"},
 		{"ISSUE_TRACKER_GITHUB_READONLY_SOCKET", "RV_GITHUB_RO_SOCKET"},
 		{"ISSUE_TRACKER_FORGEJO_READONLY_LOG", "RV_FORGEJO_RO_LOG"},
@@ -199,12 +195,10 @@ func TestAssembleResearchVerdictSelection(t *testing.T) {
 		{"ISSUE_TRACKER_LOCAL_LOG", "RV_LOCAL_LOG"},
 		{"ISSUE_TRACKER_LOCAL_SOCKET", "RV_LOCAL_SOCKET"},
 	}, targetPrompt, []selectionCase{
-		{"github read-write", []func(*Env){fragResearch}, []string{"RV_GITHUB"}},
-		{"github read-only", []func(*Env){fragResearch, fragReadOnly}, []string{"RV_GITHUB_RO_LOG"}},
-		{"github read-only socket", []func(*Env){fragResearch, fragReadOnly, fragSocket}, []string{"RV_GITHUB_RO_SOCKET"}},
-		{"forgejo read-write", []func(*Env){fragResearch, fragForgejoTracker}, []string{"RV_FORGEJO"}},
-		{"forgejo read-only", []func(*Env){fragResearch, fragForgejoTracker, fragReadOnly}, []string{"RV_FORGEJO_RO_LOG"}},
-		{"forgejo read-only socket", []func(*Env){fragResearch, fragForgejoTracker, fragReadOnly, fragSocket}, []string{"RV_FORGEJO_RO_SOCKET"}},
+		{"github", []func(*Env){fragResearch}, []string{"RV_GITHUB_RO_LOG"}},
+		{"github socket", []func(*Env){fragResearch, fragSocket}, []string{"RV_GITHUB_RO_SOCKET"}},
+		{"forgejo", []func(*Env){fragResearch, fragForgejoTracker}, []string{"RV_FORGEJO_RO_LOG"}},
+		{"forgejo socket", []func(*Env){fragResearch, fragForgejoTracker, fragSocket}, []string{"RV_FORGEJO_RO_SOCKET"}},
 		{"local", []func(*Env){fragResearch, fragLocalTracker}, []string{"RV_LOCAL_LOG"}},
 		{"local socket", []func(*Env){fragResearch, fragLocalTracker, fragSocket}, []string{"RV_LOCAL_SOCKET"}},
 		{"jira", []func(*Env){fragResearch, fragJiraTracker}, []string{"RV_GITHUB_RO_LOG"}},
@@ -212,49 +206,37 @@ func TestAssembleResearchVerdictSelection(t *testing.T) {
 	})
 }
 
-// The research OUTCOME step reports the verdict's landing as a posted comment
-// URL only where the Box posts it itself; a relayed verdict (read-only, local,
-// or any run with the Filer) lands as none, and the carrier picks whether the
-// relay is acknowledged.
+// The research OUTCOME step reports the verdict's landing as none: the Box
+// never posts the comment, and the carrier picks whether the relay is
+// acknowledged.
 func TestAssembleResearchOutcomeLandingSelection(t *testing.T) {
 	rows := []gatedRow{
-		{"ISSUE_TRACKER_GITHUB_READWRITE", "OL_GITHUB"},
-		{"ISSUE_TRACKER_FORGEJO_READWRITE", "OL_FORGEJO"},
 		{"RESEARCH_VERDICT_RELAYED_LOG", "OL_RELAYED_LOG"},
 		{"RESEARCH_VERDICT_RELAYED_SOCKET", "OL_RELAYED_SOCKET"},
 	}
 	assertSelection(t, rows, targetPrompt, []selectionCase{
-		{"github read-write", []func(*Env){fragResearch}, []string{"OL_GITHUB"}},
-		{"github read-write with the Filer", []func(*Env){fragResearch, fragFiler}, []string{"OL_RELAYED_LOG"}},
-		{"github read-write with the Filer on the socket", []func(*Env){fragResearch, fragFiler, fragSocket}, []string{"OL_RELAYED_SOCKET"}},
-		{"github read-only", []func(*Env){fragResearch, fragReadOnly}, []string{"OL_RELAYED_LOG"}},
+		{"github", []func(*Env){fragResearch}, []string{"OL_RELAYED_LOG"}},
+		{"github with the Filer", []func(*Env){fragResearch, fragFiler}, []string{"OL_RELAYED_LOG"}},
+		{"github with the Filer on the socket", []func(*Env){fragResearch, fragFiler, fragSocket}, []string{"OL_RELAYED_SOCKET"}},
 		{"local", []func(*Env){fragResearch, fragLocalTracker}, []string{"OL_RELAYED_LOG"}},
 		{"jira", []func(*Env){fragResearch, fragJiraTracker}, []string{"OL_RELAYED_LOG"}},
 		{"jira with the Filer", []func(*Env){fragResearch, fragJiraTracker, fragFiler}, []string{"OL_RELAYED_LOG"}},
-		{"forgejo read-write", []func(*Env){fragResearch, fragForgejoTracker}, []string{"OL_FORGEJO"}},
-		{"forgejo read-only", []func(*Env){fragResearch, fragForgejoTracker, fragReadOnly}, []string{"OL_RELAYED_LOG"}},
+		{"forgejo", []func(*Env){fragResearch, fragForgejoTracker}, []string{"OL_RELAYED_LOG"}},
 	})
 }
 
-// The blocked-run issue comment is posted by the Box only on a writable
-// github or forgejo tracker; read-only and local runs let the launcher post
-// it, and a tracker with no client (jira read-write) says so instead.
+// The blocked-run issue comment is never posted by the Box: the launcher
+// posts it from the outcome line's note=, and the tracker picks the wording.
 func TestAssembleBlockedCommentSelection(t *testing.T) {
 	assertSelection(t, []gatedRow{
-		{"ISSUE_TRACKER_GITHUB_READWRITE", "BC_GITHUB"},
-		{"ISSUE_TRACKER_FORGEJO_READWRITE", "BC_FORGEJO"},
 		{"ISSUE_TRACKER_GITHUB_READONLY", "BC_GITHUB_RO"},
 		{"ISSUE_TRACKER_FORGEJO_READONLY", "BC_FORGEJO_RO"},
 		{"ISSUE_TRACKER_LOCAL", "BC_LOCAL"},
-		{"ISSUE_TRACKER_UNWRITABLE_READWRITE", "BC_UNWRITABLE"},
 	}, targetPrompt, []selectionCase{
-		{"github read-write", nil, []string{"BC_GITHUB"}},
-		{"github read-only", []func(*Env){fragReadOnly}, []string{"BC_GITHUB_RO"}},
+		{"github", nil, []string{"BC_GITHUB_RO"}},
 		{"local", []func(*Env){fragLocalTracker}, []string{"BC_LOCAL"}},
-		{"jira read-write", []func(*Env){fragJiraTracker}, []string{"BC_UNWRITABLE"}},
-		{"jira read-only", []func(*Env){fragJiraTracker, fragReadOnly}, []string{"BC_GITHUB_RO"}},
-		{"forgejo read-write", []func(*Env){fragForgejoTracker}, []string{"BC_FORGEJO"}},
-		{"forgejo read-only", []func(*Env){fragForgejoTracker, fragReadOnly}, []string{"BC_FORGEJO_RO"}},
+		{"jira", []func(*Env){fragJiraTracker}, []string{"BC_GITHUB_RO"}},
+		{"forgejo", []func(*Env){fragForgejoTracker}, []string{"BC_FORGEJO_RO"}},
 	})
 }
 
@@ -301,15 +283,13 @@ func TestAssembleGitForgeBlockedSelection(t *testing.T) {
 	})
 }
 
-// The Filer's own prompt files through the tracker's client when the Box may
-// write, and through the host-relayed intent when it may not. Its dedup
-// follows whether a search reaches the Box: the socket's issue-search verb on
-// github and forgejo, local's own folder search; jira and every tracker under
-// the log carrier run no search at all (issues #5233, #6895).
+// The Filer's own prompt files through the host-relayed intent on every
+// tracker. Its dedup follows whether a search reaches the Box: the socket's
+// issue-search verb on github and forgejo, local's own folder search; jira and
+// every tracker under the log carrier run no search at all (issues #5233,
+// #6895).
 func TestAssembleFilerPromptSelection(t *testing.T) {
 	assertSelection(t, []gatedRow{
-		{"FILER_FILE_DIRECT_GH", "FILE_GITHUB"},
-		{"FILER_FILE_DIRECT_FORGEJO", "FILE_FORGEJO"},
 		{"FILER_FILE_RELAY_LOG", "FILE_RELAY_LOG"},
 		{"FILER_FILE_RELAY_SOCKET", "FILE_RELAY_SOCKET"},
 		{"ISSUE_TRACKER_GITHUB_SEARCHABLE", "DEDUP_GITHUB"},
@@ -317,22 +297,19 @@ func TestAssembleFilerPromptSelection(t *testing.T) {
 		{"ISSUE_TRACKER_LOCAL", "DEDUP_LOCAL"},
 		{"ISSUE_TRACKER_UNSEARCHABLE", "DEDUP_NONE"},
 	}, targetFiler, []selectionCase{
-		{"github read-write", []func(*Env){fragSocket, fragIssueSearch}, []string{"FILE_GITHUB", "DEDUP_GITHUB"}},
-		{"github read-write log", nil, []string{"FILE_GITHUB", "DEDUP_NONE"}},
-		{"github read-only", []func(*Env){fragReadOnly}, []string{"FILE_RELAY_LOG", "DEDUP_NONE"}},
-		{"github read-only socket", []func(*Env){fragReadOnly, fragSocket, fragIssueSearch}, []string{"FILE_RELAY_SOCKET", "DEDUP_GITHUB"}},
-		{"forgejo read-write", []func(*Env){fragForgejoTracker, fragSocket, fragIssueSearch}, []string{"FILE_FORGEJO", "DEDUP_FORGEJO"}},
-		{"forgejo read-write log", []func(*Env){fragForgejoTracker}, []string{"FILE_FORGEJO", "DEDUP_NONE"}},
+		{"github socket", []func(*Env){fragSocket, fragIssueSearch}, []string{"FILE_RELAY_SOCKET", "DEDUP_GITHUB"}},
+		{"github log", nil, []string{"FILE_RELAY_LOG", "DEDUP_NONE"}},
+		{"forgejo socket", []func(*Env){fragForgejoTracker, fragSocket, fragIssueSearch}, []string{"FILE_RELAY_SOCKET", "DEDUP_FORGEJO"}},
+		{"forgejo log", []func(*Env){fragForgejoTracker}, []string{"FILE_RELAY_LOG", "DEDUP_NONE"}},
 		{"jira", []func(*Env){fragJiraTracker}, []string{"FILE_RELAY_LOG", "DEDUP_NONE"}},
 		{"jira socket", []func(*Env){fragJiraTracker, fragSocket}, []string{"FILE_RELAY_SOCKET", "DEDUP_NONE"}},
-		{"local", []func(*Env){fragLocalTracker}, []string{"FILE_GITHUB", "DEDUP_LOCAL"}},
+		{"local", []func(*Env){fragLocalTracker}, []string{"FILE_RELAY_LOG", "DEDUP_LOCAL"}},
 	})
 }
 
-// The relay's stated reason follows the tracker, not the Box's access mode: a
-// read-write Box on a tracker with no in-Box client never claims a read-only
-// token, while a read-only Box on a writable tracker still does, on both
-// signal carriers (issue #6354).
+// The relay's stated reason follows the tracker: a tracker with no in-Box
+// client never claims a read-only token, while a writable one still does, on
+// both signal carriers (issue #6354).
 func TestAssembleFilerRelayReasonSelection(t *testing.T) {
 	for _, target := range []struct {
 		name string
@@ -343,26 +320,23 @@ func TestAssembleFilerRelayReasonSelection(t *testing.T) {
 				{"ISSUE_TRACKER_WRITABLE", "FRR_READONLY"},
 				{"ISSUE_TRACKER_UNWRITABLE", "FRR_UNWRITABLE"},
 			}, target.to, []selectionCase{
-				{"jira read-write log", []func(*Env){fragJiraTracker}, []string{"FRR_UNWRITABLE"}},
-				{"jira read-write socket", []func(*Env){fragJiraTracker, fragSocket}, []string{"FRR_UNWRITABLE"}},
-				{"github read-only log", []func(*Env){fragReadOnly}, []string{"FRR_READONLY"}},
-				{"github read-only socket", []func(*Env){fragReadOnly, fragSocket}, []string{"FRR_READONLY"}},
+				{"jira log", []func(*Env){fragJiraTracker}, []string{"FRR_UNWRITABLE"}},
+				{"jira socket", []func(*Env){fragJiraTracker, fragSocket}, []string{"FRR_UNWRITABLE"}},
+				{"github log", nil, []string{"FRR_READONLY"}},
+				{"github socket", []func(*Env){fragSocket}, []string{"FRR_READONLY"}},
 			})
 		})
 	}
 }
 
-// The work prompt's FILE ISSUES step forks the same way: a writable Box files
-// directly and reads back the URLs, a read-only one queues the findings.
+// The work prompt's FILE ISSUES step queues the findings through the relay.
 func TestAssembleFileIssuesStepSelection(t *testing.T) {
 	assertSelection(t, []gatedRow{
-		{"FILER_FILE_DIRECT_ANY", "FILE_ISSUES_DIRECT"},
 		{"FILER_FILE_RELAY_LOG", "FILE_ISSUES_RELAY_LOG"},
 		{"FILER_FILE_RELAY_SOCKET", "FILE_ISSUES_RELAY_SOCKET"},
 	}, targetPrompt, []selectionCase{
-		{"read-write", []func(*Env){fragFiler}, []string{"FILE_ISSUES_DIRECT"}},
-		{"read-only", []func(*Env){fragFiler, fragReadOnly}, []string{"FILE_ISSUES_RELAY_LOG"}},
-		{"read-only socket", []func(*Env){fragFiler, fragReadOnly, fragSocket}, []string{"FILE_ISSUES_RELAY_SOCKET"}},
+		{"log", []func(*Env){fragFiler}, []string{"FILE_ISSUES_RELAY_LOG"}},
+		{"socket", []func(*Env){fragFiler, fragSocket}, []string{"FILE_ISSUES_RELAY_SOCKET"}},
 		{"filer off", nil, nil},
 	})
 }
