@@ -1,5 +1,28 @@
 # Migration Guide
 
+## The native claude Strategy is gone: claude runs through its Connector (issue #6799)
+
+claude's host half is its Connector for every Consumer; the native Strategy is
+deleted. See [Driver rows on a
+Connector](docs/reference.md#driver-rows-on-a-connector).
+
+What changed for a Consumer:
+
+- **The claude row is always rendered.** `mkHarness` uses your
+  `driverRows.claude` if set, else the batteries flake's, whichever Driver is
+  selected. A host that cannot evaluate its module fails evaluation naming the
+  row; a Connector that fails to load fails the run with `DRIVER "claude": ...`,
+  with no fallback. A `driverRows.claude` override without a `module` (for
+  example one set to the core entry) used to be admitted but now fails
+  evaluation instead of falling back to the batteries row; set a row with a
+  `module`, or drop the override.
+- **`shadow` and `primary` on claude are refused.** With no native Strategy
+  there is nothing to compare against or replace, so
+  `spindrift.connectors.claude.shadow` and `.primary`, and `shadowDrivers` or
+  `primaryDrivers` naming `claude`, now fail evaluation. Delete them.
+- **claude `--resume` no longer renders on fix passes.** A resume falls back to
+  the cold-context fix flow, with no error (tracked as #6824).
+
 ## The native jira adapter is gone: jira runs through its Connector (issue #6858)
 
 `ISSUE_TRACKER=jira` is built from the jira Connector alone; the native jira
