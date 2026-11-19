@@ -1,5 +1,6 @@
 # Plain-Nix entry point of the forgejo Connector (ADR 0073): the Forgejo forge
-# half (branch primitives, PR reads and PR writes over REST), compiled to a
+# half (branch primitives, PR reads and PR writes over REST) and the tracker
+# half (issue reads, label edits, comments, filing and closing), compiled to a
 # wasip1 reactor against the SDK. `core` is handed in, so the Connector
 # evaluates against whichever core the caller holds.
 {
