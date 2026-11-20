@@ -21,7 +21,6 @@ func fakeGitlabRow() backendkit.Strategy {
 			ValidAsTracker:   true,
 			ValidAsCodeForge: true,
 			TokenEnvVar:      "GITLAB_TOKEN",
-			BoxTokenEnvVar:   "BOX_GITLAB_TOKEN",
 			DoctorTokenHint:  "GITLAB_TOKEN",
 			DoctorSlugHint:   "GITLAB_BASE_URL",
 		},

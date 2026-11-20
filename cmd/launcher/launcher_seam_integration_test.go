@@ -13,7 +13,6 @@ import (
 	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
@@ -144,10 +143,8 @@ func checkRuntimeArgv(doc *inputdoc.Document, kind string, argv []string) []stri
 	// Every Box is read-only and holds no forge credential (issue #6900), so the
 	// forge token names BOX_ENV_VARS lists never reach its argv.
 	forgeTokens := map[string]bool{}
-	for _, b := range backend.Registry {
-		if b.BoxTokenEnvVar != "" {
-			forgeTokens[b.TokenEnvVar], forgeTokens[b.BoxTokenEnvVar] = true, true
-		}
+	for _, name := range []string{"GH_TOKEN", "FORGEJO_TOKEN"} {
+		forgeTokens[name] = true
 	}
 	for _, name := range strings.Fields(doc.Artifacts.Shared.BoxEnvVars.String()) {
 		got, ok := env[name]

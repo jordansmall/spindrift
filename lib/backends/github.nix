@@ -8,7 +8,6 @@
   validAsCodeForge = true;
   connectorOnly = true;
   tokenEnvVar = "GH_TOKEN";
-  boxTokenEnvVar = "BOX_GH_TOKEN";
   outboxRelayCapable = true;
   relayCapable = true;
   hostPostingCapable = true;

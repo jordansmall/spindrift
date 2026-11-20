@@ -1187,7 +1187,6 @@ rec {
         (optional "validAsCodeForge" "ValidAsCodeForge" false)
         (optional "connectorOnly" "ConnectorOnly" false)
         (optional "tokenEnvVar" "TokenEnvVar" "")
-        (optional "boxTokenEnvVar" "BoxTokenEnvVar" "")
         (optional "doctorTokenHint" "DoctorTokenHint" "")
         (optional "doctorSlugHint" "DoctorSlugHint" "")
         (optional "hostMediatedRemote" "HostMediatedRemote" false)
@@ -1209,13 +1208,12 @@ rec {
       # A row attribute outside this set is a misspelling, not a new fact, and
       # must fail the build rather than render as if the field were never set.
       # goVar names the generated var and is not a Descriptor field; knobs are
-      # folded into the env schema by lib/row-knobs.nix, cliPackage and
-      # validateKnobs are read by lib/mkHarness.nix, core, goTestRepoFiles and
-      # goTestBuildsOn are read by nix/checks/go.nix, not rendered here.
+      # folded into the env schema by lib/row-knobs.nix, validateKnobs is read
+      # by lib/mkHarness.nix, core, goTestRepoFiles and goTestBuildsOn are read
+      # by nix/checks/go.nix, not rendered here.
       knownFields = [
         "goVar"
         "knobs"
-        "cliPackage"
         "validateKnobs"
         "goTestRepoFiles"
         "goTestBuildsOn"

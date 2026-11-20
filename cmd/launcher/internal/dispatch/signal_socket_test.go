@@ -552,7 +552,7 @@ func (f *fakeIssueSearcher) SearchIssues(text string, _ forge.IssueState, _ stri
 // issue and issue-search verbs still answer over the Signal socket, because
 // the host-side reader and searcher hold the credential, not the Box.
 func TestRunOnce_ReadOnlyBoxStillAnswersIssueVerbs(t *testing.T) {
-	tokenNames := []string{"GH_TOKEN", "BOX_GH_TOKEN", "FORGEJO_TOKEN", "BOX_FORGEJO_TOKEN"}
+	tokenNames := []string{"GH_TOKEN", "FORGEJO_TOKEN"}
 	for _, n := range tokenNames {
 		t.Setenv(n, "secret-"+n)
 	}
