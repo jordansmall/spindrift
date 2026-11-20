@@ -2,7 +2,7 @@ package main
 
 import "testing"
 
-// TestFilerPromptReportShapeContract pins filer-prompt.md's FILED/QUEUED
+// TestFilerPromptReportShapeContract pins filer-prompt.md's QUEUED
 // report-shape prose (issue #3726 finding 2): QUEUED must cover both signal
 // carriers — a SPINDRIFT_ISSUE_INTENT marker line under the log carrier, and
 // an accepted `driver-exec signal issue-intent` call under the socket

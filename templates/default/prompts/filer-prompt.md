@@ -90,17 +90,15 @@ Output — final message exactly this shape, one line per finding you were
 given:
 
 ```
-FILED <url> — <title>
 QUEUED — <title>
 SKIPPED (duplicate of <url>) — <title>
 FAILED — <title>: <reason>
 ```
 
-`FILED <url>` is for a direct issue-creation call; `QUEUED` is for an
-intent you handed to the launcher's relay — a `SPINDRIFT_ISSUE_INTENT`
-line under the `log` carrier, or a `driver-exec signal issue-intent` call
-the socket accepted — whose issue isn't filed until the launcher relays
-it, so no URL is known yet.
+`QUEUED` is for an intent you handed to the launcher's relay — a
+`SPINDRIFT_ISSUE_INTENT` line under the `log` carrier, or a `driver-exec
+signal issue-intent` call the socket accepted — whose issue isn't filed
+until the launcher relays it, so no URL is known yet.
 
 If you were given no findings, or every finding was skipped, output exactly:
 
