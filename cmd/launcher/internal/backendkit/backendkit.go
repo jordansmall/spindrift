@@ -292,10 +292,9 @@ func ForgeReadsThroughConnector(name string, primary bool) bool {
 }
 
 // TrackerReadsThroughConnector reports whether the issue tracker of the
-// backend row named name reads through its Connector: the adapter routes it.
-// A primary forgejo row switches its Code Forge alone, so its tracker stays
-// native.
-func TrackerReadsThroughConnector(name string) bool {
+// backend row named name reads through its Connector: the row is primary, or
+// the adapter routes a non-shadow row itself.
+func TrackerReadsThroughConnector(name string, primary bool) bool {
 	strat, _ := ByName(name)
-	return strat.ConnectorRouted
+	return primary || strat.ConnectorRouted
 }
