@@ -2690,9 +2690,8 @@ directly) has none. Under a `GH_HOST` other than `github.com` the row is
 dropped, since its Routes pin `api.github.com`, so GitHub Enterprise is not
 served until the Connector's Routes cover it, and no connector token is read.
 And a shadow row has no native adapter left to be compared against, so it fails
-every call too; drop `shadow` from it. The one `gh` exec core keeps is the
-Box's open-PR query, which runs in the Box with the Box's own `gh` (spec
-#6757). The ADR 0073 migration window is closed and its all-or-none rule is in
+every call too; drop `shadow` from it. Core runs no `gh` at all: the Box's
+open-PR question is answered by the Launcher (issue #6902). The ADR 0073 migration window is closed and its all-or-none rule is in
 force: the Bundle registers no native network backend, and a Go test fails if
 it registers one, except forgejo's native forge and tracker, a pinned exception
 until #6868 and #7122 delete them. The Connector is held to the tracker read
@@ -4196,7 +4195,7 @@ Target repos.
         spindrift = {
           # Minimal toolchain — shared utilities only.
           # The Target repo's own devShell drives the real build/test commands.
-          infra.image.packages = p: [ p.git p.gh p.gnused ];
+          infra.image.packages = p: [ p.git p.gnused ];
 
           agents.prompt = builtins.readFile ./prompts/issue-prompt.md;
 
@@ -4260,9 +4259,9 @@ apps also read an optional `harness.<driver>.env` after `harness.env`; see
 [Several Drivers side by side](#several-drivers-side-by-side).
 
 A secret knob is any knob declared `secret = true` in `lib/env-schema.nix`
-or on a backend row in `lib/backends/` — `GH_TOKEN`, `BOX_GH_TOKEN`,
+or on a backend row in `lib/backends/` — `GH_TOKEN`,
 `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENCODE_AUTH_CONTENT`,
-each pi Provider key, `JIRA_TOKEN`, `FORGEJO_TOKEN`, and `BOX_FORGEJO_TOKEN`,
+each pi Provider key, `JIRA_TOKEN`, and `FORGEJO_TOKEN`,
 among others; `spindrift --help --all` lists every one. Every secret knob
 can also be sourced from an external command instead of a plaintext value —
 **the preferred, highly encouraged way to supply secrets**, since it keeps
@@ -4317,9 +4316,8 @@ per-secret `_CMD` example above in one line. A per-secret `<SECRET>_CMD`
 With one exception (the `opencode` bullet below), the template is attempted
 only for a secret this run actually needs — e.g. `JIRA_TOKEN` only when
 `ISSUE_TRACKER=jira`, `FORGEJO_TOKEN` only when `CODE_FORGE` or
-`ISSUE_TRACKER` is `forgejo`, and never for the deprecated Box tokens `BOX_GH_TOKEN` (ADR 0016) and
-`BOX_FORGEJO_TOKEN`, which no Box reads — so an operator who doesn't use
-those features never gets an unwanted vault lookup for them.
+`ISSUE_TRACKER` is `forgejo` — so an operator who doesn't use those
+features never gets an unwanted vault lookup for them.
 The active Driver's credential is likewise the only one fetched; a
 credential outside the Driver's set is never looked up, so a vault missing
 it is never an error. This list mirrors the `credentials` rules on each
@@ -4361,17 +4359,17 @@ When a vault's naming isn't uniform, fall back to the per-secret
 | var                       | default                | meaning                                  |
 | ------------------------- | ---------------------- | ---------------------------------------- |
 | `REPO_SLUG`               | — (required unless `CODE_FORGE` and `ISSUE_TRACKER` are both `local`; baked via `forge.repoSlug`) | target repo, `owner/repo` |
-| `GH_TOKEN`                | — (required unless `CODE_FORGE` is `local` or `forgejo`, and `ISSUE_TRACKER` is not `github`) | GitHub token for `gh` inside containers (secret; env only) |
+| `GH_TOKEN`                | — (required unless `CODE_FORGE` is `local` or `forgejo`, and `ISSUE_TRACKER` is not `github`) | GitHub token the Launcher uses on the host; never reaches the Box (secret; env only) |
 | `GH_TOKEN_REFRESH_FILE`   | — (baked via `forge.ghTokenRefreshFile`) | path the launcher polls to keep `GH_TOKEN` current past an installation token's ~1h lifetime; a Connector host credential built with `tokenrefresh.Follow` re-reads it per request, though no CLI flag wires that yet ([Network Connectors](#connector-protocol)) — see [GitHub App installation token](#github-app-installation-token-recommended) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | — (one auth required)  | from `claude setup-token` (secret; env only) |
 | `ANTHROPIC_API_KEY`       | —                      | alternative to the OAuth token (secret; env only) |
 | `GIT_USER_NAME`           | host `git config`; baked via `git.user.name` | commit author name (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config); the `github` Code Forge's host-side Rebase also pins it on its throwaway clone) |
 | `GIT_USER_EMAIL`          | host `git config`; baked via `git.user.email` | commit author email (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config); the `github` Code Forge's host-side Rebase also pins it on its throwaway clone) |
-| `CODE_FORGE`              | `github` (baked)       | code-landing backend: `github` (open PR, watch CI, merge), `git` (push-only to `CODE_FORGE_REMOTE_URL`; no PR, CI-watch, or merge gate — see [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)), `local` (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network — see [ADR 0033](../docs/adr/0033-host-mediated-local-code-forge.md)), or `forgejo` (open a PR via `fj pr create`, watch the CI rollup, and merge under `MERGE_MODE` on a Forgejo/Gitea instance authenticated by `FORGEJO_TOKEN` — the second full `PRForge` backend beside `github`; see [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)) |
+| `CODE_FORGE`              | `github` (baked)       | code-landing backend: `github` (open PR, watch CI, merge), `git` (push-only to `CODE_FORGE_REMOTE_URL`; no PR, CI-watch, or merge gate — see [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)), `local` (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network — see [ADR 0033](../docs/adr/0033-host-mediated-local-code-forge.md)), or `forgejo` (open a PR through the Forgejo API, watch the CI rollup, and merge under `MERGE_MODE` on a Forgejo/Gitea instance authenticated by `FORGEJO_TOKEN` — the second full `PRForge` backend beside `github`; see [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)) |
 | `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `CODE_FORGE_ACCUMULATION_REPO_DIR` | `.spindrift/accum.git` under the launcher's working directory when `CODE_FORGE=local` (auto-created and seeded); an explicit value overrides it | host path to the bare Accumulation repo, mounted read-only into the Box and landed into host-side |
 | `BOX_FORGE_AND_ISSUE_ACCESS` | `read-only` (baked; issue #6899)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-only` is the only value, and the default: the Launcher host-mediates every write — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only). `read-write` was removed in issue #6901 and is rejected at build, dispatch, daemon start and `spindrift doctor` (see [MIGRATING.md](../MIGRATING.md)). The selection is coherence-checked against the selected forge/tracker's registry capability bits at `nix build` (Consumer eval) time (issue #2526) — the selected forge must implement bundle-relay (and host-side draft-PR-create when it has pull requests) and the selected tracker must implement host-posted comments; `local`, `github`, and `forgejo` satisfy both sides of the check today, the plain `git` forge satisfies the forge side by bundle relay alone (issue #6898), and the `jira` tracker satisfies the tracker side (paired with a `github`, `forgejo`, or `git` Code Forge, issues #6355, #6898); a Go startup gate remains only as a backstop for a runtime override past what nix already validated |
-| `BOX_FORGE_CREDENTIAL` | unset (baked via `forge.boxForgeCredential`) | DEPRECATED, no effect, and removed in issue #6902: every Box already holds no forge credential (issue #6900). Any explicit value (`forwarded` or `none`) warns at build, launch and `spindrift doctor` and changes nothing; unset it |
+| `BOX_FORGE_CREDENTIAL` | unset (baked via `forge.boxForgeCredential`) | REMOVED (issue #6902): every Box holds no forge credential (issue #6900), so there is nothing to opt in or out of. Setting it fails at build and launch; delete it (see [MIGRATING.md](../MIGRATING.md)) |
 | `BOX_SIGNAL_CARRIER`     | `socket` (per-run only; not bakeable) | transport for the three mid-run signal channels (comment, PR intent, issue intent) crossing the launcher/Box seam: `socket` (the default — routed over a launcher-owned Signal socket, see [ADR 0052](adr/0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md) and [Signal socket](#signal-socket-box_signal_carriersocket) below) or `log` (the opt-out — nonce-guarded marker lines in the Box log, as before; stays selectable through the whole 0.22 minor). Unset counts as `socket`, so it fails at launcher startup under `NETWORK_MODE=none`, and when each Dispatch starts under `no-host-loopback` where the transport needs TCP; pass `--box-signal-carrier log` there (the daemon reads `BOX_SIGNAL_CARRIER` from its own environment and forwards it to each child as that flag) |
 | `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
 | `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query (per-run only; not bakeable) |
@@ -5228,7 +5226,7 @@ credential above. Before each Pass the launcher clones every branch of the
 remote into a bare mirror under `.spindrift/mirror-*/repo.git` (re-seeded
 every Pass, removed when the launcher exits) and mounts it read-only at
 `/repo`; the Box clones that
-mirror, with no `gh auth setup-git` and no userinfo in its
+mirror, with no userinfo in its
 `CODE_FORGE_REMOTE_URL` (the launcher strips it). The Box commits, writes
 `seam.bundle` to the outbox, and prints `landing=agent/issue-N
 status=ready`; the launcher clones the remote, imports the bundle, and
@@ -6463,20 +6461,16 @@ such block and are experimental, so you select them by editing
   Record or in-flight run holding a pre-rename/transfer `html_url` errors
   instead of resolving by index; settle's late-merge sweep warns and skips it.
 
-#### In-Box forgejo tooling (`fj`)
+#### No in-Box forgejo tooling
 
-When either backend knob selects forgejo — `ISSUE_TRACKER=forgejo` or
-`CODE_FORGE=forgejo` — the image bakes [`fj`](https://codeberg.org/Cyborus/forgejo-cli)
-(forgejo-cli) onto the Box's PATH, because the forgejo backend row declares it
-as its `cliPackage`; an image selecting no such backend never carries it.
-A Box holds no forge token (issue #6900), so `fj` has nothing to authenticate
-with there and no shipped fragment tells the agent to run it (the [in-Box
-forge CLI allowlist](in-box-forge-cli.md) is empty). Every forgejo read and
-write is host-side: the launcher reads the issue, linked issues and
-duplicate searches for the Box through the Signal socket, relays its comment,
-verdict and PR intents, and opens the draft PR itself. `box` runs `fj auth
-add-key` only when a `FORGEJO_TOKEN` is present in its environment, which no
-dispatch provides now.
+The Box carries no forge CLI: the image ships neither
+[`fj`](https://codeberg.org/Cyborus/forgejo-cli) (forgejo-cli) nor `gh`, and
+`box` runs no CLI setup. A Box holds no forge token (issue #6900), and no
+shipped fragment tells the agent to run a forge CLI (the [in-Box forge CLI
+allowlist](in-box-forge-cli.md) is empty). Every forgejo read and write is
+host-side: the launcher reads the issue, linked issues and duplicate searches
+for the Box through the Signal socket, relays its comment, verdict and PR
+intents, and opens the draft PR itself.
 
 The launcher opens the PR with a `WIP: ` title prefix, a draft it flips ready
 on CI green, then handles per [`MERGE_MODE`](#runtime-configuration) and the
@@ -6664,9 +6658,9 @@ ruleset (GitHub) or branch-protection rule (Forgejo) barring that user from
 updating the base branch. It existed because a `read-write` Box held a token
 that could merge its own green PR. Issue #6901 removed `read-write`, and no
 Box holds a forge token (issue #6900), so there is no Box actor to split from
-the launcher's and nothing for a ruleset to rule out. `BOX_GH_TOKEN` and
-`BOX_FORGEJO_TOKEN` have no reader and are removed in issue #6902; delete
-them from `harness.env`. A ruleset on the base branch is still good hygiene
+the launcher's and nothing for a ruleset to rule out. The Box token knobs
+(`BOX_GH_TOKEN`, `BOX_FORGEJO_TOKEN`) are removed (issue #6902); see
+[MIGRATING.md](../MIGRATING.md). A ruleset on the base branch is still good hygiene
 against any other writer, but spindrift no longer needs it.
 
 #### Forgejo Actions dispatch templates
@@ -6705,8 +6699,8 @@ when the repo variable is unset), since a knob env var exits 6; a job-level
    and `jq` on `PATH` (the up-front claim, the blocked-release, and the
    park-on-failure steps all talk to the Forgejo REST API through the
    `forgejo-label-swap` composite, and the research-reject close through
-   `forgejo-issue-close`, both of which shell `curl`/`jq`, because `fj` has
-   no label or issue verb and is not guaranteed on the runner). If your runner
+   `forgejo-issue-close`, both of which shell `curl`/`jq`, because no forge
+   CLI is guaranteed on the runner). If your runner
    carries a different label, edit each workflow's `runs-on: self-hosted`
    to match.
 3. **Create the `FORGEJO_TOKEN` repository secret** (Actions secret) — the
@@ -7787,11 +7781,10 @@ A Box does not clone the forge at all. Before every Pass the Launcher fetches
 the Target repo host-side with its own credential (the clone the bundle relay
 already uses) into a fresh per-Pass `.spindrift/mirror/pass-*/repo.git`,
 mounts it read-only at `/repo` on both runners, and removes it once that
-Pass's Box exits. The Box clones `/repo`, so the clone runs no `gh auth
-setup-git` and takes no forge URL, and a private repo works. The clone keeps
-a credential-free `forge` remote beside `origin` (the mount) so `gh` and `fj`
-still resolve the repo, and makes it the push default so `gh` finds the
-current branch's PR. A failed fetch fails the Pass (`seed mirror: host-side
+Pass's Box exits. The Box clones `/repo`, so the clone takes
+no forge URL, and a private repo works. The clone keeps
+a credential-free `forge` remote beside `origin` (the mount), made the push
+default, and the read-only guard points its pushurl at a decoy. A failed fetch fails the Pass (`seed mirror: host-side
 fetch of the <forge> Target repo: ...`) before the Box starts. `local`
 already worked this way, its Accumulation repo being the mirror, and so does
 the `git` forge, over one mirror re-seeded per Pass.
@@ -7809,10 +7802,10 @@ uses](in-box-forge-cli.md).
 
 #### Credential-free read-only Box
 
-A Box holds no forge credential (issue #6900), whatever the backend. The Launcher sets none of `GH_TOKEN`, `FORGEJO_TOKEN`, `BOX_GH_TOKEN`
-or `BOX_FORGEJO_TOKEN` in it.
-The Box clones the host-seeded mirror (`gh auth setup-git` and `fj auth
-add-key` never run), reads the parent and linked issues and searches for
+A Box holds no forge credential (issue #6900), whatever the backend, and the
+image ships no forge CLI (`gh`, `fj`) to use one with (issue #6902). The
+Launcher sets neither `GH_TOKEN` nor `FORGEJO_TOKEN` in it.
+The Box clones the host-seeded mirror, reads the parent and linked issues and searches for
 duplicates through host-answered [Signal
 socket](#signal-socket-box_signal_carriersocket) verbs (`driver-exec signal
 issue` and `issue-search`), and gets CI detail injected into its prompt as
@@ -7825,11 +7818,11 @@ aborts recovery as a failed `gh pr list` would. The
 `in-box-forge-cli-allowlist` check pins that no shipped template instructs a
 forge CLI.
 
-There is no Box token to provision, verify or report: the Launcher and
-`spindrift doctor` neither require nor read `BOX_GH_TOKEN` or
-`BOX_FORGEJO_TOKEN`, and the `read-only-token-<backend>`
-launch gates (issue #1950) no longer exist. `BOX_FORGE_CREDENTIAL` (issue
-#7140's opt-in) is a deprecated no-op: unset it.
+There is no Box token to provision, verify or report: `BOX_GH_TOKEN`,
+`BOX_FORGEJO_TOKEN` and `BOX_FORGE_CREDENTIAL` (issue #7140's opt-in) are
+removed knobs that fail at build and launch (issue #6902; see
+[MIGRATING.md](../MIGRATING.md)), and the `read-only-token-<backend>` launch
+gates (issue #1950) no longer exist.
 
 A Connector-backed forge host-mediates the same way when it declares
 `forge.draftPRs`: core relays the bundle in its own git and only the draft-PR
@@ -7925,29 +7918,14 @@ instead. No backend registered today leaves a real
 `git push` as its read-only hand-off; that shape exists only as latent guard
 infrastructure for a hypothetical future backend.
 
-The other three rows above get the same local-guard treatment, but via
-`gh`/`fj` shims rather than a push hook (issue #2465): on every read-only Box
-other than a [`--self-contained` research run](#self-contained-research-mode),
-`installReadonlyGuards` (`cmd/launcher/box/readonlyguards.go`) installs a
-`gh` shim and an `fj` shim, each ahead of the real binary on `PATH` and
-only when that binary is on `PATH`, independent of the push hook's own gate
-above. The `gh` shim rejects `gh pr create`, `gh pr ready`, `gh pr merge`,
-`gh issue comment`, `gh issue create`, and `gh api` calls with a mutating
-method (`POST`/`PATCH`/`PUT`/`DELETE`, including gh's implied `POST` when
-`-f`/`-F`/`--field`/`--raw-field`/`--input` is passed with no explicit method;
-`gh api graphql` is exempt, so its mutations fail at the forge), each rejection
-naming the relay that replaces it — the PR-intent line, the Launcher's own
-ready/merge once CI is green, the outcome `note=` field, or the issue-intent
-line, as appropriate. Reads (`gh issue view`, `gh pr view`, `gh run view`,
-`gh run list`, a plain `gh api` `GET`, and so on) pass through to the real `gh`
-untouched. The `fj` shim likewise rejects `fj pr create`, `fj pr ready`, `fj pr
-merge`, `fj issue comment`, and `fj issue create`. Like the push guard above,
-this is a cheap interim guard, not adversary-proof.
+The other three rows above need no local guard: the image ships no `gh` or
+`fj` (issue #6902; earlier, issue #2465, shimmed them), so the only way to
+open a PR, comment or file an issue is the relay line the prompt names.
 
-The issue-filing row has the same local guard, and the Filer always uses the
-relay under `read-only` (issue #2019; it was once gated on the since-removed
-`ORCHESTRATOR_ENABLED`, whose off state kept a degraded `gh issue create`
-attempt that failed and fell back to pasting the findings into the PR body).
+The Filer always uses the relay under `read-only` (issue #2019; it was once
+gated on the since-removed `ORCHESTRATOR_ENABLED`, whose off state kept a
+degraded `gh issue create` attempt that failed and fell back to pasting the
+findings into the PR body).
 
 This is checked by capability, not by `CODE_FORGE`/`ISSUE_TRACKER` value
 alone: the selected forge must implement bundle-relay (and host-side
@@ -8158,10 +8136,8 @@ socket-mode agent is told to run `driver-exec signal <kind>` with explicit
 fields and to read the command's exit code as the acceptance, with no nonce,
 no base64 and no "print exactly one line" wording anywhere in its prompt.
 Both variants of every fragment bake into the image, so flipping the knob
-takes no rebuild. The read-only `gh` shim's refusal messages for `gh pr
-create`, `gh issue comment` and `gh issue create` name both routes, and the
-in-Box marker gate (`box`, `cmd/launcher/box`) — the post-driver resume nudge for a `ready` outcome with
-no PR intent — asks the socket's status route under `socket` instead of
+takes no rebuild. The in-Box marker gate (`box`, `cmd/launcher/box`) — the
+post-driver resume nudge for a `ready` outcome with no PR intent — asks the socket's status route under `socket` instead of
 re-scanning the Box log.
 
 ---
@@ -8269,13 +8245,14 @@ issues on the host.
 ### Read-only Box token
 
 Under [`BOX_FORGE_AND_ISSUE_ACCESS=read-only`](#read-only-box-box_forge_and_issue_accessread-only)
-the Box holds no forge token at all (issue #6900), so there is no read-scoped
-Box token to provision: the Box clones the host-fetched mirror and reads the
-issue through host-answered Signal-socket verbs, and the Launcher applies every
-write with its own `GH_TOKEN`, scoped by the table above. A fully
-injection-steered Box cannot open a PR, push a branch, or comment, because it
-holds nothing that could. `BOX_GH_TOKEN` and `BOX_FORGEJO_TOKEN` are
-deprecated, read by nothing, and removed in issue #6902.
+the Box holds no forge token at all (issue #6900) and the image ships no forge
+CLI (issue #6902), so there is no read-scoped Box token to provision: the Box
+clones the host-fetched mirror and reads the issue through host-answered
+Signal-socket verbs, and the Launcher applies every write with its own
+`GH_TOKEN`, scoped by the table above. A fully injection-steered Box cannot
+open a PR, push a branch, or comment, because it holds nothing that could.
+`BOX_GH_TOKEN`, `BOX_FORGEJO_TOKEN` and `BOX_FORGE_CREDENTIAL` are removed
+knobs; setting one fails (see [MIGRATING.md](../MIGRATING.md)).
 
 ### GitHub App installation token (recommended)
 
@@ -8988,8 +8965,8 @@ rule: auto-promotion (below). See the **Butler** / **Chore** / **Ledger**
 glossary entries in [`CONTEXT.md`](../CONTEXT.md) for the full vocabulary.
 
 The butler Box runs the read-only posture like every Box: it holds no forge
-credential, and box installs the read-only guards (the `gh`/`fj` shims, plus
-the git push hook on a bundle-relaying forge). Treat the guards as defense in
+credential, and box installs the read-only git push hook on a
+bundle-relaying forge. Treat the guard as defense in
 depth on top of the prompt and the Filer relay; the real enforcement is that
 the Box holds nothing that could write.
 
