@@ -102,7 +102,7 @@ func bwrapSandboxRun(cfg BwrapConfig, host string, args []string, stderr io.Writ
 		fmt.Fprintln(stderr, cfg.RefuseSandbox)
 		return 1
 	}
-	return execConnectorHost("bwrap", cfg.ConnectorHost, stderr)
+	return execConnectorHost("bwrap", cfg.ConnectorHost, cfg.Record, stderr)
 }
 
 // UseBwrap makes `bwrap` on PATH this fake, scripted by cfg, until the test

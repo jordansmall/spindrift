@@ -1310,6 +1310,11 @@ driverGoTests
         # The root package's TestMain registers claude from its compiled
         # Connector (issue #6799); there is no flake beside the copied tree.
         SPINDRIFT_CLAUDE_CONNECTOR_WASM = claudeConnectorWasm;
+        # The Connector sandbox seam's tracker rows run the compiled github
+        # Connector against a fake backend: its module and Route table, which the
+        # test points at that backend's address.
+        SPINDRIFT_BACKEND_CONNECTOR_WASM = "${(connectorFor ../../connectors/github).package pkgs}/github.wasm";
+        SPINDRIFT_BACKEND_CONNECTOR_ROUTES = builtins.toJSON (connectorFor ../../connectors/github).routes;
       }
       ''
         mkdir -p src/cmd

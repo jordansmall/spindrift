@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 )
 
@@ -163,6 +164,9 @@ type Cmd struct {
 	PathDirs []string
 	// Dir is the working directory; empty inherits the parent's.
 	Dir string
+	// OwnGroup starts the child as leader of a new process group, so
+	// SignalGroup can reach it and its same-group descendants without the test.
+	OwnGroup bool
 }
 
 // Result is a finished subprocess's captured output.
@@ -208,6 +212,18 @@ func (p *Proc) Signal(tb testing.TB, sig os.Signal) {
 	}
 }
 
+// Pid is the child's process id; with Cmd.OwnGroup it is also its group id.
+func (p *Proc) Pid() int { return p.cmd.Process.Pid }
+
+// SignalGroup sends sig to the child's whole process group, as a terminal does
+// for Ctrl-C. The child must have been started with Cmd.OwnGroup.
+func (p *Proc) SignalGroup(tb testing.TB, sig syscall.Signal) {
+	tb.Helper()
+	if err := syscall.Kill(-p.cmd.Process.Pid, sig); err != nil {
+		tb.Fatalf("seamtest: signal group of %s: %v", p.cmd.Path, err)
+	}
+}
+
 // Start launches c as Run does, without waiting for it. The caller must Wait.
 func Start(tb testing.TB, c Cmd) *Proc {
 	tb.Helper()
@@ -228,6 +244,9 @@ func Start(tb testing.TB, c Cmd) *Proc {
 	}
 	p := &Proc{cmd: exec.Command(c.Bin, c.Args...)}
 	p.cmd.Dir = c.Dir
+	if c.OwnGroup {
+		p.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
 	// Later duplicates win in os/exec, so the overlay order above is the
 	// precedence order.
 	p.cmd.Env = env

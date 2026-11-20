@@ -36,16 +36,20 @@ const stoppedLine = "==> stopped Connector sandbox: "
 // Driver's Connector, or for the github row's, which is why every run has one.
 type sandboxExit struct {
 	name string
-	// local runs on a local tracker and the git forge, with no github row, so
-	// the run proceeds; otherwise the github row is a routed fixture that is no
-	// tracker, and the run's first read is refused.
-	local bool
+	// mode wires the github row. Local runs on a local tracker and the git forge,
+	// with no github row, so the run proceeds; the zero mode is a routed fixture
+	// that is no tracker, and the run's first read is refused. Tracker is the
+	// compiled github Connector in the sandbox, against a fake backend.
+	mode sandboxMode
 	// box is the scripted Box run.
 	box seamtest.PodmanRun
 	// wantExit is the launcher's exit status, and wantOut text its output must
 	// carry: the proof the run ended the way the row says.
 	wantExit int
 	wantOut  string
+	// wantLabel, in tracker mode, is the label the run's settle must have added
+	// to #7 through the sandbox.
+	wantLabel string
 	// wantBox is whether a Box is expected to have run.
 	wantBox bool
 	// issues are the ready issues the tracker holds, default just #7; the first
@@ -55,23 +59,33 @@ type sandboxExit struct {
 	maxParallel int
 	// signal, when set, is sent to the launcher once the Box is in flight; the
 	// Box stays held until the launcher has latched the stop it asks for.
-	signal os.Signal
+	signal syscall.Signal
+	// group delivers signal to the launcher's whole process group, as a terminal
+	// does for Ctrl-C, so it reaches the Box and sandbox clients that share the
+	// group too.
+	group bool
 }
 
 // sandboxExits is every exit path the seam harness drives. A path that starts
 // the sandbox another way, or has the launcher end differently, is one more row.
 var sandboxExits = []sandboxExit{
-	{name: "success", local: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, wantBox: true, wantOut: "branches pushed on owner/repo"},
-	{name: "failed-run", local: true, box: seamtest.PodmanRun{Exit: 1}, wantBox: true, wantOut: "(box-failed)"},
-	{name: "launcher-error", local: false, wantExit: 1, wantOut: "cannot list issues"},
-	{name: "blocked-run", local: true, box: seamtest.PodmanRun{Outcome: seamOutcome("blocked")}, wantBox: true, wantOut: "(blocked)"},
-	{name: "sigint", local: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, signal: syscall.SIGINT, wantExit: 7, wantBox: true, wantOut: "<- #7 done"},
-	{name: "sigterm", local: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, signal: syscall.SIGTERM, wantExit: 7, wantBox: true, wantOut: "<- #7 done"},
+	{name: "success", mode: sandboxLocal, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, wantBox: true, wantOut: "branches pushed on owner/repo"},
+	{name: "failed-run", mode: sandboxLocal, box: seamtest.PodmanRun{Exit: 1}, wantBox: true, wantOut: "(box-failed)"},
+	{name: "failed-run-tracker", mode: sandboxTracker, box: seamtest.PodmanRun{Exit: 1}, wantBox: true, wantOut: "(box-failed)", wantLabel: "agent-failed"},
+	{name: "launcher-error", wantExit: 1, wantOut: "cannot list issues"},
+	{name: "blocked-run", mode: sandboxLocal, box: seamtest.PodmanRun{Outcome: seamOutcome("blocked")}, wantBox: true, wantOut: "(blocked)"},
+	{name: "sigint", mode: sandboxTracker, wantLabel: "agent-complete", box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, signal: syscall.SIGINT, wantExit: 7, wantBox: true, wantOut: "<- #7 done"},
+	{name: "sigterm", mode: sandboxTracker, wantLabel: "agent-complete", box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, signal: syscall.SIGTERM, wantExit: 7, wantBox: true, wantOut: "<- #7 done"},
+	// The terminal's Ctrl-C also kills the Box client, so the run settles
+	// failed. Were the sandbox client in the group, the Connector host would die
+	// with it before that settle; the process-group assertion is the proof it
+	// did not (issue #7302).
+	{name: "sigint-group", mode: sandboxTracker, wantLabel: "agent-failed", box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, signal: syscall.SIGINT, group: true, wantExit: 7, wantBox: true, wantOut: "#7: signal: interrupt"},
 	// The shutdown gate declines the issue left waiting on the one Box slot
 	// while the stop arrives, so no second Box launches. Which issue goes first
 	// is unordered, so the Box run may answer the other; the gate's own line is
 	// the proof it declined.
-	{name: "shutdown-gate", local: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, issues: []int{7, 8}, maxParallel: 1, signal: syscall.SIGTERM, wantExit: 7, wantBox: true, wantOut: "==> stop requested; nothing in flight"},
+	{name: "shutdown-gate", mode: sandboxLocal, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, issues: []int{7, 8}, maxParallel: 1, signal: syscall.SIGTERM, wantExit: 7, wantBox: true, wantOut: "==> stop requested; nothing in flight"},
 }
 
 func seamOutcome(status string) string {
@@ -98,6 +112,9 @@ type sandboxRig struct {
 	bin, docPath, workDir, fakeDir string
 	flags                          []string
 	env                            map[string]string
+	// backend is the fake github the tracker mode's row routes to, nil in any
+	// other mode.
+	backend *fakeGithub
 }
 
 // sandboxMode is how the rig's github backend row, if any, is wired; the modes exclude
@@ -113,6 +130,11 @@ const (
 	// sandboxLocal has no github row: the run reads a local issue and lands by
 	// plain git push, so the only Connector it loads is the Driver's.
 	sandboxLocal
+	// sandboxTracker is the compiled github Connector as the primary tracker,
+	// routed to a fake backend, with landing by plain git push. Every tracker
+	// read and write, the run's settle included, goes through the sandbox, so
+	// a dead sandbox fails the settle.
+	sandboxTracker
 )
 
 // sandboxRigOpts is what newSandboxRig varies; a struct so its fields cannot be
@@ -147,7 +169,16 @@ func newSandboxRig(t *testing.T, runtime string, o sandboxRigOpts) sandboxRig {
 	if runtime == "bwrap" {
 		fixture, artifacts = "launcher-run-input-bwrap.json", bwrapSandboxArtifacts(t, host)
 	}
-	docPath := sandboxDoc(t, seamtest.Path(t, fixture), filepath.Join(connectors, "forge.wasm"), o.mode, artifacts)
+	row := map[string]any{
+		"name": "github", "module": filepath.Join(connectors, "forge.wasm"), "credentialEnv": "GH_TOKEN",
+		"routes": []map[string]string{{"method": "GET", "host": "api.github.com", "path": "/repos/{repo}"}},
+	}
+	var backend *fakeGithub
+	if o.mode == sandboxTracker {
+		backend = startFakeGithub(t)
+		row = compiledGithubRow(t, backend.srv.Listener.Addr().String())
+	}
+	docPath := sandboxDoc(t, seamtest.Path(t, fixture), row, o.mode, artifacts)
 
 	bin := seamtest.BuildLauncher(t)
 	fakeDir := seamtest.InstallFakes(t, "podman", "docker", "bwrap", "gh")
@@ -159,8 +190,11 @@ func newSandboxRig(t *testing.T, runtime string, o sandboxRigOpts) sandboxRig {
 	for k, v := range gitEnv {
 		env[k] = v
 	}
-	if o.mode == sandboxLocal {
+	switch o.mode {
+	case sandboxLocal:
 		useLocalForge(t, docPath, workDir, bare, issues, "ready-for-agent")
+	case sandboxTracker:
+		setDocSettings(t, docPath, map[string]string{"CODE_FORGE": "git", "CODE_FORGE_REMOTE_URL": bare})
 	}
 	release := filepath.Join(recDir, "release")
 	runs := slices.Clone(o.runs)
@@ -186,6 +220,12 @@ func newSandboxRig(t *testing.T, runtime string, o sandboxRigOpts) sandboxRig {
 	for k, v := range smokeSecrets {
 		env[k] = v
 	}
+	if backend != nil {
+		// The github Connector's HTTP leaves the launcher, which trusts only the
+		// fake's certificate; ghs_ makes the write gate skip token introspection.
+		env["SSL_CERT_FILE"] = backend.certFile
+		env["GH_TOKEN"] = "ghs_seam"
+	}
 
 	args := []string{"--input", docPath, "--repo-slug", smokeRepo, "--box-signal-carrier", "log",
 		"--user-name", "Seam Bot", "--user-email", "seam@example.com", "--no-build",
@@ -198,6 +238,7 @@ func newSandboxRig(t *testing.T, runtime string, o sandboxRigOpts) sandboxRig {
 		cmd:    seamtest.Cmd{Bin: bin, Args: append(slices.Clone(flags), "dispatch"), Env: env, CleanEnv: true, PathDirs: []string{fakeDir}, Dir: workDir},
 		recDir: recDir, release: release,
 		bin: bin, docPath: docPath, workDir: workDir, fakeDir: fakeDir, flags: flags, env: env,
+		backend: backend,
 	}
 }
 
@@ -212,25 +253,27 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 		extra = []string{"--max-parallel", strconv.Itoa(x.maxParallel)}
 	}
 	run := x.box
-	if x.signal != nil {
+	if x.signal != 0 {
 		run.HoldUntil = "set by the rig"
 	}
-	mode := sandboxRouted
-	if x.local {
-		mode = sandboxLocal
-	}
-	rig := newSandboxRig(t, runtime, sandboxRigOpts{mode: mode, runs: []seamtest.PodmanRun{run}, issues: issues, extra: extra})
+	rig := newSandboxRig(t, runtime, sandboxRigOpts{mode: x.mode, runs: []seamtest.PodmanRun{run}, issues: issues, extra: extra})
 	recPath := filepath.Join(rig.recDir, runtime+".jsonl")
 
+	rig.cmd.OwnGroup = x.group
 	p := seamtest.Start(t, rig.cmd)
-	if x.signal != nil {
+	if x.signal != 0 {
 		// Whatever happens, free a held fake Box so it cannot outlive the test.
 		t.Cleanup(func() { _ = os.WriteFile(rig.release, nil, 0o644) })
 		runnertest.Eventually(t, time.Minute, "a Box to start", func() bool {
 			_, boxes := countRuns(runtime, seamtest.ReadRecord(t, recPath))
 			return boxes > 0
 		})
-		p.Signal(t, x.signal)
+		if x.group {
+			assertSandboxOwnGroup(t, recPath, p.Pid())
+			p.SignalGroup(t, x.signal)
+		} else {
+			p.Signal(t, x.signal)
+		}
 		awaitStopLatched()
 		if err := os.WriteFile(rig.release, nil, 0o644); err != nil {
 			t.Fatal(err)
@@ -238,15 +281,33 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 	}
 	res := p.Wait(t)
 	res.WantExit(t, x.wantExit)
-	if out := res.Stdout + res.Stderr; !strings.Contains(out, x.wantOut) {
+	out := res.Stdout + res.Stderr
+	if !strings.Contains(out, x.wantOut) {
 		t.Errorf("output lacks %q:\n%s", x.wantOut, out)
+	}
+	assertSandboxSurvivedSettle(t, "output", out)
+	primary, _ := filepath.Glob(filepath.Join(hostpaths.LogDir(rig.workDir), "primary-github-*"))
+	if x.mode == sandboxTracker && len(primary) == 0 {
+		t.Errorf("no primary-github record in %s", hostpaths.LogDir(rig.workDir))
+	}
+	for _, record := range primary {
+		b, _ := os.ReadFile(record)
+		assertSandboxSurvivedSettle(t, record, string(b))
+	}
+	if x.mode == sandboxTracker {
+		// The settle's tracker write is a Connector call through the sandbox, so
+		// the backend seeing it proves the sandbox still served it; a sandbox
+		// stopped first fails the call before it leaves the launcher.
+		if got := rig.backend.labelPosts(); !slices.Contains(got, x.wantLabel) {
+			t.Errorf("the backend saw labels %q added to #7, want %q among them; requests:\n%s\noutput:\n%s", got, x.wantLabel, rig.backend.requests(), out)
+		}
 	}
 
 	// The stopped line prints only after a successful stop, so a fail-then-retry
 	// still shows one; no failed-attempt warning too is what proves one hook run.
-	stopped := stoppedSandboxes(res.Stderr)
-	if failed := strings.Count(res.Stderr, "warning: stopping Connector sandbox"); len(stopped) != 1 || failed != 0 {
-		t.Fatalf("the stop hook ran %d times (%q) with %d failed attempts, want exactly once\nstderr:\n%s", len(stopped), stopped, failed, res.Stderr)
+	stopped := stoppedSandboxes(out)
+	if failed := strings.Count(out, "warning: stopping Connector sandbox"); len(stopped) != 1 || failed != 0 {
+		t.Fatalf("the stop hook ran %d times (%q) with %d failed attempts, want exactly once\noutput:\n%s", len(stopped), stopped, failed, out)
 	}
 
 	recs := seamtest.ReadRecord(t, recPath)
@@ -435,11 +496,11 @@ func sandboxName(argv []string) string {
 }
 
 // sandboxDoc writes a copy of the input document at docPath with CONNECTOR_SANDBOX
-// on and a github backend row whose Connector is the wasm at module. The row
-// reads through GH_TOKEN, and mode picks its primary key. As a routed row it
-// loads at launch, and its lack of the tracker capability refuses the first
-// read. artifacts overrides keys of the document's artifacts.
-func sandboxDoc(t *testing.T, docPath, module string, mode sandboxMode, artifacts map[string]string) string {
+// on and row as its github backend row, none in sandboxLocal mode. mode picks the
+// row's primary key. The fixture row is a routed no-tracker Connector, so its
+// lack of the tracker capability refuses the first read. artifacts overrides
+// keys of the document's artifacts.
+func sandboxDoc(t *testing.T, docPath string, row map[string]any, mode sandboxMode, artifacts map[string]string) string {
 	t.Helper()
 	data, err := os.ReadFile(docPath)
 	if err != nil {
@@ -466,11 +527,7 @@ func sandboxDoc(t *testing.T, docPath, module string, mode sandboxMode, artifact
 	}
 	var rows []any
 	if mode != sandboxLocal {
-		row := map[string]any{
-			"name": "github", "module": module, "credentialEnv": "GH_TOKEN",
-			"routes": []map[string]string{{"method": "GET", "host": "api.github.com", "path": "/repos/{repo}"}},
-		}
-		if mode == sandboxPrimary {
+		if mode == sandboxPrimary || mode == sandboxTracker {
 			row["primary"] = true
 		}
 		rows = []any{row}
@@ -577,5 +634,27 @@ func TestSeamConnectorSandboxPrimaryTotals(t *testing.T) {
 	}
 	if out := res.Stdout + res.Stderr; !strings.Contains(out, "could not be determined") || !strings.Contains(out, "forge.tokenGrant") {
 		t.Errorf("the write gate did not warn that the capability is undetermined:\n%s", out)
+	}
+}
+
+// assertSandboxOwnGroup fails unless every Connector sandbox client the fake
+// recorded, which it replaces with the connector-host, leads a process group
+// other than the launcher's. A terminal's Ctrl-C reaches every process in the
+// launcher's group, so a sandbox left in it dies before the run's settle can
+// write through it (issue #7302).
+func assertSandboxOwnGroup(t *testing.T, record string, launcher int) {
+	t.Helper()
+	pids := seamtest.SandboxPids(t, record)
+	if len(pids) == 0 {
+		t.Fatalf("no Connector sandbox started under launcher pid %d", launcher)
+	}
+	for _, pid := range pids {
+		pgid, err := syscall.Getpgid(pid)
+		if err != nil {
+			t.Fatalf("sandbox pid %d: %v", pid, err)
+		}
+		if pgid == launcher {
+			t.Errorf("the Connector sandbox (pid %d) shares the launcher's process group %d", pid, launcher)
+		}
 	}
 }

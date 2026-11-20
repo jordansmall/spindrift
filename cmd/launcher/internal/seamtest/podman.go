@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -234,17 +235,51 @@ func sandboxRun(tool string, cfg PodmanConfig, args []string, stderr io.Writer) 
 		fmt.Fprintln(stderr, cfg.RefuseSandbox)
 		return 125
 	}
-	return execConnectorHost(tool, cfg.ConnectorHost, stderr)
+	return execConnectorHost(tool, cfg.ConnectorHost, cfg.Record, stderr)
 }
 
-// execConnectorHost replaces the fake with the connector-host binary at host.
-// It returns only when that is impossible.
-func execConnectorHost(tool, host string, stderr io.Writer) int {
+// sandboxPidSuffix names, next to the argv record, the file a sandbox run
+// appends its pid to.
+const sandboxPidSuffix = ".sandbox-pids"
+
+// SandboxPids returns the pid of every Connector sandbox a fake started, in
+// order. The fake execs into the connector-host, so the pid is the sandbox
+// client process the launcher spawned.
+func SandboxPids(tb testing.TB, record string) []int {
+	tb.Helper()
+	b, err := os.ReadFile(record + sandboxPidSuffix)
+	if err != nil && !os.IsNotExist(err) {
+		tb.Fatalf("seamtest: %v", err)
+	}
+	var pids []int
+	for _, f := range strings.Fields(string(b)) {
+		pid, err := strconv.Atoi(f)
+		if err != nil {
+			tb.Fatalf("seamtest: sandbox pid %q: %v", f, err)
+		}
+		pids = append(pids, pid)
+	}
+	return pids
+}
+
+// execConnectorHost replaces the fake with the connector-host binary at host,
+// noting its pid beside record first. It returns only when that is impossible.
+func execConnectorHost(tool, host, record string, stderr io.Writer) int {
 	if host == "" {
 		fmt.Fprintf(stderr, "%s fake: a Connector sandbox run needs connector_host in the config\n", tool)
 		return fakeConfigExit
 	}
-	err := syscall.Exec(host, []string{"connector-host"}, os.Environ())
+	f, err := os.OpenFile(record+sandboxPidSuffix, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err == nil {
+		_, err = fmt.Fprintln(f, os.Getpid())
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "%s fake: noting the sandbox pid: %v\n", tool, err)
+	}
+	err = syscall.Exec(host, []string{"connector-host"}, os.Environ())
 	fmt.Fprintf(stderr, "%s fake: exec %s: %v\n", tool, host, err)
 	return 1
 }
