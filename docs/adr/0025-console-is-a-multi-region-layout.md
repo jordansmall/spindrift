@@ -1,5 +1,8 @@
 # The Console is a multi-region layout with a docked transcript pane
 
+> **Superseded by [ADR 0076](0076-the-console-is-removed.md).**
+> The Console is removed; `spindrift console` is now an unknown subcommand.
+
 The Console (ADR 0023) rendered its whole state as one flat text stream —
 banner-less, the backlog and the picks queue stacked under bare labels, the
 drill-in transcript replacing the entire view. Everything the operator needs is
