@@ -127,10 +127,11 @@ What changed for a Consumer:
 - **`BOX_GH_TOKEN` and `BOX_FORGEJO_TOKEN` have no reader.** No Box consumes
   them now, so delete both from `harness.env`. Issue #6902 removes the
   deprecated names and `BOX_FORGE_CREDENTIAL`.
-- **Three Box env vars are gone.** `BOX_WRITE_ENABLED`, `BOX_HOST_SEEDED_MIRROR`
-  and `BOX_GH_TOKEN_OPTIONAL` are no longer set. A Box always clones the mirror
-  the launcher seeds, for every code forge, and the direct clone path (with
-  `gh` as a git credential helper) is deleted.
+- **Four Box env vars are gone.** `BOX_WRITE_ENABLED`, `BOX_HOST_SEEDED_MIRROR`,
+  `BOX_GH_TOKEN_OPTIONAL` and `BOX_FORGE_AND_ISSUE_ACCESS` are no longer set in
+  the Box (`BOX_FORGE_AND_ISSUE_ACCESS` stays a launcher knob). A Box always
+  clones the mirror the launcher seeds, for every code forge, and the direct
+  clone path (with `gh` as a git credential helper) is deleted.
 - **The outcome backstop and branch recovery never push.** They publish only
   through the outbox bundle, and a forge with no outbox relay makes the
   backstop block instead of falling back to a push. The Box no longer reads

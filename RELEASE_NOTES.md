@@ -25,14 +25,14 @@ served it are removed.
   set it to `read-only`; an explicit `read-only` keeps working. The forge must
   support bundle relay, as it already had to under `read-only`.
 - **⚠ Breaking: Box env vars and prompt variables removed.**
-  `BOX_WRITE_ENABLED`, `BOX_HOST_SEEDED_MIRROR` and `BOX_GH_TOKEN_OPTIONAL`
-  are no longer set, and the Box always clones the host-seeded mirror. The
-  Box's outcome backstop no longer pushes, so it ignores
-  `MAX_REBASE_ATTEMPTS`, `TRANSIENT_BACKOFF_SECS` and `HOLD_JITTER_SECS`; the
-  launcher still reads all three for its own retries. A prompt override that
-  references a removed `*_READ_WRITE_*` or `*_DIRECT_*` variable,
-  `RESEARCH_VERDICT_STEP`, or a `BOX_ACCESS_READ_WRITE`-style gate fails to
-  render; `MIGRATING.md` has the full list.
+  `BOX_WRITE_ENABLED`, `BOX_HOST_SEEDED_MIRROR`, `BOX_GH_TOKEN_OPTIONAL` and
+  `BOX_FORGE_AND_ISSUE_ACCESS` are no longer set in the Box, and the Box always
+  clones the host-seeded mirror. The Box's outcome backstop no longer pushes,
+  so it ignores `MAX_REBASE_ATTEMPTS`, `TRANSIENT_BACKOFF_SECS` and
+  `HOLD_JITTER_SECS`; the launcher still reads all three for its own retries.
+  A prompt override that references a removed `*_READ_WRITE_*` or `*_DIRECT_*`
+  variable, `RESEARCH_VERDICT_STEP`, or a `BOX_ACCESS_READ_WRITE`-style gate
+  fails to render; `MIGRATING.md` has the full list.
 - **`BOX_GH_TOKEN` and `BOX_FORGEJO_TOKEN` have no reader left.** Delete them
   from `harness.env`.
 
