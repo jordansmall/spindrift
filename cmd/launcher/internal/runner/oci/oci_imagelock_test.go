@@ -4,6 +4,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,6 +35,24 @@ func TestEnsureReady_ImagePresent_NoLockFileCreated(t *testing.T) {
 // the image present: it must return without ever running a build, load or
 // tag, and its log must explain both the wait and the skip.
 func TestEnsureReady_LockHeldByAnother_BlocksThenObservesPresentWithoutRebuilding(t *testing.T) {
+	cases := []struct {
+		name  string
+		probe runnertest.Call
+	}{
+		{"fast probe", runnertest.Call{Exit: 1}},
+		{"slow probe", runnertest.Call{Exit: 1, Shell: "sleep 0.5"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			testLockHeldByAnother(t, tc.probe)
+		})
+	}
+}
+
+// testLockHeldByAnother holds the image lock, runs EnsureReady with probe as
+// its outside-the-lock probe (call 0), and asserts it blocks until release,
+// then skips without building, logging both the wait and the skip.
+func testLockHeldByAnother(t *testing.T, probe runnertest.Call) {
 	redirectImageLockDir(t)
 	const image = "spindrift:abc123"
 
@@ -44,9 +63,11 @@ func TestEnsureReady_LockHeldByAnother_BlocksThenObservesPresentWithoutRebuildin
 
 	// call 0: the outside-the-lock probe, before this child even tries to
 	// acquire — must see absent, or it would never attempt the lock at all.
+	// The slow case delays it past the old fixed 200 ms release, reproducing
+	// the flake in issue #7304.
 	// call 1+: the re-probe under the lock, taken only after the holder
 	// releases — scripted present, standing in for "the winner finished".
-	cliScript, cliDir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}, runnertest.Call{Exit: 0})
+	cliScript, cliDir := runnertest.NewFakeCLI(t, probe, runnertest.Call{Exit: 0})
 
 	origExec := execCommand
 	nixInvoked := false
@@ -61,6 +82,16 @@ func TestEnsureReady_LockHeldByAnother_BlocksThenObservesPresentWithoutRebuildin
 
 	a := &ociAdapter{cli: cliScript, boxImg: imageSpec{tag: image, drv: "/nix/store/fake.drv"}}
 
+	// The hook fires only after the waiter's non-blocking acquire hit EWOULDBLOCK,
+	// so releasing after it is race-free regardless of how slow call 0 was.
+	// Swapping the process-wide hook and execCommand means neither subtest may
+	// call t.Parallel().
+	waiting := make(chan struct{})
+	var once sync.Once
+	origHook := imageLockWaitHook
+	imageLockWaitHook = func() { once.Do(func() { close(waiting) }) }
+	t.Cleanup(func() { imageLockWaitHook = origHook })
+
 	type result struct{ err error }
 	done := make(chan result, 1)
 	var res result
@@ -73,6 +104,15 @@ func TestEnsureReady_LockHeldByAnother_BlocksThenObservesPresentWithoutRebuildin
 		select {
 		case r := <-done:
 			t.Fatalf("EnsureReady returned early (err=%v) while the holder still held the lock", r.err)
+		case <-waiting:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("timed out waiting for EnsureReady to block on the held lock")
+		}
+
+		// The window checks the waiter stays blocked, not ordering.
+		select {
+		case r := <-done:
+			t.Fatalf("EnsureReady returned (err=%v) after logging the wait but while the holder still held the lock", r.err)
 		case <-time.After(200 * time.Millisecond):
 		}
 
