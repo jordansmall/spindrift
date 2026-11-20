@@ -1752,7 +1752,6 @@ let
       # Consumer's nixInBox knob), which this derivation cannot gate, so it
       # carries sqlite3 unconditionally.
       runtimeInputs = with hostPkgs; [
-        gh
         git
         coreutils
         sqlite
