@@ -635,8 +635,8 @@ func (w failingPRWrites) MarkDraft(string) error               { return w.fail("
 
 // connectorHarness drives the compiled github Connector, through the
 // Connector host, against the scripted REST backend.
-// pf is the read shadow's PRForge (connectorforge.New over native writes the
-// reads must never reach); cf and caps are the Code Forge composed from the
+// pf is the PRForge connectorforge.New builds over native writes the reads
+// must never reach; cf and caps are the Code Forge composed from the
 // Connector alone, whose PRForge is caps.PRForge.
 type connectorHarness struct {
 	t       *testing.T
@@ -887,7 +887,7 @@ var (
 )
 
 // TestConnector_Contracts runs the shared contracts against the compiled
-// Connector: the tracker and PR reads (through the read shadow's PRForge), and
+// Connector: the tracker and PR reads (through the PRForge), and
 // the whole Code Forge composed from the Connector. A route no request in either
 // run used is broader than the Connector needs, so coverage is judged over both.
 func TestConnector_Contracts(t *testing.T) {

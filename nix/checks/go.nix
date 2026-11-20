@@ -1151,6 +1151,7 @@ driverGoTests
         SPINDRIFT_PROBE_GUARD_FULL_TREE=1 guard ./internal/forge TestNoCapabilityProbeOutsideResolver
         SPINDRIFT_HOSTPROFILE_GUARD_FULL_TREE=1 guard ./internal/hostprofile TestAdvisoryBoundaryHoldsOnRealTree
         guard ./internal/seamtest TestNoNativeStrategyOutsideDrivers
+        guard ./quickstart TestQuickstartProbe_GoesThroughTheConnectorWithTheWizardsToken
         touch $out
       '';
 

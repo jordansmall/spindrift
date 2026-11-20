@@ -1,5 +1,6 @@
 // Package github implements forge's IssueTracker, CodeForge, and PRForge
-// interfaces by running the gh CLI. GH_TOKEN comes from the ambient
+// interfaces. Every read goes through the routed github Connector row; the
+// writes still run the gh CLI (until #6888), with GH_TOKEN from the ambient
 // environment.
 package github
 

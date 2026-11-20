@@ -126,12 +126,10 @@ func rowEnvAt(host string) (getenv func(string) string, ok bool, err error) {
 	}, true, nil
 }
 
-// The package runs in one of two modes. With a compiled github Connector
-// (the wasm and routes env nix/checks/go.nix sets) every test reads GitHub
-// through the baked row against defaultAPI, and ghStubDir holds a gh that
-// records its calls and fails. Without one the row is absent and ghStubDir
-// holds a gh answering the scope audit, so the tests that only need an audited
-// token still run.
+// With a compiled github Connector (the wasm and routes env nix/checks/go.nix
+// sets) every GitHub read goes through the baked row against defaultAPI;
+// without one defaultAPI is nil and the GitHub-reading tests skip. ghStubDir
+// holds a gh that records its calls and fails.
 var (
 	defaultAPI *githubAPI
 	ghStubDir  string
@@ -154,7 +152,6 @@ func runMain(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	script := "#!/bin/sh\nprintf 'HTTP/2.0 200 OK\\nX-OAuth-Scopes: public_repo\\n\\n{}'\n"
 	api := newGithubAPI()
 	defer api.Close()
 	getenv, ok, err := rowEnvAt(api.Listener.Addr().String())
@@ -162,8 +159,8 @@ func runMain(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	script := "#!/bin/sh\necho call >> '" + filepath.Join(ghStubDir, "calls") + "'\nexit 99\n"
 	if ok {
-		script = "#!/bin/sh\necho call >> '" + filepath.Join(ghStubDir, "calls") + "'\nexit 99\n"
 		defaultAPI = api
 		if err := useBakedGithubRow(getenv); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -179,13 +176,14 @@ func runMain(m *testing.M) int {
 	return m.Run()
 }
 
-// ghCalls counts the gh invocations so far; it only counts in Connector mode.
+// ghCalls counts the gh invocations so far.
 func ghCalls() int {
 	b, _ := os.ReadFile(filepath.Join(ghStubDir, "calls"))
 	return strings.Count(string(b), "call")
 }
 
-// requireConnector skips a test that needs the compiled github Connector.
+// requireConnector returns the fake GitHub backend, skipping the test when no
+// compiled github Connector is configured.
 func requireConnector(t *testing.T) *githubAPI {
 	t.Helper()
 	if defaultAPI == nil {
@@ -194,39 +192,20 @@ func requireConnector(t *testing.T) *githubAPI {
 	return defaultAPI
 }
 
-// ghScopes makes the wizard's scope audit read scopes: from the Connector's
-// backend when one is configured, otherwise from a gh on PATH.
+// ghScopes makes the wizard's scope audit read scopes from the Connector's backend.
 func ghScopes(t *testing.T, scopes []string) {
 	t.Helper()
 	joined := strings.Join(scopes, ", ")
-	if defaultAPI != nil {
-		defaultAPI.set(t, func(a *githubAPI) { a.scopes = joined })
-		return
-	}
-	fakeGH(t, "printf 'HTTP/2.0 200 OK\\nX-OAuth-Scopes: "+joined+"\\n\\n{}'")
+	requireConnector(t).set(t, func(a *githubAPI) { a.scopes = joined })
 }
 
 // ghFailing makes every scope read fail.
 func ghFailing(t *testing.T) {
 	t.Helper()
-	if defaultAPI != nil {
-		defaultAPI.set(t, func(a *githubAPI) { a.viewerCode = http.StatusUnauthorized })
-		return
-	}
-	fakeGH(t, "echo 'HTTP 401: Bad credentials' >&2; exit 1")
+	requireConnector(t).set(t, func(a *githubAPI) { a.viewerCode = http.StatusUnauthorized })
 }
 
-func fakeGH(t *testing.T, body string) {
-	t.Helper()
-	dir := t.TempDir()
-	script := "#!/bin/sh\n" + body + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-}
-
-// A build with nothing baked in leaves quickstart on the native gh.
+// A build with nothing baked in applies no row.
 func TestUseBakedGithubRow_NothingBakedAppliesNoRow(t *testing.T) {
 	t.Cleanup(backendrows.Snapshot())
 	if err := backendrows.Use(nil, nil); err != nil {
@@ -240,7 +219,7 @@ func TestUseBakedGithubRow_NothingBakedAppliesNoRow(t *testing.T) {
 	}
 }
 
-// A wiring error fires on every host, including one that keeps the native gh.
+// A wiring error fires on every host, including one that applies no row.
 func TestUseBakedGithubRow_RefusesMalformedRoutes(t *testing.T) {
 	for _, host := range []string{"", "ghe.corp"} {
 		t.Run("GH_HOST="+host, func(t *testing.T) {
@@ -302,8 +281,8 @@ func TestUseBakedGithubRow_AppliesTheGithubRow(t *testing.T) {
 	}
 }
 
-// The baked routes pin api.github.com, so a GH_HOST naming another host keeps
-// the native gh, which honours GH_HOST itself; github.com, in any letter case,
+// The baked routes pin api.github.com, so a GH_HOST naming another host applies
+// no row; github.com, in any letter case,
 // applies the row, as does no GH_HOST at all (TestUseBakedGithubRow_AppliesTheGithubRow).
 func TestUseBakedGithubRow_AppliesOnlyForGithubDotCom(t *testing.T) {
 	for _, tc := range []struct {

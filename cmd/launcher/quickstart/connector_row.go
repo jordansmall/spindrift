@@ -22,11 +22,12 @@ const (
 
 // useBakedGithubRow applies the github backend row the build baked in, so the
 // wizard's identity probe and token scope audit go through the Connector and
-// never reach gh. With neither var set (a plain `go run`) it applies none and
-// the native gh answers, as backend rows are opt-in. The wizard's token is the
-// row's credential: runQuickstart exports it as GH_TOKEN before the probe.
-// The baked routes pin api.github.com, so under any other GH_HOST it applies
-// none either and gh, which honours GH_HOST, answers.
+// never reach gh. With neither var set (a plain `go run`) there is no compiled
+// Connector to route through, so it applies none and the probe and audit fail
+// with ErrNoReadRoute.
+// The wizard's token is the row's credential: runQuickstart exports it as
+// GH_TOKEN before the probe. The baked routes pin api.github.com, so under any
+// other GH_HOST it applies none either and they fail the same way.
 func useBakedGithubRow(getenv func(string) string) error {
 	wasm, routes := getenv(connectorWasmEnv), getenv(connectorRoutesEnv)
 	if wasm == "" && routes == "" {

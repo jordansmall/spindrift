@@ -62,6 +62,7 @@ func withPodman() fakeEnvironment {
 }
 
 func TestRunQuickstart_RepoSlugDetected_ShownAsDefault_AcceptedWithEnter(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}, remoteURL: "git@github.com:jordansmall/spindrift.git"}
@@ -91,6 +92,7 @@ func TestRunQuickstart_RepoSlugDetected_ShownAsDefault_AcceptedWithEnter(t *test
 }
 
 func TestRunQuickstart_RepoSlugDetected_CanBeOverridden(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}, remoteURL: "git@github.com:jordansmall/spindrift.git"}
@@ -120,6 +122,7 @@ func TestRunQuickstart_RepoSlugDetected_CanBeOverridden(t *testing.T) {
 }
 
 func TestRunQuickstart_RepoSlugInvalid_RejectedAndReprompted(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	env := withPodman()
@@ -168,6 +171,7 @@ func TestRunQuickstart_RepoSlugInvalidAtEOF_ReturnsErrorInsteadOfHanging(t *test
 }
 
 func TestRunQuickstart_RuntimeInvalid_RejectedAndReprompted(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	env := withPodman()
@@ -238,6 +242,7 @@ func TestRunQuickstart_RuntimeChosen_AbsentFromPATH_WarnsAndAsksConfirmation(t *
 // out as something the new confirmation must preserve: confirming "y" must
 // still write flake.nix with the chosen (uninstalled) runtime.
 func TestRunQuickstart_RuntimeChosen_AbsentFromPATH_ConfirmedProceeds(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	env := withPodman()
@@ -310,6 +315,7 @@ func TestValidateRepoSlug_RejectsWhitespace(t *testing.T) {
 }
 
 func TestRunQuickstart_GitIdentityDetected_ShownAsDefault_AcceptedWithEnter(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	env := fakeEnvironment{
@@ -344,6 +350,7 @@ func TestRunQuickstart_GitIdentityDetected_ShownAsDefault_AcceptedWithEnter(t *t
 }
 
 func TestRunQuickstart_GitIdentityDetected_CanBeOverridden(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	env := fakeEnvironment{
@@ -376,6 +383,7 @@ func TestRunQuickstart_GitIdentityDetected_CanBeOverridden(t *testing.T) {
 }
 
 func TestRunQuickstart_RuntimeDefault_FallsBackToDockerThenBwrap(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	env := fakeEnvironment{runtimes: map[string]bool{"docker": true, "bwrap": true}}
@@ -398,6 +406,7 @@ func TestRunQuickstart_RuntimeDefault_FallsBackToDockerThenBwrap(t *testing.T) {
 }
 
 func TestRunQuickstart_RuntimeDefault_BwrapWhenOnlyOneAvailable(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	env := fakeEnvironment{runtimes: map[string]bool{"bwrap": true}}
@@ -420,6 +429,7 @@ func TestRunQuickstart_RuntimeDefault_BwrapWhenOnlyOneAvailable(t *testing.T) {
 }
 
 func TestRunQuickstart_RuntimeDefault_NerdctlDetected_OffersRancher(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	env := fakeEnvironment{runtimes: map[string]bool{"nerdctl": true, "bwrap": true}}
@@ -449,6 +459,7 @@ func TestRunQuickstart_RuntimeDefault_NerdctlDetected_OffersRancher(t *testing.T
 }
 
 func TestRunQuickstart_RuntimeDefault_DockerPreferredOverNerdctl(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	env := fakeEnvironment{runtimes: map[string]bool{"docker": true, "nerdctl": true}}
@@ -549,6 +560,7 @@ func TestRunQuickstart_DeclineRuntimeConfirmation_ForceDoesNotBackUpExistingFile
 }
 
 func TestRunQuickstart_RuntimeDefault_PrefersPodmanOverDockerAndBwrap(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	env := fakeEnvironment{runtimes: map[string]bool{"podman": true, "docker": true, "bwrap": true}}
@@ -659,6 +671,7 @@ func TestRunQuickstart_ExistingFlakeNixAndHarnessEnv_RefusesWithProseList(t *tes
 }
 
 func TestRunQuickstart_HappyPath_WritesFiles(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
@@ -730,6 +743,7 @@ func TestRunQuickstart_HappyPath_WritesFiles(t *testing.T) {
 // the wizard runs inside a git work tree the finish line must remind the
 // operator to `git add` the newly written scaffold files.
 func TestRunQuickstart_InsideGitWorkTree_FinishLineRemindsGitAdd(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := defaultQuickstartStdin()
@@ -783,6 +797,7 @@ func TestRunQuickstart_InsideGitWorkTree_FinishLineRemindsGitAdd(t *testing.T) {
 // The negative counterpart of the test above: outside a git work tree there is
 // nothing to `git add`, so the reminder must not appear.
 func TestRunQuickstart_NotInsideGitWorkTree_FinishLineOmitsGitAddReminder(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := defaultQuickstartStdin()
@@ -802,6 +817,7 @@ func TestRunQuickstart_NotInsideGitWorkTree_FinishLineOmitsGitAddReminder(t *tes
 }
 
 func TestRunQuickstart_WritesGithubIssueTrackerWithoutPrompting(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
@@ -838,6 +854,7 @@ func TestRunQuickstart_WritesGithubIssueTrackerWithoutPrompting(t *testing.T) {
 }
 
 func TestRunQuickstart_AmbientGHToken_SkipsPrompt(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
@@ -1179,6 +1196,7 @@ func TestRunQuickstart_GHAuthTokenEmpty_AbortsWithoutWriting(t *testing.T) {
 }
 
 func TestRunQuickstart_Force_BacksUpExistingFiles(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("old flake"), 0o644); err != nil {
 		t.Fatalf("seed flake.nix: %v", err)
@@ -1293,6 +1311,7 @@ func defaultQuickstartStdin() *strings.Reader {
 }
 
 func TestRunQuickstart_Force_BackupReserveNonIsExistErr_ReturnsErrorInsteadOfHanging(t *testing.T) {
+	requireConnector(t)
 	if os.Geteuid() == 0 {
 		t.Skip("running as root bypasses permission checks")
 	}
@@ -1332,6 +1351,7 @@ func TestRunQuickstart_Force_BackupReserveNonIsExistErr_ReturnsErrorInsteadOfHan
 }
 
 func TestRunQuickstart_Force_BackupRenameErr_CleansUpReservedBakFile(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 
 	// Seeding flake.nix as a directory makes the clobber check queue it for
@@ -1364,6 +1384,7 @@ func TestRunQuickstart_Force_BackupRenameErr_CleansUpReservedBakFile(t *testing.
 }
 
 func TestRunQuickstart_Force_BackupRenameErr_RollsBackEarlierBackups(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 
 	// flake.nix is a regular file so its backup rename succeeds, harness.env is
@@ -1500,6 +1521,7 @@ func TestRollbackAndFail_SomeRestoresFail_ReportsEachInReverseOrder(t *testing.T
 }
 
 func TestRunQuickstart_Force_SecondRun_PreservesBothBackups(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("v1 flake"), 0o644); err != nil {
 		t.Fatalf("seed flake.nix: %v", err)
@@ -1596,6 +1618,7 @@ func TestRunQuickstart_Force_SecondRun_PreservesBothBackups(t *testing.T) {
 }
 
 func TestRunQuickstart_DeclineSetupToken_PromptsForAPIKey(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
@@ -1629,6 +1652,7 @@ func TestRunQuickstart_DeclineSetupToken_PromptsForAPIKey(t *testing.T) {
 }
 
 func TestRunQuickstart_AcceptSetupToken_EmptyPaste_Errors(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
@@ -1656,6 +1680,7 @@ func TestRunQuickstart_AcceptSetupToken_EmptyPaste_Errors(t *testing.T) {
 }
 
 func TestRunQuickstart_AcceptSetupToken_RunsItAndPastesToken(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
@@ -1689,6 +1714,7 @@ func TestRunQuickstart_AcceptSetupToken_RunsItAndPastesToken(t *testing.T) {
 }
 
 func TestRunQuickstart_AmbientClaudeOAuthToken_ReusedWithoutPrompt(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
@@ -1721,6 +1747,7 @@ func TestRunQuickstart_AmbientClaudeOAuthToken_ReusedWithoutPrompt(t *testing.T)
 }
 
 func TestRunQuickstart_BothAmbientCredentials_OAuthTokenTakesPrecedence(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
@@ -1753,6 +1780,7 @@ func TestRunQuickstart_BothAmbientCredentials_OAuthTokenTakesPrecedence(t *testi
 }
 
 func TestRunQuickstart_AmbientAnthropicAPIKey_ReusedWithoutPrompt(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
@@ -1807,6 +1835,7 @@ func fakeForgeBuilder(f *forge.Fake) ForgeBuilder {
 }
 
 func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
@@ -1868,6 +1897,7 @@ func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *test
 // failed step directly instead of sending the operator back through the whole
 // wizard. It must never suggest --force, which only governs the clobber guard.
 func TestRunQuickstart_FailsAfterWrite_NamesWrittenFilesAndRerunCommand(t *testing.T) {
+	requireConnector(t)
 	cases := []struct {
 		name               string
 		forge              *forge.Fake
@@ -2998,6 +3028,7 @@ func assertNoDeprecatedPathSpellings(t *testing.T, dir string) {
 // expected string, never the absence of a deprecated one. Both subtests are
 // needed: only the forgejo branch emits forge.backend and issues.forgejo.baseURL.
 func TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings(t *testing.T) {
+	requireConnector(t)
 	t.Run("github", func(t *testing.T) {
 		dir := t.TempDir()
 		var out bytes.Buffer
@@ -3095,6 +3126,7 @@ func TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit(t *te
 // A host no row lists is asked, offering exactly the rows with a quickstart
 // block, with the first row as the default answer.
 func TestRunQuickstart_UnclaimedHost_PromptsOverQuickstartRowsOnly(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	env := fakeEnvironment{
@@ -3122,6 +3154,7 @@ func TestRunQuickstart_UnclaimedHost_PromptsOverQuickstartRowsOnly(t *testing.T)
 
 // A github.com remote is claimed by the github row, which carries no knobs.
 func TestRunQuickstart_GithubRemote_DetectedWithoutBackendPrompt(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	env := fakeEnvironment{
@@ -3147,6 +3180,7 @@ func TestRunQuickstart_GithubRemote_DetectedWithoutBackendPrompt(t *testing.T) {
 // github's RemoteMatch compares against github.Host(), which reads GH_HOST, so
 // a GHES operator's github.com remote is no longer claimed by the github row.
 func TestRunQuickstart_GHHostOverride_GithubComRemoteFallsToBackendPrompt(t *testing.T) {
+	requireConnector(t)
 	t.Setenv("GH_HOST", "ghe.corp")
 	dir := t.TempDir()
 	var out bytes.Buffer
@@ -3173,6 +3207,7 @@ func TestRunQuickstart_GHHostOverride_GithubComRemoteFallsToBackendPrompt(t *tes
 // An unclaimed host still yields the owner/repo slug from the remote, whichever
 // backend the operator picks at the prompt.
 func TestRunQuickstart_UnclaimedHost_SlugDefaultParsedFromRemote(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	env := fakeEnvironment{
@@ -3328,6 +3363,7 @@ func TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidan
 
 func runQuickstartSeeded(t *testing.T, seed map[string]string, force bool) (string, string) {
 	t.Helper()
+	requireConnector(t)
 	dir := t.TempDir()
 	for name, content := range seed {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
@@ -3346,6 +3382,7 @@ func runQuickstartSeeded(t *testing.T, seed map[string]string, force bool) (stri
 }
 
 func TestRunQuickstart_ExistingGitignoreAndEnvrc_Preserved(t *testing.T) {
+	requireConnector(t)
 	for _, force := range []bool{false, true} {
 		t.Run(fmt.Sprintf("force=%v", force), func(t *testing.T) {
 			const gi, rc = "node_modules/\n.env\n", "use nix\nexport FOO=1\n"
@@ -3393,6 +3430,7 @@ func TestRunQuickstart_ExistingGitignoreAndEnvrc_Preserved(t *testing.T) {
 }
 
 func TestRunQuickstart_ExistingEnvrcWithUseFlake_NoHint(t *testing.T) {
+	requireConnector(t)
 	_, out := runQuickstartSeeded(t, map[string]string{".envrc": "use flake\n"}, false)
 	if !strings.Contains(out, "kept: .envrc (existing)\n") {
 		t.Errorf("expected plain kept line, got:\n%s", out)
@@ -3400,6 +3438,7 @@ func TestRunQuickstart_ExistingEnvrcWithUseFlake_NoHint(t *testing.T) {
 }
 
 func TestRunQuickstart_GitignoreAlreadyComplete_Untouched(t *testing.T) {
+	requireConnector(t)
 	dir, out := runQuickstartSeeded(t, map[string]string{".gitignore": quickstartGitignore}, false)
 	got, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
 	if err != nil {
@@ -3417,6 +3456,7 @@ func TestRunQuickstart_GitignoreAlreadyComplete_Untouched(t *testing.T) {
 }
 
 func TestRunQuickstart_EmptyGitignore_GetsBlockWithoutLeadingBlankLine(t *testing.T) {
+	requireConnector(t)
 	dir, _ := runQuickstartSeeded(t, map[string]string{".gitignore": ""}, false)
 	got, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
 	if err != nil {
@@ -3428,6 +3468,7 @@ func TestRunQuickstart_EmptyGitignore_GetsBlockWithoutLeadingBlankLine(t *testin
 }
 
 func TestRunQuickstart_GitignoreUnreadable_Errors(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, ".gitignore"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -3505,6 +3546,7 @@ func TestMergeGitignore_CRLFKeepsLineEndings(t *testing.T) {
 }
 
 func TestRunQuickstart_OpencodeDriver_PrintsRemedyAndRunsNoCommand(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
