@@ -1,9 +1,14 @@
 # lib/fragment-paths.nix declares the shipped per-backend fragment files
 # independent of disk, so a deleted or renamed one fails the shipped-tree
 # checks instead of silently shrinking the expected set (issue #5726).
-# Eval-level: every assert runs at evaluation, the derivation only carries the
-# result.
-{ pkgs, ... }:
+# Eval-level except the two fallback checks at the bottom, which diff the
+# built prompt dir.
+{
+  pkgs,
+  nixpkgs,
+  system,
+  ...
+}:
 let
   inherit (pkgs.lib)
     assertMsg
@@ -26,7 +31,7 @@ let
       filter = p: _: !(hasSuffix "/${suffix}" p);
     };
 
-  missing = problems (withoutFile "forgejo/fix-ci-read.md");
+  missing = problems (withoutFile "github/fix-ci-read.md");
 
   # The guards on `shipped` itself, pinned over a doctored copy of it. Dropping
   # or adding a declared file also surfaces strays or missing files, so each
@@ -118,16 +123,27 @@ let
     filter (hasInfix "../y.md") connectorEscape != [ ]
     && filter (hasInfix "../x") connectorEscape != [ ];
   throws = v: !(builtins.tryEval (builtins.deepSeq v v)).success;
+
+  forkDir = ../fixtures/connector-fragments-fork-forgejo;
+  jiraForkDir = ../fixtures/connector-fragments-fork-jira;
+  harnessWith =
+    connectorFragments:
+    import ../../lib/mkHarness.nix {
+      inherit nixpkgs system connectorFragments;
+      defaults = {
+        codeForge = "forgejo";
+        issueTracker = "forgejo";
+      };
+      packages = p: [ p.hello ];
+    };
 in
 {
   fragment-paths =
     assert assertMsg (problems shippedDir == [ ])
       "fragment-paths: the shipped tree disagrees with lib/fragment-paths.nix's `shipped`: ${builtins.toJSON (problems shippedDir)}";
     assert assertMsg
-      (
-        builtins.length missing == 1 && hasInfix "forgejo/fix-ci-read.md: declared" (builtins.head missing)
-      )
-      "fragment-paths: a declared per-backend file missing from the tree must yield one problem naming forgejo/fix-ci-read.md, got: ${builtins.toJSON missing}";
+      (builtins.length missing == 1 && hasInfix "github/fix-ci-read.md: declared" (builtins.head missing))
+      "fragment-paths: a declared per-backend file missing from the tree must yield one problem naming github/fix-ci-read.md, got: ${builtins.toJSON missing}";
     assert assertMsg (builtins.length stray == 1)
       "fragment-paths: an undeclared file in a backend folder must yield one problem naming it, got: ${builtins.toJSON stray}";
     assert assertMsg (builtins.length noEntry == 1)
@@ -184,4 +200,71 @@ in
       !throws (withFixture.pathsOf scoutRow)
     ) "fragment-paths: pathsOf over a well-formed Connector must evaluate";
     pkgs.runCommand "fragment-paths" { } "touch $out";
+
+  # A forgejo Consumer registers no Connector module (the native adapter
+  # serves forgejo without it), yet its Box must still ship forgejo's
+  # fragments (issue #6867): mkHarness falls back to the batteries flake's.
+  # jira's ship only where the Consumer registers its module.
+  fragment-paths-batteries-fallback =
+    let
+      harness = harnessWith [ ];
+    in
+    pkgs.runCommand "fragment-paths-batteries-fallback" { } ''
+      diff -r ${../../connectors/forgejo/fragments/forgejo} ${harness.internals.promptDir}/fragments/forgejo
+      test ! -e ${harness.internals.promptDir}/fragments/jira/issue-blocked-comment-relay.md
+      touch $out
+    '';
+
+  # A Consumer's entry replaces the Connector's file at each path it declares.
+  # The forgejo halves guard that the batteries fallback never declares the
+  # same path twice, under another name or under its own; the jira half guards
+  # that a registration under another name evaluates (jira is no fallback).
+  fragment-paths-fork-dedupe =
+    let
+      forgejoFork = harnessWith [
+        {
+          name = "acme-forgejo";
+          dir = forkDir;
+          shipped."if-blocked-pr.md" = [ "forgejo" ];
+        }
+      ];
+      forgejoSameName = harnessWith [
+        {
+          name = "forgejo";
+          dir = forkDir;
+          shipped."if-blocked-pr.md" = [ "forgejo" ];
+        }
+      ];
+      jiraFork = harnessWith [
+        {
+          name = "acme-jira";
+          dir = jiraForkDir;
+          shipped."issue-blocked-comment-relay.md" = [ "jira" ];
+        }
+      ];
+      forgejoDir = "${forgejoFork.internals.promptDir}/fragments/forgejo";
+      sameNameDir = "${forgejoSameName.internals.promptDir}/fragments/forgejo";
+    in
+    assert assertMsg (
+      !throws forgejoFork.internals.promptDir.drvPath
+    ) "fragment-paths: a Consumer forking forgejo's fragment under another name must evaluate";
+    assert assertMsg (
+      !throws forgejoSameName.internals.promptDir.drvPath
+    ) "fragment-paths: a Consumer registering forgejo's fragment under the name forgejo must evaluate";
+    assert assertMsg (
+      !throws jiraFork.internals.promptDir.drvPath
+    ) "fragment-paths: a Consumer registering jira's fragment under another name must evaluate";
+    pkgs.runCommand "fragment-paths-fork-dedupe" { } ''
+      fallbackIntact() {
+        cmp ${forkDir}/forgejo/if-blocked-pr.md "$1"/if-blocked-pr.md
+        for f in ${../../connectors/forgejo/fragments/forgejo}/*; do
+          b=$(basename "$f")
+          [ "$b" = if-blocked-pr.md ] || cmp "$f" "$1"/"$b"
+        done
+      }
+      fallbackIntact ${forgejoDir}
+      fallbackIntact ${sameNameDir}
+      cmp ${jiraForkDir}/jira/issue-blocked-comment-relay.md ${jiraFork.internals.promptDir}/fragments/jira/issue-blocked-comment-relay.md
+      touch $out
+    '';
 }

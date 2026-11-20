@@ -100,17 +100,18 @@ func TestRegistryRowsShipAsFragmentFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	prompts := repopath.MergedPromptsDir(t)
 	if len(reg.Rows) == 0 {
 		t.Fatal("registry has no rows, check is vacuous")
 	}
 	for _, row := range reg.Rows {
-		pattern := filepath.Join(repopath.PromptsDir(), "fragments", row.Fragment)
+		pattern := filepath.Join(prompts, "fragments", row.Fragment)
 		if row.Axis != "" {
 			// An axis row ships one file per backend folder, or one shared root
 			// file; at least one must exist.
-			pattern = filepath.Join(repopath.PromptsDir(), "fragments", "*", row.Fragment)
+			pattern = filepath.Join(prompts, "fragments", "*", row.Fragment)
 			if row.Shared {
-				pattern = filepath.Join(repopath.PromptsDir(), "fragments", row.Fragment)
+				pattern = filepath.Join(prompts, "fragments", row.Fragment)
 			}
 		}
 		if matches, err := filepath.Glob(pattern); err != nil || len(matches) == 0 {

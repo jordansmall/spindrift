@@ -7,6 +7,7 @@
 { ... }:
 let
   routes = import ./routes.nix;
+  fragments = import ./fragments.nix;
 in
 {
   # Depends on the core it was handed; the module system dedups by path, so a
@@ -25,6 +26,7 @@ in
   };
 
   spindrift.connectors.forgejo.routes = routes;
+  spindrift.connectors.forgejo.fragments = fragments;
 
   spindrift.connectors.forgejo.backend = {
     module = pkgs: "${import ./package.nix { inherit pkgs core; }}/forgejo.wasm";

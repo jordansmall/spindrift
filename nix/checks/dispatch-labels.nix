@@ -206,8 +206,8 @@ let
       src = builtins.readFile ../../templates/default/prompts/fragments/github/filer-direct-label.md;
       extract = extractLabelCreateTokens;
     };
-    "templates/default/prompts/fragments/forgejo/filer-direct-label.md" = {
-      src = builtins.readFile ../../templates/default/prompts/fragments/forgejo/filer-direct-label.md;
+    "connectors/forgejo/fragments/forgejo/filer-direct-label.md" = {
+      src = builtins.readFile ../../connectors/forgejo/fragments/forgejo/filer-direct-label.md;
       extract = extractNameFieldTokens;
     };
     "cmd/launcher/internal/doctor/doctor.go" = {
@@ -684,10 +684,10 @@ mapAttrs (
     let
       doctoredForgejoSrc =
         replaceStrings [ ''"name":"agent-review-finding"'' ] [ ''"name": "agent-unregistered-label"'' ]
-          harnessSurfaces."templates/default/prompts/fragments/forgejo/filer-direct-label.md".src;
+          harnessSurfaces."connectors/forgejo/fragments/forgejo/filer-direct-label.md".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
-        "templates/default/prompts/fragments/forgejo/filer-direct-label.md" =
-          harnessSurfaces."templates/default/prompts/fragments/forgejo/filer-direct-label.md"
+        "connectors/forgejo/fragments/forgejo/filer-direct-label.md" =
+          harnessSurfaces."connectors/forgejo/fragments/forgejo/filer-direct-label.md"
           // {
             src = doctoredForgejoSrc;
           };
