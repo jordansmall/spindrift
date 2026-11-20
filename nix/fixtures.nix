@@ -475,6 +475,44 @@ let
     packages = p: [ p.hello ];
   };
 
+  # One harness per non-default backend axis combination, so an image check
+  # can prove none of them bakes a forge CLI or token into the Box (issue
+  # #6902). Eval-only, consumed by box-has-no-forge-cli-or-token.
+  forgejoHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    defaults = {
+      issueTracker = "forgejo";
+    };
+    packages = p: [ p.hello ];
+  };
+
+  # forgejo on the code-forge axis alone; the tracker keeps its github
+  # default.
+  forgejoForgeHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    defaults = {
+      codeForge = "forgejo";
+    };
+    packages = p: [ p.hello ];
+  };
+
+  forgejoBothHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    defaults = {
+      issueTracker = "forgejo";
+      codeForge = "forgejo";
+    };
+    packages = p: [ p.hello ];
+  };
+
+  jiraHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    defaults = {
+      issueTracker = "jira";
+    };
+    packages = p: [ p.hello ];
+  };
+
   # The opencode Driver's on-disk agent files (issue #262 slice 5, AC4).
   # filerModel stays empty so the filer file's omission is provable too.
   # Eval-only, consumed by the opencode-agent-files image check.
@@ -854,6 +892,10 @@ in
     opencodeWorkerRosterHarness
     filerOnlyHarness
     workerOnlyHarness
+    forgejoHarness
+    forgejoForgeHarness
+    forgejoBothHarness
+    jiraHarness
     opencodeHarness
     piHarness
     piHarnessWith

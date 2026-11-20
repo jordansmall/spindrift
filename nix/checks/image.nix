@@ -5,6 +5,10 @@
 let
   inherit (fixtures)
     nonRustHarness
+    forgejoHarness
+    forgejoForgeHarness
+    forgejoBothHarness
+    jiraHarness
     customHarness
     scoutOnlyHarness
     reviewerOnlyHarness
@@ -1199,4 +1203,86 @@ in
         }
         touch $out
       '';
+
+  # The Box holds no forge CLI and no forge credential (issue #6902): every
+  # forge call goes through the host-answered verbs, so a baked gh/fj or a
+  # token in the image Env is a regression whichever backend the Consumer
+  # picks. Scans the image's layers rather than agentEnv alone, so a CLI
+  # pulled in through extraClosures or a transitive dependency is caught too.
+  box-has-no-forge-cli-or-token =
+    let
+      forgeCLIs = [
+        "gh"
+        "fj"
+        "tea"
+        "glab"
+        "hub"
+        "jira"
+        "acli"
+      ];
+      # Store-path pnames of those CLIs; exact names, so ghc or ghostscript
+      # never match.
+      forgeCLIPackages = [
+        "gh"
+        "forgejo-cli"
+        "tea"
+        "glab"
+        "hub"
+        "jira-cli"
+        "acli"
+      ];
+      rowTokens = builtins.concatMap (r: pkgs.lib.optional (r ? tokenEnvVar) r.tokenEnvVar) (
+        import ../../lib/backends/default.nix
+      );
+      forgeTokens = pkgs.lib.unique (
+        rowTokens
+        ++ [
+          "GITHUB_TOKEN"
+          "BOX_GH_TOKEN"
+          "BOX_FORGEJO_TOKEN"
+          "SPINDRIFT_GH_TOKEN"
+          "SPINDRIFT_GITHUB_CONNECTOR_TOKEN"
+          "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN"
+          "SPINDRIFT_JIRA_CONNECTOR_TOKEN"
+        ]
+      );
+      alt = pkgs.lib.concatStringsSep "|";
+      cases = {
+        github-default = nonRustHarness;
+        forgejo-tracker = forgejoHarness;
+        forgejo-forge = forgejoForgeHarness;
+        forgejo-both-axes = forgejoBothHarness;
+        jira-tracker = jiraHarness;
+        # The only images whose closure grows through extraClosures and
+        # connector rows.
+        dogfood = harness;
+        extra-closures = extraClosuresHarness;
+      };
+      checkCase = label: h: ''
+        rm -rf img && mkdir img && tar -xf ${h.image} -C img
+        cfg=$(jq -r '.[0].Config' img/manifest.json)
+        : > listing
+        for layer in $(jq -r '.[0].Layers[]' img/manifest.json); do
+          tar -tf "img/$layer" >> listing
+        done
+        ! grep -E '(^|/)bin/(${alt forgeCLIs})$' listing || {
+          echo "${label}: a forge CLI is on the Box's PATH" >&2
+          exit 1
+        }
+        ! grep -E 'nix/store/[a-z0-9]{32}-(${alt forgeCLIPackages})-[0-9]' listing || {
+          echo "${label}: a forge CLI package is in the image closure" >&2
+          exit 1
+        }
+        jq -e '(.config.Env // []) | map(split("=")[0])
+          | any(IN(${pkgs.lib.concatMapStringsSep ", " (t: ''"${t}"'') forgeTokens}))
+          | not' "img/$cfg" >/dev/null || {
+          echo "${label}: a forge token variable is baked into the image Env: $(jq -c '.config.Env' "img/$cfg")" >&2
+          exit 1
+        }
+      '';
+    in
+    pkgs.runCommand "box-has-no-forge-cli-or-token" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      ${pkgs.lib.concatStringsSep "\n" (pkgs.lib.mapAttrsToList checkCase cases)}
+      touch $out
+    '';
 }
