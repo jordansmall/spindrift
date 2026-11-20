@@ -8,7 +8,8 @@
 # and the allowed merge styles), the PR list, one PR and its files, the compare
 # for how far a PR is behind, the head commit's statuses, a failing job's log
 # (its run and jobs lists, then the log), a branch's lookup and protection
-# flag, the issue list, one issue, its comments and native dependencies, the
+# flag, the issue list (also read for the open-issue count, the labeled scan
+# and the text search), one issue, its comments and native dependencies, the
 # repository's labels, and the owner's org labels under `/orgs`. The writes
 # are open and merge a PR and the draft flip under `/pulls`, a PR's and an
 # issue's comment and the filing of an issue under `/issues`, an issue's label

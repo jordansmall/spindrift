@@ -15,7 +15,9 @@ type rawIssue struct {
 	Title  string `json:"title"`
 	Body   string `json:"body"`
 	State  string `json:"state"`
-	Labels []struct {
+	// ClosedAt is RFC3339, empty (null) for an open issue.
+	ClosedAt string `json:"closed_at"`
+	Labels   []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
 }
