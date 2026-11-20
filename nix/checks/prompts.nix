@@ -1621,10 +1621,7 @@ in
       );
       # The fragments the Box posts itself, derived from the registry rather
       # than retyped: a verdict fragment relaying through a SPINDRIFT_COMMENT
-      # line is one subject to the cap. The write-token variants
-      # (github/research-verdict.md, forgejo/research-verdict.md) comment via
-      # the tracker CLI and carry no such line, so they drop out here by
-      # construction. A deprecated row names the same file as its slot.
+      # line is one subject to the cap.
       commentLineFiles = pkgs.lib.unique (
         filter (p: hasInfix "SPINDRIFT_COMMENT" (builtins.readFile (fragmentPaths.fileOf fragmentsDir p))) (
           builtins.concatMap (r: fragmentPaths.pathsOf r) (

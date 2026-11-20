@@ -6484,10 +6484,6 @@ pinned by the prompt eval-checks the same way the `gh` family is:
   [`MERGE_MODE`](#runtime-configuration) and the [merge guard](#merge-guard)
   (the forgejo PRForge surface, [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)).
 
-For the REST surface `fj` lacks — attaching a label at issue-create time —
-the filer fragments (`forgejo/filer-direct-file.md`,
-`forgejo/filer-direct-label.md`) fall back to a `curl` call against the
-Forgejo REST API directly rather than an `fj` porcelain command.
 `forgejo/filer-dedup.md` searches through the Signal socket's
 `issue-search` verb rather than REST (issue #6895); the host drops results that
 do not carry a closed search's label, because Forgejo ignores a `labels=` name
