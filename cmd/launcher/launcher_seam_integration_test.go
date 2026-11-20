@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/inputdoc"
@@ -338,6 +340,16 @@ func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (res s
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Every Connector load goes through the sandbox, so the fakes carry the
+	// connector-host it runs.
+	host, err := fixturebuild.ConnectorHost()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sandboxArtifacts map[string]string
+	if c.runtime == "bwrap" {
+		sandboxArtifacts = bwrapSandboxArtifacts(t, host)
+	}
 	// Every kind runs read-only, so the launcher clones the Target repo host-side
 	// (SeedMirror); the same insteadOf remote serves that clone, the work kind's
 	// bundle relay, and the Ledger.
@@ -348,12 +360,12 @@ func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (res s
 		if c.kind == "research" {
 			state = forge.ResearchDispatchLabels().Dispatchable
 		}
-		docPath = scratchDoc(t, docPath, func(map[string]string) {})
+		docPath = scratchDoc(t, docPath, func(a map[string]string) { maps.Copy(a, sandboxArtifacts) })
 		useLocalForge(t, docPath, workDir, bare, []int{7}, state)
 	} else {
 		// The local forge seeds its Accumulation repo, which is also the Ledger,
 		// from the cwd's base branch, so the cwd must be a clone of the remote.
-		docPath = scratchDoc(t, docPath, func(map[string]string) {})
+		docPath = scratchDoc(t, docPath, func(a map[string]string) { maps.Copy(a, sandboxArtifacts) })
 		setDocSettings(t, docPath, smokeLocalSettings(c.kind))
 		gitEnv := os.Environ()
 		seamGit(t, gitEnv, "", "init", "-q", "-b", "main", workDir)
@@ -428,7 +440,7 @@ func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (res s
 	}
 	runs := []seamtest.PodmanRun{run}
 	for _, tool := range []string{"podman", "docker"} {
-		cfg := seamtest.PodmanConfig{Record: recDir + "/" + tool + ".jsonl", ImagePresent: true}
+		cfg := seamtest.PodmanConfig{Record: recDir + "/" + tool + ".jsonl", ImagePresent: true, ConnectorHost: host}
 		if tool == c.runtime {
 			cfg.Runs = runs
 		}
@@ -437,7 +449,7 @@ func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (res s
 		}
 	}
 	// bwrap runs with an allowlisted env, so its config travels by cwd.
-	bwrapCfg := seamtest.BwrapConfig{Record: recDir + "/bwrap.jsonl"}
+	bwrapCfg := seamtest.BwrapConfig{Record: recDir + "/bwrap.jsonl", ConnectorHost: host}
 	if c.runtime == "bwrap" {
 		bwrapCfg.Runs = runs
 	}
@@ -466,6 +478,9 @@ func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (res s
 				if boxes > 0 {
 					t.Errorf("bwrap overlay probe ran after the Box run: %q", r)
 				}
+			case tool == "bwrap" && strings.HasSuffix(r[len(r)-1], "/bin/connector-host"),
+				tool != "bwrap" && len(r) > 0 && r[0] == "run" && sandboxName(r) != "":
+				// The Connector sandbox, not the Box.
 			case tool == "bwrap":
 				boxes++
 				res.boxRun = r

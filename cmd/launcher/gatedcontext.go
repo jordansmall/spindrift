@@ -20,11 +20,16 @@ type gatedContext struct {
 // after, so preview and real dispatch stop at the same first failure and the
 // network gates' live calls never run ahead of a runner-prerequisite
 // failure.
-func newGatedContext(w io.Writer, kind *dispatchkind.Descriptor, selfContained bool) (gatedContext, error) {
+func newGatedContext(w io.Writer, kind *dispatchkind.Descriptor, selfContained bool) (gc gatedContext, err error) {
 	rc, err := newReadContext(kind, selfContained)
 	if err != nil {
 		return gatedContext{}, err
 	}
+	defer func() {
+		if err != nil {
+			rc.closeSandbox()
+		}
+	}()
 	if err := validate(rc.config); err != nil {
 		return gatedContext{}, err
 	}

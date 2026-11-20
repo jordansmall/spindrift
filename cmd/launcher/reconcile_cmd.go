@@ -129,6 +129,7 @@ func cmdReconcile(stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
+	defer rc.closeSandbox()
 
 	pwd, err := os.Getwd()
 	if err != nil {

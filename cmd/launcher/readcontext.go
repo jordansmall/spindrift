@@ -19,6 +19,9 @@ type readContext struct {
 	issueTracker forge.IssueTracker
 	codeForge    forge.CodeForge
 	capabilities forge.Capabilities
+	// closeSandbox stops the Connector sandbox newReadContext installed; the
+	// caller owns it once construction succeeds.
+	closeSandbox func()
 }
 
 // newReadContext loads config and wires the tracker and forge (issue #2941).
@@ -27,13 +30,23 @@ type readContext struct {
 // it through the same seam. It builds the adapters before any validate(), so
 // an unregistered ISSUE_TRACKER or CODE_FORGE is an error here rather than a
 // github fallback.
-func newReadContext(kind *dispatchkind.Descriptor, selfContained bool) (readContext, error) {
+func newReadContext(kind *dispatchkind.Descriptor, selfContained bool) (rc readContext, err error) {
 	c := applyDispatchKind(loadConfig(), kind)
 	c.selfContained = selfContained
 	if err := checkBackendsRegistered(c); err != nil {
 		// Carried so doctor can still report the bad name as a config finding.
 		return readContext{config: c}, err
 	}
+	// Ahead of the adapters: building one may load a Connector.
+	closeSandbox, err := installConnectorSandbox(c)
+	if err != nil {
+		return readContext{config: c}, err
+	}
+	defer func() {
+		if err != nil {
+			closeSandbox()
+		}
+	}()
 	it, err := newIssueTracker(c)
 	if err != nil {
 		return readContext{config: c}, err
@@ -54,6 +67,7 @@ func newReadContext(kind *dispatchkind.Descriptor, selfContained bool) (readCont
 		issueTracker: it,
 		codeForge:    cf,
 		capabilities: caps,
+		closeSandbox: closeSandbox,
 	}, nil
 }
 
