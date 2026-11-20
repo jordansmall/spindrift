@@ -110,8 +110,9 @@
 # connectorOnly (optional bool) marks a backend whose only implementation is
 # its Connector: there is no native adapter for a Connector row's `primary` to
 # replace, so lib/flakeModule.nix leaves the name out of the set `primary` is
-# checked against (jira, issue #6858; github, issue #6888). Like `knobs`, the generated Descriptor
-# ignores it.
+# checked against (jira, issue #6858; github, issue #6888). The generated
+# Descriptor carries it too: the Bundle's no-native-network-adapter check reads
+# it (issue #6888).
 
 # labelRegistry marks a tracker whose labels are registered objects that
 # ListLabels/CreateLabel manage; local and jira omit it (issue #4400).

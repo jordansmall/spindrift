@@ -1185,6 +1185,7 @@ rec {
         (required "displayName" "DisplayName")
         (optional "validAsTracker" "ValidAsTracker" false)
         (optional "validAsCodeForge" "ValidAsCodeForge" false)
+        (optional "connectorOnly" "ConnectorOnly" false)
         (optional "tokenEnvVar" "TokenEnvVar" "")
         (optional "boxTokenEnvVar" "BoxTokenEnvVar" "")
         (optional "doctorTokenHint" "DoctorTokenHint" "")
@@ -1210,8 +1211,7 @@ rec {
       # goVar names the generated var and is not a Descriptor field; knobs are
       # folded into the env schema by lib/row-knobs.nix, cliPackage and
       # validateKnobs are read by lib/mkHarness.nix, core, goTestRepoFiles and
-      # goTestBuildsOn are read by nix/checks/go.nix, and connectorOnly by
-      # lib/flakeModule.nix, not rendered here.
+      # goTestBuildsOn are read by nix/checks/go.nix, not rendered here.
       knownFields = [
         "goVar"
         "knobs"
@@ -1220,7 +1220,6 @@ rec {
         "goTestRepoFiles"
         "goTestBuildsOn"
         "core"
-        "connectorOnly"
       ]
       ++ map (f: f.attr) rowFields;
       quickstartAxes = [

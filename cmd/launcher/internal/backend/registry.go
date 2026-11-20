@@ -18,6 +18,11 @@ type Descriptor struct {
 	ValidAsTracker   bool
 	ValidAsCodeForge bool
 
+	// ConnectorOnly marks a backend whose only implementation is its Connector:
+	// it has no native adapter, so the Bundle's no-native-network-adapter check
+	// (ADR 0073) lets its Strategy stay registered.
+	ConnectorOnly bool
+
 	// TokenEnvVar names this backend's bearer-token env var; it is empty when
 	// the backend carries no bearer token (git, local).
 	TokenEnvVar string
