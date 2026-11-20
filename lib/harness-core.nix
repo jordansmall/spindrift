@@ -137,6 +137,7 @@ let
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/panicguard)
         ../cmd/launcher/internal/connectorsandbox/connectorsandbox.go
+        ../cmd/launcher/internal/connectorsandbox/connectorsandboxtest/connectorsandboxtest.go
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/logscan)
@@ -282,6 +283,7 @@ let
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/panicguard)
         ../cmd/launcher/internal/connectorsandbox/connectorsandbox.go
+        ../cmd/launcher/internal/connectorsandbox/connectorsandboxtest/connectorsandboxtest.go
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/passmanifest)
@@ -409,6 +411,7 @@ let
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/panicguard)
         ../cmd/launcher/internal/connectorsandbox/connectorsandbox.go
+        ../cmd/launcher/internal/connectorsandbox/connectorsandboxtest/connectorsandboxtest.go
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/registryvocab)

@@ -30,8 +30,8 @@ func init() {
 }
 
 // loadViaRow loads a backend row over a module that no engine can compile, so
-// an in-process load fails with a compile error and a sandboxed one with the
-// sandbox's.
+// a load that reached an engine fails with a compile error, and a sandboxed one
+// with the sandbox's.
 func loadViaRow(t *testing.T) error {
 	t.Helper()
 	module := filepath.Join(t.TempDir(), "x.wasm")
@@ -42,13 +42,12 @@ func loadViaRow(t *testing.T) error {
 	return err
 }
 
-func TestInstallConnectorSandbox_OffLoadsInProcess(t *testing.T) {
+func TestInstallConnectorSandbox_OffLoadsFailClosed(t *testing.T) {
 	t.Cleanup(connectorsandbox.Use(nil))
 	closeSandbox := installConnectorSandbox(baseConfig(), t.TempDir())
 	defer closeSandbox()
-	err := loadViaRow(t)
-	if err == nil || errors.Is(err, connectorsandbox.ErrConnectorSandboxStart) {
-		t.Fatalf("load = %v, want an in-process compile error", err)
+	if err := loadViaRow(t); !errors.Is(err, connectorsandbox.ErrNoConnectorSandbox) {
+		t.Fatalf("load = %v, want ErrNoConnectorSandbox, not an in-process load", err)
 	}
 	if got := sandboxVerdict(int(exitcode.Dispatched), &bytes.Buffer{}); got != int(exitcode.Dispatched) {
 		t.Fatalf("verdict = %d, want a success left alone", got)

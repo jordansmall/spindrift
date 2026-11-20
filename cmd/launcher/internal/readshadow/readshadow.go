@@ -299,8 +299,6 @@ func (s *Shadow) close(ctx context.Context) {
 		s.rec.Sum.NativeNsPerLine = int64(s.nativeNs / n)
 		s.rec.Sum.ShadowNsPerLine = int64(s.shadowNs / n)
 	}
-	loads := connectorsandbox.InProcessLoads()
-	s.rec.Sum.InProcessLoads = &loads
 	if st, ok := connectorsandbox.Report(); ok {
 		s.rec.Sum.SandboxStartNs = int64(st.Start)
 		s.rec.Sum.SandboxCalls = st.Calls

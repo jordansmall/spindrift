@@ -1,11 +1,11 @@
-// Package connectorsandbox is where the Launcher decides whether a Connector it
-// hosts loads in its own process or into the run's Connector sandbox.
+// Package connectorsandbox is where the Launcher loads a Connector it hosts
+// into the run's Connector sandbox.
 //
-// With CONNECTOR_SANDBOX on, main installs one Loader for the run (Use), the
-// sandbox package's. With none installed the loads are the in-process
-// connectorhost ones, which is all the Box ever does: it never starts a
-// sandbox. The package imports no runner, so the Box's binary does not link one
-// for it.
+// main installs one Loader for the run (Use), the sandbox package's. With none
+// installed every load fails with ErrNoConnectorSandbox: the Launcher never
+// loads a Connector in its own address space. The Box loads its first-party
+// Drivers in-process through driverrows and never through this package. The
+// package imports no runner, so the Box's binary does not link one for it.
 package connectorsandbox
 
 import (
@@ -22,7 +22,13 @@ import (
 // in-process, which would hand the Connector the Launcher's own address space.
 var ErrConnectorSandboxStart = errors.New("the Connector sandbox did not start")
 
-// Loader is the installed sandbox: loads go to it instead of in-process.
+// ErrNoConnectorSandbox is a load with no Loader installed. It is distinct from
+// ErrConnectorSandboxStart, which is a sandbox that was installed and failed:
+// here none was ever attempted, so the run's wiring, not the runner, is at
+// fault.
+var ErrNoConnectorSandbox = errors.New("no Connector sandbox is installed")
+
+// Loader is the installed sandbox that every load goes to.
 type Loader interface {
 	Load(ctx context.Context, wasm []byte) (*connectorhost.Connector, error)
 	LoadNetwork(ctx context.Context, wasm []byte, n connectorhost.Network) (*connectorhost.Connector, error)
@@ -53,16 +59,6 @@ func Use(l Loader) (restore func()) {
 	return func() { current.Store(prev) }
 }
 
-// inProcess counts the loads that fell back to the Launcher's own address
-// space. It is not part of Report, which says nothing when no sandbox started.
-// It is never reset: tests read a before/after delta, so none that loads here
-// may run in parallel.
-var inProcess atomic.Int64
-
-// InProcessLoads is how many Connectors this process loaded in-process rather
-// than into a sandbox; a sandboxed Launcher leaves it at zero.
-func InProcessLoads() int64 { return inProcess.Load() }
-
 func installed() Loader {
 	if h := current.Load(); h != nil {
 		return h.l
@@ -70,23 +66,22 @@ func installed() Loader {
 	return nil
 }
 
-// Load loads wasm into the installed sandbox, or in-process when none is.
+// Load loads wasm into the installed sandbox, or fails with
+// ErrNoConnectorSandbox when none is.
 func Load(ctx context.Context, wasm []byte) (*connectorhost.Connector, error) {
 	if l := installed(); l != nil {
 		return l.Load(ctx, wasm)
 	}
-	inProcess.Add(1)
-	return connectorhost.Load(ctx, wasm)
+	return nil, ErrNoConnectorSandbox
 }
 
 // LoadNetwork loads wasm as a network Connector into the installed sandbox, or
-// in-process when none is.
+// fails with ErrNoConnectorSandbox when none is.
 func LoadNetwork(ctx context.Context, wasm []byte, n connectorhost.Network) (*connectorhost.Connector, error) {
 	if l := installed(); l != nil {
 		return l.LoadNetwork(ctx, wasm, n)
 	}
-	inProcess.Add(1)
-	return connectorhost.LoadNetwork(ctx, wasm, n)
+	return nil, ErrNoConnectorSandbox
 }
 
 // Failure is the installed sandbox's start failure, which the run reports as

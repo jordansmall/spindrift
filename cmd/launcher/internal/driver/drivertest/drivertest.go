@@ -12,6 +12,8 @@ import (
 	"slices"
 	"testing"
 
+	"spindrift.dev/launcher/internal/connectorsandbox"
+	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/fixturebuild"
@@ -38,6 +40,15 @@ func Isolate(t testing.TB) {
 	t.Cleanup(driver.Snapshot())
 }
 
+// InProcessSandbox installs the in-process Connector engine as the Connector
+// sandbox until t ends, for a test that has the Launcher's path (driverrows.Use)
+// load a real Connector. Without it that load fails with
+// connectorsandbox.ErrNoConnectorSandbox.
+func InProcessSandbox(t testing.TB) {
+	t.Helper()
+	t.Cleanup(connectorsandbox.Use(connectorsandboxtest.InProcess()))
+}
+
 // claudeRows is the one-row Driver rows document for the claude Connector;
 // firstParty marks the row as the Nix renders it into the Box's rows file.
 func claudeRows(firstParty bool) ([]byte, error) {
@@ -55,13 +66,16 @@ func claudeRows(firstParty bool) ([]byte, error) {
 // UseClaudeConnector registers the claude Driver from the compiled claude
 // Connector through the production path: a one-row Driver rows document applied
 // by driverrows.Use. claude has no native Strategy, so a binary's tests that
-// resolve it need this in TestMain. An unresolvable wasm is an error, never a
-// skip (ADR 0067); the Connector itself loads lazily, on the first New.
+// resolve it need this in TestMain. It also installs the in-process Connector
+// engine as the Connector sandbox for the rest of the process, as the Launcher's
+// path would otherwise refuse the load. An unresolvable wasm is an error, never
+// a skip (ADR 0067); the Connector itself loads lazily, on the first New.
 func UseClaudeConnector() error {
 	raw, err := claudeRows(false)
 	if err != nil {
 		return err
 	}
+	connectorsandbox.Use(connectorsandboxtest.InProcess())
 	return driverrows.Use(raw)
 }
 

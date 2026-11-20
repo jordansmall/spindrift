@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 
+	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
@@ -85,6 +86,16 @@ func (p loadPolicy) refuses(row Row) bool {
 	return p == boxLoads && row.Module != "" && !row.FirstParty
 }
 
+// load loads wasm as p does: the Box in-process, since refuses has already
+// kept every Connector but a first-party one from reaching here, and the
+// Launcher only into its Connector sandbox.
+func (p loadPolicy) load(ctx context.Context, wasm []byte) (*connectorhost.Connector, error) {
+	if p == boxLoads {
+		return connectorhost.Load(ctx, wasm)
+	}
+	return connectorsandbox.Load(ctx, wasm)
+}
+
 // use applies raw under p: a row p refuses still registers, but loading its
 // Driver fails with ErrNotFirstParty, and a shadow row it refuses is skipped.
 func use(raw json.RawMessage, p loadPolicy) error {
@@ -148,7 +159,7 @@ func use(raw json.RawMessage, p loadPolicy) error {
 			continue
 		}
 		driver.UseDescriptor(row.Descriptor)
-		load := loader(row.Name, row.Module)
+		load := loader(row.Name, row.Module, p)
 		if p.refuses(row) {
 			load = refusal(row.Name)
 		}
@@ -193,13 +204,13 @@ func refusal(name string) func() (driverkit.Strategy, error) {
 // loader returns the function that loads the Connector at module as the Driver
 // name. The Connector stays open for the life of the process, as the Strategy
 // borrows its instance.
-func loader(name, module string) func() (driverkit.Strategy, error) {
+func loader(name, module string, p loadPolicy) func() (driverkit.Strategy, error) {
 	return func() (driverkit.Strategy, error) {
 		wasm, err := os.ReadFile(module)
 		if err != nil {
 			return driverkit.Strategy{}, fmt.Errorf("read module: %w", err)
 		}
-		c, err := connectorsandbox.Load(context.Background(), wasm)
+		c, err := p.load(context.Background(), wasm)
 		if err != nil {
 			return driverkit.Strategy{}, fmt.Errorf("load module %s: %w", module, err)
 		}
