@@ -234,7 +234,7 @@
             #   merge = {
             #     # comma-separated globs matched against every changed path (added, modified, deleted); a hit downgrades the merge to manual regardless of MERGE_MODE and posts a PR comment naming the match; empty disables the guard (github and forgejo Code Forge merge paths only)
             #     guardPaths = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**";
-            #     # how the final integration commits land on green: merge (merge commit), squash, or rebase; maps to the Forgejo merge API's Do field on forgejo; the github Connector merges by rebase only and refuses merge or squash at launch unless the github row is in shadow mode (github and forgejo Code Forge merge paths only)
+            #     # how the final integration commits land on green: merge (merge commit), squash, or rebase; maps to the Forgejo merge API's Do field on forgejo; the github Connector merges by rebase only and refuses merge or squash at launch (github and forgejo Code Forge merge paths only)
             #     method = "rebase";
             #     # post-green merge policy: immediate (merge on green), auto (enqueue the forge's native auto-merge on github or forgejo; github needs Allow auto-merge enabled, forgejo needs the MERGE_METHOD merge style allowed), manual (leave PR open for human approval)
             #     policy = "manual";
