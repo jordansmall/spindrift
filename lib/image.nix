@@ -67,7 +67,6 @@ let
       gettext # envsubst (promptassembly, conflictresolve)
       jq # agent/*.sh hooks (reject-background-bash.sh and others)
       git
-      gh
       (driver.driverEntry.package pkgs)
       cacert
       socat # unix-socket<->TCP Forwarder for the registry proxy (ADR 0044, issue #2849)
@@ -99,10 +98,10 @@ let
   entrypoint = pkgs.writeShellApplication {
     name = "entrypoint";
     # box and the orchestrator it spawns resolve their tools from this PATH.
-    runtimeInputs =
-      (with pkgs; [
+    runtimeInputs = (
+      with pkgs;
+      [
         git
-        gh
         (driver.driverEntry.package pkgs)
         gettext # envsubst (promptassembly, conflictresolve)
         coreutils
@@ -110,7 +109,8 @@ let
         driver.driverExecBin # in-box Driver runner (#626)
         driver.orchestratorBin # in-box orchestrator (#1996)
         driver.boxBin # in-box settle sequence (#4292)
-      ]);
+      ]
+    );
     # AGENTS_JSON_TEMPLATE is baked as a fixed value, not a :-default, because
     # it comes from the configured models rather than a standalone knob.
     text =

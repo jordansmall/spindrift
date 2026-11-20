@@ -66,15 +66,15 @@ func Clone(cfg Config, stdout, stderr io.Writer) error {
 	return nil
 }
 
-// addForgeRemote gives the mirror clone a credential-free "forge" remote: gh and
-// fj resolve the repo from the clone's remotes, and origin is the mount path.
-// skipFetchAll keeps `git fetch --all` off the forge, which the Box holds no
-// credential for. remote.pushDefault is repo-wide: every branch without its own
-// pushRemote pushes to forge, which gh uses to find a PR and branch recovery
-// would otherwise leave on origin. A push naming no remote then goes to forge;
-// the read-only guard points forge's pushurl at the decoy in every Box that
-// has a forge to guard (all but a self-contained dispatch). A forge with no web
-// URL (local, git) gets no remote.
+// addForgeRemote gives the mirror clone a credential-free "forge" remote naming
+// the repo's web URL, since origin is the mount path. skipFetchAll keeps `git
+// fetch --all` off the forge, which the Box holds no credential for.
+// remote.pushDefault is repo-wide: every branch without its own pushRemote
+// pushes to forge, where branch recovery would otherwise leave it on origin. A
+// push naming no remote then goes to forge; the read-only guard points forge's
+// pushurl at the decoy in every Box that has a forge to guard (all but a
+// self-contained dispatch). A forge with no web URL (local, git) gets no
+// remote.
 func addForgeRemote(cfg Config, stdout, stderr io.Writer) error {
 	s, ok := backendkit.ByName(cfg.CodeForge)
 	if !ok || s.WebURL == nil {

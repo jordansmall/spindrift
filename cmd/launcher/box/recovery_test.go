@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"reflect"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/branchrecovery"
@@ -81,9 +82,6 @@ func TestRecoveryConfig_QueriesOpenPROnlyWhereTheBoxCan(t *testing.T) {
 // query it handed to recovery (nil when none was passed).
 func queryFor(t *testing.T, forge, hostAnswer string) func() (bool, error) {
 	t.Helper()
-	// An empty PATH makes any gh invocation fail, so a host answer that wrongly
-	// reached the forge CLI cannot pass as a clean "open" or "none".
-	t.Setenv("PATH", t.TempDir())
 	f := newFixture(t)
 	f.env.CodeForge = forge
 	f.knobs[branchrecovery.HostOpenPREnv] = hostAnswer
@@ -131,12 +129,12 @@ func TestOpenPRQuery_HostVerdictNeverAddsAQueryWhereNoneRan(t *testing.T) {
 	}
 }
 
-func TestOpenPRQuery_UnsetHostVerdictKeepsTheForgeQuery(t *testing.T) {
+func TestOpenPRQuery_UnsetHostVerdictIsAnError(t *testing.T) {
 	q := queryFor(t, "github", "")
 	if q == nil {
 		t.Fatal("no open-PR query passed")
 	}
-	if _, err := q(); err == nil {
-		t.Error("query succeeded with no gh on PATH; the strategy was not consulted")
+	if got, err := q(); err == nil || got || !strings.Contains(err.Error(), branchrecovery.HostOpenPREnv) {
+		t.Errorf("query = (%v, %v), want an error naming %s and no PR", got, err, branchrecovery.HostOpenPREnv)
 	}
 }

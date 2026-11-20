@@ -27,12 +27,10 @@ type ForbiddenMarkerRow struct {
 	// vocabulary as ValidateMarkerRow.When.
 	When string `json:"when"`
 	// Kind is "substring" for a row whose Marker is scanned as literal
-	// rendered text, or "gh-api-mutation" for the one row backed by
-	// readonlyguards.go's `gh api` argument scan, whose Marker is
-	// display-only and never scanned as a prompt substring.
+	// rendered text.
 	Kind string `json:"kind"`
 	// Enforce names the runtime mechanism that stops the operation:
-	// "command-shim" (a PATH-shadowing wrapper), "git-hook", or "prompt-only"
+	// "git-hook", or "prompt-only"
 	// when only the build-time corpus scan enforces the row, because a
 	// runtime guard would collide with a legitimate in-box use of the same
 	// operation.
@@ -41,10 +39,10 @@ type ForbiddenMarkerRow struct {
 	// interpolated.
 	Message string `json:"message"`
 	// RuntimeMessage is the wording readonlyguards renders into the installed
-	// shim or hook script when Enforce is "git-hook" or "command-shim" (issue
-	// #2509). Message is written for a prompt-facing diagnostic and reads as
-	// nonsense from a shim that rejected one command mid-run while the run
-	// continues. A "prompt-only" row leaves this empty.
+	// hook script when Enforce is "git-hook" (issue #2509). Message is
+	// written for a prompt-facing diagnostic and reads as nonsense from a
+	// hook that rejected one command mid-run while the run continues. A
+	// "prompt-only" row leaves this empty.
 	RuntimeMessage string `json:"runtimeMessage"`
 }
 

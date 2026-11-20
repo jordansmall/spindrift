@@ -180,30 +180,6 @@ let
         cp "$exemptBodyPath" $out/open-pr-create-outbox.md
       '';
 
-  # gh-api-mutation-kind counterpart (issue #2513): same plain, non-exempt
-  # gate as brokenForbiddenMarkerFragmentsDir above, but carrying the
-  # forbidden-gh-api-mutation row's marker text ("gh api").
-  # buildTimeForbiddenMarkerViolations scans only kind == "substring" rows
-  # (readonlyguards.go enforces that row), so this must NOT throw.
-  ghAPIMutationForbiddenMarkerFragmentBody = ''
-    Never run `gh api` yourself here with a mutating method. This fixture
-    deliberately injects the forbidden-gh-api-mutation row's marker text
-    into a fragment gated on a plain, non-exempt gate, to prove the
-    kind == "substring" filter still excludes it from the build-time scan.
-  '';
-  ghAPIMutationForbiddenMarkerFragmentsDir =
-    pkgs.runCommand "gh-api-mutation-forbidden-marker-fragments"
-      {
-        passAsFile = [ "ghAPIMutationBody" ];
-        ghAPIMutationBody = ghAPIMutationForbiddenMarkerFragmentBody;
-      }
-      ''
-        mkdir -p $out
-        cp -r ${../../templates/default/prompts/fragments}/. $out/
-        chmod -R u+w $out
-        cp "$ghAPIMutationBodyPath" $out/auto-format.md
-      '';
-
   # Clean placeholder carrying none of the forbiddenMarkers substrings (issue
   # #2510). The forbidden-marker checks below override `prompt`/`filerPrompt`
   # with it wherever the check isn't exercising that param, so a check over
@@ -2032,31 +2008,6 @@ in
       "mkHarness.nix must not throw when a fragment gated on an exempt gate (BOX_ACCESS_READ_ONLY_LOG) carries a forbidden marker as literal fragment-body text";
     pkgs.runCommand "build-time-forbidden-marker-fragment-exempt-gate-not-triggered" { } "touch $out";
 
-  # The gh-api-mutation-kind counterpart (issue #2513): a plain, non-exempt
-  # gate carrying the forbidden-gh-api-mutation row's marker ("gh api")
-  # instead of a kind == "substring" row's.
-  # buildTimeForbiddenMarkerViolations filters to substring rows, so this
-  # must NOT throw, proving that filter still excludes the gh-api-mutation row.
-  build-time-forbidden-marker-fragment-gh-api-mutation-kind-not-scanned =
-    let
-      inherit (pkgs.lib) assertMsg;
-      ok = builtins.tryEval (
-        (import ../../lib/mkHarness.nix {
-          inherit nixpkgs system;
-          packages = p: [ p.hello ];
-          fragmentsDir = ghAPIMutationForbiddenMarkerFragmentsDir;
-          # Isolates this check to the fragment scan, as in the sibling
-          # build-time-reject-forbidden-marker-fragment check above.
-          prompt = cleanForbiddenMarkerPlaceholder;
-          filerPrompt = cleanForbiddenMarkerPlaceholder;
-        }).spindrift
-      );
-    in
-    assert assertMsg ok.success
-      "mkHarness.nix must not throw when a fragment carries the forbidden-gh-api-mutation row's marker ('gh api') as literal text -- that row's kind is 'gh-api-mutation', not 'substring', so it must be excluded from the build-time scan";
-    pkgs.runCommand "build-time-forbidden-marker-fragment-gh-api-mutation-kind-not-scanned" { }
-      "touch $out";
-
   # The shared top-level template counterpart (issue #2510): `prompt`
   # (issue-prompt.md's default) gets no exemption at all, so its raw text is
   # scanned unconditionally against every forbiddenMarkers substring row.
@@ -2067,7 +2018,7 @@ in
         (import ../../lib/mkHarness.nix {
           inherit nixpkgs system;
           packages = p: [ p.hello ];
-          prompt = "some issue prompt text containing gh pr create somewhere";
+          prompt = "some issue prompt text containing git push somewhere";
           # Isolates this check to the deliberately-broken `prompt` param:
           # the real filer-prompt.md carries an unrelated template violation
           # that would pass this assertion for the wrong reason.
@@ -2076,7 +2027,7 @@ in
       );
     in
     assert assertMsg (!broken.success)
-      "mkHarness.nix must throw when the shared `prompt` template carries a forbidden marker ('gh pr create') as literal text";
+      "mkHarness.nix must throw when the shared `prompt` template carries a forbidden marker ('git push') as literal text";
     pkgs.runCommand "build-time-reject-forbidden-marker-template" { } "touch $out";
 
   # Same as above, but exercising `reviewPrompt` instead of `prompt`.
@@ -2092,13 +2043,13 @@ in
           inherit nixpkgs system;
           packages = p: [ p.hello ];
           prompt = cleanForbiddenMarkerPlaceholder;
-          reviewPrompt = "some review prompt text containing gh pr merge somewhere";
+          reviewPrompt = "some review prompt text containing git push somewhere";
           filerPrompt = cleanForbiddenMarkerPlaceholder;
         }).spindrift
       );
     in
     assert assertMsg (!broken.success)
-      "mkHarness.nix must throw when the shared `reviewPrompt` template carries a forbidden marker ('gh pr merge') as literal text";
+      "mkHarness.nix must throw when the shared `reviewPrompt` template carries a forbidden marker ('git push') as literal text";
     pkgs.runCommand "build-time-reject-forbidden-marker-review-template" { } "touch $out";
 
   # Same again for `filerPrompt`.
@@ -2110,12 +2061,12 @@ in
           inherit nixpkgs system;
           packages = p: [ p.hello ];
           prompt = cleanForbiddenMarkerPlaceholder;
-          filerPrompt = "some filer prompt text containing gh issue create somewhere";
+          filerPrompt = "some filer prompt text containing git bundle create somewhere";
         }).spindrift
       );
     in
     assert assertMsg (!broken.success)
-      "mkHarness.nix must throw when the shared `filerPrompt` template carries a forbidden marker ('gh issue create') as literal text";
+      "mkHarness.nix must throw when the shared `filerPrompt` template carries a forbidden marker ('git bundle create') as literal text";
     pkgs.runCommand "build-time-reject-forbidden-marker-filer-template" { } "touch $out";
 
   # Anti-drift registry check (issue #2709, slice 1): before

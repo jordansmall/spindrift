@@ -193,13 +193,8 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 		return 0, err
 	}
 
-	// Each selected backend's CLI setup and the guards come right after the
-	// clone, ahead of recovery, so no recovery step (its gh pr list, its outbox
-	// bundle) runs unguarded (issue #4446). The PATH the guards prepend
-	// must reach the prefetch hook, the orchestrator and the Driver.
-	if err := r.configureBackendCLIs(); err != nil {
-		return 0, phaseErr("backend-cli", err)
-	}
+	// The guards come right after the clone, ahead of recovery, so no recovery
+	// step (its outbox bundle) runs unguarded (issue #4446).
 	if err := r.installReadonlyGuards(); err != nil {
 		return 0, phaseErr("readonly-guards", err)
 	}

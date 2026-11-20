@@ -24,6 +24,5 @@ BRANCH=agent/issue-7
 CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R0_OTHERCORP_TOKEN=spindrift-registry-proxy-placeholder-not-a-secret
 CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
 GOTOOLCHAIN=local
-PATH=<tmp>/home/.spindrift/readonly-gh-shim:$PATH
 PWD=<tmp>/work
 npm_config_registry=http://127.0.0.1:27182/r0/

@@ -22,5 +22,4 @@ BASH_DEFAULT_TIMEOUT_MS=1800000
 BASH_MAX_TIMEOUT_MS=1800000
 BRANCH=agent/issue-butler-bugs
 CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
-PATH=<tmp>/home/.spindrift/readonly-gh-shim:$PATH
 PWD=<tmp>/work

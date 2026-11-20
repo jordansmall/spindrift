@@ -229,7 +229,7 @@ func newFixture(t *testing.T) *fixture {
 		Registry: newRegFake().deps(),
 		// An empty registry installs nothing, so the read-only cases need no
 		// real git and leave the test process's PATH alone.
-		Guards:    guardsDeps{Install: readonlyguards.Install, Setenv: func(string, string) error { return nil }},
+		Guards:    guardsDeps{Install: readonlyguards.Install},
 		Git:       func(string, ...string) error { return nil },
 		GitOutput: func(string, ...string) (string, error) { return "", nil },
 		Getenv:    func(k string) string { return f.knobs[k] },
@@ -352,7 +352,7 @@ func (f *fixture) run() int {
 // emptyGuardsLine is what the always-on guards install narrates against the
 // fixture's empty registry; stdout and lines drop it so each test asserts only
 // the line it is about.
-const emptyGuardsLine = "readonly-guards: installed 0 command-shim(s) ([]), hook installed=false\n"
+const emptyGuardsLine = "readonly-guards: hook installed=false\n"
 
 func (f *fixture) stdout() string {
 	return strings.TrimPrefix(f.out.String(), emptyGuardsLine)

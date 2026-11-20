@@ -20,7 +20,6 @@ const fakeConfigExit = 97
 // invoked under one of these names.
 var fakes = map[string]func(args []string) int{
 	"gh":     ghMain,
-	"fj":     fjMain,
 	"podman": podmanMain,
 	"docker": podmanMain,
 	"bwrap":  bwrapMain,

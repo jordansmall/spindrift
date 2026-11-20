@@ -50,7 +50,7 @@ type Outcome struct {
 // goes to w. An error means the Box must abort.
 //
 // openPR nil means the forge cannot be asked
-// (backendkit.Strategy.OpenPRForBranch); it is consulted only when non-nil,
+// (backendkit.Strategy.HostAnswersOpenPR); it is consulted only when non-nil,
 // and only when origin/Branch exists. Its error must abort: a silent empty
 // answer (network/auth failure) is indistinguishable from "no PR" and must
 // not trigger the force-reset.

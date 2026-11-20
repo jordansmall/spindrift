@@ -35,29 +35,24 @@ func (r *boxRun) recoveryConfig() branchrecovery.Config {
 	}
 }
 
-// openPRQuery is the CODE_FORGE Strategy's in-box open-PR query bound to this
-// Box's repo and branch; nil when the forge is unregistered or cannot be asked.
-// A tokenless Box answers from the host's BOX_HOST_OPEN_PR instead (issue
-// #7146). A failed query is an error, never "no PR": the caller must not
+// openPRQuery is the open-PR question this Box asks, answered from the host's
+// BOX_HOST_OPEN_PR (issue #7146); nil when the forge is unregistered or the
+// host does not answer for it. The Box holds no forge client or token, so an
+// unset or unusable answer is an error, never "no PR": the caller must not
 // force-reset on it.
 func (r *boxRun) openPRQuery() func() (bool, error) {
-	s, ok := backendkit.ByName(r.codeForge())
-	if !ok || s.OpenPRForBranch == nil {
+	if s, ok := backendkit.ByName(r.codeForge()); !ok || !s.HostAnswersOpenPR {
 		return nil
 	}
-	if v := r.d.Getenv(branchrecovery.HostOpenPREnv); v != "" {
-		return func() (bool, error) {
-			switch v {
-			case branchrecovery.HostOpenPROpen:
-				return true, nil
-			case branchrecovery.HostOpenPRNone:
-				return false, nil
-			}
-			return false, fmt.Errorf("host could not answer whether a PR is open (BOX_HOST_OPEN_PR=%q)", v)
-		}
-	}
+	v := r.d.Getenv(branchrecovery.HostOpenPREnv)
 	return func() (bool, error) {
-		return s.OpenPRForBranch(r.d.Getenv("REPO_SLUG"), r.env.Branch)
+		switch v {
+		case branchrecovery.HostOpenPROpen:
+			return true, nil
+		case branchrecovery.HostOpenPRNone:
+			return false, nil
+		}
+		return false, fmt.Errorf("host could not answer whether a PR is open (%s=%q)", branchrecovery.HostOpenPREnv, v)
 	}
 }
 

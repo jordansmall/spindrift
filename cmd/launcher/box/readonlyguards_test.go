@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,20 +19,14 @@ import (
 )
 
 const guardsRegistry = `[
- {"id":"gh-pr-create","marker":"gh pr create","kind":"substring","enforce":"command-shim","message":"m","runtimeMessage":"blocked gh"},
- {"id":"fj-pr-create","marker":"fj pr create","kind":"substring","enforce":"command-shim","message":"m","runtimeMessage":"blocked fj"},
  {"id":"git-push","marker":"git push","kind":"substring","enforce":"git-hook","message":"m","runtimeMessage":"blocked push"}
 ]`
 
-// guardsFixture is a read-only Box with a real work repo, real git, a fake gh
-// on a PATH the test owns and the real install, so what lands on disk and in
-// the environment is what the Driver would inherit.
+// guardsFixture is a read-only Box with a real work repo, real git and the
+// real install, so what lands on disk is what the Driver would inherit.
 type guardsFixture struct {
 	*fixture
-	reg     *regFake
-	bin     string
-	shimDir string
-	path    string
+	reg *regFake
 }
 
 func newGuardsFixture(t *testing.T) *guardsFixture {
@@ -44,16 +39,6 @@ func newGuardsFixture(t *testing.T) *guardsFixture {
 	g.firstRun(blockedLine+"\n", 0)
 	g.d.Registry = g.reg.deps()
 	g.write(g.in.ForbiddenMarkersFile, guardsRegistry)
-	g.bin = filepath.Join(g.dir, "bin")
-	if err := os.MkdirAll(g.bin, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	g.fakeBinary("gh")
-	g.path = g.bin + string(os.PathListSeparator) + os.Getenv("PATH")
-	t.Setenv("PATH", g.path)
-	// box reads PATH through the injected Getenv, so the knob mirrors the process.
-	g.knobs["PATH"] = g.path
-	g.shimDir = readonlyShimDir(g.knobs["HOME"])
 
 	if err := os.MkdirAll(g.in.WorkDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -73,7 +58,6 @@ func newGuardsFixture(t *testing.T) *guardsFixture {
 			g.reg.events = append(g.reg.events, "guards")
 			return readonlyguards.Install(rows, cfg, out)
 		},
-		Setenv: os.Setenv,
 	}
 	return g
 }
@@ -85,13 +69,6 @@ func (g *guardsFixture) git(dir string, args ...string) string {
 		g.t.Fatalf("git %v: %v: %s", args, err, out)
 	}
 	return strings.TrimSpace(string(out))
-}
-
-func (g *guardsFixture) fakeBinary(name string) {
-	g.t.Helper()
-	if err := os.WriteFile(filepath.Join(g.bin, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		g.t.Fatal(err)
-	}
 }
 
 func (g *guardsFixture) pushurl() string {
@@ -115,23 +92,16 @@ func TestReadonlyGuards_SelfContainedInstallsNothing(t *testing.T) {
 	g.env.SelfContained = true
 	g.env.OutboxRelayCapable = true
 	g.run()
-	if _, err := os.Stat(g.shimDir); err == nil {
-		t.Fatal("shim dir exists on a self-contained run")
-	}
-	if os.Getenv("PATH") != g.path {
-		t.Fatalf("PATH = %q, want it unchanged", os.Getenv("PATH"))
+	if g.pushurl() != "" {
+		t.Fatalf("pushurl = %q on a self-contained run, want it untouched", g.pushurl())
 	}
 }
 
-func TestReadonlyGuards_OutboxRelay_ShimAndHooksAndPath(t *testing.T) {
+func TestReadonlyGuards_OutboxRelay_InstallsHooks(t *testing.T) {
 	g := newGuardsFixture(t)
 	g.env.OutboxRelayCapable = true
 	g.run()
 
-	assertExecutable(t, filepath.Join(g.shimDir, "gh"))
-	if _, err := os.Stat(filepath.Join(g.shimDir, "fj")); err == nil {
-		t.Error("fj shim installed without fj on PATH")
-	}
 	decoy := g.pushurl()
 	if filepath.Base(decoy) != readonlyDecoyName || !strings.HasPrefix(decoy, g.dir) {
 		t.Fatalf("pushurl = %q, want a decoy under the temp dir", decoy)
@@ -142,10 +112,7 @@ func TestReadonlyGuards_OutboxRelay_ShimAndHooksAndPath(t *testing.T) {
 	} {
 		assertExecutable(t, hook)
 	}
-	if got := os.Getenv("PATH"); got != g.shimDir+string(os.PathListSeparator)+g.path {
-		t.Fatalf("PATH = %q, want the shim dir prefixed", got)
-	}
-	if want := "readonly-guards: installed 1 command-shim(s) ([gh]), hook installed=true"; !strings.Contains(g.stdout(), want) {
+	if want := "readonly-guards: hook installed=true"; !strings.Contains(g.stdout(), want) {
 		t.Fatalf("stdout lacks %q:\n%s", want, g.stdout())
 	}
 }
@@ -160,78 +127,41 @@ func TestReadonlyGuards_HostMediatedOnly_InstallsHook(t *testing.T) {
 	assertExecutable(t, filepath.Join(g.in.WorkDir, ".git", "hooks", "pre-push"))
 }
 
-func TestReadonlyGuards_NeitherCapability_ShimsOnly(t *testing.T) {
+func TestReadonlyGuards_NeitherCapability_InstallsNothing(t *testing.T) {
 	g := newGuardsFixture(t)
 	// An unregistered forge reads as the zero Descriptor: neither host-mediated nor relay-capable.
 	g.env.CodeForge = "unregistered"
 	g.run()
-	assertExecutable(t, filepath.Join(g.shimDir, "gh"))
 	if g.pushurl() != "" {
 		t.Errorf("pushurl = %q, want it untouched", g.pushurl())
 	}
 	if _, err := os.Stat(filepath.Join(g.in.WorkDir, ".git", "hooks", "pre-push")); err == nil {
 		t.Error("git hook installed without outbox capability")
 	}
-	if !strings.Contains(g.stdout(), "hook installed=false") {
-		t.Errorf("stdout lacks the hook=false summary:\n%s", g.stdout())
+	if slices.Contains(g.reg.events, "guards") {
+		t.Errorf("events = %v, want the guards install skipped", g.reg.events)
 	}
 }
 
-func TestReadonlyGuards_FjOnPath_GetsItsShimInTheSameDir(t *testing.T) {
-	g := newGuardsFixture(t)
-	g.fakeBinary("fj")
-	g.run()
-	assertExecutable(t, filepath.Join(g.shimDir, "gh"))
-	assertExecutable(t, filepath.Join(g.shimDir, "fj"))
-}
-
-func TestReadonlyGuards_RunsAfterForgejoCLIBeforeRecoveryAndBindings(t *testing.T) {
+func TestReadonlyGuards_RunsBeforeRecoveryAndBindings(t *testing.T) {
 	g := newGuardsFixture(t)
 	g.env.OutboxRelayCapable = true
-	g.env.CodeForge = "forgejo"
-	g.knobs["FORGEJO_TOKEN"] = "s3cret"
-	g.d.LookPath = func(name string) (string, error) {
-		if name == "fj" {
-			return "/bin/fj", nil
-		}
-		return exec.LookPath(name)
-	}
-	g.d.RunCmd = func(cmd *exec.Cmd) error {
-		if cmd.Args[0] == "fj" {
-			g.reg.events = append(g.reg.events, "fj")
-		}
-		return nil
-	}
 	recoverBranch := g.d.Recover
 	g.d.Recover = func(cfg branchrecovery.Config, open func() (bool, error), out io.Writer) (branchrecovery.Outcome, error) {
 		g.reg.events = append(g.reg.events, "recover")
 		return recoverBranch(cfg, open, out)
 	}
 	g.run()
-	want := []string{"fj", "git init", "git config", "guards", "recover", "gate"}
+	want := []string{"git init", "git config", "guards", "recover", "gate"}
 	if got := g.reg.events[:len(want)]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("events = %v, want a prefix of %v", g.reg.events, want)
-	}
-}
-
-func TestReadonlyGuards_PathReachesChildren(t *testing.T) {
-	g := newGuardsFixture(t)
-	var seen string
-	orchestrate := g.d.Orchestrate
-	g.d.Orchestrate = func(argv []string) int {
-		seen = os.Getenv("PATH")
-		return orchestrate(argv)
-	}
-	g.run()
-	if !strings.HasPrefix(seen, g.shimDir) {
-		t.Fatalf("PATH at the Driver run = %q, want the shim dir first", seen)
 	}
 }
 
 func TestReadonlyGuards_FailureAbortsBeforeRecoveryBindingsAndDriver(t *testing.T) {
 	g := newGuardsFixture(t)
 	g.env.OutboxRelayCapable = true
-	// A partial install: the shims land on disk, then Install fails.
+	// A partial install: the hooks land on disk, then Install fails.
 	install := g.d.Guards.Install
 	g.d.Guards.Install = func(rows []promptassembly.ForbiddenMarkerRow, cfg readonlyguards.Config, out io.Writer) (readonlyguards.Result, error) {
 		res, _ := install(rows, cfg, out)
@@ -260,34 +190,6 @@ func TestReadonlyGuards_DecoyFailureAborts(t *testing.T) {
 	var pe *phaseError
 	if !errors.As(err, &pe) || pe.phase != "readonly-guards" {
 		t.Fatalf("run() error = %v, want a readonly-guards phase error", err)
-	}
-}
-
-func TestReadonlyGuards_VerificationCatchesAMissingShim(t *testing.T) {
-	g := newGuardsFixture(t)
-	install := g.d.Guards.Install
-	g.d.Guards.Install = func(rows []promptassembly.ForbiddenMarkerRow, cfg readonlyguards.Config, out io.Writer) (readonlyguards.Result, error) {
-		res, err := install(rows, cfg, out)
-		res.Shims = append(res.Shims, "never-installed")
-		return res, err
-	}
-	_, err := run(g.in, g.env, g.d)
-	var pe *phaseError
-	if !errors.As(err, &pe) || pe.phase != "readonly-guards" || !strings.Contains(err.Error(), "never-installed") {
-		t.Fatalf("run() error = %v, want the readonly-guards phase naming the missing shim", err)
-	}
-	if len(g.calls) != 0 {
-		t.Fatal("Driver ran with a guard missing")
-	}
-}
-
-func TestReadonlyGuards_VerificationCatchesAShadowedShim(t *testing.T) {
-	g := newGuardsFixture(t)
-	// A Setenv that fails to put the shim dir first leaves the real gh winning.
-	g.d.Guards.Setenv = func(string, string) error { return nil }
-	_, err := run(g.in, g.env, g.d)
-	if err == nil || !strings.Contains(err.Error(), "not the guard shim") {
-		t.Fatalf("run() error = %v, want the shadowed shim reported", err)
 	}
 }
 
@@ -335,11 +237,6 @@ func afterInstall(g *guardsFixture, tamper func()) {
 	}
 }
 
-// replaceShim overwrites the installed gh shim with body once Install ran.
-func replaceShim(g *guardsFixture, body string) {
-	afterInstall(g, func() { g.write(filepath.Join(g.shimDir, "gh"), body) })
-}
-
 // chmodAfterInstall sets path's mode once Install ran.
 func chmodAfterInstall(g *guardsFixture, path string, mode os.FileMode) {
 	afterInstall(g, func() {
@@ -349,38 +246,41 @@ func chmodAfterInstall(g *guardsFixture, path string, mode os.FileMode) {
 	})
 }
 
-func TestReadonlyGuards_VerificationCatchesAnUnrunnableShim(t *testing.T) {
-	g := newGuardsFixture(t)
-	replaceShim(g, "#!/nonexistent/interpreter\nexit 0\n")
-	requireGuardsPhaseError(t, g, "shim gh", "/nonexistent/interpreter")
+// replaceHook overwrites the installed work-dir pre-push hook with body once
+// Install ran.
+func replaceHook(g *guardsFixture, body string) {
+	hook := filepath.Join(g.in.WorkDir, ".git", "hooks", "pre-push")
+	afterInstall(g, func() {
+		g.write(hook, body)
+		if err := os.Chmod(hook, 0o755); err != nil {
+			g.t.Fatal(err)
+		}
+	})
 }
 
-func TestReadonlyGuards_VerificationCatchesAShimWhoseTargetIsMissing(t *testing.T) {
+func TestReadonlyGuards_VerificationCatchesAHookWhoseTargetIsMissing(t *testing.T) {
 	g := newGuardsFixture(t)
-	replaceShim(g, "#!/bin/sh\nexec /nonexistent/real-gh \"$@\"\n")
+	g.env.OutboxRelayCapable = true
+	replaceHook(g, "#!/bin/sh\nexec /nonexistent/real-target \"$@\"\n")
 	// No exit code pinned: macOS /bin/sh exits 126 for exec of a missing path, dash 127.
-	requireGuardsPhaseError(t, g, "shim gh", "interpreter /bin/sh", "missing or not executable")
+	requireGuardsPhaseError(t, g, "pre-push", "interpreter /bin/sh", "missing or not executable")
 }
 
-func TestReadonlyGuards_VerificationCatchesANonExecutableShim(t *testing.T) {
+func TestReadonlyGuards_VerificationCatchesAHookKilledByASignal(t *testing.T) {
 	g := newGuardsFixture(t)
-	chmodAfterInstall(g, filepath.Join(g.shimDir, "gh"), 0o644)
-	requireGuardsPhaseError(t, g, "shim gh", "interpreter ", "permission denied")
+	g.env.OutboxRelayCapable = true
+	replaceHook(g, "#!/bin/sh\nkill -KILL $$\n")
+	requireGuardsPhaseError(t, g, "pre-push", "signal: killed")
 }
 
-func TestReadonlyGuards_VerificationCatchesAShimKilledByASignal(t *testing.T) {
+func TestReadonlyGuards_VerificationTimesOutAHungHook(t *testing.T) {
 	g := newGuardsFixture(t)
-	replaceShim(g, "#!/bin/sh\nkill -KILL $$\n")
-	requireGuardsPhaseError(t, g, "shim gh", "signal: killed")
-}
-
-func TestReadonlyGuards_VerificationTimesOutAHungShim(t *testing.T) {
-	g := newGuardsFixture(t)
+	g.env.OutboxRelayCapable = true
 	old := probeTimeout
 	probeTimeout = 200 * time.Millisecond
 	t.Cleanup(func() { probeTimeout = old })
-	replaceShim(g, "#!/bin/sh\nexec sleep 5\n")
-	requireGuardsPhaseError(t, g, "shim gh", "timed out")
+	replaceHook(g, "#!/bin/sh\nexec sleep 5\n")
+	requireGuardsPhaseError(t, g, "pre-push", "timed out")
 }
 
 func TestReadonlyGuards_VerificationCatchesAnUnrunnableHook(t *testing.T) {

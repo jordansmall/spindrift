@@ -241,14 +241,11 @@ in
 
   # issue #2499: structural coverage only, catching a typo'd kind.
   # promptassembly.Validate no longer branches on kind (issue #2513 deleted
-  # its forbidden-marker loop); the two places that still do are pinned
-  # separately, in nix/checks/prompts.nix and in readonlyguards_test.go's
-  # TestInstall_GhAPIMutationRejectsMutatingMethod.
+  # its forbidden-marker loop); only lib/prompt-corpus-scan.nix still does.
   prompt-contract-forbidden-markers-every-row-kind-known-value =
     let
       knownKinds = [
         "substring"
-        "gh-api-mutation"
       ];
       bad = builtins.filter (r: !(builtins.elem r.kind knownKinds)) promptContract.forbiddenMarkers;
       badIds = map (r: r.id) bad;
@@ -263,7 +260,6 @@ in
   prompt-contract-forbidden-markers-every-row-enforce-known-value =
     let
       knownEnforce = [
-        "command-shim"
         "git-hook"
         "prompt-only"
       ];
@@ -275,21 +271,19 @@ in
     pkgs.runCommand "prompt-contract-forbidden-markers-every-row-enforce-known-value" { } "touch $out";
 
   # issue #2509 (Finding 2): the rows readonlyguards.go renders into a runtime
-  # shim or hook script must carry a runtimeMessage distinct from the
+  # hook script must carry a runtimeMessage distinct from the
   # prompt-validator-facing message. A "prompt-only" row is never
   # runtime-rendered, so it carries none.
   prompt-contract-forbidden-markers-runtime-rendered-rows-have-runtime-message =
     let
-      runtimeRendered = builtins.filter (
-        r: r.enforce == "git-hook" || r.enforce == "command-shim"
-      ) promptContract.forbiddenMarkers;
+      runtimeRendered = builtins.filter (r: r.enforce == "git-hook") promptContract.forbiddenMarkers;
       bad = builtins.filter (
         r: !(r ? runtimeMessage) || r.runtimeMessage == "" || r.runtimeMessage == r.message
       ) runtimeRendered;
       badIds = map (r: r.id) bad;
     in
     assert assertMsg (bad == [ ])
-      "every git-hook/command-shim forbiddenMarkers row must carry a non-empty runtimeMessage distinct from its message, offending ids: [${concatStringsSep ", " badIds}]";
+      "every git-hook forbiddenMarkers row must carry a non-empty runtimeMessage distinct from its message, offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-forbidden-markers-runtime-rendered-rows-have-runtime-message" { }
       "touch $out";
 
@@ -302,27 +296,6 @@ in
     assert assertMsg (bad == [ ])
       "every prompt-only forbiddenMarkers row must carry no runtimeMessage, offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-forbidden-markers-prompt-only-rows-have-no-runtime-message" { }
-      "touch $out";
-
-  # issue #3726: the baked shim text cannot know a run's carrier, so the
-  # three `gh` rows whose signal has a socket-mode verb must point at both
-  # routes -- pin the verb string so a later edit cannot silently drop it.
-  prompt-contract-forbidden-markers-gh-signal-rows-name-driver-exec-signal =
-    let
-      ids = [
-        "forbidden-gh-pr-create"
-        "forbidden-gh-issue-comment"
-        "forbidden-gh-issue-create"
-      ];
-      rows = builtins.filter (r: builtins.elem r.id ids) promptContract.forbiddenMarkers;
-      bad = builtins.filter (r: !(pkgs.lib.hasInfix "driver-exec signal" r.runtimeMessage)) rows;
-      badIds = map (r: r.id) bad;
-    in
-    assert assertMsg (builtins.length rows == builtins.length ids)
-      "expected exactly ${builtins.toString (builtins.length ids)} forbiddenMarkers rows [${concatStringsSep ", " ids}], found ${builtins.toString (builtins.length rows)}";
-    assert assertMsg (bad == [ ])
-      "every gh pr create / gh issue comment / gh issue create forbiddenMarkers row's runtimeMessage must name \"driver-exec signal\", offending ids: [${concatStringsSep ", " badIds}]";
-    pkgs.runCommand "prompt-contract-forbidden-markers-gh-signal-rows-name-driver-exec-signal" { }
       "touch $out";
 
   # buildTimeRejectVerdicts (issue #2250) resolves each validateMarkers

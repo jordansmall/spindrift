@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -282,8 +281,6 @@ type seamCase struct {
 	// nix, when set, puts the nix fake on PATH with this config (Record is
 	// filled in); the probe argv it saw lands in seamRun.nixRec.
 	nix *seamtest.NixConfig
-	// fakes are extra tool fakes put on PATH, each configured through env.
-	fakes []string
 	// unset names Box env vars dropped entirely, not blanked.
 	unset []string
 }
@@ -356,13 +353,7 @@ func runBoxSeam(t *testing.T, c seamCase) seamRun {
 		snapshots = filepath.Join(tmp, "snapshots")
 		orchCfg.Snapshot = snapshots
 	}
-	// The clone runs `gh auth setup-git`; a case's own gh config, in c.env,
-	// wins over this answer-nothing default.
-	fakeNames := append([]string{"claude", "orchestrator"}, c.fakes...)
-	if !slices.Contains(c.fakes, "gh") {
-		fakeNames = append(fakeNames, "gh")
-	}
-	mergeEnv(env, seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{Record: filepath.Join(tmp, "gh.rec")}))
+	fakeNames := []string{"claude", "orchestrator"}
 	mergeEnv(env, c.env,
 		seamtest.WriteFakeConfig(t, "claude", seamtest.DriverConfig{Record: driverRec, Runs: c.driverRuns}),
 		seamtest.WriteFakeConfig(t, "orchestrator", orchCfg))
@@ -835,33 +826,31 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 		// Registry-absent half of the pair.
 		registry bool
 		// readonly arms a read-only Box with the outbox relay, so box installs
-		// the guards and prepends their shim dir to PATH.
+		// the guards.
 		readonly bool
-		// fj puts an fj fake on PATH, so a read-only Box shims it as well.
-		fj bool
 	}{
 		{"work-registry", map[string]string{
 			"DISPATCH_KIND": "work", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "implementing",
 			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7", "BOX_OUTBOX_RELAY_CAPABLE": "1",
-		}, true, true, false},
+		}, true, true},
 		{"work-readonly", map[string]string{
 			"DISPATCH_KIND": "work", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "implementing",
 			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7",
 			"BOX_OUTBOX_RELAY_CAPABLE": "1",
-		}, false, true, false},
+		}, false, true},
 		{"work-readonly-forgejo", readonlyWorkEnv(map[string]string{
 			"BOX_OUTBOX_RELAY_CAPABLE": "1", "CODE_FORGE": "forgejo", "BOX_FORGE_BACKEND": "FORGEJO",
 			"FORGEJO_TOKEN": "s3cr3t-forgejo-token", "FORGEJO_BASE_URL": "https://forge.example/",
-		}), false, true, true},
+		}), false, true},
 		{"work-readonly-local", readonlyWorkEnv(map[string]string{
 			"CODE_FORGE": "local", "BOX_HOST_MEDIATED_REMOTE": "1", "BOX_FULLY_LOCAL": "1",
 			"GH_TOKEN": "", "REPO_SLUG": "",
-		}), false, true, false},
-		{"work-readonly-git", readonlyWorkEnv(map[string]string{"CODE_FORGE": "git"}), false, true, false},
+		}), false, true},
+		{"work-readonly-git", readonlyWorkEnv(map[string]string{"CODE_FORGE": "git"}), false, true},
 		{"research", map[string]string{
 			"DISPATCH_KIND": "research", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "researching",
 			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7",
-		}, false, false, false},
+		}, false, false},
 		// A self-contained run has no clone: the work dir is empty and the
 		// token and slug are absent, so the env guards must exempt it.
 		{"research-self-contained", map[string]string{
@@ -869,12 +858,12 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7", "SELF_CONTAINED": "1", "ISSUE_TRACKER": "local",
 			"BOX_TRACKER_AXIS_READ": "LOCAL", "BOX_TRACKER_AXIS_WRITE": "", "BOX_IN_BOX_UNREACHABLE_TRACKER": "1",
 			"GH_TOKEN": "", "REPO_SLUG": "",
-		}, false, false, false},
+		}, false, false},
 		{"butler", map[string]string{
 			"DISPATCH_KIND": "butler", "DISPATCH_KEYING": "chore", "DISPATCH_ANNOUNCE_VERB": "sweeping",
 			"DISPATCH_KEY": "butler-bugs", "CHORE_NAME": "bugs", "ISSUE_TITLE": "", "CHORE_HEAD": "deadbeef",
 			"CHORE_DIFF_RANGE": "cafef00d..deadbeef", "CHORE_SLICE": "cmd/launcher/main.go", "CHORE_MAX_FINDINGS": "5",
-		}, false, false, false},
+		}, false, false},
 	}
 	for _, c := range cases {
 		t.Run(c.kind, func(t *testing.T) {
@@ -896,17 +885,9 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 				registryEnv = seamRegistryRoute(t, workDir)
 			}
 
-			// The clone runs gh, and a gh on PATH is what gets a read-only shim
-			// installed; the fake keeps the run off the host's own gh.
-			fakeNames := []string{"claude", "orchestrator", "gh"}
-			ghEnv := seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{Record: filepath.Join(root, "gh.rec")})
-			if c.fj {
-				fakeNames = append(fakeNames, "fj")
-				mergeEnv(ghEnv, seamtest.WriteFakeConfig(t, "fj", seamtest.FjConfig{Record: filepath.Join(root, "fj.rec")}))
-			}
+			fakeNames := []string{"claude", "orchestrator"}
 			fakes := seamtest.InstallFakes(t, fakeNames...)
 			base := seamBaseEnv(t)
-			mergeEnv(base, ghEnv)
 			mergeEnv(base, map[string]string{
 				"REPO_SLUG": "owner/repo",
 				"HOME":      home,
@@ -952,7 +933,7 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 				t.Errorf("first Driver invocation differs from %s.golden\n--- golden ---\n%s--- actual ---\n%s--- end ---", c.kind, golden, got)
 			}
 			if c.readonly {
-				assertExecutable(t, filepath.Join(readonlyShimDir(home), "gh"))
+				assertExecutable(t, filepath.Join(workDir, ".git", "hooks", "pre-push"))
 			}
 			if c.registry {
 				assertRegistryBound(t, workDir, home, res.Stdout)
@@ -1248,7 +1229,7 @@ func TestBoxSeamHandoffCarriesTheFlagSettings(t *testing.T) {
 
 // seamConflictRepo is a work dir whose origin holds a prior run's agent branch
 // and an origin/main that advanced past it, both adding the same file
-// differently. With seamConflictGh's open PR on the branch, box adopts it and
+// differently. With the host's open PR on the branch, box adopts it and
 // its pre-work `git rebase origin/main` stops on the conflict.
 func seamConflictRepo(t *testing.T) string {
 	t.Helper()
@@ -1271,16 +1252,10 @@ func seamConflictRepo(t *testing.T) string {
 	return dir
 }
 
-// seamConflictGh is the env for a gh fake reporting an open PR on seamBranch,
+// seamConflictOpenPR is the env for a host reporting an open PR on seamBranch,
 // which is what makes box adopt the prior branch instead of force-resetting it.
-func seamConflictGh(t *testing.T) map[string]string {
-	t.Helper()
-	return seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{
-		Record: filepath.Join(t.TempDir(), "gh.rec"),
-		PRs: []seamtest.GhPR{{
-			Number: 9, URL: "https://example.test/o/r/pull/9", HeadRefName: seamBranch, BaseRefName: "main",
-		}},
-	})
+func seamConflictOpenPR() map[string]string {
+	return map[string]string{branchrecovery.HostOpenPREnv: branchrecovery.HostOpenPROpen}
 }
 
 func seamRebaseInProgress(dir string) bool {
@@ -1357,8 +1332,7 @@ func TestBoxSeamConflictUnresolvedAborts(t *testing.T) {
 	r := runBoxSeam(t, seamCase{
 		repo:       repo,
 		snapshot:   true,
-		fakes:      []string{"gh"},
-		env:        seamConflictGh(t),
+		env:        seamConflictOpenPR(),
 		driverRuns: []seamtest.DriverRun{{Stdout: seamResult("could not resolve")}},
 	})
 	r.res.WantExit(t, 1)
@@ -1387,8 +1361,7 @@ func TestBoxSeamConflictResolvedContinuesIntoTheMainRun(t *testing.T) {
 	r := runBoxSeam(t, seamCase{
 		repo:     repo,
 		snapshot: true,
-		fakes:    []string{"gh"},
-		env:      seamConflictGh(t),
+		env:      seamConflictOpenPR(),
 		driverRuns: []seamtest.DriverRun{
 			{Sh: seamResolveRebase(repo), Stdout: seamResult("resolved")},
 			{Stdout: seamResult(seamOutcomeLine("done", "after the conflict pass"))},
@@ -1423,8 +1396,7 @@ func TestBoxSeamConflictResolveOnlyStopsBeforeTheMainRun(t *testing.T) {
 	r := runBoxSeam(t, seamCase{
 		repo:       repo,
 		snapshot:   true,
-		fakes:      []string{"gh"},
-		env:        mergedEnv(seamConflictGh(t), map[string]string{"CONFLICT_RESOLVE_PR_URL": "https://example.test/o/r/pull/9"}),
+		env:        mergedEnv(seamConflictOpenPR(), map[string]string{"CONFLICT_RESOLVE_PR_URL": "https://example.test/o/r/pull/9"}),
 		driverRuns: []seamtest.DriverRun{{Sh: seamResolveRebase(repo), Stdout: seamResult("resolved")}},
 	})
 	r.res.WantExit(t, 0)
@@ -1749,32 +1721,23 @@ func TestBoxSeamLockfileScanWarnsAtSettle(t *testing.T) {
 	}
 }
 
-// TestBoxSeamReadonlyGuardsAndForgejoCLI runs box over each access mode and
-// backend, asserting on the files its guard and Forgejo CLI steps leave behind
-// and on the PATH the Driver is handed.
-func TestBoxSeamReadonlyGuardsAndForgejoCLI(t *testing.T) {
-	const token = "s3cr3t-forgejo-token"
+// TestBoxSeamReadonlyGuards runs box over each access mode and backend,
+// asserting on the push hooks its guard step leaves behind.
+func TestBoxSeamReadonlyGuards(t *testing.T) {
 	cases := []struct {
 		name  string
 		relay bool // the outbox relay is on (BOX_OUTBOX_RELAY_CAPABLE)
 		env   map[string]string
-		fj    bool // an fj fake is on PATH
-		// shims are the shims the run must have installed; none means the shim
-		// dir must not exist.
-		shims []string
 		hook  bool
-		// fjArgv is the add-key call fj must have recorded; nil means none.
-		fjArgv []string
 	}{
-		{name: "read-only github with outbox relay", relay: true, shims: []string{"gh"}, hook: true},
+		{name: "read-only github with outbox relay", relay: true, hook: true},
 		{
-			name: "read-only forgejo", relay: true, fj: true,
+			name: "read-only forgejo", relay: true,
 			env: map[string]string{
 				"CODE_FORGE": "forgejo", "BOX_FORGE_BACKEND": "FORGEJO",
-				"FORGEJO_TOKEN": token, "FORGEJO_BASE_URL": "https://forge.example/",
+				"FORGEJO_TOKEN": "s3cr3t-forgejo-token", "FORGEJO_BASE_URL": "https://forge.example/",
 			},
-			shims: []string{"fj", "gh"}, hook: true,
-			fjArgv: []string{"-H", "https://forge.example", "auth", "add-key", "spindrift-agent"},
+			hook: true,
 		},
 		{
 			// Fully local is still read-only: it gets the guards.
@@ -1783,21 +1746,20 @@ func TestBoxSeamReadonlyGuardsAndForgejoCLI(t *testing.T) {
 				"CODE_FORGE":               "local",
 				"BOX_HOST_MEDIATED_REMOTE": "1", "BOX_FULLY_LOCAL": "1",
 			},
-			shims: []string{"gh"}, hook: true,
+			hook: true,
 		},
 		{
-			name:  "read-only git backend",
-			env:   map[string]string{"CODE_FORGE": "git"},
-			shims: []string{"gh"}, hook: true,
+			name: "read-only git backend",
+			env:  map[string]string{"CODE_FORGE": "git"},
+			hook: true,
 		},
 		{name: "read-only self-contained", relay: true, env: map[string]string{"SELF_CONTAINED": "1"}},
 		{
-			name: "read-only self-contained forgejo", relay: true, fj: true,
+			name: "read-only self-contained forgejo", relay: true,
 			env: map[string]string{
 				"SELF_CONTAINED": "1", "CODE_FORGE": "forgejo", "BOX_FORGE_BACKEND": "FORGEJO",
-				"FORGEJO_TOKEN": token,
+				"FORGEJO_TOKEN": "s3cr3t-forgejo-token",
 			},
-			fjArgv: []string{"-H", "https://codeberg.org", "auth", "add-key", "spindrift-agent"},
 		},
 	}
 	for _, c := range cases {
@@ -1810,31 +1772,14 @@ func TestBoxSeamReadonlyGuardsAndForgejoCLI(t *testing.T) {
 				seamGit(t, filepath.Dir(work), "clone", "-q", seamOriginPath(work), work)
 				seamGit(t, work, "checkout", "-q", "-b", seamBranch)
 			}
-			dir := t.TempDir()
-			fjArgvRec, fjStdinRec := filepath.Join(dir, "fj.argv"), filepath.Join(dir, "fj.stdin")
 			env := map[string]string{}
 			// Ambient values must not stand in for the defaults the cases pin; the guard needs a non-empty GIT_USER_NAME, so the default is passed explicitly.
-			mergeEnv(env, map[string]string{"GIT_USER_NAME": "spindrift-agent", "FORGEJO_TOKEN": "", "FORGEJO_BASE_URL": ""}, c.env, seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{Record: filepath.Join(dir, "gh.rec")}))
-			fakes := []string{"gh"}
-			if c.fj {
-				fakes = append(fakes, "fj")
-				mergeEnv(env, seamtest.WriteFakeConfig(t, "fj", seamtest.FjConfig{Record: fjArgvRec, StdinRecord: fjStdinRec}))
-			}
+			mergeEnv(env, map[string]string{"GIT_USER_NAME": "spindrift-agent", "FORGEJO_TOKEN": "", "FORGEJO_BASE_URL": ""}, c.env)
 			r := runBoxSeam(t, seamCase{
-				repo: work, relay: c.relay, env: env, fakes: fakes, snapshot: true,
+				repo: work, relay: c.relay, env: env, snapshot: true,
 				driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "guards"))}},
 			})
 			r.res.WantExit(t, 0)
-
-			shimDir := readonlyShimDir(r.home)
-			if len(c.shims) == 0 {
-				if _, err := os.Stat(shimDir); !os.IsNotExist(err) {
-					t.Errorf("shim dir %s exists (%v); want none", shimDir, err)
-				}
-			}
-			for _, name := range c.shims {
-				assertExecutable(t, filepath.Join(shimDir, name))
-			}
 
 			hooks := filepath.Join(work, ".git", "hooks", "pre-push")
 			pushurl, _ := exec.Command("git", "-C", work, "config", "--get", "remote.origin.pushurl").Output()
@@ -1855,50 +1800,8 @@ func TestBoxSeamReadonlyGuardsAndForgejoCLI(t *testing.T) {
 				assertExecutable(t, filepath.Join(decoy, "hooks", "pre-receive"))
 				assertExecutable(t, filepath.Join(decoy, "hooks", "pre-push"))
 			}
-
-			gotFj := seamtest.ReadRecord(t, fjArgvRec)
-			if c.fjArgv == nil {
-				if len(gotFj) != 0 {
-					t.Errorf("fj ran: %v; want no call", gotFj)
-				}
-			} else {
-				want := [][]string{c.fjArgv}
-				if slices.Contains(c.shims, "fj") {
-					// readonly-guards verification runs the installed shim once.
-					want = append(want, []string{"--version"})
-				}
-				if !reflect.DeepEqual(gotFj, want) {
-					t.Errorf("fj argv = %v; want %v", gotFj, want)
-				}
-				if got, _ := os.ReadFile(fjStdinRec); string(got) != token {
-					t.Errorf("fj stdin = %q; want the token", got)
-				}
-				if strings.Contains(r.res.Stdout+r.res.Stderr, token) {
-					t.Error("the token leaked into box's output")
-				}
-			}
-
-			path := envMap(seamtest.ReadSnapshot(t, r.snapshots, 1).Env)["PATH"]
-			if len(c.shims) > 0 {
-				if !strings.HasPrefix(path, shimDir+string(os.PathListSeparator)) {
-					t.Errorf("Driver PATH = %q; want it to start with %s", path, shimDir)
-				}
-			} else if strings.Contains(path, shimDir) {
-				t.Errorf("Driver PATH = %q names the shim dir; want it untouched", path)
-			}
-
-			// Each shim rejects a forbidden command locally; the fake behind it
-			// must never see the call.
-			for _, tool := range c.shims {
-				var stderr bytes.Buffer
-				cmd := exec.Command(filepath.Join(shimDir, tool), "pr", "create")
-				cmd.Stderr = &stderr
-				if err := cmd.Run(); err == nil {
-					t.Errorf("`%s pr create` through the shim succeeded; want it rejected", tool)
-				}
-				if !strings.Contains(stderr.String(), "PR-intent relay") {
-					t.Errorf("%s shim rejection = %q; want the PR-intent relay message", tool, stderr.String())
-				}
+			if strings.Contains(r.res.Stdout+r.res.Stderr, "s3cr3t-forgejo-token") {
+				t.Error("the token leaked into box's output")
 			}
 		})
 	}
@@ -2050,19 +1953,10 @@ func seamBundleHeads(t *testing.T, work, outbox string) map[string]string {
 	return heads
 }
 
-func seamGhAskedPRList(t *testing.T, rec string) bool {
-	t.Helper()
-	for _, argv := range seamtest.ReadRecord(t, rec) {
-		if len(argv) >= 2 && argv[0] == "pr" && argv[1] == "list" {
-			return true
-		}
-	}
-	return false
-}
-
 // Branch recovery through the real box binary against a real origin and the
-// gh fake: the prior branch is adopted, left alone or ignored, and the result
-// is read off the unmoved origin ref or the relayed bundle.
+// host's BOX_HOST_OPEN_PR answer: the prior branch is adopted, left alone or
+// ignored, and the result is read off the unmoved origin ref or the relayed
+// bundle.
 func TestBoxSeamBranchRecovery(t *testing.T) {
 	forgejo := map[string]string{
 		"CODE_FORGE": "forgejo", "BOX_FORGE_BACKEND": "FORGEJO",
@@ -2082,40 +1976,38 @@ func TestBoxSeamBranchRecovery(t *testing.T) {
 		name    string
 		prior   bool // origin holds a prior agent branch
 		advance bool // origin/main moved past it
-		openPR  bool // the gh fake reports an open PR on the branch
+		openPR  bool // the host reports an open PR on the branch
 		noWork  bool // the prior branch is at origin/main with no commits of its own
 		relay   bool
 		env     map[string]string
-		fj      bool
 
 		wantBranch string // the work tree's checked-out branch afterwards
 		wantRef    string
 		wantBundle string // "" for none, else "rebased": the bundle's branch head
-		wantAsked  bool   // gh was asked `pr list`
 		wantSay    string
 	}{
 		{name: "no prior branch", wantBranch: seamBranch, wantRef: absent},
 		{
 			name: "read-only prior branch with an open PR is relayed as a bundle", prior: true, advance: true, openPR: true, relay: true,
-			wantBranch: seamBranch, wantRef: unchanged, wantBundle: rebased, wantAsked: true,
+			wantBranch: seamBranch, wantRef: unchanged, wantBundle: rebased,
 			wantSay: "open PR exists on " + seamBranch + "; skipping force-reset",
 		},
 		{
 			name: "read-only adopted branch with nothing ahead of base relays nothing", prior: true, advance: true, openPR: true, relay: true, noWork: true,
-			wantBranch: seamBranch, wantRef: unchanged, wantAsked: true,
+			wantBranch: seamBranch, wantRef: unchanged,
 		},
 		{
 			name: "read-only stale prior branch is left alone", prior: true, advance: true, relay: true,
-			wantBranch: seamBranch, wantRef: unchanged, wantAsked: true,
+			wantBranch: seamBranch, wantRef: unchanged,
 			wantSay: "force-resetting to main",
 		},
 		{
-			name: "forgejo starts fresh and never asks gh", prior: true, env: forgejo, fj: true,
+			name: "forgejo starts fresh and never takes a host answer", prior: true, env: forgejo,
 			wantBranch: seamBranch, wantRef: unchanged,
 			wantSay: "CODE_FORGE=forgejo: starting " + seamBranch + " fresh from origin/main",
 		},
 		{
-			name: "git starts fresh and never asks gh", prior: true, env: map[string]string{"CODE_FORGE": "git"},
+			name: "git starts fresh and never takes a host answer", prior: true, env: map[string]string{"CODE_FORGE": "git"},
 			wantBranch: seamBranch, wantRef: unchanged,
 			wantSay: "CODE_FORGE=git: starting " + seamBranch + " fresh from origin/main",
 		},
@@ -2129,20 +2021,13 @@ func TestBoxSeamBranchRecovery(t *testing.T) {
 				repo = seamPriorBranchRepo(t, c.advance, !c.noWork)
 			}
 			prior := seamOriginRef(t, repo)
-			dir := t.TempDir()
-			ghRec := filepath.Join(dir, "gh.rec")
-			ghCfg := seamtest.GhConfig{Record: ghRec}
+			answer := branchrecovery.HostOpenPRNone
 			if c.openPR {
-				ghCfg.PRs = []seamtest.GhPR{{Number: 9, URL: "https://example.test/o/r/pull/9", HeadRefName: seamBranch, BaseRefName: "main"}}
+				answer = branchrecovery.HostOpenPROpen
 			}
-			env := mergedEnv(c.env, seamtest.WriteFakeConfig(t, "gh", ghCfg))
-			fakes := []string{"gh"}
-			if c.fj {
-				fakes = append(fakes, "fj")
-				mergeEnv(env, seamtest.WriteFakeConfig(t, "fj", seamtest.FjConfig{Record: filepath.Join(dir, "fj.rec")}))
-			}
+			env := mergedEnv(c.env, map[string]string{branchrecovery.HostOpenPREnv: answer})
 			r := runBoxSeam(t, seamCase{
-				repo: repo, relay: c.relay, env: env, fakes: fakes,
+				repo: repo, relay: c.relay, env: env,
 				driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "recovered"))}},
 			})
 			r.res.WantExit(t, 0)
@@ -2155,9 +2040,6 @@ func TestBoxSeamBranchRecovery(t *testing.T) {
 			_, err := os.Stat(filepath.Join(repo, "branch.txt"))
 			if adopted := c.openPR && c.prior && !c.noWork; (err == nil) != adopted {
 				t.Errorf("branch.txt present = %v; want %v", err == nil, adopted)
-			}
-			if got := seamGhAskedPRList(t, ghRec); got != c.wantAsked {
-				t.Errorf("gh asked `pr list` = %v; want %v", got, c.wantAsked)
 			}
 			if c.wantSay != "" && !strings.Contains(r.res.Stdout, c.wantSay) {
 				t.Errorf("stdout lacks %q\n%s", c.wantSay, r.res.Stdout)
@@ -2193,18 +2075,16 @@ func TestBoxSeamBranchRecovery(t *testing.T) {
 	}
 }
 
-// A failed `gh pr list` is never read as "no PR": box aborts before the Driver
-// and leaves the prior branch alone rather than force-resetting a live PR.
-func TestBoxSeamBranchRecoveryGhFailureAborts(t *testing.T) {
+// A github Box the host gave no BOX_HOST_OPEN_PR is never read as "no PR": box
+// aborts before the Driver and leaves the prior branch alone rather than
+// force-resetting a live PR.
+func TestBoxSeamBranchRecoveryUnsetHostAnswerAborts(t *testing.T) {
 	repo := seamPriorBranchRepo(t, true, true)
 	prior := seamOriginRef(t, repo)
 	r := runBoxSeam(t, seamCase{
-		repo:  repo,
-		fakes: []string{"gh"},
-		env: seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{
-			Record:  filepath.Join(t.TempDir(), "gh.rec"),
-			Replies: []seamtest.GhReply{{Args: []string{"pr", "list"}, Exit: 1}},
-		}),
+		repo: repo,
+		// Set empty, not absent: the ambient env of a dispatched Box carries its own answer.
+		env:        map[string]string{branchrecovery.HostOpenPREnv: ""},
 		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "never"))}},
 	})
 	r.res.WantExit(t, 1)
@@ -2225,20 +2105,14 @@ func TestBoxSeamBranchRecoveryGhFailureAborts(t *testing.T) {
 // launcher-forwarded or not.
 var seamForgeTokenVars = []string{"GH_TOKEN", "GITEA_TOKEN", "FORGEJO_TOKEN", "BOX_GH_TOKEN", "BOX_FORGEJO_TOKEN"}
 
-// seamTokenlessCase is a credential-free Box on the github forge,
-// read-only as every such Box is (it relays a bundle, never pushes): no token
-// in its env and a gh fake whose `pr list` fails the way an
-// unauthenticated gh does, so only the host's BOX_HOST_OPEN_PR can answer the
-// open-PR question. hostOpenPR is that variable's value, "" leaving it unset.
-func seamTokenlessCase(t *testing.T, repo, hostOpenPR string, runs []seamtest.DriverRun) (seamCase, string) {
+// seamTokenlessCase is a credential-free Box on the github forge, read-only as
+// every such Box is (it relays a bundle, never pushes): no token in its env, so
+// only the host's BOX_HOST_OPEN_PR can answer the open-PR question. hostOpenPR
+// is that variable's value, "" leaving it unset.
+func seamTokenlessCase(t *testing.T, repo, hostOpenPR string, runs []seamtest.DriverRun) seamCase {
 	t.Helper()
-	ghRec := filepath.Join(t.TempDir(), "gh.rec")
 	env := map[string]string{branchrecovery.HostOpenPREnv: hostOpenPR}
-	mergeEnv(env, seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{
-		Record:  ghRec,
-		Replies: []seamtest.GhReply{{Args: []string{"pr", "list"}, Exit: 4}},
-	}))
-	return seamCase{repo: repo, relay: true, snapshot: true, env: env, fakes: []string{"gh"}, unset: seamForgeTokenVars, driverRuns: runs}, ghRec
+	return seamCase{repo: repo, relay: true, snapshot: true, env: env, unset: seamForgeTokenVars, driverRuns: runs}
 }
 
 // seamDumpEnvNames is the Driver side effect that writes the names in its env
@@ -2257,9 +2131,8 @@ func seamWantNoForgeToken(t *testing.T, envDump string) {
 	}
 }
 
-// A read-only Box holds no forge token, so branch
-// recovery takes the open-PR answer from the host's BOX_HOST_OPEN_PR. The gh
-// fake's `pr list` fails, so a forge call would abort the run. The Box is
+// A read-only Box holds no forge token, so branch recovery takes the open-PR
+// answer from the host's BOX_HOST_OPEN_PR. The Box is
 // read-only, so origin never moves: open adopts the prior branch and relays it
 // rebased as a bundle, none resets it to main with nothing to relay, and a
 // failed host lookup aborts rather than reading as "no PR".
@@ -2286,14 +2159,11 @@ func TestBoxSeamBranchRecoveryTokenlessAnswersFromTheHost(t *testing.T) {
 			repo := seamPriorBranchRepo(t, true, true)
 			prior := seamOriginRef(t, repo)
 			envDump := filepath.Join(t.TempDir(), "box.env")
-			sc, ghRec := seamTokenlessCase(t, repo, c.hostOpenPR, []seamtest.DriverRun{{
+			sc := seamTokenlessCase(t, repo, c.hostOpenPR, []seamtest.DriverRun{{
 				Sh: seamDumpEnvNames(envDump), Stdout: seamResult(seamOutcomeLine("done", "recovered")),
 			}})
 			r := runBoxSeam(t, sc)
 			r.res.WantExit(t, c.wantExit)
-			if seamGhAskedPRList(t, ghRec) {
-				t.Error("the Box ran `gh pr list`; want the host's answer to stand in for it")
-			}
 			if c.wantExit != 0 {
 				for _, want := range []string{"box: branch-recovery:", branchrecovery.HostOpenPREnv + `="` + c.hostOpenPR + `"`, "aborting to protect any open PR"} {
 					if !strings.Contains(r.res.Stderr, want) {
@@ -2343,11 +2213,11 @@ func TestBoxSeamBranchRecoveryTokenlessAnswersFromTheHost(t *testing.T) {
 
 // The adopted branch's pre-work rebase conflicts, and the conflict-resolve
 // pass still runs and the main run still follows, with no forge token in the
-// Box and no `gh pr list` behind the open-PR answer.
+// Box.
 func TestBoxSeamConflictResolveRunsForATokenlessBox(t *testing.T) {
 	repo := seamConflictRepo(t)
 	envDump := filepath.Join(t.TempDir(), "box.env")
-	sc, ghRec := seamTokenlessCase(t, repo, branchrecovery.HostOpenPROpen, []seamtest.DriverRun{
+	sc := seamTokenlessCase(t, repo, branchrecovery.HostOpenPROpen, []seamtest.DriverRun{
 		{Sh: seamResolveRebase(repo), Stdout: seamResult("resolved")},
 		{Sh: seamDumpEnvNames(envDump), Stdout: seamResult(seamOutcomeLine("done", "after the conflict pass"))},
 	})
@@ -2362,9 +2232,6 @@ func TestBoxSeamConflictResolveRunsForATokenlessBox(t *testing.T) {
 	r.wantConflictPass(t)
 	if seamRebaseInProgress(repo) {
 		t.Error("a rebase is still in progress")
-	}
-	if seamGhAskedPRList(t, ghRec) {
-		t.Error("the Box ran `gh pr list`; want the host's answer to stand in for it")
 	}
 	seamWantNoForgeToken(t, envDump)
 }
@@ -2463,7 +2330,6 @@ func TestBoxSeamSettleBundleOut(t *testing.T) {
 			repo := seamRepo(t)
 			r := runBoxSeam(t, seamCase{
 				repo: repo, relay: c.relay, env: c.env, driverRuns: c.runs(repo),
-				fakes: []string{"gh"},
 			})
 			r.res.WantExit(t, c.wantExit)
 
@@ -2535,19 +2401,10 @@ func TestBoxSeamUnrecognizedDispatchKindFails(t *testing.T) {
 	}
 }
 
-// seamGhRecord is a gh fake config of its own, so a test can read back what
-// the run asked gh.
-func seamGhRecord(t *testing.T) (map[string]string, string) {
-	t.Helper()
-	rec := filepath.Join(t.TempDir(), "gh.rec")
-	return seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{Record: rec}), rec
-}
-
 func TestBoxSeamClonesTheTargetOntoTheAgentBranch(t *testing.T) {
 	repo := seamRepo(t)
-	ghEnv, ghRec := seamGhRecord(t)
 	r := runBoxSeam(t, seamCase{
-		repo: repo, env: ghEnv, fakes: []string{"gh"},
+		repo:       repo,
 		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "clone"))}},
 	})
 	r.res.WantExit(t, 0)
@@ -2559,36 +2416,24 @@ func TestBoxSeamClonesTheTargetOntoTheAgentBranch(t *testing.T) {
 			t.Errorf("repo-local %s = %q; want %q", key, got, want)
 		}
 	}
-	for _, argv := range seamtest.ReadRecord(t, ghRec) {
-		if len(argv) >= 2 && argv[0] == "auth" && argv[1] == "setup-git" {
-			t.Errorf("clone ran gh auth setup-git: %q", argv)
-		}
-	}
 }
 
-func TestBoxSeamLocalForgeClonesTheMountWithoutGh(t *testing.T) {
+func TestBoxSeamLocalForgeClonesTheMount(t *testing.T) {
 	repo := seamRepo(t)
-	ghEnv, ghRec := seamGhRecord(t)
 	env := map[string]string{"CODE_FORGE": "local", "BOX_HOST_MEDIATED_REMOTE": "1"}
-	mergeEnv(env, ghEnv)
 	r := runBoxSeam(t, seamCase{
-		repo: repo, env: env, fakes: []string{"gh"},
+		repo: repo, env: env,
 		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "local"))}},
 	})
 	r.res.WantExit(t, 0)
 	if got := strings.TrimSpace(seamGitOut(t, repo, "log", "-1", "--format=%s", "origin/main")); got != "base" {
 		t.Errorf("origin/main tip = %q; want the mount's base commit", got)
 	}
-	for _, argv := range seamtest.ReadRecord(t, ghRec) {
-		if len(argv) >= 2 && argv[0] == "auth" && argv[1] == "setup-git" {
-			t.Errorf("CODE_FORGE=local ran gh auth setup-git: %q", argv)
-		}
-	}
 }
 
 // Under read-only the launcher mounts a host-seeded mirror and, by default
 // (issue #6900), forwards no forge token at all: the Box env has no
-// token key (absent, not blank), it runs no `gh auth setup-git` or `fj auth add-key`,
+// token key (absent, not blank),
 // the clone's origin is the mount rather than the forge URL, and the branch
 // still leaves as a bundle. This harness carries Signals on the log carrier,
 // so dispatch's TestRunOnce_ReadOnlyBoxStillAnswersIssueVerbs
@@ -2618,30 +2463,22 @@ func TestBoxSeamReadOnlyBoxRunsWithNoForgeCredential(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.forge, func(t *testing.T) {
 			repo := seamRepo(t)
-			ghEnv, ghRec := seamGhRecord(t)
-			fjRec := filepath.Join(t.TempDir(), "fj.rec")
 			envDump := filepath.Join(t.TempDir(), "box.env")
 			env := map[string]string{}
-			mergeEnv(env, c.env, ghEnv, seamtest.WriteFakeConfig(t, "fj", seamtest.FjConfig{Record: fjRec}))
+			mergeEnv(env, c.env)
 			// The Driver runs in the Box's env; dump its names to prove what it holds.
 			sh := seamCommitWork(repo) + " && " + seamDumpEnvNames(envDump)
 			r := runBoxSeam(t, seamCase{
-				repo: repo, relay: true, env: env, fakes: []string{"gh", "fj"}, unset: seamForgeTokenVars,
+				repo: repo, relay: true, env: env, unset: seamForgeTokenVars,
 				driverRuns: []seamtest.DriverRun{{Sh: sh, Stdout: seamResult(seamOutcomeLine("ready", "done"))}},
 			})
 			r.res.WantExit(t, 0)
 			seamWantNoForgeToken(t, envDump)
-			for _, argv := range seamtest.ReadRecord(t, fjRec) {
-				if slices.Contains(argv, "add-key") {
-					t.Errorf("a mirror Box ran fj auth add-key: %q", argv)
-				}
-			}
 			if got, want := strings.TrimSpace(seamGitOut(t, repo, "config", "remote.origin.url")), seamOriginPath(repo); got != want {
 				t.Errorf("origin url = %q; want the mirror mount %q", got, want)
 			}
 			if c.forgeURL != "" {
-				// gh resolves the repo and the branch's PR from remotes (fj matches the PR
-				// through -H), and origin is the mount.
+				// origin is the mount, so the forge's web URL rides on a remote of its own.
 				if got := strings.TrimSpace(seamGitOut(t, repo, "remote", "get-url", "forge")); got != c.forgeURL {
 					t.Errorf("forge remote url = %q; want the credential-free %q", got, c.forgeURL)
 				}
@@ -2652,11 +2489,6 @@ func TestBoxSeamReadOnlyBoxRunsWithNoForgeCredential(t *testing.T) {
 				// guard must have pointed its pushurl at the decoy too.
 				if got := strings.TrimSpace(seamGitOut(t, repo, "config", "--get", "remote.forge.pushurl")); filepath.Base(got) != readonlyDecoyName {
 					t.Errorf("remote.forge.pushurl = %q; want the bare decoy", got)
-				}
-			}
-			for _, argv := range seamtest.ReadRecord(t, ghRec) {
-				if len(argv) >= 2 && argv[0] == "auth" && argv[1] == "setup-git" {
-					t.Errorf("a mirror Box ran gh auth setup-git: %q", argv)
 				}
 			}
 			if heads := seamBundleHeads(t, repo, r.outboxDir); heads["refs/heads/"+seamBranch] != seamRevParse(t, repo, seamBranch) {
