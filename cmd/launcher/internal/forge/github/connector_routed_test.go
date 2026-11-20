@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -432,22 +431,6 @@ func TestMergeCommitFrom_WithoutTheReaderIsMissingCapability(t *testing.T) {
 
 	if !errors.Is(err, errNoCapability) {
 		t.Errorf("mergeCommitFrom without a reader = %v, want errNoCapability", err)
-	}
-}
-
-// The labels CompleteVerdict checks come from the Connector's Issue read under
-// a routed row, never from gh.
-func TestRoutedRow_IssueLabelsComeFromTheConnector(t *testing.T) {
-	h, c, calls, _ := routedLogHarness(t, useGithubRowRouted)
-	h.SeedIssue(forge.Issue{Number: "1", Title: "one", Labels: []string{testLabels.InProgress}})
-
-	got, err := c.issueLabels("1")
-
-	if err != nil || !slices.Equal(got, []string{testLabels.InProgress}) {
-		t.Errorf("issueLabels = %v, %v; want [%s]", got, err, testLabels.InProgress)
-	}
-	if n := calls(); n != 0 {
-		t.Errorf("issueLabels ran gh %d times", n)
 	}
 }
 

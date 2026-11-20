@@ -129,31 +129,31 @@ func closeSharedConnectors() {
 }
 
 // routedRow is the github backend row when one is configured and not in shadow
-// mode. The write paths branch on it: routed, the Connector serves the write;
-// otherwise the host's gh does. Reads never fall back, see readRow.
+// mode.
 func routedRow() (backendrows.Row, bool) {
 	row, ok := backendrows.Lookup(backend.GitHub.Name)
 	return row, ok && !row.Shadow
 }
 
-// ErrNoReadRoute is wrapped by every read that has no Connector row to go
-// through. The native gh read path is gone, so the read fails rather than
-// falling back to gh.
-var ErrNoReadRoute = errors.New("github read has no Connector route")
+// ErrNoRoute is wrapped by every call that has no Connector row to go through,
+// and by NewLedger at construction (the tracker and Code Forge build without a
+// row and fail per call). The Connector is github's only implementation, so
+// the call fails rather than falling back to gh.
+var ErrNoRoute = errors.New("github has no Connector route")
 
-// readRow is routedRow for a read: the routed row, or ErrNoReadRoute naming
-// which of the three causes left none.
-func readRow() (backendrows.Row, error) {
+// routeRow is routedRow for a call that needs one: the routed row, or
+// ErrNoRoute naming which of the three causes left none.
+func routeRow() (backendrows.Row, error) {
 	if row, ok := routedRow(); ok {
 		return row, nil
 	}
 	if _, ok := backendrows.Lookup(backend.GitHub.Name); ok {
-		return backendrows.Row{}, fmt.Errorf("%w: the github backend row is in shadow mode, and github has no native read path left to shadow; drop shadow from the row", ErrNoReadRoute)
+		return backendrows.Row{}, fmt.Errorf("%w: the github backend row is in shadow mode, and github has no native implementation left to shadow; drop shadow from the row", ErrNoRoute)
 	}
 	if host := Host(); !strings.EqualFold(host, DefaultHost) {
-		return backendrows.Row{}, fmt.Errorf("%w: GH_HOST=%s is not %s and the github Connector's routes pin api.github.com, so GitHub Enterprise is not served", ErrNoReadRoute, host, DefaultHost)
+		return backendrows.Row{}, fmt.Errorf("%w: GH_HOST=%s is not %s and the github Connector's routes pin api.github.com, so GitHub Enterprise is not served", ErrNoRoute, host, DefaultHost)
 	}
-	return backendrows.Row{}, fmt.Errorf("%w: no github backend row is applied; import spindrift.flakeModules.default (the root module), not core's module directly", ErrNoReadRoute)
+	return backendrows.Row{}, fmt.Errorf("%w: no github backend row is applied; import spindrift.flakeModules.default (the root module), not core's module directly", ErrNoRoute)
 }
 
 // noteRouted records the error a routed read or write returned and returns
@@ -188,8 +188,7 @@ const coreTracker = ""
 // trackerOp runs fn over a tracker view of conn that serves the capability
 // capName names (or coreTracker) and each of alsoCaps. The view has no native
 // tracker under it: a capability it does not serve must fail with
-// errNoCapability, never reach gh or the nil native tracker, which a write the
-// view has no layer for would otherwise panic on.
+// errNoCapability, since nothing sits under the view for it to reach.
 func (e *execClient) trackerOp(row backendrows.Row, capName, verb string, fn func(forge.IssueTracker) error, alsoCaps ...string) error {
 	return e.connectorOp(row, connectortracker.ErrNotTracker, verb, func(conn *connectorhost.Connector, api string) error {
 		for _, c := range append([]string{capName}, alsoCaps...) {
@@ -219,10 +218,8 @@ func trackerCapOp[T any](e *execClient, row backendrows.Row, capName, verb strin
 }
 
 // forgeRead runs fn over a PR forge view of conn, with its PR-side and
-// optional-interface handles resolved. Its web host is the one the native
-// adapter's own PR URLs carry (GH_HOST, else github.com), and nothing native
-// sits under it: a read the Connector does not serve must fail rather than
-// reach gh.
+// optional-interface handles resolved. Its web host is the one the PR URLs carry
+// (GH_HOST, else github.com); a read the Connector does not serve fails.
 func (e *execClient) forgeRead(row backendrows.Row, verb string, fn func(forge.CodeForge, forge.Capabilities) error) error {
 	return e.connectorOp(row, connectorforge.ErrNotForge, verb, func(conn *connectorhost.Connector, api string) error {
 		cf, err := connectorforge.NewReader(conn, connectorforge.Target{API: api, Repo: e.repo}, Host())
@@ -411,7 +408,7 @@ func (e *execClient) listLabelsViaConnector(row backendrows.Row) ([]string, erro
 	return viaTracker(e, row, connectortracker.CapLabels, "list labels", func(tr forge.IssueTracker) ([]string, error) { return tr.ListLabels() })
 }
 
-// classifyProbeErr gives a failed probe the sentinels the native Probe does:
+// classifyProbeErr gives a failed probe the sentinels callers match on:
 // anything but an auth failure, a rate limit or an unsupported Connector means
 // the repository is unreachable.
 func classifyProbeErr(err error, repoSlug string) error {

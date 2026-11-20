@@ -11,8 +11,8 @@ import (
 
 const readPRURL = "https://github.com/owner/repo/pull/1"
 
-// readsNeedingARow is every tracker read a no-route state must fail by name.
-var readsNeedingARow = []struct {
+// callsNeedingARow is every read and write a no-route state must fail by name.
+var callsNeedingARow = []struct {
 	name string
 	read func(c *execClient) error
 }{
@@ -48,13 +48,33 @@ var readsNeedingARow = []struct {
 	{"Probe", func(c *execClient) error { _, err := c.Probe(); return err }},
 	{"ListLabels", func(c *execClient) error { _, err := c.ListLabels(); return err }},
 	{"FailureDetail", func(c *execClient) error { _, err := c.FailureDetail(readPRURL); return err }},
+	{"TransitionState", func(c *execClient) error { return c.TransitionState("1", forge.Dispatchable, forge.InProgress) }},
+	{"AddLabels", func(c *execClient) error { return c.AddLabels("1", []string{"x"}) }},
+	{"CompleteVerdict", func(c *execClient) error { return c.CompleteVerdict("1", forge.Recommend) }},
+	{"CloseMergedIssue", func(c *execClient) error { return c.CloseMergedIssue("1") }},
+	{"Comment", func(c *execClient) error { return c.Comment("1", "b") }},
+	{"PostIssue", func(c *execClient) error { _, err := c.PostIssue("t", "b", nil); return err }},
+	{"Merge", func(c *execClient) error { return c.Merge(readPRURL) }},
+	{"EnqueueAutoMerge", func(c *execClient) error { return c.EnqueueAutoMerge(readPRURL) }},
+	{"MarkReady", func(c *execClient) error { return c.MarkReady(readPRURL) }},
+	{"MarkDraft", func(c *execClient) error { return c.MarkDraft(readPRURL) }},
+	{"CommentPR", func(c *execClient) error { return c.CommentPR(readPRURL, "b") }},
+	{"CreateLabel", func(c *execClient) error { return c.CreateLabel("n", "d", "ffffff") }},
+	{"Rebase", func(c *execClient) error { return c.Rebase(readPRURL) }},
+	{"RebasePRHead", func(c *execClient) error { return c.RebasePRHead(readPRURL, "b") }},
+	{"SeedMirror", func(c *execClient) error { return c.SeedMirror("/nonexistent") }},
+	{"PushBranch", func(c *execClient) error { return c.PushBranch("/nonexistent", "ref", "b", "main") }},
+	{"DeleteBranch", func(c *execClient) error { return c.DeleteBranch("b", "main") }},
+	{"CreateDraftPR", func(c *execClient) error { _, _, err := c.CreateDraftPR("t", "b", "main", "b"); return err }},
+	{"RelayBundle", func(c *execClient) error { return c.RelayBundle("/nonexistent", "ref") }},
+	{"CommitSubjects", func(c *execClient) error { _, err := c.CommitSubjects("/nonexistent", "main", "ref"); return err }},
 	{"IntrospectToken", func(*execClient) error { _, err := introspectToken("ghp_abc", connectorRepo); return err }},
 }
 
 // With no github row, under a GitHub Enterprise GH_HOST, or under a shadow row
-// there is no Connector to read through, and gh is no fallback: each read fails
-// with ErrNoReadRoute naming the cause and never runs gh.
-func TestReads_WithoutARoutedRowFailNamedAndNeverRunGh(t *testing.T) {
+// there is no Connector to go through, and gh is no fallback: each call fails
+// with ErrNoRoute naming the cause and never runs gh.
+func TestCalls_WithoutARoutedRowFailNamedAndNeverRunGh(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		setup func(t *testing.T) (c *execClient, calls func() int)
@@ -78,14 +98,14 @@ func TestReads_WithoutARoutedRowFailNamedAndNeverRunGh(t *testing.T) {
 			return c, calls
 		}, "shadow"},
 	} {
-		for _, rd := range readsNeedingARow {
+		for _, rd := range callsNeedingARow {
 			t.Run(tc.name+"/"+rd.name, func(t *testing.T) {
 				c, calls := tc.setup(t)
 
 				err := rd.read(c)
 
-				if !errors.Is(err, ErrNoReadRoute) {
-					t.Fatalf("%s error = %v, want ErrNoReadRoute", rd.name, err)
+				if !errors.Is(err, ErrNoRoute) {
+					t.Fatalf("%s error = %v, want ErrNoRoute", rd.name, err)
 				}
 				if !strings.Contains(err.Error(), tc.want) {
 					t.Errorf("%s error = %q, want it to name %q", rd.name, err, tc.want)

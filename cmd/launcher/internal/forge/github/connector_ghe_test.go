@@ -45,8 +45,8 @@ func TestGithubRow_GHEHostAppliesNoRow(t *testing.T) {
 	}
 	calls := countGH(t)
 	c := NewExecClient(connectorRepo, forge.DispatchLabels{})
-	if _, err := c.ListOpenIssues(); !errors.Is(err, ErrNoReadRoute) {
-		t.Errorf("ListOpenIssues error = %v, want ErrNoReadRoute", err)
+	if _, err := c.ListOpenIssues(); !errors.Is(err, ErrNoRoute) {
+		t.Errorf("ListOpenIssues error = %v, want ErrNoRoute", err)
 	}
 	if n := calls(); n != 0 {
 		t.Errorf("ListOpenIssues ran gh %d times under a GitHub Enterprise host", n)

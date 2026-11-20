@@ -26,9 +26,9 @@ func HostFrom(getenv func(string) string) string {
 
 func init() {
 	// The row's Routes pin api.github.com. Under any other GH_HOST no row
-	// applies: github reads fail with ErrNoReadRoute and native writes go through
-	// gh (which honours GH_HOST). The row's credential is neither fetched nor
-	// sent to a host it never targeted.
+	// applies: every github call fails with ErrNoRoute rather than going through
+	// gh. The row's credential is neither fetched nor sent to a host it never
+	// targeted.
 	backendrows.RegisterGate(backend.GitHub.Name, func(lookup func(string) string) bool {
 		return strings.EqualFold(HostFrom(lookup), DefaultHost)
 	})

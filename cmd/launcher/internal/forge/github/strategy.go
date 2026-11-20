@@ -25,27 +25,31 @@ var Strategy = backendkit.Strategy{
 		return `enable "Allow auto-merge" in repo Settings → General`
 	},
 	AcquireToken: acquireTokenWith(introspectToken),
+	// The tracker and Code Forge build without a row and fail each call with
+	// ErrNoRoute (routeRow), as the reads did since #6811: a build that failed
+	// here would take down every launch path that merely constructs one.
 	NewIssueTracker: func(s backendkit.Shared, _ backendkit.Lookup) (forge.IssueTracker, error) {
 		return NewExecClient(s.RepoSlug, s.Labels, WithVerdictLabels(s.VerdictLabels)), nil
 	},
 	NewCodeForge: func(s backendkit.Shared, _ backendkit.Lookup, _ forge.SanitizedParent, _ forge.IssueTracker) (forge.CodeForge, error) {
-		if err := checkRoutedMergeMethodAtBuild(s); err != nil {
-			return nil, err
+		// Refuse an unhonourable MERGE_METHOD at launch, as the forgejo row
+		// does, rather than at the first merge.
+		if _, ok := routedRow(); ok {
+			if err := checkRoutedMergeMethod(s.MergeMethod); err != nil {
+				return nil, err
+			}
 		}
 		return NewExecClient(s.RepoSlug, s.Labels, codeForgeOpts(s)...), nil
 	},
 	// The Box has no backend rows, so this stays the in-box gh query (#6757)
 	// rather than the Connector read the host's OpenPRForBranch uses.
-	OpenPRForBranch: func(repoSlug, branch string) (bool, error) {
-		_, open, err := NewExecClient(repoSlug, forge.DispatchLabels{}).nativeOpenPRForBranch(branch)
-		return open, err
-	},
+	OpenPRForBranch: boxOpenPRForBranch,
 	NewLedger: func(s backendkit.Shared, _ backendkit.Lookup) (backendkit.LedgerSite, error) {
-		if row, ok := routedRow(); ok {
-			return NewExecClient(s.RepoSlug, s.Labels, codeForgeOpts(s)...).ledgerSiteViaConnector(row)
+		row, err := routeRow()
+		if err != nil {
+			return backendkit.LedgerSite{}, err
 		}
-		url, gitArgs := GitRemote(s.RepoSlug)
-		return backendkit.LedgerSite{URL: url, GitArgs: gitArgs}, nil
+		return NewExecClient(s.RepoSlug, s.Labels, codeForgeOpts(s)...).ledgerSiteViaConnector(row)
 	},
 	WebURL: func(s backendkit.Shared, _ backendkit.Lookup) string {
 		if s.RepoSlug == "" {
@@ -63,15 +67,6 @@ var Strategy = backendkit.Strategy{
 		return strings.EqualFold(host, Host()) && strings.EqualFold(slug, s.RepoSlug)
 	},
 	IntrospectToken: introspectToken,
-}
-
-// checkRoutedMergeMethodAtBuild refuses an unhonourable MERGE_METHOD at launch
-// under a routed row, as the forgejo row does, rather than at the first merge.
-func checkRoutedMergeMethodAtBuild(s backendkit.Shared) error {
-	if _, ok := routedRow(); !ok {
-		return nil
-	}
-	return checkRoutedMergeMethod(s.MergeMethod)
 }
 
 func codeForgeOpts(s backendkit.Shared) []ExecOption {

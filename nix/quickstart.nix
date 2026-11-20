@@ -22,7 +22,7 @@ pkgs.buildGoModule {
   nativeBuildInputs = [ pkgs.makeWrapper ];
   # quickstart's main reads these into a github backend row
   # (cmd/launcher/quickstart/connector_row.go); a plain `go run` sets neither
-  # and the probe and token audit fail with ErrNoReadRoute.
+  # and the probe and token audit fail with ErrNoRoute.
   postInstall = ''
     wrapProgram $out/bin/quickstart \
       --set SPINDRIFT_BACKEND_CONNECTOR_WASM ${connector.package pkgs}/github.wasm \
