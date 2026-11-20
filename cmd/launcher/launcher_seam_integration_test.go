@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -49,6 +50,14 @@ var smokeRuntimeSettings = map[string]string{
 // on a runner argv. BOX_GH_TOKEN is a Box-side credential name a migrated
 // Consumer may still export; the launcher must never forward it to a runner.
 var smokeSecrets = map[string]string{"GH_TOKEN": "fake-token", "BOX_GH_TOKEN": "fake-box-token", "CLAUDE_CODE_OAUTH_TOKEN": "fake-oauth"}
+
+// smokeLocalSettings are the values a work or research run takes at run time
+// from useLocalForge, which moves the tracker and forge off the fixture's
+// github; the butler run keeps the document's. CODE_FORGE_REMOTE_URL is the
+// per-run bare remote, so only its tail is pinned.
+var smokeLocalSettings = map[string]string{"ISSUE_TRACKER": "local", "CODE_FORGE": "git"}
+
+const smokeLocalRemoteTail = "/remote.git"
 
 // tmpOverlay is argvEnv's mount source for a bwrap --tmp-overlay target.
 const tmpOverlay = "<tmp-overlay>"
@@ -141,7 +150,14 @@ func checkRuntimeArgv(doc *inputdoc.Document, kind string, argv []string) []stri
 		if rt, ok := smokeRuntimeSettings[name]; ok {
 			want, inDoc = rt, true
 		}
+		if rt, ok := smokeLocalSettings[name]; ok && kind != "butler" {
+			want, inDoc = rt, true
+		}
 		switch {
+		case name == "CODE_FORGE_REMOTE_URL" && kind != "butler":
+			if !ok || got == nil || !strings.HasSuffix(*got, smokeLocalRemoteTail) {
+				bad = append(bad, fmt.Sprintf("CODE_FORGE_REMOTE_URL=%v on argv; want the local remote", got))
+			}
 		case forgeTokens[name]:
 			if ok {
 				bad = append(bad, fmt.Sprintf("read-only Box got forge token %s on argv", name))
@@ -186,11 +202,15 @@ func forgeCall(calls [][]string, want ...string) bool {
 	return false
 }
 
-// checkForgeCalls returns what is wrong with the gh calls a dispatch of
-// issue 7 made. The work family's labels come from the document; the
-// research family's are fixed by the launcher (ADR 0022).
-func checkForgeCalls(doc *inputdoc.Document, kind string, calls [][]string) []string {
+// checkForge returns what is wrong with what a dispatch of issue 7 did to
+// its tracker and forge. The work family's labels come from the document; the
+// research family's are fixed by the launcher (ADR 0022). A work or research
+// run is checked by the issue file's end state and whether the change landed,
+// since the local tracker and git forge make no gh calls; a butler run by its
+// gh calls.
+func checkForge(doc *inputdoc.Document, kind string, r smokeRun) []string {
 	var bad []string
+	calls := r.gh
 	need := func(why string, want ...string) {
 		if !forgeCall(calls, want...) {
 			bad = append(bad, fmt.Sprintf("no gh call %s: want %q", why, want))
@@ -198,17 +218,18 @@ func checkForgeCalls(doc *inputdoc.Document, kind string, calls [][]string) []st
 	}
 	switch kind {
 	case "work":
-		queue, active, done := doc.Settings["LABEL"], doc.Settings["IN_PROGRESS_LABEL"], doc.Settings["COMPLETE_LABEL"]
-		need("discovers the work queue", "issue", "list", "--label", queue)
-		need("claims the issue", "issue", "edit", "7", "--add-label", active, "--remove-label", queue)
-		need("merges the landing PR", "pr", "merge", smokePR)
-		need("marks the issue complete", "issue", "edit", "7", "--add-label", done, "--remove-label", active)
+		if want := doc.Settings["COMPLETE_LABEL"]; r.issueState != want {
+			bad = append(bad, fmt.Sprintf("issue 7 ends in state %q; want the complete label %q", r.issueState, want))
+		}
+		if !r.landed {
+			bad = append(bad, "the agent branch's change never reached main on the remote")
+		}
 	case "research":
-		labels := forge.ResearchDispatchLabels()
-		need("claims the issue", "issue", "edit", "7", "--add-label", labels.InProgress, "--remove-label", labels.Dispatchable)
-		need("applies the verdict label", "issue", "edit", "7", "--add-label", forge.ResearchVerdictLabels().Label(forge.Recommend))
-		if forgeCall(calls, "pr", "merge") {
-			bad = append(bad, "research dispatch merged a PR")
+		if want := forge.ResearchVerdictLabels().Label(forge.Recommend); r.issueState != want {
+			bad = append(bad, fmt.Sprintf("issue 7 ends in state %q; want the verdict label %q", r.issueState, want))
+		}
+		if r.landed {
+			bad = append(bad, "research dispatch merged a change")
 		}
 	case "butler":
 		need("files the finding under the butler provenance label", "issue", "create", "--label", dispatchkind.Butler.FindingLabel)
@@ -251,7 +272,7 @@ func seedLedgerRemote(t *testing.T) (bare string, env map[string]string) {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{
-		{"init", "-q", "--bare", bare},
+		{"init", "-q", "--bare", "-b", "main", bare},
 		{"init", "-q", "-b", "main", seed},
 	} {
 		seamGit(t, gitEnv, "", args...)
@@ -285,11 +306,47 @@ func seamGit(t *testing.T, env []string, dir string, args ...string) {
 	}
 }
 
-// runSmoke runs the launcher on docPath and returns the Box-run argv the
-// runtime recorded, plus every gh call. For a butler case, ledgerRefs lists
-// the Ledger refs the sweep left on the remote. extra are launcher flags
-// appended before the subcommand.
-func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (boxRun []string, gh [][]string, ledgerRefs []string) {
+// smokeRun is what a runSmoke launcher run left behind.
+type smokeRun struct {
+	// boxRun is the Box-run argv the runtime recorded.
+	boxRun []string
+	// gh is every gh call. Only a butler run reaches gh: work and research
+	// read and land through the local tracker and git forge.
+	gh [][]string
+	// ledgerRefs lists the Ledger refs a butler sweep left on the remote.
+	ledgerRefs []string
+	// issueState is issue 7's frontmatter state after a work or research run.
+	issueState string
+	// landed reports whether the agent branch's change reached main on the remote.
+	landed bool
+}
+
+// useLocalForge points the document at docPath at a local tracker holding one
+// issue file per n in issues, each in state, under workDir, and a git forge
+// landing on the bare remote. It edits docPath, so pass a copy. The git forge
+// merges in its own clone of bare, which ignores the launcher's insteadOf
+// rules, so the remote is named directly. The github path is no longer
+// runnable here: every github read needs a routed Connector row.
+func useLocalForge(t *testing.T, docPath, workDir, bare string, issues []int, state string) {
+	t.Helper()
+	setDocSettings(t, docPath, map[string]string{"ISSUE_TRACKER": "local", "CODE_FORGE": "git", "CODE_FORGE_REMOTE_URL": bare})
+	dir := filepath.Join(workDir, ".spindrift", "issues")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range issues {
+		body := "---\ntitle: T\nstate: " + state + "\n---\nB\n"
+		if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(n)+".md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// runSmoke runs the launcher on docPath and returns what it left behind. A
+// work or research run reads a local issue and lands through the git forge, on
+// a scratch copy of the document. extra are launcher flags appended before
+// the subcommand.
+func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (res smokeRun) {
 	t.Helper()
 	bin := seamtest.BuildLauncher(t)
 	fakeDir := seamtest.InstallFakes(t, "podman", "docker", "bwrap", "gh")
@@ -298,6 +355,19 @@ func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (boxRu
 	doc, err := inputdoc.Load(docPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Every kind runs read-only, so the launcher clones the Target repo host-side
+	// (SeedMirror); the same insteadOf remote serves that clone, the work kind's
+	// bundle relay, and the Ledger.
+	bare, gitEnv := seedLedgerRemote(t)
+	local := c.kind != "butler"
+	if local {
+		state := doc.Settings["LABEL"]
+		if c.kind == "research" {
+			state = forge.ResearchDispatchLabels().Dispatchable
+		}
+		docPath = scratchDoc(t, docPath, func(map[string]string) {})
+		useLocalForge(t, docPath, workDir, bare, []int{7}, state)
 	}
 	overlay := c.runtime == "bwrap" && bwrapStoreOverlay(doc)
 	if overlay {
@@ -321,7 +391,6 @@ func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (boxRu
 		}
 	}
 
-	issue := seamtest.GhIssue{Number: 7, Title: "T", Body: "B", Labels: []string{"ready-for-agent"}}
 	outcome := "SPINDRIFT_OUTCOME issue=7 landing=" + smokePR + " status=ready note=seam\n"
 	args := []string{"--input", docPath, "--repo-slug", smokeRepo, "--box-signal-carrier", "log",
 		"--user-name", "Seam Bot", "--user-email", "seam@example.com", "--no-build",
@@ -337,7 +406,6 @@ func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (boxRu
 	var bareLedger string
 	switch c.kind {
 	case "research":
-		issue.Labels = []string{forge.ResearchDispatchLabels().Dispatchable}
 		outcome = "SPINDRIFT_OUTCOME issue=7 landing=none status=recommend note=seam\n"
 		args = append(args, "research", "7")
 	case "butler":
@@ -348,21 +416,12 @@ func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (boxRu
 		replies = []seamtest.GhReply{{Args: []string{"issue", "create"}, Stdout: "https://github.com/" + smokeRepo + "/issues/12\n"}}
 	default:
 		args = append(args, "dispatch")
-		// The host opens the PR for the relayed branch; the fake answers with its URL.
-		replies = []seamtest.GhReply{{Args: []string{"pr", "create"}, Stdout: smokePR + "\n"}}
 	}
 
 	env := seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{
 		Record:  recDir + "/gh.jsonl",
-		Issues:  []seamtest.GhIssue{issue},
 		Replies: replies,
-		PRs: []seamtest.GhPR{{Number: 9, URL: smokePR, HeadRefName: "agent/issue-7", BaseRefName: "main",
-			HeadRefOid: "abc123", Checks: "SUCCESS", Mergeable: "MERGEABLE"}},
 	})
-	// Every kind runs read-only, so the launcher clones the Target repo host-side
-	// (SeedMirror); the same insteadOf remote serves that clone, the work kind's bundle relay,
-	// and the Ledger.
-	bare, gitEnv := seedLedgerRemote(t)
 	if c.kind == "butler" {
 		bareLedger = bare
 	}
@@ -370,6 +429,10 @@ func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (boxRu
 		env[k] = v
 	}
 	run := seamtest.PodmanRun{Outcome: outcome, Intents: intents}
+	if c.kind == "research" {
+		// A local tracker has no in-box client, so the Box relays its verdict comment.
+		run.Comment = "verdict: recommend\n"
+	}
 	if c.kind == "work" {
 		// A read-only Box cannot push: it hands the launcher a bundle in its outbox.
 		run.Files = map[string]string{
@@ -396,8 +459,7 @@ func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (boxRu
 		env[k] = v
 	}
 
-	res := seamtest.Run(t, seamtest.Cmd{Bin: bin, Args: args, Env: env, CleanEnv: true, PathDirs: []string{fakeDir}, Dir: workDir})
-	res.WantExit(t, 0)
+	seamtest.Run(t, seamtest.Cmd{Bin: bin, Args: args, Env: env, CleanEnv: true, PathDirs: []string{fakeDir}, Dir: workDir}).WantExit(t, 0)
 
 	for _, tool := range []string{"podman", "docker", "bwrap"} {
 		recs := seamtest.ReadRecord(t, recDir+"/"+tool+".jsonl")
@@ -419,9 +481,9 @@ func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (boxRu
 				}
 			case tool == "bwrap":
 				boxes++
-				boxRun = r
+				res.boxRun = r
 			case len(r) > 0 && r[0] == "run":
-				boxRun = r
+				res.boxRun = r
 			}
 		}
 		if tool == "bwrap" {
@@ -442,9 +504,23 @@ func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (boxRu
 		if err != nil {
 			t.Fatalf("list ledger refs: %v", err)
 		}
-		ledgerRefs = strings.Fields(string(out))
+		res.ledgerRefs = strings.Fields(string(out))
 	}
-	return boxRun, seamtest.ReadRecord(t, recDir+"/gh.jsonl"), ledgerRefs
+	res.gh = seamtest.ReadRecord(t, recDir+"/gh.jsonl")
+	if local {
+		data, err := os.ReadFile(filepath.Join(workDir, ".spindrift", "issues", "7.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			if v, ok := strings.CutPrefix(line, "state: "); ok {
+				res.issueState = strings.Trim(v, "\"")
+			}
+		}
+		// The change is the agent branch's one file; it reaches main only by a merge.
+		res.landed = exec.Command("git", "-C", bare, "cat-file", "-e", "main:change.txt").Run() == nil
+	}
+	return res
 }
 
 func TestSeamLauncherSmokeMatrix(t *testing.T) {
@@ -458,19 +534,20 @@ func TestSeamLauncherSmokeMatrix(t *testing.T) {
 			if got := doc.Artifacts.Shared.Runtime.String(); got != c.runtime {
 				t.Fatalf("fixture %s renders RUNTIME=%q; case expects %q", c.fixture, got, c.runtime)
 			}
-			boxRun, gh, ledgerRefs := runSmoke(t, c, docPath)
+			run := runSmoke(t, c, docPath)
+			boxRun := run.boxRun
 			if boxRun == nil {
 				t.Fatalf("%s never ran a Box", c.runtime)
 			}
 			for _, p := range checkRuntimeArgv(doc, c.kind, boxRun) {
 				t.Errorf("runtime: %s", p)
 			}
-			for _, p := range checkForgeCalls(doc, c.kind, gh) {
+			for _, p := range checkForge(doc, c.kind, run) {
 				t.Errorf("forge: %s", p)
 			}
 			if c.kind == "butler" {
-				if want := []string{ledger.RefPrefix + "bugs"}; !slices.Equal(ledgerRefs, want) {
-					t.Errorf("ledger refs on the remote = %q; want %q", ledgerRefs, want)
+				if want := []string{ledger.RefPrefix + "bugs"}; !slices.Equal(run.ledgerRefs, want) {
+					t.Errorf("ledger refs on the remote = %q; want %q", run.ledgerRefs, want)
 				}
 				if env, _ := argvEnv(boxRun, "-e"); env["CHORE_NAME"] == nil || *env["CHORE_NAME"] != "bugs" {
 					t.Errorf("butler Box was not handed CHORE_NAME=bugs: %q", boxRun)
@@ -491,7 +568,8 @@ func TestSeamSmokeReadOnlyBoxCarriesNoForgeToken(t *testing.T) {
 		t.Fatal("smokeMatrix has no work-podman row")
 	}
 	c := smokeMatrix[i]
-	boxRun, gh, _ := runSmoke(t, c, seamtest.Path(t, c.fixture))
+	run := runSmoke(t, c, seamtest.Path(t, c.fixture))
+	boxRun := run.boxRun
 	if boxRun == nil {
 		t.Fatalf("%s never ran a Box", c.runtime)
 	}
@@ -501,14 +579,14 @@ func TestSeamSmokeReadOnlyBoxCarriesNoForgeToken(t *testing.T) {
 			t.Errorf("Box argv carries %s under read-only access: %q", name, boxRun)
 		}
 	}
-	if got := env[branchrecovery.HostOpenPREnv]; got == nil || *got != branchrecovery.HostOpenPROpen {
-		t.Errorf("%s = %v; want %s (the fake forge lists an open PR on the branch)", branchrecovery.HostOpenPREnv, got, branchrecovery.HostOpenPROpen)
+	if got := env[branchrecovery.HostOpenPREnv]; got == nil || *got != branchrecovery.HostOpenPRNone {
+		t.Errorf("%s = %v; want %s (the git forge has no PRs, so its lookup answers none)", branchrecovery.HostOpenPREnv, got, branchrecovery.HostOpenPRNone)
 	}
 	doc, err := inputdoc.Load(seamtest.Path(t, c.fixture))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range checkForgeCalls(doc, c.kind, gh) {
+	for _, p := range checkForge(doc, c.kind, run) {
 		t.Errorf("forge: %s", p)
 	}
 }
@@ -535,11 +613,11 @@ func TestSeamSmokeCatchesDroppedKnob(t *testing.T) {
 		artifacts["BOX_ENV_VARS"] = strings.Join(names, " ")
 	})
 
-	boxRun, gh, _ := runSmoke(t, c, scratch)
-	if boxRun == nil {
+	run := runSmoke(t, c, scratch)
+	if run.boxRun == nil {
 		t.Fatalf("%s never ran a Box", c.runtime)
 	}
-	problems := append(checkRuntimeArgv(doc, c.kind, boxRun), checkForgeCalls(doc, c.kind, gh)...)
+	problems := append(checkRuntimeArgv(doc, c.kind, run.boxRun), checkForge(doc, c.kind, run)...)
 	if !slices.ContainsFunc(problems, func(p string) bool { return strings.Contains(p, dropped) }) {
 		t.Fatalf("dropping %s from the document went unnoticed by every smoke check; problems: %q", dropped, problems)
 	}
@@ -598,14 +676,14 @@ func TestSeamSmokeBwrapOverlayProbe(t *testing.T) {
 		t.Fatalf("scratch document does not enable the store overlay: %+v", doc.Artifacts)
 	}
 
-	boxRun, gh, _ := runSmoke(t, c, scratch)
-	if boxRun == nil {
+	run := runSmoke(t, c, scratch)
+	if run.boxRun == nil {
 		t.Fatal("bwrap never ran a Box")
 	}
-	for _, p := range checkRuntimeArgv(doc, c.kind, boxRun) {
+	for _, p := range checkRuntimeArgv(doc, c.kind, run.boxRun) {
 		t.Errorf("runtime: %s", p)
 	}
-	for _, p := range checkForgeCalls(doc, c.kind, gh) {
+	for _, p := range checkForge(doc, c.kind, run) {
 		t.Errorf("forge: %s", p)
 	}
 }
