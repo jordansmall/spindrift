@@ -80,9 +80,6 @@ func TestRoutedReads_ShadowRowLeavesGhAnswering(t *testing.T) {
 		name string
 		read func(c *execClient)
 	}{
-		{"CountReady", func(c *execClient) { _, _ = c.CountReady(false) }},
-		{"ListIssues", func(c *execClient) { _, _ = c.ListIssues(forge.Dispatchable) }},
-		{"PriorClaimState", func(c *execClient) { _, _, _ = c.PriorClaimState("1") }},
 		{"Probe", func(c *execClient) { _, _ = c.Probe() }},
 		{"ListLabels", func(c *execClient) { _, _ = c.ListLabels() }},
 		{"BranchProtected", func(c *execClient) { _, _ = c.BranchProtected("main") }},

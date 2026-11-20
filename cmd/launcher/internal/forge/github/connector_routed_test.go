@@ -178,10 +178,14 @@ func TestPlainRow_ReadsGoThroughTheConnector(t *testing.T) {
 	}
 }
 
-// A shadow row stays native-authoritative: every read runs gh and writes no
-// primary record.
+// A shadow row stays native-authoritative: every read still on gh runs it and
+// writes no primary record. The reads readRow serves fail by name instead, see
+// TestReads_WithoutARoutedRowFailNamedAndNeverRunGh.
 func TestShadowRow_ReadsStayOnGh(t *testing.T) {
 	for _, tc := range routedReads {
+		if servedByReadRow(tc.name) {
+			continue
+		}
 		t.Run(tc.name, func(t *testing.T) {
 			_, c, calls, logDir := routedLogHarness(t, useGithubRowShadow)
 

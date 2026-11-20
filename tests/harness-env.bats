@@ -9,8 +9,9 @@ load helper
 
 setup() { setup_dispatch_env; }
 
-# tokens_seen: the distinct GH_TOKEN values the fake gh was invoked with.
-tokens_seen() { sort -u "$GH_LOG.token"; }
+# tokens_seen: the distinct GH_TOKEN values the fake runtime started a Box
+# with; the launcher forwards it by name (`-e GH_TOKEN`).
+tokens_seen() { sort -u "$PODMAN_LOG.token"; }
 
 @test "dispatch reads secrets from \$PWD/harness.env" {
   unset GH_TOKEN

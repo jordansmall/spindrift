@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-	"sync"
 	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -81,9 +80,6 @@ type execClient struct {
 	userName      string // committer identity Rebase sets on its clone; empty keeps ambient git config
 	userEmail     string
 	baseBranch    string // core's BASE_BRANCH; the base a routed row's Rebase syncs onto
-
-	demandMu    sync.Mutex // guards demandCache; CountReady is the only user
-	demandCache *demandCache
 }
 
 // ExecOption sets one optional execClient field. NewExecClient applies

@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -83,10 +82,9 @@ func TestConnector_ProbeMatchesNative(t *testing.T) {
 	}
 }
 
-// A demand count is the same number whether the native adapter reads it through
-// gh or the Connector through the host: the Dispatchable issues, pull requests
+// A demand count is the number of Dispatchable issues, pull requests
 // excluded, however many items sit in other states.
-func TestConnector_CountReadyMatchesNative(t *testing.T) {
+func TestConnector_CountReady(t *testing.T) {
 	type item struct {
 		num    string
 		labels []string
@@ -136,19 +134,6 @@ func TestConnector_CountReadyMatchesNative(t *testing.T) {
 			if h.backend.unexpected != nil {
 				t.Errorf("unexpected backend requests: %v", h.backend.unexpected)
 			}
-
-			n := newGithubHarness(t)
-			for _, it := range fx.items {
-				n.SeedIssue(forge.Issue{Number: it.num, Title: it.num, Labels: it.labels})
-				if it.pull {
-					if err := os.WriteFile(filepath.Join(n.issueDir(it.num), "pull_request"), nil, 0o644); err != nil {
-						t.Fatal(err)
-					}
-				}
-			}
-			if want := countReady(t, n, false); got != want {
-				t.Errorf("Connector CountReady = %d, native %d", got, want)
-			}
 		})
 	}
 }
@@ -175,8 +160,8 @@ func TestConnector_ProbeIntervalMatchesNative(t *testing.T) {
 
 // recover reads the terminal label a claim stripped from the timeline. The
 // Connector returns the removed names and core picks the state, so the answer
-// must be the native adapter's, which filters the same timeline through gh.
-func TestConnector_PriorClaimStateMatchesNative(t *testing.T) {
+// must be the latest Complete or Failed removal.
+func TestConnector_PriorClaimState(t *testing.T) {
 	for _, fx := range []struct {
 		name    string
 		removed []string
@@ -207,15 +192,6 @@ func TestConnector_PriorClaimStateMatchesNative(t *testing.T) {
 			}
 			if h.backend.unexpected != nil {
 				t.Errorf("unexpected backend requests: %v", h.backend.unexpected)
-			}
-
-			// The native adapter's gh --jq has already reduced the timeline to
-			// the removed names, one a line.
-			out := strings.Join(fx.removed, "\\n")
-			prependFakeGH(t, `case "$*" in *timeline*) printf '`+out+`\n' ;; esac`)
-			wantState, wantFound, err := NewExecClient(connectorRepo, testLabels).PriorClaimState("7")
-			if err != nil || found != wantFound || (found && got != wantState) {
-				t.Errorf("Connector PriorClaimState = (%v, %v), native (%v, %v, %v)", got, found, wantState, wantFound, err)
 			}
 		})
 	}
