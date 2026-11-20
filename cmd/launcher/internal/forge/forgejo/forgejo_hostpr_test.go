@@ -14,7 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgetest"
 )
 
-// NewForgejoCodeForge (read-write) now issues draft-PR creates and pushes
+// NewForgejoCodeForge now issues draft-PR creates and pushes
 // branches itself, on the same terms readOnlyCodeForge previously
 // monopolized (issue #4071): the request reaching the fake Forgejo server is
 // recorded and checked verbatim.
@@ -42,7 +42,7 @@ func TestForgejoCodeForge_CreateDraftPR_PostsAndReturnsURL(t *testing.T) {
 	}, nil)
 	dpc, ok := cf.(forge.DraftPRCreator)
 	if !ok {
-		t.Fatal("forgejo read-write CodeForge does not implement forge.DraftPRCreator")
+		t.Fatal("forgejo CodeForge does not implement forge.DraftPRCreator")
 	}
 
 	url, created, err := dpc.CreateDraftPR("feat: add widget", "Adds a widget.", "main", "agent/issue-1964")
@@ -101,7 +101,7 @@ func TestForgejoCodeForge_CreateDraftPR_RefusedErrors(t *testing.T) {
 	}
 }
 
-// newForgejoPushBranchHarness returns a read-write forgejo CodeForge pointed
+// newForgejoPushBranchHarness returns a forgejo CodeForge pointed
 // at a real bare git repo via the ForTest git-remote override, mirroring
 // newReadOnlyRelayHarness (forgejo_readonly_test.go) but for the base adapter.
 func newForgejoPushBranchHarness(t *testing.T) *forgetest.GitRepoFixture {
@@ -123,7 +123,7 @@ func newForgejoPushBranchForge(t *testing.T, bare string) forge.BranchPusher {
 	}, nil, bare)
 	bp, ok := cf.(forge.BranchPusher)
 	if !ok {
-		t.Fatal("forgejo read-write CodeForge does not implement forge.BranchPusher")
+		t.Fatal("forgejo CodeForge does not implement forge.BranchPusher")
 	}
 	return bp
 }

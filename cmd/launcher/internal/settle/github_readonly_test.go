@@ -11,8 +11,8 @@ import (
 // Mirrors TestSettle_LocalForge_BlockedPostsNoteAsComment for a github-shaped
 // tracker (AsNoLandingRecorder) under BOX_FORGE_AND_ISSUE_ACCESS=read-only
 // (issue #1917): the Box holds no write token, so it reports its blocked note
-// in the outcome note= field, as the local path always has. Config.ReadOnly
-// drives that, not the LandingRecorder type assertion the read-write path uses.
+// in the outcome note= field, as the local path always has. The note is posted
+// host-side whether or not the tracker implements LandingRecorder.
 func TestSettle_GithubReadOnly_BlockedPostsNoteAsComment(t *testing.T) {
 	const issNum = "42"
 	fc := forge.NewFake(testDispatchLabels)
