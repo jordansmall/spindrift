@@ -217,7 +217,7 @@ let
         options =
           lib.mapAttrs mkKnobOption knobs
           // lib.mapAttrs (_: _: removedKnobOption) (
-            lib.filterAttrs (_: row: row.legacySection == sectionAttr) removedKnobs
+            lib.filterAttrs (_: row: (row.legacySection or null) == sectionAttr) removedKnobs
           );
       };
       default = { };
@@ -886,10 +886,12 @@ in
             at = "perSystem.spindrift.${lib.concatStringsSep "." row.flakePath}";
             inherit (row) message;
           }
-          ++ lib.optional ((cfg.settings.${row.legacySection}.${key} or null) != null) {
-            at = "perSystem.spindrift.settings.${row.legacySection}.${key}";
-            inherit (row) message;
-          }
+          ++
+            lib.optional (row ? legacySection && (cfg.settings.${row.legacySection}.${key} or null) != null)
+              {
+                at = "perSystem.spindrift.settings.${row.legacySection}.${key}";
+                inherit (row) message;
+              }
         ) removedKnobs
       );
 

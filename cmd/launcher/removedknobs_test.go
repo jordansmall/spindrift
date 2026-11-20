@@ -217,3 +217,26 @@ func assertRemovedBoxTokenErr(t *testing.T, env string) {
 		}
 	}
 }
+
+func TestRemovedKnobsCheck_RejectsConnectorSandbox(t *testing.T) {
+	assertRejected := func(t *testing.T) {
+		t.Helper()
+		_, err := removedKnobsCheck().Probe()
+		if err == nil {
+			t.Fatal("Probe() err = nil, want a removed-knob rejection")
+		}
+		for _, want := range []string{"CONNECTOR_SANDBOX", "was removed", "always on"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("err = %q, want it to contain %q", err, want)
+			}
+		}
+	}
+	t.Run("env", func(t *testing.T) {
+		t.Setenv("CONNECTOR_SANDBOX", "false")
+		assertRejected(t)
+	})
+	t.Run("input document", func(t *testing.T) {
+		useDoc(t, &inputdoc.Document{Settings: map[string]string{"CONNECTOR_SANDBOX": "1"}})
+		assertRejected(t)
+	})
+}

@@ -125,7 +125,6 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 
 | attr path | env var | default | description |
 |---|---|---|---|
-| `perSystem.spindrift.infra.connector.sandbox` | `CONNECTOR_SANDBOX` | `false` | when enabled, the launcher loads its own Connectors (the github read path, read shadows, token introspection, Driver Connectors) into one sandbox container per run, started on the first Connector load, instead of in the launcher process; a run that loads no Connector starts none. A sandbox that cannot start fails the run with a named error and never falls back to in-process loading. Under bwrap the sandbox binds only the connector-host store path. Off by default |
 | `perSystem.spindrift.infra.devShell.name` | `DEV_SHELL_NAME` | `default` | which devShell to enter; lets a Target expose a lean headless ci shell distinct from a heavy interactive default |
 | `perSystem.spindrift.infra.devShell.probeTimeout` | `DEV_SHELL_PROBE_TIMEOUT` | `300` | seconds before the devShell probe is abandoned and the baked toolchain is used |
 | `perSystem.spindrift.infra.limits.memory` | `MEMORY_LIMIT` | `5g` | max memory per agent Box: hard --memory cap under OCI; under bwrap, a per-Box cgroup v2 memory.max when the host delegates a writable cgroup subtree, else best-effort (warns and proceeds uncapped -- ADR 0042); empty string disables the limit |

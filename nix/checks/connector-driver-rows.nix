@@ -538,22 +538,6 @@ in
       touch $out
     '';
 
-  # Issue #7020: the dogfood proves the Connector sandbox on real traffic
-  # before it becomes mandatory. Each side must carry the knob in the document
-  # settings itself; the whole-program parity above would not say which knob
-  # diverged, and would pass if both sides dropped it.
-  connector-driver-rows-dogfood-sandbox =
-    pkgs.runCommand "connector-driver-rows-dogfood-sandbox" { nativeBuildInputs = [ pkgs.jq ]; }
-      ''
-        ${fixtures.runInputDocOf config.apps.default.program}
-        jq -e '.settings.CONNECTOR_SANDBOX == "1"' "$doc" >/dev/null \
-          || { echo "dogfood flake app: CONNECTOR_SANDBOX is not \"1\"" >&2; exit 1; }
-        ${fixtures.runInputDocOf fixtures.harness.apps.default.program}
-        jq -e '.settings.CONNECTOR_SANDBOX == "1"' "$doc" >/dev/null \
-          || { echo "fixtures mirror: CONNECTOR_SANDBOX is not \"1\"" >&2; exit 1; }
-        touch $out
-      '';
-
   # Doctor's `connector-routes-widened[<name>]` reads each backend row's
   # `routes` against its `acceptedRoutes`. The forgejo row is registered but
   # neither primary nor shadowed, so only its place in the dogfood document

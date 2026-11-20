@@ -495,11 +495,11 @@ func sandboxName(argv []string) string {
 	return ""
 }
 
-// sandboxDoc writes a copy of the input document at docPath with CONNECTOR_SANDBOX
-// on and row as its github backend row, none in sandboxLocal mode. mode picks the
-// row's primary key. The fixture row is a routed no-tracker Connector, so its
-// lack of the tracker capability refuses the first read. artifacts overrides
-// keys of the document's artifacts.
+// sandboxDoc writes a copy of the input document at docPath with row as its
+// github backend row, none in sandboxLocal mode. mode picks the row's primary
+// key. The fixture row is a routed no-tracker Connector, so its lack of the
+// tracker capability refuses the first read. artifacts overrides keys of the
+// document's artifacts.
 func sandboxDoc(t *testing.T, docPath string, row map[string]any, mode sandboxMode, artifacts map[string]string) string {
 	t.Helper()
 	data, err := os.ReadFile(docPath)
@@ -510,11 +510,6 @@ func sandboxDoc(t *testing.T, docPath string, row map[string]any, mode sandboxMo
 	if err := json.Unmarshal(data, &doc); err != nil {
 		t.Fatal(err)
 	}
-	var settings map[string]string
-	if err := json.Unmarshal(doc["settings"], &settings); err != nil {
-		t.Fatal(err)
-	}
-	settings["CONNECTOR_SANDBOX"] = "true"
 	if len(artifacts) > 0 {
 		var art map[string]string
 		if err := json.Unmarshal(doc["artifacts"], &art); err != nil {
@@ -532,10 +527,8 @@ func sandboxDoc(t *testing.T, docPath string, row map[string]any, mode sandboxMo
 		}
 		rows = []any{row}
 	}
-	for k, v := range map[string]any{"settings": settings, "backends": rows} {
-		if doc[k], err = json.Marshal(v); err != nil {
-			t.Fatal(err)
-		}
+	if doc["backends"], err = json.Marshal(rows); err != nil {
+		t.Fatal(err)
 	}
 	if data, err = json.Marshal(doc); err != nil {
 		t.Fatal(err)

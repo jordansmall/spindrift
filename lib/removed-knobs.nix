@@ -9,7 +9,8 @@
   orchestratorEnabled = {
     env = "ORCHESTRATOR_ENABLED";
     # The flake-module option path under perSystem.spindrift, and the legacy
-    # settings.<legacySection>.<key> alias the knob had.
+    # settings.<legacySection>.<key> alias the knob had. A knob that never had a
+    # legacy alias omits legacySection.
     flakePath = [
       "dispatch"
       "orchestrator"
@@ -44,5 +45,14 @@
     ];
     legacySection = "repository";
     message = "BOX_FORGE_CREDENTIAL was removed: every Box already holds no forge credential (issue #6900), so there is nothing to opt in or out of; see MIGRATING.md; delete the setting";
+  };
+  connectorSandbox = {
+    env = "CONNECTOR_SANDBOX";
+    flakePath = [
+      "infra"
+      "connector"
+      "sandbox"
+    ];
+    message = "CONNECTOR_SANDBOX was removed: the Connector sandbox is always on (issue #7022), so there is nothing to switch; delete the setting";
   };
 }
