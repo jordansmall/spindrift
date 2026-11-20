@@ -9,6 +9,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/forge/github"
 )
 
@@ -214,5 +215,28 @@ func TestAcquireToken_AuditsThePastedTokenForTheTargetRepo(t *testing.T) {
 	}
 	if gotToken != "gho_pasted" || gotRepo != "o/r" {
 		t.Errorf("introspected (%q, %q), want (gho_pasted, o/r)", gotToken, gotRepo)
+	}
+}
+
+// Quickstart installs no Connector sandbox, so a classic token's scope audit
+// cannot run there; that defers to `spindrift doctor` rather than failing the
+// wizard or printing the raw error.
+func TestAcquireToken_NoConnectorSandboxDefersTheAuditAndContinues(t *testing.T) {
+	var out bytes.Buffer
+	noSandbox := func(string, string) (backendkit.TokenIntrospection, error) {
+		return backendkit.TokenIntrospection{}, fmt.Errorf("introspect the token: %w", connectorsandbox.ErrNoConnectorSandbox)
+	}
+	token, err := acquireWith(t, noSandbox, backendkit.TokenPrompt{
+		Out:    &out,
+		Getenv: func(k string) string { return map[string]string{"GH_TOKEN": "ghp_x"}[k] },
+	})
+	if err != nil || token != "ghp_x" {
+		t.Fatalf("got %q, %v", token, err)
+	}
+	if !strings.Contains(out.String(), "token scope audit needs the Connector sandbox") || !strings.Contains(out.String(), "`spindrift doctor`") {
+		t.Errorf("output missing the deferral notice: %q", out.String())
+	}
+	if strings.Contains(out.String(), connectorsandbox.ErrNoConnectorSandbox.Error()) {
+		t.Errorf("output leaks the raw error: %q", out.String())
 	}
 }

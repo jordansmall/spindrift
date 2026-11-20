@@ -15,6 +15,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
@@ -567,7 +568,11 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	// Verbose: quickstart's finish line always reports in full, whatever
 	// `spindrift doctor`'s own quiet default does (issue #3777).
 	rep := doctor.NewReporter(w, true)
-	if err := doctor.Run(it, cf, doctor.Config{
+	// Quickstart installs no Connector sandbox, so a Connector-routed backend's
+	// checks cannot load their Connector here; they run under `spindrift doctor`.
+	if strategy.ConnectorRouted && !connectorsandbox.Installed() {
+		fmt.Fprintln(w, "the finish-line checks need the Connector sandbox, which quickstart does not run — deferred to `spindrift doctor`.")
+	} else if err := doctor.Run(it, cf, doctor.Config{
 		IssueTracker:    choice.name,
 		TokenHint:       tokenHint,
 		SlugHint:        slugHint,

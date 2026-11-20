@@ -14,6 +14,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
@@ -3780,5 +3781,41 @@ func TestRenderFlakeNix_KnobWithoutQuickstartKnobsEntry_Errors(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q should name %s", err, want)
 		}
+	}
+}
+
+// Quickstart installs no Connector sandbox, so a Connector-routed backend's
+// finish-line doctor cannot load its Connector: the wizard says the check is
+// deferred to `spindrift doctor` and goes on to the build.
+func TestRunQuickstart_FinishLine_NoConnectorSandboxDefersDoctor(t *testing.T) {
+	defer connectorsandbox.Use(nil)()
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"Ada Lovelace",
+		"ada@example.com",
+		"github_pat_faketoken",
+	}, "\n") + "\n")
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+	f := forge.NewFake()
+	f.ProbeErr = fmt.Errorf("probe: %w", connectorsandbox.ErrNoConnectorSandbox)
+	runner := &fakeCommandRunner{}
+
+	if err := runQuickstart(dir, env, runner, fakeForgeBuilder(f), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+	if !strings.Contains(out.String(), "finish-line checks need the Connector sandbox") || !strings.Contains(out.String(), "`spindrift doctor`") {
+		t.Errorf("transcript missing the deferral notice:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), connectorsandbox.ErrNoConnectorSandbox.Error()) {
+		t.Errorf("transcript leaks the raw error:\n%s", out.String())
+	}
+	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != strings.Join(spindriftBuildArgs, " ") {
+		t.Errorf("want the build to run, got: %v", runner.calls)
+	}
+	if !strings.Contains(out.String(), "Quickstart complete.") {
+		t.Errorf("wizard did not complete:\n%s", out.String())
 	}
 }

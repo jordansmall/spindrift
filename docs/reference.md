@@ -2732,7 +2732,9 @@ runs before any Consumer flake, bakes the github Connector into its package
 and applies it as a row whose credential is `GH_TOKEN`; a `go run` of
 quickstart bakes in nothing, so its probe and token audit fail with
 `ErrNoRoute`, as they do under a `GH_HOST` other than `github.com`, since
-the baked Routes target `api.github.com`.
+the baked Routes target `api.github.com`. Quickstart installs no Connector
+sandbox, so its token scope audit and finish-line checks say they are deferred
+to `spindrift doctor` instead of loading the Connector.
 
 #### The jira Connector
 

@@ -67,6 +67,10 @@ func installed() Loader {
 	return nil
 }
 
+// Installed reports whether a Loader is installed, so a caller that never
+// installs one can say so before a load fails.
+func Installed() bool { return installed() != nil }
+
 // Load loads wasm into the installed sandbox, or fails with
 // ErrNoConnectorSandbox when none is.
 func Load(ctx context.Context, wasm []byte) (*connectorhost.Connector, error) {
