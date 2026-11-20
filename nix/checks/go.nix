@@ -1424,6 +1424,28 @@ driverGoTests
     touch $out
   '';
 }
+// {
+  # Host-side, github goes through its wasm Connector only, so the launcher
+  # wrapper must not pin `gh`. The Box image keeps its own gh for the in-box
+  # PR path. Matches store-path names, not `pkgs.gh`, because the harness
+  # fixture's hostPkgs need not be this check's pkgs.
+  launcher-host-closure-no-gh =
+    let
+      closure = pkgs.closureInfo { rootPaths = [ fixtures.harness.spindrift ]; };
+    in
+    pkgs.runCommand "launcher-host-closure-no-gh" { } ''
+      # git is a deliberate runtimeInput; its absence means the scan is blind.
+      grep -qE -- '^/nix/store/[^/-]+-git-[0-9]' ${closure}/store-paths || {
+        echo "the launcher closure holds no git; the scan proves nothing" >&2
+        exit 1
+      }
+      if grep -E -- '^/nix/store/[^/-]+-gh-[0-9]' ${closure}/store-paths; then
+        echo "the launcher host closure pins gh" >&2
+        exit 1
+      fi
+      touch $out
+    '';
+}
 // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
   # The escape primitives (issue #7017) must never reach a release artifact.
   # The escape build and the release host are separate derivations, so a hit
