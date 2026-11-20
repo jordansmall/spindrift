@@ -76,7 +76,6 @@ in
           )
           {
             shadow = null;
-            primary = null;
           }
       );
 

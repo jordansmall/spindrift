@@ -697,13 +697,10 @@ in
                     Make this Connector authoritative over the native
                     implementation of the same name (issues #6998, #6999).
                     On a `backend` row it answers in place of the native
-                    backend: for github it is a no-op, the Connector being
-                    github's default for every Consumer (issue #7139), so
-                    setting or dropping it changes nothing; for jira
-                    the whole tracker (reads, claim, transitions, labels,
-                    comments and filed findings), authorized with the row's
-                    Basic credential; for forgejo the whole Code Forge, reads
-                    and writes, its tracker staying native. On a `driver`
+                    backend: for forgejo the whole Code Forge and the
+                    whole tracker, reads and writes. github and jira have
+                    no native backend (their Connector is the only one), so
+                    `primary` is refused on their rows. On a `driver`
                     row it is the Driver in place of the native Strategy, in
                     the Box during the Pass and on the host when it reads
                     Pass logs back; a Connector that fails to load fails the
@@ -712,8 +709,8 @@ in
                     Exclusive with `shadow`, and a row with no native
                     implementation of its name throws, each naming the row.
                     Off by default, which leaves the Consumer's outputs
-                    byte-identical. Except on github, dropping it restores
-                    the native implementation.
+                    byte-identical. Dropping it restores the native
+                    implementation.
                   '';
                 };
                 shadowEvery = mkOption {
