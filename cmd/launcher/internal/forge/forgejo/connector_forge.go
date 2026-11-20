@@ -37,18 +37,30 @@ var loadRowConnector = backendrows.Load
 // the default client. A test seam, as a real host reaches the real instance.
 var connectorClient *http.Client
 
+// ErrNoConnectorRow is why forgejo's Code Forge cannot be built without a
+// forgejo backend row that is not shadow: it runs only through its Connector,
+// and a shadow row only observes beside an adapter that no longer exists.
+var ErrNoConnectorRow = errors.New("forgejo's Code Forge runs only through its Connector: configure a non-shadow forgejo backend row")
+
 // primaryRow is the forgejo backend row when it is configured primary: the
-// issue tracker and Code Forge are then built from the row's Connector, never
-// the native adapters.
+// issue tracker is then built from the row's Connector rather than the native
+// adapter.
 func primaryRow() (backendrows.Row, bool) {
 	row, ok := backendrows.Lookup(backend.Forgejo.Name)
 	return row, ok && row.Primary
 }
 
+// forgeRow is the forgejo backend row the Code Forge is built from: any row
+// that is not shadow, with or without primary.
+func forgeRow() (backendrows.Row, bool) {
+	row, ok := backendrows.Lookup(backend.Forgejo.Name)
+	return row, ok && !row.Shadow
+}
+
 // newConnectorCodeForge composes the Code Forge from row's Connector and the
 // capabilities its handshake advertises, with core's own git doing every git
-// operation. Every failure is returned as is: a primary row never falls back to
-// the native adapter. The Connector authorizes with the row's credential; git
+// operation. Every failure is returned as is: the forge never falls back to a
+// native adapter. The Connector authorizes with the row's credential; git
 // keeps the native token. The Connector and its audit file live for the
 // process.
 func newConnectorCodeForge(row backendrows.Row, s backendkit.Shared, k Knobs) (forge.CodeForge, error) {

@@ -13,9 +13,10 @@ import (
 
 // Strategy is the forgejo backend's Go half (ADR 0068).
 var Strategy = backendkit.Strategy{
-	Descriptor:        backend.Forgejo,
-	ValidateTracker:   validateTracker,
-	ValidateCodeForge: validate("CODE_FORGE"),
+	Descriptor:           backend.Forgejo,
+	ForgeConnectorRouted: true,
+	ValidateTracker:      validateTracker,
+	ValidateCodeForge:    validate("CODE_FORGE"),
 	LandedBanner: func(s backendkit.Shared) string {
 		return "branches pushed on " + s.RepoSlug
 	},
@@ -39,15 +40,16 @@ var Strategy = backendkit.Strategy{
 			VerdictLabels: s.VerdictLabels,
 		}), nil
 	},
-	NewCodeForge: func(s backendkit.Shared, l backendkit.Lookup, _ forge.SanitizedParent, it forge.IssueTracker) (forge.CodeForge, error) {
+	NewCodeForge: func(s backendkit.Shared, l backendkit.Lookup, _ forge.SanitizedParent, _ forge.IssueTracker) (forge.CodeForge, error) {
 		k, err := ReadKnobs(l)
 		if err != nil {
 			return nil, err
 		}
-		if row, ok := primaryRow(); ok {
-			return newConnectorCodeForge(row, s, k)
+		row, ok := forgeRow()
+		if !ok {
+			return nil, ErrNoConnectorRow
 		}
-		return NewForgejoCodeForge(codeForgeConfig(s, k), it), nil
+		return newConnectorCodeForge(row, s, k)
 	},
 	NewLedger: func(s backendkit.Shared, l backendkit.Lookup) (backendkit.LedgerSite, error) {
 		k, err := ReadKnobs(l)
@@ -114,18 +116,6 @@ func validate(axis string) func(backendkit.Shared, backendkit.Lookup) error {
 			return err
 		}
 		return ValidateForgejoEnv(axis, k.ForgejoBaseURL, k.ForgejoToken)
-	}
-}
-
-func codeForgeConfig(s backendkit.Shared, k Knobs) ForgejoCodeForgeConfig {
-	return ForgejoCodeForgeConfig{
-		BaseURL:     k.ForgejoBaseURL,
-		Repo:        s.RepoSlug,
-		Token:       k.ForgejoToken,
-		BaseBranch:  s.BaseBranch,
-		UserName:    s.GitUserName,
-		UserEmail:   s.GitUserEmail,
-		MergeMethod: s.MergeMethod,
 	}
 }
 

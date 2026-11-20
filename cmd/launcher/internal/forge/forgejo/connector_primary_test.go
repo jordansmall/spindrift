@@ -159,17 +159,44 @@ func TestPrimaryRow_RefusesAMergeMethodTheConnectorCannotHonour(t *testing.T) {
 	}
 }
 
-// Without a primary row, the native adapters are built and no Connector loads.
-func TestNoPrimaryRow_BuildsTheNativeForgeAndTracker(t *testing.T) {
+// primary governs only the tracker: a plain row still builds the Connector
+// forge, beside the native tracker.
+func TestPlainRow_BuildsTheConnectorForgeAndTheNativeTracker(t *testing.T) {
+	srv := httptest.NewTLSServer(nil)
+	t.Cleanup(srv.Close)
+	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Primary = false })
+	t.Setenv(connectorCredentialEnv, connectorToken)
+	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
+	t.Chdir(t.TempDir())
+
+	cf, err := buildForge(srv, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := nativeForgeType(cf); strings.Contains(got, "forgejoCodeForge") {
+		t.Errorf("built %s, want the Connector forge", got)
+	}
+	tr, err := buildTracker(srv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reflect.TypeOf(tr).String(); !strings.Contains(got, "forgejoClient") {
+		t.Errorf("built %s, want the native forgejo tracker", got)
+	}
+}
+
+// Forgejo's Code Forge runs only through its Connector: without a row, or
+// with a shadow row (which only observes), construction fails and never
+// degrades to the native forge. The tracker stays native.
+func TestNoConnectorRow_RefusesTheCodeForge(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
 	t.Cleanup(forgejo.SetLoadRowConnector(func(context.Context, backendrows.Row, backendrows.Options) (*connectorhost.Connector, error) {
-		t.Error("a Connector loaded without a primary row")
+		t.Error("a Connector loaded without a usable row")
 		return nil, errors.New("unexpected load")
 	}))
 	for name, plain := range map[string]func(*backendrows.Row){
 		"no row":     nil,
-		"plain row":  func(r *backendrows.Row) { r.Primary = false },
 		"shadow row": func(r *backendrows.Row) { r.Primary, r.Shadow, r.ShadowEvery = false, true, 1 },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -177,11 +204,8 @@ func TestNoPrimaryRow_BuildsTheNativeForgeAndTracker(t *testing.T) {
 				useForgejoRow(t, srv.URL, plain)
 			}
 			cf, err := buildForge(srv, "squash")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := nativeForgeType(cf); !strings.Contains(got, "forgejo") || strings.Contains(got, "connectorforge") {
-				t.Errorf("built %s, want the native forgejo adapter", got)
+			if !errors.Is(err, forgejo.ErrNoConnectorRow) || cf != nil {
+				t.Errorf("buildForge = (%v, %v), want (nil, ErrNoConnectorRow)", cf, err)
 			}
 			tr, err := buildTracker(srv)
 			if err != nil {

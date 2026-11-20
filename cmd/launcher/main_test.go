@@ -2832,7 +2832,7 @@ func TestNewCodeForge_Git_ReturnsPushOnlyAdapter(t *testing.T) {
 func TestNewCodeForge_Forgejo_IsPRForge(t *testing.T) {
 	c := minimalValidConfig()
 	c.CodeForge = "forgejo"
-	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+	useForgejoFixtureBase(t, &c)
 	c.setRowKnob("FORGEJO_TOKEN", "tok")
 
 	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
@@ -2840,7 +2840,7 @@ func TestNewCodeForge_Forgejo_IsPRForge(t *testing.T) {
 	if cf == nil {
 		t.Fatal("newCodeForge(CODE_FORGE=forgejo) returned nil")
 	}
-	if _, ok := cf.(forge.PRForge); !ok {
+	if _, ok := forge.AsCodeForge[forge.PRForge](cf); !ok {
 		t.Error("newCodeForge(CODE_FORGE=forgejo) does not satisfy PRForge, want the full-parity PRForge adapter")
 	}
 }
@@ -2874,7 +2874,7 @@ func TestNewCodeForge_Github_ImplementsPRForge(t *testing.T) {
 
 	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
 
-	if _, ok := cf.(forge.PRForge); !ok {
+	if _, ok := forge.AsCodeForge[forge.PRForge](cf); !ok {
 		t.Error("newCodeForge(CODE_FORGE=github) does not satisfy PRForge")
 	}
 }
@@ -2893,7 +2893,7 @@ func TestNewCodeForge_GithubReadOnly_ImplementsBundleRelay(t *testing.T) {
 	if _, ok := cf.(forge.BundleRelay); !ok {
 		t.Error("newCodeForge(CODE_FORGE=github, BOX_FORGE_AND_ISSUE_ACCESS=read-only) does not satisfy forge.BundleRelay")
 	}
-	if _, ok := cf.(forge.PRForge); !ok {
+	if _, ok := forge.AsCodeForge[forge.PRForge](cf); !ok {
 		t.Error("newCodeForge(CODE_FORGE=github, BOX_FORGE_AND_ISSUE_ACCESS=read-only) does not satisfy forge.PRForge")
 	}
 }
@@ -2921,16 +2921,16 @@ func TestNewCodeForge_GithubReadOnly_SatisfiesCapabilityGate(t *testing.T) {
 func TestNewCodeForge_ForgejoReadOnly_SatisfiesBundleRelayAndDraftPRCreator(t *testing.T) {
 	c := minimalValidConfig()
 	c.CodeForge = "forgejo"
-	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+	useForgejoFixtureBase(t, &c)
 	c.setRowKnob("FORGEJO_TOKEN", "tok")
 	c.BoxForgeAndIssueAccess = "read-only"
 
 	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
 
-	if _, ok := cf.(forge.BundleRelay); !ok {
+	if _, ok := forge.AsCodeForge[forge.BundleRelay](cf); !ok {
 		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-only) does not satisfy forge.BundleRelay")
 	}
-	if _, ok := cf.(forge.DraftPRCreator); !ok {
+	if _, ok := forge.AsCodeForge[forge.DraftPRCreator](cf); !ok {
 		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-only) does not satisfy forge.DraftPRCreator")
 	}
 }
@@ -2952,7 +2952,7 @@ func TestResolveCapabilities_HostCanOpenPR(t *testing.T) {
 			c := minimalValidConfig()
 			c.CodeForge = tc.forge
 			c.BoxForgeAndIssueAccess = tc.access
-			c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+			useForgejoFixtureBase(t, &c)
 			c.setRowKnob("FORGEJO_TOKEN", "tok")
 			c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/owner/repo.git")
 			c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", filepath.Join(t.TempDir(), "repo.git"))
@@ -3470,6 +3470,7 @@ func TestDispatchConfig_SeedMirror_SetPerBackend(t *testing.T) {
 		t.Run(row.Name, func(t *testing.T) {
 			c := minimalValidConfig()
 			c.CodeForge = row.Name
+			useForgejoFixtureBase(t, &c)
 			if cfg := seedMirrorDispatchConfig(t, c); cfg.SeedMirror == nil {
 				t.Error("dispatchConfig().SeedMirror = nil, want a seeded mirror")
 			}
@@ -3477,10 +3478,21 @@ func TestDispatchConfig_SeedMirror_SetPerBackend(t *testing.T) {
 	}
 }
 
-// A forgejo row with primary builds its Code Forge, read-only included, from
-// the row's Connector rather than the native adapter, so the composed forge
-// must itself offer the MirrorSeeder the host-side fetch keys on.
-func TestDispatchConfig_SeedMirror_ForgejoPrimaryRow(t *testing.T) {
+// useForgejoFixtureBase points c at the fixture row when c builds the forgejo
+// Code Forge, and leaves any other forge untouched.
+func useForgejoFixtureBase(t *testing.T, c *config) {
+	t.Helper()
+	if c.CodeForge == "forgejo" {
+		c.setRowKnob("FORGEJO_BASE_URL", useForgejoFixtureRow(t))
+	}
+}
+
+// useForgejoFixtureRow installs a forgejo row over the fixture forge-pr
+// Connector and returns the stub base URL it answers on. Forgejo's Code Forge
+// is built only from a row's Connector, so any test that builds one needs it.
+// The global transport swap means a caller must not run in parallel.
+func useForgejoFixtureRow(t *testing.T) string {
+	t.Helper()
 	dir, err := fixturebuild.ConnectorDir()
 	if err != nil {
 		t.Fatal(err)
@@ -3492,8 +3504,7 @@ func TestDispatchConfig_SeedMirror_ForgejoPrimaryRow(t *testing.T) {
 	}))
 	t.Cleanup(backendSrv.Close)
 	// The connector dials with the default transport, which must trust the stub.
-	// The global swap means this test and its subtests must not run in parallel.
-	defer func(old http.RoundTripper) { http.DefaultTransport = old }(http.DefaultTransport)
+	t.Cleanup(func(old http.RoundTripper) func() { return func() { http.DefaultTransport = old } }(http.DefaultTransport))
 	http.DefaultTransport = backendSrv.Client().Transport
 	u, err := url.Parse(backendSrv.URL)
 	if err != nil {
@@ -3505,11 +3516,20 @@ func TestDispatchConfig_SeedMirror_ForgejoPrimaryRow(t *testing.T) {
 	})
 	t.Chdir(t.TempDir()) // the Connector's audit file lands under the working directory
 	t.Setenv("FIXTURE_TOKEN", "connector-token")
+	t.Setenv("FORGEJO_BASE_URL", backendSrv.URL)
+	return backendSrv.URL
+}
+
+// A forgejo row builds its Code Forge, read-only included, from the row's
+// Connector, so the composed forge must itself offer the MirrorSeeder the
+// host-side fetch keys on.
+func TestDispatchConfig_SeedMirror_ForgejoPrimaryRow(t *testing.T) {
+	base := useForgejoFixtureRow(t)
 	c := minimalValidConfig()
 	c.CodeForge = "forgejo"
-	c.setRowKnob("FORGEJO_BASE_URL", backendSrv.URL)
+	c.setRowKnob("FORGEJO_BASE_URL", base)
 	if cfg := seedMirrorDispatchConfig(t, c); cfg.SeedMirror == nil {
-		t.Error("dispatchConfig().SeedMirror = nil, want a host-side fetch for a primary forgejo row")
+		t.Error("dispatchConfig().SeedMirror = nil, want a host-side fetch for a forgejo row")
 	}
 }
 
@@ -3518,6 +3538,7 @@ func TestDispatchConfig_SeedMirror_NilWhenSelfContained(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := minimalValidConfig()
 			c.CodeForge = name
+			useForgejoFixtureBase(t, &c)
 			c.BoxForgeAndIssueAccess = "read-only"
 			c.selfContained = true
 			if cfg := seedMirrorDispatchConfig(t, c); cfg.SeedMirror != nil {
@@ -3829,7 +3850,7 @@ func TestDispatchConfig_ResolveEnv_GHTokenPassthrough(t *testing.T) {
 func TestDispatchConfig_ResolveEnv_ForgejoTokenPassthrough(t *testing.T) {
 	c := minimalValidConfig()
 	c.CodeForge = "forgejo"
-	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+	useForgejoFixtureBase(t, &c)
 	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("FORGEJO_TOKEN", "launcher-fj-tok")
 	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
