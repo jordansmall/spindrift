@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -17,13 +18,18 @@ var removedKnobs = []struct{ env, reason string }{
 	{"ORCHESTRATOR_ENABLED", "the orchestrator is now the only Box path (issue #4291), so there is nothing to switch"},
 }
 
-// removedKnobsCheck fails when any removed knob is still set, in the
-// environment (set-but-empty counts) or a loaded input document's settings.
+// removedKnobsCheckName names the removed-knobs row, so validateConfigChecks
+// can tell whether its caller's checks already cover removed choices.
+const removedKnobsCheckName = "removed-knobs"
+
+// removedKnobsCheck fails when any removed knob or removed choice is still
+// set, in the environment (set-but-empty counts, for a knob) or a loaded input
+// document's settings.
 // It reads both directly rather than through resolvedKnob: the knob is no
 // longer in the schema, and a silent default would hide the stale setting.
 func removedKnobsCheck() doctor.Check {
 	return doctor.Check{
-		Name:   "removed-knobs",
+		Name:   removedKnobsCheckName,
 		Tier:   doctor.Required,
 		Remedy: "delete the setting from the Consumer config, env file, or --input document",
 		Probe: func() (any, error) {
@@ -39,9 +45,9 @@ func removedKnobsCheck() doctor.Check {
 			// the removed value is a stale setting. A flag is caught by the
 			// choice walk, which skips only what this row already reported.
 			for _, f := range inputdoc.SchemaFlags {
-				for value, msg := range f.RemovedChoices {
-					if setsRemovedChoice(f.Env, value) {
-						errs = append(errs, msg)
+				for _, value := range slices.Sorted(maps.Keys(f.RemovedChoices)) {
+					if sourceHolds(f.Env, value) {
+						errs = append(errs, f.RemovedChoices[value])
 					}
 				}
 			}
@@ -57,12 +63,15 @@ func removedKnobsCheck() doctor.Check {
 // the environment or a loaded input document's settings holds it: the sources
 // the removed-knobs row reads, and so the removed choices it already reports.
 func setsRemovedChoice(env, value string) bool {
-	if !slices.ContainsFunc(inputdoc.SchemaFlags, func(f inputdoc.FlagEntry) bool {
-		_, removed := f.RemovedChoices[value]
-		return f.Env == env && removed
-	}) {
+	if _, removed := inputdoc.RemovedChoice(env, value); !removed {
 		return false
 	}
+	return sourceHolds(env, value)
+}
+
+// sourceHolds reports whether the environment or a loaded input document's
+// settings sets env to value.
+func sourceHolds(env, value string) bool {
 	envValue, inEnv := os.LookupEnv(env)
 	docValue, inDoc := launcherInput.Setting(env)
 	return (inEnv && envValue == value) || (inDoc && docValue == value)
