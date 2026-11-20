@@ -148,10 +148,28 @@ func TestValidateConfig_ReportsInvalidChoiceFromEnv(t *testing.T) {
 	}
 }
 
-// Doctor names a removed choice once, not from both the row and the walk.
-func TestValidateConfig_ReportsRemovedChoiceOnce(t *testing.T) {
+// Without the removed-knobs row in the checks, the walk is the only reporter
+// and must still reject an env-set removed choice, once.
+func TestValidateConfigChecks_WithoutRemovedKnobsRowStillRejects(t *testing.T) {
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-write")
 	c := loadConfig()
+	c.BoxForgeAndIssueAccess = "read-write"
+	err := validateConfigChecks(c, nil)
+	if n := strings.Count(fmt.Sprint(err), "BOX_FORGE_AND_ISSUE_ACCESS=read-write was removed"); n != 1 {
+		t.Fatalf("validateConfigChecks() names the removal %d times, want once: %v", n, err)
+	}
+}
+
+// Doctor names a removed choice once, not from both the row and the walk. The
+// flag makes the resolved config read-write, so the walk really sees it.
+func TestValidateConfig_ReportsRemovedChoiceOnce(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
+	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-write")
+	setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-write")
+	c := loadConfig()
+	if c.BoxForgeAndIssueAccess != "read-write" {
+		t.Fatalf("BoxForgeAndIssueAccess = %q, want read-write", c.BoxForgeAndIssueAccess)
+	}
 	c.runtime = "echo"
 	c.GhToken, c.RepoSlug, c.GitUserName, c.GitUserEmail = "ghp_test", "owner/repo", "bot", "bot@example.com"
 	err := validateConfig(c)

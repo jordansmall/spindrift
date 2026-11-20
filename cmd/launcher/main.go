@@ -475,11 +475,15 @@ func validateConfigChecks(c config, checks []doctor.Check) error {
 			errs = append(errs, doctor.WithRemedy(r))
 		}
 	}
-	// The removed-knobs row already reports a removed choice set in the
-	// environment or document; the walk covers the rest (a flag).
-	rows := slices.DeleteFunc(slices.Clone(choiceKnobRegistry), func(r choiceKnobRow) bool {
-		return setsRemovedChoice(r.Env, r.Value(c))
-	})
+	// A removed-knobs row already reports a removed choice set in the
+	// environment or document; the walk covers the rest (a flag), and all of
+	// it when the caller's checks omit that row.
+	rows := choiceKnobRegistry
+	if slices.ContainsFunc(checks, func(ch doctor.Check) bool { return ch.Name == removedKnobsCheckName }) {
+		rows = slices.DeleteFunc(slices.Clone(rows), func(r choiceKnobRow) bool {
+			return setsRemovedChoice(r.Env, r.Value(c))
+		})
+	}
 	errs = append(errs, validateChoiceKnobsErrors(c, rows)...)
 	if _, err := forge.ParseResearchVerdicts(c.ResearchVerdicts); err != nil {
 		errs = append(errs, err)
