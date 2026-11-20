@@ -46,6 +46,10 @@ type ociAdapter struct {
 // execCommand is the test seam for the host `nix build` EnsureReady runs.
 var execCommand = exec.Command
 
+// imageLockWaitHook is the test seam fired once lockImage's waiter has found
+// the lock held.
+var imageLockWaitHook = func() {}
+
 // Strategy is the oci family's entry in the runner registry; New and NewBuild
 // construct the same adapter.
 var Strategy = runner.Strategy{
@@ -129,6 +133,7 @@ func (a *ociAdapter) IsReady() error {
 func lockImage(img imageSpec) func() {
 	onWait := func() {
 		fmt.Fprintf(img.out(), "==> image '%s' is being realized elsewhere — waiting\n", img.tag)
+		imageLockWaitHook()
 	}
 	lock, err := acquireImageLock(img.tag, onWait)
 	if err != nil {
