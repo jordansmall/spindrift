@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
@@ -162,8 +165,8 @@ func TestPrimaryRow_RefusesAMergeMethodTheConnectorCannotHonour(t *testing.T) {
 	}
 }
 
-// Without a primary row, the native adapter is built and no Connector loads.
-func TestNoPrimaryRow_BuildsTheNativeForge(t *testing.T) {
+// Without a primary row, the native adapters are built and no Connector loads.
+func TestNoPrimaryRow_BuildsTheNativeForgeAndTracker(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
 	t.Cleanup(forgejo.SetLoadRowConnector(func(context.Context, backendrows.Row, backendrows.Options) (*connectorhost.Connector, error) {
@@ -187,6 +190,13 @@ func TestNoPrimaryRow_BuildsTheNativeForge(t *testing.T) {
 				if got := nativeForgeType(cf); !strings.Contains(got, "forgejo") || strings.Contains(got, "connectorforge") {
 					t.Errorf("readOnlyBox=%v: built %s, want the native forgejo adapter", readOnlyBox, got)
 				}
+			}
+			tr, err := buildTracker(srv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := reflect.TypeOf(tr).String(); !strings.Contains(got, "forgejoClient") {
+				t.Errorf("built %s, want the native forgejo tracker", got)
 			}
 		})
 	}
@@ -237,4 +247,132 @@ func TestPrimaryRow_RebasePRHeadIsPinnedToTheAgentBranch(t *testing.T) {
 			}
 		})
 	}
+}
+
+// buildTracker runs the production constructor for the issue tracker.
+func buildTracker(srv *httptest.Server) (forge.IssueTracker, error) {
+	l := mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: srv.URL, forgejo.ForgejoTokenEnv: gitSecret})
+	return forgejo.Strategy.NewIssueTracker(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels()}, l)
+}
+
+// A Connector that fails to load fails the tracker's construction with its
+// error and builds no tracker, native or otherwise.
+func TestPrimaryRow_TrackerLoadFailureFailsConstruction(t *testing.T) {
+	srv := httptest.NewTLSServer(nil)
+	t.Cleanup(srv.Close)
+	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Module = filepath.Join(t.TempDir(), "absent.wasm") })
+	t.Chdir(t.TempDir())
+
+	tr, err := buildTracker(srv)
+
+	if err == nil || !strings.Contains(err.Error(), "read module") || tr != nil {
+		t.Errorf("buildTracker = (%v, %v), want (nil, the module read error)", tr, err)
+	}
+}
+
+func TestPrimaryRow_TrackerLoadErrorIsReturnedAsIs(t *testing.T) {
+	boom := errors.New("connector would not load")
+	srv := httptest.NewTLSServer(nil)
+	t.Cleanup(srv.Close)
+	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
+	t.Cleanup(forgejo.SetLoadRowConnector(func(context.Context, backendrows.Row, backendrows.Options) (*connectorhost.Connector, error) {
+		return nil, boom
+	}))
+	t.Chdir(t.TempDir())
+
+	if tr, err := buildTracker(srv); !errors.Is(err, boom) || tr != nil {
+		t.Errorf("buildTracker = (%v, %v), want (nil, the load error)", tr, err)
+	}
+}
+
+// A Connector whose handshake omits a capability the native tracker serves
+// would leave that operation with nothing behind it, so loading it fails by
+// name and closes it.
+func TestPrimaryRow_TrackerRefusesAConnectorMissingACapability(t *testing.T) {
+	srv := httptest.NewTLSServer(nil)
+	t.Cleanup(srv.Close)
+	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
+	var loaded *connectorhost.Connector
+	t.Cleanup(forgejo.SetLoadRowConnector(func(ctx context.Context, row backendrows.Row, o backendrows.Options) (*connectorhost.Connector, error) {
+		c, err := backendrows.Load(ctx, row, o)
+		if err == nil {
+			c.Capabilities = slices.DeleteFunc(slices.Clone(c.Capabilities), func(cap string) bool {
+				return cap == connectortracker.CapLabeled || cap == connectortracker.CapProbe
+			})
+			loaded = c
+		}
+		return c, err
+	}))
+	t.Setenv(connectorCredentialEnv, connectorToken)
+	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
+	t.Chdir(t.TempDir())
+
+	tr, err := buildTracker(srv)
+
+	if err == nil || !strings.Contains(err.Error(), "forgejo Connector lacks required capabilities: tracker.probe, tracker.labeled") || tr != nil {
+		t.Errorf("buildTracker = (%v, %v), want (nil, the missing capabilities named)", tr, err)
+	}
+	if loaded == nil || !errors.Is(loaded.Call(context.Background(), connectortracker.CapProbe, struct{}{}, &struct{}{}), connectorhost.ErrUnusable) {
+		t.Error("the refused Connector was left open")
+	}
+}
+
+// A request outside the row's Routes is refused by the host: the tracker
+// operation fails with that refusal, and nothing native answers in its place.
+func TestPrimaryRow_TrackerRefusedRouteFailsTheOperation(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests.Add(1) }))
+	t.Cleanup(srv.Close)
+	useForgejoRow(t, srv.URL, func(r *backendrows.Row) {
+		r.Routes = append(slicesDeleteMethod(r.Routes, "GET"), connectorhost.Route{Method: "GET", Host: backendrows.BaseHost, Path: "/unrelated"})
+	})
+	t.Setenv(connectorCredentialEnv, connectorToken)
+	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
+	t.Chdir(t.TempDir())
+
+	tr, err := buildTracker(srv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tr.Issue("1")
+
+	if !errors.Is(err, connectorhost.ErrCall) || !errors.Is(err, connectorhost.ErrRouteRefused) {
+		t.Errorf("Issue = %v, want an error wrapping connectorhost.ErrCall and ErrRouteRefused", err)
+	}
+	if n := requests.Load(); n != 0 {
+		t.Errorf("the backend saw %d requests, want none", n)
+	}
+}
+
+// The Connector-only tracker exposes every optional capability the native
+// forgejo tracker does, so no caller's forge.As lookup silently misses.
+func TestPrimaryRow_TrackerExposesTheNativeCapabilitySet(t *testing.T) {
+	w := newTrackerHarness(t)
+	for name, ok := range map[string]bool{
+		"NativeDepsReader":     asOK[forge.NativeDepsReader](w.tr),
+		"BlockersLister":       asOK[forge.BlockersLister](w.tr),
+		"CommentLister":        asOK[forge.CommentLister](w.tr),
+		"HostPostedCommenter":  asOK[forge.HostPostedCommenter](w.tr),
+		"HostPostedIssueFiler": asOK[forge.HostPostedIssueFiler](w.tr),
+		"IssueLabeler":         asOK[forge.IssueLabeler](w.tr),
+		"MergeCloser":          asOK[forge.MergeCloser](w.tr),
+		"DemandCounter":        asOK[forge.DemandCounter](w.tr),
+		"LabeledBacklogLister": asOK[forge.LabeledBacklogLister](w.tr),
+		"IssueSearcher":        asOK[forge.IssueSearcher](w.tr),
+		"LabeledTracker":       asOK[forge.LabeledTracker](w.tr),
+		"FullyPaginated":       asOK[forge.FullyPaginated](w.tr),
+	} {
+		if !ok {
+			t.Errorf("the Connector-only tracker lacks %s", name)
+		}
+	}
+	// Unlike the native tracker's true: the Connector's list is one capped page.
+	if fp, _ := forge.As[forge.FullyPaginated](w.tr); fp == nil || fp.WalksAllPages() {
+		t.Error("FullyPaginated.WalksAllPages = true, want false under primary")
+	}
+}
+
+func asOK[T any](it forge.IssueTracker) bool {
+	_, ok := forge.As[T](it)
+	return ok
 }

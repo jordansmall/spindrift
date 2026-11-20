@@ -28,6 +28,9 @@ var Strategy = backendkit.Strategy{
 		if err != nil {
 			return nil, err
 		}
+		if row, ok := primaryRow(); ok {
+			return newConnectorTracker(row, s, k)
+		}
 		return NewForgejoClient(ForgejoConfig{
 			BaseURL:       k.ForgejoBaseURL,
 			Repo:          s.RepoSlug,
