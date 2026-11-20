@@ -803,7 +803,22 @@ systemd scope does not delegate them), so its row ran with cgroup tracking but
 without those two limits.
 
 The macOS remote-attach hop (podman machine or Docker Desktop, where stdio
-crosses into the runner VM) is unmeasured until the human macOS check (#7021).
+crosses into the runner VM) comes from the human macOS check (#7021): one
+research run each on an Apple-silicon host (16 GiB), github primary, images
+already loaded, read from the run's totals line. These are run totals, not
+the bench above: an exchange there mixes the Driver's Decode lines with
+`http_request` calls, so compare the two runtimes, not a column of the table.
+
+| runtime | start | exchanges (Host calls) | hop per exchange |
+|---|---|---|---|
+| podman machine 5.8.9 (applehv) | 171.4 ms | 233 (15) | 8.85 ms |
+| Docker Desktop 29.9.3 | 143.5 ms | 204 (15) | 9.81 ms |
+
+Start is in the range of the Linux bench's podman row (206.4 ms, on another
+host), so the VM crossing adds no start cost a run notices. Per exchange the two runtimes sit within about a
+millisecond of each other. A cold start, where the run first builds and loads
+the sandbox image, is far longer (22.8 s on podman machine) and is a
+first-run cost, not a hop cost.
 
 A real dogfood run reports the same costs (`sandbox_start_ns`,
 `sandbox_calls`, `sandbox_host_calls`, `sandbox_hop_ns`, and
