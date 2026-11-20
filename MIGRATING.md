@@ -1,5 +1,29 @@
 # Migration Guide
 
+## `CONNECTOR_SANDBOX` is removed (issue #7022)
+
+The Connector sandbox is now always on: every Connector the launcher hosts,
+first-party included, loads into it on every runner family, and there is no
+in-process fallback. Delete `CONNECTOR_SANDBOX` (env, settings document,
+`mkHarness` `defaults`) and the flake option `infra.connector.sandbox` from
+your config. A leftover setting is not ignored: it fails preflight (the
+`removed-knobs` check of `spindrift doctor`, and eval of the flake surfaces)
+naming the knob as removed.
+
+What else changed:
+
+- **A sandbox that cannot start fails the run** with
+  `ErrConnectorSandboxStart`, naming the runner. A host that denies bwrap's
+  unprivileged user namespaces, or has no sandbox image loaded, now fails
+  where an unset `CONNECTOR_SANDBOX` used to load in-process.
+- **`spindrift quickstart` defers its Connector checks.** It cannot start a
+  sandbox, so its token scope audit and finish-line check say they are deferred
+  to `spindrift doctor`.
+- **`in_process_loads` is gone** from the read shadow's `shadow_summary` and
+  the github primary totals line. Drop it from any script that reads them.
+
+See [Connector sandbox](docs/reference.md#connector-sandbox).
+
 ## The Console is removed (issue #7306)
 
 `spindrift console`, the interactive terminal UI for browsing the backlog,

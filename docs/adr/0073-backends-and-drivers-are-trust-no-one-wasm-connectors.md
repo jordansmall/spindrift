@@ -825,7 +825,8 @@ first-run cost, not a hop cost.
 A real dogfood run reports the same costs (`sandbox_start_ns`,
 `sandbox_calls`, `sandbox_host_calls`, `sandbox_hop_ns`, and
 `in_process_loads`) in the totals line that ends its primary record's audit
-file (#7116). Since #6998 made github primary, dogfood writes no read shadow
+file (#7116). (Superseded by the issue #7022 amendment below: `in_process_loads`
+is removed.) Since #6998 made github primary, dogfood writes no read shadow
 `shadow_summary`, which carries the same keys for a shadow row. See [the
 reference](../reference.md#backend-primary-mode).
 
@@ -1294,3 +1295,36 @@ one is registered that is neither a Connector-only row nor a Built-in backend
 (`local`, `git`). forgejo's native forge and tracker are the one pinned
 exception, deleted by #6868 (the forge half) and #7122 (the tracker), after
 which the pin is emptied.
+
+## Amendment (issue #7022): the Connector sandbox is always on
+
+Decision 14's Connector sandbox is mandatory. Every Launcher-hosted Connector,
+first-party included, loads into it on every runner family (podman, docker,
+rancher and bwrap), and the `CONNECTOR_SANDBOX` knob and its flake option
+`infra.connector.sandbox` are gone: a leftover setting fails through the
+removed-knobs registry. The sandbox still starts lazily on the first Connector
+load, so a command that loads none starts none. This supersedes the earlier
+sentence that the mandatory sandbox "has not landed", and the opt-in rollout it
+ran under (the knob, and the dogfood check that held it on).
+
+Failure is closed at both ends. A run whose sandbox cannot start fails with
+`ErrConnectorSandboxStart`, naming the runner. A process with no sandbox
+installed refuses every Connector load with `ErrNoConnectorSandbox`, never
+falling back to its own address space. No production binary loads a
+Launcher-hosted Connector in-process any more. The in-process engine remains
+only in test binaries, through `connectorsandboxtest`, and in the Box, which
+loads first-party Driver Connectors directly under the unchanged
+`driverrows.ErrNotFirstParty` rule.
+
+The Launcher installs the sandbox on every path that can load a Connector
+(`run`, `recover`, `research`, `butler`, `doctor`, reconcile, `preview` and
+shell completion). The daemon installs a lazy sandbox for its own demand
+counting, through the same runner and artifacts as its Launcher children.
+Quickstart has no runner, artifacts or input document, so it cannot start one
+and loads no Connector: its token scope audit and finish-line doctor are
+deferred to `spindrift doctor`.
+
+The `in_process_loads` counter is removed from the read shadow's
+`shadow_summary` and the github primary totals line, since the count it kept at
+zero can no longer be anything else; the #7018 and #7020 mentions of it no
+longer hold. The remaining sandbox cost keys are unchanged.
