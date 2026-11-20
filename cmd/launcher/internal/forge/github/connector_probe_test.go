@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -92,39 +91,5 @@ func TestExecClientProbe_ConfiguredRowGoesThroughTheConnector(t *testing.T) {
 				t.Errorf("backend saw Authorization %v, want the host's credential", b.seenAuth)
 			}
 		})
-	}
-}
-
-// The Connector's verdicts match the native Probe over the same failures.
-func TestExecClientProbe_ConnectorMatchesNative(t *testing.T) {
-	for _, status := range []int{200, 401, 404} {
-		b := newProbeBackend(t, status)
-		useGithubRowAt(t, b.Listener.Addr().String())
-		useConnectorClient(t, b)
-		t.Setenv(tokenCredentialEnv, "ghp_host")
-		gotSlug, gotErr := NewExecClient(connectorRepo, testLabels).Probe()
-
-		noGithubRow(t)
-		ghProbeStub(t, status)
-		wantSlug, wantErr := NewExecClient(connectorRepo, testLabels).Probe()
-
-		if gotSlug != wantSlug && status == 200 || errClass(gotErr) != errClass(wantErr) {
-			t.Errorf("status %d: Connector Probe = (%q, %v), native (%q, %v)", status, gotSlug, gotErr, wantSlug, wantErr)
-		}
-	}
-}
-
-// Without a github row the Probe is the native gh path.
-func TestExecClientProbe_NoRowUsesGh(t *testing.T) {
-	noGithubRow(t)
-	dir := prependFakeGH(t, "printf 'owner/repo\\n'")
-
-	slug, err := NewExecClient(connectorRepo, testLabels).Probe()
-
-	if err != nil || slug != "owner/repo" {
-		t.Fatalf("Probe = (%q, %v), want (owner/repo, nil)", slug, err)
-	}
-	if m, _ := filepath.Glob(filepath.Join(dir, "call-*.txt")); len(m) != 2 {
-		t.Errorf("Probe ran gh %d times, want 2 (auth status, repo view)", len(m))
 	}
 }

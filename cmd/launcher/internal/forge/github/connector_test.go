@@ -961,37 +961,6 @@ func TestConnector_Contracts(t *testing.T) {
 	cov.assertUsed(t)
 }
 
-// TestConnector_FailureDetailMatchesNative pins the failing sets connectorforge
-// copies from ci_rollup.go: one context of every CheckRun conclusion and
-// StatusContext state must render exactly as the native adapter renders them.
-func TestConnector_FailureDetailMatchesNative(t *testing.T) {
-	h := newComposedHarness(t)
-	var native []failureDetailContext
-	var nodes []scriptedContext
-	for _, c := range []string{"SUCCESS", "NEUTRAL", "SKIPPED", "FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE"} {
-		native = append(native, failureDetailContext{TypeName: "CheckRun", Name: "run-" + c, Conclusion: c, Summary: "summary " + c})
-		nodes = append(nodes, scriptedContext{TypeName: "CheckRun", Name: "run-" + c, Conclusion: c, Summary: "summary " + c})
-	}
-	for _, s := range []string{"SUCCESS", "PENDING", "EXPECTED", "FAILURE", "ERROR"} {
-		native = append(native, failureDetailContext{TypeName: "StatusContext", Context: "status-" + s, State: s, Description: "description " + s})
-		nodes = append(nodes, scriptedContext{TypeName: "StatusContext", Context: "status-" + s, State: s, Description: "description " + s})
-	}
-	url := h.SeedOpenPR("301")
-	h.mutatePR("301", func(p *restPR) { p.contexts = nodes })
-
-	got, err := h.Forge().FailureDetail(url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := renderFailureDetail(native, nil)
-	if want == "" {
-		t.Fatal("native rendered no failure detail for the failing contexts")
-	}
-	if got != want {
-		t.Errorf("Connector FailureDetail differs from native\n got: %q\nwant: %q", got, want)
-	}
-}
-
 func TestConnector_ListIssuesOmitsPullRequests(t *testing.T) {
 	h := newComposedHarness(t)
 	h.SeedIssue(forge.Issue{Number: "11", Title: "issue"})

@@ -71,32 +71,6 @@ func countLoads(t *testing.T, failWith error) *int {
 	return loads
 }
 
-// A shadow github row never routes: gh stays authoritative for every host
-// read, and the shadow compares gh against the Connector. One subtest per read
-// behind routedRow, so a site that consults the row directly and skips the
-// Shadow check fails here.
-func TestRoutedReads_ShadowRowLeavesGhAnswering(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		read func(c *execClient)
-	}{
-		{"Probe", func(c *execClient) { _, _ = c.Probe() }},
-		{"ListLabels", func(c *execClient) { _, _ = c.ListLabels() }},
-		{"BranchProtected", func(c *execClient) { _, _ = c.BranchProtected("main") }},
-		{"CanAutoMerge", func(c *execClient) { _, _ = c.CanAutoMerge() }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, c, calls := harnessWithRow(t, useGithubRowShadow)
-
-			tc.read(c)
-
-			if calls() == 0 {
-				t.Errorf("%s under a shadow row never reached gh", tc.name)
-			}
-		})
-	}
-}
-
 // Under a github row the host-side reads doctor, the daemon and recover make
 // are answered by the Connector over the API, never by gh.
 func TestExecClient_ConfiguredRowReadsGoThroughTheConnector(t *testing.T) {

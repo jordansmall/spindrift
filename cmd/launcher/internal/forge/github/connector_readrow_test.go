@@ -2,13 +2,14 @@ package github
 
 import (
 	"errors"
-	"slices"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/forge"
 )
+
+const readPRURL = "https://github.com/owner/repo/pull/1"
 
 // readsNeedingARow is every tracker read a no-route state must fail by name.
 var readsNeedingARow = []struct {
@@ -31,6 +32,23 @@ var readsNeedingARow = []struct {
 		return err
 	}},
 	{"CountReady", func(c *execClient) error { _, err := c.CountReady(false); return err }},
+	{"OpenPRForBranch", func(c *execClient) error { _, _, err := c.OpenPRForBranch("b"); return err }},
+	{"BranchExists", func(c *execClient) error { _, err := c.BranchExists("b"); return err }},
+	{"BranchProtected", func(c *execClient) error { _, err := c.BranchProtected("b"); return err }},
+	{"PRForBranch", func(c *execClient) error { _, _, err := c.PRForBranch("b"); return err }},
+	{"PRState", func(c *execClient) error { _, err := c.PRState(readPRURL); return err }},
+	{"MergeCommit", func(c *execClient) error { _, err := c.MergeCommit(readPRURL); return err }},
+	{"CheckState", func(c *execClient) error { _, err := c.CheckState(readPRURL); return err }},
+	{"CheckRun", func(c *execClient) error { _, _, err := c.CheckRun(readPRURL); return err }},
+	{"HeadCommitSHA", func(c *execClient) error { _, err := c.HeadCommitSHA(readPRURL); return err }},
+	{"Mergeable", func(c *execClient) error { _, err := c.Mergeable(readPRURL); return err }},
+	{"NeedsUpdate", func(c *execClient) error { _, err := c.NeedsUpdate(readPRURL); return err }},
+	{"ListPRFiles", func(c *execClient) error { _, err := c.ListPRFiles(readPRURL); return err }},
+	{"CanAutoMerge", func(c *execClient) error { _, err := c.CanAutoMerge(); return err }},
+	{"Probe", func(c *execClient) error { _, err := c.Probe(); return err }},
+	{"ListLabels", func(c *execClient) error { _, err := c.ListLabels(); return err }},
+	{"FailureDetail", func(c *execClient) error { _, err := c.FailureDetail(readPRURL); return err }},
+	{"IntrospectToken", func(*execClient) error { _, err := introspectToken("ghp_abc", connectorRepo); return err }},
 }
 
 // With no github row, under a GitHub Enterprise GH_HOST, or under a shadow row
@@ -78,14 +96,4 @@ func TestReads_WithoutARoutedRowFailNamedAndNeverRunGh(t *testing.T) {
 			})
 		}
 	}
-}
-
-// servedByReadRow reports whether the read named name has no native path left.
-func servedByReadRow(name string) bool {
-	return slices.ContainsFunc(readsNeedingARow, func(r struct {
-		name string
-		read func(c *execClient) error
-	}) bool {
-		return r.name == name
-	})
 }

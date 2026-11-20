@@ -34,8 +34,10 @@ var Strategy = backendkit.Strategy{
 		}
 		return NewExecClient(s.RepoSlug, s.Labels, codeForgeOpts(s)...), nil
 	},
+	// The Box has no backend rows, so this stays the in-box gh query (#6757)
+	// rather than the Connector read the host's OpenPRForBranch uses.
 	OpenPRForBranch: func(repoSlug, branch string) (bool, error) {
-		_, open, err := NewExecClient(repoSlug, forge.DispatchLabels{}).OpenPRForBranch(branch)
+		_, open, err := NewExecClient(repoSlug, forge.DispatchLabels{}).nativeOpenPRForBranch(branch)
 		return open, err
 	},
 	NewLedger: func(s backendkit.Shared, _ backendkit.Lookup) (backendkit.LedgerSite, error) {

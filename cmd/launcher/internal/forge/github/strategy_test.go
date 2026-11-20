@@ -89,7 +89,9 @@ func TestStrategyRemoteMatch(t *testing.T) {
 	}
 }
 
-func TestStrategyOpenPRForBranchPassesSlugAndBranchThrough(t *testing.T) {
+// The Box has no backend rows, so its branch recovery keeps the in-box gh
+// query (#6757) rather than the Connector read the host uses.
+func TestStrategyOpenPRForBranchRunsNativeGHWithNoRoute(t *testing.T) {
 	dir := prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   echo "https://github.com/o/r/pull/7"
   exit 0

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Stateful stand-in for the gh CLI that forgetest.RunTrackerContract runs.
+# Stateful stand-in for the gh CLI behind the native label writes.
 # Invocations share a STATE_DIR/issues/<num>/ tree rather than each returning a
 # scripted response, so every call sees the previous calls' writes.
 DIR="$STATE_DIR/issues"
@@ -11,13 +11,6 @@ json_escape() {
 	cr=$(printf '\r')
 	out=$(printf '%s.' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e "s/$tab/\\\\t/g" -e "s/$cr/\\\\r/g" | awk 'NR > 1 { printf "\\n" } { printf "%s", $0 }')
 	printf '%s' "${out%.}"
-}
-
-ordered_nums() {
-	# Issue directory names are always plain digits, because the test creates
-	# them, so ls's word-splitting risk does not apply.
-	# shellcheck disable=SC2012
-	ls "$DIR" 2>/dev/null | sort -n
 }
 
 labels_json() {
@@ -38,60 +31,8 @@ labels_json() {
 cmd1="$1"; cmd2="$2"
 
 case "$cmd1-$cmd2" in
-issue-list)
-	shift 2
-	label=""
-	while [ $# -gt 0 ]; do
-		case "$1" in
-		--label) label="$2"; shift 2 ;;
-		*) shift ;;
-		esac
-	done
-	printf '['
-	first=1
-	for num in $(ordered_nums); do
-		if [ -n "$label" ]; then
-			labf="$DIR/$num/labels"
-			if [ ! -f "$labf" ] || ! grep -qxF "$label" "$labf"; then
-				continue
-			fi
-		fi
-		[ $first -eq 0 ] && printf ','
-		first=0
-		title=$(cat "$DIR/$num/title" 2>/dev/null)
-		printf '{"number":%s,"title":"%s","labels":%s}' "$num" "$(json_escape "$title")" "$(labels_json "$num")"
-	done
-	printf ']'
-	;;
 issue-view)
-	num="$3"
-	shift 3
-	fields=""
-	while [ $# -gt 0 ]; do
-		case "$1" in
-		--json) fields="$2"; shift 2 ;;
-		*) shift ;;
-		esac
-	done
-	title=$(cat "$DIR/$num/title" 2>/dev/null)
-	body=$(cat "$DIR/$num/body" 2>/dev/null)
-	case "$fields" in
-	*body*)
-		printf '{"number":%s,"title":"%s","body":"%s","state":"OPEN","labels":%s}' "$num" "$(json_escape "$title")" "$(json_escape "$body")" "$(labels_json "$num")"
-		;;
-	*comments*)
-		# The harness writes the native {"comments":[...]} document, so the wire
-		# shape stays decided on the Go side rather than re-encoded here.
-		if [ -f "$DIR/$num/comments" ]; then
-			cat "$DIR/$num/comments"
-		else
-			printf '{"comments":[]}'
-		fi
-		;;
-	*)
-		printf '{"labels":%s}' "$(labels_json "$num")"
-		;;
-	esac
+	printf '{"labels":%s}' "$(labels_json "$3")"
 	;;
 issue-edit)
 	num="$3"
@@ -118,105 +59,5 @@ $2"; shift 2 ;;
 	fi
 	[ -n "$add" ] && echo "$add" >> "$tmp"
 	mv "$tmp" "$DIR/$num/labels"
-	;;
-api-*)
-	path="$2"
-	case "$path" in
-	*/dependencies/blocked_by)
-		rest=${path#*/issues/}
-		num=${rest%%/dependencies*}
-		if [ -f "$DIR/$num/fail_native" ]; then
-			echo "simulated native lookup failure" >&2
-			exit 1
-		fi
-		if [ -f "$DIR/$num/deps" ]; then
-			cat "$DIR/$num/deps"
-		fi
-		;;
-	*/issues\?*)
-		# Conditional page read behind forge.DemandCounter: the open issues
-		# carrying the labels= query value, 100 per page (page=N, default 1),
-		# with an Etag over the served page's body. Real GitHub orders by
-		# updated desc; the fake orders by number ascending instead. An issue
-		# dir holding a pull_request marker file is listed as a pull request.
-		# FAKE_GH_ISSUES_FAIL_STATUS fails the read with that HTTP status;
-		# FAKE_GH_ISSUES_FAIL_PAGE scopes it to one page number.
-		query=${path#*\?}
-		size=100
-		case "$query" in
-		*sort=updated*) ;;
-		*) echo "fake gh: issues page must sort by update: $path" >&2; exit 1 ;;
-		esac
-		case "$query" in
-		*per_page="$size"*) ;;
-		*) echo "fake gh: issues page must be $size per page: $path" >&2; exit 1 ;;
-		esac
-		want=$(printf '%s' "$query" | tr '&' '\n' | sed -n 's/^labels=//p' | sed 's/%20/ /g; s/+/ /g')
-		page=$(printf '%s' "$query" | tr '&' '\n' | sed -n 's/^page=//p')
-		[ -n "$page" ] || page=1
-		if [ -n "$FAKE_GH_ISSUES_FAIL_STATUS" ] && { [ -z "$FAKE_GH_ISSUES_FAIL_PAGE" ] || [ "$FAKE_GH_ISSUES_FAIL_PAGE" = "$page" ]; }; then
-			echo "$path - $FAKE_GH_ISSUES_FAIL_STATUS" >> "$STATE_DIR/api.log"
-			printf 'HTTP/2.0 %s Error\r\n\r\n{"message":"boom"}' "$FAKE_GH_ISSUES_FAIL_STATUS"
-			echo "gh: HTTP $FAKE_GH_ISSUES_FAIL_STATUS" >&2
-			exit 1
-		fi
-		if [ -n "$FAKE_GH_ISSUES_RATE_LIMIT_HEADERS" ]; then
-			# Newline-separated header lines to print under a rate-limit 403.
-			printf 'HTTP/2.0 403 Forbidden\r\n'
-			printf '%s\n' "$FAKE_GH_ISSUES_RATE_LIMIT_HEADERS" | while IFS= read -r h; do
-				[ -n "$h" ] && printf '%s\r\n' "$h"
-			done
-			printf '\r\n{"message":"API rate limit exceeded"}'
-			echo "gh: API rate limit exceeded for user ID 1. (HTTP 403)" >&2
-			exit 1
-		fi
-		inm="-"
-		shift 2
-		while [ $# -gt 0 ]; do
-			case "$1" in
-			-H)
-				case "$2" in
-				If-None-Match:*) inm=${2#If-None-Match: } ;;
-				esac
-				shift 2
-				;;
-			*) shift ;;
-			esac
-		done
-		body=$(
-			printf '['
-			first=1
-			idx=0
-			size=100
-			lo=$(( (page - 1) * size ))
-			for n in $(ordered_nums); do
-				labf="$DIR/$n/labels"
-				if [ ! -f "$labf" ] || ! grep -qxF "$want" "$labf"; then
-					continue
-				fi
-				idx=$((idx + 1))
-				if [ "$idx" -le "$lo" ] || [ "$idx" -gt $((lo + size)) ]; then
-					continue
-				fi
-				[ $first -eq 0 ] && printf ','
-				first=0
-				title=$(cat "$DIR/$n/title" 2>/dev/null)
-				pr=""
-				[ -f "$DIR/$n/pull_request" ] && pr=',"pull_request":{"url":"x"}'
-				printf '{"number":%s,"title":"%s","labels":%s%s}' "$n" "$(json_escape "$title")" "$(labels_json "$n")" "$pr"
-			done
-			printf ']'
-		)
-		etag="\"$(printf '%s' "$body" | cksum | tr -d ' ')\""
-		if [ "$inm" = "$etag" ]; then
-			echo "$path $inm 304" >> "$STATE_DIR/api.log"
-			printf 'HTTP/2.0 304 Not Modified\r\nEtag: %s\r\n\r\n' "$etag"
-			echo "gh: HTTP 304" >&2
-			exit 1
-		fi
-		echo "$path $inm 200" >> "$STATE_DIR/api.log"
-		printf 'HTTP/2.0 200 OK\r\nEtag: %s\r\n\r\n%s' "$etag" "$body"
-		;;
-	esac
 	;;
 esac

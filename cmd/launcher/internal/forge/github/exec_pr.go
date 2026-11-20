@@ -1,18 +1,12 @@
 package github
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	neturl "net/url"
 	"os"
 	"os/exec"
-	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -28,9 +22,16 @@ import (
 const rebaseForcePushTimeout = 5 * time.Minute
 
 func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
-	if row, ok := routedRow(); ok {
-		return e.openPRForBranchViaConnector(row, branch)
+	row, err := readRow()
+	if err != nil {
+		return forge.PR{}, false, err
 	}
+	return e.openPRForBranchViaConnector(row, branch)
+}
+
+// nativeOpenPRForBranch is the gh read OpenPRForBranch was, kept for the native
+// write that calls it.
+func (e *execClient) nativeOpenPRForBranch(branch string) (forge.PR, bool, error) {
 	cmd := exec.Command("gh", "pr", "list",
 		"--repo", e.repo,
 		"--head", branch,
@@ -57,24 +58,11 @@ func (e *execClient) BranchExists(branch string) (bool, error) {
 	if branch == "" {
 		return false, fmt.Errorf("branch must not be empty")
 	}
-	if row, ok := routedRow(); ok {
-		return e.branchExistsViaConnector(row, branch)
-	}
-	cmd := exec.Command("gh", "api",
-		fmt.Sprintf("repos/%s/git/matching-refs/heads/%s", e.repo, branch),
-		"--jq", ".[].ref",
-	)
-	out, err := cmd.Output()
+	row, err := readRow()
 	if err != nil {
-		return false, ghCommandErr(fmt.Sprintf("gh api matching-refs heads/%s", branch), err)
+		return false, err
 	}
-	want := "refs/heads/" + branch
-	for _, ref := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if ref == want {
-			return true, nil
-		}
-	}
-	return false, nil
+	return e.branchExistsViaConnector(row, branch)
 }
 
 // BranchProtected reports whether branch has protection, classic rule or
@@ -86,129 +74,47 @@ func (e *execClient) BranchProtected(branch string) (bool, error) {
 	if branch == "" {
 		return false, fmt.Errorf("branch must not be empty")
 	}
-	if row, ok := routedRow(); ok {
-		return e.branchProtectedViaConnector(row, branch)
-	}
-	var stderr bytes.Buffer
-	cmd := exec.Command("gh", "api",
-		fmt.Sprintf("repos/%s/branches/%s/protection", e.repo, branch),
-	)
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		base := ghCommandErrText(fmt.Sprintf("gh api branches/%s/protection", branch), err, stderr.String())
-		classicKnownUnprotected := strings.Contains(stderr.String(), "Branch not protected")
-		classicUnreadable := strings.Contains(stderr.String(), "HTTP 403")
-		if classicKnownUnprotected || classicUnreadable {
-			protected, rerr := e.branchProtectedByRuleset(branch)
-			if rerr != nil {
-				return false, rerr
-			}
-			if protected || classicKnownUnprotected {
-				return protected, nil
-			}
-			return false, fmt.Errorf("classic protection unreadable and no ruleset applies -- cannot determine whether %s carries a classic-only protection rule: %w", branch, base)
-		}
-		return false, base
-	}
-	return true, nil
-}
-
-// branchProtectedByRuleset covers what the classic protection endpoint cannot
-// see: repository rulesets. GitHub evaluates targeting server-side, so a
-// wildcard like "release/*" matches without replicating that logic here. The
-// endpoint returns 200 with an empty array when none apply and never 404, so
-// any gh failure here is a genuine probe failure.
-func (e *execClient) branchProtectedByRuleset(branch string) (bool, error) {
-	cmd := exec.Command("gh", "api",
-		fmt.Sprintf("repos/%s/rules/branches/%s", e.repo, branch),
-		"--jq", "length",
-	)
-	out, err := cmd.Output()
+	row, err := readRow()
 	if err != nil {
-		return false, ghCommandErr(fmt.Sprintf("gh api rules/branches/%s", branch), err)
+		return false, err
 	}
-	n, parseErr := strconv.Atoi(strings.TrimSpace(string(out)))
-	if parseErr != nil {
-		return false, fmt.Errorf("gh api rules/branches/%s: parse response: %w", branch, parseErr)
-	}
-	return n > 0, nil
+	return e.branchProtectedViaConnector(row, branch)
 }
 
 func (e *execClient) PRForBranch(branch string) (string, bool, error) {
-	if row, ok := routedRow(); ok {
-		return e.prForBranchViaConnector(row, branch)
-	}
-	cmd := exec.Command("gh", "pr", "list",
-		"--repo", e.repo,
-		"--head", branch,
-		"--state", "all",
-		"--json", "url",
-		"--jq", `.[0].url // ""`,
-	)
-	out, err := cmd.Output()
+	row, err := readRow()
 	if err != nil {
-		return "", false, ghCommandErr("gh pr list", err)
+		return "", false, err
 	}
-	url := strings.TrimSpace(string(out))
-	if url == "" {
-		return "", false, nil
-	}
-	return url, true, nil
+	return e.prForBranchViaConnector(row, branch)
 }
 
 func (e *execClient) PRState(url string) (forge.PRState, error) {
-	if row, ok := routedRow(); ok {
-		return e.prStateViaConnector(row, url)
-	}
-	cmd := exec.Command("gh", "pr", "view", url, "--json", "state", "--jq", ".state")
-	out, err := cmd.Output()
+	row, err := readRow()
 	if err != nil {
-		return "", ghCommandErr(fmt.Sprintf("gh pr view %s state", url), err)
+		return "", err
 	}
-	return forge.PRState(strings.TrimSpace(string(out))), nil
+	return e.prStateViaConnector(row, url)
 }
 
 // MergeCommit returns the oid of the commit the merged PR at url landed as, ""
 // when GitHub reports none (an unmerged PR).
 func (e *execClient) MergeCommit(url string) (string, error) {
-	if row, ok := routedRow(); ok {
-		return e.mergeCommitViaConnector(row, url)
-	}
-	cmd := exec.Command("gh", "pr", "view", url, "--json", "mergeCommit", "--jq", `.mergeCommit.oid // ""`)
-	out, err := cmd.Output()
+	row, err := readRow()
 	if err != nil {
-		return "", ghCommandErr(fmt.Sprintf("gh pr view %s mergeCommit", url), err)
+		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	return e.mergeCommitViaConnector(row, url)
 }
 
 // CheckState returns the aggregate statusCheckRollup state of the PR's head
 // commit, or StateNone when no checks are registered.
 func (e *execClient) CheckState(url string) (forge.RollupState, error) {
-	if row, ok := routedRow(); ok {
-		return e.checkStateViaConnector(row, url)
+	row, err := readRow()
+	if err != nil {
+		return forge.StateNone, err
 	}
-	state, _, err := e.CheckRun(url)
-	return state, err
-}
-
-// actionsRunRE matches a GitHub Actions run URL, optionally followed by the
-// /job/<id> segment a check run's detailsUrl carries. Group 1 is the
-// https://host/owner/repo prefix, group 2 the run path, group 3 the job id
-// ("" without one).
-var actionsRunRE = regexp.MustCompile(`^(https://[^/]+/[^/]+/[^/]+)(/actions/runs/\d+)(?:/job/(\d+))?/?$`)
-
-// rollupQueryResult is the statusCheckRollup object CheckRun's --jq emits, or
-// {} when the head commit has no checks.
-type rollupQueryResult struct {
-	State    string `json:"state"`
-	Contexts struct {
-		Nodes []struct {
-			TypeName   string `json:"__typename"`
-			DetailsURL string `json:"detailsUrl"`
-			Status     string `json:"status"`
-		} `json:"nodes"`
-	} `json:"contexts"`
+	return e.checkStateViaConnector(row, url)
 }
 
 // CheckRun implements forge.CIRunReporter. The run URL is the first Actions run
@@ -216,69 +122,20 @@ type rollupQueryResult struct {
 // live work rather than a finished sibling workflow. Only runs under the PR's
 // own host, owner and repo count.
 func (e *execClient) CheckRun(url string) (forge.RollupState, string, error) {
-	if row, ok := routedRow(); ok {
-		return e.checkRunViaConnector(row, url)
-	}
-	// Parse https://github.com/OWNER/REPO/pull/NUMBER
-	parts := strings.Split(url, "/")
-	if len(parts) < 7 {
-		return forge.StateNone, "", fmt.Errorf("invalid PR URL: %s", url)
-	}
-	owner, repo, number := parts[3], parts[4], parts[6]
-	prefix := strings.Join(parts[:5], "/")
-	const gql = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:50){nodes{__typename ... on CheckRun{detailsUrl status}}}}}}}}}}`
-	cmd := exec.Command("gh", "api", "graphql",
-		"-f", "query="+gql,
-		"-f", "owner="+owner,
-		"-f", "repo="+repo,
-		"-F", "number="+number,
-		"--jq", `.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup // {}`,
-	)
-	out, err := cmd.Output()
+	row, err := readRow()
 	if err != nil {
-		return forge.StateNone, "", ghCommandErr("gh api graphql (statusCheckRollup)", err)
+		return forge.StateNone, "", err
 	}
-	var rollup rollupQueryResult
-	if s := strings.TrimSpace(string(out)); s != "" {
-		if err := json.Unmarshal([]byte(s), &rollup); err != nil {
-			return forge.StateNone, "", fmt.Errorf("parse statusCheckRollup: %w", err)
-		}
-	}
-	state := forge.RollupState(rollup.State)
-	if state == "" {
-		state = forge.StateNone
-	}
-	var first string
-	for _, n := range rollup.Contexts.Nodes {
-		if n.TypeName != "CheckRun" {
-			continue
-		}
-		m := actionsRunRE.FindStringSubmatch(n.DetailsURL)
-		if m == nil || !strings.EqualFold(m[1], prefix) {
-			continue
-		}
-		// Dropping /job/<id> keeps the URL stable as a run's jobs register.
-		run := m[1] + m[2]
-		if n.Status != "COMPLETED" {
-			return state, run, nil
-		}
-		if first == "" {
-			first = run
-		}
-	}
-	return state, first, nil
+	return e.checkRunViaConnector(row, url)
 }
 
 // HeadCommitSHA returns the PR's current head commit SHA.
 func (e *execClient) HeadCommitSHA(url string) (string, error) {
-	if row, ok := routedRow(); ok {
-		return e.headCommitSHAViaConnector(row, url)
-	}
-	out, err := exec.Command("gh", "pr", "view", url, "--json", "headRefOid", "--jq", ".headRefOid").Output()
+	row, err := readRow()
 	if err != nil {
-		return "", ghCommandErr(fmt.Sprintf("gh pr view %s headRefOid", url), err)
+		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	return e.headCommitSHAViaConnector(row, url)
 }
 
 // Mergeable returns the PR's content-mergeability state: the GraphQL
@@ -286,9 +143,16 @@ func (e *execClient) HeadCommitSHA(url string) (string, error) {
 // Merge can tell a genuine conflict (CONFLICTING) apart from a PR merely
 // blocked by pending or failing checks (MERGEABLE).
 func (e *execClient) Mergeable(url string) (forge.MergeableState, error) {
-	if row, ok := routedRow(); ok {
-		return e.mergeableViaConnector(row, url)
+	row, err := readRow()
+	if err != nil {
+		return forge.MergeableUnknown, err
 	}
+	return e.mergeableViaConnector(row, url)
+}
+
+// nativeMergeable is the gh read Mergeable was, kept for the native Merge that
+// classifies its failure by it.
+func (e *execClient) nativeMergeable(url string) (forge.MergeableState, error) {
 	parts := strings.Split(url, "/")
 	if len(parts) < 7 {
 		return forge.MergeableUnknown, fmt.Errorf("invalid PR URL: %s", url)
@@ -319,37 +183,11 @@ func (e *execClient) Mergeable(url string) (forge.MergeableState, error) {
 // to be up to date, which this project's PAT cannot even read (issue #936).
 // A fork-sourced head 404s here; the caller logs and swallows that error.
 func (e *execClient) NeedsUpdate(prURL string) (bool, error) {
-	if row, ok := routedRow(); ok {
-		return e.needsUpdateViaConnector(row, prURL)
-	}
-	out, err := exec.Command("gh", "pr", "view", prURL,
-		"--json", "headRefName,baseRefName",
-		"--jq", "[.headRefName,.baseRefName]|@tsv",
-	).Output()
+	row, err := readRow()
 	if err != nil {
-		return false, ghCommandErr(fmt.Sprintf("gh pr view %s", prURL), err)
+		return false, err
 	}
-	fields := strings.SplitN(strings.TrimSpace(string(out)), "\t", 2)
-	if len(fields) != 2 {
-		return false, fmt.Errorf("gh pr view: unexpected output %q", string(out))
-	}
-	head, base := fields[0], fields[1]
-
-	// "base...head" makes behind_by count commits reachable from base but not
-	// head. Ref names are path-escaped since agent/issue-N contains a slash.
-	basehead := neturl.PathEscape(base) + "..." + neturl.PathEscape(head)
-	cmpOut, err := exec.Command("gh", "api",
-		fmt.Sprintf("repos/%s/compare/%s", e.repo, basehead),
-		"--jq", ".behind_by",
-	).Output()
-	if err != nil {
-		return false, ghCommandErr(fmt.Sprintf("gh api compare %s", basehead), err)
-	}
-	behindBy, convErr := strconv.Atoi(strings.TrimSpace(string(cmpOut)))
-	if convErr != nil {
-		return false, fmt.Errorf("gh api compare %s: unexpected output %q", basehead, string(cmpOut))
-	}
-	return behindBy > 0, nil
+	return e.needsUpdateViaConnector(row, prURL)
 }
 
 // ListPRFiles returns every path changed by the PR, added, modified, and
@@ -357,31 +195,11 @@ func (e *execClient) NeedsUpdate(prURL string) (bool, error) {
 // endpoint works under a fine-grained PAT scoped to Pull requests RW; the
 // check-runs endpoint does not.
 func (e *execClient) ListPRFiles(url string) ([]string, error) {
-	if row, ok := routedRow(); ok {
-		return e.listPRFilesViaConnector(row, url)
-	}
-	parts := strings.Split(url, "/")
-	if len(parts) < 7 {
-		return nil, fmt.Errorf("invalid PR URL: %s", url)
-	}
-	owner, repo, number := parts[3], parts[4], parts[6]
-	cmd := exec.Command("gh", "api",
-		fmt.Sprintf("repos/%s/%s/pulls/%s/files", owner, repo, number),
-		"--paginate",
-		"--jq", ".[].filename",
-	)
-	out, err := cmd.Output()
+	row, err := readRow()
 	if err != nil {
-		return nil, ghCommandErr("gh api pulls files", err)
+		return nil, err
 	}
-	var files []string
-	sc := bufio.NewScanner(strings.NewReader(string(out)))
-	for sc.Scan() {
-		if f := strings.TrimSpace(sc.Text()); f != "" {
-			files = append(files, f)
-		}
-	}
-	return files, nil
+	return e.listPRFilesViaConnector(row, url)
 }
 
 func (e *execClient) Merge(url string) error {
@@ -423,7 +241,7 @@ func (e *execClient) classifyMergeFailure(url string, mergeErr error, stderr str
 		}
 		return base
 	}
-	state, err := e.Mergeable(url)
+	state, err := e.nativeMergeable(url)
 	if err != nil {
 		return fmt.Errorf("%w (mergeable state unavailable: %v)", base, err)
 	}
@@ -435,26 +253,11 @@ func (e *execClient) classifyMergeFailure(url string, mergeErr error, stderr str
 
 // CanAutoMerge reports whether the repo allows GitHub's native auto-merge.
 func (e *execClient) CanAutoMerge() (bool, error) {
-	if row, ok := routedRow(); ok {
-		return e.canAutoMergeViaConnector(row)
-	}
-	parts := strings.SplitN(e.repo, "/", 2)
-	if len(parts) != 2 {
-		return false, fmt.Errorf("invalid repo slug: %q", e.repo)
-	}
-	owner, repo := parts[0], parts[1]
-	const gql = `query($owner:String!,$repo:String!){repository(owner:$owner,name:$repo){autoMergeAllowed}}`
-	cmd := exec.Command("gh", "api", "graphql",
-		"-f", "query="+gql,
-		"-f", "owner="+owner,
-		"-f", "repo="+repo,
-		"--jq", ".data.repository.autoMergeAllowed",
-	)
-	out, err := cmd.Output()
+	row, err := readRow()
 	if err != nil {
-		return false, ghCommandErr("gh api graphql (autoMergeAllowed)", err)
+		return false, err
 	}
-	return strings.TrimSpace(string(out)) == "true", nil
+	return e.canAutoMergeViaConnector(row)
 }
 
 // EnqueueAutoMerge enqueues GitHub's native auto-merge for the PR, which merges
@@ -519,54 +322,21 @@ func runGHReadyToggle(prURL string, args ...string) error {
 // the other two, so a caller checking those first does not misreport a
 // throttled operator's real cause.
 func (e *execClient) Probe() (string, error) {
-	if row, ok := routedRow(); ok {
-		return e.probeViaConnector(row)
-	}
-	if _, err := exec.Command("gh", "auth", "status").Output(); err != nil {
-		wrapped := ghCommandErr("gh auth status", err)
-		if errors.Is(wrapped, forge.ErrRateLimit) {
-			return "", wrapped
-		}
-		return "", fmt.Errorf("%w: %w", forge.ErrAuthFailure, wrapped)
-	}
-	var stderr bytes.Buffer
-	cmd := exec.Command("gh", "repo", "view", e.repo,
-		"--json", "nameWithOwner", "--jq", ".nameWithOwner",
-	)
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	row, err := readRow()
 	if err != nil {
-		wrapped := ghCommandErrText(fmt.Sprintf("gh repo view %s", e.repo), err, stderr.String())
-		if errors.Is(wrapped, forge.ErrRateLimit) {
-			return "", wrapped
-		}
-		return "", fmt.Errorf("%w: %w", forge.ErrRepoNotFound, wrapped)
+		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	return e.probeViaConnector(row)
 }
 
 // ListLabels returns the names of all labels defined in the repository.
 // --paginate is load-bearing: one page holds at most demandPageSize labels.
 func (e *execClient) ListLabels() ([]string, error) {
-	if row, ok := routedRow(); ok {
-		return e.listLabelsViaConnector(row)
-	}
-	out, err := exec.Command("gh", "api",
-		fmt.Sprintf("repos/%s/labels?per_page=%d", e.repo, demandPageSize),
-		"--paginate",
-		"--jq", ".[].name",
-	).Output()
+	row, err := readRow()
 	if err != nil {
-		return nil, ghCommandErr("gh api labels", err)
+		return nil, err
 	}
-	var labels []string
-	sc := bufio.NewScanner(strings.NewReader(string(out)))
-	for sc.Scan() {
-		if name := strings.TrimSpace(sc.Text()); name != "" {
-			labels = append(labels, name)
-		}
-	}
-	return labels, nil
+	return e.listLabelsViaConnector(row)
 }
 
 // CreateLabel creates a label in the repository. color is hex without the
@@ -793,7 +563,7 @@ func (e *execClient) CreateDraftPR(title, body, base, head string) (string, bool
 		// created=false so settle's reconstructed-PR path (issue #2447) knows
 		// the title and body are not the ones supplied here.
 		if strings.Contains(stderr.String(), "already exists") {
-			if pr, ok, openErr := e.OpenPRForBranch(head); openErr == nil && ok {
+			if pr, ok, openErr := e.nativeOpenPRForBranch(head); openErr == nil && ok {
 				return pr.URL, false, nil
 			}
 		}

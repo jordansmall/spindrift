@@ -14,9 +14,6 @@ var _ forge.DemandCounter = (*execClient)(nil)
 // relaxed.
 const demandProbeInterval = 60 * time.Second
 
-// demandPageSize is the REST per_page maximum.
-const demandPageSize = 100
-
 // CountReady implements forge.DemandCounter through the Connector, which owns
 // the conditional-request cache; fresh makes it skip the validator, forcing a
 // full read after a count the child contradicted.
