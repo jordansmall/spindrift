@@ -4053,12 +4053,20 @@ Driver Connectors); a run that loads none starts none.
   child is its own run with its own sandbox) the Launcher closes the sandbox's
   stdin, then calls the runner's `Kill` on its name as the backstop, logging
   `==> stopped Connector sandbox: <name>` once it succeeds. A failed `Kill`
-  logs a warning instead and is retried by the next exit step.
+  logs a warning instead and is retried by the next exit step. The sandbox
+  outlives an interrupted run's settle: the runner starts it in a process
+  group of its own, so a terminal Ctrl-C reaches the Launcher but not the
+  sandbox, and the close comes only after the settle's tracker writes
+  (issue #7302).
 - **Orphans.** Only a hard kill of the Launcher or the runtime CLI leaves a
-  sandbox running. With `CONNECTOR_SANDBOX` on, the next Launcher start
-  (ahead of its token, network and push gates), or a daemon's start through
-  its `doctor` preflight (so any `spindrift doctor` too), lists running
-  sandboxes by the `spindrift-connector-sandbox-` prefix and kills each one
+  sandbox running. The sandbox sits outside the terminal's process group, so a
+  terminal hangup or group-wide kill does not reach its client directly: a
+  Launcher that dies that way closes the sandbox's stdin, and the sandbox
+  normally ends on that EOF; the sweep below covers one that does not. With
+  `CONNECTOR_SANDBOX` on, the next Launcher start (ahead of its token, network
+  and push gates), or a daemon's start through its `doctor` preflight (so any
+  `spindrift doctor` too), lists running sandboxes by the
+  `spindrift-connector-sandbox-` prefix and kills each one
   whose `<owner>` is this Launcher's own and whose `<pid>`, the Launcher that
   started it, is no longer alive, logging `==> reaped orphaned Connector
   sandbox: <name>`. Unlike an orphaned Box, which Console startup only lists
