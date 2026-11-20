@@ -25,9 +25,20 @@ let
 
   templatesDir = ../../templates/default;
 
-  fragmentPaths = import ../../lib/fragment-paths.nix;
+  connectorFragments = import ../connector-fragments.nix;
+  fragmentPaths = (import ../../lib/fragment-paths.nix).withConnectors connectorFragments;
   fragmentRows = import ../../lib/fragments.nix;
   inherit (import ../../lib/gate-vocabulary.nix) readWriteOnly;
+
+  # The Box sees a Connector's fragment files under prompts/fragments/ (issue
+  # #6857), so the corpus keys them there, keeping the allowlist spelling.
+  connectorFiles = builtins.concatMap (
+    c:
+    map (f: {
+      name = "prompts/fragments/${removePrefix "${toString c.dir}/" (toString f)}";
+      inherit f;
+    }) (pkgs.lib.filesystem.listFilesRecursive c.dir)
+  ) connectorFragments;
 
   corpus =
     let
@@ -41,6 +52,10 @@ let
         name = removePrefix "${toString templatesDir}/" (toString f);
         value = builtins.readFile f;
       }) (filter (hasSuffix ".md") files)
+      ++ map (c: {
+        inherit (c) name;
+        value = builtins.readFile c.f;
+      }) (filter (c: hasSuffix ".md" c.name) connectorFiles)
     );
 
   # A bare "." does not end a clause, so ${FORGEJO_BASE_URL:-https://codeberg.org}

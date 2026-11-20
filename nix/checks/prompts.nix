@@ -17,6 +17,23 @@ let
     batsHarness
     ;
 
+  # The shipped prompts tree with each Connector's fragment dir overlaid on its
+  # fragments/ (issue #6857): the tree the Box sees, so a check that reads or
+  # scans a Connector-owned file (the forgejo fragments) keeps covering it.
+  mergedPrompts = pkgs.runCommand "merged-prompts" { } (
+    ''
+      cp -r ${../../templates/default/prompts} $out
+      chmod -R u+w $out
+      rm -r $out/fragments
+    ''
+    + import ../../lib/fragments-install.nix {
+      inherit (pkgs) lib;
+      src = ../../templates/default/prompts/fragments;
+      connectorFragments = import ../connector-fragments.nix;
+      dest = "$out/fragments";
+    }
+  );
+
   # Caveman-coverage registry (issue #2709): one row per top-level prompt
   # template, declaring "covered" or "exempt". Hoisted here so every
   # caveman-coverage-* check below shares one import.
@@ -1235,10 +1252,10 @@ in
         # assertion below ever runs. The grep in the error branch below
         # needs no such guard -- it only runs once count != 0, i.e. once a
         # match is already known to exist.
-        count=$(grep -rlF 'query($owner:String!' ${../../templates/default/prompts} | wc -l || true)
+        count=$(grep -rlF 'query($owner:String!' ${mergedPrompts} | wc -l || true)
         [ "$count" -eq 0 ] || {
           echo "expected the WATCH CI GraphQL query in no prompt source file, got $count" >&2
-          grep -rlF 'query($owner:String!' ${../../templates/default/prompts} >&2
+          grep -rlF 'query($owner:String!' ${mergedPrompts} >&2
           exit 1
         }
         touch $out
@@ -1270,9 +1287,9 @@ in
   filer-prompt-dedup-searches-all-open-issues =
     pkgs.runCommand "filer-prompt-dedup-searches-all-open-issues" { }
       ''
-        for f in ${../../templates/default/prompts/fragments/github/filer-dedup.md} \
-          ${../../templates/default/prompts/fragments/forgejo/filer-dedup.md} \
-          ${../../templates/default/prompts/fragments/jira/filer-dedup.md}; do
+        for f in ${mergedPrompts}/fragments/github/filer-dedup.md \
+          ${mergedPrompts}/fragments/forgejo/filer-dedup.md \
+          ${mergedPrompts}/fragments/jira/filer-dedup.md; do
           grep -q -- 'driver-exec signal issue-search -state open' "$f"
           if grep -qE '(^|[^a-z])gh |curl|_TOKEN' "$f"; then
             echo "$f: the dedup search must not call a forge CLI, curl or a token" >&2
@@ -1350,7 +1367,7 @@ in
   # issues), all four provenance labels are searched closed, and no forge CLI,
   # REST call or token appears (the host runs the search).
   filer-prompt-dedup-forgejo-searches = pkgs.runCommand "filer-prompt-dedup-forgejo-searches" { } ''
-    f=${../../templates/default/prompts/fragments/forgejo/filer-dedup.md}
+    f=${mergedPrompts}/fragments/forgejo/filer-dedup.md
     total=$(grep -c 'driver-exec signal issue-search ' "$f" || true)
     [ "$total" -eq 6 ] || {
       echo "expected 6 issue-search commands (site key, all-open, 4 closed), found $total" >&2
@@ -1513,8 +1530,8 @@ in
     pkgs.runCommand "issue-read-fragments-never-fetch-the-subject-issue" { }
       ''
         shopt -s nullglob
-        for f in ${../../templates/default/prompts/fragments}/*issue-read.md \
-          ${../../templates/default/prompts/fragments}/*/*issue-read.md; do
+        for f in ${mergedPrompts}/fragments/*issue-read.md \
+          ${mergedPrompts}/fragments/*/*issue-read.md; do
           ! grep -q 'gh issue view' "$f" || {
             echo "$f: expected no 'gh issue view' (subject-issue fetch), found one" >&2
             exit 1
@@ -1538,7 +1555,7 @@ in
     pkgs.runCommand "prompt-templates-never-name-issues-mount" { }
       ''
         ${issuesMountScan}
-        issues_scan ${../../templates/default/prompts}
+        issues_scan ${mergedPrompts}
         touch $out
       '';
 
@@ -1548,7 +1565,7 @@ in
     pkgs.runCommand "prompt-templates-never-name-issues-mount-catches-copy" { }
       ''
         ${issuesMountScan}
-        cp -r ${../../templates/default/prompts} prompts
+        cp -r ${mergedPrompts} prompts
         chmod -R u+w prompts
         echo 'see /issues/42.md' >> prompts/fragments/local/issue-read.md
         if (issues_scan prompts) 2>/dev/null; then
@@ -1603,7 +1620,7 @@ in
     pkgs.runCommand "forgejo-readwrite-comment-fragments-keep-fj-issue-comment" { }
       ''
         for f in forgejo/issue-blocked-comment.md forgejo/research-verdict.md; do
-          grep -q 'fj issue comment' ${../../templates/default/prompts/fragments}/"$f"
+          grep -q 'fj issue comment' ${mergedPrompts}/fragments/"$f"
         done
         touch $out
       '';
@@ -1671,66 +1688,67 @@ in
         if commentLineFiles == [ ] then
           throw "research-verdict budget check: no lib/fragments.nix row matched RESEARCH_VERDICT_* with a SPINDRIFT_COMMENT line -- the predicate has gone stale and would vacuously pass"
         else
-          commentLineFiles;
+          map (p: "${p}=${fragmentPaths.fileOf fragmentsDir p}") commentLineFiles;
     in
     pkgs.runCommand "research-verdict-comment-line-fragments-state-carrier-and-payload-budget" { } ''
       ${normalizedGrep}
-      for f in ${concatStringsSep " " checkedFragments}; do
-        p=${fragmentsDir}/"$f"
-        normalized_grep "$p" 'Bash tool result' || {
-          echo "$f: missing the carrier phrase 'Bash tool result'" >&2
+      for entry in ${concatStringsSep " " checkedFragments}; do
+        name="''${entry%%=*}"
+        f="''${entry#*=}"
+        normalized_grep "$f" 'Bash tool result' || {
+          echo "$name: missing the carrier phrase 'Bash tool result'" >&2
           exit 1
         }
-        normalized_grep "$p" 'caps a Bash result at ${toString pinnedBashMaxOutputLength} characters, cutting it there with no truncation' || {
-          echo "$f: missing the derived cap ${toString pinnedBashMaxOutputLength}" >&2
+        normalized_grep "$f" 'caps a Bash result at ${toString pinnedBashMaxOutputLength} characters, cutting it there with no truncation' || {
+          echo "$name: missing the derived cap ${toString pinnedBashMaxOutputLength}" >&2
           exit 1
         }
-        normalized_grep "$p" 'take ${toString markerPrefixLength} of those, leaving ${toString payloadBudget} characters for the base64 payload' || {
-          echo "$f: missing the derived marker-prefix length ${toString markerPrefixLength} or payload budget ${toString payloadBudget}" >&2
+        normalized_grep "$f" 'take ${toString markerPrefixLength} of those, leaving ${toString payloadBudget} characters for the base64 payload' || {
+          echo "$name: missing the derived marker-prefix length ${toString markerPrefixLength} or payload budget ${toString payloadBudget}" >&2
           exit 1
         }
-        normalized_grep "$p" 'at most ${toString bodyBudget} bytes of Markdown' || {
-          echo "$f: missing the derived body budget ${toString bodyBudget}" >&2
+        normalized_grep "$f" 'at most ${toString bodyBudget} bytes of Markdown' || {
+          echo "$name: missing the derived body budget ${toString bodyBudget}" >&2
           exit 1
         }
-        normalized_grep "$p" 'Aim for ${toString targetBudget} bytes' || {
-          echo "$f: missing the derived soft target ${toString targetBudget} bytes" >&2
+        normalized_grep "$f" 'Aim for ${toString targetBudget} bytes' || {
+          echo "$name: missing the derived soft target ${toString targetBudget} bytes" >&2
           exit 1
         }
-        normalized_grep "$p" '${toString bodyBudget} bytes encode to exactly ${toString encodedBudget} characters' || {
-          echo "$f: missing the derived encoded size (${toString bodyBudget} bytes to ${toString encodedBudget} characters)" >&2
+        normalized_grep "$f" '${toString bodyBudget} bytes encode to exactly ${toString encodedBudget} characters' || {
+          echo "$name: missing the derived encoded size (${toString bodyBudget} bytes to ${toString encodedBudget} characters)" >&2
           exit 1
         }
-        normalized_grep "$p" '"''${#payload}" -gt ${toString payloadBudget}' || {
-          echo "$f: missing the derived guard threshold ${toString payloadBudget} in the emission snippet" >&2
+        normalized_grep "$f" '"''${#payload}" -gt ${toString payloadBudget}' || {
+          echo "$name: missing the derived guard threshold ${toString payloadBudget} in the emission snippet" >&2
           exit 1
         }
-        normalized_grep "$p" 'A Bash result over ${tailBytes} bytes reaches you as its *last* ${tailBytes} bytes' || {
-          echo "$f: missing the derived summary-hook read-back hazard (tail of ${tailBytes} bytes, from agent/bash-output-summary.sh)" >&2
+        normalized_grep "$f" 'A Bash result over ${tailBytes} bytes reaches you as its *last* ${tailBytes} bytes' || {
+          echo "$name: missing the derived summary-hook read-back hazard (tail of ${tailBytes} bytes, from agent/bash-output-summary.sh)" >&2
           exit 1
         }
-        normalized_grep "$p" 'Emit at most one valid such line' || {
-          echo "$f: missing the 'Emit at most one valid such line' rule" >&2
+        normalized_grep "$f" 'Emit at most one valid such line' || {
+          echo "$name: missing the 'Emit at most one valid such line' rule" >&2
           exit 1
         }
-        normalized_grep "$p" 'Print nothing before the marker line' || {
-          echo "$f: missing the sole-output precondition 'Print nothing before the marker line'" >&2
+        normalized_grep "$f" 'Print nothing before the marker line' || {
+          echo "$name: missing the sole-output precondition 'Print nothing before the marker line'" >&2
           exit 1
         }
-        normalized_grep "$p" 'cut at payload character ${toString payloadBudget}, which is not a multiple of four' || {
-          echo "$f: missing the reason the cut is always safe -- payload character ${toString payloadBudget} is not a multiple of four, so base64 cannot decode a truncated payload there" >&2
+        normalized_grep "$f" 'cut at payload character ${toString payloadBudget}, which is not a multiple of four' || {
+          echo "$name: missing the reason the cut is always safe -- payload character ${toString payloadBudget} is not a multiple of four, so base64 cannot decode a truncated payload there" >&2
           exit 1
         }
-        normalized_grep "$p" 'shorten the verdict body and emit it again' || {
-          echo "$f: missing the re-emit rule" >&2
+        normalized_grep "$f" 'shorten the verdict body and emit it again' || {
+          echo "$name: missing the re-emit rule" >&2
           exit 1
         }
-        ! normalized_grep "$p" 'exactly ONE such line' || {
-          echo "$f: still carries the old 'exactly ONE such line' wording" >&2
+        ! normalized_grep "$f" 'exactly ONE such line' || {
+          echo "$name: still carries the old 'exactly ONE such line' wording" >&2
           exit 1
         }
-        ! normalized_grep "$p" 'if the line came back cut' || {
-          echo "$f: still tells the Box to detect a cut marker line by reading it back, which the ${tailBytes}-byte tail makes impossible" >&2
+        ! normalized_grep "$f" 'if the line came back cut' || {
+          echo "$name: still tells the Box to detect a cut marker line by reading it back, which the ${tailBytes}-byte tail makes impossible" >&2
           exit 1
         }
       done
@@ -1800,14 +1818,14 @@ in
   filer-direct-forgejo-fragments-speak-fj-and-curl =
     pkgs.runCommand "filer-direct-forgejo-fragments-speak-fj-and-curl" { }
       ''
-        grep -q 'fj issue create' ${../../templates/default/prompts/fragments/forgejo/filer-direct-file.md}
-        ! grep -q 'gh issue create' ${../../templates/default/prompts/fragments/forgejo/filer-direct-file.md} || {
+        grep -q 'fj issue create' ${mergedPrompts}/fragments/forgejo/filer-direct-file.md
+        ! grep -q 'gh issue create' ${mergedPrompts}/fragments/forgejo/filer-direct-file.md || {
           echo "forgejo/filer-direct-file.md invokes gh issue create (issue #1963)" >&2
           exit 1
         }
-        grep -q '/api/v1/repos' ${../../templates/default/prompts/fragments/forgejo/filer-direct-label.md}
-        grep -q 'agent-review-finding' ${../../templates/default/prompts/fragments/forgejo/filer-direct-label.md}
-        ! grep -q 'gh label create' ${../../templates/default/prompts/fragments/forgejo/filer-direct-label.md} || {
+        grep -q '/api/v1/repos' ${mergedPrompts}/fragments/forgejo/filer-direct-label.md
+        grep -q 'agent-review-finding' ${mergedPrompts}/fragments/forgejo/filer-direct-label.md
+        ! grep -q 'gh label create' ${mergedPrompts}/fragments/forgejo/filer-direct-label.md || {
           echo "forgejo/filer-direct-label.md invokes gh label create (issue #1963)" >&2
           exit 1
         }
@@ -1824,7 +1842,7 @@ in
     pkgs.runCommand "filer-direct-fragments-dedup-marker-matches-go" { }
       ''
         ${normalizedGrep}
-        for f in ${../../templates/default/prompts/fragments/github/filer-direct-file.md} ${../../templates/default/prompts/fragments/forgejo/filer-direct-file.md}; do
+        for f in ${mergedPrompts}/fragments/github/filer-direct-file.md ${mergedPrompts}/fragments/forgejo/filer-direct-file.md; do
           normalized_grep "$f" ${pkgs.lib.escapeShellArg dedupMarkerPrefixInGo} || {
             echo "$f: expected the dedup marker prefix '${dedupMarkerPrefixInGo}' (dedupmarker.Prefix) verbatim" >&2
             exit 1
@@ -1851,12 +1869,12 @@ in
           echo "github/open-pr-create.md invokes fj pr create (issue #1963)" >&2
           exit 1
         }
-        grep -q 'fj pr create' ${../../templates/default/prompts/fragments/forgejo/open-pr-create.md}
-        ! grep -qE -e 'fj pr create[^`]*--title' ${../../templates/default/prompts/fragments/forgejo/open-pr-create.md} || {
+        grep -q 'fj pr create' ${mergedPrompts}/fragments/forgejo/open-pr-create.md
+        ! grep -qE -e 'fj pr create[^`]*--title' ${mergedPrompts}/fragments/forgejo/open-pr-create.md || {
           echo "forgejo/open-pr-create.md passes --title to fj pr create, which takes the title positionally (issue #5098)" >&2
           exit 1
         }
-        ! grep -q 'gh pr create --' ${../../templates/default/prompts/fragments/forgejo/open-pr-create.md} || {
+        ! grep -q 'gh pr create --' ${mergedPrompts}/fragments/forgejo/open-pr-create.md || {
           echo "forgejo/open-pr-create.md invokes gh pr create (issues #1963, #5066)" >&2
           exit 1
         }
@@ -1871,7 +1889,7 @@ in
   # but a copy worded without the token still slips past it.
   merge-mode-clause-stated-once = pkgs.runCommand "merge-mode-clause-stated-once" { } ''
     ${mergeModeScan}
-    merge_mode_scan ${../../templates/default/prompts/fragments}
+    merge_mode_scan ${mergedPrompts}/fragments
     touch $out
   '';
 
@@ -1882,7 +1900,7 @@ in
         ${mergeModeScan}
         for plant in outcome-ready-means-git.md forgejo/open-pr-create.md; do
           rm -rf frags
-          cp -r ${../../templates/default/prompts/fragments} frags
+          cp -r ${mergedPrompts}/fragments frags
           chmod -R u+w frags
           echo 'Honour MERGE_MODE here.' >> "frags/$plant"
           if (merge_mode_scan frags) 2>/dev/null; then
@@ -1906,13 +1924,13 @@ in
           echo "github/if-blocked-pr.md invokes fj pr (issue #5099)" >&2
           exit 1
         }
-        ! grep -q 'gh pr' ${../../templates/default/prompts/fragments/forgejo/if-blocked-pr.md} || {
+        ! grep -q 'gh pr' ${mergedPrompts}/fragments/forgejo/if-blocked-pr.md || {
           echo "forgejo/if-blocked-pr.md invokes gh pr (issue #5099)" >&2
           exit 1
         }
-        grep -q 'fj pr create' ${../../templates/default/prompts/fragments/forgejo/if-blocked-pr.md}
-        grep -q 'WIP: ' ${../../templates/default/prompts/fragments/forgejo/if-blocked-pr.md}
-        ! grep -q -e '--title' ${../../templates/default/prompts/fragments/forgejo/if-blocked-pr.md} || {
+        grep -q 'fj pr create' ${mergedPrompts}/fragments/forgejo/if-blocked-pr.md
+        grep -q 'WIP: ' ${mergedPrompts}/fragments/forgejo/if-blocked-pr.md
+        ! grep -q -e '--title' ${mergedPrompts}/fragments/forgejo/if-blocked-pr.md || {
           echo "forgejo/if-blocked-pr.md uses --title; fj takes the title positionally (issue #5098)" >&2
           exit 1
         }
@@ -1923,9 +1941,9 @@ in
   # (issue #6893), so neither fix-ci-read fragment nor ci-failure.md may
   # instruct a forge CLI or API call to read CI.
   fix-ci-read-fragments-no-forge-cli = pkgs.runCommand "fix-ci-read-fragments-no-forge-cli" { } ''
-    for f in ${../../templates/default/prompts/fragments/github/fix-ci-read.md} \
-      ${../../templates/default/prompts/fragments/forgejo/fix-ci-read.md} \
-      ${../../templates/default/prompts/fragments/ci-failure.md}; do
+    for f in ${mergedPrompts}/fragments/github/fix-ci-read.md \
+      ${mergedPrompts}/fragments/forgejo/fix-ci-read.md \
+      ${mergedPrompts}/fragments/ci-failure.md; do
       ! grep -qE '\b(gh|fj) |curl|/api/v1' "$f" || {
         echo "$f instructs a forge CLI or API call (issue #6893)" >&2
         exit 1

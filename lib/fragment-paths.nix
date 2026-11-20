@@ -92,9 +92,10 @@ let
   # A Connector contributes fragment files (issue #6857) as
   # `{ name; dir; shipped }`: `dir` is laid out `<folder>/<fragment>` like the
   # shipped tree, `shipped` has the shape of the `shipped` table below.
+  pathOf = folder: frag: "${folder}/${frag}";
   declaredBy =
     shipped:
-    builtins.concatMap (frag: map (f: "${f}/${frag}") shipped.${frag}) (builtins.attrNames shipped);
+    builtins.concatMap (frag: map (f: pathOf f frag) shipped.${frag}) (builtins.attrNames shipped);
   fileOf =
     connectors: fragmentsDir: path:
     let
@@ -106,52 +107,27 @@ let
   # empty list is legitimate: a folder without a row's file renders empty
   # (ADR 0068), and a `shared` row's root file stands in for every folder.
   shipped = {
-    "filer-direct-label.md" = [
-      "github"
-      "forgejo"
-    ];
+    "filer-direct-label.md" = [ "github" ];
     "filer-dedup.md" = [
       "github"
-      "forgejo"
       "jira"
       "local"
     ];
-    "filer-direct-file.md" = [
-      "github"
-      "forgejo"
-    ];
-    "fix-ci-read.md" = [
-      "github"
-      "forgejo"
-    ];
+    "filer-direct-file.md" = [ "github" ];
+    "fix-ci-read.md" = [ "github" ];
     "pr-body-issue-ref.md" = [ "local" ];
     "pr-body-no-issue-ref.md" = [ "local" ];
     "issue-read.md" = [ "local" ];
     "research-issue-read.md" = [ "local" ];
     "scout-issue-read.md" = [ ];
-    "research-verdict.md" = [
-      "github"
-      "forgejo"
-    ];
+    "research-verdict.md" = [ "github" ];
     "research-verdict-relay.md" = [ "local" ];
     "research-verdict-relay-socket.md" = [ "local" ];
-    "research-outcome-landing.md" = [
-      "github"
-      "forgejo"
-    ];
-    "issue-blocked-comment.md" = [
-      "github"
-      "forgejo"
-    ];
+    "research-outcome-landing.md" = [ "github" ];
+    "issue-blocked-comment.md" = [ "github" ];
     "issue-blocked-comment-relay.md" = [ "local" ];
-    "open-pr-create.md" = [
-      "github"
-      "forgejo"
-    ];
-    "if-blocked-pr.md" = [
-      "github"
-      "forgejo"
-    ];
+    "open-pr-create.md" = [ "github" ];
+    "if-blocked-pr.md" = [ "github" ];
   };
 
   axisRows = builtins.filter (r: (r.axis or "") != "") (import ./fragments.nix);
@@ -337,7 +313,13 @@ api [ ]
   inherit shippedProblemsIn axisSignals;
 
   # For the check's negative cases: the same comparisons over doctored inputs.
-  inherit problemsWith connectorProblemsWith shipped;
+  inherit
+    problemsWith
+    connectorProblemsWith
+    shipped
+    declaredBy
+    pathOf
+    ;
 
   # The fragments/ folder one backend row reads from on `axis`, the same folder
   # pathsIn lists for that row.

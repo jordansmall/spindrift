@@ -292,13 +292,59 @@ let
   # one exception that still slices its own source: it needs the
   # RESEARCH_VERDICTS-rendered text, not the registry's unrendered default.
   promptContract = import ./prompt-contract.nix;
+  # The Consumer's Connector fragments plus the batteries flake's for each
+  # fallback Connector's paths it did not declare: the native forgejo adapter
+  # needs no Connector module, and the Box would otherwise ship no forgejo
+  # fragments (issue #6867). Unlike hostedRowOf's `driverRows` fallback, which
+  # swaps the whole row by name, this trims per path: each path the Consumer
+  # declares wins and the fallback ships the rest. Sorted by name.
+  #
+  # Only the Connectors whose fragments core used to ship to every Box fall
+  # back (forgejo's); jira's shipped only where the Consumer registered it.
+  fragmentFallbackConnectors = [ "forgejo" ];
+  effectiveConnectorFragments =
+    let
+      # Imported directly: `fragmentPaths` depends on this very binding.
+      inherit (import ./fragment-paths.nix) declaredBy pathOf;
+      taken = lib.concatMap (f: declaredBy f.shipped) connectorFragments;
+      # A Consumer forking a fallback Connector's fragment, under any name,
+      # takes over the paths it declares: drop them from the fallback, from
+      # its `dir` too, which connectorProblemsWith requires to match `shipped`.
+      withoutTaken =
+        f:
+        let
+          dropped = lib.filter (p: lib.elem p taken) (declaredBy f.shipped);
+          kept = lib.filterAttrs (_: dirs: dirs != [ ]) (
+            lib.mapAttrs (frag: dirs: lib.filter (d: !lib.elem (pathOf d frag) taken) dirs) f.shipped
+          );
+        in
+        if dropped == [ ] then
+          f
+        else
+          f
+          // {
+            shipped = kept;
+            dir = builtins.path {
+              name = "${f.name}-fragments";
+              path = f.dir;
+              filter = p: _: !lib.elem (lib.removePrefix "${toString f.dir}/" p) dropped;
+            };
+          };
+      isFallback = f: lib.elem f.name fragmentFallbackConnectors;
+      fallback = lib.filter (f: f.shipped != { }) (
+        map (f: (withoutTaken f) // { name = "${f.name} (batteries fallback)"; }) (
+          lib.filter isFallback (import ../nix/connector-fragments.nix)
+        )
+      );
+    in
+    lib.sort (a: b: a.name < b.name) (connectorFragments ++ fallback);
   # folderOf and mayBeAbsent are connector-independent; the rest resolve over
   # the Connectors' contributions.
   fragmentPaths =
     let
       base = import ./fragment-paths.nix;
     in
-    base // base.withConnectors connectorFragments;
+    base // base.withConnectors effectiveConnectorFragments;
   # Shared per-file scan of the default prompt corpus (issue #5858).
   corpusScan = import ./prompt-corpus-scan.nix;
   # A source left at its default resolves to the shared per-file scan; an
@@ -1342,9 +1388,9 @@ let
       workerPrompt
       conflictResolvePrompt
       fragmentsSourceDir
-      connectorFragments
       choresSourceDir
       ;
+    connectorFragments = effectiveConnectorFragments;
     kindPrompts = map (e: { inherit (e) file baked; }) kindPrompts;
   };
   imageKnobs = {
