@@ -39,7 +39,7 @@ const (
 // gates are excluded on purpose: they are Runner prerequisites, run at launch
 // by checkRunnerLaunchPrerequisites and reported by doctor through
 // prerequisiteChecks, with richer dynamic Tier and remedy semantics. The
-// primary github Connector write gate closes the list.
+// routed github Connector write gate closes the list.
 var gateRegistry = append([]launchGate{
 	{Name: "read-only-capability", Check: func(c config, _ io.Writer) error {
 		return checkReadOnlyCapabilityGate(c)
@@ -52,12 +52,12 @@ var gateRegistry = append([]launchGate{
 	}},
 }, primaryConnectorWriteGate)
 
-// primaryConnectorWriteGate closes gateRegistry (checkPrimaryConnectorWriteGate).
+// primaryConnectorWriteGate closes gateRegistry (checkRoutedConnectorWriteGate).
 var primaryConnectorWriteGate = launchGate{
 	Name:       primaryConnectorWriteGateName,
-	Applicable: primaryGithubApplies,
+	Applicable: routedGithubApplies,
 	Network:    true,
-	Check:      checkPrimaryConnectorWriteGate,
+	Check:      checkRoutedConnectorWriteGate,
 }
 
 // splitGateRegistryByNetwork partitions registry into its non-network and

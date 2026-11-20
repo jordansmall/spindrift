@@ -32,7 +32,7 @@ type routedContractEnv struct {
 
 func newRoutedContractEnv(t *testing.T) *routedContractEnv {
 	t.Helper()
-	h, _, calls, logDir := primaryHarness(t, useGithubRowAt)
+	h, _, calls, logDir := routedLogHarness(t, useGithubRowAt)
 	s := backendkit.Shared{
 		RepoSlug: connectorRepo, Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(),
 		BaseBranch: "main", GitUserName: "Test Bot", GitUserEmail: "bot@example.com",
@@ -58,7 +58,7 @@ func (e *routedContractEnv) assertSplit(t *testing.T, wantFailed int, wantReads 
 		t.Errorf("the contract ran gh %d times under a plain row", n)
 	}
 
-	audits := primaryFiles(t, e.logDir, ".audit.jsonl")
+	audits := routedFiles(t, e.logDir, ".audit.jsonl")
 	if len(audits) != 1 {
 		t.Fatalf("primary audit files = %v, want one", audits)
 	}
@@ -83,7 +83,7 @@ func (e *routedContractEnv) assertSplit(t *testing.T, wantFailed int, wantReads 
 		}
 	}
 	failed := 0
-	for _, log := range primaryFiles(t, e.logDir, ".log") {
+	for _, log := range routedFiles(t, e.logDir, ".log") {
 		raw, _ := os.ReadFile(log)
 		failed += strings.Count(string(raw), "\n")
 	}

@@ -96,10 +96,10 @@ func TestEnqueueAutoMerge_MergeMethod(t *testing.T) {
 	}
 }
 
-// Under a primary row the Connector merges by rebase only, so another
+// Under a routed row the Connector merges by rebase only, so another
 // MERGE_METHOD is refused by name before any Connector or gh call rather than
 // silently ignored.
-func TestPrimaryRow_MergeMethodOtherThanRebaseIsRefused(t *testing.T) {
+func TestRoutedRow_MergeMethodOtherThanRebaseIsRefused(t *testing.T) {
 	for _, method := range []string{"merge", "squash"} {
 		for _, op := range []struct {
 			name string
@@ -109,15 +109,15 @@ func TestPrimaryRow_MergeMethodOtherThanRebaseIsRefused(t *testing.T) {
 			{"EnqueueAutoMerge", func(c *execClient, u string) error { return c.EnqueueAutoMerge(u) }},
 		} {
 			t.Run(op.name+"/"+method, func(t *testing.T) {
-				h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+				h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
 				url := h.SeedLandablePR("9")
 				before := h.backend.hitCount()
 				c := NewExecClient(connectorRepo, testLabels, WithMergeMethod(method))
 
 				err := op.run(c, url)
 
-				if !errors.Is(err, ErrPrimaryMergeMethod) || !strings.Contains(err.Error(), method) {
-					t.Errorf("err = %v, want ErrPrimaryMergeMethod naming %q", err, method)
+				if !errors.Is(err, ErrRoutedMergeMethod) || !strings.Contains(err.Error(), method) {
+					t.Errorf("err = %v, want ErrRoutedMergeMethod naming %q", err, method)
 				}
 				if after := h.backend.hitCount(); after != before || calls() != 0 {
 					t.Errorf("the refused call reached the backend (%d requests) or gh (%d)", after-before, calls())
@@ -143,7 +143,7 @@ func TestStrategy_RoutedRowRefusesMergeMethodAtBuild(t *testing.T) {
 	}
 	rows := map[string]func(*testing.T, string){
 		"plain":   useGithubRowAt,
-		"primary": useGithubRowPrimary,
+		"primary": useGithubRowRouted,
 		"shadow":  useGithubRowShadow,
 	}
 	for name, build := range builds {
@@ -165,7 +165,7 @@ func TestStrategy_RoutedRowRefusesMergeMethodAtBuild(t *testing.T) {
 
 				_, err := build(backendkit.Shared{RepoSlug: connectorRepo, MergeMethod: tc.method})
 
-				if tc.refused != errors.Is(err, ErrPrimaryMergeMethod) || (!tc.refused && err != nil) {
+				if tc.refused != errors.Is(err, ErrRoutedMergeMethod) || (!tc.refused && err != nil) {
 					t.Errorf("err = %v, want refused=%v", err, tc.refused)
 				}
 			})
@@ -174,8 +174,8 @@ func TestStrategy_RoutedRowRefusesMergeMethodAtBuild(t *testing.T) {
 }
 
 // An explicit rebase is the Connector's own method and passes.
-func TestPrimaryRow_MergeMethodRebasePasses(t *testing.T) {
-	h, _, _, _ := primaryHarness(t, useGithubRowPrimary)
+func TestRoutedRow_MergeMethodRebasePasses(t *testing.T) {
+	h, _, _, _ := routedLogHarness(t, useGithubRowRouted)
 	url := h.SeedLandablePR("9")
 	c := NewExecClient(connectorRepo, testLabels, WithMergeMethod("rebase"))
 
