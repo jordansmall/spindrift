@@ -649,15 +649,17 @@ has happened for `github` and `forgejo` under
 `BOX_FORGE_AND_ISSUE_ACCESS=read-only`. The Launcher fetches the Target repo
 host-side before each Pass, mounts it at `/repo`, and forwards
 `BOX_HOST_SEEDED_MIRROR=1`; the Box clones it without a forge credential,
-keeping a credential-free `forge` remote so `gh` and `fj` resolve the repo; it
-is also the push default, so `gh` finds the current branch's PR. ADR 0033's
-amendment for this issue records the widened exception. Two parts of the
-code plane are still to come: `read-write` keeps its direct in-box clone until
+keeping a credential-free `forge` remote; it is also the push default. ADR
+0033's amendment for this issue records the widened exception. Two parts of
+the code plane are still to come: `read-write` keeps its direct in-box clone until
 it is removed, and the read-only Box still holds `GH_TOKEN` for its in-box
 reads, so removing the Box token is separate work (spec #6757). (Amended by
 issue #6901: `read-write` and its direct clone are gone, so the mirror is the
 only clone path and the Launcher no longer forwards `BOX_HOST_SEEDED_MIRROR`;
-issue #6900 removed the Box token.)
+issue #6900 removed the Box token. Amended by issue #6902: the Box has no
+`gh` or `fj`, so the `forge` remote serves no CLI. It stays as the push
+default, the read-only guard points its pushurl at the decoy, and the forge's
+web URL rides on it.)
 
 ## Amendment (issue #6854): the tracker Connector performs lifecycle writes
 

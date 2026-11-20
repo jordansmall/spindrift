@@ -300,3 +300,16 @@ directly with the Box token. Once the github read path has crossed the
 Connector seam, the Box token, in-box CLIs, in-box CLI setup and credential
 helper are removed, and then `read-write` itself. Each step is a versioned
 break (spec #6757).
+
+## Amendment (issue #6902): the Box token, the in-box CLIs and their shims are removed
+
+The last steps of the ADR 0073 plan landed. `BOX_GH_TOKEN`,
+`BOX_FORGEJO_TOKEN` and `BOX_FORGE_CREDENTIAL`, deprecated no-ops since issues
+#6900 and #6901, are now removed knobs that fail the build and the launch with
+a pointer to MIGRATING.md. The image ships neither `gh` nor `fj`
+(forgejo-cli), `box` runs no in-Box CLI setup, and the read-only `gh` and `fj`
+shims from issue #2465 are gone because they guarded CLIs the Box no longer
+has. The `git push` hook stays. The backend rows lose `boxTokenEnvVar` and
+`cliPackage`, the two fields that described a Box holding a token and a CLI to
+use it. The decision above is unchanged; only the machinery that outlived it
+is deleted.

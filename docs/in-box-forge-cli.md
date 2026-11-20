@@ -19,8 +19,9 @@ together when a use goes away. Never add one.
 Harness-owned skills under `templates/default/skills/` carry no forge CLI
 instruction today. `prompts/fix-prompt.md` and the `*-outbox*` and
 `outcome-ready-means-*` fragments mention `gh`, but only to forbid it. The
-runtime backstop for a prohibited command is the shim and git-hook guards in
-`cmd/launcher/internal/readonlyguards`. Dogfood-only skills (root `skills/`,
+Box's image ships neither `gh` nor `fj` (issue #6902), so a prohibited command
+has nothing to run; the runtime backstop for a stray `git push` is the
+git-hook guard in `cmd/launcher/internal/readonlyguards`. Dogfood-only skills (root `skills/`,
 wired via `nix/dogfood-skills.nix`) are outside the check's corpus: they are
 this repo's own dev skills, not shipped to the Boxes of other repos.
 

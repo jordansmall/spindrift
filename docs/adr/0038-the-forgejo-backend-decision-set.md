@@ -97,8 +97,10 @@ that never goes stale — machinery with no failure mode to prevent.
 
 ### Both Box access models
 
-`read-write` is the default, matching github parity: the Box holds a
-`FORGEJO_TOKEN` (or a distinct `BOX_FORGEJO_TOKEN`) and writes in-box.
+(Amended by issue #6902: the Box holds no forge token and `BOX_FORGEJO_TOKEN`
+is a removed knob; every forge write is host-mediated.) `read-write` was the
+default, matching github parity: the Box held a `FORGEJO_TOKEN` (or a
+distinct `BOX_FORGEJO_TOKEN`) and wrote in-box.
 `read-only` rides the landed [ADR
 0034](0034-host-mediated-github-forge-and-issue-access.md) host-mediation —
 branch as a bundle, PR as a nonce-guarded intent line, comment as a relayed
@@ -119,6 +121,10 @@ to github would strand self-hosted operators on the one access model that
 keeps a forge token out of the Box, for no capability reason.
 
 ### `fj` over `tea` as the in-Box CLI
+
+*Amended by issue #6902:* the Box no longer ships `fj` or any forge CLI; the
+forgejo prompt fragments name host-mediated intents, not `fj` commands. The
+reasoning below records why `fj` was chosen while it was in the Box.
 
 The in-Box tool baked into Harness plumbing when the backend is forgejo is
 `fj` (forgejo-cli), with curl-against-the-REST-API as the documented fallback

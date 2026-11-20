@@ -4,7 +4,8 @@
 
 `BOX_GH_TOKEN`, `BOX_FORGEJO_TOKEN` and `BOX_FORGE_CREDENTIAL` had no reader
 since issues #6900 and #6901: a Box holds no forge credential. They were
-deprecated no-ops, and now each fails loudly instead of being ignored.
+deprecated no-ops, and now each fails loudly instead of being ignored. The
+image also stops shipping the forge CLIs that went with them.
 
 What changed for a Consumer:
 
@@ -19,6 +20,25 @@ What changed for a Consumer:
   any command line.
 - **Nothing replaces them.** The launcher's own `GH_TOKEN` or `FORGEJO_TOKEN`
   does every forge write. A Box needs no token of its own.
+- **The image no longer ships `gh` or `fj`.** The Box has no forge CLI, and
+  `box` runs no in-Box CLI setup (`gh auth setup-git`, `fj auth add-key`). The
+  read-only `gh` and `fj` shims, which only guarded those CLIs, are gone; the
+  `git push` guard stays. Nothing shipped told the agent to run either CLI
+  (issue #6901), so a stock prompt is unaffected. A custom prompt or skill that
+  runs `gh` or `fj` in the Box now fails with command-not-found; move that step
+  to a host-mediated intent, or add the CLI yourself through
+  `infra.image.packages` (it will have no credential to use). The build no
+  longer rejects a custom override prompt that orders `gh` or `fj` (the
+  `forbidden-gh-*` and `forbidden-fj-*` prompt-contract rows are gone), so such
+  a prompt fails only at run time; the shipped prompts stay covered by
+  `nix/checks/in-box-forge-cli-allowlist.nix`.
+- **Backend rows no longer read `boxTokenEnvVar` or `cliPackage`.** Both
+  described a Box that held a token and a CLI to use it. An author of a custom
+  backend row (or a Connector that declared them) deletes the two fields; a
+  stale one is ignored, not rejected. `BOX_GH_TOKEN_CMD` and
+  `BOX_FORGEJO_TOKEN_CMD` are likewise ignored now, not rejected. The
+  Box env builder now strips every row's host token variable from the Box
+  unconditionally.
 
 ## The native github adapter is deleted (issue #6888)
 
@@ -44,7 +64,7 @@ What changed for a Consumer:
   closure dropped it. Anything host-side that relied on the wrapper's `gh`,
   such as a `SECRET_CMD` or hook calling `gh`, needs its own. Quickstart still
   tries an ambient `gh auth token` as a token fallback when `gh` is on PATH. The
-  Box keeps its own `gh` for its open-PR query.
+  Box kept its own `gh` for its open-PR query until #6902 (above).
 - **Go callers rename `ErrNoReadRoute` to `ErrNoRoute`.** One identifier now
   covers reads and writes.
 

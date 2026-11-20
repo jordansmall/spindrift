@@ -119,9 +119,10 @@ labels, but these are on you:
   default enforcement.** A Box implements and returns a bundle; the host
   launcher pushes it, makes the CI-green decision and applies `MERGE_MODE`.
   The Box holds no forge token at all (`BOX_FORGE_AND_ISSUE_ACCESS=read-only`
-  is the only mode, issue #6901), so it cannot push, open a PR, merge,
-  comment, or make an authenticated forge read, regardless of what a
-  repository ruleset does or doesn't enforce. Two-actor separation, which
+  is the only mode, issue #6901, and the Box token knobs are removed, issue
+  #6902), and its image ships no forge CLI (`gh`, `fj`), so it cannot push,
+  open a PR, merge, comment, or make an authenticated forge read, regardless
+  of what a repository ruleset does or doesn't enforce. Two-actor separation, which
   used to cap the blast radius of a token a `read-write` Box held, is retired
   (see [its note](docs/reference.md#two-actor-separation-retired)). It clones
   a mirror the launcher fetched host-side and reads issues through
