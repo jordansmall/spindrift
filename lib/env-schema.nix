@@ -111,7 +111,7 @@ withRowKnobs {
     group = "git";
     flag = "merge-policy";
     default = "manual";
-    doc = "post-green merge policy: immediate (merge on green), auto (enqueue the forge's native auto-merge on github or forgejo; github needs Allow auto-merge enabled, forgejo needs the MERGE_METHOD merge style allowed), manual (leave PR open for human approval)";
+    doc = "post-green merge policy: immediate (merge on green), auto (enqueue the forge's native auto-merge on github or forgejo; github needs Allow auto-merge enabled, forgejo needs rebase merges allowed), manual (leave PR open for human approval)";
     choices = [
       "immediate"
       "auto"
@@ -125,7 +125,7 @@ withRowKnobs {
     env = "MERGE_METHOD";
     group = "git";
     default = "rebase";
-    doc = "how the final integration commits land on green: merge (merge commit), squash, or rebase; maps to the Forgejo merge API's Do field on forgejo; the github Connector merges by rebase only and refuses merge or squash at launch (github and forgejo Code Forge merge paths only)";
+    doc = "how the final integration commits land on green: merge (merge commit), squash, or rebase; the github and forgejo Connectors merge by rebase only and refuse merge or squash at launch (github and forgejo Code Forge merge paths only)";
     choices = [
       "merge"
       "squash"
@@ -633,7 +633,7 @@ withRowKnobs {
     group = "forge";
     flag = "forge-backend";
     default = "github";
-    doc = "code-landing backend: github (open PR, watch CI, merge), git (push-only to CODE_FORGE_REMOTE_URL; no PR, CI-watch, or merge gate), local (host-mediated landing onto the Accumulation repo's Integration branch by rebase and fast-forward, never a merge commit; no PR, CI-watch, or network; ADR 0033, issue #1889), or forgejo (open PR, watch CI, merge under MERGE_MODE on a Forgejo/Gitea instance authenticated by FORGEJO_TOKEN; ADR 0038)";
+    doc = "code-landing backend: github (open PR, watch CI, merge), git (push-only to CODE_FORGE_REMOTE_URL; no PR, CI-watch, or merge gate), local (host-mediated landing onto the Accumulation repo's Integration branch by rebase and fast-forward, never a merge commit; no PR, CI-watch, or network; ADR 0033, issue #1889), or forgejo (open PR, watch CI, merge under MERGE_MODE on a Forgejo/Gitea instance through the forgejo Connector, authorized by SPINDRIFT_FORGEJO_CONNECTOR_TOKEN, with FORGEJO_TOKEN as git's credential; ADR 0038)";
     choices = map (r: r.name) (builtins.filter (r: r.validAsCodeForge or false) backends);
     flakeOption = true;
     nixSubPath = "backend";

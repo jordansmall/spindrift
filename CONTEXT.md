@@ -483,7 +483,7 @@ mediates. Four values:
   implements **PRForge** (see below).
 - `forgejo` — the same full flow (open a PR, watch the CI rollup, rebase, merge)
   against a Forgejo/Gitea instance (Codeberg by default). The second value that
-  implements **PRForge**; a native REST client, not a CLI-exec adapter (ADR 0038).
+  implements **PRForge**; built only from the forgejo Connector (ADR 0038, ADR 0073).
 - `git` — **push-only** to a plain git remote URL (self-hosted git, gitea,
   GitLab-without-MRs, a bare server repo): clone, commit to a per-issue branch,
   push, and stop. No PR, no CI, no merge gate — it implements CodeForge only,
@@ -757,13 +757,13 @@ The migration stage after Shadow mode, in which the Connector answers in place
 of the native backend, with no fallback: a Connector failure or audit refusal is
 recorded and fails the operation. Only a backend that still has a native
 adapter takes `primary`, which today is forgejo, whose Connector replaces the
-whole Code Forge and the whole tracker, reads and writes. github and jira have
-no native path left and take no `primary`: their Connectors are always the
-implementation, and a row that sets it fails evaluation (#6858, #6888).
-Dropping the row's `primary` option restores the native path; the native path
-is deleted (cut-over) after 20 consecutive dogfood runs with no Connector read
-error and no refusal (ADR 0073). _Avoid_: cut-over (the later deletion of the
-native path), promotion.
+whole tracker, reads and writes (its Code Forge is always the Connector's).
+github and jira have no native path left and take no `primary`: their
+Connectors are always the implementation, and a row that sets it fails
+evaluation (#6858, #6888). Dropping the row's `primary` option restores the
+native tracker; the native path is deleted (cut-over) after 20 consecutive
+dogfood runs with no Connector read error and no refusal (ADR 0073). _Avoid_:
+cut-over (the later deletion of the native path), promotion.
 
 **Connector protocol**:
 The versioned contract between the Connector host and Connectors: the
