@@ -26,9 +26,13 @@ this repo's own dev skills, not shipped to the Boxes of other repos.
 
 ## Inventory
 
-Fragment paths are under `templates/default/prompts/fragments/`. `github/` and
-`forgejo/` variants of one use share a row. The access column comes from each
-row's gate in `lib/fragments.nix` (and the gate's definition in
+Fragment paths are under `templates/default/prompts/fragments/`, except the
+`forgejo/` files (shipped by the forgejo Connector from
+`connectors/forgejo/fragments/`) and `jira/issue-blocked-comment-relay.md`
+(from `connectors/jira/fragments/`); the Box sees each at the same relative
+path.
+`github/` and `forgejo/` variants of one use share a row. The access column
+comes from each row's gate in `lib/fragments.nix` (and the gate's definition in
 `cmd/launcher/internal/promptassembly/`).
 
 | intent | fragment(s) | rendered by | access modes | r/w | planned replacement |
