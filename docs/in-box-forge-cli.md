@@ -2,10 +2,10 @@
 
 This page inventories every way a shipped prompt or fragment tells the agent
 in the Box to use a forge CLI: `gh`, `fj`, a `curl` against a forge API, or
-the generic "read it via the forge" instruction. The Box is meant to hold no
-forge credential (issue #6757), and nothing an agent relies on should be taken
-away blind, so each use is recorded here with the access modes it applies in
-and what will replace it.
+the generic "read it via the forge" instruction. The Box holds no forge
+credential (issues #6757, #6900 and #6901), and nothing an agent relies on
+should be taken away blind, so each use was recorded here until a host-side
+replacement landed. The set is now empty and must stay empty.
 
 [`nix/checks/in-box-forge-cli-allowlist.nix`](../nix/checks/in-box-forge-cli-allowlist.nix)
 pins the set shrink-only. A template under `templates/default/` that starts
@@ -36,10 +36,10 @@ Fragment paths would be listed as the Box sees them, under
 `templates/default/prompts/fragments/` or a Connector's `fragments/` folder,
 one row per use, with the `github/` and `forgejo/` variants sharing a row.
 
-## Reachable under `read-only`
+## Reads that moved host-side
 
-A `read-only` Box reaches no in-box read use: #6900 ("A read-only Box holds
-no forge credential") drove that set to empty. The fix pass reads
+No Box has an in-box read use: #6900 ("A read-only Box holds no forge
+credential") drove that set to empty. The fix pass reads
 CI failure detail from the launcher-injected `CI FAILURE` section
 (`ci-failure.md`), which carries each failing job's log tail, so
 `fix-ci-read` instructs no forge call.

@@ -1611,9 +1611,9 @@ The launcher-side check, outside the Box and beyond the Agent's influence,
 applied between green CI and merge: if the change touches a guarded path, the
 merge downgrades to manual — regardless of `MERGE_MODE` — and a note on the PR
 says why. It bounds injection-induced *drift* (an agent following its normal
-flow), not a fully adversarial Agent, which holds a token that can merge (see
-Two-actor separation). Downgrade, never block: the cost of a hit is one human
-read.
+flow), not a fully adversarial Agent. No Box holds a forge token now, so the
+Box has no merge capability to bypass the guard with (see Two-actor
+separation). Downgrade, never block: the cost of a hit is one human read.
 _Avoid_: path filter, merge block, review gate.
 
 **Instruction surface**:
@@ -1625,10 +1625,10 @@ by the Merge guard's default path set.
 _Avoid_: config files, dotfiles, prompt files.
 
 **Two-actor separation**:
-The opt-in hard mode where the Box token's user cannot update the base branch
-(repository ruleset) and only a second, launcher-held token can merge. The only
-configuration in which the Merge guard is literally uninfluenceable by the
-Agent; the single-token default trades that away for operator simplicity.
+Retired by issue #6901. It was the opt-in hard mode where a read-write Box's
+token user could not update the base branch (repository ruleset) and only a
+second, launcher-held token could merge. No Box holds a forge token now, so
+the guarantee holds by capability alone.
 _Avoid_: dual token, split credentials, bot pair.
 
 **Tripwire**:

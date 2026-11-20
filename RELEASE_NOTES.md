@@ -9,6 +9,35 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## Unreleased
+
+Read-write Box access is gone: every Box now returns its work to the launcher,
+which does all the forge and tracker writes.
+
+**⚠ Breaking changes** this release: `BOX_FORGE_AND_ISSUE_ACCESS=read-write`
+is rejected, and the prompt gates, Box env vars and push retries that only
+served it are removed.
+
+- **⚠ Breaking: `read-write` Box access is removed.** Setting
+  `BOX_FORGE_AND_ISSUE_ACCESS` (`forge.boxAccess`, `--box-access`) to
+  `read-write` now fails the build, the launch, the daemon start and
+  `spindrift doctor`, with a pointer to `MIGRATING.md`. Delete the setting or
+  set it to `read-only`; an explicit `read-only` keeps working. The forge must
+  support bundle relay, as it already had to under `read-only`.
+- **⚠ Breaking: Box env vars and prompt variables removed.**
+  `BOX_WRITE_ENABLED`, `BOX_HOST_SEEDED_MIRROR` and `BOX_GH_TOKEN_OPTIONAL`
+  are no longer set, and the Box always clones the host-seeded mirror. The
+  Box's outcome backstop no longer pushes, so it ignores
+  `MAX_REBASE_ATTEMPTS`, `TRANSIENT_BACKOFF_SECS` and `HOLD_JITTER_SECS`; the
+  launcher still reads all three for its own retries. A prompt override that
+  references a removed `*_READ_WRITE_*` or `*_DIRECT_*` variable,
+  `RESEARCH_VERDICT_STEP`, or a `BOX_ACCESS_READ_WRITE`-style gate fails to
+  render; `MIGRATING.md` has the full list.
+- **`BOX_GH_TOKEN` and `BOX_FORGEJO_TOKEN` have no reader left.** Delete them
+  from `harness.env`.
+
+---
+
 ## 0.32.0 — 2026-11-18
 
 Boxes now default to read-only and carry no forge token, and the first

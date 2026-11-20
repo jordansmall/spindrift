@@ -846,7 +846,9 @@ let
   # A value a knob's `removedChoices` row names fails with that row's migration
   # message. It runs ahead of choicesCheckOk, whose generic "valid: ..." error
   # would otherwise name no way forward.
-  removedChoiceError = import ./removed-choice-error.nix { inherit lib; } flakeOptionEntries mergedDefaults;
+  removedChoiceError = import ./removed-choice-error.nix {
+    inherit lib;
+  } flakeOptionEntries mergedDefaults;
   removedChoiceCheckOk = if removedChoiceError == null then true else throw removedChoiceError;
 
   # Eval-time choices guard (issue #2519): flakeModule.nix's generated options

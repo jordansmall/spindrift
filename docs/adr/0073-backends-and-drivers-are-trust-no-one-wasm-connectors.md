@@ -652,7 +652,10 @@ is also the push default, so `gh` finds the current branch's PR. ADR 0033's
 amendment for this issue records the widened exception. Two parts of the
 code plane are still to come: `read-write` keeps its direct in-box clone until
 it is removed, and the read-only Box still holds `GH_TOKEN` for its in-box
-reads, so removing the Box token is separate work (spec #6757).
+reads, so removing the Box token is separate work (spec #6757). (Amended by
+issue #6901: `read-write` and its direct clone are gone, so the mirror is the
+only clone path and the Launcher no longer forwards `BOX_HOST_SEEDED_MIRROR`;
+issue #6900 removed the Box token.)
 
 ## Amendment (issue #6854): the tracker Connector performs lifecycle writes
 

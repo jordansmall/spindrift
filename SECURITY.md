@@ -44,9 +44,9 @@ rationale is in [`docs/reference.md`](docs/reference.md#threat-model).
   comment into the issue body (the local adapter's body-inlined thread is
   written only by the launcher and the Box). The launcher drops comments a
   maintainer has minimized on GitHub from the transcript it renders, but
-  that is a mitigation for that transcript only: a read-write Box's token can
-  still read the full thread, and the agent still fetches parent and linked
-  issues itself, minimized comments included. A vetted-transcript filter
+  that is a mitigation for that transcript only: the agent still fetches
+  parent and linked issues itself, through the host-answered issue verb,
+  minimized comments included. A vetted-transcript filter
   (#382, not yet active) will keep only comments from a GitHub `OWNER`,
   `MEMBER`, or `COLLABORATOR`; Forgejo and Jira cannot attest a commenter's
   standing, so their comments will count as untrusted (fail closed). See the
@@ -85,13 +85,10 @@ context despite being told not to — and once a secret is in the transcript
 it is effectively leaked, because there is no output redaction. These
 controls stop the Driver from putting a secret in its own context in the
 first place; they make no claim about a compromised Box exfiltrating data
-over the network. The accepted residual is `GH_TOKEN`, which stays a live
-environment variable in a `read-write` Box (a `read-only` Box, the default,
-holds no forge credential) because the Box is a first-class GitHub
-actor; issue #380 (two-actor separation, below) caps the blast radius of a
-leaked one rather than removing it. See [Secret exposure
-model](docs/reference.md#secret-exposure-model) for the full story,
-including the fully-local, zero-GitHub-token posture.
+over the network. No forge token reaches the Box (issues #6900 and #6901
+removed the `read-write` Box that held one), so `GH_TOKEN` is no longer a
+residual there. See [Secret exposure
+model](docs/reference.md#secret-exposure-model) for the full story.
 
 The jira Connector performs tracker transitions and label edits, so its
 credential needs edit-issue and transition-issue permission. Its Route table
@@ -119,23 +116,14 @@ labels, but these are on you:
   Workflows:RW an injected agent can rewrite CI to auto-pass checks or exfiltrate
   those secrets. Grant it only for an issue that edits `.github/workflows/*`.
 - **The launcher owns the merge, the Box never does — by contract, not by
-  default enforcement.** A Box implements and pushes; the host launcher makes
-  the CI-green decision and applies `MERGE_MODE`. In a `read-write` Box under
-  the single-token default the Agent must not run `gh pr merge`, but nothing
-  stops it from doing so — the token that opened the PR is the same token that
-  can merge it (see the [merge guard bypass
-  discussion](docs/reference.md#merge-guard)). **Two-actor separation** is
-  the opt-in hard mode that closes this: a second, launcher-held token whose
-  user a repository ruleset bypass-lists, barring the Box's user from
-  updating the base branch at all — the only configuration where a Box
-  genuinely cannot merge its own PR. See the [two-actor separation
-  recipe](docs/reference.md#two-actor-separation-opt-in-hard-mode).
-- **Read-only Box is the second route to that same guarantee.** Two-actor
-  separation caps the blast radius of a write-capable token with an
-  out-of-band ruleset; `BOX_FORGE_AND_ISSUE_ACCESS=read-only` (the default)
-  removes the credential itself — the Box holds no forge token at all, so it
-  cannot push, open a PR, comment, or make an authenticated forge read,
-  regardless of what a repository ruleset does or doesn't enforce. It clones
+  default enforcement.** A Box implements and returns a bundle; the host
+  launcher pushes it, makes the CI-green decision and applies `MERGE_MODE`.
+  The Box holds no forge token at all (`BOX_FORGE_AND_ISSUE_ACCESS=read-only`
+  is the only mode, issue #6901), so it cannot push, open a PR, merge,
+  comment, or make an authenticated forge read, regardless of what a
+  repository ruleset does or doesn't enforce. Two-actor separation, which
+  used to cap the blast radius of a token a `read-write` Box held, is retired
+  (see [its note](docs/reference.md#two-actor-separation-retired)). It clones
   a mirror the launcher fetched host-side and reads issues through
   host-answered verbs; the launcher performs every write host-side with its
   own token, the same host-mediated model

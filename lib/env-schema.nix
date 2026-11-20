@@ -526,7 +526,7 @@ withRowKnobs {
   boxGhToken = {
     env = "BOX_GH_TOKEN";
     secret = true;
-    doc = "DEPRECATED: only a read-write Box reads it; a read-only Box receives no forge token (issue #6900); removed with read-write in #6902. opt-in two-actor separation (ADR 0016): a second machine user's fine-grained PAT for the Box only — the launcher keeps using its own GH_TOKEN for merges, labels, and all host-side forge calls, while the Box receives this value as its GH_TOKEN instead; empty (default) leaves the single-token flow unchanged. Pair with a repository ruleset that bars this user from updating the base branch and bypass-lists only the launcher's user — see docs/reference.md's two-actor separation recipe";
+    doc = "DEPRECATED, no effect, and removed in #6902: no Box receives a forge token (issues #6900 and #6901), so nothing reads it. It was the opt-in two-actor separation PAT (ADR 0016) of the removed read-write Box; see docs/reference.md's retired two-actor separation note";
     boxEnv = false;
   };
   claudeOAuthToken = {
@@ -667,7 +667,8 @@ withRowKnobs {
     # this message, instead of the module system's generic enum error naming
     # no migration. The launcher's value-level rejection is generated from it.
     removedChoices = {
-      "read-write" = "BOX_FORGE_AND_ISSUE_ACCESS=read-write was removed: read-write Box access was removed in issue #6901 and every Box is now host-mediated (read-only); set it to read-only or delete the setting; see MIGRATING.md";
+      "read-write" =
+        "BOX_FORGE_AND_ISSUE_ACCESS=read-write was removed: read-write Box access was removed in issue #6901 and every Box is now host-mediated (read-only); set it to read-only or delete the setting; see MIGRATING.md";
     };
     flakeOption = true;
     nixSubPath = "boxAccess";
@@ -683,7 +684,7 @@ withRowKnobs {
     # "" is the unset choice, so any explicit value, `forwarded` included, can
     # be told apart and warned on.
     default = "";
-    doc = "DEPRECATED, no effect, and removed in #6902: every read-only Box already holds no forge credential (issue #6900), and a read-write Box always receives its token. Setting it to either value (`forwarded` or `none`) warns at build time, at run time, and in spindrift doctor and changes nothing";
+    doc = "DEPRECATED, no effect, and removed in #6902: every Box already holds no forge credential (issue #6900). Setting it to either value (`forwarded` or `none`) warns at build time, at run time, and in spindrift doctor and changes nothing";
     choices = [
       ""
       "forwarded"
