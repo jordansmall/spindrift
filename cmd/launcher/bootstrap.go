@@ -99,7 +99,6 @@ func bootstrapWith(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descri
 	if err := validate(seedConfig); err != nil {
 		return nil, fmt.Errorf("%w: %w", errConfigInvalid, err)
 	}
-	warnBoxAccessReadWrite(seedConfig, os.Stderr)
 	warnBoxForgeCredential(seedConfig, os.Stderr)
 
 	// Ahead of every gate so a start that fails one still reaps.

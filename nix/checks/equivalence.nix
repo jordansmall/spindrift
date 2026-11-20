@@ -2305,7 +2305,6 @@ in
         "kindPrompts"
         "rosterWarnings"
         "deprecatedFragmentVarWarnings"
-        "boxAccessWarnings"
         "boxForgeCredentialWarnings"
       ];
       actual = builtins.attrNames harness.internals;

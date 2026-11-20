@@ -16,6 +16,10 @@ type FlagEntry struct {
 	SettingsPath    string
 	DeprecatedAlias string // empty unless the canonical flag was renamed (ADR 0037 Pass 2)
 	Choices         []string
+	// RemovedChoices maps a value the knob once accepted to the message that
+	// rejects it (issue #6901); validateChoice and the removed-knobs doctor check
+	// read it.
+	RemovedChoices map[string]string
 	// LauncherIgnores marks a knob the launcher generates a flag for (1:1
 	// flake-option/flag parity, #3567) but never itself reads; only
 	// cmd/launcher/daemon consumes it, via the input document (#3698).
@@ -75,4 +79,12 @@ func SchemaFlag(key string) (FlagEntry, bool) {
 		}
 	}
 	return FlagEntry{}, false
+}
+
+// RemovedChoice returns the migration message for value when it is one of env's
+// removed choices.
+func RemovedChoice(env, value string) (string, bool) {
+	e, _ := SchemaFlag(env)
+	msg, removed := e.RemovedChoices[value]
+	return msg, removed
 }

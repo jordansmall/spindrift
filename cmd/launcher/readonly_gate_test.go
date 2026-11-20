@@ -22,20 +22,6 @@ func withRelayIncapableGit(t *testing.T) {
 	t.Cleanup(backendkit.ReplaceRegistryForTest(rows))
 }
 
-// A relay-incapable forge with jira would fail under read-only on the forge
-// axis, so this fixture pins that read-write is a complete no-op rather than a
-// gate that happens to pass.
-func TestReadOnlyCapabilityGate_ReadWriteIsNoOp(t *testing.T) {
-	withRelayIncapableGit(t)
-	c := minimalValidConfig()
-	c.BoxForgeAndIssueAccess = "read-write"
-	c.CodeForge = "git"
-	c.IssueTracker = "jira"
-	if err := checkReadOnlyCapabilityGate(c); err != nil {
-		t.Errorf("checkReadOnlyCapabilityGate() with read-write = %v, want nil", err)
-	}
-}
-
 // mkHarness's readOnlyCapabilityOk eval assert (issue #2526 slice 2) already
 // proves every combination a Consumer can bake into an image, so the Go gate
 // (issue #2526 slice 3) has shrunk to a registry lookup by name that backstops a

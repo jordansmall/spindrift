@@ -10,11 +10,10 @@ import (
 	"spindrift.dev/launcher/internal/forge/local"
 )
 
-// relayCapabilityViolations builds each CODE_FORGE-valid row's read-only forge
-// the way production does (newCodeForge, so local, which has no
-// newReadOnlyCodeForge, is covered too) and reports every disagreement between
-// the row's RelayCapable and OutboxRelayCapable bits and the interfaces that
-// forge implements.
+// relayCapabilityViolations builds each CODE_FORGE-valid row's forge the way
+// production does (newCodeForge) and reports every disagreement between the
+// row's RelayCapable and OutboxRelayCapable bits and the interfaces that forge
+// implements.
 func relayCapabilityViolations() []string {
 	var out []string
 	for _, row := range backendkit.Strategies() {
@@ -34,35 +33,35 @@ func relayCapabilityViolations() []string {
 		_, subjects := cf.(forge.BundleCommitSubjects)
 
 		if relay != row.RelayCapable {
-			out = append(out, fmt.Sprintf("%s: RelayCapable=%v but read-only forge %T implements BundleRelay=%v", row.Name, row.RelayCapable, cf, relay))
+			out = append(out, fmt.Sprintf("%s: RelayCapable=%v but forge %T implements BundleRelay=%v", row.Name, row.RelayCapable, cf, relay))
 		}
 		if draft != subjects {
-			out = append(out, fmt.Sprintf("%s: read-only forge %T implements DraftPRCreator=%v but BundleCommitSubjects=%v; the PR pair must move together", row.Name, cf, draft, subjects))
+			out = append(out, fmt.Sprintf("%s: forge %T implements DraftPRCreator=%v but BundleCommitSubjects=%v; the PR pair must move together", row.Name, cf, draft, subjects))
 		}
 		if (draft || subjects) && !row.RelayCapable {
-			out = append(out, fmt.Sprintf("%s: read-only forge %T implements a PR capability but RelayCapable=false", row.Name, cf))
+			out = append(out, fmt.Sprintf("%s: forge %T implements a PR capability but RelayCapable=false", row.Name, cf))
 		}
 		// The IF BLOCKED PR gates read OutboxRelayCapable as "this forge has pull
 		// requests", so it must track DraftPRCreator, not RelayCapable (local is
 		// RelayCapable without PRs).
 		if draft != row.OutboxRelayCapable {
-			out = append(out, fmt.Sprintf("%s: OutboxRelayCapable=%v but read-only forge %T implements DraftPRCreator=%v", row.Name, row.OutboxRelayCapable, cf, draft))
+			out = append(out, fmt.Sprintf("%s: OutboxRelayCapable=%v but forge %T implements DraftPRCreator=%v", row.Name, row.OutboxRelayCapable, cf, draft))
 		}
 	}
 	return out
 }
 
-// TestRelayCapableMatchesReadOnlyForgeInterfaces checks the registry's
+// TestRelayCapableMatchesForgeInterfaces checks the registry's
 // RelayCapable and OutboxRelayCapable bits against what each row's live
-// read-only forge implements: BundleRelay iff RelayCapable, DraftPRCreator iff
+// forge implements: BundleRelay iff RelayCapable, DraftPRCreator iff
 // BundleCommitSubjects, no PR capability without RelayCapable, and
 // OutboxRelayCapable iff DraftPRCreator.
 // A nix-only row with no Go row is
 // already caught by TestBackendRowsCoverRegistry plus nix/checks/schema-drift.nix's
 // backend-registry-gen.
-func TestRelayCapableMatchesReadOnlyForgeInterfaces(t *testing.T) {
+func TestRelayCapableMatchesForgeInterfaces(t *testing.T) {
 	if v := relayCapabilityViolations(); len(v) > 0 {
-		t.Errorf("RelayCapable or OutboxRelayCapable disagrees with the read-only forge's interfaces:\n%s", strings.Join(v, "\n"))
+		t.Errorf("RelayCapable or OutboxRelayCapable disagrees with the forge's interfaces:\n%s", strings.Join(v, "\n"))
 	}
 }
 
@@ -96,7 +95,7 @@ func (prPairForge) CommitSubjects(outboxDir, base, ref string) ([]string, error)
 	return nil, nil
 }
 
-// relayPRPairForge is a full read-only PR forge: BundleRelay plus both PR
+// relayPRPairForge is a full PR forge: BundleRelay plus both PR
 // capabilities.
 type relayPRPairForge struct{ relayDraftForge }
 

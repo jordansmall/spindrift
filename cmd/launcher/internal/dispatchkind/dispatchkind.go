@@ -179,7 +179,6 @@ type Descriptor struct {
 	Settle         Settle
 	AdviseOnly     bool   // read-only posture: never lands code (no branch/PR/merge); ignores blockers
 	CompleteBanner string // all-delivered banner phrase for run/runContinuousDispatch (the butler and recover print none); "" = the Code Forge's landing wording
-	ReadOnlyBox    bool   // Box always runs read-only (guards, outbox relay), regardless of BOX_FORGE_AND_ISSUE_ACCESS
 	DaemonPriority DaemonPriority
 	DemandSource   DemandSource
 	FindingLabel   string          // provenance label settle applies to a filed finding

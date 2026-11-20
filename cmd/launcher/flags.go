@@ -132,12 +132,16 @@ func resolveSecretCmd(env, cmd string) (string, error) {
 }
 
 // validateChoice checks a resolved value against the inputdoc.SchemaFlags row's
-// declared choices (issue #2520 slice 2). A missing row or a row with no
+// declared choices (issue #2520 slice 2); a value in RemovedChoices fails with
+// its migration message. A missing row or a row with no
 // choices is a no-op.
 func validateChoice(env, value string) error {
 	for _, e := range inputdoc.SchemaFlags {
 		if e.Env != env {
 			continue
+		}
+		if msg, removed := inputdoc.RemovedChoice(env, value); removed {
+			return errors.New(msg)
 		}
 		if len(e.Choices) == 0 {
 			return nil
@@ -549,9 +553,9 @@ func secretRequiredThisRun(env string, rules []driver.CredentialRule) bool {
 		return !sig.fullyLocal && backend.NeedsGHToken(forgeRow.Descriptor, trackerRow.Descriptor)
 	default:
 		// Any other backend's own token is required exactly when a selected
-		// backend names it as its TokenEnvVar. BOX_GH_TOKEN (ADR 0016) is opt-in and
-		// no row names it as a TokenEnvVar (github has it only as its boxTokenEnvVar),
-		// so the template never sources it.
+		// backend names it as its TokenEnvVar. BOX_GH_TOKEN is deprecated with no
+		// reader and no row names it as a TokenEnvVar (github has it only as its
+		// boxTokenEnvVar), so the template never sources it.
 		return env != "" && (forgeRow.TokenEnvVar == env || trackerRow.TokenEnvVar == env)
 	}
 }

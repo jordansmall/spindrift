@@ -1,11 +1,11 @@
 # These checks pin lib/mkHarness.nix's readOnlyCapabilityOk assert (issue
-# #2526 slice 2) at eval time: the BOX_FORGE_AND_ISSUE_ACCESS x CODE_FORGE x
+# #2526 slice 2) at eval time: the CODE_FORGE x
 # ISSUE_TRACKER matrix against lib/backends/default.nix's relayCapable and
 # hostPostingCapable rows. Each case goes through the real mkHarness.nix entry
 # point, so it exercises mkHarness's own assert chain and not a bare copy.
 # These cases trust the relayCapable bit; whether the bit matches the forge
 # adapter's real capabilities is checked Go-side, by cmd/launcher's
-# TestRelayCapableMatchesReadOnlyForgeInterfaces (issue #2628).
+# TestRelayCapableMatchesForgeInterfaces (issue #2628).
 {
   pkgs,
   nixpkgs,
@@ -133,20 +133,4 @@ in
     assert assertMsg ok.success
       "mkHarness.nix must not throw when BOX_FORGE_AND_ISSUE_ACCESS=read-only and both CODE_FORGE/ISSUE_TRACKER are capability-satisfied (forgejo/forgejo)";
     pkgs.runCommand "read-only-capability-accepts-capable-forgejo-pair" { } "touch $out";
-
-  # The assert fires only under read-only: outside it, the capability bits are
-  # never consulted at all (the git/jira pair was the last rejected pairing).
-  read-only-capability-is-a-no-op-under-read-write =
-    let
-      ok = builtins.tryEval (
-        builtins.seq (mkHarnessWith {
-          codeForge = "git";
-          issueTracker = "jira";
-          boxForgeAndIssueAccess = "read-write";
-        }) "reached"
-      );
-    in
-    assert assertMsg ok.success
-      "mkHarness.nix must not throw for any CODE_FORGE/ISSUE_TRACKER pair when BOX_FORGE_AND_ISSUE_ACCESS is not read-only";
-    pkgs.runCommand "read-only-capability-is-a-no-op-under-read-write" { } "touch $out";
 }

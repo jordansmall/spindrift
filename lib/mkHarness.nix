@@ -843,6 +843,12 @@ let
   trackerAxisFiler = issueTrackerRow.trackerAxisFiler or "GH";
   forgeBackend = codeForgeRow.forgeBackend or "GH";
 
+  # A value a knob's `removedChoices` row names fails with that row's migration
+  # message. It runs ahead of choicesCheckOk, whose generic "valid: ..." error
+  # would otherwise name no way forward.
+  removedChoiceError = import ./removed-choice-error.nix { inherit lib; } flakeOptionEntries mergedDefaults;
+  removedChoiceCheckOk = if removedChoiceError == null then true else throw removedChoiceError;
+
   # Eval-time choices guard (issue #2519): flakeModule.nix's generated options
   # use `types.enum`, but that only protects Consumers going through the flake
   # module. A Consumer calling mkHarness directly could otherwise set an
@@ -1129,7 +1135,7 @@ let
   buildTimeRejectVerdicts = promptContract.buildTimeRejectVerdicts {
     staticGates = {
       reviewPrompt = true;
-      readOnlyResearch = mergedDefaults.boxForgeAndIssueAccess == "read-only";
+      readOnlyResearch = true;
     };
     contentByRowId = {
       "reviewer-verdict" = reviewPrompt;
@@ -1857,18 +1863,11 @@ let
   ) (lib.filter bareWorker keptRoster);
   droppedBareWorkerMsg = "spindrift: the worker model ${builtins.toJSON (lib.head droppedBareWorkers).model} is not a `<provider>/<model>` id, which this Driver requires, so the worker is not provisioned (issue #5331).";
 
-  # read-only is the default (issue #6899), so a merged read-write is always
-  # explicit. The input document carries no notice: the launcher warns on the
-  # effective value, which a --box-access flag can differ from.
-  boxAccessWarnings =
-    lib.optional (mergedDefaults.boxForgeAndIssueAccess == "read-write")
-      "spindrift: BOX_FORGE_AND_ISSUE_ACCESS=read-write is deprecated and will be removed in a later minor release (issue #6757). The default is now read-only, where the launcher host-mediates every Box write. To move, set perSystem.spindrift.forge.boxAccess = \"read-only\" (or defaults.boxForgeAndIssueAccess), or unset it; see MIGRATING.md, \"The Box's forge access defaults to read-only (issue #6899)\".";
-
   # Unset is "", so any explicit value warns, `forwarded` included. The launcher
   # prints the same text at run time (inputdoc.BoxForgeCredentialNotice).
   boxForgeCredentialWarnings =
     lib.optional (mergedDefaults.boxForgeCredential != "")
-      "spindrift: BOX_FORGE_CREDENTIAL is deprecated and has no effect, and will be removed in a later minor release (issue #6902). Every read-only Box now holds no forge credential (issue #6900), whatever its value, and a read-write Box always receives its token. Unset forge.boxForgeCredential (defaults.boxForgeCredential) and drop --box-forge-credential.";
+      "spindrift: BOX_FORGE_CREDENTIAL is deprecated and has no effect, and will be removed in a later minor release (issue #6902). Every Box holds no forge credential (issue #6900), whatever its value. Unset forge.boxForgeCredential (defaults.boxForgeCredential) and drop --box-forge-credential.";
 
   # The same warnings as data, so a check can assert on them without
   # capturing stderr.
@@ -1884,7 +1883,6 @@ let
     lib.foldl' (acc: msg: lib.warn msg acc) outputs (
       lib.optional (legacyKnobsSet != [ ]) deprecationMsg
       ++ rosterWarnings
-      ++ boxAccessWarnings
       ++ boxForgeCredentialWarnings
       ++ deprecatedFragmentVarWarnings
     );
@@ -1923,12 +1921,9 @@ let
   # BOX_FORGE_AND_ISSUE_ACCESS=read-only denies the Box a write token on both
   # axes, so the selected CODE_FORGE must be relayCapable and the selected
   # ISSUE_TRACKER hostPostingCapable (lib/backends/default.nix, issue #2526).
-  # read-write is a fast no-op that never inspects the backends, mirroring
-  # cmd/launcher/main.go's checkReadOnlyCapabilityGate.
+  # Mirrors cmd/launcher/main.go's checkReadOnlyCapabilityGate.
   readOnlyCapabilityOk =
-    if mergedDefaults.boxForgeAndIssueAccess != "read-only" then
-      true
-    else if !(codeForgeRow.relayCapable or false) then
+    if !(codeForgeRow.relayCapable or false) then
       throw "mkHarness: BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected CODE_FORGE=${mergedDefaults.codeForge} does not implement bundle-relay (forge.BundleRelay) for the Box's finished branch hand-off"
     else if !(issueTrackerRow.hostPostingCapable or false) then
       throw "mkHarness: BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected ISSUE_TRACKER=${mergedDefaults.issueTracker} does not implement host-posted comments and issue-filing (forge.HostPostedCommenter / forge.HostPostedIssueFiler)"
@@ -2004,6 +1999,7 @@ else
   assert forbiddenMarkerCheckOk;
   assert removedFragmentVarCheckOk;
   assert repoSlugCoherenceOk;
+  assert removedChoiceCheckOk;
   assert choicesCheckOk;
   assert networkModeCoherenceOk;
   assert nixStoreWritableCoherenceOk;
@@ -2081,7 +2077,6 @@ else
       inherit
         rosterWarnings
         deprecatedFragmentVarWarnings
-        boxAccessWarnings
         boxForgeCredentialWarnings
         ;
     };

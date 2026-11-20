@@ -1317,20 +1317,23 @@ checkedMerge {
       "lib/env-schema.nix: continuousDispatch.doc must say plainly it is not removed — it stays for no-daemon operators and remains the Console's engine (issue #3547), got: ${doc}";
     pkgs.runCommand "continuous-dispatch-doc-reference" { } "touch $out";
 
-  # The read-write deprecation (issues #6891, #6899) rides the knob's doc
-  # string, which is what renders it onto --help, the man page, and
-  # docs/flake-options.md.
-  box-access-default-doc-deprecated =
+  # The read-write removal (issue #6901) rides the knob's doc string, which is
+  # what renders it onto --help, the man page, and docs/flake-options.md, and
+  # its removedChoices row, which the launcher's rejection is generated from.
+  box-access-doc-names-removal =
     let
       schema = import ../../lib/env-schema.nix;
       inherit (pkgs.lib) assertMsg hasInfix;
-      doc = schema.boxForgeAndIssueAccess.doc;
+      entry = schema.boxForgeAndIssueAccess;
     in
-    assert assertMsg (hasInfix "DEPRECATED" doc)
-      "lib/env-schema.nix: boxForgeAndIssueAccess.doc must mark read-write DEPRECATED (issue #6899), got: ${doc}";
-    assert assertMsg (hasInfix "#6757" doc)
-      "lib/env-schema.nix: boxForgeAndIssueAccess.doc must name the parent issue #6757 that removes read-write, got: ${doc}";
-    pkgs.runCommand "box-access-default-doc-deprecated" { } "touch $out";
+    assert assertMsg (hasInfix "#6901" entry.doc)
+      "lib/env-schema.nix: boxForgeAndIssueAccess.doc must name issue #6901 that removed read-write, got: ${entry.doc}";
+    assert assertMsg (!(hasInfix "DEPRECATED" entry.doc))
+      "lib/env-schema.nix: boxForgeAndIssueAccess.doc must not call read-write deprecated: it is removed (issue #6901), got: ${entry.doc}";
+    assert assertMsg (
+      builtins.attrNames entry.removedChoices == [ "read-write" ]
+    ) "lib/env-schema.nix: boxForgeAndIssueAccess.removedChoices must name exactly read-write";
+    pkgs.runCommand "box-access-doc-names-removal" { } "touch $out";
 
   # A knob's launcherIgnores = true axis and its doc string's "the launcher
   # itself ignores it" clause must agree exactly, in both directions: a
@@ -1490,11 +1493,8 @@ checkedMerge {
       ]
     ) "lib/env-schema.nix: syncMethod.choices must be [ rebase merge ]";
     assert pkgs.lib.assertMsg (
-      schema.boxForgeAndIssueAccess.choices or [ ] == [
-        "read-write"
-        "read-only"
-      ]
-    ) "lib/env-schema.nix: boxForgeAndIssueAccess.choices must be [ read-write read-only ]";
+      schema.boxForgeAndIssueAccess.choices or [ ] == [ "read-only" ]
+    ) "lib/env-schema.nix: boxForgeAndIssueAccess.choices must be [ read-only ] (issue #6901)";
     assert pkgs.lib.assertMsg (
       schema.networkMode.choices or [ ] == [
         "open"

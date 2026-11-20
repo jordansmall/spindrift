@@ -18,8 +18,6 @@ rec {
   settle = "SettleLedger";
   adviseOnly = true;
   completeBanner = "findings filed";
-  # issue #3906
-  readOnlyBox = true;
   daemonPriority = "PriorityIdle";
   enablement = "EnabledByChores";
   demandSource = "DemandChildReported";

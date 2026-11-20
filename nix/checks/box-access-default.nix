@@ -1,7 +1,6 @@
-# Issue #6899: BOX_FORGE_AND_ISSUE_ACCESS defaults to read-only. An explicit
-# read-write is deprecated (issue #6757): mkHarness warns at build time and
-# exposes the message as `internals.boxAccessWarnings`. The run input document
-# carries no notice; the launcher prints its own for the effective value.
+# BOX_FORGE_AND_ISSUE_ACCESS is single-valued read-only (issue #6901). The
+# read-write value was removed: an explicit one must fail the build with the
+# migration message, and read-only (explicit or the default) stays silent.
 {
   pkgs,
   fixtures,
@@ -13,17 +12,16 @@
 let
   inherit (pkgs.lib) assertMsg hasInfix;
   knob = "BOX_FORGE_AND_ISSUE_ACCESS";
-  withAccess =
+  schema = import ../../lib/env-schema.nix;
+  removedChoiceError = import ../../lib/removed-choice-error.nix { lib = pkgs.lib; };
+  mkHarnessWith =
     access:
     import ../../lib/mkHarness.nix {
       inherit nixpkgs system;
       packages = p: [ p.hello ];
       defaults.boxForgeAndIssueAccess = access;
     };
-  explicitReadWrite = withAccess "read-write";
-  explicitReadOnly = withAccess "read-only";
   defaulted = fixtures.minimalDirect.internals;
-  msgs = i: builtins.concatStringsSep "\n" i.boxAccessWarnings;
 
   # The flake outputs expose no `internals`, so read the run input document
   # the published `spindrift` wrapper points at.
@@ -86,14 +84,11 @@ let
       '';
 in
 {
-  box-access-default-is-read-only-and-silent =
+  box-access-default-is-read-only =
     assert assertMsg (
-      defaulted.boxAccessWarnings == [ ]
-    ) "an unset ${knob} must not warn, got: ${msgs defaulted}";
-    assert assertMsg (
-      explicitReadOnly.internals.boxAccessWarnings == [ ]
-    ) "an explicit read-only must not warn, got: ${msgs explicitReadOnly.internals}";
-    pkgs.runCommand "box-access-default-is-read-only-and-silent" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      (mkHarnessWith "read-only") ? spindrift
+    ) "an explicit read-only must build, since it is the one valid value";
+    pkgs.runCommand "box-access-default-is-read-only" { nativeBuildInputs = [ pkgs.jq ]; } ''
       jq -e --arg k ${knob} '.settings[$k] == "read-only"' ${defaulted.runInputDocumentFile}
       touch $out
     '';
@@ -102,9 +97,6 @@ in
     let
       names = builtins.attrNames unsetPairs;
     in
-    assert assertMsg (builtins.all (
-      n: unsetInternals.${n}.boxAccessWarnings == [ ]
-    ) names) "an unset ${knob} must not warn on any of: ${builtins.concatStringsSep ", " names}";
     pkgs.runCommand "box-access-unset-is-read-only-on-every-forge" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
         ${builtins.concatStringsSep "\n" (
@@ -117,42 +109,40 @@ in
         touch $out
       '';
 
-  box-access-explicit-read-write-warns =
+  # The migration message, compared by value: tryEval cannot tell it from the
+  # generic choices error, which fails the same build.
+  box-access-read-write-rejected =
     let
-      msg = msgs explicitReadWrite.internals;
-      goSrc = builtins.readFile ../../cmd/launcher/internal/inputdoc/inputdoc.go;
+      err = removedChoiceError schema { boxForgeAndIssueAccess = "read-write"; };
+      rejected = builtins.tryEval (mkHarnessWith "read-write").spindrift;
+      viaFlake = builtins.tryEval (consumerWith { forge.boxAccess = "read-write"; });
+      enumValues = builtins.attrNames (schema.boxForgeAndIssueAccess.removedChoices);
     in
+    assert assertMsg (err != null) "a removed read-write value must produce an error";
+    assert assertMsg (hasInfix "${knob}=read-write was removed" err) "the error must name the knob, got: ${err}";
+    assert assertMsg (hasInfix "#6901" err) "the error must name issue #6901, got: ${err}";
+    assert assertMsg (hasInfix "host-mediated" err) "the error must say every Box is host-mediated, got: ${err}";
+    assert assertMsg (hasInfix "MIGRATING.md" err) "the error must point at MIGRATING.md, got: ${err}";
     assert assertMsg (
-      builtins.length explicitReadWrite.internals.boxAccessWarnings == 1
-    ) "an explicit read-write must record exactly one warning, got: ${msg}";
-    assert assertMsg (hasInfix "#6757" msg) "the notice must name the parent issue #6757, got: ${msg}";
-    assert assertMsg (hasInfix "#6899" msg) "the notice must name issue #6899, got: ${msg}";
-    assert assertMsg (hasInfix "MIGRATING.md" msg) "the notice must point at MIGRATING.md, got: ${msg}";
-    # The Go string literal and builtins.toJSON escape this ASCII text alike
-    # (only `"` is escaped), so the Go const is the build notice verbatim.
-    assert assertMsg
-      (hasInfix (builtins.toJSON (builtins.head explicitReadWrite.internals.boxAccessWarnings)) goSrc)
-      "lib/mkHarness.nix boxAccessWarnings and BoxAccessReadWriteNotice in cmd/launcher/internal/inputdoc/inputdoc.go must carry the same text";
-    pkgs.runCommand "box-access-explicit-read-write-warns" { } "touch $out";
-
-  # nix/dogfood-defaults.nix pins read-only; fixtures.harness mirrors the
-  # dogfood flake's mkHarness call (pinned in connector-driver-rows.nix).
-  box-access-dogfood-is-silent =
+      removedChoiceError schema { boxForgeAndIssueAccess = "read-only"; } == null
+    ) "read-only must raise no removed-choice error";
     assert assertMsg (
-      fixtures.harness.internals.boxAccessWarnings == [ ]
-    ) "spindrift's own flake must not warn on ${knob}, got: ${msgs fixtures.harness.internals}";
-    pkgs.runCommand "box-access-dogfood-is-silent" { } "touch $out";
+      removedChoiceError schema { }  == null
+    ) "an unset knob must raise no removed-choice error";
+    assert assertMsg (enumValues == [ "read-write" ]) "read-write must be the only removed value";
+    assert assertMsg (!rejected.success) "mkHarness must reject defaults.boxForgeAndIssueAccess = \"read-write\"";
+    assert assertMsg (!viaFlake.success) "the flake module must reject forge.boxAccess = \"read-write\"";
+    pkgs.runCommand "box-access-read-write-rejected" { } "touch $out";
 
-  # Only the build-time warning is out of reach from the flake path; this
-  # proves forge.boxAccess lands in the document the wrapper runs with.
+  # The flake option reaches the document, and read-write never gets that far.
   box-access-flake-option-reaches-document =
     let
       unset = flakeDocument { };
-      readWrite = flakeDocument { forge.boxAccess = "read-write"; };
+      explicit = flakeDocument { forge.boxAccess = "read-only"; };
     in
     pkgs.runCommand "box-access-flake-option-reaches-document" { nativeBuildInputs = [ pkgs.jq ]; } ''
       jq -e --arg k ${knob} '.settings[$k] == "read-only"' "$(cat ${unset})"
-      jq -e --arg k ${knob} '.settings[$k] == "read-write"' "$(cat ${readWrite})"
+      jq -e --arg k ${knob} '.settings[$k] == "read-only"' "$(cat ${explicit})"
       touch $out
     '';
 }

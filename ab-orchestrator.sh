@@ -227,8 +227,6 @@ run_arm() {
   # Pass every knob as a --flag, not an env var: flags are set via os.Setenv
   # before the launcher's ambient-knob check, so they beat whatever harness.env
   # exported, which is how a stray REPO_SLUG would otherwise leak in.
-  # --box-forge-and-issue-access read-write is forced for the same reason, since
-  # a read-only harness.env is incompatible with CODE_FORGE=git.
   local -a cmd=(
     nix run ".#" -- dispatch "${nb[@]}" --yes
     --repo-slug "$AB_REPO_SLUG"
@@ -239,7 +237,6 @@ run_arm() {
     --merge-mode manual
     --model "$AB_MODEL"
     --issue-tracker "$tracker"
-    --box-forge-and-issue-access read-write
     "$issue"
   )
   if [ -n "${AB_DRY_RUN:-}" ]; then

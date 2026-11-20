@@ -31,21 +31,11 @@ func TestBoxForgeCredentialNotice_WarnsWhenSet(t *testing.T) {
 }
 
 func TestBoxForgeCredentialNotice_QuietUnderDaemonChild(t *testing.T) {
-	t.Setenv(inputdoc.BoxAccessNoticeDecidedEnv, "1")
+	t.Setenv(inputdoc.ForgeCredentialNoticeDecidedEnv, "1")
 	c := minimalValidConfig()
 	c.BoxForgeCredential = "none"
 	if msg, ok := boxForgeCredentialNotice(c); ok {
 		t.Errorf("notice = %q under the decided marker, want none", msg)
-	}
-}
-
-// The knob changes nothing, so none no longer conflicts with read-write.
-func TestReadOnlyCapabilityGate_AcceptsNoCredentialUnderReadWrite(t *testing.T) {
-	c := minimalValidConfig()
-	c.BoxForgeAndIssueAccess = "read-write"
-	c.BoxForgeCredential = "none"
-	if err := checkReadOnlyCapabilityGate(c); err != nil {
-		t.Errorf("checkReadOnlyCapabilityGate() = %v, want nil", err)
 	}
 }
 

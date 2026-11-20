@@ -111,7 +111,6 @@ jobs:
             --tracker forgejo \
             --forge-backend forgejo \
             --forgejo-base-url "$FORGEJO_URL" \
-            --box-forge-and-issue-access read-write \
             --repo-slug "${{ github.repository }}" \
             --base-branch "${{ github.event.repository.default_branch }}" \
             --git-user-name "${{ steps.setup.outputs.git-user-name }}" \

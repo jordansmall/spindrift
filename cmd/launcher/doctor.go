@@ -110,9 +110,9 @@ func requiredLabels(opts doctorOptions, rc readContext) []string {
 		// faults and would silently drop the requirement.
 		labels = append(labels, chore.FindingLabels(c.ButlerChores)...)
 	}
-	// A read-only work Box relays review findings for the host to file, so the
+	// A work Box relays review findings for the host to file, so the
 	// label is part of what the work kind needs whichever flags are set.
-	if c.BoxForgeAndIssueAccess == "read-only" && resolveAgentPresenceSignals(c.driver).filerEnabled {
+	if resolveAgentPresenceSignals(c.driver).filerEnabled {
 		labels = append(labels, dispatchkind.Default.FindingLabel)
 	}
 	return labels
@@ -224,12 +224,6 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.
 	}
 	if msg, ok := boxForgeCredentialNotice(c); ok {
 		rep.Passthrough("%s\n", msg)
-	}
-	if c.BoxForgeAndIssueAccess == "read-write" {
-		if msg, ok := boxAccessReadWriteNotice(c); ok {
-			// Passthrough, not an Advisory: a quiet doctor would hide the notice.
-			rep.Passthrough("%s\n", msg)
-		}
 	}
 	// Kinds are picked by the same Enablement row and backend.RelaysOutbox
 	// predicate the daemon's gateKinds uses, so doctor cannot disagree with

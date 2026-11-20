@@ -22,9 +22,9 @@ type Descriptor struct {
 	// the backend carries no bearer token (git, local).
 	TokenEnvVar string
 
-	// BoxTokenEnvVar is the ADR 0016 Box-side override of TokenEnvVar: the
-	// operator's value under this name reaches the Box as TokenEnvVar. Empty
-	// when the backend has no override.
+	// BoxTokenEnvVar is the deprecated Box-side override knob; nothing reads it
+	// (MIGRATING.md). It stays so dispatch strips this name and TokenEnvVar from
+	// the Box env.
 	BoxTokenEnvVar string
 
 	// DoctorTokenHint/DoctorSlugHint name the env vars doctor points an
@@ -51,8 +51,8 @@ type Descriptor struct {
 	// recover-kind enablement follows it (RelaysOutbox). It does not decide
 	// the outbox mount or the relay: RelaysBundle does, from RelayCapable
 	// (issues #1918, #6898).
-	// TestRelayCapableMatchesReadOnlyForgeInterfaces (cmd/launcher) fails when
-	// it diverges from the read-only forge implementing DraftPRCreator.
+	// TestRelayCapableMatchesForgeInterfaces (cmd/launcher) fails when it
+	// diverges from the forge implementing DraftPRCreator.
 	OutboxRelayCapable bool
 
 	// InBoxUnreachableTracker is true only for a tracker with no in-box
@@ -81,9 +81,8 @@ type Descriptor struct {
 	// PR concept. True for every registered CODE_FORGE (git relays a bundle
 	// only, issue #6898). Wider than OutboxRelayCapable, which is "this forge
 	// has pull requests" (#5276).
-	// cmd/launcher's TestRelayCapableMatchesReadOnlyForgeInterfaces checks the
-	// bit against the interfaces each row's read-only forge implements
-	// (issue #2628).
+	// cmd/launcher's TestRelayCapableMatchesForgeInterfaces checks the bit
+	// against the interfaces each row's forge implements (issue #2628).
 	RelayCapable bool
 
 	// HostPostingCapable is true for an ISSUE_TRACKER backend whose comments
@@ -230,10 +229,10 @@ func OutboxRelayBackends() []string {
 }
 
 // RelaysBundle reports whether a Box on forge d hands its finished branch back
-// as an outbox bundle the host relays, rather than pushing: a
-// HostMediatedRemote forge, or a RelayCapable one (ADR 0033, issues #1918,
-// #6898). The launcher's outbox mount and the Box's relay, push guard, and
-// outcome backstop all decide through this.
+// as an outbox bundle the host relays: a HostMediatedRemote forge, or a
+// RelayCapable one (ADR 0033, issues #1918, #6898). The launcher's outbox mount
+// and the Box's relay, push guard, and outcome backstop all decide through
+// this.
 func RelaysBundle(d Descriptor) bool {
 	return d.HostMediatedRemote || d.RelayCapable
 }

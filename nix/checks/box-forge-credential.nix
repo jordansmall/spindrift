@@ -51,22 +51,13 @@ in
     pkgs.runCommand "box-forge-credential-set-warns" { } "touch $out";
 
   box-forge-credential-changes-no-pairing =
-    assert assertMsg (builtins.all evals (
-      builtins.concatMap
-        (access: [
-          {
-            boxForgeAndIssueAccess = access;
-            boxForgeCredential = "none";
-          }
-          {
-            boxForgeAndIssueAccess = access;
-            boxForgeCredential = "forwarded";
-          }
-        ])
-        [
-          "read-only"
-          "read-write"
-        ]
-    )) "mkHarness.nix must evaluate BOX_FORGE_CREDENTIAL under either access mode";
+    assert assertMsg (builtins.all evals [
+      {
+        boxForgeCredential = "none";
+      }
+      {
+        boxForgeCredential = "forwarded";
+      }
+    ]) "mkHarness.nix must evaluate BOX_FORGE_CREDENTIAL under the read-only default";
     pkgs.runCommand "box-forge-credential-changes-no-pairing" { } "touch $out";
 }

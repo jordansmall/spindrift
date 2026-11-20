@@ -150,51 +150,19 @@ func (c config) kind() *dispatchkind.Descriptor {
 	return c.dispatchKind
 }
 
-// effectiveBoxForgeAndIssueAccess is the effective BOX_FORGE_AND_ISSUE_ACCESS
-// handed to dispatch: the raw knob, forced "read-only" for a ReadOnlyBox kind
-// (issue #3906). c.BoxForgeAndIssueAccess itself stays raw for the
-// token/settle gates that key off the operator's actual knob.
-func (c config) effectiveBoxForgeAndIssueAccess() string {
-	if c.kind().ReadOnlyBox {
-		return "read-only"
-	}
-	return c.BoxForgeAndIssueAccess
-}
-
-// boxAccessReadWriteNotice is the deprecation notice for an effective
-// BOX_FORGE_AND_ISSUE_ACCESS=read-write (issue #6757), whether the document or
-// a flag set it. A ReadOnlyBox kind is skipped: its Box is forced read-only
-// whatever the knob says. Under the daemon the decision was already made for
-// every kind it runs (issue #6891), so a child or preflight stays quiet.
-func boxAccessReadWriteNotice(c config) (string, bool) {
-	if c.effectiveBoxForgeAndIssueAccess() != "read-write" || inputdoc.BoxAccessNoticeDecided() {
-		return "", false
-	}
-	return inputdoc.BoxAccessReadWriteNotice, true
-}
-
-// warnBoxAccessReadWrite prints the notice to stderr, not the run's stdout: the
-// notice is advisory and stdout is the run's product.
-func warnBoxAccessReadWrite(c config, stderr io.Writer) {
-	if msg, ok := boxAccessReadWriteNotice(c); ok {
-		fmt.Fprintln(stderr, msg)
-	}
-}
-
 // boxForgeCredentialNotice is the deprecation notice for a set
 // BOX_FORGE_CREDENTIAL (issue #6900), whatever its value: unset is "" because
-// the schema carries no default. It shares the daemon's decided marker with
-// the read-write notice: the daemon prints the notice itself, so a child it
-// spawns stays quiet.
+// the schema carries no default. It honors the daemon's decided marker:
+// the daemon prints the notice itself, so a child it spawns stays quiet.
 func boxForgeCredentialNotice(c config) (string, bool) {
-	if c.BoxForgeCredential == "" || inputdoc.BoxAccessNoticeDecided() {
+	if c.BoxForgeCredential == "" || inputdoc.ForgeCredentialNoticeDecided() {
 		return "", false
 	}
 	return inputdoc.BoxForgeCredentialNotice, true
 }
 
-// warnBoxForgeCredential prints the deprecation notice to stderr, like
-// warnBoxAccessReadWrite.
+// warnBoxForgeCredential prints the deprecation notice to stderr, not the
+// run's stdout: the notice is advisory and stdout is the run's product.
 func warnBoxForgeCredential(c config, stderr io.Writer) {
 	if msg, ok := boxForgeCredentialNotice(c); ok {
 		fmt.Fprintln(stderr, msg)
@@ -507,7 +475,12 @@ func validateConfigChecks(c config, checks []doctor.Check) error {
 			errs = append(errs, doctor.WithRemedy(r))
 		}
 	}
-	errs = append(errs, validateChoiceKnobsErrors(c, choiceKnobRegistry)...)
+	// The removed-knobs row already reports a removed choice set in the
+	// environment or document; the walk covers the rest (a flag).
+	rows := slices.DeleteFunc(slices.Clone(choiceKnobRegistry), func(r choiceKnobRow) bool {
+		return setsRemovedChoice(r.Env, r.Value(c))
+	})
+	errs = append(errs, validateChoiceKnobsErrors(c, rows)...)
 	if _, err := forge.ParseResearchVerdicts(c.ResearchVerdicts); err != nil {
 		errs = append(errs, err)
 	}
@@ -787,26 +760,6 @@ func hostGitConfigResolver(c config, next func(num, name string) string) func(nu
 	}
 }
 
-// boxTokenResolver wraps next, overriding a Box's bearer-token env var with
-// the operator's BOX_<X>_TOKEN when the owning backend row sets one (ADR 0016
-// two-actor separation, issue #380; ADR 0038 backend-prefixed knobs). The
-// launcher's own os.Getenv(token) stays untouched for merges and labels. It
-// runs ahead of next's CODE_FORGE fan-out, so it applies under every forge.
-func boxTokenResolver(next func(num, name string) string) func(num, name string) string {
-	return func(num, name string) string {
-		for _, row := range backendkit.Strategies() {
-			if row.TokenEnvVar == "" || row.BoxTokenEnvVar == "" || name != row.TokenEnvVar {
-				continue
-			}
-			if v := os.Getenv(row.BoxTokenEnvVar); v != "" {
-				return v
-			}
-			break
-		}
-		return next(num, name)
-	}
-}
-
 // retryPolicy builds the transient-retry tuning once, so dispatchConfig,
 // settleConfig, and wavesConfig share one value instead of each converting the
 // same three ints (issue #2928).
@@ -830,7 +783,7 @@ func dispatchConfig(c config, pwd string, it forge.IssueTracker, lw *localloop.W
 	reader := issueReader(c, it, os.Stderr)
 	return dispatch.Config{
 		BoxEnvVars: c.boxEnvVars,
-		ResolveEnv: boxTokenResolver(hostGitConfigResolver(c, localBaseBranchResolver(c, it, lw, cf, caps))),
+		ResolveEnv: hostGitConfigResolver(c, localBaseBranchResolver(c, it, lw, cf, caps)),
 		// The explicit flag only, not resolvedKnob (issue #3171): these two carry only
 		// what the operator set at dispatch time. The document/schema-default
 		// chain must stay out, since those values already reached the baked
@@ -841,7 +794,6 @@ func dispatchConfig(c config, pwd string, it forge.IssueTracker, lw *localloop.W
 		SelfContained:            c.selfContained,
 		ForgeDescriptor:          caps.ForgeDescriptor,
 		TrackerDescriptor:        caps.TrackerDescriptor,
-		BoxForgeAndIssueAccess:   c.effectiveBoxForgeAndIssueAccess(),
 		TrackerAxisRead:          trackerAxisRead,
 		TrackerAxisWrite:         trackerAxisWrite,
 		TrackerAxisFiler:         trackerAxisFiler,
@@ -1067,15 +1019,13 @@ func newLaunchGateConfigError(format string, args ...any) error {
 	return &launchGateConfigError{msg: fmt.Sprintf(format, args...)}
 }
 
-// checkReadOnlyCapabilityGate enforces BOX_FORGE_AND_ISSUE_ACCESS=read-only's
-// requirement (issue #1916): the Box may be denied a write token only when the
-// Launcher can perform every write it would otherwise make, on both axes.
+// checkReadOnlyCapabilityGate enforces the host-mediated Box's requirement
+// (issue #1916): every Box is denied the write token, so the selected forge
+// and tracker must each support host mediation, i.e. the Launcher can perform
+// every write the Box would otherwise make.
 // mkHarness's readOnlyCapabilityOk assert (issue #2526) already proves this at
 // build time, so this gate only backstops a runtime override of those knobs.
 func checkReadOnlyCapabilityGate(c config) error {
-	if c.BoxForgeAndIssueAccess != "read-only" {
-		return nil
-	}
 	forgeRow, ok := backendkit.ByName(c.CodeForge)
 	if !ok {
 		return newLaunchGateConfigError("BOX_FORGE_AND_ISSUE_ACCESS=read-only: CODE_FORGE=%q is not a registered backend", c.CodeForge)

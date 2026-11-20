@@ -8,7 +8,6 @@ import (
 
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/inputdoc"
 )
 
 // TestRunDoctor_HealthyReport_Golden pins the full, in-order text runDoctor
@@ -23,8 +22,8 @@ import (
 //     "advisory: RUNTIME not set — skipping runtime check" line
 //     doctor.Run emits (cmd/launcher/internal/doctor/doctor.go) rather than a
 //     PATH-dependent "ok: runtime ... found on PATH" one.
-//   - c.BoxForgeAndIssueAccess stays "read-write" (minimalValidConfig's
-//     default), so runDoctor prints the fixed deprecation notice.
+//   - c.BoxForgeAndIssueAccess stays "read-only" (minimalValidConfig's
+//     default), so the report carries no Box token row.
 //   - f.Labels carries every triage and advisory-tier label name
 //     (doctor.AdvisoryLabelNames) the doctor.Run label check enumerates, so
 //     every label row reads "ok:" and the run ends on the single all-present
@@ -98,22 +97,18 @@ func assertDoctorGolden(t *testing.T, f *forge.Fake, c config, goldenPath string
 	}
 }
 
-// TestRunDoctor_HealthyReport_Quiet_PrintsOnlyTheDeprecationNotice is the golden
-// test's quiet sibling (issue #3777): the identical all-green fixture through a
-// quiet Reporter prints only the read-write deprecation Passthrough (issue
-// #6899), since every other row is an ok: success row.
-func TestRunDoctor_HealthyReport_Quiet_PrintsOnlyTheDeprecationNotice(t *testing.T) {
+// TestRunDoctor_HealthyReport_Quiet_PrintsNothing is the golden test's quiet
+// sibling (issue #3777): the identical all-green fixture through a quiet
+// Reporter prints nothing, since every row is an ok: success row.
+func TestRunDoctor_HealthyReport_Quiet_PrintsNothing(t *testing.T) {
 	f, c := healthyGoldenFixture()
 
 	var buf bytes.Buffer
 	if err := runDoctor(f, f, c, doctor.NewReporter(&buf, false), &buf, strings.NewReader(""), false, nil); err != nil {
 		t.Fatalf("runDoctor() unexpected error: %v", err)
 	}
-
-	// The read-write deprecation notice is a Passthrough, so it survives the
-	// quiet reporter: a healthy read-write doctor prints exactly that line.
-	if got, want := buf.String(), inputdoc.BoxAccessReadWriteNotice+"\n"; got != want {
-		t.Errorf("runDoctor() quiet output = %q, want only the deprecation notice %q", got, want)
+	if got := buf.String(); got != "" {
+		t.Errorf("runDoctor() quiet output = %q, want none", got)
 	}
 }
 

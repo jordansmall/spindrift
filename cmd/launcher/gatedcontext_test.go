@@ -316,11 +316,9 @@ func TestNewGatedContext_BwrapGatesRunAfterCapabilityAndNetworkModeGates(t *test
 
 // This is the only test that trips the registry's network-mode-runtime entry:
 // deleting that entry from gateRegistry left every other test here and in
-// launchgates_test.go green. BOX_FORGE_AND_ISSUE_ACCESS is set explicitly to
-// read-write, not left unset, because a dogfood Box's ambient environment
-// carries read-only (ADR 0018, issue #470) and would trip an earlier gate.
+// launchgates_test.go green.
 func TestNewGatedContext_FailingNetworkModeRuntimeGate_SurfacesGateError(t *testing.T) {
-	setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-write")
+	setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 	setKnob(t, "REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "ghp_test")
 	setKnob(t, "GIT_USER_NAME", "bot")

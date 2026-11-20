@@ -50,7 +50,7 @@ func withExtraStrategies(t *testing.T, extra ...backendkit.Strategy) {
 // TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges pins issue #2267
 // acceptance criterion #5: a new backend needs only a row plus an adapter
 // package. It registers a fake Strategy and drives validate(),
-// newIssueTracker(), newCodeForge(), boxTokenResolver(), and runDoctor()'s hint
+// newIssueTracker(), newCodeForge(), and runDoctor()'s hint
 // lookup, none of which knows the new backend exists.
 func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 	withExtraStrategies(t, fakeGitlabRow())
@@ -81,14 +81,6 @@ func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 	cf := mustNewCodeForge(t, c, forge.SanitizedParent{}, it)
 	if _, ok := cf.(*forge.Fake); !ok {
 		t.Fatalf("newCodeForge(gitlab) returned %T, want *forge.Fake (the row's constructor)", cf)
-	}
-
-	t.Setenv("BOX_GITLAB_TOKEN", "box-gitlab-tok")
-	resolved := boxTokenResolver(func(num, name string) string {
-		return "unresolved-fallthrough"
-	})("42", "GITLAB_TOKEN")
-	if resolved != "box-gitlab-tok" {
-		t.Errorf("boxTokenResolver resolved GITLAB_TOKEN = %q, want %q", resolved, "box-gitlab-tok")
 	}
 
 	// This backendkit.ByName call is the lookup runDoctor uses for its hints.

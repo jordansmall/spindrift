@@ -819,7 +819,6 @@ rec {
         (field "settle" "Settle" "enum")
         (field "adviseOnly" "AdviseOnly" "flag")
         (field "completeBanner" "CompleteBanner" "str")
-        (field "readOnlyBox" "ReadOnlyBox" "flag")
         (field "daemonPriority" "DaemonPriority" "enum")
         (field "demandSource" "DemandSource" "enum")
         (field "findingLabel" "FindingLabel" "str")
@@ -1863,6 +1862,19 @@ rec {
           ", Choices: []string{${builtins.concatStringsSep ", " (map (c: "\"${c}\"") e.choices)}}"
         else
           "";
+      # A choice the schema removed, with its migration message, so a Go guard
+      # can reject the value by name instead of the generic invalid-choice error
+      # (issue #6901).
+      flagRemovedChoices =
+        e:
+        if e ? removedChoices && e.removedChoices != { } then
+          ", RemovedChoices: map[string]string{${
+            builtins.concatStringsSep ", " (
+              mapAttrsToList (v: msg: "${builtins.toJSON v}: ${builtins.toJSON msg}") e.removedChoices
+            )
+          }}"
+        else
+          "";
       # The knob's placed flake path (Driver-valued knobs land under
       # agents.drivers.<name>). Since ADR 0037 Pass 1 the settings path is that
       # path. Empty for a knob with no flake-settings surface.
@@ -1892,7 +1904,7 @@ rec {
           concatStrings (
             mapAttrsToList (
               key: e:
-              "\t{Env: \"${e.env}\", Flag: \"${flagName e}\", Group: \"${e.group}\"${flagAlias e}${flagDeprecatedAlias e}, Kind: \"${flagKind e}\", Doc: \"${e.doc}\", Dflt: \"${flagDflt e}\", SettingsPath: \"${flagSettingsPath key e}\"${flagLauncherIgnores e}${flagEmptyDisables e}${flagBoxHostDerived e}${flagHostGitConfigKey e}${flagChoices e}},\n"
+              "\t{Env: \"${e.env}\", Flag: \"${flagName e}\", Group: \"${e.group}\"${flagAlias e}${flagDeprecatedAlias e}, Kind: \"${flagKind e}\", Doc: \"${e.doc}\", Dflt: \"${flagDflt e}\", SettingsPath: \"${flagSettingsPath key e}\"${flagLauncherIgnores e}${flagEmptyDisables e}${flagBoxHostDerived e}${flagHostGitConfigKey e}${flagChoices e}${flagRemovedChoices e}},\n"
             ) nonSecretSchema
           );
       secretRows = concatStrings (

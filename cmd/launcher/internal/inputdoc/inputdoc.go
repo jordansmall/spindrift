@@ -190,26 +190,21 @@ const DriverWarnedEnv = "SPINDRIFT_DRIVER_WARNED"
 // exemption for a non-knob read.
 func DriverWarned() string { return os.Getenv(DriverWarnedEnv) }
 
-// BoxAccessNoticeDecidedEnv names the marker env var a daemon sets on its
-// children and doctor preflight: it already decided the
-// BOX_FORGE_AND_ISSUE_ACCESS=read-write deprecation notice for its kinds,
-// printing it or deliberately withholding it (a butler-only daemon), so none of
-// them repeats it (issue #6891).
-const BoxAccessNoticeDecidedEnv = "SPINDRIFT_BOX_ACCESS_NOTICE_DECIDED"
+// ForgeCredentialNoticeDecidedEnv names the marker env var a daemon sets on its
+// children and doctor preflight: it already decided the BOX_FORGE_CREDENTIAL
+// deprecation notice (issue #6900), printing it, so none of them repeats it
+// (issue #6891). The env value predates the notice: it first marked the
+// removed read-write notice.
+const ForgeCredentialNoticeDecidedEnv = "SPINDRIFT_BOX_ACCESS_NOTICE_DECIDED"
 
-// BoxAccessNoticeDecided reads the BoxAccessNoticeDecidedEnv marker here for
-// the same reason as DriverWarned.
-func BoxAccessNoticeDecided() bool { return os.Getenv(BoxAccessNoticeDecidedEnv) != "" }
-
-// BoxAccessReadWriteNotice is the run-time deprecation notice for an effective
-// BOX_FORGE_AND_ISSUE_ACCESS=read-write (issue #6757); lib/mkHarness.nix's
-// boxAccessWarnings carries the same text for the build.
-const BoxAccessReadWriteNotice = "spindrift: BOX_FORGE_AND_ISSUE_ACCESS=read-write is deprecated and will be removed in a later minor release (issue #6757). The default is now read-only, where the launcher host-mediates every Box write. To move, set perSystem.spindrift.forge.boxAccess = \"read-only\" (or defaults.boxForgeAndIssueAccess), or unset it; see MIGRATING.md, \"The Box's forge access defaults to read-only (issue #6899)\"."
+// ForgeCredentialNoticeDecided reads the ForgeCredentialNoticeDecidedEnv
+// marker here for the same reason as DriverWarned.
+func ForgeCredentialNoticeDecided() bool { return os.Getenv(ForgeCredentialNoticeDecidedEnv) != "" }
 
 // BoxForgeCredentialNotice is the run-time deprecation notice for a set
 // BOX_FORGE_CREDENTIAL (issue #6900); lib/mkHarness.nix's
 // boxForgeCredentialWarnings carries the same text for the build.
-const BoxForgeCredentialNotice = "spindrift: BOX_FORGE_CREDENTIAL is deprecated and has no effect, and will be removed in a later minor release (issue #6902). Every read-only Box now holds no forge credential (issue #6900), whatever its value, and a read-write Box always receives its token. Unset forge.boxForgeCredential (defaults.boxForgeCredential) and drop --box-forge-credential."
+const BoxForgeCredentialNotice = "spindrift: BOX_FORGE_CREDENTIAL is deprecated and has no effect, and will be removed in a later minor release (issue #6902). Every Box holds no forge credential (issue #6900), whatever its value. Unset forge.boxForgeCredential (defaults.boxForgeCredential) and drop --box-forge-credential."
 
 // DriverMarker is the DriverWarnedEnv value for an (ambient, baked) pair. It
 // names both so a child baking a different Driver than the daemon still warns.

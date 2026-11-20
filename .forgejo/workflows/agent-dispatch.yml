@@ -95,7 +95,6 @@ jobs:
             --tracker forgejo \
             --forge-backend forgejo \
             --forgejo-base-url "$FORGEJO_URL" \
-            --box-forge-and-issue-access read-write \
             --issue-number "${{ github.event.issue.number }}" \
             --label agent-in-progress \
             --max-jobs 1 \
