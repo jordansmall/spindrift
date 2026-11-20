@@ -680,7 +680,8 @@ in
           {
             systems = [ system ];
             imports = [ ../../lib/flakeModule.nix ];
-            perSystem.spindrift = spindrift // {
+            # Recursive, so a removed knob under infra is not shadowed by it.
+            perSystem.spindrift = pkgs.lib.recursiveUpdate spindrift {
               infra.image.packages = p: [ p.hello ];
             };
           };
@@ -736,7 +737,9 @@ in
         key: row:
         let
           nested = pkgs.lib.setAttrByPath row.flakePath true;
-          legacy = {
+          # A knob that was legacySettingsExempt never had a settings alias.
+          hasLegacy = row ? legacySection;
+          legacy = pkgs.lib.optionalAttrs hasLegacy {
             settings.${row.legacySection}.${key} = true;
           };
           reason = builtins.match "${row.env} was removed: (.*); delete the setting" row.message;
@@ -753,11 +756,14 @@ in
         assert assertMsg (declares row.flakePath)
           "lib/flakeModule.nix must declare the hidden removed-knob option perSystem.spindrift.${pathOf row}, or setting it fails with a generic \"option does not exist\"";
         assert assertMsg
-          (declares [
-            "settings"
-            row.legacySection
-            key
-          ])
+          (
+            !hasLegacy
+            || declares [
+              "settings"
+              row.legacySection
+              key
+            ]
+          )
           "lib/flakeModule.nix must declare the hidden removed-knob option perSystem.spindrift.settings.${row.legacySection}.${key}, or setting it fails with a generic \"option does not exist\"";
         assert assertMsg (
           !(schema ? ${key})
@@ -768,7 +774,7 @@ in
         assert assertMsg (
           !(evaluates (consumerWith nested))
         ) "setting perSystem.spindrift.${pathOf row} must fail eval (${key} was removed)";
-        assert assertMsg (!(evaluates (consumerWith legacy)))
+        assert assertMsg (!hasLegacy || !(evaluates (consumerWith legacy)))
           "setting perSystem.spindrift.settings.${row.legacySection}.${key} must fail eval (${key} was removed)";
         assert assertMsg (mkHarnessEvaluates { }) "control: mkHarness with no defaults must evaluate";
         assert assertMsg (

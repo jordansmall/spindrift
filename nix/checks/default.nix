@@ -219,7 +219,6 @@ let
     "connector-driver-rows-shadow-reaches-box-only"
     "connector-driver-rows-shadow-only-for-selected-driver"
     "connector-driver-rows-dogfood-shadows"
-    "connector-driver-rows-dogfood-sandbox"
     "connector-driver-rows-first-party-mark"
     "connector-driver-rows-primary-driver"
     "connector-driver-rows-claude-row-always-rendered"

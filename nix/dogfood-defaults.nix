@@ -108,9 +108,6 @@ in
     model = "claude-opus-5-5";
     effort = "high";
     mergeMode = "immediate";
-    # Issue #7020: the dogfood runs the Connector sandbox on real traffic
-    # before it becomes mandatory; the shipped default stays off.
-    connectorSandbox = true;
     # Behaviour-changing files merge by hand whatever their origin (ADR 0062,
     # issue #4949). Setting the knob replaces the shipped default, so it is
     # restated here; the shipped default itself stays unchanged.

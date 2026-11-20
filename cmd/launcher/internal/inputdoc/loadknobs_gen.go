@@ -34,7 +34,6 @@ func LoadKnobs(src KnobSource) Knobs {
 		ClaudeOAuthToken:          src.Secret("CLAUDE_CODE_OAUTH_TOKEN"),
 		CodeForge:                 src.String("CODE_FORGE"),
 		CompleteLabel:             src.String("COMPLETE_LABEL"),
-		ConnectorSandbox:          src.String("CONNECTOR_SANDBOX") != "",
 		ContinuousDispatch:        src.String("CONTINUOUS_DISPATCH") != "",
 		DaemonApp:                 src.String("DAEMON_APP"),
 		DaemonAwakeWindow:         src.String("DAEMON_AWAKE_WINDOW"),

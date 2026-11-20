@@ -171,7 +171,6 @@
               infra.image.extraClosures = dogfoodDefaults.extraClosures;
               infra.nix.storeWritable = dogfoodDefaults.nixStoreWritable;
               infra.limits.memory = dogfoodDefaults.defaults.memoryLimit;
-              infra.connector.sandbox = dogfoodDefaults.defaults.connectorSandbox;
               agents.skills = dogfoodSkills;
               forge.repoSlug = dogfoodDefaults.defaults.repoSlug;
               git.merge.policy = dogfoodDefaults.defaults.mergeMode;

@@ -32,7 +32,6 @@ type Knobs struct {
 	ClaudeOAuthToken          string
 	CodeForge                 string
 	CompleteLabel             string
-	ConnectorSandbox          bool
 	ContinuousDispatch        bool
 	DaemonApp                 string
 	DaemonAwakeWindow         string
