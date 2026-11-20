@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -3818,4 +3820,59 @@ func TestRunQuickstart_FinishLine_NoConnectorSandboxDefersDoctor(t *testing.T) {
 	if !strings.Contains(out.String(), "Quickstart complete.") {
 		t.Errorf("wizard did not complete:\n%s", out.String())
 	}
+}
+
+// Forgejo's Code Forge loads its Connector eagerly, so without a sandbox the
+// wizard must not even call the forge builder, let alone fail on it.
+func TestRunQuickstart_FinishLine_NoConnectorSandboxDefersForgejoWithoutBuildingForge(t *testing.T) {
+	defer connectorsandbox.Use(nil)()
+	// The token probe builds the tracker alone, over http.DefaultClient.
+	prev := http.DefaultTransport
+	http.DefaultTransport = repoProbeTransport{}
+	defer func() { http.DefaultTransport = prev }()
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{
+		remoteURL: "https://git.example.com/team/proj.git",
+		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
+		runtimes:  map[string]bool{"podman": true},
+	}
+	stdin := strings.NewReader(strings.Join([]string{
+		"forgejo",           // backend
+		"",                  // repoSlug default team/proj
+		"",                  // runtime default podman
+		"Ada Lovelace",      // git user name
+		"ada@example.com",   // git user email
+		"forgejo-faketoken", // Forgejo token
+	}, "\n") + "\n")
+	runner := &fakeCommandRunner{}
+	builder := func(backendkit.Strategy, backendkit.Shared, backendkit.Lookup) (forge.IssueTracker, forge.CodeForge, error) {
+		t.Error("forge builder called without a Connector sandbox")
+		return nil, nil, connectorsandbox.ErrNoConnectorSandbox
+	}
+
+	if err := runQuickstart(dir, env, runner, builder, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+	if !strings.Contains(out.String(), "finish-line checks need the Connector sandbox") {
+		t.Errorf("transcript missing the deferral notice:\n%s", out.String())
+	}
+	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != strings.Join(spindriftBuildArgs, " ") {
+		t.Errorf("want the build to run, got: %v", runner.calls)
+	}
+	if !strings.Contains(out.String(), "Quickstart complete.") {
+		t.Errorf("wizard did not complete:\n%s", out.String())
+	}
+}
+
+// repoProbeTransport answers every request with a Forgejo repository body.
+type repoProbeTransport struct{}
+
+func (repoProbeTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"full_name":"team/proj"}`)),
+		Request:    r,
+	}, nil
 }

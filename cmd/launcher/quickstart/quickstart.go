@@ -249,16 +249,27 @@ func postWriteFailure(step postWriteStep, written []string, insideGitWorkTree bo
 // Injected so tests substitute a forge.Fake instead of reaching a live API.
 type ForgeBuilder func(s backendkit.Strategy, sh backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, forge.CodeForge, error)
 
+// buildTracker builds the backend's issue tracker alone. The deferred token
+// probe calls it directly because it cannot build a Connector-routed Code
+// Forge.
+func buildTracker(s backendkit.Strategy, sh backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, error) {
+	if s.NewIssueTracker == nil {
+		return nil, fmt.Errorf("backend %q cannot build an issue tracker", s.Name)
+	}
+	it, err := s.NewIssueTracker(sh, l)
+	if err != nil {
+		return nil, fmt.Errorf("build %s issue tracker: %w", s.Name, err)
+	}
+	return it, nil
+}
+
 // buildForge is the production ForgeBuilder. The Code Forge is the chosen
 // backend itself when it declares the forge axis, else defaultCodeForge (ADR
 // 0027: Quickstart never prompts for it).
 func buildForge(s backendkit.Strategy, sh backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, forge.CodeForge, error) {
-	if s.NewIssueTracker == nil {
-		return nil, nil, fmt.Errorf("backend %q cannot build an issue tracker", s.Name)
-	}
-	it, err := s.NewIssueTracker(sh, l)
+	it, err := buildTracker(s, sh, l)
 	if err != nil {
-		return nil, nil, fmt.Errorf("build %s issue tracker: %w", s.Name, err)
+		return nil, nil, err
 	}
 	cs := s
 	if forgeName := effectiveForge(s); forgeName != s.Name {
@@ -449,6 +460,13 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		return fmt.Errorf("backend %q declares no AcquireToken hook, so quickstart cannot set up its token", strategy.Name)
 	}
 	shared := quickstartShared(repoSlug, gitUserName, gitUserEmail)
+	// Quickstart installs no Connector sandbox, so a backend whose tracker or
+	// Code Forge reads through a Connector cannot build both here: the token
+	// probe builds the tracker alone and the finish-line checks run under
+	// `spindrift doctor`. The false arguments mean "not primary".
+	deferChecks := !connectorsandbox.Installed() &&
+		(backendkit.TrackerReadsThroughConnector(strategy.Name, false) ||
+			backendkit.ForgeReadsThroughConnector(effectiveForge(strategy), false))
 	token, err := strategy.AcquireToken(
 		shared,
 		knobLookup(knobs, "", ""),
@@ -459,7 +477,13 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 			PromptMasked: promptMasked,
 			AmbientToken: env.GHAuthToken,
 			Probe: func(token string) error {
-				it, _, err := forgeBuilder(strategy, shared, knobLookup(knobs, strategy.TokenEnvVar, token))
+				var it forge.IssueTracker
+				var err error
+				if deferChecks {
+					it, err = buildTracker(strategy, shared, knobLookup(knobs, strategy.TokenEnvVar, token))
+				} else {
+					it, _, err = forgeBuilder(strategy, shared, knobLookup(knobs, strategy.TokenEnvVar, token))
+				}
 				if err != nil {
 					return err
 				}
@@ -557,35 +581,35 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		fmt.Fprintln(w, gitAddReminder)
 	}
 
-	it, cf, err := forgeBuilder(strategy, shared, knobLookup(knobs, strategy.TokenEnvVar, token))
-	if err != nil {
-		return postWriteFailure(doctorPostWriteStep, written, insideGitWorkTree, err)
-	}
-	tokenHint, slugHint, noLabelRegistry := doctorHints(choice.name)
-	// launcherchecks carries no runtime row: doctor.Config.Runtime below
-	// reports runtime validity.
-	launcherRows := launcherchecks.All(quickstartCheckConfig(a, quickstartForge(choice.name)), quickstartCheckDeps(a))
-	// Verbose: quickstart's finish line always reports in full, whatever
-	// `spindrift doctor`'s own quiet default does (issue #3777).
-	rep := doctor.NewReporter(w, true)
-	// Quickstart installs no Connector sandbox, so a Connector-routed backend's
-	// checks cannot load their Connector here; they run under `spindrift doctor`.
-	if strategy.ConnectorRouted && !connectorsandbox.Installed() {
+	if deferChecks {
 		fmt.Fprintln(w, "the finish-line checks need the Connector sandbox, which quickstart does not run — deferred to `spindrift doctor`.")
-	} else if err := doctor.Run(it, cf, doctor.Config{
-		IssueTracker:    choice.name,
-		TokenHint:       tokenHint,
-		SlugHint:        slugHint,
-		NoLabelRegistry: noLabelRegistry,
-		Label:           defaultDispatchLabels.Dispatchable,
-		InProgressLabel: defaultDispatchLabels.InProgress,
-		FailedLabel:     defaultDispatchLabels.Failed,
-		CompleteLabel:   defaultDispatchLabels.Complete,
-		Runtime:         runtime,
-		MergePolicy:     defaultMergePolicy,
-		BaseBranch:      defaultBaseBranch,
-	}, rep, scanner, interactive, launcherRows); err != nil {
-		return postWriteFailure(doctorPostWriteStep, written, insideGitWorkTree, err)
+	} else {
+		it, cf, err := forgeBuilder(strategy, shared, knobLookup(knobs, strategy.TokenEnvVar, token))
+		if err != nil {
+			return postWriteFailure(doctorPostWriteStep, written, insideGitWorkTree, err)
+		}
+		tokenHint, slugHint, noLabelRegistry := doctorHints(choice.name)
+		// launcherchecks carries no runtime row: doctor.Config.Runtime below
+		// reports runtime validity.
+		launcherRows := launcherchecks.All(quickstartCheckConfig(a, quickstartForge(choice.name)), quickstartCheckDeps(a))
+		// Verbose: quickstart's finish line always reports in full, whatever
+		// `spindrift doctor`'s own quiet default does (issue #3777).
+		rep := doctor.NewReporter(w, true)
+		if err := doctor.Run(it, cf, doctor.Config{
+			IssueTracker:    choice.name,
+			TokenHint:       tokenHint,
+			SlugHint:        slugHint,
+			NoLabelRegistry: noLabelRegistry,
+			Label:           defaultDispatchLabels.Dispatchable,
+			InProgressLabel: defaultDispatchLabels.InProgress,
+			FailedLabel:     defaultDispatchLabels.Failed,
+			CompleteLabel:   defaultDispatchLabels.Complete,
+			Runtime:         runtime,
+			MergePolicy:     defaultMergePolicy,
+			BaseBranch:      defaultBaseBranch,
+		}, rep, scanner, interactive, launcherRows); err != nil {
+			return postWriteFailure(doctorPostWriteStep, written, insideGitWorkTree, err)
+		}
 	}
 
 	fmt.Fprintln(w, "==> the first image build can take a while — building now")
