@@ -1042,9 +1042,11 @@ driverGoTests
   # capability-probe guard, which needs package main's files, and the
   # host-profile advisory guard, which needs package main's route-resolution
   # file, and the seamtest guard that no package outside the Drivers builds a
-  # native Strategy; the whole tree is copied, so a Driver edit reruns this. It
-  # also gofmts and vets those packages (not the adapters', which their own
-  # go-test does), so launcher-go-fmt and launcher-go-vet need not see them.
+  # native Strategy and that no production main reaches an in-process Connector
+  # load outside its allowlist; the whole tree is copied, so a Driver edit
+  # reruns this. It also gofmts and vets those packages (not the adapters',
+  # which their own go-test does), so launcher-go-fmt and launcher-go-vet need
+  # not see them.
   # Each full-tree guard must run and print its PASS line: go test exits 0 with
   # "[no tests to run]" when -run matches nothing (a renamed guard).
   launcher-binaries-go-test =
@@ -1094,6 +1096,7 @@ driverGoTests
         SPINDRIFT_PROBE_GUARD_FULL_TREE=1 guard ./internal/forge TestNoCapabilityProbeOutsideResolver
         SPINDRIFT_HOSTPROFILE_GUARD_FULL_TREE=1 guard ./internal/hostprofile TestAdvisoryBoundaryHoldsOnRealTree
         guard ./internal/seamtest TestNoNativeStrategyOutsideDrivers
+        SPINDRIFT_ENGINE_GUARD_FULL_TREE=1 guard ./internal/seamtest TestNoProductionBinaryLoadsAConnectorInProcess
         guard ./quickstart TestQuickstartProbe_GoesThroughTheConnectorWithTheWizardsToken
         touch $out
       '';
