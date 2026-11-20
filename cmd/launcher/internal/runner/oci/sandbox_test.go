@@ -8,7 +8,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -285,5 +287,37 @@ func TestStartConnectorSandbox_GenuineNixFailureSkipsContainerBuild(t *testing.T
 		if argv := runnertest.ReadCall(t, dir, i); argv[0] != "image" {
 			t.Errorf("runtime call %v after a genuine nix failure, want image inspects only", argv)
 		}
+	}
+}
+
+// A terminal Ctrl-C signals the Launcher's foreground process group; the
+// sandbox client must sit in its own so it outlives that signal until the
+// Launcher's own cleanup stops it (issue #7302).
+func TestStartConnectorSandbox_OwnProcessGroup(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	script, _ := runnertest.NewFakeCLIBySubcommand(t, map[string]runnertest.Call{
+		"image": {},
+		"run":   {Shell: fmt.Sprintf("echo $$ > %[1]s.tmp; mv %[1]s.tmp %[1]s; exec cat", pidFile)},
+	})
+	sb, err := sandboxAdapter(t, script).StartConnectorSandbox(runner.ConnectorSandboxPrefix + "pgrp")
+	if err != nil {
+		t.Fatalf("StartConnectorSandbox: %v", err)
+	}
+	t.Cleanup(func() { _ = sb.Stdin.Close(); _ = sb.Wait() })
+
+	var pid int
+	for deadline := time.Now().Add(10 * time.Second); pid == 0 && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		b, _ := os.ReadFile(pidFile)
+		pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+	}
+	if pid == 0 {
+		t.Fatal("sandbox client never reported its pid")
+	}
+	pgid, err := syscall.Getpgid(pid)
+	if err != nil {
+		t.Fatalf("Getpgid(%d): %v", pid, err)
+	}
+	if pgid == syscall.Getpgrp() {
+		t.Errorf("sandbox client pgid %d is the Launcher's own; Ctrl-C would reach it before settle", pgid)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"spindrift.dev/launcher/internal/freshness"
@@ -604,6 +605,9 @@ func (a *ociAdapter) StartConnectorSandbox(name string) (runner.ConnectorSandbox
 		return runner.ConnectorSandbox{}, err
 	}
 	cmd := exec.Command(a.cli, a.buildSandboxArgs(name)...)
+	// Own process group: a terminal Ctrl-C must not reach the sandbox before
+	// settle (issue #7302).
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return runner.ConnectorSandbox{}, err

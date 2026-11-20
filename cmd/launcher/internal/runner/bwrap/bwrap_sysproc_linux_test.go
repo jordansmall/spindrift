@@ -158,3 +158,31 @@ func TestBwrapRun_NoCgroupDirStartsOnceWithoutCgroupFD(t *testing.T) {
 		t.Errorf("SysProcAttr = %+v, want Pdeathsig SIGKILL and no UseCgroupFD", p)
 	}
 }
+
+// A terminal Ctrl-C signals the Launcher's foreground process group; the
+// Connector sandbox's bwrap must sit in its own so it outlives that signal
+// until the Launcher's own cleanup stops it (issue #7302). Pdeathsig must
+// survive the change.
+func TestStartConnectorSandbox_OwnProcessGroup(t *testing.T) {
+	var cmd *exec.Cmd
+	a, _ := startableSandbox(t, func([]string) *exec.Cmd {
+		cmd = exec.Command("cat")
+		return cmd
+	})
+	sb, err := a.StartConnectorSandbox(runner.ConnectorSandboxPrefix + "pgrp")
+	if err != nil {
+		t.Fatalf("StartConnectorSandbox: %v", err)
+	}
+	t.Cleanup(func() { _ = sb.Stdin.Close(); _ = sb.Wait() })
+
+	pgid, err := syscall.Getpgid(cmd.Process.Pid)
+	if err != nil {
+		t.Fatalf("Getpgid(%d): %v", cmd.Process.Pid, err)
+	}
+	if pgid == syscall.Getpgrp() {
+		t.Errorf("sandbox pgid %d is the Launcher's own; Ctrl-C would reach it before settle", pgid)
+	}
+	if cmd.SysProcAttr.Pdeathsig != syscall.SIGKILL {
+		t.Errorf("SysProcAttr = %+v, want Pdeathsig kept", cmd.SysProcAttr)
+	}
+}
