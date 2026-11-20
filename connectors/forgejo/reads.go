@@ -41,7 +41,12 @@ func call(method, api, path string, body []byte, out any) error {
 	if out == nil {
 		return nil
 	}
-	if err := json.Unmarshal(resp.Body, out); err != nil {
+	return decode(method, path, resp.Body, out)
+}
+
+// decode reads a 2xx JSON body into out.
+func decode(method, path string, body []byte, out any) error {
+	if err := json.Unmarshal(body, out); err != nil {
 		return fmt.Errorf("%s %s: decode: %w", method, path, err)
 	}
 	return nil
