@@ -1,82 +1,17 @@
 // Package github implements forge's IssueTracker, CodeForge, and PRForge
-// interfaces. Every read goes through the routed github Connector row; the
-// writes still run the gh CLI (until #6888), with GH_TOKEN from the ambient
-// environment.
+// interfaces. Every call goes through the routed github Connector row; with no
+// routed row it fails with ErrNoRoute.
 package github
 
 import (
-	"errors"
-	"fmt"
-	"os/exec"
-	"strings"
-	"unicode/utf8"
-
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/forge/gitplumbing"
 )
-
-// ghCommandErrStderrCap caps the gh stderr folded into an error message, so a
-// pathological failure cannot dump unbounded output into the logs that carry
-// it.
-const ghCommandErrStderrCap = 4096
-
-// ghCommandErrText folds an already-captured stderr string into the error, for
-// a call site that wired its own buffer to inspect gh's output before deciding
-// on a failure. Wrap that failure here or with ghCommandErr, never both, or the
-// same stderr text is reported twice.
-func ghCommandErrText(description string, err error, stderr string) error {
-	var base error
-	if msg := strings.TrimSpace(stderr); msg != "" {
-		if len(msg) > ghCommandErrStderrCap {
-			cut := ghCommandErrStderrCap
-			for cut > 0 && !utf8.RuneStart(msg[cut]) {
-				cut--
-			}
-			msg = msg[:cut] + "...(truncated)"
-		}
-		base = fmt.Errorf("%s: %w: %s", description, err, msg)
-	} else {
-		base = fmt.Errorf("%s: %w", description, err)
-	}
-	if isRateLimited(stderr) {
-		return &forge.RateLimitError{Err: base}
-	}
-	return base
-}
-
-// ghCommandErr wraps an error from cmd.Output() with gh's own stderr
-// diagnostic. It recovers that stderr from the *exec.ExitError, which
-// cmd.Output fills in only when the caller left cmd.Stderr nil. Any other
-// error, such as a missing gh binary, falls back to "description: err".
-func ghCommandErr(description string, err error) error {
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return ghCommandErrText(description, err, string(exitErr.Stderr))
-	}
-	return fmt.Errorf("%s: %w", description, err)
-}
-
-// rateLimitMarkers is GitHub's fixed rate-limit vocabulary as it appears in
-// gh's stderr.
-var rateLimitMarkers = []string{
-	"api rate limit exceeded",
-	"already exceeded",
-	"secondary rate limit",
-	"abuse detection",
-}
-
-// isRateLimited reports whether gh's stderr names the primary hourly quota or
-// the secondary/abuse-detection limit, as opposed to an auth, not-found, or
-// network failure.
-func isRateLimited(stderr string) bool {
-	return gitplumbing.MatchesAnyMarker(stderr, rateLimitMarkers)
-}
 
 type execClient struct {
 	repo          string // owner/repo slug
 	labels        forge.DispatchLabels
 	verdictLabels forge.VerdictLabels
-	mergeMethod   string // "", "merge", "squash", or "rebase"; "" behaves as "rebase" (mergeMethodFlag)
+	mergeMethod   string // "" or "rebase"; the Connector merges by rebase only (checkRoutedMergeMethod)
 	syncMethod    string // "", "rebase", or "merge"; "" behaves as "rebase"
 	userName      string // committer identity Rebase sets on its clone; empty keeps ambient git config
 	userEmail     string
@@ -93,8 +28,8 @@ func WithVerdictLabels(vl forge.VerdictLabels) ExecOption {
 	return func(e *execClient) { e.verdictLabels = vl }
 }
 
-// WithMergeMethod sets the `gh pr merge` method ("merge", "squash", or
-// "rebase") Merge and EnqueueAutoMerge use. Omitted, it stays on --rebase.
+// WithMergeMethod sets the MERGE_METHOD the Connector must honour: only
+// "rebase" or unset, which checkRoutedMergeMethod enforces.
 func WithMergeMethod(method string) ExecOption {
 	return func(e *execClient) { e.mergeMethod = method }
 }
@@ -119,7 +54,7 @@ func WithCommitIdentity(name, email string) ExecOption {
 	return func(e *execClient) { e.userName, e.userEmail = name, email }
 }
 
-// NewExecClient returns the gh-exec adapter for the given repo slug. One
+// NewExecClient returns the Connector-backed adapter for the given repo slug. One
 // instance implements IssueTracker, CodeForge, and PRForge, so a caller may
 // use it for every seam it needs or construct one per seam. labels maps
 // canonical DispatchState values to GitHub label names.

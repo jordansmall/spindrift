@@ -140,25 +140,39 @@ func TestRoutedRow_DeleteBranchRefusesTheBaseBranch(t *testing.T) {
 	}
 }
 
-// A plain non-shadow row routes the same writes through the Connector; a
-// shadow row keeps them on gh.
-func TestLandingWrites_PlainRowRoutesShadowStaysOnGh(t *testing.T) {
-	for rowName, useRow := range map[string]func(*testing.T, string){"plain": useGithubRowAt, "shadow": useGithubRowShadow} {
-		for _, tc := range routedLandingWrites {
-			t.Run(rowName+"/"+tc.name, func(t *testing.T) {
-				h, _, calls, _ := routedLogHarness(t, useRow)
-				url := tc.seed(h)
+// A shadow row has no native write left to shadow, so every landing write
+// fails with ErrNoRoute and never reaches gh.
+func TestLandingWrites_ShadowRowFailsNamed(t *testing.T) {
+	for _, tc := range routedLandingWrites {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, calls, _ := routedLogHarness(t, useGithubRowShadow)
+			url := tc.seed(h)
 
-				_ = tc.write(routedWriteClient(), url)
+			err := tc.write(routedWriteClient(), url)
 
-				if rowName == "plain" && calls() != 0 {
-					t.Errorf("%s under a plain row ran gh %d times", tc.name, calls())
-				}
-				if rowName == "shadow" && calls() == 0 {
-					t.Errorf("%s under a shadow row never reached gh", tc.name)
-				}
-			})
-		}
+			if !errors.Is(err, ErrNoRoute) {
+				t.Errorf("%s under a shadow row = %v, want ErrNoRoute", tc.name, err)
+			}
+			if n := calls(); n != 0 {
+				t.Errorf("%s under a shadow row ran gh %d times", tc.name, n)
+			}
+		})
+	}
+}
+
+// A plain non-shadow row routes the landing writes through the Connector.
+func TestLandingWrites_PlainRowRoutesThroughTheConnector(t *testing.T) {
+	for _, tc := range routedLandingWrites {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+			url := tc.seed(h)
+
+			_ = tc.write(routedWriteClient(), url)
+
+			if n := calls(); n != 0 {
+				t.Errorf("%s under a plain row ran gh %d times", tc.name, n)
+			}
+		})
 	}
 }
 

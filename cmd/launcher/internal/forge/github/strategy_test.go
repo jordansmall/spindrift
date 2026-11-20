@@ -1,6 +1,7 @@
 package github
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 )
 
@@ -27,14 +29,27 @@ func TestStrategyShape(t *testing.T) {
 	}
 }
 
-func TestStrategyLedgerIsGitRemote(t *testing.T) {
-	site, err := Strategy.NewLedger(backendkit.Shared{RepoSlug: "o/r"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	url, args := GitRemote("o/r")
-	if site.URL != url || !reflect.DeepEqual(site.GitArgs, args) {
-		t.Errorf("site = %+v, want %q %v", site, url, args)
+// With no routed row (none applied, a shadow row, or a GitHub Enterprise
+// GH_HOST) the Ledger has no remote to name: NewLedger fails with ErrNoRoute
+// rather than falling back to a gh credential-helper URL.
+func TestStrategyLedgerFailsWithNoRoute(t *testing.T) {
+	s := backendkit.Shared{RepoSlug: "o/r"}
+	for name, setup := range map[string]func(*testing.T){
+		"no row": func(t *testing.T) {
+			t.Cleanup(backendrows.Snapshot())
+			if err := backendrows.Use([]byte("[]"), func(string) string { return "" }); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("GH_HOST", "")
+		},
+		"shadow row": func(t *testing.T) { useGithubRowShadow(t, "127.0.0.1:1") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			setup(t)
+			if _, err := Strategy.NewLedger(s, nil); !errors.Is(err, ErrNoRoute) {
+				t.Errorf("NewLedger err = %v, want ErrNoRoute", err)
+			}
+		})
 	}
 }
 

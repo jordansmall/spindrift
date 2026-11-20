@@ -51,11 +51,17 @@ var smokeRuntimeSettings = map[string]string{
 // Consumer may still export; the launcher must never forward it to a runner.
 var smokeSecrets = map[string]string{"GH_TOKEN": "fake-token", "BOX_GH_TOKEN": "fake-box-token", "CLAUDE_CODE_OAUTH_TOKEN": "fake-oauth"}
 
-// smokeLocalSettings are the values a work or research run takes at run time
-// from useLocalForge, which moves the tracker and forge off the fixture's
-// github; the butler run keeps the document's. CODE_FORGE_REMOTE_URL is the
-// per-run bare remote, so only its tail is pinned.
-var smokeLocalSettings = map[string]string{"ISSUE_TRACKER": "local", "CODE_FORGE": "git"}
+// smokeLocalSettings are the values a run takes at run time from
+// useLocalForge, which moves the tracker and forge off the fixture's github.
+// A butler run needs a forge that hosts a Ledger, which the git forge does
+// not, so it takes the local forge. CODE_FORGE_REMOTE_URL is the per-run bare
+// remote, so only its tail is pinned.
+func smokeLocalSettings(kind string) map[string]string {
+	if kind == "butler" {
+		return map[string]string{"ISSUE_TRACKER": "local", "CODE_FORGE": "local"}
+	}
+	return map[string]string{"ISSUE_TRACKER": "local", "CODE_FORGE": "git"}
+}
 
 const smokeLocalRemoteTail = "/remote.git"
 
@@ -150,7 +156,7 @@ func checkRuntimeArgv(doc *inputdoc.Document, kind string, argv []string) []stri
 		if rt, ok := smokeRuntimeSettings[name]; ok {
 			want, inDoc = rt, true
 		}
-		if rt, ok := smokeLocalSettings[name]; ok && kind != "butler" {
+		if rt, ok := smokeLocalSettings(kind)[name]; ok {
 			want, inDoc = rt, true
 		}
 		switch {
@@ -186,35 +192,16 @@ func checkRuntimeArgv(doc *inputdoc.Document, kind string, argv []string) []stri
 	return bad
 }
 
-// forgeCall reports whether some recorded gh call contains want in order.
-func forgeCall(calls [][]string, want ...string) bool {
-	for _, c := range calls {
-		i := 0
-		for _, a := range c {
-			if i < len(want) && a == want[i] {
-				i++
-			}
-		}
-		if i == len(want) {
-			return true
-		}
-	}
-	return false
-}
-
 // checkForge returns what is wrong with what a dispatch of issue 7 did to
 // its tracker and forge. The work family's labels come from the document; the
 // research family's are fixed by the launcher (ADR 0022). A work or research
 // run is checked by the issue file's end state and whether the change landed,
-// since the local tracker and git forge make no gh calls; a butler run by its
-// gh calls.
+// since the local tracker and git forge make no gh calls; a butler run by the
+// issue files it filed. No kind may reach gh: the native path is gone.
 func checkForge(doc *inputdoc.Document, kind string, r smokeRun) []string {
 	var bad []string
-	calls := r.gh
-	need := func(why string, want ...string) {
-		if !forgeCall(calls, want...) {
-			bad = append(bad, fmt.Sprintf("no gh call %s: want %q", why, want))
-		}
+	if len(r.gh) > 0 {
+		bad = append(bad, fmt.Sprintf("%s run made gh calls: %q", kind, r.gh))
 	}
 	switch kind {
 	case "work":
@@ -232,11 +219,8 @@ func checkForge(doc *inputdoc.Document, kind string, r smokeRun) []string {
 			bad = append(bad, "research dispatch merged a change")
 		}
 	case "butler":
-		need("files the finding under the butler provenance label", "issue", "create", "--label", dispatchkind.Butler.FindingLabel)
-		for _, verb := range []string{"merge", "create"} {
-			if forgeCall(calls, "pr", verb) {
-				bad = append(bad, "butler sweep ran gh pr "+verb)
-			}
+		if !slices.ContainsFunc(r.filed, func(f string) bool { return strings.Contains(f, dispatchkind.Butler.FindingLabel) }) {
+			bad = append(bad, fmt.Sprintf("no filed issue carries the butler provenance label %q: %q", dispatchkind.Butler.FindingLabel, r.filed))
 		}
 	}
 	return bad
@@ -258,9 +242,9 @@ var smokeMatrix = []smokeCase{
 const smokeFinding = `{"title":"seam finding","body":"found by the seam","type":"bug"}`
 
 // seedLedgerRemote stands up a bare repo holding a main branch with one
-// commit, the clone the butler scans, and returns the env that makes git
-// treat the repo's github URL as that bare repo: the Ledger is a real git
-// remote, and nothing else in the run touches the network.
+// commit, the clone every kind seeds its mirror from, and returns the env that
+// makes git treat the repo's github URL as that bare repo, so nothing else in
+// the run touches the network.
 func seedLedgerRemote(t *testing.T) (bare string, env map[string]string) {
 	t.Helper()
 	root := t.TempDir()
@@ -310,10 +294,12 @@ func seamGit(t *testing.T, env []string, dir string, args ...string) {
 type smokeRun struct {
 	// boxRun is the Box-run argv the runtime recorded.
 	boxRun []string
-	// gh is every gh call. Only a butler run reaches gh: work and research
-	// read and land through the local tracker and git forge.
+	// gh is every gh call. Every kind runs on the local tracker and forge, so
+	// none should appear.
 	gh [][]string
-	// ledgerRefs lists the Ledger refs a butler sweep left on the remote.
+	// filed is the content of each issue file a butler run filed.
+	filed []string
+	// ledgerRefs lists the Ledger refs a butler sweep left in the Accumulation repo.
 	ledgerRefs []string
 	// issueState is issue 7's frontmatter state after a work or research run.
 	issueState string
@@ -368,6 +354,15 @@ func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (res s
 		}
 		docPath = scratchDoc(t, docPath, func(map[string]string) {})
 		useLocalForge(t, docPath, workDir, bare, []int{7}, state)
+	} else {
+		// The local forge seeds its Accumulation repo, which is also the Ledger,
+		// from the cwd's base branch, so the cwd must be a clone of the remote.
+		docPath = scratchDoc(t, docPath, func(map[string]string) {})
+		setDocSettings(t, docPath, smokeLocalSettings(c.kind))
+		gitEnv := os.Environ()
+		seamGit(t, gitEnv, "", "init", "-q", "-b", "main", workDir)
+		seamGit(t, gitEnv, workDir, "fetch", "-q", bare, "main")
+		seamGit(t, gitEnv, workDir, "update-ref", "refs/heads/main", "FETCH_HEAD")
 	}
 	overlay := c.runtime == "bwrap" && bwrapStoreOverlay(doc)
 	if overlay {
@@ -402,7 +397,6 @@ func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (res s
 		args = append(args, "--network-mode", "host")
 	}
 	var intents []string
-	var replies []seamtest.GhReply
 	var bareLedger string
 	switch c.kind {
 	case "research":
@@ -412,18 +406,15 @@ func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (res s
 		outcome = "SPINDRIFT_OUTCOME issue=butler-bugs landing=none status=ready note=seam\n"
 		intents = []string{smokeFinding}
 		args = append(args, "butler", "--chore", "bugs")
-		// The filing's URL is what the launcher records in the Ledger.
-		replies = []seamtest.GhReply{{Args: []string{"issue", "create"}, Stdout: "https://github.com/" + smokeRepo + "/issues/12\n"}}
 	default:
 		args = append(args, "dispatch")
 	}
 
 	env := seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{
-		Record:  recDir + "/gh.jsonl",
-		Replies: replies,
+		Record: recDir + "/gh.jsonl",
 	})
 	if c.kind == "butler" {
-		bareLedger = bare
+		bareLedger = filepath.Join(workDir, ".spindrift", "accum.git")
 	}
 	for k, v := range gitEnv {
 		env[k] = v
@@ -507,6 +498,16 @@ func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (res s
 		res.ledgerRefs = strings.Fields(string(out))
 	}
 	res.gh = seamtest.ReadRecord(t, recDir+"/gh.jsonl")
+	if c.kind == "butler" {
+		files, _ := filepath.Glob(filepath.Join(workDir, ".spindrift", "issues", "*.md"))
+		for _, name := range files {
+			data, err := os.ReadFile(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res.filed = append(res.filed, string(data))
+		}
+	}
 	if local {
 		data, err := os.ReadFile(filepath.Join(workDir, ".spindrift", "issues", "7.md"))
 		if err != nil {

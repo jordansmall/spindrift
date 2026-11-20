@@ -635,9 +635,9 @@ func (w failingPRWrites) MarkDraft(string) error               { return w.fail("
 
 // connectorHarness drives the compiled github Connector, through the
 // Connector host, against the scripted REST backend.
-// pf is the PRForge connectorforge.New builds over native writes the reads
-// must never reach; cf and caps are the Code Forge composed from the
-// Connector alone, whose PRForge is caps.PRForge.
+// pf is the PRForge connectorforge.New builds over writes the reads must
+// never reach (failingPRWrites fails the test); cf and caps are the Code Forge
+// composed from the Connector alone, whose PRForge is caps.PRForge.
 type connectorHarness struct {
 	t       *testing.T
 	backend *restBackend

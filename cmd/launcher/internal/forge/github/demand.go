@@ -18,7 +18,7 @@ const demandProbeInterval = 60 * time.Second
 // the conditional-request cache; fresh makes it skip the validator, forcing a
 // full read after a count the child contradicted.
 func (e *execClient) CountReady(fresh bool) (int, error) {
-	row, err := readRow()
+	row, err := routeRow()
 	if err != nil {
 		return 0, err
 	}

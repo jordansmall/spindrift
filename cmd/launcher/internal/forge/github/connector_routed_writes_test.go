@@ -141,22 +141,23 @@ func TestRoutedRow_ClaimOfAClaimedIssueIsRefused(t *testing.T) {
 	}
 }
 
-// A plain non-shadow row routes the same writes through the Connector; a
-// shadow row keeps them on gh.
-func TestTrackerWrites_PlainRowRoutesShadowStaysOnGh(t *testing.T) {
+// A plain non-shadow row routes the writes through the Connector; a shadow
+// row has no native write left to shadow, so each fails with ErrNoRoute and
+// never reaches gh.
+func TestTrackerWrites_PlainRowRoutesShadowFailsNamed(t *testing.T) {
 	for rowName, useRow := range map[string]func(*testing.T, string){"plain": useGithubRowAt, "shadow": useGithubRowShadow} {
 		for _, tc := range routedWrites {
 			t.Run(rowName+"/"+tc.name, func(t *testing.T) {
 				h, _, calls, _ := routedLogHarness(t, useRow)
 				h.SeedIssue(tc.seed)
 
-				_ = tc.write(routedWriteClient())
+				err := tc.write(routedWriteClient())
 
-				if rowName == "plain" && calls() != 0 {
-					t.Errorf("%s under a plain row ran gh %d times", tc.name, calls())
+				if n := calls(); n != 0 {
+					t.Errorf("%s under a %s row ran gh %d times", tc.name, rowName, n)
 				}
-				if rowName == "shadow" && calls() == 0 {
-					t.Errorf("%s under a shadow row never reached gh", tc.name)
+				if rowName == "shadow" && !errors.Is(err, ErrNoRoute) {
+					t.Errorf("%s under a shadow row = %v, want ErrNoRoute", tc.name, err)
 				}
 			})
 		}

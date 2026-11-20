@@ -29,9 +29,9 @@ func gitCredential(row backendrows.Row) (gitexec.Credential, error) {
 }
 
 // coreGit is the plumbing a routed row composes over the Connector's clone
-// URL: the stock git adapter, except that Rebase honours SYNC_METHOD as the
-// native path does. It keeps the validated URL and credential so core's own
-// clones (the Box's mirror, the sync) use exactly what Compose vetted.
+// URL: the stock git adapter, except that Rebase honours SYNC_METHOD. It keeps
+// the validated URL and credential so core's own clones (the Box's mirror, the
+// sync) use exactly what Compose vetted.
 type coreGit struct {
 	forge.CodeForge
 	e        *execClient
@@ -62,9 +62,8 @@ func (g *coreGit) Rebase(head string) error {
 	return g.e.syncBranch(head, base, g.clone, g.cred)
 }
 
-// seedMirror bare-clones the Connector's repository for the Box's mirror. As
-// the native seed, the pins are command-scope, so nothing persists into a repo
-// the Box mounts.
+// seedMirror bare-clones the Connector's repository for the Box's mirror. The
+// pins are command-scope, so nothing persists into a repo the Box mounts.
 func (g *coreGit) seedMirror(dir string) error {
 	args := append(gitexec.NoAutoMaintenance("-c"), "clone", "--bare", g.cloneURL, dir)
 	if out, err := runRedacted(g.cred.Apply(exec.Command("git", args...))); err != nil {
@@ -218,7 +217,7 @@ var ErrRoutedMergeMethod = errors.New("MERGE_METHOD must be rebase or unset: the
 func (e *execClient) checkRoutedMergeMethod() error { return checkRoutedMergeMethod(e.mergeMethod) }
 
 func checkRoutedMergeMethod(method string) error {
-	if mergeMethodFlag(method) != "--rebase" {
+	if method != "" && method != "rebase" {
 		return fmt.Errorf("%w (got %q)", ErrRoutedMergeMethod, method)
 	}
 	return nil

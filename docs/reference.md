@@ -2311,7 +2311,7 @@ is the fixture Connector in
   Consumer's switch on the registered row, not a second registration. With
   `shadow` on, the native Strategy or backend of the same name stays
   authoritative; github has no native read left, so a github shadow row fails
-  every read with `ErrNoReadRoute` (issue #6811). A `driver` row must name a core Driver and carry a `module`;
+  every read with `ErrNoRoute` (issue #6811). A `driver` row must name a core Driver and carry a `module`;
   the Box replays each Pass log through it and records divergences. A
   `backend` row samples every `shadowEvery`th read (default 10, minimum 1) per
   operation through its Connector instead. With `primary` on, the Connector
@@ -2538,7 +2538,7 @@ evaluation. They render into the row as `credentialScheme`, `identityEnv` and
 canonical path, leaves a non-shadow row unapplied, so core falls back to the
 native backend for it; a Connector-only backend such as jira has none, so the
 run fails naming the https requirement, and github's reads fail with
-`ErrNoReadRoute` (issue #6811). A shadow row with an unset or unusable
+`ErrNoRoute` (issue #6811). A shadow row with an unset or unusable
 base fails at load.
 
 Evaluation fails, naming the Connector and the route, on a Route table the host
@@ -2683,7 +2683,7 @@ row is registered unconditionally, so every Consumer of the root
 `spindrift.flakeModules.default` has it, and every covered read and write
 (see [Backend primary mode](#backend-primary-mode)) goes through it with no
 `gh` fallback. The native github read path is deleted (issue #6811): a read
-that finds no routed row fails with `ErrNoReadRoute` naming the cause, and
+that finds no routed row fails with `ErrNoRoute` naming the cause, and
 never falls back to `gh`. There are three such causes. A Consumer flake with no
 github row (one importing core's module directly) has none. Under a `GH_HOST`
 other than `github.com` the row is dropped, since its Routes pin
@@ -2729,7 +2729,7 @@ token's grant ride `POST /graphql`; an App installation token's grant reads `GET
 runs before any Consumer flake, bakes the github Connector into its package
 and applies it as a row whose credential is `GH_TOKEN`; a `go run` of
 quickstart bakes in nothing, so its probe and token audit fail with
-`ErrNoReadRoute`, as they do under a `GH_HOST` other than `github.com`, since
+`ErrNoRoute`, as they do under a `GH_HOST` other than `github.com`, since
 the baked Routes target `api.github.com`.
 
 #### The jira Connector
@@ -2892,7 +2892,7 @@ and its `githubConnectorToken` knob (the host-only
 root `spindrift.flakeModules.default`, shadow or not (issue #7139, which
 reverses #6912's conditional row). A shadow github row is no longer usable
 (issue #6811): with no native read path left to compare against, it fails every
-read with `ErrNoReadRoute`. A flake with no github row, one importing core's
+read with `ErrNoRoute`. A flake with no github row, one importing core's
 module directly, carries no github backend row, fails github reads the same
 way, has no such variable, and doctor prints no `connector-routes[github]` or
 `connector-routes-widened[github]` row. spindrift's own dogfood shadows the
@@ -3037,7 +3037,7 @@ count.
 A shadowed backend row (`backend` with `shadow` on) samples the backend's reads
 instead of replaying a log. It needs a native adapter to stay authoritative, so
 it serves backends that still have one (forgejo); github no longer does (issue
-#6811), and a shadow github row fails every read with `ErrNoReadRoute`. Only
+#6811), and a shadow github row fails every read with `ErrNoRoute`. Only
 `dispatch` and `research` runs shadow; the
 launcher wraps the native tracker and forge, and every `shadowEvery`th call to
 each operation, the first included, is also asked of the Connector. The shadowed
@@ -3214,7 +3214,7 @@ there is no native github read path to fall back to: a shadow row (see [Shadow
 mode](#shadow-mode)), a flake with no github row at all, and a run under a
 `GH_HOST` other than `github.com` (the Connector's Routes pin `api.github.com`,
 so the row is dropped and no connector token is fetched or sent) each fail
-every read with `ErrNoReadRoute` naming the cause, while native writes still
+every read with `ErrNoRoute` naming the cause, while native writes still
 use `gh` until #6888. The github row routes every read and, since the first two write
 switches (issues #6883 and #6885), these writes, with no `gh` fallback: the
 claim, un-claim and reclaim and the settle transitions (`TransitionState`),
@@ -11585,7 +11585,7 @@ resolves the row's host-only credential
 from the daemon's environment) when neither is set, as in the launcher. It
 does so only when an enabled kind probes the tracker; a shadow row, or a row
 for another backend, never runs its command (a shadow github row fails the
-probe with `ErrNoReadRoute`). With no source set, or a command
+probe with `ErrNoRoute`). With no source set, or a command
 that fails, the daemon refuses to start, naming the variable, its `_CMD` form,
 and `SECRET_CMD`. A command-sourced credential is re-resolved every 30
 minutes, and a failed refresh keeps the previous value and logs a line naming

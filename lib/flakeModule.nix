@@ -685,7 +685,7 @@ in
                     Connector beside the native read, which stays
                     authoritative (forgejo only: a github shadow row has no
                     native read left, so every github read fails with
-                    `ErrNoReadRoute`). A row with neither throws. mkHarness
+                    `ErrNoRoute`). A row with neither throws. mkHarness
                     throws on any other mismatch. Off by default, which
                     leaves the Consumer's outputs byte-identical.
                   '';

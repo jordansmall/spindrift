@@ -24,7 +24,7 @@ const (
 // wizard's identity probe and token scope audit go through the Connector and
 // never reach gh. With neither var set (a plain `go run`) there is no compiled
 // Connector to route through, so it applies none and the probe and audit fail
-// with ErrNoReadRoute.
+// with ErrNoRoute.
 // The wizard's token is the row's credential: runQuickstart exports it as
 // GH_TOKEN before the probe. The baked routes pin api.github.com, so under any
 // other GH_HOST it applies none either and they fail the same way.
