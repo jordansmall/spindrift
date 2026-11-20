@@ -85,3 +85,15 @@ func TestLoadsFailClosedWithNoLoaderInstalled(t *testing.T) {
 		t.Fatalf("LoadNetwork = %v, want ErrNoConnectorSandbox", err)
 	}
 }
+
+func TestInstalledReportsWhetherALoaderIsInstalled(t *testing.T) {
+	restore := Use(nil)
+	defer restore()
+	if Installed() {
+		t.Fatal("Installed() = true with no Loader")
+	}
+	defer Use(failingLoader{})()
+	if !Installed() {
+		t.Fatal("Installed() = false with a Loader")
+	}
+}

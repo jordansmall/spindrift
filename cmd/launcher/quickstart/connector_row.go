@@ -28,6 +28,9 @@ const (
 // The wizard's token is the row's credential: runQuickstart exports it as
 // GH_TOKEN before the probe. The baked routes pin api.github.com, so under any
 // other GH_HOST it applies none either and they fail the same way.
+//
+// Quickstart installs no Connector sandbox, so the audit and the finish-line
+// checks defer to `spindrift doctor` before they would load the Connector.
 func useBakedGithubRow(getenv func(string) string) error {
 	wasm, routes := getenv(connectorWasmEnv), getenv(connectorRoutesEnv)
 	if wasm == "" && routes == "" {
