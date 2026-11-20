@@ -136,13 +136,6 @@ func routedRow() (backendrows.Row, bool) {
 	return row, ok && !row.Shadow
 }
 
-// Routed reports whether the github row is configured and not shadow: the one
-// rule for whether the Connector, not gh, serves github.
-func Routed() bool {
-	_, ok := routedRow()
-	return ok
-}
-
 // notePrimary records the error a routed read or write returned and returns
 // it unchanged. A lost claim race records nothing: forge.ErrAlreadyClaimed is
 // core policy, not a Connector fault, and an empty log is what marks a clean
