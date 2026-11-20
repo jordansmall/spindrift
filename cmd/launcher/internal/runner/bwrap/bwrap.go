@@ -1836,7 +1836,8 @@ func (a *bwrapAdapter) StartConnectorSandbox(name string) (runner.ConnectorSandb
 	newCmd := func() *exec.Cmd {
 		cmd := execCommand("bwrap", args...)
 		setDeathSignal(cmd)
-		cmd.Env = []string{} // non-nil: bwrap needs none, and nil would inherit the launcher's
+		setOwnProcessGroup(cmd) // terminal Ctrl-C must not reach the sandbox before settle (issue #7302)
+		cmd.Env = []string{}    // non-nil: bwrap needs none, and nil would inherit the launcher's
 		cmd.ExtraFiles = []*os.File{filter}
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = stdinR, stdoutW, stderr
 		return cmd

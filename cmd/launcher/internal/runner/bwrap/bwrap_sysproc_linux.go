@@ -28,3 +28,12 @@ func setCgroupClone(cmd *exec.Cmd, fd int) {
 	cmd.SysProcAttr.UseCgroupFD = true
 	cmd.SysProcAttr.CgroupFD = fd
 }
+
+// setOwnProcessGroup moves cmd's process into a new process group, keeping
+// the Pdeathsig setDeathSignal set.
+func setOwnProcessGroup(cmd *exec.Cmd) {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Setpgid = true
+}

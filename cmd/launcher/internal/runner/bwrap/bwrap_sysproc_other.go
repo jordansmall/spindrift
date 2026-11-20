@@ -16,3 +16,6 @@ const cgroupCloneSupported = false
 
 // setCgroupClone is a no-op off Linux; Run never calls it there.
 func setCgroupClone(cmd *exec.Cmd, fd int) {}
+
+// setOwnProcessGroup is a no-op off Linux; bubblewrap only runs on Linux.
+func setOwnProcessGroup(cmd *exec.Cmd) {}
