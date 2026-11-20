@@ -341,9 +341,8 @@ func TestRoutedRow_GitOpsNameAnUnsetCredential(t *testing.T) {
 }
 
 // routedHostMediationHarness is the host-mediation contract's harness with the
-// Strategy's read-only Code Forge, under a plain row, as the code forge. The
-// tracker half is a forge.Fake built before routedLogHarness changes directory,
-// which the fake's first use depends on.
+// Strategy's own tracker and read-only Code Forge, under a plain row. Comments
+// land on the scripted backend, so the tracker half is under test too.
 type routedHostMediationHarness struct {
 	*composedHostMediationHarness
 	cf forge.CodeForge
@@ -353,20 +352,30 @@ type routedHostMediationHarness struct {
 func (h *routedHostMediationHarness) CodeForge() forge.CodeForge  { return h.cf }
 func (h *routedHostMediationHarness) Tracker() forge.IssueTracker { return h.tr }
 
+func (h *routedHostMediationHarness) SeedCommentTarget(failing bool) string {
+	return trackerWriteHarness{h.connectorHarness}.SeedCommentTarget(failing)
+}
+
+func (h *routedHostMediationHarness) CommentPosted(num, body string) bool {
+	return trackerWriteHarness{h.connectorHarness}.CommentPosted(num, body)
+}
+
 // The host-mediation contract holds for the production forge under a plain
 // row, with core's git doing the relay and no gh call.
 func TestPlainRow_HostMediationContract(t *testing.T) {
-	fake := forge.NewFake()
-	tr := fake.AsIssueFiler()
-	_, _ = fake.ListOpenIssues() // loads the shared fake Connector from the package directory
 	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 	base := &composedHostMediationHarness{
-		connectorHarness: h, fake: fake,
-		relayedSHA: map[string]string{}, seeded: map[string]bool{}, prSeq: 1500,
+		connectorHarness: h,
+		relayedSHA:       map[string]string{}, seeded: map[string]bool{}, prSeq: 1500,
 	}
-	cf, err := Strategy.NewReadOnlyCodeForge(backendkit.Shared{
+	s := backendkit.Shared{
 		RepoSlug: connectorRepo, Labels: testLabels, BaseBranch: "main", GitUserName: "Test Bot", GitUserEmail: "bot@example.com",
-	}, nil, forge.SanitizedParent{}, nil)
+	}
+	tr, err := Strategy.NewIssueTracker(s, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cf, err := Strategy.NewReadOnlyCodeForge(s, nil, forge.SanitizedParent{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
