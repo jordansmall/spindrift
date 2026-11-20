@@ -1,5 +1,34 @@
 # Migration Guide
 
+## The forgejo fragments ship from the forgejo Connector (issue #6867)
+
+The nine `forgejo/` prompt fragments (`filer-dedup.md`, `filer-direct-file.md`,
+`filer-direct-label.md`, `fix-ci-read.md`, `if-blocked-pr.md`,
+`issue-blocked-comment.md`, `open-pr-create.md`,
+`research-outcome-landing.md`, `research-verdict.md`) moved from
+`templates/default/prompts/fragments/forgejo/` to
+`connectors/forgejo/fragments/forgejo/`, declared by
+`connectors/forgejo/fragments.nix` and contributed through
+`spindrift.connectors.forgejo.fragments`, as jira's already are. The Box still
+reads them at `prompts/fragments/forgejo/<name>.md`, and no prompt text
+changed. A Consumer need not import the forgejo Connector's flake module for
+them: mkHarness ships the batteries flake's forgejo fragments unless the
+Consumer registers its own.
+
+What changed for a Consumer:
+
+- **A custom `forgejo/<name>.md` is now silently ignored.** A Connector's
+  declared file wins over a file at the same path in a custom fragments
+  directory (`SPINDRIFT_PROMPT_DIR`), so an override of one of the nine files
+  no longer takes effect, and nothing reports it. Fork the Connector's
+  fragment directory to change one of these steps, declaring only the files
+  you change, and register the fork as `spindrift.connectors.forgejo.fragments`
+  (with `lib.mkForce` if you import the forgejo Connector's module, which sets
+  it): each `<folder>/<fragment>` path it declares replaces the batteries
+  file, and mkHarness still ships the rest. A fork registered under another
+  name works only when the module is not imported; with it, both entries
+  declare the path and evaluation fails.
+
 ## The github Connector is the default for every Consumer (issue #7139)
 
 Every non-shadow github row now routes its covered reads and writes through the

@@ -843,13 +843,15 @@ folder's files may ship from a Connector
 (`spindrift.connectors.<name>.fragments`): evaluation fails, naming the path and
 the Connector, on a declared file for a folder not of its row's axis or on a
 missing, stray or duplicate file. A Connector's declared file wins over a
-file at the same path in a custom fragments directory. A folder with no such file renders an empty
-step, unless the row is `shared`, in which case the root-level
-`fragments/<fragment>` is read next: one body for every backend, naming the
-active one through `${FORGE_DISPLAY_NAME}`, which is the `displayName` of the
-backend's row in `lib/backends/`. A backend folder's own file still wins over
-the shared one. A fragment variable retired from the registry is listed in
-`lib/removed-fragment-vars.nix`, with a
+file at the same path in a custom fragments directory. mkHarness ships the
+batteries flake's forgejo fragments for each path the Consumer's own entries
+do not declare, so a forgejo Consumer needs no Connector module. A folder
+with no such file renders an empty step, unless the row is `shared`, in which
+case the root-level `fragments/<fragment>` is read next: one body for every
+backend, naming the active one through `${FORGE_DISPLAY_NAME}`, which is the
+`displayName` of the backend's row in `lib/backends/`. A backend folder's own
+file still wins over the shared one. A fragment variable retired from the
+registry is listed in `lib/removed-fragment-vars.nix`, with a
 `severity` of `removed` (the default; a prompt still using it fails the build
 and prompt assembly) or `deprecated` (it still renders, and warns naming its
 `replacement`, at eval time and again at run time). The per-backend variables
@@ -2293,7 +2295,8 @@ is the fixture Connector in
   caller's `pkgs` returning the build (`connectors/claude` returns
   `$out/claude.wasm`). A Connector that ships prompt fragment files also
   exports `fragments`, the `{ name; dir; shipped }` contribution its module
-  sets as `spindrift.connectors.<name>.fragments` (`connectors/jira`).
+  sets as `spindrift.connectors.<name>.fragments` (`connectors/jira`,
+  `connectors/forgejo`).
 
 - **Module.** `module.nix` is a flake-parts module. It imports
   `core.flakeModules.default` (the module system dedups by path, so a Consumer
@@ -2812,6 +2815,14 @@ host-posted-comment and issue-filer contracts, in
 is registered and not shadowed, and the table is baselined in
 `spindrift-connector-routes.json` so doctor's `connector-routes-widened[forgejo]`
 row reports it as accepted.
+
+The Connector also ships the forgejo fragment folder,
+`connectors/forgejo/fragments/forgejo/` (the nine forge and tracker steps the
+[in-Box forge CLI inventory](in-box-forge-cli.md#inventory) lists), through
+`spindrift.connectors.forgejo.fragments`. The Box reads each at
+`prompts/fragments/forgejo/<name>.md`, as before. Because a Connector's
+declared file wins over a custom fragments directory, a `forgejo/<name>.md` in
+a `SPINDRIFT_PROMPT_DIR` is ignored (see [`MIGRATING.md`](../MIGRATING.md)).
 
 The native forgejo adapter builds the Code Forge unless the Consumer sets
 `spindrift.connectors.forgejo.primary = true`. Then, in every launcher process
