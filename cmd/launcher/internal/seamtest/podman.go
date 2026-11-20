@@ -53,6 +53,11 @@ type PodmanRun struct {
 	// <base64>" line, the log-carrier grammar. Without RUN_NONCE in the run
 	// argv they are omitted: the launcher would reject them as unverified.
 	Intents []string `json:"intents"`
+	// Comment is a research verdict comment body, written between the intents
+	// and Outcome as a "SPINDRIFT_COMMENT <RUN_NONCE> <base64>" line; a Box with
+	// no in-box tracker client relays its verdict that way. Omitted without
+	// RUN_NONCE, like Intents.
+	Comment string `json:"comment"`
 	// Files maps a destination path to a prebuilt source file the run copies
 	// there, standing in for what a Box writes into its mounted outbox (a
 	// read-only Box's code-out bundle). The launcher empties the outbox before
@@ -136,7 +141,7 @@ func podmanFake(tool string, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// boxOutput is what a scripted Box run prints: its intents, then its outcome.
+// boxOutput is what a scripted Box run prints: its intents, its comment, then its outcome.
 // It also materializes run.Files, the run's other observable effect.
 func boxOutput(run PodmanRun, args []string) (string, error) {
 	if err := holdUntil(run.HoldUntil); err != nil {
@@ -151,6 +156,9 @@ func boxOutput(run PodmanRun, args []string) (string, error) {
 	if nonce, ok := runNonce(args); ok {
 		for _, raw := range run.Intents {
 			fmt.Fprintf(&b, "SPINDRIFT_ISSUE_INTENT %s %s\n", nonce, base64.StdEncoding.EncodeToString([]byte(raw)))
+		}
+		if run.Comment != "" {
+			fmt.Fprintf(&b, "SPINDRIFT_COMMENT %s %s\n", nonce, base64.StdEncoding.EncodeToString([]byte(run.Comment)))
 		}
 	}
 	b.WriteString(withNonce(run.Outcome, args))

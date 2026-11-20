@@ -32,14 +32,14 @@ import (
 const stoppedLine = "==> stopped Connector sandbox: "
 
 // sandboxExit is one way a launcher run ends with a Connector sandbox started.
-// A run is a work dispatch on the family's fake, with the github backend row
-// pointed at a fixture Connector so a Connector load, and with it the sandbox,
-// happens.
+// A run is a work dispatch on the family's fake; the sandbox starts for the
+// Driver's Connector, or for the github row's, which is why every run has one.
 type sandboxExit struct {
 	name string
-	// shadow loads the Connector lazily from a read shadow, during the run; a
-	// routed row loads it at launch, before the run starts.
-	shadow bool
+	// local runs on a local tracker and the git forge, with no github row, so
+	// the run proceeds; otherwise the github row is a routed fixture that is no
+	// tracker, and the run's first read is refused.
+	local bool
 	// box is the scripted Box run.
 	box seamtest.PodmanRun
 	// wantExit is the launcher's exit status, and wantOut text its output must
@@ -61,17 +61,17 @@ type sandboxExit struct {
 // sandboxExits is every exit path the seam harness drives. A path that starts
 // the sandbox another way, or has the launcher end differently, is one more row.
 var sandboxExits = []sandboxExit{
-	{name: "success", shadow: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, wantBox: true, wantOut: "verified-merged"},
-	{name: "failed-run", shadow: true, box: seamtest.PodmanRun{Exit: 1}, wantBox: true, wantOut: "(box-failed)"},
-	{name: "launcher-error", shadow: false, wantExit: 1, wantOut: "cannot list issues"},
-	{name: "blocked-run", shadow: true, box: seamtest.PodmanRun{Outcome: seamOutcome("blocked")}, wantBox: true, wantOut: "(blocked)"},
-	{name: "sigint", shadow: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, signal: syscall.SIGINT, wantExit: 7, wantBox: true, wantOut: "verified-merged"},
-	{name: "sigterm", shadow: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, signal: syscall.SIGTERM, wantExit: 7, wantBox: true, wantOut: "verified-merged"},
+	{name: "success", local: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, wantBox: true, wantOut: "branches pushed on owner/repo"},
+	{name: "failed-run", local: true, box: seamtest.PodmanRun{Exit: 1}, wantBox: true, wantOut: "(box-failed)"},
+	{name: "launcher-error", local: false, wantExit: 1, wantOut: "cannot list issues"},
+	{name: "blocked-run", local: true, box: seamtest.PodmanRun{Outcome: seamOutcome("blocked")}, wantBox: true, wantOut: "(blocked)"},
+	{name: "sigint", local: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, signal: syscall.SIGINT, wantExit: 7, wantBox: true, wantOut: "<- #7 done"},
+	{name: "sigterm", local: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, signal: syscall.SIGTERM, wantExit: 7, wantBox: true, wantOut: "<- #7 done"},
 	// The shutdown gate declines the issue left waiting on the one Box slot
 	// while the stop arrives, so no second Box launches. Which issue goes first
 	// is unordered, so the Box run may answer the other; the gate's own line is
 	// the proof it declined.
-	{name: "shutdown-gate", shadow: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, issues: []int{7, 8}, maxParallel: 1, signal: syscall.SIGTERM, wantExit: 7, wantBox: true, wantOut: "==> stop requested; nothing in flight"},
+	{name: "shutdown-gate", local: true, box: seamtest.PodmanRun{Outcome: seamOutcome("ready")}, issues: []int{7, 8}, maxParallel: 1, signal: syscall.SIGTERM, wantExit: 7, wantBox: true, wantOut: "==> stop requested; nothing in flight"},
 }
 
 func seamOutcome(status string) string {
@@ -100,18 +100,19 @@ type sandboxRig struct {
 	env                            map[string]string
 }
 
-// sandboxMode is how the rig's github backend row is wired; the modes exclude
+// sandboxMode is how the rig's github backend row, if any, is wired; the modes exclude
 // each other.
 type sandboxMode int
 
 const (
 	// sandboxRouted is a routed row, loaded at launch.
 	sandboxRouted sandboxMode = iota
-	// sandboxShadow loads the Connector from a read shadow rather than a routed row.
-	sandboxShadow
 	// sandboxPrimary makes the row the primary read path; like a routed row it
 	// loads at launch.
 	sandboxPrimary
+	// sandboxLocal has no github row: the run reads a local issue and lands by
+	// plain git push, so the only Connector it loads is the Driver's.
+	sandboxLocal
 )
 
 // sandboxRigOpts is what newSandboxRig varies; a struct so its fields cannot be
@@ -153,20 +154,13 @@ func newSandboxRig(t *testing.T, runtime string, o sandboxRigOpts) sandboxRig {
 	recDir := t.TempDir()
 	workDir := t.TempDir()
 
-	var ghIssues []seamtest.GhIssue
-	for _, n := range issues {
-		ghIssues = append(ghIssues, seamtest.GhIssue{Number: n, Title: "T", Body: "B", Labels: []string{"ready-for-agent"}})
-	}
-	env := seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{
-		Record:  recDir + "/gh.jsonl",
-		Issues:  ghIssues,
-		Replies: []seamtest.GhReply{{Args: []string{"pr", "create"}, Stdout: smokePR + "\n"}},
-		PRs: []seamtest.GhPR{{Number: 9, URL: smokePR, HeadRefName: "agent/issue-7", BaseRefName: "main",
-			HeadRefOid: "abc123", Checks: "SUCCESS", Mergeable: "MERGEABLE"}},
-	})
+	env := seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{Record: recDir + "/gh.jsonl"})
 	bare, gitEnv := seedLedgerRemote(t)
 	for k, v := range gitEnv {
 		env[k] = v
+	}
+	if o.mode == sandboxLocal {
+		useLocalForge(t, docPath, workDir, bare, issues, "ready-for-agent")
 	}
 	release := filepath.Join(recDir, "release")
 	runs := slices.Clone(o.runs)
@@ -222,8 +216,8 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 		run.HoldUntil = "set by the rig"
 	}
 	mode := sandboxRouted
-	if x.shadow {
-		mode = sandboxShadow
+	if x.local {
+		mode = sandboxLocal
 	}
 	rig := newSandboxRig(t, runtime, sandboxRigOpts{mode: mode, runs: []seamtest.PodmanRun{run}, issues: issues, extra: extra})
 	recPath := filepath.Join(rig.recDir, runtime+".jsonl")
@@ -295,7 +289,7 @@ func TestSeamConnectorSandboxReapsOrphans(t *testing.T) {
 	for _, imageAbsent := range []bool{false, true} {
 		t.Run(fmt.Sprintf("imageAbsent=%t", imageAbsent), func(t *testing.T) {
 			rig := newSandboxRig(t, "podman", sandboxRigOpts{
-				mode: sandboxShadow, runs: []seamtest.PodmanRun{{Outcome: seamOutcome("ready")}}, issues: []int{7},
+				mode: sandboxLocal, runs: []seamtest.PodmanRun{{Outcome: seamOutcome("ready")}}, issues: []int{7},
 				running: append([]string{orphan}, others...), imageAbsent: imageAbsent,
 			})
 			res := seamtest.Start(t, rig.cmd).Wait(t)
@@ -442,10 +436,9 @@ func sandboxName(argv []string) string {
 
 // sandboxDoc writes a copy of the input document at docPath with CONNECTOR_SANDBOX
 // on and a github backend row whose Connector is the wasm at module. The row
-// reads through GH_TOKEN, and mode picks its shadow or primary keys. As a shadow
-// row it loads on the run's first read, and native stays authoritative; as a
-// routed one it loads at launch, and its lack of the tracker capability
-// refuses the launch. artifacts overrides keys of the document's artifacts.
+// reads through GH_TOKEN, and mode picks its primary key. As a routed row it
+// loads at launch, and its lack of the tracker capability refuses the first
+// read. artifacts overrides keys of the document's artifacts.
 func sandboxDoc(t *testing.T, docPath, module string, mode sandboxMode, artifacts map[string]string) string {
 	t.Helper()
 	data, err := os.ReadFile(docPath)
@@ -461,16 +454,6 @@ func sandboxDoc(t *testing.T, docPath, module string, mode sandboxMode, artifact
 		t.Fatal(err)
 	}
 	settings["CONNECTOR_SANDBOX"] = "true"
-	row := map[string]any{
-		"name": "github", "module": module, "credentialEnv": "GH_TOKEN",
-		"routes": []map[string]string{{"method": "GET", "host": "api.github.com", "path": "/repos/{repo}"}},
-	}
-	switch mode {
-	case sandboxShadow:
-		row["shadow"], row["shadowEvery"] = true, 1
-	case sandboxPrimary:
-		row["primary"] = true
-	}
 	if len(artifacts) > 0 {
 		var art map[string]string
 		if err := json.Unmarshal(doc["artifacts"], &art); err != nil {
@@ -481,7 +464,18 @@ func sandboxDoc(t *testing.T, docPath, module string, mode sandboxMode, artifact
 			t.Fatal(err)
 		}
 	}
-	for k, v := range map[string]any{"settings": settings, "backends": []any{row}} {
+	var rows []any
+	if mode != sandboxLocal {
+		row := map[string]any{
+			"name": "github", "module": module, "credentialEnv": "GH_TOKEN",
+			"routes": []map[string]string{{"method": "GET", "host": "api.github.com", "path": "/repos/{repo}"}},
+		}
+		if mode == sandboxPrimary {
+			row["primary"] = true
+		}
+		rows = []any{row}
+	}
+	for k, v := range map[string]any{"settings": settings, "backends": rows} {
 		if doc[k], err = json.Marshal(v); err != nil {
 			t.Fatal(err)
 		}
