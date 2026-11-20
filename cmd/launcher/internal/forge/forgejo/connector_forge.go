@@ -38,7 +38,8 @@ var loadRowConnector = backendrows.Load
 var connectorClient *http.Client
 
 // primaryRow is the forgejo backend row when it is configured primary: the
-// Code Forge is then built from the row's Connector, never the native adapter.
+// issue tracker and Code Forge are then built from the row's Connector, never
+// the native adapters.
 func primaryRow() (backendrows.Row, bool) {
 	row, ok := backendrows.Lookup(backend.Forgejo.Name)
 	return row, ok && row.Primary

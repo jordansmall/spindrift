@@ -6,38 +6,15 @@ import (
 	"strconv"
 	"testing"
 
-	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 )
 
-// failingWrites is the native adapter's role behind the Connector's tracker: a
-// call that reaches it is a primitive the Connector failed to serve.
-type failingWrites struct{ t *testing.T }
-
-func (w failingWrites) fail(name string) error {
-	w.t.Errorf("tracker contract called the native adapter's %s", name)
-	return nil
-}
-
-func (w failingWrites) ListIssues(forge.DispatchState) ([]forge.Issue, error) {
-	return nil, w.fail("ListIssues")
-}
-func (w failingWrites) ListOpenIssues() ([]forge.Issue, error) { return nil, w.fail("ListOpenIssues") }
-func (w failingWrites) Issue(string) (forge.Issue, error)      { return forge.Issue{}, w.fail("Issue") }
-func (w failingWrites) TransitionState(string, forge.DispatchState, forge.DispatchState) error {
-	return w.fail("TransitionState")
-}
-func (w failingWrites) CompleteVerdict(string, forge.Verdict) error { return w.fail("CompleteVerdict") }
-func (w failingWrites) Comment(string, string) error                { return w.fail("Comment") }
-func (w failingWrites) Probe() (string, error)                      { return "", w.fail("Probe") }
-func (w failingWrites) ListLabels() ([]string, error)               { return nil, w.fail("ListLabels") }
-func (w failingWrites) CreateLabel(string, string, string) error    { return w.fail("CreateLabel") }
-
 // trackerHarness drives the tracker contracts through the Connector's tracker
-// primitives. It omits forgetest.StateSeeder, so state moves through
-// TransitionState, and the native adapter behind it fails every call.
+// primitives, built by the production constructor under a primary row with no
+// native adapter behind it. It omits forgetest.StateSeeder, so state moves
+// through TransitionState.
 type trackerHarness struct {
 	*connectorHarness
 	tr forge.IssueTracker
@@ -55,10 +32,8 @@ var (
 
 func newTrackerHarness(t *testing.T) trackerHarness {
 	t.Helper()
-	h := newConnectorHarness(t, false, false)
-	tr, err := connectortracker.New(h.conn, failingWrites{t},
-		connectortracker.Lifecycle{Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels()},
-		connectortracker.Target{API: h.srv.URL, Repo: connectorRepo})
+	h := newConnectorHarness(t, false, true)
+	tr, err := buildTracker(h.srv)
 	if err != nil {
 		t.Fatal(err)
 	}
