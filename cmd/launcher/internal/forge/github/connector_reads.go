@@ -85,7 +85,7 @@ func sharedConnectorFor(row backendrows.Row, repoSlug string) (*sharedConnector,
 		// deletes what it closes). The call that failed is not retried; this read
 		// loads a fresh one.
 		dropShared(key, sc)
-		notePrimary("reload the Connector", deadErr)
+		noteRouted("reload the Connector", deadErr)
 	}
 	if f := sharedConnectors.failures[key]; f.n >= maxLoadFailures && loadClock().Sub(f.last) < loadRetryAfter {
 		return nil, fmt.Errorf("connector load failed %d times in a row; retried %s after the last failure: %w", f.n, loadRetryAfter, f.err)
@@ -136,11 +136,11 @@ func routedRow() (backendrows.Row, bool) {
 	return row, ok && !row.Shadow
 }
 
-// notePrimary records the error a routed read or write returned and returns
+// noteRouted records the error a routed read or write returned and returns
 // it unchanged. A lost claim race records nothing: forge.ErrAlreadyClaimed is
 // core policy, not a Connector fault, and an empty log is what marks a clean
 // run.
-func notePrimary(op string, err error) error {
+func noteRouted(op string, err error) error {
 	if errors.Is(err, forge.ErrAlreadyClaimed) {
 		return err
 	}
@@ -158,7 +158,7 @@ func (e *execClient) connectorOp(row backendrows.Row, missing error, verb string
 	if err == nil {
 		err = unsupportedWithout(fn(sc.conn, sc.api), verb, missing, errNoCapability)
 	}
-	return notePrimary(verb, err)
+	return noteRouted(verb, err)
 }
 
 // coreTracker as trackerOp's capName names an operation of the core tracker

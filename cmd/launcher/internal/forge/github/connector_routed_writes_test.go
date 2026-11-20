@@ -14,9 +14,9 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// primaryWrites is every tracker write a primary row routes, each driven
+// routedWrites is every tracker write a routed row routes, each driven
 // through the production execClient. seed prepares the issue the write acts on.
-var primaryWrites = []struct {
+var routedWrites = []struct {
 	name  string
 	seed  forge.Issue
 	write func(c *execClient) error
@@ -53,19 +53,19 @@ var primaryWrites = []struct {
 		nil},
 }
 
-func primaryWriteClient() *execClient {
+func routedWriteClient() *execClient {
 	return NewExecClient(connectorRepo, testLabels, WithVerdictLabels(forge.ResearchVerdictLabels()))
 }
 
-// Under a primary row each tracker write reaches the Connector's backend and
+// Under a routed row each tracker write reaches the Connector's backend and
 // runs no gh.
-func TestPrimaryRow_TrackerWritesGoThroughTheConnector(t *testing.T) {
-	for _, tc := range primaryWrites {
+func TestRoutedRow_TrackerWritesGoThroughTheConnector(t *testing.T) {
+	for _, tc := range routedWrites {
 		t.Run(tc.name, func(t *testing.T) {
-			h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+			h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
 			h.SeedIssue(tc.seed)
 
-			if err := tc.write(primaryWriteClient()); err != nil {
+			if err := tc.write(routedWriteClient()); err != nil {
 				t.Fatalf("%s: %v", tc.name, err)
 			}
 
@@ -89,9 +89,9 @@ func TestPrimaryRow_TrackerWritesGoThroughTheConnector(t *testing.T) {
 // appended, so finding dedup and butler promotion see it as a gh-filed one.
 // settle's own sweep is not driven here: the backend go-test fileset leaves
 // settle out (nix/checks/go.nix backendGoTestShared).
-func TestPrimaryRow_PostedIssueKeepsItsMarkerAndLabels(t *testing.T) {
-	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
-	c := primaryWriteClient()
+func TestRoutedRow_PostedIssueKeepsItsMarkerAndLabels(t *testing.T) {
+	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
+	c := routedWriteClient()
 	marker := dedupmarker.Build([]string{"pkg/a.go"})
 	labels := []string{"agent-butler-finding", "ready-for-agent"}
 
@@ -127,11 +127,11 @@ func TestPrimaryRow_PostedIssueKeepsItsMarkerAndLabels(t *testing.T) {
 
 // A claim on an issue already in progress is refused by the Connector path
 // with the same sentinel the native claim returns, and without gh.
-func TestPrimaryRow_ClaimOfAClaimedIssueIsRefused(t *testing.T) {
-	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+func TestRoutedRow_ClaimOfAClaimedIssueIsRefused(t *testing.T) {
+	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
 	h.SeedIssue(forge.Issue{Number: "7", Labels: []string{testLabels.InProgress}})
 
-	err := primaryWriteClient().TransitionState("7", forge.Dispatchable, forge.InProgress)
+	err := routedWriteClient().TransitionState("7", forge.Dispatchable, forge.InProgress)
 
 	if !errors.Is(err, forge.ErrAlreadyClaimed) {
 		t.Errorf("TransitionState of a claimed issue = %v, want ErrAlreadyClaimed", err)
@@ -145,12 +145,12 @@ func TestPrimaryRow_ClaimOfAClaimedIssueIsRefused(t *testing.T) {
 // shadow row keeps them on gh.
 func TestTrackerWrites_PlainRowRoutesShadowStaysOnGh(t *testing.T) {
 	for rowName, useRow := range map[string]func(*testing.T, string){"plain": useGithubRowAt, "shadow": useGithubRowShadow} {
-		for _, tc := range primaryWrites {
+		for _, tc := range routedWrites {
 			t.Run(rowName+"/"+tc.name, func(t *testing.T) {
-				h, _, calls, _ := primaryHarness(t, useRow)
+				h, _, calls, _ := routedLogHarness(t, useRow)
 				h.SeedIssue(tc.seed)
 
-				_ = tc.write(primaryWriteClient())
+				_ = tc.write(routedWriteClient())
 
 				if rowName == "plain" && calls() != 0 {
 					t.Errorf("%s under a plain row ran gh %d times", tc.name, calls())
@@ -166,9 +166,9 @@ func TestTrackerWrites_PlainRowRoutesShadowStaysOnGh(t *testing.T) {
 // A Connector that fails to load fails each routed write with the load error,
 // never reaching gh.
 func TestPlainRow_LoadFailureFailsTheWrite(t *testing.T) {
-	for _, tc := range primaryWrites {
+	for _, tc := range routedWrites {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, calls, _ := primaryHarness(t, useGithubRowAt)
+			_, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 			boom := errors.New("github connector failed to load")
 			old := loadRowConnector
 			t.Cleanup(func() { loadRowConnector = old })
@@ -176,7 +176,7 @@ func TestPlainRow_LoadFailureFailsTheWrite(t *testing.T) {
 				return nil, boom
 			}
 
-			if err := tc.write(primaryWriteClient()); !errors.Is(err, boom) {
+			if err := tc.write(routedWriteClient()); !errors.Is(err, boom) {
 				t.Errorf("err = %v, want the load error", err)
 			}
 			if n := calls(); n != 0 {
@@ -189,9 +189,9 @@ func TestPlainRow_LoadFailureFailsTheWrite(t *testing.T) {
 // A write outside the row's Routes is refused by the host: it fails with that
 // refusal and never falls back to gh.
 func TestPlainRow_RefusedRouteFailsTheWrite(t *testing.T) {
-	for _, tc := range primaryWrites {
+	for _, tc := range routedWrites {
 		t.Run(tc.name, func(t *testing.T) {
-			h, _, calls, _ := primaryHarness(t, func(t *testing.T, host string) {
+			h, _, calls, _ := routedLogHarness(t, func(t *testing.T, host string) {
 				applyGithubRow(t, host, func(r *backendrows.Row) {
 					r.Routes = r.Routes[:0:0]
 					for _, rt := range allRoutes(t, host) {
@@ -203,7 +203,7 @@ func TestPlainRow_RefusedRouteFailsTheWrite(t *testing.T) {
 			})
 			h.SeedIssue(tc.seed)
 
-			if err := tc.write(primaryWriteClient()); !errors.Is(err, connectorhost.ErrRouteRefused) {
+			if err := tc.write(routedWriteClient()); !errors.Is(err, connectorhost.ErrRouteRefused) {
 				t.Errorf("err = %v, want the route refusal", err)
 			}
 			if n := calls(); n != 0 {
@@ -215,7 +215,7 @@ func TestPlainRow_RefusedRouteFailsTheWrite(t *testing.T) {
 
 // A Connector that does not advertise what a write needs fails it with the
 // named capability error instead of reaching the nil native tracker or gh.
-func TestPrimaryRow_MissingCapabilityFailsTheWrite(t *testing.T) {
+func TestRoutedRow_MissingCapabilityFailsTheWrite(t *testing.T) {
 	for _, tc := range []struct{ write, capName string }{
 		{"TransitionState", "tracker.editLabels"},
 		{"TransitionState", "tracker.transition"},
@@ -228,16 +228,16 @@ func TestPrimaryRow_MissingCapabilityFailsTheWrite(t *testing.T) {
 		{"CloseMergedIssue", "tracker.closeIssue"},
 	} {
 		t.Run(tc.write+"/"+tc.capName, func(t *testing.T) {
-			h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+			h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
 			withoutCapability(t, tc.capName)
 			matched := false
-			for _, w := range primaryWrites {
+			for _, w := range routedWrites {
 				if w.name != tc.write {
 					continue
 				}
 				matched = true
 				h.SeedIssue(w.seed)
-				if err := w.write(primaryWriteClient()); !errors.Is(err, errNoCapability) {
+				if err := w.write(routedWriteClient()); !errors.Is(err, errNoCapability) {
 					t.Errorf("err = %v, want errNoCapability", err)
 				}
 			}
@@ -254,18 +254,18 @@ func TestPrimaryRow_MissingCapabilityFailsTheWrite(t *testing.T) {
 // A lost claim race is core policy, not a Connector fault, so it leaves the
 // primary log empty; any other failed write is recorded.
 func TestNotePrimary_SkipsALostClaimRace(t *testing.T) {
-	_, _, _, logDir := primaryHarness(t, useGithubRowPrimary)
+	_, _, _, logDir := routedLogHarness(t, useGithubRowRouted)
 
 	claimed := fmt.Errorf("tracker: issue 7: %w", forge.ErrAlreadyClaimed)
-	if got := notePrimary("transition an issue", claimed); got != claimed {
-		t.Errorf("notePrimary = %v, want the error unchanged", got)
+	if got := noteRouted("transition an issue", claimed); got != claimed {
+		t.Errorf("noteRouted = %v, want the error unchanged", got)
 	}
-	if logs := primaryFiles(t, logDir, ".log"); len(logs) != 0 {
+	if logs := routedFiles(t, logDir, ".log"); len(logs) != 0 {
 		t.Errorf("a lost claim race wrote primary logs %v", logs)
 	}
 
-	_ = notePrimary("transition an issue", errors.New("boom"))
-	if logs := primaryFiles(t, logDir, ".log"); len(logs) != 1 {
+	_ = noteRouted("transition an issue", errors.New("boom"))
+	if logs := routedFiles(t, logDir, ".log"); len(logs) != 1 {
 		t.Errorf("a failed write wrote primary logs %v, want one", logs)
 	}
 }

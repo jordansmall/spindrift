@@ -213,16 +213,16 @@ func (e *execClient) ledgerSiteViaConnector(row backendrows.Row) (backendkit.Led
 	return site, err
 }
 
-// ErrPrimaryMergeMethod is why a primary github row refuses a MERGE_METHOD
+// ErrRoutedMergeMethod is why a routed github row refuses a MERGE_METHOD
 // other than rebase: the Connector always merges by rebase, so honouring the
 // knob is impossible and ignoring it would be silent.
-var ErrPrimaryMergeMethod = errors.New("MERGE_METHOD must be rebase or unset: the github Connector merges by rebase only")
+var ErrRoutedMergeMethod = errors.New("MERGE_METHOD must be rebase or unset: the github Connector merges by rebase only")
 
-func (e *execClient) checkPrimaryMergeMethod() error { return checkPrimaryMergeMethod(e.mergeMethod) }
+func (e *execClient) checkRoutedMergeMethod() error { return checkRoutedMergeMethod(e.mergeMethod) }
 
-func checkPrimaryMergeMethod(method string) error {
+func checkRoutedMergeMethod(method string) error {
 	if mergeMethodFlag(method) != "--rebase" {
-		return fmt.Errorf("%w (got %q)", ErrPrimaryMergeMethod, method)
+		return fmt.Errorf("%w (got %q)", ErrRoutedMergeMethod, method)
 	}
 	return nil
 }
@@ -233,7 +233,7 @@ func checkPrimaryMergeMethod(method string) error {
 // (a repository that deletes merged heads itself) is done, not a fault, so it
 // stays out of the primary log; any other failure is recorded there and warned.
 func (e *execClient) mergeViaConnector(row backendrows.Row, prURL string) error {
-	if err := e.checkPrimaryMergeMethod(); err != nil {
+	if err := e.checkRoutedMergeMethod(); err != nil {
 		return err
 	}
 	err := e.forgeWrite(row, "merge a PR", false, func(cf forge.CodeForge, caps forge.Capabilities) error {
@@ -273,7 +273,7 @@ func (e *execClient) mergeViaConnector(row backendrows.Row, prURL string) error 
 }
 
 func (e *execClient) enqueueAutoMergeViaConnector(row backendrows.Row, prURL string) error {
-	if err := e.checkPrimaryMergeMethod(); err != nil {
+	if err := e.checkRoutedMergeMethod(); err != nil {
 		return err
 	}
 	return e.prWrite(row, "enqueue auto-merge", func(pf forge.PRForge) error { return pf.EnqueueAutoMerge(prURL) })

@@ -432,7 +432,7 @@ func (l *lazyRunner) Kill(name string) error {
 }
 
 // recordSandboxTotals is a var so a test can count the closer's calls.
-var recordSandboxTotals = github.RecordPrimarySandboxTotals
+var recordSandboxTotals = github.RecordRoutedSandboxTotals
 
 // installConnectorSandbox makes every Connector this process hosts load into
 // one sandbox, under CONNECTOR_SANDBOX, and returns the func that stops it. The

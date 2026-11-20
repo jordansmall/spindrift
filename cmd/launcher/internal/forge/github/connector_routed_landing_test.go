@@ -21,11 +21,11 @@ import (
 // landingBranch is the agent branch the landing writes act on.
 const landingBranch = "agent/issue-9"
 
-// primaryLandingWrites is every PR write and branch delete a primary row
+// routedLandingWrites is every PR write and branch delete a routed row
 // routes, each driven through the production execClient. seed prepares the PR
 // and branch the write acts on and returns the PR's URL; landed reports what
 // the scripted backend then holds.
-var primaryLandingWrites = []struct {
+var routedLandingWrites = []struct {
 	name   string
 	seed   func(h *connectorHarness) string
 	write  func(c *execClient, prURL string) error
@@ -80,14 +80,14 @@ var primaryLandingWrites = []struct {
 		}},
 }
 
-// Under a primary row each PR write and the branch delete reaches the
+// Under a routed row each PR write and the branch delete reaches the
 // Connector's backend and runs no gh.
-func TestPrimaryRow_LandingWritesGoThroughTheConnector(t *testing.T) {
-	for _, tc := range primaryLandingWrites {
+func TestRoutedRow_LandingWritesGoThroughTheConnector(t *testing.T) {
+	for _, tc := range routedLandingWrites {
 		t.Run(tc.name, func(t *testing.T) {
-			h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+			h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
 			url := tc.seed(h)
-			c := primaryWriteClient()
+			c := routedWriteClient()
 
 			if err := tc.write(c, url); err != nil {
 				t.Fatalf("%s: %v", tc.name, err)
@@ -106,10 +106,10 @@ func TestPrimaryRow_LandingWritesGoThroughTheConnector(t *testing.T) {
 // A hand-off the Box or an earlier attempt already opened is adopted, not
 // reported as a failure, and created=false tells settle the title and body are
 // not the ones supplied.
-func TestPrimaryRow_CreateDraftPRAdoptsAnOpenPR(t *testing.T) {
-	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+func TestRoutedRow_CreateDraftPRAdoptsAnOpenPR(t *testing.T) {
+	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
 	h.backend.repo.SeedBranch(landingBranch, "9")
-	c := primaryWriteClient()
+	c := routedWriteClient()
 	first, created, err := c.CreateDraftPR("title", "body", "main", landingBranch)
 	if err != nil || !created {
 		t.Fatalf("CreateDraftPR = (%q, %v, %v), want a created PR", first, created, err)
@@ -126,11 +126,11 @@ func TestPrimaryRow_CreateDraftPRAdoptsAnOpenPR(t *testing.T) {
 }
 
 // DeleteBranch refuses the base branch before any call is made.
-func TestPrimaryRow_DeleteBranchRefusesTheBaseBranch(t *testing.T) {
-	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+func TestRoutedRow_DeleteBranchRefusesTheBaseBranch(t *testing.T) {
+	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
 	before := h.backend.hitCount()
 
-	err := primaryWriteClient().DeleteBranch("main", "main")
+	err := routedWriteClient().DeleteBranch("main", "main")
 
 	if err == nil {
 		t.Fatal("DeleteBranch(base) succeeded, want a refusal")
@@ -144,12 +144,12 @@ func TestPrimaryRow_DeleteBranchRefusesTheBaseBranch(t *testing.T) {
 // shadow row keeps them on gh.
 func TestLandingWrites_PlainRowRoutesShadowStaysOnGh(t *testing.T) {
 	for rowName, useRow := range map[string]func(*testing.T, string){"plain": useGithubRowAt, "shadow": useGithubRowShadow} {
-		for _, tc := range primaryLandingWrites {
+		for _, tc := range routedLandingWrites {
 			t.Run(rowName+"/"+tc.name, func(t *testing.T) {
-				h, _, calls, _ := primaryHarness(t, useRow)
+				h, _, calls, _ := routedLogHarness(t, useRow)
 				url := tc.seed(h)
 
-				_ = tc.write(primaryWriteClient(), url)
+				_ = tc.write(routedWriteClient(), url)
 
 				if rowName == "plain" && calls() != 0 {
 					t.Errorf("%s under a plain row ran gh %d times", tc.name, calls())
@@ -165,9 +165,9 @@ func TestLandingWrites_PlainRowRoutesShadowStaysOnGh(t *testing.T) {
 // A Connector that fails to load fails each routed landing write with the
 // load error, never reaching gh.
 func TestPlainRow_LoadFailureFailsTheLandingWrite(t *testing.T) {
-	for _, tc := range primaryLandingWrites {
+	for _, tc := range routedLandingWrites {
 		t.Run(tc.name, func(t *testing.T) {
-			h, _, calls, _ := primaryHarness(t, useGithubRowAt)
+			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 			url := tc.seed(h)
 			boom := errors.New("github connector failed to load")
 			old := loadRowConnector
@@ -176,7 +176,7 @@ func TestPlainRow_LoadFailureFailsTheLandingWrite(t *testing.T) {
 				return nil, boom
 			}
 
-			if err := tc.write(primaryWriteClient(), url); !errors.Is(err, boom) {
+			if err := tc.write(routedWriteClient(), url); !errors.Is(err, boom) {
 				t.Errorf("err = %v, want the load error", err)
 			}
 			if n := calls(); n != 0 {
@@ -189,9 +189,9 @@ func TestPlainRow_LoadFailureFailsTheLandingWrite(t *testing.T) {
 // A landing write outside the row's Routes is refused by the host and fails
 // with that refusal, never falling back to gh.
 func TestPlainRow_RefusedRouteFailsTheLandingWrite(t *testing.T) {
-	for _, tc := range primaryLandingWrites {
+	for _, tc := range routedLandingWrites {
 		t.Run(tc.name, func(t *testing.T) {
-			h, _, calls, _ := primaryHarness(t, func(t *testing.T, host string) {
+			h, _, calls, _ := routedLogHarness(t, func(t *testing.T, host string) {
 				applyGithubRow(t, host, func(r *backendrows.Row) {
 					r.Routes = r.Routes[:0:0]
 					for _, rt := range allRoutes(t, host) {
@@ -203,7 +203,7 @@ func TestPlainRow_RefusedRouteFailsTheLandingWrite(t *testing.T) {
 			})
 			url := tc.seed(h)
 
-			if err := tc.write(primaryWriteClient(), url); !errors.Is(err, connectorhost.ErrRouteRefused) {
+			if err := tc.write(routedWriteClient(), url); !errors.Is(err, connectorhost.ErrRouteRefused) {
 				t.Errorf("err = %v, want the route refusal", err)
 			}
 			if n := calls(); n != 0 {
@@ -216,7 +216,7 @@ func TestPlainRow_RefusedRouteFailsTheLandingWrite(t *testing.T) {
 // A Connector without the draft-PR capability fails CreateDraftPR with the
 // named capability error instead of reaching gh; one that is not a forge at
 // all is unsupported.
-func TestPrimaryRow_MissingCapabilityFailsTheLandingWrite(t *testing.T) {
+func TestRoutedRow_MissingCapabilityFailsTheLandingWrite(t *testing.T) {
 	for _, tc := range []struct {
 		write, capName string
 		want           error
@@ -227,13 +227,13 @@ func TestPrimaryRow_MissingCapabilityFailsTheLandingWrite(t *testing.T) {
 		{"Merge", "forge.prs", connectorforge.ErrPRForgeUnsupported},
 	} {
 		t.Run(tc.write+"/"+tc.capName, func(t *testing.T) {
-			h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+			h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
 			withoutCapability(t, tc.capName)
-			for _, w := range primaryLandingWrites {
+			for _, w := range routedLandingWrites {
 				if w.name != tc.write {
 					continue
 				}
-				if err := w.write(primaryWriteClient(), w.seed(h)); !errors.Is(err, tc.want) {
+				if err := w.write(routedWriteClient(), w.seed(h)); !errors.Is(err, tc.want) {
 					t.Errorf("err = %v, want %v", err, tc.want)
 				}
 			}
@@ -246,12 +246,12 @@ func TestPrimaryRow_MissingCapabilityFailsTheLandingWrite(t *testing.T) {
 
 // A Connector without forge.autoMerge fails the enqueue by name instead of
 // reaching gh.
-func TestPrimaryRow_EnqueueAutoMergeWithoutTheCapabilityFails(t *testing.T) {
-	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+func TestRoutedRow_EnqueueAutoMergeWithoutTheCapabilityFails(t *testing.T) {
+	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
 	withoutCapability(t, "forge.autoMerge")
 	url := h.SeedOpenPR("9")
 
-	err := primaryWriteClient().EnqueueAutoMerge(url)
+	err := routedWriteClient().EnqueueAutoMerge(url)
 
 	if err == nil || !strings.Contains(err.Error(), "auto-merge is unavailable") {
 		t.Errorf("err = %v, want the auto-merge capability refusal", err)
@@ -263,11 +263,11 @@ func TestPrimaryRow_EnqueueAutoMergeWithoutTheCapabilityFails(t *testing.T) {
 
 // A transient merge failure surfaces as the class core's merge loop retries,
 // and nothing is deleted for a merge that did not land.
-func TestPrimaryRow_MergeTransientFailureIsRetryable(t *testing.T) {
-	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+func TestRoutedRow_MergeTransientFailureIsRetryable(t *testing.T) {
+	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
 	url := h.SeedLandablePR("9")
 	h.scriptMerge(http.StatusBadGateway)
-	c := primaryWriteClient()
+	c := routedWriteClient()
 
 	err := c.Merge(url)
 
@@ -287,8 +287,8 @@ func TestPrimaryRow_MergeTransientFailureIsRetryable(t *testing.T) {
 
 // The branch delete after a landed merge is best effort: a Connector that
 // refuses it must not turn a merged PR into a failed settle.
-func TestPrimaryRow_MergeSurvivesAFailedBranchDelete(t *testing.T) {
-	h, _, calls, logDir := primaryHarness(t, func(t *testing.T, host string) {
+func TestRoutedRow_MergeSurvivesAFailedBranchDelete(t *testing.T) {
+	h, _, calls, logDir := routedLogHarness(t, func(t *testing.T, host string) {
 		applyGithubRow(t, host, func(r *backendrows.Row) {
 			r.Primary = true
 			r.Routes = r.Routes[:0:0]
@@ -301,7 +301,7 @@ func TestPrimaryRow_MergeSurvivesAFailedBranchDelete(t *testing.T) {
 	})
 	url := h.SeedLandablePR("9")
 
-	if err := primaryWriteClient().Merge(url); err != nil {
+	if err := routedWriteClient().Merge(url); err != nil {
 		t.Fatalf("Merge = %v, want nil: the PR landed", err)
 	}
 	if !h.Merged(url) {
@@ -311,7 +311,7 @@ func TestPrimaryRow_MergeSurvivesAFailedBranchDelete(t *testing.T) {
 		t.Errorf("ran gh %d times", n)
 	}
 	// stderr carries the same failure as a warning; only the log is asserted.
-	logs := primaryFiles(t, logDir, ".log")
+	logs := routedFiles(t, logDir, ".log")
 	if len(logs) != 1 {
 		t.Fatalf("primary logs = %v, want one recording the failed delete", logs)
 	}
@@ -322,11 +322,11 @@ func TestPrimaryRow_MergeSurvivesAFailedBranchDelete(t *testing.T) {
 }
 
 // A merged same-repository PR has its head branch deleted.
-func TestPrimaryRow_MergeDeletesASameRepoHead(t *testing.T) {
-	h, _, _, _ := primaryHarness(t, useGithubRowPrimary)
+func TestRoutedRow_MergeDeletesASameRepoHead(t *testing.T) {
+	h, _, _, _ := routedLogHarness(t, useGithubRowRouted)
 	url := h.SeedLandablePR("9")
 
-	if err := primaryWriteClient().Merge(url); err != nil {
+	if err := routedWriteClient().Merge(url); err != nil {
 		t.Fatalf("Merge = %v, want nil", err)
 	}
 	if got, want := h.deletedRefs(), []string{"refs/heads/" + landingBranch}; !slices.Equal(got, want) {
@@ -336,11 +336,11 @@ func TestPrimaryRow_MergeDeletesASameRepoHead(t *testing.T) {
 
 // A cross-repository PR's head is not in the base repository, so the merge
 // deletes nothing: a same-named base-repo branch would be someone else's.
-func TestPrimaryRow_MergeLeavesACrossRepoHeadAlone(t *testing.T) {
-	h, _, _, logDir := primaryHarness(t, useGithubRowPrimary)
+func TestRoutedRow_MergeLeavesACrossRepoHeadAlone(t *testing.T) {
+	h, _, _, logDir := routedLogHarness(t, useGithubRowRouted)
 	url := h.SeedLandableForkPR("9")
 
-	if err := primaryWriteClient().Merge(url); err != nil {
+	if err := routedWriteClient().Merge(url); err != nil {
 		t.Fatalf("Merge = %v, want nil", err)
 	}
 	if !h.Merged(url) {
@@ -349,21 +349,21 @@ func TestPrimaryRow_MergeLeavesACrossRepoHeadAlone(t *testing.T) {
 	if got := h.deletedRefs(); len(got) != 0 {
 		t.Errorf("deleted refs = %v, want none for a fork PR", got)
 	}
-	if ok, err := primaryWriteClient().BranchExists(landingBranch); err != nil || !ok {
+	if ok, err := routedWriteClient().BranchExists(landingBranch); err != nil || !ok {
 		t.Errorf("BranchExists(%s) = (%v, %v), want the base repo's same-named branch kept", landingBranch, ok, err)
 	}
-	if logs := primaryFiles(t, logDir, ".log"); len(logs) != 0 {
+	if logs := routedFiles(t, logDir, ".log"); len(logs) != 0 {
 		t.Errorf("primary logs = %v, want none", logs)
 	}
 }
 
 // A head the repository already deleted is done, not a fault: nothing is
 // recorded for a clean primary run.
-func TestPrimaryRow_MergeWithTheHeadAlreadyGoneRecordsNothing(t *testing.T) {
-	h, _, calls, logDir := primaryHarness(t, useGithubRowPrimary)
+func TestRoutedRow_MergeWithTheHeadAlreadyGoneRecordsNothing(t *testing.T) {
+	h, _, calls, logDir := routedLogHarness(t, useGithubRowRouted)
 	url := h.SeedOpenPR("9")
 
-	if err := primaryWriteClient().Merge(url); err != nil {
+	if err := routedWriteClient().Merge(url); err != nil {
 		t.Fatalf("Merge = %v, want nil", err)
 	}
 	if !h.Merged(url) {
@@ -372,7 +372,7 @@ func TestPrimaryRow_MergeWithTheHeadAlreadyGoneRecordsNothing(t *testing.T) {
 	if n := calls(); n != 0 {
 		t.Errorf("ran gh %d times", n)
 	}
-	if logs := primaryFiles(t, logDir, ".log"); len(logs) != 0 {
+	if logs := routedFiles(t, logDir, ".log"); len(logs) != 0 {
 		t.Errorf("primary logs = %v, want none for an already-deleted head", logs)
 	}
 }
@@ -401,12 +401,12 @@ func TestGitCredential_ReadsTheRowEnvAtUse(t *testing.T) {
 
 // The PR-body Closes gate is core policy; the Connector carries the body to the
 // backend byte for byte, so the keyword survives the host-side open.
-func TestPrimaryRow_CreateDraftPRCarriesTheClosesBodyIntact(t *testing.T) {
-	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+func TestRoutedRow_CreateDraftPRCarriesTheClosesBodyIntact(t *testing.T) {
+	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
 	h.backend.repo.SeedBranch(landingBranch, "9")
 	const body = "Fixes the thing.\n\nCloses #9\n"
 
-	url, created, err := primaryWriteClient().CreateDraftPR("title", body, "main", landingBranch)
+	url, created, err := routedWriteClient().CreateDraftPR("title", body, "main", landingBranch)
 
 	if err != nil || !created {
 		t.Fatalf("CreateDraftPR = (%q, %v, %v), want a created PR", url, created, err)
@@ -422,15 +422,15 @@ func TestPrimaryRow_CreateDraftPRCarriesTheClosesBodyIntact(t *testing.T) {
 // The butler patch PR path: push the branch, open the draft PR for it, then
 // delete the branch again when the patch is abandoned, all through the
 // Connector and core's git with no gh call.
-func TestPrimaryRow_ButlerPatchPathRunsThroughTheConnector(t *testing.T) {
-	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+func TestRoutedRow_ButlerPatchPathRunsThroughTheConnector(t *testing.T) {
+	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
 	src := t.TempDir()
 	forgetest.Run(t, "", "clone", h.backend.repo.Bare, src)
 	forgetest.Run(t, src, "checkout", "-b", "work")
 	forgetest.WriteFile(t, filepath.Join(src, "patch.txt"), "patch\n")
 	forgetest.Run(t, src, "add", "patch.txt")
 	forgetest.Run(t, src, "commit", "-m", "patch")
-	c := primaryGitClient()
+	c := routedGitClient()
 
 	if err := c.PushBranch(src, "work", landingBranch, "main"); err != nil {
 		t.Fatalf("PushBranch: %v", err)
@@ -456,8 +456,8 @@ func TestPrimaryRow_ButlerPatchPathRunsThroughTheConnector(t *testing.T) {
 
 // A push-only Connector composes without a PR forge: Merge fails by the named
 // capability instead of reaching the push-only forge's Merge.
-func TestPrimaryRow_MergeOnAPushOnlyConnectorNamesTheMissingCapability(t *testing.T) {
-	h, _, calls, _ := primaryHarness(t, useGithubRowPrimary)
+func TestRoutedRow_MergeOnAPushOnlyConnectorNamesTheMissingCapability(t *testing.T) {
+	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
 	withoutCapability(t, "forge.prs")
 	old := loadRowConnector
 	loadRowConnector = func(ctx context.Context, row backendrows.Row, o backendrows.Options) (*connectorhost.Connector, error) {
@@ -469,7 +469,7 @@ func TestPrimaryRow_MergeOnAPushOnlyConnectorNamesTheMissingCapability(t *testin
 	}
 	url := h.SeedLandablePR("9")
 
-	err := primaryWriteClient().Merge(url)
+	err := routedWriteClient().Merge(url)
 
 	if !errors.Is(err, backendkit.ErrUnsupported) || !strings.Contains(err.Error(), "forge.prs") {
 		t.Errorf("Merge = %v, want unsupported naming forge.prs", err)

@@ -33,7 +33,7 @@ func introspectToken(token, repoSlug string) (backendkit.TokenIntrospection, err
 	audit, closeAudit, _ := primaryrecord.OpenFile(primaryrecord.Name(backend.GitHub.Name, ".audit.jsonl"))
 	defer closeAudit()
 	got, err := introspectViaConnector(row, backendrows.Options{Audit: audit, Client: connectorClient}, token, repoSlug)
-	return got, notePrimary("introspect the token", err)
+	return got, noteRouted("introspect the token", err)
 }
 
 var nativeIntrospect = newTokenIntrospector(TokenOAuthScopes, TokenRepoPushPermission)

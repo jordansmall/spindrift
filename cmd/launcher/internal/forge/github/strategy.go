@@ -29,13 +29,13 @@ var Strategy = backendkit.Strategy{
 		return NewExecClient(s.RepoSlug, s.Labels, WithVerdictLabels(s.VerdictLabels)), nil
 	},
 	NewCodeForge: func(s backendkit.Shared, _ backendkit.Lookup, _ forge.SanitizedParent, _ forge.IssueTracker) (forge.CodeForge, error) {
-		if err := checkPrimaryMergeMethodAtBuild(s); err != nil {
+		if err := checkRoutedMergeMethodAtBuild(s); err != nil {
 			return nil, err
 		}
 		return NewExecClient(s.RepoSlug, s.Labels, codeForgeOpts(s)...), nil
 	},
 	NewReadOnlyCodeForge: func(s backendkit.Shared, _ backendkit.Lookup, _ forge.SanitizedParent, _ forge.IssueTracker) (forge.CodeForge, error) {
-		if err := checkPrimaryMergeMethodAtBuild(s); err != nil {
+		if err := checkRoutedMergeMethodAtBuild(s); err != nil {
 			return nil, err
 		}
 		return NewReadOnlyCodeForge(s.RepoSlug, s.Labels, codeForgeOpts(s)...), nil
@@ -74,13 +74,13 @@ var Strategy = backendkit.Strategy{
 	IntrospectToken: introspectToken,
 }
 
-// checkPrimaryMergeMethodAtBuild refuses an unhonourable MERGE_METHOD at launch
+// checkRoutedMergeMethodAtBuild refuses an unhonourable MERGE_METHOD at launch
 // under a routed row, as the forgejo row does, rather than at the first merge.
-func checkPrimaryMergeMethodAtBuild(s backendkit.Shared) error {
+func checkRoutedMergeMethodAtBuild(s backendkit.Shared) error {
 	if _, ok := routedRow(); !ok {
 		return nil
 	}
-	return checkPrimaryMergeMethod(s.MergeMethod)
+	return checkRoutedMergeMethod(s.MergeMethod)
 }
 
 func codeForgeOpts(s backendkit.Shared) []ExecOption {
