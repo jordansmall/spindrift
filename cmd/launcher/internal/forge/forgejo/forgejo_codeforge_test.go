@@ -118,8 +118,8 @@ func (h *forgejoCodeForgeHarness) FailNextRebase(ref string) {
 	h.repo.ConflictBase(prNumFromURL(ref))
 }
 
-// realMerge is fakeForgejo's mergeHook, mirroring the github adapter's
-// fake-gh-codeforge.sh pr-merge case. The error it returns on conflict is what
+// realMerge is fakeForgejo's mergeHook: it merges the PR's branch into main in
+// the bare repo. The error it returns on conflict is what
 // the fake's merge route turns into the non-2xx response that the adapter's
 // classifyMergeFailure interprets.
 func (h *forgejoCodeForgeHarness) realMerge(num string) error {

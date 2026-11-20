@@ -18,7 +18,7 @@ type modeLayoutFuncInfo struct {
 }
 
 // modeLayoutCalleeName resolves a call's callee to a bare identifier or a
-// selector's final name, mirroring calleeName in gh_error_guard_test.go. This
+// selector's final name. This
 // matches names rather than resolving types, and package console overloads
 // names, so the guard walks every same-named body: a false positive fails
 // loudly, while picking the wrong one would hide a real violation.

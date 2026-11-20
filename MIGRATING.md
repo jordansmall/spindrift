@@ -1,12 +1,40 @@
 # Migration Guide
 
+## The native github adapter is deleted (issue #6888)
+
+The rest of the native github adapter is gone: the github Connector is the only
+github implementation, for writes as well as reads, and the ADR 0073 migration
+window is closed. A write with no routed github row fails with `ErrNoRoute`
+naming the cause, in place of running `gh`. See [The github
+Connector](docs/reference.md#the-github-connector) and [Backend primary
+mode](docs/reference.md#backend-primary-mode).
+
+What changed for a Consumer:
+
+- **`primary` on a github row fails evaluation.** The row is Connector-only,
+  and there is no native backend of the same name to replace. Drop `primary`;
+  it has been a no-op since #7139. A github config that never set `primary`
+  evaluates unchanged.
+- **The three unrouted cases fail writes too.** A `GH_HOST` other than
+  `github.com`, a flake importing `core.flakeModules.default` directly (no
+  github row), and a github `shadow` row each fail every read and write with
+  `ErrNoRoute`, where writes used to run `gh`. The fixes are the ones listed
+  under #6811 below.
+- **The launcher no longer brings `gh` on PATH.** The launcher wrapper's host
+  closure dropped it. Anything host-side that relied on the wrapper's `gh`,
+  such as a `SECRET_CMD` or hook calling `gh`, needs its own. Quickstart still
+  tries an ambient `gh auth token` as a token fallback when `gh` is on PATH. The
+  Box keeps its own `gh` for its open-PR query.
+- **Go callers rename `ErrNoReadRoute` to `ErrNoRoute`.** One identifier now
+  covers reads and writes.
+
 ## The native github read path is deleted (issue #6811)
 
 Every github read, tracker and forge, goes through the github Connector alone;
 the native adapter's read methods are gone. A read with no routed github row
 fails with `ErrNoReadRoute` naming the cause, in place of falling back to `gh`.
-Native writes are unchanged until #6888. See [The github
-Connector](docs/reference.md#the-github-connector).
+Native writes were unchanged until #6888, which deletes them too (see above).
+See [The github Connector](docs/reference.md#the-github-connector).
 
 What changed for a Consumer:
 

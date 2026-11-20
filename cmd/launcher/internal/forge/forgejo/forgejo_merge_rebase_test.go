@@ -262,9 +262,7 @@ func TestMerge_RefusedButAlreadyMerged_Succeeds(t *testing.T) {
 
 // Only Forgejo's refusal statuses (405/409) get disambiguated through the
 // pull's mergeable field. Every other non-2xx must come back as a raw error
-// naming the status, so a 403, 429 or 500 is never misread as a conflict. The
-// github adapter gates the same way on IsMergeConflict(stderr) before it
-// classifies (exec_pr.go, issue #566).
+// naming the status, so a 403, 429 or 500 is never misread as a conflict.
 func TestMerge_NonRefusalStatus_SurfacesRawError(t *testing.T) {
 	for _, status := range []int{
 		http.StatusForbidden,

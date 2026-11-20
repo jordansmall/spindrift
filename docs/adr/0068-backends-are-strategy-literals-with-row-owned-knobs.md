@@ -140,7 +140,10 @@ A network backend's Strategy moves into a WebAssembly Connector reached
 through the Connector host, and its row gains a Route table. `local` and `git`
 remain native Strategies registered by the Bundle, as Built-in backends,
 because they need filesystem and git capabilities Connectors are denied. After
-the migration window the Bundle registers no native network backend.
+the migration window the Bundle registers no native network backend (amended by
+issue #6888: the window is closed, and a Go test over the Bundle enforces it;
+forgejo's native forge and tracker are pinned until #6868 and #7122 delete
+them).
 Row-owned knobs (point 2) extend across Connectors through the module system.
 Point 5's in-box fields (CLI package, `ConfigureCLI`) retire with the Box's
 forge credential (spec #6757). Point 7's per-adapter derivations become
