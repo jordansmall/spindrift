@@ -2317,7 +2317,8 @@ is the fixture Connector in
   `backend` row samples every `shadowEvery`th read (default 10, minimum 1) per
   operation through its Connector instead. With `primary` on, the Connector
   answers the native backend's calls with no fallback: forgejo's whole Code
-  Forge (see [The forgejo Connector](#the-forgejo-connector)). github needs no
+  Forge and its whole tracker (see [The forgejo
+  Connector](#the-forgejo-connector)). github needs no
   `primary`: every Consumer of the root `spindrift.flakeModules.default`
   carries the github row, and a plain row already answers every github read
   and write (see [Backend primary mode](#backend-primary-mode)), so `primary`
@@ -2784,10 +2785,12 @@ title; a merge uses the rebase style and deletes the branch; auto-merge asks
 transient merge failure is retried by core, not the Connector.
 
 Its tracker half serves `tracker.listIssues`, `tracker.issue`,
-`tracker.comments`, `tracker.nativeDeps` and `tracker.blocks`, and performs the
-writes core asks for, advertising `tracker.transition`, `tracker.editLabels`,
-`tracker.comment`, `tracker.fileIssue`, `tracker.closeIssue` and
-`tracker.labels` (`tracker.listLabels` and `tracker.createLabel` ride on it). It
+`tracker.comments`, `tracker.nativeDeps` and `tracker.blocks`, and the probe,
+count, labeled-scan and text-search reads, and performs the writes core asks
+for, advertising `tracker.transition`, `tracker.editLabels`,
+`tracker.comment`, `tracker.fileIssue`, `tracker.closeIssue`, `tracker.labels`
+(`tracker.listLabels` and `tracker.createLabel` ride on it), `tracker.probe`,
+`tracker.count`, `tracker.labeled` and `tracker.searchIssues`. It
 advertises `tracker.comments` because Forgejo has no minimized comments, so
 `minimized` is faithfully always false. Forgejo has no issue statuses, so
 `tracker.transition` always answers unmapped and core swaps labels itself;
@@ -2824,10 +2827,11 @@ The Connector also ships the forgejo fragment folder,
 declared file wins over a custom fragments directory, a `forgejo/<name>.md` in
 a `SPINDRIFT_PROMPT_DIR` is ignored (see [`MIGRATING.md`](../MIGRATING.md)).
 
-The native forgejo adapter builds the Code Forge unless the Consumer sets
-`spindrift.connectors.forgejo.primary = true`. Then, in every launcher process
-that builds it (dispatch, research, the daemon, recover and doctor), the Code
-Forge is the Connector's, with core's own git doing every git operation:
+The native forgejo adapter builds the issue tracker and the Code Forge unless
+the Consumer sets `spindrift.connectors.forgejo.primary = true`. Then, in every
+launcher process that builds them (dispatch, research, the daemon, reconcile,
+recover, quickstart and doctor), both are the Connector's, with core's own git
+doing every git operation:
 
 - The Connector authorizes with `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`, resolved
   by the launcher and the daemon like any secret knob (the value, `_CMD`, or
@@ -2840,14 +2844,24 @@ Forge is the Connector's, with core's own git doing every git operation:
   table refuses, fails the operation with the Connector's own error, and the
   native adapter never answers instead. The Connector's audit lines go to
   `.spindrift/logs/connector-forgejo.audit.jsonl`.
-- The tracker stays native: labels, claims and comments still go through the
-  native adapter until the tracker switch.
+- Every tracker operation goes through the Connector: reads, the claim and
+  every transition, label edits and creation, comments (the agent-facing and
+  the host-posted ones), filed findings, and native dependencies. The tracker
+  requires the Connector to advertise the writes `tracker.transition`,
+  `tracker.editLabels`, `tracker.labels`, `tracker.comment`,
+  `tracker.fileIssue` and `tracker.closeIssue`, and the reads
+  `tracker.comments`, `tracker.nativeDeps`, `tracker.blocks`, `tracker.probe`,
+  `tracker.count`, `tracker.labeled` and `tracker.searchIssues`; one missing
+  fails the build with `forgejo Connector lacks required capabilities: ...`
+  and the native tracker does not answer in its place. The Connector
+  credential therefore covers issue writes as well as pull requests.
 
-Dropping `primary` restores the native Code Forge with no code revert. The
-[forgejo integration harness](#forgejo-integration-harness) runs its lifecycle
-once more with `primary` set when `SPINDRIFT_BACKEND_CONNECTOR_WASM` and
-`SPINDRIFT_BACKEND_CONNECTOR_ROUTES` name a built Connector, fronting the
-harness Forgejo with a TLS proxy because the Connector refuses a non-https base.
+Dropping `primary` restores the native tracker and Code Forge with no code
+revert. The [forgejo integration harness](#forgejo-integration-harness) runs
+its lifecycle once more with `primary` set when
+`SPINDRIFT_BACKEND_CONNECTOR_WASM` and `SPINDRIFT_BACKEND_CONNECTOR_ROUTES`
+name a built Connector, fronting the harness Forgejo with a TLS proxy because
+the Connector refuses a non-https base.
 
 #### Shadow mode
 
@@ -3222,7 +3236,7 @@ Consumer; dogfood also lists it in `nix/dogfood-primary.nix`, a no-op kept
 until #6888. The jira row is not a primary row: it routes the whole tracker
 with no native backend to fall back to or shadow ([Running jira through its
 Connector](#running-jira-through-its-connector)). The forgejo row replaces
-the whole Code Forge, reads and writes, and leaves the tracker native; it is
+the whole Code Forge and the whole tracker, reads and writes; it is
 [documented with its Connector](#the-forgejo-connector). The rest of this
 section describes github's. On github, no read stays on `gh`. Primary and
 shadow are exclusive, so a primary row samples nothing; evaluation refuses
@@ -6513,7 +6527,8 @@ SPINDRIFT_BACKEND_CONNECTOR_WASM=$wasm SPINDRIFT_BACKEND_CONNECTOR_ROUTES=$route
 Run it from the repository root. The two Connector variables name the built
 forgejo Connector and its Route table, as `connectors/forgejo`'s
 `connector-forgejo-conformance` check exports them. Without them the `primary`
-subtest, which reruns the lifecycle through the Connector (see [The forgejo
+subtest, which reruns the lifecycle with the tracker and the Code Forge both
+built from the Connector (see [The forgejo
 Connector](#the-forgejo-connector)), skips while the `native` subtest passes, so
 the run still reports green.
 

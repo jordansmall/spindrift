@@ -1,7 +1,7 @@
-# The forgejo Connector's flake-parts module: the Forgejo forge half. The
-# native forgejo adapter stays authoritative unless a Consumer sets the row's
-# `primary`, which builds the Code Forge from the Connector instead (the
-# tracker stays native). The backend row below declares the Connector and its
+# The forgejo Connector's flake-parts module: the Forgejo forge and tracker.
+# The native forgejo adapter stays authoritative unless a Consumer sets the
+# row's `primary`, which builds the Code Forge and the issue tracker from the
+# Connector instead. The backend row below declares the Connector and its
 # Route table.
 { core }:
 { ... }:

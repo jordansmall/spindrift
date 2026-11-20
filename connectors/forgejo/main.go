@@ -4,8 +4,9 @@
 // the tracker's probe, open-issue count, labeled scan and text search, and the
 // tracker writes (label edits, comments, filing, closing, the label registry)
 // over REST, sent through the host's http_request Host call, which
-// attaches the credential. The native forgejo adapter stays authoritative;
-// nothing routes a production call through the Connector yet. Forgejo has no
+// attaches the credential. The native forgejo adapter stays authoritative
+// unless the row sets `primary`, which routes the Code Forge and the issue
+// tracker through the Connector with no fallback. Forgejo has no
 // statuses, so a transition always answers unmapped and core swaps labels.
 // The Connector returns raw fields only, and core makes every policy
 // decision.
