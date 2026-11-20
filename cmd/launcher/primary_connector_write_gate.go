@@ -11,7 +11,6 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
-	"spindrift.dev/launcher/internal/forge/github"
 )
 
 // primaryConnectorWriteGateName names the gate in gateRegistry.
@@ -50,7 +49,9 @@ func primaryGithubSides(c config) []githubSide {
 // shadow) and the Connector carries github writes. It looks the row up per call:
 // backendrows loads after package init, when gateRegistry is built.
 func primaryGithubApplies(c config) bool {
-	return github.Routed() && len(primaryGithubSides(c)) > 0
+	row, ok := backendrows.Lookup(backend.GitHub.Name)
+	routed := ok && !row.Shadow && backendkit.ForgeReadsThroughConnector(row.Name, row.Primary)
+	return routed && len(primaryGithubSides(c)) > 0
 }
 
 // primaryGithubWrites describes what the Connector writes with the credential
