@@ -115,23 +115,31 @@ in
     let
       err = removedChoiceError schema { boxForgeAndIssueAccess = "read-write"; };
       rejected = builtins.tryEval (mkHarnessWith "read-write").spindrift;
-      viaFlake = builtins.tryEval (consumerWith { forge.boxAccess = "read-write"; });
+      viaFlake = builtins.tryEval (consumerWith {
+        forge.boxAccess = "read-write";
+      });
       enumValues = builtins.attrNames (schema.boxForgeAndIssueAccess.removedChoices);
     in
     assert assertMsg (err != null) "a removed read-write value must produce an error";
-    assert assertMsg (hasInfix "${knob}=read-write was removed" err) "the error must name the knob, got: ${err}";
+    assert assertMsg (hasInfix "${knob}=read-write was removed" err)
+      "the error must name the knob, got: ${err}";
     assert assertMsg (hasInfix "#6901" err) "the error must name issue #6901, got: ${err}";
-    assert assertMsg (hasInfix "host-mediated" err) "the error must say every Box is host-mediated, got: ${err}";
+    assert assertMsg (hasInfix "host-mediated" err)
+      "the error must say every Box is host-mediated, got: ${err}";
     assert assertMsg (hasInfix "MIGRATING.md" err) "the error must point at MIGRATING.md, got: ${err}";
     assert assertMsg (
       removedChoiceError schema { boxForgeAndIssueAccess = "read-only"; } == null
     ) "read-only must raise no removed-choice error";
     assert assertMsg (
-      removedChoiceError schema { }  == null
+      removedChoiceError schema { } == null
     ) "an unset knob must raise no removed-choice error";
     assert assertMsg (enumValues == [ "read-write" ]) "read-write must be the only removed value";
-    assert assertMsg (!rejected.success) "mkHarness must reject defaults.boxForgeAndIssueAccess = \"read-write\"";
-    assert assertMsg (!viaFlake.success) "the flake module must reject forge.boxAccess = \"read-write\"";
+    assert assertMsg (
+      !rejected.success
+    ) "mkHarness must reject defaults.boxForgeAndIssueAccess = \"read-write\"";
+    assert assertMsg (
+      !viaFlake.success
+    ) "the flake module must reject forge.boxAccess = \"read-write\"";
     pkgs.runCommand "box-access-read-write-rejected" { } "touch $out";
 
   # The flake option reaches the document, and read-write never gets that far.

@@ -292,7 +292,9 @@ the clone, so a private repo works. A failed fetch fails the Pass before the
 Box starts. The branch still returns as a bundle through the outbox, unchanged.
 The mount stays read-only; `read-write` mounts none and keeps its direct in-box
 clone until that path is removed. ADR 0073 recorded this widening as a
-consequence; this is the first step of it.
+consequence; this is the first step of it. (Amended by issue #6901:
+`read-write` and its direct clone are removed, and the `ReadOnlyBox` kind axis
+with them, so every `github` and `forgejo` Pass gets the mount.)
 
 The push-only `git` Code Forge backend implements no `forge.MirrorSeeder`,
 which only the `github` and `forgejo` adapters do, over the credentialed clone

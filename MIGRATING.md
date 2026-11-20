@@ -103,6 +103,91 @@ What changed for a Jira Consumer:
 - **`spindrift.connectors.jira.primary` is refused.** Delete it: the
   Connector is always the tracker.
 
+## Read-write Box access is removed (issue #6901)
+
+Every Box is now host-mediated. The Box never pushes, opens a PR, comments,
+labels, or files an issue itself: it returns its branch as an outbox bundle and
+its issue, verdict and PR intents over the Signal socket, and the launcher does
+every forge and tracker write with its own token. See [Read-only
+Box](docs/reference.md#read-only-box-box_forge_and_issue_accessread-only).
+
+What changed for a Consumer:
+
+- **`BOX_FORGE_AND_ISSUE_ACCESS=read-write` is rejected.** The build, the
+  launcher at dispatch (from the environment, the input document or
+  `--box-access`), the daemon at start, and `spindrift doctor`'s removed-knobs
+  check all fail with a pointer here. Delete the setting, or set it to
+  `read-only`. The knob stays, single-valued, so an explicit `read-only`
+  (`forge.boxAccess = "read-only"`, `defaults.boxForgeAndIssueAccess`,
+  `--box-access read-only`) keeps working silently and needs no edit.
+- **The forge must support bundle relay.** The host-mediation capability check
+  that a `read-only` build already ran now runs for every build, and the build
+  throws naming the missing seam otherwise. Every built-in combination passes
+  (see the list under issue #6899, below).
+- **`BOX_GH_TOKEN` and `BOX_FORGEJO_TOKEN` have no reader.** No Box consumes
+  them now, so delete both from `harness.env`. Issue #6902 removes the
+  deprecated names and `BOX_FORGE_CREDENTIAL`.
+- **Three Box env vars are gone.** `BOX_WRITE_ENABLED`, `BOX_HOST_SEEDED_MIRROR`
+  and `BOX_GH_TOKEN_OPTIONAL` are no longer set. A Box always clones the mirror
+  the launcher seeds, for every code forge, and the direct clone path (with
+  `gh` as a git credential helper) is deleted.
+- **The outcome backstop and branch recovery never push.** They publish only
+  through the outbox bundle, and a forge with no outbox relay makes the
+  backstop block instead of falling back to a push. The Box no longer reads
+  `MAX_REBASE_ATTEMPTS`, `TRANSIENT_BACKOFF_SECS` or `HOLD_JITTER_SECS` (they
+  drove its push retries). The launcher still reads all three:
+  `MAX_REBASE_ATTEMPTS` and `TRANSIENT_BACKOFF_SECS` shape its own rebase and
+  `recover` retries, and `HOLD_JITTER_SECS` its 429 hold jitter.
+- **Settle no longer adopts a Box's own writes.** A PR or research verdict
+  comment a Box created itself is not picked up; work reaches the forge only
+  through the relay.
+- **The prompt's read-write gates and slot variables are removed variables.**
+  The `BOX_ACCESS_READ_WRITE`, `BOX_PUSH_READ_WRITE`, `PR_FORGE_READ_WRITE` and
+  `*_RW_*` gates, the `_READWRITE` tracker gates and the `FILER_FILE_DIRECT_*`
+  gates are gone, as are the variables they filled:
+  `COMMIT_PUSH_READ_WRITE_STEP`, `OPEN_PR_CREATE_DIRECT_STEP`,
+  `OPEN_PR_PUSH_READ_WRITE_STEP`, `IF_BLOCKED_PR_DIRECT_STEP`,
+  `RESEARCH_VERDICT_STEP`, `ISSUE_BLOCKED_COMMENT_STEP`,
+  `FILE_ISSUES_DIRECT_STEP` and the rest that `lib/removed-fragment-vars.nix`
+  lists under issue 6901. The deprecated `OPEN_PR_CREATE_READ_WRITE_*` and
+  `IF_BLOCKED_PR_READ_WRITE_*` aliases are removed too, since what they
+  pointed at is gone. A prompt override that references any of them fails to
+  render: delete the reference, because the host-relayed arms
+  (`COMMIT_PUSH_READ_ONLY_STEP` and its siblings) render unconditionally.
+- **The in-Box forge CLI allowlist is empty.** No shipped fragment tells the
+  agent to run `gh` or `fj`, and the allowlist check keeps it that way (see
+  [In-Box forge CLI uses](docs/in-box-forge-cli.md)).
+
+What breaks in an override prompt directory: the read-write fragment files are
+deleted, and an override copy of one is never read. Each variable above now
+renders the host-relayed fragment that sat beside the deleted file, so move
+your edits to that file. Where a row lists a `-socket` file, it renders on the
+Signal-socket carrier and the other on the log carrier. A deleted file with no
+counterpart has no step left to override: delete your copy.
+
+| Deleted file under `fragments/` | Fragment that renders in its place |
+| --- | --- |
+| `commit-push-git.md` | `commit-push-outbox.md` (a PR or `git` forge), `commit-push-host-mediated.md` (`local`) |
+| `if-blocked-push-git.md` | `if-blocked-push-outbox.md`, `if-blocked-push-host-mediated.md` (as above) |
+| `if-blocked-triage-git.md` | `if-blocked-triage-outbox.md`, `if-blocked-triage-host-mediated.md` (as above) |
+| `land-git-push-git.md` | none: a `git` Box pushes nothing, delete your copy |
+| `land-git-stop-read-write.md` | `land-git-stop-read-only.md` |
+| `open-pr-push-git.md` | `open-pr-push-outbox.md` |
+| `github/open-pr-create.md`, `forgejo/open-pr-create.md` | `open-pr-create-outbox.md`, `open-pr-create-outbox-socket.md` |
+| `github/if-blocked-pr.md`, `forgejo/if-blocked-pr.md` | `if-blocked-pr-outbox.md`, `if-blocked-pr-outbox-socket.md` (a forge with PRs); `if-blocked-pr-none.md` already covers one without |
+| `outcome-landing-git.md` | `outcome-landing-outbox.md`, `outcome-landing-outbox-socket.md` |
+| `outcome-ready-means-git.md` | `outcome-ready-means-outbox.md`, `outcome-ready-means-outbox-socket.md` |
+| `if-blocked-outcome-landing-git.md` | `if-blocked-outcome-landing-outbox.md` (a forge with PRs); `if-blocked-outcome-landing-branch.md` already covers one without |
+| `github/research-verdict.md`, `forgejo/research-verdict.md` | `research-verdict-relay.md`, `research-verdict-relay-socket.md` (`local/research-verdict-relay*.md` on a `local` tracker) |
+| `github/research-outcome-landing.md`, `forgejo/research-outcome-landing.md` | `research-outcome-landing-relayed.md`, `research-outcome-landing-relayed-socket.md` |
+| `github/issue-blocked-comment.md`, `forgejo/issue-blocked-comment.md`, `issue-blocked-comment-unwritable.md` | `issue-blocked-comment-relay.md` |
+| `file-issues-direct.md` | `file-issues-relay.md`, `file-issues-relay-socket.md` |
+| `github/filer-direct-file.md`, `forgejo/filer-direct-file.md` | `filer-file-relay.md`, `filer-file-relay-socket.md` |
+| `github/filer-direct-label.md`, `forgejo/filer-direct-label.md` | `filer-label-relay.md` |
+
+The `*-relay*` and `*-outbox*` files are the ones the launcher already
+rendered for a read-only Box, so an override of those keeps working.
+
 ## A read-only Box holds no forge credential (issue #6900)
 
 The launcher now forwards no forge token to any `read-only` Box: `GH_TOKEN`,
@@ -114,10 +199,9 @@ Box](docs/reference.md#credential-free-read-only-box).
 
 What changed for a Consumer:
 
-- **`BOX_GH_TOKEN` and `BOX_FORGEJO_TOKEN` are deprecated.** Only a
-  `read-write` Box reads them (two-actor separation). A `read-only` run no
-  longer requires them, so the Box-token check in the entry below is gone; you
-  can delete both from `harness.env`.
+- **`BOX_GH_TOKEN` and `BOX_FORGEJO_TOKEN` are deprecated.** A `read-only` run
+  no longer requires them, so the Box-token check in the entry below is gone;
+  you can delete both from `harness.env`.
 - **The read-only token gate is gone.** The `read-only-token-github` and
   `read-only-token-forgejo` launch gates no longer run, so `spindrift doctor`
   neither requires nor reports a Box token, and the launcher no longer
@@ -125,12 +209,8 @@ What changed for a Consumer:
 - **`BOX_FORGE_CREDENTIAL` is a deprecated no-op.** It was the opt-in
   (issue #7140) for this behaviour, which is now the only one. Any explicit
   value, `forwarded` or `none`, warns at build, at launch and in doctor and
-  changes nothing; `none` with `read-write` is no longer refused. Unset it
-  (`forge.boxForgeCredential`, `--box-forge-credential`). Issue #6902 removes
-  it.
-
-A `read-write` Box still receives its token, and `BOX_GH_TOKEN` or
-`BOX_FORGEJO_TOKEN` still substitutes for it there.
+  changes nothing. Unset it (`forge.boxForgeCredential`,
+  `--box-forge-credential`). Issue #6902 removes it.
 
 ## The Box's forge access defaults to read-only (issue #6899)
 
@@ -142,11 +222,8 @@ launcher pushes it, opens the draft PR, posts the comments, and swaps the
 labels with its own token. See [Read-only
 Box](docs/reference.md#read-only-box-box_forge_and_issue_accessread-only).
 
-A Consumer that never set the knob is affected. An explicit `read-write` still
-works, but it is deprecated: the build, the launcher at dispatch and in the
-daemon, and `spindrift doctor` all warn, and a later minor release removes it
-(parent issue #6757). The butler's Box is always read-only, whatever the knob
-says.
+A Consumer that never set the knob is affected. An explicit `read-write` was
+deprecated here and is now rejected (issue #6901, above).
 
 If you never set the knob, check three things before you update:
 
@@ -164,18 +241,6 @@ If you never set the knob, check three things before you update:
   `forgejo`, `local`, and `git` forges, and `jira` alongside a `github`,
   `forgejo`, or `git` forge. The build throws naming the missing seam
   otherwise.
-
-To keep `read-write` for now, set it explicitly:
-
-```nix
-perSystem.spindrift.forge.boxAccess = "read-write";
-# or, with mkHarness directly:
-defaults.boxForgeAndIssueAccess = "read-write";
-```
-
-or pass `--box-access read-write` for a single dispatch (the daemon has no such
-flag; set the knob). Either way it warns as deprecated until you move to
-`read-only`.
 
 ## A knob env var stops the launcher (issue #6623)
 
@@ -262,12 +327,11 @@ including the work prompt's `git log` bullet, render empty.
 ## A read-only Box on `CODE_FORGE=local` renders the host-mediated commit step (issue #6259)
 
 A read-only Box on a host-mediated forge (`CODE_FORGE=local`) now renders
-`commit-push-host-mediated.md` for its COMMIT push step, the same fragment a
-read-write Box there gets, instead of `commit-push-outbox.md`. The outbox copy
-now renders only for a read-only Box on a PR forge. If your prompt directory
-overrides `commit-push-outbox.md` and you run read-only on `local`, move that
-override to `commit-push-host-mediated.md`, or a read-only local Box will no
-longer see it.
+`commit-push-host-mediated.md` for its COMMIT push step, instead of
+`commit-push-outbox.md`. The outbox copy now renders only for a read-only Box
+on a PR forge. If your prompt directory overrides `commit-push-outbox.md` and
+you run read-only on `local`, move that override to
+`commit-push-host-mediated.md`, or a read-only local Box will no longer see it.
 
 ## The pi Driver enforces `spawns` (issue #5809)
 
@@ -334,15 +398,26 @@ What breaks in an override prompt directory:
   | `RESEARCH_ISSUE_READ_GITHUB_STEP`, `RESEARCH_ISSUE_READ_LOCAL_STEP`, `RESEARCH_ISSUE_READ_FORGEJO_STEP` | `RESEARCH_ISSUE_READ_STEP` |
   | `SCOUT_ISSUE_READ_GITHUB_STEP`, `SCOUT_ISSUE_READ_FORGEJO_STEP` | `SCOUT_ISSUE_READ_STEP` |
   | `FILER_DEDUP_SEARCH_STEP`, `FILER_DEDUP_SEARCH_FORGEJO_STEP`, `FILER_DEDUP_SEARCH_LOCAL_STEP` | `FILER_DEDUP_STEP` |
+  | `RESEARCH_VERDICT_GITHUB_STEP`, `RESEARCH_VERDICT_FORGEJO_STEP` | `RESEARCH_VERDICT_STEP` (removed in #6901) |
   | `RESEARCH_VERDICT_GITHUB_READONLY_STEP`, `RESEARCH_VERDICT_FORGEJO_READONLY_STEP`, `RESEARCH_VERDICT_LOCAL_STEP` | `RESEARCH_VERDICT_RELAY_STEP` |
   | `RESEARCH_VERDICT_GITHUB_READONLY_SOCKET_STEP`, `RESEARCH_VERDICT_FORGEJO_READONLY_SOCKET_STEP`, `RESEARCH_VERDICT_LOCAL_SOCKET_STEP` | `RESEARCH_VERDICT_RELAY_SOCKET_STEP` |
+  | `RESEARCH_OUTCOME_LANDING_GITHUB_STEP`, `RESEARCH_OUTCOME_LANDING_FORGEJO_STEP` | `RESEARCH_OUTCOME_LANDING_STEP` (removed in #6901) |
+  | `ISSUE_BLOCKED_COMMENT_GITHUB_STEP`, `ISSUE_BLOCKED_COMMENT_FORGEJO_STEP` | `ISSUE_BLOCKED_COMMENT_STEP` (removed in #6901) |
   | `ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP`, `ISSUE_BLOCKED_COMMENT_FORGEJO_READONLY_STEP`, `ISSUE_BLOCKED_COMMENT_LOCAL_STEP` | `ISSUE_BLOCKED_COMMENT_RELAY_STEP` |
+  | `FILER_FILE_DIRECT_STEP`, `FILER_FILE_DIRECT_FORGEJO_STEP` | `FILER_DIRECT_FILE_STEP` (removed in #6901) |
+  | `FILER_LABEL_DIRECT_STEP`, `FILER_LABEL_DIRECT_FORGEJO_STEP` | `FILER_DIRECT_LABEL_STEP` (removed in #6901) |
   | `FIX_CI_READ_GITHUB_STEP`, `FIX_CI_READ_FORGEJO_STEP` | `FIX_CI_READ_STEP` |
+  | `OPEN_PR_CREATE_READ_WRITE_STEP`, `OPEN_PR_CREATE_READ_WRITE_FORGEJO_STEP` | `OPEN_PR_CREATE_DIRECT_STEP` (removed in #6901) |
+  | `IF_BLOCKED_PR_READ_WRITE_STEP`, `IF_BLOCKED_PR_READ_WRITE_FORGEJO_STEP` | `IF_BLOCKED_PR_DIRECT_STEP` (removed in #6901) |
   | `PR_BODY_LOCAL_REF_STEP` | `PR_BODY_ISSUE_REF_STEP` |
   | `PR_BODY_LOCAL_NOREF_STEP` | `PR_BODY_NO_ISSUE_REF_STEP` |
   | `COMMIT_PUSH_LOCAL_STEP` | `COMMIT_PUSH_HOST_MEDIATED_STEP` |
   | `IF_BLOCKED_TRIAGE_LOCAL_STEP` | `IF_BLOCKED_TRIAGE_HOST_MEDIATED_STEP` |
   | `IF_BLOCKED_PUSH_LOCAL_STEP` | `IF_BLOCKED_PUSH_HOST_MEDIATED_STEP` |
+
+  A row marked "removed in #6901", here or in the file table below, no longer
+  renders at all, not even deprecated: see [Read-write Box access is
+  removed](#read-write-box-access-is-removed-issue-6901).
 
   `lib/removed-fragment-vars.nix` is the authoritative list. Variables not in
   the table, such as `COMMIT_PUSH_READ_ONLY_STEP`, are unchanged.
@@ -360,14 +435,28 @@ What breaks in an override prompt directory:
   | `filer-dedup-search.md` | `github/filer-dedup.md` |
   | `filer-dedup-search-forgejo.md` | `forgejo/filer-dedup.md` |
   | `filer-dedup-search-local.md` | `local/filer-dedup.md` |
+  | `filer-file-direct.md` | `github/filer-direct-file.md` (removed in #6901) |
+  | `filer-file-direct-forgejo.md` | `forgejo/filer-direct-file.md` (removed in #6901) |
+  | `filer-label-direct.md` | `github/filer-direct-label.md` (removed in #6901) |
+  | `filer-label-direct-forgejo.md` | `forgejo/filer-direct-label.md` (removed in #6901) |
+  | `research-verdict-github.md` | `github/research-verdict.md` (removed in #6901) |
+  | `research-verdict-forgejo.md` | `forgejo/research-verdict.md` (removed in #6901) |
   | `research-verdict-github-readonly.md`, `research-verdict-forgejo-readonly.md` | `research-verdict-relay.md` |
   | `research-verdict-github-readonly-socket.md`, `research-verdict-forgejo-readonly-socket.md` | `research-verdict-relay-socket.md` |
   | `research-verdict-local.md` | `local/research-verdict-relay.md` |
   | `research-verdict-local-socket.md` | `local/research-verdict-relay-socket.md` |
+  | `research-outcome-landing-github.md` | `github/research-outcome-landing.md` (removed in #6901) |
+  | `research-outcome-landing-forgejo.md` | `forgejo/research-outcome-landing.md` (removed in #6901) |
+  | `issue-blocked-comment-github.md` | `github/issue-blocked-comment.md` (removed in #6901) |
+  | `issue-blocked-comment-forgejo.md` | `forgejo/issue-blocked-comment.md` (removed in #6901) |
   | `issue-blocked-comment-github-readonly.md`, `issue-blocked-comment-forgejo-readonly.md` | `issue-blocked-comment-relay.md` |
   | `issue-blocked-comment-local.md` | `local/issue-blocked-comment-relay.md` |
   | `fix-ci-read-github.md` | `github/fix-ci-read.md` |
   | `fix-ci-read-forgejo.md` | `forgejo/fix-ci-read.md` |
+  | `open-pr-create-git.md` | `github/open-pr-create.md` (removed in #6901) |
+  | `open-pr-create-forgejo.md` | `forgejo/open-pr-create.md` (removed in #6901) |
+  | `if-blocked-pr-git.md` | `github/if-blocked-pr.md` (removed in #6901) |
+  | `if-blocked-pr-forgejo.md` | `forgejo/if-blocked-pr.md` (removed in #6901) |
   | `pr-body-local-ref.md` | `local/pr-body-issue-ref.md` |
   | `pr-body-local-noref.md` | `local/pr-body-no-issue-ref.md` |
   | `commit-push-local.md` | `commit-push-host-mediated.md` |

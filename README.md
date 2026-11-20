@@ -253,14 +253,10 @@ The first three are on by default. The rest are off until you enable them.
   under a `## Touches` heading. The launcher holds it back while another
   in-progress issue lists an overlapping path. See
   [Declared touch-set overlap](docs/reference.md#declared-touch-set-overlap).
-- **Read-only Box (the default).** With `forge.boxAccess = "read-only"`, the Box gets
+- **Read-only Box (the only mode).** Every Box gets
   no forge credential. The launcher pushes the branch, opens the PR, and posts
   comments for it, so the agent has no way to merge. See
   [Read-only Box](docs/reference.md#read-only-box-box_forge_and_issue_accessread-only).
-- **Two-actor separation.** For a `read-write` Box (deprecated), put a second
-  machine user's token in `BOX_GH_TOKEN` and bar that user from the base branch
-  with a ruleset. See
-  [Two-actor separation](docs/reference.md#two-actor-separation-opt-in-hard-mode).
 - **Auto-format and auto-lint.** `agents.format.enable` and
   `agents.lint.enable` run the project's formatter or linter on changed files
   before each commit. spindrift detects which tool to run.

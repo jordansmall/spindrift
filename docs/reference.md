@@ -924,10 +924,8 @@ full human-quality prose — irrelevant here since a research dispatch never
 commits). It does name `SPINDRIFT_COMMENT` explicitly, where the base
 fragment only reaches it generically, as one instance of "any host-relay
 signal line such as `SPINDRIFT_PR_INTENT`": whenever the verdict is relayed
-(`RESEARCH_VERDICT_RELAYED`) — a read-only dispatch (`BoxWriteEnabled=false`),
-a local tracker (no tracker client at all), a tracker the Box cannot write
-in-box (Jira), or a Filer-on run, where the verdict relays even from a
-read-write Box (ADR 0041) — the box posts nothing itself and relays the
+(`RESEARCH_VERDICT_RELAYED`), which is every research dispatch (ADR 0041) —
+the box posts nothing itself and relays the
 comment through a single `SPINDRIFT_COMMENT` host-relay stdout line under
 the log carrier (the socket carrier relays it through the signal socket
 instead), making it the sole carrier of the verdict on that path (the
@@ -3916,11 +3914,12 @@ This is protocol version **0.3.0**. The host is
   Core pushes a branch it built itself, relays the Box's outbox bundle and
   reads the bundle's commit subjects, each in its own clone of the validated
   `forge.remote` clone URL with its own credential. The relay and the subjects
-  are offered only when `Git.ReadOnlyBox` is set, since Settle reads a relay
-  as "the Box handed off a bundle". Only the draft-PR create crosses the
-  Connector, as `forge.openPR`. A create that fails adopts the branch's open
-  PR, if there is one, as not created: adopt is the result a retried hand-off
-  needs, so no forge-specific status code or error class stands for it.
+  are offered whenever the Connector declares `forge.draftPRs`, since Settle
+  reads a relay as "the Box handed off a bundle". Only the draft-PR create
+  crosses the Connector, as `forge.openPR`. A create that fails adopts the
+  branch's open PR, if there is one, as not created: adopt is the result a
+  retried hand-off needs, so no forge-specific status code or error class
+  stands for it.
   Without `forge.draftPRs` the forge cannot host-mediate, and Settle blocks a
   read-only hand-off as it does for a native PR forge without bundle relay.
 
@@ -4295,9 +4294,9 @@ per-secret `_CMD` example above in one line. A per-secret `<SECRET>_CMD`
 With one exception (the `opencode` bullet below), the template is attempted
 only for a secret this run actually needs — e.g. `JIRA_TOKEN` only when
 `ISSUE_TRACKER=jira`, `FORGEJO_TOKEN` only when `CODE_FORGE` or
-`ISSUE_TRACKER` is `forgejo`, and never for the opt-in, deprecated, `read-write`-only Box tokens
-`BOX_GH_TOKEN` (ADR 0016) and `BOX_FORGEJO_TOKEN` — so an operator who
-doesn't use those features never gets an unwanted vault lookup for them.
+`ISSUE_TRACKER` is `forgejo`, and never for the deprecated Box tokens `BOX_GH_TOKEN` (ADR 0016) and
+`BOX_FORGEJO_TOKEN`, which no Box reads — so an operator who doesn't use
+those features never gets an unwanted vault lookup for them.
 The active Driver's credential is likewise the only one fetched; a
 credential outside the Driver's set is never looked up, so a vault missing
 it is never an error. This list mirrors the `credentials` rules on each
@@ -4348,8 +4347,8 @@ When a vault's naming isn't uniform, fall back to the per-secret
 | `CODE_FORGE`              | `github` (baked)       | code-landing backend: `github` (open PR, watch CI, merge), `git` (push-only to `CODE_FORGE_REMOTE_URL`; no PR, CI-watch, or merge gate — see [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)), `local` (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network — see [ADR 0033](../docs/adr/0033-host-mediated-local-code-forge.md)), or `forgejo` (open a PR via `fj pr create`, watch the CI rollup, and merge under `MERGE_MODE` on a Forgejo/Gitea instance authenticated by `FORGEJO_TOKEN` — the second full `PRForge` backend beside `github`; see [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)) |
 | `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `CODE_FORGE_ACCUMULATION_REPO_DIR` | `.spindrift/accum.git` under the launcher's working directory when `CODE_FORGE=local` (auto-created and seeded); an explicit value overrides it | host path to the bare Accumulation repo, mounted read-only into the Box and landed into host-side |
-| `BOX_FORGE_AND_ISSUE_ACCESS` | `read-only` (baked; issue #6899)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-only` (the default: the Launcher host-mediates every write — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)) or `read-write` (the Box writes directly; deprecated, warns at build, dispatch, daemon start and `spindrift doctor`, and a later minor release removes it, issue #6757; see [MIGRATING.md](../MIGRATING.md)), coherence-checked against the selected forge/tracker's registry capability bits at `nix build` (Consumer eval) time (issue #2526) — `read-only` is permitted only when the selected forge implements bundle-relay (and host-side draft-PR-create when it has pull requests) and the selected tracker implements host-posted comments; `local`, `github`, and `forgejo` satisfy both sides of the check today, the plain `git` forge satisfies the forge side by bundle relay alone (issue #6898), and the `jira` tracker satisfies the tracker side (paired with a `github`, `forgejo`, or `git` Code Forge, issues #6355, #6898); a Go startup gate remains only as a backstop for a runtime override past what nix already validated |
-| `BOX_FORGE_CREDENTIAL` | unset (baked via `forge.boxForgeCredential`) | DEPRECATED, no effect, and removed in issue #6902: every `read-only` Box already holds no forge credential (issue #6900), and a `read-write` Box always receives its token. Any explicit value (`forwarded` or `none`) warns at build, launch and `spindrift doctor` and changes nothing; unset it |
+| `BOX_FORGE_AND_ISSUE_ACCESS` | `read-only` (baked; issue #6899)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-only` is the only value, and the default: the Launcher host-mediates every write — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only). `read-write` was removed in issue #6901 and is rejected at build, dispatch, daemon start and `spindrift doctor` (see [MIGRATING.md](../MIGRATING.md)). The selection is coherence-checked against the selected forge/tracker's registry capability bits at `nix build` (Consumer eval) time (issue #2526) — the selected forge must implement bundle-relay (and host-side draft-PR-create when it has pull requests) and the selected tracker must implement host-posted comments; `local`, `github`, and `forgejo` satisfy both sides of the check today, the plain `git` forge satisfies the forge side by bundle relay alone (issue #6898), and the `jira` tracker satisfies the tracker side (paired with a `github`, `forgejo`, or `git` Code Forge, issues #6355, #6898); a Go startup gate remains only as a backstop for a runtime override past what nix already validated |
+| `BOX_FORGE_CREDENTIAL` | unset (baked via `forge.boxForgeCredential`) | DEPRECATED, no effect, and removed in issue #6902: every Box already holds no forge credential (issue #6900). Any explicit value (`forwarded` or `none`) warns at build, launch and `spindrift doctor` and changes nothing; unset it |
 | `BOX_SIGNAL_CARRIER`     | `socket` (per-run only; not bakeable) | transport for the three mid-run signal channels (comment, PR intent, issue intent) crossing the launcher/Box seam: `socket` (the default — routed over a launcher-owned Signal socket, see [ADR 0052](adr/0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md) and [Signal socket](#signal-socket-box_signal_carriersocket) below) or `log` (the opt-out — nonce-guarded marker lines in the Box log, as before; stays selectable through the whole 0.22 minor). Unset counts as `socket`, so it fails at launcher startup under `NETWORK_MODE=none`, and when each Dispatch starts under `no-host-loopback` where the transport needs TCP; pass `--box-signal-carrier log` there (the daemon reads `BOX_SIGNAL_CARRIER` from its own environment and forwards it to each child as that flag) |
 | `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
 | `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query (per-run only; not bakeable) |
@@ -5173,9 +5172,10 @@ when the PR merges — by the launcher (`immediate`), by GitHub (`auto`), or by 
 human (`manual`).
 
 **`CODE_FORGE=git`** (push-only, [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md))
-replaces everything from *open PR* onward: the Box pushes its branch to
-`CODE_FORGE_REMOTE_URL` and prints `SPINDRIFT_OUTCOME ... landing=agent/issue-N status=ready`
-— no PR, no CI-watch. The launcher skips the CI-poll entirely (there is
+replaces everything from *open PR* onward: the Box returns its branch as a
+bundle, prints `SPINDRIFT_OUTCOME ... landing=agent/issue-N status=ready`, and
+the launcher pushes the branch to `CODE_FORGE_REMOTE_URL` —
+no PR, no CI-watch. The launcher skips the CI-poll entirely (there is
 nothing to poll) and swaps the issue straight to `agent-complete`, then
 applies `MERGE_MODE` as a plain push: `manual` leaves the branch as pushed,
 `immediate` merges it onto the target branch. `auto` has no meaning off
@@ -5186,7 +5186,7 @@ a `PRForge` backend and is rejected at startup.
 `GIT_USER_NAME`/`GIT_USER_EMAIL` as the merge commit's identity. The host
 needs its own push credentials for that remote (e.g. an SSH key or
 credential helper covering `CODE_FORGE_REMOTE_URL`) — separate from the
-Box's `GH_TOKEN`, which only covers the Issue Tracker. A push auth failure
+launcher's `GH_TOKEN`, which only covers the Issue Tracker. A push auth failure
 surfaces as a `merge-blocked` comment on the issue, not a crash.
 Userinfo on an http(s) `CODE_FORGE_REMOTE_URL` (`oauth2:<token>@`, or a
 bare `<token>@`) also works: the launcher splits it off and runs every
@@ -6011,7 +6011,7 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   `==> conflict-resolve pass summary:` (each line prefixed `  | `, so no
   summary line can forge a host-scanned `SPINDRIFT_` line); the
   post-force-push fix pass owns whatever repair remains.
-- **A relay that exhausts its retries parks the issue.** When a read-only Box
+- **A relay that exhausts its retries parks the issue.** When a Box
   prints `status=ready` but the Launcher's host-side bundle relay still fails
   (anything but a missing bundle or the Workflows-permission refusal below)
   after `TRANSIENT_RETRY_MAX` retries, settle swaps `agent-in-progress` →
@@ -6367,21 +6367,18 @@ such block and are experimental, so you select them by editing
   tracker maps research states the same way it maps work states, through
   its frontmatter `state` field.
 
-  A research verdict on Jira is always host-posted. The Box has no Jira
-  client and the Connector's credentials never reach it, so even under
-  `read-write` and with the Filer off the verdict relays through the Launcher
-  (`SPINDRIFT_COMMENT`, OUTCOME `landing=none`) rather than
-  `gh issue comment`, and a run whose relayed verdict is missing fails to
+  A research verdict on Jira is host-posted, as on every tracker. The Box
+  has no Jira client and the Connector's credentials never reach it, so the
+  verdict relays through the Launcher (`SPINDRIFT_COMMENT`, OUTCOME
+  `landing=none`), and a run whose relayed verdict is missing fails to
   `agent-research-failed` instead of applying a bare verdict label (issue
-  #5245). The backend row's `inBoxUnwritableTracker` bit drives both
-  halves. Linked Jira issues are read through `driver-exec signal issue`
+  #5245). Linked Jira issues are read through `driver-exec signal issue`
   like any other tracker's (issue #6894).
 
-  A blocked work run's progress comment is host-posted on Jira for the
-  same reason: under `read-write` the IF BLOCKED step tells the agent to
-  put what's done and what remains in the `SPINDRIFT_OUTCOME` `note=`
-  field instead of running `gh issue comment`, and settle posts that note
-  to the Jira issue (issue #5263). The same bit drives both halves.
+  A blocked work run's progress comment is host-posted on Jira too: the IF
+  BLOCKED step tells the agent to put what's done and what remains in the
+  `SPINDRIFT_OUTCOME` `note=` field, and settle posts that note to the Jira
+  issue (issue #5263).
 
   Because comments and issue filing both post host-side, the `jira` row
   carries `hostPostingCapable`, so `BOX_FORGE_AND_ISSUE_ACCESS=read-only`
@@ -6449,40 +6446,19 @@ When either backend knob selects forgejo — `ISSUE_TRACKER=forgejo` or
 `CODE_FORGE=forgejo` — the image bakes [`fj`](https://codeberg.org/Cyborus/forgejo-cli)
 (forgejo-cli) onto the Box's PATH, because the forgejo backend row declares it
 as its `cliPackage`; an image selecting no such backend never carries it.
-This is the forgejo analog of the `gh` load out: in a read-write
-mode an Agent reads its issue, comments, posts research verdicts, and opens
-the PR through `fj` porcelain rather than hand-assembled REST calls.
+A Box holds no forge token (issue #6900), so `fj` has nothing to authenticate
+with there and no shipped fragment tells the agent to run it (the [in-Box
+forge CLI allowlist](in-box-forge-cli.md) is empty). Every forgejo read and
+write is host-side: the launcher reads the issue, linked issues and
+duplicate searches for the Box through the Signal socket, relays its comment,
+verdict and PR intents, and opens the draft PR itself. `box` runs `fj auth
+add-key` only when a `FORGEJO_TOKEN` is present in its environment, which no
+dispatch provides now.
 
-`box` configures `fj` non-interactively right after it clones the Target
-repo, ahead of the read-only guards and branch recovery: it feeds
-`FORGEJO_TOKEN` on stdin (never argv) to `fj auth add-key`, which writes
-`~/.local/share/forgejo-cli/keys.json` keyed by the instance host — an
-offline write, no network call. It runs only when
-`ISSUE_TRACKER` or `CODE_FORGE` selects forgejo, and is inert on a
-non-forgejo image (no `fj`) or a read-only Box (no token), so the token
-plumbing follows exactly where `fj` is baked and permitted to write. The
-same `FORGEJO_TOKEN` also authenticates git pushes, carried as the origin
-remote URL's userinfo.
-
-The `*-forgejo` prompt-fragment family names the commands the Agent runs,
-pinned by the prompt eval-checks the same way the `gh` family is:
-
-- **Read** (`fj issue view <other-number>`) — for a parent/linked issue or
-  PRD the subject issue references; the subject issue's own body and its
-  last-10-comment snapshot no longer need an in-box read at all, since the
-  launcher reads them host-side at dispatch and injects them into the
-  prompt's `# ISSUE TEXT` section (issue #3445), same as every other
-  tracker.
-- **Comment / verdict** (`fj issue comment ${ISSUE_NUMBER} "..."`) — the
-  read-write blocked-note and research-verdict steps; a read-only Box relays
-  both host-side (a nonce-guarded `SPINDRIFT_COMMENT` line and the
-  `SPINDRIFT_OUTCOME` `note=` field) exactly as the local and read-only
-  github trackers do.
-- **Open PR** (`fj pr create --base … --head … --body … "WIP: …"`) — the
-  read-write `CODE_FORGE=forgejo` create step; the `WIP: ` prefix opens a
-  draft the launcher flips ready on CI green, then handles per
-  [`MERGE_MODE`](#runtime-configuration) and the [merge guard](#merge-guard)
-  (the forgejo PRForge surface, [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)).
+The launcher opens the PR with a `WIP: ` title prefix, a draft it flips ready
+on CI green, then handles per [`MERGE_MODE`](#runtime-configuration) and the
+[merge guard](#merge-guard) (the forgejo PRForge surface, [ADR
+0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)).
 
 `forgejo/filer-dedup.md` searches through the Signal socket's
 `issue-search` verb rather than REST (issue #6895); the host drops results that
@@ -6647,7 +6623,7 @@ does — the GitHub token that opens the PR is the same token that can merge
 it, so an Agent that defies the contract and runs `gh pr merge` against its
 own PR bypasses the launcher-side check entirely. See
 [ADR 0016](adr/0016-merge-guard-bounds-drift-not-adversaries.md) for that
-boundary and the two-actor-separation hard mode.
+boundary and the retired two-actor-separation hard mode.
 
 The guard exists on the `github` and `forgejo` Code Forge merge paths (both
 implement `PRForge`). The push-only `git` forge has no launcher in the merge
@@ -6657,109 +6633,18 @@ Configure it via `git.merge.guardPaths` (baked) or the
 `MERGE_GUARD_PATHS` env var (runtime) — see the [flake options
 reference](flake-options.md) for the full knob surface.
 
-#### Two-actor separation (opt-in hard mode)
+#### Two-actor separation (retired)
 
-Under the single-token default, the GitHub token that opens a PR is the same
-token that can merge it — the Box holds it, so a fully adversarial Agent can
-run `gh pr merge` on its own green PR from inside the Box before the launcher
-ever evaluates the merge guard (see [ADR
-0016](adr/0016-merge-guard-bounds-drift-not-adversaries.md)). Two-actor
-separation is the opt-in hard mode that closes that gap: two machine GitHub
-users instead of one, with a repository ruleset barring the Box's user from
-updating the base branch. It is the only configuration in which the merge
-guard is literally uninfluenceable by the Agent, at the cost of a second
-account and a second secret to provision.
-
-`BOX_GH_TOKEN` (and `BOX_FORGEJO_TOKEN`, below) matters only to a `read-write`
-Box, which is deprecated: a `read-only` Box holds no forge credential, so
-there is no Box token to split from the launcher's and nothing to rule out.
-The knobs are deprecated along with it.
-
-**Setup:**
-
-1. Create a **second GitHub user** (or bot account) distinct from the one
-   behind your existing `GH_TOKEN`. Mint it a fine-grained PAT scoped to
-   **only the Target repository**, with the same permission set the
-   single-token default already grants (see the permission table above).
-2. Set that PAT as `BOX_GH_TOKEN` — a secret, like `GH_TOKEN` itself: `harness.env`
-   or your shell, never a flake setting. Unset, the harness behaves exactly as
-   the single-token default, byte-for-byte; set, the Box receives this value
-   as its own `GH_TOKEN` while the launcher keeps using its own for every
-   host-side call (merges, labels, the usage comment).
-3. On the Target repo, create a **repository ruleset** (Settings → Rules →
-   Rulesets) targeting the base branch, with a "Restrict updates" rule (add
-   "Restrict deletions" too, to stop the Box's user from deleting the branch
-   outright).
-4. Set the ruleset's **bypass list to the launcher's own user only** — the
-   one behind `GH_TOKEN`. Every other actor, including the Box's user, is
-   then blocked from updating the base branch by the ruleset itself,
-   whether by a direct push or by merging a PR — GitHub enforces "restrict
-   updates" on every ref update regardless of the token's own permission
-   scope, which is why this closes the gap the merge guard cannot: no PAT
-   permission table controls it, the ruleset does.
-
-**Per-token permissions** — both tokens carry the same fine-grained scopes;
-what differs is which GitHub user each belongs to, and only one is on the
-bypass list:
-
-| token                | GitHub user            | can update the base branch? |
-| -------------------- | ----------------------- | ---------------------------- |
-| `BOX_GH_TOKEN` (Box)  | second, non-bypassed user | No — the ruleset blocks it, even via PR merge |
-| `GH_TOKEN` (launcher) | primary, bypass-listed user | Yes — the ruleset's sole bypass actor |
-
-See [SECURITY.md](../SECURITY.md) for how this changes the "Box cannot merge
-its own PR" claim.
-
-#### Two-actor separation on Forgejo
-
-The Forgejo backend earns the same opt-in hard mode, mirroring the GitHub
-recipe above with `BOX_FORGEJO_TOKEN` in place of `BOX_GH_TOKEN`. Under the
-single-token default, the `FORGEJO_TOKEN` that opens a PR is the same token
-that can merge it, so a fully adversarial Agent could merge its own green PR
-from inside the Box before the launcher evaluates the merge guard. Two
-machine Forgejo users instead of one, with a branch-protection rule barring
-the Box's user from updating the base branch, closes that gap. Forgejo has no
-App-token model, so this is the Forgejo analog of GitHub's ruleset: a plain
-branch-protection rule whose push and merge whitelists name only the
-launcher's user.
-
-**Setup:**
-
-1. Create a **second Forgejo user** (or bot account) distinct from the one
-   behind your existing `FORGEJO_TOKEN`. Mint it a PAT scoped to **only the
-   Target repository**, with the same permission set the single-token default
-   already grants.
-2. Set that PAT as `BOX_FORGEJO_TOKEN` — a secret, like `FORGEJO_TOKEN`
-   itself: `harness.env` or your shell, never a flake setting. Unset, the
-   harness behaves exactly as the single-token default, byte-for-byte; set,
-   the Box receives this value as its own `FORGEJO_TOKEN` while the launcher
-   keeps using its own for every host-side call (merges, labels, the usage
-   comment).
-3. On the Target repo, add a **branch-protection rule** (Settings → Branches →
-   Branch protection rules → Add new rule) whose branch-name pattern matches
-   the base branch (e.g. `main`). Enable it so direct pushes are blocked
-   unless whitelisted, and turn on **Enable Merge Whitelist** so unwhitelisted
-   users cannot merge PRs into the branch either.
-4. Set both the **push whitelist and the merge whitelist to the launcher's own
-   user only** — the one behind `FORGEJO_TOKEN`. Every other actor, including
-   the Box's user, is then blocked from updating the base branch by the rule
-   itself, whether by a direct push or by merging a PR. No PAT permission
-   scope controls this — the branch-protection rule does, which is why it
-   closes the gap the merge guard cannot.
-
-**Per-token permissions** — both tokens carry the same scopes; what differs is
-which Forgejo user each belongs to, and only one is whitelisted:
-
-| token                      | Forgejo user               | can update the base branch? |
-| -------------------------- | -------------------------- | ---------------------------- |
-| `BOX_FORGEJO_TOKEN` (Box)  | second, non-whitelisted user | No — the rule blocks it, even via PR merge |
-| `FORGEJO_TOKEN` (launcher) | primary, whitelisted user  | Yes — the rule's sole whitelisted actor |
-
-**Forgejo exposes no endpoint to introspect a token's granted scopes**, so the
-launcher cannot verify `BOX_FORGEJO_TOKEN`'s write capability at startup. The
-branch-protection rule is the enforcement boundary regardless; provision the
-Box user's PAT with least privilege and verify its scope yourself before
-relying on it.
+Two-actor separation (ADR 0016) was the opt-in hard mode that closed the gap
+the merge guard cannot: a second machine user for the Box, with a repository
+ruleset (GitHub) or branch-protection rule (Forgejo) barring that user from
+updating the base branch. It existed because a `read-write` Box held a token
+that could merge its own green PR. Issue #6901 removed `read-write`, and no
+Box holds a forge token (issue #6900), so there is no Box actor to split from
+the launcher's and nothing for a ruleset to rule out. `BOX_GH_TOKEN` and
+`BOX_FORGEJO_TOKEN` have no reader and are removed in issue #6902; delete
+them from `harness.env`. A ruleset on the base branch is still good hygiene
+against any other writer, but spindrift no longer needs it.
 
 #### Forgejo Actions dispatch templates
 
@@ -7002,10 +6887,10 @@ Filing is strictly best-effort: a filer failure or timeout never blocks the
 PR or changes the outcome line — the main agent falls back to pasting the
 escalated findings into the PR body, exactly as when the filer is off.
 
-Under [`BOX_FORGE_AND_ISSUE_ACCESS=read-only`](#read-only-box-box_forge_and_issue_accessread-only)
-(issue #2019; unconditional since #4291 removed the orchestrator switch), the filer's write mechanism
-swaps: instead of `gh label create`/`gh issue create` (both writes a
-read-only Box can't make), it prints one nonce-guarded, base64-encoded
+The filer's write mechanism is a relay (issue #2019; unconditional since
+#4291 removed the orchestrator switch, and since #6901 removed the direct
+`gh issue create` path along with `read-write` Box access): the Box can't
+create labels or issues, so it prints one nonce-guarded, base64-encoded
 `SPINDRIFT_ISSUE_INTENT` stdout line per issue to file, and reports `QUEUED`
 rather than `FILED <url>` — the issue isn't filed until the Launcher relays
 it, host-side, once the Box exits, so no URL is known yet. The Launcher
@@ -7020,9 +6905,7 @@ added host-side backstop described below (`dedupTerms`, issue #3609): before
 filing, the Launcher re-checks each intent against the backlog itself — open
 and closed alike (issue #3873, since a closed finding was already filed once
 and must never be refiled just because it was since closed) — and skips a
-repeat that survived the Filer's own search. A
-`read-write` Box keeps the direct `gh issue create`
-path above, unchanged.
+repeat that survived the Filer's own search.
 
 The relayed payload's JSON may also carry an optional `type` key, one of the
 closed set `bug` | `enhancement` | `chore` (issue #2594, ADR 0041) — the
@@ -7179,23 +7062,20 @@ than a breaking format change, and lets the next added count do the same.
 
 The Filer also backs the research Dispatch kind (see [Research
 dispatch](#research-dispatch)): whenever a research run — ordinary or
-`--self-contained`, read-only or read-write — has
+`--self-contained` — has
 the Filer provisioned (same `models.filer` roster switch as above, no
 separate research knob), both research prompts render a filing step letting
 the researcher hand any finding worth tracking, beyond the issue's own
-verdict, to the filer subagent. Unlike the work path's read-only
-fork above, research filing is relay-only **unconditionally** — there is no
-direct-file mode for research at all. The filer emits one
+verdict, to the filer subagent. Research filing is relay-only, like the work
+path's. The filer emits one
 `SPINDRIFT_ISSUE_INTENT` line per finding; the Launcher files each host-side
 after the Box exits, applying `agent-research-finding` (not
 `agent-review-finding`) and a `Filed from research on #<N>` backlink to the
 filed issue's body.
 
-This changes observable read-write behavior too: once the Filer is
-provisioned, the research verdict comment itself now always relays through
-the Launcher (`SPINDRIFT_COMMENT`) as well, even under `read-write`, where an
-unmodified research Box used to post its own `gh issue comment` directly.
-The Launcher files each intent first, appends a "Filed issues" section
+Once the Filer is provisioned, the research verdict comment relays through
+the Launcher (`SPINDRIFT_COMMENT`) as well, as it does without one. The
+Launcher files each intent first, appends a "Filed issues" section
 listing the real URLs — or, for a filing that failed, an inline
 title-and-summary bullet — right after the comment body, then posts the
 combined comment host-side in one call, so the researcher never fabricates
@@ -7211,9 +7091,8 @@ standalone comment of its own, since gate.go has no filed-issues comment to
 append it to, so a dedup skip is visible in the tracker artifact on both
 paths. Without the Filer provisioned, the filing step and its "plus, when
 the Filer is provisioned" closing reference both vanish from both research
-prompts, and the verdict comment posts directly from the Box as always — the
-filing step and the relay-comment change are both gated purely on Filer
-presence.
+prompts, and the verdict comment still relays through the Launcher, with no
+"Filed issues" section.
 
 Override the filer's system prompt the same way as `scoutPrompt`/
 `reviewPrompt`: the `filerPrompt` `mkHarness` argument (image rebuild), or
@@ -7485,8 +7364,8 @@ This retires only the issue-plane exception to zero-shared-host-filesystem;
 under `CODE_FORGE=local` the read-only Accumulation repo mount and the
 writable outbox ([ADR 0033](adr/0033-host-mediated-local-code-forge.md))
 remain documented exceptions. `github` (and `jira`) Dispatches are
-unchanged — they keep reading and writing in-box via `gh issue view`/`gh
-issue comment` for anything beyond the subject issue.
+unchanged — the Box reads anything beyond the subject issue through the
+host-answered `driver-exec signal issue` verb, and the Launcher does every write.
 
 Each issue is one file, named `<slug>.md`, where `<slug>` is the issue's ID
 (used anywhere the GitHub backend would use an issue number — dependency
@@ -7555,8 +7434,7 @@ landing: "https://github.com/owner/repo/pull/123"
   branch ref under `CODE_FORGE=git`) the launcher writes only from its own
   evidence (a PR it opened or adopted, a merge it performed, a push-only
   branch it relayed), never from the work outcome line's Box-controlled
-  `landing=` value (issue #5005); a read-write PR forge's ready run records
-  nothing at settle. It's a plain pointer, not
+  `landing=` value (issue #5005). It's a plain pointer, not
   cached merge-state — a later `reconcile` re-checks the forge live rather
   than trusting this field for anything beyond "where did this land."
   `reconcile` (below) also writes it itself when it discovers a PR by agent
@@ -7866,48 +7744,49 @@ its Integration branch, so the operator sees it there.
 Issue Tracker to parity with the host-mediated model `local` has always used
 (ADR 0032, ADR 0033, and [ADR
 0034](adr/0034-host-mediated-github-forge-and-issue-access.md) for the
-`github` extension). The Box holds **no forge credential** (issue #6900; see
-[Read-only Box token](#read-only-box-token)), and every write the Box would
-otherwise make in-box instead travels out as a stdout block or a bundle for
-the Launcher to apply with its own, separately-scoped write token:
+`github` extension). It is the only value of the knob and the default: issue
+#6901 removed the `read-write` mode, in which the Box held a token and wrote
+in-box, and `read-write` is now rejected at build, dispatch, daemon start and
+`spindrift doctor`. The Box holds **no forge credential** (issue #6900; see
+[Read-only Box token](#read-only-box-token)), and every write it would
+otherwise make instead travels out as a stdout block or a bundle for the
+Launcher to apply with its own, separately-scoped write token:
 
-| write            | `read-write`            | `read-only`                          |
-| ---------------- | ------------------------ | ------------------------------------- |
-| get the code (not a write) | clone the Target repo in-box | clone the read-only `/repo` mirror the Launcher fetched host-side for this Pass; the clone needs no forge credential |
-| land the branch   | `git push`               | `seam.bundle` written to the outbox; the Launcher relays it (ADR 0033's mechanism, reused) |
-| open the PR       | `gh pr create --draft`   | a nonce-guarded, base64-encoded `SPINDRIFT_PR_INTENT` stdout line; the Launcher opens the draft PR host-side |
-| post a comment     | `gh issue comment`       | a single nonce-guarded `SPINDRIFT_COMMENT` line; the Launcher verifies the nonce, decodes it, and posts it host-side (ADR 0032's mechanism, reused) |
-| file an issue (Filer, opt-in) | `gh label create` / `gh issue create` | one nonce-guarded, base64-encoded `SPINDRIFT_ISSUE_INTENT` stdout line per issue; the Launcher files each one host-side (issue #2018) — see [Filer](#filer) |
+| write            | how the Box hands it off |
+| ---------------- | ------------------------- |
+| get the code (not a write) | clone the read-only `/repo` mirror the Launcher fetched host-side for this Pass; the clone needs no forge credential |
+| land the branch   | `seam.bundle` written to the outbox; the Launcher relays it (ADR 0033's mechanism, reused) |
+| open the PR       | a nonce-guarded, base64-encoded `SPINDRIFT_PR_INTENT` stdout line; the Launcher opens the draft PR host-side |
+| post a comment     | a single nonce-guarded `SPINDRIFT_COMMENT` line; the Launcher verifies the nonce, decodes it, and posts it host-side (ADR 0032's mechanism, reused) |
+| file an issue (Filer, opt-in) | one nonce-guarded, base64-encoded `SPINDRIFT_ISSUE_INTENT` stdout line per issue; the Launcher files each one host-side (issue #2018) — see [Filer](#filer) |
 
-On `github` and `forgejo` a `read-only` Box does not clone the forge at all.
-Before every Pass the Launcher fetches the Target repo host-side with its own
-credential (the clone the bundle relay already uses) into a fresh per-Pass
-`.spindrift/mirror/pass-*/repo.git`, mounts it read-only at `/repo` on both
-runners, and removes it once that Pass's
-Box exits. The Box clones `/repo`, so the clone runs no `gh auth setup-git` and
-takes no forge URL, and a private repo works. The clone keeps a credential-free
-`forge` remote beside `origin` (the mount) so `gh` and `fj` still resolve the
-repo, and makes it the push default so `gh` finds the current branch's PR. A
-failed fetch fails the Pass
-(`seed mirror: host-side fetch of the <forge> Target repo: ...`) before the Box
-starts. `local` already works this way, its Accumulation repo being the mirror,
-and so does a `read-only` `git` Box, over one mirror re-seeded per Pass.
-`read-write` keeps its direct in-box clone.
+A Box does not clone the forge at all. Before every Pass the Launcher fetches
+the Target repo host-side with its own credential (the clone the bundle relay
+already uses) into a fresh per-Pass `.spindrift/mirror/pass-*/repo.git`,
+mounts it read-only at `/repo` on both runners, and removes it once that
+Pass's Box exits. The Box clones `/repo`, so the clone runs no `gh auth
+setup-git` and takes no forge URL, and a private repo works. The clone keeps
+a credential-free `forge` remote beside `origin` (the mount) so `gh` and `fj`
+still resolve the repo, and makes it the push default so `gh` finds the
+current branch's PR. A failed fetch fails the Pass (`seed mirror: host-side
+fetch of the <forge> Target repo: ...`) before the Box starts. `local`
+already worked this way, its Accumulation repo being the mirror, and so does
+the `git` forge, over one mirror re-seeded per Pass.
 
-`read-only` is the default (issue #6899). An explicit `read-write` still works
-but is deprecated: the build, the launcher at dispatch and daemon start, and
-`spindrift doctor` warn, and a later minor release removes it (issue #6757).
-[MIGRATING.md](../MIGRATING.md) lists what a Consumer that never set the knob
-must check first.
+The forge must implement the bundle relay, and the tracker must post comments
+host-side; the build throws naming the missing seam otherwise (see the
+`BOX_FORGE_AND_ISSUE_ACCESS` row under [Runtime
+configuration](#runtime-configuration)). [MIGRATING.md](../MIGRATING.md)
+lists what a Consumer that never set the knob, or set it to `read-write`,
+must check.
 
-Every way the shipped prompts still tell a Box to run a forge CLI, and which of
-them a `read-only` Box reaches, is inventoried in [In-Box forge CLI
+The set of ways a shipped prompt tells a Box to run a forge CLI is empty, and
+is pinned empty by the allowlist described in [In-Box forge CLI
 uses](in-box-forge-cli.md).
 
 #### Credential-free read-only Box
 
-A `read-only` Box holds no forge credential (issue #6900), whatever the
-backend. The Launcher sets none of `GH_TOKEN`, `FORGEJO_TOKEN`, `BOX_GH_TOKEN`
+A Box holds no forge credential (issue #6900), whatever the backend. The Launcher sets none of `GH_TOKEN`, `FORGEJO_TOKEN`, `BOX_GH_TOKEN`
 or `BOX_FORGEJO_TOKEN` in it.
 The Box clones the host-seeded mirror (`gh auth setup-git` and `fj auth
 add-key` never run), reads the parent and linked issues and searches for
@@ -7925,7 +7804,7 @@ forge CLI.
 
 There is no Box token to provision, verify or report: the Launcher and
 `spindrift doctor` neither require nor read `BOX_GH_TOKEN` or
-`BOX_FORGEJO_TOKEN` under `read-only`, and the `read-only-token-<backend>`
+`BOX_FORGEJO_TOKEN`, and the `read-only-token-<backend>`
 launch gates (issue #1950) no longer exist. `BOX_FORGE_CREDENTIAL` (issue
 #7140's opt-in) is a deprecated no-op: unset it.
 
@@ -8010,7 +7889,7 @@ blocked, failed, or left-open-for-a-human landing keeps it, and a failed
 deletion is logged and never fails the landing (issue #4653).
 
 A stray `git push` in the "land the branch" row above — the agent guessing at
-the read-write workflow — fails locally instead of reaching the forge and
+a direct-push workflow — fails locally instead of reaching the forge and
 403ing there (issue #2463): the Box repoints `origin`'s push URL at a
 throwaway local repo and installs a `pre-push` hook that always refuses, so
 the failure is instant and names the actual hand-off instead of a bare 403.
@@ -8065,27 +7944,19 @@ issue (#2526) itself added to its backend row. The `jira` tracker satisfies the
 tracker side as of issue #6355, via `hostPostingCapable` on its row, but only
 alongside a `github`, `forgejo`, or `git` forge (the plain `git` forge
 satisfies the forge side as of issue #6898, bundle relay only, no draft PR).
-`read-write` is unaffected
-either way — it never inspects these capabilities.
+The check is unconditional since issue #6901 removed the `read-write` mode
+that was exempt from it.
 
-Inside the Box, the write-enabled-vs-not decision is resolved once,
-host-side, and forwarded as a single explicit positive signal
-(`BOX_WRITE_ENABLED`, present only under `read-write`); the Box's prompt
-fragments render the no-write path whenever it is absent, for any reason
-(issue #1951) — an unset, typo'd, or forwarding-glitched value can never
-fall open into the write-capable path.
+Every Box has no write path to begin with, so there is no write-enabled flag
+to forward: the prompt fragments render the host-relayed arms
+unconditionally (`BOX_WRITE_ENABLED` is gone), and an unset or garbled value
+can never fall open into a write-capable path.
 
-`read-only` is an **alternative route to the same guarantee** [two-actor
-separation](#two-actor-separation-opt-in-hard-mode) provides: a Box that
-cannot unilaterally land on the base branch. Two-actor separation gets there
-by capability plus an out-of-band repository ruleset (a `read-write` Box's
-token could still open a PR and merge it; the ruleset is what stops it).
-Read-only gets there by capability alone — the Box holds no forge credential,
-so it cannot open a PR or merge one in the first place, at the cost of the
-Launcher doing more host-side work per issue. The two are not additive:
-`read-only` alone already removes the capability two-actor separation was
-closing off with a ruleset, which is why two-actor separation now matters only
-to the deprecated `read-write` Box.
+Read-only gets the guarantee [two-actor
+separation](#two-actor-separation-retired) used to provide — a Box that
+cannot unilaterally land on the base branch — by capability alone: the Box
+holds no forge credential, so it cannot open a PR or merge one in the first
+place, at the cost of the Launcher doing more host-side work per issue.
 
 ### Signal socket (`BOX_SIGNAL_CARRIER=socket`)
 
@@ -8333,21 +8204,13 @@ boundary does and does not promise.
    MCP server still inherits it —
    see [Self-inflicted secret reads are denied per
    Driver](#self-inflicted-secret-reads-are-denied-per-driver).
-3. **`GH_TOKEN` is the accepted residual.** `GH_TOKEN` is vault-sourceable
-   like any other secret (point 1 above), but sourcing only controls how it
-   *reaches* a `read-write` Box (the deprecated mode; a `read-only` Box,
-   the default, receives no token at all) — once there, it stays a live
-   environment variable for
-   the run's duration, because the Box is a first-class GitHub actor: it runs
-   `git push`, `gh pr create`, `gh issue view`/`comment`/`create`/`list`,
-   `gh label create`, and CI-log inspection during the fix pass, all
-   authenticated by that variable. None of the controls above remove it —
-   env-based auth is exactly why `git`/`gh` never need to *read* a credential
-   file, but the token itself is still visible to a `Bash(env)` call. **#380**
-   (two-actor separation) is the recommended companion: it doesn't remove the
-   token from the Box, but it caps the blast radius of a leaked one by
-   barring the Box's user from ever updating the base branch — see
-   [Two-actor separation](#two-actor-separation-opt-in-hard-mode).
+3. **`GH_TOKEN` never reaches the Box.** `GH_TOKEN` is vault-sourceable like
+   any other secret (point 1 above), but sourcing only controls how the
+   *Launcher* gets it: no Box receives a forge token (issues #6900 and
+   #6901), so a `Bash(env)` call in the Box shows no forge credential and
+   there is no residual to cap. Two-actor separation (#380), which capped the
+   blast radius of a token the Box held, is retired — see [Two-actor
+   separation](#two-actor-separation-retired).
 4. **The strongest available posture is zero GitHub token in the Box, and
    it is the default.** A `read-only` Box holds no forge credential (issue
    #6900), and `CODE_FORGE=local` + `ISSUE_TRACKER=local` (ADR 0033, ADR
@@ -8389,8 +8252,7 @@ issue through host-answered Signal-socket verbs, and the Launcher applies every
 write with its own `GH_TOKEN`, scoped by the table above. A fully
 injection-steered Box cannot open a PR, push a branch, or comment, because it
 holds nothing that could. `BOX_GH_TOKEN` and `BOX_FORGEJO_TOKEN` are
-deprecated and read only by a `read-write` Box, where
-[two-actor separation](#two-actor-separation-opt-in-hard-mode) uses them.
+deprecated, read by nothing, and removed in issue #6902.
 
 ### GitHub App installation token (recommended)
 
@@ -8516,11 +8378,11 @@ deliberate, not oversights — write them down so you can honour them:
    agent as prompt input. The trust boundary is the label, not the issue or
    comment author. The launcher drops comments a maintainer has minimized on
    GitHub from the transcript it renders, but that is a mitigation for that
-   transcript only: a read-write Box's token can still read the full thread,
-   and the agent still fetches parent and linked issues itself, minimized
-   comments included. What bounds the blast radius is what the Box's token
-   allows, or under read-only the host-mediated relays, and nothing more,
-   because the Box has no host access.
+   transcript only: the agent still fetches parent and linked issues itself
+   through the host-answered `driver-exec signal issue` verb, minimized
+   comments included. What bounds the blast radius is the host-mediated
+   relays and nothing more, because the Box holds no forge token and has no
+   host access.
    Decided comment-trust policy, not yet enforced (the vetted-transcript filter
    is #382; until it lands, every comment reaches the agent on every tracker):
    the filter will keep only comments whose GitHub `author_association` is
@@ -9102,18 +8964,11 @@ By default that is the whole story, same as every other agent-filed issue
 rule: auto-promotion (below). See the **Butler** / **Chore** / **Ledger**
 glossary entries in [`CONTEXT.md`](../CONTEXT.md) for the full vocabulary.
 
-The butler Box always runs the read-only posture, whatever
-`BOX_FORGE_AND_ISSUE_ACCESS` says (issue #3906): the launcher never sets
-`BOX_WRITE_ENABLED` for it, so box installs the read-only guards
-(the `gh`/`fj` shims, plus the git push hook on a bundle-relaying
-forge) and dispatch's outbox decision (`needsOutbox`) applies
-the same forced read-only access, so the `/outbox` mount matches. Research
-does not get this treatment; under `read-write` it still posts its own
-verdict comment. Treat the guards as defense in depth on top of the prompt
-and the Filer relay, not as token-level enforcement: under `read-write` the
-Box still holds the ordinary write-capable token, and a direct API call
-gets around the shims. Real enforcement still means
-`BOX_FORGE_AND_ISSUE_ACCESS=read-only` (the Box then holds no forge credential).
+The butler Box runs the read-only posture like every Box: it holds no forge
+credential, and box installs the read-only guards (the `gh`/`fj` shims, plus
+the git push hook on a bundle-relaying forge). Treat the guards as defense in
+depth on top of the prompt and the Filer relay; the real enforcement is that
+the Box holds nothing that could write.
 
 Auto-promotion (ADR 0056, issue #3880) adds `ready-for-agent` (or your
 configured `LABEL`) to a finding at settle, host-side, when every one of
@@ -10687,14 +10542,12 @@ who has opted into no Chore sees the same daemon as before; naming `butler`
 explicitly with an empty `BUTLER_CHORES` fails startup instead of running a
 kind that could only ever report no work (`daemon: butler selected but no
 chores enabled (BUTLER_CHORES is empty)`). The same holds for `recover`: it
-is on only when `CODE_FORGE` is `github` or `forgejo` and
-`BOX_FORGE_AND_ISSUE_ACCESS=read-only` (one predicate, `backend.RelaysOutbox`,
-since only then does a Box leave a bundle in the outbox), never on
-`CODE_FORGE=local` (ADR 0039) or a read-write Box. The bare default includes
+is on only when `CODE_FORGE` is `github` or `forgejo` (one predicate,
+`backend.RelaysOutbox`, since only then does a Box leave a pull-request
+bundle in the outbox), never on `CODE_FORGE=local` (ADR 0039). The bare default includes
 it where enabled and silently drops it elsewhere; naming `recover` where it is
-disabled fails startup (`daemon: recover selected but CODE_FORGE=<x> with
-BOX_FORGE_AND_ISSUE_ACCESS=<y>: no pull-request outbox to recover (recover needs
-CODE_FORGE github or forgejo with BOX_FORGE_AND_ISSUE_ACCESS=read-only)`).
+disabled fails startup (`daemon: recover selected but CODE_FORGE=<x>: no
+pull-request outbox to recover (recover needs CODE_FORGE forgejo or github)`).
 `gateKinds` (`cmd/launcher/daemon/main.go`) decides all of this from each
 kind's descriptor `Enablement` row (`EnabledByOutboxRelay` for `recover`),
 never from its name. `status` is the other positional, and
@@ -12582,7 +12435,7 @@ warning carries no `slot` either: it precedes every slot.
 | `model` | `time`, `kind`, `issue` or `chore`, `model`, `model_role`, `revision`, `slot` | each time the child reported that the Box's active model changed (the exact model id, plus the optional role, such as a reviewer, that is running it); the record is emitted as it arrives, so the Events file keeps the history a slot's status entry drops. `model_role` is absent when the model has no role |
 | `image_build` | `time`, `kind`, `state`, `revision`, `slot` | each time the child reported that its Box image build started or finished (`state` `started` or `finished`); a build that never reports `finished` (the child died mid-build) is cleared on the status entry by the next `box`, the `settled` record, or the child exiting, but leaves only its `started` row here |
 | `child_finish` | `time`, `kind`, `issue` or `chore`, `revision`, `exit`, `outcome`, `slot` | after the child exits; `issue` (or, for a butler child, `chore`) is whichever the child last claimed (the last `box` record's), or absent if it claimed none. `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `signalled-stop` is exit 7's label whichever way the pool then acts on it — it no longer by itself implies a halt: the pool halts on it only while the operator's Stop latch was already closed, and otherwise backs that slot off like any other unclassified failure (see **Failures** above). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
-| `settled` | `time`, `kind`, `issue` or `chore`, `state`, `note`, `pr_url`, `record_id`, `revision`, `slot` | emitted once per issue (or, for a butler run, per Chore), at the end of that issue's settle path — never live at each terminal transition, so `state` carries the issue's last word, never two contradicting rows. Only the dispatch settle path defers through a `flushSettled` latch (issue #3627), since it alone can reach a terminal state twice for the same issue (a green `completeLanding` that `verifyMerged` later demotes to Failed); the research settle path, `recoverFailed`, and the butler settle path each reach exactly one terminal state per issue/Chore and emit inline, already once. `state` is the launcher's own dispatch-state vocabulary (`complete`, `failed`, `recoverable`, `ambiguous`), never `child_finish`'s `outcome` vocabulary above, and the two must not be confused: a `child_finish` reports how the *child process* ended, a `settled` reports what the *issue* ended up at, and the two can disagree (a child can exit `dispatched` for an issue that itself settles `failed`). `note` carries the settling site's own reason wherever one is live — the research path's `"no verdict comment block"` was the original motivating case, and the dispatch settle path now fills it too (the blocked/ambiguous/already-resolved outcome's own note, the unresolved path's classification detail, `verifyMerged`'s demotion reason, the recoverable reason) rather than always passing `""`: with the daemon's terminal gone, that reason previously survived nowhere on disk. The record does not carry the settle's warnings (scan errors, stale-marker and rejected-line warnings): `note` is clipped at `report.MaxLine`, so a settle writes them untruncated, one per line, to the sidecar `.spindrift/logs/issue-<n>.warnings` (a butler run: `issue-butler-<chore>.warnings`) — read it to diagnose a failed settle. `pr_url` is the PR the Dispatch opened or adopted, carried from the child's record: a PR the host opened, adopted, or recovered (named as soon as the host resolves it), the open PR on the agent branch of a read-write Box (resolved host-side at settle, never from the Box's `landing=`). It is present even when the landing went red or failed, and absent when there is no PR (push-only forges, research, a butler Chore's own settle, a failure before any PR, no open PR on the agent branch at settle) (issue #4718). `record_id` is the Dispatch's [Record ID](#stats), matching its `box` events and its `dispatch_settled` op; added without a `v` bump, and absent on a Dispatch that failed before minting a Record ID |
+| `settled` | `time`, `kind`, `issue` or `chore`, `state`, `note`, `pr_url`, `record_id`, `revision`, `slot` | emitted once per issue (or, for a butler run, per Chore), at the end of that issue's settle path — never live at each terminal transition, so `state` carries the issue's last word, never two contradicting rows. Only the dispatch settle path defers through a `flushSettled` latch (issue #3627), since it alone can reach a terminal state twice for the same issue (a green `completeLanding` that `verifyMerged` later demotes to Failed); the research settle path, `recoverFailed`, and the butler settle path each reach exactly one terminal state per issue/Chore and emit inline, already once. `state` is the launcher's own dispatch-state vocabulary (`complete`, `failed`, `recoverable`, `ambiguous`), never `child_finish`'s `outcome` vocabulary above, and the two must not be confused: a `child_finish` reports how the *child process* ended, a `settled` reports what the *issue* ended up at, and the two can disagree (a child can exit `dispatched` for an issue that itself settles `failed`). `note` carries the settling site's own reason wherever one is live — the research path's `"no verdict comment block"` was the original motivating case, and the dispatch settle path now fills it too (the blocked/ambiguous/already-resolved outcome's own note, the unresolved path's classification detail, `verifyMerged`'s demotion reason, the recoverable reason) rather than always passing `""`: with the daemon's terminal gone, that reason previously survived nowhere on disk. The record does not carry the settle's warnings (scan errors, stale-marker and rejected-line warnings): `note` is clipped at `report.MaxLine`, so a settle writes them untruncated, one per line, to the sidecar `.spindrift/logs/issue-<n>.warnings` (a butler run: `issue-butler-<chore>.warnings`) — read it to diagnose a failed settle. `pr_url` is the PR the Dispatch opened or adopted, carried from the child's record: a PR the host opened, adopted, or recovered (named as soon as the host resolves it), the open PR on the agent branch (resolved host-side at settle, never from the Box's `landing=`). It is present even when the landing went red or failed, and absent when there is no PR (push-only forges, research, a butler Chore's own settle, a failure before any PR, no open PR on the agent branch at settle) (issue #4718). `record_id` is the Dispatch's [Record ID](#stats), matching its `box` events and its `dispatch_settled` op; added without a `v` bump, and absent on a Dispatch that failed before minting a Record ID |
 | `demand_appeared` | `time`, `kind`, `slot`, `ready` | a Demand probe of a probed kind found startable items (`ready` above 0) where the previous count was 0, or the kind had never been probed; emitted on the zero crossing only, so a count that merely changes between two positive values emits nothing |
 | `demand_drained` | `time`, `kind`, `slot`, `ready` | a Demand probe found none (`ready` is 0) where the previous count was above 0 — the opposite zero crossing to `demand_appeared`, and a kind probed empty again emits nothing. Neither event is emitted for an exit-driven kind, which has no probe |
 | `demand_rose` | `time`, `kind`, `slot`, `ready` | a Demand probe of a jammed probed kind counted `ready` strictly above the kind's `ready_at_jam` (the count the jam froze), or, for `recover`, named a bundle the backoff's baseline lacks at any count, which lifts the jam — resetting its gate to `IdleFloor`, as a moved tip does — and wakes parked slots if the kind is now startable. The wait policy above lists the probes that lift nothing. Probed kinds only; it can accompany `demand_appeared` on the same probe |

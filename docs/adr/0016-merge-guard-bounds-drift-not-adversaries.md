@@ -40,7 +40,9 @@ honestly:
 - **Two-actor separation** is the documented opt-in hard mode: a repository
   ruleset bars the Box token's user from updating the base branch, and only a
   second, launcher-held token can merge. It is the only configuration in which
-  the guard is literally uninfluenceable by the Agent.
+  the guard is literally uninfluenceable by the Agent. (Amended by issue #6901:
+  two-actor separation is retired. With `read-write` removed no Box holds a
+  forge token, so there is no Box actor to separate from the launcher's.)
 
 ## Considered Options
 
@@ -61,7 +63,8 @@ honestly:
 
 - The guard's security claim is scoped: it holds against drift through the
   normal flow, and against nothing stronger, unless two-actor separation is
-  enabled.
+  enabled. (Amended by issue #6901: no Box holds a forge token, so the Agent
+  can no longer merge its own PR through the guard's bypass.)
 - The default guarded-path set encodes threats the operator hasn't thought of
   (the instruction surface as a cross-run persistence vector) — operators
   extending `MERGE_GUARD_PATHS` add to it, they don't rediscover it.

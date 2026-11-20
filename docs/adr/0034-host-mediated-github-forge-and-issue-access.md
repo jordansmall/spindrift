@@ -25,7 +25,7 @@ Dispatch today hands the Box a token that can `git push`, `gh pr create`,
 and `gh issue comment` on the Target repo. The only thing stopping a
 prompt-injected or misbehaving Box from pushing straight to the base branch,
 or merging its own PR, is a **repository ruleset** the operator configures
-out-of-band — [two-actor separation](../reference.md#two-actor-separation-opt-in-hard-mode),
+out-of-band — [two-actor separation](../reference.md#two-actor-separation-retired),
 ADR 0016's hard mode. That guarantee lives in GitHub's config, not in
 spindrift's code: it is easy to misconfigure, invisible in code review, and
 load-bearing anyway.
@@ -58,6 +58,8 @@ reach it. `github` is host-mediated **only when the operator opts in** —
 `read-write` (the default) leaves today's in-box-write flow byte-for-byte
 unchanged, matching ADR 0032's "remote trackers... read and write them
 in-box" and ADR 0033's untouched `git`/`github` merge-commit landing.
+(Amended by issue #6901: `read-write` is removed, so every `github` Box is
+host-mediated and `read-only` is the knob's only value.)
 `read-only` re-derives the same three host-mediation moves ADR 0032/0033
 established for `local`, this time for a reachable backend that is choosing
 not to use that reachability for writes:

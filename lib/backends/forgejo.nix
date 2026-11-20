@@ -51,7 +51,7 @@ rec {
     boxForgejoToken = {
       env = "BOX_FORGEJO_TOKEN";
       secret = true;
-      doc = "DEPRECATED: only a read-write Box reads it; a read-only Box receives no forge token (issue #6900); removed with read-write in #6902. opt-in two-actor separation (ADR 0016 analog): a second machine user's Forgejo PAT for the Box only — the launcher keeps using its own FORGEJO_TOKEN for merges, labels, and all host-side forge calls, while the Box receives this value as its FORGEJO_TOKEN instead; empty (default) leaves the single-token flow unchanged. Pair with a Forgejo branch-protection rule that bars this user from updating the base branch and whitelists only the launcher's user for push and merge — see docs/reference.md's Forgejo two-actor separation recipe";
+      doc = "DEPRECATED, no effect, and removed in #6902: no Box receives a forge token (issues #6900 and #6901), so nothing reads it. It was the opt-in two-actor separation PAT (ADR 0016 analog) of the removed read-write Box; see docs/reference.md's retired two-actor separation note";
       boxEnv = false;
     };
   };
