@@ -1,8 +1,8 @@
 # The forgejo Connector's flake-parts module: the Forgejo forge and tracker.
-# The native forgejo adapter stays authoritative unless a Consumer sets the
-# row's `primary`, which builds the Code Forge and the issue tracker from the
-# Connector instead. The backend row below declares the Connector and its
-# Route table.
+# The Connector is always the Code Forge. The native forgejo adapter still
+# builds the issue tracker until #7122, unless a Consumer sets the row's
+# `primary`, which builds the tracker from the Connector too. The backend row
+# below declares the Connector and its Route table.
 { core }:
 { ... }:
 let
@@ -10,6 +10,11 @@ let
   fragments = import ./fragments.nix;
 in
 {
+  # Root's `flakeModules.default` already carries this module; the key lets a
+  # Consumer that also imports it through `lib.connector` dedup instead of
+  # failing with "registered twice".
+  key = "spindrift-connector-forgejo";
+
   # Depends on the core it was handed; the module system dedups by path, so a
   # Consumer that imports the same core module is unaffected.
   imports = [ core.flakeModules.default ];
@@ -20,7 +25,7 @@ in
     env = "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN";
     group = "dispatch";
     secret = true;
-    doc = "bearer token the forgejo Connector's backend row authorizes its calls with (needs read access to the repository, its pull requests, commit statuses and branches, and write access to open, edit, merge and comment on pull requests and to delete branches); host-only, never reaches the Box; used when the row sets primary, else unused";
+    doc = "bearer token the forgejo Connector's backend row authorizes its calls with (needs read access to the repository, its pull requests, commit statuses and branches, and write access to open, edit, merge and comment on pull requests and to delete branches); host-only, never reaches the Box; needed on every run whose CODE_FORGE is forgejo, and on an ISSUE_TRACKER=forgejo run only when the row sets primary";
     flakeOption = false;
     boxEnv = false;
   };

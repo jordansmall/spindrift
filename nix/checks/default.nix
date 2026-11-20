@@ -13,6 +13,7 @@
   baselineChecks,
   rootFlakeModule,
   githubConnectorModule,
+  forgejoConnectorModule,
 }:
 let
   buildConstants = import ../../lib/build-constants.nix;
@@ -129,7 +130,12 @@ let
     // (import ./bare-bang-guard.nix common)
     // (import ./backend-name-guard.nix common)
     // (import ./eval-probe.nix common)
-    // (import ./core-entry.nix (common // { inherit rootFlakeModule githubConnectorModule; }))
+    // (import ./core-entry.nix (
+      common
+      // {
+        inherit rootFlakeModule githubConnectorModule forgejoConnectorModule;
+      }
+    ))
     // (import ./connectors.nix common)
     // (import ./connector-backend-rows.nix common)
     // (import ./connector-driver-rows.nix common)

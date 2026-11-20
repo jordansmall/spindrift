@@ -1,7 +1,8 @@
 # Issue #6765: the root flake takes its module from the core entry point, so
 # one unchanged Consumer config must evaluate identically through both, apart
-# from the github Connector the root module adds for every Consumer (#7139).
-# Equal drvPaths mean the core split moved no other Consumer-visible output.
+# from the github and forgejo Connectors the root module adds for every
+# Consumer (#7139, #6868). Equal drvPaths mean the core split moved no other
+# Consumer-visible output.
 # The core side goes through core/flake.nix's outputs, so the thin wrapper is
 # exercised.
 {
@@ -10,6 +11,7 @@
   system,
   rootFlakeModule,
   githubConnectorModule,
+  forgejoConnectorModule,
   ...
 }:
 let
@@ -25,6 +27,7 @@ let
     imports = [
       coreEntry.flakeModules.default
       githubConnectorModule
+      forgejoConnectorModule
     ];
   };
   differing = builtins.filter (n: viaRoot.${n} or null != viaCore.${n} or null) (
@@ -35,6 +38,35 @@ let
   staleLockNodes = builtins.filter (
     n: (rootLock.nodes.${n}.locked or null) != coreLock.nodes.${n}.locked
   ) (builtins.filter (n: n != "root") (builtins.attrNames coreLock.nodes));
+
+  # The most common opted-in shape: root's module plus the Connector module
+  # imported again through `lib.connector`. The module's `key` dedups the two;
+  # without it evaluation fails with "registered twice".
+  rootAndConnectorModuleDedup =
+    {
+      name,
+      module,
+      connector,
+      credentialKnob,
+      modes,
+    }:
+    pkgs.linkFarm name (
+      pkgs.lib.genAttrs modes (
+        mode:
+        pkgs.runCommand "${name}-${mode}" { nativeBuildInputs = [ pkgs.jq ]; } ''
+          ${fixtures.runInputDocOf
+            (fixtures.moduleConsumerWith [
+              rootFlakeModule
+              module
+              { spindrift.connectors.${connector}.${mode} = true; }
+            ]).apps.${system}.default.program
+          }
+          jq -e '[.backends[] | select(.credentialKnob == "${credentialKnob}")]
+            | length == 1 and .[0].${mode} == true' "$doc"
+          touch $out
+        ''
+      )
+    );
 in
 {
   # Issue #7139: a Consumer importing the root's `flakeModules.default` and
@@ -50,34 +82,37 @@ in
         touch $out
       '';
 
-  # The most common opted-in shape: root's module plus the github module
-  # imported again through `lib.connector`. The module's `key` dedups the two;
-  # without it evaluation fails with "registered twice".
-  core-entry-root-and-connector-module-dedup =
-    pkgs.linkFarm "core-entry-root-and-connector-module-dedup"
-      (
-        builtins.mapAttrs
-          (
-            mode: _:
-            pkgs.runCommand "core-entry-root-and-connector-module-dedup-${mode}"
-              { nativeBuildInputs = [ pkgs.jq ]; }
-              ''
-                ${fixtures.runInputDocOf
-                  (fixtures.moduleConsumerWith [
-                    rootFlakeModule
-                    githubConnectorModule
-                    { spindrift.connectors.github.${mode} = true; }
-                  ]).apps.${system}.default.program
-                }
-                jq -e '[.backends[] | select(.credentialKnob == "githubConnectorToken")]
-                  | length == 1 and .[0].${mode} == true' "$doc"
-                touch $out
-              ''
-          )
-          {
-            shadow = null;
-          }
-      );
+  # Issue #6868: the same for the forgejo row, which is the Code Forge for
+  # every forgejo run and so must exist for a Consumer that never imported it.
+  core-entry-root-module-carries-forgejo-row =
+    pkgs.runCommand "core-entry-root-module-carries-forgejo-row" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        ${fixtures.runInputDocOf
+          (fixtures.moduleConsumerVia rootFlakeModule).apps.${system}.default.program
+        }
+        jq -e '[.backends[] | select(.credentialKnob == "forgejoConnectorToken")]
+          | length == 1 and (.[0] | (has("primary") | not) and (has("shadow") | not))' "$doc"
+        touch $out
+      '';
+
+  core-entry-root-and-forgejo-connector-module-dedup = rootAndConnectorModuleDedup {
+    name = "core-entry-root-and-forgejo-connector-module-dedup";
+    module = forgejoConnectorModule;
+    connector = "forgejo";
+    credentialKnob = "forgejoConnectorToken";
+    modes = [
+      "shadow"
+      "primary"
+    ];
+  };
+
+  core-entry-root-and-connector-module-dedup = rootAndConnectorModuleDedup {
+    name = "core-entry-root-and-connector-module-dedup";
+    module = githubConnectorModule;
+    connector = "github";
+    credentialKnob = "githubConnectorToken";
+    modes = [ "shadow" ];
+  };
 
   core-entry-consumer-evaluates-identically =
     assert assertMsg (differing == [ ])

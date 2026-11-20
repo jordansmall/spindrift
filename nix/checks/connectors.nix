@@ -191,6 +191,20 @@ in
     ) "the forgejo Connector's row must carry the Route table in connectors/forgejo/routes.nix";
     pkgs.runCommand "connectors-forgejo-contributes-routes" { } "touch $out";
 
+  # Issue #6868: the forgejo Connector registers its row and token knob whatever
+  # `shadow` and `primary` say; it is the Code Forge for every forgejo run.
+  connectors-forgejo-row-unconditional =
+    assert assertMsg (
+      (configOf withForgejo).envSchema ? forgejoConnectorToken
+    ) "with shadow and primary off the env schema must still carry forgejoConnectorToken";
+    assert assertMsg
+      (
+        (configOf withForgejo).connectors.forgejo.knobs ? forgejoConnectorToken
+        && (configOf withForgejo).connectors.forgejo.backend != null
+      )
+      "with shadow and primary off the forgejo row must carry the forgejoConnectorToken knob and its backend";
+    pkgs.runCommand "connectors-forgejo-row-unconditional" { } "touch $out";
+
   connectors-jira-contributes-routes =
     let
       routes = (configOf withJira).connectors.jira.routes or null;

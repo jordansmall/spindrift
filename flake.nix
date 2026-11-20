@@ -43,8 +43,10 @@
       connectorModules = map connectorModuleOf connectorDirs;
 
       # Every Consumer of `spindrift.flakeModules.default` carries the github
-      # row (#7139): the Connector answers github's reads and writes for all.
+      # row (#7139) and the forgejo row (#6868): each Connector answers its
+      # forge's reads and writes for all.
       githubConnectorModule = connectorModuleOf ./connectors/github;
+      forgejoConnectorModule = connectorModuleOf ./connectors/forgejo;
 
       # Every mkHarness call handed this wrapped input shares one lazy nixpkgs
       # instantiation per system instead of paying its own fixed-point evaluation
@@ -95,6 +97,7 @@
             default.imports = [
               core.flakeModules.default
               githubConnectorModule
+              forgejoConnectorModule
             ];
           };
         };
@@ -151,7 +154,7 @@
                   ;
                 baselineChecks = checksResult.checks;
                 rootFlakeModule = inputs.self.flakeModules.default;
-                inherit githubConnectorModule;
+                inherit githubConnectorModule forgejoConnectorModule;
                 fixtures = fixturesAt root;
                 nixpkgs = nixpkgsShared;
               };
