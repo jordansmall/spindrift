@@ -420,7 +420,7 @@ func connectorCredentialNeededThisRun(row backendrows.Row) bool {
 	isTracker := resolvedKnob("ISSUE_TRACKER") == row.Name
 	return (row.Shadow && (isForge || isTracker)) ||
 		(isForge && backendkit.ForgeReadsThroughConnector(row.Name, row.Primary)) ||
-		(isTracker && backendkit.TrackerReadsThroughConnector(row.Name))
+		(isTracker && backendkit.TrackerReadsThroughConnector(row.Name, row.Primary))
 }
 
 // applyConnectorCredentials resolves each backend row's credential env the way

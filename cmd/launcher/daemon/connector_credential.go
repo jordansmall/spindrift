@@ -42,7 +42,7 @@ var secretCmdRunner = func(cmd string) (string, error) {
 // children share the Daemon's ISSUE_TRACKER and CODE_FORGE. A routed row of
 // the CODE_FORGE is included, though the Daemon's own probe reads only the
 // tracker: its children inherit the pinned `_CMD`, and refusing here fails fast.
-// A forge row counts when backendkit.ForgeReadsThroughConnector: primary, or an
+// A row counts when backendkit.{Forge,Tracker}ReadsThroughConnector: primary, or an
 // adapter that routes its non-shadow row itself (github), as flags.go gates it.
 func resolveConnectorCredentials(doc *inputdoc.Document, kinds []daemon.Kind, stderr io.Writer) (refresh func(), err error) {
 	probes := false
@@ -71,7 +71,7 @@ func resolveConnectorCredentials(doc *inputdoc.Document, kinds []daemon.Kind, st
 	seen := map[string]bool{}
 	for _, row := range backendrows.All() {
 		env := row.CredentialEnv
-		readsTracker := row.Name == tracker && backendkit.TrackerReadsThroughConnector(row.Name)
+		readsTracker := row.Name == tracker && backendkit.TrackerReadsThroughConnector(row.Name, row.Primary)
 		readsForge := row.Name == forge && backendkit.ForgeReadsThroughConnector(row.Name, row.Primary)
 		if !(readsTracker || readsForge) || row.Shadow || seen[env] {
 			continue
