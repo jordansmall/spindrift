@@ -552,6 +552,26 @@ func TestUseSkipsANonShadowBaseRowWithAnUnusableBase(t *testing.T) {
 	}
 }
 
+func TestBaseErrorReportsTheBaseOfADroppedRowOnly(t *testing.T) {
+	isolate(t)
+	good, site := row("good", getRepos), baseRow(baseSearch)
+	if err := backendrows.Use(rows(t, []backendrows.Row{good, site}), envOf("http://site.lan:3000")); err != nil {
+		t.Fatal(err)
+	}
+	if err := backendrows.BaseError("site"); err == nil || !strings.Contains(err.Error(), "must be an https URL") {
+		t.Errorf("BaseError(site) = %v, want the https error", err)
+	}
+	if err := backendrows.BaseError("good"); err != nil {
+		t.Errorf("BaseError(good) = %v, want nil for a row with no base", err)
+	}
+	if err := backendrows.Use(rows(t, []backendrows.Row{good, site}), envOf("https://site.example.net")); err != nil {
+		t.Fatal(err)
+	}
+	if err := backendrows.BaseError("site"); err != nil {
+		t.Errorf("BaseError(site) = %v, want nil once the row applied", err)
+	}
+}
+
 func TestUseStillValidatesAnUnconfiguredBaseRow(t *testing.T) {
 	isolate(t)
 	bad := baseRow(baseSearch)

@@ -21,12 +21,12 @@ import (
 	"spindrift.dev/launcher/internal/hostpaths"
 )
 
-// ErrPrimaryMergeMethod is why a primary forgejo row refuses a MERGE_METHOD
+// ErrMergeMethod is why a non-shadow forgejo row refuses a MERGE_METHOD
 // other than rebase: the Connector always merges by rebase, so honouring the
 // knob is impossible and ignoring it would be silent.
-var ErrPrimaryMergeMethod = errors.New("MERGE_METHOD must be rebase or unset: the forgejo Connector merges by rebase only")
+var ErrMergeMethod = errors.New("MERGE_METHOD must be rebase or unset: the forgejo Connector merges by rebase only")
 
-// connectorAuditLog is the primary Connector's request record, in the host's
+// connectorAuditLog is the Connector's request record, in the host's
 // log directory beside the other Connector logs.
 const connectorAuditLog = "connector-forgejo.audit.jsonl"
 
@@ -39,8 +39,8 @@ var connectorClient *http.Client
 
 // ErrNoConnectorRow is why forgejo's Code Forge cannot be built without a
 // forgejo backend row that is not shadow: it runs only through its Connector,
-// and a shadow row only observes beside an adapter that no longer exists.
-var ErrNoConnectorRow = errors.New("forgejo's Code Forge runs only through its Connector: configure a non-shadow forgejo backend row")
+// and a shadow row only observes, so it never answers the forge.
+var ErrNoConnectorRow = errors.New("forgejo's Code Forge runs only through its Connector, which needs a non-shadow forgejo backend row with a usable base")
 
 // primaryRow is the forgejo backend row when it is configured primary: the
 // issue tracker is then built from the row's Connector rather than the native
@@ -65,11 +65,11 @@ func forgeRow() (backendrows.Row, bool) {
 // process.
 func newConnectorCodeForge(row backendrows.Row, s backendkit.Shared, k Knobs) (forge.CodeForge, error) {
 	if MergeStyle(s.MergeMethod) != "rebase" {
-		return nil, fmt.Errorf("%w (got %q)", ErrPrimaryMergeMethod, s.MergeMethod)
+		return nil, fmt.Errorf("%w (got %q)", ErrMergeMethod, s.MergeMethod)
 	}
 	row.Routes = connectortracker.Routes(row.Routes, s.RepoSlug)
 	audit, closeAudit := openAudit()
-	conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Audit: audit, Client: connectorClient})
+	conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Audit: audit, Client: connectorClient, Getenv: credentialGetenv(row, k)})
 	if err != nil {
 		closeAudit()
 		return nil, err
@@ -88,9 +88,21 @@ func newConnectorCodeForge(row backendrows.Row, s backendkit.Shared, k Knobs) (f
 	return cf, nil
 }
 
+// credentialGetenv resolves FORGEJO_TOKEN from k, the Lookup the forge was
+// built from, so a token the process env never held (the quickstart wizard's)
+// still authorizes. Every other name falls through to the process env.
+func credentialGetenv(row backendrows.Row, k Knobs) func(string) string {
+	return func(name string) string {
+		if name == row.CredentialEnv && name == ForgejoTokenEnv && k.ForgejoToken != "" {
+			return k.ForgejoToken
+		}
+		return os.Getenv(name)
+	}
+}
+
 // openAudit opens the Connector's audit file for appending. A record that
 // cannot be written must not fail the run, so an unopenable file discards, with
-// one stderr line because primary mode exists to collect that evidence.
+// one stderr line because that record is the Connector's evidence.
 func openAudit() (io.Writer, func()) {
 	lost := func(err error) (io.Writer, func()) {
 		fmt.Fprintf(os.Stderr, "forgejo: Connector audit record disabled: %v\n", err)

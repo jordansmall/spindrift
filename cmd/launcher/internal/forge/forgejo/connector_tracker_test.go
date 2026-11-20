@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
@@ -33,6 +34,8 @@ var (
 func newTrackerHarness(t *testing.T) trackerHarness {
 	t.Helper()
 	h := newConnectorHarness(t, true)
+	// The harness's forge needs no primary; only the tracker does.
+	useForgejoRow(t, h.srv.URL, func(r *backendrows.Row) { r.Primary = true })
 	tr, err := buildTracker(h.srv)
 	if err != nil {
 		t.Fatal(err)
