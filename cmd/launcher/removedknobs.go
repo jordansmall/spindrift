@@ -16,6 +16,9 @@ import (
 // holds the Nix-side counterpart (flake option and mkHarness defaults key).
 var removedKnobs = []struct{ env, reason string }{
 	{"ORCHESTRATOR_ENABLED", "the orchestrator is now the only Box path (issue #4291), so there is nothing to switch"},
+	{"BOX_GH_TOKEN", "no Box holds a forge credential (issues #6900 and #6901), so nothing reads it; see MIGRATING.md"},
+	{"BOX_FORGEJO_TOKEN", "no Box holds a forge credential (issues #6900 and #6901), so nothing reads it; see MIGRATING.md"},
+	{"BOX_FORGE_CREDENTIAL", "every Box already holds no forge credential (issue #6900), so there is nothing to opt in or out of; see MIGRATING.md"},
 }
 
 // removedKnobsCheckName names the removed-knobs row, so validateConfigChecks

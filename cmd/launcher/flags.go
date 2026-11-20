@@ -553,9 +553,7 @@ func secretRequiredThisRun(env string, rules []driver.CredentialRule) bool {
 		return !sig.fullyLocal && backend.NeedsGHToken(forgeRow.Descriptor, trackerRow.Descriptor)
 	default:
 		// Any other backend's own token is required exactly when a selected
-		// backend names it as its TokenEnvVar. BOX_GH_TOKEN is deprecated with no
-		// reader and no row names it as a TokenEnvVar (github has it only as its
-		// boxTokenEnvVar), so the template never sources it.
+		// backend names it as its TokenEnvVar.
 		return env != "" && (forgeRow.TokenEnvVar == env || trackerRow.TokenEnvVar == env)
 	}
 }

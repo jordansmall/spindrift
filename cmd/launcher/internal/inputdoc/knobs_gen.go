@@ -13,7 +13,6 @@ type Knobs struct {
 	AnthropicAPIKey           string
 	BaseBranch                string
 	BoxForgeAndIssueAccess    string
-	BoxForgeCredential        string
 	BranchPrefix              string
 	ButlerChoreClasses        string
 	ButlerChores              string

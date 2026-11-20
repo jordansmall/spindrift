@@ -222,9 +222,6 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.
 	}, rep, bufio.NewScanner(stdin), interactive, extraChecks); err != nil {
 		return err
 	}
-	if msg, ok := boxForgeCredentialNotice(c); ok {
-		rep.Passthrough("%s\n", msg)
-	}
 	// Kinds are picked by the same Enablement row and backend.RelaysOutbox
 	// predicate the daemon's gateKinds uses, so doctor cannot disagree with
 	// it. Off is a normal configuration, hence Success rather than a finding.

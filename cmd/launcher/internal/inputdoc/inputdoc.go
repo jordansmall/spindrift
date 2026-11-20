@@ -190,22 +190,6 @@ const DriverWarnedEnv = "SPINDRIFT_DRIVER_WARNED"
 // exemption for a non-knob read.
 func DriverWarned() string { return os.Getenv(DriverWarnedEnv) }
 
-// ForgeCredentialNoticeDecidedEnv names the marker env var a daemon sets on its
-// children and doctor preflight: it already decided the BOX_FORGE_CREDENTIAL
-// deprecation notice (issue #6900), printing it, so none of them repeats it
-// (issue #6891). The env value predates the notice: it first marked the
-// removed read-write notice.
-const ForgeCredentialNoticeDecidedEnv = "SPINDRIFT_BOX_ACCESS_NOTICE_DECIDED"
-
-// ForgeCredentialNoticeDecided reads the ForgeCredentialNoticeDecidedEnv
-// marker here for the same reason as DriverWarned.
-func ForgeCredentialNoticeDecided() bool { return os.Getenv(ForgeCredentialNoticeDecidedEnv) != "" }
-
-// BoxForgeCredentialNotice is the run-time deprecation notice for a set
-// BOX_FORGE_CREDENTIAL (issue #6900); lib/mkHarness.nix's
-// boxForgeCredentialWarnings carries the same text for the build.
-const BoxForgeCredentialNotice = "spindrift: BOX_FORGE_CREDENTIAL is deprecated and has no effect, and will be removed in a later minor release (issue #6902). Every Box holds no forge credential (issue #6900), whatever its value. Unset forge.boxForgeCredential (defaults.boxForgeCredential) and drop --box-forge-credential."
-
 // DriverMarker is the DriverWarnedEnv value for an (ambient, baked) pair. It
 // names both so a child baking a different Driver than the daemon still warns.
 func DriverMarker(ambient, baked string) string { return ambient + "/" + baked }

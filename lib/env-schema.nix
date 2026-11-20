@@ -523,12 +523,6 @@ withRowKnobs {
     flakeOption = true;
     boxEnv = false;
   };
-  boxGhToken = {
-    env = "BOX_GH_TOKEN";
-    secret = true;
-    doc = "DEPRECATED, no effect, and removed in #6902: no Box receives a forge token (issues #6900 and #6901), so nothing reads it. It was the opt-in two-actor separation PAT (ADR 0016) of the removed read-write Box; see docs/reference.md's retired two-actor separation note";
-    boxEnv = false;
-  };
   claudeOAuthToken = {
     env = "CLAUDE_CODE_OAUTH_TOKEN";
     secret = true;
@@ -672,24 +666,6 @@ withRowKnobs {
     };
     flakeOption = true;
     nixSubPath = "boxAccess";
-    boxEnv = false;
-  };
-  boxForgeCredential = {
-    env = "BOX_FORGE_CREDENTIAL";
-    group = "forge";
-    # "" is the unset choice, so any explicit value, `forwarded` included, can
-    # be told apart and warned on.
-    default = "";
-    doc = "DEPRECATED, no effect, and removed in #6902: every Box already holds no forge credential (issue #6900). Setting it to either value (`forwarded` or `none`) warns at build time, at run time, and in spindrift doctor and changes nothing";
-    choices = [
-      ""
-      "forwarded"
-      "none"
-    ];
-    flakeOption = true;
-    legacySettingsExempt = true;
-    nixSubPath = "boxForgeCredential";
-    # The launcher computes what it forwards; the Box never reads this knob.
     boxEnv = false;
   };
   maxFixAttempts = {

@@ -18,7 +18,7 @@
   };
 
   # Credential knob for the backend row below; secret and host-only, like core's
-  # boxGhToken.
+  # GH_TOKEN.
   spindrift.connectors.fixture.knobs.fixtureToken = {
     env = "FIXTURE_TOKEN";
     group = "dispatch";

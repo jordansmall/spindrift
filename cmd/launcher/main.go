@@ -150,25 +150,6 @@ func (c config) kind() *dispatchkind.Descriptor {
 	return c.dispatchKind
 }
 
-// boxForgeCredentialNotice is the deprecation notice for a set
-// BOX_FORGE_CREDENTIAL (issue #6900), whatever its value: unset is "" because
-// the schema carries no default. It honors the daemon's decided marker:
-// the daemon prints the notice itself, so a child it spawns stays quiet.
-func boxForgeCredentialNotice(c config) (string, bool) {
-	if c.BoxForgeCredential == "" || inputdoc.ForgeCredentialNoticeDecided() {
-		return "", false
-	}
-	return inputdoc.BoxForgeCredentialNotice, true
-}
-
-// warnBoxForgeCredential prints the deprecation notice to stderr, not the
-// run's stdout: the notice is advisory and stdout is the run's product.
-func warnBoxForgeCredential(c config, stderr io.Writer) {
-	if msg, ok := boxForgeCredentialNotice(c); ok {
-		fmt.Fprintln(stderr, msg)
-	}
-}
-
 // artifact resolves c.boxArtifact to the freshness adapter that owns how the
 // Box artifact is identified, named, and diagnosed. An unset BOX_ARTIFACT takes
 // the runner family's artifact, so a RUNNER_KIND=bwrap run without the key is

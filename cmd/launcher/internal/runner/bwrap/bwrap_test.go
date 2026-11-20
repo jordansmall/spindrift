@@ -1558,8 +1558,8 @@ func TestResolvedRunEnv_ForwardsAllOffArgvKeys(t *testing.T) {
 }
 
 // Two legitimate exclusions: BOX_GH_TOKEN is not an OffArgvKeys key at all
-// (lib/env-schema.nix's boxGhToken is boxEnv=false, so it would never be a
-// box.Env key in production either), and ISSUE_NUMBER is a real box.Env key
+// (the knob was removed, so it would never be a box.Env key in production
+// either), and ISSUE_NUMBER is a real box.Env key
 // that buildArgs already delivers via --setenv, so forwarding it here would
 // deliver it twice.
 func TestResolvedRunEnv_ExcludesKeysNotInOffArgvKeys(t *testing.T) {

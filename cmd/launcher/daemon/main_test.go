@@ -1279,7 +1279,7 @@ var daemonKnobEnvVars = []string{
 	"ISSUE_TRACKER", "LABEL", "IN_PROGRESS_LABEL",
 	"COMPLETE_LABEL", "FAILED_LABEL", "REPO_SLUG",
 	"GH_TOKEN_REFRESH_FILE", "SECRET_CMD",
-	"CODE_FORGE", "BOX_FORGE_AND_ISSUE_ACCESS", "BOX_FORGE_CREDENTIAL", "DRIVER",
+	"CODE_FORGE", "BOX_FORGE_AND_ISSUE_ACCESS", "DRIVER",
 }
 
 // clearKnobEnvT clears the daemon's knob env vars for the duration of the
@@ -3741,41 +3741,6 @@ func TestMainRun_DriverMismatch_WarnsOnceAndMarksChildren(t *testing.T) {
 	}
 }
 
-// The doctor preflight and every dispatch child carry the decided marker so
-// none repeats the deprecation notice the daemon already decided
-// (issues #6891, #6900).
-func TestMainRun_MarksChildrenNoticeDecided(t *testing.T) {
-	path := capturedEnvFixtureArtifactsT(t, map[string]string{"DAEMON_BREAKER_THRESHOLD": "1"}, claudeArtifacts())
-
-	origDoctor := runnerDoctorCommand
-	t.Cleanup(func() { runnerDoctorCommand = origDoctor })
-	var doctorCmd *exec.Cmd
-	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		doctorCmd = exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
-		return doctorCmd
-	}
-	origExec := runnerExecCommand
-	t.Cleanup(func() { runnerExecCommand = origExec })
-	var childCmd *exec.Cmd
-	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
-		childCmd = exec.Command("/bin/sh", "-c", "exit 1")
-		return childCmd
-	}
-
-	var stdout, stderr bytes.Buffer
-	mainRun([]string{"--input", path, "dispatch"}, &stdout, &stderr)
-
-	for label, cmd := range map[string]*exec.Cmd{"doctor": doctorCmd, "dispatch child": childCmd} {
-		if cmd == nil {
-			t.Errorf("%s command was never built", label)
-			continue
-		}
-		if !slices.Contains(cmd.Env, inputdoc.ForgeCredentialNoticeDecidedEnv+"=1") {
-			t.Errorf("%s env lacks %s=1", label, inputdoc.ForgeCredentialNoticeDecidedEnv)
-		}
-	}
-}
-
 func TestMainRun_DriverMatch_NoWarningNoMarker(t *testing.T) {
 	path := capturedEnvFixtureArtifactsT(t, nil, claudeArtifacts())
 	t.Setenv("DRIVER", "claude")
@@ -4896,37 +4861,6 @@ func TestMainRun_RejectsReadWriteBoxAccess(t *testing.T) {
 				if !strings.Contains(stderr.String(), want) {
 					t.Errorf("stderr = %q, want it to contain %q", stderr.String(), want)
 				}
-			}
-		})
-	}
-}
-
-// Each daemon child stays quiet on the deprecated BOX_FORGE_CREDENTIAL because
-// the parent decided; the parent must therefore print it itself.
-func TestMainRun_BoxForgeCredentialNoticeOnStderr(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		value string
-		want  int
-	}{{"set", "anything", 1}, {"unset", "", 0}} {
-		t.Run(tc.name, func(t *testing.T) {
-			clearKnobEnvT(t)
-			checkOnlyNoNetworkT(t)
-			settings := map[string]string{
-				"DAEMON_APP":   ".#dogfood",
-				"BASE_BRANCH":  "main",
-				"MAX_PARALLEL": "1",
-			}
-			if tc.value != "" {
-				settings["BOX_FORGE_CREDENTIAL"] = tc.value
-			}
-			docPath := writeInputDocT(t, settings)
-			var stdout, stderr bytes.Buffer
-			if got := mainRun([]string{"--input", docPath, "--check-only", "dispatch"}, &stdout, &stderr); got != 0 {
-				t.Fatalf("mainRun() = %d, want 0; stderr = %q", got, stderr.String())
-			}
-			if n := strings.Count(stderr.String(), inputdoc.BoxForgeCredentialNotice); n != tc.want {
-				t.Errorf("notice count = %d, want %d; stderr = %q", n, tc.want, stderr.String())
 			}
 		})
 	}

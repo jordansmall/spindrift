@@ -21,24 +21,22 @@ func TestReadKnobs_UnsetYieldsDefaults(t *testing.T) {
 	if k.ForgejoBaseURL != "https://codeberg.org" {
 		t.Errorf("ForgejoBaseURL = %q, want the row default", k.ForgejoBaseURL)
 	}
-	if k.ForgejoToken != "" || k.BoxForgejoToken != "" {
-		t.Errorf("tokens = %q, %q, want empty", k.ForgejoToken, k.BoxForgejoToken)
+	if k.ForgejoToken != "" {
+		t.Errorf("token = %q, want empty", k.ForgejoToken)
 	}
 }
 
 func TestReadKnobs_SetYieldsValues(t *testing.T) {
 	k, err := forgejo.ReadKnobs(lookupFrom(map[string]string{
-		"FORGEJO_BASE_URL":  "https://git.example.test",
-		"FORGEJO_TOKEN":     "tok",
-		"BOX_FORGEJO_TOKEN": "boxtok",
+		"FORGEJO_BASE_URL": "https://git.example.test",
+		"FORGEJO_TOKEN":    "tok",
 	}))
 	if err != nil {
 		t.Fatalf("ReadKnobs: %v", err)
 	}
 	want := forgejo.Knobs{
-		ForgejoBaseURL:  "https://git.example.test",
-		ForgejoToken:    "tok",
-		BoxForgejoToken: "boxtok",
+		ForgejoBaseURL: "https://git.example.test",
+		ForgejoToken:   "tok",
 	}
 	if k != want {
 		t.Errorf("ReadKnobs = %+v, want %+v", k, want)
