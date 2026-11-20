@@ -1,7 +1,6 @@
 #!/usr/bin/env bats
-# Covers the `pr ready` arm of tests/fakes/gh (issue #2423), which models the
-# launcher's MarkReady and MarkDraft (`pr ready --undo`) in
-# cmd/launcher/internal/forge/github/exec_pr.go. These tests invoke the fake
+# Covers the `pr ready` arm of tests/fakes/gh (issue #2423), which models
+# `gh pr ready` and `gh pr ready --undo`. These tests invoke the fake
 # directly rather than through tests/helper.bash, because the contract under
 # test is the fake's own GH_LOG/GH_STATE behaviour.
 

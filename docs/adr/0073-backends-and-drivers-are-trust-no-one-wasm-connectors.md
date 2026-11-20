@@ -75,7 +75,7 @@ The question was grilled on 2026-11-09. Specs #6750–#6759 carry the work.
    Connectors, so every core test crosses the real seam (ADR 0067's all or
    none). Native network adapters and native Driver Strategies may coexist with
    Connectors only during a migration window, which closes when github's merge
-   crosses.
+   crosses (amended by issue #6888: the window is closed; see its amendment).
 8. **Drivers cross in the same campaign. Runners never do**, because they are
    the sandbox.
 9. **The Box ends with no forge credential.**
@@ -1125,7 +1125,7 @@ tracker protocol gains an optional `tracker.closeIssue`, which the github
 Connector serves with a GraphQL mutation over the `POST /graphql` route it
 already declares. The Connector merges by rebase only, so a primary row refuses
 any other `MERGE_METHOD`, as the forgejo row does. The native paths stay until
-#6888.
+#6888 (amended by issue #6888: they are deleted).
 
 ## Amendment (issue #7209): a primary github Connector holds a push-capable credential
 
@@ -1200,7 +1200,8 @@ Descriptors alone.
 With no native Strategy there is nothing to shadow or lead, so `mkHarness`
 refuses `claude` in `shadowDrivers` and `primaryDrivers`, and
 `spindrift.connectors.claude.shadow` and `.primary` fail evaluation. Dogfood's
-claude row sets neither, and `nix/dogfood-primary.nix` now lists only github.
+claude row sets neither, and `nix/dogfood-primary.nix` now lists only github
+(amended by issue #6888: the list is empty).
 The shadow plumbing (the switch, the comparator, divergence records and the
 per-Pass summary) stays for opencode and pi (#6874, #6876) and is deleted by
 #6879 once the last Driver has cut over. The claude corpus and goldens moved
@@ -1233,7 +1234,8 @@ fallback: a load failure or a refused route fails with its named error.
 The native adapter stays in the build, so reverting the change restores native
 routing (amended by issue #6811: not for reads, which are deleted), until #6811
 and #6888 delete it. Three cases keep native `gh` (amended by issue #6811: for
-reads none do, each fails with `ErrNoReadRoute`; only writes stay native). A
+reads none do, each fails with `ErrNoReadRoute`; only writes stay native;
+amended by issue #6888: writes fail too, with `ErrNoRoute`). A
 shadow row stays native-authoritative and sampled, as before. A Consumer that
 imports `core.flakeModules.default` directly carries no github row. And under
 a `GH_HOST` other than `github.com` the row is dropped, because the
@@ -1260,4 +1262,33 @@ Native writes are unchanged and still use `gh` where the row is not routed,
 until #6888 deletes the rest of the adapter. The generic backend read shadow
 stays for backends that keep a native adapter, forgejo today; only its github
 use is gone. Dogfood keeps `primary` on its github row until #6888, a no-op
-since #7139.
+since #7139 (amended by issue #6888: the entry is gone, and `primary` on a
+github row fails evaluation).
+
+## Amendment (issue #6888): the native github adapter is deleted and the migration window is closed
+
+The rest of the native github adapter is deleted, so the github Connector is
+github's only implementation. The #6811 amendment left writes on `gh` for the
+three cases it named; they now fail like reads. A shadow github row, a Consumer
+importing `core.flakeModules.default` directly (no github row), and a
+`GH_HOST` other than `github.com` each fail every read and every write with
+`ErrNoRoute`, naming which of the three applied. `ErrNoReadRoute` is renamed
+`ErrNoRoute` because it now covers both. The tracker and Code Forge still build
+with no row and fail per call, so a misconfigured Consumer sees the error where
+the call is made.
+
+A github row that sets `primary` fails evaluation, the same way a jira row
+does: the row is Connector-only, and there is no native backend of the same name
+to replace. Dogfood's `nix/dogfood-primary.nix` now holds no backend. A github
+Consumer config that never set `primary` evaluates unchanged.
+
+`gh` leaves the launcher's host closure. The Box keeps its own `gh` for the
+open-PR query that still runs in the Box (#6757), which is the one `gh` exec
+core retains.
+
+Rule 7's migration window is closed and the all-or-none rule is in force: the
+Bundle registers no native network backend. A Go test over the Bundle fails if
+one is registered that is neither a Connector-only row nor a Built-in backend
+(`local`, `git`). forgejo's native forge and tracker are the one pinned
+exception, deleted by #6868 (the forge half) and #7122 (the tracker), after
+which the pin is emptied.

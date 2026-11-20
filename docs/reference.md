@@ -2317,12 +2317,13 @@ is the fixture Connector in
   operation through its Connector instead. With `primary` on, the Connector
   answers the native backend's calls with no fallback: forgejo's whole Code
   Forge and its whole tracker (see [The forgejo
-  Connector](#the-forgejo-connector)). github needs no
+  Connector](#the-forgejo-connector)). github takes no
   `primary`: every Consumer of the root `spindrift.flakeModules.default`
-  carries the github row, and a plain row already answers every github read
-  and write (see [Backend primary mode](#backend-primary-mode)), so `primary`
-  there is a no-op kept for existing configs. jira takes no
-  `primary`: it has no native backend to replace, and its Connector is always
+  carries the github row, and a plain row answers every github read and write
+  (see [Backend primary mode](#backend-primary-mode)). It has no native
+  backend left to replace, so a github row that sets `primary` fails
+  evaluation (issue #6888). jira takes no
+  `primary` either: it has no native backend to replace, and its Connector is always
   the tracker (see [Running jira through its
   Connector](#running-jira-through-its-connector)). A `driver` row with
   `primary` on makes its Connector the Driver ahead of the native Strategy (see
@@ -2333,8 +2334,7 @@ is the fixture Connector in
   `spindrift.connectors.claude.shadow` and `.primary` fail evaluation.
   spindrift's own dogfood is a pinned exception to mimicking a new Consumer: it
   shadows the Connectors in `nix/dogfood-shadow.nix` (none today) and runs those
-  in `nix/dogfood-primary.nix` (github) as primary, each until cut-over;
-  github's entry is redundant with its default row and stays until #6888.
+  in `nix/dogfood-primary.nix` (none today) as primary, each until cut-over.
 - **Row-owned knobs.** A row's `knobs` attrset has the shape of a core row's
   (ADR 0068), keyed by env-schema key with an env-schema entry as value. The
   knobs fold into `spindrift.envSchema` on top of lib/env-schema.nix. Only that
@@ -2682,17 +2682,20 @@ maintainer-minimized comment. The Connector is github's default backend: the
 row is registered unconditionally, so every Consumer of the root
 `spindrift.flakeModules.default` has it, and every covered read and write
 (see [Backend primary mode](#backend-primary-mode)) goes through it with no
-`gh` fallback. The native github read path is deleted (issue #6811): a read
-that finds no routed row fails with `ErrNoRoute` naming the cause, and
-never falls back to `gh`. There are three such causes. A Consumer flake with no
-github row (one importing core's module directly) has none. Under a `GH_HOST`
-other than `github.com` the row is dropped, since its Routes pin
-`api.github.com`, so GitHub Enterprise is not served for reads until the
-Connector's Routes cover it, and no connector token is read. And a shadow row
-has no native read path left to be compared against, so it fails every read
-too; drop `shadow` from it. Native writes stay until #6888 deletes the rest of
-the adapter, and still use `gh` where the row is not routed. The jira
-Connector routes every write too. The Connector is held to the tracker read
+`gh` fallback. The native github adapter is deleted (issues #6811 for reads
+and #6888 for writes): a read or write that finds no routed row fails with
+`ErrNoRoute` naming the cause, and never falls back to `gh`. There are three
+such causes. A Consumer flake with no github row (one importing core's module
+directly) has none. Under a `GH_HOST` other than `github.com` the row is
+dropped, since its Routes pin `api.github.com`, so GitHub Enterprise is not
+served until the Connector's Routes cover it, and no connector token is read.
+And a shadow row has no native adapter left to be compared against, so it fails
+every call too; drop `shadow` from it. The one `gh` exec core keeps is the
+Box's open-PR query, which runs in the Box with the Box's own `gh` (spec
+#6757). The ADR 0073 migration window is closed and its all-or-none rule is in
+force: the Bundle registers no native network backend, and a Go test fails if
+it registers one, except forgejo's native forge and tracker, a pinned exception
+until #6868 and #7122 delete them. The Connector is held to the tracker read
 contract (`forgetest.RunTrackerReadContract`, with a `StateSeeder` standing in
 for the writes a read-only tracker lacks) and the PR forge read contract
 (`forgetest.RunPRForgeReadContract`), which the Connector's subflake check
@@ -2897,7 +2900,7 @@ module directly, carries no github backend row, fails github reads the same
 way, has no such variable, and doctor prints no `connector-routes[github]` or
 `connector-routes-widened[github]` row. spindrift's own dogfood shadows the
 Connectors listed in `nix/dogfood-shadow.nix` (none today) and runs those in
-`nix/dogfood-primary.nix` (github) as primary, a pinned exception to
+`nix/dogfood-primary.nix` (none today) as primary, a pinned exception to
 mimicking a new Consumer; its accepted github Route table is baselined in
 `spindrift-connector-routes.json`.
 
@@ -3207,15 +3210,15 @@ A backend row with `primary` on (issues #6998, #7127, #7128) makes its Connector
 answer in place of the native backend, in every launcher process that builds the
 adapter (dispatch, research, the daemon, recover and doctor). What it routes is
 per backend. github is the exception to needing the switch: since issue #7139
-a github row routes through its Connector whether or not `primary` is set,
-every Consumer of the root `spindrift.flakeModules.default` carries the row,
-and `primary` on it is a no-op kept for existing configs. Since issue #6811
-there is no native github read path to fall back to: a shadow row (see [Shadow
-mode](#shadow-mode)), a flake with no github row at all, and a run under a
-`GH_HOST` other than `github.com` (the Connector's Routes pin `api.github.com`,
-so the row is dropped and no connector token is fetched or sent) each fail
-every read with `ErrNoRoute` naming the cause, while native writes still
-use `gh` until #6888. The github row routes every read and, since the first two write
+a github row routes through its Connector whether or not `primary` is set, and
+every Consumer of the root `spindrift.flakeModules.default` carries the row.
+Since issue #6888 `primary` on it fails evaluation, because no native github
+backend is left to replace. There is no native github adapter to fall back to
+(issues #6811 and #6888): a shadow row (see [Shadow mode](#shadow-mode)), a
+flake with no github row at all, and a run under a `GH_HOST` other than
+`github.com` (the Connector's Routes pin `api.github.com`, so the row is
+dropped and no connector token is fetched or sent) each fail every read and
+write with `ErrNoRoute` naming the cause. The github row routes every read and, since the first two write
 switches (issues #6883 and #6885), these writes, with no `gh` fallback: the
 claim, un-claim and reclaim and the settle transitions (`TransitionState`),
 research verdicts (`CompleteVerdict`), the butler's label adds (`AddLabels`,
@@ -3243,17 +3246,17 @@ never a failed merge. The switches cover launcher-side writes only: the CI
 claim and release label swaps in `.github/actions/agent-setup/action.yml`
 and `.github/workflows/agent-dispatch.yml` still run `gh issue edit` and
 are not leaks of the switches. The github row is the default for every
-Consumer; dogfood also lists it in `nix/dogfood-primary.nix`, a no-op kept
-until #6888. The jira row is not a primary row: it routes the whole tracker
-with no native backend to fall back to or shadow ([Running jira through its
+Consumer, and `nix/dogfood-primary.nix` lists no backend. The jira row is not
+a primary row: it routes the whole tracker with no native backend to fall
+back to or shadow ([Running jira through its
 Connector](#running-jira-through-its-connector)). The forgejo row replaces
 the whole Code Forge and the whole tracker, reads and writes; it is
 [documented with its Connector](#the-forgejo-connector). The rest of this
-section describes github's. On github, no read stays on `gh`. Primary and
+section describes github's. On github, no read or write stays on `gh`. Primary and
 shadow are exclusive, so a primary row samples nothing; evaluation refuses
 the two together, a row with neither a `backend` nor a `driver` (a Driver's
 primary mode is [its own](#driver-primary-mode)), and a name with no native
-backend, each naming the
+backend (github and jira), each naming the
 row.
 
 There is no fallback. A Connector that fails to load, or a request its Route
@@ -3308,12 +3311,12 @@ only `ISSUE_TRACKER` on `github`, the Connector carries no PR writes, so they
 name Issues write and drop Pull requests and Contents. `spindrift doctor`
 reports the same.
 
-Dropping the github name from `nix/dogfood-primary.nix`, or `primary` from the
-row, changes nothing: the row routes through the Connector regardless, and with
-the native github read path deleted (issue #6811) no configuration restores
-native reads. The `primary = true` on the github mirror row in
-`nix/fixtures.nix` still moves with the dogfood list, or
-`connector-driver-rows-dogfood-shadows` fails.
+A github row that sets `primary` fails evaluation with ``Connector 'github':
+`primary` needs a native backend of the same name to replace; none is
+registered``. Drop it: the row routes through the Connector without it, and with
+the native github adapter deleted (issues #6811 and #6888) no configuration
+restores native github. A github Consumer config that never set `primary`
+evaluates unchanged.
 
 Each launcher process writes its own record pair under `.spindrift/logs/`, the
 directory CI uploads, once it makes its first primary read (a daemon writes one

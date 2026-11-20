@@ -742,12 +742,11 @@ with none (ADR 0073). _Avoid_: canary, dry run.
 **Primary mode**:
 The migration stage after Shadow mode, in which the Connector answers in place
 of the native backend, with no fallback: a Connector failure or audit refusal is
-recorded and fails the operation. github's Connector answers reads and the
-issue comment, label and issue-filing writes (#6883, #6885), its PR writes,
-branch delete and git push, relay and Ledger push (#6886), its merges staying
-native until #6887; forgejo's replaces the whole Code Forge, reads and writes,
-its tracker staying native. jira has no native path and takes no `primary`: its
-Connector is always the tracker (#6858).
+recorded and fails the operation. Only a backend that still has a native
+adapter takes `primary`, which today is forgejo, whose Connector replaces the
+whole Code Forge and the whole tracker, reads and writes. github and jira have
+no native path left and take no `primary`: their Connectors are always the
+implementation, and a row that sets it fails evaluation (#6858, #6888).
 Dropping the row's `primary` option restores the native path; the native path
 is deleted (cut-over) after 20 consecutive dogfood runs with no Connector read
 error and no refusal (ADR 0073). _Avoid_: cut-over (the later deletion of the
