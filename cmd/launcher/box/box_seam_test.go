@@ -232,9 +232,6 @@ func seamBaseEnv(t *testing.T) map[string]string {
 		"BASE_BRANCH":            "main",
 		"RUN_NONCE":              seamNonce,
 		"BOX_SIGNAL_CARRIER":     "log",
-		"MAX_REBASE_ATTEMPTS":    "1",
-		"TRANSIENT_BACKOFF_SECS": "0",
-		"HOLD_JITTER_SECS":       "0",
 		// What checkEnvGuards requires of every dispatch.
 		"REPO_SLUG":      seamSlug,
 		"GIT_USER_NAME":  "spindrift-agent",

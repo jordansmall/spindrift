@@ -519,7 +519,7 @@ func TestSeamSmokeReadOnlyBoxCarriesNoForgeToken(t *testing.T) {
 // BOX_ENV_VARS, the list of settings forwarded into the Box, and takes the
 // expectations from the unmodified document.
 func TestSeamSmokeCatchesDroppedKnob(t *testing.T) {
-	const dropped = "MAX_REBASE_ATTEMPTS"
+	const dropped = "BRANCH_PREFIX"
 	c := smokeMatrix[0]
 	docPath := seamtest.Path(t, c.fixture)
 	doc, err := inputdoc.Load(docPath)

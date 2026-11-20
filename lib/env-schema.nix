@@ -672,11 +672,7 @@ withRowKnobs {
     };
     flakeOption = true;
     nixSubPath = "boxAccess";
-    # Forwarded into the Box, but the prompt fragments gate on the derived
-    # BOX_WRITE_ENABLED signal rather than this raw value (issue #1951), so an
-    # unset or garbled value can never fall open into the write-capable path.
-    # The launcher reads this knob directly too, so no boxEnvOnly.
-    boxEnv = true;
+    boxEnv = false;
   };
   boxForgeCredential = {
     env = "BOX_FORGE_CREDENTIAL";
@@ -739,10 +735,7 @@ withRowKnobs {
     flakeOption = true;
     intKind = "nonneg";
     nixSubPath = "retry.maxRebase";
-    # Forwarded into the Box so box's in-process outcome backstop takes its
-    # push-retry bound from launcher-delivered plumbing rather than a
-    # hand-copied default (issue #2157).
-    boxEnv = true;
+    boxEnv = false;
   };
   maxBudgetTokens = {
     env = "MAX_BUDGET_TOKENS";
@@ -1009,9 +1002,7 @@ withRowKnobs {
     flakeOption = true;
     intKind = "nonneg";
     nixSubPath = "retry.holdJitter";
-    # Forwarded into the Box for the push-retry jitter of box's
-    # in-process outcome backstop (issue #2157); see maxRebaseAttempts.
-    boxEnv = true;
+    boxEnv = false;
   };
   transientBackoffSecs = {
     env = "TRANSIENT_BACKOFF_SECS";
@@ -1021,9 +1012,7 @@ withRowKnobs {
     flakeOption = true;
     intKind = "positive";
     nixSubPath = "retry.transientBackoff";
-    # Forwarded into the Box for the push-retry linear backoff unit of
-    # box's in-process outcome backstop (issue #2157); see maxRebaseAttempts.
-    boxEnv = true;
+    boxEnv = false;
   };
   transientRetryMax = {
     env = "TRANSIENT_RETRY_MAX";
