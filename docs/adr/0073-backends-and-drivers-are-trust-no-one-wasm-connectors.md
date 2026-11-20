@@ -554,7 +554,9 @@ has the procedure.
 
 Proof-order step 2 is in place on dogfood: the launcher wraps the native github
 tracker and forge, and the Connector answers a sample of the same reads beside
-them. Native stays authoritative and every write stays native. Sampling is per
+them. Native stays authoritative (amended by issue #6811: not on github, whose
+native reads are gone; a github shadow row fails every read, and shadow serves
+forgejo only) and every write stays native. Sampling is per
 operation at a row-owned rate (`spindrift.connectors.<name>.shadowEvery`,
 default 10, first call always sampled), so a rare read such as `FailureDetail`
 is still compared. A rate limit is classified host-side, in the Connector
@@ -1214,7 +1216,9 @@ carries the row for every Consumer. There is still no automatic native
 fallback: a load failure or a refused route fails with its named error.
 
 The native adapter stays in the build, so reverting the change restores native
-routing, until #6811 and #6888 delete it. Three cases keep native `gh`. A
+routing (amended by issue #6811: not for reads, which are deleted), until #6811
+and #6888 delete it. Three cases keep native `gh` (amended by issue #6811: for
+reads none do, each fails with `ErrNoReadRoute`; only writes stay native). A
 shadow row stays native-authoritative and sampled, as before. A Consumer that
 imports `core.flakeModules.default` directly carries no github row. And under
 a `GH_HOST` other than `github.com` the row is dropped, because the
@@ -1224,3 +1228,21 @@ Every run whose `CODE_FORGE` or `ISSUE_TRACKER` is github now needs
 `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`, write-capable under the #7209 amendment,
 and a non-shadow github row refuses `MERGE_METHOD=merge` and `squash` at
 launch, since the Connector merges by rebase only.
+
+## Amendment (issue #6811): the native github read path is deleted
+
+The cut-over lands for reads. Every github read, tracker and forge, token
+introspection included, goes through the Connector alone, and the native
+adapter's read methods are gone. The three cases the #7139 amendment left on
+native `gh` (a shadow row, a Consumer importing `core.flakeModules.default`
+directly, and a `GH_HOST` other than `github.com`) no longer fall back: each
+fails every read with `ErrNoReadRoute`, naming which of the three applied.
+GitHub Enterprise is therefore not served until the Connector's Routes cover
+it. A shadow github row has no native read path left to compare against, so it
+fails rather than samples.
+
+Native writes are unchanged and still use `gh` where the row is not routed,
+until #6888 deletes the rest of the adapter. The generic backend read shadow
+stays for backends that keep a native adapter, forgejo today; only its github
+use is gone. Dogfood keeps `primary` on its github row until #6888, a no-op
+since #7139.
