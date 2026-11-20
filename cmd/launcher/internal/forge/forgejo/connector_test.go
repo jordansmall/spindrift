@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -407,7 +409,7 @@ func (c *routeCoverage) assertUsed(t *testing.T) {
 
 // TestConnector_Contracts runs the shared contracts against the compiled
 // Connector: the whole Code Forge composed from it, both directly and as the
-// production constructor builds it under a primary forgejo row. A route no
+// production constructor builds it under a forgejo row. A route no
 // request in any run used is broader than the Connector needs, so coverage is
 // judged over all.
 func TestConnector_Contracts(t *testing.T) {
@@ -635,4 +637,25 @@ func testMergeRefusedWhileConflictCheckRuns(t *testing.T, h *connectorHarness) {
 			t.Fatalf("Merge refused while the PR stays unmergeable = %v, want forge.ErrMergeConflict", err)
 		}
 	})
+}
+
+// mergeIntoMain merges head into main in the bare repo with a real git merge,
+// failing on a conflict.
+func mergeIntoMain(t *testing.T, bare, head string) error {
+	t.Helper()
+	work := t.TempDir()
+	if out, err := exec.Command("git", "clone", bare, work).CombinedOutput(); err != nil {
+		return fmt.Errorf("git clone: %w: %s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", work, "checkout", "main").CombinedOutput(); err != nil {
+		return fmt.Errorf("git checkout main: %w: %s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", work, "merge", "--no-ff", "origin/"+head, "-m", "merge "+head).CombinedOutput(); err != nil {
+		exec.Command("git", "-C", work, "merge", "--abort").Run()
+		return fmt.Errorf("merge conflict: %s", out)
+	}
+	if out, err := exec.Command("git", "-C", work, "push", "origin", "HEAD:main").CombinedOutput(); err != nil {
+		return fmt.Errorf("git push: %w: %s", err, out)
+	}
+	return nil
 }

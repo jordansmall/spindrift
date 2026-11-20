@@ -31,7 +31,7 @@ func useForgejoRow(t *testing.T, baseURL string, adjust func(*backendrows.Row)) 
 	path, table := declaredRoutes(t)
 	row := backendrows.Row{
 		Name: "forgejo", Module: path, Routes: table,
-		CredentialEnv: connectorCredentialEnv, BaseEnv: forgejo.ForgejoBaseURLEnv, Primary: true,
+		CredentialEnv: connectorCredentialEnv, BaseEnv: forgejo.ForgejoBaseURLEnv,
 	}
 	adjust(&row)
 	doc, err := json.Marshal([]backendrows.Row{row})
@@ -58,7 +58,7 @@ func buildForge(srv *httptest.Server, mergeMethod string) (forge.CodeForge, erro
 }
 
 // productionForge builds the Code Forge the way the launcher does under a
-// primary forgejo row pointing at the compiled Connector and srv. It returns
+// forgejo row pointing at the compiled Connector and srv. It returns
 // the row's resolved Route table and the Connector's audit file, which core
 // writes under the working directory's log directory.
 func productionForge(t *testing.T, srv *httptest.Server) (forge.CodeForge, []connectorhost.Route, string, error) {
@@ -73,11 +73,9 @@ func productionForge(t *testing.T, srv *httptest.Server) (forge.CodeForge, []con
 	return cf, connectortracker.Routes(row.Routes, connectorRepo), filepath.Join(dir, ".spindrift", "logs", "connector-forgejo.audit.jsonl"), err
 }
 
-func nativeForgeType(cf forge.CodeForge) string { return reflect.TypeOf(cf).String() }
-
 // A Connector that fails to load fails the construction with its error and
 // builds no forge, native or otherwise.
-func TestPrimaryRow_LoadFailureFailsConstruction(t *testing.T) {
+func TestConnectorForge_LoadFailureFailsConstruction(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
 	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Module = filepath.Join(t.TempDir(), "absent.wasm") })
@@ -89,11 +87,11 @@ func TestPrimaryRow_LoadFailureFailsConstruction(t *testing.T) {
 		t.Errorf("err = %v, want the module read error", err)
 	}
 	if cf != nil {
-		t.Errorf("built a %s despite the load failure", nativeForgeType(cf))
+		t.Errorf("built a %T despite the load failure", cf)
 	}
 }
 
-func TestPrimaryRow_LoadErrorIsReturnedAsIs(t *testing.T) {
+func TestConnectorForge_LoadErrorIsReturnedAsIs(t *testing.T) {
 	boom := errors.New("connector would not load")
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
@@ -111,7 +109,7 @@ func TestPrimaryRow_LoadErrorIsReturnedAsIs(t *testing.T) {
 // A request outside the row's Routes is refused by the host: the operation
 // fails with that refusal, and the forge is the Connector's, never a native
 // fallback that would have answered.
-func TestPrimaryRow_RefusedRouteFailsTheOperation(t *testing.T) {
+func TestConnectorForge_RefusedRouteFailsTheOperation(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
 	useForgejoRow(t, srv.URL, func(r *backendrows.Row) {
@@ -124,9 +122,6 @@ func TestPrimaryRow_RefusedRouteFailsTheOperation(t *testing.T) {
 	cf, err := buildForge(srv, "")
 	if err != nil {
 		t.Fatal(err)
-	}
-	if got := nativeForgeType(cf); strings.Contains(got, "forgejoCodeForge") {
-		t.Fatalf("built %s, want the Connector's Code Forge", got)
 	}
 	_, err = cf.Probe()
 
@@ -147,14 +142,14 @@ func slicesDeleteMethod(routes []connectorhost.Route, method string) []connector
 
 // The Connector merges by rebase only, so a MERGE_METHOD it cannot honour is
 // refused rather than silently ignored.
-func TestPrimaryRow_RefusesAMergeMethodTheConnectorCannotHonour(t *testing.T) {
+func TestConnectorForge_RefusesAMergeMethodTheConnectorCannotHonour(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
 	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
 	for _, method := range []string{"squash", "merge"} {
 		cf, err := buildForge(srv, method)
-		if !errors.Is(err, forgejo.ErrPrimaryMergeMethod) || !strings.Contains(err.Error(), "MERGE_METHOD") || cf != nil {
-			t.Errorf("MERGE_METHOD=%s: buildForge = (%v, %v), want (nil, ErrPrimaryMergeMethod)", method, cf, err)
+		if !errors.Is(err, forgejo.ErrMergeMethod) || !strings.Contains(err.Error(), "MERGE_METHOD") || cf != nil {
+			t.Errorf("MERGE_METHOD=%s: buildForge = (%v, %v), want (nil, ErrMergeMethod)", method, cf, err)
 		}
 	}
 }
@@ -164,17 +159,14 @@ func TestPrimaryRow_RefusesAMergeMethodTheConnectorCannotHonour(t *testing.T) {
 func TestPlainRow_BuildsTheConnectorForgeAndTheNativeTracker(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Primary = false })
+	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
 	t.Setenv(connectorCredentialEnv, connectorToken)
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	t.Chdir(t.TempDir())
 
-	cf, err := buildForge(srv, "")
+	_, err := buildForge(srv, "")
 	if err != nil {
 		t.Fatal(err)
-	}
-	if got := nativeForgeType(cf); strings.Contains(got, "forgejoCodeForge") {
-		t.Errorf("built %s, want the Connector forge", got)
 	}
 	tr, err := buildTracker(srv)
 	if err != nil {
@@ -197,7 +189,7 @@ func TestNoConnectorRow_RefusesTheCodeForge(t *testing.T) {
 	}))
 	for name, plain := range map[string]func(*backendrows.Row){
 		"no row":     nil,
-		"shadow row": func(r *backendrows.Row) { r.Primary, r.Shadow, r.ShadowEvery = false, true, 1 },
+		"shadow row": func(r *backendrows.Row) { r.Shadow, r.ShadowEvery = true, 1 },
 	} {
 		t.Run(name, func(t *testing.T) {
 			if plain != nil {
@@ -218,11 +210,27 @@ func TestNoConnectorRow_RefusesTheCodeForge(t *testing.T) {
 	}
 }
 
-// The production forgejo forge, composed under a primary row, exposes the
+// A plain row whose base is not https is dropped by the row set as unusable;
+// the forge build must name the base, not point at a row that exists.
+func TestPlainRow_PlaintextBaseNamesTheBase(t *testing.T) {
+	srv := httptest.NewTLSServer(nil)
+	t.Cleanup(srv.Close)
+	useForgejoRow(t, "http://forgejo.lan:3000", func(*backendrows.Row) {})
+
+	cf, err := buildForge(srv, "squash")
+	if !errors.Is(err, forgejo.ErrNoConnectorRow) || cf != nil {
+		t.Fatalf("buildForge = (%v, %v), want (nil, ErrNoConnectorRow)", cf, err)
+	}
+	if !strings.Contains(err.Error(), "must be an https URL") || !strings.Contains(err.Error(), forgejo.ForgejoBaseURLEnv) {
+		t.Errorf("err = %q, want it to say %s must be an https URL", err, forgejo.ForgejoBaseURLEnv)
+	}
+}
+
+// The production forgejo forge, composed under a forgejo row, exposes the
 // head-pinned rebase to the Lander, refuses a PR whose guest-named head is not
 // the derived agent branch, and refuses a plain Rebase, each before any branch
 // is pushed (issue #6961). A matching head rebases.
-func TestPrimaryRow_RebasePRHeadIsPinnedToTheAgentBranch(t *testing.T) {
+func TestConnectorForge_RebasePRHeadIsPinnedToTheAgentBranch(t *testing.T) {
 	h := newConnectorHarness(t, true)
 	rebaser := h.caps.PRHeadRebaser
 	if rebaser == nil {
@@ -268,7 +276,7 @@ func buildTracker(srv *httptest.Server) (forge.IssueTracker, error) {
 func TestPrimaryRow_TrackerLoadFailureFailsConstruction(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Module = filepath.Join(t.TempDir(), "absent.wasm") })
+	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Primary, r.Module = true, filepath.Join(t.TempDir(), "absent.wasm") })
 	t.Chdir(t.TempDir())
 
 	tr, err := buildTracker(srv)
@@ -282,7 +290,7 @@ func TestPrimaryRow_TrackerLoadErrorIsReturnedAsIs(t *testing.T) {
 	boom := errors.New("connector would not load")
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
+	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Primary = true })
 	t.Cleanup(forgejo.SetLoadRowConnector(func(context.Context, backendrows.Row, backendrows.Options) (*connectorhost.Connector, error) {
 		return nil, boom
 	}))
@@ -299,7 +307,7 @@ func TestPrimaryRow_TrackerLoadErrorIsReturnedAsIs(t *testing.T) {
 func TestPrimaryRow_TrackerRefusesAConnectorMissingACapability(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
+	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Primary = true })
 	var loaded *connectorhost.Connector
 	t.Cleanup(forgejo.SetLoadRowConnector(func(ctx context.Context, row backendrows.Row, o backendrows.Options) (*connectorhost.Connector, error) {
 		c, err := backendrows.Load(ctx, row, o)
@@ -332,6 +340,7 @@ func TestPrimaryRow_TrackerRefusedRouteFailsTheOperation(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests.Add(1) }))
 	t.Cleanup(srv.Close)
 	useForgejoRow(t, srv.URL, func(r *backendrows.Row) {
+		r.Primary = true
 		r.Routes = append(slicesDeleteMethod(r.Routes, "GET"), connectorhost.Route{Method: "GET", Host: backendrows.BaseHost, Path: "/unrelated"})
 	})
 	t.Setenv(connectorCredentialEnv, connectorToken)

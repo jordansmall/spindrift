@@ -117,11 +117,6 @@ var (
 	fakeForgejoIssueNumRe  = regexp.MustCompile(`issue-(\d+)`)
 )
 
-func newFakeForgejo(t *testing.T) *fakeForgejo {
-	t.Helper()
-	return startFakeForgejo(t, httptest.NewServer)
-}
-
 // startFakeForgejo serves the fake with start, httptest.NewServer or
 // httptest.NewTLSServer.
 func startFakeForgejo(t *testing.T, start func(http.Handler) *httptest.Server) *fakeForgejo {
@@ -143,7 +138,7 @@ func startFakeForgejo(t *testing.T, start func(http.Handler) *httptest.Server) *
 	return f
 }
 
-// URL returns the value to pass as ForgejoCodeForgeConfig.BaseURL.
+// URL returns the fake's base URL.
 func (f *fakeForgejo) URL() string { return f.srv.URL }
 
 // prNumFromURL reads the trailing path segment, the same convention the real
@@ -266,7 +261,7 @@ func (f *fakeForgejo) SeedAutoMergeAllowed(allowed bool) {
 
 // SetMergeable overrides num's mergeable flag. Slice 6's CodeForge harness
 // sets it false alongside a real git conflict (GitRepoFixture's ConflictBase)
-// so the adapter's classifyMergeFailure, which reads Mergeable over REST,
+// so the Connector's merge-failure classification, which reads Mergeable over REST,
 // reports forge.ErrMergeConflict and not forge.ErrMergeBlockedByChecks.
 func (f *fakeForgejo) SetMergeable(num string, mergeable bool) {
 	f.mu.Lock()
@@ -288,7 +283,7 @@ func (f *fakeForgejo) ScriptMergeableReads(num string, reads ...bool) {
 }
 
 // SeedNeedsUpdate scripts the compare route's total_commits, nonzero for true
-// and 0 for false, because forgejo_prforge.go's NeedsUpdate reads that field
+// and 0 for false, because the Connector's NeedsUpdate reads that field
 // from the swapped-refs compare call.
 func (f *fakeForgejo) SeedNeedsUpdate(url string, needsUpdate bool) {
 	f.mu.Lock()
@@ -322,9 +317,9 @@ func (f *fakeForgejo) IsDraft(url string) bool {
 }
 
 // fakeWIPPrefixes mirrors real Forgejo's default WORK_IN_PROGRESS_PREFIXES
-// config. Keep it separate from the adapter's own forgejoWIPPrefixes
-// (forgejo_prforge.go): this fake stands in for a real server, which derives
-// its draft field independently of this codebase's adapter.
+// config. Keep it separate from the Connector's own prefix list, so this fake
+// stands in for a real server, which derives its draft field independently of
+// the Connector.
 var fakeWIPPrefixes = []string{"WIP:", "[WIP]"}
 
 // fakeIsDraftTitle mirrors how real Forgejo derives a pull's served "draft"
@@ -565,7 +560,7 @@ func (f *fakeForgejo) handleCommitStatus(w http.ResponseWriter, _ *http.Request,
 }
 
 // handleCompare serves the swapped-refs compare route NeedsUpdate reads,
-// mirroring forgejoCompare in forgejo_prforge.go. It recovers the PR number
+// mirroring the Connector's compare read. It recovers the PR number
 // from the head ref embedded in the compare path, which seedPull always
 // writes as agent/issue-<num>.
 func (f *fakeForgejo) handleCompare(w http.ResponseWriter, r *http.Request) {

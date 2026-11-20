@@ -1,6 +1,6 @@
-// Package forgejo is the Forgejo REST adapter. It satisfies all three forge
-// seams (ADR 0038): IssueTracker on forgejoClient, and CodeForge plus the full
-// PRForge optional interface on forgejoCodeForge.
+// Package forgejo is the Forgejo adapter. The native IssueTracker is
+// forgejoClient; the CodeForge and PRForge seams are served by the Connector
+// (connector_forge.go).
 package forgejo
 
 import (
@@ -20,7 +20,61 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/rest"
+	"spindrift.dev/launcher/internal/gitexec"
 )
+
+// defaultForgejoHTTPTimeout bounds every Forgejo REST call so a hung instance
+// cannot block one forever.
+const defaultForgejoHTTPTimeout = 30 * time.Second
+
+// GitRemoteURL builds the clone URL for repo (an owner/repo slug). It carries
+// no userinfo: git authenticates with GitCredential, out of band, so the token
+// never reaches an argv, a persisted remote or an error string. If baseURL
+// fails to parse, it concatenates the slug onto the raw base.
+func GitRemoteURL(baseURL, repo string) string {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return strings.TrimSuffix(baseURL, "/") + "/" + strings.Trim(repo, "/") + ".git"
+	}
+	u.Path = "/" + strings.Trim(repo, "/") + ".git"
+	return u.String()
+}
+
+// GitCredential is the credential git presents to a Forgejo instance for
+// token. Forgejo/Gitea basic auth takes a non-empty password as an access
+// token, so the username is a placeholder, the same oauth2:<token> shape the
+// git backend documents. An empty token yields the zero (anonymous)
+// Credential.
+func GitCredential(token string) gitexec.Credential {
+	if token == "" {
+		return gitexec.Credential{}
+	}
+	return gitexec.Credential{Username: "oauth2", Password: token}
+}
+
+// MergeStyle resolves MergeMethod to a merge style. An unset method resolves
+// to "rebase", matching the github adapter's default; the forge build gates on
+// rebase and AutoMergeRemedy names the style.
+func MergeStyle(method string) string {
+	switch method {
+	case "merge":
+		return "merge"
+	case "squash":
+		return "squash"
+	default:
+		return "rebase"
+	}
+}
+
+// forgejoStatusMap is the HTTP-status to sentinel-error table for the
+// tracker's *rest.Client.
+func forgejoStatusMap() rest.StatusMap {
+	return rest.StatusMap{
+		http.StatusUnauthorized: forge.ErrAuthFailure,
+		http.StatusForbidden:    forge.ErrAuthFailure,
+		http.StatusNotFound:     forge.ErrNotFound,
+	}
+}
 
 // ForgejoConfig configures the Forgejo IssueTracker adapter.
 type ForgejoConfig struct {
@@ -37,9 +91,7 @@ type ForgejoConfig struct {
 
 	// HTTPClient overrides the client used for Forgejo REST calls. A nil
 	// client gets defaultForgejoHTTPTimeout, never the untimed
-	// http.DefaultClient, because this default also backs the CodeForge
-	// adapter's Probe and Merge calls when the two seams share one
-	// *rest.Client (issue #2256).
+	// http.DefaultClient.
 	HTTPClient *http.Client
 }
 
@@ -117,10 +169,6 @@ func NewForgejoClient(cfg ForgejoConfig) forge.IssueTracker {
 	if hc == nil {
 		hc = &http.Client{Timeout: defaultForgejoHTTPTimeout}
 	}
-	// The status map's 405/409 to errMergeRefused entries matter only on the
-	// merge endpoint, which this IssueTracker never calls. They are carried
-	// here so the disambiguation still works when NewForgejoCodeForge reuses
-	// this tracker's *rest.Client (issue #2256).
 	restClient := rest.New(cfg.BaseURL, rest.TokenAuth{Scheme: "token", Token: cfg.Token}, "forgejo", forgejoStatusMap(), hc)
 	return &forgejoClient{cfg: cfg, rest: restClient, now: time.Now}
 }

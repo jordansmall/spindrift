@@ -38,13 +38,33 @@ func TestGitCredential(t *testing.T) {
 	if got := GitCredential(""); got != (gitexec.Credential{}) {
 		t.Errorf("GitCredential(\"\") = %+v, want the zero Credential", got)
 	}
+
 }
 
-// Issue #2256's shared-client seam: given a tracker built by NewForgejoClient,
-// the CodeForge's *rest.Client must be the identical pointer, not a second
-// client against the same repo. A nil tracker (different backend, or none
-// configured) falls back to building its own.
-func TestNewForgejoCodeForge_ReusesTrackerRESTClient(t *testing.T) {
+// An unset or unrecognized method falls back to "rebase", matching the github
+// adapter's mergeMethodFlag default.
+func TestMergeStyle(t *testing.T) {
+	tests := []struct {
+		method string
+		want   string
+	}{
+		{"merge", "merge"},
+		{"squash", "squash"},
+		{"rebase", "rebase"},
+		{"", "rebase"},
+		{"bogus", "rebase"},
+	}
+	for _, tt := range tests {
+		if got := MergeStyle(tt.method); got != tt.want {
+			t.Errorf("MergeStyle(%q) = %q, want %q", tt.method, got, tt.want)
+		}
+	}
+}
+
+// The tracker's client must carry a bounded timeout when NewForgejoClient is
+// given no HTTPClient override: a hung Forgejo instance would otherwise block
+// IssueTracker calls forever.
+func TestNewForgejoClient_DefaultClientIsTimeBounded(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 
@@ -53,22 +73,7 @@ func TestNewForgejoCodeForge_ReusesTrackerRESTClient(t *testing.T) {
 	if !ok {
 		t.Fatalf("NewForgejoClient(...) = %T, want *forgejoClient", tracker)
 	}
-
-	cf := newForgejoCodeForge(ForgejoCodeForgeConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}, tracker, "unused")
-	if cf.rest != fc.rest {
-		t.Fatalf("newForgejoCodeForge(..., tracker, ...).rest = %p, want the tracker's own *rest.Client %p (shared instance)", cf.rest, fc.rest)
-	}
-
-	// The reuse path discards newForgejoCodeForge's own timed client, so the
-	// timeout must come from the tracker's client. If NewForgejoClient defaulted
-	// to the untimed http.DefaultClient, a hung Forgejo instance would block
-	// Probe/Merge/IssueTracker calls forever.
 	if timeout := fc.rest.HTTPClientForTest().Timeout; timeout <= 0 {
-		t.Fatalf("tracker built by NewForgejoClient with no HTTPClient override: rest client Timeout = %v, want a bounded (>0) timeout", timeout)
-	}
-
-	cfNoTracker := newForgejoCodeForge(ForgejoCodeForgeConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}, nil, "unused")
-	if cfNoTracker.rest == fc.rest {
-		t.Fatal("newForgejoCodeForge(..., nil, ...).rest unexpectedly shares the unrelated tracker's *rest.Client")
+		t.Fatalf("rest client Timeout = %v, want a bounded (>0) timeout", timeout)
 	}
 }

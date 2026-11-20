@@ -44,7 +44,7 @@ func TestAutoMergePreflight(t *testing.T) {
 			codeForge:        "forgejo",
 			autoMergeAllowed: false,
 			wantErr:          true,
-			wantErrContains:  `enable the "rebase" merge style (MERGE_METHOD) in the repo's settings, or change MERGE_METHOD`,
+			wantErrContains:  `enable the "rebase" merge style (MERGE_METHOD) in the repo's settings`,
 			wantErrOmits:     "Allow auto-merge",
 		},
 		{

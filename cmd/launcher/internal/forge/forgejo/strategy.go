@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/gitremote"
@@ -22,7 +23,7 @@ var Strategy = backendkit.Strategy{
 	},
 	IssueReadScope: func(s backendkit.Shared, _ backendkit.Lookup) string { return s.RepoSlug },
 	AutoMergeRemedy: func(s backendkit.Shared) string {
-		return fmt.Sprintf(`enable the %q merge style (MERGE_METHOD) in the repo's settings, or change MERGE_METHOD`, MergeStyle(s.MergeMethod))
+		return fmt.Sprintf(`enable the %q merge style (MERGE_METHOD) in the repo's settings`, MergeStyle(s.MergeMethod))
 	},
 	NewIssueTracker: func(s backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, error) {
 		k, err := ReadKnobs(l)
@@ -47,6 +48,9 @@ var Strategy = backendkit.Strategy{
 		}
 		row, ok := forgeRow()
 		if !ok {
+			if baseErr := backendrows.BaseError(backend.Forgejo.Name); baseErr != nil {
+				return nil, fmt.Errorf("%w: %w", ErrNoConnectorRow, baseErr)
+			}
 			return nil, ErrNoConnectorRow
 		}
 		return newConnectorCodeForge(row, s, k)

@@ -13,26 +13,7 @@ import (
 // SetNow swaps the clock behind the undefined-label verdict's expiry.
 func SetNow(t forge.IssueTracker, now func() time.Time) { t.(*forgejoClient).now = now }
 
-// SetMergeRecheckDelay swaps the pause before Merge re-reads a pull that
-// reported mergeable=false after a refusal.
-func SetMergeRecheckDelay(cf forge.CodeForge, d time.Duration) {
-	cf.(*forgejoCodeForge).mergeRecheckDelay = d
-}
-
-// RelayClone exposes the clone closure PushBranch, Relay and CommitSubjects share.
-func RelayClone(cf forge.CodeForge, op string) func(dir string) error {
-	return cf.(*forgejoCodeForge).relayClone(op)
-}
-
-// SetJobLogsBudget swaps the cap on one FailureDetail's job-log reads and
-// returns a restore func.
-func SetJobLogsBudget(d time.Duration) (restore func()) {
-	old := jobLogsBudget
-	jobLogsBudget = d
-	return func() { jobLogsBudget = old }
-}
-
-// SetLoadRowConnector swaps the Connector load behind a primary row and
+// SetLoadRowConnector swaps the Connector load behind a forgejo row and
 // returns a restore func.
 func SetLoadRowConnector(f func(context.Context, backendrows.Row, backendrows.Options) (*connectorhost.Connector, error)) (restore func()) {
 	old := loadRowConnector
@@ -40,15 +21,10 @@ func SetLoadRowConnector(f func(context.Context, backendrows.Row, backendrows.Op
 	return func() { loadRowConnector = old }
 }
 
-// SetConnectorClient swaps the transport a primary row's Connector sends over
+// SetConnectorClient swaps the transport a forgejo row's Connector sends over
 // and returns a restore func.
 func SetConnectorClient(c *http.Client) (restore func()) {
 	old := connectorClient
 	connectorClient = c
 	return func() { connectorClient = old }
-}
-
-// JobLog calls the job-log read directly, so a test can hand it a deadline.
-func JobLog(cf forge.PRForge, targetURL string, deadline time.Time) string {
-	return cf.(*forgejoCodeForge).jobLog(targetURL, deadline)
 }

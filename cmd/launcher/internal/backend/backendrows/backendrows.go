@@ -106,6 +106,8 @@ var coreBackends = map[string]bool{"git": true, "local": true}
 var (
 	mu      sync.RWMutex
 	applied = map[string]Row{}
+	// unusableBase holds the base error of each row Use dropped.
+	unusableBase = map[string]error{}
 )
 
 // Use applies the rows in raw, a JSON array of Row, replacing any rows an
@@ -129,21 +131,24 @@ func Use(raw json.RawMessage, lookup func(string) string) error {
 	}
 	seen := map[string]bool{}
 	next := make(map[string]Row, len(rows))
+	dropped := map[string]error{}
 	for _, row := range rows {
-		resolved, unconfigured, err := resolveBase(row, lookup)
+		resolved, unusable, err := resolveBase(row, lookup)
 		if err == nil {
 			err = validate(resolved, seen)
 		}
 		if err != nil {
 			return fmt.Errorf("backend rows: %w", err)
 		}
-		if !unconfigured && gateAllows(resolved.Name, lookup) {
+		if unusable != nil {
+			dropped[resolved.Name] = unusable
+		} else if gateAllows(resolved.Name, lookup) {
 			next[resolved.Name] = resolved
 		}
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	applied = next
+	applied, unusableBase = next, dropped
 	return nil
 }
 
@@ -166,28 +171,28 @@ func gateAllows(name string, lookup func(string) string) bool {
 	return !ok || applies(lookup)
 }
 
-// unsetHost is the placeholder base host an unconfigured non-Shadow row
+// unsetHost is the placeholder base host an unusable non-Shadow row
 // resolves against, so its routes still validate whole before it is dropped.
 const unsetHost = "unset.invalid"
 
 // resolveBase returns row with every BaseHost route host and path prefix
 // replaced from the base URL its BaseEnv names. It runs before validate so
 // ValidateRoutes judges the table the Connector will actually be held to.
-// unconfigured reports an unset or unusable base on a non-Shadow row: it
-// resolves against unsetHost and the caller drops it. A Consumer importing every
-// Connector need not configure a tracker it does not use, so an unset or
-// unusable base must not fail it; a Shadow or Primary row opted in, so every
-// base error stands. A dropped jira base surfaces as errNoConnectorRow when the
-// jira tracker is built (forge/jira/strategy.go).
-func resolveBase(row Row, lookup func(string) string) (_ Row, unconfigured bool, _ error) {
+// A base is unusable when BaseEnv is unset or names anything but a bare https
+// URL. On a plain row, unusable carries that error: the row resolves against
+// unsetHost and the caller drops it, since a Consumer importing every
+// Connector need not configure a tracker it does not use. A Shadow or Primary
+// row opted in, so its base error is returned as the error instead. Use keeps
+// a dropped row's error for BaseError.
+func resolveBase(row Row, lookup func(string) string) (_ Row, unusable, _ error) {
 	uses := func(routes []connectorhost.Route) bool {
 		return slices.ContainsFunc(routes, func(r connectorhost.Route) bool { return r.Host == BaseHost })
 	}
 	if !uses(row.Routes) && !uses(row.AcceptedRoutes) {
-		return row, false, nil
+		return row, nil, nil
 	}
 	if row.BaseEnv == "" {
-		return row, false, fmt.Errorf("backend %q: a route host is %s but the row has no baseEnv", row.Name, BaseHost)
+		return row, nil, fmt.Errorf("backend %q: a route host is %s but the row has no baseEnv", row.Name, BaseHost)
 	}
 	raw := lookup(row.BaseEnv)
 	u, perr := url.Parse(raw)
@@ -216,9 +221,9 @@ func resolveBase(row Row, lookup func(string) string) (_ Row, unconfigured bool,
 	}
 	if err != nil {
 		if row.Shadow || row.Primary {
-			return row, false, err
+			return row, nil, err
 		}
-		u, prefix, unconfigured = &url.URL{Scheme: "https", Host: unsetHost}, "", true
+		u, prefix, unusable = &url.URL{Scheme: "https", Host: unsetHost}, "", err
 	}
 	host := u.Host
 	apply := func(routes []connectorhost.Route) []connectorhost.Route {
@@ -238,7 +243,7 @@ func resolveBase(row Row, lookup func(string) string) (_ Row, unconfigured bool,
 	}
 	row.Routes = apply(row.Routes)
 	row.AcceptedRoutes = apply(row.AcceptedRoutes)
-	return row, unconfigured, nil
+	return row, unusable, nil
 }
 
 // bareHost reports whether u names a host[:port] that Route.validate would
@@ -377,10 +382,18 @@ func Load(ctx context.Context, row Row, o Options) (*connectorhost.Connector, er
 func Snapshot() (restore func()) {
 	mu.Lock()
 	defer mu.Unlock()
-	saved, savedGates := maps.Clone(applied), maps.Clone(gates)
+	saved, savedGates, savedBase := maps.Clone(applied), maps.Clone(gates), maps.Clone(unusableBase)
 	return func() {
 		mu.Lock()
 		defer mu.Unlock()
-		applied, gates = saved, savedGates
+		applied, gates, unusableBase = saved, savedGates, savedBase
 	}
+}
+
+// BaseError returns why Use dropped the named row, so a caller that finds no
+// row can say why. It is nil when the row applied or is absent.
+func BaseError(name string) error {
+	mu.RLock()
+	defer mu.RUnlock()
+	return unusableBase[name]
 }
