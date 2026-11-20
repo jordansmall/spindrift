@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -110,15 +109,12 @@ type Strategy struct {
 	// HostSeededMirror.
 	SeedMirror func(s Shared, l Lookup, pwd, dir string) error
 
-	// ConfigureCLI sets up the backend's CLI inside the Box; nil means the
-	// backend has none to set up.
-	ConfigureCLI func(BoxCLI) error
-
-	// OpenPRForBranch asks, from inside the Box, whether branch has an open PR
-	// on repoSlug. Nil means the Box cannot ask this forge: it has no in-box
-	// client and token for one (forgejo, issue #3942) or no PRs at all (local,
-	// git; ADR 0033, ADR 0013).
-	OpenPRForBranch func(repoSlug, branch string) (bool, error)
+	// HostAnswersOpenPR is set when the host answers the Box's open-PR
+	// question through BOX_HOST_OPEN_PR: the Box has no client or token to
+	// ask the forge itself. False means the Box is not asked this forge: it
+	// has no PRs at all (local, git; ADR 0033, ADR 0013) or the host does not
+	// answer for it (forgejo, issue #3942).
+	HostAnswersOpenPR bool
 
 	// Quickstart hooks (ADR 0068 decision 8). KnobsFromRemote returns the
 	// backend's own knob values (env name -> value) implied by a git remote
@@ -152,14 +148,6 @@ type TokenPrompt struct {
 	Probe func(token string) error
 	// RerunCmd is the command the error hints tell the operator to rerun.
 	RerunCmd string
-}
-
-// BoxCLI is the Box's process seams a ConfigureCLI setup runs through.
-type BoxCLI struct {
-	Getenv   func(string) string
-	LookPath func(string) (string, error)
-	Run      func(*exec.Cmd) error
-	Stderr   io.Writer
 }
 
 // TokenIntrospection reports what a Box token probe learned. Introspectable is

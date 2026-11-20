@@ -16,122 +16,71 @@ import (
 	"spindrift.dev/launcher/internal/readonlyguards"
 )
 
-// guardsDeps are the read-only guard steps, split out so a test can make the
-// install miss what the post-install verification then catches.
+// guardsDeps is the read-only guard install, split out so a test can make it
+// miss what the post-install verification then catches.
 type guardsDeps struct {
 	Install func(rows []promptassembly.ForbiddenMarkerRow, cfg readonlyguards.Config, out io.Writer) (readonlyguards.Result, error)
-	// Setenv prepends the shim dir to box's own PATH, which every child (the
-	// prefetch hook, the orchestrator, the Driver) inherits.
-	Setenv func(key, value string) error
 }
 
 func realGuardsDeps() guardsDeps {
-	return guardsDeps{Install: readonlyguards.Install, Setenv: os.Setenv}
+	return guardsDeps{Install: readonlyguards.Install}
 }
 
 // readonlyDecoyName is the basename of the bare decoy repo that the guarded
 // remotes' pushurls point at.
 const readonlyDecoyName = "readonly-push-guard.git"
 
-// readonlyShimDir is where box installs the read-only command shims. $HOME
-// rather than the work dir's parent, which in production is the root-owned `/`
-// while the Box runs as uid 1000.
-func readonlyShimDir(home string) string {
-	return filepath.Join(home, ".spindrift", "readonly-gh-shim")
-}
-
-// installReadonlyGuards installs the read-only guards (issues #2463, #2465,
-// #2509): a git push hook plus command shims for gh and fj, every guard and
-// rejection message coming from the forbiddenMarkers registry. A
-// self-contained dispatch has no forge to guard. An argv0 absent from PATH is
-// skipped by Install, so a github Box with no fj is fine.
+// installReadonlyGuards installs the read-only git push hook (issues #2463,
+// #2465, #2509), whose guard and rejection message come from the
+// forbiddenMarkers registry. A self-contained dispatch has no forge to guard,
+// and one whose hand-off is a real `git push` must never get that push
+// blocked locally, so neither installs the hook.
 func (r *boxRun) installReadonlyGuards() error {
 	env, d := r.env, r.d
-	if env.SelfContained {
+	if env.SelfContained || !r.needsBox {
 		return nil
 	}
 	rows, err := promptassembly.LoadForbiddenMarkersFile(r.in.ForbiddenMarkersFile)
 	if err != nil {
 		return err
 	}
-	shimDir := readonlyShimDir(d.Getenv("HOME"))
-	cfg := readonlyguards.Config{ShimDir: shimDir}
-	var decoy string
-	// Only the git-hook guard is gated on the bundle hand-off: a read-only Box
-	// whose hand-off IS a real `git push` must never get that push blocked
-	// locally. Every backend registered today hands back a bundle (issue
-	// #2927), but the branch stays live for a future one. The shims install
-	// regardless.
-	if r.needsBox {
-		// A bare decoy outside the work dir, never the work dir itself: every
-		// real push targets the branch already checked out there, so a pushurl
-		// pointing at it would resolve as "Everything up-to-date" and exit 0
-		// without firing a hook. The work dir gets the hook too, catching a push
-		// to an explicit URL that bypasses the remotes' pushurls.
-		tmp, err := os.MkdirTemp("", "")
-		if err != nil {
-			return err
-		}
-		decoy = filepath.Join(tmp, readonlyDecoyName)
-		if err := d.Git(r.in.WorkDir, "init", "--bare", "-q", decoy); err != nil {
-			return fmt.Errorf("init decoy repo: %w", err)
-		}
-		remotes, err := r.guardedRemotes()
-		if err != nil {
-			return err
-		}
-		for _, name := range remotes {
-			if err := d.Git(r.in.WorkDir, "config", "remote."+name+".pushurl", decoy); err != nil {
-				return fmt.Errorf("point remote %s's pushurl at the decoy: %w", name, err)
-			}
-		}
-		cfg.RepoDir = decoy
-		cfg.ExtraRepoDirs = []string{r.in.WorkDir}
-	} else {
-		cfg.SkipGitHook = true
+	// A bare decoy outside the work dir, never the work dir itself: every
+	// real push targets the branch already checked out there, so a pushurl
+	// pointing at it would resolve as "Everything up-to-date" and exit 0
+	// without firing a hook. The work dir gets the hook too, catching a push
+	// to an explicit URL that bypasses the remotes' pushurls.
+	tmp, err := os.MkdirTemp("", "")
+	if err != nil {
+		return err
 	}
+	decoy := filepath.Join(tmp, readonlyDecoyName)
+	if err := d.Git(r.in.WorkDir, "init", "--bare", "-q", decoy); err != nil {
+		return fmt.Errorf("init decoy repo: %w", err)
+	}
+	remotes, err := r.guardedRemotes()
+	if err != nil {
+		return err
+	}
+	for _, name := range remotes {
+		if err := d.Git(r.in.WorkDir, "config", "remote."+name+".pushurl", decoy); err != nil {
+			return fmt.Errorf("point remote %s's pushurl at the decoy: %w", name, err)
+		}
+	}
+	cfg := readonlyguards.Config{RepoDir: decoy, ExtraRepoDirs: []string{r.in.WorkDir}}
 	res, err := d.Guards.Install(rows, cfg, d.Stdout)
 	if err != nil {
 		return err
 	}
-	r.say("readonly-guards: installed %d command-shim(s) (%v), hook installed=%v", len(res.Shims), res.Shims, res.HookInstalled)
-
-	path := shimDir
-	if cur := d.Getenv("PATH"); cur != "" {
-		path += string(os.PathListSeparator) + cur
-	}
-	if err := d.Guards.Setenv("PATH", path); err != nil {
-		return err
-	}
-	return r.verifyReadonlyGuards(res, shimDir, cfg, decoy)
+	r.say("readonly-guards: hook installed=%v", res.HookInstalled)
+	return r.verifyReadonlyGuards(res, cfg, decoy)
 }
 
 // verifyReadonlyGuards asserts the guards are in place and in force before the
-// Driver can run, rather than trusting the install sequence: each installed
-// shim must be what its argv0 now resolves to on PATH, and an installed hook
+// Driver can run, rather than trusting the install sequence: an installed hook
 // must exist and run in every repo it was written to, with every remote's
-// pushurl still pointing at the decoy. Each shim must also actually run, not
-// just carry an exec bit. LookPath resolves against the process PATH the
-// preceding Setenv updated.
-func (r *boxRun) verifyReadonlyGuards(res readonlyguards.Result, shimDir string, cfg readonlyguards.Config, decoy string) error {
+// pushurl still pointing at the decoy.
+func (r *boxRun) verifyReadonlyGuards(res readonlyguards.Result, cfg readonlyguards.Config, decoy string) error {
 	d := r.d
-	for _, argv0 := range res.Shims {
-		want := filepath.Join(shimDir, argv0)
-		// Probed before LookPath, which skips a non-executable file and would
-		// report a bad-mode shim as merely absent. --version matches no guard
-		// row, so every shim passes it through to the real binary offline; a
-		// guard row on --version would turn this probe into a rejection.
-		if err := runnable("shim "+argv0, "", want, "--version"); err != nil {
-			return err
-		}
-		got, err := d.LookPath(argv0)
-		if err != nil {
-			return fmt.Errorf("shim %s does not resolve on PATH: %w", argv0, err)
-		}
-		if got != want {
-			return fmt.Errorf("%s resolves to %s, not the guard shim %s", argv0, got, want)
-		}
-	}
 	if !res.HookInstalled {
 		return nil
 	}
@@ -144,9 +93,6 @@ func (r *boxRun) verifyReadonlyGuards(res readonlyguards.Result, shimDir string,
 				return err
 			}
 		}
-	}
-	if decoy == "" {
-		return nil
 	}
 	remotes, err := r.guardedRemotes()
 	if err != nil {
@@ -187,7 +133,7 @@ var probeTimeout = 10 * time.Second
 
 // runnable starts path in dir (the caller's cwd when empty) and reports an
 // error when it cannot be exec'd, hangs, or dies on a signal. Exit 126 and 127
-// are the shell's cannot-execute and not-found codes (a shim whose interpreter
+// are the shell's cannot-execute and not-found codes (a hook whose interpreter
 // starts but whose real target is missing), so they count as not runnable. Any
 // other non-zero exit still counts as running: the push-guard hook exits 1 by
 // design. Output is discarded and stdin is /dev/null so the hook reads no ref

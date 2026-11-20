@@ -63,9 +63,6 @@ func errBaseURLRequired(knob string) error {
 
 const defaultForgejoBaseURL = "https://codeberg.org"
 
-// defaultGitUserName names the fj auth key when GIT_USER_NAME is unset in the Box.
-const defaultGitUserName = "spindrift-agent"
-
 // forgejoClient satisfies IssueTracker only.
 type forgejoClient struct {
 	cfg  ForgejoConfig

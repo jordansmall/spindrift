@@ -2,10 +2,7 @@ package github
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -24,7 +21,7 @@ func TestStrategyShape(t *testing.T) {
 		t.Error("github declares no code-forge validator")
 	}
 	if Strategy.NewIssueTracker == nil || Strategy.NewCodeForge == nil ||
-		Strategy.NewLedger == nil || Strategy.OpenPRForBranch == nil {
+		Strategy.NewLedger == nil {
 		t.Error("github must fill every constructor")
 	}
 }
@@ -104,34 +101,10 @@ func TestStrategyRemoteMatch(t *testing.T) {
 	}
 }
 
-// The Box has no backend rows, so its branch recovery keeps the in-box gh
-// query (#6757) rather than the Connector read the host uses.
-func TestStrategyOpenPRForBranchRunsNativeGHWithNoRoute(t *testing.T) {
-	dir := prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
-  echo "https://github.com/o/r/pull/7"
-  exit 0
-fi
-exit 1
-`)
-	open, err := Strategy.OpenPRForBranch("o/r", "agent/issue-7")
-	if err != nil || !open {
-		t.Fatalf("OpenPRForBranch = (%v, %v), want (true, nil)", open, err)
-	}
-	argv, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"o/r", "agent/issue-7"} {
-		if !strings.Contains(string(argv), want) {
-			t.Errorf("gh argv %q lacks %q", argv, want)
-		}
-	}
-}
-
-func TestStrategyOpenPRForBranchPropagatesError(t *testing.T) {
-	prependFakeGH(t, "echo 'HTTP 502: Bad Gateway' >&2\nexit 1\n")
-	open, err := Strategy.OpenPRForBranch("o/r", "agent/issue-7")
-	if err == nil || open {
-		t.Fatalf("OpenPRForBranch = (%v, %v), want (false, error)", open, err)
+// The Box holds no forge client or token, so github recovery is answered by
+// the host through BOX_HOST_OPEN_PR; forgejo, local and git are not asked.
+func TestStrategyHostAnswersOpenPR(t *testing.T) {
+	if !Strategy.HostAnswersOpenPR {
+		t.Error("github must have the host answer the Box's open-PR question")
 	}
 }

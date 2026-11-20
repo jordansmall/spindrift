@@ -20,8 +20,7 @@ func TestStrategyShape(t *testing.T) {
 		t.Errorf("Descriptor = %+v, want backend.Forgejo", s.Descriptor)
 	}
 	if s.ValidateTracker == nil || s.ValidateCodeForge == nil || s.NewIssueTracker == nil ||
-		s.NewCodeForge == nil || s.NewLedger == nil ||
-		s.ConfigureCLI == nil {
+		s.NewCodeForge == nil || s.NewLedger == nil {
 		t.Error("forgejo must fill every closure")
 	}
 }

@@ -12,8 +12,9 @@ import (
 // Strategy is the github backend's Go half (ADR 0068). It has no knobs, so
 // its closures ignore the Lookup.
 var Strategy = backendkit.Strategy{
-	Descriptor:      backend.GitHub,
-	ConnectorRouted: true,
+	Descriptor:        backend.GitHub,
+	ConnectorRouted:   true,
+	HostAnswersOpenPR: true,
 	ValidateTracker: func(s backendkit.Shared, _ backendkit.Lookup) error {
 		return backendkit.RequireRepoSlug(s, backend.GitHub.Name)
 	},
@@ -41,9 +42,6 @@ var Strategy = backendkit.Strategy{
 		}
 		return NewExecClient(s.RepoSlug, s.Labels, codeForgeOpts(s)...), nil
 	},
-	// The Box has no backend rows, so this stays the in-box gh query (#6757)
-	// rather than the Connector read the host's OpenPRForBranch uses.
-	OpenPRForBranch: boxOpenPRForBranch,
 	NewLedger: func(s backendkit.Shared, _ backendkit.Lookup) (backendkit.LedgerSite, error) {
 		row, err := routeRow()
 		if err != nil {
