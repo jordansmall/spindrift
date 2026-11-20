@@ -332,7 +332,7 @@ func TestDispatchWithRetry_SuccessWithIssueIntentLinesPopulatesResult(t *testing
 	}
 }
 
-// Read-write and read-only runs emit no issue-intent signal, so false and nil
+// Ordinary runs emit no issue-intent signal, so false and nil
 // must be the default shape (issue #2018's "no existing run path changes"
 // acceptance criterion).
 func TestDispatchWithRetry_NoIssueIntentLinesLeavesResultEmpty(t *testing.T) {

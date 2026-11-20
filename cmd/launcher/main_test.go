@@ -2968,10 +2968,8 @@ func TestResolveCapabilities_HostCanOpenPR(t *testing.T) {
 	}
 }
 
-// CODE_FORGE=local ignores BOX_FORGE_AND_ISSUE_ACCESS=read-only entirely:
-// local never had a distinct read-only CodeForge constructor, so read-only
-// falls through to the same plain adapter as read-write, unlike github and
-// forgejo, which swap in a dedicated wrapper.
+// CODE_FORGE=local ignores BOX_FORGE_AND_ISSUE_ACCESS=read-only entirely: its
+// one adapter already relays the bundle.
 func TestNewCodeForge_LocalReadOnly_ReturnsPlainAdapter(t *testing.T) {
 	c := minimalValidConfig()
 	c.CodeForge = "local"
@@ -2991,9 +2989,8 @@ func TestNewCodeForge_LocalReadOnly_ReturnsPlainAdapter(t *testing.T) {
 	}
 }
 
-// The CODE_FORGE=git mirror of the local case above: git also has no distinct
-// read-only CodeForge constructor, so read-only falls through to the same
-// push-only adapter as read-write.
+// The CODE_FORGE=git mirror of the local case above: read-only gets git's one
+// push-only adapter.
 func TestNewCodeForge_GitReadOnly_ReturnsPlainAdapter(t *testing.T) {
 	c := minimalValidConfig()
 	c.CodeForge = "git"

@@ -19,10 +19,8 @@ var ambiguousDispatchLabels = forge.DispatchLabels{
 	Ambiguous:    "agent-ambiguous-spec",
 }
 
-// Issue #2275: a status=ambiguous outcome posts o.Note unconditionally, unlike
-// postBlockedNoteComment, which fires only under s.landing != nil || s.readOnly,
-// and it transitions the issue to Ambiguous (agent-ambiguous-spec), not
-// agent-failed.
+// Issue #2275: a status=ambiguous outcome posts o.Note and transitions the
+// issue to Ambiguous (agent-ambiguous-spec), not agent-failed.
 func TestSettle_AmbiguousOutcome_PostsNoteAndTransitions(t *testing.T) {
 	const issNum = "42"
 	const note = "Issue title/body describe unrelated work: title says X, body describes Y."
@@ -38,9 +36,8 @@ func TestSettle_AmbiguousOutcome_PostsNoteAndTransitions(t *testing.T) {
 		},
 	}
 
-	// A read-write github-shaped tracker (no landing recorder, not read-only) is
-	// the s.landing == nil && !s.readOnly case that suppresses
-	// postBlockedNoteComment. The ambiguous comment must still post here.
+	// A github-shaped tracker has no landing recorder; the ambiguous comment
+	// must still post.
 	s := newTestSettle(baseConfig(), fc.AsNoLandingRecorder(), fc)
 	s.Settle(d, issNum, 0, result)
 

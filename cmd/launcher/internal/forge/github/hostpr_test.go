@@ -9,7 +9,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgetest"
 )
 
-// NewExecClient (read-write) now issues draft-PR creates itself, on the same
+// NewExecClient now issues draft-PR creates itself, on the same
 // terms readOnlyCodeForge previously monopolized (issue #4071): the args
 // reaching gh are recorded and checked verbatim.
 func TestExecClient_CreateDraftPR_IssuesGhPrCreateAndReturnsURL(t *testing.T) {
