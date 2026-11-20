@@ -202,14 +202,6 @@ let
   # findingLabel/patchLabel directly.
   harnessSurfaces = {
     "lib/dispatch-kinds" = kindRowSurface dispatchKinds;
-    "templates/default/prompts/fragments/github/filer-direct-label.md" = {
-      src = builtins.readFile ../../templates/default/prompts/fragments/github/filer-direct-label.md;
-      extract = extractLabelCreateTokens;
-    };
-    "connectors/forgejo/fragments/forgejo/filer-direct-label.md" = {
-      src = builtins.readFile ../../connectors/forgejo/fragments/forgejo/filer-direct-label.md;
-      extract = extractNameFieldTokens;
-    };
     "cmd/launcher/internal/doctor/doctor.go" = {
       src = builtins.readFile ../../cmd/launcher/internal/doctor/doctor.go;
       extract = extractDoctorLabels;
@@ -224,51 +216,6 @@ let
       sliceLabels = extractReturnStringSliceLabels src;
     in
     if researchLabels == [ ] || sliceLabels == [ ] then [ ] else researchLabels ++ sliceLabels;
-  # The literal is the shell bareword right after `label create `, unquoted
-  # unlike the Go and JSON surfaces below.
-  extractLabelCreateTokens =
-    src:
-    let
-      marker = "label create ";
-      relevantLines = filter (l: hasInfix marker l) (splitString "\n" src);
-      tokenAfterMarker =
-        line:
-        let
-          parts = splitString marker line;
-        in
-        if builtins.length parts < 2 then
-          [ ]
-        else
-          let
-            rest = builtins.elemAt parts 1;
-            firstTok = builtins.head (filter (s: s != "") (splitString " " rest));
-          in
-          if builtins.match "[a-z0-9-]+" firstTok != null then [ firstTok ] else [ ];
-    in
-    concatMap tokenAfterMarker relevantLines;
-  # Only the value of the "name":"..." key, not any quoted string on the line:
-  # the same line's "description" value carries prose like "non-blocking" that
-  # a line-wide filter would flag as a phantom missing label.
-  extractNameFieldTokens =
-    src:
-    let
-      marker = ''"name":"'';
-      relevantLines = filter (l: hasInfix marker l) (splitString "\n" src);
-      tokenAfterMarker =
-        line:
-        let
-          parts = splitString marker line;
-        in
-        if builtins.length parts < 2 then
-          [ ]
-        else
-          let
-            rest = builtins.elemAt parts 1;
-            value = builtins.head (splitString "\"" rest);
-          in
-          if builtins.match "[a-z0-9-]+" value != null then [ value ] else [ ];
-    in
-    concatMap tokenAfterMarker relevantLines;
   # Shared span-scanned quote-split used by both Go label-literal extractors
   # below: splits the whole source on the marker, not line by line, and takes
   # everything up to the next quote in each following segment.
@@ -333,12 +280,7 @@ let
   # labels.butlerFinding, labels.butlerPatch, labels.tuningFinding). A
   # non-literal item in a span, first slot included, empties the whole result.
   extractReturnStringSliceLabels = labelLiteralsInSpanAfterMarker "return []string{";
-  # extractLabelCreateTokens and extractNameFieldTokens scan line by line, so a
-  # shell `\`-continued `gh label create` would leave the marker and its
-  # literal on different lines and match neither. Folding backslash-newline
-  # into a space first re-joins them however the source wraps.
-  joinBackslashNewline = src: replaceStrings [ "\\\n" ] [ " " ] src;
-  labelsWrittenBy = surface: unique (surface.extract (joinBackslashNewline surface.src));
+  labelsWrittenBy = surface: unique (surface.extract surface.src);
   # Checks emptyOffenders before registryOffenders: every surface writes at
   # least one label today, so an empty extraction means the extractor's marker
   # no longer matches the source (or the kind rows stopped carrying
@@ -617,89 +559,6 @@ mapAttrs (
     assert assertMsg (!result.success)
       "label-registry-covers-harness-writes-no-row-labels-regression: expected assertHarnessWritesInRegistry to reject kind rows with no findingLabel or patchLabel, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-no-row-labels-regression" { } "touch $out";
-
-  # Proves extractLabelCreateTokens still catches an unregistered label once
-  # `gh label create` is line-wrapped with a shell `\` (issue #2528). Before
-  # joinBackslashNewline the marker and the literal landed on different lines,
-  # so the per-line scan returned [ ] and this had nothing to reject.
-  label-registry-covers-harness-writes-continuation-regression =
-    let
-      doctoredFilerLabelDirectSrc =
-        replaceStrings
-          [ "label create agent-review-finding" ]
-          [
-            ''
-              label create \
-                     agent-unregistered-label''
-          ]
-          harnessSurfaces."templates/default/prompts/fragments/github/filer-direct-label.md".src;
-      doctoredHarnessSurfaces = harnessSurfaces // {
-        "templates/default/prompts/fragments/github/filer-direct-label.md" =
-          harnessSurfaces."templates/default/prompts/fragments/github/filer-direct-label.md"
-          // {
-            src = doctoredFilerLabelDirectSrc;
-          };
-      };
-      result = builtins.tryEval (assertHarnessWritesInRegistry {
-        harnessSurfaces = doctoredHarnessSurfaces;
-        registryLabels = allRegistryLabels;
-      });
-    in
-    assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-continuation-regression: expected assertHarnessWritesInRegistry to reject a synthetic github/filer-direct-label.md with the label-create bareword line-continued and renamed to agent-unregistered-label, but it evaluated successfully";
-    pkgs.runCommand "label-registry-covers-harness-writes-continuation-regression" { } "touch $out";
-
-  # Proves the emptyOffenders half fires when extractLabelCreateTokens'
-  # unquoted-bareword assumption breaks (issue #2528): a leading `"` fails the
-  # label-shape match, the surface extracts [ ], and before emptyOffenders that
-  # let the whole check pass while the harness created an unregistered label.
-  label-registry-covers-harness-writes-quoted-bareword-regression =
-    let
-      doctoredFilerLabelDirectSrc =
-        replaceStrings
-          [ "label create agent-review-finding" ]
-          [ ''label create "agent-unregistered-label"'' ]
-          harnessSurfaces."templates/default/prompts/fragments/github/filer-direct-label.md".src;
-      doctoredHarnessSurfaces = harnessSurfaces // {
-        "templates/default/prompts/fragments/github/filer-direct-label.md" =
-          harnessSurfaces."templates/default/prompts/fragments/github/filer-direct-label.md"
-          // {
-            src = doctoredFilerLabelDirectSrc;
-          };
-      };
-      result = builtins.tryEval (assertHarnessWritesInRegistry {
-        harnessSurfaces = doctoredHarnessSurfaces;
-        registryLabels = allRegistryLabels;
-      });
-    in
-    assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-quoted-bareword-regression: expected assertHarnessWritesInRegistry to reject a synthetic github/filer-direct-label.md with the label-create bareword double-quoted and renamed to agent-unregistered-label, but it evaluated successfully";
-    pkgs.runCommand "label-registry-covers-harness-writes-quoted-bareword-regression" { } "touch $out";
-
-  # Proves the emptyOffenders half fires when extractNameFieldTokens' no-space
-  # `"name":"` marker meets ordinary JSON spacing (issue #2528): the marker
-  # never matches, the surface extracts [ ], and before emptyOffenders that let
-  # the whole check pass silently.
-  label-registry-covers-harness-writes-json-spacing-regression =
-    let
-      doctoredForgejoSrc =
-        replaceStrings [ ''"name":"agent-review-finding"'' ] [ ''"name": "agent-unregistered-label"'' ]
-          harnessSurfaces."connectors/forgejo/fragments/forgejo/filer-direct-label.md".src;
-      doctoredHarnessSurfaces = harnessSurfaces // {
-        "connectors/forgejo/fragments/forgejo/filer-direct-label.md" =
-          harnessSurfaces."connectors/forgejo/fragments/forgejo/filer-direct-label.md"
-          // {
-            src = doctoredForgejoSrc;
-          };
-      };
-      result = builtins.tryEval (assertHarnessWritesInRegistry {
-        harnessSurfaces = doctoredHarnessSurfaces;
-        registryLabels = allRegistryLabels;
-      });
-    in
-    assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-json-spacing-regression: expected assertHarnessWritesInRegistry to reject a synthetic forgejo/filer-direct-label.md with a space after the \"name\" key's colon and the value renamed to agent-unregistered-label, but it evaluated successfully";
-    pkgs.runCommand "label-registry-covers-harness-writes-json-spacing-regression" { } "touch $out";
 
   # Proves assertHarnessWritesInRegistry catches doctor.go's hand-written
   # ResearchLabelNamesFor() literal drifting from lib/labels.nix's researchFinding
