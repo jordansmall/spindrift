@@ -293,9 +293,9 @@ let
   # RESEARCH_VERDICTS-rendered text, not the registry's unrendered default.
   promptContract = import ./prompt-contract.nix;
   # The Consumer's Connector fragments plus the batteries flake's for each
-  # fallback Connector's paths it did not declare: the native forgejo adapter
-  # needs no Connector module, and the Box would otherwise ship no forgejo
-  # fragments (issue #6867). Unlike hostedRowOf's `driverRows` fallback, which
+  # fallback Connector's paths it did not declare: a Consumer's own forgejo
+  # row may omit some, and the Box would otherwise ship no forgejo fragments
+  # for them (issue #6867). Unlike hostedRowOf's `driverRows` fallback, which
   # swaps the whole row by name, this trims per path: each path the Consumer
   # declares wins and the fallback ships the rest. Sorted by name.
   #

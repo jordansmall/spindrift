@@ -697,8 +697,10 @@ in
                     Make this Connector authoritative over the native
                     implementation of the same name (issues #6998, #6999).
                     On a `backend` row it answers in place of the native
-                    backend: for forgejo the whole Code Forge and the
-                    whole tracker, reads and writes. github and jira have
+                    backend: for forgejo the whole tracker, reads and
+                    writes (the Code Forge is the Connector's already, so
+                    `primary` moves only the tracker, native until #7122).
+                    github and jira have
                     no native backend (their Connector is the only one), so
                     `primary` is refused on their rows. On a `driver`
                     row it is the Driver in place of the native Strategy, in

@@ -52,6 +52,37 @@ of the daemon, for operators who want no daemon at all.
 A script or shell alias that ran `spindrift console` needs one of the
 replacements above.
 
+## Every Consumer carries the forgejo Connector row (issue #6868)
+
+The Code Forge for forgejo is built only from the forgejo Connector; the native
+forgejo forge is gone. So that a forgejo Consumer needs no edit, the root
+`spindrift.flakeModules.default` now carries the forgejo backend row, as it
+does the github one. See [The forgejo
+Connector](docs/reference.md#the-forgejo-connector).
+
+What changed for a forgejo Consumer:
+
+- **A run whose `CODE_FORGE` is forgejo needs
+  `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`.** Set it like any secret knob (the
+  value, `_CMD`, or `SECRET_CMD`). `FORGEJO_TOKEN` stays git's credential, so
+  both are needed. An `ISSUE_TRACKER=forgejo` run needs it only when the row
+  sets `primary`.
+- **`MERGE_METHOD` must be `rebase` or unset.** The Connector merges by rebase
+  only; the launcher refuses to build the forge for `squash` or `merge`.
+- **`primary = true` still evaluates.** It now moves only the issue tracker,
+  which stays native until #7122.
+- **A forgejo Code Forge needs an https `FORGEJO_BASE_URL`.** The native forge
+  accepted `http`; the Connector's routes are https only. With an unset or
+  `http` base the forge build fails with `ErrNoConnectorRow` and the cause,
+  such as `FORGEJO_BASE_URL must be an https URL`.
+- **A forgejo row set `shadow = true` fails the forge build.** With
+  `CODE_FORGE=forgejo` it ends in `ErrNoConnectorRow`: a shadow row only
+  observes, so drop `shadow`.
+- **Importing `core.flakeModules.default` directly has no forgejo row.** A
+  forgejo run then fails with `ErrNoConnectorRow`. Only the root
+  `flakeModules.default` carries it; a Consumer that also imports the Connector
+  through `lib.connector` dedups on the module's `key`.
+
 ## The Box token knobs are removed (issue #6902)
 
 `BOX_GH_TOKEN`, `BOX_FORGEJO_TOKEN` and `BOX_FORGE_CREDENTIAL` had no reader
