@@ -110,7 +110,7 @@
 # connectorOnly (optional bool) marks a backend whose only implementation is
 # its Connector: there is no native adapter for a Connector row's `primary` to
 # replace, so lib/flakeModule.nix leaves the name out of the set `primary` is
-# checked against (jira, issue #6858). Like `knobs`, the generated Descriptor
+# checked against (jira, issue #6858; github, issue #6888). Like `knobs`, the generated Descriptor
 # ignores it.
 
 # labelRegistry marks a tracker whose labels are registered objects that

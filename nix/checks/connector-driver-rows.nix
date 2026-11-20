@@ -52,6 +52,16 @@ let
       ]
       ++ modules
     )).apps.${system}.default.program;
+  forgejoConnector = (import ../../connectors/forgejo).lib.connector { core = import ../../core; };
+  forgejoProgramWith =
+    modules:
+    (fixtures.connectorConsumerVia (
+      [
+        ../../lib/flakeModule.nix
+        forgejoConnector.flakeModule
+      ]
+      ++ modules
+    )).apps.${system}.default.program;
   claudeRow = claudeConnector.driverRow pkgs.lib;
   # opencode rejects the schema's bare claude ids (issue #5355), so each
   # Harness selecting it names its models; the worker's is dropped silently.
@@ -488,14 +498,15 @@ in
         touch $out
       '';
 
-  # Issues #6797, #6810, #6998, #6999, #6799: the dogfood runs github (a
-  # backend row) as primary and shadows nothing; claude's Connector row is
-  # always rendered but, with no native Strategy, is neither shadow nor
-  # primary. The real flake's default app (flake.nix's `spindrift.connectors`
-  # through the module) must equal the direct mirror's, whose Box rows file and
-  # input document carry `primary` on the primaries only and no `shadow`; the
-  # app program embeds both, so dropping flake.nix's wiring changes it. The
-  # mirror alone would not notice: it reads the nix/dogfood-*.nix lists itself.
+  # Issues #6797, #6810, #6998, #6999, #6799, #6888: the dogfood runs no backend
+  # as primary (github has no native adapter left) and shadows nothing;
+  # claude's Connector row is always rendered but, with no native Strategy, is
+  # neither shadow nor primary. The real flake's default app (flake.nix's
+  # `spindrift.connectors` through the module) must equal the direct mirror's,
+  # whose Box rows file and input document carry `primary` on the primaries
+  # only and no `shadow`; the app program embeds both, so dropping flake.nix's
+  # wiring changes it. The mirror alone would not notice: it reads the
+  # nix/dogfood-*.nix lists itself.
   connector-driver-rows-dogfood-shadows =
     assert assertMsg (config.apps.default.program == fixtures.harness.apps.default.program)
       "flake.nix must wire the nix/dogfood-shadow.nix and nix/dogfood-primary.nix Connectors: the dogfood app differs from the mirror (fixtures.harness)";
@@ -520,10 +531,10 @@ in
         | length == 1 and (.[0] | has("module") and (has("shadow") | not) and (has("primary") | not))' "$doc"
       jq -e --argjson names '${builtins.toJSON backendPrimaries}' '
         [.backends[] | select(.name as $n | $names | index($n))] as $rows
-        | ($names | length) > 0
-          and ($rows | length) == ($names | length)
+        | ($rows | length) == ($names | length)
           and all($rows[]; .primary == true and (has("shadow") | not) and (has("shadowEvery") | not))
       ' "$doc"
+      jq -e 'all(.backends[]; has("shadow") | not)' "$doc"
       touch $out
     '';
 
@@ -570,9 +581,9 @@ in
     pkgs.runCommand "connector-driver-rows-primary-reaches-document"
       { nativeBuildInputs = [ pkgs.jq ]; }
       ''
-        ${fixtures.runInputDocOf (githubProgramWith [ { spindrift.connectors.github.primary = true; } ])}
-        jq -e --argjson names '${builtins.toJSON backendPrimaries}' '[.backends[] | select(.name as $n | $names | index($n))]
-          | length == ($names | length) and all(.[]; .primary == true and (has("shadow") | not))' "$doc"
+        ${fixtures.runInputDocOf (forgejoProgramWith [ { spindrift.connectors.forgejo.primary = true; } ])}
+        jq -e --arg n forgejo '[.backends[] | select(.name == $n)]
+          | length == 1 and all(.[]; .primary == true and (has("shadow") | not))' "$doc"
         touch $out
       '';
 
@@ -745,9 +756,21 @@ in
     assert assertMsg (
       !(evaluatesWith [ (nativeless true) ])
     ) "`primary` on a row with no native backend must fail evaluation";
-    assert assertMsg (evaluatesWith [
-      { spindrift.connectors.github.primary = true; }
-    ]) "control: `primary` on the github backend row must evaluate";
+    assert assertMsg (evaluatesWith [ ]) "control: the github backend row evaluates without `primary`";
+    assert assertMsg (
+      !(evaluatesWith [ { spindrift.connectors.github.primary = true; } ])
+    ) "`primary` on the github backend row must fail evaluation: no native backend remains";
+    assert assertMsg (
+      !(builtins.elem "github" nativeBackendNames)
+    ) "github must stay out of the native backend names the module checks `primary` against";
+    assert assertMsg (
+      names.primaryError nativeBackendNames [ ] "github" {
+        shadow = false;
+        driver = null;
+        backend = { };
+      }
+      == "Connector 'github': `primary` needs a native backend of the same name to replace; none is registered"
+    ) "the github refusal must be the existing no-native-backend message";
     assert assertMsg (
       !(evaluatesWith [
         {

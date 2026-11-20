@@ -128,7 +128,6 @@ let
       credentialEnv = "SPINDRIFT_GITHUB_CONNECTOR_TOKEN";
       credentialKnob = "githubConnectorToken";
       acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).github;
-      primary = true;
     };
     # Registered but not primary: the native forgejo adapter stays
     # authoritative, so nix/dogfood-primary.nix omits it.
