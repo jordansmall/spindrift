@@ -475,38 +475,6 @@ let
     packages = p: [ p.hello ];
   };
 
-  # Proves mkHarness bakes fj (forgejo-cli) into the image only for a
-  # forgejo-backend harness (issue #1963), whichever axis names forgejo and
-  # once when both do (issue #5768). Eval-only, consumed by the
-  # forgejo-cli-baked-only-for-forgejo-backend image check.
-  forgejoHarness = import ../lib/mkHarness.nix {
-    inherit nixpkgs system;
-    defaults = {
-      issueTracker = "forgejo";
-    };
-    packages = p: [ p.hello ];
-  };
-
-  # forgejo on the code-forge axis alone; the tracker keeps its github
-  # default.
-  forgejoForgeHarness = import ../lib/mkHarness.nix {
-    inherit nixpkgs system;
-    defaults = {
-      codeForge = "forgejo";
-    };
-    packages = p: [ p.hello ];
-  };
-
-  # forgejo on both axes, so the union must dedupe to a single fj.
-  forgejoBothHarness = import ../lib/mkHarness.nix {
-    inherit nixpkgs system;
-    defaults = {
-      issueTracker = "forgejo";
-      codeForge = "forgejo";
-    };
-    packages = p: [ p.hello ];
-  };
-
   # The opencode Driver's on-disk agent files (issue #262 slice 5, AC4).
   # filerModel stays empty so the filer file's omission is provable too.
   # Eval-only, consumed by the opencode-agent-files image check.
@@ -886,9 +854,6 @@ in
     opencodeWorkerRosterHarness
     filerOnlyHarness
     workerOnlyHarness
-    forgejoHarness
-    forgejoForgeHarness
-    forgejoBothHarness
     opencodeHarness
     piHarness
     piHarnessWith

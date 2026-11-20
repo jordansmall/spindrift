@@ -287,10 +287,7 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 	}
 	// Absent, not blank: an empty value still reaches the Box as a set name.
 	for _, d := range backend.Registry {
-		if d.BoxTokenEnvVar != "" {
-			delete(env, d.TokenEnvVar)
-			delete(env, d.BoxTokenEnvVar)
-		}
+		delete(env, d.TokenEnvVar)
 	}
 	if cfg.ForgeDescriptor.HostSeededMirror {
 		// The Box clones the mirror and nothing in it reads the remote, so its

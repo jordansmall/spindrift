@@ -615,14 +615,11 @@ func TestBuildBoxEnvMirrorCloneCarriesNoRemoteCredential(t *testing.T) {
 // it, whichever backends the run pairs and whatever the launcher's env holds;
 // the keys are absent, not blank.
 func TestBuildBoxEnvDropsEveryForgeToken(t *testing.T) {
-	t.Setenv("GH_TOKEN", "gh-secret")
-	t.Setenv("FORGEJO_TOKEN", "fj-secret")
-	t.Setenv("BOX_GH_TOKEN", "box-gh-secret")
-	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-secret")
 	var tokenNames []string
 	for _, d := range backend.Registry {
-		if d.BoxTokenEnvVar != "" {
-			tokenNames = append(tokenNames, d.TokenEnvVar, d.BoxTokenEnvVar)
+		if d.TokenEnvVar != "" {
+			t.Setenv(d.TokenEnvVar, d.Name+"-secret")
+			tokenNames = append(tokenNames, d.TokenEnvVar)
 		}
 	}
 	for _, c := range []struct {

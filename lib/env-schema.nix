@@ -514,7 +514,7 @@ withRowKnobs {
     hostConfig = true;
     placeholder = "fake-token";
     doc = "fine-grained PAT scoped to the target repo — Contents/PR/Issues/Metadata RW; required unless CODE_FORGE is local or forgejo, and ISSUE_TRACKER is not github";
-    boxEnv = true;
+    boxEnv = false;
   };
   ghTokenRefreshFile = {
     env = "GH_TOKEN_REFRESH_FILE";

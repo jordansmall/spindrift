@@ -1171,7 +1171,7 @@ checkedMerge {
       launcherDir = ../../cmd/launcher;
       # loadknobs_gen.go carries the env-var literal of every knob that
       # LoadKnobs loads into inputdoc.Knobs (issue #2364).
-      # registry_gen.go carries each backend row's BoxTokenEnvVar, which the
+      # registry_gen.go carries each backend row's TokenEnvVar, which the
       # launcher reads through the row rather than a literal (issue #5642).
       forwardGoSrc = concatStringsSep "\n" (
         map (name: builtins.readFile (launcherDir + "/${name}")) [

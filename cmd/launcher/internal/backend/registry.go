@@ -27,11 +27,6 @@ type Descriptor struct {
 	// the backend carries no bearer token (git, local).
 	TokenEnvVar string
 
-	// BoxTokenEnvVar is the deprecated Box-side override knob; nothing reads it
-	// (MIGRATING.md). It stays so dispatch strips this name and TokenEnvVar from
-	// the Box env.
-	BoxTokenEnvVar string
-
 	// DoctorTokenHint/DoctorSlugHint name the env vars doctor points an
 	// operator at when this backend is the active ISSUE_TRACKER. Empty means
 	// the github-shaped default.

@@ -1,14 +1,13 @@
 # The forgejo backend row: data plus the env knobs it owns (issues #5633,
 # #5634). The registry (./default.nix) documents the fields and fixes this
 # row's order; lib/row-knobs.nix folds `knobs` into lib/env-schema.nix.
-rec {
+{
   name = "forgejo";
   goVar = "Forgejo";
   displayName = "Forgejo";
   validAsTracker = true;
   validAsCodeForge = true;
   tokenEnvVar = "FORGEJO_TOKEN";
-  boxTokenEnvVar = "BOX_FORGEJO_TOKEN";
   doctorTokenHint = "FORGEJO_TOKEN";
   doctorSlugHint = "FORGEJO_BASE_URL";
   outboxRelayCapable = true;
@@ -28,7 +27,6 @@ rec {
       "forge"
     ];
   };
-  cliPackage = "forgejo-cli";
 
   knobs = {
     forgejoBaseURL = {
@@ -46,7 +44,7 @@ rec {
       secret = true;
       hostConfig = true;
       doc = "Forgejo/Gitea API token (Bearer/token scheme); required when ISSUE_TRACKER=forgejo or CODE_FORGE=forgejo";
-      boxEnv = true;
+      boxEnv = false;
     };
   };
 }

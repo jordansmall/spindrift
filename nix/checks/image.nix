@@ -21,9 +21,6 @@ let
     harness
     opencodeHarness
     piHarness
-    forgejoHarness
-    forgejoForgeHarness
-    forgejoBothHarness
     ;
   agentPaths = import ../../lib/agent-paths.nix;
   preambles = import ../../lib/preambles.nix;
@@ -1154,62 +1151,6 @@ in
         }
         touch $out
       '';
-
-  # fj (forgejo-cli) bakes in only for a forgejo-backend Consumer
-  # (issue #1963), so a github-backend image never carries an unused CLI.
-  # Either axis alone pulls it in; both together bake it once (issue #5768).
-  # buildEnv collapses identical store paths, so a double bake is invisible
-  # in the file tree -- assert the deduped name list instead.
-  forgejo-cli-baked-only-for-forgejo-backend =
-    let
-      cases = [
-        {
-          label = "forgejo-tracker";
-          harness = forgejoHarness;
-          want = [ "forgejo-cli" ];
-        }
-        {
-          label = "forgejo-forge";
-          harness = forgejoForgeHarness;
-          want = [ "forgejo-cli" ];
-        }
-        {
-          label = "forgejo-both-axes";
-          harness = forgejoBothHarness;
-          want = [ "forgejo-cli" ];
-        }
-        {
-          label = "non-forgejo";
-          harness = nonRustHarness;
-          want = [ ];
-        }
-      ];
-      expectCLIPackages =
-        c:
-        pkgs.lib.assertMsg (c.harness.internals.backendCLIPackages == c.want)
-          "${c.label} backendCLIPackages must be ${builtins.toJSON c.want}, got: ${builtins.toJSON c.harness.internals.backendCLIPackages}";
-      fjTest =
-        c:
-        if c.want == [ ] then
-          ''
-            ! test -e ${c.harness.internals.agentEnv}/bin/fj || {
-              echo "fj leaked into ${c.label} image" >&2
-              exit 1
-            }
-          ''
-        else
-          ''
-            test -x ${c.harness.internals.agentEnv}/bin/fj || {
-              echo "fj missing from ${c.label} image" >&2
-              exit 1
-            }
-          '';
-    in
-    assert pkgs.lib.all expectCLIPackages cases;
-    pkgs.runCommand "forgejo-cli-baked-only-for-forgejo-backend" { } ''
-      ${pkgs.lib.concatMapStrings fjTest cases}
-      touch $out
-    '';
 
   # extraClosures derivations must be physically present in the image:
   # contents = [...] ++ extraClosures pulls the closure into the store layers

@@ -923,17 +923,6 @@ let
     else
       true;
 
-  # The backend-specific CLI packages (nixpkgs attribute names) the selected
-  # tracker and forge rows declare (issue #1963), which lib/image.nix bakes so
-  # an image never carries a CLI its backends do not use. An unregistered
-  # backend name contributes none.
-  backendCLIPackages = lib.unique (
-    lib.concatMap (row: lib.optional (row ? cliPackage) row.cliPackage) [
-      issueTrackerRow
-      codeForgeRow
-    ]
-  );
-
   defaultsKeyError = import ./defaults-key-error.nix {
     inherit lib;
     validKeys = lib.attrNames flakeOptionEntries;
@@ -1367,7 +1356,6 @@ let
     inherit
       nixInBox
       nixStoreWritable
-      backendCLIPackages
       prefetch
       imageName
       ;
@@ -2035,7 +2023,6 @@ else
         agentPathsPreambleFile
         runInputDocumentFile
         backendBundleDirs
-        backendCLIPackages
         ;
       driverExecBin = imageDriver.driverExecBin;
       orchestratorBin = imageDriver.orchestratorBin;

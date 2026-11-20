@@ -46,11 +46,6 @@
 # because "github" must render as "GitHub" and no capitalize-first rule
 # produces that.
 
-# boxTokenEnvVar is the ADR 0016 Box-side override of tokenEnvVar: the
-# operator's value under this name reaches the Box under tokenEnvVar's name,
-# while the launcher keeps its own token for merges and labels. Optional;
-# omitted means no override (jira, local, git).
-
 # relayCapable covers every host-mediation seam a CODE_FORGE needs under
 # BOX_FORGE_AND_ISSUE_ACCESS=read-only: bundle relay always, plus draft-PR
 # create and commit subjects when the backend has a PR concept. Nix cannot
@@ -84,13 +79,6 @@
 # renders the values the Strategy derives from the remote for the flakeOption
 # knobs in the row's `knobs`. An omitted block
 # means hand-edit only: Quickstart never offers the backend.
-
-# cliPackage is the nixpkgs attribute name of a CLI only this backend needs
-# inside the Box (forgejo: forgejo-cli, issue #1963). lib/mkHarness.nix unions
-# it across the selected tracker and forge rows and lib/image.nix bakes the
-# result; omit it for a backend that needs none. gh is not declared here: it
-# is Harness plumbing, baked unconditionally. Like `knobs`, the generated
-# Descriptor ignores it.
 
 # validateKnobs (optional) is a function from the merged defaults to true,
 # throwing on an invalid value of a knob the row owns; lib/mkHarness.nix runs
