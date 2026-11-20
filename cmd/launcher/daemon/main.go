@@ -146,8 +146,8 @@ var errNoOutboxRelay = fmt.Errorf("no pull-request outbox to recover (recover ne
 // gateKnobs are the resolved knob values gateKinds judges each kind's
 // Enablement row by.
 type gateKnobs struct {
-	chores               chore.Knobs
-	codeForge, boxAccess string
+	chores    chore.Knobs
+	codeForge string
 }
 
 // gateKinds drops from a bare invocation's kinds every kind whose descriptor
@@ -365,6 +365,16 @@ func validateSignalCarrier(raw string) error {
 		return nil
 	}
 	return fmt.Errorf("BOX_SIGNAL_CARRIER=%q is not valid; must be %s", raw, launcherchecks.JoinOxford(e.Choices))
+}
+
+// validateBoxAccess refuses a BOX_FORGE_AND_ISSUE_ACCESS value the schema
+// removed (issue #6901) at daemon start, so every child does not fail on it
+// instead. Any other value is the child launcher's own validateChoice to judge.
+func validateBoxAccess(raw string) error {
+	if msg, removed := inputdoc.RemovedChoice("BOX_FORGE_AND_ISSUE_ACCESS", raw); removed {
+		return errors.New(msg)
+	}
+	return nil
 }
 
 // nixSystemDouble maps Go's GOOS/GOARCH to the nix system double the self
@@ -852,18 +862,17 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return refuse(err)
 	}
 
+	if err := validateBoxAccess(shared.boxAccess); err != nil {
+		return refuse(err)
+	}
 	gatedKinds, err := gateKinds(args.Kinds, args.ExplicitSelector, gateKnobs{
 		chores:    chore.Knobs{Chores: shared.butlerChores, Every: shared.butlerEvery, Classes: shared.butlerChoreClasses},
 		codeForge: shared.codeForge,
-		boxAccess: shared.boxAccess,
 	})
 	if err != nil {
 		return refuse(err)
 	}
 	args.Kinds = gatedKinds
-	if msg := boxAccessNotice(shared.boxAccess, args.Kinds); msg != "" {
-		fmt.Fprintln(stderr, msg)
-	}
 	// Children inherit the decided marker and stay quiet, so the daemon prints
 	// this deprecation (issue #6900) once for all of them.
 	if shared.boxForgeCredential != "" {
@@ -1047,7 +1056,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		nixSystem:     nixSystem,
 		// Snapshotted once here, not per-child: nothing between mainRun's
 		// entry and this line calls os.Setenv, so it's still a startup capture.
-		env:         append(append(os.Environ(), driverEnv...), inputdoc.BoxAccessNoticeDecidedEnv+"=1"),
+		env:         append(append(os.Environ(), driverEnv...), inputdoc.ForgeCredentialNoticeDecidedEnv+"=1"),
 		knobs:       stripped,
 		doctorFlags: doctorFlags,
 		demand:      demand,
@@ -1347,22 +1356,3 @@ func resumeFromHandoff(raw string) (*resumed, error) {
 // errInPlaceUnsupported is returned wherever the exec path is unavailable;
 // restart_other.go's stubs and mainRun's refusal share it.
 var errInPlaceUnsupported = errors.New("in-place restart is supported only on linux amd64/arm64")
-
-// boxAccessNotice is the deprecation notice for an effective
-// BOX_FORGE_AND_ISSUE_ACCESS=read-write (issue #6757), or "" when the knob is
-// not read-write or every gated kind runs a forced read-only Box. boxAccess is
-// the value the children resolve (childKnob), since the daemon has no
-// box-access flag. The decided marker is ignored here: an in-place restart
-// inherits it, but the successor may be a build with a different document, so
-// it decides afresh.
-func boxAccessNotice(boxAccess string, kinds []daemon.Kind) string {
-	if boxAccess != "read-write" {
-		return ""
-	}
-	for _, k := range kinds {
-		if d, ok := dispatchkind.ByVerb(string(k)); ok && !d.ReadOnlyBox {
-			return inputdoc.BoxAccessReadWriteNotice
-		}
-	}
-	return ""
-}

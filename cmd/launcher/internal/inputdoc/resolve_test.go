@@ -155,7 +155,7 @@ func TestResolve_Precedence(t *testing.T) {
 			func(r Resolved) any { return r.Knobs.BaseBranch }, "trunk"},
 		{"empty on a plain string falls through to default", []string{"--base-branch", ""}, nil,
 			func(r Resolved) any { return r.Knobs.BaseBranch }, "main"},
-		{"deprecated alias is the flag", []string{"--box-forge-and-issue-access", "read-only"}, docWith(map[string]string{"BOX_FORGE_AND_ISSUE_ACCESS": "read-write"}),
+		{"deprecated alias is the flag", []string{"--box-forge-and-issue-access", "read-only"}, docWith(map[string]string{"BOX_FORGE_AND_ISSUE_ACCESS": "other"}),
 			func(r Resolved) any { return r.Knobs.BoxForgeAndIssueAccess }, "read-only"},
 		{"canonical name of an aliased flag", []string{"--box-access", "read-only"}, nil,
 			func(r Resolved) any { return r.Knobs.BoxForgeAndIssueAccess }, "read-only"},

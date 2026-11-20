@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/inputdoc"
 )
 
 // removedKnobs lists the env knobs lib/env-schema.nix no longer declares and
@@ -33,10 +35,35 @@ func removedKnobsCheck() doctor.Check {
 					errs = append(errs, fmt.Sprintf("%s was removed: %s; delete the setting", k.env, k.reason))
 				}
 			}
+			// A removed choice is value-level: the knob stays declared, so only
+			// the removed value is a stale setting. A flag is caught by the
+			// choice walk, which skips only what this row already reported.
+			for _, f := range inputdoc.SchemaFlags {
+				for value, msg := range f.RemovedChoices {
+					if setsRemovedChoice(f.Env, value) {
+						errs = append(errs, msg)
+					}
+				}
+			}
 			if len(errs) > 0 {
 				return nil, fmt.Errorf("%s", strings.Join(errs, "; "))
 			}
 			return nil, nil
 		},
 	}
+}
+
+// setsRemovedChoice reports whether value is one of env's removed choices and
+// the environment or a loaded input document's settings holds it: the sources
+// the removed-knobs row reads, and so the removed choices it already reports.
+func setsRemovedChoice(env, value string) bool {
+	if !slices.ContainsFunc(inputdoc.SchemaFlags, func(f inputdoc.FlagEntry) bool {
+		_, removed := f.RemovedChoices[value]
+		return f.Env == env && removed
+	}) {
+		return false
+	}
+	envValue, inEnv := os.LookupEnv(env)
+	docValue, inDoc := launcherInput.Setting(env)
+	return (inEnv && envValue == value) || (inDoc && docValue == value)
 }

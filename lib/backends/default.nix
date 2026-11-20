@@ -56,10 +56,10 @@
 # BOX_FORGE_AND_ISSUE_ACCESS=read-only: bundle relay always, plus draft-PR
 # create and commit subjects when the backend has a PR concept. Nix cannot
 # see the adapters, so cmd/launcher's
-# TestRelayCapableMatchesReadOnlyForgeInterfaces checks each row's bit against
-# the interfaces its read-only forge implements (issue #2628).
+# TestRelayCapableMatchesForgeInterfaces checks each row's bit against the
+# interfaces its forge implements (issue #2628).
 # outboxRelayCapable is narrower: it means "this forge has pull requests", the
-# prompt's IF BLOCKED PR gates (read-write Boxes included, issue #5276) and the
+# prompt's IF BLOCKED PR gates (issue #5276) and the
 # recover kind's enablement. It does not decide the outbox mount or the relay,
 # which backend.RelaysBundle derives from hostMediatedRemote and relayCapable
 # (issues #1918, #2267, #6898); git is relayCapable without it. The same Go

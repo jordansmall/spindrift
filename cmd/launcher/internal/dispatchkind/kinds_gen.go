@@ -54,7 +54,6 @@ var (
 		Settle:         SettleLedger,
 		AdviseOnly:     true,
 		CompleteBanner: "findings filed",
-		ReadOnlyBox:    true,
 		DaemonPriority: PriorityIdle,
 		DemandSource:   DemandChildReported,
 		FindingLabel:   "agent-butler-finding",
@@ -98,4 +97,4 @@ var Default = Work
 // descriptorRowFields lists the Descriptor fields kinds_gen.go populates:
 // PassRoles from the renderer, the rest from row attributes. It feeds the
 // struct-sync test and is not read at runtime.
-var descriptorRowFields = []string{"Name", "Verb", "Keying", "Labels", "Prompts", "Settle", "AdviseOnly", "CompleteBanner", "ReadOnlyBox", "DaemonPriority", "DemandSource", "FindingLabel", "PatchLabel", "Contract", "FilerRelayGate", "Tracker", "AnnounceVerb", "Enablement", "Preflight", "UnclaimedGate", "Statuses", "PassRoles"}
+var descriptorRowFields = []string{"Name", "Verb", "Keying", "Labels", "Prompts", "Settle", "AdviseOnly", "CompleteBanner", "DaemonPriority", "DemandSource", "FindingLabel", "PatchLabel", "Contract", "FilerRelayGate", "Tracker", "AnnounceVerb", "Enablement", "Preflight", "UnclaimedGate", "Statuses", "PassRoles"}

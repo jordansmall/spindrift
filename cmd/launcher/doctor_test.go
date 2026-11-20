@@ -409,7 +409,7 @@ func TestDoctorReport_Butler_MisconfigExitsConfigInvalid(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := forge.NewFake()
 			f.ProbeRepo = "owner/repo"
-			f.Labels = append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, doctor.ButlerLabelNames()...)
+			f.Labels = append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete", "agent-review-finding"}, doctor.ButlerLabelNames()...)
 
 			c := newHealthyConfig(t)
 			tc.mutate(t, &c)
@@ -578,11 +578,10 @@ func TestRequiredLabels(t *testing.T) {
 		PRForge: cf.PRForgeFake, BranchDeleter: cf,
 		ForgeDescriptor: githubDesc, TrackerDescriptor: githubDesc,
 	}
-	mk := func(tracker, access, driver string, patches int, caps forge.Capabilities, chores ...string) readContext {
+	mk := func(tracker, driver string, patches int, caps forge.Capabilities, chores ...string) readContext {
 		var c config
 		c.ButlerChores = strings.Join(chores, " ")
 		c.IssueTracker = tracker
-		c.BoxForgeAndIssueAccess = access
 		c.driver = driver
 		c.ButlerMaxPatchesPerDay = patches
 		return readContext{config: c, codeForge: cf, capabilities: caps}
@@ -593,28 +592,28 @@ func TestRequiredLabels(t *testing.T) {
 		rc   readContext
 		want []string
 	}{
-		{"no flags, read-write", doctorOptions{}, mk("github", "read-write", "", 0, patchCaps), nil},
-		{"read-only with filer", doctorOptions{}, mk("github", "read-only", "claude", 0, patchCaps), []string{"agent-review-finding"}},
-		{"read-only with filer, opencode", doctorOptions{}, mk("github", "read-only", "opencode", 0, patchCaps), []string{"agent-review-finding"}},
-		{"butler, patches off", doctorOptions{butler: true}, mk("github", "read-write", "", 0, patchCaps), []string{"agent-butler-finding"}},
-		{"butler, patches on", doctorOptions{butler: true}, mk("github", "read-write", "", 2, patchCaps), []string{"agent-butler-finding", "agent-butler-patch"}},
-		{"butler, patches on but no patch forge", doctorOptions{butler: true}, mk("github", "read-write", "", 2, forge.Capabilities{}), []string{"agent-butler-finding"}},
-		{"research", doctorOptions{research: true}, mk("github", "read-write", "", 0, patchCaps), doctor.ResearchLabelNames()},
+		{"no flags", doctorOptions{}, mk("github", "", 0, patchCaps), []string{"agent-review-finding"}},
+		{"read-only with filer", doctorOptions{}, mk("github", "claude", 0, patchCaps), []string{"agent-review-finding"}},
+		{"read-only with filer, opencode", doctorOptions{}, mk("github", "opencode", 0, patchCaps), []string{"agent-review-finding"}},
+		{"butler, patches off", doctorOptions{butler: true}, mk("github", "", 0, patchCaps), []string{"agent-butler-finding", "agent-review-finding"}},
+		{"butler, patches on", doctorOptions{butler: true}, mk("github", "", 2, patchCaps), []string{"agent-butler-finding", "agent-butler-patch", "agent-review-finding"}},
+		{"butler, patches on but no patch forge", doctorOptions{butler: true}, mk("github", "", 2, forge.Capabilities{}), []string{"agent-butler-finding", "agent-review-finding"}},
+		{"research", doctorOptions{research: true}, mk("github", "", 0, patchCaps), append(doctor.ResearchLabelNames(), "agent-review-finding")},
 		{"research, custom verdicts", doctorOptions{research: true}, func() readContext {
-			rc := mk("github", "read-write", "", 0, patchCaps)
+			rc := mk("github", "", 0, patchCaps)
 			rc.config.ResearchVerdicts = `[{"verdict":"go","label":"research-go"},{"verdict":"nogo","label":"research-nogo"}]`
 			return rc
-		}(), []string{"agent-research", "agent-research-in-progress", "agent-research-failed", "research-go", "research-nogo", "agent-research-finding"}},
-		{"butler patches on and read-only", doctorOptions{butler: true}, mk("github", "read-only", "claude", 1, patchCaps), []string{"agent-butler-finding", "agent-butler-patch", "agent-review-finding"}},
-		{"forgejo keeps butler label", doctorOptions{butler: true}, mk("forgejo", "read-write", "", 0, patchCaps), []string{"agent-butler-finding"}},
-		{"local, butler with tuning and research and read-only", doctorOptions{butler: true, research: true}, mk("local", "read-only", "claude", 2, patchCaps, "tuning"), nil},
-		{"jira, butler with tuning and research and read-only", doctorOptions{butler: true, research: true}, mk("jira", "read-only", "claude", 2, patchCaps, "tuning"), nil},
-		{"butler, tuning enabled", doctorOptions{butler: true}, mk("github", "read-write", "", 0, patchCaps, "bugs", "tuning"), []string{"agent-butler-finding", "agent-tuning-finding"}},
-		{"butler, tuning enabled on forgejo", doctorOptions{butler: true}, mk("forgejo", "read-write", "", 0, patchCaps, "tuning"), []string{"agent-butler-finding", "agent-tuning-finding"}},
-		{"butler, tuning listed twice", doctorOptions{butler: true}, mk("github", "read-write", "", 0, patchCaps, "tuning", "tuning"), []string{"agent-butler-finding", "agent-tuning-finding"}},
-		{"butler, tuning not enabled", doctorOptions{butler: true}, mk("github", "read-write", "", 0, patchCaps, "bugs"), []string{"agent-butler-finding"}},
-		{"butler, tuning enabled, patches on and read-only", doctorOptions{butler: true}, mk("github", "read-only", "claude", 1, patchCaps, "tuning"), []string{"agent-butler-finding", "agent-butler-patch", "agent-tuning-finding", "agent-review-finding"}},
-		{"tuning enabled without --butler", doctorOptions{}, mk("github", "read-write", "", 0, patchCaps, "tuning"), nil},
+		}(), []string{"agent-research", "agent-research-in-progress", "agent-research-failed", "research-go", "research-nogo", "agent-research-finding", "agent-review-finding"}},
+		{"butler patches on", doctorOptions{butler: true}, mk("github", "claude", 1, patchCaps), []string{"agent-butler-finding", "agent-butler-patch", "agent-review-finding"}},
+		{"forgejo keeps butler label", doctorOptions{butler: true}, mk("forgejo", "", 0, patchCaps), []string{"agent-butler-finding", "agent-review-finding"}},
+		{"local, butler with tuning and research", doctorOptions{butler: true, research: true}, mk("local", "claude", 2, patchCaps, "tuning"), nil},
+		{"jira, butler with tuning and research", doctorOptions{butler: true, research: true}, mk("jira", "claude", 2, patchCaps, "tuning"), nil},
+		{"butler, tuning enabled", doctorOptions{butler: true}, mk("github", "", 0, patchCaps, "bugs", "tuning"), []string{"agent-butler-finding", "agent-tuning-finding", "agent-review-finding"}},
+		{"butler, tuning enabled on forgejo", doctorOptions{butler: true}, mk("forgejo", "", 0, patchCaps, "tuning"), []string{"agent-butler-finding", "agent-tuning-finding", "agent-review-finding"}},
+		{"butler, tuning listed twice", doctorOptions{butler: true}, mk("github", "", 0, patchCaps, "tuning", "tuning"), []string{"agent-butler-finding", "agent-tuning-finding", "agent-review-finding"}},
+		{"butler, tuning not enabled", doctorOptions{butler: true}, mk("github", "", 0, patchCaps, "bugs"), []string{"agent-butler-finding", "agent-review-finding"}},
+		{"butler, tuning enabled, patches on", doctorOptions{butler: true}, mk("github", "claude", 1, patchCaps, "tuning"), []string{"agent-butler-finding", "agent-butler-patch", "agent-tuning-finding", "agent-review-finding"}},
+		{"tuning enabled without --butler", doctorOptions{}, mk("github", "", 0, patchCaps, "tuning"), []string{"agent-review-finding"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := requiredLabels(tc.opts, tc.rc); !slices.Equal(got, tc.want) {
@@ -773,11 +772,6 @@ func TestKindForDoctorFlag(t *testing.T) {
 	kindForDoctorFlag("--no-such-flag")
 }
 
-func runDoctorWithAccess(t *testing.T, access string) (string, error) {
-	t.Helper()
-	return runDoctorWithConfig(t, func(c *config) { c.BoxForgeAndIssueAccess = access })
-}
-
 func runDoctorWithConfig(t *testing.T, mutate func(*config)) (string, error) {
 	t.Helper()
 	f := forge.NewFake()
@@ -791,41 +785,6 @@ func runDoctorWithConfig(t *testing.T, mutate func(*config)) (string, error) {
 	_, report := doctorCheckSets(c)
 	err := runDoctor(f, f, c, doctor.NewReporter(&buf, false), &buf, strings.NewReader(""), false, report)
 	return buf.String(), err
-}
-
-func runDoctorReadWrite(t *testing.T) string {
-	t.Helper()
-	out, err := runDoctorWithAccess(t, "read-write")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	return out
-}
-
-func TestRunDoctor_ReadWriteBoxAccess_PrintsDeprecationNotice(t *testing.T) {
-	want := inputdoc.BoxAccessReadWriteNotice + "\n"
-	if out := runDoctorReadWrite(t); !strings.Contains(out, want) {
-		t.Errorf("runDoctor() output = %q, want it to contain %q", out, want)
-	}
-}
-
-func TestRunDoctor_ReadOnlyBoxAccess_NoDeprecationNotice(t *testing.T) {
-	out, err := runDoctorWithAccess(t, "read-only")
-	if err != nil {
-		t.Fatalf("runDoctor() error = %v, want nil: a read-only Box holds no token for doctor to refuse", err)
-	}
-	if strings.Contains(out, inputdoc.BoxAccessReadWriteNotice) {
-		t.Errorf("runDoctor() output = %q, want no notice for read-only", out)
-	}
-}
-
-// The daemon's startup preflight (issue #6891): a butler-only daemon withholds
-// the notice, and a daemon with a work kind has already printed it.
-func TestRunDoctor_UnderDaemon_NoDeprecationNotice(t *testing.T) {
-	t.Setenv(inputdoc.BoxAccessNoticeDecidedEnv, "1")
-	if out := runDoctorReadWrite(t); strings.Contains(out, inputdoc.BoxAccessReadWriteNotice) {
-		t.Errorf("runDoctor() output = %q, want no notice under the daemon", out)
-	}
 }
 
 func TestRunDoctor_BoxForgeCredential_PrintsDeprecationNoticeOnlyWhenSet(t *testing.T) {

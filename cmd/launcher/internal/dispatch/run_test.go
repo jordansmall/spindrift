@@ -188,8 +188,7 @@ func TestRun_PopulatesBoxOutboxDir_GithubReadOnly(t *testing.T) {
 
 	fr := runner.NewFake()
 	f, err := NewFactory(Config{
-		ForgeDescriptor:        backend.Descriptor{RelayCapable: true, OutboxRelayCapable: true},
-		BoxForgeAndIssueAccess: "read-only",
+		ForgeDescriptor: backend.Descriptor{RelayCapable: true, OutboxRelayCapable: true},
 	}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
@@ -224,8 +223,7 @@ func TestRun_PopulatesBoxOutboxDir_ForgejoReadOnly(t *testing.T) {
 
 	fr := runner.NewFake()
 	f, err := NewFactory(Config{
-		ForgeDescriptor:        backend.Forgejo,
-		BoxForgeAndIssueAccess: "read-only",
+		ForgeDescriptor: backend.Forgejo,
 	}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
@@ -257,8 +255,7 @@ func TestRun_PopulatesBoxOutboxDir_GitReadOnly(t *testing.T) {
 
 	fr := runner.NewFake()
 	f, err := NewFactory(Config{
-		ForgeDescriptor:        backend.Git,
-		BoxForgeAndIssueAccess: "read-only",
+		ForgeDescriptor: backend.Git,
 	}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
@@ -288,8 +285,7 @@ func TestRun_NoOutboxDirForRelayIncapableReadOnly(t *testing.T) {
 
 	fr := runner.NewFake()
 	f, err := NewFactory(Config{
-		ForgeDescriptor:        backend.Descriptor{},
-		BoxForgeAndIssueAccess: "read-only",
+		ForgeDescriptor: backend.Descriptor{},
 	}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)

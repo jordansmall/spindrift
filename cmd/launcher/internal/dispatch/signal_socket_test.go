@@ -560,7 +560,6 @@ func TestRunOnce_ReadOnlyBoxStillAnswersIssueVerbs(t *testing.T) {
 	searcher := &fakeIssueSearcher{}
 	cfg := retryConfig(3, 0, 0)
 	cfg.SignalCarrier = "socket"
-	cfg.BoxForgeAndIssueAccess = "read-only"
 	cfg.BoxEnvVars = "REPO_SLUG " + strings.Join(tokenNames, " ")
 	cfg.IssueReader = reader
 	cfg.IssueSearcher = searcher

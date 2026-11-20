@@ -191,35 +191,6 @@ func TestBuildBoxEnvSetsRunNonce(t *testing.T) {
 	}
 }
 
-// Issue #3906: BOX_FORGE_AND_ISSUE_ACCESS is boxEnv=true (lib/env-schema.nix),
-// so it reaches the Box through the BoxEnvVars forwarding loop as a raw
-// value. A butler Config must forward the forced "read-only" there too, not
-// the raw knob, or the Box sees a write-capable BOX_FORGE_AND_ISSUE_ACCESS
-// in the Box.
-func TestBuildBoxEnvForcesForgeAndIssueAccessForReadOnlyBoxKind(t *testing.T) {
-	cfg := Config{
-		Kind:                   "butler",
-		BoxEnvVars:             "BOX_FORGE_AND_ISSUE_ACCESS",
-		BoxForgeAndIssueAccess: "read-write",
-		ResolveEnv: func(_, name string) string {
-			if name == "BOX_FORGE_AND_ISSUE_ACCESS" {
-				return "read-write"
-			}
-			return ""
-		},
-	}
-	if got := mustBuildBoxEnv(t, cfg, "3", "T", 0, "", "")["BOX_FORGE_AND_ISSUE_ACCESS"]; got != "read-only" {
-		t.Errorf("BOX_FORGE_AND_ISSUE_ACCESS: got %q, want %q", got, "read-only")
-	}
-
-	// Any other kind forwards the resolver's value untouched.
-	cfg.Kind = "research"
-	cfg.BoxForgeAndIssueAccess = ""
-	if got := mustBuildBoxEnv(t, cfg, "3", "T", 0, "", "")["BOX_FORGE_AND_ISSUE_ACCESS"]; got != "read-write" {
-		t.Errorf("BOX_FORGE_AND_ISSUE_ACCESS for research: got %q, want %q", got, "read-write")
-	}
-}
-
 // Issue #3063: Config carries the two resolved backend.Descriptor rows
 // directly instead of the wider forge.Capabilities value. Each var is present
 // only as "1" when true, and absent rather than "0" when false.

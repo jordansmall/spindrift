@@ -344,27 +344,6 @@ let
     else
       builtins.elemAt tailBytesMatch 0;
 
-  # dedupmarker.Prefix/Suffix, parsed out of the Go source that defines them
-  # (issue #3609) rather than retyped, the same builtins.match idiom as
-  # bakedCap and nonceHexWidth above: the two direct-mode filer fragments
-  # below build this marker line themselves (their own token never
-  # round-trips through the launcher, so dedupmarker.Build can't build it for
-  # them), and a rename here that isn't echoed in the fragments would leave
-  # them emitting a marker dedupmarker.Parse can never recognize.
-  dedupMarkerGoSrc = builtins.readFile ../../cmd/launcher/internal/dedupmarker/dedupmarker.go;
-  dedupMarkerPrefixMatch = builtins.match ".*[[:space:]]Prefix = \"([^\"]*)\".*" dedupMarkerGoSrc;
-  dedupMarkerPrefixInGo =
-    if dedupMarkerPrefixMatch == null then
-      throw "dedup marker check: no Prefix const found in cmd/launcher/internal/dedupmarker/dedupmarker.go -- update the match in nix/checks/prompts.nix alongside the const"
-    else
-      builtins.elemAt dedupMarkerPrefixMatch 0;
-  dedupMarkerSuffixMatch = builtins.match ".*[[:space:]]Suffix = \"([^\"]*)\".*" dedupMarkerGoSrc;
-  dedupMarkerSuffixInGo =
-    if dedupMarkerSuffixMatch == null then
-      throw "dedup marker check: no Suffix const found in cmd/launcher/internal/dedupmarker/dedupmarker.go -- update the match in nix/checks/prompts.nix alongside the const"
-    else
-      builtins.elemAt dedupMarkerSuffixMatch 0;
-
   # Shared by the two research-prompt advise-only enumeration dedup checks
   # below (issue #3227, #3270): research-prompt.md and its self-contained
   # sub-mode sibling carry the identical trailer/TASK contract, so one
@@ -1568,19 +1547,7 @@ in
         touch $out
       '';
 
-  # The read-write write-step fragments (issue #1917) must keep
-  # `gh issue comment` byte-for-byte: the same in-box write these two steps
-  # always rendered before BOX_FORGE_AND_ISSUE_ACCESS existed.
-  github-readwrite-comment-fragments-keep-gh-issue-comment-unchanged =
-    pkgs.runCommand "github-readwrite-comment-fragments-keep-gh-issue-comment-unchanged" { }
-      ''
-        for f in github/issue-blocked-comment.md github/research-verdict.md; do
-          grep -q 'gh issue comment' ${../../templates/default/prompts/fragments}/"$f"
-        done
-        touch $out
-      '';
-
-  # The read-only counterpart (issue #1917): a read-only Box holds no write
+  # Read-only comment relay (issue #1917): a read-only Box holds no write
   # token, so its blocked-note and verdict-comment fragments never invoke
   # `gh issue comment`. They relay through the host instead: note= on
   # SPINDRIFT_OUTCOME, and one nonce-guarded SPINDRIFT_COMMENT line (issue
@@ -1606,19 +1573,7 @@ in
         touch $out
       '';
 
-  # The forgejo-side counterpart of github-readwrite-comment-fragments-*
-  # above (issue #1963): the read-write write-step fragments must keep
-  # `fj issue comment`.
-  forgejo-readwrite-comment-fragments-keep-fj-issue-comment =
-    pkgs.runCommand "forgejo-readwrite-comment-fragments-keep-fj-issue-comment" { }
-      ''
-        for f in forgejo/issue-blocked-comment.md forgejo/research-verdict.md; do
-          grep -q 'fj issue comment' ${mergedPrompts}/fragments/"$f"
-        done
-        touch $out
-      '';
-
-  # The forgejo-side counterpart of github-readonly-comment-fragments-* above
+  # The forgejo side of github-readonly-comment-fragments-* above
   # (issue #1963): a read-only Box holds no write-capable FORGEJO_TOKEN, so
   # these fragments must never invoke `fj issue comment` and must carry the
   # same relay forms (note= field, SPINDRIFT_COMMENT line) as the others.
@@ -1774,18 +1729,7 @@ in
         touch $out
       '';
 
-  # The filer write-mechanism split (issue #2019): the direct-mode fragments
-  # must keep `gh label create`/`gh issue create` byte-for-byte, the same
-  # in-box writes filer-prompt.md's steps rendered before this split existed.
-  filer-direct-fragments-keep-gh-write-unchanged =
-    pkgs.runCommand "filer-direct-fragments-keep-gh-write-unchanged" { }
-      ''
-        grep -q 'gh label create agent-review-finding' ${../../templates/default/prompts/fragments/github/filer-direct-label.md}
-        grep -q 'gh issue create' ${../../templates/default/prompts/fragments/github/filer-direct-file.md}
-        touch $out
-      '';
-
-  # The read-only counterpart (issue #2019): a read-only Box holds no write
+  # The filer relay fragments (issue #2019): a read-only Box holds no write
   # token, so the filer's relay fragments must never invoke
   # `gh label create` and must carry the host-mediated
   # SPINDRIFT_ISSUE_INTENT relay instead. `gh issue create`'s absence is
@@ -1801,50 +1745,6 @@ in
           }
         done
         grep -q 'SPINDRIFT_ISSUE_INTENT ''${RUN_NONCE}' ${../../templates/default/prompts/fragments/filer-file-relay.md}
-        touch $out
-      '';
-
-  # The forgejo counterpart of filer-direct-fragments-keep-gh-write-unchanged
-  # above (issue #1963): fj has no label verb and `fj issue create` has no
-  # --label flag, so the forgejo direct-mode fragments must speak
-  # `fj issue create` and the REST API (curl) for the label.
-  filer-direct-forgejo-fragments-speak-fj-and-curl =
-    pkgs.runCommand "filer-direct-forgejo-fragments-speak-fj-and-curl" { }
-      ''
-        grep -q 'fj issue create' ${mergedPrompts}/fragments/forgejo/filer-direct-file.md
-        ! grep -q 'gh issue create' ${mergedPrompts}/fragments/forgejo/filer-direct-file.md || {
-          echo "forgejo/filer-direct-file.md invokes gh issue create (issue #1963)" >&2
-          exit 1
-        }
-        grep -q '/api/v1/repos' ${mergedPrompts}/fragments/forgejo/filer-direct-label.md
-        grep -q 'agent-review-finding' ${mergedPrompts}/fragments/forgejo/filer-direct-label.md
-        ! grep -q 'gh label create' ${mergedPrompts}/fragments/forgejo/filer-direct-label.md || {
-          echo "forgejo/filer-direct-label.md invokes gh label create (issue #1963)" >&2
-          exit 1
-        }
-        touch $out
-      '';
-
-  # The direct-mode fragments hand-build the dedup marker line themselves
-  # (issue #3609 review finding): pin them to dedupMarkerPrefixInGo, parsed
-  # out of dedup.go above, so a rename of the const there fails this check
-  # instead of leaving the fragments emitting a marker dedup.go's own parser
-  # never recognizes. normalized_grep because the marker sits inside prose
-  # that can rewrap.
-  filer-direct-fragments-dedup-marker-matches-go =
-    pkgs.runCommand "filer-direct-fragments-dedup-marker-matches-go" { }
-      ''
-        ${normalizedGrep}
-        for f in ${mergedPrompts}/fragments/github/filer-direct-file.md ${mergedPrompts}/fragments/forgejo/filer-direct-file.md; do
-          normalized_grep "$f" ${pkgs.lib.escapeShellArg dedupMarkerPrefixInGo} || {
-            echo "$f: expected the dedup marker prefix '${dedupMarkerPrefixInGo}' (dedupmarker.Prefix) verbatim" >&2
-            exit 1
-          }
-          normalized_grep "$f" ${pkgs.lib.escapeShellArg dedupMarkerSuffixInGo} || {
-            echo "$f: expected the dedup marker suffix '${dedupMarkerSuffixInGo}' (dedupmarker.Suffix) verbatim" >&2
-            exit 1
-          }
-        done
         touch $out
       '';
 
@@ -2084,28 +1984,6 @@ in
     assert assertMsg (!broken.success)
       "mkHarness.nix must throw when boxForgeAndIssueAccess is statically read-only and research-verdict-relay.md is missing the required SPINDRIFT_COMMENT marker";
     pkgs.runCommand "build-time-reject-research-verdict-comment-relay-missing" { } "touch $out";
-
-  # The gate-not-triggered counterpart (AC3): the same broken fragments
-  # directory, but boxForgeAndIssueAccess set to
-  # read-write. The gating condition is not statically known true, so
-  # buildTimeRejectVerdicts resolves "advise" and the build succeeds.
-  build-time-reject-research-verdict-comment-relay-not-triggered =
-    let
-      inherit (pkgs.lib) assertMsg;
-      ok = builtins.tryEval (
-        (import ../../lib/mkHarness.nix {
-          inherit nixpkgs system;
-          packages = p: [ p.hello ];
-          fragmentsDir = brokenResearchVerdictFragmentsDir;
-          defaults = {
-            boxForgeAndIssueAccess = "read-write";
-          };
-        }).spindrift
-      );
-    in
-    assert assertMsg ok.success
-      "mkHarness.nix must not throw when boxForgeAndIssueAccess is not statically read-only, even with a missing SPINDRIFT_COMMENT marker";
-    pkgs.runCommand "build-time-reject-research-verdict-comment-relay-not-triggered" { } "touch $out";
 
   # Structural forbidden-marker check (issue #2510, parent #2498 campaign R):
   # a forbidden marker authored as literal fragment-body text in a fragment

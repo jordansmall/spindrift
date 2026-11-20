@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -63,5 +65,108 @@ func TestParseFlags_StaleOrchestratorFlagIsUnknown(t *testing.T) {
 				t.Errorf("parseFlags(%q) err = %v, want %q", arg, err, want)
 			}
 		})
+	}
+}
+
+// assertReadWriteRemovedErr pins the migration pointer a removed
+// BOX_FORGE_AND_ISSUE_ACCESS=read-write value must carry, not the generic
+// "must be read-only" choice error.
+func assertReadWriteRemovedErr(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("err = nil, want the read-write removal rejection")
+	}
+	for _, want := range []string{"BOX_FORGE_AND_ISSUE_ACCESS=read-write was removed", "#6901", "host-mediated", "MIGRATING.md"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q, want it to contain %q", err, want)
+		}
+	}
+}
+
+// read-only stays a valid, silent setting: only the removed value is rejected.
+func TestRemovedKnobsCheck_BoxAccessValue(t *testing.T) {
+	t.Run("read-only passes", func(t *testing.T) {
+		t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
+		if _, err := removedKnobsCheck().Probe(); err != nil {
+			t.Errorf("Probe() err = %v, want nil for an explicit read-only", err)
+		}
+	})
+	t.Run("read-write in env fails", func(t *testing.T) {
+		t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-write")
+		_, err := removedKnobsCheck().Probe()
+		assertReadWriteRemovedErr(t, err)
+	})
+	t.Run("read-write in the input document fails", func(t *testing.T) {
+		useDoc(t, &inputdoc.Document{Settings: map[string]string{"BOX_FORGE_AND_ISSUE_ACCESS": "read-write"}})
+		_, err := removedKnobsCheck().Probe()
+		assertReadWriteRemovedErr(t, err)
+	})
+}
+
+// Launch time: dispatch (validate) and doctor (validateConfig) both reject
+// read-write whichever tier supplied it, and the flag's deprecated alias too.
+func TestValidate_RejectsReadWriteBoxAccess(t *testing.T) {
+	cases := map[string]func(t *testing.T){
+		"env": func(t *testing.T) { t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-write") },
+		"document": func(t *testing.T) {
+			useDoc(t, &inputdoc.Document{Settings: map[string]string{"BOX_FORGE_AND_ISSUE_ACCESS": "read-write"}})
+		},
+		"flag": func(t *testing.T) {
+			t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
+			setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-write")
+		},
+		"deprecated flag alias": func(t *testing.T) {
+			t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
+			restoreLauncherInput(t)
+			testFlagArgs = append(slices.Clone(testFlagArgs), "--box-forge-and-issue-access", "read-write")
+			resolveTestInput(t)
+		},
+	}
+	for name, set := range cases {
+		t.Run(name, func(t *testing.T) {
+			set(t)
+			c := loadConfig()
+			c.runtime = "echo"
+			c.GhToken, c.RepoSlug, c.GitUserName, c.GitUserEmail = "ghp_test", "owner/repo", "bot", "bot@example.com"
+			assertReadWriteRemovedErr(t, validate(c))
+			assertReadWriteRemovedErr(t, validateConfig(c))
+		})
+	}
+}
+
+// The doctor's choice walk skips only a removed value the removed-knobs row
+// already reported, not every choice set in the environment.
+func TestValidateConfig_ReportsInvalidChoiceFromEnv(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
+	t.Setenv("MERGE_MODE", "bogus")
+	c := loadConfig()
+	c.runtime = "echo"
+	c.GhToken, c.RepoSlug, c.GitUserName, c.GitUserEmail = "ghp_test", "owner/repo", "bot", "bot@example.com"
+	c.MergeMode = "bogus"
+	if err := validateConfig(c); err == nil || !strings.Contains(err.Error(), `MERGE_MODE="bogus" is not valid`) {
+		t.Fatalf("validateConfig() = %v, want the MERGE_MODE choice rejection", err)
+	}
+}
+
+// Doctor names a removed choice once, not from both the row and the walk.
+func TestValidateConfig_ReportsRemovedChoiceOnce(t *testing.T) {
+	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-write")
+	c := loadConfig()
+	c.runtime = "echo"
+	c.GhToken, c.RepoSlug, c.GitUserName, c.GitUserEmail = "ghp_test", "owner/repo", "bot", "bot@example.com"
+	err := validateConfig(c)
+	if n := strings.Count(fmt.Sprint(err), "BOX_FORGE_AND_ISSUE_ACCESS=read-write was removed"); n != 1 {
+		t.Fatalf("validateConfig() names the removal %d times, want once: %v", n, err)
+	}
+}
+
+func TestValidateChoice_BoxAccessReadWriteIsRemoved(t *testing.T) {
+	assertReadWriteRemovedErr(t, validateChoice("BOX_FORGE_AND_ISSUE_ACCESS", "read-write"))
+	if err := validateChoice("BOX_FORGE_AND_ISSUE_ACCESS", "read-only"); err != nil {
+		t.Errorf("validateChoice(read-only) = %v, want nil", err)
+	}
+	// A value that was never valid keeps the generic choice error.
+	if err := validateChoice("BOX_FORGE_AND_ISSUE_ACCESS", "bogus"); err == nil || strings.Contains(err.Error(), "removed") {
+		t.Errorf("validateChoice(bogus) = %v, want the generic invalid-choice error", err)
 	}
 }

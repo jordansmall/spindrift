@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -369,12 +368,6 @@ func (d *Dispatch) dispatchStart() hostop.DispatchStart {
 	s := d.cfg.Stamp
 	s.RecordID = d.recordID
 	s.Kind = d.cfg.kindName()
-	if _, ok := s.Knobs["BOX_FORGE_AND_ISSUE_ACCESS"]; ok {
-		// A ReadOnlyBox kind always runs read-only whatever the raw knob says.
-		// Knobs is shared across Dispatches, so clone before overriding.
-		s.Knobs = maps.Clone(s.Knobs)
-		s.Knobs["BOX_FORGE_AND_ISSUE_ACCESS"] = d.cfg.boxAccessForKind()
-	}
 	s.DispatchKey = d.number
 	s.ClaimTime = d.claimTime
 	s.Started = d.clock.Now()
@@ -481,11 +474,10 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	boxLog := newBoxLog(logFile)
 	defer func() { _ = boxLog.flush() }()
 
-	// A HostMediatedRemote backend always needs an outbox (ADR 0033,
-	// CODE_FORGE=local); a RelayCapable one needs it only under
-	// BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1918). Every other
-	// combination skips .spindrift/outbox/<num> rather than leaving an
-	// empty directory behind on every dispatch.
+	// A HostMediatedRemote or RelayCapable backend needs an outbox
+	// (backend.RelaysBundle; ADR 0033, issue #1918). Any other forge skips
+	// .spindrift/outbox/<num> rather than leaving an empty directory behind
+	// on every dispatch.
 	var outboxDir string
 	if needsOutbox(d.cfg) {
 		outboxDir = OutboxDirFor(d.pwd, d.number)

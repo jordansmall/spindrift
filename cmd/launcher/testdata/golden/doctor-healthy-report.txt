@@ -22,7 +22,6 @@ ok: label "agent-butler-finding" present
 ok: label "agent-butler-patch" present
 ok: label "agent-tuning-finding" present
 ok: all triage, research, priority, ambiguous-spec, and butler labels present
-spindrift: BOX_FORGE_AND_ISSUE_ACCESS=read-write is deprecated and will be removed in a later minor release (issue #6757). The default is now read-only, where the launcher host-mediates every Box write. To move, set perSystem.spindrift.forge.boxAccess = "read-only" (or defaults.boxForgeAndIssueAccess), or unset it; see MIGRATING.md, "The Box's forge access defaults to read-only (issue #6899)".
 ok: recover kind: on — CODE_FORGE=github relays the Box's outbox bundle
 ok: read-only-capability
 ok: network-mode-runtime

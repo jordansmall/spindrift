@@ -256,7 +256,7 @@ func setStubFamilyLaunchEnv(t *testing.T) {
 		"ISSUE_TRACKER":              "github",
 		"BASE_BRANCH":                "main",
 		"MERGE_MODE":                 "manual",
-		"BOX_FORGE_AND_ISSUE_ACCESS": "read-write",
+		"BOX_FORGE_AND_ISSUE_ACCESS": "read-only",
 	} {
 		setKnob(t, k, v)
 	}
@@ -374,7 +374,7 @@ func setRealRunnerLaunchEnv(t *testing.T, bwrapExit int, pasta bool) {
 		"ISSUE_TRACKER":              "github",
 		"BASE_BRANCH":                "main",
 		"MERGE_MODE":                 "manual",
-		"BOX_FORGE_AND_ISSUE_ACCESS": "read-write",
+		"BOX_FORGE_AND_ISSUE_ACCESS": "read-only",
 		"NETWORK_MODE":               "open",
 	} {
 		setKnob(t, k, v)

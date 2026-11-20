@@ -345,3 +345,18 @@ func TestResolveDriver(t *testing.T) {
 		})
 	}
 }
+
+func TestRemovedChoice(t *testing.T) {
+	msg, ok := RemovedChoice("BOX_FORGE_AND_ISSUE_ACCESS", "read-write")
+	if !ok || msg == "" {
+		t.Errorf("read-write: got (%q, %v), want a removed-choice message", msg, ok)
+	}
+	for _, c := range []struct{ env, value string }{
+		{"BOX_FORGE_AND_ISSUE_ACCESS", "read-only"},
+		{"NO_SUCH_KNOB", "read-write"},
+	} {
+		if msg, ok := RemovedChoice(c.env, c.value); ok {
+			t.Errorf("RemovedChoice(%q, %q) = (%q, true), want not removed", c.env, c.value, msg)
+		}
+	}
+}

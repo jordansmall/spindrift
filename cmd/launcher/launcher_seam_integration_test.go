@@ -127,10 +127,8 @@ func checkRuntimeArgv(doc *inputdoc.Document, kind string, argv []string) []stri
 		}
 	}
 	secretNames := []string{"GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"}
-	// A read-only Box (the default) holds no forge credential (issue #6900), so
-	// the forge token names BOX_ENV_VARS lists never reach its argv.
-	d, _ := dispatchkind.ByName(kind)
-	readOnlyBox := d.ReadOnlyBox || doc.Settings["BOX_FORGE_AND_ISSUE_ACCESS"] != "read-write"
+	// Every Box is read-only and holds no forge credential (issue #6900), so the
+	// forge token names BOX_ENV_VARS lists never reach its argv.
 	forgeTokens := map[string]bool{}
 	for _, b := range backend.Registry {
 		if b.BoxTokenEnvVar != "" {
@@ -143,12 +141,8 @@ func checkRuntimeArgv(doc *inputdoc.Document, kind string, argv []string) []stri
 		if rt, ok := smokeRuntimeSettings[name]; ok {
 			want, inDoc = rt, true
 		}
-		// A read-only kind overrides the document's access mode.
-		if d, ok := dispatchkind.ByName(kind); ok && d.ReadOnlyBox && name == "BOX_FORGE_AND_ISSUE_ACCESS" {
-			want, inDoc = "read-only", true
-		}
 		switch {
-		case readOnlyBox && forgeTokens[name]:
+		case forgeTokens[name]:
 			if ok {
 				bad = append(bad, fmt.Sprintf("read-only Box got forge token %s on argv", name))
 			}

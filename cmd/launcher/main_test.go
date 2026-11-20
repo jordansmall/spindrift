@@ -2802,7 +2802,7 @@ func TestValidateBoxForgeAndIssueAccess_RejectsUnknown(t *testing.T) {
 }
 
 func TestValidateBoxForgeAndIssueAccess_AcceptsKnown(t *testing.T) {
-	for _, mode := range []string{"read-write", "read-only"} {
+	for _, mode := range []string{"read-only"} {
 		c := minimalValidLocalConfig()
 		c.BoxForgeAndIssueAccess = mode
 		if err := validate(c); err != nil {
@@ -2936,18 +2936,16 @@ func TestNewCodeForge_ForgejoReadOnly_SatisfiesBundleRelayAndDraftPRCreator(t *t
 }
 
 // Capabilities.HostCanOpenPR (issue #4071) holds for github and forgejo under
-// either access mode, and never for git (push-only) or local (no PR at all).
+// and never for git (push-only) or local (no PR at all).
 func TestResolveCapabilities_HostCanOpenPR(t *testing.T) {
 	tests := []struct {
 		forge, access string
 		want          bool
 	}{
-		{"github", "read-write", true},
 		{"github", "read-only", true},
-		{"forgejo", "read-write", true},
 		{"forgejo", "read-only", true},
-		{"git", "read-write", false},
-		{"local", "read-write", false},
+		{"git", "read-only", false},
+		{"local", "read-only", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.forge+" "+tc.access, func(t *testing.T) {
@@ -3356,61 +3354,6 @@ func TestDispatchConfig_ForwardsKindAndSelfContained(t *testing.T) {
 	}
 }
 
-// Butler's Box must run the read-only posture (guards, outbox relay)
-// regardless of BOX_FORGE_AND_ISSUE_ACCESS (issue #3906): a read-write
-// Consumer must not hand a butler Box write access.
-func TestDispatchConfig_BoxForgeAndIssueAccess_ButlerForcedReadOnly(t *testing.T) {
-	cases := []struct {
-		name    string
-		kind    *dispatchkind.Descriptor
-		knob    string
-		want    string
-		forgejo bool
-	}{
-		{"work read-write", dispatchkind.Work, "read-write", "read-write", false},
-		{"work read-only", dispatchkind.Work, "read-only", "read-only", false},
-		{"research read-write", dispatchkind.Research, "read-write", "read-write", false},
-		{"research read-only", dispatchkind.Research, "read-only", "read-only", false},
-		{"butler read-write", dispatchkind.Butler, "read-write", "read-only", false},
-		{"butler read-only", dispatchkind.Butler, "read-only", "read-only", false},
-		// Issue #3906 review finding: the github-only table above never
-		// exercised a second backend, so a forgejo-specific regression in
-		// either resolveCapabilitySignals or the registry lookup could slip
-		// through. codeForge=forgejo with the real registry descriptor pins
-		// the same forcing and agreement for that backend too.
-		{"butler read-write forgejo", dispatchkind.Butler, "read-write", "read-only", true},
-	}
-
-	githubCaps := forge.Capabilities{ForgeDescriptor: backend.Descriptor{OutboxRelayCapable: true}}
-	forgejoDescriptor, ok := backend.ByName("forgejo")
-	if !ok {
-		t.Fatal("backend.ByName(\"forgejo\") not found in registry")
-	}
-	forgejoCaps := forge.Capabilities{ForgeDescriptor: forgejoDescriptor}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			cf := forge.NewFake()
-			it := forge.NewFake()
-			c := applyDispatchKind(minimalValidConfig(), tc.kind)
-			c.BoxForgeAndIssueAccess = tc.knob
-			caps := githubCaps
-			if tc.forgejo {
-				c.CodeForge = "forgejo"
-				c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
-				c.setRowKnob("FORGEJO_TOKEN", "tok")
-				caps = forgejoCaps
-			}
-
-			dc := dispatchConfig(c, "", it, testWired(it), cf, caps)
-
-			if dc.BoxForgeAndIssueAccess != tc.want {
-				t.Errorf("dispatchConfig().BoxForgeAndIssueAccess = %q, want %q", dc.BoxForgeAndIssueAccess, tc.want)
-			}
-		})
-	}
-}
-
 // Pins issue #3062: a loaded document whose Settings match the resolved names
 // but whose Artifacts contradict the caps argument must not reach
 // dispatchConfig's Capabilities. resolveCapabilitySignals trusts that
@@ -3565,18 +3508,11 @@ func TestDispatchConfig_SeedMirror_ForgejoPrimaryRow(t *testing.T) {
 	})
 	t.Chdir(t.TempDir()) // the Connector's audit file lands under the working directory
 	t.Setenv("FIXTURE_TOKEN", "connector-token")
-	readOnly := minimalValidConfig()
-	readOnly.BoxForgeAndIssueAccess = "read-only"
-	butlerKind := applyDispatchKind(minimalValidConfig(), dispatchkind.Butler)
-	butlerKind.BoxForgeAndIssueAccess = "read-write"
-	for name, c := range map[string]config{"read-only": readOnly, "ReadOnlyBox kind under read-write": butlerKind} {
-		t.Run(name, func(t *testing.T) {
-			c.CodeForge = "forgejo"
-			c.setRowKnob("FORGEJO_BASE_URL", backendSrv.URL)
-			if cfg := seedMirrorDispatchConfig(t, c); cfg.SeedMirror == nil {
-				t.Error("dispatchConfig().SeedMirror = nil, want a host-side fetch for a primary forgejo row")
-			}
-		})
+	c := minimalValidConfig()
+	c.CodeForge = "forgejo"
+	c.setRowKnob("FORGEJO_BASE_URL", backendSrv.URL)
+	if cfg := seedMirrorDispatchConfig(t, c); cfg.SeedMirror == nil {
+		t.Error("dispatchConfig().SeedMirror = nil, want a host-side fetch for a primary forgejo row")
 	}
 }
 
@@ -3876,29 +3812,9 @@ func snapshotGitIdentityConfig(t *testing.T, vals map[string]string) (config, *[
 	return c, calls
 }
 
-// Opt-in two-actor separation (ADR 0016, issue #380): with BOX_GH_TOKEN set,
-// ResolveEnv resolves the Box's GH_TOKEN to that value while the launcher's
-// ambient GH_TOKEN stays untouched for its own host-side forge calls.
-func TestDispatchConfig_ResolveEnv_BoxGHTokenOverridesGHToken(t *testing.T) {
-	c := minimalValidConfig()
-	c.CodeForge = "github"
-	t.Setenv("GH_TOKEN", "launcher-token")
-	t.Setenv("BOX_GH_TOKEN", "box-token")
-	cf := forge.NewFake()
-
-	cfg := dispatchConfig(c, "", cf, testWired(forge.NewFake()), cf, forge.Capabilities{})
-
-	if got := cfg.ResolveEnv("42", "GH_TOKEN"); got != "box-token" {
-		t.Errorf("ResolveEnv(42, GH_TOKEN) = %q, want %q", got, "box-token")
-	}
-	if got := os.Getenv("GH_TOKEN"); got != "launcher-token" {
-		t.Errorf("launcher's own GH_TOKEN mutated: got %q, want %q", got, "launcher-token")
-	}
-}
-
-// The single-token default: with BOX_GH_TOKEN unset, ResolveEnv forwards the
-// launcher's own ambient GH_TOKEN unchanged.
-func TestDispatchConfig_ResolveEnv_GHTokenPassthroughWhenBoxGHTokenUnset(t *testing.T) {
+// ResolveEnv forwards the launcher's own ambient GH_TOKEN unchanged; the Box
+// env build strips it afterwards.
+func TestDispatchConfig_ResolveEnv_GHTokenPassthrough(t *testing.T) {
 	c := minimalValidConfig()
 	c.CodeForge = "github"
 	t.Setenv("GH_TOKEN", "launcher-token")
@@ -3911,34 +3827,14 @@ func TestDispatchConfig_ResolveEnv_GHTokenPassthroughWhenBoxGHTokenUnset(t *test
 	}
 }
 
-// The Forgejo analog of BOX_GH_TOKEN (ADR 0016): with BOX_FORGEJO_TOKEN set,
-// ResolveEnv resolves the Box's FORGEJO_TOKEN to that value, the mechanism
-// that withholds a forgejo write credential from a read-only Box.
-func TestDispatchConfig_ResolveEnv_BoxForgejoTokenOverridesForgejoToken(t *testing.T) {
+// ResolveEnv forwards the launcher's own ambient FORGEJO_TOKEN unchanged; the
+// Box env build strips it afterwards.
+func TestDispatchConfig_ResolveEnv_ForgejoTokenPassthrough(t *testing.T) {
 	c := minimalValidConfig()
 	c.CodeForge = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("FORGEJO_TOKEN", "launcher-fj-tok")
-	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
-	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
-
-	cfg := dispatchConfig(c, "", forge.NewFake(), testWired(forge.NewFake()), cf, forge.Capabilities{})
-
-	if got := cfg.ResolveEnv("1", "FORGEJO_TOKEN"); got != "box-fj-tok" {
-		t.Errorf("ResolveEnv(1, FORGEJO_TOKEN) = %q, want %q", got, "box-fj-tok")
-	}
-}
-
-// The single-token default: with BOX_FORGEJO_TOKEN unset, ResolveEnv forwards
-// the launcher's own ambient FORGEJO_TOKEN unchanged.
-func TestDispatchConfig_ResolveEnv_BoxForgejoTokenUnsetFallsThrough(t *testing.T) {
-	c := minimalValidConfig()
-	c.CodeForge = "forgejo"
-	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
-	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
-	t.Setenv("FORGEJO_TOKEN", "launcher-fj-tok")
-	t.Setenv("BOX_FORGEJO_TOKEN", "")
 	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
 
 	cfg := dispatchConfig(c, "", forge.NewFake(), testWired(forge.NewFake()), cf, forge.Capabilities{})
@@ -3948,28 +3844,8 @@ func TestDispatchConfig_ResolveEnv_BoxForgejoTokenUnsetFallsThrough(t *testing.T
 	}
 }
 
-// The override is scoped to the FORGEJO_TOKEN name alone: a BOX_FORGEJO_TOKEN
-// set in the environment must not leak into GH_TOKEN or any other name.
-func TestDispatchConfig_ResolveEnv_BoxForgejoTokenDoesNotAffectOtherNames(t *testing.T) {
-	c := minimalValidConfig()
-	c.CodeForge = "forgejo"
-	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
-	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
-	t.Setenv("GH_TOKEN", "launcher-gh-tok")
-	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
-	cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil)
-
-	cfg := dispatchConfig(c, "", forge.NewFake(), testWired(forge.NewFake()), cf, forge.Capabilities{})
-
-	if got := cfg.ResolveEnv("1", "GH_TOKEN"); got != "launcher-gh-tok" {
-		t.Errorf("ResolveEnv(1, GH_TOKEN) = %q, want %q", got, "launcher-gh-tok")
-	}
-}
-
-// boxTokenResolver's registry walk (issue #2267) lets a token name with no
-// registered BoxTokenEnvVar fall straight through unchanged: jira's row
-// carries a tokenEnvVar but no Box-side override knob, since jira is
-// tracker-only.
+// A token name no resolver claims (jira is tracker-only) falls straight
+// through unchanged.
 func TestDispatchConfig_ResolveEnv_JiraTokenFallsThroughUntouched(t *testing.T) {
 	c := minimalValidConfig()
 	c.CodeForge = "github"
@@ -3980,26 +3856,6 @@ func TestDispatchConfig_ResolveEnv_JiraTokenFallsThroughUntouched(t *testing.T) 
 
 	if got := cfg.ResolveEnv("1", "JIRA_TOKEN"); got != "launcher-jira-tok" {
 		t.Errorf("ResolveEnv(1, JIRA_TOKEN) = %q, want %q", got, "launcher-jira-tok")
-	}
-}
-
-// The BOX_GH_TOKEN override applies under CODE_FORGE=local too: it is a
-// host-side control signal independent of Code Forge, unlike BASE_BRANCH's
-// local-only Integration-branch substitution.
-func TestDispatchConfig_Local_ResolveEnv_BoxGHTokenOverridesGHToken(t *testing.T) {
-	c := minimalValidConfig()
-	c.CodeForge = "local"
-	c.BaseBranch = "main"
-	t.Setenv("GH_TOKEN", "launcher-token")
-	t.Setenv("BOX_GH_TOKEN", "box-token")
-	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "42"})
-	cf := fc.AsLocal()
-
-	cfg := dispatchConfig(c, "", fc, testWired(fc), cf, forge.Capabilities{ForgeDescriptor: backend.Descriptor{HostMediatedRemote: true}})
-
-	if got := cfg.ResolveEnv("42", "GH_TOKEN"); got != "box-token" {
-		t.Errorf("ResolveEnv(42, GH_TOKEN) = %q, want %q", got, "box-token")
 	}
 }
 
@@ -4250,10 +4106,10 @@ func TestSettleConfig_FindingLabelFromKind(t *testing.T) {
 }
 
 // newSettlers hands the research settle the research row's finding label, so an
-// issue intent a research run relays (read-only or read-write) is filed as
+// issue intent a research run relays is filed as
 // agent-research-finding rather than under a blank label.
 func TestNewSettle_Research_FilesFindingWithResearchLabel(t *testing.T) {
-	for _, access := range []string{"read-only", "read-write"} {
+	for _, access := range []string{"read-only"} {
 		t.Run(access, func(t *testing.T) {
 			c := minimalValidConfig()
 			c.dispatchKind = dispatchkind.Research
@@ -4425,7 +4281,7 @@ func minimalValidConfig() config {
 			IssueTracker:           "github",
 			CodeForge:              "github",
 			OverlapGate:            "defer",
-			BoxForgeAndIssueAccess: "read-write",
+			BoxForgeAndIssueAccess: "read-only",
 			NetworkMode:            "open",
 			SignalCarrier:          "log",
 		},

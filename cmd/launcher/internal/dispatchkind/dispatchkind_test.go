@@ -313,8 +313,8 @@ func TestRecoverRow(t *testing.T) {
 	if d.Settle != SettleMerge || d.Tracker != TrackerWork || d.Labels != LabelsConfigured || d.Keying != ByIssue {
 		t.Errorf("recover must settle through work's merge gate on work's tracker and labels: %+v", d)
 	}
-	if d.AdviseOnly || d.ReadOnlyBox {
-		t.Errorf("recover lands code through the work gate: AdviseOnly=%v ReadOnlyBox=%v", d.AdviseOnly, d.ReadOnlyBox)
+	if d.AdviseOnly {
+		t.Errorf("recover lands code through the work gate: AdviseOnly=%v", d.AdviseOnly)
 	}
 }
 

@@ -661,11 +661,14 @@ withRowKnobs {
     group = "forge";
     flag = "box-access";
     default = "read-only";
-    doc = "whether the Box writes to the Code Forge and Issue Tracker directly (read-write) or the launcher host-mediates every write instead (read-only), a third axis orthogonal to CODE_FORGE and ISSUE_TRACKER (issue #1914); read-only is coherence-checked against the selected forge/tracker's registry capability bits at nix build (Consumer eval) time (issue #2526) — permitted only when the selected forge implements bundle-relay (and host-side draft-PR-create when it has pull requests) and the selected tracker implements host-posted comments, otherwise the build throws naming the missing seam; local, github, and forgejo backends satisfy both sides of the check today, the plain git forge satisfies the forge side by bundle relay alone (issue #6898), and the jira tracker satisfies the tracker side when paired with a github, forgejo, or git forge (issues #6355, #6898) (ADR extending 0032/0033 to github, docs/adr/0034-host-mediated-github-forge-and-issue-access.md); the launcher's own startup gate now only backstops a runtime override of this value past what nix already validated; the butler dispatch kind's Box always runs read-only regardless of this knob (issue #3906). read-only is the default since issue #6899. DEPRECATED: an explicit read-write warns at build time, at run time, and in spindrift doctor, and will be removed in a later minor release (issue #6757); see MIGRATING.md";
-    choices = [
-      "read-write"
-      "read-only"
-    ];
+    doc = "how the Box reaches the Code Forge and Issue Tracker: read-only is the only value, and the default. The Box holds no write token and the launcher host-mediates every write (issue #1914), so it is a third axis orthogonal to CODE_FORGE and ISSUE_TRACKER. It is coherence-checked against the selected forge/tracker's registry capability bits at nix build (Consumer eval) time (issue #2526) — permitted only when the selected forge implements bundle-relay (and host-side draft-PR-create when it has pull requests) and the selected tracker implements host-posted comments, otherwise the build throws naming the missing seam; local, github, and forgejo backends satisfy both sides of the check today, the plain git forge satisfies the forge side by bundle relay alone (issue #6898), and the jira tracker satisfies the tracker side when paired with a github, forgejo, or git forge (issues #6355, #6898) (ADR extending 0032/0033 to github, docs/adr/0034-host-mediated-github-forge-and-issue-access.md); the launcher's own startup gate backstops a runtime override of the backends past what nix already validated. The read-write value was removed in issue #6901: setting it fails at build time, at launch, and in spindrift doctor; see MIGRATING.md";
+    choices = [ "read-only" ];
+    # A removed value stays in the flake option's enum so mkHarness can throw
+    # this message, instead of the module system's generic enum error naming
+    # no migration. The launcher's value-level rejection is generated from it.
+    removedChoices = {
+      "read-write" = "BOX_FORGE_AND_ISSUE_ACCESS=read-write was removed: read-write Box access was removed in issue #6901 and every Box is now host-mediated (read-only); set it to read-only or delete the setting; see MIGRATING.md";
+    };
     flakeOption = true;
     nixSubPath = "boxAccess";
     # Forwarded into the Box, but the prompt fragments gate on the derived

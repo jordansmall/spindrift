@@ -168,8 +168,8 @@ let
   # Three GitHub-named knobs stay shared because the core launcher reads
   # them ungated: GH_TOKEN (Box env guard, bootstrap, and git's gh credential
   # helper), GH_TOKEN_REFRESH_FILE (token refresh bootstrap and daemon watch),
-  # and BOX_GH_TOKEN (boxTokenResolver swaps it in for the Box's GH_TOKEN under
-  # every forge, git included).
+  # and BOX_GH_TOKEN (a deprecated knob with no reader; dispatch strips it and
+  # GH_TOKEN from every Box env, git included).
   owners = {
     git.codeForgeRemoteURL = "CODE_FORGE_REMOTE_URL";
     oci.podmanNetwork = "PODMAN_NETWORK";

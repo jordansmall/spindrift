@@ -166,26 +166,6 @@ func afterStamp(t *testing.T, log []byte) string {
 	return rest
 }
 
-// A ReadOnlyBox kind runs read-only whatever the raw knob says, so its stamp
-// must record the effective value without touching the Stamp every Dispatch
-// shares.
-func TestDispatchStart_ReadOnlyBoxKindStampsEffectiveAccess(t *testing.T) {
-	cfg := retryConfig(1, 0, 0)
-	cfg.Kind = "butler"
-	cfg.BoxForgeAndIssueAccess = "read-write"
-	cfg.Stamp = hostop.DispatchStart{Knobs: map[string]string{"BOX_FORGE_AND_ISSUE_ACCESS": "read-write", "MAX_PASSES": "4"}}
-	d := newTestDispatch(t, cfg, runner.NewFake(), fakeDriver{}, Clock{Now: time.Now, Sleep: func(time.Duration) {}})
-
-	got := d.dispatchStart().Knobs
-	want := map[string]string{"BOX_FORGE_AND_ISSUE_ACCESS": "read-only", "MAX_PASSES": "4"}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("stamped knobs = %v, want %v", got, want)
-	}
-	if cfg.Stamp.Knobs["BOX_FORGE_AND_ISSUE_ACCESS"] != "read-write" {
-		t.Errorf("Config.Stamp.Knobs mutated: %v", cfg.Stamp.Knobs)
-	}
-}
-
 // TestDispatchStamp_AdoptedFixContinuesPriorRecord pins that a Dispatch which
 // never Ran (recover adopting an open PR) continues the Record stamped at the
 // head of the primary log, so its fix and conflict logs and a later
