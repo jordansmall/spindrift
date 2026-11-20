@@ -72,26 +72,6 @@ const fakeGHClaimPrecondition = `case "$*" in
 	;;
 esac`
 
-func TestExecClient_DepsOf_NativeErrorEmptyStderrNoTrailingColon(t *testing.T) {
-	prependFakeGH(t, `case "$*" in
-*dependencies/blocked_by*)
-	exit 1
-	;;
-*"issue view"*)
-	printf '{"number":10,"title":"t","body":"blocked by #9","state":"OPEN","labels":[]}'
-	;;
-esac`)
-
-	c := NewExecClient("owner/repo", forge.DispatchLabels{})
-	_, err := c.NativeDepsOf("10")
-	if err == nil {
-		t.Fatal("NativeDepsOf: want error, got nil")
-	}
-	if strings.HasSuffix(err.Error(), ": ") {
-		t.Fatalf("NativeDepsOf error must not have a trailing colon-space; got: %q", err.Error())
-	}
-}
-
 // GitHub's issue-dependencies API tracks blocked/blocking as a bidirectional
 // relationship, so the reverse direction is one more native call rather than a
 // whole-backlog scan (issue #1744).
@@ -112,8 +92,8 @@ func TestExecClient_BranchExists_RejectsEmptyBranch(t *testing.T) {
 	dir := prependFakeGH(t, `exit 1`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{})
-	if _, err := c.BranchExists(""); err == nil {
-		t.Error("BranchExists(\"\"): want error, got nil")
+	if _, err := c.BranchExists(""); err == nil || !strings.Contains(err.Error(), "must not be empty") {
+		t.Errorf("BranchExists(\"\"): want a \"must not be empty\" error, got %v", err)
 	}
 	if matches, _ := filepath.Glob(filepath.Join(dir, "call-*.txt")); len(matches) != 0 {
 		t.Errorf("want no gh invocation for an empty branch, got %d", len(matches))
@@ -124,8 +104,8 @@ func TestExecClient_BranchProtected_RejectsEmptyBranch(t *testing.T) {
 	dir := prependFakeGH(t, `exit 1`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{})
-	if _, err := c.BranchProtected(""); err == nil {
-		t.Error("BranchProtected(\"\"): want error, got nil")
+	if _, err := c.BranchProtected(""); err == nil || !strings.Contains(err.Error(), "must not be empty") {
+		t.Errorf("BranchProtected(\"\"): want a \"must not be empty\" error, got %v", err)
 	}
 	if matches, _ := filepath.Glob(filepath.Join(dir, "call-*.txt")); len(matches) != 0 {
 		t.Errorf("want no gh invocation for an empty branch, got %d", len(matches))

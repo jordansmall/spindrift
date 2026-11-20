@@ -17,11 +17,11 @@ import (
 //go:embed testdata/fake-gh.sh
 var fakeGHState string
 
-// githubHarness is a native adapter over a STATE_DIR/issues/<num>/
+// githubHarness is a native write adapter over a STATE_DIR/issues/<num>/
 // tree the fakeGHState script reads and mutates, so successive gh calls see
 // each other's effects. prependFakeGH's single scripted response cannot do
-// that: CompleteVerdict's double-dispatch guard has to observe a label an
-// earlier TransitionState call added.
+// that: a later call has to observe a label an earlier TransitionState call
+// added.
 type githubHarness struct {
 	issuesDir string
 	tr        forge.IssueTracker
@@ -45,7 +45,7 @@ func newGithubHarness(t *testing.T) *githubHarness {
 
 	return &githubHarness{
 		issuesDir: issuesDir,
-		tr:        NewExecClient("owner/repo", testLabels, WithVerdictLabels(forge.ResearchVerdictLabels())),
+		tr:        NewExecClient("owner/repo", testLabels),
 	}
 }
 
@@ -59,8 +59,6 @@ func (h *githubHarness) Tracker() forge.IssueTracker { return h.tr }
 
 func (h *githubHarness) SeedIssue(iss forge.Issue) {
 	dir := h.issueDir(iss.Number)
-	os.WriteFile(filepath.Join(dir, "title"), []byte(iss.Title), 0o644)
-	os.WriteFile(filepath.Join(dir, "body"), []byte(iss.Body), 0o644)
 	var labels string
 	for _, l := range iss.Labels {
 		labels += l + "\n"

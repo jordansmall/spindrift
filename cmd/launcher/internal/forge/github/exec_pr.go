@@ -29,8 +29,9 @@ func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 	return e.openPRForBranchViaConnector(row, branch)
 }
 
-// nativeOpenPRForBranch is the gh read OpenPRForBranch was, kept for the native
-// write that calls it.
+// nativeOpenPRForBranch looks up the open PR for branch through gh. It serves
+// the native write path and goes with #6888; the Box's Strategy also calls it
+// because it keeps its own gh (#6757).
 func (e *execClient) nativeOpenPRForBranch(branch string) (forge.PR, bool, error) {
 	cmd := exec.Command("gh", "pr", "list",
 		"--repo", e.repo,
@@ -150,8 +151,8 @@ func (e *execClient) Mergeable(url string) (forge.MergeableState, error) {
 	return e.mergeableViaConnector(row, url)
 }
 
-// nativeMergeable is the gh read Mergeable was, kept for the native Merge that
-// classifies its failure by it.
+// nativeMergeable reads a PR's mergeable state through gh, so the native Merge
+// can classify its failure by it. It goes with #6888.
 func (e *execClient) nativeMergeable(url string) (forge.MergeableState, error) {
 	parts := strings.Split(url, "/")
 	if len(parts) < 7 {
@@ -329,8 +330,8 @@ func (e *execClient) Probe() (string, error) {
 	return e.probeViaConnector(row)
 }
 
-// ListLabels returns the names of all labels defined in the repository.
-// --paginate is load-bearing: one page holds at most demandPageSize labels.
+// ListLabels returns the names of all labels defined in the repository, read
+// through the routed Connector row.
 func (e *execClient) ListLabels() ([]string, error) {
 	row, err := readRow()
 	if err != nil {

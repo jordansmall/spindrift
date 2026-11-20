@@ -51,7 +51,7 @@ func useConnectorClient(t *testing.T, b *probeBackend) {
 }
 
 // With a github row the production Probe asks the Connector, with the host's
-// own credential, and gives the answers the native gh Probe gives.
+// own credential, and reports auth and not-found from the HTTP status.
 func TestExecClientProbe_ConfiguredRowGoesThroughTheConnector(t *testing.T) {
 	for _, tc := range []struct {
 		status           int

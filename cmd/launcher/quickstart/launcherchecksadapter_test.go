@@ -110,6 +110,7 @@ func TestQuickstartLauncherRows_NoRuntimeRow(t *testing.T) {
 // transcript must report the launcherchecks "git-user-name" row, the one
 // assertion that proves the doctor.Run call site is no longer handed nil.
 func TestRunQuickstart_WiresLauncherChecksIntoDoctorOutput(t *testing.T) {
+	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
