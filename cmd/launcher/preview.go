@@ -136,6 +136,7 @@ func preview(stdout io.Writer, issueNums []string) error {
 	if err != nil {
 		return err
 	}
+	defer gc.closeSandbox()
 	pwd, err := os.Getwd()
 	if err != nil {
 		return err

@@ -122,18 +122,18 @@ func bootstrapWith(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descri
 		}()
 	}
 
-	// Ahead of the gate walk, whose network gates may load a Connector.
-	closeSandbox := installConnectorSandbox(seedConfig, pwd)
+	// newGatedContext installs the Connector sandbox ahead of its gate walk and
+	// stops it itself on an error.
+	gc, err := newGatedContext(stdout, kind, selfContained)
+	if err != nil {
+		return nil, err
+	}
+	closeSandbox := gc.closeSandbox
 	defer func() {
 		if err != nil {
 			closeSandbox()
 		}
 	}()
-
-	gc, err := newGatedContext(stdout, kind, selfContained)
-	if err != nil {
-		return nil, err
-	}
 	// c diverges from gc.config below (registryProxyRoutes is set on c only),
 	// which is safe only because gc itself is never read again.
 	c := gc.config
@@ -398,24 +398,36 @@ func (l *lazyRunner) Kill(name string) error {
 // recordSandboxTotals is a var so a test can count the closer's calls.
 var recordSandboxTotals = github.RecordRoutedSandboxTotals
 
-// installConnectorSandbox makes every Connector this process hosts load into
-// one sandbox, under CONNECTOR_SANDBOX, and returns the func that stops it. The
-// install lasts the process, so sandboxVerdict can still read a start failure
-// once the run has cleaned up.
-func installConnectorSandbox(c config, pwd string) (closeSandbox func()) {
-	if !c.ConnectorSandbox {
-		return func() {}
-	}
-	sb := sandbox.New(&lazyRunner{build: func() (runner.Runner, error) {
+// newConnectorSandboxLoader is a var so a test binary, which has no runner to
+// start a sandbox on, can install the in-process engine instead.
+var newConnectorSandboxLoader = realConnectorSandboxLoader
+
+func realConnectorSandboxLoader(c config, pwd string) connectorsandbox.Loader {
+	return sandbox.New(&lazyRunner{build: func() (runner.Runner, error) {
 		return runnerForKind(c, runnerConfig(c), pwd)
 	}}, connectorSandboxRunnerLabel(c))
-	connectorsandbox.Use(sb)
+}
+
+// installConnectorSandbox makes every Connector this process hosts load into
+// one sandbox and returns the func that stops it. Each path that can load a
+// Connector installs it once, ahead of its first load: the Launcher never loads
+// one in its own address space. The install lasts the process, so
+// sandboxVerdict can still read a start failure once the run has cleaned up.
+func installConnectorSandbox(c config) (closeSandbox func(), err error) {
+	pwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	l := newConnectorSandboxLoader(c, pwd)
+	connectorsandbox.Use(l)
 	// The totals follow Close so they are final, and live here so every exit
 	// path that closes the sandbox records them.
 	return func() {
-		_ = sb.Close(context.Background())
+		if cl, ok := l.(interface{ Close(context.Context) error }); ok {
+			_ = cl.Close(context.Background())
+		}
 		recordSandboxTotals()
-	}
+	}, nil
 }
 
 // connectorSandboxRunnerLabel names the runner a Connector sandbox starts

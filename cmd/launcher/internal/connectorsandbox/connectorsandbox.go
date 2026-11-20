@@ -1,7 +1,8 @@
 // Package connectorsandbox is where the Launcher loads a Connector it hosts
 // into the run's Connector sandbox.
 //
-// main installs one Loader for the run (Use), the sandbox package's. With none
+// Each path that loads a Connector (a Launcher command, the daemon) installs
+// one Loader (Use), the sandbox package's, ahead of its first load. With none
 // installed every load fails with ErrNoConnectorSandbox: the Launcher never
 // loads a Connector in its own address space. The Box loads its first-party
 // Drivers in-process through driverrows and never through this package. The

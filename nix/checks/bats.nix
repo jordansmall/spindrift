@@ -111,6 +111,8 @@ let
     # PATH and would otherwise shadow a PATH-injected fake.
     SPINDRIFT_CMD = "${batsHarness.spindrift}/bin/spindrift";
     SPINDRIFT_MULTI_DRIVER_CMD = "${multiDriverBatsHarness.spindrift}/bin/spindrift";
+    # tests/fakes/runtime execs it for a Connector sandbox run.
+    FAKE_CONNECTOR_HOST = "${fixtures.connectorHost}/bin/connector-host";
   };
 
   # Shared by the bats-shard-N derivations: stage a writable copy of tests/,

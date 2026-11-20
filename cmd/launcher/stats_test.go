@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/golden"
 	"spindrift.dev/launcher/internal/hostop"
@@ -573,5 +574,28 @@ func TestStats_UnreadableLogWarnsAndExitsZero(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "warning: skipping unreadable log") || !strings.Contains(stderr.String(), bad) {
 		t.Errorf("stderr = %q, want a warning naming %s", stderr.String(), bad)
+	}
+}
+
+// Parsing a log loads the Driver's Connector, so stats must install the
+// Connector sandbox itself rather than lean on whatever the process has.
+func TestStats_InstallsConnectorSandbox(t *testing.T) {
+	root := t.TempDir()
+	dir := hostpaths.LogDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) + statsResult("2026-10-07T12:35:00Z", 1.5, 7, 240000, 3000, "claude-opus")
+	if err := os.WriteFile(filepath.Join(dir, "issue-7.log"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(connectorsandbox.Use(nil))
+
+	stdout, stderr := runStats(t, root)
+	if strings.Contains(stderr, "warning") {
+		t.Errorf("stderr = %q, want no warning", stderr)
+	}
+	if !strings.Contains(stdout, "Records: 1 ") {
+		t.Errorf("stdout = %q, want the one Record", stdout)
 	}
 }

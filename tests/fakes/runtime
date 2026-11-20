@@ -20,6 +20,12 @@ _append "$log" "$*"
 
 case "${1:-}" in
   run)
+    # Every Launcher-hosted Connector loads in the Connector sandbox (issue
+    # #7022): serve its stdio with the real connector-host, the sandbox
+    # image's entrypoint.
+    if [[ " $* " == *" --name spindrift-connector-sandbox-"* ]]; then
+      exec "${FAKE_CONNECTOR_HOST:?}"
+    fi
     # The token the Box would inherit, so tests/harness-env.bats can pin which
     # source (environment or a sourced file) won without echoing it into
     # $PODMAN_LOG.
