@@ -766,7 +766,7 @@ withRowKnobs {
     default = false;
     kind = "bool";
     alias = "continuous";
-    doc = "when enabled, dispatch runs as a long-running slot-refill loop instead of a single wave (#527): as each Box finishes, the launcher re-discovers the queue and refills the freed slot when the image-freshness probe (#526) reports fresh; a rebuild-needed result stops refilling, lets in-flight Boxes finish, and exits with the new documented code (see the exit-code table in docs/reference.md's Dispatch exit codes section). Off by default; applies to queue discovery only — ISSUE_NUMBER-claimed and selective dispatch ignore it. DEPRECATED: superseded by the daemon (apps.daemon, nix run .#daemon), which holds the pool as one single-Box launcher invocation per slot, each pinned to its own fetched revision, instead of one long-lived launcher process doing all the pool-holding itself (#3547); not removed — it stays available for operators who want no daemon at all, and it remains the Console's engine";
+    doc = "when enabled, dispatch runs as a long-running slot-refill loop instead of a single wave (#527): as each Box finishes, the launcher re-discovers the queue and refills the freed slot when the image-freshness probe (#526) reports fresh; a rebuild-needed result stops refilling, lets in-flight Boxes finish, and exits with the new documented code (see the exit-code table in docs/reference.md's Dispatch exit codes section). Off by default; applies to queue discovery only — ISSUE_NUMBER-claimed and selective dispatch ignore it. DEPRECATED: superseded by the daemon (apps.daemon, nix run .#daemon), which holds the pool as one single-Box launcher invocation per slot, each pinned to its own fetched revision, instead of one long-lived launcher process doing all the pool-holding itself (#3547); not removed — it stays available for operators who want no daemon at all";
     flakeOption = true;
     nixSubPath = "continuous.enable";
     boxEnv = false;
@@ -908,7 +908,7 @@ withRowKnobs {
     env = "MERGE_POLL_INTERVAL";
     group = "git";
     default = 30;
-    doc = "seconds between merge-gate poll iterations; not a rate-limit lever — the gate is one strictly-serialized single-point GraphQL query at a time, only while a PR is actively landing (the cadence-sensitive pollers are the continuous refill ticker and the console backlog poll), and the interval is reused as four fixed-call-count delays (SUCCESS confirm, check-registration window, merge-blocked retry, fix-pass confirm) that stretch with it for zero rate-limit benefit — see docs/reference.md before bumping (issue #3249)";
+    doc = "seconds between merge-gate poll iterations; not a rate-limit lever — the gate is one strictly-serialized single-point GraphQL query at a time, only while a PR is actively landing (the cadence-sensitive poller is the continuous refill ticker), and the interval is reused as four fixed-call-count delays (SUCCESS confirm, check-registration window, merge-blocked retry, fix-pass confirm) that stretch with it for zero rate-limit benefit — see docs/reference.md before bumping (issue #3249)";
     flakeOption = true;
     intKind = "nonneg";
     nixSubPath = "merge.pollInterval";

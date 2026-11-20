@@ -1452,7 +1452,7 @@ Driver entry declares:
   `backends-go-test-independent` also pins. If
   the tests import an internal package missing from that check's fileset, add
   it to `driverGoTestShared` in `nix/checks/go.nix`. The check vendors from a
-  source without any Driver directory under the launcher's `launcherVendorHash`,
+  source without any Driver directory under `launcherCoreVendorHash`,
   so a Driver importing a third-party module no other launcher package uses
   makes that vendor derivation mismatch the hash. A module download failure
   instead fails it with `go mod vendor: unexpected stderr (likely a module

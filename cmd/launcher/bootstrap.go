@@ -52,16 +52,16 @@ type launchContext struct {
 	merge   settle.MergeSettler
 	verdict *settle.ResearchSettle
 	// terminated is the merge settler's own registry, and every marker writes
-	// it: the Console's Terminate, the waves, and an abort's Reclaim. An abort
+	// it: the waves and an abort's Reclaim. An abort
 	// and a settle goroutine already polling CI then agree on an issue's fate
-	// (#3521), and a Console recover gesture cannot replace it and strand later
+	// (#3521), and a recover cannot replace it and strand later
 	// marks where no settle looks (#3522). Under research no settler reads it
-	// (the verdict arm mints a fresh one); the Console and waves still mark it.
+	// (the verdict arm mints a fresh one); the waves still mark it.
 	terminated *terminate.Registry
 	cleanup    func()
 }
 
-// bootstrap wires the prologue shared by console, recover, dispatch, research,
+// bootstrap wires the prologue shared by recover, dispatch, research,
 // and butler. ensureReady picks EnsureReady() over IsReady() (--no-build); kind
 // selects the label family, blocker handling, and Settle via applyDispatchKind
 // (ADR 0022); stdout receives the gate walk's output; selfContained is
@@ -361,36 +361,6 @@ func seedMirrorHook(c config, pwd string, seeder forge.MirrorSeeder) func() (str
 		}
 		return dir, func() { _ = os.RemoveAll(tmp) }, nil
 	}
-}
-
-// researchLaunchStack builds the research-kind tracker, dispatch factory, and
-// settle the Console wires in alongside lc's work-kind stack (issue #1708, ADR
-// 0022). A second bootstrap() call would not merely repeat work: depending on
-// config it would fail validation on registry credential env vars the first
-// resolution already unset, fail on the run's own Accumulation-repo lock, or
-// start a second GH_TOKEN refresh watcher and repeat the readiness check. The
-// returned Factory owns its own driver-cache root, so the caller must call its
-// Cleanup.
-func researchLaunchStack(lc *launchContext) (forge.IssueTracker, *dispatch.Factory, *settle.ResearchSettle, error) {
-	rc := applyDispatchKind(lc.config, dispatchkind.Research)
-	it, err := newIssueTracker(rc)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	lw := localloop.Wire(localloopConfig(rc), it)
-	f, err := newDispatchFactory(rc, lc.pwd, lc.runner, it, lw, lc.codeForge, lc.capabilities)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	// The SettleVerdict arm never reads its caps argument, so there is nothing
-	// worth resolving.
-	_, verdict, _, err := newSettlers(rc.kind().Settle, rc, it, lw, lc.codeForge, forge.Capabilities{})
-	if err != nil {
-		f.Cleanup()
-		return nil, nil, nil, err
-	}
-	return it, f, verdict, nil
 }
 
 // lazyRunner is the Connector sandbox's Starter: it builds its runner on the

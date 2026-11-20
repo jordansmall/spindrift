@@ -328,3 +328,19 @@ func mustNewCodeForge(t *testing.T, c config, parent forge.SanitizedParent, it f
 	}
 	return cf
 }
+
+// mustGitOutput runs gitOutput in dir and fails the test on error.
+func mustGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := gitOutput(dir, args...)
+	if err != nil {
+		t.Fatalf("git -C %s: %v", dir, err)
+	}
+	return out
+}
+
+// runGit runs `git -C pwd args...`, surfacing git's own stderr on failure.
+func runGit(pwd string, args ...string) error {
+	_, err := gitOutput(pwd, args...)
+	return err
+}

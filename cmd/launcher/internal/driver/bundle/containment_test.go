@@ -212,8 +212,8 @@ func nonTestImports(t *testing.T, dir string) []string {
 
 // packageDirs lists root and every subdirectory under it that can hold a Go
 // package, pruning testdata (which may hold deliberately unparseable or
-// fixture .go files, as internal/console/msgcensus/testdata does) and
-// dot-prefixed directories, which hold tooling state rather than source.
+// fixture .go files) and dot-prefixed directories, which hold tooling state
+// rather than source.
 func packageDirs(t *testing.T, root string) []string {
 	t.Helper()
 	var dirs []string

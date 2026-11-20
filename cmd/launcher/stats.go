@@ -375,9 +375,8 @@ func renderAgentTable(w io.Writer, records []dispatchrecord.Record) error {
 // delete outright.
 var statsWarnSpaces = strings.NewReplacer("\t", " ", "\r", " ", "\n", " ")
 
-// statsWarnText sanitizes a warning's error text. Not
-// console.SanitizeControlSequences: it keeps \n, which would let error text
-// forge extra warning lines.
+// statsWarnText sanitizes a warning's error text. It replaces \n rather than
+// keeping it, so error text cannot forge extra warning lines.
 func statsWarnText(s string) string {
 	return driverkit.SanitizeLine(statsWarnSpaces.Replace(s))
 }

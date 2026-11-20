@@ -25,7 +25,7 @@ func TestNewSettlers_EveryStrategyYieldsExactlyOneSettler(t *testing.T) {
 				t.Fatalf("newSettlers(%s) error = %v, want an arm for every Settle value", name, err)
 			}
 			if terminated == nil {
-				t.Errorf("newSettlers(%s): terminated registry is nil; Console, waves and the shutdown gate need one", name)
+				t.Errorf("newSettlers(%s): terminated registry is nil; waves and the shutdown gate need one", name)
 			}
 			if (merge == nil) == (verdict == nil) {
 				t.Errorf("newSettlers(%s): merge nil = %t, verdict nil = %t; want exactly one set", name, merge == nil, verdict == nil)

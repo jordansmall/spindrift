@@ -1196,8 +1196,6 @@ checkedMerge {
         # Ambient process / toolchain environment.
         "HOME"
         "PATH"
-        "TERM"
-        "NO_COLOR"
         "GITHUB_OUTPUT" # GitHub Actions step-output file (issue #6611)
         "GH_HOST" # gh CLI host override
         "OPENCODE_DB" # lib/drivers/opencode.nix envCommon, read by the opencode resume lookup (issue #5378)
@@ -1312,7 +1310,7 @@ checkedMerge {
     assert assertMsg (hasInfix "nix run .#daemon" doc)
       "lib/env-schema.nix: continuousDispatch.doc must name nix run .#daemon as the replacement (issue #3547), got: ${doc}";
     assert assertMsg (hasInfix "not removed" doc)
-      "lib/env-schema.nix: continuousDispatch.doc must say plainly it is not removed — it stays for no-daemon operators and remains the Console's engine (issue #3547), got: ${doc}";
+      "lib/env-schema.nix: continuousDispatch.doc must say plainly it is not removed — it stays for no-daemon operators (issue #3547), got: ${doc}";
     pkgs.runCommand "continuous-dispatch-doc-reference" { } "touch $out";
 
   # The read-write removal (issue #6901) rides the knob's doc string, which is

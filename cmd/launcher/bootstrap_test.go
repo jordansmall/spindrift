@@ -13,7 +13,6 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/dispatchkind"
-	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/hostpaths"
@@ -959,60 +958,6 @@ func TestBootstrap_EnsureReadyError_AbortsBeforeLaunch(t *testing.T) {
 	}
 	if lc != nil {
 		t.Fatalf("bootstrap() on EnsureReady error = %+v, want nil launch context", lc)
-	}
-}
-
-// researchLaunchStack is cmdConsole's research-kind mirror of bootstrap's
-// work-kind wiring (issue #1708): the same newIssueTracker/newDispatchFactory/
-// newSettlers with dispatchkind.Research applied, so it must return the
-// agent-research label family and a ResearchSettle. The local tracker makes
-// the label write observable from disk with no network dependency.
-func TestResearchLaunchStack_WiresResearchLabelsAndSettle(t *testing.T) {
-	issuesDir := t.TempDir()
-	issueFile := `---
-title: Some issue
-state: untriaged
-labels: []
-created: 2026-07-09T12:00:00Z
----
-body
-`
-	if err := os.WriteFile(filepath.Join(issuesDir, "42.md"), []byte(issueFile), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	c := baseConfig()
-	c.IssueTracker = "local"
-	c.setRowKnob("LOCAL_ISSUES_DIR", issuesDir)
-	dir := tempLogDir(t)
-	lc := &launchContext{
-		config:    c,
-		pwd:       dir,
-		runner:    nil,
-		codeForge: forge.NewFake(),
-	}
-
-	it, f, s, err := researchLaunchStack(lc)
-	if err != nil {
-		t.Fatalf("researchLaunchStack: %v", err)
-	}
-	t.Cleanup(f.Cleanup)
-
-	if err := it.TransitionState("42", forge.Untriaged, forge.Dispatchable); err != nil {
-		t.Fatalf("TransitionState: %v", err)
-	}
-	iss, err := it.Issue("42")
-	if err != nil {
-		t.Fatalf("Issue: %v", err)
-	}
-	if !containsLabel(iss.Labels, "agent-research") {
-		t.Errorf("issue labels = %v, want agent-research", iss.Labels)
-	}
-	if f == nil {
-		t.Fatal("researchLaunchStack factory = nil, want a research-kind *dispatch.Factory")
-	}
-	if s == nil {
-		t.Error("researchLaunchStack settle = nil, want a *settle.ResearchSettle")
 	}
 }
 
