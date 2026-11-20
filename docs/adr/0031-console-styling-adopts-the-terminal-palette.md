@@ -1,5 +1,8 @@
 # Console styling adopts the terminal palette, with an optional base16 override
 
+> **Superseded by [ADR 0076](0076-the-console-is-removed.md).**
+> The Console is removed; `spindrift console` is now an unknown subcommand.
+
 The section-switched reskin (ADR 0030) needs color: state-tagged rows, section
 tabs, borders, and an accent. Hardcoding a palette would fight every operator's
 terminal theme and force a config surface to make it adjustable.

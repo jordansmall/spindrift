@@ -1,5 +1,8 @@
 # The Console is a picks-only interactive driving loop
 
+> **Superseded by [ADR 0076](0076-the-console-is-removed.md).**
+> The Console is removed; `spindrift console` is now an unknown subcommand.
+
 Composing a parallel run today takes two tools: pre-label issues in the GitHub
 UI, then start a headless loop and watch it through filesystem archaeology —
 `logs/issue-N.log` tails, `blocked.txt`, label queries. The human launch

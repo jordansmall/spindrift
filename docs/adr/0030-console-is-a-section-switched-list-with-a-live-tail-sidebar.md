@@ -1,5 +1,8 @@
 # The Console is a section-switched list with a live-tail sidebar
 
+> **Superseded by [ADR 0076](0076-the-console-is-removed.md).**
+> The Console is removed; `spindrift console` is now an unknown subcommand.
+
 ADR 0025 rendered the Console body as two side-by-side columns (queueable
 backlog left, picks queue right) with a docked Transcript third column, chosen
 so a driving loop running many Dispatches keeps backlog and live queue both
