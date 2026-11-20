@@ -2746,15 +2746,15 @@ func TestApplyConnectorCredentials_TemplateRunsForJiraRow(t *testing.T) {
 }
 
 // A primary row reads through its Connector whatever its adapter's Strategy
-// says, as Code Forge and as issue tracker, so forgejo's credential resolves
-// for it and only for it.
-func TestApplyConnectorCredentials_TemplateRunsForPrimaryForgejoRowOnly(t *testing.T) {
+// says, as Code Forge and as issue tracker; forgejo's Code Forge always does,
+// so its credential resolves for a plain row only as the CODE_FORGE.
+func TestApplyConnectorCredentials_TemplateRunsForForgejoForgeOrPrimaryTracker(t *testing.T) {
 	for _, tc := range []struct {
 		name, extra, forge, tracker string
 		want                        []string
 	}{
 		{"primary", `,"primary":true`, "forgejo", "local", []string{"vault get shadow-test-token"}},
-		{"plain", ``, "forgejo", "local", nil},
+		{"plain forge", ``, "forgejo", "local", []string{"vault get shadow-test-token"}},
 		{"primary tracker only", `,"primary":true`, "git", "forgejo", []string{"vault get shadow-test-token"}},
 		{"plain tracker only", ``, "git", "forgejo", nil},
 	} {

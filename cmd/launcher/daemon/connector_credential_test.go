@@ -515,17 +515,18 @@ func TestMainRun_StartsTheConnectorCredentialWatcherForACmdSourcedRow(t *testing
 	}
 }
 
-// A primary forgejo row is read as the CODE_FORGE and the ISSUE_TRACKER, so
-// the credential gate must key on both; a plain forgejo row is never read
-// through its Connector and stays unresolved.
-func TestResolveConnectorCredentials_ForgejoRowResolvesOnlyWhenPrimary(t *testing.T) {
+// A forgejo row is read as the CODE_FORGE whether or not it is primary, and
+// as the ISSUE_TRACKER only when primary, so the credential gate must key on
+// both; a plain row's tracker is never read through its Connector and stays
+// unresolved.
+func TestResolveConnectorCredentials_ForgejoRowResolvesAsForgeOrPrimaryTracker(t *testing.T) {
 	for _, tc := range []struct {
 		name, extra, template, forge string
 		wantRan, wantErr             bool
 	}{
 		{"primary resolves", `,"primary":true`, "rbw get {name}", "forgejo", true, false},
 		{"primary unset refuses", `,"primary":true`, "", "forgejo", false, true},
-		{"plain skipped", ``, "rbw get {name}", "forgejo", false, false},
+		{"plain forge resolves", ``, "rbw get {name}", "forgejo", true, false},
 		{"primary tracker only resolves", `,"primary":true`, "rbw get {name}", "git", true, false},
 		{"plain tracker only skipped", ``, "rbw get {name}", "git", false, false},
 	} {

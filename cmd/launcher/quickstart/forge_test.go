@@ -32,7 +32,7 @@ func TestBuildForge_GithubTracker_BuildsBothSeams(t *testing.T) {
 	}
 }
 
-func TestBuildForge_ForgejoTracker_ProbeHitsConfiguredBaseURLWithToken(t *testing.T) {
+func TestForgejoTracker_ProbeHitsConfiguredBaseURLWithToken(t *testing.T) {
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo" {
@@ -48,12 +48,11 @@ func TestBuildForge_ForgejoTracker_ProbeHitsConfiguredBaseURLWithToken(t *testin
 
 	s := mustStrategy(t, "forgejo")
 	l := knobLookup(map[string]string{"FORGEJO_BASE_URL": srv.URL}, s.TokenEnvVar, "forgejo-faketoken")
-	it, cf, err := buildForge(s, backendkit.Shared{RepoSlug: "owner/repo", Labels: defaultDispatchLabels}, l)
+	// Forgejo's Code Forge needs a Connector row the wizard does not bake, so
+	// the tracker is built on its own.
+	it, err := s.NewIssueTracker(backendkit.Shared{RepoSlug: "owner/repo", Labels: defaultDispatchLabels}, l)
 	if err != nil {
-		t.Fatalf("buildForge: %v", err)
-	}
-	if cf == nil {
-		t.Fatal("expected a non-nil CodeForge")
+		t.Fatalf("NewIssueTracker: %v", err)
 	}
 
 	repo, err := it.Probe()
