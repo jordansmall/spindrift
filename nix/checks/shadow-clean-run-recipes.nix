@@ -239,7 +239,7 @@
         p_clean() { p_audit "$(pstem "$1" "$2" "$3")" allowed allowed; }
         # The sandbox totals line a process appends at exit: no decision key.
         p_totals() {
-          echo '{"sandbox_start_ns":1,"sandbox_calls":2,"sandbox_host_calls":3,"sandbox_hop_ns":4,"in_process_loads":0}' >> "$(pstem "$1" "$2" "$3").audit.jsonl"
+          echo '{"sandbox_start_ns":1,"sandbox_calls":2,"sandbox_host_calls":3,"sandbox_hop_ns":4}' >> "$(pstem "$1" "$2" "$3").audit.jsonl"
         }
         crun() { run "$1" "$2" "$3" "$4" cut-over; }
 

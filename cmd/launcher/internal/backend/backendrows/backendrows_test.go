@@ -17,6 +17,7 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorsandbox"
+	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 )
 
 const fixturesEnv = "SPINDRIFT_CONNECTOR_FIXTURES_DIR"
@@ -202,6 +203,7 @@ func fixtureWasm(t *testing.T) string {
 	if dir == "" {
 		t.Skipf("%s is unset; it names the dir holding the fixture Connector .wasm files", fixturesEnv)
 	}
+	t.Cleanup(connectorsandbox.Use(connectorsandboxtest.InProcess()))
 	return filepath.Join(dir, "network.wasm")
 }
 

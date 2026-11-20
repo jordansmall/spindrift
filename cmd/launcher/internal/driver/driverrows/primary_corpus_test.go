@@ -53,6 +53,7 @@ func TestPrimaryRowConnectorPassesCorpus(t *testing.T) {
 	} {
 		t.Run(path, func(t *testing.T) {
 			drivertest.Isolate(t)
+			drivertest.InProcessSandbox(t)
 			// A primary row replaces a native Strategy, which this binary may not link.
 			if !driver.HasNative(name) {
 				driver.Register(driverkit.Strategy{Name: name})

@@ -36,12 +36,11 @@ func RecordRoutedSandboxTotals() {
 	path := filepath.Join(hostpaths.LogDir(pwd), primaryrecord.Name(backend.GitHub.Name, ".audit.jsonl"))
 	// Every field is an int64, so Marshal cannot fail.
 	line, _ := json.Marshal(struct {
-		StartNs        int64 `json:"sandbox_start_ns"`
-		Calls          int64 `json:"sandbox_calls"`
-		HostCalls      int64 `json:"sandbox_host_calls"`
-		HopNs          int64 `json:"sandbox_hop_ns"`
-		InProcessLoads int64 `json:"in_process_loads"`
-	}{int64(st.Start), st.Calls, st.HostCalls, int64(st.Hop), connectorsandbox.InProcessLoads()})
+		StartNs   int64 `json:"sandbox_start_ns"`
+		Calls     int64 `json:"sandbox_calls"`
+		HostCalls int64 `json:"sandbox_host_calls"`
+		HopNs     int64 `json:"sandbox_hop_ns"`
+	}{int64(st.Start), st.Calls, st.HostCalls, int64(st.Hop)})
 	// No O_CREATE: the file already existing is the precondition.
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
 	if errors.Is(err, fs.ErrNotExist) {

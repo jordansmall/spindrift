@@ -613,14 +613,12 @@ func TestSeamConnectorSandboxPrimaryTotals(t *testing.T) {
 		t.Errorf("sandbox_calls = %d, want 7 (%s)", totals["sandbox_calls"], lines[0])
 	}
 	// A routed read stays inside the sandbox, and the fixture asks the host
-	// for nothing; a primary run loads no Connector in-process.
-	for _, k := range []string{"sandbox_host_calls", "in_process_loads"} {
-		if v, ok := totals[k]; !ok || v != 0 {
-			t.Errorf("%s = %d (present %t), want 0 and present (%s)", k, v, ok, lines[0])
-		}
+	// for nothing.
+	if v, ok := totals["sandbox_host_calls"]; !ok || v != 0 {
+		t.Errorf("sandbox_host_calls = %d (present %t), want 0 and present (%s)", v, ok, lines[0])
 	}
-	if len(totals) != 5 {
-		t.Errorf("totals line has keys %v, want the five totals", slices.Sorted(maps.Keys(totals)))
+	if len(totals) != 4 {
+		t.Errorf("totals line has keys %v, want the four totals", slices.Sorted(maps.Keys(totals)))
 	}
 
 	logs, _ := filepath.Glob(filepath.Join(logDir, "primary-github-*.log"))

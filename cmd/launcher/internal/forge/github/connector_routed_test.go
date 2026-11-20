@@ -524,8 +524,8 @@ func TestRecordRoutedSandboxTotals_AppendsOneLineToTheAuditFile(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("audit file = %q, want the existing line and one totals line", b)
 	}
-	want := fmt.Sprintf(`{"sandbox_start_ns":%d,"sandbox_calls":5,"sandbox_host_calls":3,"sandbox_hop_ns":%d,"in_process_loads":%d}`,
-		int64(7*time.Millisecond), int64(11*time.Millisecond), connectorsandbox.InProcessLoads())
+	want := fmt.Sprintf(`{"sandbox_start_ns":%d,"sandbox_calls":5,"sandbox_host_calls":3,"sandbox_hop_ns":%d}`,
+		int64(7*time.Millisecond), int64(11*time.Millisecond))
 	if lines[1] != want {
 		t.Errorf("totals line = %s, want %s", lines[1], want)
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/driver/driverrows"
@@ -58,6 +59,7 @@ func TestUseNilChangesNothing(t *testing.T) {
 
 func TestUseLoadsConnectorDriverLazily(t *testing.T) {
 	drivertest.Isolate(t)
+	drivertest.InProcessSandbox(t)
 	wasm := fixtureWasm(t, "driver.wasm")
 	err := driverrows.Use(rows(t, []map[string]any{{
 		"name":   "fixture",
@@ -123,6 +125,7 @@ func TestNativeStrategyWinsOverModule(t *testing.T) {
 
 func TestNameMismatchFailsOnNew(t *testing.T) {
 	drivertest.Isolate(t)
+	drivertest.InProcessSandbox(t)
 	wasm := fixtureWasm(t, "driver.wasm")
 	if err := driverrows.Use(rows(t, []map[string]any{{"name": "other", "module": wasm}})); err != nil {
 		t.Fatal(err)
@@ -334,6 +337,8 @@ func TestBoxUnmarkedRowDoesNotBlockOtherDrivers(t *testing.T) {
 
 func TestBoxLoadsFirstPartyConnectorDriver(t *testing.T) {
 	drivertest.Isolate(t)
+	// The Box loads its first-party Connectors itself, with no sandbox installed.
+	t.Cleanup(connectorsandbox.Use(nil))
 	wasm := fixtureWasm(t, "driver.wasm")
 	if err := useFile(t, rows(t, []map[string]any{{"name": "fixture", "module": wasm, "firstParty": true}})); err != nil {
 		t.Fatal(err)
@@ -534,6 +539,7 @@ func TestPrimaryAndShadowRowsForSameDriverRefused(t *testing.T) {
 
 func TestPrimaryRowReplacesNativeDriver(t *testing.T) {
 	drivertest.Isolate(t)
+	drivertest.InProcessSandbox(t)
 	wasm := fixtureWasm(t, "driver.wasm")
 	driver.Register(driverkit.Strategy{Name: "fixture"})
 	row := rows(t, []driverrows.Row{{Descriptor: driver.Descriptor{Name: "fixture"}, Module: wasm, Primary: true, FirstParty: true}})
@@ -561,5 +567,41 @@ func TestRowWithoutPrimaryOmitsKey(t *testing.T) {
 	b := rows(t, driverrows.Row{Descriptor: driver.Descriptor{Name: "x"}})
 	if strings.Contains(string(b), "primary") {
 		t.Errorf("row JSON = %s, want no primary key", b)
+	}
+}
+
+// The module is read but never compiled: the Launcher refuses before any
+// in-process load, so a row it cannot sandbox fails closed rather than loading
+// in its own address space.
+func TestHostLoadFailsClosedWithNoSandbox(t *testing.T) {
+	drivertest.Isolate(t)
+	t.Cleanup(connectorsandbox.Use(nil))
+	module := filepath.Join(t.TempDir(), "outsider.wasm")
+	if err := os.WriteFile(module, []byte("not wasm"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := driverrows.Use(rows(t, []map[string]any{{"name": "outsider", "module": module, "firstParty": true}})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := driver.New("outsider"); !errors.Is(err, connectorsandbox.ErrNoConnectorSandbox) {
+		t.Fatalf("New(outsider) = %v, want ErrNoConnectorSandbox", err)
+	}
+}
+
+// A first-party row's load reaches the in-process engine, which rejects the
+// module, not the sandbox seam, which has none installed.
+func TestBoxFirstPartyLoadBypassesTheSandbox(t *testing.T) {
+	drivertest.Isolate(t)
+	t.Cleanup(connectorsandbox.Use(nil))
+	module := filepath.Join(t.TempDir(), "first.wasm")
+	if err := os.WriteFile(module, []byte("not wasm"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := useFile(t, rows(t, []map[string]any{{"name": "first", "module": module, "firstParty": true}})); err != nil {
+		t.Fatal(err)
+	}
+	_, err := driver.New("first")
+	if err == nil || errors.Is(err, connectorsandbox.ErrNoConnectorSandbox) || !strings.Contains(err.Error(), "load module") {
+		t.Fatalf("New(first) = %v, want the in-process engine's rejection of the module", err)
 	}
 }

@@ -50,8 +50,8 @@ func TestUseRoutesLoadsToTheInstalledLoader(t *testing.T) {
 		t.Fatalf("Failure = %v", Failure())
 	}
 	restore()
-	if _, err := Load(context.Background(), notWasm); err == nil || errors.Is(err, ErrConnectorSandboxStart) {
-		t.Fatalf("Load after restore = %v, want an in-process compile error", err)
+	if _, err := Load(context.Background(), notWasm); !errors.Is(err, ErrNoConnectorSandbox) {
+		t.Fatalf("Load after restore = %v, want ErrNoConnectorSandbox", err)
 	}
 	if Failure() != nil {
 		t.Fatal("Failure after restore")
@@ -74,20 +74,14 @@ func TestReportIsTheInstalledLoadersStats(t *testing.T) {
 	}
 }
 
-func TestInProcessLoadsCountsOnlyLoadsThatFallBack(t *testing.T) {
-	ctx := context.Background()
-	before := InProcessLoads()
-	_, _ = Load(ctx, notWasm)
-	_, _ = LoadNetwork(ctx, notWasm, connectorhost.Network{})
-	if got := InProcessLoads() - before; got != 2 {
-		t.Fatalf("in-process loads = %d, want 2", got)
+// notWasm would fail with a compile error, not ErrNoConnectorSandbox, if the
+// seam ever reached the in-process engine.
+func TestLoadsFailClosedWithNoLoaderInstalled(t *testing.T) {
+	t.Cleanup(Use(nil))
+	if _, err := Load(context.Background(), notWasm); !errors.Is(err, ErrNoConnectorSandbox) {
+		t.Fatalf("Load = %v, want ErrNoConnectorSandbox", err)
 	}
-
-	t.Cleanup(Use(failingLoader{ErrConnectorSandboxStart}))
-	before = InProcessLoads()
-	_, _ = Load(ctx, notWasm)
-	_, _ = LoadNetwork(ctx, notWasm, connectorhost.Network{})
-	if got := InProcessLoads() - before; got != 0 {
-		t.Fatalf("in-process loads under a sandbox = %d, want 0", got)
+	if _, err := LoadNetwork(context.Background(), notWasm, connectorhost.Network{}); !errors.Is(err, ErrNoConnectorSandbox) {
+		t.Fatalf("LoadNetwork = %v, want ErrNoConnectorSandbox", err)
 	}
 }
