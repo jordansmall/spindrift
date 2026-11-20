@@ -589,20 +589,6 @@ func TestPrintHelp_ShowsDispatchSubcommand(t *testing.T) {
 	}
 }
 
-// Bare `spindrift` points operators at the interactive console first, so
-// console leads the listing (ADR 0023).
-func TestPrintSubcommands_ConsoleFirst(t *testing.T) {
-	var buf bytes.Buffer
-	printSubcommands(&buf)
-	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
-	if len(lines) < 2 {
-		t.Fatalf("printSubcommands output too short: %q", buf.String())
-	}
-	if !strings.Contains(lines[1], "console") {
-		t.Errorf("first subcommand line = %q, want it to mention console", lines[1])
-	}
-}
-
 // --continuous is a schema-backed bool alias, so parseFlags consumes it and
 // sets CONTINUOUS_DISPATCH directly instead of passing it through to the
 // verb handler for hand-rolled extraction (issues #2033 and #2147).
@@ -637,7 +623,6 @@ func TestParseFlags_ContinuousDispatchBareAlias(t *testing.T) {
 // a hand-picked width once did (issue #1575 review).
 func TestPrintSubcommands_ExactOutput(t *testing.T) {
 	want := "Subcommands:\n" +
-		"  console                                                                                                                                        browse the open backlog interactively and dispatch picked issues\n" +
 		"  dispatch [--no-build] [--yes] [--continuous] [issue...]                                                                                        dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)\n" +
 		"  research [--no-build] [--yes] [--continuous] [--self-contained] [issue...]                                                                     advise-only research dispatch: drains agent-research (or an issue list) and posts a verdict comment; never merges, never promotes\n" +
 		"  butler [--chore <name>] [--no-build]                                                                                                           one-shot butler sweep of the first due opted-in Chore (BUTLER_CHORES order), or only the one named by --chore, else no work: claims its Ledger, runs one read-only Box, and files findings; promotes a finding or opens a patch PR for it only through opt-in host-side gates (both off by default)\n" +

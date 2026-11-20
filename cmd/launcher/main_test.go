@@ -543,18 +543,18 @@ func TestMainRun_NonNumericAndMixedIssueIDs_HitSelectivePath(t *testing.T) {
 	}
 }
 
-// `console` reaches the same bootstrap/validate prologue as the other
-// subcommands, proven by a missing REPO_SLUG (issue #694).
-func TestMainRun_Console_RoutesThroughBootstrap(t *testing.T) {
-	setKnob(t, "REPO_SLUG", "")
-
+// `console` is not a subcommand: it is refused like any unknown verb, with
+// the usage text (issue #7306).
+func TestMainRun_Console_IsUnknownSubcommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := mainRunT(t, []string{"console"}, &stdout, &stderr)
 	if code != 1 {
 		t.Errorf("mainRun([console]) code = %d, want 1", code)
 	}
-	if !strings.Contains(stderr.String(), "--repo-slug") {
-		t.Errorf("mainRun([console]) stderr = %q, want a --repo-slug validation error", stderr.String())
+	for _, want := range []string{"unknown subcommand: console", "Usage: spindrift [flags] <subcommand>"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("mainRun([console]) stderr missing %q, got:\n%s", want, stderr.String())
+		}
 	}
 }
 
@@ -760,8 +760,8 @@ func TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument(t *testing.T) {
 // The verb dispatch table is the single source of truth for which
 // subcommands exist (issue #1574). The hidden __complete-issues completion
 // verb dispatches before the table lookup, so it must not appear here.
-func TestVerbHandlers_CoversExactlyElevenRealVerbs(t *testing.T) {
-	want := []string{"build", "butler", "console", "dispatch", "doctor", "preview", "reconcile", "recover", "registry", "research", "stats"}
+func TestVerbHandlers_CoversExactlyTenRealVerbs(t *testing.T) {
+	want := []string{"build", "butler", "dispatch", "doctor", "preview", "reconcile", "recover", "registry", "research", "stats"}
 
 	got := make([]string, 0, len(verbHandlers))
 	for verb := range verbHandlers {
@@ -775,7 +775,7 @@ func TestVerbHandlers_CoversExactlyElevenRealVerbs(t *testing.T) {
 }
 
 // The generated subcommandRegistry (lib/subcommands.nix, issue #1575) names
-// exactly the same set as verbHandlers, so console/doctor cannot drift apart
+// exactly the same set as verbHandlers, so the verbs cannot drift apart
 // the way they did across the hand-written completion and man-page listings.
 func TestSubcommandRegistry_MatchesVerbHandlers(t *testing.T) {
 	verbSet := make(map[string]bool, len(verbHandlers))
@@ -3206,8 +3206,8 @@ func TestDispatchConfig_RegistryProxyRewriteRowsFromRegisteredStrategies(t *test
 	}
 }
 
-// One Factory built from this Config outlives many dispatches in the Console
-// and the continuous loop, so the Factory-level resolver must not memoize:
+// One Factory built from this Config outlives many dispatches in the
+// continuous loop, so the Factory-level resolver must not memoize:
 // per-Dispatch memoizing lives in dispatch.newDispatch (issue #4160).
 func TestDispatchConfig_IssueTextForResolvesFresh(t *testing.T) {
 	it := forge.NewFake()

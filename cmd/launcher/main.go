@@ -18,7 +18,6 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorsandbox"
-	"spindrift.dev/launcher/internal/console"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -62,7 +61,7 @@ type config struct {
 	artifacts inputdoc.Artifacts
 
 	// imageTag/flakeImageAttr are the only artifacts core reads itself
-	// (freshness probe, preview, console, hot-swap), so loadConfig copies them
+	// (freshness probe, preview, hot-swap), so loadConfig copies them
 	// out of whichever family part the document carries (issue #2667): the OCI
 	// image's content-hash tag and flake attr, or the bwrap agent closure's
 	// loaded output path and flake attr. Adapters read the rest from artifacts.
@@ -1078,9 +1077,8 @@ var errQueueEmpty = errors.New("queue empty")
 
 // installStopSignal is a package-level test seam, like lookupRunnerStrategy,
 // so tests drive waves.Config.Stop and waves.Config.Abort through
-// fake channels, or spy on cmdConsole's channel-discarding hold, instead of
-// registering a real signal handler or sending a real SIGTERM/SIGINT to the
-// test binary (#3520, #3521, #3651).
+// fake channels instead of registering a real signal handler or sending a
+// real SIGTERM/SIGINT to the test binary (#3520, #3521, #3651).
 var installStopSignal = stopsignal.Notify
 
 func containsLabel(labels []string, target string) bool {
@@ -1177,8 +1175,8 @@ func queryOpenIssues(c config, it forge.IssueTracker) ([]issue, []heldIssue, err
 	for _, fi := range rawIssues {
 		// Filtering on the tracker-returned Labels, rather than adding a
 		// -label: qualifier to the ListIssues query, is what makes this
-		// tracker-derived: it sees in-progress work started by a Console
-		// session, CI, or a human, not just this launcher's own claims. It
+		// tracker-derived: it sees in-progress work started by another
+		// launcher run, CI, or a human, not just this launcher's own claims. It
 		// also keeps work-only operation working with no research labels
 		// defined — an absent label is a label no issue carries, so the
 		// filter is a no-op (applyDispatchKind already dropped blank labels).
@@ -1668,7 +1666,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	// firstQueryEmpty separates "no open issues at all" from "open issues that
 	// turned out blocked or deferred"; only the former maps
 	// ErrOpenNoneDispatchable to exit 2 below. Tracked here rather than in
-	// RunContinuous, whose sentinel the console Discoverer shares (#1645).
+	// RunContinuous, whose sentinel the Discoverer shares (#1645).
 	firstQuery := true
 	firstQueryEmpty := false
 	var firstHeld []heldIssue
@@ -1891,65 +1889,6 @@ func cmdBuild(stderr io.Writer) int {
 	return 0
 }
 
-// cmdConsole is the `console` subcommand: the interactive picks-only driving
-// loop (#645, #646). Fresh and RebuildFn turn the freshness.Probe seam behind
-// the headless exit-4 path into an in-session banner and one-key rebuild
-// (issue #652). stdin/stdout are threaded so a test can drive the real Bubble
-// Tea program with a scripted reader instead of a live TTY; stderr takes
-// console.Run's own error line.
-//
-// The launcher holds its own stop-signal registration for the whole body:
-// Bubble Tea drops its own on any quit (keypress or signal), and the window
-// after Run returns covers launch.Wait's drain plus the deferred cleanups.
-// The channels are discarded because Console's Boxes have no Stop/Abort
-// wiring, so once quit it is SIGKILL-only (#3651, #3520). Taking it before
-// Bubble Tea's own also swallows a signal in the instant before Run starts.
-func cmdConsole(lc *launchContext, stdin io.Reader, stdout, stderr io.Writer) int {
-	_, _, stopCleanup := installStopSignal()
-	defer stopCleanup()
-	defer lc.cleanup()
-	// Bubble Tea owns the terminal in alt-screen raw mode, where a heartbeat
-	// line's bare \n moves the cursor down but not back to column 0,
-	// stairstepping across the screen. The sidebar activity feed re-renders the
-	// same lines from the pass log anyway (issue #1583).
-	lc.factory.SetHeartbeatOut(io.Discard)
-	fresh, rebuild, err := newConsoleFreshness(lc.config, lc.pwd, runner.NixEvaluator{},
-		func() (string, string, error) { return consoleGitSync(lc.pwd, lc.config.BaseBranch) },
-		func() (string, error) { return consoleNixBuild(lc.pwd) })
-	if err != nil {
-		fmt.Fprintf(stderr, "%s\n", err)
-		return 1
-	}
-	researchTracker, researchFactory, researchSettle, err := researchLaunchStack(lc)
-	if err != nil {
-		fmt.Fprintf(stderr, "%s\n", err)
-		return 1
-	}
-	defer researchFactory.Cleanup()
-	launch := &console.Launcher{
-		CodeForge:       lc.codeForge,
-		BranchPrefix:    lc.config.BranchPrefix,
-		Factory:         lc.factory,
-		Settle:          lc.merge,
-		Terminated:      lc.terminated,
-		ResearchTracker: researchTracker,
-		ResearchFactory: researchFactory,
-		ResearchSettle:  researchSettle,
-		MaxParallel:     lc.config.MaxParallel,
-		FailedLabel:     lc.config.FailedLabel,
-		Fresh:           fresh,
-		RebuildFn:       rebuild,
-		RecoverFn: func(issueNum string) error {
-			return lc.runRecover(issueNum, stdout, stderr)
-		},
-	}
-	if err := console.Run(lc.issueTracker, lc.pwd, stdin, stdout, launch); err != nil {
-		fmt.Fprintf(stderr, "%s\n", err)
-		return 1
-	}
-	return 0
-}
-
 // writeGithubOutput appends a "key=value\n" line to the file named by
 // GITHUB_OUTPUT, GitHub Actions' step-output mechanism. It is a no-op when
 // that is unset. Newlines in value become spaces, so one cannot corrupt the
@@ -1969,12 +1908,6 @@ func writeGithubOutput(key, value string) error {
 	return err
 }
 
-// runRecover runs recoverByNumber against the launch context's wiring; the
-// recover verb and console's recover action share it.
-func (lc *launchContext) runRecover(issueNum string, stdout, stderr io.Writer) error {
-	return recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.merge, lc.terminated, issueNum, stdout, stderr)
-}
-
 // cmdRecover is the `recover` subcommand: adopt an already-discovered open PR
 // with no outcome line and drive it through the merge gate, honouring the
 // two-stage operator-shutdown latch the same as every other Box-launching
@@ -1984,7 +1917,7 @@ func (lc *launchContext) runRecover(issueNum string, stdout, stderr io.Writer) e
 // a spy cleanup to exercise the cleanup-on-every-exit contract.
 func cmdRecover(lc *launchContext, issueNum string, stdout, stderr io.Writer) int {
 	defer lc.cleanup()
-	err := lc.runRecover(issueNum, stdout, stderr)
+	err := recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.merge, lc.terminated, issueNum, stdout, stderr)
 	if err == nil {
 		return int(exitcode.Dispatched)
 	}
@@ -2116,10 +2049,8 @@ func cmdDispatch(lc *launchContext, stdout, stderr io.Writer) int {
 //
 // Injected through stdout/stderr:
 //   - doctor, reconcile, preview, registry, dispatch, research and recover's
-//     launcher-layer lines (not the globals below), including console's
-//     recover action
-//   - the other verbs' own handler lines, bootstrap's gate walk, and
-//     console's Bubble Tea screen
+//     launcher-layer lines (not the globals below)
+//   - the other verbs' own handler lines and bootstrap's gate walk
 //
 // Still process globals: every internal/* package that prints writes to
 // os.Stdout/os.Stderr directly, not the injected writers -- among them, not
@@ -2150,14 +2081,6 @@ var verbHandlers = map[string]verbHandler{
 		return cmdDoctor(opts, stdout, stderr)
 	},
 	"reconcile": func(args []string, stdout, stderr io.Writer) int { return cmdReconcile(stdout, stderr) },
-	"console": func(args []string, stdout, stderr io.Writer) int {
-		lc, err := bootstrap(stdout, true, dispatchkind.Work, false)
-		if err != nil {
-			fmt.Fprintf(stderr, "%s\n", err)
-			return 1
-		}
-		return cmdConsole(lc, os.Stdin, stdout, stderr)
-	},
 	"recover": func(args []string, stdout, stderr io.Writer) int {
 		// noBuild and yes are dispatch/research knobs recover has no use for.
 		// remaining is used unfiltered, since recover's non-numeric IDs must

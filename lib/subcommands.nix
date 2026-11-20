@@ -4,12 +4,7 @@
 # match a verbHandlers key (cmd/launcher/main.go); the hidden
 # __complete-issues verb is undocumented and absent from both tables.
 [
-  # List order is display order. Console comes first per ADR 0023.
-  {
-    name = "console";
-    usage = "";
-    doc = "browse the open backlog interactively and dispatch picked issues";
-  }
+  # List order is display order.
   {
     name = "dispatch";
     usage = "[--no-build] [--yes] [--continuous] [issue...]";

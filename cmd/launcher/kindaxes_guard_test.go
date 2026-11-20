@@ -181,9 +181,6 @@ var kindAxisForbiddenPatterns = sync.OnceValue(func() []kindAxisForbidden {
 // kindNameWhy explains namesKind's finding; Default is not in its pattern.
 const kindNameWhy = "names one kind -- read the axis from the descriptor in hand, walk dispatchkind.All, or use dispatchkind.Default for an unset kind; only an entry point selecting its own verb's kind, or a listed work-kind fact, may name it"
 
-// pickerFile is the one file allowed to bind a per-verb Kind<Verb> alias.
-const pickerFile = "internal/console/pick.go"
-
 // workKindFacts lists, per file, the exact source lines allowed to name Work,
 // each with the number of sites it covers there: they state a fact about the
 // work kind itself (only work Dispatches land code; frozen old-log shapes,
@@ -204,12 +201,10 @@ var workKindFacts = map[string]map[string]int{
 var (
 	kindNameRef       = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`\bdispatchkind\.` + kindVarAlternation() + `\b`) })
 	kindBootstrapCall = regexp.MustCompile(`\b(bootstrap|bootstrapShadowed|applyDispatchKind)\(`)
-	kindPickerAlias   = regexp.MustCompile(`^\s*Kind(\w+)\s*=\s*dispatchkind\.(\w+)\s*$`)
 )
 
 // namesKind reports whether line, read from path, names one kind outside an
-// entry point selecting its own verb's kind: package main's bootstrap calls,
-// and the console picker's per-verb aliases, each bound to its own verb. The
+// entry point selecting its own verb's kind: package main's bootstrap calls. The
 // workKindFacts lines are also exempt, matched whole at their own path.
 func namesKind(path, line string) bool {
 	if !kindNameRef().MatchString(line) {
@@ -222,8 +217,7 @@ func namesKind(path, line string) bool {
 	if _, ok := workKindFacts[p][strings.TrimSpace(line)]; ok {
 		return false
 	}
-	m := kindPickerAlias.FindStringSubmatch(line)
-	return p != pickerFile || m == nil || m[1] != m[2]
+	return true
 }
 
 // kindVarAlternation is a capturing group of the exported var each registered
@@ -323,7 +317,7 @@ func TestKindAxesGuard(t *testing.T) {
 }
 
 // guardHits reports whether the guard flags line in an ordinary file: one
-// outside settle, package main and the console picker.
+// outside settle and package main.
 func guardHits(line string) bool {
 	return len(kindAxisViolations("internal/x/x.go", line)) > 0
 }
@@ -405,8 +399,8 @@ func TestKindAxesGuardPatterns(t *testing.T) {
 }
 
 // TestKindAxesGuardEntryPoints pins where an entry point may name its own
-// verb's kind: a bootstrap call in package main, and a Kind<Verb> alias bound
-// to its own verb in the console picker -- nowhere else, and no other alias.
+// verb's kind: a bootstrap call in package main -- nowhere else, and no
+// Kind<Verb> alias anywhere.
 func TestKindAxesGuardEntryPoints(t *testing.T) {
 	const (
 		bootstrapCall = `lc, err := bootstrap(stdout, true, dispatchkind.Work, false)`
@@ -427,11 +421,9 @@ func TestKindAxesGuardEntryPoints(t *testing.T) {
 		{"bootstrap.go", applyCall, false},
 		{"internal/daemon/x.go", bootstrapCall, true},
 		{"internal/daemon/x.go", applyCall, true},
-		{pickerFile, workAlias, false},
-		{pickerFile, `KindResearch = dispatchkind.Research`, false},
-		{pickerFile, `KindWork = dispatchkind.Butler`, true},
-		{"internal/console/launcher.go", workAlias, true},
-		{pickerFile, `kind := dispatchkind.Work`, true},
+		{"internal/daemon/x.go", workAlias, true},
+		{"main.go", workAlias, true},
+		{"main.go", `kind := dispatchkind.Work`, true},
 		{tuningFile, tuningLine, false},
 		{recordFile, announcedLine, false},
 		{recordFile, "\t\t" + workFallbackLine + "  ", false},

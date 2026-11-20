@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"spindrift.dev/launcher/internal/daemon"
@@ -113,4 +116,17 @@ func fillInferredRevisions(records []dispatchrecord.Record, events []daemon.Even
 			r.Revision = best.rev
 		}
 	}
+}
+
+// gitOutput runs `git -C pwd args...` and returns its trimmed stdout,
+// surfacing git's own stderr on failure.
+func gitOutput(pwd string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", pwd}, args...)...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return strings.TrimSpace(stdout.String()), nil
 }

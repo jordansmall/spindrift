@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/terminate"
 )
@@ -231,113 +230,5 @@ func TestCmdDispatch_RunsCleanupOnEveryExit(t *testing.T) {
 	}
 	if !called {
 		t.Error("cmdDispatch did not run lc.cleanup()")
-	}
-}
-
-// The scripted "q" on stdin quits the real Bubble Tea program at once because
-// the fake launchContext's queue starts empty, so this reaches console.Run
-// rather than stopping at bootstrap routing. See keymap_global.go's "q"
-// binding, whose ModeList action calls tea.go's closeOrConfirmQuit: that returns
-// QuitMsg directly unless launch is non-nil and LiveIssues() is non-empty.
-func TestCmdConsole_RunsCleanupOnEveryExit(t *testing.T) {
-	c := baseConfig()
-	fc := forge.NewFake()
-	dir := tempLogDir(t)
-	called := false
-	lc := &launchContext{
-		config:       c,
-		pwd:          dir,
-		issueTracker: fc,
-		codeForge:    fc,
-		// runner.NewFake(), not nil like the sibling tests: Init's
-		// orphanDetectCmd calls Factory.OrphanedIssues, which calls
-		// f.runner.ListRunning on startup and panics on a nil runner.
-		factory:    testFactory(t, dir, runner.NewFake()),
-		merge:      settle.NewFake(),
-		terminated: terminate.NewRegistry(),
-		cleanup:    func() { called = true },
-	}
-
-	stdin := strings.NewReader("q")
-	var stdout bytes.Buffer
-
-	got := cmdConsole(lc, stdin, &stdout, io.Discard)
-
-	if got != 0 {
-		t.Errorf("cmdConsole(lc, ...) = %d, want 0", got)
-	}
-	if !called {
-		t.Error("cmdConsole did not run lc.cleanup()")
-	}
-}
-
-// Issue #3651: Bubble Tea drops its own signal registration on any quit, so
-// cmdConsole must hold a launcher-owned one across the whole body, including
-// the deferred cleanups that run after Run returns.
-func TestCmdConsole_HoldsStopSignalRegistrationThroughCleanup(t *testing.T) {
-	orig := installStopSignal
-	installs, releases := 0, 0
-	heldAtCleanup := false
-	installStopSignal = func() (<-chan struct{}, <-chan struct{}, func()) {
-		installs++
-		return make(chan struct{}), make(chan struct{}), func() { releases++ }
-	}
-	t.Cleanup(func() { installStopSignal = orig })
-
-	c := baseConfig()
-	fc := forge.NewFake()
-	dir := tempLogDir(t)
-	lc := &launchContext{
-		config:       c,
-		pwd:          dir,
-		issueTracker: fc,
-		codeForge:    fc,
-		factory:      testFactory(t, dir, runner.NewFake()),
-		merge:        settle.NewFake(),
-		terminated:   terminate.NewRegistry(),
-		// lc.cleanup is the last teardown to run before stopCleanup, so a hold
-		// seen here also covers launch.Wait and researchFactory.Cleanup.
-		cleanup: func() { heldAtCleanup = installs == 1 && releases == 0 },
-	}
-
-	var stdout bytes.Buffer
-	if got := cmdConsole(lc, strings.NewReader("q"), &stdout, io.Discard); got != 0 {
-		t.Errorf("cmdConsole = %d, want 0", got)
-	}
-	if installs != 1 {
-		t.Errorf("installStopSignal calls = %d, want 1", installs)
-	}
-	if !heldAtCleanup {
-		t.Error("stop-signal registration was not held when lc.cleanup ran")
-	}
-	if releases != 1 {
-		t.Errorf("stop-signal cleanup calls = %d, want 1", releases)
-	}
-}
-
-// Issue #1583: Bubble Tea owns the terminal in alt-screen raw mode, so a
-// dispatch's heartbeat writer echoing to os.Stdout stairsteps down the screen
-// instead of returning to column 0.
-func TestCmdConsole_SetsHeartbeatOutToDiscard(t *testing.T) {
-	c := baseConfig()
-	fc := forge.NewFake()
-	dir := tempLogDir(t)
-	lc := &launchContext{
-		config:       c,
-		pwd:          dir,
-		issueTracker: fc,
-		codeForge:    fc,
-		factory:      testFactory(t, dir, runner.NewFake()),
-		merge:        settle.NewFake(),
-		terminated:   terminate.NewRegistry(),
-		cleanup:      func() {},
-	}
-
-	stdin := strings.NewReader("q")
-	var stdout bytes.Buffer
-	cmdConsole(lc, stdin, &stdout, io.Discard)
-
-	if got := lc.factory.HeartbeatOut(); got != io.Discard {
-		t.Errorf("factory heartbeat sink = %v, want io.Discard", got)
 	}
 }

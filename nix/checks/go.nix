@@ -97,17 +97,19 @@ let
   # family, Ecosystem package, bundled backend, bundle or binary, so editing one
   # Driver, family, ecosystem or bundled backend never changes another's
   # drvPath nor the core go test's (a plain launcherGoModules would, its src
-  # being the whole tree). Fixed-output with the same vendorHash, so its
-  # outPath equals launcherGoModules' and nothing is fetched twice. `go mod
+  # being the whole tree). Fixed-output under launcherCoreVendorHash: only the
+  # root package and quickstart import charmbracelet/x/term, so the narrowed
+  # tree vendors without it and cannot share launcherVendorHash. `go mod
   # vendor -e` tolerates the packages that import the absent directories, but
   # also hides download failures, so go-vendor-errors.sh fails on any other
   # stderr line.
   # Gotcha: a Driver, runner family, ecosystem, bundled backend or main
   # importing a third-party module no other package uses changes the vendored
-  # set, and the narrowed derivation then mismatches launcherVendorHash.
+  # set, and the narrowed derivation then mismatches launcherCoreVendorHash.
   vendorFor =
     files:
     launcherGoModules.overrideAttrs (_: {
+      outputHash = (import ../../lib/build-constants.nix).launcherCoreVendorHash;
       src = fs.toSource {
         root = launcherDir;
         fileset = coreFiles files;
@@ -701,63 +703,6 @@ let
     ${goCheckEnv}
     cd src
   '';
-  # ADR 0023 makes console a leaf UI package: engine packages never import it.
-  # go list -deps walks the whole transitive graph, so an import that reaches
-  # console through another engine package is caught too, not just a direct one.
-  consoleIsolationFor =
-    files:
-    let
-      # runner/oci and runner/bwrap are adapters, not in the core source.
-      # runnerGoTestShared is the structural guard, asserted below: a family's
-      # go test source holds no internal/console, so a family importing it
-      # fails to compile in its own runners-<name>-go-test.
-      guardedPackages = pkgs.lib.concatStringsSep " " [
-        "dispatch"
-        "waves"
-        "forge"
-        "settle"
-        "runner"
-        "driver"
-        "freshness"
-      ];
-      runnerConsole = fs.toList (
-        fs.intersection (fs.unions runnerGoTestShared) (internalDir + "/console")
-      );
-    in
-    assert pkgs.lib.assertMsg (
-      runnerConsole == [ ]
-    ) "runnerGoTestShared holds internal/console, so runner families escape launcher-console-isolation";
-    pkgs.runCommand "launcher-console-isolation"
-      {
-        nativeBuildInputs = [ pkgs.go ];
-        inherit guardedPackages;
-      }
-      ''
-        ${corePrologue files}
-        for pkg in $guardedPackages; do
-          if ! deps=$(go list -deps "./internal/$pkg" 2>&1); then
-            # console already imports most guarded packages, so a reverse
-            # import forms a cycle — go list fails outright instead of
-            # listing console as a dependency. Treat that failure itself
-            # as the violation signal. But go list -deps also fails for
-            # reasons unrelated to console (an unresolvable import, a
-            # malformed package clause in a dependency), so only blame
-            # console when the toolchain actually reports a cycle.
-            if echo "$deps" | grep -q 'import cycle'; then
-              echo "go list failed for internal/$pkg — likely an import cycle through internal/console, which violates ADR 0023's one-way dependency:" >&2
-            else
-              echo "go list failed for internal/$pkg for a reason unrelated to a console cycle (see stderr below) — not necessarily an ADR 0023 violation:" >&2
-            fi
-            echo "$deps" >&2
-            exit 1
-          fi
-          if echo "$deps" | grep -qx 'spindrift.dev/launcher/internal/console'; then
-            echo "internal/$pkg imports internal/console — violates ADR 0023's one-way dependency (engine packages never import console)" >&2
-            exit 1
-          fi
-        done
-        touch $out
-      '';
   # The core checks, each cut from coreFiles so an adapter edit never moves one;
   # adapterRegistryChecks and backends-go-test-independent pin that.
   coreChecksFor = files: {
@@ -771,7 +716,6 @@ let
       go vet ${corePkgs}
       touch $out
     '';
-    launcher-console-isolation = consoleIsolationFor files;
   };
   # Names of the core checks whose drvPath differs from the unedited tree's.
   coreChecksMovedBy =
@@ -1089,7 +1033,6 @@ driverGoTests
     launcher-go-test
     launcher-go-fmt
     launcher-go-vet
-    launcher-console-isolation
     ;
 
   # The packages that link every native Driver through the bundle

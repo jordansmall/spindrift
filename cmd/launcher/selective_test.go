@@ -633,8 +633,7 @@ func TestSelectiveListDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched(t *tes
 
 // failDepsOf wraps a *forge.Fake so forge.DepsOf errors for num, simulating a
 // transient tracker failure. NoDeps makes core return NativeDepsOf's error
-// as-is, leaving the raw Issue read that previewIssues also makes intact. It
-// mirrors the helper of the same name in console/queue_test.go.
+// as-is, leaving the raw Issue read that previewIssues also makes intact.
 type failDepsOf struct {
 	*forge.Fake
 	num string

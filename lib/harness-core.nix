@@ -433,12 +433,10 @@ let
   };
 
   # The whole module is the src of both launcherBin and daemonBin, not a
-  # narrowed fileset like launcherCurrencyFileset below: the launcher's
-  # _test.go files pull test-only deps (github.com/charmbracelet/x/exp/golden,
-  # .../teatest) into go.sum, so trimming them out would vendor differently
-  # and force a second vendorHash. docs/ sits outside the root, so a
-  # docs-only commit moves neither src nor daemonBin (which bakes no
-  # revision).
+  # narrowed fileset like launcherCurrencyFileset below: a narrowed tree
+  # can vendor differently and would force a second vendorHash. docs/ sits
+  # outside the root, so a docs-only commit moves neither src nor daemonBin
+  # (which bakes no revision).
   launcherModuleSrc = lib.fileset.toSource {
     root = ../cmd/launcher;
     fileset = ../cmd/launcher;
