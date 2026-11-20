@@ -873,11 +873,6 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return refuse(err)
 	}
 	args.Kinds = gatedKinds
-	// Children inherit the decided marker and stay quiet, so the daemon prints
-	// this deprecation (issue #6900) once for all of them.
-	if shared.boxForgeCredential != "" {
-		fmt.Fprintln(stderr, inputdoc.BoxForgeCredentialNotice)
-	}
 	doctorFlags, err := doctorPreflightFlags(args.Kinds, args.ExplicitSelector)
 	if err != nil {
 		return refuse(err)
@@ -1056,7 +1051,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		nixSystem:     nixSystem,
 		// Snapshotted once here, not per-child: nothing between mainRun's
 		// entry and this line calls os.Setenv, so it's still a startup capture.
-		env:         append(append(os.Environ(), driverEnv...), inputdoc.ForgeCredentialNoticeDecidedEnv+"=1"),
+		env:         append(os.Environ(), driverEnv...),
 		knobs:       stripped,
 		doctorFlags: doctorFlags,
 		demand:      demand,

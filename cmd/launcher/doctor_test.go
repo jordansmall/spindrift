@@ -771,33 +771,3 @@ func TestKindForDoctorFlag(t *testing.T) {
 	}()
 	kindForDoctorFlag("--no-such-flag")
 }
-
-func runDoctorWithConfig(t *testing.T, mutate func(*config)) (string, error) {
-	t.Helper()
-	f := forge.NewFake()
-	f.ProbeRepo = "owner/repo"
-	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
-	c := minimalValidConfig()
-	c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
-		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	mutate(&c)
-	var buf bytes.Buffer
-	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf, false), &buf, strings.NewReader(""), false, report)
-	return buf.String(), err
-}
-
-func TestRunDoctor_BoxForgeCredential_PrintsDeprecationNoticeOnlyWhenSet(t *testing.T) {
-	for _, tc := range []struct {
-		value string
-		want  bool
-	}{{"none", true}, {"", false}} {
-		out, err := runDoctorWithConfig(t, func(c *config) { c.BoxForgeCredential = tc.value })
-		if err != nil {
-			t.Fatalf("BOX_FORGE_CREDENTIAL=%q: runDoctor() error = %v", tc.value, err)
-		}
-		if got := strings.Contains(out, inputdoc.BoxForgeCredentialNotice+"\n"); got != tc.want {
-			t.Errorf("BOX_FORGE_CREDENTIAL=%q: notice in output = %v, want %v; output = %q", tc.value, got, tc.want, out)
-		}
-	}
-}

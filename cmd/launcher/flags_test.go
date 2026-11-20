@@ -683,7 +683,7 @@ func TestPrintHelpFull_ContainsLabelEntry(t *testing.T) {
 // fully-local exemption (issue #1895). Matching on each line's leading
 // env/flag token, not a bare substring, keeps only GH_TOKEN's own two
 // rendered lines in scope and skips docs that merely mention "GH_TOKEN" in
-// prose, such as BOX_GH_TOKEN's (issue #380).
+// prose (issue #380).
 func TestPrintHelpFull_RepoSlugAndGhTokenNoteLocalExemption(t *testing.T) {
 	var buf bytes.Buffer
 	printHelpFull(&buf)
@@ -1181,7 +1181,6 @@ func TestParseFlags_GlobalSecretCmd_RunsTemplate(t *testing.T) {
 	}
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GH_TOKEN_CMD", "")
-	t.Setenv("BOX_GH_TOKEN", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "existing-value")
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("JIRA_TOKEN", "")
@@ -1553,28 +1552,6 @@ func TestSecretRequiredThisRun_NovelRowTokenFollowsSelection(t *testing.T) {
 	}
 	if secretRequiredThisRun("", nil) {
 		t.Error("secretRequiredThisRun(\"\") = true, want false")
-	}
-}
-
-// BOX_GH_TOKEN (ADR 0016 two-actor separation) is opt-in with no
-// requiredness signal of its own, so the template must never auto-source it.
-func TestParseFlags_GlobalSecretCmd_SkipsBoxGhToken(t *testing.T) {
-	orig := secretCmdRunner
-	t.Cleanup(func() { secretCmdRunner = orig })
-	secretCmdRunner = func(cmd string) (string, error) {
-		if strings.Contains(cmd, "box-gh-token") {
-			t.Fatalf("secretCmdRunner should not be called for BOX_GH_TOKEN, got %q", cmd)
-		}
-		return "value", nil
-	}
-	t.Setenv("BOX_GH_TOKEN", "")
-	t.Setenv("GH_TOKEN", "already-set")
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "already-set")
-	if err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got := os.Getenv("BOX_GH_TOKEN"); got != "" {
-		t.Errorf("BOX_GH_TOKEN = %q, want empty (never auto-sourced by the template)", got)
 	}
 }
 

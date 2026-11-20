@@ -3,8 +3,6 @@ package forgejo
 
 // The env name each knob is read from.
 const (
-	// BoxForgejoTokenEnv names BoxForgejoToken's env var.
-	BoxForgejoTokenEnv = "BOX_FORGEJO_TOKEN"
 	// ForgejoBaseURLEnv names ForgejoBaseURL's env var.
 	ForgejoBaseURLEnv = "FORGEJO_BASE_URL"
 	// ForgejoTokenEnv names ForgejoToken's env var.
@@ -13,8 +11,6 @@ const (
 
 // Knobs holds the typed value of each knob the row declares.
 type Knobs struct {
-	// BoxForgejoToken is BOX_FORGEJO_TOKEN.
-	BoxForgejoToken string
 	// ForgejoBaseURL is FORGEJO_BASE_URL.
 	ForgejoBaseURL string
 	// ForgejoToken is FORGEJO_TOKEN.
@@ -31,12 +27,8 @@ type Lookup = func(env string) (value string, ok bool)
 // Regenerate with `nix run .#regen` after editing lib/backends/forgejo.nix.
 func ReadKnobs(lookup Lookup) (Knobs, error) {
 	k := Knobs{
-		BoxForgejoToken: "",
-		ForgejoBaseURL:  "https://codeberg.org",
-		ForgejoToken:    "",
-	}
-	if v, ok := lookup(BoxForgejoTokenEnv); ok && v != "" {
-		k.BoxForgejoToken = v
+		ForgejoBaseURL: "https://codeberg.org",
+		ForgejoToken:   "",
 	}
 	if v, ok := lookup(ForgejoBaseURLEnv); ok && v != "" {
 		k.ForgejoBaseURL = v

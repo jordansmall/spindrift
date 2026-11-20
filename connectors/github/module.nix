@@ -21,7 +21,7 @@ in
   # Consumer that imports the same core module is unaffected.
   imports = [ core.flakeModules.default ];
 
-  # A dedicated token, not core's boxGhToken: the Connector is untrusted wasm,
+  # A dedicated token, not core's GH_TOKEN: the Connector is untrusted wasm,
   # so a core secret must never reach it (lib/flakeModule.nix refuses one).
   spindrift.connectors.github.knobs.githubConnectorToken = {
     env = "SPINDRIFT_GITHUB_CONNECTOR_TOKEN";

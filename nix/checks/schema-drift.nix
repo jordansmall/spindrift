@@ -120,7 +120,6 @@ let
         "mergeMethod"
         "syncMethod"
         "boxForgeAndIssueAccess"
-        "boxForgeCredential"
         "networkMode"
         "signalCarrier"
       ];
@@ -1214,7 +1213,6 @@ checkedMerge {
         "SPINDRIFT_REPORT_FD" # report FD handed to a child
         "SPINDRIFT_DAEMON_PROGRAM" # daemon wrapper's own program path
         "SPINDRIFT_DRIVER_WARNED" # daemon-set marker on children (issue #5050)
-        "SPINDRIFT_BOX_ACCESS_NOTICE_DECIDED" # daemon-set marker on children and its doctor preflight (issue #6891)
         "SPINDRIFT_BWRAP_NETNS_PROBE" # set on the launcher's own re-exec under pasta by the bwrap probe (issue #5983)
         "SPINDRIFT_SEAM_FIXTURES_DIR" # test-only override read by internal/seamtest (issue #4280)
         "SPINDRIFT_CONNECTOR_FIXTURES_DIR" # test-only override read by internal/fixturebuild (issue #6794)
@@ -2057,9 +2055,9 @@ checkedMerge {
       }
       ''
         need() { grep -q "$@" "$man" || { echo "man page missing: $*" >&2; exit 1; }; }
-        # Pair `.TP` with `.B <ENV>` exactly, inside ENVIRONMENT: BOX_GH_TOKEN,
-        # GH_TOKEN_REFRESH_FILE and the prose `.B GH_TOKEN` line would all pass
-        # a substring match. One awk read, not `grep | grep -q`, which pipefail
+        # Pair `.TP` with `.B <ENV>` exactly, inside ENVIRONMENT: GH_TOKEN_REFRESH_FILE
+        # and the prose `.B GH_TOKEN` line would both pass a GH_TOKEN
+        # substring match. One awk read, not `grep | grep -q`, which pipefail
         # fails on SIGPIPE once -q exits early.
         needEntry() {
           awk -v e="$1" '/^\.SH /{s = ($2 == "ENVIRONMENT")} s && p && $0 == e {f = 1} {p = ($0 == ".TP")} END {exit !f}' "$man" \

@@ -1864,12 +1864,6 @@ let
   ) (lib.filter bareWorker keptRoster);
   droppedBareWorkerMsg = "spindrift: the worker model ${builtins.toJSON (lib.head droppedBareWorkers).model} is not a `<provider>/<model>` id, which this Driver requires, so the worker is not provisioned (issue #5331).";
 
-  # Unset is "", so any explicit value warns, `forwarded` included. The launcher
-  # prints the same text at run time (inputdoc.BoxForgeCredentialNotice).
-  boxForgeCredentialWarnings =
-    lib.optional (mergedDefaults.boxForgeCredential != "")
-      "spindrift: BOX_FORGE_CREDENTIAL is deprecated and has no effect, and will be removed in a later minor release (issue #6902). Every Box holds no forge credential (issue #6900), whatever its value. Unset forge.boxForgeCredential (defaults.boxForgeCredential) and drop --box-forge-credential.";
-
   # The same warnings as data, so a check can assert on them without
   # capturing stderr.
   rosterWarnings =
@@ -1884,7 +1878,6 @@ let
     lib.foldl' (acc: msg: lib.warn msg acc) outputs (
       lib.optional (legacyKnobsSet != [ ]) deprecationMsg
       ++ rosterWarnings
-      ++ boxForgeCredentialWarnings
       ++ deprecatedFragmentVarWarnings
     );
 
@@ -2078,7 +2071,6 @@ else
       inherit
         rosterWarnings
         deprecatedFragmentVarWarnings
-        boxForgeCredentialWarnings
         ;
     };
 

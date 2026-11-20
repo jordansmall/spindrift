@@ -1,5 +1,25 @@
 # Migration Guide
 
+## The Box token knobs are removed (issue #6902)
+
+`BOX_GH_TOKEN`, `BOX_FORGEJO_TOKEN` and `BOX_FORGE_CREDENTIAL` had no reader
+since issues #6900 and #6901: a Box holds no forge credential. They were
+deprecated no-ops, and now each fails loudly instead of being ignored.
+
+What changed for a Consumer:
+
+- **Setting any of the three is rejected.** The build (`defaults.boxGhToken`,
+  `defaults.boxForgejoToken`, `defaults.boxForgeCredential`,
+  `forge.boxForgeCredential`), the launcher at dispatch (from the environment
+  or the input document) and `spindrift doctor`'s
+  removed-knobs check all fail with a pointer here. Set-but-empty counts. Delete
+  the setting: `BOX_GH_TOKEN` and `BOX_FORGEJO_TOKEN` from `harness.env` (and
+  `BOX_GH_TOKEN_CMD` and `BOX_FORGEJO_TOKEN_CMD` if you set them),
+  `forge.boxForgeCredential` from the flake, and `--box-forge-credential` from
+  any command line.
+- **Nothing replaces them.** The launcher's own `GH_TOKEN` or `FORGEJO_TOKEN`
+  does every forge write. A Box needs no token of its own.
+
 ## The native github adapter is deleted (issue #6888)
 
 The rest of the native github adapter is gone: the github Connector is the only

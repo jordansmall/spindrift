@@ -188,3 +188,32 @@ func TestValidateChoice_BoxAccessReadWriteIsRemoved(t *testing.T) {
 		t.Errorf("validateChoice(bogus) = %v, want the generic invalid-choice error", err)
 	}
 }
+
+// The Box token knobs (issue #6902) have no reader left: each is rejected like
+// any removed knob, in the environment and in an input document, with a
+// pointer to MIGRATING.md.
+func TestRemovedKnobsCheck_RejectsBoxTokenKnobs(t *testing.T) {
+	for _, env := range []string{"BOX_GH_TOKEN", "BOX_FORGEJO_TOKEN", "BOX_FORGE_CREDENTIAL"} {
+		t.Run(env+"/env", func(t *testing.T) {
+			t.Setenv(env, "")
+			assertRemovedBoxTokenErr(t, env)
+		})
+		t.Run(env+"/document", func(t *testing.T) {
+			useDoc(t, &inputdoc.Document{Settings: map[string]string{env: "x"}})
+			assertRemovedBoxTokenErr(t, env)
+		})
+	}
+}
+
+func assertRemovedBoxTokenErr(t *testing.T, env string) {
+	t.Helper()
+	_, err := removedKnobsCheck().Probe()
+	if err == nil {
+		t.Fatalf("%s: Probe() err = nil, want a removed-knob rejection", env)
+	}
+	for _, want := range []string{env, "was removed", "MIGRATING.md"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %q, want it to contain %q", env, err, want)
+		}
+	}
+}

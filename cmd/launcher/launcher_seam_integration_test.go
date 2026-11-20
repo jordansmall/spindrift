@@ -47,9 +47,8 @@ var smokeRuntimeSettings = map[string]string{
 }
 
 // smokeSecrets are exported to the launcher's own environment; none may land
-// on a runner argv. BOX_GH_TOKEN is a Box-side credential name a migrated
-// Consumer may still export; the launcher must never forward it to a runner.
-var smokeSecrets = map[string]string{"GH_TOKEN": "fake-token", "BOX_GH_TOKEN": "fake-box-token", "CLAUDE_CODE_OAUTH_TOKEN": "fake-oauth"}
+// on a runner argv.
+var smokeSecrets = map[string]string{"GH_TOKEN": "fake-token", "CLAUDE_CODE_OAUTH_TOKEN": "fake-oauth"}
 
 // smokeLocalSettings are the values a run takes at run time from
 // useLocalForge, which moves the tracker and forge off the fixture's github.
@@ -560,7 +559,7 @@ func TestSeamLauncherSmokeMatrix(t *testing.T) {
 
 // TestSeamSmokeReadOnlyBoxCarriesNoForgeToken runs the work-podman document
 // under the default read-only access while the launcher's own env holds GH_TOKEN
-// and BOX_GH_TOKEN (smokeSecrets): the Box run must still land, and its argv
+// (smokeSecrets): the Box run must still land, and its argv
 // must carry no forge token key, forwarded bare or by value (issues #7140,
 // #6900), and the host's open-PR answer for branch recovery (issue #7146).
 func TestSeamSmokeReadOnlyBoxCarriesNoForgeToken(t *testing.T) {
@@ -575,7 +574,7 @@ func TestSeamSmokeReadOnlyBoxCarriesNoForgeToken(t *testing.T) {
 		t.Fatalf("%s never ran a Box", c.runtime)
 	}
 	env, _ := argvEnv(boxRun, "-e")
-	for _, name := range []string{"GH_TOKEN", "BOX_GH_TOKEN", "GITEA_TOKEN", "FORGEJO_TOKEN", "BOX_FORGEJO_TOKEN"} {
+	for _, name := range []string{"GH_TOKEN", "GITEA_TOKEN", "FORGEJO_TOKEN"} {
 		if _, ok := env[name]; ok {
 			t.Errorf("Box argv carries %s under read-only access: %q", name, boxRun)
 		}

@@ -8,7 +8,7 @@ rec {
   validAsTracker = true;
   validAsCodeForge = true;
   tokenEnvVar = "FORGEJO_TOKEN";
-  boxTokenEnvVar = knobs.boxForgejoToken.env;
+  boxTokenEnvVar = "BOX_FORGEJO_TOKEN";
   doctorTokenHint = "FORGEJO_TOKEN";
   doctorSlugHint = "FORGEJO_BASE_URL";
   outboxRelayCapable = true;
@@ -47,12 +47,6 @@ rec {
       hostConfig = true;
       doc = "Forgejo/Gitea API token (Bearer/token scheme); required when ISSUE_TRACKER=forgejo or CODE_FORGE=forgejo";
       boxEnv = true;
-    };
-    boxForgejoToken = {
-      env = "BOX_FORGEJO_TOKEN";
-      secret = true;
-      doc = "DEPRECATED, no effect, and removed in #6902: no Box receives a forge token (issues #6900 and #6901), so nothing reads it. It was the opt-in two-actor separation PAT (ADR 0016 analog) of the removed read-write Box; see docs/reference.md's retired two-actor separation note";
-      boxEnv = false;
     };
   };
 }

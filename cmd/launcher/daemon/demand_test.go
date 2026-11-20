@@ -777,7 +777,6 @@ var sharedKnobAccessors = map[string]func(childSharedKnobs) string{
 	"BUTLER_CHORE_CLASSES":       func(k childSharedKnobs) string { return k.butlerChoreClasses },
 	"CODE_FORGE":                 func(k childSharedKnobs) string { return k.codeForge },
 	"BOX_FORGE_AND_ISSUE_ACCESS": func(k childSharedKnobs) string { return k.boxAccess },
-	"BOX_FORGE_CREDENTIAL":       func(k childSharedKnobs) string { return k.boxForgeCredential },
 }
 
 // daemonOnlyKnobAccessors maps each daemon-only knob to its field, so
