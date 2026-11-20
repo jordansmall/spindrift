@@ -845,7 +845,7 @@ the Connector, on a declared file for a folder not of its row's axis or on a
 missing, stray or duplicate file. A Connector's declared file wins over a
 file at the same path in a custom fragments directory. mkHarness ships the
 batteries flake's forgejo fragments for each path the Consumer's own entries
-do not declare, so a forgejo Consumer needs no Connector module. A folder
+do not declare. A folder
 with no such file renders an empty step, unless the row is `shared`, in which
 case the root-level `fragments/<fragment>` is read next: one body for every
 backend, naming the active one through `${FORGE_DISPLAY_NAME}`, which is the
@@ -2315,9 +2315,9 @@ is the fixture Connector in
   the Box replays each Pass log through it and records divergences. A
   `backend` row samples every `shadowEvery`th read (default 10, minimum 1) per
   operation through its Connector instead. With `primary` on, the Connector
-  answers the native backend's calls with no fallback: forgejo's whole Code
-  Forge and its whole tracker (see [The forgejo
-  Connector](#the-forgejo-connector)). github takes no
+  answers the native backend's calls with no fallback: forgejo's whole tracker
+  (see [The forgejo Connector](#the-forgejo-connector)); forgejo's Code Forge
+  is the Connector's whether or not `primary` is set. github takes no
   `primary`: every Consumer of the root `spindrift.flakeModules.default`
   carries the github row, and a plain row answers every github read and write
   (see [Backend primary mode](#backend-primary-mode)). It has no native
@@ -2693,12 +2693,12 @@ And a shadow row has no native adapter left to be compared against, so it fails
 every call too; drop `shadow` from it. Core runs no `gh` at all: the Box's
 open-PR question is answered by the Launcher (issue #6902). The ADR 0073 migration window is closed and its all-or-none rule is in
 force: the Bundle registers no native network backend, and a Go test fails if
-it registers one, except forgejo's native forge and tracker, a pinned exception
-until #6868 and #7122 delete them. The Connector is held to the tracker read
-contract (`forgetest.RunTrackerReadContract`, with a `StateSeeder` standing in
-for the writes a read-only tracker lacks) and the PR forge read contract
-(`forgetest.RunPRForgeReadContract`), which the Connector's subflake check
-`connector-<backend>-conformance` runs against it, through
+it registers one, except forgejo's native tracker, a pinned exception until
+#7122 deletes it (the native forge went with #6868). The Connector is held to
+the tracker read contract (`forgetest.RunTrackerReadContract`, with a
+`StateSeeder` standing in for the writes a read-only tracker lacks) and the PR
+forge read contract (`forgetest.RunPRForgeReadContract`), which the Connector's
+subflake check `connector-<backend>-conformance` runs against it, through
 `SPINDRIFT_BACKEND_CONNECTOR_WASM` and `SPINDRIFT_BACKEND_CONNECTOR_ROUTES`.
 Its tracker write primitives are held to the tracker contract
 (`forgetest.RunTrackerContract`), the host-posted-comment contract
@@ -2828,6 +2828,11 @@ is registered and not shadowed, and the table is baselined in
 `spindrift-connector-routes.json` so doctor's `connector-routes-widened[forgejo]`
 row reports it as accepted.
 
+`FORGEJO_BASE_URL` must be an https URL: the row's routes are https only, and a
+plain row whose base is unset or not https is dropped, so the forge build
+fails with `ErrNoConnectorRow` carrying the base error. The deleted native
+forge accepted `http`.
+
 The Connector also ships the forgejo fragment folder,
 `connectors/forgejo/fragments/forgejo/` (the nine forge and tracker steps the
 [in-Box forge CLI inventory](in-box-forge-cli.md#inventory) lists), through
@@ -2836,11 +2841,14 @@ The Connector also ships the forgejo fragment folder,
 declared file wins over a custom fragments directory, a `forgejo/<name>.md` in
 a `SPINDRIFT_PROMPT_DIR` is ignored (see [`MIGRATING.md`](../MIGRATING.md)).
 
-The native forgejo adapter builds the issue tracker and the Code Forge unless
-the Consumer sets `spindrift.connectors.forgejo.primary = true`. Then, in every
-launcher process that builds them (dispatch, research, the daemon, reconcile,
-recover, quickstart and doctor), both are the Connector's, with core's own git
-doing every git operation:
+The forgejo Code Forge is always the Connector's, in every launcher process
+that builds it (dispatch, research, the daemon, reconcile, recover and doctor;
+quickstart defers to `spindrift doctor`), with core's own git doing every git
+operation. There is no native forgejo forge: a Consumer whose forgejo row is
+absent or `shadow` fails to build the Code Forge with `ErrNoConnectorRow`, and
+every Consumer of the root `spindrift.flakeModules.default` carries the row. The forgejo issue tracker
+stays native until #7122 unless the Consumer sets
+`spindrift.connectors.forgejo.primary = true`, which moves only the tracker.
 
 - The Connector authorizes with `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`, resolved
   by the launcher and the daemon like any secret knob (the value, `_CMD`, or
@@ -2849,25 +2857,26 @@ doing every git operation:
 - `MERGE_METHOD` must be `rebase` or unset: the Connector merges by rebase only,
   and the launcher refuses to build the forge for `squash` or `merge` rather
   than ignore the knob.
-- There is no fallback. A Connector that fails to load, or a request its Route
-  table refuses, fails the operation with the Connector's own error, and the
-  native adapter never answers instead. The Connector's audit lines go to
-  `.spindrift/logs/connector-forgejo.audit.jsonl`.
-- Every tracker operation goes through the Connector: reads, the claim and
-  every transition, label edits and creation, comments (the agent-facing and
-  the host-posted ones), filed findings, and native dependencies. The tracker
-  requires the Connector to advertise the writes `tracker.transition`,
-  `tracker.editLabels`, `tracker.labels`, `tracker.comment`,
-  `tracker.fileIssue` and `tracker.closeIssue`, and the reads
+- There is no fallback, with or without `primary`. A Connector that fails to
+  load, or a request its Route table refuses, fails the operation with the
+  Connector's own error, and the native adapter never answers instead. The
+  Connector's audit lines go to `.spindrift/logs/connector-forgejo.audit.jsonl`.
+- Under `primary`, every tracker operation goes through the Connector: reads,
+  the claim and every transition, label edits and creation, comments (the
+  agent-facing and the host-posted ones), filed findings, and native
+  dependencies. The tracker requires the Connector to advertise the writes
+  `tracker.transition`, `tracker.editLabels`, `tracker.labels`,
+  `tracker.comment`, `tracker.fileIssue` and `tracker.closeIssue`, and the reads
   `tracker.comments`, `tracker.nativeDeps`, `tracker.blocks`, `tracker.probe`,
   `tracker.count`, `tracker.labeled` and `tracker.searchIssues`; one missing
   fails the build with `forgejo Connector lacks required capabilities: ...`
   and the native tracker does not answer in its place. The Connector
   credential therefore covers issue writes as well as pull requests.
 
-Dropping `primary` restores the native tracker and Code Forge with no code
-revert. The [forgejo integration harness](#forgejo-integration-harness) runs
-its lifecycle once more with `primary` set when
+Dropping `primary` restores the native tracker with no code revert; the Code
+Forge stays the Connector's. The [forgejo integration
+harness](#forgejo-integration-harness) runs its lifecycle once more with
+`primary` set when
 `SPINDRIFT_BACKEND_CONNECTOR_WASM` and `SPINDRIFT_BACKEND_CONNECTOR_ROUTES`
 name a built Connector, fronting the harness Forgejo with a TLS proxy because
 the Connector refuses a non-https base.
@@ -3237,25 +3246,25 @@ pr merge --delete-branch` did, `EnqueueAutoMerge` under `MERGE_MODE=auto`, and
 the close of a merged issue (`CloseMergedIssue`, over `tracker.closeIssue`),
 so every `MERGE_MODE` settles through the Connector. The Connector merges
 by rebase only: a non-shadow github row refuses any other `MERGE_METHOD`
-with `ErrPrimaryMergeMethod` when it builds the Code Forge, as the forgejo
-row does. A transient merge failure is retried by core's merge loop, and a
-head-branch delete that fails after the merge landed is recorded and warned,
-never a failed merge. The switches cover launcher-side writes only: the CI
-claim and release label swaps in `.github/actions/agent-setup/action.yml`
-and `.github/workflows/agent-dispatch.yml` still run `gh issue edit` and
-are not leaks of the switches. The github row is the default for every
-Consumer, and `nix/dogfood-primary.nix` lists no backend. The jira row is not
-a primary row: it routes the whole tracker with no native backend to fall
-back to or shadow ([Running jira through its
-Connector](#running-jira-through-its-connector)). The forgejo row replaces
-the whole Code Forge and the whole tracker, reads and writes; it is
-[documented with its Connector](#the-forgejo-connector). The rest of this
-section describes github's. On github, no read or write stays on `gh`. Primary and
-shadow are exclusive, so a primary row samples nothing; evaluation refuses
-the two together, a row with neither a `backend` nor a `driver` (a Driver's
-primary mode is [its own](#driver-primary-mode)), and a name with no native
-backend (github and jira), each naming the
-row.
+with `ErrRoutedMergeMethod` when it builds the Code Forge, as the forgejo
+row does with `ErrMergeMethod`. A transient merge failure is retried by core's
+merge loop, and a head-branch delete that fails after the merge landed is
+recorded and warned, never a failed merge. The switches cover launcher-side
+writes only: the CI claim and release label swaps in
+`.github/actions/agent-setup/action.yml` and
+`.github/workflows/agent-dispatch.yml` still run `gh issue edit` and are not
+leaks of the switches. The github row is the default for every Consumer, and
+`nix/dogfood-primary.nix` lists no backend. The jira row is not a primary row:
+it routes the whole tracker with no native backend to fall back to or shadow
+([Running jira through its Connector](#running-jira-through-its-connector)).
+The forgejo row replaces the whole Code Forge always and, under `primary`, the
+whole tracker, reads and writes; it is [documented with its
+Connector](#the-forgejo-connector). The rest of this section describes
+github's. On github, no read or write stays on `gh`. Primary and shadow are
+exclusive, so a primary row samples nothing; evaluation refuses the two
+together, a row with neither a `backend` nor a `driver` (a Driver's primary
+mode is [its own](#driver-primary-mode)), and a name with no native backend
+(github and jira), each naming the row.
 
 There is no fallback. A Connector that fails to load, or a request its Route
 table refuses, fails the read or write with the Connector's own error and the
@@ -4358,7 +4367,7 @@ When a vault's naming isn't uniform, fall back to the per-secret
 | `ANTHROPIC_API_KEY`       | —                      | alternative to the OAuth token (secret; env only) |
 | `GIT_USER_NAME`           | host `git config`; baked via `git.user.name` | commit author name (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config); the `github` Code Forge's host-side Rebase also pins it on its throwaway clone) |
 | `GIT_USER_EMAIL`          | host `git config`; baked via `git.user.email` | commit author email (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config); the `github` Code Forge's host-side Rebase also pins it on its throwaway clone) |
-| `CODE_FORGE`              | `github` (baked)       | code-landing backend: `github` (open PR, watch CI, merge), `git` (push-only to `CODE_FORGE_REMOTE_URL`; no PR, CI-watch, or merge gate — see [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)), `local` (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network — see [ADR 0033](../docs/adr/0033-host-mediated-local-code-forge.md)), or `forgejo` (open a PR through the Forgejo API, watch the CI rollup, and merge under `MERGE_MODE` on a Forgejo/Gitea instance authenticated by `FORGEJO_TOKEN` — the second full `PRForge` backend beside `github`; see [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)) |
+| `CODE_FORGE`              | `github` (baked)       | code-landing backend: `github` (open PR, watch CI, merge), `git` (push-only to `CODE_FORGE_REMOTE_URL`; no PR, CI-watch, or merge gate — see [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)), `local` (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network — see [ADR 0033](../docs/adr/0033-host-mediated-local-code-forge.md)), or `forgejo` (open a PR, watch the CI rollup, and merge under `MERGE_MODE` on a Forgejo/Gitea instance through the forgejo Connector, authorized by `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`, with `FORGEJO_TOKEN` as git's credential — the second full `PRForge` backend beside `github`; see [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)) |
 | `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `CODE_FORGE_ACCUMULATION_REPO_DIR` | `.spindrift/accum.git` under the launcher's working directory when `CODE_FORGE=local` (auto-created and seeded); an explicit value overrides it | host path to the bare Accumulation repo, mounted read-only into the Box and landed into host-side |
 | `BOX_FORGE_AND_ISSUE_ACCESS` | `read-only` (baked; issue #6899)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-only` is the only value, and the default: the Launcher host-mediates every write — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only). `read-write` was removed in issue #6901 and is rejected at build, dispatch, daemon start and `spindrift doctor` (see [MIGRATING.md](../MIGRATING.md)). The selection is coherence-checked against the selected forge/tracker's registry capability bits at `nix build` (Consumer eval) time (issue #2526) — the selected forge must implement bundle-relay (and host-side draft-PR-create when it has pull requests) and the selected tracker must implement host-posted comments; `local`, `github`, and `forgejo` satisfy both sides of the check today, the plain `git` forge satisfies the forge side by bundle relay alone (issue #6898), and the `jira` tracker satisfies the tracker side (paired with a `github`, `forgejo`, or `git` Code Forge, issues #6355, #6898); a Go startup gate remains only as a backstop for a runtime override past what nix already validated |
@@ -4374,8 +4383,8 @@ When a vault's naming isn't uniform, fall back to the per-secret
 | `IN_PROGRESS_LABEL`       | `agent-in-progress` (baked) | label a dispatched issue is swapped to |
 | `FAILED_LABEL`            | `agent-failed` (baked) | label an issue gets when its Box fails or its PR can't merge |
 | `COMPLETE_LABEL`          | `agent-complete` (baked) | label the launcher swaps on when CI reaches green (agent is done; the merge is a separate step) |
-| `MERGE_MODE`              | `manual` (baked)       | post-green merge policy: `manual` (leave the green PR for a human), `immediate` (rebase-merge on green), `auto` (enqueue the forge's native auto-merge — meaningful on any `PRForge` backend, `github` or `forgejo`; on `github` the repo must have auto-merge enabled, on `forgejo` the repo must allow the merge style `MERGE_METHOD` selects). Under `CODE_FORGE=git`, `manual`/`immediate` map to remote pushes instead (leave the pushed branch / push straight to the target branch); `auto` has no meaning off a `PRForge` backend and fails fast at startup. Under `CODE_FORGE=local`, only `immediate` relays the seam bundle into the Accumulation repo — `manual`/`auto` have no meaning under `local` and fail fast at startup. |
-| `MERGE_METHOD`            | `rebase` (baked)       | how the final integration commits land on green: `merge` (merge commit), `squash`, or `rebase`; maps to GitHub's native `merge_method` on `github` and to the Forgejo merge API's `Do` field on `forgejo` (`github` and `forgejo` Code Forge merge paths only) |
+| `MERGE_MODE`              | `manual` (baked)       | post-green merge policy: `manual` (leave the green PR for a human), `immediate` (rebase-merge on green), `auto` (enqueue the forge's native auto-merge — meaningful on any `PRForge` backend, `github` or `forgejo`; on `github` the repo must have auto-merge enabled, on `forgejo` the repo must allow rebase merges). Under `CODE_FORGE=git`, `manual`/`immediate` map to remote pushes instead (leave the pushed branch / push straight to the target branch); `auto` has no meaning off a `PRForge` backend and fails fast at startup. Under `CODE_FORGE=local`, only `immediate` relays the seam bundle into the Accumulation repo — `manual`/`auto` have no meaning under `local` and fail fast at startup. |
+| `MERGE_METHOD`            | `rebase` (baked)       | how the final integration commits land on green: `merge` (merge commit), `squash`, or `rebase`; the `github` and `forgejo` Connectors merge by rebase only and refuse `merge` or `squash` at launch (`github` and `forgejo` Code Forge merge paths only) |
 | `SYNC_METHOD`             | `rebase` (baked)       | how a behind branch is brought current before landing: `rebase` (linear history) or `merge` (merge the base in); governs both the preflight-stale-base proactive sync and the reactive on-conflict sync during an immediate merge (`github` Code Forge PR-landing path only; the sync commits as `GIT_USER_NAME`/`GIT_USER_EMAIL`) |
 | `MERGE_GUARD_PATHS`       | `.github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**` (baked) | comma-separated globs; a green PR touching a matched path downgrades to manual regardless of `MERGE_MODE` (`github` and `forgejo` Code Forges only; empty disables — see [Merge guard](#merge-guard)) |
 | `MODEL`                   | (baked; see [Default models](#default-models)) | main/coordinator Claude model the in-container agent runs (worker-tier defaults are unaffected) |
@@ -6421,7 +6430,10 @@ such block and are experimental, so you select them by editing
   is GitHub or the forge is tokenless. Label pre-checks also resolve labels
   defined on the repo's owning org, not just the repo itself, which needs
   the token's `read:organization` scope; without it, org-only labels go
-  unseen and the launcher warns once per client.
+  unseen and the launcher warns once per client. Quickstart installs no
+  Connector sandbox, so for forgejo it probes the token against the tracker
+  alone and defers its finish-line checks to `spindrift doctor`, as for
+  `github`.
 
   Dispatch state uses the same label lifecycle as `github` (`ready-for-agent`
   / `agent-in-progress` / `agent-complete` / `agent-failed`, same
@@ -6474,18 +6486,18 @@ the repo does not define.
 
 #### Forgejo integration harness
 
-The httptest contract suite (`TestForgejoClient_TrackerContract`,
-`TestForgejoCodeForge_PRForgeContract`) pins the adapter's behaviour against a
-fake that mirrors the adapter's own expectations back at it — fast, hermetic,
-and part of the default gate, but structurally unable to catch the adapter
-drifting from Forgejo's *real* wire format, because the fake drifts along with
-it. The **integration harness** closes that gap: it boots a throwaway Forgejo
-from its published OCI image, seeds a repo, an issue, and both label families,
-and drives one real dispatch loop — claim, work, PR, merge, complete — entirely
-through the real IssueTracker and CodeForge/PRForge adapters, asserting the
+The httptest contract suite (`TestForgejoClient_TrackerContract` for the
+native tracker, and the Connector's conformance check for the Code Forge) pins
+the adapters' behaviour against a fake that mirrors their own expectations back
+at them — fast, hermetic, and part of the default gate, but structurally unable
+to catch an adapter drifting from Forgejo's *real* wire format, because the fake
+drifts along with it. The **integration harness** closes that gap: it boots a
+throwaway Forgejo from its published OCI image, seeds a repo, an issue, and
+both label families, and drives one real dispatch loop — claim, work, PR, merge,
+complete — through the real IssueTracker and CodeForge/PRForge, asserting the
 canonical lifecycle at each step. A deliberate API-shape regression in the
-adapter (a renamed JSON tag, a changed REST path) fails the harness where the
-contract suite stays green.
+tracker adapter or the Connector (a renamed JSON tag, a changed REST path)
+fails the harness where the contract suite stays green.
 
 It is **opt-in**: it lives behind the `integration` build tag, so a plain
 `go test ./...` never compiles it, and it self-skips wherever no container
@@ -6505,11 +6517,12 @@ SPINDRIFT_BACKEND_CONNECTOR_WASM=$wasm SPINDRIFT_BACKEND_CONNECTOR_ROUTES=$route
 
 Run it from the repository root. The two Connector variables name the built
 forgejo Connector and its Route table, as `connectors/forgejo`'s
-`connector-forgejo-conformance` check exports them. Without them the `primary`
-subtest, which reruns the lifecycle with the tracker and the Code Forge both
-built from the Connector (see [The forgejo
-Connector](#the-forgejo-connector)), skips while the `native` subtest passes, so
-the run still reports green.
+`connector-forgejo-conformance` check exports them. Both subtests need
+them, since the Code Forge is always the Connector's: the `native tracker`
+subtest runs the Connector's Code Forge beside the native tracker, and the
+`primary` subtest reruns the lifecycle with the tracker built from the
+Connector too (see [The forgejo Connector](#the-forgejo-connector)). Without the
+variables both skip and the run reports green having tested nothing.
 
 The one `go test` run boots, seeds, runs the loop, asserts, and tears the
 container down — no external service and no credential beyond the throwaway

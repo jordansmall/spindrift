@@ -43,7 +43,7 @@
       env = "FORGEJO_TOKEN";
       secret = true;
       hostConfig = true;
-      doc = "Forgejo/Gitea API token (Bearer/token scheme); required when ISSUE_TRACKER=forgejo or CODE_FORGE=forgejo";
+      doc = "Forgejo/Gitea API token (Bearer/token scheme); required when ISSUE_TRACKER=forgejo, and git's credential when CODE_FORGE=forgejo";
       boxEnv = false;
     };
   };

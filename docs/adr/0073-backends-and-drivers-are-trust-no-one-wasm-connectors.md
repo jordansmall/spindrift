@@ -1328,3 +1328,18 @@ The `in_process_loads` counter is removed from the read shadow's
 `shadow_summary` and the github primary totals line, since the count it kept at
 zero can no longer be anything else; the #7018 and #7020 mentions of it no
 longer hold. The remaining sandbox cost keys are unchanged.
+
+## Amendment (issue #6868): the native forgejo forge is deleted
+
+forgejo's Code Forge is built only from a non-shadow forgejo backend row's
+Connector, with or without `primary`. The native REST adapter, PR forge and
+bundle relay are deleted, and a missing or shadow row fails the build with
+`ErrNoConnectorRow` rather than falling back. `primary` on the forgejo row now
+moves only the issue tracker, which stays native until #7122. The root
+`flakeModules.default` carries the forgejo Connector module, so every Consumer
+has the forgejo row, as it has github's, and an existing forgejo Consumer
+config evaluates unchanged, `primary` included. A `CODE_FORGE=forgejo` run needs
+`SPINDRIFT_FORGEJO_CONNECTOR_TOKEN` (`FORGEJO_TOKEN` stays git's credential)
+and `MERGE_METHOD` `rebase` or unset. The in-box half (the Box token, the
+in-box forge CLI and forgejo-cli) stays until #6757. The pinned exception in
+rule 7 shrinks to the native forgejo tracker.
