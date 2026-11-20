@@ -222,7 +222,6 @@ report. See the [threat model](docs/reference.md#threat-model).
 | `spindrift preview` | Lists what `dispatch` would pick up, in order, without running it |
 | `spindrift dispatch [N…]` | Works every `ready-for-agent` issue, or only issues `N…` |
 | `spindrift research [N…]` | Reviews each `agent-research` issue and posts one verdict comment |
-| `spindrift console` | Browses the backlog, dispatches picked issues, and tails or stops live Boxes |
 | `spindrift recover N` | Re-runs the merge gate for one issue |
 | `nix run .#daemon` | Keeps working every configured queue — dispatch, research, and (once opted in) the butler, plus auto-recovery of stranded outbox bundles on a read-only Box — picking up issues or due Chores as they arrive |
 | `nix run .#dashboard` | Serves a read-only web page of the daemon's status (unauthenticated; loopback by default) — see [Dashboard](docs/reference.md#dashboard) |
@@ -233,8 +232,7 @@ The CLI ships tab completion for bash, fish, and zsh. See
 `research` never edits code or opens a PR. It posts a `recommend`, `reject`,
 or `unclear` verdict and labels the issue from its own `agent-research*`
 family. A human decides what to do next. See
-[Research dispatch](docs/reference.md#research-dispatch). The Console has its
-own page, [`docs/console.md`](docs/console.md), and the daemon is covered
+[Research dispatch](docs/reference.md#research-dispatch). The daemon is covered
 under [Daemon](docs/reference.md#daemon).
 
 ## Optional behaviors
@@ -276,7 +274,6 @@ The first three are on by default. The rest are off until you enable them.
 | -------- | -------- |
 | [`docs/reference.md`](docs/reference.md) | The full manual, covering the CLI, configuration, runtime env, how a run works, labels, backends, research, the daemon, security, and macOS notes |
 | [`docs/flake-options.md`](docs/flake-options.md) | Every flake option with its path, type, default, and description; generated from the source |
-| [`docs/console.md`](docs/console.md) | The interactive Console |
 | [`CONTEXT.md`](CONTEXT.md) | Definitions of Harness, Consumer flake, Target repo, Box, Driver, Issue Tracker, and Code Forge |
 | [`SECURITY.md`](SECURITY.md) | How to report a vulnerability, and the deployment threat model |
 | [`MIGRATING.md`](MIGRATING.md) | Deprecations and breaking changes |
