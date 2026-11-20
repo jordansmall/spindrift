@@ -836,6 +836,11 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if err := backendrows.Use(doc.Backends, func(k string) string { return backendRowSetting(doc, stderr, k) }); err != nil {
 		return refuse(err)
 	}
+	sandboxWD, err := os.Getwd()
+	if err != nil {
+		return refuse(err)
+	}
+	defer installConnectorSandbox(doc, sandboxWD)()
 
 	// Computed once here, right after the document loads (the earliest
 	// point the key set is known) and reused below for the runner config,
