@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -29,11 +30,21 @@ func newDaemonRig(t *testing.T, runtime string) sandboxRig {
 	return newDaemonRigWith(t, runtime, daemonRigOpts{runs: []seamtest.PodmanRun{box, box}, issues: []int{7, 8}})
 }
 
+// newDaemonTrackerRig is a daemon with the one run its fake github holds, #7,
+// whose settle writes cross the sandbox.
+func newDaemonTrackerRig(t *testing.T, runtime string) sandboxRig {
+	t.Helper()
+	box := seamtest.PodmanRun{Outcome: seamOutcome("blocked"), HoldUntil: "set by the rig"}
+	return newDaemonRigWith(t, runtime, daemonRigOpts{tracker: true, runs: []seamtest.PodmanRun{box}, issues: []int{7}})
+}
+
 // daemonRigOpts is what newDaemonRigWith varies: the scripted runs, the ready
 // issues and the containers already running; execDoctor makes the nix fake run
 // the real `doctor` preflight instead of answering it, and imageAbsent leaves
-// the Box image unloaded.
+// the Box image unloaded. tracker puts the github Connector in the sandbox as
+// the tracker (sandboxTracker) instead of a local one.
 type daemonRigOpts struct {
+	tracker     bool
 	runs        []seamtest.PodmanRun
 	issues      []int
 	running     []string
@@ -45,10 +56,20 @@ type daemonRigOpts struct {
 func newDaemonRigWith(t *testing.T, runtime string, o daemonRigOpts) sandboxRig {
 	t.Helper()
 	execDoctor := o.execDoctor
-	rig := newSandboxRig(t, runtime, sandboxRigOpts{mode: sandboxLocal, runs: o.runs, issues: o.issues, running: o.running, imageAbsent: o.imageAbsent})
+	mode := sandboxLocal
+	if o.tracker {
+		mode = sandboxTracker
+	}
+	rig := newSandboxRig(t, runtime, sandboxRigOpts{mode: mode, runs: o.runs, issues: o.issues, running: o.running, imageAbsent: o.imageAbsent})
 
+	// The fake github keeps #7 ready after a claim, so a second slot would
+	// start a second child on it.
+	maxParallel := "2"
+	if o.tracker {
+		maxParallel = "1"
+	}
 	setDocSettings(t, rig.docPath, map[string]string{
-		"REPO_SLUG": smokeRepo, "MAX_PARALLEL": "2", "DAEMON_IDLE_FLOOR": "1s", "DAEMON_IDLE_CAP": "2s",
+		"REPO_SLUG": smokeRepo, "MAX_PARALLEL": maxParallel, "DAEMON_IDLE_FLOOR": "1s", "DAEMON_IDLE_CAP": "2s",
 	})
 	gitEnv := append(os.Environ(), "GIT_CONFIG_GLOBAL="+rig.env["GIT_CONFIG_GLOBAL"])
 	seamGit(t, gitEnv, rig.workDir, "init", "-q", "-b", "main")
@@ -106,13 +127,38 @@ func TestSeamDaemonRunsEachHoldOneSandbox(t *testing.T) {
 			if stopInFlight {
 				name = "shutdown-" + runtime
 			}
-			t.Run(name, func(t *testing.T) { runDaemonSandboxes(t, runtime, stopInFlight) })
+			t.Run(name, func(t *testing.T) { runDaemonSandboxes(t, runtime, daemonSandboxOpts{stopInFlight: stopInFlight}) })
 		}
 	}
 }
 
-func runDaemonSandboxes(t *testing.T, runtime string, stopInFlight bool) {
-	rig := newDaemonRig(t, runtime)
+// TestSeamDaemonShutdownSettlesThroughSandbox stops a daemon with a run in
+// flight whose tracker is the github Connector in the sandbox. The child's
+// settle is a tracker write through that sandbox, so the fake backend seeing
+// it, and the child's log free of a dead host, prove the sandbox outlived the
+// settle as it does in an in-process run (issue #7302).
+func TestSeamDaemonShutdownSettlesThroughSandbox(t *testing.T) {
+	for _, runtime := range []string{"podman", "bwrap"} {
+		t.Run(runtime, func(t *testing.T) {
+			runDaemonSandboxes(t, runtime, daemonSandboxOpts{stopInFlight: true, tracker: true})
+		})
+	}
+}
+
+// daemonSandboxOpts is what runDaemonSandboxes varies; a struct so its flags
+// cannot be swapped silently (issue #3060). stopInFlight stops the daemon with
+// its runs held mid-run; tracker runs newDaemonTrackerRig's one run instead of
+// daemonSlots local ones.
+type daemonSandboxOpts struct {
+	stopInFlight, tracker bool
+}
+
+func runDaemonSandboxes(t *testing.T, runtime string, o daemonSandboxOpts) {
+	stopInFlight, tracker := o.stopInFlight, o.tracker
+	rig, slots := newDaemonRig(t, runtime), daemonSlots
+	if tracker {
+		rig, slots = newDaemonTrackerRig(t, runtime), 1
+	}
 	recPath := filepath.Join(rig.recDir, runtime+".jsonl")
 	t.Cleanup(func() { _ = os.WriteFile(rig.release, nil, 0o644) })
 
@@ -122,13 +168,13 @@ func runDaemonSandboxes(t *testing.T, runtime string, stopInFlight bool) {
 			t.Logf("daemon stdout:\n%s\ndaemon stderr:\n%s", p.Stdout(), p.Stderr())
 		}
 	})
-	runnertest.Eventually(t, time.Minute, "both runs' Boxes to be in flight", func() bool {
+	runnertest.Eventually(t, time.Minute, fmt.Sprintf("%d Boxes to be in flight", slots), func() bool {
 		_, boxes := countRuns(runtime, seamtest.ReadRecord(t, recPath))
-		return boxes >= daemonSlots
+		return boxes >= slots
 	})
-	// Both runs are held mid-run, so each owns its sandbox and no more.
-	if starts, _ := countRuns(runtime, seamtest.ReadRecord(t, recPath)); starts != daemonSlots {
-		t.Errorf("%d Connector sandboxes with %d runs in flight, want one each", starts, daemonSlots)
+	// Every run is held mid-run, so each owns its sandbox and no more.
+	if starts, _ := countRuns(runtime, seamtest.ReadRecord(t, recPath)); starts != slots {
+		t.Errorf("%d Connector sandboxes with %d runs in flight, want one each", starts, slots)
 	}
 	for _, log := range daemonChildLogs(t, rig.workDir, p.Stdout()) {
 		if got := stoppedSandboxes(readFile(t, log)); len(got) != 0 {
@@ -145,25 +191,34 @@ func runDaemonSandboxes(t *testing.T, runtime string, stopInFlight bool) {
 		t.Fatal(err)
 	}
 	if !stopInFlight {
-		runnertest.Eventually(t, time.Minute, "both runs to settle", func() bool { return countEvents(p.Stdout(), "child_finish") >= daemonSlots })
+		runnertest.Eventually(t, time.Minute, "both runs to settle", func() bool { return countEvents(p.Stdout(), "child_finish") >= slots })
 		p.Signal(t, syscall.SIGTERM)
 	}
 	res := p.Wait(t)
 	res.WantExit(t, 0)
-	if got := strings.Count(res.Stdout, `"outcome":"signalled-stop"`); stopInFlight && got != daemonSlots {
-		t.Errorf("%d runs ended on the daemon's stop, want %d", got, daemonSlots)
+	if got := strings.Count(res.Stdout, `"outcome":"signalled-stop"`); stopInFlight && got != slots {
+		t.Errorf("%d runs ended on the daemon's stop, want %d", got, slots)
 	}
 
+	if tracker {
+		// The stop reaches the run through the Box client as well, so it settles
+		// failed; that write is a Connector call through the sandbox.
+		if got := rig.backend.labelPosts(); !slices.Contains(got, "agent-failed") {
+			t.Errorf("the backend saw labels %q added to #7, want agent-failed among them; requests:\n%s", got, rig.backend.requests())
+		}
+	}
 	recs := seamtest.ReadRecord(t, recPath)
 	starts, _ := countRuns(runtime, recs)
 	logs := daemonChildLogs(t, rig.workDir, res.Stdout)
 	var stopped []string
 	for _, log := range logs {
-		got := stoppedSandboxes(readFile(t, log))
+		body := readFile(t, log)
+		got := stoppedSandboxes(body)
 		if len(got) != 1 {
 			t.Errorf("%s: the stop hook ran %d times (%q), want exactly once", log, len(got), got)
 		}
 		stopped = append(stopped, got...)
+		assertSandboxSurvivedSettle(t, log, body)
 	}
 	if starts != len(logs) || len(stopped) != starts {
 		t.Errorf("%d children started %d Connector sandboxes and stopped %d, want one each", len(logs), starts, len(stopped))
