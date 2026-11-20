@@ -1,5 +1,27 @@
 # Migration Guide
 
+## The native github read path is deleted (issue #6811)
+
+Every github read, tracker and forge, goes through the github Connector alone;
+the native adapter's read methods are gone. A read with no routed github row
+fails with `ErrNoReadRoute` naming the cause, in place of falling back to `gh`.
+Native writes are unchanged until #6888. See [The github
+Connector](docs/reference.md#the-github-connector).
+
+What changed for a Consumer:
+
+- **GitHub Enterprise reads fail.** Under a `GH_HOST` other than `github.com`
+  the row is dropped, because the Connector's Routes pin `api.github.com`, and
+  reads fail with `ErrNoReadRoute`. GitHub Enterprise is not served until the
+  Connector's Routes cover it.
+- **Importing `core.flakeModules.default` directly fails github reads.** Only
+  the root `flakeModules.default` carries the github row; import it instead.
+- **A github `shadow` row fails every read.** No native read path is left to
+  compare against; drop `shadow` from the row.
+- **Quickstart needs its baked row.** A `go run` of quickstart, or a run under
+  a `GH_HOST` other than `github.com`, fails its probe and token audit with
+  `ErrNoReadRoute`.
+
 ## The forgejo fragments ship from the forgejo Connector (issue #6867)
 
 The nine `forgejo/` prompt fragments (`filer-dedup.md`, `filer-direct-file.md`,

@@ -19,6 +19,12 @@ _append() {
 _append "$log" "$*"
 
 case "${1:-}" in
+  run)
+    # The token the Box would inherit, so tests/harness-env.bats can pin which
+    # source (environment or a sourced file) won without echoing it into
+    # $PODMAN_LOG.
+    _append "$log.token" "${GH_TOKEN-}"
+    ;;
   image)
     if [ "${2:-}" = "inspect" ] || [ "${2:-}" = "exists" ]; then
       [ "${FAKE_PODMAN_IMAGE_PRESENT:-0}" = "1" ]

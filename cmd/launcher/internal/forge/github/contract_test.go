@@ -2,13 +2,12 @@ package github
 
 import (
 	_ "embed"
-	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/forge/forgetest"
 )
 
 // fakeGHState is a stateful stand-in for the gh CLI. It stays a real .sh file
@@ -18,21 +17,7 @@ import (
 //go:embed testdata/fake-gh.sh
 var fakeGHState string
 
-// ghWireComment mirrors gh's native comment JSON independently of the
-// adapter's own ghComment struct, so a tag typo in the adapter fails the
-// contract instead of round-tripping through a shared type.
-type ghWireComment struct {
-	Author struct {
-		Login string `json:"login"`
-	} `json:"author"`
-	CreatedAt         string `json:"createdAt"`
-	Body              string `json:"body"`
-	IsMinimized       bool   `json:"isMinimized"`
-	MinimizedReason   string `json:"minimizedReason"`
-	AuthorAssociation string `json:"authorAssociation"`
-}
-
-// githubHarness implements forgetest.Harness over a STATE_DIR/issues/<num>/
+// githubHarness is a native adapter over a STATE_DIR/issues/<num>/
 // tree the fakeGHState script reads and mutates, so successive gh calls see
 // each other's effects. prependFakeGH's single scripted response cannot do
 // that: CompleteVerdict's double-dispatch guard has to observe a label an
@@ -83,93 +68,13 @@ func (h *githubHarness) SeedIssue(iss forge.Issue) {
 	os.WriteFile(filepath.Join(dir, "labels"), []byte(labels), 0o644)
 }
 
-func (h *githubHarness) SeedNativeDeps(num string, ids []string) {
-	dir := h.issueDir(num)
-	var s string
-	for _, id := range ids {
-		s += id + "\n"
-	}
-	os.WriteFile(filepath.Join(dir, "deps"), []byte(s), 0o644)
-}
-
-func (h *githubHarness) FailNativeDeps(num string) {
-	os.WriteFile(filepath.Join(h.issueDir(num), "fail_native"), nil, 0o644)
-}
-
-// SeedComments writes num's thread in gh's native wire shape, which is what
-// pins execClient.Comments's JSON tags against the real CLI's output.
-func (h *githubHarness) SeedComments(num string, comments []forge.Comment) {
-	doc := struct {
-		Comments []ghWireComment `json:"comments"`
-	}{Comments: []ghWireComment{}}
-	for _, c := range comments {
-		var w ghWireComment
-		w.Author.Login = c.Author
-		w.CreatedAt = c.CreatedAt
-		w.Body = c.Body
-		w.IsMinimized = c.Minimized
-		w.MinimizedReason = c.MinimizedReason
-		w.AuthorAssociation = c.Association
-		doc.Comments = append(doc.Comments, w)
-	}
-	b, _ := json.Marshal(doc)
-	os.WriteFile(filepath.Join(h.issueDir(num), "comments"), b, 0o644)
-}
-
-func (h *githubHarness) IsolatesNativeFailure() {}
-
-func (h *githubHarness) IsPriorityCapable() {}
-
-func TestExecClient_TrackerContract(t *testing.T) {
-	forgetest.RunTrackerContract(t, newGithubHarness(t))
-}
-
-func TestExecClient_CommentsCarryMinimized(t *testing.T) {
-	h := newGithubHarness(t)
-	h.SeedComments("7", []forge.Comment{
-		{Author: "a", CreatedAt: "2026-01-01T00:00:00Z", Body: "live"},
-		{Author: "b", CreatedAt: "2026-01-02T00:00:00Z", Body: "noise", Minimized: true, MinimizedReason: "SPAM"},
-	})
-	got, err := h.tr.(forge.CommentLister).Comments("7")
+// labels is num's label set as the fake gh holds it, for checking what a native
+// write left behind: the adapter's own reads have no native path to ask.
+func (h *githubHarness) labels(t *testing.T, num string) []string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(h.issueDir(num), "labels"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("got %d comments, want 2", len(got))
-	}
-	if got[0].Minimized || got[0].MinimizedReason != "" {
-		t.Errorf("live comment = %+v, want not minimized", got[0])
-	}
-	if !got[1].Minimized || got[1].MinimizedReason != "SPAM" {
-		t.Errorf("minimized comment = %+v, want Minimized with reason SPAM", got[1])
-	}
-}
-
-// Pins the fail-closed policy through the real adapter path: gh's
-// authorAssociation round-trips, and a comment gh reports no association for
-// is untrusted rather than defaulting to trusted.
-func TestComments_AssociationFeedsCommentTrusted(t *testing.T) {
-	h := newGithubHarness(t)
-	h.SeedIssue(forge.Issue{Number: "7", Title: "t", Body: "b"})
-	h.SeedComments("7", []forge.Comment{
-		{Author: "o", Body: "1", Association: "OWNER"},
-		{Author: "n", Body: "2", Association: "NONE"},
-		{Author: "u", Body: "3"},
-	})
-	got, err := h.Tracker().(forge.CommentLister).Comments("7")
-	if err != nil {
-		t.Fatalf("Comments: %v", err)
-	}
-	want := []struct {
-		assoc   string
-		trusted bool
-	}{{"OWNER", true}, {"NONE", false}, {"", false}}
-	if len(got) != len(want) {
-		t.Fatalf("got %d comments, want %d", len(got), len(want))
-	}
-	for i, w := range want {
-		if got[i].Association != w.assoc || forge.CommentTrusted(got[i]) != w.trusted {
-			t.Errorf("comments[%d] = %+v, want Association %q trusted=%v", i, got[i], w.assoc, w.trusted)
-		}
-	}
+	return strings.Fields(string(b))
 }

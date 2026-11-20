@@ -39,37 +39,19 @@ setup_dispatch_env() {
   export PATH="$FAKE_BIN:$PATH"
 
   export PODMAN_LOG="$BATS_TEST_TMPDIR/podman.log"
-  # No gh is staged on PATH: the launcher pins the real gh, so nix/fixtures.nix
-  # overlays the recording fake in, and that fake reads GH_LOG from here.
-  export GH_LOG="$BATS_TEST_TMPDIR/gh.log"
   : >"$PODMAN_LOG"
-  : >"$GH_LOG"
-  : >"$GH_LOG.token"
+  : >"$PODMAN_LOG.token"
   set_dispatch_env
   cd "$BATS_TEST_TMPDIR" || exit
-  export FAKE_GH_ISSUES=$'1\tFirst issue\n2\tSecond issue'
-  route_forge_to_local_remote owner/repo from-flag/repo
-}
-
-# The host seeds a per-Pass mirror from the Target repo before every Box
-# (issue #6898), so a dispatch reaches the forge over HTTPS. This routes the
-# github clone URL to a local bare repo per slug through git's insteadOf, which
-# the seed's command-scope pins leave in force, so no suite touches the network.
-route_forge_to_local_remote() {
-  local remotes="$BATS_TEST_TMPDIR/remotes" slug work i=0
-  work="$BATS_TEST_TMPDIR/remote-work"
-  git init -q -b main "$work"
-  git -C "$work" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m seed
-  for slug in "$@"; do
-    mkdir -p "$remotes/${slug%/*}"
-    git clone -q --bare "$work" "$remotes/$slug.git"
-    # The exact clone URL, not a host prefix: the seed pins an identity
-    # insteadOf on that URL, and the longer match wins.
-    export "GIT_CONFIG_KEY_$i=url.file://$remotes/$slug.git.insteadOf"
-    export "GIT_CONFIG_VALUE_$i=https://github.com/$slug.git"
-    i=$((i + 1))
-  done
-  export GIT_CONFIG_COUNT=$i
+  # A github read needs a Connector row the bats harness does not apply, so
+  # dispatch reads a local issue and lands through the git forge instead. The
+  # host seeds the Box's mirror from that remote (issue #6898), so it needs a
+  # main branch to clone.
+  git init -q -b main remote-work
+  git -C remote-work -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m seed
+  git clone -q --bare remote-work remote.git
+  mkdir -p .spindrift/issues
+  printf -- '---\ntitle: First issue\nstate: ready-for-agent\n---\n' >.spindrift/issues/1.md
 }
 
 # Secrets only in the environment so `dispatch`'s required-var guards pass; the
@@ -90,6 +72,9 @@ set_dispatch_env() {
   # shellcheck disable=SC2034 # read by the sourcing suites
   DISPATCH_FLAGS=(
     --repo-slug owner/repo
+    --tracker local
+    --forge-backend git
+    --remote-url "$BATS_TEST_TMPDIR/remote.git"
     --user-name "Test Bot"
     --user-email bot@example.com
     --box-signal-carrier log

@@ -1,18 +1,7 @@
 #!/usr/bin/env bash
-# Fake gh for tests. Records every invocation to $GH_LOG and models just enough
-# of the issue label lifecycle (issue #15) for tests/harness-env.bats's
-# `dispatch` runs and the pr pair tests/fake-gh-pr-ready.bats calls directly:
+# Fake gh for tests. Records every invocation to $GH_LOG and models the pr pair
+# tests/fake-gh-pr-ready.bats calls directly:
 #
-#   * `issue list --label L` prints the FAKE_GH_ISSUES rows whose *current*
-#     lifecycle label is L. An issue that has never been edited is treated as
-#     carrying whatever label is queried (its initial "ready" state), so a first
-#     run sees every seeded issue regardless of the query label. Once an issue
-#     has been edited it matches only its recorded label.
-#   * `issue edit N --add-label A --remove-label R` records N's new label A in
-#     $GH_STATE, so a subsequent `issue list --label R` no longer matches it.
-#   * `issue view` answers the `--json labels` and `--json
-#     number,title,body,state,labels` shapes; the issue is always OPEN with an
-#     empty body.
 #   * `pr view --json isDraft` reads FAKE_GH_PR_DRAFT_<n>; `pr ready` flips it to
 #     false and `pr ready --undo` back to true in $GH_STATE.
 #   * Every other call is recorded, no-op.
@@ -20,12 +9,9 @@ set -euo pipefail
 
 : "${GH_LOG:?GH_LOG must point at a log file}"
 printf '%s\n' "$*" >>"$GH_LOG"
-# The token each call ran with, so tests/harness-env.bats can pin which
-# source (environment or a sourced file) won without echoing it into GH_LOG.
-printf '%s\n' "${GH_TOKEN-}" >>"$GH_LOG.token"
 
-# Per-test state (issue number -> lifecycle label, pr-draft-N -> isDraft), kept
-# beside the log so it is isolated per test yet persists across gh calls.
+# Per-test state (pr-draft-N -> isDraft), kept beside the log so it is isolated
+# per test yet persists across gh calls.
 GH_STATE="${GH_STATE:-$GH_LOG.state}"
 
 # state_get KEY: the last value $GH_STATE recorded for KEY, or empty.
@@ -39,86 +25,7 @@ state_get() {
   printf '%s' "$cur"
 }
 
-# labels_array LABEL: a gh --json labels array holding LABEL, or [] when empty.
-labels_array() {
-  if [ -n "$1" ]; then
-    jq -cn '[{"name":$a}]' --arg a "$1"
-  else
-    printf '[]\n'
-  fi
-}
-
 case "${1:-}" in
-  issue)
-    case "${2:-}" in
-      list)
-        # execClient.ListIssues()/ListOpenIssues() expect a JSON array
-        # matching --json number,title,labels.
-        want=""
-        args=("$@")
-        for ((i = 0; i < ${#args[@]}; i++)); do
-          [ "${args[i]}" = "--label" ] && want="${args[i + 1]:-}"
-        done
-        entries=()
-        while IFS=$'\t' read -r num title; do
-          [ -n "$num" ] || continue
-          cur=$(state_get "$num")
-          if [ -z "$cur" ] || [ "$cur" = "$want" ]; then
-            labels_json=$(labels_array "${cur:-$want}")
-            entries+=("$(jq -cn --argjson num "$num" --arg title "$title" --argjson labels "$labels_json" \
-              '{"number":$num,"title":$title,"labels":$labels}')")
-          fi
-        done <<EOF
-${FAKE_GH_ISSUES:-}
-EOF
-        if [ "${#entries[@]}" -eq 0 ]; then
-          printf '[]\n'
-        else
-          printf '%s\n' "${entries[@]}" | jq -cs '.'
-        fi
-        ;;
-      edit)
-        num="${3:-}"
-        add=""
-        args=("$@")
-        for ((i = 0; i < ${#args[@]}; i++)); do
-          [ "${args[i]}" = "--add-label" ] && add="${args[i + 1]:-}"
-        done
-        [ -n "$num" ] && [ -n "$add" ] && printf '%s\t%s\n' "$num" "$add" >>"$GH_STATE"
-        ;;
-      view)
-        num="${3:-}"
-        json_field=""
-        args=("$@")
-        for ((i = 0; i < ${#args[@]}; i++)); do
-          [ "${args[i]}" = "--json" ] && json_field="${args[i + 1]:-}"
-        done
-        case "$json_field" in
-          labels)
-            # execClient.issueLabels() expects a JSON object, matching the
-            # "labels" field of the combined number,title,body,state,labels
-            # response below.
-            labels_json=$(labels_array "$(state_get "$num")")
-            jq -cn --argjson labels "$labels_json" '{"labels":$labels}'
-            ;;
-          number,title,body,state,labels)
-            # Combined response for execClient.Issue(): return a JSON object.
-            # Look up the title from FAKE_GH_ISSUES (tab-separated num\ttitle).
-            title=""
-            while IFS=$'\t' read -r n t; do
-              [ "$n" = "$num" ] && title="$t" && break
-            done <<< "${FAKE_GH_ISSUES:-}"
-            labels_json=$(labels_array "$(state_get "$num")")
-            jq -cn \
-              --argjson num "$num" \
-              --arg title "$title" \
-              --argjson labels "$labels_json" \
-              '{"number":$num,"title":$title,"body":"","state":"OPEN","labels":$labels}'
-            ;;
-        esac
-        ;;
-    esac
-    ;;
   pr)
     case "${2:-}" in
       view)

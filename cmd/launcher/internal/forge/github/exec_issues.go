@@ -1,17 +1,12 @@
 package github
 
 import (
-	"bufio"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os/exec"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
-	"time"
-	"unicode"
 
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -29,157 +24,50 @@ func labelNames(labels []ghLabel) []string {
 	return names
 }
 
-// ghIssueRow is the raw shape shared by every "gh issue list --json ..." call
-// in this file. Body is simply empty where the caller's --json fields don't
-// request it.
-type ghIssueRow struct {
-	Number int       `json:"number"`
-	Title  string    `json:"title"`
-	Body   string    `json:"body"`
-	State  string    `json:"state"`
-	Labels []ghLabel `json:"labels"`
-	// StateReason and ClosedAt are requested only by ListIssuesWithLabels.
-	// ClosedAt stays a string so a null or malformed value cannot fail the list.
-	StateReason string `json:"stateReason"`
-	ClosedAt    string `json:"closedAt"`
-}
-
-// toIssue converts a raw gh row to a forge.Issue, resolving Priority from the
-// row's own labels.
-func (r ghIssueRow) toIssue() forge.Issue {
-	names := labelNames(r.Labels)
-	// An unparsable closedAt stays zero, which downstream reads as "never
-	// expires" -- the conservative direction for a dedup cooldown.
-	closedAt, _ := time.Parse(time.RFC3339, r.ClosedAt)
-	return forge.Issue{
-		Number:           strconv.Itoa(r.Number),
-		Title:            r.Title,
-		Body:             r.Body,
-		State:            forge.IssueState(r.State),
-		Labels:           names,
-		Priority:         forge.ResolvePriority(names),
-		ClosedAt:         closedAt,
-		ClosedNotPlanned: r.StateReason == "NOT_PLANNED",
-		Reopened:         r.StateReason == "REOPENED",
-	}
-}
-
-// parseIssueRows decodes a raw "gh issue list --json ..." payload into
-// forge.Issue values, in the response's own order.
-func parseIssueRows(out []byte) ([]forge.Issue, error) {
-	var raw []ghIssueRow
-	if err := json.Unmarshal(out, &raw); err != nil {
-		return nil, fmt.Errorf("parse gh issue list: %w", err)
-	}
-	issues := make([]forge.Issue, len(raw))
-	for i, r := range raw {
-		issues[i] = r.toIssue()
-	}
-	return issues, nil
-}
-
-// decodeIssueRows is the shared tail of ListIssues and ListOpenIssues, which
-// differ only in the --label filter they hand gh: decode, order and the
-// page-limit warning have to stay identical between the two.
-func decodeIssueRows(out []byte) ([]forge.Issue, error) {
-	issues, err := parseIssueRows(out)
+func (e *execClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
+	row, err := readRow()
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(issues, func(i, j int) bool {
-		ni, _ := strconv.Atoi(issues[i].Number)
-		nj, _ := strconv.Atoi(issues[j].Number)
-		return ni < nj
-	})
-	forge.WarnPageMayTruncateBacklog("gh issue list", len(issues))
-	return issues, nil
-}
-
-func (e *execClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
-	if row, ok := routedRow(); ok {
-		return e.listIssuesViaConnector(row, state)
-	}
-	label := e.labels.Label(state)
-	cmd := exec.Command("gh", "issue", "list",
-		"--repo", e.repo,
-		"--state", "open",
-		"--label", label,
-		"--limit", strconv.Itoa(forge.ResultPageLimit),
-		"--search", "sort:created-asc",
-		"--json", "number,title,labels",
-	)
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, ghCommandErr("gh issue list", err)
-	}
-	return decodeIssueRows(out)
+	return e.listIssuesViaConnector(row, state)
 }
 
 // ListOpenIssues returns every open issue in ascending number order. Unlike
-// ListIssues it passes no --label filter, so issues with no dispatch label
+// ListIssues it filters on no label, so issues with no dispatch label
 // yet are included.
 func (e *execClient) ListOpenIssues() ([]forge.Issue, error) {
-	if row, ok := routedRow(); ok {
-		return e.listOpenIssuesViaConnector(row)
-	}
-	cmd := exec.Command("gh", "issue", "list",
-		"--repo", e.repo,
-		"--state", "open",
-		"--limit", strconv.Itoa(forge.ResultPageLimit),
-		"--search", "sort:created-asc",
-		"--json", "number,title,labels",
-	)
-	out, err := cmd.Output()
+	row, err := readRow()
 	if err != nil {
-		return nil, ghCommandErr("gh issue list", err)
+		return nil, err
 	}
-	return decodeIssueRows(out)
+	return e.listOpenIssuesViaConnector(row)
 }
 
 // ListIssuesWithLabels implements forge.LabeledBacklogLister (issue #3873,
 // building on the #3609 review). state scopes the scan to open or closed
 // issues -- a closed finding is a durable triage decision the host must not
-// refile. "gh issue list --label A --label B" ANDs the labels together, so
-// finding every issue carrying *either* one takes one query per label; the
-// merge, dedup-by-number, and partial-failure handling live in
-// forge.MergeLabeledIssues.
+// refile. The Connector scans one label at a time and merges them
+// (forge.MergeLabeledIssues).
 func (e *execClient) ListIssuesWithLabels(state forge.IssueState, labels []string) ([]forge.Issue, error) {
-	if row, ok := routedRow(); ok {
-		return e.listIssuesWithLabelsViaConnector(row, state, labels)
+	row, err := readRow()
+	if err != nil {
+		return nil, err
 	}
-	var ghState string
-	switch state {
-	case forge.IssueOpen, forge.IssueClosed:
-		ghState = state.Wire()
-	default:
-		return nil, fmt.Errorf("gh issue list: unsupported issue state %q", state)
-	}
-	return forge.MergeLabeledIssues("gh issue list", labels, func(label string) ([]forge.Issue, error) {
-		cmd := exec.Command("gh", "issue", "list",
-			"--repo", e.repo,
-			"--state", ghState,
-			"--label", label,
-			"--limit", strconv.Itoa(forge.DedupScanLimit),
-			"--search", "sort:created-desc",
-			"--json", "number,title,body,labels,stateReason,closedAt",
-		)
-		out, err := cmd.Output()
-		if err != nil {
-			return nil, ghCommandErr("gh issue list", err)
-		}
-		issues, err := parseIssueRows(out)
-		if err != nil {
-			return nil, err
-		}
-		forge.WarnDedupScanMayTruncate("gh issue list --state "+ghState, label, len(issues))
-		return issues, nil
-	})
+	return e.listIssuesWithLabelsViaConnector(row, state, labels)
 }
 
 func (e *execClient) Issue(num string) (forge.Issue, error) {
-	if row, ok := routedRow(); ok {
-		return e.issueViaConnector(row, num)
+	row, err := readRow()
+	if err != nil {
+		return forge.Issue{}, err
 	}
+	return e.issueViaConnector(row, num)
+}
+
+// nativeIssue reads issue num through gh. Only CloseMergedIssue's native write
+// path calls it, to learn whether the issue is already closed; every read goes
+// through readRow.
+func (e *execClient) nativeIssue(num string) (forge.Issue, error) {
 	cmd := exec.Command("gh", "issue", "view", num,
 		"--repo", e.repo,
 		"--json", "number,title,body,state,labels",
@@ -209,50 +97,14 @@ func (e *execClient) Issue(num string) (forge.Issue, error) {
 	}, nil
 }
 
-// ghComment is the comment shape gh issue view --json comments emits.
-type ghComment struct {
-	Author struct {
-		Login string `json:"login"`
-	} `json:"author"`
-	CreatedAt         string `json:"createdAt"`
-	Body              string `json:"body"`
-	IsMinimized       bool   `json:"isMinimized"`
-	MinimizedReason   string `json:"minimizedReason"`
-	AuthorAssociation string `json:"authorAssociation"`
-}
-
-// Comments returns issue num's comments oldest-first, the order gh emits them
-// in and the order forge.IssueText assumes when it windows to the last 10.
+// Comments returns issue num's comments oldest-first, the order
+// forge.IssueText assumes when it windows to the last 10.
 func (e *execClient) Comments(num string) ([]forge.Comment, error) {
-	if row, ok := routedRow(); ok {
-		return e.commentsViaConnector(row, num)
-	}
-	cmd := exec.Command("gh", "issue", "view", num,
-		"--repo", e.repo,
-		"--json", "comments",
-	)
-	out, err := cmd.Output()
+	row, err := readRow()
 	if err != nil {
-		return nil, ghCommandErr(fmt.Sprintf("gh issue view %s", num), err)
+		return nil, err
 	}
-	var raw struct {
-		Comments []ghComment `json:"comments"`
-	}
-	if err := json.Unmarshal(out, &raw); err != nil {
-		return nil, fmt.Errorf("parse issue %s: %w", num, err)
-	}
-	comments := make([]forge.Comment, len(raw.Comments))
-	for i, c := range raw.Comments {
-		comments[i] = forge.Comment{
-			Author:          c.Author.Login,
-			CreatedAt:       c.CreatedAt,
-			Body:            c.Body,
-			Minimized:       c.IsMinimized,
-			MinimizedReason: c.MinimizedReason,
-			Association:     c.AuthorAssociation,
-		}
-	}
-	return comments, nil
+	return e.commentsViaConnector(row, num)
 }
 
 var _ forge.CommentLister = (*execClient)(nil)
@@ -385,10 +237,11 @@ var _ forge.NativeDepsReader = (*execClient)(nil)
 // NativeDepsOf reads issue num's blocked_by relationships from GitHub's
 // native issue-dependencies API.
 func (e *execClient) NativeDepsOf(num string) ([]string, error) {
-	if row, ok := routedRow(); ok {
-		return e.nativeDepsViaConnector(row, num)
+	row, err := readRow()
+	if err != nil {
+		return nil, err
 	}
-	return e.nativeDependencyIDs(num, "blocked_by")
+	return e.nativeDepsViaConnector(row, num)
 }
 
 // BlocksOf returns the issues num blocks, read from GitHub's native
@@ -396,38 +249,11 @@ func (e *execClient) NativeDepsOf(num string) ([]string, error) {
 // relationship, so unlike DepsOf there is no body-text fallback and a lookup
 // failure is returned directly (issue #1744).
 func (e *execClient) BlocksOf(num string) ([]forge.Dependency, error) {
-	if row, ok := routedRow(); ok {
-		return e.blocksOfViaConnector(row, num)
-	}
-	ids, err := e.nativeDependencyIDs(num, "blocking")
+	row, err := readRow()
 	if err != nil {
 		return nil, err
 	}
-	return forge.WithSource(ids, forge.DepSourceNative), nil
-}
-
-// nativeDependencyIDs reads num's relationships in the given direction,
-// either "blocked_by" or "blocking", deduplicating in API response order.
-func (e *execClient) nativeDependencyIDs(num, direction string) ([]string, error) {
-	cmd := exec.Command("gh", "api",
-		fmt.Sprintf("repos/%s/issues/%s/dependencies/%s", e.repo, num, direction),
-		"--jq", ".[].number",
-	)
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, ghCommandErr(fmt.Sprintf("gh api dependencies/%s %s", direction, num), err)
-	}
-	var deps []string
-	seen := map[string]bool{}
-	scanner := bufio.NewScanner(strings.NewReader(string(out)))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line != "" && !seen[line] {
-			seen[line] = true
-			deps = append(deps, line)
-		}
-	}
-	return deps, nil
+	return e.blocksOfViaConnector(row, num)
 }
 
 // PriorClaimState reads issue num's timeline for the most recent "unlabeled"
@@ -436,30 +262,11 @@ func (e *execClient) nativeDependencyIDs(num, direction string) ([]string, error
 // so the timeline is the only route back to it. Events arrive oldest first,
 // across --paginate pages too, so the last match scanned is the most recent.
 func (e *execClient) PriorClaimState(num string) (forge.DispatchState, bool, error) {
-	if row, ok := routedRow(); ok {
-		return e.priorClaimStateViaConnector(row, num)
-	}
-	cmd := exec.Command("gh", "api",
-		fmt.Sprintf("repos/%s/issues/%s/timeline", e.repo, num),
-		"--paginate",
-		"--jq", `.[] | select(.event == "unlabeled") | .label.name`,
-	)
-	out, err := cmd.Output()
+	row, err := readRow()
 	if err != nil {
-		return forge.Untriaged, false, ghCommandErr(fmt.Sprintf("gh api timeline %s", num), err)
+		return forge.Untriaged, false, err
 	}
-	var prior forge.DispatchState
-	found := false
-	scanner := bufio.NewScanner(strings.NewReader(string(out)))
-	for scanner.Scan() {
-		switch strings.TrimSpace(scanner.Text()) {
-		case e.labels.Complete:
-			prior, found = forge.Complete, true
-		case e.labels.Failed:
-			prior, found = forge.Failed, true
-		}
-	}
-	return prior, found, nil
+	return e.priorClaimStateViaConnector(row, num)
 }
 
 // CloseMergedIssue closes issue num as a backstop for a merged agent PR whose
@@ -472,7 +279,7 @@ func (e *execClient) CloseMergedIssue(num string) error {
 	if row, ok := routedRow(); ok {
 		return e.closeMergedIssueViaConnector(row, num)
 	}
-	iss, err := e.Issue(num)
+	iss, err := e.nativeIssue(num)
 	if err != nil {
 		return err
 	}
@@ -528,46 +335,12 @@ var _ forge.HostPostedCommenter = (*execClient)(nil)
 var _ forge.HostPostedIssueFiler = (*execClient)(nil)
 
 // SearchIssues implements forge.IssueSearcher (issue #6895). text comes from an
-// untrusted Box and lands in a GitHub search string, where a bare qualifier
-// such as "repo:other/x" or "is:pr" would widen the scope (repo: qualifiers OR
-// together). Each term is therefore double-quoted, which makes it a literal
-// phrase rather than a qualifier, and text that could break out of the quoting
-// is rejected rather than escaped; a backslash is rejected too, since the search
-// parser may read `\"` as an escaped quote.
+// untrusted Box; the Connector quotes each term and rejects text that could
+// break out of the quoting.
 func (e *execClient) SearchIssues(text string, state forge.IssueState, label string, limit int) ([]forge.Issue, error) {
-	if row, ok := routedRow(); ok {
-		return e.searchIssuesViaConnector(row, text, state, label, limit)
-	}
-	switch state {
-	case forge.IssueOpen, forge.IssueClosed:
-	default:
-		return nil, fmt.Errorf("gh issue list: unsupported issue state %q", state)
-	}
-	if strings.ContainsFunc(text, func(r rune) bool { return r == '"' || r == '\\' || unicode.IsControl(r) }) {
-		return nil, errors.New("gh issue list: search text must not contain a double quote, backslash or control character")
-	}
-	terms := strings.Fields(text)
-	if len(terms) == 0 {
-		return nil, errors.New("gh issue list: search text is empty")
-	}
-	for i, t := range terms {
-		terms[i] = `"` + t + `"`
-	}
-	args := []string{"issue", "list",
-		"--repo", e.repo,
-		"--state", state.Wire(),
-	}
-	if label != "" {
-		args = append(args, "--label", label)
-	}
-	args = append(args,
-		"--limit", strconv.Itoa(limit),
-		"--search", strings.Join(terms, " ")+" in:title,body",
-		"--json", "number,title,state,labels",
-	)
-	out, err := exec.Command("gh", args...).Output()
+	row, err := readRow()
 	if err != nil {
-		return nil, ghCommandErr("gh issue list", err)
+		return nil, err
 	}
-	return parseIssueRows(out)
+	return e.searchIssuesViaConnector(row, text, state, label, limit)
 }

@@ -2,6 +2,7 @@ package github
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
@@ -31,10 +32,11 @@ func useGithubRowUnderHost(t *testing.T, host string) {
 }
 
 // The row's Routes pin api.github.com, so under a GitHub Enterprise GH_HOST it
-// applies none and the host's gh, which honours GH_HOST, answers: nothing is
-// sent to api.github.com and no connector credential is read.
-func TestGithubRow_GHEHostLeavesNativeGHInCharge(t *testing.T) {
+// applies none: nothing is sent to api.github.com, no connector credential is
+// read, and a read fails by name rather than reaching gh.
+func TestGithubRow_GHEHostAppliesNoRow(t *testing.T) {
 	useGithubRowUnderHost(t, "ghe.example.com")
+	t.Setenv("GH_HOST", "ghe.example.com")
 	if _, ok := backendrows.Lookup("github"); ok {
 		t.Fatal("the github row is applied under GH_HOST=ghe.example.com")
 	}
@@ -43,9 +45,11 @@ func TestGithubRow_GHEHostLeavesNativeGHInCharge(t *testing.T) {
 	}
 	calls := countGH(t)
 	c := NewExecClient(connectorRepo, forge.DispatchLabels{})
-	_, _ = c.ListOpenIssues()
-	if n := calls(); n == 0 {
-		t.Error("ListOpenIssues never reached gh under a GitHub Enterprise host")
+	if _, err := c.ListOpenIssues(); !errors.Is(err, ErrNoReadRoute) {
+		t.Errorf("ListOpenIssues error = %v, want ErrNoReadRoute", err)
+	}
+	if n := calls(); n != 0 {
+		t.Errorf("ListOpenIssues ran gh %d times under a GitHub Enterprise host", n)
 	}
 }
 

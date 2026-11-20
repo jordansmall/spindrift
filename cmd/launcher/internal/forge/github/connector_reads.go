@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -128,12 +129,31 @@ func closeSharedConnectors() {
 }
 
 // routedRow is the github backend row when one is configured and not in shadow
-// mode: every read and write the Connector serves goes through it, with no gh
-// fallback. Without a row, under a shadow row (native stays authoritative), or
-// under a GH_HOST other than github.com (host.go's gate), the host's gh answers.
+// mode. The write paths branch on it: routed, the Connector serves the write;
+// otherwise the host's gh does. Reads never fall back, see readRow.
 func routedRow() (backendrows.Row, bool) {
 	row, ok := backendrows.Lookup(backend.GitHub.Name)
 	return row, ok && !row.Shadow
+}
+
+// ErrNoReadRoute is wrapped by every read that has no Connector row to go
+// through. The native gh read path is gone, so the read fails rather than
+// falling back to gh.
+var ErrNoReadRoute = errors.New("github read has no Connector route")
+
+// readRow is routedRow for a read: the routed row, or ErrNoReadRoute naming
+// which of the three causes left none.
+func readRow() (backendrows.Row, error) {
+	if row, ok := routedRow(); ok {
+		return row, nil
+	}
+	if _, ok := backendrows.Lookup(backend.GitHub.Name); ok {
+		return backendrows.Row{}, fmt.Errorf("%w: the github backend row is in shadow mode, and github has no native read path left to shadow; drop shadow from the row", ErrNoReadRoute)
+	}
+	if host := Host(); !strings.EqualFold(host, DefaultHost) {
+		return backendrows.Row{}, fmt.Errorf("%w: GH_HOST=%s is not %s and the github Connector's routes pin api.github.com, so GitHub Enterprise is not served", ErrNoReadRoute, host, DefaultHost)
+	}
+	return backendrows.Row{}, fmt.Errorf("%w: no github backend row is applied; import spindrift.flakeModules.default (the root module), not core's module directly", ErrNoReadRoute)
 }
 
 // noteRouted records the error a routed read or write returned and returns
