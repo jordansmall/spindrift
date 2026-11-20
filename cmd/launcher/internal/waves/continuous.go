@@ -517,7 +517,6 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 						return struct{}{}
 					})
 			}
-			limiter.Release()
 			mu.Lock()
 			// Integrate the idle slot-time since the last checkpoint using the
 			// pre-delete inflight count, the busy-slot count over the
@@ -529,6 +528,10 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			// Must run before the abort watcher can next take mu, or a Box that
 			// just finished on its own would still look in-flight to it (#3521).
 			delete(inflight, iss.Number)
+			// Released under mu, not before taking it: a slot freed earlier lets
+			// a refill already holding mu claim it ahead of this completion's
+			// bookkeeping, so one completion drives an extra refill pass.
+			limiter.Release()
 			drainRefill()
 			if staleDrain.inProgress() && len(inflight) == 0 {
 				reportStaleDrainReleasingMu(&mu, queue, staleDrain.finish(staleDrain.slotAt))
