@@ -1,5 +1,33 @@
 # Migration Guide
 
+## The Console is removed (issue #7306)
+
+`spindrift console`, the interactive terminal UI for browsing the backlog,
+picking issues, and tailing or stopping live Boxes, is gone. The subcommand no
+longer exists: `spindrift console` fails with `unknown subcommand: console`,
+and `docs/console.md` is deleted. The removal is recorded in [ADR
+0076](docs/adr/0076-the-console-is-removed.md) (issue #7306).
+
+What to use instead:
+
+- **Triage and launch from the tracker.** Label an issue `ready-for-agent` to
+  make it dispatchable, and `agent-trigger` to fire one CI dispatch run. See
+  [Label lifecycle](docs/reference.md#label-lifecycle).
+- **Launch one issue by hand.** Run `spindrift dispatch N`, or set
+  `ISSUE_NUMBER=N`, in place of picking it in the Console.
+- **Keep a pool filled.** Run the daemon, `nix run .#daemon`, which holds
+  `MAX_PARALLEL` slots and refills them as work arrives. See
+  [Daemon](docs/reference.md#daemon).
+- **Watch what is running.** Run the Dashboard, `nix run .#dashboard`, a
+  read-only web page of the daemon's status. See
+  [Dashboard](docs/reference.md#dashboard).
+
+`CONTINUOUS_DISPATCH` is unaffected: it stays available, deprecated in favour
+of the daemon, for operators who want no daemon at all.
+
+A script or shell alias that ran `spindrift console` needs one of the
+replacements above.
+
 ## The Box token knobs are removed (issue #6902)
 
 `BOX_GH_TOKEN`, `BOX_FORGEJO_TOKEN` and `BOX_FORGE_CREDENTIAL` had no reader
@@ -1004,11 +1032,11 @@ orchestrate for its whole pool lifetime. See docs/reference.md's Daemon
 section for the full mechanism.
 
 If you drive spindrift with a headless loop, switch it to `nix run
-.#daemon`. If you have no such loop — you dispatch by hand, or use the
-Console — you are not required to do anything: the knob stays available
-for operators who want no daemon at all, and the Console keeps using the
-continuous engine as its own dispatch mechanism, unaffected by this
-deprecation.
+.#daemon`. If you have no such loop and dispatch by hand, you are not required
+to do anything: the knob stays available for operators who want no daemon at
+all. (The interactive Console, which once used the continuous engine as its own
+dispatch mechanism, has since been removed; see the Console entry at the top of
+this guide.)
 
 ## `spindrift doctor` now exits 2 on an undersized podman machine (issue #3544)
 

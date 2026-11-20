@@ -1439,9 +1439,9 @@ Driver entry declares:
   (`internal/forge/<name>`) edit reruns the same set, with that adapter's
   `runners-<name>-go-test` or `backends-<name>-go-test` in place of the
   Driver's check. None of the three reruns the core checks
-  (`launcher-go-test`, `launcher-go-fmt`, `launcher-go-vet` and
-  `launcher-console-isolation`), which `drivers-go-test-independent`,
-  `runners-go-test-independent` and `backends-go-test-independent` pin.
+  (`launcher-go-test`, `launcher-go-fmt` and `launcher-go-vet`), which
+  `drivers-go-test-independent`, `runners-go-test-independent` and
+  `backends-go-test-independent` pin.
   Those build from a source without any Driver, runner family, bundled
   backend, bundle or binary, and each adapter's check gofmts and vets its own
   package instead. A
@@ -4068,13 +4068,13 @@ Driver Connectors); a run that loads none starts none.
   `spindrift-connector-sandbox-` prefix and kills each one
   whose `<owner>` is this Launcher's own and whose `<pid>`, the Launcher that
   started it, is no longer alive, logging `==> reaped orphaned Connector
-  sandbox: <name>`. Unlike an orphaned Box, which Console startup only lists
-  (issue #1619), an orphaned sandbox is killed: it holds no work worth
-  inspecting. `<owner>` is a 12-hex-digit digest of the Launcher's identity:
-  on Linux its boot id and pid namespace, on macOS its boot session UUID. A
-  sandbox whose `<owner>` differs was started by a Launcher in another pid
-  namespace or on another host sharing the runtime daemon, and the sweep
-  skips it silently, since its `<pid>` means nothing here. A sandbox with no
+  sandbox: <name>`. An orphaned sandbox is killed rather than left for
+  inspection: it holds no work worth inspecting. `<owner>` is a 12-hex-digit
+  digest of the Launcher's identity: on Linux its boot id and pid namespace,
+  on macOS its boot session UUID. A sandbox whose `<owner>` differs was
+  started by a Launcher in another pid namespace or on another host sharing
+  the runtime daemon, and the sweep skips it silently, since its `<pid>`
+  means nothing here. A sandbox with no
   owner identity, named by an older Launcher (`<pid>-<nanos>`) or with the
   `unowned` token a Launcher that could not read its identity uses, is
   skipped too, printing `note: skipped Connector sandbox with no owner
@@ -4685,7 +4685,7 @@ row to also say "(its `--flag` is accepted but inert)" (issue #3855).
 | `MAX_BUDGET_TOKENS`    | `0`     | `selfHealing`      | cumulative tokens (every pass and every retried attempt within it) before stopping self-heal short of `MAX_FIX_ATTEMPTS` (`0` disables the token budget cap); also forwarded into the Box, where the orchestrator's own review loop applies the same threshold to its own fresh, Box-local sum (implement/fix/review passes plus dispatched workers in *this* Box only, not the host's cross-Box figure) to commit to a terminal land pass instead of a further BLOCK-triggered review round |
 | `MAX_BUDGET_USD`       | `0`     | `selfHealing`      | cumulative cost in USD (every pass and every retried attempt within it) before stopping self-heal short of `MAX_FIX_ATTEMPTS` (`0` disables the cost budget cap); quote fractional values in flake settings, e.g. `"4.44"`; also forwarded into the Box for the orchestrator's own review-loop budget cap, same as `MAX_BUDGET_TOKENS` (same threshold, same fresh-per-Box sum, not the host's own cross-Box one) |
 | `PREFLIGHT_STALE_BASE` | `` (off) | `selfHealing`    | opt-in: proactively rebase a green-but-behind PR (no conflict) and re-green it before merging — see [Stale-base preflight](#stale-base-preflight); off by default merges a green-but-behind PR as-is |
-| `MERGE_POLL_INTERVAL`  | `30`    | `branches`         | seconds between CI-status polls in the merge gate. Not a rate-limit lever: the gate issues one strictly-serialized, single-point GraphQL query at a time, only while a PR is actively mid-landing, bounded by `MERGE_POLL_TIMEOUT` — it never bursts. The cadence-sensitive pollers are the *continuous refill* ticker (runs for the launcher's whole lifetime and bursts outside its ticker) and the *console backlog* poll — slow those in a rate-limit sweep, not this knob. The interval is also reused as four fixed-call-count delays (the `SUCCESS` confirm re-poll, the `3 ×` check-registration window, the merge-blocked-by-checks retry, and the fix-pass no-op confirm), so raising it stretches every landing for zero rate-limit benefit (issue #3249) |
+| `MERGE_POLL_INTERVAL`  | `30`    | `branches`         | seconds between CI-status polls in the merge gate. Not a rate-limit lever: the gate issues one strictly-serialized, single-point GraphQL query at a time, only while a PR is actively mid-landing, bounded by `MERGE_POLL_TIMEOUT` — it never bursts. The cadence-sensitive poller is the *continuous refill* ticker (runs for the launcher's whole lifetime and bursts outside its ticker) — slow that in a rate-limit sweep, not this knob. The interval is also reused as four fixed-call-count delays (the `SUCCESS` confirm re-poll, the `3 ×` check-registration window, the merge-blocked-by-checks retry, and the fix-pass no-op confirm), so raising it stretches every landing for zero rate-limit benefit (issue #3249) |
 | `MERGE_POLL_TIMEOUT`   | `3600`  | `branches`         | seconds to wait for CI green before abandoning the merge — at the default, a merge that rides out the full deadline can outlive an installation token's ~1h lifetime when `GH_TOKEN_REFRESH_FILE` is unset (see [GitHub App installation token](#github-app-installation-token-recommended)) |
 | `OVERLAP_GATE`         | `defer` | `concurrency`      | declared `## Touches` overlap policy: `defer` (hold a Dispatchable issue whose declared touch-set intersects an in-progress issue's, retrying once the collider completes) or `off` (disable the check — see [Declared touch-set overlap](#declared-touch-set-overlap)) |
 | `TRANSIENT_RETRY_MAX`  | `3`     | `selfHealing`      | retries for transient box exits (529/network backoff; consecutive 429 holds); also bounds the retries of a host-side bundle relay for a read-only Box (issue #4649) and of the host-side draft PR create after it (issue #5146); once the `status=ready` landing relay or a fix-pass relay exhausts them the issue parks `agent-failed` (issues #4651, #6074), while the conflict-resolve relay never parks |
@@ -4703,7 +4703,7 @@ row to also say "(its `--flag` is accepted but inert)" (issue #3855).
 longer costs `is-running`, `list-running`, and `reap` their visibility:
 under bwrap those resolve a Box through the same per-Box cgroup v2
 subtree, but that subtree — and the `ErrAlreadyRunning` collision guard
-and Console's orphan detection (issue #651) alongside it — survives
+alongside it — survives
 whenever a delegated cgroup directory can be created at all; an
 unwritable `pids.max`/`memory.max` degrades only that one cap, not the
 whole cgroup (ADR 0042). They report "nothing running" only when no
@@ -6359,18 +6359,15 @@ such block and are experimental, so you select them by editing
     could not move from status "A" to "B": the workflow offers transitions
     to "C", "D"` as a comment on the issue and settles the Record with
     reason `transition-refused`, whose note keeps the reason and note it
-    displaced (see [Stats](#stats)). A refused claim (dispatch or the
-    Console queue) and a refused move back to `dispatchable` (terminate,
-    abort, or the Console's quit revert) post the same comment. A
+    displaced (see [Stats](#stats)). A refused claim and a refused move back to
+    `dispatchable` (an abort) post the same comment. A
     dispatch process comments an unchanged claim refusal once, but a
     wave, one-shot or daemon-spawned run starts fresh, so each such run
     posts it again until the workflow offers the transition. Only a
     successful claim clears that memory, so a card that leaves the
     dispatchable listing and returns with the same refusal is not
-    commented again. The Console queue keeps no such memory: a refused
-    pick is dissolved, so picking the same card again posts it again. The
-    `doctor` `status-mapping` row catches a mapped status the workflow
-    lacks ahead of time.
+    commented again. The `doctor` `status-mapping` row catches a mapped
+    status the workflow lacks ahead of time.
 
   To migrate, map every work state, then set `JIRA_LIFECYCLE=status`
   (`issues.jira.lifecycle = "status"` in the flake). Research states are
@@ -7638,11 +7635,7 @@ process's run — every Box it dispatches, not just the initial seed. A
 second process that tries to seed the same Accumulation repo while the
 first still holds the lock fails fast with a clear error naming the repo
 path, rather than blocking or silently racing the first process's mount;
-the operator re-runs once the first process exits. `console` is the one
-case where "the whole run" is a full interactive session, not a single
-seed-and-dispatch: it holds the lock from startup until the operator quits,
-so a `dispatch`/`research` process against the same Accumulation repo fails
-fast for as long as a `console` session stays open. The lock is advisory
+the operator re-runs once the first process exits. The lock is advisory
 and per-`CODE_FORGE_ACCUMULATION_REPO_DIR` path, but that default resolves
 to one shared `.spindrift/accum.git` under the launcher's working directory
 (not one per ticket) — so, by default, two unrelated tickets dispatched
@@ -8614,10 +8607,9 @@ isn't wired up today: `Start`'s `(func() error, error)` return signature
 exposes no pid or pgid to forward against, so this would need a seam change
 first. The launcher's own SIGINT/SIGTERM registration,
 `stopsignal.Notify` (behind `main.go`'s `installStopSignal` seam), is held
-by the headless dispatch paths and, since issue #3651, for the Console's
-whole run (the daemon holds its own), but its relay only closes stop/abort
-channels; it has no hook that forwards a signal into a child's group. So
-the orphaned-build cost of the Ctrl-C case is a deliberate,
+by the headless dispatch paths (the daemon holds its own), but its relay only
+closes stop/abort channels; it has no hook that forwards a signal into a child's
+group. So the orphaned-build cost of the Ctrl-C case is a deliberate,
 currently-unmitigated cost, not one that's impossible to avoid.
 
 ---
@@ -10331,8 +10323,7 @@ something one process must orchestrate across its whole pool lifetime —
 the very job the image-freshness probe, the hot-swap, and the stale-drain
 exit documented in [Dispatch exit codes](#dispatch-exit-codes) above exist
 to do. It is **not removed**: the knob still works, it stays available for
-operators who want no daemon at all, and it remains the Console's engine
-unchanged (see [docs/console.md](console.md)). See issue #3547.
+operators who want no daemon at all. See issue #3547.
 
 See `lib/env-schema.nix`'s `continuousDispatch` entry for the full
 behavior. On the command line `--continuous-dispatch` is a boolean
@@ -11431,7 +11422,7 @@ unchanged, and an explicitly claimed `ISSUE_NUMBER` still runs regardless
 of what the other family's label says, exactly as it did before this
 ticket. The filter is tracker-derived: it reads the labels the tracker
 already returned with each issue rather than adding a query qualifier, so
-in-progress work started by a Console session, CI, or a human is just as
+in-progress work started by CI or a human is just as
 visible to it as work this daemon started itself, and an operator who has
 never created the research labels pays nothing for the check — an absent
 label is a label no issue carries, so the filter is a silent no-op. A
@@ -12615,8 +12606,8 @@ once.
 Continuous dispatch (`CONTINUOUS_DISPATCH`, above) is deprecated in the
 daemon's favour — the daemon is its replacement as the way to hold a pool
 of Boxes — but not removed: the knob still works for an operator who wants
-no daemon at all, and it remains the Console's engine unchanged, see
-**Deprecated** under [Continuous dispatch](#continuous-dispatch).
+no daemon at all. See **Deprecated** under [Continuous
+dispatch](#continuous-dispatch).
 
 ## Dashboard
 

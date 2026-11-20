@@ -602,8 +602,8 @@ parses the `integration/<parent>` ref grammar itself — the local adapter's
 `local.IntegrationBranch` renders the branch label the scope prints, so the
 operator-facing hold diagnostic names the Integration branch while the wave
 engine stays adapter-neutral. `localloop.SeedScopeOf` is the single seam that
-builds it, consumed by both the dispatch command path and the Console, so the
-two can never disagree about which blocker landing gates a dependent.
+builds it, so no caller can disagree about which blocker landing gates a
+dependent.
 _Avoid_: seed parent, `ParentOf` (the pre-#2150 name of the now-deleted
 resolver closure and Config field).
 
@@ -625,8 +625,7 @@ parented broad ticket's surfaced branch keeps ADR 0033's sanitized-parent
 name; a parentless one surfaces under its own sanitized ticket title
 instead (falling back to its slug when the title sanitizes empty), while
 the Integration branch key stays the stable sanitized slug in every case,
-so an edited title never shifts a ticket's identity mid-flight. The
-Console may render the same value later.
+so an edited title never shifts a ticket's identity mid-flight.
 _Avoid_: surface notice, skip reason (both pre-#1811 names for the scattered
 prints Verdict consolidates).
 
@@ -853,7 +852,10 @@ mechanism).
 
 **Abort signal**:
 The second operator signal, after a [[Stop signal]]: reap every in-flight Box
-and release its claim.
+and release its claim. The release (`terminate.Reclaim`) returns the issue to
+`Dispatchable`, never `Failed`, leaves pushed branches and open PRs in place,
+and posts a comment linking them so a later re-dispatch can adopt rather than
+collide.
 _Avoid_: escalation (the transition from Stop to Abort, not the request),
 kill, SIGINT (the mechanism).
 
@@ -1029,7 +1031,7 @@ labels) that each Issue Tracker adapter resolves into one canonical `Priority`
 value on the returned issue — the same shape as dispatch-state labels becoming a
 canonical [[Dispatch lifecycle]] state — so the launcher sorts once, centrally
 (in the plan), never in a backend's mechanism. Applies to the discovered pool
-(queue-drain and continuous-refill hydration) and the Console [[Backlog]]; a
+(queue-drain and continuous-refill hydration); a
 hand-picked selective list keeps the operator's typed order (ADR 0011), and it
 is a no-op on the single-issue workflow trigger. Strictly a sort key: it never
 overrides a dependency edge (a blocker runs before its dependent regardless of
@@ -1089,18 +1091,11 @@ candidates remain queued, taking the caller's own claimed set as a
 parameter (issue #3035); `ReportStaleDrain` delivers a finished stale-drain
 report to wherever an implementation's operator watches; `EnsureLogDirExists`
 idempotently makes the on-disk log directory the Queue writes to, a documented
-no-op for an implementation with none (issue #3036). Two real
-implementations: the headless adapter (`NewHeadlessQueue`, same file)
+no-op for an implementation with none (issue #3036). The real
+implementation is the headless adapter (`NewHeadlessQueue`, same file); it
 performs the real `Dispatchable`→`InProgress` claim, creates the
 `.spindrift/logs` directory, and owns the operator-facing stale-drain stdout
-print plus log-file append; the Console adapter (`runContinuousQueue`,
-`cmd/launcher/internal/console/launcher.go`) has a no-op `Claim` (Console's
-own `Queue.Discover`, `console/queue.go`, already claims as a side effect of
-discovering a ready pick), reads the session queue's own still-queued depth
-for `Pending`, routes `ReportStaleDrain` in memory to the session banner, and
-so has a no-op `EnsureLogDirExists`, never touching the filesystem.
-Distinct from the Console's own session `Queue` (`console/queue.go`, holding
-`Pick`s): that is one implementation's backing store, not the seam itself.
+print plus log-file append.
 _Was_: the per-caller Config closures `PreResolved`, `PendingCount`,
 `DiscoverReporting`, `OnStaleDrainReport`, and the label-zeroing convention
 (`Label`/`InProgressLabel` left empty to mean no-op claim) — all deleted
@@ -1110,11 +1105,10 @@ from `waves.Config`.
 The query seam answering "may this issue dispatch now, and if not, why"
 before anything launches: per-issue blocker status (ready / blocked-by /
 check-failed) with the native-vs-body `Sources` tags carried through. The
-pre-dispatch consumers — the Console's held picks (#650) and `preview`'s
-blocker annotations — use it; the wave engine keeps its own internal gate,
-which now always runs — a caller that has already resolved readiness
-through this seam, like Console's `Queue.Discover`, simply hands back an
-empty blocker graph, so the gate has nothing left to check rather than
+pre-dispatch consumer, `preview`'s blocker annotations, uses it; the wave
+engine keeps its own internal gate, which now always runs — a caller that has
+already resolved readiness through this seam simply hands back an empty
+blocker graph, so the gate has nothing left to check rather than
 needing to be told to skip it. Decided 2026-07-18 (#1547), replacing
 the exported blocker primitives and the empty-edges construction.
 _Avoid_: blocker check, gate (that is the engine's internal act), preflight
@@ -1126,9 +1120,9 @@ structurally cannot: advancing the checkout, rebuilding the image, and
 deciding whether to run again — the thing that outlives a single launcher
 invocation. ADR 0019 makes the invocation the image-freshness boundary, so
 every driving loop exists to supply the other half of that boundary.
-Instances differ by who decides to re-run — an operator (Console), the
-[[Daemon]] (`dogfood.sh` before it), a workflow (CI) — not by what the
-role is.
+Instances differ by who decides to re-run — the
+[[Daemon]] (`dogfood.sh` before it), a workflow (CI), or an operator
+re-running by hand — not by what the role is.
 _Avoid_: scheduler, cron, supervisor, runner (that is the Box sandbox seam),
 harness, orchestrator (the in-box review role). Note "daemon" names one
 instance ([[Daemon]]), never the role itself, and never the container-runtime
@@ -1144,9 +1138,9 @@ read-only Box relays an outbox bundle — against that one pool; a kind
 selector (`dispatch`, `research`, `butler`, `recover`) narrows it to that
 one kind.
 This makes it the owner of dispatch concurrency, superseding continuous
-dispatch — deprecated in its favour, but kept for operators who want no daemon
-and retained as the Console's engine. It supervises and re-invokes; it never
-runs a Box itself. It learns whether a kind has work from that kind's
+dispatch — deprecated in its favour, but kept for operators who want no daemon.
+It supervises and re-invokes; it never runs a Box itself. It learns whether a
+kind has work from that kind's
 [[Demand]], never by spawning a child to find out (ADR 0059). Distinct from the
 *container-runtime* daemon (podman/docker) that the bwrap runtime is
 "daemonless" of: spindrift's Daemon is runtime-agnostic and drives a bwrap
@@ -1164,7 +1158,7 @@ the instant its next [[Chore]] is due, reported by its last child. Advisory
 only: the child still discovers and claims, and `Ready` counts labelled
 candidates, not dispatchable ones — blockers and overlap still surface as a
 jam.
-_Avoid_: queue depth, backlog (that is the Console's pick source), pending.
+_Avoid_: queue depth, backlog, pending.
 
 **Start budget**:
 The most children of one [[Dispatch kind]] the [[Daemon]] lets into discovery
@@ -1215,19 +1209,6 @@ side.
 _Avoid_: runner log (the runner is the Box isolation seam), daemon log, box
 log.
 
-**Console**:
-The interactive driving loop: a launcher session in which an operator composes
-the running work by Picking issues (promoting them as needed), watches live
-Dispatches, drills into each Dispatch's work, and ends them (Unpick,
-Terminate). Discovery is picks-only — nothing launches that the operator did
-not Pick; "pick all ready" is an explicit bulk gesture, not standing
-discovery. The issue listing is advisory and the claim authoritative: a stale
-listing can only produce a failed claim, never a wrong dispatch. The session
-queue is in-memory; durable state lives on the Issue Tracker alone. A peer of
-the headless driving loops (the [[Daemon]], CI), not a replacement for them.
-_Avoid_: TUI (names the rendering, not the role), dashboard (it drives, not
-merely displays), monitor.
-
 **Dashboard**:
 A read-only view of one [[Daemon]]: its slots and their phases, the Dispatch
 each busy slot is working, the recent history from its [[Events file]], and
@@ -1235,42 +1216,7 @@ each Dispatch's [[Child log]] and [[Pass log]]s. It never picks, starts,
 stops, or settles anything, and it reads only what the Daemon already
 publishes — never the Daemon's internals. The name is the role, not the
 rendering: a web page and a terminal view are both the Dashboard.
-_Avoid_: monitor, console (that drives), UI, status page.
-
-**Section**:
-A named slice of the session's issues the Console shows one at a time — Backlog,
-Running, Held, Settled, or Failed. The Backlog section is the pick source; the
-rest slice the work queue of already-Picked issues by their state.
-_Avoid_: tab (names the widget, not the slice), view, filter (the Backlog's own
-label filter is a separate thing).
-
-**Backlog**:
-The Console section listing queueable issues an operator can Pick — the pick
-source, distinct from the work queue of issues already Picked.
-_Avoid_: inbox, todo, queue (that is the picked work, not the source).
-
-**Viewport**:
-The Console-internal geometry module owning scroll state for every scrolling
-pane — offset, cursor, cursor-follow, and clamp-on-shrink behind a small
-interface, with height 0 meaning unbounded. Pure geometry: it returns
-visible-slice bounds and hidden-above/below counts, and the view renders the
-affordance strings ("… N more below"), so restyling never touches it. One
-implementation serves the backlog/queue columns, the drill-in pane, and the
-rebuild-output pane. Decided 2026-07-18 (#1540).
-_Avoid_: scroll region, pager, window (that names its output value, not the
-module).
-
-**Layout**:
-The pure resolver (`cmd/launcher/internal/console/layout.go`,
-`resolveLayout(m Model) layout`) that decides the console's render geometry
-once per Model snapshot — the branch (docked sidebar, floating sidebar
-modal, fullscreen sidebar, fullscreen detail modal, or plain) plus every
-pane budget, wrap width, and scroll-clamp height — so View's branch pick and
-Update's viewport clamps consume the same value instead of separately
-re-deriving it (issue #2922, retiring a decision that used to drift out of
-sync between the two, e.g. issues #829/#1501/#1755).
-_Avoid_: render (Layout decides geometry; it draws nothing itself —
-layout_purity_guard_test.go pins it, issue #3019).
+_Avoid_: monitor, console, UI, status page.
 
 **Quickstart**:
 The pre-CLI interactive scaffolder — a nix app (`nix run
@@ -1297,35 +1243,6 @@ generated files as values, with the injection-guarding nix escaping applied
 on that single seam. The wizard keeps the writes, the clobber/backup policy,
 and the doctor/build finish line. Decided 2026-07-18 (#1548).
 _Avoid_: config (that names the generated files), wizard state, form.
-
-**Pick**:
-The operator's act of selecting an issue into the running session's queue for
-dispatch. Picking an issue that is not yet `Dispatchable` promotes it through
-the normal lifecycle transition first — the pick *is* the human launch button,
-recorded durably on the Issue Tracker. A picked issue waits in the queue until
-a parallelism slot frees; queued-but-unlaunched picks hold at `Dispatchable`,
-never `InProgress`.
-_Avoid_: select, schedule, enqueue.
-
-**Unpick**:
-Retracting a queued-but-not-yet-launched Pick. Purely a session-queue edit —
-no Issue Tracker interaction; the issue simply remains `Dispatchable`.
-_Avoid_: cancel (ambiguous with Terminate), dequeue, remove.
-
-**Terminate**:
-The operator-initiated ending of a live Dispatch, valid anywhere from claim to
-verdict: any running Box is reaped, the settle is abandoned wherever it stands
-(CI watch, fix pass, merge gate), and the issue returns to `Dispatchable` —
-never `Failed` (nothing to triage; the human just decided) and never a new
-lifecycle state. Terminate abandons watching, never un-lands work: pushed
-branches and open PRs stay put, and the terminate comment on the issue links
-them so a later re-dispatch can adopt rather than collide. The ending is
-recorded outside the state machine: a terminal line in the Box log and that
-comment. Distinct from Unpick, which retracts a Pick that never launched.
-The same reclaim path (`terminate.Reclaim`) also serves an [[Abort signal]]
-and a shutdown drain's release, each posting its own trigger-specific
-comment — only the operator gesture described above is a Terminate.
-_Avoid_: kill, cancel, abort.
 
 **Reconcile**:
 The bookkeeping sweep that, on the `local` tracker, makes a local issue's
@@ -1366,34 +1283,22 @@ unauthenticated signal (a local fast-forward has no draft-PR review catch,
 unlike the PR-shaped forge that auto-adopts) nor lost to the `Failed` triage
 queue. [[Reconcile]] skips it — never resets it toward `Dispatchable`, so it is
 never silently re-dispatched — and `spindrift recover` (the
-`Recover` entry point, issue #2225) is what lands it; `doctor` and the
-Console surface a count. The operator's action becomes *recover*, not
+`Recover` entry point, issue #2225) is what lands it; `doctor` surfaces a
+count. The operator's action becomes *recover*, not
 *restart*. _Avoid_: stranded, salvageable, failed-recoverable (it is a state of
 its own, not a flavor of `Failed`).
 
 **Pass log**:
 One Box pass's log — the initial pass, each fix pass, or the conflict-resolve
 pass — written per Dispatch, with earlier attempts rotated aside rather than
-overwritten. The agent's side of a Dispatch; the [[Transcript]] and
-[[Activity feed]] are views of it.
+overwritten. The agent's side of a Dispatch; the [[Transcript]] is a view of it.
 _Avoid_: box log, runner log, issue log (Chores have no issue).
 
 **Transcript**:
-The Driver-rendered record of a Dispatch's work across its pass logs — the full
-content the live-tail sidebar shows on toggle, with a raw-JSONL toggle for the
-byte-exact form. It is a *view* of logs the Dispatch already produced, not a
-separately stored stream: the condensed Activity feed is a second view of the
-same logs, not a distinct timeline behind them.
+The Driver-rendered record of a Dispatch's work across its pass logs, with a
+raw-JSONL form for the byte-exact record. It is a *view* of logs the Dispatch
+already produced, not a separately stored stream.
 _Avoid_: narrative log, running log, log.
-
-**Activity feed**:
-The Console's condensed, timestamped view of a running Dispatch's work — one
-line per Driver step, derived by replaying the Dispatch's pass log through the
-heartbeat parser. It is the live-tail sidebar's default, following the newest
-line until the operator scrolls back; a key toggles it to the full [[Transcript]].
-Like the Transcript, a view of logs the Dispatch already produced, not a
-separately stored stream.
-_Avoid_: heartbeat log, status log, activity log, event stream.
 
 **Outcome line**:
 The machine-readable final line a Box writes to stdout, parsed by the Launcher
