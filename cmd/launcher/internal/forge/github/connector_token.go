@@ -19,24 +19,20 @@ import (
 // API host.
 var connectorClient *http.Client
 
-// introspectToken is the Strategy's IntrospectToken. With a github backend row
-// the row's Connector answers, so the host needs no gh; without one (host.go's
-// gate drops it under another GH_HOST) or under a shadow row the native gh probe
-// does and the primary write gate keeps detecting a write-incapable token. A
-// Connector load is short-lived, with its audit record in the run's primary
-// record.
+// introspectToken is the Strategy's IntrospectToken. The github backend row's
+// Connector answers, so the host needs no gh; without a routed row it fails
+// with ErrNoReadRoute, as every read does. A Connector load is short-lived,
+// with its audit record in the run's primary record.
 func introspectToken(token, repoSlug string) (backendkit.TokenIntrospection, error) {
-	row, ok := routedRow()
-	if !ok {
-		return nativeIntrospect(token, repoSlug)
+	row, err := readRow()
+	if err != nil {
+		return backendkit.TokenIntrospection{}, err
 	}
 	audit, closeAudit, _ := primaryrecord.OpenFile(primaryrecord.Name(backend.GitHub.Name, ".audit.jsonl"))
 	defer closeAudit()
 	got, err := introspectViaConnector(row, backendrows.Options{Audit: audit, Client: connectorClient}, token, repoSlug)
 	return got, noteRouted("introspect the token", err)
 }
-
-var nativeIntrospect = newTokenIntrospector(TokenOAuthScopes, TokenRepoPushPermission)
 
 // loadConnector loads row's Connector bound to repoSlug, and returns it with
 // the API base URL its first Route names.

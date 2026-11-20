@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -110,77 +109,14 @@ func githubRow(t *testing.T) backendrows.Row {
 	return row
 }
 
-func noGithubRow(t *testing.T) {
-	t.Helper()
-	t.Cleanup(backendrows.Snapshot())
-	if err := backendrows.Use(nil, func(string) string { return "" }); err != nil {
-		t.Fatal(err)
-	}
+// ghTokenWriteScopes are the classic/OAuth scopes that grant repo write access;
+// the Connector carries its own copy, which TestConnector_TokenGrantWriteScopes
+// pins.
+var ghTokenWriteScopes = map[string]bool{
+	"repo":        true,
+	"public_repo": true,
 }
 
-// With no github row configured the introspection is the native gh probe, so a
-// host without a Connector keeps detecting a write-capable token.
-func TestIntrospectToken_NoRowFallsBackToNativeGh(t *testing.T) {
-	noGithubRow(t)
-	str := func(s string) *string { return &s }
-	for _, tc := range []struct {
-		name, token string
-		scopes      *string
-		repoBody    string
-		want        backendkit.TokenIntrospection
-	}{
-		{name: "classic PAT with repo", token: "ghp_abc", scopes: str("read:org, repo"),
-			want: backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true, Scopes: []string{"read:org", "repo"}}},
-		{name: "classic PAT read-only", token: "gho_abc", scopes: str("read:org"),
-			want: backendkit.TokenIntrospection{Introspectable: true, Scopes: []string{"read:org"}}},
-		{name: "installation token with push", token: "ghs_abc", repoBody: `{"permissions":{"push":true}}`,
-			want: backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true}},
-		{name: "fine-grained PAT", token: "github_pat_abc",
-			want: backendkit.TokenIntrospection{Reason: notIntrospectableReason}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ghTokenStub(t, 0, tc.scopes, tc.repoBody)
-			got, err := introspectToken(tc.token, connectorRepo)
-			if err != nil || !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("introspectToken = (%+v, %v), want %+v", got, err, tc.want)
-			}
-		})
-	}
-}
-
-// ghTokenStub scripts the gh the native introspector runs: `api -i user`
-// answers with scopes (or userStatus 401), `api repos/<slug>` with repoBody.
-func ghTokenStub(t *testing.T, userStatus int, scopes *string, repoBody string) {
-	t.Helper()
-	header := ""
-	if scopes != nil {
-		header = "X-OAuth-Scopes: " + *scopes + `\n`
-	}
-	prependFakeGH(t, `case "$*" in
-"api -i user")
-	[ `+strconv.Itoa(userStatus)+` = 401 ] && { echo "HTTP 401: Bad credentials" >&2; exit 1; }
-	printf 'HTTP/2.0 200 OK\n`+header+`\n{}' ;;
-"api repos/`+connectorRepo+`")
-	printf '%s' '`+repoBody+`' ;;
-esac`)
-}
-
-// A shadow github row never routes token introspection: gh stays authoritative, and
-// the shadow compares gh against the Connector.
-func TestIntrospectToken_ShadowRowRunsNative(t *testing.T) {
-	b := newTokenBackend(t, "ghp_abc")
-	useGithubRowShadow(t, b.Listener.Addr().String())
-	var native bool
-	old := nativeIntrospect
-	nativeIntrospect = func(string, string) (backendkit.TokenIntrospection, error) {
-		native = true
-		return backendkit.TokenIntrospection{}, nil
-	}
-	t.Cleanup(func() { nativeIntrospect = old })
-
-	_, _ = introspectToken("ghp_abc", connectorRepo)
-
-	if !native || len(b.seenAuth) != 0 {
-		t.Errorf("native introspection ran = %v, backend requests = %d; want gh to answer, not the Connector", native, len(b.seenAuth))
-	}
-}
+// notIntrospectableReason is the primary Connector write gate's explanation for
+// a GitHub token whose grants cannot be determined.
+const notIntrospectableReason = "e.g. a fine-grained PAT, whose granted permissions GitHub exposes no endpoint to introspect"

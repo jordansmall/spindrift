@@ -112,6 +112,9 @@ func (h *codeforgeHarness) FailNextRebase(ref string) {
 	h.repo.ConflictBase(prNum(ref))
 }
 
-func TestExecClient_CodeForgeContract(t *testing.T) {
-	forgetest.RunCodeForgeContract(t, newCodeForgeHarness(t))
+func writeFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }

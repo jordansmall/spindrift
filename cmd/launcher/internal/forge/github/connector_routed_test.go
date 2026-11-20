@@ -178,29 +178,6 @@ func TestPlainRow_ReadsGoThroughTheConnector(t *testing.T) {
 	}
 }
 
-// A shadow row stays native-authoritative: every read still on gh runs it and
-// writes no primary record. The reads readRow serves fail by name instead, see
-// TestReads_WithoutARoutedRowFailNamedAndNeverRunGh.
-func TestShadowRow_ReadsStayOnGh(t *testing.T) {
-	for _, tc := range routedReads {
-		if servedByReadRow(tc.name) {
-			continue
-		}
-		t.Run(tc.name, func(t *testing.T) {
-			_, c, calls, logDir := routedLogHarness(t, useGithubRowShadow)
-
-			_ = tc.read(c, "https://github.com/owner/repo/pull/1")
-
-			if calls() == 0 {
-				t.Errorf("%s under a shadow row never reached gh", tc.name)
-			}
-			if m, _ := filepath.Glob(filepath.Join(logDir, "primary-github-*")); len(m) != 0 {
-				t.Errorf("a shadow row wrote primary records %v", m)
-			}
-		})
-	}
-}
-
 // A plain row's Connector audits to the run's primary record, like a primary
 // row's.
 func TestPlainRow_AuditsToThePrimaryRecord(t *testing.T) {

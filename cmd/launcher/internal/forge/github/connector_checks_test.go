@@ -34,25 +34,7 @@ func countGH(t *testing.T) (calls func() int) {
 	}
 }
 
-// ghProbeStub scripts the gh the native Probe runs: `auth status` fails
-// without a credential, `repo view` fails for a repository gh cannot see.
-func ghProbeStub(t *testing.T, status int) {
-	t.Helper()
-	prependFakeGH(t, `case "$*" in
-"auth status")
-	[ `+strconv.Itoa(status)+` = 401 ] && { echo "You are not logged in" >&2; exit 1; }
-	exit 0 ;;
-"repo view"*)
-	[ `+strconv.Itoa(status)+` = 404 ] && { echo "Could not resolve to a Repository" >&2; exit 1; }
-	printf 'owner/repo\n' ;;
-esac`)
-}
-
-func errClass(err error) [3]bool {
-	return [3]bool{err == nil, errors.Is(err, forge.ErrAuthFailure), errors.Is(err, forge.ErrRepoNotFound)}
-}
-
-func TestConnector_ProbeMatchesNative(t *testing.T) {
+func TestConnector_Probe(t *testing.T) {
 	for _, status := range []int{200, 401, 404} {
 		h := newComposedHarness(t)
 		if status != 200 {
@@ -64,12 +46,6 @@ func TestConnector_ProbeMatchesNative(t *testing.T) {
 			t.Errorf("status %d: the Connector's Probe ran gh %d times", status, n)
 		}
 
-		ghProbeStub(t, status)
-		wantSlug, wantErr := NewExecClient(connectorRepo, testLabels).Probe()
-
-		if gotSlug != wantSlug || errClass(gotErr) != errClass(wantErr) {
-			t.Errorf("status %d: Connector Probe = (%q, %v), native (%q, %v)", status, gotSlug, gotErr, wantSlug, wantErr)
-		}
 		if status == 200 && (gotErr != nil || gotSlug != connectorRepo) {
 			t.Errorf("good credential: Probe = (%q, %v), want (%q, nil)", gotSlug, gotErr, connectorRepo)
 		}
@@ -359,9 +335,9 @@ func TestConnector_TokenGrant(t *testing.T) {
 }
 
 // The Connector carries its own copy of the write-scope set, since its module
-// cannot import this package: each scope native treats as write-granting must
+// cannot import this package: each scope in ghTokenWriteScopes must
 // make the Connector report a write-capable grant too.
-func TestConnector_TokenGrantWriteScopesMatchNative(t *testing.T) {
+func TestConnector_TokenGrantWriteScopes(t *testing.T) {
 	for scope := range ghTokenWriteScopes {
 		t.Run(scope, func(t *testing.T) {
 			b := newTokenBackend(t, "ghp_abc")
@@ -376,9 +352,9 @@ func TestConnector_TokenGrantWriteScopesMatchNative(t *testing.T) {
 }
 
 // doctor's label check compares the lifecycle labels with what the repository
-// defines. Both page REST, the Connector directly and native through gh; 150
+// defines; 150
 // labels force a second page.
-func TestConnector_ListLabelsMatchesNative(t *testing.T) {
+func TestConnector_ListLabels(t *testing.T) {
 	for _, fx := range []struct {
 		name string
 		n    int
@@ -405,20 +381,10 @@ func TestConnector_ListLabelsMatchesNative(t *testing.T) {
 			if h.backend.unexpected != nil {
 				t.Errorf("unexpected backend requests: %v", h.backend.unexpected)
 			}
-
-			script := `if [ "$1" = "api" ] && [ "$2" = "repos/` + connectorRepo + `/labels?per_page=100" ]; then`
-			for _, name := range want {
-				script += "\n  echo " + name
-			}
-			prependFakeGH(t, script+"\n  exit 0\nfi\nexit 1\n")
-			native, err := NewExecClient(connectorRepo, testLabels).ListLabels()
-			if err != nil {
-				t.Fatalf("native ListLabels: %v", err)
-			}
 			slices.Sort(got)
-			slices.Sort(native)
-			if !slices.Equal(got, native) || len(got) != fx.n {
-				t.Errorf("Connector ListLabels = %d labels, native %d, want %d", len(got), len(native), fx.n)
+			slices.Sort(want)
+			if !slices.Equal(got, want) {
+				t.Errorf("ListLabels = %d labels, want the %d the repository defines", len(got), len(want))
 			}
 		})
 	}
