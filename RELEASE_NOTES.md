@@ -15,8 +15,8 @@ Read-write Box access is gone: every Box now returns its work to the launcher,
 which does all the forge and tracker writes.
 
 **⚠ Breaking changes** this release: `BOX_FORGE_AND_ISSUE_ACCESS=read-write`
-is rejected, and the prompt gates, Box env vars and push retries that only
-served it are removed.
+is rejected, the prompt gates, Box env vars and push retries that only served
+it are removed, and `CONNECTOR_SANDBOX` is removed.
 
 - **⚠ Breaking: `read-write` Box access is removed.** Setting
   `BOX_FORGE_AND_ISSUE_ACCESS` (`forge.boxAccess`, `--box-access`) to
@@ -35,6 +35,16 @@ served it are removed.
   fails to render; `MIGRATING.md` has the full list.
 - **`BOX_GH_TOKEN` and `BOX_FORGEJO_TOKEN` have no reader left.** Delete them
   from `harness.env`.
+- **⚠ Breaking: the Connector sandbox is always on.** Every Connector the
+  launcher hosts now runs in the locked-down sandbox (container or bwrap jail),
+  on every runner, with no setting to turn it off. `CONNECTOR_SANDBOX` (flake
+  option `infra.connector.sandbox`) is removed and a leftover setting fails the
+  build, the launch and `spindrift doctor` as a removed knob; delete it. A
+  sandbox that cannot start fails the run, with no fallback to the launcher's
+  own process. `spindrift quickstart` cannot start one, so its token scope
+  audit and finish-line check now say they are deferred to `spindrift doctor`.
+  The read shadow summary and the github totals line no longer carry
+  `in_process_loads`.
 
 ---
 

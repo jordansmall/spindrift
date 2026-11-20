@@ -37,9 +37,9 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 
 ### `spindrift doctor` checks
 
-The checks `spindrift doctor` runs, grouped by what it probes. With
-`CONNECTOR_SANDBOX` on it also sweeps orphaned Connector sandboxes first
-([Connector sandbox](#connector-sandbox)); the sweep never changes its verdict.
+The checks `spindrift doctor` runs, grouped by what it probes. It also
+sweeps orphaned Connector sandboxes first ([Connector
+sandbox](#connector-sandbox)); the sweep never changes its verdict.
 
 **Configuration and required knobs**
 
@@ -3070,15 +3070,12 @@ the Driver replay, with these differences:
   `native_ns_per_line` and `shadow_ns_per_line` are the mean cost per compared
   call. It adds `skipped` (samples dropped), `forbidden` (403s that are not rate
   limits), `rate_limited` (primary) and `secondary_rate_limited`; each is
-  omitted at zero. Under `CONNECTOR_SANDBOX` it also carries the run's sandbox
-  cost: `sandbox_start_ns` (runner start through the connector host's hello),
-  `sandbox_calls` and `sandbox_host_calls` (exchanges, and `http_request` Host
-  calls plus refused Host-call frames, across the pipe) and `sandbox_hop_ns`
-  (their wall time less the Launcher's Host-call handling, guest execution
-  included); all are absent when no sandbox started. The host-side summary
-  also always carries `in_process_loads`, the loads through the Launcher's
-  Connector routing point (`connectorsandbox`) that fell back to its own
-  process: `0` means none did. A host-side read shadow writes them on its
+  omitted at zero. It also carries the run's sandbox cost: `sandbox_start_ns`
+  (runner start through the connector host's hello), `sandbox_calls` and
+  `sandbox_host_calls` (exchanges, and `http_request` Host calls plus refused
+  Host-call frames, across the pipe) and `sandbox_hop_ns` (their wall time less
+  the Launcher's Host-call handling, guest execution included); all are absent
+  when no sandbox started. A host-side read shadow writes them on its
   `shadow_summary`; a primary row's process writes them as a totals line on
   its [primary record](#backend-primary-mode). Totals are run-wide, as one
   sandbox serves every Connector the run hosts, and each shadowed backend
@@ -3266,8 +3263,8 @@ caller handles it as it would a `gh` failure. That is the point of the stage: a
 failure that a fallback would hide is counted instead. A call that fails
 fatally (its time budget or memory cap, a trap, malformed output, a refused
 request) closes the shared Connector and fails its read with no retry; the next
-read loads a fresh one (issue #7096), in the Connector sandbox when one is on,
-where the dead one's session is released. A failed load is retried by the next
+read loads a fresh one (issue #7096), in the Connector sandbox, where the dead
+one's session is released. A failed load is retried by the next
 read until three loads have failed in a row, then at most once a minute. It
 reads with the same host-only `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` as the shadow,
 but outside shadow the credential must also write, so every github run needs
@@ -3326,12 +3323,10 @@ with the stamp as `20060102T150405Z`:
 
 - `<stem>.audit.jsonl` holds the Connector's [audit lines](#connector-protocol),
   token introspection's included. `"decision":"refused"` marks a request the
-  Route table refused. With the Connector sandbox on, the process also appends
-  one totals line (github only, #7116) as it closes the sandbox, on a failed
-  bootstrap too,
+  Route table refused. The process also appends one totals line (github only,
+  #7116) as it closes the sandbox, on a failed bootstrap too,
   `{"sandbox_start_ns":N,"sandbox_calls":N,
-  "sandbox_host_calls":N,"sandbox_hop_ns":N,"in_process_loads":N}`, the keys
-  the read shadow's `shadow_summary` carries. It has no `decision`, and it is
+  "sandbox_host_calls":N,"sandbox_hop_ns":N}`, the keys the read shadow's `shadow_summary` carries. It has no `decision`, and it is
   written only when a sandbox started and the file exists.
 - `<stem>.log` gets one JSON line, `{"op":"<verb>","error":"<err>"}`, per
   failed routed read or write (`op` is its verb, such as `count demand`), a load
@@ -4017,14 +4012,16 @@ This is protocol version **0.3.0**. The host is
 
 #### Connector sandbox
 
-`CONNECTOR_SANDBOX` (flake option `infra.connector.sandbox`; see
-[flake-options.md](flake-options.md)) is opt-in and off by default. Off, the
-Launcher loads every Connector it hosts into its own process. On, it loads them
-into one sandbox container per run, which the `connector-host` binary serves
-over the container's stdio, one session per Connector. The sandbox starts
-lazily on the first Connector load and is shared by every Launcher-hosted
-Connector in the run (the github read path, read shadows, token introspection,
-Driver Connectors); a run that loads none starts none.
+Every Connector the Launcher hosts, first-party included, loads into one
+sandbox container per run on every runner family, which the `connector-host`
+binary serves over the container's stdio, one session per Connector. There is
+no knob: `CONNECTOR_SANDBOX` and the flake option `infra.connector.sandbox`
+were removed (issue #7022), and a leftover setting fails preflight like any
+removed knob. The sandbox starts lazily on the first Connector load and is
+shared by every Launcher-hosted Connector in the run (the github read path,
+read shadows, token introspection, Driver Connectors); a command that loads
+none starts none. A process with no sandbox installed refuses every Connector
+load with `ErrNoConnectorSandbox`, never falling back to its own process.
 
 - **Isolation.** The sandbox image is built minimal, holding only
   `connector-host`, and carries no `Env`. On an OCI runtime the Launcher runs
@@ -4045,7 +4042,7 @@ Driver Connectors); a run that loads none starts none.
   the same fixed `pids.max` 128 and `memory.max` 512 MiB caps as above, not
   the Box's knobs.
 - **Failure.** A sandbox that cannot start fails the run with
-  `ErrConnectorSandboxStart`, naming the runner and its stderr. There is no
+  `ErrConnectorSandboxStart`, naming the runner and its stderr; there is no
   in-process fallback. On a bwrap host that denies unprivileged user
   namespaces, bwrap exits at once and its message is the stderr named.
 - **Lifetime.** The sandbox lasts no longer than its run. On every exit path
@@ -4063,11 +4060,11 @@ Driver Connectors); a run that loads none starts none.
   sandbox running. The sandbox sits outside the terminal's process group, so a
   terminal hangup or group-wide kill does not reach its client directly: a
   Launcher that dies that way closes the sandbox's stdin, and the sandbox
-  normally ends on that EOF; the sweep below covers one that does not. With
-  `CONNECTOR_SANDBOX` on, the next Launcher start (ahead of its token, network
-  and push gates), or a daemon's start through its `doctor` preflight (so any
-  `spindrift doctor` too), lists running sandboxes by the
-  `spindrift-connector-sandbox-` prefix and kills each one
+  normally ends on that EOF; the sweep below covers one that does not. The
+  next Launcher start (ahead of its token, network and push gates), or a
+  daemon's start through its `doctor` preflight (so any `spindrift doctor`
+  too), lists running sandboxes by the `spindrift-connector-sandbox-` prefix
+  and kills each one
   whose `<owner>` is this Launcher's own and whose `<pid>`, the Launcher that
   started it, is no longer alive, logging `==> reaped orphaned Connector
   sandbox: <name>`. An orphaned sandbox is killed rather than left for
@@ -4088,9 +4085,16 @@ Driver Connectors); a run that loads none starts none.
   touches a Box; Box orphan detection likewise skips sandbox names. Under
   bwrap, `Kill` reaches a sandbox or Box an earlier Launcher started through
   its cgroup.
-- **What stays in-process.** The Box (`driver-exec`) still loads its Driver
-  Connectors in its own process. `doctor`, `preview` and the daemon process's
-  own probes are not runs, so they load in-process too.
+- **What stays in-process.** Only the Box's first-party Driver Connectors
+  (`driver-exec` loads them in the Box's own process and refuses any other)
+  and test binaries, which install the in-process engine from
+  `connectorsandboxtest`. Every Launcher command that can load a Connector
+  (`run`, `recover`, `research`, `butler`, `reconcile`, `stats`, `doctor`,
+  `preview`, `console`, shell completion) installs the sandbox, and the daemon
+  installs one for its own demand counting, through the same runner and
+  artifacts as its Launcher children. Quickstart can start no sandbox, so it
+  loads no Connector: its token scope audit and finish-line doctor are
+  deferred to `spindrift doctor`.
 - **Testing.** The `seamtest` podman and bwrap fakes check a sandbox's argv
   against the isolation above, refusing one that weakens it, then exec the real
   `connector-host`. The `RefuseSandbox` field of `PodmanConfig` and
@@ -4112,18 +4116,6 @@ Driver Connectors); a run that loads none starts none.
   `connector-host-escapeprobe-absent-from-release` check keeps the tag out of
   the Launcher, the daemon, the Box's binaries, the release `connector-host`
   and the release sandbox image.
-- **Dogfood.** spindrift's own dogfood turns `CONNECTOR_SANDBOX` on
-  (`connectorSandbox` in `nix/dogfood-defaults.nix`, which the fixtures mirror
-  inherits; the `connector-driver-rows-dogfood-sandbox` check asserts both
-  carry it), so its github Connector and the Launcher-hosted claude Driver
-  Connector load in the sandbox; its shadow and primary settings are unchanged. A
-  dogfood run's primary record, `primary-github-<stamp>-<pid>.audit.jsonl`,
-  should end with a totals line showing the sandbox's start and hop totals and
-  `in_process_loads` of `0` (see [Backend primary
-  mode](#backend-primary-mode)). The bar for making the sandbox mandatory and
-  removing the knob (issue #7022) is 20 consecutive clean dogfood runs with it
-  on, meaning no sandbox start failures and no divergences or audit refusals
-  attributable to the sandbox, plus the human macOS check (issue #7021).
 
 #### Pinned wazero
 
@@ -9301,8 +9293,11 @@ a reader sees the host's figures rather than the Box's transcription of them.
 [--kind <kind>] [--include-inferred=false] [--by <dimension>[,<dimension>...]]` (ADR 0061) reports what past
 Dispatches cost, read entirely from the Pass logs already on disk. It reads the
 checkout the Dispatches ran from: the current directory, unless `--root` names
-others (see Filters and roots below). It never contacts the tracker, the forge,
-or a container.
+others (see Filters and roots below). It never contacts the tracker or the
+forge. Parsing a log loads its Driver's Connector, so it needs a working podman
+or bwrap runner for the [Connector sandbox](#connector-sandbox); on a host with
+none, every log it would parse is skipped with a `skipping unreadable log`
+warning.
 
 **The stamp.** The host writes a `dispatch_start` `spindrift_op` as the first
 line of every Pass log a Dispatch creates: each attempt's fresh log (a retry
