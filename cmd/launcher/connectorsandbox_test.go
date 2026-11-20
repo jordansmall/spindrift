@@ -175,18 +175,3 @@ func TestInstallConnectorSandbox_StartFailureFailsTheRun(t *testing.T) {
 		}
 	}
 }
-
-func TestConnectorSandboxRunnerLabel(t *testing.T) {
-	for _, tc := range []struct{ kind, runtime, want string }{
-		{"", "podman", "oci (podman)"},
-		{"oci", "docker", "oci (docker)"},
-		{"bwrap", "podman", "bwrap"},
-		{"bwrap", "bwrap", "bwrap"},
-	} {
-		c := baseConfig()
-		c.runnerKind, c.runtime = tc.kind, tc.runtime
-		if got := connectorSandboxRunnerLabel(c); got != tc.want {
-			t.Errorf("label(%q, %q) = %q, want %q", tc.kind, tc.runtime, got, tc.want)
-		}
-	}
-}

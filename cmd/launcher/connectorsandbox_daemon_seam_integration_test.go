@@ -159,6 +159,9 @@ func runDaemonSandboxes(t *testing.T, runtime string, o daemonSandboxOpts) {
 	if tracker {
 		rig, slots = newDaemonTrackerRig(t, runtime), 1
 	}
+	// The tracker rig's daemon counts demand through its github row, so it holds
+	// a sandbox of its own besides each run's.
+	ownSandboxes := b2i(tracker)
 	recPath := filepath.Join(rig.recDir, runtime+".jsonl")
 	t.Cleanup(func() { _ = os.WriteFile(rig.release, nil, 0o644) })
 
@@ -173,7 +176,7 @@ func runDaemonSandboxes(t *testing.T, runtime string, o daemonSandboxOpts) {
 		return boxes >= slots
 	})
 	// Every run is held mid-run, so each owns its sandbox and no more.
-	if starts, _ := countRuns(runtime, seamtest.ReadRecord(t, recPath)); starts != slots {
+	if starts, _ := countRuns(runtime, seamtest.ReadRecord(t, recPath)); starts != slots+ownSandboxes {
 		t.Errorf("%d Connector sandboxes with %d runs in flight, want one each", starts, slots)
 	}
 	for _, log := range daemonChildLogs(t, rig.workDir, p.Stdout()) {
@@ -220,7 +223,12 @@ func runDaemonSandboxes(t *testing.T, runtime string, o daemonSandboxOpts) {
 		stopped = append(stopped, got...)
 		assertSandboxSurvivedSettle(t, log, body)
 	}
-	if starts != len(logs) || len(stopped) != starts {
+	if own := stoppedSandboxes(res.Stderr); len(own) != ownSandboxes {
+		t.Errorf("the daemon stopped %q, want %d sandboxes of its own", own, ownSandboxes)
+	} else {
+		stopped = append(stopped, own...)
+	}
+	if starts != len(logs)+ownSandboxes || len(stopped) != starts {
 		t.Errorf("%d children started %d Connector sandboxes and stopped %d, want one each", len(logs), starts, len(stopped))
 	}
 	seen := map[string]bool{}

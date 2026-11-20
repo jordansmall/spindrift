@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"sync"
 
 	"spindrift.dev/launcher/internal/backendkit"
@@ -363,38 +362,6 @@ func seedMirrorHook(c config, pwd string, seeder forge.MirrorSeeder) func() (str
 	}
 }
 
-// lazyRunner is the Connector sandbox's Starter: it builds its runner on the
-// first start, so a run that loads no Connector builds none. It cannot borrow
-// bootstrap's own runner, which is built after the network gates that may
-// load Connectors.
-type lazyRunner struct {
-	build func() (runner.Runner, error)
-	once  sync.Once
-	r     runner.Runner
-	err   error
-}
-
-func (l *lazyRunner) get() (runner.Runner, error) {
-	l.once.Do(func() { l.r, l.err = l.build() })
-	return l.r, l.err
-}
-
-func (l *lazyRunner) StartConnectorSandbox(name string) (runner.ConnectorSandbox, error) {
-	r, err := l.get()
-	if err != nil {
-		return runner.ConnectorSandbox{}, err
-	}
-	return r.StartConnectorSandbox(name)
-}
-
-func (l *lazyRunner) Kill(name string) error {
-	r, err := l.get()
-	if err != nil {
-		return err
-	}
-	return r.Kill(name)
-}
-
 // recordSandboxTotals is a var so a test can count the closer's calls.
 var recordSandboxTotals = github.RecordRoutedSandboxTotals
 
@@ -403,9 +370,7 @@ var recordSandboxTotals = github.RecordRoutedSandboxTotals
 var newConnectorSandboxLoader = realConnectorSandboxLoader
 
 func realConnectorSandboxLoader(c config, pwd string) connectorsandbox.Loader {
-	return sandbox.New(&lazyRunner{build: func() (runner.Runner, error) {
-		return runnerForKind(c, runnerConfig(c), pwd)
-	}}, connectorSandboxRunnerLabel(c))
+	return sandbox.ForKind(c.runnerKind, runnerConfig(c), c.artifacts, c.knobLookup, pwd)
 }
 
 // installConnectorSandbox makes every Connector this process hosts load into
@@ -428,18 +393,4 @@ func installConnectorSandbox(c config) (closeSandbox func(), err error) {
 		}
 		recordSandboxTotals()
 	}, nil
-}
-
-// connectorSandboxRunnerLabel names the runner a Connector sandbox starts
-// through in a start error: the family, plus RUNTIME only when that family
-// serves it, so bwrap beside RUNTIME=podman is not named podman.
-func connectorSandboxRunnerLabel(c config) string {
-	family, err := runner.DescriptorFor(c.runnerKind)
-	if err != nil {
-		return c.runnerKind
-	}
-	if slices.Contains(family.Runtimes, c.runtime) && c.runtime != family.Name {
-		return fmt.Sprintf("%s (%s)", family.Name, c.runtime)
-	}
-	return family.Name
 }
