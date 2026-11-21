@@ -58,6 +58,13 @@ type Env struct {
 	// pre-resolved below (issue #2533).
 	IssueTracker string // $ISSUE_TRACKER
 
+	// IssueRouted is set when the launcher forwards an issue route; it alone
+	// gates the cross-repo fragment (ADR 0075). RepoSlug is the Target repo the
+	// Box works (REPO_SLUG), only substituted into that fragment: the launcher
+	// requires it whenever a route is set.
+	IssueRouted bool   // $BOX_ISSUE_ROUTED presence
+	RepoSlug    string // $REPO_SLUG
+
 	// TrackerAxisRead, TrackerAxisWrite, and TrackerAxisFiler are nix's
 	// pre-resolved form of the "${ISSUE_TRACKER:-github}" case statement
 	// entrypoint.sh once held (issue #2533). Read is
