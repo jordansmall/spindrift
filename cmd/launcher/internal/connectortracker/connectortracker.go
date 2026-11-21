@@ -65,6 +65,9 @@ type Lifecycle struct {
 	// transition is refused instead of swapped for a label, and the claim check
 	// reads the native status alone.
 	StatusOnly bool
+	// Route narrows the queue lists, the demand count and the labeled backlog
+	// read, and is stamped on filed issues; nil is the whole scope.
+	Route forge.Route
 }
 
 // Routes returns a copy of a tracker Connector's Route table with the
@@ -112,17 +115,19 @@ type (
 		ResearchMarker bool `json:"researchMarker"`
 	}
 	listIssuesParams struct {
-		Target Target `json:"target"`
-		Label  string `json:"label"`
-		Status string `json:"status"`
-		Limit  int    `json:"limit"`
+		Target Target     `json:"target"`
+		Label  string     `json:"label"`
+		Status string     `json:"status"`
+		Limit  int        `json:"limit"`
+		Route  []Selector `json:"route,omitempty"`
 	}
 	labeledParams struct {
-		Target Target `json:"target"`
-		Label  string `json:"label"`
-		State  string `json:"state"`
-		Limit  int    `json:"limit"`
-		Cursor string `json:"cursor,omitempty"`
+		Target Target     `json:"target"`
+		Label  string     `json:"label"`
+		State  string     `json:"state"`
+		Limit  int        `json:"limit"`
+		Cursor string     `json:"cursor,omitempty"`
+		Route  []Selector `json:"route,omitempty"`
 	}
 	searchIssuesParams struct {
 		Target Target `json:"target"`
@@ -203,11 +208,12 @@ type (
 		IssueType string `json:"issueType"`
 	}
 	countParams struct {
-		Target Target `json:"target"`
-		Label  string `json:"label"`
-		Status string `json:"status"`
-		Limit  int    `json:"limit"`
-		Fresh  bool   `json:"fresh"`
+		Target Target     `json:"target"`
+		Label  string     `json:"label"`
+		Status string     `json:"status"`
+		Limit  int        `json:"limit"`
+		Fresh  bool       `json:"fresh"`
+		Route  []Selector `json:"route,omitempty"`
 	}
 	wireCreateMeta struct {
 		IssueTypes []string          `json:"issueTypes"`
@@ -305,6 +311,18 @@ type reads struct {
 	ids       idGrammar
 	// v02 is false for a 0.1 Connector, which has no status selector.
 	v02 bool
+	// route is lifecycle.Route in wire form; omitempty keeps an unrouted
+	// payload unchanged.
+	route []Selector
+}
+
+// routeParam is the route to send, refused for a 0.1 Connector, which ignores
+// a selector it does not know and would answer the whole scope.
+func (t *reads) routeParam() ([]Selector, error) {
+	if len(t.route) > 0 && !t.v02 {
+		return nil, fmt.Errorf("%w: a 0.1 connector cannot narrow by issue route", connectorhost.ErrProtocolUnsupported)
+	}
+	return t.route, nil
 }
 
 // Unwrap implements forge.Unwrapper, so forge.As finds the native adapter's own
@@ -512,10 +530,14 @@ func (l countLayer) CountReady(fresh bool) (int, error) {
 	if label == "" && status == "" {
 		return 0, nil
 	}
+	route, err := l.r.routeParam()
+	if err != nil {
+		return 0, err
+	}
 	var res struct {
 		Count int `json:"count"`
 	}
-	if err := l.r.call(context.Background(), CapCount, countParams{Target: l.r.target, Label: label, Status: status, Limit: forge.ResultPageLimit, Fresh: fresh}, &res); err != nil {
+	if err := l.r.call(context.Background(), CapCount, countParams{Target: l.r.target, Label: label, Status: status, Limit: forge.ResultPageLimit, Fresh: fresh, Route: route}, &res); err != nil {
 		return 0, err
 	}
 	if res.Count < 0 {
@@ -680,6 +702,10 @@ func (l labeledLayer) ListIssuesWithLabels(state forge.IssueState, labels []stri
 // and warns, as an error would drop the whole label. A bad number or state
 // fails closed, as in issue().
 func (l labeledLayer) walkLabeled(state forge.IssueState, source, label string) ([]forge.Issue, error) {
+	route, err := l.r.routeParam()
+	if err != nil {
+		return nil, err
+	}
 	var issues []forge.Issue
 	sent := map[[sha256.Size]byte]bool{}
 	seen := map[string]bool{}
@@ -687,7 +713,7 @@ func (l labeledLayer) walkLabeled(state forge.IssueState, source, label string) 
 	cursor := ""
 	for page := 1; ; page++ {
 		sent[sha256.Sum256([]byte(cursor))] = true
-		p := labeledParams{Target: l.r.target, Label: label, State: state.Wire(), Limit: forge.DedupScanLimit, Cursor: cursor}
+		p := labeledParams{Target: l.r.target, Label: label, State: state.Wire(), Limit: forge.DedupScanLimit, Cursor: cursor, Route: route}
 		var ans labeledAnswer
 		if err := l.r.call(context.Background(), CapLabeled, p, &ans); err != nil {
 			return nil, err
@@ -873,6 +899,14 @@ func speaksV02(version string) bool {
 	return ok && minor >= 2
 }
 
+func wireRoute(r forge.Route) []Selector {
+	var out []Selector
+	for _, s := range r {
+		out = append(out, Selector{Kind: s.Kind, Value: s.Value})
+	}
+	return out
+}
+
 func newTracker(call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, target Target, caps []string, v02 bool) (forge.IssueTracker, error) {
 	if !v02 {
 		caps = slices.DeleteFunc(slices.Clone(caps), func(c string) bool {
@@ -883,7 +917,7 @@ func newTracker(call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, 
 	if slices.Contains(caps, CapProjectKeyIDs) {
 		ids = projectKeyIDs
 	}
-	r := &reads{IssueTracker: writes, call: call, lifecycle: lifecycle, target: target, ids: ids, v02: v02}
+	r := &reads{IssueTracker: writes, call: call, lifecycle: lifecycle, target: target, ids: ids, v02: v02, route: wireRoute(lifecycle.Route)}
 	var it forge.IssueTracker = r
 	if slices.Contains(caps, CapComments) {
 		it = commentsLayer{it, r}
@@ -954,18 +988,22 @@ func (t *reads) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
 		// selector matches nothing.
 		return nil, nil
 	}
-	return t.list(label, status)
+	route, err := t.routeParam()
+	if err != nil {
+		return nil, err
+	}
+	return t.list(label, status, route)
 }
 
 func (t *reads) ListOpenIssues() ([]forge.Issue, error) {
-	return t.list("", "")
+	return t.list("", "", nil)
 }
 
-func (t *reads) list(label, status string) ([]forge.Issue, error) {
+func (t *reads) list(label, status string, route []Selector) ([]forge.Issue, error) {
 	var res struct {
 		Issues []wireIssue `json:"issues"`
 	}
-	p := listIssuesParams{Target: t.target, Label: label, Status: status, Limit: forge.ResultPageLimit}
+	p := listIssuesParams{Target: t.target, Label: label, Status: status, Limit: forge.ResultPageLimit, Route: route}
 	if err := t.call(context.Background(), "tracker.listIssues", p, &res); err != nil {
 		return nil, err
 	}
