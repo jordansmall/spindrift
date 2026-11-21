@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.1](https://github.com/jordansmall/spindrift/compare/github-v0.3.0...github-v0.3.1) (2026-11-21)
+
+
+### Documentation
+
+* **go:** trim and correct comments in Go sources ([b5ea3c7](https://github.com/jordansmall/spindrift/commit/b5ea3c7b4ded1ce6d19cd14b0d02c1749b1530ab))
+* **nix:** trim and correct comments in Nix sources ([862042b](https://github.com/jordansmall/spindrift/commit/862042b35483dfacd356051cdcf0caacba385a9c))
+
+
+### Tests
+
+* **go:** trim and correct comments in Go tests ([61fbf0f](https://github.com/jordansmall/spindrift/commit/61fbf0fd01dc860ac09ca9b5696b3e9fb6c22a51))
+
 ## [0.3.0](https://github.com/jordansmall/spindrift/compare/github-v0.2.0...github-v0.3.0) (2026-11-21)
 
 

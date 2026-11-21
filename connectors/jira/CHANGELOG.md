@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/jordansmall/spindrift/compare/jira-v0.2.0...jira-v0.2.1) (2026-11-21)
+
+
+### Bug Fixes
+
+* **jira:** carry Jira's reason on a refused request ([0b5f7c2](https://github.com/jordansmall/spindrift/commit/0b5f7c21275473ccedddbffb362785251d170832)), closes [#7336](https://github.com/jordansmall/spindrift/issues/7336)
+
 ## [0.2.0](https://github.com/jordansmall/spindrift/compare/jira-v0.1.1...jira-v0.2.0) (2026-11-21)
 
 

@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.33.1](https://github.com/jordansmall/spindrift/compare/v0.33.0...v0.33.1) (2026-11-21)
+
+
+### Features
+
+* **backend:** declare the Issue route kinds a tracker row supports ([8224430](https://github.com/jordansmall/spindrift/commit/8224430d2f0c6286c4c30467afe2c52e25f019a4)), closes [#7331](https://github.com/jordansmall/spindrift/issues/7331)
+* **daemon:** probe a routed daemon's ready query at startup ([0041608](https://github.com/jordansmall/spindrift/commit/00416088ea69b4558dc6808e05a3c97d812eea40)), closes [#7336](https://github.com/jordansmall/spindrift/issues/7336)
+* **forge:** route the local tracker's queue and filing by label ([5dd0cb9](https://github.com/jordansmall/spindrift/commit/5dd0cb9b5905a19ba94f3d2e080157adcf50ba29)), closes [#7331](https://github.com/jordansmall/spindrift/issues/7331)
+* **launcher:** carry ISSUE_ROUTE to the tracker and demand count ([995e660](https://github.com/jordansmall/spindrift/commit/995e6600437f078a53c3ad3d6826796f02edac26)), closes [#7331](https://github.com/jordansmall/spindrift/issues/7331)
+* **nix:** add the issues.route knob and the Tracker scope assert ([15bce76](https://github.com/jordansmall/spindrift/commit/15bce76f02f795a716deaa6968536e491ac70211)), closes [#7331](https://github.com/jordansmall/spindrift/issues/7331)
+* **sdk:** add an Issue route to the tracker list Query ([2222780](https://github.com/jordansmall/spindrift/commit/222278094ce1e66ea726c3a9ab77a4237fdf52de)), closes [#7331](https://github.com/jordansmall/spindrift/issues/7331)
+
+
+### Bug Fixes
+
+* **forge:** narrow the local finding backlog list to the route ([510c126](https://github.com/jordansmall/spindrift/commit/510c12675eef7f1c812cb064711fcd754a974d8a)), closes [#7332](https://github.com/jordansmall/spindrift/issues/7332)
+
+
+### Documentation
+
+* **go:** trim and correct comments in Go sources ([b5ea3c7](https://github.com/jordansmall/spindrift/commit/b5ea3c7b4ded1ce6d19cd14b0d02c1749b1530ab))
+* **nix:** trim and correct comments in Nix sources ([862042b](https://github.com/jordansmall/spindrift/commit/862042b35483dfacd356051cdcf0caacba385a9c))
+* **reference:** note the routed daemon's startup probe ([8004e83](https://github.com/jordansmall/spindrift/commit/8004e83997726e4f98512862a6f61d26c025b6fe)), closes [#7336](https://github.com/jordansmall/spindrift/issues/7336)
+* **reference:** say what ISSUE_ROUTE narrows and what it leaves alone ([94ea340](https://github.com/jordansmall/spindrift/commit/94ea3400c72c277006ef1d0c9a10643ad8d4c2ee)), closes [#7332](https://github.com/jordansmall/spindrift/issues/7332)
+* **shell:** trim comments in shell scripts ([9029f6c](https://github.com/jordansmall/spindrift/commit/9029f6c11b3cc484b01e7a570cdb0857fe41ec10))
+
+
+### Tests
+
+* **connector/opencode:** make the header-merge seed deterministic ([1fc1445](https://github.com/jordansmall/spindrift/commit/1fc144548df72c108947f043a6df016631152738)), closes [#6874](https://github.com/jordansmall/spindrift/issues/6874)
+* **driver/opencode:** replay the corpus through shadow mode ([1291df1](https://github.com/jordansmall/spindrift/commit/1291df1de0de53777fa6bd9d01489edbeda08d6c)), closes [#6874](https://github.com/jordansmall/spindrift/issues/6874)
+* **go:** trim and correct comments in Go tests ([61fbf0f](https://github.com/jordansmall/spindrift/commit/61fbf0fd01dc860ac09ca9b5696b3e9fb6c22a51))
+* **jira:** pin a rejected count query's reason at the Connector ([230d905](https://github.com/jordansmall/spindrift/commit/230d905f29cd8eb7b4b40f4e710228cdf7338310)), closes [#7336](https://github.com/jordansmall/spindrift/issues/7336)
+* **launcher:** pin the route on the research queue too ([45502e2](https://github.com/jordansmall/spindrift/commit/45502e2302a69efbb54d79483f7d015c83578c88)), closes [#7332](https://github.com/jordansmall/spindrift/issues/7332)
+* **settle:** pin the route stamp on every finding class ([e7436a0](https://github.com/jordansmall/spindrift/commit/e7436a07973ef1d95225987a4c4275a50945cd9c)), closes [#7332](https://github.com/jordansmall/spindrift/issues/7332)
+* **settle:** pin the route stamp on Filer relay filings ([0749404](https://github.com/jordansmall/spindrift/commit/0749404d4f40d7819e57c6cee100ddd99d91d603)), closes [#7331](https://github.com/jordansmall/spindrift/issues/7331)
+* **waves:** pin cross-route blockers and unrouted key reads ([6e3a2e7](https://github.com/jordansmall/spindrift/commit/6e3a2e7357b499f105e002a0d2f0cb5242802795)), closes [#7332](https://github.com/jordansmall/spindrift/issues/7332)
+
+
+### Build System
+
+* **dogfood:** shadow the opencode Connector ([3994485](https://github.com/jordansmall/spindrift/commit/39944857df72047c399a7a7ecd81e369109ea6b8)), closes [#6874](https://github.com/jordansmall/spindrift/issues/6874)
+
 ## [0.33.0](https://github.com/jordansmall/spindrift/compare/v0.32.0...v0.33.0) (2026-11-21)
 
 
