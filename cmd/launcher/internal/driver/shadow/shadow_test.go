@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/driver/shadow/shadowtest"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/shadowrecord"
 )
@@ -66,7 +68,7 @@ func lineCount(t *testing.T, path string) int {
 func replay(t *testing.T, native driverkit.Strategy, wasm []byte, logPath string, exitCode int) ([]hostop.ShadowDivergence, hostop.ShadowSummary) {
 	t.Helper()
 	var ops []hostop.SpindriftOp
-	Run(context.Background(), native, wasm, logPath, exitCode, func(op hostop.SpindriftOp) { ops = append(ops, op) })
+	Run(context.Background(), native, connectorhost.Load, wasm, logPath, exitCode, func(op hostop.SpindriftOp) { ops = append(ops, op) })
 	return split(t, ops)
 }
 
@@ -263,7 +265,7 @@ func TestRealConnectorAbortedMidRunReportsTheDeadline(t *testing.T) {
 	var ops []hostop.SpindriftOp
 	start := time.Now()
 	// driver.wasm diverges on every claude line, so the first divergence lands mid-run.
-	Run(ctx, nativeStrategy(), fixture(t, "driver.wasm"), log, 0, func(op hostop.SpindriftOp) {
+	Run(ctx, nativeStrategy(), connectorhost.Load, fixture(t, "driver.wasm"), log, 0, func(op hostop.SpindriftOp) {
 		ops = append(ops, op)
 		cancel()
 	})
@@ -317,20 +319,7 @@ func TestPanicBecomesSummaryError(t *testing.T) {
 // nativeStrategy is a stand-in for a native Driver: a library package's tests
 // may not reach a real one (see bundle_guard_test.go). It decodes every
 // non-blank line to one text event and encodes a result as a result event.
-func nativeStrategy() driverkit.Strategy {
-	return driverkit.Strategy{
-		Name: "native",
-		NewDecoder: func() driverkit.Decoder {
-			return func(line string) []driverkit.Event {
-				if strings.TrimSpace(line) == "" {
-					return nil
-				}
-				return []driverkit.Event{{Kind: driverkit.KindText, Text: line}}
-			}
-		},
-		ResultEvent: func(text string) ([]byte, error) { return []byte("native " + text + "\n"), nil },
-	}
-}
+func nativeStrategy() driverkit.Strategy { return shadowtest.Native() }
 
 // batchShadow agrees with nativeStrategy except on the line containing
 // diverge, and records the size of each batch it is handed.

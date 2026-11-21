@@ -121,8 +121,8 @@ var (
 	}
 	// The Box mains also replay a shadow, which loads the shadow Module in-process.
 	boxAllowed = append(slices.Clone(commonAllowed), allowedCall{
-		"internal/driver/shadow/shadow.go", "Run", "",
-		"driver-exec's shadow replay inside the Box; no Launcher-side main imports internal/driver/shadow",
+		"driver-exec/main.go", "runShadow", "",
+		"driver-exec hands its shadow replay the in-process loader; internal/driver/shadow takes the Loader as a parameter",
 	})
 )
 

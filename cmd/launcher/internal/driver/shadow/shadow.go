@@ -19,20 +19,29 @@ import (
 	"spindrift.dev/launcher/internal/shadowrecord"
 )
 
+// Loader loads the Connector compiled in a wasm module. The caller picks it: a
+// Box main loads in-process (connectorhost.Load), a Launcher main through the
+// sandbox (connectorsandbox.Load), and the engine-reach guard holds each to its
+// side, so this package names neither.
+type Loader func(ctx context.Context, wasm []byte) (*connectorhost.Connector, error)
+
+// Budget bounds one Pass replay, Connector load included. The orchestrator
+// waits on a live replay before it sees the Pass's exit code. A replay that
+// runs out is a summary error, never a clean run.
+const Budget = 2 * time.Minute
+
 // Run replays the Pass log at logPath through native and through the Connector
-// compiled in wasm, handing each divergence and then one closing summary to
-// emit. exitCode is the CLI's exit code, for the resolveExit comparison. ctx
-// bounds the whole replay, Connector load included: when it ends, the Connector
-// is aborted mid-call and the run stops with a summary Error. Run never fails
-// and never panics: a Connector that does not load, or fails closed mid-run, is
-// reported in the summary.
-func Run(ctx context.Context, native driverkit.Strategy, wasm []byte, logPath string, exitCode int, emit func(hostop.SpindriftOp)) {
+// that load builds from wasm, handing each divergence and then one closing
+// summary to emit. exitCode is the CLI's exit code, for the resolveExit
+// comparison. ctx bounds the whole replay, Connector load included: when it
+// ends, the Connector is aborted mid-call and the run stops with a summary
+// Error. Run never fails and never panics: a Connector that does not load, or
+// fails closed mid-run, is reported in the summary.
+func Run(ctx context.Context, native driverkit.Strategy, load Loader, wasm []byte, logPath string, exitCode int, emit func(hostop.SpindriftOp)) {
 	r := &run{native: native, Recorder: shadowrecord.New(native.Name, emit)}
 	defer r.finish()
 
-	// The interpreter, not LoadCompiled: a compiled module is cached on disk,
-	// and a shadow must not depend on, or write to, the host's filesystem.
-	c, err := connectorhost.Load(ctx, wasm)
+	c, err := load(ctx, wasm)
 	if err != nil {
 		r.Sum.Error = err.Error()
 		return

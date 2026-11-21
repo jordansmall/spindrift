@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/driver/drivertest"
+	"spindrift.dev/launcher/internal/driver/shadow"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/promptassembly"
 )
@@ -680,7 +681,7 @@ func TestMainRunShadowedRunFailureIsSummarisedWithoutReplay(t *testing.T) {
 	module := filepath.Join(t.TempDir(), "driver.wasm")
 	writeTestFile(t, module, "not wasm")
 	prev := shadowReplay
-	shadowReplay = func(context.Context, driverkit.Strategy, []byte, string, int, func(hostop.SpindriftOp)) {
+	shadowReplay = func(context.Context, driverkit.Strategy, shadow.Loader, []byte, string, int, func(hostop.SpindriftOp)) {
 		replayed = true
 	}
 	t.Cleanup(func() { shadowReplay = prev })
@@ -809,7 +810,7 @@ func TestMainRunShadowHandsTheComparatorTheRawExitCode(t *testing.T) {
 	writeTestFile(t, module, "unused: the replay is stubbed")
 	var got []int
 	prev := shadowReplay
-	shadowReplay = func(_ context.Context, _ driverkit.Strategy, _ []byte, _ string, exitCode int, _ func(hostop.SpindriftOp)) {
+	shadowReplay = func(_ context.Context, _ driverkit.Strategy, _ shadow.Loader, _ []byte, _ string, exitCode int, _ func(hostop.SpindriftOp)) {
 		got = append(got, exitCode)
 	}
 	t.Cleanup(func() { shadowReplay = prev })
