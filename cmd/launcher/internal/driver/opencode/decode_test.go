@@ -220,6 +220,31 @@ func TestDecode_ResetAtNeedsAnchorOrHeader(t *testing.T) {
 	}
 }
 
+// TestDecode_ResetLastHeaderInDocumentOrderWins pins the rule at every level
+// (data, responseHeaders, header name): a Go map iteration order must not pick
+// which of Retry-After/retry-after survives. Map order picked wrong about half
+// the time, so 200 iterations make a regression all but certain to show.
+func TestDecode_ResetLastHeaderInDocumentOrderWins(t *testing.T) {
+	const line = `{"type":"error","timestamp":1790000004000,"error":{"DATA":{"RESPONSEHEADERS":{"Retry-After":"9"}},"data":{"responseHeaders":{"retry-after":"8"}}}}`
+	want := time.UnixMilli(1790000004000).Add(8 * time.Second).UTC()
+	for i := range 200 {
+		got := opencode.Decode(line)
+		if len(got) != 1 || got[0].ResetAt == nil || !got[0].ResetAt.Equal(want) {
+			t.Fatalf("iteration %d: got %+v, want one error with ResetAt %v", i, got, want)
+		}
+	}
+}
+
+// TestDecode_ResetLaterNullHeadersKeepEarlier pins that a later null
+// responseHeaders is a no-op, as in the Connector, not encoding/json's map reset.
+func TestDecode_ResetLaterNullHeadersKeepEarlier(t *testing.T) {
+	got := opencode.Decode(`{"type":"error","timestamp":1790000004000,"error":{"data":{"responseHeaders":{"retry-after":"8"}},"DATA":{"RESPONSEHEADERS":null}}}`)
+	want := time.UnixMilli(1790000004000).Add(8 * time.Second).UTC()
+	if len(got) != 1 || got[0].ResetAt == nil || !got[0].ResetAt.Equal(want) {
+		t.Errorf("got %+v, want one error with ResetAt %v", got, want)
+	}
+}
+
 func TestNewDecoder_IsDecode(t *testing.T) {
 	line := `{"type":"step_start","timestamp":1,"part":{"messageID":"m"}}`
 	if got, want := opencode.NewDecoder()(line), opencode.Decode(line); !reflect.DeepEqual(got, want) {
