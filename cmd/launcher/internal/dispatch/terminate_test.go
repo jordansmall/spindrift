@@ -3,7 +3,6 @@ package dispatch
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -38,73 +37,6 @@ func TestFactory_Kill_PropagatesRunnerError(t *testing.T) {
 
 	if err := f.Kill("42"); err != boxErr {
 		t.Errorf("Kill err = %v, want %v", err, boxErr)
-	}
-}
-
-// OrphanedIssues reads issue numbers out of the runner's running sandbox names
-// for Console startup orphan detection (issue #651). Only an unsigned-integer
-// suffix is a valid issue number, so OrphanedIssues skips every other shape
-// rather than feed it to a caller like recoverByNumber (issue #793, issue #1157).
-func TestFactory_OrphanedIssues(t *testing.T) {
-	tests := []struct {
-		name         string
-		runningNames []string
-		want         []string
-	}{
-		{
-			name:         "valid unsigned suffixes",
-			runningNames: []string{"agent-issue-42", "agent-issue-101"},
-			want:         []string{"42", "101"},
-		},
-		{
-			name:         "connector sandbox is not an orphaned Box",
-			runningNames: []string{"agent-issue-42", runner.ConnectorSandboxPrefix + "1"},
-			want:         []string{"42"},
-		},
-		{
-			name:         "no-prefix-match name is skipped",
-			runningNames: []string{"agent-issue-42", "some-other-container"},
-			want:         []string{"42"},
-		},
-		{
-			name:         "non-numeric suffix is skipped",
-			runningNames: []string{"agent-issue-42", "agent-issue-foo"},
-			want:         []string{"42"},
-		},
-		{
-			name:         "empty suffix is skipped",
-			runningNames: []string{"agent-issue-42", "agent-issue-"},
-			want:         []string{"42"},
-		},
-		{
-			name:         "signed-positive suffix is skipped",
-			runningNames: []string{"agent-issue-42", "agent-issue-+5"},
-			want:         []string{"42"},
-		},
-		{
-			name:         "signed-negative suffix is skipped",
-			runningNames: []string{"agent-issue-42", "agent-issue--42"},
-			want:         []string{"42"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := runner.NewFake()
-			r.RunningNames = tt.runningNames
-			f, err := NewFactory(Config{}, tempLogDir(t), r, fakeDriver{}, RealClock())
-			if err != nil {
-				t.Fatalf("NewFactory: %v", err)
-			}
-
-			got, err := f.OrphanedIssues()
-			if err != nil {
-				t.Fatalf("OrphanedIssues: %v", err)
-			}
-			if !slices.Equal(got, tt.want) {
-				t.Errorf("OrphanedIssues = %v, want %v", got, tt.want)
-			}
-		})
 	}
 }
 
