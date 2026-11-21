@@ -92,6 +92,8 @@
 # package this one uses as a library, so its go test source may hold that
 # sibling's directory (issue #5637). core (optional bool) marks a backend the core
 # build keeps (ADR 0068, decision 7); every other row is stripped from the core run.
+# A core row gets no per-row go test derivation (launcher-go-test runs it, issue
+# #7318), so it must not set goTestBuildsOn.
 # Like `knobs`, the generated Descriptor ignores all three.
 
 # connectorOnly (optional bool) marks a backend whose only implementation is
