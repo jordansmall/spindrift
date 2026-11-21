@@ -122,7 +122,10 @@ func createMeta(t tracker.Target, issueType string) (tracker.CreateMeta, error) 
 // count sizes the set listIssues(q) returns without walking it: Cloud's
 // approximate count, Server's search total from a zero-row search.
 func count(t tracker.Target, q tracker.Query, _ int, _ bool) (int, error) {
-	query := openJQL(t.Repo, q)
+	query, err := openJQL(t.Repo, q)
+	if err != nil {
+		return 0, err
+	}
 	switch t.Dialect {
 	case "cloud":
 		var out struct {

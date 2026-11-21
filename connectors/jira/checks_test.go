@@ -145,7 +145,7 @@ func TestCountCloudPostsTheUnorderedListIssuesJQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	if r.Method != "POST" || r.URL != site+"/rest/api/3/search/approximate-count" ||
-		body.JQL != openJQL("ENG", q) || strings.Contains(body.JQL, "order by") || r.Headers["Content-Type"] != "application/json" {
+		body.JQL != mustOpenJQL(t, q) || strings.Contains(body.JQL, "order by") || r.Headers["Content-Type"] != "application/json" {
 		t.Fatalf("request = %#v", r)
 	}
 }
@@ -160,7 +160,7 @@ func TestCountServerReadsSearchTotalWithZeroRows(t *testing.T) {
 	r := (*got)[0]
 	u, _ := url.Parse(r.URL)
 	if r.Method != "GET" || u.Path != "/jira/rest/api/2/search" ||
-		u.Query().Get("jql") != openJQL("ENG", q) || strings.Contains(u.Query().Get("jql"), "order by") || u.Query().Get("maxResults") != "0" {
+		u.Query().Get("jql") != mustOpenJQL(t, q) || strings.Contains(u.Query().Get("jql"), "order by") || u.Query().Get("maxResults") != "0" {
 		t.Fatalf("request = %#v", r)
 	}
 }
@@ -174,5 +174,26 @@ func TestCountRejectsUnknownDialect(t *testing.T) {
 func TestCountIntervalIsInfrequent(t *testing.T) {
 	if countInterval < time.Minute {
 		t.Fatalf("countInterval = %s", countInterval)
+	}
+}
+
+func TestCountCarriesRouteClauses(t *testing.T) {
+	q := tracker.Query{Label: "agent-trigger", Route: []tracker.Selector{{Kind: "component", Value: `a" OR project = "B`}}}
+	const want = `project = "ENG" AND (labels = "agent-trigger") AND (component = "a\" OR project = \"B") AND statusCategory != Done`
+	got := script(t, func(connector.Request, *url.URL) (int, string) { return 200, `{"count":2,"total":2,"issues":[]}` })
+	if _, err := count(cloud, q, 0, false); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		JQL string `json:"jql"`
+	}
+	if err := json.Unmarshal([]byte((*got)[0].Body), &body); err != nil || body.JQL != want {
+		t.Errorf("cloud jql = %q, %v, want %s", body.JQL, err, want)
+	}
+	if _, err := count(server, q, 0, false); err != nil {
+		t.Fatal(err)
+	}
+	if g := mustQuery(t, (*got)[1]).Get("jql"); g != want {
+		t.Errorf("server jql = %q, want %s", g, want)
 	}
 }

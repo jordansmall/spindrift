@@ -455,3 +455,62 @@ func TestFileIssueErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestFileIssueRouteAddsLabelsAndComponents(t *testing.T) {
+	got := issueServer(t, 201, `{"key":"ENG-9"}`)
+	_, err := fileIssue(cloud, tracker.IssueRequest{
+		Title: "t", IssueType: "Task", Labels: []string{"a", "team-a"},
+		Route: []tracker.Selector{
+			{Kind: "label", Value: "team-a"}, {Kind: "label", Value: "team-b"},
+			{Kind: "component", Value: "Orders"}, {Kind: "component", Value: "Billing"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Fields struct {
+			Labels     []string            `json:"labels"`
+			Components []map[string]string `json:"components"`
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal([]byte((*got)[0].Body), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(body.Fields.Labels, []string{"a", "team-a", "team-b"}) ||
+		!reflect.DeepEqual(body.Fields.Components, []map[string]string{{"name": "Orders"}, {"name": "Billing"}}) {
+		t.Errorf("fields = %+v", body.Fields)
+	}
+}
+
+func TestFileIssueLabelOnlyRouteSendsNoComponents(t *testing.T) {
+	got := issueServer(t, 201, `{"key":"ENG-9"}`)
+	if _, err := fileIssue(cloud, tracker.IssueRequest{Title: "t", IssueType: "Task", Route: []tracker.Selector{{Kind: "label", Value: "x"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if b := (*got)[0].Body; strings.Contains(b, "components") || !strings.Contains(b, `"labels":["x"]`) {
+		t.Errorf("body = %s", b)
+	}
+}
+
+func TestFileIssueRouteDedupsRepeatedComponent(t *testing.T) {
+	got := issueServer(t, 201, `{"key":"ENG-9"}`)
+	_, err := fileIssue(cloud, tracker.IssueRequest{
+		Title: "t", IssueType: "Task",
+		Route: []tracker.Selector{{Kind: "component", Value: "Orders"}, {Kind: "component", Value: "Orders"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Fields struct {
+			Components []map[string]string `json:"components"`
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal([]byte((*got)[0].Body), &body); err != nil {
+		t.Fatal(err)
+	}
+	if want := []map[string]string{{"name": "Orders"}}; !reflect.DeepEqual(body.Fields.Components, want) {
+		t.Errorf("components = %v, want %v", body.Fields.Components, want)
+	}
+}
