@@ -536,8 +536,10 @@ func runSmoke(t *testing.T, c smokeCase, docPath string, extra ...string) (res s
 }
 
 func TestSeamLauncherSmokeMatrix(t *testing.T) {
+	t.Parallel()
 	for _, c := range smokeMatrix {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			docPath := seamtest.Path(t, c.fixture)
 			doc, err := inputdoc.Load(docPath)
 			if err != nil {
@@ -575,6 +577,7 @@ func TestSeamLauncherSmokeMatrix(t *testing.T) {
 // must carry no forge token key, forwarded bare or by value (issues #7140,
 // #6900), and the host's open-PR answer for branch recovery (issue #7146).
 func TestSeamSmokeReadOnlyBoxCarriesNoForgeToken(t *testing.T) {
+	t.Parallel()
 	i := slices.IndexFunc(smokeMatrix, func(c smokeCase) bool { return c.name == "work-podman" })
 	if i < 0 {
 		t.Fatal("smokeMatrix has no work-podman row")
@@ -609,6 +612,7 @@ func TestSeamSmokeReadOnlyBoxCarriesNoForgeToken(t *testing.T) {
 // BOX_ENV_VARS, the list of settings forwarded into the Box, and takes the
 // expectations from the unmodified document.
 func TestSeamSmokeCatchesDroppedKnob(t *testing.T) {
+	t.Parallel()
 	const dropped = "BRANCH_PREFIX"
 	c := smokeMatrix[0]
 	docPath := seamtest.Path(t, c.fixture)
@@ -671,6 +675,7 @@ func scratchDoc(t *testing.T, docPath string, edit func(artifacts map[string]str
 // probe overlayfs before the Box run. The shipped fixture leaves nixInBox off
 // (issue #2664), so the knobs are set on a scratch copy.
 func TestSeamSmokeBwrapOverlayProbe(t *testing.T) {
+	t.Parallel()
 	c := smokeCase{"work-bwrap-overlay", "launcher-run-input-bwrap.json", "bwrap", "work"}
 	nixConf := filepath.Join(t.TempDir(), "nix.conf")
 	if err := os.WriteFile(nixConf, nil, 0o600); err != nil {

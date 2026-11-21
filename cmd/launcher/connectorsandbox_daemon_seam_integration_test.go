@@ -121,13 +121,17 @@ func countEvents(stdout, event string) int {
 // ends: when the runs settle on their own, or when the daemon is stopped with
 // both still in flight.
 func TestSeamDaemonRunsEachHoldOneSandbox(t *testing.T) {
+	t.Parallel()
 	for _, runtime := range []string{"podman", "bwrap"} {
 		for _, stopInFlight := range []bool{false, true} {
 			name := "settle-" + runtime
 			if stopInFlight {
 				name = "shutdown-" + runtime
 			}
-			t.Run(name, func(t *testing.T) { runDaemonSandboxes(t, runtime, daemonSandboxOpts{stopInFlight: stopInFlight}) })
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				runDaemonSandboxes(t, runtime, daemonSandboxOpts{stopInFlight: stopInFlight})
+			})
 		}
 	}
 }
@@ -138,8 +142,10 @@ func TestSeamDaemonRunsEachHoldOneSandbox(t *testing.T) {
 // it, and the child's log free of a dead host, prove the sandbox outlived the
 // settle as it does in an in-process run (issue #7302).
 func TestSeamDaemonShutdownSettlesThroughSandbox(t *testing.T) {
+	t.Parallel()
 	for _, runtime := range []string{"podman", "bwrap"} {
 		t.Run(runtime, func(t *testing.T) {
+			t.Parallel()
 			runDaemonSandboxes(t, runtime, daemonSandboxOpts{stopInFlight: true, tracker: true})
 		})
 	}
@@ -153,7 +159,22 @@ type daemonSandboxOpts struct {
 	stopInFlight, tracker bool
 }
 
+// daemonRuns lets one runDaemonSandboxes run at a time. Each is a daemon, its
+// child launchers and their Connector hosts, about 115 tasks at GOMAXPROCS=4.
+// The Box's task limit (~512, threads included) is shared with the other
+// packages' seam jobs, which peak near 377 tasks with one run in flight, so a
+// second would leave no headroom; at four wide a fork fails with EAGAIN.
+// TestSeamDaemonStartReapsOrphanedSandboxes starts no children and skips it.
+var daemonRuns = make(chan struct{}, 1)
+
+func holdDaemonRun(t *testing.T) {
+	t.Helper()
+	daemonRuns <- struct{}{}
+	t.Cleanup(func() { <-daemonRuns })
+}
+
 func runDaemonSandboxes(t *testing.T, runtime string, o daemonSandboxOpts) {
+	holdDaemonRun(t)
 	stopInFlight, tracker := o.stopInFlight, o.tracker
 	rig, slots := newDaemonRig(t, runtime), daemonSlots
 	if tracker {
@@ -298,6 +319,7 @@ func setDocSettings(t *testing.T, path string, set map[string]string) {
 // is absent, as after an upgrade changed its tag: listing and killing
 // sandboxes needs no image, so the sweep must not wait for a build.
 func TestSeamDaemonStartReapsOrphanedSandboxes(t *testing.T) {
+	t.Parallel()
 	orphan, others := stageOrphan(t)
 	rig := newDaemonRigWith(t, "podman", daemonRigOpts{running: append([]string{orphan}, others...), execDoctor: true, imageAbsent: true})
 	recPath := filepath.Join(rig.recDir, "podman.jsonl")
