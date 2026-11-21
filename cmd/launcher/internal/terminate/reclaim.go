@@ -17,16 +17,15 @@ type Reaper interface {
 }
 
 // Trigger is what called Reclaim. It picks the wording of the Box log line
-// and the issue comment, so neither names an operator gesture that never
+// and the issue comment, so neither names a trigger that never
 // happened (issue #3559).
 type Trigger int
 
 const (
-	// Gesture is the console's Terminate gesture. It starts at iota+1 so an
-	// unset Trigger gets neutral wording, never an operator gesture.
-	Gesture Trigger = iota + 1
 	// SignalAbort is the second SIGTERM/SIGINT reaping Boxes still in flight.
-	SignalAbort
+	// It starts at iota+1 so an unset Trigger gets neutral wording, never a
+	// real trigger's.
+	SignalAbort Trigger = iota + 1
 	// DrainDecline is reached on a shutdown (either signal) declining a
 	// launch and releasing the held claim before any Box launched, so
 	// nothing was terminated.
@@ -46,11 +45,6 @@ type wording struct {
 
 func (t Trigger) wording() wording {
 	switch t {
-	case Gesture:
-		return wording{
-			terminalLine: "terminated by operator; issue returned to Dispatchable",
-			comment:      "Terminated by operator: reclaimed back " + CommentSuffix,
-		}
 	case SignalAbort:
 		return wording{
 			terminalLine: "aborted on signal; issue returned to Dispatchable",
@@ -69,18 +63,16 @@ func (t Trigger) wording() wording {
 	}
 }
 
-// Reclaim ends num's live Dispatch (ADR 0024, issue #649; extracted from the
-// console's Launcher.Terminate for issue #3519 so the launcher's own shutdown
-// path can call it without importing console), worded for trigger: it marks
-// reg so an in-flight settle abandons at its next checkpoint, reaps any
-// running Box via reaper, resolves a dangling branch/PR note, transitions the
-// issue back to Dispatchable (never Failed, since nothing failed), and
-// comments. Every step logs its own note to stderr and is otherwise
-// best-effort; only the reap's error is returned. reaper and cf are interfaces
-// rather than concrete types: pass a nil interface when there is none, never a
-// typed nil boxed into one (a nil *dispatch.Factory, say), or the nil guards
-// below will not see it as nil.
-// branchPrefix is BRANCH_PREFIX, naming num's agent branch.
+// Reclaim ends num's live Dispatch (ADR 0024, issues #649 and #3519), worded
+// for trigger: it marks reg so an in-flight settle abandons at its next
+// checkpoint, reaps any running Box via reaper, resolves a dangling branch/PR
+// note, transitions the issue back to Dispatchable (never Failed, since
+// nothing failed), and comments. Every step logs its own note to stderr and is
+// otherwise best-effort; only the reap's error is returned. reaper and cf are
+// interfaces rather than concrete types: pass a nil interface when there is
+// none, never a typed nil boxed into one (a nil *dispatch.Factory, say), or
+// the nil guards below will not see it as nil. branchPrefix is BRANCH_PREFIX,
+// naming num's agent branch.
 func Reclaim(tracker forge.IssueTracker, cf forge.CodeForge, branchPrefix string, reaper Reaper, reg *Registry, num string, trigger Trigger) error {
 	reg.Mark(num)
 

@@ -27,8 +27,7 @@ func newFakeForge(t *testing.T) *forge.Fake {
 }
 
 // newReclaimFixture pairs that forge fake with the reaper half: a real
-// dispatch.Factory over a fake runner, built the way console/terminate_test.go
-// builds the one its Launcher carries (issue #3519). dir is the factory's host
+// dispatch.Factory over a fake runner (issue #3519). dir is the factory's host
 // root, under which the terminal log line lands.
 func newReclaimFixture(t *testing.T) (fc *forge.Fake, fr *runner.Fake, factory *dispatch.Factory, dir string) {
 	t.Helper()
@@ -52,15 +51,14 @@ func newReclaimFixture(t *testing.T) (fc *forge.Fake, fr *runner.Fake, factory *
 	return fc, fr, factory, dir
 }
 
-// TestReclaim_ReapsTransitionsAndComments pins the full ADR 0024 action moved
-// out of the console (issue #3519): the reaper's Kill and AppendTerminalLine
-// both fire, the issue transitions InProgress->Dispatchable and
+// TestReclaim_ReapsTransitionsAndComments pins the full ADR 0024 action (issue
+// #3519): the reaper's Kill and AppendTerminalLine both fire, the issue transitions InProgress->Dispatchable and
 // Complete->Dispatchable, and a single comment carries the open PR link.
 func TestReclaim_ReapsTransitionsAndComments(t *testing.T) {
 	fc, fr, factory, dir := newReclaimFixture(t)
 	fc.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/owner/repo/pull/7"})
 
-	if err := terminate.Reclaim(fc, fc, "agent/issue-", factory, terminate.NewRegistry(), "42", terminate.Gesture); err != nil {
+	if err := terminate.Reclaim(fc, fc, "agent/issue-", factory, terminate.NewRegistry(), "42", terminate.SignalAbort); err != nil {
 		t.Fatalf("Reclaim: %v", err)
 	}
 
@@ -83,7 +81,7 @@ func TestReclaim_ReapsTransitionsAndComments(t *testing.T) {
 		}
 	}
 
-	line := "[terminate] terminated by operator; issue returned to Dispatchable"
+	line := "[terminate] aborted on signal; issue returned to Dispatchable"
 	log, err := os.ReadFile(filepath.Join(dispatch.HostLogDirFor(dir), "issue-42.log"))
 	if err != nil {
 		t.Fatalf("read terminal log: %v", err)
@@ -96,8 +94,8 @@ func TestReclaim_ReapsTransitionsAndComments(t *testing.T) {
 		t.Fatalf("CommentCalls: want 1, got %+v", fc.CommentCalls)
 	}
 	body := fc.CommentCalls[0].Body
-	if !strings.Contains(body, "Terminated") {
-		t.Errorf("comment must name the terminate; body=%q", body)
+	if !strings.Contains(body, "Aborted") {
+		t.Errorf("comment must name the abort; body=%q", body)
 	}
 	if !strings.Contains(body, "https://github.com/owner/repo/pull/7") {
 		t.Errorf("comment must link the open PR; body=%q", body)
@@ -112,7 +110,7 @@ func TestReclaim_MarksRegistry(t *testing.T) {
 	reg := terminate.NewRegistry()
 	gen := reg.Begin("42")
 
-	if err := terminate.Reclaim(fc, fc, "agent/issue-", factory, reg, "42", terminate.Gesture); err != nil {
+	if err := terminate.Reclaim(fc, fc, "agent/issue-", factory, reg, "42", terminate.SignalAbort); err != nil {
 		t.Fatalf("Reclaim: %v", err)
 	}
 
@@ -128,7 +126,7 @@ func TestReclaim_PropagatesKillError(t *testing.T) {
 	fc, fr, factory, _ := newReclaimFixture(t)
 	fr.KillErr = errors.New("boom: kill failed")
 
-	err := terminate.Reclaim(fc, fc, "agent/issue-", factory, terminate.NewRegistry(), "42", terminate.Gesture)
+	err := terminate.Reclaim(fc, fc, "agent/issue-", factory, terminate.NewRegistry(), "42", terminate.SignalAbort)
 	if err != fr.KillErr {
 		t.Fatalf("Reclaim err = %v, want %v", err, fr.KillErr)
 	}
@@ -149,7 +147,7 @@ func TestReclaim_RefusedRelease_CommentsRefusal(t *testing.T) {
 	refused := &forge.TransitionRefusedError{Issue: "42", From: "A", To: "B"}
 	fc.TransitionStateErr = fmt.Errorf("wrapped: %w", refused)
 
-	if err := terminate.Reclaim(fc, fc, "agent/issue-", factory, terminate.NewRegistry(), "42", terminate.Gesture); err != nil {
+	if err := terminate.Reclaim(fc, fc, "agent/issue-", factory, terminate.NewRegistry(), "42", terminate.SignalAbort); err != nil {
 		t.Fatalf("Reclaim: %v", err)
 	}
 
@@ -167,7 +165,7 @@ func TestReclaim_RefusedRelease_CommentsRefusal(t *testing.T) {
 func TestReclaim_NotesDanglingBranchWhenNoOpenPR(t *testing.T) {
 	fc := newFakeForge(t)
 
-	if err := terminate.Reclaim(fc, fc, "agent/issue-", nil, terminate.NewRegistry(), "42", terminate.Gesture); err != nil {
+	if err := terminate.Reclaim(fc, fc, "agent/issue-", nil, terminate.NewRegistry(), "42", terminate.SignalAbort); err != nil {
 		t.Fatalf("Reclaim: %v", err)
 	}
 
@@ -186,7 +184,7 @@ func TestReclaim_NotesDanglingBranchWhenNoOpenPR(t *testing.T) {
 func TestReclaim_NilReaperAndCodeForge_SafeAndNotesNone(t *testing.T) {
 	fc := newFakeForge(t)
 
-	if err := terminate.Reclaim(fc, nil, "agent/issue-", nil, terminate.NewRegistry(), "42", terminate.Gesture); err != nil {
+	if err := terminate.Reclaim(fc, nil, "agent/issue-", nil, terminate.NewRegistry(), "42", terminate.SignalAbort); err != nil {
 		t.Fatalf("Reclaim: %v", err)
 	}
 
@@ -203,7 +201,7 @@ func TestReclaim_NilReaperAndCodeForge_SafeAndNotesNone(t *testing.T) {
 
 // TestReclaim_WordingNamesTrigger pins issue #3559: the comment and
 // terminal log line must name the trigger that actually fired Reclaim, not
-// always claim an operator Terminate. DrainDecline in particular must claim
+// always claim an operator-driven terminate. DrainDecline in particular must claim
 // no termination or kill, since it fires before any Box ever launched. Every
 // comment shares the terminate.CommentSuffix callers match.
 func TestReclaim_WordingNamesTrigger(t *testing.T) {
@@ -214,12 +212,6 @@ func TestReclaim_WordingNamesTrigger(t *testing.T) {
 		wantCommentNone []string
 		wantLogLine     string
 	}{
-		{
-			name:           "Gesture",
-			trigger:        terminate.Gesture,
-			wantCommentHas: "Terminated by operator",
-			wantLogLine:    "terminated by operator; issue returned to Dispatchable",
-		},
 		{
 			name:           "SignalAbort",
 			trigger:        terminate.SignalAbort,
@@ -235,7 +227,7 @@ func TestReclaim_WordingNamesTrigger(t *testing.T) {
 		},
 		{
 			// The zero value (no Trigger constant) must fall to neutral
-			// wording that names no actor, never the Gesture wording.
+			// wording that names no actor, never a real trigger's wording.
 			name:            "zero value falls to neutral wording",
 			trigger:         terminate.Trigger(0),
 			wantCommentHas:  "Reclaimed back to Dispatchable.",
@@ -285,7 +277,7 @@ func TestReclaim_NamesBranchFromPassedPrefix(t *testing.T) {
 	fc := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	fc.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-in-progress"}})
 
-	if err := terminate.Reclaim(fc, fc, "agent/issue-", nil, terminate.NewRegistry(), "42", terminate.Gesture); err != nil {
+	if err := terminate.Reclaim(fc, fc, "agent/issue-", nil, terminate.NewRegistry(), "42", terminate.SignalAbort); err != nil {
 		t.Fatalf("Reclaim: %v", err)
 	}
 	if len(fc.CommentCalls) != 1 || !strings.Contains(fc.CommentCalls[0].Body, "branch=agent/issue-42") {
