@@ -101,6 +101,15 @@ let
       testPkgs =
         pkgs.lib.optionalString (!connectorHosted) "./internal/${testPkg}/${name}/..."
         + pkgs.lib.optionalString (!isBackend) " ./internal/driver/driverrows/...";
+      # The test that runs the Connector: TestCorpus for a hosted Driver,
+      # TestPrimaryRowConnectorPassesCorpus for one with a native Strategy.
+      requiredPass =
+        if connectorHosted then
+          "TestCorpus"
+        else if !isBackend then
+          "TestPrimaryRowConnectorPassesCorpus"
+        else
+          null;
     in
     {
       "connector-${name}-go-fmt" = mk "fmt" ''
@@ -138,18 +147,18 @@ let
             cd src/cmd/launcher
             ${setup}
             ${
-              if connectorHosted then
+              if requiredPass == null then
+                "go test ${testPkgs}"
+              else
                 ''
-                  # go test exits 0 when TestCorpus skips, so require its PASS line.
+                  # go test exits 0 when the test skips, so require its PASS line.
                   log=$(go test -v ${testPkgs} 2>&1) || { printf '%s\n' "$log"; exit 1; }
                   printf '%s\n' "$log"
-                  grep -q '^--- PASS: TestCorpus ' <<<"$log" || {
-                    echo "connector-${name}-conformance: TestCorpus did not pass (skipped or never ran)" >&2
+                  grep -q '^--- PASS: ${requiredPass} ' <<<"$log" || {
+                    echo "connector-${name}-conformance: ${requiredPass} did not pass (skipped or never ran)" >&2
                     exit 1
                   }
                 ''
-              else
-                "go test ${testPkgs}"
             }
             touch $out
           '';
