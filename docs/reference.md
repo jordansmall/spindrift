@@ -29,6 +29,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift doctor`               | run the preflight checks a dispatch depends on — see [`spindrift doctor` checks](#spindrift-doctor-checks) |
 | `spindrift reconcile`            | bookkeeping sweep: on any PR-capable Code Forge, record a late merge for each Dispatch Record whose PR was left open at settle and has merged since (see [Stats](#stats)); on a local tracker, also close issues whose recorded `landing` PR merged and reset an orphaned `InProgress` issue to `Dispatchable` (ADR 0029). Also auto-invoked at the end of a `dispatch` run that names no issues — see [`reconcile`: late merges and closing a local issue](#reconcile-late-merges-and-closing-a-local-issue) |
 | `spindrift stats [--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>[,<dimension>...]]` | per-role Dispatch cost summary read from the logs under `.spindrift` (notional API-equivalent USD), optionally grouped by revision, model, driver, agent (subagent), prompt hash, or knob; `--json` emits one Record per line — see [Stats](#stats) |
+| `spindrift shadow-replay --driver <name> [--connector <driver.wasm>] [<log-dir>]` | replay archived Pass logs through one Driver's Connector beside its native Strategy, writing each log's comparison to a `.shadow-replay.jsonl` sidecar — see [Replaying archived Pass logs](#replaying-archived-pass-logs) |
 | `spindrift registry discover <repo-dir> <routes-file>` | write a registry routes file (ADR 0045) by scanning the Target repo's own committed registry config, setup-time only, by the operator — see [Registry route discovery](#registry-route-discovery) |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
 | `spindrift --help --all`         | the full flag reference, grouped by category (the terminal form of `man spindrift`) |
@@ -2943,8 +2944,9 @@ clipped to 8 KiB; the summary's `diverged` still counts every mismatch.
 
 **`shadow_summary`**, one per Pass, under `shadow_summary`: `driver`, `loaded`,
 `error`, `compared` (lines compared), `diverged`, `recorded` (divergence ops
-emitted), and `native_ns_per_line` and `shadow_ns_per_line`, the mean cost of
-decoding one line on each side. The shadow decodes in batches of about 1 MiB
+emitted), `native_ns_per_line` and `shadow_ns_per_line`, the mean cost of
+decoding one line on each side, and `replayed`, set only by a [replay of an
+archived log](#replaying-archived-pass-logs). The shadow decodes in batches of about 1 MiB
 of lines, so its figure is each batch call's time averaged over the lines
 compared. A run spans several Passes, so its totals are
 the sum over the summaries in its Pass logs. The Connector runs on wazero's
@@ -2990,7 +2992,11 @@ fetched from CI with `gh run download` have all ended, so for them set
 summary counts dirty, and a satellite fetched without its primary is not
 skipped. A Driver shadow moves on to primary mode (#6999) after 20 consecutive
 clean dogfood runs; once a Driver is primary it emits no `shadow_summary`, so
-the recipe applies only while the Driver is shadowed. claude cut over this way
+the recipe applies only while the Driver is shadowed. opencode and pi cut over
+after 20 consecutive clean runs, live or replayed, because dogfood rarely runs
+them (pi only when an operator forces it onto the self-hosted Provider); the
+recipe counts [replayed runs](#replaying-archived-pass-logs) with live ones.
+claude's bar stayed live-only: it cut over this way
 (issue #6799), on 41 consecutive clean dogfood runs in primary mode (16 work
 Boxes and 25 research dispatches) before its native Strategy was deleted. The
 recipe counts them from the newest log back, with `logs` the directory of Pass
@@ -3005,17 +3011,19 @@ whatever the shell's locale and keep their verdict:
 
 ```sh
 logs=.spindrift/logs
-driver=claude
+driver=opencode
 finished=
 for f in "$logs"/issue-*.log; do
   [ -e "$f" ] || continue
   base=${f##*/}; base=${base%.log}; base=${base%-fix-*}; base=${base%-conflict-resolve}
   primary=${f%/*}/$base.log
+  rep=${f%.log}.shadow-replay.jsonl
+  [ -e "$rep" ] || rep=/dev/null
   settled=${finished:+true}
   [ -n "$settled" ] || settled=$(jq -Rrs '
     [split("\n")[] | fromjson? | objects | select(.type == "spindrift_op") | .spindrift_op.op]
     | any(. == "dispatch_settled")' "$primary" 2>/dev/null)
-  jq -Rrs --arg driver "$driver" --argjson settled "${settled:-false}" '
+  jq -Rrs --arg driver "$driver" --argjson settled "${settled:-false}" --slurpfile rep "$rep" '
     def utc: if . == "" then "" else
       try ((.[0:19] + "Z" | fromdateiso8601)
       - ((capture("(?<s>[+-])(?<h>\\d\\d):(?<m>\\d\\d)$") // {s: "+", h: "0", m: "0"})
@@ -3023,13 +3031,18 @@ for f in "$logs"/issue-*.log; do
       | tostring) catch "" end;
     [split("\n")[] | fromjson? | objects | select(.type == "spindrift_op") | .spindrift_op] as $ops
     | ([$ops[] | select(.op == "dispatch_start") | .dispatch_start][0] // {}) as $start
-    | [$ops[] | select(.op == "shadow_summary") | .shadow_summary | select(.driver == $driver)] as $sums
+    | def sums: [.[] | select(.op == "shadow_summary") | .shadow_summary | select(.driver == $driver)];
+    ($ops | sums | map(select(.replayed != true))) as $live
+    | ([$rep[] | objects | select(.type == "spindrift_op") | .spindrift_op]) as $repops
+    | (if ([$repops[] | select(.op == "dispatch_start") | .dispatch_start][0] // null) == $start
+       then $repops | sums else [] end) as $replayed
     | ([$ops[] | select(.op == "pass_start")] | length) as $passes
     | ([$ops[] | select(.op == "pass_usage")] | length) as $ended
+    | ([$live, $replayed | select(length > 0)]) as $sets
     | (if $passes == 0 or ($start.driver // $driver) != $driver then "skip"
        elif $ended < $passes and ($settled | not) then "skip"
-       elif ($sums | length) == $passes
-         and all($sums[]; .loaded and (.error // "") == "" and .compared > 0 and .diverged == 0)
+       elif ($sets | length) > 0 and all($sets[]; length == $passes
+         and all(.[]; .loaded and (.error // "") == "" and .compared > 0 and .diverged == 0))
        then "clean" else "dirty" end) as $verdict
     | "\(($start.started // "") | utc)\t\($verdict)"' "$f"
 done | LC_ALL=C sort -r | awk -F'\t' '
@@ -3044,6 +3057,55 @@ Pass logs mix Driver JSON with host ops and may hold lines that are not JSON;
 never reached, ran no Pass and is skipped rather than counted or treated as a
 break. A finished run of the shadowed Driver with a missing summary breaks the
 count.
+
+The recipe also reads each log's `.shadow-replay.jsonl` sidecar. A run is one
+log, so it counts once however many summaries it has; its live and replayed
+summaries are each checked against the clean rule, and a divergence in either
+breaks the count. Set `driver` to the shadowed Driver (`opencode` here). The
+two sets are judged separately: each non-empty set must be clean with one
+summary per Pass, so a complete clean replay does not fill the gaps in a
+partial live set, and such a run counts dirty. A sidecar counts only when it
+opens with its log's own `dispatch_start`; otherwise it is ignored, so replay
+again.
+
+###### Replaying archived Pass logs
+
+`spindrift shadow-replay --driver <name> [--connector <driver.wasm>] [<log-dir>]`
+replays logs that already ran through the comparator, so a Connector can be
+checked against real Passes without a Dispatch. `<log-dir>` defaults to
+`.spindrift/logs` and may be a directory of artifacts fetched with `gh run
+download`. The native Strategy is the Driver's linked-in one, so a Driver with
+none (claude, since issue #6799) is a usage error. The Connector is
+`--connector`, else the module of the Driver's shadow row, and loads through
+the Connector sandbox like any other.
+
+Each `issue-*.log` (satellites included) is replayed Pass by Pass, and the
+shadow ops are written to a sidecar beside it, `issue-<n>.shadow-replay.jsonl`,
+whose summaries carry `replayed: true`. The sidecar opens with the log's
+`dispatch_start`, which tells it from one left by an earlier Dispatch of the
+same issue (the host renames old logs aside but not their sidecars). Only
+`issue-*.log` is replayed: rotated and quarantined earlier runs
+(`issue-<n>.log.N`, `issue-<n>.log.prior-run.N`) are neither replayed nor
+counted. The archive is never modified, and the sidecar's name keeps the
+Dispatch Record scan, which reads `issue-*.log`, from taking it for a Pass log.
+A log whose `dispatch_start` stamps another Driver or none is reported
+`skipped` with no sidecar, and a Pass not yet ended is not replayed. The
+archive does not record the CLI's raw exit code, so every Pass resolves its
+exit against 0. A log that fails is reported and makes the verb exit non-zero
+once the rest are done. Running the verb again replaces a log's sidecar.
+
+Replaying a Dispatch that is still running writes a sidecar holding only the
+Passes ended so far, which makes the run count dirty once it settles; run the
+verb again after it settles.
+
+Pass logs hold the CLI's output after the stream filter, so replay cannot
+prove a filter. pi's filter rests on its Conformance goldens and its live
+shadow runs. The archive also merges the CLI's and driver-exec's stderr into
+the stream, so replay keeps only JSON-object lines: a non-JSON stdout line that
+live compared is dropped and a JSON-shaped stderr line is compared, so a
+replay's `compared` can differ from live's for such a Pass. `gh run download
+<run-id>` without `-n agent-logs-<n>` nests the logs one directory down, and
+the verb then reports no Pass logs found; point it at the nested directory.
 
 ##### Backend read shadow
 
