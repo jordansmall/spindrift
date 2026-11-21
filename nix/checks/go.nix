@@ -244,6 +244,15 @@ let
           '';
       }) names
     );
+  # The pi Connector's non-test Go source, of which the pi Driver's
+  # connector_source_parity_test.go reads the files it pins to the native
+  # copies. Tests and nix files are left out, so editing them moves no check.
+  piConnectorTwins = fs.toSource {
+    root = ../../connectors/pi;
+    fileset = fs.fileFilter (
+      f: f.hasExt "go" && !pkgs.lib.hasSuffix "_test.go" f.name
+    ) ../../connectors/pi;
+  };
   driverGoTestsFor =
     { files, names }:
     adapterGoTests {
@@ -253,9 +262,15 @@ let
       sharedFor = _: driverGoTestShared;
       # A Driver's shadow test replays its corpus through the divergent
       # fixture Connector.
-      setupFor = _: ''
-        export SPINDRIFT_CONNECTOR_FIXTURES_DIR=${fixtures.connectorWasm}
-      '';
+      setupFor =
+        name:
+        ''
+          export SPINDRIFT_CONNECTOR_FIXTURES_DIR=${fixtures.connectorWasm}
+        ''
+        + pkgs.lib.optionalString (name == "pi") ''
+          mkdir -p src/connectors/pi
+          cp ${piConnectorTwins}/*.go src/connectors/pi
+        '';
     };
   driverGoTests = driverGoTestsFor {
     files = launcherDir;

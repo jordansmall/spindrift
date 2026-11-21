@@ -4,5 +4,6 @@
   "connectors/forgejo": "0.2.0",
   "connectors/github": "0.3.0",
   "connectors/jira": "0.2.0",
-  "connectors/opencode": "0.1.1"
+  "connectors/opencode": "0.1.1",
+  "connectors/pi": "0.1.0"
 }

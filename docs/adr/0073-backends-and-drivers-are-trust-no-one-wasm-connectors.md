@@ -371,6 +371,49 @@ events across the readers (about nine full scans after a Pass today); cut the
 Connector's per-byte cost (the bulk is large `tool_result` strings the readers
 mostly do not need); or the compiler with a per-user cache.
 
+### pi's stream filter on the live stdout path (issue #6875)
+
+Unlike a decoder, which shadow mode replays after the Pass, pi's stream filter
+sits on the live stdout path: `driver-exec` writes each read of the CLI's
+stdout through it before the log tee. `BenchmarkConnectorStreamFilter`
+(`cmd/launcher/internal/driver/pi/connector_bench_test.go`; medians of 5; Linux
+amd64, Ryzen 9 5950X, go1.26.8, wazero v1.11.0; the 3.96 MB pi Connector,
+stock Go `GOOS=wasip1`) feeds a fresh filter per stream, then flushes, over two
+corpora: the 13 pass logs (318 lines, 177,765 bytes) and the 10 raw stdout
+fixtures, which carry the deltas the filter drops (50 lines, 19,545 bytes).
+The chunking is how `driver-exec` reads: `os/exec` copies the Driver's private
+stdout pipe with `io.Copy`'s 32 KiB buffer, and a read returns what the pipe
+holds, so a live pi, which flushes one event per write, hands the filter about
+a line a read; a backed-up pipe hands it a full buffer. Both are run. A call is
+one `Write` of one chunk; construction and `Flush` are in the time, not the
+count. Each Connector row's output is asserted equal to native's before
+timing. Run in a dogfood Box on a shared host: compare ratios, not absolutes.
+
+| bench, per call | native | interpreter | compiler |
+|---|---|---|---|
+| pass logs, one line a read (318 calls) | 4.87 µs | 5.99 ms | 814 µs |
+| pass logs, 32 KiB reads (14 calls) | 125 µs | 118 ms | 15.1 ms |
+| raw stdout, one line a read (50 calls) | 5.53 µs | 5.78 ms | 592 µs |
+| raw stdout, 32 KiB reads (10 calls) | 37.9 µs | 23.2 ms | 3.03 ms |
+
+The interpreter costs about 600x to 1,200x native per call and the compiler
+about 80x to 170x, so the compiler is about 7x to 10x faster, against about
+7.6x for decode.
+The cost is per byte again, about 11 µs a byte on the interpreter for the
+559-byte pass-log line, so a full 32 KiB read of such lines would take about
+a third of a second.
+
+At one line a read the interpreter sustains about 165 calls/s (6 ms a call),
+against about 2.8 lines/s for the densest real claude pass above: about 60x
+headroom at claude's densest measured rate, under 2 percent of one core. That
+is a claude-rate proxy, not a pi claim: no pi corpus case carries real
+timestamps, so pi's own rate is unmeasured; a streaming pi emits a
+`message_update` per delta, which the filter drops, and those lines are short
+(183 bytes on average in the fixtures, so cheaper per call than the table's
+line rows). Unlike the heartbeat's one slow line, a slow call here
+backpressures the Driver's stdout pipe, so a large tool result is the case to
+watch: pi events of a few hundred KB would stall the CLI for seconds.
+
 ## Amendment (issue #6851): the post-Pass reads share one decode
 
 `driverkit.Driver.Decode` decodes a Pass log once into a `PassLog`, and its

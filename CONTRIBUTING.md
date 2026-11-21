@@ -313,9 +313,10 @@ and in the in-box `box` program; the only bash left is the generated shim that
   on core internals. It carries a published copy of the event vocabulary,
   kept in parity with driverkit by `sdk/event/parity_test.go`. It also
   carries twins of the driverkit helpers a Connector needs (`ToolTarget`,
-  `ErrorText`, `CompactJSON`, `SessionKey`, `SessionUUID`, `IsProgress`),
-  pinned by `TestHelperParity` in `sdk/driver/parity_test.go` and
-  `TestIsProgressParity` in `sdk/event/parity_test.go`. Fixture
+  `ErrorText`, `CompactJSON`, `SessionKey`, `SessionUUID`, `IsProgress`,
+  `LineFramer`), pinned by `TestHelperParity` and `TestLineFramerParity` in
+  `sdk/driver/parity_test.go` and `TestIsProgressParity` in
+  `sdk/event/parity_test.go`. Fixture
   Connectors live under `nix/fixtures/connector-wasm`, except the fixture Driver
   Connector, which is `nix/fixtures/connector` itself.
 - **`connectors/`** — shipped Connector subflakes, each its own Go module built
@@ -326,7 +327,9 @@ and in the in-box `box` program; the only bash left is the generated shim that
   `connectors/github` is the github backend's tracker and forge read paths;
   `connectors/jira` is the jira backend's tracker read and write paths
   (transitions, label edits, label list and create); `connectors/forgejo` is
-  the forgejo backend's forge path (branch and PR primitives).
+  the forgejo backend's forge path (branch and PR primitives);
+  `connectors/pi` is the pi Driver's host half, ported from the native
+  Strategy, which stays authoritative until cut-over.
   Each subflake gets `connector-<name>-go-{fmt,vet,test}` and
   `connector-<name>-conformance` from `core.lib.connectorChecks`; core's root
   `checks` carry none of them.
