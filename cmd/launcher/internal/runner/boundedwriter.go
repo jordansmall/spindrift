@@ -2,7 +2,7 @@ package runner
 
 import "sync"
 
-// BoundedWriter retains only the last rebuildOutputCap bytes written (#1130),
+// BoundedWriter retains only the last boundedOutputCap bytes written (#1130),
 // so an uncapped verbose nix build cannot pin a multi-MB transcript in memory.
 // It keeps the tail because failures print at the end.
 // It is safe for concurrent use: a Connector sandbox's stderr is written by the
@@ -12,16 +12,16 @@ type BoundedWriter struct {
 	buf []byte
 }
 
-// rebuildOutputCap bounds a single RunNixBuild capture. 64 KiB keeps enough
-// trailing context to diagnose a nix build failure.
-const rebuildOutputCap = 64 * 1024
+// boundedOutputCap bounds a single BoundedWriter capture. 64 KiB keeps enough
+// trailing context to diagnose a failed command.
+const boundedOutputCap = 64 * 1024
 
 func (w *BoundedWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.buf = append(w.buf, p...)
-	if len(w.buf) > rebuildOutputCap {
-		w.buf = w.buf[len(w.buf)-rebuildOutputCap:]
+	if len(w.buf) > boundedOutputCap {
+		w.buf = w.buf[len(w.buf)-boundedOutputCap:]
 	}
 	return len(p), nil
 }

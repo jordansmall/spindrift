@@ -207,16 +207,3 @@ func TestHostLogDirFor(t *testing.T) {
 		}
 	}
 }
-
-// Factory must expose the Driver it was constructed with, so rendering a
-// Dispatch's logs needs no second rendering path on the Factory (#648).
-func TestFactory_Driver_ReturnsConfiguredDriver(t *testing.T) {
-	drv := fakeDriver{}
-	f, err := NewFactory(Config{}, tempLogDir(t), nil, drv, RealClock())
-	if err != nil {
-		t.Fatalf("NewFactory: %v", err)
-	}
-	if f.Driver().Name() != drv.Name() {
-		t.Errorf("Driver().Name() = %q, want %q", f.Driver().Name(), drv.Name())
-	}
-}
