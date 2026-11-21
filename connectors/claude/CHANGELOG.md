@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/jordansmall/spindrift/compare/claude-v0.2.0...claude-v0.3.0) (2026-11-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **nix:** spindrift.connectors.claude.primary and .shadow are refused; the claude Connector is always the claude Driver.
+* **driver:** claude can no longer be shadowed or set primary, and a claude Connector that fails to load fails the run.
+
+### Features
+
+* **driver:** delete the native claude Strategy ([db8a3e7](https://github.com/jordansmall/spindrift/commit/db8a3e7d09f0830cd559332a90b75360843cd53d)), closes [#6799](https://github.com/jordansmall/spindrift/issues/6799)
+* **nix:** render claude's Connector row for every Consumer ([fd73c22](https://github.com/jordansmall/spindrift/commit/fd73c227ed93d80b1c279e65d0178995fb343b08)), closes [#6799](https://github.com/jordansmall/spindrift/issues/6799)
+
 ## [0.2.0](https://github.com/jordansmall/spindrift/compare/claude-v0.1.0...claude-v0.2.0) (2026-11-18)
 
 
