@@ -42,10 +42,19 @@ type Target struct {
 // Query selects the open issues a ListIssues call returns. They are the
 // selectors core resolved from a Dispatch state: a Connector matches an open
 // issue carrying Label OR in Status, ignoring an empty one. Both empty means
-// every open issue.
+// every open issue. Route then narrows that set: an issue must also match
+// every Route selector (AND), and an empty Route narrows nothing.
 type Query struct {
-	Label  string `json:"label"`
-	Status string `json:"status"`
+	Label  string     `json:"label"`
+	Status string     `json:"status"`
+	Route  []Selector `json:"route,omitempty"`
+}
+
+// Selector is one Route term: Kind names how the tracker matches (a kind the
+// tracker declares it supports) and Value is what it matches against.
+type Selector struct {
+	Kind  string `json:"kind"`
+	Value string `json:"value"`
 }
 
 // Issue is one tracker issue. State is "open" or "closed"; a listIssues answer
