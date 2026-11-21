@@ -64,6 +64,7 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 		return conn, nil
 	}, nil, nil, connectortracker.Lifecycle{
 		Labels:        s.Labels,
+		Route:         s.Route,
 		VerdictLabels: s.VerdictLabels,
 	}, connectortracker.Target{
 		API:  strings.TrimSuffix(k.ForgejoBaseURL, "/"),

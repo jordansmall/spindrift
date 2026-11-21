@@ -1,14 +1,18 @@
 package forgejo_test
 
 import (
+	"errors"
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 )
 
@@ -238,4 +242,73 @@ func testFindingDedupMarkerSurvivesFiling(t *testing.T, w trackerHarness) {
 	if !slices.Equal(dedupmarker.Parse(got.Body), dedupmarker.Parse(body)) {
 		t.Errorf("Issue(%s) = %+v, want the marker's terms", nums[0], got)
 	}
+}
+
+const routeLabel = "orders-api"
+
+// An Issue route reaches the Connector on every tracker read and filing, which
+// narrows the labels filter to the route's issues; an unrouted tracker sends
+// none and sees the whole scope.
+func TestConnectorTracker_IssueRouteNarrowsReadsAndFilesWithItsLabel(t *testing.T) {
+	w := newTrackerHarness(t)
+	w.SeedIssue(forge.Issue{Number: "1", Title: "in route", Labels: []string{testLabels.Dispatchable, routeLabel, "finding"}})
+	w.SeedIssue(forge.Issue{Number: "2", Title: "other route", Labels: []string{testLabels.Dispatchable, "finding"}})
+
+	if n, err := countReady(w.tr); err != nil || n != 2 {
+		t.Fatalf("unrouted CountReady = %d, %v; want the whole scope, 2", n, err)
+	}
+	if got, err := listLabeled(w.tr, "finding"); err != nil || len(got) != 2 {
+		t.Fatalf("unrouted ListIssuesWithLabels = %v, %v; want 2 issues", got, err)
+	}
+
+	tr, err := forgejo.Strategy.NewIssueTracker(backendkit.Shared{
+		RepoSlug: connectorRepo, Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(),
+		Route: forge.Route{{Kind: "label", Value: routeLabel}},
+	}, mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: w.srv.URL, forgejo.ForgejoTokenEnv: gitSecret}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := countReady(tr); err != nil || n != 1 {
+		t.Errorf("routed CountReady = %d, %v; want 1", n, err)
+	}
+	if got, err := tr.ListIssues(forge.Dispatchable); err != nil || len(got) != 1 || got[0].Number != "1" {
+		t.Errorf("routed ListIssues = %v, %v; want issue 1", got, err)
+	}
+	if got, err := listLabeled(tr, "finding"); err != nil || len(got) != 1 || got[0].Number != "1" {
+		t.Errorf("routed ListIssuesWithLabels = %v, %v; want issue 1", got, err)
+	}
+
+	url, err := tr.(forge.HostPostedIssueFiler).PostIssue("routed finding", "body", []string{"finding"})
+	if err != nil {
+		t.Fatalf("PostIssue: %v", err)
+	}
+	num := atoi(url[strings.LastIndex(url, "/")+1:])
+	w.mu.Lock()
+	filed := w.trk.issues[num]
+	var labels []string
+	if filed != nil {
+		labels = slices.Clone(filed.labels)
+	}
+	w.mu.Unlock()
+	for _, want := range []string{"finding", routeLabel} {
+		if !slices.Contains(labels, want) {
+			t.Errorf("filed labels = %v, want %q among them", labels, want)
+		}
+	}
+}
+
+func countReady(tr forge.IssueTracker) (int, error) {
+	dc, ok := forge.As[forge.DemandCounter](tr)
+	if !ok {
+		return 0, errors.New("tracker is not a forge.DemandCounter")
+	}
+	return dc.CountReady(true)
+}
+
+func listLabeled(tr forge.IssueTracker, labels ...string) ([]forge.Issue, error) {
+	l, ok := forge.As[forge.LabeledBacklogLister](tr)
+	if !ok {
+		return nil, errors.New("tracker is not a forge.LabeledBacklogLister")
+	}
+	return l.ListIssuesWithLabels(forge.IssueOpen, labels)
 }
