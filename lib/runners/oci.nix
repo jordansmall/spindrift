@@ -21,10 +21,8 @@
   ];
 
   # The run-document keys only this family renders (ADR 0069 decision 7); the
-  # keys both families share live in lib/preambles.nix. It also carries the
-  # build-time vars so EnsureReady can build the image on demand when it is
-  # absent: the workflow is `build` first, but `run` must still handle a
-  # missing image on any machine.
+  # shared keys live in lib/preambles.nix. The build-time vars let
+  # EnsureReady build a missing image on demand at `run`.
   runArtifacts =
     {
       flakeImageAttr,

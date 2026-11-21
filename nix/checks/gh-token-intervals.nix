@@ -31,8 +31,7 @@ let
 
   # Compares the ordered, counted list, not merely that each value appears
   # somewhere, which would miss one of the two refreshSeconds sites drifting
-  # alone. Factored out so the -regression check below can exercise this
-  # path against doctored source without touching the real files.
+  # alone.
   assertSleepSecsPinned =
     src:
     let

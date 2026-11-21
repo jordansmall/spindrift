@@ -1,13 +1,11 @@
-# A Connector's conformance suite, built from core so a Connector's own
-# subflake can run it (`nix flake check` in connectors/<name>). It is the only
-# place a Connector's checks run: root `checks` carry none, and CI's `connector`
-# lane runs it via `nix run .#connector-dev -- <name> flake check`. It covers
-# the Connector's Go fmt, wasip1 vet and unit tests, plus the launcher's
-# conformance test for its Driver or backend run against the Connector's wasm.
-# It runs `go test ./internal/{driver,forge}/<name>/...` inside core's launcher
-# (a Driver with no native package, lib/drivers/default.nix's connectorHosted,
-# runs the driverrows tests alone, over the corpus beside the Connector),
-# so it works only for a Connector named after a core Driver or backend package.
+# A Connector's conformance suite, built from core so its own subflake can run
+# it (`nix flake check` in connectors/<name>); root `checks` carry none, and
+# CI's `connector` lane runs it via `nix run .#connector-dev -- <name> flake
+# check`. It covers the Connector's Go fmt, wasip1 vet and unit tests, plus
+# core's `go test ./internal/{driver,forge}/<name>/...` against the
+# Connector's wasm (a connectorHosted Driver, with no native package, runs the
+# driverrows tests alone), so it works only for a Connector named after a core
+# Driver or backend package.
 {
   nixpkgs,
   systems,

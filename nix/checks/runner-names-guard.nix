@@ -1,18 +1,15 @@
-# Rejects a quoted runner family or runtime name in any *.nix outside the runner
-# rows (issue #5689, ADR 0069). The rows in lib/runners/ are the one home for
-# these literals; everything else must read them from the registry, so adding a
-# runner stays a one-row change. The name set is derived from the rows at eval
-# time: each row's `name` plus its `runtimes`.
-# Known limits: line-based; only a double-quoted exact name is matched, so a
-# name inside a longer string ("docker-compose") or an indented-string prose
-# mention without quotes is unseen; a full-line `#` comment is skipped but a
-# trailing `#` comment after code is not; a name built by interpolation is unseen.
-# Exemptions are whole-file or directory-prefix, so a literal added anywhere in
-# an exempt path passes unseen: keep an exempt file down to the one site that
-# needs the names (issue #5804). The golden directory stays a prefix exemption
-# because the Go golden tests in cmd/launcher/quickstart/quickstart_test.go pin
-# its files byte-for-byte, so a new literal there fails those tests, not this
-# one.
+# Rejects a quoted runner family or runtime name (each row's `name` plus its
+# `runtimes`) in any *.nix outside lib/runners/ (issue #5689, ADR 0069), so
+# adding a runner stays a one-row change.
+# Known limits: line-based; only a double-quoted exact name matches, so a name
+# inside a longer string or an unquoted prose mention is unseen; a full-line
+# `#` comment is skipped but a trailing one is not; a name built by
+# interpolation is unseen.
+# An exemption covers its whole file or prefix, so a literal added anywhere in
+# it passes unseen: keep an exempt file down to the one site that needs the
+# names (issue #5804). The quickstart golden directory stays a prefix
+# exemption because quickstart_test.go pins its files byte-for-byte, so a new
+# literal there fails those tests instead.
 { pkgs, ... }:
 let
   rows = import ../../lib/runners;

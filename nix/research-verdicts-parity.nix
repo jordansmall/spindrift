@@ -1,9 +1,9 @@
-# Fixture for TestResearchVerdictRenderingMatchesNix, the nix-to-Go parity test
-# (issues #4159, #2630): the three renderings lib/research-verdicts.nix's
-# renderPrompt performs on research-prompt.md, per RESEARCH_VERDICTS value,
-# for forge.VerdictLabels.RenderPrompt's output at prompt assembly to be
-# diffed against. Each target is rendered on its own, through the same `render`
-# the build uses, so the expected bytes cannot drift from the nix function.
+# Fixture for TestResearchVerdictRenderingMatchesNix (issues #4159, #2630):
+# the three placeholder renderings lib/research-verdicts.nix's renderPrompt
+# performs on research-prompt.md, per RESEARCH_VERDICTS value, which
+# forge.VerdictLabels.RenderPrompt's output is diffed against. Each target is
+# rendered on its own through the build's own `render`, so the expected bytes
+# cannot drift from the nix function.
 { pkgs }:
 let
   rv = import ../lib/research-verdicts.nix;

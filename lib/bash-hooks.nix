@@ -1,28 +1,23 @@
 # The Bash hook table (issue #5408): the one place the Bash hook list is named.
-# lib/image.nix renders the claude settings.json hooks from it and
-# lib/agent-hooks.nix bakes the ~/.claude/hooks files from it (the image and
-# the opencode-guards check both use that directory); `nix run .#regen` renders
-# the opencode plugin's hook list and its docs/reference.md copy, and the pi
-# bridge extension's hook list; nix/checks/bats.nix's shellcheck lints `scripts`.
+# lib/image.nix renders the claude settings.json hooks from it,
+# lib/agent-hooks.nix bakes the ~/.claude/hooks files, and `nix run .#regen`
+# renders the opencode plugin's and pi bridge's hook lists (and the
+# docs/reference.md copy); nix/checks/bats.nix's shellcheck lints `scripts`.
 #
 # Row order is load-bearing: it is the claude settings.json order within an
-# event, and the opencode plugin's and pi bridge's run order, where each hook
+# event and the opencode plugin's and pi bridge's run order, where each hook
 # sees the args the earlier ones rewrote (the tee must stay last to wrap the
 # scrubbed command).
 #
-# A row with an `opencode` attr is run by the opencode plugin
-# (agent/opencode-guards.js): a PreToolUse row in its tool.execute.before
-# HOOKS, where `rewrites` marks a hook whose silence on a non-empty command is
-# a failure rather than "allow", and the one PostToolUse row as its
-# tool.execute.after SUMMARY_HOOK. A PreToolUse row's opencode tools are its
-# `matchers`, lowercased to opencode's tool names (Bash -> bash, Read -> read).
-# credential-deny.sh runs there too: the plugin's throw precedes opencode's
-# permission check, so a Target repo's opencode.json allow rule cannot widen it.
-# opencode's own deny config (lib/drivers/opencode.nix) stays as a floor.
-#
-# A row with a `pi` attr is run the same way by the pi bridge extension
-# (agent/pi-hook-bridge.js), which has no deny config to lean on. A
-# PreToolUse row's pi tools are its `matchers`, lowercased the same way.
+# A row with an `opencode` attr runs in agent/opencode-guards.js: a PreToolUse
+# row in its tool.execute.before HOOKS, where `rewrites` marks a hook whose
+# silence on a non-empty command is a failure rather than "allow", and the one
+# PostToolUse row as its SUMMARY_HOOK. Its tools are its `matchers`, lowercased
+# (Bash -> bash). credential-deny.sh runs there too: the plugin's throw precedes
+# opencode's permission check, so a Target repo's opencode.json allow rule
+# cannot widen it; opencode's own deny config (lib/drivers/opencode.nix) stays
+# as a floor. A `pi` row runs the same way in agent/pi-hook-bridge.js, which
+# has no deny config at all.
 rec {
   hooks = [
     # reject-background-bash.sh (issue #1609): --disallowedTools strips whole

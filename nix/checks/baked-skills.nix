@@ -1,8 +1,8 @@
-# Baked-skill end-to-end regression guards (issue #2532). The five per-span
-# drift checks are now lib/documented-facts.nix rows, checked by
-# nix/checks/schema-drift.nix (issue #2949). What stays here are the two
-# guards a per-row string-diff cannot express: a synthetic seventh row driven
-# through every renderer end to end, and a missing BEGIN marker that must throw.
+# Baked-skill end-to-end regression guards (issue #2532); the per-span drift
+# checks are lib/documented-facts.nix rows (nix/checks/schema-drift.nix, issue
+# #2949). This file keeps the two a per-row string-diff cannot express, a
+# synthetic seventh row driven through every renderer and a missing BEGIN
+# marker that must throw, plus rowByName's own guard.
 {
   pkgs,
   launcherGoModules,
@@ -282,7 +282,7 @@ in
         touch $out
       '';
 
-  # Regression guard for the marker-presence bug (issue #2532 review): without
+  # Regression guard for the marker-presence bug (issue #2532): without
   # it, a future edit could drop the eval-time missing-marker check again,
   # exactly how the bug shipped undetected the first time, and no check would
   # complain.
@@ -362,7 +362,7 @@ in
       "baked-skills-marker-guard: expected assertSplicedSpanOk to reject a synthetic file whose BEGIN GENERATED SKILL-BAKED FIELDS marker is missing, but it evaluated successfully";
     pkgs.runCommand "baked-skills-marker-guard" { } "touch $out";
 
-  # Regression guard (issue #2949 review): rowByName used to call bare
+  # Regression guard (issue #2949): rowByName used to call bare
   # builtins.head, so an unmatched name threw Nix's "list is empty" with no
   # indication of which row it was looking for.
   baked-skills-row-by-name-guard =

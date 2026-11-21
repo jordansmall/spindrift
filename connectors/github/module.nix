@@ -3,9 +3,9 @@
 # #7139), confined to the Route table in ./routes.nix. The backend row and its
 # token knob are registered unconditionally, so a Consumer importing this module
 # always has the row; the Connector token is needed on every run whose
-# CODE_FORGE or ISSUE_TRACKER is github. `shadow` keeps the native adapter
-# authoritative and samples the Connector's reads beside it; `primary` is
-# refused, since no native github adapter remains to replace (issue #6888).
+# CODE_FORGE or ISSUE_TRACKER is github. No native github adapter remains
+# (issue #6888), so neither `shadow` nor `primary` applies: a `shadow` row
+# fails at runtime.
 { core }:
 _:
 let

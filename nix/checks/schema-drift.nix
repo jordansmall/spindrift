@@ -22,7 +22,7 @@ let
   # hand-mirrored copies of the marker splice (issue #2949).
   documentedFactChecker = import ../../lib/documented-fact-checker.nix { inherit pkgs; };
   # regen-postsplice-dispatch-guard below exercises the exact per-row
-  # postSplice dispatch `nix run .#regen` uses (issue #2949 review finding).
+  # postSplice dispatch `nix run .#regen` uses (issue #2949).
   regen = import ../regen.nix { inherit pkgs; };
   # Shared with nix/checks/promptassembly.nix's regen-goldens-app-wiring so
   # the two app-wiring guards cannot fork hand-copied variants (issue #3192).
@@ -181,8 +181,8 @@ let
       # bool knob it is redundant with the bool rule, and on an
       # int/float/secret/hostDerived knob flagEmptyDisables still emits it, so
       # FlagEntry.EmptyIsSetting would drive the deprecation warning and
-      # resolveBoxEnvVar while the LoadKnobs loaderLine cascade
-      # (lib/renderers.nix) loads that knob without consulting an empty value.
+      # resolveBoxEnvVar while LoadKnobs' loaderLine cascade (lib/renderers.nix)
+      # ignores an empty value.
       emptyDisablesOnNonString = filter (
         e:
         (e.emptyDisables or false)
@@ -259,7 +259,7 @@ let
     ++ (dotted extraOptionPaths);
 
   # Frozen ground truth, in its own file so it is not a fourth hand-copy of a
-  # knob list living only in this check (issue #2522 review finding).
+  # knob list living only in this check (issue #2522).
   preFreezeFlakeOptionNames = import ../../lib/pre-freeze-flake-options.nix;
 
   # Every flakeOption knob needs a lib/legacy-settings-section.nix row or an
@@ -815,14 +815,13 @@ checkedMerge {
       "backend-registry-explicit-empty-guard (issue #3487): trackerAxisWrite = \"\" must still render successfully (local's exemption: Go reads trackerAxisWrite as-is with no == \"\" default), but it failed";
     pkgs.runCommand "backend-registry-explicit-empty-guard" { } "touch $out";
 
-  # checkRow must reject a row that sets trackerAxisWrite or trackerAxisFiler
-  # without trackerAxisRead, since cmd/launcher's backend.TrackerAxisSignals
-  # drops both on such a row (issue #4183). The full-axes row proves the
-  # rejection keys on the missing read, so the negative cases are not vacuous.
-  # checkRow also rejects the converse, trackerAxisRead without
-  # trackerAxisWrite, since mkHarness.nix would default the omitted write to
-  # "GITHUB" while cmd/launcher reads it as-is (issue #2673); a synthetic row
-  # in local's shape, with an explicit "", is the control.
+  # checkRow must reject trackerAxisWrite or trackerAxisFiler without
+  # trackerAxisRead, since backend.TrackerAxisSignals drops both on such a row
+  # (issue #4183); the full-axes row keeps the negatives non-vacuous. It also
+  # rejects trackerAxisRead without trackerAxisWrite, since mkHarness.nix
+  # would default the omitted write to "GITHUB" while cmd/launcher reads it
+  # as-is (issue #2673); a local-shaped row with an explicit "" is the
+  # control.
   backend-registry-axis-read-guard =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1141,15 +1140,12 @@ checkedMerge {
         touch $out
       '';
 
-  # Forward: every lib/env-schema.nix knob appears as a literal in main.go,
-  # backend.go, loadknobs_gen.go, or registry_gen.go (presence only; pinning
-  # values is refactor-brittle). Kept to those files, not the whole tree, so a
-  # knob cannot be satisfied by a stray literal elsewhere. Reverse: every
-  # env var read anywhere in non-test cmd/launcher source must be a schema
-  # knob, a document artifact, a Box env name (promptassembly-boxenv.nix), or
-  # in nonKnobEnvNames, so a new os.Getenv in an internal package cannot go
-  # unregistered (issue #3751). The reverse scan also resolves names held in a
-  # const/var (see boundNames).
+  # Forward: every lib/env-schema.nix knob appears as a literal in one of the
+  # forwardGoSrc files (presence only; pinning values is refactor-brittle).
+  # The scan is kept to those files so a stray literal elsewhere cannot
+  # satisfy it. Reverse: every env var read in non-test cmd/launcher source
+  # must be a schema knob, a document artifact, a Box env name
+  # (lib/promptassembly-boxenv.nix), or in nonKnobEnvNames (issue #3751).
   launcher-env-coverage =
     let
       schema = import ../../lib/env-schema.nix;
@@ -1246,26 +1242,21 @@ checkedMerge {
       matches = re: filter builtins.isList (builtins.split re treeGoSrc);
       # Groups: 1 reader, 2 env name.
       literalNames = map (m: builtins.elemAt m 1) (matches ''(${readerPattern})\("(${envNameRe})"[,)]'');
-      # An env name held in a const/var or short var decl (`:=`), typed or not,
-      # and read as os.Getenv(ident) or os.Getenv(pkg.Ident). Matching is by
-      # identifier name, not scope: an unrelated `ident = "ALL_CAPS"` anywhere in
-      # the tree whose ident is also read as an env name would surface here,
-      # which fails loudly (safe direction). Not resolved: struct-field or
-      # parameter indirection (os.Getenv(f.envName)) and os.Getenv passed as a
-      # function value, which need a Go parser; nor raw-string (`FOO`),
-      # multi-name (a, b = "A", "B"), or concatenated bindings.
+      # An env name bound by const/var or `:=` and read as os.Getenv(ident) or
+      # os.Getenv(pkg.Ident). Matched by name, not scope, so a same-named
+      # unrelated binding fails loudly (safe direction). Not resolved:
+      # struct-field or parameter indirection, os.Getenv as a function value,
+      # raw-string, multi-name, or concatenated bindings.
       # Groups: 1 reader, 2 optional `pkg.` prefix, 3 identifier.
       readIdents = map (m: builtins.elemAt m 2) (
         matches ''(${readerPattern})\((${identRe}\.)?(${identRe})[,)]''
       );
       # Groups: 1 first token before `=`, 2 optional second token, 3 env name.
-      # For `const fooEnv string = ...` the bound ident is token 1 and token 2
-      # is the type. An untyped binding's match starts one word early (`const`
-      # at top level; inside a `const (...)` block the previous line's last
-      # word, often a comment word, as [[:space:]] crosses newlines), so the
-      # ident lands in token 2 (a type may be `pkg.Name`, hence the dot). Keep
-      # the binding if either token is read; a stray token 1 that is itself a
-      # read ident can only add a false positive.
+      # Typed (`const fooEnv string = ...`): the ident is token 1 and the type,
+      # maybe `pkg.Name`, is token 2. An untyped match starts one word early
+      # (`const`, or in a block the previous line's last word, as [[:space:]]
+      # crosses newlines), putting the ident in token 2. The binding is kept if
+      # either token is read; a stray token 1 can only add a false positive.
       boundNames = map (m: builtins.elemAt m 2) (
         filter (
           m: builtins.elem (builtins.elemAt m 0) readIdents || builtins.elem (builtins.elemAt m 1) readIdents
@@ -1332,20 +1323,14 @@ checkedMerge {
     ) "lib/env-schema.nix: boxForgeAndIssueAccess.removedChoices must name exactly read-write";
     pkgs.runCommand "box-access-doc-names-removal" { } "touch $out";
 
-  # A knob's launcherIgnores = true axis and its doc string's "the launcher
-  # itself ignores it" clause must agree exactly, in both directions: a
-  # daemon-only knob whose doc states the fact but forgot the axis, or an
-  # axis-bearing knob whose doc no longer states it, would desync the
-  # generated flag table (cmd/launcher/internal/inputdoc/flagtable_gen.go)
-  # from the prose it is meant to source (issue #3698). Two more asserts cover
-  # separate invariants the same axis implies: a launcherIgnores knob must
-  # also set flakeOption, since its settings path is all ambientKnobEnvError
-  # has left to suggest, and must not be secret, since inputdoc.IsDaemonOnly
-  # reads the axis off SchemaFlags, which has no row for a secret knob.
-  # The remaining asserts pin docs/reference.md's `### Advanced tuning` table
-  # to the same axis, in both directions, and require the inert-flag aside on
-  # every clause-bearing row, so a hand-edited row can't drift from the schema
-  # silently (issue #3855).
+  # A knob's launcherIgnores = true axis and its doc's "the launcher itself
+  # ignores it" clause must agree both ways, or the generated flag table
+  # (inputdoc/flagtable_gen.go) desyncs from its prose (issue #3698). Such a
+  # knob must also set flakeOption (its settings path is all
+  # ambientKnobEnvError can suggest) and not be secret (inputdoc.IsDaemonOnly
+  # reads SchemaFlags, which has no secret rows). The remaining asserts pin
+  # docs/reference.md's `### Advanced tuning` table to the axis both ways and
+  # require the inert-flag aside on every clause-bearing row (issue #3855).
   launcher-ignores-doc-consistency =
     let
       schema = import ../../lib/env-schema.nix;
@@ -1531,12 +1516,11 @@ checkedMerge {
     pkgs.runCommand "schema-choices-knobset-guard" { } "touch $out";
 
   # signalCarrier must stay out of the settings map: ChildCommand
-  # (cmd/launcher/internal/daemon/command.go) withoutKeys-strips every
-  # settings key from a child's environment, so a flakeOption promotion would
-  # silently break the documented `BOX_SIGNAL_CARRIER=log nix run .#daemon`
-  # opt-out gesture. The second assert is the issue #2519-style guard that
-  # the first one is not vacuous — and, with the `?` test, that a rename
-  # cannot make it pass by absence.
+  # (internal/daemon/command.go) strips every settings key from a child's
+  # environment, so a flakeOption promotion would silently break the
+  # documented `BOX_SIGNAL_CARRIER=log nix run .#daemon` opt-out. The second
+  # assert is an issue #2519-style guard that the first is not vacuous;
+  # envOnly's `?` test stops a rename passing it by absence.
   signal-carrier-env-only =
     let
       inherit (pkgs.lib) assertMsg;
@@ -2620,7 +2604,7 @@ checkedMerge {
   # vacuously (issue #2948). Every row is exercised, not just the first, by
   # appending a content-agnostic sentinel to its own docSrc. `postSplice ==
   # "gofmt"` rows never take that path in production, so they drive
-  # assertSplicedSpanOk's expectMismatch instead (issue #2949 review finding).
+  # assertSplicedSpanOk's expectMismatch instead (issue #2949).
   documented-fact-guard =
     let
       inherit (pkgs.lib) assertMsg concatStringsSep filter;
@@ -2839,7 +2823,7 @@ checkedMerge {
   # postSplice = "gofmt"; row emits the gofmt line, a row with no postSplice
   # field does not, and neither does a wrong-case "Gofmt" typo, which this
   # documents rather than fixes. The positive assertion pins the exact path,
-  # so gofmt run against the wrong file is caught (issue #2949 review finding).
+  # so gofmt run against the wrong file is caught (issue #2949).
   regen-postsplice-dispatch-guard =
     let
       inherit (pkgs.lib) assertMsg hasInfix escapeShellArg;
@@ -2859,7 +2843,7 @@ checkedMerge {
       typoScript = regen.regenRowScript typoRow;
       # regenRowScript escapeShellArg's the docPath, so the emitted invocation
       # is a double-quoted "$root/" prefix followed by a single-quoted docPath
-      # literal, not one double-quoted string (issue #2949 review finding).
+      # literal, not one double-quoted string (issue #2949).
       expectedGofmtInvocation = ''gofmt -w "$root/"${escapeShellArg gofmtRow.docPath}'';
     in
     assert assertMsg (hasInfix expectedGofmtInvocation gofmtScript)
@@ -2930,11 +2914,10 @@ checkedMerge {
       '';
 
   # splice must fail loudly unless it sees the begin line exactly once and one
-  # end line after it. A silent pass-through let a re-indented BEGIN marker
-  # (gofmt) leave a stale span unflagged and made `nix run .#regen` a no-op;
-  # a BEGIN with no END truncated the target at EOF (issue #6137). The harness
-  # is a standalone `set -e` script, as regen's own, so a failing splice
-  # aborts write_between before its mv.
+  # end line after it: a gofmt-re-indented BEGIN once made regen a silent
+  # no-op, and a BEGIN with no END truncated the target (issue #6137). The
+  # harness is a standalone `set -e` script like regen's own, so a failing
+  # splice aborts write_between before its mv.
   regen-write-between-rejects-bad-markers =
     pkgs.runCommand "regen-write-between-rejects-bad-markers"
       {
@@ -2996,9 +2979,9 @@ checkedMerge {
 
   # write_between's mktemp'd content file must not survive a failed splice:
   # its own `rm -f` sits after the splice, so the EXIT trap is the only
-  # cleanup there (issue #3128 review finding). The harness must be a
-  # standalone script, because bash fires a subshell's EXIT trap with the
-  # function frame still live, and a reintroduced `local` would pass there.
+  # cleanup there (issue #3128). The harness must be a standalone script,
+  # because bash fires a subshell's EXIT trap with the function frame still
+  # live, and a reintroduced `local` would pass there.
   regen-write-between-cleans-up-temp-on-failure =
     pkgs.runCommand "regen-write-between-cleans-up-temp-on-failure"
       {
@@ -3190,7 +3173,7 @@ checkedMerge {
   # path through resolveNixPath, never a hand-typed literal: otherwise a
   # `group`/`nixSubPath` rename leaves them emitting a stale path while
   # settings-example-*-doc stays green, since that check only compares a
-  # renderer against its own committed output (issue #2557 review finding).
+  # renderer against its own committed output (issue #2557).
   settings-example-paths-resolve-nix-path =
     let
       modelsOk = assertRendererPathsResolveOk {

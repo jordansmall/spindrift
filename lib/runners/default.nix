@@ -4,21 +4,17 @@
 # lookup from them, so a runtime value is named in exactly one place.
 
 # Field meanings live on the Descriptor in
-# cmd/launcher/internal/runner/family.go, except `goName`, which names the
-# exported Go var and its Kind constant (OCI, KindOCI). Adding a field is one
-# entry in rowFields (lib/renderers.nix) plus the struct field, guarded by
-# TestDescriptorFieldsMatchNixRows. `nix run .#regen` renders the rows into
-# families_gen.go. `runArtifacts` and `imageAttrName` are the Nix-only fields,
-# allowed via nixOnlyFields in lib/renderers.nix and never rendered to Go:
-# `runArtifacts` is a function returning the row's run-document keys, consumed
-# by lib/preambles.nix; `imageAttrName` is the default flake package name that
-# lib/mkHarness.nix exposes the family's artifact under.
+# cmd/launcher/internal/runner/family.go; `goName` names the exported Go var
+# and its Kind constant (OCI, KindOCI). A new field is one rowFields entry
+# (lib/renderers.nix) plus the struct field, guarded by
+# TestDescriptorFieldsMatchNixRows; `nix run .#regen` renders families_gen.go.
+# The Nix-only fields (nixOnlyFields): `runArtifacts` returns the row's
+# run-document keys for lib/preambles.nix; `imageAttrName` is the default
+# flake package name lib/mkHarness.nix exposes the artifact under.
 
-# A row may also carry `knobs`: an attrset keyed by env-schema key, each value
-# an env-schema entry. lib/row-knobs.nix folds them into lib/env-schema.nix, so
-# the row owns its runner-specific knobs; the generated Descriptor ignores the
-# field, and an env name or key a row shares with another declaration fails
-# eval (ADR 0068).
+# A row may also carry `knobs`, env-schema entries keyed by env-schema key,
+# which lib/row-knobs.nix folds into lib/env-schema.nix; an env name or key
+# shared with another declaration fails eval (ADR 0068).
 
 # A plain list with no `{ lib }:` wrapper, matching lib/dispatch-kinds/default.nix.
 # Order is load-bearing: the concatenated `runtimes` are the runtime option's

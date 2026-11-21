@@ -1,5 +1,5 @@
 # Plain-Nix entry point of the github Connector (ADR 0073): the GitHub tracker
-# read path, compiled to a wasip1 reactor against the SDK. `core` is handed in,
+# and forge, compiled to a wasip1 reactor against the SDK. `core` is handed in,
 # so the Connector evaluates against whichever core the caller holds.
 {
   lib.connector =

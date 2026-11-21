@@ -225,11 +225,10 @@ runArtifactsRowChecks allRows
         touch $out
       '';
 
-  # Issue #2234: renderDefaultsPreamble used to splice a baked default raw
-  # inside a double-quoted `VAR="${VAR:-<baked>}"` assignment, so a default
-  # containing double quotes broke out of that quoting and tripped SC2140.
-  # The renderer now uses escapeShellArg. The fixture value carries both a
-  # double quote and a single quote to exercise the `'\''` path.
+  # Issue #2234: a baked default spliced raw into `VAR="${VAR:-<baked>}"`
+  # broke out of the quoting when it held a double quote (SC2140), so the
+  # renderer uses escapeShellArg. The fixture value carries both quote kinds
+  # to exercise the `'\''` path.
   preambles-defaults-quote-containing =
     let
       verdicts = builtins.toJSON [

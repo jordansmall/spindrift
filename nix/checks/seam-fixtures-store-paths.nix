@@ -1,9 +1,7 @@
-# Issue #7082: a Box runs with sandbox=false, so it sees the whole /nix/store
-# while CI's sandboxed build sees only a derivation's closure (ADR 0008). A
-# seam fixture that names a real store path it does not carry passes in the
-# Box and breaks in CI, so every /nix/store path in the fixtures must be in
-# their own closure or be the zero-hash sentinel
-# (/nix/store/00000000000000000000000000000000-<name>), which is never realised.
+# Issue #7082: a Box (sandbox=false) sees the whole /nix/store while CI's
+# sandboxed build sees only the closure (ADR 0008), so every /nix/store path
+# in the seam fixtures must be in their own closure or be the never-realised
+# zero-hash sentinel (/nix/store/00000000000000000000000000000000-<name>).
 { pkgs, fixtures, ... }:
 let
   inherit (fixtures.seamFixtures) sentinelHash storePathRegex;

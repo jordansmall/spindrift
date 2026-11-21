@@ -1,16 +1,13 @@
 # Where a lib/fragments.nix row's file lives under prompts/fragments/ (issue
 # #5646, ADR 0068). A plain row is one root-level file; an `axis` row has one
-# file per folder its axis signal can pick, in `<folder>/<fragment>`, because
-# the active backend's signal picks the file at render time; a `shared` axis
-# row also has the root `<fragment>` every folder without its own file falls
-# back to. mkHarness's scan sites iterate `scanPathsOf`; the shipped-tree
-# checks (image bake, golden coverage) iterate `pathsOf`. `axisSignals` exists
-# only to render the Go signal-parity fixture (issue #5727).
-#
-# The shipped tree's per-backend files are declared in `shipped` below,
-# independent of disk, so the shipped-tree checks fail when a declared file
-# goes missing (issue #5726) instead of shrinking their own expected set. A new
-# axis row, or a new per-backend file, is declared there too.
+# `<folder>/<fragment>` per folder its signal can pick at render time, plus, if
+# `shared`, the root `<fragment>` that folders without their own fall back to.
+# mkHarness's scan sites iterate `scanPathsOf`; the shipped-tree checks (image
+# bake, golden coverage) iterate `pathsOf`. `axisSignals` exists only to render
+# the Go signal-parity fixture (issue #5727). A new axis row or per-backend file
+# is declared in `shipped`, independent of disk, so the shipped-tree checks fail
+# when a declared file goes missing instead of shrinking their expected set
+# (issue #5726).
 let
   backends = import ./backends/default.nix;
 

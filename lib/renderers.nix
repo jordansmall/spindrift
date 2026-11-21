@@ -92,8 +92,7 @@ let
     in
     s + concatStrings (builtins.genList (_: " ") (if pad > 0 then pad else 0));
   # Renders `path = value;` lines with every `=` aligned to the widest path.
-  # The width is computed per block, never hand-typed (issue #2557 review
-  # finding).
+  # The width is computed per block, never hand-typed (issue #2557).
   renderAlignedLines =
     items:
     let
@@ -176,13 +175,12 @@ rec {
   choicesFlagPatterns = e: map (n: "--${n}") (allFlagNames e);
 
   # The knob's type token: the flag table and man page print it, and it picks
-  # the flake option type (mkKnobOption) and int membership (`isIntTyped`). A
-  # knob opts into the presence-style bool kind explicitly with `kind = "bool";`
-  # (issue #2145), and an int knob with no `default` to infer from with
-  # `kind = "int";`; bool is never inferred from a boolean `default`, because
-  # several knobs carry `default = false` only to render as a `types.bool` flake
-  # option while their CLI flag stays a value form, and inferring would silently
-  # flip all of them.
+  # the flake option type (mkKnobOption) and int membership (`isIntTyped`).
+  # `kind = "bool";` opts into the presence-style bool (issue #2145) and
+  # `kind = "int";` covers an int with no `default`. Bool is never inferred
+  # from a boolean `default`: several knobs carry `default = false` only to
+  # render as a `types.bool` option while their CLI flag stays a value form,
+  # and inferring would silently flip them all.
   flagKind =
     e:
     if e ? kind then
@@ -551,9 +549,8 @@ rec {
     {
       structuralPaths,
       extraOptionPaths,
-      # From lib/build-constants.nix, the source lib/mkHarness.nix itself
-      # defaults from, so this row's default cell is not a second hand-typed
-      # digest that could drift from it (issue #2950 review finding).
+      # From lib/build-constants.nix, the source lib/mkHarness.nix defaults
+      # from, so this cell is no second hand-typed digest (issue #2950).
       nixBuilderImage,
     }:
     let
@@ -585,10 +582,9 @@ rec {
         | `defaultDriver` | `${path "defaultDriver" extraOptionPaths}` | shared | string | `null` | the Driver behind `apps.default` and `apps.daemon`; inferred with one declared Driver, required with several |
       '';
       # Row names are read back off `table` itself, not a hand-kept side list, so
-      # a wrong name breaks the render everyone reads (issue #2950 review
-      # finding). A row's cell is checked against the registry path for its own
-      # name below, which also catches an editorial dash rendering under a
-      # registry key's name (issues #3067, #3387).
+      # a wrong name breaks the render everyone reads (issue #2950). Each row's
+      # cell is checked against its own name's registry path, which also catches
+      # an editorial dash under a registry key's name (issues #3067, #3387).
       rowNames = map (cells: cells.name) (optionSurfaceRowNamePaths table);
       # Forward direction only. A row with no registry key is legitimate (the
       # editorial rows), so schema-drift.nix's editorial-rows-pin holds that side.
@@ -645,7 +641,7 @@ rec {
       inherit (builtins) toJSON;
       # Paths come from resolveNixPath, never hand-typed, so a `group` or
       # `nixSubPath` rename cannot leave this example stale while the drift
-      # check stays green (issue #2557 review finding).
+      # check stays green (issue #2557).
       item = key: value: {
         path = builtins.concatStringsSep "." (
           placeEntry exampleDriver schema.${key} (splitNixPath (resolveNixPath key schema.${key}))
@@ -670,9 +666,7 @@ rec {
       # builtins.toJSON, not "${value}", so a default containing `"` or `\`
       # still renders as a valid quoted literal.
       inherit (builtins) toJSON;
-      # Paths come from resolveNixPath, never hand-typed, so a `group` or
-      # `nixSubPath` rename cannot leave this example stale while the drift
-      # check stays green (issue #2557 review finding).
+      # Paths from resolveNixPath, as in renderSettingsExampleModelsDoc.
       item = key: {
         path = resolveNixPath key schema.${key};
         value = toJSON schema.${key}.default;
@@ -695,9 +689,7 @@ rec {
       # builtins.toJSON, not "${value}", so a string default containing `"` or
       # `\` still renders as a valid quoted literal.
       inherit (builtins) toJSON;
-      # Paths come from resolveNixPath, never hand-typed, so a `group` or
-      # `nixSubPath` rename cannot leave this example stale while the drift
-      # check stays green (issue #2557 review finding).
+      # Paths from resolveNixPath, as in renderSettingsExampleModelsDoc.
       item = key: render: {
         path = resolveNixPath key schema.${key};
         value = render schema.${key}.default;
@@ -715,13 +707,11 @@ rec {
     ];
 
   # cmd/launcher/internal/driver/descriptor_gen.go content (issues #5338,
-  # #5503): one Go `Descriptor` per lib/drivers/*.nix row, sorted by
-  # name. driverEntries is the registry's `entries` attrset, not the whole
-  # registry: the registry also exports shape-assertion and rendering
-  # functions, which are not Drivers (issue #624). Driver rows carry many
-  # Nix-only attributes, so an attribute outside rowFields is not an error here;
-  # assertShape owns the closed set. Emits unaligned Go; gofmt owns column
-  # alignment.
+  # #5503): one Go `Descriptor` per lib/drivers/*.nix row, sorted by name.
+  # driverEntries is the registry's `entries`, not the whole registry, whose
+  # functions are not Drivers (issue #624). Driver rows carry many Nix-only
+  # attributes, so one outside rowFields is no error here; assertShape owns the
+  # closed set. Emits unaligned Go; gofmt owns column alignment.
   renderDriverDescriptorsGo =
     driverEntries:
     let
@@ -1184,7 +1174,7 @@ rec {
   # `Descriptor` var per lib/backends/default.nix row, plus a Registry slice in
   # the nix list's declaration order, which is load-bearing (see that file's
   # header). Emits unaligned Go; gofmt owns column alignment. Only Go-truthy
-  # values get a field line, mirroring the struct literals this replaced.
+  # values get a field line.
   renderBackendRegistryGo =
     backends:
     let
@@ -1322,10 +1312,9 @@ rec {
   # cmd/launcher/internal/doctor/labelmeta_gen.go content (issue #2528): a
   # `Meta<Role>` var per work-tier row, the `TriageLabelMeta` map every tier but
   # recoverable, findingType, reviewFinding, and triggerOnly feeds, and the
-  # separate `FindingTypeLabels` map (issue #2594, ADR 0041). That map is kept
-  # apart so ensureTypeLabel's `type` token can never collide with a real label
-  # name. `ReviewFindingLabelMeta` is separate for a different reason: its color
-  # collides with a TriageLabelMeta row's.
+  # separate `FindingTypeLabels` map (issue #2594, ADR 0041), so ensureTypeLabel's
+  # `type` token never collides with a real label name. `ReviewFindingLabelMeta`
+  # is separate because its color collides with a TriageLabelMeta row's.
   renderLabelRegistryGo =
     labels:
     let
@@ -1478,12 +1467,11 @@ rec {
     + "var descriptorRowFields = []string{${renderGoStringSlice (map (f: f.go) rowFields)}}\n";
 
   # cmd/launcher/internal/inputdoc/artifacts_gen.go content (issue #6612): the
-  # typed form of the Launcher input document's `artifacts` section. `shared`
-  # and each family's `artifacts` map key to the placeholder value lib/preambles.nix
-  # renders (sharedArtifactsStub, rowArtifactsStub); a "true"/"false" placeholder
-  # types the key as a Flag, everything else as a Value. `families` are the
-  # lib/runners rows' name and goName plus that stub. Emits unaligned Go; gofmt
-  # owns column alignment.
+  # typed input document `artifacts` section. `shared` and each family's
+  # `artifacts` map key to lib/preambles.nix's placeholder (sharedArtifactsStub,
+  # rowArtifactsStub); a "true"/"false" placeholder types the key as a Flag,
+  # anything else as a Value. `families` are the lib/runners rows' name and
+  # goName plus that stub. Emits unaligned Go; gofmt owns column alignment.
   renderLauncherArtifactsGo =
     { shared, families }:
     let
@@ -1992,15 +1980,12 @@ rec {
   # becoming so must not silently mismatch its os.Getenv loader.
   goTypeClass = e: if e.secret or false then "string" else typeClass e;
 
-  # The shared model behind renderKnobsGo and renderLoadKnobsGo: the
-  # Knobs struct (cmd/launcher/internal/inputdoc/knobs_gen.go) and the
-  # loader that fills it (cmd/launcher/internal/inputdoc/loadknobs_gen.go) are
-  # one field and one loader line per host-config member (issue #2364, held
-  # by value in config per issue #2365), so both read the same member split
-  # and exported field names. Knobs a registry row owns
-  # (lib/row-knob-registries.nix) get no field of their own: they are held in
-  # one RowKnobs map keyed by env name, which the row packages read through
-  # their generated ReadKnobs (ADR 0068 decision 3).
+  # The shared model behind renderKnobsGo and renderLoadKnobsGo: one Knobs field
+  # and one loader line per host-config member (issues #2364, #2365), so both
+  # read the same member split and field names. Knobs a registry row owns
+  # (lib/row-knob-registries.nix) get no field: they ride one RowKnobs map keyed
+  # by env name, which the row packages read through their generated ReadKnobs
+  # (ADR 0068 decision 3).
   knobsModel =
     schema:
     let
@@ -2131,13 +2116,11 @@ rec {
     + "}\n";
 
   # A typed knob reader for one row (ADR 0068 decision 3, issue #5636): a
-  # `Knobs` struct with a field per knob, an exported `<Field>Env` constant
-  # naming each knob's env var, and `ReadKnobs(lookup)`, which applies each
-  # knob's default and kind (string, int, bool, choices). Generic over
-  # whatever owns the knobs: it takes a Go package name, the repo path it is
-  # generated from, and a knobs attrset keyed by env-schema key. Emits unaligned
-  # Go; gofmt owns column alignment. Extra attrs (a lib/row-knob-readers.nix
-  # target's `path`) are ignored so call sites can pass the target whole.
+  # `Knobs` struct, a `<Field>Env` constant per knob, and `ReadKnobs(lookup)`,
+  # which applies each knob's default and kind. Takes a Go package name, the
+  # source repo path, and knobs keyed by env-schema key; extra attrs (a
+  # lib/row-knob-readers.nix target's `path`) are ignored so call sites can
+  # pass the target whole. Emits unaligned Go; gofmt owns column alignment.
   renderRowKnobsGo =
     {
       package,
@@ -2640,9 +2623,9 @@ rec {
       );
       # Dynamic positional issue-number completion (issue #556). fish's
       # `complete -a` splits a tab-separated candidate into value and
-      # description, so `__complete-issues`'s output needs no reformatting here,
-      # unlike bash and zsh. Silenced stderr plus the subcommand's bounded
-      # timeout make a slow or offline query degrade to zero candidates.
+      # description, so `__complete-issues`'s output needs no reformatting.
+      # stderr is silenced so a slow or offline query degrades to zero
+      # candidates, as in bash.
       issueCompletion = "complete -c spindrift -n '__fish_seen_subcommand_from ${builtins.concatStringsSep " " issuePositionalSubcommands}' -f -a '(spindrift __complete-issues 2>/dev/null)'";
     in
     ''
@@ -2733,9 +2716,8 @@ rec {
           '';
       # Dynamic positional issue-number completion (issue #556) offers
       # `number:title` candidates through _describe, so zsh keeps the
-      # per-candidate description bash cannot carry. Silenced stderr plus the
-      # subcommand's bounded timeout make a slow or offline query degrade to zero
-      # candidates rather than blocking the completion.
+      # per-candidate description bash cannot carry. stderr is silenced so a
+      # slow or offline query degrades to zero candidates, as in bash.
       issueCompletionBranch = ''
         if (( CURRENT >= 3 )); then
           case "''${words[2]}" in

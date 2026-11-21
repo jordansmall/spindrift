@@ -144,11 +144,10 @@ in
     }
   ];
 
-  # Butler-finding provenance (ADR 0056): the label a one-shot butler run's
-  # Filer applies to every Chore finding it files. Like researchFinding, this
-  # one does render into TriageLabelMeta, so doctor probes and offers to
-  # create it, still advisory. Its color must stay distinct from every other
-  # TriageLabelMeta color or TestTriageLabelMeta_ColorsAreDistinct trips.
+  # Butler-finding provenance (ADR 0056): the label a butler run's Filer
+  # applies to every Chore finding it files. Doctor-visible and advisory like
+  # researchFinding, and likewise needs a distinct TriageLabelMeta color
+  # (TestTriageLabelMeta_ColorsAreDistinct).
   butlerFinding = [
     {
       role = "ButlerFinding";
@@ -160,9 +159,7 @@ in
 
   # Butler-patch provenance (ADR 0057): the label the host applies alongside
   # butlerFinding's when it lands the finding itself as a patch PR rather than
-  # leaving it for a worker to promote. Same doctor-visible, advisory
-  # treatment as butlerFinding. Its color must stay distinct from every other
-  # TriageLabelMeta color or TestTriageLabelMeta_ColorsAreDistinct trips.
+  # leaving it for a worker to promote. Treated like butlerFinding.
   butlerPatch = [
     {
       role = "ButlerPatch";
@@ -173,8 +170,7 @@ in
   ];
 
   # Tuning Chore finding provenance (ADR 0062): a PR closing an issue with this
-  # label merges by hand. Doctor-visible and advisory like butlerFinding. Its
-  # color must stay distinct from every other TriageLabelMeta color.
+  # label merges by hand. Treated like butlerFinding.
   tuningFinding = [
     {
       role = "TuningFinding";
@@ -199,14 +195,12 @@ in
   ];
 
   # Review-finding provenance (issue #393, ADR 0041): the Filer creates this
-  # label from its prompt fragments, and the host ensure-creates it when filing
-  # a relayed review finding (issue #4400). Doctor also requires and creates it
-  # when a read-only work deployment relays findings host-side
-  # (Config.RequiredLabels), but the renderer must not emit it into
-  # TriageLabelMeta, where its d4c5f9 would collide with agent-research-unclear's
-  # and trip TestTriageLabelMeta_ColorsAreDistinct. It is emitted as the
-  # standalone doctor.ReviewFindingLabelMeta map instead, which
-  # doctor.LabelMetaFor consults after TriageLabelMeta.
+  # label, the host ensure-creates it when filing a relayed finding (issue
+  # #4400), and doctor requires it when a read-only work deployment relays
+  # findings (Config.RequiredLabels). Its d4c5f9 collides with
+  # agent-research-unclear's, so it renders as the standalone
+  # doctor.ReviewFindingLabelMeta, which doctor.LabelMetaFor consults after
+  # TriageLabelMeta.
   reviewFinding = [
     {
       role = "ReviewFinding";

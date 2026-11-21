@@ -1,7 +1,6 @@
-# The forgejo Connector's flake-parts module: the Forgejo forge and tracker.
-# The Connector is always the Code Forge and, since the native forgejo tracker
-# was deleted (#7122), the issue tracker too; `primary` is refused on the row.
-# The backend row below declares the Connector and its Route table.
+# The forgejo Connector's flake-parts module: the Connector is both the Code
+# Forge and the issue tracker (#7122), so `primary` is refused on the row. The
+# backend row below declares the Connector and its Route table.
 { core }:
 { ... }:
 let

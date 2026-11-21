@@ -1,15 +1,10 @@
-# Negative-path pins for nix/checks/mk-fragment-parity.nix's five asserts and
-# its dogfood-row lookup (issue #3240 review finding), plus positive pins for
-# its comparator fold and per-side needles (issue #3486) and its escaped,
-# digit-bounded clause match (issue #4270): the helper itself only
-# has positive callers (commit/tdd/code-review-fragment-parity.nix), so an
-# inverted clause matcher or a dropped assert there would still evaluate green.
-# Mirrors nix/checks/fragment-pairs.nix's rejectionCase/rejectionCases shape.
-#
-# Every case below imports the helper fresh against a synthetic one-row
-# `dogfoodSkills` fixture, never the `mkFragmentParity` default.nix builds
-# against the real skills -- that keeps this file's outcome independent of
-# upstream SKILL.md wording, the same reason the helper avoids verbatim diffs.
+# Negative-path pins for mk-fragment-parity.nix's asserts and dogfood-row
+# lookup (issue #3240), plus positive pins for its comparator fold and per-side
+# needles (issue #3486) and escaped, digit-bounded clause match (issue #4270):
+# the helper's real callers are all positive, so an inverted matcher or a
+# dropped assert would still evaluate green. Each case imports the helper
+# against a synthetic one-row `dogfoodSkills` fixture, never the real skills,
+# so the outcome is independent of upstream SKILL.md wording.
 { pkgs, ... }:
 let
   inherit (pkgs.lib) assertMsg;

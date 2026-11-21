@@ -522,14 +522,10 @@ mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
     assert assertMsg (!(throws ok)) "assertShape must accept a well-formed authContent";
     pkgs.runCommand "drivers-assert-shape-auth-content" { } "touch $out";
 
-  # Issue #3348: assertShape also validates sessionCacheDirRelative's shape
-  # when present (absence stays valid -- a Driver with no resumable session
-  # state omits it): a non-empty
-  # relative path with no empty, "." or ".." segment (so no leading/
-  # trailing/doubled slash either). tryEval can't report which condition
-  # fired, so one list of malformed values, each spliced onto an otherwise-
-  # complete entry, covers every bad shape in one check rather than one
-  # throw-case per condition.
+  # Issue #3348: assertShape validates sessionCacheDirRelative when present
+  # (a Driver with no resumable session state omits it): a non-empty relative
+  # path with no empty, "." or ".." segment. tryEval can't say which condition
+  # fired, so each malformed value is spliced onto an otherwise-complete entry.
   drivers-assert-shape-rejects-bad-session-cache-dir-relative =
     let
       complete = stubDriverComplete;

@@ -20,38 +20,25 @@ let
   launchgatesSrc = builtins.readFile ../../cmd/launcher/launchgates.go;
   doctorMainSrc = builtins.readFile ../../cmd/launcher/doctor.go;
 
-  # One mechanism, scan_files, drives all three rules below: a build-time grep
-  # of each .go file a rule hands it for write call sites. Each rule names the
-  # writer identifiers permitted at its call sites (empty = none permitted);
-  # scan_files rejects every other writer. The identifiers are pinned
-  # literally (w, checkW, stderr) rather than resolved through Go's type
-  # system, so renaming one of those parameters is a loud false-fail — the
-  # right failure mode for a guard this cheap, and the rejection message names
-  # the permitted writers so the fix is obvious.
-  #
-  # Recognises three write idioms: fmt.Fprint*, io.WriteString(writer, …), and
-  # writer.Write([]byte(…)). This is a pinned idiom set, not an exhaustive
-  # one, and each match must carry its writer on the same line as the call's
-  # open paren — a write spelled some other way, or hand-wrapped so the writer
-  # lands on the next line, is outside the guard.
-  #
-  # Three rules, one per acceptance-criterion clause:
-  #   1. cmd/launcher/internal/doctor/report.go is the only non-test .go file
-  #      under internal/doctor allowed to write at all. The exemption is that
-  #      one path, not the basename, so a future internal/doctor/sub/report.go
-  #      is scanned like any other file.
-  #   2. launchgates.go may write only to w or checkW — permitted by design,
-  #      not by accident: a gate's own Check (whose signature binds its writer
-  #      as `w`, launchGate.Check in launchgates.go) writing its own
-  #      operator-facing output is exactly what AC7 protects, so it must pass
-  #      this guard even though no gate does so today. checkW is
-  #      walkGateRegistry's pass-through name for the same writer.
-  #   3. every write left in cmd/launcher/doctor.go must target stderr —
-  #      stdout is the report stream and reaches it only via
-  #      doctor.NewReporter(stdout, opts.verbose).
-  # Rules 2 and 3 stay pinned to these two filenames rather than widening to
-  # all of cmd/launcher: most files there legitimately write to stdout, and
-  # only these two sit in the doctor report call graph this guard protects.
+  # scan_files greps each .go file a rule hands it for write call sites and
+  # rejects every writer but the rule's permitted identifiers (empty = none).
+  # They are pinned literally (w, checkW, stderr), not resolved by type, so
+  # renaming one is a loud false-fail, the right failure mode for a guard this
+  # cheap.
+  # Recognises fmt.Fprint*, io.WriteString(writer, …) and
+  # writer.Write([]byte(…)), with the writer on the call's open-paren line;
+  # any other spelling, or a writer wrapped to the next line, escapes it.
+  # Rules:
+  #   1. internal/doctor/report.go is the only non-test .go file under
+  #      internal/doctor allowed to write. The exemption is that path, not the
+  #      basename, so a future internal/doctor/sub/report.go is scanned.
+  #   2. launchgates.go may write only to w (launchGate.Check's writer) or
+  #      checkW (walkGateRegistry's name for it): a gate Check writing its own
+  #      operator-facing output is what AC7 protects, though none does today.
+  #   3. every write left in cmd/launcher/doctor.go must target stderr: stdout
+  #      is the report stream, reached only via doctor.NewReporter.
+  # Rules 2 and 3 name only those files: most of cmd/launcher legitimately
+  # writes to stdout, and only these two sit in the doctor report call graph.
   scanScript = pkgs.writeShellScript "doctor-report-routing-scan" ''
     set -euo pipefail
 
@@ -139,19 +126,12 @@ in
   '';
 
   # Exercises scanScript against doctored copies of the real tree: a reject
-  # fixture per rule, so a guard that can only pass is caught, plus accept
-  # fixtures for the writes each rule permits on purpose, so a rule that can
-  # only fail is caught too — the check that would have caught rule 2
-  # permitting a writer name no gate Check actually binds.
-  #
-  # Each doctored source is built from the real source via replaceStrings
-  # anchored on real text, so a rewrite of the anchored line surfaces as a
-  # doctored == original no-op in checkDiffers below rather than silently
-  # testing nothing, the same shape gh-token-intervals.nix's
-  # gh-token-intervals-pinned-in-action-regression uses. checkDiffers only
-  # proves at least one anchor match fired — replaceStrings replaces every
-  # occurrence, so a second unintended match elsewhere would not be caught
-  # by this guard.
+  # fixture per rule catches a guard that can only pass, and accept fixtures
+  # for each rule's permitted writes catch one that can only fail (e.g. rule 2
+  # permitting a writer name no gate Check binds). Each doctored source is a
+  # replaceStrings anchored on real text, so a rewritten anchor surfaces in
+  # checkDiffers as a doctored == original no-op. checkDiffers only proves one
+  # match fired: a second unintended match elsewhere goes unnoticed.
   doctor-report-routing-regression =
     let
       leakFn = "\n\nfunc doctorReportRoutingLeak() {\n\tfmt.Fprintln(nil, \"leak\")\n}\n";
@@ -294,11 +274,9 @@ in
       ];
 
       # Each file's source reaches the builder through an env var rather than
-      # the script text, so a Go source containing shell metacharacters cannot
-      # rewrite the builder. The name is derived from the fixture, so the two
-      # spellings cannot drift apart — with the scratch dir's dashes mapped to
-      # underscores, since Nix will happily name an env var the shell cannot
-      # then expand.
+      # the script text, so shell metacharacters in Go source cannot rewrite
+      # the builder. The name derives from the fixture, dashes mapped to
+      # underscores: Nix will name an env var the shell cannot expand.
       fixtureFiles =
         f:
         imap0 (
@@ -322,13 +300,10 @@ in
           }";
         true;
 
-      # ''$ escapes the shell's literal `$`, then ${file.envVar} interpolates.
-      # Writing `$${file.envVar}` instead yields the literal text
-      # `${file.envVar}`, so the fixture file would hold that rather than the
-      # doctored source. The -s test catches every other way a fixture could
-      # land empty (an env var the shell cannot expand, a source file that
-      # moved): an empty fixture has nothing to scan, so it would pass both a
-      # reject and an accept assertion for the wrong reason.
+      # ''$ escapes the shell's literal `$`, then ${file.envVar} interpolates;
+      # `$${file.envVar}` would write that literal text instead. The -s test
+      # catches every other way a fixture lands empty: an empty fixture would
+      # pass both a reject and an accept assertion for the wrong reason.
       writeFixture =
         f:
         concatMapStrings (file: ''

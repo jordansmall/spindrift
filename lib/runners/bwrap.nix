@@ -35,26 +35,21 @@
       groupFileDrv,
       agentClosurePath,
       prefetch,
-      # The bwrap-only nix.conf artifact (issue #2664), from the same
-      # nixConfigFile derivation the OCI image bakes in directly. Defaults to
-      # "" so a non-nixInBox Consumer renders the key present-but-empty rather
-      # than omitting it.
+      # The bwrap-only nix.conf artifact (issue #2664), from the nixConfigFile
+      # derivation the OCI image bakes in. Defaults to "" so a non-nixInBox
+      # Consumer renders the key present-but-empty.
       nixConfigPath ? "",
       # The bwrap ephemeral-overlay-store knob (ADR 0042, issue #2665). No `?`
-      # default: unlike nixConfigPath, which is meaningless and so blanked to
-      # "" when nixInBox is off, this is a real Consumer knob independent of
-      # nixInBox and must always render its true value. The AND-gate with
-      # NixConfigFile lives in cmd/launcher/internal/runner/bwrap/bwrap.go, not here.
+      # default: it is a Consumer knob independent of nixInBox and always
+      # renders its true value; runner/bwrap/bwrap.go ANDs it with
+      # NixConfigFile.
       nixStoreWritable,
       # The drv counterpart of nixConfigPath above (issue #2672), defaulting
       # to "" for the same nixInBox-off reason.
       nixConfigDrv ? "",
-      # The compiled BPF syscall-filter artifact (issue #2670 slice 3). Unlike
-      # nixConfigPath above, this bwrap hardening is orthogonal to nix-in-box:
-      # it always builds, so no `?` default and no on/off knob.
+      # The compiled BPF syscall-filter artifact (issue #2670 slice 3): it
+      # always builds, so no `?` default and no on/off knob.
       syscallFilterPath,
-      # The build-time drv counterpart of syscallFilterPath above
-      # (issue #2672), same reasoning as agentFilesDrv.
       syscallFilterDrv,
       # The static Linux connector-host output dir and its drv: the bwrap
       # adapter binds that one store path into a Connector sandbox.

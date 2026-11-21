@@ -9,13 +9,11 @@
 # naming `replacement` (a bare var name, required for a deprecated row), at
 # eval time and again at run time.
 #
-# Eval-time scan coverage: see removedFragmentVarHits in lib/mkHarness.nix
-# (removed rows throw via removedFragmentVarViolations, deprecated rows warn via
-# deprecatedFragmentVarWarnings). The launcher's own runtime check is the hand-kept table in
+# Eval-time scan coverage: see removedFragmentVarHits in lib/mkHarness.nix.
+# The launcher's runtime check is the hand-kept table in
 # cmd/launcher/internal/promptassembly/removed_vars.go, pinned to this file by
 # nix/checks/equivalence.nix. A targeted list on purpose, never a reject of
-# every unknown token: legitimate pass-through text such as ${FORGEJO_TOKEN}
-# in the forgejo/filer-*.md fragments must keep rendering.
+# every unknown token: legitimate pass-through ${...} text must keep rendering.
 {
   CAVEMAN_STEP_WORKER = {
     issue = 4562;

@@ -167,16 +167,13 @@ let
   # `nix flake check` still runs them.
   evalHeavyCheckNames = [ "docs-edit-isolation" ];
 
-  # This starts from portableSourceChecks, not sourceChecks, so a darwin eval
-  # also drops linuxOnlyCheckNames. Otherwise checks-inbox forces
-  # mkharness-agent-closure-package's build on darwin, where
-  # bwrapHarness.packages lacks agent-closure and its own assert throws.
-  #
-  # The bats shards are source checks, not image ones, but they push a cold
-  # checks-inbox past Claude Code's stock 10-minute Bash cap (dogfood raises
-  # it to 30 minutes, issue #4409, but whether the suite fits that is
-  # unmeasured). CI's `nix flake check` still runs them; fold them back in
-  # once the Box Go port (issue #4275) has shrunk the suite.
+  # Starts from portableSourceChecks so a darwin eval also drops
+  # linuxOnlyCheckNames; otherwise mkharness-agent-closure-package's own
+  # assert throws there (bwrapHarness.packages lacks agent-closure).
+  # The bats shards push a cold checks-inbox past Claude Code's stock 10-minute
+  # Bash cap (dogfood raises it to 30, issue #4409; unmeasured whether the
+  # suite fits). CI's `nix flake check` still runs them; fold them back in once
+  # the Box Go port (issue #4275) has shrunk the suite.
   checksInboxSet = removeAttrs portableSourceChecks (
     imageOnlyCheckNames ++ evalHeavyCheckNames ++ batsShardNames
   );
@@ -497,7 +494,7 @@ let
   # The suite copies whole trees, so no per-file read list exists; the reads
   # are derived from three inputs: the core paths quoted in sdk/**/*_test.go
   # (a directory expands to its files), the *test/conformance kit packages a
-  # Connector's own tests import, and the path literals reachable from
+  # Connector's tests import, and the path literals reachable from
   # lib/connector-checks.nix (a .nix file is walked, a directory is not) plus
   # each backend row's goTestRepoFiles. cmd/launcher is excluded from the walk:
   # the conformance test compiles only internal/{forge,driver}/<name>'s import

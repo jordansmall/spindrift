@@ -4,10 +4,8 @@
 {
   # A runtime listed by two runner rows is ambiguous (ADR 0069), so
   # lib/runners/index.nix must throw when either attribute is forced. The
-  # control proves the real rows evaluate. The literal runtime and family
-  # lists below are a deliberate golden for the "RUNTIME choices unchanged"
-  # acceptance of #5678: they pin the enum order and family mapping
-  # independently of the rows they come from, so they name runtimes on purpose.
+  # literal runtime and family lists below are a deliberate golden (#5678):
+  # they pin enum order and family mapping independently of the rows.
   runners-unique-runtime =
     let
       inherit (pkgs.lib) assertMsg;

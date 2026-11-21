@@ -1,9 +1,9 @@
 # Issue #6792: wazero is the Connector sandbox (ADR 0073), so a floating
 # version would let `go get -u` or a pseudo-version swap the sandbox silently.
-# Fails unless cmd/launcher/go.mod requires github.com/tetratelabs/wazero
-# directly, exactly once, at a plain release `vX.Y.Z`, with no `replace` or
-# `exclude` naming it. go.mod is parsed by `go mod edit -json`, not matched as
-# text, so quoted and escaped module paths cannot slip past the guard.
+# Fails unless cmd/launcher/go.mod requires it directly, exactly once, at a
+# plain release `vX.Y.Z`, with no `replace` or `exclude`. go.mod is parsed
+# with `go mod edit -json`, so quoted and escaped module paths cannot slip
+# past.
 { pkgs, ... }:
 let
   mod = "github.com/tetratelabs/wazero";

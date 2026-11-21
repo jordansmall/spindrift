@@ -93,19 +93,16 @@ let
         ++ bundleBinaryDirs
       )
     );
-  # The vendor tree is re-derived from a source without any Driver, runner
-  # family, Ecosystem package, bundled backend, bundle or binary, so editing one
-  # Driver, family, ecosystem or bundled backend never changes another's
-  # drvPath nor the core go test's (a plain launcherGoModules would, its src
-  # being the whole tree). Fixed-output under launcherCoreVendorHash: only the
-  # root package and quickstart import charmbracelet/x/term, so the narrowed
-  # tree vendors without it and cannot share launcherVendorHash. `go mod
-  # vendor -e` tolerates the packages that import the absent directories, but
-  # also hides download failures, so go-vendor-errors.sh fails on any other
-  # stderr line.
-  # Gotcha: a Driver, runner family, ecosystem, bundled backend or main
-  # importing a third-party module no other package uses changes the vendored
-  # set, and the narrowed derivation then mismatches launcherCoreVendorHash.
+  # The vendor tree is re-derived from a source with no Driver, runner family,
+  # Ecosystem package, bundled backend, bundle or binary, so editing one never
+  # moves another's drvPath nor the core go test's. It has its own
+  # launcherCoreVendorHash: only the root package and quickstart import
+  # charmbracelet/x/term, so the narrowed tree vendors without it and cannot
+  # share launcherVendorHash. `go mod vendor -e` tolerates imports of the absent
+  # directories but hides download failures, so go-vendor-errors.sh fails on
+  # any other stderr line.
+  # Gotcha: any of those importing a third-party module no other package uses
+  # changes the vendored set and mismatches launcherCoreVendorHash.
   vendorFor =
     files:
     launcherGoModules.overrideAttrs (_: {
@@ -187,18 +184,15 @@ let
     "usage"
   ];
   # One go test derivation per adapter of any registry (ADR 0066 decision 5,
-  # ADR 0068 decision 7) or Ecosystem package, keyed by registry name (for the
-  # ecosystems, the directory name) so a new row or directory yields one with
-  # no hand-pinned attr: `${prefix}-${name}-go-test`. `pkgFor name` is the
-  # adapter's package directory under cmd/launcher; `sharedFor name` the extra
-  # packages its tests reach. `files` is the cmd/launcher fileset every source
-  # is cut from; the independence check perturbs it. The vendor tree is
-  # `vendorFor files`, so one Driver's or runner family's edits never move
-  # another's drvPath; coreFiles keeps the core backends (git, local), so
-  # editing one moves every backend's drvPath, though not its outPath.
-  # `setupFor name` is shell run after the copy for files outside cmd/launcher
-  # its tests read. Each also gofmts and vets the adapter's own package, so
-  # launcher-go-fmt and launcher-go-vet need not see it.
+  # ADR 0068 decision 7) or Ecosystem package directory, so a new row or
+  # directory yields `${prefix}-${name}-go-test` with no hand-pinned attr.
+  # `pkgFor name` is the adapter's package directory under cmd/launcher,
+  # `sharedFor name` the extra packages its tests reach, `setupFor name` shell
+  # run after the copy for files outside cmd/launcher its tests read. `files`
+  # is the fileset every source is cut from (the independence check perturbs
+  # it). coreFiles keeps the core backends (git, local), so editing one moves
+  # every backend's drvPath, though not its outPath. Each also gofmts and vets
+  # its own package, so launcher-go-fmt and launcher-go-vet need not.
   adapterGoTests =
     {
       files,
@@ -364,12 +358,11 @@ let
     names = bundledBackendNames;
   };
   # Packages the runner families' tests reach (go list -test -deps over every
-  # family's package): the union of their closures, so one list serves every
-  # family. A family whose tests import a new internal package must add it
-  # here, and a stale list fails the build loudly. Never a family's
-  # directory. The runner and driver roots are listed
-  # file by file because the family and Driver directories lie beneath them;
-  # the driver root is bwrap's credential-rule import, non-test files only.
+  # family's package), one union list for all. A family whose tests import a
+  # new internal package must add it here; a stale list fails the build loudly.
+  # Never a family's directory. The runner and driver roots are listed file by
+  # file because family and Driver directories lie beneath them; the driver
+  # root is bwrap's credential-rule import, non-test files only.
   runnerGoTestShared =
     map (p: internalDir + "/${p}") [
       "agentpaths"
@@ -496,21 +489,17 @@ let
   );
   ecosystemsLackingDerivation =
     dirs: set: builtins.filter (d: !(set ? ${adapterGoTestAttr "ecosystems" d})) dirs;
-  # The two registry-row checks every adapter registry shares. `testsFor` is the
-  # registry's `{ files, names }` go test builder.
-  #
-  # A registry row yields its go test derivation with no other edit (issues
-  # #5508, #5637, #5688). Only attr names are forced: building the stub's
-  # derivation would fail on its missing package directory.
-  #
-  # With `independence = { dirFor, noun; }` (`dirFor name` the adapter's
-  # directory, `noun` what the assert messages call an adapter), editing one
-  # adapter leaves every other adapter's go test derivation path, and every core
-  # check's, unchanged (issues #5508, #5545, #5562, #5688): coreFiles strips
-  # the adapter directories, so no vendor tree or source is shared. Each adapter
-  # in turn has one file removed; the sensitivity assert keeps the check from
-  # passing vacuously. `others` lists further `{ prefix, testsFor, names }`
-  # registries whose derivations the edit must not move either.
+  # The two registry-row checks every adapter registry shares; `testsFor` is
+  # the registry's `{ files, names }` go test builder. A registry row yields its
+  # derivation with no other edit (issues #5508, #5637, #5688); only attr names
+  # are forced, since building the stub's derivation would fail on its missing
+  # package directory.
+  # With `independence = { dirFor, noun; }`, editing one adapter leaves every
+  # other adapter's and every core check's derivation path unchanged (issues
+  # #5508, #5545, #5562, #5688): coreFiles strips the adapter directories. Each
+  # adapter in turn has one file removed; the sensitivity assert keeps the
+  # check from passing vacuously. `others` lists further
+  # `{ prefix, testsFor, names }` registries the edit must not move either.
   adapterRegistryChecks =
     {
       prefix,
@@ -1045,16 +1034,13 @@ driverGoTests
 
   # The packages that link every native Driver through the bundle
   # (bundleBinaryDirs; claude is a Connector, not linked), the bundle's own
-  # tests, the registry root's cross-Driver guard tests and the forge package's
-  # contract guard, which needs every backend directory, the forge package's
-  # capability-probe guard, which needs package main's files, and the
-  # host-profile advisory guard, which needs package main's route-resolution
-  # file, and the seamtest guard that no package outside the Drivers builds a
-  # native Strategy and that no production main reaches an in-process Connector
-  # load outside its allowlist; the whole tree is copied, so a Driver edit
-  # reruns this. It also gofmts and vets those packages (not the adapters',
-  # which their own go-test does), so launcher-go-fmt and launcher-go-vet need
-  # not see them.
+  # tests, and the full-tree guards: the registry root's cross-Driver guards,
+  # forge's contract guard (every backend directory) and capability-probe guard
+  # (package main's files), the host-profile advisory guard (main's
+  # route-resolution file), and the seamtest guard (no native Strategy outside
+  # the Drivers, no in-process Connector load outside its allowlist). The whole
+  # tree is copied, so a Driver edit reruns this. It also gofmts and vets those
+  # packages, so launcher-go-fmt and launcher-go-vet need not.
   # Each full-tree guard must run and print its PASS line: go test exits 0 with
   # "[no tests to run]" when -run matches nothing (a renamed guard).
   launcher-binaries-go-test =
@@ -1155,18 +1141,15 @@ driverGoTests
     pkgs.runCommand "bundle-binaries-match-guard" { } "touch $out";
 
   # Stands in for adapterRegistryChecks' independence half, which cannot hold
-  # for backends: the core backends live in the core checks.
-  #
-  # No backend's go test source holds another backend's directory, bar the git
-  # backend's for the bundled backends that build on it (issue #5637). A
-  # fileset check for the backend-to-backend leaks, since a core backend edit
+  # for backends: the core backends live in the core checks. No backend's go
+  # test source holds another's directory, bar git's for the bundled backends
+  # built on it (issue #5637), checked on filesets since a core backend edit
   # still moves every backend's vendor drvPath. Editing a bundled backend
   # (issue #5648) leaves the core checks' drvPaths unchanged, while editing a
-  # core backend moves every core check's. Editing a runner family leaves
-  # every backend's go test drvPath unchanged, as backends need only the
-  # runner root package; the family's own sensitivity is asserted by
-  # runners-go-test-independent. The sensitivity asserts keep it from passing
-  # vacuously.
+  # core backend moves every core check's. Editing a runner family leaves every
+  # backend's unchanged, as they need only the runner root package;
+  # runners-go-test-independent asserts the family's own sensitivity. The
+  # sensitivity asserts keep it from passing vacuously.
   backends-go-test-independent =
     let
       inherit (pkgs.lib) assertMsg concatStringsSep;
@@ -1246,20 +1229,16 @@ driverGoTests
     pkgs.runCommand "backends-go-test-independent" { } "touch $out";
 
   # Seam tests (issue #4280): the integration-tagged packages run against the
-  # rendered fixtures the bats harness produces, handed over via
-  # SPINDRIFT_SEAM_FIXTURES_DIR since the sandbox can't build them; the
-  # locked pi, its hook bridge and the baked hooks reach the piseam tests the
-  # same way, via SPINDRIFT_PI_BIN, _BRIDGE and _HOOKS_DIR. The
-  # other integration tests self-skip without bwrap/podman/docker. pkgs.nix is
-  # on PATH so the bwrap gcroots test runs against a chroot store. The
-  # package list is derived from the tree, so a new tagged file is picked up.
-  #
-  # Unlike the core checks it copies the whole tree (issue #5562): the fixtures'
-  # run-input documents name the image built from the bundle-linking box
-  # binary, so any Driver, runner family or bundled backend edit moves them
-  # anyway, and several tagged packages (the root, box, driver-exec,
-  # internal/forge/forgejo, internal/runner/bwrap, internal/runner/oci) lie
-  # outside coreFiles.
+  # bats harness's rendered fixtures via SPINDRIFT_SEAM_FIXTURES_DIR (the
+  # sandbox can't build them); the locked pi, its hook bridge and baked hooks
+  # reach the piseam tests via SPINDRIFT_PI_BIN, _BRIDGE and _HOOKS_DIR. Other
+  # integration tests self-skip without bwrap/podman/docker. pkgs.nix is on
+  # PATH for the bwrap gcroots test's chroot store. It copies the whole tree
+  # (issue #5562): the fixtures name the image built from the bundle-linking
+  # box binary, so any Driver, runner family or bundled backend edit moves
+  # them anyway, and several tagged packages (the root, box, driver-exec,
+  # internal/forge/forgejo, internal/runner/bwrap and oci) lie outside
+  # coreFiles.
   launcher-go-seam-test =
     pkgs.runCommand "launcher-go-seam-test"
       {

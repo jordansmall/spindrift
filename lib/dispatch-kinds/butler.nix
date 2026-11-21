@@ -1,11 +1,8 @@
-# The one-shot butler run (ADR 0056, #3870): it carries one Ledger Chore
-# (ByChore), never a tracker issue, and files findings the same advise-only
-# way research does, so it never lands code either. It has no lifecycle
-# labels of its own (LabelsNone) — its only doctor-visible label is the
-# agent-butler-finding provenance one. Its PriorityIdle means a slot picks it
-# only once dispatch and research have both reported no work (the
-# awake-window rule: gate starting, never stopping — a running butler child
-# is never preempted once picked).
+# The one-shot butler run (ADR 0056, #3870): it carries one Ledger Chore,
+# never a tracker issue, and files findings advise-only like research. Its
+# only doctor-visible label is the agent-butler-finding provenance one.
+# PriorityIdle: a slot picks it only once dispatch and research both report
+# no work, and a running butler child is never preempted.
 rec {
   name = "butler";
   verb = "butler";
@@ -25,8 +22,7 @@ rec {
   patchLabel = "agent-butler-patch";
   contract = "ContractInline";
   filerRelayGate = "FILER_FILE_RELAY_BUTLER";
-  # Butler files findings onto the work tracker; it has no lifecycle labels
-  # of its own.
+  # Butler files findings onto the work tracker.
   tracker = "TrackerWork";
   announceVerb = "sweeping";
   unclaimedGate = true;

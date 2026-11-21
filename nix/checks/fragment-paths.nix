@@ -201,8 +201,7 @@ in
     ) "fragment-paths: pathsOf over a well-formed Connector must evaluate";
     pkgs.runCommand "fragment-paths" { } "touch $out";
 
-  # A forgejo Consumer registers no Connector module (the native adapter
-  # serves forgejo without it), yet its Box must still ship forgejo's
+  # A harness registering no Connector module must still ship forgejo's
   # fragments (issue #6867): mkHarness falls back to the batteries flake's.
   # jira's ship only where the Consumer registers its module.
   fragment-paths-batteries-fallback =

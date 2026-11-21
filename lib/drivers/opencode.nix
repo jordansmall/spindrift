@@ -1,8 +1,6 @@
 # The opencode Driver: pure data only (ADR 0009, issue #624). ./default.nix
 # validates this entry's shape and renders it into what lib/mkHarness.nix bakes
-# into the image. The bats harness sources the registry's rendered preamble,
-# byte-identical to the baked one, before exec-ing the entrypoint, so the suite
-# exercises the same bytes (issue #433).
+# into the image; the bats harness sources the same rendered preamble (#433).
 { lib }:
 let
   # Claude Code roster tool names to opencode permission keys, the one home of
@@ -33,19 +31,15 @@ let
   sessionCacheDirRelative = ".local/share/opencode/spindrift-session";
 
   # opencode treats an unset permission key as allow, so an entry's tools list
-  # restricts nothing until every other mapped key is explicitly denied. An
-  # unmapped tool throws rather than being dropped, which would silently change
-  # what the subagent may do. Only the table's keys are set; keys it never
-  # produces (list, lsp, question, external_directory, doom_loop, MCP/custom
-  # tools) keep opencode's defaults. An explicit `tools = [ ]` denies every
-  # mapped key, read included, unlike an omitted `tools`.
+  # restricts nothing until every other mapped key is denied. An unmapped tool
+  # throws rather than silently changing what the subagent may do. Keys the
+  # table never produces (lsp, MCP/custom tools, ...) keep opencode's defaults.
+  # An explicit `tools = [ ]` denies every mapped key, unlike an omitted one.
   #
-  # An entry allowing `task` with `spawns` gets `task` as a map (issue #5368).
-  # opencode evaluates rules last-match-wins, so `*` must come first:
-  # builtins.toJSON sorts keys and `*` (0x2A) sorts before letters. The `*` deny
-  # also hides opencode's built-in subagents, so a target absent from the
-  # roster would leave nothing to spawn and throws instead. An empty `spawns`
-  # is deliberate: spawn nothing. Returns "" when the entry sets neither key.
+  # `spawns` makes `task` a map (issue #5368). opencode rules are
+  # last-match-wins, so `*` must come first: builtins.toJSON sorts it before
+  # letters. The `*` deny also hides opencode's built-in subagents, so a target
+  # absent from the roster throws. An empty `spawns` means spawn nothing.
   permissionLineFor =
     rosterNames: e:
     let
@@ -91,12 +85,10 @@ in
 
   bin = "opencode";
 
-  # An API-key Provider with a secret env-schema row rides it as plain Box env,
-  # which opencode reads natively; no config file carries a key. Only the
-  # github-copilot/ prefix has a rule here: it is OAuth-only (ADR 0009
-  # amendment, #260) and reads the credential from OPENCODE_AUTH_CONTENT. Every
-  # other Provider has no credential gate (see #7055), so a missing key is not
-  # caught at launch.
+  # An API-key Provider rides its secret env-schema row as plain Box env, which
+  # opencode reads natively. Only github-copilot/ has a rule: it is OAuth-only
+  # (ADR 0009 amendment, #260). Every other Provider has no credential gate
+  # (see #7055), so a missing key is not caught at launch.
   credentials = [
     {
       env = [ "OPENCODE_AUTH_CONTENT" ];
@@ -119,12 +111,9 @@ in
   # skills directory exists or is wired.
   skillsDirRelative = ".claude/skills";
 
-  # The file-rewrite loop in cmd/launcher/internal/promptassembly (issue
-  # #2153) rewrites each baked agent file's body at runtime through this
-  # path, so it must stay in lockstep with the path agentFilesTemplate below
-  # bakes into or the loop silently no-ops. Optional, not in default.nix's
-  # requiredAttrs: a Driver whose subagents are not on-disk files (claude)
-  # has nothing to rewrite.
+  # promptassembly's file-rewrite loop (issue #2153) rewrites each baked agent
+  # file through this path, so it must match the path agentFilesTemplate bakes
+  # into, or the loop silently no-ops.
   agentFilesDirRelative = ".config/opencode/agents";
 
   # Issue #5349, ADR 0009: the launcher mounts a per-issue host directory over
@@ -158,13 +147,12 @@ in
   # roster argument (issue #264) only to give mkHarness.nix one call site.
   agentsJsonTemplate = { roster }: "";
 
-  # opencode discovers subagents by scanning these files, and an entry's effort
-  # becomes opencode's reasoningEffort key (issue #2242). rosterLib.dropOptedOut
-  # drops empty-model entries upstream, so e.model needs no fallback and reaches
-  # driver-exec verbatim. Every frontmatter scalar is JSON-encoded (issue #2152
-  # slice C) so a newline or colon cannot inject a second YAML key.
-  # An entry with a `tools` list also gets a `permission` map (`spawns` alone
-  # gets a task-only one); one with neither keeps opencode's full tool set.
+  # opencode discovers subagents by scanning these files; effort becomes its
+  # reasoningEffort key (issue #2242). rosterLib.dropOptedOut drops empty-model
+  # entries upstream, so e.model needs no fallback. Every frontmatter scalar is
+  # JSON-encoded (issue #2152 slice C) so a newline or colon cannot inject a
+  # second YAML key. An entry with neither `tools` nor `spawns` gets no
+  # permission map and keeps opencode's full tool set.
   agentFilesTemplate =
     { roster }:
     {
@@ -190,15 +178,13 @@ in
       }) roster
     );
 
-  # Files baked under /home/agent, path -> content (issue #5345). Optional: a
-  # Driver whose config lives in hooks (claude) bakes none here. opencode's guard
-  # plugin runs credential-deny.sh; these deny rules are a floor beneath it,
-  # still holding the plain forms if opencode cannot load the plugin. They must
-  # be a literal "deny": the Box runs with --auto
-  # (flagsCommon), which approves every ask. opencode globs have no character
-  # classes, so the bash boundaries enumerate credential-deny.sh's lead and
-  # trail classes char by char, minus `*` and `?` (wildcards here, so a literal
-  # one cannot be written) and `\` (opencode rewrites it to `/`).
+  # Files baked under /home/agent (issue #5345). These deny rules are a floor
+  # beneath the guard plugin's credential-deny.sh, holding the plain forms if
+  # the plugin cannot load. They must be a literal "deny": --auto
+  # (flagsCommon) approves every ask. opencode globs have no character classes,
+  # so the bash boundaries enumerate credential-deny.sh's lead and trail
+  # classes char by char, minus `*` and `?` (wildcards here) and `\` (opencode
+  # rewrites it to `/`).
   configFiles =
     let
       paths = import ../credential-paths.nix;

@@ -1,12 +1,9 @@
 # Marginal-cost eval probe (issue #5860). `one` forces a single mkHarness
-# instance, `two` forces two independent ones, both on the same nixpkgs. Each
-# is evaluated in its own process (.github/scripts/eval-probe.sh), because
-# NIX_SHOW_STATS is cumulative per process; two minus one is then the cost of
-# the second instance, and lost Harness-core sharing shows up as growth in it.
-#
-# `nixpkgs` must be the shared instance (lib/nixpkgs-shared.nix): a raw input
-# would charge every instance a fresh nixpkgs fixed point and measure nothing
-# useful.
+# instance, `two` forces two independent ones, each in its own process
+# (.github/scripts/eval-probe.sh) because NIX_SHOW_STATS is cumulative; lost
+# Harness-core sharing shows up as growth in two minus one. `nixpkgs` must be
+# the shared instance (lib/nixpkgs-shared.nix), or every instance pays a fresh
+# nixpkgs fixed point.
 { nixpkgs, system }:
 let
   # A function only so each application is a separate, unshared evaluation (a

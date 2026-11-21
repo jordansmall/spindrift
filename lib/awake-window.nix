@@ -2,19 +2,14 @@
 # daemonAwakeWindow). cmd/launcher/internal/daemon/awake.go's ParseWindow
 # parses the same knob at runtime, so the accepted shape and rejections here
 # must not diverge from it, with one deliberate asymmetry: ParseWindow trims
-# surrounding whitespace before parsing, while this rejects a padded value
-# outright. Rejecting more at eval time than at runtime is always safe -- an
-# eval-time throw means the value never reaches the daemon at all. Pure
-# builtins only, no pkgs.lib, so a bare `nix eval` tests this file without a
-# locked nixpkgs.
+# surrounding whitespace, while this rejects a padded value outright, which is
+# safe because rejecting more at eval time never lets a bad value through.
+# Pure builtins only, no pkgs.lib, so a bare `nix eval` tests this file
+# without a locked nixpkgs.
 let
-  # Mirrors awake.go's windowFormat: two-digit hour, two-digit minute, a
-  # literal '-', one space, then a non-empty zone with no embedded
-  # whitespace. builtins.match is an extended regex, which has
-  # no \S shorthand, so "not whitespace" is spelled as the POSIX [:space:]
-  # class negated -- a plain [^ ] would miss a tab, under-rejecting relative
-  # to \S and inverting the header claim above that eval only ever rejects
-  # more than runtime.
+  # Mirrors awake.go's windowFormat. builtins.match has no \S, and a plain
+  # [^ ] would miss a tab and under-reject relative to the Go side, so "not
+  # whitespace" is the negated POSIX [:space:] class.
   windowRe = "([0-9]{2}):([0-9]{2})-([0-9]{2}):([0-9]{2}) ([^[:space:]]+)";
 
   prefix = "DAEMON_AWAKE_WINDOW: ";
@@ -51,13 +46,11 @@ let
       h * 60 + m;
 in
 {
-  # The empty string is the schema default and means no window -- always
-  # awake -- mirroring ParseWindow's (nil, nil) result. Nix cannot load the
-  # IANA zone database, so unlike awake.go this cannot confirm the zone
-  # actually resolves; it only validates the zone token's shape (non-empty,
-  # no embedded whitespace, not the literal "Local"). The runtime
-  # ParseWindow is what proves the zone resolves, which is also why the Go
-  # parse remains the real guarantee for an env-supplied value.
+  # The empty string is the schema default and means no window (always
+  # awake), mirroring ParseWindow's (nil, nil). Nix cannot load the IANA zone
+  # database, so this only validates the zone token's shape (non-empty, no
+  # whitespace, not the literal "Local"); the runtime ParseWindow proves it
+  # resolves.
   parse =
     raw:
     if raw == "" then

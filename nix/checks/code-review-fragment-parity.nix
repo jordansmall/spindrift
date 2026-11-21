@@ -11,16 +11,14 @@ let
   skillDesc = "the upstream code-review SKILL.md (pinned `matt-skills` flake input, read via nix/dogfood-skills.nix)";
   fallbackDesc = "templates/default/prompts/review-prompt.md";
   anchorDesc = "templates/default/prompts/fragments/code-review-baked.md";
-  # Issue #3226 moved the four hunt dimensions into review-prompt.md as
-  # unconditional inline text, since they must render whether or not the
-  # skill is baked. The drift target follows the prose there.
+  # The four hunt dimensions are inline in review-prompt.md (issue #3226): they
+  # must render whether or not the skill is baked.
   fallbackText = builtins.readFile ../../templates/default/prompts/review-prompt.md;
   anchorText = builtins.readFile ../../templates/default/prompts/fragments/code-review-baked.md;
 
-  # Only two clauses. The skill's Standards/Spec two-axis model and
-  # review-prompt.md's four hunt dimensions are different shapes by design:
-  # CORRECTNESS and SECURITY have no counterpart in the skill, so most of
-  # review-prompt.md's prose shares no vocabulary to pin against. These two
+  # Only two clauses: the skill's Standards/Spec axes and review-prompt.md's
+  # four hunt dimensions differ by design (CORRECTNESS and SECURITY have no
+  # skill counterpart), so most prose shares no vocabulary to pin. These two
   # name the same finding class in both texts, not just a shared topic word.
   sharedClauses = [
     {

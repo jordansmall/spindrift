@@ -166,12 +166,12 @@ in
         touch $out
       '';
 
-  # The dogfood adopts the Driver map (ADR 0064, issue #5054): claude stays the
-  # default Driver, so the unsuffixed apps are the claude ones
-  # (flakemodule-equivalence above pins the Harness itself), and opencode and
-  # pi each expose their own apps and, on Linux, their own image, each equal to
-  # a direct mkHarness call for that Driver so a wrong model, roster, or daemon
-  # ref fails here rather than passing on the image name alone (issue #5090).
+  # The dogfood's Driver map (ADR 0064, issue #5054): claude stays the default
+  # Driver, so the unsuffixed apps are claude's (flakemodule-equivalence pins
+  # that Harness), and opencode and pi each expose their own apps and, on Linux,
+  # image, each equal to a direct mkHarness call for that Driver so a wrong
+  # model, roster, or daemon ref fails here rather than passing on the image
+  # name alone (issue #5090).
   flakemodule-dogfood-drivers =
     let
       inherit (pkgs.lib) assertMsg;
@@ -921,12 +921,11 @@ in
       "oldFlatShims description mismatch (hand-copy regression) for: ${concatStringsSep ", " mismatches}";
     pkgs.runCommand "flakemodule-legacy-shim-description-generated" { } "touch $out";
 
-  # Issue #2572: every one of the 13 structural knobs (lib/structural-paths.nix)
-  # plus byName and the driver map's drivers/defaultDriver (lib/byname-paths.nix,
-  # lib/driver-map.nix) needs a non-empty string doc/docType/docDefault entry in
-  # lib/structural-options-doc.nix, which lib/renderers.nix's
-  # renderStructuralOptionsDoc turns into a docs/flake-options.md row. It is
-  # plain data because lib/renderers.nix must stay pure-builtins, no flake eval.
+  # Issue #2572: every structural knob (lib/structural-paths.nix) plus byName
+  # and the driver map's drivers/defaultDriver needs a non-empty
+  # doc/docType/docDefault entry in lib/structural-options-doc.nix, plain data
+  # because lib/renderers.nix, which renders it into docs/flake-options.md,
+  # must stay pure builtins, no flake eval.
   structural-options-doc-metadata =
     let
       inherit (pkgs.lib)
@@ -1582,12 +1581,11 @@ in
       ''dogfood memoryLimit must stay "5g" on darwin/podman-in-VM (issue #2379): got "${defaultsDarwin.defaults.memoryLimit}"'';
     pkgs.runCommand "dogfood-memory-limit-platform-aware" { } "touch $out";
 
-  # The dogfood config sources agent models and efforts from an explicit roster
-  # (issue #2388): `defaults` must not carry `filerModel`, the roster's
-  # filer/reviewer/worker entries carry the dogfood's local pins (#393), and
-  # scout resolves to its lib/env-schema.nix default (#2433, #2434).
-  # Expectations anchor to defaultModelFixture, not the schema, which would pass
-  # under drift (#2435 AC2).
+  # The dogfood sources agent models and efforts from an explicit roster (issue
+  # #2388): `defaults` carries no `filerModel`, filer/reviewer/worker carry the
+  # local pins (#393), and scout resolves to its lib/env-schema.nix default
+  # (#2433, #2434). Expectations anchor to defaultModelFixture, not the schema,
+  # which would pass under drift (#2435 AC2).
   dogfood-roster-and-review-effort =
     let
       inherit (pkgs.lib)
@@ -1788,12 +1786,11 @@ in
     '';
 
   # The agent-image drvPath must be a pure function of flake content, not the
-  # Consumer's host system (issue #597). ADR 0019's freshness probe keys on
-  # the Linux-twin image tag, an outPath hash, against the IMAGE_TAG the
-  # host-`system` Harness baked (issue #587; cmd/launcher/internal/freshness).
-  # Equal drvPaths imply equal tags; a host-tagged drvPath moves the tag, so
-  # the probe reports "rebuild needed" forever on a macOS Consumer (issue
-  # #598). Two calls differing only in `system` show it.
+  # Consumer's host system (issue #597): ADR 0019's freshness probe compares
+  # the Linux-twin image tag, an outPath hash, with the IMAGE_TAG the
+  # host-`system` Harness baked (issue #587), so a host-tagged drvPath reports
+  # "rebuild needed" forever on a macOS Consumer (issue #598). Two calls
+  # differing only in `system` show it.
   skills-content-form-drvpath-host-independent =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1966,10 +1963,10 @@ in
 
   # Ties the FLAKE_IMAGE_ATTR lib/preambles.nix bakes from a bwrap harness's
   # default `imageAttrName` (lib/runners/bwrap.nix, `agent-closure`) to the
-  # package mkHarness.nix registers under that name. The first assert trips
-  # on a rename of that row's `imageAttrName`; the shell compare trips when
-  # the baked name drifts from the registered one, which would leave Probe on
-  # the isImageAttrMissing path, restoring the bug #2667 fixes.
+  # package mkHarness.nix registers under that name. The first assert trips on
+  # a rename of that row's `imageAttrName`, the shell compare on drift between
+  # baked and registered names, which would leave Probe on the
+  # isImageAttrMissing path (bug #2667).
   mkharness-agent-closure-package =
     let
       inherit (pkgs.lib) assertMsg;
@@ -2340,10 +2337,9 @@ in
     pkgs.runCommand "mkharness-default-roster-drops-filer" { } "touch $out";
 
   # A custom roster entry omitting both `promptFile` and `prompt` must throw at
-  # eval time: issue #2571 made `rosterLib.normalizeRoster` strict, so a custom
+  # eval time: `rosterLib.normalizeRoster` is strict (issue #2571), so a custom
   # agent with no resolvable prompt fails loudly instead of silently running
-  # with no prompt (issue #2555 user story 23). This supersedes the old #264
-  # "degrade gracefully" behavior.
+  # with no prompt (issue #2555 user story 23).
   mkharness-roster-custom-entry-missing-prompt-fields-throws =
     let
       inherit (pkgs.lib) assertMsg;
@@ -2367,12 +2363,11 @@ in
       "mkHarness must throw when a custom roster entry omits both promptFile and prompt (issue #2571, #2555 user story 23)";
     pkgs.runCommand "mkharness-roster-custom-entry-missing-prompt-fields-throws" { } "touch $out";
 
-  # The other AC4 shape: an inline `prompt` with no `promptFile`. This entry
-  # passes validation and survives customRosterPromptFiles' `hasInlinePrompt`
-  # filter (non-null, non-empty), so it IS baked. `resolvedRoster` is
-  # normalized before customRosterPromptFiles derives from it (issue #2152
-  # slice B); a regression reading `e.promptFile` first throws a
-  # missing-attribute error here (#264).
+  # The other AC4 shape: an inline `prompt` with no `promptFile`, which passes
+  # customRosterPromptFiles' `hasInlinePrompt` filter, so it IS baked.
+  # `resolvedRoster` is normalized before customRosterPromptFiles derives from
+  # it (issue #2152 slice B); a regression reading `e.promptFile` first throws
+  # a missing-attribute error here (#264).
   mkharness-roster-custom-entry-inline-prompt-no-file =
     let
       inlineRoster = [
@@ -2562,11 +2557,9 @@ in
 
   # Issues #2533, #5330, #5331: both flags follow roster membership under every
   # Driver, but opencode model ids are Provider-namespaced, so a worker whose
-  # model is not (here "m", as the inherited schema default would be) is
-  # dropped from the opencode roster and nothing bakes worker.md or reports
-  # WORKER_PROVISIONED. The filer is kept, so FILER_ENABLED is true. Pins the
-  # opencode cell directly; mkharness-filer-worker-agree above only exercises
-  # claude.
+  # model is not (here "m", like the inherited schema default) is dropped and
+  # nothing bakes worker.md or reports WORKER_PROVISIONED; the kept filer makes
+  # FILER_ENABLED true. mkharness-filer-worker-agree above covers only claude.
   mkharness-worker-false-filer-follows-roster-for-opencode-driver =
     let
       inherit (pkgs.lib) assertMsg all;
@@ -2803,7 +2796,7 @@ in
   # launcher SOURCE changes, or a future narrowing of launcherCurrencyFileset
   # would leave it reporting the same hash forever. `overrideAttrs` only swaps
   # the outer derivation's `src`, so the perturbed one is a valid outPath probe
-  # but not buildable as a stand-in for "flags.go removed" (issue #2677 review).
+  # but not buildable as a stand-in for "flags.go removed" (issue #2677).
   mkharness-launcher-currency-source-sensitive =
     let
       inherit (pkgs.lib) assertMsg;
@@ -2838,11 +2831,10 @@ in
     '';
 
   # Guards daemonBin's `src` staying docs-free (issue #3621): a docs-only
-  # commit must not move the daemon's program path. The positive assertions
-  # pin `src` to the module root (cmd/launcher's contents directly), so a
-  # revert to a docs-bearing tree (cmd/launcher/ + docs/) fails both the
-  # positives and the negative together, not some unrelated tree that
-  # happens to lack a docs/ dir.
+  # commit must not move the daemon's program path. The positives pin `src` to
+  # the module root, so a revert to a docs-bearing tree (cmd/launcher/ +
+  # docs/) fails positives and negative together, and the negative cannot pass
+  # on an unrelated tree that merely lacks docs/.
   mkharness-daemon-src-excludes-docs =
     let
       direct1 = import ../../lib/mkHarness.nix { inherit nixpkgs system; };
@@ -2857,20 +2849,15 @@ in
     '';
 
   # Flip side of the check above: daemonBin's outPath must still move when
-  # the daemon's own Go source changes, or a narrowing that accidentally
-  # dropped a real input would leave it reporting the same hash forever.
-  # The guard below re-derives the whole-module source here rather than
-  # importing a fileset out of lib/, so it pins launcherModuleSrc's own
-  # definition instead of restating it: `fileset.toSource` is
-  # content-addressed, so an identical tree yields an identical store path,
-  # while a narrowing or a revert to a plain `src = ../cmd/launcher` copy
-  # (which lands at `…-launcher`, where `toSource` yields `…-source`) breaks
-  # the equality. That rules out a store-path *name* difference alone passing
-  # the sensitivity assertion -- the hole a narrowing that silently dropped
-  # `internal/daemon` would slip through.
-  # `overrideAttrs` only swaps the outer derivation's `src`, so the perturbed
-  # one is a valid outPath probe but not buildable as a stand-in for
-  # "pool.go removed" (mirrors the launcher-currency check's caveat above).
+  # the daemon's own Go source changes, or a narrowing that dropped a real
+  # input would report the same hash forever. The guard re-derives the
+  # whole-module source rather than importing it from lib/: `fileset.toSource`
+  # is content-addressed, so only an identical tree matches, while a narrowing
+  # or a plain `src = ../cmd/launcher` copy (`…-launcher`, not `…-source`)
+  # breaks the equality. That stops a store-path *name* difference alone from
+  # passing the sensitivity assertion. As in
+  # mkharness-launcher-currency-source-sensitive, the `overrideAttrs` probe is
+  # an outPath probe only, not buildable.
   mkharness-daemon-source-sensitive =
     let
       inherit (pkgs.lib) assertMsg;
