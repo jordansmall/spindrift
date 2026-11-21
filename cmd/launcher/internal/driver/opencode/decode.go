@@ -1,7 +1,9 @@
 package opencode
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"strconv"
@@ -249,6 +251,41 @@ func decodeStepFinish(part logPart, ts int64) []driverkit.Event {
 	return events
 }
 
+// responseHeaders holds lower-cased header names. Decoding a plain map would
+// lose document order, so Retry-After and retry-after would race; walking the
+// tokens lets the last one win. encoding/json calls UnmarshalJSON once per
+// repeated (case-folded) key, in document order, so the win holds across them.
+type responseHeaders map[string]string
+
+func (h *responseHeaders) UnmarshalJSON(b []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if tok == nil {
+		return nil
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '{' {
+		return errors.New("responseHeaders: not an object")
+	}
+	if *h == nil {
+		*h = responseHeaders{}
+	}
+	for dec.More() {
+		k, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		var v string
+		if err := dec.Decode(&v); err != nil {
+			return err
+		}
+		(*h)[strings.ToLower(k.(string))] = strings.TrimSpace(v)
+	}
+	return nil
+}
+
 // resetFrom derives the rate-limit reset time from the response headers of a
 // NamedError payload, in the order opencode's own session/retry.ts reads them:
 // retry-after-ms, then retry-after as seconds, then retry-after as an HTTP date.
@@ -257,16 +294,13 @@ func decodeStepFinish(part logPart, ts int64) []driverkit.Event {
 func resetFrom(raw json.RawMessage, timestampMs int64) *time.Time {
 	var payload struct {
 		Data struct {
-			ResponseHeaders map[string]string `json:"responseHeaders"`
+			ResponseHeaders responseHeaders `json:"responseHeaders"`
 		} `json:"data"`
 	}
 	if json.Unmarshal(raw, &payload) != nil {
 		return nil
 	}
-	headers := map[string]string{}
-	for k, v := range payload.Data.ResponseHeaders {
-		headers[strings.ToLower(k)] = strings.TrimSpace(v)
-	}
+	headers := payload.Data.ResponseHeaders
 	relative := func(value string, unit time.Duration) *time.Time {
 		// MaxInt32 keeps n*unit inside time.Duration's int64 range for either unit.
 		n, err := strconv.ParseFloat(value, 64)
