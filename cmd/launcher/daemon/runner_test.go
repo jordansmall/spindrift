@@ -4294,3 +4294,113 @@ func requireInPlaceRestart(t testing.TB) {
 		t.Skip("in-place restart is supported only on linux amd64/arm64")
 	}
 }
+
+// TestSweepLateMerges points the sweep's exec seam at a scripted shell command:
+// a zero exit is success, a non-zero one an error naming the exit, and the
+// command is the pinned hidden verb under an env that is no pool child's.
+func TestSweepLateMerges(t *testing.T) {
+	orig := runnerSweepCommand
+	t.Cleanup(func() { runnerSweepCommand = orig })
+	var argv []string
+	var script string
+	runnerSweepCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		argv = append([]string{name}, args...)
+		return exec.CommandContext(ctx, "/bin/sh", "-c", script)
+	}
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: []string{"PATH=/bin", daemon.PoolChildEnv + "=1"}})
+
+	script = "exit 0"
+	if err := r.SweepLateMerges(context.Background(), "abc"); err != nil {
+		t.Fatalf("SweepLateMerges() = %v, want nil on exit 0", err)
+	}
+	if got := argv[len(argv)-1]; got != daemon.LateMergeSweepVerb {
+		t.Errorf("argv = %v, want it to end in %s", argv, daemon.LateMergeSweepVerb)
+	}
+	if !slices.ContainsFunc(argv, func(a string) bool { return strings.Contains(a, "rev=abc") }) {
+		t.Errorf("argv = %v, want the flakeref pinned to rev abc", argv)
+	}
+
+	script = "echo boom >&2; exit 3"
+	err := r.SweepLateMerges(context.Background(), "abc")
+	if err == nil || !strings.Contains(err.Error(), "exit status 3") {
+		t.Fatalf("SweepLateMerges() = %v, want an error naming exit status 3", err)
+	}
+}
+
+// The sweep runs in its own process group so a terminal Ctrl-C halts the pool
+// without also killing a running sweep.
+func TestSweepLateMerges_ChildInOwnProcessGroup(t *testing.T) {
+	orig := runnerSweepCommand
+	t.Cleanup(func() { runnerSweepCommand = orig })
+	var cmd *exec.Cmd
+	runnerSweepCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
+		return cmd
+	}
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	if err := r.SweepLateMerges(context.Background(), "abc"); err != nil {
+		t.Fatalf("SweepLateMerges() = %v, want nil", err)
+	}
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
+		t.Errorf("SysProcAttr = %+v, want Setpgid so a group-wide SIGINT misses the sweep", cmd.SysProcAttr)
+	}
+}
+
+// Cancelling a sweep's ctx kills its whole process group: with Setpgid, a
+// bare CommandContext kill reaches only the direct PID and orphans whatever
+// the sweep forked (a Connector subprocess). The grandchild holds a pipe's
+// write end, so the read hits EOF only once it is gone.
+func TestSweepLateMerges_CancelKillsGrandchild(t *testing.T) {
+	orig := runnerSweepCommand
+	t.Cleanup(func() { runnerSweepCommand = orig })
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pr.Close()
+	runnerSweepCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", `sleep 30 & echo up >&3; wait`)
+		cmd.ExtraFiles = []*os.File{pw}
+		return cmd
+	}
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() { errc <- r.SweepLateMerges(ctx, "abc") }()
+
+	_ = pr.SetReadDeadline(time.Now().Add(10 * time.Second))
+	buf := make([]byte, 3)
+	if _, err := io.ReadFull(pr, buf); err != nil {
+		t.Fatalf("sweep never reported its grandchild started: %v", err)
+	}
+	_ = pw.Close()
+	cancel()
+	if _, err := io.ReadAll(pr); err != nil {
+		t.Fatalf("grandchild outlived the cancelled sweep: %v", err)
+	}
+	if err := <-errc; err == nil {
+		t.Error("SweepLateMerges() = nil, want an error for a torn-down sweep")
+	}
+}
+
+// A sweep that outlives its ctx is torn down rather than waited on.
+func TestSweepLateMerges_CancelledContextTearsDownChild(t *testing.T) {
+	orig := runnerSweepCommand
+	t.Cleanup(func() { runnerSweepCommand = orig })
+	runnerSweepCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exec sleep 30")
+	}
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if err := r.SweepLateMerges(ctx, "abc"); err == nil {
+		t.Fatal("SweepLateMerges() = nil, want an error for a torn-down sweep")
+	}
+	if d := time.Since(start); d > 10*time.Second {
+		t.Errorf("SweepLateMerges took %v, want it cut short by ctx", d)
+	}
+}

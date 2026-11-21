@@ -36,6 +36,7 @@ import (
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/launcherchecks"
 	"spindrift.dev/launcher/internal/report"
+	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/stopsignal"
 	"spindrift.dev/launcher/internal/tokenrefresh"
 )
@@ -1109,23 +1110,24 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 
 	cfg := daemon.Config{
-		Kinds:            args.Kinds,
-		Reservation:      reservation,
-		IdleFloor:        idleFloor,
-		IdleCap:          idleCap,
-		ProbeIntervals:   probeIntervals(demand, probeOverride),
-		Trackers:         trackers(demand, doc),
-		RepoURL:          repoURL(doc),
-		Slots:            slots,
-		SelfProgram:      selfProgram,
-		FailureBackoff:   failureBackoff,
-		BreakerThreshold: breakerThreshold,
-		BreakerWindow:    breakerWindow,
-		Awake:            awake,
-		Status:           statusWriter,
-		Stop:             poolStop,
-		Abort:            poolAbort,
-		RestartInPlace:   args.RestartInPlace,
+		Kinds:                  args.Kinds,
+		Reservation:            reservation,
+		IdleFloor:              idleFloor,
+		IdleCap:                idleCap,
+		ProbeIntervals:         probeIntervals(demand, probeOverride),
+		Trackers:               trackers(demand, doc),
+		RepoURL:                repoURL(doc),
+		Slots:                  slots,
+		LateMergeSweepInterval: settle.LateMergeSweepInterval,
+		SelfProgram:            selfProgram,
+		FailureBackoff:         failureBackoff,
+		BreakerThreshold:       breakerThreshold,
+		BreakerWindow:          breakerWindow,
+		Awake:                  awake,
+		Status:                 statusWriter,
+		Stop:                   poolStop,
+		Abort:                  poolAbort,
+		RestartInPlace:         args.RestartInPlace,
 	}
 	if res != nil {
 		cfg.Handoff = &res.handoff

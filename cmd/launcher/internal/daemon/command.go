@@ -347,6 +347,38 @@ func DoctorCommand(s DoctorSpec) (Command, error) {
 	argv := []string{"nix", "run", flakeref, "--", "doctor"}
 	argv = append(argv, s.Flags...)
 	argv = appendFeatureBranch(argv, s.FeatureBranch)
-	argv, env := liftSignalCarrier(argv, s.Env)
-	return Command{Argv: argv, Env: withoutKeys(withoutKeys(env, s.Knobs), []string{reportFDEnv, PoolChildEnv})}, nil
+	return pinnedHostCommand(argv, s.Env, s.Knobs), nil
+}
+
+// LateMergeSweepSpec is everything one pinned late-merge sweep invocation
+// needs; the fields mean what DoctorSpec's do.
+type LateMergeSweepSpec struct {
+	RepoPath      string
+	AppAttr       string
+	Revision      string
+	Env           []string
+	Knobs         []string
+	FeatureBranch string
+}
+
+// LateMergeSweepCommand builds the Command for the daemon's own late-merge
+// sweep (issue #7342): DoctorCommand's pinned flakeref and env stripping,
+// invoking LateMergeSweepVerb. The sweep is no pool child and reports no
+// records, so PoolChildEnv and reportFDEnv are stripped, never re-added.
+func LateMergeSweepCommand(s LateMergeSweepSpec) (Command, error) {
+	flakeref, err := appFlakeref(s.RepoPath, s.AppAttr, s.Revision, "a late-merge sweep must always be pinned")
+	if err != nil {
+		return Command{}, err
+	}
+	argv := appendFeatureBranch([]string{"nix", "run", flakeref, "--", LateMergeSweepVerb}, s.FeatureBranch)
+	return pinnedHostCommand(argv, s.Env, s.Knobs), nil
+}
+
+// pinnedHostCommand is the shared tail of the host-side pinned commands
+// (doctor, late-merge sweep): the signal carrier lifted onto argv, and an env
+// stripped of the Knobs plus the pool-child keys, which a command that is no
+// pool child and reports no records must never inherit.
+func pinnedHostCommand(argv, env, knobs []string) Command {
+	argv, env = liftSignalCarrier(argv, env)
+	return Command{Argv: argv, Env: withoutKeys(withoutKeys(env, knobs), []string{reportFDEnv, PoolChildEnv})}
 }

@@ -656,3 +656,28 @@ func TestSelfRootCommand(t *testing.T) {
 		t.Fatalf("SelfRootCommand = %v, want %v", got, want)
 	}
 }
+
+// TestLateMergeSweepCommand pins the daemon's own late-merge sweep exec: the
+// same pinned flakeref as a child, the hidden verb, and an env that names no
+// pool child, no report fd and no Knob (issue #7342).
+func TestLateMergeSweepCommand(t *testing.T) {
+	base := "git+file:///home/op/repo?rev=abc123&allRefs=1"
+	got, err := LateMergeSweepCommand(LateMergeSweepSpec{
+		RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", FeatureBranch: "feat/thing",
+		Env:   []string{"PATH=/bin", "MODEL=opus", "SPINDRIFT_REPORT_FD=9", PoolChildEnv + "=1"},
+		Knobs: []string{"MODEL"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantArgv := []string{"nix", "run", base, "--", LateMergeSweepVerb, "--base-branch", "feat/thing"}
+	if !reflect.DeepEqual(got.Argv, wantArgv) {
+		t.Errorf("argv = %v, want %v", got.Argv, wantArgv)
+	}
+	if want := []string{"PATH=/bin"}; !reflect.DeepEqual(got.Env, want) {
+		t.Errorf("env = %v, want %v", got.Env, want)
+	}
+	if _, err := LateMergeSweepCommand(LateMergeSweepSpec{RepoPath: "/home/op/repo", AppAttr: ".#"}); err == nil {
+		t.Error("empty revision: want an error, a sweep must always be pinned")
+	}
+}

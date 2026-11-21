@@ -379,4 +379,5 @@ func TestHostRunnerDemand_OutboxNamesItsBundles(t *testing.T) {
 	}
 }
 
-func (r *wiringRunner) Prebuild(context.Context, daemon.Tip) error { return nil }
+func (r *wiringRunner) Prebuild(context.Context, daemon.Tip) error    { return nil }
+func (r *wiringRunner) SweepLateMerges(context.Context, string) error { return nil }

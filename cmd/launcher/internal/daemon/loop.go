@@ -106,6 +106,11 @@ type Runner interface {
 	// to *PrebuildError; ctx cancellation aborts it and is not a verdict on
 	// the build.
 	Prebuild(ctx context.Context, tip Tip) error
+	// SweepLateMerges runs the throttled late-merge sweep at revision
+	// (issue #7342), off the pool's slots. A failure only warns. ctx
+	// outlives a pool halt; a hard abort, a committed in-place handoff, or
+	// the caller's own cancellation ends it.
+	SweepLateMerges(ctx context.Context, revision string) error
 }
 
 // ChildHandle is one started child. Only one Wait may run at a time, and once
@@ -195,6 +200,11 @@ type Config struct {
 	Reservation int
 
 	Slots int
+
+	// LateMergeSweepInterval is how often the daemon runs the late-merge
+	// sweep, outside the pool's slots and so never holding one (issue #7342).
+	// Zero or negative runs no sweep.
+	LateMergeSweepInterval time.Duration
 
 	// Handoff, when non-nil, is the in-place restart document this pool resumes
 	// from (ADR 0063): it occupies the Slots the document names and supervises
@@ -400,6 +410,7 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Hal
 	}()
 
 	var wg sync.WaitGroup
+	sweeperDone := p.startLateMergeSweeper(pctx, ctx)
 	wg.Add(cfg.Slots)
 	for slot := 0; slot < cfg.Slots; slot++ {
 		go func(slot int) {
@@ -416,6 +427,7 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Hal
 	// return.
 	p.cancel()
 	<-watcherDone
+	<-sweeperDone
 
 	if h := p.committedHandoff(); h != nil {
 		return Halt{Handoff: h}
