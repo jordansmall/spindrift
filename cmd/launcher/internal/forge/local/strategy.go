@@ -29,7 +29,7 @@ var Strategy = backendkit.Strategy{
 		if err != nil {
 			return nil, err
 		}
-		return NewLocalTracker(k.LocalIssuesDir, s.Labels, s.VerdictLabels), nil
+		return NewLocalTracker(k.LocalIssuesDir, s.Labels, s.VerdictLabels).WithRoute(s.Route), nil
 	},
 	NewCodeForge: func(s backendkit.Shared, l backendkit.Lookup, parent forge.SanitizedParent, _ forge.IssueTracker) (forge.CodeForge, error) {
 		dir, err := resolveAccumulationRepoDir(l)

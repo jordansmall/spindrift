@@ -120,6 +120,7 @@ type LocalTracker struct {
 	dir           string
 	labels        forge.DispatchLabels
 	verdictLabels forge.VerdictLabels
+	route         forge.Route
 }
 
 var _ forge.HostPostedIssueFiler = (*LocalTracker)(nil)
@@ -135,6 +136,14 @@ func NewLocalTracker(dir string, labels forge.DispatchLabels, verdictLabels ...f
 		vl = verdictLabels[0]
 	}
 	return &LocalTracker{dir: dir, labels: labels, verdictLabels: vl}
+}
+
+// WithRoute narrows ListIssues (and so CountReady) to issues carrying every
+// route label and stamps them onto issues PostIssue files. ListOpenIssues and
+// AllIssues stay unrouted: readiness reads the whole scope (ADR 0075).
+func (lt *LocalTracker) WithRoute(r forge.Route) *LocalTracker {
+	lt.route = r
+	return lt
 }
 
 // slugPath returns the file path for issue num, accepting only a bare filename
@@ -218,7 +227,9 @@ func (lt *LocalTracker) StateLabels() forge.DispatchLabels {
 // oldest created first.
 func (lt *LocalTracker) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
 	want := lt.labels.Label(state)
-	return lt.listIssues(func(li localIssue) bool { return !li.frontmatter.Closed && li.frontmatter.State == want })
+	return lt.listIssues(func(li localIssue) bool {
+		return !li.frontmatter.Closed && li.frontmatter.State == want && lt.route.MatchesLabels(li.frontmatter.Labels)
+	})
 }
 
 // demandProbeInterval is how often the daemon re-counts local demand: the
@@ -454,7 +465,7 @@ func (lt *LocalTracker) PostIssue(title, body string, labels []string) (string, 
 	li := localIssue{
 		frontmatter: localFrontmatter{
 			Title:   title,
-			Labels:  labels,
+			Labels:  lt.route.StampLabels(labels),
 			Created: time.Now().Format(time.RFC3339),
 		},
 		body: body,
