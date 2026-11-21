@@ -372,12 +372,13 @@ func TestHostileConnectorFailsWithItsOwnNamedError(t *testing.T) {
 		t.Run(engine, func(t *testing.T) {
 			for _, tc := range tests {
 				t.Run(tc.name, func(t *testing.T) {
+					budget := shortenBudgetIfExhausting(t, tc.want)
 					start := time.Now()
 					c, err := ld(context.Background(), tc.wasm)
 					if c != nil {
 						_ = c.Close(context.Background())
 					}
-					if d := time.Since(start); d > connectorhost.InitBudget+connectorhost.CallBudget+slack {
+					if d := time.Since(start); d > connectorhost.InitBudget+budget+slack {
 						t.Fatalf("Load took %v with no caller deadline", d)
 					}
 					if !errors.Is(err, connectorhost.ErrHandshake) {

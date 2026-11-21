@@ -274,6 +274,7 @@ func failsClosedOn(t *testing.T, line string, want error) {
 }
 
 func TestDriverStreamFilterFailsClosedOnAnExhaustedBudget(t *testing.T) {
+	useShortCallBudget(t)
 	failsClosedOn(t, "filter-spin\n", connectorhost.ErrBudget)
 }
 

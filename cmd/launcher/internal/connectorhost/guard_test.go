@@ -65,11 +65,12 @@ func TestCallGuardsAgainstHostileGuest(t *testing.T) {
 		t.Run(engine, func(t *testing.T) {
 			for _, tc := range tests {
 				t.Run(tc.name, func(t *testing.T) {
+					budget := shortenBudgetIfExhausting(t, tc.want)
 					c := loadWasmUsing(t, ld, tc.wasm)
 					var out int
 					start := time.Now()
 					err := c.Call(context.Background(), "m", nil, &out)
-					if d := time.Since(start); d > connectorhost.CallBudget+slack {
+					if d := time.Since(start); d > budget+slack {
 						t.Errorf("Call took %v, want a prompt return", d)
 					}
 					if tc.want == nil {
