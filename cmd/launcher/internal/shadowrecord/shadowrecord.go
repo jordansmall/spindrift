@@ -18,9 +18,9 @@ const (
 	// MaxRecorded caps the divergence ops one run emits, so a wholly divergent
 	// Connector cannot balloon the Pass log; the summary still counts them all.
 	MaxRecorded = 100
-	// maxPayload caps each side of a divergence and its line, for the same
+	// MaxPayload caps each side of a divergence and its line, for the same
 	// reason: a single log line may be megabytes.
-	maxPayload = 8 << 10
+	MaxPayload = 8 << 10
 )
 
 // Recorder accumulates a run's summary and emits its divergences. Sum is the
@@ -69,16 +69,16 @@ func EncodeJSON(v any) json.RawMessage {
 }
 
 func clip(s string) string {
-	if len(s) <= maxPayload {
+	if len(s) <= MaxPayload {
 		return s
 	}
-	return strings.ToValidUTF8(s[:maxPayload], "") + fmt.Sprintf("...[%d bytes]", len(s))
+	return strings.ToValidUTF8(s[:MaxPayload], "") + fmt.Sprintf("...[%d bytes]", len(s))
 }
 
 // clipJSON swaps an oversized encoding for a string holding its head, so the
 // op stays valid JSON.
 func clipJSON(raw json.RawMessage) json.RawMessage {
-	if len(raw) <= maxPayload {
+	if len(raw) <= MaxPayload {
 		return raw
 	}
 	return EncodeJSON(clip(string(raw)))

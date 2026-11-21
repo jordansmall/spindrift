@@ -225,6 +225,13 @@ type ShadowDivergence struct {
 // than delay the native path), and the Sandbox* fields: run-wide totals for
 // the Connector sandbox all the run's Connectors share, set only when one
 // started. Replayed is set only by a replay of an archived Pass log.
+//
+// The Filter* fields cover the stream-filter check, set only for a Driver that
+// filters its stdout: FilterRan is true once the whole raw copy was fed to both
+// filters and compared, FilterBytes is how much was fed, FilterDiverged
+// whether the outputs differed, and FilterError why the check could not finish
+// (a returned error never sets Error; a panic in a filter does). *_ns_per_kib
+// is each filter's cost per KiB of input.
 type ShadowSummary struct {
 	Driver               string `json:"driver"`
 	Loaded               bool   `json:"loaded"`
@@ -239,6 +246,12 @@ type ShadowSummary struct {
 	Skipped              int    `json:"skipped,omitempty"`
 	NativeNsPerLine      int64  `json:"native_ns_per_line"`
 	ShadowNsPerLine      int64  `json:"shadow_ns_per_line"`
+	FilterRan            bool   `json:"filter_ran,omitempty"`
+	FilterBytes          int64  `json:"filter_bytes,omitempty"`
+	FilterDiverged       bool   `json:"filter_diverged,omitempty"`
+	FilterError          string `json:"filter_error,omitempty"`
+	FilterNativeNsPerKiB int64  `json:"filter_native_ns_per_kib,omitempty"`
+	FilterShadowNsPerKiB int64  `json:"filter_shadow_ns_per_kib,omitempty"`
 	SandboxStartNs       int64  `json:"sandbox_start_ns,omitempty"`
 	SandboxCalls         int64  `json:"sandbox_calls,omitempty"`
 	SandboxHostCalls     int64  `json:"sandbox_host_calls,omitempty"`

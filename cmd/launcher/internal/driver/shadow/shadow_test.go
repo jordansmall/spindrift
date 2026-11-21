@@ -68,7 +68,7 @@ func lineCount(t *testing.T, path string) int {
 func replay(t *testing.T, native driverkit.Strategy, wasm []byte, logPath string, exitCode int) ([]hostop.ShadowDivergence, hostop.ShadowSummary) {
 	t.Helper()
 	var ops []hostop.SpindriftOp
-	Run(context.Background(), native, connectorhost.Load, wasm, logPath, exitCode, func(op hostop.SpindriftOp) { ops = append(ops, op) })
+	Run(context.Background(), native, connectorhost.Load, wasm, logPath, "", exitCode, func(op hostop.SpindriftOp) { ops = append(ops, op) })
 	return split(t, ops)
 }
 
@@ -265,7 +265,7 @@ func TestRealConnectorAbortedMidRunReportsTheDeadline(t *testing.T) {
 	var ops []hostop.SpindriftOp
 	start := time.Now()
 	// driver.wasm diverges on every claude line, so the first divergence lands mid-run.
-	Run(ctx, nativeStrategy(), connectorhost.Load, fixture(t, "driver.wasm"), log, 0, func(op hostop.SpindriftOp) {
+	Run(ctx, nativeStrategy(), connectorhost.Load, fixture(t, "driver.wasm"), log, "", 0, func(op hostop.SpindriftOp) {
 		ops = append(ops, op)
 		cancel()
 	})

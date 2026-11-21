@@ -3,7 +3,8 @@
 // trusted before it replaces the native Driver. The native Strategy stays
 // authoritative: nothing here returns a result a caller could use in its
 // place, and no Connector failure escapes Run. The log is decoded in batches,
-// one Connector call each, but compared line by line.
+// one Connector call each, but compared line by line. A second check runs the
+// raw stdout through both stream filters and compares their outputs.
 package shadow
 
 import (
@@ -32,10 +33,14 @@ const Budget = 2 * time.Minute
 
 // Run replays the Pass log at logPath through native and through the Connector
 // that load builds from wasm, handing each divergence and then one closing
-// summary to emit. exitCode feeds the resolveExit comparison. When ctx ends,
-// the Connector is aborted mid-call and the run stops with a summary Error.
+// summary to emit. rawPath names a copy of the CLI's raw stdout: when native
+// filters its stream, the copy also runs through both filters and the
+// Connector's output is compared with the log. "" means no copy, which the
+// summary reports as a FilterError. exitCode feeds the resolveExit comparison.
+// When ctx ends, the Connector is aborted mid-call and the run stops with a
+// summary Error.
 // Run never fails or panics: Connector failures land in the summary.
-func Run(ctx context.Context, native driverkit.Strategy, load Loader, wasm []byte, logPath string, exitCode int, emit func(hostop.SpindriftOp)) {
+func Run(ctx context.Context, native driverkit.Strategy, load Loader, wasm []byte, logPath, rawPath string, exitCode int, emit func(hostop.SpindriftOp)) {
 	r := &run{native: native, Recorder: shadowrecord.New(native.Name, emit)}
 	defer r.finish()
 
@@ -55,6 +60,10 @@ func Run(ctx context.Context, native driverkit.Strategy, load Loader, wasm []byt
 	}
 	r.Sum.Loaded = true
 	r.compare(ctx, shadow, c.Err, logPath, exitCode)
+	// A dead Connector's filter says nothing about its code either.
+	if r.Sum.Error == "" {
+		r.filterCompare(ctx, shadow, c.Err, logPath, rawPath)
+	}
 }
 
 type run struct {
@@ -62,6 +71,8 @@ type run struct {
 	*shadowrecord.Recorder
 	nativeTime time.Duration
 	shadowTime time.Duration
+	// filterNative and filterShadow are the filters' time over FilterBytes.
+	filterNative, filterShadow time.Duration
 }
 
 // finish emits the summary, the last op of every run. It also turns a panic
@@ -73,6 +84,10 @@ func (r *run) finish() {
 	if r.Sum.Compared > 0 {
 		r.Sum.NativeNsPerLine = r.nativeTime.Nanoseconds() / int64(r.Sum.Compared)
 		r.Sum.ShadowNsPerLine = r.shadowTime.Nanoseconds() / int64(r.Sum.Compared)
+	}
+	if b := r.Sum.FilterBytes; b > 0 {
+		r.Sum.FilterNativeNsPerKiB = r.filterNative.Nanoseconds() * 1024 / b
+		r.Sum.FilterShadowNsPerKiB = r.filterShadow.Nanoseconds() * 1024 / b
 	}
 	r.Recorder.Finish()
 }
