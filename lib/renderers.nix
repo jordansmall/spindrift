@@ -158,6 +158,13 @@ rec {
   # else its env-derived kebab name. When `flag` is set, the env-derived name
   # stays on as a deprecated alias so operator scripts keep working until 1.0.
   flagName = e: e.flag or (toKebab e.env);
+  # `noFlag = true` keeps a row a knob (flake option, input-document setting,
+  # schema default) with no CLI flag at all, e.g. a value a Consumer must bake
+  # rather than override per invocation. flaggedKnobs is the one filter every
+  # Nix flag-listing renderer uses; the Go side guards empty Flags itself.
+  hasFlag = e: !(e.noFlag or false);
+  flaggedKnobs =
+    schema: builtins.filter (e: !(e.secret or false) && hasFlag e) (builtins.attrValues schema);
   deprecatedFlagAliases = e: if e ? flag then [ (toKebab e.env) ] else [ ];
   liveFlagAliases = e: if e ? alias then [ e.alias ] else [ ];
   # Non-canonical forms, live alias before deprecated old name.
@@ -229,7 +236,11 @@ rec {
       # rather than as a fake identity in consumer-facing documentation.
       nixLiteral =
         e:
-        if e ? default then
+        if e.attrsOfStrings or false then
+          # The flake option is an attrset (lib/flakeModule.nix), so the string
+          # default would not typecheck if a Consumer uncommented the line.
+          "{ }"
+        else if e ? default then
           if builtins.isBool e.default then
             (if e.default then "true" else "false")
           else if builtins.isInt e.default then
@@ -1211,9 +1222,12 @@ rec {
       # goVar names the generated var and is not a Descriptor field; knobs are
       # folded into the env schema by lib/row-knobs.nix, validateKnobs is read
       # by lib/mkHarness.nix, core, goTestRepoFiles and goTestBuildsOn are read
-      # by nix/checks/go.nix, not rendered here.
+      # by nix/checks/go.nix, and trackerScopeKnob and bareRefClosesIssues by
+      # lib/mkHarness.nix, not rendered here.
       knownFields = [
         "goVar"
+        "trackerScopeKnob"
+        "bareRefClosesIssues"
         "knobs"
         "validateKnobs"
         "goTestRepoFiles"
@@ -1899,14 +1913,21 @@ rec {
       # Every non-secret knob must declare a group so the full reference can file
       # it under a heading. A missing group is a schema error, not a silent "".
       ungrouped = mapAttrsToList (k: _: k) (filterAttrs (_: e: !(e ? group)) nonSecretSchema);
+      flaglessWithFlag = mapAttrsToList (k: _: k) (
+        filterAttrs (_: e: !(hasFlag e) && (e ? flag || e ? alias)) nonSecretSchema
+      );
+      # A noFlag row's Flag is empty: no argv token matches it (inputdoc.FlagEntry).
+      tableFlagName = e: if hasFlag e then flagName e else "";
       rows =
-        if ungrouped != [ ] then
+        if flaglessWithFlag != [ ] then
+          throw "env-schema.nix: noFlag knob(s) must not declare `flag` or `alias`: ${builtins.concatStringsSep ", " flaglessWithFlag}"
+        else if ungrouped != [ ] then
           throw "env-schema.nix: non-secret knob(s) missing `group`: ${builtins.concatStringsSep ", " ungrouped}"
         else
           concatStrings (
             mapAttrsToList (
               key: e:
-              "\t{Env: \"${e.env}\", Flag: \"${flagName e}\", Group: \"${e.group}\"${flagAlias e}${flagDeprecatedAlias e}, Kind: \"${flagKind e}\", Doc: \"${e.doc}\", Dflt: \"${flagDflt e}\", SettingsPath: \"${flagSettingsPath key e}\"${flagLauncherIgnores e}${flagEmptyDisables e}${flagBoxHostDerived e}${flagHostGitConfigKey e}${flagChoices e}${flagRemovedChoices e}},\n"
+              "\t{Env: \"${e.env}\", Flag: \"${tableFlagName e}\", Group: \"${e.group}\"${flagAlias e}${flagDeprecatedAlias e}, Kind: \"${flagKind e}\", Doc: \"${e.doc}\", Dflt: \"${flagDflt e}\", SettingsPath: \"${flagSettingsPath key e}\"${flagLauncherIgnores e}${flagEmptyDisables e}${flagBoxHostDerived e}${flagHostGitConfigKey e}${flagChoices e}${flagRemovedChoices e}},\n"
             ) nonSecretSchema
           );
       secretRows = concatStrings (
@@ -2482,7 +2503,7 @@ rec {
   renderBashCompletion =
     schema: subcommandRegistry:
     let
-      nonSecret = builtins.filter (e: !(e.secret or false)) (builtins.attrValues schema);
+      nonSecret = flaggedKnobs schema;
       secretEntries = builtins.filter (e: e.secret or false) (builtins.attrValues schema);
       subcommands = map (s: s.name) subcommandRegistry;
       issuePositionalSubcommands = issueCompletionSubcommands subcommandRegistry;
@@ -2585,7 +2606,7 @@ rec {
   renderFishCompletion =
     schema: subcommandRegistry:
     let
-      nonSecret = builtins.filter (e: !(e.secret or false)) (builtins.attrValues schema);
+      nonSecret = flaggedKnobs schema;
       secretEntries = builtins.filter (e: e.secret or false) (builtins.attrValues schema);
       subcommands = map (s: s.name) subcommandRegistry;
       issuePositionalSubcommands = issueCompletionSubcommands subcommandRegistry;
@@ -2644,7 +2665,7 @@ rec {
   renderZshCompletion =
     schema: subcommandRegistry:
     let
-      nonSecret = builtins.filter (e: !(e.secret or false)) (builtins.attrValues schema);
+      nonSecret = flaggedKnobs schema;
       secretEntries = builtins.filter (e: e.secret or false) (builtins.attrValues schema);
       subcommands = subcommandRegistry;
       issuePositionalSubcommands = issueCompletionSubcommands subcommandRegistry;
@@ -2766,7 +2787,7 @@ rec {
   renderManpageRoff =
     schema: spindriftVersion: subcommands:
     let
-      nonSecret = builtins.filter (e: !(e.secret or false)) (builtins.attrValues schema);
+      nonSecret = flaggedKnobs schema;
       secretEntries = builtins.filter (e: e.secret or false) (builtins.attrValues schema);
       esc = builtins.replaceStrings [ "\\" ] [ "\\\\" ]; # neutralise stray backslashes
       escFlag = f: builtins.replaceStrings [ "-" ] [ "\\-" ] f; # roff renders \- as a minus

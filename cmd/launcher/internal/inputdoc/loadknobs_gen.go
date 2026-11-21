@@ -55,6 +55,7 @@ func LoadKnobs(src KnobSource) Knobs {
 		HoldJitterSecs:            src.NonnegInt("HOLD_JITTER_SECS"),
 		InProgressLabel:           src.String("IN_PROGRESS_LABEL"),
 		IssueNumber:               src.String("ISSUE_NUMBER"),
+		IssueRoute:                src.String("ISSUE_ROUTE"),
 		IssueTracker:              src.String("ISSUE_TRACKER"),
 		Label:                     src.String("LABEL"),
 		MaxBudgetTokens:           src.NonnegInt("MAX_BUDGET_TOKENS"),

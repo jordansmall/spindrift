@@ -814,7 +814,15 @@ let
   # Non-strict (issue #2506): most flakeOption keys have no model concept and
   # cannot guarantee a `.default`, unlike the roster helper's four model keys.
   schemaDefaults = rosterSchemaDefaults.readSchemaDefaults { strict = false; } flakeOptionEntries;
-  mergedDefaults = schemaDefaults // defaults;
+  issueRoute = import ./issue-route.nix { inherit lib; };
+  trackerScope = import ./tracker-scope.nix { inherit lib; };
+  unroutedDefaults = schemaDefaults // defaults;
+  # The flake option is an attrset and a direct caller may pass either form;
+  # every consumer below (preamble, document settings, asserts) reads the one
+  # rendered ISSUE_ROUTE string.
+  mergedDefaults = unroutedDefaults // {
+    issueRoute = issueRoute.render unroutedDefaults.issueRoute;
+  };
 
   # The two registry rows the selected CODE_FORGE and ISSUE_TRACKER values
   # pick out (issue #2527), so the capability bits below do not re-state
@@ -1900,6 +1908,25 @@ let
     else
       true;
 
+  # An Issue route (ADR 0075) names kinds the selected tracker row must have
+  # declared in `routeKinds`: a tracker that ignored one would quietly list the
+  # whole Tracker scope instead of this instance's slice.
+  issueRouteKindsError = issueRoute.kindsError {
+    tracker = mergedDefaults.issueTracker;
+    declared = issueTrackerRow.routeKinds or [ ];
+    route = mergedDefaults.issueRoute;
+  };
+  issueRouteKindsOk = if issueRouteKindsError == null then true else throw issueRouteKindsError;
+
+  trackerScopeOk = trackerScope.sameRepoOk {
+    row = issueTrackerRow;
+    scope = trackerScope.of {
+      row = issueTrackerRow;
+      inherit mergedDefaults;
+    };
+    repoSlug = mergedDefaults.repoSlug or "";
+  };
+
   # BOX_FORGE_AND_ISSUE_ACCESS=read-only denies the Box a write token on both
   # axes, so the selected CODE_FORGE must be relayCapable and the selected
   # ISSUE_TRACKER hostPostingCapable (lib/backends/default.nix, issue #2526).
@@ -1981,6 +2008,8 @@ else
   assert forbiddenMarkerCheckOk;
   assert removedFragmentVarCheckOk;
   assert repoSlugCoherenceOk;
+  assert issueRouteKindsOk;
+  assert trackerScopeOk;
   assert removedChoiceCheckOk;
   assert choicesCheckOk;
   assert networkModeCoherenceOk;

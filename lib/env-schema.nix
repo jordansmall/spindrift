@@ -40,6 +40,24 @@ withRowKnobs {
     nixSubPath = "labels.dispatch";
     boxEnv = false;
   };
+  issueRoute = {
+    env = "ISSUE_ROUTE";
+    group = "issues";
+    default = "";
+    doc = "narrows this instance's slice of the tracker scope (ADR 0075): comma-joined kind=value pairs that must all match, e.g. label=orders-api; the flake option takes the same pairs as an attrset keyed by kind. Each kind must be one the configured ISSUE_TRACKER declares (lib/backends/<name>.nix routeKinds). Empty means no narrowing";
+    flakeOption = true;
+    # A Consumer sets an attrset of kind -> value (lib/flakeModule.nix types it,
+    # lib/issue-route.nix renders it), though the env value stays a string.
+    attrsOfStrings = true;
+    # Baked by the Consumer's flake only: a per-invocation flag would override
+    # the slice the Consumer scoped this instance to. The row stays a knob
+    # (flake option, document setting, default) with no CLI flag.
+    noFlag = true;
+    # New after the legacy settings.<section> snapshot froze (lib/legacy-settings-section.nix).
+    legacySettingsExempt = true;
+    nixSubPath = "route";
+    boxEnv = false;
+  };
   issueTracker = {
     env = "ISSUE_TRACKER";
     group = "issues";

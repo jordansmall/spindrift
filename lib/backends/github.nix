@@ -6,6 +6,8 @@
   displayName = "GitHub";
   validAsTracker = true;
   validAsCodeForge = true;
+  # A bare `Closes #N` in a PR closes this tracker's own issue #N (ADR 0075).
+  bareRefClosesIssues = true;
   connectorOnly = true;
   tokenEnvVar = "GH_TOKEN";
   outboxRelayCapable = true;

@@ -191,6 +191,8 @@ let
       type =
         if entry ? choices then
           types.nullOr (types.enum (entry.choices ++ builtins.attrNames (entry.removedChoices or { })))
+        else if entry.attrsOfStrings or false then
+          types.nullOr (types.attrsOf types.str)
         else if flagKind entry == "int" then
           types.nullOr types.int
         else if builtins.isBool (entry.default or "") then

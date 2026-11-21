@@ -53,6 +53,7 @@ type Knobs struct {
 	HoldJitterSecs            int
 	InProgressLabel           string
 	IssueNumber               string
+	IssueRoute                string
 	IssueTracker              string
 	Label                     string
 	MaxBudgetTokens           int

@@ -5,7 +5,7 @@ package inputdoc
 // renderFlagTableGo.
 type FlagEntry struct {
 	Env   string // SCREAMING_SNAKE_CASE
-	Flag  string // kebab-case, no leading dashes
+	Flag  string // kebab-case, no leading dashes; empty for a noFlag knob (document and default only)
 	Alias string // kebab-case, no leading dashes; empty when absent
 	Kind  string // "string", "int", or "bool"
 	Doc   string
@@ -52,8 +52,13 @@ func (e FlagEntry) EmptyIsSetting() bool {
 }
 
 // Argv renders the flag with value as command-line tokens: a bool is a single
-// "--flag=value" token so a following token is never read as its value.
+// "--flag=value" token so a following token is never read as its value. It
+// panics on a flagless (noFlag) knob: the empty Flag would render the bare "--"
+// end-of-options marker into a child argv.
 func (e FlagEntry) Argv(value string) []string {
+	if e.Flag == "" {
+		panic("inputdoc: Argv on flagless knob " + e.Env)
+	}
 	if e.Kind == "bool" {
 		return []string{"--" + e.Flag + "=" + value}
 	}

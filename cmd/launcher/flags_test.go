@@ -2940,3 +2940,12 @@ func TestApplyConnectorCredentials_SharedEnvRunsOnce(t *testing.T) {
 		t.Errorf("ran %q, want one run", ran())
 	}
 }
+
+// ISSUE_ROUTE is a flake-baked knob with no flag (noFlag in lib/env-schema.nix):
+// a command-line route would override the Consumer's baked slice of the tracker.
+func TestParseFlags_IssueRouteIsNotAFlag(t *testing.T) {
+	_, err := parseResolved(t, []string{"--issue-route", "label=x", "dispatch"})
+	if err == nil || !strings.Contains(err.Error(), "unknown flag: --issue-route") {
+		t.Errorf("parseResolved err = %v, want unknown flag: --issue-route", err)
+	}
+}

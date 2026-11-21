@@ -96,6 +96,16 @@
 # #7318), so it must not set goTestBuildsOn.
 # Like `knobs`, the generated Descriptor ignores all three.
 
+# trackerScopeKnob (optional string) names the schema key whose value is the
+# Tracker scope (ADR 0075 decision 3), as the Jira row names jiraProjectKey. An
+# omitted field scopes by the repo slug. lib/mkHarness.nix reads it, and the
+# generated Descriptor ignores it.
+
+# bareRefClosesIssues (optional bool) marks a tracker that is the repo's own
+# issue list, so a bare `Closes #N` in a PR closes its issue #N. mkHarness
+# then requires the Tracker scope to equal REPO_SLUG (ADR 0075 decision 3).
+# The generated Descriptor ignores it.
+
 # routeKinds (optional list of strings) names the Issue route kinds the tracker
 # translates (ADR 0075 decision 1); each declared kind has both a filter op and
 # a stamp op. An omitted field means none, and mkHarness rejects a route kind
