@@ -62,6 +62,23 @@ func dispatchLabels(cfg Config, label string) forge.DispatchLabels {
 	}
 }
 
+// forgeQueue is a headless Queue over fc's dispatchable issues, claimed
+// through a real LabelClaimer.
+func forgeQueue(fc *forge.Fake, c Config, label, dir string) Queue {
+	discover := func() (Batch, error) {
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return Batch{}, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title}
+		}
+		return Batch{Issues: out, Edges: map[string][]string{}}, nil
+	}
+	return NewHeadlessQueue(discover, NewLabelClaimer(fc, label, dispatchLabels(c, label).InProgress), noopPending, dir)
+}
+
 func tempLogDir(tb testing.TB) string {
 	tb.Helper()
 	dir := tb.TempDir()

@@ -1,8 +1,8 @@
 // Package wavestest is the executable contract for waves.Queue (issue #2937,
-// spec #2919): one shared suite every adapter runs against its own harness, so
-// semantic drift between them fails CI. It is a sibling package to waves, not a
-// waves_test file, because the Console adapter's own test imports waves, which
-// would cycle that import back through wavestest.
+// spec #2919): one shared suite any adapter runs against its own harness, so
+// an adapter that drifts from the Queue semantics fails CI. It is a sibling
+// package to waves, not a waves_test file, because wavestest imports waves, so
+// a waves test importing it would cycle.
 package wavestest
 
 import (

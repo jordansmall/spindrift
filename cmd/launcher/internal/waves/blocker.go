@@ -79,10 +79,10 @@ func NewReadiness(it forge.IssueTracker, issues []Issue) (Readiness, error) {
 }
 
 // Status reports num's blocker readiness against r.Edges without transitioning
-// tracker state: the Console (#650) and the engine hold a pick rather than
-// cascade the dependent to Failed (#1984). A satisfied blocker never holds,
-// whatever its labels (#4911), so failed lists only unready blockers wearing
-// cfg.FailedLabel; it drives Reason, unready drives BlockedBy (#755).
+// tracker state: the engine holds a pick rather than cascade the dependent to
+// Failed (#1984). A satisfied blocker never holds, whatever its labels
+// (#4911), so failed lists only unready blockers wearing cfg.FailedLabel; it
+// drives Reason, unready drives BlockedBy (#755).
 func (r Readiness) Status(cfg Config, it forge.IssueTracker, caps forge.Capabilities, num string) (ready bool, failed, unready []string) {
 	return blockerStatus(cfg, it, caps, num, r.Edges)
 }

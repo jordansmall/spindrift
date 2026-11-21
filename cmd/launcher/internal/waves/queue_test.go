@@ -15,19 +15,6 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// Pending() errors rather than fabricating a confirmed-looking 0 (#2939 review
-// finding). A caller that reaches Pending despite QueueFromDiscoverer being
-// documented as Discover-only must be routed to RunContinuous's heldBackUnknown
-// path, not handed a fake confirmed count.
-func TestDiscoverQueue_Pending_ReturnsError(t *testing.T) {
-	q := QueueFromDiscoverer(func() (Batch, error) { return Batch{}, nil })
-
-	n, err := q.Pending(nil)
-	if err == nil {
-		t.Fatalf("Pending() = (%d, nil), want a non-nil error", n)
-	}
-}
-
 // Pending() forwards straight to the injected closure (#2939). The discover and
 // claimer arguments stay nil because this test never calls Discover or Claim.
 func TestHeadlessQueue_Pending_DelegatesToClosure(t *testing.T) {
@@ -73,7 +60,7 @@ func TestHeadlessQueue_Pending_ForwardsCallersClaimedSet(t *testing.T) {
 	}
 }
 
-// ReportStaleDrain prints report.Console() to stdout and appends
+// ReportStaleDrain prints report.Stdout() to stdout and appends
 // report.HostLog() to the stale-drain.log in pwd's host log dir (#2939).
 func TestHeadlessQueue_ReportStaleDrain_PrintsAndAppendsLog(t *testing.T) {
 	dir := tempLogDir(t)
@@ -197,17 +184,5 @@ func TestRunContinuous_HeadlessQueue_CreatesLogDirBeforeDispatch(t *testing.T) {
 	}
 	if info, err := os.Stat(logDir); err != nil || !info.IsDir() {
 		t.Fatalf("Stat(%s) after RunContinuous: got info=%v err=%v, want an existing directory", logDir, info, err)
-	}
-}
-
-// QueueFromDiscoverer's EnsureLogDirExists is a plain no-op, returning nil
-// without deriving or creating a directory (issue #3036). This adapter has no
-// pwd of its own and its ReportStaleDrain never writes to disk, so it has no
-// log directory to create.
-func TestDiscoverQueue_EnsureLogDirExists_ReturnsNil(t *testing.T) {
-	q := QueueFromDiscoverer(func() (Batch, error) { return Batch{}, nil })
-
-	if err := q.EnsureLogDirExists(); err != nil {
-		t.Fatalf("EnsureLogDirExists() = %v, want nil", err)
 	}
 }

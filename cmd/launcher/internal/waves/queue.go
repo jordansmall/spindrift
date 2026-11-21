@@ -1,7 +1,6 @@
 package waves
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -53,34 +52,11 @@ type Queue interface {
 	EnsureLogDirExists() error
 }
 
-// QueueFromDiscoverer wraps discover as a Queue whose Claim and
-// ReportStaleDrain are no-ops and whose Pending errors, for call sites that
-// only need Discover.
-func QueueFromDiscoverer(discover func() (Batch, error)) Queue {
-	return discoverQueue(discover)
-}
-
-type discoverQueue func() (Batch, error)
-
-func (d discoverQueue) Discover() (Batch, error) { return d() }
-func (d discoverQueue) Claim(string) error       { return nil }
-
-// Pending always errors rather than fabricating a count: the error routes a
-// caller that reaches it anyway to RunContinuous's heldBackUnknown path instead
-// of handing it a confirmed-looking 0.
-func (d discoverQueue) Pending(map[string]bool) (int, error) {
-	return 0, errors.New("waves: QueueFromDiscoverer has no Pending count; use NewHeadlessQueue or the Console adapter instead")
-}
-func (d discoverQueue) ReportStaleDrain(StaleDrainReport) {}
-
-// EnsureLogDirExists is a no-op: this adapter never touches the filesystem.
-func (d discoverQueue) EnsureLogDirExists() error { return nil }
-
 // NewHeadlessQueue adapts discover, claimer, and pending into a Queue for
 // headless RunContinuous callers; pwd locates the stale-drain log file. Claim
-// makes the real Dispatchable to InProgress transition (issue #2938), unlike
-// QueueFromDiscoverer's no-op. pending must be a quiet, unlogged listing that
-// takes Pending's claimed set, so a stale listing cannot inflate it (#2939).
+// makes the real Dispatchable to InProgress transition (issue #2938). pending
+// must be a quiet, unlogged listing that takes Pending's claimed set, so a
+// stale listing cannot inflate it (#2939).
 func NewHeadlessQueue(discover func() (Batch, error), claimer Claimer, pending func(map[string]bool) (int, error), pwd string) Queue {
 	return headlessQueue{discover: discover, claimer: claimer, pending: pending, pwd: pwd}
 }
@@ -102,7 +78,7 @@ func (q headlessQueue) Pending(claimed map[string]bool) (int, error) { return q.
 // q.pwd's stale-drain.log, reporting a file error to stderr rather than
 // failing (#2678).
 func (q headlessQueue) ReportStaleDrain(report StaleDrainReport) {
-	fmt.Print(report.Console())
+	fmt.Print(report.Stdout())
 	logPath := filepath.Join(dispatch.HostLogDirFor(q.pwd), staleDrainMarker)
 	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
