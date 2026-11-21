@@ -1446,8 +1446,8 @@ Driver entry declares:
   backend, bundle or binary, and each adapter's check gofmts and vets its own
   package instead. A
   Driver, runner-family or bundled-backend edit never reruns another
-  Driver's, family's or bundled backend's check either (the backends that
-  build on another, `local` and `forgejo`, build on the core `git`
+  Driver's, family's or bundled backend's check either (the bundled backends
+  that build on another, `forgejo` and `github`, build on the core `git`
   backend), and a runner-family edit never reruns a backend check, which
   `backends-go-test-independent` also pins. If
   the tests import an internal package missing from that check's fileset, add
