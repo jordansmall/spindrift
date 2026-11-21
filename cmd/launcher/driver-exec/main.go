@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"time"
 
+	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/driver"
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
 	"spindrift.dev/launcher/internal/driver/driverkit"
@@ -166,11 +166,6 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 // runShadow hands it.
 var shadowReplay = shadow.Run
 
-// shadowBudget bounds what the shadow replay adds to every Pass, which the
-// orchestrator waits on before it sees the exit code. A replay that runs out is
-// a summary error, never a clean run.
-const shadowBudget = 2 * time.Minute
-
 // runShadow replays the Pass log through the Connector shadowing the named
 // native Driver, if a Driver row declared one, writing the comparison onto
 // stdout as spindrift ops. It never alters the run: the native result stays
@@ -204,9 +199,11 @@ func runShadow(name, logPath string, rawExit int, runErr error, stdout io.Writer
 		emit(hostop.SpindriftOp{Op: hostop.OpShadowSummary, ShadowSummary: &hostop.ShadowSummary{Driver: resolved, Error: err.Error()}})
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), shadowBudget)
+	ctx, cancel := context.WithTimeout(context.Background(), shadow.Budget)
 	defer cancel()
-	shadowReplay(ctx, native, wasm, logPath, rawExit, emit)
+	// The interpreter, not LoadCompiled: a compiled module is cached on disk,
+	// and a shadow must not depend on, or write to, the host's filesystem.
+	shadowReplay(ctx, native, connectorhost.Load, wasm, logPath, rawExit, emit)
 }
 
 func main() {
