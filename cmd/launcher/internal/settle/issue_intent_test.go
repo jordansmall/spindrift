@@ -2392,3 +2392,49 @@ func TestSettle_FilesIssueIntents_UsesConfiguredFindingLabel(t *testing.T) {
 		t.Errorf("PostIssueCalls = %+v, want one filing labelled [custom-finding-label]", fc.PostIssueCalls)
 	}
 }
+
+// An issue filed through the Filer relay carries the instance's Issue route
+// label next to the provenance label, so it stays inside that instance's
+// slice of the Tracker scope (ADR 0075). With no route the labels are
+// unchanged.
+func TestFileIssueIntents_StampsRouteLabel(t *testing.T) {
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents:      []string{`{"title":"bug","body":"body"}`},
+	}
+	for name, tc := range map[string]struct {
+		route forge.Route
+		want  []string
+	}{
+		"routed": {forge.Route{{Kind: forge.RouteKindLabel, Value: "orders-api"}}, []string{"agent-review-finding", "orders-api"}},
+		"unset":  {nil, []string{"agent-review-finding"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fc := forge.NewFake(testDispatchLabels)
+			fc.Route = tc.route
+			fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+			if len(fc.PostIssueCalls) != 1 || !slices.Equal(fc.PostIssueCalls[0].Labels, tc.want) {
+				t.Errorf("PostIssueCalls = %+v, want one call with labels %v", fc.PostIssueCalls, tc.want)
+			}
+		})
+	}
+}
+
+func TestFileIssueIntents_RealLocalTracker_StampsRouteLabel(t *testing.T) {
+	lt := local.NewLocalTracker(t.TempDir(), testDispatchLabels).WithRoute(forge.Route{{Kind: forge.RouteKindLabel, Value: "orders-api"}})
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents:      []string{`{"title":"bug","body":"body"}`},
+	}
+	urls := filedURLs(fileIssueIntentsDetailed(StdoutProgress{}, lt, "1", result, "agent-review-finding", ""))
+	if len(urls) != 1 {
+		t.Fatalf("urls = %v, want 1", urls)
+	}
+	iss, err := lt.Issue(strings.TrimPrefix(urls[0], "local:"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(iss.Labels, "orders-api") || !slices.Contains(iss.Labels, "agent-review-finding") {
+		t.Errorf("labels = %v, want the route and provenance labels", iss.Labels)
+	}
+}
