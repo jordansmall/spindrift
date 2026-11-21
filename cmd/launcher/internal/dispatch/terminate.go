@@ -29,7 +29,7 @@ func (f *Factory) Kill(number string) error {
 
 // armKillLatch mints a fresh open latch for number, replacing any latch a
 // prior claim left closed. A kill applies to the claim that owned the issue
-// when it landed, so a re-pick after a Console Terminate (issue #649) launches
+// when it landed, so a re-pick after an earlier Reclaim (issue #649) launches
 // normally rather than inheriting that kill.
 func (f *Factory) armKillLatch(number string) chan struct{} {
 	f.killMu.Lock()
@@ -42,8 +42,8 @@ func (f *Factory) armKillLatch(number string) chan struct{} {
 	return ch
 }
 
-// closeKillLatch closes number's latch idempotently: Kill is legitimately
-// called twice for one issue (a Console Terminate, then a signalled abort).
+// closeKillLatch closes number's latch idempotently, so a repeat Kill for one
+// issue is harmless.
 func (f *Factory) closeKillLatch(number string) {
 	f.killMu.Lock()
 	defer f.killMu.Unlock()

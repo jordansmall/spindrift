@@ -1,16 +1,15 @@
 // Package terminate carries the signal that ends a claimed Dispatch/Settle
-// loop by hand (ADR 0024, issue #649). Three triggers send it: an operator's
-// Console Terminate gesture, the launcher's stage-two signalled abort on a
-// second SIGTERM/SIGINT, or the shutdown gate declining, once a stop or
-// abort has arrived, to launch an issue the launcher claimed but never
-// launched. Reclaim reaps any running Box, moves the tracker, and comments
-// (issue #3519); Registry only stops a surviving goroutine from corrupting
-// the issue's state afterwards.
+// loop by hand (ADR 0024, issue #649). Two triggers send it: the launcher's
+// stage-two signalled abort on a second SIGTERM/SIGINT, or the shutdown gate
+// declining, once a stop or abort has arrived, to launch an issue the
+// launcher claimed but never launched. Reclaim reaps any running Box, moves
+// the tracker, and comments (issue #3519); Registry only stops a surviving
+// goroutine from corrupting the issue's state afterwards.
 package terminate
 
 import "sync"
 
-// Registry tracks, per issue number, which dispatch generation the operator
+// Registry tracks, per issue number, which dispatch generation the launcher
 // has terminated this session. A nil *Registry stays safe to call (Begin
 // returns 0, Mark is a no-op, Marked reports false), but every production
 // dispatch path builds or substitutes a non-nil one, so only tests reach the

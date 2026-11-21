@@ -151,8 +151,8 @@ func dispatchWave(cfg Config, it forge.IssueTracker, cf forge.CodeForge, f *disp
 			disp := d.Run()
 			switch {
 			case terminated.Marked(iss.Number, iss.Generation):
-				// terminate.Reclaim (a Console Terminate gesture or a
-				// signalled abort, ADR 0024) already reaped this Box, moved
+				// terminate.Reclaim (a signalled abort or a shutdown
+				// drain decline, ADR 0024) already reaped this Box, moved
 				// the issue back to Dispatchable, and logged its own line,
 				// so neither a Failed transition nor a Settle belongs here.
 				fmt.Printf("    ~~ #%s reclaimed; abandoning\n", iss.Number)
