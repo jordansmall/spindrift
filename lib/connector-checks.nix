@@ -101,15 +101,21 @@ let
       testPkgs =
         pkgs.lib.optionalString (!connectorHosted) "./internal/${testPkg}/${name}/..."
         + pkgs.lib.optionalString (!isBackend) " ./internal/driver/driverrows/...";
-      # The test that runs the Connector: TestCorpus for a hosted Driver,
-      # TestPrimaryRowConnectorPassesCorpus for one with a native Strategy.
-      requiredPass =
+      # The tests that run the Connector: TestCorpus for a hosted Driver,
+      # TestPrimaryRowConnectorPassesCorpus (and the Driver's own
+      # TestConnectorResolveExitMatchesNative, if it has one) for one with a
+      # native Strategy. The path stays `../cmd/launcher + "..."`: a deeper
+      # literal would make ci-connector-contract-covers-reads walk that tree.
+      requiredPasses =
         if connectorHosted then
-          "TestCorpus"
+          [ "TestCorpus" ]
         else if !isBackend then
-          "TestPrimaryRowConnectorPassesCorpus"
+          [ "TestPrimaryRowConnectorPassesCorpus" ]
+          ++ pkgs.lib.optional (builtins.pathExists (
+            ../cmd/launcher + "/internal/driver/${name}/connector_test.go"
+          )) "TestConnectorResolveExitMatchesNative"
         else
-          null;
+          [ ];
     in
     {
       "connector-${name}-go-fmt" = mk "fmt" ''
@@ -147,17 +153,19 @@ let
             cd src/cmd/launcher
             ${setup}
             ${
-              if requiredPass == null then
+              if requiredPasses == [ ] then
                 "go test ${testPkgs}"
               else
                 ''
-                  # go test exits 0 when the test skips, so require its PASS line.
+                  # go test exits 0 when the test skips, so require each PASS line.
                   log=$(go test -v ${testPkgs} 2>&1) || { printf '%s\n' "$log"; exit 1; }
                   printf '%s\n' "$log"
-                  grep -q '^--- PASS: ${requiredPass} ' <<<"$log" || {
-                    echo "connector-${name}-conformance: ${requiredPass} did not pass (skipped or never ran)" >&2
-                    exit 1
-                  }
+                  ${pkgs.lib.concatMapStrings (t: ''
+                    grep -q '^--- PASS: ${t} ' <<<"$log" || {
+                      echo "connector-${name}-conformance: ${t} did not pass (skipped or never ran)" >&2
+                      exit 1
+                    }
+                  '') requiredPasses}
                 ''
             }
             touch $out
