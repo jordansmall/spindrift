@@ -35,7 +35,7 @@ SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=ambiguous note=
 `status=ambiguous` is a distinct, successful, non-crash stop — never
 `status=blocked`, and never a signal that implementation itself failed.
 
-# COMMS
+${ISSUE_ROUTE_SCOPE_STEP}# COMMS
 
 ${CAVEMAN_STEP}Your text output is a machine-parsed log, not a conversation:
 no pleasantries, acknowledgements, praise, or apologies; never restate what
