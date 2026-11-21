@@ -50,9 +50,10 @@ type Issue struct {
 
 	// Generation is the terminate.Registry generation this issue's claim was
 	// launched under (#743). Headless dispatch paths leave it zero, which
-	// matches the Mark any Reclaim takes on that never-Begun issue. Console
-	// sets it via Begin so the eventual Settle checks this incarnation only,
-	// not whichever one last held the issue number.
+	// matches the Mark any Reclaim takes on that never-Begun issue. A caller
+	// that Begins the issue in a terminate.Registry sets it so the eventual
+	// Settle checks this incarnation only, not whichever one last held the issue
+	// number.
 	Generation uint64
 
 	// Priority is the issue's agent-priority-{critical,high,low} tier (ADR
@@ -154,7 +155,7 @@ type Config struct {
 
 	// Stop is the operator wind-down seam (#3520). The headless callers (run,
 	// selectiveListDispatch, and runContinuousDispatch) hand it a channel that
-	// closes on the first SIGTERM/SIGINT; nil means the Console or a test. On
+	// closes on the first SIGTERM/SIGINT; nil means a test. On
 	// close, RunContinuous drains and Dispatch's one-shot wave stops
 	// launching, while in-flight Boxes finish. Tests close this channel
 	// directly.
@@ -162,9 +163,9 @@ type Config struct {
 
 	// Abort is the operator second-signal escalation seam (#3521): the same
 	// headless callers hand it a channel that closes on a second
-	// SIGTERM/SIGINT, after Stop has already closed. nil means the Console or
-	// a test. Closing it makes RunContinuous and Dispatch's one-shot wave stop
-	// launching further Boxes (the same guard Stop trips) and additionally
+	// SIGTERM/SIGINT, after Stop has already closed. nil means a test. Closing
+	// it makes RunContinuous and Dispatch's one-shot wave stop launching
+	// further Boxes (the same guard Stop trips) and additionally
 	// terminate.Reclaim every in-flight issue rather than waiting for it to
 	// finish on its own. Tests close this channel directly.
 	Abort <-chan struct{}

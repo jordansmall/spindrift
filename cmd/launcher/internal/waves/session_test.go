@@ -23,20 +23,9 @@ func TestRunContinuous_NilSession_FallsBackToFixedLimiter(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: map[string][]string{}}, nil
-	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, f, s, QueueFromDiscoverer(discover), fresh); err != nil {
+	if err := RunContinuous(c, nil, fc, fc, f, s, forgeQueue(fc, c, label, dir), fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 	if len(fr.RunCalls) != 1 {

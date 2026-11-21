@@ -14,10 +14,9 @@ type Session struct {
 	// after a Box exits, that the operator terminated the issue, so it is
 	// neither failed nor settled; Terminate already reclaimed it (ADR 0024,
 	// issue #649). Every production caller passes a non-nil one (main's
-	// launchContext.terminated, the Console's Launcher.registry), so nil is
-	// tests-only: dispatchWave and RunContinuous then substitute a fresh
-	// registry, which a signalled abort's Reclaim can still mark, so an issue
-	// can still come back terminated.
+	// launchContext.terminated), so nil is tests-only: dispatchWave and
+	// RunContinuous then substitute a fresh registry, which a signalled abort's
+	// Reclaim can still mark, so an issue can still come back terminated.
 	Terminated *terminate.Registry
 
 	// Tally folds the Settlement each of this session's settles returns,
@@ -25,8 +24,8 @@ type Session struct {
 	Tally *settle.Tally
 
 	// BoxFailed, when non-nil, is called after a Box that exited non-zero was
-	// transitioned to Failed, so the Console's queue can move its row out of
-	// PickRunning (issue #705). Nil means no observer (headless runs).
+	// transitioned to Failed, so an observer tracking per-issue state can move
+	// it out of running (issue #705). Nil means no observer (headless runs).
 	BoxFailed func(num string, gen uint64)
 }
 

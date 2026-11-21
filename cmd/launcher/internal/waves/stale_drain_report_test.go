@@ -25,7 +25,7 @@ func TestStaleDrainReport_Duration(t *testing.T) {
 // This compares the whole line, because a substring check would still pass for
 // a swapped field or a missing separator. The docs and loop scripts depend on
 // the exact format.
-func TestStaleDrainReport_Console(t *testing.T) {
+func TestStaleDrainReport_Stdout(t *testing.T) {
 	stale := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	r := StaleDrainReport{
 		StaleAt:      stale,
@@ -34,10 +34,10 @@ func TestStaleDrainReport_Console(t *testing.T) {
 		HeldBack:     1,
 	}
 
-	got := r.Console()
+	got := r.Stdout()
 	want := "==> stale-drain: 5s idle, 8.4 free-slot-s, 1 issue(s) held back\n"
 	if got != want {
-		t.Errorf("Console() = %q, want %q", got, want)
+		t.Errorf("Stdout() = %q, want %q", got, want)
 	}
 }
 
@@ -67,8 +67,8 @@ func TestStaleDrainReport_HostLog(t *testing.T) {
 }
 
 // A transient discover error (#2678) leaves the held-back count unconfirmed, so
-// Console() must say "unknown" rather than fabricate a zero.
-func TestStaleDrainReport_Console_HeldBackUnknown(t *testing.T) {
+// Stdout() must say "unknown" rather than fabricate a zero.
+func TestStaleDrainReport_Stdout_HeldBackUnknown(t *testing.T) {
 	stale := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	r := StaleDrainReport{
 		StaleAt:         stale,
@@ -78,17 +78,17 @@ func TestStaleDrainReport_Console_HeldBackUnknown(t *testing.T) {
 		HeldBackUnknown: true,
 	}
 
-	got := r.Console()
+	got := r.Stdout()
 	for _, want := range []string{"5s", "8.4", "unknown"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("Console() = %q, want substring %q", got, want)
+			t.Errorf("Stdout() = %q, want substring %q", got, want)
 		}
 	}
 	if strings.Contains(got, "0 issue(s) held back") {
-		t.Errorf("Console() = %q, must not render a fabricated zero-held-back count", got)
+		t.Errorf("Stdout() = %q, must not render a fabricated zero-held-back count", got)
 	}
 	if !strings.HasSuffix(got, "\n") {
-		t.Errorf("Console() = %q, want trailing newline", got)
+		t.Errorf("Stdout() = %q, want trailing newline", got)
 	}
 }
 
@@ -123,9 +123,9 @@ func TestStaleDrainReport_ZeroLengthDrain(t *testing.T) {
 	stale := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	r := StaleDrainReport{StaleAt: stale, DrainedAt: stale, FreeSlotSecs: 0, HeldBack: 0}
 
-	console := r.Console()
-	if !strings.Contains(console, "0s") {
-		t.Errorf("Console() = %q, want substring %q", console, "0s")
+	stdout := r.Stdout()
+	if !strings.Contains(stdout, "0s") {
+		t.Errorf("Stdout() = %q, want substring %q", stdout, "0s")
 	}
 
 	hostLog := r.HostLog()

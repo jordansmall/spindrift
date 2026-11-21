@@ -15,12 +15,11 @@ type StaleDrainReport struct {
 	FreeSlotSecs float64
 	// HeldBack counts issues that didn't launch solely because the run had
 	// already gone stale by the time they were reached. Queue.Pending()
-	// supplies it (#2939) and each adapter defines it in its own terms:
-	// headlessQueue filters through CountReady, Console's runContinuousQueue
-	// uses a raw PickQueued tally. Either way it is a scope decision (#2778).
+	// supplies it (#2939); headlessQueue filters through CountReady. What
+	// counts is a scope decision (#2778).
 	HeldBack int
 	// HeldBackUnknown is true when queue.Pending() errored at the moment of the
-	// stale verdict (#2678, #2939). Console() and HostLog() must render this
+	// stale verdict (#2678, #2939). Stdout() and HostLog() must render this
 	// distinctly from a confirmed zero.
 	HeldBackUnknown bool
 }
@@ -45,8 +44,8 @@ func (r StaleDrainReport) heldBackTail() string {
 	return fmt.Sprintf("%s issue(s) held back", r.heldBackText())
 }
 
-// Console renders a human-readable summary line for stdout, ending in "\n".
-func (r StaleDrainReport) Console() string {
+// Stdout renders a human-readable summary line for stdout, ending in "\n".
+func (r StaleDrainReport) Stdout() string {
 	return fmt.Sprintf(
 		"==> stale-drain: %s idle, %.1f free-slot-s, %s\n",
 		r.Duration().Round(time.Millisecond), r.FreeSlotSecs, r.heldBackTail(),
