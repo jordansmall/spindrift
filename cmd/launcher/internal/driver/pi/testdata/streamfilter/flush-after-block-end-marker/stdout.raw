@@ -1,0 +1,5 @@
+{"type":"message_start","message":{"role":"assistant"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hel"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"lo"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":0}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_start","contentIndex":1}}

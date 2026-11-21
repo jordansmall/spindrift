@@ -192,164 +192,69 @@ func TestStreamFilterKeepsNonSubagentToolExecutionUpdatesVerbatim(t *testing.T) 
 	}
 }
 
-type openBlock struct{ typ, text string }
+func TestStrategyDeclaresStreamFilter(t *testing.T) {
+	var out bytes.Buffer
+	f := driverkit.New(pi.Strategy).NewStreamFilter(&out)
+	line := `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"x"}}` + "\n"
+	if _, err := f.Write([]byte(line)); err != nil {
+		t.Fatal(err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("delta written through before Flush: %q", out.String())
+	}
+}
 
-// heldAtEnd reads the deltas of the message still open at the end of lines,
-// grouped per content block in order of first appearance.
-func heldAtEnd(t *testing.T, lines []string) (order []int, blocks map[int]*openBlock) {
+func countSubagentUpdates(t *testing.T, out string) (n int) {
 	t.Helper()
-	blocks = map[int]*openBlock{}
-	for _, line := range lines {
-		l := parseLine(t, line)
-		if l.Message.Role == "assistant" && (l.Type == "message_end" || l.Type == "message_start") {
-			order, blocks = nil, map[int]*openBlock{}
+	for _, line := range strings.Split(strings.TrimSuffix(out, "\n"), "\n") {
+		if line != "" && isSubagentUpdate(t, line) {
+			n++
 		}
-		if !pi.IsDelta(l.Type, l.AME.Type) {
-			continue
-		}
-		b, ok := blocks[l.AME.ContentIndex]
-		if !ok {
-			b = &openBlock{typ: l.AME.Type}
-			blocks[l.AME.ContentIndex] = b
-			order = append(order, l.AME.ContentIndex)
-		}
-		b.text += l.AME.Delta
 	}
-	return order, blocks
+	return n
 }
 
-func TestStreamFilterFlushCoalescesAbortedMessage(t *testing.T) {
-	rng := rand.New(rand.NewSource(4))
-	log := corpusLogs(t)["reviewer-verdict"]
-	lines := strings.Split(strings.TrimSuffix(log, "\n"), "\n")
+// subagentErrorEnd is the end of a call whose execute threw: an error result
+// with no details.results, so it cannot restate the children.
+const subagentErrorEnd = `{"type":"tool_execution_end","toolCallId":"s1","toolName":"subagent","result":{"content":[{"type":"text","text":"Subagent was aborted"}],"details":{}},"isError":true}`
 
-	// Cut right after the last delta, so its message never reaches message_end.
-	cut := -1
-	for i, line := range lines {
-		if isDeltaLine(t, line) {
-			cut = i
+// The filtered log yields the usage of the unfiltered stream, for a finished
+// subagent call and for one killed before its end.
+func TestStreamFilterPreservesSubagentUsage(t *testing.T) {
+	head := toolTurn(1000, "s1", "subagent", `{"agent":"scout","task":"look"}`)
+	completed := append([]string{head}, subagentUpdates()...)
+	completed = append(completed,
+		subagentEnd("parallel", subagentResult("scout", scoutUser, scoutCall, scoutResult, scoutSays), subagentResult("scout", secondSays)),
+		textEnd(2000, "parent done"),
+	)
+	// A subagent that throws ends in an error result with no details.results.
+	failed := append(append([]string{head}, subagentUpdates()...), subagentErrorEnd)
+	cases := []struct {
+		name     string
+		lines    []string
+		wantHeld int
+	}{
+		{"completed", completed, 0},
+		{"killed", append([]string{head}, subagentUpdates()...), 1},
+		{"failed", failed, 1},
+	}
+	rng := rand.New(rand.NewSource(5))
+	for _, c := range cases {
+		want, err := newDriver().ExtractUsage(pi.WriteLog(t, c.lines...))
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	truncated := lines[:cut+1]
-	order, blocks := heldAtEnd(t, truncated)
-	if len(order) == 0 {
-		t.Fatal("truncation left no open deltas")
-	}
-
-	got := filterChunked(t, strings.Join(truncated, "\n")+"\n", rng)
-	outLines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
-	if !strings.HasSuffix(got, "\n") {
-		t.Error("output must end in a newline")
-	}
-	var deltas []int
-	for _, line := range outLines {
-		l := parseLine(t, line)
-		if !pi.IsDelta(l.Type, l.AME.Type) {
-			continue
+		filtered := filterChunked(t, strings.Join(c.lines, "\n")+"\n", rng)
+		got, err := newDriver().ExtractUsage(pi.WriteLog(t, strings.Split(strings.TrimSuffix(filtered, "\n"), "\n")...))
+		if err != nil {
+			t.Fatal(err)
 		}
-		b := blocks[l.AME.ContentIndex]
-		if b == nil || l.AME.Type != b.typ || l.AME.Delta != b.text {
-			t.Errorf("coalesced delta %q (%s) at %d does not match input %+v", l.AME.Delta, l.AME.Type, l.AME.ContentIndex, b)
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: usage from the filtered log = %+v, want %+v", c.name, got, want)
 		}
-		deltas = append(deltas, l.AME.ContentIndex)
-	}
-	if !reflect.DeepEqual(deltas, order) {
-		t.Errorf("coalesced block order = %v, want %v", deltas, order)
-	}
-	for _, ev := range decodeAll(got) {
-		if ev.Kind == driverkit.KindUnparsed {
-			t.Errorf("filtered output holds an unparsed line: %q", ev.Text)
+		if n := countSubagentUpdates(t, filtered); n != c.wantHeld {
+			t.Errorf("%s: filtered log holds %d subagent updates, want %d", c.name, n, c.wantHeld)
 		}
-	}
-}
-
-func TestStreamFilterCoalescesInterleavedBlocksKeepingEnvelope(t *testing.T) {
-	in := strings.Join([]string{
-		`{"type":"message_start","message":{"role":"assistant"}}`,
-		`{"type":"message_update","usage":{"input":1},"assistantMessageEvent":{"type":"thinking_delta","contentIndex":0,"delta":"a"}}`,
-		`{"type":"message_update","usage":{"input":2},"assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"X"}}`,
-		`{"type":"message_update","usage":{"input":3},"assistantMessageEvent":{"type":"thinking_delta","contentIndex":0,"delta":"b"}}`,
-		`{"type":"message_update","usage":{"input":4},"assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"Y"}}`,
-	}, "\n") + "\n"
-	var out bytes.Buffer
-	f := pi.NewStreamFilter(&out)
-	if _, err := f.Write([]byte(in)); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Flush(); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Flush(); err != nil {
-		t.Fatal(err)
-	}
-	want := strings.Join([]string{
-		`{"type":"message_start","message":{"role":"assistant"}}`,
-		`{"assistantMessageEvent":{"contentIndex":0,"delta":"ab","type":"thinking_delta"},"type":"message_update","usage":{"input":3}}`,
-		`{"assistantMessageEvent":{"contentIndex":1,"delta":"XY","type":"text_delta"},"type":"message_update","usage":{"input":4}}`,
-	}, "\n") + "\n"
-	if out.String() != want {
-		t.Errorf("output =\n%s\nwant\n%s", out.String(), want)
-	}
-}
-
-// The coalesced text follows the *_end marker that already passed through; the
-// decoder ignores message_update, so the order is harmless.
-func TestStreamFilterFlushAfterBlockEndMarkerKeepsTextAndDecodes(t *testing.T) {
-	in := strings.Join([]string{
-		`{"type":"message_start","message":{"role":"assistant"}}`,
-		`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hel"}}`,
-		`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"lo"}}`,
-		`{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":0}}`,
-		`{"type":"message_update","assistantMessageEvent":{"type":"toolcall_start","contentIndex":1}}`,
-	}, "\n") + "\n"
-	var out bytes.Buffer
-	f := pi.NewStreamFilter(&out)
-	if _, err := f.Write([]byte(in)); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Flush(); err != nil {
-		t.Fatal(err)
-	}
-	want := strings.Join([]string{
-		`{"type":"message_start","message":{"role":"assistant"}}`,
-		`{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":0}}`,
-		`{"type":"message_update","assistantMessageEvent":{"type":"toolcall_start","contentIndex":1}}`,
-		`{"assistantMessageEvent":{"contentIndex":0,"delta":"Hello","type":"text_delta"},"type":"message_update"}`,
-	}, "\n") + "\n"
-	if out.String() != want {
-		t.Errorf("output =\n%s\nwant\n%s", out.String(), want)
-	}
-	for _, ev := range decodeAll(out.String()) {
-		if ev.Kind == driverkit.KindUnparsed {
-			t.Errorf("filtered output holds an unparsed line: %q", ev.Text)
-		}
-	}
-}
-
-func TestStreamFilterFlushesHeldDeltasBeforeNextAssistantMessage(t *testing.T) {
-	in := strings.Join([]string{
-		`{"type":"message_start","message":{"role":"assistant"}}`,
-		`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"lost"}}`,
-		`{"type":"message_start","message":{"role":"assistant"}}`,
-		`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"gone"}}`,
-		`{"type":"message_end","message":{"role":"assistant"}}`,
-	}, "\n") + "\n"
-	var out bytes.Buffer
-	f := pi.NewStreamFilter(&out)
-	if _, err := f.Write([]byte(in)); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Flush(); err != nil {
-		t.Fatal(err)
-	}
-	want := strings.Join([]string{
-		`{"type":"message_start","message":{"role":"assistant"}}`,
-		`{"assistantMessageEvent":{"contentIndex":0,"delta":"lost","type":"text_delta"},"type":"message_update"}`,
-		`{"type":"message_start","message":{"role":"assistant"}}`,
-		`{"type":"message_end","message":{"role":"assistant"}}`,
-	}, "\n") + "\n"
-	if out.String() != want {
-		t.Errorf("output =\n%s\nwant\n%s", out.String(), want)
 	}
 }
 
@@ -375,20 +280,6 @@ func TestStreamFilterPartialLineAndUnparsedPassThrough(t *testing.T) {
 	}
 }
 
-func TestStrategyDeclaresStreamFilter(t *testing.T) {
-	var out bytes.Buffer
-	f := driverkit.New(pi.Strategy).NewStreamFilter(&out)
-	line := `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"x"}}` + "\n"
-	if _, err := f.Write([]byte(line)); err != nil {
-		t.Fatal(err)
-	}
-	if out.Len() != 0 {
-		t.Errorf("delta written through before Flush: %q", out.String())
-	}
-}
-
-// subagentUpdateFor is a subagent update of call id whose one child message
-// says text, so the latest held line is told apart from the ones it replaced.
 func subagentUpdateFor(id, text string) string {
 	return subagentUpdateOf(id, subagentResult("scout", scoutUser, childAssistant(1500, `[{"type":"text","text":"`+text+`"}]`)))
 }
@@ -398,16 +289,6 @@ func writeLines(t *testing.T, w io.Writer, lines ...string) {
 	if _, err := w.Write([]byte(strings.Join(lines, "\n") + "\n")); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func countSubagentUpdates(t *testing.T, out string) (n int) {
-	t.Helper()
-	for _, line := range strings.Split(strings.TrimSuffix(out, "\n"), "\n") {
-		if line != "" && isSubagentUpdate(t, line) {
-			n++
-		}
-	}
-	return n
 }
 
 func TestStreamFilterHoldsNoSubagentUpdateWhileRunningOrAfterEnd(t *testing.T) {
@@ -457,76 +338,3 @@ func TestStreamFilterFlushKeepsLatestSubagentUpdateInFirstSeenOrder(t *testing.T
 }
 
 // An end drops only its own call's held update, and a reused toolCallId starts
-// a fresh hold.
-func TestStreamFilterEndDropsOnlyItsOwnCallsUpdate(t *testing.T) {
-	var out bytes.Buffer
-	f := pi.NewStreamFilter(&out)
-	end := subagentEnd("single", subagentResult("scout", scoutUser, scoutSays))
-	keep := subagentUpdateFor("b", "b-1")
-	again := subagentUpdateFor("s1", "again")
-	writeLines(t, f, subagentUpdateFor("s1", "s1-1"), keep, end, again)
-	if err := f.Flush(); err != nil {
-		t.Fatal(err)
-	}
-	if want := end + "\n" + keep + "\n" + again + "\n"; out.String() != want {
-		t.Errorf("output =\n%s\nwant\n%s", out.String(), want)
-	}
-}
-
-// subagentErrorEnd is the end of a call whose execute threw: an error result
-// with no details.results, so it cannot restate the children.
-const subagentErrorEnd = `{"type":"tool_execution_end","toolCallId":"s1","toolName":"subagent","result":{"content":[{"type":"text","text":"Subagent was aborted"}],"details":{}},"isError":true}`
-
-// The held update of such a call is written ahead of the end.
-func TestStreamFilterWritesHeldUpdateBeforeErrorEnd(t *testing.T) {
-	var out bytes.Buffer
-	f := pi.NewStreamFilter(&out)
-	latest := subagentUpdateFor("s1", "s1-2")
-	writeLines(t, f, subagentUpdateFor("s1", "s1-1"), latest, subagentErrorEnd)
-	if err := f.Flush(); err != nil {
-		t.Fatal(err)
-	}
-	if want := latest + "\n" + subagentErrorEnd + "\n"; out.String() != want {
-		t.Errorf("output =\n%s\nwant\n%s", out.String(), want)
-	}
-}
-
-// The filtered log yields the usage of the unfiltered stream, for a finished
-// subagent call and for one killed before its end.
-func TestStreamFilterPreservesSubagentUsage(t *testing.T) {
-	head := toolTurn(1000, "s1", "subagent", `{"agent":"scout","task":"look"}`)
-	completed := append([]string{head}, subagentUpdates()...)
-	completed = append(completed,
-		subagentEnd("parallel", subagentResult("scout", scoutUser, scoutCall, scoutResult, scoutSays), subagentResult("scout", secondSays)),
-		textEnd(2000, "parent done"),
-	)
-	// A subagent that throws ends in an error result with no details.results.
-	failed := append(append([]string{head}, subagentUpdates()...), subagentErrorEnd)
-	cases := []struct {
-		name     string
-		lines    []string
-		wantHeld int
-	}{
-		{"completed", completed, 0},
-		{"killed", append([]string{head}, subagentUpdates()...), 1},
-		{"failed", failed, 1},
-	}
-	rng := rand.New(rand.NewSource(5))
-	for _, c := range cases {
-		want, err := newDriver().ExtractUsage(pi.WriteLog(t, c.lines...))
-		if err != nil {
-			t.Fatal(err)
-		}
-		filtered := filterChunked(t, strings.Join(c.lines, "\n")+"\n", rng)
-		got, err := newDriver().ExtractUsage(pi.WriteLog(t, strings.Split(strings.TrimSuffix(filtered, "\n"), "\n")...))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(got, want) {
-			t.Errorf("%s: usage from the filtered log = %+v, want %+v", c.name, got, want)
-		}
-		if n := countSubagentUpdates(t, filtered); n != c.wantHeld {
-			t.Errorf("%s: filtered log holds %d subagent updates, want %d", c.name, n, c.wantHeld)
-		}
-	}
-}

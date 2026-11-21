@@ -11,3 +11,7 @@ import (
 func TestCorpus(t *testing.T) {
 	conformance.Run(t, pi.Strategy, filepath.Join("testdata", "corpus"))
 }
+
+func TestStreamFilterCorpus(t *testing.T) {
+	conformance.RunStreamFilter(t, pi.Strategy, filepath.Join("testdata", "streamfilter"))
+}
