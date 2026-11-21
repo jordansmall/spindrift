@@ -4082,9 +4082,8 @@ load with `ErrNoConnectorSandbox`, never falling back to its own process.
   under bwrap by killing the processes in its `spindrift-<name>` cgroup. A
   sweep that cannot read its own identity, or runs on a host with none,
   reaps nothing. Box names never match the prefix, so the sweep never
-  touches a Box; Box orphan detection likewise skips sandbox names. Under
-  bwrap, `Kill` reaches a sandbox or Box an earlier Launcher started through
-  its cgroup.
+  touches a Box. Under bwrap, `Kill` reaches a sandbox or Box an earlier
+  Launcher started through its cgroup.
 - **What stays in-process.** Only the Box's first-party Driver Connectors
   (`driver-exec` loads them in the Box's own process and refuses any other)
   and test binaries, which install the in-process engine from

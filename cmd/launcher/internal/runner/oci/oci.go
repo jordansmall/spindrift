@@ -493,10 +493,9 @@ func (a *ociAdapter) IsRunning(name string) bool {
 }
 
 // ListRunning returns the names of every running container under this runtime,
-// for Console startup orphan detection (issue #651). Deliberately narrower
-// than IsRunning's not-terminal-and-not-too-young check: a display of
-// probably-orphaned sandboxes is only useful naming containers actually
-// running, not one still mid-creation and possibly about to start cleanly.
+// for reconcile and the Connector sandbox orphan sweep. Unlike IsRunning's
+// not-terminal-and-not-too-young check, it omits a container still
+// mid-creation.
 func (a *ociAdapter) ListRunning() ([]string, error) {
 	out, err := exec.Command(a.cli, "ps", "--filter", "status=running", "--format", "{{.Names}}").Output()
 	if err != nil {

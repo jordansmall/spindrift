@@ -58,8 +58,8 @@ type Fake struct {
 
 	IsRunningCalls []string
 
-	// RunningNames is the orphan-detection seam (issue #651): a test sets it
-	// to simulate sandboxes still running from a prior, crashed session.
+	// RunningNames simulates sandboxes still running from a prior, crashed
+	// session.
 	RunningNames []string
 
 	ListRunningErr error
