@@ -49,7 +49,7 @@ var referenceLines = []string{
 	`{"type":"error","timestamp":1790000004000,"error":{"data":[],"responseHeaders":1}}`,
 	`{"type":"error","timestamp":1790000004000,"error":{"data":{"responseHeaders":null}}}`,
 	`{"type":"error","timestamp":1790000004000,"error":{"data":null}}`,
-	`{"type":"error","timestamp":1790000004000,"error":{"DATA":{"RESPONSEHEADERS":{"Retry-After":"9"}},"data":{"responseHeaders":{"retry-after":"8"}}}}`,
+	`{"type":"error","timestamp":1790000004000,"error":{"DATA":{"RESPONSEHEADERS":{"retry-after":"9"}},"data":{"responseHeaders":{"retry-after":"8"}}}}`,
 	`{"type":"error","timestamp":-5,"error":{"data":{"responseHeaders":{"retry-after":"9"}}}}`,
 	`{"type":"error","error":"` + "\xff" + `"}`,
 	`{"type":"error","part":{"text":5},"error":"boom"}`,
