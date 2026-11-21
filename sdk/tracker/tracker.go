@@ -13,7 +13,9 @@ package tracker
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"spindrift.dev/sdk/connector"
@@ -45,6 +47,31 @@ type Query struct {
 type Selector struct {
 	Kind  string `json:"kind"`
 	Value string `json:"value"`
+}
+
+// RouteLabels is label (when set) followed by every route label: the set an
+// issue must carry in full. A comma-joined labels filter cannot tell a label
+// holding a comma from two, so one is refused under a route, never split. A
+// non-label selector fails closed, because ignoring it would list the whole
+// scope.
+func RouteLabels(label string, route []Selector) ([]string, error) {
+	var all []string
+	if label != "" {
+		all = append(all, label)
+	}
+	for _, s := range route {
+		if s.Kind != "label" {
+			return nil, fmt.Errorf("issue route: unsupported selector kind %q (only label)", s.Kind)
+		}
+		if s.Value == "" || strings.Contains(s.Value, ",") {
+			return nil, fmt.Errorf("issue route: label %q is empty or holds a comma, which a labels filter cannot express", s.Value)
+		}
+		all = append(all, s.Value)
+	}
+	if len(route) > 0 && strings.Contains(label, ",") {
+		return nil, fmt.Errorf("issue route: label %q holds a comma, which a labels filter cannot express", label)
+	}
+	return all, nil
 }
 
 // Issue is one tracker issue. State is "open" or "closed"; a listIssues answer
@@ -197,7 +224,10 @@ type Reader struct {
 	// of the following page, or "" at the end. Core repeats the call with
 	// next as cursor until next is "". Setting it advertises
 	// "tracker.labeled" and takes precedence over Labeled.
-	LabeledPage func(t Target, label, state, cursor string, limit int) (issues []Issue, next string, err error)
+	//
+	// route narrows the scan like Query.Route: an issue must match every
+	// selector, and an empty route narrows nothing.
+	LabeledPage func(t Target, label, state, cursor string, limit int, route []Selector) (issues []Issue, next string, err error)
 }
 
 type method = func(json.RawMessage) (any, error)
@@ -437,23 +467,27 @@ func handlers(r Reader) ([]string, map[string]method) {
 		caps = append(caps, "tracker.labeled")
 		m["tracker.labeled"] = func(params json.RawMessage) (any, error) {
 			var p struct {
-				Target Target `json:"target"`
-				Label  string `json:"label"`
-				State  string `json:"state"`
-				Limit  int    `json:"limit"`
-				Cursor string `json:"cursor"`
+				Target Target     `json:"target"`
+				Label  string     `json:"label"`
+				State  string     `json:"state"`
+				Limit  int        `json:"limit"`
+				Cursor string     `json:"cursor"`
+				Route  []Selector `json:"route"`
 			}
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
 			}
 			if r.LabeledPage == nil {
+				if len(p.Route) > 0 {
+					return nil, errors.New("tracker.labeled: this Connector cannot apply a route")
+				}
 				issues, err := r.Labeled(p.Target, p.Label, p.State, p.Limit)
 				if err != nil {
 					return nil, err
 				}
 				return issueList(issues), nil
 			}
-			issues, next, err := r.LabeledPage(p.Target, p.Label, p.State, p.Cursor, p.Limit)
+			issues, next, err := r.LabeledPage(p.Target, p.Label, p.State, p.Cursor, p.Limit, p.Route)
 			if err != nil {
 				return nil, err
 			}

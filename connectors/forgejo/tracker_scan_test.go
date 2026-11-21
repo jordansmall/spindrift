@@ -111,7 +111,7 @@ func TestLabeledPageClosedFieldsAndRecheck(t *testing.T) {
 			{"number":8,"title":"dropped","state":"closed","labels":[{"name":"other"}]}]`),
 	})
 	withHeaders(t, nil)
-	got, next, err := labeledPage(ttgt, "finding", "closed", "", 20)
+	got, next, err := labeledPage(ttgt, "finding", "closed", "", 20, nil)
 	want := []tracker.Issue{{Number: "9", Title: "nine", State: "closed", Labels: []string{"finding"}, ClosedAt: "2026-01-02T03:04:05Z"}}
 	if err != nil || next != "" || !reflect.DeepEqual(got, want) {
 		t.Fatalf("labeledPage = %#v, %q, %v", got, next, err)
@@ -123,12 +123,12 @@ func TestLabeledPagePagesByLinkHeader(t *testing.T) {
 		labeledURL("open", 20, 2): ok(`[{"number":4,"state":"open","labels":[{"name":"finding"}]}]`),
 	})
 	withHeaders(t, map[string]string{"Link": `<https://forge.test/x?page=3>; rel="next", <https://forge.test/x?page=9>; rel="last"`})
-	got, next, err := labeledPage(ttgt, "finding", "open", "2", 20)
+	got, next, err := labeledPage(ttgt, "finding", "open", "2", 20, nil)
 	if err != nil || next != "3" || len(got) != 1 || got[0].ClosedAt != "" {
 		t.Fatalf("labeledPage = %#v, %q, %v", got, next, err)
 	}
 	withHeaders(t, map[string]string{"Link": `<https://forge.test/x?page=1>; rel="first"`})
-	if _, next, err = labeledPage(ttgt, "finding", "open", "2", 20); err != nil || next != "" {
+	if _, next, err = labeledPage(ttgt, "finding", "open", "2", 20, nil); err != nil || next != "" {
 		t.Fatalf("last page: next = %q, %v", next, err)
 	}
 }
@@ -138,14 +138,14 @@ func TestLabeledPageFullPageFallback(t *testing.T) {
 		labeledURL("open", 1, 1): ok(`[{"number":4,"state":"open","labels":[{"name":"finding"}]}]`),
 	})
 	withHeaders(t, nil)
-	if _, next, err := labeledPage(ttgt, "finding", "open", "", 1); err != nil || next != "2" {
+	if _, next, err := labeledPage(ttgt, "finding", "open", "", 1, nil); err != nil || next != "2" {
 		t.Fatalf("next = %q, %v", next, err)
 	}
 }
 
 func TestLabeledPageUndefinedLabelIsEmpty(t *testing.T) {
 	got := labelStub(t, `[]`, ok(`[]`), nil)
-	out, next, err := labeledPage(ttgt, "finding", "open", "", 20)
+	out, next, err := labeledPage(ttgt, "finding", "open", "", 20, nil)
 	if err != nil || next != "" || out == nil || len(out) != 0 {
 		t.Fatalf("labeledPage = %#v, %q, %v", out, next, err)
 	}
@@ -162,7 +162,7 @@ func TestLabeledPageRefusesBadInput(t *testing.T) {
 		state, cursor string
 		limit         int
 	}{{"all", "", 5}, {"open", "x", 5}, {"open", "0", 5}, {"open", "", 0}} {
-		if _, _, err := labeledPage(ttgt, "finding", c.state, c.cursor, c.limit); err == nil {
+		if _, _, err := labeledPage(ttgt, "finding", c.state, c.cursor, c.limit, nil); err == nil {
 			t.Errorf("%+v accepted", c)
 		}
 	}
@@ -240,7 +240,7 @@ func TestUnreadableLabelRegistryQueriesAnyway(t *testing.T) {
 		labelStub(t, `[]`, status(500), map[string]connector.Response{
 			labeledURL("open", 20, 1): ok(`[{"number":2,"labels":[{"name":"finding"}]},{"number":3,"labels":[{"name":"other"}]}]`),
 		})
-		out, _, err := labeledPage(ttgt, "finding", "open", "", 20)
+		out, _, err := labeledPage(ttgt, "finding", "open", "", 20, nil)
 		if err != nil || len(out) != 1 || out[0].Number != "2" {
 			t.Fatalf("labeledPage = %#v, %v", out, err)
 		}

@@ -181,7 +181,7 @@ func TestLabeledCapabilityAndWireShape(t *testing.T) {
 
 func TestLabeledPageCursorAndPrecedence(t *testing.T) {
 	r := fakeReader(t)
-	r.LabeledPage = func(tg Target, label, state, cursor string, limit int) ([]Issue, string, error) {
+	r.LabeledPage = func(tg Target, label, state, cursor string, limit int, route []Selector) ([]Issue, string, error) {
 		if tg != wantTarget || label != "bug" || state != "open" || limit != 2 {
 			t.Errorf("LabeledPage(%v, %q, %q, %q, %d)", tg, label, state, cursor, limit)
 		}
@@ -491,5 +491,67 @@ func TestQueryRouteWireShape(t *testing.T) {
 	b, err = json.Marshal(Query{Route: []Selector{{Kind: "label", Value: "orders"}}})
 	if err != nil || string(b) != `{"label":"","status":"","route":[{"kind":"label","value":"orders"}]}` {
 		t.Errorf("routed Query = %s, %v", b, err)
+	}
+}
+
+func TestLabeledPageReceivesRoute(t *testing.T) {
+	r := fakeReader(t)
+	var got []Selector
+	r.LabeledPage = func(_ Target, _, _, _ string, _ int, route []Selector) ([]Issue, string, error) {
+		got = route
+		return nil, "", nil
+	}
+	_, m := handlers(r)
+	call(t, m, "tracker.labeled", `{`+target+`,"label":"bug","state":"open","limit":2,"route":[{"kind":"label","value":"orders-api"}]}`)
+	if want := []Selector{{Kind: "label", Value: "orders-api"}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("route = %v, want %v", got, want)
+	}
+	call(t, m, "tracker.labeled", `{`+target+`,"label":"bug","state":"open","limit":2}`)
+	if len(got) != 0 {
+		t.Errorf("route = %v, want none when the request carries none", got)
+	}
+}
+
+// A Connector with only the unrouted Labeled reader cannot honour a route, and
+// ignoring it would list the whole scope.
+func TestLabeledWithoutPageRefusesARoute(t *testing.T) {
+	r := fakeReader(t)
+	r.Labeled = func(Target, string, string, int) ([]Issue, error) { return []Issue{{Number: "1"}}, nil }
+	_, m := handlers(r)
+	if _, err := m["tracker.labeled"](json.RawMessage(`{` + target + `,"label":"bug","state":"open","limit":2,"route":[{"kind":"label","value":"orders"}]}`)); err == nil {
+		t.Fatal("want an error for a route the reader cannot apply")
+	}
+	if got := call(t, m, "tracker.labeled", `{`+target+`,"label":"bug","state":"open","limit":2}`); !strings.Contains(got, `"number":"1"`) {
+		t.Errorf("unrouted labeled = %s", got)
+	}
+}
+
+func TestRouteLabels(t *testing.T) {
+	label := func(v string) Selector { return Selector{Kind: "label", Value: v} }
+	for name, tc := range map[string]struct {
+		label string
+		route []Selector
+		want  []string
+		err   bool
+	}{
+		"nothing":          {},
+		"label only":       {label: "ready", want: []string{"ready"}},
+		"route only":       {route: []Selector{label("a"), label("b")}, want: []string{"a", "b"}},
+		"label then route": {label: "ready", route: []Selector{label("a")}, want: []string{"ready", "a"}},
+		"unrouted comma":   {label: "a,b", want: []string{"a,b"}},
+		"routed comma":     {label: "a,b", route: []Selector{label("c")}, err: true},
+		"comma in value":   {route: []Selector{label("a,b")}, err: true},
+		"empty value":      {route: []Selector{label("")}, err: true},
+		"non-label kind":   {label: "ready", route: []Selector{{Kind: "project", Value: "x"}}, err: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := RouteLabels(tc.label, tc.route)
+			if (err != nil) != tc.err {
+				t.Fatalf("err = %v, want error %v", err, tc.err)
+			}
+			if !tc.err && !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("labels = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

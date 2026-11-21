@@ -392,7 +392,7 @@ func commentsOf(t tracker.Target, number string) ([]tracker.Comment, error) {
 // ("" is page 1), so a walk must keep limit constant. next is set while the
 // raw page was full, so one call is one request; a page may hold fewer issues
 // because pull requests are skipped. Unlike the list reads, the body stays.
-func labeledPage(t tracker.Target, label, state, cursor string, limit int) ([]tracker.Issue, string, error) {
+func labeledPage(t tracker.Target, label, state, cursor string, limit int, _ []tracker.Selector) ([]tracker.Issue, string, error) {
 	if limit < 1 {
 		return nil, "", fmt.Errorf("list labeled issues: limit %d < 1", limit)
 	}

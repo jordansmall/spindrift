@@ -99,7 +99,7 @@ func count(t tracker.Target, q tracker.Query, limit int, _ bool) (int, error) {
 // so ClosedNotPlanned stays false. The cursor is the page number ("" is page
 // 1); next follows Forgejo's Link header, since an instance may cap a page
 // below limit, and falls back to a full page when the header is absent.
-func labeledPage(t tracker.Target, label, state, cursor string, limit int) ([]tracker.Issue, string, error) {
+func labeledPage(t tracker.Target, label, state, cursor string, limit int, _ []tracker.Selector) ([]tracker.Issue, string, error) {
 	if limit < 1 {
 		return nil, "", fmt.Errorf("list labeled issues: limit %d < 1", limit)
 	}
