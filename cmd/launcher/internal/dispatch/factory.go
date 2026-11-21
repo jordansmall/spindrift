@@ -125,11 +125,6 @@ func (f *Factory) Cleanup() {
 	f.cache.cleanup()
 }
 
-// Driver returns the Driver this Factory was constructed with.
-func (f *Factory) Driver() driver.Driver {
-	return f.driver
-}
-
 // SetAgentGeneration overrides the agent-closure generation every Box launched
 // afterward binds (issue #2682, the store-closure Box-only staleness
 // hot-swap). A hot-swap must be able to land mid-run, so the mutex is what
