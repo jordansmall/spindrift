@@ -1164,3 +1164,61 @@ func TestIndexFindingIssues_NotPlannedExpiryIsScopedToTheChore(t *testing.T) {
 		}
 	}
 }
+
+// A route-scoped instance's dedup index and butler prior-findings read ignore
+// another route's finding but still see the findings it filed itself, which
+// carry the route stamp (issue #7332). Driven through the real local tracker:
+// the fake's ListOpenIssues is unrouted and would pass without the route.
+func TestBacklogDedupIndex_HonoursTheIssueRoute(t *testing.T) {
+	dir := t.TempDir()
+	finding := dispatchkind.Work.FindingLabel
+	route := func(value string) *local.LocalTracker {
+		return local.NewLocalTracker(dir, forge.DispatchLabels{}).WithRoute(forge.Route{{Kind: forge.RouteKindLabel, Value: value}})
+	}
+	for _, name := range []string{"billing", "orders"} {
+		if _, err := route(name).PostIssue(name, priorMarker("tuning", "site "+name), []string{finding}); err != nil {
+			t.Fatalf("PostIssue %s: %v", name, err)
+		}
+	}
+	routed := route("orders")
+	if _, err := routed.PostIssue("mine", priorMarker("tuning", "race in settle"), []string{finding}); err != nil {
+		t.Fatalf("PostIssue: %v", err)
+	}
+	unroutedTracker := local.NewLocalTracker(dir, forge.DispatchLabels{})
+
+	index := backlogDedupIndex(routed, "100", "", time.Time{})
+
+	if _, ok := index["site billing"]; ok {
+		t.Error("index carries another route's finding; want it ignored")
+	}
+	if _, ok := index["site orders"]; !ok {
+		t.Error("index lacks a same-route finding")
+	}
+	if _, ok := index["race in settle"]; !ok {
+		t.Error("index lacks the finding this instance filed; it would refile it")
+	}
+
+	unrouted := backlogDedupIndex(unroutedTracker, "100", "", time.Time{})
+	if _, ok := unrouted["site billing"]; !ok {
+		t.Error("unset route index lacks the billing finding; want unchanged behaviour")
+	}
+
+	titles := func(it forge.IssueTracker) []string {
+		got, err := PriorFindings(it, "tuning")
+		if err != nil {
+			t.Fatalf("PriorFindings: %v", err)
+		}
+		var out []string
+		for _, f := range got {
+			out = append(out, f.Issue.Title)
+		}
+		slices.Sort(out)
+		return out
+	}
+	if got := titles(routed); !slices.Equal(got, []string{"mine", "orders"}) {
+		t.Errorf("routed PriorFindings = %v, want [mine orders]", got)
+	}
+	if got := titles(unroutedTracker); !slices.Equal(got, []string{"billing", "mine", "orders"}) {
+		t.Errorf("unrouted PriorFindings = %v, want all three", got)
+	}
+}

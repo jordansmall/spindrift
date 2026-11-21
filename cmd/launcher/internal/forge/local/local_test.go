@@ -2025,3 +2025,45 @@ func TestLocalTracker_PostIssue_StampsRouteLabel(t *testing.T) {
 		t.Errorf("pre-labelled = %v, want no duplicate", got)
 	}
 }
+
+func TestLocalTracker_Route_NarrowsListIssuesWithLabels(t *testing.T) {
+	dir := t.TempDir()
+	mk := func(slug string, closed bool, labels ...string) {
+		writeLocalIssue(t, dir, slug, localIssue{frontmatter: localFrontmatter{
+			Title: slug, Closed: closed, Labels: labels, Created: "2026-01-01T00:00:00Z",
+		}})
+	}
+	mk("open-orders", false, "finding", "orders")
+	mk("open-billing", false, "finding", "billing")
+	mk("closed-orders", true, "finding", "orders")
+	mk("closed-billing", true, "finding", "billing")
+
+	slugs := func(lt *LocalTracker, state forge.IssueState) []string {
+		t.Helper()
+		got, err := lt.ListIssuesWithLabels(state, []string{"finding"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, i := range got {
+			out = append(out, i.Number)
+		}
+		sort.Strings(out)
+		return out
+	}
+
+	plain := NewLocalTracker(dir, testLabels)
+	if got := slugs(plain, forge.IssueOpen); !reflect.DeepEqual(got, []string{"open-billing", "open-orders"}) {
+		t.Errorf("unset route open = %v, want both", got)
+	}
+	if got := slugs(plain, forge.IssueClosed); !reflect.DeepEqual(got, []string{"closed-billing", "closed-orders"}) {
+		t.Errorf("unset route closed = %v, want both", got)
+	}
+	routed := NewLocalTracker(dir, testLabels).WithRoute(forge.Route{{Kind: "label", Value: "orders"}})
+	if got := slugs(routed, forge.IssueOpen); !reflect.DeepEqual(got, []string{"open-orders"}) {
+		t.Errorf("routed open = %v, want [open-orders]", got)
+	}
+	if got := slugs(routed, forge.IssueClosed); !reflect.DeepEqual(got, []string{"closed-orders"}) {
+		t.Errorf("routed closed = %v, want [closed-orders]", got)
+	}
+}
