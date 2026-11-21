@@ -1,7 +1,8 @@
 # ISSUE_ROUTE and the Tracker scope (ADR 0075, issue #7331) pinned at eval
 # time through the real lib/mkHarness.nix entry point: a route reaches the run
-# input document, a kind the tracker row has not declared fails, and a Tracker
-# scope that differs from the repo slug on github/forgejo fails.
+# input document, a kind the tracker row has not declared fails, a label route
+# evaluates on local, github and forgejo, and a Tracker scope that differs from
+# the repo slug on github/forgejo fails.
 {
   pkgs,
   nixpkgs,
@@ -98,21 +99,40 @@ in
     }) "an empty route attrset is the unset route";
     pkgs.runCommand "issue-route-unset-evaluates" { } "touch $out";
 
+  issue-route-label-evaluates =
+    let
+      labelRoute = tracker: {
+        codeForge = tracker;
+        issueTracker = tracker;
+        issueRoute = {
+          label = "orders-api";
+        };
+      };
+    in
+    assert assertMsg (evaluates (
+      labelRoute "github"
+    )) "github declares label, so a label route must evaluate";
+    assert assertMsg (evaluates (
+      labelRoute "forgejo"
+    )) "forgejo declares label, so a label route must evaluate";
+    assert assertMsg (evaluates (
+      labelRoute "github" // { issueRoute = "label=orders-api"; }
+    )) "the string form of a label route must evaluate on github";
+    pkgs.runCommand "issue-route-label-evaluates" { } "touch $out";
+
   issue-route-rejects-undeclared-kind =
     let
       route = {
         codeForge = "github";
         issueTracker = "github";
         issueRoute = {
-          label = "orders-api";
+          component = "orders-api";
         };
       };
     in
+    assert assertMsg (!evaluates route) "github declares only label, so a component route must fail";
     assert assertMsg (
-      !evaluates route
-    ) "a github tracker declares no route kind, so a label route must fail";
-    assert assertMsg (
-      !evaluates (route // { issueRoute = "label=orders-api"; })
+      !evaluates (route // { issueRoute = "component=orders-api"; })
     ) "the string form must fail on an undeclared kind too";
     assert assertMsg (
       !evaluates (

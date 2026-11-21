@@ -2,6 +2,7 @@ package backend
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 
 	"spindrift.dev/launcher/internal/testutil"
@@ -211,17 +212,27 @@ func TestQuickstartBlocks(t *testing.T) {
 	}
 }
 
-// TestRouteKindsAreLocalLabelOnly pins ADR 0075 decision 1: only local
-// declares an Issue route kind (label); every other row declares none, since a
+// routeKindsPending names tracker rows whose label route is still in flight;
+// the entry must go once the row declares label.
+var routeKindsPending = map[string]string{"jira": "#7333"}
+
+// TestTrackerRowsDeclareLabelRoute pins ADR 0075 decision 1: every tracker row
+// declares the label route kind, and a non-tracker row declares none, since a
 // tracker that ignored the route would quietly list the whole Tracker scope.
-func TestRouteKindsAreLocalLabelOnly(t *testing.T) {
+func TestTrackerRowsDeclareLabelRoute(t *testing.T) {
 	for _, d := range Registry {
-		var want []string
-		if d.Name == "local" {
-			want = []string{"label"}
+		declaresLabel := slices.Contains(d.RouteKinds, "label")
+		if issue, ok := routeKindsPending[d.Name]; ok {
+			if declaresLabel {
+				t.Errorf("%s declares label; delete its routeKindsPending entry (%s)", d.Name, issue)
+			}
+			continue
 		}
-		if !reflect.DeepEqual(d.RouteKinds, want) {
-			t.Errorf("%s.RouteKinds = %v, want %v", d.Name, d.RouteKinds, want)
+		switch {
+		case d.ValidAsTracker && !declaresLabel:
+			t.Errorf("tracker %s.RouteKinds = %v, want it to include label", d.Name, d.RouteKinds)
+		case !d.ValidAsTracker && len(d.RouteKinds) != 0:
+			t.Errorf("non-tracker %s.RouteKinds = %v, want none", d.Name, d.RouteKinds)
 		}
 	}
 }
