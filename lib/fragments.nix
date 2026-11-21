@@ -540,6 +540,14 @@ let
       legacyFragment = "pr-body-local-noref.md";
       var = "PR_BODY_LOCAL_NOREF_STEP";
     }
+    # The Target-repo boundary of a routed ticket (ADR 0075, issue #7338): a
+    # cross-repo spec halts at the ambiguous gate. Names ${REPO_SLUG}, a plain
+    # scalar, so it needs no extraSubstVars.
+    {
+      gate = "ISSUE_ROUTED";
+      fragment = "issue-route-scope.md";
+      var = "ISSUE_ROUTE_SCOPE_STEP";
+    }
     # The issue-read step (issues #1691, #1963, ADR 0032): the subject issue's
     # body and comments are injected host-side (issues #3445, #3469,
     # promptassembly.issueTextSection), so these fragments cover only a
