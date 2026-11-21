@@ -114,6 +114,18 @@
     arg = "dimension";
   }
   {
+    flag = "driver";
+    doc = "the Driver whose archived Pass logs to replay (required)";
+    verb = "shadow-replay";
+    arg = "name";
+  }
+  {
+    flag = "connector";
+    doc = "the Driver Connector .wasm to replay through (default: the Driver's shadow row)";
+    verb = "shadow-replay";
+    arg = "driver.wasm";
+  }
+  {
     flag = "help";
     doc = "show usage and exit";
     verb = null;

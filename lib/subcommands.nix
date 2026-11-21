@@ -63,6 +63,11 @@
     doc = "summarise Dispatch cost per pass role from the logs under .spindrift (notional API-equivalent USD), across one or more --root checkouts; --json emits one Dispatch Record per line";
   }
   {
+    name = "shadow-replay";
+    usage = "--driver <name> [--connector <driver.wasm>] [<log-dir>]";
+    doc = "replay archived Pass logs through one Driver's shadow Connector beside its native Strategy, writing each log's comparison to a .shadow-replay.jsonl sidecar (see docs/reference.md)";
+  }
+  {
     name = "registry";
     usage = "discover <repo-dir> <routes-file> [--force]";
     doc = "discover registry routes from a Target repo checkout and write the routes file (ADR 0045)";

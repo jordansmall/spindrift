@@ -632,6 +632,7 @@ func TestPrintSubcommands_ExactOutput(t *testing.T) {
 		"  doctor [--verbose|-v] [--butler] [--research]                                                                                                  check configuration validity, forge credentials, repository connectivity, and label presence; distinct exit code per failure class (see docs/reference.md); also stops orphaned Connector sandboxes\n" +
 		"  reconcile                                                                                                                                      bookkeeping sweep: record PRs merged after settle for stats; on a local tracker, also close issues whose recorded landing PR merged\n" +
 		"  stats [--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>[,<dimension>...]]  summarise Dispatch cost per pass role from the logs under .spindrift (notional API-equivalent USD), across one or more --root checkouts; --json emits one Dispatch Record per line\n" +
+		"  shadow-replay --driver <name> [--connector <driver.wasm>] [<log-dir>]                                                                          replay archived Pass logs through one Driver's shadow Connector beside its native Strategy, writing each log's comparison to a .shadow-replay.jsonl sidecar (see docs/reference.md)\n" +
 		"  registry discover <repo-dir> <routes-file> [--force]                                                                                           discover registry routes from a Target repo checkout and write the routes file (ADR 0045)\n"
 
 	var buf bytes.Buffer
@@ -2539,6 +2540,22 @@ func TestParseFlags_VerbFlagEqualsFormPassesThrough(t *testing.T) {
 	}
 	if _, _, err := parseFlags([]string{"dispatch", "--root=/a"}); err == nil {
 		t.Error("--root=/a after dispatch: want unknown flag error")
+	}
+}
+
+// shadow-replay's own flags clear the global scan and reach the verb
+// handler; the scan rejects any flag with no schema row.
+func TestParseFlags_ShadowReplayFlagsPassThrough(t *testing.T) {
+	args := []string{"shadow-replay", "--driver", "opencode", "--connector=/x/driver.wasm", "logs"}
+	remaining, _, err := parseFlags(args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !slices.Equal(remaining, args) {
+		t.Errorf("remaining = %v, want %v", remaining, args)
+	}
+	if _, _, err := parseFlags([]string{"dispatch", "--driver", "opencode"}); err == nil {
+		t.Error("--driver after dispatch: want unknown flag error")
 	}
 }
 

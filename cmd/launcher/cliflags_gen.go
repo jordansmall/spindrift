@@ -19,6 +19,8 @@ var cliFlags = []cliFlag{
 	{flag: "kind", verb: "stats", arg: "kind", short: "", doc: "keep only Records of this dispatch kind, or unknown for logs the backfill could not classify", intercepted: false},
 	{flag: "include-inferred", verb: "stats", arg: "", short: "", doc: "include Records whose attribution is inferred from logs (default true; --include-inferred=false drops them)", intercepted: false},
 	{flag: "by", verb: "stats", arg: "dimension", short: "", doc: "group the summary and --json by one or more comma-separated dimensions (nested in the order given), merged across every --root: role, agent, revision, model, driver, prompt:<role>, or knob:<NAME>; the default table groups by role, and any explicit --by adds a group field to --json; Records lacking it fall in a (none) group", intercepted: false},
+	{flag: "driver", verb: "shadow-replay", arg: "name", short: "", doc: "the Driver whose archived Pass logs to replay (required)", intercepted: false},
+	{flag: "connector", verb: "shadow-replay", arg: "driver.wasm", short: "", doc: "the Driver Connector .wasm to replay through (default: the Driver's shadow row)", intercepted: false},
 	{flag: "help", verb: "", arg: "", short: "h", doc: "show usage and exit", intercepted: true},
 	{flag: "all", verb: "", arg: "", short: "", doc: "with --help, show the full reference: every subcommand, flag, and knob", intercepted: true},
 	{flag: "version", verb: "", arg: "", short: "", doc: "show version and exit", intercepted: true},
