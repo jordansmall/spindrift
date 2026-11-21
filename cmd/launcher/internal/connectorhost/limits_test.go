@@ -29,6 +29,14 @@ func TestLimitsForScalesWithTheRequest(t *testing.T) {
 	}
 }
 
+// CallBudget is the same constant the seam reads, so the test above cannot see
+// it change: pin production's 5 s as a literal, through what a load gets.
+func TestProductionCallBudgetIsFiveSeconds(t *testing.T) {
+	if budget, _, _ := connectorhost.LimitsFor(0); budget != 5*time.Second {
+		t.Fatalf("production call budget = %v, want 5s", budget)
+	}
+}
+
 // A correct Connector's decode time grows with the line, so a line the launcher
 // legally reads (logscan takes up to 4 MiB) must not trip the base call budget
 // and close the Connector under every later line.

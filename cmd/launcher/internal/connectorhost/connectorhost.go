@@ -88,6 +88,9 @@ var initLimits = limits{budget: initBudget, memory: memoryCap, output: maxOutput
 // initLimits copies it at package init, so a writer updates both.
 var memoryCap uint64 = memoryCapBytes
 
+// callBudgetBase is the base call budget: a var only so tests can lower it.
+var callBudgetBase = callBudget
+
 // guestEnv is the guest's environment: nil in production, set only from tests.
 var guestEnv map[string]string
 
@@ -97,7 +100,7 @@ var guestEnv map[string]string
 func limitsFor(requestBytes int) limits {
 	n := uint64(requestBytes)
 	return limits{
-		budget: callBudget + time.Duration(n)*budgetPerMiB>>20,
+		budget: callBudgetBase + time.Duration(n)*budgetPerMiB>>20,
 		memory: memoryCap + n*memoryPerRequestByte,
 		output: maxOutput + n*outputPerRequestByte,
 	}

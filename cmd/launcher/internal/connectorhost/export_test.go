@@ -196,6 +196,20 @@ func SetMemoryCap(n uint64) (restore func()) {
 	return func() { memoryCap, initLimits.memory = old, old }
 }
 
+// ShortCallBudget is the budget tests that exhaust it load under, via
+// SetCallBudget, instead of waiting out CallBudget.
+const ShortCallBudget = 500 * time.Millisecond
+
+// SetCallBudget sets the base call budget every engine's limitsFor starts from
+// and returns the restore. The process and remote engines enforce the budget on
+// the launcher side, so it bounds them too. A process engine's child keeps its
+// own 5 s budget; only the launcher-side budget is lowered.
+func SetCallBudget(d time.Duration) (restore func()) {
+	old := callBudgetBase
+	callBudgetBase = d
+	return func() { callBudgetBase = old }
+}
+
 // SetGuestEnv sets the environment of Connectors the in-process engine loads
 // after it and returns the restore; a remote engine's child keeps its own.
 func SetGuestEnv(env map[string]string) (restore func()) {
