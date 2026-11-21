@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"net"
 	"os"
@@ -312,7 +311,7 @@ func (d *Dispatch) boxEnv(fixPass int, ciFailureSummary string) (map[string]stri
 // quarantinePriorRunLogs moves the earlier run's log to logPath.prior-run.N;
 // the name stays fixed per issue (see docs/reference.md).
 func (d *Dispatch) announce(phase, logPath string) {
-	fmt.Fprint(d.humanOut(), announceLine(d.number, humanPhase(phase), d.subject.title))
+	fmt.Fprint(os.Stdout, announceLine(d.number, humanPhase(phase), d.subject.title))
 	rel, err := filepath.Rel(d.pwd, logPath)
 	if err != nil {
 		// rel is "": the record then names no Pass log.
@@ -405,17 +404,6 @@ func announceLine(number, phase, title string) string {
 		return fmt.Sprintf("    -> #%s: %s\n", number, title)
 	}
 	return fmt.Sprintf("    -> #%s (%s): %s\n", number, phase, title)
-}
-
-// humanOut is the human-facing sink for this Dispatch: the heartbeat writer
-// and each dispatch-start announce line write here (issue #1829). The console
-// discards it via Factory.SetHeartbeatOut so a console-driven dispatch never
-// scribbles over the TUI frame; every other caller gets stdout.
-func (d *Dispatch) humanOut() io.Writer {
-	if d.cfg.HeartbeatOut == nil {
-		return os.Stdout
-	}
-	return d.cfg.HeartbeatOut
 }
 
 // Close evicts this issue's driver-cache entry and releases the claim Run
@@ -661,7 +649,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		Issue:             d.number,
 		Name:              name,
 		Env:               env,
-		Output:            d.driver.NewHeartbeatWriter(boxLog.stream(), d.number, d.humanOut(), renderOpts),
+		Output:            d.driver.NewHeartbeatWriter(boxLog.stream(), d.number, os.Stdout, renderOpts),
 		DriverCacheDir:    driverCacheDir,
 		OutboxDir:         outboxDir,
 		MirrorDir:         mirrorDir,

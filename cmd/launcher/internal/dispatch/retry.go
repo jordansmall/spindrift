@@ -75,12 +75,12 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 				// #5444), so logPath may still hold earlier content: neither
 				// settledOutcome nor ClassifyTransient may be trusted against it.
 				if isPermanentPreDispatchErr(pErr) {
-					fmt.Fprintf(d.humanOut(), "    !! #%s: pre-dispatch failed permanently\n", d.number)
+					fmt.Fprintf(os.Stdout, "    !! #%s: pre-dispatch failed permanently\n", d.number)
 					return Failed(Result{Err: pErr})
 				}
 				transientCount++
 				if transientCount > d.cfg.Policy.Max {
-					fmt.Fprintf(d.humanOut(), "    !! #%s: pre-dispatch retry cap exhausted (%d)\n",
+					fmt.Fprintf(os.Stdout, "    !! #%s: pre-dispatch retry cap exhausted (%d)\n",
 						d.number, d.cfg.Policy.Max)
 					// Result.Err is the "never launched" carrier the caller's
 					// ReportFailureReason prints, so no ?? line here.
@@ -88,7 +88,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 				}
 				fmt.Fprintf(os.Stderr, "    ?? #%s: %v\n", d.number, pErr)
 				backoff := d.cfg.Policy.Backoff(d.clock).Duration(transientCount)
-				fmt.Fprintf(d.humanOut(), "    .. #%s: pre-dispatch failed; retry %d/%d in %s\n",
+				fmt.Fprintf(os.Stdout, "    .. #%s: pre-dispatch failed; retry %d/%d in %s\n",
 					d.number, transientCount, d.cfg.Policy.Max, backoff)
 				d.sleepOrKilled(backoff)
 				// prevRedispatched/prevWasHold stay as they were, so the retry
@@ -131,7 +131,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 				holdCount++
 			}
 			if holdCount >= d.cfg.Policy.Max {
-				fmt.Fprintf(d.humanOut(), "    !! #%s: hold cap exhausted (%d consecutive no-progress hold(s))\n",
+				fmt.Fprintf(os.Stdout, "    !! #%s: hold cap exhausted (%d consecutive no-progress hold(s))\n",
 					d.number, d.cfg.Policy.Max)
 				return Failed(Result{})
 			}
@@ -139,7 +139,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 			if wait < 0 {
 				wait = d.cfg.Policy.Jitter
 			}
-			fmt.Fprintf(d.humanOut(), "    .. #%s: rate limit; holding until %s\n",
+			fmt.Fprintf(os.Stdout, "    .. #%s: rate limit; holding until %s\n",
 				d.number, cls.ResetAt.UTC().Format("15:04 UTC"))
 			d.sleepOrKilled(wait)
 			prevWasHold = true
@@ -152,12 +152,12 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 		prevRedispatched = true
 		transientCount++
 		if transientCount > d.cfg.Policy.Max {
-			fmt.Fprintf(d.humanOut(), "    !! #%s: transient retry cap exhausted (%d)\n",
+			fmt.Fprintf(os.Stdout, "    !! #%s: transient retry cap exhausted (%d)\n",
 				d.number, d.cfg.Policy.Max)
 			return Failed(Result{})
 		}
 		backoff := d.cfg.Policy.Backoff(d.clock).Duration(transientCount)
-		fmt.Fprintf(d.humanOut(), "    .. #%s: transient (%s); retry %d/%d in %s\n",
+		fmt.Fprintf(os.Stdout, "    .. #%s: transient (%s); retry %d/%d in %s\n",
 			d.number, cls.Reason, transientCount, d.cfg.Policy.Max, backoff)
 		d.sleepOrKilled(backoff)
 	}

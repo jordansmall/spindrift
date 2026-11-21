@@ -126,10 +126,6 @@ func TestSettle_DispatchRecordSeam(t *testing.T) {
 	}
 }
 
-type nopWriter struct{}
-
-func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
-
 // seamTranscript is one Pass's canonical-event log: pass_start, a usage turn
 // and a result. A non-empty outcomeLine rides in the result and also leads a
 // raw line after it, which is what the host's outcome.Resolve reads.
@@ -171,7 +167,6 @@ func seamDispatch(t *testing.T, root, num string, fr *runner.Fake) *dispatch.Dis
 		t.Fatal(err)
 	}
 	t.Cleanup(f.Cleanup)
-	f.SetHeartbeatOut(nopWriter{})
 	return f.New(num, "t")
 }
 

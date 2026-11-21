@@ -57,21 +57,6 @@ func newTestDispatch(t *testing.T, cfg Config, fr runner.Runner, drv fakeDriver,
 	return f.New("1", "t")
 }
 
-// newTestDispatchDiscard discards the Factory's heartbeat sink the way the
-// console entry point does (issue #1583), so a test can assert that retry and
-// hold status lines stay off stdout (issue #1829).
-func newTestDispatchDiscard(t *testing.T, cfg Config, fr runner.Runner, drv fakeDriver, clock Clock) *Dispatch {
-	t.Helper()
-	dir := tempLogDir(t)
-	f, err := NewFactory(cfg, dir, fr, drv, clock)
-	if err != nil {
-		t.Fatalf("NewFactory: %v", err)
-	}
-	t.Cleanup(f.Cleanup)
-	f.SetHeartbeatOut(io.Discard)
-	return f.New("1", "t")
-}
-
 func TestDispatchWithRetry_SuccessOnFirstRun(t *testing.T) {
 	fr := runner.NewFake()
 	called := false
@@ -805,60 +790,7 @@ func TestDispatchWithRetry_ConsecutiveHoldsConsumeCapAndFail(t *testing.T) {
 	}
 }
 
-// The "hold cap exhausted" status line routes through the same humanOut()
-// sink as the dispatch-start announce line (issue #1829), so a Factory with
-// its heartbeat sink discarded writes nothing to stdout (issue #1847).
-func TestDispatchWithRetry_HoldCapExhaustedSuppressedWhenDiscardConfigured(t *testing.T) {
-	fixedNow := time.Unix(1_000_000, 0).UTC()
-	resetAt := fixedNow.Add(30 * time.Minute)
-
-	fr := runner.NewFake()
-	fr.RunErr = boxErr
-	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
-		return driver.Classification{Class: driver.Transient, Reason: driver.RateLimit, ResetAt: &resetAt}, nil
-	}}
-	var sleeps []time.Duration
-	d := newTestDispatchDiscard(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps))
-
-	var result Disposition
-	out := testutil.CaptureStdout(t, func() { result = d.Run() })
-
-	if result.ok() {
-		t.Error("want failed (cap exhausted), got true")
-	}
-	if strings.Contains(out, "hold cap exhausted") {
-		t.Errorf("stdout should carry no hold-cap-exhausted status line when discarded, got %q", out)
-	}
-}
-
-// The "rate limit; holding until" status line routes through humanOut(), so a
-// Factory with its heartbeat sink discarded writes nothing to stdout (issue
-// #1847).
-func TestDispatchWithRetry_RateLimitHoldSuppressedWhenDiscardConfigured(t *testing.T) {
-	fixedNow := time.Unix(1_000_000, 0).UTC()
-	resetAt := fixedNow.Add(30 * time.Minute)
-
-	fr := runner.NewFake()
-	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
-		return driver.Classification{Class: driver.Transient, Reason: driver.RateLimit, ResetAt: &resetAt}, nil
-	}}
-	var sleeps []time.Duration
-	d := newTestDispatchDiscard(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps))
-	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"))
-
-	var result Disposition
-	out := testutil.CaptureStdout(t, func() { result = d.Run() })
-
-	if !result.ok() {
-		t.Error("want succeeded (succeeded after hold), got false")
-	}
-	if strings.Contains(out, "rate limit; holding") {
-		t.Errorf("stdout should carry no rate-limit-hold status line when discarded, got %q", out)
-	}
-}
-
-// With no heartbeat sink override, the hold and rate-limit status lines still
-// reach stdout: the non-console CLI dispatch path (issue #1847, matching
+// The hold and rate-limit status lines reach stdout (issue #1847, matching
 // #1829's precedent for the announce line).
 func TestDispatchWithRetry_ConsecutiveHoldsEmitToStdoutWithoutOverride(t *testing.T) {
 	fixedNow := time.Unix(1_000_000, 0).UTC()
@@ -886,9 +818,8 @@ func TestDispatchWithRetry_ConsecutiveHoldsEmitToStdoutWithoutOverride(t *testin
 	}
 }
 
-// With no heartbeat sink override, the transient-backoff and
-// transient-cap-exhausted status lines still reach stdout: the non-console
-// CLI dispatch path (issue #1847).
+// The transient-backoff and transient-cap-exhausted status lines reach stdout
+// (issue #1847).
 func TestDispatchWithRetry_TransientRetriesEmitToStdoutWithoutOverride(t *testing.T) {
 	fr := runner.NewFake()
 	fr.RunErr = boxErr
@@ -972,29 +903,6 @@ func TestDispatchWithRetry_TransientBackoffRetryAndSucceed(t *testing.T) {
 	}
 }
 
-// The "transient (...); retry" backoff status line routes through humanOut(),
-// so a Factory with its heartbeat sink discarded writes nothing to stdout
-// (issue #1847).
-func TestDispatchWithRetry_TransientBackoffRetrySuppressedWhenDiscardConfigured(t *testing.T) {
-	fr := runner.NewFake()
-	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
-		return driver.Classification{Class: driver.Transient, Reason: driver.Overloaded}, nil
-	}}
-	var sleeps []time.Duration
-	d := newTestDispatchDiscard(t, retryConfig(3, 10, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
-	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"))
-
-	var result Disposition
-	out := testutil.CaptureStdout(t, func() { result = d.Run() })
-
-	if !result.ok() {
-		t.Error("want succeeded (success after backoff retry), got false")
-	}
-	if strings.Contains(out, "transient (overloaded); retry") {
-		t.Errorf("stdout should carry no transient-backoff status line when discarded, got %q", out)
-	}
-}
-
 func TestDispatchWithRetry_TransientCapExhausted(t *testing.T) {
 	fr := runner.NewFake()
 	fr.RunErr = boxErr
@@ -1027,29 +935,6 @@ func TestDispatchWithRetry_TransientCapExhausted(t *testing.T) {
 	// must stay nil or a caller duplicates it (issue #3119).
 	if result.result.Err != nil {
 		t.Errorf("Err: got %v, want nil (cap-exhaustion path prints its own message)", result.result.Err)
-	}
-}
-
-// The "transient retry cap exhausted" status line routes through humanOut(),
-// so a Factory with its heartbeat sink discarded writes nothing to stdout
-// (issue #1847).
-func TestDispatchWithRetry_TransientCapExhaustedSuppressedWhenDiscardConfigured(t *testing.T) {
-	fr := runner.NewFake()
-	fr.RunErr = boxErr
-	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
-		return driver.Classification{Class: driver.Transient, Reason: driver.Network}, nil
-	}}
-	var sleeps []time.Duration
-	d := newTestDispatchDiscard(t, retryConfig(2, 5, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
-
-	var result Disposition
-	out := testutil.CaptureStdout(t, func() { result = d.Run() })
-
-	if result.ok() {
-		t.Error("want failed (cap exhausted), got true")
-	}
-	if strings.Contains(out, "transient retry cap exhausted") {
-		t.Errorf("stdout should carry no transient-cap-exhausted status line when discarded, got %q", out)
 	}
 }
 
