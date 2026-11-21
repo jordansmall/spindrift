@@ -489,14 +489,14 @@ in
         touch $out
       '';
 
-  # Issues #6797, #6810, #6998, #6999, #6799, #6888, #6874: the dogfood runs no
-  # backend as primary (github has no native adapter left) and shadows
-  # opencode; claude's Connector row is always rendered but, with no native
-  # Strategy, is neither shadow nor primary. The real flake's default app
+  # Issues #6797, #6810, #6998, #6999, #6799, #6888, #6874, #6876: the dogfood
+  # runs no backend as primary (github has no native adapter left) and shadows
+  # opencode and pi; claude's Connector row is always rendered but, with no
+  # native Strategy, is neither shadow nor primary. The real flake's default app
   # (flake.nix's `spindrift.connectors` through the module) must equal the
   # direct mirror's, whose Box rows file and input document carry `primary` on
   # the primaries only; the default Harness carries no `shadow`, and the
-  # opencode Harness carries it on opencode's row. The app program embeds
+  # opencode and pi Harnesses carry it on their own rows. The app program embeds
   # both, so dropping flake.nix's wiring changes it. The mirror alone would not notice: it reads the
   # nix/dogfood-*.nix lists itself.
   connector-driver-rows-dogfood-shadows =
@@ -515,6 +515,9 @@ in
       jq -e '[.[] | select(.name == "opencode")]
         | length == 1 and (.[0] | .shadow == true and .firstParty == true and has("module"))' \
         ${fixtures.dogfoodOpencodeHarness.internals.driverRowsFile}
+      jq -e '[.[] | select(.name == "pi")]
+        | length == 1 and (.[0] | .shadow == true and .firstParty == true and has("module"))' \
+        ${fixtures.dogfoodPiHarness.internals.driverRowsFile}
       ${fixtures.runInputDocOf config.apps.default.program}
       jq -e --argjson names '${builtins.toJSON driverPrimaries}' '
         ([.drivers[]? | select(.name as $n | $names | index($n))] as $rows

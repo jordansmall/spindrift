@@ -414,6 +414,11 @@ line rows). Unlike the heartbeat's one slow line, a slow call here
 backpressures the Driver's stdout pipe, so a large tool result is the case to
 watch: pi events of a few hundred KB would stall the CLI for seconds.
 
+Shadow mode does not put the Connector on that path (issue #6876). pi's filter
+is shadowed after the Pass, from a raw stdout copy `driver-exec` keeps for the
+Pass, so the live stream never waits on the Connector; the Reference's Driver
+replay section has the check and its summary fields.
+
 ## Amendment (issue #6851): the post-Pass reads share one decode
 
 `driverkit.Driver.Decode` decodes a Pass log once into a `PassLog`, and its
