@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.3.0](https://github.com/jordansmall/spindrift/compare/github-v0.2.0...github-v0.3.0) (2026-11-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **schema:** setting BOX_GH_TOKEN, BOX_FORGEJO_TOKEN or BOX_FORGE_CREDENTIAL (forge.boxForgeCredential) now fails; delete the setting.
+* **github:** a github Connector row that sets `primary` no longer evaluates; drop the option, it has been a no-op since #7139.
+* **nix:** a Consumer of `spindrift.flakeModules.default` now carries the github backend row, so a run whose CODE_FORGE or ISSUE_TRACKER is github needs SPINDRIFT_GITHUB_CONNECTOR_TOKEN.
+
+### Features
+
+* **connector/github:** page tracker.labeled by REST page number ([a162726](https://github.com/jordansmall/spindrift/commit/a162726558c014a69bd6bf52475e559084d5ce01)), closes [#7137](https://github.com/jordansmall/spindrift/issues/7137)
+* **forge:** report cross-repository PRs on the wire PR ([11e0ff5](https://github.com/jordansmall/spindrift/commit/11e0ff57da0f9e5de0f1ad2b53a69d330b98e653)), closes [#7221](https://github.com/jordansmall/spindrift/issues/7221)
+* **github:** refuse primary on the github row ([d667a89](https://github.com/jordansmall/spindrift/commit/d667a897e43eed56684ae318b82b2e90a2d37502)), closes [#6888](https://github.com/jordansmall/spindrift/issues/6888)
+* **nix:** give every Consumer the github Connector row ([a1f2b02](https://github.com/jordansmall/spindrift/commit/a1f2b02121fac081ac0ad6178d8c2d88e0d99033)), closes [#7139](https://github.com/jordansmall/spindrift/issues/7139)
+* **schema:** reject the Box token knobs as removed ([e6969af](https://github.com/jordansmall/spindrift/commit/e6969af08874bc0f96fd9c34456940054a7f73dd)), closes [#6902](https://github.com/jordansmall/spindrift/issues/6902)
+* **sdk:** carry limit and fresh on tracker.count ([994cebe](https://github.com/jordansmall/spindrift/commit/994cebe1776683a956e24dd8cff2399ba8a45969)), closes [#6982](https://github.com/jordansmall/spindrift/issues/6982)
+
+
+### Bug Fixes
+
+* **connectors/github:** cache and cap the demand count like native ([93d3ae4](https://github.com/jordansmall/spindrift/commit/93d3ae40671d02f19b583393d72b14b57ee5a94f)), closes [#6982](https://github.com/jordansmall/spindrift/issues/6982)
+* **github:** class a merge-conflict 405 as not-mergeable ([f3409f8](https://github.com/jordansmall/spindrift/commit/f3409f8633469ed81d1f19d4c70c9a85a0b5743a)), closes [#7270](https://github.com/jordansmall/spindrift/issues/7270)
+* **github:** report a genuine 405 merge refusal as not-mergeable ([9b3da05](https://github.com/jordansmall/spindrift/commit/9b3da05fac514ce3ecc37fcbce1287092965bcc2)), closes [#6960](https://github.com/jordansmall/spindrift/issues/6960)
+
+
+### Tests
+
+* **github:** build the host-mediation tracker by its production constructor ([82079a9](https://github.com/jordansmall/spindrift/commit/82079a98d3b1a20f6f19bd85dc67da2d1806cbff)), closes [#7139](https://github.com/jordansmall/spindrift/issues/7139)
+
 ## [0.2.0](https://github.com/jordansmall/spindrift/compare/github-v0.1.0...github-v0.2.0) (2026-11-18)
 
 

@@ -1,5 +1,254 @@
 # Changelog
 
+## [0.33.0](https://github.com/jordansmall/spindrift/compare/v0.32.0...v0.33.0) (2026-11-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **forgejo:** delete the native forgejo tracker
+* **forgejo:** primary on the forgejo backend row is refused at evaluation; drop it. A shadow-only forgejo row no longer builds a tracker.
+* **nix:** a run whose CODE_FORGE is forgejo needs SPINDRIFT_FORGEJO_CONNECTOR_TOKEN beside FORGEJO_TOKEN, and MERGE_METHOD must be rebase or unset.
+* **forgejo:** NewForgejoCodeForge and ForgejoCodeForgeConfig are removed; forgejo's Code Forge comes only from its Connector row, which needs an https FORGEJO_BASE_URL. ErrPrimaryMergeMethod is renamed ErrMergeMethod.
+* **forgejo:** a forgejo CODE_FORGE now needs a non-shadow forgejo backend row and SPINDRIFT_FORGEJO_CONNECTOR_TOKEN; without the row the Code Forge fails to build with ErrNoConnectorRow.
+* CONNECTOR_SANDBOX and infra.connector.sandbox are removed; delete the setting.
+* **connectorsandbox:** a Launcher process that loads a Connector without an installed Connector sandbox fails with "no Connector sandbox is installed".
+* **launcher:** `spindrift console` is removed and now fails with `unknown subcommand: console`. Use tracker labels for triage, `spindrift dispatch` or ISSUE_NUMBER to launch one issue, the daemon for a refill pool, and the Dashboard for observation.
+* **box:** the Box image no longer carries gh, and the backend strategy no longer offers a ConfigureCLI hook or an in-Box OpenPRForBranch query.
+* **backend:** the image no longer carries fj (forgejo-cli), and the backend rows no longer read boxTokenEnvVar or cliPackage.
+* **schema:** setting BOX_GH_TOKEN, BOX_FORGEJO_TOKEN or BOX_FORGE_CREDENTIAL (forge.boxForgeCredential) now fails; delete the setting.
+* **github:** a github write with no routed row (a shadow row, core's module imported directly, or a GH_HOST other than github.com) now fails with ErrNoRoute instead of running gh.
+* **github:** a github Connector row that sets `primary` no longer evaluates; drop the option, it has been a no-op since #7139.
+* **github:** github PR and repository reads, FailureDetail and token introspection no longer fall back to gh. With no routed github row (no row, a shadow row, or a GitHub Enterprise GH_HOST) they fail with ErrNoReadRoute; see MIGRATING.md.
+* **github:** github tracker reads no longer fall back to gh. A Consumer with no github backend row, a github row in shadow mode, or a GH_HOST naming a GitHub Enterprise host now fails every github tracker read with ErrNoReadRoute; see MIGRATING.md.
+* **schema:** BOX_FORGE_AND_ISSUE_ACCESS=read-write (and forge.boxAccess = "read-write") is rejected; every Box is host-mediated.
+* **box:** BOX_HOST_SEEDED_MIRROR and BOX_GH_TOKEN_OPTIONAL are gone, and the backend descriptor loses InBoxGHCredentialHelper and Strategy.CloneURL; a Box always clones from REPO_MOUNT_DIR.
+* **settle:** settle no longer adopts a PR or verdict comment a Box wrote itself; a Box's work reaches the forge only through the relay.
+* **box:** the Box ignores MAX_REBASE_ATTEMPTS, TRANSIENT_BACKOFF_SECS and HOLD_JITTER_SECS in the outcome backstop, and BOX_WRITE_ENABLED is no longer set.
+* **connector/forgejo:** a forgejo/<name>.md in a custom fragments directory (SPINDRIFT_PROMPT_DIR) no longer overrides the shipped step, because a Connector's declared file wins over a custom fragments directory.
+* **nix:** a Consumer of `spindrift.flakeModules.default` now carries the github backend row, so a run whose CODE_FORGE or ISSUE_TRACKER is github needs SPINDRIFT_GITHUB_CONNECTOR_TOKEN.
+* **github:** a github backend row without `primary` now sends every covered github read and write through the Connector, which needs a write-capable SPINDRIFT_GITHUB_CONNECTOR_TOKEN, and a non-shadow github row refuses MERGE_METHOD=merge or squash at launch because the Connector merges by rebase only.
+* **nix:** spindrift.connectors.claude.primary and .shadow are refused; the claude Connector is always the claude Driver.
+* **driver:** claude can no longer be shadowed or set primary, and a claude Connector that fails to load fails the run.
+* **nix:** spindrift.connectors.jira.primary = true now fails evaluation; drop the option, since the Connector is jira's only backend.
+* **jira:** ISSUE_TRACKER=jira needs the jira Connector's flake module and a bare https JIRA_BASE_URL; there is no native adapter to fall back to.
+
+### Features
+
+* **backendkit:** let a Strategy route only its Code Forge ([724fdae](https://github.com/jordansmall/spindrift/commit/724fdaea0f5c5b09f4314e36e19b8a396030e7aa)), closes [#6868](https://github.com/jordansmall/spindrift/issues/6868)
+* **box:** clone only from the host-seeded mirror ([0ece969](https://github.com/jordansmall/spindrift/commit/0ece969401f762f965e7277e4af7a8a451e1706e)), closes [#6901](https://github.com/jordansmall/spindrift/issues/6901)
+* **box:** drop gh, the in-box CLI setup and the gh/fj shims ([4d9d0e4](https://github.com/jordansmall/spindrift/commit/4d9d0e47955adcc7f4abf5b702d895ee16ae558c)), closes [#6902](https://github.com/jordansmall/spindrift/issues/6902)
+* **box:** stop the Box pushing from the backstop and recovery ([7626d86](https://github.com/jordansmall/spindrift/commit/7626d861c0311206affd1c33856a09b68e01144f)), closes [#6901](https://github.com/jordansmall/spindrift/issues/6901)
+* **connector/forgejo:** perform the tracker writes ([f380ada](https://github.com/jordansmall/spindrift/commit/f380ada85cb39ca7cc8d2e127925ff689deb0b77)), closes [#6865](https://github.com/jordansmall/spindrift/issues/6865)
+* **connector/forgejo:** ship forgejo's fragments from its Connector ([81bde31](https://github.com/jordansmall/spindrift/commit/81bde3135b51ee2f9a9fb428c07fce01350052c9)), closes [#6867](https://github.com/jordansmall/spindrift/issues/6867)
+* **connector/opencode:** make opencode a Connector subflake ([29ce044](https://github.com/jordansmall/spindrift/commit/29ce0449f5d8b4d167052260043623fd6cedfa70)), closes [#6873](https://github.com/jordansmall/spindrift/issues/6873)
+* **connector:** add a not-mergeable error class ([0d5a50b](https://github.com/jordansmall/spindrift/commit/0d5a50b1c5ad72169a27a5d8e3d28007950e7c2b)), closes [#6960](https://github.com/jordansmall/spindrift/issues/6960)
+* **connectorsandbox:** fail closed when no sandbox is installed ([1118f4c](https://github.com/jordansmall/spindrift/commit/1118f4cbe890a1536086956869c5be47714e635c)), closes [#7022](https://github.com/jordansmall/spindrift/issues/7022)
+* **daemon:** load the daemon's Connectors into a sandbox ([515a00e](https://github.com/jordansmall/spindrift/commit/515a00e109134859bd05e5bac9d0c520a71461a0)), closes [#7022](https://github.com/jordansmall/spindrift/issues/7022)
+* **driver:** delete the native claude Strategy ([db8a3e7](https://github.com/jordansmall/spindrift/commit/db8a3e7d09f0830cd559332a90b75360843cd53d)), closes [#6799](https://github.com/jordansmall/spindrift/issues/6799)
+* **forgejo:** build the Code Forge only from the Connector row ([f5662a5](https://github.com/jordansmall/spindrift/commit/f5662a5120e2083fe2fa5b12c37432693d188d3b)), closes [#6868](https://github.com/jordansmall/spindrift/issues/6868)
+* **forgejo:** build the tracker from the Connector under a primary row ([b4734cc](https://github.com/jordansmall/spindrift/commit/b4734ccd11464e2b9b7e4896be455ad9b58d58d3)), closes [#7129](https://github.com/jordansmall/spindrift/issues/7129)
+* **forgejo:** build the tracker only from the Connector row ([013c878](https://github.com/jordansmall/spindrift/commit/013c878f17f61733d9bfd20a3b98272a3ff16662)), closes [#7122](https://github.com/jordansmall/spindrift/issues/7122)
+* **forgejo:** delete the native forgejo forge half ([057945a](https://github.com/jordansmall/spindrift/commit/057945a565f855905f9497024312dc11a5467f37)), closes [#6868](https://github.com/jordansmall/spindrift/issues/6868)
+* **forgejo:** delete the native forgejo tracker ([c8cb9be](https://github.com/jordansmall/spindrift/commit/c8cb9beaf7070bcae72a374c47093298cc0fab94)), closes [#7122](https://github.com/jordansmall/spindrift/issues/7122)
+* **forge:** report cross-repository PRs on the wire PR ([11e0ff5](https://github.com/jordansmall/spindrift/commit/11e0ff57da0f9e5de0f1ad2b53a69d330b98e653)), closes [#7221](https://github.com/jordansmall/spindrift/issues/7221)
+* **github:** delete the native github write path ([fbf9741](https://github.com/jordansmall/spindrift/commit/fbf97417352f2e8107891572eb9c4a41bb7a3a06)), closes [#6888](https://github.com/jordansmall/spindrift/issues/6888)
+* **github:** refuse primary on the github row ([d667a89](https://github.com/jordansmall/spindrift/commit/d667a897e43eed56684ae318b82b2e90a2d37502)), closes [#6888](https://github.com/jordansmall/spindrift/issues/6888)
+* **github:** route every non-shadow github row through its Connector ([3fe2ef3](https://github.com/jordansmall/spindrift/commit/3fe2ef31f1e5e2d8eee851801e95aed66d9ecf56)), closes [#7139](https://github.com/jordansmall/spindrift/issues/7139)
+* **github:** serve forge reads through the Connector only ([470075e](https://github.com/jordansmall/spindrift/commit/470075ea81d6b0821d5597b71d1a389479cc1dc3)), closes [#6811](https://github.com/jordansmall/spindrift/issues/6811)
+* **github:** serve tracker reads through the Connector only ([fc46f22](https://github.com/jordansmall/spindrift/commit/fc46f220bd74a394481d9bceb3ac594290eaf205)), closes [#6811](https://github.com/jordansmall/spindrift/issues/6811)
+* **jira:** build the jira tracker from its Connector row ([24712b7](https://github.com/jordansmall/spindrift/commit/24712b7549de5720332abc62ecbe0038b962af79)), closes [#6858](https://github.com/jordansmall/spindrift/issues/6858)
+* **launcher:** add the shadow-replay verb ([5c8907c](https://github.com/jordansmall/spindrift/commit/5c8907cc5c779d88f798e3db54d61b3cad088dc4)), closes [#6872](https://github.com/jordansmall/spindrift/issues/6872)
+* **launcher:** install the Connector sandbox on every loading path ([a2548fb](https://github.com/jordansmall/spindrift/commit/a2548fb08f62fc4ef6a2e82b78f402e8afaaef35)), closes [#7022](https://github.com/jordansmall/spindrift/issues/7022)
+* **launcher:** remove the Console ([a057979](https://github.com/jordansmall/spindrift/commit/a057979773a706e3425b970340e569308d452379)), closes [#7306](https://github.com/jordansmall/spindrift/issues/7306)
+* **launcher:** route a primary row's tracker through its Connector ([066c2a1](https://github.com/jordansmall/spindrift/commit/066c2a1566c1e15cce2b92142cdf94598cf10661)), closes [#7129](https://github.com/jordansmall/spindrift/issues/7129)
+* **nix:** give every Consumer the forgejo Connector row ([3aa5e7d](https://github.com/jordansmall/spindrift/commit/3aa5e7d1342085be5b1642d2baf78ea3d24a2845)), closes [#6868](https://github.com/jordansmall/spindrift/issues/6868)
+* **nix:** give every Consumer the github Connector row ([a1f2b02](https://github.com/jordansmall/spindrift/commit/a1f2b02121fac081ac0ad6178d8c2d88e0d99033)), closes [#7139](https://github.com/jordansmall/spindrift/issues/7139)
+* **nix:** refuse `primary` on the jira Connector row ([180f6b7](https://github.com/jordansmall/spindrift/commit/180f6b735a90243568897d563ff69099cb0024a3)), closes [#6858](https://github.com/jordansmall/spindrift/issues/6858)
+* **nix:** render claude's Connector row for every Consumer ([fd73c22](https://github.com/jordansmall/spindrift/commit/fd73c227ed93d80b1c279e65d0178995fb343b08)), closes [#6799](https://github.com/jordansmall/spindrift/issues/6799)
+* **prompt:** drop the read-write forge fragments ([fd20baa](https://github.com/jordansmall/spindrift/commit/fd20baae6da4320a4d87071ae3b19a11c9722242)), closes [#6901](https://github.com/jordansmall/spindrift/issues/6901)
+* **prompt:** drop the read-write tracker fragments ([255ab09](https://github.com/jordansmall/spindrift/commit/255ab09f6cf92d4192989e5bcddc481f1202c4e4)), closes [#6901](https://github.com/jordansmall/spindrift/issues/6901)
+* **quickstart:** defer Connector checks to spindrift doctor ([e6428b1](https://github.com/jordansmall/spindrift/commit/e6428b168f63303cfcc4f376ab1d3d78b7b23665)), closes [#7022](https://github.com/jordansmall/spindrift/issues/7022)
+* remove the CONNECTOR_SANDBOX knob ([7e43d0c](https://github.com/jordansmall/spindrift/commit/7e43d0c9ba16485e0b982a255b31f593a3786736)), closes [#7022](https://github.com/jordansmall/spindrift/issues/7022)
+* **schema:** reject read-write Box forge access ([9b63ed2](https://github.com/jordansmall/spindrift/commit/9b63ed25b3f64cfd8d580350b0d26793ff3300ac)), closes [#6901](https://github.com/jordansmall/spindrift/issues/6901)
+* **schema:** reject the Box token knobs as removed ([e6969af](https://github.com/jordansmall/spindrift/commit/e6969af08874bc0f96fd9c34456940054a7f73dd)), closes [#6902](https://github.com/jordansmall/spindrift/issues/6902)
+* **sdk:** add a paged LabeledPage reader for tracker.labeled ([684981e](https://github.com/jordansmall/spindrift/commit/684981e1617b9861d415c84a2117ec27b39bc49a)), closes [#7137](https://github.com/jordansmall/spindrift/issues/7137)
+* **sdk:** carry limit and fresh on tracker.count ([994cebe](https://github.com/jordansmall/spindrift/commit/994cebe1776683a956e24dd8cff2399ba8a45969)), closes [#6982](https://github.com/jordansmall/spindrift/issues/6982)
+* **settle:** settle every Box as a host-mediated one ([915d4db](https://github.com/jordansmall/spindrift/commit/915d4db8e59c12337bd4bfc7967511e3da2783bb)), closes [#6901](https://github.com/jordansmall/spindrift/issues/6901)
+* **shadowreplay:** replay archived Pass logs through the comparator ([44cc216](https://github.com/jordansmall/spindrift/commit/44cc2168367b7c990a2cc45cecb7d5f26b21ed2e)), closes [#6872](https://github.com/jordansmall/spindrift/issues/6872)
+
+
+### Bug Fixes
+
+* **backendkit:** name --repo-slug and forge.repoSlug in the slug remedy ([a58b14a](https://github.com/jordansmall/spindrift/commit/a58b14afea6632a44b98fa9a58d1877f91cd09ac)), closes [#7260](https://github.com/jordansmall/spindrift/issues/7260)
+* **checks:** fail the narrowed vendor fetch on a module download error ([d3004f8](https://github.com/jordansmall/spindrift/commit/d3004f84c14f9f9cd17a6c9cca182ad3e18ce9c0)), closes [#7284](https://github.com/jordansmall/spindrift/issues/7284)
+* **checks:** give launcher-go-test an explicit 30m go test timeout ([2337a01](https://github.com/jordansmall/spindrift/commit/2337a01709e8391be1b48a062659e65cf46d02e1)), closes [#7282](https://github.com/jordansmall/spindrift/issues/7282)
+* **connectorforge:** re-read the PR only for a not-mergeable refusal ([50ccaaf](https://github.com/jordansmall/spindrift/commit/50ccaaf97675d0402597d2a2790fd5979025a9b5)), closes [#6960](https://github.com/jordansmall/spindrift/issues/6960)
+* **connectorforge:** seed a read-only Box's mirror from core's git ([ba9d572](https://github.com/jordansmall/spindrift/commit/ba9d5722a3f0ea0ebeb5ef699b5754c11e102565)), closes [#7157](https://github.com/jordansmall/spindrift/issues/7157)
+* **connectorhost:** keep guest handle live across a decode call ([623b59f](https://github.com/jordansmall/spindrift/commit/623b59f0de79adeacd6179e7fbdb94d264d19f64)), closes [#7100](https://github.com/jordansmall/spindrift/issues/7100)
+* **connectorsandbox:** reap only sandboxes from this pid namespace ([d56f28c](https://github.com/jordansmall/spindrift/commit/d56f28c090a13cf94f411a5f1efcfc97d93016c4)), closes [#7069](https://github.com/jordansmall/spindrift/issues/7069)
+* **connectortracker:** page the labeled dedup scan by cursor ([e05f31e](https://github.com/jordansmall/spindrift/commit/e05f31ed1a4f91b3ba1fa3a9b678db56281aab30)), closes [#7137](https://github.com/jordansmall/spindrift/issues/7137)
+* **daemon:** run the late-merge sweep beside the pool ([5e69f69](https://github.com/jordansmall/spindrift/commit/5e69f69a9d4756c9e870bf4426468d33d22688e8)), closes [#7342](https://github.com/jordansmall/spindrift/issues/7342)
+* **daemon:** stop pool children running the late-merge sweep ([1744955](https://github.com/jordansmall/spindrift/commit/1744955ea2930df55d3c7735ec9cdb8d5aed7565)), closes [#7342](https://github.com/jordansmall/spindrift/issues/7342)
+* **dispatch:** forward the host's issue reader and searcher to the Box ([7a72a4f](https://github.com/jordansmall/spindrift/commit/7a72a4f819c26b7fa81c9dbc8f73fa6eaf8691f2)), closes [#6924](https://github.com/jordansmall/spindrift/issues/6924)
+* **doctor:** name forge.repoSlug in the default repo-not-found hint ([2fd66c0](https://github.com/jordansmall/spindrift/commit/2fd66c088f54ac4834fc3ef3d86d5ad29f8f5601)), closes [#7260](https://github.com/jordansmall/spindrift/issues/7260)
+* **doctor:** report a removed choice once whatever the checks hold ([0b611e0](https://github.com/jordansmall/spindrift/commit/0b611e05c5d1b7a982ebbfb615c8314359623607)), closes [#6901](https://github.com/jordansmall/spindrift/issues/6901)
+* **driver/claude:** drop a host op with a mistyped field unscanned ([df651d0](https://github.com/jordansmall/spindrift/commit/df651d03797540e6e7e3af48149af52674d69733)), closes [#7120](https://github.com/jordansmall/spindrift/issues/7120)
+* **driver/claude:** merge a repeated spindrift_op key like core ([3ca4c4b](https://github.com/jordansmall/spindrift/commit/3ca4c4b37096ec7217a52217b67e340aaff2822f)), closes [#7250](https://github.com/jordansmall/spindrift/issues/7250)
+* **driverrows:** refuse a primary and a shadow row for one Driver ([2d224f9](https://github.com/jordansmall/spindrift/commit/2d224f92bdd9e581b2ae82e8b60f4d8029b046b3)), closes [#7159](https://github.com/jordansmall/spindrift/issues/7159)
+* **forgejo:** read a failing job's log in the Connector ([cc82dfe](https://github.com/jordansmall/spindrift/commit/cc82dfe62e5108807ff4f836b3b32df494c9ed77)), closes [#6937](https://github.com/jordansmall/spindrift/issues/6937)
+* **forgejo:** read the native job log over the Actions API ([c21f8b9](https://github.com/jordansmall/spindrift/commit/c21f8b9c9adf89e438e7811c8e05361115f7d438)), closes [#6937](https://github.com/jordansmall/spindrift/issues/6937)
+* **forge:** refuse a transition with no target label in the Fake ([e3a2575](https://github.com/jordansmall/spindrift/commit/e3a25757efb4894c7255aefca5d958a3c5a92100)), closes [#6995](https://github.com/jordansmall/spindrift/issues/6995)
+* **github:** keep native gh under a GitHub Enterprise GH_HOST ([8566597](https://github.com/jordansmall/spindrift/commit/85665979987b4ad2d9158f5bbf83a1ce3e351e79)), closes [#7139](https://github.com/jordansmall/spindrift/issues/7139)
+* **github:** skip post-merge head delete for cross-repository PRs ([7b654cf](https://github.com/jordansmall/spindrift/commit/7b654cfc199a85793219bf33819766bb5bc3bb80)), closes [#7221](https://github.com/jordansmall/spindrift/issues/7221)
+* **launcherchecks:** name flags in required-knob remedies ([797018d](https://github.com/jordansmall/spindrift/commit/797018d6c504a1da787ccb632b63cd2d284bf6e7)), closes [#7160](https://github.com/jordansmall/spindrift/issues/7160)
+* **opencode:** resolve case-colliding rate-limit headers in order ([2e7d877](https://github.com/jordansmall/spindrift/commit/2e7d877b3bcf79cf16c1f546759f1f4f401cc254)), closes [#7388](https://github.com/jordansmall/spindrift/issues/7388)
+* **promptassembly:** gate the issue verb arms on the host's signals ([19767d9](https://github.com/jordansmall/spindrift/commit/19767d9dcd5f2b0073359265004ec94bcbaea387)), closes [#6924](https://github.com/jordansmall/spindrift/issues/6924)
+* **prompt:** drop the read-write path from the IF BLOCKED triage ([34af02e](https://github.com/jordansmall/spindrift/commit/34af02e40265d738667d81925b46d883fb5956f9)), closes [#6901](https://github.com/jordansmall/spindrift/issues/6901)
+* **prompt:** stop offering the filer a direct FILED report ([5e607a8](https://github.com/jordansmall/spindrift/commit/5e607a82725ed8d6ae69fab672e2e7c8c4d743e3)), closes [#6901](https://github.com/jordansmall/spindrift/issues/6901)
+* **quickstart:** defer the doctor for a Connector-routed Code Forge ([cdf4a17](https://github.com/jordansmall/spindrift/commit/cdf4a1707d27314b852b47e6de9798252c98ca20)), closes [#6868](https://github.com/jordansmall/spindrift/issues/6868)
+* **runner/bwrap:** name --network-mode host in pasta refusals ([0d36a8b](https://github.com/jordansmall/spindrift/commit/0d36a8b61efa56200a4d3f530073da86b6ac89c5)), closes [#7158](https://github.com/jordansmall/spindrift/issues/7158)
+* **runner:** start the Connector sandbox in its own process group ([763978d](https://github.com/jordansmall/spindrift/commit/763978d1da852c5fc98abc8db7f31838461af13e)), closes [#7302](https://github.com/jordansmall/spindrift/issues/7302)
+* **schema:** stop forwarding the backstop retry knobs to the Box ([09f56d4](https://github.com/jordansmall/spindrift/commit/09f56d40e74f18da509dacf4374d23f1c6856f3a)), closes [#6901](https://github.com/jordansmall/spindrift/issues/6901)
+* **sdk/connector:** reclaim the guest heap between connector_calls ([a1914fb](https://github.com/jordansmall/spindrift/commit/a1914fba40a6030eccdd26a19195669d841b798a)), closes [#7164](https://github.com/jordansmall/spindrift/issues/7164)
+* **settle:** append Closes #N only on a shared issue namespace ([b3b65bf](https://github.com/jordansmall/spindrift/commit/b3b65bf62cbbeda01b143b866420c03398855383)), closes [#7058](https://github.com/jordansmall/spindrift/issues/7058)
+* **settle:** restore ready after a conflict rebase that cannot push ([d53ea17](https://github.com/jordansmall/spindrift/commit/d53ea17f3644e77719142d27fc2ef25295d29f25)), closes [#7224](https://github.com/jordansmall/spindrift/issues/7224)
+* **waves:** free a continuous slot under mu, beside its inflight delete ([3d147f2](https://github.com/jordansmall/spindrift/commit/3d147f24efcaa7d9b1d178c447f920caad2236b8)), closes [#6902](https://github.com/jordansmall/spindrift/issues/6902)
+* **waves:** post each blocked marker as a whole release reason ([4047cfa](https://github.com/jordansmall/spindrift/commit/4047cfa86ec6da186baf213dc2e8ac95d3117571)), closes [#7054](https://github.com/jordansmall/spindrift/issues/7054) [#6244](https://github.com/jordansmall/spindrift/issues/6244)
+
+
+### Security
+
+* **connectorforge:** pin a PR rebase to the expected head ([d72e197](https://github.com/jordansmall/spindrift/commit/d72e1979de6cdeec04588ba8630621d97e45e5c7)), closes [#6961](https://github.com/jordansmall/spindrift/issues/6961)
+* **connectorforge:** refuse an unpinned rebase of a PR head ([b8bd4b2](https://github.com/jordansmall/spindrift/commit/b8bd4b279b9fd95e05e30cd02f623bc8f4cf3094)), closes [#6961](https://github.com/jordansmall/spindrift/issues/6961)
+* **github:** route a pinned PR rebase through the primary Connector ([4a76089](https://github.com/jordansmall/spindrift/commit/4a7608912142c3682fef5bc7ad641b03857173b3)), closes [#6961](https://github.com/jordansmall/spindrift/issues/6961)
+* **quickstart:** keep native gh under a non-github.com GH_HOST ([d51d15f](https://github.com/jordansmall/spindrift/commit/d51d15fcc18b94f48c6ac4a0fa1479e395d7beaf)), closes [#7007](https://github.com/jordansmall/spindrift/issues/7007)
+* **settle:** defuse cross-repo and URL closing references ([9bf37ee](https://github.com/jordansmall/spindrift/commit/9bf37eead7d35778ef91ed4ae104476521444a9a)), closes [#7079](https://github.com/jordansmall/spindrift/issues/7079) [#2447](https://github.com/jordansmall/spindrift/issues/2447)
+* **settle:** defuse other issues' closing keywords in the PR body ([57d0e84](https://github.com/jordansmall/spindrift/commit/57d0e841025bc4f5ff80b7955dd2d45a6a855954)), closes [#7079](https://github.com/jordansmall/spindrift/issues/7079)
+* **settle:** defuse the closing keyword instead of the reference ([2681e37](https://github.com/jordansmall/spindrift/commit/2681e37e557e45c1704c3f3a7b496e52243efe55)), closes [#7248](https://github.com/jordansmall/spindrift/issues/7248)
+* **settle:** pin every PR rebase to the derived agent branch ([e73a447](https://github.com/jordansmall/spindrift/commit/e73a447e0d70510c22c0603790a785afc611df74)), closes [#6961](https://github.com/jordansmall/spindrift/issues/6961)
+
+
+### Documentation
+
+* add 0.33.0 release notes ([531b0a7](https://github.com/jordansmall/spindrift/commit/531b0a73736871046d1ea3a5509792ab03b965d8))
+* **adr:** amend ADR 0068 for core backends' test derivations ([d1cddad](https://github.com/jordansmall/spindrift/commit/d1cddad90632b3f903675d481d8cdf08049fd792)), closes [#7318](https://github.com/jordansmall/spindrift/issues/7318)
+* **adr:** note the github Connector carries the demand ETag ([fc0bba6](https://github.com/jordansmall/spindrift/commit/fc0bba6d62f1499b60ecc3a206a70f1966ba62d1)), closes [#6982](https://github.com/jordansmall/spindrift/issues/6982)
+* **adr:** record the Console's removal in ADR 0076 ([120bdce](https://github.com/jordansmall/spindrift/commit/120bdce10762db83301bdfcf6b96bc6aea81f675)), closes [#7306](https://github.com/jordansmall/spindrift/issues/7306)
+* **adr:** record the macOS remote-attach hop in ADR 0073 ([2dd42a2](https://github.com/jordansmall/spindrift/commit/2dd42a2d3df99d2cc845a742573f361e37bc8542)), closes [#7021](https://github.com/jordansmall/spindrift/issues/7021)
+* **adr:** route one tracker scope to many Target repos ([ac41cd7](https://github.com/jordansmall/spindrift/commit/ac41cd7cc60363a0c1ef58b1c8dd601b65a32d4f))
+* **daemon:** say the daemon runs the late-merge sweep ([76c32ed](https://github.com/jordansmall/spindrift/commit/76c32ed3edca0fc8f9dbc6092044275760e0dda1)), closes [#7342](https://github.com/jordansmall/spindrift/issues/7342)
+* describe a Box with no forge token or forge CLI ([a75a5af](https://github.com/jordansmall/spindrift/commit/a75a5afa94e32ad47be201533c4280ebfe806332)), closes [#6902](https://github.com/jordansmall/spindrift/issues/6902)
+* describe every Box as host-mediated ([1c3998a](https://github.com/jordansmall/spindrift/commit/1c3998a2db60442253a3dd984a411882d64cfda7)), closes [#6901](https://github.com/jordansmall/spindrift/issues/6901)
+* describe forgejo's Code Forge as Connector-only ([40a985c](https://github.com/jordansmall/spindrift/commit/40a985c09a7228bdf2659c46e3a82014e2b8a5c6)), closes [#6868](https://github.com/jordansmall/spindrift/issues/6868)
+* describe forgejo's primary as covering its tracker ([b42b89f](https://github.com/jordansmall/spindrift/commit/b42b89fa40792fc165ef5c39bdaedf18e8f21609)), closes [#7129](https://github.com/jordansmall/spindrift/issues/7129)
+* describe forgejo's tracker as Connector-only ([664f823](https://github.com/jordansmall/spindrift/commit/664f823411233ad91ebc41a7429b227abf4fe059)), closes [#7122](https://github.com/jordansmall/spindrift/issues/7122)
+* describe jira as running through its Connector only ([04cc8ce](https://github.com/jordansmall/spindrift/commit/04cc8cefa81c65a2cac38afd5983cbc12fcd8a7e)), closes [#6858](https://github.com/jordansmall/spindrift/issues/6858)
+* describe the Connector as github's default backend ([45e2ab1](https://github.com/jordansmall/spindrift/commit/45e2ab19495124dcbb01a06d051b358eba3e55f1)), closes [#7139](https://github.com/jordansmall/spindrift/issues/7139)
+* describe the forgejo Connector's job-log read ([1b1c477](https://github.com/jordansmall/spindrift/commit/1b1c477db9645e97ec40b119242d4efdfc3a0c77)), closes [#6937](https://github.com/jordansmall/spindrift/issues/6937)
+* document the not-mergeable error class ([3dbd49e](https://github.com/jordansmall/spindrift/commit/3dbd49ef38387296839887d0b445d25c10afd54f)), closes [#6960](https://github.com/jordansmall/spindrift/issues/6960)
+* drop the Console from the guides and glossary ([b94bd1c](https://github.com/jordansmall/spindrift/commit/b94bd1ccecd6aded101082874678f12b2dbc65ed)), closes [#7306](https://github.com/jordansmall/spindrift/issues/7306)
+* **launcher:** stop explaining engine seams through the Console ([28e8559](https://github.com/jordansmall/spindrift/commit/28e8559c84e676f0bd74fa31114768f574d4f9b5)), closes [#7309](https://github.com/jordansmall/spindrift/issues/7309)
+* record forgejo's fragments shipping from its Connector ([c4da20c](https://github.com/jordansmall/spindrift/commit/c4da20c0e60201f3db16314b8af794cfb9a7ea91)), closes [#6867](https://github.com/jordansmall/spindrift/issues/6867)
+* record that github reads no longer fall back to gh ([3ce90b8](https://github.com/jordansmall/spindrift/commit/3ce90b8c4d01a5359073779d719e646ebd3f3dbd)), closes [#6811](https://github.com/jordansmall/spindrift/issues/6811)
+* record the claude cut-over to its Connector ([db37f64](https://github.com/jordansmall/spindrift/commit/db37f64e12f8ebe9ecadc14d30267c975cef9125)), closes [#6799](https://github.com/jordansmall/spindrift/issues/6799)
+* record the closed migration window ([16799cb](https://github.com/jordansmall/spindrift/commit/16799cb118dbca70caf8d3914aa3e97d17d5afdf)), closes [#6888](https://github.com/jordansmall/spindrift/issues/6888)
+* **reference:** describe the forgejo Connector's tracker half ([f367e1b](https://github.com/jordansmall/spindrift/commit/f367e1b774d429f50e303d34025c6af750fa77ef)), closes [#6865](https://github.com/jordansmall/spindrift/issues/6865)
+* **reference:** describe the owner-scoped Connector sandbox sweep ([70d20ca](https://github.com/jordansmall/spindrift/commit/70d20ca0d1bf8d070d9287e8e044d8552739fe1c)), closes [#7069](https://github.com/jordansmall/spindrift/issues/7069)
+* **reference:** name the --network-mode host opt-out for bwrap ([f1d13f7](https://github.com/jordansmall/spindrift/commit/f1d13f793bdef06edcab50357bf32b3a5d7cce9a)), closes [#7158](https://github.com/jordansmall/spindrift/issues/7158)
+* **reference:** note quickstart keeps gh under another GH_HOST ([5a856ad](https://github.com/jordansmall/spindrift/commit/5a856adfa96816ea6f7717f306d8fa16998c4d2e)), closes [#7007](https://github.com/jordansmall/spindrift/issues/7007)
+* **reference:** note the pinned Connector PR rebase ([9ff8fa7](https://github.com/jordansmall/spindrift/commit/9ff8fa7aeff1cd49ab9be56163761e14b67a127b)), closes [#6961](https://github.com/jordansmall/spindrift/issues/6961)
+* **reference:** say a merge-blocked hand-off is never a draft ([1f5b344](https://github.com/jordansmall/spindrift/commit/1f5b3448cdb8e52a5ec9a7465dad511d1736f116)), closes [#7224](https://github.com/jordansmall/spindrift/issues/7224)
+* **reference:** say the Connector sandbox outlives the settle ([b3f761d](https://github.com/jordansmall/spindrift/commit/b3f761d2f5d312d571dac7951352a4e73e6a2e21)), closes [#7302](https://github.com/jordansmall/spindrift/issues/7302)
+* **reference:** state the host Closes backstop is pairwise ([743b368](https://github.com/jordansmall/spindrift/commit/743b368b40795da91396806c866c38352f53d074)), closes [#7058](https://github.com/jordansmall/spindrift/issues/7058)
+* say core backends get no per-row go test check ([0cf38a7](https://github.com/jordansmall/spindrift/commit/0cf38a75dad2e91cf36cb4d05dfc78de6f59b098)), closes [#7318](https://github.com/jordansmall/spindrift/issues/7318)
+* **shadow:** count replayed runs toward the opencode and pi bar ([c677463](https://github.com/jordansmall/spindrift/commit/c6774637dc14abcfd0ba44e0ec422162016153bc)), closes [#6872](https://github.com/jordansmall/spindrift/issues/6872)
+* state that the Connector sandbox is always on ([73a603b](https://github.com/jordansmall/spindrift/commit/73a603b0d53cbf72b3c8907bcf33088ac7c26097)), closes [#7022](https://github.com/jordansmall/spindrift/issues/7022)
+* state that the host gates the issue read and search verbs ([897fa91](https://github.com/jordansmall/spindrift/commit/897fa9123739ea506a036eddb4b4aa9eb467e292)), closes [#6924](https://github.com/jordansmall/spindrift/issues/6924)
+* stop citing Console orphan detection in runner comments ([e2aef4b](https://github.com/jordansmall/spindrift/commit/e2aef4b4c6826dbeab5b3b6185704a97e8de94d4)), closes [#7308](https://github.com/jordansmall/spindrift/issues/7308)
+
+
+### Code Refactoring
+
+* **backend:** drop the ClosesRefTracker row fact ([970891d](https://github.com/jordansmall/spindrift/commit/970891dbe5918fbb1a21e72955a2fae7c91f3c73)), closes [#7058](https://github.com/jordansmall/spindrift/issues/7058)
+* **backend:** retire the in-box half of the backend rows ([599998a](https://github.com/jordansmall/spindrift/commit/599998a30854fcb69f644815a6dc14e1dd104110)), closes [#6902](https://github.com/jordansmall/spindrift/issues/6902)
+* **dispatch:** drop the heartbeat-output override ([2bda44f](https://github.com/jordansmall/spindrift/commit/2bda44fe7be97daccb15883077f2255f170326ef)), closes [#7309](https://github.com/jordansmall/spindrift/issues/7309)
+* **dispatch:** drop the orphaned-issues query ([b205a5b](https://github.com/jordansmall/spindrift/commit/b205a5b7d723400eecd63678d9ca3786d18fcbee)), closes [#7308](https://github.com/jordansmall/spindrift/issues/7308)
+* **forge:** give each code forge one constructor ([2d29e30](https://github.com/jordansmall/spindrift/commit/2d29e303df17fdacfdc4992560aa9947e21c991a)), closes [#6901](https://github.com/jordansmall/spindrift/issues/6901)
+* **forge:** share git's redacted output tail ([ea812b7](https://github.com/jordansmall/spindrift/commit/ea812b7013a2000d28f5b69a9b111d5c8947a40d)), closes [#7157](https://github.com/jordansmall/spindrift/issues/7157)
+* **github:** name the routed-row helpers for what they now cover ([ce56356](https://github.com/jordansmall/spindrift/commit/ce56356560fcdf5ce4c35943856f2e430b04c0d1)), closes [#7139](https://github.com/jordansmall/spindrift/issues/7139)
+* **jira:** delete the native jira adapter ([fadfbba](https://github.com/jordansmall/spindrift/commit/fadfbba6308f86cc8f10ccf51021d93839c80e92)), closes [#6858](https://github.com/jordansmall/spindrift/issues/6858)
+* **launcher:** answer the write gate from the Connector-routing rule ([450c295](https://github.com/jordansmall/spindrift/commit/450c295b59c1a154e85a89ba5131982bd6ae8587)), closes [#7139](https://github.com/jordansmall/spindrift/issues/7139)
+* **launcher:** delete RunNixBuild and Factory.Driver ([d8ed04c](https://github.com/jordansmall/spindrift/commit/d8ed04c0909fe09693e7b8ced3fdac108ff16631)), closes [#7309](https://github.com/jordansmall/spindrift/issues/7309)
+* **shadow:** take the Connector loader as a parameter ([e070f23](https://github.com/jordansmall/spindrift/commit/e070f23be39c5c516d68a5088ae5bb28f19e8729)), closes [#6872](https://github.com/jordansmall/spindrift/issues/6872)
+* **terminate:** drop the Terminate-gesture Reclaim trigger ([741f1a2](https://github.com/jordansmall/spindrift/commit/741f1a29b66d80f03b8699754d62c12aa2998f03)), closes [#7309](https://github.com/jordansmall/spindrift/issues/7309)
+* **waves:** drop the discoverer-backed queue adapter ([bebc688](https://github.com/jordansmall/spindrift/commit/bebc68875b393b2bb9b04ebf25defa630ffcb1f2)), closes [#7309](https://github.com/jordansmall/spindrift/issues/7309)
+* **waves:** drop the Limiter's resize API ([c524203](https://github.com/jordansmall/spindrift/commit/c5242031390340c19d953dcd482271d4eb3cd3b9)), closes [#7307](https://github.com/jordansmall/spindrift/issues/7307)
+* **waves:** fix the continuous engine's cap at MaxParallel ([0495dfe](https://github.com/jordansmall/spindrift/commit/0495dfed9a54c29f427ca68d827aa101d1200c6e)), closes [#7307](https://github.com/jordansmall/spindrift/issues/7307)
+
+
+### Tests
+
+* **box:** drop the read-write seam cases ([8e35f01](https://github.com/jordansmall/spindrift/commit/8e35f01ecfa32a47f58a7e9b1190bfc70392b604)), closes [#6901](https://github.com/jordansmall/spindrift/issues/6901)
+* **box:** run the box seam tests in parallel ([42e950c](https://github.com/jordansmall/spindrift/commit/42e950c97a73d76ae698021a626108103b8c8b5c)), closes [#7341](https://github.com/jordansmall/spindrift/issues/7341)
+* **bundle:** fail when the Bundle registers a native network adapter ([cec81e3](https://github.com/jordansmall/spindrift/commit/cec81e3b0586c5941d08ee4e3b131b120f80123b)), closes [#6888](https://github.com/jordansmall/spindrift/issues/6888)
+* **bundle:** prune the module-root vendor in packageDirs ([edc2704](https://github.com/jordansmall/spindrift/commit/edc27046a3514423e4d7ff5130278f4b6264ffe5)), closes [#7329](https://github.com/jordansmall/spindrift/issues/7329)
+* **checks:** classify narrowed go mod vendor -e stderr ([a373d84](https://github.com/jordansmall/spindrift/commit/a373d84a97d9d46fa61f086e278eed5c73b25001)), closes [#7284](https://github.com/jordansmall/spindrift/issues/7284)
+* **claude:** name a dead Connector and reload it in the fuzz harness ([61b4aca](https://github.com/jordansmall/spindrift/commit/61b4acafcba9927eeac861fc876ebb55f9b03fda)), closes [#7164](https://github.com/jordansmall/spindrift/issues/7164)
+* **connector/opencode:** check Connector exit resolution against native ([a9e10b8](https://github.com/jordansmall/spindrift/commit/a9e10b8f62adc4a259b3190740b4759d13ea0927)), closes [#6873](https://github.com/jordansmall/spindrift/issues/6873)
+* **connectorhost:** add test-only memory cap and guest env knobs ([1fa8fd8](https://github.com/jordansmall/spindrift/commit/1fa8fd879fe73e83c97649903620a0734f94c937)), closes [#7283](https://github.com/jordansmall/spindrift/issues/7283)
+* **connectorhost:** decode 96 MiB through one fixture Connector ([aa40e36](https://github.com/jordansmall/spindrift/commit/aa40e366b0c0a08a10351c6e80ed7653c6963b07)), closes [#7164](https://github.com/jordansmall/spindrift/issues/7164)
+* **connectorhost:** exhaust the short call budget, not the real one ([9aa134e](https://github.com/jordansmall/spindrift/commit/9aa134ebe9f1965dab6fbf911599f9007e40f913)), closes [#7340](https://github.com/jordansmall/spindrift/issues/7340)
+* **connectorhost:** give each long-run subtest its own memory cap ([d1a16f0](https://github.com/jordansmall/spindrift/commit/d1a16f0ca17a4c46ab4bc5a2d61d4c21addad4bb)), closes [#7319](https://github.com/jordansmall/spindrift/issues/7319)
+* **connectorhost:** give the long-line decode test a wide budget ([b8d3e59](https://github.com/jordansmall/spindrift/commit/b8d3e5987975cebef5e7f9289ccdde109a63f619)), closes [#7341](https://github.com/jordansmall/spindrift/issues/7341)
+* **connectorhost:** give the request-timeout fixture test CI headroom ([01ad04b](https://github.com/jordansmall/spindrift/commit/01ad04b8645927e808bb694d8c97edf7ecfa8fce)), closes [#6960](https://github.com/jordansmall/spindrift/issues/6960)
+* **connectorhost:** let tests lower the call budget ([a79b116](https://github.com/jordansmall/spindrift/commit/a79b1169a12b5269424b13ffde72a30559e861df)), closes [#7340](https://github.com/jordansmall/spindrift/issues/7340)
+* **connectorhost:** overrun a lower memory cap in the long-run test ([d477fa0](https://github.com/jordansmall/spindrift/commit/d477fa0ba298edeb4ad98c927511a5b7ce4174de)), closes [#7283](https://github.com/jordansmall/spindrift/issues/7283)
+* **connector:** require the primary-row corpus PASS line ([85b40f5](https://github.com/jordansmall/spindrift/commit/85b40f5ea0ca08a899a24f1281aea3233d60711a)), closes [#6873](https://github.com/jordansmall/spindrift/issues/6873)
+* describe the single host-mediated path in test comments ([e4d7823](https://github.com/jordansmall/spindrift/commit/e4d782395041e7652a68e6b1a7f76b50f7285bc2)), closes [#6901](https://github.com/jordansmall/spindrift/issues/6901)
+* **doctor:** quote the current git-user-name remedy in fixtures ([5000181](https://github.com/jordansmall/spindrift/commit/5000181e05369de6893e8d5f093ea0db32c47f9e)), closes [#7160](https://github.com/jordansmall/spindrift/issues/7160)
+* **driver/claude:** seed the fuzz corpus with repeated spindrift_op keys ([4d9fb21](https://github.com/jordansmall/spindrift/commit/4d9fb2137cd570ef0056d799dcadbf9781056320)), closes [#7250](https://github.com/jordansmall/spindrift/issues/7250)
+* **driver/claude:** stop skipping mistyped host ops in the fuzz test ([628a7bf](https://github.com/jordansmall/spindrift/commit/628a7bf63ed2177522f53a98e986586b84c26b69)), closes [#7120](https://github.com/jordansmall/spindrift/issues/7120)
+* drop the last read-write check and bats pin ([90f599e](https://github.com/jordansmall/spindrift/commit/90f599e2bc78e81023cd14f8890889c99d262d41)), closes [#6901](https://github.com/jordansmall/spindrift/issues/6901)
+* **forge/forgejo:** drive the harness tracker through the Connector too ([133806f](https://github.com/jordansmall/spindrift/commit/133806f009ec58cffa5912992e91dbe35cae47ae)), closes [#7129](https://github.com/jordansmall/spindrift/issues/7129)
+* **forge/forgejo:** hold the Connector's tracker half to the contracts ([7e65253](https://github.com/jordansmall/spindrift/commit/7e652536a25000cfccdd06551779ecab6d7aa808)), closes [#6865](https://github.com/jordansmall/spindrift/issues/6865)
+* **forge/github:** drive the demand count's ETag and cap end to end ([533979d](https://github.com/jordansmall/spindrift/commit/533979d8293cb4a2610ccb373e61a4f4cd722083)), closes [#6982](https://github.com/jordansmall/spindrift/issues/6982)
+* **forge/github:** keep body newlines in the fake gh's JSON ([4af5d6b](https://github.com/jordansmall/spindrift/commit/4af5d6b0feab52f338fb96c1e182b0071ed77a76)), closes [#7025](https://github.com/jordansmall/spindrift/issues/7025)
+* **forge/local:** seed issue labels in the contract harness ([c0336ad](https://github.com/jordansmall/spindrift/commit/c0336ad642d03141488e2d1fac9b9afaaf302ac5)), closes [#7025](https://github.com/jordansmall/spindrift/issues/7025)
+* **forgejo:** pin the primary row's rebase to the agent branch ([a94d074](https://github.com/jordansmall/spindrift/commit/a94d07474da2e26407e4b97e7bd358f70f758b7b)), closes [#6961](https://github.com/jordansmall/spindrift/issues/6961)
+* **forgejo:** run the contract's job-log checks on the Connector ([8eb35d1](https://github.com/jordansmall/spindrift/commit/8eb35d1170fa0445889e1df1c8c60d287a664d95)), closes [#6937](https://github.com/jordansmall/spindrift/issues/6937)
+* **forgejo:** run the mirror-seed contract against the Connector ([371a6e3](https://github.com/jordansmall/spindrift/commit/371a6e3f57e1fb97ab57bcd7368cd17aaae0995d)), closes [#7157](https://github.com/jordansmall/spindrift/issues/7157)
+* **forgetest:** pin issue title, body and labels in the read contract ([644b2c1](https://github.com/jordansmall/spindrift/commit/644b2c1329c41c5cb4b76b20c1a7e8f4c3fa69e5)), closes [#7025](https://github.com/jordansmall/spindrift/issues/7025)
+* **github:** build the host-mediation tracker by its production constructor ([82079a9](https://github.com/jordansmall/spindrift/commit/82079a98d3b1a20f6f19bd85dc67da2d1806cbff)), closes [#7139](https://github.com/jordansmall/spindrift/issues/7139)
+* **github:** drop test modes and comments that assume native reads ([91dd6ab](https://github.com/jordansmall/spindrift/commit/91dd6abdf861a7847af3c13684f7bf2a88bfcf97)), closes [#6811](https://github.com/jordansmall/spindrift/issues/6811)
+* **github:** hold a plain github row to the full Conformance contract ([37ddf96](https://github.com/jordansmall/spindrift/commit/37ddf9625b1c7fae277af0dc149394a270d9e7f7)), closes [#7139](https://github.com/jordansmall/spindrift/issues/7139)
+* **image:** assert no forge CLI or token reaches the Box ([007a4bc](https://github.com/jordansmall/spindrift/commit/007a4bcd8ac9b1ace1989c202355aafe8623ea25)), closes [#6902](https://github.com/jordansmall/spindrift/issues/6902)
+* **launcher:** give Fake fixtures the labels their code claims with ([d288f30](https://github.com/jordansmall/spindrift/commit/d288f3079f0546f5176091394a7f3c1d418e1db1)), closes [#6995](https://github.com/jordansmall/spindrift/issues/6995)
+* **launcher:** pin the Connector sandbox serving through the settle ([9a3eec0](https://github.com/jordansmall/spindrift/commit/9a3eec08b11cf8ea0beed08cfa0b5de2997f0e38)), closes [#7302](https://github.com/jordansmall/spindrift/issues/7302)
+* **launcher:** run the root seam tests in parallel ([0a73ae2](https://github.com/jordansmall/spindrift/commit/0a73ae27734c9f025c4a48cbc82509bc6d611361)), closes [#7341](https://github.com/jordansmall/spindrift/issues/7341)
+* **launcher:** run the seam smoke on the local tracker and git forge ([1795e49](https://github.com/jordansmall/spindrift/commit/1795e49acec4c696e073a309f8e61795f3f46519)), closes [#6811](https://github.com/jordansmall/spindrift/issues/6811)
+* **launcher:** seed the mirror for a primary forgejo row ([dc8f3a8](https://github.com/jordansmall/spindrift/commit/dc8f3a80a58af77aaff8cbb2ac7385fda3db35f7)), closes [#7157](https://github.com/jordansmall/spindrift/issues/7157)
+* **launcher:** skip vendor/ in the root-package guard walks ([d117896](https://github.com/jordansmall/spindrift/commit/d11789658a26d29e44b22b11449bdf1368139608)), closes [#7329](https://github.com/jordansmall/spindrift/issues/7329)
+* **piseam:** run the pi seam tests in parallel ([989c0f4](https://github.com/jordansmall/spindrift/commit/989c0f49e912232cb425030768145f1bc7273f1f)), closes [#7341](https://github.com/jordansmall/spindrift/issues/7341)
+* prove no production binary loads a Connector in-process ([bdeb152](https://github.com/jordansmall/spindrift/commit/bdeb15259f6721d4c173697cfc270eed633c6233)), closes [#7022](https://github.com/jordansmall/spindrift/issues/7022)
+* **runner/oci:** release the held image lock once the waiter blocks ([1c0b453](https://github.com/jordansmall/spindrift/commit/1c0b453feedc61a25c2fd9a8bbe7338d79188c9a)), closes [#7304](https://github.com/jordansmall/spindrift/issues/7304)
+* **settle:** drive a conflicting merge refusal through a Connector ([eba768f](https://github.com/jordansmall/spindrift/commit/eba768f889e6677a756eb9434724ce5a8b1885e5)), closes [#7270](https://github.com/jordansmall/spindrift/issues/7270)
+
+
+### Build System
+
+* **launcher:** drop gh from the launcher's host closure ([e487a37](https://github.com/jordansmall/spindrift/commit/e487a3712e851233dfde50835aa36dbc40894820)), closes [#6888](https://github.com/jordansmall/spindrift/issues/6888)
+
+
+### Continuous Integration
+
+* run the full matrix for a connectorHosted Connector's paths ([efbd027](https://github.com/jordansmall/spindrift/commit/efbd027dcc512ccce113a2fb0594f14e3be83fe7)), closes [#6799](https://github.com/jordansmall/spindrift/issues/6799)
+
+
+### Miscellaneous Chores
+
+* **checks:** run each core backend's go tests once per system ([20f160f](https://github.com/jordansmall/spindrift/commit/20f160fd44548e2f0f6a81b32357add17603587d)), closes [#7318](https://github.com/jordansmall/spindrift/issues/7318)
+* **checks:** run launcher-go-seam-test packages concurrently ([bb5bbcf](https://github.com/jordansmall/spindrift/commit/bb5bbcf5d3939bee127bb73fc7d66177c3434483)), closes [#7328](https://github.com/jordansmall/spindrift/issues/7328)
+
 ## [0.32.0](https://github.com/jordansmall/spindrift/compare/v0.31.0...v0.32.0) (2026-11-18)
 
 
