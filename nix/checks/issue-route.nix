@@ -196,6 +196,29 @@ in
     ) "jira declares no assignee kind, so that route must fail";
     pkgs.runCommand "issue-route-jira-declares-label-and-component" { } "touch $out";
 
+  # See launcherchecks.repoSlugRequired (ADR 0075). Omitting repoSlug (the
+  # localRouted harnesses above) defers it to dispatch time.
+  issue-route-requires-repo-slug =
+    let
+      routed = {
+        codeForge = "local";
+        issueTracker = "local";
+        issueRoute = {
+          label = "orders-api";
+        };
+      };
+    in
+    assert assertMsg (
+      !evaluates (routed // { repoSlug = ""; })
+    ) "a route with an explicitly empty repoSlug must fail on a fully-local run";
+    assert assertMsg (evaluates (
+      routed // { repoSlug = "acme/orders"; }
+    )) "a route with a real repoSlug must evaluate";
+    assert assertMsg (evaluates (
+      removeAttrs routed [ "issueRoute" ] // { repoSlug = ""; }
+    )) "an unrouted fully-local run may keep an empty repoSlug";
+    pkgs.runCommand "issue-route-requires-repo-slug" { } "touch $out";
+
   issue-route-rejects-malformed-string =
     let
       bad = s: {

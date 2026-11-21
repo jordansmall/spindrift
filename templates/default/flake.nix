@@ -221,7 +221,7 @@
             #   ghTokenRefreshFile = "";
             #   # plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo); required when CODE_FORGE=git, unused otherwise; under read-only the Box never uses it to reach the remote, the host does (issue #6898)
             #   remoteURL = "";
-            #   # target GitHub repository the agents work on; required unless CODE_FORGE and ISSUE_TRACKER are both local
+            #   # target repository the agents work on; required unless CODE_FORGE and ISSUE_TRACKER are both local and no ISSUE_ROUTE is set
             #   repoSlug = "owner/repo";
             # };
             # git = {

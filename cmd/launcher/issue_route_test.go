@@ -147,3 +147,19 @@ func TestIssueRoute_DispatchConfigIssueRouted(t *testing.T) {
 		}
 	}
 }
+
+// See launcherchecks.repoSlugRequired for why a routed local run needs a slug.
+func TestIssueRoute_RoutedFullyLocalRequiresRepoSlug(t *testing.T) {
+	c := minimalValidLocalConfig()
+	c.IssueTracker = "local"
+	c.IssueRoute = "label=x"
+	c.GhToken, c.RepoSlug = "", ""
+	err := validate(c)
+	if err == nil || !strings.Contains(err.Error(), "repo-slug") {
+		t.Fatalf("validate(local/local, route, no slug) = %v, want a repo-slug failure", err)
+	}
+	c.RepoSlug = "acme/orders"
+	if err := validate(c); err != nil {
+		t.Errorf("validate(local/local, route, slug) = %v, want nil", err)
+	}
+}

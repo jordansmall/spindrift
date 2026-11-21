@@ -34,8 +34,10 @@ type Config struct {
 	IssueTracker string
 	CodeForge    string
 
+	// IssueRouted is true when ISSUE_ROUTE is set; see repoSlugRequired.
+	IssueRouted bool
 	// These two, with Signals.InBoxUnreachableTracker, feed the
-	// REPO_SLUG/GH_TOKEN exemption (repoRequirementExempt below).
+	// REPO_SLUG/GH_TOKEN exemption (noRepoResearch below).
 	ResearchDispatch bool
 	SelfContained    bool
 }
@@ -72,13 +74,26 @@ type Deps struct {
 	ExtraCrossKnob []doctor.Check
 }
 
-// repoRequirementExempt reports whether c is exempt from the REPO_SLUG/
-// GH_TOKEN presence requirement: a fully-local run, or a self-contained
-// research run whose issue tracker cannot be reached from inside the Box.
-// The caller passes sig in so both guarded rows resolve signals once.
-func repoRequirementExempt(sig Signals, c Config) bool {
-	noRepoResearch := c.ResearchDispatch && c.SelfContained && sig.InBoxUnreachableTracker
-	return sig.FullyLocal || noRepoResearch
+// noRepoResearch reports a self-contained research run whose issue tracker
+// cannot be reached from inside the Box: it clones no Target repo.
+func noRepoResearch(sig Signals, c Config) bool {
+	return c.ResearchDispatch && c.SelfContained && sig.InBoxUnreachableTracker
+}
+
+// ghTokenExempt reports whether c is exempt from the GH_TOKEN presence
+// requirement: a fully-local run, or a noRepoResearch run. REPO_SLUG uses
+// repoSlugRequired.
+func ghTokenExempt(sig Signals, c Config) bool {
+	return sig.FullyLocal || noRepoResearch(sig, c)
+}
+
+// repoSlugRequired reports whether REPO_SLUG must be set. An ISSUE_ROUTE names
+// its Target repo through REPO_SLUG, even on a fully-local run, so a routed
+// run needs it despite the fully-local exemption. A self-contained research
+// run keeps its exemption (no Target repo, no route fragment in its prompt);
+// gh-token has no route override.
+func repoSlugRequired(sig Signals, c Config) bool {
+	return !noRepoResearch(sig, c) && (!sig.FullyLocal || c.IssueRouted)
 }
 
 // ghTokenRequired resolves both backends' descriptors for backend.NeedsGHToken.
@@ -112,9 +127,13 @@ func requiredValue(name, msg string, missing func() bool) doctor.Check {
 // gh-token rows both need it.
 func RequiredKnobChecks(c Config, d Deps) []doctor.Check {
 	sig := d.Signals(c.CodeForge, c.IssueTracker)
+	repoSlugMsg := "pass --repo-slug owner/repo or set forge.repoSlug (the target repository)"
+	if c.IssueRouted {
+		repoSlugMsg += "; an ISSUE_ROUTE names its Target repo through REPO_SLUG, even on a fully-local run"
+	}
 	return []doctor.Check{
-		requiredValue("repo-slug", "pass --repo-slug owner/repo or set forge.repoSlug (the target GitHub repository)", func() bool {
-			return !repoRequirementExempt(sig, c) && c.RepoSlug == ""
+		requiredValue("repo-slug", repoSlugMsg, func() bool {
+			return repoSlugRequired(sig, c) && c.RepoSlug == ""
 		}),
 		requiredValue("git-user-name", "pass --user-name or set git.user.name, or configure git user.name on the host", func() bool {
 			return c.GitUserName == ""
@@ -123,7 +142,7 @@ func RequiredKnobChecks(c Config, d Deps) []doctor.Check {
 			return c.GitUserEmail == ""
 		}),
 		requiredValue("gh-token", "set GH_TOKEN (fine-grained PAT scoped to the single target repo: Issues RW, Contents RW, Pull requests RW, Metadata R)", func() bool {
-			return !repoRequirementExempt(sig, c) && ghTokenRequired(c, d) && c.GHToken == ""
+			return !ghTokenExempt(sig, c) && ghTokenRequired(c, d) && c.GHToken == ""
 		}),
 		{
 			Name:   "driver-credentials",

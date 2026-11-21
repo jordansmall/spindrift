@@ -37,6 +37,7 @@ func launcherCheckConfig(c config) launcherchecks.Config {
 
 		IssueTracker: c.IssueTracker,
 		CodeForge:    c.CodeForge,
+		IssueRouted:  c.issueRouted(),
 
 		ResearchDispatch: researchDispatch,
 		SelfContained:    c.selfContained,
