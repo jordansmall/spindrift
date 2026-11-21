@@ -408,7 +408,7 @@ func TestChildCommandReturnsChildEnv(t *testing.T) {
 	// TestChildCommandSetsReportFD below for that half in isolation); this
 	// test's own focus stays on the knob-stripping behaviour it shares with
 	// DoctorCommand.
-	want := []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=3"}
+	want := []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=3", PoolChildEnv + "=1"}
 	if !reflect.DeepEqual(got.Env, want) {
 		t.Fatalf("ChildCommand(%+v) env = %v, want %v", spec, got.Env, want)
 	}
@@ -441,7 +441,7 @@ func TestChildCommandSetsReportFD(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ChildCommand(%+v): unexpected error: %v", spec, err)
 		}
-		want := []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=3"}
+		want := []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=3", PoolChildEnv + "=1"}
 		if !reflect.DeepEqual(got.Env, want) {
 			t.Errorf("ChildCommand(%+v) env = %v, want %v", spec, got.Env, want)
 		}
@@ -459,9 +459,38 @@ func TestChildCommandStripsAmbientReportFD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ChildCommand(%+v): unexpected error: %v", spec, err)
 	}
-	want := []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=3"}
+	want := []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=3", PoolChildEnv + "=1"}
 	if !reflect.DeepEqual(got.Env, want) {
 		t.Fatalf("ChildCommand(%+v) env = %v, want %v (ambient SPINDRIFT_REPORT_FD=9 must not survive)", spec, got.Env, want)
+	}
+}
+
+// TestChildCommandMarksPoolChild pins issue #7342's marker: a pool child
+// carries exactly one SPINDRIFT_DAEMON_POOL_CHILD=1 (an ambient copy is
+// replaced), and the doctor preflight carries none, even from an ambient copy.
+func TestChildCommandMarksPoolChild(t *testing.T) {
+	count := func(env []string) int {
+		n := 0
+		for _, e := range env {
+			if strings.HasPrefix(e, PoolChildEnv+"=") {
+				n++
+			}
+		}
+		return n
+	}
+	child, err := ChildCommand(ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindOf(dispatchkind.Work), Env: []string{"PATH=/bin", PoolChildEnv + "=0"}})
+	if err != nil {
+		t.Fatalf("ChildCommand: %v", err)
+	}
+	if count(child.Env) != 1 || !slices.Contains(child.Env, PoolChildEnv+"=1") {
+		t.Fatalf("child env = %v, want exactly one %s=1", child.Env, PoolChildEnv)
+	}
+	doctor, err := DoctorCommand(DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Env: []string{"PATH=/bin", PoolChildEnv + "=1"}})
+	if err != nil {
+		t.Fatalf("DoctorCommand: %v", err)
+	}
+	if count(doctor.Env) != 0 {
+		t.Fatalf("doctor env = %v, want no %s", doctor.Env, PoolChildEnv)
 	}
 }
 
@@ -519,7 +548,7 @@ func TestSignalCarrierRidesArgvNotEnv(t *testing.T) {
 			if !reflect.DeepEqual(got.Argv, wantArgv) {
 				t.Fatalf("ChildCommand(%+v) argv = %v, want %v", spec, got.Argv, wantArgv)
 			}
-			wantEnv := append(append([]string{}, tc.wantEnv...), "SPINDRIFT_REPORT_FD=3")
+			wantEnv := append(append([]string{}, tc.wantEnv...), "SPINDRIFT_REPORT_FD=3", PoolChildEnv+"=1")
 			if !reflect.DeepEqual(got.Env, wantEnv) {
 				t.Fatalf("ChildCommand(%+v) env = %v, want %v", spec, got.Env, wantEnv)
 			}

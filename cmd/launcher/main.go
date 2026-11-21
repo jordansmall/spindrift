@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorsandbox"
+	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -2067,8 +2068,8 @@ type verbHandler func(args []string, stdout, stderr io.Writer) int
 
 // verbHandlers is the single source of truth for which subcommands exist
 // (issue #1574); a test enumerates its keys. The hidden __complete-issues
-// completion verb stays out of it and is dispatched ahead of the table lookup,
-// since it is not a documented verb.
+// and daemon.LateMergeSweepVerb verbs stay out of it and are dispatched ahead
+// of the table lookup, since neither is a documented verb.
 var verbHandlers = map[string]verbHandler{
 	"build": func(args []string, stdout, stderr io.Writer) int { return cmdBuild(stderr) },
 	"doctor": func(args []string, stdout, stderr io.Writer) int {
@@ -2289,6 +2290,9 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 	if verb == "__complete-issues" {
 		return cmdCompleteIssues()
+	}
+	if verb == daemon.LateMergeSweepVerb {
+		return sandboxVerdict(cmdLateMergeSweep(stdout, stderr), stderr)
 	}
 	if handler, ok := verbHandlers[verb]; ok {
 		return sandboxVerdict(handler(rest, stdout, stderr), stderr)
