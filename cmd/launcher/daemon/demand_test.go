@@ -935,3 +935,59 @@ func TestBuildDemandSources_ForgejoConnectorRowBuildsProbeSource(t *testing.T) {
 		}
 	}
 }
+
+// ADR 0075 decision 4: the route narrows the Daemon's demand count, so the
+// daemon does not spawn a child for issues that child's route would not queue.
+func TestBuildDemandSources_IssueRouteNarrowsCount(t *testing.T) {
+	clearKnobEnvT(t)
+	dir := t.TempDir()
+	writeIssueFileT(t, dir, "plain", "ready-for-agent")
+	routed := "---\ntitle: routed\nstate: ready-for-agent\nlabels: [orders-api]\ncreated: 2024-01-01T00:00:00Z\n---\nbody\n"
+	writeFileT(t, filepath.Join(dir, "routed.md"), routed)
+
+	count := func(route string) int {
+		t.Helper()
+		settings := map[string]string{"ISSUE_TRACKER": "local", "LOCAL_ISSUES_DIR": dir, "LABEL": "ready-for-agent"}
+		if route != "" {
+			settings["ISSUE_ROUTE"] = route
+		}
+		src, _ := buildDemandSources(demandDocT(settings), allDemandKinds)
+		n, err := src[daemon.KindOf(dispatchkind.Work)].CountReady(false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if got := count("label=orders-api"); got != 1 {
+		t.Errorf("routed CountReady = %d, want 1", got)
+	}
+	if got := count(""); got != 2 {
+		t.Errorf("unset-route CountReady = %d, want 2", got)
+	}
+}
+
+// A route the child's launcher would refuse leaves the kind without a demand
+// source, with the reason, as every other bad tracker knob does.
+func TestBuildDemandSources_BadIssueRouteHasNoSource(t *testing.T) {
+	cases := map[string]map[string]string{
+		"malformed":       {"ISSUE_TRACKER": "local", "LOCAL_ISSUES_DIR": "", "ISSUE_ROUTE": "orders-api"},
+		"undeclared kind": {"ISSUE_TRACKER": "github", "REPO_SLUG": "o/r", "ISSUE_ROUTE": "label=x"},
+	}
+	for name, settings := range cases {
+		t.Run(name, func(t *testing.T) {
+			clearKnobEnvT(t)
+			settings["LABEL"] = "ready-for-agent"
+			if settings["LOCAL_ISSUES_DIR"] == "" && settings["ISSUE_TRACKER"] == "local" {
+				settings["LOCAL_ISSUES_DIR"] = t.TempDir()
+			}
+			src, missing := buildDemandSources(demandDocT(settings), allDemandKinds)
+			work := daemon.KindOf(dispatchkind.Work)
+			if _, ok := src[work]; ok {
+				t.Error("work has a demand source despite a bad ISSUE_ROUTE")
+			}
+			if !strings.Contains(missing[work], "ISSUE_ROUTE") {
+				t.Errorf("missing[work] = %q, want it to name ISSUE_ROUTE", missing[work])
+			}
+		})
+	}
+}
