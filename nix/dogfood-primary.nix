@@ -3,8 +3,8 @@
 # of the native Strategy, with no fallback; a backend Connector answers every
 # read the native backend of the same name would, but only a backend that still
 # has a native adapter can be listed (the module refuses `primary` elsewhere).
-# github and jira have none left, so the list holds no backend. Dropping a name
-# here restores the native path without a code revert, though its
+# github, jira and forgejo have none left, so the list holds no backend.
+# Dropping a name here restores the native path without a code revert, though its
 # nix/fixtures.nix mirror row moves with it. A row is never in both this list
 # and nix/dogfood-shadow.nix (flake.nix asserts it); flake.nix reads both, and
 # nix/fixtures.nix's mkHarness mirror hardcodes each row (`primaryDrivers` for

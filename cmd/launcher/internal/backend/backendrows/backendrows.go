@@ -62,10 +62,9 @@ type Row struct {
 	Shadow      bool `json:"shadow,omitempty"`
 	ShadowEvery int  `json:"shadowEvery,omitempty"`
 	// Primary makes the Connector answer in place of the native adapter of the
-	// same name: github's reads and the writes docs/reference.md lists under
-	// "Backend primary mode" (the rest stay native until #6756).
-	// Refused with Shadow; Nix evaluation (lib/flakeModule.nix) also refuses it
-	// on jira, which always runs through its Connector.
+	// same name. Refused with Shadow; Nix evaluation (lib/flakeModule.nix) also
+	// refuses it on every backend row (forgejo, github, jira), which has no
+	// native adapter left to replace.
 	Primary bool `json:"primary,omitempty"`
 }
 

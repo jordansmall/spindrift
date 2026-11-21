@@ -36,8 +36,8 @@ in
     module = pkgs: "${import ./package.nix { inherit pkgs core; }}/forgejo.wasm";
     inherit routes;
     credential = "forgejoConnectorToken";
-    # The instance URL is the native adapter's own FORGEJO_BASE_URL; the base is
-    # not a secret, so a core knob may carry it.
+    # The instance URL is the core FORGEJO_BASE_URL knob; the base is not a
+    # secret, so a core knob may carry it.
     base = "forgejoBaseURL";
   };
 }
