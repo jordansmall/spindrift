@@ -34,6 +34,9 @@
     },
     "connectors/jira": {
       "component": "jira"
+    },
+    "connectors/opencode": {
+      "component": "opencode"
     }
   }
 }
