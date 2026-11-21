@@ -83,8 +83,9 @@ func withBuildDir(runTests func() int) int {
 
 // buildBinary is the non-TB core of Build.
 func buildBinary(root, pkg string) (string, error) {
-	// One lock across the whole go build is deliberate: no seam test runs
-	// t.Parallel, so serializing distinct packages costs nothing.
+	// One lock across the whole go build is deliberate: seam tests build only
+	// a couple of distinct packages, so serializing them costs little even
+	// under t.Parallel.
 	buildState.Lock()
 	defer buildState.Unlock()
 	key := filepath.Join(root, pkg)

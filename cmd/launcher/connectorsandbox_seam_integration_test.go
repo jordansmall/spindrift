@@ -93,9 +93,13 @@ func seamOutcome(status string) string {
 }
 
 func TestSeamConnectorSandboxStoppedOnce(t *testing.T) {
+	t.Parallel()
 	for _, runtime := range []string{"podman", "bwrap"} {
 		for _, x := range sandboxExits {
-			t.Run(x.name+"-"+runtime, func(t *testing.T) { runSandboxExit(t, runtime, x) })
+			t.Run(x.name+"-"+runtime, func(t *testing.T) {
+				t.Parallel()
+				runSandboxExit(t, runtime, x)
+			})
 		}
 	}
 }
@@ -346,9 +350,11 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 // subprocess cannot be pointed away from, so bwrap's list-then-stop is pinned
 // at the runner (runnertest SandboxOrphan).
 func TestSeamConnectorSandboxReapsOrphans(t *testing.T) {
+	t.Parallel()
 	orphan, others := stageOrphan(t)
 	for _, imageAbsent := range []bool{false, true} {
 		t.Run(fmt.Sprintf("imageAbsent=%t", imageAbsent), func(t *testing.T) {
+			t.Parallel()
 			rig := newSandboxRig(t, "podman", sandboxRigOpts{
 				mode: sandboxLocal, runs: []seamtest.PodmanRun{{Outcome: seamOutcome("ready")}}, issues: []int{7},
 				running: append([]string{orphan}, others...), imageAbsent: imageAbsent,
@@ -569,6 +575,7 @@ func bwrapSandboxArtifacts(t *testing.T, host string) map[string]string {
 // token introspection and that read are the two things the .log holds, and the
 // audit file holds no Connector decisions, only the totals.
 func TestSeamConnectorSandboxPrimaryTotals(t *testing.T) {
+	t.Parallel()
 	rig := newSandboxRig(t, "podman", sandboxRigOpts{mode: sandboxPrimary, issues: []int{7}})
 	res := seamtest.Start(t, rig.cmd).Wait(t)
 	res.WantExit(t, 1)
