@@ -1,5 +1,24 @@
 # Migration Guide
 
+## The native forgejo tracker is deleted (issue #7122)
+
+forgejo's issue tracker is built only from the forgejo Connector row, as its
+Code Forge already was (issue #6868). `spindrift.connectors.forgejo.primary`
+is refused, as no native tracker remains to switch: a forgejo row that sets
+it fails evaluation with ``Connector 'forgejo': `primary` needs a native backend of the
+same name to replace; none is registered``. Delete the line; the row routes
+through the Connector without it. A forgejo Consumer that never set `primary`
+evaluates unchanged.
+
+What else changed:
+
+- **An `ISSUE_TRACKER=forgejo` run needs
+  `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`**, as a `CODE_FORGE=forgejo` run does.
+- **A missing or `shadow` forgejo row fails the tracker build** with
+  `ErrNoConnectorRow`, as it does the forge build.
+
+See [The forgejo Connector](docs/reference.md#the-forgejo-connector).
+
 ## `CONNECTOR_SANDBOX` is removed (issue #7022)
 
 The Connector sandbox is now always on: every Connector the launcher hosts,
@@ -65,12 +84,11 @@ What changed for a forgejo Consumer:
 - **A run whose `CODE_FORGE` is forgejo needs
   `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`.** Set it like any secret knob (the
   value, `_CMD`, or `SECRET_CMD`). `FORGEJO_TOKEN` stays git's credential, so
-  both are needed. An `ISSUE_TRACKER=forgejo` run needs it only when the row
-  sets `primary`.
+  both are needed. An `ISSUE_TRACKER=forgejo` run needs it too (issue #7122).
 - **`MERGE_METHOD` must be `rebase` or unset.** The Connector merges by rebase
   only; the launcher refuses to build the forge for `squash` or `merge`.
-- **`primary = true` still evaluates.** It now moves only the issue tracker,
-  which stays native until #7122.
+- **`primary = true` no longer evaluates** (issue #7122): the native tracker it
+  switched is deleted.
 - **A forgejo Code Forge needs an https `FORGEJO_BASE_URL`.** The native forge
   accepted `http`; the Connector's routes are https only. With an unset or
   `http` base the forge build fails with `ErrNoConnectorRow` and the cause,

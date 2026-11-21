@@ -129,8 +129,8 @@ let
       credentialKnob = "githubConnectorToken";
       acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).github;
     };
-    # Registered but not primary: the Connector is the Code Forge whatever
-    # `primary` says; `primary` is refused on it (no native tracker remains), so
+    # Registered but not primary: the Connector is the tracker and Code Forge
+    # (`primary` is refused on it, no native backend remains), so
     # nix/dogfood-primary.nix omits it.
     backendRows.forgejo = {
       module = p: "${forgejoConnector.package p}/forgejo.wasm";

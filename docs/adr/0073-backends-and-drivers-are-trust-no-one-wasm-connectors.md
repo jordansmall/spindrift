@@ -1343,3 +1343,17 @@ config evaluates unchanged, `primary` included. A `CODE_FORGE=forgejo` run needs
 and `MERGE_METHOD` `rebase` or unset. The in-box half (the Box token, the
 in-box forge CLI and forgejo-cli) stays until #6757. The pinned exception in
 rule 7 shrinks to the native forgejo tracker.
+
+## Amendment (issue #7122): the native forgejo tracker is deleted
+
+forgejo's issue tracker is built only from a non-shadow forgejo backend row's
+Connector, as its Code Forge already was, so no native network backend is left.
+The row is Connector-only like github's and jira's: `primary` on it fails
+evaluation with the same no-native-backend refusal, and a missing or shadow row
+fails the tracker build with `ErrNoConnectorRow`. An existing forgejo Consumer
+config that never set `primary` evaluates unchanged. The pinned exception in
+rule 7 is emptied, so the Bundle test admits only Connector-only rows and the
+Built-in `local` and `git` backends. The generic backend read shadow has no
+native adapter left to serve. The in-box half (the Box token, the in-box forge
+CLI and forgejo-cli) stays until #6757; an `ISSUE_TRACKER=forgejo` run now
+needs `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`.

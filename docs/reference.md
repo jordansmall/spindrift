@@ -2315,10 +2315,10 @@ is the fixture Connector in
   every read with `ErrNoRoute` (issue #6811). A `driver` row must name a core Driver and carry a `module`;
   the Box replays each Pass log through it and records divergences. A
   `backend` row samples every `shadowEvery`th read (default 10, minimum 1) per
-  operation through its Connector instead. With `primary` on, the Connector
-  answers the native backend's calls with no fallback: forgejo's whole tracker
-  (see [The forgejo Connector](#the-forgejo-connector)); forgejo's Code Forge
-  is the Connector's whether or not `primary` is set. github takes no
+  operation through its Connector instead. forgejo takes no `primary` either:
+  its tracker and Code Forge are always the Connector's, and a forgejo row that
+  sets it fails evaluation (issue #7122; see [The forgejo
+  Connector](#the-forgejo-connector)). github takes no
   `primary`: every Consumer of the root `spindrift.flakeModules.default`
   carries the github row, and a plain row answers every github read and write
   (see [Backend primary mode](#backend-primary-mode)). It has no native
@@ -2694,8 +2694,8 @@ And a shadow row has no native adapter left to be compared against, so it fails
 every call too; drop `shadow` from it. Core runs no `gh` at all: the Box's
 open-PR question is answered by the Launcher (issue #6902). The ADR 0073 migration window is closed and its all-or-none rule is in
 force: the Bundle registers no native network backend, and a Go test fails if
-it registers one, except forgejo's native tracker, a pinned exception until
-#7122 deletes it (the native forge went with #6868). The Connector is held to
+it registers one; the pin that held forgejo's native tracker is empty (#6868
+deleted the forge, #7122 the tracker). The Connector is held to
 the tracker read contract (`forgetest.RunTrackerReadContract`, with a
 `StateSeeder` standing in for the writes a read-only tracker lacks) and the PR
 forge read contract (`forgetest.RunPRForgeReadContract`), which the Connector's
@@ -2842,14 +2842,17 @@ The Connector also ships the forgejo fragment folder,
 declared file wins over a custom fragments directory, a `forgejo/<name>.md` in
 a `SPINDRIFT_PROMPT_DIR` is ignored (see [`MIGRATING.md`](../MIGRATING.md)).
 
-The forgejo Code Forge is always the Connector's, in every launcher process
-that builds it (dispatch, research, the daemon, reconcile, recover and doctor;
+The forgejo Code Forge and tracker are always the Connector's, in every launcher process
+that builds them (dispatch, research, the daemon, reconcile, recover and doctor;
 quickstart defers to `spindrift doctor`), with core's own git doing every git
 operation. There is no native forgejo forge: a Consumer whose forgejo row is
-absent or `shadow` fails to build the Code Forge with `ErrNoConnectorRow`, and
-every Consumer of the root `spindrift.flakeModules.default` carries the row. The forgejo issue tracker
-stays native until #7122 unless the Consumer sets
-`spindrift.connectors.forgejo.primary = true`, which moves only the tracker.
+absent or `shadow` fails to build either with `ErrNoConnectorRow`, and
+every Consumer of the root `spindrift.flakeModules.default` carries the row.
+The forgejo issue tracker is the Connector's too, since the native tracker was
+deleted (issue #7122). The row takes no `primary`: a forgejo row that sets it
+fails evaluation with ``Connector 'forgejo': `primary` needs a native backend
+of the same name to replace; none is registered``. Drop it; a forgejo Consumer
+config that never set `primary` evaluates unchanged.
 
 - The Connector authorizes with `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`, resolved
   by the launcher and the daemon like any secret knob (the value, `_CMD`, or
@@ -2858,11 +2861,11 @@ stays native until #7122 unless the Consumer sets
 - `MERGE_METHOD` must be `rebase` or unset: the Connector merges by rebase only,
   and the launcher refuses to build the forge for `squash` or `merge` rather
   than ignore the knob.
-- There is no fallback, with or without `primary`. A Connector that fails to
+- There is no fallback. A Connector that fails to
   load, or a request its Route table refuses, fails the operation with the
   Connector's own error, and the native adapter never answers instead. The
   Connector's audit lines go to `.spindrift/logs/connector-forgejo.audit.jsonl`.
-- Under `primary`, every tracker operation goes through the Connector: reads,
+- Every tracker operation goes through the Connector: reads,
   the claim and every transition, label edits and creation, comments (the
   agent-facing and the host-posted ones), filed findings, and native
   dependencies. The tracker requires the Connector to advertise the writes
@@ -2870,17 +2873,15 @@ stays native until #7122 unless the Consumer sets
   `tracker.comment`, `tracker.fileIssue` and `tracker.closeIssue`, and the reads
   `tracker.comments`, `tracker.nativeDeps`, `tracker.blocks`, `tracker.probe`,
   `tracker.count`, `tracker.labeled` and `tracker.searchIssues`; one missing
-  fails the build with `forgejo Connector lacks required capabilities: ...`
-  and the native tracker does not answer in its place. The Connector
+  fails the build with `forgejo Connector lacks required capabilities: ...`.
+  The Connector
   credential therefore covers issue writes as well as pull requests.
 
-Dropping `primary` restores the native tracker with no code revert; the Code
-Forge stays the Connector's. The [forgejo integration
-harness](#forgejo-integration-harness) runs its lifecycle once more with
-`primary` set when
-`SPINDRIFT_BACKEND_CONNECTOR_WASM` and `SPINDRIFT_BACKEND_CONNECTOR_ROUTES`
-name a built Connector, fronting the harness Forgejo with a TLS proxy because
-the Connector refuses a non-https base.
+The [forgejo integration harness](#forgejo-integration-harness) runs its
+lifecycle through the Connector when `SPINDRIFT_BACKEND_CONNECTOR_WASM` and
+`SPINDRIFT_BACKEND_CONNECTOR_ROUTES` name a built Connector, fronting the
+harness Forgejo with a TLS proxy because the Connector refuses a non-https
+base.
 
 #### Shadow mode
 
@@ -3110,10 +3111,11 @@ the verb then reports no Pass logs found; point it at the nested directory.
 ##### Backend read shadow
 
 A shadowed backend row (`backend` with `shadow` on) samples the backend's reads
-instead of replaying a log. It needs a native adapter to stay authoritative, so
-it serves backends that still have one (forgejo); github no longer does (issue
-#6811), and a shadow github row fails every read with `ErrNoRoute`. Only
-`dispatch` and `research` runs shadow; the
+instead of replaying a log. It needs a native adapter to stay authoritative, and
+none remains: github lost its (issue #6811) and forgejo its (issue #7122), so a
+shadow github row fails every read with `ErrNoRoute` and a shadow forgejo row
+fails the tracker and forge build with `ErrNoConnectorRow`. Where an adapter
+exists, only `dispatch` and `research` runs shadow; the
 launcher wraps the native tracker and forge, and every `shadowEvery`th call to
 each operation, the first included, is also asked of the Connector. The shadowed
 operations are the tracker reads `ListIssues`, `ListOpenIssues` and `Issue`, and
@@ -3319,14 +3321,14 @@ leaks of the switches. The github row is the default for every Consumer, and
 `nix/dogfood-primary.nix` lists no backend. The jira row is not a primary row:
 it routes the whole tracker with no native backend to fall back to or shadow
 ([Running jira through its Connector](#running-jira-through-its-connector)).
-The forgejo row replaces the whole Code Forge always and, under `primary`, the
-whole tracker, reads and writes; it is [documented with its
+The forgejo row is not a primary row either: it replaces the whole Code Forge
+and the whole tracker, reads and writes, always; it is [documented with its
 Connector](#the-forgejo-connector). The rest of this section describes
 github's. On github, no read or write stays on `gh`. Primary and shadow are
 exclusive, so a primary row samples nothing; evaluation refuses the two
 together, a row with neither a `backend` nor a `driver` (a Driver's primary
 mode is [its own](#driver-primary-mode)), and a name with no native backend
-(github and jira), each naming the row.
+(github, jira and forgejo), each naming the row.
 
 There is no fallback. A Connector that fails to load, or a request its Route
 table refuses, fails the read or write with the Connector's own error and the
@@ -4354,11 +4356,12 @@ secret) may appear in host-side logs. The plaintext direct-value and
 with this in place, `harness.env` is expected to hold fetch recipes
 rather than live credentials. A Connector backend row's host-only
 credential (`SPINDRIFT_GITHUB_CONNECTOR_TOKEN`,
-`SPINDRIFT_JIRA_CONNECTOR_TOKEN`) resolves the same way: `<ENV>_CMD`, then
+`SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`, `SPINDRIFT_JIRA_CONNECTOR_TOKEN`) resolves
+the same way: `<ENV>_CMD`, then
 the plain env var, then the `SECRET_CMD` template. The template applies
 only to a row this run reads through: its backend is the active
-`CODE_FORGE` or `ISSUE_TRACKER`, and the row is shadowed or routed (github
-under `primary`, jira always). An explicit `<ENV>_CMD` runs regardless. The
+`CODE_FORGE` or `ISSUE_TRACKER`, and the row is shadowed or routed (github,
+forgejo and jira always). An explicit `<ENV>_CMD` runs regardless. The
 jira row's paired identity env, `SPINDRIFT_JIRA_CONNECTOR_EMAIL`, gets no `_CMD` or
 template resolution. The token has no `--<secret>-cmd` or `--<secret>-file`
 flag, and a failing command or template fails startup naming the env var,
@@ -6548,9 +6551,8 @@ the repo does not define.
 
 #### Forgejo integration harness
 
-The httptest contract suite (`TestForgejoClient_TrackerContract` for the
-native tracker, and the Connector's conformance check for the Code Forge) pins
-the adapters' behaviour against a fake that mirrors their own expectations back
+The httptest contract suite (the Connector's conformance check) pins
+the adapter's behaviour against a fake that mirrors their own expectations back
 at them — fast, hermetic, and part of the default gate, but structurally unable
 to catch an adapter drifting from Forgejo's *real* wire format, because the fake
 drifts along with it. The **integration harness** closes that gap: it boots a
@@ -6558,7 +6560,7 @@ throwaway Forgejo from its published OCI image, seeds a repo, an issue, and
 both label families, and drives one real dispatch loop — claim, work, PR, merge,
 complete — through the real IssueTracker and CodeForge/PRForge, asserting the
 canonical lifecycle at each step. A deliberate API-shape regression in the
-tracker adapter or the Connector (a renamed JSON tag, a changed REST path)
+Connector (a renamed JSON tag, a changed REST path)
 fails the harness where the contract suite stays green.
 
 It is **opt-in**: it lives behind the `integration` build tag, so a plain
@@ -6579,12 +6581,10 @@ SPINDRIFT_BACKEND_CONNECTOR_WASM=$wasm SPINDRIFT_BACKEND_CONNECTOR_ROUTES=$route
 
 Run it from the repository root. The two Connector variables name the built
 forgejo Connector and its Route table, as `connectors/forgejo`'s
-`connector-forgejo-conformance` check exports them. Both subtests need
-them, since the Code Forge is always the Connector's: the `native tracker`
-subtest runs the Connector's Code Forge beside the native tracker, and the
-`primary` subtest reruns the lifecycle with the tracker built from the
-Connector too (see [The forgejo Connector](#the-forgejo-connector)). Without the
-variables both skip and the run reports green having tested nothing.
+`connector-forgejo-conformance` check exports them. The test needs them, since
+the tracker and the Code Forge are both the Connector's (see [The forgejo
+Connector](#the-forgejo-connector)). Without the variables it skips and the run
+reports green having tested nothing.
 
 The one `go test` run boots, seeds, runs the loop, asserts, and tears the
 container down — no external service and no credential beyond the throwaway

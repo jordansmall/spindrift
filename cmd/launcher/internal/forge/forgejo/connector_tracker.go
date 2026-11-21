@@ -15,13 +15,12 @@ import (
 )
 
 // errConnectorCapabilities is a Connector whose handshake omits a method the
-// native tracker serves, with nothing behind it to fall back to.
+// tracker needs, with nothing behind it to fall back to.
 var errConnectorCapabilities = errors.New("forgejo Connector lacks required capabilities")
 
-// connectorCapabilities are what the native forgejo tracker serves, so none
-// silently disappears under a primary row. A missing one would reach a nil
-// native layer, and a missing CapLabeled would degrade the finding dedup to
-// open issues.
+// connectorCapabilities are what the forgejo tracker needs, so none silently
+// disappears. A missing one would reach a nil layer, and a missing CapLabeled
+// would degrade the finding dedup to open issues.
 var connectorCapabilities = []string{
 	connectortracker.CapTransition, connectortracker.CapEditLabels, connectortracker.CapLabels,
 	connectortracker.CapComment, connectortracker.CapFileIssue, connectortracker.CapCloseIssue,

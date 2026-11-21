@@ -560,7 +560,7 @@ func TestResolveConnectorCredentials_ForgejoRowResolvesAsForgeOrTracker(t *testi
 }
 
 // A routed github row is read as the CODE_FORGE through its Connector with or
-// without `primary`, so its credential resolves even with a native tracker.
+// without `primary`, so its credential resolves even with a local tracker.
 func TestResolveConnectorCredentials_GithubForgeRowResolvesWithoutPrimary(t *testing.T) {
 	clearKnobEnvT(t)
 	useGithubConnectorRow(t, "")

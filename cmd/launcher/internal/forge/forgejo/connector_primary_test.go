@@ -304,9 +304,9 @@ func TestConnectorTracker_LoadErrorIsReturnedAsIs(t *testing.T) {
 	}
 }
 
-// A Connector whose handshake omits a capability the native tracker serves
-// would leave that operation with nothing behind it, so loading it fails by
-// name and closes it.
+// A Connector whose handshake omits a capability the tracker needs would leave
+// that operation with nothing behind it, so loading it fails by name and
+// closes it.
 func TestConnectorTracker_RefusesAConnectorMissingACapability(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
@@ -385,7 +385,7 @@ func TestConnectorTracker_ExposesTheNativeCapabilitySet(t *testing.T) {
 			t.Errorf("the Connector-only tracker lacks %s", name)
 		}
 	}
-	// Unlike the native tracker's true: the Connector's list is one capped page.
+	// The Connector's list is one capped page.
 	if fp, _ := forge.As[forge.FullyPaginated](w.tr); fp == nil || fp.WalksAllPages() {
 		t.Error("FullyPaginated.WalksAllPages = true, want false")
 	}

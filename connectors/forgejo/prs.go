@@ -11,7 +11,7 @@ import (
 )
 
 // wipPrefix is the one marker the write side produces; the read side accepts
-// every default Forgejo spelling, as the native adapter does.
+// every default Forgejo spelling.
 const wipPrefix = "WIP:"
 
 var wipPrefixes = []string{wipPrefix, "[WIP]"}
