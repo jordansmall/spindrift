@@ -230,10 +230,9 @@ func TestSelectiveListDispatch_BlockerOrderedAhead(t *testing.T) {
 }
 
 // Regression test for #524: `dispatch 12 15`, where #15 is blocked by in-list,
-// unmerged #12, dispatches #12 only in one invocation and never claims #15. The
-// remaining-list and re-run-command output is covered in the waves package,
-// because drainMaxJobs writes it to stdout directly rather than through the
-// io.Writer this test's caller injects.
+// unmerged #12, dispatches #12 only and never claims #15. The remaining-list
+// output is covered in the waves package, since drainMaxJobs writes it to
+// stdout directly rather than through the injected io.Writer.
 func TestSelectiveListDispatch_InListUnmergedBlocker_DispatchesOnlyBlocker(t *testing.T) {
 	c := baseConfig()
 	c.Label = "ready-for-agent"
@@ -326,10 +325,9 @@ func TestPreviewIssues_WithList_ShowsAnnotations(t *testing.T) {
 	}
 }
 
-// Regression test for #1420 at the second call site: previewIssues with an
-// explicit issue list routes to previewSelectiveList, which must also thread
-// result.Failed into waves.Input so a DepsOf call failure renders distinctly
-// instead of as a plain zero-blocker line.
+// Regression test for #1420 at the second call site: previewSelectiveList must
+// also thread result.Failed into waves.Input so a DepsOf failure renders
+// distinctly rather than as a zero-blocker line.
 func TestPreviewIssues_WithList_DepsOfCheckFailure_AnnotatesDistinctly(t *testing.T) {
 	c := baseConfig()
 	c.Label = "ready-for-agent"
@@ -507,11 +505,10 @@ func TestEvictUnmetBlockers_KeepsMergedBlocker(t *testing.T) {
 	}
 }
 
-// Regression test for #2130, exercising the real seed-branch wiring rather than
-// a stubbed Config.SeedScopeOf. Under CODE_FORGE=local, evictUnmetBlockers
-// resolves the dependent's own localloop.SeedScopeResolver(it, cf) live, so an
-// external blocker whose landing already reached the dependent's own
-// integration/<parent> seed branch satisfies the edge and nothing is evicted.
+// Regression test for #2130 over the real seed-branch wiring: under
+// CODE_FORGE=local, evictUnmetBlockers resolves the dependent's own seed scope
+// live via localloop.SeedScopeResolver, so an external blocker whose landing
+// reached the dependent's integration/<parent> seed branch satisfies the edge.
 func TestEvictUnmetBlockers_LocalForge_SameParentBlockerLandingReleases(t *testing.T) {
 	fc := forge.NewFake()
 	landing := "integration/999@shaXYZ"
@@ -588,10 +585,9 @@ func TestEvictUnmetBlockers_CascadingEviction(t *testing.T) {
 	}
 }
 
-// Regression test for #1103: selective dispatch threads NewReadiness's failed
-// set through to the wave engine, so an issue whose own DepsOf call errored is
-// held for retry rather than dispatched or cascade-failed, while an unaffected
-// sibling still dispatches normally.
+// Regression test for #1103: an issue whose own DepsOf call errored is held
+// for retry rather than dispatched or cascade-failed, while an unaffected
+// sibling still dispatches.
 func TestSelectiveListDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched(t *testing.T) {
 	c := baseConfig()
 	c.Label = "ready-for-agent"
@@ -659,11 +655,10 @@ func writeLocalReadyIssue(t *testing.T, dir, slug, label string) {
 	}
 }
 
-// Issue #3055, acceptance criterion 1: under a real local.LocalTracker, a
-// non-numeric slug ID resolves via LocalTracker.Issue, which reads dir/<slug>.md
-// directly with no numeric parsing, and dispatches only that issue. A second
-// ready-for-agent issue in the same dir stays untouched, proving this took the
-// selective path and not a full-queue drain that would have picked it up too.
+// Issue #3055 AC1: under a real local.LocalTracker a non-numeric slug ID
+// resolves via LocalTracker.Issue and dispatches only that issue. A second
+// ready-for-agent issue in the dir stays untouched, proving the selective path
+// ran, not a full-queue drain.
 func TestSelectiveListDispatch_LocalTrackerSlugID_ResolvesOnlyThatIssue(t *testing.T) {
 	c := baseConfig()
 	c.Label = "ready-for-agent"
@@ -703,11 +698,9 @@ func TestSelectiveListDispatch_LocalTrackerSlugID_ResolvesOnlyThatIssue(t *testi
 	}
 }
 
-// Issue #3055, acceptance criterion 2: an unresolvable ID exits non-zero with an
-// error naming it, and a valid ID earlier in the list is not dispatched either,
-// because fetchSelectiveIssues fails fast on the first Issue() error before
-// selectiveListDispatch reaches waves.Dispatch. forge.Fake's Issue() returns the
-// same not-found shape a real backend adapter would, slug or numeric alike.
+// Issue #3055 AC2: an unresolvable ID exits non-zero naming it, and a valid ID
+// earlier in the list is not dispatched either: fetchSelectiveIssues fails fast
+// on the first Issue() error, before waves.Dispatch.
 func TestSelectiveListDispatch_UnknownID_FailsFastDispatchesNothing(t *testing.T) {
 	c := baseConfig()
 	c.Label = "ready-for-agent"
@@ -737,9 +730,8 @@ func TestSelectiveListDispatch_UnknownID_FailsFastDispatchesNothing(t *testing.T
 	}
 }
 
-// Issue #3055, acceptance criterion 3, at the selective.go layer:
-// fetchSelectiveIssues treats every ID as an opaque string with no numeric or
-// slug branch in its loop, so a mixed list resolves in the exact order given.
+// Issue #3055 AC3: fetchSelectiveIssues treats every ID as an opaque string,
+// so a mixed numeric/slug list resolves in the exact order given.
 func TestFetchSelectiveIssues_MixedNumericAndSlugIDs_PreservesOrder(t *testing.T) {
 	c := baseConfig()
 	c.Label = "ready-for-agent"

@@ -6,9 +6,7 @@ import (
 	"testing"
 )
 
-// TestValidClass pins the one Chore class slug grammar (issue #3986):
-// lowercase letter or digit first, then lowercase letters, digits, and
-// hyphens, at most 40 characters.
+// TestValidClass pins the one Chore class slug grammar (issue #3986).
 func TestValidClass(t *testing.T) {
 	cases := []struct {
 		name  string

@@ -24,9 +24,9 @@ import (
 )
 
 // MODEL must stay sonnet-5 and not regress to opus-4-8 or an older release
-// (issue #2240). The issue #2514 review found SCOUT_MODEL, REVIEW_MODEL,
-// FILER_MODEL and WORKER_MODEL generated into the fixture
-// (cmd/launcher/defaultmodels_gen_test.go) but asserted nowhere.
+// (issue #2240). SCOUT_MODEL, REVIEW_MODEL, FILER_MODEL and WORKER_MODEL are
+// generated into the fixture (defaultmodels_gen_test.go) and must be asserted
+// too (issue #2514).
 func TestSchemaFlags_DefaultModelsMatchFixture(t *testing.T) {
 	for env, want := range expectedDefaultModels {
 		t.Run(env, func(t *testing.T) {
@@ -324,13 +324,11 @@ func TestParseFlags_ButlerRejectedUnlessAfterDoctor(t *testing.T) {
 	}
 }
 
-// parseFlags verb-scopes the "--verbose" spelling to doctor; every other
-// verb still hits the ordinary unknown-flag error, whether --verbose trails
-// the verb or (since parseFlags hasn't seen a verb yet) leads it. The bare
-// "-v" spelling has no "--" prefix, so parseFlags forwards it as a
-// positional to whatever verb follows: doctorFlagArgs accepts it as the
-// short spelling of --verbose for doctor, while other verbs reject it their
-// own way, e.g. as a bogus issue ID (issue #3777).
+// parseFlags verb-scopes "--verbose" to doctor; every other verb hits the
+// unknown-flag error whether --verbose trails or leads it (no verb seen yet).
+// The bare "-v" has no "--" prefix, so parseFlags forwards it as a positional:
+// doctorFlagArgs accepts it, while other verbs reject it their own way, e.g. as
+// a bogus issue ID (issue #3777).
 func TestParseFlags_VerboseRejectedUnlessAfterDoctor(t *testing.T) {
 	cases := [][]string{
 		{"dispatch", "--verbose"},
@@ -620,7 +618,7 @@ func TestParseFlags_ContinuousDispatchBareAlias(t *testing.T) {
 
 // The listing is pinned byte-for-byte so a change to printSubcommands, such
 // as its column-width constant, cannot silently misalign the output the way
-// a hand-picked width once did (issue #1575 review).
+// a hand-picked width once did (issue #1575).
 func TestPrintSubcommands_ExactOutput(t *testing.T) {
 	want := "Subcommands:\n" +
 		"  dispatch [--no-build] [--yes] [--continuous] [issue...]                                                                                        dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)\n" +
@@ -1109,8 +1107,7 @@ func TestResolveSecretCmd_NonZeroExit_NeverLeaksCommandOrOutput(t *testing.T) {
 }
 
 // A signal-killed command reports ExitCode() == -1, a sentinel rather than a
-// real exit code. Printing it would mislead the operator (issue #1972 review
-// finding).
+// real exit code; printing it would mislead the operator (issue #1972).
 func TestResolveSecretCmd_SignalKilled_OmitsFabricatedExitCode(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1461,7 +1458,7 @@ func TestApplySecretCmdFallback_UsesDocumentSettings(t *testing.T) {
 // GH_TOKEN vault lookup. Artifacts carries the FULLY_LOCAL bit nix bakes
 // alongside that Settings pairing, so the fixture models a real document:
 // secretRequiredThisRun trusts the forwarded artifact only when Settings
-// still matches the resolved pairing (ADR 0020; issue #2527 review).
+// still matches the resolved pairing (ADR 0020; issue #2527).
 func TestApplySecretCmdFallback_SkipsGhTokenWhenDocumentIsFullyLocal(t *testing.T) {
 	useDoc(t, &inputdoc.Document{
 		Settings:  map[string]string{"CODE_FORGE": "local", "ISSUE_TRACKER": "local"},
@@ -2179,9 +2176,8 @@ func TestParseIssuePositionals_IDBeforeBool(t *testing.T) {
 
 // Non-numeric positionals pass through unfiltered; parseIssuePositionals's
 // doc comment in flags.go says why (issue #3054). A flag-shaped positional,
-// such as a slug ID surviving a "--" separator, must also survive verbatim,
-// the case a prior version silently dropped (issue #3055), because every
-// issue-taking verb now uses remaining with no further filtering.
+// such as a slug ID surviving a "--" separator, must also survive verbatim
+// (issue #3055), since every issue-taking verb uses remaining unfiltered.
 func TestParseIssuePositionals_NonNumericPassedThrough(t *testing.T) {
 	parsed := parseIssuePositionals([]string{"--no-build", "foo", "--yes", "42", "bar", "--odd-slug"})
 	if !parsed.noBuild || !parsed.yes || parsed.selfContained {

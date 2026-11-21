@@ -12,10 +12,10 @@ import (
 	"spindrift.dev/launcher/internal/retry"
 )
 
-// terminateCases are the rows where an operator's Terminate (or Reclaim) lands
-// while Settle stands in the PR landing: one row per stop point, each of which
-// must abandon without committing tracker state or posting a comment, since
-// the stop already released the issue (ADR 0024, issue #3523).
+// terminateCases are the rows where a Reclaim lands while Settle stands in the
+// PR landing: one row per stop point, each of which must abandon without
+// committing tracker state or posting a comment, since the stop already
+// released the issue (ADR 0024, issue #3523).
 func terminateCases() []prCase {
 	flip := []string{"MarkReady:" + testPR}
 	reds := []forge.RollupState{red, red, red, red}

@@ -155,10 +155,9 @@ func TestNewGatedContext_InvalidConfig_SurfacesValidateError(t *testing.T) {
 }
 
 // A relay-incapable CODE_FORGE (withRelayIncapableGit: no registered forge is
-// one since #6898) paired with read-only access
-// trips checkReadOnlyCapabilityGate on an
-// otherwise-valid config. That proves newGatedContext walks gateRegistry at
-// all, rather than only ever exercising the validate() short-circuit above.
+// one since #6898) with read-only access trips checkReadOnlyCapabilityGate on
+// an otherwise-valid config, proving newGatedContext walks gateRegistry at
+// all rather than only exercising the validate() short-circuit above.
 func TestNewGatedContext_FailingRegistryGate_SurfacesGateError(t *testing.T) {
 	withRelayIncapableGit(t)
 	setKnob(t, "REPO_SLUG", "owner/repo")

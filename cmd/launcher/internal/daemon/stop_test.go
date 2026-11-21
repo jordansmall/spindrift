@@ -10,11 +10,9 @@ import (
 	"time"
 )
 
-// TestLoopClosedStopHaltsWithNoChildStarted covers the "already stopped
-// before Loop was even called" edge of the operator-stop latch: a
-// pre-closed Config.Stop must halt deterministically before any slot ever
-// reaches StartChild, not merely once the background watcher happens to be
-// scheduled.
+// TestLoopClosedStopHaltsWithNoChildStarted pins that a Config.Stop closed
+// before Loop is called halts before any slot reaches StartChild, not merely
+// once the background watcher is scheduled.
 func TestLoopClosedStopHaltsWithNoChildStarted(t *testing.T) {
 	stop := make(chan struct{})
 	close(stop)
@@ -56,11 +54,9 @@ func TestLoopClosedStopEndsInProgressResolveTipPromptly(t *testing.T) {
 		revisions: []string{"rev1"},
 		results:   []ChildResult{{Exit: 0}},
 		onResolve: func(ctx context.Context, call int) error {
-			// Signals the fetch is genuinely in flight before the test
-			// closes Stop — otherwise a fast scheduler could have the
-			// watcher goroutine halt the pool before runSlot ever reaches
-			// ResolveTip, and this test would pass for the wrong
-			// reason (no fetch to interrupt at all).
+			// Signal the fetch is in flight before Stop closes; otherwise
+			// the watcher could halt the pool before runSlot reaches
+			// ResolveTip and the test would pass with no fetch to interrupt.
 			close(resolving)
 			<-ctx.Done()
 			close(unblocked)
@@ -103,13 +99,10 @@ func TestLoopClosedStopEndsInProgressResolveTipPromptly(t *testing.T) {
 	}
 }
 
-// TestLoopClosedStopEndsInProgressBackoffSleepPromptly covers the other half
-// of the "closed Stop ends an in-progress wait promptly" acceptance
-// criterion (TestLoopClosedStopEndsInProgressResolveTipPromptly above
-// covers the fetch half): a slot parked in the failure backoff sleep must
-// unblock the instant Stop closes, not sleep out the rest of
-// FailureBackoff. BreakerThreshold defaults to 1000 (testConfig), so this
-// one unclassified exit backs the slot off instead of tripping the breaker.
+// TestLoopClosedStopEndsInProgressBackoffSleepPromptly pins that a slot parked
+// in the failure backoff sleep unblocks the instant Stop closes, not after
+// sleeping out FailureBackoff. testConfig's BreakerThreshold (1000) makes this one
+// unclassified exit back off rather than trip the breaker.
 func TestLoopClosedStopEndsInProgressBackoffSleepPromptly(t *testing.T) {
 	stop := make(chan struct{})
 
@@ -319,14 +312,11 @@ func TestChildRequestForwardsLatchesClosedAfterAdmission(t *testing.T) {
 }
 
 // TestLoopExit7WithStopOpenBacksOffAndCounts pins issue #3626's other half:
-// exit 7 while Stop is still open means someone else signalled that child,
-// not the operator — an unclassified failure like any other, so it counts
-// in the breaker rather than halting the pool outright. BreakerThreshold: 2
-// scripts two such exits so the first is asserted as a genuine backoff (the
-// slot actually sleeps and refills) before the second crosses the
-// threshold — BreakerThreshold: 1 (as this test used to run it) trips on
-// the first exit, before any backoff sleep, so it could never assert that
-// half.
+// exit 7 with Stop still open means someone else signalled the child, an
+// unclassified failure that counts in the breaker. BreakerThreshold: 2 lets
+// the first exit be asserted as a genuine backoff (the slot sleeps and
+// refills) before the second crosses the threshold; 1 would trip on the first
+// exit, before any backoff.
 func TestLoopExit7WithStopOpenBacksOffAndCounts(t *testing.T) {
 	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 7}, {Exit: 7}}}
 	clk := &testClock{}
@@ -356,14 +346,11 @@ func TestLoopExit7WithStopOpenBacksOffAndCounts(t *testing.T) {
 	}
 }
 
-// TestLoopExit7WithStopClosedHaltsAsOperatorStop pins issue #3626's
-// headline case: exit 7 keeps its pre-#3626 meaning — an operator stop,
-// exit 0 — but only while Stop was already closed when the child exited.
-// Drives newPool/runSlot directly, not Loop: Loop's own background Stop
-// watcher would otherwise race this same close and can win it with its own
-// generic HaltOperatorStop, halting with the watcher's reason instead of
-// this child's own HaltChildSignalled one — a race, not a bug, but not
-// what this test means to pin.
+// TestLoopExit7WithStopClosedHaltsAsOperatorStop pins issue #3626's headline
+// case: exit 7 is an operator stop (exit 0) only while Stop was already
+// closed when the child exited. Drives newPool/runSlot, not Loop, whose Stop
+// watcher could win the race with its generic HaltOperatorStop instead of
+// this child's HaltChildSignalled.
 func TestLoopExit7WithStopClosedHaltsAsOperatorStop(t *testing.T) {
 	stop := make(chan struct{})
 	r := &scriptedRunner{
@@ -391,13 +378,10 @@ func TestLoopExit7WithStopClosedHaltsAsOperatorStop(t *testing.T) {
 }
 
 // TestLoopUnknownExitWithStopClosedNeverCounted pins the breaker carve-out
-// (issue #3595, now by construction): an unrecognised exit that lands while
-// Stop is already closed is an ordinary shutdown, not evidence of a
-// systemic fault, so it never reaches the breaker — BreakerThreshold: 1
-// means any count at all would trip it, so no breaker_trip proves it was
-// skipped. Drives newPool/runSlot directly, not Loop, for the same
-// watcher-race reason as TestLoopExit7WithStopClosedHaltsAsOperatorStop
-// above.
+// (issue #3595): an unrecognised exit landing once Stop has closed is an
+// ordinary shutdown and never reaches the breaker; with BreakerThreshold: 1
+// any count would trip it. Drives newPool/runSlot, not Loop, to avoid the
+// watcher race TestLoopExit7WithStopClosedHaltsAsOperatorStop describes.
 func TestLoopUnknownExitWithStopClosedNeverCounted(t *testing.T) {
 	stop := make(chan struct{})
 	r := &scriptedRunner{

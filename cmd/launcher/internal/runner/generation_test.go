@@ -2,12 +2,9 @@ package runner
 
 import "testing"
 
-// NewAgentGeneration treats its argument as the agent-closure linkFarm's own
-// store path (res.TipTag under bwrap), not the agentFiles derivation: it
-// derives the "files", "env", "nix-config" and "prefetch" children (issue
-// #2954). Generation comes from the closure path via the same
-// SafePathComponent rule bwrap.ClosureGeneration applies to its artifacts part's
-// ImageTag.
+// The argument is the agent-closure linkFarm's store path (res.TipTag under
+// bwrap), not the agentFiles derivation (issue #2954). Generation uses the
+// same SafePathComponent rule bwrap.ClosureGeneration applies to ImageTag.
 func TestNewAgentGeneration_DerivesFilesAndEnvFromAgentClosurePath(t *testing.T) {
 	cases := []struct {
 		name    string

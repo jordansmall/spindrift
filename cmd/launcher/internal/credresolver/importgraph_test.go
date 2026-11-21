@@ -30,8 +30,8 @@ func TestImportGraphExcludesRegistryLayer(t *testing.T) {
 }
 
 // TestImportClosureCatchesTransitiveForbiddenImport proves the walker is not
-// vacuous: credresolver imports no internal package today, so the real test
-// above would pass even if importClosure walked nothing.
+// vacuous: the real tree reaches no forbidden package, so the test above
+// would pass even if importClosure walked nothing.
 func TestImportClosureCatchesTransitiveForbiddenImport(t *testing.T) {
 	root := t.TempDir()
 	const moduleName = "example.com/fixturemodule"

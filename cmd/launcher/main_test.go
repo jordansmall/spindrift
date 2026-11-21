@@ -159,11 +159,11 @@ func TestMainRun_LeadingForceBeforeRegistry_PassesDiscoverGate(t *testing.T) {
 }
 
 // The leading spelling of each pass-through flag behaves exactly like the
-// verb-first one (issue #3784). REPO_SLUG empty makes bootstrap fail at
-// validation, so no runner or gh is needed; the default tracker makes
-// reconcile a no-op, and it writes to os.Stderr, so for reconcile the stderr
-// comparison only confirms both buffers stay empty and the stdout comparison
-// is what catches a leading flag knocking it into mainRun's help branch.
+// verb-first one (issue #3784). An empty REPO_SLUG fails bootstrap at
+// validation, so no runner or gh is needed. reconcile is a no-op on the default
+// tracker and writes straight to os.Stderr, leaving both stderr buffers empty,
+// so for it only the stdout comparison catches a leading flag knocking it into
+// mainRun's help branch.
 func TestMainRun_LeadingFlag_MatchesVerbFirstSpelling(t *testing.T) {
 	setKnob(t, "REPO_SLUG", "")
 	setKnob(t, "ISSUE_TRACKER", "")
@@ -317,13 +317,10 @@ func TestRegistry_MissingOrUnknownSubcommand_UsageError(t *testing.T) {
 	}
 }
 
-// `doctor`'s verb handler rejects an unrecognised positional before ever
-// reaching cmdDoctor/newReadContext (issue #3777), so this stays hermetic —
-// no real network call.
-// A "--"-prefixed bogus flag never reaches the verb handler at all: parseFlags
-// (main.go, ahead of the verbHandlers dispatch) already rejects any
-// unrecognised "--flag" for every subcommand, pre-ticket behavior this slice
-// leaves untouched — pinned below so a regression there is still caught.
+// `doctor`'s verb handler rejects an unrecognised positional before reaching
+// cmdDoctor/newReadContext (issue #3777), so this stays hermetic. A
+// "--"-prefixed bogus flag never reaches the handler: parseFlags rejects any
+// unknown "--flag" for every subcommand, also pinned below.
 func TestDoctor_UnrecognizedArg_UsageError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := mainRunT(t, []string{"doctor", "extra"}, &stdout, &stderr)
@@ -947,11 +944,9 @@ func TestResolveCapabilitySignals_LocalTracker_InBoxUnreachable(t *testing.T) {
 	}
 }
 
-// The config to runner hand-off that used to carry the /issues mount source
-// (issue #3471). It asserts by string containment over fmt.Sprintf("%+v", rc)
-// rather than naming a field, so it compiled before issue #3471 too, when
-// runner.MountParams.LocalIssuesDir carried the dir through and the test
-// failed.
+// The /issues mount source never reaches runner.Config (issue #3471).
+// Asserting by string containment over fmt.Sprintf("%+v", rc), not a named
+// field, catches it in whatever field might carry it.
 func TestRunnerConfig_LocalIssuesDirNeverReachesRunnerConfig(t *testing.T) {
 	dir := t.TempDir()
 	setKnob(t, "ISSUE_TRACKER", "local")
@@ -1615,7 +1610,7 @@ func TestValidate_RepoSlugRequired(t *testing.T) {
 // With no loaded document (a direct binary invocation), resolveCapabilitySignals
 // derives the signals fresh from the backend registry rather than trusting a
 // forwarded artifact that was never populated: Shared.FullyLocal
-// is always "" with no document (issue #2527 review).
+// is always "" with no document (issue #2527).
 func TestResolveCapabilitySignals_NoDocumentFallsBackToRegistry(t *testing.T) {
 	useDoc(t, nil)
 
@@ -1663,7 +1658,7 @@ func TestResolveCapabilitySignals_MatchingDocumentTrustsForwardedArtifact(t *tes
 // When the pairing in effect diverges from what the document baked in (a CLI
 // flag or env override), the forwarded artifact is not trusted: a
 // github-baked document run with --forge-backend local --tracker local must
-// not keep reading the baked FULLY_LOCAL=false (issue #2527 review).
+// not keep reading the baked FULLY_LOCAL=false (issue #2527).
 func TestResolveCapabilitySignals_OverrideAwayFromBakedDocumentFallsBack(t *testing.T) {
 	useDoc(t, &inputdoc.Document{
 		Settings:  map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
@@ -1679,7 +1674,7 @@ func TestResolveCapabilitySignals_OverrideAwayFromBakedDocumentFallsBack(t *test
 // In the matching-document branch the four capability-signal keys come
 // strictly from the document's Artifacts section, never os.Getenv: these four
 // are nix-resolved policy, not operator knobs, so a stray ambient
-// FULLY_LOCAL=true must not override what nix baked (issue #2527 review).
+// FULLY_LOCAL=true must not override what nix baked (issue #2527).
 func TestResolveCapabilitySignals_MatchingDocumentIgnoresAmbientEnvOverride(t *testing.T) {
 	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
@@ -1713,7 +1708,7 @@ func TestResolveCapabilitySignals_MatchingDocumentIgnoresAmbientEnvOverride(t *t
 // A matching document carrying none of the four capability-signal keys (an
 // old document, or a nix rendering bug) must not be trusted for an all-false
 // answer: it falls through to the registry-derived fallback, so a local/local
-// document still resolves fullyLocal=true (issue #2527 review).
+// document still resolves fullyLocal=true (issue #2527).
 func TestResolveCapabilitySignals_MatchingDocumentMissingArtifactKeysFallsBack(t *testing.T) {
 	useDoc(t, &inputdoc.Document{
 		Settings:  map[string]string{"CODE_FORGE": "local", "ISSUE_TRACKER": "local"},
@@ -1735,7 +1730,7 @@ func TestResolveCapabilitySignals_MatchingDocumentMissingArtifactKeysFallsBack(t
 // A matching document carrying only some of the four keys falls back to the
 // registry derivation for all four. Presence must be checked with AND, not
 // OR: an OR lets a document missing one key into the trust branch, where
-// the missing key's typed field reads as false (issue #2527 review).
+// the missing key's typed field reads as false (issue #2527).
 func TestResolveCapabilitySignals_MatchingDocumentPartialArtifactKeysFallsBack(t *testing.T) {
 	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "local", "ISSUE_TRACKER": "local"},
@@ -1771,7 +1766,7 @@ func TestResolveCapabilitySignals_MatchingDocumentPartialArtifactKeysFallsBack(t
 // With no loaded document, resolveTrackerAndForgeSignals derives the
 // tracker-axis and forge-backend strings fresh from the pure mirror of
 // lib/mkHarness.nix's computation rather than reading an unpopulated
-// typed artifact as "" (issue #2533 review).
+// typed artifact as "" (issue #2533).
 func TestResolveTrackerAndForgeSignals_NoDocumentFallsBackToComputation(t *testing.T) {
 	useDoc(t, nil)
 
@@ -1815,7 +1810,7 @@ func TestResolveTrackerAndForgeSignals_MatchingDocumentTrustsForwardedArtifact(t
 // When the pairing in effect diverges from the document (a dispatch-time
 // --tracker/--forge-backend override), the stale forwarded artifact is not
 // trusted: a github-baked document overridden to forgejo must not keep
-// reading the baked BOX_TRACKER_AXIS_READ=GITHUB (issue #2533 review).
+// reading the baked BOX_TRACKER_AXIS_READ=GITHUB (issue #2533).
 func TestResolveTrackerAndForgeSignals_OverrideAwayFromBakedDocumentFallsBack(t *testing.T) {
 	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
@@ -1835,7 +1830,7 @@ func TestResolveTrackerAndForgeSignals_OverrideAwayFromBakedDocumentFallsBack(t 
 
 // A matching document carrying only some of the four tracker/forge keys falls
 // back to the fresh computation for all four, mirroring the
-// capability-signals partial-key guard (issue #2533 review).
+// capability-signals partial-key guard (issue #2533).
 func TestResolveTrackerAndForgeSignals_PartialArtifactKeysFallsBack(t *testing.T) {
 	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "forgejo", "ISSUE_TRACKER": "forgejo"},
@@ -1856,7 +1851,7 @@ func TestResolveTrackerAndForgeSignals_PartialArtifactKeysFallsBack(t *testing.T
 // With no loaded document, resolveAgentPresenceSignals returns
 // schema-default-derived values rather than unconditional false:
 // WORKER_MODEL's default is non-empty, so workerProvisioned defaults true
-// (issue #2533 review).
+// (issue #2533).
 func TestResolveAgentPresenceSignals_NoDocumentFallsBackToSchemaDefaults(t *testing.T) {
 	useDoc(t, nil)
 	// Isolate from this test process's own ambient environment (a dispatched
@@ -1904,7 +1899,7 @@ func TestResolveAgentPresenceSignals_MatchingDocumentTrustsForwardedArtifact(t *
 }
 
 // A dispatch-time FILER_MODEL override does not defeat trust in the
-// document's FILER_ENABLED artifact (issue #2533 review): FILER_MODEL and
+// document's FILER_ENABLED artifact (issue #2533): FILER_MODEL and
 // WORKER_MODEL never reach the box at runtime, since lib/image.nix bakes
 // AGENTS_JSON_TEMPLATE at build time and lib/mkHarness.nix computes the flags
 // from that template, so a live override cannot change the real roster.
@@ -1963,12 +1958,11 @@ func TestResolveAgentPresenceSignals_WorkerModelOverride_DocumentArtifactStillTr
 	}
 }
 
-// The version-skew fallback is driver-aware (issue #2533 review, #5330,
-// #5331, #5338): opencode is a provider-namespaced Driver, so lib/mkHarness.nix
-// drops a worker model that is not Provider-namespaced (no "/"), and a
-// driver-blind fallback would report it provisioned. The Filer is provisioned from on-disk
-// agent files there, so FILER_ENABLED follows FILER_MODEL like every other
-// Driver.
+// The version-skew fallback is driver-aware (issues #2533, #5330, #5331,
+// #5338): opencode is a provider-namespaced Driver, so lib/mkHarness.nix drops
+// a worker model with no "/", which a driver-blind fallback would report
+// provisioned. The Filer is provisioned from on-disk agent files there, so
+// FILER_ENABLED follows FILER_MODEL like every other Driver.
 func TestResolveAgentPresenceSignals_NoDocumentOpencodeDriverFallback(t *testing.T) {
 	cases := []struct {
 		name, workerModel string
@@ -2119,7 +2113,7 @@ func TestValidate_FullyLocalExemptsRepoSlugAndGhToken(t *testing.T) {
 	}
 }
 
-// The issue #2527 review finding: a github-baked input document run with an
+// Issue #2527: a github-baked input document run with an
 // override to --forge-backend local --tracker local must still exempt
 // REPO_SLUG/GH_TOKEN, not keep trusting the stale FULLY_LOCAL=false baked for
 // the pre-override pairing.
@@ -2142,7 +2136,7 @@ func TestValidate_OverrideAwayFromBakedGithubDocumentExemptsRepoSlugAndGhToken(t
 	}
 }
 
-// The inverse of the issue #2527 review finding: a fully-local baked document
+// The inverse of the issue #2527 case: a fully-local baked document
 // overridden back to github on both axes at runtime must require
 // REPO_SLUG/GH_TOKEN again, not keep trusting the stale FULLY_LOCAL=true.
 func TestValidate_OverrideBackToGithubFromFullyLocalDocumentRequiresRepoSlugAndGhToken(t *testing.T) {
@@ -2647,12 +2641,10 @@ func TestValidateCodeForge_RejectsUnknown(t *testing.T) {
 	}
 }
 
-// Pins validate()'s exact CODE_FORGE-invalid error string, so a
-// registry-driven rewrite of the CODE_FORGE switch (issue #2267) cannot
-// silently drift it. The "must be ..." list renders from
-// validCodeForgeNames() (issue #2520 slice 4), so its word order tracks
-// the registered Strategies. want also pins the remedy line the row carries
-// (issue #2886).
+// Pins validate()'s exact CODE_FORGE-invalid error string so a registry-driven
+// rewrite (issue #2267) cannot silently drift it. The "must be ..." list
+// renders from validCodeForgeNames() (issue #2520), so its order tracks the
+// registered Strategies; want also pins the row's remedy line (issue #2886).
 func TestValidateCodeForge_RejectsUnknown_ExactMessage(t *testing.T) {
 	c := minimalValidConfig()
 	c.CodeForge = "gitlab"
@@ -2892,9 +2884,8 @@ func TestNewCodeForge_GithubReadOnly_ImplementsBundleRelay(t *testing.T) {
 
 // github on both axes under read-only passes checkReadOnlyCapabilityGate:
 // github's backend registry row (issue #2526) carries RelayCapable and
-// HostPostingCapable, so the gate, now a registry lookup by name rather than a
-// live interface assertion (issue #2526 slice 3), accepts it. newCodeForge is
-// still called to prove it constructs for this config.
+// HostPostingCapable. The gate reads that row, not the adapter, so
+// newCodeForge is called separately to prove it constructs.
 func TestNewCodeForge_GithubReadOnly_SatisfiesCapabilityGate(t *testing.T) {
 	c := minimalValidConfig()
 	c.CodeForge = "github"
@@ -2928,7 +2919,7 @@ func TestNewCodeForge_ForgejoReadOnly_SatisfiesBundleRelayAndDraftPRCreator(t *t
 }
 
 // Capabilities.HostCanOpenPR (issue #4071) holds for github and forgejo under
-// and never for git (push-only) or local (no PR at all).
+// read-only, and never for git (push-only) or local (no PR at all).
 func TestResolveCapabilities_HostCanOpenPR(t *testing.T) {
 	tests := []struct {
 		forge, access string
@@ -2999,12 +2990,10 @@ func TestNewCodeForge_GitReadOnly_ReturnsPlainAdapter(t *testing.T) {
 	}
 }
 
-// The all-delivered wording per forge is unchanged by settled outcomes:
-// github is the only forge whose line claims PRs (issue #1733), git and
-// forgejo share the "branches pushed" wording, and local lands host-side onto
-// the Accumulation repo's Integration branch (ADR 0033), naming no single
-// branch since each seam resolves its own from its own parent frontmatter
-// (issue #1734).
+// The all-delivered wording per forge: github alone claims PRs (issue #1733),
+// git and forgejo share "branches pushed", and local lands host-side onto the
+// Accumulation repo's Integration branch (ADR 0033), naming no single branch
+// since each seam resolves its own from its parent frontmatter (issue #1734).
 func TestDispatchCompletionBanner_AllDelivered(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -3096,10 +3085,10 @@ func settledOutcome(key, reason, prURL string) settle.DispatchOutcome {
 
 // mixedOutcomes is one delivered dispatch plus a representative mix of ways a
 // dispatch can fail to deliver, each shaped as settle really records it: a
-// Complete merge-blocked record with no PR (a push-only landing failure,
-// the push-only Lander), an InProgress handoff-blocked (blockHandoff), relay-failed, a
-// Failed ci-red that still has its PR open, already-resolved, blocked,
-// ambiguous, a Chore key, and the off-script InProgress.
+// Complete merge-blocked record with no PR (a push-only landing failure), an
+// InProgress handoff-blocked (blockHandoff), relay-failed, a Failed ci-red with
+// its PR still open, already-resolved, blocked, ambiguous, a Chore key, and the
+// off-script InProgress.
 func mixedOutcomes() []settle.DispatchOutcome {
 	return []settle.DispatchOutcome{
 		settledOutcome("11", dispatchrecord.ReasonMerged, "https://github.com/owner/repo/pull/11"),
@@ -3148,10 +3137,9 @@ func TestDispatchCompletionBanner_NamesDispatchesThatDidNotDeliver(t *testing.T)
 }
 
 // dispatchConfig wires resolveTrackerAndForgeSignals and
-// resolveAgentPresenceSignals rather than the old unguarded artifact reads:
-// with no document, WorkerProvisioned comes back true and the tracker-axis and
-// forge-backend strings come back the fresh github computation, not the old
-// bug's unconditional false and empty (issue #2533 review).
+// resolveAgentPresenceSignals, not raw artifact reads: with no document,
+// WorkerProvisioned is true and the tracker-axis and forge-backend strings are
+// the fresh github computation, not false and empty (issue #2533).
 func TestDispatchConfig_NoDocument_UsesGuardedResolvers(t *testing.T) {
 	useDoc(t, nil)
 	// Isolate from this test process's own ambient environment (a dispatched
@@ -4264,7 +4252,7 @@ func TestSettleConfig_CapabilitiesThreadsFromReadContext(t *testing.T) {
 // minimalValidLocalConfig wires minimalValidConfig() for a valid
 // CODE_FORGE=local run, so local-specific tests override only the field under
 // test. validate() derives its capability signals fresh via
-// resolveCapabilitySignals (issue #2527 review), so setting c.CodeForge and
+// resolveCapabilitySignals (issue #2527), so setting c.CodeForge and
 // c.IssueTracker to "local" is enough.
 func minimalValidLocalConfig() config {
 	c := minimalValidConfig()
@@ -4298,13 +4286,11 @@ func minimalValidConfig() config {
 	}
 }
 
-// runDoctor passes the report half of doctorCheckSets(c), not nil, as
-// doctor.Run's extraChecks argument (AC2). That half starts with
-// doctorExtraChecks(c), so a doctorExtraChecks row failure shows in doctor's
-// output.
-// The config adds the four work-tier labels, which minimalValidConfig leaves
-// unset and doctor.Run's own label check would otherwise fail on, and clears
-// gitUserName to fail exactly the "git-user-name" row and no other.
+// runDoctor passes doctorCheckSets(c)'s report half, which starts with
+// doctorExtraChecks(c), as doctor.Run's extraChecks (AC2), so a
+// doctorExtraChecks row failure shows in doctor's output. The config adds the
+// four work-tier labels doctor.Run would otherwise fail on, and clears
+// gitUserName to fail exactly the "git-user-name" row.
 func TestRunDoctor_WiresDoctorReportChecksIntoOutput(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -4326,13 +4312,11 @@ func TestRunDoctor_WiresDoctorReportChecksIntoOutput(t *testing.T) {
 	}
 }
 
-// runDoctor passes doctorCheckSets(c)'s report half, not
-// doctorExtraChecks(c), so a bwrap-runner config shows the bwrap family's
-// three prerequisite rows; swapping the call site back would drop them
-// silently (issue #2671 review). The bwrap Strategy is wrapped with its probes
-// swapped through lookupRunnerStrategy so the test never spawns a real bwrap
-// or does a real PATH lookup; the cgroup probe fails so its row renders
-// predictably.
+// runDoctor passes doctorCheckSets(c)'s report half, not doctorExtraChecks(c),
+// so a bwrap-runner config shows the bwrap family's three prerequisite rows
+// (issue #2671). The bwrap Strategy's probes are swapped through
+// lookupRunnerStrategy so no real bwrap or PATH lookup runs; the cgroup probe
+// fails so its row renders predictably.
 func TestRunDoctor_WiresBwrapCapabilityChecksIntoOutput(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -4436,9 +4420,8 @@ func TestDoctor_AuthFailure(t *testing.T) {
 }
 
 // A failing built-in Required check is reported exactly once, through the
-// returned error and not also as a "MISSING: ..." row on w: cmdDoctor already
-// prints the returned error to stderr, and Run wrote nothing to w on this
-// path before the launcher-startup checks moved into doctor.Run (084abc54a).
+// returned error, not also as a "MISSING: ..." row on w: cmdDoctor already
+// prints the returned error to stderr.
 func TestDoctor_AuthFailure_NotDoublyReported(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeErr = forge.ErrAuthFailure
@@ -5324,9 +5307,8 @@ func TestDoctor_TTY_Confirm_AmbiguousLabel(t *testing.T) {
 	f.ProbeRepo = "owner/repo"
 	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 	ambiguous := doctor.AmbiguousLabelNames()
-	// Every advisory tier except ambiguous-spec present; the ambiguous-spec
-	// label missing, so this test stays scoped to ambiguous-spec label
-	// creation.
+	// Every advisory tier except ambiguous-spec present, so this test stays
+	// scoped to ambiguous-spec label creation.
 	otherAdvisory := advisoryLabelsExcept(ambiguous)
 	f.Labels = append(append([]string{}, work...), otherAdvisory...)
 	f.LabelsSeq = [][]string{
@@ -5381,10 +5363,8 @@ func TestDoctor_TTY_Confirm_AmbiguousStillMissing_Advisory(t *testing.T) {
 		t.Fatalf("ambiguous-spec label still missing after creation must not fail doctor, got: %v", err)
 	}
 	out := buf.String()
-	// Exact match, not HasPrefix: ambiguous-spec's ref is "" (no ADR
-	// citation), so this is the one still-missing line that would show a
-	// double space before the em dash if refSuffix's empty-ref branch ever
-	// regressed.
+	// Exact match, not HasPrefix, for the same empty-ref double-space reason
+	// as TestDoctor_NoTTY_AmbiguousLabelMissing_ExitZero.
 	const wantAdvisoryLine = "advisory: 1 ambiguous-spec label(s) still missing after creation — does not fail this check: agent-ambiguous-spec"
 	var advisoryLine string
 	for _, line := range strings.Split(out, "\n") {
@@ -5454,8 +5434,7 @@ func TestReferenceDocLabelSnippetMatchesTriageDefaults(t *testing.T) {
 
 // Guards against the `system` option table row restating the auto-supplied
 // pass-through mechanism the intro paragraph above the table already explains
-// (#880): commit 5a5993f (#660) added that intro but left the row's prose
-// intact, so the same two facts ended up asserted twice.
+// (#880, #660).
 func TestReferenceDocSystemRowDoesNotDuplicateIntro(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "reference.md"))
 	if err != nil {
@@ -5825,10 +5804,7 @@ func TestFindDeprecatedDocSpellings_DetectsReintroducedSpelling(t *testing.T) {
 			want:    nil,
 		},
 		{
-			// packages/roster/nixpkgs are deliberately not generalized: each
-			// collides with a live, non-deprecated doc usage today. See
-			// flatShimDeliberateCollisions; adding them here would turn this
-			// check into a false-positive generator.
+			// Deliberately not generalized; see flatShimDeliberateCollisions.
 			name:    "packages/roster/nixpkgs deliberately not generalized",
 			content: "  packages = p: [ p.go ];\n  roster = rosterLib.defaultRoster {};\n  nixpkgs = inputs.nixpkgs;\n",
 			want:    nil,
@@ -5914,11 +5890,9 @@ func readStructuralPathsFile(t *testing.T) string {
 	return string(content)
 }
 
-// fataler is the minimal slice of *testing.T the two content parsers need.
-// Accepting it instead of the concrete *testing.T lets a test substitute a
-// fake that records a Fatalf call instead of tearing down the calling
-// goroutine via runtime.Goexit, which is what lets the test goroutine itself
-// assert that the code failed cleanly.
+// fataler is the minimal slice of *testing.T the two content parsers need, so
+// a test can substitute a fake that records Fatalf instead of tearing down its
+// goroutine via runtime.Goexit.
 type fataler interface {
 	Helper()
 	Fatalf(format string, args ...any)
@@ -6537,10 +6511,9 @@ func TestConfigArtifact_EmptyBoxArtifactFollowsRunnerFamily(t *testing.T) {
 
 // A document's Driver rows are applied to the registry before any verb runs,
 // so a Connector-backed Driver is resolvable by name for the whole process.
-// The rows are the `drivers` section of the input document the Nix renders for
-// a Consumer importing the fixture Driver Connector. Only that section is
-// taken: the real document's settings drive a research run this test does not
-// want.
+// The rows are the `drivers` section of the document Nix renders for a
+// Consumer importing the fixture Driver Connector; only that section is taken,
+// since the real document's settings would drive a research run.
 func TestMainRun_InputDocument_AppliesDriverRows(t *testing.T) {
 	drivertest.Isolate(t)
 	realDoc := os.Getenv("SPINDRIFT_FIXTURE_CONNECTOR_DOC")

@@ -429,9 +429,7 @@ func TestReporter_Results_SkipsRemedyLineWhenIdenticalToErrText(t *testing.T) {
 	}
 }
 
-// This test only proves RunRequiredFailFast routes its first blocking Result
-// through WithRemedy; the TestWithRemedy_* suite below pins WithRemedy itself.
-// It asserts the *RemedyError type rather than the rendered text so a
+// This asserts the *RemedyError type rather than the rendered text so a
 // hand-formatted remedy line that bypassed WithRemedy still fails.
 func TestRunRequiredFailFast_AppendsRemedyToErrorText(t *testing.T) {
 	probeErr := errors.New(gitUserNameErrText)
@@ -607,9 +605,8 @@ func TestReporter_Results_TierAndDegradedDriveRowPrefix(t *testing.T) {
 	}
 }
 
-// Blocking is the one place the "does this Required failure stop the run?"
-// rule lives, so cmd/launcher's config classification and this package's
-// fail-fast chains cannot drift apart (issue #3544).
+// Blocking is shared by cmd/launcher's config classification and this
+// package's fail-fast chains (issue #3544).
 func TestBlocking(t *testing.T) {
 	tests := []struct {
 		name string

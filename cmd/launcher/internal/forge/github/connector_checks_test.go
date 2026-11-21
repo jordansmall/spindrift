@@ -271,7 +271,7 @@ func loadTokenConnector(t *testing.T, b *tokenBackend, token string) *connectorh
 // never through gh.
 func TestConnector_TokenGrant(t *testing.T) {
 	str := func(s string) *string { return &s }
-	// Held to the native adapter's constant, not a copy, so the two cannot drift.
+	// The shared constant, not a copy, so the token tests cannot drift.
 	notIntrospectable := backendkit.TokenIntrospection{Reason: notIntrospectableReason}
 	for _, tc := range []struct {
 		name, token string
@@ -352,8 +352,7 @@ func TestConnector_TokenGrantWriteScopes(t *testing.T) {
 }
 
 // doctor's label check compares the lifecycle labels with what the repository
-// defines; 150
-// labels force a second page.
+// defines; 150 labels force a second page.
 func TestConnector_ListLabels(t *testing.T) {
 	for _, fx := range []struct {
 		name string

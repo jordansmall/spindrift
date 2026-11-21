@@ -58,9 +58,8 @@ func buildForge(srv *httptest.Server, mergeMethod string) (forge.CodeForge, erro
 }
 
 // productionForge builds the Code Forge the way the launcher does under a
-// forgejo row pointing at the compiled Connector and srv. It returns
-// the row's resolved Route table and the Connector's audit file, which core
-// writes under the working directory's log directory.
+// forgejo row pointing at the compiled Connector and srv, returning the
+// resolved Route table and the Connector's audit file.
 func productionForge(t *testing.T, srv *httptest.Server) (forge.CodeForge, []connectorhost.Route, string, error) {
 	t.Helper()
 	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
@@ -363,8 +362,8 @@ func TestConnectorTracker_RefusedRouteFailsTheOperation(t *testing.T) {
 	}
 }
 
-// The Connector-only tracker exposes every optional capability the native
-// forgejo tracker does, so no caller's forge.As lookup silently misses.
+// The Connector-only tracker exposes every optional capability below, so no
+// caller's forge.As lookup silently misses.
 func TestConnectorTracker_ExposesTheNativeCapabilitySet(t *testing.T) {
 	w := newTrackerHarness(t)
 	for name, ok := range map[string]bool{

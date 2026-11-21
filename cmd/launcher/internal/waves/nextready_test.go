@@ -241,9 +241,8 @@ func TestNextReady_Local_ClosedOnDiskUnblocksDependent_IndependentSeamUnaffected
 
 // Guards #1850: a local blocker's landing contained in its Integration branch
 // unblocks the dependent in the very next readiness check, not only once the
-// post-loop reconcile closes the blocker issue. Needs a non-empty c.SeedScopeOf,
-// because #2151 dropped the no-scope self-verification fallback a zero
-// SeedScope used to take.
+// post-loop reconcile closes the blocker issue. Needs a non-empty c.SeedScopeOf:
+// a zero SeedScope has no self-verification fallback (#2151).
 func TestNextReady_Local_LandingVerifiedUnblocksDependentInSameRun(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"

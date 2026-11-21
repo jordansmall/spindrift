@@ -89,11 +89,9 @@ func TestHeadlessQueue_ReportStaleDrain_PrintsAndAppendsLog(t *testing.T) {
 	}
 }
 
-// This pins a review finding on #2678: ReportStaleDrain's stale-drain.log open
-// failure goes to stderr rather than failing the run. dir is a bare t.TempDir()
-// whose .spindrift/logs subdirectory was never created, unlike every real
-// RunContinuous call, so os.OpenFile's O_CREATE cannot create the file inside a
-// missing parent.
+// Pins #2678: ReportStaleDrain's stale-drain.log open failure goes to stderr
+// rather than failing the run. dir is a bare t.TempDir() with no
+// .spindrift/logs, so O_CREATE cannot create the file in a missing parent.
 func TestHeadlessQueue_ReportStaleDrain_OpenFailureLogsToStderr(t *testing.T) {
 	dir := t.TempDir()
 	q := NewHeadlessQueue(nil, nil, func(map[string]bool) (int, error) { return 0, nil }, dir)
@@ -146,7 +144,7 @@ func TestHeadlessQueue_EnsureLogDirExists_Idempotent(t *testing.T) {
 	}
 }
 
-// RunContinuous no longer MkdirAlls dispatch.HostLogDirFor(pwd) itself (#3036).
+// RunContinuous does not MkdirAll dispatch.HostLogDirFor(pwd) itself (#3036).
 // It relies entirely on queue.EnsureLogDirExists, called before any Box's
 // dispatch.runOnce opens its log file (box.go's os.Create has no fallback when
 // the parent is missing). Driving a bare t.TempDir() through the real

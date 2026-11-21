@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	// aliased: two tests below declare a local "report" (a StatusReport)
+	// aliased: tests below declare a local "report" (a StatusReport)
 	// that would otherwise shadow the package name for the rest of their
 	// function body.
 	reportpkg "spindrift.dev/launcher/internal/report"
@@ -70,21 +70,17 @@ func countEvents(names []string, name string) int {
 	return n
 }
 
-// testIdleCap is intentionally far above testIdleFloor: it lets tests that
-// only ever hit one no-work check still see the undoubled floor, while
-// tests that chain several consecutive no-work checks (and want to see
-// growth) are free to assert on the doubling explicitly.
+// testIdleCap is far above testIdleFloor so tests chaining several no-work
+// checks can assert on the doubling before the cap clips it.
 const (
 	testIdleFloor = time.Millisecond
 	testIdleCap   = time.Hour
 )
 
-// testFailureBackoff/testBreakerThreshold/testBreakerWindow are the
-// breaker knobs most tests don't care about but Loop now requires to be
-// valid (Config's own validation, mirroring Slots). A window far longer
-// than any test's virtual clock advances keeps the breaker's window from
-// silently aging failures out mid-test; tests that want it to trip build
-// their own Config with a small threshold instead.
+// testFailureBackoff/testBreakerThreshold/testBreakerWindow are valid
+// breaker knobs most tests don't care about. A window far longer than any
+// test's virtual clock advances keeps failures from aging out mid-test;
+// tests that want a trip build their own Config with a small threshold.
 const (
 	testFailureBackoff   = time.Millisecond
 	testBreakerThreshold = 1000
@@ -144,10 +140,8 @@ func TestLoopWaitThenHalt(t *testing.T) {
 }
 
 // TestLoopExit3SingleSlotIsAJam pins the occupancy-axis contract for a
-// single-slot daemon: with Slots: 1 there is never a sibling to explain
-// away a "none dispatchable" exit, so every exit 3 is a jam, not routine
-// idle — it still waits like exit 2 (below), it just no longer reports
-// like it.
+// single-slot daemon: with no sibling to explain away a "none dispatchable"
+// exit, every exit 3 is a jam — it waits like exit 2 but reports as a jam.
 func TestLoopExit3SingleSlotIsAJam(t *testing.T) {
 	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 3}, {Exit: 5}}}
 	clk := &testClock{}
@@ -223,10 +217,9 @@ func TestLoopExit4ContinuesWithoutSleeping(t *testing.T) {
 	}
 }
 
-// TestLoopUnknownExitBacksOffThenHalts pins the new contract for an
-// unrecognised exit code: it backs the slot off rather than halting the
-// pool outright. A follow-up host-tainted exit gives the fake a real halt
-// so the test still terminates rather than looping forever on backoffs.
+// TestLoopUnknownExitBacksOffThenHalts pins that an unrecognised exit code
+// backs the slot off rather than halting the pool. A follow-up host-tainted
+// exit gives the fake a real halt so the test terminates.
 func TestLoopUnknownExitBacksOffThenHalts(t *testing.T) {
 	for _, exit := range []int{1, 99} {
 		r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: exit}, {Exit: 5}}}
@@ -259,11 +252,9 @@ func TestLoopUnknownExitBacksOffThenHalts(t *testing.T) {
 	}
 }
 
-// TestLoopResolveErrorBacksOffThenHalts pins the new contract: a
-// ResolveTip fetch error (a failed git fetch) is exactly the transient blip
-// that must not end the night, so it backs off its slot rather than
-// halting the pool. A follow-up host-tainted exit gives the fake a real
-// halt so the test still terminates.
+// TestLoopResolveErrorBacksOffThenHalts pins that a ResolveTip fetch error,
+// the transient blip that must not end the night, backs off its slot rather
+// than halting the pool.
 func TestLoopResolveErrorBacksOffThenHalts(t *testing.T) {
 	wantErr := errors.New("boom: no such revision")
 	r := &scriptedRunner{revisions: []string{"rev1"}, resolveAt: 1, resolveErr: wantErr, results: []ChildResult{{Exit: 5}}}
@@ -289,11 +280,9 @@ func TestLoopResolveErrorBacksOffThenHalts(t *testing.T) {
 	}
 }
 
-// TestLoopStartChildErrorBacksOffAndEmitsChildFinish pins the new contract: a
-// StartChild seam error backs off its slot rather than halting the pool, but
-// still emits the child_finish for the child it already started — a
-// started child always gets a matching finish. A follow-up host-tainted
-// exit gives the fake a real halt so the test still terminates.
+// TestLoopStartChildErrorBacksOffAndEmitsChildFinish pins that a StartChild
+// seam error backs off its slot rather than halting the pool, but still
+// emits a child_finish matching the child_start.
 func TestLoopStartChildErrorBacksOffAndEmitsChildFinish(t *testing.T) {
 	wantErr := errors.New("exec: nix not found")
 	r := &scriptedRunner{revisions: []string{"rev1"}, runErrAt: 1, runErr: wantErr, results: []ChildResult{{Exit: 5}}}
@@ -329,11 +318,10 @@ func TestLoopWaitErrorBacksOffAndEmitsChildFinish(t *testing.T) {
 }
 
 // TestLoopWaitErrorStillEmitsAnnouncedBoxes covers the non-ExitError
-// wait-failure path (runner.go): a child can report a box record over its
-// pipe and only then have Wait itself fail (a wait failure that is no
-// ExitError). That box must still reach the durable stream, so a box event
-// lands before child_finish even on the error path — reported live via
-// OnRecord, from onStart, as the host runner delivers records during Wait.
+// wait-failure path (cmd/launcher/daemon/runner.go): a box record reported
+// before Wait fails must still land on the stream before child_finish. The
+// fixture reports it via OnRecord from onStart, as the host runner delivers
+// records during Wait.
 func TestLoopWaitErrorStillEmitsAnnouncedBoxes(t *testing.T) {
 	wantErr := errors.New("wait: signal: killed")
 	var calls int
@@ -498,13 +486,9 @@ func TestLoopCancelledDuringResolveTipHaltsBeforeStartingTheChild(t *testing.T) 
 }
 
 func TestLoopNeverKillsAStartedChild(t *testing.T) {
-	// A Runner whose child cancels ctx mid-run, as the production
-	// adapter's process-exit path will (next slice) — the loop must still
-	// wait for the result and emit that child's child_finish before it
-	// re-checks ctx and halts, never killing the child itself.
+	// A child that cancels ctx mid-run must still be waited on and get its
+	// child_finish before the loop halts.
 	ctx, cancel := context.WithCancel(context.Background())
-	// the child cancelling ctx then returning result — the running child
-	// must still be waited on and its child_finish emitted, never abandoned.
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		results:   []ChildResult{{Exit: 0}},
@@ -551,8 +535,7 @@ func TestLoopSelfEvalCtxCancelledIsNotABreakerFailure(t *testing.T) {
 
 // TestLoopFetchCtxCancelledIsNotABreakerFailure is
 // TestLoopSelfEvalCtxCancelledIsNotABreakerFailure's sibling for
-// ResolveTip's fetch half in runSlot (loop.go), which has had this same
-// hazard since before this diff.
+// ResolveTip's fetch half.
 func TestLoopFetchCtxCancelledIsNotABreakerFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	r := newCancelErrRunner(cancel, phaseFetch, "")
@@ -567,9 +550,7 @@ func TestLoopFetchCtxCancelledIsNotABreakerFailure(t *testing.T) {
 
 // assertCancelledStopNoBreaker fails unless Loop stopped on the cancellation
 // itself and left none of the bookkeeping a real seam failure would. Takes
-// the already-decoded events, not the raw buffer: a caller that also wants
-// to assert on event names/order (e.g. child_finish presence) must decode
-// once and reuse the slice, since decodeEvents drains the buffer.
+// decoded events because decodeEvents drains the buffer.
 func assertCancelledStopNoBreaker(t *testing.T, reason string, events []Event) {
 	t.Helper()
 	if !strings.HasPrefix(reason, "context-cancelled:") {
@@ -593,9 +574,9 @@ func TestLoopCtxCancelledIsNotABreakerFailure(t *testing.T) {
 		runErr  error // injected at StartChild
 		waitErr error // injected at the handle's Wait
 	}{
-		// This issue's slice: a child forwarded SIGTERM that dies on the
-		// default disposition before installing its own handler reports an
-		// unclassified exit (e.g. 143), same as any other unrecognised code.
+		// A child forwarded SIGTERM that dies on the default disposition
+		// before installing its own handler reports an unclassified exit
+		// (e.g. 143).
 		{name: "unclassified exit", result: ChildResult{Exit: 143}},
 		// The seam-error branches: starting the child, or its own wait, can
 		// fail as an operator SIGTERM tears it down.
@@ -631,10 +612,8 @@ func TestLoopCtxCancelledIsNotABreakerFailure(t *testing.T) {
 	}
 }
 
-// cancelPhase names which half of one ResolveTip call an operator SIGTERM
-// lands inside — the fetch half or the self-eval half — not a separate
-// Runner seam: ResolveTip is the only seam onto ResolveTip, and both halves
-// run inside that one call.
+// cancelPhase names which half of one ResolveTip call (fetch or self-eval)
+// an operator SIGTERM lands inside.
 type cancelPhase string
 
 const (
@@ -643,10 +622,9 @@ const (
 )
 
 // newCancelErrRunner models an operator SIGTERM landing inside one phase of
-// ResolveTip: the phase cancelIn names cancels the parent ctx and returns
-// its ctx.Err(), and every phase the loop must not reach afterwards errors
-// loudly rather than handing back a zero value the loop would read as a
-// real answer.
+// ResolveTip: that phase cancels the parent ctx and returns ctx.Err(), and
+// every later phase errors loudly rather than returning a zero value the
+// loop would read as a real answer.
 func newCancelErrRunner(cancel context.CancelFunc, cancelIn cancelPhase, revision string) *scriptedRunner {
 	r := &scriptedRunner{revisions: []string{revision}}
 	r.onResolve = func(ctx context.Context, call int) error {
@@ -669,10 +647,8 @@ func newCancelErrRunner(cancel context.CancelFunc, cancelIn cancelPhase, revisio
 	return r
 }
 
-// TestLoopRejectsNonPositiveSlots asserts Loop treats a zero or negative
-// pool size as a real, halt-shaped config error rather than silently
-// running no children — a zero-slot daemon that looks healthy while doing
-// nothing is the worst outcome.
+// TestLoopRejectsNonPositiveSlots asserts Loop halts on a zero or negative
+// pool size rather than looking healthy while running nothing.
 func TestLoopRejectsNonPositiveSlots(t *testing.T) {
 	for _, slots := range []int{0, -1} {
 		t.Run(fmt.Sprintf("slots=%d", slots), func(t *testing.T) {
@@ -695,10 +671,9 @@ func TestLoopRejectsNonPositiveSlots(t *testing.T) {
 }
 
 // TestLoopRejectsInvalidBreakerConfig mirrors
-// TestLoopRejectsNonPositiveSlots for the breaker knobs this slice adds: a
-// non-positive threshold or window, or a negative backoff, is a config
-// error Loop rejects up front rather than a zero-value default that would
-// make the breaker's real threshold invisible.
+// TestLoopRejectsNonPositiveSlots for the breaker knobs: Loop rejects an
+// invalid one up front rather than treating it as a zero-value default that
+// would make the breaker's real threshold invisible.
 func TestLoopRejectsInvalidBreakerConfig(t *testing.T) {
 	// Each case is the valid single-slot config with exactly one knob made
 	// invalid, so what the case rejects is the only thing it states.
@@ -737,9 +712,7 @@ func TestLoopRejectsInvalidBreakerConfig(t *testing.T) {
 }
 
 // TestLoopRejectsInvalidKindsConfig mirrors TestLoopRejectsInvalidBreakerConfig
-// for the Kinds/Reservation knobs issue #3541 adds: an empty Kinds, an
-// unknown or duplicate kind, or a Reservation outside [0, Slots] is a
-// config error Loop rejects up front.
+// for the Kinds/Reservation knobs (issue #3541).
 func TestLoopRejectsInvalidKindsConfig(t *testing.T) {
 	invalid := func(mutate func(*Config)) Config {
 		cfg := testConfig(2)
@@ -776,10 +749,8 @@ func TestLoopRejectsInvalidKindsConfig(t *testing.T) {
 }
 
 // TestLoopIdleBackoffGrowsAndCapsAcrossConsecutiveNoWork pins one kind's
-// backoff growth: testConfig has a single kind, so consecutive no-work checks
-// (exit 2) each double the wait from the last one, bounded by IdleCap, rather
-// than repeating the same fixed interval forever. Per-kind independence is
-// TestPoolPerKindBackoffGrowsIndependently's (dualkind_test.go).
+// backoff growth: consecutive no-work checks (exit 2) double the wait up to
+// IdleCap. Per-kind independence is TestPoolPerKindBackoffGrowsIndependently's.
 func TestLoopIdleBackoffGrowsAndCapsAcrossConsecutiveNoWork(t *testing.T) {
 	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{
 		{Exit: 2}, {Exit: 2}, {Exit: 2}, {Exit: 2}, {Exit: 2}, {Exit: 5},
@@ -800,10 +771,8 @@ func TestLoopIdleBackoffGrowsAndCapsAcrossConsecutiveNoWork(t *testing.T) {
 	}
 }
 
-// TestLoopIdleBackoffResetsOnDispatch pins the reset rule this slice adds:
-// a check that actually dispatches (exit 0) is evidence the queue was not
-// really idle, so the very next no-work check must wait the floor again,
-// not the grown value the streak was on before the dispatch.
+// TestLoopIdleBackoffResetsOnDispatch pins that a dispatch (exit 0) resets
+// the next no-work wait to the floor.
 func TestLoopIdleBackoffResetsOnDispatch(t *testing.T) {
 	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{
 		{Exit: 2}, {Exit: 2}, {Exit: 0}, {Exit: 2}, {Exit: 5},
@@ -821,8 +790,7 @@ func TestLoopIdleBackoffResetsOnDispatch(t *testing.T) {
 }
 
 // TestLoopRejectsInvalidIdleConfig mirrors TestLoopRejectsInvalidBreakerConfig
-// for the idle-backoff knobs this slice adds: a non-positive floor or a cap
-// below the floor is a config error Loop rejects up front.
+// for the idle-backoff knobs.
 func TestLoopRejectsInvalidIdleConfig(t *testing.T) {
 	invalid := func(mutate func(*Config)) Config {
 		cfg := testConfig(1)
@@ -981,13 +949,10 @@ func TestLoopQueueEmptyWaitIgnoresTipMoved(t *testing.T) {
 // short-circuited streak left off.
 func TestLoopTipMovedResetsBackoffForNextWait(t *testing.T) {
 	r := &scriptedRunner{
-		// A trailing explicit false, not left to the "last value repeats"
-		// convention: resolveTip (pool.go, issue #3625) now reports a
-		// Moved tip from the post-pickKind site too, not only the
-		// opportunistic one, so a 6th resolve call that repeated moved's
-		// last scripted value (true) would observe the still-jammed gate
-		// a second time and fire a second tip_moved this test does not
-		// intend to exercise.
+		// A trailing explicit false, not the "last value repeats"
+		// convention: resolveTip (issue #3625) reports Moved from the
+		// post-Decide site too, so a repeated true would fire a second
+		// tip_moved this test does not exercise.
 		revisions: []string{"rev1", "rev1", "rev1", "rev1", "rev2", "rev2"},
 		moved:     []bool{false, false, false, false, true, false},
 		results:   []ChildResult{{Exit: 3}, {Exit: 3}, {Exit: 3}, {Exit: 3}, {Exit: 5}},
@@ -1019,15 +984,11 @@ func TestLoopTipMovedResetsBackoffForNextWait(t *testing.T) {
 	}
 }
 
-// TestLoopTipMovedResolvesOnceNotFetchThenRefetch is the headline regression
-// tripwire for #3579: the slot that observes a mid-wait tip move must reuse
-// that same resolution for the child it runs next, not fetch it again at the
-// top of the following iteration. Two consecutive no-work checks grow the
-// wait past one IdleFloor, so the second's idleSleep asks for an
-// opportunistic resolve; that resolve is scripted to report the move
-// straight away, so pickKind finds dispatch runnable again in the very same
-// iteration and must run with the tip already in hand — one resolution per
-// run, not the fetch-then-refetch pair there was before this slice.
+// TestLoopTipMovedResolvesOnceNotFetchThenRefetch is the regression tripwire
+// for #3579: the slot that observes a mid-wait tip move must reuse that
+// resolution for its next child, not fetch again. Two no-work checks grow
+// the wait past one IdleFloor so idleSleep asks for an opportunistic
+// resolve, scripted to report the move at once.
 func TestLoopTipMovedResolvesOnceNotFetchThenRefetch(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1", "rev1", "rev2"},
@@ -1106,19 +1067,16 @@ func TestLoopTipMovedFollowsMovedFlagNotRevisionDiff(t *testing.T) {
 }
 
 // TestLoopIdleWaitSwallowsMidWaitPollFailure pins resolveOpportunistic's
-// failure branch: a ResolveTip error during the opportunistic resolve
-// idleSleep's resolveTip return asks for is not the loop's own
-// per-iteration fetch, so it must be swallowed as "no change
-// observed" rather than routed to backoffOrHalt (which would trip the
-// pool-wide breaker over a transient fetch blip).
+// failure branch: an opportunistic resolve error is swallowed as "no change
+// observed" rather than routed to backoffOrHalt and the breaker.
 //
 // Iteration 1: ResolveTip call #1 (top of loop) -> exit 3 -> wait = floor;
-// idleSleep sleeps one slice and returns resolveTip = false (nothing
+// idleSleep sleeps one slice and returns wantResolve = false (nothing
 // remained). Iteration 2: call #2 (top of loop) -> exit 3 -> wait = 2*floor;
-// idleSleep sleeps slice 1 and returns resolveTip = true. Iteration 3: the
+// idleSleep sleeps slice 1 and returns wantResolve = true. Iteration 3: the
 // opportunistic resolve this asked for is call #3, the one set to fail --
-// swallowed, phase reset, pickKind still gated -> idleSleep sleeps slice 2
-// and returns resolveTip = false. Iteration 4: call #4 (top of loop, dispatch
+// swallowed, phase reset, Decide still gated -> idleSleep sleeps slice 2
+// and returns wantResolve = false. Iteration 4: call #4 (top of loop, dispatch
 // now runnable) -> exit 5 -> halt. FailureBackoff is set apart from the
 // floor so a stray failure-backoff sleep (a regression routing the
 // opportunistic failure to backoffOrHalt) would be unmistakable in
@@ -1160,26 +1118,17 @@ func TestLoopIdleWaitSwallowsMidWaitPollFailure(t *testing.T) {
 	}
 }
 
-// TestLoopTipMovedFiresDespiteSelfEvalErrorOnSameResolve pins the reviewer
-// finding on resolveTip (pool.go, issue #3625 review round 2): a resolution
-// that observes Moved=true must report it even when that same call's
-// self-eval half fails and wraps the result in *SelfEvalError. The runner's
-// baseline is already advanced by the time a *SelfEvalError is returned
-// (resolveTipOnce, double_test.go), so an err == nil guard on the report
-// would drop the move for good — no later resolve can ever re-observe it.
+// TestLoopTipMovedFiresDespiteSelfEvalErrorOnSameResolve pins resolveTip
+// (issue #3625): a resolution observing Moved=true must report it even when
+// its self-eval half fails with *SelfEvalError. The runner's baseline has
+// already advanced by then, so an err == nil guard would drop the move for
+// good.
 //
-// The script mirrors TestLoopIdleWaitSwallowsMidWaitPollFailure's jam setup
-// (two exit-3 results gate dispatch, growing its backoff), but the
-// opportunistic resolve idleSleep asks for (call #3) is scripted with
-// Moved=true and a self-eval error rather than a plain fetch error. With the
-// fix, resolveTip reports the move before resolveOpportunistic swallows the
-// error, so noteTipMoved resets dispatch's backoff mid-iteration: pickKind
-// finds it runnable at once, and the ordinary post-pickKind resolve (call
-// #4) proceeds in that same loop pass rather than idleSleep sleeping out a
-// second slice. That collapses the wait sequence to two Sleep calls instead
-// of three, which is the observable this test pins alongside the event
-// itself: the pre-fix guard leaves dispatch jammed through call #3, costing
-// a third slice before the natural elapse at call #4 unblocks it anyway.
+// The script mirrors TestLoopIdleWaitSwallowsMidWaitPollFailure's jam setup,
+// but the opportunistic resolve (call #3) reports Moved=true with a
+// self-eval error. Reporting the move resets dispatch's backoff at once, so
+// call #4 runs in the same pass: two Sleep calls, not three — the
+// observable pinned alongside the event.
 func TestLoopTipMovedFiresDespiteSelfEvalErrorOnSameResolve(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
@@ -1288,11 +1237,9 @@ func TestLoopAwakeWindowWraparoundOpenStartsImmediately(t *testing.T) {
 	}
 }
 
-// TestLoopAwakeWindowClosesWhileChildRunsFinishesThenParks pins the "a Box
-// running when the window closes finishes, and so does its Settle" criterion
-// at the loop layer: a child already in flight when the window's close time
-// passes still gets its child_finish, and only the *next* iteration parks
-// (awake_close) rather than a second child starting straight away.
+// TestLoopAwakeWindowClosesWhileChildRunsFinishesThenParks pins that a child
+// in flight when the window closes still gets its child_finish, and only the
+// *next* iteration parks (awake_close).
 func TestLoopAwakeWindowClosesWhileChildRunsFinishesThenParks(t *testing.T) {
 	win, err := ParseWindow("09:00-17:00 UTC")
 	if err != nil {
@@ -1302,9 +1249,7 @@ func TestLoopAwakeWindowClosesWhileChildRunsFinishesThenParks(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		results:   []ChildResult{{Exit: 3}, {Exit: 5}},
-		// The child advances the shared clock, simulating a Box that
-		// outlasts the Awake window: the window can close mid-run without
-		// anything in the loop noticing until the child itself returns.
+		// Simulates a Box that outlasts the Awake window.
 		onStart: func(ctx context.Context, req ChildRequest) error {
 			clk.advanceBy(2 * time.Hour) // 16:00 -> 18:00, past the 17:00 close
 			return nil
@@ -1326,12 +1271,9 @@ func TestLoopAwakeWindowClosesWhileChildRunsFinishesThenParks(t *testing.T) {
 }
 
 // TestLoopAwakeWindowClosesDuringResolveTipParksInsteadOfStarting pins
-// a blocking review finding on runSlot: awaitWindow only decides the
-// window is open once, and ResolveTip's git fetch can outlast that
-// decision, so runSlot re-checks the window after ResolveTip returns.
-// A child must never start once the fetch comes back outside the window --
-// the slot should park (awake_close/awake_open) and try again, not launch
-// straight away.
+// runSlot's window re-check after ResolveTip, whose fetch can outlast
+// awaitWindow's decision: a child must never start once the fetch returns
+// outside the window; the slot parks and retries.
 func TestLoopAwakeWindowClosesDuringResolveTipParksInsteadOfStarting(t *testing.T) {
 	win, err := ParseWindow("09:00-17:00 UTC")
 	if err != nil {
@@ -1341,11 +1283,8 @@ func TestLoopAwakeWindowClosesDuringResolveTipParksInsteadOfStarting(t *testing.
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		results:   []ChildResult{{Exit: 5}},
-		// ResolveTip advances the shared clock, simulating a fetch that
-		// spans the window's close: the decision to run was made while
-		// still open, but time has moved on by the time the revision comes
-		// back. Guarded to call 1 only, so a slot that parks and retries
-		// sees a steady clock on its second pass.
+		// Simulates a fetch that spans the window's close. Call 1 only, so
+		// the retry sees a steady clock.
 		onResolve: func(ctx context.Context, call int) error {
 			if call == 1 {
 				clk.advanceBy(4 * time.Minute) // 16:58 -> 17:02, past the 17:00 close
@@ -1468,11 +1407,9 @@ func TestLoopEmptySelfProgramSkipsCheck(t *testing.T) {
 	}
 }
 
-// TestLoopEmptySelfProgramNeverHaltsEvenWithSelfPathReported asserts the
-// comparison itself is skipped, not merely made harmless: even when the
-// runner's Tip carries a SelfPath (this slice's scriptedRunner serves the
-// self half whenever a test scripts selfPaths, whatever cfg.SelfProgram is),
-// an empty Config.SelfProgram must never halt on it.
+// TestLoopEmptySelfProgramNeverHaltsEvenWithSelfPathReported asserts an
+// empty Config.SelfProgram never halts even when the Tip carries a SelfPath
+// (scriptedRunner serves one whenever selfPaths is scripted).
 func TestLoopEmptySelfProgramNeverHaltsEvenWithSelfPathReported(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
@@ -1493,10 +1430,8 @@ func TestLoopEmptySelfProgramNeverHaltsEvenWithSelfPathReported(t *testing.T) {
 	}
 }
 
-// TestLoopSelfChangeHaltDetailFormat pins the exact detail string a
-// self-build mismatch halts with — the same "daemon build at %s is %s,
-// running %s" grammar checkSelfBuild used before this slice folded it into
-// runSlot's own field comparison.
+// TestLoopSelfChangeHaltDetailFormat pins the exact "daemon build at %s is
+// %s, running %s" detail string a self-build mismatch halts with.
 func TestLoopSelfChangeHaltDetailFormat(t *testing.T) {
 	r := &scriptedRunner{revisions: []string{"rev1"}, selfPaths: []string{"/nix/store/new-path"}}
 	prebuildAfterFirstChild(r, nil)
@@ -1515,12 +1450,10 @@ func TestLoopSelfChangeHaltDetailFormat(t *testing.T) {
 	}
 }
 
-// TestLoopResolveTipErrorClassification is the regression tripwire that
-// keeps the halt class an operator's exit code depends on distinguishable
-// between ResolveTip's two error shapes. A *SelfEvalError backs off under
-// the self-build reason and carries the resolved revision on the backoff
-// event (the fetch half succeeded); a plain fetch error backs off under
-// "resolve-revision:" with no revision at all (nothing was ever resolved).
+// TestLoopResolveTipErrorClassification keeps ResolveTip's two error shapes
+// distinguishable, since an operator's exit code depends on the halt class:
+// a *SelfEvalError backs off under the self-build reason with the resolved
+// revision; a plain fetch error under "resolve-revision:" with none.
 func TestLoopResolveTipErrorClassification(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -1620,11 +1553,9 @@ func TestLoopFeatureBranchGoneHaltsOutright(t *testing.T) {
 	wantEvents(t, &buf, []string{"halt"}, "exactly one halt event, no child_start")
 }
 
-// TestLoopFeatureBranchGoneMidRunHaltsOutright pins the mid-run half of the
-// acceptance criterion TestLoopFeatureBranchGoneHaltsOutright's resolveAt: 1
-// leaves untested: the gone answer arriving after a child has already run
-// and completed, not on the very first resolve. The halt must still land
-// before the next claim, with no further StartChild call.
+// TestLoopFeatureBranchGoneMidRunHaltsOutright pins the gone answer arriving
+// after a child has already run, not on the first resolve: the halt must
+// still land before the next claim.
 func TestLoopFeatureBranchGoneMidRunHaltsOutright(t *testing.T) {
 	r := &scriptedRunner{
 		revisions:  []string{"rev1"},
@@ -1657,11 +1588,9 @@ func TestLoopFeatureBranchGoneMidRunHaltsOutright(t *testing.T) {
 }
 
 // TestLoopFeatureBranchGoneDrainsRunningSibling is
-// TestLoopSelfChangeDrainsRunningChild's counterpart for the gone-branch
-// halt: the sibling's resolve (global call 2) only reports gone once the
-// lead's child is confirmed running, so the halt genuinely races an
-// in-flight sibling rather than an imagined one, and that sibling must
-// still finish (child_finish) instead of being abandoned.
+// TestLoopSelfChangeDrainsRunningChild for the gone-branch halt: resolve
+// call 2 reports gone only once the lead's child is confirmed running, and
+// that child must still get its child_finish.
 func TestLoopFeatureBranchGoneDrainsRunningSibling(t *testing.T) {
 	leadEntered := make(chan struct{}) // closed once the lead's resolve (call 1) is under way
 	started := make(chan struct{})     // closed by onStart the moment the lead's child starts
@@ -1818,28 +1747,17 @@ func TestLoopSelfPathErrorBacksOff(t *testing.T) {
 	}
 }
 
-// TestLoopSelfChangeDrainsRunningChild asserts the "drains running children
-// rather than killing them" criterion for the self-change halt specifically:
-// with one slot's child already running when a sibling slot's self-check
-// halts the pool, the running child's child_finish is still emitted and
-// neither slot returns until that child has actually returned. It drives
-// runSlot against a newPool rather than Loop so the two slots can be
-// launched in a pinned order, for the reason below; Loop adds nothing over
-// that here beyond the goroutine fan-out this does itself.
+// TestLoopSelfChangeDrainsRunningChild asserts the self-change halt drains
+// rather than kills: with one slot's child running when a sibling's
+// self-check halts the pool, that child's child_finish is still emitted and
+// neither slot returns before it does. It drives runSlot directly so the
+// slots launch in a pinned order.
 //
-// leadSlot must win the matching (call 1) path, not siblingSlot: leadSlot
-// is newPool's pre-assigned baton holder (pool.go), and awaitBaton now
-// sits after the resolve/self-check, right before the child start (issue
-// #3625's structural fix). If leadSlot instead landed on call 2 — the
-// branch that blocks on `started`, which only a child actually starting
-// can close — it would sit in self-eval forever waiting for a child that
-// can never start: starting requires the baton, and leadSlot cannot pass
-// a baton it is holding while blocked inside its own self-eval. That is a
-// genuine deadlock, but purely a test-construction one:
-// self-eval never depends cross-slot in production, only this fixture's
-// own `started` handshake does — so the fix is pinning call order via a
-// staggered launch, the same pattern the baton release-path tests use,
-// rather than leaving it to a shared call-index race.
+// leadSlot (the pre-assigned baton holder) must take self-eval call 1: call 2
+// blocks on `started`, and since awaitBaton sits after the self-check (issue
+// #3625), a holder blocked in call 2 would wait forever for a child that
+// cannot start without the baton it holds — a deadlock of this fixture's
+// handshake only, avoided by a staggered launch.
 func TestLoopSelfChangeDrainsRunningChild(t *testing.T) {
 	const matchPath = "/nix/store/old-path"
 	const newPath = "/nix/store/new-path"
@@ -1858,10 +1776,8 @@ func TestLoopSelfChangeDrainsRunningChild(t *testing.T) {
 				leadEnteredOnce.Do(func() { close(leadEntered) })
 				return nil
 			}
-			// Not first: wait for the other slot's child to actually be
-			// running before reporting the mismatch, so the halt this
-			// triggers is guaranteed to race a genuinely in-flight child,
-			// not an imagined one.
+			// Wait for the other slot's child to be running, so the halt
+			// races a genuinely in-flight child.
 			<-started
 			return nil
 		},
@@ -2053,10 +1969,8 @@ func TestLoopPublishesLiveStatus(t *testing.T) {
 	clk := &testClock{}
 	sw := NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
 
-	// report/probeErr are read back from inside onStart, while the child is
-	// still "running" from the pool's point of view, so the assertion below
-	// is genuinely about the in-flight file, not the one left behind after
-	// the child returns.
+	// Read from inside onStart, so the assertion is about the in-flight
+	// file, not the one left behind.
 	var report StatusReport
 	var probeErr error
 	r := &scriptedRunner{
@@ -2297,14 +2211,10 @@ func TestLoopButlerBoxSettledCarryChoreNotIssue(t *testing.T) {
 	}
 }
 
-// TestLoopNilStatusPublishesNothing pins Config.Status == nil as the
-// deliberate opt-out: Loop must run to completion without panicking and
-// must never create a status file. The check against dir would be vacuous
-// on its own — nothing ties dir to cfg when Status is nil, so no run could
-// ever write there — so the second half re-runs the same shape with
-// cfg.Status wired to a StatusWriter over that same dir, proving a file
-// does land there when Status is non-nil and making the first half's
-// absence assertion load-bearing rather than a check against thin air.
+// TestLoopNilStatusPublishesNothing pins Config.Status == nil as a
+// deliberate opt-out: no panic, no status file. The absence check alone
+// would be vacuous, so the second half wires a StatusWriter over the same
+// dir and proves a file does land there.
 func TestLoopNilStatusPublishesNothing(t *testing.T) {
 	dir := t.TempDir()
 	statusPath := filepath.Join(dir, statusFileName)
@@ -2330,12 +2240,10 @@ func TestLoopNilStatusPublishesNothing(t *testing.T) {
 	}
 }
 
-// TestLoopInvalidConfigPublishesHaltedStatus pins invalidConfig's Write:
-// Loop rejects a bad config before any pool exists, so there is no
-// projectStatus to publish through, yet a wired Status must still end up
-// holding a StateHalted record naming the same reason returned to the
-// caller — otherwise a checkout's status file is left at whatever a
-// predecessor run last published, under a lock this run now holds.
+// TestLoopInvalidConfigPublishesHaltedStatus pins invalidConfig's Write: with
+// no pool yet, a wired Status must still end up StateHalted with the
+// returned reason, or the status file is left at a predecessor's last
+// publish under a lock this run now holds.
 func TestLoopInvalidConfigPublishesHaltedStatus(t *testing.T) {
 	dir := t.TempDir()
 	clk := &testClock{}
@@ -2387,25 +2295,14 @@ func TestLoopInvalidConfigReportsStatusWriteFailure(t *testing.T) {
 
 // TestLoopCoalescesConcurrentResolvesAcrossSlots is the Loop-seam
 // acceptance test for issue #3625's coalescing criterion: three slots
-// released together, in one pool, cost the shared Runner one resolve, not
-// three.
+// released together cost the shared Runner one resolve, not three.
 //
-// This is one Loop with Slots: 3, not three independent one-slot Loops:
-// the baton no longer gates ResolveTip (issue #3625's structural fix moved
-// acquisition past it, to immediately before the child start), so every
-// slot's very first round reaches the post-pickKind resolve concurrently
-// with no setup needed to force it — that overlap is what makes
-// resolveCount() == 1 a claim about Loop's own behaviour rather than about
-// the double's single-flight in isolation. Against a Loop that still
-// serialized resolves behind the baton, only the leader would ever reach
-// holdResolve's park and awaitResolveJoins below would time out waiting
-// for joiners that could never arrive, rather than the test passing.
-//
-// coalesceResolve+holdResolve pins the leader in place until the other two
-// have genuinely joined its flight (not merely started their own — a sleep
-// here would make the test flaky by construction), then releases it: one
-// resolve should answer all three. resolveCount() == 1 is the tripwire —
-// three independently resolving slots would have left it at 3.
+// One Loop with Slots: 3: the baton does not gate ResolveTip, so every
+// slot's first round reaches the resolve concurrently, making
+// resolveCount() == 1 a claim about Loop rather than about the double. A Loop
+// that serialized resolves behind the baton would time out in
+// awaitResolveJoins. holdResolve pins the leader until the other two have
+// genuinely joined its flight (a sleep would be flaky by construction).
 func TestLoopCoalescesConcurrentResolvesAcrossSlots(t *testing.T) {
 	const slots = 3
 	r := &scriptedRunner{
@@ -2435,24 +2332,15 @@ func TestLoopCoalescesConcurrentResolvesAcrossSlots(t *testing.T) {
 }
 
 // TestLoopCoalescedResolveFailureBacksOffEverySlot is the Loop-seam
-// acceptance test for issue #3625 acceptance criterion 6: a fetch error
-// surfaced to every caller sharing one flight still leaves each of them
-// backing off on its own, same as an uncoalesced failure would. The
-// coalescing collapses the fetch itself, not the per-slot backoff that
-// follows it.
+// acceptance test for issue #3625 criterion 6: a fetch error shared by one
+// flight still backs off every caller on its own — coalescing collapses the
+// fetch, not the per-slot backoff.
 //
-// holdResolve+awaitResolveJoins forces the same genuine three-way overlap
-// TestLoopCoalescesConcurrentResolvesAcrossSlots relies on, so resolveErr
-// answers all three callers of one shared flight rather than three
-// independent resolves that merely happened to fail identically. rearmResolve
-// then re-uses the same join count for round 2 as a synchronization
-// barrier — all three slots reaching round 2's flight is only possible once
-// every slot has finished its own round-1 backoff — before the events
-// buffer is read. A follow-up successful resolve (resolveAt is 1-based and
-// only matches the first leader) and a host-tainted exit then give the pool
-// a real halt, the same way TestLoopResolveErrorBacksOffThenHalts ends its
-// single-slot case, so this test terminates rather than looping forever on
-// backoffs.
+// holdResolve+awaitResolveJoins forces a genuine three-way overlap, so one
+// shared flight answers all three. rearmResolve reuses the join count for
+// round 2 as a barrier proving every round-1 backoff finished. A later
+// successful resolve (resolveAt: 1 matches only the first flight's leader)
+// and a host-tainted exit then halt the pool.
 func TestLoopCoalescedResolveFailureBacksOffEverySlot(t *testing.T) {
 	const slots = 3
 	wantErr := errors.New("boom: no such revision")
@@ -2476,23 +2364,15 @@ func TestLoopCoalescedResolveFailureBacksOffEverySlot(t *testing.T) {
 
 	r.awaitResolveJoins(t, slots-1)
 
-	// Each slot must finish its own backoffOrHalt (and thus emit its own
-	// "backoff" event) before it loops back for round 2's resolve, so
-	// seeing all three converge on round 2's flight is the synchronization
-	// point that proves round 1's backoffs are all done — without it, a
-	// fast leader could race ahead into round 2 and beyond before the
-	// other two slots recorded anything, which is exactly the -race
-	// failure an earlier version of this test hit. rearmResolve installs
-	// round 2's hold before releasing round 1's, so no slot can slip
-	// through unheld between the two rounds (see rearmResolve's own doc).
+	// All three converging on round 2's flight proves round 1's backoffs
+	// are done; without it a fast leader races ahead before the others
+	// record anything (a real -race failure). rearmResolve installs round
+	// 2's hold before releasing round 1's.
 	r.rearmResolve(t, slots-1) // round 1's shared flight fails for all three
 	r.awaitResolveJoins(t, slots-1)
 
-	// Without coalescing, resolveAt: 1 would only ever fail the one caller
-	// that happened to make call #1 — the other two would succeed and run
-	// a child straight away, never backing off at all. All three slots
-	// reporting their own backoff below is only possible because the one
-	// shared flight's error answered all of them.
+	// Without coalescing, resolveAt: 1 would fail only one caller; three
+	// backoffs prove the shared flight's error answered all of them.
 	events := decodeEvents(t, &buf)
 	seen := map[int]bool{}
 	for _, ev := range events {

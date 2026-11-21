@@ -397,8 +397,6 @@ func TestOrchestratorPass_ForwardsRunStateFileAsStateFile(t *testing.T) {
 	}
 }
 
-// --- outcome nudge gate (ported from the deleted entrypoint-outcome-recovery.bats, #4292) ---
-
 func TestOutcomeNudge_ResumeSuppliesOutcome_NoBackstop(t *testing.T) {
 	f := newFixture(t)
 	f.firstRun("all done, no marker\n", 0)
@@ -549,8 +547,6 @@ func TestOutcomeNudge_SkippedForAdviseOnlyKind(t *testing.T) {
 	}
 }
 
-// --- outcome backstop (ported from the deleted entrypoint-outcome-backstop.bats, #4292) ---
-
 func TestBackstop_NoOutcomeLine_EmitsSyntheticLineOnce(t *testing.T) {
 	f := newFixture(t)
 	f.firstRun("done\n", 0)
@@ -644,8 +640,6 @@ func TestBackstop_AdviseOnlyKindReachesTheBackstopWithItsKind(t *testing.T) {
 	}
 }
 
-// --- already-resolved demotion: bats outcome-backstop #4016 cases ---
-
 func TestDemotion_ReplacesOutcomeLineWithVerbOutput(t *testing.T) {
 	f := newFixture(t)
 	f.firstRun(resolvedLine+"\n", 0)
@@ -721,8 +715,6 @@ func TestDemotion_ErrorIsFatal(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
-
-// --- PR-intent nudge gate (ported from the deleted entrypoint-pr-intent-nudge.bats, #4292) ---
 
 func TestPRIntent_GenuineMarkerPresent_NoResume(t *testing.T) {
 	f := newFixture(t)
@@ -992,8 +984,6 @@ func TestPRIntent_SignalStatusErrorWarnsAndStillNudges(t *testing.T) {
 	}
 }
 
-// --- settle phases and sequencing ---
-
 func TestSettle_LockfileScanRunsUnlessSelfContained(t *testing.T) {
 	f := newFixture(t)
 	f.firstRun(blockedLine+"\n", 6)
@@ -1217,8 +1207,6 @@ func TestRun_StdoutOrderForACleanRun(t *testing.T) {
 	}
 }
 
-// --- the first Driver run ---
-
 func TestFirstRun_PassesTheSharedHandoffAndPromptFileContent(t *testing.T) {
 	f := newFixture(t)
 	f.run()
@@ -1415,8 +1403,6 @@ func TestPhaseError_Format(t *testing.T) {
 	}
 }
 
-// --- real orchestrator runner ---
-
 func TestExecOrchestrator_NotOnPathIsRC127(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	var stderr bytes.Buffer
@@ -1441,8 +1427,6 @@ func TestExecOrchestrator_PropagatesExitCodeAndOutput(t *testing.T) {
 		t.Fatalf("rc=%d stdout=%q", rc, stdout.String())
 	}
 }
-
-// --- flags ---
 
 // allFlags is one `--name=value` token per flag, so a bool needs no separate
 // value argument.
@@ -1654,8 +1638,6 @@ func TestMainRun_ErrorPrintsBoxPhaseAndExitsOne(t *testing.T) {
 	}
 }
 
-// --- prompt assembly ---
-
 func TestAssemble_FailureIsAPhaseErrorAndNoOrchestratorRuns(t *testing.T) {
 	f := newFixture(t)
 	f.assembleErr = errors.New("registry unreadable")
@@ -1818,7 +1800,7 @@ func TestAssemblePrompt_FixPassLeavesNoReviewPromptFile(t *testing.T) {
 }
 
 // The flag-supplied Driver settings ride the Handoff to the orchestrator and
-// driver-exec, which no longer read them from the environment (issue #2975).
+// driver-exec, which do not read them from the environment (issue #2975).
 func TestAssemblePrompt_HandoffCarriesTheDriverSettings(t *testing.T) {
 	in := assemblyFixture(t)
 	in.Passthrough = promptassembly.Passthrough{
@@ -1921,8 +1903,6 @@ func TestRun_AssemblesThenTheFirstPassGetsTheHandoffBoxWrote(t *testing.T) {
 		t.Error("the first pass prompt lacks the baked caveman fragment")
 	}
 }
-
-// --- the toolchain decision ---
 
 const (
 	probingLine = "==> flake.nix found in cloned repo; probing for devShell"
@@ -2180,10 +2160,9 @@ func TestAssemblePrompt_NoPromptHashesWithoutRecordID(t *testing.T) {
 	}
 }
 
-// --- exit resolution joined to the recovery gates (issue #5348) ---
-//
-// The fixture's passes settle through each Driver's real ResolveExit, so these
-// cover the seam between a Driver's rc and the gates that read it.
+// The recovery-gate tests below settle the fixture's passes through each
+// Driver's real ResolveExit (issue #5348), covering the seam between a
+// Driver's rc and the gates that read it.
 
 const opencodeErrorEvent = `{"type":"error","error":"boom"}`
 

@@ -331,9 +331,9 @@ func TestRun_LeavesLocalLandingOpenWhenNotVerifiedMerged(t *testing.T) {
 	}
 }
 
-// Issue #1809, the silent-stuck cluster this typed repair path replaces: for a
-// LandingBranchRef (settle's pre-merge record) that is not yet contained,
-// Reconcile prints a loud, branch-naming stuck verdict, never a silent no-op.
+// Issue #1809: for a LandingBranchRef (settle's pre-merge record) that is not
+// yet contained, Reconcile prints a loud, branch-naming stuck verdict, never a
+// silent no-op.
 func TestRun_PrintsStuckVerdictForUnmergedBranchRefLanding(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
@@ -795,10 +795,9 @@ func TestRun_ResetIsIdempotent(t *testing.T) {
 }
 
 // ADR 0039 Slice B: Reconcile leaves a Recoverable issue (a stranded
-// CODE_FORGE=local push-only run promoted to Recoverable instead of Failed)
-// completely untouched. Against a push-only local Code Forge, Run skips its
-// only reset mechanism, the second InProgress sweep at its tail, because
-// hasPR is false, so this test covers the local landing path itself.
+// CODE_FORGE=local push-only run) untouched. Against a push-only Code Forge
+// Run skips its only reset mechanism, the tail InProgress sweep (no PRForge),
+// so this covers the local landing path itself.
 func TestRun_Local_RecoverableIssueNeverReset(t *testing.T) {
 	labels := forge.DispatchLabels{Dispatchable: "dispatchable", InProgress: "in-progress", Recoverable: "recoverable"}
 	f := forge.NewFake(labels)

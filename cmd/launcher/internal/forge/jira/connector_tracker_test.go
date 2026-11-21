@@ -132,12 +132,10 @@ func TestConnectorTracker_StatusOnlyRefusalSentence(t *testing.T) {
 	}
 }
 
-// #6370: on a site that maps failed and ambiguous to one status, the
-// Connector-backed ListIssues(Failed) also returns the ambiguous-halted card,
-// which never wears the failed label: the listing queue recover must skip it
-// from (recover_queue_test.go's sharedFailedStatus fake simulates this).
-// It pins the listing property that fake assumes, standing in for running
-// recover's skip itself.
+// #6370: on a site that maps failed and ambiguous to one status,
+// ListIssues(Failed) also returns the ambiguous-halted card, which never wears
+// the failed label, so recover must skip it. This pins the listing property
+// recover_queue_test.go's sharedFailedStatus fake assumes.
 func TestConnectorTracker_SharedFailedStatusListsTheAmbiguousCardUnderFailed(t *testing.T) {
 	const mapping = `{"failed":"Needs Info","ambiguous":"Needs Info"}`
 	for _, fl := range connectorFlavours {

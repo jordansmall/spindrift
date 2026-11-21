@@ -271,13 +271,11 @@ func TestSettleRun_CapDropsOverflowAndRecordsDropped(t *testing.T) {
 	}
 }
 
-// (c2b) A log-carrier Box (dispatch.Result.IssueIntents populated from
-// outcome.AllIssueIntentLinesInLog rather than the socket) is capped the
-// same as any other carrier: settle only ever sees the populated
-// dispatch.Result, never which channel filled it. Pins the specific
-// "twelve" figure from issue #3994's acceptance criterion -- the log
-// carrier's own scanner takes every verifying line unbounded, so the cap
-// enforced here, not there, is what actually bounds a run at twelve.
+// (c2b) A log-carrier Box is capped the same as any other carrier: settle
+// only sees the populated dispatch.Result, never which channel filled it, so
+// a plain readyResult stands in for one. The log carrier's own scanner takes
+// every verifying line unbounded, so the cap enforced here is what actually
+// bounds a run at twelve (issue #3994).
 func TestSettleRun_LogCarrierHonoursCapOfTwelve(t *testing.T) {
 	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
@@ -464,11 +462,8 @@ func TestSettleRun_CrashedRun_LeavesClaimUnadvanced(t *testing.T) {
 }
 
 // (e) A crashed run -- no ready outcome line at all -- still warns about any
-// rejected signal lines the result channel carried, since settle.RecordSettleWarnings
-// now runs as settle's first statement, ahead of both crash guards (issue
-// #3990). Before this fix the warning lived inside settle.FileButlerFindings,
-// reachable only once a run had already cleared the guards below, so a
-// crashed run's rejected lines were dropped with no trace at all.
+// rejected signal lines: the warning must run ahead of both crash guards, or
+// a crashed run's rejected lines are dropped with no trace (issue #3990).
 func TestSettleRun_CrashedRun_StillWarnsAboutRejectedSignals(t *testing.T) {
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -832,13 +827,9 @@ func TestSettleRun_Promotion_ConcurrenceCollapsedToOneLine(t *testing.T) {
 	}
 }
 
-// (i) promotion.decide in isolation: promotion off, an unlisted class, the
-// file-count gate (both directions -- zero files and over the limit),
-// missing/blank reviewer concurrence, no room left, and the promote case
-// itself, asserting the labels it hands back (issue #3993). No case here
-// hands decide a room closure -- room is a plain chore.Room argument, and
-// no case here sets Patch, so decide never reaches its patch branch (see
-// TestPromotion_DecidePatch for that).
+// (i) promotion.decide's promote/skip gates in isolation (issue #3993). No
+// case sets Patch, so decide never reaches its patch branch (see
+// TestPromotion_DecidePatch).
 func TestPromotion_Decide(t *testing.T) {
 	t.Parallel()
 	base := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 2, label: "ready-for-agent"}
@@ -951,18 +942,13 @@ func TestPromotion_Decide(t *testing.T) {
 	}
 }
 
-// (i2) promotion.decide's patch branch (ADR 0057, issue #4074/#4075): the
-// patch case itself, then every way a single patch gate can fail -- class,
-// diff shape (added/deleted/renamed/mode-change/binary), file cap, line cap,
-// patchPaths, site keys, missing concurrence, no patch room, plus the two
-// gates that gate patchBlocker's own call (rung off, blank patch) -- each
-// asserted to fall through to exactly what decidePromote returns for the
-// same finding with Patch cleared, under both a promotion-on policy (falls
-// through to promote) and a promotion-off one (falls through to skip). That
-// equivalence is the point: a failed patch gate must never change what
-// promote/skip decide reaches. wantSkip additionally pins that the failing
+// (i2) promotion.decide's patch branch (ADR 0057, issues #4074, #4075): every
+// way a single patch gate can fail must fall through to exactly what
+// decidePromote returns for the same finding with Patch cleared, under both a
+// promotion-on and a promotion-off policy -- a failed patch gate must never
+// change what promote/skip decide reaches. wantSkip pins that the failing
 // gate names itself in decision.patchSkip (empty for the two gates decide
-// checks before ever calling patchBlocker).
+// checks before calling patchBlocker: rung off, blank patch).
 func TestPromotion_DecidePatch(t *testing.T) {
 	t.Parallel()
 	patchable := newPromotion(
@@ -1050,17 +1036,15 @@ func TestPromotion_DecidePatch(t *testing.T) {
 			return p, f
 		}, nil, "class not on patch allow-list"},
 		{"legacy Files ... differ binary marker falls through as unparseable", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
-			// Attack from review finding on issue #4075: without the fix,
-			// this binary section's unrecognised line is dropped instead of
-			// rejected, so ParseUnifiedDiff would report only the ordinary
-			// docs/a.md entry and every gate below would clear it.
+			// Issue #4075: if this binary section's unrecognised line were
+			// dropped instead of rejected, ParseUnifiedDiff would report only
+			// the ordinary docs/a.md entry and every gate would clear it.
 			f.Patch = "diff --git a/CLAUDE.md b/CLAUDE.md\nindex 1111111..2222222 100644\nFiles a/CLAUDE.md and b/CLAUDE.md differ\ndiff --git a/docs/a.md b/docs/a.md\nindex 1111111..2222222 100644\n--- a/docs/a.md\n+++ b/docs/a.md\n@@ -1 +1 @@\n-p\n+q\n"
 			return p, f
 		}, nil, "diff does not parse"},
 		{"legacy rename old/new headers fall through as a rename", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
-			// Attack from review finding on issue #4075: unrecognised, the
-			// "rename old "/"rename new " section was dropped and only the
-			// docs/a.md entry reached the gates.
+			// Issue #4075: unrecognised, the "rename old "/"rename new "
+			// section would be dropped and only docs/a.md reach the gates.
 			f.Patch = "diff --git a/CLAUDE.md b/docs/evil.md\nrename old CLAUDE.md\nrename new docs/evil.md\ndiff --git a/docs/a.md b/docs/a.md\nindex 1111111..2222222 100644\n--- a/docs/a.md\n+++ b/docs/a.md\n@@ -1 +1 @@\n-p\n+q\n"
 			return p, f
 		}, nil, "renamed"},
@@ -1487,11 +1471,9 @@ func TestSettleRun_Promotion_NoReservationCommitWhenNothingEligible(t *testing.T
 	}
 }
 
-// patchReservePromotion builds a promotion with the patch rung always on
-// (docs-drift, DefaultPatchPaths, room enough for one) and the promotion
-// rung on iff promoteEnabled -- the shape TestSettleRun_Patch_* below share,
-// pinning that a patch candidate's own eligibility never depends on the
-// promotion rung being on (issue #4111).
+// patchReservePromotion builds a promotion with the patch rung always on and
+// the promotion rung on iff promoteEnabled, pinning that a patch candidate's
+// eligibility never depends on the promotion rung (issue #4111).
 func patchReservePromotion(promoteEnabled bool) promotion {
 	perDay := 0
 	if promoteEnabled {
@@ -1701,10 +1683,8 @@ func TestSettleRun_Patch_StaleClaimReserveFailsNeverLands(t *testing.T) {
 }
 
 // (t) A promote-only finding and a separate patch finding in the same sweep
-// share one reservation commit, not two: Reserved counts the promote-only
-// finding (its class is on the promotion allow-list) and ReservedPatches
-// counts the patch finding (its class is only on the patch allow-list, so it
-// never counts toward Reserved) -- issue #4111.
+// share one reservation commit (issue #4111). The patch finding's class is
+// only on the patch allow-list, so it never counts toward Reserved.
 func TestSettleRun_ReservesPromotionAndPatchInOneCommit(t *testing.T) {
 	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
@@ -1750,10 +1730,11 @@ func TestSettleRun_ReservesPromotionAndPatchInOneCommit(t *testing.T) {
 }
 
 // (u) A lost Finish still hands each landed patch to the merge gate, on both
-// failure shapes -- a non-CAS error and a rival takeover's CAS win --
-// since skipping it would orphan the already-open draft PR. The gate runs
-// after the lost Finish attempt, so no Ledger write follows it -- the
-// takeover shape's rival claim lands inside that attempt (issue #4118).
+// failure shapes -- a non-CAS error and a rival takeover's CAS win -- since
+// skipping it would orphan the already-open draft PR (issue #4118). The gate
+// runs after the lost Finish attempt -- the takeover shape's rival claim lands
+// inside that attempt -- so no Ledger write follows the gate call on either
+// shape.
 func TestSettleRun_Patch_GateRunsDespiteLostFinish(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {

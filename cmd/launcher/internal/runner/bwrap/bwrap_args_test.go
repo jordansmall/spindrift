@@ -241,7 +241,7 @@ func TestBwrapArgs_ClosureGenerationOverridesAgentFiles(t *testing.T) {
 	}
 }
 
-// Issue #2681 review finding: a non-nil ClosureGeneration with an empty
+// Issue #2681: a non-nil ClosureGeneration with an empty
 // AgentFiles must fall back to the baked agentFiles. Binding a bare "/agent"
 // and "/home/agent" would pull the host's own directories into the sandbox
 // instead of a store closure.
@@ -404,7 +404,7 @@ func assertBareBwrapExecTarget(t *testing.T, a *bwrapAdapter, etcDir string, box
 	}
 }
 
-// Issue #2666 review finding: pasta is the outer process that configures the
+// Issue #2666: pasta is the outer process that configures the
 // fresh netns, so buildArgs must inherit it rather than unshare a second empty
 // one on top. TestExecTarget_NetworkModeOpenWrapsWithPasta asserts the pasta
 // composition; the synthesized resolv.conf bind pointing at pasta's
@@ -430,7 +430,7 @@ func TestBwrapArgs_NetworkModeOpenOmitsBwrapSideUnshareNet(t *testing.T) {
 	}
 }
 
-// Characterization test (issue #2562 review finding, closed by issue #2666):
+// Characterization test (issues #2562, #2666):
 // nix eval and main.go's checkNetworkModeRuntimeGate keep "no-host-loopback"
 // from reaching the adapter in production, but one constructed directly now
 // isolates with pasta-wrapped egress instead of falling open to the shared
@@ -779,13 +779,6 @@ func TestBwrapArgs_SkillsDirUnset_NoMount(t *testing.T) {
 	}
 }
 
-// Issue #2489 removed TestBwrapArgs_BakedSkillsMounted,
-// TestBwrapArgs_RuntimeSkillsTakePrecedence and
-// TestBwrapArgs_SkillsDirInvalid_NoFallback along with bwrap.go's
-// baked-skills-fallback bind. Baked skills now reach the box through the
-// /agent ro-bind and the box program's (cmd/launcher/box) own copy step at
-// startup.
-
 // A non-empty nixConfigFile means the nixInBox knob is on (ADR 0042), which
 // renders both the nix.conf ro-bind and the store-DB snapshot overlay onto
 // /nix/var.
@@ -833,7 +826,7 @@ func TestBwrapArgs_ClosureGenerationOverridesNixVarSnapshotDir(t *testing.T) {
 	}
 }
 
-// Issue #2681 review finding: a non-nil ClosureGeneration with an empty
+// Issue #2681: a non-nil ClosureGeneration with an empty
 // Generation must fall back to the baked nixVarSnapshotDir. Overlaying the
 // bare nixVarSnapshotRoot would pick the container of every generation dir,
 // which holds no db.sqlite of its own.
@@ -860,7 +853,7 @@ func TestBwrapArgs_ClosureGenerationEmptyGenerationFallsBackToBaked(t *testing.T
 	}
 }
 
-// Issue #2681 review finding: a Generation of ".." would resolve one level
+// Issue #2681: a Generation of ".." would resolve one level
 // above nixVarSnapshotRoot through a raw filepath.Join, so it is rejected the
 // same way ClosureGeneration rejects an unsafe imageTag-derived label and
 // falls back to the baked nixVarSnapshotDir.

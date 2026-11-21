@@ -30,8 +30,8 @@ import (
 )
 
 // forgejoHarnessLabel is one label the harness seeds into a fresh Forgejo
-// repo. Color is a bare 6-hex-digit string with no leading "#", because the
-// adapter's CreateLabel prepends the "#" itself.
+// repo. Color is bare 6-hex-digit, as the Connector's createLabel prepends
+// the "#" itself.
 type forgejoHarnessLabel struct {
 	Name  string
 	Color string
@@ -54,10 +54,9 @@ func forgejoHarnessLabels() []forgejoHarnessLabel {
 }
 
 // forgejoContainerRunArgs builds the argv (without the leading cli) for a
-// detached, throwaway Forgejo container: SQLite, install lock pre-set so first
-// boot skips the setup wizard, and --rm so a crashed run leaves no stopped
-// container behind. hostPort 0 omits the host side of the publish flag, so the
-// runtime picks an ephemeral port (recovered via parseForgejoHostPort).
+// throwaway Forgejo container: install lock pre-set so first boot skips the
+// setup wizard, --rm so a crashed run leaves nothing behind. hostPort 0 lets
+// the runtime pick an ephemeral port.
 func forgejoContainerRunArgs(cli, name, image string, hostPort int) []string {
 	publish := "127.0.0.1::3000"
 	if hostPort != 0 {
@@ -74,11 +73,9 @@ func forgejoContainerRunArgs(cli, name, image string, hostPort int) []string {
 	}
 }
 
-// parseForgejoHostPort reads `docker port <name> 3000` output, one
-// "<host>:<port>" mapping per line ("0.0.0.0:49153", possibly with an ipv6
-// "[::]:49153" line alongside), and returns the first parseable port. Empty or
-// unparseable input errors rather than returning a zero port, since a harness
-// that cannot discover the published port has nothing to poll.
+// parseForgejoHostPort reads `docker port <name> 3000` output (one
+// "<host>:<port>" per line, ipv4 and maybe ipv6) and returns the first
+// parseable port. Unparseable input errors rather than returning port zero.
 func parseForgejoHostPort(portCmdOutput string) (int, error) {
 	for _, line := range strings.Split(portCmdOutput, "\n") {
 		line = strings.TrimSpace(line)
@@ -132,9 +129,8 @@ func forgejoVersionURL(baseURL string) string {
 
 // requireForgejoRuntime returns the CLI name ("podman" or "docker") for the
 // first runtime on PATH with a reachable daemon, skipping cleanly when neither
-// is usable. It mirrors internal/runner/oci's requireRealOCI (issue #576, "skip
-// on hosts with no real runtime"), reimplemented here so this package need not
-// import internal/runner/oci for one small probe.
+// is usable. It mirrors internal/runner/oci's requireRealOCI (issue #576)
+// without importing that package.
 func requireForgejoRuntime(t *testing.T) string {
 	t.Helper()
 	if runtime.GOOS != "linux" {
@@ -178,9 +174,8 @@ const forgejoPortTimeout = 10 * time.Second
 // started container to start answering requests.
 const forgejoReadyTimeout = 60 * time.Second
 
-// forgejoHTTPTimeout bounds a single harness HTTP request so one hung
-// connect or read cannot block past the surrounding readiness deadline
-// (forgejoWaitReady) or go test's global timeout (doREST).
+// forgejoHTTPTimeout bounds one harness HTTP request, so a hung connect cannot
+// outlast the readiness deadline or go test's global timeout.
 const forgejoHTTPTimeout = 10 * time.Second
 
 // forgejoHTTPClient replaces http.DefaultClient, whose timeout is unbounded,
@@ -201,9 +196,8 @@ const (
 )
 
 // isForgejoRuntimeUnavailable reports whether a failed container launch means
-// the registry or daemon is unreachable (a CI runner with no network egress,
-// an unauthenticated pull quota, a broken local daemon) rather than a harness
-// bug. bootForgejo skips on that signal instead of failing hard.
+// the registry or daemon is unreachable (no egress, pull quota, broken daemon)
+// rather than a harness bug; bootForgejo skips on it.
 func isForgejoRuntimeUnavailable(output string) bool {
 	for _, s := range []string{
 		"no such host",
@@ -299,10 +293,9 @@ func forgejoExecArgs(name string, cmd []string) []string {
 	return append([]string{"exec", "-u", "git", name}, cmd...)
 }
 
-// forgejoBootstrapAdmin runs `forgejo admin user create` inside the harness
-// container, retrying because the database may not have finished migrating
-// the instant the version endpoint answers 200. A "user already exists"
-// failure, a retry racing its own successful prior attempt, counts as success.
+// forgejoBootstrapAdmin runs `forgejo admin user create`, retrying since the
+// database may still be migrating when /version first answers 200. "User
+// already exists" (a retry racing its own success) counts as success.
 func forgejoBootstrapAdmin(t *testing.T, cli, name string) {
 	t.Helper()
 	args := forgejoExecArgs(name, forgejoAdminCreateArgs(forgejoAdminUser, forgejoAdminPassword, forgejoAdminEmail))
@@ -336,11 +329,10 @@ func forgejoMintToken(t *testing.T, cli, name string) string {
 	return token
 }
 
-// doREST issues a raw Forgejo REST request and returns the status code. It
-// fails the test on any transport, marshal, or decode error rather than
-// returning it, since a seed helper's failure is broken harness setup, not a
-// condition under test. It is hand-rolled, independent of the forgejo
-// package's own REST plumbing, for the AC3 cross-check below.
+// doREST issues a raw Forgejo REST request and returns the status code,
+// failing the test on any transport or codec error: that is broken setup.
+// It is independent of the Connector's REST plumbing, for the cross-check
+// below.
 func doREST(t *testing.T, method, url, token string, body, out any) int {
 	t.Helper()
 	var reqBody io.Reader
@@ -403,8 +395,7 @@ func seedLabels(t *testing.T, baseURL, token, repo string) {
 	}
 }
 
-// seedIssue applies labelNames through the same replace-labels endpoint the
-// adapter's own setLabels uses.
+// seedIssue applies labelNames through the replace-labels endpoint.
 func seedIssue(t *testing.T, baseURL, token, repo, title, body string, labelNames []string) int {
 	t.Helper()
 	var created struct {
@@ -454,8 +445,8 @@ func openPR(t *testing.T, baseURL, token, repo, head, base, title string) string
 }
 
 // rawIssueLabels reads issue num's label names via a raw REST GET, decoded
-// independently of the forgejo package's own forgejoIssuePayload struct. It is
-// the AC3 cross-check oracle in TestForgejoIntegration_DispatchLifecycle.
+// independently of the Connector: the cross-check oracle in
+// TestForgejoIntegration_DispatchLifecycle.
 func rawIssueLabels(t *testing.T, baseURL, token, repo, num string) []string {
 	t.Helper()
 	var payload struct {
@@ -501,12 +492,11 @@ func assertNotListed(t *testing.T, tr forge.IssueTracker, state forge.DispatchSt
 	}
 }
 
-// TestForgejoIntegration_DispatchLifecycle boots a throwaway Forgejo from its
-// OCI image and drives claim, work, PR, merge, complete through the forgejo
-// Connector's tracker and Code Forge, so a green run exercises the real REST
-// wire format rather than the httptest fake the contract tests run against. It
-// is opt-in behind the "integration" tag and self-skips where no daemon is
-// reachable.
+// TestForgejoIntegration_DispatchLifecycle boots a throwaway Forgejo and
+// drives claim, work, PR, merge, complete through the Connector's tracker and
+// Code Forge, exercising the real REST wire format rather than the contract
+// tests' httptest fake. It is opt-in behind the "integration" tag and
+// self-skips with no daemon.
 func TestForgejoIntegration_DispatchLifecycle(t *testing.T) {
 	cli := requireForgejoRuntime(t)
 	declaredRoutes(t) // skip before booting a container when no Connector was built
@@ -523,11 +513,9 @@ type backendBuilder func(t *testing.T, baseURL, token, repo string) (forge.Issue
 const forgejoDefaultRootURL = "http://localhost:3000"
 
 // connectorBackend builds the issue tracker and Code Forge through the
-// production constructors under a forgejo row, both from the Connector. The
-// Connector and its row refuse a base URL that is not https, which the harness
-// Forgejo is not, so a TLS reverse proxy fronts it. Forgejo's own links name
-// its ROOT_URL, so the proxy rewrites them to the proxy's address, as Forgejo
-// behind a real TLS front end would emit.
+// production constructors under a forgejo row. The row refuses a non-https
+// base, so a TLS reverse proxy fronts the harness Forgejo and rewrites its
+// ROOT_URL links to the proxy's address, as a real TLS front end would.
 func connectorBackend() backendBuilder {
 	return func(t *testing.T, baseURL, token, repo string) (forge.IssueTracker, forge.CodeForge, func(string) string) {
 		t.Helper()
@@ -606,11 +594,9 @@ func runDispatchLifecycle(t *testing.T, cli string, build backendBuilder) {
 	assertListed(t, tr, forge.InProgress, numStr)
 	assertNotListed(t, tr, forge.Dispatchable, numStr)
 
-	// AC3 cross-check: read the same issue through the adapter and through a
-	// raw decode that shares neither forgejoIssuePayload's json tags nor
-	// repoPath()'s URL routing. A renamed tag or changed path disagrees here
-	// while contract_test.go's fake stays green, since a fake built to match
-	// the adapter cannot catch the adapter drifting from the real wire format.
+	// Cross-check: read the issue through the tracker and through a raw
+	// decode sharing none of the Connector's json tags or paths. A fake built
+	// to match the Connector cannot catch it drifting from the real wire.
 	iss, err := tr.Issue(numStr)
 	if err != nil {
 		t.Fatalf("Issue(%s): %v", numStr, err)

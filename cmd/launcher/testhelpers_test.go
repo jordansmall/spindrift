@@ -24,9 +24,8 @@ import (
 )
 
 // The lifecycle-label set mirrored from lib/env-schema.nix and pinned against
-// the agent workflows by nix/checks/dispatch-labels.nix (issue #460).
-// forge.NewFake takes labels as an explicit constructor argument, so tests
-// share this one value instead of each restating the four strings.
+// the agent workflows by nix/checks/dispatch-labels.nix (issue #460), shared
+// because forge.NewFake takes labels as an explicit constructor argument.
 var testDispatchLabels = forge.DispatchLabels{
 	Dispatchable: "ready-for-agent",
 	InProgress:   "agent-in-progress",
@@ -64,10 +63,9 @@ func baseConfig() config {
 }
 
 // Installs flags as the package-level inputdoc.SchemaFlags table for the
-// duration of t. Everything that reads the table sees the swap, including
-// inputdoc's Document.Setting, SchemaDefault and IsDaemonOnly. A caller that
-// reassigns inputdoc.SchemaFlags again within t (e.g. per-subcase) still
-// restores to the same pre-call value once t finishes.
+// duration of t; everything reading the table sees the swap. A caller that
+// reassigns inputdoc.SchemaFlags again within t still restores to the
+// pre-call value once t finishes.
 func withSchemaFlags(t *testing.T, flags []inputdoc.FlagEntry) {
 	t.Helper()
 	orig := inputdoc.SchemaFlags
@@ -116,10 +114,9 @@ func testWired(it forge.IssueTracker) *localloop.Wired {
 	return localloop.Wire(localloop.Config{}, it)
 }
 
-// Resolves Capabilities from it and cf the same way newReadContext does, so a
-// test gets correct pr/landing behavior for whatever fake shape it passes
-// without wiring Capabilities by hand.
-// The concrete type lets a test hand the same Settle's Registry() to the entry
+// Resolves Capabilities from it and cf the way newReadContext does, so a test
+// gets correct pr/landing behavior for whatever fake shape it passes. The
+// concrete type lets a test hand the same Settle's Registry() to the entry
 // point under test, as bootstrap does.
 func testNewSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) *settle.Settle {
 	forgeDesc, _ := backend.ByName(c.CodeForge)
@@ -224,7 +221,7 @@ func mustInitCheckout(t *testing.T, dir, branch string) {
 
 // testFlagArgs is the explicit-flag tier a test built with setKnob: what a
 // command line would have carried. Resolve ranks it over the document and the
-// schema default, the tier the knob env vars used to occupy.
+// schema default.
 var testFlagArgs []string
 
 // testDoc is the document tier a test built with useDoc; nil is no document.

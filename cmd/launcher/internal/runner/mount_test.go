@@ -11,10 +11,9 @@ import (
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
-// Both sides of the Target comparison read agentpaths.PromptsDir, so a rename
-// in lib/agent-paths.nix cannot fail this assertion on its own; only
-// agent-paths-gen catches that drift. What this pins is that BuildMountSpecs
-// targets the generated constant and not a stray literal (issue #2531).
+// Both sides of the Target comparison read agentpaths.PromptsDir, so only
+// agent-paths-gen catches a rename; this pins that BuildMountSpecs targets the
+// generated constant, not a stray literal (issue #2531).
 func TestBuildMountSpecs_PromptDirMounted(t *testing.T) {
 	dir := t.TempDir()
 	specs := BuildMountSpecs(MountParams{PromptDir: dir}, Box{})
@@ -265,16 +264,14 @@ func TestBuildMountSpecs_AbsentMirrorDir_NoMount(t *testing.T) {
 	}
 }
 
-// The discriminating pin for issue #3471: MountParams carried
-// HostMediatedIssueTracker and LocalIssuesDir until that issue removed them,
-// and this failed on both; it passes now because neither field exists.
+// Issue #3471 removed MountParams' HostMediatedIssueTracker and
+// LocalIssuesDir; this is the discriminating pin against their return.
 func TestMountParams_TakesNoIssuesDirInput(t *testing.T) {
 	typ := reflect.TypeOf(MountParams{})
 	for i := 0; i < typ.NumField(); i++ {
 		name := typ.Field(i).Name
-		// "Issue" covers "Issues" and e.g. "IssueDir"; "Tracker" covers the
-		// other field name MountParams carried before issue #3471. A re-add
-		// named neither is past this heuristic's reach, which is why
+		// The substrings match both removed fields' names; a re-add
+		// containing neither is past this heuristic's reach, which is why
 		// TestBuildMountSpecs_NeverProducesIssuesMount guards the output too.
 		if strings.Contains(name, "Issue") || strings.Contains(name, "Tracker") {
 			t.Errorf("MountParams.%s: field name suggests an issues-dir or tracker-gating mount input; the /issues mount was removed by issue #3471", name)
@@ -282,11 +279,9 @@ func TestMountParams_TakesNoIssuesDirInput(t *testing.T) {
 	}
 }
 
-// This guard passed before issue #3471 too, since a zero-tracker MountParams
-// produced no /issues mount then; TestMountParams_TakesNoIssuesDirInput is
-// the discriminating pin. Its job is to keep that absence non-vacuous by
-// asserting every other expected mount still comes out of a fully populated
-// MountParams and Box.
+// Not discriminating for issue #3471 on its own; it keeps the /issues absence
+// non-vacuous by asserting every other mount still comes out of a fully
+// populated MountParams and Box.
 func TestBuildMountSpecs_NeverProducesIssuesMount(t *testing.T) {
 	promptDir := t.TempDir()
 	skillsDir := t.TempDir()

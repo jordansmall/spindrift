@@ -24,9 +24,7 @@ func TestStrategyShape(t *testing.T) {
 	}
 }
 
-// TestStrategyNewIssueTracker_JiraIssueTypeReachesPostIssue proves the
-// JIRA_ISSUE_TYPE knob flows through ReadKnobs into the Connector tracker
-// PostIssue creates with; the harness accepts Task and Bug and rejects Epic.
+// The harness accepts Task and Bug and rejects Epic.
 func TestStrategyNewIssueTracker_JiraIssueTypeReachesPostIssue(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

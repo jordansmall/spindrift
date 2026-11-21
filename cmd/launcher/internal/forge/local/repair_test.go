@@ -58,10 +58,8 @@ func TestPatchEquivalentToIntegration_ErrorsOnGenuineGitFailure(t *testing.T) {
 }
 
 // IntegrationTip resolves the named parent's own Integration branch, not the
-// adapter's construction-time parent, mirroring LandingContained's
-// instance-agnostic contract (issue #1734): one shared reconcile-time instance
-// must resolve every parent in a mixed batch, not just the one it was built
-// with.
+// adapter's construction-time parent (issue #1734): one shared reconcile-time
+// instance must resolve every parent in a mixed batch.
 func TestLocalCodeForge_IntegrationTip_ResolvesNamedParentsBranch(t *testing.T) {
 	setGitIdentityEnv(t)
 

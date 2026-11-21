@@ -468,9 +468,8 @@ func TestNew_EscapedRemainderPreserved(t *testing.T) {
 	}
 }
 
-// A single-route table is the shape a scalar-knob bridge or a single-route
-// TOML routes file builds, and it must still work once its one route also
-// requires a Prefix (issue #3142 slice 2's back-compat criterion).
+// A single-route table, as a single-route TOML routes file builds, must still
+// work with its one route requiring a Prefix (issue #3142).
 func TestNew_SingleRouteTableBackCompat(t *testing.T) {
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1159,9 +1158,9 @@ func TestServe_PathTooLong(t *testing.T) {
 	}
 }
 
-// Exercises the mutex guarding the handler's shared per-route state (round-1
-// review's data race finding). Run with -race: the interleaving is
-// non-deterministic, so this only asserts no panic, deadlock, or race.
+// Exercises the mutex guarding the handler's shared per-route state. Run with
+// -race: the interleaving is non-deterministic, so this only asserts no panic,
+// deadlock, or race.
 func TestNew_ConcurrentRequestsNoRace(t *testing.T) {
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1845,11 +1844,10 @@ func TestModifyResponse_RewrittenResponseNeverCarriesCredential(t *testing.T) {
 	}
 }
 
-// Blocking review finding on issue #3175: net/http's Transport only
-// auto-decompresses a gzip response when it added Accept-Encoding itself, so
-// a real client's own header leaves the bytes compressed by the time
-// modifyResponse reads them. Before the fix that body failed json.Decode and
-// was relayed untouched. The upstream compresses only when asked, like a CDN.
+// Issue #3175: net/http's Transport only auto-decompresses a gzip response
+// when it added Accept-Encoding itself, so unless the proxy forces identity a
+// real client's own header leaves the bytes compressed for modifyResponse and
+// json.Decode fails. The upstream compresses only when asked, like a CDN.
 func TestModifyResponse_GzippedIndexJSONStillRewritten(t *testing.T) {
 	const rawBody = `{"download":"https://registry.example.com/files/pkg"}`
 
@@ -1913,10 +1911,9 @@ func TestNew_NonMatchingShapePreservesClientAcceptEncoding(t *testing.T) {
 	}
 }
 
-// Second half of issue #3175's blocking review finding: a matched row whose
-// body held nothing rewritable used to log nothing, making a no-op rewrite
-// undiagnosable. The new line names the row and carries neither the
-// credential nor any of the body.
+// Issue #3175: a matched row whose body held nothing rewritable must log, or
+// a no-op rewrite is undiagnosable. The line names the row and carries
+// neither the credential nor any of the body.
 func TestModifyResponse_MatchedRowNoRewritableFieldLogsWithoutBodyOrCredential(t *testing.T) {
 	const credential = "s3kr1t-do-not-log-me"
 	const body = `{"not-a-download-field":"nothing to rewrite here"}`
@@ -1954,10 +1951,9 @@ func TestModifyResponse_MatchedRowNoRewritableFieldLogsWithoutBodyOrCredential(t
 	}
 }
 
-// Closes the other half of issue #3175's blocking review finding: only the
-// skip path had a log-capturing test, never the rewrite path itself. The
-// fixture's credential and unrelated field are distinctive sentinels so a
-// leak cannot hide inside a plausible-looking substring.
+// Issue #3175: the rewrite path's own log lines must not leak. The fixture's
+// credential and unrelated field are distinctive sentinels so a leak cannot
+// hide inside a plausible-looking substring.
 func TestModifyResponse_SuccessfulRewriteLogsOnceWithoutCredentialOrBody(t *testing.T) {
 	const credential = "s3kr1t-sentinel-do-not-log-me"
 	const sentinelField = "sentinel-unrelated-field"

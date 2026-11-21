@@ -8,12 +8,8 @@ import (
 	"time"
 )
 
-// Relay is Notify's internal relay factored out so it can be driven from a
-// fake chan os.Signal (#3520): the real Notify itself is a one-line
-// signal.Notify call plus this relay, and the signal.Notify half is trusted
-// stdlib wiring not worth exercising with a real SIGTERM/SIGINT to the test
-// binary. A lone signal, of either kind, closes stop and leaves abort open
-// -- it drains, it does not abort (#3521).
+// A lone signal, of either kind, closes stop and leaves abort open: it
+// drains, it does not abort (#3521).
 func TestRelaySignals_SingleSignalClosesStopOnly(t *testing.T) {
 	for _, sigVal := range []os.Signal{syscall.SIGTERM, syscall.SIGINT} {
 		t.Run(sigVal.String(), func(t *testing.T) {
@@ -99,9 +95,7 @@ func TestRelaySignals_ThirdAndLaterSignalsAreNoOps(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("abort never closed after the second signal")
 	}
-	// Give the (already-returned) relay goroutine a moment in case a bug
-	// left it still draining sig, then confirm neither channel panicked and
-	// both ended up in their expected closed state.
+	// The extra signals must leave stop closed too.
 	select {
 	case <-stop:
 	case <-time.After(50 * time.Millisecond):

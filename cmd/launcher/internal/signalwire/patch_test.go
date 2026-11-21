@@ -6,10 +6,7 @@ import (
 	"testing"
 )
 
-// TestValidateUnifiedDiff pins ValidateUnifiedDiff's own rule set (ADR
-// 0057): a parseable unified diff is accepted, and a non-diff, a diff whose
-// hunk line counts disagree with its header, and a binary hunk are each
-// rejected with a reason naming what is wrong.
+// TestValidateUnifiedDiff pins ValidateUnifiedDiff's rule set (ADR 0057).
 func TestValidateUnifiedDiff(t *testing.T) {
 	const validDiff = `--- a/foo.go
 +++ b/foo.go
@@ -63,28 +60,24 @@ index 1234567..89abcde 100644
 			true, "disagree",
 		},
 		{
-			// hunkHeaderRE admits only digits here, so this can only fail
-			// Atoi on overflow -- pinning that it is rejected as a malformed
-			// header, not silently clamped and then rejected (or accepted)
-			// as a count disagreement (review finding on issue #4072).
+			// Atoi overflow must read as a malformed header, not be clamped
+			// into a count disagreement (issue #4072).
 			"hunk header count overflows",
 			"--- a/foo.go\n+++ b/foo.go\n@@ -1,99999999999999999999 +1,1 @@\n-a\n+b\n",
 			true, "malformed",
 		},
 		{
-			// git apply accepts a fully empty line inside a hunk body as an
-			// empty context line (whitespace-stripping transports produce
-			// this); it must count against both old and new, not reject as
-			// a count disagreement (review finding on issue #4072).
+			// git apply takes an empty line in a hunk body as empty context
+			// (whitespace-stripping transports produce it); it counts against
+			// both sides (issue #4072).
 			"empty line inside hunk body is a context line",
 			"--- a/foo.go\n+++ b/foo.go\n@@ -1,3 +1,3 @@\n a\n\n-b\n+c\n",
 			false, "",
 		},
 		{
-			// The patch's own trailing newline is not a line: a hunk one
-			// context line short must not borrow the split artifact after
-			// it as an empty context line (git apply rejects this as a
-			// corrupt patch).
+			// A hunk one context line short must not borrow the trailing
+			// newline's split artifact as empty context (git apply calls it
+			// corrupt).
 			"hunk truncated by one trailing context line",
 			"--- a/f\n+++ b/f\n@@ -1,3 +1,3 @@\n a\n-b\n+c\n",
 			true, "disagree",
@@ -100,32 +93,23 @@ index 1234567..89abcde 100644
 			true, "binary",
 		},
 		{
-			// git apply also accepts the legacy "Files a/X and b/X differ"
-			// form for a binary file (still produced by e.g. `diff`
-			// itself) -- rejected exactly like the modern "Binary files
-			// ... differ" spelling (review finding on issue #4075).
+			// The legacy "Files ... differ" binary marker, which `diff` still
+			// emits and git apply accepts, is rejected too (issue #4075).
 			"legacy Files ... differ binary marker",
 			"diff --git a/foo.bin b/foo.bin\nindex 1234567..89abcde 100644\nFiles a/foo.bin and b/foo.bin differ\n",
 			true, "binary",
 		},
 		{
-			// git apply also accepts the legacy "rename old "/"rename new "
-			// extended headers alongside "rename from "/"rename to " -- a
-			// hunk-bearing companion file elsewhere in the patch clears the
-			// "no hunk" check, so this pins that the legacy headers
-			// themselves are recognised, not merely tolerated as
-			// unrecognised junk (review finding on issue #4075).
+			// The legacy "rename old "/"rename new " headers must be
+			// recognised, not tolerated as junk; the companion hunk clears
+			// "no hunk" (issue #4075).
 			"legacy rename old/new headers recognised",
 			"diff --git a/old.go b/new.go\nsimilarity index 100%\nrename old old.go\nrename new new.go\ndiff --git a/bar.go b/bar.go\nindex 1234567..89abcde 100644\n--- a/bar.go\n+++ b/bar.go\n@@ -1 +1 @@\n-a\n+b\n",
 			false, "",
 		},
 		{
-			// An unrecognised line in a "diff --git" section's own
-			// extended-header zone (before its own "--- "/"+++ " pair, if
-			// any) must fail closed rather than silently drop the section
-			// -- otherwise a smuggled path could ride past every
-			// downstream gate under an unknown header (review finding on
-			// issue #4075).
+			// An unknown line in the extended-header zone fails closed, or a
+			// smuggled path could ride past every gate under it (issue #4075).
 			"unrecognised extended header line fails closed",
 			"diff --git a/CLAUDE.md b/docs/evil.md\nbogus header line\ndiff --git a/bar.go b/bar.go\nindex 1234567..89abcde 100644\n--- a/bar.go\n+++ b/bar.go\n@@ -1 +1 @@\n-a\n+b\n",
 			true, "unrecognised",
@@ -136,29 +120,23 @@ index 1234567..89abcde 100644
 			true, "unified diff",
 		},
 		{
-			// A quoted path (git's core.quotePath escaping a non-ASCII
-			// name) is a path-resolution problem, not a structural one:
-			// the socket must not reject the whole issue intent over it
-			// (review finding on issue #4075) -- ParseUnifiedDiff still
-			// fails closed on it below.
+			// A quoted path (core.quotePath) is a path problem, not a
+			// structural one: the socket must not reject the intent over it
+			// (issue #4075). ParseUnifiedDiff still fails closed on it below.
 			"quoted path is structurally fine",
 			"--- \"a/foo bar.go\"\n+++ \"b/foo bar.go\"\n@@ -1 +1 @@\n-a\n+b\n",
 			false, "",
 		},
 		{
-			// A --no-prefix (or diff.noprefix) diff leaves both the
-			// "diff --git" line and the "--- "/"+++ " pair without their
-			// usual a/ b/ prefixes -- also a path-resolution problem the
-			// socket must let through structurally (review finding on
-			// issue #4075).
+			// A --no-prefix diff is likewise a path problem the socket lets
+			// through (issue #4075).
 			"no-prefix diff is structurally fine",
 			"diff --git CLAUDE.md CLAUDE.md\nindex 1234567..89abcde 100644\n--- CLAUDE.md\n+++ CLAUDE.md\n@@ -1 +1 @@\n-old\n+new\n",
 			false, "",
 		},
 		{
-			// A path error in one file must not mask a real structural
-			// fault in another: ValidateUnifiedDiff still rejects the
-			// whole patch once the second file's hunk counts disagree.
+			// A path error in one file must not mask a structural fault in
+			// another.
 			"structural error after a path error still surfaces",
 			"--- \"a/foo bar.go\"\n+++ \"b/foo bar.go\"\n@@ -1 +1 @@\n-a\n+b\n--- a/second.go\n+++ b/second.go\n@@ -1,3 +1,3 @@\n package foo\n-func Old() {}\n",
 			true, "disagree",
@@ -184,10 +162,8 @@ index 1234567..89abcde 100644
 	}
 }
 
-// TestParseUnifiedDiff pins ParseUnifiedDiff's per-file bookkeeping (issue
-// #4075): the path and change kind of every file entry a patch touches,
-// and its added/removed line counts, which the butler's patch gate uses to
-// enforce file/line caps and a path allow-list.
+// TestParseUnifiedDiff pins the per-file path, change kind and line counts
+// the butler's patch gate enforces its caps and allow-list on (issue #4075).
 func TestParseUnifiedDiff(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -244,10 +220,7 @@ func TestParseUnifiedDiff(t *testing.T) {
 			false, "",
 		},
 		{
-			// A pure rename carries no hunk of its own, so it needs a real
-			// hunk-bearing file elsewhere in the same patch to clear the
-			// "no hunk" check -- same reasoning as the mode-change gotcha
-			// case below.
+			// The companion hunk-bearing file clears the "no hunk" check.
 			"rename via git headers, hunkless",
 			"diff --git a/old.go b/new.go\nsimilarity index 100%\nrename from old.go\nrename to new.go\ndiff --git a/bar.go b/bar.go\nindex 1234567..89abcde 100644\n--- a/bar.go\n+++ b/bar.go\n@@ -1 +1 @@\n-a\n+b\n",
 			[]DiffFile{
@@ -286,10 +259,8 @@ func TestParseUnifiedDiff(t *testing.T) {
 			false, "",
 		},
 		{
-			// The gotcha this slice exists for: a hunkless "diff --git"
-			// section carrying only a mode change is a section `git apply`
-			// would still apply, so it must show up as its own entry
-			// alongside the real, hunk-bearing file in the same patch.
+			// A hunkless mode-change section is still applied by `git apply`,
+			// so it must be its own entry.
 			"mode-only hunkless section alongside a modified file",
 			"diff --git a/foo.sh b/foo.sh\nold mode 100644\nnew mode 100755\ndiff --git a/bar.go b/bar.go\nindex 1234567..89abcde 100644\n--- a/bar.go\n+++ b/bar.go\n@@ -1 +1 @@\n-a\n+b\n",
 			[]DiffFile{
@@ -299,11 +270,8 @@ func TestParseUnifiedDiff(t *testing.T) {
 			false, "",
 		},
 		{
-			// A second "--- "/"+++ " pair under one "diff --git" line is a
-			// smuggling trick: `git apply` treats it as its own traditional
-			// patch and applies both files, so the parser must surface both
-			// as separate entries rather than letting the second pair
-			// silently replace the first.
+			// Smuggling: `git apply` applies a second "--- "/"+++ " pair under
+			// one "diff --git" as its own patch, so both must surface.
 			"second header pair under one diff --git section is its own entry",
 			"diff --git a/CLAUDE.md b/CLAUDE.md\nindex 1234567..89abcde 100644\n--- a/CLAUDE.md\n+++ b/CLAUDE.md\n@@ -1 +1 @@\n-a\n+b\n--- a/docs/x.md\n+++ b/docs/x.md\n@@ -1,2 +1,2 @@\n-c\n-d\n+e\n+f\n",
 			[]DiffFile{
@@ -313,11 +281,8 @@ func TestParseUnifiedDiff(t *testing.T) {
 			false, "",
 		},
 		{
-			// Once a "diff --git" section's own "--- "/"+++ " pair and hunks
-			// are accounted for, a trailing unrecognised line stays lenient
-			// (silently skipped) rather than fail closed -- the fail-closed
-			// rule only guards the section's extended-header zone, before
-			// that pair is seen.
+			// Fail-closed only guards the extended-header zone; junk after
+			// the section's hunks is skipped.
 			"trailing junk after a section's header pair and hunk stays lenient",
 			"diff --git a/foo.go b/foo.go\nindex 1234567..89abcde 100644\n--- a/foo.go\n+++ b/foo.go\n@@ -1 +1 @@\n-a\n+b\nsome trailing junk line\n",
 			[]DiffFile{{Path: "foo.go", Change: "", Added: 1, Removed: 1}},
@@ -329,22 +294,16 @@ func TestParseUnifiedDiff(t *testing.T) {
 			nil, true, "binary",
 		},
 		{
-			// Attack from review finding on issue #4075: the legacy "Files
-			// ... differ" binary marker followed by an ordinary hunk in its
-			// own section. Before the fix, the binary section's unrecognised
-			// line dropped it entirely (rank 0) and ParseUnifiedDiff
-			// returned only the ordinary docs/x.md entry -- every patch gate
-			// downstream then cleared a diff that actually smuggled a
-			// binary CLAUDE.md change.
+			// Attack (issue #4075): before the fix, an unrecognised legacy binary
+			// marker dropped its section, so gates cleared a diff smuggling a binary
+			// CLAUDE.md change behind docs/x.md.
 			"legacy Files ... differ binary marker does not slip past a companion hunk",
 			"diff --git a/CLAUDE.md b/CLAUDE.md\nindex 1234567..89abcde 100644\nFiles a/CLAUDE.md and b/CLAUDE.md differ\ndiff --git a/docs/x.md b/docs/x.md\nindex 1234567..89abcde 100644\n--- a/docs/x.md\n+++ b/docs/x.md\n@@ -1 +1 @@\n-c\n+d\n",
 			nil, true, "binary",
 		},
 		{
-			// Attack from review finding on issue #4075: the legacy "rename
-			// old "/"rename new " headers were unrecognised, so the section
-			// was dropped and only docs/x.md came back -- while git apply
-			// renamed CLAUDE.md away.
+			// Attack (issue #4075): before the fix, unrecognised legacy rename
+			// headers dropped the section while git apply renamed CLAUDE.md away.
 			"legacy rename old/new headers surface as a renamed entry",
 			"diff --git a/CLAUDE.md b/docs/evil.md\nrename old CLAUDE.md\nrename new docs/evil.md\ndiff --git a/docs/x.md b/docs/x.md\nindex 1234567..89abcde 100644\n--- a/docs/x.md\n+++ b/docs/x.md\n@@ -1 +1 @@\n-c\n+d\n",
 			[]DiffFile{{Path: "docs/evil.md", Change: "renamed"}, {Path: "docs/x.md", Added: 1, Removed: 1}},
@@ -356,10 +315,8 @@ func TestParseUnifiedDiff(t *testing.T) {
 			nil, true, "quoted",
 		},
 		{
-			// The socket's structural check accepts this (see
-			// TestValidateUnifiedDiff), but ParseUnifiedDiff still fails
-			// closed on it: no path could be resolved from either the
-			// "diff --git" line or the "--- "/"+++ " pair.
+			// Structurally valid (TestValidateUnifiedDiff), but no path
+			// resolves from either header.
 			"no-prefix diff path unresolvable",
 			"diff --git CLAUDE.md CLAUDE.md\nindex 1234567..89abcde 100644\n--- CLAUDE.md\n+++ CLAUDE.md\n@@ -1 +1 @@\n-old\n+new\n",
 			nil, true, "cannot be resolved",

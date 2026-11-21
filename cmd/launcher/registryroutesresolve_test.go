@@ -20,10 +20,9 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// These tests drive route resolution over the synthetic Strategy and a twin of it,
-// so a host can declare two ecosystems at once; the real Strategies' declaration
-// shapes are pinned by the corpora under
-// internal/ecosystem and its ecosystem packages.
+// These tests drive route resolution over the synthetic Strategy and a twin so
+// a host can declare two ecosystems at once; the real Strategies' declaration
+// shapes are pinned by the corpora under internal/ecosystem.
 var (
 	twinRow     = synthetic.Twin("twin")
 	otherRow    = synthetic.Twin("other")
@@ -31,10 +30,10 @@ var (
 	threeRows   = []ecosystem.Strategy{synthetic.Strategy, twinRow, otherRow}
 )
 
-// Production reaches the read-error wrapper only through
-// buildRegistryProxyRoutes, which the checks.go registry-proxy-routes row's
-// identical read/Parse/Peek always shadows by failing first, so this test calls
-// resolveRegistryRoutesFromFile directly.
+// Production reaches resolveRegistryRoutesFromFile's read-error wrapper only
+// through buildRegistryProxyRoutes, which the checks.go registry-proxy-routes
+// row's identical read always shadows by failing first, so this test calls it
+// directly.
 func TestResolveRegistryRoutesFromFile_MissingFile_WrapsReadError(t *testing.T) {
 	missing := t.TempDir() + "/does-not-exist.toml"
 
@@ -53,9 +52,8 @@ func TestResolveRegistryRoutesFromFile_MissingFile_WrapsReadError(t *testing.T) 
 	}
 }
 
-// resolveRegistryRoutesFromFile passes a Parse failure straight through, so this
-// pins that the error branch returns Parse's own error rather than swallowing or
-// re-wrapping it.
+// The Parse failure must come back as Parse's own error, not swallowed or
+// re-wrapped.
 func TestResolveRegistryRoutesFromFile_InvalidTOML_PropagatesParseError(t *testing.T) {
 	invalid := writeRoutesFile(t, `not valid toml [[[`)
 
@@ -71,10 +69,10 @@ func TestResolveRegistryRoutesFromFile_InvalidTOML_PropagatesParseError(t *testi
 	}
 }
 
-// The wrap under test is resolveRegistryRoutesFromFile's own "resolving
-// credential for route %q". Production reaches the checks.go Peek gate's wrap
-// instead; TestBootstrap_RegistryProxyRoutesFile_ResolveFailure_ChecksGateNamesRoute
-// in bootstrap_test.go covers that gate.
+// The wrap under test is resolveRegistryRoutesFromFile's own; production
+// reaches the checks.go Peek gate's wrap instead, and
+// TestBootstrap_RegistryProxyRoutesFile_ResolveFailure_ChecksGateNamesRoute
+// covers that gate.
 func TestResolveRegistryRoutesFromFile_ResolveFailure_NamesRoute(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
@@ -125,10 +123,10 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_HAPPY_CRED" }
 	}
 }
 
-// A [routes.ecosystems.<name>] block (ADR 0048, issue #3405) is read straight
-// onto the Route's Ecosystems block, the only place a per-ecosystem declaration
-// travels from here on (issues #3259, #3404): the generic path key and a key
-// only the Strategy's own RouteDeclaration accepts.
+// A [routes.ecosystems.<name>] block (ADR 0048, issue #3405) is read onto the
+// Route's Ecosystems block, the only place a per-ecosystem declaration travels
+// (issues #3259, #3404); the fixture carries the generic path key and a
+// Strategy-only key.
 func TestResolveRegistryRoutesFromFile_RouteDeclarationBlockReadIntoEcosystems(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
@@ -154,8 +152,7 @@ mirror-path = "/other"
 	}
 }
 
-// Every production route table must carry a Prefix (issue #3142).
-// resolveRegistryRoutesFromFile leaves Prefix unset; only
+// Every production route table must carry a Prefix (issue #3142), and only
 // buildRegistryProxyRoutes runs registryproxy.AssignPrefixes.
 func TestBuildRegistryProxyRoutes_FilePath_AssignsPrefixes(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_ROUTES_PREFIX_CRED", "s3kr1t")
@@ -194,9 +191,7 @@ mirror-path = "/other"
 }
 
 // Issue #3145: with no routes file, dispatch behaves exactly as a proxy-less
-// dispatch does. The five scalar REGISTRY_PROXY_* knobs that used to synthesize
-// a bridge route are retired (ADR 0044/0045), so an empty
-// registryProxyRoutesFile is the only input buildRegistryProxyRoutes reads.
+// one; the scalar REGISTRY_PROXY_* knobs are retired (ADR 0044/0045).
 func TestBuildRegistryProxyRoutes_NoRoutesFile_ReturnsNil(t *testing.T) {
 	c := config{}
 
@@ -209,9 +204,9 @@ func TestBuildRegistryProxyRoutes_NoRoutesFile_ReturnsNil(t *testing.T) {
 	}
 }
 
-// resolveRegistryRoutesFromFile does no derivation of its own; that is
-// buildRegistryProxyRoutes's job. A caller that needs only the parse and
-// credential step keeps working with no Target-repo checkout.
+// resolveRegistryRoutesFromFile does no derivation (buildRegistryProxyRoutes's
+// job), so a caller needing only parse and credentials works with no Target-repo
+// checkout.
 func TestResolveRegistryRoutesFromFile_HostRooted_LeavesUpstreamEmpty(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
@@ -256,9 +251,9 @@ match-host = "host.example.com"
 	}
 }
 
-// c.CodeForge is left unset, so checkoutIsTargetRepo hits its default case and
-// refuses to identify the resolved checkout as the Target repo. The route must
-// fail closed, the same "treat as absent" gate the doctor drift row uses.
+// c.CodeForge is unset, so checkoutIsTargetRepo refuses to identify the
+// checkout as the Target repo and the route must fail closed, as the doctor
+// drift row does.
 func TestBuildRegistryProxyRoutes_HostRooted_NotTargetRepo_FailsClosed(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
@@ -406,10 +401,10 @@ allow = ["/dl"]
 	}
 }
 
-// Issue #3258's acceptance demo: with the route table wired straight into
-// registryproxy.New, a request under the allow-only "/dl" path forwards exactly
-// like one under the derived "/index" path, while a path under neither still 403s.
-// Host-rooted enforcement stays unconditional and allow never loosens it.
+// Issue #3258's acceptance demo: wired into registryproxy.New, a request under
+// the allow-only "/dl" path forwards like one under the derived "/index" path,
+// while a path under neither still 403s; allow never loosens host-rooted
+// enforcement.
 func TestBuildRegistryProxyRoutes_HostRooted_AllowPathForwardsLikeDerivedPath(t *testing.T) {
 	var gotPaths []string
 	var gotAuths []string
@@ -479,11 +474,9 @@ credential = { env = "SPINDRIFT_TEST_ALLOW_LOOP_CRED" }
 	}
 }
 
-// Issue #3259: registrypathset.ApplyToRoute tags each derived path with its
-// declaring ecosystem in EnforcedSubtrees, not just the flat, untagged
-// EnforcedPaths the Registry proxy's admission check already used. The
-// fixture declares a synthetic and a twin registry on one host, so each
-// declaration must get its own tag.
+// Issue #3259: ApplyToRoute tags each derived path with its declaring ecosystem
+// in EnforcedSubtrees, not just the flat EnforcedPaths. The fixture declares a
+// synthetic and a twin registry on one host so each must get its own tag.
 func TestBuildRegistryProxyRoutes_HostRooted_DerivesEnforcedSubtrees(t *testing.T) {
 	repoDir := t.TempDir()
 	testutil.WriteFixture(t, repoDir, synthetic.Strategy.InTreeConfigPath, "main = https://host.example.com/index\n")
@@ -522,8 +515,7 @@ match-host = "host.example.com"
 
 // registryproxy.New rejects a host-rooted Upstream carrying any path, so the
 // Upstream assignment trims a trailing "/" from HostPathSet.Origin.
-// registrypathset.Derive never emits one, so this pins the defensive trim
-// directly rather than relying on that holding.
+// registrypathset.Derive never emits one; this pins the defensive trim directly.
 func TestApplyToRoute_TrimsTrailingSlashFromOrigin(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com"}
 	sets := map[string]registrypathset.HostPathSet{
@@ -614,9 +606,9 @@ func TestApplyToRoute_AllowAppendsAfterDerivedPaths(t *testing.T) {
 	}
 }
 
-// A duplicated path would appear twice in the 403 body's path-set listing and
-// confuse an operator. The second Allow entry names a genuinely new path, so the
-// dedupe must drop only the exact duplicate, never a real gap-patching entry.
+// A duplicated path would appear twice in the 403 body's path-set listing. The
+// second Allow entry names a genuinely new path, so the dedupe must drop only
+// the exact duplicate.
 func TestApplyToRoute_AllowDuplicatingDerivedPathIsNotRepeated(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com", Allow: []string{"/index", "/extra"}}
 	sets := map[string]registrypathset.HostPathSet{
@@ -636,9 +628,8 @@ func TestApplyToRoute_AllowDuplicatingDerivedPathIsNotRepeated(t *testing.T) {
 	}
 }
 
-// The pre-#3400 shape kept only one ecosystem's subtrees, in the since-deleted
-// Route.CargoIndexBases field. On a host declaring two ecosystems'
-// subtrees, one ecosystem's filter must no longer drop the other's tag.
+// The pre-#3400 shape kept only one ecosystem's subtrees; on a host declaring
+// two ecosystems, one ecosystem's filter must not drop the other's tag.
 func TestApplyToRoute_EnforcedSubtreesKeepsEveryEcosystemTagFromMixedEcosystems(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com"}
 	sets := map[string]registrypathset.HostPathSet{
@@ -665,9 +656,8 @@ func TestApplyToRoute_EnforcedSubtreesKeepsEveryEcosystemTagFromMixedEcosystems(
 	}
 }
 
-// Two registries of one ecosystem share one host. Derivation order must survive the
-// projection into EnforcedSubtrees, not just the single-ecosystem subset the
-// pre-#3400 shape kept it on.
+// Two registries of one ecosystem share one host; derivation order must
+// survive the projection into EnforcedSubtrees.
 func TestApplyToRoute_EnforcedSubtreesTwoSameEcosystemSubtreesInDerivationOrder(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com"}
 	sets := map[string]registrypathset.HostPathSet{
@@ -724,9 +714,9 @@ func TestApplyToRoute_EcosystemsBlockDeclaredPathLandsTaggedSubtree(t *testing.T
 }
 
 // The paths dedupe must never suppress the subtree tag when a declared path
-// duplicates an Allow entry, or a binding renderer finds no entry tagged for the
-// declaring ecosystem and silently renders an inert binding even though the path itself
-// is enforced.
+// duplicates an Allow entry, or a binding renderer finds no entry tagged for
+// the declaring ecosystem and silently renders an inert binding even though
+// the path itself is enforced.
 func TestApplyToRoute_DeclaredPathCollidingWithAllowStillTagsSubtree(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com", Allow: []string{"/mirror"}, Ecosystems: registryvocab.RouteEcosystems{twinRow.Name: registryvocab.RouteDeclaration{"path": "/mirror"}}}
 	sets := map[string]registrypathset.HostPathSet{
@@ -860,10 +850,10 @@ path = "/mirror"
 	}
 }
 
-// A route declaring no path for a Strategy must leave EnforcedSubtrees free of any
-// entry tagged for that Strategy, even with another Strategy's declared path present. A
-// stray tag would make that Strategy's binding renderer bind a registry the operator
-// never asked for, aimed at another ecosystem's subtree.
+// A route declaring no path for a Strategy must leave EnforcedSubtrees free of
+// any entry tagged for it, even with another Strategy's declared path present:
+// a stray tag would make that Strategy's binding renderer bind a registry the
+// operator never asked for, aimed at another ecosystem's subtree.
 func TestApplyToRoute_UndeclaredRowTagsNoSubtree(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com", Ecosystems: registryvocab.RouteEcosystems{twinRow.Name: registryvocab.RouteDeclaration{"path": "/declared"}}}
 	sets := map[string]registrypathset.HostPathSet{
@@ -885,10 +875,9 @@ func TestApplyToRoute_UndeclaredRowTagsNoSubtree(t *testing.T) {
 	}
 }
 
-// Two Strategies' declared paths serve unrelated ecosystems, so applying one must
-// never exclude the other. Their blocks land in Strategy order, not declaration
-// order, because declaredPaths walks the rows slice in its own load-bearing
-// order.
+// Two Strategies' declared paths coexist. Their blocks land in Strategy order,
+// not declaration order, because declaredPaths walks the rows slice in its own
+// load-bearing order.
 func TestApplyToRoute_TwoDeclaredPathsCoexistBothTaggedInRowOrder(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com", Ecosystems: registryvocab.RouteEcosystems{otherRow.Name: registryvocab.RouteDeclaration{"path": "/other-mirror"}, twinRow.Name: registryvocab.RouteDeclaration{"path": "/declared"}}}
 	sets := map[string]registrypathset.HostPathSet{
@@ -917,11 +906,10 @@ func TestApplyToRoute_TwoDeclaredPathsCoexistBothTaggedInRowOrder(t *testing.T) 
 	}
 }
 
-// Issue #3403: one host-rooted route may declare several Strategies' blocks together,
-// applied in Strategy order. A block carrying no path, only a Strategy-specific key, adds
-// nothing to EnforcedPaths or EnforcedSubtrees and needs no origin of its own;
-// the key must still survive resolution. The real Strategies' non-path keys are pinned
-// by the ecosystem corpora (cargo's registries-declared).
+// Issue #3403: one host-rooted route may declare several Strategies' blocks,
+// applied in Strategy order. A block with no path, only a Strategy-specific
+// key, adds nothing to EnforcedPaths or EnforcedSubtrees and needs no origin,
+// but the key must survive resolution.
 func TestBuildRegistryProxyRoutes_HostRooted_DeclarationBlocksCoexist(t *testing.T) {
 	repoDir := t.TempDir()
 	testutil.WriteFixture(t, repoDir, synthetic.Strategy.InTreeConfigPath, "main = https://host.example.com/index\n")
@@ -982,12 +970,10 @@ mirror-path = "/keyed"
 	}
 }
 
-// Issue #3405 and ADR 0048 at the launch gate: resolveRegistryRoutesFromFile
-// propagates Parse's retirement error unwrapped, so a routes file still spelling
-// a retired key never reaches buildRegistryProxyRoutes. The error must name the
-// route and the retired key. The retired per-ecosystem keys are fixed names of
-// real Strategies, so this uses enforce-allowlist; the ecosystem corpora's
-// retired-route-key cases pin the per-ecosystem ones.
+// Issue #3405 and ADR 0048: resolveRegistryRoutesFromFile propagates Parse's
+// retirement error unwrapped, naming the route and the retired key. This uses
+// enforce-allowlist because the retired per-ecosystem keys belong to real
+// Strategies; the ecosystem corpora pin those.
 func TestResolveRegistryRoutesFromFile_RetiredRouteKeyRefusedAtLaunchGate(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
@@ -1010,10 +996,9 @@ enforce-allowlist = true
 	}
 }
 
-// Issue #3140 added the exec, npmrc, and gradle-properties sources. This
-// exercises the real Resolve path, not doctor's Peek, across all three plus the
-// pre-existing env source, checking each credential pairs with the right route
-// by match-host.
+// Issue #3140: exercises the real Resolve path, not doctor's Peek, across the
+// exec, npmrc, gradle-properties and env sources, pairing each credential with
+// its route by match-host.
 func TestResolveRegistryRoutesFromFile_MixedSources_ResolvesEachRouteCredential(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_ROUTES_MIXED_ENV_CRED", "tok-env")
 
@@ -1070,9 +1055,8 @@ credential = { gradle-properties = "`+propsPath+`", key = "registryToken" }
 	}
 }
 
-// assertRouteCredentials checks routes against want (keyed by MatchHost),
-// failing on a route count mismatch, an unexpected MatchHost, a Credential
-// that doesn't match, or a want key that no returned route matched.
+// assertRouteCredentials checks routes against want, keyed by MatchHost, in
+// both directions.
 func assertRouteCredentials(t *testing.T, routes []registryproxy.Route, want map[string]string) {
 	t.Helper()
 	if len(routes) != len(want) {
@@ -1098,23 +1082,17 @@ func assertRouteCredentials(t *testing.T, routes []registryproxy.Route, want map
 }
 
 // execEchoOrAbsentArgv is the TOML `exec` array for a credential helper that
-// echoes envVar's value if set (including set-but-empty) in the child, or
-// ABSENT if unset -- shared by the two tests below that route a named env
-// var through a real child process to probe execCredentialEnv's allowlist.
-// It tests `${VAR+set}` rather than `[ -z "$VAR" ]` because the latter
-// can't distinguish unset from set-but-empty, the exact distinction
-// execCredentialEnv's os.LookupEnv is built on.
+// echoes envVar's value if set in the child, or ABSENT if unset. It tests
+// `${VAR+set}` rather than `[ -z "$VAR" ]` because only the former tells unset
+// from set-but-empty, the distinction execCredentialEnv's os.LookupEnv uses.
 func execEchoOrAbsentArgv(envVar string) string {
 	return fmt.Sprintf(`["/bin/sh", "-c", "if [ -z \"${%s+set}\" ]; then echo ABSENT; else echo \"$%s\"; fi"]`, envVar, envVar)
 }
 
-// Issue #3151 regression test: an exec route listed BEFORE an env route in
-// the routes file must never see the env route's credential var, whatever
-// the file order. This uses a non-allowlisted name, so it exercises the
-// real child-process boundary (execCredentialEnv's fixed allowlist) rather
-// than resolveRegistryRoutesFromFile's own pass ordering; see
-// TestResolveRegistryRoutesFromFile_OrderOfSourcesDoesNotAffectResult below
-// for a check that pins the pass ordering itself.
+// Issue #3151 regression: an exec route listed before an env route must never
+// see the env route's credential var. A non-allowlisted name exercises the
+// child-process boundary (execCredentialEnv's allowlist), not the pass order;
+// TestResolveRegistryRoutesFromFile_OrderOfSourcesDoesNotAffectResult pins that.
 func TestResolveRegistryRoutesFromFile_ExecBeforeEnv_ExecNeverSeesEnvRouteCredential(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_ROUTES_ORDER_ENV_CRED", "should-not-leak")
 
@@ -1138,17 +1116,11 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_ORDER_ENV_CRED" }
 	})
 }
 
-// This pins the two-pass ordering at resolveRegistryRoutesFromFile's own
-// seam, independent of execCredentialEnv's allowlist: the env source here
-// (SSH_AUTH_SOCK) is itself one of the names the allowlist forwards to an
-// exec child, so the exec route can only see it if the env route's Resolve
-// (and its Unsetenv) ran first -- a non-allowlisted name would pass on both
-// orders for the wrong reason (the allowlist blocks it either way) and never
-// actually exercise this function's own pass ordering. A single-pass,
-// file-order resolver would run the exec route before unsetting the env var
-// on the exec-then-env order and leak it; the two-pass resolver unsets every
-// env source in pass 1, before any exec source runs in pass 2, so the exec
-// route never observes it in either file order.
+// This pins the two-pass ordering itself: SSH_AUTH_SOCK is on
+// execCredentialEnv's allowlist, so the exec route could see it unless the env
+// route's Resolve (and its Unsetenv) ran first. A non-allowlisted name would
+// pass under either order for the wrong reason. Pass 1 unsets every env source
+// before any exec source runs in pass 2.
 func TestResolveRegistryRoutesFromFile_OrderOfSourcesDoesNotAffectResult(t *testing.T) {
 	argv := execEchoOrAbsentArgv("SSH_AUTH_SOCK")
 	envThenExec := fmt.Sprintf(`
@@ -1189,12 +1161,9 @@ credential = { env = "SSH_AUTH_SOCK" }
 	}
 }
 
-// Pins the error-ordering consequence recorded in
-// resolveRegistryRoutesFromFile's doc comment: when both an exec route and
-// an env route would fail to resolve, the env route's failure surfaces
-// first, because pass 1 (env sources) runs to completion before pass 2
-// (everything else) starts -- independent of which route sits first in the
-// file.
+// When both an exec and an env route would fail, the env failure surfaces
+// first whatever the file order, because pass 1 (env sources) completes before
+// pass 2 starts (see resolveRegistryRoutesFromFile's doc comment).
 func TestResolveRegistryRoutesFromFile_BothFail_EnvErrorSurfacesFirst(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
@@ -1218,11 +1187,10 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_BOTH_FAIL_ENV_DOES_NOT_EXIST" }
 	}
 }
 
-// mustLocalAccumulationRepo seeds a bare Accumulation repo from a throwaway
-// "main" checkout through local.SeedAccumulationRepo, the same seed path
-// bootstrap()'s seedAccumulationRepoIfHostSeeded runs before dispatch. An
-// empty registryConfig skips writing relPath, leaving the checkout declaring no
-// registry.
+// mustLocalAccumulationRepo seeds a bare Accumulation repo through
+// local.SeedAccumulationRepo, the seed path bootstrap()'s
+// seedAccumulationRepoIfHostSeeded runs. An empty registryConfig leaves the
+// checkout declaring no registry.
 func mustLocalAccumulationRepo(t *testing.T, relPath, registryConfig string) string {
 	t.Helper()
 	checkout := mustSeedableCheckout(t)
@@ -1250,10 +1218,9 @@ func minimalValidLocalConfigForRoutes(accumRepo string) config {
 }
 
 // Issue #3310 AC1 and AC2's positive half: under CODE_FORGE=local the route
-// derives from the Accumulation repo's baseBranch snapshot, not a cwd checkout.
-// t.Chdir moves the process into an unrelated directory and
-// registryRouteDriftRepoDirFn is stubbed to t.Fatal, so a fallback to the
-// cwd-checkout branch fails loudly.
+// derives from the Accumulation repo's baseBranch snapshot. t.Chdir to an
+// unrelated dir and a t.Fatal registryRouteDriftRepoDirFn make any fallback to
+// the cwd checkout fail loudly.
 func TestBuildRegistryProxyRoutes_HostRooted_Local_DerivesFromAccumulationRepo(t *testing.T) {
 	accumRepo := mustLocalAccumulationRepo(t, synthetic.Strategy.InTreeConfigPath, "main = https://host.example.com/index\n")
 
@@ -1288,10 +1255,9 @@ match-host = "host.example.com"
 	}
 }
 
-// Issue #3310 AC2's negative half: the registry config is committed to the checkout after
-// SeedAccumulationRepo already ran and is never re-seeded, so the derived
-// snapshot still declares nothing and the route must fail closed. The local
-// derivation reads only what landed in the Accumulation repo.
+// Issue #3310 AC2's negative half: the registry config is committed after
+// SeedAccumulationRepo ran and never re-seeded, so the snapshot declares
+// nothing and the route fails closed.
 func TestBuildRegistryProxyRoutes_HostRooted_Local_CheckoutOnlyConfigIgnored(t *testing.T) {
 	checkout := mustSeedableCheckout(t)
 	accumRepo := filepath.Join(t.TempDir(), "accum.git")

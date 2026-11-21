@@ -11,11 +11,9 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// newProxy assigns prefixes over routes and builds a handler with rows. It
-// hands the assigned routes back because AssignPrefixes fills in each Prefix
-// and callers build their request paths out of it. It fails the test on a
-// construction error: only the tests that assert on New rejecting a route
-// care which error comes back, so only they call New directly.
+// newProxy assigns prefixes over routes and builds a handler with rows,
+// failing the test on a construction error. It hands the assigned routes back
+// because callers build their request paths from each Prefix.
 func newProxy(t *testing.T, rows []registryvocab.RewriteRow, routes []Route) (http.Handler, []Route) {
 	t.Helper()
 	assigned := AssignPrefixes(routes)
@@ -40,10 +38,9 @@ func syntheticRoute(upstream, credential string) Route {
 	return Route{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "synthetic", Path: "/"}}, Upstream: upstream, Credential: credential}
 }
 
-// newUpstream starts a test upstream and registers its Close on cleanup, so
-// callers that deliberately close it early (e.g. to force a dial failure)
-// don't need their own defer -- httptest.Server's Close is observed to be
-// idempotent (it guards on s.closed), not a documented contract.
+// newUpstream starts a test upstream and registers its Close on cleanup.
+// Callers may close it early (to force a dial failure): httptest.Server's
+// Close is observed to be idempotent, not a documented contract.
 func newUpstream(t *testing.T, h http.HandlerFunc) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(h)
@@ -59,9 +56,7 @@ func newPlainProxy(t *testing.T, routes ...Route) (http.Handler, []Route) {
 }
 
 // plainRoute builds the single-path, no-credential Route shape most tests
-// route through -- everything else on Route left at its zero value. A shape
-// only some tests repeat gets its constructor beside them, the way
-// syntheticRoute does.
+// route through, every other field zero.
 func plainRoute(upstream string) Route {
 	return Route{EnforcedPaths: []string{"/"}, Upstream: upstream}
 }

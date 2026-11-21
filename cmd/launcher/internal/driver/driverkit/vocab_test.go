@@ -35,10 +35,9 @@ func TestReasonValues(t *testing.T) {
 	}
 }
 
-// The test parses vocab.go with go/ast, reading AllReasons from source rather
-// than importing it, so a new Reason const without a matching AllReasons entry
-// fails here instead of silently vanishing from the completeness-pinned slice
-// (issue #2301, the pin that issue #2269's exhaustiveness work depends on).
+// Reading AllReasons from source, not importing it, makes a new Reason const
+// without an AllReasons entry fail here (issue #2301, which #2269's
+// exhaustiveness pin depends on).
 func TestAllReasonsCoversDeclaredReasonConsts(t *testing.T) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "vocab.go", nil, 0)

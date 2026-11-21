@@ -14,10 +14,9 @@ import (
 // prose the fragment's rendered text must still say (or, with absent, must
 // not say), and reason is why. pattern is the alternative to clause, for an
 // obligation no fixed literal covers; exactly one of the two must be set. from
-// and to optionally scope the
-// match to the text after from and before to within the fragment's span.
-// verbatim skips whitespace normalization, for clauses whose whitespace is
-// the obligation.
+// and to optionally scope the match to the text after from and before to
+// within the fragment's span. verbatim skips whitespace normalization, for
+// clauses whose whitespace is the obligation.
 type clauseContract struct {
 	fragment string
 	clause   string

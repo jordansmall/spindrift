@@ -28,10 +28,7 @@ import (
 	"spindrift.dev/launcher/internal/report"
 )
 
-// mustHostRunner is the call-site helper for the tests below that build a
-// valid hostRunner and only care about using it, not about newHostRunner's
-// error return — the tests that assert on newHostRunner's error return call
-// it directly.
+// mustHostRunner is newHostRunner for tests that don't assert on its error.
 func mustHostRunner(t *testing.T, cfg hostRunnerConfig) *hostRunner {
 	t.Helper()
 	r, err := newHostRunner(cfg)
@@ -52,11 +49,8 @@ func TestStartChild_ExitCode(t *testing.T) {
 		return exec.Command("/bin/sh", "-c", "exit 2")
 	}
 
-	// Every runner the tests below use passes env: os.Environ() — a nil env
-	// is rejected at construction now (TestNewHostRunner_RejectsNilEnv), and
-	// the snapshot is load-bearing for the tests whose children shell out:
-	// TestStartChild_ChildInOwnProcessGroup, TestStartChild_ChildStartedAfterBothLatchesClosedSeesBothKinds,
-	// TestRunDoctor_CancelledContextTearsDownChild.
+	// Runners pass a real env, never nil (TestNewHostRunner_RejectsNilEnv);
+	// the os.Environ() snapshot is load-bearing for children that shell out.
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	got, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	if err != nil {
@@ -67,13 +61,10 @@ func TestStartChild_ExitCode(t *testing.T) {
 	}
 }
 
-// captureStream redirects *target (an os.Stdout/os.Stderr-shaped global) to
-// a pipe for the caller and returns a func that restores the original and
-// hands back everything written while redirected. Callers must not run
-// t.Parallel: two tests swapping the same global would race. One test may
-// capture two distinct globals at once, as the RunDoctor tests do, but must
-// not capture the same global twice — the read func restores unconditionally,
-// so the inner restore would hand the outer capture's writer back.
+// captureStream redirects *target (os.Stdout or os.Stderr) to a pipe and
+// returns a func restoring it and returning what was written. Not for
+// t.Parallel tests, and never twice on one global: the inner restore would
+// hand back the outer capture's writer.
 func captureStream(t *testing.T, target **os.File) func() []byte {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -82,13 +73,9 @@ func captureStream(t *testing.T, target **os.File) func() []byte {
 	}
 	orig := *target
 	*target = w
-	// Drain concurrently rather than once the caller is done: a callee may
-	// wire a child process straight to this descriptor and write past a
-	// pipe's capacity before returning — StartChild does, and
-	// TestStartChild_StdoutRelayedUnchanged deliberately writes 70 KiB. With
-	// nothing reading, the child blocks in write() forever, so it never
-	// exits, never closes its report descriptor, and wedges StartChild's read
-	// of the report pipe.
+	// Drained concurrently: StartChild wires a child straight to this
+	// descriptor, and TestStartChild_StdoutRelayedUnchanged writes 70 KiB, past
+	// a pipe's capacity; unread, the child blocks forever and wedges StartChild.
 	type capture struct {
 		out []byte
 		err error
@@ -131,12 +118,9 @@ func captureStdout(t *testing.T) func() []byte {
 	return captureStream(t, &os.Stdout)
 }
 
-// TestStartChild_OnRecordDeliversBoxAndSettledInOrder drives a scripted child
-// that writes one "box" and one "settled" record to descriptor 3 (the
-// report pipe StartChild hands it — see daemon.ReportFD/SPINDRIFT_REPORT_FD),
-// and asserts both reach ChildRequest.OnRecord, in order, with every field
-// intact: the live channel a slot has no other way to learn what a child is
-// doing, or how it settled, before it exits (issue #3545, #3627).
+// TestStartChild_OnRecordDeliversBoxAndSettledInOrder asserts a "box" and a
+// "settled" record written to fd 3 reach OnRecord in order, intact: a slot's
+// only live view of its child (issues #3545, #3627).
 func TestStartChild_OnRecordDeliversBoxAndSettledInOrder(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
@@ -172,11 +156,8 @@ func TestStartChild_OnRecordDeliversBoxAndSettledInOrder(t *testing.T) {
 	}
 }
 
-// TestStartChild_UnknownEventIgnored asserts an event daemon.ParseRecord
-// doesn't recognise is ignored outright: no OnRecord call, no error, no
-// stderr diagnostic, and the child's own clean exit still comes through —
-// a forward-compatible reader must tolerate an event it doesn't understand
-// yet (see ParseRecord's doc).
+// TestStartChild_UnknownEventIgnored asserts an unrecognised event is
+// silently ignored, for forward compatibility.
 func TestStartChild_UnknownEventIgnored(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
@@ -208,11 +189,9 @@ func TestStartChild_UnknownEventIgnored(t *testing.T) {
 	}
 }
 
-// TestStartChild_MalformedLinesReportOnceThenValidArrives drives a child that
-// writes two malformed lines followed by one valid record: exactly one
-// stderr diagnostic must come out (not two — a hostile or buggy child
-// spamming bad lines must not spam the daemon's own log), and the valid
-// record after them must still reach OnRecord.
+// TestStartChild_MalformedLinesReportOnceThenValidArrives asserts two
+// malformed lines draw one diagnostic, so a child spamming bad lines cannot
+// spam the daemon's log, and a valid record after them still arrives.
 func TestStartChild_MalformedLinesReportOnceThenValidArrives(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
@@ -323,12 +302,9 @@ func TestStartChild_ChildCommandErrorCarriesNoDaemonPrefix(t *testing.T) {
 	}
 }
 
-// TestStartChild_OverLongLineDiscardedThenValidArrives drives a child that
-// writes one unterminated line well past report.MaxLine, then a valid record:
-// readReports must neither buffer the over-long run without limit nor wedge
-// on it (issue #3627's review finding) — the over-long line is reported
-// exactly once, like any other malformed line, and the record after it still
-// reaches OnRecord.
+// TestStartChild_OverLongLineDiscardedThenValidArrives asserts a line past
+// report.MaxLine is neither buffered without limit nor wedges the reader
+// (issue #3627): reported once, and the next record still arrives.
 func TestStartChild_OverLongLineDiscardedThenValidArrives(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
@@ -361,16 +337,10 @@ func TestStartChild_OverLongLineDiscardedThenValidArrives(t *testing.T) {
 	}
 }
 
-// TestStartChild_SettledLongNoteDeliveredOneRecord closes issue #3627's review
-// finding at the point it was reported: a Box's SPINDRIFT_OUTCOME note=<~5KB
-// prose> threads through settle/gate.go into report.Settled, and before the
-// fix the resulting JSON line exceeded report.MaxLine, so readReports hit
-// bufio.ErrBufferFull and discarded the whole record (0 delivered). The
-// bytes this test feeds fd 3 are produced by the real report.Reporter over a
-// throwaway pipe — not hand-rolled JSON — so the assertion exercises
-// report.emit's own clipping, not a stand-in for it. With the fix, the note
-// is clipped before the line ever reaches the wire, so exactly one record
-// reaches onRecord with the right issue and state.
+// TestStartChild_SettledLongNoteDeliveredOneRecord pins issue #3627: a ~5KB
+// SPINDRIFT_OUTCOME note made the settled line exceed report.MaxLine, so the
+// whole record was discarded. The bytes come from the real report.Reporter,
+// not hand-rolled JSON, so report.emit's own clipping is what is exercised.
 func TestStartChild_SettledLongNoteDeliveredOneRecord(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
@@ -429,10 +399,9 @@ func TestStartChild_SettledLongNoteDeliveredOneRecord(t *testing.T) {
 }
 
 // TestStartChild_StdoutRelayedUnchanged asserts a child's stdout reaches the
-// daemon's stderr byte-for-byte, with no userspace copy: the child prints a
-// line matching the old (now-deleted) announce regex, followed by a line
-// past both bufio's 64 KiB default and the old raised 1 MiB cap, proving
-// the cap is really gone rather than just raised further.
+// daemon's stderr byte-for-byte, including a line past bufio's 64 KiB
+// default, so no scanner line cap sits in between. literalLine matches the
+// deleted announce regex, so a relay that still parsed it would show.
 func TestStartChild_StdoutRelayedUnchanged(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
@@ -711,13 +680,9 @@ func TestStartChild_CleanExitNoRecords(t *testing.T) {
 // — env(1) included — is reachable from inside it.
 const envDumpScript = `{ echo "MODEL=${MODEL-<unset>}"; echo "PATH=${PATH-<unset>}"; echo "GH_TOKEN=${GH_TOKEN-<unset>}"; } >%q; exit 0`
 
-// assertEnvStripsKnobsKeepsSecrets is the shared assertion for
-// TestStartChild_EnvStripsKnobsKeepsSecrets and
-// TestRunDoctor_EnvStripsKnobsKeepsSecrets below: the daemon-side knob
-// MODEL must never reach the child, while a non-knob (PATH) and a
-// secret-shaped var (GH_TOKEN) must pass through untouched. A mismatch
-// never prints a GH_TOKEN value: a child that execs with the raw process
-// env instead of the fixture carries the live token into the test log.
+// assertEnvStripsKnobsKeepsSecrets asserts the knob MODEL was stripped while
+// PATH and GH_TOKEN passed through. It never prints a GH_TOKEN value: a child
+// exec'd with the raw process env would carry the live token into the log.
 func assertEnvStripsKnobsKeepsSecrets(t *testing.T, dumped string) {
 	t.Helper()
 	got := strings.Split(strings.TrimRight(dumped, "\n"), "\n")
@@ -755,10 +720,8 @@ func envDumpKeys(got, want []string) []string {
 	return keys
 }
 
-// TestStartChild_EnvStripsKnobsKeepsSecrets drives the exec seam with a
-// scripted child that dumps its own environment to a temp file (StartChild's
-// stdout now goes straight to os.Stderr with no userspace copy, so a temp
-// file is the observable route here, same as RunDoctor's test below).
+// TestStartChild_EnvStripsKnobsKeepsSecrets has the child dump its env to a
+// file, since its stdout goes straight to os.Stderr.
 func TestStartChild_EnvStripsKnobsKeepsSecrets(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
@@ -822,14 +785,10 @@ func TestStartChild_EnvKeepsAmbientForKeyWhoseDocumentValueDoesNotCount(t *testi
 	}
 }
 
-// TestStartChild_ChildInOwnProcessGroup asserts the child started through the
-// runnerExecCommand seam is isolated into its own process group (Setpgid),
-// so a group-wide Ctrl-C SIGINT never reaches it — only the daemon's own
-// forwarded SIGTERM does (issue #3538). The child reports its own $$ to a
-// file rather than the test reading cmd.Process from outside StartChild:
-// exec.Cmd's Process field is written by cmd.Start() with no synchronization
-// a test can observe now that nothing in the runner publishes the started
-// process, so a bare pointer read here would be a genuine data race.
+// TestStartChild_ChildInOwnProcessGroup asserts the child gets its own
+// process group, so a group-wide Ctrl-C never reaches it (issue #3538). The
+// child reports its own $$: reading cmd.Process from outside would race
+// cmd.Start().
 func TestStartChild_ChildInOwnProcessGroup(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
@@ -875,13 +834,10 @@ func TestStartChild_ChildInOwnProcessGroup(t *testing.T) {
 	<-done
 }
 
-// TestStartChild_StdinIsDevNull pins StartChild's deliberate choice not to set
-// cmd.Stdin: the child's own process group (Setpgid, issue #3538) makes a
-// tty read a SIGTTIN stop, so dogfood.sh's mid-loop vault-unlock prompt has
-// no home under the daemon (issue #3548), and nothing may silently hand a
-// child the daemon's terminal. Capturing the seam's *exec.Cmd is race-free
-// here, unlike reading cmd.Process: StartChild writes Stdin, if at all,
-// before cmd.Start() and never after.
+// TestStartChild_StdinIsDevNull pins that StartChild never sets cmd.Stdin: in
+// its own process group a tty read stops with SIGTTIN (issues #3538, #3548).
+// Reading the captured Cmd's Stdin is race-free, since StartChild would set
+// it, if at all, before cmd.Start().
 func TestStartChild_StdinIsDevNull(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
@@ -929,12 +885,9 @@ func gitOutputT(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
-// TestResolveTip_FetchesWithoutMutatingWorkingTree builds a bare
-// "origin" plus two clones: dirConsumer (the operator's checkout under
-// test) and dirAdvancer, which pushes a second commit to origin after
-// dirConsumer was created. ResolveTip(dirConsumer, ...) must then
-// resolve to that second commit while leaving dirConsumer's own HEAD,
-// branch, and working tree exactly as they were — a fetch, never a pull.
+// TestResolveTip_FetchesWithoutMutatingWorkingTree asserts ResolveTip sees a
+// commit dirAdvancer pushed after dirConsumer's clone while leaving the
+// consumer's HEAD, branch and working tree untouched: a fetch, never a pull.
 func TestResolveTip_FetchesWithoutMutatingWorkingTree(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -995,14 +948,10 @@ func TestResolveTip_FetchesWithoutMutatingWorkingTree(t *testing.T) {
 	}
 }
 
-// TestResolveTip_ConcurrentCallsDoNotRace drives several concurrent
-// ResolveTip calls on one hostRunner against a repo whose origin/main
-// has genuinely advanced since dirConsumer's clone, so each `git fetch` must
-// actually move (re-lock) refs/remotes/origin/main rather than finding it
-// already at the wanted tip — the scenario where unsynchronized concurrent
-// fetches raced that ref lock and interleaved on the FETCH_HEAD file one
-// fetch writes and the next rev-parse reads (issue #3539). Every call must
-// return the same advanced tip with no error.
+// TestResolveTip_ConcurrentCallsDoNotRace pins issue #3539: origin/main has
+// genuinely advanced, so each fetch must re-lock the ref, where unsynchronized
+// fetches raced the lock and interleaved on FETCH_HEAD. Every call must
+// return the same advanced tip.
 func TestResolveTip_ConcurrentCallsDoNotRace(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -1065,12 +1014,8 @@ func TestResolveTip_ConcurrentCallsDoNotRace(t *testing.T) {
 	}
 }
 
-// TestResolveTip_CancelledContext guards against the ctx-discarding bug
-// (issue #3538): ResolveTip must wire ctx into the underlying
-// git invocations so a caller who cancels (SIGINT/SIGTERM with no child to
-// forward to) gets an error back promptly instead of the daemon hanging
-// until SIGKILL. The deadline below is the regression tripwire — before the
-// fix this test would hang instead of failing.
+// TestResolveTip_CancelledContext pins issue #3538: ResolveTip must pass ctx
+// to git, or a cancelled caller hangs. The deadline below is the tripwire.
 func TestResolveTip_CancelledContext(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -1230,13 +1175,9 @@ func waitForArmed(t *testing.T, armed ...string) {
 	t.Fatalf("children never started and armed their signal traps: %v", armed)
 }
 
-// childExitOnFirstSignal traps SIGTERM and exits 7 on it, so a forwarded
-// stop proves the signal was delivered and drained rather than SIGKILLed.
-//
-// `: >"$0"` truncates the trap-armed marker file passed in as $0, which is
-// how waitForArmed tells the trap is installed; the `sleep 0.05` busy loop
-// exists so the shell returns from its foreground child often enough to
-// run the trap.
+// childExitOnFirstSignal exits 7 on SIGTERM, proving a drain rather than a
+// SIGKILL. `: >"$0"` creates the marker waitForArmed polls for; the short
+// sleep loop returns to the shell often enough to run the trap.
 const childExitOnFirstSignal = `trap 'exit 7' TERM; : >"$0"; while :; do sleep 0.05; done`
 
 // childExitOnSecondSignal traps both SIGTERM and SIGINT, counts them, and
@@ -1252,13 +1193,9 @@ trap 'n=$((n+1)); if [ "$n" -ge 2 ]; then exit 7; fi' TERM INT
 : >"$0"
 while :; do :; done`
 
-// startChild starts a StartChild call on its own goroutine with the given
-// Stop/Abort latch and hands back the channels its result or error lands
-// on, so each test only has to write the select and its own assertions
-// rather than re-declaring the same resultCh/errCh/go func plumbing.
-// Cleanup of any child it starts is the caller's job (capture the *exec.Cmd
-// in its own exec seam override) — nothing in the runner publishes running
-// children any more for a shared helper to reach into.
+// startChild runs StartChild and Wait on a goroutine with the given latch,
+// returning the result and error channels. Cleaning up the child is the
+// caller's job, via its own exec seam override.
 func startChild(t *testing.T, r *hostRunner, stop, abort <-chan struct{}) (<-chan daemon.ChildResult, <-chan error) {
 	t.Helper()
 	resultCh := make(chan daemon.ChildResult, 1)
@@ -1274,12 +1211,8 @@ func startChild(t *testing.T, r *hostRunner, stop, abort <-chan struct{}) (<-cha
 	return resultCh, errCh
 }
 
-// TestStartChild_StopClosedSignalsSIGTERM drives the exec seam at a script
-// that traps SIGTERM and exits with a distinct code, so closing Stop proves
-// the signal reached the child specifically (child.Signal(pid) never
-// touches the wider process group) and that the child chose to exit on its
-// own terms rather than being SIGKILLed — the production half of the "halt
-// drains, never kills a Box" AC (issue #3538).
+// TestStartChild_StopClosedSignalsSIGTERM asserts closing Stop delivers a
+// SIGTERM the child drains on, never a kill (issue #3538).
 func TestStartChild_StopClosedSignalsSIGTERM(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
@@ -1324,11 +1257,8 @@ func TestStartChild_StopClosedSignalsSIGTERM(t *testing.T) {
 }
 
 // TestStartChild_StopSignalsEveryConcurrentChild is
-// TestStartChild_StopClosedSignalsSIGTERM at three concurrently running
-// children: each StartChild call starts its own forwarding goroutine, so a
-// design that only signalled one child (or shared state that a second
-// StartChild call clobbered) would leave the other two abandoned rather than
-// drained.
+// TestStartChild_StopClosedSignalsSIGTERM at three concurrent children, so
+// shared forwarding state cannot leave two undrained.
 func TestStartChild_StopSignalsEveryConcurrentChild(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
@@ -1396,10 +1326,7 @@ func TestStartChild_StopSignalsEveryConcurrentChild(t *testing.T) {
 }
 
 // TestStartChild_ChildStartedAfterStopClosedIsSignalledAtOnce covers a child
-// started after Stop has already closed: StartChild's forwarding goroutine
-// selects on an already-closed channel, which fires immediately, so the
-// child is signalled at once rather than running its Box to completion
-// unsignalled.
+// started after Stop closed.
 func TestStartChild_ChildStartedAfterStopClosedIsSignalledAtOnce(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
@@ -1434,13 +1361,9 @@ func TestStartChild_ChildStartedAfterStopClosedIsSignalledAtOnce(t *testing.T) {
 	case err := <-errCh:
 		t.Fatalf("startAndWait() unexpected error: %v", err)
 	case got := <-resultCh:
-		// Not asserted as exactly 7: delivery fires the instant StartChild
-		// starts forwarding, which can outrace the shell's own `trap`
-		// install (interpreter startup costs real OS time; the send does
-		// not), so the process may end via SIGTERM's default action
-		// (Exit -1) rather than the handler (Exit 7). Either way the busy
-		// loop never exits unsignalled, so any nonzero exit proves the
-		// signal reached this child rather than it being abandoned.
+		// Not exactly 7: the signal can beat the shell's `trap` install and
+		// kill it by default action (-1). The loop never exits unsignalled,
+		// so any nonzero exit proves delivery.
 		if got.Exit == 0 {
 			t.Errorf("Exit = %d, want nonzero (busy loop never exits unsignalled)", got.Exit)
 		}
@@ -1449,12 +1372,9 @@ func TestStartChild_ChildStartedAfterStopClosedIsSignalledAtOnce(t *testing.T) {
 	}
 }
 
-// TestStartChild_StopThenAbortDeliversDistinctKinds asserts closing Stop then
-// Abort delivers two distinct signals to a running child — SIGTERM then
-// SIGINT — end to end with no seam override: the child traps both, counts,
-// and only exits on the second, the same first-drains/second-aborts
-// contract the child launcher enforces on itself (issue #3521), mirrored
-// here on the daemon's forwarding side.
+// TestStartChild_StopThenAbortDeliversDistinctKinds asserts Stop then Abort
+// deliver SIGTERM then SIGINT to a real child, the drain-then-abort contract
+// of issue #3521.
 func TestStartChild_StopThenAbortDeliversDistinctKinds(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
@@ -1511,16 +1431,11 @@ func TestStartChild_StopThenAbortDeliversDistinctKinds(t *testing.T) {
 	}
 }
 
-// TestStartChild_ChildStartedAfterBothLatchesClosedSeesBothKinds is
-// TestStartChild_ChildStartedAfterStopClosedIsSignalledAtOnce with Stop and
-// Abort both already closed before StartChild is even called: the forwarding
-// goroutine must still send two distinct kinds, in order, not one signal
-// twice. It asserts on the *sequence* through the runnerSignal seam,
-// because OS-level delivery can't show it: a child born after both closes
-// has installed no handler yet, so it can die on the first signal's default
-// disposition before the second is even observable from outside. The child
-// here is the cheapest one that still drives StartChild's real forwarding
-// path (sleep, not a trap script).
+// TestStartChild_ChildStartedAfterBothLatchesClosedSeesBothKinds asserts two
+// distinct kinds, in order, when both latches closed before StartChild. It
+// reads them off the runnerSignal seam because a handler-less child can die on
+// the first signal before the second is observable. The child is a bare
+// sleep, the cheapest that still drives the real forwarding path.
 func TestStartChild_ChildStartedAfterBothLatchesClosedSeesBothKinds(t *testing.T) {
 	origExec := runnerExecCommand
 	origSignal := runnerSignal
@@ -1567,12 +1482,8 @@ func TestStartChild_ChildStartedAfterBothLatchesClosedSeesBothKinds(t *testing.T
 	}
 }
 
-// TestStartChild_ForwardingStopsAfterChildExits pins the done-channel
-// contract: once StartChild has returned for a child that exited on its own,
-// its forwarding goroutine must already be torn down, so a Stop that closes
-// afterward sends nothing. This is new coverage the per-goroutine design
-// needs that the old shared children map never required — there was no
-// stale map entry to leak a signal through in the first place.
+// TestStartChild_ForwardingStopsAfterChildExits asserts a Stop closing after
+// the child exited on its own sends nothing.
 func TestStartChild_ForwardingStopsAfterChildExits(t *testing.T) {
 	origExec := runnerExecCommand
 	origSignal := runnerSignal
@@ -1613,11 +1524,8 @@ func TestStartChild_ForwardingStopsAfterChildExits(t *testing.T) {
 	}
 }
 
-// TestStartChild_NilStopAbortRunsNormally asserts a ChildRequest carrying no
-// latch at all — the terminal/one-off shape, e.g. a caller that never wires
-// Stop/Abort — runs and exits normally rather than the forwarding goroutine
-// panicking or blocking on a nil channel forever (a select on nil simply
-// never fires).
+// TestStartChild_NilStopAbortRunsNormally asserts a ChildRequest with no
+// latch runs and exits normally.
 func TestStartChild_NilStopAbortRunsNormally(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
@@ -1698,21 +1606,15 @@ func TestResolveTip_EmptySelfAttrSkipsEval(t *testing.T) {
 	}
 }
 
-// scriptedFetchSeamT builds a runnerFetchCommand replacement that never
-// touches a real git remote: the "fetch" subcommand runs onFetch (a hook a
-// test can use to block the leader, or to fail), and the "rev-parse"
-// subcommand always echoes whatever revision() currently returns, so a test
-// can move the "remote" tip between calls by mutating the string a closure
-// reads. Recognising the subcommand by args[2] mirrors fetchRevision's own
-// call shape: runnerFetchCommand(ctx, "git", "-C", repoPath, sub, ...).
+// scriptedFetchSeamT fakes runnerFetchCommand with no remote: "fetch" runs
+// onFetch (to block the leader, or fail) and "rev-parse" echoes revision(),
+// so a test moves the tip between calls. args[2] is the subcommand, per
+// fetchRevision's "-C", repoPath, sub call shape.
 func scriptedFetchSeamT(t *testing.T, revision func() string, onFetch func()) func(ctx context.Context, name string, args ...string) *exec.Cmd {
 	t.Helper()
 	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		if len(args) < 3 {
-			// t.Errorf, not t.Fatalf: this closure runs as runnerFetchCommand
-			// on whatever goroutine calls ResolveTip, which in the
-			// coalescing tests is a caller goroutine, not the test
-			// goroutine — Fatalf (FailNow) is only safe from the latter.
+			// Not Fatalf: this may run off the test goroutine.
 			t.Errorf("runnerFetchCommand args = %v, want at least 3", args)
 			return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 1")
 		}
@@ -1726,12 +1628,9 @@ func scriptedFetchSeamT(t *testing.T, revision func() string, onFetch func()) fu
 	}
 }
 
-// TestResolveTip_ConcurrentCallersCoalesceIntoOneFetchAndOneEval drives three
-// concurrent ResolveTip callers against a leader deliberately held inside
-// the fetch seam until both other callers have joined its flight (via
-// runnerFlightJoined — no sleeps as synchronisation), and asserts the whole
-// group costs exactly one `git fetch` and one `nix eval` despite three
-// callers, with every caller receiving the identical Tip.
+// TestResolveTip_ConcurrentCallersCoalesceIntoOneFetchAndOneEval holds the
+// leader in the fetch seam until both others join (runnerFlightJoined), then
+// asserts one fetch, one eval, and an identical Tip for all three.
 func TestResolveTip_ConcurrentCallersCoalesceIntoOneFetchAndOneEval(t *testing.T) {
 	origFetch, origEval, origJoined := runnerFetchCommand, runnerEvalCommand, runnerFlightJoined
 	t.Cleanup(func() {
@@ -1815,10 +1714,8 @@ func TestResolveTip_NoTTLSequentialCallsEachFetch(t *testing.T) {
 	}
 }
 
-// TestResolveTip_SelfPathMemoisedPerRevision asserts two resolutions at the
-// same revision cost one `nix eval` (the memo serves the second), and a
-// resolution at a new revision evaluates again. The
-// fetch count is not what this test is about.
+// TestResolveTip_SelfPathMemoisedPerRevision asserts one `nix eval` per
+// distinct revision.
 func TestResolveTip_SelfPathMemoisedPerRevision(t *testing.T) {
 	origFetch, origEval := runnerFetchCommand, runnerEvalCommand
 	t.Cleanup(func() { runnerFetchCommand, runnerEvalCommand = origFetch, origEval })
@@ -1938,10 +1835,8 @@ func TestResolveTip_Moved(t *testing.T) {
 	}
 }
 
-// TestResolveTip_FetchErrorReachesEveryJoiner asserts a failing `git fetch`
-// reaches every caller sharing that leader's flight with the identical
-// error — the same wrapping fetchRevision produces today — rather than
-// only the leader seeing it.
+// TestResolveTip_FetchErrorReachesEveryJoiner asserts every caller sharing a
+// flight gets the leader's identical fetch error.
 func TestResolveTip_FetchErrorReachesEveryJoiner(t *testing.T) {
 	origFetch, origJoined := runnerFetchCommand, runnerFlightJoined
 	t.Cleanup(func() { runnerFetchCommand, runnerFlightJoined = origFetch, origJoined })
@@ -2113,9 +2008,7 @@ func TestRunDoctor_ZeroExit(t *testing.T) {
 }
 
 // TestRunDoctor_EnvStripsKnobsKeepsSecrets is RunDoctor's half of
-// TestStartChild_EnvStripsKnobsKeepsSecrets above: same script-dumps-to-a-file
-// route, since RunDoctor sends both streams straight to os.Stderr with no
-// existing capture pattern in this file.
+// TestStartChild_EnvStripsKnobsKeepsSecrets.
 func TestRunDoctor_EnvStripsKnobsKeepsSecrets(t *testing.T) {
 	orig := runnerDoctorCommand
 	t.Cleanup(func() { runnerDoctorCommand = orig })
@@ -2186,16 +2079,12 @@ func TestRunDoctor_SeamFailure(t *testing.T) {
 	}
 }
 
-// TestRunDoctor_ArgvIsDoctorCommand captures the argv the seam receives and
-// asserts it is exactly what daemon.DoctorCommand builds: a pinned flakeref
-// carrying the revision, ending in "-- doctor", with no --max-jobs or
-// --max-parallel (those cap a child's dispatch wave; doctor dispatches
-// nothing to cap), and no --verbose or -v — the daemon relies on doctor's
-// quiet-by-default report (#3777) rather than requesting the verbose one,
-// and a reflect.DeepEqual against DoctorCommand's own argv can't catch
-// DoctorCommand itself growing a --verbose. Token-exact matching (not
-// substring) guards against a false match inside another argument, e.g. a
-// flakeref or revision.
+// TestRunDoctor_ArgvIsDoctorCommand asserts the seam's argv is
+// DoctorCommand's: a pinned flakeref ending in "-- doctor", without
+// --max-jobs/--max-parallel (doctor dispatches nothing) or --verbose/-v (the
+// daemon relies on quiet-by-default doctor, #3777). Checked per token, since
+// DeepEqual against DoctorCommand would miss it growing a --verbose, and not
+// by substring, which could match inside a flakeref or revision.
 func TestRunDoctor_ArgvIsDoctorCommand(t *testing.T) {
 	orig := runnerDoctorCommand
 	t.Cleanup(func() { runnerDoctorCommand = orig })
@@ -2288,13 +2177,9 @@ func TestRunDoctor_NoButlerOmitsFlag(t *testing.T) {
 	}
 }
 
-// TestRunDoctor_HealthyPreflightEmitsNothing stubs the doctor seam with a
-// script that exits 0 printing nothing on either stream, mirroring what
-// quiet-by-default doctor (#3777) does on a healthy machine, and asserts the
-// daemon's own captured stderr is empty and its stdout stays reserved for
-// the event stream. RunDoctor relays both of the child's streams onto the
-// daemon's stderr and adds no framing of its own, so a silent child must
-// leave both of the daemon's streams silent too.
+// TestRunDoctor_HealthyPreflightEmitsNothing asserts a silent doctor (as
+// quiet-by-default doctor is when healthy, #3777) leaves both daemon streams
+// silent: RunDoctor adds no framing.
 func TestRunDoctor_HealthyPreflightEmitsNothing(t *testing.T) {
 	orig := runnerDoctorCommand
 	t.Cleanup(func() { runnerDoctorCommand = orig })
@@ -2320,14 +2205,9 @@ func TestRunDoctor_HealthyPreflightEmitsNothing(t *testing.T) {
 	}
 }
 
-// TestRunDoctor_RefusedPreflightForwardsFindings stubs the doctor seam with
-// scripts mirroring two shapes real doctor refuses in: missing required
-// triage labels exit 4 with bare MISSING rows and no remedy line, while an
-// unprotected base branch exits 1 with a MISSING row paired with its indented
-// remedy line. Each case asserts every line the script emitted lands
-// on the daemon's captured stderr — both of the child's streams are relayed
-// to the same descriptor — and the returned exit is the child's own with no
-// error.
+// TestRunDoctor_RefusedPreflightForwardsFindings mirrors two real doctor
+// refusals (labels missing, exit 4; unprotected base branch, exit 1) and
+// asserts every line lands on the daemon's stderr with the child's own exit.
 func TestRunDoctor_RefusedPreflightForwardsFindings(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -2353,12 +2233,9 @@ exit 4`,
 			},
 		},
 		{
-			// Reporter.Results is the only caller that pairs a row with a
-			// remedy line, and branch-protection is a Required row whose
-			// Remedy differs from its probe error, so both lines print. That
-			// error wraps no sentinel, so it lands on doctorExitCodeFor's
-			// default arm, exit 1 — the connectivity rows wrap ErrConnectivity
-			// and exit 3 instead. doctorReport prints it to stderr verbatim.
+			// branch-protection's Remedy differs from its probe error, so both
+			// lines print, and doctorReport prints the error to stderr. It
+			// wraps no sentinel, hence exit 1 (connectivity rows exit 3).
 			name: "unprotected base branch",
 			script: `printf '%s\n%s\n' 'MISSING: branch-protection: base branch "main" is not protected' '  remedy: protect main: block direct pushes and require CI status checks'
 printf '%s\n' 'base branch "main" is not protected' >&2
@@ -2471,11 +2348,8 @@ func TestRunDoctor_SignalKilledIsSeamFailure(t *testing.T) {
 	}
 }
 
-// TestNewHostRunner_RejectsNilEnv pins the fix for the silent-empty-env bug
-// of #3692: a nil cfg.env — an uncaptured environment, not "empty on
-// purpose" — is rejected at construction rather than reaching withoutKeys
-// (internal/daemon/command.go), which can't tell the two apart (both come
-// out non-nil).
+// TestNewHostRunner_RejectsNilEnv pins issue #3692: a nil cfg.env is an
+// uncaptured environment, rejected before withoutKeys makes it look empty.
 func TestNewHostRunner_RejectsNilEnv(t *testing.T) {
 	_, err := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: nil})
 	if err == nil {
@@ -2499,14 +2373,8 @@ func TestNewHostRunner_AcceptsEmptyEnv(t *testing.T) {
 	}
 }
 
-// TestStartChild_FeatureBranchAppendsBaseBranchArg pins issue #3882's
-// wiring: a non-empty featureBranch reaches the child argv as
-// --base-branch (daemon.ChildSpec's own field already does the appending;
-// this is the runner actually passing it through).
-// TestStartChild_FeatureBranchAppendsBaseBranchArg pins both halves of issue
-// #3882's argv wiring in one table, flag-set and flag-unset, matching
-// TestParseArgs's style: an unset featureBranch must leave the child argv
-// byte-for-byte today — no --base-branch anywhere.
+// TestStartChild_FeatureBranchAppendsBaseBranchArg pins issue #3882: a set
+// featureBranch reaches the child argv as --base-branch; unset, none appears.
 func TestStartChild_FeatureBranchAppendsBaseBranchArg(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -2569,13 +2437,10 @@ func TestRunDoctor_FeatureBranchAppendsBaseBranchArg(t *testing.T) {
 	}
 }
 
-// TestResolveTip_FetchesBaseBranchNotFeatureBranch pins the invariant that
-// ResolveTip's fetch and self-path eval both always track baseBranch, never
-// featureBranch: a merge to the feature branch alone must never halt the
-// daemon self-changed (issue #3882) — only StartChild/RunDoctor ever see
-// featureBranch. selfAttr is set here (unlike an eval-skipping spec) so the
-// self-change eval path in evalSelfPath actually runs, with runnerEvalCommand
-// stubbed the same way TestResolveTip_SelfPathHappyPath stubs it.
+// TestResolveTip_FetchesBaseBranchNotFeatureBranch pins that ResolveTip's
+// fetch and self eval track baseBranch, so a feature-branch merge never
+// halts the daemon self-changed (issue #3882). selfAttr is set so the eval
+// actually runs.
 func TestResolveTip_FetchesBaseBranchNotFeatureBranch(t *testing.T) {
 	origFetch := runnerFetchCommand
 	t.Cleanup(func() { runnerFetchCommand = origFetch })
@@ -2618,12 +2483,10 @@ func TestResolveTip_FetchesBaseBranchNotFeatureBranch(t *testing.T) {
 	}
 }
 
-// scriptedFeatureBranchSeamT is scriptedFetchSeamT's sibling for the
-// --feature-branch existence check (issue #3883): "fetch" always succeeds,
-// "rev-parse" (the default case) echoes revision(), and "ls-remote" runs
-// onLsRemote (a hook a test can use to count calls or block the leader) and
-// exits lsRemoteExit — 0 (branch exists), 2 (ls-remote's "no matching ref"),
-// or any other code (a remote error) a test wants to script.
+// scriptedFeatureBranchSeamT is scriptedFetchSeamT for the --feature-branch
+// check (issue #3883), except "fetch" always succeeds: "ls-remote" runs
+// onLsRemote and exits lsRemoteExit (0 exists, 2 no matching ref, else a
+// remote error).
 func scriptedFeatureBranchSeamT(t *testing.T, revision func() string, lsRemoteExit int, onLsRemote func()) func(ctx context.Context, name string, args ...string) *exec.Cmd {
 	t.Helper()
 	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
@@ -2672,11 +2535,9 @@ func TestFetchRevision_FeatureBranchGoneReturnsTypedError(t *testing.T) {
 	}
 }
 
-// TestFetchRevision_FeatureBranchRemoteErrorIsOrdinary pins the other side of
-// the same branch: an ls-remote exit that is neither 0 nor 2 (128, here — a
-// stand-in for a real auth/network failure) must stay an ordinary error, not
-// the typed absence signal — a network blip must never halt the campaign
-// outright.
+// TestFetchRevision_FeatureBranchRemoteErrorIsOrdinary pins that any other
+// ls-remote exit (128, an auth/network stand-in) stays an ordinary error, so
+// a network blip never halts the campaign.
 func TestFetchRevision_FeatureBranchRemoteErrorIsOrdinary(t *testing.T) {
 	orig := runnerFetchCommand
 	t.Cleanup(func() { runnerFetchCommand = orig })
@@ -2780,11 +2641,8 @@ func TestFetchRevision_RealGitMissingFeatureBranchReturnsTypedError(t *testing.T
 	}
 }
 
-// TestResolveTip_FeatureBranchConcurrentCallersShareSingleLsRemote mirrors
-// TestResolveTip_ConcurrentCallersCoalesceIntoOneFetchAndOneEval, but for the
-// existence check: three concurrent ResolveTip callers with --feature-branch
-// set must still cost exactly one ls-remote invocation, since it rides the
-// same single flight as the fetch it follows.
+// TestResolveTip_FeatureBranchConcurrentCallersShareSingleLsRemote asserts
+// three coalesced callers cost one ls-remote, which rides the fetch's flight.
 func TestResolveTip_FeatureBranchConcurrentCallersShareSingleLsRemote(t *testing.T) {
 	origFetch, origJoined := runnerFetchCommand, runnerFlightJoined
 	t.Cleanup(func() { runnerFetchCommand, runnerFlightJoined = origFetch, origJoined })
@@ -3314,11 +3172,9 @@ type doneHandle struct{}
 func (doneHandle) Wait(<-chan struct{}) (daemon.ChildResult, error) { return daemon.ChildResult{}, nil }
 func (doneHandle) State() daemon.ChildState                         { return daemon.ChildState{} }
 
-// TestStartChild_AbandonedWaitLeavesChildRunning is the in-place-restart
-// prefactor's contract (ADR 0063): closing a Wait's abandon channel stops the
-// wait without signalling, reaping or closing anything of the child's, and a
-// later Wait on the same handle resumes cleanly — including a report line the
-// abandoned read had only half received.
+// TestStartChild_AbandonedWaitLeavesChildRunning pins ADR 0063's contract:
+// abandoning a Wait signals, reaps and closes nothing, and a later Wait
+// resumes cleanly, even mid report line.
 func TestStartChild_AbandonedWaitLeavesChildRunning(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
@@ -3888,8 +3744,6 @@ func TestInheritChild_DropsAForgedOrStaleHandoff(t *testing.T) {
 	})
 }
 
-// execReadyRunner is a runner whose last Prebuild and latest fetched tip agree
-// on prebuildSelfPath, so execTarget accepts it until a test spoils one side.
 // setSignalSettle overrides how long execSuccessor waits for a stop signal
 // to land after ignoring them, for this test only.
 func setSignalSettle(t testing.TB, d time.Duration) {
@@ -3899,8 +3753,9 @@ func setSignalSettle(t testing.TB, d time.Duration) {
 	signalSettle = d
 }
 
-// execReadyRunner is a runner execSuccessor can be called on, with no settle
-// wait unless the test sets one.
+// execReadyRunner is a runner whose last Prebuild and latest fetched tip
+// agree on prebuildSelfPath, so execTarget accepts it until a test spoils one
+// side. It has no settle wait unless the test sets one.
 func execReadyRunner(t *testing.T, mut func(*hostRunnerConfig)) *hostRunner {
 	t.Helper()
 	setSignalSettle(t, 0)

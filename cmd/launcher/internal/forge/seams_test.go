@@ -55,7 +55,7 @@ func TestFake_ImplementsPRForge(t *testing.T) {
 }
 
 // AsPushOnly gives the Fake the git adapter's shape, which is how Settle
-// detects push-only forges now that the PushOnly() flag is gone.
+// detects push-only forges.
 func TestFake_AsPushOnly_HidesPRForge(t *testing.T) {
 	f := forge.NewFake()
 	cf := f.AsPushOnly()
@@ -137,8 +137,8 @@ func TestFake_ImplementsHostPostedCommenter(t *testing.T) {
 	var _ forge.HostPostedCommenter = forge.NewFake()
 }
 
-// No real adapter implements host-posted issue filing yet (issue #2018), the
-// same posture forge.DraftPRCreator holds, so a bare Fake must not either.
+// The Fake offers host-posted issue filing (issue #2018) only through its As*
+// wrappers, so a bare Fake must not satisfy it.
 func TestFake_DoesNotImplementHostPostedIssueFilerByDefault(t *testing.T) {
 	f := forge.NewFake()
 	if _, ok := any(f).(forge.HostPostedIssueFiler); ok {
@@ -269,9 +269,8 @@ func TestFake_TransitionState_InProgressToComplete(t *testing.T) {
 }
 
 // A claim strips stale terminal labels left by a prior run, not just the
-// from-state label, mirroring the github adapter (exec_issues.go). If the
-// Fake diverges here, a launcher-level test can pass while the real GitHub
-// backend still misbehaves (#1985).
+// from-state label, mirroring connectortracker. If the Fake diverges here, a
+// launcher-level test can pass while the real backend misbehaves (#1985).
 func TestFake_TransitionState_ClaimStripsStaleTerminalLabels(t *testing.T) {
 	f := forge.NewFake(testLabels)
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent", "agent-failed"}})
@@ -387,7 +386,7 @@ func TestFake_CompleteVerdict_MissingInProgressErrors(t *testing.T) {
 
 // With InProgress unconfigured, no label can ever satisfy the precondition,
 // so CompleteVerdict skips the check rather than always erroring. This
-// mirrors exec's `if remove != ""` guard (github/exec_issues.go).
+// mirrors the `if remove != ""` guard in connectortracker/writes.go.
 func TestFake_CompleteVerdict_UnconfiguredInProgressSkipsCheck(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{})
 	f.VerdictLabels = researchVerdictLabels
@@ -399,8 +398,7 @@ func TestFake_CompleteVerdict_UnconfiguredInProgressSkipsCheck(t *testing.T) {
 }
 
 // An unconfigured verdict label must error rather than append an empty
-// label, mirroring the real adapter's add == "" guard
-// (github/exec_issues.go).
+// label, mirroring the add == "" guard in connectortracker/writes.go.
 func TestFake_CompleteVerdict_UnconfiguredVerdictLabelErrors(t *testing.T) {
 	f := forge.NewFake(researchLabels)
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-in-progress"}})

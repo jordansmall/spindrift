@@ -212,11 +212,10 @@ func commonPrefix(a, b string) string {
 	return a[:i]
 }
 
-// TestScoutBriefPathMatchesPromptProse is the parity guard for issue #3157,
-// extended by #3449 to cover the scout's own prompt once the scout began
-// writing the brief itself: it checks the -scout-brief-path flag default
-// against the prompts that tell the scout where to write the brief and the
-// coordinator and worker where to read it back.
+// TestScoutBriefPathMatchesPromptProse is the parity guard for issues #3157
+// and #3449: it checks the -scout-brief-path flag default against the prompts
+// that tell the scout where to write the brief and the coordinator and worker
+// where to read it back.
 func TestScoutBriefPathMatchesPromptProse(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 

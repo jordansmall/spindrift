@@ -16,14 +16,11 @@ import (
 	"spindrift.dev/launcher/internal/flock"
 )
 
-// TestAcquireCheckoutLock_SucceedsThroughMomentarySharedProbe pins the
-// issue #3545 review finding: a status reader's probeCheckoutLock takes
-// LOCK_SH for a few syscalls then releases it, and a daemon starting in
-// that window must not mistake it for a second daemon. This simulates that
-// probe directly (LOCK_SH, not via AcquireCheckoutLock) and releases it
-// from the first between-retry sleep, so the first attempt must fail and
-// the retry must win — with no wall-clock race against acquireGraceTotal,
-// which a loaded CI runner can lose.
+// TestAcquireCheckoutLock_SucceedsThroughMomentarySharedProbe pins issue
+// #3545: a daemon starting while a status reader's LOCK_SH probe is held
+// must not mistake it for a second daemon. The simulated probe is released
+// from the first between-retry sleep, so the first attempt fails and the
+// retry wins with no wall-clock race a loaded CI runner can lose.
 func TestAcquireCheckoutLock_SucceedsThroughMomentarySharedProbe(t *testing.T) {
 	dir := t.TempDir()
 	lockPath := filepath.Join(dir, checkoutLockFileName)

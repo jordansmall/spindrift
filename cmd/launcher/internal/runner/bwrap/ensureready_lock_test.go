@@ -98,12 +98,11 @@ func TestBwrapRunEnsureReady_ConcurrentColdStartsVacuumOnce(t *testing.T) {
 	}
 }
 
-// realizeLockWaiter notes when EnsureReady, reporting on errc, issues the
-// build of lastDrv, the last closure it realizes before taking the realize
-// lock. The returned func waits for that, then reports whether EnsureReady
-// stayed blocked through a grace. The grace cannot start at EnsureReady's
-// call: each realize spawns the fake CLI, which on a loaded runner can outlast
-// it, so the holder would unlock before the waiter ever waited.
+// realizeLockWaiter's func waits until EnsureReady (reporting on errc) builds
+// lastDrv, its last closure before the realize lock, then reports whether it
+// stayed blocked through a grace. Starting the grace at EnsureReady's call
+// would let each realize's fake CLI spawn outlast it on a loaded runner, so
+// the holder would unlock before the waiter ever waited.
 func realizeLockWaiter(t *testing.T, lastDrv string, errc <-chan error) func() bool {
 	t.Helper()
 	realized := make(chan struct{})

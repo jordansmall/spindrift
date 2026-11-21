@@ -3336,9 +3336,8 @@ const (
 )
 
 // twinContracts binds the hand-mirrored fragment pairs to each other. Text is
-// compared after whitespace normalization (the old tests that compared bytes
-// let no re-wrap pass; a re-wrap is harmless to the model), so a one-sided
-// re-wrap passes while any one-sided wording change fails.
+// compared after whitespace normalization, so a one-sided re-wrap (harmless to
+// the model) passes while any one-sided wording change fails.
 var twinContracts = []twinContract{
 	{
 		a:       "file-issues-relay-socket.md",

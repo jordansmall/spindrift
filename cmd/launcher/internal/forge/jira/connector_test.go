@@ -64,8 +64,7 @@ func (w failingWrites) CreateLabel(string, string, string) error    { return w.f
 
 // connectorHarness drives the compiled jira Connector, through the Connector
 // host, against the scripted Jira backend served over TLS (the host requires
-// https). Only the tracker, comments, and native-dependency reads are
-// scripted; the embedded backend's own native tracker is unset.
+// https).
 type connectorHarness struct {
 	*jiraHarness
 	cloud  bool

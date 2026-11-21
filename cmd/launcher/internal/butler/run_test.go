@@ -25,21 +25,16 @@ import (
 )
 
 // testRunClaimTimeout is the claim timeout every Sweep test below passes
-// explicitly, migrated from cmd/launcher's retired testClaimTimeout (issue
-// #3990).
+// explicitly (issue #3990).
 const testRunClaimTimeout = 6 * time.Hour
 
 // noRunEvery is the zero Every: it never blocks a due check
-// (IntervalNotElapsed), the shape most tests below want when the interval
-// itself isn't what's under test. Distinct from sweep_test.go's fixed-shape
-// testPolicy, since the tests below each build their own Policy (chores,
-// promotion knobs) per case.
+// (IntervalNotElapsed), for tests where the interval isn't under test.
 const noRunEvery time.Duration = 0
 
-// testRunPolicy builds a Policy for the tests below: testRunClaimTimeout, an
-// unlimited (zero) Budgets, UTC, ready-for-agent as the promotion label, and
-// Chores built from chores, each with the same Every and no PromotionClasses --
-// migrated from cmd/launcher's retired testButlerPolicy.
+// testRunPolicy builds a Policy with unlimited (zero) Budgets, UTC,
+// ready-for-agent as the promotion label, and Chores built from chores, each
+// with the same Every and no PromotionClasses.
 func testRunPolicy(every time.Duration, chores ...string) Policy {
 	cs := make([]chore.Chore, len(chores))
 	for i, name := range chores {
@@ -134,8 +129,7 @@ func gitLogSubjects(t *testing.T, repo, ref string) []string {
 // promotableDispatcher builds a dispatch.Fake whose one relayed finding
 // carries class, one file, and a reviewer concurrence -- the shape that
 // clears every settle-side promotion gate whenever the host policy allows
-// class (issue #3880). The outcome shape comes from readyResult via
-// intentsDispatcher.
+// class (issue #3880).
 func promotableDispatcher(class string) *dispatch.Fake {
 	return intentsDispatcher(
 		fmt.Sprintf(`{"title":"bug found","body":"repro","dedupTerms":["a.go:Foo"],"class":%q,"concurrence":"agreed"}`, class),
@@ -143,10 +137,9 @@ func promotableDispatcher(class string) *dispatch.Fake {
 }
 
 // (a) A clean run claims, dispatches, files its one finding, and writes a
-// done commit carrying lastSwept=head and the filed URL -- visible in the
-// Accumulation repo's refs/spindrift/butler/<chore> ref, the issue's own
-// acceptance criterion (`git log refs/spindrift/butler/bugs`). A
-// Consumer-declared Chore ("tidy-deps") runs exactly like a built-in one.
+// done commit carrying lastSwept=head and the filed URL in the Accumulation
+// repo's refs/spindrift/butler/<chore> ref. A Consumer-declared Chore
+// ("tidy-deps") runs exactly like a built-in one.
 func TestSweep_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
 	t.Parallel()
 	for _, choreName := range []string{"bugs", "tidy-deps"} {
@@ -209,10 +202,8 @@ func TestSweep_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
 }
 
 // TestSweep_PassesRoomFindingsAsBoxMaxFindings pins issue #3994's butler
-// half: run() reads room.Findings (chore.Budgets.Room, computed once per
-// Sweep) into dispatch.Chore.MaxFindings, so the Box this run dispatches
-// carries the day's actual per-sweep cap rather than the socket's own
-// hardcoded default.
+// half: the Box carries the day's actual per-sweep cap rather than the
+// socket's own hardcoded default.
 func TestSweep_PassesRoomFindingsAsBoxMaxFindings(t *testing.T) {
 	t.Parallel()
 	const choreName = "bugs"
@@ -431,16 +422,12 @@ func TestSweep_StaleClaimIsTakenOver(t *testing.T) {
 	}
 }
 
-// (d2) Stale-claim takeover, covered end to end (issue #3877): a crashed
-// run's claim sits on top of an earlier done commit that carries lastSwept
-// and a mid-tree cursor forward. The next run, after the branch has moved,
-// takes the stale claim over rather than reporting NotDue, sweeps
-// lastSwept..newHead, resumes the tree walk strictly after the old cursor
-// (never restarting it), and ends in a done commit -- the full claimed(seed)
-// -> done(seed) -> claimed(stale) -> done(final) chain, newest first. head1
-// and head2 stand in for the branch's tip before and after work "lands"
-// between the seed and this run (fakeTree, no real git needed -- issue
-// #3995).
+// (d2) Stale-claim takeover end to end (issue #3877): a crashed run's claim
+// sits on top of an earlier done commit carrying lastSwept and a mid-tree
+// cursor. The next run, after the branch has moved, takes the stale claim
+// over rather than reporting NotDue, sweeps lastSwept..newHead, resumes the
+// tree walk strictly after the old cursor, and ends in a done commit.
+// head1/head2 are the branch tip before and after work lands (issue #3995).
 func TestSweep_StaleClaimTakeoverEndToEnd(t *testing.T) {
 	t.Parallel()
 	const head1, head2 = "head1", "head2"
@@ -558,8 +545,7 @@ func TestSweep_ClaimJustUnderTimeoutStillLive(t *testing.T) {
 }
 
 // (g) A named chore not yet due by interval reports why and NotDue, without
-// claiming or dispatching. (ledger.Claim losing the race, the "f" case in
-// cmd/launcher's retired suite, is covered by TestSweep_LostRace above.)
+// claiming or dispatching.
 func TestSweep_NamedChoreNotDueByIntervalReportsWhy(t *testing.T) {
 	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
@@ -790,12 +776,10 @@ func TestSweep_BudgetSpentByAnotherEnabledChore(t *testing.T) {
 }
 
 // (k) The day a budget resets in runs against policy.Zone, not UTC or the
-// host's own zone: a Claimed+Done run at 23:30 America/New_York on one date
-// is 04:30 UTC the *next* date, so this instant lands on different calendar
-// dates depending which zone decides the boundary. Reading at 23:50 the same
-// NY evening still finds the budget spent; reading at 00:10 the following NY
-// morning finds a fresh day and runs. head1/head2 stand in for the branch
-// tip before/after the seeded run, as above (fakeTree, no real git needed).
+// host's own zone: a run at 23:30 America/New_York is 04:30 UTC the *next*
+// date, so the instant lands on different calendar dates depending which
+// zone decides the boundary. 23:50 the same NY evening still finds the
+// budget spent; 00:10 the following NY morning finds a fresh day.
 func TestSweep_DayBoundaryUsesConfiguredZoneNotUTC(t *testing.T) {
 	t.Parallel()
 	const head1, head2 = "head1", "head2"
@@ -908,12 +892,10 @@ func TestSweep_PerSweepCapDropsExcessFindingsInLedger(t *testing.T) {
 	}
 }
 
-// (l2) BUTLER_MAX_FINDINGS_PER_SWEEP=0 (no per-sweep limit configured on
-// top of a day cap) still bounds a sweep at the day's remaining finding
-// headroom, not an uncapped run (due.go's MaxFindingsPerSweep doc): with
-// MaxFindingsPerDay=10 and 4 already filed today, a Box relaying more than
-// 6 findings gets only 6 filed, the rest dropped (issue #3994 review
-// finding).
+// (l2) BUTLER_MAX_FINDINGS_PER_SWEEP=0 (no per-sweep limit) still bounds a
+// sweep at the day's remaining finding headroom, not an uncapped run: with
+// MaxFindingsPerDay=10 and 4 already filed today, a Box relaying more than 6
+// findings gets only 6 filed, the rest dropped (issue #3994).
 func TestSweep_ZeroPerSweepCapStillBoundedByDayHeadroom(t *testing.T) {
 	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
@@ -1120,9 +1102,9 @@ func TestSweep_PromotionUsesConfiguredWorkLabel(t *testing.T) {
 
 // (o) A day whose Ledger already holds MaxPromotionsPerDay promotions leaves
 // no room: the next otherwise-eligible finding still files, just unlabelled
-// (issue #3880). The earlier promotion is seeded before this Sweep call, so
-// Sweep's own single Room walk at its own start (issue #3994) already sees
-// it spent -- no second walk at settle time is needed to catch it.
+// (issue #3880). The earlier promotion is seeded before Sweep, so Sweep's
+// single Room walk at its start already sees it spent -- no second walk at
+// settle time (issue #3994).
 func TestSweep_PromotionBudgetSpentFilesUnlabelled(t *testing.T) {
 	t.Parallel()
 	const head1, head2 = "head1", "head2"
@@ -1165,10 +1147,8 @@ func TestSweep_PromotionBudgetSpentFilesUnlabelled(t *testing.T) {
 	if len(fc.PostIssueCalls) != 1 || slices.Contains(fc.PostIssueCalls[0].Labels, "ready-for-agent") {
 		t.Fatalf("PostIssueCalls = %+v, want one call with no ready-for-agent label (budget spent)", fc.PostIssueCalls)
 	}
-	// Room already spent (today.Promoted >= MaxPromotionsPerDay): the Box
-	// must not be told a class list even though the Chore has PromotionClasses and
-	// promotion is on, mirroring the promotion-off case above (issue #3994
-	// review finding, butler.go's room.Promotions > 0 gate).
+	// Room spent: the Box must not be told a class list even though promotion
+	// is on (issue #3994, butler.go's room.Promotions > 0 gate).
 	if len(gotChore.PromotionClasses) != 0 {
 		t.Errorf("dispatch.Chore.PromotionClasses = %v, want none with today's promotion room spent", gotChore.PromotionClasses)
 	}
@@ -1254,14 +1234,9 @@ func TestSweep_PatchRungOffByDefaultOmitsPatchClasses(t *testing.T) {
 	}
 }
 
-// (q) With MaxPatchesPerDay > 0, a configured patchForge, today's patch room
-// untouched, and promotion also enabled with room, the Box is told its own
-// Chore's host-side patch allow-list, the patch rung's sibling of
-// TestSweep_PromotionEnabledPromotesAllowedFinding (issue #4072, ADR 0057).
-// This slice only forwards the fact -- landing a patch itself is out of
-// scope here. WithPatchForge matters to this test now (issue #4074): a nil
-// patchForge must withhold PatchClasses regardless of budget, per
-// TestSweep_NoPatchForgeOmitsPatchClassesFromBox.
+// (q) With MaxPatchesPerDay > 0, a configured patchForge, patch room
+// untouched, and promotion enabled with room, the Box is told its Chore's
+// host-side patch allow-list (issues #4072, #4074, ADR 0057).
 func TestSweep_PatchRungOnWithRoomForwardsPatchClasses(t *testing.T) {
 	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
@@ -1294,10 +1269,9 @@ func TestSweep_PatchRungOnWithRoomForwardsPatchClasses(t *testing.T) {
 }
 
 // (q2) With MaxPatchesPerDay > 0 but promotion off (the default), the Box
-// must not be told a patch class list even though the Chore has
-// PatchClasses: the relay fragment only ever honours CHORE_PATCH_CLASSES
-// for a class also present on CHORE_CLASSES, and with promotion off that
-// list is always empty (review finding on issue #4072, ADR 0057).
+// must not be told a patch class list: the relay fragment only honours
+// CHORE_PATCH_CLASSES for a class also on CHORE_CLASSES, which is empty with
+// promotion off (issue #4072, ADR 0057).
 func TestSweep_PatchRungOnPromotionOffOmitsPatchClasses(t *testing.T) {
 	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
@@ -1344,11 +1318,9 @@ func (w *countingHistoryBackend) History(choreName string, since time.Time) ([]l
 	return w.Backend.History(choreName, since)
 }
 
-// (q) One full Sweep -- claim, run a Box whose finding is eligible to
-// promote, settle -- with promotion enabled walks the day's totals exactly
+// (q) One full Sweep with promotion enabled walks the day's totals exactly
 // once: Sweep's own Room computation up front, never a second walk inside
-// settle (issue #3994; before this the promotion Room closure re-walked the
-// Ledger fresh at settle time on top of Sweep's own walk, costing two).
+// settle (issue #3994).
 func TestSweep_PromotionEnabledWalksDayTotalsOnce(t *testing.T) {
 	t.Parallel()
 	midnight := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -1379,9 +1351,8 @@ func TestSweep_PromotionEnabledWalksDayTotalsOnce(t *testing.T) {
 
 // (q2) With two enabled Chores, the day's totals walk costs one History
 // call per Chore (DayTotalsAll folds one DayTotals per name) -- 2, never 4.
-// A single-Chore fixture can't tell "one walk, N Chores" apart from "N
-// Chores walked twice" since both read back totalsWalks == N in that case;
-// this pins the count where the two diverge (issue #3994 review finding).
+// A single-Chore fixture can't tell "one walk, N Chores" from "N Chores
+// walked twice"; two Chores is where they diverge (issue #3994).
 func TestSweep_PromotionEnabledWalksDayTotalsOncePerChore(t *testing.T) {
 	t.Parallel()
 	midnight := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -1411,21 +1382,13 @@ func TestSweep_PromotionEnabledWalksDayTotalsOncePerChore(t *testing.T) {
 }
 
 // TestSweep_RemoteBackendEndToEndAgainstHostedForgeShape drives a full Sweep
-// against a Remote Ledger backend built the same way a hosted-forge backend
-// row (github, forgejo) wires one -- ledger.NewRemote's scratch repo, then
-// FetchTree fetching the same scratch repo forward to the base branch, so
-// one checkout serves both the Tree and the Ledger (issue #3876's stand-in
-// for "works on github/forgejo"), migrated from cmd/launcher's retired
-// TestRunButler_AgainstRemoteLedger (issue #3990): the assertion is about
-// ledger.Remote's own push/fetch behavior under a real Sweep, not about
-// cmd/launcher's backend-row wiring (remoteLedger itself is a thin
-// convenience over these same two calls), so it belongs here rather than at
-// the verb level. It asserts the remote's own refs/spindrift/butler/<chore>
-// ref -- not just the scratch repo's -- picked up the done commit, and that
-// refs/heads/main on the remote never moved. Kept on a real ledgertest.Repo
-// and a real FetchTree (unlike every other Sweep test above), since it's the
-// one case actually exercising the Ledger/Tree wiring over real git, not
-// just Runner's own logic (issue #3995).
+// against a Remote Ledger backend wired the way a hosted-forge backend row
+// wires one -- ledger.NewRemote's scratch repo serving both the Tree (via
+// FetchTree) and the Ledger (issues #3876, #3990). It asserts the remote's
+// own refs/spindrift/butler/<chore> ref picked up the done commit and that
+// refs/heads/main on the remote never moved. Unlike every other Sweep test it
+// runs over real git, since it is the one case exercising the Ledger/Tree
+// wiring rather than Runner's own logic (issue #3995).
 func TestSweep_RemoteBackendEndToEndAgainstHostedForgeShape(t *testing.T) {
 	t.Parallel()
 	remoteRepo := ledgertest.NewRepo(t)
@@ -1465,18 +1428,13 @@ func TestSweep_RemoteBackendEndToEndAgainstHostedForgeShape(t *testing.T) {
 }
 
 // testPatchDiff is a minimal unified diff that clears signalwire's
-// ValidateUnifiedDiff and patchTestPolicy's own patchPaths (docs/a.md, under
-// the default BUTLER_PATCH_PATHS) -- what every single-finding patch-rung
-// test below embeds as an issue-intent's "patch" field (its own contents are
-// never actually applied: fakeTree.CommitPatch answers a scripted
-// PatchCommit/error, not a real git apply).
+// ValidateUnifiedDiff and the default BUTLER_PATCH_PATHS (docs/a.md). It is
+// never actually applied: fakeTree.CommitPatch answers a scripted result.
 const testPatchDiff = "--- a/docs/a.md\n+++ b/docs/a.md\n@@ -1 +1 @@\n-old\n+new\n"
 
 // patchDiffFor is testPatchDiff's per-path sibling (issue #4075): decide's
 // site-key gate requires a patch's diff path to appear among the finding's
-// own dedup terms, so patchableDispatcherN can no longer hand every finding
-// the same fixed diff -- each needs its own path, matching its own dedup
-// term.
+// own dedup terms, so each finding needs its own path.
 func patchDiffFor(path string) string {
 	return fmt.Sprintf("--- a/%s\n+++ b/%s\n@@ -1 +1 @@\n-old\n+new\n", path, path)
 }
@@ -1512,16 +1470,12 @@ type fakeDraftCall struct{ title, body, base, head string }
 // fakeDeleteCall records one DeleteBranch invocation.
 type fakeDeleteCall struct{ branch, base string }
 
-// fakePatchForge is PatchForge's test double:
-// PushBranch/CreateDraftPR each record their call and answer a scripted
-// error, or -- on CreateDraftPR -- the scripted draftURL. AddLabels is
-// promoted straight through from the embedded forge.IssueLabeler (issue
-// #4074), normally the same fc.AsIssueFiler() fake the test's own
-// IssueTracker is, so a fallback assertion against fc.AddLabelsCalls sees
-// the call whichever path it came through. openPR/openPRFound/openPRErr and
-// deleteCalls/deleteErr back landPatch's ambiguous-CreateDraftPR-error
-// recovery (issue #4112): a lookup told apart from a real create failure,
-// and the branch cleanup that follows only when no PR was found.
+// fakePatchForge is PatchForge's test double. The embedded IssueLabeler is
+// normally the same fake the test's IssueTracker is, so a fallback assertion
+// against fc.AddLabelsCalls sees the call whichever path it came through
+// (issue #4074). openPR*/delete* back landPatch's ambiguous-create recovery
+// (issue #4112): a lookup tells it apart from a real create failure, and the
+// branch is deleted only when no PR was found.
 type fakePatchForge struct {
 	forge.IssueLabeler
 
@@ -1574,11 +1528,9 @@ type fakePatchGateCall struct {
 	prURL string
 }
 
-// fakePatchGate is a no-op recording PatchGate (issue #4076): every existing
-// patch-rung Sweep test that doesn't itself exercise the merge gate passes
-// one of these so WithPatchForge never sees a nil gate. onCall, when set,
-// runs before the call is recorded -- TestSweep_PatchGateCalledAfterDoneCommit
-// uses it to read the Ledger from inside the call.
+// fakePatchGate is a no-op recording PatchGate (issue #4076), so
+// WithPatchForge never sees a nil gate. onCall, when set, runs before the
+// call is recorded.
 type fakePatchGate struct {
 	calls  []fakePatchGateCall
 	onCall func(num, prURL string)
@@ -1608,12 +1560,11 @@ func patchTestPolicy() Policy {
 	return policy
 }
 
-// TestSweep_NoPatchForgeOmitsPatchClassesFromBox pins that room.Patches
-// derives from the Consumer's raw BUTLER_MAX_PATCHES_PER_DAY budget alone
-// (chore.Room), so it stays positive even with no WithPatchForge -- run()
-// must still withhold PatchClasses from the Box, or a non-write-capable
-// host would tell the Box to spend its diff budget on patch classes the
-// host can never land (issue #4074).
+// TestSweep_NoPatchForgeOmitsPatchClassesFromBox: room.Patches derives from
+// the raw BUTLER_MAX_PATCHES_PER_DAY budget alone (chore.Room), so it stays
+// positive with no WithPatchForge, but run() must still withhold
+// PatchClasses, or a non-write-capable host would have the Box spend its diff
+// budget on patches the host can never land (issue #4074).
 func TestSweep_NoPatchForgeOmitsPatchClassesFromBox(t *testing.T) {
 	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
@@ -1815,13 +1766,11 @@ func TestSweep_PatchDiffNoLongerAppliesFilesPlainWithPromotionOff(t *testing.T) 
 	}
 }
 
-// (r4) A patch that commits cleanly but fails to land -- CreateDraftPR
-// errors after the push succeeded, and a lookup finds no PR was created
-// anyway -- falls back to promoting the already-filed issue via
+// (r4) CreateDraftPR errors after the push succeeded, and a lookup finds no
+// PR was created: the already-filed issue falls back to promotion via
 // IssueLabeler.AddLabels, since PostIssue already ran and cannot be redone
-// with different labels. The finding keeps its agent-butler-patch
-// provenance label; ready-for-agent is added on top. The orphaned branch the
-// failed push left behind is deleted (issue #4112).
+// with different labels. ready-for-agent is added on top of its
+// agent-butler-patch label, and the orphaned branch is deleted (issue #4112).
 func TestSweep_PatchPRCreateFailsFallsBackToPromoteViaAddLabels(t *testing.T) {
 	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
@@ -2209,15 +2158,11 @@ func TestSweep_PatchFallbackCommentFailsStillCountsPromotion(t *testing.T) {
 }
 
 // (r10) ISSUE_TRACKER=local paired with a patch-capable CODE_FORGE (issue
-// #4074): the local tracker's PostIssue returns "local:"+slug, not a forge
-// issue URL, so issueNumberFromURL must reject it before ever reaching
-// patchForge -- no push, no draft PR. OnFiled returns as soon as
-// issueNumberFromURL errors, before it would otherwise call
-// fallBackToPromote, so no promotion happens either; the sweep still reaches
-// its done commit. In production butlerPatchForge never hands ISSUE_TRACKER=
-// local a PatchForge at all (it has no IssueLabeler), so this pins
-// issueNumberFromURL's own guard as defense in depth, not the only thing
-// standing between local and a patch attempt.
+// #4074): the local tracker's PostIssue returns "local:"+slug, so
+// issueNumberFromURL must reject it before reaching patchForge -- no push,
+// no draft PR, no promotion -- and the sweep still reaches its done commit.
+// Production never hands local a PatchForge (it has no IssueLabeler), so
+// this pins the guard as defense in depth.
 func TestSweep_PatchLocalTrackerIssueURLLeavesFindingFiled(t *testing.T) {
 	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
@@ -2261,7 +2206,7 @@ func TestSweep_PatchLocalTrackerIssueURLLeavesFindingFiled(t *testing.T) {
 }
 
 // patchGateDispatchLabels mirrors testDispatchLabels in internal/settle's
-// gate_test.go: the DispatchLabels a real *settle.Settle needs to know
+// helpers_test.go: the DispatchLabels a real *settle.Settle needs to know
 // what "agent-complete"/"agent-failed" actually spell, even though an
 // unclaimed patch finding's issue never carries agent-in-progress in the
 // first place.
@@ -2576,9 +2521,7 @@ func TestSweep_PatchGateMergeGuardHitLeavesUnmerged(t *testing.T) {
 }
 
 // captureSweepOutput points r's status-line writer at a buffer, runs fn, and
-// returns everything r printed -- settle's status lines go
-// to the Runner's out writer, so this is how a test sees one (issue #4075)
-// without swapping the os.Stdout global.
+// returns everything r printed (issue #4075) without swapping os.Stdout.
 func captureSweepOutput(t *testing.T, r *Runner, fn func()) string {
 	t.Helper()
 	var buf bytes.Buffer
@@ -2651,15 +2594,12 @@ func patchableTopLevelDispatcher(path, diff string) *dispatch.Fake {
 	)
 }
 
-// TestSweep_PatchAppliesToBaseHeadButNotScannedFallsThrough is the Sweep-
-// level acceptance case for ADR 0057's ordered apply-check (issue #4075):
-// newBox's closure advances the temp repo's branch only after Sweep has
-// already captured the scanned commit (butler.go's r.tree.Head, read before
-// newBox runs), so the diff applies to the moved base head but not to what
-// was actually scanned -- CommitPatch's scanned-commit gate must still
-// reject it, falling through to promote exactly as any other stale-diff
-// candidate does, and the settle log names the gate it failed. Runs over a
-// real GitTree/CommitPatch round trip, not fakeTree's scripted answer.
+// TestSweep_PatchAppliesToBaseHeadButNotScannedFallsThrough is the Sweep-level
+// acceptance case for ADR 0057's ordered apply-check (issue #4075): newBox advances the
+// branch only after Sweep captured the scanned commit, so the diff applies to
+// the moved base head but not to what was scanned -- CommitPatch must still
+// reject it, falling through to promote, and the settle log names the gate.
+// Runs over a real GitTree, not fakeTree's scripted answer.
 func TestSweep_PatchAppliesToBaseHeadButNotScannedFallsThrough(t *testing.T) {
 	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}

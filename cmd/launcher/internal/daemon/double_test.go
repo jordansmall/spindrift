@@ -15,12 +15,10 @@ import (
 	"spindrift.dev/launcher/internal/report"
 )
 
-// scriptedRunner is the package's one scriptable Runner double, replacing
-// the 15 ad-hoc fakes this package used to grow one per test file. Every
-// scripting field below is written once, before Loop/the pool starts, and
-// never mutated again — mu does not guard them, only the call-recording
-// fields and the concurrent reads several slot goroutines make of them
-// once a multi-slot test is under way.
+// scriptedRunner is the package's one scriptable Runner double. Most
+// scripting fields are written once, before the pool starts, and read without
+// mu; mu guards the call-recording state and the demand scripting, which
+// tests change mid-run.
 type scriptedRunner struct {
 	// revisions/resolveAt/resolveErr: one revision per ResolveTip call's
 	// resolve half, last value repeating once exhausted; resolveAt is a
@@ -31,55 +29,37 @@ type scriptedRunner struct {
 	resolveErr error
 
 	// selfPaths/selfErrAt/selfErr: the same convention as revisions, for
-	// ResolveTip's self half. That half is only served (and counted in
-	// selfCalls) when a test actually scripts it — len(selfPaths) > 0,
-	// selfErrAt != 0, or onSelf != nil — since most tests never script a
-	// self-path at all (Config.SelfProgram left empty short-circuits the
-	// check before it's ever reached).
+	// ResolveTip's self half, which is only served (and counted in
+	// selfCalls) when a test scripts it: len(selfPaths) > 0, selfErrAt != 0,
+	// or onSelf != nil.
 	selfPaths []string
 	selfErrAt int
 	selfErr   error
 
-	// moved: the same "one value per call, last value repeating once
-	// exhausted" convention as revisions, for Tip.Moved. An empty moved
-	// yields false for every call -- most tests never care whether the tip
-	// moved -- so a test that does care can script Moved independently of
-	// revisions, including in disagreement with it (issue #3625): tip_moved
-	// is driven by the flag alone, never a revision-string diff.
+	// moved: the same convention as revisions, for Tip.Moved; empty yields
+	// false. Scripted independently of revisions, even in disagreement
+	// (issue #3625): tip_moved follows the flag, never a revision diff.
 	moved []bool
 
 	// coalesceResolve, when set, makes resolveCount() count resolutions
-	// rather than callers: a caller that finds a resolution already
-	// registered waits on it and shares its exact Tip/error instead of
-	// resolving itself. This is a counter, not a re-implementation of
-	// hostRunner.ResolveTip's single-flight (cmd/launcher/daemon/runner.go)
-	// — it skips the ctx-aware joiner exit and the TTL that production
-	// needs, since no test here exercises either; the real flight's
-	// semantics (shared results, shared errors, no TTL) are pinned
-	// directly against hostRunner in
-	// cmd/launcher/daemon/runner_test.go, not by this double. Off by
-	// default: every existing test scripts revisions/moved/selfPaths/
-	// resolveAt by call index, and turning coalescing on would silently
-	// change which call index a given caller lands on — never flip it on
-	// for an existing test.
+	// rather than callers: a caller that finds a resolution already in flight
+	// shares its Tip/error. Not a re-implementation of hostRunner.ResolveTip's
+	// single-flight (no ctx-aware joiner exit, no TTL); the real semantics
+	// are pinned in cmd/launcher/daemon/runner_test.go. Never flip it on for
+	// an existing test: it changes which call index each caller lands on.
 	coalesceResolve bool
 	resolveFlight   *scriptedResolveFlight // guarded by mu
 
-	// resolveHold/resolveJoins: installed by holdResolve for a test that
-	// needs to pin a coalesced flight's leader in place while it counts
-	// joiners, the resolve-side counterpart of holdSlots/started above. Both
-	// nil (no hold at all) unless holdResolve was called.
+	// resolveHold/resolveJoins: installed by holdResolve to pin a coalesced
+	// flight's leader while counting joiners; nil otherwise.
 	resolveHold  chan struct{}
 	resolveJoins chan struct{}
 
-	// Result scripting, most specific winning: runErrAt (a 1-based
-	// *total* call index, across every slot and kind) wins over all
-	// (a held slot short-circuits even this); then byKind (keyed by
-	// the caller's own per-kind call index, for two independently-
-	// emptying dispatch/research queues); then the single shared
-	// results sequence in total call order. A test wanting per-slot
-	// results pins the call order instead — holdSlots/releaseSlot, or
-	// a hook that serialises the slots — never a slot-keyed tier here.
+	// Result scripting, most specific winning: runErrAt (a 1-based *total*
+	// call index; a held slot short-circuits even this), then byKind (per-kind
+	// call index), then results in total call order. A test wanting per-slot
+	// results pins the call order instead (holdSlots/releaseSlot or a
+	// serialising hook), never a slot-keyed tier here.
 	byKind   map[Kind][]ChildResult
 	results  []ChildResult
 	runErrAt int
@@ -114,7 +94,7 @@ type scriptedRunner struct {
 	onDemand    func(ctx context.Context, kind Kind)
 	// outbox models a host-outbox-backed kind (setOutbox): its Demand names and counts
 	// the keys not in the probe's inFlight; exclusive with demand for a kind
-	// (the setters panic on both). demandInFlight
+	// (the setters panic on both). demandInFlight records each call's inFlight.
 	outbox         map[Kind][]dispatchkey.Key
 	demandInFlight map[Kind][]dispatchkey.Set
 
@@ -147,12 +127,9 @@ type scriptedRunner struct {
 }
 
 // holdSlots switches the child into blocking mode for slots 0..n-1: each
-// start records itself, fires onStart, announces its slot on started, then
-// its Wait blocks until releaseSlot sends its result. Buffered release
-// channels (1 each) and a started channel sized to n mean no slot's goroutine
-// ever blocks sending on a single wave — only on the intentional release
-// wait — so a test that spans several waves must drain each wave before the
-// next.
+// start announces its slot on started, then its Wait blocks until
+// releaseSlot sends its result. Channels are sized for one wave, so a test
+// spanning several waves must drain each before the next.
 func (r *scriptedRunner) holdSlots(n int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -174,15 +151,11 @@ type scriptedResolveFlight struct {
 	err  error
 }
 
-// holdResolve switches a coalesced flight's leader into blocking mode:
-// after registering its flight, it parks on resolveHold until
-// releaseResolve, giving joiners a real window to arrive rather than a
-// race a sleep would only paper over. n sizes the joins channel
-// awaitResolveJoins drains, the same "size the channel to the wait"
-// gesture holdSlots(n) makes for started. coalesceResolve must also be set
-// — enforced here, since a hold installed on an uncoalesced runner would
-// sit unread and every caller would hang on awaitResolveJoins instead of
-// failing at the setup mistake itself.
+// holdResolve parks a coalesced flight's leader on resolveHold until
+// releaseResolve, giving joiners a real window to arrive. n sizes the joins
+// channel awaitResolveJoins drains. It enforces coalesceResolve: on an
+// uncoalesced runner the hold would sit unread and awaitResolveJoins would
+// hang instead of failing at the setup mistake.
 func (r *scriptedRunner) holdResolve(n int) {
 	if !r.coalesceResolve {
 		panic("scriptedRunner: holdResolve requires coalesceResolve")
@@ -210,10 +183,8 @@ func (r *scriptedRunner) awaitResolveJoins(t *testing.T, n int) {
 	}
 }
 
-// releaseResolve lets a leader parked by holdResolve proceed with its
-// resolution. It fails the test rather than closing a nil channel, same
-// guard as releaseSlot, since a caller with no matching holdResolve would
-// otherwise panic on close(nil).
+// releaseResolve lets a leader parked by holdResolve proceed. It fails the
+// test rather than panicking on close(nil) without a matching holdResolve.
 func (r *scriptedRunner) releaseResolve(t *testing.T) {
 	t.Helper()
 	r.mu.Lock()
@@ -225,15 +196,10 @@ func (r *scriptedRunner) releaseResolve(t *testing.T) {
 	close(hold)
 }
 
-// rearmResolve releases the currently held flight and arms the next
-// round's hold in one critical section — the one span resolveHold and
-// resolveJoins are ever mutated together. Two separate calls
-// (releaseResolve then holdResolve) leave a window between them during
-// which resolveHold still points at the just-closed round's channel: a
-// slot fast enough to re-enter ResolveTip and become the next leader in
-// that window reads the stale, already-closed hold and sails through
-// unheld, so the next round's awaitResolveJoins would never see it join.
-// Installing the new hold before closing the old one closes that window.
+// rearmResolve releases the currently held flight and arms the next round's
+// hold in one critical section. releaseResolve then holdResolve would leave
+// a window in which a fast slot becomes the next leader on the stale,
+// already-closed hold and sails through unheld.
 func (r *scriptedRunner) rearmResolve(t *testing.T, n int) {
 	t.Helper()
 	if !r.coalesceResolve {
@@ -266,8 +232,7 @@ func (r *scriptedRunner) releaseSlot(t *testing.T, slot int, res ChildResult) {
 }
 
 // announceEachSlot installs an onStart that announces "issue-<slot>" through
-// req.OnRecord, the one shape every child start that wants a per-slot
-// issue announcement needs.
+// req.OnRecord.
 func (r *scriptedRunner) announceEachSlot() {
 	r.onStart = func(ctx context.Context, req ChildRequest) error {
 		if req.OnRecord != nil {
@@ -308,10 +273,7 @@ func (r *scriptedRunner) fireOnRecord(t *testing.T, slot int, rec Record) {
 	fn(rec)
 }
 
-// fireOnIssue is fireOnRecord's convenience wrapper for the many existing
-// call sites that only ever simulate a "box" record for a bare issue
-// number — keeping them from having to spell out Record{Event: "box", ...}
-// at every call.
+// fireOnIssue is fireOnRecord for a "box" record on a bare issue number.
 func (r *scriptedRunner) fireOnIssue(t *testing.T, slot int, issue string) {
 	t.Helper()
 	r.fireOnRecord(t, slot, Record{Event: report.EventBox, Key: dispatchkey.Issue(issue)})
@@ -360,16 +322,10 @@ func (r *scriptedRunner) calls() []runCall {
 	return out
 }
 
-// ResolveTip dispatches straight to resolveTipOnce unless coalesceResolve
-// is set, in which case the first caller becomes the leader and registers
-// the flight, then (if holdResolve installed a hold) parks until released;
-// every caller that arrives while the flight is registered joins it
-// instead — signalling resolveJoins, then blocking on flight.done — without
-// ever calling resolveTipOnce itself, so resolveCalls only ever counts
-// leaders. This is deliberately thinner than hostRunner.ResolveTip's real
-// single-flight: no ctx-aware joiner exit, no TTL, because no test here
-// needs either — see coalesceResolve's own doc for where the real
-// semantics are pinned instead.
+// ResolveTip dispatches straight to resolveTipOnce unless coalesceResolve is
+// set: then the first caller leads the flight (parking on any holdResolve
+// hold) and later arrivals join it, signalling resolveJoins and sharing its
+// result, so resolveCalls counts only leaders.
 func (r *scriptedRunner) ResolveTip(ctx context.Context) (Tip, error) {
 	if !r.coalesceResolve {
 		return r.resolveTipOnce(ctx)
@@ -406,14 +362,10 @@ func (r *scriptedRunner) ResolveTip(ctx context.Context) (Tip, error) {
 }
 
 // resolveTipOnce serves the resolve half first: resolveAt short-circuits
-// with resolveErr before the self half is ever reached, so selfCalls is
-// not incremented on that path — the same ordering the pool had when the
-// two were separate methods. The self half then only runs (and counts in
-// selfCalls) when a test actually scripted it; otherwise the returned
-// Tip.SelfPath is left empty, same as Config.SelfProgram == "" skipping the
-// check outright. A scripted self failure still carries the resolved
-// revision on the returned Tip, wrapped as *SelfEvalError, so the pool's
-// backoff event has a revision to report.
+// with resolveErr before the self half (and selfCalls) is reached. The self
+// half runs only when scripted. A scripted self failure still carries the
+// resolved revision, wrapped as *SelfEvalError, so the pool's backoff event
+// has a revision to report.
 func (r *scriptedRunner) resolveTipOnce(ctx context.Context) (Tip, error) {
 	r.mu.Lock()
 	r.resolveCalls++
@@ -478,11 +430,9 @@ func (r *scriptedRunner) resolveTipOnce(ctx context.Context) (Tip, error) {
 	return Tip{Revision: revision, Moved: moved, SelfPath: r.selfPaths[idx]}, nil
 }
 
-// pickScripted clamps idx to the last index of list, mirroring every
-// scripting field's "last value repeats once exhausted" rule in one place.
-// An empty list yields the zero ChildResult rather than panicking, same as
-// ResolveTip's own empty guards: an all-unset scriptedRunner is a valid, if
-// boring, script.
+// pickScripted clamps idx to the last index of list ("last value repeats").
+// An empty list yields the zero ChildResult: an all-unset scriptedRunner is
+// a valid script.
 func pickScripted(list []ChildResult, idx int) ChildResult {
 	if len(list) == 0 {
 		return ChildResult{}
@@ -528,10 +478,8 @@ func (r *scriptedRunner) StartChild(ctx context.Context, req ChildRequest) (Chil
 		return len(r.runCalls)
 	})
 
-	// The mutex must not be held across a hook call or the blocking
-	// holdSlots wait: several slots call StartChild at once in the
-	// start-gate and dual-kind tests, and holding mu here would serialize
-	// what those tests need to run genuinely concurrently.
+	// mu must not be held across onStart: it would serialize slots that tests
+	// need genuinely concurrent.
 	if r.onStart != nil {
 		if err := r.onStart(ctx, req); err != nil {
 			end()
@@ -680,24 +628,19 @@ func (h *scriptedHandle) Wait(abandon <-chan struct{}) (ChildResult, error) {
 	return h.res, nil
 }
 
-// testClock is the package's one scriptable Clock double, covering every
-// sleep behaviour the 5 ad-hoc fake clocks it replaces needed: an instant
-// default advance, a parked mode that blocks until woken or cancelled, a
-// step mode that releases every parked sleeper at once over a fresh
-// barrier so N concurrent sleeps never additively stack, a releaseOne that
-// frees only the longest-parked sleeper, and a sleep-entry signal plus
-// onSleep hook for tests that need to know the instant a slot genuinely
-// idles.
+// testClock is the package's one scriptable Clock double: an instant default
+// advance, a parked mode that blocks until woken or cancelled, a step mode
+// that releases every sleeper over a fresh barrier so concurrent sleeps
+// never additively stack, releaseOne, and a sleep-entry signal plus onSleep
+// hook for the instant a slot genuinely idles.
 type testClock struct {
 	mu       sync.Mutex
 	now      time.Time
 	waitList []time.Duration
 
-	// parked, once true (via park), makes Sleep block instead of
-	// instantly advancing now; barrierClosed tracks whether the current
-	// barrier generation has already been closed, so wake (which may be
-	// called when no one has parked yet) and step (which always installs
-	// a fresh generation) never double-close the same channel.
+	// parked makes Sleep block instead of instantly advancing now;
+	// barrierClosed keeps wake and step from double-closing the current
+	// barrier generation.
 	parked        bool
 	barrier       chan struct{}
 	barrierClosed bool
@@ -726,10 +669,9 @@ func (c *testClock) park() {
 	}
 }
 
-// wake releases every currently parked Sleep call without changing now and
-// without installing a fresh barrier — the one-shot "let everything through
-// from here on" gesture, for unparking every slot asleep in a shut window
-// without cancelling the pool.
+// wake releases every parked Sleep without changing now or installing a
+// fresh barrier: everything is let through from here on, without
+// cancelling the pool.
 func (c *testClock) wake() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -915,7 +857,7 @@ func TestScriptedRunnerRevisionScripting(t *testing.T) {
 	if err != nil || tip.Revision != "rev2" {
 		t.Fatalf("call 2 = (%+v, %v), want (rev2, nil)", tip, err)
 	}
-	// exhausted: repeats the last value
+	// call 3 hits resolveAt
 	tip, err = r.ResolveTip(ctx)
 	if err == nil || tip.Revision != "" {
 		t.Fatalf("call 3 = (%+v, %v), want (zero Tip, err) per resolveAt", tip, err)
@@ -1448,11 +1390,9 @@ func (r *scriptedRunner) awaitDemandInFlight(t *testing.T, kind Kind, key dispat
 }
 
 // awaitClaimedSiblingParked waits out the claim of key (of kind) in a
-// two-slot pool whose other slot was parked: fireOnIssue folds the claim
-// synchronously and wakes that slot, whose re-probe of kind then holds the
-// flight key, after which it parks again. Waiting on both leaves one parked
-// sleeper and no stale park signal for a later awaitSleep to mistake for a
-// fresh park.
+// two-slot pool whose other slot was parked: the claim wakes that slot,
+// whose re-probe holds the key before it parks again. Waiting on both leaves
+// no stale park signal for a later awaitSleep to mistake for a fresh park.
 func (r *scriptedRunner) awaitClaimedSiblingParked(t *testing.T, clk *testClock, kind Kind, key dispatchkey.Key) {
 	t.Helper()
 	r.awaitDemandInFlight(t, kind, key)
@@ -1492,9 +1432,9 @@ func (p *pool) markNoWork(kind Kind, now time.Time, jammed bool) {
 	})
 }
 
-// Prebuild counts the call, then answers through onPrebuild if set and
-// with success otherwise: most tests never script a self-update at all, and
-// the ones that mismatch SelfProgram expect the halt to follow.
+// Prebuild counts the call, then answers through onPrebuild if set and with
+// success otherwise, so a test that mismatches SelfProgram reaches the halt
+// without scripting a self-update.
 func (r *scriptedRunner) Prebuild(ctx context.Context, tip Tip) error {
 	r.mu.Lock()
 	r.prebuildTips = append(r.prebuildTips, tip)

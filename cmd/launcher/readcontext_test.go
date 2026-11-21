@@ -62,9 +62,8 @@ func TestReadContext_ReconcileLivenessProbe_GithubTracker_ReturnsNil(t *testing.
 	}
 }
 
-// newReadContext is the read prefix that doctor.go's cmdDoctor and
-// reconcile_cmd.go's cmdReconcile now share instead of each building its own
-// copy inline (issue #2941).
+// newReadContext is the read prefix cmdDoctor and cmdReconcile share (issue
+// #2941).
 func TestNewReadContext_FullyLocal_ConstructsClean(t *testing.T) {
 	setKnob(t, "ISSUE_TRACKER", "local")
 	setKnob(t, "CODE_FORGE", "local")
@@ -191,10 +190,9 @@ func TestReadContext_Validation_ValidConfig_ReturnsNilConfigErr(t *testing.T) {
 }
 
 // validation() calls doctorCheckSets(c) exactly once, so a route-credential
-// Probe shared with the returned reportChecks Peeks its credential at most
-// once (issue #3144's guarantee, reached through the read tier added by issue
-// #2992). Two separate doctorCheckSets(c) calls would give reportChecks its
-// own unmemoized Probe, which would re-Peek and notice the unset env var.
+// Probe shared with reportChecks Peeks at most once (issues #3144, #2992). A
+// second call would give reportChecks its own unmemoized Probe, which would
+// re-Peek and notice the unset env var.
 func TestReadContext_Validation_ReportSharesClassifyMemoizedProbe(t *testing.T) {
 	const envName = "SPINDRIFT_TEST_READCONTEXT_VALIDATION_SHARED_PROBE"
 	t.Setenv(envName, "resolvable")

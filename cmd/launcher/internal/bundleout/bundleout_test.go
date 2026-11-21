@@ -57,10 +57,8 @@ func newRepoNoFeatureCommits(t *testing.T) (dir, base, branch string) {
 	return dir, "main", "feature"
 }
 
-// TestRun_NonEmptyRange_CreatesBundle verifies Run bundles base..branch into
-// outboxDir/seambundle.FileName when the range holds commits. This is the
-// harness-owned code-out step that replaces the Agent's own `git bundle
-// create` instruction under CODE_FORGE=local (issue #1808).
+// Issue #1808: the harness, not the Agent, bundles base..branch under
+// CODE_FORGE=local.
 func TestRun_NonEmptyRange_CreatesBundle(t *testing.T) {
 	dir, base, branch := newRepoWithFeatureBranch(t)
 	outbox := t.TempDir()
@@ -89,11 +87,9 @@ func TestRun_NonEmptyRange_CreatesBundle(t *testing.T) {
 	}
 }
 
-// TestRun_EmptyRangeAfterReadyClaim_AppendsCorrectiveOutcome verifies that an
-// empty base..branch range after the Agent's own status=ready claim gets no
-// bundle and a corrective SPINDRIFT_OUTCOME line instead, so a false ready
-// cannot settle silently (issue #1808). It reads the line back through
-// outcome.Resolve, the same log scan the launcher runs, not by matching stdout.
+// A false ready must not settle silently (issue #1808). The corrective line is
+// read back through outcome.Resolve, the launcher's own scan, not by matching
+// stdout.
 func TestRun_EmptyRangeAfterReadyClaim_AppendsCorrectiveOutcome(t *testing.T) {
 	dir, base, branch := newRepoNoFeatureCommits(t)
 	outbox := t.TempDir()
@@ -126,7 +122,7 @@ func TestRun_EmptyRangeAfterReadyClaim_AppendsCorrectiveOutcome(t *testing.T) {
 		t.Fatalf("bundle created for an empty range, want none")
 	}
 
-	// ADR 0055, issue #2274: the outcome scan no longer gates on a nonce, so
+	// ADR 0055, issue #2274: the outcome scan does not gate on a nonce, so
 	// Resolve must find the corrective line without one.
 	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, "")
 	if err != nil {
@@ -147,11 +143,8 @@ func TestRun_EmptyRangeAfterReadyClaim_AppendsCorrectiveOutcome(t *testing.T) {
 	}
 }
 
-// TestRun_EmptyRangeAfterBlockedClaim_WritesNothing verifies a legitimate
-// "no change needed" verdict (status=blocked, no commits) is left alone: no
-// bundle, and no corrective line clobbering the Agent's own more specific
-// note. Only a status=ready claim is a contradiction Run must correct
-// (issue #1808).
+// A legitimate "no change needed" (status=blocked, no commits) must not get a
+// corrective line clobbering the Agent's own note (issue #1808).
 func TestRun_EmptyRangeAfterBlockedClaim_WritesNothing(t *testing.T) {
 	dir, base, branch := newRepoNoFeatureCommits(t)
 	outbox := t.TempDir()
@@ -179,10 +172,8 @@ func TestRun_EmptyRangeAfterBlockedClaim_WritesNothing(t *testing.T) {
 	}
 }
 
-// TestRun_RejectsRefStartingWithDash verifies Run rejects a Branch that
-// could be misread as a git option once interpolated into a `base..branch`
-// range spec, the same defense in depth forge/local's relayBundle applies
-// to its own ref argument.
+// A Branch starting with "-" could be misread as a git option in the
+// `base..branch` spec; forge/local's relayBundle applies the same guard.
 func TestRun_RejectsRefStartingWithDash(t *testing.T) {
 	dir, base, _ := newRepoWithFeatureBranch(t)
 	err := bundleout.Run(bundleout.Config{

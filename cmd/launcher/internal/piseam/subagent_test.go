@@ -11,9 +11,9 @@ import (
 )
 
 // linkSubagentExtension links the subagent extension shipped beside the pi
-// binary into the agent dir, as ADR 0009's pi Driver plans to. The extension spawns its
-// children from process.argv[1] and process.execPath, so they run the same pi
-// with the same environment and need nothing on PATH.
+// binary into the agent dir, as lib/drivers/pi.nix does. The extension
+// spawns its children from process.argv[1] and process.execPath, so they run
+// the same pi with the same environment and need nothing on PATH.
 func linkSubagentExtension(t *testing.T, bin, agentDir string) {
 	t.Helper()
 	real, err := filepath.EvalSymlinks(bin)

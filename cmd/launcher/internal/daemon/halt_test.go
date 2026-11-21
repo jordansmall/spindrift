@@ -106,10 +106,8 @@ func TestHaltExitCode_PinsWireNumbers(t *testing.T) {
 }
 
 // TestHaltEvent_ReasonMatchesStringAndOmitsZeroFields pins Event()'s shape:
-// Reason always equals String(), and a pre-pool halt (zero Kind/Revision)
-// marshals with no "kind"/"revision" key at all — the byte-identity
-// guarantee the three pre-pool halt call sites (config-invalid,
-// instance-lock, preflight) depend on to match today's JSON exactly.
+// Reason always equals String(), and a pre-pool halt (config-invalid,
+// instance-lock, preflight) marshals with no "kind"/"revision" key at all.
 func TestHaltEvent_ReasonMatchesStringAndOmitsZeroFields(t *testing.T) {
 	h := Halt{Class: HaltOperatorStop, Detail: "shutting down"}
 	ev := h.Event()

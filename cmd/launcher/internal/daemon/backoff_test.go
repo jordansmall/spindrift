@@ -38,11 +38,10 @@ func TestIdleBackoffReset(t *testing.T) {
 }
 
 // TestIdleBackoffCapsAtShippedDefaults pins the clamp branch (b.cur =
-// b.cap) at the actual values the daemon ships: DAEMON_IDLE_FLOOR (5m) and
-// DAEMON_IDLE_CAP (30m) from lib/env-schema.nix. Those aren't a
-// power-of-two multiple of each other, so this is the only pair (among this
-// file's tests) where doubling overshoots the cap and the clamp itself
-// has to run: 20m doubles to 40m, which must clamp to 30m.
+// b.cap) at the shipped DAEMON_IDLE_FLOOR (5m) and DAEMON_IDLE_CAP (30m):
+// not a power-of-two multiple apart, so doubling 20m to 40m must clamp to
+// 30m. This file's other pairs never overshoot, so only this test runs the
+// clamp.
 func TestIdleBackoffCapsAtShippedDefaults(t *testing.T) {
 	floor, err := time.ParseDuration(shippedKnobDefaults["DAEMON_IDLE_FLOOR"])
 	if err != nil {
@@ -111,10 +110,9 @@ func TestKindBackoffGatesUntilDeadline(t *testing.T) {
 	}
 }
 
-// TestKindBackoffReadyAtElapsedDeadline pins the fix for the finding at
-// backoff.go:98: once the deadline itself has passed, readyAt must report
-// not-gated (matching runnable), never a stale `until` a caller could go on
-// to publish as a future nextCheck.
+// TestKindBackoffReadyAtElapsedDeadline pins that once the deadline has
+// passed, readyAt reports not-gated (matching runnable), never a stale
+// `until` a caller could publish as a future nextCheck.
 func TestKindBackoffReadyAtElapsedDeadline(t *testing.T) {
 	k := newKindBackoff(time.Second, 8*time.Second)
 	now := time.Now()

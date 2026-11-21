@@ -418,14 +418,11 @@ func TestReadStatus_GarbageStatusFileIsError(t *testing.T) {
 	}
 }
 
-// TestReadStatus_LockHeldFalseUnderConcurrentSharedProbe pins the review
-// finding against the test this replaces: that one held LOCK_EX (via
-// AcquireCheckoutLock), so both ReadStatus calls hit the same EWOULDBLOCK
-// branch a regressed LOCK_EX probe would too, and never actually exercised
-// probeCheckoutLock's LOCK_SH choice. This instead takes LOCK_SH directly
-// on the lock file — standing in for a second, concurrent probe's own
-// window — and asserts ReadStatus's probe (a compatible LOCK_SH) still
-// succeeds and reports the lock free.
+// TestReadStatus_LockHeldFalseUnderConcurrentSharedProbe pins
+// probeCheckoutLock's LOCK_SH choice: it takes LOCK_SH directly, standing in
+// for a concurrent probe, and ReadStatus's probe must still succeed and report
+// the lock free. Holding LOCK_EX instead could not catch a regressed LOCK_EX
+// probe: a correct LOCK_SH probe hits the same EWOULDBLOCK.
 func TestReadStatus_LockHeldFalseUnderConcurrentSharedProbe(t *testing.T) {
 	dir := t.TempDir()
 	lockPath := filepath.Join(dir, checkoutLockFileName)
@@ -450,11 +447,8 @@ func TestReadStatus_LockHeldFalseUnderConcurrentSharedProbe(t *testing.T) {
 }
 
 // TestStatusWriter_PublishDropsOlderSeq pins issue #3623's ordering rule: a
-// Publish whose seq is older than the last one written must leave the file
-// holding the newer snapshot, even though the older one landed second —
-// the scenario that used to require serializing sample-and-write under
-// w.mu (issue #3545) is now handled by seq order instead, so an
-// out-of-order arrival is a no-op rather than a race.
+// Publish whose seq is older than the last one written leaves the newer
+// snapshot in place, even though the older one landed second.
 func TestStatusWriter_PublishDropsOlderSeq(t *testing.T) {
 	dir := t.TempDir()
 	fixed := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
@@ -509,10 +503,8 @@ func TestStatusWriter_PublishWritesInOrderSeq(t *testing.T) {
 	}
 }
 
-// TestParseHolderPid pins the review finding against parseHolderPid: an
-// unreadable holder line — no pid= prefix, or a non-numeric pid= value —
-// must parse to 0, which can never equal a real Status.Pid, so a caller
-// reads it as not-live rather than a false live.
+// TestParseHolderPid pins that an unreadable holder line (no pid=, or a
+// non-numeric one) parses to 0, so a caller reads it as not live.
 func TestParseHolderPid(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -554,11 +546,9 @@ func TestParseHolderPid(t *testing.T) {
 	}
 }
 
-// TestReadStatus_UnreadableHolderLineReadsAsNotLive pins the same intent
-// through the real ReadStatus seam (review finding against parseHolderPid): a
-// held lock whose identity line the parser cannot read must never be
-// mistaken for this reader's own live daemon — it must come back
-// Live:false, Stale:true, exactly like a recognizably different pid would.
+// TestReadStatus_UnreadableHolderLineReadsAsNotLive pins the same through
+// ReadStatus: a held lock whose identity line cannot be parsed reads
+// Live:false, Stale:true, like a different pid would.
 func TestReadStatus_UnreadableHolderLineReadsAsNotLive(t *testing.T) {
 	dir := t.TempDir()
 
@@ -568,10 +558,9 @@ func TestReadStatus_UnreadableHolderLineReadsAsNotLive(t *testing.T) {
 	}
 	defer lock.Release()
 
-	// Garble the identity line in place while the lock is still held.
-	// flock is advisory over the open file description, not the path, so
-	// a plain write to the same inode does not contend with the held
-	// lock — only a competing flock call would.
+	// Garble the identity line in place while the lock is still held: flock
+	// is advisory over the open file description, so a plain write does not
+	// contend with it.
 	lockPath := filepath.Join(dir, checkoutLockFileName)
 	if err := os.WriteFile(lockPath, []byte("garbage, no pid field here\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -594,11 +583,9 @@ func TestReadStatus_UnreadableHolderLineReadsAsNotLive(t *testing.T) {
 	}
 }
 
-// TestReadStatus_EmptyStatusAndUnparseableHolderNotLive pins the review
-// finding at ReadStatus: a bare "{}" status file (zero-valued Pid) beside a
-// lock whose identity line has no parseable pid= must not read live just
-// because both sides zero-value to 0. Before the holderPid > 0 guard,
-// status.Pid == holderPid was 0 == 0 → true.
+// TestReadStatus_EmptyStatusAndUnparseableHolderNotLive pins the
+// holderPid > 0 guard: a bare "{}" status file beside a lock with no
+// parseable pid= must not read live just because both pids are 0.
 func TestReadStatus_EmptyStatusAndUnparseableHolderNotLive(t *testing.T) {
 	dir := t.TempDir()
 
@@ -608,9 +595,8 @@ func TestReadStatus_EmptyStatusAndUnparseableHolderNotLive(t *testing.T) {
 	}
 	defer lock.Release()
 
-	// Garble the identity line in place while the lock is still held, as
-	// TestReadStatus_UnreadableHolderLineReadsAsNotLive does — flock is
-	// advisory over the open file description, not the path.
+	// Garble the identity line in place, as in
+	// TestReadStatus_UnreadableHolderLineReadsAsNotLive.
 	lockPath := filepath.Join(dir, checkoutLockFileName)
 	if err := os.WriteFile(lockPath, []byte("garbage, no pid field here\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -633,11 +619,9 @@ func TestReadStatus_EmptyStatusAndUnparseableHolderNotLive(t *testing.T) {
 	}
 }
 
-// TestReadStatus_MatchingPidDifferentHostNotLive pins the review finding
-// that Live correlated on pid alone: a status file naming this process's
-// real pid but a different host than the lock's own identity line must not
-// read live — on a shared checkout a coincidental pid match must not read
-// a dead remote daemon's file as live.
+// TestReadStatus_MatchingPidDifferentHostNotLive pins that Live correlates
+// on host as well as pid: on a shared checkout a coincidental pid match must
+// not read a dead remote daemon's file as live.
 func TestReadStatus_MatchingPidDifferentHostNotLive(t *testing.T) {
 	dir := t.TempDir()
 
@@ -663,11 +647,9 @@ func TestReadStatus_MatchingPidDifferentHostNotLive(t *testing.T) {
 	}
 }
 
-// TestReadStatus_GarbageStatusUnderHeldLockKeepsLockHeld pins the review
-// finding that the file parse ran before the lock probe: a genuinely held
-// lock beside a garbage status file must still surface in the returned
-// report (LockHeld true, Holder populated) alongside the parse error,
-// rather than the zero-valued StatusReport{} the pre-fix ordering returned.
+// TestReadStatus_GarbageStatusUnderHeldLockKeepsLockHeld pins that the lock
+// probe runs before the file parse: a held lock beside a garbage status file
+// still surfaces (LockHeld true, Holder populated) alongside the parse error.
 func TestReadStatus_GarbageStatusUnderHeldLockKeepsLockHeld(t *testing.T) {
 	dir := t.TempDir()
 

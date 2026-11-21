@@ -147,9 +147,9 @@ func TestAssembleResearchFileFindingsRelay(t *testing.T) {
 	}
 }
 
-// A review finding on issue #2593: the kind-agnostic FILER_FILE_RELAY gate
-// made a research dispatch render the work-worded label sentence, though the
-// launcher's research path applies a different label. Each kind takes its own
+// Issue #2593: the kind-agnostic FILER_FILE_RELAY gate made a research
+// dispatch render the work-worded label sentence, though the launcher's
+// research path applies a different label. Each kind takes its own
 // label-relay step.
 func TestAssembleFilerLabelRelayStepByKind(t *testing.T) {
 	reg, base := relayCarrierRegistry(t)

@@ -15,13 +15,12 @@ import (
 )
 
 // ecosystemImportViolations lists every package directory under moduleRoot,
-// test files included, that imports an ecosystem package it has no right to: a
-// package directly beneath internal/ecosystem (ecosystemkit aside) is imported
-// only by the Bundle at bundleDir and by its own directory. Core, the other
-// ecosystem packages, and every other package are all barred, which keeps an
-// ecosystem's code out of any binary that does not link the Bundle. It also
-// returns how many permitted imports it saw, so a walk that finds nothing at
-// all can be told apart from one that found nothing wrong.
+// test files included, that imports a package directly beneath
+// internal/ecosystem (ecosystemkit aside) without being the Bundle at
+// bundleDir or that package's own directory, which keeps an ecosystem's code
+// out of any binary that does not link the Bundle. It also returns how many
+// permitted imports it saw, so a walk that finds nothing can be told from one
+// that found nothing wrong.
 func ecosystemImportViolations(t *testing.T, moduleRoot, moduleName, bundleDir string) (violations []string, permitted int) {
 	t.Helper()
 	prefix := moduleName + "/internal/ecosystem/"

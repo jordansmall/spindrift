@@ -187,16 +187,10 @@ func TestFromEnv_Malformed(t *testing.T) {
 	}
 }
 
-// clearCloseOnExec clears FD_CLOEXEC on fd, raw, on both linux and darwin.
-// os.Pipe already returns close-on-exec descriptors, so a test that spawns a
-// subprocess against a bare os.Pipe fd would pass with or without
-// FromEnv's own syscall.CloseOnExec call — it is exercising the Go runtime's
-// default, not this package's guarantee. The production fd this package
-// guards is instead handed down via exec.Cmd.ExtraFiles (runner.go), and
-// os/exec explicitly clears FD_CLOEXEC on every ExtraFiles descriptor before
-// exec so the child can use it — so this clear reproduces that starting
-// state, making a deleted syscall.CloseOnExec(fd) in FromEnv observable as a
-// test failure (issue #3627).
+// clearCloseOnExec clears FD_CLOEXEC on fd. os.Pipe fds are already
+// close-on-exec, so a test on a bare pipe would pass without FromEnv's own
+// CloseOnExec; the production fd arrives via exec.Cmd.ExtraFiles, which
+// clears the flag, and this reproduces that state (issue #3627).
 func clearCloseOnExec(t *testing.T, fd int) {
 	t.Helper()
 	if _, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), uintptr(syscall.F_SETFD), 0); errno != 0 {
@@ -233,11 +227,8 @@ func TestFromEnv_CloseOnExec(t *testing.T) {
 }
 
 // TestFromEnv_CloseOnExec_ControlFdStaysOpenWithoutFromEnv is the mutation
-// control for the test above: with FD_CLOEXEC cleared the same way but
-// FromEnv never called, the same spawn must succeed. Without this, a broken
-// clearCloseOnExec (e.g. a no-op) would make TestFromEnv_CloseOnExec pass
-// for the wrong reason — the write failing regardless of FromEnv — and
-// mutation-deleting syscall.CloseOnExec from FromEnv would go unnoticed.
+// control for the test above: without FromEnv the same spawn must succeed,
+// so a no-op clearCloseOnExec cannot make that test pass for the wrong reason.
 func TestFromEnv_CloseOnExec_ControlFdStaysOpenWithoutFromEnv(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -257,12 +248,9 @@ func TestFromEnv_CloseOnExec_ControlFdStaysOpenWithoutFromEnv(t *testing.T) {
 	}
 }
 
-// TestFromEnv_DoesNotOwnDescriptor pins the fix for the bug this package's
-// comment on the fd field describes: a Reporter going out of scope must
-// never close its descriptor, because it never owned it — the parent that
-// passed it down did. Before the fix, FromEnv wrapped fd in an *os.File,
-// which Go's finalizer closes once unreachable; dropping the Reporter and
-// forcing a GC+finalizer pass here reproduced exactly that close.
+// TestFromEnv_DoesNotOwnDescriptor pins the bug the Reporter.fd comment
+// describes: FromEnv once wrapped fd in an *os.File, whose finalizer closed
+// the parent's descriptor once the Reporter was unreachable.
 func TestFromEnv_DoesNotOwnDescriptor(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -278,9 +266,7 @@ func TestFromEnv_DoesNotOwnDescriptor(t *testing.T) {
 		t.Fatalf("FromEnv returned nil, stderr: %s", stderr.String())
 	}
 
-	// Drop the only reference to rep and force finalizers to run. If
-	// anything in this package still attaches ownership/a finalizer to fd,
-	// this closes it out from under us.
+	// Drop the only reference to rep and force finalizers to run.
 	rep = nil
 	runtime.GC()
 	runtime.GC()
@@ -296,10 +282,9 @@ func TestFromEnv_DoesNotOwnDescriptor(t *testing.T) {
 }
 
 // TestSettled_LongNoteIsClippedToFitMaxLine drives Settled with a ~5000-byte
-// note over a real pipe: the daemon reader's line cap is MaxLine bytes
-// including the trailing newline (issue #3627's review finding), so emit
-// must shorten Note until the encoded line fits, rather than let a long
-// human-written reason discard the whole record.
+// note over a real pipe: the reader caps lines at MaxLine including the
+// newline, so a long reason must be clipped rather than cost the whole record
+// (#3627).
 func TestSettled_LongNoteIsClippedToFitMaxLine(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -345,11 +330,9 @@ func TestSettled_LongNoteIsClippedToFitMaxLine(t *testing.T) {
 	}
 }
 
-// assertMaximalClip asserts the whole clipping contract for a Record whose
-// Note is too long to fit: the line fits MaxLine, the note survives carrying
-// the clip mark, and the clip is *maximal* — one more rune of the original
-// would have pushed the encoded line over. Each long-note case below only has
-// to state its input and reuse this.
+// assertMaximalClip asserts the clipping contract for a too-long Note: the
+// line fits MaxLine, the note keeps the clip mark, and the clip is maximal
+// (one more rune would overflow).
 func assertMaximalClip(t *testing.T, rec Record) {
 	t.Helper()
 
@@ -407,11 +390,9 @@ func TestSettled_NoteAllEscapedCharsStillFits(t *testing.T) {
 	})
 }
 
-// TestSettled_LongNoteWithEscapedPunctuationKeepsMostOfIt is the realistic
-// version of the case above: prose quoting a diff or HTML fragment, so only
-// some characters escape. A byte-delta clip degrades monotonically here — the
-// longer and more detailed the reason, the less of it survives — so this
-// pins maximality on mixed input, not just on an all-escaped extreme.
+// TestSettled_LongNoteWithEscapedPunctuationKeepsMostOfIt pins maximality on
+// prose where only some characters escape: a byte-delta clip keeps less the
+// longer the reason gets.
 func TestSettled_LongNoteWithEscapedPunctuationKeepsMostOfIt(t *testing.T) {
 	assertMaximalClip(t, Record{
 		Event: EventSettled,
@@ -421,9 +402,8 @@ func TestSettled_LongNoteWithEscapedPunctuationKeepsMostOfIt(t *testing.T) {
 	})
 }
 
-// TestEmit_ShortRecordUnchanged proves a record that already fits is
-// written byte-identically to before this change — no mark, no re-encode
-// difference.
+// TestEmit_ShortRecordUnchanged proves a record that already fits is written
+// as plain json.Marshal output, with no clip mark.
 func TestEmit_ShortRecordUnchanged(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {

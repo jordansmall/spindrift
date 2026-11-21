@@ -55,9 +55,8 @@ func allKinds() []signalwire.Kind {
 }
 
 // startSignalServer stands up a real Buffer behind a real NewHandler behind a
-// real Listener and points the verb's environment at it. Nothing here is
-// stubbed: the point of this harness is that the verb, the transport, the
-// handler and the buffer agree end to end.
+// real Listener and points the verb's environment at it: nothing is stubbed,
+// so the verb, transport, handler and buffer must agree end to end.
 func startSignalServer(t *testing.T, transport string, cfg signalsocket.Config) *signalServer {
 	return startSignalServerWithIssues(t, transport, cfg, nil)
 }
@@ -207,10 +206,10 @@ func TestRunSignal_BodyFile(t *testing.T) {
 	})
 }
 
-// An input past the verb's own limit must error client-side -- on every
-// source (body file, patch file, stdin) -- rather than either silently
-// truncating (a file read) or reporting a size the agent never sent. Bodies under it still reach the
-// socket, which enforces the smaller per-field MaxBodyBytes itself.
+// An input past the verb's own limit must error client-side on every source
+// (body file, patch file, stdin) rather than silently truncating or reporting
+// a size the agent never sent. Bodies under it still reach the socket, which
+// enforces the smaller per-field MaxBodyBytes itself.
 func TestRunSignal_InputOverLimit(t *testing.T) {
 	t.Setenv("SIGNAL_SOCKET_ENDPOINT", "unix://"+filepath.Join(t.TempDir(), "unused.sock"))
 	t.Setenv("SIGNAL_SOCKET_SECRET", "")
@@ -382,9 +381,8 @@ func TestRunSignal_TCPSecret(t *testing.T) {
 		if rc != 1 {
 			t.Fatalf("exit = %d, want 1 (out=%q)", rc, out)
 		}
-		// The gate now rejects through the socket's own {status, reason}
-		// shape (issue #3724), so the verb prints that reason rather than a
-		// synthesised http_401.
+		// The gate rejects through the socket's own {status, reason} shape
+		// (issue #3724), not a synthesised http_401.
 		if !strings.Contains(out, "unauthorized") {
 			t.Fatalf("output = %q, want the socket's own unauthorized status", out)
 		}
@@ -409,12 +407,9 @@ func TestRunSignal_TCPSecret(t *testing.T) {
 
 // The per-run signal secret and RUN_NONCE are separate credentials: the Box
 // sees both, and neither may be derivable from the other. internal/dispatch's
-// newNonce is unexported, so the nonce is asserted here as the Box receives
-// it -- through RUN_NONCE.
-//
-// With no production mint site until the Dispatch wiring lands, this pins
-// NewSecret alone: two mints differ from each other and from RUN_NONCE, so a
-// constant or nonce-derived implementation fails.
+// newNonce is unexported, so the nonce is asserted as the Box receives it,
+// through RUN_NONCE: two NewSecret mints differ from each other and from it,
+// so a constant or nonce-derived implementation fails.
 func TestRunSignal_SecretIsNotTheRunNonce(t *testing.T) {
 	t.Setenv("RUN_NONCE", "0123456789abcdef0123456789abcdef")
 	srv := startSignalServer(t, "tcp", signalsocket.Config{Consumes: allKinds()})
@@ -690,10 +685,8 @@ func TestRunSignal_IssueIntentPatchFile(t *testing.T) {
 }
 
 // TestRunSignal_IssueIntentDedupWireBody pins the wire shape directly,
-// bypassing the socket: -dedup adds a dedupTerms array with the given terms
-// in order, and its absence must leave the posted body byte-identical to
-// what it was before this field existed -- no dedupTerms key at all, not an
-// empty one.
+// bypassing the socket: -dedup adds a dedupTerms array in order, and its
+// absence must leave no dedupTerms key at all, not an empty one.
 func TestRunSignal_IssueIntentDedupWireBody(t *testing.T) {
 	post := func(t *testing.T, args ...string) string {
 		t.Helper()
@@ -948,10 +941,9 @@ func TestRunSignal_NothingListening(t *testing.T) {
 	}
 }
 
-// lastNonEmptyLine returns s's final line with trailing whitespace ignored --
-// a report's own line, if any, is printed before the rejected line
-// (signalUsageFailure's contract), so this is what a `| tail -1` consumer
-// would see too.
+// lastNonEmptyLine returns s's final line with trailing whitespace ignored:
+// what a `| tail -1` consumer sees, since a usage report prints before the
+// rejected line.
 func lastNonEmptyLine(s string) string {
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -962,11 +954,10 @@ func lastNonEmptyLine(s string) string {
 	return ""
 }
 
-// TestRunSignal_UsageFailureRejectedLine pins issue #3867's client-side
-// contract: every usage failure's last line is "signal <kind> rejected
-// (usage): <reason>", in the same shape as a server rejection, whatever kind
-// word (or none, or an unrecognised one) the agent gave -- and no usage
-// failure buffers an intent.
+// TestRunSignal_UsageFailureRejectedLine pins issue #3867: every usage
+// failure's last line is "signal <kind> rejected (usage): <reason>", shaped
+// like a server rejection, whatever kind word (or none, or an unrecognised
+// one) the agent gave, and no usage failure buffers an intent.
 func TestRunSignal_UsageFailureRejectedLine(t *testing.T) {
 	srv := startSignalServer(t, "unix", signalsocket.Config{Consumes: allKinds()})
 
@@ -1053,10 +1044,9 @@ func TestRunSignal_UsageFailureRejectedLine(t *testing.T) {
 	}
 }
 
-// TestRunSignal_UsageFailureReportsOverSocket asserts the report itself: it
-// lands on the kind's usage route with the reason as its body and the TCP
-// secret header, and an unrecognised kind word never reaches the wire -- it
-// reports to the kindless route instead.
+// TestRunSignal_UsageFailureReportsOverSocket asserts the report lands on the
+// kind's usage route with the reason as body and the TCP secret header, and
+// an unrecognised kind word reports to the kindless route instead.
 func TestRunSignal_UsageFailureReportsOverSocket(t *testing.T) {
 	forEachTransport(t, func(t *testing.T, transport string) {
 		srv := startSignalServer(t, transport, signalsocket.Config{Consumes: allKinds()})
@@ -1085,25 +1075,20 @@ func TestRunSignal_UsageFailureReportsOverSocket(t *testing.T) {
 		if ops[0].Decision != "usage" || ops[0].Kind != "comment" || !strings.Contains(ops[0].Reason, "-nonce") {
 			t.Fatalf("comment usage op = %+v, want kind comment and the flag error as reason", ops[0])
 		}
-		// "unknown" is the mirror's own sentinel for the kindless route
-		// (kindForPath), never the agent's unrecognised word "nope" --
-		// which is what this case is really pinning: the word must not
-		// reach the wire at all.
+		// "unknown" is the mirror's sentinel for the kindless route
+		// (kindForPath); the agent's word "nope" must never reach the wire.
 		if ops[1].Decision != "usage" || ops[1].Kind != "unknown" {
 			t.Fatalf("unrecognised-kind usage op = %+v, want the kindless route, never the agent's word", ops[1])
 		}
 	})
 }
 
-// TestRunSignal_UsageReportTruncatesOversizeReason exercises the real
-// client's truncation branch (reportSignalUsage): an unknown flag whose own
-// name is long enough that "flag provided but not defined: -<name>" clears
-// signalwire.MaxUsageReasonBytes. The cut lands mid multi-byte rune on
-// purpose -- the flag name is built of a 3-byte character at a length that
-// puts the byte-1024 cut one byte into a rune -- so this pins
-// strings.ToValidUTF8 actually running on the truncated copy, not just on
-// an already-clean prefix. The printed line, unlike the wire copy, keeps the
-// reason whole.
+// TestRunSignal_UsageReportTruncatesOversizeReason exercises
+// reportSignalUsage's truncation: an unknown flag long enough to clear
+// signalwire.MaxUsageReasonBytes, built of a 3-byte character so the
+// byte-1024 cut lands one byte into a rune. That pins strings.ToValidUTF8
+// running on the truncated copy, not just a clean prefix. The printed line
+// keeps the reason whole.
 func TestRunSignal_UsageReportTruncatesOversizeReason(t *testing.T) {
 	srv := startSignalServer(t, "unix", signalsocket.Config{Consumes: allKinds()})
 
@@ -1139,11 +1124,9 @@ func TestRunSignal_UsageReportTruncatesOversizeReason(t *testing.T) {
 	}
 }
 
-// TestRunSignal_UsageFailureReportNeverMasksTheError asserts the issue's
-// third requirement directly: whether the report lands (a live socket) or
-// cannot even be attempted (no socket at all), the usage error's own output
-// and exit code are unaffected -- a failed report leaves nothing behind for
-// the rejected line to follow.
+// TestRunSignal_UsageFailureReportNeverMasksTheError asserts that whether the
+// report lands or cannot be attempted (no socket), the usage error's own
+// output and exit code are unaffected.
 func TestRunSignal_UsageFailureReportNeverMasksTheError(t *testing.T) {
 	args := []string{"comment", "-nonce", "x"}
 
@@ -1217,11 +1200,9 @@ func TestMainRun_RoutesSignal(t *testing.T) {
 	}
 }
 
-// rawFields must marshal a wire struct to the exact same bytes a hand-built
-// signalBody map would have -- keys sorted alphabetically by encoding/json,
-// omitempty fields dropped when zero/empty -- and it must preserve an
-// invalid UTF-8 byte unlaundered, the same guarantee rawString gives a
-// hand-built map today.
+// rawFields must marshal a wire struct to the exact bytes a hand-built
+// signalBody map would (keys sorted, omitempty fields dropped when empty) and
+// preserve an invalid UTF-8 byte unlaundered, as rawString does.
 func TestRawFields(t *testing.T) {
 	t.Run("all fields set", func(t *testing.T) {
 		got, err := json.Marshal(rawFields(signalwire.IssueIntent{
@@ -1297,9 +1278,8 @@ func TestRawFields(t *testing.T) {
 				t.Fatalf("panic = %q, want %q", msg, want)
 			}
 		}()
-		// Count is non-zero so the old omitempty-first ordering would have
-		// hit reflect.Value.Len's own panic on an int kind before ever
-		// reaching the type switch.
+		// Count is non-zero so a length check ahead of the type switch would
+		// hit reflect.Value.Len's own panic on an int kind.
 		rawFields(badWire{Count: 1})
 	})
 }

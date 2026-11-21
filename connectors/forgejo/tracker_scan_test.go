@@ -216,7 +216,7 @@ func TestSearchRefusesBadInput(t *testing.T) {
 }
 
 // An unreadable label registry counts the label as defined; the client-side
-// re-check then decides, as in the native adapter.
+// re-check then decides.
 func TestUnreadableLabelRegistryQueriesAnyway(t *testing.T) {
 	t.Run("count", func(t *testing.T) {
 		labelStub(t, `[]`, status(500), map[string]connector.Response{

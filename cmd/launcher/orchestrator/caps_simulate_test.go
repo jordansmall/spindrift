@@ -41,11 +41,10 @@ func TestSimulateReviewRoundCapPass(t *testing.T) {
 	}
 }
 
-// TestSimulateReviewRoundCapPassBoundedRuntime is the issue #2548 finding 1
-// regression test. simulateReviewRoundCapPass used to loop maxReviewRounds
-// times directly, so a huge -max-review-rounds value made validateCaps hang
-// at orchestrator startup. The probe-and-extrapolate rewrite is O(1) in
-// maxReviewRounds, so this must return within a few seconds.
+// TestSimulateReviewRoundCapPassBoundedRuntime pins issue #2548: looping
+// maxReviewRounds times made a huge -max-review-rounds hang validateCaps at
+// orchestrator startup. Probe-and-extrapolate is O(1), so this must return
+// within a few seconds.
 func TestSimulateReviewRoundCapPassBoundedRuntime(t *testing.T) {
 	for _, reviewPassEnabled := range []bool{true, false} {
 		reviewPassEnabled := reviewPassEnabled
@@ -159,7 +158,7 @@ func groundTruthCapFiredPass(t *testing.T, maxReviewRounds int, reviewPassEnable
 // TestSimulateReviewRoundCapPassLinearity checks simulateReviewRoundCapPass
 // against groundTruthCapFiredPass's independent simulation across a range of
 // maxReviewRounds values, for both loop shapes. That is the evidence that the
-// linear extrapolation (issue #2548 finding 1) reproduces
+// linear extrapolation (issue #2548) reproduces
 // passmachine.Transition's real per-round pass cost.
 func TestSimulateReviewRoundCapPassLinearity(t *testing.T) {
 	const maxN = 15

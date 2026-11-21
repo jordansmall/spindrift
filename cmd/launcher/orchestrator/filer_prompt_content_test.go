@@ -3,7 +3,7 @@ package main
 import "testing"
 
 // TestFilerPromptReportShapeContract pins filer-prompt.md's QUEUED
-// report-shape prose (issue #3726 finding 2): QUEUED must cover both signal
+// report-shape prose (issue #3726): QUEUED must cover both signal
 // carriers — a SPINDRIFT_ISSUE_INTENT marker line under the log carrier, and
 // an accepted `driver-exec signal issue-intent` call under the socket
 // carrier — since this text is ungated and read under either carrier as-is.
@@ -25,13 +25,12 @@ func TestFilerPromptReportShapeContract(t *testing.T) {
 }
 
 // TestFilerPromptSiteKeyRuleContract pins filer-prompt.md's step 2 site-key
-// rule (issue #4108): a finding naming a symbol keys on `file:Symbol`, never
-// a line or range even when it also cites lines, and the key names the code
-// the finding is about, not the test file/line where it was noticed. It also
-// pins the in-batch dedup instruction, since the host catches only exact
-// keys and overlapping line ranges, never a divergent key for one symbol.
-// Issue #3812 adds the fallback to the nearest enclosing symbol, a bare line
-// key only when none encloses the site, and the reason: a line key goes stale.
+// rule (issue #4108): a finding naming a symbol keys on `file:Symbol`, never a
+// line or range, naming the code it is about rather than where it was noticed.
+// It also pins the in-batch dedup instruction, since the host catches only
+// exact keys and overlapping ranges. Issue #3812 adds the fallback to the
+// nearest enclosing symbol, a bare line key only when none encloses the site,
+// and why: a line key goes stale.
 func TestFilerPromptSiteKeyRuleContract(t *testing.T) {
 	assertPromptClauses(t, "filer-prompt.md", []promptClause{
 		{

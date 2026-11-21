@@ -108,9 +108,8 @@ func TestHandlerRejectsUnknownPathWithoutEchoingIt(t *testing.T) {
 	}
 }
 
-// The mirror names an unknown route "unknown", a fixed token, never the
-// requested path: the path is Box-controlled, and echoing it into the
-// launcher's log would let a caller write its own text there.
+// The mirror names an unknown route "unknown", never the Box-controlled path,
+// so a caller cannot write its own text into the launcher's log.
 func TestHandlerMirrorsUnknownKindWithoutEchoingPath(t *testing.T) {
 	var log strings.Builder
 	h := signalsocket.NewHandler(newAll(t), &log, nil, nil)
@@ -166,10 +165,8 @@ func TestHandlerRejectsMalformedBody(t *testing.T) {
 	}
 }
 
-// TestHandlerRejectsMalformedPatch shows a malformed patch reaching the Box
-// over the actual HTTP route (ADR 0057, issue #4072): a non-diff patch and
-// an over-cap one are each rejected with a reason naming what is wrong,
-// before the intent is ever buffered.
+// TestHandlerRejectsMalformedPatch drives a malformed patch over the real
+// HTTP route (ADR 0057, issue #4072).
 func TestHandlerRejectsMalformedPatch(t *testing.T) {
 	b := newAll(t)
 	h := signalsocket.NewHandler(b, nil, nil, nil)
@@ -194,12 +191,10 @@ func TestHandlerRejectsMalformedPatch(t *testing.T) {
 	}
 }
 
-// TestHandlerRequestSizeAccommodatesBodyAndPatch shows MaxRequestBytes is
-// sized for two worst-case-escaped fields, not one (review finding on issue
-// #4072): a body at the MaxBodyBytes cap plus a heavily-escaped patch at the
-// same cap must still clear the reader's ceiling and reach per-field
-// validation (here, invalid_patch), rather than the generic request-size
-// reject a one-field-sized ceiling would give.
+// TestHandlerRequestSizeAccommodatesBodyAndPatch pins MaxRequestBytes as sized
+// for two worst-case-escaped fields (issue #4072): a max body plus a max
+// escaped patch must reach per-field validation (invalid_patch), not the
+// generic request-size reject.
 func TestHandlerRequestSizeAccommodatesBodyAndPatch(t *testing.T) {
 	h := signalsocket.NewHandler(newAll(t), nil, nil, nil)
 
@@ -252,9 +247,8 @@ func TestHandlerRejectsOversizeBody(t *testing.T) {
 	}
 }
 
-// A field over the buffer's own limit still decodes cleanly, so the buffer
-// computes a receipt for it before refusing it -- the mirror carries that
-// receipt's size and hash even though the signal never got buffered.
+// A field over the buffer's limit still decodes, so the mirror carries its
+// receipt's size and hash though it was never buffered.
 func TestHandlerMirrorsSizeAndHashOnAFieldOversizeReject(t *testing.T) {
 	var log strings.Builder
 	h := signalsocket.NewHandler(newAll(t), &log, nil, nil)
@@ -288,10 +282,9 @@ func TestHandlerAcceptsMaxSizeBody(t *testing.T) {
 	}
 }
 
-// A usage report is a client-side usage failure (bad flag, missing required
-// flag) that never reached a real route at all. The handler mirrors it as
-// one spindrift_op with decision "usage" and leaves the buffer -- and
-// therefore settle -- untouched (ADR 0052, issue #3867).
+// A usage report (a client-side bad or missing flag that never reached a real
+// route) mirrors as one spindrift_op with decision "usage" and leaves the
+// buffer, and so settle, untouched (ADR 0052, issue #3867).
 func TestHandlerMirrorsUsageReportWithoutTouchingTheBuffer(t *testing.T) {
 	for _, tc := range []struct {
 		path, wantKind string
@@ -385,11 +378,8 @@ func TestHandlerRejectsKindNotConsumed(t *testing.T) {
 	wantReject(t, w, "kind_not_consumed", http.StatusConflict)
 }
 
-// A usage report for a kind the run's Consumes list omits is still accepted:
-// the Consumes gate lives in the buffer's Accept* methods (checkKind), and
-// usageReport never calls into the buffer at all -- it takes no *Buffer
-// receiver -- so a kind's own consumption never gates the diagnostics-only
-// route it shares no code path with.
+// A usage report for a kind outside Consumes is still accepted: the Consumes
+// gate lives in the buffer's Accept* methods, which usageReport never calls.
 func TestHandlerAcceptsUsageReportForAKindNotConsumed(t *testing.T) {
 	var log strings.Builder
 	b := signalsocket.New(signalsocket.Config{Consumes: []signalwire.Kind{signalwire.KindComment}})
@@ -453,11 +443,8 @@ func TestHandlerMirrorsOneOpPerRequest(t *testing.T) {
 	}
 	for i, want := range []struct {
 		kind, decision string
-		// hasReceipt is true wherever the request's content decoded cleanly
-		// enough for the buffer to compute a receipt for it, whether that
-		// receipt was then accepted or refused -- as opposed to a request
-		// that never reached the buffer at all (wrong method, unknown
-		// route), which carries no receipt to mirror.
+		// hasReceipt: the content decoded far enough for the buffer to
+		// compute a receipt, accepted or refused.
 		hasReceipt bool
 	}{
 		{"comment", "accept", true},
@@ -540,9 +527,8 @@ func TestHandlerNilLogWriterDiscardsTheMirror(t *testing.T) {
 	}
 }
 
-// encoding/json substitutes U+FFFD for invalid bytes inside a JSON string, so
-// the raw request bytes are the only place the fault is still visible: the
-// check has to sit ahead of the decoder, not behind it.
+// encoding/json substitutes U+FFFD for invalid bytes, so the check must sit
+// ahead of the decoder.
 func TestHandlerRejectsInvalidUTF8Bytes(t *testing.T) {
 	var log strings.Builder
 	h := signalsocket.NewHandler(newAll(t), &log, nil, nil)
@@ -577,13 +563,11 @@ func TestHandlerRejectsOversizeBeforeInvalidUTF8(t *testing.T) {
 	}
 }
 
-// http.ServeMux answers a request whose path it cleans (a doubled slash, a
-// dot segment, or an unregistered trailing slash) with its own 307 redirect
-// and never calls a registered handler at all -- no route arm would ever set
-// a decision on such a request. httptest.NewRequest("//comment") parses as a
-// scheme-relative URL (host "comment", empty path), not the doubled-slash
-// path a real request line carries, so these use the absolute form and rely
-// on url.Parse leaving dot segments unresolved in RequestURI.
+// http.ServeMux would answer a path it cleans (doubled slash, dot segment,
+// trailing slash) with its own 307 before any route arm set a decision.
+// httptest.NewRequest("//comment") parses as scheme-relative (host
+// "comment"), so these use the absolute form; url.Parse leaves dot segments
+// unresolved in RequestURI.
 func TestHandlerRejectsPathsServeMuxWouldClean(t *testing.T) {
 	for _, path := range []string{
 		"http://box//comment",
@@ -599,10 +583,8 @@ func TestHandlerRejectsPathsServeMuxWouldClean(t *testing.T) {
 				t.Fatalf("POST %s = %d, want a 404 reject, never a redirect", path, w.Code)
 			}
 			rej := wantReject(t, w, "unknown_kind", http.StatusNotFound)
-			// The fixed reason unknownRoute always writes, never one built
-			// from the request: "status" is a legitimate substring of that
-			// reason's own JSON field name, so a raw-body substring check
-			// on "comment"/"status" would false-positive on every case.
+			// Compare the fixed reason, not a raw-body substring: "status" is
+			// the reply's own JSON field name.
 			if rej.Reason != "no such signal kind" {
 				t.Errorf("POST %s reply reason %q, want the fixed unknown-route reason", path, rej.Reason)
 			}

@@ -201,7 +201,7 @@ func TestBuildSkippedIssuesSection_BracketsEscaped(t *testing.T) {
 
 // A multi-line title renders as a single bullet: the title is agent-chosen,
 // so a heading on a later line would otherwise break out of the list and
-// forge structure in the posted comment (issue #3811 review).
+// forge structure in the posted comment (issue #3811).
 func TestBuildSkippedIssuesSection_MultiLineTitleTruncated(t *testing.T) {
 	filed := []filedIntent{
 		{Title: "fix(x): bug\n## forged heading", Skipped: true, DupRef: "#123"},
@@ -280,8 +280,7 @@ func TestBuildSkippedIssuesSection_NoSkips(t *testing.T) {
 }
 
 // The lead sentence must not claim an intra-run match was "an existing open
-// issue": it wasn't, it was filed moments earlier by this same run (issue
-// #3811 review).
+// issue": this same run filed it moments earlier (issue #3811).
 func TestBuildSkippedIssuesSection_LeadCoversIntraRunMatch(t *testing.T) {
 	filed := []filedIntent{
 		{Title: "fix(y): other bug", Skipped: true, DupRef: `this run's "fix(z): peer bug"`},

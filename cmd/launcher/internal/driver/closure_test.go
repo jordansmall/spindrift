@@ -150,10 +150,8 @@ func callsConformanceRun(path string) (bool, error) {
 }
 
 // corpusProblems lists how the Driver packages under root fail to carry a
-// corpus: a registered Driver with no case under testdata/corpus or no
-// TestCorpus replaying it, or a corpus directory belonging to no registered
-// Driver. It is a static scan, so it imports no Driver and stays clear of
-// the closure rule above. A filesystem or parse error is reported as itself
+// corpus. It is a static scan, so it imports no Driver and stays clear of the
+// closure rule above. A filesystem or parse error is reported as itself
 // rather than as the missing piece it hides.
 func corpusProblems(root string, names []string) []string {
 	var problems []string

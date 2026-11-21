@@ -108,13 +108,12 @@ func TestRunExitCode_SignalledStop_WinsOverAllBlocked(t *testing.T) {
 	}
 }
 
-// TestRunExitCode_SignalledStop_WinsOverClaimedBlocked pins the reviewer's
-// exact BLOCKING finding on #3522: ISSUE_NUMBER=42 with #42 blocked writes
-// the blocked marker and returns a bare nil from drainMaxJobs's OriginClaimed
-// branch, a return the old signalledOr wrapper -- applied only to
-// waves.Dispatch's non-nil returns -- could never catch. A Stop already
-// closed by the time Dispatch returns must still exit exitcode.SignalledStop, and
-// must never reach the dispatch completion banner or reconcileAfterDispatch.
+// TestRunExitCode_SignalledStop_WinsOverClaimedBlocked pins a #3522
+// regression: ISSUE_NUMBER=42 with #42 blocked writes the blocked marker and
+// returns a bare nil from drainMaxJobs's OriginClaimed branch, which
+// signalledOr, once applied only to waves.Dispatch's non-nil returns, missed.
+// A Stop closed by then must still exit exitcode.SignalledStop and never reach
+// the completion banner or reconcileAfterDispatch.
 func TestRunExitCode_SignalledStop_WinsOverClaimedBlocked(t *testing.T) {
 	withClosedStopSignal(t)
 
@@ -382,13 +381,10 @@ func TestCmdDispatchSelective_SignalledStop_StillRunsCleanup(t *testing.T) {
 }
 
 // killHook wraps runner.Fake so a test can wait for terminate.Reclaim's Kill
-// to actually land before proceeding, mirroring waves/continuous_test.go's
-// own killHook (#3521/#3522): in production, Kill terminating the real
-// sandbox is what makes a Box's Run() return, an ordering the plain Fake
-// cannot reproduce on its own since its Kill only records the call. Shared
-// by this file (a blocked RunFunc waiting on kr.killed) and
-// recover_stop_test.go (a killSignal chan built here and handed to
-// abortDuringSettle too, so it can wait on the same signal).
+// to land, like waves/continuous_test.go's killHook (#3521/#3522): in
+// production Kill is what makes a Box's Run() return, which the plain Fake,
+// recording Kill only, cannot reproduce. recover_stop_test.go shares it,
+// handing the same killed chan to abortDuringSettle too.
 type killHook struct {
 	*runner.Fake
 	killed chan string
@@ -417,15 +413,12 @@ func waitOn[T any](t *testing.T, ch <-chan T, msg string) T {
 }
 
 // TestSelectiveListDispatch_ResearchAbort_ReclaimsOntoResearchFamily proves
-// applyDispatchKind's label swap (main.go's applyDispatchKind) reaches
-// terminate.Reclaim's TransitionState(InProgress, Dispatchable) call: an
-// abort mid-flight must move a research issue back onto agent-research, the
-// research family's own dispatchable label, never onto the work family's
-// ready-for-agent (#3522). withClosedAbortSignal cannot be reused here (its
-// channels are pre-closed and hidden inside the helper); this test needs a
-// live abort channel it can close only after the Box has actually started,
-// so it stubs installStopSignal directly, the same low-level substitution
-// withStubbedSignals itself makes.
+// applyDispatchKind's label swap reaches terminate.Reclaim's
+// TransitionState(InProgress, Dispatchable): an abort mid-flight moves a
+// research issue back onto agent-research, never the work family's
+// ready-for-agent (#3522). It stubs installStopSignal directly because it
+// needs a live abort channel closed only after the Box has started, which
+// withClosedAbortSignal's pre-closed channels cannot give.
 func TestSelectiveListDispatch_ResearchAbort_ReclaimsOntoResearchFamily(t *testing.T) {
 	orig := installStopSignal
 	stopCh := make(chan struct{})

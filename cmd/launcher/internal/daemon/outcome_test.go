@@ -40,13 +40,11 @@ func TestInterpret(t *testing.T) {
 	}
 }
 
-// TestInterpret_HaltPoolIffHaltClassSet pins the invariant runSlot's
-// `default: // HaltPool` branch (loop.go) leans on instead of a runtime
-// guard: action == HaltPool if and only if halt != HaltNone. Exits
-// Interpret does not name today are swept too, so a future exit added to
-// one column of its table but not the other fails here first. Both values
-// of stopClosed are swept: exit 7 is the one exit whose action/class split
-// on it, and the invariant must hold either way.
+// TestInterpret_HaltPoolIffHaltClassSet pins the invariant superviseChild's
+// HaltPool branch leans on instead of a runtime guard: action == HaltPool iff
+// halt != HaltNone. It sweeps exits DispatchTable does not name, so an exit
+// added to one column but not the other fails here first, and both stopClosed
+// values, since exit 7 splits on it.
 func TestInterpret_HaltPoolIffHaltClassSet(t *testing.T) {
 	exits := []int{100, 255}
 	for exit := -1; exit <= 12; exit++ {

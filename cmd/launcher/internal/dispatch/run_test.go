@@ -276,10 +276,8 @@ func TestRun_PopulatesBoxOutboxDir_GitReadOnly(t *testing.T) {
 }
 
 // The outbox dir is gated on the backend's capability, not just the access
-// mode. No registered backend leaves
-// both RelayCapable and HostMediatedRemote false today, so the
-// descriptor here is a hypothetical backend shape, not a pin on any real
-// backend's behavior.
+// mode. No registered backend leaves both RelayCapable and
+// HostMediatedRemote false, so the descriptor here is hypothetical.
 func TestRun_NoOutboxDirForRelayIncapableReadOnly(t *testing.T) {
 	dir := tempLogDir(t)
 

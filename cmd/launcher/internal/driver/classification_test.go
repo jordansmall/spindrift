@@ -6,11 +6,9 @@ import (
 	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
-// TestReasonAliases_CoverAllDriverkitReasons pins the launcher-facing
-// re-export surface (classification.go) to alias every driverkit.Reason.
-// If driverkit gains a new Reason without a matching alias here, this test
-// fails instead of the new Reason silently vanishing from launcher-facing
-// code (issue #2269).
+// TestReasonAliases_CoverAllDriverkitReasons pins classification.go's
+// re-exports to alias every driverkit.Reason, so a new Reason cannot silently
+// vanish from launcher-facing code (issue #2269).
 func TestReasonAliases_CoverAllDriverkitReasons(t *testing.T) {
 	aliased := map[driverkit.Reason]bool{
 		RateLimit:       true,

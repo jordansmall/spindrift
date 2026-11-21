@@ -2555,14 +2555,12 @@ var harnessEnvExampleStartLine = strings.SplitN(harnessEnvSecretLine("X", ""), "
 // still would.
 var envSchemaSecretTrueRe = regexp.MustCompile(`^\s*secret\s*=\s*true;\s*(#.*)?$`)
 
-// countEnvSchemaSecrets counts `secret = true;` entries across the folded
-// schema's sources: lib/env-schema.nix plus every row file of each registry
-// lib/row-knob-registries.nix lists, since row knobs carry their own `secret`
-// flag. It counts the attribute lib/renderers.nix's renderHarnessEnvExample
-// filters on to generate templates/default/harness.env.example. The count is
-// independent and upstream: a stanza dropped whole from the generated fixture
-// leaves it unchanged, so comparing the two catches what scanning the fixture
-// cannot.
+// countEnvSchemaSecrets counts `secret = true;`, the attribute
+// renderHarnessEnvExample filters on to generate
+// templates/default/harness.env.example, across lib/env-schema.nix and every
+// row file of each registry lib/row-knob-registries.nix lists (row knobs carry
+// their own `secret` flag). Counted upstream, independent of the fixture, it
+// catches a stanza dropped whole from the generated file.
 func countEnvSchemaSecrets(t *testing.T) int {
 	t.Helper()
 	return countEnvSchemaSecretsIn(t, filepath.Join("..", "..", ".."))

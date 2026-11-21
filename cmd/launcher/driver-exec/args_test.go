@@ -81,8 +81,8 @@ func TestBuildDriverArgsWithAgents(t *testing.T) {
 	}
 }
 
-// The shell pipeline this replaced only set agents_args when agents_json was
-// non-empty, so an empty agents file must still drop --agents.
+// An empty agents file must drop --agents, as the shell pipeline
+// buildDriverArgs replaced did.
 func TestBuildDriverArgsEmptyAgentsFileOmitsFlag(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -367,9 +367,8 @@ func TestBuildDriverArgsInvalidPromptStyleErrors(t *testing.T) {
 	}
 }
 
-// synthShape deliberately shares no order or flag value with claudeShape or
-// opencodeShape. Reusing either one would let a hardcoded flag name in args.go
-// pass, which is what this test catches.
+// synthShape shares no order or flag value with claudeShape or opencodeShape,
+// so a flag name hardcoded in args.go cannot pass.
 func TestBuildDriverArgsSyntheticShapeIsDataDriven(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")

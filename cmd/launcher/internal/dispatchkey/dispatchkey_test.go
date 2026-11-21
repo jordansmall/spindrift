@@ -78,11 +78,9 @@ func TestIsZero(t *testing.T) {
 	}
 }
 
-// TestChoreSpellingMatchesBoxSeam pins Chore(name).String() to the
-// "butler-" prefix, and checks butler-prompt.md's OUTCOME lines read the
-// key off DISPATCH_KEY (the host's dispatch.go forwards
-// Chore(name).String() there verbatim, issue #3996) rather than
-// re-spelling the "butler-" prefix itself in-Box.
+// The host forwards Chore(name).String() as DISPATCH_KEY verbatim (issue
+// #3996), so butler-prompt.md's OUTCOME lines must read that rather than
+// re-spell the "butler-" prefix in-Box.
 func TestChoreSpellingMatchesBoxSeam(t *testing.T) {
 	prefix := strings.TrimSuffix(Chore("X").String(), "X")
 	if prefix != "butler-" {

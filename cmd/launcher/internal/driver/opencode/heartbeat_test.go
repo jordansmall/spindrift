@@ -11,10 +11,9 @@ import (
 	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
-// TestWriter_ForwardsRawBytesUnchanged verifies that every byte written to
-// the opencode Driver's heartbeat writer is forwarded to raw unchanged,
-// regardless of what heartbeat parsing does with it — the contract of the
-// shared driverkit.HeartbeatWriter the opencode Driver returns.
+// TestWriter_ForwardsRawBytesUnchanged pins the shared
+// driverkit.HeartbeatWriter contract: raw gets every byte, whatever heartbeat
+// parsing does with it.
 func TestWriter_ForwardsRawBytesUnchanged(t *testing.T) {
 	var raw, out bytes.Buffer
 	w := newDriver().NewHeartbeatWriter(&raw, "42", &out, driverkit.RenderOptions{})
@@ -34,9 +33,8 @@ func TestWriter_ForwardsRawBytesUnchanged(t *testing.T) {
 	}
 }
 
-// TestWriter_EmitsHeartbeatOnTextEvent verifies that a type:"text" event with
-// non-empty part.text produces a heartbeat line to out carrying the issue
-// number.
+// TestWriter_EmitsHeartbeatOnTextEvent verifies that a non-empty type:"text"
+// event yields a heartbeat line carrying the issue number.
 func TestWriter_EmitsHeartbeatOnTextEvent(t *testing.T) {
 	var raw, out bytes.Buffer
 	w := newDriver().NewHeartbeatWriter(&raw, "42", &out, driverkit.RenderOptions{})
@@ -50,7 +48,7 @@ func TestWriter_EmitsHeartbeatOnTextEvent(t *testing.T) {
 }
 
 // TestWriter_NoPanicOnMalformedLine verifies that a non-JSON or empty line
-// doesn't panic the parser, only skips heartbeat emission for that line.
+// only skips its heartbeat.
 func TestWriter_NoPanicOnMalformedLine(t *testing.T) {
 	var raw, out bytes.Buffer
 	w := newDriver().NewHeartbeatWriter(&raw, "42", &out, driverkit.RenderOptions{})

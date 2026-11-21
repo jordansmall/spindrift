@@ -180,17 +180,12 @@ func TestEnsureReady_LockUncontended_StillRunsHostBuild(t *testing.T) {
 	}
 }
 
-// A lock dir that cannot even be created/opened must degrade to a stderr
-// warning and an unlocked build, not to a failed EnsureReady — issue
-// #3632's acquire-failure degrade path, previously asserted only by a
-// comment in oci.go.
+// A lock dir that cannot be created/opened must degrade to a stderr warning
+// and an unlocked build, not a failed EnsureReady (issue #3632).
 func TestEnsureReady_LockAcquireFails_ContinuesUnlockedWithWarning(t *testing.T) {
-	// A nonexistent parent makes acquireImageLock's os.OpenFile fail
-	// outright, standing in for "the lock dir cannot be created/opened" —
-	// distinct from a contended lock (which succeeds at OpenFile and blocks
-	// on flock instead). t.TempDir()'s result is captured out here, not
-	// called inside the closure, for the reason redirectImageLockDir
-	// documents.
+	// A nonexistent parent makes os.OpenFile fail outright, unlike a
+	// contended lock, which opens and blocks on flock. t.TempDir() is
+	// captured out here for the reason redirectImageLockDir documents.
 	missing := filepath.Join(t.TempDir(), "nonexistent-parent", "nested")
 	orig := imageLockDir
 	imageLockDir = func() string { return missing }

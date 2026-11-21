@@ -36,26 +36,15 @@ func slotsSeen(calls []runCall, kind Kind) map[int]bool {
 	return seen
 }
 
-// kindGate stops a dual-kind Loop run through scriptedRunner's onStart
-// hook rather than being grown onto the seam double itself — this is
-// dualkind_test.go's own scheduling-stop concern, not
-// something every scriptedRunner user needs. limit is the total StartChild
-// count across every kind at which onStart fires cancelFn. With cancelWhen
-// set, limit is a safety cap set far above whatever the goal below needs,
-// so a genuine regression fails in bounded time as a clear "safety cap
-// exhausted" fatal rather than hanging the test forever, and
-// requireGoalMet is the check that the goal — not the cap — is what
-// actually stopped the run. With cancelWhen nil there is no goal to check:
-// limit IS the run's intended stop, and requireGoalMet is a no-op.
-// cancelWhen, when set, is evaluated right after every call is recorded
-// (via r's own calls()/kindCount() accessors, never r's internal lock); the
-// first time it returns true, onStart fires cancelFn. This is deliberately
-// the condition each test actually asserts on (e.g. "every slot has run"),
-// not a call count: with several slot goroutines calling StartChild
-// concurrently, a shared count races the Go scheduler (one fast slot can
-// burn the whole budget before a sibling is ever scheduled), so the stop
-// has to be the asserted state itself, which the loop is guaranteed to
-// have reached by construction.
+// kindGate stops a dual-kind Loop run through scriptedRunner's onStart hook.
+// limit is the total StartChild count at which onStart fires cancelFn.
+// With cancelWhen set, limit is only a safety cap far above the goal, so a
+// regression fails in bounded time, and requireGoalMet checks that the goal,
+// not the cap, stopped the run; with cancelWhen nil, limit is the intended
+// stop. cancelWhen, evaluated after every recorded call through r's
+// accessors (never r.mu directly), is the state each test asserts on (e.g.
+// "every slot has run") rather than a shared call count: with concurrent
+// slots, one fast slot can burn a count before a sibling is ever scheduled.
 type kindGate struct {
 	r          *scriptedRunner
 	limit      int
@@ -70,9 +59,7 @@ func (g *kindGate) onStart(ctx context.Context, req ChildRequest) error {
 	goalMet := g.cancelWhen != nil && g.cancelWhen(g.r)
 	shouldCancel := goalMet
 	if !goalMet && g.limit > 0 && g.r.runCount() >= g.limit {
-		// capExhausted only means something when there was a goal to miss;
-		// with cancelWhen nil, limit is the intended stop, not a cap that
-		// fired early.
+		// capExhausted only means something when there was a goal to miss.
 		if g.cancelWhen != nil {
 			g.mu.Lock()
 			g.capExhausted = true
@@ -86,22 +73,16 @@ func (g *kindGate) onStart(ctx context.Context, req ChildRequest) error {
 	return nil
 }
 
-// fataler is the sliver of *testing.T requireGoalMet needs — small enough
-// that a self-test can pass a recording double instead, to observe a
-// requireGoalMet failure without actually failing the suite.
+// fataler is the sliver of *testing.T requireGoalMet needs, so a self-test
+// can pass a recording double.
 type fataler interface {
 	Helper()
 	Fatalf(format string, args ...any)
 }
 
 // requireGoalMet fails the test if the safety cap fired before cancelWhen's
-// condition was ever satisfied. That distinguishes "the loop reached the
-// state the test wanted, and stopped there" from "a regression means it
-// never did, and only the cap kept the test from hanging" — without this, a
-// capped-out run can look identical to a successful one to whatever the test
-// asserts afterward. With cancelWhen nil, capExhausted is never set (see
-// onStart), so this is a no-op: limit was the run's intended stop, not a
-// cap that fired early.
+// condition was satisfied; otherwise a capped-out run can look identical to
+// a successful one. A no-op with cancelWhen nil.
 func (g *kindGate) requireGoalMet(t fataler) {
 	t.Helper()
 	g.mu.Lock()
@@ -258,12 +239,10 @@ func TestPoolReservationKeepsResearchFloorWhileBothKindsHaveWork(t *testing.T) {
 }
 
 // TestPoolWorkBurstsIntoWholePoolWhenResearchQueueEmpty pins the burst
-// contract: a reservation orders which kind a starting slot tries first and
-// never holds a slot for research that has nothing queued. Slots: 2,
-// Reservation: 1; research empties on its first check (and, with a frozen
-// fake clock, never becomes runnable again), so both slots settle into
-// running work. The reservation is a live running count, so any slot turning
-// over while no research runs prefers research until that gate lands.
+// contract: a reservation never holds a slot for research that has nothing
+// queued. Slots: 2, Reservation: 1; research empties on its first check and,
+// with a frozen clock, never becomes runnable again, so both slots settle
+// into work.
 func TestPoolWorkBurstsIntoWholePoolWhenResearchQueueEmpty(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &scriptedRunner{
@@ -277,10 +256,9 @@ func TestPoolWorkBurstsIntoWholePoolWhenResearchQueueEmpty(t *testing.T) {
 		r:        r,
 		limit:    3000, // safety cap: dispatch never gates, so only the goal below stops the loop
 		cancelFn: cancel,
-		// Goal: dispatch has run in both slots (the burst this test pins).
-		// Research gates itself for good on its first call regardless of when
-		// this fires, so stopping here rather than on a shared call count still
-		// leaves the "research called exactly once" assertion below meaningful.
+		// Goal: dispatch has run in both slots. Research gates for good on its
+		// first call whenever this fires, so the exactly-once assertion below
+		// stays meaningful.
 		cancelWhen: func(r *scriptedRunner) bool {
 			seen := map[int]bool{}
 			for _, c := range r.calls() {
@@ -360,12 +338,11 @@ func TestPoolResearchGateLandsBeforeBatonPasses(t *testing.T) {
 
 // TestPoolResearchBurstsIntoWholePoolWhenWorkQueueEmpty mirrors
 // TestPoolWorkBurstsIntoWholePoolWhenResearchQueueEmpty: work empties on its
-// first (and only) check, so research ends up running in every slot. The
-// first research child is held open until work has been checked: the
-// reservation is a live count, so with research's floor already filled by
-// that held child, the sibling slot prefers work and gives it the check that
-// gates it. Without the hold, instant research children keep the count at
-// zero and work is never tried.
+// only check, so research runs in every slot. The first research child is
+// held open until work has been checked: the reservation is a live running
+// count, so with research's floor filled the sibling prefers work and gives
+// it the check that gates it. Without the hold, instant research children
+// keep that count at zero and work is never tried.
 func TestPoolResearchBurstsIntoWholePoolWhenWorkQueueEmpty(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &scriptedRunner{
@@ -472,10 +449,8 @@ func TestPoolZeroReservationIsWorkFirstWithResearchOnLeftovers(t *testing.T) {
 }
 
 // TestPoolReservationEqualsSlotsIsResearchFirst mirrors
-// TestPoolZeroReservationIsWorkFirstWithResearchOnLeftovers, but exercised
-// across every slot (Reservation == Slots means every slot, not
-// just one, prefers research) to prove the reservation applies pool-wide,
-// not to a single hardcoded slot.
+// TestPoolZeroReservationIsWorkFirstWithResearchOnLeftovers across every
+// slot, proving the reservation applies pool-wide.
 func TestPoolReservationEqualsSlotsIsResearchFirst(t *testing.T) {
 	const slots = 2
 	ctx, cancel := context.WithCancel(context.Background())
@@ -520,10 +495,8 @@ func TestPoolReservationEqualsSlotsIsResearchFirst(t *testing.T) {
 }
 
 // TestLoopEmptyWorkQueueDoesNotSlowResearchDown pins the independence of
-// the two kinds' gates: work is permanently empty (and, once gated, never
-// rechecked against a fake clock that never advances) while research keeps
-// dispatching. The slot must never fall back to sleeping out work's
-// backoff — clk.waits() must stay empty the whole run.
+// the two kinds' gates: with work permanently empty and research
+// dispatching, the slot never sleeps out work's backoff.
 func TestLoopEmptyWorkQueueDoesNotSlowResearchDown(t *testing.T) {
 	// gateLimit counts total calls across both kinds (see kindGate). Dispatch
 	// gates itself after exactly one call, leaving research the remaining
@@ -563,10 +536,7 @@ func TestLoopEmptyWorkQueueDoesNotSlowResearchDown(t *testing.T) {
 func TestLoopIdlesOnlyOnceBothKindsHaveBackedOff(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	clk := &testClock{}
-	// onSleep fires cancelFn the first time Sleep is called. A slot only
-	// ever calls Sleep from idleSleep once every configured kind has backed
-	// off (pickKind found nothing runnable) — that is exactly the "pool has
-	// genuinely idled" moment this test needs to stop on.
+	// The first Sleep is the "every kind has backed off" moment to stop on.
 	var once sync.Once
 	clk.onSleep = func() { once.Do(cancel) }
 	r := &scriptedRunner{
@@ -597,12 +567,10 @@ func TestLoopIdlesOnlyOnceBothKindsHaveBackedOff(t *testing.T) {
 }
 
 // TestPoolPerKindBackoffGrowsIndependently drives markNoWork and resetKind
-// directly per kind (the only honest way to isolate one kind's streak from
-// the daemon's normal end-to-end interleaving): dispatch's wait must double
-// across its own consecutive empty results exactly like a lone idleBackoff
-// would, while research resetting in between must never perturb it, and
-// vice versa. The assertions are on the published nextCheck, not on any
-// private idleBackoff field.
+// directly per kind, to isolate one kind's streak from end-to-end
+// interleaving: dispatch's wait doubles across its empty results while
+// research resetting in between never perturbs it. Assertions are on the
+// published nextCheck.
 func TestPoolPerKindBackoffGrowsIndependently(t *testing.T) {
 	clk := &testClock{}
 	clk.setNow(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
@@ -637,11 +605,9 @@ func TestPoolPerKindBackoffGrowsIndependently(t *testing.T) {
 	}
 }
 
-// TestLoopSingleKindConfigurationsNeverRunTheOtherKind pins issue #3541's
-// backward-compatible edge: Kinds: {KindOf(dispatchkind.Work)} alone must never produce a
-// research child, whatever Reservation is set to (it only has
-// meaning once a second kind exists), and Kinds: {KindOf(dispatchkind.Research)} alone must
-// never produce a dispatch child.
+// TestLoopSingleKindConfigurationsNeverRunTheOtherKind pins issue #3541: a
+// work-only pool never produces a research child, whatever Reservation is,
+// and a research-only pool never produces a dispatch child.
 func TestLoopSingleKindConfigurationsNeverRunTheOtherKind(t *testing.T) {
 	t.Run("dispatch-only", func(t *testing.T) {
 		cfg := testConfig(1)
@@ -806,12 +772,10 @@ func TestKindGateRequireGoalMet(t *testing.T) {
 }
 
 // TestPoolResearchFloorRecoversWhileReservedSlotHoldsLongWork pins the
-// reservation as a live floor (issue #3582): research gates itself on its
-// first check, slot 0 then takes a work child that stays running for the
-// rest of the test, and once research's gate lapses a sibling slot's own
-// turnover must pick research even though slot 0 never turns over. A
-// per-slot static preference would only re-evaluate the floor when slot 0
-// itself freed up.
+// reservation as a live floor (issue #3582): research gates on its first
+// check, slot 0 takes a long-running work child, and once research's gate
+// lapses a sibling's turnover must pick research — a per-slot static
+// preference would wait for slot 0 to free up.
 func TestPoolResearchFloorRecoversWhileReservedSlotHoldsLongWork(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -34,7 +34,7 @@ func TestRealizeTip_FreshNoOp(t *testing.T) {
 
 // Probe's fetch-failure branch produces this Result shape, having never got as
 // far as a rev or a tag. Despite the name, the test exercises the TipTag == ""
-// guard, because RealizeTip no longer looks at res.Rev when deciding to realize.
+// guard: RealizeTip does not look at res.Rev when deciding to realize.
 func TestRealizeTip_EmptyRevNoOp(t *testing.T) {
 	rf := NewRealizerFake()
 	res := Result{Applicable: true, Fresh: false, Rev: ""}

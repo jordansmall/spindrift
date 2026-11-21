@@ -10,10 +10,9 @@ import (
 
 // Pins issue #2562: NETWORK_MODE is runtime-overridable but RUNNER_KIND is
 // baked at eval time, so mkHarness's networkModeCoherenceOk assert never sees
-// this pairing, and bwrap would render no-host-loopback no differently from
-// the isolated-by-default NETWORK_MODE=open. The gate keys on c.runnerKind,
-// never c.runtime (issue #2538), because runnerForKind reads runnerKind to
-// select the bwrap adapter.
+// this pairing, and bwrap renders no-host-loopback the same as open. The gate
+// keys on c.runnerKind, never c.runtime (issue #2538), because runnerForKind
+// reads runnerKind to select the bwrap adapter.
 func TestNetworkModeRuntimeGate_BwrapNoHostLoopbackFails(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = "bwrap"
@@ -48,10 +47,9 @@ func TestNetworkModeRuntimeGate_EveryListedModePasses(t *testing.T) {
 	}
 }
 
-// The gate must key on c.runnerKind, not c.runtime: bootstrap_test.go pins
-// RUNNER_KIND=bwrap with RUNTIME=podman as a supported pairing, so a
-// c.runtime-keyed gate would let NETWORK_MODE=no-host-loopback through to
-// the bwrap adapter, which renders it identically to NETWORK_MODE=open.
+// RUNNER_KIND=bwrap with RUNTIME=podman is a supported pairing
+// (bootstrap_test.go), so a c.runtime-keyed gate would let no-host-loopback
+// through to the bwrap adapter.
 func TestNetworkModeRuntimeGate_BwrapRunnerKindWithPodmanRuntimeFails(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = "bwrap"
@@ -99,11 +97,10 @@ func TestNetworkModeRuntimeGate_OpenModeIsNoOp(t *testing.T) {
 	}
 }
 
-// The second gap this gate backstops (review finding on issue #2562): a
-// runtime override can set a non-open NETWORK_MODE on an image already baked
-// with a raw knob (PODMAN_NETWORK / BWRAP_UNSHARE_NET), past mkHarness's
-// networkModeCoherenceOk assert, and runner.Config.OCINetwork then picks
-// the raw knob over the mode and renders full egress instead of isolation.
+// The second gap this gate backstops (issue #2562): a runtime override can set
+// a non-open NETWORK_MODE on an image baked with a raw knob (PODMAN_NETWORK /
+// BWRAP_UNSHARE_NET), past networkModeCoherenceOk, and
+// runner.Config.OCINetwork then picks the raw knob and renders full egress.
 func TestNetworkModeRuntimeGate_ModeAndRawKnobCoherence(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -150,11 +147,11 @@ func TestNetworkModeRuntimeGate_ModeAndRawKnobCoherence(t *testing.T) {
 	}
 }
 
-// A raw knob paired with networkMode "open" or "" (unset, the zero value,
-// distinct from minimalValidConfig()'s "open" default) is the escape hatch
-// docs/reference.md documents for users who never set NETWORK_MODE, and
-// raw-wins in runner.Config.OCINetwork has nothing to disagree with. Without both cases,
-// deleting either half of the guard's mode condition leaves go test green.
+// A raw knob with networkMode "open" or "" (unset, distinct from
+// minimalValidConfig()'s "open") is the documented escape hatch for users who
+// never set NETWORK_MODE, and OCINetwork's raw-wins has no mode to disagree
+// with. Without both cases, deleting either half of the guard's mode
+// condition leaves go test green.
 func TestNetworkModeRuntimeGate_RawKnobAloneIsNoOp(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -197,11 +194,10 @@ func TestNetworkModeRuntimeGate_RawKnobAloneIsNoOp(t *testing.T) {
 	}
 }
 
-// Review finding on issue #2942 (AC5: gate wording stays byte-identical):
-// wrapping this gate's error with the errLaunchGateConfigInvalid sentinel
-// prepends "launch gate config invalid: " to the message that dispatch,
-// recover and preview print verbatim to stderr. The text must still start
-// with "NETWORK_MODE=" while errors.Is holds for doctor.go's doctorExitCodeFor.
+// Issue #2942 AC5 (gate wording stays byte-identical): wrapping with the
+// errLaunchGateConfigInvalid sentinel must not prepend its prefix to the text
+// dispatch, recover and preview print verbatim. It must still start with
+// "NETWORK_MODE=" while errors.Is holds for doctorExitCodeFor.
 func TestNetworkModeRuntimeGate_ErrorTextHasNoSentinelPrefix(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = "bwrap"

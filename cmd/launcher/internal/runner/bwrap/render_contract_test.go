@@ -31,12 +31,10 @@ type bwrapRenderingHarness struct{}
 
 func (bwrapRenderingHarness) Family() string { return runner.KindBwrap }
 
-// Baked is what a launch renders whatever the Box: the closure env, the store
-// and identity files, nix.conf, and the agent home. The adapter binds nix.conf
-// only when nixConfigFile is set and resolv.conf only when statResolvConf finds
-// one and the network is not isolated without pasta (mode none); Render sets
-// the former and stubs the latter, so both are baked here. Values vary per
-// generation and run, so only keys and targets are named.
+// Baked is what a launch renders whatever the Box. nix.conf and resolv.conf
+// are conditional in the adapter, but Render sets nixConfigFile and stubs
+// statResolvConf, so both are baked here. Values vary per generation and run,
+// so only keys and targets are named.
 func (bwrapRenderingHarness) Baked(l contract.Launch) contract.BakedSet {
 	baked := contract.BakedSet{
 		EnvKeys:      []string{"HOME", "PATH", "PREFETCH", "SSL_CERT_FILE", "GIT_SSL_CAINFO"},

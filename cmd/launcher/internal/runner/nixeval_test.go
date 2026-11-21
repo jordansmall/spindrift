@@ -7,10 +7,6 @@ import (
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
-// TestNixEvaluatorEval_BuildsHermeticGitFileRef verifies that the flake
-// reference Eval passes to `nix eval` (via the execCommand seam) points at
-// the fetched rev via a hermetic git+file URL — never the working tree —
-// with .outPath appended to the attr.
 func TestNixEvaluatorEval_BuildsHermeticGitFileRef(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0, Stdout: "/nix/store/abc-drv"})
 	orig := execCommand
@@ -30,9 +26,6 @@ func TestNixEvaluatorEval_BuildsHermeticGitFileRef(t *testing.T) {
 	}
 }
 
-// TestNixEvaluatorEval_ViaSeam verifies that Eval invokes `nix eval` through
-// the package-level execCommand seam, and that a scripted failure surfaces
-// wrapped with the flake reference and stderr.
 func TestNixEvaluatorEval_ViaSeam(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1, Stdout: "boom"})
 	orig := execCommand
@@ -53,8 +46,6 @@ func TestNixEvaluatorEval_ViaSeam(t *testing.T) {
 	}
 }
 
-// TestNixEvaluatorEval_SuccessReturnsTrimmedOutput verifies that Eval trims
-// trailing whitespace from a scripted successful `nix eval` invocation.
 func TestNixEvaluatorEval_SuccessReturnsTrimmedOutput(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0, Stdout: "/nix/store/abc-drv "})
 	orig := execCommand

@@ -79,10 +79,9 @@ func TestBootstrap_PropagatesRemedyText_WrapsErrConfigInvalid(t *testing.T) {
 }
 
 // The retirement gate (registry-proxy-routes row, checks.go) refuses
-// REGISTRY_PROXY_CREDENTIAL_ENV unconditionally, even with
-// REGISTRY_PROXY_UPSTREAM_URL unset. That case was the carve-out issue #2850
-// used to exempt; it no longer exists, so any one of the five retired knobs
-// aborts the launch on its own.
+// REGISTRY_PROXY_CREDENTIAL_ENV even with REGISTRY_PROXY_UPSTREAM_URL unset:
+// issue #2850's carve-out for that case is gone, so any one of the five
+// retired knobs aborts the launch on its own.
 func TestBootstrap_RetiredRegistryProxyCredentialEnv_NoUpstreamURL_WrapsErrConfigInvalid(t *testing.T) {
 	stubPastaOnPath(t)
 	checkout := mustSeedableCheckout(t)

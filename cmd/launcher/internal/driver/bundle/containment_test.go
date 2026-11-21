@@ -156,9 +156,7 @@ var routed = %q
 }
 
 // readModuleName reads the "module " directive out of the go.mod at path.
-// Duplicated from registryproxy/importgraph_test.go rather than exported
-// across packages, matching that file's own test-local style for the same
-// helper.
+// Duplicated from registryproxy/importgraph_test.go rather than exported.
 func readModuleName(t *testing.T, path string) string {
 	t.Helper()
 	f, err := os.Open(path)
@@ -178,8 +176,7 @@ func readModuleName(t *testing.T, path string) string {
 }
 
 // nonTestImports returns every import path named by dir's non-test *.go files.
-// Duplicated from registryproxy/importgraph_test.go for the same
-// test-local-style reason as readModuleName above.
+// Duplicated from registryproxy/importgraph_test.go, like readModuleName.
 func nonTestImports(t *testing.T, dir string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -211,10 +208,9 @@ func nonTestImports(t *testing.T, dir string) []string {
 }
 
 // packageDirs lists root and every subdirectory under it that can hold a Go
-// package, pruning testdata (which may hold deliberately unparseable or
-// fixture .go files) and dot-prefixed directories, which hold tooling state
-// rather than source, and root's own vendor directory, where the Nix sandbox
-// copies third-party modules that are outside the guard's scope.
+// package, pruning testdata (deliberately unparseable fixtures), dot-prefixed
+// directories, and root's vendor directory (the Nix sandbox's third-party
+// copies).
 func packageDirs(t *testing.T, root string) []string {
 	t.Helper()
 	var dirs []string
@@ -244,17 +240,14 @@ func packageDirs(t *testing.T, root string) []string {
 // deriveEcosystemImporters returns the directories under moduleRoot that can
 // handle an ecosystem name: direct importers of moduleName+"/internal/ecosystem"
 // or moduleName+"/internal/registryvocab", plus registryvocab itself (the leaf
-// declaring the string fields names travel in: Subtree.Ecosystem,
-// RouteEcosystems),
-// moduleRoot (so routing main's ecosystem access through an intermediary
-// cannot uncover it) and internal/credresolver (which must never import this
-// package yet must not re-name an ecosystem either).
+// declaring the string fields names travel in, Subtree.Ecosystem and
+// RouteEcosystems), moduleRoot (so routing main's ecosystem access through an
+// intermediary cannot uncover it) and internal/credresolver (which must never
+// import ecosystem yet must not re-name one either).
 //
-// Direct imports only: a package that merely passes a registrymanifest along
-// opaquely, as the runners do, never sees a name. The ecosystem tree (the core
-// package and the ecosystem packages beneath it) is skipped by path, since it
-// is where the names live; ecosystemTreeFindings scans it against each
-// package's own names. Testdata corpora are pruned by packageDirs.
+// Direct imports only: a package passing a registrymanifest along opaquely,
+// as the runners do, never sees a name. The ecosystem tree is skipped by
+// path, since it is where the names live; containmentFindings scans it.
 func deriveEcosystemImporters(t *testing.T, moduleRoot, moduleName string) []string {
 	t.Helper()
 	ecosystemImport := moduleName + "/internal/ecosystem"
@@ -330,16 +323,12 @@ func buildSyntheticEcosystemModule(t *testing.T, plantedReader, plantedRoot, pla
 }
 
 // TestDeriveEcosystemImporters_NewImporterPickedUpAutomatically proves a new
-// importer needs no edit here: each of newreader (imports the stub ecosystem)
-// and vocabreader (imports only the stub registryvocab, never ecosystem) turns
-// up in the derived list, and scanning it reports its single planted literal.
-//
-// Two exclusions are asserted so the derivation cannot pass by over-selecting.
-// sibling imports nothing, so listing every directory would include it. The
-// stub ecosystem imports registryvocab and holds a planted literal, so it
-// would be selected as a vocab importer were it not skipped by path; the
-// skip is what keeps the ecosystem packages out of the importer scan, where an
-// owning package's own names would be findings rather than allowed.
+// importer needs no edit here: newreader (imports the stub ecosystem) and
+// vocabreader (imports only the stub registryvocab) are both derived and
+// their planted literals found. Two exclusions stop it passing by
+// over-selecting: sibling imports nothing, and the stub ecosystem imports
+// registryvocab but must be skipped by path, or its own names would count as
+// findings.
 func TestDeriveEcosystemImporters_NewImporterPickedUpAutomatically(t *testing.T) {
 	names := registeredNames(t, 1)
 	plantedName := names[0]
@@ -512,18 +501,12 @@ func containmentFindings(t *testing.T, moduleRoot, moduleName, registerFile stri
 }
 
 // TestEcosystemNamesStayInTheirOwnPackage enforces that an ecosystem's name
-// lives in its own Strategy's package: every direct importer of the core
-// package or of the registryvocab leaf (whose string fields names travel in),
-// and registryvocab itself, reaches an ecosystem fact through its Strategy and
-// never re-names the ecosystem as a bare literal, and within internal/ecosystem
-// each package holds only its own Strategies' names. Only the Bundle's
-// ecosystems file may name them all. Targets come from
-// deriveEcosystemImporters, so the set tracks imports with no edit here.
-// internal/registryproxy, which ADR 0047 forbids importing the core package, is
-// covered through its registryvocab import.
-//
-// This lives in the Bundle's tests because only here is every Strategy
-// registered: core's own tests cannot link an ecosystem package.
+// lives in its own Strategy's package: importers of the core package or the
+// registryvocab leaf never re-name an ecosystem as a bare literal, and within
+// internal/ecosystem each package holds only its own Strategies' names. Only
+// the Bundle's ecosystems file may name them all. internal/registryproxy
+// (barred from importing core by ADR 0047) is covered via registryvocab.
+// It lives here because only the Bundle registers every Strategy.
 func TestEcosystemNamesStayInTheirOwnPackage(t *testing.T) {
 	moduleName := readModuleName(t, filepath.Join(realModuleRoot, "go.mod"))
 	registerFile := filepath.Join(realModuleRoot, "internal", "driver", "bundle", "ecosystems.go")

@@ -6,16 +6,13 @@ import (
 )
 
 // forgejoServerPageCap mirrors Forgejo's default [api] MAX_RESPONSE_ITEMS
-// cap (issue #3978). Stock Forgejo clamps whatever limit a client requests
-// down to this value, so a fake that always honored a larger client limit
-// would never exercise the walk-until-empty-page behavior it's meant to
-// fake.
+// (issue #3978). Stock Forgejo clamps any requested limit to it; a fake
+// honoring a larger limit would never exercise the page walk.
 const forgejoServerPageCap = 50
 
-// windowPage reads page (default 1) and limit (default len(items)) from r's
-// query, clamps limit at forgejoServerPageCap the way stock Forgejo does,
-// and returns the resulting window into items. Out of range returns a
-// non-nil empty slice, matching Forgejo's own past-the-end response.
+// windowPage returns the window of items r's page and limit query select,
+// clamped as stock Forgejo does. Past the end is a non-nil empty slice, as in
+// Forgejo.
 func windowPage[T any](r *http.Request, items []T) []T {
 	page := 1
 	if p := r.URL.Query().Get("page"); p != "" {

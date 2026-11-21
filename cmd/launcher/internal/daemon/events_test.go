@@ -166,15 +166,10 @@ func TestNewEmitterNilErrWDoesNotPanicOnWriteFailure(t *testing.T) {
 	e.Emit(Event{Event: "child_start"}) // must not panic: nil errW defaults to io.Discard
 }
 
-// eventDiff renders wantEvents' mismatch report and is exported (in test
-// scope) as its own function so a self-test can inspect the rendering
-// without going through a testing.T that would fail the suite on mismatch.
-// It reports the first index where got and want diverge — "<missing>" for
-// an index past got's end (want expected more events than arrived),
-// "<none>" for an index past want's end (got carries more events than want
-// asked for, so want has nothing at this index) — then both full
-// sequences, then msg as the caller's "why this is the right sequence"
-// context. Returns "" when the sequences match exactly.
+// eventDiff renders wantEvents' mismatch report as its own function so a
+// self-test can inspect it without failing the suite. It reports the first diverging index ("<missing>" past
+// got's end, "<none>" past want's end), both full sequences, then msg.
+// Returns "" when the sequences match exactly.
 func eventDiff(got, want []string, msg string) string {
 	longest := len(got)
 	if len(want) > longest {

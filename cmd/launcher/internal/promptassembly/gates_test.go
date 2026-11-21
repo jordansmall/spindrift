@@ -5,12 +5,11 @@ import (
 	"testing"
 )
 
-// Each *_BAKED gate (box prompt assembly) fires only when the
-// CLI boundary found the skill at DRIVER_SKILLS_DIR/<name>/SKILL.md, so Gates
-// only branches on the already-resolved bool. AUTO_FORMAT_BAKED,
-// AUTO_LINT_BAKED, and (since #3505 inlined the policy body) CODE_COMMENTS_BAKED
-// gate no fragment row and exist for family completeness; CHECK_HYGIENE_BAKED
-// is the one that still gates a row (issue #3220).
+// Each *_BAKED gate fires only when the CLI boundary found the skill at
+// DRIVER_SKILLS_DIR/<name>/SKILL.md, so Gates only branches on the resolved
+// bool. AUTO_FORMAT_BAKED, AUTO_LINT_BAKED, and CODE_COMMENTS_BAKED (#3505
+// inlined the policy body) gate no fragment row and exist for family
+// completeness; CHECK_HYGIENE_BAKED still gates one (issue #3220).
 func TestGatesSkillsBaking(t *testing.T) {
 	cases := []struct {
 		name string
@@ -343,11 +342,9 @@ func TestGatesCoordinatorScoutBrief(t *testing.T) {
 	}
 }
 
-// WORKER_SCOUT_BRIEF is work-only (issue #3157): ScoutProvisioned alone is a
-// roster-presence fact that holds on a research dispatch too, but
-// research-prompt.md never delegates a scout or writes a brief, so the gate
-// also checks DispatchKind, defaulting empty to "work" as gates_tracker.go and
-// assemble.go do.
+// WORKER_SCOUT_BRIEF is work-only (issue #3157): ScoutProvisioned holds on a
+// research dispatch too, but research-prompt.md never delegates a scout or
+// writes a brief, so the gate also excludes advise-only kinds.
 func TestGatesWorkerScoutBrief(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -411,21 +408,17 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 			want:         map[string]bool{"FIX_CI_READ_GH": false, "FIX_CI_READ_FORGEJO": true},
 		},
 		{
-			// An empty ForgeBackend is what a version-skew dispatch leaves
-			// behind: a host launcher predating issue #2533 never sets
-			// BOX_FORGE_BACKEND, which has no baked default. Gates repeats
-			// entrypoint.sh's old "${CODE_FORGE:-github}" default, so the run
-			// gets the GH arm instead of no CI-read step at all.
+			// A host launcher predating issue #2533 never sets
+			// BOX_FORGE_BACKEND, which has no baked default; Gates defaults
+			// CODE_FORGE to github so the run still gets a CI-read step.
 			name:         "empty ForgeBackend falls open to GH default",
 			forgeBackend: "",
 			want:         map[string]bool{"FIX_CI_READ_GH": true, "FIX_CI_READ_FORGEJO": false},
 		},
 		{
-			// Same version-skew shape, but CodeForge says "forgejo" (it is
-			// still forwarded on Env for exactly this fallback). The
-			// fallback must re-derive from CodeForge: a hardcoded GH arm
+			// Same version skew with CodeForge "forgejo": a hardcoded GH arm
 			// would tell the agent to drive `gh` against a Forgejo forge
-			// (issue #2533 review).
+			// (issue #2533).
 			name:         "empty ForgeBackend with CodeForge=forgejo falls open to FORGEJO",
 			forgeBackend: "",
 			codeForge:    "forgejo",
@@ -581,11 +574,9 @@ var pushGates = []string{"HOST_MEDIATED_PUSH", "OUTBOX_PUSH_READ_ONLY"}
 
 // Exactly one fragment of each push/triage family renders per env: the
 // template slots are bare placeholder runs, so the gates alone enforce
-// exclusivity. This lives in Go, not lib/fragment-pairs.nix: that registry
-// only checks the declaration shape of two-way inverseOf pairs at eval time.
-// Gates computes these gates, so only a Go test proves exactly-one-on (issue
-// #6303). The gate set is listed here, not read from the registry, so the test
-// pins Gates() alone.
+// exclusivity. lib/fragment-pairs.nix checks only inverseOf declaration
+// shape, so only a Go test proves exactly-one-on (issue #6303). The gate set
+// is listed here, not read from the registry, so the test pins Gates() alone.
 func TestGatesPushRowsPartition(t *testing.T) {
 	for _, mediated := range []bool{false, true} {
 		got := Gates(Env{HostMediatedRemote: mediated})

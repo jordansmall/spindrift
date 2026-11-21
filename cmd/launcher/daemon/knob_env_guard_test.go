@@ -15,29 +15,24 @@ import (
 	"spindrift.dev/launcher/internal/inputdoc"
 )
 
-// knobEnvGuardAllowlist maps a FuncDecl name to the normalised selector
-// (see selectorLabel) it is allowed a non-literal first arg for. Three funcs
-// qualify. warnStrippedChildEnv replays the document's own settings keys to
-// warn about them, it reads no knob. childEnvValue is the daemon's
-// backendkit.Lookup: the Strategy names its own knobs, so the key is not
-// literal here, and clearKnobEnvT covers them by recording the keys the
-// registered Strategies read. backendRowSetting resolves the knob a backend
-// row names as its baseEnv: the row names its own knob, so the key is not
-// literal, and there is no registered set to record. The exemption covers only the plain package-level
-// func's own direct body — not a method of the same name (see fd.Recv below),
-// and not a func literal nested inside it, which gets no exemption either.
+// knobEnvGuardAllowlist maps a FuncDecl name to the selector (see
+// selectorLabel) it may call with a non-literal key. warnStrippedChildEnv
+// reads no knob, only replays the document's keys. childEnvValue's keys come
+// from the registered Strategies, and clearKnobEnvT records the keys they
+// read. backendRowSetting's key is the one a backend row names, with no
+// registered set to record. Only the plain func's direct body is exempt, not
+// a same-named method or a nested closure.
 var knobEnvGuardAllowlist = map[string]string{
 	"warnStrippedChildEnv": "os.Getenv",
 	"childEnvValue":        "os.Getenv",
 	"backendRowSetting":    ".Lookup",
 }
 
-// knobEnvGuardMethods lists the inputdoc.Document knob readers this guard
-// treats as a knob read on any receiver shape, alongside stdlib
-// os.Getenv/os.LookupEnv. This guard is blind to a knob read any other way:
-// scanning os.Environ() (main.go feeds it into hostRunnerConfig.env),
-// os.ExpandEnv, syscall.Getenv, or a dot-imported "os" package's bare
-// Getenv/LookupEnv call (no os. prefix for osImportNames to match).
+// knobEnvGuardMethods are the inputdoc.Document knob readers matched on any
+// receiver, alongside os.Getenv/os.LookupEnv. The guard is blind to
+// os.Environ() scans (main.go feeds one into hostRunnerConfig.env),
+// os.ExpandEnv, syscall.Getenv, and bare Getenv/LookupEnv calls through a
+// dot-imported os.
 var knobEnvGuardMethods = map[string]bool{
 	"Resolve":         true,
 	"ResolveOptional": true,
@@ -63,15 +58,13 @@ func osImportNames(file *ast.File) map[string]bool {
 	return names
 }
 
-// selectorLabel classifies sel as a knob-reader selector and returns its
-// normalised form for messages and allow-list matching, or "" if sel is not
-// a knob read. Resolve/ResolveOptional/Lookup match on method name alone,
-// regardless of receiver shape (doc, d2.doc, h.d, ...): without go/types
-// the receiver cannot be confirmed as an inputdoc.Document anyway. Callers
-// skip selectors in type positions (see markTypeSelectors), so a type named
-// pkg.Lookup is not a read. Type spellings the parser places in expression
-// position stay flagged: a conversion pkg.Lookup(fn) (a CallExpr), a generic
-// type argument f[pkg.Lookup](x), and a new(pkg.Lookup) or make argument.
+// selectorLabel returns sel's normalised knob-reader form, or "" if it is not
+// a knob read. Methods match on name alone: without go/types the receiver
+// cannot be confirmed as an inputdoc.Document. Callers skip type positions
+// (markTypeSelectors), so a type named pkg.Lookup is not a read, but type
+// spellings the parser puts in expression position stay flagged: a
+// conversion pkg.Lookup(fn), a generic argument f[pkg.Lookup](x), a new or
+// make argument.
 func selectorLabel(sel *ast.SelectorExpr, osNames map[string]bool) string {
 	if knobEnvGuardMethods[sel.Sel.Name] {
 		return "." + sel.Sel.Name
@@ -113,13 +106,10 @@ func markTypeSelectors(n ast.Node, set map[*ast.SelectorExpr]bool) {
 	})
 }
 
-// scanKnobEnvSites walks every non-test *.go file in dir and returns each
-// knob-shaped call site's literal string key and every "file:line" location
-// it was read from, plus one violation message for each knob-reader
-// selector found with a non-literal key outside the allow-list, or found
-// somewhere other than the direct Fun of a call (e.g. bound to a variable
-// as a method value) — a shape this guard cannot trace to a key at all.
-// ReadDir/ParseFile failures return a plain error rather than a violation.
+// scanKnobEnvSites maps each literal knob key read in dir's non-test files
+// to its "file:line" sites, and returns a violation for each knob reader with
+// a non-literal key outside the allow-list or not called directly (a method
+// value), which the guard cannot trace to a key.
 func scanKnobEnvSites(dir string) (sites map[string][]string, violations []string, err error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -147,13 +137,9 @@ func scanKnobEnvSites(dir string) (sites map[string][]string, violations []strin
 				hasRecv = fd.Recv != nil
 			}
 
-			// First pass: every SelectorExpr that is the direct Fun of some
-			// call, keyed by node identity so the second pass can tell a
-			// direct call apart from a method value bound and used later.
-			// Also record, by the same node identity, whether a selector
-			// sits inside a *ast.FuncLit nested somewhere under decl — the
-			// allow-list only exempts decl's own direct body, not a closure
-			// declared inside it.
+			// Keyed by node identity: selectors that are a call's direct Fun
+			// (vs a method value), and selectors inside a nested FuncLit,
+			// which the allow-list does not exempt.
 			callFun := make(map[*ast.SelectorExpr]*ast.CallExpr)
 			inFuncLit := make(map[*ast.SelectorExpr]bool)
 			typePos := make(map[*ast.SelectorExpr]bool)
@@ -442,10 +428,8 @@ func TestScanKnobEnvSites_HasTeeth(t *testing.T) {
 		t.Error("scan should skip _test.go files, but found the IGNORED key from fixture_test.go")
 	}
 
-	// lineOf finds marker's line number in the fixture source, so each
-	// expected violation is pinned to the exact statement it came from
-	// rather than a name substring that a later, unrelated fixture shape
-	// could also produce (e.g. two shapes both named warnStrippedChildEnv).
+	// Pinned by line, not name: two fixture shapes are both named
+	// warnStrippedChildEnv.
 	lineOf := func(marker string) int {
 		idx := strings.Index(knobFixtureSource, marker)
 		if idx < 0 {

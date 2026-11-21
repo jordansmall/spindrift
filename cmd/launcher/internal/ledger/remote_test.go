@@ -14,11 +14,9 @@ import (
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
 )
 
-// remoteHarness is the ledgertest.Harness for Remote: the "remote" is a bare
-// repo shared by Backend and Rival, each of which is a Remote over its own
-// scratch clone (t.TempDir()) pointing at that one bare repo's path. t is
-// captured at construction so Backend/Rival (no *testing.T param, per the
-// Harness interface) can still call t.TempDir()/t.Fatalf.
+// remoteHarness is the ledgertest.Harness for Remote: Backend and Rival are
+// each a Remote over its own scratch repo, sharing one bare "remote". t is
+// captured because the Harness methods take no *testing.T.
 type remoteHarness struct {
 	t      *testing.T
 	remote string
@@ -68,8 +66,7 @@ func TestRemoteLedgerContract(t *testing.T) {
 
 // TestNewRemoteUnreachableNotLostRace asserts that NewRemote's own sync
 // failing (the remote URL is unreachable) surfaces as a plain error, never
-// ErrLostRace: NewRemote now owns the routine fetch, so an unreachable
-// remote fails there rather than ever reaching Append's push.
+// ErrLostRace.
 func TestNewRemoteUnreachableNotLostRace(t *testing.T) {
 	setGitIdentityEnv(t)
 	scratch := t.TempDir()
@@ -138,9 +135,8 @@ func TestRemoteRedactsCredentials(t *testing.T) {
 
 // TestRemoteAppendPushFailureRedactsCredentials asserts that a push that
 // fails for a real reason (a rejecting pre-receive hook, not a lost lease)
-// still redacts the URL's credential in the returned error.
-// TestRemoteRedactsCredentials above never reaches push at all: it fails at
-// the earlier fetch, so it never exercises redaction on the push-error path.
+// still redacts the URL's credential in the returned error;
+// TestRemoteRedactsCredentials fails at the fetch and never reaches push.
 func TestRemoteAppendPushFailureRedactsCredentials(t *testing.T) {
 	setGitIdentityEnv(t)
 	bare := ledgertest.NewRepo(t)

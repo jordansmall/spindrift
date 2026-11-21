@@ -89,9 +89,8 @@ func TestRenderSegmentsNestedAttribution(t *testing.T) {
 	}
 }
 
-// This pins the invariant the slice's brief calls out: byte attribution is
-// exactly linear, so per-source lengths sum to the whole text with no
-// remainder.
+// Byte attribution is exactly linear: per-source lengths sum to the whole
+// text with no remainder.
 func TestBodyLengthsPartitionText(t *testing.T) {
 	b := body{
 		{src: Source{Kind: SourceTemplate, Name: "t"}, text: "abc "},

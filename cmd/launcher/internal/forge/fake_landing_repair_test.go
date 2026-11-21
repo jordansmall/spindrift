@@ -7,9 +7,9 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// An unscripted (landing, parent) pair must default to contained=false, nil.
-// That is the "stays open" default the three predecessors this fake collapsed
-// all used, so changing it would silently flip callers to closing.
+// An unscripted (landing, parent) pair must default to contained=false, nil,
+// the "stays open" default; changing it would silently flip callers to
+// closing.
 func TestFake_LandingContained_ScriptsPerLandingAndParent(t *testing.T) {
 	f := forge.NewFake()
 	f.SetLandingContained("agent/issue-42", "1694", true, nil)

@@ -57,10 +57,8 @@ func TestRecordArtifactPathFreshOnReadFailureAfterStat(t *testing.T) {
 	}
 }
 
-// These cases mirror the pre-#2982
-// TestCheckDispositionsTokenBudget/TestCheckDecisionsTokenBudget cases that
-// checkBudget replaces, plus the zero-ceiling ("tripwire disabled") case the
-// per-artifact functions never had to cover.
+// TestRoundLogCheckBudget includes the zero-ceiling ("tripwire disabled")
+// case the findings roundLog relies on (issue #2982).
 func TestRoundLogCheckBudget(t *testing.T) {
 	rl := roundLog{phase: "dispositions", meanCeiling: dispositionsMeanTokenCeiling, totalCeiling: dispositionsTotalTokenCeiling}
 

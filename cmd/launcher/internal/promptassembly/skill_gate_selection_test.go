@@ -80,11 +80,9 @@ func TestAssembleCIFailureSummaryGateSubstitutesItsValue(t *testing.T) {
 	}
 }
 
-// Assemble's fragment loop reproduces old bash's swallow: the failed command
-// substitution sat as a printf argument, so `set -e` never saw a non-zero exit
-// and a missing fragment resolved to an empty string. CAVEMAN_BAKED is on in
-// coveredEnv while its fragment file is absent here, so the swallow is
-// observable.
+// A missing fragment file renders empty rather than failing (bash parity).
+// CAVEMAN_BAKED is on in coveredEnv while its fragment file is absent here, so
+// the swallow is observable.
 func TestAssembleMissingGatedFragmentFileIsSwallowed(t *testing.T) {
 	reg, env := syntheticRegistry(t,
 		[]FragmentRow{{Gate: "CAVEMAN_BAKED", Fragment: "absent.md", Var: "CAVEMAN_STEP"}},

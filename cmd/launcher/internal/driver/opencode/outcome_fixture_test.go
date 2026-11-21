@@ -17,9 +17,8 @@ import (
 // (issue #2261 slice 1).
 const spindriftOutcomeLine = "SPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 status=ready note=fixture"
 
-// Pins that RenderTranscript emits this line, so a rendered transcript
-// shows it. The orchestrator no longer reads the transcript;
-// TestOutcomeFixtureResultText covers its path.
+// Pins that RenderTranscript emits spindriftOutcomeLine; the orchestrator reads
+// ResultText instead, which TestOutcomeFixtureResultText covers.
 func TestOutcomeFixtureRenderTranscript(t *testing.T) {
 	path := filepath.Join("testdata", "outcome-fixture.jsonl")
 

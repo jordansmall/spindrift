@@ -101,13 +101,11 @@ type fakeIssueLabeler struct{}
 
 func (fakeIssueLabeler) AddLabels(num string, labels []string) error { return nil }
 
-// pushDraftForge wraps a forge.CodeForge with the BranchPusher and
-// DraftPRCreator methods, a DeleteBranch delegating to the wrapped Fake (so the
-// delete crosses its Connector), plus a real *forge.PRForgeFake,
-// a write-capable adapter would carry, so forge.ResolveCapabilities can
-// populate Capabilities.BranchPusher/DraftPRCreator/PRForge/BranchDeleter
-// off a real type assertion rather than a hand-built Capabilities value
-// (issue #4074's, #4112's wiring subtests below).
+// pushDraftForge wraps a forge.CodeForge with BranchPusher and DraftPRCreator
+// methods, a DeleteBranch delegating to the wrapped Fake (so the delete crosses
+// its Connector), and a real *forge.PRForgeFake, so forge.ResolveCapabilities
+// populates BranchPusher/DraftPRCreator/PRForge/BranchDeleter off a real type
+// assertion rather than a hand-built Capabilities (issues #4074, #4112).
 type pushDraftForge struct {
 	forge.CodeForge
 	fakeBranchPusher
@@ -121,17 +119,9 @@ func (p pushDraftForge) DeleteBranch(branch, base string) error {
 	return p.CodeForge.(forge.BranchDeleter).DeleteBranch(branch, base)
 }
 
-// butlerPatchForge opts the patch rung on only when Capabilities proves the
-// resolved CodeForge can both push a branch and open a draft PR host-side
-// (forge.Capabilities.HostCanOpenPR), can look up an open PR for a branch and
-// delete a branch host-side (forge.Capabilities.PRForge/BranchDeleter, issue
-// #4112 -- landPatch's own ambiguous-create recovery), the resolved
-// IssueTracker can add labels to an already-filed issue
-// (forge.Capabilities.IssueLabeler), and the tracker and forge descriptors
-// name the same backend, so the issue number both "Closes #N" and
-// "agent/issue-N" carry actually names an issue on that forge (issue #4074);
-// any one leg missing keeps the rung off exactly as WithPatchForge(nil, nil)
-// does.
+// TestButlerPatchForge covers each leg of butlerPatchForge's opt-in (see its
+// doc comment): any one missing keeps the rung off exactly as
+// WithPatchForge(nil, nil) does.
 func TestButlerPatchForge(t *testing.T) {
 	cf := forge.NewFake()
 
@@ -220,12 +210,9 @@ func TestButlerPatchForge(t *testing.T) {
 		}
 	})
 
-	// (issue #4074) a github CODE_FORGE paired with a forgejo ISSUE_TRACKER
-	// is a valid pairing generally, but the two backends' issue numbers are
-	// foreign namespaces: a finding filed on forgejo as issue N shares no
-	// relationship with GitHub issue N. Even though both capabilities are
-	// otherwise present, the rung must stay off, or the draft PR's "Closes
-	// #N" and its "agent/issue-N" branch would name the wrong issue.
+	// (issue #4074) a github forge with a forgejo tracker: their issue numbers
+	// are foreign namespaces, so with both capabilities present the rung must
+	// still stay off, or "Closes #N" and agent/issue-N would name the wrong issue.
 	t.Run("mismatched tracker and forge namespaces", func(t *testing.T) {
 		caps := forge.Capabilities{
 			BranchPusher: fakeBranchPusher{}, DraftPRCreator: fakeDraftPRCreator{}, IssueLabeler: fakeIssueLabeler{},
@@ -313,12 +300,9 @@ func assertNoButlerLedgerClaims(t *testing.T, repo string) {
 }
 
 // testButlerLaunchContext builds an otherwise-complete launchContext for a
-// preflight-rejection test: every knob past butlerPreflight (BUTLER_EVERY,
-// BUTLER_CLAIM_TIMEOUT, DAEMON_AWAKE_WINDOW, a real *dispatch.Factory) is
-// filled in at its schema default, so that if the guard under test were
-// missing, cmdButler would actually reach ledger.Claim instead of failing
-// earlier at, say, parseButlerClaimTimeout on a zero-value config (issue
-// #3905).
+// preflight-rejection test: every knob past butlerPreflight is at its schema
+// default and the factory is real, so a missing guard lets cmdButler reach
+// ledger.Claim rather than fail earlier on a zero-value config (issue #3905).
 func testButlerLaunchContext(t *testing.T, repo, butlerChores string) *launchContext {
 	t.Helper()
 	return &launchContext{
@@ -528,14 +512,12 @@ func TestButlerPreflight_TrackerCapability(t *testing.T) {
 	}
 }
 
-// (m) butlerPreflight guards codeForge, BUTLER_CHORES membership (or, with
-// no --chore, BUTLER_CHORES being non-empty at all), BUTLER_CHORE_CLASSES
-// syntax, the BUTLER_PATCH_CLASSES cross-checks (ADR 0057, only when
-// butlerMaxPatchesPerDay > 0), the ISSUE_TRACKER host-side filing gate (issue
-// #6343), and the Filer gate in that order, before
-// cmdButler ever claims a Ledger -- in particular a chore run with no
-// provisioned Filer (FILER_MODEL="") must be refused up
-// front rather than sweep and silently drop findings.
+// (m) butlerPreflight guards codeForge, BUTLER_CHORES membership
+// (or non-emptiness with no --chore), BUTLER_CHORE_CLASSES syntax, the
+// BUTLER_PATCH_CLASSES cross-checks (ADR 0057, only when
+// butlerMaxPatchesPerDay > 0), host-side filing (issue #6343), and the Filer,
+// all before any Ledger claim: a run with no Filer (FILER_MODEL="") would
+// silently drop findings.
 func TestButlerPreflight(t *testing.T) {
 	cases := []struct {
 		name                   string
@@ -900,12 +882,11 @@ func TestParseButlerClaimTimeout(t *testing.T) {
 	}
 }
 
-// promotableRunFunc builds a runner.Fake.RunFunc that reports one finding
-// clearing every promotion gate (allow-listed class, one file, non-blank
-// concurrence) -- the real-Dispatch, log-carrier equivalent of internal/
-// butler's own promotableDispatcher fixture, since cmdButler always drives a
-// real *dispatch.Dispatch (via lc.factory.NewChore), never a fake Dispatcher
-// (issue #3993).
+// promotableRunFunc builds a runner.Fake.RunFunc reporting one finding that
+// clears every promotion gate (allow-listed class, one file, non-blank
+// concurrence): the log-carrier equivalent of internal/butler's
+// promotableDispatcher, since cmdButler always drives a real
+// *dispatch.Dispatch via lc.factory.NewChore (issue #3993).
 func promotableRunFunc(class string) func(runner.Box) error {
 	return func(box runner.Box) error {
 		nonce := box.Env["RUN_NONCE"]

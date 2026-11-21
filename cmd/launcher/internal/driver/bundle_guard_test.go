@@ -130,9 +130,7 @@ func bundleProblems(reach map[string][]string, binaries []string, list string) [
 // TestOnlyBinariesReachTheBundle pins issues #5541, #5545 and #5648: only the
 // binaries (and the seamtest/bundled fixture) may reach the bundle, a Driver or
 // a non-core backend adapter (github, forgejo, jira) in their tests; every
-// library package tests through seamtest's Strategy or the forge fake. The
-// scan is one go list over the module, so it costs one invocation, not one per
-// package.
+// library package tests through seamtest's Strategy or the forge fake.
 func TestOnlyBinariesReachTheBundle(t *testing.T) {
 	names := driver.DescriptorNames()
 	if len(names) == 0 {

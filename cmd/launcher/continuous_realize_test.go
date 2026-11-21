@@ -170,11 +170,9 @@ func TestRunContinuousDispatch_FailedRealizeDoesNotChangeOutcome(t *testing.T) {
 	}
 }
 
-// This test pinned exit code 4 (waves.ErrImageStale) for a stale bwrap
-// agent-closure under issue #2667 AC2. ADR 0043 (issue #2682) superseded that:
-// an image-only-stale verdict under bwrap now hot-swaps in place instead of
-// draining, so with no open issue the run falls through to the ordinary
-// empty-queue exit (2, errQueueEmpty) once the swap succeeds.
+// Under bwrap an image-only-stale verdict hot-swaps in place (ADR 0043, issue
+// #2682) instead of draining with exit 4 (issue #2667 AC2), so with no open
+// issue the run reaches the ordinary empty-queue exit (2, errQueueEmpty).
 func TestRunContinuousDispatch_StoreClosure_StaleClosure_HotSwapsThenReachesEmptyQueue(t *testing.T) {
 	const loadedHash = "11111111111111111111111111111111" // 32 chars, the loaded closure
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct, so it never matches loadedHash
@@ -191,7 +189,7 @@ func TestRunContinuousDispatch_StoreClosure_StaleClosure_HotSwapsThenReachesEmpt
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
 	// The swap branch requires the launcher dimension to have really been
-	// probed (ADR 0043, issue #2682 review finding), not defaulted true by an
+	// probed (ADR 0043, issue #2682), not defaulted true by an
 	// unconfigured attr. freshness.Fake returns the same outpath for every
 	// attr, so loadedLauncherHash must be staleHash to leave that dimension
 	// both evaluated and fresh.

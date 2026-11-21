@@ -320,7 +320,7 @@ func TestSnapshotGeneration_WritesDBAtDerivedGenerationDir(t *testing.T) {
 	}
 }
 
-// Issue #2682 review Finding B: generations are immutable once created, and a
+// Issue #2682: generations are immutable once created, and a
 // generation already snapshotted by an earlier swap to the same closure (a
 // revert, say) may be --overlay-src-mounted by a live Box. VacuumStoreDBInto
 // would replace the existing db.sqlite with a fresh one, which ADR
@@ -395,8 +395,8 @@ func TestSnapshotGeneration_SweepsStaleTempWhenDestExists(t *testing.T) {
 }
 
 // Two different closure generations must nest into two different,
-// non-overlapping directories under the same nix-var-snapshot root, rather
-// than sharing the one flat path every closure used to collide on.
+// non-overlapping directories under the same nix-var-snapshot root, not one
+// shared flat path.
 func TestNixVarSnapshotDir_DifferentGenerationsProduceDistinctDirs(t *testing.T) {
 	root := filepath.Join("/pwd", ".spindrift", "nix-var-snapshot")
 	got1 := NixVarSnapshotDir("/pwd", "abc123-agent-closure")

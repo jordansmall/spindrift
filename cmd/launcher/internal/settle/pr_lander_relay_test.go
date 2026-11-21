@@ -66,7 +66,7 @@ type handoffRig struct {
 	outbox  string
 	sleeps  []time.Duration
 	onSleep func() // runs on every clock sleep, after it is recorded
-	stop    func() // the operator's Terminate, once Settle exists
+	stop    func() // a Reclaim mark, once Settle exists
 }
 
 // setup returns a row's Config/fake setup: a Policy of retries retries, a
@@ -433,8 +433,8 @@ func blockedHandoffCases() []prCase {
 // assertOutboxParked pins issues #4651 (an exhausted host-side relay) and #5144
 // (a draft-PR create failure after a successful relay): the bundle is preserved
 // in the outbox, so the issue moves agent-in-progress -> agent-failed with
-// exactly one comment pointing at `spindrift recover`, and never the old
-// merge-blocked comment.
+// exactly one comment pointing at `spindrift recover`, never a merge-blocked
+// comment.
 func assertOutboxParked(t *testing.T, fc *forge.Fake, num string) {
 	t.Helper()
 	iss, _ := fc.Issue(num)

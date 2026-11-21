@@ -40,7 +40,7 @@ func TestRegistry_BeginThenMarkedIsFalse(t *testing.T) {
 
 // A settle goroutine from the terminated incarnation can still be live, so
 // the Begin of a re-pick's fresh claim must leave the earlier generation's
-// mark intact (issue #743): the race Unmark used to lose.
+// mark intact (issue #743).
 func TestRegistry_BeginDoesNotClearAnOlderGenerationsMark(t *testing.T) {
 	r := NewRegistry()
 	oldGen := r.Begin("42")
@@ -58,7 +58,7 @@ func TestRegistry_BeginDoesNotClearAnOlderGenerationsMark(t *testing.T) {
 // Mark targets whichever generation is current, so the second one lands on
 // the re-pick's gen2. A settle goroutine from the earlier, already-terminated
 // incarnation can still be live (stuck in a long CI-watch poll, say), so that
-// second Terminate must not erase gen1's mark (issue #743 review finding).
+// second Mark must not erase gen1's mark (issue #743).
 func TestRegistry_SecondTerminateDoesNotErasePriorGenerationsMark(t *testing.T) {
 	r := NewRegistry()
 	gen1 := r.Begin("42")

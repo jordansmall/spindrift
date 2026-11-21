@@ -52,9 +52,7 @@ func awaitWG(t *testing.T, r *scriptedRunner, wg *sync.WaitGroup) {
 }
 
 // assertBatonPassReason fails the test unless events contains at least one
-// baton_pass stamped with reason — the shared check every release-path test
-// below ends on, once its own setup has driven the holder into that one
-// path.
+// baton_pass stamped with reason.
 func assertBatonPassReason(t *testing.T, events []Event, reason batonReason) {
 	t.Helper()
 	for _, ev := range events {
@@ -66,8 +64,7 @@ func assertBatonPassReason(t *testing.T, events []Event, reason batonReason) {
 }
 
 // childStartSlots extracts the slot of every child_start in events, in
-// stream order — the shape the two failure tests below assert slot
-// identity on.
+// stream order.
 func childStartSlots(t *testing.T, events []Event) []int {
 	t.Helper()
 	var slots []int
@@ -89,37 +86,25 @@ func childStartSlots(t *testing.T, events []Event) []int {
 const siblingSlot = 1
 
 // pinTheFailingHolder parks clk so that a holder whose round fails cannot
-// come back around and take its own baton again, which is what lets the
-// failure tests below assert exactly which slot started each child.
+// come back around and re-take its own baton, letting the failure tests
+// assert exactly which slot started each child.
 //
-// The obvious synchronisation — wait for the sibling's baton_hold line
-// before letting the failure land — does not work: awaitBaton emits
-// baton_hold *before* entering its blocking select (pool.go), so the line
-// proves only that the sibling emitted, not that it is parked on the
-// channel. The token can still land in the capacity-1 buffer and be
-// re-taken by the failing holder through awaitBaton's own non-blocking
-// receive, which makes the failing slot start the next child instead.
-//
-// A parked clock closes that off structurally rather than by timing:
-// every failure path here reaches backoffOrHalt, which passes the baton
-// and *then* sleeps out FailureBackoff. Parked, that sleep blocks until Loop's halt
-// cancels ctx, so the failing holder is still sitting in it while the
-// sibling runs — and once it does wake, its next haltIfStopping returns it
-// rather than letting it start anything.
+// Waiting for the sibling's baton_hold is not enough: awaitBaton emits it
+// *before* its blocking select, so the token can still land in the
+// capacity-1 buffer and be re-taken by the failing holder's non-blocking
+// receive. A parked clock closes that off structurally: backoffOrHalt
+// passes the baton and *then* sleeps out FailureBackoff, which blocks until
+// Loop's halt cancels ctx; on waking, haltIfStopping returns the holder
+// before it can start anything.
 func pinTheFailingHolder(clk *testClock) {
 	clk.park()
 }
 
 // TestPoolBatonSerializesDiscoveryOnColdStart pins issue #3684's AC1: at
 // most one child is in its discovery phase at any moment, on the first
-// wave exactly as much as on every refill. On a cold start, only the
-// pre-assigned initial holder (slot 0) starts discovery; every other slot
-// parks on baton_hold rather than running its own discovery against the
-// same tracker snapshot. Once the holder announces a claim (live, via
-// OnRecord's box record, not after its child exits), the baton passes to
-// exactly one waiting slot — never both at once, which is the whole point
-// of a token versus the old one-shot gate that released every sibling
-// together.
+// wave too. Only the pre-assigned holder (slot 0) starts discovery; once it
+// announces a claim (live, via OnRecord's box record), the baton passes to
+// exactly one waiting slot, never both at once.
 func TestPoolBatonSerializesDiscoveryOnColdStart(t *testing.T) {
 	const slots = 3
 	r := &scriptedRunner{revisions: []string{"rev1"}}
@@ -138,14 +123,11 @@ func TestPoolBatonSerializesDiscoveryOnColdStart(t *testing.T) {
 		t.Fatalf("first slot to start = %d, want 0 (the initial baton holder)", got)
 	}
 
-	// The other two slots park on the baton instead of starting their own
-	// discovery: wait for both to report it.
 	nw.waitForLine(t, "\"event\":\"baton_hold\"")
 	nw.waitForLine(t, "\"event\":\"baton_hold\"")
 
-	// Structurally guaranteed, not a timing race: a slot parked in
-	// awaitBaton cannot reach StartChild until the baton reaches it, so
-	// r.started must have nothing further to give yet.
+	// Not a timing race: a slot parked in awaitBaton cannot reach
+	// StartChild until the baton reaches it.
 	select {
 	case got := <-r.started:
 		t.Fatalf("sibling slot %d started before the holder claimed anything, want the pool held", got)
@@ -194,9 +176,8 @@ func TestPoolBatonSerializesDiscoveryOnColdStart(t *testing.T) {
 	if passes != slots-1 {
 		t.Errorf("baton_pass events = %d, want exactly %d (one per claim that released a sibling)", passes, slots-1)
 	}
-	// Every pass above is claim-driven (fireOnIssue), so the stream's
-	// reason must say so on every one of them — not merely on one of
-	// them, which is all the shared assertBatonPassReason checks.
+	// Every pass above is claim-driven, so every one must say so —
+	// assertBatonPassReason only checks for one.
 	for _, ev := range events {
 		if ev.Event == "baton_pass" && ev.Reason != string(batonPassClaimed) {
 			t.Errorf("baton_pass reason = %q, want every pass in this test stamped %q", ev.Reason, batonPassClaimed)
@@ -214,9 +195,7 @@ func TestPoolBatonSerializesDiscoveryOnColdStart(t *testing.T) {
 }
 
 // TestPoolSingleSlotNeverHoldsABaton pins that a single-slot pool builds no
-// baton at all (see newPool): the sole slot has no sibling to serialize
-// against, so there is no discovery to stagger and the stream must carry no
-// baton_hold or baton_pass event.
+// baton (see newPool), so the stream carries no baton_hold or baton_pass.
 func TestPoolSingleSlotNeverHoldsABaton(t *testing.T) {
 	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
 	clk := &testClock{}
@@ -235,13 +214,9 @@ func TestPoolSingleSlotNeverHoldsABaton(t *testing.T) {
 
 // TestPoolBatonCancellationNeverDeadlocksAWaitingSlot pins issue #3684's
 // AC5: a slot parked in awaitBaton must never hang past ctx cancellation.
-// The initial holder's own ResolveTip call (guaranteed to be call 1:
-// every sibling is still parked in awaitBaton, so none has reached
-// ResolveTip yet) blocks on ctx.Done() rather than returning, so the
-// holder never starts a child and never passes the baton on its own; once
-// a sibling has reported its own baton_hold, the ctx is cancelled and Loop
-// must still return rather than leaving that sibling stuck on <-p.baton
-// forever.
+// The holder's ResolveTip blocks on ctx.Done(), so it never passes the baton
+// on its own; once a sibling reports baton_hold, ctx is cancelled and Loop
+// must still return.
 func TestPoolBatonCancellationNeverDeadlocksAWaitingSlot(t *testing.T) {
 	const slots = 2
 	entered := make(chan struct{})
@@ -265,12 +240,10 @@ func TestPoolBatonCancellationNeverDeadlocksAWaitingSlot(t *testing.T) {
 	p, pctx := newPool(ctx, cfg, r, em, clk)
 	defer p.cancel()
 
-	// leadSlot is launched alone first, and only released to siblingSlot
-	// once it is confirmed genuinely blocked inside its own (call 1)
-	// resolve: the baton no longer gates ResolveTip (issue #3625's
-	// structural fix), so both slots would otherwise race for call 1, and
-	// whichever slot loses that race would find the baton already free and
-	// never park on it at all.
+	// leadSlot is launched alone and confirmed blocked in its (call 1)
+	// resolve before siblingSlot starts: the baton does not gate ResolveTip
+	// (issue #3625), so the slots would otherwise race for call 1 and the
+	// loser would never park on the baton.
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -305,33 +278,21 @@ func TestPoolBatonCancellationNeverDeadlocksAWaitingSlot(t *testing.T) {
 	}
 }
 
-// --- one test per baton release path (issue #3684's release-path AC) ---
-//
-// Every test below shares one shape: a two-slot pool where the initial
-// holder (slot 0, leadSlot) ends its round by exactly one release path, and
-// the assertion is that the pool moves rather than stalls on it — the
-// waiting sibling's own child goes on to start, and the stream carries a
-// baton_pass stamped with the reason that path owns. A pool that forgot to
-// pass the baton on any one of these would leave the sibling parked on
-// baton_hold forever, indistinguishable from a genuine hang.
+// One test per baton release path follows (issue #3684's release-path AC):
+// a two-slot pool whose holder (leadSlot) ends its round by exactly one
+// release path, asserting the sibling's child starts and the stream carries
+// that path's baton_pass reason. A missed pass leaves the sibling parked
+// forever, indistinguishable from a hang.
 
 // TestPoolBatonPassesOnQueueEmptyChildEnd pins the post-StartChild release for
-// a queue-empty child (exit 2): the holder's round ends having found no work
-// at all, and the baton must still move — a pool that held it through every
-// empty-queue result would let one slot's dry queue stall its sibling's
-// discovery too.
+// a queue-empty child (exit 2), so one slot's dry queue cannot stall its
+// sibling's discovery.
 //
-// The clock is parked so the holder cannot re-take its own baton: the pool
-// has no FIFO waiter queue (issue #3684), so nothing else stops it. This is
-// pinTheFailingHolder's move, applied to the idle branch rather than
-// backoffOrHalt. runSlot picks a Kind *before* awaitBaton, so the sibling
-// picked Dispatch at cold start, while still ungated, and parks on
-// baton_hold holding that choice;
-// nothing re-picks once the baton reaches it. The holder is the one that
-// re-picks: exit 2 gates Dispatch's pool-wide kindBackoff (issue #3541), so
-// with the lone configured Kind it takes the batonPassIdle branch and
-// blocks in idleSleep on the parked clock until Loop's halt cancels ctx.
-// The next start is therefore the sibling's, deterministically.
+// The clock is parked so the holder cannot re-take its own baton (there is
+// no FIFO waiter queue, issue #3684): the sibling picked its Kind before
+// awaitBaton, while still ungated, but the holder re-picks after exit 2
+// gates the lone Kind (issue #3541) and blocks in idleSleep until Loop's
+// halt. The next start is therefore the sibling's, deterministically.
 func TestPoolBatonPassesOnQueueEmptyChildEnd(t *testing.T) {
 	const slots = 2
 	cfg := testConfig(slots)
@@ -387,14 +348,10 @@ func startParkedSiblingPool(t *testing.T, r *scriptedRunner, cfg Config) <-chan 
 }
 
 // TestPoolHaltPoolExitPassesNoBatonBeforeHalt pins issue #4365: a holder whose
-// child exits with a pool-halting code (exit 5 host-tainted, exit 6
-// config-invalid) must not hand the baton to a parked sibling before the
-// halt lands, or that sibling wakes, finds nothing stopping it, and starts a
-// child on a host the pool has just declared unfit.
-//
-// Exit 7 with Stop closed is the third HaltPool exit and is not covered: the
-// closed Stop already halts the pool via Loop's watcher, so the woken
-// sibling's re-check would halt it even under the old ordering and the case
+// child exits with a pool-halting code (5, 6) must not hand the baton to a
+// parked sibling before the halt lands, or the sibling starts a child on a
+// host the pool has just declared unfit. Exit 7 with Stop closed is not
+// covered: the closed Stop halts the woken sibling anyway, so that case
 // could not fail.
 func TestPoolHaltPoolExitPassesNoBatonBeforeHalt(t *testing.T) {
 	for _, tc := range []struct {
@@ -424,16 +381,13 @@ func TestPoolHaltPoolExitPassesNoBatonBeforeHalt(t *testing.T) {
 }
 
 // TestPoolBreakerTripPassesNoBatonBeforeHalt pins issue #4365's breaker
-// path: a holder whose own failure crosses the breaker threshold must not
-// hand the baton to a parked sibling before the trip lands, or that sibling
-// wakes, finds nothing stopping it, and starts a child on a pool that is
-// already halting. BreakerThreshold 1 makes the holder's own failure the
-// tripping one; the sibling is parked on baton_hold throughout.
+// path: a holder whose failure trips the breaker (BreakerThreshold 1) must
+// not hand the baton to the parked sibling before the trip lands.
 //
 // A held slot cannot return a seam error, so the seam case gates the lead's
-// StartChild in onStart instead and scripts exit 5 for any child that starts
-// after it: a sibling that wrongly runs surfaces as a host-tainted halt, not
-// the breaker's.
+// StartChild in onStart instead and scripts exit 5 for any later child: a
+// sibling that wrongly runs surfaces as a host-tainted halt, not the
+// breaker's.
 func TestPoolBreakerTripPassesNoBatonBeforeHalt(t *testing.T) {
 	const slots = 2
 	for _, tc := range []struct {
@@ -484,17 +438,10 @@ func TestPoolBreakerTripPassesNoBatonBeforeHalt(t *testing.T) {
 	}
 }
 
-// TestPoolBatonPassesOnNoneDispatchableChildEnd is
-// TestPoolBatonPassesOnQueueEmptyChildEnd's sibling for exit 3: work
-// existed but every issue found was claimed or overlap-deferred, a
-// different outcome label (outcomeNoneDispatchable) than exit 2's, but the
-// same post-StartChild release site — the baton must move on both alike, not
-// just the plain empty-queue case.
-//
-// The clock is parked for the same reason as in
-// TestPoolBatonPassesOnQueueEmptyChildEnd: exit 3 gates Dispatch's
-// pool-wide kindBackoff too, so the holder's re-pick sleeps on the parked
-// clock and cannot re-take the baton ahead of the sibling.
+// TestPoolBatonPassesOnNoneDispatchableChildEnd is the counterpart of
+// TestPoolBatonPassesOnQueueEmptyChildEnd for exit 3 (outcomeNoneDispatchable):
+// same release site, different outcome label. The clock is parked for the
+// same reason: exit 3 gates the kind too.
 func TestPoolBatonPassesOnNoneDispatchableChildEnd(t *testing.T) {
 	const slots = 2
 	cfg := testConfig(slots)
@@ -532,20 +479,15 @@ func TestPoolBatonPassesOnNoneDispatchableChildEnd(t *testing.T) {
 }
 
 // TestPoolBatonPassesOnUnrecognisedExit pins the same post-StartChild release
-// site for an unrecognised exit code (Interpret's default case, Backoff):
-// the child ended abnormally rather than announcing anything, and the
-// release must still be honest about it — batonPassChildEnded, the same
-// reason a clean no-work exit gets, since from the baton's point of view
-// both are "the holder's child ended without a claim".
+// site for an unrecognised exit code (Interpret's Backoff case): the reason
+// is batonPassChildEnded, as for a clean no-work exit, since both are "the
+// holder's child ended without a claim".
 func TestPoolBatonPassesOnUnrecognisedExit(t *testing.T) {
 	const slots = 2
 	r := &scriptedRunner{revisions: []string{"rev1"}}
 	r.holdSlots(slots)
 	clk := &testClock{}
-	// An unrecognised exit is Interpret's Backoff case, so the holder ends
-	// this round in backoffOrHalt exactly as the two failure tests below
-	// do — park the clock for the same reason, to pin which slot starts
-	// next.
+	// The holder ends in backoffOrHalt; see pinTheFailingHolder.
 	pinTheFailingHolder(clk)
 	nw := newNotifyWriter()
 	em := newTestEmitter(nw)
@@ -579,11 +521,9 @@ func TestPoolBatonPassesOnUnrecognisedExit(t *testing.T) {
 	assertBatonPassReason(t, events, batonPassChildEnded)
 }
 
-// TestPoolBatonPassesOnSeamFailure pins the same release reason for a
-// StartChild seam error (the child could not even be started/waited on, not a
-// real exit code at all): backoffOrHalt is handed batonPassChildEnded, so the
-// reason on the stream honestly says a child ended rather than claiming the
-// round failed before starting one.
+// TestPoolBatonPassesOnSeamFailure pins batonPassChildEnded for a StartChild
+// seam error too: a child_start was emitted, so the round did not fail
+// before starting one.
 func TestPoolBatonPassesOnSeamFailure(t *testing.T) {
 	const slots = 2
 	wantErr := errors.New("boom")
@@ -622,11 +562,8 @@ func TestPoolBatonPassesOnSeamFailure(t *testing.T) {
 		}
 	}
 
-	// runErrAt=1 seam-errors leadSlot's own StartChild call, so the round
-	// that follows is siblingSlot's — the only other configured slot
-	// (slots==2) — and with the clock parked exactly two children start,
-	// in exactly that order: leadSlot's seam-failed one, then the
-	// sibling's, whose exit 5 halts the pool.
+	// With the clock parked exactly two children start, in order:
+	// leadSlot's seam-failed one, then the sibling's, whose exit 5 halts.
 	startSlots := childStartSlots(t, events)
 	if len(startSlots) != 2 || startSlots[0] != leadSlot || startSlots[1] != siblingSlot {
 		t.Fatalf("child_start slots = %v, want exactly [%d %d]: the sibling parked on the baton must start next, not the failing holder re-acquiring", startSlots, leadSlot, siblingSlot)
@@ -635,9 +572,8 @@ func TestPoolBatonPassesOnSeamFailure(t *testing.T) {
 
 // TestPoolBatonPassesWhenWindowClosesBeforeChildStart pins the pre-child
 // Awake re-check in runSlot: the window can shut between the holder's
-// ResolveTip fetch and its own child_start, and the holder is about to
-// loop back into awaitWindow for the whole shut span — holding the baton
-// through that would stall the sibling's own discovery for no reason.
+// ResolveTip and its child_start, and holding the baton through the whole
+// shut span would stall the sibling's discovery.
 func TestPoolBatonPassesWhenWindowClosesBeforeChildStart(t *testing.T) {
 	const slots = 2
 	win, err := ParseWindow("09:00-17:00 UTC")
@@ -669,10 +605,8 @@ func TestPoolBatonPassesWhenWindowClosesBeforeChildStart(t *testing.T) {
 	p, pctx := newPool(ctx, cfg, r, em, clk)
 	defer p.cancel()
 
-	// leadSlot is launched alone first, and siblingSlot only once leadSlot
-	// is confirmed genuinely blocked inside its own (call 1) resolve: the
-	// baton no longer gates ResolveTip (issue #3625's structural fix), so
-	// a bare call-index script would otherwise race both slots for call 1.
+	// leadSlot must own resolve call 1: the baton does not gate ResolveTip
+	// (issue #3625), so both slots would otherwise race for it.
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -694,11 +628,9 @@ func TestPoolBatonPassesWhenWindowClosesBeforeChildStart(t *testing.T) {
 	close(proceed)
 
 	// The holder's fetch returns past the window's close (16:59:50 ->
-	// 17:01:50): the baton must still pass, on the holder's next
-	// iteration, rather than the pool hanging on it until the window
-	// reopens at 09:00. With a shut window the sibling parks straight
-	// back into awaitWindow too, so a child starting is not the right
-	// signal here — the baton_pass event, seen below, is.
+	// 17:01:50): the baton must still pass rather than hang until 09:00.
+	// The sibling parks in awaitWindow too, so baton_pass, not a child
+	// start, is the signal.
 	nw.waitForLine(t, "\"event\":\"baton_pass\"")
 	cancel()
 
@@ -727,17 +659,13 @@ func TestPoolBatonPassesWhenWindowClosesBeforeChildStart(t *testing.T) {
 	}
 }
 
-// TestPoolBatonColdStartInsideShutWindowGatesDiscoveryAtOpen pins runSlot's
-// comment above p.awaitBaton (loop.go): apart from the pre-assigned initial
-// holder's very first round, a slot never parks in awaitWindow holding the
-// baton — acquisition happens only after awaitWindow returns. A cold start
-// wholly inside a shut Awake window puts every slot, the holder included,
-// through awaitWindow first: none of them has reached awaitBaton yet, so
-// the stream must carry no baton_hold at all for the whole shut span, not
-// just none from the holder. Once the window reopens, discovery resumes
-// exactly as serialized as any other round: the holder (already holding
-// the token from newPool) starts at once, and a sibling's baton_hold only
-// clears once the holder's own claim passes it on.
+// TestPoolBatonColdStartInsideShutWindowGatesDiscoveryAtOpen pins that,
+// apart from the initial holder's first round, a slot never parks in
+// awaitWindow holding the baton: acquisition happens only after awaitWindow
+// returns, so a cold start inside a shut window carries no baton_hold at all
+// for the whole shut span. Once the window reopens, discovery is serialized
+// as in any other round: the holder (holding the token from newPool) starts
+// at once, and a sibling waits for its claim.
 func TestPoolBatonColdStartInsideShutWindowGatesDiscoveryAtOpen(t *testing.T) {
 	const slots = 3
 	win, err := ParseWindow("09:00-17:00 UTC")
@@ -762,10 +690,8 @@ func TestPoolBatonColdStartInsideShutWindowGatesDiscoveryAtOpen(t *testing.T) {
 		done <- Loop(context.Background(), cfg, r, em, clk)
 	}()
 
-	// Every slot's first window read finds it shut — the holder included —
-	// so all three park in clk.Sleep from inside awaitWindow, none having
-	// reached awaitBaton yet. Draining exactly `slots` sleep entries proves
-	// all three, not just the first, actually got there.
+	// Draining exactly `slots` sleep entries proves all three, holder
+	// included, parked in awaitWindow before reaching awaitBaton.
 	clk.awaitSleep(t, slots)
 
 	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
@@ -775,9 +701,8 @@ func TestPoolBatonColdStartInsideShutWindowGatesDiscoveryAtOpen(t *testing.T) {
 		}
 	}
 
-	// Reopen the window: every slot's Sleep returns at once. The holder
-	// proceeds straight through (it already holds the token), the two
-	// siblings each miss the non-blocking receive and park on baton_hold.
+	// Reopen the window: the holder already holds the token; the two
+	// siblings park on baton_hold.
 	clk.step(time.Date(2026, 1, 1, 9, 0, 1, 0, time.UTC))
 
 	if got := r.awaitStart(t); got != leadSlot {
@@ -786,9 +711,7 @@ func TestPoolBatonColdStartInsideShutWindowGatesDiscoveryAtOpen(t *testing.T) {
 	nw.waitForLine(t, "\"event\":\"baton_hold\"")
 	nw.waitForLine(t, "\"event\":\"baton_hold\"")
 
-	// Structurally guaranteed, not a timing race: both siblings are parked
-	// in awaitBaton and cannot reach StartChild until the holder claims
-	// something, so r.started must have nothing further to give yet.
+	// Not a timing race: both siblings are parked in awaitBaton.
 	select {
 	case got := <-r.started:
 		t.Fatalf("a sibling slot %d started before the holder claimed anything, want the pool held through the reopen", got)
@@ -816,20 +739,13 @@ func TestPoolBatonColdStartInsideShutWindowGatesDiscoveryAtOpen(t *testing.T) {
 }
 
 // TestPoolBatonPassesOnPreChildFailure pins the backoffOrHalt release site
-// for a failure that lands before any child ever starts (here, the
-// holder's very first ResolveTip): the holder is about to back off
-// alone, and holding the pool through that backoff would stall the
-// sibling's own discovery on a problem backoffOrHalt already handles
-// per-slot.
+// for a failure before any child starts (the holder's first ResolveTip):
+// holding the baton through a per-slot backoff would stall the sibling's
+// discovery.
 //
-// The baton no longer gates ResolveTip (issue #3625's structural fix moved
-// acquisition to after the resolve), so both slots can now reach
-// resolveTipOnce concurrently and a bare resolveAt=1 script would race
-// both slots for call index 1. Launching leadSlot's goroutine alone first,
-// and holding it inside its own onResolve until the test has observed it
-// get there, pins call 1 to leadSlot deterministically without relying on
-// scheduler timing — siblingSlot is only launched, and only then reaches
-// resolveTipOnce for call 2, once that is confirmed.
+// The baton does not gate ResolveTip (issue #3625), so a bare resolveAt=1
+// script would race both slots for call 1. leadSlot runs alone and is held
+// in onResolve until observed there; only then is siblingSlot launched.
 func TestPoolBatonPassesOnPreChildFailure(t *testing.T) {
 	const slots = 2
 	wantErr := errors.New("boom")
@@ -894,10 +810,8 @@ func TestPoolBatonPassesOnPreChildFailure(t *testing.T) {
 	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
 	assertBatonPassReason(t, events, batonPassFailed)
 
-	// resolveAt=1 fails leadSlot before it ever reaches child_start, so
-	// the only child that starts at all is siblingSlot's: with the clock
-	// parked, leadSlot never gets a second round in which to start one of
-	// its own.
+	// With the clock parked, leadSlot never gets a second round, so the
+	// only child that starts is siblingSlot's.
 	startSlots := childStartSlots(t, events)
 	if len(startSlots) != 1 || startSlots[0] != siblingSlot {
 		t.Fatalf("child_start slots = %v, want exactly [%d]: the sibling parked on the baton must be the one to start, not the failing holder", startSlots, siblingSlot)
@@ -905,19 +819,14 @@ func TestPoolBatonPassesOnPreChildFailure(t *testing.T) {
 }
 
 // TestPoolBatonPassesWhenNoKindIsRunnable pins the pickKind-fails release
-// (batonPassIdle): every slot shares one kindBackoff per configured kind
-// (issue #3541), so once a no-work result gates the pool's only kind, a
-// holder whose own pickKind then comes up empty must not sleep out its idle
-// wait holding the baton — that would strand every sibling's discovery on
-// the same drought, not just the one kind that is dry.
+// (batonPassIdle): a holder whose pickKind comes up empty, because the
+// pool's only kind is gated (issue #3541), must not sleep out its idle wait
+// holding the baton.
 //
-// The kind is seeded gated directly, before either slot starts, rather
-// than driven by a real no-work StartChild: passBaton(batonPassChildEnded)
-// fires before markNoWork in loop.go's own Wait case, so racing a live
-// no-work exit against the sibling's very next pickKind call would leave
-// this test's own outcome dependent on which side of that gap the sibling
-// happened to land on. Seeding up front removes that gap entirely — both
-// slots deterministically see the kind already gated.
+// The kind is seeded gated before either slot starts, rather than driven by
+// a real no-work exit, so both slots deterministically see it gated without
+// depending on when the sibling's pickKind lands relative to the holder's
+// release.
 func TestPoolBatonPassesWhenNoKindIsRunnable(t *testing.T) {
 	const slots = 2
 	cfg := testConfig(slots)
@@ -949,10 +858,8 @@ func TestPoolBatonPassesWhenNoKindIsRunnable(t *testing.T) {
 	events := decodeEvents(t, &buf)
 	assertBatonPassReason(t, events, batonPassIdle)
 
-	// Advance past the seeded deadline and release both parked slots:
-	// pickKind now finds the kind runnable again, so whichever slot wins
-	// the freed baton goes on to start its own child — the pool resumes
-	// rather than stalling on the drought.
+	// Past the seeded deadline, whichever slot wins the freed baton starts
+	// a child.
 	clk.step(clk.Now().Add(time.Hour))
 
 	started := r.awaitStart(t)
@@ -961,21 +868,14 @@ func TestPoolBatonPassesWhenNoKindIsRunnable(t *testing.T) {
 }
 
 // TestPoolBatonPassesWhenHolderStopsBeforeResolving pins runSlot's own
-// deferred passBaton (batonPassStopped): a holder that stops before any of
-// the other release sites ever resolves — here, an operator cancellation
-// landing inside its very first ResolveTip — must still release the
-// baton on its way out, or a sibling parked in awaitBaton would hang
-// forever on a token nothing else will ever pass.
+// deferred passBaton (batonPassStopped): a holder that stops before any
+// other release site — here, an operator cancellation inside its first
+// ResolveTip — must still release the baton on its way out.
 //
-// Only leadSlot's own goroutine runs: the property this pins is the
-// holder's own stamped reason on exit, not a sibling's unblocking (that is
-// TestPoolBatonCancellationNeverDeadlocksAWaitingSlot's own claim, and — now
-// that the baton is acquired after the resolve rather than before (issue
-// #3625's structural fix) — a sibling no longer parks on the baton ahead of
-// the holder's first resolve anyway, so there is nothing left here for a
-// second slot to pin). cfg still configures two slots so newPool allocates
-// a baton at all (Slots > 1, pool.go) — a single-slot pool has none to
-// stamp.
+// Only leadSlot's goroutine runs: this pins the holder's stamped reason, not
+// a sibling's unblocking (TestPoolBatonCancellationNeverDeadlocksAWaitingSlot
+// covers that). cfg still configures two slots so newPool allocates a baton
+// at all.
 func TestPoolBatonPassesWhenHolderStopsBeforeResolving(t *testing.T) {
 	const slots = 2
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1018,26 +918,18 @@ func TestPoolBatonPassesWhenHolderStopsBeforeResolving(t *testing.T) {
 		t.Fatalf("halt reason = %q, want it to name context-cancelled", reason)
 	}
 
-	// backoffOrHalt checks haltIfStopping before it ever touches the baton
-	// (issue #3626), and this ctx cancellation is exactly what that check
-	// catches — so backoffOrHalt returns without passing the baton itself,
-	// and it is runSlot's own deferred passBaton that fires as the holder
-	// unwinds. The reason is batonPassStopped, not batonPassFailed: the
-	// holder returned before its discovery round resolved, so the pass
-	// this test observes is runSlot's, not backoffOrHalt's.
+	// backoffOrHalt's haltIfStopping check (issue #3626) catches the
+	// cancellation before it touches the baton, so the pass is runSlot's
+	// deferred batonPassStopped, not backoffOrHalt's batonPassFailed.
 	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
 	assertBatonPassReason(t, events, batonPassStopped)
 }
 
-// TestPoolBatonSerializesRefillsAfterTheFirstWave pins issue #3684's own
-// sharpest difference from the deleted one-shot gate: the gate released
-// every sibling together once, then stopped gating at all. The baton must
-// keep applying to *every* refill, not just the cold start — two slots
-// finishing in the same tick still discover one after the other, not both
-// at once. Every claim below is driven manually via fireOnIssue (not
-// announceEachSlot), so the test controls exactly when each replacement's
-// own claim reaches the pool rather than racing it against StartChild's own
-// entry.
+// TestPoolBatonSerializesRefillsAfterTheFirstWave pins issue #3684: the baton
+// applies to *every* refill, not just the cold start — two slots finishing
+// in the same tick still discover one after the other. Claims are driven via
+// fireOnIssue, not announceEachSlot, so the test controls when each reaches
+// the pool.
 func TestPoolBatonSerializesRefillsAfterTheFirstWave(t *testing.T) {
 	const slots = 3
 	r := &scriptedRunner{revisions: []string{"rev1"}}
@@ -1051,19 +943,13 @@ func TestPoolBatonSerializesRefillsAfterTheFirstWave(t *testing.T) {
 		done <- Loop(context.Background(), testConfig(slots), r, em, clk)
 	}()
 
-	// Drive a genuine first wave: the pre-assigned holder claims, freeing
-	// the baton to the next parked sibling, and so on, until all three are
-	// in flight together.
 	first := r.awaitStart(t)
 	if first != leadSlot {
 		t.Fatalf("first slot to start = %d, want %d (the initial baton holder)", first, leadSlot)
 	}
-	// Wait for both siblings to genuinely park before releasing the first
-	// claim: without this, one sibling's own first awaitBaton call can
-	// still be in flight when the claim lands, letting it grab the token
-	// via the non-blocking receive with no hold of its own — leaving the
-	// wave1 hold count that the refill's own count is measured against
-	// under-counted.
+	// Both siblings must park before the first claim, or one can grab the
+	// token via the non-blocking receive with no hold, under-counting the
+	// wave1 holds the refill is measured against.
 	nw.waitForLine(t, "\"event\":\"baton_hold\"")
 	nw.waitForLine(t, "\"event\":\"baton_hold\"")
 	r.fireOnIssue(t, first, "issue-a")
@@ -1078,12 +964,9 @@ func TestPoolBatonSerializesRefillsAfterTheFirstWave(t *testing.T) {
 		t.Fatalf("peakConcurrency = %d, want %d: the first wave never had all three slots in flight at once", peak, slots)
 	}
 
-	// Release two of the three in-flight children together: both refill in
-	// the same tick. Exit 0 (dispatched, Continue) rather than a no-work
-	// exit deliberately: a no-work exit gates this pool's own single Kind
-	// through the pool-wide kindBackoff (issue #3541), which would send
-	// both slots through an extra idleSleep/batonPassIdle round-trip and
-	// entangle that gate's own timing with the property this test pins.
+	// Exit 0, not a no-work exit: a no-work exit gates the single Kind
+	// (issue #3541) and would entangle an idleSleep round-trip with the
+	// property pinned here.
 	r.releaseSlot(t, first, ChildResult{Exit: 0})
 	r.releaseSlot(t, second, ChildResult{Exit: 0})
 
@@ -1092,17 +975,11 @@ func TestPoolBatonSerializesRefillsAfterTheFirstWave(t *testing.T) {
 		t.Fatalf("first replacement to start = %d, want one of the two released slots (%d, %d)", winner, first, second)
 	}
 
-	// The winner grabbed the spare token wave1 left behind, silently — no
-	// hold of its own. The loser finds the channel already empty and
-	// parks: wait for its baton_hold (the wave1 pair was already drained
-	// above, so this is the refill's own, freshly emitted one) so the
-	// select below observes a genuinely parked loser, not a lucky
-	// scheduling gap.
+	// The winner silently took wave1's spare token; wait for the loser's
+	// fresh baton_hold so the select below sees it genuinely parked.
 	nw.waitForLine(t, "\"event\":\"baton_hold\"")
 
-	// Structurally guaranteed, not a timing race: the loser is parked on
-	// awaitBaton and cannot reach StartChild until the winner claims
-	// something, so r.started must have nothing further to give yet.
+	// Not a timing race: the loser is parked on awaitBaton.
 	select {
 	case got := <-r.started:
 		t.Fatalf("a second replacement (slot %d) started before the first announced, want the two refills serialized", got)
@@ -1138,11 +1015,9 @@ func TestPoolBatonSerializesRefillsAfterTheFirstWave(t *testing.T) {
 	}
 }
 
-// TestPoolOneKindPoolBehavesAsBefore pins issue #3684's AC2 for the
-// single-Kind half: a multi-slot pool restricted to just KindOf(dispatchkind.Work)
-// (testConfig's default) still fills every slot with that one kind — the
-// baton only serializes *discovery*, it must never leave a slot starved
-// just because there is nothing else to pick.
+// TestPoolOneKindPoolBehavesAsBefore pins issue #3684's AC2: a multi-slot
+// work-only pool still fills every slot — the baton serializes discovery,
+// never starves a slot.
 func TestPoolOneKindPoolBehavesAsBefore(t *testing.T) {
 	const slots = 3
 	r := &scriptedRunner{revisions: []string{"rev1"}}
@@ -1180,16 +1055,12 @@ func TestPoolOneKindPoolBehavesAsBefore(t *testing.T) {
 	}
 }
 
-// TestPoolBatonEventStreamOrderingAndReasons pins issue #3684's AC6, the
-// operator-facing contract the gate pair of #3634 used to carry: every
-// baton_hold and baton_pass names its slot and carries a
-// non-empty reason, so an operator can tell which slot is discovering and
-// why control changed hands, and a held slot's own first child_start lands
-// after some baton_pass. Not necessarily the very next one, though —
-// awaitBaton's non-blocking receive lets a slot that wins a race log its
-// own baton_hold *after* the baton_pass that actually freed a different
-// sibling (see awaitBaton's own doc) — so this stops short of asserting a
-// single global hold-before-pass ordering.
+// TestPoolBatonEventStreamOrderingAndReasons pins issue #3684's AC6: every
+// baton_hold and baton_pass names its slot and a non-empty reason, and a
+// held slot's first child_start lands after some baton_pass. Not
+// necessarily the next one — awaitBaton's non-blocking receive lets a
+// race winner log baton_hold *after* the pass that freed a different
+// sibling — so no global hold-before-pass ordering is asserted.
 func TestPoolBatonEventStreamOrderingAndReasons(t *testing.T) {
 	const slots = 3
 	r := &scriptedRunner{revisions: []string{"rev1"}}
@@ -1283,23 +1154,11 @@ func TestPoolBatonEventStreamOrderingAndReasons(t *testing.T) {
 }
 
 // TestReferenceDocBatonReasonsMatchConstants binds the baton_hold and
-// baton_pass rows of docs/reference.md's event table to pool.go's actual
-// reason constants. The docs reproduce every one of them verbatim for
-// operators reading the event stream, and unlike the marker/parity checks
-// elsewhere in this repo nothing else catches one side drifting out from
-// under the other — an edit to a constant here or to the prose there would
-// otherwise go unnoticed until an operator matched a log line against a
-// stale sentence.
-//
-// Both sides are read from source rather than restated here, following
-// TestReferenceDocLabelSnippetMatchesTriageDefaults (main_test.go): the
-// constants are parsed out of pool.go, so a newly added batonPass* has to
-// be documented rather than silently escaping a hand-maintained list, and
-// the docs side is narrowed to the two table rows, so a reason quoted
-// anywhere else in a 5000-line file cannot stand in for the row that is
-// actually meant to carry it. The reverse direction is checked too: a row
-// naming a constant pool.go no longer declares is as stale as a row
-// quoting the wrong string.
+// baton_pass rows of docs/reference.md's event table to pool.go's reason
+// constants, both ways; nothing else catches either side drifting.
+// Constants are parsed from pool.go so a new batonPass* must be documented,
+// and the docs side is narrowed to the two table rows so a reason quoted
+// elsewhere cannot stand in for the row.
 func TestReferenceDocBatonReasonsMatchConstants(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "docs", "reference.md"))
 	if err != nil {
@@ -1443,10 +1302,9 @@ func TestPoolIssueKeyedStartsStillWaitOnEachOthersBaton(t *testing.T) {
 	}
 }
 
-// TestPoolHolderStartingButlerPassesTheBatonAtOnce pins that a slot holding
-// the baton when it starts a Chore-keyed child (the pre-assigned leader's first
-// round) passes it at the start, so a butler run never holds the pool until
-// its Box record.
+// TestPoolHolderStartingButlerPassesTheBatonAtOnce pins that a holder starting
+// a Chore-keyed child passes the baton at the start, so a butler run never
+// holds the pool until its Box record.
 func TestPoolHolderStartingButlerPassesTheBatonAtOnce(t *testing.T) {
 	cfg := triKindConfig(2, 0)
 	r := &scriptedRunner{revisions: []string{"rev1"}}

@@ -388,9 +388,8 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_PostsIssue
 
 // When reconstruction succeeds but the CreateDraftPR that follows fails, the
 // bundle is already relayed, so settle parks the issue agent-failed for
-// `spindrift recover` (issue #5144) instead of the old comment-only block. The
-// reconstructed text never reached any PR, so the reconstructed-hand-off
-// comment must not fire.
+// `spindrift recover` (issue #5144). The reconstructed text never reached a
+// PR, so the reconstructed-hand-off comment must not fire.
 func TestSettle_GithubReadOnly_MissingPRIntentReconstructsButCreateDraftPRFailsParksNoReconstructedComment(t *testing.T) {
 	const issNum = "1919"
 	branch := "agent/issue-1919"
@@ -674,11 +673,10 @@ func TestSettle_GithubReadOnly_MissingPRIntentAndZeroCommitSubjectsBlocksNotFail
 	}
 }
 
-// Embeds interface types, not the concrete githubForge, because Go's
-// method promotion follows the static field type: CommitSubjects stays
-// unpromoted even though the underlying Fake-backed value implements it. A
-// type assertion to forge.BundleCommitSubjects therefore fails, which is the
-// branch of reconstructPRText this exercises.
+// Embeds interface types, not the concrete githubForge: promotion follows the
+// static field type, so CommitSubjects stays unpromoted even though the Fake
+// implements it. The forge.BundleCommitSubjects assertion therefore fails,
+// which is the reconstructPRText branch this exercises.
 type readOnlyForgeWithoutCommitSubjects struct {
 	forge.CodeForge
 	forge.PRForge

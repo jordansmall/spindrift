@@ -336,7 +336,7 @@ func TestRunStateIsEmpty(t *testing.T) {
 		t.Error("IsEmpty() of a state with only DoneSlices/RemainingSlices set = false, want true")
 	}
 	// DispositionsPath joins DoneSlices/RemainingSlices in the "set but still
-	// IsEmpty" case (issue #2550 review finding): seedPromptFromState, the
+	// IsEmpty" case (issue #2550): seedPromptFromState, the
 	// only caller, never renders it. seedReviewPromptFromState's own narrower
 	// check governs the round-N review prompt DispositionsPath seeds.
 	if !(RunState{DispositionsPath: "/tmp/dispositions.md"}).IsEmpty() {

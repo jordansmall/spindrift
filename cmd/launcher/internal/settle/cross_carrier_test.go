@@ -11,14 +11,11 @@ import (
 	"spindrift.dev/launcher/internal/signalwire"
 )
 
-// TestFileIssueIntentsDetailed_SameFindingFromEitherCarrier pins issue #3992's
-// point: the log carrier's raw SPINDRIFT_ISSUE_INTENT JSON and the socket
-// carrier's signalwire.IssueIntent, round-tripped through
-// signalsocket.Buffer.AcceptIssueIntent/IssueIntents exactly as
-// dispatch.signalResultFromBuffer does, must settle the same finding
-// identically -- same title, body (backlink and dedup marker included),
-// and labels -- because both carriers now share one wire type and one
-// Validate.
+// The log carrier's raw SPINDRIFT_ISSUE_INTENT JSON and the socket carrier's
+// signalwire.IssueIntent, round-tripped through signalsocket.Buffer as
+// dispatch.signalResultFromBuffer does, must settle the same finding with the
+// same title, body (backlink and dedup marker included) and labels, since both
+// carriers share one wire type and one Validate (issue #3992).
 func TestFileIssueIntentsDetailed_SameFindingFromEitherCarrier(t *testing.T) {
 	const rawLog = `{"title":"nil deref on the hot path","body":"a nil check is missing before the dereference","dedupTerms":["a.go:X"],"type":"bug","class":"error-handling","concurrence":"agree"}`
 
@@ -67,12 +64,9 @@ func TestFileIssueIntentsDetailed_SameFindingFromEitherCarrier(t *testing.T) {
 	}
 }
 
-// TestFileIssueIntentsDetailed_InvalidClassSkipsRatherThanClears pins the
-// other half of issue #3992: the pre-#3992 behavior silently blanked an
-// unparseable Class and still filed the finding. Now
-// signalwire.IssueIntent.Validate rejects the whole intent, so it is skipped
-// like any other malformed payload -- no PostIssue call, no filedIntent
-// entry -- and the skip line at settle names the reject's reason.
+// The other half of issue #3992: an invalid Class once was blanked and the
+// finding filed anyway. Validate rejects the whole intent, so it is skipped
+// like any malformed payload, and the skip line names the reject's reason.
 func TestFileIssueIntentsDetailed_InvalidClassSkipsRatherThanClears(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/1"

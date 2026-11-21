@@ -4,10 +4,8 @@ import (
 	"testing"
 )
 
-// Issue #3225 reviewed conflict-resolve-prompt.md and found no design-history
-// prose to cut: the file is all contract and sequencing. Pinning each clause of
-// its resolution procedure here means a later cut cannot silently take a rule
-// with it.
+// Pins each clause of conflict-resolve-prompt.md's resolution procedure so a
+// later cut cannot silently take a rule with it (issue #3225).
 func TestConflictResolvePromptOperativeContract(t *testing.T) {
 	assertPromptClauses(t, "conflict-resolve-prompt.md", []promptClause{
 		{

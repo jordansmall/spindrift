@@ -102,10 +102,8 @@ func TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory(t *testing.T) {
 
 // TestRunContinuous_ThroughFakeQueue_AlreadyClaimedSkipsWithoutDispatch pins
 // that a Queue.Claim failing with ErrAlreadyClaimed (#3887, another claimant
-// won the race) prints the dedicated skip line and never reaches
-// dispatch.Factory.New -- a nil Factory/Settler is a stronger guarantee here
-// than an fr.RunCalls==0 assertion would be, matching the stop-closed cases
-// above.
+// won the race) prints the dedicated skip line and never dispatches; the nil
+// Factory/Settler makes that structural.
 func TestRunContinuous_ThroughFakeQueue_AlreadyClaimedSkipsWithoutDispatch(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"

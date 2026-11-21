@@ -12,10 +12,8 @@ import (
 	"spindrift.dev/launcher/internal/forge/local"
 )
 
-// issueTextLabels mirrors the local package's own unexported testLabels
-// (local_test.go): this file lives in the external local_test package, so
-// it can't see that unexported var and needs its own copy of the same
-// conventional lifecycle-label set.
+// issueTextLabels copies local_test.go's unexported testLabels, which this
+// external test package cannot see.
 var issueTextLabels = forge.DispatchLabels{
 	Dispatchable: "ready-for-agent",
 	InProgress:   "agent-in-progress",
@@ -24,10 +22,7 @@ var issueTextLabels = forge.DispatchLabels{
 }
 
 // writeIssue writes a local issue file straight from frontmatter-shaped
-// fields, mirroring the local package's own writeLocalIssue test helper but
-// expressed at the forge.IssueText seam this file exercises -- these tests
-// deliberately never reach into the local package's unexported localIssue
-// type.
+// fields, so these tests never reach into the unexported localIssue type.
 func writeIssue(t *testing.T, dir, slug, frontmatter, body string) {
 	t.Helper()
 	content := "---\n" + frontmatter + "---\n" + body

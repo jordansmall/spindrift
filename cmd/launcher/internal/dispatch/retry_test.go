@@ -238,10 +238,9 @@ func TestDispatchWithRetry_SelfReportSurvivesSyntheticBackstop(t *testing.T) {
 }
 
 // outcomeResult must print resolved.SelfReportError to stderr with the
-// "self-report scan" message, the warning the pre-refactor code printed
-// (issue #2343). One log file cannot make the outcome tier succeed while the
-// self-report tier hits an I/O error, so this calls outcomeResult directly
-// with an injected Resolved instead of driving it through d.Run().
+// "self-report scan" message (issue #2343). One log file cannot make the
+// outcome tier succeed while the self-report tier hits an I/O error, so this
+// calls outcomeResult directly with an injected Resolved.
 func TestDispatchOutcomeResult_SelfReportErrorLoggedToStderr(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {

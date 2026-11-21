@@ -348,11 +348,9 @@ func TestCheckRunnerLaunchPrerequisites_RunsInLaunchOrder(t *testing.T) {
 }
 
 // setRealRunnerLaunchEnv sets a minimal environment newGatedContext accepts
-// for the real registered bwrap strategy (RUNNER_KIND=bwrap, RUNTIME=bwrap)
-// and pins PATH to a temp dir holding a `bwrap` stub that exits bwrapExit,
-// plus a `pasta` stub when pasta is true. The bwrap validate seams are
-// unexported, so PATH is the only way to steer the real probes: validate()'s
-// runtime row needs `bwrap` resolvable, and the overlay probe runs it.
+// for the real bwrap strategy and pins PATH to a temp dir holding a `bwrap`
+// stub exiting bwrapExit, plus a `pasta` stub when pasta is true. The bwrap
+// validate seams are unexported, so PATH is the only way to steer the probes.
 func setRealRunnerLaunchEnv(t *testing.T, bwrapExit int, pasta bool) {
 	t.Helper()
 	dir := t.TempDir()
@@ -402,9 +400,8 @@ func TestRealBwrapStrategy_DefaultNetworkModeMissingPastaFailsLaunch(t *testing.
 }
 
 // With pasta present and the overlay Required (nixStoreWritable plus a nix
-// config file, ADR 0042) but the host unable to mount it -- the bwrap probe
-// stub exits non-zero -- launch fails with the overlay error, not the pasta
-// one.
+// config file, ADR 0042) but unmountable (the bwrap stub exits non-zero),
+// launch fails with the overlay error, not the pasta one.
 func TestRealBwrapStrategy_RequiredOverlayUnsupportedFailsLaunch(t *testing.T) {
 	setRealRunnerLaunchEnv(t, 1, true)
 	setArtifact(t, "NIX_STORE_WRITABLE", "true")

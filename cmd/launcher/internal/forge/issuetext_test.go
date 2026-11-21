@@ -227,11 +227,8 @@ func TestIssueText(t *testing.T) {
 	})
 
 	t.Run("byte-identical when tracker is not a LinkedIssueLister", func(t *testing.T) {
-		// Linked-issue rendering (slice 2) only activates when the tracker
-		// also implements LinkedIssueLister, which a remote tracker (github,
-		// jira) never does. Neither issueOnlyTracker nor the Fake implements
-		// it (only LocalTracker does), so both must still render the
-		// pre-existing text unchanged.
+		// Only LocalTracker implements LinkedIssueLister; neither
+		// issueOnlyTracker nor the Fake does, so both render no linked section.
 		f := forge.NewFake()
 		f.SetIssue(forge.Issue{Number: "1", Body: "the body"})
 		f.CommentsFor = map[string][]forge.Comment{

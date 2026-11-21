@@ -35,11 +35,11 @@ var kindNamePattern = func() string {
 // dispatchkey.ChorePrefix rather than dispatchkind.All.
 var choreKeyLiteral = regexp.MustCompile(regexp.QuoteMeta(`"` + dispatchkey.ChorePrefix))
 
-// shellKindBranch mirrors the grep -E patterns of the retired
-// entrypoint kind-axes bats guard. `--dispatch-kind "${DISPATCH_KIND:-work}"`
-// (handing the name to driver-exec for its own descriptor lookup) and the
-// "DISPATCH_KIND=${DISPATCH_KIND:-work}" display string are deliberately not
-// comparisons: both lack an operator directly after the expansion.
+// shellKindBranch matches a shell comparison on the kind name. `--dispatch-kind
+// "${DISPATCH_KIND:-work}"` (handing the name to driver-exec for its own
+// descriptor lookup) and the "DISPATCH_KIND=${DISPATCH_KIND:-work}" display
+// string are deliberately not comparisons: both lack an operator directly
+// after the expansion.
 var shellKindBranch = []*regexp.Regexp{
 	regexp.MustCompile(`\$\{?DISPATCH_KIND[^}]*\}?"?[[:space:]]+[!=]?=`),
 	regexp.MustCompile(`case[[:space:]]+"?\$\{?DISPATCH_KIND`),

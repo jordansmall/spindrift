@@ -63,8 +63,8 @@ func TestPreviewIssues_PrintsMergeMode(t *testing.T) {
 	}
 }
 
-// A fully-local run has no repo slug, and the banner used to print a bare
-// "repo: " line for it (issue #1895).
+// A fully-local run has no repo slug, so the banner must not print a bare
+// "repo: " line (issue #1895).
 func TestPreviewIssues_FullyLocal_OmitsBareRepoLine(t *testing.T) {
 	c := baseConfig()
 	c.RepoSlug = ""
@@ -192,11 +192,9 @@ func TestPreviewIssues_NamesHeldIssueAlongsideDispatchable(t *testing.T) {
 	}
 }
 
-// Probe no longer branches on the runner family (it once special-cased only
-// KindBwrap before the fetch step), so a store-closure and an OCI image
-// artifact reach the same not-a-git-repository path when pwd is not a
-// checkout. c.runtime stays set to "podman" here, but nothing in this path
-// reads it; internal/freshness's own tests cover that.
+// Probe does not branch on the runner family, so a store-closure and an OCI
+// image artifact reach the same not-a-git-repository path when pwd is not a
+// checkout. c.runtime is "podman" here but nothing in this path reads it.
 func TestPreviewIssues_PrintsFreshnessLine(t *testing.T) {
 	c := baseConfig()
 	c.RepoSlug = "owner/repo"
@@ -219,10 +217,9 @@ func TestPreviewIssues_PrintsFreshnessLine(t *testing.T) {
 	}
 }
 
-// Preview must print a real fresh/stale verdict for bwrap, not just the
-// not-applicable path TestPreviewIssues_PrintsFreshnessLine covers (issue #2667
-// AC3). The fixture needs a real git clone with an origin remote and an
-// injected Evaluator to drive Probe all the way to an outPath comparison.
+// Preview must print a real fresh/stale verdict for bwrap, not only the
+// not-applicable path (issue #2667 AC3): a real git clone with an origin
+// remote and an injected Evaluator drive Probe to an outPath comparison.
 func TestPreviewIssues_Bwrap_PrintsRealFreshnessLine(t *testing.T) {
 	const staleHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	const freshHash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -277,10 +274,9 @@ func TestPreviewIssues_PrintsLauncherCurrencyLine(t *testing.T) {
 	}
 }
 
-// FLAKE_LAUNCHER_ATTR is empty in the unwrapped `go run` case, and the line
-// then ended in a bare, valueless colon (issue #2677 review finding). The
-// placeholder matches the adjacent freshness line, which always carries a
-// non-empty res.Message.
+// FLAKE_LAUNCHER_ATTR is empty in the unwrapped `go run` case, so the line
+// carries a placeholder instead of ending in a bare colon (issue #2677),
+// matching the adjacent freshness line, which always carries a value.
 func TestPreviewIssues_PrintsLauncherCurrencyPlaceholderWhenUnset(t *testing.T) {
 	c := baseConfig()
 	c.RepoSlug = "owner/repo"
@@ -364,9 +360,8 @@ func TestPreviewIssues_MixedBatchAnnotatesEachSource(t *testing.T) {
 	}
 }
 
-// previewIssues silently dropped DepsOf call failures (#752, #1103) until the
-// fix threaded result.Failed into waves.Input. The failure must read distinctly
-// from both a zero-blocker issue and a blocked-by annotation.
+// A DepsOf call failure (#752, #1103) must read distinctly from both a
+// zero-blocker issue and a blocked-by annotation.
 func TestPreviewIssues_DepsOfCheckFailure_AnnotatesDistinctly(t *testing.T) {
 	c := baseConfig()
 	c.RepoSlug = "owner/repo"

@@ -55,8 +55,7 @@ func TestBuildBoxEnvForwardsSchemaVars(t *testing.T) {
 
 // buildBoxEnv resolves each BoxEnvVars name through Config.ResolveEnv rather
 // than a raw os.Getenv, so a boxEnv knob's document-baked value still reaches
-// the Box when the operator never set it as an ambient env var. ADR 0020
-// dropped the wrapper's per-var env export.
+// the Box when the operator never set it as an ambient env var (ADR 0020).
 func TestBuildBoxEnvUsesResolveEnv(t *testing.T) {
 	cfg := Config{
 		BoxEnvVars: "MODEL",
@@ -312,10 +311,9 @@ func TestBuildBoxEnvForwardsReviewOverrides(t *testing.T) {
 }
 
 // Issue #3445: a failing closure errors rather than silently dropping the
-// var: every issue-prompt.md-family prompt now tells the Box its body lives
-// in the injected ISSUE_TEXT section and not to fetch it from the tracker, so
-// a Box launched without it has no recourse. An unreadable subject issue
-// fails the dispatch outright, with no retry (see buildBoxEnv's doc).
+// var: every issue-prompt.md-family prompt tells the Box its body lives in
+// the injected ISSUE_TEXT section and not to fetch it from the tracker, so a
+// Box launched without it has no recourse.
 func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
 	env, err := buildBoxEnv(Config{}, issueSubject("3", "T"), 0, "", "")
 	if err != nil {
@@ -471,10 +469,8 @@ func TestBuildBoxEnv_ChoreOmitsEmptyScopeFields(t *testing.T) {
 	}
 }
 
-// A chore whose PromotionClasses is nil/empty (promotion off, or no allow-list --
-// butler.go's job to decide, this package just forwards whatever it is
-// given) omits CHORE_CLASSES entirely, the same absent-when-empty shape as
-// every other optional Chore field.
+// A chore whose PromotionClasses is empty omits CHORE_CLASSES entirely, the
+// same absent-when-empty shape as every other optional Chore field.
 func TestBuildBoxEnv_ChoreOmitsEmptyClasses(t *testing.T) {
 	env, err := buildBoxEnv(Config{}, choreSubject(Chore{Name: "empty", Branch: "b"}), 0, "", "")
 	if err != nil {
@@ -488,10 +484,8 @@ func TestBuildBoxEnv_ChoreOmitsEmptyClasses(t *testing.T) {
 	}
 }
 
-// The patch rung's CHORE_PATCH_CLASSES sibling (issue #4072, ADR 0057) gets
-// the same absent-when-empty treatment: butler.go's job to leave
-// PatchClasses nil whenever the rung is off or today's patch room is spent,
-// this package just forwards whatever it is given.
+// CHORE_PATCH_CLASSES (issue #4072, ADR 0057) gets the same
+// absent-when-empty treatment.
 func TestBuildBoxEnv_ChoreOmitsEmptyPatchClasses(t *testing.T) {
 	env, err := buildBoxEnv(Config{}, choreSubject(Chore{Name: "empty", Branch: "b"}), 0, "", "")
 	if err != nil {
@@ -502,12 +496,10 @@ func TestBuildBoxEnv_ChoreOmitsEmptyPatchClasses(t *testing.T) {
 	}
 }
 
-// CHORE_MAX_FINDINGS forwards the sweep's own room (chore.Room.Findings,
-// issue #3994) when the host set one, and falls back to
-// signalsocket.DefaultMaxIssueIntents (8) when it left MaxFindings zero --
-// the same fallback startSignalSocket applies to the socket carrier's cap,
-// so a log-carrier Box is told the same number a socket-carrier one's
-// listener actually enforces.
+// CHORE_MAX_FINDINGS forwards the sweep's own room (issue #3994), falling
+// back to signalsocket.DefaultMaxIssueIntents when MaxFindings is zero -- the
+// same fallback startSignalSocket applies to the socket carrier's cap, so a
+// log-carrier Box is told the number a socket-carrier listener enforces.
 func TestBuildBoxEnv_ChoreForwardsMaxFindings(t *testing.T) {
 	cases := []struct {
 		name        string

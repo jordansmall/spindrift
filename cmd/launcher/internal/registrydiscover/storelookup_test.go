@@ -44,9 +44,8 @@ func TestStoreLookupConfig_MatchesKindStoreConfig(t *testing.T) {
 }
 
 // lookupNetrc runs StoreLookup for registry.example.com against a netrc store
-// holding content. netrc stands in for every store kind here: the lookup glue
-// is kind-agnostic, and each format's own parsing is pinned in credresolver's
-// tests and, end to end per Strategy, in the ecosystem corpus's stores/ cases.
+// holding content. netrc stands in for every kind: the glue is kind-agnostic,
+// and each format is pinned in credresolver and the ecosystem corpus.
 func lookupNetrc(t *testing.T, content string) bool {
 	t.Helper()
 	dir := t.TempDir()

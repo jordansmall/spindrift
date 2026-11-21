@@ -59,12 +59,6 @@ func TestReporter_Passthrough_PrintsVerbatimWithNoTrailingNewline(t *testing.T) 
 	}
 }
 
-// TestReporter_Results_PrintsOkForSuccess and the finding+remedy pairing
-// below are the ones test-first per the task; registry_test.go's renamed
-// TestReporter_Results_* suite (formerly TestReportResults_*) pins the rest
-// of Results' behavior in detail, so this file keeps only the two shapes
-// that motivated the Reporter type: a success row, and a finding welded to
-// its remedy line.
 func TestReporter_Results_PrintsFindingAndRemedyForFailure(t *testing.T) {
 	const remedy = "pass --user-name or set git.user.name, or configure git user.name on the host"
 	results := []Result{
@@ -164,10 +158,8 @@ func TestReporter_Quiet_Results_DropsSuccessRow(t *testing.T) {
 	}
 }
 
-// A Required-tier failure wrapping ErrDegraded demotes to Advisory at print
-// (registry.go's Blocking / Reporter.Results), so it must drop out of a
-// quiet run's output along with its remedy — never an orphan "  remedy:"
-// line with no row above it.
+// A Required-tier failure wrapping ErrDegraded prints as Advisory, so a quiet
+// run drops it along with its remedy: never an orphan "  remedy:" line.
 func TestReporter_Quiet_Results_DropsDegradedRequiredFindingAndItsRemedy(t *testing.T) {
 	results := []Result{
 		{

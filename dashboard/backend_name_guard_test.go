@@ -28,8 +28,7 @@ type backendNameHit struct {
 // exec.Command("git", ...) arguments or assignments are not comparisons, so
 // only a branch on a backend name is flagged. It is a tripwire, not a proof:
 // map-key lookups, a backend name held in a named constant, an aliased slices
-// import, slices.ContainsFunc, and strings.Contains-style helpers, for example,
-// escape it.
+// import, slices.ContainsFunc and strings.Contains-style helpers escape it.
 func scanBackendNameComparisons(t *testing.T, filename string, src any, names map[string]bool) []backendNameHit {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -77,11 +76,10 @@ func scanBackendNameComparisons(t *testing.T, filename string, src any, names ma
 }
 
 // TestDashboardDoesNotCompareBackendNames fails when a dashboard file branches
-// on a backend name (ADR 0068). It mirrors cmd/launcher's
-// TestCoreDoesNotCompareBackendNames for this separate Go module, which cannot
-// import backend.Registry: the names come from backendnames_gen_test.go,
-// rendered from lib/backends, so a new row is covered with no edit here.
-// _test.go and generated files are skipped.
+// on a backend name (ADR 0068), mirroring cmd/launcher's
+// TestCoreDoesNotCompareBackendNames. This module cannot import
+// backend.Registry, so the names come from backendnames_gen_test.go, rendered
+// from lib/backends.
 func TestDashboardDoesNotCompareBackendNames(t *testing.T) {
 	if len(backendNames) == 0 {
 		t.Fatal("backendNames is empty: the guard has no names to look for")

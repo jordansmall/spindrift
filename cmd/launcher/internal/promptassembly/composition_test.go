@@ -503,10 +503,10 @@ func TestDiffPassesHandConstructed(t *testing.T) {
 	})
 }
 
-// Pins the two collisions the old code let through: a carried block named the
-// same as a substituted scalar var (now a different SourceKind by construction,
-// issue #3444), and two carried blocks sharing one name, which fold through
-// sourceAggregator instead of appending two rows.
+// Pins two collisions: a carried block named the same as a substituted scalar
+// var (a different SourceKind by construction, issue #3444), and two carried
+// blocks sharing one name, which fold through sourceAggregator instead of
+// appending two rows.
 func TestComposeCarriedNoDuplicateSources(t *testing.T) {
 	reg, base := composeRegistry(t)
 	env := base
@@ -551,9 +551,9 @@ func TestComposeCarriedNoDuplicateSources(t *testing.T) {
 	}
 }
 
-// Pins the non-blocking finding at composition.go:106: a carried block naming a
-// pass kind this cell does not render must error and name both the block and
-// the pass, rather than silently vanishing from every pass.
+// A carried block naming a pass kind this cell does not render must error and
+// name both the block and the pass, rather than silently vanishing from every
+// pass.
 func TestComposeUnknownCarriedPassErrors(t *testing.T) {
 	reg, base := composeRegistry(t)
 	env := base

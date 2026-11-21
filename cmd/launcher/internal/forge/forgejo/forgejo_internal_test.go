@@ -40,7 +40,7 @@ func TestGitCredential(t *testing.T) {
 }
 
 // An unset or unrecognized method falls back to "rebase", matching the github
-// adapter's mergeMethodFlag default.
+// adapter's default.
 func TestMergeStyle(t *testing.T) {
 	tests := []struct {
 		method string

@@ -16,11 +16,10 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// A Strategy with a RepoAwareHomeConfig binds by re-rendering its home config, which
-// the in-tree rewrite does not compose with (issue #3201), and a Strategy with no
-// InTreeConfigPath has nothing to rewrite; both are filtered out and the rest
-// keep the Strategies' own order. Which registered Strategies survive is pinned in the ecosystem
-// package's bindregistry_table_test.go.
+// A RepoAwareHomeConfig Strategy (issue #3201) and one with no
+// InTreeConfigPath are filtered out; the rest keep their order. Which
+// registered Strategies survive is pinned in the npmfamily package's
+// bindregistry_table_test.go.
 func TestInTreeBindings_FiltersByRepoAwareHomeConfigAndConfigPath(t *testing.T) {
 	repoAware := ecosystem.Strategy{
 		Name:             "repo-aware",
@@ -40,11 +39,9 @@ func TestInTreeBindings_FiltersByRepoAwareHomeConfigAndConfigPath(t *testing.T) 
 }
 
 // gitQuietArgs is the leading `git` argument list every helper here builds on.
-// Git forks a detached `git gc --auto` / `git maintenance run --auto` once a
-// commit crosses the loose-object threshold, and it can still be repacking
-// when t.TempDir()'s RemoveAll runs, failing the test with "directory not
-// empty" on .git — the same race commit 31f9696d closed in driver-exec's own
-// git helper.
+// A detached `git gc --auto` / `git maintenance run --auto` can still be
+// repacking when t.TempDir()'s RemoveAll runs ("directory not empty"), the
+// race commit 31f9696d closed in driver-exec's git helper.
 func gitQuietArgs(dir string) []string {
 	return []string{"-C", dir, "-c", "gc.auto=0", "-c", "maintenance.auto=false"}
 }
@@ -373,13 +370,11 @@ func TestApplyInTreeBindingNoopWhenNeitherRouteHostPresent(t *testing.T) {
 	}
 }
 
-// Issue #3142's overlap defect: "registry.example.com" and
-// "registry.example.com:8443" share a prefix, so a rewrite loop running in
-// caller order, shorter host first, would once have replaced the bare host
-// inside the longer host's own URL. The host boundary (#5311) now prevents
-// that, so this pins longest-first ordering as a safeguard. The rewrites
-// below are listed shorter-host-first deliberately, to prove Apply reorders by
-// host length.
+// Issue #3142: "registry.example.com" and "registry.example.com:8443" share a
+// prefix, so a shorter-host-first loop could rewrite the bare host inside the
+// longer one's URL. The host boundary (#5311) prevents that; this pins
+// longest-first ordering as a safeguard. The rewrites are listed
+// shorter-host-first deliberately, to prove Apply reorders them.
 func TestApplyInTreeBindingOverlappingHostsRewriteLongestFirst(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "short = \"https://registry.example.com/index/\"\nlong = \"https://registry.example.com:8443/index/\"\n"

@@ -95,11 +95,9 @@ func TestHandoffEndToEnd(t *testing.T) {
 	handoffOutput := filepath.Join(dir, "handoff.json")
 	reviewPromptOutput := filepath.Join(dir, "review-prompt.txt")
 
-	// Issue #2979 moved assemble-prompt's Box env fields from a flag to the
-	// process environment, which the subprocess below inherits from this test.
-	// The test can itself run inside a spindrift Box, so clear every Box env
-	// var (promptassembly.BoxEnvVarNames, issue #4044) before setting the ones
-	// it does pin below.
+	// assemble-prompt reads its Box env fields from the process environment
+	// (issue #2979), which the subprocess inherits, and this test may itself run
+	// inside a Box, so clear every Box env var (issue #4044) before pinning ours.
 	for _, name := range promptassembly.BoxEnvVarNames {
 		t.Setenv(name, "")
 	}

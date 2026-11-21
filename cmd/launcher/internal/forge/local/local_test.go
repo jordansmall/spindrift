@@ -217,8 +217,8 @@ func TestLocalIssue_RenderParseRoundTrip_ScalarEscaping(t *testing.T) {
 	}
 }
 
-// scalarNeedsQuoting's colon check, widened in the frontmatter-colon-escaping
-// fix, applies to every scalar field renderScalar writes, not just Title.
+// scalarNeedsQuoting's colon check applies to every scalar field renderScalar
+// writes, not just Title.
 func TestLocalIssue_Render_QuotesColonBearingFields(t *testing.T) {
 	li := localIssue{
 		frontmatter: localFrontmatter{
@@ -770,10 +770,8 @@ func TestLocalTracker_DepsOf_StripsBackticksFromSlug(t *testing.T) {
 	}
 }
 
-// A "- None" bullet means zero blockers, not a literal slug. This mirrors the
-// GitHub parser's sentinel case,
-// forge.TestParseBlockerRefs_SentinelNoneBulletIgnoresInlineRef in
-// seams_test.go.
+// A "- None" bullet means zero blockers, not a literal slug, mirroring
+// forge.TestParseBlockerRefs_SentinelNoneBulletIgnoresInlineRef.
 func TestLocalTracker_DepsOf_SkipsSentinelBullet(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels

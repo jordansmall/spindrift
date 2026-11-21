@@ -18,16 +18,13 @@ import (
 )
 
 // coveredCellArgs puts runAssemblePrompt's Env in promptassembly.Assemble's
-// covered cell (issue #2540: checkCoveredCell checks only dispatch kind
-// "work"). Since issue #2979 the Box-env-sourced fields arrive via t.Setenv,
-// so every one is set explicitly, even to "", or a leftover value in the test
-// process's own environment leaks into the run. Blanking the generated
-// promptassembly.BoxEnvVarNames keeps that true as rows are added (issue
-// #4044). Its registry holds only the PR-intent row: every dispatch is
-// read-only, so without it the validator's pr-intent warning lands on stdout
-// and corrupts a composition report streamed there. The mechanics it covers
-// (flag parsing, output files, composition, run state) hold for any other
-// registry, and a test that cares about a row's effect supplies its own.
+// covered cell (issue #2540). The Box-env-sourced fields arrive via t.Setenv
+// (issue #2979), so every one is set explicitly, even to "", or a value in the
+// test process's own environment leaks in; blanking the generated
+// promptassembly.BoxEnvVarNames keeps that true as rows are added (#4044).
+// Its registry holds only the PR-intent row: every dispatch is read-only, so
+// without it the validator's pr-intent warning lands on stdout and corrupts a
+// composition report streamed there. Tests caring about a row's effect supply their own.
 func coveredCellArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput string) []string {
 	t.Helper()
 	for _, name := range promptassembly.BoxEnvVarNames {
@@ -132,10 +129,9 @@ func TestRunAssemblePrompt_CoveredCellWritesOutputs(t *testing.T) {
 	}
 }
 
-// The dispatch kind is the one axis checkCoveredCell still validates as of
-// issue #2540, because it has no eval-time or launcher-side guard the way
-// IssueTracker and CodeForge do. An unsupported value must come back as a
-// CLI failure, not a panic.
+// The dispatch kind is the one axis checkCoveredCell still validates (issue
+// #2540): unlike IssueTracker and CodeForge it has no eval-time or
+// launcher-side guard. An unsupported value must be a CLI failure, not a panic.
 func TestRunAssemblePrompt_UnsupportedCellReturnsNonZero(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -228,11 +224,10 @@ func issuePromptDirLackingSpindriftPRIntent(t *testing.T) string {
 	return dir
 }
 
-// replaceArg drops flag in either the two-token or the "--flag=value" form
-// coveredCellArgs mixes, then re-adds it as one "--flag=value" token, which
-// both flag kinds accept. Go's flag package requires the "=" for an explicit
-// bool value: a bare "--flag next-token" reads next-token as a positional
-// argument and halts flag parsing entirely.
+// replaceArg drops flag in either the two-token or "--flag=value" form
+// coveredCellArgs mixes, then re-adds it as one "--flag=value" token: Go's
+// flag package needs the "=" for an explicit bool value, or it reads the next
+// token as a positional and halts parsing.
 func replaceArg(args []string, flag, value string) []string {
 	out := make([]string, 0, len(args)+1)
 	for i := 0; i < len(args); i++ {
@@ -345,10 +340,9 @@ func TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs(t *testing.T) {
 	}
 }
 
-// The BOX_TRACKER_AXIS_* env vars must reach Env's TrackerAxis* fields
-// (issue #2533 slice 2). gates_tracker.go reads the axis fields directly
-// instead of re-deriving them, and checkCoveredCell no longer re-validates
-// IssueTracker (issue #2540), so the axis fields are the sole gate input.
+// The BOX_TRACKER_AXIS_* env vars must reach Env's TrackerAxis* fields (issue
+// #2533): gates_tracker.go reads them directly and checkCoveredCell does not
+// validate IssueTracker (issue #2540), so they are the sole gate input.
 func TestRunAssemblePrompt_TrackerAxisEnvVarsReachGates(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -639,11 +633,10 @@ func TestRunAssemblePrompt_PopulatesPassthroughHandoffFields(t *testing.T) {
 	}
 }
 
-// Pins the graceful-degrade contract for the budget caps (issue #2975 review
-// finding #1, restoring coverage dropped when
-// TestMainRunToleratesMalformedOrNegativeBudgetCaps was deleted). entrypoint.sh
-// forwards the values verbatim, so an operator typo must degrade to 0 here
-// rather than fail fs.Parse and kill the box run under set -euo pipefail (#2694).
+// Pins the graceful-degrade contract for the budget caps (issue #2975):
+// entrypoint.sh forwards the values verbatim, so an operator typo must degrade
+// to 0 here rather than fail fs.Parse and kill the Box run under
+// set -euo pipefail (#2694).
 func TestRunAssemblePrompt_MalformedBudgetCapsDegradeToZero(t *testing.T) {
 	tests := []struct {
 		name            string

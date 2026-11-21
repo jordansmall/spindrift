@@ -36,15 +36,13 @@ func (fp kindAxisForbidden) matches(line string) bool {
 
 const dispatchkindDir = "internal/dispatchkind"
 
-// kindAxisConsts maps every tag axis of dispatchkind.Descriptor -- each field
-// whose type is an exported, package-declared signed or unsigned integer
-// type -- to the exported constants of that type found in dir's non-test
-// files. A constant counts as typed when its spec names the type
-// (`C Keying = ...`), is a conversion (`C = Keying(3)`), or inherits either
-// from an earlier spec of the block (an iota run). Both halves are derived,
-// so a new axis or value is guarded without editing this file. An axis with
-// no constants is an error: it would leave an empty alternation in the
-// patterns.
+// kindAxisConsts maps every tag axis of dispatchkind.Descriptor (each field
+// of an exported, package-declared integer type) to that type's exported
+// constants in dir's non-test files. A constant is typed by its spec
+// (`C Keying = ...`), a conversion (`C = Keying(3)`), or an iota run
+// inheriting either. Both halves are derived, so a new axis or value needs no
+// edit here; an axis with no constants is an error, as it would leave an empty
+// pattern alternation.
 func kindAxisConsts(dir string) (map[string][]string, error) {
 	desc := reflect.TypeOf(dispatchkind.Descriptor{})
 	axes := map[string][]string{}
@@ -274,10 +272,8 @@ func kindAxisViolations(path, line string) []string {
 	return whys
 }
 
-// TestKindAxesGuard walks the launcher module tree (prior art: the marker and
-// parity checks) and fails on any of the old kind == kind comparisons the
-// descriptor axes replaced, so a reintroduced comparison is caught here
-// instead of drifting back in unnoticed.
+// TestKindAxesGuard walks the launcher module tree and fails on any of the
+// old kind == kind comparisons the descriptor axes replaced.
 func TestKindAxesGuard(t *testing.T) {
 	settleFiles := 0
 	err := walkOwnSource(".", func(path string, d fs.DirEntry, err error) error {

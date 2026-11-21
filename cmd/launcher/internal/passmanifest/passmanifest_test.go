@@ -16,10 +16,8 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// Read's degrade-not-error contract (issue #2983): a path that never
-// existed (no outbox mounted, or a non-orchestrator box) returns (nil, nil)
-// so callers treat "no manifest" like "empty manifest" without checking
-// os.IsNotExist themselves.
+// Issue #2983: a path that never existed (no outbox mounted, or a
+// non-orchestrator box) degrades to (nil, nil), like an empty manifest.
 func TestReadMissingFileReturnsNilNil(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.json")
@@ -69,11 +67,9 @@ func TestWriteThenReadRoundTrips(t *testing.T) {
 	}
 }
 
-// Pins the on-disk key names of a land entry's LandDelta (issue #3244
-// review finding): landdelta.Delta once serialized as bare Go field names
-// ("Known"), breaking the snake_case convention every other manifest.json
-// field follows. The three cases are the three shapes Delta takes on a land
-// entry, so a regression in any one of them shows up here.
+// Pins snake_case on-disk keys for a land entry's LandDelta (issue #3244):
+// landdelta.Delta once serialized as bare Go field names ("Known"). The
+// three cases are the three shapes Delta takes on a land entry.
 func TestWriteLandEntryUsesSnakeCaseDeltaKeys(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -150,9 +146,8 @@ func TestReadMalformedJSONReturnsError(t *testing.T) {
 }
 
 // Read bounds how much of the Box-authored manifest it buffers (issue #2983
-// DoS finding): a runaway or prompt-injected Box can write any size it likes
-// to the 0o777 outbox mount. Past maxManifestBytes Read returns (nil, err),
-// never the reserved (nil, nil) that means "no manifest was ever written".
+// DoS finding). Past maxManifestBytes it errors, never the (nil, nil) that
+// means "no manifest was ever written".
 func TestReadOversizedFileReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.json")
@@ -173,11 +168,9 @@ func TestReadOversizedFileReturnsError(t *testing.T) {
 	}
 }
 
-// A Box with shell access can mkfifo the manifest path (issue #2983 review
-// finding), and opening a writerless FIFO read-only blocks forever, freezing
-// the launcher on every Read. Read opens with O_NONBLOCK and stats the
-// descriptor. The 2s deadline keeps a regression from hanging the whole test
-// binary.
+// A Box can mkfifo the manifest path (issue #2983), and a read-only open of a
+// writerless FIFO blocks forever. The 2s deadline keeps a regression from
+// hanging the whole test binary.
 func TestReadFIFODoesNotHang(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.json")
@@ -208,11 +201,9 @@ func TestReadFIFODoesNotHang(t *testing.T) {
 	}
 }
 
-// Reproduces the TOCTOU race in the old Lstat-then-Open pattern (issue #2983
-// review finding): a Box can rename a FIFO over the regular file between
-// Read's Lstat and its os.Open, and Open then blocks forever on a path Lstat
-// had already approved as regular. The swap goroutine and the repeated Read
-// loop exist to hit that window.
+// Pins the TOCTOU fix (issue #2983): with Lstat-then-Open, a Box renaming a
+// FIFO over the regular file in between blocks Open forever. The swap
+// goroutine and the repeated Read loop exist to hit that window.
 func TestReadConcurrentFIFOSwapDoesNotHang(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.json")
@@ -283,11 +274,8 @@ func TestReadConcurrentFIFOSwapDoesNotHang(t *testing.T) {
 	}
 }
 
-// Reproduces the torn-read finding (issue #2983 review): Write used to
-// truncate path in place via os.WriteFile, so a Read landing in the
-// truncate-then-write window saw a partial file and failed to parse it,
-// against pick.go:200's convention that a Read failure leaves prior state
-// stale rather than raising a spurious error. A JSON error here is the bug.
+// Pins the torn-read fix (issue #2983): a Write that truncates path in place
+// lets a concurrent Read parse a partial file. A JSON error here is the bug.
 func TestWriteIsAtomicUnderConcurrentRead(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.json")
@@ -333,10 +321,8 @@ func TestWriteIsAtomicUnderConcurrentRead(t *testing.T) {
 	<-done
 }
 
-// A Box with shell access to the 0o777 outbox mount can symlink the manifest
-// path at an arbitrary host file (issue #2983 review finding), redirecting
-// the host's read. Read passes O_NOFOLLOW, which fails the open outright on
-// a symlink at the final path component.
+// A Box can symlink the manifest path at an arbitrary host file (issue
+// #2983); O_NOFOLLOW must fail the open.
 func TestReadSymlinkReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.json")

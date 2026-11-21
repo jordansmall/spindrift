@@ -176,8 +176,8 @@ func TestCountWithoutETagCachesNothing(t *testing.T) {
 }
 
 func TestCountDropsCachedETagWhenA200CarriesNone(t *testing.T) {
-	// Native overwrites its cache on every 200; a stale ETag kept past an
-	// ETag-less 200 would answer a later 304 with the older count.
+	// A stale ETag kept past an ETag-less 200 would answer a later 304 with
+	// the older count.
 	resetCountCache(t)
 	stubETag(t, `"abc"`)
 	url1 := countBase + "&page=1"

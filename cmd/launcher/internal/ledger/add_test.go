@@ -6,8 +6,6 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// TestTotalsAdd exercises add's field-wise sum directly; DayTotalsAll's own
-// tests (ledger_test.go) exercise it indirectly through the exported path.
 func TestTotalsAdd(t *testing.T) {
 	a := Totals{
 		Claims: 1, Filed: 2, Promoted: 3, Dropped: 4, Patched: 5,

@@ -97,9 +97,6 @@ func statsWriteLogs(t *testing.T, root string, logs map[string]string) {
 	}
 }
 
-// statsStampedRoot holds three stamped Dispatches that differ in revision,
-// knobs, prompt hashes and models, one stamped Dispatch recording none of
-// them bar one empty-valued knob, and one inferred Record.
 type statsGroupedLine struct {
 	Group       string   `json:"group"`
 	GroupKeys   []string `json:"group_keys"`
@@ -121,6 +118,9 @@ func statsGroupedLines(t *testing.T, jsonl string) []statsGroupedLine {
 	return recs
 }
 
+// statsStampedRoot holds three stamped Dispatches that differ in revision,
+// knobs, prompt hashes and models, one stamped Dispatch recording none of
+// them bar one empty-valued knob, and one inferred Record.
 func statsStampedRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()

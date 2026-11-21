@@ -6,11 +6,9 @@ import (
 	"testing"
 )
 
-// These tests pin the unexported scanners lastInLog and lastSelfReportInLog
-// directly: near-miss error propagation, oversized-line handling, and
-// synthetic-line exclusion from a self-report. The file is package outcome
-// rather than outcome_test only because those two functions are unexported
-// (issue #2260); Resolve's tier policy is covered by outcome_test.go.
+// This file is package outcome, not outcome_test, only because lastInLog and
+// lastSelfReportInLog are unexported (issue #2260); Resolve's tier policy is
+// covered by outcome_test.go.
 
 func writeLog(t *testing.T, lines ...string) string {
 	t.Helper()
@@ -131,11 +129,9 @@ func TestLastInLog_NearMiss(t *testing.T) {
 	}
 }
 
-// The next three tests pin one contract: a mention that doesn't lead the line
-// is never a candidate, giving found=false and err=nil whether or not it
-// carries field markers. Each uses a different realistic shape (bare prose,
-// mid-sentence with fields, JSON-embedded) that a regression could break
-// independently, even though today's code doesn't branch on field presence.
+// The next three tests pin one contract (a non-leading mention is never a
+// candidate, fields or not) across three shapes a regression could break
+// independently, though today's code doesn't branch on field presence.
 
 func TestLastInLog_BareMentionIsNotNearMiss(t *testing.T) {
 	path := writeLog(t,
@@ -261,11 +257,9 @@ func TestLastInLog_OversizedLine_TakesLast(t *testing.T) {
 	}
 }
 
-// Issue #2223 acceptance criterion (a): a driver near-miss self-report that
-// paraphrases the grammar with no fields at all, followed by the backstop's
-// synthetic line. lastSelfReportInLog must surface the driver's near-miss
-// instead of being shadowed by the synthetic line, while lastInLog, the
-// authoritative outcome, still reports the synthetic blocked outcome.
+// Issue #2223 (a): the backstop's synthetic line must not shadow the driver's
+// fieldless near-miss in lastSelfReportInLog, while lastInLog still reports
+// the synthetic outcome.
 func TestLastSelfReportInLog_NearMissThenSynthetic(t *testing.T) {
 	path := writeLog(t,
 		"SPINDRIFT_OUTCOME: success",
@@ -301,8 +295,7 @@ func TestLastSelfReportInLog_NearMissThenSynthetic(t *testing.T) {
 	}
 }
 
-// Issue #2223 acceptance criterion (b): a single genuine, full-grammar,
-// non-synthetic line parses fully and populates Outcome.
+// Issue #2223 (b).
 func TestLastSelfReportInLog_FullGrammarGenuine(t *testing.T) {
 	path := writeLog(t,
 		"SPINDRIFT_OUTCOME issue=9 landing=https://github.com/o/r/pull/9 status=ready note=all good nonce=abc123",
@@ -329,8 +322,7 @@ func TestLastSelfReportInLog_FullGrammarGenuine(t *testing.T) {
 	}
 }
 
-// Issue #2223 acceptance criterion (c): a log of prose with no
-// SPINDRIFT_OUTCOME token at all yields found=false and no error.
+// Issue #2223 (c).
 func TestLastSelfReportInLog_NoOutcome(t *testing.T) {
 	path := writeLog(t,
 		"some output",
@@ -346,10 +338,8 @@ func TestLastSelfReportInLog_NoOutcome(t *testing.T) {
 	}
 }
 
-// Issue #2343 slice 1: a log whose scan hits a genuine I/O error (here Path
-// points at a directory, so os.Open succeeds but the bufio read fails) is
-// still skipped, so the walk finds the good log's report and never aborts,
-// but the error now comes back to the caller instead of being swallowed.
+// Issue #2343: an unreadable log (a directory: os.Open succeeds, the read
+// fails) is skipped without aborting the walk, but its error is returned.
 func TestLastSelfReportAcrossLogs_SkipsBadLogButReturnsError(t *testing.T) {
 	badDir := t.TempDir()
 	goodPath := writeLog(t,
@@ -372,9 +362,6 @@ func TestLastSelfReportAcrossLogs_SkipsBadLogButReturnsError(t *testing.T) {
 	}
 }
 
-// When the only leading-token line is the backstop's own synthetic line, only
-// the backstop spoke and the driver never did, so lastSelfReportInLog must not
-// mistake that line for a genuine self-report.
 func TestLastSelfReportInLog_SkipsSyntheticOnlyLog(t *testing.T) {
 	path := writeLog(t,
 		"some output",

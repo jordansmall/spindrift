@@ -249,19 +249,15 @@ func TestRun_SecondRunLosesWhileFirstUnclosed(t *testing.T) {
 	release()
 }
 
-// spindriftClaimHelperEnv gates TestHelperClaimAndBlock: unset, it is a no-op
-// under a normal `go test` run; set, the parent below re-execs the test
-// binary with it to get a genuine second OS process racing ClaimIssue,
-// covering the real cross-process case flock (unlike an in-process mutex)
-// exists for.
+// spindriftClaimHelperEnv gates TestHelperClaimAndBlock, so the parent can
+// re-exec the test binary as a genuine second OS process racing ClaimIssue --
+// the cross-process case flock exists for.
 const spindriftClaimHelperEnv = "SPINDRIFT_CLAIM_HELPER"
 
 // TestHelperClaimAndBlock is not a real test: it is the child-process body
-// for TestClaimIssue_CrossProcess, invoked via `-test.run` with
-// spindriftClaimHelperEnv set. It claims the issue named by
-// SPINDRIFT_CLAIM_PWD/SPINDRIFT_CLAIM_NUMBER, announces readiness on stdout,
-// and blocks on stdin until the parent kills it -- process death, not a
-// graceful release call, is the scenario under test.
+// for TestClaimIssue_CrossProcess. It claims the issue and blocks until the
+// parent kills it -- process death, not a graceful release, is the scenario
+// under test.
 func TestHelperClaimAndBlock(t *testing.T) {
 	if os.Getenv(spindriftClaimHelperEnv) != "1" {
 		t.Skip("helper process for TestClaimIssue_CrossProcess; not a standalone test")

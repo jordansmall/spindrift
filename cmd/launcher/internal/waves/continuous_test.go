@@ -52,11 +52,10 @@ func fakeWavesClock(now time.Time, calls *[]time.Duration) retry.Clock {
 	}
 }
 
-// TestRunContinuous_RefillsFreedSlotWhileOthersRunning verifies the core
-// slot-refill behavior (#527 AC1): with MaxParallel=2 and three ready issues,
-// the third launches into the slot #1 frees while #2 is still running. A
-// batch-shaped implementation would deadlock here, since #2 only unblocks
-// after #3 has already started.
+// TestRunContinuous_RefillsFreedSlotWhileOthersRunning verifies #527 AC1: with
+// MaxParallel=2 and three ready issues, #3 launches into the slot #1 frees
+// while #2 still runs. A batch-shaped implementation deadlocks here, since #2
+// only unblocks after #3 has started.
 func TestRunContinuous_RefillsFreedSlotWhileOthersRunning(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -260,20 +259,18 @@ func TestRunContinuous_StaleProbeStopsRefillLetsInFlightFinish(t *testing.T) {
 }
 
 // TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack verifies
-// #2678's non-zero-outstanding case: when the stale verdict fires while a
-// Box is still in flight, the drain report is emitted once that Box
-// finishes (from the completion goroutine, not the stale-transition
-// branch), and reflects the issue left unclaimed by the stale verdict.
+// #2678's non-zero-outstanding case: a stale verdict with a Box in flight is
+// reported by the completion goroutine once that Box finishes, counting the
+// issue the stale verdict left unclaimed.
 func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
 	c.MaxParallel = 2
 
-	// Deterministic clock (issue #2678 mutation-testing gap: replacing the
-	// freeSlotSecs accumulation with a literal 0 left the whole waves suite
-	// green, since the assertions below only checked >=0). The
-	// mu.Lock()/idle.Wait() pairing in the bootstrap makes this scenario read
-	// the clock exactly twice, so freeSlotSecs is computable by hand.
+	// Deterministic clock (issue #2678: a literal-0 freeSlotSecs once passed a
+	// >=0 assertion). The bootstrap's mu.Lock()/idle.Wait() pairing makes this
+	// scenario read the clock exactly twice, so freeSlotSecs is computable by
+	// hand.
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	const tick = 5 * time.Second
 	var clockMu sync.Mutex
@@ -359,11 +356,9 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 		t.Fatalf("report.Duration(): got %v, want exactly %v (base+%v clock, two reads)", dur, wantDur, tick)
 	}
 
-	// freeSlotSecs accumulates (limiter.Cap()-outstanding)*elapsed across the
-	// single interval between the two clock reads: Cap()=2, outstanding=1 (box
-	// #1 still counted before its own decrement), so the exact value is
-	// 1*tick, not merely >=0. Reverting the accumulation to a literal 0, or
-	// any other wrong formula, must fail this assertion.
+	// freeSlotSecs accumulates (Cap()-outstanding)*elapsed over the one
+	// interval: Cap()=2, outstanding=1 (#1 still counted before its own
+	// decrement), so exactly 1*tick.
 	wantFree := float64(2-1) * tick.Seconds()
 	if report.FreeSlotSecs != wantFree {
 		t.Fatalf("report.FreeSlotSecs: got %v, want exactly %v ((cap-outstanding)*tick = (2-1)*%v)", report.FreeSlotSecs, wantFree, tick)
@@ -374,10 +369,9 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 	}
 }
 
-// TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown verifies a
-// review finding on #2678: when queue.Pending() errors (a transient tracker
-// hiccup), the emitted StaleDrainReport must say the held-back count is
-// unknown, not silently fabricate a confirmed-looking zero.
+// TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown pins #2678:
+// when queue.Pending() errors, the StaleDrainReport must say the held-back
+// count is unknown, not fabricate a confirmed-looking zero.
 func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -459,11 +453,10 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 	}
 }
 
-// TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues verifies a review
-// finding on #2678: heldBack must apply nextReady's blocked, touch-overlap
-// and failed-check filtering, not just drop issues already claimed this run.
-// #1 is ready and #2 is blocked by #9, so heldBack is 1; the old
-// len(dropClaimed(issues, claimed)) counted both. Ported onto Pending (#2939).
+// TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues pins #2678:
+// heldBack must apply nextReady's blocked, touch-overlap and failed-check
+// filtering, not just drop issues already claimed this run (#2939). #1 is
+// ready and #2 is blocked by #9, so heldBack is 1, never 2.
 func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -486,10 +479,8 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 		return true, false, "rebuild needed (base tip changed image inputs)"
 	}
 
-	// Stale fires before any launch, so no Box ever dispatches: nil, nil for
-	// the *dispatch.Factory and settle.Settler, mirroring
-	// TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory
-	// (queue_engine_test.go).
+	// Stale fires before any launch, so the nil Factory/Settler is never
+	// reached.
 	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
@@ -509,7 +500,6 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 // the second of countReady's three documented exclusions (#2778): heldBack
 // must also skip an issue deferred by the touch-overlap gate. #1 is ready; #2
 // declares the same touch path as in-progress #9, so heldBack is 1, never 2.
-// Ported forward onto the Queue.Pending seam (issue #2939).
 func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -528,10 +518,8 @@ func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *t
 		return true, false, "rebuild needed (base tip changed image inputs)"
 	}
 
-	// Stale fires before any launch, so no Box ever dispatches: nil, nil for
-	// the *dispatch.Factory and settle.Settler, mirroring
-	// TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory
-	// (queue_engine_test.go).
+	// Stale fires before any launch, so the nil Factory/Settler is never
+	// reached.
 	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
@@ -551,7 +539,6 @@ func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *t
 // third of countReady's three documented exclusions (#2778): heldBack must
 // also skip an issue whose own DepsOf check failed. #1 is ready; #2 is marked
 // failed via the discover closure's failed map, so heldBack is 1, never 2.
-// Ported forward onto the Queue.Pending seam (issue #2939).
 func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -573,10 +560,8 @@ func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T
 		return true, false, "rebuild needed (base tip changed image inputs)"
 	}
 
-	// Stale fires before any launch, so no Box ever dispatches: nil, nil for
-	// the *dispatch.Factory and settle.Settler, mirroring
-	// TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory
-	// (queue_engine_test.go).
+	// Stale fires before any launch, so the nil Factory/Settler is never
+	// reached.
 	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
@@ -593,10 +578,10 @@ func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T
 }
 
 // TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers is
-// the counterexample to the two sibling exclusion tests above (#2778 review
-// finding): under cfg.IgnoreBlockers (research-kind dispatch), issueReadiness
+// the counterexample to the blocked and DepsOf-failed exclusion tests above
+// (#2778): under cfg.IgnoreBlockers (research-kind dispatch), issueReadiness
 // skips both the DepsOf-failed guard and the blocker-edge computation, so #1,
-// #2, and #3 all count ready and heldBack is 3. Ported onto Pending (#2939).
+// #2, and #3 all count ready and heldBack is 3.
 func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -623,10 +608,8 @@ func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t
 		return true, false, "rebuild needed (base tip changed image inputs)"
 	}
 
-	// Stale fires before any launch, so no Box ever dispatches: nil, nil for
-	// the *dispatch.Factory and settle.Settler, mirroring
-	// TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory
-	// (queue_engine_test.go).
+	// Stale fires before any launch, so the nil Factory/Settler is never
+	// reached.
 	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
@@ -664,9 +647,7 @@ func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	// nil, nil: nothing ever dispatches, so a nil *dispatch.Factory and
-	// settle.Settler is a stronger guarantee than an fr.RunCalls==0
-	// assertion. With no Factory, dispatch is impossible, not merely
+	// A nil Factory/Settler makes dispatch impossible, not merely
 	// unobserved.
 	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
@@ -937,10 +918,8 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	// Real settle, not settle.NewFake(): the TransitionStateCalls==1 assertion
-	// below only holds because a real Settle performs the InProgress -> Failed
-	// demotion on fc for the outcome-less, PR-less run (issue #1605).
-	// settle.NewFake() records calls on itself and never touches fc, so that
-	// assertion would see 0 instead.
+	// needs a real Settle's InProgress -> Failed demotion on fc for the
+	// outcome-less, PR-less run (issue #1605); the Fake never touches fc.
 	s := newSettle(fc, fc)
 
 	// Always reports #1 as dispatchable regardless of the claim already made
@@ -969,9 +948,7 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 	if len(fc.TransitionStateCalls) != 1 {
 		t.Fatalf("TransitionStateCalls: got %d, want 1 (suppressed stale entry must not re-attempt settle's transition)", len(fc.TransitionStateCalls))
 	}
-	// fake.ClaimCalls now proves the claim happened exactly once, replacing
-	// the coverage the old TransitionStateCalls==2 count gave the claim half
-	// before Claim moved onto the FakeQueue.
+	// fake.ClaimCalls proves the claim happened exactly once.
 	if len(fake.ClaimCalls) != 1 || fake.ClaimCalls[0] != "1" {
 		t.Fatalf("ClaimCalls: got %v, want [\"1\"] (stale re-discovery of #1 must not double-claim)", fake.ClaimCalls)
 	}
@@ -981,9 +958,9 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 }
 
 // TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle verifies
-// that when a Box's issue is marked on cfg.Terminated (Terminate landed while
-// it was running, ADR 0024, issue #649), a non-zero exit is neither
-// transitioned to Failed nor handed to Settle: Terminate already transitioned
+// that when a Box's issue is marked on Session.Terminated (a Reclaim landed
+// while it was running, ADR 0024, issue #649), a non-zero exit is neither
+// transitioned to Failed nor handed to Settle: Reclaim already transitioned
 // the issue to Dispatchable, and a Failed transition here would corrupt that.
 func TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle(t *testing.T) {
 	c := baseConfig()
@@ -1068,11 +1045,9 @@ func TestRunContinuous_FailedBoxCallsBoxFailedHook(t *testing.T) {
 }
 
 // TestRunContinuous_AlreadyInFlightSkipsWithoutFailedTransition verifies that
-// when a second dispatch slot's Box reports its container is already running
-// (a live run possibly orphaned by a killed launcher, not a genuine box
-// failure), RunContinuous's goroutine switch skips it without a Failed
-// transition or a BoxFailed call, matching dispatchWave's
-// onSkip arm (issue #3633).
+// a Box whose container is already running (a live run possibly orphaned by a
+// killed launcher) is skipped without a Failed transition or a BoxFailed call,
+// matching dispatchWave (issue #3633).
 func TestRunContinuous_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -1126,7 +1101,7 @@ func TestRunContinuous_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T)
 }
 
 // TestRunContinuous_FailedBoxWithEmptyLogPrintsErrToStderr is
-// TestRunContinuous_FailedBoxCallsSettlerFail's stderr-output counterpart:
+// TestRunContinuous_FailedBoxCallsBoxFailedHook's stderr-output counterpart:
 // a box that never launched (Result.Err populated per dispatch/retry.go)
 // must have its reason surfaced next to the FAILED line (issue #3119).
 func TestRunContinuous_FailedBoxWithEmptyLogPrintsErrToStderr(t *testing.T) {
@@ -1423,11 +1398,10 @@ func TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss(t *testing.T) {
 		}
 	}
 
-	// Bootstrap drains discover twice: once to launch #1, once more for the
-	// terminating refill() attempt that finds the second slot's only candidate
-	// (#1) already claimed and strands the slot. Both calls happen inside the
-	// single initial drainRefill(), which holds mu for its whole loop, so the
-	// poll ticker cannot contribute a call until it reaches idle.Wait().
+	// Bootstrap calls discover twice: to launch #1, then the terminating
+	// refill() that finds only claimed #1 and strands the slot. Both run in the
+	// initial drainRefill() under mu, so the poll ticker cannot contribute
+	// until idle.Wait().
 	drain(2)
 
 	// #2 becomes visible now that the slot is already stranded. #1 is still
@@ -1530,10 +1504,8 @@ func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing
 		return true, false, "rebuild needed (base tip changed image inputs)"
 	}
 
-	// Freshness is stale from the very first refill, so no Box ever launches;
-	// a nil *dispatch.Factory/settle.Settler makes that structural (a launch
-	// attempt would nil-panic), the same pattern
-	// TestRunContinuous_RefillCycleGuardSkipsAndReports uses.
+	// Stale from the first refill, so the nil Factory/Settler is never
+	// reached.
 	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
@@ -1707,9 +1679,8 @@ func TestRunContinuous_StopClosedBeforeCall_NonEmptyQueue_ReturnsErrSignalledSto
 	close(stop)
 	c.Stop = stop
 
-	// nil, nil: a stopped-before-call run must never reach dispatch.Factory.New
-	// at all, so a nil Factory/Settler is a stronger guarantee than an
-	// fr.RunCalls==0 assertion would be.
+	// A nil Factory/Settler makes dispatch impossible, not merely
+	// unobserved.
 	var err error
 	out := captureStdout(t, func() {
 		err = RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
@@ -1771,10 +1742,8 @@ func TestRunContinuous_StopClosedBeforeCall_EmptyQueue_ReturnsErrSignalledStopNo
 
 // TestRunContinuous_StopClosedWhileBoxInFlight_DrainsWithoutFurtherLaunchAndPrintsOnce
 // covers #3520's drain: a Stop closed mid-run lets the in-flight Box finish
-// and settle, blocks the poll ticker's own refill attempts (pollInterval is
-// overridden short enough for several ticks to fire before release), and
-// prints the drain line exactly once despite every one of those attempts
-// re-checking the latch.
+// and settle, blocks the poll ticker's refills (pollInterval is short enough
+// for several ticks), and prints the drain line exactly once.
 func TestRunContinuous_StopClosedWhileBoxInFlight_DrainsWithoutFurtherLaunchAndPrintsOnce(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -2032,13 +2001,10 @@ func TestRunContinuous_NonNilStopNeverClosed_OrdinaryResultUnaffected(t *testing
 }
 
 // TestRunContinuous_StopClosedDuringRateLimitBackoffSleep_LaunchesNothing
-// reproduces the #3520 review finding at continuous.go:351: a stop closed
-// while refill is sleeping out a forge.ErrRateLimit re-discover backoff must
-// abort that refill on wake, not fall through to a re-discover that
-// succeeds and claims/launches one more Box. Discover fails once (forcing
-// the backoff sleep) then would succeed on the very next call if reached —
-// the fix must never let refill reach that second call once Sleep's own
-// stop-close has landed.
+// pins a #3520 finding: a stop closed while refill sleeps out a
+// forge.ErrRateLimit re-discover backoff must abort that refill on wake, not
+// fall through to a re-discover that succeeds and launches one more Box.
+// Discover fails once (forcing the sleep), then would succeed if reached.
 func TestRunContinuous_StopClosedDuringRateLimitBackoffSleep_LaunchesNothing(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -2057,8 +2023,7 @@ func TestRunContinuous_StopClosedDuringRateLimitBackoffSleep_LaunchesNothing(t *
 	stop := make(chan struct{})
 	c.Stop = stop
 
-	// The Sleep injection is the reviewer's own repro: close cfg.Stop from
-	// inside the backoff sleep, then see whether refill still launches.
+	// Close cfg.Stop from inside the backoff sleep.
 	c.Clock = retry.Clock{
 		Now: func() time.Time { return time.Time{} },
 		Sleep: func(time.Duration) {
@@ -2071,8 +2036,7 @@ func TestRunContinuous_StopClosedDuringRateLimitBackoffSleep_LaunchesNothing(t *
 		if callN == 1 {
 			return Batch{}, fmt.Errorf("%w: rate limited", forge.ErrRateLimit)
 		}
-		// Only reached if the post-sleep stop check is missing; must never
-		// happen once the fix lands.
+		// Only reached if the post-sleep stop check is missing.
 		return Batch{Issues: []Issue{{Number: "1"}}}, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
@@ -2097,15 +2061,10 @@ func TestRunContinuous_StopClosedDuringRateLimitBackoffSleep_LaunchesNothing(t *
 }
 
 // TestRunContinuous_StopClosedDuringRateLimitBackoffSleep_PrintsPromptlyNotAfterFullBackoff
-// reproduces the #3520 review finding at continuous.go:333: refill used to
-// hold mu across the backoff clock.Sleep, so the dedicated stop-watcher
-// goroutine (which needs mu to print) was blocked out until the sleep
-// returned. This drives a Sleep that blocks on a channel the test alone
-// controls, closes cfg.Stop while that sleep is still blocked, and asserts
-// the drain line appears on stdout before the sleep is ever released. A
-// regression to a mu-held sleep reproduces the finding exactly: the watcher
-// cannot take mu until Sleep returns, so the line never appears within the
-// bounded wait below and the test times out instead of passing.
+// pins a #3520 finding: a refill holding mu across the backoff clock.Sleep
+// blocks the stop watcher (which needs mu to print) until the sleep returns.
+// Sleep blocks on a test-held channel, Stop closes meanwhile, and the drain
+// line must appear before the sleep is released; a mu-held sleep times out.
 func TestRunContinuous_StopClosedDuringRateLimitBackoffSleep_PrintsPromptlyNotAfterFullBackoff(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -2141,10 +2100,9 @@ func TestRunContinuous_StopClosedDuringRateLimitBackoffSleep_PrintsPromptlyNotAf
 	os.Stdout = w
 	t.Cleanup(func() { os.Stdout = orig })
 
-	// captureStdout can't serve this test: it reads the pipe only after fn
-	// returns, and the assertion below must see a line while RunContinuous is
-	// still mid-run. Hence the hand-swap, plus a scanner goroutine that never
-	// blocks on a full channel and always ends when closeStdout runs.
+	// Not captureStdout, which reads only after fn returns: the line must be
+	// seen mid-run. The scanner goroutine never blocks on a full channel and
+	// ends when closeStdout runs.
 	lines := make(chan string, 16)
 	scannerDone := make(chan struct{})
 	go func() {
@@ -2177,9 +2135,8 @@ func TestRunContinuous_StopClosedDuringRateLimitBackoffSleep_PrintsPromptlyNotAf
 
 	close(stop)
 
-	// The sleep is held open by release, not by a duration, so seeing the
-	// line here proves the watcher printed it without the sleep returning —
-	// exactly the promptness the finding says a mu-held sleep breaks.
+	// The sleep is held open by release, so the line proves the watcher
+	// printed without the sleep returning.
 	found := false
 	deadline := time.After(1 * time.Second)
 	for !found {
@@ -2270,10 +2227,9 @@ func assertReclaimedToDispatchable(t *testing.T, fc *forge.Fake, num string) {
 
 // TestRunContinuous_AbortClosedWhileBoxInFlight_ReclaimsAndAbandons covers
 // #3521 items 1 and 2: an Abort closed while one Box is in flight reclaims it
-// (kill + tracker back to Dispatchable) rather than waiting for it to finish
-// on its own, and the Box's own completion goroutine abandons — Reclaim's
-// Registry mark means it neither Fails nor Settles the issue Reclaim already
-// released. Uses a Session-supplied Registry, covering that registry source.
+// (kill + tracker back to Dispatchable), and the Box's completion goroutine,
+// seeing Reclaim's mark, neither Fails nor Settles. Uses a Session-supplied
+// Registry.
 func TestRunContinuous_AbortClosedWhileBoxInFlight_ReclaimsAndAbandons(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -2479,12 +2435,10 @@ func TestRunContinuous_AbortAfterOneSettles_OnlyInFlightIssueReclaimed(t *testin
 
 	abort := make(chan struct{})
 	c.Abort = abort
-	// Close Abort from c.now instead of from the test goroutine after a timing
-	// margin: once armed, the only site left that reaches now() is #1's own
-	// completion goroutine (staleDrain.checkpointIfNeeded), which runs under mu
-	// immediately above its outstanding--/delete(inflight), so the first
-	// observeAbort after it is that goroutine's own drainRefill — with #1
-	// provably already out of inflight (#3521).
+	// Close Abort from c.now, not after a timing margin: once armed, only #1's
+	// completion goroutine reaches now(), under mu just above its
+	// delete(inflight), so the first observeAbort after it is that goroutine's
+	// drainRefill, with #1 provably out of inflight (#3521).
 	armed := make(chan struct{})
 	var armOnce sync.Once
 	c.now = func() time.Time {
@@ -2537,11 +2491,9 @@ func TestRunContinuous_AbortAfterOneSettles_OnlyInFlightIssueReclaimed(t *testin
 }
 
 // TestRunContinuous_AbortClosedWithNothingInFlight_ReturnsErrSignalledStop
-// covers #3521 item 5: an Abort closed before RunContinuous ever launches
-// anything still returns ErrSignalledStop, prints the nothing-in-flight
-// line, and claims nothing — mirroring
-// TestRunContinuous_StopClosedBeforeCall_EmptyQueue_ReturnsErrSignalledStopNotOpenNoneDispatchable's
-// shape for Stop.
+// covers #3521 item 5: an Abort closed before RunContinuous launches anything
+// still returns ErrSignalledStop, prints the nothing-in-flight line, and
+// claims nothing.
 func TestRunContinuous_AbortClosedWithNothingInFlight_ReturnsErrSignalledStop(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -2692,18 +2644,12 @@ func (g *transitionGate) TransitionState(num string, from, to forge.DispatchStat
 	return g.Fake.TransitionState(num, from, to)
 }
 
-// TestRunContinuous_AbortReclaimInFlight_HoldsReturnUntilTransitioned pins the
-// abort contract's own invariant (#3521): every aborted issue is transitioned
-// off InProgress back to Dispatchable, so RunContinuous must not return — and
-// let the process exit — while a Reclaim is still between its Kill and that
-// transition.
-//
-// The sequencing makes a *completing Box's* goroutine, not the abort watcher,
-// the site that first observes cfg.Abort: c.now is only ever called with mu
-// held, so closing Abort from there means the watcher cannot have latched
-// first, and the very next mu-held observeAbort is this goroutine's own via
-// drainRefill. The watcher is the easy case — its reclaim runs inside the
-// goroutine RunContinuous joins on before returning.
+// TestRunContinuous_AbortReclaimInFlight_HoldsReturnUntilTransitioned pins
+// #3521's invariant: RunContinuous must not return while a Reclaim is between
+// its Kill and the InProgress->Dispatchable transition. A *completing Box's*
+// goroutine, not the watcher (the easy case, joined before return), first
+// observes cfg.Abort: c.now runs only under mu, so closing Abort there means
+// the next mu-held observeAbort is that goroutine's drainRefill.
 func TestRunContinuous_AbortReclaimInFlight_HoldsReturnUntilTransitioned(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -2811,13 +2757,11 @@ func (g *preLaunchGate) IsRunning(name string) bool {
 	return g.killHook.IsRunning(name)
 }
 
-// TestRunContinuous_AbortBeforeContainerCreated_StopsBoxAndReleasesIssue
-// closes the last window the #3521 review named: an issue joins inflight at
-// claim time but its container only exists once runner.Run is entered, so an
-// abort landing between the two reaps nothing by name. The kill latch is what
-// makes it stick — the Box must never launch, and its issue must still come
-// back to Dispatchable with RunContinuous returning promptly rather than
-// waiting the Box out.
+// TestRunContinuous_AbortBeforeContainerCreated_StopsBoxAndReleasesIssue pins
+// #3521's last window: an issue joins inflight at claim but its container only
+// exists once runner.Run is entered, so an abort between the two reaps nothing
+// by name. The kill latch must stop the Box launching, release the issue to
+// Dispatchable, and let RunContinuous return promptly.
 func TestRunContinuous_AbortBeforeContainerCreated_StopsBoxAndReleasesIssue(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -2898,13 +2842,10 @@ func TestRunContinuous_AbortBeforeContainerCreated_StopsBoxAndReleasesIssue(t *t
 	}
 }
 
-// awaitingSettle wraps settle.Fake so a Settle call behaves like a real
-// in-flight settle that is genuinely still polling when the abort lands
-// (#3523), mirroring how the real settle.Settle's watch.poll loop rechecks
-// s.terminated() at every checkpoint. The poll (see Settle below) never
-// sleeps, so there is no timer for a test to hide timing assumptions behind.
-// release lets a test end a Settle call the other way, covering the
-// graceful-drain case where nothing interrupts it.
+// awaitingSettle wraps settle.Fake so a Settle call behaves like a real settle
+// still polling when the abort lands (#3523), rechecking termination the way
+// settle.Settle's watch.poll does, with no sleep to hide timing behind.
+// release ends a Settle the other way, for the graceful-drain case.
 type awaitingSettle struct {
 	*settle.Fake
 	reg *terminate.Registry
@@ -2999,12 +2940,10 @@ func setupAbortDrainSettleTest(t *testing.T) (c Config, session *Session, fc *fo
 }
 
 // TestRunContinuous_AbortWhileSettleInFlight_StopsPromptlyAndReleasesIssue
-// covers #3523's end-to-end case none of #3521's own abort tests exercise:
-// the Box has already finished and it is the *settle*, not the Box, still in
-// flight when Abort closes. continuous.go calls s.Settle before
-// delete(inflight, num), so a still-polling settle's issue is still in
-// reclaimInFlight's snapshot — this pins that the reclaim's mark is what lets
-// the polling settle stop, not some unrelated timeout or race.
+// covers #3523: the *settle*, not the Box, is in flight when Abort closes.
+// s.Settle runs before delete(inflight, num), so the issue is in
+// reclaimInFlight's snapshot; this pins that the reclaim's mark is what stops
+// the polling settle, not a timeout or race.
 func TestRunContinuous_AbortWhileSettleInFlight_StopsPromptlyAndReleasesIssue(t *testing.T) {
 	c, session, fc, f, as, fake, fresh := setupAbortDrainSettleTest(t)
 
@@ -3046,8 +2985,7 @@ func TestRunContinuous_AbortWhileSettleInFlight_StopsPromptlyAndReleasesIssue(t 
 // TestRunContinuous_DrainDuringSettle_NotInterruptedRunsToCompletion is the
 // negative case #3523 pins alongside the abort test above: a graceful drain
 // (cfg.Stop alone, never cfg.Abort) must let an in-flight settle finish on
-// its own, never cutting it short the way an abort does. If a future change
-// ever made a drain interrupt a settle, this fails.
+// its own, never cutting it short the way an abort does.
 func TestRunContinuous_DrainDuringSettle_NotInterruptedRunsToCompletion(t *testing.T) {
 	c, session, fc, f, as, fake, fresh := setupAbortDrainSettleTest(t)
 
@@ -3062,11 +3000,9 @@ func TestRunContinuous_DrainDuringSettle_NotInterruptedRunsToCompletion(t *testi
 	waitOn(t, as.started, "settle was never invoked for issue #1")
 	close(stop)
 
-	// RunContinuous joins on inflight emptying before it can return
-	// (continuous.go's `for len(inflight) > 0 || aborting { idle.Wait() }`),
-	// and #1 only leaves inflight once Settle returns, so its still being in
-	// flight here, well after Stop closed, is itself proof the drain did not
-	// cut the settle short.
+	// RunContinuous joins on inflight emptying, and #1 leaves inflight only
+	// once Settle returns, so RunContinuous not returning here, well after
+	// Stop closed, proves the drain did not cut the settle short.
 	select {
 	case got := <-resultCh:
 		t.Fatalf("RunContinuous returned (%v) while the settle was still in flight after Stop alone", got)
