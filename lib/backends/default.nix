@@ -99,7 +99,8 @@
 # connectorOnly (optional bool) marks a backend whose only implementation is
 # its Connector: there is no native adapter for a Connector row's `primary` to
 # replace, so lib/flakeModule.nix leaves the name out of the set `primary` is
-# checked against (jira, issue #6858; github, issue #6888). The generated
+# checked against (jira, issue #6858; github, issue #6888; forgejo, issue
+# #7122). The generated
 # Descriptor carries it too: the Bundle's no-native-network-adapter check reads
 # it (issue #6888).
 

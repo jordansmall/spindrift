@@ -53,15 +53,6 @@ let
       ++ modules
     )).apps.${system}.default.program;
   forgejoConnector = (import ../../connectors/forgejo).lib.connector { core = import ../../core; };
-  forgejoProgramWith =
-    modules:
-    (fixtures.connectorConsumerVia (
-      [
-        ../../lib/flakeModule.nix
-        forgejoConnector.flakeModule
-      ]
-      ++ modules
-    )).apps.${system}.default.program;
   claudeRow = claudeConnector.driverRow pkgs.lib;
   # opencode rejects the schema's bare claude ids (issue #5355), so each
   # Harness selecting it names its models; the worker's is dropped silently.
@@ -558,19 +549,6 @@ in
         touch $out
       '';
 
-  # Issue #6998: `primary` is a switch on a registered backend row; on, the
-  # row's entry says so. Off, the entry carries no `primary`
-  # (connector-driver-rows-github-row-unconditional).
-  connector-driver-rows-primary-reaches-document =
-    pkgs.runCommand "connector-driver-rows-primary-reaches-document"
-      { nativeBuildInputs = [ pkgs.jq ]; }
-      ''
-        ${fixtures.runInputDocOf (forgejoProgramWith [ { spindrift.connectors.forgejo.primary = true; } ])}
-        jq -e --arg n forgejo '[.backends[] | select(.name == $n)]
-          | length == 1 and all(.[]; .primary == true and (has("shadow") | not))' "$doc"
-        touch $out
-      '';
-
   # Issue #7139: the github Connector registers its backend row whatever
   # `shadow` and `primary` say. Both off, the document carries one row with its
   # Route table and the accepted baseline doctor diffs that table against, and
@@ -776,6 +754,28 @@ in
         { spindrift.connectors.jira.primary = true; }
       ])
     ) "`primary` on the jira row must fail evaluation: no native backend remains";
+    # forgejo's native tracker is gone (issue #7122): like github and jira it
+    # is connectorOnly, so its row is refused `primary`.
+    assert assertMsg (evaluatesWith [
+      forgejoConnector.flakeModule
+    ]) "control: the forgejo Connector row evaluates without `primary`";
+    assert assertMsg (
+      !(evaluatesWith [
+        forgejoConnector.flakeModule
+        { spindrift.connectors.forgejo.primary = true; }
+      ])
+    ) "`primary` on the forgejo row must fail evaluation: no native backend remains";
+    assert assertMsg (
+      !(builtins.elem "forgejo" nativeBackendNames)
+    ) "forgejo must stay out of the native backend names the module checks `primary` against";
+    assert assertMsg (
+      names.primaryError nativeBackendNames [ ] "forgejo" {
+        shadow = false;
+        driver = null;
+        backend = { };
+      }
+      == "Connector 'forgejo': `primary` needs a native backend of the same name to replace; none is registered"
+    ) "the forgejo refusal must be the existing no-native-backend message";
     assert assertMsg (
       !(builtins.elem "jira" nativeBackendNames)
     ) "jira must stay out of the native backend names the module checks `primary` against";

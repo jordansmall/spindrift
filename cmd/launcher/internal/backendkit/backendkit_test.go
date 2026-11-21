@@ -104,19 +104,3 @@ func TestAutoMergeRemedyClauseReadsShared(t *testing.T) {
 		t.Fatalf("clause = %q", got)
 	}
 }
-
-func TestForgeConnectorRoutedRoutesOnlyTheForge(t *testing.T) {
-	reset(t)
-	s := strategy("forgeonly")
-	s.ForgeConnectorRouted = true
-	Register(s)
-	if !ForgeReadsThroughConnector("forgeonly", false) {
-		t.Error("ForgeReadsThroughConnector = false; want true for a forge-routed Strategy")
-	}
-	if TrackerReadsThroughConnector("forgeonly", false) {
-		t.Error("TrackerReadsThroughConnector = true; want false: the tracker stays native unless primary")
-	}
-	if !TrackerReadsThroughConnector("forgeonly", true) {
-		t.Error("TrackerReadsThroughConnector(primary) = false; want true")
-	}
-}

@@ -2762,30 +2762,27 @@ func TestApplyConnectorCredentials_TemplateRunsForJiraRow(t *testing.T) {
 	}
 }
 
-// A primary row reads through its Connector whatever its adapter's Strategy
-// says, as Code Forge and as issue tracker; forgejo's Code Forge always does,
-// so its credential resolves for a plain row only as the CODE_FORGE.
-func TestApplyConnectorCredentials_TemplateRunsForForgejoForgeOrPrimaryTracker(t *testing.T) {
-	for _, tc := range []struct {
-		name, extra, forge, tracker string
-		want                        []string
-	}{
-		{"primary", `,"primary":true`, "forgejo", "local", []string{"vault get shadow-test-token"}},
-		{"plain forge", ``, "forgejo", "local", []string{"vault get shadow-test-token"}},
-		{"primary tracker only", `,"primary":true`, "git", "forgejo", []string{"vault get shadow-test-token"}},
-		{"plain tracker only", ``, "git", "forgejo", nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ran := useCredentialRows(t, credentialRowDoc("forgejo", tc.extra), "vault get {name}", func(string) (string, error) { return "tok", nil })
-			setKnob(t, "CODE_FORGE", tc.forge)
-			setKnob(t, "ISSUE_TRACKER", tc.tracker)
-			if err := applyConnectorCredentials(); err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(ran(), tc.want) {
-				t.Errorf("ran %q, want %q", ran(), tc.want)
-			}
-		})
+// forgejo's Code Forge and issue tracker are both its Connector, so its
+// credential resolves for the active forgejo row on either axis, with or
+// without `primary`.
+func TestApplyConnectorCredentials_TemplateRunsForForgejoRow(t *testing.T) {
+	for _, extra := range []string{`,"primary":true`, ``} {
+		for _, axis := range []struct{ name, forge, tracker string }{
+			{"forge", "forgejo", "local"},
+			{"tracker", "git", "forgejo"},
+		} {
+			t.Run(axis.name+extra, func(t *testing.T) {
+				ran := useCredentialRows(t, credentialRowDoc("forgejo", extra), "vault get {name}", func(string) (string, error) { return "tok", nil })
+				setKnob(t, "CODE_FORGE", axis.forge)
+				setKnob(t, "ISSUE_TRACKER", axis.tracker)
+				if err := applyConnectorCredentials(); err != nil {
+					t.Fatal(err)
+				}
+				if want := []string{"vault get shadow-test-token"}; !reflect.DeepEqual(ran(), want) {
+					t.Errorf("ran %q, want %q", ran(), want)
+				}
+			})
+		}
 	}
 }
 

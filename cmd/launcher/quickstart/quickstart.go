@@ -249,9 +249,7 @@ func postWriteFailure(step postWriteStep, written []string, insideGitWorkTree bo
 // Injected so tests substitute a forge.Fake instead of reaching a live API.
 type ForgeBuilder func(s backendkit.Strategy, sh backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, forge.CodeForge, error)
 
-// buildTracker builds the backend's issue tracker alone. The deferred token
-// probe calls it directly because it cannot build a Connector-routed Code
-// Forge.
+// buildTracker builds the backend's issue tracker alone.
 func buildTracker(s backendkit.Strategy, sh backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, error) {
 	if s.NewIssueTracker == nil {
 		return nil, fmt.Errorf("backend %q cannot build an issue tracker", s.Name)
@@ -462,8 +460,9 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	shared := quickstartShared(repoSlug, gitUserName, gitUserEmail)
 	// Quickstart installs no Connector sandbox, so a backend whose tracker or
 	// Code Forge reads through a Connector cannot build both here: the token
-	// probe builds the tracker alone and the finish-line checks run under
-	// `spindrift doctor`. The false arguments mean "not primary".
+	// probe defers when the tracker is itself the Connector, and the
+	// finish-line checks run under `spindrift doctor`. The false arguments
+	// mean "not primary".
 	deferChecks := !connectorsandbox.Installed() &&
 		(backendkit.TrackerReadsThroughConnector(strategy.Name, false) ||
 			backendkit.ForgeReadsThroughConnector(effectiveForge(strategy), false))
@@ -477,13 +476,10 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 			PromptMasked: promptMasked,
 			AmbientToken: env.GHAuthToken,
 			Probe: func(token string) error {
-				var it forge.IssueTracker
-				var err error
-				if deferChecks {
-					it, err = buildTracker(strategy, shared, knobLookup(knobs, strategy.TokenEnvVar, token))
-				} else {
-					it, _, err = forgeBuilder(strategy, shared, knobLookup(knobs, strategy.TokenEnvVar, token))
+				if deferChecks && backendkit.TrackerReadsThroughConnector(strategy.Name, false) {
+					return connectorsandbox.ErrNoConnectorSandbox
 				}
+				it, _, err := forgeBuilder(strategy, shared, knobLookup(knobs, strategy.TokenEnvVar, token))
 				if err != nil {
 					return err
 				}

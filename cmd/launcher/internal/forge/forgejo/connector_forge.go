@@ -37,24 +37,23 @@ var loadRowConnector = backendrows.Load
 // the default client. A test seam, as a real host reaches the real instance.
 var connectorClient *http.Client
 
-// ErrNoConnectorRow is why forgejo's Code Forge cannot be built without a
-// forgejo backend row that is not shadow: it runs only through its Connector,
-// and a shadow row only observes, so it never answers the forge.
-var ErrNoConnectorRow = errors.New("forgejo's Code Forge runs only through its Connector, which needs a non-shadow forgejo backend row with a usable base")
+// ErrNoConnectorRow is why neither forgejo's Code Forge nor its issue tracker
+// can be built without a forgejo backend row that is not shadow: both run only
+// through the Connector, and a shadow row only observes, so it never answers.
+var ErrNoConnectorRow = errors.New("forgejo runs only through its Connector, which needs a non-shadow forgejo backend row with a usable base")
 
-// primaryRow is the forgejo backend row when it is configured primary: the
-// issue tracker is then built from the row's Connector rather than the native
-// adapter.
-func primaryRow() (backendrows.Row, bool) {
-	row, ok := backendrows.Lookup(backend.Forgejo.Name)
-	return row, ok && row.Primary
-}
-
-// forgeRow is the forgejo backend row the Code Forge is built from: any row
-// that is not shadow, with or without primary.
-func forgeRow() (backendrows.Row, bool) {
-	row, ok := backendrows.Lookup(backend.Forgejo.Name)
-	return row, ok && !row.Shadow
+// connectorRow is the forgejo backend row both halves are built from: any row
+// that is not shadow, with or without primary. Otherwise it returns
+// ErrNoConnectorRow, wrapping the row set's base error when that is why the
+// row is absent.
+func connectorRow() (backendrows.Row, error) {
+	if row, ok := backendrows.Lookup(backend.Forgejo.Name); ok && !row.Shadow {
+		return row, nil
+	}
+	if baseErr := backendrows.BaseError(backend.Forgejo.Name); baseErr != nil {
+		return backendrows.Row{}, fmt.Errorf("%w: %w", ErrNoConnectorRow, baseErr)
+	}
+	return backendrows.Row{}, ErrNoConnectorRow
 }
 
 // newConnectorCodeForge composes the Code Forge from row's Connector and the

@@ -54,7 +54,7 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 	// The nil reload-failure note is deliberate: connector_forge.go records no
 	// primaryrecord trace either, unlike the jira tracker.
 	it, err := connectortracker.NewReloading(func() (*connectorhost.Connector, error) {
-		conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Audit: audit, Client: connectorClient})
+		conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Audit: audit, Client: connectorClient, Getenv: credentialGetenv(row, k)})
 		if err != nil {
 			return nil, err
 		}

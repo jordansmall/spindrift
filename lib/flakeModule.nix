@@ -681,11 +681,11 @@ in
                     divergence from the native decode. A `driver` row must
                     name a core Driver and carry a `module`; only the Harness
                     running that Driver bakes the module. A `backend` row
-                    instead samples every `shadowEvery`th read through its
-                    Connector beside the native read, which stays
-                    authoritative (forgejo only: a github shadow row has no
-                    native read left, so every github read fails with
-                    `ErrNoRoute`). A row with neither throws. mkHarness
+                    instead names a backend with a native read to sample
+                    beside; no shipped backend has one left (forgejo, github
+                    and jira are Connector-only), so a backend shadow row has
+                    nothing to compare and every read fails with `ErrNoRoute`
+                    or a named refusal. A row with neither throws. mkHarness
                     throws on any other mismatch. Off by default, which
                     leaves the Consumer's outputs byte-identical.
                   '';
@@ -696,12 +696,9 @@ in
                   description = ''
                     Make this Connector authoritative over the native
                     implementation of the same name (issues #6998, #6999).
-                    On a `backend` row it answers in place of the native
-                    backend: for forgejo the whole tracker, reads and
-                    writes (the Code Forge is the Connector's already, so
-                    `primary` moves only the tracker, native until #7122).
-                    github and jira have
-                    no native backend (their Connector is the only one), so
+                    On a `backend` row it would answer in place of the native
+                    backend, but every shipped backend (forgejo, github, jira)
+                    is Connector-only with no native backend to replace, so
                     `primary` is refused on their rows. On a `driver`
                     row it is the Driver in place of the native Strategy, in
                     the Box during the Pass and on the host when it reads
@@ -711,8 +708,8 @@ in
                     Exclusive with `shadow`, and a row with no native
                     implementation of its name throws, each naming the row.
                     Off by default, which leaves the Consumer's outputs
-                    byte-identical. Dropping it restores the native
-                    implementation.
+                    byte-identical. Dropping it from a `driver` row restores
+                    the native Strategy.
                   '';
                 };
                 shadowEvery = mkOption {

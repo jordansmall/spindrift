@@ -13,7 +13,7 @@ import (
 )
 
 // trackerHarness drives the tracker contracts through the Connector's tracker
-// primitives, built by the production constructor under a primary row with no
+// primitives, built by the production constructor under a forgejo row with no
 // native adapter behind it. It omits forgetest.StateSeeder, so state moves
 // through TransitionState.
 type trackerHarness struct {
@@ -34,8 +34,7 @@ var (
 func newTrackerHarness(t *testing.T) trackerHarness {
 	t.Helper()
 	h := newConnectorHarness(t, true)
-	// The harness's forge needs no primary; only the tracker does.
-	useForgejoRow(t, h.srv.URL, func(r *backendrows.Row) { r.Primary = true })
+	useForgejoRow(t, h.srv.URL, func(*backendrows.Row) {})
 	tr, err := buildTracker(h.srv)
 	if err != nil {
 		t.Fatal(err)

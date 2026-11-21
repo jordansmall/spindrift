@@ -2,8 +2,6 @@ package main
 
 import (
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -29,41 +27,6 @@ func TestBuildForge_GithubTracker_BuildsBothSeams(t *testing.T) {
 	}
 	if it == nil || cf == nil {
 		t.Fatal("expected non-nil IssueTracker and CodeForge")
-	}
-}
-
-func TestForgejoTracker_ProbeHitsConfiguredBaseURLWithToken(t *testing.T) {
-	var gotAuth string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/repos/owner/repo" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		gotAuth = r.Header.Get("Authorization")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"full_name":"owner/repo"}`))
-	}))
-	defer srv.Close()
-
-	s := mustStrategy(t, "forgejo")
-	l := knobLookup(map[string]string{"FORGEJO_BASE_URL": srv.URL}, s.TokenEnvVar, "forgejo-faketoken")
-	// Forgejo's Code Forge needs a Connector row the wizard does not bake, so
-	// the tracker is built on its own.
-	it, err := s.NewIssueTracker(backendkit.Shared{RepoSlug: "owner/repo", Labels: defaultDispatchLabels}, l)
-	if err != nil {
-		t.Fatalf("NewIssueTracker: %v", err)
-	}
-
-	repo, err := it.Probe()
-	if err != nil {
-		t.Fatalf("Probe: %v", err)
-	}
-	if repo != "owner/repo" {
-		t.Errorf("Probe() = %q, want %q", repo, "owner/repo")
-	}
-	if !strings.Contains(gotAuth, "forgejo-faketoken") {
-		t.Errorf("Authorization = %q, want it to carry the token passed through the Lookup", gotAuth)
 	}
 }
 

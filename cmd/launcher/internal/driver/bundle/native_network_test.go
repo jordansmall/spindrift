@@ -13,9 +13,9 @@ import (
 var builtinBackends = []string{backend.Local.Name, backend.Git.Name}
 
 // pinnedNativeNetwork is the native network adapters still registered while
-// their deletion is open: #7122 (forgejo's tracker). That ticket removes this
-// entry; nothing else belongs here.
-var pinnedNativeNetwork = []string{"forgejo"}
+// their deletion is open. It is empty: a new entry needs a ticket that removes
+// it.
+var pinnedNativeNetwork = []string{}
 
 // nativeNetworkBackends names every Strategy that is native yet neither a
 // Built-in backend, connector-only, nor a pinned exception.
