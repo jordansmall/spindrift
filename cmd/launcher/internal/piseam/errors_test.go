@@ -10,6 +10,7 @@ import (
 // Failed turns in JSON mode exit zero: the failure is an assistant message
 // with stopReason "error", and the stream still ends in agent_settled.
 func TestPiErrorExit(t *testing.T) {
+	t.Parallel()
 	const rateLimit = `{"error":{"message":"Rate limit reached","type":"rate_limit_error","code":"rate_limit_exceeded"}}`
 	for _, tc := range []struct {
 		name         string
@@ -39,6 +40,7 @@ func TestPiErrorExit(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			s := newStub(t, tc.script...)
 			r := runPi(t, s, "Say hello.")
 			if r.err != nil {
@@ -71,7 +73,9 @@ func TestPiErrorExit(t *testing.T) {
 }
 
 func TestPiUnknownModel(t *testing.T) {
+	t.Parallel()
 	t.Run("unknown provider fails before any event", func(t *testing.T) {
+		t.Parallel()
 		s := newStub(t)
 		r := runPiWith(t, s, piOpts{args: []string{"--model", "nope/nope"}}, "hi")
 		if exitDetail(r.err) != "exit 1" {
@@ -87,6 +91,7 @@ func TestPiUnknownModel(t *testing.T) {
 	// Under a configured provider an unlisted id is not an error: pi warns and
 	// sends the id to the endpoint as-is.
 	t.Run("unknown id under a configured provider is sent anyway", func(t *testing.T) {
+		t.Parallel()
 		s := newStub(t, textReply("ok"))
 		r := runPiWith(t, s, piOpts{args: []string{"--model", stubProvider + "/nope"}}, "hi")
 		if r.err != nil {

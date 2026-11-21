@@ -164,12 +164,14 @@ func (o toolOutcome) ran(marker string) bool {
 }
 
 func TestPiHooksBlockCredentialReads(t *testing.T) {
+	t.Parallel()
 	seed := map[string]string{".env": planted}
 	for _, tc := range []struct{ name, tool, argsJSON string }{
 		{"read tool", "read", `{"path":".env"}`},
 		{"bash", "bash", `{"command":"cat .env"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			o := runHooked(t, hooksDir(t), tc.tool, tc.argsJSON, nil, seed)
 			if !o.isError {
 				t.Errorf("credential read was not an error; result = %q", o.result)
@@ -187,6 +189,7 @@ func TestPiHooksBlockCredentialReads(t *testing.T) {
 	// Control: the same read of a plain file succeeds, so the blocks above are
 	// the hook's doing and not a fixture pi cannot read.
 	t.Run("plain file is read", func(t *testing.T) {
+		t.Parallel()
 		o := runHooked(t, hooksDir(t), "read", `{"path":"plain.txt"}`, nil, map[string]string{"plain.txt": planted})
 		if o.isError || !strings.Contains(o.modelSaw, planted) {
 			t.Errorf("plain read isError = %v, model saw %q, want its content", o.isError, o.modelSaw)
@@ -195,6 +198,7 @@ func TestPiHooksBlockCredentialReads(t *testing.T) {
 }
 
 func TestPiHooksScrubCredentialVars(t *testing.T) {
+	t.Parallel()
 	const secret = "sekrit-token-value"
 	o := runHooked(t, hooksDir(t), "bash", `{"command":"echo \"key=[$ANTHROPIC_API_KEY] other=[$KEEP_ME]\""}`,
 		[]string{"ANTHROPIC_API_KEY=" + secret, "KEEP_ME=kept"}, nil)
@@ -211,6 +215,7 @@ func TestPiHooksScrubCredentialVars(t *testing.T) {
 }
 
 func TestPiHooksRejectBackgroundBash(t *testing.T) {
+	t.Parallel()
 	o := runHooked(t, hooksDir(t), "bash", `{"command":"touch ran.marker & wait"}`, nil, nil)
 	if !o.isError {
 		t.Errorf("backgrounded command was not an error; result = %q", o.result)
@@ -224,6 +229,7 @@ func TestPiHooksRejectBackgroundBash(t *testing.T) {
 }
 
 func TestPiHooksSummariseLongOutput(t *testing.T) {
+	t.Parallel()
 	teeDir := t.TempDir()
 	env := []string{"BASH_OUTPUT_TEE_DIR=" + teeDir, "BASH_OUTPUT_SUMMARY_TAIL_BYTES=64"}
 	o := runHooked(t, hooksDir(t), "bash", `{"command":"seq 1 2000"}`, env, nil)
@@ -257,6 +263,7 @@ func TestPiHooksSummariseLongOutput(t *testing.T) {
 }
 
 func TestPiHooksFailClosed(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, script, body string }{
 		{"guard exits nonzero", "credential-deny.sh", "exit 1"},
 		{"guard prints malformed output", "credential-deny.sh", "echo not-json"},
@@ -265,6 +272,7 @@ func TestPiHooksFailClosed(t *testing.T) {
 		{"rewriter prints no rewrite", "env-credential-scrub.sh", "exit 0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			hooks := hooksWith(t, tc.script, tc.body)
 			o := runHooked(t, hooks, "bash", `{"command":"touch ran.marker"}`, nil, nil)
 			if !o.isError {
@@ -279,6 +287,7 @@ func TestPiHooksFailClosed(t *testing.T) {
 		})
 	}
 	t.Run("read tool", func(t *testing.T) {
+		t.Parallel()
 		hooks := hooksWith(t, "credential-deny.sh", "exit 1")
 		o := runHooked(t, hooks, "read", `{"path":"plain.txt"}`, nil, map[string]string{"plain.txt": planted})
 		if !o.isError || strings.Contains(o.modelSaw, planted) {
@@ -290,11 +299,13 @@ func TestPiHooksFailClosed(t *testing.T) {
 // The summary hook runs after the call has, so a broken one fails open: the
 // model gets the command's own output, not a refusal.
 func TestPiHooksSummaryFailsOpen(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, body string }{
 		{"summary exits nonzero", "exit 1"},
 		{"summary prints malformed output", "echo not-json"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			hooks := hooksWith(t, "bash-output-summary.sh", tc.body)
 			env := []string{"BASH_OUTPUT_TEE_DIR=" + t.TempDir()}
 			o := runHooked(t, hooks, "bash", `{"command":"echo kept-output; touch ran.marker"}`, env, nil)
@@ -316,6 +327,7 @@ func TestPiHooksSummaryFailsOpen(t *testing.T) {
 // The bridge's load-time throw is the only guard against a hook naming a tool it
 // cannot map, so pi must treat the failed load as fatal and not start without it.
 func TestPiHooksUnmappedToolRefusesStart(t *testing.T) {
+	// Serial: t.Setenv(BridgeEnv) forbids t.Parallel.
 	src := bridgeSource(t)
 	const row = `{ script: "credential-deny.sh", tools: ["read", "bash"`
 	if !strings.Contains(src, row) {
@@ -345,6 +357,7 @@ func TestPiHooksUnmappedToolRefusesStart(t *testing.T) {
 // planted project extension still stays unloaded, AGENTS.md is still read, and
 // the bridge still guards the call.
 func TestPiHooksWithProjectTrust(t *testing.T) {
+	t.Parallel()
 	const (
 		extMarkerFile = "PROJECT-EXTENSION-LOADED"
 		contextMarker = "CONTEXT-MARKER-WITH-BRIDGE"

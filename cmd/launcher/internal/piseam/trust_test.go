@@ -39,6 +39,7 @@ func seedFiles(t *testing.T, files map[string]string) func(work string) {
 }
 
 func TestPiNoApproveProjectTrust(t *testing.T) {
+	t.Parallel()
 	const (
 		projectMarker = "PROJECT-APPEND-MARKER"
 		extMarkerFile = "PROJECT-EXTENSION-LOADED"
@@ -59,6 +60,7 @@ export default function () {
 	opts := piOpts{args: []string{"--model", stubModelRef}, reasoning: true}
 
 	t.Run("no-approve ignores project resources", func(t *testing.T) {
+		t.Parallel()
 		s := newStub(t, textReply("ok"))
 		dirs := newPiDirs(t)
 		o := opts
@@ -89,6 +91,7 @@ export default function () {
 	// Control: the same fixture is seen once trusted, so the absences above
 	// are the flag's doing and not a fixture that pi never reads.
 	t.Run("approve loads project resources", func(t *testing.T) {
+		t.Parallel()
 		s := newStub(t, textReply("ok"))
 		dirs := newPiDirs(t)
 		o := opts
@@ -114,6 +117,7 @@ export default function () {
 	// Context files need no trust, so --no-approve still reads them.
 	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
 		t.Run("no-approve reads "+name, func(t *testing.T) {
+			t.Parallel()
 			s := newStub(t, textReply("ok"))
 			marker := "CONTEXT-MARKER-" + name
 			r := runPiWith(t, s, piOpts{args: opts.args}, "hi", seedFiles(t, map[string]string{name: marker}))
@@ -128,6 +132,7 @@ export default function () {
 }
 
 func TestPiAgentDirSkillsNeedNoTrust(t *testing.T) {
+	t.Parallel()
 	s := newStub(t, textReply("ok"))
 	dirs := newPiDirs(t)
 	skill := filepath.Join(dirs.agentDir, "skills", "agent-skill", "SKILL.md")

@@ -252,6 +252,7 @@ func exitDetail(err error) string {
 }
 
 func TestPiPlainAnswer(t *testing.T) {
+	t.Parallel()
 	const answer = "The stubbed model says hello."
 	const prompt = "Say hello to the seam."
 	s := newStub(t, textReply(answer))
@@ -336,6 +337,7 @@ func captureName(testName string, n int) string {
 }
 
 func TestCaptureNameSuffixesLaterRuns(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		test string
 		n    int
@@ -353,6 +355,7 @@ func TestCaptureNameSuffixesLaterRuns(t *testing.T) {
 }
 
 func TestCaptureKeepsEveryRunInATest(t *testing.T) {
+	// Serial: t.Setenv(CaptureEnv) forbids t.Parallel.
 	dir := t.TempDir()
 	t.Setenv(CaptureEnv, dir)
 	s := newStub(t, textReply("one"), textReply("two"))

@@ -22,6 +22,7 @@ const envFilesEnv = "SPINDRIFT_PI_ENV_FILES"
 // A bump must re-run this seam's checks against ADR 0009's pi amendment and
 // update it.
 func TestPiVersion(t *testing.T) {
+	t.Parallel()
 	const want = "1.1.0"
 	out, err := exec.Command(piPath(t), "--version").Output()
 	if err != nil {
@@ -46,6 +47,7 @@ func authHeader(t *testing.T, s *stub) string {
 }
 
 func TestPiAuthJSON(t *testing.T) {
+	t.Parallel()
 	const (
 		key   = "auth-json-key"
 		decoy = "home-decoy-key"
@@ -54,6 +56,7 @@ func TestPiAuthJSON(t *testing.T) {
 	// A custom Provider in models.json with no apiKey takes its key from the
 	// agent dir's auth.json: the shape PI_AUTH_CONTENT would have to write.
 	t.Run("agent dir auth.json supplies a custom Provider's key", func(t *testing.T) {
+		t.Parallel()
 		s := newStub(t, textReply("ok"))
 		dirs := newPiDirs(t)
 		writeJSON(t, filepath.Join(dirs.agentDir, "auth.json"), authJSON(key))
@@ -68,6 +71,7 @@ func TestPiAuthJSON(t *testing.T) {
 
 	// With PI_CODING_AGENT_DIR set, $HOME/.pi/agent is not consulted.
 	t.Run("PI_CODING_AGENT_DIR wins over HOME/.pi/agent", func(t *testing.T) {
+		t.Parallel()
 		s := newStub(t, textReply("ok"))
 		dirs := newPiDirs(t)
 		homeAgent := filepath.Join(dirs.home, ".pi", "agent")
@@ -88,6 +92,7 @@ func TestPiAuthJSON(t *testing.T) {
 	// Control for the test above: with no key in the agent dir pi refuses to
 	// call the Provider, so the decoy going unused is not a missed request.
 	t.Run("HOME/.pi/agent auth.json alone is not read", func(t *testing.T) {
+		t.Parallel()
 		s := newStub(t)
 		dirs := newPiDirs(t)
 		homeAgent := filepath.Join(dirs.home, ".pi", "agent")
@@ -106,6 +111,7 @@ func TestPiAuthJSON(t *testing.T) {
 
 	// pi neither warns about nor tightens a group/world-readable auth.json.
 	t.Run("auth.json mode is not enforced", func(t *testing.T) {
+		t.Parallel()
 		s := newStub(t, textReply("ok"))
 		dirs := newPiDirs(t)
 		p := filepath.Join(dirs.agentDir, "auth.json")
@@ -158,6 +164,7 @@ func assertPrivateFile(t *testing.T, path, want string) {
 // The path the Box takes for PI_AUTH_CONTENT: the Driver's envFiles write it
 // into $HOME/.pi/agent/auth.json, which pi reads with PI_CODING_AGENT_DIR unset.
 func TestPiAuthContentReachesPi(t *testing.T) {
+	t.Parallel()
 	const key = "auth-content-key"
 	b, err := json.Marshal(authJSON(key))
 	if err != nil {
@@ -196,6 +203,7 @@ func TestPiAuthContentReachesPi(t *testing.T) {
 // unset. The harness writes no models.json of its own, so the Provider can only
 // come from the written file.
 func TestPiModelsContentReachesPi(t *testing.T) {
+	t.Parallel()
 	const (
 		answer = "reply via written models.json"
 		key    = "models-content-key"
@@ -229,6 +237,7 @@ func TestPiModelsContentReachesPi(t *testing.T) {
 // PI_CODING_AGENT_DIR unset. The stub waits before its first byte, so the
 // request survives only when the written httpIdleTimeoutMs outlasts the wait.
 func TestPiSettingsContentReachesPi(t *testing.T) {
+	t.Parallel()
 	const (
 		answer = "reply after the wait"
 		wait   = 3 * time.Second
@@ -261,6 +270,7 @@ func TestPiSettingsContentReachesPi(t *testing.T) {
 	}
 
 	t.Run("a timeout shorter than the wait fails the request", func(t *testing.T) {
+		t.Parallel()
 		r := runWith(t, settings(500))
 		msg := lastAssistantMessage(r.events)
 		if msg["stopReason"] != "error" {
@@ -272,6 +282,7 @@ func TestPiSettingsContentReachesPi(t *testing.T) {
 	})
 
 	t.Run("a timeout longer than the wait succeeds", func(t *testing.T) {
+		t.Parallel()
 		r := runWith(t, settings(30000))
 		if got := finalAssistantText(r.events); got != answer {
 			t.Errorf("final assistant text = %q, want %q\nstdout:\n%s", got, answer, r.stdout)

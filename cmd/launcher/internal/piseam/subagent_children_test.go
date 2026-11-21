@@ -129,6 +129,7 @@ type childWant struct {
 // visible; with SPINDRIFT_PI_CAPTURE_DIR set the parent's event stream is the
 // corpus log for that mode.
 func TestPiSubagentModes(t *testing.T) {
+	t.Parallel()
 	const model = "stub/stub-model:high"
 	for _, tc := range []struct {
 		name, call string
@@ -161,6 +162,7 @@ func TestPiSubagentModes(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			s := subagentStub(t, tc.call, tc.children)
 			dirs := newPiDirs(t)
 			writeAgentFile(t, dirs.agentDir, "scout", model, "read, grep", "You are the scout.")
@@ -209,6 +211,7 @@ func TestPiSubagentModes(t *testing.T) {
 // per-role usage mix-up or a dropped child toolResult is visible; with
 // SPINDRIFT_PI_CAPTURE_DIR set the parent's event stream is the corpus log.
 func TestPiSubagentMultiRole(t *testing.T) {
+	t.Parallel()
 	s := subagentStub(t,
 		`{"tasks":[{"agent":"scout","task":"read the file"},{"agent":"auditor","task":"audit beta"}]}`,
 		map[string][]reply{
@@ -264,6 +267,7 @@ func TestPiSubagentMultiRole(t *testing.T) {
 // bridge, installed in the agent dir the child inherits, must block the read
 // inside the child's own process.
 func TestPiSubagentChildLoadsHookBridge(t *testing.T) {
+	t.Parallel()
 	const call = `{"agent":"scout","task":"read the file"}`
 	// The planted credential file is named as the hooks name it.
 	credFile := "." + "env"
@@ -279,6 +283,7 @@ func TestPiSubagentChildLoadsHookBridge(t *testing.T) {
 	}
 
 	t.Run("credential read is blocked in the child", func(t *testing.T) {
+		t.Parallel()
 		r, s := runRead(t, credFile)
 		_, results := subagentResults(t, r)
 		if len(results) != 1 || results[0]["exitCode"] != float64(0) {
@@ -310,6 +315,7 @@ func TestPiSubagentChildLoadsHookBridge(t *testing.T) {
 	// Control: the same child reads a plain file, so the block above is the
 	// bridge's doing and not a child that cannot read.
 	t.Run("plain file is read in the child", func(t *testing.T) {
+		t.Parallel()
 		r, _ := runRead(t, "plain.txt")
 		if !strings.Contains(r.stdout, planted) {
 			t.Errorf("child did not read the plain file; stdout:\n%s", r.stdout)
@@ -321,6 +327,7 @@ func TestPiSubagentChildLoadsHookBridge(t *testing.T) {
 // reaches the children: the extension spawns them without the flag, so a child
 // must still ignore the Target repo's project-local .pi/.
 func TestPiSubagentChildIgnoresProjectFiles(t *testing.T) {
+	t.Parallel()
 	const (
 		projectMarker = "PROJECT-APPEND-MARKER"
 		extMarkerFile = "PROJECT-EXTENSION-LOADED"
@@ -360,6 +367,7 @@ export default function () {
 // prompt needs a UI, so only the hook bridge keeps the Target repo's
 // .pi/agents/*.md from overriding the baked roster.
 func TestPiSubagentRefusesProjectAgentScope(t *testing.T) {
+	t.Parallel()
 	const projectMarker = "PROJECT-AGENT-MARKER"
 	plant := func(work string) {
 		dir := filepath.Join(work, ".pi", "agents")
@@ -396,6 +404,7 @@ func TestPiSubagentRefusesProjectAgentScope(t *testing.T) {
 
 	for _, scope := range []string{"project", "both"} {
 		t.Run(scope+" is refused", func(t *testing.T) {
+			t.Parallel()
 			r, s := runScope(t, scope)
 			reqs := s.Requests()
 			if len(reqs) != 2 {
@@ -412,6 +421,7 @@ func TestPiSubagentRefusesProjectAgentScope(t *testing.T) {
 	// Control: an explicit "user" scope still runs the baked scout, so the
 	// refusals above are the bridge's doing and not a subagent that cannot run.
 	t.Run("user runs the baked roster", func(t *testing.T) {
+		t.Parallel()
 		r, s := runScope(t, "user")
 		if _, results := subagentResults(t, r); len(results) != 1 || results[0]["exitCode"] != float64(0) {
 			t.Fatalf("results = %v, want one clean child", results)

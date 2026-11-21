@@ -40,6 +40,7 @@ func toolRoleMessages(req map[string]any) []string {
 }
 
 func TestPiToolCall(t *testing.T) {
+	t.Parallel()
 	const content = "tool-call-fixture-content"
 	for _, tc := range []struct {
 		name, tool, argsJSON string
@@ -58,6 +59,7 @@ func TestPiToolCall(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			const final = "Tool done."
 			s := newStub(t, toolCallReply("call_1", tc.tool, tc.argsJSON), textReply(final))
 			r := runPi(t, s, "Use the tool.", func(work string) {
@@ -108,6 +110,7 @@ func TestPiToolCall(t *testing.T) {
 }
 
 func TestPiRetriesOverload(t *testing.T) {
+	t.Parallel()
 	const final = "Recovered after retry."
 	s := newStub(t,
 		statusReply(429, `{"error":{"message":"Rate limit reached, try again later","type":"rate_limit_error","code":"rate_limit_exceeded"}}`),
@@ -137,6 +140,7 @@ func TestPiRetriesOverload(t *testing.T) {
 }
 
 func TestPiOutcomeLine(t *testing.T) {
+	t.Parallel()
 	const outcome = "SPINDRIFT_OUTCOME issue=1 landing=agent/issue-1 status=ready note=stub"
 	s := newStub(t, textReply("All work is finished.\n"+outcome))
 
