@@ -34,6 +34,7 @@ func linkSubagentExtension(t *testing.T, bin, agentDir string) {
 }
 
 func TestPiSubagent(t *testing.T) {
+	t.Parallel()
 	const (
 		agentBody     = "You are the scout. Report tersely."
 		task          = "find the thing"

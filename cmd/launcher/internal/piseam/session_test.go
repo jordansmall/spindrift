@@ -69,6 +69,7 @@ func sessionEntries(t *testing.T, path string) []map[string]any {
 }
 
 func TestPiModelThinkingSuffix(t *testing.T) {
+	t.Parallel()
 	const model = stubModelRef
 	for _, tc := range []struct {
 		name          string
@@ -89,6 +90,7 @@ func TestPiModelThinkingSuffix(t *testing.T) {
 		{name: "unknown suffix becomes model id", args: []string{"--model", model + ":bogus"}, reasoning: true, wantEffort: "medium", wantLevel: "medium", wantModelSent: stubModel + ":bogus", wantStderr: "Using custom model id"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			s := newStub(t, textReply("ok"))
 			dirs := newPiDirs(t)
 			r := runPiWith(t, s, piOpts{args: tc.args, reasoning: tc.reasoning, dirs: &dirs}, "Think.")
@@ -130,6 +132,7 @@ func TestPiModelThinkingSuffix(t *testing.T) {
 }
 
 func TestPiSessionIDOpenOrCreate(t *testing.T) {
+	t.Parallel()
 	id := driverkit.SessionUUID(sessionSlug, sessionIssue)
 	s := newStub(t, textReply("first-answer"), textReply("second-answer"))
 	dirs := newPiDirs(t)
@@ -172,6 +175,7 @@ func TestPiSessionIDOpenOrCreate(t *testing.T) {
 }
 
 func TestPiResumeWithoutStoredSessionStartsFresh(t *testing.T) {
+	t.Parallel()
 	id := driverkit.SessionUUID(sessionSlug, sessionIssue)
 	s := newStub(t, textReply("answer"))
 	dirs := newPiDirs(t)
@@ -197,6 +201,7 @@ func TestPiResumeWithoutStoredSessionStartsFresh(t *testing.T) {
 // Pins the Box's layout: no PI_CODING_AGENT_DIR, so sessions land in
 // $HOME/.pi/agent/sessions, the path lib/drivers/pi.nix bind-mounts.
 func TestPiSessionsLandInDefaultAgentDir(t *testing.T) {
+	t.Parallel()
 	id := driverkit.SessionUUID(sessionSlug, sessionIssue)
 	s := newStub(t, textReply("answer"))
 	dirs := newPiDirs(t)
@@ -213,6 +218,7 @@ func TestPiSessionsLandInDefaultAgentDir(t *testing.T) {
 }
 
 func TestPiSessionIDRejectsInvalid(t *testing.T) {
+	t.Parallel()
 	s := newStub(t)
 	r := runPiWith(t, s, piOpts{args: []string{"--model", stubModelRef, "--session-id", "not/valid"}}, "hi")
 	if exitDetail(r.err) != "exit 1" {

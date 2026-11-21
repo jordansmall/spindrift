@@ -11,6 +11,7 @@ import (
 // VERDICT on the first line, findings below. It runs a reasoning model with
 // --thinking high so the captured stream shows a non-off thinking level.
 func TestPiReviewerVerdict(t *testing.T) {
+	t.Parallel()
 	const verdict = "VERDICT: APPROVE"
 	s := newStub(t, reasoningTextReply("Checking the diff for blocking defects.",
 		verdict+"\n\n## Blocking\n- none\n\n## Non-blocking\n- none"))
