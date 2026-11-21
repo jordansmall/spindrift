@@ -138,9 +138,10 @@ func NewLocalTracker(dir string, labels forge.DispatchLabels, verdictLabels ...f
 	return &LocalTracker{dir: dir, labels: labels, verdictLabels: vl}
 }
 
-// WithRoute narrows ListIssues (and so CountReady) to issues carrying every
-// route label and stamps them onto issues PostIssue files. ListOpenIssues and
-// AllIssues stay unrouted: readiness reads the whole scope (ADR 0075).
+// WithRoute narrows ListIssues (and so CountReady) and ListIssuesWithLabels
+// (the findings backlog reads) to issues carrying every route label and
+// stamps them onto issues PostIssue files. ListOpenIssues and AllIssues stay
+// unrouted: readiness reads the whole scope (ADR 0075).
 func (lt *LocalTracker) WithRoute(r forge.Route) *LocalTracker {
 	lt.route = r
 	return lt
@@ -263,7 +264,8 @@ func (lt *LocalTracker) AllIssues() ([]forge.Issue, error) {
 // state scopes the scan to open or closed issue files, since a closed
 // finding is a durable triage decision the host must not refile. listIssues
 // returns oldest-created first; this reverses it to the promised
-// newest-first.
+// newest-first. A set route narrows it to that route's issues, so another
+// route's finding at the same site never suppresses this route's.
 func (lt *LocalTracker) ListIssuesWithLabels(state forge.IssueState, labels []string) ([]forge.Issue, error) {
 	var wantClosed bool
 	switch state {
@@ -275,7 +277,7 @@ func (lt *LocalTracker) ListIssuesWithLabels(state forge.IssueState, labels []st
 		return nil, fmt.Errorf("local: unsupported issue state %q", state)
 	}
 	issues, err := lt.listIssues(func(li localIssue) bool {
-		if li.frontmatter.Closed != wantClosed {
+		if li.frontmatter.Closed != wantClosed || !lt.route.MatchesLabels(li.frontmatter.Labels) {
 			return false
 		}
 		return slices.ContainsFunc(labels, func(label string) bool {

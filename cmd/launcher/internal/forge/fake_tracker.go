@@ -20,7 +20,8 @@ type IssueTrackerFake struct {
 	// Route narrows ListIssues and CountReady to issues carrying every label
 	// selector, and the AsIssueFiler and AsLocalIssueFiler wrappers stamp it
 	// onto the labels PostIssue records. Set it directly; nil is the whole
-	// scope.
+	// scope. The fake has no ListIssuesWithLabels, so the findings dedup reads
+	// fall back to its unrouted ListOpenIssues.
 	Route Route
 	// VerdictLabels maps a Verdict to the label CompleteVerdict writes. Set it
 	// directly: there is no constructor argument.
