@@ -28,11 +28,9 @@ var ErrUnsupportedCell = errors.New("promptassembly: env combination not covered
 type Result struct {
 	Prompt     string
 	AgentsJSON string
-	// ReviewPromptText is the rendered review-prompt.md body, populated
-	// under the same condition Handoff.ReviewPromptFile describes
-	// (default fresh-work dispatch, FixPass == 0). It lives
-	// on Result, not Handoff, because it is rendered text rather than the
-	// path Handoff serializes to disk (issue #2975).
+	// ReviewPromptText is the rendered review-prompt.md body, set only on a
+	// fresh-work, non-AdviseOnly dispatch (FixPass == 0). It lives on Result,
+	// not Handoff, because Handoff serializes paths, not text (issue #2975).
 	ReviewPromptText string
 	Handoff          Handoff
 	// Fragments is the sorted, de-duplicated set of lib/fragments.nix
@@ -110,15 +108,13 @@ type Handoff struct {
 	// reviewer.md `model:` overwrites it (issue #5350). An explicit
 	// dispatch-time REVIEW_MODEL (issue #3171) binds over both last.
 	ReviewModel string
-	// ReviewEffort mirrors ReviewModel, from the same reviewer key's "effort"
-	// field under the same condition, is likewise overwritten by reviewer.md's
-	// `reasoningEffort:` under a Driver with on-disk agent files (issue #5350),
-	// and is overridden last by an explicit dispatch-time REVIEW_EFFORT (issue
-	// #3171).
+	// ReviewEffort mirrors ReviewModel for the reviewer key's "effort" field,
+	// with reviewer.md's `reasoningEffort:` and REVIEW_EFFORT binding over it
+	// in the same order.
 	ReviewEffort string
 	// AdvisoryReviewer is true when the kind supplies its own reviewer prompt
-	// (butler, ADR 0056): its inline reviewer only
-	// advises, so its verdict must not steer the pass loop (issue #3925).
+	// (butler, ADR 0056): its inline reviewer only advises, so its verdict
+	// must not steer the pass loop (issue #3925).
 	AdvisoryReviewer bool
 	// Model, Effort, Driver, DriverBin, and DriverFlags are the Driver
 	// invocation's static configuration, never derived from Env/gate logic.
@@ -140,12 +136,10 @@ type Handoff struct {
 	Caps         Caps
 }
 
-// checkCoveredCell validates that e sits in a covered Env cell: DispatchKind,
-// plus SelfContained against the resolved kind's Prompts. DispatchKind is set
-// programmatically at runtime with no schema entry to guard it, while
-// IssueTracker and CodeForge are validated by lib/mkHarness.nix's
-// choicesCheckOk assert and main.go's validate() (issue #2540). No
-// combination of the other axes is rejected (issue #2354).
+// checkCoveredCell validates DispatchKind, which has no schema entry to guard
+// it, plus SelfContained against the kind's Prompts. IssueTracker and
+// CodeForge are validated upstream by mkHarness's choicesCheckOk and main.go's
+// validate() (issue #2540); no other axis combination is rejected (#2354).
 func checkCoveredCell(e Env) error {
 	d, ok := dispatchkind.ByName(e.kind())
 	if !ok {
@@ -198,13 +192,11 @@ func substitute(text string, vars map[string]string) string {
 }
 
 // RenderText substitutes the ${NAME} tokens in text through vars and trims
-// trailing newlines, the same treatment renderFileSegments gives an on-disk
-// file. With bare, a bare $NAME is substituted too (GNU envsubst parity). Bare
-// mode exists only for conflict-resolve-prompt.md Consumer PROMPTS_DIR
-// overrides, which use a bare $BASE_BRANCH; the main assembly path stays
-// braces-only because the default prompts carry literal shell text such as
-// `echo $CODE_FORGE`, which bare mode would rewrite once its name became a
-// substitution var.
+// trailing newlines, as renderFileSegments does for a file. bare also
+// substitutes $NAME (GNU envsubst parity), only for Consumer PROMPTS_DIR
+// overrides of conflict-resolve-prompt.md that use a bare $BASE_BRANCH; the
+// main path stays braces-only because the default prompts carry literal shell
+// text such as `echo $CODE_FORGE`.
 func RenderText(text string, vars map[string]string, bare bool) string {
 	re := substTokenRe
 	if bare {
@@ -247,10 +239,9 @@ func injectSharedBlockSegments(prompt body, contractPath string, vars map[string
 }
 
 // renderFileSegments reads path, substitutes it through vars, and trims the
-// trailing newlines a $(...) command substitution would strip. That invariant
-// lives here alone, not at each of the fragment, base-template, and
-// per-agent call sites. The trim runs on segments rather than the joined
-// string so per-segment attribution stays intact.
+// trailing newlines a $(...) command substitution would strip; every call
+// site relies on this one trim. It trims segments, not the joined string, to
+// keep per-segment attribution.
 func renderFileSegments(path string, owner Source, vars map[string]body) (body, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -280,12 +271,10 @@ type promptBodies struct {
 	kind        *dispatchkind.Descriptor
 }
 
-// assemblePromptBodies performs Assemble's prompt path in attributed segment
-// form: gates, the substitution vars, the fragment loop, base-template
-// selection, shared-block injection, and the review-prompt render. It also
-// returns vars, gates, and kind, so Assemble's agent-prompt renders
-// substitute through the same attributed vars and their fragment sources
-// reach Result.Fragments.
+// assemblePromptBodies renders Assemble's prompt and review-prompt bodies in
+// attributed segment form. It also returns vars, gates, and kind, so the
+// agent-prompt renders substitute through the same attributed vars and their
+// fragment sources reach Result.Fragments.
 func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	return assemblePromptBodiesMasked(e, reg, false)
 }
@@ -373,9 +362,7 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 	// because I/O is out of its scope.
 	gates["SKILLS_FOUND"] = e.SkillsFound != ""
 
-	// The substitution vars: the fixed scalars below plus every registry
-	// row's var and extraSubstVars, one flat set shared by every render in this
-	// function rather than scoped per-fragment.
+	// One flat var set shared by every render here, not scoped per fragment.
 	scalars := map[string]string{
 		"ISSUE_NUMBER":      e.IssueNumber,
 		"ISSUE_TITLE":       e.IssueTitle,
@@ -415,12 +402,10 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 	}
 	vars["ISSUE_TEXT"] = varBody("ISSUE_TEXT", issueSection)
 
-	// CHORE_PROMPT (ADR 0056, issue #3875) is the butler's ${CHORE_PROMPT}
-	// substitution: the named Chore's own prompt file, embedded into
-	// butler-prompt.md's body rather than appended like ISSUE_TEXT, since the
-	// Chore prompt is host-authored template text, not untrusted issue prose.
-	// A ByChore kind with no matching chores/<name>.md fails assembly outright
-	// (choreSection), unlike ISSUE_TEXT's silent-empty default.
+	// CHORE_PROMPT (ADR 0056, issue #3875) is embedded into butler-prompt.md's
+	// body rather than appended like ISSUE_TEXT: it is host-authored, not
+	// untrusted issue prose. A missing chores/<name>.md fails assembly, unlike
+	// ISSUE_TEXT's silent-empty default.
 	chorePrompt, err := choreSection(e)
 	if err != nil {
 		return promptBodies{}, err
@@ -477,12 +462,10 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 		}
 	}
 
-	// For each row in registry order, render its fragment when its gate is on
-	// and assign renderedText + "\n\n" to its var. The "\n\n" is appended
-	// here, not baked into the fragment file or the substitution result,
-	// because command substitution strips trailing newlines.
-	// Rows with exclusive gates may share one var (issue #6344), so an off or
-	// empty row must not clobber a binding an on-gate row already made.
+	// The "\n\n" separator is appended here, not baked into the fragment
+	// file, because command substitution strips trailing newlines. Rows with
+	// exclusive gates may share one var (issue #6344), so an off or empty row
+	// must not clobber a binding an on-gate row already made.
 	bound := map[string]bool{}
 	for _, row := range reg.Rows {
 		fragName, err := row.resolvedFragment(e)
@@ -500,9 +483,7 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 		if row.Gate == "" || gates[row.Gate] {
 			var rendered body
 			// Each fallback is read only when the one before is absent;
-			// fragName and fragSource then name the file actually read. A
-			// Shared axis row falls back to its root file first, then the
-			// legacy one.
+			// fragName and fragSource then name the file actually read.
 			candidates := []string{fragName}
 			if row.Axis != "" && row.Shared {
 				candidates = append(candidates, row.Fragment)
@@ -519,11 +500,9 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 				}
 			}
 			if err != nil {
-				// A missing fragment file resolves to an empty string rather
-				// than aborting, reproducing the bash original: its command
-				// substitution sat as a printf argument, so a failed read
-				// never tripped `set -e`. Any other read error still fails
-				// hard, since bash would not have swallowed that either.
+				// A missing fragment renders empty rather than aborting, as
+				// the bash original's printf-argument substitution never
+				// tripped `set -e`; any other read error fails hard.
 				if !errors.Is(err, os.ErrNotExist) {
 					return promptBodies{}, fmt.Errorf("read fragment %s: %w", fragName, err)
 				}
@@ -594,16 +573,11 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 	}
 	base := renderSegments(string(baseText), baseSource, vars).trimTrailingNewlines()
 
-	// ContractVerdict (research) injects only research-verdict;
-	// ContractInline (butler) injects nothing at all (its OUTCOME section is
-	// self-contained in butler-prompt.md, and the work-shaped comms/check
-	// blocks below assume a landing branch/PR the butler never cuts, ADR
-	// 0056); ContractLanding (work) injects comms, then check, then outcome,
-	// in that order. For issue-prompt.md this is a no-op: those markers are
-	// sliced from issue-prompt.md itself, so the already-contains-marker
-	// guard always fires. The code-comments policy is inlined verbatim in
-	// the templates themselves (issue #3505), so it is not part of this
-	// injection list.
+	// ContractInline (butler) injects nothing: its OUTCOME section is
+	// self-contained, and the comms/check blocks assume a landing branch the
+	// butler never cuts (ADR 0056). For issue-prompt.md the landing injection
+	// is a no-op, since those blocks are sliced from it and the marker guard
+	// fires. The code-comments policy is inlined in the templates (#3505).
 	switch d.Contract {
 	case dispatchkind.ContractVerdict:
 		base, err = injectSharedBlockSegments(base, e.ResearchOutcomeContractFile, vars)
@@ -611,7 +585,6 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 			return promptBodies{}, err
 		}
 	case dispatchkind.ContractInline:
-		// No shared-block injection for the butler (ADR 0056): nothing to do.
 	case dispatchkind.ContractLanding:
 		for _, contractFile := range []string{e.CommsContractFile, e.CheckContractFile, e.OutcomeContractFile} {
 			base, err = injectSharedBlockSegments(base, contractFile, vars)
@@ -694,18 +667,14 @@ func Assemble(e Env, reg Registry) (Result, error) {
 		},
 	}
 
-	// A cell that renders no review prompt leaves bodies.review nil, whose
-	// text() is "".
 	result.ReviewPromptText = bodies.review.text()
 
 	// An empty template means no --agents flag at all: AgentsJSON stays "".
 	if e.AgentsJSONTemplate != "" {
 		agentsTemplate := e.AgentsJSONTemplate
 
-		// Issue #2277: extract the reviewer's configured model before
-		// dropping the reviewer key entirely. The code-owned review pass
-		// replaces the inline reviewer subagent, so that subagent is
-		// never provisioned into --agents at all, not merely muted.
+		// Issue #2277: the code-owned review pass replaces the inline
+		// reviewer subagent, so its key is dropped after its model is read.
 		var agentsKeys map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(agentsTemplate), &agentsKeys); err != nil {
 			return Result{}, fmt.Errorf("parse agents json template: %w", err)
@@ -722,11 +691,9 @@ func Assemble(e Env, reg Registry) (Result, error) {
 			result.Handoff.ReviewModel = reviewer.Model
 			result.Handoff.ReviewEffort = reviewer.Effort
 		}
-		// A kind with its own reviewer prompt (butler's
-		// butler-review-prompt.md, ADR 0056) never gets the code-owned
-		// review pass above (it's AdviseOnly), so its inline reviewer
-		// subagent is the only review it gets — keep the key instead of
-		// dropping it.
+		// A kind with its own reviewer prompt (butler, ADR 0056) is
+		// AdviseOnly and never gets the code-owned review pass, so its
+		// inline reviewer is its only review: keep the key.
 		if bodies.kind.Prompts.Reviewer == "" {
 			delete(agentsKeys, "reviewer")
 		}
@@ -743,11 +710,8 @@ func Assemble(e Env, reg Registry) (Result, error) {
 		result.AgentsJSON = agentsJSON
 	}
 
-	// The on-disk agent-file rewrite is the twin of the --agents JSON loop
-	// above, for a Driver whose subagents use on-disk agent files. It must run
-	// after that loop: an existing reviewer.md's frontmatter model and effort
-	// overwrite whatever the JSON path set in ReviewModel and ReviewEffort,
-	// and a missing reviewer.md leaves the JSON-path values unchanged.
+	// Must run after the --agents loop: an existing reviewer.md's frontmatter
+	// model and effort overwrite what the JSON path set.
 	if e.DriverAgentFilesDir != "" {
 		if err := rewriteAgentFiles(e, bodies.vars, &removed, &result.Handoff.ReviewModel, &result.Handoff.ReviewEffort, bodies.kind.Prompts.Reviewer); err != nil {
 			return Result{}, err
@@ -786,11 +750,10 @@ const reviewFanoutAgent = "review-axis"
 const reviewFanoutFallbackAgent = "general-purpose"
 
 // reviewFanoutAgentFor resolves code-review-baked.md's REVIEW_FANOUT_AGENT
-// from what this run provisions: an --agents JSON Driver such as claude by a
-// template key, a Driver with on-disk agent files such as opencode by a
-// <name>.md in that directory.
-// A roster can omit the entry (issue #392's reviewModel="" opt-out), and
-// naming an agent the driver session never defines errors after burning turns.
+// from what this run provisions: a template key for an --agents JSON Driver,
+// a <name>.md for an on-disk agent-file Driver. A roster can omit the entry
+// (issue #392's reviewModel="" opt-out), and naming an agent the session never
+// defines errors after burning turns.
 func reviewFanoutAgentFor(e Env) string {
 	if e.AgentsJSONTemplate != "" {
 		var keys map[string]json.RawMessage
@@ -810,14 +773,11 @@ func reviewFanoutAgentFor(e Env) string {
 	return reviewFanoutFallbackAgent
 }
 
-// reviewerPromptOverride swaps in the kind's own reviewer prompt (butler's
-// butler-review-prompt.md, ADR 0056) for the roster's review-prompt.md, so a
-// kind whose reviewer subagent judges a delegation-message finding rather
-// than a branch diff gets a rubric that matches. reviewerPrompt == "" (a kind
-// with no reviewer prompt of its own) leaves promptFiles untouched; a roster
-// with no "reviewer" entry at all stays without one either way, since
-// nothing reads promptFiles["reviewer"] when the agents template carries no
-// "reviewer" key.
+// reviewerPromptOverride swaps in the kind's own reviewer prompt (butler,
+// ADR 0056) for the roster's review-prompt.md, since its reviewer judges a
+// delegation-message finding rather than a branch diff. A roster with no
+// "reviewer" entry stays without one: nothing reads promptFiles["reviewer"]
+// when the agents template carries no "reviewer" key.
 func reviewerPromptOverride(reviewerPrompt string, promptFiles map[string]string) map[string]string {
 	if reviewerPrompt == "" {
 		return promptFiles
@@ -890,11 +850,9 @@ func addFragmentRenders(renders map[string][]string, b body) {
 
 // renderAgentsJSON sets .{name}.prompt for every key in agentsTemplate whose
 // AgentsPromptFiles entry names a file that exists under PromptsDir.
-// agentsTemplate is a parameter rather than read from e.AgentsJSONTemplate so
-// the caller can pass the reviewer-stripped template (issue #2353).
-// reviewerPrompt is the dispatch kind's own
-// reviewer prompt filename, or "" when it has none. Every fragment that
-// reaches a rendered agent prompt is added to frags.
+// agentsTemplate is a parameter so the caller can pass the reviewer-stripped
+// template (issue #2353). Every fragment reaching an agent prompt is added to
+// frags.
 func renderAgentsJSON(e Env, agentsTemplate string, vars map[string]body, frags map[string][]string,
 	removed *removedVarScan, reviewerPrompt string) (string, error) {
 	var template map[string]json.RawMessage
@@ -973,11 +931,9 @@ func frontmatterOf(data []byte) string {
 	return strings.TrimRight(string(data), "\n")
 }
 
-// frontmatterScalar extracts the `key:` YAML scalar (`model`,
-// `reasoningEffort`) from a baked reviewer.md's frontmatter. The baked shape
-// is always a double-quoted scalar, e.g. `model: "opus"`, so a prefix cut plus
-// a quote trim replaces the original's jq unwrap without a JSON parse.
-// Returns "" when the frontmatter has no such line.
+// frontmatterScalar extracts the `key:` YAML scalar from a baked reviewer.md's
+// frontmatter, or "" when absent. The baked shape is always double-quoted
+// (`model: "opus"`), so a prefix cut plus a quote trim suffices.
 func frontmatterScalar(frontmatter, key string) string {
 	prefix := key + ": "
 	for _, line := range strings.Split(frontmatter, "\n") {
@@ -989,15 +945,12 @@ func frontmatterScalar(frontmatter, key string) string {
 }
 
 // rewriteAgentFiles is renderAgentsJSON's twin for a Driver whose subagents
-// use on-disk agent files. Call it only when DriverAgentFilesDir is set.
-// reviewer.md's `model:` and `reasoningEffort:` scalars overwrite
-// *reviewModel and *reviewEffort (each "" when its key is absent) and the file
-// is removed; a missing one leaves both untouched. A kind with its own
-// reviewer prompt (reviewerPrompt != "") keeps reviewer.md instead, since it
-// never gets the code-owned review pass this removal makes room for — the
-// rewrite loop below then rewrites it from that kind's prompt like any other
-// agent file. Names are rewritten in sorted order, so Go map order cannot vary
-// results.
+// use on-disk agent files; call it only when DriverAgentFilesDir is set.
+// reviewer.md's `model:` and `reasoningEffort:` overwrite *reviewModel and
+// *reviewEffort (each "" when absent) and the file is removed; a missing one
+// leaves both untouched. A kind with its own reviewer prompt keeps
+// reviewer.md, rewritten from that prompt like any other agent file. Names
+// are rewritten in sorted order so Go map order cannot vary results.
 func rewriteAgentFiles(e Env, vars map[string]body, removed *removedVarScan, reviewModel, reviewEffort *string, reviewerPrompt string) error {
 	if reviewerPrompt == "" {
 		reviewerPath := filepath.Join(e.DriverAgentFilesDir, "reviewer.md")

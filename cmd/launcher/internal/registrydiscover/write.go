@@ -29,15 +29,11 @@ func Render(routes []Route) []byte {
 		b.WriteString("\n[[routes]]\n")
 		writeProfileComments(&b, r.Profile)
 		fmt.Fprintf(&b, "match-host = %s\n", quoteTOMLString(r.MatchHost))
-		// registryroutes owns the rule for whether a route needs an
-		// upstream-origin. The migration remedies quote the same rule, so a
-		// mirrored copy here that drifted would confuse an operator.
+		// registryroutes owns the upstream-origin rule; the migration remedies
+		// quote it too, so no mirrored copy here.
 		if origin := registryroutes.UpstreamOriginFor(r.UpstreamBaseURL); origin != "" {
 			fmt.Fprintf(&b, "upstream-origin = %s\n", quoteTOMLString(origin))
 		}
-		// Discovery probed (or profile-filled) this value, so always write it
-		// out rather than leaning on registryroutes.Parse's "bearer" default,
-		// which is a fallback for hand-written files.
 		if r.SchemeFromProfile {
 			fmt.Fprintf(&b, "# auth-scheme from host profile %s: the probe saw no usable challenge\n", quoteTOMLString(r.Profile.Name))
 		}
@@ -47,6 +43,7 @@ func Render(routes []Route) []byte {
 		case BareTokenNeedsUserSecret:
 			b.WriteString("# basic needs a user:secret credential (for example an env source); the matched store yields a bare token, which the proxy refuses for basic\n")
 		}
+		// Always written: Parse's "bearer" default is for hand-written files.
 		fmt.Fprintf(&b, "auth-scheme = %s\n", quoteTOMLString(r.AuthScheme))
 		if len(r.Allow) > 0 {
 			fmt.Fprintf(&b, "# allow from host profile %s: sibling paths outside the declared registry path\n", quoteTOMLString(r.Profile.Name))

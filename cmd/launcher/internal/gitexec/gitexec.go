@@ -51,13 +51,10 @@ func GuardedArgs(dir string, args ...string) []string {
 	return append(append([]string{"-C", dir}, NoAutoMaintenance("-c")...), args...)
 }
 
-// OutputErr wraps err from a git command run with Output(), keeping the
-// stderr Output() captured on *exec.ExitError. prefix names the calling
-// package (e.g. "ledger", "butler") so the error reads "<prefix>: <msg>:
-// <err>: <stderr>", or "<prefix>: <msg>: <err>" when stderr is empty.
-// stderr goes in unredacted: a remote git command can echo a tokened URL
-// there, so run forge.RedactURLCredentials over its stderr instead of using
-// this helper.
+// OutputErr wraps err from a git command run with Output() as "<prefix>:
+// <msg>: <err>: <stderr>", appending the stderr captured on *exec.ExitError
+// when there is any. stderr goes in unredacted: for a remote git command,
+// which can echo a tokened URL, use forge.RedactURLCredentials instead.
 func OutputErr(prefix string, err error, format string, args ...any) error {
 	msg := fmt.Sprintf(format, args...)
 	var exitErr *exec.ExitError

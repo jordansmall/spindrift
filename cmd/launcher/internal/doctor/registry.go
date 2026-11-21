@@ -8,12 +8,10 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// ErrDegraded marks a Probe error as indeterminate: the probe could not
-// determine the condition it checks, as distinct from affirmatively detecting
-// it. Wrapping it makes FirstRequiredError and RunChecksFailFast treat the
-// failure as non-blocking even at Required tier. Reporter.Results still
-// prints the failure and its Remedy, as an advisory line. It is the runner
-// package's value so a Prerequisite Probe can wrap it without importing doctor.
+// ErrDegraded marks a Probe error as indeterminate (the probe could not tell),
+// not an affirmative detection: the failure never blocks, even at Required
+// tier, though Reporter.Results still prints it as advisory. It is runner's
+// value so a Prerequisite Probe can wrap it without importing doctor.
 var ErrDegraded = runner.ErrDegraded
 
 // Tier classifies a Check as blocking (Required) or non-blocking (Advisory).
@@ -64,13 +62,10 @@ func runOne(c Check) Result {
 	return Result{Check: c, Output: output, Err: err}
 }
 
-// Blocking reports whether r's failure stops the run. A Required-tier probe
-// that wrapped ErrDegraded could not determine its answer, which is not the
-// same as affirmatively detecting the condition it checks (issue #2962), so
-// it never blocks; nor does a probe wrapping backendkit.ErrUnsupported, at any tier.
-// Every caller asking "does this failure stop the run?" — this package's
-// fail-fast chains and cmd/launcher's configuration classification alike —
-// routes through here so the two cannot drift apart.
+// Blocking reports whether r's failure stops the run: a Required-tier failure
+// wrapping neither ErrDegraded (issue #2962) nor backendkit.ErrUnsupported. The
+// fail-fast chains here and cmd/launcher's configuration classification both
+// route through it so they cannot drift apart.
 func Blocking(r Result) bool {
 	return r.Check.Tier == Required && r.Err != nil && !errors.Is(r.Err, ErrDegraded) && !errors.Is(r.Err, backendkit.ErrUnsupported)
 }
@@ -86,9 +81,7 @@ func RunChecks(checks []Check) []Result {
 }
 
 // RunChecksFailFast runs checks in order and stops after the first blocking
-// Result, so the returned slice can be shorter than checks. That lets a probe
-// chain skip an expensive check, such as an extra live network call, once an
-// earlier required one has failed.
+// Result, so a chain skips later live calls once a required one has failed.
 func RunChecksFailFast(checks []Check) []Result {
 	results := make([]Result, 0, len(checks))
 	for _, c := range checks {
@@ -124,10 +117,9 @@ func FirstRequiredError(results []Result) error {
 }
 
 // RemedyError pairs a blocking Check's Probe error with the Check, so Error()
-// can append the Remedy hint to a fail-fast caller's error text. Error() shares
-// Remedy's text and suppression rule with Reporter.Results and indents the
-// remedy line the same way, so an errors.Join of several keeps each remedy
-// visibly attached to its own error.
+// can append the Remedy hint. The remedy line is indented as in
+// Reporter.Results, so an errors.Join of several keeps each remedy visibly
+// attached to its own error.
 type RemedyError struct {
 	// Err is the failing Check's Probe error, unmodified.
 	Err error
@@ -157,8 +149,7 @@ func (e *RemedyError) Unwrap() error {
 const remedyLinePrefix = "  remedy: "
 
 // remedySuffix returns remedy, or "" when it is empty or identical to msg so
-// the caller skips a remedy line that would just repeat the error. Every
-// reporter pairing a Remedy with an error text shares this one copy of the rule.
+// the caller skips a remedy line that would just repeat the error.
 func remedySuffix(remedy, msg string) string {
 	if remedy == "" || remedy == msg {
 		return ""
@@ -181,9 +172,8 @@ func WithRemedy(r Result) error {
 }
 
 // RunRequiredFailFast runs checks via RunChecksFailFast and returns the first
-// Required-tier failure through WithRemedy, or nil. The remedy wrapping lives
-// here rather than in FirstRequiredError because that function must return the
-// error verbatim; nothing depends on this return value's error identity.
+// Required-tier failure through WithRemedy, or nil. FirstRequiredError must
+// return the error verbatim, so the remedy wrapping lives here.
 func RunRequiredFailFast(checks []Check) error {
 	r := firstBlockingResult(RunChecksFailFast(checks))
 	if r == nil {

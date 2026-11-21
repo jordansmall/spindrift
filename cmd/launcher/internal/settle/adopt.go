@@ -10,11 +10,10 @@ import (
 )
 
 // settleAdopted runs the merge gate on an already-discovered open PR for num,
-// draft or not (issue #2408). It is the shared tail of Recover's open-PR arm
-// and SettlePatch, the butler patch gate (a Settle built with Unclaimed, ADR
-// 0057), never Settle's own no-outcome path, which reports status=blocked
-// (issue #1654). The head SHA may not come from this process, so the gate
-// waits for evidence the rollup registered (issue #1652), bounded by
+// draft or not (issue #2408): the tail of Recover's open-PR arm and SettlePatch
+// (ADR 0057), never Settle's no-outcome path, which reports status=blocked
+// (issue #1654). The head SHA may not be this process's, so the gate waits
+// for evidence the rollup registered (issue #1652), bounded by
 // registrationWindowPolls (#2475).
 func (s *Settle) settleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) (st Settlement) {
 	defer func() { st = s.flushSettled(d, num) }()
@@ -56,10 +55,9 @@ func (s *Settle) SettlePatch(owner dispatchkey.Key, num, prURL string) Settlemen
 // postUsageComment posts d's aggregate usage-statistics comment to the issue.
 // It logs a post failure instead of returning one, so the caller continues.
 func (s *Settle) postUsageComment(num string, d dispatch.Dispatcher) {
-	// Audited for leaks (issue #1233, extending #831): UsageReport's only
-	// external input is the MODEL env var, so it carries no Box-internal
-	// output, and commentErr is a post failure that reaches stderr only.
-	// Nothing here needs redaction.
+	// Audited for leaks (issues #1233, #831): UsageReport's only external
+	// input is the MODEL env var and commentErr reaches stderr only, so
+	// nothing here needs redaction.
 	if commentErr := s.it.Comment(num, d.UsageReport()); commentErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: post usage comment: %v\n", num, commentErr)
 	}

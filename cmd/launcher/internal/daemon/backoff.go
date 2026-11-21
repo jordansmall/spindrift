@@ -5,17 +5,12 @@ import (
 )
 
 // idleBackoff grows an idle wait on each consecutive no-work check and
-// resets it the moment any check sees real work. It was pool-wide (the same
-// shape as breaker, see breaker.go:8-13) before issue #3541 split the pool
-// across two Dispatch kinds; now one idleBackoff is embedded per kind, inside
-// kindBackoff below, so the quantity each embedding bounds is that one kind's
-// own rate-limit spend against the forge, and a slot observing work resets
-// only the kind it was working, not its sibling's.
+// resets it the moment any check sees real work. One is embedded per kind
+// (kindBackoff, issue #3541), bounding that kind's own rate-limit spend
+// against the forge.
 //
-// A plain value, not a mutex-guarded object (issue #3623): the pool holds
-// its per-kind idleBackoffs (via kindBackoff, below, inside the Schedule) under
-// p.mu, so next()/reset() read the receiver and return the updated value
-// for the caller to store back, rather than mutating in place.
+// A plain value (issue #3623): the pool holds it under p.mu, so next() and
+// reset() return the updated value for the caller to store back.
 type idleBackoff struct {
 	floor time.Duration
 	cap   time.Duration
@@ -30,9 +25,8 @@ func newIdleBackoff(floor, cap time.Duration) idleBackoff {
 }
 
 // next records one no-work check and returns the updated backoff alongside
-// the wait for this check: the current value, before it doubles. Doubling
-// only while cur is still below cap, and clamping after, keeps cur from
-// overshooting cap — not a general int64 overflow guard.
+// the wait for this check: the current value, before it doubles. The clamp
+// only keeps cur from overshooting cap; it is not an int64 overflow guard.
 func (b idleBackoff) next() (idleBackoff, time.Duration) {
 	wait := b.cur
 	if b.cur < b.cap {
@@ -53,16 +47,11 @@ func (b idleBackoff) reset() idleBackoff {
 
 // kindBackoff is one Dispatch kind's own no-work state: the idle backoff it
 // grows across consecutive empty results, plus the instant that kind may next
-// be tried. Issue #3541 splits idleBackoff (pool-wide) into one of these per
-// kind because the two kinds no longer share a queue: an empty work queue
-// does not slow research down (and vice versa), so each kind's streak — and
-// the growing wait it earns — has to live and reset independently of the
-// other's.
+// be tried. It is per kind because an empty work queue must not slow research
+// down (issue #3541).
 //
-// A plain value (issue #3623): the Schedule holds one per kind under p.mu, so
-// every method here reads the receiver
-// and returns the updated value for the caller to store back,
-// rather than mutating a shared object in place.
+// A plain value (issue #3623): the Schedule holds one per kind under p.mu,
+// and every method returns the updated value for the caller to store back.
 type kindBackoff struct {
 	b      idleBackoff
 	until  time.Time
@@ -85,12 +74,10 @@ func newKindBackoff(floor, cap time.Duration) kindBackoff {
 // dispatchable" (exit 3) rather than "queue empty" (exit 2): only a jam is
 // worth polling a moved tip for.
 //
-// Deliberately exit-3-alone: sibling occupancy plays no part. jammed doubles
-// as idleSleep's tip-poll gate (park.TipPoll, schedule.go) as well as status
-// data, and a sibling that actually drains the queue clears it through
-// reset() on its own next Continue — so occupancy is the jam *event*'s
-// narrower predicate (state.siblingsEngaged, reached from noteWaitResult, an
-// operator alarm), not this flag's.
+// Deliberately exit-3-alone: sibling occupancy plays no part. jammed is also
+// idleSleep's tip-poll gate (park.TipPoll), and a sibling that drains the
+// queue clears it through reset(); occupancy belongs only to the jam
+// *event*'s narrower predicate (state.siblingsEngaged).
 func (k kindBackoff) markNoWork(now time.Time, jammed bool) (kindBackoff, time.Duration) {
 	b, wait := k.b.next()
 	k.b = b

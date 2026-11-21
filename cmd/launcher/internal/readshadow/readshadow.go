@@ -1,12 +1,9 @@
 // Package readshadow is the host-side sampled shadow for a backend's read
-// path. Every Nth call per read operation, the Connector-backed reader answers
-// the same question off the caller's goroutine; the two answers are compared at
-// canonical types and each divergence is recorded through shadowrecord.
-//
-// Native stays authoritative: callers always get the native result and error
-// untouched, and every write goes straight to the native backend. No Connector
-// failure escapes: one that fails to load, is refused by its Route table, fails
-// closed, panics, or hangs is logged into the summary and the native path keeps
+// path: every Nth call per read operation, the Connector-backed reader answers
+// the same question off the caller's goroutine and shadowrecord records any
+// divergence at canonical types. Native stays authoritative for every result
+// and write. No Connector failure (load, Route refusal, fail-closed, panic,
+// hang) escapes: it is logged into the summary and the native path keeps
 // running.
 package readshadow
 

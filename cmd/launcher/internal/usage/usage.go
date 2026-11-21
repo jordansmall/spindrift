@@ -119,33 +119,30 @@ func (a AgentUsage) TotalTokens() int {
 }
 
 // Report combines a Box run's aggregate usage totals with its per-model and
-// per-agent breakdowns. Found is false when the log has no result event or
-// does not exist, and Totals is then zero-valued. Totals sums whole sessions,
-// whereas SummedByModel and SummedByAgent sum per call and deduplicate by
-// message id, so they deliberately do not reconcile numerically. The exception
-// is SummedByModel's OutputTokens under session totals: the per-call output is
-// a placeholder (issue #6269), so it comes from the result events' per-model
-// summary, and ModelUsage.OutputUnavailable marks a row with no such figure.
+// per-agent breakdowns. Found is false when the log is missing or has no
+// result event, and Totals is then zero-valued. Totals sums whole sessions
+// while the Summed breakdowns sum per call, deduplicated by message id, so
+// they deliberately do not reconcile. Under session totals, though, their
+// OutputTokens come from the result events' summary, because the per-call
+// output is a placeholder (issue #6269); ModelUsage.OutputUnavailable marks a
+// model row with no such figure.
 type Report struct {
 	Totals        Usage
 	Found         bool
 	SummedByModel []ModelUsage
 	SummedByAgent []AgentUsage
 
-	// EarliestEventMs and LatestEventMs are the earliest and latest
-	// top-level event timestamps in the log, in unix milliseconds, and are
-	// meaningful only when HasEventSpan is true. A caller derives a
-	// wall-time span across several logs from them.
+	// EarliestEventMs and LatestEventMs bound the log's top-level event
+	// timestamps (unix ms), so a caller can span several logs' wall time.
 	EarliestEventMs, LatestEventMs int64
-	// HasEventSpan is false when the log carried no usable event timestamp
-	// at all, in which case EarliestEventMs and LatestEventMs are zero.
+	// HasEventSpan is false when the log carried no usable event timestamp;
+	// the span fields are then zero.
 	HasEventSpan bool
 }
 
 // BudgetExceeded reports whether tokens or usd has reached either cap, naming
 // the cap or caps that tripped. A zero cap means no cap on that dimension
-// (issue #2001). The two dimensions are independent, so either can trip
-// first. Settle's fix-pass loop and the pass machine share this one rule
+// (issue #2001). Settle's fix-pass loop and the pass machine share this rule
 // (issue #6617).
 func BudgetExceeded(tokens int, usd float64, capTokens int, capUSD float64) (bool, string) {
 	var reasons []string

@@ -1,24 +1,16 @@
-// Package connectorforge builds core's forge PR reads (the open-PR and
-// any-state branch lookups, the PR state, the check rollup state and the
-// failure detail of forge.PRForge) from a forge Connector, over the forge
-// primitives in sdk/forge. New wraps a native adapter: every write stays with
-// it, and so does every read the Connector has no primitive for (Mergeable,
-// HeadCommitSHA, NeedsUpdate, ListPRFiles, CanAutoMerge). Compose instead
-// builds a whole Code Forge from the Connector.
+// Package connectorforge builds core's forge from a forge Connector over the
+// sdk/forge primitives. New wraps a native adapter with the Connector's PR
+// reads, leaving every write and every read the Connector has no primitive for
+// with the native side. Compose builds a whole Code Forge from a Connector advertising
+// "forge.branches" and "forge.pushOnly" or "forge.prs": the Connector answers
+// the forge questions and names the remote, and git runs in core's plumbing
+// with core's credential, attached only after the remote's host is checked
+// against the Connector's declared routes.
 //
-// The Connector returns raw fields; every policy decision is made here: PR URL
-// validation, which conclusions count as failing, and rendering and capping the
-// failure detail, so a hostile guest's text cannot outgrow
-// forge.MaxFailureDetailBytes.
-//
-// Compose builds a Code Forge from a Connector advertising "forge.branches" and
-// either "forge.pushOnly" (a push-only forge) or "forge.prs" (a PR forge whose
-// merge, draft, comment and auto-merge writes the Connector performs): the
-// Connector answers the forge questions and names the remote, and git runs in
-// core's own plumbing with core's own credential, attached only after the
-// remote's host is checked against the Connector's declared routes. Every
-// idempotent Connector call retries a transient failure, and every call reads
-// its error class as core's sentinels.
+// The Connector returns raw fields; every policy decision is made here (PR URL
+// validation, which conclusions fail, capping the failure detail so a hostile
+// guest cannot outgrow forge.MaxFailureDetailBytes). Every idempotent call
+// retries a transient failure, and every error maps to core's sentinels.
 package connectorforge
 
 import (
@@ -114,11 +106,9 @@ type (
 type guestCall func(ctx context.Context, method string, params, result any) error
 
 // reads serves the PR reads from a Connector and leaves everything else to the
-// embedded native adapter.
-//
-// Optional capabilities found by type assertion on the native adapter
-// (forge.CIRunReporter and the like) are hidden behind this wrapper. Only the read
-// shadow builds one in production, so no authoritative path loses them.
+// embedded native adapter. It hides the native adapter's optional
+// capabilities (forge.CIRunReporter and the like); only the read shadow builds
+// one in production, so no authoritative path loses them.
 type reads struct {
 	forge.PRForge
 	call    guestCall
@@ -128,10 +118,9 @@ type reads struct {
 
 // New builds core's forge PR reads from a forge Connector. writes keeps every
 // write and every read the Connector has no primitive for. Calls run under
-// context.Background() because PRForge methods carry no context.
-// webHost is the forge's web host (host[:port]) every PR URL must name exactly,
-// matched case-insensitively with the port as written ("github.com:443" does
-// not match "github.com").
+// context.Background() because PRForge methods carry no context. Every PR URL
+// must name webHost (host[:port]) exactly, case-insensitively, with the port
+// as written ("github.com:443" does not match "github.com").
 func New(c *connectorhost.Connector, writes forge.PRForge, target Target, webHost string) (forge.PRForge, error) {
 	if !slices.Contains(c.Capabilities, capForge) {
 		return nil, fmt.Errorf("%w: capabilities %v lack \"forge\"", ErrNotForge, c.Capabilities)
@@ -143,10 +132,9 @@ func New(c *connectorhost.Connector, writes forge.PRForge, target Target, webHos
 }
 
 // NewReader composes c's forge for a host that reads through the Connector
-// alone: the same PR and branch reads Compose offers, with no git and no native
-// writes under it. Only those reads are meant to be called: Rebase needs the git
-// Compose supplies and fails with ErrNoGit, and the writes would reach the
-// Connector.
+// alone: Compose's PR and branch reads with no git or native writes under it.
+// Call only those reads: Rebase fails with ErrNoGit, and the writes would
+// reach the Connector.
 func NewReader(c *connectorhost.Connector, target Target, webHost string) (forge.CodeForge, error) {
 	if !slices.Contains(c.Capabilities, capForge) {
 		return nil, fmt.Errorf("%w: capabilities %v lack \"forge\"", ErrNotForge, c.Capabilities)
@@ -376,11 +364,9 @@ func (t *reads) FailureDetail(prURL string) (string, error) {
 }
 
 // jobLog reads the tail of one job's log, or "" for no job, a Connector without
-// forge.jobLog, or any failed read: the log only enriches a detail that is
-// already in hand, and a caller treats an error as no detail at all. The guest
-// is asked for a tail of forge.JobLogKeepBytes, preceded by up to
-// forge.MaxLogExcerptBytes of the dropped head's error lines, so a long log
-// never crosses the output cap.
+// forge.jobLog, or any failed read: the log only enriches a detail already in
+// hand, and a caller treats an error as no detail at all. The requested tail
+// and error-line excerpt keep a long log under the output cap.
 //
 // The budget is checked before the call rather than carried as its context
 // deadline: a deadline expiring mid-call closes the Connector, costing every

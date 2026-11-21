@@ -55,13 +55,10 @@ var launcherInput inputdoc.Resolved
 func resolvedKnob(key string) string { return launcherInput.Source().String(key) }
 
 // resolveBoxEnvVar resolves one BOX_ENV_VARS forwarding name from
-// launcherInput: a schema knob through its tiers (the wrapper no longer
-// pre-populates env with baked defaults, ADR 0020), anything else as a secret
-// read live from env, because the --secret-cmd fallback exports secrets after
-// Resolve. The host-derived commit identity is not resolved here:
-// hostGitConfigResolver answers it from the launcher's startup snapshot, not
-// re-read per dispatch, so Box and host commits carry one identity for the
-// process's lifetime (issue #5333).
+// launcherInput: a schema knob through its tiers (ADR 0020), anything else as
+// a secret read live from env, since the --secret-cmd fallback exports secrets
+// after Resolve. The host-derived commit identity is answered instead by
+// hostGitConfigResolver's startup snapshot (issue #5333).
 func resolveBoxEnvVar(name string) string {
 	return inputdoc.BoxEnv(launcherKnobSource{launcherInput.Source()}, name)
 }
@@ -84,11 +81,10 @@ func ambientKnobEnvError() error { return inputdoc.AmbientKnobError(processEnv()
 
 // launcherKnobSource layers onto Resolve's tiers the two reads that only
 // exist after it: secrets, which the --secret-cmd fallback exports later, and
-// the host git config behind GIT_USER_NAME/GIT_USER_EMAIL. The wrapper exports
-// no knob env at all (ADR 0020), so that fallback has to run in process; the
-// schema row's hostGitConfigKey is the one place the key lives, so the
-// launcher's startup snapshot (which the Box env reuses) reads the same keys
-// (issues #5329, #5333).
+// the host git config behind GIT_USER_NAME/GIT_USER_EMAIL, which must run in
+// process since the wrapper exports no knob env (ADR 0020). The schema row's
+// hostGitConfigKey is the one place the key lives, so the startup snapshot the
+// Box env reuses reads the same keys (issues #5329, #5333).
 type launcherKnobSource struct{ inputdoc.KnobSource }
 
 func (launcherKnobSource) Secret(env string) string { return os.Getenv(env) }

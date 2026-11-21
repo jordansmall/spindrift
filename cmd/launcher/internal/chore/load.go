@@ -28,38 +28,26 @@ type Chore struct {
 	ClassList        []string      // Closed class list the Box classifies from (issue #4766): the catalog's plus any extra PromotionClasses; nil for a Consumer-declared Chore.
 }
 
-// Knobs is the raw butler settings (ADR 0056, ADR 0057): BUTLER_CHORES,
-// BUTLER_EVERY, BUTLER_CHORE_CLASSES and BUTLER_PATCH_CLASSES, unparsed, plus
-// BUTLER_MAX_PATCHES_PER_DAY already parsed to an int (it gates whether
-// PatchClasses is read at all).
+// Knobs is the raw butler settings (ADR 0056, ADR 0057), unparsed but for
+// MaxPatchesPerDay.
 type Knobs struct {
 	Chores, Every, Classes, PatchClasses string
-	// MaxPatchesPerDay is BUTLER_MAX_PATCHES_PER_DAY. 0 (the default) means
-	// the patch rung is off: Load never parses or cross-checks PatchClasses,
-	// and every resulting Chore.PatchClasses is nil regardless of its value.
+	// MaxPatchesPerDay is BUTLER_MAX_PATCHES_PER_DAY. 0 (the default) turns
+	// the patch rung off: PatchClasses is never read.
 	MaxPatchesPerDay int
 }
 
 // Load resolves Knobs into one Chore per enabled name, in BUTLER_CHORES
-// order. When BUTLER_CHORES enables no Chore, Load returns (nil, nil)
-// immediately without parsing or cross-checking BUTLER_EVERY,
-// BUTLER_CHORE_CLASSES or BUTLER_PATCH_CLASSES: with no Chore enabled,
-// those knobs configure nothing, so a leftover or malformed value in any of
-// them is not a startup error. When MaxPatchesPerDay == 0, BUTLER_PATCH_CLASSES
-// is likewise never parsed or cross-checked, for the same reason (its
-// default names docs-drift, which would otherwise be rejected as
-// not-enabled for every Consumer that never turns the patch rung on).
-// Otherwise every problem is returned together via errors.Join, each
-// prefixed with its knob. A knob's grammar reports only its first fault,
-// since its parser stops there; the cross-checks report every offender,
-// once per offender. A BUTLER_CHORE_CLASSES entry may name a
-// code-scanning built-in Chore that is not enabled: the schema default
-// names each of them, so such an entry is inert rather than a typo; one
-// naming the records-scoped tuning Chore is rejected, enabled or not. A
-// BUTLER_PATCH_CLASSES entry has no such exemption: it must name an
-// enabled Chore, and each of its classes must be on that Chore's resolved
-// BUTLER_CHORE_CLASSES allow-list (skipped when BUTLER_CHORE_CLASSES
-// itself failed to parse).
+// order. With no Chore enabled it returns (nil, nil) without parsing the other
+// knobs, which then configure nothing, so a leftover or malformed value is no
+// startup error; with MaxPatchesPerDay == 0 it likewise skips
+// BUTLER_PATCH_CLASSES, whose default names docs-drift and would otherwise
+// fail as not enabled for every Consumer off the patch rung. Otherwise every
+// problem is joined, each prefixed with its knob: a grammar reports its first
+// fault, a cross-check every offender. A BUTLER_CHORE_CLASSES entry may name a
+// disabled code-scanning built-in (the schema default names each), but never
+// the records-scoped tuning Chore. A BUTLER_PATCH_CLASSES entry must name an
+// enabled Chore, each class on its BUTLER_CHORE_CLASSES allow-list.
 func Load(k Knobs) ([]Chore, error) {
 	names := choreNames(k.Chores)
 	if len(names) == 0 {
@@ -100,9 +88,7 @@ func Load(k Knobs) ([]Chore, error) {
 	if classesErr != nil {
 		errs = append(errs, fmt.Errorf("BUTLER_CHORE_CLASSES: %w", classesErr))
 	} else {
-		// classesErr == nil means every entry in classes already parsed
-		// cleanly, so re-splitting it here for token order (a map has none)
-		// can't fail.
+		// Re-split for token order (a map has none); it parsed, so this can't fail.
 		for _, entry := range strings.Fields(k.Classes) {
 			name, _, _ := strings.Cut(entry, "=")
 			if slices.Contains(builtinRecordsScoped, name) {
@@ -123,9 +109,6 @@ func Load(k Knobs) ([]Chore, error) {
 		if patchErr != nil {
 			errs = append(errs, fmt.Errorf("BUTLER_PATCH_CLASSES: %w", patchErr))
 		} else {
-			// patchErr == nil means every entry already parsed cleanly, so
-			// re-splitting it here for token order (a map has none) can't
-			// fail.
 			for _, entry := range strings.Fields(k.PatchClasses) {
 				name, classesPart, _ := strings.Cut(entry, "=")
 				if slices.Contains(builtinRecordsScoped, name) {
@@ -137,8 +120,6 @@ func Load(k Knobs) ([]Chore, error) {
 					continue
 				}
 				if classesErr != nil {
-					// BUTLER_CHORE_CLASSES itself failed to parse: nothing to
-					// check the subset against.
 					continue
 				}
 				for _, class := range strings.Split(classesPart, ",") {
@@ -275,13 +256,8 @@ var catalogEvery = func() map[string]time.Duration {
 }()
 
 // parseEvery parses BUTLER_EVERY's grammar (ADR 0056): space-separated
-// tokens, each either a bare Go time.ParseDuration string (the default
-// interval for every enabled Chore not otherwise overridden) or
-// "<chore>=<duration>" (a per-Chore override), e.g. "6h docs-drift=168h". A
-// value with no bare token falls back to DefaultEvery. Rejects an
-// unparseable or negative duration, more than one bare default token, a
-// duplicate override for the same Chore, and an empty chore name in a
-// "=<duration>" token.
+// tokens, each a bare Go duration (the default interval) or a per-Chore
+// "<chore>=<duration>" override, e.g. "6h docs-drift=168h".
 func parseEvery(value string) (everyConfig, error) {
 	cfg := everyConfig{overrides: make(map[string]time.Duration)}
 	haveDefault := false
@@ -317,9 +293,6 @@ func parseEvery(value string) (everyConfig, error) {
 	return cfg, nil
 }
 
-// parseNonNegativeDuration parses s as a Go duration, rejecting a negative
-// result; parseEvery's shared validation for both its bare-default and
-// per-Chore-override tokens.
 func parseNonNegativeDuration(s string) (time.Duration, error) {
 	d, err := time.ParseDuration(s)
 	if err != nil {

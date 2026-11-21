@@ -26,9 +26,8 @@ type gateResult int
 
 const (
 	// gateTerminal is the zero value: a poll timeout or a CheckState API
-	// error. No label swap here; the caller swaps to failedLabel, except when
-	// the observation's err is errAbandoned (a stop landed): another actor owns
-	// the issue, so the caller swaps nothing.
+	// error. The caller fails the issue, unless the observation's err is
+	// errAbandoned: another actor owns the issue then.
 	gateTerminal gateResult = iota
 	// gateRedRetry is a genuine CI failure (FAILURE or ERROR); the caller
 	// decides whether to dispatch a fix box.
@@ -57,8 +56,8 @@ func (g gateResult) String() string {
 type landingResult int
 
 const (
-	// landingFailed is the zero value: CI never reached green. The issue is
-	// swapped to failedLabel.
+	// landingFailed is the zero value: CI never reached green. The issue
+	// goes Failed.
 	landingFailed landingResult = iota
 	// landingManual is CI green but not merged (manual/auto mode, a merge
 	// guard, a merge-guard check error, or a merge failure after green). The

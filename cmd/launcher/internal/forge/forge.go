@@ -167,7 +167,7 @@ func QuoteList(items []string) string {
 	return strings.Join(quoted, ", ")
 }
 
-// Issue is a GitHub issue as seen by the launcher.
+// Issue is a tracker issue as seen by the launcher.
 type Issue struct {
 	Number string // launcher keeps issue numbers as strings
 	Title  string
@@ -197,9 +197,8 @@ type Issue struct {
 	// github, jira and local report a close reason; forgejo, which has none,
 	// leaves it false.
 	ClosedNotPlanned bool
-	// Reopened reports an open issue that was reopened after it closed. Only
-	// github's ListIssuesWithLabels reads it (stateReason REOPENED); every other
-	// adapter and read path leaves it false.
+	// Reopened reports an open issue that was reopened after it closed. No
+	// adapter sets it today: the Connector tracker wire carries no reopen state.
 	Reopened bool
 }
 
@@ -428,15 +427,13 @@ const (
 const minLogExcerptBytes = 400
 
 // RenderFailureDetail formats failing entries into a bounded report. Names and
-// summaries are capped (MaxNameBytes, MaxSummaryBytes); the room
-// MaxFailureDetailBytes leaves beyond the headers is split evenly across the
-// entries that have a log, each capped at MaxLogExcerptBytes, so every job
-// keeps the tail of its log where the error is, preceded by any error lines
-// (errorLineRE) from before that tail, which share the cap. A trimmed excerpt
-// says so, naming its job and the cap it got. When the entries cannot all fit
-// with at least minLogExcerptBytes per log, the trailing ones are omitted
-// whole and a closing line names the first and counts them. Callers must
-// filter entries down to failing ones first.
+// summaries are capped; the room MaxFailureDetailBytes leaves beyond the
+// headers is split evenly across the entries with a log, each capped at
+// MaxLogExcerptBytes, so every job keeps its log tail plus any earlier error
+// lines (errorLineRE), which share the cap. A trimmed excerpt says so. When
+// entries cannot all fit with minLogExcerptBytes per log, the trailing ones
+// are omitted whole behind a closing count. Callers must pass failing entries
+// only.
 func RenderFailureDetail(entries []FailureDetailEntry) string {
 	const sep = "---\n"
 	names := make([]string, len(entries))

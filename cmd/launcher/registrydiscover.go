@@ -15,14 +15,11 @@ import (
 )
 
 // runRegistryDiscover is the testable core of `spindrift registry discover`.
-// Errors go to stderr, not stdout, so a caller piping stdout to a report file
-// still sees failures. The report prints on the error and zero-route paths
-// too, so an operator still sees which hosts matched; only the `route ...`
-// lines mean a file was written. Zero proposed routes writes no file (a
-// header-only file would fail registryroutes.Parse); that is a failure unless
-// known public hosts alone explain it and no config was skipped. rows is the
-// registered Strategies to discover over: production passes
-// ecosystem.Registered(), tests a synthetic Strategy.
+// Errors go to stderr so a caller piping stdout to a report file still sees
+// them. The report prints on the error and zero-route paths too; only the
+// `route ...` lines mean a file was written. Zero proposed routes writes no
+// file (a header-only file fails registryroutes.Parse), and is a failure unless
+// known public hosts alone explain it and no config was skipped.
 func runRegistryDiscover(stdout, stderr io.Writer, rows []ecosystem.Strategy, repoDir, outPath string, force bool, stores []registrydiscover.Store, lookup registrydiscover.Lookup, probe registrydiscover.Probe) int {
 	routes, report, err := registrydiscover.Discover(repoDir, rows, stores, lookup, probe)
 	if err != nil {

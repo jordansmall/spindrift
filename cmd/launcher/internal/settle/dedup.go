@@ -33,13 +33,11 @@ var findingLabels = func() []string {
 			labels = append(labels, d.FindingLabel)
 		}
 	}
-	// agent-butler-patch (ADR 0057) is not a Descriptor's FindingLabel: the
-	// host adds it alongside agent-butler-finding when it lands a finding as
-	// a patch PR. Folding in doctor.ButlerLabelNames() rather than a bare
-	// literal ties this list to the source nix/checks/dispatch-labels.nix
-	// extracts from -- for as long as ButlerLabelNames stays the
-	// return-literal that check parses -- so a rename in lib/labels.nix
-	// can't drift from dedup silently.
+	// agent-butler-patch (ADR 0057) is no Descriptor's FindingLabel (the host
+	// adds it beside agent-butler-finding on a patch PR); reading it from
+	// doctor.ButlerLabelNames(), the return literal
+	// nix/checks/dispatch-labels.nix parses, keeps a lib/labels.nix rename
+	// from drifting past dedup silently.
 	for _, l := range doctor.ButlerLabelNames() {
 		if !seen[l] {
 			labels = append(labels, l)
@@ -49,14 +47,11 @@ var findingLabels = func() []string {
 	return labels
 }()
 
-// choreTermPrefix opens the dedup-marker term a Chore finding carries, naming
-// the Chore that filed it (ADR 0062). PriorFindings lists a Chore's findings
-// by it on every tracker, and on local, whose label absence is not
-// authoritative (backend.Descriptor.IssuesWearLabels), the merge hold of a PR
-// closing such a finding recognises it by this term too. "=" is not a
-// dedupPunctRun separator, so the term survives normalizeDedupKey unchanged.
-// It is excluded from dedup matching because every finding of a Chore carries
-// it.
+// choreTermPrefix opens the dedup-marker term naming the Chore that filed a
+// finding (ADR 0062). PriorFindings lists by it, and on a tracker whose label
+// absence is not authoritative (IssuesWearLabels false) the merge hold reads
+// it too. "=" is not a dedupPunctRun separator, so the term survives
+// normalization. Dedup matching skips it: every finding of a Chore carries it.
 const choreTermPrefix = "chore="
 
 // choreTerm is the marker term naming Chore name.
@@ -75,15 +70,12 @@ func isProvenanceTerm(k string) bool {
 // "Type. Field" fold alike.
 var dedupPunctRun = regexp.MustCompile(` ?[.:#/_][ .:#/_]*`)
 
-// normalizeDedupKey folds s into a comparison key: trimmed, internal
-// whitespace runs collapsed to one space, lowercased, each dedupPunctRun
-// folded to one ":" (issue #3977), and any leading/trailing ":" trimmed.
-// The fold target is never "-": "a-:b" would become "a--b", which
-// normalizeDedupTerm rejects. Returns "" for a blank, whitespace-only, or
-// separator-only s, and for one with no letter or digit (e.g. "-" or "!!"),
-// which names no site and would only collide unrelated findings (issue
-// #4019). Pure normalization only -- normalizeDedupTerm is the one to call
-// when the result must also be safe to carry as a marker term.
+// normalizeDedupKey folds s into a comparison key: whitespace collapsed,
+// lowercased, each dedupPunctRun folded to ":" (issue #3977), outer ":"
+// trimmed. The fold target is never "-", since "a-:b" would become the
+// rejected "a--b". A key with no letter or digit names no site and would only
+// collide unrelated findings, so it is "" (issue #4019). Use
+// normalizeDedupTerm when the result must be safe as a marker term.
 func normalizeDedupKey(s string) string {
 	k := strings.ToLower(strings.Join(strings.Fields(s), " "))
 	k = dedupPunctRun.ReplaceAllString(k, ":")
@@ -95,15 +87,10 @@ func normalizeDedupKey(s string) string {
 }
 
 // normalizeDedupTerm normalizes s per normalizeDedupKey and reports whether
-// the result is usable as a dedup term. Rejects (drops, never rewrites) a
-// term that is empty, contains "," -- the marker line's own field separator,
-// so a term carrying one could never round-trip through
-// buildDedupMarker/parseDedupMarker -- or contains "--", which inside
-// buildDedupMarker's HTML comment could close it early (e.g. a term holding
-// "foo-->bar") and corrupt the rest of the key set. Splitting or stripping
-// the bad substring instead would either invent a bogus generic key or
-// silently repair a malformed payload; dropping the whole term is the only
-// safe move.
+// the result is usable as a dedup term. It drops, never rewrites, an empty
+// term, one with "," (the marker's field separator, so it cannot round-trip),
+// or one with "--", which could close the marker's HTML comment early.
+// Stripping the bad part would invent a bogus key or repair a malformed one.
 func normalizeDedupTerm(s string) (string, bool) {
 	k := normalizeDedupKey(s)
 	if k == "" || strings.Contains(k, ",") || strings.Contains(k, "--") {
@@ -140,26 +127,19 @@ func UsableDedupTerm(s string) bool {
 	return ok
 }
 
-// splitDedupTerms partitions terms into a dedup key set -- terms normalized,
-// invalid or blank ones dropped -- and the raw (un-normalized) terms
-// normalizeDedupTerm rejected, so fileIssueIntentsDetailed can warn about a
-// dropped term without re-running the normalize loop itself. The title is
-// deliberately excluded from the key set (issue #3609 review): two distinct
-// findings can share a formulaic title (e.g. a conventional-commit prefix),
-// and keying on prose would merge them. Terms carrying nothing usable
-// therefore yield an empty key set that never matches the backlog index --
-// the in-run byte-identity dedup (issue #2068) still covers a byte-identical
-// retry within one run.
+// splitDedupTerms partitions terms into a normalized dedup key set and the raw
+// terms normalizeDedupTerm rejected, for the caller's warning. The title is
+// never a key (issue #3609): distinct findings can share a formulaic title. An
+// empty key set never matches the backlog; the in-run byte-identity dedup
+// (issue #2068) still catches an identical retry.
 func splitDedupTerms(terms []string) (keys map[string]bool, dropped []string) {
 	keys = make(map[string]bool)
 	for _, t := range terms {
 		if k, ok := normalizeDedupTerm(t); ok {
 			keys[k] = true
 		} else if normalizeDedupKey(t) != "" {
-			// A blank term (empty after normalization) is not a drop worth
-			// warning about -- it carries no information to lose. Only a
-			// non-blank term that normalizeDedupTerm still rejected (comma
-			// or "--") is a real degradation.
+			// A blank term carries nothing to lose, so only a rejected
+			// non-blank one warns.
 			dropped = append(dropped, t)
 		}
 	}
@@ -167,24 +147,15 @@ func splitDedupTerms(terms []string) (keys map[string]bool, dropped []string) {
 }
 
 // buildDedupMarker renders terms as the hidden marker line appended to a
-// filed finding's body, or "" when terms carries no usable term (every entry
-// invalid or blank after normalizeDedupTerm). "" does not mean "append
-// nothing": fileIssueIntentsDetailed substitutes a bare
-// dedupmarker.Bare, which parseDedupMarker reads back as
-// zero keys, so the launcher's own marker is always the body's last one.
+// filed finding's body (issue #3609), from which backlogDedupIndex recovers
+// the key set later. It returns "" when no term is usable; the caller then
+// appends a bare dedupmarker.Bare so the launcher's marker is always last.
 //
-// The hidden marker line carries the intent's own DedupTerms (issue #3609), so
-// a later run recovers this issue's dedup key set from the backlog
-// (backlogDedupIndex) without re-parsing prose.
-//
-// Findings filed before #3609 carry no marker, so they add no keys, open or
-// closed. Since #3873 indexes closed findings too, that gap is permanent but
-// bounded: a fixed set that never grows. It is deliberately not backfilled
-// (issue #3813): a backfilled key would be guessed from body prose, and
-// wrong ones covering an intent's every key can make matchDedup skip a
-// genuinely new finding -- indefinitely on a closed issue, without filing
-// anything a human would triage -- worse than a visible duplicate. The
-// Filer's own pre-filing prose search covers those legacy issues instead.
+// Findings filed before #3609 carry no marker, a permanent but bounded gap
+// now that closed findings are indexed too (#3873). They are deliberately not
+// backfilled (issue #3813): keys guessed from prose could suppress a genuinely
+// new finding indefinitely, worse than a visible duplicate. The Filer's own
+// prose search covers them.
 func buildDedupMarker(terms []string) string {
 	var kept []string
 	for _, t := range terms {
@@ -199,13 +170,10 @@ func buildDedupMarker(terms []string) string {
 }
 
 // parseDedupMarker recovers the normalized dedup terms from the LAST marker
-// line in a body, or nil when no such line is present. Last wins because the
-// filer always appends its own marker last (issue_intent.go); an earlier
-// marker line is untrusted body prose (e.g. a finding quoting the marker
-// format in a fenced code block) and must not hijack the key set (issue
-// #3609). A comma-splitting hand-rolled marker could smuggle a "," or "--"
-// through a single raw term; normalizeDedupTerm drops any such split piece
-// rather than trusting it.
+// line in body, or nil. The filer appends its own marker last, so an earlier
+// one is untrusted prose (a finding quoting the format) and must not hijack
+// the key set (issue #3609). normalizeDedupTerm drops any piece a hand-rolled
+// marker smuggles in.
 func parseDedupMarker(body string) []string {
 	var terms []string
 	for _, t := range dedupmarker.Parse(body) {
@@ -269,21 +237,14 @@ func notPlannedExpired(iss forge.Issue, chore string, cutoff time.Time) bool {
 		!iss.ClosedAt.After(cutoff) && carriesChoreMarker(iss.Body, chore)
 }
 
-// backlogDedupIndex maps every dedup key already covered to a
-// human-readable reference: a "#<number>" for a key covered by a finding
-// issue, open or closed -- closing a finding is a durable triage decision the
-// host enforces (issue #3873), except that a finding of chore closed
-// not-planned expires at notPlannedBefore (see notPlannedExpired) -- or a
-// `this run's "<title>"` string for a key fileIssueIntentsDetailed adds in
-// place as this same run files its own intents. A list failure is non-fatal:
-// it warns, in the same style as the sibling ListLabels warning this call
-// sits beside, and contributes nothing to the index -- exactly as an
-// open-lookup failure did before #3873 -- so the closed and open lookups
-// degrade independently: during an open-side outage, closed keys still
-// suppress a refile. Closed is indexed first so an open issue, the one still
-// actively tracked, wins a shared key. Every real adapter implements
-// forge.LabeledBacklogLister; a tracker without it (a test fake) falls back
-// to ListOpenIssues, open-only.
+// backlogDedupIndex maps every dedup key already covered to a reference: a
+// "#<number>" finding issue, open or closed, since closing a finding is a
+// durable triage decision (issue #3873) unless notPlannedExpired; the caller
+// adds `this run's "<title>"` entries as it files. A failed list warns and
+// adds nothing, so the closed and open lookups degrade independently. Closed
+// is indexed first so the open issue wins a shared key. Only a test fake
+// lacks forge.LabeledBacklogLister (jira and forgejo refuse a Connector
+// without tracker.labeled), and it falls back to open issues only.
 func backlogDedupIndex(it forge.IssueTracker, num, chore string, notPlannedBefore time.Time) map[string]string {
 	index := make(map[string]string)
 	lister, ok := forge.As[forge.LabeledBacklogLister](it)
@@ -314,11 +275,8 @@ func backlogDedupIndex(it forge.IssueTracker, num, chore string, notPlannedBefor
 type dedupOverlap struct {
 	// covered is the subset of the intent's keys already tracked, sorted.
 	covered []string
-	// refs names the distinct references covering them -- backlog
-	// "#<number>" issues, this run's "<title>" peers, or both -- more than
-	// one when separate references track the finding's sites. It is
-	// built by walking covered in its sorted order, which is what makes it
-	// deterministic despite Go's randomized map order.
+	// refs names the distinct references covering them, in covered's
+	// sorted order so it is deterministic despite map order.
 	refs []string
 	// full is true only when every key is covered and there was at least
 	// one: an empty key set must never read as "already tracked".
@@ -358,11 +316,8 @@ func matchDedup(index map[string]string, keys map[string]bool) dedupOverlap {
 }
 
 // dedupKeyLineSpec parses key's trailing ":<line>" or ":<lo>-<hi>" segment
-// (normalizeDedupKey never folds the "-" a range uses, issue #4108),
-// returning the key's file-prefix (everything before that segment) and the
-// line range it names. ok is false when key carries no such trailing
-// segment, or the prefix or the range is malformed -- none of those name a
-// line site, so a caller must not treat them as one.
+// (normalizeDedupKey never folds the range's "-", issue #4108) into the
+// file prefix and line range. ok is false when key names no line site.
 func dedupKeyLineSpec(key string) (prefix string, lo, hi int, ok bool) {
 	i := strings.LastIndex(key, ":")
 	if i <= 0 || i == len(key)-1 {
@@ -385,12 +340,9 @@ func dedupKeyLineSpec(key string) (prefix string, lo, hi int, ok bool) {
 	return prefix, n, n, true
 }
 
-// parseDedupLineDigits parses s as a line number, unlike strconv.Atoi
-// rejecting a leading sign (e.g. "+80") so a stray "+" can never masquerade
-// as part of a line number and slip a non-site key past dedupKeyLineSpec
-// (issue #4108). The digit-only scan above already rejects anything
-// non-numeric, so the trailing strconv.Atoi error now fires only on
-// overflow -- a digit run too long to fit an int (e.g. 25 digits).
+// parseDedupLineDigits parses s as a line number. Unlike strconv.Atoi it
+// rejects a sign ("+80"), so a non-site key cannot pass as a line site (issue
+// #4108); Atoi's error then fires only on overflow.
 func parseDedupLineDigits(s string) (int, bool) {
 	if s == "" {
 		return 0, false
@@ -408,8 +360,8 @@ func parseDedupLineDigits(s string) (int, bool) {
 }
 
 // dedupLineOverlap reports whether a and b name the same file (per
-// dedupKeyLineSpec's prefix) with intersecting line ranges. Neither being a
-// line-site key at all (dedupKeyLineSpec's ok false) is never an overlap.
+// dedupKeyLineSpec's prefix) with intersecting line ranges. A key that is not
+// a line site (dedupKeyLineSpec's ok false) never overlaps.
 func dedupLineOverlap(a, b string) bool {
 	pa, loA, hiA, okA := dedupKeyLineSpec(a)
 	pb, loB, hiB, okB := dedupKeyLineSpec(b)
@@ -419,19 +371,14 @@ func dedupLineOverlap(a, b string) bool {
 	return loA <= hiB && loB <= hiA
 }
 
-// applyRunLineOverlap aliases each of keys not already in dedupIndex to the
-// ref of a runKeys entry naming an overlapping line range in the same file,
-// so "...go:80-83" and "...go:80" (issue #4108) dedup like one key and
-// matchDedup handles the rest unchanged. runKeys holds only this run's own
-// filings: against the backlog, two findings a few lines apart in a
-// long-lived file are distinct and must both file. When several run keys
-// overlap one intent key, the smallest wins, so the ref is deterministic
-// despite Go's randomized map order. An aliased key also joins runKeys under
-// the same ref, so a later intent's key overlapping only the alias (not the
-// original run key) still chains onto the same ref instead of filing again
-// (issue #4108). The aliases join only once every key is matched: joining
-// mid-loop would let one key of this intent chain onto a sibling key of its
-// own, making the outcome hang on map order.
+// applyRunLineOverlap aliases each key not in dedupIndex to the ref of a
+// runKeys entry with an overlapping line range in the same file, so
+// "...go:80-83" and "...go:80" dedup as one (issue #4108). runKeys holds only
+// this run's filings: against the backlog, nearby findings in a long-lived
+// file are distinct. The smallest overlapping run key wins, for determinism.
+// Aliases join runKeys too, so a later key overlapping only an alias chains
+// onto the same ref, but only after the loop: joining mid-loop would let a key
+// chain onto its own sibling, making the result depend on map order.
 func applyRunLineOverlap(dedupIndex, runKeys map[string]string, keys map[string]bool) {
 	aliases := make(map[string]string)
 	for k := range keys {
@@ -482,9 +429,8 @@ type PriorFinding struct {
 
 // PriorFindings lists chore's findings in the backlog, open and closed,
 // recognised by the chore term in their dedup marker so trackers with no
-// label registry list them too. A list failure is non-fatal for the lookup it
-// hit: the findings the other lookup returned are still returned, beside the
-// first error.
+// label registry list them too. A list failure returns the other lookup's
+// findings beside the first error.
 func PriorFindings(it forge.IssueTracker, chore string) ([]PriorFinding, error) {
 	var out []PriorFinding
 	collect := func(issues []forge.Issue, open bool) {

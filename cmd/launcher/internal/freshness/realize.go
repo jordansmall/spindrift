@@ -39,10 +39,8 @@ func RealizeTip(r Realizer, pwd string, res Result, flakeImageAttr string) {
 }
 
 // startRealize holds the guard, attr trimming, and Start call that RealizeTip
-// and RealizeSync share, so the two cannot drift apart. Callers must check
-// skipped, which marks a genuine no-op, before err: a Start implementation
-// that returns (nil, nil) on success would otherwise read as a skip
-// (issue #2682 review findings).
+// and RealizeSync share. Callers must check skipped before err: a Start that
+// returns (nil, nil) on success would otherwise read as a skip (issue #2682).
 func startRealize(r Realizer, pwd string, res Result, flakeImageAttr string) (wait func() error, attr string, skipped bool, err error) {
 	// A non-empty TipTag is Probe's only genuine "rebuild needed, tag differs"
 	// verdict. Its error branches and its launcher-only-stale verdict all leave

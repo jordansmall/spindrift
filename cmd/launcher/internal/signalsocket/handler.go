@@ -21,11 +21,9 @@ import (
 // ever buffered under it.
 const statusKind = "status"
 
-// unknownKind tags a request outside the known routes, and a usage report
-// whose kind the client could not name (bare "/usage"). It is a fixed
-// token, never the requested path -- the path is Box-controlled and the
-// mirror is a log line, so echoing the path back would let a caller write
-// its own text into the launcher's log.
+// unknownKind tags a request outside the known routes, and a bare "/usage".
+// It is a fixed token, never the Box-controlled path, so a caller cannot
+// write its own text into the launcher's log.
 const unknownKind = "unknown"
 
 type handler struct {
@@ -35,26 +33,21 @@ type handler struct {
 	// read from.
 	issues IssueReader
 
-	// search answers the search verb; nil when the Dispatch's tracker cannot
-	// be read or cannot search. It is already scoped to the Dispatch's
-	// repository, so the request names no scope.
+	// search answers the search verb; nil when the tracker cannot be read or
+	// cannot search. It is already scoped to the Dispatch's repository, so the
+	// request names no scope.
 	search IssueSearcher
 
-	// logMu serialises the mirror's writes: requests are served
-	// concurrently, and two interleaved writes would splice one stream-json
-	// line into another.
+	// logMu serialises the mirror's writes, so concurrent requests cannot
+	// splice one stream-json line into another.
 	logMu sync.Mutex
 	logw  io.Writer
 }
 
-// opRecordKey is the context key that carries the per-request opRecord.
-// Unexported so only this package can stash or read one.
 type opRecordKey struct{}
 
-// opRecord accumulates one request's mirror fields as it moves through
-// routing, decoding and accept. The mirror middleware creates it, stashes it
-// on the request context, and emits it as the request's one hostop.SpindriftOp
-// once the inner handler returns.
+// opRecord accumulates one request's mirror fields; the mirror middleware
+// emits it as the request's one hostop.SpindriftOp.
 type opRecord struct {
 	kind     string
 	usage    bool
@@ -64,31 +57,25 @@ type opRecord struct {
 	reason   string
 }
 
-// recordFrom returns the current request's opRecord. Every request the mux
-// serves passes through the mirror middleware first, so this is always
-// non-nil inside a route handler.
+// recordFrom returns the current request's opRecord, always non-nil inside a
+// route handler since the mirror runs first.
 func recordFrom(r *http.Request) *opRecord {
 	rec, _ := r.Context().Value(opRecordKey{}).(*opRecord)
 	return rec
 }
 
-// Handler is the signal socket's http.Handler. It is a named type rather than
-// a bare http.Handler so that gated travels with the chain: only the assembly
-// point knows whether a TCP secret gate was installed inside the mirror, and
-// ListenAndServeTCP has to refuse anything else.
+// Handler is the signal socket's http.Handler. gated travels with the chain
+// because only the assembly point knows whether a TCP secret gate was
+// installed, and ListenAndServeTCP refuses anything ungated.
 type Handler struct {
 	http.Handler
 	gated bool
 }
 
-// routes dispatches on recordFrom(r).kind, the same kind kindForPath already
-// derived for the mirror ahead of routing, rather than registering paths on
-// an http.ServeMux. A ServeMux answers a request whose path it cleans (a
-// doubled slash, a dot segment) with its own 307 redirect before any
-// registered handler runs, so no route arm ever gets a chance to set a
-// decision on it; dispatching on the already-derived kind instead makes
-// "kind is the route" exact-match-or-nothing, with no cleaning step in
-// between.
+// routes dispatches on the kind kindForPath derived, not an http.ServeMux: a
+// ServeMux answers a path it cleans (doubled slash, dot segment) with its own
+// 307 before any route arm can set a decision. This keeps "kind is the route"
+// exact-match-or-nothing.
 func (h *handler) routes(w http.ResponseWriter, r *http.Request) {
 	rec := recordFrom(r)
 	if rec.usage {
@@ -113,25 +100,19 @@ func (h *handler) routes(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// NewHandler returns the signal socket's Handler, serving b's three buffered
-// routes, the GET /status, GET /issue and GET /issue-search reads, and the
-// diagnostics-only usage route (ADR 0052), and mirroring one spindrift_op event
-// per request to logw (issue #3724). A nil logw discards the mirror. issues
-// backs GET /issue and search backs GET /issue-search; a nil issues or search
-// makes its own route reject. The unix transport is the only caller: it has the
-// socket file's permissions as its own gate, so this Handler carries none.
+// NewHandler returns the signal socket's ungated Handler (ADR 0052), mirroring
+// one spindrift_op event per request to logw (issue #3724); a nil logw
+// discards the mirror, and a nil issues or search makes its route reject. Only
+// the unix transport uses it: the socket file's permissions are its gate.
 func NewHandler(b *Buffer, logw io.Writer, issues IssueReader, search IssueSearcher) *Handler {
 	h := &handler{buf: b, logw: logw, issues: issues, search: search}
 	return &Handler{Handler: h.mirror(http.HandlerFunc(h.routes))}
 }
 
-// NewGatedHandler returns a Handler for the every-interface TCP fallback,
-// which has no filesystem permissions of its own: every request must present
-// secret via signalwire.SecretHeader before it reaches a route. An empty
-// secret would match an absent header, so it fails closed here rather than at
-// listen time. The gate sits inside the mirror (gate wraps routes, mirror
-// wraps gate), so a rejected request still emits its one spindrift_op event.
-// issues and search are as for NewHandler.
+// NewGatedHandler returns a Handler for the every-interface TCP fallback:
+// every request must present secret via signalwire.SecretHeader. An empty
+// secret would match an absent header, so it fails closed. The gate sits
+// inside the mirror, so a rejected request still emits its event.
 func NewGatedHandler(b *Buffer, logw io.Writer, secret string, issues IssueReader, search IssueSearcher) (*Handler, error) {
 	if secret == "" {
 		return nil, errors.New("signalsocket: refusing to gate a handler with an empty secret")
@@ -141,22 +122,16 @@ func NewGatedHandler(b *Buffer, logw io.Writer, secret string, issues IssueReade
 }
 
 // gate wraps next behind a constant-time comparison of signalwire.SecretHeader
-// against secret. It runs inside the mirror middleware (recordFrom(r) already
-// has an opRecord to write into), so a wrong-secret request rejects through
-// the same reject helper every other refusal uses instead of a bare
-// http.Error that the mirror never sees.
+// against secret. It runs inside the mirror, so a wrong secret refuses through
+// reject rather than a bare http.Error the mirror never sees.
 func gate(secret string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// subtle.ConstantTimeCompare, not ==: this header is the sole gate on
-		// a port anything that can route to the host can reach, so a
-		// short-circuiting == would leak secret a byte at a time. The early
-		// return on differing lengths leaks only len(secret), which is not a
-		// comparable oracle.
+		// Constant-time: this header is the sole gate on a reachable port, and
+		// == would leak the secret a byte at a time. The early return on
+		// differing lengths leaks only len(secret), not a comparable oracle.
 		if subtle.ConstantTimeCompare([]byte(r.Header.Get(signalwire.SecretHeader)), []byte(secret)) != 1 {
-			// The body is never read here, on purpose: an unauthenticated
-			// caller must not get to push bytes through the socket at all,
-			// so the mirrored event's size and hash stay zero rather than
-			// describing content the gate had no business looking at.
+			// The body is never read: an unauthenticated caller pushes no
+			// bytes through, so the event's size and hash stay zero.
 			reject(w, recordFrom(r), &signalwire.Reject{
 				Status: "unauthorized",
 				Reason: "missing or wrong tcp secret",
@@ -168,12 +143,9 @@ func gate(secret string, next http.Handler) http.Handler {
 	})
 }
 
-// kindForPath derives a request's mirror kind from its path alone, ahead of
-// routing, so every request -- known route, wrong method, or no route at all
-// -- gets a kind (and whether it landed on the diagnostics-only usage route)
-// before the inner handler runs.
-// The bare "/usage" route is checked first: stripping its suffix leaves "",
-// which the switch would treat as no route at all.
+// kindForPath derives a request's mirror kind from its path alone, so every
+// request gets one before routing. Bare "/usage" is checked first: stripping
+// its suffix would leave "".
 func kindForPath(path string) (kind string, isUsage bool) {
 	if path == signalwire.UsagePath("") {
 		return unknownKind, true
@@ -195,18 +167,14 @@ func kindForPath(path string) (kind string, isUsage bool) {
 	case "/status":
 		return statusKind, isUsage
 	default:
-		// A usage-suffixed path whose prefix names no known kind (e.g.
-		// "/comments-typo-xyz/usage") is unknown outright, same as a bare
-		// unknown path -- never a usage report for a kind that isn't real.
+		// A usage-suffixed path with an unknown prefix is unknown outright,
+		// never a usage report for a kind that isn't real.
 		return unknownKind, false
 	}
 }
 
-// mirror wraps next so every request passes through exactly one emission
-// point: it stashes a fresh opRecord on the request's context, calls next,
-// then writes the one hostop.SpindriftOp the record accumulated. This is what
-// makes "exactly one event per request" structural rather than a convention
-// each route arm has to remember.
+// mirror wraps next so "exactly one event per request" is structural rather
+// than a convention each route arm must remember.
 func (h *handler) mirror(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// decision starts "reject", not "": FormatSpindriftOp renders an
@@ -239,9 +207,8 @@ func (h *handler) emit(op hostop.SpindriftOp) {
 	_, _ = io.WriteString(h.logw, line)
 }
 
-// serve runs one POST route: bounded read, strict decode into content, then
-// accept. Content is the request type itself -- no per-route wrapper -- so a
-// destination field is unrepresentable rather than merely ignored.
+// serve runs one POST route. Content is the request type itself, with no
+// per-route wrapper, so a destination field is unrepresentable.
 func serve[T any](w http.ResponseWriter, r *http.Request, accept func(T) (signalwire.Receipt, *signalwire.Reject)) {
 	rec := recordFrom(r)
 	if r.Method != http.MethodPost {
@@ -254,10 +221,8 @@ func serve[T any](w http.ResponseWriter, r *http.Request, accept func(T) (signal
 		return
 	}
 	rcpt, rej := accept(content)
-	// The receipt describes content, computed the same way whether accept
-	// then buffers it or a buffer-level check (oversize body, empty, invalid
-	// utf-8 field, unknown type, kind-not-consumed, intent cap) refuses it --
-	// the body decoded cleanly either way, so size and hash are known here.
+	// The receipt is computed whether the buffer accepts or refuses the
+	// content, so size and hash are known either way.
 	rec.size, rec.hash = rcpt.Bytes, rcpt.Hash
 	if rej != nil {
 		reject(w, rec, rej)
@@ -273,20 +238,15 @@ func (h *handler) status(w http.ResponseWriter, r *http.Request) {
 		reject(w, rec, methodReject())
 		return
 	}
-	// A GET is neither an accept nor a reject -- it never sends content for
-	// the buffer to store -- so it gets its own disposition rather than
-	// reusing "accept" for a request the buffer never mediated.
+	// The buffer never mediated a GET, so it is not an "accept".
 	rec.decision = "read"
 	writeJSON(w, http.StatusOK, h.buf.Status())
 }
 
 // usageReport answers the diagnostics-only usage route (ADR 0052): a
 // client-side usage failure (unknown flag, missing required flag) that never
-// reached a real route at all. It never touches h.buf -- the route buffers
-// nothing, is never consumed at settle, and never changes the run's outcome,
-// so it takes no *Buffer receiver, unlike serve and status. On success it
-// writes no body: the caller has nothing to read back, only a signal that
-// the report landed.
+// reached a real route. It never touches the buffer and never changes the
+// run's outcome.
 func usageReport(w http.ResponseWriter, r *http.Request) {
 	rec := recordFrom(r)
 	if r.Method != http.MethodPost {
@@ -315,8 +275,8 @@ func usageReport(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// unknownRoute answers any path outside the known routes. It never learns a
-// receipt -- there is no accept to run -- so size and hash stay zero.
+// unknownRoute answers any path outside the known routes; size and hash stay
+// zero.
 func unknownRoute(w http.ResponseWriter, r *http.Request) {
 	reject(w, recordFrom(r), &signalwire.Reject{
 		Status: "unknown_kind",
@@ -373,8 +333,7 @@ func malformed() *signalwire.Reject {
 	}
 }
 
-// reject records rej's decision and reason onto rec -- the mirror middleware
-// reads them back once the request finishes -- and writes rej as the reply.
+// reject records rej onto rec for the mirror and writes it as the reply.
 func reject(w http.ResponseWriter, rec *opRecord, rej *signalwire.Reject) {
 	rec.decision = "reject"
 	rec.reason = rej.Reason

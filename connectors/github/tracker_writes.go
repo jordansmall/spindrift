@@ -170,7 +170,7 @@ func issueComment(t tracker.Target, number string, r tracker.CommentRequest) err
 
 // fileIssue creates the issue and returns its html_url. GitHub has no entity
 // property, so the dedup marker goes back into the body as its last line.
-// IssueType is ignored, as the native adapter ignores it.
+// IssueType is ignored.
 func fileIssue(t tracker.Target, r tracker.IssueRequest) (string, error) {
 	body := r.Body
 	if r.DedupMarker != "" {

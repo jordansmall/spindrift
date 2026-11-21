@@ -40,11 +40,11 @@ func SurfaceIntegrationBranch(repoPath, pwd string, parent SanitizedParent, bran
 
 	refspec := "refs/heads/" + integrationBranch + ":refs/heads/" + branchName
 	if out, err := exec.Command("git", "-C", pwd, "fetch", repoPath, refspec).CombinedOutput(); err != nil {
-		// A non-fast-forward rejection means the operator's local branch has commits
-		// of its own, so it is a skip. Anything else (a corrupt repoPath, or the
-		// Integration branch vanishing in the TOCTOU window after the check above) is
-		// a real failure the caller should see. git reports the rejection only in that
-		// text, which is stable across git versions unlike the exit code.
+		// A non-fast-forward rejection means the operator's branch has commits of
+		// its own: a skip. Anything else (a corrupt repoPath, or the Integration
+		// branch vanishing in the TOCTOU window after the check above) is a real
+		// failure. git reports the rejection only in that text, which is stable
+		// across versions unlike the exit code.
 		if strings.Contains(string(out), "non-fast-forward") {
 			return false, "local branch " + branchName + " has diverged from " + integrationBranch, nil
 		}

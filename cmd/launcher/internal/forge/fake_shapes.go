@@ -54,8 +54,8 @@ var _ HostPostedIssueFiler = issueFilerTracker{}
 var _ IssueLabeler = issueFilerTracker{}
 
 // noLandingIssueTracker hides a Fake's RecordLanding and CloseIssue so a
-// type assertion against either reports absence, matching the github and
-// jira adapters, which implement neither (ADR 0029).
+// type assertion against either reports absence, matching connectortracker,
+// which implements neither (ADR 0029).
 type noLandingIssueTracker struct {
 	IssueTracker
 	wrappedFake
@@ -93,10 +93,10 @@ func (f *Fake) AsLocalShaped() IssueTracker {
 	return localShapedIssueTracker{IssueTracker: f, wrappedFake: wrappedFake{f}}
 }
 
-// localIssueFilerTracker is the real local adapter's actual combined shape
-// (issue #2592). Neither existing double covers it: AsLocalShaped never
-// gained PostIssue, and AsIssueFiler embeds the IssueTracker interface value
-// rather than *Fake, so it promotes neither RecordLanding nor CloseIssue.
+// localIssueFilerTracker is the real local adapter's combined shape (issue
+// #2592): AsLocalShaped lacks PostIssue, and AsIssueFiler embeds the
+// IssueTracker interface value, so it promotes neither RecordLanding nor
+// CloseIssue.
 type localIssueFilerTracker struct {
 	IssueTracker
 	wrappedFake
@@ -142,11 +142,9 @@ func (fs forgejoShapedIssueTracker) CloseMergedIssue(num string) error {
 	return fs.f.CloseMergedIssue(num)
 }
 
-// AddLabels promotes IssueTrackerFake's AddLabels (issue #4074), mirroring
-// the real forgejo adapter (internal/forge/forgejo/forgejo.go), which
-// implements it too: embedding the IssueTracker interface value rather than
-// *Fake would otherwise hide it, the same reason issueFilerTracker promotes
-// it explicitly.
+// AddLabels promotes IssueTrackerFake's AddLabels (issue #4074), which
+// embedding the IssueTracker interface value would otherwise hide, as for
+// issueFilerTracker.
 func (fs forgejoShapedIssueTracker) AddLabels(num string, labels []string) error {
 	return fs.f.AddLabels(num, labels)
 }
@@ -174,8 +172,8 @@ func (f *Fake) AsSeamListed() IssueTracker {
 
 var _ SeamLister = seamListedIssueTracker{}
 
-// fullyPaginatedIssueTracker matches the forgejo and jira adapters, which
-// wrap their list calls in a page-walking loop. A bare *Fake stays single-page.
+// fullyPaginatedIssueTracker models a tracker that walks every list page. A
+// bare *Fake stays single-page.
 type fullyPaginatedIssueTracker struct {
 	IssueTracker
 	wrappedFake
@@ -183,7 +181,7 @@ type fullyPaginatedIssueTracker struct {
 
 func (fullyPaginatedIssueTracker) WalksAllPages() bool { return true }
 
-// AsFullyPaginated returns f in the forgejo and jira adapters' shape: IssueTracker plus FullyPaginated.
+// AsFullyPaginated returns f wrapped so it satisfies IssueTracker plus FullyPaginated.
 func (f *Fake) AsFullyPaginated() IssueTracker {
 	return fullyPaginatedIssueTracker{IssueTracker: f, wrappedFake: wrappedFake{f}}
 }

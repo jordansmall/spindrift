@@ -87,14 +87,13 @@ func warnRoutedWriteUndetermined(w io.Writer, c config, env, reason string) {
 	fmt.Fprintf(w, "WARNING: the primary github Connector's write capability on %s could not be determined (%s); it needs %s.\n", env, reason, routedWritePermissions(c))
 }
 
-// checkRoutedConnectorWriteGate refuses a launch whose routed github
-// Connector credential cannot write: the Connector sends each
-// routedGithubSides side's writes with it, and a read-only token would fail
-// them only after the claim. A credential whose capability cannot be
-// read (a fine-grained PAT, an installation token, an unsupported hook, an
-// unset env) warns rather than refuses. The env is final by now: mainRun
-// resolves each row's _CMD form before any verb runs, so an empty value is not
-// set, and backendrows.Use only checks that the row names a credential env.
+// checkRoutedConnectorWriteGate refuses a launch whose routed github Connector
+// credential cannot write: a read-only token would fail the Connector's writes
+// only after the claim. A credential whose capability cannot be read (a
+// fine-grained PAT, an installation token, an unsupported hook, an unset env)
+// warns rather than refuses. The env is final here: mainRun resolves each
+// row's _CMD form before any verb runs, so an empty value is not set, and
+// backendrows.Use only checks that the row names a credential env.
 func checkRoutedConnectorWriteGate(c config, w io.Writer) error {
 	row, ok := backendrows.Lookup(backend.GitHub.Name)
 	if !ok {

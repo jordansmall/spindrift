@@ -7,10 +7,8 @@ package promptassembly
 
 import "spindrift.dev/launcher/internal/dispatchkind"
 
-// These are the defaults applied when the Env field arrives empty, the
-// "${VAR:-default}" expansion entrypoint.sh applied before box took over.
-// Issue #2533 moved every other gate-family default upstream into nix,
-// carried pre-resolved on Env.
+// Defaults for an Env field that arrives empty; every other gate-family
+// default is resolved in nix and arrives on Env (issue #2533).
 const (
 	defaultIssueTracker = "github"
 )
@@ -40,9 +38,8 @@ type Env struct {
 	// END GENERATED SKILL-BAKED FIELDS
 
 	// AgentsJSONTemplate is the nix-baked --agents JSON template, empty when no
-	// subagent model is configured. Assemble parses its JSON content, but the
-	// filer/worker presence facts are no longer re-derived from it: they arrive
-	// pre-resolved below (issue #2533).
+	// subagent model is configured. The roster presence facts below are
+	// resolved in nix, not re-derived from it (issue #2533).
 	AgentsJSONTemplate string // $AGENTS_JSON_TEMPLATE
 
 	// FilerEnabled, WorkerProvisioned, and ScoutProvisioned are true when the
@@ -52,17 +49,15 @@ type Env struct {
 	WorkerProvisioned bool
 	ScoutProvisioned  bool
 
-	// IssueTracker selects the per-axis issue-tracker gate family, defaulting to
-	// "github" when empty. The PR-body ticket-reference gates switch on the tracker
-	// row's slug-issue-reference fact rather than the name; the per-axis suffixes arrive
-	// pre-resolved below (issue #2533).
+	// IssueTracker names the tracker, defaulting to "github" when empty. The
+	// PR-body ticket-reference gates switch on the tracker row's
+	// slug-issue-reference fact rather than the name.
 	IssueTracker string // $ISSUE_TRACKER
 
-	// TrackerAxisRead, TrackerAxisWrite, and TrackerAxisFiler are nix's
-	// pre-resolved form of the "${ISSUE_TRACKER:-github}" case statement
-	// entrypoint.sh once held (issue #2533). Read is
-	// "GITHUB"/"LOCAL"/"FORGEJO"/"JIRA"; Write is "GITHUB"/"FORGEJO", or "" when the
-	// tracker has no in-box direct-write path (local always relays instead);
+	// TrackerAxisRead, TrackerAxisWrite, and TrackerAxisFiler are the tracker's
+	// per-axis gate suffixes, resolved in nix (issue #2533). Read is
+	// "GITHUB"/"LOCAL"/"FORGEJO"/"JIRA"; Write is "GITHUB"/"FORGEJO", or "" when
+	// the tracker has no in-box direct-write path (local always relays);
 	// Filer is "GH"/"FORGEJO".
 	TrackerAxisRead  string
 	TrackerAxisWrite string
@@ -135,10 +130,8 @@ type Env struct {
 	// substitution.
 	SkillsFound string // ScanSkillsFound over the skills dir
 
-	// AutoFormat and AutoLint mirror lib/env-schema.nix's Consumer knobs.
-	// Each gates on presence (a non-empty env value, as entrypoint.sh's
-	// "[ -n "${AUTO_FORMAT:-}" ]" did), not a boolean parse, so a bool set only
-	// when the knob was set reproduces it.
+	// AutoFormat and AutoLint mirror lib/env-schema.nix's Consumer knobs. Each
+	// gates on presence (a non-empty env value), not a boolean parse.
 	AutoFormat bool // $AUTO_FORMAT knob presence
 	AutoLint   bool // $AUTO_LINT knob presence
 
@@ -163,10 +156,8 @@ type Env struct {
 	RecordID string // dispatch/box.go: $RECORD_ID
 
 	// IssueText is the subject issue's body plus recent comments
-	// (forge.IssueText, issue #3445). Deliberately not one of the seven fixed
-	// names above: assemblePromptBodies registers a fenced, sectioned
-	// ISSUE_TEXT entry separately, because scalars substitutes each fixed
-	// name's raw value.
+	// (forge.IssueText, issue #3445). Not one of the fixed names above:
+	// ISSUE_TEXT substitutes a fenced section, not this raw value.
 	IssueText string // $ISSUE_TEXT
 
 	// ResearchVerdicts is the raw RESEARCH_VERDICTS JSON (empty = the default
@@ -176,31 +167,24 @@ type Env struct {
 	ResearchVerdicts string // dispatch.go: $RESEARCH_VERDICTS
 
 	// ReviewModelOverride and ReviewEffortOverride carry an operator's explicit
-	// dispatch-time REVIEW_MODEL/REVIEW_EFFORT (issue #3171), forwarded only when
-	// the operator set them, never a schema default, so empty means no override.
-	// When non-empty, Assemble binds them last,
-	// over both the AgentsJSONTemplate extraction and the agent-files rewrite.
+	// dispatch-time REVIEW_MODEL/REVIEW_EFFORT (issue #3171), never a schema
+	// default, so empty means no override. Assemble binds them last.
 	ReviewModelOverride  string // dispatch.go: $BOX_REVIEW_MODEL_OVERRIDE
 	ReviewEffortOverride string // dispatch.go: $BOX_REVIEW_EFFORT_OVERRIDE
 
 	// ChoreName, ChoreHead, ChoreDiffRange, and ChoreSlice carry the butler's
-	// Chore key (ADR 0056, issue #3875): dispatch.go's buildBoxEnv forwards
-	// them only for a Factory.NewChore Dispatch (Keying == ByChore), in place
-	// of IssueNumber/IssueTitle/IssueText. ChoreName doubles as the
-	// prompts/chores/<name>.md lookup key choreSection resolves into
-	// CHORE_PROMPT (issue #3875 slice 4).
+	// Chore key (ADR 0056, issue #3875), forwarded only for a ByChore Dispatch
+	// in place of the issue facts. ChoreName is also the prompts/chores/<name>.md
+	// key choreSection resolves into CHORE_PROMPT.
 	ChoreName      string // dispatch.go: $CHORE_NAME
 	ChoreHead      string // dispatch.go: $CHORE_HEAD
 	ChoreDiffRange string // dispatch.go: $CHORE_DIFF_RANGE
 	ChoreSlice     string // dispatch.go: $CHORE_SLICE
 
 	// ChoreClasses is the Chore's promotion-candidate class allow-list
-	// (issue #3880), space-joined; empty whenever the host has promotion
-	// off (dispatch.Chore.PromotionClasses, set by internal/butler's Runner only
-	// while today's promotion room is > 0 -- off, or spent for the day,
-	// leaves it empty). It is informational for the Box's prompt only --
-	// settle re-checks a finding's class against the host's own
-	// allow-list regardless of what this string says.
+	// (issue #3880, dispatch.Chore.PromotionClasses), space-joined; empty when
+	// promotion is off or spent for the day. Informational only: settle
+	// re-checks a finding's class against the host's own allow-list.
 	ChoreClasses string // dispatch.go: $CHORE_CLASSES
 
 	// ChoreClassList is the Chore's closed finding-class list (issue
@@ -222,10 +206,8 @@ type Env struct {
 	ChorePatchClasses string // dispatch.go: $CHORE_PATCH_CLASSES
 
 	// ChoreMaxFindings is the run's decimal cap on relayed findings (issue
-	// #3994): dispatch.go's buildBoxEnv always sets it, for every Chore
-	// Box, to the sweep's own findings room when positive, else the
-	// signal socket's fixed default -- so the Box's prompt can name the
-	// run's actual cap rather than the socket's fallback alone.
+	// #3994), always set for a Chore Box: the sweep's findings room when
+	// positive, else the signal socket's fixed default.
 	ChoreMaxFindings string // dispatch.go: $CHORE_MAX_FINDINGS
 }
 
@@ -238,10 +220,9 @@ func (e Env) kind() string {
 	return e.DispatchKind
 }
 
-// descriptor resolves e.kind() against dispatchkind.ByName, so call sites
-// read a property off the descriptor instead of comparing kind strings.
-// checkCoveredCell already rejects an unknown name before any other reader
-// runs, so the Default fallback here only guards a caller that skips that gate.
+// descriptor resolves e.kind() so call sites read a property off the
+// descriptor instead of comparing kind strings. The Default fallback only
+// guards a caller that skips checkCoveredCell.
 func (e Env) descriptor() *dispatchkind.Descriptor {
 	if d, ok := dispatchkind.ByName(e.kind()); ok {
 		return d

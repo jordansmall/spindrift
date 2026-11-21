@@ -6,29 +6,21 @@ import "time"
 // across a single stale transition and drain-out (#2678, #2774). RunContinuous's
 // mu serializes every access, so this type keeps no lock of its own.
 type staleDrainTracker struct {
-	// heldBack is queue.Pending()'s raw return value at the moment the stale
-	// verdict fired (#2678, #2939); each Queue adapter defines that count in
-	// its own terms. It stays zero whenever heldBackUnknown is set, since the
-	// two are mutually exclusive per drain.
+	// heldBack is queue.Pending() at the stale verdict (#2678, #2939); zero
+	// when heldBackUnknown is set.
 	heldBack int
 
-	// heldBackUnknown is set only when the stale-transition branch's
-	// queue.Pending() call errors, a transient tracker hiccup rather than a
-	// confirmed zero, so both StaleDrainReport emission sites render "unknown"
-	// instead of a fabricated 0 (#2678 review finding).
+	// heldBackUnknown is set when that Pending call errors, so the report
+	// renders "unknown" rather than a fabricated 0 (#2678).
 	heldBackUnknown bool
 
 	// The zero value of start and end doubles as a single-emit guard: the
-	// stale-transition branch runs at most once per RunContinuous call, so a
-	// second report can never be computed. slotAt is the wall-clock time of
-	// the last checkpoint call, or start before the first one.
+	// stale transition runs at most once per RunContinuous call. slotAt is the
+	// last checkpoint's time, or start before the first.
 	start, end, slotAt time.Time
 
-	// freeSlotSecs accumulates idle slot-seconds across every interval
-	// checkpoint has closed out since start.
 	freeSlotSecs float64
 
-	// cap is the limiter cap held for the whole drain.
 	cap int
 }
 
@@ -39,8 +31,7 @@ func (t *staleDrainTracker) inProgress() bool {
 }
 
 // begin starts a new drain interval at now with cap as the limiter cap.
-// Callers must hold RunContinuous's mu. slotAt starts equal to start so
-// the first checkpoint measures idle time from the drain's own start.
+// Callers must hold RunContinuous's mu.
 func (t *staleDrainTracker) begin(now time.Time, cap int) {
 	t.start = now
 	t.slotAt = now
@@ -55,8 +46,7 @@ func (t *staleDrainTracker) checkpoint(now time.Time, outstanding int) {
 	t.slotAt = now
 }
 
-// checkpointIfNeeded calls checkpoint only when a drain is in progress, so any
-// RunContinuous checkpoint site can call it unconditionally.
+// checkpointIfNeeded calls checkpoint only when a drain is in progress.
 func (t *staleDrainTracker) checkpointIfNeeded(now time.Time, outstanding int) {
 	if t.inProgress() {
 		t.checkpoint(now, outstanding)
@@ -71,8 +61,7 @@ func (t *staleDrainTracker) finish(end time.Time) StaleDrainReport {
 	return t.report()
 }
 
-// report renders t's fields into a StaleDrainReport. freeSlotSecs is 0.0 when
-// no checkpoint has run, because slotAt still equals start then.
+// report renders t's fields into a StaleDrainReport.
 func (t *staleDrainTracker) report() StaleDrainReport {
 	return StaleDrainReport{
 		StaleAt:         t.start,

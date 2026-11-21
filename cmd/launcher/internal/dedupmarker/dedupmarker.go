@@ -1,10 +1,8 @@
 // Package dedupmarker is the grammar of the hidden dedup marker line a filed
 // finding's body ends with (issue #3609): "<!-- spindrift-dedup: t1, t2 -->".
-// It owns only the line shape -- which line is the marker, how its terms are
-// joined and split. What a term may contain is the caller's rule (settle
-// normalizes before Build and after Parse), so a tracker adapter that merely
-// moves the line (the Jira adapter, ADR 0072) shares the grammar without
-// importing settle.
+// It owns only the line shape; what a term may contain is the caller's rule
+// (settle normalizes around Build and Parse), so connectortracker, which only
+// moves the line (ADR 0072), shares the grammar without importing settle.
 package dedupmarker
 
 import "strings"

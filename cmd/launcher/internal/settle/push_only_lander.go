@@ -14,28 +14,24 @@ import (
 // tracker and Code Forge access but never reads the PR forge.
 type pushOnlyLander struct{ *Settle }
 
-// land lands a push-only forge, where there is no PR or CI to watch, so
-// the issue goes Complete once MERGE_MODE has applied straight against the
-// forge's Merge and Rebase. Complete commits after the merge, through
-// completeLanding, so a mark landing during the merge's retry backoff abandons
-// instead of committing tracker state (issue #4879). A merge failure leaves
-// the issue Complete with a merge-blocked note (unless Unclaimed, which has no
-// state to move), never demoted to Failed (ADR 0012). A relay that fails with
-// its bundle still in the outbox parks the issue Failed instead (issue #4651)
-// and returns landingFailed, the transition and comment already done. An
-// immediate merge drops the landed bundle here, since only the PR Lander
-// runs verifyMerged.
+// land lands a push-only forge, with no PR or CI to watch: MERGE_MODE applies
+// straight against the forge's Merge and Rebase. Complete commits after the
+// merge, so a mark during the merge's retry backoff abandons instead (issue
+// #4879). A merge failure still goes Complete with a merge-blocked note
+// (unless Unclaimed), never Failed (ADR 0012); a relay failure with its bundle still
+// in the outbox parks Failed (issue #4651) and returns landingFailed with the
+// transition and comment already done. An actual merge drops the landed
+// bundle here, since only the PR Lander runs verifyMerged.
 func (s pushOnlyLander) land(_ dispatch.Dispatcher, num string, gen uint64, branch string, _ bool, passes []passmanifest.Entry) (landingResult, string, error) {
 	// No CI watch here, so this is the only checkpoint before landing —
 	// an aborted run must not merge or commit Complete (issue #3523).
 	if s.terminated(num, gen) {
 		return landingFailed, "", errAbandoned
 	}
-	// Merge needs the ref to exist as a branch, but the read-only Box bundled it
-	// instead of pushing, so relay it in first (ADR 0033). It runs ahead of the
-	// Complete commit because a stop during the relay's retry backoff (issue
-	// #4649) has already released num (issue #3523). branch is re-derived from
-	// forge.AgentBranchName, never trusted from the Agent-controlled outcome line
+	// Merge needs the branch, which the read-only Box bundled instead of
+	// pushing (ADR 0033). The relay runs before the Complete commit because a
+	// stop in its backoff (issue #4649) has already released num (issue #3523).
+	// The ref is re-derived, never taken from the Agent-controlled outcome line
 	// (#1949).
 	relayedRef, relayErr := s.relayBoxBundle(num, gen)
 	if relayedRef != "" {
@@ -78,10 +74,9 @@ func (s pushOnlyLander) land(_ dispatch.Dispatcher, num string, gen uint64, bran
 	if _, cerr := s.completeLanding(num, gen, landed, mergeReason); cerr != nil {
 		return landingFailed, "", cerr
 	}
-	// CODE_FORGE=local needs the resolved Integration ref and commit sha
-	// (ADR 0029/0033), not the placeholder agent branch recorded above, so
-	// overwrite it now that Merge has landed. Best-effort: a resolution
-	// failure must never turn a successful land into a failure.
+	// CODE_FORGE=local records the resolved Integration ref and sha (ADR
+	// 0029/0033) over the placeholder. Best-effort: a resolution failure must
+	// never fail a successful land.
 	if lr := forge.ResolveCodeForge(s.cfForNum(num)).LandingRef; lr != nil {
 		if landing, err := lr.LandingRef(); err == nil {
 			// Re-recording passes is deliberate: it keeps the pair with the
@@ -163,15 +158,12 @@ func (s pushOnlyLander) landRelayedBranch(d dispatch.Dispatcher, num string, gen
 	s.gateAdopted(d, num, gen, s.agentBranch(num), note, passes)
 }
 
-// salvage promotes a local push-only issue to Recoverable (ADR 0039) when
-// either a genuine success self-report or a signal kill (#2378)
-// coincides with a bundle in the outbox, leaving the land itself to `spindrift
-// recover`. It only stats the outbox, so no local issue is ever
-// fast-forwarded on unauthenticated evidence alone. A success self-report
-// that is unreviewed, or a signal-killed run whose loop stopped before its
-// land pass, fails the issue instead, since recover would decline that bundle
-// (issues #5973, #5984). True means the issue is settled, Recoverable or
-// Failed.
+// salvage promotes a local push-only issue to Recoverable (ADR 0039) when a
+// genuine success self-report or a signal kill (#2378) coincides with an
+// outbox bundle, leaving the land to `spindrift recover`, so nothing
+// fast-forwards on unauthenticated evidence alone. An unreviewed run fails
+// instead, since recover would decline its bundle (issues #5973, #5984). True
+// means the issue is settled.
 func (s pushOnlyLander) salvage(d dispatch.Dispatcher, num string, _ uint64, result dispatch.Result) bool {
 	cf := s.cfForNum(num)
 	selfReportOK := result.Resolved.SelfReportFound && isSuccessSelfReport(result.Resolved.SelfReport.Status)

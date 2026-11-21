@@ -59,9 +59,8 @@ func WithSource(ids []string, source DepSource) []Dependency {
 }
 
 // IssueTracker reads issues and transitions their dispatch state.
-// Implementations map DispatchState to
-// their own mechanism: GitHub labels, Jira workflow statuses, local file
-// frontmatter.
+// Implementations map DispatchState to their own mechanism: GitHub labels,
+// Jira workflow statuses, local file frontmatter.
 type IssueTracker interface {
 	// ListIssues returns open issues in the given dispatch state, in
 	// canonical order (GitHub: ascending issue number).
@@ -104,21 +103,14 @@ type BlockersLister interface {
 	BlocksOf(num string) ([]Dependency, error)
 }
 
-// LabeledBacklogLister is the optional IssueTracker capability for a
-// state-scoped dedup scan of the finding backlog (issue #3873): the scan
-// reads both open AND closed finding issues, since a closed finding is a
-// durable triage decision the host must not refile. Unlike ListOpenIssues,
-// whose GitHub implementation omits body and truncates to the *oldest*
-// ResultPageLimit issues (useless for dedup), ListIssuesWithLabels returns
-// every issue in the given state carrying at least one of labels, with Body
-// populated, newest first -- so a truncated page drops the oldest
-// already-covered findings rather than the newest ones a later run is most
-// likely to re-file. Every real adapter
-// (github, forgejo, jira, local) implements it; the fallback to
-// ListOpenIssues -- open-only dedup with no closed-finding suppression --
-// exists only for a tracker that lacks it. An implementation may return the
-// labels that succeeded with a nil error, failing only when every label
-// failed.
+// LabeledBacklogLister is the optional IssueTracker capability for the
+// finding-backlog dedup scan (issue #3873), which reads closed findings too:
+// a closed finding is a triage decision the host must not refile.
+// ListOpenIssues won't do: on GitHub it omits body and truncates to the
+// *oldest* ResultPageLimit issues. Its newest-first order means a truncated
+// page drops the oldest findings, not the ones a later run is likeliest to
+// re-file. An implementation may return the labels that succeeded with a nil
+// error, failing only when every label failed.
 type LabeledBacklogLister interface {
 	// ListIssuesWithLabels returns every issue in state carrying at least
 	// one of labels, Body populated, newest first. state must be IssueOpen
@@ -144,13 +136,11 @@ type IssueSearcher interface {
 }
 
 // MergeLabeledIssues calls fetch once per label, merges the results by
-// Number, and sorts them newest first. A failed label is logged and
-// skipped rather than aborting the whole scan: the repo may simply lack one
-// of the labels, or one call may hit a transient rate limit, and a hard
-// failure would hand the caller an empty result that discards what the
-// succeeding labels already found. Only a failure on every label is
-// returned, so a total outage still reaches the caller's own fallback.
-// source prefixes the warning and error text (e.g. "gh issue list").
+// Number, and sorts them newest first. A failed label (missing from the
+// repo, or a transient rate limit) is logged and skipped so it cannot
+// discard what the other labels found; only a failure on every label is
+// returned, so a total outage still reaches the caller's fallback. source
+// prefixes the warning and error text (e.g. "gh issue list").
 func MergeLabeledIssues(source string, labels []string, fetch func(label string) ([]Issue, error)) ([]Issue, error) {
 	seen := make(map[string]bool)
 	var issues []Issue
@@ -175,8 +165,7 @@ func MergeLabeledIssues(source string, labels []string, fetch func(label string)
 	if len(labels) > 0 && failures == len(labels) {
 		return nil, fmt.Errorf("%s: all %d label(s) failed: %w", source, len(labels), lastErr)
 	}
-	// A merge of per-label pages is unordered whatever order each page
-	// arrived in, and the LabeledBacklogLister doc promises newest-first.
+	// LabeledBacklogLister promises newest-first.
 	sort.Slice(issues, func(i, j int) bool {
 		ni, _ := strconv.Atoi(issues[i].Number)
 		nj, _ := strconv.Atoi(issues[j].Number)
@@ -224,14 +213,11 @@ type DemandCounter interface {
 	ProbeInterval() time.Duration
 }
 
-// IssueLabeler is the optional IssueTracker capability for adapters that can
-// add labels to an existing issue without going through TransitionState's
-// DispatchState mapping (issue #4074): the butler's patch rung files a
-// finding issue with agent-butler-finding and agent-butler-patch but no
-// dispatch label, and only promotes it to a work label later, after a
-// failed patch push or PR create -- a plain label add TransitionState
-// cannot express, since the butler kind's label family has no Ready label
-// to transition through.
+// IssueLabeler is the optional IssueTracker capability for adding labels
+// outside TransitionState's DispatchState mapping (issue #4074): the
+// butler's patch rung promotes its finding issue to a work label after a
+// failed patch push or PR create, and the butler label family has no Ready
+// label to transition through.
 type IssueLabeler interface {
 	// AddLabels adds labels to issue num, leaving any labels already present
 	// untouched.
@@ -272,17 +258,16 @@ type LandingRecorder interface {
 	RecordLanding(num, landing string) error
 }
 
-// LandingPassRecorder is the optional IssueTracker capability for adapters
-// that can record which pass produced a landing's outcome (ADR 0029, issue
-// #2983). Advisory provenance only: no settle decision and no Resolved tier
-// selection ever reads it. Only the local adapter implements it.
+// LandingPassRecorder is the optional IssueTracker capability for recording
+// which pass produced a landing's outcome (ADR 0029, issue #2983). Advisory
+// provenance only: no settle decision or Resolved tier selection reads it.
+// Only the local adapter implements it.
 //
-// The pass names the in-Box pass that produced the landing ref, recorded at
-// settle's landing write (issue #5272); it does not describe the merged head.
-// Settle-dispatched CI fix passes on a read-only PR-shaped forge move the PR
-// head without re-recording it. Reconcile's later ref upgrades leave it
-// unchanged, and a landing reconcile discovers clears it. On push-only
-// landings there is no fix pass, so it coincides with the merged head.
+// The pass is recorded at settle's landing write (issue #5272), so it need
+// not describe the merged head: settle-dispatched CI fix passes on a read-only
+// PR-shaped forge move the head without re-recording it; a push-only landing
+// has no fix pass, so there it is the merged head. Reconcile's ref upgrades
+// leave it unchanged; a landing reconcile discovers clears it.
 type LandingPassRecorder interface {
 	// RecordLandingPass persists the 1-indexed pass number and role
 	// ("implement", "review", "fix", "land", ...) of the pass that produced
@@ -302,14 +287,13 @@ type IssueCloser interface {
 	CloseIssue(num string) error
 }
 
-// MergeCloser is the optional IssueTracker capability for closing an issue as
-// settle's backstop (issue #1892) for a forge's merge-driven auto-close, and
-// for settle's own close on a status=already-resolved outcome (issue #4015).
-// Only github and forgejo implement it. The method is not named CloseIssue
-// because ISSUE_TRACKER=local with CODE_FORGE=github is valid, and a shared
-// name would let settle's merge backstop close a local issue, whose closed:
-// axis only reconcile writes for landed work (settle's already-resolved
-// close goes through IssueCloser deliberately, issue #4017).
+// MergeCloser is the optional IssueTracker capability for settle's backstop
+// close after a forge merge (issue #1892) and its close on
+// status=already-resolved (issue #4015). It is not named CloseIssue because
+// ISSUE_TRACKER=local with CODE_FORGE=github is valid, and a shared name
+// would let the merge backstop close a local issue, whose closed: axis only
+// reconcile writes for landed work (settle's already-resolved close uses
+// IssueCloser, issue #4017).
 type MergeCloser interface {
 	// CloseMergedIssue closes issue num once settle has independently
 	// confirmed either a genuine merge or that the work is already resolved

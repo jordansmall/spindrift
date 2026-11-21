@@ -1,5 +1,6 @@
-// Package bindregistry classifies a repo's working directory into a
-// toolchain-nudge ecosystem, for the Box's toolchain decision.
+// Package bindregistry binds a Box's ecosystem tooling to the in-Box registry
+// proxy Forwarder (ADR 0044/0045), and classifies a repo's working directory
+// into a toolchain-nudge ecosystem for the Box's toolchain decision.
 package bindregistry
 
 import (
@@ -11,8 +12,8 @@ import (
 
 // Classify returns the classification of the first of rows whose lockfile name
 // matches a file under workDir, or "" if none match. Reordering rows changes
-// the result: the registered order encodes the cargo, npm-family, go, gradle
-// precedence that agent/entrypoint.sh's old if/elif chain had (#2930).
+// the result: the registered order encodes cargo, npm-family, go, gradle
+// precedence (#2930).
 func Classify(workDir string, rows []ecosystem.Strategy) string {
 	for _, row := range rows {
 		for _, name := range row.LockfileNames {

@@ -60,13 +60,12 @@ var (
 // records it.
 //
 // FollowRedirect lets a GET route follow one redirect hop to a host the table
-// cannot name (a pre-signed blob URL). The hop is sent uncredentialed and
-// audited with its target host, asks for the body's tail with a Range suffix,
-// and is bounded to half the request's remaining time (failing non-fatally past
-// it); String shows the opt-in, so a Route-table diff does too. A body over the
-// response cap keeps its tail rather than failing the call: that error is
-// fatal to the Connector, and the tail of a blob such as a job log is the
-// useful part.
+// cannot name (a pre-signed blob URL). The hop is sent uncredentialed, audited
+// with its target host, asks for the body's tail with a Range suffix, and gets
+// half the request's remaining time (failing non-fatally past it); String
+// shows the opt-in, so a Route-table diff does too. A body over the response
+// cap keeps its tail rather than failing the call, which would be fatal to the
+// Connector: the tail of a blob such as a job log is the useful part.
 type Route struct {
 	Method         string `json:"method"`
 	Host           string `json:"host"`
@@ -396,9 +395,9 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 	ctx, cancelTimeout := context.WithTimeoutCause(ctx, timeout, timeoutCause)
 	defer cancelTimeout()
 	// sendFailed names the timeout when it, not the caller, ended the request;
-	// context.DeadlineExceeded alone would not say which clock ran out. what, if
-	// set, says which step failed. The timeout cannot end a request before it is
-	// sent, so the substitution is a no-op for the pre-send failures.
+	// context.DeadlineExceeded alone would not say which clock ran out. The
+	// timeout cannot end a request before it is sent, so pre-send failures
+	// pass through unchanged.
 	sendFailed := func(what string, cause error) error {
 		if errors.Is(context.Cause(ctx), timeoutCause) {
 			cause = timeoutCause
@@ -440,10 +439,10 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 				return status, nil, nil, refuse("redirect from %s%s: only https locations without userinfo are followed", u.Host, u.Path)
 			}
 			entry.RedirectHost = loc.Host
-			// A fresh request: the guest's headers and the credential must not leave the admitted host.
-			// The hop's share covers its body read; a caller's deadline expiring
-			// instead would kill the Connector rather than fail with a plain
-			// ErrHTTPSend.
+			// A fresh request: the guest's headers and the credential must not
+			// leave the admitted host. The hop's share covers its body read; the
+			// caller's deadline expiring instead would kill the Connector rather
+			// than fail with a plain ErrHTTPSend.
 			hopCtx := ctx
 			if dl, ok := ctx.Deadline(); ok {
 				var cancel context.CancelFunc

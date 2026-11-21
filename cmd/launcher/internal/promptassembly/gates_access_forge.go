@@ -1,23 +1,17 @@
 package promptassembly
 
-// accessForgeGates computes the code-forge gate family. It lives in its own
-// file so edits to this axis do not collide with sibling axis tickets editing
-// their own gate files (issue #2351, spec #2347 slice S3).
+// accessForgeGates computes the code-forge gate family.
 func accessForgeGates(e Env) map[string]bool {
 	g := map[string]bool{}
 
-	// nix resolves the backend suffix at eval time, so it arrives pre-resolved
-	// on Env.ForgeBackend (issue #2533), but a host launcher older than #2533
-	// never sets it. Re-derive it from e.CodeForge the way entrypoint.sh's
-	// "${CODE_FORGE:-github}" did; hardcoding the GH arm would tell the agent
+	// A host launcher older than #2533 never sets ForgeBackend, so forgeSignal
+	// re-derives it from CodeForge; hardcoding the GH arm would tell the agent
 	// to drive `gh` against a Forgejo forge.
 	backend := forgeSignal(e)
 
 	// The IF BLOCKED PR step and landing line name a PR, which only a forge
-	// with PRs has (issue #5233). OutboxRelayCapable stands in for that: only
-	// the github/forgejo forge rows set it, while git and local do not.
-	// backend.Descriptor.OutboxRelayCapable names the test that ties the bit
-	// to a forge with PRs.
+	// with PRs has (issue #5233); OutboxRelayCapable stands in for that, set
+	// only on the github/forgejo rows.
 	g["PR_FORGE_READ_ONLY"] = e.OutboxRelayCapable
 	// A Box on a no-PR forge has no PR step either (issue #6281). The name
 	// carries no access infix, so lib/mkHarness.nix's

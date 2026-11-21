@@ -95,9 +95,7 @@ func (w *Wired) ResolveParent(num string) local.SanitizedParent {
 	return w.cached(num, func() local.SanitizedParent { return ResolveParent(w.it, num) })
 }
 
-// cached returns num's memoized parent, computing and storing it via resolve on
-// a cache miss. Surface populates the same cache through it from an issue it
-// already holds, avoiding a second read of a file it just fetched.
+// cached returns num's memoized parent, computing it via resolve on a miss.
 func (w *Wired) cached(num string, resolve func() local.SanitizedParent) local.SanitizedParent {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -155,9 +153,8 @@ func (w *Wired) Surface(pwd string, out io.Writer, stuck map[string]string, caps
 	groups := map[local.SanitizedParent]*seamGroup{}
 	var order []local.SanitizedParent
 	for _, iss := range issues {
-		// w.cached, not w.ResolveParent: iss.Parent is already in hand from
-		// AllIssues, so a cache miss resolves from it directly instead of
-		// re-fetching the issue file, and still populates the shared cache.
+		// Not w.ResolveParent: iss.Parent is in hand, so skip re-fetching
+		// while still filling the shared cache.
 		parent := w.cached(iss.Number, func() local.SanitizedParent { return local.ResolveParent(iss.Number, iss.Parent) })
 		g, seen := groups[parent]
 		if !seen {
@@ -167,13 +164,12 @@ func (w *Wired) Surface(pwd string, out io.Writer, stuck map[string]string, caps
 		}
 		g.issues = append(g.issues, iss)
 	}
-	// A broad ticket whose own key collides with its group's key is a member of
-	// its own group, not one of its seams. Dropping it before parentless, title,
-	// and SeamCount are derived keeps those correct with no filtering of their
-	// own (issue #3439). Scoped to the collision: a three-level chain's middle
-	// issue resolves into its grandparent's group and must keep gating it.
-	// Consequence: an excluded issue's own stuck landing is unreachable from
-	// verdictFor's lookup below; reconcile reports it instead (issue #3440).
+	// A broad ticket whose own key collides with its group's key is not one of
+	// its seams; dropping it here keeps parentless, title and SeamCount correct
+	// (issue #3439). The drop is scoped to the collision: a three-level chain's
+	// middle issue lands in its grandparent's group and must keep gating it.
+	// An excluded issue's stuck landing is unreachable from verdictFor;
+	// reconcile reports it (issue #3440).
 	for _, parent := range order {
 		g := groups[parent]
 		var kept []forge.Issue
@@ -189,11 +185,11 @@ func (w *Wired) Surface(pwd string, out io.Writer, stuck map[string]string, caps
 		if len(kept) > 0 {
 			g.issues = kept
 		}
-		// local.SanitizeParent, not a bare Parent == "" check: a parent: value
-		// made entirely of non-[a-z0-9] characters sanitizes to empty, and
-		// ResolveParent already treats that as unset (ADR 0033, issue #1734).
-		// g.issues[0] carries no ordering requirement: a parentless member of
-		// group P has slug P, so a non-degenerate exclusion above already dropped it.
+		// Not a bare Parent == "" check: a parent: of only non-[a-z0-9]
+		// characters sanitizes to empty, which ResolveParent treats as unset
+		// (ADR 0033, issue #1734). g.issues[0] needs no ordering: a parentless
+		// member of group P has slug P, so the exclusion above already dropped
+		// it.
 		g.parentless = local.SanitizeParent(g.issues[0].Parent) == ""
 		g.title = g.issues[0].Title
 	}
@@ -202,9 +198,7 @@ func (w *Wired) Surface(pwd string, out io.Writer, stuck map[string]string, caps
 	for _, parent := range order {
 		v, err := w.verdictFor(pwd, parent, groups[parent], stuck)
 		if err != nil {
-			// Recorded, not returned immediately: one parent's surface failure
-			// must not stop the sweep from attempting every other completed
-			// broad ticket in the same batch.
+			// One parent's failure must not stop the sweep.
 			errs = append(errs, fmt.Errorf("surface %s: %w", parent, err))
 			continue
 		}

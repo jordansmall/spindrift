@@ -25,9 +25,8 @@ type Event struct {
 	Event string `json:"event"`
 	Kind  Kind   `json:"kind,omitempty"`
 	// Kinds is tip_moved's own field, naming the kinds whose backoff the
-	// reset actually ended (see pool.go's noteTipMoved) — plural because a
-	// moved tip is evidence for every jammed kind at once, not just
-	// whichever kind Kind would have named.
+	// reset ended (noteTipMoved): a moved tip is evidence for every jammed
+	// kind at once.
 	Kinds []Kind `json:"kinds,omitempty"`
 	// Key is a box/settled/child_finish event's Dispatch key — a tracker
 	// issue for an ordinary Dispatch, a butler Chore for a butler run (ADR
@@ -106,10 +105,9 @@ func (ev Event) MarshalJSON() ([]byte, error) {
 	return json.Marshal(eventWire{eventFields: eventFields(ev), Issue: issue, Chore: chore})
 }
 
-// UnmarshalJSON leaves Key zero, without error, when neither issue nor chore
-// is set: most events carry no key at all. Both set is always an error —
-// ParseRecord already enforces exactly one on the way in, so a decoded
-// event with both is a genuine wire corruption, not a case to tolerate.
+// UnmarshalJSON leaves Key zero when neither issue nor chore is set: most
+// events carry no key. Both set is always an error — ParseRecord enforces
+// exactly one on the way in, so both is wire corruption.
 func (ev *Event) UnmarshalJSON(data []byte) error {
 	var w eventWire
 	if err := json.Unmarshal(data, &w); err != nil {
@@ -127,17 +125,14 @@ func (ev *Event) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// ShutdownDrain is the reason on the shutdown event the daemon emits for the
-// first stop signal: docs/reference.md documents this exact string as
-// operator-facing grammar, so changing it is a documented-behaviour change,
-// not a rename (see Halt.String() in halt.go for the same convention).
+// ShutdownDrain is the reason on the shutdown event for the first stop
+// signal. docs/reference.md documents this exact string, so changing it is a
+// documented-behaviour change, not a rename.
 const ShutdownDrain = "signalled stop: forwarding a drain request to every running child"
 
-// ShutdownEscalate is the reason on the shutdown event the daemon emits for
-// the second stop signal — the escalation forwarded to every running child
-// so each reaps and releases (issue #3521 handles the escalation itself;
-// the daemon only forwards it). Same documented-string convention as
-// ShutdownDrain.
+// ShutdownEscalate is the reason on the shutdown event for the second stop
+// signal, which the daemon forwards to every running child (issue #3521).
+// Documented like ShutdownDrain.
 const ShutdownEscalate = "second signal: forwarding the escalation so every child reaps and releases"
 
 // Emitter writes Events as JSON-lines to an injected io.Writer and reports
@@ -152,10 +147,8 @@ type Emitter struct {
 }
 
 // NewEmitter builds an Emitter writing to w, stamping each Event that has no
-// Time of its own with now(). now is injected so tests get a deterministic
-// timestamp and a later slice can hand the emitter a real clock. errW is
-// where advisory write failures — a failed event or status-file write — are
-// reported; nil means io.Discard.
+// Time of its own with now(). errW is where advisory write failures — a
+// failed event or status-file write — are reported; nil means io.Discard.
 func NewEmitter(w, errW io.Writer, now func() time.Time) *Emitter {
 	if errW == nil {
 		errW = io.Discard
@@ -203,15 +196,15 @@ func (e *Emitter) Emit(ev Event) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	var line bytes.Buffer
-	// Encode appends the trailing newline each JSON-lines record needs. A
-	// marshal failure is unreachable (no Event field is unmarshalable), but
-	// report it rather than silently drop a record from the durable stream.
+	// Encode appends the JSON-lines newline. A marshal failure is
+	// unreachable, but report it rather than silently drop a record from the
+	// durable stream.
 	if err := json.NewEncoder(&line).Encode(ev); err != nil {
 		fmt.Fprintf(e.errW, "daemon: event encode failed: %v\n", err)
 		return
 	}
-	// A closed or full e.w makes this fail — silently dropping the record
-	// would make the durable stream lie about what happened, so report it.
+	// A silently dropped record would make the durable stream lie, so report
+	// a failed write.
 	if _, err := e.w.Write(line.Bytes()); err != nil {
 		fmt.Fprintf(e.errW, "daemon: event stream write failed: %v\n", err)
 	}

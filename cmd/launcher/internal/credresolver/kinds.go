@@ -2,13 +2,10 @@ package credresolver
 
 import "slices"
 
-// StoreFacts is a stand-in for an ecosystem.Declaration: credresolver
-// must never import ecosystem, registrydiscover, or registryvocab.
-// Importing registrydiscover would be a cycle (it imports credresolver);
-// the other two bans keep credresolver below the registry layer.
-// importgraph_test.go enforces all three.
-// Host and HostKey hold different values: npmrc's store keys on the raw
-// host, gradle-properties' on registryvocab.HostKey(host).
+// StoreFacts stands in for an ecosystem.Declaration: credresolver must not
+// import ecosystem, registrydiscover (a cycle) or registryvocab, which keeps
+// it below the registry layer (importgraph_test.go). npmrc's store keys on
+// Host, gradle-properties' on HostKey (registryvocab.HostKey(host)).
 type StoreFacts struct {
 	Host            string
 	HostKey         string
@@ -27,9 +24,8 @@ type Kind struct {
 	CompanionKey string
 	// FileFormat is "" for env and exec, neither of which is file-backed.
 	FileFormat string
-	// ArgvValue is true only for exec, whose TOML value is an argv array
-	// rather than a string, so parseCredential must pull it out of the
-	// generic string/empty check.
+	// ArgvValue is true only for exec, whose TOML value is an argv array, so
+	// parseCredential skips the generic string check for it.
 	ArgvValue bool
 
 	// ValueField selects the Config field this kind's primary value lands
@@ -41,18 +37,17 @@ type Kind struct {
 	// StorePath is this kind's store file as $HOME-relative path segments,
 	// nil for the three kinds that are not stores (env, exec, file/raw).
 	StorePath []string
-	// StoreConfig builds the Config a discovery-side store lookup produces,
-	// given the store's resolved path and the route's facts. nil when the
-	// kind is not a store.
+	// StoreConfig builds the Config a discovery-side store lookup produces;
+	// nil when the kind is not a store.
 	StoreConfig func(path string, f StoreFacts) Config
 
 	// newFileResolver is non-nil only for the five file-backed kinds. New
 	// walks the table matching FileFormat rather than switching on it.
 	newFileResolver func(Config) Resolver
 
-	// storeSearchOrder is this store kind's position in the documented
-	// search order, which differs from kindTable's row order. Zero and
-	// unused on the three non-store kinds.
+	// storeSearchOrder is this store's position in the documented search
+	// order, which differs from kindTable's row order. Unused on the three
+	// non-store kinds, so zero there is not a position.
 	storeSearchOrder int
 }
 
@@ -192,9 +187,7 @@ func IsCompanionKey(key string) bool {
 }
 
 // StoreKinds returns the four discoverable stores in the documented search
-// order, which differs from kindTable's row order. It is the single source
-// of truth for both that order and each store's path; registrydiscover walks
-// this slice rather than keeping its own copy.
+// order, the single source of that order and each store's path.
 func StoreKinds() []Kind {
 	var out []Kind
 	for _, k := range kindTable {

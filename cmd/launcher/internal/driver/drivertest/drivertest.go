@@ -64,12 +64,12 @@ func claudeRows(firstParty bool) ([]byte, error) {
 }
 
 // UseClaudeConnector registers the claude Driver from the compiled claude
-// Connector through the production path: a one-row Driver rows document applied
-// by driverrows.Use. claude has no native Strategy, so a binary's tests that
-// resolve it need this in TestMain. It also installs the in-process Connector
-// engine as the Connector sandbox for the rest of the process, as the Launcher's
-// path would otherwise refuse the load. An unresolvable wasm is an error, never
-// a skip (ADR 0067); the Connector itself loads lazily, on the first New.
+// Connector through driverrows.Use, the production path; claude has no native
+// Strategy, so a test binary that resolves it needs this. It also installs the
+// in-process engine as the Connector sandbox for the rest of the process, as
+// the Launcher's path refuses the load without one. An unresolvable wasm is an
+// error, never a skip (ADR 0067); the Connector loads lazily, on the first
+// New.
 func UseClaudeConnector() error {
 	raw, err := claudeRows(false)
 	if err != nil {

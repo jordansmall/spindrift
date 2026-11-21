@@ -1,9 +1,7 @@
 // Package signalclient is the Box-side client of the Signal socket (ADR 0052,
-// issue #3724): endpoint resolution from the environment, the unix/TCP
-// transport, and the reply decoding that driver-exec's signal verb and the
-// in-process box binary share. The wire shapes live in signalwire; this
-// package imports only that and the standard library, so it stays cheap to
-// link into a Box binary.
+// issue #3724): endpoint resolution, the unix/TCP transport, and the reply
+// decoding driver-exec and the box binary share. It imports only signalwire
+// and the standard library, so it stays cheap to link into a Box binary.
 package signalclient
 
 import (
@@ -64,9 +62,7 @@ func Target() (*http.Client, string, string, error) {
 	}
 	secret := os.Getenv(SecretEnv)
 	if secret == "" {
-		// Refused here rather than on the wire: a TCP request without the
-		// header can only ever earn a 401, and the empty attempt would be one
-		// more thing in the log to explain.
+		// Refused here: a TCP request without the header can only earn a 401.
 		return nil, "", "", fmt.Errorf("%s is required for an %s endpoint", SecretEnv, httpScheme)
 	}
 	return client, base, secret, nil
@@ -116,12 +112,10 @@ func Do(client *http.Client, req *http.Request, secret string) (int, []byte, err
 	return resp.StatusCode, reply, nil
 }
 
-// DecodeReject reads the handler's own Reject payload -- every reply the
-// signal socket itself produces, including the TCP gate's 401, is this
-// {status, reason} shape now that the gate rejects through the same path as
-// every other route. The fallback below is for a reply from something that
-// is not this socket at all (a proxy, a misrouted endpoint), which owes no
-// such shape.
+// DecodeReject reads the handler's Reject payload: every reply the socket
+// itself produces, the TCP gate's 401 included, has this {status, reason}
+// shape. The fallback covers a reply from something else (a proxy, a
+// misrouted endpoint).
 func DecodeReject(code int, reply []byte) signalwire.Reject {
 	var rej signalwire.Reject
 	if err := json.Unmarshal(reply, &rej); err == nil && rej.Reason != "" {
@@ -136,11 +130,9 @@ func DecodeReject(code int, reply []byte) signalwire.Reject {
 
 // FetchStatus is the transport shared by driver-exec's "status" verb and by
 // markergate's socket-carrier PR-intent presence check (issue #3726): GET
-// base+"/status" against an already-resolved client/secret and decode the
-// reply. A non-2xx reply comes back as a non-nil *signalwire.Reject rather
-// than an error, so a caller that wants CLI-style "rejected (status): reason"
-// text and one that wants a plain error (Status) each render it their own way
-// from the same parsed value.
+// base+"/status" and decode the reply. A non-2xx reply comes back as a
+// *signalwire.Reject rather than an error, so the CLI and Status can each
+// render it their own way.
 func FetchStatus(client *http.Client, base, secret string) (signalwire.Status, *signalwire.Reject, error) {
 	req, err := http.NewRequest(http.MethodGet, base+"/status", nil)
 	if err != nil {

@@ -44,16 +44,13 @@ func ValidReviewedCommitAnchor(anchor string) bool {
 // prompt, Separator included, or "" when state carries nothing to hand off.
 // original + Handoff(state) is the whole seeded prompt.
 func Handoff(state runstate.RunState) string {
-	// A missing or unreadable decisions record degrades to no content, not an
-	// error (issue #2695 AC4). Read before the IsEmpty() check below, because
-	// DecisionsLogPath is excluded from IsEmpty(): a state whose only set
-	// field is a stale DecisionsLogPath must not render a "Run-state handoff"
-	// header with no bullets under it.
+	// A missing decisions record degrades to no content (issue #2695 AC4).
+	// IsEmpty() excludes DecisionsLogPath, so the record is read first: a
+	// state holding only a stale path must not render a bullet-less
+	// "Run-state handoff" header.
 	var decisionsContent string
 	if state.DecisionsLogPath != "" {
-		// TrimSpace, not len(): a whitespace-only log (a round-log header
-		// with no entries under it) must degrade like an empty file rather
-		// than render a bullet whose fenced block is blank.
+		// TrimSpace: a header-only round log must degrade like an empty file.
 		if content, err := os.ReadFile(state.DecisionsLogPath); err == nil && strings.TrimSpace(string(content)) != "" {
 			decisionsContent = string(content)
 		}
@@ -95,9 +92,7 @@ func Handoff(state runstate.RunState) string {
 		fmt.Fprintf(&b, "- Dispositions log: %s (every fix pass's own per-finding dispositions so far -- a finding recorded there as `won't-fix: escalated ...` was already escalated; never escalate it again)\n", state.DispositionsLogPath)
 	}
 	// promptfence.Block stops this agent-authored log, downstream of
-	// untrusted issue and comment text (CLAUDE.md's comment-injection trust
-	// boundary), from closing its own fence early with a stray section
-	// boundary.
+	// untrusted issue and comment text, from closing its own fence early.
 	if decisionsContent != "" {
 		fmt.Fprintf(&b, "- Decisions record so far (what prior passes chose, rejected, and why):\n\n%s\n", promptfence.Block(decisionsContent))
 	}
@@ -131,11 +126,9 @@ func Review(state runstate.RunState) string {
 		}
 	}
 
-	// A valid anchor is worth seeding even with ReviewFindings and
-	// dispositions both empty (round 1 recorded the anchor and had nothing to
-	// report): the delta-focus section it drives is useful on its own. An
-	// invalid one omits that section rather than erroring, since a corrupt
-	// anchor must only widen the diff the reviewer considers, never narrow it.
+	// A valid anchor seeds the delta-focus section even with nothing else to
+	// report. An invalid one omits it rather than erroring: a corrupt anchor
+	// may only widen the diff the reviewer considers, never narrow it.
 	hasAnchor := ValidReviewedCommitAnchor(state.ReviewedCommitAnchor)
 
 	if state.ReviewFindings == "" && dispositions == "" && !hasAnchor {

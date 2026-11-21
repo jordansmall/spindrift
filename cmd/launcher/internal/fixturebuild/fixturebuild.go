@@ -69,10 +69,9 @@ func (r resolver) resolve(envVar, hint string, args func(root string) []string) 
 
 // ResolveBuild builds a flake output with nix from the checkout above the
 // working directory, for tests whose subject is a nix-built artifact other
-// than the fixtures. args maps the flake root to nix build's arguments. It
-// returns a non-empty skipReason, never an error, when nix is absent; the
-// caller checks its own env override first (naming envVar) and should cache
-// the result, since the build is slow.
+// than the fixtures; args maps the flake root to nix build's arguments. A
+// missing nix yields a skipReason, not an error. The caller checks its own
+// envVar override first and should cache the result: the build is slow.
 func ResolveBuild(envVar, hint string, args func(root string) []string) (path, skipReason string, err error) {
 	return resolver{lookPath: exec.LookPath, build: nixBuild, flakeRoot: workingDirFlakeRoot}.resolve(envVar, hint, args)
 }

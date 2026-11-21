@@ -10,9 +10,8 @@ import (
 )
 
 // readMasked reads one line from stdin without echoing it, but only when stdin
-// is a real TTY. A pipe or a redirected file is also an *os.File, so the
-// IsTerminal check, not the type assertion, keeps non-interactive input working.
-// Every other shape falls back to the echoing scanner read.
+// is a real TTY (a pipe is also an *os.File, hence IsTerminal). Every other
+// shape falls back to the echoing scanner read.
 func readMasked(stdin io.Reader, scanner *bufio.Scanner) (value string, masked bool) {
 	f, ok := stdin.(*os.File)
 	if !ok || !term.IsTerminal(f.Fd()) {
@@ -22,9 +21,8 @@ func readMasked(stdin io.Reader, scanner *bufio.Scanner) (value string, masked b
 
 	state, err := term.GetState(f.Fd())
 	if err != nil {
-		// GetState never changed terminal state, so echo is still on and there
-		// is nothing to restore. This is the one path where a masked prompt
-		// still echoes.
+		// GetState changed nothing, so echo is still on: the one path where
+		// a masked prompt echoes.
 		scanner.Scan()
 		return scanner.Text(), false
 	}

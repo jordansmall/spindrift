@@ -1,24 +1,14 @@
 // Package tracker is the Connector author's side of the tracker primitives:
-// the reads of Connector protocol 0.2, which a Connector declares as a Reader
-// and Register exports, and the write primitives (transition, label edit,
-// label list and create), which it declares as a Writer and RegisterWrites
-// exports.
+// the reads of Connector protocol 0.2 (a Reader, exported by Register) and the
+// write primitives (a Writer, exported by RegisterWrites).
 //
-// Core decides every lifecycle policy: the fallback when a transition is
-// unavailable, the refusal, the claim checks and the verdicts. A Connector
-// only validates the status mapping it is handed, refusing one in which two
-// states other than failed and ambiguous share a status. The Connector
-// never decides what a record or verdict says; it returns data (raw fields
-// such as minimized, association, createdAt and status) and performs the one
-// write it is asked for. That includes the markers: a Connector whose tracker keeps
-// the dedup or research marker in a side store returns it as a field
-// (Issue.DedupMarker, Comment.ResearchMarker) and never splices it into a
-// body; core restores it. The optional reads are Comments, NativeDeps (the
-// issues an issue is blocked on) and Blocks (the issues it blocks). The
-// optional doctor and daemon reads are Probe, Statuses, CreateMeta and Count
-// with its CountInterval; each returns raw API data and core decides what it
-// means. RemovedLabels serves recover's read of the lifecycle label an issue
-// last lost.
+// Core decides every lifecycle policy: transition fallback, refusal, claim
+// checks and verdicts. A Connector only validates the status mapping it is
+// handed (no two states other than failed and ambiguous may share a status),
+// returns raw data, and performs the one write it is asked for. A Connector
+// whose tracker keeps the dedup or research marker in a side store returns it
+// as a field (Issue.DedupMarker, Comment.ResearchMarker), never in a body;
+// core restores it.
 package tracker
 
 import (
@@ -136,8 +126,8 @@ type Reader struct {
 	// Setting it advertises "tracker.comments", which attests that each
 	// comment's Minimized and MinimizedReason are reported faithfully; core
 	// drops minimized comments on that flag. A Connector whose API cannot
-	// report minimized state leaves it nil, and core reads comments from the
-	// native adapter of the same name where one exists (jira has none).
+	// report minimized state leaves it nil, and core reads no comments
+	// through it; no native adapter answers in its place.
 	Comments func(t Target, number string) ([]Comment, error)
 
 	// NativeDeps is optional: it returns the ids of the issues number blocks
@@ -166,13 +156,12 @@ type Reader struct {
 	CreateMeta func(t Target, issueType string) (CreateMeta, error)
 
 	// Count is optional: it returns how many open issues match q, the same set
-	// ListIssues(q) would return, read without walking them. It may be
-	// approximate where the API only offers an approximate count; a demand
-	// probe tolerates lag. Setting it advertises "tracker.count" and requires
-	// CountInterval. limit is how many issues core will use: it clamps the
-	// answer, so a count need not walk past it (0 when core sent none). fresh
-	// asks the Connector to bypass any conditional-request cache it keeps; core
-	// sets it after a count a child contradicted (ADR 0059).
+	// ListIssues(q) would return, without walking them, approximate where the
+	// API is (a demand probe tolerates lag). Setting it advertises
+	// "tracker.count" and requires CountInterval. limit clamps the answer, so
+	// a count need not walk past it (0 when core sent none). fresh bypasses any
+	// conditional-request cache; core sets it after a child contradicted a
+	// count (ADR 0059).
 	Count func(t Target, q Query, limit int, fresh bool) (int, error)
 
 	// CountInterval is how often core re-asks Count, chosen for the API's rate
@@ -188,20 +177,19 @@ type Reader struct {
 	// Search is optional: it returns up to limit issues matching the free text
 	// text, narrowed to state ("open" or "closed") and, when label is not "",
 	// to issues carrying it. Leaving it nil advertises no
-	// "tracker.searchIssues" capability, and core searches through its native
-	// adapter instead.
+	// "tracker.searchIssues" capability, and no native adapter searches in its
+	// place.
 	Search func(t Target, text, state, label string, limit int) ([]Issue, error)
 
 	// Labeled is optional: it returns up to limit issues in state ("open" or
-	// "closed") carrying label, newest first. Unlike ListIssues it reads
-	// closed issues too, and it must fill ClosedAt and ClosedNotPlanned for
-	// them: core's dedup scan reads both. Setting it advertises
-	// "tracker.labeled"; leaving it nil makes core scan through its native
-	// adapter instead. It answers a single page: core reads no further, so
-	// a backlog larger than limit is truncated; use LabeledPage to page.
+	// "closed") carrying label, newest first, and must fill ClosedAt and
+	// ClosedNotPlanned for closed ones: core's dedup scan reads both. Setting
+	// it advertises "tracker.labeled", which that scan needs: no native
+	// adapter scans in its place, and core's jira and forgejo trackers refuse
+	// a Connector without it.
 	//
-	// Deprecated: use LabeledPage, which pages by cursor; Labeled answers one
-	// page with no next, so core's scan of a large label stops at limit.
+	// Deprecated: use LabeledPage. Labeled answers one page, so core's scan of
+	// a large label stops at limit.
 	Labeled func(t Target, label, state string, limit int) ([]Issue, error)
 
 	// LabeledPage is the paged Labeled: it returns up to limit issues

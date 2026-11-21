@@ -48,10 +48,8 @@ type PriorityCapable interface {
 }
 
 // CommentCapable is implemented by harnesses whose adapter satisfies
-// forge.CommentLister. The local adapter inlines its thread into the body rather
-// than listing it, so its harness does not implement this and the Comments case
-// is skipped for it. A harness and tracker that disagree on the two interfaces
-// fail the case instead.
+// forge.CommentLister. The local adapter inlines its thread into the body, so
+// the Comments case skips it; a harness and tracker that disagree fail it.
 type CommentCapable interface {
 	// SeedComments scripts comments as num's thread, oldest first.
 	SeedComments(num string, comments []forge.Comment)
@@ -403,8 +401,8 @@ func testLabelToPriority(t *testing.T, h Harness) {
 }
 
 // testIssueFields checks that Title, Body and seeded Labels survive the read
-// contract. It reads both Issue and ListIssues because the native github
-// adapter converts the two through separate code paths.
+// contract. It reads both Issue and ListIssues because an adapter may convert
+// the two through separate code paths.
 func testIssueFields(t *testing.T, h Harness) {
 	tr := h.Tracker()
 	num := id(h, "801")
@@ -516,8 +514,7 @@ func numbers(issues []forge.Issue) []string {
 
 // testComments checks that Comments returns a seeded thread field-for-field,
 // oldest first, and an empty thread for an issue with no comments. Lengths are
-// compared rather than nil-ness: forgejo returns nil where github returns an
-// empty slice.
+// compared rather than nil-ness: adapters differ on nil versus empty.
 func testComments(t *testing.T, h Harness) {
 	lister, lists := forge.As[forge.CommentLister](h.Tracker())
 	ch, capable := h.(CommentCapable)

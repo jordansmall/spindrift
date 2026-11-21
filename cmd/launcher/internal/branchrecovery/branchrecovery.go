@@ -1,9 +1,8 @@
-// Package branchrecovery is the Box's pre-work branch positioning: it decides
-// whether a prior run's agent branch is adopted or force-reset, checks the
-// branch out, rebases it onto the latest base, and owns the single decision of
-// how a rebased branch is published. Git runs for real in Config.WorkDir; the
-// one question git cannot answer, whether the branch has an open PR, is
-// injected.
+// Package branchrecovery is the Box's pre-work branch positioning: adopt or
+// force-reset a prior run's agent branch, check it out, rebase it onto the
+// latest base, and own the single decision of how a rebased branch is
+// published. Git runs for real in Config.WorkDir; whether the branch has an
+// open PR is injected.
 package branchrecovery
 
 import (
@@ -46,14 +45,13 @@ type Outcome struct {
 
 // Recover positions cfg.Branch for the agent: fresh from origin/base, adopted
 // from an open PR, or force-reset when stale. It then rebases onto
-// origin/base and publishes at once when nothing is left to resolve. Narration
-// goes to w. An error means the Box must abort.
+// origin/base and publishes at once when nothing is left to resolve. An error
+// means the Box must abort.
 //
 // openPR nil means the forge cannot be asked
-// (backendkit.Strategy.HostAnswersOpenPR); it is consulted only when non-nil,
-// and only when origin/Branch exists. Its error must abort: a silent empty
-// answer (network/auth failure) is indistinguishable from "no PR" and must
-// not trigger the force-reset.
+// (backendkit.Strategy.HostAnswersOpenPR); it is consulted only when
+// origin/Branch exists. Its error must abort: a failed query read as "no PR"
+// would force-reset a branch with an open PR.
 func Recover(cfg Config, openPR func() (bool, error), w io.Writer) (Outcome, error) {
 	var out Outcome
 	base := "origin/" + cfg.BaseBranch
@@ -100,8 +98,8 @@ func Recover(cfg Config, openPR func() (bool, error), w io.Writer) (Outcome, err
 	}
 
 	fmt.Fprintf(w, "==> rebasing %s onto latest %s\n", cfg.Branch, base)
-	// Any rebase failure is handed on as a conflict, as the shell did: the
-	// caller's resolve pass checks whether a rebase is actually in progress.
+	// Any rebase failure is handed on as a conflict: the caller's resolve
+	// pass checks whether a rebase is actually in progress.
 	out.Conflict = cfg.git(w, "rebase", base) != nil
 	// Only the adoption path rewrote history already on the remote. A
 	// conflict defers publication until the resolve pass has run.
@@ -114,8 +112,8 @@ func Recover(cfg Config, openPR func() (bool, error), w io.Writer) (Outcome, err
 	return out, nil
 }
 
-// Publish lands the just-rebased branch so a later step never sees the stale
-// pre-rebase state, as the outbox bundle (issue #1808), which no-ops with no
+// Publish writes the just-rebased branch as the outbox bundle (issue #1808)
+// so a later step never sees the stale pre-rebase state; it no-ops with no
 // commits ahead.
 func Publish(cfg Config, w io.Writer) error {
 	return bundleout.Run(bundleout.Config{

@@ -51,13 +51,12 @@ func Load(path string) (*Document, error) {
 }
 
 // Lookup resolves one schema knob: ambient env first, then the document's
-// settings (keyed by env var name — lib/mkHarness.nix's documentSettings),
-// then nothing (found=false). When the document also carries a value and the
-// ambient env wins anyway, it prints a provenance warning to stderr —
-// otherwise nothing records which value actually drove the run, and a stale
-// exported override silently wins (ADR 0020). d may be nil (no --input
-// document loaded). Unlike Setting, an empty document value always means unset
-// here: the daemon's own knobs are strings, none bool or emptyDisables.
+// settings (keyed by env var name, lib/mkHarness.nix's documentSettings),
+// then nothing (found=false). When ambient env beats a document value it
+// prints a provenance warning, so a stale exported override cannot win
+// silently (ADR 0020). d may be nil. Unlike Setting, an empty document value
+// always means unset: the daemon's own knobs are strings, none bool or
+// emptyDisables.
 func (d *Document) Lookup(envVar string, stderr io.Writer) (string, bool) {
 	if v := os.Getenv(envVar); v != "" {
 		if d != nil {
@@ -116,14 +115,11 @@ func (d *Document) ResolveOptional(envVar string, stderr io.Writer) string {
 	return v
 }
 
-// ParseInt parses raw as a base-10 integer no smaller than min, both
-// callers' shared shape: Resolve can hand back an ambient env override of
-// anything, so a malformed or out-of-range knob must fail startup here with
-// a clear diagnostic rather than reaching the caller's own halt, which is
-// meant for a genuine programming error, not an operator's mistyped env var.
-// label names the constraint in the error text (e.g. "positive integer"); it
-// must read correctly next to both "got %q" (unparsable) and "got %d" (out
-// of range).
+// ParseInt parses raw as a base-10 integer no smaller than min, so an
+// operator's malformed or out-of-range override fails startup with a clear
+// diagnostic rather than reaching a caller's programming-error halt. label
+// names the constraint (e.g. "positive integer") and must read correctly
+// before both "got %q" (unparsable) and "got %d" (out of range).
 func ParseInt(name, label, raw string, min int) (int, error) {
 	n, err := strconv.Atoi(raw)
 	if err != nil {
@@ -136,9 +132,8 @@ func ParseInt(name, label, raw string, min int) (int, error) {
 }
 
 // ParseDuration parses raw with time.ParseDuration, then rejects a result
-// below min, mirroring ParseInt's shape (same "got %q"/"got %v" pair, %v
-// rather than %d so the out-of-range diagnostic prints a readable duration
-// like "500ms" instead of a raw nanosecond count).
+// below min, mirroring ParseInt (with %v, so the diagnostic reads "500ms"
+// rather than nanoseconds).
 func ParseDuration(name, label, raw string, min time.Duration) (time.Duration, error) {
 	d, err := time.ParseDuration(raw)
 	if err != nil {
@@ -196,12 +191,11 @@ func DriverMarker(ambient, baked string) string { return ambient + "/" + baked }
 
 // ResolveDriver returns the Driver to use and, when an ambient DRIVER
 // disagrees with the baked one, a warning for the caller to print once (ADR
-// 0064, issue #5050). The baked artifact always wins: ambient env includes
-// harness.env, which the wrapper sources, and a mismatched DRIVER would have
-// the host parse a Pass log as one Driver while the image runs another. With no
-// baked value (no --input document) the ambient value stands, unwarned. When
-// warned equals DriverMarker(ambient, baked) a parent already warned about this
-// pair, so the warning is suppressed.
+// 0064, issue #5050). The baked artifact always wins: ambient env includes the
+// wrapper-sourced harness.env, and a mismatched DRIVER would have the host
+// parse a Pass log as one Driver while the image runs another. With no baked
+// value (no --input document) the ambient one stands, unwarned. warned equal
+// to DriverMarker(ambient, baked) means a parent already warned.
 func ResolveDriver(baked, ambient, warned string) (driver, warning string) {
 	if baked == "" {
 		return ambient, ""

@@ -25,28 +25,24 @@ import (
 var conventionalSubjectRE = regexp.MustCompile(`^[a-z]+(?:\([^)]*\))?!?: \S`)
 
 // conventionalBangRE matches the breaking-change "!" in an already-
-// conventional subject, capturing the type[(scope)] on one side and the
-// ": " on the other so patchCommitSubject can drop just the "!" (issue
-// #4074): a Box-authored "feat!: ..." title landing verbatim as a squash
-// subject would otherwise drive an unintended release-please major bump.
+// conventional subject so patchCommitSubject can drop just the "!" (issue
+// #4074): a Box-authored "feat!: ..." squash subject would otherwise drive an
+// unintended release-please major bump.
 var conventionalBangRE = regexp.MustCompile(`^([a-z]+(?:\([^)]*\))?)!(: )`)
 
 // settled is what one settleRun.settle call reports back to Sweep: whether
 // the done commit actually landed, and, only when it did, the counts Sweep's
-// Outcome carries. Sweep learns "did it land" from this return value alone --
-// it never re-reads the Ledger after settle to find out, since a lost race
-// on the done commit and a crashed Box (no ready outcome at all) both leave
-// nothing new to read back.
+// Outcome carries. Sweep never re-reads the Ledger to learn this: a lost race
+// on the done commit and a crashed Box both leave nothing new to read back.
 type settled struct {
 	done                              bool
 	filed, promoted, dropped, patched int
 }
 
-// settleRun is one Chore run's settle step: file each finding the Box reported, then write the Chore's
-// done Ledger commit carrying the advanced lastSwept/cursor, the filed URLs,
-// and the run's usage. No CI watch, no merge, and no tracker label
-// transition -- the butler carries no tracker issue of its own, only a
-// Ledger Chore.
+// settleRun is one Chore run's settle step: file each finding the Box
+// reported, then write the Chore's done Ledger commit carrying the advanced
+// lastSwept/cursor, the filed URLs, and the run's usage. No tracker label
+// transition: the butler carries no tracker issue of its own.
 type settleRun struct {
 	it     forge.IssueTracker
 	ledger ledger.Backend
@@ -57,12 +53,7 @@ type settleRun struct {
 	room   chore.Room
 	policy promotion
 
-	// out receives the host-side status lines settle prints; Runner hands it
-	// its own writer so a test can read them without swapping os.Stdout.
-	out io.Writer
-
-	// progress receives settle's progress steps; newSettleRun defaults it to
-	// stdout and Runner overrides it.
+	out      io.Writer
 	progress settle.Progress
 
 	// labels are extra provenance labels every finding of this Chore wears
@@ -70,12 +61,10 @@ type settleRun struct {
 	// hidden-marker term from them.
 	labels []string
 
-	// kindLabels are the butler row's finding and patch provenance labels,
-	// handed in by the launcher rather than looked up here.
 	kindLabels kindLabels
 
-	// patch backs the patch rung (ADR 0057, issue #4074) -- see Runner.run
-	// for how patch.forge's presence gates it.
+	// patch backs the patch rung (ADR 0057, issue #4074); patch.forge's
+	// presence gates it (Runner.run).
 	patch patchRung
 
 	// records is the stored digest of a records-scoped sweep; nil for a code
@@ -83,11 +72,9 @@ type settleRun struct {
 	records *recordsSnapshot
 }
 
-// patchRung is what the patch rung needs (ADR 0057, issue #4074/#4076): tree
-// commits a candidate's diff on top of the fresh base head, forge pushes the
-// committed branch and opens the draft PR (and, on a failed push/PR-create,
-// labels the already-filed issue for the fallback promote), base is the
-// branch both target, and gate is the work merge gate each landed PR is
+// patchRung is what the patch rung needs (ADR 0057, issue #4074): tree
+// commits a candidate's diff on the fresh base head, forge pushes it and
+// opens the draft PR, and gate is the work merge gate each landed PR is
 // handed to after the Chore's Done commit lands (issue #4076).
 type patchRung struct {
 	tree  Tree
@@ -110,29 +97,23 @@ type patchLanding struct {
 }
 
 // newSettleRun constructs a settleRun for one Chore run. claim is the Ledger
-// tip Claim produced at the start of this run -- ledger.Finish's compare-and-
-// swap parent, unless settle first reserves promotion slots (issue #3926), in
-// which case the reservation commit takes over as parent; scope is the run's
-// computed Scope (internal/chore.NextScope), whose Head/NextCursor become the
-// done commit's lastSwept/cursor on success. room is Sweep's chore.Room:
-// room.Findings caps how many well-formed findings settle will file this
-// sweep (0 means no cap), and room.Promotions seeds how many may
-// auto-promote, only when policy.enabled -- room is computed once per Sweep
-// and handed down, never re-walked here (issue #3994). policy is the
-// host-side auto-promotion gate (issue #3880); its zero value never
-// promotes anything. patch backs the patch rung (ADR 0057); see Runner.run
-// for how patch.forge's presence gates it. out receives the status lines.
+// tip Claim produced at the start of this run -- ledger.Finish's
+// compare-and-swap parent, unless settle first reserves promotion slots
+// (issue #3926), in which case the reservation commit takes over as parent.
+// scope's Head/NextCursor become the done commit's lastSwept/cursor on
+// success. room is computed once per Sweep and handed down, never re-walked
+// here (issue #3994); room.Findings 0 means no cap. policy's zero value never
+// promotes anything (issue #3880).
 func newSettleRun(it forge.IssueTracker, backend ledger.Backend, choreName string, claim ledger.Tip, scope chore.Scope, now func() time.Time, room chore.Room, policy promotion, patch patchRung, labels kindLabels, out io.Writer) *settleRun {
 	return &settleRun{out: out, progress: settle.StdoutProgress{}, kindLabels: labels, it: it, ledger: backend, chore: choreName, claim: claim, scope: scope, now: now, room: room, policy: policy, patch: patch}
 }
 
 // settle files result's findings, if any, then writes the Chore's done
-// Ledger commit. A crashed run -- no outcome line, or an outcome line whose
-// status isn't "ready" (e.g. blocked) -- files nothing and writes no Ledger
-// commit at all, so the claim stands and lastSwept/cursor stay put for the
-// next run to resume from (ADR 0056). Rejected signal lines are warned about
-// first, before either crash guard, so a crashed run's dropped comment/
-// issue-intent/pr-intent lines are never silently lost (issue #3990).
+// Ledger commit. A crashed run -- no outcome line, or a non-ready status --
+// files nothing and writes no Ledger commit, so the claim stands and
+// lastSwept/cursor stay put for the next run (ADR 0056). Rejected signal
+// lines are warned about before either crash guard, so a crashed run's
+// dropped lines are never silently lost (issue #3990).
 func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settled {
 	num := dispatchkey.Chore(s.chore).String()
 	settle.RecordSettleWarnings(d, num, "", result)
@@ -171,9 +152,6 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 
 	finishParent := s.claim
 	var promoted []string
-	// landings pairs each landed patch's issue number with its PR URL for the
-	// gate calls after ledger.Finish below; the Ledger's Patched URLs derive
-	// from it.
 	var landings []patchLanding
 	// A Digest with a DedupTerms hook keys on the pattern a finding names. A
 	// records Chore sets the cutoff from its Digest's cooldown knob, but only
@@ -185,11 +163,9 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		dedup = settle.DedupPolicy{Chore: s.chore, Terms: s.records.digest.DedupTerms, NotPlannedBefore: s.now().Add(-s.records.knobs.Cooldown)}
 	}
 	filing := settle.FileButlerFindings(s.progress, s.it, num, result, s.room.Findings, s.kindLabels.finding, dedup, func(kept []settle.Finding) func(settle.Finding) settle.Decoration {
-		// An unconfigured/off policy can never promote, so it reserves none
-		// of the day's shared promotion room. room.Promotions is Sweep's own
-		// snapshot, handed down rather than re-walked here (issue #3994): a
-		// promotion landed by a concurrent run mid-sweep is not seen (soft
-		// cap, chore.Room's own doc).
+		// An off policy reserves none of the day's shared promotion room.
+		// room.Promotions is Sweep's snapshot, so a promotion landed by a
+		// concurrent run mid-sweep is not seen (soft cap, chore.Room's doc).
 		remaining := 0
 		if s.policy.enabled {
 			remaining = s.room.Promotions
@@ -199,23 +175,16 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		patchesLeft := s.room.Patches
 
 		// Reserve the slots this run intends to spend before filing anything
-		// (issues #3926, #4111): if the done commit below never lands -- the
-		// claim was lost to a takeover, or the push itself fails -- the
+		// (issues #3926, #4111): if the done commit never lands, the
 		// reservation still counts against DayTotals, so a lost Finish can
-		// never let a Chore promote or patch past the day's budget.
-		// finishParent moves to the reservation tip on success so the done
-		// commit's own CAS is checked against it, not the stale claim. A
-		// patch candidate that is also promotion-eligible holds a promotion
-		// slot as well as its patch slot while room allows (its fallback
-		// needs one), so a landed patch whose Finish is lost over-counts
-		// that day's promotions, never under-counts either budget.
+		// never let a Chore promote or patch past the day's budget. A patch
+		// candidate that is also promotion-eligible holds a promotion slot
+		// too (its fallback needs one), so a lost Finish over-counts
+		// promotions, never under-counts either budget.
 		eligible, patchCount := 0, 0
 		for _, f := range kept {
-			// Patch room is left zero for this probe: a patch candidate
-			// whose landing later fails falls back to promote (decide's
-			// own patch-gate-fails contract), so it still needs a reserved
-			// promotion slot -- this count must not skip it just because
-			// it might patch instead.
+			// Patch room zero: a patch candidate whose landing later fails
+			// falls back to promote, so it still needs a promotion slot.
 			if s.policy.decide(f, promoteOnlyRoom(remaining)).kind == promote {
 				eligible++
 			}
@@ -255,15 +224,13 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 					return settle.Decoration{
 						Backlink:    backlink,
 						ExtraLabels: s.extraLabels(s.kindLabels.patch),
-						// Spend the slot, push, and open the PR only in
-						// OnFiled, after PostIssue succeeds -- a failed post
-						// must not push a branch or open a PR for an issue
-						// that never landed (mirrors the promote path below).
+						// Spend the slot, push, and open the PR only after
+						// PostIssue succeeds: a failed post must not push a
+						// branch or open a PR for an issue that never landed.
 						OnFiled: func(url string) {
 							issueNum, err := issueNumberFromURL(url)
 							if err != nil {
-								// No issue number to label or close: the
-								// finding stays filed as-is.
+								// No issue number to label or close.
 								fmt.Fprintf(s.out, "    #%s  status=patch-failed  !! %v\n", num, err)
 								return
 							}
@@ -318,10 +285,9 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		fmt.Fprintf(s.out, "    #%s  status=promotion-off  note=%s\n", num, promotionOffNote)
 	}
 
-	// Every finding failing to file (a missing provenance label, a network or
-	// rate-limit error) leaves the claim standing like a crash: the cursor
-	// stays put so the findings are re-found next run, and the non-zero exit
-	// feeds the daemon breaker instead of spending a Box per sweep forever.
+	// Every finding failing to file leaves the claim standing like a crash:
+	// the findings are re-found next run, and the non-zero exit feeds the
+	// daemon breaker instead of spending a Box per sweep forever.
 	if len(filing.Filed) == 0 && filing.Failed > 0 {
 		s.fail(d, num, fmt.Sprintf("all %d finding(s) failed to file -- see the logged issue-intent filing errors; a missing provenance label is one cause (spindrift doctor --butler)", filing.Failed))
 		return settled{}
@@ -353,8 +319,8 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		s.settled(d, dispatchrecord.ReasonLedgerFinishFailed, fmt.Sprintf("ledger finish failed: %v", err))
 		// Still gate the already-open draft PRs, or they orphan (issue
 		// #4118). #4076's ordering has nothing left to protect: a lost CAS
-		// means a rival owns the Chore, and any other error leaves this
-		// claim standing until stale-claim takeover whatever runs next.
+		// means a rival owns the Chore, and any other error leaves this claim
+		// standing until stale-claim takeover anyway.
 		s.adoptLandings(landings)
 		return settled{}
 	}
@@ -372,9 +338,8 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	s.settled(d, dispatchrecord.ReasonFindingsFiled, note)
 	fmt.Fprintf(s.out, "    #%s  status=%s  note=%s\n", num, o.Status, note)
 
-	// On the success path, hand each patch to the work merge gate only after
-	// the Done commit above has actually landed: a crash while polling CI
-	// must never leave the Chore's claim standing (issue #4076).
+	// Gate the patches only after the Done commit landed: a crash while
+	// polling CI must never leave the Chore's claim standing (issue #4076).
 	s.adoptLandings(landings)
 
 	return settled{done: true, filed: len(filing.Filed), promoted: len(promoted), dropped: dropped, patched: len(patched)}
@@ -426,16 +391,11 @@ func (s *settleRun) landPatch(chorenum string, pc PatchCommit, subject, head str
 }
 
 // fallBackToPromote is landPatch's failure path (issue #4074): a finding
-// already filed with the butler kind's PatchLabel, whose push or PR-create
-// then failed, is judged exactly as decidePromote would judge it with no
-// Patch, via s.patch.forge's own forge.IssueLabeler rather than PostIssue's
-// own labels (the issue already exists) -- reachable only because
-// butlerPatchForge (cmd/launcher/butler.go) refuses to turn the rung on
-// without an IssueLabeler in the first place. Reports whether it promoted --
-// the caller's OnFiled spends the shared remaining/promoted state itself on
-// true, the same way the ordinary promote path does. A failed AddLabels
-// leaves the finding filed with only its patch label -- logged, never
-// fatal, like every other best-effort step in this file.
+// already filed with the patch label is judged as decidePromote would judge
+// it with no Patch, labelled through s.patch.forge's IssueLabeler since the
+// issue already exists (butlerPatchForge refuses to turn the rung on without
+// one). Reports whether it promoted; the caller spends the shared promotion
+// state on true. A failed AddLabels is logged, never fatal.
 func (s *settleRun) fallBackToPromote(chorenum, issueNum string, f settle.Finding, remaining int) bool {
 	fb := s.policy.decide(f, promoteOnlyRoom(remaining))
 	if fb.kind != promote {
@@ -462,20 +422,17 @@ func (s *settleRun) logPromoteSkip(num string, dec decision) {
 	fmt.Fprintf(s.out, "    #%s  status=promote-skipped  note=%s\n", num, dec.reason)
 }
 
-// promoteOnlyRoom zeroes the patch half of a chore.Room so a re-decide call
-// can only promote or skip a finding that has already left the patch path
-// (spent, skipped, or failed to land) -- never offered patch room a second
-// time for the same finding (issue #4074).
+// promoteOnlyRoom zeroes the patch half of a chore.Room so a finding that has
+// left the patch path is never offered patch room a second time (issue #4074).
 func promoteOnlyRoom(promotions int) chore.Room {
 	return chore.Room{Promotions: promotions}
 }
 
-// issueNumberFromURL returns url's trailing path segment -- a filed issue's
-// number on the github/forgejo trackers -- for forge.AgentBranchName and
-// IssueLabeler.AddLabels, neither of which take a URL. It errors when that
-// segment is not a positive decimal number: the local tracker's PostIssue
-// returns "local:" + slug, which must never become a branch name or a
-// Closes reference (issue #4074).
+// issueNumberFromURL returns url's trailing path segment, a filed issue's
+// number, for forge.AgentBranchName and IssueLabeler.AddLabels, neither of
+// which takes a URL. It errors when that segment is not a positive decimal
+// number: the local tracker's PostIssue returns "local:" + slug, which must
+// never become a branch name or a Closes reference (issue #4074).
 func issueNumberFromURL(url string) (string, error) {
 	tail := url[strings.LastIndex(url, "/")+1:]
 	if n, err := strconv.Atoi(tail); err != nil || n <= 0 {
@@ -490,13 +447,9 @@ func issueNumberFromURL(url string) (string, error) {
 const patchSubjectMaxLen = 72
 
 // patchCommitSubject derives a Conventional Commits subject for a patch's
-// commit (and, doubling as the draft PR's title) from the finding's own
-// title: used as-is when it already reads as one, else prefixed so the
-// commit history stays Conventional-Commits-clean regardless of what a Box
-// happened to title the finding. A leading breaking-change "!" is always
-// stripped -- the butler never decides a finding is breaking, so the
-// squash title must never carry the marker release-please reads as a major
-// bump -- and the result is capped at patchSubjectMaxLen (issue #4074).
+// commit and draft PR title from the finding's own title, prefixing it when
+// it does not already read as one. A breaking-change "!" is always stripped:
+// the butler never decides a finding is breaking (issue #4074).
 func patchCommitSubject(title string) string {
 	subject := oneLine(title)
 	if !conventionalSubjectRE.MatchString(subject) {
@@ -506,9 +459,8 @@ func patchCommitSubject(title string) string {
 	return truncateSubject(subject, patchSubjectMaxLen)
 }
 
-// truncateSubject caps s at limit runes (never splitting a multi-byte rune),
-// replacing the last rune with "…" when it had to cut so the result still
-// reads as visibly truncated rather than silently clipped.
+// truncateSubject caps s at limit runes, replacing the last rune with "…"
+// when it had to cut so the result reads as visibly truncated.
 func truncateSubject(s string, limit int) string {
 	r := []rune(s)
 	if len(r) <= limit {
@@ -534,11 +486,9 @@ func patchPRBody(choreName string, f settle.Finding, findingURL, issueNum string
 	return fmt.Sprintf("%s\n\n%s\n\nCloses #%s", patchedNote(choreName, f), findingURL, issueNum)
 }
 
-// fail prints a status=failed line and reports the run failed. It applies no
-// tracker transition: the butler has no tracker issue to move. Neither files
-// findings nor writes a Ledger commit, so the claim stands and
-// lastSwept/cursor stay at the prior run's values for the next run to resume
-// from.
+// fail prints a status=failed line and reports the run failed. It writes no
+// Ledger commit, so the claim stands and lastSwept/cursor stay put for the
+// next run to resume from.
 func (s *settleRun) fail(d dispatch.Dispatcher, num, note string) {
 	s.settled(d, dispatchrecord.ReasonChoreFailed, note)
 	fmt.Fprintf(s.out, "    #%s  status=failed  note=%s\n", num, note)
@@ -575,12 +525,11 @@ func citeDrop(cites []string, anchors map[string]bool) string {
 }
 
 // validateFindings drops every finding in raw that cites nothing, cites an
-// anchor outside the stored digest, or the Digest's Validate hook (when it has
-// one) refuses, returning the rest and a Drop for each. A payload
-// that filing would reject (settle.ParseIssueIntent) passes through for it to
-// skip, so its unvetted fields never reach a Drop. A tracked-files
-// error fails the settle rather than dropping anything: the claim stands and
-// the next sweep retries.
+// anchor outside the stored digest, or the Digest's Validate hook refuses,
+// returning the rest and a Drop for each. A payload that filing would reject
+// (settle.ParseIssueIntent) passes through for filing to skip, so its
+// unvetted fields never reach a Drop. A tracked-files error fails the settle
+// so the next sweep retries.
 func (s *settleRun) validateFindings(num string, raw []string) ([]string, []ledger.Drop, error) {
 	var tracked map[string]bool
 	trackedFiles := func() (map[string]bool, error) {

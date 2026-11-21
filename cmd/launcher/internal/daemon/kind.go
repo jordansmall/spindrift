@@ -45,13 +45,11 @@ func ParseKind(s string) (Kind, error) {
 }
 
 // ParseKinds parses the daemon's argv verb as a set of kinds to draw from one
-// pool (issue #3541). Unlike ParseKind, "" here means "every kind" rather
-// than "dispatch": a bare daemon invocation now runs work, research, the
-// butler, and recover off the same pool by default (ADR 0056, #3878, #4656),
-// while "dispatch", "research", "butler", or "recover" alone still restrict
-// it to one kind for callers that want that. The daemon binary still drops
-// the butler from "" when BUTLER_CHORES enables no Chore, and recover where
-// CODE_FORGE has no read-only PR outbox (cmd/launcher/daemon's gateKinds).
+// pool (issue #3541). Unlike ParseKind, "" means every kind rather than
+// work dispatch (ADR 0056, #3878, #4656); a single verb restricts the pool
+// to that kind. The daemon binary still drops the butler from "" when
+// BUTLER_CHORES enables no Chore, and recover where CODE_FORGE has no
+// read-only PR outbox (cmd/launcher/daemon's gateKinds).
 func ParseKinds(s string) ([]Kind, error) {
 	if s == "" {
 		kinds := make([]Kind, 0, len(dispatchkind.All))

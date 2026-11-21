@@ -127,10 +127,8 @@ func (a *ociAdapter) IsReady() error {
 }
 
 // lockImage acquires the per-image realize lock (issue #3632) and returns a
-// closure that releases it. Neither a failed acquire nor a failed release
-// fails the realize: without the lock a child only duplicates the work every
-// child already duplicated before this issue, which beats refusing to build
-// outright, so both degrade to a stderr warning and unlocked operation.
+// closure that releases it. A failed acquire or release only warns: without
+// the lock a child merely duplicates the build, which beats refusing to build.
 func lockImage(img imageSpec) func() {
 	onWait := func() {
 		fmt.Fprintf(img.out(), "==> image '%s' is being realized elsewhere — waiting\n", img.tag)
@@ -185,11 +183,9 @@ func (s imageSpec) out() io.Writer {
 func (s imageSpec) reportBuild() bool { return !s.sandbox }
 
 // EnsureReady checks that the OCI image is present and builds it if not. The
-// warm path (image already present) returns before ever touching the lock,
-// so a repeat dispatch that finds the image loaded pays no lock syscall. Once
-// absent, the lock is taken and the presence check repeated: a child that
-// lost the race and waited may find the winner already finished, in which
-// case it must not repeat the build, load and tag.
+// warm path returns before touching the lock; once absent, the lock is taken
+// and presence re-checked, so a child that waited out the winner does not
+// repeat the build, load and tag.
 func (a *ociAdapter) EnsureReady() error {
 	if a.imagePresent(a.boxImg.tag) {
 		fmt.Printf("==> image '%s' already loaded\n", a.boxImg.tag)
@@ -278,12 +274,10 @@ func isNoBuilderError(stderr string) bool {
 		strings.Contains(stderr, "Reason: platform mismatch")
 }
 
-// isTransientRegistryError reports whether stderr indicates a network hiccup
-// reaching the registry, or the registry rate-limiting or erroring with a 5xx,
-// rather than a genuine failure, so a caller can retry or skip instead of
-// failing on a blip (issue #2015). Its only caller is the integration test,
-// but it lives here untagged so checks-inbox unit-tests it without a real
-// container runtime on PATH.
+// isTransientRegistryError reports whether stderr indicates a network hiccup,
+// rate limit or 5xx reaching the registry rather than a genuine failure, so a
+// caller can retry or skip (issue #2015). Only the integration test calls it,
+// but it lives untagged so checks-inbox unit-tests it without a runtime.
 func isTransientRegistryError(stderr string) bool {
 	for _, s := range []string{
 		"i/o timeout",
@@ -391,20 +385,16 @@ type container struct {
 	created time.Time
 }
 
-// midCreationGrace bounds how long a non-terminal, non-running container (most
-// commonly "created", the window between `podman run`'s create and start) is
-// treated as a sibling launcher's in-flight container rather than abandoned.
-// create→start is sub-second under normal load; two minutes is far past any
-// real one, so anything older was left behind by a launcher that died
-// mid-create, not one that is merely slow (issue #3633).
+// midCreationGrace bounds how long a non-terminal, non-running container
+// (usually "created", between `podman run`'s create and start) counts as a
+// sibling launcher's in-flight container rather than abandoned. create→start
+// is sub-second and two minutes is far past it, so anything older was left by
+// a launcher that died mid-create (issue #3633).
 const midCreationGrace = 2 * time.Minute
 
-// reapable reports whether c is safe to rm -f as of now. Terminal states are
-// always safe regardless of age. "running" is never safe. Everything else —
-// "created" and any other transient or unrecognised status — is safe only
-// once it has outlived midCreationGrace: within the window it may belong to a
-// sibling launcher about to start it, so failing safe means treating it as
-// live, not reapable.
+// reapable reports whether c is safe to rm -f as of now. Terminal states
+// always are; "running" never is; any other status only once it has outlived
+// midCreationGrace, since it may belong to a sibling about to start it.
 func (c container) reapable(now time.Time) bool {
 	switch c.status {
 	case "exited", "stopped", "dead":
@@ -412,26 +402,19 @@ func (c container) reapable(now time.Time) bool {
 	case "running":
 		return false
 	default:
-		// A zero created — an unparseable timestamp, see inspectContainer —
-		// reads as arbitrarily old and so reaps, restoring the pre-#3633
-		// behaviour of clearing a container this launcher cannot classify
-		// rather than wedging the issue permanently undispatchable.
+		// A zero created (an unparseable timestamp) reads as arbitrarily old
+		// and reaps, rather than wedging the issue permanently undispatchable.
 		return now.Sub(c.created) > midCreationGrace
 	}
 }
 
 // inspectContainer runs a single inspect and decodes it into a container, so
-// a caller that both classifies and acts on one (Run, reap, and Kill through
-// inspect) does it from one observation instead of two: acting on the ID this call returns,
-// rather than re-resolving the name later, is what keeps a removal from
-// landing on a container a sibling launcher created in between (issue #3633).
-// ok means the container exists — true whenever the inspect command itself
-// succeeded, even if the body will not decode, since a successful inspect
-// proves existence and reporting absent would send Run straight into the name
-// collision this issue is about. Podman and docker both emit Created as an
-// RFC3339Nano string under `--format={{json .}}`, which the space-separated
-// template this replaced could not carry (podman renders a Go time.Time
-// there, docker a string).
+// Run, reap and Kill (via inspect) classify and act on one observation:
+// acting on the ID it returns, never re-resolving the name, keeps a removal
+// off a container a sibling launcher created in between (issue #3633). ok means the inspect
+// succeeded, even if the body will not decode: reporting absent would send Run
+// into the name collision. Podman and docker both emit Created as RFC3339Nano
+// under `--format={{json .}}`.
 func (a *ociAdapter) inspectContainer(name string) (container, bool) {
 	c, ok, _ := a.inspect(name)
 	return c, ok
@@ -550,13 +533,11 @@ func (a *ociAdapter) buildRunArgs(box runner.Box) []string {
 		args = append(args, "-v", m.Source+":"+dst)
 	}
 	// A TCP-transport Box may need an explicit host-gateway mapping to resolve
-	// its listener's host, which plain Linux docker will not resolve without
-	// it. Never make it unconditional: a VM-backed runtime (Docker Desktop,
-	// Rancher Desktop/Lima) resolves the name to the real host, and the
-	// mapping overrides that with the in-VM bridge gateway (issue #3111).
-	// addHostTargets covers both the registry proxy and the Signal socket
-	// (issue #3725), since either one alone can leave box.RegistryProxy at
-	// its zero value.
+	// its listener's host on plain Linux docker. Never unconditional: on a
+	// VM-backed runtime (Docker Desktop, Rancher Desktop/Lima) the mapping
+	// overrides the real host with the in-VM bridge gateway (issue #3111).
+	// addHostTargets covers the registry proxy and the Signal socket (issue
+	// #3725), since either alone can leave box.RegistryProxy zero.
 	for _, host := range addHostTargets(box) {
 		args = append(args, "--add-host", host+":host-gateway")
 	}
@@ -871,12 +852,10 @@ func (a *ociAdapter) probeRegistryTCPReachable(host string) (bool, error) {
 var errProbeNoVerdict = errors.New("no probe verdict")
 
 // listenTCPProbe binds the throwaway TCP listener the probe container dials
-// back into. A var, not a direct net.Listen call, so a test can force the bind
-// to fail without starving the process of file descriptors (issue #3120).
-// It binds every interface like the real listeners (dispatch's registry proxy
-// and signal socket, issue #3772) so the probe tests the same route they
-// serve, and it carries no secret because it only accepts and closes -- no
-// credential, no payload.
+// back into; a var so a test can force the bind to fail without exhausting
+// file descriptors (issue #3120). It binds every interface like the real
+// listeners, the registry proxy and Signal socket (issue #3772), so the probe
+// tests the route they serve; it only accepts and closes, carrying no secret.
 var listenTCPProbe = func() (net.Listener, error) {
 	return net.Listen("tcp", "0.0.0.0:0")
 }
@@ -989,13 +968,10 @@ func ociRunEnv(boxEnv map[string]string) []string {
 // Run launches a single issue into a podman/docker container.
 func (a *ociAdapter) Run(box runner.Box) error {
 	reapOrphanedRebaseDirs(rebaseTempRoot())
-	// Never touch a live container: a concurrent launcher invocation may own
-	// one that is not terminal and still within midCreationGrace, and a
-	// force-remove would destroy that run's work silently. A live container
-	// would also collide on the name, so report ErrAlreadyRunning instead of
-	// launching (issue #562, widened for mid-creation siblings by issue
-	// #3633). The removal below targets the ID inspectContainer observed
-	// (see its doc comment), not the name.
+	// Never touch a live container: a concurrent launcher may own one still
+	// within midCreationGrace, and a force-remove would silently destroy its
+	// run; it would also collide on the name, so report ErrAlreadyRunning
+	// (issues #562, #3633). The removal below targets the observed ID.
 	c, ok := a.inspectContainer(box.Name)
 	if ok {
 		if !c.reapable(time.Now()) {
@@ -1009,24 +985,21 @@ func (a *ociAdapter) Run(box runner.Box) error {
 		out = io.Discard
 	}
 
-	// A lost create race: our inspect above missed the container (daemon
-	// blip, or a sibling launcher's create not yet visible to us), but the
-	// runtime still refuses to create it because the name is taken. That
-	// refusal is itself the concurrency signal — issue #3633 — so retain a
-	// bounded head of the run output to check for it, without ever removing
-	// by name (that would race a sibling's in-flight create).
+	// A lost create race: our inspect missed the container, but the runtime
+	// refuses the taken name (issue #3633). Retain a bounded head of the
+	// output to check for that refusal, never removing by name, which would
+	// race a sibling's in-flight create.
 	head := &headTee{w: out, limit: collisionHeadLimit}
 	cmd := exec.Command(a.cli, a.buildRunArgs(box)...)
 	cmd.Env = ociRunEnv(box.Env)
 	cmd.Stdout = head
 	cmd.Stderr = head
 	err := cmd.Run()
-	// Collision text alone is not proof: the Box's own transcript flows
-	// through this same tee and may echo an untrusted issue comment quoting
-	// the refusal. Only a fresh inspect finding the name still held by a live
-	// container proves the runtime refused the create — a Box that did start
-	// and then failed leaves its own container exited or gone, so it reaps
-	// through to RunError whatever it printed (issue #3633).
+	// Collision text alone is not proof: the Box's transcript flows through
+	// this tee and may echo an untrusted comment quoting the refusal. Only a
+	// fresh inspect finding the name held by a live container proves it; a
+	// Box that started and failed leaves its container exited or gone, so it
+	// reaps through to RunError (issue #3633).
 	if err != nil && looksLikeNameCollision(head.String(), box.Name) {
 		if c, ok := a.inspectContainer(box.Name); ok && !c.reapable(time.Now()) {
 			return runner.ErrAlreadyRunning
@@ -1063,20 +1036,16 @@ func (h *headTee) Write(p []byte) (int, error) {
 	return h.w.Write(p)
 }
 
-// String returns the retained head. Only the shape mirrors
-// BoundedWriter.String(): that one keeps the tail, because a nix failure
-// prints at the end, while this keeps the prefix, because the runtime's
-// refusal prints before anything else.
+// String returns the retained head: the prefix, not the tail as
+// BoundedWriter keeps, because the runtime's refusal prints first.
 func (h *headTee) String() string {
 	return h.head.String()
 }
 
 // looksLikeNameCollision reports whether out could be the runtime refusing to
-// create a container named name because the name is already taken. Podman and
-// docker word this differently, but both include "is already in use" and both
-// print the name itself, so this keys on the pair rather than either
-// runtime's exact prose. This is only a cheap pre-filter over Box-controlled
-// text — Run treats it as a hint to check, never as proof on its own.
+// create a container named name: podman and docker both print "is already in
+// use" and the name. It is only a pre-filter over Box-controlled text; Run
+// never treats it as proof.
 func looksLikeNameCollision(out, name string) bool {
 	return strings.Contains(out, "is already in use") && strings.Contains(out, name)
 }
@@ -1123,17 +1092,12 @@ func (a *ociAdapter) RemoveHostTree(path string) error {
 	return nil
 }
 
-// Kill force-stops and removes name once confirmed to exist; `rm -f` stops a
-// running container first, so Kill does not need the running/exited
-// distinction reap's reapable check draws. Unlike reap, Kill is
-// unconditional — an operator-driven terminate (ADR 0024, issue #649) removes
-// a live container too — but it still pins the removal to the ID
-// inspect observed, not name, for the same reason Run and reap do.
-// A container confirmed not to exist is not an error, matching the
-// Runner.Kill contract; that is the common settle-phase case, where
-// reapAfterSuccess already removed the Box. An inspect that could not tell,
-// or that found the container but no ID to remove, is an error: returning nil
-// there would let Terminate report a still-running Box as reclaimed.
+// Kill force-stops and removes name once confirmed to exist. Unlike reap it
+// is unconditional (Reclaim, ADR 0024, issue #649, removes a live container
+// too), but it still removes the ID inspect observed, not the name. A
+// container confirmed absent is not an error: the common settle-phase case,
+// where Run's reap already removed the Box. An inspect that could not tell, or found no ID to
+// remove, is an error: nil would let Reclaim report a live Box as reclaimed.
 func (a *ociAdapter) Kill(name string) error {
 	c, ok, err := a.inspect(name)
 	if err != nil {
@@ -1149,10 +1113,8 @@ func (a *ociAdapter) Kill(name string) error {
 }
 
 // remove force-removes an observed container by ID, the single removal path
-// behind Run, reap and Kill. An observation carrying no ID came from an
-// inspect whose body would not decode (see inspectContainer): there is
-// nothing safe to target, and falling back to the name would race a sibling
-// launcher's in-flight create, so this removes nothing and leaves Run's
+// behind Run, reap and Kill. With no ID (an undecodable inspect) it removes
+// nothing rather than race a sibling's create by name, leaving Run's
 // name-collision path to report ErrAlreadyRunning, which skips the issue
 // rather than failing it (issue #3633).
 func (a *ociAdapter) remove(c container) error {

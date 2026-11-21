@@ -1,12 +1,10 @@
 // Package connectorsandbox is where the Launcher loads a Connector it hosts
-// into the run's Connector sandbox.
-//
-// Each path that loads a Connector (a Launcher command, the daemon) installs
-// one Loader (Use), the sandbox package's, ahead of its first load. With none
-// installed every load fails with ErrNoConnectorSandbox: the Launcher never
-// loads a Connector in its own address space. The Box loads its first-party
-// Drivers in-process through driverrows and never through this package. The
-// package imports no runner, so the Box's binary does not link one for it.
+// into the run's Connector sandbox. Each loading path installs the sandbox
+// package's Loader (Use) before its first load; with none, every load fails
+// with ErrNoConnectorSandbox, so the Launcher never loads a Connector in its
+// own address space. The Box loads its first-party Drivers in-process via
+// driverrows, never through this package, and this package imports no runner
+// so the Box's binary does not link one.
 package connectorsandbox
 
 import (
@@ -23,10 +21,8 @@ import (
 // in-process, which would hand the Connector the Launcher's own address space.
 var ErrConnectorSandboxStart = errors.New("the Connector sandbox did not start")
 
-// ErrNoConnectorSandbox is a load with no Loader installed. It is distinct from
-// ErrConnectorSandboxStart, which is a sandbox that was installed and failed:
-// here none was ever attempted, so the run's wiring, not the runner, is at
-// fault.
+// ErrNoConnectorSandbox is a load with no Loader installed: unlike
+// ErrConnectorSandboxStart, the run's wiring, not the runner, is at fault.
 var ErrNoConnectorSandbox = errors.New("no Connector sandbox is installed")
 
 // Loader is the installed sandbox that every load goes to.

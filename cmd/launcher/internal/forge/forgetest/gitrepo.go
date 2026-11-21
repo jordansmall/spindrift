@@ -30,11 +30,9 @@ func NewGitRepoFixture(t *testing.T, base string) *GitRepoFixture {
 
 	g := &GitRepoFixture{t: t, Bare: bare, base: base}
 	g.run("", "init", "--bare", bare)
-	// Git forks a detached `git gc --auto` once a push crosses the loose-object
-	// threshold, and it can still be repacking when t.TempDir()'s RemoveAll
-	// runs, failing with "directory not empty". gc.auto covers only
-	// commands run directly against bare; pushes go through git-receive-pack,
-	// whose own post-receive gc obeys receive.autogc, so both need disabling.
+	// A detached `git gc --auto` can still be repacking when t.TempDir()'s
+	// RemoveAll runs ("directory not empty"). Pushes gc via git-receive-pack,
+	// which obeys receive.autogc rather than gc.auto, so disable both.
 	g.run(bare, "config", "gc.auto", "0")
 	g.run(bare, "config", "receive.autogc", "false")
 	g.clone(work)
@@ -46,15 +44,10 @@ func NewGitRepoFixture(t *testing.T, base string) *GitRepoFixture {
 	return g
 }
 
-// clone disables auto-gc in the clone's own config, the way NewGitRepoFixture
-// does for the bare repo: a detached `git gc --auto`, forked by any of the
-// commands the adapter under test runs directly in that clone, can still be
-// writing into .git/objects when t.TempDir()'s RemoveAll runs, failing the
-// test with "directory not empty". The knobs differ from the bare side's
-// because the commands do — a clone receives no pushes, so receive.autogc has
-// nothing to cover here, while `git maintenance`'s own auto-run, which
-// ordinary commands like commit and fetch trigger and which gc.auto alone does
-// not cover, does.
+// clone disables auto-gc in the clone's config for the same RemoveAll race
+// NewGitRepoFixture guards on the bare side. The knobs differ: a clone
+// receives no pushes, but commit and fetch trigger `git maintenance`'s
+// auto-run, which gc.auto alone does not cover.
 func (g *GitRepoFixture) clone(work string) {
 	g.t.Helper()
 	g.run("", append(append([]string{"clone"}, gitexec.NoAutoMaintenance("--config")...), g.Bare, work)...)

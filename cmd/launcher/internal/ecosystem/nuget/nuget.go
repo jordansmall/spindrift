@@ -18,16 +18,16 @@ import (
 )
 
 // Strategy binds nuget.config in place: ApplyInTreeBinding repoints each routed
-// source at the Forwarder, rewriteNuGetConfig then marks it
-// allowInsecureConnections (the loopback endpoint is HTTP, which a .NET 9+ SDK
-// refuses with NU1302 otherwise) and drops its packageSourceCredentials entry,
-// and the run's revert restores the committed file. The binding takes the first
-// spelling present in DiscoveryConfigPaths, which are NuGet's own probe order on
-// a case-sensitive filesystem. It has no route-declaration hook, so a route's
-// ecosystems block accepts only the generic path key. Its credentials come from
-// the operator's stores alone: a repo's own packageSourceCredentials is never
-// read, only removed from a routed source so NuGet's client-side credential
-// handling cannot abort before the request reaches the proxy.
+// source at the Forwarder, rewriteNuGetConfig marks it allowInsecureConnections
+// (the loopback endpoint is HTTP, which a .NET 9+ SDK refuses with NU1302) and
+// drops its packageSourceCredentials entry, and the run's revert restores the
+// committed file. The binding takes the first spelling present in
+// DiscoveryConfigPaths, NuGet's own probe order on a case-sensitive
+// filesystem. With no route-declaration hook, a route's ecosystems block
+// accepts only the generic path key. A repo's own
+// packageSourceCredentials is never read, only removed from a routed source so
+// NuGet's client-side credential handling cannot abort before the request
+// reaches the proxy.
 var Strategy = ecosystem.Strategy{
 	Name:                 nameNuGet,
 	CredentialStores:     []string{"netrc", "npmrc", "gradle-properties"},
@@ -115,15 +115,13 @@ func newConfigDecoder(content string) *xml.Decoder {
 	return dec
 }
 
-// parseNuGetConfig is NuGet's ConfigParser. It keeps only absolute http(s) v3
-// sources, which NuGet recognises by protocolVersion="3" or a URL ending in
-// ".json" (any case); a v2 feed, a local path, or a URL with userinfo is
-// skipped, not an error. nuget.org is declared Public (never routed) and not
-// counted as a named registry. The declared URL is the service index's
-// directory for a ".json" URL, and the URL itself for a protocolVersion="3"
-// one, since the path-set is the declared URL's path. A query or fragment
-// never survives. A source that <disabledPackageSources> switches off is
-// dropped before any of this.
+// parseNuGetConfig is NuGet's ConfigParser. It keeps only enabled, absolute
+// http(s) v3 sources, which NuGet recognises by protocolVersion="3" or a URL
+// ending in ".json" (any case); a v2 feed, a local path, or a URL with
+// userinfo is skipped, not an error. nuget.org is declared Public and not
+// counted as a named registry. The declared URL, whose path is the path-set,
+// is the service index's directory for a ".json" URL and the URL itself
+// otherwise, minus any query or fragment.
 func parseNuGetConfig(content string) ([]ecosystem.Declaration, bool, error) {
 	var raw nugetConfig
 	if err := newConfigDecoder(content).Decode(&raw); err != nil {
@@ -170,10 +168,9 @@ func removal(start, end int) textEdit { return textEdit{start: start, end: end} 
 
 // rewriteNuGetConfig is nuget's InTreeRewrite. It edits the text in place
 // rather than re-marshalling, so everything outside the edits stays
-// byte-identical and the revert's checkout needs no round trip through an XML
-// writer. Each <add> under packageSources whose value now points at one of
-// localURLs gains allowInsecureConnections="true", and the
-// packageSourceCredentials entry of each such source is removed.
+// byte-identical. Each <add> under packageSources whose value points at one
+// of localURLs gains allowInsecureConnections="true", and that source's
+// packageSourceCredentials entry is removed.
 func rewriteNuGetConfig(content string, localURLs []string) (string, error) {
 	dec := newConfigDecoder(content)
 	sourcesPath := []string{"configuration", "packageSources", "add"}

@@ -11,9 +11,8 @@ import (
 // value wrapped in matching quotes is JSON-decoded (single quotes stripped
 // first, the text kept as-is when that fails), and an unquoted one is cut at
 // the first unescaped ";" or "#" with "\;", "\#" and "\\" kept as literals.
-// It decodes into a Go string only, so quoted non-string JSON (e.g. '123')
-// comes back as its raw text, unlike ini; acceptable since .npmrc callers
-// read URLs and tokens.
+// Unlike ini, quoted non-string JSON (e.g. '123') comes back as raw text;
+// .npmrc callers read only URLs and tokens.
 func Decode(val string) string {
 	val = strings.TrimSpace(val)
 	if len(val) > 0 && (val[0] == '"' || val[0] == '\'') && val[len(val)-1] == val[0] {

@@ -45,12 +45,11 @@ func (f *EventsFile) open() (*os.File, error) {
 	return os.OpenFile(f.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 }
 
-// append writes one whole line. It opens the file per line rather than
-// holding a descriptor, so the file can vanish (or be rotated by hand)
-// under a long-running daemon without wedging it. A line is never split
-// across generations: rotation happens before the write that would
-// overflow the cap, and an oversized line into an empty file is written
-// as is rather than rotating forever.
+// append writes one whole line, opening the file per line so it can vanish
+// or be rotated by hand under a long-running daemon. Rotation happens before
+// the write that would overflow the cap, so a line never splits across
+// generations; an oversized line into an empty file is written as is rather
+// than rotating forever.
 func (f *EventsFile) append(line []byte) error {
 	file, err := f.open()
 	if err != nil {

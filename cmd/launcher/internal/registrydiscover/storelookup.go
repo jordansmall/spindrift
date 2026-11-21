@@ -16,10 +16,9 @@ func StoreLookup(store Store, d ecosystem.Declaration) (found bool, err error) {
 		return false, err
 	}
 
-	// Every Peek error means "this store doesn't hold it": credresolver folds a
-	// missing file, a missing entry, and an empty value into one error shape.
-	// Swallowing err rather than propagating it matches firstMatch's contract that
-	// one unreachable store must never abort discovery.
+	// Every Peek error means "this store doesn't hold it" (credresolver folds
+	// a missing file, entry, or empty value into one shape); one unreachable
+	// store must never abort discovery.
 	_, err = credresolver.New(cfg).Peek()
 	return err == nil, nil
 }

@@ -38,11 +38,10 @@ func parseButlerClaimTimeout(value string) (time.Duration, error) {
 }
 
 // parseButlerArgs parses `butler`'s own args: an optional "--chore <name>",
-// given at most once and with a non-empty name, plus the --no-build flag
-// every dispatch-family verb shares. Unlike parseIssuePositionals's callers,
-// butler takes no issue positionals, so any other token is a usage error. An
-// empty chore return means "pick a due Chore" rather than sweep one named
-// explicitly, which is why an explicit empty --chore value must fail here.
+// given at most once and non-empty, plus the shared --no-build flag. butler
+// takes no positionals, so any other token is a usage error. An empty chore
+// return means "pick a due Chore", which is why an explicit empty --chore
+// value must fail here.
 func parseButlerArgs(args []string) (choreName string, noBuild bool, err error) {
 	seen := false
 	for i := 0; i < len(args); i++ {
@@ -91,36 +90,26 @@ func butlerOutcomeErr(o butler.Outcome) error {
 	}
 }
 
-// choreCatalog is the baked CHORE_CATALOG artifact (rendered by
-// lib/preambles.nix's runArtifacts), parsed for butlerPreflight's
-// prompt-exists check. known is false when the artifact key is absent
-// entirely (no --input, or a document baked before it existed) -- skip the
-// check rather than fail on missing information. Present-but-empty (known
-// true, names nil) means every enabled chore's prompt is provably missing.
+// choreCatalog is the baked CHORE_CATALOG artifact (lib/preambles.nix's
+// runArtifacts), parsed for butlerPreflight's prompt-exists check. known is
+// false when the key is absent (no --input, or an older document), and the
+// check is skipped. Present-but-empty means every enabled prompt is missing.
 type choreCatalog struct {
 	names []string
 	known bool
 }
 
 // butlerPreflight holds the guards cmdButler checks before it claims
-// anything. A malformed BUTLER_CHORE_CLASSES, or (when BUTLER_MAX_PATCHES_PER_DAY
-// > 0) BUTLER_PATCH_CLASSES, fails here, before any claim; a Chore with no
-// entry is fine, its allow-list is just empty. The Filer gate
-// matters because a butler Box relays findings only through the Filer:
-// without one it would still report ready, and settling would advance
-// lastSwept and the cursor past findings nobody filed. The same holds when
-// the Issue Tracker cannot file host-side (hostFiler nil, issue #6343): the
-// Filer's relayed findings would have nowhere to land. An empty chore (no
-// --chore) needs BUTLER_CHORES to name at least one candidate instead. A
-// per-sweep cap above the day cap is also rejected here: left alone, every
-// run would trip internal/chore.Check's SweepFindingsExceedHeadroom at
-// Filed=0 and no run could ever start.
-//
-// The chore name format and prompt-file-exists checks below catch a
-// malformed BUTLER_CHORES entry or missing chores/<name>.md here, before a
-// claim -- otherwise they'd only surface once the Runner's Box fails
-// in promptassembly.choreSection, leaving the claim standing for the full
-// claim timeout (issue #3905).
+// anything. It rejects a malformed BUTLER_CHORE_CLASSES, or
+// BUTLER_PATCH_CLASSES when BUTLER_MAX_PATCHES_PER_DAY > 0 (a Chore with no
+// entry just has an empty allow-list). It needs a Filer and host-side filing
+// (hostFiler, issue #6343): a butler Box relays findings only through the
+// Filer, so without either, settling would advance lastSwept and the cursor
+// past findings nobody filed. An empty chore needs a BUTLER_CHORES candidate.
+// It rejects a per-sweep cap above the day cap, which would trip chore.Check's
+// SweepFindingsExceedHeadroom at Filed=0 on every run. A malformed BUTLER_CHORES name or missing
+// chores/<name>.md would otherwise surface only in the Runner's Box, leaving
+// the claim standing for the full claim timeout (issue #3905).
 func butlerPreflight(cfg config, choreName string, filerEnabled bool, hostFiler forge.HostPostedIssueFiler, catalog choreCatalog) ([]chore.Chore, error) {
 	row, ok := backendkit.ByName(cfg.CodeForge)
 	if !ok || row.NewLedger == nil {
@@ -271,19 +260,15 @@ func (h hostPatchForge) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 }
 
 // butlerPatchForge builds cmdButler's butler.PatchForge, opting the patch
-// rung on only when caps proves cf can both push a branch and open a draft
-// PR host-side, look up that PR and delete that branch again (issue #4112),
-// the paired issue tracker can add labels to an already-filed issue, and tracker
-// and forge are the same backend. The labeler leg matters on its own:
-// ISSUE_TRACKER=local's PostIssue returns "local:"+slug, not a forge issue
-// number, so it implements no IssueLabeler -- without it a failed push or
-// PR-create would file the finding with the patch label and then have no way
-// to fall it back to promote. The same-backend leg keeps "Closes #N" and the
-// agent/issue-N branch pointing at the filed issue: ISSUE_TRACKER=forgejo
-// with CODE_FORGE=github would otherwise close an unrelated GitHub issue N
-// on merge, the hazard closeOnlyOwnIssue guards on the work path
-// (#2341). nil whenever any leg is missing: WithPatchForge(nil, nil) is
-// "never opted in", so the rung stays off (issue #4074).
+// rung on only when caps proves the forge can push a branch, open a draft PR
+// host-side, look that PR up and delete the branch (landPatch's
+// ambiguous-create recovery, issue #4112); the tracker can label an
+// already-filed issue; and tracker and forge are one backend.
+// Without a labeler (ISSUE_TRACKER=local posts "local:"+slug) a failed push or
+// PR-create could not fall the finding back to promote. A split backend
+// (forgejo tracker, github forge) would let "Closes #N" and agent/issue-N
+// close an unrelated issue, the hazard closeOnlyOwnIssue guards (#2341). Any
+// missing leg yields nil, which keeps the rung off (issue #4074).
 func butlerPatchForge(caps forge.Capabilities) butler.PatchForge {
 	if !caps.HostCanOpenPR() || caps.IssueLabeler == nil ||
 		caps.PRForge == nil || caps.BranchDeleter == nil {
@@ -295,17 +280,14 @@ func butlerPatchForge(caps forge.Capabilities) butler.PatchForge {
 	return hostPatchForge{pr: caps.PRForge, BranchPusher: caps.BranchPusher, DraftPRCreator: caps.DraftPRCreator, IssueLabeler: caps.IssueLabeler, BranchDeleter: caps.BranchDeleter}
 }
 
-// cmdButler is the `butler [--chore <name>]` subcommand (ADR 0056, issue
-// #3875, #3877, #3880): it sweeps the first due Chore among the one named on
-// --chore, or else every BUTLER_CHORES entry in order, and reports "no work"
-// with each candidate's reason if none is due. Each swept Chore's finding is
-// auto-promoted to the configured work label (lc.config.workLabel) when it
-// clears every host-side gate (allow-listed class, file limit, reviewer
-// concurrence, and daily promotion room); BUTLER_MAX_PROMOTIONS_PER_DAY
-// defaults to 0, off. A resolveButlerSettings failure exits
-// exitcode.ConfigInvalid rather than Failed, so the daemon's shared breaker
-// (internal/daemon/outcome.go) never treats a config problem as an
-// unclassified error (issue #3920).
+// cmdButler is the `butler [--chore <name>]` subcommand (ADR 0056, issues
+// #3875, #3877, #3880): it sweeps the first due Chore among the --chore one or
+// every BUTLER_CHORES entry in order, else reports "no work" with each
+// candidate's reason. A swept finding is auto-promoted to lc.config.workLabel
+// when it clears every host-side gate (allow-listed class, file limit, reviewer
+// concurrence, daily promotion room; BUTLER_MAX_PROMOTIONS_PER_DAY defaults
+// to 0, off). A resolveButlerSettings failure exits ConfigInvalid, not Failed,
+// so the daemon's breaker never counts a config problem as unclassified (#3920).
 func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
 	defer lc.cleanup()
 

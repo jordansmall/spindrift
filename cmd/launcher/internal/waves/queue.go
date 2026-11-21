@@ -15,40 +15,33 @@ const staleDrainMarker = "stale-drain.log"
 // entry point that needs nothing else from Queue (issue #2919).
 type Claimer interface {
 	// Claim marks num claimed immediately before dispatch, e.g. the
-	// Dispatchable-to-InProgress label transition. A failed claim (a stale
-	// listing racing a concurrent claimant) means skip, never an error the
-	// caller must propagate. An implementation whose caller already claimed as
-	// a side effect documents Claim as a no-op instead.
+	// Dispatchable-to-InProgress transition. A failed claim (a stale listing
+	// racing a concurrent claimant) means skip, never an error to propagate.
 	Claim(num string) error
 }
 
-// Queue is the wave engine's work-supply seam (issue #2937, spec #2919): where
-// dispatchable work comes from, how the Queue claims it, how many candidates
-// remain queued, and where a finished stale-drain report goes.
+// Queue is the wave engine's work-supply seam (issue #2937, spec #2919).
 type Queue interface {
 	Claimer
 
 	// Discover returns the current dispatchable Batch. RunContinuous calls it
-	// once at startup and again before every slot refill, retrying a
-	// rate-limit error up to Config.Policy.Max. It is never called purely to
-	// report heldBack; Pending covers that instead.
+	// at startup and before every slot refill, retrying a rate-limit error up
+	// to Config.Policy.Max. It is never called just to report heldBack;
+	// Pending covers that.
 	Discover() (Batch, error)
 
-	// Pending reports how many candidates remain queued, without claiming and
-	// without any discovery side effect. claimed is the caller's own record of
-	// what it has claimed this run (issue #3035); an implementation must not
-	// retain the reference past the call. err is non-nil only when the count
-	// could not be determined, never a partial or best-effort value.
+	// Pending reports how many candidates remain queued, without claiming or
+	// discovery side effects. claimed is the caller's record of this run's
+	// claims (issue #3035); do not retain it past the call. err is non-nil
+	// only when the count could not be determined, never with a partial value.
 	Pending(claimed map[string]bool) (int, error)
 
 	// ReportStaleDrain delivers a finished stale-drain report to the Queue's
 	// own destination.
 	ReportStaleDrain(report StaleDrainReport)
 
-	// EnsureLogDirExists idempotently makes whatever on-disk log directory this
-	// Queue writes to, so RunContinuous does not derive and create that
-	// directory itself from a separately threaded pwd (issue #3036). An
-	// implementation with no log directory of its own is a documented no-op.
+	// EnsureLogDirExists idempotently makes the Queue's on-disk log directory,
+	// so RunContinuous need not derive it from a threaded pwd (issue #3036).
 	EnsureLogDirExists() error
 }
 

@@ -1,9 +1,8 @@
 // Package fakehook lets a test run a callback inside a named method of a fake,
 // the way a signal or termination lands mid-call, without a one-off wrapper
-// type per method. A fake embeds Hooks and calls Fire at the top of each method
-// a test needs to hook. Firing before the method body rather than after it is
-// equivalent for state the fake never reads (a settle-side termination mark),
-// which is all these hooks are for.
+// type per method. A fake embeds Hooks and calls Fire at the top of each
+// hooked method; firing before the body is fine because hooks only touch state
+// the fake never reads (a settle-side termination mark).
 package fakehook
 
 import (

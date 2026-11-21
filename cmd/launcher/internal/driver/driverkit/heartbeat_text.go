@@ -8,10 +8,9 @@ import (
 
 // SanitizeLine drops control characters, ANSI escape sequences, newlines,
 // Unicode format (Cf) runes such as bidi controls and zero-width chars, and
-// line/paragraph separators (Zl/Zp) from s. It cleans any agent-controlled
-// heartbeat field (role, verdict, reason, narration, ...) so every heartbeat
-// line stays single-line and cannot be reordered or visually broken. ZWJ is
-// dropped too, splitting joined emoji; harmless for a status line.
+// line/paragraph separators (Zl/Zp) from s, so an agent-controlled heartbeat
+// field cannot break or visually reorder its line. Dropping ZWJ splits joined
+// emoji; harmless for a status line.
 func SanitizeLine(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))

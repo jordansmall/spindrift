@@ -22,10 +22,9 @@ const (
 	Untriaged
 )
 
-// String returns a stable, lower-case-kebab name for s, used by the report
-// package (issue #3627) so a "settled" record's state field is stable
-// machine-readable text rather than the underlying int, which would shift if
-// the const block above ever reordered.
+// String returns a stable kebab-case name for s, so the report package's
+// "settled" record (issue #3627) never carries the int, which would shift if
+// the const block reordered.
 func (s DispatchState) String() string {
 	switch s {
 	case Dispatchable:
@@ -43,17 +42,15 @@ func (s DispatchState) String() string {
 	case Untriaged:
 		return "untriaged"
 	default:
-		// Unreachable today -- every Terminal() state is named above -- but an
-		// identifying fallback keeps a "state" field on the wire and a
-		// non-blank diagnostic if that ever stops holding.
+		// Unreachable for a named state; an identifying fallback keeps the
+		// wire's "state" field non-blank if a new state goes unnamed.
 		return fmt.Sprintf("DispatchState(%d)", int(s))
 	}
 }
 
-// Terminal reports whether s is one of the four states that end an issue's
-// dispatch lifecycle: Complete, Failed, Recoverable, Ambiguous. Dispatchable,
-// InProgress, and Untriaged are all mid-lifecycle, so a transition landing on
-// any of those three is not settle's outcome to report.
+// Terminal reports whether s ends an issue's dispatch lifecycle: Complete,
+// Failed, Recoverable, or Ambiguous. A transition landing on any other state
+// is not settle's outcome to report.
 func (s DispatchState) Terminal() bool {
 	switch s {
 	case Complete, Failed, Recoverable, Ambiguous:

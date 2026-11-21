@@ -73,12 +73,10 @@ func tokenizeSegments(pattern string) []segment {
 }
 
 // segmentsOverlap walks a bottom-up O(len(a)*len(b)) table where cell j of the
-// row for i means a[i:] and b[j:] can overlap, with next holding row i+1 and
-// cur row i. Patterns come from untrusted prompt input, so a hostile issue body
-// can declare many "**" segments, and a naive "try every split" recursion would
-// blow up exponentially on them when nothing overlaps. Two rolling rows keep
-// memory linear; scratch is shared with every segmentOverlap call so the walk
-// allocates nothing per cell.
+// row for i means a[i:] and b[j:] can overlap (next is row i+1, cur row i).
+// Patterns are untrusted prompt input: a naive split-every-way recursion over
+// many "**" segments blows up exponentially. Two rolling rows keep memory
+// linear; scratch is shared so segmentOverlap allocates nothing per cell.
 func segmentsOverlap(a, b []segment) bool {
 	maxToks := 0
 	for _, segs := range [][]segment{a, b} {
@@ -108,21 +106,16 @@ func segmentsOverlap(a, b []segment) bool {
 }
 
 // segmentOverlap reports whether some name satisfies both single-segment
-// patterns. It walks the two patterns as a product automaton: cell j of the
-// row for i means ta[i:] and tb[j:] can still match a common string, with
-// next holding row i+1 and cur row i. That is O(len(a)*len(b)) time however
-// many "*" the patterns hold, and two rolling rows keep memory linear. The rows
-// are carved from scratch, which must hold 2*(len(b.toks)+1) bools; the caller
-// sizes it for the longest segment on either side, so argument order is free.
-// next is never read before the first row is written, so stale contents are
-// harmless.
+// patterns, walking them as a product automaton with the same rolling-row
+// table as segmentsOverlap: O(len(a)*len(b)) however many "*" they hold.
+// scratch must hold 2*(len(b.toks)+1) bools; the caller sizes it for the
+// longest segment on either side. Stale scratch contents are never read.
 func segmentOverlap(a, b segment, scratch []bool) bool {
 	if a.pat == b.pat {
 		return true
 	}
 	if !a.ok || !b.ok {
-		// A malformed pattern fails closed: a missed overlap lets colliding
-		// work run concurrently, a false one only defers a dispatch.
+		// Fails closed, as Overlap documents.
 		return true
 	}
 	ta, tb := a.toks, b.toks

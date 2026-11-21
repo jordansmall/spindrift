@@ -39,11 +39,10 @@ type Strategy struct {
 	// Heartbeat is the heartbeat's phase and count tracking. Its Family also
 	// orders the per-model usage rows.
 	Heartbeat HeartbeatTracking
-	// DefaultTopLevelRole is the heartbeat's role for top-level messages when the
-	// caller's RenderOptions.TopLevelRole is empty. Empty means the heartbeat
-	// attributes no role at all and ignores the caller's too (a CLI with no role
-	// attribution, issue #2092). The transcript is unaffected: it always takes
-	// the caller's role.
+	// DefaultTopLevelRole is the heartbeat's role for top-level messages when
+	// RenderOptions.TopLevelRole is empty. Empty means the heartbeat attributes
+	// no role and ignores the caller's too (a CLI with no role attribution, issue
+	// #2092); the transcript always takes the caller's role.
 	DefaultTopLevelRole string
 	// Result selects how ResultText reads the final message.
 	Result ResultReader

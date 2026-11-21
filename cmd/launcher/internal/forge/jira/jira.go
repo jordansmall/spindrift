@@ -63,14 +63,13 @@ func jsonTypeName(v any) string {
 
 // ParseStatusMapping parses the JIRA_STATUS_MAPPING knob, a JSON object mapping
 // statusMappingKeys to a native Jira status name or a {"status", "resolution"}
-// object. An unknown key or field is an error so a typo fails fast at startup
-// instead of silently dropping the mapping. Keys are checked in sorted order so
-// the first error is deterministic; the Nix mirror reports the same one. Two
-// keys may share a status (compared with strings.EqualFold, as the claim check
-// is) only if they are failed and ambiguous, which both mean a human must act
-// and fit one Blocked column; any other share would, say, make every ready card
-// look claimed. The Nix eval-time mirror folds ASCII only, so a non-ASCII
-// case-only share is caught at startup only.
+// object. An unknown key or field fails fast at startup instead of silently
+// dropping the mapping; keys are checked sorted so the first error matches the
+// Nix mirror's. Only failed and ambiguous may share a status (EqualFold, as the
+// claim check compares): both mean a human must act and fit one Blocked column,
+// while any other share would, say, make every ready card look claimed. The Nix
+// mirror folds ASCII only, so a non-ASCII case-only share is caught at startup
+// only.
 func ParseStatusMapping(s string) (map[forge.DispatchState]StatusTarget, error) {
 	out := map[forge.DispatchState]StatusTarget{}
 	if s == "" {
@@ -99,8 +98,7 @@ func ParseStatusMapping(s string) (map[forge.DispatchState]StatusTarget, error) 
 		}
 		out[state] = target
 	}
-	// Keys are sorted so the error names the same pair every run and
-	// ambiguous always precedes failed.
+	// Sorted keys put ambiguous before failed, the one pair allowed to share.
 	for i, k := range keys {
 		status := out[statusMappingKeys[k]].Status
 		if status == "" {

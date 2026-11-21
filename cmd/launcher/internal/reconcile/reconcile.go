@@ -125,10 +125,10 @@ type prReconciler struct {
 // reconcile checks one open issue against live PR state: it closes the issue
 // on a merged landing PR, discovers an unrecorded landing by agent branch,
 // resolves a bare branch landing to its PR, and flags one whose landing PR
-// closed unmerged. A recorded branch landing that names a branch other than the
-// issue's own agent branch, or that resolves to no PR or only to a closed one,
-// prints the landing-unverifiable line and lets the sweep continue. A PR
-// resolved from a branch is recorded once its state is read.
+// closed unmerged. A recorded branch landing other than the issue's own agent
+// branch, or one resolving to no PR or only a closed one, prints the
+// landing-unverifiable line and the sweep continues. A PR resolved from a branch is recorded only once its state
+// is read.
 func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 	landing := iss.Landing
 	bareBranch := ""
@@ -248,10 +248,9 @@ func (p prReconciler) resolveBranch(num, branch string) (url string, found bool,
 }
 
 // localLandingReconciler bundles the seams the local-landing path needs per
-// issue. A nil repair (a Code Forge without forge.LandingRepair) leaves no
-// ancestor check to run, so a branch ref prints a loud "no repair surface"
-// line rather than the silent no-op it got before issue #1809. scopeFor is a
-// caller-supplied callback so reconcile imports no adapter (issue #1819).
+// issue. A nil repair (no forge.LandingRepair) leaves no ancestor check, so a
+// branch ref prints a loud "no repair surface" line (issue #1809). scopeFor is
+// a callback so reconcile imports no adapter (issue #1819).
 type localLandingReconciler struct {
 	closer    forge.IssueCloser
 	container forge.LandingContainmentQuery
@@ -264,12 +263,11 @@ type localLandingReconciler struct {
 }
 
 // reconcile checks one open issue's recorded landing, parsed into a typed
-// forge.Landing (issue #1809) so the switch reads meaning, not string grammar:
-// no landing discovers one by agent branch, an integration ref closes the
-// issue once contained (issue #2151), a branch ref naming the issue's own agent
-// branch takes the healing path (any other branch is unverifiable, issue
-// #5005), and any other shape prints a loud unverifiable line, never a
-// not-merged-yet pass.
+// forge.Landing (issue #1809): no landing discovers one by agent branch, an
+// integration ref closes the issue once contained (issue #2151), a branch ref
+// naming the issue's own agent branch takes the healing path (any other branch
+// is unverifiable, issue #5005), and any other shape prints a loud
+// unverifiable line, never a not-merged-yet pass.
 func (l localLandingReconciler) reconcile(res *Result, iss forge.Issue) error {
 	if iss.Landing == "" {
 		return l.discover(res, iss)

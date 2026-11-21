@@ -17,10 +17,9 @@ import (
 // Harness lets RunContract drive a ledger.Backend without knowing which
 // storage adapter it is. Each Backend()/Rival() call opens a fresh handle
 // that sees the store as of that call (a Remote syncs its mirror once, at
-// construction), and a handle's Append must be given a tip read through that
-// same handle or returned by it -- reading through one handle and Appending
-// through another built earlier can hand it a tip its own mirror has never
-// seen.
+// construction), so a handle's Append must be given a tip read through or
+// returned by that same handle: another handle's tip may be one its mirror
+// has never seen.
 type Harness interface {
 	// Backend returns the handle under test.
 	Backend() ledger.Backend
@@ -184,15 +183,11 @@ func testLostRace(t *testing.T, h Harness) {
 	requireNoBranchesMoved(t, h, before)
 }
 
-// testStaleMirror covers the shape testLostRace doesn't: the loser's own
-// view (not just a freshly-read tip handed to it) is out of date when it
-// tries to Claim. backend reads tip before rival exists, so rival wins the
-// Claim it makes right after; backend then Claims against that very tip --
-// stale the moment rival won -- and must lose the race rather than
-// succeeding against a view of the store that no longer matches. A Remote's
-// mirror only refreshes on that loss, so this is also the case that proves
-// the loser's next Read reflects the winner rather than repeating its own
-// stale view.
+// testStaleMirror covers what testLostRace doesn't: the loser's own view,
+// not just the tip handed to it, is out of date. backend reads tip before
+// rival exists, rival wins its Claim, and backend's Claim against that tip
+// must lose. A Remote's mirror refreshes only on that loss, so this also
+// proves the loser's next Read reflects the winner.
 func testStaleMirror(t *testing.T, h Harness) {
 	before := h.Branches(t)
 	const chore = "chore-stale-mirror"
@@ -598,11 +593,9 @@ func testReserve(t *testing.T, h Harness) {
 	day := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
 
 	t.Run("DayTotals", func(t *testing.T) {
-		// Table over what a reservation's Promotions/Patches, and whether a
-		// Finish lands on top of it, do to the day's totals: a still-open
-		// reservation counts its own numbers (in-flight), a finished one
-		// counts the Done's own list instead (no double count), and either
-		// half can be reserved alone.
+		// A still-open reservation counts its own numbers (in-flight); a
+		// finished one counts the Done's list instead (no double count);
+		// either half can be reserved alone.
 		tests := []struct {
 			name                                  string
 			chore                                 string

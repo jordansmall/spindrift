@@ -7,11 +7,10 @@ import (
 	"strings"
 )
 
-// ReportFD is the file descriptor SPINDRIFT_REPORT_FD names in a dispatch
-// or research child's environment: the first (and only) entry in
-// exec.Cmd.ExtraFiles always lands at fd 3 in the child, since fds 0-2 are
-// already stdin/stdout/stderr — the host runner's pipe wiring and this
-// constant must agree on that number, which is why both point here.
+// ReportFD is the file descriptor SPINDRIFT_REPORT_FD names in a child's
+// environment: the only exec.Cmd.ExtraFiles entry lands at fd 3. The host
+// runner's pipe wiring and this env value must agree, which is why both
+// point here.
 const ReportFD = 3
 
 // reportFDEnv is the environment variable name that carries ReportFD to a
@@ -48,11 +47,8 @@ type ChildSpec struct {
 }
 
 // Command is the argv and environment for one pinned invocation, returned
-// together so a caller cannot silently transpose two same-typed []string
-// results (both are built by ChildCommand/DoctorCommand; see their docs).
-// Whenever one of those builders returns a nil error, Env is non-nil; the
-// zero Command it returns alongside an error is not meant to be used at
-// all. See withoutKeys for why non-nil matters once this reaches exec.Cmd.Env.
+// together so a caller cannot transpose two same-typed []string results.
+// With a nil error Env is non-nil (see withoutKeys for why that matters).
 type Command struct {
 	Argv []string
 	Env  []string
@@ -90,23 +86,18 @@ func liftSignalCarrier(argv, env []string) ([]string, []string) {
 }
 
 // ChildCommand builds the Command for one pinned child launcher invocation.
-// It is pure: no filesystem or process access, so the loop slice's seam is
-// tested by feeding it a ChildSpec and asserting on the returned Command.
-// The caller supplies both the environment to filter and the knob keys to
-// strip; ChildCommand never reads os.Environ itself.
+// It is pure: the caller supplies the environment and the knob keys to
+// strip; it never reads os.Environ.
 //
-// The child's environment is the daemon's own environment minus every key
-// present in Knobs: those keys are the Launcher input document's settings,
-// which is itself the child's own knob source, so stripping them here keeps
-// the daemon's resolved knobs from leaking into (and shadowing) the child's
-// independent resolution of the same names. BOX_SIGNAL_CARRIER, which the
-// daemon takes from its own environment, reaches the child as a flag instead:
-// it is lifted onto argv as --box-signal-carrier (see liftSignalCarrier).
+// The child's environment is the daemon's minus every key in Knobs: those
+// are the Launcher input document's settings, the child's own knob source,
+// so a leaked daemon value would shadow the child's resolution.
+// BOX_SIGNAL_CARRIER reaches the child as a flag (see liftSignalCarrier).
 //
-// The flakeref is built before the kind is parsed, so a spec that is wrong in
-// both ways reports the flakeref error: the pin is what keeps the daemon off a
-// moving working tree, so it is the half worth naming first. TestChildCommand
-// pins that order.
+// The flakeref is built before the kind is parsed, so a spec wrong both ways
+// reports the flakeref error: the pin, which keeps the daemon off a moving
+// working tree, is the half worth naming first. TestChildCommand pins that
+// order.
 func ChildCommand(s ChildSpec) (Command, error) {
 	flakeref, err := appFlakeref(s.RepoPath, s.AppAttr, s.Revision, "a child must always be pinned")
 	if err != nil {
@@ -120,11 +111,9 @@ func ChildCommand(s ChildSpec) (Command, error) {
 	argv := []string{
 		"nix", "run", flakeref, "--",
 		string(kind),
-		// The pool cap now lives in the daemon (one slot, one child), so
-		// each child must itself be exactly one Box: --max-jobs 1 caps the
-		// wave to a single issue and --max-parallel 1 caps concurrency
-		// within it. Pinning both means the guarantee does not depend on
-		// which of the two knobs a given dispatch path happens to honour.
+		// The pool cap lives in the daemon, so each child must be exactly
+		// one Box. Both knobs are pinned so the guarantee does not depend
+		// on which one a dispatch path honours.
 		"--max-jobs", "1",
 		"--max-parallel", "1",
 	}
@@ -133,25 +122,19 @@ func ChildCommand(s ChildSpec) (Command, error) {
 
 	return Command{
 		Argv: argv,
-		// The markers are appended after stripping the knobs and then
-		// re-run through withoutKeys with just their own keys, so an ambient
-		// SPINDRIFT_REPORT_FD or PoolChildEnv already in the daemon's own
-		// environment (a nested daemon, an operator's stray export) cannot
-		// survive alongside the value set here — the child must see exactly one.
+		// The markers are stripped before being appended, so an ambient
+		// SPINDRIFT_REPORT_FD or PoolChildEnv (a nested daemon, a stray
+		// export) cannot survive alongside the value set here.
 		Env: append(withoutKeys(withoutKeys(env, s.Knobs), []string{reportFDEnv, PoolChildEnv}),
 			fmt.Sprintf("%s=%d", reportFDEnv, ReportFD), PoolChildEnv+"=1"),
 	}, nil
 }
 
 // withoutKeys filters env down to the entries whose key (the text before the
-// first '=') is not in keys, preserving env's order. It always returns a
-// non-nil slice, even when the result is empty: this becomes Command.Env,
-// which callers assign straight to exec.Cmd.Env, where nil means "inherit
-// the parent's environment" — exactly the ambient-knob leak this change
-// closes, so an empty-but-non-nil slice must stay empty rather than falling
-// back to inheritance. An entry with no '=' has no key to match and always
-// passes through. keys is small (one schema's worth of knobs, or a single
-// env var name), so a map built per call is fine.
+// first '=') is not in keys, preserving order. It always returns a non-nil
+// slice: as exec.Cmd.Env, nil means "inherit the parent's environment",
+// exactly the ambient-knob leak this prevents. An entry with no '=' always
+// passes through.
 func withoutKeys(env, keys []string) []string {
 	strip := make(map[string]struct{}, len(keys))
 	for _, k := range keys {
@@ -172,21 +155,15 @@ func withoutKeys(env, keys []string) []string {
 }
 
 // appFlakeref validates repoPath/revision and pins attr's frag into a git
-// flakeref. Shared by ChildCommand and DoctorCommand: both run an app at the
-// default-or-named attr with the same empty-frag-defaults, same "#?&"
-// rejection — unlike SelfCommand's SelfAttr, which rejects an empty attr
-// rather than defaulting it (see SelfCommand's comment), so SelfCommand
-// keeps its own frag handling rather than sharing this helper. unpinnedMsg
-// is each call site's own wording for the empty-revision error.
+// flakeref, for ChildCommand and DoctorCommand. SelfCommand keeps its own
+// frag handling: it rejects an empty attr rather than defaulting it.
+// unpinnedMsg is each call site's wording for the empty-revision error.
 func appFlakeref(repoPath, attr, revision, unpinnedMsg string) (string, error) {
 	if err := validateRepoPathAndRevision(repoPath, revision, unpinnedMsg); err != nil {
 		return "", err
 	}
-	// The fragment is omitted entirely for the default attr rather than
-	// emitting a bare trailing "#", which nix would reject. frag is
-	// interpolated straight after that "#", so it gets the same
-	// malformed-ref check repoPath got above (the ".#" prefix itself is
-	// stripped first, so a bare default attr never trips it).
+	// The default attr omits the fragment: nix rejects a bare trailing "#".
+	// frag lands right after "#", so it gets repoPath's malformed-ref check.
 	frag := strings.TrimPrefix(attr, ".#")
 	if frag != "" && strings.ContainsAny(frag, "#?&") {
 		return "", fmt.Errorf("app attr must not contain '#', '?', or '&', got %q", attr)
@@ -194,16 +171,11 @@ func appFlakeref(repoPath, attr, revision, unpinnedMsg string) (string, error) {
 	return pinnedFlakeref(repoPath, revision, frag), nil
 }
 
-// validateRepoPathAndRevision runs the checks appFlakeref (on behalf of
-// ChildCommand and DoctorCommand) and SelfCommand both need before touching
-// repoPath or revision: repoPath must be an absolute path free of the chars
-// that would open a second query string, fragment, or query param once
-// interpolated into the flakeref (pinnedFlakeref), and revision must be
-// non-empty — unpinnedMsg supplies each call site's own wording for why. It
-// stops short of the two attr/frag checks: those diverge on empty-frag policy
-// (appFlakeref's attr defaults on empty, SelfCommand's SelfAttr rejects it),
-// so the honest shared core is only these three checks, not the whole
-// validation.
+// validateRepoPathAndRevision runs the checks appFlakeref and SelfCommand
+// share: repoPath must be absolute and free of the chars that would open a
+// second query string, fragment, or query param in the flakeref, and
+// revision must be non-empty. The attr/frag checks diverge on empty-frag
+// policy, so they stay with each caller.
 func validateRepoPathAndRevision(repoPath, revision, unpinnedMsg string) error {
 	if repoPath == "" || !path.IsAbs(repoPath) {
 		return fmt.Errorf("repo path must be an absolute path, got %q", repoPath)
@@ -219,9 +191,7 @@ func validateRepoPathAndRevision(repoPath, revision, unpinnedMsg string) error {
 
 // pinnedFlakeref builds a git flakeref pinned to revision at repoPath, with
 // frag (already stripped of its leading ".#") appended as the fragment when
-// non-empty. Shared by SelfCommand and, through appFlakeref, by ChildCommand
-// and DoctorCommand: all three need the exact same pin, for the exact same
-// reason.
+// non-empty.
 //
 // git+file:// (not a bare path) because only a git flakeref accepts ?rev=,
 // and that pin is the whole point: the daemon must never evaluate a moving
@@ -253,11 +223,9 @@ func SelfCommand(s SelfSpec) ([]string, error) {
 		return nil, fmt.Errorf("system must not be empty")
 	}
 	frag := strings.TrimPrefix(s.SelfAttr, ".#")
-	// Unlike ChildCommand's AppAttr, an empty attr here is an error rather
-	// than a default: "apps.<system>..program" is a malformed attribute
-	// path, not nix's default search path (that's ChildCommand's flakeref
-	// fragment, which nix run itself defaults for; nix eval has no such
-	// default to fall back on).
+	// Unlike ChildCommand's AppAttr, an empty attr is an error:
+	// "apps.<system>..program" is malformed, and nix eval has no default
+	// app to fall back on.
 	if frag == "" {
 		return nil, fmt.Errorf("self attr must not be empty, got %q", s.SelfAttr)
 	}
@@ -265,11 +233,8 @@ func SelfCommand(s SelfSpec) ([]string, error) {
 		return nil, fmt.Errorf("self attr must not contain '#', '?', or '&', got %q", s.SelfAttr)
 	}
 
-	// The fragment is the full attribute path (apps.<system>.<attr>.program),
-	// not the bare attr ChildCommand passes: nix eval's own fragment
-	// resolution only tries packages.<system>/legacyPackages.<system> --
-	// apps is nix run's default search path, not nix eval's -- so the
-	// system double has to be supplied rather than inferred by nix.
+	// The full attribute path, not the bare attr: nix eval's fragment
+	// resolution only tries packages/legacyPackages, never apps.
 	frag = fmt.Sprintf("apps.%s.%s.program", s.System, frag)
 
 	return []string{"nix", "eval", "--raw", pinnedFlakeref(s.RepoPath, s.Revision, frag)}, nil
@@ -323,22 +288,14 @@ type DoctorSpec struct {
 	Flags []string
 }
 
-// DoctorCommand builds the Command for the daemon's own startup preflight:
-// the same pinned flakeref ChildCommand resolves (same repo/attr/revision,
-// same validation) and the same env-minus-Knobs stripping (see ChildCommand
-// and withoutKeys), but invoking "doctor" instead of a dispatch kind, and with
-// neither --max-jobs nor --max-parallel appended — those cap a child's wave
-// of dispatched work, and doctor dispatches nothing to cap. Pure like
-// ChildCommand: the caller supplies Env, DoctorCommand never reads
-// os.Environ itself.
+// DoctorCommand builds the Command for the daemon's startup preflight: the
+// same pinned flakeref and env stripping as ChildCommand, invoking "doctor"
+// with no --max-jobs/--max-parallel, since doctor dispatches nothing. Pure
+// like ChildCommand.
 //
-// Unlike ChildCommand, reportFDEnv is stripped and never re-added: the
-// preflight emits no records, so it must see no report fd at all, not even
-// an ambient one surviving from the daemon's own environment (a stray
-// operator export, a nested daemon) — issue #3627's review finding.
-// PoolChildEnv is stripped the same way: the preflight is no pool child
-// (issue #7342). BOX_SIGNAL_CARRIER is lifted onto argv exactly as ChildCommand
-// does.
+// reportFDEnv is stripped and never re-added: the preflight emits no
+// records, so it must see no ambient report fd either (issue #3627).
+// PoolChildEnv likewise: the preflight is no pool child (issue #7342).
 func DoctorCommand(s DoctorSpec) (Command, error) {
 	flakeref, err := appFlakeref(s.RepoPath, s.AppAttr, s.Revision, "a preflight must always be pinned")
 	if err != nil {

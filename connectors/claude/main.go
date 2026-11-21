@@ -1,8 +1,6 @@
 // Command claude is the claude Driver's host half as a Connector (ADR 0073),
-// ported from the native Strategy, which issue #6799 deleted: this Connector is
-// now the only claude Driver. The corpus under testdata and its tests
-// (decode_test.go, classify_test.go, session_test.go for the session flags,
-// dogfood_corpus_test.go) pin it.
+// the only claude Driver (issue #6799). The corpus under testdata and its
+// tests pin it.
 package main
 
 import "spindrift.dev/sdk/driver"

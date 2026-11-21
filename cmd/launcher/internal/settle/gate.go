@@ -42,13 +42,11 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 				clsNote += "  resetsAt=" + result.Classification.ResetAt.UTC().Format(time.RFC3339)
 			}
 		}
-		// A read-only run's !Resolved.Found may just mean the Box was cut short
-		// before it printed any parseable outcome line, leaving no ADR 0036
-		// synthetic backstop line to key off (issue #2253), unlike the
-		// "blocked" arm below. The Lander settles it from the run's own
-		// evidence: a PR forge adopts the relayed branch, while local push-only
-		// (ADR 0039) promotes to Recoverable and leaves the land itself to
-		// `spindrift recover` (or settles Failed/unreviewed instead).
+		// A read-only Box cut short before any outcome line leaves no ADR 0036
+		// synthetic backstop to key off (issue #2253), so the Lander salvages
+		// from the run's own evidence: a PR forge adopts the relayed branch and
+		// local push-only (ADR 0039) promotes to Recoverable for `spindrift
+		// recover` to land, but either fails an unreviewed run.
 		if s.lander.salvage(d, num, gen, result) {
 			return
 		}
@@ -57,14 +55,11 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	}
 
 	o := result.Resolved.Outcome
-	// Ahead of the status switch so it runs on every outcome status alike
-	// (issue #2019): a run's own findings are worth tracking whether it landed
-	// ready or blocked. Best-effort, so a filing failure never changes the
-	// switch's landing decision.
+	// Ahead of the status switch so findings file on every status (issue
+	// #2019); best-effort, so a filing failure never changes the landing.
 	filed := fileIssueIntentsDetailed(s.cfg.Progress, s.it, num, result, s.cfg.FindingLabel, "")
 	reportFiled(s.cfg.Progress, num, filed)
-	// Placed and best-effort for the same reasons as reportFiled above; why the
-	// work path needs its own post is on postSkippedComment (issue #3811).
+	// Best-effort, like reportFiled (issue #3811).
 	postSkippedComment(s.it, num, filed)
 
 	// An already-resolved claim with commits behind it must not close the
@@ -78,25 +73,18 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 
 	switch o.Status {
 	case outcome.StatusBlocked:
-		// A read-only run's status=blocked may be the ADR 0036 synthetic
-		// backstop over a Box cut short before its final print, not a genuine
-		// "never finished" (issue #2224). The Lander checks the driver's last
-		// genuine self-report (issue #2223) and settles the run from it: a PR
-		// forge opens a PR and merges it, local push-only (ADR 0039) promotes
-		// to Recoverable. The ProvenanceSynthetic guard sits here because a
-		// genuine status=blocked is the driver's own authoritative outcome
-		// line, not the backstop this override exists to second-guess, so it
-		// must still park Failed below.
+		// A synthetic status=blocked (the ADR 0036 backstop) may cover a Box cut
+		// short before its final print (issue #2224), so the Lander salvages
+		// from the driver's last genuine self-report (issue #2223). A genuine
+		// status=blocked is authoritative and still parks Failed below.
 		if result.Resolved.Provenance == outcome.ProvenanceSynthetic && s.lander.salvage(d, num, gen, result) {
 			return
 		}
 		s.cfg.Progress.Step(Step{Key: num, Landing: o.Landing, Status: Status(o.Status), Detail: "!! " + o.Note})
 		s.transitionState(num, ForReason(dispatchrecord.ReasonBlocked), o.Note)
-		// A read-only Box never pushes or opens a PR in-box (issue #1933), so a
-		// bundle it wrote to the outbox and a PR-intent line it printed would
-		// be stranded once the container exits. Applies to PR-shaped and
-		// push-only forges alike (issue #1946). Best-effort and additive:
-		// failure never changes the blocked outcome recorded above.
+		// A read-only Box never pushes in-box (issue #1933), so its outbox
+		// bundle and PR intent would be stranded without this relay, on any
+		// forge (issue #1946). Best-effort: it never changes the outcome above.
 		if errors.Is(s.relayBlockedWork(num, gen, result), errAbandoned) {
 			return
 		}
@@ -115,8 +103,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		}
 		landing, reason, err := s.selfHeal(d, num, gen, pr, result.Passes)
 		if errors.Is(err, errAbandoned) {
-			// Another actor owns the issue, so a usage comment here would be
-			// noise.
+			// Another actor owns the issue, so a usage comment would be noise.
 			return
 		}
 		if landing == landingFailed {
@@ -124,17 +111,16 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		}
 		s.postUsageComment(num, d)
 	case "merged":
-		// status=merged is off-script: no prompt fragment instructs a Box to
-		// print it, so o.Landing is Agent-controlled with no legitimate
-		// provenance. It is absent from lib/prompt-contract.nix's
-		// outcomeStatusSets (issue #2504), hence a bare string literal.
+		// status=merged is off-script: no prompt asks for it, so o.Landing has
+		// no legitimate provenance and settleReportedMerge ignores it. It is
+		// absent from lib/prompt-contract.nix's outcomeStatusSets (issue
+		// #2504), hence the literal.
 		s.lander.settleReportedMerge(num)
 		s.postUsageComment(num, d)
 	case outcome.StatusAmbiguous:
-		// The Box detected an internally-contradictory issue and halted before
-		// scouting (issue #2275). This is a successful, non-crash stop, so it
-		// must never fall through to agent-failed. The Box has no fragment to
-		// post this comment in-box, so settle posts o.Note host-side.
+		// A contradictory spec halted the Box before scouting (issue #2275): a
+		// clean stop, never agent-failed. The Box has no fragment to post its
+		// questions, so settle posts o.Note host-side.
 		if o.Note != "" {
 			if err := s.it.Comment(num, o.Note); err != nil {
 				fmt.Fprintf(os.Stderr, "    ?? #%s: could not post ambiguous-spec comment: %v\n", num, err)
@@ -144,9 +130,8 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		s.transitionState(num, ForReason(dispatchrecord.ReasonAmbiguous), o.Note)
 		s.postUsageComment(num, d)
 	case outcome.StatusAlreadyResolved:
-		// The Box found the change already on the default branch: zero
-		// commits and no PR, yet a success (issue #4015). No PR carries a
-		// Closes #<N> here, so settle closes the issue itself.
+		// Already on the default branch: a success with no PR to carry
+		// Closes #<N> (issue #4015), so settle closes the issue itself.
 		msg := "Closing this issue as completed: the work it asks for is already complete on the default branch."
 		if o.Note != "" {
 			msg += "\n\n" + o.Note
@@ -171,14 +156,12 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 
 // RecordSettleWarnings is the one seam that prints a settle's rejection
 // warnings to stderr and records result.Warnings plus those rejections to d's
-// sidecar (issue #3744). tag prefixes every entry and stderr line ("" for the
-// initial settle, "fix pass N: " for a fix pass); an empty fix-pass batch
-// records nothing, so a clean pass cannot delete an earlier run's file.
-//
-// An issue-intent rejection leaves no other trace, so it always warns.
-// retry.go's own scan already warns when every comment or pr-intent line was
-// rejected, so for those two this covers only a verifying match alongside
-// rejections.
+// sidecar (issue #3744). tag prefixes every entry ("fix pass N: " for a fix
+// pass); an empty fix-pass batch records nothing, so a clean pass cannot
+// delete an earlier run's file. An issue-intent rejection leaves no other
+// trace, so it always warns; dispatch's scan already warns when every comment
+// or pr-intent line was rejected, so for those two this adds only the mixed
+// case.
 func RecordSettleWarnings(d dispatch.Dispatcher, num, tag string, result dispatch.Result) {
 	var rejections []string
 	if result.CommentFound {
@@ -226,30 +209,26 @@ func (s *Settle) settleUnresolved(num, clsNote, missingNote string) {
 	}
 	if !res.Found {
 		s.cfg.Progress.Step(Step{Key: num, Status: StatusMissing, Detail: strings.TrimPrefix(clsNote+"  note="+missingNote, "  ")})
-		// Same detail the log line above prints, folded into one note (issue
-		// #3627) so a settled record is diagnosable on disk without the
-		// daemon's terminal.
+		// Folded into the note so the settled record is diagnosable on disk
+		// (issue #3627).
 		note := missingNote + clsNote
 		s.transitionState(num, ForReason(dispatchrecord.ReasonNoOutcome), note)
 		return
 	}
-	// No transitionState here, on purpose, regardless of draft-ness (issue
-	// #1654): an open PR is a real, if unmergeable-right-now, result, and ADR
-	// 0012 reserves agent-failed for "never produced a green PR". A non-draft
-	// PR only got that way via this launcher's own MarkReady at green (issue
-	// #1651).
+	// No transitionState, draft or not (issue #1654): an open PR is a real
+	// result, and ADR 0012 reserves agent-failed for "never produced a green
+	// PR". A non-draft PR only got that way via the launcher's own MarkReady
+	// at green (issue #1651).
 	s.cfg.Progress.Step(Step{Key: num, Landing: res.URL, Status: StatusBlocked, Detail: fmt.Sprintf("note=no outcome line; PR on %s left for manual adopt", branch)})
 }
 
 // Transition moves num from one dispatch state to v's state and is the one
 // place a refused TransitionState (a status-lifecycle tracker that could not
-// move the card, issue #6353) is recognised. A refusal is posted as a comment,
-// since no label was applied and the card would otherwise carry no trace of
-// why it did not move, and the returned Verdict and note are the ones the
-// Record should settle with: transition-refused, keeping v's state, since the
-// displaced outcome still happened. For any other outcome v and note come back
-// unchanged. The TransitionState error is returned as is (nil on success);
-// logging it is the caller's, since each site words it differently.
+// move the card, issue #6353) is recognised. A refusal is commented, since
+// the card would otherwise carry no trace of it, and settles as
+// transition-refused keeping v's state, since the displaced outcome still
+// happened; otherwise v and note come back unchanged. The TransitionState
+// error is returned for the caller to log.
 func Transition(it forge.IssueTracker, num string, from forge.DispatchState, v Verdict, note string) (Verdict, string, error) {
 	err := it.TransitionState(num, from, v.State())
 	refusal, _ := forge.CommentRefusal(it, num, err)
@@ -282,8 +261,7 @@ type settledLatch struct {
 // transitionState is a best-effort dispatch-state transition that logs but
 // does not propagate errors. note is the most specific reason live at the
 // call site, "" where none exists; v carries that site's status= class and
-// the state it fixes — see flushSettled for why this only latches rather than
-// emits.
+// the state it fixes.
 func (s *Settle) transitionState(num string, v Verdict, note string) {
 	// An unclaimed issue (issue #4076) never went agent-in-progress, so there
 	// is nothing to leave and no agent-failed to apply here — only a real
@@ -295,14 +273,10 @@ func (s *Settle) transitionState(num string, v Verdict, note string) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %s: %v\n", num, v.State(), err)
 	}
-	// Latched, not emitted, here (issue #3627): one issue's settle path can
-	// reach a second, contradicting terminal transition on the same run — a
-	// green completeLanding (Complete) that verifyMerged then demotes to
-	// Failed after re-checking PR state (pr_lander.go) — so emitting per call
-	// would let a stale Complete race a real Failed to the daemon. Last write
-	// wins: it is always the tracker's own final decision, checked in
-	// call order. The mutex exists because dispatchWave goroutines settle
-	// different issues on the same *Settle concurrently.
+	// Latched, not emitted (issue #3627): verifyMerged can demote a
+	// Complete to Failed on the same run, and emitting per call would let
+	// the stale Complete race the real Failed to the daemon. Last write
+	// wins. Locked because dispatchWave settles issues concurrently.
 	s.settledMu.Lock()
 	if s.settledLatch == nil {
 		s.settledLatch = make(map[string]settledLatch)
@@ -327,12 +301,9 @@ func (s *Settle) latchUnrecorded(num string, v Verdict, note string) {
 }
 
 // flushSettled settles num's latched decision, if any, exactly once
-// (issue #3627). Call it via defer at every settle entry point. A terminal
-// latch is emitted as one dispatch_settled op; an unrecorded one is only
-// returned, so an issue that never reaches a terminal state still produces no
-// record. Emitting here, not in transitionState, means a path that latches
-// twice (Complete demoted to Failed) still appends one op. The returned
-// Settlement is that same latched decision, zero when nothing latched.
+// (issue #3627); defer it at every settle entry point. A terminal latch is
+// emitted as one dispatch_settled op; an unrecorded one is only returned. The
+// returned Settlement is that decision, zero when nothing latched.
 func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) Settlement {
 	s.settledMu.Lock()
 	rec, ok := s.settledLatch[num]
@@ -374,12 +345,10 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) Settlement {
 }
 
 // Settled is the single terminal-record emitter for every settle path (only
-// LateMerges' reconcile upgrade appends one outside it, through
-// dispatchrecord.AppendSettled): it records ds as a dispatch_settled op in the
-// Dispatch's primary Pass log and the root's Record store, then reports the
-// settled record. ds's State and Reason are v's, overwritten here. Best-effort;
-// what gates the append is documented on dispatchrecord.AppendSettled. It
-// returns the Settlement it recorded.
+// LateMerges' reconcile upgrade appends outside it): it records ds, with v's
+// State and Reason, as a dispatch_settled op in the primary Pass log and the
+// Record store, then reports it. Best-effort; see
+// dispatchrecord.AppendSettled for what gates the append.
 func Settled(key dispatchkey.Key, logPath string, v Verdict, ds hostop.DispatchSettled) Settlement {
 	if v.reason == "" {
 		panic("settle: Settled needs a Verdict from ForReason, not the zero value")
@@ -450,11 +419,9 @@ func (s *Settle) postBlockedNoteComment(num, note string) {
 }
 
 // recordLanding persists landing onto the tracker issue via the optional
-// LandingRecorder interface (ADR 0029), then the pass that produced it. An
-// empty landing is a no-op: a blank write must never clear an already-recorded
-// ref. Best-effort, matching transitionState's log-but-don't-propagate
-// contract. A failed landing write skips the pass write so the pair never
-// disagrees.
+// LandingRecorder (ADR 0029), then the pass that produced it. An empty
+// landing is a no-op, so it never clears a recorded ref; a failed landing
+// write skips the pass write so the pair never disagrees. Best-effort.
 func (s *Settle) recordLanding(num, landing string, passes []passmanifest.Entry) {
 	if s.landing == nil || landing == "" {
 		return
@@ -467,13 +434,11 @@ func (s *Settle) recordLanding(num, landing string, passes []passmanifest.Entry)
 }
 
 // recordLandingPass persists which pass produced the landing just recorded
-// (issue #2983). It runs only from recordLanding, never off the Box-controlled
-// outcome line (issue #5189). Picks the last entry with OutcomeFound true,
-// else the last entry. With no manifest evidence it clears the recorded pass, so a
-// landing written without pass evidence (e.g. `spindrift recover`) never
-// inherits an earlier run's pass. Best-effort, matching transitionState's
-// log-but-don't-propagate contract. Fix passes that settle dispatches later
-// never call it (see forge.LandingPassRecorder).
+// (issue #2983): the last entry with OutcomeFound, else the last entry. It runs
+// only from recordLanding, never off the Box-controlled outcome line (issue
+// #5189). With no manifest evidence it clears the pass, so a landing written without
+// it (e.g. by `spindrift recover`) never inherits an earlier run's.
+// Best-effort.
 func (s *Settle) recordLandingPass(num string, passes []passmanifest.Entry) {
 	if s.landingPass == nil {
 		return
@@ -501,11 +466,9 @@ func reportCloseErr(num string, err error) {
 }
 
 // closeIssue closes num through the tracker's optional MergeCloser (issue
-// #1892), a backstop for github's merged-PR auto-close, which only fires when
-// the PR body carries a literal Closes #<N>. MergeCloser rather than
-// IssueCloser keeps this a no-op for local, whose closed: axis only reconcile
-// writes for landed work (ADR 0029), even paired with a github Code Forge.
-// Reports whether the tracker implements MergeCloser.
+// #1892), a backstop for github's auto-close, which needs a literal Closes
+// #<N> in the PR body. Not IssueCloser, so it is a no-op for local, whose
+// closed: axis is reconcile's alone (ADR 0029). Reports whether the tracker implements MergeCloser.
 func (s *Settle) closeIssue(num string) bool {
 	closer, ok := forge.As[forge.MergeCloser](s.it)
 	if !ok {
@@ -516,12 +479,9 @@ func (s *Settle) closeIssue(num string) bool {
 }
 
 // closeResolvedIssue closes num for a status=already-resolved outcome (issue
-// #4017), which has no PR and so no merge for closeIssue's MergeCloser path
-// to key off. No PR and no merge means nothing landed for reconcile to
-// observe either, so it would leave a local issue open forever; this is the
-// one direct close outside ADR 0029's reconcile-only closed: axis. Prefers
-// MergeCloser (forgejo, github) when present, falling back to IssueCloser
-// (local) otherwise.
+// #4017). With no merge, reconcile would never close a local issue, so this is
+// the one direct close outside ADR 0029's reconcile-only closed: axis. It uses
+// MergeCloser when present, else IssueCloser.
 func (s *Settle) closeResolvedIssue(num string) {
 	if s.closeIssue(num) {
 		return

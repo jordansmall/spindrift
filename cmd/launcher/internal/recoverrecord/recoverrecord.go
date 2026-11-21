@@ -1,8 +1,7 @@
 // Package recoverrecord is queue-mode recover's host-side record of failed
 // landings for one issue's outbox bundle, plus the one rule deciding whether
-// that bundle is still eligible for another attempt (issues #4655, #4657). The
-// launcher's recover pass and the daemon's scheduler both read it, and the
-// daemon cannot import the launcher's package main, so it lives here; it
+// that bundle is still eligible for another attempt (issues #4655, #4657).
+// The daemon's scheduler reads it too and cannot import package main; it
 // imports only leaf packages to keep the daemon's graph small.
 package recoverrecord
 
@@ -106,12 +105,10 @@ func (r Record) BackingOff(now time.Time, unit time.Duration) bool {
 
 // Due reports whether a recover pass would act on the bundle now: attempt it,
 // or retry a give-up comment that never posted (Count at the bound, GaveUp
-// still false). Backoff gates only attempts, not that retry. A record at the
-// bound stays Due until its give-up posts, and the child posts it only when the
-// bundle still passes its other checks (failed label, ready self-report); a
-// record whose issue lost the label or whose self-report is not success stays
-// counted indefinitely, which the daemon's upper-bound backoff
-// (DAEMON_IDLE_CAP) bounds to about one child per cap.
+// still false); backoff gates only attempts. The child posts the give-up only
+// when the bundle passes its other checks (failed label, ready self-report),
+// so a record failing them stays Due indefinitely, which DAEMON_IDLE_CAP
+// bounds to about one child per cap.
 func (r Record) Due(now time.Time, maxAttempts int, unit time.Duration) bool {
 	if r.GaveUp {
 		return false
@@ -120,12 +117,10 @@ func (r Record) Due(now time.Time, maxAttempts int, unit time.Duration) bool {
 }
 
 // Eligible names the outbox bundles a recover pass would act on now: a bundle
-// is present and its record is Due. Each is named by outbox key and BundleID,
-// so a re-run that leaves a new bundle under the same key reads as a new item
-// (issue #4705). Chore-keyed (butler) outboxes are never recover's work, and
-// so is an entry whose key is in inFlight, which a live child holds. The
-// result is an upper bound; the recover child re-checks everything else
-// (self-report, open PR, claim).
+// is present and its record is Due. Each is named key@BundleID, so a re-run's
+// new bundle under the same key reads as a new item (issue #4705). Chore-keyed
+// (butler) outboxes and keys in inFlight are skipped. The result is an upper
+// bound; the recover child re-checks the rest (self-report, open PR, claim).
 func Eligible(pwd string, maxAttempts int, unit time.Duration, now time.Time, inFlight dispatchkey.Set) ([]string, error) {
 	entries, err := os.ReadDir(hostpaths.OutboxRoot(pwd))
 	if errors.Is(err, fs.ErrNotExist) {

@@ -27,9 +27,8 @@ type PodmanConfig struct {
 	// as the zero PodmanRun (exit 0, no output).
 	Runs []PodmanRun `json:"runs"`
 	// ConnectorHost is the connector-host binary a Connector sandbox `run`
-	// execs in place of an image's entrypoint, so the fake process is the host
-	// and the launcher's pipes reach it unchanged. Sandbox runs never consume
-	// Runs.
+	// execs in place of an image's entrypoint, so the launcher's pipes reach
+	// the real host. Sandbox runs never consume Runs.
 	ConnectorHost string `json:"connector_host"`
 	// RefuseSandbox, when set, makes a Connector sandbox `run` exit 125 (the
 	// status a container runtime gives a run it could not start) with this
@@ -44,10 +43,9 @@ type PodmanConfig struct {
 type PodmanRun struct {
 	Exit int `json:"exit"`
 	// Outcome is written to stdout, e.g.
-	// "SPINDRIFT_OUTCOME issue=7 status=done\n". Like a well-behaved Box it
-	// gains the run's own " nonce=<RUN_NONCE>" (from the run argv's
-	// -e RUN_NONCE=...) unless it already carries one; the launcher rejects
-	// a line without it as spoofed.
+	// "SPINDRIFT_OUTCOME issue=7 status=done\n", gaining the run's
+	// " nonce=<RUN_NONCE>" unless it carries one: the launcher rejects a line
+	// without it as spoofed.
 	Outcome string `json:"outcome"`
 	// Intents are raw issue-intent JSON payloads (a butler finding), each
 	// written ahead of Outcome as a "SPINDRIFT_ISSUE_INTENT <RUN_NONCE>
@@ -59,10 +57,10 @@ type PodmanRun struct {
 	// no in-box tracker client relays its verdict that way. Omitted without
 	// RUN_NONCE, like Intents.
 	Comment string `json:"comment"`
-	// Files maps a destination path to a prebuilt source file the run copies
-	// there, standing in for what a Box writes into its mounted outbox (a
-	// read-only Box's code-out bundle). The launcher empties the outbox before
-	// the run, so a test cannot pre-place the file.
+	// Files maps a destination path to a source file the run copies there,
+	// standing in for what a Box writes into its outbox (a read-only Box's
+	// bundle). The launcher empties the outbox first, so a test cannot
+	// pre-place the file.
 	Files map[string]string `json:"files"`
 	// HoldUntil is a path the run waits to exist before it writes anything
 	// else, so a test can signal the launcher while the Box is in flight.
@@ -300,9 +298,8 @@ func longFlags(args []string, name string) []string {
 
 // UsePodman makes `podman` on PATH this fake, scripted by cfg, until the test
 // ends, and returns the file its argvs are recorded to (cfg.Record, or a fresh
-// one). The calling test binary must run seamtest.Main in TestMain. An empty
-// cfg.ConnectorHost is filled with the connector-host fixturebuild resolves, so
-// a sandbox run reaches the real host.
+// one). The test binary must run seamtest.Main in TestMain. An empty
+// cfg.ConnectorHost gets the real connector-host.
 func UsePodman(t testing.TB, cfg PodmanConfig) (record string) {
 	t.Helper()
 	if cfg.Record == "" {

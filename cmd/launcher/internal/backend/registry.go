@@ -42,32 +42,28 @@ type Descriptor struct {
 	// host seeds fresh before each Pass and mounts at /repo: local (ADR 0033)
 	// and git (issue #6898), whose Box holds no credential for the remote. Read
 	// only host-side, to pick the Strategy's seeding hook. github and forgejo
-	// do not set it: they get a per-Pass host-fetched mirror via
-	// forge.MirrorSeeder (issue #6897).
+	// instead get a host-fetched mirror via forge.MirrorSeeder (issue #6897).
 	HostSeededMirror bool
 
 	// OutboxRelayCapable is true for a backend whose CODE_FORGE has pull
-	// requests: the promptassembly IF BLOCKED PR gates read it that way, and
-	// recover-kind enablement follows it (RelaysOutbox). It does not decide
-	// the outbox mount or the relay: RelaysBundle does, from RelayCapable
-	// (issues #1918, #6898).
+	// requests: the promptassembly IF BLOCKED PR gates and recover-kind
+	// enablement (RelaysOutbox) read it. The outbox mount and relay follow
+	// RelaysBundle instead (issues #1918, #6898).
 	// TestRelayCapableMatchesForgeInterfaces (cmd/launcher) fails when it
 	// diverges from the forge implementing DraftPRCreator.
 	OutboxRelayCapable bool
 
 	// InBoxUnreachableTracker is true only for a tracker with no in-box
-	// reachability at all (ADR 0032: "local"). Issue #3471 retired the /issues
-	// mount, so grep the field name for the live set of consumers that
-	// compensate.
+	// reachability at all (ADR 0032: "local").
 	InBoxUnreachableTracker bool
 
 	// InBoxUnwritableTracker is true only for a tracker the Box has no client
 	// for ("jira"), so it can neither write to the tracker nor read its linked
-	// issues; "local" is covered by InBoxUnreachableTracker and its empty write
-	// axis instead. The jira row still carries TrackerAxisWrite="GITHUB" for
-	// its other arms; this bit overrides that for the research verdict (#5245)
-	// and the work IF BLOCKED comment (#5263), which both relay through the
-	// host, and for the prompts' linked-issue read steps (#6344).
+	// issues; "local" is covered by InBoxUnreachableTracker and its empty
+	// write axis instead. It overrides the jira row's TrackerAxisWrite="GITHUB"
+	// for the research verdict (#5245) and the work IF BLOCKED comment
+	// (#5263), which relay through the host, and for the linked-issue read
+	// steps (#6344).
 	InBoxUnwritableTracker bool
 
 	// SlugIssueRefTracker is true for a tracker whose issues carry no number a
@@ -78,47 +74,39 @@ type Descriptor struct {
 	// RelayCapable is true for a CODE_FORGE backend with every host-mediation
 	// seam needed under BOX_FORGE_AND_ISSUE_ACCESS=read-only: bundle relay
 	// always, plus draft-PR-create and commit-subjects when the backend has a
-	// PR concept. True for every registered CODE_FORGE (git relays a bundle
-	// only, issue #6898). Wider than OutboxRelayCapable, which is "this forge
-	// has pull requests" (#5276).
-	// cmd/launcher's TestRelayCapableMatchesForgeInterfaces checks the bit
-	// against the interfaces each row's forge implements (issue #2628).
+	// PR concept (git relays a bundle only, issue #6898). Wider than
+	// OutboxRelayCapable (#5276). cmd/launcher's
+	// TestRelayCapableMatchesForgeInterfaces checks it (issue #2628).
 	RelayCapable bool
 
 	// HostPostingCapable is true for an ISSUE_TRACKER backend whose comments
 	// and issue filing can be host-mediated under
-	// BOX_FORGE_AND_ISSUE_ACCESS=read-only. True for github, forgejo, local,
-	// jira.
+	// BOX_FORGE_AND_ISSUE_ACCESS=read-only.
 	HostPostingCapable bool
 
 	// LabelRegistry is true for an ISSUE_TRACKER backend whose labels are
 	// registered objects that ListLabels and CreateLabel manage, so a doctor
-	// preflight can require one and create it when missing. True for github,
-	// forgejo; false for local (ListLabels reports only the dispatch
-	// markers AllLabels names and CreateLabel is a no-op) and jira
-	// (ListLabels reports only labels already applied to an issue, and
-	// CreateLabel is a no-op).
+	// preflight can require one and create it when missing. local and jira
+	// have no registry: CreateLabel is a no-op and ListLabels reports only the
+	// dispatch markers (local) or labels already on an issue (jira).
 	LabelRegistry bool
 
 	// IssuesWearLabels is true for an ISSUE_TRACKER backend whose issue labels
-	// are reliable provenance, so a label's absence is authoritative too:
-	// github, forgejo, and jira (which has no label registry, so LabelRegistry
-	// is false there). It asks whether a label on an issue is a fact about
-	// that issue, not whether labels can be listed or created ahead of time
-	// (issue #6347). False for local: its frontmatter labels are still read,
-	// but a body marker can stand in for a missing one.
+	// are reliable provenance, so a label's absence is authoritative too
+	// (issue #6347): a label on an issue is a fact about it, whether or not
+	// labels can be listed or created ahead of time, so jira wears labels
+	// without a LabelRegistry. False for local: its frontmatter labels are
+	// still read, but a body marker can stand in for a missing one.
 	IssuesWearLabels bool
 
 	// TrackerAxisRead is this tracker's read-step axis value ("GITHUB",
-	// "LOCAL", "FORGEJO", or "JIRA"); empty means "GITHUB", so github leaves it
-	// at the Go zero value. An unregistered name's zero-value Descriptor reads
-	// back the same way, which is why TrackerAxisSignals tests for ""
-	// to cover both cases at once.
+	// "LOCAL", "FORGEJO", or "JIRA"); empty means "GITHUB", both for github's
+	// row and an unregistered name's zero Descriptor.
 	TrackerAxisRead string
 
 	// TrackerAxisWrite is this tracker's write-step axis value ("GITHUB",
 	// "FORGEJO", or ""); empty means "GITHUB" for an unregistered lookup, but
-	// "local" sets it empty as its real resolved value, having no write axis.
+	// is local's real resolved value, as it has no write axis.
 	TrackerAxisWrite string
 
 	// TrackerAxisFiler is this tracker's filer write-mechanism axis value ("GH"
@@ -165,23 +153,18 @@ func ByName(name string) (Descriptor, bool) {
 }
 
 // TrackerAxisSignals reads the tracker-axis facts off the matching Registry
-// entry rather than re-deriving them with its own name switch, so nix and Go
-// can never drift (issue #2533). An empty TrackerAxisRead covers both an
-// unregistered name and github/jira's own rows, whose resolved value is
-// "GITHUB" but whose Go zero value leaves the field unset.
-// renderBackendRegistryGo rejects a row that sets write/filer without read, so
-// the early return never drops a declared axis (issue #4183); it also rejects
-// read without write, so a row past the early return always declares
-// TrackerAxisWrite and "" means a declared empty axis (issue #2673).
+// entry rather than a name switch, so nix and Go can never drift (issue
+// #2533). renderBackendRegistryGo rejects a row that sets write/filer without
+// read, so the early return never drops a declared axis (issue #4183), and
+// read without write, so past it "" is a declared empty write axis (issue
+// #2673).
 func TrackerAxisSignals(issueTracker string) (read, write, filer string) {
 	row, ok := ByName(issueTracker)
 	if !ok || row.TrackerAxisRead == "" {
 		return "GITHUB", "GITHUB", "GH"
 	}
-	// TrackerAxisWrite is read as-is: unlike Read and Filer, "" is a
-	// legitimate resolved value for a found row (local has no write-step axis),
-	// not an unset-field placeholder. The "GITHUB" fallback above and Filer's
-	// "GH" default mirror lib/mkHarness.nix's `or "GITHUB"` / `or "GH"`.
+	// The "GITHUB" fallback above and filer's "GH" default mirror
+	// lib/mkHarness.nix's `or "GITHUB"` / `or "GH"`.
 	filer = row.TrackerAxisFiler
 	if filer == "" {
 		filer = "GH"
@@ -211,12 +194,11 @@ func NeedsGHToken(forge, tracker Descriptor) bool {
 
 // ClosesRef reports whether a `Closes #N` in a PR body on forge auto-closes
 // tracker's issue N: forge has pull requests and is the same backend as the
-// tracker, so the two share an issue namespace (github+github,
-// forgejo+forgejo). Any other pairing names a foreign tracker's number, or a
-// key the forge never parses. An unknown name's zero row is false. Settle's
-// host append (closeOnlyOwnIssue), the prompt's PR_BODY_CLOSES gate, and
-// the closing-keyword defuse of the Box-authored PR body (#7079) all read it,
-// so a change here moves all three.
+// tracker, so the two share an issue namespace. Any other pairing names a
+// foreign tracker's number, or a key the forge never parses. An unknown
+// name's zero row is false. Settle's host append (closeOnlyOwnIssue), the
+// prompt's PR_BODY_CLOSES gate, and the closing-keyword defuse of the
+// Box-authored PR body (#7079) all read it.
 func ClosesRef(forge, tracker Descriptor) bool {
 	return forge.OutboxRelayCapable && tracker.ValidAsTracker && forge.Name == tracker.Name
 }
@@ -234,20 +216,17 @@ func OutboxRelayBackends() []string {
 }
 
 // RelaysBundle reports whether a Box on forge d hands its finished branch back
-// as an outbox bundle the host relays: a HostMediatedRemote forge, or a
-// RelayCapable one (ADR 0033, issues #1918, #6898). The launcher's outbox mount
-// and the Box's relay, push guard, and outcome backstop all decide through
-// this.
+// as an outbox bundle the host relays (ADR 0033, issues #1918, #6898). The
+// launcher's outbox mount and the Box's relay, push guard, and outcome
+// backstop all decide through this.
 func RelaysBundle(d Descriptor) bool {
 	return d.HostMediatedRemote || d.RelayCapable
 }
 
 // RelaysOutbox reports whether a Box under codeForge is a pull-request forge's
-// Box, whose outbox bundle the host relays into a PR (issue #4656): an
-// OutboxRelayCapable CODE_FORGE. It gates the recover kind, so `git`, which
-// relays a bundle but opens no PR, is false (see RelaysBundle). codeForge is a
-// resolved knob value; an unset CODE_FORGE is not defaulted here, so "" is not
-// a backend and relays nothing.
+// Box, whose outbox bundle the host relays into a PR (issue #4656). It gates
+// the recover kind, so `git`, which relays a bundle but opens no PR, is false.
+// An unset CODE_FORGE is not defaulted here: "" relays nothing.
 func RelaysOutbox(codeForge string) bool {
 	d, ok := ByName(codeForge)
 	return ok && d.OutboxRelayCapable

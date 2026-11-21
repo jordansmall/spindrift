@@ -99,12 +99,9 @@ func FindingLocations(findings string) []Location {
 
 // bulletLocation extracts a bullet's leading token, unwrapping backtick and
 // "**" pairs in either nesting order and parsing off a :<line>[:<col>] or
-// :<line>-<line> suffix. The unwrap runs again after the strip, so a suffix
-// written outside the backticks (`path`:12) still resolves. The path shape
-// check runs last, so it also rejects the `- none` convention without a
-// special case, and a token that still holds a ':' (an unparseable suffix)
-// is dropped rather than recorded as a bogus path. A cited line that is zero
-// or overflows drops the bullet too (see parseLine).
+// :<line>-<line> suffix. The unwrap reruns after the strip so `path`:12
+// resolves. The path-shape check runs last: it rejects the `- none`
+// convention and any token still holding a ':' (an unparseable suffix).
 func bulletLocation(content string) (Location, bool) {
 	fields := strings.Fields(content)
 	if len(fields) == 0 {
@@ -176,29 +173,24 @@ type Trigger struct {
 	// Reason is always non-empty, whatever Fire is (issue #2655).
 	Reason string
 	// Beyond lists the delta locations outside the findings' named locations,
-	// sorted. A whole-path entry (no finding named the path at all) renders
-	// bare ("path"); a line-local miss renders "path:N" or "path:N-M" for the
-	// touched pre-image span, with a trailing " (+N)" when the hunk's
-	// post-image added more lines than its pre-image span covers. Decide
-	// fills it only on the delta-exceeded-findings Fire case and leaves it
-	// nil otherwise, gate-discovered work included.
+	// sorted: a bare "path" when no finding named the path, else "path:N" or
+	// "path:N-M" for the pre-image span (see renderSpan). Decide sets it only
+	// on the delta-exceeded-findings case, never for gate-discovered work.
 	Beyond []string
 }
 
-// toleranceLines widens each cited line into the window a fold may legitimately
-// touch: answering a one-line finding commonly rewrites the cited line plus its
-// immediate neighbour, and a reflow can carry one line further, so ±2 covers the
-// ordinary fold while anything past it is a block the reviewer never read.
-// Because a hunk spans its longer side (issue #3532), an insertion of more
-// than 2*toleranceLines+1 = 5 lines beside a cited line always fires: a fold
+// toleranceLines widens each cited line into the window a fold may touch: a
+// fix rewrites the cited line plus a neighbour, a reflow one more. Because a
+// hunk spans its longer side (issue #3532), inserting more than
+// 2*toleranceLines+1 = 5 lines beside a cited line always fires: a fold
 // answering a one-line finding never needs a block that long.
 const toleranceLines = 2
 
 // Decide reports whether one more review pass should run before settling. The
 // caller runs at most one, never a loop (issues #3244, #3246).
 func Decide(delta landdelta.Delta, findings, decisions string) Trigger {
-	// This fires before delta is consulted, because issue #3245 requires a human
-	// look at every inline gate fix even when no comparison resolves.
+	// Checked before delta: issue #3245 wants a human look at every inline
+	// gate fix, even when no comparison resolves.
 	if GateWorkDeclared(decisions) {
 		return Trigger{Fire: true, Reason: GateWorkReason}
 	}
@@ -252,9 +244,8 @@ func locationsBeyond(delta landdelta.Delta, findings []Location) []string {
 		}
 		ranges, ok := delta.Ranges[p]
 		if !ok {
-			// No determinable pre-image hunks for p (binary, mode-only, rebase
-			// collision, rename, or quoted path — see landdelta.Delta.Ranges).
-			// Nothing to compare, so this fails open like an unknown delta.
+			// No determinable pre-image hunks (see landdelta.Delta.Ranges):
+			// fail open like an unknown delta.
 			continue
 		}
 		windows := mergeWindows(locs)
@@ -267,11 +258,10 @@ func locationsBeyond(delta landdelta.Delta, findings []Location) []string {
 				uncovered = append(uncovered, r)
 			}
 		}
-		// landdelta.Delta.Paths is documented sorted, so the output follows it,
-		// but the per-path []Range order is not: sort hunks in file order
-		// (numeric, not the rendered string's "run.go:100" < "run.go:20").
-		// SortFunc is unstable, so the key covers every field renderSpan
-		// reads; any ranges still tied render identically.
+		// Delta.Paths is sorted but per-path Ranges are not: sort numerically
+		// ("run.go:20" before "run.go:100"). SortFunc is unstable, so the key
+		// covers every field renderSpan reads; ranges still tied render
+		// identically.
 		slices.SortFunc(uncovered, func(a, b landdelta.Range) int {
 			aStart, aEnd := shownBounds(a)
 			bStart, bEnd := shownBounds(b)
@@ -336,11 +326,9 @@ func coveredBy(span window, windows []window) bool {
 	return false
 }
 
-// shownBounds is the [start, end] pre-image span a hunk is displayed (and
-// sorted) as. Line 0 is git's "inserted before line 1" header (@@ -0,0 @@),
-// not a line any file has; locationsBeyond compared the real span, but the
-// rendered location feeds the delta-review agent's prompt (Trigger.Beyond),
-// so it must name real lines.
+// shownBounds is the [start, end] pre-image span a hunk is displayed and
+// sorted as. Line 0 is git's "inserted before line 1" (@@ -0,0 @@); the
+// rendered span feeds the delta-review prompt, so it must name real lines.
 func shownBounds(r landdelta.Range) (start, end int) {
 	start, end = r.Start, r.End()
 	if start == 0 {

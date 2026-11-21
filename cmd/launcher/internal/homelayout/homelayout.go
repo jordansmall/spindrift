@@ -1,10 +1,9 @@
 // Package homelayout lays out what the Driver finds in HOME (ADR 0058, issue
 // #4296): its skills directory and the baked home-agent files.
 //
-// Both copies mirror `cp -r src/. dst/` without -p, and both must cope with
-// read-only sources (bwrap ro-binds /agent from the Nix store), so every copy
-// is followed by a u+w pass; without it the next copy over the same tree would
-// fail (issue #3941).
+// Both copies mirror `cp -r src/. dst/` without -p over read-only sources
+// (bwrap ro-binds /agent from the Nix store), so every copy is followed by a
+// u+w pass or the next copy over the same tree fails (issue #3941).
 package homelayout
 
 import (
@@ -17,13 +16,10 @@ import (
 	"strings"
 )
 
-// PopulateSkills copies each src into dst in order, so a later src wins a name
-// collision (the operator's skill overrides a harness skill of the same name)
-// while an earlier skill the later one didn't override survives. A src that is
-// absent or not a directory is skipped: an absent operator mount is the common
-// case; any other stat failure (say, a permission error) is returned.
-// Everything under dst, dst included, ends owner-writable; that blanket chmod
-// is safe because nothing is bind-mounted under dst.
+// PopulateSkills copies each src into dst in order, so a later src (the
+// operator's skill) wins a name collision. A src that is absent or not a
+// directory is skipped. Everything under dst ends owner-writable; that
+// blanket chmod is safe because nothing is bind-mounted under dst.
 func PopulateSkills(dst string, srcs ...string) error {
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", dst, err)
@@ -51,19 +47,14 @@ func PopulateSkills(dst string, srcs ...string) error {
 }
 
 // PopulateHome copies the staged home-agent tree into home and makes every
-// copied entry owner-writable. It is a no-op when staged is absent or not a
-// directory (under OCI the image bakes /home/agent directly); any other stat
-// failure is returned. A symlinked entry in the staged tree is never chmod'd,
-// unlike the old shell's `chmod u+w`, which followed it into the read-only
-// store.
+// copied non-symlink entry owner-writable. It is a no-op when staged is absent
+// or not a directory (under OCI the image bakes /home/agent directly).
 //
-// The directory sessionCacheDir ("" when the Driver has none) is not chmod'd
-// when it already exists before the copy (checked before copyTree, which
-// would otherwise create it and make every cache look bound): that is the
-// bwrap bind target, and a chmod would mutate the live host directory outside
-// the sandbox (issue #2845). An unmounted one is our own copy of the store's
-// read-only directory and is made writable so the Driver runs cold (issue
-// #5388). A trailing slash on sessionCacheDir is ignored.
+// sessionCacheDir ("" for none) is not chmod'd when it exists before the copy
+// (checked before copyTree, which would create it): it is then the bwrap bind
+// target, and a chmod would mutate the live host directory (issue #2845). An
+// unmounted one is our copy of the store's and is made writable so the
+// Driver runs cold (issue #5388).
 func PopulateHome(home, staged, sessionCacheDir string) error {
 	if ok, err := isDir(staged); err != nil {
 		return err

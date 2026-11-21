@@ -63,9 +63,8 @@ var ErrRewriteAbandoned = errors.New("rewrite abandoned; remainder relayed uncha
 
 // RewriteRow binds one request shape (ecosystem, HTTP method, path-shape
 // matcher) to a response-body rewriter. A shape with no matching row is never
-// inspected at all, not even to sniff its Content-Type, so issue #2854's
-// wrong-media-type defect is excluded by construction rather than by a
-// runtime guard.
+// inspected, not even to sniff its Content-Type, which excludes issue #2854's
+// wrong-media-type defect by construction.
 type RewriteRow struct {
 	Name      string // shape name, used only in log lines (e.g. "cargo config.json")
 	Ecosystem string // a registered Strategy's Name; matched against the route's tagged subtrees
@@ -82,9 +81,8 @@ type RewriteRow struct {
 }
 
 // JoinBase joins a route-relative subtree base with a row-relative path.
-// base == "/" is the sentinel for "no base segment at all", so it combines
-// with rel as rel itself; prepending it literally would yield
-// "//config.json" for every host-rooted subtree, which is the common case.
+// base == "/" means "no base segment", so it yields rel itself rather than
+// "//config.json".
 func JoinBase(base, rel string) string {
 	if base == "/" {
 		return rel

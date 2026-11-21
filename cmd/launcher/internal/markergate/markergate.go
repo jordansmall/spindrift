@@ -18,8 +18,8 @@ import (
 // signalCarrierSocket is the BOX_SIGNAL_CARRIER value (issue #3725) that
 // routes the PR-intent presence check through the Signal socket's status
 // route instead of a log scan (issue #3726). Every other value, including
-// the legacy "log" opt-out and an empty string reaching this package (only
-// an older host launcher forwards nothing, issue #4376), keeps the log scan.
+// "log" and an empty string from an older host launcher (issue #4376), keeps
+// the log scan.
 const signalCarrierSocket = "socket"
 
 // Marker identifies which required-marker gate row a decision is for.
@@ -43,25 +43,20 @@ type NudgeConfig struct {
 	// resumed pass must repeat verbatim as its final message.
 	OriginalOutcomeLine string
 
-	// LogPath is scanned to detect whether the marker is already present.
-	// Its meaning depends on cfg.Marker: for MarkerOutcome, the Driver's
-	// unwrapped and markdown-stripped final-message text, not the raw
-	// stream-json log; for MarkerPRIntent, the raw Driver stream_log.
-	// Under SignalCarrier == "socket", MarkerPRIntent ignores LogPath
-	// entirely (issue #3726): a socket-mode marker line in the log carries
-	// no data (retry.go's own rule), so scanning it would be wrong.
+	// LogPath is scanned to detect whether the marker is already present: for
+	// MarkerOutcome, the Driver's unwrapped and markdown-stripped final-message
+	// text, not the raw stream-json log; for MarkerPRIntent, the raw Driver
+	// stream_log. Under SignalCarrier == "socket", MarkerPRIntent ignores it
+	// (issue #3726): a socket-mode marker line in the log carries no data.
 	LogPath string
 
-	// SignalCarrier is the BOX_SIGNAL_CARRIER knob value (issue #3725).
-	// MarkerPRIntent branches on it: "socket" calls SignalStatus instead of
-	// scanning LogPath. MarkerOutcome ignores it -- the outcome marker has
-	// no socket carrier.
+	// SignalCarrier is the BOX_SIGNAL_CARRIER knob value (issue #3725). Under
+	// "socket", MarkerPRIntent calls SignalStatus instead of scanning LogPath;
+	// the outcome marker has no socket carrier.
 	SignalCarrier string
-	// SignalStatus queries the Signal socket's status route, required
-	// (non-nil) whenever SignalCarrier == "socket" and cfg.Marker is
-	// MarkerPRIntent. A nil SignalStatus under socket mode is a caller bug,
-	// reported as an error rather than silently falling back to a log scan
-	// (ADR 0052 exists to remove exactly that kind of silent fallback).
+	// SignalStatus queries the Signal socket's status route. It is required
+	// for MarkerPRIntent under socket mode: nil there is reported as an error
+	// rather than silently falling back to a log scan (ADR 0052).
 	SignalStatus func() (signalwire.Status, error)
 }
 
@@ -82,9 +77,8 @@ func RenderNudgePrompt(cfg NudgeConfig) (string, error) {
 const recheckRule = "Do not re-run checks or gates by default: re-run them only if the working tree changed since your last green check run in this session."
 
 // renderOutcomeNudge picks the near-miss wording when a token-leading line
-// was present but missing a field marker, and the generic wording otherwise.
-// A scan error reads the same as "no near-miss line", so it renders the
-// generic wording.
+// was present but missing a field marker, and the generic wording otherwise,
+// including on a scan error.
 func renderOutcomeNudge(cfg NudgeConfig) (string, error) {
 	nearMiss, found, err := outcome.LastNearMissOutcomeLine(cfg.LogPath)
 	if err != nil {
@@ -159,14 +153,10 @@ func ShouldNudgePRIntent(cfg NudgeConfig) (bool, error) {
 }
 
 // prIntentPresent is the one presence rule both ShouldNudgePRIntent and
-// Resolve gate on. Under signalCarrierSocket it never touches path -- a
-// socket-mode marker line in the log carries no data (retry.go's rule) -- and
-// asks statusFn instead; statusFn == nil there is a caller bug, reported as
-// an error rather than a silent log-scan fallback (ADR 0052). Otherwise it
-// scans path exactly as before: a scan error means every token-bearing line
-// failed to verify (a spoof or a corrupted line), never that the token was
-// absent, and the message carries the rejected-line count but never the
-// nonce.
+// Resolve gate on. Under signalCarrierSocket it asks statusFn and never
+// touches path. Otherwise a scan error means every token-bearing line failed
+// to verify (a spoof or a corrupted line), never that the token was absent;
+// the message carries the rejected-line count but never the nonce.
 func prIntentPresent(path, nonce, carrier string, statusFn func() (signalwire.Status, error)) (bool, error) {
 	if carrier == signalCarrierSocket {
 		if statusFn == nil {
@@ -233,9 +223,7 @@ type ResolveConfig struct {
 	// ResumeExitCode is the corrective resume's own driver exit code.
 	ResumeExitCode int
 
-	// SignalCarrier and SignalStatus mirror NudgeConfig's fields of the same
-	// name: Resolve gates on prIntentPresent too, the same presence rule
-	// ShouldNudgePRIntent uses, so it needs the same carrier-aware inputs.
+	// SignalCarrier and SignalStatus are as in NudgeConfig.
 	SignalCarrier string
 	SignalStatus  func() (signalwire.Status, error)
 }
@@ -258,9 +246,9 @@ type Resolution struct {
 
 // Resolve decides what to do with the corrective PR-intent resume's result.
 // Giving up (OpLine) and restoring (OutcomeLine) answer orthogonal questions,
-// so both, either, or neither may fire; collapsing them into one switch would
-// force an arbitrary precedence. Both scanners can fail, so their errors are
-// combined with errors.Join rather than one shadowing the other.
+// so both, either, or neither may fire; one switch would force an arbitrary
+// precedence. Both scanners' errors are joined rather than one shadowing the
+// other.
 func Resolve(cfg ResolveConfig) (Resolution, error) {
 	var r Resolution
 

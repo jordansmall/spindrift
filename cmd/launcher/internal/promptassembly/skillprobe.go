@@ -7,11 +7,10 @@ import (
 	"strings"
 )
 
-// SkillBaked reports whether dir/<name>/SKILL.md is a regular file that a
-// Box may invoke; os.Stat follows symlinks, like the shell `[ -f ]` this
-// replaced. A skill whose frontmatter sets `disable-model-invocation: true` is
-// human-only (a person typing /name) and inert in a Box, so it counts as not
-// baked.
+// SkillBaked reports whether dir/<name>/SKILL.md is a regular file (following
+// symlinks) that a Box may invoke. A skill whose frontmatter sets
+// `disable-model-invocation: true` is human-only and inert in a Box, so it
+// counts as not baked.
 func SkillBaked(dir, name string) bool {
 	path := filepath.Join(dir, name, "SKILL.md")
 	fi, err := os.Stat(path)

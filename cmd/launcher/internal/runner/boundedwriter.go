@@ -4,9 +4,9 @@ import "sync"
 
 // BoundedWriter retains only the last boundedOutputCap bytes written (#1130),
 // so an uncapped verbose nix build cannot pin a multi-MB transcript in memory.
-// It keeps the tail because failures print at the end.
-// It is safe for concurrent use: a Connector sandbox's stderr is written by the
-// exec copier while a caller reads it.
+// It keeps the tail because failures print at the end. Safe for concurrent
+// use: a Connector sandbox's stderr is written by the exec copier while a
+// caller reads it.
 type BoundedWriter struct {
 	mu  sync.Mutex
 	buf []byte

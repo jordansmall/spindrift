@@ -13,11 +13,10 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// BwrapConfig is the bwrap fake's JSON config. bwrap has no subcommands, so
-// every invocation is a Box run and Runs scripts them in order, except the
-// launcher's overlay probe (bwrap.ValidateOverlay), which exits 0 silently
-// and takes no scripted run, and a Connector sandbox run, which execs
-// ConnectorHost and takes none either.
+// BwrapConfig is the bwrap fake's JSON config. Every invocation is a Box run
+// scripted by Runs in order, except the overlay probe (bwrap.ValidateOverlay),
+// which exits 0, and a Connector sandbox run, which execs ConnectorHost;
+// neither consumes a Run.
 type BwrapConfig struct {
 	// Record is the file every invocation's argv is appended to.
 	Record string `json:"record"`
@@ -107,13 +106,12 @@ func bwrapSandboxRun(cfg BwrapConfig, host string, args []string, stderr io.Writ
 
 // UseBwrap makes `bwrap` on PATH this fake, scripted by cfg, until the test
 // ends, and returns the file its argvs are recorded to (cfg.Record, or a fresh
-// one). The calling test binary must run seamtest.Main in TestMain. An empty
-// cfg.ConnectorHost is filled with the connector-host fixturebuild resolves, so
-// a sandbox run reaches the real host.
+// one). The test binary must run seamtest.Main in TestMain. An empty
+// cfg.ConnectorHost is filled with the connector-host fixturebuild resolves.
 //
-// The launcher starts bwrap with a scrubbed env, so the fake finds its config
-// in the working directory: UseBwrap changes into a fresh directory holding it,
-// and relative paths in the test no longer resolve.
+// The launcher starts bwrap with a scrubbed env, so the fake reads its config
+// from the working directory: UseBwrap changes into a fresh directory holding
+// it, and relative test paths no longer resolve.
 func UseBwrap(t testing.TB, cfg BwrapConfig) (record string) {
 	t.Helper()
 	dir := t.TempDir()

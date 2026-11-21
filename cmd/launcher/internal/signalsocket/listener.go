@@ -17,30 +17,23 @@ import (
 )
 
 const (
-	// readTimeout bounds how long one connection may take to deliver a whole
-	// request. A hostile Box gets to tie up a slot on its own launcher and
-	// only briefly, rather than parking a half-sent body forever. It is
-	// generous next to the milliseconds a signalwire.MaxRequestBytes body
-	// needs over the bridge IP or a unix socket, so no legitimate signal can
-	// trip it.
+	// readTimeout stops a hostile Box parking a half-sent body forever; a
+	// signalwire.MaxRequestBytes body needs milliseconds, so no legitimate
+	// signal trips it.
 	readTimeout = 30 * time.Second
 
 	// readHeaderTimeout bounds the header phase alone: a slowloris drip
 	// never reaches the body, so readTimeout would not fire on it.
 	readHeaderTimeout = 5 * time.Second
 
-	// maxConns caps concurrent connections. The only client is one Box's
-	// agent posting a handful of signals per run, so the cap exists to keep
-	// a connection flood from exhausting launcher file descriptors, not to
-	// meter legitimate traffic.
+	// maxConns keeps a connection flood from exhausting launcher file
+	// descriptors; one Box posts only a handful of signals per run.
 	maxConns = 8
 )
 
-// NewSecret mints a fresh per-run secret gating the signal socket's
-// every-interface TCP fallback (signalwire.SecretHeader): 16 crypto/rand
-// bytes, hex-encoded. It must never share a value with the per-run nonce
-// (issue #1937) or with the registry proxy's TCP secret, each of which has a
-// different security role. rand.Read fails only on a broken entropy source.
+// NewSecret mints a fresh per-run secret gating the signal socket's TCP
+// fallback. It must never share a value with the per-run nonce (issue #1937)
+// or the registry proxy's TCP secret: each has a different security role.
 func NewSecret() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -49,11 +42,9 @@ func NewSecret() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// Listener serves an http.Handler over a unix domain socket or, via
-// ListenAndServeTCP, a secret-gated TCP port bound on every interface. It is
-// a listener of its own rather than a route on the registry proxy: that proxy
-// is GET/HEAD-only, host-rooted (ADR 0047) and starts only when routes are
-// configured, none of which holds here (ADR 0052).
+// Listener serves an http.Handler over a unix domain socket or a secret-gated
+// TCP port. It is not a route on the registry proxy, which is GET/HEAD-only,
+// host-rooted (ADR 0047) and starts only when routes are configured (ADR 0052).
 type Listener struct {
 	// Handler is the Handler to serve, built with NewHandler for the unix
 	// transport or NewGatedHandler for the TCP fallback.
@@ -63,20 +54,16 @@ type Listener struct {
 	server   *http.Server
 }
 
-// ListenAndServe removes any stale file at socketPath, listens on a unix
-// domain socket there, and serves Handler in the background. It returns once
-// the listener is established. The transport carries no secret: the socket
-// file's permissions are the gate. A nil Handler fails closed here, as it
-// does on ListenAndServeTCP, rather than binding and then panicking once per
-// request inside net/http's recover.
+// ListenAndServe replaces any stale file at socketPath with a unix socket and
+// serves Handler in the background. The socket file's permissions are the
+// gate. A nil Handler fails closed rather than panicking once per request.
 func (l *Listener) ListenAndServe(socketPath string) error {
 	if l.Handler == nil {
 		return errors.New("signalsocket: refusing to listen on a unix socket with a nil handler")
 	}
 
-	// Checked before touching the filesystem: net.Listen would fail on a
-	// too-long path anyway, but with a bare EINVAL naming neither the
-	// platform cap nor the path length (issue #3077).
+	// Checked up front: net.Listen would fail on a too-long path with a bare
+	// EINVAL naming neither the cap nor the length (issue #3077).
 	if unixsocket.TooLong(socketPath) {
 		return fmt.Errorf("signalsocket: socket path is %d bytes, at or over the %d-byte AF_UNIX sun_path limit on %s: %s", len(socketPath), unixsocket.Cap(), runtime.GOOS, socketPath)
 	}
@@ -93,15 +80,10 @@ func (l *Listener) ListenAndServe(socketPath string) error {
 	return nil
 }
 
-// ListenAndServeTCP serves Handler on addr in the background. The caller owns
-// addr and nothing here narrows it: loopback ("127.0.0.1:0") is the safe
-// default, but the launcher deliberately binds every interface ("0.0.0.0:0")
-// because a Box on a docker bridge reaches the host at the bridge IP, not at
-// loopback. A TCP port has no filesystem permissions of its own,
-// so Handler must already be gated (built with NewGatedHandler) -- serving an
-// ungated Handler here would let anything that can route to the host reach the
-// known routes with no secret at all, so this fails closed instead. Call Addr to
-// learn an ephemeral port's bound address.
+// ListenAndServeTCP serves Handler on addr in the background. The launcher
+// binds every interface because a Box on a docker bridge reaches the host at
+// the bridge IP, not loopback. A TCP port has no file permissions, so an
+// ungated Handler fails closed. Addr reports an ephemeral port.
 func (l *Listener) ListenAndServeTCP(addr string) error {
 	if l.Handler == nil || !l.Handler.gated {
 		return errors.New("signalsocket: refusing to listen on TCP with an ungated handler")
@@ -150,9 +132,8 @@ func (l *Listener) Close() error {
 	// request cannot outlive the run.
 	err := l.server.Close()
 	if l.listener != nil {
-		// Server.Close only closes the listener once Serve has tracked it; if
-		// Close wins the race against the serve goroutine, this releases the
-		// socket now. A second-close error is expected.
+		// Server.Close only closes the listener once Serve has tracked it, and
+		// Close can win that race. A second-close error is expected.
 		_ = l.listener.Close()
 	}
 	return err

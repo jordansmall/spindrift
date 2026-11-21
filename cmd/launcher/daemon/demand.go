@@ -30,29 +30,18 @@ type demandSources map[daemon.Kind]forge.DemandCounter
 // it stays exit-driven.
 type missingSources map[daemon.Kind]string
 
-// buildDemandSources builds the Demand counter of each kind in kinds the
-// daemon schedules from host-side demand, per its descriptor row. A
-// DemandTrackerProbe kind counts against ISSUE_TRACKER, resolved with the
-// tracker's own knobs and the work labels from the same settings a child uses
-// (a blank ISSUE_TRACKER is github, as the launcher defaults it); an unknown
-// tracker or a missing knob yields no source, never an error, and the kind then
-// stays exit-driven. A DemandHostOutbox kind always gets its outbox counter: it
-// reads only the host filesystem, so a misconfigured tracker cannot take it
-// away. A DemandChildReported kind never gets one. The second result names, per
-// tracker-probed kind left without a source, why (never a token or secret
-// value); warnUnprobedKinds reports it.
+// buildDemandSources builds each kind's Demand counter per its descriptor
+// row. A DemandTrackerProbe kind counts against ISSUE_TRACKER, resolved from
+// the same settings a child uses; an unknown tracker or missing knob leaves
+// it exit-driven, never an error. A DemandHostOutbox kind always gets its
+// outbox counter: it reads only the host filesystem, so a misconfigured
+// tracker cannot take it away. The second result says why each probed kind
+// got no source (never a secret value).
 //
-// FORGEJO_TOKEN and JIRA_TOKEN are read as plain knobs; a token supplied only
-// through its -file or -cmd form is invisible here, so that deployment stays
-// exit-driven; a set -cmd form earns a hint in the reason (tokenFormHint).
-//
-// A relative LOCAL_ISSUES_DIR is used as written: it resolves against the
-// daemon's cwd, which every child inherits (StartChild sets no cmd.Dir), so
-// both sides read the same directory.
-//
-// The github probe runs `gh` in the daemon's own environment, so it sees the
-// daemon's GH_TOKEN; mainRun keeps that fresh from GH_TOKEN_REFRESH_FILE the
-// way a child does.
+// Tracker tokens are read as plain knobs, so one supplied only through its
+// -file/-cmd flag or _CMD form leaves the kind exit-driven (a set _CMD earns a
+// tokenFormHint). A relative LOCAL_ISSUES_DIR resolves against the daemon's
+// cwd, which every child inherits (StartChild sets no cmd.Dir).
 func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) (demandSources, missingSources) {
 	var probed []*dispatchkind.Descriptor
 	sources := demandSources{}
@@ -67,8 +56,7 @@ func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) (demandSour
 		case dispatchkind.DemandHostOutbox:
 			sources[daemon.KindOf(d)] = newOutboxDemand(doc)
 		case dispatchkind.DemandChildReported:
-			// No host-side source: only a child run knows, so the kind stays
-			// exit-driven.
+			// Exit-driven: only a child run knows its demand.
 		default:
 			panic(fmt.Sprintf("daemon: kind %s has unhandled DemandSource %d", k, d.DemandSource))
 		}
@@ -156,9 +144,8 @@ func trackerNames() []string {
 	return names
 }
 
-// childEnvValue is the daemon's backendkit.Lookup body: key resolved as a
-// child does, the document first and then the daemon's ambient env. The
-// Strategy names its own knobs, so the key is not a literal here;
+// childEnvValue is the daemon's backendkit.Lookup body, resolving key as a
+// child does. The Strategy names its own knobs, so the key is not a literal;
 // clearKnobEnvT records the keys the registered Strategies read.
 func childEnvValue(doc *inputdoc.Document, key string) (string, bool) {
 	return childValue(doc, key, os.Getenv(key))
@@ -223,13 +210,12 @@ func (o *outboxDemand) CountReady(bool) (int, error) {
 
 func (o *outboxDemand) ProbeInterval() time.Duration { return outboxDemandInterval }
 
-// launcherInt resolves key as inputdoc's knobResolver.PositiveInt does for a child: a
-// positive integer, else the default, which is the document's own value for
-// key parsed with strconv.Atoi (so a document "0" or an unparseable value is
-// 0, not the schema default) or, absent from the document, the schema default.
-// A document value that counts as a setting strips the ambient env from the
-// child, so it never competes with ambient. Keep in step with
-// knobResolver.PositiveInt in cmd/launcher/internal/inputdoc/resolve.go.
+// launcherInt resolves key as a child's knobResolver.PositiveInt
+// (internal/inputdoc/resolve.go) does; keep the two in step. A positive
+// ambient value wins unless the document's value counts as a setting, which
+// strips the ambient one from the child's env; otherwise the result is the
+// document's value parsed as-is (a "0" or unparseable value is 0), else the
+// schema default.
 func launcherInt(doc *inputdoc.Document, key, ambient string) int {
 	def := inputdoc.SchemaDefault(key)
 	if doc != nil {
@@ -257,11 +243,9 @@ func allMissing(probed []*dispatchkind.Descriptor, reason string) missingSources
 }
 
 // tokenFormHint explains a blank plain token when the tracker's _CMD form is
-// set: the operator believes the token is supplied, but the daemon never runs
-// the command. It names the knobs only, never the command. It applies only
-// when err is the blank-token failure, which every backend words as "set
-// <plain token knob> when ..."; any other validation error (a missing
-// REPO_SLUG, say) is not explained by the _CMD form.
+// set, since the daemon never runs the command. It names knobs only, and
+// applies only to the blank-token error, which every backend words as "set
+// <plain token knob> when ...".
 func tokenFormHint(strat backendkit.Strategy, lookup backendkit.Lookup, err error) string {
 	plain := strat.TokenEnvVar
 	if plain == "" || !strings.Contains(err.Error(), plain) {
@@ -302,11 +286,10 @@ func codeForgeName(doc *inputdoc.Document) string {
 	return childKnob(doc, "CODE_FORGE", os.Getenv("CODE_FORGE"))
 }
 
-// trackers is daemon.Config.Trackers for src: every kind with a Demand source
-// counts against the one ISSUE_TRACKER, so they share a rate-limit pause (ADR
-// 0059). The outbox kind shares it although its count never calls the tracker:
-// each child it starts does (ListIssues, label swaps, merge), so it must not
-// keep starting while the tracker is paused.
+// trackers is daemon.Config.Trackers for src: every sourced kind shares the
+// one ISSUE_TRACKER's rate-limit pause (ADR 0059). The outbox kind too: its
+// count never calls the tracker, but each child it starts does, so it must not
+// keep starting them while the tracker is paused.
 func trackers(src demandSources, doc *inputdoc.Document) map[daemon.Kind]string {
 	name := issueTrackerName(doc)
 	out := make(map[daemon.Kind]string, len(src))
@@ -341,14 +324,11 @@ func probeIntervals(src demandSources, override time.Duration) map[daemon.Kind]t
 	return out
 }
 
-// childKnob is the value a child launcher resolves for key. A key whose
-// --input document value counts (Document.Setting) is stripped from the
-// child's env (withoutKeys), so the child reads the document alone and an
-// ambient override is invisible to it; any other key is not stripped, so the
-// child inherits the daemon's ambient value. The caller passes ambient as a
-// literal os.Getenv so knob_env_guard_test.go still sees which keys the daemon
-// reads. A key unset in both the document and the environment falls back to
-// its schema default, as the child's knobResolver does.
+// childKnob is the value a child launcher resolves for key: the document's
+// value when it counts (withoutKeys then strips the ambient one from the
+// child), else the inherited ambient value, else the schema default. Callers
+// pass ambient as a literal os.Getenv so knob_env_guard_test.go sees which
+// keys the daemon reads.
 func childKnob(doc *inputdoc.Document, key, ambient string) string {
 	if v, ok := childValue(doc, key, ambient); ok {
 		return v
@@ -452,11 +432,9 @@ func resolveDaemonOnlyKnobs(doc *inputdoc.Document, stderr io.Writer, withSelf, 
 	return k, nil
 }
 
-// repoURL is the Target repo's web URL for the ISSUE_TRACKER, "" when that
-// tracker has no web repo to link or its knobs are unset. It is derived from
-// the issue tracker, not CODE_FORGE, because the link it feeds is an issue
-// link served at <repo>/issues/<n>. The tracker's Strategy decides the URL
-// (GitHub Enterprise hosts come from GH_HOST, as the gh CLI reads it).
+// repoURL is the Target repo's web URL for the ISSUE_TRACKER, or "". It
+// follows the tracker, not CODE_FORGE, because it feeds <repo>/issues/<n>
+// links.
 func repoURL(doc *inputdoc.Document) string {
 	slug := childKnob(doc, "REPO_SLUG", os.Getenv("REPO_SLUG"))
 	if slug == "" {

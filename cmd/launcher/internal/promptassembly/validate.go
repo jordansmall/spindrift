@@ -77,16 +77,13 @@ func LoadValidateMarkersFile(path string) ([]ValidateMarkerRow, error) {
 	return rows, nil
 }
 
-// Validate runs the reject/warn marker matrix at the tail of prompt assembly,
-// after every fragment is rendered and before the Driver is invoked (it
-// succeeds agent/entrypoint.sh's _validate_prompt_contract; issues #2249 and
-// #2356). It reads gates from one Gates(e) call so it cannot drift from the
-// gating Assemble used, and dispatches on row data rather than id (#2318).
-// It first reports a removed fragment variable's literal ${NAME} that Assemble
-// found in operator-authored prompt text (see removedFragmentVars). Assemble
-// defers that error to here so it is a *ValidateError; a caller that skips
-// Validate never sees it. A deprecated fragment variable is a warning instead,
-// returned ahead of the marker matrix's.
+// Validate runs the reject/warn marker matrix after every fragment is
+// rendered and before the Driver is invoked (issues #2249, #2356). It reads
+// gates from one Gates(e) call so it cannot drift from Assemble's gating, and
+// dispatches on row data rather than id (#2318). It first reports the removed
+// fragment variable Assemble deferred to it, so that error is a
+// *ValidateError and a caller that skips Validate never sees it;
+// deprecated-variable warnings precede the matrix's.
 func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string, err error) {
 	if result.removedVarErr != nil {
 		return nil, result.removedVarErr
@@ -106,16 +103,14 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 
 		switch row.When {
 		case whenReadOnlyResearch:
-			// Contract == ContractVerdict, not the broader AdviseOnly: this row
-			// demands a posted SPINDRIFT_COMMENT verdict comment, a research-only
-			// concept the butler (also AdviseOnly, ADR 0056) never shares -- it
-			// files findings and writes the Ledger's done commit, posting no
-			// comment on any issue at all.
+			// ContractVerdict, not AdviseOnly: this row demands a posted
+			// verdict comment, which the butler (also AdviseOnly, ADR 0056)
+			// never posts.
 			gateActive = verdictContract(d)
 			haystack = result.Prompt
 		case whenReviewPrompt:
-			// ReviewPromptText, not Handoff.ReviewPromptFile: the latter became
-			// a real on-disk path and no longer holds rendered text (#2975).
+			// ReviewPromptText, not Handoff.ReviewPromptFile, which holds a
+			// path rather than rendered text (#2975).
 			gateActive = result.ReviewPromptText != ""
 			haystack = result.ReviewPromptText
 		case whenNotAdviseOnly:

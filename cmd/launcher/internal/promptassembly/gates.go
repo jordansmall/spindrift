@@ -1,9 +1,8 @@
 package promptassembly
 
 // Gates computes every gate the prompt fragment registry (lib/fragments.nix)
-// reads, with no I/O. Each key is the exact name the gate had as a bash
-// local in the retired entrypoint.sh phase, which is also the name the
-// registry's gate column uses, so the two must stay in step.
+// reads, with no I/O. Each key is the name the registry's gate column uses,
+// so the two must stay in step.
 func Gates(e Env) map[string]bool {
 	g := map[string]bool{}
 
@@ -47,12 +46,10 @@ func Gates(e Env) map[string]bool {
 
 	g["SCOUT_ABSENT"] = !e.ScoutProvisioned
 
-	// Both brief gates exclude every advise-only kind (research today): an
-	// advise-only dispatch is scout-less by construction (research-prompt.md
-	// never delegates one), so either gate would dangle a "read the brief"
-	// instruction on a file that kind never writes. The fragment registry
-	// allows one gate per row, so both conjunctions are computed here rather
-	// than nested inside their fragments.
+	// An advise-only dispatch is scout-less by construction, so either brief
+	// gate would dangle a "read the brief" instruction on a file that kind
+	// never writes. The registry allows one gate per row, so the conjunctions
+	// live here.
 	landsCode := !e.descriptor().AdviseOnly
 	g["COORDINATOR_SCOUT_BRIEF"] = e.WorkerProvisioned && e.ScoutProvisioned && landsCode
 	g["WORKER_SCOUT_BRIEF"] = e.ScoutProvisioned && landsCode
@@ -71,11 +68,10 @@ func Gates(e Env) map[string]bool {
 	socket := e.SignalCarrier == "socket"
 	g["SIGNAL_CARRIER_SOCKET"] = socket
 
-	// These gates carry a signal fragment (comment/PR-intent/issue-intent),
-	// each split into a log/socket pair so the fragment registry's one row
-	// per rendered fragment can pick the carrier variant. Both members are
-	// false whenever the base gate is off, so this is a plain conjunction
-	// rather than the exactly-one-on inverseOf mechanic (lib/fragment-pairs.nix).
+	// Each signal-carrying gate splits into a log/socket pair so one registry
+	// row per fragment can pick the carrier variant. Both are false when the
+	// base gate is off: a plain conjunction, not lib/fragment-pairs.nix's
+	// exactly-one-on inverseOf.
 	for _, base := range []string{
 		"ISSUE_TRACKER_GITHUB_READONLY",
 		"ISSUE_TRACKER_LOCAL",

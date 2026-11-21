@@ -35,11 +35,10 @@ var lockRaceWindowHook = func() {}
 var vacuumTempRaceWindowHook = func() {}
 
 // NixVarSnapshotDir is the host-side directory standing in for /nix/var inside a
-// bwrap Box's overlay lower (ADR 0042): the build command writes a VACUUMed
-// snapshot of /nix/var/nix/db/db.sqlite to <dir>/db-<V>/nix/db/db.sqlite, V the
-// host DB version (issue #6072), so the Box's nix trusts host-present store
-// paths. generation scopes it to one agent-closure (issue #2680); empty means
-// the flat pre-#2680 path.
+// bwrap Box's overlay lower (ADR 0042): a VACUUMed host db.sqlite lands at
+// <dir>/db-<V>/nix/db/db.sqlite, V the host DB version (issue #6072), so the
+// Box's nix trusts host-present store paths. generation scopes it to one
+// agent-closure (issue #2680); empty means the flat pre-#2680 path.
 func NixVarSnapshotDir(pwd, generation string) string {
 	return filepath.Join(NixVarSnapshotRoot(pwd), generation)
 }
@@ -69,10 +68,10 @@ func snapshotDBPath(dir string) string {
 }
 
 // RealizeLockPath is the lock concurrent cold starts on one snapshot root
-// serialize their snapshot write on. A sibling of root, never inside it:
-// reclaimStaleSnapshots sweeps any NAME.lock under root as a generation lock.
-// It is not a generation's SnapshotLockPath either, which a running Box holds
-// shared for its whole life. The file is never removed, so its inode is stable.
+// serialize their snapshot write on. A sibling of root, since
+// reclaimStaleSnapshots sweeps any NAME.lock under root, and distinct from
+// SnapshotLockPath, which a running Box holds shared for life. Never removed,
+// so its inode is stable.
 func RealizeLockPath(root string) string {
 	return root + ".realize.lock"
 }
@@ -99,14 +98,12 @@ func lockRealize(root string, onWait func()) (*os.File, error) {
 	return lf, nil
 }
 
-// registerGenerationRoot keeps storePaths from being garbage-collected while
-// generation is live, by building each with --out-link under
-// <rootsRoot>/<generation>/ (nix makes each link an indirect GC root). The
-// paths are otherwise only realized with --no-link, so a nix-collect-garbage
-// would free them from under a running Box. One build per path, so a single
-// invalid path leaves the rest rooted. An empty generation is the flat path,
-// which is never reclaimed, so a root there would leak forever. Never fails
-// the build: a root that did not register only risks a later GC.
+// registerGenerationRoot keeps storePaths, otherwise realized --no-link, from
+// being garbage-collected under a running Box, via --out-link indirect roots
+// under <rootsRoot>/<generation>/. One build per path, so one invalid path
+// leaves the rest rooted. The flat path (empty generation) is never reclaimed,
+// so a root there would leak forever. Never fails the build: a missed root
+// only risks a later GC.
 func registerGenerationRoot(rootsRoot, generation string, storePaths []string) {
 	if generation == "" || rootsRoot == "" {
 		return
@@ -145,11 +142,9 @@ func registerMountedArtifactRoots(rootsRoot, generation string, closureSide []st
 }
 
 // ClosureGeneration derives NixVarSnapshotDir's generation subdir from a
-// bwrap artifacts part's ImageTag. imageTag originates in the Launcher input
-// document's bwrap part, which an untrusted source can influence, and becomes
-// a path component reclaimStaleSnapshots later os.RemoveAlls, hence
-// SafePathComponent. A rejected non-empty imageTag warns: it would otherwise
-// silently disable stale reclaim.
+// bwrap artifacts part's ImageTag. The tag is untrusted and becomes a path
+// reclaimStaleSnapshots RemoveAlls, hence SafePathComponent. A rejected
+// non-empty tag warns, since its flat-path fallback disables stale reclaim.
 func ClosureGeneration(imageTag string) string {
 	gen := runner.SafePathComponent(imageTag)
 	if imageTag != "" && gen == "" {
@@ -158,10 +153,8 @@ func ClosureGeneration(imageTag string) string {
 	return gen
 }
 
-// generationLabelWarnLimit bounds how much of a rejected generation source
-// ClosureGeneration's warning echoes. The value is untrusted text with no length
-// bound of its own, so printing it whole would let a hostile one emit an
-// arbitrarily long line into the launcher's log.
+// generationLabelWarnLimit bounds how much of an untrusted, unbounded rejected
+// generation source ClosureGeneration's warning echoes into the log.
 const generationLabelWarnLimit = 256
 
 // truncateGenerationLabel cuts s on a rune boundary so the tail cannot become a
@@ -177,19 +170,16 @@ func truncateGenerationLabel(s string) string {
 	return string(r[:generationLabelWarnLimit]) + "..."
 }
 
-// SnapshotLockPath spells the "<generation dir>.lock" convention: a sibling of
-// the generation dir, never a file inside it, since buildArgs --overlay-src
-// binds that dir into the sandbox and a lock file inside it would risk being
-// swept up by the mount.
+// SnapshotLockPath spells the "<generation dir>.lock" convention: a sibling,
+// since --overlay-src binds the dir itself into the sandbox.
 func SnapshotLockPath(dir string) string {
 	return dir + ".lock"
 }
 
-// LockSnapshotShared opens (creating if needed) and takes a blocking shared
-// advisory flock on dir's SnapshotLockPath. The path's inode is not stable: a
-// concurrent sweepOrphanedLock can remove it between this open and the Flock,
-// leaving a lock on an inode nothing resolves to, so verify identity afterwards
-// (LockedFDMatchesPath) and retry against a fresh fd, bounded (issues #2680, #3005).
+// LockSnapshotShared takes a blocking shared flock on dir's SnapshotLockPath,
+// creating it. A concurrent sweepOrphanedLock can remove the path between open
+// and Flock, so identity is verified afterwards and a fresh fd retried, bounded
+// (issues #2680, #3005).
 func LockSnapshotShared(dir string) (*os.File, error) {
 	const maxAttempts = 100
 	path := SnapshotLockPath(dir)
@@ -206,8 +196,6 @@ func LockSnapshotShared(dir string) (*os.File, error) {
 		if LockedFDMatchesPath(lf, path) {
 			return lf, nil
 		}
-		// lf's lock protects an inode nothing resolves to anymore. Drop it and
-		// retry against whatever is at the path now.
 		UnlockSnapshot(lf)
 	}
 	return nil, fmt.Errorf("lockSnapshotShared: %s kept changing identity after locking across %d attempts", path, maxAttempts)
@@ -243,18 +231,15 @@ func UnlockSnapshot(lf *os.File) {
 // SnapshotGeneration prepares a closure hot-swapped mid-run before binding it.
 // For a nixInBox Consumer it writes the nix-var snapshot for the host DB's
 // current version (ADR 0043, issues #2682, #6072), so the copy happens here
-// rather than in Run's recreate. It skips the vacuum when that version's
-// db.sqlite already exists, since a live Box may be reading it, and never
-// reclaims: an idle Dispatch holds no flock on a generation it will launch
-// against again. It drops the version lock before returning; Run takes it for
-// the Box's life.
+// rather than in Run's recreate; an existing db.sqlite is not re-vacuumed, as
+// a live Box may be reading it. It never reclaims: an idle Dispatch holds no
+// flock on a generation it will launch against again.
 //
-// It also GC-roots what a Box on the swapped generation mounts: the closure,
-// plus the passwd, group and syscall filter the daemon booted with (issue
-// #5995). The root is registered even when db.sqlite already exists, so a
-// re-swap onto a generation still roots it. With nixInBox off
-// (art.NixConfigFile empty) only the lock and roots happen: the Box mounts no
-// nix-var snapshot, so none is written and no VACUUM runs (issue #5996).
+// It always GC-roots what a Box on the swapped generation mounts, even when
+// db.sqlite already exists, so a re-swap onto a generation still roots it
+// (issue #5995). With nixInBox off only the lock and roots happen (issue
+// #5996). It drops the version lock before returning; Run
+// takes it for the Box's life.
 func SnapshotGeneration(art inputdoc.BwrapArtifacts, pwd, closurePath string) error {
 	generation := ClosureGeneration(closurePath)
 	dir := NixVarSnapshotDir(pwd, generation)
@@ -287,17 +272,13 @@ func SnapshotGeneration(art inputdoc.BwrapArtifacts, pwd, closurePath string) er
 // It is the one Go call site that reaches into live host store metadata.
 const hostNixDBPath = "/nix/var/nix/db/db.sqlite"
 
-// VacuumStoreDBInto does the VACUUM INTO and install work against an explicit
-// dir, so the run-time hot-swap caller (SnapshotGeneration) reuses it rather
-// than reaching it only through a bwrapBuildAdapter's baked field (issue
-// #2682). Writes dir/nix/db/db.sqlite; callers pass a version dir (see
-// prepareSnapshotVersion). The finished temp is linked in only if db.sqlite is
-// absent, never replacing one a running Box may be reading (ADR 0043).
-// It compacts in the same step (ADR 0042: ~302MB raw vs ~104MB compacted, and an
-// overlay copy-up rewrites a file whole, so the compacted size is what lands in
-// the Box's tmpfs upper on first touch). VACUUM INTO fills a temp the launcher
-// itself created, so the snapshot is owned by the invoking uid and needs no
-// chown.
+// VacuumStoreDBInto writes dir/nix/db/db.sqlite for an explicit version dir
+// rather than an adapter's baked field, so the hot-swap caller
+// (SnapshotGeneration) reuses it too (issue #2682). The finished temp is
+// linked in only if db.sqlite is absent, never replacing one a running Box may
+// be reading (ADR 0043). It compacts in the same step (ADR 0042: ~302MB raw vs
+// ~104MB, and overlay copy-up rewrites a file whole into the Box's tmpfs). The
+// temp is the launcher's own, so the snapshot needs no chown.
 func VacuumStoreDBInto(dir string) error {
 	if err := checkHostNixDB(); err != nil {
 		return err
@@ -308,13 +289,11 @@ func VacuumStoreDBInto(dir string) error {
 		return fmt.Errorf("mkdir nix-var-snapshot: %w", err)
 	}
 
-	// Vacuum into a temp sibling and install over dest only on success, so dest
-	// only ever names a complete snapshot: prepareSnapshotVersion's existence check
-	// and IsReady trust it, and a failed vacuum (disk full, host db locked) must
-	// neither leave a partial dest nor destroy a previous one (#2664, #4817).
-	// The name must be unique: concurrent launchers hold only a shared lock.
-	// createLockedVacuumTemp and sweepStaleVacuumTemps cover ownership and the
-	// reclaim of temps a killed launcher leaks.
+	// Vacuum into a uniquely named temp and install only on success, so dest
+	// only ever names a complete snapshot: existence checks trust it, and a
+	// failed vacuum must neither leave a partial dest nor destroy a previous
+	// one (#2664, #4817). The name must be unique: concurrent launchers hold
+	// only a shared lock.
 	sweepStaleVacuumTemps(filepath.Dir(dest))
 	tmpFile, err := createLockedVacuumTemp(filepath.Dir(dest))
 	if err != nil {
@@ -329,11 +308,10 @@ func VacuumStoreDBInto(dir string) error {
 		return fmt.Errorf("prepare temp nix store db snapshot %s: %w", tmp, err)
 	}
 
-	// "VACUUM INTO" uses sqlite's online-backup mechanism, so it handles a
-	// concurrent nix-daemon write (WAL not yet checkpointed) that a plain file
-	// copy could snapshot mid-write, and it compacts into the destination in the
-	// same step. tmp is escaped for a single-quoted SQL literal; sqlite3's
-	// dot-commands are whitespace-tokenized, but a SQL statement on argv is not.
+	// VACUUM INTO uses sqlite's online backup, so unlike a plain copy it cannot
+	// catch a concurrent nix-daemon write mid-write. tmp is escaped for a
+	// single-quoted SQL literal; unlike sqlite3's dot-commands, a SQL
+	// statement on argv is not whitespace-tokenized.
 	escapedTmp := strings.ReplaceAll(tmp, "'", "''")
 	stmt := fmt.Sprintf("VACUUM INTO '%s';", escapedTmp)
 	vacuumInto := execCommand("sqlite3", hostNixDBPath, stmt)
@@ -344,9 +322,8 @@ func VacuumStoreDBInto(dir string) error {
 		return fmt.Errorf("sqlite3 vacuum-into nix store db snapshot: %w", err)
 	}
 
-	// Link, never rename: a concurrent launcher may have installed dest and
-	// started a Box on it, and a swap must not replace a file a running Box is
-	// reading (ADR 0043).
+	// Link, never rename: a Box may already be reading a concurrently
+	// installed dest (ADR 0043).
 	err = os.Link(tmp, dest)
 	removeVacuumTemp(tmp)
 	if errors.Is(err, fs.ErrExist) {
@@ -363,14 +340,12 @@ func VacuumStoreDBInto(dir string) error {
 // concurrent sweep.
 const maxVacuumTempAttempts = 3
 
-// createLockedVacuumTemp creates a vacuum temp in dir and returns it holding
-// the exclusive flock that marks it owned. A concurrent sweep can lock and
-// unlink the fresh temp between CreateTemp and Flock, leaving this fd locked on
-// an orphaned inode; LockedFDMatchesPath catches that and retries with a new
-// temp. Once the locked fd matches the path, no sweep can remove it. A stat
-// failure other than a sweep also reads as a mismatch, so the retry may leave
-// that temp behind; it is unlocked once f closes, and the next
-// sweepStaleVacuumTemps reclaims it.
+// createLockedVacuumTemp creates a vacuum temp in dir holding the exclusive
+// flock that marks it owned. A concurrent sweep can unlink the temp between
+// CreateTemp and Flock, so a path mismatch retries with a new temp; once the
+// locked fd matches the path, no sweep can remove it. A stat failure also
+// reads as a mismatch and may leave that temp behind, unlocked, for the next
+// sweepStaleVacuumTemps.
 func createLockedVacuumTemp(dir string) (*os.File, error) {
 	for range maxVacuumTempAttempts {
 		f, err := os.CreateTemp(dir, vacuumTempPrefix+"*")
@@ -412,16 +387,11 @@ func removeVacuumTemp(path string) {
 	}
 }
 
-// sweepStaleVacuumTemps removes vacuum temps in dir that no live launcher owns.
-// Ownership is the exclusive flock VacuumStoreDBInto holds on its temp, so a
-// non-blocking exclusive Flock that succeeds means the owner is gone or has not
-// locked yet (it re-checks the path after locking and retries if swept), and
-// EWOULDBLOCK leaves a concurrent launcher's temp alone. Only names CreateTemp
-// can produce (digits after the prefix) count: sqlite3's side files, such as
-// <tmp>-journal, share the prefix but hold no flock, so a live vacuum's journal
-// would otherwise look stale. A stale temp's journal, leaked when sqlite3 died
-// with its launcher, goes with it. Best-effort: errors warn and never fail the
-// vacuum.
+// sweepStaleVacuumTemps removes vacuum temps in dir whose owner's exclusive
+// flock is gone; an owner that has not locked yet re-checks and retries. Only
+// CreateTemp-shaped names count: sqlite3's <tmp>-journal shares the prefix but
+// holds no flock, so a live vacuum's journal would look stale. A stale temp's
+// journal goes with it. Best-effort: errors only warn.
 func sweepStaleVacuumTemps(dir string) {
 	matches, err := filepath.Glob(filepath.Join(dir, vacuumTempPrefix+"*"))
 	if err != nil {
@@ -476,14 +446,12 @@ func checkHostNixDB() error {
 }
 
 // hostStoreDBVersion is the host DB's version, "<max>-<count>" over
-// ValidPaths. nix autoincrements ids and never reuses one, so for a fixed max the
-// row set only shrinks: (max, count) names exactly one ValidPaths set over the
-// DB's history (the key, not the file: the probe runs before VACUUM INTO, so a
-// registration landing in between leaves the snapshot slightly newer than its
-// key). A registration raises max; a GC deletion changes count (or max),
-// so every host GC lands in a fresh db-<V> dir rather than reusing a snapshot
-// that still lists deleted paths (issue #6101). Its own seam, apart from
-// execCommand, so tests counting sqlite3 calls need not model the probe.
+// ValidPaths. nix never reuses an id, so at a fixed max rows only shrink and
+// (max, count) names one ValidPaths set in the DB's history. A GC deletion
+// changes count (or max), so every host GC lands in a fresh db-<V> dir rather than reusing a snapshot listing deleted
+// paths (issue #6101). The probe precedes VACUUM INTO, so a snapshot may be
+// slightly newer than its key. Its own seam, so tests counting sqlite3 calls
+// need not model it.
 var hostStoreDBVersion = func() (string, error) {
 	if err := checkHostNixDB(); err != nil {
 		return "", err
@@ -557,11 +525,8 @@ func isDecimal(s string) bool {
 }
 
 // newestSnapshotDir is the complete snapshot under genDir with the newest
-// version in snapshotVersionRank order, so a failed host probe can still reuse
-// what a prior run wrote. "" when there is none. A flat pre-#6072 snapshot in
-// genDir never counts: it is a lower an older launcher's Box may mount, and
-// mounting it here would put this launcher's db-<V> dirs inside that lower
-// (issue #6100).
+// version, so a failed host probe can still reuse what a prior run wrote; ""
+// when there is none. A flat pre-#6072 snapshot never counts (issue #6100).
 func newestSnapshotDir(genDir string) string {
 	entries, err := os.ReadDir(genDir)
 	if err != nil && !os.IsNotExist(err) {
@@ -603,10 +568,9 @@ func currentSnapshotDir(genDir string) (string, error) {
 }
 
 // prepareSnapshotVersion resolves the current version dir under genDir, takes
-// its shared lock and writes the snapshot unless one is already there. The
-// returned lock is still held for the caller to release, since a Box keeps it
-// for its life; on error it is released here. A lock that cannot be taken warns
-// and yields a nil lf, as the other callers do.
+// its shared lock and writes the snapshot unless one is already there. The lock
+// is returned held, since a Box keeps it for its life. lf is nil on error, or
+// when the lock cannot be taken, which only warns.
 func prepareSnapshotVersion(genDir string) (dir string, lf *os.File, err error) {
 	dir, err = currentSnapshotDir(genDir)
 	if err != nil {
@@ -648,12 +612,11 @@ func flatSnapshotPath(genDir string) string {
 }
 
 // retireFlatSnapshot removes a pre-#6072 flat nix/ under genDir once nothing
-// can be mounting it. Every Box, old or new, holds genDir's lock shared for its
-// life, so a non-blocking exclusive flock succeeding proves no Box does; held
-// means one may, and the flat snapshot stays. Best effort: callers go on to
-// prepareSnapshotVersion, which refuses to write beside a surviving flat nix/.
-// A failed host probe with no complete db-<V> keeps it: --no-build's IsReady
-// still counts the flat snapshot, and nothing will replace it this run.
+// can be mounting it: every Box holds genDir's lock shared for life, so a
+// non-blocking exclusive flock proves none does. Best effort;
+// prepareSnapshotVersion refuses to write beside a survivor. A failed host
+// probe with no complete db-<V> keeps it: --no-build's IsReady still counts
+// it, and nothing replaces it this run.
 // Call it before taking genDir's shared lock, which it would conflict with.
 func retireFlatSnapshot(genDir string) {
 	flat := flatSnapshotPath(genDir)

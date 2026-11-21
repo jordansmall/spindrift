@@ -8,11 +8,11 @@ import (
 	"spindrift.dev/launcher/internal/boxclone"
 )
 
-// cloneTarget clones the Target repo into the work dir and stands in it, the
-// way bash's clone_repo and `cd` did. A self-contained Box (issue #2202) has no
-// repo to clone or explore, so it gets an empty work dir instead. It runs
-// before branch recovery, which needs the clone, and after the kind check, so
-// an unrecognized kind fails before anything is cloned.
+// cloneTarget clones the Target repo into the work dir and stands in it. A
+// self-contained Box (issue #2202) has no repo to clone or explore, so it gets
+// an empty work dir instead. It runs before branch recovery, which needs the
+// clone, and after the kind check, so an unrecognized kind fails before
+// anything is cloned.
 func (r *boxRun) cloneTarget() error {
 	if r.env.SelfContained {
 		if err := os.MkdirAll(r.in.WorkDir, 0o755); err != nil {
@@ -24,8 +24,7 @@ func (r *boxRun) cloneTarget() error {
 	if err := r.d.Chdir(r.in.WorkDir); err != nil {
 		return phaseErr("clone", fmt.Errorf("enter work dir: %w", err))
 	}
-	// Go's Chdir leaves PWD alone and the orchestrator inherits it, as it did
-	// from bash's `cd`.
+	// Go's Chdir leaves PWD stale, and the orchestrator inherits PWD.
 	if err := r.d.Setenv("PWD", r.in.WorkDir); err != nil {
 		return phaseErr("env-export", err)
 	}

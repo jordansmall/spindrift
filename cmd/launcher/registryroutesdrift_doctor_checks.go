@@ -80,10 +80,10 @@ type targetRepoSource struct {
 // resolveTargetRepoSource keys on backendkit.ByName(c.CodeForge).HostMediatedRemote,
 // not a codeForge == "local" compare a future host-mediated backend would
 // break. A host-mediated forge reads the bare Accumulation repo at
-// c.BaseBranch, the same snapshot the launch itself derives host-rooted routes
-// from. Only ResolveRef runs eagerly, and it materializes nothing, so a
-// fail-fast run that never reaches a Probe leaks no snapshot dir. ok is false
-// when no Target repo resolves.
+// c.BaseBranch, the snapshot the launch derives host-rooted routes from. Only
+// ResolveRef runs eagerly and it materializes nothing, so a fail-fast run that
+// never reaches a Probe leaks no snapshot dir. ok is false when no Target repo
+// resolves.
 func resolveTargetRepoSource(c config) (src targetRepoSource, ok bool) {
 	row, _ := backendkit.ByName(c.CodeForge)
 	if row.HostMediatedRemote {

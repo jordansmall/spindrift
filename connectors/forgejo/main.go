@@ -1,16 +1,10 @@
-// Command forgejo is the Forgejo forge and tracker as a Connector (ADR 0073):
-// the branch primitives, the PR and commit-status reads, the PR write
-// primitives, the tracker reads (issues, comments, native dependencies), and
-// the tracker's probe, open-issue count, labeled scan and text search, and the
-// tracker writes (label edits, comments, filing, closing, the label registry)
-// over REST, sent through the host's http_request Host call, which
-// attaches the credential. The Connector is always the Code Forge; the native
-// forgejo adapter still builds the issue tracker unless the row sets
-// `primary`, which routes the tracker through the Connector with no
-// fallback. Forgejo has no statuses, so a transition always answers unmapped
-// and core swaps labels.
-// The Connector returns raw fields only, and core makes every policy
-// decision.
+// Command forgejo is the Forgejo Code Forge and issue tracker as a Connector
+// (ADR 0073, #7122): branch primitives, PR and commit-status reads, PR writes,
+// and the tracker's reads, probe, count, scan, search and writes, over REST
+// through the host's http_request Host call, which attaches the credential.
+// Forgejo has no statuses, so a transition always answers unmapped and core
+// swaps labels. The Connector returns raw fields only; core makes every
+// policy decision.
 package main
 
 import (

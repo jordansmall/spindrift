@@ -33,12 +33,10 @@ type Config struct {
 // sees current origin/BASE_BRANCH, not the state captured at clone time.
 // Narration goes to stdout; git keeps its own stdout and stderr streams.
 func Clone(cfg Config, stdout, stderr io.Writer) error {
-	// Under rootless podman the Box's mapped uid never matches the
-	// host-owned bind mount's uid, so git's dubious-ownership guard
-	// rejects RepoMountDir before the clone copies a single object
-	// (#1720). Both paths outlive the clone step, so these are standing
-	// global entries: the one exception to the repo-local-only config rule
-	// below.
+	// Under rootless podman the Box's mapped uid never matches the bind
+	// mount's, so git's dubious-ownership guard rejects RepoMountDir (#1720).
+	// Both paths outlive the clone, so these are standing global entries: the
+	// one exception to the repo-local identity rule below.
 	for _, dir := range []string{cfg.RepoMountDir, cfg.WorkDir} {
 		if err := run(stdout, stderr, "", "git", "config", "--global", "--add", "safe.directory", dir); err != nil {
 			return err
@@ -68,13 +66,10 @@ func Clone(cfg Config, stdout, stderr io.Writer) error {
 
 // addForgeRemote gives the mirror clone a credential-free "forge" remote naming
 // the repo's web URL, since origin is the mount path. skipFetchAll keeps `git
-// fetch --all` off the forge, which the Box holds no credential for.
-// remote.pushDefault is repo-wide: every branch without its own pushRemote
-// pushes to forge, where branch recovery would otherwise leave it on origin. A
-// push naming no remote then goes to forge; the read-only guard points forge's
-// pushurl at the decoy in every Box that has a forge to guard (all but a
-// self-contained dispatch). A forge with no web URL (local, git) gets no
-// remote.
+// fetch --all` off the uncredentialed forge. remote.pushDefault is repo-wide
+// and outranks the origin upstream that branch recovery sets, so any push
+// naming no remote goes to forge, whose pushurl the read-only guard points at
+// the decoy. A forge with no web URL (local, git) gets no remote.
 func addForgeRemote(cfg Config, stdout, stderr io.Writer) error {
 	s, ok := backendkit.ByName(cfg.CodeForge)
 	if !ok || s.WebURL == nil {

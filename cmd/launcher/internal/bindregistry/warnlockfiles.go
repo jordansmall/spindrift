@@ -12,10 +12,9 @@ import (
 // WarnStaleLockfiles is the settle-time lockfile scan (issue #3199): it warns
 // on w about any git-tracked lockfile in workDir still naming the run's
 // Forwarder URL, a stale pin that would otherwise ship silently in the PR. It
-// parses REGISTRY_PROXY_MANIFEST directly and never resolves the Forwarder
-// readiness gate, which probes and can spawn the Forwarder; a settle-time scan
-// must never do that. An absent manifest (registry proxy off) is silent, and
-// every failure path only warns.
+// parses REGISTRY_PROXY_MANIFEST directly rather than resolving the Forwarder
+// readiness gate, which can spawn a Forwarder. An absent manifest is silent; every failure only
+// warns.
 func WarnStaleLockfiles(w io.Writer, workDir string, rows []ecosystem.Strategy, getenv func(string) string) {
 	if _, err := registrymanifest.Parse(getenv(registrymanifest.EnvVar)); err != nil {
 		if errors.Is(err, registrymanifest.ErrAbsent) {

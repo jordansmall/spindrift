@@ -13,11 +13,9 @@ import (
 )
 
 // checkoutLockFileName is the well-known lock file name within a checkout's
-// git dir. It is never removed on Release: the point of flock is that the
-// kernel releases it when the holder dies (including an uncatchable
-// SIGKILL), so there is nothing stale to clean up and a fresh daemon can
-// always re-acquire it. Deleting the file on release would only reintroduce
-// a race with a concurrent acquirer.
+// git dir. It is never removed on Release: the kernel releases a flock when
+// the holder dies (even on SIGKILL), so nothing goes stale, and deleting the
+// file would race a concurrent acquirer.
 const checkoutLockFileName = "spindrift-daemon.lock"
 
 // CheckoutLock is a held, per-checkout exclusive lock enforcing that at
@@ -29,14 +27,10 @@ type CheckoutLock struct {
 	file *os.File
 }
 
-// acquireGraceTotal bounds how long AcquireCheckoutLock retries a
-// LOCK_EX|LOCK_NB attempt that found the lock held (flock.ErrHeld) before
-// it gives up and reports it. It exists to tell a status reader's momentary
-// LOCK_SH probe (held for a few syscalls, then released — see
-// probeCheckoutLock) from a genuine daemon, which holds LOCK_EX for its
-// whole life and so still exhausts the full grace period and gets
-// reported. Kept short: an operator's mistaken second daemon must still
-// see "already running" promptly, not a hang.
+// acquireGraceTotal bounds how long AcquireCheckoutLock retries a held
+// lock (flock.ErrHeld), telling a status reader's momentary LOCK_SH probe
+// (probeCheckoutLock) from a genuine daemon holding LOCK_EX for life. Kept
+// short so a mistaken second daemon still sees "already running" promptly.
 const acquireGraceTotal = 50 * time.Millisecond
 
 // acquireGraceStep is the sleep between retries within acquireGraceTotal.
@@ -49,16 +43,12 @@ var acquireSleep = time.Sleep
 
 // AcquireCheckoutLock takes a non-blocking exclusive lock on
 // filepath.Join(dir, "spindrift-daemon.lock") and stamps the holder's
-// identity into the file. dir is expected to already exist (the caller
-// passes a git dir); a missing dir is a real error, not silently created.
+// identity into the file. dir must already exist (a git dir); a missing dir
+// is a real error.
 //
-// Every attempt uses LOCK_NB, so it never blocks the kernel-level way; an
-// operator running a second daemon by mistake still sees "already running"
-// within acquireGraceTotal, not a hang. But a lone flock.ErrHeld is retried
-// for up to acquireGraceTotal before being reported, because a status
-// reader's LOCK_SH probe can transiently hold the lock across a few
-// syscalls — without the retry, that window would make a starting daemon
-// mistake a passing reader for a second daemon and refuse to start.
+// Every attempt uses LOCK_NB, but flock.ErrHeld is retried for up to
+// acquireGraceTotal, so a status reader's transient LOCK_SH probe is not
+// mistaken for a second daemon.
 func AcquireCheckoutLock(dir string, kinds []Kind) (*CheckoutLock, error) {
 	lockPath := filepath.Join(dir, checkoutLockFileName)
 
@@ -209,14 +199,12 @@ func writeHolderIdentity(file *os.File, kinds []Kind) error {
 
 // readHolderIdentity reads back whatever identity line a lock-holding
 // process wrote, for a refused acquirer's error message. The file may be
-// empty or unreadable in the narrow window where the holder has flocked
-// but not yet written (or is mid-write of) its identity line — in that
-// case, say so plainly rather than inventing a PID.
+// empty while the holder has flocked but not yet written its line; say so
+// rather than inventing a PID.
 func readHolderIdentity(file *os.File) string {
 	buf := make([]byte, 4096)
-	// ReadAt returns a non-nil error at or before EOF even on a successful
-	// partial read; n is what matters here, not err — this is a best-effort
-	// diagnostic read, not a correctness-critical one.
+	// ReadAt returns an error at EOF even on a successful partial read; n
+	// is what matters for this best-effort diagnostic.
 	n, _ := file.ReadAt(buf, 0)
 	line := strings.TrimSpace(string(buf[:n]))
 	if line == "" {

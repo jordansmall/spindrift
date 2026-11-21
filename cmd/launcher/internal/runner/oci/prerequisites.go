@@ -10,8 +10,7 @@ import (
 const cliPodman = "podman"
 
 // podmanMachineMemoryCheckName is the Name of the podman-machine-memory
-// prerequisite row, so callers match on the constant rather than the bare
-// string literal.
+// prerequisite row.
 const podmanMachineMemoryCheckName = "podman-machine-memory"
 
 // vmOverheadMiB is the RAM the machine's own OS and daemon compete for
@@ -34,9 +33,8 @@ func memoryLimitMiB(limit string) (int, error) {
 }
 
 // podmanMachineRequiredMiB is the RAM maxParallel containers each capped at
-// memoryLimit need from the machine. The remedy and the Probe's failure
-// message both name this figure, so both route through here rather than
-// re-deriving it from a second parse.
+// memoryLimit need from the machine; the remedy and the Probe's failure
+// message both name it.
 func podmanMachineRequiredMiB(memoryLimit string, maxParallel int) (int, error) {
 	limitMiB, err := memoryLimitMiB(memoryLimit)
 	if err != nil {
@@ -62,15 +60,12 @@ func podmanMachineMemoryRemedy(memoryLimit string, maxParallel int) string {
 }
 
 // Prerequisites declares the oci family's runtime row and its
-// "podman-machine-memory" row (issue #3537), porting the driving loop's old
-// shell preflight (#580, parallelism-aware per #712) into doctor's own report.
-// On macOS/Windows
+// "podman-machine-memory" row (issues #3537, #580, #712). On macOS/Windows
 // podman runs containers in a VM with fixed RAM, so when MAX_PARALLEL
 // containers together want more than the machine has, the VM's OOM-killer
-// fires before any single container's --memory cap ever bites (#565 killed
-// an in-box `nix build`; #712 took down the whole VM). The row is declared for
-// every runtime of the family; docker and rancher use no podman machine, so
-// their Probe reports not applicable.
+// fires before any container's --memory cap bites (#565 killed an in-box
+// `nix build`; #712 took down the whole VM). docker and rancher use no podman
+// machine, so their Probe reports not applicable.
 func Prerequisites(cfg runner.Config, _ runner.KnobLookup) []runner.Prerequisite {
 	return []runner.Prerequisite{runner.RuntimePrerequisite(cfg.Runtime), {
 		Name:     podmanMachineMemoryCheckName,

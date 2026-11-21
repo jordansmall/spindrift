@@ -20,14 +20,12 @@ var TransientPatterns = []driver.Pattern{
 	{Substr: "Overloaded", Reason: driver.Overloaded},
 }
 
-// TerminalPatterns holds markers for non-retryable harness argv rejections. opencode
-// rejects an unknown flag (the harness passes effort as --variant) through
-// yargs .strict() with a custom fail handler that prints the `run` usage dump
-// instead of yargs' "Unknown argument" line, then exits 1; "Unknown argument"
-// stays as a guard for an opencode that stops swallowing that message. The
-// usage banner also fires on yargs' sibling rejections ("Not enough non-option
-// arguments", "Invalid values:"), all of which are argv faults a retry cannot
-// fix.
+// TerminalPatterns holds markers for non-retryable harness argv rejections.
+// opencode's yargs fail handler answers an unknown flag (effort rides
+// --variant) with the `run` usage dump instead of yargs' "Unknown argument"
+// line, and answers the sibling argv rejections the same way; a retry fixes
+// none of them. "Unknown argument" guards an opencode that stops swallowing
+// that message.
 var TerminalPatterns = []driver.Pattern{
 	{Substr: "opencode run [message..]", Reason: driver.UnsupportedFlag},
 	{Substr: "Unknown argument", Reason: driver.UnsupportedFlag},

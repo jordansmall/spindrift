@@ -19,38 +19,27 @@ type DueConfig struct {
 	ClaimTimeout time.Duration
 }
 
-// Budgets caps a local day's butler activity. A zero field means that
-// dimension has no limit; the zero value of Budgets is unlimited. Budgets
-// are global across every enabled Chore, not per Chore: they gate whether a
-// run may start at all, and the totals they compare against come only from
-// the Ledger (no second store).
+// Budgets caps a local day's butler activity across every enabled Chore,
+// gating whether a run may start, against totals from the Ledger alone. A zero
+// field means no limit, except where noted.
 type Budgets struct {
-	// MaxSweepsPerDay caps how many claims (runs started) may happen in a
-	// local day, across every Chore.
+	// MaxSweepsPerDay caps claims (runs started).
 	MaxSweepsPerDay int
-	// MaxFindingsPerDay caps how many findings may be filed in a local day,
-	// across every Chore.
+	// MaxFindingsPerDay caps findings filed.
 	MaxFindingsPerDay int
-	// MaxFindingsPerSweep caps how many findings a single sweep may file.
-	// Combined with MaxFindingsPerDay it bounds one run's contribution to the
-	// day (see Room's doc for the rationale); when MaxFindingsPerDay is 0
-	// this field never gates starting a run, and only settle's own
-	// per-sweep cap applies. When this field is 0 but MaxFindingsPerDay is
-	// set, the sweep is still capped at the day's remaining headroom
-	// (Room.Findings): 0 means no per-sweep limit, not an uncapped run.
+	// MaxFindingsPerSweep caps one sweep's filings (see Budgets.Room for why
+	// it gates starting). With MaxFindingsPerDay 0 it never gates a start and
+	// only settle's per-sweep cap applies; this field at 0 with
+	// MaxFindingsPerDay set still caps the sweep at the day's remaining
+	// headroom.
 	MaxFindingsPerSweep int
-	// DailyTokenCeiling caps a local day's total token usage
-	// (usage.Usage.TotalTokens), across every Chore.
+	// DailyTokenCeiling caps usage.Usage.TotalTokens.
 	DailyTokenCeiling int
-	// MaxPromotionsPerDay caps how many findings a local day may
-	// auto-promote, across every Chore. 0 means promotion is off, not
-	// unlimited -- unlike this struct's other fields, so it is never a start
-	// gate (see Room.Promotions).
+	// MaxPromotionsPerDay caps auto-promotions. 0 means promotion is off, not
+	// unlimited, so it is never a start gate (see Room.Promotions).
 	MaxPromotionsPerDay int
-	// MaxPatchesPerDay caps how many patches (ADR 0057) a local day may land,
-	// across every Chore. 0 means the patch rung is off, not unlimited --
-	// unlike this struct's other fields, so it is never a start gate (see
-	// Room.Patches).
+	// MaxPatchesPerDay caps patches (ADR 0057). 0 means the patch rung is off,
+	// not unlimited, so it is never a start gate (see Room.Patches).
 	MaxPatchesPerDay int
 }
 
@@ -99,8 +88,7 @@ const (
 )
 
 // String gives the short human text the cmd layer prints as
-// "chore X not due: <reason>". Due's own text is only used if a caller
-// prints it unconditionally rather than gating on it first.
+// "chore X not due: <reason>".
 func (r NotDue) String() string {
 	switch r {
 	case Due:
@@ -126,25 +114,19 @@ func (r NotDue) String() string {
 	}
 }
 
-// Check decides whether a Chore is due to run right now: its interval has
-// elapsed since its last Done, there is something to scan, no live claim
-// holds it, and room (today's cross-Chore budget headroom, computed once per
-// Sweep by Budgets.Room) still allows starting. It is a pure function of tip
-// (the Ledger's current head), recent (the caller's
-// ledger.Backend.History(chore, now.Add(-cfg.Every)), newest first), head
-// (the repo's current commit), now, room, and cfg — no I/O.
-//
-// recent is expected to already be windowed to now.Add(-cfg.Every), but Check
-// re-checks each entry's age itself (now.Sub(e.At) < cfg.Every) rather than
-// trusting the caller's window precisely, so a caller that over-fetches
-// doesn't change the result.
+// Check decides, with no I/O, whether a Chore is due to run now: its interval
+// has elapsed since its last Done, there is something to scan, no live claim
+// holds it, and room still allows starting. recent is the caller's
+// ledger.Backend.History(chore, now.Add(-cfg.Every)), newest first; Check
+// re-checks each entry's age, so a caller that over-fetches doesn't change
+// the result.
 func Check(tip ledger.Tip, recent []ledger.Entry, head string, now time.Time, room Room, cfg DueConfig) NotDue {
 	if r := checkGates(tip, recent, now, room, cfg); r != Due {
 		return r
 	}
 
 	// Fully rotated (cursor back at the top) with no new commits since the
-	// last sweep: nothing new to scan.
+	// last sweep.
 	if tip.State.LastSwept == head && tip.State.Cursor == "" {
 		return NothingToScan
 	}
@@ -152,12 +134,11 @@ func Check(tip ledger.Tip, recent []ledger.Entry, head string, now time.Time, ro
 	return Due
 }
 
-// CheckRecords is Check for a records-scoped Chore (ADR 0062): the same claim,
-// interval and budget gates, but the something-to-scan test counts new settled
-// Dispatch Records (NewSettledRecords) instead of comparing the tree head. It
-// returns TooFewRecords when newSettled is under minRecords. newSettled == 0 is
-// never due, whatever minRecords is: a missing or empty store is the caller
-// passing 0, and a Chore with nothing to read must not run.
+// CheckRecords is Check for a records-scoped Chore (ADR 0062): the
+// something-to-scan test counts new settled Dispatch Records instead of
+// comparing the tree head. newSettled == 0 is never due, whatever minRecords
+// is: a missing or empty store arrives as 0, and a Chore with nothing to read
+// must not run.
 func CheckRecords(tip ledger.Tip, recent []ledger.Entry, newSettled, minRecords int, now time.Time, room Room, cfg DueConfig) NotDue {
 	if r := checkGates(tip, recent, now, room, cfg); r != Due {
 		return r
@@ -171,10 +152,8 @@ func CheckRecords(tip ledger.Tip, recent []ledger.Entry, newSettled, minRecords 
 // checkGates is the claim, interval and budget prefix Check and CheckRecords
 // share: Due when none blocks.
 func checkGates(tip ledger.Tip, recent []ledger.Entry, now time.Time, room Room, cfg DueConfig) NotDue {
-	// A live (non-stale) claim blocks the run outright; a stale one is
-	// taken over, so it falls through to the checks below rather than
-	// blocking. Claim carries LastSwept/Cursor forward from the tip it was
-	// taken on, so those checks still see the last Done's position.
+	// A stale claim is taken over, so it falls through to the checks below;
+	// Claim carries LastSwept/Cursor forward, so they still see the last Done.
 	if tip.State.Phase == ledger.Claimed && !tip.State.StaleClaim(now, cfg.ClaimTimeout) {
 		return LiveClaim
 	}
@@ -203,17 +182,15 @@ func newestDoneWithin(recent []ledger.Entry, now time.Time, every time.Duration)
 	return newest, found
 }
 
-// NextDue maps the reason Check returns for the same inputs to the earliest
-// instant that reason lifts, and whether it lifts only when the branch head
-// moves. Due yields (now, false). Daily budgets lift at the next midnight in
-// now's Location, matching ledger.DayTotals, so the caller passes now already
-// in the policy zone. A live claim lifts at the first instant StaleClaim is
-// true, one nanosecond past the timeout, since StaleClaim is strictly-after
-// and an earlier re-check would still say LiveClaim. A live claim or an
-// unelapsed interval masks a spent budget in Check, so when room also says
-// spent, the lift is the later of its own and the next midnight.
-// NothingToScan lifts only on a head move: (zero, true). A Claimed tip with no
-// ClaimedBy is never stale, so no time lifts it: (zero, false).
+// NextDue maps Check's reason to the earliest instant it lifts, and whether it
+// lifts only when the branch head moves. Due yields (now, false). Daily
+// budgets lift at the next midnight in now's Location, matching
+// ledger.DayTotals, so the caller passes now in the policy zone. A live claim
+// lifts one nanosecond past the timeout, StaleClaim being strictly-after. A
+// live claim or unelapsed interval masks a spent budget in Check, so the lift
+// is then the later of its own and the next midnight. NothingToScan lifts only
+// on a head move: (zero, true). A Claimed tip with no ClaimedBy is never
+// stale: (zero, false).
 func NextDue(tip ledger.Tip, recent []ledger.Entry, head string, now time.Time, room Room, cfg DueConfig) (at time.Time, onTipMove bool) {
 	return nextDue(Check(tip, recent, head, now, room, cfg), tip, recent, now, room, cfg)
 }

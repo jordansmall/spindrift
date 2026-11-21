@@ -106,14 +106,13 @@ func (s *passState) finish(src TotalsSource) PassTally {
 	return t
 }
 
-// ReadPasses splits the Pass log at path into segments at each pass_start host
-// op and tallies each one through the Driver's decoder, so Dispatch Records
-// read per-pass figures without parsing a CLI's grammar themselves. The
-// returned slice has one tally per segment (pass_starts + 1). visit, when
-// non-nil, sees every non-blank line after its own tally is updated. A write
-// to trackWrite by opts.WriteTool counts once its tool result arrives without
-// IsError; a call still unanswered at a segment boundary is dropped. A missing
-// log is one empty tally.
+// ReadPasses splits the Pass log at path at each pass_start host op and
+// tallies each segment (pass_starts + 1 of them), so Dispatch Records read
+// per-pass figures without parsing a CLI's grammar. visit, when non-nil, sees
+// every non-blank line after its tally is updated. An opts.WriteTool call on
+// trackWrite counts once its tool result arrives without IsError; one still
+// unanswered at a segment boundary is dropped. A missing log is one empty
+// tally.
 func ReadPasses(path string, opts PassOptions, trackWrite string, visit func(PassLine)) ([]PassTally, error) {
 	l, err := DecodeLog(path, opts.NewDecoder)
 	if err != nil {

@@ -8,10 +8,8 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 )
 
-// Composed from outcome.ReviewVerdictToken the same way orchestrator/markers.go
-// builds its own VerdictBlock/VerdictApprove, so neither package hardcodes the
-// bare "VERDICT:" literal. lib/prompt-contract.nix's markerChannels registry is
-// the one source of truth for it.
+// Composed from outcome.ReviewVerdictToken, never a bare "VERDICT:" literal:
+// lib/prompt-contract.nix's markerChannels registry is its one source of truth.
 const (
 	verdictBlockToken   = outcome.ReviewVerdictToken + " BLOCK"
 	verdictApproveToken = outcome.ReviewVerdictToken + " APPROVE"
@@ -76,17 +74,14 @@ func scanReviewVerdict(rendered string) ScanResult {
 }
 
 // Matches only a tool_result line tagged with a completed "reviewer" subagent
-// report (issue #2980). An ordinary tool_result, or one tagged with another
-// subagent role, cannot match, which is the security fix: attacker-controlled
-// Bash or Read output echoing the literal verdict string can no longer flip a
-// non-review pass's fold.
+// report (issue #2980), so attacker-controlled Bash or Read output echoing the
+// verdict string cannot flip a non-review pass's fold.
 var reviewerToolResultPrefixRe = regexp.MustCompile(`^\[[^\]]*\]   -> \[reviewer\] `)
 
-// scanSubagentReviewVerdict folds BLOCK-dominant over the reviewer-tagged lines
-// only. BLOCK-dominant rather than last-match-wins because an eligible line can
-// still carry attacker-influenced text after a genuine verdict word (the
-// subagent's report may quote earlier tool output), so a BLOCK anywhere wins
-// over an APPROVE anywhere, whatever the order.
+// scanSubagentReviewVerdict folds BLOCK-dominant over the reviewer-tagged
+// lines, not last-match-wins: an eligible line can still carry
+// attacker-influenced text after a genuine verdict (the report may quote
+// earlier tool output), so a BLOCK anywhere beats an APPROVE anywhere.
 func scanSubagentReviewVerdict(rendered string) ScanResult {
 	var sawBlock, sawApprove bool
 	sc := bufio.NewScanner(strings.NewReader(rendered))

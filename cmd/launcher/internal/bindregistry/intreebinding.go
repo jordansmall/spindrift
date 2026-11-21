@@ -13,25 +13,23 @@ import (
 	"spindrift.dev/launcher/internal/ecosystem"
 )
 
-// intreebindingTempFilePattern is the os.CreateTemp pattern ApplyInTreeBinding
-// writes under and the glob sweepOrphanedTempFiles matches, as one constant so
-// the write site and the cleanup site cannot drift into two prefixes.
+// intreebindingTempFilePattern is shared by ApplyInTreeBinding's temp-file
+// write and sweepOrphanedTempFiles's glob so the two cannot drift.
 const intreebindingTempFilePattern = ".intreebinding-*"
 
 // InTreeBindings returns every Strategy of all whose registry pin lives in a
-// tracked config file rather than an env var (ADR 0044), in Strategies order: npm's .npmrc, yarn
-// berry's .yarnrc.yml (issue #2856), pnpm's pnpm-workspace.yaml (issue #2855),
-// and nuget's nuget.config spellings.
+// tracked config file rather than an env var (ADR 0044), in Strategies order:
+// npm's .npmrc, yarn berry's .yarnrc.yml (issue #2856), pnpm's
+// pnpm-workspace.yaml (issue #2855), and nuget's nuget.config spellings.
 // A row naming only DiscoveryConfigPaths is admitted too; BoundInTreeRow picks
 // the spelling it binds.
 func InTreeBindings(all []ecosystem.Strategy) []ecosystem.Strategy {
 	var rows []ecosystem.Strategy
 	for _, row := range all {
-		// A Strategy with a RepoAwareHomeConfig binds by re-rendering that home config
-		// once the Target repo is on disk (issue #3201), and the two rewrites do
-		// not compose: once one swaps the index host away, the other has nothing
-		// left to key off. Cargo is that case, and keeps a non-empty
-		// InTreeConfigPath only for host-side discovery.
+		// A RepoAwareHomeConfig rewrite (cargo, issue #3201) does not compose
+		// with an in-tree one: once one swaps the index host away, the other
+		// has nothing to key off. Cargo keeps InTreeConfigPath only for
+		// host-side discovery.
 		if len(row.ConfigPaths()) > 0 && row.RepoAwareHomeConfig == nil {
 			rows = append(rows, row)
 		}
@@ -81,11 +79,9 @@ func regularFileSpelled(repoDir, rel string) bool {
 	return err == nil && info.Mode().IsRegular()
 }
 
-// isTracked reports whether relPath is git-tracked in the repo at repoDir.
-// Rewriting and skip-worktree-hiding an untracked path is never safe, because
-// skip-worktree only applies to a path git already tracks. A nonzero exit means
-// untracked, not an error; only a failure to run git itself returns err, so a
-// caller cannot mistake "git not found" for "confirmed untracked".
+// isTracked reports whether relPath is git-tracked in the repo at repoDir
+// (skip-worktree only applies to a tracked path). Only a failure to run git
+// returns err, so "git not found" never reads as "confirmed untracked".
 func isTracked(repoDir, relPath string) (bool, error) {
 	cmd := exec.Command("git", "-C", repoDir, "ls-files", "--error-unmatch", "--", relPath)
 	err := cmd.Run()
@@ -99,15 +95,13 @@ func isTracked(repoDir, relPath string) (bool, error) {
 }
 
 // ApplyOutcome classifies why ApplyInTreeBinding did or did not rewrite
-// configPath. The verb layer decides two other conditions that suppress an
-// in-tree rewrite before any Strategy is considered, so they have no value here: a
-// registry proxy manifest (ADR 0045) carrying no route upstream host, and an
-// unreachable manifest endpoint (issue #3082).
+// configPath. A registry proxy manifest (ADR 0045) with no route upstream
+// host and an unreachable manifest endpoint (issue #3082) suppress the rewrite
+// earlier, in the verb layer, so they have no value here.
 type ApplyOutcome int
 
 const (
-	// The zero value is never a meaningful outcome: ApplyInTreeBinding pairs it
-	// only with a non-nil error.
+	// The zero value pairs only with a non-nil error.
 	_ ApplyOutcome = iota
 	// ApplyMissing: configPath doesn't exist (ENOENT).
 	ApplyMissing
@@ -118,9 +112,9 @@ const (
 	// --skip-worktree` was never attempted; git would reject it anyway.
 	ApplyUntracked
 	// ApplySkipWorktreeSet: the bit was already set, so content was never
-	// re-checked. Distinct from ApplyNoopContent because the bit is tagged
-	// before content is rewritten, so a crash between those two steps (issue
-	// #2932) leaves the bit set over unrewritten content.
+	// re-checked. Distinct from ApplyNoopContent because a crash between
+	// tagging and rewriting (issue #2932) leaves the bit set over unrewritten
+	// content.
 	ApplySkipWorktreeSet
 	// ApplyNoopContent: the bit was clear and the content already doesn't
 	// mention upstreamHost, so there is nothing to rewrite or converge.
@@ -181,10 +175,9 @@ func asciiLower(s string) string {
 
 // indexHostFold returns the first index >= from where needle occurs in folded
 // and ends at a host boundary (EOF or a URL/quote/whitespace/YAML-flow
-// terminator), or -1.
-// ':' is deliberately not a terminator: a port follows, so a portless route must
-// not match "host:8081", nor "host.mirror.net" (issue #5311). folded and needle
-// must already be asciiLower'd.
+// terminator), or -1. ':' is deliberately not a terminator: a portless route
+// must not match "host:8081", nor "host.mirror.net" (issue #5311). folded and
+// needle must already be asciiLower'd.
 func indexHostFold(folded, needle string, from int) int {
 	for from <= len(folded) {
 		i := strings.Index(folded[from:], needle)
@@ -207,9 +200,8 @@ func indexHostFold(folded, needle string, from int) int {
 
 // replaceAllFold is strings.ReplaceAll with ASCII case-insensitive matching,
 // accepting only matches that end at a host boundary (see indexHostFold).
-// Bytes outside a matched span, such as an uppercase path, stay untouched.
-// Relies on asciiLower being length-preserving (ASCII-only) so indexes into the
-// folded copy align with s; old must be non-empty (callers prepend a scheme).
+// Bytes outside a match stay untouched. Relies on asciiLower preserving length
+// so folded indexes align with s; old must be non-empty.
 func replaceAllFold(s, old, repl string) string {
 	foldedS, foldedOld := asciiLower(s), asciiLower(old)
 	var out strings.Builder
@@ -229,20 +221,16 @@ func replaceAllFold(s, old, repl string) string {
 
 // ApplyInTreeBinding rewrites row's in-tree config file, when it exists and is
 // git-tracked, so references to any rewrites' UpstreamHost point at that
-// entry's LocalURL. row is one of InTreeBindings's: tracked config that
-// would otherwise take precedence over an env override (ADR 0044), or that
-// says what one cannot (a per-scope .npmrc registry, .yarnrc.yml's npmScopes,
-// pnpm-workspace.yaml's registries; ADR 0044's yarn and pnpm updates), so the
-// value has to be edited into the tracked file itself.
+// entry's LocalURL. Such tracked config would otherwise beat an env override,
+// or says what one cannot (a per-scope .npmrc registry, .yarnrc.yml's
+// npmScopes, pnpm-workspace.yaml's registries; ADR 0044).
 func ApplyInTreeBinding(repoDir string, row ecosystem.Strategy, rewrites []HostRewrite) (ApplyOutcome, error) {
 	if row.InTreeConfigPath == "" {
 		return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with %s row that has no bound config path; resolve it with BoundInTreeRow first", row.Name)
 	}
-	// Internal-consistency guards, not operator-facing outcomes: the verb layer
-	// already drops any route with no upstream host or a host shared with
-	// another route (issue #3142, host-only matching cannot disambiguate
-	// those). They return errors rather than a named outcome so a caller cannot
-	// mistake a contract violation for a real "config not found" (issue #3082).
+	// Contract guards: the verb layer already drops hostless and shared-host
+	// routes (issue #3142). Errors, not outcomes, so a violation never reads
+	// as "config not found" (issue #3082).
 	if len(rewrites) == 0 {
 		return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with no rewrites for %s", row.InTreeConfigPath)
 	}
@@ -263,17 +251,15 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Strategy, rewrites []HostR
 
 	configPath := filepath.Join(repoDir, row.InTreeConfigPath)
 
-	// Callers must not run ApplyInTreeBinding and RevertInTreeBinding
-	// concurrently for Strategies in the same repo: npm, yarn, and pnpm share the
-	// repo-root configDir, so one Strategy's sweep would delete another Strategy's
-	// in-flight temp file. applyInTree loops its Strategies sequentially.
+	// Never run Apply and Revert concurrently for one repo: npm, yarn, and pnpm
+	// share the repo-root configDir, so one sweep would delete another's
+	// in-flight temp file.
 	sweepOrphanedTempFiles(filepath.Dir(configPath))
 
-	// configPath may be a symlink, which git tracks as blob mode 120000. os.Stat
-	// and os.ReadFile follow it, matching `sed -i`, so a dangling link is ENOENT
-	// here and IsRegular below no-ops on a directory, fifo, or device: reading a
-	// fifo or /dev/zero hangs or OOMs (issue #2933). Hard-erroring on a symlink,
-	// as #2932 first did, aborted every Strategy in the call.
+	// configPath may be a symlink (git mode 120000); following it makes a
+	// dangling link ENOENT, and IsRegular no-ops on a directory, fifo, or
+	// device, whose read hangs or OOMs (issue #2933). Hard-erroring on a
+	// symlink, as #2932 first did, aborted every Strategy in the call.
 	info, statErr := os.Stat(configPath)
 	if statErr != nil {
 		if os.IsNotExist(statErr) {
@@ -299,11 +285,10 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Strategy, rewrites []HostR
 	if err != nil {
 		return 0, err
 	}
-	// A set bit means a prior Apply completed, so don't touch content again. The
-	// bit is tagged before the rewrite, so a crash in between leaves it set over
-	// unrewritten content and every later Apply returns here without re-checking
-	// (issue #2932, issue #3024 gap 1). The caller closes that window:
-	// box reverts on any nonzero exit, and each dispatch clones fresh.
+	// A set bit means a prior Apply completed. A crash between tag and rewrite
+	// leaves it set over unrewritten content, which every later Apply skips (issue
+	// #2932, #3024 gap 1); the caller closes that window: box reverts on any
+	// nonzero exit, and each dispatch clones fresh.
 	if skipSet {
 		return ApplySkipWorktreeSet, nil
 	}
@@ -313,11 +298,10 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Strategy, rewrites []HostR
 		return 0, err
 	}
 
-	// Match only the scheme-qualified forms: the old bash phase used `grep -qF`
-	// on the bare host, so a `.npmrc` carrying only a protocol-relative line
-	// (`//host/:_authToken=`) got the bit and a "rewritten" log line with no
-	// content change. Every rewrite's host is checked, not just the first, so a
-	// config naming only a later route's host still reaches the loop (#3142).
+	// Match only scheme-qualified forms: a bare-host match would tag a
+	// `.npmrc` whose only mention is a protocol-relative `//host/:_authToken=`
+	// line and log a rewrite with no content change. Every rewrite's host is
+	// checked, not just the first (#3142).
 	contentStr := string(content)
 	foldedContent := asciiLower(contentStr)
 	anyHostPresent := false
@@ -329,12 +313,10 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Strategy, rewrites []HostR
 		}
 	}
 	if !anyHostPresent {
-		// Bit clear and no host left: either nothing ever needed rewriting, or
-		// something other than Apply (see "Tag before writing" below) dirtied
-		// the file so it already lacks the upstream host. Converge by tagging.
-		// dirty is not content evidence, so an unrelated dirty edit reads
-		// identically and is reported ApplyApplied. Accepted, because telling
-		// the two apart needs an API change (issue #3024 gap 2).
+		// Bit clear, no host left: nothing needed rewriting, or something
+		// other than Apply dirtied the file; converge by tagging. An unrelated
+		// dirty edit reads identically and reports ApplyApplied, accepted
+		// because telling them apart needs an API change (issue #3024 gap 2).
 		dirty, dirtyErr := workingTreeDirty(repoDir, row.InTreeConfigPath)
 		if dirtyErr != nil {
 			return 0, dirtyErr
@@ -348,30 +330,25 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Strategy, rewrites []HostR
 		return ApplyApplied, nil
 	}
 
-	// Longest host first, on a copy because the caller's slice order must
-	// survive. Hosts can overlap by prefix ("registry.example.com" and
-	// "registry.example.com:8443"); the host boundary already stops the shorter
-	// one matching inside the longer, so this is a safeguard. Longest-first
-	// also keeps a shorter host out of an already-rewritten LocalURL.
+	// Longest host first, on a copy to keep the caller's order: a safeguard
+	// beside the host boundary for prefix-overlapping hosts, and it keeps a
+	// shorter host out of an already-rewritten LocalURL.
 	ordered := append([]HostRewrite(nil), rewrites...)
 	sort.SliceStable(ordered, func(i, j int) bool {
 		return len(ordered[i].UpstreamHost) > len(ordered[j].UpstreamHost)
 	})
 
-	// Two passes per rewrite because the config may use either scheme, including
-	// a sparse index URL like "sparse+https://HOST/...". Matching is literal
-	// apart from ASCII case folding (issue #3706), so unlike the old sed -i
-	// version this needs no metacharacter escaping for hosts containing ".",
-	// "#", or "*".
+	// Either scheme may appear, including "sparse+https://HOST/...". Matching
+	// is literal apart from ASCII case folding (issue #3706).
 	rewritten := contentStr
 	for _, rw := range ordered {
 		rewritten = replaceAllFold(rewritten, "https://"+rw.UpstreamHost, rw.LocalURL)
 		rewritten = replaceAllFold(rewritten, "http://"+rw.UpstreamHost, rw.LocalURL)
 	}
 
-	// Only on this path, never the no-host-left one above, so a convergent
-	// second Apply does not re-run it over already-rewritten content. Before the
-	// tag, so a hook error leaves the bit clear and the file untouched.
+	// The InTreeRewrite hook runs only here, not on the no-host-left path, so
+	// a convergent second Apply does not re-run it over rewritten content; and
+	// before the tag, so a hook error leaves the bit clear.
 	if row.InTreeRewrite != nil {
 		localURLs := make([]string, len(rewrites))
 		for i, rw := range rewrites {
@@ -383,19 +360,16 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Strategy, rewrites []HostR
 		}
 	}
 
-	// Tag before writing: update-index only flips an index bit, so a path git
-	// refuses to tag (exit 128 for an unmerged path) fails before content is
-	// rewritten, instead of leaving the local proxy URL in an unmerged file
-	// RevertInTreeBinding cannot clean up either (issue #2932). The tag also
-	// hides the rewrite from `git status`.
+	// Tag before writing: a path git refuses to tag (exit 128, unmerged) then
+	// fails before the proxy URL lands in a file Revert cannot clean up
+	// (issue #2932). The tag also hides the rewrite from `git status`.
 	if err := exec.Command("git", "-C", repoDir, "update-index", "--skip-worktree", "--", row.InTreeConfigPath).Run(); err != nil {
 		return 0, err
 	}
 
-	// Temp file in the same directory, then rename: os.WriteFile would follow a
-	// symlink at configPath and write through to its target, possibly outside
-	// repoDir, while os.Rename replaces whatever directory entry sits there
-	// without following it. Same directory keeps the rename atomic.
+	// Temp file plus rename: os.WriteFile would write through a symlink,
+	// possibly outside repoDir; os.Rename replaces the entry itself. Same
+	// directory keeps the rename atomic.
 	tmp, err := os.CreateTemp(filepath.Dir(configPath), intreebindingTempFilePattern)
 	if err != nil {
 		_ = exec.Command("git", "-C", repoDir, "update-index", "--no-skip-worktree", "--", row.InTreeConfigPath).Run()
@@ -436,9 +410,8 @@ func skipWorktreeBitSet(repoDir, relPath string) (bool, error) {
 }
 
 // workingTreeDirty reports whether relPath's working-tree content differs from
-// the index, via `git diff --quiet` (exit 0 clean, exit 1 dirty, anything else
-// a real error). That coincides with a diff against HEAD for the ordinary
-// unstaged-edit case here, but it is not a HEAD comparison.
+// the index (not HEAD), via `git diff --quiet`: exit 1 is dirty, any other
+// nonzero exit a real error.
 func workingTreeDirty(repoDir, relPath string) (bool, error) {
 	err := exec.Command("git", "-C", repoDir, "diff", "--quiet", "--", relPath).Run()
 	if err == nil {
@@ -451,23 +424,18 @@ func workingTreeDirty(repoDir, relPath string) (bool, error) {
 }
 
 // sweepOrphanedTempFiles removes leftover intreebindingTempFilePattern files
-// from configDir (issue #3027). It covers the one window no error path can: a
-// hard kill between os.CreateTemp and os.Rename runs no Go code at all, and the
-// orphan it leaves is untracked, so it gets folded into whatever `git add -A`
-// runs next.
+// from configDir (issue #3027): a hard kill between os.CreateTemp and
+// os.Rename runs no Go cleanup, and the untracked orphan would be folded into
+// the next `git add -A`.
 func sweepOrphanedTempFiles(configDir string) {
-	// Unconditional and idempotent rather than crash-detecting: repeated retries
-	// can strand several orphans in one directory, and a directory with none must
-	// stay a silent no-op. Glob's only failure, ErrBadPattern, needs glob
-	// metacharacters in configDir, which the launcher's fixed /work paths never
-	// carry.
+	// Unconditional, not crash-detecting: retries can strand several orphans,
+	// and a directory with none stays a silent no-op. Glob only fails on
+	// metacharacters, which the fixed /work paths never carry.
 	matches, _ := filepath.Glob(filepath.Join(configDir, intreebindingTempFilePattern))
 	for _, m := range matches {
-		// .intreebinding-* is a reserved filename inside a binding's config
-		// directory: every match is removed, so a file the Target repo genuinely
-		// tracks under that name would show up as a deletion. Guarding each match
-		// with `git ls-files` would spend a subprocess per match. A failed remove
-		// is swallowed so a file another process holds open cannot fail the call.
+		// .intreebinding-* is a reserved name: a tracked file so named would
+		// show as a deletion (a per-match `git ls-files` guard costs a
+		// subprocess each). A failed remove must not fail the call.
 		_ = os.Remove(m)
 	}
 }
@@ -480,8 +448,8 @@ func sweepOrphanedTempFiles(configDir string) {
 func RevertInTreeBinding(repoDir string, row ecosystem.Strategy) (reverted bool, err error) {
 	configPath := filepath.Join(repoDir, row.InTreeConfigPath)
 
-	// Sweep ahead of the missing and untracked early returns below, so a config
-	// that goes missing or untracked after a crash still sheds its orphan.
+	// Ahead of the early returns, so a config gone missing or untracked after
+	// a crash still sheds its orphan.
 	sweepOrphanedTempFiles(filepath.Dir(configPath))
 
 	if _, statErr := os.Stat(configPath); statErr != nil {
@@ -507,18 +475,16 @@ func RevertInTreeBinding(repoDir string, row ecosystem.Strategy) (reverted bool,
 		if err := exec.Command("git", "-C", repoDir, "update-index", "--no-skip-worktree", "--", row.InTreeConfigPath).Run(); err != nil {
 			return false, err
 		}
-		// Unconditional checkout even though content usually already matches
-		// HEAD: cheap, and it converges without a second dirty check here.
+		// Unconditional: cheap, and converges without a second dirty check.
 		if err := exec.Command("git", "-C", repoDir, "checkout", "--", row.InTreeConfigPath).Run(); err != nil {
 			return false, err
 		}
 		return true, nil
 	}
 
-	// Bit clear but content may still be dirty: defensively, something other
-	// than Apply (which tags first) may have rewritten or dirtied it. Treat it
-	// the same as an applied bit, so the checkout below also discards an
-	// unrelated dirty edit (Revert's side of issue #3024 gap 2).
+	// Bit clear but content may be dirty from something other than Apply;
+	// treated as applied, so an unrelated dirty edit is discarded too (issue
+	// #3024 gap 2).
 	dirty, err := workingTreeDirty(repoDir, row.InTreeConfigPath)
 	if err != nil {
 		return false, err
@@ -533,14 +499,12 @@ func RevertInTreeBinding(repoDir string, row ecosystem.Strategy) (reverted bool,
 	return true, nil
 }
 
-// RevertInTreeBindings reverts every Strategy in rows, continuing past a per-Strategy
-// error so one Strategy's failure cannot strand the rest, and reports whether any
-// failed. Each outcome is narrated to w; who prefixes a failure line.
-// A row with DiscoveryConfigPaths is reverted at each spelling whose
-// skip-worktree bit is set, not at a re-resolved one: Apply tags the bit
-// before rewriting, so it marks the bound spelling even if the agent created
-// an earlier one since. An unmarked spelling is left alone, its dirty content
-// being the agent's.
+// RevertInTreeBindings reverts every Strategy in rows, continuing past a
+// per-Strategy error, and reports whether any failed. Each outcome is narrated
+// to w; who prefixes a failure line. A DiscoveryConfigPaths row is reverted at each spelling whose
+// skip-worktree bit is set, not a re-resolved one: the bit marks the bound
+// spelling even if the agent since created an earlier one. An unmarked
+// spelling is left alone, its dirty content being the agent's.
 func RevertInTreeBindings(workDir string, rows []ecosystem.Strategy, who string, w io.Writer) (failed bool) {
 	for _, row := range rows {
 		targets, probed, err := revertTargets(workDir, row)

@@ -77,11 +77,10 @@ var bwrapSandboxForbidden = []string{
 }
 
 // BwrapSandboxViolations lists how a bwrap argv for a Connector sandbox departs
-// from the isolation the sandbox promises: only the connector-host store path
-// at host bound read-only (never the whole /nix/store), no network or env, and
-// the seccomp filter on fd 3 (the one fd the adapter hands it), with
-// connector-host as the program. It is the single policy the bwrap adapter
-// contract and the seamtest fake share.
+// from the isolation the sandbox promises: only host, the connector-host store
+// path, bound read-only (never the whole /nix/store), no network or env, the
+// seccomp filter on fd 3 (the one fd the adapter hands it), and connector-host
+// as the program. The bwrap adapter contract and the seamtest fake share it.
 func BwrapSandboxViolations(argv []string, host string) []string {
 	var bad []string
 	hasRun := func(run ...string) bool {

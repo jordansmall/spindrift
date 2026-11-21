@@ -1,8 +1,7 @@
-// Package panicguard restores the terminal when a spindrift goroutine
-// panics. bubbletea recovers panics only on its own goroutines, so a panic
-// elsewhere kills the process with the terminal still in alt-screen and the
-// cursor hidden. Only goroutines started through Go are covered; goroutines
-// owned by third-party code are not.
+// Package panicguard runs a registered terminal-restore hook when a spindrift
+// goroutine panics, before the panic kills the process. Only goroutines
+// started through Go are covered; goroutines owned by third-party code are
+// not.
 package panicguard
 
 import "sync/atomic"

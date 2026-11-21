@@ -8,13 +8,9 @@ import "sort"
 // by its owner. The test is "must never appear on argv", not "is a credential":
 // ISSUE_TEXT is a private issue body, sensitive without being a secret.
 //
-// The Driver credential half comes from credentialenv_gen.go (regenerated from
-// the Driver credential rules); nonDriverOffArgvKeys holds only the rest. That
-// half is the runner-local generated driverCredentialEnv slice because runner
-// does not import internal/driver.
-//
-// The set is unexported so no importer can widen or shrink it; IsOffArgvKey and
-// OffArgvKeys are the read paths.
+// The Driver credential half is the generated driverCredentialEnv
+// (credentialenv_gen.go), since runner does not import internal/driver.
+// It is unexported so no importer can widen or shrink it.
 var offArgvKeys = withDriverCredentialEnv(nonDriverOffArgvKeys)
 
 // IsOffArgvKey reports whether k's value must stay off a runner's argv.

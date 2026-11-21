@@ -20,11 +20,9 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// nameCargo is Cargo's Name. Cargo's rewrite rows tag themselves with it
-// too: registryproxy matches a rewrite row only against subtrees tagged with
-// the Strategy's name, so the two spellings must never drift apart. Classification
-// below spells "cargo" as well, but that is the nudge's family grouping, a
-// separate concept that only coincides here.
+// nameCargo is Cargo's Name and its rewrite rows' tag: registryproxy matches a
+// rewrite row only against subtrees tagged with the Strategy's name. The
+// Classification "cargo" is the nudge's family grouping and only coincides.
 const nameCargo = "cargo"
 
 // Strategy binds through source replacement in a repo-aware home config, not
@@ -59,13 +57,11 @@ var Strategy = ecosystem.Strategy{
 }
 
 // validateCargoRouteDeclaration is Cargo's RouteDeclaration hook (issue
-// #3403). Each name must match cargoBareKeyPattern: a name only filters
-// the repo's [registries.NAME] entries, which are themselves bare-key
-// filtered, so a name outside [A-Za-z0-9_-] could never match; and the
-// undeclared-registry warning interpolates it unquoted. Rejecting a
-// repeated name is input hygiene only.
-// Errors are predicates (e.g. "must be an array of strings"); the caller
-// prefixes "<route>: <key> ", see RouteDeclarationValidator.
+// #3403). Each name must match cargoBareKeyPattern: it only filters the repo's
+// bare-key-filtered [registries.NAME] entries, so a non-bare name could never
+// match, and the undeclared-registry warning interpolates it unquoted.
+// Rejecting a repeated name is input hygiene only. Errors are predicates; the
+// caller prefixes "<route>: <key> ".
 func validateCargoRouteDeclaration(key string, value any) error {
 	if key != ecosystem.CargoRouteRegistriesKey {
 		return errors.New("is not a key cargo's route declaration accepts")
@@ -106,21 +102,17 @@ func cargoRouteRegistries(blocks registryvocab.RouteEcosystems) []string {
 	return blocks.Strings(nameCargo, ecosystem.CargoRouteRegistriesKey)
 }
 
-// rawCargoConfig is the decode shape for the [registries.*] slice of
-// .cargo/config.toml this package cares about. It deliberately does not
-// DisallowUnknownFields: a real Cargo config carries many other tables
-// ([source], [net], [build], ...) that are none of this package's business.
+// rawCargoConfig is the [registries.*] slice of .cargo/config.toml. It does
+// not DisallowUnknownFields: a real config carries many other tables.
 type rawCargoConfig struct {
 	Registries map[string]struct {
 		Index string `toml:"index"`
 	} `toml:"registries"`
 }
 
-// parseCargoRegistryConfig is Cargo's ConfigParser: it decodes a
-// .cargo/config.toml for its [registries.<name>] entries. An index URL's
-// leading "sparse+" is stripped because that prefix is cargo's own marker for
-// the sparse protocol, not part of the URL the Forwarder or credential lookup
-// ever sees. parseCargoRegistryDecls keeps the index verbatim instead.
+// parseCargoRegistryConfig is Cargo's ConfigParser. It strips an index URL's
+// "sparse+", cargo's protocol marker that the Forwarder and credential lookup
+// never see; parseCargoRegistryDecls keeps the index verbatim instead.
 func parseCargoRegistryConfig(content string) ([]ecosystem.Declaration, bool, error) {
 	var raw rawCargoConfig
 	if err := toml.Unmarshal([]byte(content), &raw); err != nil {
@@ -135,8 +127,8 @@ func parseCargoRegistryConfig(content string) ([]ecosystem.Declaration, bool, er
 		stripped := strings.TrimPrefix(index, "sparse+")
 		host, upstreamBaseURL, ok := ecosystemkit.HTTPAbsoluteURL(stripped)
 		if !ok {
-			// Skip the entry rather than erroring the whole file; only the
-			// file's own TOML syntax is an error.
+			// Skip a malformed index: only the file's own TOML syntax errors
+			// the whole file.
 			continue
 		}
 		out = append(out, ecosystem.Declaration{
@@ -161,16 +153,13 @@ type cargoRegistryDecl struct {
 	Index string
 }
 
-// parseCargoRegistryDecls decodes the repo's own tracked .cargo/config.toml,
-// before any rewrite, for every [registries.NAME] table carrying an `index`,
-// sorted by name. It decodes with go-toml like parseCargoRegistryConfig, so
-// every spelling discovery accepts reads the same here, and a file go-toml
-// rejects (a repeated table or key included) yields nil as discovery errors.
-// A name failing cargoBareKeyPattern is skipped: an untrusted name must never
-// reach a caller that could turn it into a shell-sourced env var name. Because
-// decls are in name order, when two registries share one index path the shared
-// proxy name (and so its CARGO_REGISTRIES_*_TOKEN env var) comes from the
-// alphabetically first registry, not the first written in the file.
+// parseCargoRegistryDecls decodes the repo's own un-rewritten
+// .cargo/config.toml for every [registries.NAME] table carrying an `index`,
+// sorted by name. It decodes with go-toml like parseCargoRegistryConfig, so it
+// reads every spelling discovery accepts and yields nil where discovery
+// errors. Name order means two registries sharing one index path take their
+// shared proxy name (and CARGO_REGISTRIES_*_TOKEN var) from the alphabetically
+// first, not the first written.
 func parseCargoRegistryDecls(content string) []cargoRegistryDecl {
 	var raw rawCargoConfig
 	if err := toml.Unmarshal([]byte(content), &raw); err != nil {
@@ -280,11 +269,10 @@ func cargoRouteHostMatches(indexHost string, route registrymanifest.Route) bool 
 // cargoIndexPath returns index's path component, stripping "sparse+" first,
 // for a host-rooted route's per-registry local URL (issue #3256): a registry
 // served at its own real path must resolve through that path locally, or the
-// Forwarder's per-registry subtree never admits the requests cargo sends. The
-// result is always "" or a leading-"/", no-trailing-"/" path. It trims the
-// decoded u.Path, not the escaped path cargoCanonicalSourceURLKey trims, so
-// "%2F" and "/" collapse onto one local URL here while the canonical key
-// keys them apart -- pre-existing #3256 behaviour, unchanged by #3251.
+// Forwarder's per-registry subtree never admits cargo's requests. The result
+// is "" or a leading-"/", no-trailing-"/" path. It trims the decoded u.Path,
+// so "%2F" and "/" collapse onto one local URL here while
+// cargoCanonicalSourceURLKey keys them apart (#3256 behaviour, kept by #3251).
 func cargoIndexPath(index string) string {
 	raw := strings.TrimPrefix(index, "sparse+")
 	u, err := url.Parse(raw)
@@ -315,18 +303,12 @@ func cargoLocalIndexURLWithPath(port int, prefix, indexPath string) string {
 // with under cargo's 1:1 URL to source-name rule.
 const registryProxySourceName = "spindrift-registry-proxy"
 
-// cargoCanonicalSourceURLKey returns value (a [source.NAME].registry or
-// [registries.NAME].index string) as a canonical claimingSourceNameByURL map
-// key on cargo's own two CanonicalUrl/SourceId matching axes -- one trailing
-// slash trimmed from the path, and the host lowercased -- plus the scheme
-// case-folding url.Parse/String do for free; the default port cargo also
-// folds is deliberately left unfolded. A leading "sparse+" is deliberately
-// left as-is -- cargo treats "sparse+https://..." (sparse HTTP registry) and
-// "https://..." (git registry index) as different source kinds, a genuinely
-// different SourceId, not a spelling variant of the same one (issue #3251).
-// A value that fails to parse as an http(s) URL with a host falls back to
-// itself verbatim, so today's byte-for-byte behavior holds for anything this
-// axis pair can't canonicalize.
+// cargoCanonicalSourceURLKey keys value (a [source.NAME].registry or
+// [registries.NAME].index) on cargo's own CanonicalUrl/SourceId axes: one
+// trailing path slash trimmed and the host lowercased, plus url.Parse's scheme
+// folding; the default port cargo also folds is left unfolded. "sparse+" is
+// kept: cargo treats sparse and git indexes as different SourceIds (issue
+// #3251). A value that is not an http(s) URL with a host keys as itself.
 func cargoCanonicalSourceURLKey(value string) string {
 	sparse := strings.HasPrefix(value, "sparse+")
 	raw := strings.TrimPrefix(value, "sparse+")
@@ -335,17 +317,14 @@ func cargoCanonicalSourceURLKey(value string) string {
 		return value
 	}
 	u.Host = strings.ToLower(u.Host)
-	// Trim the trailing slash on the escaped path, then re-derive Path from
-	// it, so RawPath and Path stay consistent -- trimming only u.Path leaves
-	// u.RawPath stale, and u.String() then re-escapes from the decoded Path,
-	// silently decoding %2F into a structural "/" and dropping the
-	// trailing-slash trim whenever the path holds percent-encoding.
+	// Trim the escaped path's trailing slash and re-derive Path from it:
+	// trimming only u.Path leaves RawPath stale, and u.String() then decodes
+	// %2F into a structural "/" and drops the trim whenever the path holds
+	// percent-encoding.
 	escaped := strings.TrimSuffix(u.EscapedPath(), "/")
 	decoded, err := url.PathUnescape(escaped)
 	if err != nil {
-		// Belt and braces: EscapedPath() is a valid encoding by construction
-		// and trimming a structural trailing "/" cannot invalidate it, so
-		// this branch is unreachable today.
+		// Unreachable: EscapedPath() is valid by construction.
 		return value
 	}
 	u.Path = decoded
@@ -379,10 +358,8 @@ func cargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 		hosted = append(hosted, hostedDecl{name: d.Name, host: host, index: d.Index})
 	}
 
-	// These are the table names the rendered home config already uses. A repo
-	// source name equal to one of them can never be reused: cargo requires
-	// [source.NAME] table names unique within one file, so reuse would be a
-	// duplicate-table TOML error, not a mere URL collision.
+	// Table names the rendered home config already uses: reusing one as a repo
+	// source name would be a duplicate-table TOML error.
 	homeOwnedSourceNames := map[string]bool{
 		"crates-io":             true,
 		registryProxySourceName: true,
@@ -391,9 +368,8 @@ func cargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 		if route.Prefix == "" {
 			continue
 		}
-		// Over-reserve rather than under-reserve: the route's upstream
-		// filtering happens later, so a decl that will end up unbound still
-		// gets its name reserved here.
+		// Over-reserves: a decl the later route filtering leaves unbound
+		// still gets its name reserved.
 		for _, d := range hosted {
 			if cargoRouteHostMatches(d.host, route) {
 				homeOwnedSourceNames[registryProxySourceName+"-"+route.Prefix+"-"+d.name] = true
@@ -404,9 +380,9 @@ func cargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 		homeOwnedSourceNames["spindrift-upstream-"+d.Name] = true
 	}
 
-	// Maps a repo-declared [source.NAME]'s registry URL to NAME,
-	// first-by-name-wins. A guarded name is excluded up front so the
-	// minting site below falls back to its minted name rather than reusing it.
+	// Each repo [source.NAME] claims its registry URL, first by name winning.
+	// A home-owned name is excluded so the minting site below falls back to
+	// its minted name.
 	claimingSourceNameByURL := make(map[string]string)
 	for _, sd := range parseCargoSourceDecls(repoConfig) {
 		if homeOwnedSourceNames[sd.Name] {
@@ -425,10 +401,9 @@ func cargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 	var replacements []cargoSourceReplacement
 	var warnings []string
 
-	// routeCandidate is the one filter both the ownership pre-pass and the
-	// binding loop apply, so an owner is always a route that goes on to bind
-	// the registry. undeclared is a host match the route's explicit registries
-	// list excludes.
+	// The ownership pre-pass and the binding loop share this filter, so an
+	// owner is always a route that goes on to bind the registry. undeclared is
+	// a host match the route's explicit registries list excludes.
 	routeCandidate := func(d hostedDecl, route registrymanifest.Route, routeRegistries []string) (binds, undeclared bool) {
 		if !cargoRouteHostMatches(d.host, route) || !cargoBareKeyPattern.MatchString(d.name) {
 			return false, false
@@ -489,12 +464,11 @@ func cargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 			if !binds {
 				continue
 			}
-			// Marked before the dedupe check on purpose: a name collapsed
-			// into an earlier name's stanza still binds through it.
+			// Marked before the dedupe: a name collapsed into an earlier
+			// name's stanza still binds through it.
 			bound[d.name] = true
-			// Canonicalized on the same axes as claimingSourceNameByURL
-			// above (issue #3251), so two decls cargo treats as one
-			// SourceId dedupe to one [source.<name>] stanza.
+			// Two decls cargo treats as one SourceId dedupe to one stanza
+			// (issue #3251).
 			canonicalIndexURL := cargoCanonicalSourceURLKey(d.index)
 			if seenIndexURL[canonicalIndexURL] {
 				continue
@@ -504,10 +478,8 @@ func cargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 				warnings = append(warnings, "==> WARNING: cargo registry "+strconv.Quote(d.name)+" matches route prefix "+strconv.Quote(route.Prefix)+"'s upstream host but is already bound to route prefix "+strconv.Quote(owner)+" as registry "+strconv.Quote(ownerRegistry[canonicalIndexURL])+", which shares that upstream host; one cargo source can be replaced through only one route, so route prefix "+strconv.Quote(route.Prefix)+" will not serve it")
 				continue
 			}
-			// Reuse the repo's own claiming source name (issue #3248) when
-			// one exists for this canonical index URL, so a repo spelling
-			// that differs only on the axes above still reuses instead of
-			// minting a second stanza (issue #3251).
+			// Reuse the repo's own claiming source name (issues #3248,
+			// #3251) rather than minting a second stanza for the same URL.
 			sourceName := "spindrift-upstream-" + d.name
 			if claimed, ok := claimingSourceNameByURL[canonicalIndexURL]; ok {
 				sourceName = claimed
@@ -520,27 +492,22 @@ func cargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 				continue
 			}
 			bound[name] = true // a name repeated in the declared list warns once
-			// name is interpolated unquoted into "[registries.<name>]" here,
-			// safe because validateCargoRouteDeclaration (issue #3403) pins
-			// every cargo block entry to the bare-key pattern when the host
-			// parses the routes file. The retired "cargo-registries" key is
-			// refused at that parse (registryroutes), so it never reaches here.
+			// Unquoted interpolation is safe: validateCargoRouteDeclaration
+			// (issue #3403) pinned every name to the bare-key pattern, and
+			// registryroutes refuses the retired "cargo-registries" key.
 			warnings = append(warnings, "==> WARNING: cargo registry "+strconv.Quote(name)+" is declared on route prefix "+strconv.Quote(route.Prefix)+" (upstream host "+strconv.Quote(route.UpstreamHost)+") but the repo's .cargo/config.toml has no [registries."+name+"] with a well-formed index URL on that host, so it will not be bound to the Forwarder -- cargo will try to reach the real registry directly, which a network-less Box cannot do; verify the route's declared cargo registries against the repo's .cargo/config.toml")
 		}
 
 		if len(matched) == 0 {
-			// This fabricates no placeholder export on purpose: with no
-			// replacement there is no [registries.<proxy-source>] stanza for
-			// cargo to look a token up against, so the export would be inert.
-			// The declared-name warnings above are the coverage instead.
+			// No placeholder export: with no [registries.<proxy-source>]
+			// stanza it would be inert.
 			continue
 		}
 
-		// One cargoSourceReplacement per distinct upstream index URL (issue
-		// #3256), not one per route: a route serves its upstream host's real
-		// path layout, so two registries sharing it need their own local URLs
-		// and minted proxy sources, or the Forwarder's per-registry subtree
-		// could never tell them apart.
+		// One replacement per distinct upstream index URL, not per route
+		// (issue #3256): registries sharing a route need their own local URLs
+		// and proxy sources or the Forwarder's per-registry subtree could not
+		// tell them apart.
 		for _, m := range matched {
 			localURL := cargoLocalIndexURLWithPath(port, route.Prefix, cargoIndexPath(m.index))
 			proxySource, ok := sourceNameByLocalURL[localURL]
@@ -561,10 +528,8 @@ func cargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 }
 
 // cargoConfigTOMLWithReplacements renders the full $CARGO_HOME/config.toml
-// once source-replacement stanzas are known (issue #3201): cargoConfigTOML's
-// output, unchanged, followed by one stanza block per replacement, with the
-// [registries.NAME] half emitted once per distinct ProxySource. An empty
-// replacements slice returns cargoConfigTOML's output verbatim.
+// (issue #3201): cargoConfigTOML's output followed by one stanza block per
+// replacement, its [registries.NAME] half once per distinct ProxySource.
 func cargoConfigTOMLWithReplacements(port int, prefix string, replacements []cargoSourceReplacement) string {
 	base := cargoConfigTOML(port, prefix, nil)
 	if len(replacements) == 0 {
@@ -576,12 +541,10 @@ func cargoConfigTOMLWithReplacements(port int, prefix string, replacements []car
 
 	b.WriteString("\n[registry]\nglobal-credential-providers = [\"cargo:token\"]\n")
 
-	// Two replacements can share one ProxySource, and repeating a table name
-	// in one file is a duplicate-table TOML error, not a merge, so the pair is
-	// emitted with the first replacement that claims the name. The planner
-	// already gives each upstream one owning route (issue #6272), so the same
-	// guard on upstream sources only keeps a regression there from emitting
-	// invalid TOML.
+	// A repeated table name is a duplicate-table TOML error, not a merge, so
+	// a shared ProxySource is emitted with its first replacement. The planner
+	// already gives each upstream one owner (issue #6272); the upstream guard
+	// only keeps a regression there from emitting invalid TOML.
 	emittedProxySources := make(map[string]bool)
 	emittedUpstreamSources := make(map[string]bool)
 
@@ -596,9 +559,7 @@ func cargoConfigTOMLWithReplacements(port int, prefix string, replacements []car
 		}
 		emittedProxySources[rep.ProxySource] = true
 
-		// The reused spindrift-registry-proxy source's stanza is already in
-		// base, and emitting it again would collide on the same URL under
-		// cargo's 1:1 rule, so only a freshly minted proxy source gets one.
+		// The reused spindrift-registry-proxy stanza is already in base.
 		if rep.ProxySource != registryProxySourceName {
 			fmt.Fprintf(&b, "\n[source.%s]\nregistry = %q\n", rep.ProxySource, rep.LocalIndexURL)
 		}
@@ -609,11 +570,9 @@ func cargoConfigTOMLWithReplacements(port int, prefix string, replacements []car
 	return b.String()
 }
 
-// cargoRepoAwareConfig is the cargo Strategy's RepoAwareHomeConfigRenderer (issue
-// #3201): it plans source replacements from the cloned repo's own un-rewritten
-// .cargo/config.toml, renders $CARGO_HOME/config.toml around that plan, and
-// derives the placeholder exports cargo's credential lookup needs. A repo with
-// no declared registries yields cargoConfigTOML's base render and no exports.
+// cargoRepoAwareConfig is the cargo Strategy's RepoAwareHomeConfigRenderer
+// (issue #3201), adding the placeholder exports cargo's credential lookup
+// needs.
 func cargoRepoAwareConfig(port int, prefix string, routes []registrymanifest.Route, repoConfig string) (content string, exports []ecosystem.EnvExport, warnings []string) {
 	replacements, warnings := cargoSourceReplacements(port, prefix, routes, repoConfig)
 	content = cargoConfigTOMLWithReplacements(port, prefix, replacements)
@@ -621,9 +580,8 @@ func cargoRepoAwareConfig(port int, prefix string, routes []registrymanifest.Rou
 	return content, exports, warnings
 }
 
-// cargoReplacementPlaceholders renders replacements into one
-// CARGO_REGISTRIES_<PROXY-SOURCE>_TOKEN EnvExport each, deduped by var name:
-// two replacements sharing one ProxySource must not emit the same export twice.
+// cargoReplacementPlaceholders renders one CARGO_REGISTRIES_<PROXY-SOURCE>_TOKEN
+// EnvExport per distinct ProxySource.
 func cargoReplacementPlaceholders(replacements []cargoSourceReplacement) []ecosystem.EnvExport {
 	seen := make(map[string]bool)
 	var exports []ecosystem.EnvExport
@@ -652,11 +610,10 @@ registry = "sparse+http://127.0.0.1:%d/%s/"
 `, port, prefix)
 }
 
-// cargoBareKeyPattern matches cargo/TOML's own bare-key charset. A quoted
-// [registries."..."] table name can otherwise carry arbitrary text (spaces,
-// ";", "$(...)"), and that text becomes an env var name box exports and
-// driver-exec's bind-registry verb can still write into a sourceable env
-// file, so any name failing this check must never reach a caller.
+// cargoBareKeyPattern matches cargo/TOML's bare-key charset. A quoted
+// [registries."..."] name can carry arbitrary text ("$(...)") that would
+// become an env var name in box exports and driver-exec bind-registry's
+// sourceable env file, so a failing name must never reach a caller.
 var cargoBareKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // cargoPlaceholderToken is the fixed, non-secret value emitted for every cargo
@@ -679,12 +636,10 @@ func cargoRegistryEnvVarName(registryName string) string {
 // before fetching a crate.
 var cargoDLMarkers = []string{"{crate}", "{version}", "{prefix}", "{lowerprefix}", "{sha256-checksum}"}
 
-// rewriteCargoDL rewrites a cargo sparse-index config.json body's "dl" field to
-// point at the Forwarder with the route's prefix re-inserted, so a later crate
-// download (which cargo builds by joining dl with a crate path, or by
-// substituting its {crate}-style markers) round-trips through the same route
-// instead of going straight upstream. It does no I/O and no logging; the
-// caller logs from and to keyed off outcome.
+// rewriteCargoDL repoints a cargo sparse-index config.json's "dl" at the
+// Forwarder with the route's prefix re-inserted, so crate downloads (built
+// from dl) round-trip through the same route instead of going upstream. The
+// caller does the logging.
 func rewriteCargoDL(body []byte, rc registryvocab.RewriteContext) registryvocab.RewriteResult {
 	obj, ok := ecosystemkit.DecodeOneJSONObject(body)
 	if !ok {
@@ -717,8 +672,7 @@ func rewriteCargoDL(body []byte, rc registryvocab.RewriteContext) registryvocab.
 
 	newBody, err := json.Marshal(obj)
 	if err != nil {
-		// Unreachable in practice: obj came from a successful decode above,
-		// so every value in it is representable as JSON.
+		// Unreachable: obj came from a successful decode.
 		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
 	}
 

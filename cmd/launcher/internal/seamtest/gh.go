@@ -32,9 +32,8 @@ type GhConfig struct {
 }
 
 // GhIssue is one tracker issue. State defaults to OPEN. Labels are the
-// initial set: the fake replays the recorded `issue edit` and `issue close`
-// calls on top of it, because settle re-reads labels after a claim edited
-// them.
+// initial set; the fake replays recorded `issue edit` and `issue close` calls
+// on top, since settle re-reads labels after a claim edited them.
 type GhIssue struct {
 	Number   int         `json:"number"`
 	Title    string      `json:"title"`

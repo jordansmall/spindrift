@@ -11,10 +11,8 @@ import (
 )
 
 // ForwarderPort is the fixed TCP port the in-Box Forwarder listens on at
-// 127.0.0.1 (ADR 0044/0045, issue #3141). Every caller shares this one
-// declaration so the number cannot drift. It is not configurable: it is an
-// internal contract between the Forwarder and the ecosystem bindings this
-// package computes against it.
+// 127.0.0.1 (ADR 0044/0045, issue #3141). Not configurable: it is an internal
+// contract between the Forwarder and the bindings computed against it.
 const ForwarderPort = 27182
 
 // The Forwarder readiness poll is 50 tries at 100ms. Not flags: no caller
@@ -25,13 +23,11 @@ const (
 )
 
 // ProbeFunc reports whether something is already listening on
-// 127.0.0.1:port. Injected so EnsureForwarderReady's tests never touch a
-// real socket.
+// 127.0.0.1:port.
 type ProbeFunc func(port int) bool
 
 // SpawnFunc starts the Forwarder (socat) detached, bridging socketPath to
-// 127.0.0.1:port. Injected so EnsureForwarderReady's tests never launch a
-// real process.
+// 127.0.0.1:port.
 type SpawnFunc func(socketPath string, port int) (int, error)
 
 // DialProbe is the production ProbeFunc: a short-timeout TCP dial against
@@ -64,10 +60,8 @@ func SpawnSocat(socketPath string, port int) (int, error) {
 }
 
 // startDetached runs cmd with stdio on /dev/null in a new session, so it
-// outlives the caller. It overwrites any Stdin, Stdout, Stderr or SysProcAttr
-// already set on cmd, and marks every inherited fd close-on-exec
-// process-wide. Never call cmd.Wait() on it: it stays a long-running
-// detached process.
+// outlives the caller, overwriting cmd's stdio and SysProcAttr and marking
+// every inherited fd close-on-exec process-wide. Never cmd.Wait() on it.
 func startDetached(cmd *exec.Cmd) (int, error) {
 	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
@@ -91,10 +85,9 @@ func startDetached(cmd *exec.Cmd) (int, error) {
 }
 
 // closeOnExecInheritedFDs marks every open fd above stderr close-on-exec.
-// Go's os/exec only manages fds it opened itself, so an fd inherited from
-// this process's parent without FD_CLOEXEC survives fork+exec. The detached,
-// long-running Forwarder would then hold that pipe or file open forever,
-// hanging whatever waits for it to close.
+// os/exec only manages fds it opened, so one inherited without FD_CLOEXEC
+// survives into the detached Forwarder, which would hold it open forever and
+// hang whatever waits for it to close.
 func closeOnExecInheritedFDs() error {
 	dir, err := os.Open("/dev/fd")
 	if err != nil {
@@ -120,10 +113,9 @@ func closeOnExecInheritedFDs() error {
 }
 
 // EnsureForwarderReady makes sure a Forwarder is listening on 127.0.0.1:port,
-// spawning one and polling until ready or timeout elapses. When probe already
-// reports ready it never spawns, which keeps a re-apply run from starting a
-// second Forwarder. An exhausted timeout is not an error: the caller turns
-// "not ready" into a warning and no bindings.
+// spawning one and polling until ready or timeout elapses. An already-ready
+// probe never spawns, so a re-apply cannot start a second Forwarder. A timeout
+// is not an error: the caller turns "not ready" into a warning.
 func EnsureForwarderReady(socketPath string, port int, probe ProbeFunc, spawn SpawnFunc, timeout, pollInterval time.Duration) (ready bool, pid int, err error) {
 	if probe(port) {
 		return true, 0, nil

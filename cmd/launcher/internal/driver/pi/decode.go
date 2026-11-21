@@ -37,15 +37,11 @@ type seenKey struct {
 // and yields one KindUnparsed; a blank line, a literal `null` or an event type
 // outside the grammar yields none.
 //
-// Only an assistant message_end and a tool_execution_end carry events. pi
-// repeats the same assistant message on message_update, turn_end and agent_end,
-// and its usage with it, so reading any of those too would count a call more
-// than once; the retry events repeat the failed message's errorMessage.
-//
-// A subagent tool_execution_update or tool_execution_end also unpacks
-// details.results[].messages into InSubagent events with the agent as Role,
-// each child message once (see decodeSubagent). Reading the update, not just
-// the end, keeps the usage of a run killed mid-subagent.
+// Only an assistant message_end and a tool_execution_end carry events: pi
+// repeats the message and its usage on message_update, turn_end and
+// agent_end, so reading those would count a call more than once. A subagent
+// tool_execution_update or _end also unpacks its children (decodeSubagent);
+// reading the update keeps the usage of a run killed mid-subagent.
 //
 // Every field the readers consume is strict except the tool fields and the
 // error payload, which are lenient (see the driverkit.Decoder contract).
@@ -108,18 +104,16 @@ type childResult struct {
 	Messages []message `json:"messages"`
 }
 
-// decodeSubagent returns the child events of a subagent result not yet emitted,
-// and the agents it names joined: the model, text, tool calls and usage of a
-// child's assistant messages and its tool results, as InSubagent events with
-// the agent as Role. The caller puts them ahead of the subagent tool's own
-// result, as in claude's log order. The readers keep InSubagent text out of the
-// heartbeat narration and the last-message result. A result with no parsable
-// details yields nothing.
+// decodeSubagent returns the not-yet-emitted child events of a subagent
+// result (model, text, tool calls, usage and tool results, as InSubagent
+// events with the agent as Role) and the agents it names, joined. The caller
+// puts them ahead of the tool's own result, as in claude's log order. A result
+// with no parsable details yields nothing.
 //
-// A child message is appended only once it ends, so a message seen is complete
-// and the prefix a cumulative update repeats is skipped by count. The final
-// result (the tool_execution_end) forgets the call's counts, so a provider
-// reusing a toolCallId for a later subagent call starts that call from zero.
+// A child message is appended only once it ends, so a message seen is
+// complete and the prefix a cumulative update repeats is skipped by count. The
+// tool_execution_end forgets the call's counts, so a provider reusing a
+// toolCallId for a later subagent call starts that call from zero.
 func (d *decoder) decodeSubagent(toolCallID string, raw json.RawMessage, final bool) (children []driverkit.Event, agents string) {
 	var res subagentResult
 	if json.Unmarshal(raw, &res) != nil {
@@ -152,16 +146,15 @@ func eachChild(results []childResult, emit func(i int, r childResult)) string {
 }
 
 // childEvents decodes result i's messages from index from on. The index keeps a
-// parallel run's children, whose timestamps can collide, and a chain's repeated
+// parallel run's children (whose timestamps can collide) and a chain's repeated
 // agent apart in the message ids; parentPrefix extends a grandchild's ids past
-// its parent's, so they cannot collide with the child's at the same timestamp.
+// its parent's for the same reason.
 //
-// A child that delegates further holds its own subagent toolResult, whose
-// details carry the grandchildren's messages: they come out ahead of that
-// toolResult event, to any depth. A toolResult is whole once present, so a
-// nested one needs no seen-state. The extension appends a child's message only
-// when it ends, so a grandchild's usage reaches the log once its parent's
-// subagent call completes; a kill during a grandchild's run loses that cost.
+// A child that delegates further holds its own subagent toolResult carrying
+// the grandchildren's messages, emitted ahead of it to any depth; a toolResult
+// is whole once present, so a nested one needs no seen-state. A grandchild's
+// usage reaches the log only when its parent's call completes, so a kill
+// mid-grandchild loses that cost.
 func childEvents(r childResult, i int, parentPrefix string, from int) []driverkit.Event {
 	prefix := parentPrefix + r.Agent + ":" + strconv.Itoa(i) + ":"
 	var events []driverkit.Event

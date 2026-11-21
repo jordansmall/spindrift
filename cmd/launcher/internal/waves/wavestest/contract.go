@@ -1,8 +1,8 @@
 // Package wavestest is the executable contract for waves.Queue (issue #2937,
 // spec #2919): one shared suite any adapter runs against its own harness, so
-// an adapter that drifts from the Queue semantics fails CI. It is a sibling
-// package to waves, not a waves_test file, because wavestest imports waves, so
-// a waves test importing it would cycle.
+// drift from the Queue semantics fails CI. It is a sibling package, not a
+// waves test file, because it imports waves: an in-package waves test
+// importing it would cycle.
 package wavestest
 
 import (
@@ -55,10 +55,9 @@ func testClaimIdempotence(t *testing.T, h Harness) {
 }
 
 // testPendingQuietness pins Pending's contract (queue.go): a quiet count, no
-// claim, no discovery side effect. The unconditional checks (a stable count,
-// a later Claim still succeeding) pass even when a thin wrapper Queue claims
-// and discovers underneath, so the SideEffectObserver tier, sampling counts
-// around the two Pending calls, is the only one that catches such a leak.
+// claim, no discovery side effect. Only the SideEffectObserver tier catches a
+// wrapper Queue that claims or discovers underneath; the unconditional
+// checks pass regardless.
 func testPendingQuietness(t *testing.T, h Harness) {
 	q := h.Queue()
 	h.SeedDispatchable("2")

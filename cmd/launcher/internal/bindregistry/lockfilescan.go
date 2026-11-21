@@ -19,10 +19,10 @@ type LockfileHit struct {
 }
 
 // ScanLockfilesForForwarder reports every git-tracked lockfile under repoDir
-// whose content contains the literal "127.0.0.1:<port>". It matches lockfiles
-// by basename across every tracked path rather than checking only the repo
-// root, since lockfiles nest in workspace members and nested Go modules. Hits
-// come out in Strategies order, then path order within a Strategy.
+// whose content contains the literal "127.0.0.1:<port>". It matches by
+// basename across every tracked path, since lockfiles nest in workspace
+// members and nested Go modules. Hits come in Strategies order, then path
+// order.
 func ScanLockfilesForForwarder(repoDir string, port int, rows []ecosystem.Strategy) ([]LockfileHit, error) {
 	needle := fmt.Sprintf("127.0.0.1:%d", port)
 

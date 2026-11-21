@@ -12,8 +12,7 @@ import (
 func buildFiledIssuesSection(filed []filedIntent) string {
 	lines := make([]string, 0, len(filed))
 	for _, f := range filed {
-		// A skip has no URL and no failure Body to render -- it was never
-		// posted at all (issue #3609) -- so it renders no bullet.
+		// A skip was never posted (issue #3609), so it renders no bullet.
 		if f.Skipped {
 			continue
 		}
@@ -35,12 +34,9 @@ func buildFiledIssuesSection(filed []filedIntent) string {
 }
 
 // buildSkippedIssuesSection renders filed's Skipped entries as a "## Skipped
-// (deduplicated)" Markdown list, and returns "" when none are skipped. A
-// skip is otherwise invisible in the verdict comment -- stdout gets the
-// "skipped duplicate" line, the comment does not -- so a human reading an
-// all-dedup run's comment can't tell "deduplicated" from "never filed"
-// (issue #3811). It is its own section rather than a bullet under "Filed
-// issues": nothing here was filed, so listing it there would misreport.
+// (deduplicated)" Markdown list, "" when none: without it a reader cannot tell
+// "deduplicated" from "never filed" (issue #3811). It is its own section
+// because nothing here was filed.
 func buildSkippedIssuesSection(filed []filedIntent) string {
 	lines := make([]string, 0, len(filed))
 	for _, f := range filed {
@@ -54,9 +50,8 @@ func buildSkippedIssuesSection(filed []filedIntent) string {
 	if len(lines) == 0 {
 		return ""
 	}
-	// "#123" can now be an open or a closed finding issue (issue #3873), and
-	// `this run's "<title>"` matched a peer no backlog issue held at all --
-	// the lead must read true for all three.
+	// The lead must hold for an open or closed finding (issue #3873) and
+	// for this run's own peer.
 	lead := "These findings matched an already-filed issue — open, closed, or one this run filed itself — and were not filed again."
 	return "## Skipped (deduplicated)\n\n" + lead + "\n\n" + strings.Join(lines, "\n")
 }

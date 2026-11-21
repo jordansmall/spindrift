@@ -7,10 +7,8 @@ import (
 
 // AssertStructFieldsMatchRows fails t for every field of typ missing from
 // rowFields and every rowFields entry typ lacks, so a Descriptor field added
-// on only one side of a Nix-rendered registry fails instead of silently never
-// being set. renderer names where the field table lives (it fills "rowFields
-// (<renderer>)"), rowsHint finishes "set it on <rowsHint>", and structFile is
-// the Go file declaring typ; all three only shape the failure text.
+// on only one side of a Nix-rendered registry fails instead of never being
+// set. renderer, rowsHint and structFile only shape the failure text.
 func AssertStructFieldsMatchRows(t *testing.T, typ reflect.Type, rowFields []string, renderer, rowsHint, structFile string) {
 	t.Helper()
 	structFields := map[string]bool{}

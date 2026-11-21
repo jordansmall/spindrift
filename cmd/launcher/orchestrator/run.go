@@ -33,14 +33,11 @@ import (
 // invokes, only ever overriding sessionFile.
 type config struct {
 	// driver is the Driver registry name (ADR 0009) the orchestrator itself
-	// uses to pick a RenderTranscript strategy. driver-exec sources its own
-	// Driver from the handoff instead, not from a forwarded flag. Empty
-	// means "claude", matching driver.New.
+	// uses to pick a RenderTranscript strategy; driver-exec reads its own
+	// from the handoff. Empty means "claude", matching driver.New.
 	driver string
-	// handoffFile is the shared static-config handoff document (issue #2975)
-	// holding every per-driver-exec fact that used to be a forwarded flag.
-	// buildDriverExecCmd passes only this path, so there is no per-field
-	// forward list to keep in lockstep with driver-exec's flags.
+	// handoffFile is the shared static-config handoff document (issue
+	// #2975); see buildDriverExecCmd.
 	handoffFile string
 	promptFile  string
 	sessionFile string
@@ -87,8 +84,7 @@ type config struct {
 	// dispatches.
 	reviewPromptFile string
 	// topLevelRole is forwarded as driver-exec's --top-level-role (issue
-	// #2092). Empty omits the flag, which keeps the legacy single-loop path's
-	// argv shape byte-identical to before this field existed.
+	// #2092). Empty, as on the single-loop path, omits the flag.
 	topLevelRole string
 	// manifestPath is the per-pass advisory manifest (issue #2983), rewritten
 	// whole after each pass so every exit path leaves it consistent with the
@@ -136,8 +132,7 @@ func landPhase(terminalLand bool) passmachine.LandPhase {
 // applyDecision is the shared persist/emit helper (issue #2548): it emits
 // the verdict and pass_no_outcome ops, writes state, computes the Decision,
 // then applies any LandPhase/CapFired mutation for the NEXT pass's write.
-// The state write deliberately precedes that mutation, preserving the
-// original write-before-decide order.
+// The state write deliberately precedes that mutation (write-before-decide).
 func applyDecision(stateFile string, state *runstate.RunState, stdout io.Writer, out passOutcome, in passmachine.Input, manifestPath string, manifest *[]passmanifest.Entry) passmachine.Decision {
 	if out.emitVerdictOp {
 		fmt.Fprint(stdout, hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpVerdict, Verdict: string(out.verdict)}))
@@ -178,8 +173,7 @@ func applyDecision(stateFile string, state *runstate.RunState, stdout io.Writer,
 
 // loadManifest reads the pass manifest from manifestPath, returning nil on
 // any read error (no manifest yet on the first pass). Shared by run and
-// runWithReviewPass so their reinvoke-time load behavior cannot drift apart;
-// it did once, see the "Manifest reset-on-reinvoke fix" Decisions entry.
+// runWithReviewPass so their reinvoke-time load behavior cannot drift apart.
 func loadManifest(manifestPath string) []passmanifest.Entry {
 	manifest, err := passmanifest.Read(manifestPath)
 	if err != nil {
@@ -254,10 +248,8 @@ func run(cfg config, stdout io.Writer) (int, error) {
 			state.ScoutBriefPath = cfg.scoutBriefPath
 		}
 		recordPassSummary(cfg.passSummaryPath, &state, preStat)
-		// Nothing in this legacy loop consumes DispositionsPath or
-		// DecisionsPath (there is no review pass, so the round logs are never
-		// appended and the seeded bullets never fire). Both are recorded
-		// anyway, because a caller may set the flags purely to inspect the
+		// This loop has no review pass, so nothing consumes DispositionsPath or
+		// DecisionsPath; both are recorded anyway for a caller inspecting the
 		// run-state artifact.
 		recordDispositions(cfg.dispositionsPath, &state, dispositionsPreSnapshot)
 		recordDecisions(cfg.decisionsPath, &state, decisionsPreSnapshot)
@@ -420,11 +412,9 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		dispositionsRoundLog.readAndAppendFresh(cfg.dispositionsPath, &state.DispositionsPath, &state.DispositionsLogPath, &dispositionsLogRounds, stdout)
 		recordDecisions(cfg.decisionsPath, &state, decisionsPreSnapshot)
 		decisionsRoundLog.readAndAppendFresh(cfg.decisionsPath, &state.DecisionsPath, &state.DecisionsLogPath, &decisionsLogRounds, stdout)
-		// Only the review pass below holds verdict authority here, so this
-		// log is scanned for the outcome alone: any VERDICT-shaped text an
-		// implement/fix pass emits is not state.LastVerdict's source. The
-		// outcome's status lets the machine tell a premature ready from a
-		// settled one (issue #5972).
+		// Only the review pass holds verdict authority, so this log is scanned
+		// for the outcome alone. Its status lets the machine tell a premature
+		// ready from a settled one (issue #5972).
 		passLog := cfg.decodeAndPublishPass()
 		passOut, hasOutcome := scanPassOutcome(passLog)
 		// Folded in before the next driver-exec invocation truncates
@@ -442,9 +432,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			d := computeLandDelta(&state)
 			passLandDelta = &d
 		}
-		// A pass that never printed a terminal SPINDRIFT_OUTCOME line gets
-		// its own marker whatever the decision below is (issue #2036), so a
-		// mid-turn cutoff is visible for the exact pass it happened on.
+		// Per-pass pass_no_outcome marker (issue #2036), as in run.
 		d := applyDecision(cfg.stateFile, &state, stdout, passOutcome{
 			checkHasOutcome: true,
 			hasOutcome:      hasOutcome,
@@ -484,7 +472,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			// No cap fired, so a fresh review pass runs below.
 		default:
 			// NextPass is a kind implementFixTransition never returns on a
-			// continue decision (issue #2548 review); report it loudly rather
+			// continue decision (issue #2548); report it loudly rather
 			// than silently review an unmapped kind.
 			fmt.Fprintf(os.Stderr, "orchestrator: internal error: unexpected NextPass %q on continue decision; treating as review pass\n", d.NextPass)
 		}
@@ -576,8 +564,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 // runDeltaReviewGate implements the bounded delta-review gate (issue #3246):
 // a land pass that reached a ready outcome may still owe the run one
 // terminal delta-review pass before it settles. Called once per run from
-// runWithReviewPass; the pointer arguments are that loop's own locals, so
-// mutations here flow back into it as they did when this code was inline.
+// runWithReviewPass; the pointer arguments are that loop's own locals.
 func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *landdelta.Delta, landLog decodedPass, pc *passCounter, cumulativeTokens *int, cumulativeUSD *float64, manifest *[]passmanifest.Entry, findingsLogRounds *int, stdout io.Writer) error {
 	// landOutcome seeds the corrective blocked line below.
 	landOutcome, outcomeFound := scanPassOutcome(landLog)
@@ -677,12 +664,10 @@ func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *lan
 		Caps:             caps,
 	}, cfg.manifestPath, manifest)
 
-	// A BLOCK here contradicts the land pass's claimed status=ready, so append
-	// a corrective status=blocked result event to the land pass's log, where
-	// box's last-match-wins scan (outcome.ExtractOutcomeLine) finds it after the
-	// ready line under claude, and as the whole final message under opencode.
-	// Not echoed to stdout: box prints the extracted line itself.
-	// Issue and Landing carry over verbatim.
+	// A BLOCK contradicts the land pass's status=ready, so append a corrective
+	// status=blocked result event to its log for box's last-match-wins scan
+	// (outcome.ExtractOutcomeLine). Not echoed to stdout: box prints the
+	// extracted line itself. Issue and Landing carry over verbatim.
 	if passmachine.Verdict(deltaVerdict) == passmachine.VerdictBlock {
 		blocked := landOutcome
 		blocked.Status = outcome.StatusBlocked
@@ -1080,17 +1065,15 @@ func agentUsagePayload(r usage.Report) hostop.PassUsage {
 const dispositionsMeanTokenCeiling = 40
 
 // dispositionsTotalTokenCeiling catches what the mean ceiling alone cannot
-// (issue #2550 review finding): a pasted diff hunk is many short lines, each
-// under the mean on its own, so only a whole-round total catches it. Ten
-// compact entries is already a large round, and this leaves headroom above
-// that.
+// (issue #2550): a pasted diff hunk is many short lines, each under the mean
+// on its own. Ten compact entries is already a large round; this leaves
+// headroom above that.
 const dispositionsTotalTokenCeiling = 400
 
 // decisionsMeanTokenCeiling is dispositionsMeanTokenCeiling's counterpart
-// for decisions (issue #2695), set ten tokens higher because a decisions
-// entry carries three sub-parts (chosen, rejected, and the constraint) to a
-// disposition's one, and a genuinely terse one lands close enough to 40 to
-// risk false trips.
+// for decisions (issue #2695), ten tokens higher because an entry carries
+// three sub-parts (chosen, rejected, constraint) and a terse one lands close
+// enough to 40 to risk false trips.
 const decisionsMeanTokenCeiling = 50
 
 // decisionsTotalTokenCeiling mirrors dispositionsTotalTokenCeiling and stays
@@ -1245,9 +1228,8 @@ func seedAndInvokePass(cfg config, state runstate.RunState, prevSeededPromptFile
 
 // buildDriverExecCmd resolves driver-exec on PATH and invokes it with the
 // shared handoff file plus this pass's own paths and role (issue #2975).
-// Everything else driver-exec once took as a flag lives in the handoff
-// document, so there is no per-field forward list to keep in lockstep with
-// driver-exec's flags.
+// Every other fact lives in the handoff, so there is no per-field forward
+// list to keep in lockstep with driver-exec's flags.
 func buildDriverExecCmd(cfg config) (*exec.Cmd, error) {
 	bin, err := exec.LookPath("driver-exec")
 	if err != nil {

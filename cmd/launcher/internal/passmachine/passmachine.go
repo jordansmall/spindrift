@@ -1,7 +1,6 @@
 // Package passmachine holds the orchestrator's pure "continue to another
-// pass, or stop" decision logic (issue #2548), extracted from three switch
-// statements in cmd/launcher/orchestrator/run.go. It takes no cfg, state or
-// I/O, so every transition is table-testable. Decision.CapFired feeds a
+// pass, or stop" decision logic (issue #2548). It takes no cfg, state or I/O,
+// so every transition is table-testable. Decision.CapFired feeds a
 // byte-for-byte pinned op stream tests assert on; Reason is not pinned (#2655).
 package passmachine
 
@@ -14,8 +13,8 @@ import (
 type PassKind int
 
 const (
-	// KindLegacy is the legacy single loop's pass kind (run.go's pre-#2037
-	// run()): BLOCK-driven passes against one prompt file, no review pass.
+	// KindLegacy is the legacy single loop's pass kind (pre-#2037):
+	// BLOCK-driven passes against one prompt file, no review pass.
 	KindLegacy PassKind = iota
 	// KindImplement is the review loop's first pass, against cfg.promptFile.
 	KindImplement
@@ -90,9 +89,8 @@ func (k PassKind) String() string {
 }
 
 // ManifestKind returns the pass-manifest entry's Kind field value for k:
-// "legacy" for KindLegacy, else String(). Separate from String() because the
-// pass_start op's Role must stay blank for the legacy loop, while the
-// manifest's Kind must always name which pass shape ran.
+// "legacy" for KindLegacy, else String(). The manifest must always name the
+// pass shape, while the pass_start Role stays blank for the legacy loop.
 func (k PassKind) ManifestKind() string {
 	if k == KindLegacy {
 		return "legacy"
@@ -321,8 +319,6 @@ func legacyTransition(in Input) Decision {
 // terminalLandTransition is the in.LandPhase == LandPhaseTerminalCommitted
 // half of the implement/fix/land decision (issue #2548 AC2): once the run is
 // committed to landing, only whether the pass reached its outcome matters.
-// Kept disjoint from implementFixTransition so the two rule sets cannot be
-// reordered against each other.
 func terminalLandTransition(in Input) Decision {
 	if in.HasOutcome {
 		return Decision{Continue: false, Reason: "outcome reached", Stop: StopOutcomeReached}
@@ -431,8 +427,7 @@ func reviewTransition(in Input) Decision {
 		d = Decision{Continue: true, Reason: reason}
 	}
 
-	// A BLOCK verdict increments reviewRounds whichever case fired above,
-	// even for a capped BLOCK.
+	// Even a capped BLOCK counts as a review round.
 	if in.Verdict == VerdictBlock {
 		d.IncrementReviewRounds = true
 	}

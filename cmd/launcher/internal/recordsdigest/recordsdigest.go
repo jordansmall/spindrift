@@ -1,11 +1,7 @@
 // Package recordsdigest is the Digest Strategy a records-scoped Chore fills
-// in and the registry of those fillings (ADR 0070 decision 2). It mirrors
-// backendkit's role: the records adapter renders a Chore's Records digest
-// through the Strategy registered under the Chore's name, so it names no
-// Chore.
-//
-// recordsdigest imports no Chore; built-in Digests register from the
-// host-side bundle (internal/hostbundle).
+// in and the registry of those fillings (ADR 0070 decision 2). Like
+// backendkit, it lets the records adapter render a Chore's digest without
+// naming the Chore; built-in Digests register from internal/hostbundle.
 package recordsdigest
 
 import (
@@ -97,9 +93,8 @@ type Strategy struct {
 	ParsePrior func(settle.PriorFinding) any
 	// Validate applies the Chore's own settle rules, beyond the adapter's cite
 	// check, to a filed intent against the stored digest the Box was served,
-	// under the same Limits Render got.
-	// tracked lists the scanned HEAD's tracked files, lazily. A non-empty
-	// reason drops the finding with that reason; "" keeps it; an error fails
+	// under Render's Limits; tracked lazily lists the scanned HEAD's tracked
+	// files. A non-empty reason drops the finding, "" keeps it; an error fails
 	// the settle and leaves the claim standing.
 	Validate func(in signalwire.IssueIntent, digest string, limits Limits, tracked func() (map[string]bool, error)) (reason string, err error)
 	// DedupTerms returns the Chore's dedup pattern terms for a finding.

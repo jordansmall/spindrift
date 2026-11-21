@@ -9,14 +9,10 @@ const signalSocketNoneModeReason = "BOX_SIGNAL_CARRIER=socket is unsupported und
 
 // checkSignalCarrierNetworkModeGate backstops the one NETWORK_MODE pairing
 // the socket signal carrier (issue #3725) can never work under:
-// NETWORK_MODE=none tears down the loopback the socket transport needs, so
-// BOX_SIGNAL_CARRIER=socket must fail closed at launch rather than silently
-// fall back to the log carrier.
-//
-// The no-host-loopback case is deliberately not checked here: it depends on
-// the live transport verdict a per-Dispatch probe produces, not a static
-// config value, so it lives in the Dispatch-level gate startSignalSocket
-// applies (internal/dispatch/signal_socket.go) instead.
+// NETWORK_MODE=none tears down loopback, so BOX_SIGNAL_CARRIER=socket must
+// fail closed at launch rather than silently fall back to the log carrier.
+// The no-host-loopback case depends on the live transport verdict, so the
+// Dispatch-level gate in internal/dispatch/signal_socket.go checks it.
 func checkSignalCarrierNetworkModeGate(c config) error {
 	if c.SignalCarrier != "socket" {
 		return nil

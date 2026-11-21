@@ -15,9 +15,8 @@ import (
 // names literally so nix-rendered JSON decodes without renaming, which keeps
 // the two sides checkable for drift.
 type FragmentRow struct {
-	// Gate is the bash gate variable tested for non-emptiness, the same key
-	// Gates (gates.go) returns in its map. Empty means ungated: the row's
-	// fragment renders unconditionally.
+	// Gate is a key of Gates's map. Empty means ungated: the row's fragment
+	// renders unconditionally.
 	Gate string `json:"gate"`
 	// Fragment is the basename under prompts/fragments/ rendered when Gate is on.
 	// On an axis row it is a basename under prompts/fragments/<backend>/ instead.
@@ -124,8 +123,8 @@ func trackerReadFilerSignals(e Env) (read, filer string) {
 
 // axisFolder is the fragments/ folder an axis row reads from: the folder of
 // the same signal the axis's gates test, not of the backend's name, so a
-// backend riding another's arm (jira on github's, a local tracker's Filer on
-// GH) reads that arm's file. A plain row, with no axis, has no folder: "".
+// backend riding another's arm (a jira or local tracker's Filer on GH) reads
+// that arm's file. A plain row, with no axis, has no folder: "".
 func (r FragmentRow) axisFolder(e Env) (string, error) {
 	switch r.Axis {
 	case "":

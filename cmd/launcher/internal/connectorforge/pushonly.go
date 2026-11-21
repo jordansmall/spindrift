@@ -57,11 +57,10 @@ const (
 // in: the Connector never touches git or the credential.
 type Git struct {
 	Credential gitexec.Credential
-	// Plumbing builds core's git plumbing over the validated clone URL (the
-	// push-only git adapter's NewGitClient in production); Compose hands it
-	// Credential only after the clone URL passed the host check. It is injected
-	// because this package sits in every backend's go test sources, so it cannot
-	// import a backend package. Nil is a construction error.
+	// Plumbing builds core's git plumbing over the clone URL, getting
+	// Credential only after the host check. Injected because this package sits
+	// in every backend's go test sources, so it cannot import a backend
+	// package. Nil is a construction error.
 	Plumbing func(cloneURL string, cred gitexec.Credential) forge.CodeForge
 	// Clock paces the retry backoff; the zero value is retry.RealClock().
 	Clock retry.Clock
@@ -134,19 +133,15 @@ type pushOnly struct {
 	cred     gitexec.Credential
 }
 
-// Compose builds a Code Forge from a forge Connector whose handshake advertises
-// "forge.branches" and either "forge.pushOnly" (a push-only forge: a
-// BranchDeleter and no PRForge) or "forge" with "forge.prs" (a PR forge: the PR
-// surface, branch deletion and the merge commit, plus a CIRunReporter and
-// BranchProtectionForge only when declared, and a DraftPRCreator and
-// BranchPusher only on "forge.draftPRs", which also relays the Box's bundle and
-// reads its commit subjects). The returned Capabilities are the composed forge
-// resolved by type, so they and any later type probe (doctor's, for one) agree
-// on exactly what it offers.
-// The remote's identity is read once here, and refused (and audited) unless
-// both its URLs are plain https on Git.WebHost or, without one, a host the
-// Connector declared, so the git credential never reaches a host the Connector
-// merely named.
+// Compose builds a Code Forge from a forge Connector advertising
+// "forge.branches" and either "forge.pushOnly" (a BranchDeleter, no PRForge) or
+// "forge" with "forge.prs" (the PR surface, with each optional capability only
+// when declared; "forge.draftPRs" adds draft PRs, branch pushes and the bundle
+// relay). The returned Capabilities are the composed forge resolved by type,
+// so any later type probe agrees with them. The remote is read once, here,
+// and refused (and audited) unless both its URLs are plain https on
+// Git.WebHost or, without one, a declared host, so the git credential never
+// reaches a host the Connector merely named.
 func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge, forge.Capabilities, error) {
 	has := func(capName string) bool { return slices.Contains(c.Capabilities, capName) }
 	isPushOnly := has(capPushOnly)
@@ -266,10 +261,9 @@ func retryTransient(attempts int, b retry.LinearBackoff, fn func() error) error 
 	}
 }
 
-// cloneInto is a `git clone` step run in core's git over the validated clone
-// URL with core's credential: the Connector never sees git or the credential.
-// op names the caller and shapeFlag the clone's shape; the credential rides
-// the environment, never the URL, and the error carries only redacted output.
+// cloneInto is a `git clone` step in core's git over the validated clone URL;
+// the credential rides the environment, never the URL, and the error carries
+// only redacted output.
 func (p *pushOnly) cloneInto(op, shapeFlag string) func(dir string) error {
 	return func(dir string) error {
 		out, err := p.cred.Apply(exec.Command("git", "clone", shapeFlag, p.cloneURL, dir)).CombinedOutput()

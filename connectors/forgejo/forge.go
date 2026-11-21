@@ -64,12 +64,12 @@ func parseNumber(number string) (int, error) {
 	return n, nil
 }
 
-// pageUntilEmpty reads path's pages until one is empty, the way the native
-// adapter does: Forgejo caps `limit` below pageSize on some instances, so a
-// short page does not mark the end. A page whose first item repeats the
-// previous page's ends the walk too, for a forge that ignores `page`. There is
-// no page bound: Forgejo caps each page at its own MAX_RESPONSE_ITEMS, so a
-// large repo's PR list legitimately runs past any fixed count.
+// pageUntilEmpty reads path's pages until one is empty: Forgejo caps `limit`
+// below pageSize on some instances, so a short page does not mark the end. A
+// page whose first item repeats the previous page's ends the walk too, for a
+// forge that ignores `page`. There is no page bound: Forgejo caps each page at
+// its MAX_RESPONSE_ITEMS, so a large repo's PR list legitimately runs past any
+// fixed count.
 func pageUntilEmpty[T any, K comparable](api, path string, q url.Values, key func(T) K) ([]T, error) {
 	var items []T
 	var prevFirst K
@@ -89,8 +89,8 @@ func pageUntilEmpty[T any, K comparable](api, path string, q url.Values, key fun
 }
 
 // prsForBranch lists every PR and keeps those headed at branch: Forgejo's list
-// has no head filter. Like the native adapter it matches on the head ref alone,
-// so a fork PR of the same branch name is returned too.
+// has no head filter. It matches on the head ref alone, so a fork PR of the
+// same branch name is returned too.
 func prsForBranch(t forge.Target, branch string) ([]forge.PR, error) {
 	raw, err := pageUntilEmpty(t.API, forgePath(t, "/pulls"), url.Values{"state": {"all"}},
 		func(r rawPR) int { return r.Number })
@@ -170,7 +170,7 @@ var rollupStates = map[string]string{
 
 // checks reads the PR head commit's commit statuses. The combined state is the
 // worst newest status per context, so a "warning" can mask a pending context:
-// it is resolved from the statuses instead, as the native adapter does.
+// it is resolved from the statuses instead.
 func checks(t forge.Target, number string) (forge.Rollup, error) {
 	raw, err := readPR(t, number)
 	if err != nil {

@@ -43,10 +43,9 @@ type Config struct {
 	Runtime string
 
 	// NetworkMode is the NETWORK_MODE knob. The raw PODMAN_NETWORK and
-	// BWRAP_UNSHARE_NET escape hatches are family row knobs the adapters read,
-	// not Config fields. nix eval rejects setting NETWORK_MODE together with
-	// either raw knob (lib/mkHarness.nix networkModeCoherenceOk), but
-	// Config.OCINetwork still picks a deterministic winner (raw) since Go
+	// BWRAP_UNSHARE_NET escape hatches are family row knobs, not Config fields.
+	// nix eval rejects pairing NETWORK_MODE with either (mkHarness's
+	// networkModeCoherenceOk), but OCINetwork still lets raw win since Go
 	// cannot observe that invariant.
 	NetworkMode NetworkMode
 	PidsLimit   string
@@ -57,7 +56,6 @@ type Config struct {
 	MaxParallel int
 
 	// MountParams carries the mount-gating facts the run adapters share; the
-	// build adapters ignore them. DriverSessionCacheDir is ADR 0009.
-	// Embedded, so call sites keep reaching its fields as cfg.PromptDir.
+	// build adapters ignore them.
 	MountParams
 }

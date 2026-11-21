@@ -1,11 +1,9 @@
 // Package ecosystem is the core of the Ecosystem Strategy registry: the
-// Strategy type and its hook types, Register and the accessors over the
-// registered Strategies, and the route keys registryroutes reads without
-// importing a Strategy. What the Harness knows about each dependency
-// ecosystem (lockfile names, config readers, the env-export and
-// home-level-config renderers) lives in that ecosystem's own package under
-// internal/ecosystem, which installs its Strategy through Register (ADR
-// 0048's 2026-10-22 amendment). No ecosystem's file-format code lives here.
+// Strategy type and its hooks, Register and its accessors, and the route keys
+// registryroutes reads without importing a Strategy. Each ecosystem's
+// file-format knowledge lives in its own package under internal/ecosystem,
+// which installs its Strategy through Register (ADR 0048, 2026-10-22
+// amendment).
 package ecosystem
 
 import (
@@ -18,18 +16,15 @@ import (
 // (go reads GOTOOLCHAIN and friends). The endpoint arrives as (port, prefix)
 // so each renderer owns its trailing-slash shape (go's GOPROXY has none,
 // gradle's URL does); the npm-family renderers ignore prefix and bind their
-// matched route's own. routes (issue #3259) carries the tagged EnforcedPaths a
-// renderer keys off.
+// matched route's own. routes (issue #3259) carries the tagged EnforcedPaths.
 type EnvExportRenderer func(port int, prefix string, getenv func(string) string, routes []registrymanifest.Route) (exports []EnvExport, warnings []string)
 
 // HomeConfigRenderer renders a home-level registry-config file for the local
-// endpoint at (port, prefix). It takes no getenv because such a file rewrites
-// resolution wholesale, so it never preserves a prior environment value.
-// routes is the manifest's full route list (issue #3259), which a pre-clone
-// renderer (gradle's) keys off through the first route's tagged EnforcedPaths.
-// bound is false when the rendered file installs no redirection (gradle with no
-// declared path): the file is still written, but the bind summary must not
-// advertise a binding it lacks.
+// endpoint at (port, prefix). It takes no getenv: such a file rewrites
+// resolution wholesale. routes is the full route list (issue #3259); gradle's
+// pre-clone renderer keys off the first route's tagged EnforcedPaths. bound is
+// false when the file installs no redirection (gradle with no declared path):
+// it is still written, but the bind summary must not advertise a binding.
 type HomeConfigRenderer func(port int, prefix string, routes []registrymanifest.Route) (content string, bound bool)
 
 // HomeConfig is one ecosystem's home-level (not in-tree) registry config.
@@ -63,7 +58,7 @@ func (s Strategy) ConfigPaths() []string {
 // walker reads the file and stamps Declaration.Ecosystem and ConfigPath after
 // the call returns.
 // namedAny separates "named nothing" from "named only unusable things". Nil
-// for a Strategy with no committed config (go, gradle); a walk skips such a Strategy.
+// for a Strategy with no committed config (go, gradle); a walk skips it.
 type ConfigParser func(content string) (decls []Declaration, namedAny bool, err error)
 
 // RouteDeclarationValidator validates one key of a route's
@@ -87,15 +82,13 @@ type Strategy struct {
 
 	// Classification is not one-to-one with Name: npm, yarn and pnpm are
 	// separate Strategies with their own lockfiles and in-tree config paths, but the
-	// nudge collapses all three into one "npm/pnpm/yarn" family, as
-	// entrypoint.sh's old lockfile chain did.
+	// nudge collapses all three into one "npm/pnpm/yarn" family.
 	Classification string
 
 	// InTreeConfigPath is empty for an ecosystem with no in-tree config to
 	// rewrite (go, gradle) or whose config has several spellings
 	// (DiscoveryConfigPaths); bind-side consumers exclude a Strategy with
-	// neither by ConfigPaths being empty, never via a second hand-maintained
-	// list.
+	// neither by ConfigPaths being empty, not a hand-maintained list.
 	InTreeConfigPath string
 
 	// DiscoveryConfigPaths lists, in probe order, the spellings of an in-tree
@@ -108,12 +101,11 @@ type Strategy struct {
 
 	// InTreeRewrite is nil for every Strategy whose in-tree binding is host
 	// substitution alone. When set, bindregistry.ApplyInTreeBinding calls it
-	// with the config after that substitution and the LocalURL of every
-	// rewrite, so it can make further edits keyed off values that now start
-	// with one of those URLs. It runs only on the path that rewrites a host: a
-	// config with none left is tagged without it, which keeps a second Apply
-	// convergent. An error aborts the Apply before the skip-worktree tag and
-	// before any write.
+	// with the substituted config and every rewrite's LocalURL, for edits keyed
+	// off values that now start with one of those URLs. It runs only when a
+	// host is rewritten (a config with none left is tagged without it, keeping
+	// a second Apply convergent). An error aborts the Apply before the
+	// skip-worktree tag and any write.
 	InTreeRewrite InTreeRewriter
 
 	EnvExports EnvExportRenderer
@@ -218,12 +210,11 @@ func CredentialStores(rows []Strategy) map[string][]string {
 var registered []Strategy
 
 // Register installs the ecosystems in precedence order; the Bundle's
-// ecosystems.go makes the one call. That order is load-bearing twice over: it
-// encodes the first-hit lockfile precedence entrypoint.sh's old if/elif chain
-// had (issue #2930), and it sets the env-export file's line order
-// (EnvExportRows), so do not reorder Strategies without checking every caller
-// that stops at the first match. It panics on a second call, a duplicate Name,
-// or an empty list, so a half-registered or silently shadowed table cannot run.
+// ecosystems.go makes the one call. The order is load-bearing: it is the
+// first-hit lockfile precedence (issue #2930) and the env-export file's line
+// order (EnvExportRows), so check every first-match caller before reordering.
+// It panics on a second call, a duplicate Name, or an empty list, so a
+// half-registered or silently shadowed table cannot run.
 func Register(strategies ...Strategy) {
 	register(&registered, strategies)
 }
@@ -254,8 +245,8 @@ func Registered() []Strategy { return registered }
 // equals key, so a caller translating a retired routes-file key never
 // hand-lists which ecosystem it stood for. ok is false when nothing matches,
 // including key == "": npm, yarn and pnpm all carry an empty RetiredRouteKey,
-// so without the guard an empty key would resolve to whichever of them rows
-// lists first.
+// so an empty key would otherwise resolve to whichever of them rows lists
+// first.
 func RowByRetiredRouteKey(key string, rows []Strategy) (Strategy, bool) {
 	if key == "" {
 		return Strategy{}, false

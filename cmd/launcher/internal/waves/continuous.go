@@ -19,12 +19,10 @@ import (
 	"spindrift.dev/launcher/internal/terminate"
 )
 
-// defaultPollInterval is the background refill poll's cadence (issue #1637):
-// a ticker retries drainRefill() on this interval so a transient refill miss
-// gets retried without waiting for an unrelated Box to finish. Three minutes
-// rather than the original 30s (issue #2874), because each tick spends a share
-// of the tracker's rate-limit budget. It is hardcoded; issue #1638 tracks
-// making it an operator knob.
+// defaultPollInterval is the background refill poll's cadence (issue #1637),
+// retrying a transient refill miss without waiting for a Box to finish. Three
+// minutes, not 30s (issue #2874): each tick spends tracker rate-limit budget.
+// Issue #1638 tracks making it an operator knob.
 const defaultPollInterval = 3 * time.Minute
 
 func resolvePollInterval(override time.Duration) time.Duration {
@@ -43,12 +41,10 @@ var ErrImageStale = errors.New("image stale; rebuild and re-invoke")
 // ErrSignalledStop is returned by RunContinuous once cfg.Stop has been closed:
 // no further Boxes launch, in-flight ones finish, and the driving loop exits
 // without a rebuild (exit code 7, see main.go's runExitCode). It takes
-// precedence over ErrImageStale and ErrOpenNoneDispatchable in the terminal
-// switch below, whichever detection races first, since an operator's explicit
-// wind-down request should never be masked by a stale-image or empty-queue
-// verdict discovered in the same drain (#3520). Dispatch's one-shot wave
-// returns it too (#3522), by the same precedence, once its own
-// shutdown.Gate reports signalled.
+// precedence over ErrImageStale and ErrOpenNoneDispatchable, so an explicit
+// wind-down is never masked by a verdict found in the same drain (#3520).
+// Dispatch's one-shot wave returns it too, once its shutdown.Gate reports
+// signalled (#3522).
 var ErrSignalledStop = errors.New("stop requested; drained outstanding work")
 
 // Discoverer re-queries the dispatchable Batch. RunContinuous calls it at
@@ -69,14 +65,12 @@ type FreshnessChecker func() (applicable, fresh bool, message string)
 // sources goes unrendered here: its only consumer, writeBlockedMarker, fires
 // for OriginClaimed, a mode continuous dispatch never uses (#662).
 func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), issues []Issue, edges map[string][]string, sources Sources, depsOfFailed map[string]bool, logged map[string]string) (Issue, bool) {
-	// Drop dedup entries for issues no longer in the batch: keeps logged bounded
-	// across a long-lived session, and lets an issue that leaves and returns
-	// re-log its state afresh.
+	// Pruning keeps logged bounded over a long session, and lets an issue that
+	// leaves and returns re-log its state.
 	pruneAbsent(logged, issues)
-	// skip logs a non-dispatch outcome at most once per distinct line: refill
-	// re-walks this list on every completion and the poll re-walks it every ~3m
-	// (#1637), so an unchanged blocked or deferred reason would otherwise
-	// reprint on every tick. A nil logged map (direct unit tests) disables it.
+	// skip drops a line unchanged since the issue's last one: refill re-walks
+	// this list on every completion and ~3m poll tick (#1637). A nil logged
+	// (unit tests) disables it.
 	skip := func(num, line string) {
 		if logged != nil && logged[num] == line {
 			return
@@ -114,25 +108,21 @@ func pruneAbsent(m map[string]string, issues []Issue) {
 	}
 }
 
-// issueReadiness classifies iss the same way nextReady's selection loop does,
-// but as a pure query with no printing or dedup, so a caller that only wants
-// ready-vs-not can reuse it (the stale-drain heldBack count, #2678). line is
-// the message nextReady would print for a not-ready result and is meaningless
-// when ready is true.
+// issueReadiness is nextReady's classification as a pure query, with no
+// printing or dedup (the stale-drain heldBack count reuses it, #2678). line
+// is what nextReady would print for a not-ready result.
 func issueReadiness(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), iss Issue, edges map[string][]string, depsOfFailed map[string]bool) (ready bool, line string) {
 	var unready []string
 	if !cfg.IgnoreBlockers {
-		// caps is resolved fresh per call rather than threaded in as a parameter
-		// (issue #2946): it and cf never vary within a single Dispatch or
-		// RunContinuous invocation.
+		// Resolved per call rather than threaded in (issue #2946): caps never
+		// varies within one Dispatch or RunContinuous invocation.
 		caps := forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
 		unready = unreadyBlockers(it, caps, cfg.BranchPrefix, iss.Number, edges, cfg.SeedScopeOf)
 	}
 	switch {
 	case !cfg.IgnoreBlockers && depsOfFailed[iss.Number]:
-		// Own DepsOf call failed (#752, #1103), so edges[iss.Number] is
-		// unreliable rather than a confirmed zero-blocker result. Hold rather
-		// than launch; the next refill retries.
+		// Own DepsOf call failed (#752, #1103): edges[iss.Number] is not a
+		// confirmed zero-blocker result. Hold; the next refill retries.
 		return false, fmt.Sprintf("    ~~ #%s blocker check failed; will retry\n", iss.Number)
 	case len(unready) > 0:
 		return false, fmt.Sprintf("    ~~ #%s blocked by #%s; skipping\n", iss.Number, strings.Join(unready, ", #"))
@@ -161,10 +151,9 @@ func CountReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, batch Bat
 }
 
 // dropClaimed filters a refill's discover result against the in-run claimed
-// set before nextReady scans it (issue #1646), since an eventually-consistent
-// listing can still show a just-claimed issue as dispatchable. Dropping here
-// rather than inside nextReady's loop avoids a per-issue skip line that, with
-// N slots claimed, would repeat O(N^2) times over a run.
+// set (issue #1646): an eventually-consistent listing can still show a
+// just-claimed issue. Dropping here, not in nextReady's loop, avoids a skip
+// line that would repeat O(N^2) times over a run.
 func dropClaimed(issues []Issue, claimed map[string]bool) []Issue {
 	unclaimed := make([]Issue, 0, len(issues))
 	for _, iss := range issues {
@@ -176,10 +165,9 @@ func dropClaimed(issues []Issue, claimed map[string]bool) []Issue {
 }
 
 // reportStaleDrainReleasingMu runs queue.ReportStaleDrain's blocking I/O with
-// mu released, then re-acquires it: mu is held on entry and on exit (#2775).
-// Both call sites have already run staleDrain.finish under mu, the write that
-// makes inProgress() false, so the single-emit invariant holds before mu drops
-// and no second drain report can race in behind this one.
+// mu released; mu is held on entry and exit (#2775). Both callers run
+// staleDrain.finish under mu first, making inProgress() false, so no second
+// drain report can race in behind this one.
 func reportStaleDrainReleasingMu(mu *sync.Mutex, queue Queue, report StaleDrainReport) {
 	mu.Unlock()
 	queue.ReportStaleDrain(report)
@@ -196,97 +184,66 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		return err
 	}
 
-	// The cap is fixed at cfg.MaxParallel for this invocation.
 	limiter := NewLimiter(cfg.MaxParallel)
 	var terminated *terminate.Registry
 	if session != nil {
 		terminated = session.Terminated
 	}
 	if terminated == nil {
-		// Reclaim's Mark is what stops a surviving Box goroutine from Failing or
-		// Settling an issue the abort path already released back to
-		// Dispatchable (#3521): the abort watcher below always calls Reclaim
-		// against terminated, and only tests reach this fallback (see
-		// Session.Terminated). A fresh Registry with nothing marked yet
-		// behaves exactly like the nil one it replaces (Marked reports false
-		// until something marks it), so no non-abort path changes.
+		// Only tests reach this (see Session.Terminated). The abort path needs
+		// a Registry: Reclaim's Mark stops a surviving Box goroutine Failing or
+		// Settling an issue already released to Dispatchable (#3521). An
+		// unmarked Registry behaves like nil, so no non-abort path changes.
 		terminated = terminate.NewRegistry()
 	}
 	reaper := f.AsReaper()
 
-	// mu also guards stale, dispatchedAny, claimed, and inflight below
-	// (#653): every refill call, whether from the bootstrap loop, a completing
-	// Box, or the poll tick, runs under this one lock, so they never
-	// interleave.
+	// mu guards every piece of run state below (#653): bootstrap, completion
+	// and poll-tick refills all run under it, so they never interleave.
 	var mu sync.Mutex
 	idle := sync.NewCond(&mu)
 	stale := false
-	// signalled latches an operator wind-down request observed on cfg.Stop
-	// (#3520), mu-guarded exactly like stale: refill's guard and the terminal
-	// switch below both read it, and the dedicated stop watcher goroutine is
-	// the only other writer, so the drain-once invariant holds the same way
-	// staleDrain's does.
+	// signalled latches a wind-down request seen on cfg.Stop (#3520).
 	signalled := false
-	// aborted latches an operator second-signal abort observed on cfg.Abort
-	// (#3521), mu-guarded exactly like signalled. It has more than one writer,
-	// unlike signalled: observeAbort below runs the one-time reclaim inline, so
-	// whichever mu-held site first notices cfg.Abort closed is the site that
-	// latches. The latch itself is what keeps that to one reclaim, not a
-	// single-writer discipline.
+	// aborted latches a second-signal abort seen on cfg.Abort (#3521). Any
+	// mu-held site may be first to see cfg.Abort closed; the latch, not a
+	// single writer, keeps it to one reclaim.
 	aborted := false
-	// aborting is true only for the span of that one reclaim, keeping the
-	// terminal wait below from returning while a Reclaim is still between its
-	// Kill and the InProgress->Dispatchable transition that same Kill races:
-	// the reclaimed Box's own completion goroutine empties inflight and
-	// broadcasts from inside that window, which would otherwise exit the
-	// process with the aborted issue stranded on InProgress (#3521).
+	// aborting spans that one reclaim, so the terminal wait cannot return
+	// while a Reclaim sits between its Kill and the InProgress->Dispatchable
+	// transition: the killed Box's completion goroutine empties inflight inside
+	// that window, which would strand the issue on InProgress (#3521).
 	aborting := false
 	dispatchedAny := false
 	claimed := make(map[string]bool)
-	// inflight holds only issues claimed and not yet finished — unlike claimed,
-	// which also remembers a finished issue so it is never re-claimed, this
-	// must forget one the moment it finishes, or the abort watcher would drag
-	// an already-Complete issue back to Dispatchable (#3521). refill's claim
-	// and the abort watcher's snapshot both run under mu, so a Box either
-	// launches before the watcher latches aborted (and is therefore in the
-	// snapshot) or never launches at all. len(inflight) is also the in-flight
-	// Box count: a plain sync.WaitGroup cannot coordinate safely here, since the
-	// poll tick can call refill, and so wg.Add, from a goroutine with no
-	// causal link to any counted Box, risking the documented WaitGroup race.
-	// Reading and mutating inflight under mu makes "is anything still
-	// outstanding" and "am I about to add more" the same critical section.
+	// inflight, unlike claimed, forgets an issue the moment it finishes, or the
+	// abort watcher would drag a Complete issue back to Dispatchable (#3521).
+	// Claim and the watcher's snapshot share mu, so a Box is either in the
+	// snapshot or never launches. It also stands in for a sync.WaitGroup,
+	// unsafe here: the poll tick would call wg.Add with no causal link to a
+	// counted Box.
 	inflight := make(map[string]bool)
-	// logged keys an issue number to the last skip line printed for it, so the
-	// re-walks on every completion and ~3m poll tick (#1637) do not
-	// reprint an unchanged blocked or deferred reason.
+	// logged keys an issue to the last skip line printed for it (#1637).
 	logged := make(map[string]string)
 	// claimSkips is logged's counterpart for claim-failure skip lines (#4892).
 	claimSkips := make(map[string]string)
 	closed := false
-	// staleDrain consolidates the stale-drain report state (#2678, #2774).
 	var staleDrain staleDrainTracker
-	// now is cfg's test override, so the report's freeSlotSecs accumulation is
-	// assertable from a deterministic clock sequence (issue #2678), or the
-	// production clock.
+	// Tests override now to make freeSlotSecs deterministic (issue #2678).
 	now := cfg.now
 	if now == nil {
 		now = time.Now
 	}
-	// clock is cfg's injectable sleep seam for the rate-limited re-discover
-	// backoff (issue #2866); only same-package tests inject a fake Clock, so
-	// the backoff sleeps through it instead of a real sleep.
+	// Tests inject a fake Clock for the rate-limited re-discover backoff
+	// (issue #2866).
 	clock := cfg.Clock
 	if clock.Sleep == nil {
 		clock = retry.RealClock()
 	}
 
 	// observeStop is a non-blocking latch on cfg.Stop (#3520). Caller holds mu.
-	// refill calls it on every entry — bootstrap, completion-triggered, and the
-	// ~3m poll tick all funnel through refill — so a stop closed at any point is
-	// picked up on the very next of those triggers. The dedicated watcher
-	// goroutine below calls the same helper — see its own comment for the
-	// promptness that buys. announce is false only for the final post-drain
-	// latch, where the drain is already over and a drain line would mislead.
+	// announce is false only for the final post-drain latch, where a drain
+	// line would mislead.
 	observeStop := func(announce bool) {
 		if signalled || cfg.Stop == nil {
 			return
@@ -306,13 +263,9 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		}
 	}
 
-	// reclaimInFlight snapshots inflight, drops mu for shutdown.AbortInFlight's
-	// I/O, and retakes it before returning -- the reportStaleDrainReleasingMu
-	// idiom above: mu is held on entry and exit, and observeAbort below is its
-	// only caller, guarded so it runs exactly once. AbortInFlight (#3522) is
-	// the same sort/print/Reclaim-loop dispatchWave's shutdown.Gate uses for
-	// its own abort path, so the two Box-launching paths share one loop that
-	// actually talks to the tracker and reaper.
+	// reclaimInFlight snapshots inflight and drops mu for
+	// shutdown.AbortInFlight's I/O; mu is held on entry and exit. AbortInFlight
+	// is the same Reclaim loop dispatchWave's shutdown.Gate uses (#3522).
 	reclaimInFlight := func() {
 		nums := make([]string, 0, len(inflight))
 		for num := range inflight {
@@ -326,19 +279,12 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		idle.Broadcast()
 	}
 
-	// observeAbort is a non-blocking latch on cfg.Abort (#3521), the abort
-	// counterpart to observeStop above, called from the same handful of
-	// mu-held sites (both refill guards, the terminal re-check, and the
-	// dedicated abort watcher below). Unlike observeStop it does the one-time
-	// reclaim itself rather than leaving that to its callers: the aborted
-	// guard at top means whichever call site notices cfg.Abort closed first
-	// runs reclaimInFlight, and every later call is a no-op. Folding the
-	// reclaim in here (rather than only in the watcher, mirroring the stop
-	// watcher's shape verbatim) closes a real race: relying solely on the
-	// watcher goroutine racing the shutdown join below (close(pollDone)/
-	// <-pollExited) against its own select can lose that coin toss under
-	// scheduler pressure when nothing was ever in-flight, silently dropping
-	// the announcement. Caller holds mu.
+	// observeAbort is a non-blocking latch on cfg.Abort (#3521). Caller holds
+	// mu. Unlike observeStop it runs the one-time reclaim itself, so whichever
+	// site first sees cfg.Abort closed does it. Leaving the reclaim to the
+	// watcher alone races the shutdown join below, and can lose under
+	// scheduler pressure when nothing was in flight, dropping the
+	// announcement.
 	observeAbort := func() {
 		if aborted || cfg.Abort == nil {
 			return
@@ -351,12 +297,9 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		}
 	}
 
-	// refill reports whether it launched a Box, so a caller filling more than
-	// one freed slot from a single trigger can loop it until a call finally does
-	// nothing, rather than assuming one trigger is worth exactly one launch.
+	// refill reports whether it launched a Box, so drainRefill can loop it.
 	var refill func() bool
-	// drainRefill is predeclared so refill's completion goroutine can call it
-	// before its body is assigned.
+	// Predeclared: refill's completion goroutine calls it.
 	var drainRefill func() int
 	refill = func() bool {
 		observeStop(true)
@@ -378,11 +321,9 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			stale = true
 			fmt.Printf("==> %s\n", msg)
 			staleDrain.begin(now(), limiter.Cap())
-			// heldBack comes from queue.Pending(claimed), a side-effect-free
-			// count each Queue supplies its own way, rather than RunContinuous
-			// re-discovering or re-filtering (#2939). A Pending error is
-			// reported as unknown rather than a fabricated 0 (#2678 review
-			// finding).
+			// heldBack comes from the Queue's own side-effect-free count
+			// (#2939). A Pending error reports unknown, not a fabricated 0
+			// (#2678).
 			if n, err := queue.Pending(claimed); err != nil {
 				fmt.Fprintf(os.Stderr, "continuous: query pending for stale-drain report: %v\n", err)
 				staleDrain.heldBackUnknown = true
@@ -390,10 +331,8 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				staleDrain.heldBack = n
 			}
 			if len(inflight) == 0 {
-				// Nothing in flight, so the drain is already over and the
-				// completion goroutine below never runs to report it. end is
-				// set to start itself, not a fresh time.Now(), so Duration() is
-				// exactly zero rather than a near-zero timing artifact.
+				// No completion goroutine will report this drain. end is start
+				// itself so Duration() is exactly zero, not a timing artifact.
 				reportStaleDrainReleasingMu(&mu, queue, staleDrain.finish(staleDrain.start))
 			}
 			return false
@@ -417,13 +356,10 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			}
 			backoff := cfg.Policy.Backoff(clock).Duration(attempt)
 			fmt.Fprintf(os.Stderr, "continuous: re-discover: rate limited; retry %d/%d in %s\n", attempt, cfg.Policy.Max, backoff)
-			// mu is dropped across the sleep so the stop-watcher isn't blocked
-			// out of the drain line for the whole backoff (#3520 review). A
-			// whole other refill (completion or poll tick) may run to
-			// completion in this window; that is safe because this one re-reads
-			// every input it decides on — the Discover above, claimed, and the
-			// stop/stale flags — after re-taking mu, so it cannot duplicate a
-			// launch the other made.
+			// mu is dropped so the stop watcher can print its drain line
+			// during the backoff (#3520). Another refill may run meanwhile;
+			// safe, since this one re-reads Discover, claimed, and the flags
+			// after re-taking mu.
 			mu.Unlock()
 			clock.Sleep(backoff)
 			mu.Lock()
@@ -433,9 +369,8 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				return false
 			}
 		}
-		// Continuous refill has no Origin concept, always the discovered pool
-		// and never a hand-picked list, so unlike NewPlan it sorts
-		// unconditionally (ADR 0040).
+		// Refill always works the discovered pool, never a hand-picked list, so
+		// unlike NewPlan it sorts unconditionally (ADR 0040).
 		forge.SortByPriority(batch.Issues, func(i Issue) forge.Priority { return i.Priority })
 		if len(batch.Edges) > 0 {
 			if node, cycle := detectCycle(batch.Edges, forge.Numbers(batch.Issues, func(i Issue) string { return i.Number })); cycle {
@@ -446,9 +381,8 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		checkOverlap := waveOverlapCheck(cfg, it, cf)
 		unclaimed := dropClaimed(batch.Issues, claimed)
 		pruneAbsent(claimSkips, batch.Issues)
-		// A failed claim must not strand the free slot behind it (#4892): walk on
-		// to the next ready candidate within this same refill. The failed issue is
-		// retried on the next trigger, not remembered across refills.
+		// A failed claim must not strand the free slot (#4892): walk on to the
+		// next candidate. The failed issue is retried on the next trigger.
 		var iss Issue
 		for {
 			next, ok := nextReady(cfg, it, cf, checkOverlap, unclaimed, batch.Edges, batch.Sources, batch.Failed, logged)
@@ -471,11 +405,9 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		}
 		dispatchedAny = true
 		claimed[iss.Number] = true
-		// New arms this issue's kill latch, so it must happen here, under mu
-		// and before the inflight entry below — not as the goroutine's first
-		// statement (#3521). reclaimInFlight snapshots inflight under mu, so
-		// arming first means every issue it can reap is already armed, and no
-		// later New can re-arm the latch its Kill just closed.
+		// New arms the kill latch, so it runs under mu before the inflight
+		// entry, not in the goroutine (#3521): every issue reclaimInFlight can
+		// reap is already armed, and no later New re-arms a latch Kill closed.
 		d := f.New(iss.Number, iss.Title)
 		inflight[iss.Number] = true
 		launched = true
@@ -484,18 +416,15 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			disp := d.Run()
 			switch {
 			case terminated.Marked(iss.Number, iss.Generation):
-				// terminate.Reclaim (a signalled abort or a shutdown
-				// drain decline, ADR 0024) already reaped this Box, moved
-				// the issue back to Dispatchable, and logged its own line,
-				// so neither a Failed transition nor a Settle belongs here.
+				// terminate.Reclaim (ADR 0024) already reaped the Box, moved
+				// the issue to Dispatchable, and logged, so neither a Failed
+				// transition nor a Settle belongs here.
 				fmt.Printf("    ~~ #%s reclaimed; abandoning\n", iss.Number)
 			default:
 				dispatch.Route(disp,
 					func() struct{} {
-						// A live run, possibly orphaned by a killed launcher, still owns
-						// this issue's container, so skip without a dispatch-state
-						// transition and leave its in-progress claim untouched (#562,
-						// #3633).
+						// A live run, possibly orphaned by a killed launcher, owns
+						// the container: leave its claim untouched (#562, #3633).
 						fmt.Printf("    ~~ #%s already in flight; skipping (live run continues)\n", iss.Number)
 						return struct{}{}
 					},
@@ -513,10 +442,8 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 					})
 			}
 			mu.Lock()
-			// Integrate the idle slot-time since the last checkpoint using the
-			// pre-delete inflight count, the busy-slot count over the
-			// interval that just ended, so it must stay above the delete below
-			// or it under-bills by one Box. It is a no-op outside a drain.
+			// Needs the pre-delete inflight count (the busy slots over the
+			// interval just ended); below the delete it under-bills one Box.
 			staleDrain.checkpointIfNeeded(now(), len(inflight))
 			// Must run before the abort watcher can next take mu, or a Box that
 			// just finished on its own would still look in-flight to it (#3521).
@@ -538,10 +465,8 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	}
 
 	// drainRefill fills every free slot that has ready work and reports how many
-	// it launched, so the poll ticker below logs only the ticks that did
-	// something. A slot freed by an earlier transient refill miss stays free at
-	// the limiter level until some later call claims it, so one trigger is not
-	// worth exactly one launch (#1587).
+	// it launched. A slot an earlier refill missed stays free until a later
+	// call claims it, so one trigger is not worth exactly one launch (#1587).
 	drainRefill = func() int {
 		n := 0
 		for refill() {
@@ -550,8 +475,6 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		return n
 	}
 
-	// pollDone stops the ticker once this call is finished; pollExited confirms
-	// it has exited before RunContinuous returns.
 	pollInterval := resolvePollInterval(cfg.pollInterval)
 	pollDone := make(chan struct{})
 	pollExited := make(chan struct{})
@@ -562,17 +485,13 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		for {
 			select {
 			case <-ticker.C:
-				// A tick after closed is set is a no-op: refill()'s stale||closed
-				// guard makes drainRefill() return 0, so no explicit shutdown
-				// race-check is needed beyond the pollDone case below.
+				// After closed is set, refill's guard makes this a no-op.
 				mu.Lock()
 				n := drainRefill()
 				mu.Unlock()
 				if n > 0 {
-					// Usually an event-driven refill missed and the slot sat idle
-					// until this tick, but a tick can also just win the race
-					// against a completion trigger, so this is not proof
-					// of a miss.
+					// Not proof of a missed refill: a tick can win the race
+					// against a completion trigger.
 					fmt.Printf("    <- poll: launched %d issue(s)\n", n)
 				}
 			case <-pollDone:
@@ -581,12 +500,8 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		}
 	})
 
-	// stopWatchDone stops the watcher once this call is finished, whether or
-	// not cfg.Stop was ever closed; stopExited confirms it has exited before
-	// RunContinuous returns — the same shutdown shape as pollDone/pollExited
-	// above, so signalled has no writer left once this function reads it
-	// below (#3520). Only started when cfg.Stop != nil: a nil channel would
-	// block select forever, so there is nothing to watch.
+	// The stop watcher is joined before return, so signalled has no writer
+	// left when read below (#3520).
 	var stopWatchDone, stopExited chan struct{}
 	if cfg.Stop != nil {
 		stopWatchDone = make(chan struct{})
@@ -595,11 +510,8 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			defer close(stopExited)
 			select {
 			case <-cfg.Stop:
-				// The promptness seam: refill's own observeStop call only fires
-				// on the next completion or ~3m poll tick. Without this
-				// watcher, a stop that arrives while the run is blocked in
-				// idle.Wait() below would print nothing until one of those next
-				// occurs.
+				// refill only observes a stop on the next completion or poll
+				// tick; this announces one arriving during idle.Wait().
 				mu.Lock()
 				observeStop(true)
 				mu.Unlock()
@@ -608,17 +520,9 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		})
 	}
 
-	// abortWatchDone stops the watcher once this call is finished; abortExited
-	// confirms exit before RunContinuous returns, the same shutdown shape as
-	// stopWatchDone/stopExited above. This is the promptness seam for an
-	// abort with nothing else scheduled to call refill again: without it, an
-	// abort arriving while the run is blocked in idle.Wait() below with
-	// nothing outstanding, or after the last poll tick, would go unserviced
-	// until the final observeAbort() re-check after this function's own
-	// shutdown joins. observeAbort's own aborted guard (not "only this
-	// goroutine calls it") is what keeps reclaimInFlight to exactly one call
-	// no matter which of this watcher, refill, or the final re-check notices
-	// cfg.Abort closed first (#3521).
+	// The abort watcher services an abort arriving while nothing else will call
+	// refill again (blocked in idle.Wait(), or past the last poll tick), which
+	// would otherwise wait for the final re-check after shutdown (#3521).
 	var abortWatchDone, abortExited chan struct{}
 	if cfg.Abort != nil {
 		abortWatchDone = make(chan struct{})
@@ -654,16 +558,11 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		<-abortExited
 	}
 
-	// The watcher's select picks arbitrarily when cfg.Stop/cfg.Abort and their
-	// own *WatchDone are both ready, so a signal closing as the drain finishes
-	// could otherwise go unseen and flip this run's verdict on a coin toss.
-	// Reading both once more, after their watchers have exited and left
-	// signalled/aborted without a concurrent writer, settles it (#3520,
-	// #3521). announce=false: the drain is over, so there is none to
-	// announce for Stop. observeAbort() has no such quiet mode — by this
-	// point inflight is already empty, so if this is the call that first
-	// notices cfg.Abort closed, reclaimInFlight has nothing left to reclaim
-	// and only prints its harmless "nothing in flight" line.
+	// A watcher's select picks arbitrarily when its signal and *WatchDone are
+	// both ready, so a signal closing as the drain ends could flip the verdict
+	// on a coin toss; re-reading after the joins settles it (#3520, #3521).
+	// observeAbort has no quiet mode; with inflight empty it only prints
+	// "nothing in flight".
 	mu.Lock()
 	observeStop(false)
 	observeAbort()

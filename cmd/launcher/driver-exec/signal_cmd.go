@@ -24,18 +24,15 @@ import (
 const signalUsageReportTimeout = 5 * time.Second
 
 // runSignal posts one signal to the Box's Signal socket (ADR 0052, issue
-// #3724): `signal comment|pr-intent|issue-intent|status`, or reads with
-// `signal issue <ref>` or `signal issue-search <text...>`. The kind is the
-// route, so it is a word rather than a flag, and no flag names a destination
-// -- an issue number, branch or target is unrepresentable here, not merely
-// ignored. The reads are the only verbs that take a positional or a filter:
-// they name what to read, never where to write, and the host refuses any ref
-// outside the Dispatch's own tracker and any search label outside its fixed
-// finding set.
+// #3724), or reads with `signal issue <ref>` / `signal issue-search <text...>`.
+// The kind is the route, and no flag names a destination: an issue number,
+// branch or target is unrepresentable here, not merely ignored. The reads name
+// what to read, never where to write; the host refuses any ref outside the
+// Dispatch's tracker and any search label outside its fixed finding set.
 //
-// Bodies arrive on stdin or via -body-file, never on argv: a 64 KiB Markdown
-// body would blow the argv cap, and argv is world-readable through /proc.
-// -title and -type are short closed-vocabulary fields and stay flags.
+// Bodies arrive on stdin or via -body-file, never on argv: a 64 KiB body would
+// blow the argv cap, and argv is world-readable through /proc. -title and
+// -type are short closed-vocabulary fields, so they stay flags.
 func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 	if len(args) == 0 {
 		return signalUsageFailure(stdout, "", "want one of comment, pr-intent, issue-intent, issue, issue-search, status")
@@ -134,10 +131,9 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 				return signalFail(stdout, err)
 			}
 		}
-		// dedupTerms/cites/metric/class/concurrence/patch stay omitempty on
-		// the struct: a call without terms, cites, metric, class, concurrence
-		// or patch must keep a wire body byte-identical to what it was before
-		// these fields existed.
+		// dedupTerms/cites/metric/class/concurrence/patch stay omitempty so a
+		// call without them keeps the wire body byte-identical to what it was
+		// before these fields existed.
 		return postSignal(stdout, client, base, secret, kind, rawFields(signalwire.IssueIntent{
 			Title:       *title,
 			Body:        body,
@@ -212,13 +208,11 @@ func classListViolation(class string, classes []string) string {
 }
 
 // parseSignalFlags parses rest with fs and routes a parse failure through the
-// usage-failure path (report + final rejected line) -- except an explicit
-// -h/-help, which is a request, not a failure, so it keeps the plain dump and
-// exit 1 with no report. A leftover positional argument is a usage failure
-// too: flag stops at the first non-flag, silently dropping every flag after
-// it. On ok=false the caller must return 1 immediately; on a parse failure fs
-// has already written its own error and usage dump to stdout, while a
-// leftover argument gets only the rejected line.
+// usage-failure path (report + final rejected line), except an explicit
+// -h/-help, a request rather than a failure, which keeps the plain dump and
+// exit 1 with no report. A leftover positional is a usage failure too: flag
+// stops at the first non-flag, silently dropping every flag after it. On
+// ok=false the caller must return 1 immediately.
 func parseSignalFlags(fs *flag.FlagSet, rest []string, kind string, stdout io.Writer) (ok bool) {
 	if !parseSignalFlagValues(fs, rest, kind, stdout) {
 		return false
@@ -254,18 +248,14 @@ func signalFlagSet(kind string, stdout io.Writer) *flag.FlagSet {
 	return fs
 }
 
-// signalUsageFailure handles a client-side usage failure (issue #3867): it
-// reports the failure to the launcher over the socket's diagnostics-only
-// route -- best-effort, silently discarding any error -- and only then prints
-// the final "signal ... rejected (usage): reason" line, so the report always
-// runs before the line a caller may be tailing rather than after it.
+// signalUsageFailure reports a client-side usage failure (issue #3867) over
+// the socket's diagnostics-only route, best-effort, and only then prints the
+// final "signal ... rejected (usage): reason" line, so the report always lands
+// before the line a caller may be tailing.
 //
-// kind is both the socket path and what the printed line names: "" means
-// kindless (route /usage, line "signal rejected (usage): reason"), and
-// anything else routes /<kind>/usage with line "signal <kind> rejected
-// (usage): reason". An unrecognised kind word always calls this with "" --
-// safe to name in the fixed reason text, but never sent over the wire or
-// echoed in the line.
+// kind is both the socket path and what the line names: "" means kindless
+// (route /usage). An unrecognised kind word always passes "", so it is never
+// sent over the wire or echoed in the line.
 func signalUsageFailure(stdout io.Writer, kind, reason string) int {
 	reportSignalUsage(kind, reason)
 	if kind == "" {
@@ -283,8 +273,6 @@ func reportSignalUsage(kind, reason string) {
 	if err != nil {
 		return
 	}
-	// The invocation has already failed, so a wedged socket must not hold it
-	// for the full signalclient.Timeout.
 	reportClient := *client
 	reportClient.Timeout = signalUsageReportTimeout
 
@@ -347,10 +335,9 @@ func readLimited(r io.Reader, source string) (string, error) {
 }
 
 // signalBody is one request's content fields under their wire names. The
-// socket validates the bytes on receipt (ADR 0052), so the verb carries them
-// unaltered rather than deciding anything about them itself. The value type
-// is json.Marshaler rather than rawString directly so a field like
-// dedupTerms, an array rather than a single string, can share the map.
+// socket validates the bytes on receipt (ADR 0052), so the verb passes them
+// unaltered. The value type is json.Marshaler so an array field like
+// dedupTerms can share the map.
 type signalBody map[string]json.Marshaler
 
 // rawFields builds a signalBody from a signalwire wire struct, keyed by its
@@ -392,9 +379,8 @@ type rawString string
 func (s rawString) MarshalJSON() ([]byte, error) {
 	out := make([]byte, 0, len(s)+2)
 	out = append(out, '"')
-	// Byte-wise on purpose: range over a string decodes UTF-8 and yields
-	// U+FFFD for an invalid byte, laundering exactly the bytes this type
-	// exists to transmit unchanged so the socket can reject them.
+	// Byte-wise on purpose: ranging over a string yields U+FFFD for an
+	// invalid byte, laundering exactly what this type must transmit.
 	for i := 0; i < len(s); i++ {
 		switch c := s[i]; {
 		case c == '"' || c == '\\':

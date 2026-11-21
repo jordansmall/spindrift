@@ -60,15 +60,12 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 	}
 	backlink := fmt.Sprintf("Filed from research on #%s", num)
 	filed := fileIssueIntentsDetailed(r.progress, r.it, num, result, r.findingLabel, backlink)
-	// Reported right after filing, not at the function's tail: the comment-post
-	// and verdict-apply branches below both return early, and filing has already
-	// happened by then, so the tally must still print (issue #3608).
+	// Reported here, not at the tail: the branches below return early, after
+	// filing has already happened (issue #3608).
 	reportFiled(r.progress, num, filed)
-	// Comment != "" is redundant now that both carriers reject a zero-length
-	// payload -- outcome's classifySignalAt on the log (issue #3668) and
-	// signalwire.CheckFields on the socket; kept because the failure it guards is
-	// user-visible -- an empty verdict comment on a human's tracker issue --
-	// and the else branch is the safer fallback if that invariant regresses.
+	// Comment != "" duplicates both carriers' zero-length rejection (issue
+	// #3668), kept because an empty verdict comment on a human's issue is
+	// user-visible if that invariant regresses.
 	if result.CommentFound && result.Comment != "" {
 		body := result.Comment
 		if sections := buildVerdictCommentSections(filed); sections != "" {
@@ -85,25 +82,18 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 		r.progress.Step(Step{Key: num, Landing: o.Landing, Status: StatusVerdictApplyFailed, Detail: fmt.Sprintf("!! %v", err)})
 		return Settlement{}
 	}
-	// State stays DispatchState-only (forge.Complete); the verdict itself
-	// (recommend/reject/unclear, ADR 0022) rides in the note, since the report
-	// protocol's state field is not research-verdict vocabulary.
-	//
-	// Settled inline rather than through gate.go's transitionState/flushSettled
-	// latch: that latch arbitrates a dispatch settle that reaches a terminal
-	// state twice for one issue (completeLanding's Complete, then
-	// verifyMerged's demotion). Every ResearchSettle path reaches exactly one,
-	// so inline is already "once".
+	// The verdict (ADR 0022) rides in the note: the report protocol's state
+	// field is not research-verdict vocabulary. Settled inline, not through
+	// the transitionState latch: every research path reaches exactly one
+	// terminal state.
 	st := SettledBy(d, dispatchkey.Issue(num), ForReason(dispatchrecord.ReasonVerdict), "verdict "+string(verdict))
 	r.progress.Step(Step{Key: num, Landing: o.Landing, Status: Status(o.Status), Detail: "note=" + o.Note})
 	return st
 }
 
 // commentFailureNote distinguishes "the Box never emitted a comment line" from
-// "it emitted one the host could not decode" (issue #3670). Both used to read
-// "no verdict comment block", which sent a human triaging agent-research-failed
-// looking for a comment that had in fact been sent and cut at the Box's Bash
-// output cap (runs #3595, #3597).
+// "it emitted one the host could not decode" (issue #3670), such as a comment
+// cut at the Box's Bash output cap (runs #3595, #3597).
 func commentFailureNote(rejected outcome.Rejections) string {
 	if rejected.Total() == 0 {
 		return "no verdict comment block"
@@ -116,13 +106,7 @@ func (r *ResearchSettle) fail(d dispatch.Dispatcher, num, note string) Settlemen
 	if err := r.it.TransitionState(num, forge.InProgress, forge.Failed); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to failed: %v\n", num, err)
 	}
-	// note is the one piece of this failure a human triaging the report
-	// stream needs verbatim: which reason (no verdict line, unparseable
-	// status, missing comment relay) landed this issue in agent-research-failed.
-	//
-	// Inline, not through the transitionState/flushSettled latch (see the
-	// comment at ResearchSettle's other Settled call above): this path also
-	// reaches exactly one terminal state per issue.
+	// Inline for the same reason as Settle's own SettledBy call.
 	st := SettledBy(d, dispatchkey.Issue(num), ForReason(dispatchrecord.ReasonResearchFailed), note)
 	r.progress.Step(Step{Key: num, Status: StatusFailed, Detail: "note=" + note})
 	return st

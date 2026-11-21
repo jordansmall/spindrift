@@ -18,12 +18,9 @@ import (
 
 // MaxLine is the largest line this package writes and the most the daemon's
 // reader (cmd/launcher/daemon/runner.go's readReports) accepts, newline
-// included. It is the single shared number for both sides: the writer
-// (emit, below) clips Note to keep every line within it, and the reader
-// sizes its buffer to it, so the two can never drift apart (issue #3627's
-// review finding — before this, a Box's long free-text note made the
-// encoded line exceed the reader's separately-declared 4096 and the whole
-// record was silently discarded).
+// included. One shared number, so writer and reader cannot drift: a reader
+// limit declared separately once silently discarded a long-Note record
+// (issue #3627).
 const MaxLine = 4096
 
 // clipMark is appended to a shortened Note so a reader can tell the note
@@ -155,11 +152,8 @@ func (r *Record) UnmarshalJSON(data []byte) error {
 
 // EventBox, EventSettled, EventNotDue, EventModel, EventCIWait and
 // EventImageBuild are the Record.Event values this package ever writes.
-// Naming them once here and using the name everywhere else (internal/daemon's
-// parser, dispatch loop, and pool event stream) means a typo in the name is a
-// compile error, not a silent parse miss on the reading side — issue #3627's
-// review finding. The JSON on the wire is unchanged: these are still
-// the bare strings "box"/"settled"/"not_due"/"model"/"ci_wait"/"image_build".
+// Every reader uses these names, so a typo is a compile error rather than a
+// silent parse miss (issue #3627).
 const (
 	EventBox     = "box"
 	EventSettled = "settled"
@@ -205,7 +199,7 @@ const (
 // child Record events that reach it (box, settled, model, image_build) plus the
 // Daemon's own. not_due and ci_wait are Record-only: they update a flight and
 // never reach the file. nix/checks/event-stream-parity.nix holds this equal to
-// the emit sites. A fresh slice each call, so a caller cannot mutate shared
+// the emit sites. A fresh slice each call, so no caller can mutate shared
 // state.
 func Events() []string {
 	return []string{
@@ -255,14 +249,10 @@ func ParseNextDue(s string) (NextDue, error) {
 	return NextDue{At: at}, nil
 }
 
-// PhaseInitial, PhaseConflictResolve and PhaseRecover are three of the four
-// Box.phase values this package's callers ever pass; the fourth, a fix pass,
-// has no fixed spelling since it carries a pass number — build it with
-// PhaseFixPass instead. Naming the fixed three here, rather than leaving them
-// as bare literals at each call site, keeps the vocabulary this doc comment
-// above and dispatch's announce map between spelled once. PhaseRecover is
-// queue-mode recover's claim: it runs no Box, so it announces itself with this
-// phase to give the daemon's flight its key.
+// PhaseInitial, PhaseConflictResolve and PhaseRecover are the fixed Box.phase
+// values; a fix pass carries a number, so build it with PhaseFixPass.
+// PhaseRecover is queue-mode recover's claim: it runs no Box, so it announces
+// itself with this phase to give the daemon's flight its key.
 const (
 	PhaseInitial         = "initial"
 	PhaseConflictResolve = "conflict-resolve"
@@ -281,23 +271,17 @@ func PhaseFixPass(pass int) string {
 // every call a no-op.
 type Reporter struct {
 	mu sync.Mutex
-	// fd is the raw, unowned report-pipe descriptor the parent daemon opened
-	// and passed down. Wrapping it in an *os.File (os.NewFile) would make Go
-	// treat it as owned and attach a finalizer that closes it when the
-	// Reporter becomes unreachable — closing a descriptor someone else still
-	// holds, and later recycling its number onto an unrelated open. So this
-	// package only ever reads/writes fd via syscall, never hands it to
-	// anything (os.NewFile, exec.Cmd.ExtraFiles, ...) that would claim
-	// ownership, and never closes it itself.
+	// fd is the raw, unowned report-pipe descriptor the parent passed down.
+	// Never hand it to os.NewFile, exec.Cmd.ExtraFiles or anything else that
+	// claims ownership: a finalizer would close a descriptor someone else
+	// holds and let its number be recycled. Only syscall touches it.
 	fd int
 }
 
-// Box records that a Box started for key at phase (e.g. "initial",
-// "fix-pass-N", "conflict-resolve"). key is issue-keyed for an ordinary
-// dispatch or Chore-keyed for a butler run (ADR 0056) — same method, either
-// key shape. passLog is the Pass log the phase writes, relative to the
-// checkout; "" when the phase runs no Box (PhaseRecover). recordID is the
-// Dispatch Record the phase belongs to, "" when none was minted.
+// Box records that a Box started for key (issue or Chore, ADR 0056) at phase.
+// passLog is the Pass log the phase writes, relative to the checkout; "" when
+// the phase runs no Box (PhaseRecover). recordID is the Dispatch Record the
+// phase belongs to, "" when none was minted.
 func (r *Reporter) Box(key dispatchkey.Key, phase, passLog, recordID string) {
 	r.emit(Record{Event: EventBox, Key: key, Phase: phase, PassLog: passLog, RecordID: recordID})
 }
@@ -340,15 +324,10 @@ func (r *Reporter) ImageBuild(state ImageBuildState) {
 	r.emit(Record{Event: EventImageBuild, State: string(state)})
 }
 
-// emit swallows write failures: a broken report pipe (parent gone, pipe
-// full and non-blocking, whatever) must never fail a dispatch. The reporter
-// is a side channel for the parent's convenience, not part of the contract
-// the child's own success/failure depends on.
-//
-// The swallow can cost the next record too: a failure after a partial write
-// leaves a newline-less fragment the reader glues onto whatever emit writes
-// next. Bytes already on the pipe cannot be un-written, and blocking or
-// failing the child over a side channel is the worse trade.
+// emit swallows write failures: a broken report pipe must never fail a
+// dispatch, since the reporter is only a side channel. The swallow can cost
+// the next record too (a partial write leaves a newline-less fragment the
+// reader glues onto it), which beats blocking or failing the child.
 func (r *Reporter) emit(rec Record) {
 	if r == nil {
 		return
@@ -359,12 +338,9 @@ func (r *Reporter) emit(rec Record) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// A line may be up to MaxLine bytes, which can exceed PIPE_BUF (512
-	// on darwin; Linux's 4096 equals MaxLine), so one write(2) is not
-	// portably atomic. What keeps records from interleaving is r.mu
-	// serializing writers here and FromEnv's close-on-exec leaving this
-	// process the pipe's only writer; the loop resumes after a short
-	// write or EINTR.
+	// MaxLine can exceed PIPE_BUF (512 on darwin), so one write(2) is not
+	// portably atomic; r.mu plus FromEnv's close-on-exec (this process is the
+	// pipe's only writer) keep records from interleaving.
 	for len(line) > 0 {
 		n, err := syscall.Write(r.fd, line)
 		if err == syscall.EINTR {
@@ -373,9 +349,8 @@ func (r *Reporter) emit(rec Record) {
 		if err != nil {
 			return
 		}
-		// A zero-byte write with no error is not a documented syscall.Write
-		// outcome, but nothing rules it out on every platform; treat it as a
-		// failed write rather than loop forever holding r.mu.
+		// A zero-byte write with no error is undocumented but not ruled out;
+		// treat it as a failure rather than spin forever holding r.mu.
 		if n == 0 {
 			return
 		}
@@ -383,14 +358,10 @@ func (r *Reporter) emit(rec Record) {
 	}
 }
 
-// clippedLine marshals rec to its wire line (JSON + "\n"), shortening Note
-// as needed so the result never exceeds MaxLine — Note is free text (e.g. a
-// Box's blocked-status reason), the one field a caller can hand this
-// package of unbounded length. A shortened Note always keeps clipMark, so an
-// absent note field on the wire never means "there was a reason and we
-// dropped it". It reports ok=false only when not even clipMark alone fits;
-// the caller writes nothing rather than a record the reader would just
-// discard anyway.
+// clippedLine marshals rec to its wire line (JSON + "\n"), shortening Note,
+// the one unbounded field, so the result never exceeds MaxLine. A shortened
+// Note always keeps clipMark, so an absent note never means a dropped reason.
+// ok=false only when not even clipMark alone fits.
 func clippedLine(rec Record) (line []byte, ok bool) {
 	line, err := json.Marshal(rec)
 	if err != nil {
@@ -398,20 +369,15 @@ func clippedLine(rec Record) (line []byte, ok bool) {
 	}
 	line = append(line, '\n')
 	if len(line) <= MaxLine {
-		// Already fits: return byte-identical to the pre-clipping encoding,
-		// no mark added.
 		return line, true
 	}
 	if rec.Note == "" {
 		return nil, false
 	}
-	// JSON escaping inflates one raw byte into up to six encoded ones (quotes,
-	// control chars, <, >, &), so the line's overshoot in encoded bytes is not
-	// a count of runes to drop — subtracting one from the other over-clips by
-	// up to 6x, and clamping that against the rune count empties the note
-	// outright (issue #3627's review finding). Encoded length is instead
-	// non-decreasing in the kept rune count, so binary-search for the longest
-	// prefix whose re-encoded line fits and measure every candidate encoded.
+	// JSON escaping inflates a byte up to sixfold, so the encoded overshoot is
+	// not a rune count to drop: subtracting it emptied the note (issue #3627).
+	// Encoded length is non-decreasing in kept runes, so binary-search the
+	// longest prefix whose re-encoded line fits.
 	note := []rune(rec.Note)
 	encode := func(keep int) ([]byte, bool) {
 		candidate := rec
@@ -446,16 +412,10 @@ func clippedLine(rec Record) (line []byte, ok bool) {
 }
 
 // FromEnv reads SPINDRIFT_REPORT_FD via getenv and, if set, validates and
-// wraps the named descriptor. It returns nil (writing nothing) when the
-// variable is unset or empty, and also returns nil — after printing one
-// line to stderr — when the value doesn't name an open pipe descriptor: an
-// unparseable number, a closed fd, or an fd pointing at anything but a
-// named pipe are all refused rather than risking a crash or writing into
-// the wrong file.
-//
-// On success the descriptor is marked close-on-exec before FromEnv returns,
-// so every later spawn (Box, runtime, any subprocess) inherits nothing and
-// can never hold the write end open.
+// wraps the named descriptor. It returns nil when the variable is unset, and
+// nil after one stderr line when the value is not an open pipe descriptor,
+// rather than write into the wrong file. On success the fd is marked
+// close-on-exec, so no later spawn can hold the write end open.
 func FromEnv(getenv func(string) string, stderr io.Writer) *Reporter {
 	v := getenv("SPINDRIFT_REPORT_FD")
 	if v == "" {

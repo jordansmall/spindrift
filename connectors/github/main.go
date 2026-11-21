@@ -1,15 +1,10 @@
-// Command github is the GitHub tracker and forge as a Connector (ADR 0073):
-// REST reads, GraphQL queries for the check rollup, issue comments and
-// repository identity, and the forge's branch and PR primitives (open, draft flips,
-// comment, merge, auto-merge, branch protection, probe, token grant; the flips and auto-merge
-// enqueue are GraphQL mutations), sent through the host's http_request Host
-// call, which attaches the credential. It also performs the tracker write
-// primitives: label edits, comments, issue filing and the label registry.
-// GitHub has no statuses, so a transition always answers unmapped and core
-// swaps labels. The native github adapter stays authoritative; nothing routes
-// a production write through the Connector yet. The Connector returns raw
-// fields only, and core makes every policy decision (trust, transitions,
-// dependency parsing, which conclusions fail).
+// Command github is the GitHub tracker and forge as a Connector (ADR 0073),
+// answering github's reads and writes for every Consumer over REST and
+// GraphQL, sent through the host's http_request Host call, which attaches the
+// credential. GitHub has no statuses, so a transition always answers unmapped
+// and core swaps labels. The Connector returns raw fields only, and core makes
+// every policy decision (trust, transitions, dependency parsing, which
+// conclusions fail).
 package main
 
 import (

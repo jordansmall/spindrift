@@ -15,11 +15,8 @@ import (
 // prForge is a PR-capable Code Forge composed from a Connector: the Connector
 // answers every PR question and performs every PR write, while the policy (URL
 // pinning, answer validation, merge-failure classification) stays here. It
-// builds on reads for the five PR reads, and on pushOnly for the branch and git
-// pieces. It implements none of the optional surfaces (CIRunReporter,
-// BranchProtectionForge, DraftPRCreator and BranchPusher) as interface
-// methods: composePR stacks one layer per declared surface over it, so a type
-// probe finds exactly the declared ones.
+// implements none of the optional surfaces itself: composePR stacks one layer
+// per declared surface, so a type probe finds exactly the declared ones.
 type prForge struct {
 	*reads
 	push      *pushOnly
@@ -261,13 +258,10 @@ func (f *prForge) EnqueueAutoMerge(prURL string) error {
 	return f.numbered("forge.enqueueAutoMerge", prURL, nil)
 }
 
-// Merge asks the Connector to merge the PR. A transient failure is not retried
-// here (classedCall never retries a merge) but reported as
-// forge.ErrMergeTransient, which the Lander's merge loop retries. Only a
-// connectorhost.NotMergeable refusal is classified by re-reading the PR, once
-// more after a pause when it reads conflicting (see classifyMergeFailure);
-// every other failure, a rate limit, auth failure or refused route included, is
-// returned as is.
+// Merge asks the Connector to merge the PR. A transient failure is reported
+// as forge.ErrMergeTransient for the Lander's merge loop to retry (classedCall
+// never retries a merge). Only a NotMergeable refusal is classified by
+// re-reading the PR; every other failure is returned as is.
 func (f *prForge) Merge(prURL string) error {
 	err := f.numbered("forge.merge", prURL, nil)
 	switch connectorhost.ErrorClass(err) {

@@ -43,11 +43,11 @@ func ReadProbeResponse(header http.Header) ProbeResult {
 	}
 }
 
-// probeAuthScheme reads only the leading scheme token, never its params, and
-// answers "" for an absent or unmodelled scheme so callers can tell no usable
-// challenge from a real bearer one. Discovery proposes an AuthScheme that an
-// operator reviews and normalizeAuthScheme re-validates, so realm and scope
-// have no use here.
+// probeAuthScheme reads only the leading scheme token, answering "" for an
+// absent or unmodelled scheme so callers can tell no usable challenge from a
+// real bearer one.
+// Realm and scope go unused: an operator reviews the proposed scheme and
+// normalizeAuthScheme re-validates it.
 func probeAuthScheme(wwwAuthenticate string) string {
 	scheme, _, _ := strings.Cut(strings.TrimSpace(wwwAuthenticate), " ")
 	switch strings.ToLower(scheme) {

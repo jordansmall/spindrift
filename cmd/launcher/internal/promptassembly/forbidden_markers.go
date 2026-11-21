@@ -29,20 +29,16 @@ type ForbiddenMarkerRow struct {
 	// Kind is "substring" for a row whose Marker is scanned as literal
 	// rendered text.
 	Kind string `json:"kind"`
-	// Enforce names the runtime mechanism that stops the operation:
-	// "git-hook", or "prompt-only"
-	// when only the build-time corpus scan enforces the row, because a
-	// runtime guard would collide with a legitimate in-box use of the same
-	// operation.
+	// Enforce is "git-hook", or "prompt-only" when only the build-time corpus
+	// scan enforces the row because a runtime guard would collide with a
+	// legitimate in-box use of the same operation.
 	Enforce string `json:"enforce"`
 	// Message is pre-rendered by the nix registry with the marker already
 	// interpolated.
 	Message string `json:"message"`
 	// RuntimeMessage is the wording readonlyguards renders into the installed
-	// hook script when Enforce is "git-hook" (issue #2509). Message is
-	// written for a prompt-facing diagnostic and reads as nonsense from a
-	// hook that rejected one command mid-run while the run continues. A
-	// "prompt-only" row leaves this empty.
+	// git-hook (issue #2509): Message is prompt-facing and reads as nonsense
+	// from a hook that rejected one command mid-run. Empty for "prompt-only".
 	RuntimeMessage string `json:"runtimeMessage"`
 }
 

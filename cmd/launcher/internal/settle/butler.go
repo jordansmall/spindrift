@@ -8,10 +8,8 @@ import (
 )
 
 // Finding is the promotion-relevant view of one well-formed butler finding,
-// handed to a Runner's plan callback (issue #3990) before anything is filed
-// so the callback can count eligible findings and reserve promotion room up
-// front, the same order internal/butler's settle step already reserves
-// Ledger slots before any PostIssue call.
+// handed to a Runner's plan callback (issue #3990) before anything is filed,
+// so promotion room is reserved up front.
 type Finding struct {
 	Class, Concurrence string
 	// Cites are the digest anchors a records finding argues from (issue
@@ -19,12 +17,10 @@ type Finding struct {
 	Cites      []string
 	DedupTerms []string
 	// Patch is an optional unified diff (ADR 0057, issue #4072), carried
-	// through unexamined: whether it is ever applied is the host's own
-	// later decision, gated on Class, never this plan callback's.
+	// through unexamined; the host decides later, on Class, whether to apply it.
 	Patch string
-	// Title is the issue-intent's own title, carried through for a landed
-	// patch's commit subject/PR title (issue #4074) -- unexamined here, same
-	// as Patch.
+	// Title is the issue-intent's title, for a landed patch's commit subject
+	// and PR title (issue #4074).
 	Title string
 	// Metric is the tuning finding's metric slug, the last part of its pattern key
 	// (class, file, metric).
@@ -38,14 +34,11 @@ func (in issueIntent) finding() Finding {
 }
 
 // Decoration is what a plan's per-finding callback adds to one finding's
-// filing: optional host-authored Backlink text appended to its body (the
-// backlink, a promotion note, a tuning finding's Evidence table), any ExtraLabels beyond
-// the provenance label, and an OnFiled hook run only after PostIssue
-// succeeds -- never on a failed or skipped intent (see
-// fileIssueIntentsDetailedFunc's decorate contract), and handed the filed
-// issue's own URL -- so a callback that spends shared state (like promotion
-// room) can defer committing that spend, and record which URL it was spent
-// on, until the filing it was for is real.
+// filing: host-authored Backlink text appended to its body, ExtraLabels
+// beyond the provenance label, and OnFiled, run with the filed URL only after
+// PostIssue succeeds, never on a failed or skipped intent (see
+// fileIssueIntentsDetailedFunc), so a callback spending shared state (like
+// promotion room) commits the spend only once the filing is real.
 type Decoration struct {
 	Backlink    string
 	ExtraLabels []string
@@ -60,16 +53,12 @@ type ButlerFiling struct {
 	Dropped, Failed int
 }
 
-// FileButlerFindings caps result's issue-intent findings at maxPerSweep (0
-// means no cap; see capIntents), hands the kept well-formed findings to plan
-// before filing anything, then files the capped result under
-// the butler kind's FindingLabel provenance label using the Decoration
-// the plan's returned callback produces per finding. It prints the same
-// filed/dropped lines internal/butler's settle step always has, and returns
-// only successful filings in payload order, plus the dropped count and the
-// failed count (PostIssue failures only; a dedup skip or malformed payload is
-// neither), so a caller can tell a sweep whose every filing failed from one
-// that simply found nothing.
+// FileButlerFindings caps result's issue-intent findings at maxPerSweep (0 is
+// no cap), hands the kept well-formed findings to plan before filing anything,
+// then files them under findingLabel with the Decoration plan's callback
+// returns per finding. Failed counts PostIssue failures only (a dedup skip or
+// malformed payload is neither failed nor filed), so a caller can tell a
+// sweep whose every filing failed from one that found nothing.
 func FileButlerFindings(progress Progress, it forge.IssueTracker, num string, result dispatch.Result, maxPerSweep int, findingLabel string, dedup DedupPolicy, plan func(kept []Finding) func(Finding) Decoration) ButlerFiling {
 	kept, dropped := capIntents(result.IssueIntents, maxPerSweep)
 	capped := result
@@ -108,12 +97,8 @@ func FileButlerFindings(progress Progress, it forge.IssueTracker, num string, re
 }
 
 // capIntents keeps at most n of raw's well-formed issue-intent payloads, in
-// order, dropping the rest; n<=0 means no cap, and raw is returned itself
-// (the same backing array, aliased) rather than a copy. A malformed payload
-// (parseIssueIntent rejects it) is neither capped nor counted as dropped --
-// it always passes through kept, since fileIssueIntentsDetailedFunc's own
-// malformed-payload skip, not this cap, is what decides its fate. n>0
-// allocates and returns a fresh slice.
+// order; n<=0 returns raw itself, aliased. A malformed payload always passes
+// through uncounted, left for the filer's own malformed-payload skip.
 func capIntents(raw []string, n int) (kept []string, dropped int) {
 	if n <= 0 {
 		return raw, 0

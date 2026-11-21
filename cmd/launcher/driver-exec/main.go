@@ -27,9 +27,8 @@ const boxHeartbeatLog = "/tmp/heartbeat.log"
 var defaultHeartbeatLog = boxHeartbeatLog
 
 // mainRun returns the exit code rather than calling os.Exit so tests can run
-// it repeatedly with different argv. The FlagSet is scoped, not the global
-// flag package, which panics on re-registering flags across repeated calls in
-// one test binary.
+// it repeatedly. The FlagSet is scoped because the global flag package panics
+// on re-registering flags across calls in one test binary.
 func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// A verb is argv's first word, never a top-level flag (issue #2349).
 	if len(argv) > 0 {
@@ -167,14 +166,13 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 var shadowReplay = shadow.Run
 
 // runShadow replays the Pass log through the Connector shadowing the named
-// native Driver, if a Driver row declared one, writing the comparison onto
+// native Driver, if a Driver row declared one, writing the comparison to
 // stdout as spindrift ops. It never alters the run: the native result stays
-// authoritative, and a Connector that cannot be read, or a shadow row that was
-// skipped as malformed, is a summary, not an error. rawExit is the CLI's own
-// code, not the resolved one: the comparator resolves it once per side. A
-// non-nil runErr means the run step failed and the log may be truncated: the
-// summary carries it as the error and nothing is replayed, so the Pass cannot
-// read as clean.
+// authoritative, and an unreadable Connector or malformed shadow row is a
+// summary, not an error. rawExit is the CLI's own code (the comparator
+// resolves it per side). A non-nil runErr means the log may be truncated:
+// the summary carries it as the error and nothing is replayed, so the Pass
+// cannot read as clean.
 func runShadow(name, logPath string, rawExit int, runErr error, stdout io.Writer) {
 	emit := func(op hostop.SpindriftOp) { fmt.Fprint(stdout, hostop.EncodeSpindriftOp(op)) }
 	resolved := driver.ResolveName(name)
@@ -211,10 +209,9 @@ func main() {
 }
 
 // resolveExit asks the Driver for the final exit code (issue #2263); each
-// Driver applies its own exit-code correction itself,
-// so this call site carries no per-Driver knowledge. A ResolveExit
-// error degrades to rc rather than masking a possibly successful run behind a
-// resolution failure.
+// Driver applies its own exit-code correction, so this call site carries no
+// per-Driver knowledge. A ResolveExit error degrades to rc rather than
+// masking a possibly successful run.
 func resolveExit(d driver.Driver, rc int, logPath string) int {
 	resolved, err := d.ResolveExit(logPath, rc)
 	if err != nil {

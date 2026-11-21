@@ -8,11 +8,10 @@ import (
 	"unicode/utf8"
 )
 
-// maxIssueTextBytes bounds the string IssueText returns. The value reaches a
-// Box through the runner's environment (OffArgvKeys, issue #3470), and execve
-// bounds each environment string as it bounds each argument, so IssueText
-// truncates an unbounded comment thread. When t is also a LinkedIssueLister,
-// the subject text and the rendered link chain share this one budget.
+// maxIssueTextBytes bounds the string IssueText returns: it reaches a Box
+// through the runner's environment (OffArgvKeys, issue #3470), and execve
+// bounds each environment string. The subject text and any rendered link
+// chain share this one budget.
 const maxIssueTextBytes = 64 * 1024
 
 // issueTextCommentWindow bounds the trailing slice of comments IssueText
@@ -67,12 +66,12 @@ type Thread struct {
 }
 
 // IssueThread reads issue num and, when t implements CommentLister, its last 10
-// live comments, oldest first: the fetch-and-window step IssueText renders and
-// the Signal socket's issue read serves structured. A t.Issue error is
-// returned; a comments error is not (it lands in Thread.CommentsErr and on
-// warn), so losing the thread never fails a read the issue alone would have
-// carried. Minimized comments are excluded before the window is taken, so
-// hidden ones cannot evict live ones; each one dropped writes a line to warn.
+// live comments, oldest first: the step IssueText renders and the Signal
+// socket's issue read serves structured. A comments error lands in
+// Thread.CommentsErr and on warn, never in the returned error, so losing the
+// thread never fails a read the issue alone would have carried. Minimized
+// comments are dropped (one warn line each) before the window is taken, so
+// hidden ones cannot evict live ones.
 func IssueThread(t IssueTracker, num string, warn io.Writer) (Thread, error) {
 	iss, err := t.Issue(num)
 	if err != nil {
@@ -103,14 +102,10 @@ func logRef(num string) string {
 	return num
 }
 
-// IssueText renders issue num's body, its last 10 comments under "## Comments"
-// when t implements CommentLister, and num's transitive link chain under
-// "## Linked issues" when t implements LinkedIssueLister. A t.Issue error is
-// returned; a comments error writes a line to warn and a LinkedIssues error is
-// swallowed, so losing either section never fails a dispatch the subject text
-// alone would have carried.
-// Minimized comments are excluded before the window is taken, so hidden ones
-// cannot evict live ones; each one dropped writes a line to warn.
+// IssueText renders issue num's body, its IssueThread comments under
+// "## Comments", and num's transitive link chain under "## Linked issues" when
+// t implements LinkedIssueLister. Only a t.Issue error is returned: losing
+// either section never fails a dispatch the subject text alone would carry.
 func IssueText(t IssueTracker, num string, warn io.Writer) (string, error) {
 	th, err := IssueThread(t, num, warn)
 	if err != nil {
@@ -127,8 +122,7 @@ func IssueText(t IssueTracker, num string, warn io.Writer) (string, error) {
 		text = b.String()
 	}
 
-	// No room left for a linked section, and truncation must keep the
-	// marker-and-cut behavior it had before linked issues existed.
+	// No room left for a linked section.
 	if len(text) > maxIssueTextBytes {
 		return truncateIssueText(text), nil
 	}
@@ -164,12 +158,11 @@ func relationRank(r LinkRelation) int {
 
 // renderLinkedIssues renders links as the body of a "## Linked issues" section
 // within budget bytes. An entry too big to fit is omitted whole and listed by
-// ref, never cut mid-body. Sizing reserves the heading, the unresolved list,
-// and the worst case where every resolvable entry lands in the omitted list
-// before spending on bodies, so the section can end under budget, never over.
-// The unresolved list is sized first, then bodies, then the omitted list from
-// whatever is left; a list that does not fit is cut line by line with the rest
-// collapsed into an "and N more" line, or dropped if even that cannot fit.
+// ref, never cut mid-body. The heading, the unresolved list, and the worst
+// case of every entry landing in the omitted list are reserved before bodies,
+// so the section never ends over budget; a list that does not fit is cut line
+// by line with the rest collapsed into an "and N more" line, or dropped if
+// even that cannot fit.
 func renderLinkedIssues(links []LinkedIssue, budget int) string {
 	if budget <= len(linkedIssuesHeading) {
 		return ""

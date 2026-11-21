@@ -60,11 +60,9 @@ func FormatSpindriftOp(issue string, op hostop.SpindriftOp) string {
 			fmt.Fprintf(&sb, " · %s", strings.Join(parts, ", "))
 		}
 	case hostop.OpLandDelta:
-		// Delta is nil on a marshaled-but-degraded op, so render the zero
-		// Delta rather than dereferencing. Summary() owns the counted, zero
-		// and unknown wording (issue #3244) and the PR body renders the same
-		// call, so never restate it here. The stand-in reason below keeps
-		// Summary() from printing an empty "unknown ()".
+		// Delta is nil on a marshaled-but-degraded op. Summary() owns the
+		// wording (issue #3244), shared with the PR body, so never restate it
+		// here; the stand-in reason keeps it from printing "unknown ()".
 		var d landdelta.Delta
 		if op.Delta != nil {
 			d = *op.Delta

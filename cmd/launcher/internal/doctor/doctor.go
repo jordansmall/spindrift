@@ -94,15 +94,14 @@ func AmbiguousLabelNames() []string {
 	return []string{"agent-ambiguous-spec"}
 }
 
-// ButlerLabelNames returns the three fixed butler-tier label names, advisory
-// unless --butler promotes them (agent-butler-patch only while the patch rung
-// is on, agent-tuning-finding only while the tuning Chore is enabled): the
-// butler kind carries no lifecycle labels of its own (claims live in the
-// Ledger), so these are its only doctor-visible labels. agent-butler-finding
-// (ADR 0056) marks every Chore finding the host files; agent-butler-patch
-// (ADR 0057) joins it on a finding the host lands as a patch PR;
-// agent-tuning-finding (ADR 0062) marks a tuning Chore finding, whose closing
-// PR merges by hand.
+// ButlerLabelNames returns the butler tier's label names, advisory unless
+// --butler promotes them (agent-butler-patch only while the patch rung is on,
+// agent-tuning-finding only while the tuning Chore is enabled). The butler
+// kind's claims live in the Ledger, not on lifecycle labels, so these are its
+// only doctor-visible labels.
+// agent-butler-finding (ADR 0056) marks every Chore finding,
+// agent-butler-patch (ADR 0057) one landed as a patch PR, agent-tuning-finding
+// (ADR 0062) a tuning Chore finding, whose closing PR merges by hand.
 func ButlerLabelNames() []string {
 	return []string{"agent-butler-finding", "agent-butler-patch", "agent-tuning-finding"}
 }
@@ -176,11 +175,9 @@ type Config struct {
 	NoLabelRegistry bool
 
 	// RequiredLabels are label names, beyond the four work-tier labels, whose
-	// absence fails the run like a work-tier label — whether or not they belong to
-	// an advisory tier. The daemon preflight names the labels of each kind it
-	// runs, so a kind never starts against a repo that cannot take them; a plain
-	// doctor names only what the work kind itself needs, leaving the rest
-	// advisory so CI stays green on deployments not using them.
+	// absence fails the run even if an advisory tier lists them. The daemon
+	// preflight names every label of each kind it runs; a plain doctor names only
+	// the work kind's, so CI stays green on deployments not using the rest.
 	RequiredLabels []string
 
 	// ResearchVerdicts is the configured RESEARCH_VERDICTS vocabulary whose
@@ -188,11 +185,10 @@ type Config struct {
 	// defaults (RESEARCH_VERDICTS unset).
 	ResearchVerdicts forge.VerdictLabels
 
-	// TokenHint and SlugHint name the knobs Run points an operator at in its
-	// auth-failure and repo-not-found remediation text. The caller resolves them
-	// because internal/doctor cannot see package main's backend registry, which
-	// owns the backend-to-knob mapping. Empty means the github-shaped default
-	// (GH_TOKEN / --repo-slug / forge.repoSlug).
+	// TokenHint and SlugHint name the knobs Run's auth-failure and
+	// repo-not-found remedies point at. The caller resolves them: the
+	// backend-to-knob mapping lives in package main's backend registry. Empty
+	// means the github-shaped default (GH_TOKEN / --repo-slug / forge.repoSlug).
 	TokenHint string
 	SlugHint  string
 
@@ -223,12 +219,11 @@ type Config struct {
 	BaseBranch string
 }
 
-// Run probes the issue tracker and code forge, then checks that every configured
-// work-tier label and every advisory tier in advisoryTiers exists, offering to
-// create missing ones when interactive. Only missing work-tier labels and those
-// labels named in c.RequiredLabels fail the run; the other labels and
-// extraChecks are advisory. stdin is the caller's own scanner, so Quickstart can
-// hand one over mid-flow without losing already-buffered input.
+// Run probes the issue tracker and code forge, then checks every work-tier and
+// advisory-tier label, offering to create missing ones when interactive. Of
+// the labels, only missing work-tier ones and c.RequiredLabels fail the run;
+// extraChecks never do. stdin is the caller's scanner, so Quickstart can hand
+// one over mid-flow without losing already-buffered input.
 func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, stdin *bufio.Scanner, interactive bool, extraChecks []Check) (err error) {
 	tokenHint, slugHint := "GH_TOKEN", "--repo-slug / forge.repoSlug"
 	if c.TokenHint != "" {
@@ -325,11 +320,9 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 
 	results := RunChecksFailFast(connectivityChecks)
 	if cerr := FirstRequiredError(results); cerr != nil {
-		// RunChecksFailFast stops at the first Required failure, so that result is
-		// always the last element. Callers surface the returned error (doctorReport
-		// prints it to stderr), so its MISSING row is not written here (it would
-		// double-report); WithRemedy carries any Remedy on that error, leaving
-		// nothing of the failure on stdout.
+		// The failing result is always last. Its MISSING row is not written: the
+		// caller prints the returned error, so it would double-report. WithRemedy
+		// carries any Remedy on that error.
 		rep.Results(results[:len(results)-1])
 		return WithRemedy(results[len(results)-1])
 	}
@@ -344,7 +337,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 	defer func() {
 		// This error wins the return value, so a later error from the label
 		// section below would otherwise be overwritten and reach no stream at
-		// all. Print it to w first.
+		// all. Report it first.
 		if deferredRepoStateErr != nil {
 			if err != nil {
 				rep.Finding(Required, "%v", err)
@@ -371,8 +364,8 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 		return nil
 	}
 
-	// A missing row's prefix mirrors its tier's exit-code weight: MISSING for the
-	// fatal work tier, advisory for the three tiers that never fail the check.
+	// A missing row's prefix mirrors its tier's exit-code weight: MISSING for a
+	// Required label, advisory for the rest.
 	checkLabelSet := func(names []string, present map[string]bool, tier Tier) []string {
 		var missing []string
 		for _, label := range names {
@@ -464,10 +457,9 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 		advisoryClause += " (declining is safe, does not fail this check)"
 	}
 	// Quiet suppresses the advisory Finding rows above, but the prompt still
-	// offers to create those labels — recap them here so an operator never
-	// approves creating a label they were never shown (issue #3777 AC5). Gated
-	// on rep.verbose so the verbose report, which already printed these rows,
-	// stays byte-for-byte unchanged.
+	// offers to create those labels: recap them so an operator never approves
+	// creating a label they were never shown (issue #3777 AC5). Verbose already
+	// printed them.
 	if !rep.verbose {
 		for _, label := range advisoryMissing {
 			rep.Passthrough("%s: %s\n", rowPrefix(Advisory), labelMissingMsg(label))
@@ -532,14 +524,9 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 	if len(requiredMissing) > 0 {
 		return fmt.Errorf("%w: %s still missing after creation", ErrRequiredLabelsMissing, strings.Join(requiredMissing, ", "))
 	}
-	// Required labels are fatal above, so each advisory tier gets its own wrap-up
-	// line here, or one success line naming every tier when none is still
-	// short.
 	stillMissing := false
-	// These lines carry the "advisory:" prefix like a Finding, but they
-	// report a CreateLabel outcome that already happened rather than a fresh
-	// probe result, so the acceptance criteria class them as always-on
-	// passthrough instead of routing them through Finding's tier gate.
+	// Passthrough, not Finding: these report a CreateLabel outcome that already
+	// happened, not a probe result, so Finding's tier gate must not hide them.
 	for _, tr := range tierResults {
 		if len(tr.missing) > 0 {
 			rep.Passthrough("advisory: %d %s label(s) still missing after creation%s — does not fail this check: %s\n", len(tr.missing), tr.tier.noun, refSuffix(tr.tier.ref), strings.Join(tr.missing, ", "))

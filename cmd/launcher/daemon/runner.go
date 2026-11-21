@@ -51,30 +51,22 @@ type hostRunner struct {
 	stateDir string
 	selfArgs []string
 
-	// flightMu guards flight below, plus the Moved baseline and the
-	// self-path memo fields further down: resolveTipOnce is the sole leader
-	// while flight is non-nil, and it writes all of them before clearing
-	// flight, so the next leader's Lock is ordered after that write by the
-	// same lock/unlock pair (see ResolveTip). A child handle's signal forwarding
-	// (forwardSignals) takes no lock of its own — it reads the handle's own
-	// stop/abort and sent latch — so nothing else in this runner contends
-	// with flightMu.
+	// flightMu guards flight, the Moved baseline, the self-path memo and
+	// prebuilt. The sole flight leader writes the baseline and memo before
+	// ResolveTip clears flight, so the next leader's Lock is ordered after
+	// those writes.
 	flightMu sync.Mutex
 	flight   *tipFlight
 
-	// lastRevision/haveLastRevision are the Tip.Moved baseline (issue
-	// #3625): Runner-global, not per-slot. haveLastRevision is false until
-	// the first resolution ever completes, so that one always reports
-	// Moved == false — no last one means nothing moved.
+	// lastRevision/haveLastRevision are the Runner-global, not per-slot,
+	// Tip.Moved baseline (issue #3625); the first resolution reports
+	// Moved == false.
 	lastRevision     string
 	haveLastRevision bool
 
-	// memoRevision/memoPath/haveMemo are the self-path memo: a single
-	// entry, not a map, since git history moves forward and a revision is
-	// never revisited — one `nix eval` per distinct tip however many slots
-	// ask, with no unbounded growth over a long night. A self-eval failure
-	// never writes here, so it can't poison a later resolution at the same
-	// revision into serving a path it never got.
+	// memoRevision/memoPath/haveMemo memoize the self path: one `nix eval`
+	// per distinct tip however many slots ask. A single entry suffices since
+	// a revision is never revisited.
 	memoRevision string
 	memoPath     string
 	haveMemo     bool
@@ -91,20 +83,16 @@ type hostRunner struct {
 	handles   map[int]*hostChildHandle
 }
 
-// tipFlight is one in-flight (or just-finished, until its leader clears
-// r.flight) ResolveTip resolution shared by every caller that arrived while
-// it was running. done is closed once tip/err are set, which is what
-// publishes them to joiners — they must only be read after <-done.
+// tipFlight is one ResolveTip resolution shared by every caller that
+// arrived while it ran. tip/err may only be read after <-done.
 type tipFlight struct {
 	done chan struct{}
 	tip  daemon.Tip
 	err  error
 }
 
-// hostRunnerConfig is everything one hostRunner needs, grouped into a
-// struct (rather than five positional strings) so each argument is named at
-// the call site: a transposed pair of same-typed fields — appAttr for
-// selfAttr, say — is visible there instead of compiling silently.
+// hostRunnerConfig is a struct, not positional strings, so a transposed
+// pair like appAttr/selfAttr is visible at the call site.
 type hostRunnerConfig struct {
 	repoPath      string
 	appAttr       string
@@ -123,11 +111,9 @@ type hostRunnerConfig struct {
 	inherited map[int]*hostChildHandle
 }
 
-// newHostRunner rejects a nil cfg.env. withoutKeys
-// (internal/daemon/command.go) returns a non-nil slice either way, so past
-// this constructor an uncaptured nil and an explicitly empty environment
-// are indistinguishable — and the nil is never "inherit the parent", it
-// execs every child with no PATH (#3692).
+// newHostRunner rejects a nil cfg.env: past here withoutKeys makes it
+// indistinguishable from an empty environment, and it would exec every
+// child with no PATH rather than inherit the parent's (#3692).
 func newHostRunner(cfg hostRunnerConfig) (*hostRunner, error) {
 	if cfg.env == nil {
 		return nil, errors.New("host runner: no captured environment (hostRunnerConfig.env is nil) — children would exec with no PATH; pass os.Environ()")
@@ -154,12 +140,8 @@ func newHostRunner(cfg hostRunnerConfig) (*hostRunner, error) {
 	return r, nil
 }
 
-// runnerFetchCommand is ResolveTip's fetch-half exec seam: a test overrides
-// it to skip a real git remote, the way runnerExecCommand/runnerEvalCommand
-// already stand in for StartChild/the eval half below. Both the `git fetch`
-// and the `git rev-parse` go through it, so a test can count invocations
-// (three callers, one fetch) or block inside the first call to synchronise
-// on the leader actually being in flight, rather than sleeping and hoping.
+// runnerFetchCommand is fetchRevision's exec seam, so a test can skip a real
+// remote, count invocations, or block inside the leader's call.
 var runnerFetchCommand = exec.CommandContext
 
 // fetchWaitDelay bounds how long fetchRevision waits on a git's output pipes
@@ -170,10 +152,8 @@ var runnerFetchCommand = exec.CommandContext
 // its captured output may be truncated.
 const fetchWaitDelay = time.Second
 
-// lsRemoteNoMatchExit is the exit status `git ls-remote --exit-code` returns
-// when the given ref does not exist on the remote (its "no matching refs"
-// case), distinct from any other failure (auth, network) that ls-remote
-// reports with a different code.
+// lsRemoteNoMatchExit is `git ls-remote --exit-code`'s "no matching refs"
+// status, distinct from auth or network failures.
 const lsRemoteNoMatchExit = 2
 
 // redactedStderr renders captured child stderr for embedding in an error;
@@ -183,20 +163,14 @@ func redactedStderr(b *bytes.Buffer) string {
 	return forge.RedactURLCredentials(strings.TrimSpace(b.String()))
 }
 
-// fetchRevision shells out to git fetch + rev-parse via runnerFetchCommand
-// (context-aware), so a cancelled ctx (SIGINT/SIGTERM with no child yet to
-// forward to) tears the fetch down instead of hanging the daemon until
-// SIGKILL (issue #3538). No longer serialized by a mutex of its own:
-// startupPreflight (main.go) calls this directly, but strictly before Loop
-// starts, and once Loop is running the single flight in ResolveTip is the
-// only caller — that ordering is what keeps two fetches from ever racing on
-// FETCH_HEAD (issue #3539).
-//
-// When r.featureBranch is set, it also confirms that branch still exists on
-// the remote (issue #3883); living here gives startupPreflight and
-// ResolveTip's single flight the same one check.
+// fetchRevision fetches baseBranch and returns FETCH_HEAD, under ctx so a
+// stop tears the fetch down instead of hanging (issue #3538). It has no lock:
+// startupPreflight calls it strictly before Loop starts, and after that
+// ResolveTip's single flight is the only caller, so two fetches never race
+// on FETCH_HEAD (issue #3539). It also confirms r.featureBranch still exists
+// on the remote (issue #3883).
 func (r *hostRunner) fetchRevision(ctx context.Context) (string, error) {
-	const remote = "origin" // nothing varies this yet; inline until a caller needs it (issue #3538 review)
+	const remote = "origin"
 	git := func(args ...string) *exec.Cmd {
 		cmd := runnerFetchCommand(ctx, "git", append([]string{"-C", r.repoPath}, args...)...)
 		cmd.WaitDelay = fetchWaitDelay
@@ -208,9 +182,8 @@ func (r *hostRunner) fetchRevision(ctx context.Context) (string, error) {
 	if err := fetch.Run(); err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 		return "", fmt.Errorf("git fetch %s %s: %w: %s", remote, r.baseBranch, err, redactedStderr(&stderr))
 	}
-	// FETCH_HEAD, not the local baseBranch ref: a bare `fetch` never moves
-	// any local branch, and resolving the local ref instead would silently
-	// pin a stale tip whenever the operator's checkout lags origin.
+	// FETCH_HEAD, not the local ref: a bare `fetch` never moves a local
+	// branch, so the local ref would pin a stale tip.
 	out, err := git("rev-parse", "FETCH_HEAD").Output()
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse FETCH_HEAD: %w", err)
@@ -236,38 +209,24 @@ func (r *hostRunner) fetchRevision(ctx context.Context) (string, error) {
 	return revision, nil
 }
 
-// runnerExecCommand is the exec seam: a test overrides it to skip nix and
-// run a scripted `/bin/sh -c ...` in its place, since a child handle's
-// Wait behaviour (exit code passthrough, issue-line scanning) doesn't depend on
-// what the child actually is.
+// runnerExecCommand is StartChild's exec seam, so a test can run a scripted
+// `/bin/sh -c ...` instead of nix.
 var runnerExecCommand = exec.Command
 
-// runnerEvalCommand is evalSelfPath's exec seam: a test overrides it the same
-// way runnerExecCommand is overridden, to skip nix and run a scripted
-// `/bin/sh -c ...` in its place.
+// runnerEvalCommand is evalSelfPath's exec seam.
 var runnerEvalCommand = exec.CommandContext
 
-// runnerSelfExec is the in-place restart's exec seam: a test overrides it, since a real
-// exec never returns on success.
+// runnerSelfExec is the in-place restart's exec seam, since a real exec never
+// returns on success.
 var runnerSelfExec = syscall.Exec
 
-// runnerSignal is the signal seam: forwardSignals' goroutine sends through
-// it rather than calling p.Signal directly. OS-level delivery can't show a
-// test the *sequence* — a child started after Stop/Abort are already
-// closed has installed no handler yet, so the first signal can kill it on
-// the default disposition before the second is even sent, leaving no trace
-// outside. Routing the send through one seam is the only way a test can
-// assert "two sends, distinct kinds" instead of just "process died".
+// runnerSignal is forwardSignals' send seam. OS delivery can't show a test
+// the sequence: a fresh child has no handler yet, so the first signal can
+// kill it before the second is sent.
 var runnerSignal = func(p *os.Process, sig os.Signal) error { return p.Signal(sig) }
 
-// evalSelfPath evaluates the daemon attribute's store path at revision via
-// `nix eval`, shelled out with a context-aware exec so a cancelled ctx tears
-// the evaluation down instead of hanging the daemon until SIGKILL — same
-// reasoning as fetchRevision above.
-//
-// It does not take r.flightMu itself: resolveTipOnce, the only caller, runs
-// this as the sole flight leader (see flightMu's doc), so the flight already
-// serializes it without a separate lock held across the eval.
+// evalSelfPath evaluates the daemon attribute's store path at revision under
+// ctx. Its only caller is the sole flight leader, so it takes no lock.
 func (r *hostRunner) evalSelfPath(ctx context.Context, revision string) (string, error) {
 	argv, err := daemon.SelfCommand(daemon.SelfSpec{
 		RepoPath: r.repoPath,
@@ -289,22 +248,14 @@ func (r *hostRunner) evalSelfPath(ctx context.Context, revision string) (string,
 	return strings.TrimSpace(string(out)), nil
 }
 
-// runnerFlightJoined fires each time a caller joins an in-flight resolution
-// instead of starting its own leader; nil in production. Unlike
-// runnerExecCommand/runnerEvalCommand/runnerSignal above, this seam stands
-// in for nothing real — it exists purely so a test can synchronise on the
-// coalescing itself: wait for exactly two joins, then release the leader,
-// rather than releasing it after a fixed sleep and hoping the joiners
-// arrived first, which would be flaky by construction.
+// runnerFlightJoined fires each time a caller joins an in-flight
+// resolution; nil in production. It lets a test synchronise on the
+// coalescing instead of sleeping.
 var runnerFlightJoined func()
 
-// ResolveTip resolves the tip once per caller that isn't already covered by
-// someone else's in-flight resolution: the first caller becomes the leader
-// and does the work below via resolveTipOnce; every caller that arrives
-// while that leader's flight is registered waits on it instead and
-// receives its exact Tip/error, rather than doing its own fetch. There is
-// no TTL — once a flight's done channel is closed and r.flight cleared, the
-// next caller starts a fresh one, so no slot is ever handed a revision
+// ResolveTip coalesces concurrent callers onto one leader's resolveTipOnce,
+// each receiving its exact Tip/error. There is no TTL: once the flight
+// clears the next caller starts a fresh one, so no slot gets a revision
 // older than the moment it asked.
 func (r *hostRunner) ResolveTip(ctx context.Context) (daemon.Tip, error) {
 	r.flightMu.Lock()
@@ -313,16 +264,11 @@ func (r *hostRunner) ResolveTip(ctx context.Context) (daemon.Tip, error) {
 		if runnerFlightJoined != nil {
 			runnerFlightJoined()
 		}
-		// A joiner selects on ctx.Done() rather than blocking on <-flight.done
-		// unconditionally: a caller left waiting on someone else's fetch
-		// after its own ctx died is exactly the hang issue #3538 forbids,
-		// just relocated from "waiting on my own git process" to "waiting on
-		// another goroutine's".
+		// A joiner whose own ctx died must not keep waiting on another's
+		// fetch: that is the hang issue #3538 forbids.
 		select {
 		case <-flight.done:
-			// flight.tip/flight.err are the leader's own outcome: if err is
-			// a ctx.Err(), it's the leader's ctx that was cancelled, not
-			// this joiner's — a joiner's own cancellation is the case below.
+			// A ctx.Err() here is the leader's cancellation, not this joiner's.
 			return flight.tip, flight.err
 		case <-ctx.Done():
 			return daemon.Tip{}, ctx.Err()
@@ -332,10 +278,8 @@ func (r *hostRunner) ResolveTip(ctx context.Context) (daemon.Tip, error) {
 	r.flight = flight
 	r.flightMu.Unlock()
 
-	// Deferred so a panic in resolveTipOnce still clears r.flight and closes
-	// flight.done, releasing every joiner instead of stranding them on a
-	// leader that never returns. r.flight = nil before close(done): the
-	// window between the two only ever starts a fresh, legitimate flight.
+	// Deferred so a panic still releases every joiner. r.flight = nil before
+	// close(done): the window between the two only ever starts a fresh flight.
 	defer func() {
 		r.flightMu.Lock()
 		r.flight = nil
@@ -348,17 +292,9 @@ func (r *hostRunner) ResolveTip(ctx context.Context) (daemon.Tip, error) {
 	return tip, err
 }
 
-// resolveTipOnce does one leader's fetch and, when the self check is
-// configured (selfAttr != ""), the eval half — daemon.Runner's two halves of
-// one tip resolution — plus the Moved-baseline and self-path-memo
-// bookkeeping ResolveTip's flight wraps around it. Only one goroutine per
-// hostRunner ever runs this at a time: ResolveTip only calls it while
-// holding the sole registered flight.
-//
-// r.selfAttr == "" means the self check is off (see main.go's
-// SPINDRIFT_DAEMON_PROGRAM handling): resolveTipOnce then skips the eval
-// outright and returns a Tip with an empty SelfPath, rather than evaluating
-// anything to throw away.
+// resolveTipOnce does one leader's fetch and, when the self check is on
+// (selfAttr != ""), the self eval, plus the Moved and memo bookkeeping.
+// Only the sole flight leader runs it.
 func (r *hostRunner) resolveTipOnce(ctx context.Context) (daemon.Tip, error) {
 	revision, err := r.fetchRevision(ctx)
 	if err != nil {
@@ -387,8 +323,8 @@ func (r *hostRunner) resolveTipOnce(ctx context.Context) (daemon.Tip, error) {
 
 	path, err := r.evalSelfPath(ctx, revision)
 	if err != nil {
-		// The memo is left untouched: a failed eval must not poison a later
-		// resolution at this same revision into serving a path it never got.
+		// The memo stays untouched, so a later resolution at this revision
+		// cannot serve a path it never got.
 		return daemon.Tip{Revision: revision, Moved: moved}, &daemon.SelfEvalError{Err: err}
 	}
 
@@ -402,10 +338,9 @@ func (r *hostRunner) resolveTipOnce(ctx context.Context) (daemon.Tip, error) {
 }
 
 // Demand counts a kind's ready issues in-process: by name from the source's
-// ReadyIDs when it has one (the host outbox, which leaves out the inFlight keys
-// the pool's own children hold), else from its tracker counter. A
-// kind with no source is an error: the pool only asks for kinds named in
-// Config.ProbeIntervals, which probeIntervals derives from the same map.
+// ReadyIDs when it has one (the host outbox, which leaves out the inFlight
+// keys), else from its tracker counter. A kind with no source is an error:
+// the pool only asks for kinds probeIntervals derived from the same map.
 func (r *hostRunner) Demand(ctx context.Context, kind daemon.Kind, fresh bool, inFlight dispatchkey.Set) (daemon.Demand, error) {
 	c, ok := r.demand[kind]
 	if !ok {
@@ -425,10 +360,8 @@ func (r *hostRunner) Demand(ctx context.Context, kind daemon.Kind, fresh bool, i
 	return daemon.Demand{Ready: n}, nil
 }
 
-// runnerPrebuildCommand is Prebuild's exec seam for its two stages, `nix
-// build` and the successor smoke test, kept apart from runnerEvalCommand so a
-// test can script them independently of the eval; tests tell them apart by
-// the program name ("nix" or tip.SelfPath).
+// runnerPrebuildCommand is the exec seam for Prebuild's `nix build` and
+// smoke test, apart from runnerEvalCommand so tests script them separately.
 var runnerPrebuildCommand = exec.CommandContext
 
 // prebuildGCRoot is the single GC-root name under the state directory that
@@ -481,16 +414,14 @@ func (r *hostRunner) rootSelf(ctx context.Context, program string, warn io.Write
 const prebuildStderrTail = 2000
 
 // prebuildSmokeTimeout bounds the successor's --check-only run. It only loads
-// input and config, so a run past this is a hang; unbounded, it would hold
-// the pool in `building` forever instead of reaching `blocked`. A var so a
-// test can shrink it.
+// input and config, so a run past this is a hang; unbounded, it would hold the
+// pool in `building` instead of reaching `blocked`. A var so a test can shrink
+// it.
 var prebuildSmokeTimeout = 2 * time.Minute
 
-// prebuildBuildTimeout bounds `nix eval` and `nix build` together. Generous,
-// because a cold build can legitimately take long, but finite: a hung nix
-// would otherwise hold the pool in `building` forever instead of reaching
-// `blocked`. Killing the build loses no finished derivation; the store keeps
-// them. A var so a test can shrink it.
+// prebuildBuildTimeout bounds `nix eval` and `nix build` together: generous
+// for a cold build, but finite so a hung nix reaches `blocked`. Killing the
+// build loses no finished derivation. A var so a test can shrink it.
 var prebuildBuildTimeout = 60 * time.Minute
 
 // prebuildWaitDelay is how long Prebuild waits for a step's output pipes after
@@ -572,10 +503,9 @@ func (r *hostRunner) Prebuild(ctx context.Context, tip daemon.Tip) error {
 		return build(fmt.Errorf("nix build of %s produced %q, which does not hold %s", drvPath, outPath, tip.SelfPath))
 	}
 
-	// --input is dropped from selfArgs (see successorArgs): the successor's
-	// own wrapper supplies the input document it will actually run with.
-	// Dir stays empty so the wrapper finds harness.env from the daemon's cwd,
-	// exactly as the real restart will.
+	// selfArgs lacks --input (successorArgs), so the successor's wrapper
+	// supplies its own document. Dir stays empty so the wrapper finds
+	// harness.env from the daemon's cwd, as the real restart will.
 	smokeArgs := append(slices.Clone(r.selfArgs), "--check-only")
 	smokeCtx, cancel := context.WithTimeout(ctx, prebuildSmokeTimeout)
 	defer cancel()
@@ -595,9 +525,8 @@ func (r *hostRunner) Prebuild(ctx context.Context, tip daemon.Tip) error {
 // InheritChild re-attaches a child an earlier image handed off, trusting
 // nothing in st until it checks out. A standard stream is refused untouched;
 // any other report descriptor is re-marked close-on-exec before any other
-// check, so even a refused entry can never leak into a later child. A refused
-// entry's descriptor is left open, not closed: a forged entry may name one
-// this process holds for something else.
+// check, so even a refused one cannot leak into a later child, but is never
+// closed: a forged entry may name one this process holds for something else.
 func (r *hostRunner) InheritChild(_ context.Context, req daemon.ChildRequest, st daemon.ChildState) (daemon.ChildHandle, error) {
 	h := r.takeHandle(st)
 	if h == nil {
@@ -689,11 +618,9 @@ func (r *hostRunner) takeUnclaimed() []*hostChildHandle {
 	return hs
 }
 
-// waitOut waits out children no pool claimed (a resumed image's inherited
-// children its pool never took, or a fresh image's abandoned Waits), so
-// exiting does not orphan them. They are waited concurrently, since each Wait
-// forwards stop and abort only while it runs: the daemon's own latch must
-// reach them exactly as the pool's does its children.
+// waitOut waits out children no pool claimed, so exiting does not orphan
+// them. Concurrently, since each Wait forwards stop and abort only while it
+// runs.
 func waitOut(hs []*hostChildHandle, stop, abort <-chan struct{}) {
 	var wg sync.WaitGroup
 	for _, h := range hs {
@@ -745,31 +672,20 @@ func (r *hostRunner) StartChild(ctx context.Context, req daemon.ChildRequest) (d
 	}
 
 	cmd := runnerExecCommand(childCmd.Argv[0], childCmd.Argv[1:]...)
-	// Knob-stripped env, not the raw process environment — see withoutKeys
-	// (internal/daemon/command.go). ChildCommand already set
-	// SPINDRIFT_REPORT_FD=3 in it; the pipe below is what makes that
-	// promise true.
+	// Knob-stripped env (withoutKeys), not the raw environment. It already
+	// sets SPINDRIFT_REPORT_FD=3; the pipe below makes that true.
 	cmd.Env = childCmd.Env
-	// A terminal Ctrl-C delivers SIGINT to the whole foreground process
-	// group (daemon, nix run, launcher). The daemon catches SIGINT and
-	// SIGTERM alike (stopsignal.Notify) and Wait's forwardSignals relays a
-	// SIGTERM of its own, so without this one Ctrl-C would reach the child
-	// twice: the group SIGINT plus the forwarded SIGTERM, distinct signal
-	// numbers that can't coalesce (see forwardSignals). The child's
-	// stopsignal.Relay counts deliveries, not kinds, so it would escalate
-	// straight past the drain to abort a running Box mid-flight — exactly
-	// what issue #3538 forbids. Same group isolation as
-	// internal/runner/nixrealize.go's background `nix build` fork; see
-	// "Background realize process isolation" in docs/reference.md.
+	// Without its own group, a terminal Ctrl-C would reach the child twice:
+	// the group SIGINT plus forwardSignals' SIGTERM. The child's
+	// stopsignal.Relay counts deliveries, so it would escalate past the drain
+	// to abort a running Box (issue #3538). See "Background realize process
+	// isolation" in docs/reference.md.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	// The daemon's own stdout is the JSON-lines event stream, so the child's
-	// stdout and stderr both go to a file descriptor, never through the
-	// daemon: the Child log when one opens, else the daemon's stderr (same as
-	// RunDoctor below). os/exec hands an *os.File to the child as-is, with no
-	// pipe and no copy goroutine, so a child can neither stall nor die
-	// (SIGPIPE) because the daemon stopped reading. The log is O_APPEND and
-	// shared by both streams, which keeps their interleaving in write order.
-	// A log that cannot be created never fails the Dispatch.
+	// The daemon's stdout is the event stream, so child output goes straight
+	// to a file (the Child log, else the daemon's stderr) with no pipe: a
+	// child can neither stall nor die of SIGPIPE when the daemon stops
+	// reading. One O_APPEND log for both streams keeps write order. A log
+	// that cannot be created never fails the Dispatch.
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	// The child holds its own copy of the Child log once started, so the
@@ -790,22 +706,15 @@ func (r *hostRunner) StartChild(ctx context.Context, req daemon.ChildRequest) (d
 			cmd.Stderr = f
 		}
 	}
-	// cmd.Stdin left nil (os/exec gives the child /dev/null): the Setpgid
-	// above leaves it in a background process group, where a tty read is
-	// stopped with SIGTTIN, so forwarding the daemon's stdin would hang a
-	// slot rather than reach an operator. dogfood.sh could offer a mid-loop
-	// vault-unlock prompt only by keeping its launcher in the terminal's
-	// foreground group; under the daemon a `<SECRET>_CMD` must instead be
-	// non-interactive — unlock the vault before starting it (issue #3548).
+	// No stdin: in a background process group a tty read stops with SIGTTIN
+	// and would hang the slot, so a `<SECRET>_CMD` must be non-interactive
+	// under the daemon — unlock the vault before starting it (issue #3548).
 
 	reportRead, reportWrite, err := os.Pipe()
 	if err != nil {
 		return nil, fmt.Errorf("report pipe: %w", err)
 	}
-	// The write end is exec.Cmd.ExtraFiles' first (and only) entry, which
-	// always lands at fd 3 in the child — daemon.ReportFD names that same
-	// number, and ChildCommand's SPINDRIFT_REPORT_FD=3 is how the child
-	// learns it.
+	// ExtraFiles[0] always lands at fd 3 in the child (daemon.ReportFD).
 	cmd.ExtraFiles = []*os.File{reportWrite}
 
 	if err := cmd.Start(); err != nil {
@@ -813,11 +722,7 @@ func (r *hostRunner) StartChild(ctx context.Context, req daemon.ChildRequest) (d
 		_ = reportWrite.Close()
 		return nil, fmt.Errorf("start child: %w", err)
 	}
-	// The parent's copy of the write end must close right after Start: the
-	// child has its own (inherited, distinct fd) copy, but as long as the
-	// parent also holds one open, the read loop in Wait never sees EOF even
-	// after the child exits — Wait would then hang behind a read that never
-	// returns.
+	// While the parent holds a write end, Wait's read never sees EOF.
 	_ = reportWrite.Close()
 
 	return &hostChildHandle{
@@ -902,10 +807,6 @@ func (h *hostChildHandle) Wait(abandon <-chan struct{}) (daemon.ChildResult, err
 		}
 	}
 
-	// Read to EOF (the normal case: the write end closes when the child
-	// exits) before Wait, right here rather than on a separate goroutine —
-	// there is no stdout goroutine any more, and this read is the only
-	// thing standing between the child exiting and Wait returning.
 	readErr := readReports(h.reportRead, h.kind, h.onRecord, &h.reports)
 	stopWatching()
 	if errors.Is(readErr, os.ErrDeadlineExceeded) {
@@ -914,18 +815,15 @@ func (h *hostChildHandle) Wait(abandon <-chan struct{}) (daemon.ChildResult, err
 		}
 		return daemon.ChildResult{}, daemon.ErrWaitAbandoned
 	}
-	// Close the read end before Wait, not after: a child still writing past
-	// this point (there shouldn't be any, since readReports just hit EOF)
-	// gets EPIPE instead of wedging the daemon on a pipe nobody drains.
+	// Before proc.Wait, so a straggling writer gets EPIPE instead of wedging.
 	_ = h.reportRead.Close()
 
 	state, err := h.proc.Wait()
 	if err != nil {
 		return daemon.ChildResult{}, fmt.Errorf("wait child: %w", err)
 	}
-	// A non-zero exit is the child's own outcome, not a seam failure —
-	// daemon.Loop's Interpret is what turns it into a verdict. ExitCode is -1
-	// for a signal death.
+	// A non-zero exit is the child's outcome, not a seam failure. ExitCode is
+	// -1 for a signal death.
 	return daemon.ChildResult{Exit: state.ExitCode()}, nil
 }
 
@@ -1006,30 +904,16 @@ func openChildLog(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 }
 
-// readReports reads report-protocol lines from r until a read fails (EOF is
-// the normal end) and returns that error, so a caller can tell a read
-// deadline (os.ErrDeadlineExceeded) from EOF. A line cut short by a deadline
-// is not parsed: its bytes are stashed in st.partial and prefixed onto the next
-// line a later call reads, and an over-long line being discarded stays
-// discarded (st.discarding) across calls, as do the once-only warnings below.
-// For each complete line daemon.ParseRecord accepts, it calls onRecord (when
-// non-nil). It uses a bufio.Reader's ReadSlice rather than a bufio.Scanner
-// deliberately: a Scanner reintroduces exactly the line cap and
-// drain-or-wedge problem this change deletes the stdout scan to get rid of,
-// and unlike the ReadString
-// this replaced, the reader's own fixed buffer size (report.MaxLine) is the
-// bound — ReadSlice reports bufio.ErrBufferFull instead of growing the
-// buffer, so a line longer than the cap is discarded up to its next newline
-// (or EOF) rather than accumulated in memory. Only the first malformed line
-// is reported, on os.Stderr, so a hostile or buggy child spamming bad lines
-// can't spam the daemon's own log; every malformed line (first and later,
-// including an over-long one) is otherwise skipped and parsing continues.
-// A kind-mismatched record (daemon.ErrKindMismatch) gets its own once-only
-// report, so an earlier malformed line can't hide an emitter regression.
-// report.MaxLine — rather than a local literal — is shared with the writer
-// side (report.emit), so a legitimate child's line can never itself be over
-// this cap; the over-long path below stays as the defence against a
-// hostile/buggy child (issue #3627's review finding).
+// readReports feeds each report line daemon.ParseRecord accepts to onRecord
+// until a read fails, returning that error so a caller can tell a deadline
+// from EOF. A deadline-cut fragment is stashed in st.partial for the next
+// call; an over-long line's discard and the once-only reports also persist
+// in st across calls. ReadSlice over a report.MaxLine buffer, not a Scanner
+// or ReadString, bounds memory: an over-long line is discarded to its
+// newline, never accumulated. report.MaxLine is the writer's cap too, so only
+// a hostile or buggy child hits that path (issue #3627). Malformed lines are
+// skipped and reported once; a kind mismatch has its own once-only report, so
+// an earlier malformed line cannot hide an emitter regression.
 func readReports(r *os.File, kind daemon.Kind, onRecord func(daemon.Record), st *reportState) error {
 	reader := bufio.NewReaderSize(r, report.MaxLine)
 	reportOnce := func(err error) {
@@ -1044,9 +928,6 @@ func readReports(r *os.File, kind daemon.Kind, onRecord func(daemon.Record), st 
 	}
 	for {
 		if st.discarding {
-			// Keep pulling from the over-long line (never parsing the
-			// fragment — it isn't a complete record) until a newline
-			// surfaces or the reader hits EOF/another error.
 			var err error
 			for {
 				if _, err = reader.ReadSlice('\n'); !errors.Is(err, bufio.ErrBufferFull) {
@@ -1068,9 +949,7 @@ func readReports(r *os.File, kind daemon.Kind, onRecord func(daemon.Record), st 
 			continue
 		}
 		if len(st.partial) != 0 {
-			// Prefix and new bytes together may pass report.MaxLine; that
-			// only happens for a hostile child, and the memory is still
-			// bounded by one fragment plus one buffer.
+			// May pass report.MaxLine, still bounded by fragment plus buffer.
 			line = append(st.partial, line...)
 			st.partial = nil
 		}
@@ -1089,30 +968,18 @@ func readReports(r *os.File, kind daemon.Kind, onRecord func(daemon.Record), st 
 			}
 		}
 		if err != nil {
-			// EOF (the normal case, once the write end closes at child
-			// exit) and any other read error both just end the loop: there
-			// is nothing left to read either way.
 			return err
 		}
 	}
 }
 
-// runnerDoctorCommand is RunDoctor's exec seam: a test overrides it to skip
-// nix and run a scripted `/bin/sh -c ...` in its place — the same gesture
-// runnerExecCommand and runnerEvalCommand already make for StartChild and
-// evalSelfPath.
+// runnerDoctorCommand is RunDoctor's exec seam.
 var runnerDoctorCommand = exec.CommandContext
 
-// RunDoctor shells out to the pinned child's "doctor" subcommand as the
-// daemon's own startup preflight. It uses runnerDoctorCommand (context-aware)
-// so a cancelled ctx (SIGINT/SIGTERM during the preflight, before any Box is
-// running) tears the child down instead of hanging until SIGKILL — same
-// reasoning as evalSelfPath/fetchRevision above.
-//
-// labelsLine is the last doctor line carrying doctor.ErrRequiredLabelsMissing,
-// "" when doctor printed none: the report still streams to stderr, but
-// startupPreflight needs the line itself so its halt can name which labels
-// are missing.
+// RunDoctor runs the pinned child's `doctor` as the startup preflight, under
+// ctx so a stop tears it down. labelsLine is doctor's last
+// doctor.ErrRequiredLabelsMissing line, or "", so the halt can name the
+// missing labels.
 func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (exit int, labelsLine string, err error) {
 	doctorCmd, err := daemon.DoctorCommand(daemon.DoctorSpec{RepoPath: r.repoPath, AppAttr: r.appAttr, Revision: revision, Env: r.env, Knobs: r.knobs, FeatureBranch: r.featureBranch, Flags: r.doctorFlags})
 	if err != nil {
@@ -1120,25 +987,14 @@ func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (exit int, 
 	}
 
 	cmd := runnerDoctorCommand(ctx, doctorCmd.Argv[0], doctorCmd.Argv[1:]...)
-	// Same knob-stripped env as StartChild above (see its comment).
 	cmd.Env = doctorCmd.Env
-	// Both stdout and stderr go straight to the daemon's own stderr: the
-	// daemon's stdout is the JSON-lines event stream, so a doctor report
-	// written there would corrupt it, and the report itself is where the
-	// operator reads which row failed and its remedy. Unlike StartChild, the
-	// preflight gets no report pipe and no SPINDRIFT_REPORT_FD (doctorCmd.Env
-	// above never carries it — see DoctorCommand): it dispatches nothing, so
-	// it has nothing to report.
-	//
-	// One shared writer for both streams: os/exec then copies through a
-	// single goroutine, so the line scanner needs no lock.
+	// To stderr, never the event-stream stdout. One shared writer makes
+	// os/exec copy through a single goroutine, so the scanner needs no lock.
 	out := &markerLineWriter{w: os.Stderr, marker: doctor.ErrRequiredLabelsMissing.Error()}
 	cmd.Stdout = out
 	cmd.Stderr = out
-	// cmd.Stdin left nil (os/exec gives the child /dev/null) so doctor takes
-	// its non-interactive path rather than sitting on a create-labels prompt
-	// nobody in a daemon context can answer; no Setpgid either, unlike
-	// StartChild — a Ctrl-C during the preflight should kill exactly it.
+	// No stdin, so doctor never waits on a create-labels prompt; no Setpgid,
+	// so a Ctrl-C during the preflight kills it.
 
 	waitErr := cmd.Run()
 	if waitErr == nil {
@@ -1146,11 +1002,8 @@ func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (exit int, 
 	}
 	var exitErr *exec.ExitError
 	if errors.As(waitErr, &exitErr) {
-		// A non-zero exit is the preflight's own result, not a seam failure —
-		// the caller classifies what the code means. ExitCode() -1 is not an
-		// exit code at all: the child was ended by a signal (an operator's
-		// Ctrl-C, or ctx tearing it down), so there is no doctor verdict to
-		// classify and handing -1 to the caller would report it as one.
+		// A non-zero exit is the preflight's result for the caller to
+		// classify; -1 means a signal ended it, so there is no verdict.
 		if code := exitErr.ExitCode(); code >= 0 {
 			return code, out.line(), nil
 		}
@@ -1159,8 +1012,7 @@ func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (exit int, 
 	return 0, "", waitErr
 }
 
-// runnerSweepCommand is SweepLateMerges's exec seam, the runnerDoctorCommand
-// gesture for the sweep.
+// runnerSweepCommand is SweepLateMerges's exec seam.
 var runnerSweepCommand = exec.CommandContext
 
 // SweepLateMerges shells out to the pinned launcher's hidden late-merge sweep
@@ -1227,37 +1079,14 @@ func (m *markerLineWriter) line() string {
 	return m.last
 }
 
-// forwardSignals starts one goroutine that watches stop and abort for the
-// life of a single Wait call and relays each onto p: SIGTERM when stop closes,
-// SIGINT when abort closes. It replaces the old shared children
-// map/counter/replay with per-child state that needs no lock: a Wait that
-// begins after stop (and/or abort) is already closed observes the close
-// immediately — a select on a closed channel fires at once — which is
-// exactly the old replay loop's job, now structural rather than counted.
-// nil stop/abort (a ChildRequest carrying no latch, e.g. a one-off doctor
-// run) is safe: a select on a nil channel simply never fires.
-//
-// SIGTERM then SIGINT, never twice the same kind: two identical standard
-// signals sent back-to-back can coalesce into one pending delivery (the
-// kernel keeps one pending bit per signal number), so a SIGTERM escalation
-// could be lost the same way; two distinct kinds can't coalesce. The child
-// itself only counts deliveries, not kinds (stopsignal.Relay, #3521),
-// so which signal arrives is the daemon's problem to get right, not the
-// child's.
-//
-// sent latches what was already delivered, so a later call for the same
-// child (a Wait resumed after an abandon) never repeats a kind. The goroutine
-// is the only writer and the returned stop func joins it, so sequential calls
-// need no lock.
-//
-// The returned stop func tears the goroutine down without sending anything
-// once the child has already exited on its own (the handle's Wait defers it);
-// without it the goroutine would sit on stop/abort for the life of the
-// daemon process instead of the life of one Wait call. It blocks until the
-// goroutine is actually gone: closing done alone only *asks* it to stop, and
-// a goroutine still unscheduled when Wait returns would then reach its
-// select with stop closed too and pick that case at random, signalling a
-// child that has already exited.
+// forwardSignals relays stop as SIGTERM and abort as SIGINT onto p for the
+// life of one Wait. Two distinct signals, because two of the same kind can
+// coalesce into one pending delivery, and the child counts deliveries
+// (stopsignal.Relay, #3521). sent latches what was delivered, so a resumed
+// Wait never repeats one; the goroutine is its only writer and stopForwarding
+// joins it, so sequential calls need no lock. stopForwarding blocks until the
+// goroutine is gone: otherwise an unscheduled goroutine could see stop closed
+// too and signal a child that already exited.
 func forwardSignals(p *os.Process, stop, abort <-chan struct{}, sent *signalsSent) (stopForwarding func()) {
 	done := make(chan struct{})
 	gone := make(chan struct{})
@@ -1388,14 +1217,12 @@ func (r *hostRunner) forgetHandles() {
 	r.handlesMu.Unlock()
 }
 
-// execHandoff replaces this image with the program at h.ToPath, handing h to it
-// on a pipe named by --handoff-fd; both directions of a restart (the forward
-// handoff and the rollback) go through it, so it needs no runner. The lock and
-// every slot's report pipe are dup'd into the document and the dups survive
-// the exec; the originals stay close-on-exec and untouched, so on a failed
-// exec this image carries on with h as it was. The caller sets h.FromPath,
-// h.ToPath and h.Revision, which the successor reads. A nil return means the
-// exec happened (only a test seam returns).
+// execHandoff replaces this image with h.ToPath, handing h over on a pipe
+// named by --handoff-fd, for both the forward handoff and the rollback. Only
+// dups of the lock and report pipes survive the exec, so on a failed exec
+// this image carries on untouched. The caller sets h.FromPath, h.ToPath and
+// h.Revision, which the successor reads. A nil return means the exec happened
+// (only a test seam returns).
 func execHandoff(h daemon.Handoff, lock *os.File, stop <-chan struct{}, env, selfArgs []string) error {
 	select {
 	case <-stop:
@@ -1404,8 +1231,7 @@ func execHandoff(h daemon.Handoff, lock *os.File, stop <-chan struct{}, env, sel
 	}
 
 	// Everything fallible but the exec is prepared before the stop signals are
-	// ignored, so the window in which a stop is dropped stays as short as the
-	// settle itself.
+	// ignored, so the window in which a stop is dropped is just the settle.
 	hupIgnored, err := sigHUPIgnored()
 	if err != nil {
 		return fmt.Errorf("prepare handoff: %w", err)

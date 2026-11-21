@@ -2,20 +2,15 @@ package driverkit
 
 import "strings"
 
-// LastMessageText returns the text of the last assistant message in the log at
-// logPath, one KindText event per line, since the result is the final
-// message only: an outcome-looking line in mid-pass prose must not end the run
-// (issue #5354). Any event whose MessageID differs from the current one starts
-// a new message, so a textless final message yields "" (an empty
-// result); that also covers an oversized final text line skipped by the scan,
-// whose sibling events still carry the new ID. A KindText with no MessageID
-// also starts a new message, so a Driver's ID-less synthetic final text stays
-// the last one; other ID-less events do not. Empty text is dropped. A
-// KindResult event replaces everything gathered so far with its own Text (no
-// trailing newline added), for a CLI that reports its result as an event.
-// An InSubagent event is skipped: it is not the main loop's message. A missing
-// log is "" with no error. It is separate from ResultText, which
-// gathers every result event rather than only the last message.
+// LastMessageText returns the last main-loop assistant message in the log at
+// logPath, one KindText event's text per line. Only the final message counts:
+// an outcome-looking line in mid-pass prose must not end the run (issue
+// #5354). Any event with a new MessageID
+// starts a new message, so a textless final message, or an oversized final
+// text line the scan skipped, yields "". An ID-less KindText also starts one,
+// so a Driver's ID-less synthetic final text stays last; other ID-less events
+// do not. A KindResult replaces everything gathered with its own Text, no
+// trailing newline added. A missing log is "" with no error.
 func LastMessageText(logPath string, newDecoder func() Decoder) (string, error) {
 	l, err := DecodeLog(logPath, newDecoder)
 	if err != nil {

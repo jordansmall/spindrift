@@ -9,8 +9,8 @@ import (
 // MERGE_MODE, and connectivity probe.
 type CodeForge interface {
 	// BranchExists reports whether branch exists on the remote, independent of
-	// any PR, the signal a bare `git push` with no PR opened yet still leaves
-	// behind. Reconcile's gated orphan reset (#1432, #600) needs it.
+	// any PR, so a bare push with no PR yet still shows. Reconcile's gated
+	// orphan reset (#1432, #600) needs it.
 	BranchExists(branch string) (bool, error)
 	// Merge lands ref onto the target branch: a rebase merge of the PR (github)
 	// or a plain merge-and-push of the branch name (git, MERGE_MODE=immediate).
@@ -100,17 +100,13 @@ type PRForge interface {
 	// (issue #1980).
 	HeadCommitSHA(url string) (string, error)
 	// NeedsUpdate reports whether the PR's base branch has commits its head
-	// branch has not yet incorporated, a git-ancestry fact distinct from
-	// Mergeable's conflict check: a PR can need updating and still be
-	// MERGEABLE. That gap let #670 and #672 land a combined compile break on
-	// main even though each was individually green (issue #936).
+	// lacks. A PR can need updating and still be MERGEABLE: that gap let #670
+	// and #672, each green alone, land a combined compile break (issue #936).
 	NeedsUpdate(url string) (bool, error)
-	// FailureDetail returns each failing check's name, conclusion or state, and
-	// summary or description, plus a capped excerpt of each failing job's log when
-	// the adapter can read one, for the PR's head commit, or ""
-	// when nothing is currently failing.
-	// Best-effort: a non-nil error means detail unavailable, and callers must
-	// proceed without it rather than failing their own operation.
+	// FailureDetail returns each failing check's name, state, and summary for
+	// the PR's head commit, plus a capped log excerpt when the adapter can read
+	// one, or "" when nothing is failing. Best-effort: on error callers proceed
+	// without it rather than failing their own operation.
 	FailureDetail(url string) (string, error)
 	// ListPRFiles returns every path changed by the PR (added, modified, deleted).
 	ListPRFiles(url string) ([]string, error)
@@ -131,17 +127,14 @@ type PRForge interface {
 
 // DraftPRCreator is the optional host-side draft-PR creation interface (issue
 // #1914): under BOX_FORGE_AND_ISSUE_ACCESS=read-only the Box holds no write
-// token, so the Launcher opens the draft PR instead, from a title, body, base,
-// and head the Box supplies. Only meaningful for a forge that also implements
-// PRForge. github and forgejo base adapters implement it regardless of the
-// Box's access mode (issue #4071); read-only settle uses it for the Box's
-// hand-off.
+// token, so the Launcher opens the draft PR from a title, body, base, and head
+// the Box supplies. Only meaningful alongside PRForge; implemented regardless
+// of the Box's access mode (issue #4071).
 type DraftPRCreator interface {
 	// CreateDraftPR opens a draft PR from head onto base and returns its URL.
-	// created is false when the adapter instead adopted a pre-existing open PR
-	// for head after the create call refused it as a duplicate (issue #2407).
-	// Settle's reconstructed-PR path (issue #2447) must not word over an
-	// adopted PR's title and body, so it needs the two cases apart.
+	// created is false when the adapter adopted a pre-existing open PR for
+	// head after a duplicate refusal (issue #2407); settle's reconstructed-PR
+	// path (issue #2447) must not overwrite an adopted PR's title and body.
 	CreateDraftPR(title, body, base, head string) (url string, created bool, err error)
 }
 
@@ -169,17 +162,14 @@ type MirrorSeeder interface {
 }
 
 // BranchDeleter is the optional host-credentialed branch-delete interface
-// (issue #4112, ADR 0057): github and forgejo base adapters implement it
-// regardless of the Box's access mode. The butler patch rung uses it to
-// remove a branch it just pushed (BranchPusher) when the draft PR create
-// that was meant to follow then fails, so a failed patch attempt leaves no
-// orphan branch behind.
+// (issue #4112, ADR 0057). The butler patch rung uses it to remove a branch
+// it just pushed when the draft PR create then fails, so a failed patch
+// leaves no orphan branch.
 type BranchDeleter interface {
-	// DeleteBranch deletes branch from the target repo. It refuses an empty
-	// or leading-"-" branch, and branch == base, before any network call
-	// (ValidateBranchDelete). Deleting a branch that does not exist on the
-	// target is an error, not a silent no-op: DeleteBranch's one caller only
-	// ever names a branch it just pushed itself.
+	// DeleteBranch deletes branch from the target repo, refusing what
+	// ValidateBranchDelete rejects before any network call. A missing branch
+	// is an error, not a no-op: the one caller only names a branch it just
+	// pushed.
 	DeleteBranch(branch, base string) error
 }
 
@@ -210,9 +200,9 @@ type BranchProtectionForge interface {
 
 // BundleCommitSubjects is settle's read-only PR-intent fallback (issue #2447):
 // when a read-only Box's status=ready outcome carries no usable
-// SPINDRIFT_PR_INTENT line, settle reconstructs the draft PR's title and body
-// host-side from the relayed branch's own commits rather than blocking a
-// finished hand-off. Only meaningful alongside BundleRelay and DraftPRCreator.
+// SPINDRIFT_PR_INTENT line, settle builds the draft PR's title and body from
+// the relayed branch's commits rather than blocking a finished hand-off. Only
+// meaningful alongside BundleRelay and DraftPRCreator.
 type BundleCommitSubjects interface {
 	// CommitSubjects returns the one-line commit subjects the bundle at
 	// outboxDir/seambundle.FileName carries for ref, relative to base, oldest first.

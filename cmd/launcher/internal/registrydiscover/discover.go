@@ -71,16 +71,13 @@ const (
 	BareTokenNeedsUserSecret
 )
 
-// Route is one proposed route, shaped to write directly into a registry routes
-// file (registryroutes.Route) minus the optional keys this engine has no basis
-// to guess (the per-ecosystem path declarations). Allow is set only from a Host
-// profile's sibling paths.
+// Route is one proposed route, shaped like registryroutes.Route minus the
+// per-ecosystem path declarations this engine cannot guess.
 type Route struct {
 	MatchHost string
-	// UpstreamBaseURL is not a routes file key: Render distills it down to an
-	// upstream origin, and only when the scheme or port says something
-	// match-host does not. It is kept here for the auth-scheme probe and the
-	// credential-store match.
+	// UpstreamBaseURL is not a routes file key: Render distills an upstream
+	// origin from it only when scheme or port says something match-host does
+	// not. It feeds the probe and the store match.
 	UpstreamBaseURL string
 	AuthScheme      string
 	// Profile is ProbeResult.Profile.
@@ -181,9 +178,7 @@ func Discover(repoDir string, rows []ecosystem.Strategy, stores []Store, lookup 
 					route.BareToken = BareTokenNeedsUserSecret
 				}
 			}
-			// Each kind's own StoreConfig already names every companion it
-			// contributes, so Discover assigns both unconditionally rather
-			// than branching per store name.
+			// StoreConfig names each kind's companions, so no per-store branch.
 			if kind, ok := credresolver.KindBySourceKey(matchedStore.Name); ok && kind.StoreConfig != nil {
 				cfg := kind.StoreConfig(matchedStore.Path, declarationFacts(d))
 				route.RegistryName = cfg.RegistryName
@@ -243,12 +238,12 @@ func uncoveredNotes(notes []ecosystem.Note, covered map[string]bool) []ecosystem
 }
 
 // siblingAllow joins each profile sibling for a declaration's ecosystem onto
-// that declaration's registry path. A result of "/" is dropped: it would admit
-// the whole host, which routes files refuse. A declaration contributes nothing
-// when its URL does not parse, its subtree is "/" (path.Join clamps ".." at the
-// root, so a sibling would land outside any declared subtree), or its decoded
-// path is not canonical or carries "?" or "#" (the join would fail the routes
-// file's allow validation or escape the declared subtree).
+// its registry path. "/" is dropped: routes files refuse a whole-host allow. A
+// declaration contributes nothing when its URL does not parse, its subtree is
+// "/" (path.Join clamps ".." at the root, so a sibling would land outside any
+// declared subtree), or
+// its path is not canonical or carries "?" or "#" (the join would fail the
+// routes file's allow validation or escape the subtree).
 func siblingAllow(decls []ecosystem.Declaration, profile ProfileAdvice) []string {
 	var allow []string
 	for _, d := range decls {
@@ -269,16 +264,12 @@ func siblingAllow(decls []ecosystem.Declaration, profile ProfileAdvice) []string
 	return allow
 }
 
-// disambiguateEnvPlaceholders resolves envPlaceholder collisions among this
-// run's unmatched routes: envPlaceholder folds hyphens and dots alike to "_",
-// so two hosts can share one name and a value an operator sets for one host
-// silently reaches the other. It runs to a fixpoint against the whole table,
-// not one pass, because suffixing a colliding name can itself collide with
-// another route's untouched base name or with another round's suffix. Each
-// round re-buckets by the current CredentialValue and suffixes every member
-// of every 2+ bucket, never just the "losers" of some claim order, so the
-// result depends only on the set of hosts, not on declaration order or Go's
-// randomized map iteration order.
+// disambiguateEnvPlaceholders resolves envPlaceholder collisions among the
+// unmatched routes: envPlaceholder folds "-" and "." alike to "_", so without
+// this a value set for one host silently reaches another. It runs to a
+// fixpoint, since a suffixed name can collide with another's base name, and
+// suffixes every member of a colliding bucket, so the result depends only on
+// the set of hosts, not order.
 func disambiguateEnvPlaceholders(routes []Route) error {
 	var envIdxs []int
 	for i, r := range routes {
@@ -287,12 +278,10 @@ func disambiguateEnvPlaceholders(routes []Route) error {
 		}
 	}
 
-	// hostHash is fixed-width, so a route touched by a previous round
-	// already ends in "_"+hostHash(its own host), and two touched routes
-	// can collide again only if their hosts hash equal. Absent that, every
-	// round with a remaining collision must suffix at least one route for
-	// the first time, so len(envIdxs)+1 rounds is always enough; hitting
-	// the bound means a real hostHash collision.
+	// hostHash is fixed-width, so a suffixed route ends in "_"+hostHash(its
+	// host) and two suffixed routes collide again only if their hosts hash
+	// equal. Absent that, each round suffixes some route for the first time,
+	// so len(envIdxs)+1 rounds suffice; hitting the bound is a hash collision.
 	for round := 0; ; round++ {
 		byName := make(map[string][]int)
 		for _, i := range envIdxs {
@@ -350,10 +339,8 @@ func declarationFacts(d ecosystem.Declaration) credresolver.StoreFacts {
 }
 
 // firstMatch searches stores in order and returns the first hit plus every
-// configured store name, so StoresSearched names even a store the declaration's
-// Strategy does not read and never comes back empty. A lookup error counts as
-// not-found and the search continues: one unreachable store must never abort
-// discovery of the rest.
+// configured store name, so StoresSearched is never empty. A lookup error
+// counts as not-found: one unreachable store must not abort the rest.
 func firstMatch(stores []Store, storesByEcosystem map[string][]string, lookup Lookup, d ecosystem.Declaration) (store Store, searched []string, found bool) {
 	rowStores := storesByEcosystem[d.Ecosystem]
 	for _, s := range stores {

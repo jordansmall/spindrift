@@ -24,12 +24,9 @@ type imageLock struct {
 }
 
 // imageLockFilePrefix and imageLockFileSuffix name the per-image lock file.
-// Like daemon/lock.go's checkoutLockFileName, the file is deliberately never
-// unlinked on Release: unlinking would race a waiter that already opened
-// (and holds an fd on) the old inode, reintroducing the very race flock
-// exists to prevent. So the lock dir accumulates one zero-byte file per
-// distinct image reference realized under that `os.TempDir()`, forever — an
-// accepted tradeoff, not an oversight.
+// The file is never unlinked on Release: unlinking would race a waiter that
+// already holds an fd on the old inode. So the lock dir accumulates one
+// zero-byte file per distinct image realized, an accepted tradeoff.
 const (
 	imageLockFilePrefix = "spindrift-image-"
 	imageLockFileSuffix = ".lock"
@@ -61,13 +58,10 @@ func flockRetry(fd, how int) error {
 
 // acquireImageLock serializes concurrent Dispatch children on one host that
 // would otherwise each realize, load, and re-tag the same absent image at
-// once (issue #3632). It tries a non-blocking exclusive lock first so the
-// common "nobody else is realizing this image" case pays no wait; only once
-// that reports EWOULDBLOCK does it fall back to a blocking acquire, since a
-// losing child must wait out the winner's build however long that takes,
-// never time out or fail. onWait, if non-nil, runs exactly once, right
-// before that blocking acquire — the caller's chance to explain a wait that
-// can run minutes before there is anything else to show for it.
+// once (issue #3632). It tries a non-blocking lock first, then blocks without
+// timeout: a losing child waits out the winner's build however long it takes.
+// onWait, if non-nil, runs once before blocking, so the caller can explain a
+// wait that can run minutes.
 func acquireImageLock(image string, onWait func()) (*imageLock, error) {
 	path := imageLockPath(image)
 

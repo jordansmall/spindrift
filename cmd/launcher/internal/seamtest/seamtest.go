@@ -2,21 +2,17 @@
 // exercise a Go component against a fixture rendered by Nix (ADR 0058, issue
 // #4280).
 //
-// Fixtures resolve from the directory named by SPINDRIFT_SEAM_FIXTURES_DIR
-// first. When it is unset, Dir builds the flake's seam-fixtures output with
-// nix; with no nix on PATH the test skips instead of failing, so a plain
-// checkout without nix stays green. The package is not build-tagged, so its
-// own unit tests run under plain `go test ./...`.
+// Fixtures resolve from SPINDRIFT_SEAM_FIXTURES_DIR first, else Dir builds the
+// flake's seam-fixtures output with nix; with no nix on PATH the test skips,
+// so a checkout without nix stays green.
 //
 // # Launcher smoke set
 //
-// TestSeamLauncherSmokeMatrix in cmd/launcher/launcher_seam_integration_test.go
-// replaced the launcher-side bats files (tests/run-*.bats). Its smokeMatrix
+// TestSeamLauncherSmokeMatrix (cmd/launcher/launcher_seam_integration_test.go)
 // carries a case for every dispatch kind and runtime the rendered input
-// document distinguishes; recover has none, since it runs no Box and its
-// Box-facing fields mirror work's. A new kind or runtime distinction in the
-// document earns a new case there, and TestSeamSmokeCatchesDroppedKnob keeps
-// the matrix honest by asserting a dropped document knob fails a check.
+// document distinguishes; recover has none, since it runs no Box. A new
+// distinction earns a new case, and TestSeamSmokeCatchesDroppedKnob keeps the
+// matrix honest by asserting a dropped document knob fails a check.
 //
 // # Fake Driver
 //

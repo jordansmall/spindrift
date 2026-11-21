@@ -50,13 +50,11 @@ func (d *Dispatch) UsageReport() string {
 // CumulativeUsage sums every usage field across every attempt log this run has
 // produced, retried attempts included, so selfHealGate's budget gate reads the
 // run's true total spend (issues #561, #2001, #2575). Its DurationMs is the total
-// time across attempts, not the wall-clock span aggregatedReport derives.
-// internal/butler/settle.go writes this sum whole into the ledger's State.Usage,
-// so turns and durations are summed too, not just tokens and cost. A caller
-// that never called Run() must call EnsureRunLineage first. An attempt log that
-// fails to parse, or has no result event, contributes nothing rather than
-// aborting the sum. A resumed session's cumulative result figures are rebased
-// across logs, so each log books only its increment.
+// time across attempts, not the wall-clock span aggregatedReport derives; the
+// butler writes the whole sum into the ledger's State.Usage, so turns and
+// durations are summed too, not just tokens and cost. A caller that
+// never called Run() must call EnsureRunLineage first. An attempt log that
+// fails to parse contributes nothing rather than aborting the sum.
 func (d *Dispatch) CumulativeUsage() usage.Usage {
 	var total usage.Usage
 	for _, r := range d.attemptReports() {
@@ -67,13 +65,12 @@ func (d *Dispatch) CumulativeUsage() usage.Usage {
 
 // attemptReports returns the Found report of every attempt log, chronologically.
 // The session baselines thread from log to log, so a session resumed in a later
-// log (the implement -> fix resume) books only its own increment there. Work
-// retries resume the session (--resume); research and butler retries re-pin the
-// same --session-id in initial mode. Threading is still right there: within a Run
-// the transcript is cached so the counters continue, and a genuine restart is
-// caught by the counter-decrease rule. So the chain never resets within a Run
-// (prior-Run logs are quarantined and never listed). A log that errors keeps the
-// chain's previous baselines. Keep in step with dispatchrecord.sessionSeed.
+// log books only its own increment there. That holds for research and butler
+// retries too, which re-pin the same --session-id in initial mode: the
+// transcript is cached so the counters continue, and a genuine restart is
+// caught by the counter-decrease rule. The chain never resets within a Run
+// (prior-Run logs are quarantined and never listed). A log that errors keeps
+// the chain's previous baselines. Keep in step with dispatchrecord.sessionSeed.
 func (d *Dispatch) attemptReports() []usage.Report {
 	var found []usage.Report
 	var base driverkit.SessionBaselines
@@ -91,12 +88,13 @@ func (d *Dispatch) attemptReports() []usage.Report {
 	return found
 }
 
-// aggregatedReport merges a run's per-attempt reports, each of which must have Found
-// set, into one for UsageReport (issue #2575). Every total sums except DurationMs,
-// which spanDurationMs derives; SummedByModel merges by exact model id in
-// first-appearance order, so the result never depends on a driver's own sort; a row is
-// OutputUnavailable if any attempt's was, since a partial output sum would understate it. A lone
-// report returns unchanged, keeping a one-log run's body byte-for-byte as before.
+// aggregatedReport merges a run's Found per-attempt reports into one for
+// UsageReport (issue #2575). Every total sums except DurationMs, which
+// spanDurationMs derives; SummedByModel merges by exact model id in
+// first-appearance order, so the result never depends on a driver's own sort.
+// A row is OutputUnavailable if any attempt's was, since a partial output sum
+// would understate it. A lone report returns unchanged, keeping a one-log
+// run's body byte-for-byte.
 func aggregatedReport(found []usage.Report) usage.Report {
 	if len(found) == 1 {
 		return found[0]

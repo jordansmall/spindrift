@@ -15,13 +15,10 @@ import (
 	"spindrift.dev/launcher/internal/report"
 )
 
-// pool is the shared state behind Loop's slot goroutines. It owns the one
-// thing every slot must agree on: whether the daemon has decided to stop,
-// and why. First halt wins — Loop emits exactly one "halt" event per call,
-// whichever slot gets there first — and every slot shares one derived
-// context that pool cancels the moment it halts, so a sibling asleep in its
-// idle wait or blocked in ResolveTip stops promptly instead of riding
-// out the full interval or fetch.
+// pool is the shared state behind Loop's slot goroutines. First halt wins —
+// Loop emits exactly one "halt" event per call — and pool cancels the slots'
+// shared context the moment it halts, so a sibling asleep in its idle wait or
+// blocked in ResolveTip stops promptly.
 type pool struct {
 	cfg Config
 	r   Runner
@@ -35,14 +32,10 @@ type pool struct {
 	abandon chan struct{}
 
 	// baton is the discovery token (issue #3684): at most one slot may be
-	// between "started" and "announced a Box" at any moment, on the first
-	// wave and on every refill alike — a pool that lets two slots run
-	// discovery against the same tracker snapshot at once risks both
-	// selecting the same issue. st.batonSlot is the current holder, or
-	// noBaton when the token is free; baton itself is the capacity-1
-	// channel the holder sends into when it passes. nil means there is no
-	// baton to wait on at all — a single-slot pool has no sibling to
-	// stagger against (see newPool).
+	// between "started" and "announced a Box", or two slots discovering
+	// against one tracker snapshot could select the same issue. st.batonSlot
+	// is the holder (noBaton when free). nil in a single-slot pool, which has
+	// no sibling to stagger against.
 	baton chan struct{}
 
 	mu  sync.Mutex
@@ -100,11 +93,9 @@ type state struct {
 	selfSince time.Time
 
 	// wake is the current wake generation: a parked slot sleeps on a context
-	// derived from it, and wakeParked cancels it and installs a fresh one
-	// when a change grows the set of startable kinds (observe, a jam lift).
-	// It lives on state because observe and tipMoved run inside mutate, which
-	// hands them nothing but *state. A halt needs no part in it: slots
-	// sleep on pctx too.
+	// derived from it, and wakeParked replaces it when a change grows the set
+	// of startable kinds. It lives on state because observe and tipMoved run
+	// inside mutate, which hands them only *state. A halt wakes slots via pctx.
 	wake       context.Context
 	wakeCancel context.CancelFunc
 }
@@ -123,11 +114,9 @@ func (s *state) wakeParked() {
 	s.wake, s.wakeCancel = context.WithCancel(context.Background())
 }
 
-// observe folds ev into the schedule and, when Schedule.Observe reports it
-// grew the startable set or a claim made a kind probe-due, wakes every parked
-// slot. Only that result decides a wake: a phase change or a kind going
-// unstartable cannot grow the set, a claim on an already probe-due kind reports
-// no wake, and a wake never itself produces a claimed event, so slots never wake
+// observe folds ev into the schedule and wakes every parked slot only when
+// Schedule.Observe reports a wake (the startable set grew, or a claim made a
+// kind probe-due). A wake never produces a claimed event, so slots never wake
 // one another in a ring.
 func (s *state) observe(now time.Time, ev schedEvent) {
 	var woke bool
@@ -138,9 +127,8 @@ func (s *state) observe(now time.Time, ev schedEvent) {
 }
 
 // tipMoved ends every jammed kind's gate and every reported kind's tip wait,
-// returns the kinds lifted, and wakes every parked slot when
-// Schedule.TipMoved reports the lift grew the startable set — the same wake
-// decision observe makes.
+// returns the kinds lifted, and wakes parked slots on the same terms as
+// observe.
 func (s *state) tipMoved(now time.Time) (lifted []Kind) {
 	var woke bool
 	s.sched, lifted, woke = s.sched.TipMoved(now)
@@ -150,12 +138,10 @@ func (s *state) tipMoved(now time.Time) (lifted []Kind) {
 	return lifted
 }
 
-// slotState is one slot's own state: where it is in its iteration, and
-// what its child has in flight while it is running. flight is meaningful
-// only while phase == PhaseRunning: finishChild zeroes it on the way out
-// of that phase, and projectStatus reads it for a running slot only, so a
-// flight a bare setPhase left behind is never reachable as stale occupancy
-// data.
+// slotState is one slot's own state. flight is meaningful only while phase
+// == PhaseRunning: finishChild zeroes it leaving that phase, and projectStatus
+// reads it only for a running slot, so a flight a bare setPhase left behind is
+// never published as stale occupancy.
 type slotState struct {
 	phase Phase
 	// since is when phase last changed; mutate maintains it, so no phase
@@ -170,27 +156,16 @@ type slotState struct {
 	handed *ChildState
 }
 
-// mutate is the pool's one path to changing anything in state: every
-// change — a halt, an occupancy flip, a baton pass, a backoff record — goes
-// through here, and nowhere else takes p.mu to write. It holds the lock
-// while f applies the change and while the events f returns are emitted:
-// Emitter has its own mutex and never reaches back into the pool, so
-// emitting under p.mu is safe, and it is exactly what orders this mutate's
-// events ahead of any later mutate's without a special case — no other
-// mutate's f can run, and so no other mutate's events can reach the
-// stream, until this one releases the lock. The snapshot's sequence number
-// is allocated in that same hold, right after, which is what lets
-// StatusWriter.Publish drop a stale snapshot on disk instead of needing the
-// publish calls themselves to arrive in order.
+// mutate is the pool's one path to changing state; nowhere else takes p.mu
+// to write. Emitting f's events under the lock (Emitter never reaches back
+// into the pool) orders them ahead of any later mutate's by construction, and
+// allocating the snapshot's sequence number in the same hold lets
+// StatusWriter.Publish drop a stale snapshot rather than needing publishes to
+// arrive in order.
 //
 // f must touch nothing but the *state it is handed: a p.-receiver method
-// that itself takes p.mu would deadlock here.
-//
-// Two costs come with that, both accepted as the price of ordering by
-// construction: the event-stream writer's I/O runs inside this same lock
-// hold, so a stalled writer stalls every state change, halt included; and
-// every mutate publishes, so status-file write volume now tracks state
-// changes rather than the nine hand-placed call sites it replaces.
+// that itself takes p.mu would deadlock here. Accepted costs: a stalled event
+// writer stalls every state change, halt included, and every mutate publishes.
 func (p *pool) mutate(f func(s *state) []Event) {
 	p.mu.Lock()
 	before := make([]slotState, len(p.st.slots))
@@ -227,16 +202,13 @@ func (p *pool) mutate(f func(s *state) []Event) {
 	p.publish(seq, snap)
 }
 
-// leadSlot is the pool's designated initial baton holder: a fixed slot
-// number rather than whichever slot happens to reach awaitBaton first, so
-// a cold start's first discovering slot never depends on scheduler luck.
-// No longer a "leader" with any lasting powers — once its first round ends,
-// the baton is just a token that circulates to whichever slot is holding it.
+// leadSlot is the initial baton holder: a fixed slot rather than whichever
+// reaches awaitBaton first, so a cold start's first discovering slot never
+// depends on scheduler luck. It has no lasting powers after its first round.
 const leadSlot = 0
 
-// noBaton is batonSlot's value while the discovery baton is free — held by
-// no slot, in flight on p.baton's channel (or, before the pool's first
-// round, not yet claimed by anyone but the pre-assigned leadSlot).
+// noBaton is batonSlot's value while the discovery baton is free (in flight
+// on p.baton's channel).
 const noBaton = -1
 
 // batonReason is a baton_pass reason. A distinct type so passBaton and
@@ -244,54 +216,40 @@ const noBaton = -1
 // handed the two swapped.
 type batonReason string
 
-// Reasons stamped on baton_hold/baton_pass — operator-facing prose in the
-// same documented-string convention as ShutdownDrain (events.go). Every
-// way a slot's discovery round can end without a claim has its own pass
-// reason below, so an operator reading the stream sees why the baton moved
-// without cross-referencing code.
+// Reasons stamped on baton_hold/baton_pass, in the documented-string
+// convention of ShutdownDrain (events.go). Every way a discovery round can
+// end without a claim has its own pass reason, so an operator sees why the
+// baton moved.
 const (
 	// batonPassClaimed fires when the holder's child announces a Box while
 	// still running: discovery is over, so the next waiting slot starts at
 	// once rather than waiting out the whole of the holder's Box run.
 	batonPassClaimed batonReason = "the holder's child announced a Box: discovery is over, passing the baton to the next waiting slot"
 	// batonPassChildEnded fires when the holder's child returns without
-	// ever announcing a Box (queue empty, none dispatchable, an
-	// unrecognised exit, or a StartChild/Wait seam error) and the pool is not
-	// halting: the holder's round is over either way, so the baton passes
-	// regardless of which of those it was. A HaltPool exit or a breaker
-	// trip passes none, since a woken sibling would start a child before the
-	// halt lands (issue #4365).
+	// announcing a Box and the pool is not halting. A HaltPool exit or a
+	// breaker trip passes none, since a woken sibling would start a child
+	// before the halt lands (issue #4365).
 	batonPassChildEnded batonReason = "the holder's child ended without announcing a Box: passing the baton to the next waiting slot"
-	// batonPassFailed fires on an unclassified failure that reaches
-	// backoffOrHalt before the holder ever started a child — a
-	// ResolveTip error or a self-build evaluation failure: the holder
-	// is about to back off alone, and holding the pool through that
-	// backoff would stall every sibling's own discovery on a problem
-	// backoffOrHalt already handles per-slot. The baton is acquired only
-	// after the resolve completes (see runSlot, loop.go), so a
-	// non-holder never reaches this path with the baton to pass — it is
-	// only live for the pre-assigned initial holder's (leadSlot) very
-	// first round, the one round a slot gets here already holding it.
+	// batonPassFailed fires on an unclassified failure reaching
+	// backoffOrHalt before the holder started a child (a ResolveTip error or
+	// a self-build evaluation failure), so siblings' discovery does not stall
+	// through the holder's own backoff. The baton is acquired only after the
+	// resolve (runSlot, loop.go), so only leadSlot's first round reaches this
+	// holding it.
 	batonPassFailed batonReason = "the holder's round failed before it could start a child: passing the baton rather than holding the pool through its backoff"
 	// batonPassWindowClosed fires when the Awake window shuts between the
-	// holder's ResolveTip fetch and starting its child: the holder is
-	// about to loop back around into awaitWindow, and holding the pool
-	// through that whole shut span would stall every sibling's own
-	// discovery for no reason.
+	// holder's ResolveTip fetch and starting its child, so the holder does not
+	// keep the baton through the shut span.
 	batonPassWindowClosed batonReason = "the Awake window closed before the holder could start a child: passing the baton rather than holding the pool through the shut span"
 	// batonPassIdle fires when Decide finds nothing startable or probe-due for
-	// the holder: the holder is about to idleSleep, and a slot
-	// must never sleep out an idle wait holding the baton. Decide runs
-	// before the baton is acquired, so a non-holder never reaches this
-	// path holding it — only the pre-assigned initial holder (leadSlot)
-	// can, on its very first round.
+	// the holder: a slot must never idle-sleep holding the baton. Decide runs
+	// before the baton is acquired, so only leadSlot's first round reaches
+	// this holding it.
 	batonPassIdle batonReason = "no kind is runnable for the holder: passing the baton rather than holding the pool through its idle wait"
 	// batonPassOutpaced fires when the holder re-decides at startChild and
-	// finds a sibling's result since took away the start it decided on
-	// before blocking on the baton (a sibling's exit 2 zeroing the count the
-	// holder was about to spend). The holder loops back to decide again, so
-	// the baton must not stay with it through that round's probe or idle
-	// wait.
+	// finds a sibling's result took away its start (e.g. an exit 2 zeroing
+	// the count). The holder decides again, so the baton must not stay with
+	// it through that round's probe or idle wait.
 	batonPassOutpaced batonReason = "a sibling's result left nothing startable for the holder: passing the baton rather than spawning an empty child"
 	// batonPassChoreKeyed fires when the holder starts a Chore-keyed child.
 	// Such a kind selects no tracker issue, so the baton has nothing to
@@ -300,16 +258,12 @@ const (
 	batonPassChoreKeyed batonReason = "the holder started a Chore-keyed child, which discovers no tracker issue: passing the baton to the next waiting slot"
 	// batonPassStopped fires when the holder returns before any of the
 	// above resolved (a cancelled ctx, a halt, a self-build mismatch, or a
-	// HaltPool child exit or breaker trip, whose pass waits until after the
-	// halt lands):
-	// a holder that never gets to run discovery must still not strand the
-	// next waiting slot on a baton nothing else will now ever pass.
+	// HaltPool child exit or breaker trip, passed after the halt lands), so
+	// the next waiting slot is never stranded.
 	batonPassStopped batonReason = "the holder stopped before its discovery round resolved: passing the baton so no sibling waits on a slot that has already exited"
 
-	// batonHoldReason is stamped on every baton_hold event, matching every
-	// other wait event in this stream (awake_close, backoff, idle's own
-	// wait): an operator reading a held start must see why without
-	// cross-referencing code.
+	// batonHoldReason is stamped on every baton_hold event, like every other
+	// wait event's reason.
 	batonHoldReason = "waiting for the discovery baton: another slot's child is still discovering"
 )
 
@@ -323,14 +277,11 @@ const (
 	walkExhaustedReason = "no Awake window opening found within the walk horizon: re-checking then"
 )
 
-// slotFlight is what one occupied slot currently has in flight. issues is
-// the deduped set behind SlotStatus.Issues (origin/main's "seen" semantics,
-// issue #3627's review finding) in first-seen order; key is tracked
-// separately since a repeat-issue box (e.g. a fix-pass after the initial
-// box) must still move flightClaim's answer even though it adds nothing to
-// issues, and a Chore-keyed box (ADR 0056, issue #3878) never enters issues
-// at all — a Chore is never a tracker issue — so key alone carries it,
-// surfaced as SlotStatus.Chore.
+// slotFlight is what one occupied slot has in flight. issues is the deduped
+// set behind SlotStatus.Issues (issue #3627), in first-seen order. key is
+// tracked separately: a repeat-issue box (a fix-pass) must still move
+// flightClaim's answer, and a Chore-keyed box (ADR 0056, issue #3878) never
+// enters issues, so key alone carries it as SlotStatus.Chore.
 type slotFlight struct {
 	kind     Kind
 	revision string
@@ -377,15 +328,11 @@ type ciWait struct {
 	runURL string
 }
 
-// newPool derives ctx into a context pool.cancel can stop independently of
-// the caller, and returns both the pool and that derived context — every
-// slot runs against the derived one, never the caller's directly, so
-// StartChild and Wait are already contractually drain-safe under a cancelled
-// ctx (see loop.go's own doc), and hostRunner.StartChild uses exec.Command
-// rather than CommandContext, so cancelling it can never kill a running
-// child. r, clk, the breaker, and the Schedule are all pool-wide policy, not
-// slot-tracking state, but they live here so backoffOrHalt and runSlot stop
-// threading them as parameters.
+// newPool returns the pool and a context derived from ctx that pool.cancel
+// stops independently of the caller; every slot runs against it. Cancelling
+// it never kills a running child: StartChild and Wait are drain-safe under a
+// cancelled ctx (loop.go), and hostRunner.StartChild uses exec.Command, not
+// CommandContext.
 func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) (*pool, context.Context) {
 	pctx, cancel := context.WithCancel(ctx)
 	slots := make([]slotState, cfg.Slots)
@@ -423,26 +370,20 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 		p.st.b = p.st.b.restore(h.Breaker)
 	}
 	if cfg.Slots > 1 {
-		// A single slot has no sibling to race, so it must take no wait
-		// and the pool must emit no baton event at all (see baton's own
-		// doc). The token channel starts empty: batonSlot is
-		// pre-assigned to leadSlot above, so the first holder never
-		// receives from it, only ever sends when it passes.
+		// A single slot takes no wait and emits no baton event. The channel
+		// starts empty: leadSlot already holds the token, so it only ever
+		// sends, when it passes.
 		p.baton = make(chan struct{}, 1)
 	}
 	return p, pctx
 }
 
 // slotOrder returns the kinds a starting slot tries, most preferred first, in
-// four tiers: first (dispatchkind.PriorityFirst, recover, issue #4656),
-// reserved (PriorityReserved, research), normal (PriorityNormal, e.g. work)
-// and idle (PriorityIdle, the butler, ADR 0056). First kinds always go
-// first, so stranded finished work lands before a new Box starts; idle kinds
-// always go last, since a slot must only pick one once every other kind has
-// reported no work. preferReserved (from Schedule.Decide) puts the reserved
-// tier ahead of normal, else behind it. The order is derived from kinds, so
-// a later kind keeps its configured place within its own tier. A kind with
-// no descriptor (ByVerb misses) is treated as normal.
+// four tiers: first (recover, issue #4656), reserved (research), normal (e.g.
+// work) and idle (the butler, ADR 0056). First kinds go first so stranded
+// finished work lands before a new Box starts; idle kinds go last, picked only
+// once every other kind has reported no work. preferReserved (from
+// Schedule.Decide) puts reserved ahead of normal, else behind it.
 func slotOrder(kinds []Kind, preferReserved bool) []Kind {
 	if len(kinds) < 2 {
 		return kinds
@@ -486,13 +427,12 @@ func kindPriority(k Kind) dispatchkind.DaemonPriority {
 }
 
 // occupancyOf reads what the slot phases say is running, for Schedule.Decide's
-// reservation count and Start budget. Only running children count toward the
-// reservation: reserved-tier children that exit early (a run of Continue exits,
-// say) never lift the count, so the reserved kind can keep taking every
-// turnover while normal-tier kinds still have queued work. A running slot with
-// no flight key has not yet reported its claim, so it is also starting. The
-// deciding slot is not itself PhaseRunning, so neither count includes it. The
-// caller holds p.mu.
+// reservation count and Start budget. Only running children count, so
+// reserved-tier children that exit early never lift the count, and the
+// reserved kind can keep taking every turnover while normal-tier kinds still
+// have queued work. A running slot with no flight key has not reported its
+// claim, so it is also starting. The deciding slot is not PhaseRunning, so
+// neither count includes it. The caller holds p.mu.
 func occupancyOf(s *state) occupancy {
 	running := make(map[Kind]int)
 	starting := make(map[Kind]int)
@@ -521,12 +461,9 @@ func liveKeys(s *state) dispatchkey.Set {
 }
 
 // decide asks the Schedule what a free slot should do at now. A pure read,
-// not a mutate: now is sampled by the caller before the lock (never call the
-// Clock under it), and the answer is provisional — a sibling can start or
-// finish a child, or a probe can land, before the caller acts on it.
-// startChild re-decides in the same p.mu hold as the PhaseRunning flip, so two
-// slots can never both take the last reserved seat, and nothing is claimed
-// before startChild, so no early-exit path needs cleanup.
+// so the answer is provisional: startChild re-decides in the same p.mu hold
+// as the PhaseRunning flip, so two slots never both take the last reserved
+// seat, and nothing is claimed before then, so no early exit needs cleanup.
 func (p *pool) decide(now time.Time) decision {
 	d, _ := p.decideWithWake(now)
 	return d
@@ -569,29 +506,21 @@ func (p *pool) resetKind(kind Kind) {
 	})
 }
 
-// noteWaitResult is runSlot's Wait-case fold: it records kind's no-work
-// result and evaluates the jam predicate in the same mutate, so the two can
-// never be read from two different instants the way a separate
-// siblingsEngaged call followed by a separate markNoWork call used to
-// allow. "none-dispatchable" carries a second axis exit 2 doesn't: whether
-// a sibling could release a claim. With a sibling genuinely running, the
-// issues this slot found "none dispatchable" were claimed or
-// overlap-deferred against that very sibling — routine, reported like any
-// other idle wait. With every sibling idle, resolving (no claim held yet),
-// backing off (its child already exited), parked on the shut Awake window,
-// or running only a butler child (see siblingsEngaged), nothing that could
-// unblock it is running or can start: a jam an operator may need to
-// clear. The jam alarm's predicate below is deliberately not the same as
-// jammed itself: jammed records the queue condition this check saw (see
-// kindBackoff.markNoWork), while the alarm only fires when no sibling is
-// running a child that counts (issue #3571, #3735, #4205).
+// noteWaitResult records kind's no-work result and evaluates the jam
+// predicate in one mutate, so the two are never read from different instants.
+// With a sibling genuinely running, "none dispatchable" means the issues were
+// claimed or overlap-deferred against it: routine, reported as idle. With
+// every sibling idle, resolving, backing off, parked on the shut Awake window,
+// or running only a butler child (siblingsEngaged), nothing that could unblock
+// it is running: a jam an operator may need to clear. The alarm is narrower
+// than jammed itself, which records the queue condition the check saw
+// (kindBackoff.markNoWork; issues #3571, #3735, #4205).
 //
-// f is the flight snapshot flightReport read for the child: its not_due report,
-// Continue count, and the gate generation that lets a burst of results from one
-// gate raise
-// the kind's backoff once. A report that went stale while the child ran
-// (see reportStale) is replaced by "due now": one spurious child start just
-// re-reports, where parking on a stale report can idle the kind indefinitely.
+// f is the child's flight snapshot (flightReport): its not_due report,
+// Continue count, and the gate generation that lets a burst of results from
+// one gate raise the backoff once. A stale report (reportStale) is replaced by
+// "due now": one spurious start just re-reports, where parking on a stale
+// report can idle the kind indefinitely.
 func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatchable bool, f slotFlight) {
 	now := p.clk.Now()
 	nextDue := f.nextDue
@@ -632,24 +561,18 @@ func (s *state) reportStale(kind Kind, revision string, continues int, nd NextDu
 }
 
 // startChild marks slot running at revision and returns the kind it chose,
-// together with the child_start event in one mutate: the phase flip is
-// therefore always visible to any snapshot that publishes alongside this
-// event, which a hand-placed write after a separately-emitted child_start
-// could not otherwise guarantee. The kind is re-chosen inside that same
-// mutate (see Schedule.Decide). When that re-decide is not a start (or is a
-// start onto an issue-keyed kind that a non-holder deciding on a Chore-keyed
-// provisional is refused), what follows depends on provisional, the kind
-// runSlot decided on. A probed kind's count is what says there is work, so a
-// sibling's exit 2 zeroing it while this slot waited on the baton means
-// nothing is marked and ok is false: the caller decides again rather than
-// spawn an empty child (ADR 0059). An exit-driven kind has only its backoff to go on, and a child is
-// how it finds work at all, so it still starts as provisional. child_start carries no
-// dispatch key (neither issue nor chore): the daemon cannot know which key
-// a freshly started child will work until it reports a "box" record, and
-// waiting to emit child_start until then would either hide a started child
-// from the stream for its whole queue scan, or emit nothing at all for a
-// child that never claims — the "box" event is where the slot↔key binding
-// first appears (see slotFlight.fold).
+// emitting child_start in the same mutate so any snapshot published alongside
+// it shows the phase flip. The kind is re-decided here (Schedule.Decide). When
+// that is not a start (or is an issue-keyed start refused to a non-holder
+// deciding on a Chore-keyed provisional), a probed provisional kind is not
+// started and ok is false: its count is what said there was work, and a
+// sibling's exit 2 may have zeroed it, so the caller decides again rather than
+// spawn an empty child (ADR 0059). An exit-driven kind has only its backoff to
+// go on and a child is how it finds work, so it starts as provisional.
+// child_start carries no dispatch key: the child's key is unknown until its
+// "box" record, where the slot↔key binding first appears (slotFlight.fold).
+// Deferring child_start until then would hide a started child for its whole
+// queue scan, or forever if it never claims.
 func (p *pool) startChild(slot int, provisional Kind, revision string) (kind Kind, childLog string, ok bool) {
 	now := p.clk.Now()
 	p.mutate(func(s *state) []Event {
@@ -810,16 +733,13 @@ func (f slotFlight) fold(rec Record, sf slotFacts) (slotFlight, []Event, schedEv
 		f.pass = rec.Phase
 		f.model, f.modelRole = "", ""
 		f.clearTransient()
-		// SlotStatus.Issues names tracker issues, so a Chore key (ADR 0056,
-		// issue #3878) stays out of it — f.key alone tracks it. Deduped: a
-		// fix-pass box for an issue already open in this slot is the same
-		// claim continuing (issue #3627's review finding). Clipped so the
-		// append copies instead of writing the input's backing array.
+		// A Chore key stays out of the tracker-issue list. Deduped: a fix-pass
+		// box for an issue already open here continues the same claim (issue
+		// #3627). Clipped so the append never writes the input's backing array.
 		if issue, _ := rec.Key.Fields(); issue != "" && !slices.Contains(f.issues, issue) {
 			f.issues = append(slices.Clip(f.issues), issue)
 		}
-		// The event is emitted even for a deduped issue: a fix-pass box is a
-		// real thing that happened, and only the status-file issue list
+		// Emitted even for a deduped issue: only the status-file issue list
 		// collapses repeats.
 		evs = []Event{{Event: report.EventBox, Kind: sf.kind, Revision: sf.revision, Key: rec.Key, Phase: rec.Phase, PassLog: rec.PassLog, RecordID: rec.RecordID, Slot: slot}}
 	case report.EventModel:
@@ -841,11 +761,8 @@ func (f slotFlight) fold(rec Record, sf slotFacts) (slotFlight, []Event, schedEv
 		// not_due Chore was never claimed.
 		f.nextDue = f.nextDue.Merge(rec.NextDue)
 	case report.EventSettled:
-		// Always emits, though the running check covers the transient clear:
-		// a settled record names the issue's (or Chore's) terminal outcome,
-		// true whether or not the slot still runs, and dropping it would lose
-		// the one event that answers "what happened to #123". It grows no
-		// in-flight issue list.
+		// Emits even when the slot no longer runs: it is the one event that
+		// answers "what happened to #123".
 		if sf.running {
 			f.clearTransient()
 		}
@@ -864,22 +781,18 @@ func (f *slotFlight) clearTransient() {
 	f.imageBuildSince = time.Time{}
 }
 
-// flightClaim returns the key slot's child most recently boxed (the value
-// slotFlight.fold recorded, regardless of whether that box was a repeat and so
-// never grew the deduped issues list). Read directly under p.mu rather than
-// through mutate, since it changes nothing; callers that need it for a
-// child_finish event must call it before finishChild zeroes the slot's
-// flight — this is the only place it is still available at all.
+// flightClaim returns the key slot's child most recently boxed, repeats
+// included. A caller needing it for child_finish must read it before
+// finishChild zeroes the flight.
 func (p *pool) flightClaim(slot int) dispatchkey.Key {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.st.slots[slot].flight.key
 }
 
-// flightReport is flightClaim's sibling for what noteWaitResult needs: slot's
-// flight snapshot — the folded not_due reports, and the kind's Continue count
-// gate generation when its child started. The same
-// must-read-before-finishChild rule applies.
+// flightReport returns slot's flight snapshot for noteWaitResult: the folded
+// not_due reports, and the Continue count and gate generation at child start.
+// Like flightClaim, it must be read before finishChild.
 func (p *pool) flightReport(slot int) slotFlight {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -887,18 +800,13 @@ func (p *pool) flightReport(slot int) slotFlight {
 }
 
 // siblingsEngaged reports whether any slot other than slot could release a
-// claim the none-dispatchable read found blocked (#3922's can-it-explain-
-// the-read test): a sibling PhaseRunning a non-butler child. Every other
-// phase, resolving included, holds nothing it could release (the claim is
-// taken inside the child), and a new phase defaults to not engaged.
-//
-// PhaseBackingOff is one of those (#4205): every backoffOrHalt entry leaves
-// nothing releasable. A ResolveTip failure never took a claim, and a
-// StartChild/Wait seam failure or Backoff outcome follows a child that already
-// exited, so any claim it took was either cleared (agent-failed, shutdown
-// abort) or orphaned as agent-in-progress until `spindrift recover`. The
-// overlap gate reads tracker labels, not slot phase, so the sleep releases
-// nothing.
+// claim the none-dispatchable read found blocked (#3922): a sibling
+// PhaseRunning a non-butler child. No other phase holds anything releasable,
+// since the claim is taken inside the child; a new phase defaults to not
+// engaged. PhaseBackingOff (#4205) follows a ResolveTip failure that took no
+// claim or a child that already exited, whose claim was cleared or orphaned
+// as agent-in-progress until `spindrift recover`; the overlap gate reads
+// tracker labels, not slot phase, so the backoff sleep releases nothing.
 //
 // The butler skip ignores the reporting kind, which is safe only while the
 // butler never exits 3 (exitCodeFor maps 3 solely from
@@ -934,14 +842,10 @@ func (p *pool) awaitWindow(ctx context.Context, slot int) {
 	}
 }
 
-// noteAwakeClose records the pool-wide transition into a shut window and,
-// only for the caller that actually observes the transition, returns the
-// awake_close event: with several slots parking on the same close, only the
-// first to flip awakeShut reports it, so the stream carries exactly one
-// awake_close per closing however many slots are waiting on it. The phase
-// write is unconditional, though, unlike the event: every parking slot is
-// about to sleep out the shut window, whether or not it was the one that
-// noticed the edge, so each must record its own phase regardless.
+// noteAwakeClose records the pool-wide move into a shut window and returns
+// awake_close only for the slot that flips awakeShut, so the stream carries
+// one awake_close per closing however many slots park on it. Every parking
+// slot records its own phase regardless.
 //
 // Being edge-triggered, the event's Reason reflects only the first park's
 // walk: a later re-park in the same shut span whose walk exhausts is not
@@ -962,14 +866,10 @@ func (p *pool) noteAwakeClose(slot int, wait time.Duration, exhausted bool) {
 	})
 }
 
-// noteAwakeOpen is noteAwakeClose's counterpart: it returns awake_open only
-// when a close was already reported, so a daemon that starts (or every slot
-// merely finds the window already open) never emits an open with no
-// matching close. It is also the top-of-iteration phase reset: awaitWindow
-// returns through here on every open-window pass, so every path that loops
-// back to the top of runSlot lands here and clears whatever phase (backing
-// off, awaiting window) it left behind, with no publish of its own beyond
-// the one this mutate already makes.
+// noteAwakeOpen returns awake_open only when a close was reported, so the
+// stream never carries an open with no matching close. It is also the
+// top-of-iteration phase reset: every path back to the top of runSlot passes
+// through awaitWindow and lands here, clearing whatever phase it left behind.
 func (p *pool) noteAwakeOpen(slot int) {
 	p.mutate(func(s *state) []Event {
 		was := s.awakeShut
@@ -983,19 +883,10 @@ func (p *pool) noteAwakeOpen(slot int) {
 }
 
 // awaitBaton parks slot until it holds the discovery baton. Returns at once
-// when there is no baton (a single-slot pool) or when slot already holds
-// it — the pre-assigned initial holder's very first call, or any slot that
-// re-enters here while still holding from a prior pass (not possible today,
-// since every acquisition site is paired with a pass before the next
-// acquisition, but checked directly rather than assumed).
-//
-// The batonSlot check is tried first: this is called on every issue-keyed round
-// of every slot, and once a slot holds the baton a re-check costs one lock and
-// nothing more. Only a slot that does not hold it falls through to the
-// non-blocking receive (the token may already be waiting on the channel),
-// and only after that misses does it emit baton_hold and actually block, on
-// a select that also watches ctx so a pool that is cancelled while a slot
-// is held never deadlocks it.
+// with no baton (a single-slot pool) or when slot already holds it (leadSlot's
+// first call). Otherwise it tries a non-blocking receive, and only on a miss
+// emits baton_hold and blocks on a select that also watches ctx, so a pool
+// cancelled while a slot is held never deadlocks it.
 func (p *pool) awaitBaton(ctx context.Context, slot int) {
 	if p.baton == nil {
 		return
@@ -1012,11 +903,8 @@ func (p *pool) awaitBaton(ctx context.Context, slot int) {
 		return
 	default:
 	}
-	// A slot parked here is waiting for its own turn, not doing anything,
-	// so it must read as PhaseIdle in the status file rather than the
-	// "resolving" it entered with. Rides in the same mutate as baton_hold
-	// so the phase is always visible to the snapshot that publishes
-	// alongside that event.
+	// A slot waiting its turn reads as PhaseIdle, not the "resolving" it
+	// entered with; set in baton_hold's mutate so its snapshot shows it.
 	p.mutate(func(s *state) []Event {
 		s.slots[slot].phase = PhaseIdle
 		return []Event{{Event: report.EventBatonHold, Slot: intPtr(slot), Reason: batonHoldReason}}
@@ -1036,26 +924,16 @@ func (p *pool) takeBaton(slot int) {
 	})
 }
 
-// passBaton hands the baton on. A no-op unless slot actually holds it,
-// which makes it idempotent per hold and safe to call unconditionally from
-// every site a round can end — several release sites in runSlot legitimately
-// overlap (see the batonPass* reasons' own doc), and only the first to
-// actually find itself the holder is the one whose reason reaches the
+// passBaton hands the baton on. A no-op unless slot holds it, so it is
+// idempotent per hold and safe at every site a round can end: several release
+// sites in runSlot overlap, and only the first one's reason reaches the
 // stream.
 //
-// The holder check is a fast-path read, not itself a mutate: only the
-// holder ever clears its own hold, and only that slot ever sets it, so a
-// slot that just observed itself as the holder stays the holder until it
-// clears the flag itself a few lines below — nothing else can race that
-// read stale. Once confirmed, one mutate clears batonSlot and returns the
-// baton_pass event; the channel send happens after, not before: sending
-// first could let an awaitBaton call already blocked on <-p.baton wake and
-// publish its own next event before baton_pass itself reaches the stream,
-// which would make the durable record say a sibling acted before the event
-// that explains why it was allowed to. The send itself cannot block: the
-// holder is the only slot that ever sends, and the batonSlot flip above
-// guarantees it sends at most once per hold, so the capacity-1 channel is
-// always empty at this point.
+// The holder check needs no mutate: only the holder clears its own hold, so
+// the read cannot go stale. The send follows the baton_pass mutate: sending
+// first could let a blocked awaitBaton wake and publish before baton_pass,
+// so the record would show a sibling acting before the event that allowed
+// it. The send cannot block: only the holder sends, at most once per hold.
 func (p *pool) passBaton(slot int, reason batonReason) {
 	if p.baton == nil {
 		return
@@ -1103,9 +981,7 @@ func (p *pool) stopped() bool {
 }
 
 // stopClosed reports whether cfg.Stop has been closed, without blocking. A
-// nil Stop (a Config that sets no latch, e.g. an embedder that hard-cancels
-// ctx instead) always reads open: a nil channel never receives in a select,
-// so this reads the same as "not closed" rather than blocking.
+// nil Stop (an embedder that hard-cancels ctx instead) always reads open.
 func (p *pool) stopClosed() bool {
 	select {
 	case <-p.cfg.Stop:
@@ -1116,34 +992,22 @@ func (p *pool) stopClosed() bool {
 }
 
 // haltStopRequested records the operator-stop halt a closed cfg.Stop
-// demands, from one construction site: Loop's own Stop watcher and
-// haltIfStopping below both reach it, so neither the class nor the detail
-// can drift between them. "context-cancelled" is docs/reference.md's
-// documented halt grammar for this class (halt.go's haltRenderings), not a
-// name this slice may change — an operator stop and a caller ctx
-// cancellation render identically on purpose.
-//
-// kind is the halt event's Kind if the caller has one, "" for Loop's own
-// watcher, which runs no kind of its own.
+// demands, shared by Loop's Stop watcher and haltIfStopping so the class and
+// detail cannot drift. Its "context-cancelled" rendering (halt.go's
+// haltRenderings) is documented grammar in docs/reference.md: an operator
+// stop and a caller ctx cancellation render identically on purpose. kind is
+// "" from Loop's watcher, which runs no kind.
 func (p *pool) haltStopRequested(kind Kind) {
 	p.halt(Halt{Class: HaltOperatorStop, Detail: "stop requested", Kind: kind})
 }
 
 // haltIfStopping reports whether the slot should stop starting new work,
-// checking three things in order: whether a sibling already recorded a halt
-// reason (return quietly — nothing new to emit); whether cfg.Stop has
-// closed (an operator stop this call is the first to notice); and whether
-// ctx itself is freshly cancelled (the caller's own hard cancel — tests and
-// any embedder that skips cfg.Stop and cancels ctx directly instead).
-// Checking p.stopped() first is what makes the ctx branch meaningful: p.halt's
-// own cancel() also cancels ctx, so a raw ctx.Err() check alone cannot tell
-// "I am first to notice real cancellation" from "a sibling already halted
-// for some other reason and cancelled me as a side effect".
-//
-// kind is the halt event's Kind, if the caller has picked one yet: the
-// top-of-loop call races cancellation against Decide itself and so has
-// none to give (pass ""), while backoffOrHalt already knows which kind this
-// iteration is running.
+// checking in order: a sibling already halted (return quietly); cfg.Stop
+// closed (an operator stop this call is first to notice); ctx freshly
+// cancelled (a caller's hard cancel, as in tests). p.stopped() goes first
+// because p.halt's own cancel() also cancels ctx, so ctx.Err() alone cannot
+// tell a real cancellation from a sibling's halt. kind is "" from the
+// top-of-loop call, which has not picked one yet.
 func (p *pool) haltIfStopping(ctx context.Context, kind Kind) bool {
 	if p.stopped() {
 		return true
@@ -1179,9 +1043,7 @@ func (s *state) recordHalt(h Halt) []Event {
 
 // halt records h as the pool's halt reason if none is recorded yet, emits
 // the single pool-level halt event, and cancels the derived context.
-// Idempotent: once the pool has halted, later calls (racing siblings, or a
-// slot that merely rediscovers the same cancellation) are no-ops — the
-// first h wins and no second halt event is ever emitted.
+// Idempotent: the first h wins and no second halt event is ever emitted.
 func (p *pool) halt(h Halt) {
 	first := false
 	p.mutate(func(s *state) []Event {
@@ -1199,32 +1061,20 @@ func (p *pool) halt(h Halt) {
 // ResolveTip error, a StartChild/Wait seam error, an unrecognised exit code,
 // or exit 7 while Stop is open — someone else signalled that child): it
 // records the failure in the pool-wide breaker and either trips the pool
-// (enough failures landed across the pool within the window to look
-// systemic — no per-slot retry clears that) or backs this one slot off and
-// lets it retry alone. Returns true if the pool halted (the caller must
-// stop), false if the caller should sleep out the backoff and continue its
-// own loop. When the caller holds the discovery baton and this call is
-// about to back off rather than halt, it also passes the baton, with
-// passReason, just before the backoff sleep — a holder about to sleep
-// alone through FailureBackoff must not strand its sibling's discovery on
-// that sleep. The pass comes only after the breaker check and the
-// p.stopped() check: a sibling woken before a trip lands would start a
-// child on a pool that is already halting (issue #4365).
+// (failures across the pool look systemic) or backs this slot off alone.
+// Returns true if the pool halted. Before backing off it passes the baton
+// with passReason, so a holder sleeping through FailureBackoff does not stall
+// siblings' discovery; the pass follows the breaker and p.stopped() checks,
+// since a sibling woken before a trip lands would start a child on a halting
+// pool (issue #4365).
 //
-// This is also the breaker's one carve-out (issue #3595, by construction):
-// a failure that lands while Stop has already closed — or while the pool
-// has already halted, or the caller's ctx is cancelled — is never counted,
-// because it is an ordinary shutdown (an operator SIGTERM racing the
-// child/fetch/evaluation) rather than evidence of a systemic fault. The
-// check belongs here, once, rather than at every call site: the carve-out
-// is about the breaker, and backoffOrHalt is the breaker's one gate. It
-// therefore reads the latch after the child exited rather than at the
-// moment it exited, the way exit 7 does (loop.go reads it once, at
-// Interpret, so a later close cannot race that answer): a close landing in
-// that window carves out an unrecognised exit that itself landed while Stop
-// was still open. The pool halts as an operator stop under either reading,
-// so the wider window changes no operator-visible outcome — only which exit
-// the breaker declines to count on the way down.
+// The breaker's one carve-out (issue #3595): a failure landing once Stop has
+// closed, the pool has halted, or ctx is cancelled is an ordinary shutdown,
+// never counted. It lives here, not at call sites, because backoffOrHalt is
+// the breaker's one gate. It reads the latch after the child exited, not at
+// exit time as exit 7 does (loop.go, at Interpret), so a close in between also
+// carves out an unrecognised exit; the pool halts as an operator stop either
+// way, so only the breaker count differs.
 func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision, reason string, passReason batonReason) bool {
 	// A halt return passes no baton here: runSlot's deferred
 	// passBaton(slot, batonPassStopped) (loop.go) releases it after the
@@ -1234,7 +1084,6 @@ func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision,
 		return true
 	}
 
-	// Sample now before taking p.mu: the Clock is never called under it.
 	now := p.clk.Now()
 	var count int
 	var crossed bool
@@ -1268,11 +1117,8 @@ func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision,
 		return []Event{{Event: report.EventBackoff, Kind: kind, Revision: revision, Slot: intPtr(slot), Wait: p.cfg.FailureBackoff.String(), Reason: reason}}
 	})
 	p.clk.Sleep(ctx, p.cfg.FailureBackoff)
-	// The sleep is the whole backing-off span; once it returns this slot is
-	// idle again, not merely about to be — the next loop through
-	// awaitWindow would reset it anyway on an open window, but a shut one
-	// would instead overwrite backing-off with awaiting-window and never
-	// idle in between, understating how this iteration actually ended.
+	// Set idle here: on a shut window awaitWindow would overwrite
+	// backing-off with awaiting-window, never showing the idle in between.
 	p.setPhase(slot, PhaseIdle)
 	return false
 }
@@ -1289,13 +1135,10 @@ func (p *pool) setPhase(slot int, phase Phase) {
 }
 
 // resolveFailure turns a ResolveTip error into the revision and reason
-// backoffOrHalt should record. A *SelfEvalError means the fetch itself
-// succeeded (tip.Revision is valid) but the self-build evaluation at that
-// revision failed; it is rendered through Halt rather than a raw
-// "resolve-revision: " literal so the documented self-build grammar keeps
-// exactly one renderer (Halt.String()) even though this reason only ever
-// reaches a halt indirectly, via the breaker. Any other error means the
-// fetch itself failed and carries no revision.
+// backoffOrHalt should record. A *SelfEvalError means the fetch succeeded
+// but the self-build evaluation failed; it renders through Halt.String() so
+// the documented self-build grammar keeps one renderer. Any other error is a
+// failed fetch, with no revision.
 func resolveFailure(tip Tip, err error) (revision, reason string) {
 	var se *SelfEvalError
 	if errors.As(err, &se) {
@@ -1305,30 +1148,20 @@ func resolveFailure(tip Tip, err error) (revision, reason string) {
 }
 
 // idleSleep is what a slot calls when Schedule.Decide finds nothing to start
-// and nothing to probe: a genuine drought, not just a kind this slot doesn't
-// prefer right now. It re-decides rather than taking the caller's park, so a
-// sibling's reset or a probe landing since is seen; anything but a park with
-// time left returns at once for the caller to re-decide. With no jammed kind
-// or reported kind's tip wait gating the wait (park.TipPoll false), it sleeps
-// the whole wait in one sleep: a merge can unblock a jammed queue, but it
-// cannot create new work in a kind that is merely queue-empty, so resolving
-// early there would only spend a fetch for nothing.
+// or probe. It re-decides rather than taking the caller's park, so a
+// sibling's reset or a landed probe is seen; anything but a park with time
+// left returns at once. Without a jammed kind or tip wait gating it
+// (park.TipPoll false) it sleeps the whole wait: a merge cannot create work in
+// a merely queue-empty kind, so resolving early would waste a fetch.
 //
-// With a jammed kind or tip wait gating it, it instead sleeps only one
-// IdleFloor-sized slice (or the whole wait, if that is shorter) and reports
-// back, via wantResolve, whether time remained afterward — exactly the
-// condition under which runSlot (loop.go) should make one opportunistic
-// resolution before its next Decide: that resolution, not a call made here,
-// is what can observe Tip.Moved and report it, so the wait's very first
-// IdleFloor slice alone (wantResolve false) resolves nothing extra and fires
-// no tip_moved.
+// With one, it sleeps one IdleFloor slice (or the shorter whole wait) and
+// reports wantResolve when time remained, so runSlot (loop.go) makes one
+// opportunistic resolution, the call that observes Tip.Moved, before its next
+// Decide.
 //
-// Either sleep also ends early when a sibling's event grows the startable
-// set (state.wakeParked cancels the wake generation); a woken slot reports
-// wantResolve false, since the caller's next Decide is what the wake is for.
+// Either sleep ends early when a sibling's event grows the startable set
+// (state.wakeParked); a woken slot reports wantResolve false.
 func (p *pool) idleSleep(ctx context.Context, slot int) (wantResolve bool) {
-	// Sample now before taking p.mu in decideWithWake: p.clk.Sleep and Now
-	// must never run under it.
 	now := p.clk.Now()
 	d, wake := p.decideWithWake(now)
 	pk, ok := d.(park)
@@ -1352,35 +1185,23 @@ func (p *pool) idleSleep(ctx context.Context, slot int) (wantResolve bool) {
 	}
 	woken := p.sleepUntilWoken(ctx, wake, slice)
 	if woken || p.stopped() || ctx.Err() != nil {
-		// A wake, a sibling halting the pool, or the caller's ctx being
-		// cancelled ended the sleep. The caller's next Decide (or its
-		// top-of-loop haltIfStopping) handles each; no resolution is worth
-		// making.
+		// The caller's next Decide or haltIfStopping handles each of these;
+		// no resolution is worth making.
 		return false
 	}
 	return wait > slice
 }
 
-// resolveTip is the one seam runSlot's post-Decide fetch and
-// resolveOpportunistic (the opportunistic call idleSleep's return asks for)
-// both call to reach Runner.ResolveTip: it sets PhaseResolving and, on a
-// Moved tip, reports noteTipMoved before returning. Folding the
-// noteTipMoved call in here is what makes it impossible for a caller to
-// receive a moved Tip and forget to report it — a caller that reads a Tip
-// without passing through here loses that observation for good. Under
-// coalescing every joiner of a shared flight
-// sees the same Moved=true and lands here, so it is noteTipMoved's own
-// len(reset) == 0 guard, not this seam, that keeps a merge from firing more
-// than one tip_moved.
+// resolveTip is the one path from runSlot's post-Decide fetch and
+// resolveOpportunistic to Runner.ResolveTip: it sets PhaseResolving and
+// reports a Moved tip via noteTipMoved, so no caller can receive a moved Tip
+// and forget to report it. Under coalescing every joiner sees Moved=true;
+// noteTipMoved's empty-lift guard keeps a merge to one tip_moved.
 //
-// The report fires on tip.Moved alone, whatever err is: a *SelfEvalError
-// (runner.go) still carries the revision the fetch half resolved, and the
-// runner's baseline is already advanced by the time that error comes back,
-// so a move dropped here because the self-eval half also failed is dropped
-// for good — no later resolve can ever re-observe it. Errors themselves are
-// returned unchanged: each caller keeps its own error handling
-// (resolveOpportunistic's own swallow, versus runSlot's
-// haltIfStopping/backoffOrHalt).
+// The report fires on tip.Moved whatever err is: a *SelfEvalError still
+// carries the fetched revision and the runner's baseline has already
+// advanced, so a move dropped here is never re-observed. Errors are returned
+// unchanged for each caller's own handling.
 func (p *pool) resolveTip(ctx context.Context, slot int) (Tip, error) {
 	p.setPhase(slot, PhaseResolving)
 	tip, err := p.r.ResolveTip(ctx)
@@ -1393,14 +1214,10 @@ func (p *pool) resolveTip(ctx context.Context, slot int) (Tip, error) {
 	return tip, err
 }
 
-// resolveOpportunistic makes the one opportunistic ResolveTip call idleSleep's
-// resolveTip return asks runSlot for, ahead of its next Decide. tip, true
-// on success — the underlying resolveTip already reports Tip.Moved, so the
-// caller that keeps this tip for the current iteration never has to check
-// Moved itself. A failure here is deliberately treated as no change
-// observed: it is not the per-iteration fetch's own site, so it carries no
-// haltIfStopping guard, no backoffOrHalt, and no breaker failure — only that
-// fetch, made after Decide finds a kind startable, reports a genuinely
+// resolveOpportunistic makes the opportunistic ResolveTip call idleSleep asks
+// runSlot for, ahead of its next Decide; resolveTip already reports
+// Tip.Moved. A failure counts as no change observed, with no haltIfStopping,
+// backoffOrHalt or breaker failure: only the post-Decide fetch reports a
 // broken fetch.
 func (p *pool) resolveOpportunistic(ctx context.Context, slot int) (Tip, bool) {
 	tip, err := p.resolveTip(ctx, slot)
@@ -1413,29 +1230,17 @@ func (p *pool) resolveOpportunistic(ctx context.Context, slot int) (Tip, bool) {
 	return tip, true
 }
 
-// noteTipMoved records that revision is a tip a resolution actually observed
-// as moved (Tip.Moved), and lifts every currently-jammed kind's gate — the
-// observed change ends each of their no-work streaks same as real work
-// would (a queue-empty kind's streak is untouched, since a moved tip is not
-// evidence an empty queue refilled) — and every reported kind's on_tip_move
-// wait. No single Kind names this: several kinds can be lifted at once, and
-// the tip that moved is evidence for all of them, not whichever this slot
-// happened to be running. Kinds names the set actually lifted, in configured
-// order. The lift and the tip_moved event itself happen in one mutate, so the
-// set an operator reads on the event is exactly the set that was lifted, not a
-// snapshot taken a moment either side of it.
+// noteTipMoved records revision as an observed moved tip and lifts every
+// jammed kind's gate (a queue-empty kind's streak is untouched: a moved tip is
+// no evidence an empty queue refilled) and every reported kind's on_tip_move
+// wait. tip_moved's Kinds is the set lifted, in configured order; it is
+// emitted in the same mutate as the lift, so the two always agree.
 //
-// The event is emitted only when the lifted set is non-empty: resolveTip
-// (pool.go, see its own doc) reports every per-iteration fetch's Moved tip
-// here, not just the opportunistic call a jammed kind gates. Without the
-// guard, tip_moved would fire on every ordinary advance of the base branch
-// rather than staying the jam signal it is.
-//
-// The Runner-global baseline also changes the count: the per-slot baselines
-// this replaced fired one tip_moved per idling slot that crossed a merge,
-// where two slots crossing the same merge now share one baseline and so
-// produce exactly one between them. A single event still does the whole job,
-// since the lift is pool-wide.
+// It is emitted only for a non-empty lift: resolveTip reports every fetch's
+// Moved tip here, and without the guard tip_moved would fire on every
+// ordinary base-branch advance rather than staying the jam signal. The
+// Runner-global baseline means two slots crossing one merge produce one
+// tip_moved, which suffices since the lift is pool-wide.
 func (p *pool) noteTipMoved(slot int, revision string) {
 	now := p.clk.Now()
 	p.mutate(func(s *state) []Event {
@@ -1448,14 +1253,10 @@ func (p *pool) noteTipMoved(slot int, revision string) {
 	})
 }
 
-// publish writes s (already sequence-numbered by mutate) to Config.Status,
-// if configured. Called from mutate alone — there is no other publish call
-// site. A nil Status is the deliberate opt-out — a daemon that never
-// located a git dir to publish into, or an operator who chose not to
-// publish — not a swallowed error, so publish is silently a no-op rather
-// than reporting anything. A write failure is advisory-only and must never
-// fail the daemon: it is reported to the emitter's error writer and
-// otherwise ignored.
+// publish writes s to Config.Status, if configured; mutate is its only
+// caller. A nil Status is a deliberate opt-out (no git dir, or the operator
+// chose not to publish). A write failure is advisory and never fails the
+// daemon.
 func (p *pool) publish(seq uint64, s Status) {
 	if p.cfg.Status == nil {
 		return
@@ -1465,14 +1266,10 @@ func (p *pool) publish(seq uint64, s Status) {
 	}
 }
 
-// publishInitial reports the pool's startup state before any slot has made
-// its own first change, so a freshly started daemon's status file says
-// something at once instead of only on its first state change. It goes
-// through mutate, changing nothing, rather than calling projectStatus/publish
-// directly: the snapshot and its sequence number must come from the one
-// operation that allocates both, or this initial publish could race a
-// slot's first real mutate and overwrite that slot's fresher state with
-// this stale one.
+// publishInitial publishes the startup state before any slot's first change.
+// It goes through mutate rather than projectStatus/publish so the snapshot
+// and its sequence number come from the one operation that allocates both;
+// otherwise it could race a slot's first mutate and overwrite fresher state.
 func (p *pool) publishInitial() {
 	p.mutate(func(*state) []Event { return nil })
 }
@@ -1483,11 +1280,8 @@ func (p *pool) emit(ev Event) {
 	p.mutate(func(*state) []Event { return []Event{ev} })
 }
 
-// haltReason returns the pool's recorded Halt. Only meaningful after
-// every slot goroutine has returned (Loop calls it after its WaitGroup
-// drains), so no lock is strictly required at that point, but the pool's
-// own mutex is reused anyway rather than trusting a second, easy-to-miss
-// synchronisation argument.
+// haltReason returns the pool's recorded Halt. Only meaningful once every
+// slot goroutine has returned; it locks anyway rather than lean on that.
 func (p *pool) haltReason() Halt {
 	p.mu.Lock()
 	defer p.mu.Unlock()

@@ -1,30 +1,19 @@
-// Command box is the Box's in-box driver: it first checks the required env
-// (the dispatch key, keying and git identity, plus the forge token and repo
-// unless fully local or self-contained with no reachable tracker), prints the
-// writable-store notice when NIX_STORE_WRITABLE=true, clones the Target repo
-// (issue #4302) right after the kind read, installs the read-only guards
-// (issue #4299) once it is cloned, then recovers the agent branch and runs the
-// pre-work rebase (issue #4301) so no branch publication runs unguarded (issue
-// #4446), binds the registry proxy
-// (the Forwarder, the home configs and the in-tree rewrite, reverted on exit;
-// issue #4298), decides the toolchain (devShell probe, prefetch hook and
-// toolchain hint; issue #4297), lays out the Driver skills dir and the home
-// agent files from HARNESS_SKILLS_DIR, OPERATOR_SKILLS_DIR and
-// HARNESS_HOME_AGENT_DIR, which it defaults itself (issue #4296), then runs
-// the pre-work conflict-resolve pass when the rebase stopped on conflicts,
-// assembles the prompt, runs the first Driver run through the orchestrator,
-// then the settle sequence that follows it: required-marker nudges, the
-// synthetic outcome backstop, the already-resolved demotion, the lockfile
-// scan, and bundle-out. entrypoint.sh is the generated shim that only execs it
-// with the preamble values the run needs, and it exits with the run's exit
-// code (ADR 0058). It replaces
-// the assemble-prompt call, the branch-recovery and prework-rebase phases, the
-// toolchain-nudge, devShell-probe, prefetch and
-// bind-registry phases, and the conflict-resolve phase, marker-gate,
-// outcome-backstop, bundle-out and advise-only driver-exec verbs bash
-// chained. Under podman box runs as PID 1 and splits itself into an init
-// parent that only reaps orphans and forwards signals and a worker child that
-// does the work (see init.go).
+// Command box is the Box's in-box driver (ADR 0058). In order it checks the
+// required env (the dispatch key, keying and git identity, plus the forge
+// token and repo unless fully local or self-contained with no reachable
+// tracker), prints the writable-store notice, clones the Target repo (issue
+// #4302), installs the read-only guards (issue #4299), recovers the agent
+// branch and runs the pre-work rebase (issue #4301) so no branch publication
+// runs unguarded (issue #4446), binds the registry proxy, reverted on exit
+// (issue #4298), decides the toolchain (issue #4297), lays out the Driver
+// skills dir and home agent files (issue #4296), runs the conflict-resolve
+// pass if the rebase stopped on conflicts, assembles the prompt, runs the
+// first Driver run through the orchestrator, then settles: marker nudges, the
+// outcome backstop, the already-resolved demotion, the lockfile scan, and
+// bundle-out, and exits with the run's exit code. entrypoint.sh is a
+// generated shim that only execs it with the preamble values. Under podman box
+// runs as PID 1 and splits into an init parent that only reaps orphans and
+// forwards signals and a worker child (see init.go).
 package main
 
 import (
@@ -91,9 +80,8 @@ func parseFlags(args []string, stderr io.Writer) (inputs, error) {
 	if len(missing) > 0 {
 		return inputs{}, fmt.Errorf("missing required flag(s): %s", strings.Join(missing, ", "))
 	}
-	// The entrypoint never passed the review-round and slice caps, so the
-	// defaults are the only values they have ever had. Set singly: Caps also
-	// holds the budgets BindFlags parsed.
+	// No flag carries the review-round and slice caps, so they are always the
+	// defaults. Set singly: Caps also holds the budgets BindFlags parsed.
 	a.Passthrough.Caps.MaxSlices = promptassembly.DefaultMaxSlices
 	a.Passthrough.Caps.MaxReviewRounds = promptassembly.DefaultMaxReviewRounds
 	files, err := homelayout.ParseEnvFiles(envFiles)

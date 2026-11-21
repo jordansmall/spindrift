@@ -84,7 +84,7 @@ func listIssues(t tracker.Target, q tracker.Query, limit int) ([]tracker.Issue, 
 	for _, r := range raw {
 		i := r.issue()
 		// Forgejo silently drops an unresolved labels= filter and returns every
-		// open issue (native #3952), so the label is re-checked here.
+		// open issue (#3952), so the label is re-checked here.
 		if q.Label != "" && !slices.Contains(i.Labels, q.Label) {
 			continue
 		}
@@ -94,8 +94,7 @@ func listIssues(t tracker.Target, q tracker.Query, limit int) ([]tracker.Issue, 
 }
 
 // comments reads the whole thread in one request: the endpoint ignores page
-// and limit (native #3978). The research marker stays in the body, as in the
-// native adapter.
+// and limit (#3978). The research marker stays in the body.
 func comments(t tracker.Target, number string) ([]tracker.Comment, error) {
 	path, err := numberedPath(t, number, "/comments")
 	if err != nil {

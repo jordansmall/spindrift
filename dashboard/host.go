@@ -7,10 +7,9 @@ import (
 )
 
 // hostGuard rejects requests whose Host header names anything but localhost,
-// an IP literal, or an allowed name. DNS rebinding points an attacker's name
-// at the Dashboard's address, loopback or LAN, so the browser treats the page
-// as same-origin while Host still names the attacker; an IP literal can never
-// be rebound.
+// an IP literal, or an allowed name: DNS rebinding makes the browser treat an
+// attacker's name as same-origin while Host still names the attacker, and an
+// IP literal can never be rebound.
 func hostGuard(next http.Handler, allow []string) http.Handler {
 	allowed := make(map[string]bool, len(allow))
 	for _, name := range allow {

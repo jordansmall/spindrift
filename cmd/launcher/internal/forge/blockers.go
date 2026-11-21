@@ -62,7 +62,7 @@ func IsSentinelBullet(content string) bool {
 // IsBlockedByHeader reports whether line is a "## Blocked by" section header.
 // It trims line first, so an indented header still opens a section, while
 // IsAnyHeading does not trim and so an indented heading never closes one.
-// That asymmetry predates #680 and is deliberate; touches.go repeats it.
+// The asymmetry is deliberate; touches.go repeats it.
 func IsBlockedByHeader(line string) bool {
 	return blockedByHeader.MatchString(strings.TrimSpace(line))
 }
@@ -154,10 +154,9 @@ func ParseBlockerSlugs(body string) []string {
 			inSection = false
 		}
 		if inSection && IsBulletItem(line) {
-			// The sentinel check runs after backtick-stripping, unlike
-			// ParseBlockerRefs, so a quoted "`None`" also reads as the
-			// sentinel. Real slugs are never a backtick-quoted "None", so this
-			// only widens sentinel recognition, never narrows it.
+			// Unlike ParseBlockerRefs, the sentinel check runs after
+			// backtick-stripping, so a quoted "`None`" is a sentinel too; no
+			// real slug is a quoted "None".
 			slug := strings.Trim(ExtractBulletContent(line), "`")
 			if IsSentinelBullet(slug) {
 				continue

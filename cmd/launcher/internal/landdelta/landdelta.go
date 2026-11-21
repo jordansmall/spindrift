@@ -26,26 +26,21 @@ type Delta struct {
 	// Paths is sorted lexicographically for determinism (issue #3246).
 	// len(Paths) == Files when Known is true; nil when Known is false.
 	Paths []string `json:"paths,omitempty"`
-	// Ranges holds the pre-image hunk ranges for a subset of Paths, keyed by
-	// path; nil when Known is false. A path absent from the map has no
-	// determinable pre-image hunks: a binary file; a mode-only change, which
-	// numstat counts as "0 0 <path>" while -U0 renders the mode lines and no
-	// hunk; on a rebased branch, a path the moved base also touched; a
-	// renamed path (numstat reports it as the composite "d/{old => new}"
-	// key, which never matches a diff header); or a path git renders quoted
-	// (core.quotePath, e.g. non-ASCII; a control character such as TAB is
-	// quoted regardless).
+	// Ranges holds the pre-image hunk ranges for a subset of Paths; nil when
+	// Known is false. A path is absent when its hunks are indeterminable: a
+	// binary file; a mode-only change (no -U0 hunk); on a rebased branch, a
+	// path the moved base also touched; a rename (numstat's "d/{old => new}"
+	// key never matches a diff header); or a path git quotes (core.quotePath,
+	// e.g. non-ASCII; a control character such as TAB is quoted regardless).
 	Ranges map[string][]Range `json:"ranges,omitempty"`
 	// Reason names why Known is false. Empty when Known is true.
 	Reason string `json:"reason,omitempty"`
 }
 
-// Range is a pre-image line range from a unified diff hunk header, i.e. the
-// reviewed-anchor side of the diff — the coordinate space a reviewer's
-// path:line findings are already recorded in. Count == 0 marks a pure
-// insertion that added no pre-image lines: it landed immediately after old
-// line Start, mirroring git's own `@@ -N,0 +... @@` convention, which is how
-// an insertion stays distinguishable from a modification.
+// Range is a pre-image line range from a unified diff hunk header: the
+// reviewed-anchor side, the coordinate space a reviewer's path:line findings
+// are recorded in. Count == 0 marks a pure insertion right after old line
+// Start, git's own `@@ -N,0 +... @@` convention.
 type Range struct {
 	Start int `json:"start"`
 	Count int `json:"count"`
@@ -66,9 +61,8 @@ func (r Range) End() int { return r.Start + max(r.Count, 1) - 1 }
 // touched.
 func (r Range) ReachEnd() int { return r.Start + max(r.Count, r.PostCount, 1) - 1 }
 
-// Summary renders Delta as the one-line, PR-visible report (issue #3244). It
-// states the zero case explicitly so a reader never has to wonder whether the
-// line is missing.
+// Summary renders Delta as the one-line, PR-visible report (issue #3244). The
+// zero case is stated so a reader never wonders whether the line is missing.
 func (d Delta) Summary() string {
 	if !d.Known {
 		return fmt.Sprintf("post-approval land delta: unknown (%s)", d.Reason)
@@ -84,8 +78,6 @@ func (d Delta) Summary() string {
 // by the rev-parse --verify in Compute, which also fails open.
 var anchorRe = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
 
-// rangesFailedReason is the shared unknown() reason for both Compute call
-// sites below that fail computing pre-image ranges.
 const rangesFailedReason = "git diff for the reviewed-anchor line ranges failed"
 
 // Compute determines the tree delta between anchor (HEAD when the reviewer
@@ -260,11 +252,10 @@ func parseNumstatField(field string) int {
 	return n
 }
 
-// diffNumstatMaps compares each branch's own patch, both already relative to
-// their own base, so base movement cancels out. files counts every path whose
-// (ins, del) pair differs, a path on one side only included; ins and del sum
-// abs(landed - reviewed) over those paths. touched is those paths, sorted for
-// determinism (issue #3246).
+// diffNumstatMaps compares each branch's own patch, both relative to their
+// own base, so base movement cancels out. files counts every path whose (ins,
+// del) pair differs, a path on one side only included; ins and del sum
+// abs(landed - reviewed) over those paths. touched is sorted (issue #3246).
 func diffNumstatMaps(reviewed, landed map[string]numstatEntry) (files, ins, del int, touched []string) {
 	paths := make(map[string]struct{}, len(reviewed)+len(landed))
 	for p := range reviewed {
@@ -308,12 +299,11 @@ func abs(n int) int {
 	return n
 }
 
-// hunkHeaderRe matches a unified-diff hunk header's old side, anchored to
-// column zero so a `+`-prefixed content line that happens to start with
-// "@@" (legal diff content) can never match. Count is optional: git omits
-// ",Count" when it is 1. It also captures the new side's start and count
-// (groups 3 and 4), both optional, so a malformed or absent post side never
-// drops the hunk: it just yields PostCount 0.
+// hunkHeaderRe matches a unified-diff hunk header, anchored to column zero so
+// a `+`-prefixed content line starting with "@@" can never match. git omits
+// ",Count" when it is 1. The new side (groups 3 and 4) is optional, so a
+// malformed or absent post side yields PostCount 0 rather than dropping the
+// hunk.
 var hunkHeaderRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(?:(\d+)(?:,(\d+))?)?`)
 
 // oldPathHeaderRe matches a `--- a/<path>` line, the pre-image path, and
@@ -326,12 +316,11 @@ var oldPathHeaderRe = regexp.MustCompile(`^--- a/([^\t]+)`)
 var newPathHeaderRe = regexp.MustCompile(`^\+\+\+ b/([^\t]+)`)
 
 // parsePreImageRanges parses `git diff -U0` output into per-path pre-image
-// ranges. A path header is trusted only before the file's first hunk: hunk
-// content takes the same `--- a/`/`+++ b/` shape, so a land pass's own added
-// line could otherwise spoof one, and nothing short of a column-zero
-// `diff --git ` line reopens that window. A deleted file has no `+++ b/`
-// header, so `+++ /dev/null` falls back to the pre-image path, recording the
-// deletion's ranges under the path the anchor knew it by. It never errors.
+// ranges. A path header is trusted only before the file's first hunk, and
+// only a column-zero `diff --git ` line reopens that window: hunk content
+// takes the same `--- a/`/`+++ b/` shape, so a land pass's added line could
+// otherwise spoof one. A deleted file's `+++ /dev/null` falls back to the
+// pre-image path.
 func parsePreImageRanges(out string) map[string][]Range {
 	var ranges map[string][]Range
 	var oldPath, path string
@@ -393,25 +382,19 @@ func parsePreImageRanges(out string) map[string][]Range {
 }
 
 // preImageRanges returns the pre-image line ranges of paths, read from the
-// anchor..HEAD diff. Callers pre-narrow paths to the set they want ranges
-// for; this filters to that set and selects nothing itself, and returns nil
-// when nothing survives the filter so omitempty keeps `ranges` out of a zero
-// delta's JSON. It diffs unrestricted and filters to paths in Go rather than
-// handing paths to git as a pathspec: a path containing a glob metacharacter
-// could otherwise be silently dropped or over-matched.
+// anchor..HEAD diff, or nil when none survive so omitempty keeps `ranges` out
+// of a zero delta's JSON. It filters to paths in Go rather than passing them
+// to git as a pathspec: a path containing a glob metacharacter could
+// otherwise be silently dropped or over-matched.
 func preImageRanges(dir, anchor string, paths []string) (map[string][]Range, error) {
 	if len(paths) == 0 {
 		return nil, nil
 	}
-	// Pin the diff's rendering to the shape parsePreImageRanges reads, so no
-	// ambient repo config silently empties every path's ranges (issue
-	// #3503): diff.noprefix drops the `a/`/`b/` prefixes, diff.srcPrefix and
-	// diff.dstPrefix replace them, color.ui=always wraps each header in
-	// escape codes, and diff.external (or GIT_EXTERNAL_DIFF) replaces the
-	// diff text outright. diff.mnemonicPrefix substitutes its own prefixes
-	// only when a side is the index or the worktree — never on this
-	// commit-to-commit diff — but is pinned with the rest so the parser
-	// survives a change to what gets diffed.
+	// Pin the rendering parsePreImageRanges reads, so no ambient repo config
+	// silently empties every path's ranges (issue #3503): diff.noprefix,
+	// diff.srcPrefix/dstPrefix, color.ui=always, and diff.external (or
+	// GIT_EXTERNAL_DIFF) each break it. diff.mnemonicPrefix cannot fire on a
+	// commit-to-commit diff but is pinned in case what gets diffed changes.
 	out, err := runGit(dir,
 		"-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false",
 		"-c", "diff.srcPrefix=a/", "-c", "diff.dstPrefix=b/",

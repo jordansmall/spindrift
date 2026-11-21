@@ -40,23 +40,18 @@ const (
 
 // probe refreshes Demand for each of kinds and reports what the slot does
 // next. A kind is probed once however many slots ask at once: the first
-// caller leads and calls Runner.Demand, the rest wait for its answer and
-// simply re-decide on the Observe the leader made.
+// caller leads, the rest re-decide on the leader's Observe.
 //
-// A leader's error counts toward the breaker like a ResolveTip failure
-// (backoffOrHalt): a tracker that cannot even be counted is the systemic
-// fault the breaker exists for. It still Observes demandFailed first, so the
-// kind rests one interval instead of every slot re-probing it at once.
+// A leader's error counts toward the breaker like a ResolveTip failure: a
+// tracker that cannot even be counted is a systemic fault. It still
+// Observes demandFailed first, so the kind rests one interval instead of
+// every slot re-probing it. A rate limit is the exception (ADR 0059): a
+// known refusal span, not a fault, so it reaches neither the breaker nor
+// the failure backoff; the schedule pauses the tracker's kinds and Decide
+// parks the slot until the pause ends.
 //
-// A rate limit is the exception (ADR 0059): it is the tracker refusing us for
-// a known span, not a fault, so it never reaches the breaker or the failure
-// backoff. The schedule has paused the tracker's kinds; the slot hands on the
-// baton and returns to the top of the loop, where Decide parks it until the
-// pause ends.
-//
-// The Awake window is re-checked before every kind: a probe in flight can
-// outlive the window, and the slot must park in awaitWindow (probeRetop)
-// rather than ask the tracker about the next kind while it is shut.
+// The Awake window is re-checked before every kind: a probe can outlive the
+// window, and the slot must not ask about the next kind while it is shut.
 func (p *pool) probe(ctx context.Context, slot int, kinds []Kind) probeResult {
 	for _, kind := range kinds {
 		if wait, _ := p.cfg.Awake.Until(p.clk.Now()); wait > 0 {

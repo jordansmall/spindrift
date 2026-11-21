@@ -4,12 +4,9 @@
 // written once here over those events, so a reader never learns a CLI's
 // grammar: Classify (transient classification), the heartbeat writer, usage
 // (ExtractUsage and its per-model and per-agent forms), RenderTranscript, the
-// result text (ResultText, LastMessageText), and ReadPasses.
-//
-// The low-level helpers they share live here too: pattern matching, NDJSON
-// line framing, the log-scan degrade contract, the role constants, and
-// heartbeat-text sanitizing and trimming. Declaring them here keeps every
-// Driver strategy from hand-mirroring its own copy.
+// result text (ResultText, LastMessageText), and ReadPasses. The low-level
+// helpers they share live here too, so no Driver strategy mirrors its own
+// copy.
 package driverkit
 
 import "time"
@@ -38,9 +35,8 @@ const (
 )
 
 // AllReasons enumerates every Reason this package declares, in declaration
-// order. A test walks this slice against the re-exports in
-// driver.classification.go, so a Reason added here without an alias there
-// fails that test instead of vanishing from launcher-facing code (issue #2269).
+// order, so a test can fail on a Reason without an alias in the driver
+// package's classification.go (issue #2269).
 var AllReasons = []Reason{RateLimit, Overloaded, Network, TaskFailed, UnsupportedFlag}
 
 // Classification is the result of a Driver's ClassifyTransient. Every Driver

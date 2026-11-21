@@ -86,12 +86,11 @@ func shortRev(r string) string {
 }
 
 // findDispatch returns the Dispatch on slot that began with the child_start
-// whose time is exactly at, with that Dispatch's later events folded in; at is
-// empty for the slot's latest. A Dispatch has no id of its own, so slot plus its
-// child_start's time names it, and n picks the (n+1)-th of consecutive
-// child_starts sharing that time. Ownership is dispatchOwners.claim's, so a
-// link built from a history row resolves to the Dispatch the row was owned by;
-// a time or n that names no child_start is not found.
+// whose time is exactly at (empty: the slot's latest), with its later events
+// folded in. A Dispatch has no id, so slot plus child_start time names it, and
+// n picks the (n+1)-th of consecutive child_starts sharing that time.
+// Ownership is dispatchOwners.claim's, so a history row's link resolves to its
+// Dispatch.
 func (s *server) findDispatch(slot int, at string, n int) (*dispatchView, bool) {
 	f := s.followDispatch(slot, at, n)
 	f.Close()
@@ -224,13 +223,12 @@ func writeRenderError(w io.Writer, err error) {
 }
 
 // dispatchEvents streams a Dispatch's header and Pass logs as Server-Sent
-// Events so an open drill-in page follows it live: a head frame with the
-// header's HTML on connect and whenever it changes, a pass frame per Pass log
-// so the page can add a tab, all current ones on connect, then each new one
-// as the Events file grows, and a closed frame once the Dispatch has ended.
-// A query without at is pinned to the Dispatch it first resolves, so a later
-// child_start closes the stream rather than swapping it. Pass frames carry
-// JSON, as dispatch.js builds the tabs from text.
+// Events: a head frame with the header's HTML on connect and whenever it
+// changes, a pass frame per Pass log (all current ones on connect, then each
+// new one), and a closed frame once the Dispatch has ended. Pass frames carry
+// JSON, as dispatch.js builds the tabs from text. A query without at is pinned
+// to the Dispatch it first resolves, so a later child_start closes the stream
+// rather than swapping it.
 func (s *server) dispatchEvents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")

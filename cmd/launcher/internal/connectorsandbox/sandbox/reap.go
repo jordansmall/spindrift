@@ -86,14 +86,12 @@ type Reaper interface {
 
 // ReapOrphans kills the Connector sandboxes whose owning Launcher is gone,
 // which only a hard kill of the Launcher or the runtime CLI leaves behind.
-// Other Launcher runs may be live at once, and a shared runtime daemon lists
-// sandboxes from every pid namespace, so only a sandbox whose owner identity
-// matches this process's (Linux: boot id and pid namespace; macOS: boot
-// session UUID; elsewhere there is none, so nothing is reaped) and whose pid
-// is dead is reaped. A foreign-owner sandbox is skipped, one with no owner
-// identity (legacy or unowned) is skipped with a note, and an unreadable
-// identity reaps nothing. A reused pid can only leave an orphan unreaped. It
-// is best-effort: failures are noted on w, never returned.
+// Other Launchers may be live and a shared runtime daemon lists every pid
+// namespace's sandboxes, so it reaps only one whose owner identity matches
+// this process's (see namespaceIdentity; none off Linux and macOS) and whose
+// pid is dead. A sandbox with no owner identity is skipped with a note; an
+// unreadable identity reaps nothing; a reused pid can only leave an orphan
+// unreaped. Failures are noted on w, never returned.
 func ReapOrphans(r Reaper, w io.Writer) {
 	me, err := ownerID()
 	if err != nil {

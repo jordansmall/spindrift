@@ -8,11 +8,9 @@ import (
 	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
-// issueTextValue returns the value of the LAST "ISSUE_TEXT=" entry in env.
-// A runner's env may start from the calling process's own os.Environ(), which
-// still carries the blank ISSUE_TEXT the test sets, while the boxEnv-driven
-// entry is appended last, so scanning from the end picks it over that
-// inherited one.
+// issueTextValue returns the value of the LAST "ISSUE_TEXT=" entry in env: a
+// runner's env may start from os.Environ(), whose blank ISSUE_TEXT the test
+// set, and the boxEnv entry is appended after it.
 func issueTextValue(t *testing.T, env []string) string {
 	t.Helper()
 	for i := len(env) - 1; i >= 0; i-- {
@@ -25,10 +23,9 @@ func issueTextValue(t *testing.T, env []string) string {
 }
 
 // AssertIssueTextReachesPrompt is the end-to-end half of issue #3470: the env
-// a runner hands its Box (runEnv) carries ISSUE_TEXT, and feeding that env
-// into promptassembly's box-env read (EnvFromEnviron) yields a prompt with
-// the "# ISSUE TEXT" section. It blanks every Box env var first, then applies
-// only ISSUE_TEXT via t.Setenv; the runner's other off-argv keys do not
+// a runner hands its Box (runEnv) carries ISSUE_TEXT through
+// promptassembly.EnvFromEnviron into the assembled prompt's "# ISSUE TEXT"
+// section. Every other Box env var is blanked first, so only ISSUE_TEXT can
 // affect the claim.
 func AssertIssueTextReachesPrompt(t *testing.T, name string, runEnv func(boxEnv map[string]string) []string) {
 	t.Helper()

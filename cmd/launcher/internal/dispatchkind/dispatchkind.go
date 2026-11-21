@@ -1,8 +1,6 @@
-// Package dispatchkind declares each Dispatch kind once (issue #3872):
-// every former string-switch on "dispatch"/"research" collapses onto one
-// Descriptor field. It imports no other spindrift internal package: forge
-// imports outcome, and both forge and outcome import dispatchkind (forge →
-// outcome → dispatchkind), so dispatchkind must stay a leaf — importing
+// Package dispatchkind declares each Dispatch kind once (issue #3872), one
+// Descriptor field per kind fact. It must stay a leaf importing no other
+// spindrift internal package: forge → outcome → dispatchkind, so importing
 // forge back would cycle.
 package dispatchkind
 
@@ -168,8 +166,8 @@ type Prompts struct {
 	Reviewer string
 }
 
-// Descriptor is everything that used to be a separate switch on a kind
-// string, gathered into one value per kind.
+// Descriptor is every fact about one kind, so no caller switches on a kind
+// name.
 type Descriptor struct {
 	Name           string // DISPATCH_KIND value, Box env (display-only there — the Box never branches on it), prompt assembly, outcome: "work" / "research"
 	Verb           string // CLI subcommand and daemon kind selector: "dispatch" / "research"

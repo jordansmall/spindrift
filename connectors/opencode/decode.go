@@ -16,13 +16,12 @@ import (
 const WriteTool = "write"
 
 // newDecoder returns an opencode decoder with fresh state for one scan. Real
-// opencode never puts modelID on step_finish, so the decoder remembers the
-// model and effort driver-exec announces in a pass_model op and attributes each
-// untagged step_finish to them until the next pass_start. It also tracks the
-// pass role a pass_start names and stamps it on the KindModel and KindUsage
-// events it tags. The host decodes spindrift_op lines itself and discards this
-// decoder's output for them, but still hands them over so this state can follow
-// passes. Event.HostOp is unpublished, so the op is read from the scanned line.
+// opencode never puts modelID on step_finish, so the decoder attributes each
+// untagged step_finish to the model and effort of the last pass_model op until
+// the next pass_start, and stamps the pass_start role on the events it tags.
+// The host decodes spindrift_op lines itself and discards this decoder's
+// output for them, but still hands them over so this state can follow passes;
+// Event.HostOp is unpublished, so the op is read from the scanned line.
 func newDecoder(time.Time) driver.Decoder {
 	var model, effort, role string
 	// lastEmitted is the (model, effort, role) the last KindModel carried, so
@@ -401,11 +400,10 @@ func decodeStepFinish(part logPart, ts int64) []event.Event {
 }
 
 // resetFrom derives the rate-limit reset time from the response headers of a
-// NamedError payload, in the order opencode's own session/retry.ts reads them:
-// retry-after-ms, then retry-after as seconds, then retry-after as an HTTP date.
-// A relative delay is anchored to the event timestamp rather than a wall clock,
-// so the result is deterministic; a relative delay with no timestamp yields nil.
-// A payload that does not read as {"data":{"responseHeaders":{string:string}}}
+// NamedError payload, in opencode's session/retry.ts order: retry-after-ms,
+// then retry-after as seconds, then as an HTTP date. A relative delay is
+// anchored to the event timestamp, not a wall clock, so the result is
+// deterministic; a relative delay with no timestamp, or unreadable headers,
 // yields nil.
 func resetFrom(payload driver.Value, timestampMs int64) *time.Time {
 	headers := map[string]string{}

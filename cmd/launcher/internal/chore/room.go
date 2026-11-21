@@ -2,12 +2,10 @@ package chore
 
 import "spindrift.dev/launcher/internal/ledger"
 
-// Room is a day's remaining budget headroom, computed once per Sweep from
-// Budgets and today's ledger.Totals rather than re-derived per candidate
-// Chore. It is a snapshot taken at Sweep start: a concurrent run's
-// claims/filings/promotions landing after it (e.g. two Chores claimed on
-// separate slots, or two runs settling at once) are not seen, so every field
-// below is a soft cap, not a hard one (ADR 0056).
+// Room is a day's remaining budget headroom, snapshotted once per Sweep. A
+// concurrent run landing after the snapshot (two Chores on separate slots,
+// two runs settling at once) is not seen, so every field is a soft cap
+// (ADR 0056).
 type Room struct {
 	// Sweeps is how many more claims today may still make. Zero with
 	// Reason == Due means MaxSweepsPerDay is 0 (unlimited).
@@ -18,14 +16,10 @@ type Room struct {
 	// budget limits findings.
 	Findings int
 	// Promotions is how many more findings today may still auto-promote.
-	// Unlike the other fields, zero here means promotion is off
-	// (MaxPromotionsPerDay == 0), not unlimited; Promotions never sets
-	// Reason since promotion isn't a start gate.
+	// Zero means promotion is off, not unlimited; it never sets Reason.
 	Promotions int
-	// Patches is how many more patches today may still land. Like
-	// Promotions, zero here means the patch rung is off
-	// (MaxPatchesPerDay == 0), not unlimited; Patches never sets Reason
-	// since the patch rung isn't a start gate.
+	// Patches is how many more patches today may still land. Zero means the
+	// patch rung is off, not unlimited; it never sets Reason.
 	Patches int
 	// Tokens is how many more tokens today may still spend. Zero with
 	// Reason == Due means DailyTokenCeiling is 0 (unlimited).
@@ -35,11 +29,10 @@ type Room struct {
 	Reason NotDue
 }
 
-// Room computes today's headroom from b and today's totals. Findings bounds
-// a single run: a full sweep could file up to MaxFindingsPerSweep more, so
-// if today's remaining headroom (MaxFindingsPerDay - today.Filed) is less
-// than that, the sweep isn't started at all (SweepFindingsExceedHeadroom)
-// rather than let it file a partial batch.
+// Room computes today's headroom from b and today's totals. A full sweep could
+// file MaxFindingsPerSweep, so when the day's remaining headroom is less, the
+// sweep isn't started at all (SweepFindingsExceedHeadroom) rather than file a
+// partial batch.
 func (b Budgets) Room(today ledger.Totals) Room {
 	r := Room{Reason: Due}
 

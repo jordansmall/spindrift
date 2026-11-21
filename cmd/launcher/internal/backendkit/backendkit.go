@@ -1,7 +1,7 @@
 // Package backendkit is the type a backend author fills in and the registry
-// of those fillings (ADR 0068 decision 1). It mirrors driverkit's role. The
-// registry lives here rather than in internal/backend because backendkit
-// imports internal/forge, which imports internal/backend.
+// of those fillings (ADR 0068 decision 1), mirroring driverkit. The registry
+// lives here rather than in internal/backend because backendkit imports
+// internal/forge, which imports internal/backend.
 //
 // backendkit must not import internal/butler or internal/ledger: their
 // closure would bloat every backend's per-package Nix test derivation.
@@ -19,8 +19,8 @@ import (
 	"spindrift.dev/launcher/internal/gitexec"
 )
 
-// Lookup resolves one knob's env name to its already-resolved value. An alias
-// of os.LookupEnv's unnamed func type, identical to each generated Lookup.
+// Lookup resolves one knob's env name to its already-resolved value. It is an
+// alias so each generated Lookup is the identical type.
 type Lookup = func(env string) (value string, ok bool)
 
 // Shared carries the cross-backend values every Strategy closure may read; a
@@ -89,14 +89,13 @@ type Strategy struct {
 	IssueReadScope func(Shared, Lookup) string
 	// AutoMergeRemedy is the fix to name when the repo does not allow
 	// auto-merge. Nil means the backend has no native auto-merge, so the
-	// preflight names no remedy and leaves the backend out of its
-	// "CODE_FORGE=..." list.
+	// preflight leaves it out of its "CODE_FORGE=..." list.
 	AutoMergeRemedy func(Shared) string
 
-	// Remote identity (ADR 0068 decision 1). It is logic, not Descriptor
-	// data: forgejo's web URL defaults to codeberg. WebURL is the repo's
-	// browser URL ("" when unknown). RemoteMatch takes a git remote URL and
-	// reports whether it names this backend's Target repo.
+	// Remote identity (ADR 0068 decision 1) is logic, not Descriptor data:
+	// forgejo's web URL defaults to codeberg. WebURL is the repo's browser URL,
+	// or "" when unknown. RemoteMatch reports whether a git remote URL names
+	// this backend's Target repo.
 	WebURL      func(Shared, Lookup) string
 	RemoteMatch func(Shared, Lookup, string) bool
 
@@ -105,11 +104,10 @@ type Strategy struct {
 	// Nil on a backend that is not HostMediatedRemote.
 	HostRepoDir func(Shared, Lookup) (string, error)
 
-	// SeedMirror makes dir the host-seeded mirror a Box clones from (see
-	// backend.ClonesFromMirror) as the base branch stands now: local pushes
-	// pwd's checkout into its Accumulation repo, git fetches the remote with
-	// the host credential. Nil on a backend whose Descriptor does not set
-	// HostSeededMirror.
+	// SeedMirror makes dir the host-seeded mirror a Box clones from, as the
+	// base branch stands now: local pushes pwd's checkout into its
+	// Accumulation repo, git fetches the remote with the host credential. Nil
+	// unless the Descriptor sets HostSeededMirror.
 	SeedMirror func(s Shared, l Lookup, pwd, dir string) error
 
 	// HostAnswersOpenPR is set when the host answers the Box's open-PR
@@ -121,11 +119,8 @@ type Strategy struct {
 
 	// Quickstart hooks (ADR 0068 decision 8). KnobsFromRemote returns the
 	// backend's own knob values (env name -> value) implied by a git remote
-	// URL, or nil when the remote implies none. AcquireToken is the
-	// backend's token setup in the wizard: it prompts for (or reuses an
-	// ambient) bearer token and validates it however the backend requires,
-	// reading its knobs from the Lookup and the wizard's seams from the
-	// TokenPrompt.
+	// URL, or nil. AcquireToken prompts for (or reuses an ambient) bearer
+	// token and validates it however the backend requires.
 	KnobsFromRemote func(remote string) map[string]string
 	AcquireToken    func(Shared, Lookup, TokenPrompt) (string, error)
 
@@ -239,10 +234,10 @@ func Strategies() []Strategy {
 }
 
 // ErrUnsupported marks a probe error that names a capability the backend's
-// Connector does not offer, as distinct from a check that ran and failed.
-// Doctor reports such a check as unsupported and never counts it a failure.
-// It lives here, not in doctor or runner, so a backend adapter the Box links
-// can wrap it without pulling either into the Box binary.
+// Connector does not offer, as distinct from a check that ran and failed;
+// doctor never counts it a failure. It lives here, not in doctor or runner, so
+// a backend adapter the Box links can wrap it without pulling either into the
+// Box binary.
 var ErrUnsupported = errors.New("check unsupported: the backend's connector does not offer the capability")
 
 // ErrRepoSlugRequired is the blank-repo-slug failure RequireRepoSlug wraps.
@@ -258,9 +253,8 @@ func RequireRepoSlug(s Shared, trackerName string) error {
 }
 
 // ReplaceRegistryForTest swaps the registry for ss and returns a func that
-// restores the original. It exists so a test in another package can register a
-// fake backend or hide a real one; production code registers only through
-// Register.
+// restores the original, so a test in another package can register a fake
+// backend or hide a real one.
 func ReplaceRegistryForTest(ss []Strategy) (restore func()) {
 	original := registry
 	registry = append([]Strategy(nil), ss...)
@@ -273,7 +267,7 @@ func ReplaceRegistryForTest(ss []Strategy) (restore func()) {
 // credential resolution on it. It takes the row's fields, not a backendrows.Row,
 // so backendkit stays out of the Connector sandbox's import closure.
 func ForgeReadsThroughConnector(name string, primary bool) bool {
-	// An unknown row name yields the zero Strategy: not routed.
+	// An unknown name yields the zero Strategy: not routed.
 	strat, _ := ByName(name)
 	return primary || strat.ConnectorRouted
 }

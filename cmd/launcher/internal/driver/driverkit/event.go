@@ -41,11 +41,9 @@ const (
 	// KindToolResult is a tool's output coming back. Fills ToolID, ToolName,
 	// ToolTarget, ToolOutput, IsError (the tool failed), Subagent (a spawn
 	// tool's report), MessageID, Timestamp, Role; Text stays empty. The
-	// transcript renderer shows it.
-	// A CLI that reports call and result in one record emits both kinds from
-	// that record, call first, and the result then repeats the call's ToolInput
-	// and ToolTarget.
-	// Counts as agent progress.
+	// transcript renderer shows it; it counts as agent progress. A CLI that
+	// reports call and result in one record emits both kinds from it, call
+	// first, the result repeating the call's ToolInput and ToolTarget.
 	KindToolResult Kind = "tool_result"
 
 	// KindUsage is one model call's token tally. Fills Tokens, Model, Effort

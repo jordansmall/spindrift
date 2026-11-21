@@ -70,12 +70,10 @@ func NewCloneWithOrigin(t *testing.T, baseBranch string) string {
 }
 
 // InstallPipeReporter installs a report.Reporter over a fresh os.Pipe as the
-// process-wide default, the same way FromEnv builds one in production (a real
-// pipe fd number handed through getenv), and returns a function that reads
-// back every report.Record written so far. Restores the previous default via
-// t.Cleanup. Both pipe ends get their own t.Cleanup close, independent of
-// whether the returned reader ever runs: a test that installs the reporter
-// and never reads back would otherwise leak the write end.
+// process-wide default, as FromEnv does in production, and returns a function
+// that reads back every report.Record written so far. t.Cleanup restores the
+// previous default and closes both pipe ends whether or not the reader runs,
+// so the write end never leaks.
 func InstallPipeReporter(t *testing.T) func() []report.Record {
 	t.Helper()
 	r, w, err := os.Pipe()

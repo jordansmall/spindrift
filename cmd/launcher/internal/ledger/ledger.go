@@ -1,9 +1,8 @@
 // Package ledger holds a Chore's Ledger (ADR 0056): one ref under
-// refs/spindrift/butler/ pointing at a chain of commits on no branch. Each
-// commit's tree holds one state.json document; its parent is the previous
-// state commit. The chain records claim/done handoffs, detects a claim left
-// stale by a crashed run, and totals a local day's usage and filings by
-// walking the chain — without ever touching refs/heads/.
+// refs/spindrift/butler/ pointing at a chain of commits on no branch, each
+// tree holding one state.json. The chain records claim/done handoffs, detects
+// a claim left stale by a crashed run, and totals a local day's usage and
+// filings, never touching refs/heads/.
 package ledger
 
 import (
@@ -128,10 +127,9 @@ type Backend interface {
 }
 
 // Claim appends a Claimed state on top of tip, conditional on tip being
-// unchanged, carrying tip.State's LastSwept and Cursor forward so a takeover
-// of a crashed claim resumes rather than restarts a sweep. It does not
-// itself refuse to claim over a live (non-stale) claim; that check belongs to
-// the caller.
+// unchanged, carrying LastSwept and Cursor forward so a takeover of a crashed
+// claim resumes rather than restarts a sweep. Refusing to claim over a live
+// claim is the caller's check.
 func Claim(b Backend, chore string, tip Tip, by ClaimedBy) (Tip, error) {
 	s := State{
 		LastSwept: tip.State.LastSwept,
@@ -167,13 +165,11 @@ type Reservation struct {
 	Patches    int
 }
 
-// Reserve appends a reservation on top of claim, conditional on claim being
-// unchanged: a copy of claim.State (Phase, ClaimedBy, LastSwept, and Cursor
-// carried unchanged, so StaleClaim and a live-claim check still see a normal
-// claim) with Reserved and ReservedPatches set from r. settle calls this
-// before promoting or patching, so the slots are counted by DayTotals even
-// if the Finish that follows never lands (a CAS loss or a push error). The
-// caller Finishes on top of the returned Tip.
+// Reserve appends a copy of claim.State with Reserved and ReservedPatches set
+// from r, conditional on claim being unchanged; the rest is kept so StaleClaim
+// and a live-claim check still see a normal claim. settle reserves before
+// promoting or patching, so DayTotals counts the slots even if the Finish on
+// top never lands (a CAS loss or a push error).
 func Reserve(b Backend, chore string, claim Tip, r Reservation, at time.Time) (Tip, error) {
 	s := claim.State
 	s.Reserved = r.Promotions
@@ -185,12 +181,10 @@ func Reserve(b Backend, chore string, claim Tip, r Reservation, at time.Time) (T
 	return Tip{Commit: commit, State: s}, nil
 }
 
-// Totals sums a Chore's Ledger activity over a local day: budgets (ADR 0056
-// "Budgets") gate starting only, so Claims — runs started — is what they
-// check against, while Filed/Promoted/Dropped/Patched/Usage are the day's
-// completed work. Promoted and Patched also include any in-flight or
-// lost-race reservation (see Reserve and DayTotals), so an unfinished Finish
-// still counts against the day's budget.
+// Totals sums a Chore's Ledger activity over a local day. Budgets (ADR 0056)
+// gate starting only, so they check Claims (runs started); the rest is the
+// day's completed work, with Promoted and Patched also counting any
+// in-flight or lost-race reservation.
 type Totals struct {
 	Claims   int
 	Filed    int
@@ -200,30 +194,23 @@ type Totals struct {
 	Usage    usage.Usage
 }
 
-// DayTotals totals chore's Ledger over the local day containing now —
-// midnight to midnight in now.Location(), not a rolling 24h window, so a DST
-// transition doesn't shift the boundary. There is no second store: it walks
-// History rather than keeping a running total. A run that spans midnight is
-// split across its two commits: it counts toward Claims on the day its
-// Claimed commit was made, and toward Filed/Promoted/Dropped/Patched/Usage on
-// the (possibly later) day its Done commit lands.
+// DayTotals totals chore's Ledger over the local day containing now (see
+// DayBounds), walking History rather than keeping a running total. A run
+// spanning midnight counts toward Claims on its Claimed commit's day and
+// toward the rest on its Done commit's day.
 //
-// A Claimed entry with Reserved > 0 or ReservedPatches > 0 is a reservation
-// (see Reserve), not a claim: it never adds to Claims. It adds Reserved to
-// Promoted and ReservedPatches to Patched unless its child in the chain (the
-// next-newer entry) is a Done — that Done's own Promoted/Patched is the
-// accurate count, so counting both would double-count a successful run. A
-// reservation with no child yet, or whose child is a takeover Claim (its own
-// Finish having been lost to the same race Reserve guards against), counts
-// Reserved and ReservedPatches. One finding may hold both: a patch candidate
-// also keeps a promotion slot for its fallback.
+// A reservation (see Reserve: a Claimed entry with Reserved or
+// ReservedPatches > 0) never adds to Claims. Its slots count unless
+// its child in the chain is a Done, whose own Promoted/Patched is the
+// accurate count; with no child yet, or a takeover Claim as child (its Finish
+// lost), they count. One finding may hold both kinds: a patch candidate keeps
+// a promotion slot for its fallback.
 func DayTotals(b Reader, chore string, now time.Time) (Totals, error) {
 	midnight, next := DayBounds(now)
 
-	// History's since is only a fetch bound; the [midnight, next) window is
-	// owned here. entries is newest first, so entries[i-1] is entries[i]'s
-	// child — kept indexed (not filtered) so an in-window reservation can
-	// still look up its child's phase.
+	// History's since is only a fetch bound; the loop owns the window. Newest
+	// first, so entries[i-1] is entries[i]'s child; kept unfiltered so a
+	// reservation can see its child.
 	entries, err := b.History(chore, midnight)
 	if err != nil {
 		return Totals{}, err
@@ -256,8 +243,6 @@ func DayTotals(b Reader, chore string, now time.Time) (Totals, error) {
 	return t, nil
 }
 
-// add returns the field-wise sum of t and o, for DayTotalsAll folding one
-// Chore's Totals into a running cross-Chore total.
 func (t Totals) add(o Totals) Totals {
 	return Totals{
 		Claims:   t.Claims + o.Claims,
@@ -269,10 +254,8 @@ func (t Totals) add(o Totals) Totals {
 	}
 }
 
-// DayTotalsAll sums DayTotals across chores for the local day containing
-// now. Budgets (ADR 0056) are global across every enabled Chore, not
-// per-Chore, so the due check needs this cross-Chore total rather than any
-// single Chore's DayTotals.
+// DayTotalsAll sums DayTotals across chores: budgets (ADR 0056) are global
+// across every enabled Chore, not per-Chore.
 func DayTotalsAll(b Reader, chores []string, now time.Time) (Totals, error) {
 	var sum Totals
 	for _, chore := range chores {
@@ -286,10 +269,9 @@ func DayTotalsAll(b Reader, chores []string, now time.Time) (Totals, error) {
 }
 
 // DayBounds returns the [midnight, next) window of the local calendar day
-// containing now, in now's Location, so midnight <= now < next always. Every
-// consumer of the day boundary (DayTotals, chore.NextDue) must agree on it.
-// Where a DST jump skips 00:00, the day starts at the first instant that
-// exists (e.g. 01:00).
+// containing now, in now's Location, not a rolling 24h window. Every consumer
+// of the day boundary (DayTotals, chore.NextDue) must agree on it. Where a DST
+// jump skips 00:00, the day starts at the first instant that exists.
 func DayBounds(now time.Time) (midnight, next time.Time) {
 	y, m, d := now.Date()
 	loc := now.Location()

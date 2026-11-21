@@ -4,6 +4,7 @@ import "sync"
 
 // FakeQueue is an in-memory Queue for unit tests that assert wiring rather than
 // exercise a real discovery/claim backend. All methods are safe for concurrent use.
+// Every *Func hook runs outside f.mu, so it may call back into FakeQueue.
 type FakeQueue struct {
 	mu sync.Mutex
 
@@ -18,21 +19,16 @@ type FakeQueue struct {
 	// Repeats appear here but collapse into one entry in Claimed.
 	ClaimCalls []string
 	ClaimErr   error
-	// ClaimFunc scripts per-issue results: when set, its return replaces
-	// ClaimErr, and a nil return marks num Claimed. ClaimFunc runs outside f.mu
-	// so it may call back into other FakeQueue methods without deadlocking on
-	// the non-reentrant mutex.
+	// ClaimFunc scripts per-issue results, replacing ClaimErr.
 	ClaimFunc func(num string) error
-	// Claimed holds only the issue numbers Claim accepted: a non-nil ClaimErr
-	// leaves the number unset here.
+	// Claimed holds only the issue numbers Claim accepted.
 	Claimed map[string]bool
 
 	PendingCalls  int
 	PendingReturn int
 	PendingErr    error
-	// PendingFunc computes the count from the caller-supplied claimed set, which
-	// is Pending's own parameter and not the Claimed field, and takes priority
-	// over PendingReturn/PendingErr.
+	// PendingFunc takes Pending's claimed parameter, not the Claimed field,
+	// and takes priority over PendingReturn/PendingErr.
 	PendingFunc func(claimed map[string]bool) (int, error)
 
 	ReportStaleDrainCalls []StaleDrainReport
@@ -46,9 +42,7 @@ func NewFakeQueue() *FakeQueue {
 }
 
 // Discover records the call and returns DiscoverFunc(callN) when set, else
-// DiscoverReturn, DiscoverErr. DiscoverFunc runs outside f.mu so it may call
-// back into other FakeQueue methods without deadlocking on the non-reentrant
-// mutex.
+// DiscoverReturn, DiscoverErr.
 func (f *FakeQueue) Discover() (Batch, error) {
 	f.mu.Lock()
 	f.DiscoverCalls++
@@ -87,9 +81,7 @@ func (f *FakeQueue) Claim(num string) error {
 
 // Pending records the call and returns PendingFunc(claimed) when set, else
 // PendingReturn, PendingErr. claimed is forwarded verbatim, so a test wanting
-// PendingFunc to see what Claim recorded must seed it from f.Claimed at the
-// call site. PendingFunc runs outside f.mu so it may call back into other
-// FakeQueue methods without deadlocking on the non-reentrant mutex.
+// PendingFunc to see what Claim recorded must seed it from f.Claimed.
 func (f *FakeQueue) Pending(claimed map[string]bool) (int, error) {
 	f.mu.Lock()
 	f.PendingCalls++

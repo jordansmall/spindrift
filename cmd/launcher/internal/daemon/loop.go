@@ -16,9 +16,7 @@ import (
 
 // Tip is one resolution of the base branch's tip: the revision to pin the
 // next child to, plus what that same fetch found out about the daemon's own
-// build. SelfPath and Moved are both properties of the resolution itself,
-// not separate outside-world questions, which is why ResolveTip hands them
-// back together instead of behind their own methods.
+// build.
 type Tip struct {
 	Revision string
 	SelfPath string // the daemon attribute's store path at Revision; empty when the self check is off (Runner has no self attr configured)
@@ -28,9 +26,8 @@ type Tip struct {
 // SelfEvalError marks the self-path half of a ResolveTip call as the half
 // that failed — the fetch itself succeeded (Tip.Revision is still valid),
 // but evaluating the daemon attribute at that revision did not. Error()
-// returns the wrapped error's own text unchanged, so a caller that renders
-// it through Halt{Class: HaltSelfBuild, Detail: err.Error()} reproduces
-// today's self-build reason byte-for-byte.
+// returns the wrapped error's text unchanged, so a self-build halt reason
+// built from it carries the eval error verbatim.
 type SelfEvalError struct{ Err error }
 
 func (e *SelfEvalError) Error() string { return e.Err.Error() }
@@ -55,10 +52,8 @@ func (e *PrebuildError) Error() string { return string(e.Stage) + ": " + e.Err.E
 func (e *PrebuildError) Unwrap() error { return e.Err }
 
 // FeatureBranchGoneError is what Runner.ResolveTip returns on a definitive
-// "absent" answer from the remote for the daemon's --feature-branch: the
-// branch used to exist and now doesn't, not a fetch that merely failed to
-// reach the remote — see HaltFeatureBranchGone for why that distinction
-// matters.
+// "absent" answer from the remote for the daemon's --feature-branch, not a
+// fetch that merely failed (see HaltFeatureBranchGone).
 type FeatureBranchGoneError struct{ Remote, Branch string }
 
 func (e *FeatureBranchGoneError) Error() string {
@@ -69,21 +64,11 @@ func (e *FeatureBranchGoneError) Error() string {
 // current tip (the revision to pin the next child to, and what the
 // daemon's own build would be at that revision) and run a child of a given
 // Dispatch kind at a resolved revision.
-//
-// A child's box/settled records reach the caller live, through
-// ChildRequest.OnRecord, as they arrive — not bundled onto ChildResult —
-// so there is nothing left for the handle's Wait result to carry once the
-// seam itself fails partway through a run: whatever records a child
-// reported before a wait failure already reached the stream through
-// OnRecord, and ChildResult only ever needed to report the exit.
 type Runner interface {
 	// ResolveTip fetches the base branch's current tip. An error that
-	// unwraps to *SelfEvalError means the fetch itself succeeded (the
-	// returned Tip.Revision is valid) but evaluating the daemon's own
-	// build at that revision failed; every other error — including one
-	// that unwraps to *FeatureBranchGoneError, the remote's definitive
-	// "absent" answer for --feature-branch — means the fetch itself
-	// failed and the returned Tip is the zero value.
+	// unwraps to *SelfEvalError leaves Tip.Revision valid; every other error
+	// (including *FeatureBranchGoneError) means the fetch failed and the
+	// returned Tip is the zero value.
 	ResolveTip(ctx context.Context) (Tip, error)
 	// Demand counts the startable items a child of kind could claim. Only
 	// asked for a kind with a Config.ProbeIntervals entry (ADR 0059). fresh
@@ -94,17 +79,16 @@ type Runner interface {
 	Demand(ctx context.Context, kind Kind, fresh bool, inFlight dispatchkey.Set) (Demand, error)
 	StartChild(ctx context.Context, req ChildRequest) (ChildHandle, error)
 	// InheritChild rebuilds the handle of a child an earlier daemon image
-	// started and handed off (ADR 0063). The handle behaves exactly as
-	// StartChild's: records through req.OnRecord, Stop/Abort forwarding,
-	// Wait and abandon. ctx is never cancelled by a pool halt: the child is
+	// started and handed off (ADR 0063); the handle behaves exactly as
+	// StartChild's. ctx is never cancelled by a pool halt: the child is
 	// already running, so a halt must not fail the re-attach.
 	InheritChild(ctx context.Context, req ChildRequest, child ChildState) (ChildHandle, error)
-	// Prebuild realises tip.SelfPath with a GC root and smoke-tests it (the
-	// new daemon run with --check-only), so a self-change halt only ever
-	// hands the service manager a build already known to start. Only called
-	// when tip.SelfPath differs from Config.SelfProgram. A failure unwraps
-	// to *PrebuildError; ctx cancellation aborts it and is not a verdict on
-	// the build.
+	// Prebuild realises tip.SelfPath with a GC root and smoke-tests it
+	// (--check-only), so a self-change halt only ever hands the service
+	// manager a build already known to start. Only called when
+	// tip.SelfPath differs from Config.SelfProgram. A failure unwraps to
+	// *PrebuildError; ctx cancellation aborts it and is not a verdict on the
+	// build.
 	Prebuild(ctx context.Context, tip Tip) error
 	// SweepLateMerges runs the throttled late-merge sweep at revision
 	// (issue #7342), off the pool's slots. A failure only warns. ctx
@@ -132,17 +116,12 @@ type ChildHandle interface {
 // ErrWaitAbandoned is what ChildHandle.Wait returns when abandon closed first.
 var ErrWaitAbandoned = errors.New("child wait abandoned")
 
-// ChildRequest is one child invocation's parameters. Slot is the daemon
-// pool slot the child occupies (0-based): it is how the event stream says
-// which slot a child filled.
+// ChildRequest is one child invocation's parameters. Slot is the 0-based
+// pool slot the child occupies.
 //
-// Stop and Abort are the operator-stop/hard-abort latch, carried here as
-// data rather than left for the Runner to hold per-child state of its own:
-// the pool is what knows which config it was given, and re-handing the same
-// two channels on every request (this slot's whole lifetime, not just its
-// first child) means a Runner needs no bookkeeping to answer "has the
-// operator asked me to stop" — it only ever selects on what this request
-// carries.
+// Stop and Abort are the operator-stop/hard-abort latch, carried as data on
+// every request so a Runner needs no per-child bookkeeping to know whether
+// the operator asked it to stop.
 type ChildRequest struct {
 	Slot     int
 	Kind     Kind
@@ -156,26 +135,22 @@ type ChildRequest struct {
 	ChildLog string
 
 	// OnRecord, when non-nil, is called with each Record the child reports
-	// over its private pipe (internal/report), live as each line arrives
-	// rather than after the child exits — the channel the status file needs
-	// to name the issue a slot has in flight while the child is still
-	// running (issue #3545), and the only channel a "settled" record ever
-	// reaches at all.
+	// over its private pipe (internal/report), live as each line arrives: the
+	// status file names a slot's in-flight issue from it (issue #3545), and it
+	// is the only channel a "settled" record ever reaches.
 	OnRecord func(rec Record)
 }
 
 // Clock is the loop's time seam: Now for the breaker's window, Sleep for
-// the idle and backoff waits. One interface rather than a bare sleep func
-// so both read off a single seam a test fakes once.
+// the idle and backoff waits.
 type Clock interface {
 	Now() time.Time
 	Sleep(ctx context.Context, d time.Duration)
 }
 
 // ChildResult is what one child invocation reports back: only the exit
-// code. Every box/settled record the child reported already reached the
-// stream live through ChildRequest.OnRecord as it arrived, so there is
-// nothing left for the post-exit result to carry.
+// code, since every record already reached the stream through
+// ChildRequest.OnRecord.
 type ChildResult struct {
 	Exit int
 }
@@ -190,13 +165,14 @@ type Config struct {
 	// MEMORY_LIMIT x MAX_PARALLEL sizing. Must be non-empty.
 	Kinds []Kind
 
-	// Reservation is the running-child count of the reserved-priority kind (the
-	// row carrying dispatchkind.PriorityReserved) below which a starting slot
-	// tries that kind first. It never preempts a running child and holds no slot
-	// open: the reserved kind is preferred only while it has queued work, and
-	// either tier bursts into the whole pool when the other has backed off into
-	// an empty result. Zero is normal-first with the reserved kind on the
-	// leftovers; Slots is reserved-first. Must be 0 <= Reservation <= Slots.
+	// Reservation is the running-child count of the reserved-priority kind
+	// (dispatchkind.PriorityReserved) below which a starting slot tries that
+	// kind first. It never preempts a running child and holds no slot open:
+	// the reserved kind is preferred only while it has queued work, and
+	// either tier bursts into the whole pool when the other has backed off
+	// into an empty result. Zero is normal-first with the reserved kind on
+	// the leftovers; Slots is reserved-first. Must be 0 <= Reservation <=
+	// Slots.
 	Reservation int
 
 	Slots int
@@ -216,55 +192,38 @@ type Config struct {
 	// has no web repo.
 	RepoURL string
 
-	// Stop and Abort are the operator-stop/hard-abort latch (issue #3626):
-	// the same two-channel shape the Launcher's own shutdown gate and
-	// signal relay already use. A closed Stop halts the pool with
-	// HaltOperatorStop and cancels its own derived context, ending an
-	// in-progress sleep or fetch promptly. Abort has no pool-level watcher
-	// — escalation is the child's business — but is re-exposed on every
-	// ChildRequest alongside Stop so a Runner can react to both without
-	// tracking per-child state of its own. Nil is the deliberate opt-out
-	// for either: a nil channel never fires in a select, so a caller that
-	// sets neither — a test, or an embedder that hard-cancels ctx instead —
-	// halts only through ctx, exactly as the pre-#3626 host binary did.
+	// Stop and Abort are the operator-stop/hard-abort latch (issue #3626).
+	// A closed Stop halts the pool with HaltOperatorStop and cancels its
+	// derived context, ending an in-progress sleep or fetch promptly. Abort
+	// has no pool-level watcher — escalation is the child's business — and
+	// only rides every ChildRequest. Nil opts out of either: a caller that
+	// sets neither halts only through ctx.
 	Stop  <-chan struct{}
 	Abort <-chan struct{}
 
-	// Awake gates when a slot may start a new child: nil means no window
-	// is configured, so the daemon is always awake. When set, it only
-	// gates the moment a slot is about to start a child — a child already
-	// running when the window closes is never touched, however long it
-	// outlasts the close.
+	// Awake gates when a slot may start a new child; nil is always awake. A
+	// child already running when the window closes is never touched.
 	Awake *Window
 
-	// SelfProgram is the running daemon's own program store path — what
-	// its build resolved to when it started. At each iteration boundary,
-	// before starting a child, the loop compares this against what the
-	// daemon attribute evaluates to at the freshly fetched tip
-	// (Runner.ResolveTip's Tip.SelfPath): a mismatch means a newer daemon has already
-	// merged, so continuing to orchestrate fresh Boxes from this stale
-	// build risks running work under code nobody has actually loaded. On
-	// a mismatch the loop first prebuilds and smoke-tests the new build
-	// (Runner.Prebuild, issue #5012). Only a build that passes halts the
-	// pool: it finishes what is running and halts at the boundary. One
-	// that fails is recorded as a blocked self-update (status file and
-	// events) and the pool carries on under the running build until the
-	// tip moves. The loop never re-execs itself: by default a passing
-	// build drains the pool and halts self-changed, and the operator's
-	// service restart policy loads it. RestartInPlace selects the other
-	// mode, which waits for a clean moment instead of draining.
+	// SelfProgram is the running daemon's own program store path. Before
+	// starting a child, the loop compares it against Tip.SelfPath: a mismatch
+	// means a newer daemon has merged, and orchestrating fresh Boxes from
+	// this stale build risks running work under code nobody has loaded. The
+	// loop then prebuilds and smoke-tests that build (Runner.Prebuild, issue
+	// #5012); only a passing build acts, and a failing one is recorded as a
+	// blocked self-update while the pool carries on until the tip moves. The
+	// loop never re-execs itself: by default a passing build drains the pool
+	// and halts self-changed, and the operator's service restart policy loads
+	// it; RestartInPlace selects a handoff instead.
 	//
-	// Empty disables the check entirely: a daemon that cannot know its
-	// own build must not guess, and must never halt on a comparison it
-	// cannot make.
+	// Empty disables the check: a daemon that cannot know its own build must
+	// never halt on a comparison it cannot make.
 	SelfProgram string
 
 	// RestartInPlace selects the in-place self-update mode (ADR 0063): a
-	// passing prebuild no longer halts and drains the pool. It stops
-	// starting children and waits for a clean moment to hand off, and a
-	// stop requested meanwhile cancels the handoff and drains as usual.
-	// False (the default) drains, then halts self-changed. Has no effect
-	// while SelfProgram is empty.
+	// passing prebuild stops new starts and waits for a clean moment to hand
+	// off instead of draining; a stop requested meanwhile cancels the handoff
+	// and drains as usual. No effect while SelfProgram is empty.
 	RestartInPlace bool
 
 	// SelfUpdate is the self-update state the pool starts in; zero is none.
@@ -273,12 +232,10 @@ type Config struct {
 	SelfUpdate SelfUpdate
 
 	// IdleFloor and IdleCap bound each kind's own idle backoff: the first
-	// no-work check (exit 2 or exit 3) waits IdleFloor, and each further
-	// consecutive no-work check doubles the wait, capped at IdleCap. Sibling
-	// occupancy plays no part (kindBackoff.markNoWork), and a reported kind's
+	// no-work check (exit 2 or 3) waits IdleFloor, each further one doubles
+	// it up to IdleCap, and a dispatch or image refresh resets it. Sibling
+	// occupancy plays no part (kindBackoff.markNoWork); a reported kind's
 	// exit 2 carrying a next-due report waits for that instead (kindSched).
-	// Any check that actually dispatches or refreshes an image resets the
-	// wait back to IdleFloor.
 	// IdleFloor must be positive; IdleCap must be >= IdleFloor.
 	IdleFloor time.Duration
 	IdleCap   time.Duration
@@ -297,63 +254,47 @@ type Config struct {
 	Trackers map[Kind]string
 
 	// FailureBackoff is how long a slot sleeps before refilling itself
-	// after an unclassified failure (an unrecognised exit code, a
-	// StartChild/Wait seam error, or a ResolveTip error): the bad
-	// slot backs off and retries alone, rather than the whole pool
-	// stopping over one issue. Must be non-negative.
+	// after an unclassified failure (an unrecognised exit code, a seam
+	// error, or a ResolveTip error): the bad slot retries alone rather than
+	// the whole pool stopping over one issue. Must be non-negative.
 	FailureBackoff time.Duration
-	// BreakerThreshold and BreakerWindow bound the pool-wide breaker: if
-	// BreakerThreshold unclassified failures land (from any slot, in any
-	// mix) within a trailing BreakerWindow, the pool halts instead of
-	// every slot backing off forever — the signature of a systemic fault
-	// (an expired token, a forge outage) that no per-slot retry clears.
-	// Both must be positive.
+	// BreakerThreshold and BreakerWindow bound the pool-wide breaker: that
+	// many unclassified failures from any slots within a trailing window
+	// halts the pool — the signature of a systemic fault (an expired token,
+	// a forge outage) no per-slot retry clears. Both must be positive.
 	BreakerThreshold int
 	BreakerWindow    time.Duration
 
-	// Status, when non-nil, is where the pool publishes its live Status
-	// (status.go) on every state change (issue #3545). Nil is the
-	// deliberate opt-out, not a swallowed error: a daemon that never
-	// located a git dir to publish into never reaches this far, and every
-	// existing Config literal simply leaves this nil and keeps working
-	// exactly as before.
+	// Status, when non-nil, is where the pool publishes its live Status on
+	// every state change (issue #3545). Nil is a deliberate opt-out, not a
+	// swallowed error.
 	Status *StatusWriter
 }
 
-// Loop runs cfg.Slots slot goroutines, each independently driving children of
-// whichever configured Dispatch kind it currently picks (Schedule.Decide, schedule.go)
-// through the same state machine, until something says halt: a
-// Halt-mapped exit code, the pool-wide breaker tripping, or a cancelled
-// ctx. Whichever slot halts first wins — Loop emits exactly one halt event
-// per call, and returns that first reason, for a caller to log or turn
-// into a process exit code.
+// Loop runs cfg.Slots slot goroutines, each driving children of whichever
+// configured kind it picks (Schedule.Decide), until a Halt-mapped exit code,
+// the pool-wide breaker, or a cancelled ctx says halt. The first halt wins:
+// Loop emits exactly one halt event and returns that reason.
 //
-// An unclassified failure is not one of those: a resolve failure, a
-// StartChild/Wait error, an unrecognised exit code, or exit 7 while Stop is
-// still open (someone else signalled that child) backs its own slot off and
-// refills it, leaving the siblings working, and only reaches a halt by
-// tripping the breaker — unless cfg.Stop has already closed or ctx is
-// already cancelled (an operator SIGTERM forwarded to a child that had not
-// yet installed its own handler, or that raced the seam's own teardown), in
-// which case it is an ordinary stop and never reaches the breaker at all
-// (issue #3595, by construction — see backoffOrHalt, pool.go).
+// An unclassified failure (a resolve failure, a seam error, an unrecognised
+// exit, or exit 7 while Stop is still open: someone else signalled that
+// child) backs only its own slot off and reaches a halt only through the
+// breaker — unless Stop has closed or ctx is cancelled (an operator SIGTERM
+// reached a child before its handler was installed, or raced the seam's
+// teardown), when it is an ordinary stop that never reaches the breaker
+// (issue #3595; see backoffOrHalt).
 //
-// It never kills a child it has started: the slot always waits on the handle
-// StartChild returned and emits that child's child_finish before halting,
-// unless the in-place handoff abandons the wait, which leaves the child
-// running rather than killing it. Otherwise this holds even if ctx was
-// cancelled mid-run or a sibling slot halted the pool in the meantime. "Stop
-// starting new work" is enforced by the admission check at the top of a
-// slot's loop, plus one re-check right after awaitBaton: a slot can park
-// there arbitrarily long, and the holder hands the baton off only after
-// deciding whether the pool halts, so the slot it wakes must re-ask.
-// cfg.Stop and Abort ride every ChildRequest (see ChildRequest's own doc),
-// so a child started after Stop closes is signalled by the Runner at once,
-// and nothing after those two checks needs to re-assert the same fact.
+// It never kills a child it has started: the slot waits on the handle and
+// emits child_finish before halting, even after ctx cancellation or a sibling
+// halt; the in-place handoff instead abandons the wait and leaves the child
+// running. "Stop starting new work" is the admission check at the top of a
+// slot's loop plus one re-check after awaitBaton, since a slot can park there
+// arbitrarily long and the holder passes the baton only after its halt
+// decision. Nothing later re-asserts it: Stop and Abort ride every
+// ChildRequest, so the Runner signals a child started after Stop at once.
 //
-// cfg.Slots must be positive: a zero or negative pool size would silently
-// run no children while looking like a healthy daemon, so Loop rejects it
-// as a halt-shaped config error instead (see Config.Validate).
+// Invalid config (including Slots <= 0, which would otherwise look like a
+// healthy idle daemon) is a halt (see Config.Validate).
 func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Halt {
 	if err := cfg.Validate(); err != nil {
 		return invalidConfig(em, cfg, err.Error())
@@ -379,26 +320,17 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Hal
 		p.publishInitial()
 	}
 
-	// A Stop already closed before Loop was even called must halt before
-	// any slot starts, not merely once the background watcher below happens
-	// to get scheduled: a bare `go` statement makes no ordering promise
-	// against the slot goroutines started just after it. This non-blocking
-	// check runs synchronously, in Loop's own goroutine, before any slot
-	// exists to race it.
+	// Checked synchronously so an already-closed Stop halts before any slot
+	// starts: the watcher goroutine below has no ordering promise against
+	// the slot goroutines.
 	select {
 	case <-cfg.Stop:
 		p.haltStopRequested("")
 	default:
 	}
-	// Watches cfg.Stop for the rest of the pool's life, so a later close
-	// halts promptly whether or not any slot is between iterations to
-	// notice it itself (a slot deep in clk.Sleep or ResolveTip only
-	// unblocks once p.halt cancels pctx). Also selects on pctx.Done so this
-	// goroutine never outlives one Loop call — tests drive Loop repeatedly,
-	// and a leaked watcher from a previous call must not fire on a later
-	// call's cfg.Stop. cfg.Stop is nil-safe: a nil channel never receives,
-	// so an unset Stop makes this select equivalent to just waiting on
-	// pctx.Done.
+	// A slot deep in clk.Sleep or ResolveTip only unblocks once p.halt
+	// cancels pctx, so a later Stop needs its own watcher. pctx.Done keeps
+	// it from outliving this Loop call and firing on a later call's Stop.
 	watcherDone := make(chan struct{})
 	go func() {
 		defer close(watcherDone)
@@ -441,13 +373,12 @@ func closedLatch() <-chan struct{} {
 	return c
 }
 
-// Validate is the whole of the config check Loop runs before any pool exists,
-// pure over cfg: it emits nothing and writes no status. cmd/launcher/daemon's
-// mainRun runs it first, so a resumed image whose config or handoff no longer
-// fits (MAX_PARALLEL lowered, a kind dropped) rolls back to its predecessor
-// before anything emits a halt (ADR 0063, issue #5039). Loop calls it again,
-// so the guard also holds for embedders and for superviseLoop's re-entry
-// (which fits by construction: it runs on the image's freshly built handoff).
+// Validate is Loop's whole config check, pure over cfg: it emits nothing and
+// writes no status. cmd/launcher/daemon's mainRun runs it first, so a resumed
+// image whose config or handoff no longer fits (MAX_PARALLEL lowered, a kind
+// dropped) rolls back to its predecessor before anything emits a halt (ADR
+// 0063, issue #5039). Loop calls it again for embedders and superviseLoop's
+// re-entry.
 func (cfg Config) Validate() error {
 	if cfg.Slots <= 0 {
 		return fmt.Errorf("slots must be a positive integer, got %d", cfg.Slots)
@@ -509,11 +440,8 @@ func (cfg Config) Validate() error {
 // configured kind, and each kind entry configured and named once. A slot's
 // gate generation may not pass its kind's carried one (0 when the kind has no
 // entry, since its counter restarts there): it cannot have started under a
-// generation its kind never reached.
-//
-// A failure here is a startup refusal, never an inherited-child drain inside
-// Loop: it runs before any InheritChild. Its caller is Config.Validate, which
-// cmd/launcher/daemon's mainRun runs first and so owns rollback or drain.
+// generation its kind never reached. A failure is a startup refusal: it runs
+// before any InheritChild.
 func validateHandoff(cfg Config) string {
 	seenKind := make(map[Kind]bool, len(cfg.Handoff.Kinds))
 	kindGen := make(map[Kind]int, len(cfg.Handoff.Kinds))
@@ -548,15 +476,9 @@ func validateHandoff(cfg Config) string {
 // offender every run.
 func sortedKeys[V any](m map[Kind]V) []Kind { return slices.Sorted(maps.Keys(m)) }
 
-// invalidConfig emits and returns a Halt of class HaltInvalidConfig carrying
-// detail, the shape shared by every cfg field Loop rejects before starting a
-// pool.
-//
-// No Kind is stamped on the halt event: this rejection happens before any
-// pool exists to have picked one. It also publishes a StateHalted status
-// directly, bypassing projectStatus (there is no pool yet to snapshot): cfg
-// is otherwise unvalidated at this point, so cfg.Kinds is copied over as
-// given rather than assumed well-formed.
+// invalidConfig emits and returns a HaltInvalidConfig Halt carrying detail.
+// No pool exists yet, so the event carries no Kind and the StateHalted status
+// is published directly with cfg.Kinds copied as given, unvalidated.
 func invalidConfig(em *Emitter, cfg Config, detail string) Halt {
 	h := Halt{Class: HaltInvalidConfig, Detail: detail}
 	em.Emit(h.Event())
@@ -564,48 +486,32 @@ func invalidConfig(em *Emitter, cfg Config, detail string) Halt {
 	return h
 }
 
-// runSlot drives one pool slot's children until the pool halts, either
-// because this slot decided to halt it or because a sibling did. ctx is the
-// pool's own derived context (not the caller's ctx directly): cancelling it
-// is how the pool tells every slot to stop promptly, including one asleep
-// in clk.Sleep or blocked inside ResolveTip.
+// runSlot drives one pool slot's children until the pool halts. ctx is the
+// pool's derived context: cancelling it is how the pool stops every slot
+// promptly, including one in clk.Sleep or ResolveTip.
 //
-// All waiting lives at the top of the loop, via Decide/idleSleep, rather
-// than inline in the Wait case below: with two kinds sharing a slot, a Wait
-// on one kind must never sleep in place, since "an empty work queue does not
-// slow research down" (issue #3541) — the Wait case only records the no-work
-// result and loops back around, and it is the next Decide that decides
-// whether that means switching kinds or genuinely idling.
+// All waiting lives at the top of the loop, via Decide/idleSleep: with two
+// kinds sharing a slot, a Wait on one kind must never sleep in place, since
+// "an empty work queue does not slow research down" (issue #3541).
 func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
-	// The catch-all for every return: whatever route a round ends by (a
-	// halt, a cancelled ctx, a self-build mismatch), the baton must not
-	// strand a sibling on a token this slot will now never pass any other
-	// way. passBaton no-ops unless slot actually holds the baton, so this
-	// defer needs no guard of its own.
+	// Whatever route a round ends by, the baton must not strand a sibling;
+	// passBaton no-ops unless this slot holds it.
 	defer p.passBaton(slot, batonPassStopped)
-	// A slot that has left this function is doing nothing at all, whatever
-	// phase it last published (issue #3623): one returning mid-resolve would
-	// otherwise keep reporting "resolving" in the status file. Declared after
-	// passBaton so LIFO runs it first — the reset lands before the baton is
-	// freed, so the sibling that hand-off wakes never reads this slot as
-	// still resolving.
+	// A slot returning mid-resolve would otherwise keep reporting
+	// "resolving" (issue #3623). Deferred after passBaton so LIFO resets the
+	// phase before the baton wakes a sibling.
 	defer p.leaveSlot(slot)
-	// wantResolve carries idleSleep's return across the loop: set when a
-	// jammed kind's wait outlived its first IdleFloor slice (idleSleep,
-	// pool.go), it asks the next round to make one opportunistic resolution
-	// before Decide, rather than idleSleep polling internally — the
-	// restart in between passes through awaitWindow and awaitBaton, either
-	// of which can block for hours, so a Tip resolved before that wait
-	// could be stale by the time it reopens; only the request to
-	// re-resolve survives, not the resolution itself.
+	// Set by idleSleep when a park gated by a jammed kind or tip wait
+	// outlived its first IdleFloor slice: the next round makes one
+	// resolution before Decide. Only the request survives across rounds, not
+	// a Tip: awaitWindow and awaitBaton in between can block for hours.
 	var wantResolve bool
-	// An inherited child is supervised before the first admission check: it is
-	// already running, so even a pool that is halting must wait it out and
-	// report its child_finish, as it does for a child it started itself.
+	// An inherited child is already running, so even a halting pool must
+	// wait it out and report its child_finish.
 	if h := p.inheritedSlot(slot); h != nil {
 		req := p.childRequest(slot, h.Kind, h.Revision, h.ChildLog)
-		// The child is already running: a halt that cancelled ctx must not
-		// abort the re-attach, or its real exit would surface as an error.
+		// A halt that cancelled ctx must not abort the re-attach, or the
+		// child's real exit would surface as an error.
 		handle, err := p.r.InheritChild(context.WithoutCancel(ctx), req, h.Child)
 		if p.superviseChild(ctx, slot, h.Kind, h.Revision, handle, err, seamInheritChild) {
 			return
@@ -614,9 +520,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 slotLoop:
 	for {
 		// The pool's admission check (issue #3626), re-asked once after
-		// awaitBaton below: with cfg.Stop riding every ChildRequest, a child
-		// started after Stop closes is signalled by the Runner at once, so
-		// nothing else needs to re-assert "stop starting new work".
+		// awaitBaton below.
 		if p.haltIfStopping(ctx, "") {
 			return
 		}
@@ -626,12 +530,9 @@ slotLoop:
 
 		p.awaitWindow(ctx, slot)
 
-		// The opportunistic resolution idleSleep's return asked for, made
-		// before Decide so a newly unblocked kind (noteTipMoved resets its
-		// backoff) is visible to Decide in this same round. A failure
-		// here is swallowed inside resolveOpportunistic itself: haveTip
-		// stays false and the ordinary post-Decide resolve below is left
-		// to report a genuinely broken fetch.
+		// Resolved before Decide so a kind noteTipMoved just unblocked is
+		// visible this round. A failure here is swallowed; the post-Decide
+		// resolve below reports a genuinely broken fetch.
 		var tip Tip
 		var haveTip bool
 		if wantResolve {
@@ -641,13 +542,11 @@ slotLoop:
 			}
 		}
 
-		// kind is provisional until startChild re-decides it below: the
+		// kind is provisional until startChild re-decides it below; the
 		// resolve-failure and halt paths in between label this one.
 		//
-		// The window is open and this slot is free, so this is the one place
-		// a probe may run: never while the window is shut (awaitWindow above;
-		// probe re-checks it before each kind) and never for a slot that is
-		// busy running a child.
+		// The one place a probe may run: the window is open and this slot is
+		// free.
 		var kind Kind
 	decide:
 		for {
@@ -663,18 +562,9 @@ slotLoop:
 					continue slotLoop
 				}
 			default:
-				// Nothing is startable or due a probe: this is the daemon
-				// genuinely idling, not merely a kind this slot happens not to
-				// prefer right now. A slot must never sleep out an idle wait
-				// holding the baton.
-				//
-				// The explicit setPhase matters here: idleSleep publishes no
-				// phase of its own, and a resolveOpportunistic call just above
-				// can have left this slot PhaseResolving, so a sleeping slot
-				// would otherwise read as "resolving" in the status file. The
-				// window is open by the time Decide runs, so idle is the
-				// right phase to park in, the same one runSlot's own deferred
-				// setPhase resets to on every other exit.
+				// Genuinely idle. A slot must never sleep out an idle wait
+				// holding the baton. idleSleep publishes no phase, and
+				// resolveOpportunistic above can have left PhaseResolving.
 				p.setPhase(slot, PhaseIdle)
 				p.passBaton(slot, batonPassIdle)
 				wantResolve = p.idleSleep(ctx, slot)
@@ -683,25 +573,14 @@ slotLoop:
 		}
 
 		if !haveTip {
-			// Resolving covers the self-path half of ResolveTip too: both
-			// halves are outside-world evaluations at the fetched tip, and a
-			// slot inside either is no more idle than one inside a fetch —
-			// nothing between here and startChild (or a failure exit)
-			// changes phase again, so one setPhase covers the whole span.
-			// resolveTip (pool.go, see its own doc) is the one pool seam
-			// both this call and the opportunistic one above go through.
 			t, err := p.resolveTip(ctx, slot)
 			if err != nil {
-				// A gone feature branch halts outright rather than
-				// following the breaker/backoff path (see
-				// HaltFeatureBranchGone) — and does so before any claim is
-				// taken (claims only happen after startChild/StartChild
-				// below).
+				// A gone feature branch halts outright, before any claim,
+				// rather than taking the breaker/backoff path.
 				var gone *FeatureBranchGoneError
 				if errors.As(err, &gone) {
-					// p.halt directly, bypassing haltIfStopping: this
-					// definitive answer deliberately wins over an operator
-					// stop already in flight, same as HaltSelfChanged below.
+					// Bypasses haltIfStopping: this definitive answer wins
+					// over an operator stop already in flight.
 					p.halt(Halt{
 						Class:  HaltFeatureBranchGone,
 						Detail: gone.Error(),
@@ -709,10 +588,8 @@ slotLoop:
 					})
 					return
 				}
-				// A failed fetch and a failed self-eval are both the
-				// transient blip the breaker exists for, but resolveFailure
-				// keeps them under separate halt classes; backoffOrHalt's
-				// own breaker-vs-retry logic doesn't care which.
+				// A failed fetch and a failed self-eval are both breaker
+				// blips, under separate halt classes.
 				revision, reason := resolveFailure(t, err)
 				if p.backoffOrHalt(ctx, slot, kind, revision, reason, batonPassFailed) {
 					return
@@ -724,40 +601,24 @@ slotLoop:
 		revision := tip.Revision
 
 		if p.cfg.SelfProgram != "" && tip.SelfPath != p.cfg.SelfProgram {
-			// Never re-execs here: a self-change records a halt reason and
-			// cancels the pool's context — the same "stop starting new
-			// work, wait out whatever is running" halt every other reason
-			// already uses (see halt) — so a freshly merged but broken
-			// daemon cannot auto-load with nobody awake. In-place mode
-			// (cfg.RestartInPlace) records no halt: the pool waits for a
-			// clean moment and hands off. selfUpdate gates either on a
-			// prebuild. An empty cfg.SelfProgram (the self
-			// check is off) always skips this comparison, since tip.SelfPath
-			// is then empty too, by construction of ResolveTip.
+			// Never re-execs here, so a freshly merged but broken daemon
+			// cannot auto-load with nobody awake: a self-change halts (or,
+			// in-place, hands off) only after selfUpdate's prebuild passes.
 			p.selfUpdate(ctx, kind, tip)
 		} else {
 			p.clearBlockedSelfUpdate()
 		}
 
-		// Acquired here, not before the resolve: the baton is a discovery
-		// token, and neither Decide nor ResolveTip discovers anything —
-		// they just pick a kind and learn the tip. Acquiring it earlier
-		// would serialize the tip resolutions the single-flight in
-		// ResolveTip exists to coalesce (issue #3625). Apart from the
-		// pre-assigned initial holder's very first round, a slot never
-		// holds the baton across a resolve; every path that loops back to
-		// the top passes it first (see the release sites below).
-		//
+		// The baton is a discovery token, acquired only after the resolve:
+		// acquiring it earlier would serialize the tip resolutions
+		// ResolveTip's single-flight coalesces (issue #3625). Apart from the
+		// pre-assigned initial holder's first round, a slot never holds the
+		// baton across a resolve: every path back to the top passes it first.
 		// A Chore-keyed kind skips it: the Ledger's compare-and-swap settles
-		// races between its children, and it selects no tracker issue, so
-		// waiting would only delay a butler start behind a work or research
-		// child's discovery.
+		// its races and it selects no tracker issue.
 		//
-		// The re-check matters because awaitBaton also returns on ctx.Done
-		// without the baton, and because the holder passes only after its
-		// round's halt decision (issue #4365): a halt that decision reaches
-		// has already landed by the time this slot wakes, so it must see it
-		// rather than start a child on a pool that has stopped.
+		// The re-check matters because awaitBaton also returns on ctx.Done,
+		// and the holder passes only after its halt decision (issue #4365).
 		if !kind.choreKeyed() {
 			p.awaitBaton(ctx, slot)
 		}
@@ -766,13 +627,9 @@ slotLoop:
 		}
 
 		if !cfg.Awake.Open(p.clk.Now()) {
-			// ResolveTip (a git fetch) can outlast the window's own
-			// close; re-check here so that fetch never launches a child
-			// outside the window. No event here: awaitWindow's
-			// edge-triggered noteAwakeClose reports the transition when
-			// the slot parks on the next iteration. The holder is about to
-			// loop back into awaitWindow for the whole shut span, so the
-			// baton passes now rather than holding the pool through it.
+			// ResolveTip can outlast the window's close. No event here:
+			// awaitWindow reports the transition on the next iteration.
+			// The baton passes now rather than across the whole shut span.
 			p.passBaton(slot, batonPassWindowClosed)
 			continue
 		}
@@ -780,15 +637,13 @@ slotLoop:
 		kind, childLog, started := p.startChild(slot, kind, revision)
 		if !started {
 			// Outpaced while parked on the baton, or a Chore-keyed non-holder
-			// refused an issue-keyed kind: nothing is startable now, so
-			// decide again (probe or park) instead of spawning.
+			// refused an issue-keyed kind.
 			p.passBaton(slot, batonPassOutpaced)
 			continue
 		}
 		if kind.choreKeyed() {
 			// Held here only by the pre-assigned leader or after startChild
-			// switched kinds; a Chore discovers no issue, so nothing is left
-			// to hold the baton for. A no-op when this slot does not hold it.
+			// switched kinds; a Chore discovers no issue.
 			p.passBaton(slot, batonPassChoreKeyed)
 		}
 		req := p.childRequest(slot, kind, revision, childLog)
@@ -818,8 +673,7 @@ func (p *pool) childRequest(slot int, kind Kind, revision, childLog string) Chil
 			}
 			p.noteRecord(slot, kind, revision, rec)
 			if rec.Event == report.EventBox {
-				// A claim settles discovery the moment it happens, live,
-				// rather than waiting for this child to exit.
+				// A claim settles discovery the moment it happens.
 				p.passBaton(slot, batonPassClaimed)
 			}
 		},
@@ -852,91 +706,58 @@ func (p *pool) superviseChild(ctx context.Context, slot int, kind Kind, revision
 			return true
 		}
 	}
-	// Read under the pool lock, and before finishChild zeroes the
-	// slot's flight: this is the only place the key (issue or Chore)
-	// the child claimed is still available at all.
+	// Read before finishChild zeroes the flight, the last point the claimed
+	// key is still available.
 	key := p.flightClaim(slot)
 	flight := p.flightReport(slot)
 	p.finishChild(slot)
-	// Every post-child exit without a claim passes the baton, but only
-	// after the round's halt decision: Continue/Wait pass ChildEnded
-	// explicitly, failure paths pass in backoffOrHalt past the breaker
-	// check, HaltPool relies on the deferred batonPassStopped after
-	// p.halt. A pass is a no-op once a box record released the baton.
-	// A pass before a HaltPool or breaker halt lands would let a parked
-	// sibling start a child on a pool about to stop (issue #4365).
-	// child_finish still precedes the halt. Continue/Wait pass after
-	// folding the result into the kind's backoff state too, so a woken
-	// sibling's Decide never sees a gate this child already earned
-	// as still open (issue #4380).
+	// Every post-child exit passes the baton only after the round's halt
+	// decision, or a parked sibling could start a child on a pool about to
+	// stop (issue #4365), and only after folding the result into the kind's
+	// backoff, or a woken sibling's Decide sees an earned gate as still open
+	// (issue #4380). HaltPool relies on the deferred batonPassStopped.
 	if err != nil {
-		// The seam failed, not the child (e.g. it could not even be
-		// started or re-attached), so there is no exit code to report —
-		// but a child_start or child_inherited was already emitted, and
-		// every such child gets a matching child_finish so the stream
-		// never shows one without the other. Every box/settled record
-		// the child reported before this failure already reached the
-		// stream live through OnRecord, so there is nothing left to
-		// replay here.
+		// The seam failed, not the child, so there is no exit code — but
+		// child_start/child_inherited was already emitted and every such
+		// child gets a matching child_finish.
 		p.emit(Event{Event: report.EventChildFinish, Kind: kind, Key: key, Revision: revision, Outcome: "error", Slot: intPtr(slot)})
 		return p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("%s: %v", seam, err), batonPassChildEnded)
 	}
 
 	exit := result.Exit
-	// Exit 7 means "the operator stopped this child" only while Stop
-	// was already closed when the child exited; read the latch once,
-	// here, rather than let a later close race Interpret's answer.
+	// Exit 7 means "the operator stopped this child" only while Stop was
+	// already closed; read the latch once so a later close cannot race it.
 	outcome, action, haltClass := Interpret(exit, p.stopClosed())
 	p.emit(Event{Event: report.EventChildFinish, Kind: kind, Key: key, Revision: revision, Exit: &exit, Outcome: outcome, Slot: intPtr(slot)})
 
 	switch action {
 	case Continue:
-		// Exit 0 (dispatched) or exit 4 (image-stale): the check
-		// answered something other than "nothing to do", so whatever
-		// streak of no-work checks this kind's backoff was tracking is
-		// over. The other kind's own timer, if any, is untouched.
 		p.resetKind(kind)
 		p.passBaton(slot, batonPassChildEnded)
 		return false
 	case Wait:
 		if !cfg.Awake.Open(p.clk.Now()) {
-			// The window closed while the child ran, so this wait is
-			// the window's, not the idle backoff's: recording a no-work
-			// result here would spend a backoff step on a span the shut
-			// window already covers. awaitWindow, at the top, parks the
-			// whole remaining span in one sleep instead, and this kind's
-			// idle streak stays untouched so it resumes where it left
-			// off.
+			// The window closed while the child ran: this wait is the
+			// window's, so it spends no backoff step and the kind's idle
+			// streak resumes where it left off.
 			p.passBaton(slot, batonPassChildEnded)
 			return false
 		}
-		// noteWaitResult records the no-work result and decides the
-		// jam-vs-idle predicate together, in one mutate — see its own
-		// doc for why the two must not be read from two different
-		// instants.
 		p.noteWaitResult(slot, kind, revision, outcome == outcomeNoneDispatchable, flight)
 		p.passBaton(slot, batonPassChildEnded)
-		// No sleep here: this kind is now gated until its gate
-		// deadline, and the top of the loop's Decide/idleSleep decides
-		// whether that means switching to the other kind at once or
-		// genuinely idling.
 		return false
 	case Backoff:
 		return p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("outcome: %s (exit %d)", outcome, exit), batonPassChildEnded)
 	default: // HaltPool
-		// haltClass is never HaltNone here: Interpret's one table ties
-		// action == HaltPool to a real class, pinned by
-		// TestInterpret_HaltPoolIffHaltClassSet.
-		// No baton pass before the halt: the deferred batonPassStopped
-		// runs after it.
+		// haltClass is never HaltNone here
+		// (TestInterpret_HaltPoolIffHaltClassSet).
 		p.halt(Halt{Class: haltClass, Kind: kind, Revision: revision})
 		return true
 	}
 }
 
-// intPtr returns a pointer to v. Event.Slot (like Event.Exit) is a pointer
-// so slot/exit 0 — a real value — survives the field's omitempty tag
-// instead of being elided as the zero value.
+// intPtr returns a pointer to v, so slot/exit 0 survives omitempty on
+// Event.Slot and Event.Exit.
 func intPtr(v int) *int {
 	return &v
 }

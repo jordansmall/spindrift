@@ -28,12 +28,9 @@ var loadRowConnector = backendrows.Load
 var errNoCapability = errors.New("connector does not declare the capability")
 
 // sharedConnectors holds one loaded Connector per repository and row, so the
-// doctor, the daemon's demand probe and recover share a compile rather than
-// repeating it per call or per client. The row is process-global
-// (backendrows.Use) and a Connector serialises its own calls. A Connector a
-// failed call has closed is replaced by a fresh load on the next read. A failed
-// load is retried by the next read until maxLoadFailures have failed in a row,
-// then at most once per loadRetryAfter.
+// doctor, the daemon's demand probe and recover share a compile. The row is
+// process-global (backendrows.Use) and a Connector serialises its own calls.
+// A Connector closed by a failed call is reloaded on the next read.
 var sharedConnectors struct {
 	mu       sync.Mutex
 	loaded   map[string]*sharedConnector

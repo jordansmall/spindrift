@@ -235,11 +235,9 @@ const (
 
 // runStateCarried is the carried text the orchestrator would append from
 // state, one entry per rendered pass it seeds: review gets the review block,
-// every other pass the handoff block (the legacy loop seeds each of its passes
-// that way, including the single legacy or kind pass of a cell with no review
-// prompt). delta-review is deliberately absent: its seeder also needs
-// land-delta and trigger data that RunState does not hold, so
-// --composition-carried remains the way to report it.
+// every other pass (legacy and kind passes included) the handoff block.
+// delta-review is deliberately absent: its seeder also needs land-delta and
+// trigger data RunState does not hold, so --composition-carried reports it.
 func runStateCarried(state runstate.RunState, passes []string) []promptassembly.CarriedText {
 	handoff, review := seedblock.Handoff(state), seedblock.Review(state)
 	var carried []promptassembly.CarriedText

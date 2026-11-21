@@ -1,12 +1,9 @@
-// Package chore holds the pure Chore computations (ADR 0056): the scan
-// Scope and NextScope for one run (the range of new commits since the
-// Chore's last sweep, plus the next slice of the tree at the cursor, so new
-// code is checked promptly and old code eventually, and no run reads the
-// whole repo), the due Check, class parsing, and the enabled-Chore helpers.
-//
-// It stays a leaf: it imports no forge, dispatch, settle, or daemon
-// package itself. dispatch imports Scope, so any such import back would
-// cycle.
+// Package chore holds the pure Chore computations (ADR 0056): the scan Scope
+// for one run (new commits since the last sweep plus the next tree slice at
+// the cursor, so new code is checked promptly, old code eventually, and no run
+// reads the whole repo), the due Check, class parsing, and the enabled-Chore
+// helpers. It imports no forge, dispatch, settle, or daemon package:
+// dispatch imports Scope, so any such import would cycle.
 package chore
 
 import (
@@ -41,9 +38,7 @@ type Scope struct {
 
 // NextScope computes the Scope for a run that resumes from prev's saved
 // LastSwept/Cursor and sweeps up to head. files is the tracked path list at
-// head, in any order (NextScope sorts a copy rather than mutating it).
-// sliceSize bounds how many paths the tree-walk slice carries; callers
-// normally pass DefaultSliceSize.
+// head, in any order; it is not mutated.
 func NextScope(prev ledger.State, head string, files []string, sliceSize int) Scope {
 	scope := Scope{Head: head}
 	if prev.LastSwept != "" && prev.LastSwept != head {
@@ -57,9 +52,7 @@ func NextScope(prev ledger.State, head string, files []string, sliceSize int) Sc
 	sorted := append([]string(nil), files...)
 	sort.Strings(sorted)
 
-	// First path strictly after the cursor. An empty cursor (first run)
-	// matches everything; a cursor at or past the last path finds nothing,
-	// so start falls through to len(sorted) and wraps below.
+	// A cursor at or past the last path finds nothing and wraps below.
 	start := sort.Search(len(sorted), func(i int) bool { return sorted[i] > prev.Cursor })
 	if start >= len(sorted) {
 		start = 0

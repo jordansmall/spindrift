@@ -9,9 +9,8 @@ import (
 
 // PRForgeReadHarness is the part of a PRForge's scripted backend the read
 // cases drive, so a read-only Connector-backed PRForge can run them alone via
-// RunPRForgeReadContract. In a read-only run CodeForge may be a stand-in whose
-// Merge marks the scripted backend's PR merged, since merging is a native
-// write the Connector cannot perform; the read cases need only that Merge.
+// RunPRForgeReadContract. In that run CodeForge may be a stand-in whose Merge
+// marks the scripted PR merged, since the read-only PRForge cannot merge.
 type PRForgeReadHarness interface {
 	Forge() forge.PRForge
 	// CodeForge returns the same adapter as the statically-typed handle
@@ -161,10 +160,8 @@ func testOpenPRForBranchAdoptsDraft(t *testing.T, h PRForgeReadHarness) {
 
 // testMarkReadyClearsAdoptedDraftThenMerges is the companion half of issue
 // #2408: MarkReady must clear whatever draft signal the adapter uses, so an
-// adopted draft becomes mergeable and Merge succeeds on it.
-//
-// CodeForgeFake.Merge (the Fake gets it by embedding) ignores draft state, so
-// on the Fake the merge half does not prove MarkReady unblocked a merge.
+// adopted draft becomes mergeable. CodeForgeFake.Merge ignores draft state, so
+// on the Fake the merge half proves nothing.
 func testMarkReadyClearsAdoptedDraftThenMerges(t *testing.T, h PRForgeHarness) {
 	const num = "214"
 	branch := forge.AgentBranchName(h.BranchPrefix(), num)
@@ -345,9 +342,9 @@ func testFailureDetailOnFailingCheck(t *testing.T, h PRForgeReadHarness) {
 	}
 	// The log's head and tail are distinguishable and it is over the cap, so
 	// only an excerpt that keeps the tail and the early error line passes.
-	// Each early line exercises one alternative of the error-line pattern the
-	// native adapter and the Connector SDK each carry a copy of, and the decoy
-	// matches none, so drift in either copy fails the contract on that harness.
+	// Each early line exercises one alternative of the error-line pattern that
+	// forge and the Connector SDK each carry a copy of, and the decoy matches
+	// none, so drift in either copy fails the contract on that harness.
 	const loggedNum = "291"
 	loggedURL := h.SeedOpenPR(loggedNum)
 	const earlyError = "error: experimental Nix feature 'nix-command' is disabled"
@@ -389,9 +386,7 @@ func testFailureDetailOnFailingCheck(t *testing.T, h PRForgeReadHarness) {
 }
 
 // testNeedsUpdate pins the shared behind-detection semantics every adapter
-// must agree on (issue #936, issue #2258): github's native compare API and
-// forgejo's swapped-refs compensation must return the same bool for the same
-// scripted fact.
+// must agree on for the same scripted fact (issue #936, issue #2258).
 func testNeedsUpdate(t *testing.T, h PRForgeHarness) {
 	cases := []struct {
 		name        string

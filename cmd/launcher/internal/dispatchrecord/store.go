@@ -128,15 +128,13 @@ var migrations = []string{
 	-- Rows from the older schema were parsed under older rules, so re-read them (mtime -1 never matches a real
 	-- file, so each row re-parses).
 	UPDATE ingested_files SET mtime_ns = -1;`,
-	// v7: explicit segment identity (issue #4833). An unstamped satellite whose
-	// start equals a primary's claim to the millisecond shared that primary's
-	// (record_id, log_start) key, so the log column joins the passes and
-	// prompt_hashes primary keys and orphan_log names the satellite that
-	// minted an orphan Record (empty for every other Record). The orphan
-	// backfill replays the old inference once (a satellite pass at the claim
-	// time) but skips a Record holding a primary log's pass, since a primary
-	// always writes its own Record ID. Only a Record whose primary passes
-	// predate v6 (log empty) and whose primary log is gone can still be
+	// v7: explicit segment identity (issue #4833). A satellite starting on a
+	// primary's claim millisecond shared its (record_id, log_start) key, so the
+	// log column joins the passes and prompt_hashes keys, and orphan_log names
+	// the satellite that minted an orphan Record. The backfill replays the old
+	// inference once but skips a Record holding a primary log's pass, since a
+	// primary always writes its own Record ID. Only a Record whose primary
+	// passes predate v6 (log empty) and whose primary log is gone can still be
 	// mis-marked.
 	`ALTER TABLE records ADD COLUMN orphan_log TEXT NOT NULL DEFAULT '';
 	UPDATE records SET orphan_log = COALESCE((SELECT MIN(p.log) FROM passes p
@@ -204,12 +202,10 @@ var migrations = []string{
 	// would otherwise lose its v8 verdict for good.
 	`ALTER TABLE records ADD COLUMN churn_14d REAL;
 	UPDATE records SET matured_at = NULL;`,
-	// v10: settle order (issue #4951). The upsert assigns settled_seq the first
-	// time a row is written as settled and never changes it, so it orders
-	// Records by when the host settled them, which claim_time cannot (a
-	// long-running Dispatch claims early and settles late). Rows settled before
-	// this migration have no recorded settle time; claim order is the best
-	// stand-in for them.
+	// v10: settle order (issue #4951). The upsert assigns settled_seq once, the
+	// first time a row is written as settled, so it orders Records by settle
+	// time, which claim_time cannot (a long Dispatch claims early, settles
+	// late). Rows settled before v10 fall back to claim order.
 	`ALTER TABLE records ADD COLUMN settled_seq INTEGER;
 	UPDATE records SET settled_seq = (
 		SELECT COUNT(*) FROM records r2
@@ -381,15 +377,14 @@ func (s *Store) Close() error { return s.db.Close() }
 
 // Ingest parses every pass log under the root's log directory that is new or
 // changed since it was last ingested and upserts its Record: a chain log's
-// inferred one, or any stamped log's own (issue #4783). It returns how
-// many distinct files it parsed, counting satellites re-parsed to re-window;
-// a file whose path, size, and mtime match its ingested_files row is skipped
-// without being opened. Primary logs go first, so an unstamped satellite log
-// (fix pass, conflict resolve) finds the Dispatch it started under. Rows for
-// logs no longer on disk, including every row when the whole log directory is
-// gone, are forgotten (their Records are kept), so a reused path starts fresh.
-// A log it cannot read is skipped and reported in the returned error, and
-// retried next ingest.
+// inferred one, or any stamped log's own (issue #4783). It returns how many
+// distinct files it parsed, counting satellites re-parsed to re-window; a file
+// whose path, size, and mtime match its ingested_files row is not opened.
+// Primary logs go first, so an unstamped satellite (fix, conflict resolve)
+// finds the Dispatch it started under. ingested_files rows for logs gone from
+// disk, all of them when the log directory is gone, are forgotten (Records
+// kept), so a reused path starts fresh. An unreadable log is reported in the
+// error and retried next ingest.
 func (s *Store) Ingest() (parsed int, err error) { return s.ingest(false, "") }
 
 // IngestChain is Ingest restricted to the chain key of the log named logName:
@@ -476,10 +471,8 @@ func (s *Store) ingest(force bool, chainKey string) (parsed int, err error) {
 		}
 	}
 	// A new or dropped Record moves the window of every satellite of its key, so
-	// those re-window until a round shifts nothing; a key's last shifter already
-	// saw its final Record set, so it is not revisited.
-	// Rounds settle well within this bound; it only guards against a shift
-	// cycle looping forever.
+	// those re-window until a round shifts nothing; a key's last shifter is not
+	// revisited. The bound only guards against a shift cycle looping forever.
 	maxRounds := 2*len(satellites) + 2
 	for round := 0; round == 0 || len(pending) > 0; round++ {
 		if round >= maxRounds {
@@ -863,11 +856,10 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 	}
 	// A provisional ID is the same Dispatch under a stale mtime-derived ID; a
 	// changed timestamp-derived ID is a new Dispatch reusing the path. A nil rec
-	// (a log emptied in place) overwrote oldID with "" above, so whatever that
-	// log regrows into is a new Dispatch and the old provisional Record stays.
-	// A stat-identical re-parse (only a forced one reaches here) is the same
-	// Dispatch too, so an ID change means the parser changed and the old Record
-	// is stale.
+	// (log emptied in place) set oldID to "" above, so whatever the log regrows
+	// into is a new Dispatch and the old provisional Record stays. A
+	// stat-identical (forced) re-parse is the same Dispatch, so an ID change
+	// there means the parser changed and the old Record is stale.
 	if rec != nil && oldID != newID && sameFile && !joined {
 		// A satellite joined to the stale Record would keep it alive and, on a
 		// claim-time tie, win the window against the replacement. An orphan

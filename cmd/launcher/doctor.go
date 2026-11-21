@@ -17,12 +17,10 @@ import (
 )
 
 // cmdDoctor is the `doctor` subcommand. It probes each forge seam through its
-// own adapter rather than the combined Client, so a CODE_FORGE=git deployment
-// checks the actual remote it will push to instead of the IssueTracker's repo
-// a second time. It needs no runner/dispatch/settle wiring, so it builds its
-// own via newReadContext (issue #2941) instead of bootstrap. opts.interactive
-// is ignored: it is always overwritten below from the stdin TTY probe, never
-// from the caller's flag parse.
+// own adapter, so a CODE_FORGE=git deployment checks the remote it will push
+// to rather than the IssueTracker's repo again. Needing no runner, dispatch or
+// settle wiring, it builds its own via newReadContext (issue #2941), not
+// bootstrap. opts.interactive is always overwritten from the stdin TTY probe.
 func cmdDoctor(opts doctorOptions, stdout, stderr io.Writer) int {
 	// doctor never dispatches, so it carries no dispatch kind (issue #2944).
 	rc, err := newReadContext(nil, false)
@@ -120,13 +118,12 @@ func requiredLabels(opts doctorOptions, rc readContext) []string {
 }
 
 // doctorReport runs cmdDoctor's exit-vocabulary classification (issue #2569).
-// An invalid configuration never skips runDoctor, so a config-invalid run still
-// prints the full report (issue #2559), and both failures explain themselves on
-// stderr so redirecting stdout never loses the reason for a non-zero exit. Call
-// rc.validation() once: it holds the memoized Probes (issues #3144, #2992).
-// opts.verbose gates the report's ok:/advisory: rows (issue #3777); it never
-// changes which exit code doctorExitCodeFor returns. opts.butler folds the
-// butler's own config checks into configErr (issue #3920).
+// An invalid configuration still runs runDoctor and prints the full report
+// (issue #2559), and both failures explain themselves on stderr so redirecting
+// stdout never loses the reason. Call rc.validation() once: it holds the
+// memoized Probes (issues #3144, #2992). opts.verbose gates the ok:/advisory:
+// rows (issue #3777) but never the exit code; opts.butler folds the butler's
+// config checks into configErr (issue #3920).
 func doctorReport(rc readContext, stdout, stderr io.Writer, stdin io.Reader, opts doctorOptions) int {
 	v := rc.validation()
 	configErr := doctorConfigErr(rc, v, opts)
@@ -157,11 +154,10 @@ func doctorConfigErr(rc readContext, v readValidation, opts doctorOptions) error
 }
 
 // doctorUnbuildableReport is doctorReport for a config naming an unregistered
-// backend, where no adapter can be built: it reports the full config findings
-// and skips runDoctor's adapter probes. rc carries only the config. The bad
-// name is itself a config finding, so the exit is 2, not the unclassified 1
-// (issue #2569); unregistered stands in when validation finds nothing, so an
-// unbuildable config never prints a nil error or exits 0.
+// backend: no adapter can be built, so it reports the config findings and skips
+// runDoctor's probes. The bad name is itself a config finding, so the exit is
+// 2, not 1 (issue #2569); unregistered stands in when validation finds
+// nothing, so it never prints a nil error or exits 0.
 func doctorUnbuildableReport(rc readContext, unregistered error, stderr io.Writer, opts doctorOptions) int {
 	configErr := doctorConfigErr(rc, rc.validation(), opts)
 	if configErr == nil {
@@ -192,17 +188,13 @@ func doctorExitCodeFor(configErr, runErr error) int {
 	}
 }
 
-// runDoctor adapts the launcher's config to doctor.Config and delegates to the
-// shared internal/doctor package (ADR 0027). The caller passes extraChecks in
-// rather than runDoctor building them from c: rebuilding them here would create
-// un-memoized checks and run each credential Probe a second time (issue #3144).
-// checkW is separate from rep: it's a gate Check's own operator-facing writer
-// (issue #2942 AC5). For `spindrift doctor`, doctorReport hands it rep's own
-// AdvisoryWriter() rather than raw stdout, so a passing gate's own prose
-// (e.g. the primary Connector write gate's WARNING: line on a credential
-// whose capability cannot be read) obeys the same quiet gate as an advisory:
-// row instead of bypassing the Reporter (issue #3777). The two params stay
-// distinct since only one of them is the report stream.
+// runDoctor adapts the launcher's config to doctor.Config and delegates to
+// internal/doctor (ADR 0027). extraChecks come from the caller, since building
+// them here would re-run each credential Probe un-memoized (issue #3144).
+// checkW is a gate Check's own operator-facing writer (issue #2942 AC5),
+// distinct from the rep report stream; `spindrift doctor` passes rep's
+// AdvisoryWriter() so a passing gate's prose (e.g. the primary Connector write
+// gate's WARNING: line) obeys the same quiet gate as an advisory row (#3777).
 func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.Reporter, checkW io.Writer, stdin io.Reader, interactive bool, extraChecks []doctor.Check, requiredLabels ...string) error {
 	row, _ := backendkit.ByName(c.IssueTracker)
 	if err := doctor.Run(it, cf, doctor.Config{

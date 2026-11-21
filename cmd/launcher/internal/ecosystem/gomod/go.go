@@ -64,20 +64,18 @@ func computeBindings(port int, prefix string, routes []registrymanifest.Route, e
 	var result bindings
 
 	goProxyBound := false
-	// Parse validation of the [routes.ecosystems.go] path key rejects a bare "/"
-	// (registryroutes.go's validateDeclaredPath), so unlike npm's whole-host case
-	// this path can never normalize to "", and the URL below concatenates it
-	// as-is; the same validation bans "," and "|", so it cannot split GOPROXY.
+	// registryroutes' validateDeclaredPath rejects a bare "/" and bans "," and
+	// "|", so path is never "" and cannot split GOPROXY.
 	if path := ecosystemkit.DeclaredPath(routes, nameGo); path != "" {
 		result.Exports = append(result.Exports, ecosystem.EnvExport{Name: "GOPROXY", Value: fmt.Sprintf("http://127.0.0.1:%d/%s%s", port, prefix, path)})
 		goProxyBound = true
 	}
 
-	// The default GOTOOLCHAIN=auto switches toolchains, and Go's useSumDB forces
-	// a checksum-database lookup for golang.org/toolchain even under GOSUMDB=off,
-	// so a repo naming a newer toolchain dies on what looks like tampering.
-	// Pinning local produces Go's own "go.mod requires go >= X.Y.Z" error
-	// instead, and holds whether or not a GOPROXY export was rendered.
+	// The default GOTOOLCHAIN=auto switches toolchains, and Go forces a sumdb
+	// lookup for golang.org/toolchain even under GOSUMDB=off, so a repo naming
+	// a newer toolchain dies on what looks like tampering; pinning local
+	// yields Go's own "go.mod requires go >= X.Y.Z", with or without a GOPROXY
+	// export.
 	if env.GOTOOLCHAIN != "" && env.GOTOOLCHAIN != goToolchainLocal {
 		result.Warnings = append(result.Warnings, fmt.Sprintf(
 			"==> WARNING: overriding GOTOOLCHAIN=%s with GOTOOLCHAIN=%s — this Box only offers one baked Go toolchain through the Forwarder",
@@ -86,11 +84,10 @@ func computeBindings(port int, prefix string, routes []registrymanifest.Route, e
 	}
 	result.Exports = append(result.Exports, ecosystem.EnvExport{Name: "GOTOOLCHAIN", Value: goToolchainLocal})
 
-	// A repo-set GOPRIVATE defaults GONOPROXY to itself, bypassing GOPROXY, and
-	// Go treats an empty GONOPROXY as unset, so "" does not close that bypass.
-	// "none" is the documented sentinel matching nothing (`go help private`).
-	// Without goProxyBound, "none" would push private paths to Go's own public
-	// proxy instead of closing a bypass.
+	// A repo-set GOPRIVATE defaults GONOPROXY to itself, bypassing GOPROXY,
+	// and Go reads "" as unset; "none" matches nothing (`go help private`).
+	// Without goProxyBound, "none" would push private paths to Go's public
+	// proxy.
 	if goProxyBound {
 		if env.GONOPROXY != "" || env.GOPRIVATE != "" {
 			result.Warnings = append(result.Warnings, "==> WARNING: overriding pre-existing GONOPROXY/GOPRIVATE with GONOPROXY=none — every module path, private or not, now routes through the Forwarder")
@@ -98,10 +95,9 @@ func computeBindings(port int, prefix string, routes []registrymanifest.Route, e
 		result.Exports = append(result.Exports, ecosystem.EnvExport{Name: "GONOPROXY", Value: "none"})
 	}
 
-	// A checksum-database lookup for a module that turns out to be private is
-	// the leak this prevents; go.sum's committed hashes stay the integrity
-	// check. Either exemption hands the repo responsibility (Go derives
-	// GONOSUMDB from a set GOPRIVATE), so the branch skips them and otherwise
+	// Prevents a sumdb lookup leaking a private module path; go.sum stays the
+	// integrity check. A set GOPRIVATE or GONOSUMDB hands the repo
+	// responsibility (Go derives GONOSUMDB from GOPRIVATE); otherwise this
 	// overrides even an explicit GOSUMDB. goProxyBound gates it as above.
 	if goProxyBound && env.GOPRIVATE == "" && env.GONOSUMDB == "" {
 		if env.GOSUMDB != "" {

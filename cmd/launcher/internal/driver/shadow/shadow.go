@@ -1,9 +1,9 @@
 // Package shadow replays a Pass log through a Connector's Strategy next to the
 // native one and reports where they disagree, so a Connector port can be
 // trusted before it replaces the native Driver. The native Strategy stays
-// authoritative: nothing here returns a result a caller could use in its place,
-// and no failure of the Connector escapes Run. The shadow decodes the log in
-// batches, one Connector call each; lines are still compared one at a time.
+// authoritative: nothing here returns a result a caller could use in its
+// place, and no Connector failure escapes Run. The log is decoded in batches,
+// one Connector call each, but compared line by line.
 package shadow
 
 import (
@@ -32,11 +32,9 @@ const Budget = 2 * time.Minute
 
 // Run replays the Pass log at logPath through native and through the Connector
 // that load builds from wasm, handing each divergence and then one closing
-// summary to emit. exitCode is the CLI's exit code, for the resolveExit
-// comparison. ctx bounds the whole replay, Connector load included: when it
-// ends, the Connector is aborted mid-call and the run stops with a summary
-// Error. Run never fails and never panics: a Connector that does not load, or
-// fails closed mid-run, is reported in the summary.
+// summary to emit. exitCode feeds the resolveExit comparison. When ctx ends,
+// the Connector is aborted mid-call and the run stops with a summary Error.
+// Run never fails or panics: Connector failures land in the summary.
 func Run(ctx context.Context, native driverkit.Strategy, load Loader, wasm []byte, logPath string, exitCode int, emit func(hostop.SpindriftOp)) {
 	r := &run{native: native, Recorder: shadowrecord.New(native.Name, emit)}
 	defer r.finish()
@@ -79,12 +77,11 @@ func (r *run) finish() {
 	r.Recorder.Finish()
 }
 
-// flushBytes bounds the buffered line bytes before the shadow decodes a batch:
-// enough to amortise the per-call fixed cost over hundreds of lines, small
-// enough to bound memory and the time between stop() checks. A deadline or
-// Connector failure therefore leaves up to about one batch of decoded lines
-// uncompared, and the "deadline exceeded after N lines" count undercounts by
-// as much. A var for tests.
+// flushBytes bounds the buffered line bytes per decoded batch: enough to
+// amortise the per-call cost, small enough to bound memory and the time
+// between stop() checks. A stop can leave about one batch uncompared, and the
+// "deadline exceeded after N lines" count undercounts by as much. A var for
+// tests.
 var flushBytes = 1 << 20
 
 // compare runs the three checks. failed reports the Connector's fatal failure;
