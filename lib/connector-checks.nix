@@ -87,6 +87,12 @@ let
           + pkgs.lib.optionalString connectorHosted ''
             mkdir -p ../../connectors/${name}
             cp -r ${src}/testdata ../../connectors/${name}/testdata
+          ''
+          # Every Driver with a native package gets the Connector's source here;
+          # pi's connector_source_parity_test.go reads it.
+          + pkgs.lib.optionalString (!connectorHosted) ''
+            mkdir -p ../../connectors/${name}
+            cp -r ${connectorSrc}/. ../../connectors/${name}
           '';
       # A Driver with no native package has this Connector alone as its host
       # half: driverrows' TestCorpus registers the claude wasm and replays the
