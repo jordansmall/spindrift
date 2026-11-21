@@ -177,10 +177,14 @@ left open, whose PR has since merged, gets a second `dispatch_settled` (reason
 `merged`), so `spindrift stats` counts the landing. It stays observational and
 never lands code.
 
-Only the end-of-`dispatch` sweep is throttled, to one per 15 minutes
-(`settle.LateMergeSweepInterval`) per working directory, claimed through
-`.spindrift/late-merge-sweep.lock`; a failed claim or sweep only warns. The
-standalone `spindrift reconcile` always sweeps. The issue bookkeeping described
+The end-of-`dispatch` sweep and the daemon's sweep are throttled, to one per 15
+minutes (`settle.LateMergeSweepInterval`) per working directory, claimed through
+`.spindrift/late-merge-sweep.lock`; a failed claim or sweep only warns. (Amended
+by issue #7342: a daemon pool child skips its end-of-dispatch sweep and the
+daemon runs the throttled sweep itself, outside its slots. Children adopted by
+an in-place restart from an older image predate the pool-child marker and may
+still sweep; the shared stamp keeps that to one sweep per interval.) The
+standalone `spindrift reconcile` is not throttled and always sweeps. The issue bookkeeping described
 above (closing, abandoned-flagging, orphan reset — `reconcileIssues`) is
 unchanged and still `local`-only, gated on the tracker descriptor's
 in-Box-unreachable axis rather than the tracker name; a late-merge failure never
