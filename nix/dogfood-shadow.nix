@@ -2,13 +2,12 @@
 # otherwise mimics a new Consumer, but runs these Connectors in shadow mode
 # until their cut-over (20 consecutive clean runs). A Driver Connector replays
 # Pass logs; a backend Connector would sample its reads at the row's
-# `shadowEvery` rate. Empty today: claude is cut over (issue #6799) and has no
-# native Strategy left to shadow, and the shadow plumbing stays for the
-# Connectors yet to cut over (issues #6874, #6876). Its own file, not a
+# `shadowEvery` rate. opencode shadows here (issue #6874); claude is cut over
+# (issue #6799) and has no native Strategy left to shadow. Its own file, not a
 # nix/dogfood-defaults.nix leaf, because flake.nix sets
 # `spindrift.connectors.<name>.shadow` at flake level, where that file's
 # `system` argument does not exist. flake.nix reads the list from here;
-# nix/fixtures.nix's mkHarness mirror reads it too, but hardcodes each row
-# (`dogfoodDriverRows`), so a new name also needs its row added there. A
-# Connector promoted to primary moves to nix/dogfood-primary.nix.
-[ ]
+# nix/fixtures.nix's mkHarness mirror reads it too and derives each Driver row
+# from nix/connector-dirs.nix, so adding a name is the only edit. A Connector
+# promoted to primary moves to nix/dogfood-primary.nix.
+[ "opencode" ]

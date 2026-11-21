@@ -2336,8 +2336,9 @@ Consumer opts in); what the other registered facts mean at runtime is issue
   (issue #6799), and its Connector is always the claude Driver, so
   `spindrift.connectors.claude.shadow` and `.primary` fail evaluation.
   spindrift's own dogfood is a pinned exception to mimicking a new Consumer: it
-  shadows the Connectors in `nix/dogfood-shadow.nix` (none today) and runs those
-  in `nix/dogfood-primary.nix` (none today) as primary, each until cut-over.
+  shadows the Connectors in `nix/dogfood-shadow.nix` (opencode, issue #6874)
+  and runs those in `nix/dogfood-primary.nix` (none today) as primary, each
+  until cut-over.
 - **Row-owned knobs.** A row's `knobs` attrset has the shape of a core row's
   (ADR 0068), keyed by env-schema key with an env-schema entry as value. The
   knobs fold into `spindrift.envSchema` on top of lib/env-schema.nix. Only that
@@ -2913,9 +2914,9 @@ read with `ErrNoRoute`. A flake with no github row, one importing core's
 module directly, carries no github backend row, fails github reads the same
 way, has no such variable, and doctor prints no `connector-routes[github]` or
 `connector-routes-widened[github]` row. spindrift's own dogfood shadows the
-Connectors listed in `nix/dogfood-shadow.nix` (none today) and runs those in
-`nix/dogfood-primary.nix` (none today) as primary, a pinned exception to
-mimicking a new Consumer; its accepted github Route table is baselined in
+Connectors listed in `nix/dogfood-shadow.nix` (opencode, issue #6874) and runs
+those in `nix/dogfood-primary.nix` (none today) as primary, a pinned exception
+to mimicking a new Consumer; its accepted github Route table is baselined in
 `spindrift-connector-routes.json`.
 
 ##### Driver replay

@@ -25,11 +25,18 @@ let
   jiraConnector = (import ../connectors/jira).lib.connector { core = import ../core; };
   dogfoodDriverPrimaries = builtins.filter (n: dogfoodDriverRows ? ${n}) dogfoodPrimary;
   dogfoodBackendPrimaries = builtins.filter (n: !(dogfoodDriverRows ? ${n})) dogfoodPrimary;
-  dogfoodDriverRows = {
-    claude =
-      ((import ../connectors/claude).lib.connector { core = import ../core; }).driverRow
-        pkgs.lib;
-  };
+  # Every Driver Connector's row, as the module registers it, so the
+  # nix/dogfood-*.nix lists alone decide which are shadowed or primary. A
+  # backend Connector has no `driverRow`; the directory name is the row's name.
+  dogfoodDriverRows = builtins.listToAttrs (
+    builtins.concatMap (
+      dir:
+      let
+        c = (import dir).lib.connector { core = import ../core; };
+      in
+      pkgs.lib.optional (c ? driverRow) (pkgs.lib.nameValuePair (baseNameOf dir) (c.driverRow pkgs.lib))
+    ) (import ./connector-dirs.nix)
+  );
 
   # Shared with flake.nix's `spindrift` module config the same way (issue #486).
   dogfoodSkills = import ./dogfood-skills.nix {
@@ -111,12 +118,14 @@ let
     # renders the default Harness with harness.<driver>.env layering on.
     # dogfoodBwrapHarness inherits it, so `.#dogfood-bwrap` layers too.
     multiDriver = true;
-    # The Connector modules' work, done by hand: flake.nix registers claude's
-    # and github's rows, shadowing the nix/dogfood-shadow.nix Connectors and
-    # running those in nix/dogfood-primary.nix as primary, so the module path
-    # hands mkHarness all of it. A Driver row is shadowed or primary by name in
-    # `shadowDrivers` / `primaryDrivers`; a backend row carries the flag
-    # itself. claude's row is neither: it has no native Strategy (issue #6799).
+    # The Connector modules' work, done by hand: flake.nix registers the Driver
+    # Connectors' and github's rows, shadowing the nix/dogfood-shadow.nix
+    # Connectors and running those in nix/dogfood-primary.nix as primary, so
+    # the module path hands mkHarness all of it. A Driver row is shadowed or
+    # primary by name in `shadowDrivers` / `primaryDrivers`, and a shadowed row
+    # bakes only into the Harness running that Driver; a backend row carries
+    # the flag itself. claude's row is neither: it has no native Strategy
+    # (issue #6799).
     driverRows = dogfoodDriverRows;
     shadowDrivers = builtins.filter (n: dogfoodDriverRows ? ${n}) dogfoodShadow;
     primaryDrivers = dogfoodDriverPrimaries;
