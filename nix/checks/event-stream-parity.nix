@@ -1,16 +1,11 @@
 # Issue #3765: docs/reference.md's daemon event-stream table (the `| event |
-# fields | when |` one) is hand-maintained against the Go emit sites, and
-# nothing tied them together. Commit e4dbef87 dropped `Kind` from the
-# awake_close/awake_open literals without touching the table, and the row sat
-# stale for four days until #3861.
-#
-# The rule: every backticked name in a row's fields cell is a field -- prose
-# like "`reason` instead of `exit` on the paths with ..." or "`revision` when a
-# child was involved" counts, because the comparison is against the UNION of
-# fields over an event's emit sites (child_finish's two sites differ on `exit`,
-# preflight's on `exit`/`reason`). The pair "`issue` or `chore`" is one field:
-# the projected Dispatch key.
-#
+# fields | when |` one) is hand-maintained against the Go emit sites, and once
+# sat stale for days after `Kind` left the awake_* literals (#3861).
+# Every backticked name in a row's fields cell is a field, prose like
+# "`revision` when a child was involved" included, because the comparison is
+# against the UNION of fields over an event's emit sites (child_finish's two
+# sites differ on `exit`, preflight's on `exit`/`reason`). "`issue` or
+# `chore`" is one field: the projected Dispatch key.
 # Go side, read as text:
 #   * the struct-field -> JSON-key map comes from the tag lines of `type Event
 #     struct` in events.go, so a new field or a tag rename is picked up. The
@@ -20,13 +15,12 @@
 #     it.
 #   * emit sites are `Event{Event: <name>, ...}` (or slice-element `Event{{Event:
 #     <name>, ...}}`) literals on ONE line, <name> a report.Event* constant
-#     (a quoted literal throws), read from
-#     every non-test .go file directly in the two daemon packages. A line
-#     holding the key `Event: ` that does not parse, or whose literal does not
-#     close at the end of that line (`}` then only `}`/`)`), throws rather than
-#     being skipped, so a wrapped literal cannot silently drop a field. Double-quoted
-#     and raw (backtick) strings are stripped before fields are split, so a
-#     ", Kind: " inside a Reason is not a field; rune literals are not stripped.
+#     (a quoted literal throws), in every non-test .go file directly in the two
+#     daemon packages. A line holding `Event: ` that does not parse, or whose
+#     literal does not close on that line (`}` then only `}`/`)`), throws, so a
+#     wrapped literal cannot silently drop a field. Double-quoted and raw
+#     strings are stripped before fields are split, so a ", Kind: " inside a
+#     Reason is not a field; rune literals are not stripped.
 #     The rest of cmd/launcher is scanned only to throw on a `<pkg>.Event{Event:`
 #     literal, the way another package builds an event (any import alias).
 #   * known limit: a field set by assignment after the literal (`ev := Event{...};
@@ -36,7 +30,6 @@
 #   * report.Events() is parsed from report.go (the `Event*` tokens between
 #     `func Events() []string {` and the next `}` line) and must equal the set of
 #     emitted names, each listed once.
-#
 # `drift` is pure -- text in, mismatch messages out -- so rejection cases can
 # feed it doctored inputs.
 { pkgs, ... }:

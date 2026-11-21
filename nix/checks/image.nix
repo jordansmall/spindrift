@@ -627,9 +627,8 @@ in
         touch $out
       '';
 
-  # Issue #2531 (review fix-pass, AC2): proves the `grep -qF <line> <file> ||
-  # exit 1` shape used above really rejects a mismatch, which that check
-  # cannot show itself. Both candidate lines go through the real
+  # Issue #2531 (AC2): proves the `grep -qF <line> <file> || exit 1` shape
+  # used above really rejects a mismatch, which that check cannot show itself. Both candidate lines go through the real
   # renderAgentPathsPreamble, so this also pins that grep -F treats the
   # renderer's output as a literal rather than a glob or a regex.
   agent-paths-preamble-detects-divergence =
@@ -652,11 +651,11 @@ in
       touch $out
     '';
 
-  # Issue #2531 (review fix-pass): driverPreamble and agentPathsPreamble are
-  # separate halves of lib/image.nix's entrypoint `text`, and the agent-paths
-  # check greps a disjoint set of lines, so only this check catches
-  # driverPreamble being dropped whole, which would ship a Box that dies on
-  # an unbound DRIVER_* variable at run time.
+  # Issue #2531: driverPreamble and agentPathsPreamble are separate halves of
+  # lib/image.nix's entrypoint `text`, and the agent-paths check greps a
+  # disjoint set of lines, so only this check catches driverPreamble being
+  # dropped whole, which would ship a Box that dies on an unbound DRIVER_*
+  # variable at run time.
   driver-preamble-baked-into-image =
     let
       driverEntry = driverRegistry.entries.claude;
@@ -1099,14 +1098,12 @@ in
         touch $out
       '';
 
-  # See "Claude Code output caps" in docs/reference.md for these values and
-  # why they are set (issue #1987). The pins are independent literals, a
-  # deliberate check on the *built* image rather than values derived from
-  # lib/output-caps.nix (issue #3679; the Bash pin is only compared against
-  # it at eval time, see pinnedBashMaxOutputLength) -- changing
-  # BASH_MAX_OUTPUT_LENGTH means editing lib/output-caps.nix, and changing
-  # MAX_MCP_OUTPUT_TOKENS means editing lib/image.nix, each alongside this
-  # file's matching pin.
+  # See "Claude Code output caps" in docs/reference.md (issue #1987). The pins
+  # are independent literals checked against the *built* image, not derived
+  # from lib/output-caps.nix (issue #3679; only the Bash pin is also checked
+  # against it, at eval time, in pinnedBashMaxOutputLength): changing BASH_MAX_OUTPUT_LENGTH
+  # (lib/output-caps.nix) or MAX_MCP_OUTPUT_TOKENS (lib/image.nix) means
+  # editing the matching pin here too.
   output-cap-env-marker =
     pkgs.runCommand "output-cap-env-marker" { nativeBuildInputs = [ pkgs.jq ]; }
       ''

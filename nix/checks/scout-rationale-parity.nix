@@ -1,10 +1,9 @@
-# Issue #3166 consolidated the scoutProvisioned rationale onto one canonical
-# comment in lib/mkHarness.nix; the in-repo sites that point at it instead of
-# restating it are listed in `pointerSites` below. docs/reference.md keeps a
-# standalone prose copy deliberately -- a docs reader has no repo to follow a
-# pointer into (#2762) -- so it is neither a pointer site nor guarded here.
-# Nothing guarded the arrangement before this check: a trim of the canonical
-# comment, or a reword at any one site, would silently orphan a pointer.
+# The scoutProvisioned rationale lives in one canonical comment in
+# lib/mkHarness.nix (issue #3166); the sites in `pointerSites` below point at
+# it instead of restating it. Without this check, a trim of the canonical
+# comment or a reword at any site would silently orphan a pointer.
+# docs/reference.md keeps a standalone prose copy on purpose (a docs reader
+# has no repo to follow a pointer into, #2762), so it is not guarded here.
 { pkgs, ... }:
 let
   inherit (pkgs.lib)

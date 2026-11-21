@@ -68,14 +68,14 @@ let
         concatStringsSep "; " (map (n: "${n}: ${concatStringsSep ", " missingBySet.${n}}") offenders)
       }";
     offenders;
-  # Pins each workflow's own `if:` label guard (issue #2528 AC3). Per guard line,
-  # not file-wide: the guarded literal legitimately reappears dozens of times in
-  # the same file, so a token check survives the guard pointing elsewhere. Any
-  # `if:` line mentioning `github.event.label.name` is a guard, and one whose
-  # comparison isn't `== '<literal>'` yields null, so an unparsed reference
-  # fails rather than vanishing (issue #2641). A legitimate second label means
-  # widening the expectation to a list checked by membership. Block-scalar
-  # (`if: >-`) guards put the reference on a later line and are not seen.
+  # Pins each workflow's own `if:` label guard (issue #2528 AC3), per guard
+  # line: the literal reappears dozens of times per file, so a file-wide token
+  # check survives the guard pointing elsewhere. Any `if:` line mentioning
+  # `github.event.label.name` is a guard; one not shaped `== '<literal>'`
+  # yields null, so it fails rather than vanishing (issue #2641). A legitimate
+  # second label means widening the expectation to a list checked by
+  # membership. Block-scalar (`if: >-`) guards put the reference on a later
+  # line and are not seen.
   triggerGuardLabels =
     src:
     map (
@@ -237,15 +237,12 @@ let
     in
     concatMap labelFromSegment (builtins.tail (splitString marker src));
   # Like labelLiteralAfterMarker, but for a Go `[]string{"a", "b"}` literal:
-  # every quoted item up to the closing brace, not just the first. The marker
-  # stops before any quote, so the span's first item is checked here: after
-  # optional whitespace it must open with a quote, else (a named constant in
-  # the first slot, or an empty `{}`, deliberately) the whole extraction is
-  # [ ] and emptyOffenders fires.
-  # With that opening quote dropped, splitting on `"` puts the items at the
-  # even indices and the separators at the odd ones. A separator holding
-  # anything but whitespace and commas (say a named constant) also makes the
-  # whole extraction [ ].
+  # every quoted item up to the closing brace. The span must open with a quote
+  # after optional whitespace, else (a named constant in the first slot, or an
+  # empty `{}`, deliberately) the whole extraction is [ ] and emptyOffenders
+  # fires. Past that quote, splitting on `"` puts items at even indices and
+  # separators at odd; a separator holding anything but whitespace and commas
+  # also yields [ ].
   labelLiteralsInSpanAfterMarker =
     marker: src:
     let
@@ -270,23 +267,17 @@ let
   # doctor.go's ResearchLabelNamesFor() literal (ADR 0041). The marker is unique in
   # that file: its other append(names, ...) calls have no quote after the comma.
   extractResearchLabelNamesLiteral = labelLiteralAfterMarker ''append(names, "'';
-  # doctor.go's AmbiguousLabelNames() literal (issue #2817). A separate
-  # extractor because the two Go shapes differ and so need distinct markers.
-  # This marker matches every `return []string{...}` span in doctor.go —
-  # AmbiguousLabelNames() and ButlerLabelNames() (ADR 0056) both share the
-  # shape — so it cannot cross-match ResearchLabelNamesFor()'s different
-  # `append(names, "...")` shape. Every literal in each span is extracted
-  # (ButlerLabelNames() lists three); all are registered (labels.ambiguous,
-  # labels.butlerFinding, labels.butlerPatch, labels.tuningFinding). A
+  # doctor.go's AmbiguousLabelNames() literal (issue #2817). This marker
+  # matches every `return []string{...}` span in doctor.go, ButlerLabelNames()'s
+  # (ADR 0056) too, and cannot cross-match ResearchLabelNamesFor()'s
+  # `append(names, "...")` shape. Every literal in each span is extracted; a
   # non-literal item in a span, first slot included, empties the whole result.
   extractReturnStringSliceLabels = labelLiteralsInSpanAfterMarker "return []string{";
   labelsWrittenBy = surface: unique (surface.extract surface.src);
   # Checks emptyOffenders before registryOffenders: every surface writes at
   # least one label today, so an empty extraction means the extractor's marker
   # no longer matches the source (or the kind rows stopped carrying
-  # findingLabel/patchLabel), not that the surface stopped writing labels.
-  # Checking that first keeps a broken extractor from passing vacuously as a
-  # clean membership result. Factored out so the regressions below can call it.
+  # findingLabel/patchLabel), and a broken extractor must not pass vacuously.
   assertHarnessWritesInRegistry =
     { harnessSurfaces, registryLabels }:
     let

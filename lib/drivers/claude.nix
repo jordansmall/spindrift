@@ -1,8 +1,7 @@
-# The claude Driver: pure data only (ADR 0009, issue #624). The registry
-# (./default.nix) validates this entry's shape and renders it into what
-# lib/mkHarness.nix bakes into the image. The bats harness sources
-# mkHarness.internals.driverPreambleFile, byte-identical to the preamble the
-# image bakes in, so the suite exercises the same bytes (issue #433).
+# The claude Driver: pure data only (ADR 0009, issue #624). ./default.nix
+# validates this entry's shape and renders it into what lib/mkHarness.nix
+# bakes into the image; the bats harness sources the same rendered preamble
+# (mkHarness.internals.driverPreambleFile, issue #433).
 { lib }:
 {
   name = "claude";
@@ -37,7 +36,7 @@
   # comma-separated token: driver-exec/args.go splits this value on whitespace.
   flagsCommon = "--verbose --output-format stream-json --dangerously-skip-permissions --disallowedTools ScheduleWakeup,CronCreate,CronDelete,CronList,RemoteTrigger,Monitor";
 
-  # Issue #2011: claude then omits run_in_background from the Bash, Agent/Task,
+  # Issue #2011: with this set, claude omits run_in_background from the Bash, Agent/Task,
   # and PowerShell input schemas, so the model cannot park a headless turn on a
   # notification a one-shot `claude -p` never receives. --disallowedTools reaches
   # a tool name, never a parameter. reject-background-bash.sh still covers
@@ -58,16 +57,12 @@
 
   # Issue #427/#447/#448, ADR 0009: the launcher mounts a writable per-issue
   # host directory over this so a fix pass resumes the initial run's session.
-  # A Driver that omits this attribute gets no per-issue cache and no mount,
-  # so it has no resumable session state.
   sessionCacheDirRelative = ".claude/projects";
 
   # Rendered at eval time by builtins.toJSON (ADR 0007 tier-1) so model names
-  # never reach bash as interpolated strings. Takes the whole roster (issue
-  # #264); lib/mkHarness.nix already dropped empty-model entries through
-  # rosterLib.dropOptedOut, so e.model is non-empty. `prompt` stays "" because
-  # cmd/launcher/internal/promptassembly injects it at runtime; claude's schema
-  # has no `mode` key.
+  # never reach bash as interpolated strings (issue #264). rosterLib.dropOptedOut
+  # already dropped empty-model entries. `prompt` stays "" because promptassembly
+  # injects it at runtime; claude's schema has no `mode` key.
   agentsJsonTemplate =
     { roster }:
     let

@@ -1,8 +1,7 @@
 # Box image assembly (issue #514), including the nix-in-box store DB
 # registration, the writable-store self-test wiring (ADR 0018), and the
-# fakeroot chowns. This came out of lib/mkHarness.nix as a pure code move, so
-# the image derivation must stay byte-identical: every value below is copied
-# verbatim or threaded in as a parameter, never re-derived here.
+# fakeroot chowns. A value lib/mkHarness.nix computes is threaded in as a
+# parameter, never re-derived here.
 {
   pkgs,
   lib,
@@ -32,9 +31,8 @@
   # registry's preamble (issue #622).
   prompts,
   # The knob subset the image consumes: nix-in-box / writable-store wiring
-  # (ADR 0018), the forgejo-backend selector (issue #1963), the prefetch
-  # snippet, the Driver-scoped image name (issue #262 AC1), and the
-  # schema-derived entrypoint defaults preamble.
+  # (ADR 0018), the prefetch snippet, the Driver-scoped image name (issue
+  # #262), and the schema-derived entrypoint defaults preamble.
   knobs,
 }:
 let

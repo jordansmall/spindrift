@@ -1,30 +1,21 @@
-# Issue #7041: the shadow-mode "consecutive clean runs" recipes in
-# docs/reference.md are shell a human pastes, so nothing ran them. This
-# extracts each fenced block from the doc as written and runs each over small
-# fixture log sets, so doc and check cannot drift.
+# Issue #7041: runs each "consecutive clean runs" recipe in docs/reference.md,
+# extracted as written, over small fixture log sets, so doc and check cannot
+# drift.
 #
-# Cases pin: a run still in flight is skipped, not counted dirty (an unended
-# Pass whose Dispatch's primary `issue-<n>.log` has no `dispatch_settled` for
-# opencode; a live file-name pid for github); a finished run with a missing
-# summary is dirty, a killed `-fix-N` satellite included, since only the
-# primary log is ever settled; and a stamp-less log never sorts ahead of
-# stamped ones, which the opencode cases run under en_US.UTF-8 to catch (the
-# locale ignores the leading tab, so a plain `sort -r` puts the empty stamp
-# first; a malformed stamp sorts like a missing one but keeps its verdict).
-# Stamps carry mixed UTC offsets, so they order by instant, not text. Each
-# recipe's `finished=` toggle is also run set to 1, for logs fetched from CI,
-# which have all ended: then an unended Pass or missing summary counts dirty.
+# Cases pin: an in-flight run is skipped, not dirty (opencode: an unended Pass
+# whose primary `issue-<n>.log` lacks `dispatch_settled`; github: a live
+# file-name pid); a finished run missing a summary is dirty, a killed `-fix-N`
+# satellite included; a stamp-less log never sorts ahead of stamped ones (the
+# opencode cases run under en_US.UTF-8, whose collation ignores the leading
+# tab, so a plain `sort -r` would put the empty stamp first); stamps with
+# mixed UTC offsets order by instant. `finished=1` (CI-fetched logs, all ended) counts an
+# unended Pass or missing summary dirty.
 #
-# The shadow recipe also reads each log's `shadow-replay` sidecar (issue #6872):
-# live and replayed summaries count together, a run counts once whichever
-# holds its summaries, and each non-empty set must be clean on its own. A log
-# stamped with another Driver stays skipped whatever sits beside it, and a
-# sidecar not opening with its log's own dispatch_start is ignored.
-#
-# The primary-mode recipe (issue #6998) counts a process clean only with an
-# audit file holding at least one decision entry (the sandbox totals line is
-# not one) and no refusal, and an empty or absent `.log`; a live pid is in flight,
-# and `finished=1` counts it by its content.
+# The shadow recipe also reads each log's `shadow-replay` sidecar (issue
+# #6872): a run counts once whichever set holds its summaries, and each
+# non-empty set must be clean on its own. The primary-mode recipe (issue
+# #6998) needs an audit file with at least one decision entry (the sandbox
+# totals line is not one), no refusal, and an empty or absent `.log`.
 { pkgs, ... }:
 {
   shadow-clean-run-recipes =

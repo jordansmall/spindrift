@@ -121,9 +121,8 @@ rec {
       gofmt ? false,
       nativeBuildInputs ? [ ],
       # Inverts the final diff: the build passes only when the reconstruction
-      # does NOT match the committed file. Lets documented-fact-guard drive
-      # this function's real rejection path against a synthetic drift instead
-      # of only its happy path (issue #2949 review finding).
+      # does NOT match the committed file, so documented-fact-guard can drive
+      # the real rejection path against a synthetic drift (issue #2949).
       expectMismatch ? false,
     }:
     let

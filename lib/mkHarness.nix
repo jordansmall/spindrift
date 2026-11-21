@@ -55,11 +55,9 @@
   # prose.
   researchSelfContainedPrompt ? builtins.readFile ../templates/default/prompts/research-self-contained-prompt.md,
   # Used instead of `prompt` when DISPATCH_KIND=butler (ADR 0056, issue
-  # #3875): a one-shot, read-only sweep of one Ledger Chore, never an issue,
-  # so like researchPrompt this replaces the whole issue-prompt.md flow
-  # rather than sharing its COMMS/CHECK/outcome blocks. Carries no harness-
-  # owned contract injection of its own: its OUTCOME section is self-
-  # contained in the template.
+  # #3875): a read-only sweep of one Ledger Chore, never an issue, so like
+  # researchPrompt it replaces the whole issue-prompt.md flow. No contract is
+  # injected: its OUTCOME section is self-contained in the template.
   butlerPrompt ? builtins.readFile ../templates/default/prompts/butler-prompt.md,
   # The butler's own in-Box reviewer prompt (ADR 0056, issue #3880): a butler
   # candidate's finding lives only in the delegation message, never a branch
@@ -93,14 +91,12 @@
   # Where a row prompt no Consumer parameter binds is read from; overridable
   # only so the same check can point a stub row at a fixture file.
   kindPromptsDir ? ../templates/default/prompts,
-  # Skill files baked into the image at /agent/skills, alongside the
-  # harness-owned skills. Each element is a path/derivation (copied under its
-  # basename) or a { name; src; } content entry (issue #597) re-realized with
-  # the image's own Linux pkgs, never a consumer host derivation, which would
-  # tag the image's drvPath with the host system. The box program copies the
-  # baked set into the Driver's runtime skills dir at startup, then copies
-  # SPINDRIFT_SKILLS_DIR (staged at /operator-skills) over the top, so an
-  # operator skill wins a name clash without erasing the baked set.
+  # Skill files baked into the image at /agent/skills. Each element is a
+  # path/derivation (copied under its basename) or a { name; src; } entry
+  # (issue #597) re-realized with the image's Linux pkgs, since a host
+  # derivation would tag the image's drvPath with the host system. box copies
+  # SPINDRIFT_SKILLS_DIR (/operator-skills) over the baked set at startup, so an
+  # operator skill wins a name clash without erasing the rest.
   skills ? [ ],
   # Non-secret run config baked into the `run` command as its built-in defaults;
   # the knob's flag still wins at runtime, so one build can be re-pointed.
@@ -129,28 +125,24 @@
   # credentialEnv = "<env var>"; }`, plus optional `credentialScheme`
   # ("bearer" or "basic"), `identityEnv` (Basic identity) and `baseEnv` (the
   # site base URL a `{base}` route host resolves from). They reach the host
-  # binaries through the launcher input document's `backends` section (ADR
-  # 0073, issue #6805).
+  # through the input document's `backends` section (ADR 0073, issue #6805).
   backendRows ? { },
   # Prompt fragment files Connectors contribute (lib/flakeModule.nix's
   # spindrift.connectors.<name>.fragments), each `{ name; dir; shipped; }` in
   # lib/fragment-paths.nix's Connector shape (issue #6857). Their dirs overlay
   # the image's prompts/fragments, and a path one declares is read from it.
   connectorFragments ? [ ],
-  # Names of core Drivers whose Connector row (a `driverRows` entry carrying
-  # `module`) runs in shadow mode (ADR 0073, issue #6797): the native Strategy
-  # stays authoritative while the Box replays each Pass log through the
-  # module and records divergences. Only the Harness's own `driver` gets its
-  # shadow row, so another Driver's image never bakes the shadow wasm. A
-  # Driver with no native Strategy (lib/drivers/default.nix's connectorHosted)
-  # has nothing to shadow and is refused. Set by lib/flakeModule.nix from
+  # Core Drivers whose Connector row (a `driverRows` entry carrying `module`)
+  # runs in shadow mode (ADR 0073, issue #6797): the native Strategy stays
+  # authoritative while the Box replays each Pass log through the module and
+  # records divergences. Only the Harness's own `driver` bakes its shadow wasm;
+  # a connectorHosted Driver has nothing to shadow and is refused. Set from
   # `spindrift.connectors.<name>.shadow`.
   shadowDrivers ? [ ],
-  # Names of core Drivers whose Connector row (a `driverRows` entry carrying
-  # `module`) is primary (ADR 0073, issue #6999): the Connector is the Driver
-  # in place of the native Strategy, on the host and in the Box, whichever
-  # Driver the Harness selects, with no fallback. A connectorHosted Driver is
-  # always that and is refused here. Set by lib/flakeModule.nix from
+  # Core Drivers whose Connector row is primary (ADR 0073, issue #6999): the
+  # Connector replaces the native Strategy on the host and in the Box,
+  # whichever Driver the Harness selects, with no fallback. A connectorHosted
+  # Driver is always Connector-run and is refused here. Set from
   # `spindrift.connectors.<name>.primary`.
   primaryDrivers ? [ ],
   # Set by lib/flakeModule.nix when more than one Driver is declared (ADR 0064,
@@ -297,10 +289,9 @@ let
   # row may omit some, and the Box would otherwise ship no forgejo fragments
   # for them (issue #6867). Unlike hostedRowOf's `driverRows` fallback, which
   # swaps the whole row by name, this trims per path: each path the Consumer
-  # declares wins and the fallback ships the rest. Sorted by name.
-  #
-  # Only the Connectors whose fragments core used to ship to every Box fall
-  # back (forgejo's); jira's shipped only where the Consumer registered it.
+  # declares wins and the fallback ships the rest. Sorted by name. Only
+  # forgejo falls back: core shipped its fragments to every Box, while jira's
+  # shipped only where the Consumer registered it.
   fragmentFallbackConnectors = [ "forgejo" ];
   effectiveConnectorFragments =
     let
@@ -369,10 +360,7 @@ let
       scanned;
   inherit (promptContract) byId;
 
-  # An alias for the fragmentsDir param above, kept so this file's existing
-  # fragmentsSourceDir uses are unchanged (issue #463).
   fragmentsSourceDir = fragmentsDir;
-  # Mirrors fragmentsSourceDir's alias, for choresDir (ADR 0056, issue #3875).
   choresSourceDir = choresDir;
 
   # The `<name>.md` stems lib/image.nix bakes under chores/, shared by the
@@ -395,10 +383,9 @@ let
 
   injectOutcomeContract = injectSection outcomeContractMarker outcomeContract;
 
-  # COMMS and CHECK/COMMIT are the other two blocks fix-prompt.md used to
-  # hand-copy from issue-prompt.md (issue #455), sliced the same way as the
-  # outcome contract above so fix-prompt.md can drop them and receive the
-  # byte-identical section at bake time instead.
+  # COMMS and CHECK/COMMIT are sliced like the outcome contract, so
+  # fix-prompt.md receives them byte-identical at bake time rather than
+  # hand-copying them from issue-prompt.md (issue #455).
   commsMarker = (byId "comms").marker;
   commsBlock = promptContract.canonicalText.comms;
   checkMarker = (byId "check").marker;
@@ -642,12 +629,11 @@ let
   driverEntries = driverRegistry.entries // connectorEntries;
   outsideRows = removeAttrs connectorEntries (lib.attrNames driverRegistry.entries);
   # The rows the launcher input document and the Box's rows file carry: the
-  # Descriptor facts plus the wasm path. `p` supplies the module's pkgs, the
-  # host's for the document and the Box's own for the image. The document
-  # carries outside rows, every connectorHosted row and primary rows only: the
-  # host never runs a shadow. Those rows decode on the host too, so a host that
-  # cannot evaluate a module fails evaluation here rather than reading Pass
-  # logs with no Driver.
+  # Descriptor facts plus the wasm path, built with `p` (the host's pkgs for
+  # the document, the Box's for the image). The document carries outside,
+  # connectorHosted and primary rows only, since the host never runs a shadow;
+  # a host that cannot evaluate a module fails eval here rather than reading
+  # Pass logs with no Driver.
   rowOf =
     p: r:
     driverRegistry.descriptorFacts r
@@ -800,10 +786,10 @@ let
     driverEntries.${driver}
       or (throw "mkHarness: unknown driver '${driver}'; known drivers: ${lib.concatStringsSep ", " (lib.attrNames driverEntries)}");
 
-  # The OCI image name, scoped to the selected Driver (issue #262). The claude
-  # Driver keeps the historical `spindrift` name so existing tags and bats
-  # fixtures are unchanged. Threaded through image.nix and preambles so the
-  # image, its content-hash tag, and the launcher's re-tag all agree.
+  # The OCI image name, scoped to the selected Driver (issue #262); claude keeps
+  # the bare `spindrift` name existing tags and bats fixtures use. Threaded
+  # through image.nix and preambles so the image, its content-hash tag, and the
+  # launcher's re-tag all agree.
   imageName = if driver == "claude" then "spindrift" else "spindrift-${driver}";
 
   # flakeOption entries are the Consumer-tunable subset.
@@ -859,11 +845,9 @@ let
   } flakeOptionEntries mergedDefaults;
   removedChoiceCheckOk = if removedChoiceError == null then true else throw removedChoiceError;
 
-  # Eval-time choices guard (issue #2519): flakeModule.nix's generated options
-  # use `types.enum`, but that only protects Consumers going through the flake
-  # module. A Consumer calling mkHarness directly could otherwise set an
-  # invalid choice value. This validates the resolved mergedDefaults value, at
-  # the one point both entry paths funnel through.
+  # Eval-time choices guard (issue #2519): flakeModule.nix's `types.enum` only
+  # protects Consumers going through the flake module, so this validates the
+  # resolved value where both entry paths funnel through.
   choiceViolations = lib.filter (issue: issue != null) (
     lib.mapAttrsToList (
       key: entry:
@@ -962,12 +946,11 @@ let
   # downstream consumer of finalRoster sees the roster (issue #2571).
   keptRoster = rosterLib.dropOptedOut resolvedRoster;
 
-  # A Driver with `subagents = false` provisions no subagent yet, so only the
-  # reviewer stays: the orchestrator's own review pass reads its model and
-  # effort. Every subagent role drops, which bakes SCOUT_PROVISIONED,
-  # WORKER_PROVISIONED and FILER_ENABLED false. Dropping before the
-  # namespaced-model check keeps the inherited bare claude ids on those roles
-  # from failing the build.
+  # A Driver with `subagents = false` keeps only the reviewer, whose model and
+  # effort the orchestrator's own review pass reads; every subagent role drops,
+  # baking SCOUT_PROVISIONED, WORKER_PROVISIONED and FILER_ENABLED false.
+  # Dropping before the namespaced-model check keeps those roles' inherited
+  # bare claude ids from failing the build.
   provisionedRoster =
     if driverEntry.subagents or true then
       keptRoster
@@ -1084,18 +1067,16 @@ let
 
   # Custom roster entries carrying their own prompt, baked into the image
   # alongside the fixed prompt files. An entry omitting `prompt`, or setting it
-  # to null or "", is treated as having no inline prompt (issue #264 review
-  # finding); "" in the copy loop would overwrite a read-only shipped prompt.
+  # to null or "", has no inline prompt (issue #264); "" in the copy loop would
+  # overwrite a read-only shipped prompt.
   customRosterPromptFiles = lib.filter rosterLib.hasInlinePrompt finalRoster;
 
   # The Driver's in-box half, rendered by the registry (issue #624) into
-  # agent/entrypoint.sh's DRIVER_* vars and function definitions (ADR 0009),
-  # shared between the image preamble and the bats harness file (issue #433)
-  # so neither can drift from the other.
-  # DRIVER_ROWS_FILE is appended here, not rendered by the registry: the rows
-  # file is the Harness's own, not a Driver fact. Its string context pulls the
-  # file and the wasm into the image closure. Always present, because a
-  # connectorHosted Driver's Connector row is always in it.
+  # entrypoint DRIVER_* vars (ADR 0009), shared by the image preamble and the
+  # bats harness file (issue #433) so neither can drift. DRIVER_ROWS_FILE is
+  # appended here because the rows file is the Harness's, not a Driver fact;
+  # its string context pulls the wasm into the image closure. Always present:
+  # a connectorHosted Driver's row is always in it.
   driverPreambleWith =
     rowsFile:
     driverRegistry.renderPreamble driverEntry + "DRIVER_ROWS_FILE=${lib.escapeShellArg rowsFile}\n";
@@ -1115,17 +1096,16 @@ let
   promptContractRegistryJson = builtins.toJSON promptContract.validateMarkers;
 
   # lib/prompt-contract.nix's forbiddenMarkers list as JSON (issue #2464), for
-  # box's `--forbidden-markers-registry` flag (the read-only guards);
-  # assemble-prompt no longer takes it (issue #2513).
+  # box's `--forbidden-markers-registry` flag (the read-only guards).
   forbiddenMarkersRegistryJson = builtins.toJSON promptContract.forbiddenMarkers;
 
   # Build-time reject arm (issue #2250): resolves both validateMarkers
-  # "reject" rows against this build's static knowledge. The relay fragment is
-  # one shared root file for every tracker whose tracker-axis folder has no
-  # relay file of its own; a tracker whose folder carries one resolves per
-  # arm, so only the former name a file to check. For the rest the id is
-  # omitted from contentByRowId and the row resolves to "advise".
-  # buildTimeRejectOk below forces the list.
+  # "reject" rows against this build's static knowledge. The relay row is
+  # checked only when the tracker's tracker-axis folder has no
+  # research-verdict-relay.md of its own, so the shared root file is the one
+  # rendered; otherwise it resolves per arm, its id is omitted from
+  # contentByRowId, and the row resolves to "advise". buildTimeRejectOk below
+  # forces the list.
   researchRelayChecksFragment =
     issueTrackerRow ? name
     && !builtins.pathExists (
@@ -1151,13 +1131,11 @@ let
   negationOnlyFragments = [ "open-pr-push-outbox.md" ];
 
   # The fragment rows the forbidden-marker scan reaches (issue #2510): every
-  # row except those whose gate name already proves the fragment is
-  # access-mode-aware, so a legitimate negation ("do NOT `git push`") in the
-  # read-only half of a pair is never mistaken for a leak. A HOST_MEDIATED*
-  # gate qualifies under either access mode (issue #6259): the clone source is
-  # read-only there, so its "do NOT `git push`" is always a negation.
-  # Unconditional: such a marker in the corpus is a problem for any Consumer,
-  # not just this build.
+  # row except those whose gate proves the fragment access-mode-aware, so a
+  # negation ("do NOT `git push`") in a pair's read-only half is no leak. A
+  # HOST_MEDIATED* gate qualifies under either mode (issue #6259): its clone
+  # source is read-only. Unconditional: such a marker is a problem for any
+  # Consumer, not just this build.
   readOnlyReachableFragmentRows = builtins.filter (
     row:
     !(
@@ -1219,13 +1197,12 @@ let
         ) forbiddenMarkerViolations
       }";
 
-  # A removed fragment variable still written as a literal ${NAME} in a
-  # Consumer-overridable prompt arg, fragment file or chore file renders as that
-  # literal text (issue #4401); a deprecated one is collected here too and only
-  # warns (deprecatedFragmentVarWarnings). Scans the prompt args, each lib/fragments.nix
-  # row's fragment file present under fragmentsDir, and the top-level *.md
-  # files under choresDir, so it fires regardless of which gates a build turns
-  # on. Registry and rationale: lib/removed-fragment-vars.nix.
+  # A removed fragment variable still written as a literal ${NAME} in a prompt
+  # arg, fragment file or chore file renders as that literal text (issue
+  # #4401); a deprecated one only warns (deprecatedFragmentVarWarnings). Scans
+  # the prompt args, each lib/fragments.nix row's file present under
+  # fragmentsDir and the top-level *.md under choresDir, whatever gates a build
+  # turns on. Registry and rationale: lib/removed-fragment-vars.nix.
   removedFragmentVarHits =
     let
       promptArgs = {
@@ -1302,10 +1279,6 @@ let
           v: "  ${v.source}: \${${v.name}} (removed in issue #${toString v.issue})"
         ) removedFragmentVarViolations
       }";
-
-  # The image build lives in lib/image.nix (issue #514); the image derivation
-  # must stay byte-identical, so every value the module needs is threaded in
-  # exactly as it was computed here.
 
   # The host-native mirror derivations further down this file (promptDir,
   # driverPreambleFile, runArtifacts, and others) read the same fields off the
@@ -1411,12 +1384,10 @@ let
   # for the same drift-proof reason (issue #640).
   researchOutcomeContractFile = hostPkgs.writeText "research-outcome-contract.md" imageContracts.researchOutcomeContract;
 
-  # The Driver's registry-rendered preamble as a host store-path file. The
-  # bats harness prepends it before exec-ing the entrypoint (issues
-  # #433/#624) so tests exercise the exact bytes mkHarness bakes into the
-  # image, not hand-copied duplicates or entrypoint fallback literals. Its rows
-  # file is rendered with hostPkgs: on a Linux host that is the image's own
-  # file, and on a darwin host the image's holds a Linux wasm it cannot build.
+  # The Driver's preamble as a host store-path file, which the bats harness
+  # prepends so tests exercise the exact bytes baked into the image (issues
+  # #433/#624). Its rows file uses hostPkgs: a darwin host cannot build the
+  # image's Linux wasm.
   driverPreambleFile = hostPkgs.writeText "driver-preamble.sh" (
     driverPreambleWith (driverRowsFileWith hostPkgs)
   );
@@ -1487,10 +1458,8 @@ let
       ''
   );
 
-  # Nix store paths are always `/nix/store/<32-char-base32-hash>-<name>`, so
-  # characters 11 to 42 (0-indexed) are the hash. Shared by imageHash and
-  # launcherCurrencyHash so the prefix-length and hash-width numbers live in
-  # one place.
+  # Store paths are `/nix/store/<32-char-base32-hash>-<name>`, so characters 11
+  # to 42 (0-indexed) are the hash.
   storeHashOf = path: builtins.substring 11 32 path;
 
   # The image's store path as plain text (context discarded), so the launcher
@@ -1772,15 +1741,12 @@ let
     meta.license = lib.licenses.mit;
   };
 
-  # The unattended driving loop (issue #3538): sources harness.env the same
-  # way spindriftBin does and shares runInputDocumentFile with it, so no
-  # knob is hand-copied and none can drift between the CLI and the loop. It
-  # re-invokes the Consumer's own CLI app (DAEMON_APP, default `.#`) through
-  # `nix run` rather than exec'ing launcherBin directly, because that is how
-  # it drives a *child* Dispatch through the flake's own app resolution
-  # (e.g. `.#dogfood-bwrap` for a bwrap Consumer) instead of always the
-  # binary it happened to be built against. It is the only component that
-  # invokes `nix` at runtime, hence the unconditional runtimeInput below.
+  # The unattended driving loop (issue #3538): shares harness.env sourcing and
+  # runInputDocumentFile with spindriftBin, so no knob can drift between the
+  # CLI and the loop. It runs each child Dispatch through `nix run` of the
+  # Consumer's own CLI app (DAEMON_APP, default `.#`), so the flake's app
+  # resolution picks the binary (e.g. `.#dogfood-bwrap`), not the one it was
+  # built against. The only runtime `nix` caller, hence the runtimeInput below.
   daemonWrapper =
     (hostPkgs.writeShellApplication {
       name = "spindrift-daemon";
@@ -1846,13 +1812,12 @@ let
   missingReviewAxisMsg = "spindrift: the explicit `roster` carries a `reviewer` entry but no `review-axis` entry, so the /code-review fan-out runs on the Driver's ungoverned `general-purpose` default instead of a rostered agent (issue #3447); compose the roster from `rosterLib.defaultRoster { }`, or add a `review-axis` entry to it by hand.";
 
   # Under a Driver with Provider-namespaced model ids, a bare worker model the
-  # Consumer set on purpose, via `roster`, `byName.worker.model`, or the legacy
-  # `defaults.workerModel` knob, is otherwise dropped silently (issues #5331,
-  # #6142). The inherited schema default is not warned: that drop is the
-  # expected path. Worker names are unique (normalizeRoster rejects
-  # duplicates), so at most one entry drops. `byName` is tested for a non-null
-  # model, not presence: the flake module passes every `byName.<name>.model`
-  # through, defaulting to null.
+  # Consumer set on purpose (`roster`, `byName.worker.model`, or legacy
+  # `defaults.workerModel`) is otherwise dropped silently (issues #5331,
+  # #6142); dropping the inherited schema default is expected and not warned.
+  # normalizeRoster rejects duplicate names, so at most one worker drops.
+  # `byName` is tested for a non-null model, not presence: the flake module
+  # passes every `byName.<name>.model` through, defaulting to null.
   workerModelSetOnPurpose =
     roster != null || defaults ? workerModel || (byName.worker.model or null) != null;
   droppedBareWorkers = lib.optionals (
@@ -1892,16 +1857,11 @@ let
       true
   ) buildTimeRejectVerdicts;
 
-  # REPO_SLUG is deliberately runtime-optional at the Nix layer, so this must
-  # not throw merely because mergedDefaults.repoSlug is "": most Consumers
-  # supply it via --repo-slug at dispatch time, and equivalence.nix pins
-  # `mkRun {}` baking `"REPO_SLUG":""` as a must-succeed case (issue #2527).
-
-  # What is eval-decidable is a Consumer that explicitly writes
-  # `repoSlug = "";` (detected on the raw `defaults` arg) while selecting a
-  # non-fully-local backend pairing. A genuinely runtime-missing slug is
-  # caught instead by cmd/launcher/main.go's validate(); the two checks are
-  # complementary, not overlapping.
+  # REPO_SLUG is runtime-optional at the Nix layer (most Consumers pass
+  # --repo-slug at dispatch; equivalence.nix pins `mkRun {}` baking
+  # `"REPO_SLUG":""`, issue #2527), so only an explicit `repoSlug = "";` in the
+  # raw `defaults` with a non-fully-local pairing fails here. A runtime-missing
+  # slug is cmd/launcher/main.go's validate()'s to catch.
   repoSlugCoherenceOk =
     if (defaults ? repoSlug) && defaults.repoSlug == "" && !fullyLocal then
       throw "mkHarness: repoSlug is explicitly set to an empty string, but CODE_FORGE=${mergedDefaults.codeForge}/ISSUE_TRACKER=${mergedDefaults.issueTracker} is not fully-local (CODE_FORGE=local and ISSUE_TRACKER=local) -- either supply a real repoSlug or omit the key entirely so REPO_SLUG is supplied at dispatch runtime instead"
@@ -1949,22 +1909,18 @@ let
     codeForgeRow
   ];
 
-  # lib/awake-window.nix's `parse` mirrors the runtime validation in
-  # awake.go's ParseWindow (issue #3542). Unlike backendKnobsOk this
-  # needs no backend gate -- the knob is valid or not regardless of
-  # tracker/forge. `builtins.seq` forces the result so the `assert` below
-  # triggers a throw.
+  # lib/awake-window.nix's `parse` mirrors awake.go's ParseWindow (issue
+  # #3542); unlike backendKnobsOk it needs no backend gate. `builtins.seq`
+  # forces the result so the `assert` below throws.
   awakeWindow = import ./awake-window.nix;
   daemonAwakeWindowOk = builtins.seq (awakeWindow.parse (
     mergedDefaults.daemonAwakeWindow or ""
   )) true;
 
   # A Chore named in BUTLER_CHORES with no matching <name>.md would otherwise
-  # go unnoticed until a Box claims its Ledger and finds nothing to run
-  # (issue #3991) -- catch a typo at eval time instead, naming the offender.
-  # Splits on runs of space, tab, CR and LF (close to Go's strings.Fields,
-  # which also splits on \v, \f and Unicode spaces) against the same
-  # choreStems already read for choreCatalog above.
+  # go unnoticed until a Box claims its Ledger and finds nothing to run (issue
+  # #3991). Splits on runs of space, tab, CR and LF, close to Go's
+  # strings.Fields, which also splits on \v, \f and Unicode spaces.
   butlerChoresTokens = lib.filter (s: s != "") (
     lib.splitString " " (
       lib.replaceStrings [ "\t" "\n" "\r" ] [ " " " " " " ] (mergedDefaults.butlerChores or "")
@@ -2062,11 +2018,9 @@ else
       # without re-deriving the bwrap/OCI default.
       inherit imageAttrName;
 
-      # daemonBin is otherwise reachable only as apps.daemon.program, a
-      # string -- exposed here so nix/checks/equivalence.nix's store-path
-      # checks can compare and override it directly (issue #3621). launcherBin
-      # is exposed so nix/checks/go.nix's connector-host-escapeprobe-absent-from-release
-      # can scan it.
+      # daemonBin is otherwise reachable only as the apps.daemon.program
+      # string, which equivalence.nix's store-path checks cannot override
+      # (issue #3621). launcherBin is exposed for nix/checks/go.nix to scan.
       inherit daemonBin connectorSandboxImage launcherBin;
 
       # The fully resolved roster, after dropOptedOut and the reviewEffort

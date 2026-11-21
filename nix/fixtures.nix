@@ -168,17 +168,12 @@ let
   # paths yield byte-identical outputs.
   harness = import ../lib/mkHarness.nix dogfoodHarnessArgs;
 
-  # The A/B twin of `harness` above (issue #2672): only `runtime`,
-  # `daemonApp`, and `daemonSelfApp` differ, so the dogfood loop runs through
-  # the daemonless bwrap runner without a second, hand-copied config
-  # drifting from the podman-backed original. daemonApp points its daemon
-  # back at `.#dogfood-bwrap` (issue #3538) so `nix run .#dogfood-bwrap-daemon`
-  # drives a bwrap Box, not the podman one the schema default (`.#`) would
-  # re-invoke. daemonSelfApp points at `.#dogfood-bwrap-daemon` (issue #3543):
-  # flake.nix exposes this harness's `apps.daemon` under that top-level name,
-  # so the daemon's own self-check must name the attribute it was actually
-  # launched as, or it would evaluate the *default* (podman) harness's
-  # daemon and see a permanent mismatch.
+  # The A/B twin of `harness` above (issue #2672), differing only in `runtime`,
+  # `daemonApp`, and `daemonSelfApp`, so the bwrap loop cannot drift from the
+  # podman one. daemonApp re-invokes `.#dogfood-bwrap` (issue #3538), not the
+  # schema default `.#` (podman). daemonSelfApp names the attribute flake.nix
+  # exposes this harness's daemon under (issue #3543), or the self-check would
+  # evaluate the podman harness's daemon and see a permanent mismatch.
   dogfoodBwrapHarness = import ../lib/mkHarness.nix (
     dogfoodHarnessArgs
     // {
@@ -190,12 +185,11 @@ let
     }
   );
 
-  # The opencode Driver's Harness as flake.nix declares it and the module's
-  # otherHarness renders it, so the equivalence check can pin its content, not
-  # just that it differs from claude's. A non-default Driver never inherits
-  # the default entry's Driver-valued env keys (effort, driverBashTimeoutMs);
-  # flake.nix sets opencode's own bashTimeoutMs, so it is re-added below.
-  # The list is hand-written on purpose, independent of driver-map.nix's
+  # The opencode Driver's Harness as the module's otherHarness renders it, so
+  # the equivalence check can pin its content. A non-default Driver never
+  # inherits the default entry's Driver-valued env keys, so removeAttrs drops
+  # them and opencode's own bashTimeoutMs is re-added. That key list is
+  # hand-written on purpose, independent of driver-map.nix's
   # driverValued.env, so a new top-level Driver-valued default must join it.
   dogfoodOpencodeHarness = import ../lib/mkHarness.nix (
     dogfoodHarnessArgs
@@ -348,9 +342,8 @@ let
 
   # The opt-out mirror of reviewAxisTracksReviewerHarness: the reviewer opts
   # out through the #392 "" sentinel, so review-axis must go with it.
-  # scoutModel stays set to keep the baked template non-empty, otherwise the
-  # absence assertions pass vacuously against an empty AGENTS_JSON_TEMPLATE.
-  # Eval-only, consumed by agents-json-baked.
+  # scoutModel stays set, or the absence assertions pass vacuously against an
+  # empty AGENTS_JSON_TEMPLATE. Eval-only, consumed by agents-json-baked.
   reviewAxisOptOutHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     defaults = {
@@ -777,11 +770,9 @@ let
   };
 
   # Issue #6796: a Consumer importing the fixture Driver Connector, and the
-  # artifacts its row renders for the launcher (input document) and the Box
-  # (rows file). The Go tests read these instead of hand-written rows. The
-  # document comes from the Consumer's own launcher app; the rows file from a
-  # harness built on the row the Consumer's config holds. `module.wasm` links
-  # the Connector's wasm so it stays in the closure the tests run against.
+  # input document and rows file its row renders, which the Go tests read
+  # instead of hand-written rows. `module.wasm` keeps the Connector's wasm in
+  # the closure the tests run against.
   driverConnectorConsumer = connectorConsumerVia [
     ../lib/flakeModule.nix
     ((import ./fixtures/connector).lib.connector { core = import ../core; }).flakeModule

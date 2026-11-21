@@ -20,49 +20,33 @@
 # a separate per-axis ordering table. Keep it an explicit list: builtins.readDir
 # would sort the files by name and silently reorder both axes.
 
-# An omitted bool means false. An omitted trackerAxisRead means "GITHUB"; an
-# omitted trackerAxisWrite means "GITHUB" too (only reachable when
-# trackerAxisRead is omitted as well); an omitted trackerAxisFiler or
-# forgeBackend means "GH"; an omitted doctorTokenHint or doctorSlugHint means
-# doctor falls back to its github-shaped default. Omission
-# is the only way to ask for a default: renderBackendRegistryGo throws on an
-# explicit "" for tokenEnvVar or any of those defaulted string fields except
-# trackerAxisWrite, because the generated Go cannot tell "" from omitted, and
-# lib/mkHarness.nix defaults on absence while cmd/launcher defaults on
-# emptiness (issue #3487). trackerAxisWrite = "" is legal (see local) because
-# cmd/launcher reads it as-is. trackerAxisRead and trackerAxisWrite must be set
-# together or neither, and a row that sets trackerAxisFiler must set
-# trackerAxisRead, else renderBackendRegistryGo throws: cmd/launcher's
+# Field semantics are documented on the Descriptor struct in
+# cmd/launcher/internal/backend/registry.go; what follows is the Nix side.
+
+# An omitted bool means false. An omitted trackerAxisRead or trackerAxisWrite
+# means "GITHUB"; an omitted trackerAxisFiler or forgeBackend means "GH"; an
+# omitted doctorTokenHint or doctorSlugHint means doctor's github-shaped
+# default. Omission is the only way to ask for a default:
+# renderBackendRegistryGo throws on an explicit "" for tokenEnvVar or any of
+# those defaulted string fields except trackerAxisWrite, because the generated
+# Go cannot tell "" from omitted, and lib/mkHarness.nix defaults on absence
+# while cmd/launcher defaults on emptiness (issue #3487). trackerAxisWrite = ""
+# is legal (see local) because cmd/launcher reads it as-is. trackerAxisRead
+# and trackerAxisWrite must be set together or neither, and trackerAxisFiler
+# requires trackerAxisRead, else renderBackendRegistryGo throws:
 # backend.TrackerAxisSignals drops write and filer for a row that omits read
 # (issue #4183), and reads an omitted write as "" where mkHarness.nix says
 # "GITHUB" (issue #2673).
 
-# displayName (required) is the backend's human-facing name, the value of the
-# prompt's ${FORGE_DISPLAY_NAME} substitution (issue #5647, ADR 0068): a
-# fragment shared by several backends names the active one through it instead
-# of forking a copy per backend. It is not title-cased by rule: local is "local".
+# displayName (required) is the prompt's ${FORGE_DISPLAY_NAME} (issue #5647),
+# so a fragment shared by several backends need not fork per backend. It is not
+# title-cased by rule: local is "local". goVar is explicit too, since no
+# capitalize-first rule renders "github" as "GitHub".
 
-# goVar is an explicit field rather than a derived title-case transform,
-# because "github" must render as "GitHub" and no capitalize-first rule
-# produces that.
-
-# relayCapable covers every host-mediation seam a CODE_FORGE needs under
-# BOX_FORGE_AND_ISSUE_ACCESS=read-only: bundle relay always, plus draft-PR
-# create and commit subjects when the backend has a PR concept. Nix cannot
-# see the adapters, so cmd/launcher's
-# TestRelayCapableMatchesForgeInterfaces checks each row's bit against the
-# interfaces its forge implements (issue #2628).
-# outboxRelayCapable is narrower: it means "this forge has pull requests", the
-# prompt's IF BLOCKED PR gates (issue #5276) and the
-# recover kind's enablement. It does not decide the outbox mount or the relay,
-# which backend.RelaysBundle derives from hostMediatedRemote and relayCapable
-# (issues #1918, #2267, #6898); git is relayCapable without it. The same Go
-# test enforces it against DraftPRCreator.
-
-# hostSeededMirror means the Box clones from a per-Pass mirror the launcher
-# seeds and mounts at /repo: local and git. Each row's Strategy.SeedMirror does
-# the seeding (issue #6898); github and forgejo get theirs through
-# forge.MirrorSeeder instead.
+# Nix cannot see the adapters, so cmd/launcher's
+# TestRelayCapableMatchesForgeInterfaces checks relayCapable and
+# outboxRelayCapable against the interfaces each row's forge implements
+# (issue #2628). git is relayCapable without outboxRelayCapable.
 
 # A row may also carry `knobs`: an attrset keyed by env-schema key, each value
 # an env-schema entry. lib/row-knobs.nix folds them into lib/env-schema.nix, so
@@ -70,15 +54,14 @@
 # field, and an env name or key a row shares with another declaration fails
 # eval (ADR 0068).
 
-# quickstart (optional) opts the backend into Quickstart's
-# remote-host detection and wizard (ADR 0068 decision 8): `hosts` lists the
-# git remote hosts that identify it, `axes` the axes it sets, a non-empty
-# subset of "tracker" and "forge" that must include "tracker" (Quickstart's
-# answer is the issue tracker). "tracker" requires validAsTracker and "forge"
-# requires validAsCodeForge; renderBackendRegistryGo throws otherwise. Quickstart
-# renders the values the Strategy derives from the remote for the flakeOption
-# knobs in the row's `knobs`. An omitted block
-# means hand-edit only: Quickstart never offers the backend.
+# quickstart (optional) opts the backend into Quickstart's remote-host
+# detection and wizard (ADR 0068 decision 8): `hosts` lists the git remote
+# hosts that identify it, `axes` a non-empty subset of "tracker" and "forge"
+# that must include "tracker" (Quickstart's answer is the issue tracker).
+# "tracker" requires validAsTracker and "forge" validAsCodeForge, else
+# renderBackendRegistryGo throws. Quickstart renders the values the Strategy
+# derives from the remote for the flakeOption knobs in the row's `knobs`. An
+# omitted block means hand-edit only.
 
 # validateKnobs (optional) is a function from the merged defaults to true,
 # throwing on an invalid value of a knob the row owns; lib/mkHarness.nix runs
@@ -90,11 +73,10 @@
 # tests read beside cmd/launcher; nix/checks/go.nix copies them into that
 # backend's test source. goTestBuildsOn (optional) names the backend whose
 # package this one uses as a library, so its go test source may hold that
-# sibling's directory (issue #5637). core (optional bool) marks a backend the core
-# build keeps (ADR 0068, decision 7); every other row is stripped from the core run.
-# A core row gets no per-row go test derivation (launcher-go-test runs it, issue
-# #7318), so it must not set goTestBuildsOn.
-# Like `knobs`, the generated Descriptor ignores all three.
+# sibling's directory (issue #5637). core (optional bool) marks a backend the
+# core build keeps (ADR 0068, decision 7). A core row gets no per-row go test
+# derivation (launcher-go-test runs it, issue #7318), so it must not set
+# goTestBuildsOn. Like `knobs`, the generated Descriptor ignores all three.
 
 # trackerScopeKnob (optional string) names the schema key whose value is the
 # Tracker scope (ADR 0075 decision 3), as the Jira row names jiraProjectKey. An
@@ -114,12 +96,11 @@
 # RouteKinds.
 
 # connectorOnly (optional bool) marks a backend whose only implementation is
-# its Connector: there is no native adapter for a Connector row's `primary` to
-# replace, so lib/flakeModule.nix leaves the name out of the set `primary` is
-# checked against (jira, issue #6858; github, issue #6888; forgejo, issue
-# #7122). The generated
-# Descriptor carries it too: the Bundle's no-native-network-adapter check reads
-# it (issue #6888).
+# its Connector: there is no native adapter for its Connector's `primary` to
+# replace, so lib/connector-names.nix leaves it out of nativeBackendNames
+# (jira, issue #6858; github, issue #6888; forgejo, issue #7122). The
+# generated Descriptor carries it too: the Bundle's no-native-network-adapter
+# check reads it (issue #6888).
 
 # labelRegistry marks a tracker whose labels are registered objects that
 # ListLabels/CreateLabel manage; local and jira omit it (issue #4400).

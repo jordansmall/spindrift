@@ -90,12 +90,11 @@ rec {
   enumMarker = "`<RESEARCH_VERDICT_ENUM>`";
 
   # Three independent rewrites: the two markers above, plus the outcome line's
-  # `status=<${RESEARCH_STATUS_ENUM}>` alternation. Each targets a single-purpose
-  # marker, not a span between headings, so other prose in the VERDICT section
-  # is untouched, and `builtins.replaceStrings` no-ops where its target is
-  # absent. forge.VerdictLabels.RenderPrompt (Go) ports this function so a
-  # SPINDRIFT_PROMPT_DIR override renders the same way at prompt assembly; it
-  # must stay byte-identical, which promptassembly's TestResearchVerdictRenderingMatchesNix pins.
+  # `status=<${RESEARCH_STATUS_ENUM}>` alternation. Each targets a
+  # single-purpose marker, not a span between headings, and no-ops where it is
+  # absent. forge.VerdictLabels.RenderPrompt ports this so a
+  # SPINDRIFT_PROMPT_DIR override renders the same; promptassembly's
+  # TestResearchVerdictRenderingMatchesNix pins them byte-identical.
   renderPrompt =
     promptText: verdicts:
     let

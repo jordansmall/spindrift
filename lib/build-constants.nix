@@ -13,12 +13,10 @@
   # Equal to driverExecVendorHash today (same vendored tree) but its own field:
   # the two filesets drift independently.
   boxVendorHash = "sha256-ORguP1625BQ59YKDB2xN4yRivQF0YQE5pgs7PLqa+ug=";
-  # launcher-currency's fileset excludes driver-exec, orchestrator, quickstart
-  # and daemon (each an independent `package main` the launcher never
-  # imports), internal/daemon (no non-test package outside daemon imports
-  # it, issue #3538), and all _test.go files -- so it can vendor differently
-  # off identical go.mod/go.sum (#784, issue #2677); equal to
-  # launcherVendorHash today, but the two filesets drift independently.
+  # launcher-currency's narrower fileset (lib/harness-core.nix's
+  # launcherCurrencyFileset, issue #2677) can vendor differently off identical
+  # go.mod/go.sum (#784); equal to launcherVendorHash today, but the two
+  # filesets drift independently.
   launcherCurrencyVendorHash = "sha256-NKs16IMPgutW4b454RXZhoch/qbQmA8W1PadS+zImaM=";
   # nix/checks/go.nix's vendorFor tree: cmd/launcher without the Drivers,
   # runner families, Ecosystem packages, bundled backends, bundle and binaries.

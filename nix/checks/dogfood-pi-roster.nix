@@ -1,8 +1,8 @@
 # Pins for the dogfood pi Driver's self-hosted roster (issue #6049): every
 # role runs GLM on wadsworth's GPU. The scout and filer moved off the NPU
 # because its 32k context overflowed on #6003's scout. The Provider name
-# matches the PI_MODELS_CONTENT the operator supplies; no github-copilot tier
-# remains, so PI_AUTH_CONTENT is no longer needed.
+# matches the PI_MODELS_CONTENT the operator supplies; with no github-copilot
+# tier, PI_AUTH_CONTENT is unneeded.
 {
   pkgs,
   config,

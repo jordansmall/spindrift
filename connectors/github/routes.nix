@@ -1,42 +1,28 @@
 # Route paths are subtree roots (ADR 0047). `{repo}` stands for the repository's
 # owner/name slug, which core's `connectortracker.Routes` substitutes before
-# the table reaches `connectorhost.LoadNetwork`. The table covers every read
-# the Connector makes: the tracker reads (list, issue, blocked_by, blocking) under
-# `/issues`, the forge PR reads (branch lookup, one PR) under `/pulls`, the
-# check rollup over `POST /graphql`, and a failing job's log under
-# `/actions/jobs`. The forge write half adds the PR and branch primitives: open
-# and merge a PR, compare, the comment on a PR, branch lookup and delete, and
-# branch protection. The tracker write half adds the repository's label list and
-# create (`GET` and `POST /labels`); label add, comment and issue filing ride
-# the `POST /issues` root, and label removal rides `POST /graphql`. An App
-# installation token's grant is read from `GET /installation/repositories`.
+# the table reaches `connectorhost.LoadNetwork`. Every REST write is pinned to
+# `{repo}`.
 #
-# `GET /search/issues` serves the issue search. Unlike every other REST route it
-# is not pinned to the repository: a Route restricts no query string, so the
-# path cannot name `{repo}`. That is acceptable because the route is read-only
-# and the Connector always sends a `repo:` qualifier, quoting the caller's text
-# so it cannot add one.
+# `GET /search/issues` is not pinned to the repository: a Route restricts no
+# query string, so the path cannot name `{repo}`. It is read-only, and the
+# Connector always sends a `repo:` qualifier, quoting the caller's text so it
+# cannot add one. The App token-grant read, `GET /installation/repositories`,
+# is unpinned too (see tokengrant.go).
 #
-# It is the narrowest table the subtree-only Route model can express, not an
-# exact one: `/issues` also admits GET `/issues/comments/*` and `/issues/events`,
-# which no read uses; the prior-claim read walks `/issues/{n}/timeline`.
-# `POST /graphql` is wider still: a Route restricts neither body nor query, so
-# it admits any GraphQL document, mutations included, and no Route can pin it
-# to the repository. The Connector sends the rollup query, the issue-comments
-# query, repository-identity queries, classic token-grant queries, the draft-flip and auto-merge
-# mutations, the label-id query and removal mutation, and the issue-id query
-# and close mutation there (issues #6808, #6881, #6882, #6887). Label removal
-# cannot be a REST `DELETE`: the host refuses the escaped `/` in a name such as
-# `agent/ready`. Every REST write is pinned to
-# `{repo}`. The write roots over-admit too: `POST /pulls` also admits review
-# and review-comment creation, and `PUT /pulls` update-branch.
-# `/actions/jobs` is a root too: the log read is `GET /actions/jobs/{id}/logs`,
-# but the root also admits every other GET under `/actions/jobs`, which
-# no read uses. Its Route follows one redirect hop (issue #6893): GitHub
-# answers the log read with a 302 to a pre-signed blob URL on a host that
-# varies, so no host can be pinned. The host sends the second request with no
-# credential and none of the guest's headers. A log over the response cap
-# arrives as its tail, not as a failed read.
+# This is the narrowest table the subtree-only Route model can express, not an
+# exact one: `GET /issues` also admits `/issues/comments/*` and
+# `/issues/events`, `POST /pulls` admits review creation, `PUT /pulls` admits
+# update-branch, and `/actions/jobs` admits every GET beside `/{id}/logs`.
+# `POST /graphql` admits any document, mutations included, and cannot be
+# pinned to the repository; the Connector sends its rollup, comment, identity,
+# token-grant, draft-flip, auto-merge, label-removal and close documents there
+# (issues #6808, #6881, #6882, #6887). Label removal cannot be a REST
+# `DELETE`: the host refuses the escaped `/` in a name such as `agent/ready`.
+#
+# The job-log Route follows one redirect hop (issue #6893): GitHub answers
+# with a 302 to a pre-signed blob URL on a varying host, so no host can be
+# pinned. The second request carries no credential and none of the guest's
+# headers. A log over the response cap arrives as its tail.
 [
   {
     method = "GET";

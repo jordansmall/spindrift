@@ -441,9 +441,9 @@ in
     pkgs.runCommand "drivers-opencode-agent-files-escapes-effort" { } "touch $out";
 
   # A raw, unquoted colon in a description splits the frontmatter line into
-  # two mapping keys and yields malformed YAML (issue #264 review finding),
-  # so agentFilesTemplate must JSON-encode the description; JSON is a valid
-  # YAML scalar.
+  # two mapping keys and yields malformed YAML (issue #264), so
+  # agentFilesTemplate must JSON-encode the description; JSON is a valid YAML
+  # scalar.
   drivers-opencode-agent-files-description-colon-frontmatter =
     let
       rendered = entry.agentFilesTemplate {

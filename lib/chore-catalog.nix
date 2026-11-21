@@ -2,34 +2,28 @@
 # lib/env-schema.nix's butlerChoreClasses default, the generated Go builtins
 # (cmd/launcher/internal/chore/builtins_gen.go), and docs all derive from
 # this one list. List order is load-bearing: it fixes classesDefault's byte
-# layout, which the generated docs and flag table render verbatim. This list
-# declares names, each Chore's closed classList (the classes its Box
-# classifies a finding into, issue #4766), and default promotion/patch
-# classes -- prompt files resolve by name from mkHarness's choresDir (read
-# by, e.g., the BUTLER_CHORES eval assertion and the image copy), which a
-# Consumer may replace.
+# layout, which the generated docs and flag table render verbatim. A row
+# declares a name, a closed classList (the classes its Box classifies a
+# finding into, issue #4766), and default promotion/patch classes; prompt
+# files resolve by name from mkHarness's choresDir, which a Consumer may
+# replace.
 #
-# Optional row fields: scopeSource ("tree", the default, sweeps the Target
-# repo's tree; "records" sweeps the dispatch record store, ADR 0062),
-# every (a catalog default sweep interval, Go duration string), and
-# findingLabel (a provenance label every finding of the Chore wears, e.g.
-# the tuning Chore's agent-tuning-finding, ADR 0062), and mergeByHand (a
-# bool, default false: the host never merges a PR closing one of the
-# Chore's findings and a human merges it, ADR 0070), knobs (env-schema
-# entries keyed by env-schema key that the row owns, folded in by
-# lib/row-knobs.nix; nix/checks/row-knobs.nix requires a row with knobs to
-# live in lib/chores/<name>.nix), and
-# minRecordsKnob (required of a records-scoped row: the key of one of its
-# own knobs holding its minimum new-Record count, issue #5700).
+# Optional row fields: scopeSource ("tree", the default, or "records" for the
+# dispatch record store, ADR 0062); every (a default sweep interval, Go
+# duration); findingLabel (a provenance label every finding wears, ADR 0062);
+# mergeByHand (the host never merges a PR closing a finding, ADR 0070); knobs
+# (env-schema entries the row owns, folded in by lib/row-knobs.nix; a row
+# with knobs must live in lib/chores/<name>.nix, per nix/checks/row-knobs.nix);
+# and minRecordsKnob (required of a records-scoped row: its own knob holding the
+# minimum new-Record count, issue #5700).
 let
-  # Throws unless every chore's scopeSource is "tree" or "records" (absent
-  # means tree), every chore's promotionClasses and patchClasses sit on its
-  # classList, a records-scoped chore declares neither (it files findings
-  # for a human and never promotes or patches, ADR 0062), and a mergeByHand
-  # chore carries a non-empty findingLabel (the hold's comment names it, ADR
-  # 0070), and a records-scoped chore's minRecordsKnob names a key in its own
-  # knobs; exported so nix/checks/chore-catalog.nix can feed it broken
-  # catalogs.
+  # Throws unless every scopeSource is "tree" or "records", every
+  # promotionClasses and patchClasses sits on its classList, a records-scoped
+  # chore declares neither (it never promotes or patches, ADR 0062), a
+  # mergeByHand chore carries a non-empty findingLabel (the hold's comment
+  # names it, ADR 0070), and a records-scoped chore's minRecordsKnob names one
+  # of its own knobs. Exported so nix/checks/chore-catalog.nix can feed it
+  # broken catalogs.
   checkClassLists =
     cs:
     let

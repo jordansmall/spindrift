@@ -1,9 +1,8 @@
 # Regenerator for the opencode session-store fixture (issue #5492). Separate
-# from nix/regen.nix because the fixture is a snapshot of an upstream
-# binary's output, not a render of a Nix value: folding it into `.#regen`
-# would make every env-schema regen fetch and run opencode. It copies the same
-# lib/opencode-session-schema.nix output that nix/checks/opencode-session-schema.nix
-# compares against, so the app and its drift guard share one renderer.
+# from nix/regen.nix because the fixture snapshots an upstream binary's output:
+# folding it into `.#regen` would make every regen fetch and run opencode. It
+# shares lib/opencode-session-schema.nix with its drift guard,
+# nix/checks/opencode-session-schema.nix.
 { pkgs }:
 let
   schema = import ../lib/opencode-session-schema.nix { inherit pkgs; };

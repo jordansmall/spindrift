@@ -1,18 +1,14 @@
-# The rendered artifacts the Go seam tests (issue #4280) read as fixtures:
-# a pure copy of what the bats harness already renders (plus the repo's
-# nix-checks skill, which the Go check sandbox cannot reach by relative path,
-# and each Driver's baked agent-files tree),
-# no test logic here.
-# The names are pinned against cmd/launcher/internal/seamtest/fixtures.json by
-# nix/checks/seam-fixtures.nix.
-# There is deliberately no "code-comments" contract fixture: that policy was
-# inlined into the prompts (#3505, file removed in 78f2611f), so no rendered
-# artifact exists to copy.
+# The rendered artifacts the Go seam tests (issue #4280) read as fixtures: a
+# pure copy of what the bats harness renders, plus the nix-checks skill (out
+# of the Go check sandbox's relative reach) and each Driver's baked
+# agent-files tree. nix/checks/seam-fixtures.nix pins the names against
+# cmd/launcher/internal/seamtest/fixtures.json. No "code-comments" fixture:
+# that policy is inlined into the prompts (#3505).
 # Store paths the fixtures name but do not carry (the run-input docs discard
-# their artifacts' context) are rewritten to the zero-hash sentinel: a Box runs
-# with sandbox=false and sees the whole store, CI's sandbox does not, so a real
-# path passes in one and breaks in the other (issue #7082). A seam test that
-# needs a present artifact supplies its own through its input document.
+# their artifacts' context) are rewritten to the zero-hash sentinel: a Box
+# (sandbox=false) sees the whole store and CI's sandbox does not, so a real
+# path passes in one and breaks in the other (issue #7082). A seam test
+# needing an artifact supplies its own through its input document.
 {
   pkgs,
   batsHarness,

@@ -1,11 +1,8 @@
 # Eval-level checks for lib/prompt-contract.nix (issues #2245, #2246, #2405).
-# Each check diffs a registry row against the real on-disk source, or asserts
-# a cross-row invariant, such as every row of a registry sharing one fixed
-# value. By default no check pins a registry's row count, row order, or one
-# row's own literal field values, since such a pin fails only on a deliberate
-# data edit, never on a behavioral bug. The exceptions are deliberate
-# tripwires, each under a comment naming the decision (and its issue) or the
-# generated consumer it protects.
+# Each diffs a registry row against the real on-disk source or asserts a
+# cross-row invariant. No check pins a row count, row order, or one row's
+# literal values (that fails only on a deliberate data edit), except
+# deliberate tripwires, each commented with its decision or protected consumer.
 { pkgs, ... }:
 let
   promptContract = import ../../lib/prompt-contract.nix;
@@ -39,12 +36,10 @@ let
       requiredSubstrings = [ "fold your commits" ];
     }
   ];
-  # Shared helper for the prompt-contract-shared-obligations-detects-drift-*
-  # checks below (issues #2699, #3610): each proves a real sharedObligations
-  # registry row can go red by swapping the fragment's content for one
-  # carrying none of the declared substrings. Filtering to the given
-  # obligationId keeps a later, unrelated obligation from failing the check on
-  # an extra.
+  # Backs the prompt-contract-shared-obligations-detects-drift-* checks (issues
+  # #2699, #3610): each proves a real sharedObligations row can go red by swapping
+  # in fragment content carrying none of its substrings. Filtering to
+  # obligationId keeps an unrelated obligation from failing the check.
   sharedObligationDriftCheck =
     {
       obligationId,
@@ -185,13 +180,11 @@ in
       "prompt-contract: the set of severity==\"warn\" validateMarkers row ids changed from [${concatStringsSep ", " wantWarnIds}] to [${concatStringsSep ", " gotWarnIds}] -- promoting a warn row to \"reject\" (or adding/removing a warn row) is a deliberate design decision (issue #2996), not a silent flip: update this check's wantWarnIds, and revisit the promoted row's fixtures in nix/checks/prompt-contract-parity.nix, whose prompt-contract-parity-warn-rows-never-reject derives its warn set from severityById and so starts demanding a different verdict for them";
     pkgs.runCommand "prompt-contract-validate-markers-warn-row-ids" { } "touch $out";
 
-  # issue #3726: exactly the four signal-channel rows carry socketMarker (the
-  # verb string Validate scans for instead of marker when
-  # SIGNAL_CARRIER_SOCKET is active); reviewer-verdict never crosses the
-  # Signal socket and must stay carrier-blind. socketMarker and socketMessage
-  # are always both-present or both-absent -- a row carrying one without the
-  # other is a half-wired socket variant that would either scan for an empty
-  # string or emit an empty diagnostic.
+  # issue #3726: exactly the four signal-channel rows carry socketMarker (what
+  # Validate scans for instead of marker under SIGNAL_CARRIER_SOCKET);
+  # reviewer-verdict never crosses the Signal socket. socketMarker and
+  # socketMessage come as a pair: one alone would scan for an empty string or
+  # emit an empty diagnostic.
   prompt-contract-validate-markers-socket-fields-match-signal-rows =
     let
       signalIds = [
@@ -884,10 +877,9 @@ in
 
   # sharedObligationViolationsFor (issue #2699) checks that every branch an
   # obligation declares carries each of its requiredSubstrings. It takes
-  # contentBySource as an explicit argument so these tests can prove the check
-  # actually fails, on fixture content independent of the real registry
-  # (exercised separately below, against the on-disk fragments). The fixture
-  # uses two branches so a test can show only the offending one is named.
+  # contentBySource explicitly so these tests can prove it fails on fixture
+  # content; fixtureObligations' two branches let a test show only the offending
+  # one is named.
   prompt-contract-shared-obligation-violations-for-detects-missing-substring =
     let
       contentBySource = {

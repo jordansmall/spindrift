@@ -73,13 +73,11 @@ in
 
   bin = "pi";
 
-  # pi's official subagent extension is a bundled example, not a package
-  # feature (ADR 0009 amendment): linked from the package so a nixpkgs bump
-  # moves it, and found by the agent directory's extensions scan, which child
-  # pi processes run too. pi loads only the directory's index.ts; the sample
-  # agents/ and prompts/ beside it are never discovered (agents load from
-  # <agentDir>/agents only). Agent scope stays user-level because the hook
-  # bridge refuses a subagent call asking for "project" or "both".
+  # pi's subagent extension is a bundled example, not a package feature (ADR
+  # 0009 amendment): linked from the package so a nixpkgs bump moves it, and
+  # found by the extensions scan that child pi processes also run. Only its
+  # index.ts loads. Agent scope stays user-level because the hook bridge refuses a
+  # subagent call asking for "project" or "both".
   packageLinks.".pi/agent/extensions/subagent" =
     "lib/node_modules/pi-monorepo/examples/extensions/subagent";
 
@@ -137,11 +135,10 @@ in
     ];
 
   # PI_AUTH_CONTENT may hold OAuth entries only for these Providers. pi
-  # refreshes an OAuth token inside the Box; github-copilot's refresh token is
-  # a stable GitHub token, so that never invalidates the host's copy, while a
-  # Provider that rotates refresh tokens would have the Box burn the host's
-  # credential. Preflight rejects any other OAuth entry (use that Provider's
-  # API key instead).
+  # refreshes an OAuth token inside the Box: github-copilot's refresh token is
+  # a stable GitHub token, but a Provider that rotates refresh tokens would
+  # have the Box burn the host's credential. Preflight rejects any other OAuth
+  # entry (use that Provider's API key instead).
   authContent = {
     env = "PI_AUTH_CONTENT";
     oauthProviders = [ "github-copilot" ];
@@ -175,14 +172,10 @@ in
   sessionCacheDirRelative = ".pi/agent/sessions";
 
   # pi reads its OAuth credentials only from auth.json under its agent dir.
-  # The sessions mount above takes .pi/agent/sessions, so it does not shadow
-  # this file. models.json declares custom Providers (a self-hosted
-  # OpenAI-compatible server) and carries no credential rule: unset, no file is
-  # written and preflight is unchanged (issue #6048). settings.json tunes pi
-  # itself (e.g. httpIdleTimeoutMs), also with no credential rule. Its schema
-  # row is secret only to keep the value off argv and give it _CMD/_FILE
-  # sources; the written file needs no credential-deny path because pi's
-  # settings.json carries no credential (issue #6052).
+  # models.json declares custom Providers (issue #6048) and settings.json tunes
+  # pi itself (issue #6052); neither has a credential rule. settings.json's
+  # schema row is secret only to keep it off argv and give it _CMD/_FILE
+  # sources; it carries no credential, so it needs no credential-deny path.
   envFiles = [
     {
       env = "PI_AUTH_CONTENT";
@@ -212,18 +205,17 @@ in
   # pi has no --agents equivalent; the subagent extension scans agent files.
   agentsJsonTemplate = { roster }: "";
 
-  # The hook bridge (issue #5482) is an extension in pi's agent directory, not
-  # the Box's cwd, so the subagents' child pi processes load it too.
-  # Frontmatter scalars are JSON-encoded so a colon or newline cannot inject a
-  # YAML key, and promptassembly's frontmatterScalar still reads `model:`.
-  # Effort rides as a `<model>:<level>` suffix because the extension passes the
-  # parent's --thinking only to agents without a model; `reasoningEffort`, which
-  # the extension ignores, lets promptassembly's reviewer handoff read the effort
-  # so driver-exec's --thinking matches the suffix. An entry with no `tools` gets
-  # no line, which keeps pi's full tool set. spindrift-spawns.json maps each
-  # entry that declares `spawns` to its list; the bridge reads it to gate
-  # subagent targets (issue #5809), and an entry absent from it is unrestricted.
-  # It is written even as {} so the bridge can fail closed when it is missing.
+  # The hook bridge (issue #5482) lives in pi's agent directory, not the Box's
+  # cwd, so child pi processes load it too. Frontmatter scalars are
+  # JSON-encoded so a colon or newline cannot inject a YAML key, yet
+  # promptassembly's frontmatterScalar still reads `model:`. Effort rides as a
+  # `<model>:<level>` suffix because the extension passes the parent's
+  # --thinking only to agents without a model; `reasoningEffort`, which the
+  # extension ignores, lets promptassembly's reviewer handoff read the effort
+  # so driver-exec's --thinking matches the suffix. An entry with no `tools`
+  # keeps pi's full tool set. spindrift-spawns.json gates subagent targets
+  # (issue #5809); an entry absent from it is unrestricted. The file is written
+  # even as {} so the bridge fails closed when it is missing.
   agentFilesTemplate =
     { roster }:
     {

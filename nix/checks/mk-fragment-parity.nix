@@ -1,11 +1,8 @@
-# Shared machinery behind the fragment-parity checks (issue #3240). Each call
-# site (commit, tdd, code-review) pins its own clause list, prose markers, and
-# skill; this file owns only what all three do identically.
-#
-# These checks live in Nix, not beside the Go fragment-parity test, because
-# the upstream SKILL.md is not vendored: a Go test cannot reach the pinned
-# skills flake input. A verbatim diff would fail on every upstream copy-edit,
-# so each check asserts only the shared vocabulary.
+# Shared machinery behind the fragment-parity checks (issue #3240); each call
+# site (commit, tdd, code-review) pins its own clauses, markers, and skill.
+# These live in Nix, not Go, because the upstream SKILL.md is not vendored:
+# only the pinned skills flake input reaches it. A verbatim diff would fail on every upstream
+# copy-edit, so each check asserts only the shared vocabulary.
 { pkgs, fixtures }:
 {
   # `skillName` serves four roles at once -- derivation prefix, dogfood-row
@@ -53,14 +50,11 @@ let
     else
       builtins.head matches;
 
-  # Every fallback hard-wraps at a different width than its skill and capitalizes
-  # shared phrases differently, so a raw substring match would fail over line
-  # breaks and case. Each call site's clauses are chosen not to straddle markdown
-  # emphasis, so the skills' `**...**` wrappers need no stripping here.
-  # Skills and fallbacks also space the comparator differently ("≤ 50", "<=50",
-  # "subject≤50"), so every spelling folds to "≤" with no space on either side
-  # (issue #3486). replaceStrings tries its patterns in list order and never
-  # rescans its output, so " ≤ " must come before " ≤" and "≤ ".
+  # Fallbacks and skills differ in wrap width, case, and comparator spacing
+  # ("≤ 50", "<=50", "subject≤50"; issue #3486), so normalize folds all three away. Call sites
+  # pick clauses that never straddle `**...**`, so emphasis is not stripped.
+  # replaceStrings tries patterns in list order and never rescans its output,
+  # so " ≤ " must come before " ≤" and "≤ ".
   normalize =
     text:
     let

@@ -22,12 +22,10 @@ let
     ;
   inherit (pkgs.lib.lists) findFirstIndex;
 
-  # hasInfix would let a numeric needle like "--cores 1" match "--cores 16",
-  # so a one-sided bump of just the digit slips past parity silently (issue
-  # #3495). This is hasInfix plus "the next character, if any, is not a
-  # digit". Only the trailing side is guarded: a digit before the needle
-  # ("11--cores 1") still matches, which stays harmless only while every
-  # needle starts with a non-digit, as each one does today.
+  # hasInfix plus "the next character, if any, is not a digit": plain hasInfix
+  # lets "--cores 1" match "--cores 16", so a one-sided digit bump slips past
+  # (issue #3495). Only the trailing side is guarded, which stays harmless
+  # while every needle starts with a non-digit.
   hasDigitSafeInfix =
     needle: text: builtins.match (".*" + escapeRegex needle + "([^0-9].*)?") text != null;
 
@@ -41,12 +39,11 @@ let
     in
     if idx == null then null else start + idx;
 
-  # This strips backticks and `*` as well, because the two texts mark up the
-  # same phrases with different emphasis (`**scoped**` in CLAUDE.md, plain
-  # `scoped` in the skill) and several shared clauses below are the emphasized
-  # ones, so they cannot dodge emphasis the way the fragment-parity call sites
-  # do -- those pick clauses that never straddle a `**...**` wrapper, which is
-  # why mk-fragment-parity.nix's own `normalize` strips no emphasis at all.
+  # Unlike mk-fragment-parity.nix's normalize, this also strips backticks and
+  # `*`: the two texts emphasize the same phrases differently (`**scoped**` in
+  # CLAUDE.md, plain in the skill), and several shared clauses are the
+  # emphasized ones, so they cannot avoid a `**...**` wrapper the way the
+  # fragment-parity call sites do.
   normalize =
     text:
     let

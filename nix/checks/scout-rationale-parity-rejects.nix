@@ -1,10 +1,9 @@
 # Negative-path pins for nix/checks/scout-rationale-pointer-window.nix (issue
-# #3613): scout-rationale-parity.nix's pointer checks only ever see the real
-# comments, which all pass, so a matcher regressed to a joined-block match
-# would still evaluate green. The acceptance cases guard the other direction --
-# an always-false matcher would satisfy every rejection vacuously. Unlike
-# mk-fragment-parity-rejects.nix, cases assert a boolean `expect` rather than
-# tryEval a throw: the predicate returns a bool and never throws.
+# #3613): scout-rationale-parity.nix only sees real comments, which all pass,
+# so a matcher regressed to a joined-block match would stay green. The
+# acceptance cases stop an always-false matcher from passing every rejection
+# vacuously. Cases assert a boolean `expect` because the predicate never
+# throws.
 { pkgs, ... }:
 let
   inherit (pkgs.lib) assertMsg;

@@ -52,17 +52,15 @@ let
   # picked up automatically, so a marker no caveman fragment names fails the
   # check below. SPINDRIFT_ISSUE_INTENT stays in the union: caveman-covered
   # issue-prompt.md injects file-issues-relay.md, whose text names it
-  # (issue #2709 review finding).
+  # (issue #2709).
   requiredMarkerNames =
     (map (r: r.marker) promptContract.validateMarkers)
     ++ (map (r: r.marker) promptContract.workerForbiddenMarkers);
 
-  # The rendered CHECK section, sliced once here rather than once per check
-  # (issue #781), so a marker rename lands in one place. Anchored on end of
-  # line, not start (issue #3221): "# CHECK" now trails the IMPLEMENT phase's
-  # own variable run (${PRINCIPLE_LAZINESS_PROTOCOL_STEP}# CHECK) in the raw
-  # template, so a start-anchored match would silently capture nothing
-  # (issues #3221, #3505).
+  # The rendered CHECK section, sliced once (issue #781). Anchored on end of
+  # line: "# CHECK" trails the IMPLEMENT phase's variable run
+  # (${PRINCIPLE_LAZINESS_PROTOCOL_STEP}# CHECK) in the raw template, so a
+  # start-anchored match would silently capture nothing (issues #3221, #3505).
   checkSectionSlices = pkgs.runCommand "check-section-slices" { } ''
     mkdir -p $out
     awk '/# CHECK$/{f=1} /# REVIEW$/{exit} f' \
@@ -282,13 +280,10 @@ let
       builtins.fromJSON (builtins.elemAt nonceWidthMatch 0);
   markerPrefixLength = builtins.stringLength "SPINDRIFT_COMMENT " + nonceWidth + 1;
   rawPayloadBudget = pinnedBashMaxOutputLength - markerPrefixLength;
-  # What makes the fragments' safety claim true isn't "the cut length is 1
-  # mod 4" -- an accident of today's cap -- it's that outcome.go's
-  # base64.StdEncoding.Strict() decoder accepts only multiple-of-4 lengths,
-  # so a cut landing anywhere else can never decode. Assert that against the
-  # actual cap, so a cap change that lands the cut on a multiple of 4 fails
-  # the build instead of silently letting a truncated verdict post as a
-  # whole one.
+  # outcome.go's strict base64 decoder accepts only multiple-of-4 lengths, so
+  # a cut landing anywhere else never decodes. Asserted against the actual
+  # cap, so a cap change landing the cut on a multiple of 4 fails the build
+  # rather than letting a truncated verdict post as a whole one.
   payloadBudget =
     if pkgs.lib.mod rawPayloadBudget 4 == 0 then
       throw "research-verdict budget check: payloadBudget (${toString rawPayloadBudget}) is a multiple of 4 -- base64.StdEncoding.Strict() decodes exactly those lengths, so a cap whose cut payload lands 0 mod 4 would let a truncated verdict decode and post as a whole one. Pick a different lib/output-caps.nix bashMaxOutputLength."
@@ -302,10 +297,8 @@ let
   # each other's cross-check: a round trip that no longer closes means
   # the prose quotes an encoded size the arithmetic does not support.
   encodedBudget = bodyBudget / 3 * 4;
-  # A soft target for the fragments to name, so the agent has an actionable
-  # size below the hard ceiling rather than only the ceiling itself, which
-  # fits by zero margin. Four fifths of the body budget, derived so it moves
-  # with the cap.
+  # A soft target below the zero-margin ceiling for the fragments to name,
+  # derived so it moves with the cap.
   targetBudget = bodyBudget * 4 / 5;
   # A Bash result longer than this comes back to the Box as its last
   # tailBytes bytes, so a marker line emitted before a long command's
@@ -321,14 +314,9 @@ let
       builtins.elemAt tailBytesMatch 0;
 
   # Shared by the two research-prompt advise-only enumeration dedup checks
-  # below (issue #3227, #3270): research-prompt.md and its self-contained
-  # sub-mode sibling carry the identical trailer/TASK contract, so one
-  # parameterized derivation covers both prompt files. The advise-only
-  # prohibition enumeration once appeared twice in research-prompt.md,
-  # loosely reworded in TASK and in full in the byte-shared POST THE
-  # VERDICT trailer. Pins each phrase to exactly one occurrence, the
-  # trailer's, which a Consumer with no section of its own still
-  # receives; TASK keeps only the posture.
+  # below (issues #3227, #3270). Pins each prohibition phrase to exactly one
+  # occurrence, in the byte-shared POST THE VERDICT trailer, which a Consumer
+  # with no section of its own still receives; TASK keeps only the posture.
   mkAdviseOnlyEnumerationDedupCheck =
     { name, file }:
     pkgs.runCommand name { } ''
@@ -369,14 +357,11 @@ let
     }
   '';
 
-  # A grep pin body asserting one awk section slice is defined exactly
-  # once in this file. The pattern arrives in two halves joined at eval
-  # time, so this file's own source text never carries the contiguous
-  # pattern the pin counts -- else the pin would count itself. Counts
-  # occurrences, not matching lines, since attribute definitions here run
-  # to 200+ columns and two copies could share one physical line. Expands
-  # to a call of the function in sliceDefinedOnce, which each user
-  # derivation must define first.
+  # A grep pin body asserting one awk section slice is defined exactly once
+  # in this file. The pattern arrives in two halves joined at eval time, or
+  # the pin would count itself. Counts occurrences, not lines: two long
+  # definitions could share one physical line. Each user derivation must
+  # define sliceDefinedOnce first.
   mkSliceDefinedOncePin =
     {
       what,
@@ -404,8 +389,8 @@ let
   # Shell function for prompt-templates-never-name-issues-mount and its
   # negative test: `issues_scan DIR` fails if a template in the prompts dir DIR
   # or a fragment at any depth under DIR/fragments (issue #6159) names /issues
-  # outside an api/v1 URL. `sed` strips the one legitimate api/v1 URL from the
-  # line rather than dropping the line whole; nothing here is `grep -q`, whose
+  # outside an api/v1 URL. `sed` strips only the api/v1 URL, not the whole
+  # line, so a bare /issues sharing its line still trips. No `grep -q`: its
   # SIGPIPE under pipefail makes `!` a false pass.
   issuesMountScan = ''
     issues_scan() {
@@ -427,13 +412,11 @@ let
   '';
 in
 {
-  # The configured `prompt` is rendered to a store-path directory and, by
-  # default, baked into the image (see agentFiles in lib/image.nix) rather
-  # than mounted; `run` only bind-mounts a dir under the SPINDRIFT_PROMPT_DIR
-  # override.
-  # Eval/native only: the rendered prompt dir is a host store path, and
-  # prompt-baked-into-image (nix/checks/image.nix) checks the image bake
-  # Linux-side.
+  # The configured `prompt` is rendered to a store-path directory baked into
+  # the image by default (agentFiles in lib/image.nix); `run` bind-mounts a
+  # prompt dir only under the SPINDRIFT_PROMPT_DIR override. Eval/native
+  # only, as the rendered dir is a host store path: prompt-baked-into-image
+  # (nix/checks/image.nix) checks the bake Linux-side.
   mkharness-prompt = pkgs.runCommand "mkharness-prompt" { } ''
     # The Consumer's prompt text is what lands in the rendered file.
     grep -q 'CONFIGURED-PROMPT-MARKER' \
@@ -709,13 +692,9 @@ in
         touch $out
       '';
 
-  # Issue #3419 (worker-prompt.md) and #3505 (the three coordinator prompts):
-  # every prompt inlines the code-comments policy verbatim rather than
-  # carrying the removed ${CODE_COMMENTS_STEP} anchor / fragment, so one
-  # derivation loops over all four templates instead of duplicating the same
-  # derivation four times. Compares whitespace-normalized text, latched at
-  # the second `---` and tested with a literal `grep -F`, so a reworded
-  # skill fails here rather than drifting silently.
+  # Issues #3419, #3505: every prompt inlines the code-comments policy
+  # verbatim. Compares whitespace-normalized text after the second `---` with
+  # a literal `grep -F`, so a reworded skill fails here rather than drifting.
   prompt-code-comments-inlined = pkgs.runCommand "prompt-code-comments-inlined" { } ''
     skill=${codeCommentsSkillSource}
     policy=$(awk 'seen >= 2 { print } /^---$/ { seen++ }' "$skill" \
@@ -920,10 +899,9 @@ in
         touch $out
       '';
 
-  # Issue #3223: the CHECK section is ecosystem-neutral now that the Nix lore
-  # lives in the dogfood-only /nix-checks skill instead. A regrown inline
-  # mention of any of these terms would defeat the move while every anchor
-  # and skill-body pin above stayed green.
+  # Issue #3223: the CHECK section is ecosystem-neutral; the Nix lore lives
+  # in the dogfood-only /nix-checks skill. A regrown inline mention would
+  # pass every anchor and skill-body pin above.
   mkharness-prompt-check-no-nix-wording =
     pkgs.runCommand "mkharness-prompt-check-no-nix-wording" { }
       ''
@@ -1000,10 +978,9 @@ in
       '';
 
   # Companion for the self-contained sub-mode prompt (ADR 0022, issue #2202):
-  # no check previously read its rendered VERDICT section, so the render-time
-  # deletion of its "Judge relevance..." sentence, the one line that
-  # distinguishes the sub-mode, went uncaught. Pins that the sentence
-  # survives rendering ahead of the registry-generated bullets.
+  # pins that its "Judge relevance..." sentence, the one line distinguishing
+  # the sub-mode, survives rendering ahead of the generated bullets (a
+  # render-time deletion of it once went uncaught).
   mkharness-prompt-research-self-contained-verdicts-default-rendered =
     pkgs.runCommand "mkharness-prompt-research-self-contained-verdicts-default-rendered" { }
       ''
@@ -1059,16 +1036,11 @@ in
         touch $out
       '';
 
-  # A custom RESEARCH_VERDICTS set (issue #2201) flows into the baked research
-  # prompt's verdict contract: the VERDICT bullets, the enumeration, and the
-  # status alternation all render from the configured set, and no default
-  # verdict token survives in the contract. Proves the set reaches the prompt,
-  # not only the launcher. The pins stay raw grep -qF, not normalized_grep:
-  # every pinned span is machine-rendered, not hand-wrapped prose.
-  # renderPrompt (lib/research-verdicts.nix) renders each verdict bullet as one
-  # line, joined only by "\n", so the raw grep also pins each bullet to a
-  # single line, which whitespace normalization would erase; the alternation
-  # and enumeration are each one marker substitution, so no reflow splits them.
+  # A custom RESEARCH_VERDICTS set (issue #2201) renders the baked research
+  # prompt's VERDICT bullets, enumeration and status alternation, with no
+  # default verdict token surviving. Raw grep -qF, not normalized_grep: every
+  # pinned span is machine-rendered, and the raw grep also pins each bullet to
+  # one line, which whitespace normalization would erase.
   mkharness-prompt-research-verdicts-custom-rendered =
     pkgs.runCommand "mkharness-prompt-research-verdicts-custom-rendered" { }
       ''
@@ -1122,12 +1094,10 @@ in
         touch $out
       '';
 
-  # The after-rebase block (fetch / merge-base / rebase plus the After-rebase
-  # rule paragraph) is duplicated in commit-push-outbox.md and
-  # commit-push-host-mediated.md; only the local copy's missing CI clause (a
-  # local forge has no CI) differs. Nothing structural ties the copies
-  # together, so diff them (issue #4412, found during #4408; local copy issue
-  # #5251).
+  # The after-rebase block is duplicated in commit-push-outbox.md and
+  # commit-push-host-mediated.md, differing only in the host-mediated copy's
+  # missing CI clause (its host-side landing re-runs no checks); nothing
+  # structural ties the copies, so diff them (issues #4412, #5251).
   commit-push-after-rebase-rule-parity = pkgs.runCommand "commit-push-after-rebase-rule-parity" { } ''
     slice() {
       end="$3" awk 'prev=="```" && $0=="git fetch origin"{f=1; print prev} f{print} f && $0 ~ ENVIRON["end"]{exit} {prev=$0}' "$1" > "$2"
@@ -1229,8 +1199,8 @@ in
   # Grep pin (issue #908): the filer's dedup step must search open issues
   # beyond the `agent-review-finding` label, or it stops catching human-filed
   # duplicates. Adding a `-label` flag to an open search slips past the other
-  # pins (issue #921), so count that line's occurrences too. Since issue #6895
-  # the search is the Signal socket's issue-search verb, never a forge CLI.
+  # pins (issue #921), so count that line's occurrences too. The search is
+  # the Signal socket's issue-search verb, never a forge CLI (issue #6895).
   # `[ "$n" -eq 0 ] ||`, since `set -e` exempts `!` (#887).
   filer-prompt-dedup-searches-all-open-issues =
     pkgs.runCommand "filer-prompt-dedup-searches-all-open-issues" { }
@@ -1380,19 +1350,14 @@ in
         touch $out
       '';
 
-  # Grep pin (issue #3226 slice 3, extended by issue #3652): the filer's
-  # issue-authoring obligations are contract, not coaching -- the work-path
-  # backlink shape (PR form, and since #3652 the now-primary branch form,
-  # since the filer runs before a PR exists), no provenance line on a
-  # research-path issue, never the dispatch label, and never synthesizing a
-  # URL like the observed 404 `pull/DRAFT`. Each pin anchors on a
-  # distinguishing literal fragment of the prompt's own wording -- a backlink
-  # template, or a clause carrying the obligation itself -- so an edit that
-  # keeps a keyword like "provenance" but drops or inverts the rule still
-  # fails. The branch form's pin spans its `is the primary` clause for that
-  # reason: without it a reword could rank the PR form first again while every
-  # other literal stayed put. Each pin matches through normalized_grep (issue
-  # #3228), so a pinned clause may wrap across source lines.
+  # Grep pin (issues #3226, #3652): the filer's issue-authoring obligations
+  # are contract -- the work-path backlink (the branch form primary, since the
+  # filer runs before a PR exists), no provenance line on a research-path
+  # issue, never the dispatch label, never a synthesized URL like the observed
+  # 404 `pull/DRAFT`. Each pin anchors on a literal carrying the obligation
+  # itself, so keeping a keyword but inverting the rule still fails; the
+  # branch pin spans `is the primary` so a reword cannot re-rank the PR form
+  # first. normalized_grep (issue #3228) lets a clause wrap.
   filer-prompt-issue-authoring-obligations =
     pkgs.runCommand "filer-prompt-issue-authoring-obligations" { }
       ''
@@ -1469,11 +1434,10 @@ in
         touch $out
       '';
 
-  # The issue-read step no longer reads the subject issue (issue #3445): the
-  # host injects its body and comments at dispatch, so a fragment that still
-  # fetches them burns a tracker call and pushes run-varying bytes into the
-  # stable prefix. Subsumes ADR 0032's #1691 ban, the fetch-shape pins and
-  # #1990's comment cap; globbed, so a fragment added later is covered.
+  # The host injects the subject issue's body and comments at dispatch (issue
+  # #3445), so a fragment that fetches them burns a tracker call and pushes
+  # run-varying bytes into the stable prefix. Subsumes ADR 0032's #1691 ban
+  # and #1990's comment cap; globbed, so a later fragment is covered.
   issue-read-fragments-never-fetch-the-subject-issue =
     pkgs.runCommand "issue-read-fragments-never-fetch-the-subject-issue" { }
       ''
@@ -1572,17 +1536,13 @@ in
         touch $out
       '';
 
-  # Issue #3669: the verdict rides back to the host as the echoed Bash tool
-  # result, and the Box hard-cuts that at the baked BASH_MAX_OUTPUT_LENGTH
-  # with no truncation notice -- so an over-budget base64 payload arrives
-  # undecodable (~30 of 48 research runs hit this on 2026-09-20). Every
-  # verdict fragment that carries a SPINDRIFT_COMMENT line must state the
-  # carrier, the payload budget, the summary-hook read-back hazard, and the
-  # re-emit rule, and the numbers they state must come from the derived
-  # bindings above -- from the same lib/output-caps.nix value lib/image.nix bakes into
-  # BASH_MAX_OUTPUT_LENGTH, and from agent/bash-output-summary.sh's own tail
-  # default -- so a cap change fails this check instead of leaving the
-  # fragments lying about the size.
+  # Issue #3669: the Box hard-cuts the echoed Bash result at the baked
+  # BASH_MAX_OUTPUT_LENGTH with no notice, so an over-budget payload arrives
+  # undecodable (~30 of 48 research runs on 2026-09-20). Every verdict fragment
+  # carrying a SPINDRIFT_COMMENT line must state the carrier, the payload
+  # budget, the summary-hook read-back hazard, and the re-emit rule, with
+  # numbers from the derived bindings above, so a cap change fails here
+  # instead of leaving the fragments lying about the size.
   research-verdict-comment-line-fragments-state-carrier-and-payload-budget =
     let
       inherit (pkgs.lib)
@@ -1676,12 +1636,9 @@ in
       touch $out
     '';
 
-  # Issue #3669 review finding: docs/reference.md's "Claude Code output caps"
-  # section hand-typed these same numbers as prose while asserting in the
-  # same breath that they cannot drift. Pinning the prose here is what makes
-  # that claim true -- same derived values as the fragment check above, one
-  # let block, so a cap change fails both or neither. normalized_grep because
-  # the prose wraps wherever the paragraph happens to fill.
+  # Issue #3669: docs/reference.md's "Claude Code output caps" section quotes
+  # these numbers as prose and claims they cannot drift; pinning them to the
+  # same derived values as the fragment check makes that true.
   research-verdict-budget-numbers-in-reference-docs-match-the-baked-cap =
     pkgs.runCommand "research-verdict-budget-numbers-in-reference-docs-match-the-baked-cap" { }
       ''
@@ -1722,11 +1679,10 @@ in
       '';
 
   # The post-green MERGE_MODE clause is stated once, in issue-prompt.md's OPEN
-  # A PULL REQUEST paragraph (issue #5312); the forgejo create step and the
-  # outcome-ready fragments point at it. Only the land-git-stop fragment
-  # names MERGE_MODE, for the different CODE_FORGE=git push-mode clause. The
-  # scan covers fragments/ and its per-backend subdirectories (issue #6159),
-  # but a copy worded without the token still slips past it.
+  # A PULL REQUEST paragraph (issue #5312); other fragments point at it. Only
+  # land-git-stop names MERGE_MODE, for CODE_FORGE=git's push-mode clause.
+  # The scan covers fragments/ subdirectories too (issue #6159), but a copy
+  # worded without the token still slips past.
   merge-mode-clause-stated-once = pkgs.runCommand "merge-mode-clause-stated-once" { } ''
     ${mergeModeScan}
     merge_mode_scan ${mergedPrompts}/fragments
@@ -2069,11 +2025,10 @@ in
       "mkHarness.nix must throw when the shared `filerPrompt` template carries a forbidden marker ('git bundle create') as literal text";
     pkgs.runCommand "build-time-reject-forbidden-marker-filer-template" { } "touch $out";
 
-  # Anti-drift registry check (issue #2709, slice 1): before
-  # lib/prompt-coverage.nix existed, caveman coverage was decided by hand per
-  # template, so a prompt kind added later would silently default to
-  # uncovered. This guards only the registry's completeness against the
-  # templates directory, both directions; slices 2 and 3 below check content.
+  # Anti-drift registry check (issue #2709): a prompt kind added later must
+  # not silently default to caveman-uncovered. Guards only the registry's
+  # completeness against the templates directory, both directions; the checks
+  # below cover content.
   caveman-coverage-registry-matches-templates-dir =
     let
       inherit (pkgs.lib) concatMapStringsSep;
@@ -2366,16 +2321,12 @@ in
         touch $out
       '';
 
-  # Grep pin (issue #3478): commit-unbaked.md must restate both of the
-  # subject-limit tiers the upstream /commit skill teaches -- ≤50 preferred,
-  # never exceed 72 -- not the flat ≤50 whose lossy paraphrase let the
-  # documented and the practiced subject length drift apart. The assembled
-  # goldens do embed the sentence, but `nix run .#regen-goldens` rewrites
-  # them, so they catch an unregenerated edit rather than a deliberate
-  # rewording; only a pin encodes the intent. The clauses are upstream's own
-  # phrasing, so re-syncing the fragment verbatim to the skill keeps this
-  # green. commit-fragment-parity.nix pins the column bounds against the
-  # skill (issue #3486); this pin keeps the fallback's exact two-tier wording.
+  # Grep pin (issue #3478): commit-unbaked.md must restate both subject-limit
+  # tiers the upstream /commit skill teaches (≤50 preferred, never exceed 72),
+  # not a lossy flat ≤50. The goldens embed the sentence but regen-goldens
+  # rewrites them, so only a pin catches a deliberate rewording. The clauses
+  # are upstream's phrasing, so re-syncing the fragment verbatim keeps this
+  # green; commit-fragment-parity.nix pins the column bounds (issue #3486).
   commit-unbaked-fragment-two-tier-subject-limit =
     pkgs.runCommand "commit-unbaked-fragment-two-tier-subject-limit" { }
       ''

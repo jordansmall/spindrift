@@ -1,11 +1,11 @@
 # Queue-mode `spindrift recover` (issue #4656): it relays a finished work
 # Box's stranded outbox bundle through the work merge gate and runs no Box of
-# its own, so its Box-facing fields mirror work's.
-# PriorityFirst lands stranded work before a new Box starts, so each rebases
-# onto as little new main as possible. Its work is outbox bundles, not
-# tracker issues, so the host counts the eligible ones itself
-# (DemandHostOutbox), leaving out bundles a running daemon child holds; the
-# count is an upper bound, so a child may still exit 2 (nothing eligible).
+# its own, so its Box-facing fields mirror work's. PriorityFirst lands
+# stranded work before a new Box starts, so each rebases onto as little new
+# main as possible. DemandHostOutbox: its work is outbox bundles, not tracker
+# issues, so the host counts the eligible ones itself, leaving out those a
+# running daemon child holds. The count is an upper bound, so a child may
+# still exit 2 (nothing eligible).
 rec {
   name = "recover";
   verb = "recover";

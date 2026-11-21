@@ -18,13 +18,10 @@
       phrase = "What breaks in an override prompt directory";
       heading = "### ${phrase}";
       versioningDoc = builtins.readFile ../../VERSIONING.md;
-      # VERSIONING.md is hard-wrapped prose, so the cited heading phrase can
-      # straddle a line break; collapse all whitespace (including newlines) to
-      # a single space before testing so the check doesn't dictate the wrap.
-      # Same shape as the shared `normalize` in nix/checks/mk-fragment-parity.nix
-      # (also carried locally by nix-checks-lore-parity.nix), minus its
-      # `toLower` — the phrase is a heading here, so case is part of what the
-      # check pins.
+      # The cited phrase can straddle a hard wrap, so collapse whitespace.
+      # Same as nix/checks/mk-fragment-parity.nix's `normalize` minus its
+      # `toLower`:
+      # the phrase is a heading, so case is part of what the check pins.
       normalize =
         text:
         let

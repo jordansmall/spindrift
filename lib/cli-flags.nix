@@ -11,11 +11,9 @@
 # A short form is a `short` field on its long flag's row, never its own row
 # and never only doc text.
 #
-# `nix run .#regen` renders this into cmd/launcher/cliflags_gen.go, which
-# parseFlags consumes and `spindrift --help --all` renders, and the
-# shell-completion renderers and the man page's COMMAND FLAGS section consume
-# it too, so a new non-schema flag added here reaches the parser, terminal
-# help, completions, and man page together.
+# `nix run .#regen` renders this into cmd/launcher/cliflags_gen.go, and the
+# completion renderers and man page read it too, so a new flag here reaches
+# the parser, `--help --all`, completions, and man page together.
 #
 # `--input` (the Launcher input document path, ADR 0020) is deliberately not a
 # row: the Nix wrapper/daemon passes it (lib/mkHarness.nix), users never type it.

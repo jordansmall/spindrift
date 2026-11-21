@@ -1,44 +1,29 @@
 # The Driver registry (ADR 0009): one entry per in-box agent CLI. Rendering
 # lives here (issue #624) so per-Driver files like ./claude.nix stay pure data.
-# The Go launcher keeps a matching host-side registry keyed by the same names,
-# less the connectorHosted Drivers, which have no native Strategy;
-# cmd/launcher/internal/driver/parity_test.go asserts the two never drift on
-# names, because each half validates its own entries independently. The
-# Go-read facts beyond the name reach Go through the generated Descriptors,
-# which the driver-descriptors-gen drift check keeps in step with these rows.
+# The Go launcher's registry carries the same names, less the connectorHosted
+# Drivers, which have no native Strategy;
+# cmd/launcher/internal/driver/parity_test.go asserts the two never drift.
+# Other Go-read facts reach Go through the generated Descriptors, kept in step
+# by the driver-descriptors-gen drift check.
 { lib }:
 let
-  # sessionCacheDirRelative is deliberately absent: a Driver with no resumable
-  # session state omits it (see runArtifacts in lib/preambles.nix).
-  # When present, assertShape checks its shape: a non-empty relative path with
-  # no empty, "." or ".." segment (so no leading/trailing/doubled slash either).
-  # envFiles is a list of { env, pathRelative } entries: the Box writes each
-  # named environment value to a home-relative file (mode 0600) before the
-  # Driver runs, for a CLI with no env-native credential store. assertShape
-  # checks it via envFileErrors.
-  # authContent is { env, oauthProviders, apiKeyProviders? }: the env var holds
-  # a Provider-keyed auth store whose OAuth entries preflight limits to
-  # oauthProviders; apiKeyProviders maps an OAuth Provider id to the
-  # differently named Provider its API key is under (string -> string,
-  # default {}). assertShape checks it via authContentErrors.
-  # credentials is a list of rules (possibly empty), shape-checked by
-  # credentialRuleErrors. A rule's optional keys are modelPrefix, setupCommand,
-  # labels (env name after the first -> human label for its fallback prompt;
-  # needs setupCommand) and setupHint (a note beside the setupCommand offer;
-  # needs setupCommand).
-  # configFiles (home-relative path -> content, baked by lib/image.nix) is
-  # optional and unvalidated. So is `subagents` (default true): false marks a
-  # Driver that provisions no subagent yet (read by lib/mkHarness.nix). Also
-  # optional and unvalidated: `effortOnModelLevels`, the valid levels of a
-  # Driver whose effort rides on the model (lib/effort-on-model.nix). And
-  # `packageLinks` (home-relative path -> path inside the Driver's package):
-  # lib/image.nix symlinks each into the home layout, failing the build when the
-  # package has no such path.
-  # module (a function of pkgs returning the Driver Connector's wasm file path,
-  # ADR 0073) is carried only by a Connector's row (lib/flakeModule.nix's
-  # spindrift.connectors.<name>.driver); a core row has a native Strategy
-  # unless its name is in connectorHosted.
-  # Every optional attribute is listed in optionalAttrs below.
+  # Optional attributes, shape-checked by the validators below unless noted:
+  # - sessionCacheDirRelative is absent for a Driver with no resumable session
+  #   state (see runArtifacts in lib/preambles.nix).
+  # - envFiles: the Box writes each named env value to a home-relative file
+  #   (mode 0600) before the Driver runs, for a CLI with no env-native
+  #   credential store.
+  # - authContent: the env var holds a Provider-keyed auth store whose OAuth
+  #   entries preflight limits to oauthProviders; apiKeyProviders maps an OAuth
+  #   Provider id to the differently named Provider its API key is under.
+  # - configFiles (home-relative path -> content, baked by lib/image.nix),
+  #   `subagents` (default true; false provisions no subagent),
+  #   effortOnModelLevels (the valid levels of a Driver whose effort rides on
+  #   the model, lib/effort-on-model.nix) and packageLinks (home-relative path
+  #   -> path inside the Driver's package; lib/image.nix symlinks each into the
+  #   home layout, failing the build on a missing path) are unvalidated.
+  # - module (ADR 0073) is carried only by a Connector's row; a core row has a
+  #   native Strategy unless its name is in connectorHosted.
   requiredAttrs = [
     "name"
     "package"
@@ -210,11 +195,9 @@ let
     let
       missing = lib.filter (attr: !(entry ? ${attr})) requiredAttrs;
       unknown = lib.filter (attr: !(lib.elem attr knownAttrs)) (builtins.attrNames entry);
-      # isString is checked first so a non-string value short-circuits the
-      # segment check rather than throwing a type error out of splitString.
-      # Keep the path canonical: homelayout.PopulateHome cleans it before its
-      # chmod-skip comparison, but a "." segment ("./x", "x/.") is still a
-      # redundant spelling, refused here like a stray slash.
+      # isString first, so a non-string value cannot throw out of splitString.
+      # A "." segment is refused as a redundant spelling, though
+      # homelayout.PopulateHome would clean it.
       sessionCacheDirRelativeBad =
         entry ? sessionCacheDirRelative
         && !(
@@ -300,8 +283,7 @@ let
     "effort"
   ];
 
-  # assertShape only checks that argvShape exists; this validates its structure.
-  # It reports every problem found, not just the first, so one build gives a
+  # Reports every argvShape problem, not just the first, so one build gives a
   # complete diagnosis.
   assertArgvShape =
     driverName: entry:
@@ -321,9 +303,7 @@ let
       effortFlagOk = shape ? effortFlag && builtins.isString shape.effortFlag && shape.effortFlag != "";
       order = shape.order or null;
       orderIsList = builtins.isList order;
-      # The expected set tracks agentsFlag's nullability: a Driver with no
-      # --agents equivalent has no "agents" position to place, so its order
-      # omits that slot too (opencode.nix has 5, claude.nix has 6).
+      # A Driver with no agentsFlag has no "agents" slot in its order either.
       expectedSlots =
         if shape ? agentsFlag then argvOrderSlots else lib.filter (s: s != "agents") argvOrderSlots;
       missingSlots =
@@ -421,9 +401,8 @@ let
   );
 
   # envCommon (issue #2011) renders as `export`, unlike the plain DRIVER_*
-  # assignments, because the value has to reach a child process (claude, via
-  # driver-exec's env inheritance) rather than entrypoint.sh's own
-  # interpolation. A Driver that omits envCommon renders no lines at all.
+  # assignments, because the value must reach the agent CLI through
+  # driver-exec's env inheritance.
   renderEnvCommon =
     driverEntry:
     lib.concatStrings (
@@ -432,10 +411,9 @@ let
       ) (driverEntry.envCommon or { })
     );
 
-  # bashTimeoutEnv (issue #4409) is plain data, not an export: the Consumer's
-  # timeout value is only known at run time, so the box program
-  # (cmd/launcher/box) exports it under each name listed here. Absent renders
-  # no line, so a Driver with no such env vars ignores the knob without any
+  # bashTimeoutEnv (issue #4409) is plain data, not an export: the timeout is
+  # known only at run time, so cmd/launcher/box exports it under each name.
+  # Absent renders no line, so a Driver without it ignores the knob with no
   # branch on its name.
   renderBashTimeoutEnv =
     driverEntry:
@@ -447,10 +425,8 @@ let
       + "\n"
     );
 
-  # The argv shape comes from ADR 0009 and issue #2534.
-  # DRIVER_ARGV_MODEL_OMIT_EMPTY and DRIVER_ARGV_AGENTS_FLAG follow the same
-  # convention as DRIVER_AGENT_FILES_DIR below: a false or absent value renders
-  # no line at all, never an empty-string assignment.
+  # ADR 0009, issue #2534. A false or absent optional value renders no line,
+  # never an empty-string assignment.
   renderArgvShape =
     driverEntry:
     let
@@ -496,20 +472,17 @@ let
     + "DRIVER_SKILLS_DIR="
     + lib.escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}"
     + "\n"
-    # renderPreamble emits this var only when the entry declares
-    # agentFilesDirRelative (declared by any Driver whose subagents use on-disk
-    # agent files), leaving it unset rather than empty so promptassembly's
-    # file-rewrite loop (issue #2153) is a true no-op for claude, whose
-    # subagents use none.
+    # Unset rather than empty when undeclared, so promptassembly's
+    # file-rewrite loop (issue #2153) is a true no-op for a Driver whose
+    # subagents use no on-disk agent files.
     + lib.optionalString (driverEntry ? agentFilesDirRelative) (
       "DRIVER_AGENT_FILES_DIR="
       + lib.escapeShellArg "/home/agent/${driverEntry.agentFilesDirRelative}"
       + "\n"
     )
-    # Symmetric with DRIVER_AGENT_FILES_DIR above (issue #2843): the var stays
-    # unset, not empty, for a Driver with no resumable session state.
-    # runArtifacts in lib/preambles.nix carries a same-named var into the
-    # Launcher input document for the host-side launcher, a separate consumer.
+    # Unset, not empty, for a Driver with no resumable session state (issue
+    # #2843).
+    # runArtifacts in lib/preambles.nix carries a same-named var to the host.
     + lib.optionalString (driverEntry ? sessionCacheDirRelative) (
       "DRIVER_SESSION_CACHE_DIR="
       + lib.escapeShellArg "/home/agent/${driverEntry.sessionCacheDirRelative}"

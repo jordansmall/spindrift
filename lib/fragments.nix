@@ -2,25 +2,21 @@
 # step. Box's prompt assembly reads the rows as JSON (lib/mkHarness.nix's
 # fragmentsRegistryJson), so a fragment row names every variable it reads.
 
-# A row's `gate` is a bash variable the loop tests for non-emptiness, not a
-# Nix boolean, and `fragment` is a basename under prompts/fragments/, from
-# templates/default or a SPINDRIFT_PROMPT_DIR override. A row that omits `gate`
-# is ungated and renders unconditionally; the export normalizes it to "".
-# A row with `axis` ("tracker" | "filer" | "forge", issues #5646/#5647, ADR
-# 0068) names its `fragment` relative to a backend folder instead:
-# `fragments/<folder>/<fragment>`. <folder> comes from the axis's signal, the
-# one its gates test, not from the backend's name: "tracker" the tracker read
-# arm (jira reads its own), "filer" the tracker Filer arm (a local tracker's
-# rides github's), "forge" the CODE_FORGE arm (git and local ride github's). A
-# folder with no such file renders empty unless the row is `shared = true`, which
-# falls back to the root-level `fragments/<fragment>` (one body naming the active
-# backend through ${FORGE_DISPLAY_NAME}, the `displayName` of a backend row in
-# lib/backends/); a folder's own file still wins. ${FORGE_DISPLAY_NAME} is
-# bound per row to the folder backend's display name (a plain row takes the
-# tracker folder's), and a row whose fragment uses it lists it in
-# `extraSubstVars`. An omitted `axis` means a root-level fragment (Go's omitempty
-# reads the absent key as ""); lib/fragment-paths.nix expands a row to its
-# on-disk paths, and a new axis row must be declared in its `shipped` map.
+# A row's `gate` is a variable tested for non-emptiness, not a Nix boolean;
+# omitted, the row is ungated and the export normalizes it to "". `fragment`
+# is a basename under prompts/fragments/ (templates/default or a
+# SPINDRIFT_PROMPT_DIR override). A row with `axis` ("tracker" | "filer" |
+# "forge", issues #5646/#5647, ADR 0068) names its `fragment` under
+# `fragments/<folder>/` instead, <folder> coming from the axis's signal, not
+# the backend's name: "tracker" the read arm (jira reads its own), "filer" the
+# Filer arm (local rides github's), "forge" the CODE_FORGE arm (git and local
+# ride github's). A folder with no such file renders empty unless the row is
+# `shared = true`, which falls back to the root `fragments/<fragment>`; a
+# folder's own file still wins. ${FORGE_DISPLAY_NAME} binds per row to the
+# folder backend's `displayName` (a plain row takes the tracker folder's), and
+# a fragment using it lists it in `extraSubstVars`. lib/fragment-paths.nix
+# expands a row to its on-disk paths; a new axis row must be declared in its
+# `shipped` map.
 
 # `extraSubstVars` (default []) lists allowlist entries a fragment's own body
 # interpolates; every other fragment is static prose once its gate is on,
@@ -36,16 +32,14 @@
 # off row leaves it alone. Nothing checks that exclusivity outside an
 # `inverseOf` pair; overlapping gates mean the last on row silently wins.
 
-# `signalChannel` (issue #3726) names which of lib/prompt-contract.nix's
-# markerChannels ("comment" | "pr-intent" | "issue-intent") a _LOG/_SOCKET
-# fragment pair's row belongs to, so buildTimeSignalFragmentViolations can
-# derive the required marker/verb from that registry instead of a
-# hand-listed per-file table. Only _LOG/_SOCKET-paired rows that send or
-# print the signal carry it; every other row is silently skipped by that
-# check, and buildTimeSignalFragmentPairViolations (issue #3754) asserts each
-# keeps its partner. The read-only OUTCOME pairs (issue #6232) only refer
-# back to the PR intent, so they leave it off and nothing asserts their
-# pairing.
+# `signalChannel` (issue #3726) names which lib/prompt-contract.nix
+# markerChannels row ("comment" | "pr-intent" | "issue-intent") a _LOG/_SOCKET
+# row belongs to, so buildTimeSignalFragmentViolations derives the required
+# marker/verb from that registry. Only rows that send or print the signal
+# carry it (others are skipped), and buildTimeSignalFragmentPairViolations
+# (issue #3754) asserts each keeps its partner. The read-only OUTCOME pairs
+# (issue #6232) only refer back to the PR intent, so they leave it off and
+# nothing asserts their pairing.
 let
   rows = [
     {
@@ -360,17 +354,14 @@ let
       fragment = "filer-label-relay-butler-records.md";
       var = "FILER_LABEL_RELAY_BUTLER_RECORDS_STEP";
     }
-    # Step 2's tracker searches fork on whether a search reaches the Box: a
-    # relay Filer still searches through the tracker.
-    # The search is the Signal socket's issue-search verb (issue #6895), so
-    # the search arm renders wherever the host built a searcher
-    # (BOX_SIGNAL_ISSUE_SEARCH, issue #6924) and local keeps its folder
-    # search. Everything else (no searcher, or the log carrier) takes the
-    # no-search arm: the host's dedup over relayed intents is the whole check.
-    # The two arms share a var, like the issue-read arms below.
-    # One slot (issue #5647, ADR 0068): the slot is per tracker folder, so each
-    # searchable backend carries its own file, even where (jira, github) the
-    # text matches.
+    # Step 2's tracker searches fork on whether a search reaches the Box. The
+    # search is the Signal socket's issue-search verb (issue #6895), so its arm
+    # renders wherever the host built a searcher (BOX_SIGNAL_ISSUE_SEARCH,
+    # issue #6924), and local keeps its folder search. Otherwise the no-search
+    # arm renders: the host's dedup over relayed intents is the whole check.
+    # The arms share a var. The slot is per tracker folder (issue #5647, ADR
+    # 0068), so each searchable backend carries its own file even where (jira,
+    # github) the text matches.
     {
       axis = "tracker";
       gate = "ISSUE_TRACKER_SEARCHABLE";
@@ -811,29 +802,25 @@ let
       var = "LAND_GIT_STOP_READ_ONLY_STEP";
     }
     # The OPEN A PULL REQUEST push step (issue #1918): a Box holds no
-    # push-capable token, so it writes its finished branch as a seam bundle
-    # to the outbox and the launcher's BundleRelay force-pushes it host-side.
-    # Ungated by host mediation though its text is false on local
-    # (issue #6281): LAND THE CHANGE tells CODE_FORGE=local to skip OPEN A PULL
-    # REQUEST, and open-pr-create-outbox.md below is that Box's last PR-intent
-    # marker carrier once the IF BLOCKED PR-intent rows stop rendering there
-    # (prompt-contract.nix's `pr-intent` row warns without one).
+    # push-capable token, so it writes its branch as a seam bundle to the
+    # outbox and the launcher's BundleRelay force-pushes it. Ungated by host
+    # mediation though its text is false on local (issue #6281): LAND THE
+    # CHANGE tells CODE_FORGE=local to skip OPEN A PULL REQUEST, and once the
+    # IF BLOCKED PR-intent rows stop rendering there, open-pr-create-outbox.md
+    # is that Box's last PR-intent marker carrier, without which
+    # prompt-contract.nix's `pr-intent` row warns.
     {
       fragment = "open-pr-push-outbox.md";
       var = "OPEN_PR_PUSH_READ_ONLY_STEP";
     }
     # The OPEN A PULL REQUEST create step (issue #1919): a Box cannot run
-    # `gh pr create`, so it emits title and body as one nonce-guarded,
-    # base64-encoded SPINDRIFT_PR_INTENT stdout line, and the launcher opens
-    # the draft PR. Issue #1938 moved that off a multi-line block, which never
-    # survived Claude Code's stream-json transport. SPINDRIFT_PR_INTENT is
-    # opened host-side whichever forge backend answers, so the step never
-    # forks on CODE_FORGE.
-    #
-    # The carrier (issue #3726) forks the PR-intent send itself: the Box
-    # emits the nonce-guarded SPINDRIFT_PR_INTENT stdout line above, or sends
-    # the same intent over the Signal socket via `driver-exec signal
-    # pr-intent`, per BOX_SIGNAL_CARRIER's _LOG/_SOCKET gate pair.
+    # `gh pr create`, so it sends title and body as one nonce-guarded,
+    # base64-encoded PR intent and the launcher opens the draft PR whichever
+    # forge answers, so the step never forks on CODE_FORGE. The intent is one
+    # line because a multi-line block never survived Claude Code's stream-json
+    # transport (issue #1938). The carrier (issue #3726) forks the send: a
+    # SPINDRIFT_PR_INTENT stdout line, or `driver-exec signal pr-intent` over
+    # the Signal socket, per BOX_SIGNAL_CARRIER's gate pair.
     {
       gate = "BOX_ACCESS_READ_ONLY_LOG";
       fragment = "open-pr-create-outbox.md";
@@ -846,13 +833,11 @@ let
       var = "OPEN_PR_CREATE_READ_ONLY_SOCKET_STEP";
       signalChannel = "pr-intent";
     }
-    # The OUTCOME section's landing= value and status=ready close
-    # (issue #1919): a Box never opens the PR, so it never learns a URL. Its
-    # landing= carries the branch name, and "status=ready" means "branch
-    # relayed, PR-intent ready to open" rather than "PR already open". The
-    # rows fork on the carrier (issue #6232): the socket Box prints no
-    # PR-intent line, so its status=ready rests on an accepted
-    # `driver-exec signal pr-intent` call instead.
+    # The OUTCOME section's landing= value and status=ready close (issue
+    # #1919): a Box never opens the PR, so landing= carries the branch name and
+    # "status=ready" means "branch relayed, PR intent ready to open". The rows
+    # fork on the carrier (issue #6232): a socket Box prints no PR-intent line,
+    # so its status=ready rests on an accepted `driver-exec signal pr-intent`.
     {
       gate = "BOX_ACCESS_READ_ONLY_LOG";
       fragment = "outcome-landing-outbox.md";

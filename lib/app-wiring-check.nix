@@ -3,11 +3,9 @@
 # nix/checks/opencode-session-schema.nix's regen-opencode-schema-app-wiring,
 # issue #5492) guard the identical shape: flake.nix's top-level apps.<name>
 # must resolve to the same derivation this check itself built. Each `*Reason`
-# is a sentence fragment -- what breaks, in the caller's own words -- that the
-# shared diagnostic tail continues, so it takes no trailing punctuation.
-# nix/checks/equivalence.nix's dogfood-bwrap-app-wiring is deliberately not a
-# caller: its program path comes from a fixture, not from a derivation the
-# check itself built.
+# is a sentence fragment the shared diagnostic tail continues, so it takes no
+# trailing punctuation. equivalence.nix's dogfood-bwrap-app-wiring is not a
+# caller: its program path comes from a fixture.
 { pkgs }:
 {
   name,

@@ -1,26 +1,18 @@
-# Both control-plane workflow sets must reach the image build through the shared
-# agent-setup composite and claim the issue first, and the YAML is hand
-# maintained, so this guard pins both against silent regression (issue #1967).
-# The GitHub set never sets `forge`, which is how it keeps agent-setup's
-# `gh api rate_limit` smoke test and `gh issue edit` claim.
-#
-# agent-research-close.yml is deliberately absent from both sets: it claims no
-# issue and builds no image, so it has nothing to reach agent-setup for. Its
-# label guard is pinned in nix/checks/dispatch-labels.nix instead.
-#
-# It also pins both agent workflow sets to `.spindrift/logs/`, where the launcher
-# writes (HostLogDirFor): a repo-root `logs/` is always empty (#3934).
-#
-# The Forgejo `comment: >-` copies of the recover-park and dispatch-blocked
-# comments are hand-maintained against the GitHub `--body` originals and have
-# drifted before (issue #4010), so their normalized text is pinned equal too.
-#
-# `forgejo-label-swap-comment-safety` pins the forgejo-label-swap composite's
-# injection-safety contract: the .forgejo workflows feed untrusted step outputs
-# (recover-reason, blockers) into its `comment:` input, which is safe only
-# while action.yml hands it to label-swap.sh via env and the script encodes it
-# with `jq --arg` (#4030). The jq assert below pins only that one encoding
-# line, not every use of `$comment` in label-swap.sh.
+# Both hand-maintained control-plane workflow sets must reach the image build
+# through the shared agent-setup composite and claim the issue first; this
+# pins them (issue #1967). The GitHub set never sets `forge`, which keeps
+# agent-setup's `gh api rate_limit` smoke test and `gh issue edit` claim.
+# agent-research-close.yml claims no issue and builds no image, so it is in
+# neither set; dispatch-labels.nix pins its label guard.
+# Both sets must log to `.spindrift/logs/` (HostLogDirFor): a repo-root
+# `logs/` is always empty (#3934). The Forgejo `comment: >-` copies of the
+# recover-park and dispatch-blocked comments have drifted from the GitHub
+# `--body` originals before (issue #4010), so their normalized text is pinned.
+# `forgejo-label-swap-comment-safety`: the .forgejo workflows feed untrusted
+# step outputs into the forgejo-label-swap composite's `comment:` input, safe
+# only while action.yml passes it to label-swap.sh via env and the script
+# encodes it with `jq --arg` (#4030). Only that one encoding line is pinned,
+# not every use of `$comment` in label-swap.sh.
 { pkgs, ... }:
 let
   inherit (pkgs.lib)
@@ -161,12 +153,11 @@ let
     in
     concatStringsSep " " (map trim (sublist 0 endIdx lines));
 
-  # Each row names the comment, the shared basename both forges' workflow file
-  # is keyed under, and the substring substitutions (zero or more) needed to
-  # line up the GitHub `--body` prose with the Forgejo `comment: >-` prose.
+  # Each row: the comment, the workflow basename both forges share, and the
+  # substitutions lining up GitHub `--body` with Forgejo `comment: >-` prose.
   # The recover row reads its `to` from the GitHub env line, so the fallback
   # literal is pinned too; the dispatch row's `blockers` has no GitHub-side
-  # expression to read, so its Forgejo expression is written out here.
+  # expression, so its Forgejo expression is written out here.
   commentRows = [
     {
       name = "recover park comment";

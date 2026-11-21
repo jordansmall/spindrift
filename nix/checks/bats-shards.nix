@@ -20,13 +20,12 @@ let
   # coverage check compares against.
   allFiles = builtins.sort (a: b: a < b) (builtins.attrNames batsFiles);
 
-  # The heaviest file (`maxFileCount` in partitionStats) floors the largest
-  # shard total (the makespan), so more shards can cut it only while some
-  # shard's total exceeds that floor. Three shards sit above it today, so a
-  # fourth would cut the case makespan. Three is the count issue #4294 cut
-  # the suite down to, not a computed optimum; it stays put until CI shard
-  # wall-clock, not @test totals, shows another shard pays for its derivation
-  # (issue #6205).
+  # The heaviest file (`maxFileCount` in partitionStats) floors the makespan
+  # (the largest shard total), so more shards help only while some shard's
+  # total exceeds that floor; all three sit above it today, so a fourth would
+  # cut the @test makespan. Three is issue #4294's count, not a computed
+  # optimum: it stays until CI shard wall-clock, not @test totals, shows
+  # another shard pays for its derivation (issue #6205).
   shardCount = 3;
   shardIndices = lib.range 0 (shardCount - 1);
   shardNames = map (i: "bats-shard-${toString i}") shardIndices;

@@ -28,15 +28,13 @@ let
     ]
   );
 
-  # internal/driver's non-test Go files, minus the conformance kit: it imports
-  # internal/golden, which no in-box fileset carries, and `go mod vendor` loads
-  # every package in the tree, not just subPackages.
-  # Nothing in-box imports the kit (Driver packages call it from _test.go only).
-  # bundle/runners.go registers the runner families, which no Box constructs;
-  # bundle/backends.go registers the backends, which only the Box looks up (the
-  # Box adds it back through backendBundleFiles); bundle/ecosystems.go registers
-  # the ecosystems, which only the Box and driver-exec bind (both add it back
-  # through ecosystemBundleFile; the orchestrator never does).
+  # internal/driver's non-test Go files, minus the conformance kit, which only
+  # _test.go files import: it imports internal/golden, which no in-box fileset
+  # carries, and `go mod vendor` loads every package in the tree, not just
+  # subPackages. Also minus bundle/runners.go (no Box constructs a runner
+  # family), bundle/backends.go (only the Box looks backends up;
+  # backendBundleFiles adds it back) and bundle/ecosystems.go (only the Box
+  # and driver-exec bind ecosystems, via ecosystemBundleFile).
   driverTreeFiles =
     lib.fileset.difference
       (lib.fileset.fileFilter (
@@ -92,15 +90,13 @@ let
 
   # In-box Driver runner (issue #626): runs one Driver invocation, direct or
   # inside the Project devShell, tees the stream to a log path, and filters
-  # heartbeats in-process, so there is one in-box Go unit rather than two.
-  # Built for Linux (pkgs, not hostPkgs), and it goes through the Driver seam
-  # (ADR 0009, issue #620) rather than a heartbeat package directly.
-
+  # heartbeats in-process through the Driver seam (ADR 0009, issue #620).
+  # Built with pkgs, not hostPkgs: it runs in the Linux Box.
+  #
   # INVARIANT: the agent image drvPath must not change when host-side launcher
-  # code outside this binary's import closure changes, so the fileset below is
-  # deliberately tight and excludes *_test.go. An import added outside it
-  # fails the build loudly with a missing package, which is the intended
-  # failure mode (issue #474).
+  # code outside this binary's import closure changes, so the fileset is
+  # deliberately tight and excludes *_test.go; an import added outside it fails
+  # the build loudly with a missing package (issue #474).
   driverExecBin = pkgs.buildGoModule {
     pname = "driver-exec";
     version = spindriftVersion;
@@ -444,12 +440,10 @@ let
     fileset = ../cmd/launcher;
   };
 
-  # daemonBin is one input to the wrapper whose own $0
-  # (SPINDRIFT_DAEMON_PROGRAM) is what runSlot's inline Tip.SelfPath
-  # comparison (cmd/launcher/internal/daemon/loop.go) compares at each
-  # iteration boundary (issue #3543); a mismatch halts a running daemon with
-  # exit 10. Its src is the docs-free module source, so a docs-only commit
-  # cannot halt a running daemon (issue #3621).
+  # daemonBin feeds the wrapper whose $0 (SPINDRIFT_DAEMON_PROGRAM) runSlot
+  # compares to Tip.SelfPath at each iteration boundary (issue #3543), so a
+  # change halts or hands off a running daemon. Its src is the docs-free module
+  # source, so a docs-only commit never does (issue #3621).
   daemonBin = hostPkgs.buildGoModule {
     pname = "spindrift-daemon";
     version = spindriftVersion;
@@ -495,17 +489,13 @@ let
   # revision-only changes, so this one drops that ldflag. It is never
   # invoked; only its store hash is read.
 
-  # src is scoped with lib.fileset to the launcher's own sources, so a
-  # docs-only commit cannot move this hash.
-
-  # The fileset is a directory-level approximation of the launcher's import
-  # graph, not the graph itself: it subtracts the driver-exec, orchestrator,
-  # quickstart, daemon and connector-host subtrees (each an independent
-  # `package main` the launcher never imports). internal/daemon stays in:
-  # `spindrift butler` imports it for the awake window's zone (issue #3879).
-  # A reviewer found 13 directories included here that are outside the real
-  # import graph (internal/testutil, for one), so perturbing those still moves
-  # this outPath (issue #2677 review fix).
+  # A directory-level approximation of the launcher's import graph, so a
+  # docs-only commit cannot move this hash: it subtracts the driver-exec,
+  # orchestrator, quickstart, daemon and connector-host subtrees (independent
+  # `package main`s). internal/daemon stays in: `spindrift butler` imports it
+  # for the awake window's zone (issue #3879). Some included directories sit
+  # outside the real graph (internal/testutil, for one), so perturbing those
+  # still moves this outPath (issue #2677).
   launcherCurrencyFileset =
     lib.fileset.difference
       (lib.fileset.unions [

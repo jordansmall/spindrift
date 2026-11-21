@@ -32,11 +32,10 @@ let
       ensureTrailingBlankLine (promptInject.sliceBetween row.startMarker row.endMarker sourceText);
 in
 rec {
-  # Row fields: `source` is the default prompt the text is sliced from; there
-  # is no standalone contract file, which is what keeps the injected copy
-  # identical to that prompt's own (issue #419). `marker` is what
-  # injectSection scans a target prompt for to skip an already-present block;
-  # `startMarker` is inclusive, `endMarker` exclusive or `null` for the end.
+  # Row fields: `source` is the default prompt the text is sliced from (see
+  # sliceRow). `marker` is what injectSection scans a target prompt for to skip
+  # an already-present block; `startMarker` is inclusive, `endMarker` exclusive
+  # or `null` for the end.
   injectBlocks = [
     {
       id = "outcome";
@@ -290,16 +289,12 @@ rec {
     in
     (violationsIn fragmentHitsByFile) ++ (violationsIn templateHitsByFile);
 
-  # Asserts every _LOG/_SOCKET fragment pair fork (issue #3726) actually
-  # instructs the verb its carrier requires: a _SOCKET-gated fragment must
-  # contain "driver-exec signal <channel>", and a _LOG-gated fragment must
-  # contain its channel's markerChannels token. Which channel a row belongs
-  # to comes from the row's own `signalChannel` field (lib/fragments.nix),
-  # never a hand-listed filename table, so a new paired fragment only needs
-  # that one field to be covered here. Rows with no `signalChannel` (every
-  # non-signal fragment) are silently skipped. Takes the fragment rows and a
-  # content map as arguments, so a check can hand it synthetic content and
-  # prove it really fails.
+  # Asserts every _LOG/_SOCKET fragment pair fork (issue #3726) instructs the
+  # verb its carrier requires: a _SOCKET-gated fragment must contain
+  # "driver-exec signal <channel>", a _LOG-gated one its channel's
+  # markerChannels token. The channel is the row's own `signalChannel` field
+  # (lib/fragments.nix); rows without one are skipped. Takes rows and a content
+  # map as arguments, so a check can prove it fails on synthetic content.
   buildTimeSignalFragmentViolations =
     { fragmentRows, fragmentContentByFile }:
     let
@@ -344,13 +339,11 @@ rec {
   # Asserts every signalChannel row still has its _LOG/_SOCKET partner (issue
   # #3754): a _LOG row `X.md`/`B_LOG` needs exactly one row `X-socket.md`/
   # `B_SOCKET` on the same channel, and vice versa. Pairing is by row identity
-  # (fragment + gate + channel), never (gate base, channel) -- several pairs
-  # share both, so a coarser key lets one pair losing its half hide behind its
-  # siblings. A _SOCKET fragment not named `*-socket.md` is always a
-  # violation, as is a signalChannel row whose gate ends in neither _LOG nor
-  # _SOCKET (a signal row is by definition one half of a pair). Deleting both
-  # halves together is out of scope: pairing cannot see a whole removed
-  # feature.
+  # (fragment + gate + channel): several pairs share (gate base, channel), so a
+  # coarser key would let one pair's lost half hide behind its siblings. A
+  # _SOCKET fragment not named `*-socket.md`, or a signalChannel row gated on
+  # neither _LOG nor _SOCKET, is a violation. Deleting both halves together is
+  # invisible to this check.
   buildTimeSignalFragmentPairViolations =
     { fragmentRows }:
     let
@@ -506,12 +499,10 @@ rec {
   # as prose, but markergate.substituteFieldShape parses its key=value layout.
   # `carrier`/`defense` describe the `log` Signal carrier (a marker line in
   # the mid-run log or final message); the three signal rows (comment,
-  # pr-intent, issue-intent) additionally carry `socketCarrier`/
-  # `socketDefense`, describing the `socket` Signal carrier
-  # (BOX_SIGNAL_CARRIER, ADR 0052, issue #3726). The socket's defense is the
-  # launcher-owned listener rather than RUN_NONCE: the Box reaches a socket
-  # only the launcher opened, so no token in the corpus can be echoed into a
-  # signal.
+  # pr-intent, issue-intent) also carry `socketCarrier`/`socketDefense` for the
+  # `socket` carrier (BOX_SIGNAL_CARRIER, ADR 0052, issue #3726), whose defense
+  # is the launcher-owned listener rather than RUN_NONCE: the Box reaches only a
+  # socket the launcher opened, so no corpus token can be echoed into a signal.
   markerChannels = [
     {
       id = "outcome";
@@ -561,11 +552,9 @@ rec {
 
   # Every (obligation, branch) pair whose content is missing one of the
   # obligation's requiredSubstrings (issue #2699). Takes the content map as an
-  # argument rather than reading each branch's `source`, so a test can prove
-  # the check really fails by handing it synthetic content. Both sides are
-  # whitespace-collapsed before the match (issue #3815), so a rewrap cannot
-  # redden it; `missing` still carries the raw needle, which is what an
-  # author greps for.
+  # argument so a test can prove it fails on synthetic content. Both sides are
+  # whitespace-collapsed (issue #3815), so a rewrap cannot redden it; `missing`
+  # keeps the raw needle an author greps for.
   sharedObligationViolationsFor =
     obligations: contentBySource:
     builtins.concatMap (

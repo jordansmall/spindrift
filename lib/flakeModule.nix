@@ -49,23 +49,20 @@ let
     lib.filterAttrs (_: r: r.driver != null) config.spindrift.connectors
   );
   # The backend rows network Connectors register (ADR 0073, issue #6805), keyed
-  # by Connector name. `credential` names one of the Connector's own `knobs` and
-  # is resolved to its env var here. A core knob (ghToken) or a knob the Box
-  # sees is refused: the host attaches the credential to requests to the
-  # Connector's own routes, so a core secret would leak to it. The env is read
-  # through `envSchema`, not `knob.env`: its collision fold refuses a knob
-  # aliasing a core env var, and keeps a Connector's knob under its own key.
-  # `identity` (the Basic username, e.g. a Jira account email) follows the same
-  # ownership and host-only rule but is not a secret; `base` (the site's base
-  # URL, which `{base}` route hosts resolve from) is a non-secret URL, so any
-  # env-schema knob may carry it.
+  # by Connector name. `credential` names one of the Connector's own `knobs`,
+  # resolved to its env var here; a core knob (ghToken) or a Box-visible one is
+  # refused, since the host attaches it to the Connector's routes and a core
+  # secret would leak to it. The env is read through `envSchema`, whose
+  # collision fold refuses a knob aliasing a core env var. `identity` (the Basic
+  # username) follows the same rule but is no secret; `base` (the URL `{base}`
+  # route hosts resolve from) is no secret either, so any env-schema knob may
+  # carry it.
   #
-  # `acceptedRoutes` is the Consumer's reviewed baseline of each Route table,
-  # read from the Consumer's own source tree and never from an option: a
-  # Connector's module cannot set its own baseline, and a flake-lock bump that
-  # widens a table leaves the baseline untouched so doctor shows the diff. The
-  # path is built by concatenation, not "${self}", which would copy a fixture's
-  # whole repo path into the store.
+  # `acceptedRoutes` is the Consumer's reviewed Route-table baseline, read from
+  # its own tree, never an option: a Connector's module cannot set its own, and
+  # a lock bump that widens a table leaves it untouched so doctor shows the
+  # diff. The path is built by concatenation, not "${self}", which would copy a
+  # fixture's whole repo path into the store.
   acceptedRoutesFile = self.outPath + "/spindrift-connector-routes.json";
   acceptedRoutesBaseline =
     if builtins.pathExists acceptedRoutesFile then
@@ -179,12 +176,11 @@ let
   ) { } (lib.attrNames flakeOptionEntries);
 
   # Every type is nullOr so unset knobs fall through to mkHarness's schema
-  # defaults. The `choices` case (issue #2519) is checked ahead of the
-  # int/bool/str typing so an out-of-enum value fails at the option itself,
-  # naming the option path and the valid choices. Int follows flagKind, so an
-  # explicit `kind = "int"` types a knob with no default (issue #4420). Bool
-  # still infers from the default: every `kind = "bool"` entry carries a bool
-  # default, so honouring that kind here would change no option type.
+  # defaults. `choices` (issue #2519) is checked first so an out-of-enum value
+  # fails at the option, naming its path and the valid choices. Int follows
+  # flagKind, so `kind = "int"` types a knob with no default (issue #4420); bool
+  # still infers from the default: every `kind = "bool"` entry carries one, so
+  # honouring that kind would change no option type.
   mkKnobOption =
     _key: entry:
     mkOption {
@@ -753,11 +749,10 @@ in
     options.spindrift =
       let
         # Deprecation shim for the legacy `settings.<section>.<knob>` paths
-        # (ADR 0037); the domain tree built by `buildTree` is now primary.
-        # Section names come from the frozen map in
-        # lib/legacy-settings-section.nix, read by `sectionKnobs`; which
-        # knobs exist is still env-schema.nix's flakeOption subset. A set
-        # value forwards to the new path via `lib.warn`.
+        # (ADR 0037). Section names come from the frozen map in
+        # lib/legacy-settings-section.nix; which knobs exist is still
+        # env-schema.nix's flakeOption subset. A set value forwards to the
+        # domain-tree path via `lib.warn`.
         settingsOption = {
           settings = mkOption {
             type = types.submodule {

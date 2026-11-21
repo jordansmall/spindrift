@@ -58,9 +58,9 @@
     harnessOwned = true;
   }
   {
-    # code-comments still bakes into every image and stays invocable via
-    # /code-comments; the gate is a bake probe only now, not a fragment
-    # gate -- #3505 inlined the policy body into the prompts themselves.
+    # code-comments bakes into every image and is invocable via
+    # /code-comments; the gate is a bake probe only, not a fragment gate,
+    # since #3505 inlined the policy body into the prompts.
     name = "code-comments";
     goVar = "codeCommentsSkillBaked";
     field = "CodeCommentsSkillBaked";

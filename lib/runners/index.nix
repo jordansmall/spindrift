@@ -1,11 +1,9 @@
 # Derives the runtime enum and the runtime-to-row lookup from the runner rows
 # (lib/runners/default.nix). `rows` is an argument only so
 # nix/checks/schema-drift.nix can feed it a malformed row set. A runtime listed
-# by two rows, or a row with an unknown artifact, throws when `runtimes`,
-# `forRuntime`, or `rows` is forced, so a bad family never reaches the enum, the
-# harness, or the generated Go. So does a row listing a network mode outside the
-# NETWORK_MODE enum. `unsupportedNetworkModeMessage` is the one wording for a
-# mode a row does not list.
+# by two rows, an unknown artifact, or a network mode outside the NETWORK_MODE
+# enum throws when `rows`, `runtimes`, or `forRuntime` is forced, so a bad
+# family never reaches the enum, the harness, or the generated Go.
 {
   rows ? import ./default.nix,
 }:

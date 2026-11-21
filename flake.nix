@@ -249,10 +249,9 @@
             }
             # A bwrap harness bakes FLAKE_IMAGE_ATTR as
             # `.#packages.<system>.<imageAttrName>` (issue #2672), agent-closure
-            # here, so the launcher's freshness Probe needs agent-closure at top
-            # level, not only on fixtures.dogfoodBwrapHarness. The guard matches
-            # lib/mkHarness.nix:
-            # on aarch64-darwin that harness has none and the access would throw.
+            # here, so the launcher's freshness Probe needs it at top level. The
+            # guard matches lib/mkHarness.nix: on aarch64-darwin that harness has
+            # no agent-closure and the access would throw.
             // pkgs.lib.optionalAttrs (fixtures.dogfoodBwrapHarness.packages ? agent-closure) {
               agent-closure = fixtures.dogfoodBwrapHarness.packages.agent-closure;
             }
@@ -315,10 +314,9 @@
               };
             }
             # regen-goldens runs the prompt-assembly golden test in update mode
-            # (issue #2951), and nix/checks/promptassembly.nix pins it to the
-            # derivation built here. It needs fixtures.seamFixtures, rendered
-            # off lib/mkHarness.nix's batsHarness, which builds only on Linux, so the
-            # guard is `pkgs.stdenv.isLinux`, not a sibling's `? agent-closure`.
+            # (issue #2951); nix/checks/promptassembly.nix pins it to the
+            # derivation built here. Its fixtures.seamFixtures come off
+            # batsHarness, which builds only on Linux, hence the isLinux guard.
             // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
               regen-goldens = {
                 type = "app";
@@ -330,13 +328,11 @@
             # dogfood-bwrap-daemon can drive a bwrap Box without touching
             # apps.default or the podman module config. Without the guard it
             # resolves on aarch64-darwin and fails opaquely once the launcher
-            # realizes agent-closure, not up front.
+            # realizes agent-closure.
             // pkgs.lib.optionalAttrs (fixtures.dogfoodBwrapHarness.packages ? agent-closure) {
               dogfood-bwrap = fixtures.dogfoodBwrapHarness.apps.default;
-              # Its daemon counterpart (issue #3538): dogfoodBwrapHarness's own
-              # daemonApp default points back at `.#dogfood-bwrap`, so this
-              # drives a bwrap Box rather than the podman one apps.daemon
-              # (off the default harness) would.
+              # Its daemon (issue #3538) points back at `.#dogfood-bwrap`, so it
+              # drives a bwrap Box rather than apps.daemon's podman one.
               dogfood-bwrap-daemon = fixtures.dogfoodBwrapHarness.apps.daemon;
             }
             # The pi Driver in a bwrap Box (issue #6064): the bwrap twin above
@@ -358,15 +354,11 @@
                   pkgs.go
                   config.packages.spindrift
                 ]
-                # bubblewrap only builds on Linux. The runner integration tests
-                # (issue #576) need it on PATH to exercise a real sandbox, and
-                # need passt's `pasta` binary for the pasta-wrapped default
-                # network isolation path (issue #2666). The egress test also
-                # needs iproute2's `ip` to inspect the namespace's tap
-                # interface and routes, and the in-box nix tests need sqlite3
-                # for the store-db snapshot. Without these, the tests that
-                # need them skip rather than exercise anything real, unless
-                # SPINDRIFT_REQUIRE_BWRAP is set, as CI sets it.
+                # Linux-only. The runner integration tests need bubblewrap
+                # (issue #576) and passt's `pasta` (issue #2666), the egress test
+                # iproute2's `ip`, and the in-box nix tests sqlite3. Without
+                # them those tests skip, unless SPINDRIFT_REQUIRE_BWRAP is set,
+                # as CI sets it.
                 ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
                   pkgs.bubblewrap
                   pkgs.passt
