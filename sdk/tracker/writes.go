@@ -75,13 +75,16 @@ type CommentRequest struct {
 // dedup marker line; DedupMarker is that line verbatim ("" for none), stored
 // where the tracker can find it on read (Jira: an issue entity property).
 // IssueType is the type core files as; a Connector has no config channel, so
-// core ships it on each call.
+// core ships it on each call. Route is the Issue route the filed issue must
+// carry (its stamp): a Connector sets every selector, so the issue matches the
+// same route's Query; empty stamps nothing.
 type IssueRequest struct {
-	Title       string   `json:"title"`
-	Body        string   `json:"body"`
-	Labels      []string `json:"labels"`
-	DedupMarker string   `json:"dedupMarker"`
-	IssueType   string   `json:"issueType"`
+	Title       string     `json:"title"`
+	Body        string     `json:"body"`
+	Labels      []string   `json:"labels"`
+	DedupMarker string     `json:"dedupMarker"`
+	IssueType   string     `json:"issueType"`
+	Route       []Selector `json:"route,omitempty"`
 }
 
 // Writer is the write primitives of a Connector-backed tracker. Each func is

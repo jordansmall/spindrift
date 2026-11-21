@@ -249,7 +249,7 @@ func listIssues(t tracker.Target, q tracker.Query, limit int) ([]tracker.Issue, 
 // closed as not planned must not be refiled. One call is one HTTP request, so
 // the cursor is Jira's own (cloud nextPageToken, server startAt) and no row is
 // lost to truncating a page that continues; core walks the pages.
-func labeledPage(t tracker.Target, label, state, cursor string, limit int) ([]tracker.Issue, string, error) {
+func labeledPage(t tracker.Target, label string, _ []tracker.Selector, state, cursor string, limit int) ([]tracker.Issue, string, error) {
 	if limit < 1 {
 		return nil, "", fmt.Errorf("list labeled issues: limit %d < 1", limit)
 	}
