@@ -27,7 +27,7 @@ func TestByName(t *testing.T) {
 			if ok != tc.ok {
 				t.Fatalf("ByName(%q) ok = %v, want %v", tc.name, ok, tc.ok)
 			}
-			if got != tc.want {
+			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("ByName(%q) = %+v, want %+v", tc.name, got, tc.want)
 			}
 		})
@@ -207,6 +207,21 @@ func TestQuickstartBlocks(t *testing.T) {
 		}
 		if d.Quickstart == nil || !reflect.DeepEqual(*d.Quickstart, w) {
 			t.Errorf("%s quickstart = %+v, want %+v", d.Name, d.Quickstart, w)
+		}
+	}
+}
+
+// TestRouteKindsAreLocalLabelOnly pins ADR 0075 decision 1: only local
+// declares an Issue route kind (label); every other row declares none, since a
+// tracker that ignored the route would quietly list the whole Tracker scope.
+func TestRouteKindsAreLocalLabelOnly(t *testing.T) {
+	for _, d := range Registry {
+		var want []string
+		if d.Name == "local" {
+			want = []string{"label"}
+		}
+		if !reflect.DeepEqual(d.RouteKinds, want) {
+			t.Errorf("%s.RouteKinds = %v, want %v", d.Name, d.RouteKinds, want)
 		}
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -195,7 +196,7 @@ func TestStrategiesCoverRegistry(t *testing.T) {
 			t.Errorf("backendkit.ByName(%q) ok=false, want true (backend.Registry descriptor has no registered Strategy)", d.Name)
 			continue
 		}
-		if s.Descriptor != d {
+		if !reflect.DeepEqual(s.Descriptor, d) {
 			t.Errorf("backendkit.ByName(%q).Descriptor = %+v, want %+v", d.Name, s.Descriptor, d)
 		}
 	}
