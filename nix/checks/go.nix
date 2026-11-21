@@ -1303,8 +1303,6 @@ driverGoTests
         # here to build it from, and the tests expect <dir>/bin/connector-host.
         mkdir -p "$TMPDIR/connector-host-escapeprobe/bin"
         CGO_ENABLED=0 go build -tags escapeprobe -o "$TMPDIR/connector-host-escapeprobe/bin/connector-host" ./connector-host
-        # Compiled only under the tag, so no other run exercises the probe host.
-        go test -tags escapeprobe -run '^TestEscape' ./internal/connectorhost
         export SPINDRIFT_CONNECTOR_HOST_ESCAPEPROBE="$TMPDIR/connector-host-escapeprobe/bin/connector-host"
         files=$(grep -rl --include='*_test.go' --exclude-dir=vendor '^//go:build integration' . || true)
         if [ -z "$files" ]; then
@@ -1313,13 +1311,51 @@ driverGoTests
         fi
         # Run each package with only its own tagged test names: its untagged
         # tests need the full repo tree and already run in launcher-go-test or
-        # launcher-binaries-go-test.
+        # launcher-binaries-go-test. The escapeprobe connectorhost run joins the
+        # set: its tests compile only under that tag, so no other run exercises
+        # the probe host.
         # A name scraped from the sources is a heuristic, so a tagged test
         # sharing a name with an untagged one in its package would run both.
+        # The scrape runs here, not in a job: a job's shell does not inherit this
+        # one's error handling, and an empty scrape would pass having run nothing.
+        jobs="escapeprobe ./internal/connectorhost ^TestEscape"
         for pkg in $(echo "$files" | xargs -n1 dirname | sort -u); do
           tests=$(echo "$files" | grep "^$pkg/[^/]*\$" | xargs grep -h '^func Test' | sed 's/^func \(Test[A-Za-z0-9_]*\).*/\1/' | paste -sd'|')
-          go test -tags integration -run "^($tests)\$" "$pkg"
+          if [ -z "$tests" ]; then
+            echo "no tagged test names found in $pkg" >&2
+            exit 1
+          fi
+          jobs="$jobs
+        integration $pkg ^($tests)\$"
         done
+        # The jobs run concurrently, at most GOMAXPROCS at a time: unbounded, the
+        # builder's process limit fails fork/exec. Each go test itself compiles and
+        # runs up to GOMAXPROCS wide, so peak process load is roughly GOMAXPROCS
+        # times the serial loop's and counts against that limit (issue #3915); the
+        # cap keeps it bounded. Each job buffers its output to a log that prints
+        # whole afterwards so lines do not interleave. They share GOCACHE, which go
+        # keeps safe for concurrent use.
+        mkdir -p "$TMPDIR/seam"
+        seam_log() { echo "$TMPDIR/seam/$1_$(echo "$2" | tr / _).log"; }
+        # A failed go test leaves a marker naming its job and returns 0, so xargs
+        # fails only when a job's shell dies, and every log still prints first.
+        run_seam() {
+          log=$(seam_log "$1" "$2")
+          go test -tags "$1" -run "$3" "$2" >"$log" 2>&1 || touch "$log.failed"
+        }
+        export -f seam_log run_seam
+        failed=""
+        echo "$jobs" | xargs -P "$GOMAXPROCS" -L1 bash -c 'run_seam "$@"' _ || failed=" (xargs exit $?)"
+        while read -r tags pkg _; do
+          log=$(seam_log "$tags" "$pkg")
+          echo "== $pkg ($tags) =="
+          # A job that could not even open its log never ran its tests.
+          if ! cat "$log" || [ -e "$log.failed" ]; then failed="$failed $pkg($tags)"; fi
+        done <<<"$jobs"
+        if [ -n "$failed" ]; then
+          echo "seam tests failed in:$failed" >&2
+          exit 1
+        fi
         touch $out
       '';
 
