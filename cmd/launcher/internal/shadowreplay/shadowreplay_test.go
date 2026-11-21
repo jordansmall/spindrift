@@ -59,7 +59,7 @@ func live(t *testing.T, wasm []byte) []hostop.SpindriftOp {
 	path := filepath.Join(t.TempDir(), "pass.jsonl")
 	write(t, path, strings.Join(corpus, "\n"), "\n")
 	var ops []hostop.SpindriftOp
-	shadow.Run(context.Background(), native(), connectorhost.Load, wasm, path, 0, func(op hostop.SpindriftOp) { ops = append(ops, op) })
+	shadow.Run(context.Background(), native(), connectorhost.Load, wasm, path, "", 0, func(op hostop.SpindriftOp) { ops = append(ops, op) })
 	return ops
 }
 

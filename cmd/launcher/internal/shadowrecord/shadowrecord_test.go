@@ -40,17 +40,17 @@ func TestCheckEmitsDivergence(t *testing.T) {
 
 func TestCheckClipsOversizedPayloads(t *testing.T) {
 	r, ops := newRec()
-	big := strings.Repeat("x", 3*maxPayload)
+	big := strings.Repeat("x", 3*MaxPayload)
 	r.Check("c", 0, big, EncodeJSON(big), EncodeJSON("small"))
 	d := (*ops)[0].Divergence
-	if len(d.Line) > maxPayload+32 || !strings.HasSuffix(d.Line, "bytes]") {
+	if len(d.Line) > MaxPayload+32 || !strings.HasSuffix(d.Line, "bytes]") {
 		t.Errorf("line not clipped: len %d", len(d.Line))
 	}
 	var s string
 	if err := json.Unmarshal(d.Native, &s); err != nil {
 		t.Fatalf("clipped native is not valid JSON: %v", err)
 	}
-	if len(s) > maxPayload+32 {
+	if len(s) > MaxPayload+32 {
 		t.Errorf("native not clipped: len %d", len(s))
 	}
 }

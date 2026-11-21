@@ -41,7 +41,7 @@ func readLines(t *testing.T, path string) []string {
 func shadowRun(t *testing.T, wasm []byte, logPath string) ([]hostop.ShadowDivergence, hostop.ShadowSummary) {
 	t.Helper()
 	var ops []hostop.SpindriftOp
-	shadow.Run(context.Background(), opencode.Strategy, connectorhost.Load, wasm, logPath, 0, func(op hostop.SpindriftOp) { ops = append(ops, op) })
+	shadow.Run(context.Background(), opencode.Strategy, connectorhost.Load, wasm, logPath, "", 0, func(op hostop.SpindriftOp) { ops = append(ops, op) })
 	if len(ops) == 0 || ops[len(ops)-1].Op != hostop.OpShadowSummary || ops[len(ops)-1].ShadowSummary == nil {
 		t.Fatalf("last op is not a shadow_summary: %+v", ops)
 	}

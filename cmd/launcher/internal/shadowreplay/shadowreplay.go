@@ -182,7 +182,7 @@ func (p *passFile) replay(ctx context.Context, native driverkit.Strategy, load s
 	ctx, cancel := context.WithTimeout(ctx, shadow.Budget)
 	defer cancel()
 	var ops []hostop.SpindriftOp
-	shadow.Run(ctx, native, load, wasm, p.f.Name(), 0, func(op hostop.SpindriftOp) {
+	shadow.Run(ctx, native, load, wasm, p.f.Name(), "", 0, func(op hostop.SpindriftOp) {
 		if s := op.ShadowSummary; s != nil {
 			marked := *s
 			marked.Replayed = true

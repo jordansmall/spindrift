@@ -201,7 +201,7 @@ func runShadow(name, logPath string, rawExit int, runErr error, stdout io.Writer
 	defer cancel()
 	// The interpreter, not LoadCompiled: a compiled module is cached on disk,
 	// and a shadow must not depend on, or write to, the host's filesystem.
-	shadowReplay(ctx, native, connectorhost.Load, wasm, logPath, rawExit, emit)
+	shadowReplay(ctx, native, connectorhost.Load, wasm, logPath, "", rawExit, emit)
 }
 
 func main() {
