@@ -123,6 +123,33 @@ func TestIssueHTTPError(t *testing.T) {
 	}
 }
 
+// Jira says why it refused (an unknown Component in JQL, say) in the body;
+// the error carries that reason, and a body that is not Jira's shape adds none.
+func TestHTTPErrorCarriesJirasReason(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		{"errorMessages", `{"errorMessages":["The value 'orders-apii' does not exist for the field 'component'."],"errors":{}}`,
+			"GET /rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400: The value 'orders-apii' does not exist for the field 'component'."},
+		{"field errors", `{"errorMessages":[],"errors":{"jql":"bad clause"}}`,
+			"GET /rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400: jql: bad clause"},
+		{"not json", `<html>nope</html>`, "GET /rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400"},
+		{"empty", ``, "GET /rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400"},
+		{"multi-line", `{"errorMessages":["line one\r\nline two\u0007\tend"],"errors":{}}`,
+			"GET /rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400: line one  line two  end"},
+		{"separators and bidi overrides", `{"errorMessages":["a\u2028b\u2029c\u202ed"],"errors":{}}`,
+			"GET /rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400: a b c d"},
+		{"oversized", `{"errorMessages":["x` + strings.Repeat("é", maxReason) + `"],"errors":{}}`,
+			"GET /rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400: x" + strings.Repeat("é", maxReason/2-1) + "…"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			script(t, func(connector.Request, *url.URL) (int, string) { return 400, tc.body })
+			_, err := issue(cloud, "ENG-1")
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestCommentsReportResearchMarkerAsField(t *testing.T) {
 	got := serve(t, "/jira/rest/api/2/issue/ENG-3/comment", `{"comments":[
 		{"author":{"displayName":"Ann"},"created":"2025-01-02T03:04:05.000+0000","body":"verdict",
