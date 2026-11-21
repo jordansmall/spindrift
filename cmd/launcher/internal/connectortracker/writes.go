@@ -250,7 +250,7 @@ func (l filerLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
 func (l filerLayer) PostIssue(title, body string, labels []string) (string, error) {
 	desc, marker := dedupmarker.Split(body)
 	p := fileIssueParams{l.r.target, issueRequest{
-		Title: title, Body: desc, Labels: append([]string{}, labels...),
+		Title: title, Body: desc, Labels: append([]string{}, l.r.lifecycle.Route.StampLabels(labels)...),
 		DedupMarker: marker, IssueType: l.r.lifecycle.IssueType,
 	}}
 	var res struct {

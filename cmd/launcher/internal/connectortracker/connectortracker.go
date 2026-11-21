@@ -51,7 +51,11 @@ type Target struct {
 // IssueType feed doctor's check capabilities; IssueType is also what
 // tracker.fileIssue files under.
 type Lifecycle struct {
-	Labels   forge.DispatchLabels
+	Labels forge.DispatchLabels
+	// Route is the Issue route (ADR 0075): it narrows every list but
+	// ListOpenIssues, which reads the whole scope for readiness, and is stamped
+	// onto issues core files.
+	Route    forge.Route
 	Statuses map[forge.DispatchState]string
 	// IssueType is the issue type core files issues as (JIRA_ISSUE_TYPE), which
 	// the createMeta check measures the project against.
@@ -112,17 +116,24 @@ type (
 		ResearchMarker bool `json:"researchMarker"`
 	}
 	listIssuesParams struct {
-		Target Target `json:"target"`
-		Label  string `json:"label"`
-		Status string `json:"status"`
-		Limit  int    `json:"limit"`
+		Target Target          `json:"target"`
+		Label  string          `json:"label"`
+		Status string          `json:"status"`
+		Limit  int             `json:"limit"`
+		Route  []routeSelector `json:"route,omitempty"`
 	}
 	labeledParams struct {
-		Target Target `json:"target"`
-		Label  string `json:"label"`
-		State  string `json:"state"`
-		Limit  int    `json:"limit"`
-		Cursor string `json:"cursor,omitempty"`
+		Target Target          `json:"target"`
+		Label  string          `json:"label"`
+		State  string          `json:"state"`
+		Limit  int             `json:"limit"`
+		Cursor string          `json:"cursor,omitempty"`
+		Route  []routeSelector `json:"route,omitempty"`
+	}
+	// routeSelector mirrors sdk/tracker.Selector on the wire.
+	routeSelector struct {
+		Kind  string `json:"kind"`
+		Value string `json:"value"`
 	}
 	searchIssuesParams struct {
 		Target Target `json:"target"`
@@ -197,11 +208,12 @@ type (
 		IssueType string `json:"issueType"`
 	}
 	countParams struct {
-		Target Target `json:"target"`
-		Label  string `json:"label"`
-		Status string `json:"status"`
-		Limit  int    `json:"limit"`
-		Fresh  bool   `json:"fresh"`
+		Target Target          `json:"target"`
+		Label  string          `json:"label"`
+		Status string          `json:"status"`
+		Limit  int             `json:"limit"`
+		Fresh  bool            `json:"fresh"`
+		Route  []routeSelector `json:"route,omitempty"`
 	}
 	wireCreateMeta struct {
 		IssueTypes []string          `json:"issueTypes"`
@@ -509,7 +521,7 @@ func (l countLayer) CountReady(fresh bool) (int, error) {
 	var res struct {
 		Count int `json:"count"`
 	}
-	if err := l.r.call(context.Background(), CapCount, countParams{Target: l.r.target, Label: label, Status: status, Limit: forge.ResultPageLimit, Fresh: fresh}, &res); err != nil {
+	if err := l.r.call(context.Background(), CapCount, countParams{Target: l.r.target, Label: label, Status: status, Limit: forge.ResultPageLimit, Fresh: fresh, Route: wireRoute(l.r.lifecycle.Route)}, &res); err != nil {
 		return 0, err
 	}
 	if res.Count < 0 {
@@ -681,7 +693,7 @@ func (l labeledLayer) walkLabeled(state forge.IssueState, source, label string) 
 	cursor := ""
 	for page := 1; ; page++ {
 		sent[sha256.Sum256([]byte(cursor))] = true
-		p := labeledParams{Target: l.r.target, Label: label, State: state.Wire(), Limit: forge.DedupScanLimit, Cursor: cursor}
+		p := labeledParams{Target: l.r.target, Label: label, State: state.Wire(), Limit: forge.DedupScanLimit, Cursor: cursor, Route: wireRoute(l.r.lifecycle.Route)}
 		var ans labeledAnswer
 		if err := l.r.call(context.Background(), CapLabeled, p, &ans); err != nil {
 			return nil, err
@@ -948,18 +960,18 @@ func (t *reads) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
 		// selector matches nothing.
 		return nil, nil
 	}
-	return t.list(label, status)
+	return t.list(label, status, wireRoute(t.lifecycle.Route))
 }
 
 func (t *reads) ListOpenIssues() ([]forge.Issue, error) {
-	return t.list("", "")
+	return t.list("", "", nil)
 }
 
-func (t *reads) list(label, status string) ([]forge.Issue, error) {
+func (t *reads) list(label, status string, route []routeSelector) ([]forge.Issue, error) {
 	var res struct {
 		Issues []wireIssue `json:"issues"`
 	}
-	p := listIssuesParams{Target: t.target, Label: label, Status: status, Limit: forge.ResultPageLimit}
+	p := listIssuesParams{Target: t.target, Label: label, Status: status, Limit: forge.ResultPageLimit, Route: route}
 	if err := t.call(context.Background(), "tracker.listIssues", p, &res); err != nil {
 		return nil, err
 	}
@@ -1085,4 +1097,17 @@ func (w wireIssue) issue(g idGrammar, read readKind) (forge.Issue, error) {
 		iss.ClosedNotPlanned = w.ClosedNotPlanned
 	}
 	return iss, nil
+}
+
+// wireRoute is nil for an empty route, so omitempty leaves an unrouted request
+// byte-identical to one that predates routing.
+func wireRoute(r forge.Route) []routeSelector {
+	if len(r) == 0 {
+		return nil
+	}
+	out := make([]routeSelector, len(r))
+	for i, s := range r {
+		out[i] = routeSelector{s.Kind, s.Value}
+	}
+	return out
 }
