@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
@@ -290,5 +291,27 @@ func TestConnectorTracker_LoadFailureIsRecorded(t *testing.T) {
 	}
 	if log := primaryLog(t); !strings.Contains(log, `"op":"load the Connector"`) || !strings.Contains(log, "missing.wasm") {
 		t.Errorf("log = %q, want the op and the module read error", log)
+	}
+}
+
+// A routed daemon's startup probe (ISSUE_ROUTE) asks the tracker to count its
+// composed query; when Jira rejects it, such as an unknown Component, the
+// count's error carries Jira's own reason so the halt names what to fix.
+func TestConnectorTracker_CountReadySurfacesJirasRejection(t *testing.T) {
+	const reason = "The value 'orders-apii' does not exist for the field 'component'."
+	for _, fl := range connectorFlavours {
+		t.Run(fl.name, func(t *testing.T) {
+			h := newProductionHarness(t, fl.cloud, dispatchkind.TrackerWork, "", jira.LifecycleHybrid, "Task")
+			h.mu.Lock()
+			h.searchReject = reason
+			h.mu.Unlock()
+			dc := forge.ResolveCapabilities(nil, h.tr, backend.Descriptor{}, backend.Descriptor{}).DemandCounter
+			if dc == nil {
+				t.Fatal("the Jira tracker has no DemandCounter")
+			}
+			if _, err := dc.CountReady(true); err == nil || !strings.Contains(err.Error(), reason) {
+				t.Fatalf("CountReady err = %v, want one carrying %q", err, reason)
+			}
+		})
 	}
 }
