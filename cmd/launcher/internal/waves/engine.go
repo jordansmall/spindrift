@@ -82,8 +82,7 @@ func writeMarker(pwd, text string) error {
 // dispatchWave dispatches a batch of issues in parallel, up to cfg.MaxParallel
 // at once. Each goroutine claims its issue only after acquiring a Limiter slot,
 // so at most MaxParallel issues sit in the in-progress state at any moment. A
-// one-shot wave's cap never resizes; the live cap (issue #653) belongs to
-// RunContinuous and Console.
+// one-shot wave's cap is fixed.
 //
 // cfg.Stop/cfg.Abort give this one-shot wave the same two-stage operator
 // shutdown RunContinuous has (#3522), via shutdown.Gate rather than a
@@ -376,9 +375,7 @@ func SignalledStopAlready(stop, abort <-chan struct{}) bool {
 // session may be nil, mirroring RunContinuous's own Session parameter
 // (#3522): a nil session, or a nil session.Terminated, means no registry is
 // shared with a caller outside this wave, and dispatchWave substitutes a
-// fresh one before building its Gate. session.Limiter is deliberately never
-// read here -- a one-shot wave's cap never resizes (dispatchWave's own doc
-// says why), so there is nothing for a live Limiter to buy this path.
+// fresh one before building its Gate.
 //
 // The cfg.Stop/cfg.Abort override is applied once here, at the boundary,
 // rather than at each of NewPlan/run's individual returns: dispatchWave's

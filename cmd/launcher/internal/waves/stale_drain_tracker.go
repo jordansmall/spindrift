@@ -28,11 +28,7 @@ type staleDrainTracker struct {
 	// checkpoint has closed out since start.
 	freeSlotSecs float64
 
-	// cap is the cap that actually held since the last checkpoint, not
-	// limiter.Cap() read live. A Console operator can resize the live cap
-	// mid-interval (ADR 0023), and a fresh read would retroactively credit
-	// the new cap to the whole preceding interval. Only checkpoint refreshes
-	// it, and only after closing out the interval that just ended.
+	// cap is the limiter cap held for the whole drain.
 	cap int
 }
 
@@ -42,33 +38,28 @@ func (t *staleDrainTracker) inProgress() bool {
 	return !t.start.IsZero() && t.end.IsZero()
 }
 
-// begin starts a new drain interval at now with liveCap as the limiter's live
-// cap. Callers must hold RunContinuous's mu. slotAt starts equal to start so
+// begin starts a new drain interval at now with cap as the limiter cap.
+// Callers must hold RunContinuous's mu. slotAt starts equal to start so
 // the first checkpoint measures idle time from the drain's own start.
-func (t *staleDrainTracker) begin(now time.Time, liveCap int) {
+func (t *staleDrainTracker) begin(now time.Time, cap int) {
 	t.start = now
 	t.slotAt = now
-	t.cap = liveCap
+	t.cap = cap
 }
 
-// checkpoint closes out the interval since the last checkpoint using t.cap,
-// then refreshes t.cap from liveCap for the interval starting at now. Callers
-// must hold RunContinuous's mu and have already confirmed t.inProgress().
-func (t *staleDrainTracker) checkpoint(now time.Time, liveCap, outstanding int) {
-	// ResizeDelta never revokes an already-claimed slot (limiter.go), so a cap
-	// lowered mid-drain below the outstanding count makes t.cap-outstanding
-	// negative. Such an interval has no free slots to credit, so clamp to zero
-	// rather than subtract from the running total.
-	t.freeSlotSecs += float64(max(t.cap-outstanding, 0)) * now.Sub(t.slotAt).Seconds()
+// checkpoint closes out the interval since the last checkpoint using t.cap.
+// Callers must hold RunContinuous's mu and have already confirmed
+// t.inProgress().
+func (t *staleDrainTracker) checkpoint(now time.Time, outstanding int) {
+	t.freeSlotSecs += float64(t.cap-outstanding) * now.Sub(t.slotAt).Seconds()
 	t.slotAt = now
-	t.cap = liveCap
 }
 
 // checkpointIfNeeded calls checkpoint only when a drain is in progress, so any
 // RunContinuous checkpoint site can call it unconditionally.
-func (t *staleDrainTracker) checkpointIfNeeded(now time.Time, liveCap, outstanding int) {
+func (t *staleDrainTracker) checkpointIfNeeded(now time.Time, outstanding int) {
 	if t.inProgress() {
-		t.checkpoint(now, liveCap, outstanding)
+		t.checkpoint(now, outstanding)
 	}
 }
 

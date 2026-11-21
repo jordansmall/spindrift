@@ -196,15 +196,11 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		return err
 	}
 
-	var limiter *Limiter
+	// The cap is fixed at cfg.MaxParallel for this invocation.
+	limiter := NewLimiter(cfg.MaxParallel)
 	var terminated *terminate.Registry
 	if session != nil {
-		limiter, terminated = session.Limiter, session.Terminated
-	}
-	if limiter == nil {
-		// Headless (CONTINUOUS_DISPATCH) and every nil-Session call site: a fixed
-		// cap for this invocation only, never resized.
-		limiter = NewLimiter(cfg.MaxParallel)
+		terminated = session.Terminated
 	}
 	if terminated == nil {
 		// Reclaim's Mark is what stops a surviving Box goroutine from Failing or
@@ -340,8 +336,8 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	// runs reclaimInFlight, and every later call is a no-op. Folding the
 	// reclaim in here (rather than only in the watcher, mirroring the stop
 	// watcher's shape verbatim) closes a real race: relying solely on the
-	// watcher goroutine racing the shutdown joins below (close(growDone)/
-	// <-done, close(pollDone)/<-pollExited) against its own select can lose
+	// watcher goroutine racing the shutdown joins below (close(pollDone)/
+	// <-pollExited) against its own select can lose
 	// that coin toss under scheduler pressure when nothing was ever
 	// in-flight, silently dropping the announcement. Caller holds mu.
 	observeAbort := func() {
@@ -521,10 +517,8 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			// Integrate the idle slot-time since the last checkpoint using the
 			// pre-delete inflight count, the busy-slot count over the
 			// interval that just ended, so it must stay above the delete below
-			// or it under-bills by one Box. checkpoint bills that interval at
-			// staleDrain.cap, the cap in effect over it, not a live limiter.Cap()
-			// read (#2678 review finding); it is a no-op outside a drain.
-			staleDrain.checkpointIfNeeded(now(), limiter.Cap(), len(inflight))
+			// or it under-bills by one Box. It is a no-op outside a drain.
+			staleDrain.checkpointIfNeeded(now(), len(inflight))
 			// Must run before the abort watcher can next take mu, or a Box that
 			// just finished on its own would still look in-flight to it (#3521).
 			delete(inflight, iss.Number)
@@ -556,36 +550,6 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		}
 		return n
 	}
-
-	// growDone stops the resize listener; done confirms it has exited before
-	// RunContinuous returns, so no call leaks a goroutine watching a Limiter
-	// shared across a whole Console session.
-	growDone := make(chan struct{})
-	done := make(chan struct{})
-	panicguard.Go(func() {
-		defer close(done)
-		for {
-			select {
-			case <-limiter.Resized():
-				// A Console "+" or "-" mid-drain (ADR 0023, issue #653). Listen
-				// on Resized, not Grown: a lower mid-drain mis-attributes as
-				// badly as a raise if the stale staleDrain.cap bridges across it
-				// (#2678 review finding). Loop drainRefill, since one signal
-				// only means at least one resize happened (issue #766).
-				mu.Lock()
-				// The resize is the moment the live cap changed: close out the
-				// interval that just ended at the old staleDrain.cap before
-				// refreshing it, so the new cap is not retroactively credited to
-				// the whole preceding interval at the next checkpoint (#2678
-				// review finding). A no-op outside a drain.
-				staleDrain.checkpointIfNeeded(now(), limiter.Cap(), len(inflight))
-				drainRefill()
-				mu.Unlock()
-			case <-growDone:
-				return
-			}
-		}
-	})
 
 	// pollDone stops the ticker once this call is finished; pollExited confirms
 	// it has exited before RunContinuous returns.
@@ -620,7 +584,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 
 	// stopWatchDone stops the watcher once this call is finished, whether or
 	// not cfg.Stop was ever closed; stopExited confirms it has exited before
-	// RunContinuous returns — the same shutdown shape as growDone/done and
+	// RunContinuous returns — the same shutdown shape as
 	// pollDone/pollExited above, so signalled has no writer left once this
 	// function reads it below (#3520). Only started when cfg.Stop != nil: a
 	// nil channel would block select forever, so there is nothing to watch.
@@ -680,8 +644,6 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	closed = true
 	mu.Unlock()
 
-	close(growDone)
-	<-done
 	close(pollDone)
 	<-pollExited
 	if stopWatchDone != nil {
