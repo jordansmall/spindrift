@@ -90,6 +90,18 @@ func TestFake_Route_NarrowsListAndCountAndStampsPostIssue(t *testing.T) {
 	}
 }
 
+// A key read is not a queue: a blocker, parent, or linked issue outside the
+// route must still resolve by its key.
+func TestFake_Route_IssueReadByKeyIsNotNarrowed(t *testing.T) {
+	f := NewFake(DispatchLabels{Dispatchable: "ready"})
+	f.SetIssue(Issue{Number: "1", Labels: []string{"ready", "billing"}})
+	f.Route = Route{{RouteKindLabel, "orders"}}
+	got, err := f.Issue("1")
+	if err != nil || got.Number != "1" {
+		t.Errorf("Issue(1) under a foreign route = %+v, %v, want the issue", got, err)
+	}
+}
+
 func TestRouteCheckKinds(t *testing.T) {
 	r := Route{{"label", "a"}}
 	if err := r.CheckKinds("local", []string{"label"}); err != nil {
