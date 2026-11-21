@@ -3782,7 +3782,8 @@ This is protocol version **0.3.0**. The host is
   `"tracker.labeled"`, `"tracker.transition"`, `"tracker.editLabels"`,
   `"tracker.comment"`, `"tracker.fileIssue"`, `"tracker.closeIssue"` and
   `"tracker.labels"`, serving the method of the same name (`"tracker.labels"`
-  serves `tracker.listLabels` and `tracker.createLabel`), and
+  serves `tracker.listLabels` and `tracker.createLabel`), and two that serve no
+  method, `"tracker.route"` (see `route` below) and
   `"tracker.ids.projectKey"` (see **Issue
   ids**). Advertising `"tracker.comments"` attests that each comment's
   `minimized` and `minimizedReason` are faithful; a Connector whose API cannot
@@ -3793,10 +3794,15 @@ This is protocol version **0.3.0**. The host is
   `"server"` for Jira).
   The Connector reads and returns raw data and performs only the write core
   asks for; every lifecycle decision stays in core.
+  `route`, where a method's params list it, is an optional list of
+  `{kind, value}` selectors that core sends only to a Connector advertising
+  `"tracker.route"` whose backend row declares those kinds, and refuses a route
+  unsent otherwise. The Connector ANDs every selector into the read (or stamps
+  it on the issue it files) and errors on a kind it cannot honour.
 
   | Method | Params | Result |
   |---|---|---|
-  | `tracker.listIssues` | `{target, label, status, limit}`; an open issue matches when it carries `label` or is in `status`, an empty one ignored, both empty for every open issue | `{issues}` |
+  | `tracker.listIssues` | `{target, label, status, limit, route}`; an open issue matches when it carries `label` or is in `status`, an empty one ignored, both empty for every open issue | `{issues}` |
   | `tracker.issue` | `{target, number}` | an issue |
   | `tracker.comments` (optional) | `{target, number}` | `{comments}`, oldest first |
   | `tracker.nativeDeps` (optional) | `{target, number}` | `{ids}`, the issues `number` is blocked on, in the API's order |
@@ -3804,15 +3810,15 @@ This is protocol version **0.3.0**. The host is
   | `tracker.probe` (optional) | `{target}` | `{status}`, the HTTP status of one authenticated read; an error only when the request could not be sent |
   | `tracker.statuses` (optional) | `{target}` | `{statuses}`, the name of every status in the project's workflows |
   | `tracker.createMeta` (optional) | `{target, issueType}` | `{issueTypes, fields}`: every issue type the project offers, and the create fields (`{fieldId, name, required, hasDefaultValue}`) of `issueType`, none when it is not offered |
-  | `tracker.count` (optional) | `{target, label, status, limit, fresh}`, selecting as `tracker.listIssues` does; `limit` is how many issues core will use (it clamps every Connector's answer to it, a Jira server total included, so the count need not walk past it), `fresh` asks the Connector to bypass any conditional-request cache (core sets it after a count a child contradicted) | `{count}`, possibly approximate |
+  | `tracker.count` (optional) | `{target, label, status, limit, fresh, route}`, selecting as `tracker.listIssues` does; `limit` is how many issues core will use (it clamps every Connector's answer to it, a Jira server total included, so the count need not walk past it), `fresh` asks the Connector to bypass any conditional-request cache (core sets it after a count a child contradicted) | `{count}`, possibly approximate |
   | `tracker.countInterval` (with `tracker.count`) | `{}` | `{seconds}`, at least 1: how often core re-asks `tracker.count` |
   | `tracker.removedLabels` (optional) | `{target, number}` | `{labels}`: the names removed from the issue, oldest first |
   | `tracker.searchIssues` (optional) | `{target, text, state, label, limit}`, `label` `""` for any | `{issues}`, in match order |
-  | `tracker.labeled` (optional) | `{target, label, state, limit, cursor}`, `state` `open` or `closed`, `cursor` an opaque string, `""` for the first page | `{issues, next}`, `issues` carrying `label`, newest first, `closedAt` and `closedNotPlanned` filled for closed ones; `next` is the opaque cursor of the following page, `""` at the end. Core's finding dedup scan reads it, closed issues included: per label it repeats the call with `next` as `cursor` until `next` is empty, so a Connector that never sets `next` gets one call. A repeated `next`, or a page whose issues were all read already, fails that label closed, and a walk past core's page or byte bound keeps what it read and stops with a warning |
+  | `tracker.labeled` (optional) | `{target, label, state, limit, cursor, route}`, `state` `open` or `closed`, `cursor` an opaque string, `""` for the first page | `{issues, next}`, `issues` carrying `label`, newest first, `closedAt` and `closedNotPlanned` filled for closed ones; `next` is the opaque cursor of the following page, `""` at the end. Core's finding dedup scan reads it, closed issues included: per label it repeats the call with `next` as `cursor` until `next` is empty, so a Connector that never sets `next` gets one call. A repeated `next`, or a page whose issues were all read already, fails that label closed, and a walk past core's page or byte bound keeps what it read and stops with a warning |
   | `tracker.transition` (optional) | `{target, number, state, mapping}`: `state` is the Dispatch state's canonical name (`dispatchable`, `in-progress`, `complete`, `failed`, `ambiguous`) and `mapping` is core's whole table, `{<state>: {status, resolution}}`, for every state that names a status; the Connector looks up `mapping[state]`, applies the rule that only `failed` and `ambiguous` may share a status (an error otherwise) and sends the resolution when it is non-empty | `{outcome, status, offered}`: `status` is the native status the Connector resolved `state` to (`""` when unmapped); `outcome` is `moved` (the native transition ran), `unavailable` (the workflow offers no transition to `status` from the issue's current status; `offered` names the statuses it does offer) or `unmapped` (`mapping` holds no non-empty status for `state`); an error for anything else, including a screen field the transition requires and the request does not fill |
   | `tracker.editLabels` (optional) | `{target, number, add, remove}` | `{}`; one edit that adds and removes the named labels |
   | `tracker.comment` (optional) | `{target, number, body, research}`: `body` is canonical Markdown without the research marker line, and `research` says the comment carries that marker | `{}`; one comment, the marker kept where the tracker can report it as `researchMarker` |
-  | `tracker.fileIssue` (optional) | `{target, title, body, labels, dedupMarker, issueType}`: `body` is canonical Markdown without the dedup marker line, `dedupMarker` that line verbatim (`""` for none), and `issueType` the type core files as | `{url}`, the new issue's browse URL; the marker kept where `tracker.issue` returns it as `dedupMarker` |
+  | `tracker.fileIssue` (optional) | `{target, title, body, labels, dedupMarker, issueType, route}`: `body` is canonical Markdown without the dedup marker line, `dedupMarker` that line verbatim (`""` for none), and `issueType` the type core files as | `{url}`, the new issue's browse URL; the marker kept where `tracker.issue` returns it as `dedupMarker` |
   | `tracker.closeIssue` (optional) | `{target, number}` | `{}`; closes the issue as completed, never as not planned; core calls it only on an open issue |
   | `tracker.listLabels` (optional, capability `tracker.labels`) | `{target}` | `{labels}`, every label the tracker knows |
   | `tracker.createLabel` (optional, capability `tracker.labels`) | `{target, name, description, color}` | `{}`; a no-op where the tracker has no label registry |
@@ -4044,12 +4050,15 @@ This is protocol version **0.3.0**. The host is
   additive. Protocol 0.3 has not shipped in a release, so moving
   `forge.openPR` behind `forge.draftPRs`, giving `driver.newDecoder` an
   optional `now`, giving `tracker.labeled` an optional `cursor` and `next`,
-  giving a PR an optional `crossRepo`, or adding the `not-mergeable` error
-  class within 0.3 takes no bump. An older
-  Connector ignores `cursor` and sends no `next`, so core reads its one page
-  as before. An older Connector that reports a real not-mergeable refusal as
-  `permanent` now fails the merge at once instead of polling for checks, which
-  fails fast and loses nothing. Core
+  giving `tracker.listIssues`, `tracker.count`, `tracker.labeled` and
+  `tracker.fileIssue` an optional `route` behind `tracker.route`, giving a
+  PR an optional `crossRepo`, or adding the `not-mergeable` error class
+  within 0.3 takes no bump. An older Connector ignores `cursor` and sends no
+  `next`, so core reads its one page as before. An older Connector
+  advertises no `tracker.route`, so core refuses a route rather than send
+  it. An older Connector that reports a real not-mergeable refusal as
+  `permanent` now fails the merge at once instead of polling for checks,
+  which fails fast and loses nothing. Core
   accepts its current `0.y` and the one before it, so today 0.3.z and 0.2.z.
   That overlap is what protects a third-party Connector, not core's CI, which
   runs only first-party Connectors' conformance: a third-party Connector has
@@ -4444,7 +4453,7 @@ When a vault's naming isn't uniform, fall back to the per-secret
 | `BOX_SIGNAL_CARRIER`     | `socket` (per-run only; not bakeable) | transport for the three mid-run signal channels (comment, PR intent, issue intent) crossing the launcher/Box seam: `socket` (the default — routed over a launcher-owned Signal socket, see [ADR 0052](adr/0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md) and [Signal socket](#signal-socket-box_signal_carriersocket) below) or `log` (the opt-out — nonce-guarded marker lines in the Box log, as before; stays selectable through the whole 0.22 minor). Unset counts as `socket`, so it fails at launcher startup under `NETWORK_MODE=none`, and when each Dispatch starts under `no-host-loopback` where the transport needs TCP; pass `--box-signal-carrier log` there (the daemon reads `BOX_SIGNAL_CARRIER` from its own environment and forwards it to each child as that flag) |
 | `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
 | `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query (per-run only; not bakeable) |
-| `ISSUE_ROUTE`             | — (empty = no narrowing; baked via `issues.route`) | narrows this instance to one slice of its tracker: comma-joined `kind=value` pairs, e.g. `label=orders-api`, or the attrset `{ label = "orders-api"; }` in the flake option (ADR 0075). Only `local` declares a route kind (`label`) today, and a kind the tracker has not declared fails evaluation. It narrows the work and research queues, the Daemon demand count, and the findings dedup index, and stamps every issue the instance files; reads of one issue by key (blockers included) and the Box's issue search stay unrouted, as does the reconcile scan of open issues for landings (it reads the whole scope; a foreign issue's landing is simply not found in this repo). Turning a route on for an existing instance drops earlier findings filed without the route label out of the dedup index, so one may be refiled once. A routed Daemon runs each queue's routed query once at startup: a tracker rejection halts it (`config-invalid`, naming the route), and success logs how many issues the route matches, zero included; a resumed self-update rolls back instead of halting, and a route the tracker does not declare is not probed (the Daemon warns the kind has no Demand source and schedules it from child exits) |
+| `ISSUE_ROUTE`             | — (empty = no narrowing; baked via `issues.route`) | narrows this instance to one slice of its tracker: comma-joined `kind=value` pairs, e.g. `label=orders-api`, or the attrset `{ label = "orders-api"; }` in the flake option (ADR 0075). `local` declares `label` and `jira` declares `label` and `component` (Jira filing sets the route's labels and `fields.components`); no other tracker declares a route kind today, and a kind the tracker has not declared fails evaluation. It narrows the work and research queues, the Daemon demand count, and the findings dedup index, and stamps every issue the instance files; reads of one issue by key (blockers included) and the Box's issue search stay unrouted, as does the reconcile scan of open issues for landings (it reads the whole scope; a foreign issue's landing is simply not found in this repo). Turning a route on for an existing instance drops earlier findings filed without the route's label or Component out of the dedup index, so one may be refiled once. A routed Daemon runs each queue's routed query once at startup: a tracker rejection halts it (`config-invalid`, naming the route), and success logs how many issues the route matches, zero included; a resumed self-update rolls back instead of halting, and a route the tracker does not declare is not probed (the Daemon warns the kind has no Demand source and schedules it from child exits) |
 | `ISSUE_TRACKER`           | `github` (baked)       | IssueTracker backend: `github`, `local` (private Markdown + YAML frontmatter files — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal)), `jira`, or `forgejo` (see [Issue Tracker backends](#issue-tracker-backends)) |
 | `LOCAL_ISSUES_DIR`        | `.spindrift/issues` (baked) | directory scanned for issue files when `ISSUE_TRACKER=local`; git-ignored by default |
 | `BASE_BRANCH`             | `main` (baked)         | branch to cut from and PR into           |

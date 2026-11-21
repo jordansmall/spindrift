@@ -152,6 +152,30 @@ in
     ) "a declared kind must produce no error";
     pkgs.runCommand "issue-route-rejects-undeclared-kind" { } "touch $out";
 
+  issue-route-jira-declares-label-and-component =
+    let
+      jira = route: {
+        codeForge = "github";
+        issueTracker = "jira";
+        issueRoute = route;
+      };
+    in
+    assert assertMsg (evaluates (jira {
+      label = "orders-api";
+    })) "jira declares label, so a label route must evaluate";
+    assert assertMsg (evaluates (jira {
+      component = "orders-api";
+    })) "jira declares component, so a component route must evaluate";
+    assert assertMsg (evaluates (
+      jira "label=x,component=orders-api"
+    )) "jira must accept both kinds in the string form";
+    assert assertMsg (
+      !evaluates (jira {
+        assignee = "orders-api";
+      })
+    ) "jira declares no assignee kind, so that route must fail";
+    pkgs.runCommand "issue-route-jira-declares-label-and-component" { } "touch $out";
+
   issue-route-rejects-malformed-string =
     let
       bad = s: {
