@@ -34,7 +34,7 @@ func AmbientKnobError(env map[string]string) error {
 		// nix/checks/schema-drift.nix pins flakeOption = true on every such
 		// knob, which lib/renderers.nix turns into a settings path (#3698).
 		equiv := e.SettingsPath
-		if !e.LauncherIgnores {
+		if !e.LauncherIgnores && e.Flag != "" {
 			equiv = "--" + e.Flag
 			if e.SettingsPath != "" {
 				equiv += " or " + e.SettingsPath

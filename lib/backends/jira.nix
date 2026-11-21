@@ -8,6 +8,9 @@
   validAsTracker = true;
   connectorOnly = true;
   tokenEnvVar = "JIRA_TOKEN";
+  # The knob holding the Tracker scope (ADR 0075 decision 3); a row without one
+  # scopes by REPO_SLUG.
+  trackerScopeKnob = "jiraProjectKey";
   doctorTokenHint = "SPINDRIFT_JIRA_CONNECTOR_TOKEN";
   doctorSlugHint = "JIRA_BASE_URL / JIRA_PROJECT_KEY";
   # The Box has no Jira client and JIRA_TOKEN is host-only, so the research

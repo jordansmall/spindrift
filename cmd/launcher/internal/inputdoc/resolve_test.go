@@ -543,3 +543,50 @@ func TestLoad_ParsesBackendsKey(t *testing.T) {
 		t.Errorf("Backends = %s", doc.Backends)
 	}
 }
+
+// A knob with no flag (noFlag in lib/env-schema.nix, Flag empty) stays in the
+// table as a defaults and document source but no argv token reaches it; its
+// ambient-env error names only the settings path.
+func TestFlaglessKnob_HasNoFlagAndNamesSettingsPath(t *testing.T) {
+	withSchemaFlags(t, FlagEntry{Env: "ISSUE_ROUTE", Kind: "string", SettingsPath: "issues.route", Dflt: ""})
+
+	for _, arg := range []string{"--issue-route", "--"} {
+		if e, ok := LookupSchemaFlag(arg); ok {
+			t.Errorf("LookupSchemaFlag(%q) = %q, want no match for a flagless row", arg, e.Env)
+		}
+	}
+	explicit, rest, err := scanSchemaFlags([]string{"--issue-route", "label=x"})
+	if err != nil || len(explicit) != 0 || len(rest) != 2 {
+		t.Errorf("scanSchemaFlags = (%v, %v, %v), want the flag left unconsumed", explicit, rest, err)
+	}
+
+	want := "ISSUE_ROUTE=label=x set in environment — knob env vars are not read; use issues.route"
+	if got := ambientText(map[string]string{"ISSUE_ROUTE": "label=x"}); got != want {
+		t.Errorf("error = %q, want %q", got, want)
+	}
+	if got := mustResolve(t, nil, docWith(map[string]string{"ISSUE_ROUTE": "label=x"}), nil).Knobs; got.IssueRoute != "label=x" {
+		t.Errorf("IssueRoute from the document = %q, want label=x", got.IssueRoute)
+	}
+}
+
+// Every generated row without a flag is unreachable from argv, by whatever
+// name the generator might otherwise have derived for it.
+func TestSchemaFlags_FlaglessRowsAreUnparseable(t *testing.T) {
+	seen := false
+	for _, e := range SchemaFlags {
+		if e.Flag != "" {
+			continue
+		}
+		seen = true
+		if e.Alias != "" || e.DeprecatedAlias != "" {
+			t.Errorf("%s has no Flag but carries Alias=%q DeprecatedAlias=%q", e.Env, e.Alias, e.DeprecatedAlias)
+		}
+		derived := "--" + strings.ToLower(strings.ReplaceAll(e.Env, "_", "-"))
+		if _, ok := LookupSchemaFlag(derived); ok {
+			t.Errorf("%s: %s parses although the row has no flag", e.Env, derived)
+		}
+	}
+	if !seen {
+		t.Error("no flagless row in SchemaFlags; ISSUE_ROUTE should be one")
+	}
+}

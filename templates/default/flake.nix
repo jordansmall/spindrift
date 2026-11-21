@@ -315,6 +315,8 @@
             #     # JSON array of research verdict objects [{verdict,label,description}], order preserved, defining the research dispatch's verdict vocabulary and each verdict's terminal label (ADR 0022); empty (default) uses the built-in three, with no behavior change (see lib/research-verdicts.nix's defaultVerdicts for the built-in three and their labels). The launcher validates the posted verdict against this set and applies the mapped label on Settle; the research prompt's verdict contract is rendered from it at build time, and the Box renders the same markers at prompt assembly from the forwarded value, so a prompt-dir override that keeps them sees the configured set
             #     verdicts = "";
             #   };
+            #   # narrows this instance's slice of the tracker scope (ADR 0075): comma-joined kind=value pairs that must all match, e.g. label=orders-api; the flake option takes the same pairs as an attrset keyed by kind. Each kind must be one the configured ISSUE_TRACKER declares (lib/backends/<name>.nix routeKinds). Empty means no narrowing
+            #   route = { };
             #   # IssueTracker backend (ADR 0013): github (gh-exec, default), local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR), jira (through the jira Connector's flake module; see JIRA_BASE_URL/JIRA_PROJECT_KEY), or forgejo (Forgejo/Gitea REST API adapter; Codeberg default via FORGEJO_BASE_URL; see FORGEJO_BASE_URL/FORGEJO_TOKEN); the Code Forge (PR/CI/merge) is selected independently by CODE_FORGE
             #   tracker = "github";
             # };

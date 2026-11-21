@@ -88,6 +88,7 @@ let
     // (import ./awake-window.nix common)
     // (import ./chore-catalog.nix common)
     // (import ./read-only-capability.nix common)
+    // (import ./issue-route.nix common)
     // (import ./network-mode.nix common)
     // (import ./nix-store-writable.nix common)
     // (import ./row-knobs.nix common)
@@ -391,6 +392,7 @@ let
     "equivalence:." = "harness flake fixtures' outPath";
     "equivalence:cmd/launcher" = "source-identity filesets";
     "equivalence:cmd/launcher/internal/driver/bundle" = "lists its *.go names, never their text";
+    "issue-route:." = "a flake fixture's outPath";
     "promptassembly:cmd/launcher/internal/promptassembly" = "greps its *.go";
     "quickstart-golden:." = "a flake fixture's outPath";
     "skills:." = "a harness flake fixture's outPath";

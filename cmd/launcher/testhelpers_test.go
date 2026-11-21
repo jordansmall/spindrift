@@ -256,6 +256,9 @@ func setKnob(t *testing.T, env, value string) {
 		t.Fatalf("setKnob(%q): not a schema knob; use t.Setenv for secrets and plumbing", env)
 	}
 	restoreLauncherInput(t)
+	if e.Flag == "" {
+		t.Fatalf("setKnob(%q): the knob has no flag; configure it through useDoc", env)
+	}
 	testFlagArgs = append(slices.Clone(testFlagArgs), e.Argv(value)...)
 	resolveTestInput(t)
 }

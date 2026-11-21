@@ -664,6 +664,9 @@ func printHelpFull(w io.Writer) {
 
 	byGroup := make(map[string][]inputdoc.FlagEntry, len(inputdoc.GroupOrder))
 	for _, e := range inputdoc.SchemaFlags {
+		if e.Flag == "" {
+			continue
+		}
 		byGroup[e.Group] = append(byGroup[e.Group], e)
 	}
 	for _, g := range inputdoc.GroupOrder {

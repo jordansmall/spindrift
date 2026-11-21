@@ -2027,7 +2027,7 @@ checkedMerge {
       # Roff escapes every hyphen, so match the \-\- form. toKebab is the same
       # helper the man page itself is rendered through.
       roffFlag = e: "\\-\\-" + replaceStrings [ "-" ] [ "\\-" ] (renderers.toKebab e.env);
-      nonSecret = filter (e: !(e.secret or false)) (attrValues schema);
+      nonSecret = renderers.flaggedKnobs schema;
       secretEntries = filter (e: e.secret or false) (attrValues schema);
       groups = unique (map (e: e.group) nonSecret);
       groupChecks = concatMapStrings (g: "need -F '.SS ${g}'\n") groups;
@@ -2266,6 +2266,44 @@ checkedMerge {
       "renderZshCompletion's issue-completion case arm must exclude entries without dynamicIssueCompletion = true, got: ${zshOut}";
     pkgs.runCommand "renderer-issue-completion-registry-shape" { } "touch $out";
 
+  # A noFlag row stays in the flag table (defaults and document source) with
+  # an empty Flag, and no completion or the man page names a flag for it.
+  renderer-noflag-knob-has-no-flag-surface =
+    let
+      inherit (pkgs.lib) assertMsg hasInfix;
+      schema = {
+        keeps = {
+          env = "KEEPS_A_FLAG";
+          group = "issues";
+          default = "";
+          doc = "has a flag";
+        };
+        bakedOnly = {
+          env = "BAKED_ONLY";
+          group = "issues";
+          default = "";
+          doc = "has none";
+          noFlag = true;
+        };
+      };
+      surfaces = {
+        bash = renderers.renderBashCompletion schema [ ];
+        fish = renderers.renderFishCompletion schema [ ];
+        zsh = renderers.renderZshCompletion schema [ ];
+        man = renderers.renderManpageRoff schema "0" [ ];
+      };
+      table = renderers.renderFlagTableGo schema;
+    in
+    assert assertMsg (builtins.all (
+      out: hasInfix "keeps\\-a\\-flag" out || hasInfix "keeps-a-flag" out
+    ) (builtins.attrValues surfaces)) "the control knob's flag must render on every surface";
+    assert assertMsg (builtins.all (out: !(hasInfix "baked-only" out || hasInfix "baked\\-only" out)) (
+      builtins.attrValues surfaces
+    )) "a noFlag knob must not name a flag in the completions or man page";
+    assert assertMsg (hasInfix ''{Env: "BAKED_ONLY", Flag: "", Group'' table)
+      "a noFlag knob must keep its flag-table row with an empty Flag, got: ${table}";
+    pkgs.runCommand "renderer-noflag-knob-has-no-flag-surface" { } "touch $out";
+
   # The generated bash completion must cover the schema and lib/subcommands.nix
   # in full: every non-secret flag, the --issue alias, every secret --*-file
   # flag, and every registered subcommand.
@@ -2280,7 +2318,7 @@ checkedMerge {
         concatMapStrings
         concatStringsSep
         ;
-      nonSecret = filter (e: !(e.secret or false)) (attrValues schema);
+      nonSecret = renderers.flaggedKnobs schema;
       secretEntries = filter (e: e.secret or false) (attrValues schema);
       choicesKnobs = filter (e: e ? choices) nonSecret;
       subcommands = map (s: s.name) subcommandRegistry;
@@ -2353,7 +2391,7 @@ checkedMerge {
         attrValues
         concatMapStrings
         ;
-      nonSecret = filter (e: !(e.secret or false)) (attrValues schema);
+      nonSecret = renderers.flaggedKnobs schema;
       secretEntries = filter (e: e.secret or false) (attrValues schema);
       choicesKnobs = filter (e: e ? choices) nonSecret;
       subcommands = map (s: s.name) subcommandRegistry;
@@ -2424,7 +2462,7 @@ checkedMerge {
         attrValues
         concatMapStrings
         ;
-      nonSecret = filter (e: !(e.secret or false)) (attrValues schema);
+      nonSecret = renderers.flaggedKnobs schema;
       secretEntries = filter (e: e.secret or false) (attrValues schema);
       choicesKnobs = filter (e: e ? choices) nonSecret;
       subcommands = map (s: s.name) subcommandRegistry;
