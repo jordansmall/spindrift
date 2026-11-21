@@ -6,7 +6,6 @@ package dispatch
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -232,13 +231,6 @@ type Config struct {
 	// IssueSearcher answers the issue-search verb from the same tracker. Nil
 	// whenever IssueReader is nil, or the tracker cannot search.
 	IssueSearcher signalsocket.IssueSearcher
-
-	// HeartbeatOut is the human-facing sink for every Box's heartbeat writer
-	// and each dispatch-start announce line (issue #1829). Nil defaults to
-	// os.Stdout in box.go. The console entry point sets io.Discard: Bubble Tea
-	// owns the terminal in alt-screen raw mode, where a bare-\n heartbeat line
-	// stairsteps down the screen instead of returning to column 0.
-	HeartbeatOut io.Writer
 }
 
 // signalCarrierSocket reports whether c selects the socket signal carrier.

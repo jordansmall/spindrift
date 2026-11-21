@@ -3,10 +3,8 @@ package dispatch
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"io"
 	"os"
 	"sync"
-	"sync/atomic"
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/retry"
@@ -24,18 +22,17 @@ func RealClock() Clock { return retry.RealClock() }
 // selective `dispatch <nums>` path, or recover) and holds what every issue in
 // that invocation shares, including the driver-cache root.
 type Factory struct {
-	cfg       Config
-	pwd       string
-	runner    runner.Runner
-	driver    driver.Driver
-	clock     Clock
-	cache     *cache
-	newCalled atomic.Bool
+	cfg    Config
+	pwd    string
+	runner runner.Runner
+	driver driver.Driver
+	clock  Clock
+	cache  *cache
 
 	// genMu guards agentGeneration: a store-closure staleness hot-swap (issue
 	// #2682) can land at any time, including concurrently with New() and with
 	// an already-launched Box's own in-flight Run(), so a mutex is required
-	// where cfg gets by with the coarse newCalled panic guard.
+	// where cfg, fixed at construction, needs none.
 	genMu           sync.RWMutex
 	agentGeneration *runner.AgentGeneration
 
@@ -76,7 +73,6 @@ func (f *Factory) New(number, title string) *Dispatch {
 // rather than taking one from the caller, so the key and subj can never
 // drift apart.
 func (f *Factory) newDispatch(subj subject) *Dispatch {
-	f.newCalled.Store(true)
 	key := subj.key.String()
 	cfg := f.cfg
 	if cfg.IssueTextFor != nil {
@@ -129,38 +125,16 @@ func (f *Factory) Cleanup() {
 	f.cache.cleanup()
 }
 
-// Driver returns the Driver this Factory was constructed with, so a Console
-// drill-in can reach RenderTranscript without a second Driver-holding type
-// (#648).
+// Driver returns the Driver this Factory was constructed with.
 func (f *Factory) Driver() driver.Driver {
 	return f.driver
 }
 
-// SetHeartbeatOut overrides the heartbeat sink for every Dispatch this Factory
-// constructs afterward (issue #1583). Call it before any New(), which copies
-// cfg by value and may run concurrently from several goroutines; a later call
-// would silently leave earlier Dispatch values on the old sink. Calling it once
-// any New() has run panics instead of racing (issue #1594).
-func (f *Factory) SetHeartbeatOut(w io.Writer) {
-	if f.newCalled.Load() {
-		panic("dispatch: Factory.SetHeartbeatOut called after Factory.New(); must be called before any New()")
-	}
-	f.cfg.HeartbeatOut = w
-}
-
-// HeartbeatOut returns the heartbeat sink this Factory carries, nil unless
-// SetHeartbeatOut was called. A test seam for the console entry point (issue
-// #1583).
-func (f *Factory) HeartbeatOut() io.Writer {
-	return f.cfg.HeartbeatOut
-}
-
 // SetAgentGeneration overrides the agent-closure generation every Box launched
 // afterward binds (issue #2682, the store-closure Box-only staleness
-// hot-swap). It carries no before-any-New() panic guard because a hot-swap
-// must be able to land mid-run, so the mutex is what keeps a concurrent set
-// and read safe. A nil gen restores the runner adapter's own startup-baked
-// default.
+// hot-swap). A hot-swap must be able to land mid-run, so the mutex is what
+// keeps a concurrent set and read safe. A nil gen restores the runner
+// adapter's own startup-baked default.
 func (f *Factory) SetAgentGeneration(gen *runner.AgentGeneration) {
 	f.genMu.Lock()
 	defer f.genMu.Unlock()

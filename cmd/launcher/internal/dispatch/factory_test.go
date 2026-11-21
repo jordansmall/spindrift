@@ -65,8 +65,7 @@ func TestFactory_SetAgentGenerationThenGet(t *testing.T) {
 	}
 }
 
-// Unlike SetHeartbeatOut, SetAgentGeneration carries no before-any-New() panic
-// guard: a hot-swap has to be able to land after dispatching already started.
+// A hot-swap has to be able to land after dispatching already started.
 func TestFactory_SetAgentGenerationAfterNewStillApplies(t *testing.T) {
 	dir := tempLogDir(t)
 

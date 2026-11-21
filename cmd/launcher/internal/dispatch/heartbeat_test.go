@@ -1,7 +1,6 @@
 package dispatch
 
 import (
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,8 +76,7 @@ func TestRun_HeartbeatEmitsToStdout(t *testing.T) {
 	}
 }
 
-// The non-console CLI dispatch path sets no heartbeat sink override, so Run's
-// dispatch-start announce line must reach stdout unchanged (issue #1829).
+// Run's dispatch-start announce line reaches stdout (issue #1829).
 func TestRun_AnnounceEmitsToStdout(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -101,57 +99,7 @@ func TestRun_AnnounceEmitsToStdout(t *testing.T) {
 	}
 }
 
-// The console entry point sets the heartbeat sink to io.Discard (issue #1583),
-// which must silence role headers and tool-count lines on stdout while leaving
-// the raw log untouched. Run's dispatch-start announce line shares that sink
-// (issue #1829), so this test checks stdout for its absence too.
-func TestRun_HeartbeatSuppressedWhenDiscardConfigured(t *testing.T) {
-	dir := tempLogDir(t)
-
-	streamJSON := eventLine(driverkit.Event{Kind: driverkit.KindModel, Model: "m"}) +
-		eventLine(driverkit.Event{Kind: driverkit.KindToolCall, ToolName: "Bash", ToolTarget: "go test ./..."}) +
-		eventLine(driverkit.Event{Kind: driverkit.KindResult, NumTurns: 5, DurationMs: 2000})
-
-	fr := runner.NewFake()
-	fr.WriteToOutput = []byte(streamJSON)
-
-	drv := driverkit.New(testStrategy)
-	f, err := NewFactory(Config{}, dir, fr, drv, RealClock())
-	if err != nil {
-		t.Fatalf("NewFactory: %v", err)
-	}
-	defer f.Cleanup()
-	f.SetHeartbeatOut(io.Discard)
-
-	d := f.New("99", "heartbeat discard test")
-	var result Disposition
-	out := testutil.CaptureStdout(t, func() { result = d.Run() })
-
-	if !result.ok() {
-		t.Fatalf("Run: want succeeded, got %+v", result)
-	}
-	if strings.Contains(out, "\xe2\x94\x80\xe2\x94\x80") {
-		t.Errorf("stdout should carry no heartbeat role header when discarded, got %q", out)
-	}
-	if strings.Contains(out, "bash") {
-		t.Errorf("stdout should carry no heartbeat tool-count line when discarded, got %q", out)
-	}
-	if strings.Contains(out, "-> #") {
-		t.Errorf("stdout should carry no dispatch-start announce line when discarded, got %q", out)
-	}
-
-	logPath := filepath.Join(HostLogDirFor(dir), "issue-99.log")
-	got, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
-	if rest := afterStamp(t, got); rest != streamJSON {
-		t.Errorf("log file not byte-exact after the stamp:\ngot:  %q\nwant: %q", rest, streamJSON)
-	}
-}
-
-// The non-console CLI dispatch path sets no heartbeat sink override, so Fix's
-// fix-pass announce line must reach stdout unchanged (issue #1829).
+// Fix's fix-pass announce line reaches stdout (issue #1829).
 func TestFix_AnnounceEmitsToStdout(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -174,33 +122,7 @@ func TestFix_AnnounceEmitsToStdout(t *testing.T) {
 	}
 }
 
-// Fix's announce line shares the discard-configured heartbeat sink the console
-// entry point sets, so that sink must silence it (issue #1829).
-func TestFix_AnnounceSuppressedWhenDiscardConfigured(t *testing.T) {
-	dir := tempLogDir(t)
-
-	fr := runner.NewFake()
-	f, err := NewFactory(Config{}, dir, fr, fakeDriver{}, RealClock())
-	if err != nil {
-		t.Fatalf("NewFactory: %v", err)
-	}
-	defer f.Cleanup()
-	f.SetHeartbeatOut(io.Discard)
-
-	d := f.New("99", "fix announce test")
-	var result Disposition
-	out := testutil.CaptureStdout(t, func() { result = d.Fix(1, "") })
-
-	if !result.ok() {
-		t.Fatalf("Fix: want succeeded, got %+v", result)
-	}
-	if strings.Contains(out, "-> #") {
-		t.Errorf("stdout should carry no fix-pass announce line when discarded, got %q", out)
-	}
-}
-
-// The non-console CLI dispatch path sets no heartbeat sink override, so
-// ResolveConflict's announce line must reach stdout unchanged (issue #1829).
+// ResolveConflict's announce line reaches stdout (issue #1829).
 func TestResolveConflict_AnnounceEmitsToStdout(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -223,55 +145,4 @@ func TestResolveConflict_AnnounceEmitsToStdout(t *testing.T) {
 	if !strings.Contains(out, "-> #99 (conflict-resolve): conflict announce test") {
 		t.Errorf("stdout missing conflict-resolve announce line, got %q", out)
 	}
-}
-
-// ResolveConflict's announce line shares the discard-configured heartbeat sink
-// the console entry point sets, so that sink must silence it (issue #1829).
-func TestResolveConflict_AnnounceSuppressedWhenDiscardConfigured(t *testing.T) {
-	dir := tempLogDir(t)
-
-	fr := runner.NewFake()
-	f, err := NewFactory(Config{}, dir, fr, fakeDriver{}, RealClock())
-	if err != nil {
-		t.Fatalf("NewFactory: %v", err)
-	}
-	defer f.Cleanup()
-	f.SetHeartbeatOut(io.Discard)
-
-	d := f.New("99", "conflict announce test")
-	var resolveErr error
-	out := testutil.CaptureStdout(t, func() {
-		resolveErr = d.ResolveConflict("https://github.com/owner/repo/pull/1")
-	})
-
-	if resolveErr != nil {
-		t.Fatalf("ResolveConflict: %v", resolveErr)
-	}
-	if strings.Contains(out, "-> #") {
-		t.Errorf("stdout should carry no conflict-resolve announce line when discarded, got %q", out)
-	}
-}
-
-// New() copies cfg into the Dispatch, so a later SetHeartbeatOut would
-// silently race or reach only Dispatches built afterward. It panics instead
-// (issue #1594).
-func TestFactory_SetHeartbeatOutPanicsAfterNew(t *testing.T) {
-	dir := tempLogDir(t)
-
-	fr := runner.NewFake()
-	drv := driverkit.New(testStrategy)
-	f, err := NewFactory(Config{}, dir, fr, drv, RealClock())
-	if err != nil {
-		t.Fatalf("NewFactory: %v", err)
-	}
-	defer f.Cleanup()
-
-	f.New("1", "first dispatch")
-
-	defer func() {
-		if recover() == nil {
-			t.Errorf("SetHeartbeatOut after New: want panic, got none")
-		}
-	}()
-	f.SetHeartbeatOut(io.Discard)
 }

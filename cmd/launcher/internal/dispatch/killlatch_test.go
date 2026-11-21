@@ -1,7 +1,6 @@
 package dispatch
 
 import (
-	"io"
 	"testing"
 	"time"
 
@@ -9,9 +8,8 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// newKillFactory builds a Factory with an injected fake Clock and a discarded
-// heartbeat sink, so a kill-latch test can drive both Factory.Kill and
-// Factory.New against the one Factory the way Console terminate does.
+// newKillFactory builds a Factory with an injected fake Clock so a kill-latch
+// test can drive both Factory.Kill and Factory.New against the one Factory.
 func newKillFactory(t *testing.T, cfg Config, fr runner.Runner, drv fakeDriver, clock Clock) *Factory {
 	t.Helper()
 	f, err := NewFactory(cfg, tempLogDir(t), fr, drv, clock)
@@ -19,7 +17,6 @@ func newKillFactory(t *testing.T, cfg Config, fr runner.Runner, drv fakeDriver, 
 		t.Fatalf("NewFactory: %v", err)
 	}
 	t.Cleanup(f.Cleanup)
-	f.SetHeartbeatOut(io.Discard)
 	return f
 }
 
