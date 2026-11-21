@@ -423,6 +423,29 @@ func TestReadinessReady_OpenPRWithCompleteLabel(t *testing.T) {
 	}
 }
 
+// A blocker in another route is read by key, so the route never hides it. With
+// no PR visible from this forge only its issue closing satisfies the
+// dependent; agent-complete on the open issue is not a readiness signal.
+func TestReadinessReady_CrossRouteBlockerWaitsUntilIssueCloses(t *testing.T) {
+	fc := forge.NewFake()
+	fc.Route = forge.Route{{Kind: forge.RouteKindLabel, Value: "orders-api"}}
+	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Labels: []string{"billing", testCompleteLabel}})
+	ready := func() bool {
+		var ok bool
+		testutil.CaptureStdout(t, func() {
+			ok = (Readiness{}).Ready(fc, capsFor(fc, fc), "agent/issue-", "99", forge.SeedScope{})
+		})
+		return ok
+	}
+	if ready() {
+		t.Error("Readiness.Ready: want false for an open cross-route blocker wearing agent-complete, got true")
+	}
+	fc.SetIssue(forge.Issue{Number: "99", State: "CLOSED", Labels: []string{"billing", testCompleteLabel}})
+	if !ready() {
+		t.Error("Readiness.Ready: want true once the cross-route blocker's issue closes, got false")
+	}
+}
+
 func TestReadinessReady_ClosedIssueFallback(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "99", State: "CLOSED"})

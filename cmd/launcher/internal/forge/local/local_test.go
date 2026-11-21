@@ -2000,6 +2000,18 @@ func TestLocalTracker_Route_NarrowsDispatchableListAndCount(t *testing.T) {
 	}
 }
 
+func TestLocalTracker_Route_IssueReadByKeyIsNotNarrowed(t *testing.T) {
+	dir := t.TempDir()
+	writeLocalIssue(t, dir, "foreign", localIssue{frontmatter: localFrontmatter{
+		Title: "foreign", State: testLabels.Dispatchable, Labels: []string{"billing"}, Created: "2026-01-01T00:00:00Z",
+	}})
+	routed := NewLocalTracker(dir, testLabels).WithRoute(forge.Route{{Kind: "label", Value: "orders"}})
+	got, err := routed.Issue("foreign")
+	if err != nil || got.Number != "foreign" {
+		t.Errorf("Issue(foreign) under a route = %+v, %v, want the issue", got, err)
+	}
+}
+
 func TestLocalTracker_PostIssue_StampsRouteLabel(t *testing.T) {
 	dir := t.TempDir()
 	labelsOf := func(lt *LocalTracker, title string, in []string) []string {
