@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
@@ -735,9 +736,9 @@ func (a *askedPRForge) PRState(u string) (forge.PRState, error) {
 	return a.PRForge.PRState(u)
 }
 
-// Daemon pool children each run reconcileAfterDispatch; the throttle keeps all
-// but the first inside the interval off the forge, while the standalone verb
-// still sweeps every time.
+// Standalone dispatch runs (no daemon) each end in reconcileAfterDispatch; the
+// throttle keeps all but the first inside the interval off the forge, while the
+// standalone verb still sweeps every time.
 func TestReconcileAfterDispatch_ThrottlesSweepButReconcileVerbDoesNot(t *testing.T) {
 	root, _, f, c := lateMergeFixture(t)
 	caps := testCapabilities(t, c, f, f)
@@ -763,6 +764,52 @@ func TestReconcileAfterDispatch_ThrottlesSweepButReconcileVerbDoesNot(t *testing
 	}
 	if counter.calls == swept {
 		t.Fatal("runReconcile made no PRState call after a dispatch sweep, want it unthrottled")
+	}
+}
+
+// A daemon pool child leaves the sweep to the daemon (issue #7342): it makes no
+// PRState call and writes no sweep stamp, yet still closes local issues.
+func TestReconcileAfterDispatch_PoolChildSkipsSweepButKeepsIssueBookkeeping(t *testing.T) {
+	t.Setenv(daemon.PoolChildEnv, "1")
+	root, f, c := brokenStatsFixture(t)
+	counter := &askedPRForge{PRForge: f}
+	caps := testCapabilities(t, c, f, f)
+	caps.PRForge = counter
+
+	var buf bytes.Buffer
+	if err := reconcileAfterDispatch(c, f, f, fakeLiveness{}, caps, root, &buf); err != nil {
+		t.Fatalf("reconcileAfterDispatch: %v", err)
+	}
+	if strings.Contains(buf.String(), "late merges") {
+		t.Errorf("pool child ran the sweep: %q", buf.String())
+	}
+	if _, err := os.Stat(hostpaths.LateMergeSweepLock(root)); !os.IsNotExist(err) {
+		t.Errorf("sweep stamp written by a pool child (stat err = %v)", err)
+	}
+	assertIssueClosed(t, f, "42")
+}
+
+// The hidden __late-merge-sweep verb shares this helper: the first call inside
+// the interval sweeps, the next is throttled off the forge.
+func TestSweepLateMergesThrottled_ClaimsOncePerInterval(t *testing.T) {
+	root, _, f, c := lateMergeFixture(t)
+	caps := testCapabilities(t, c, f, f)
+	counter := &askedPRForge{PRForge: f}
+	caps.PRForge = counter
+
+	var buf bytes.Buffer
+	if err := sweepLateMergesThrottled(caps, root, &buf); err != nil {
+		t.Fatalf("sweepLateMergesThrottled: %v", err)
+	}
+	swept := counter.calls
+	if swept == 0 {
+		t.Fatal("first sweep asked the forge nothing")
+	}
+	if err := sweepLateMergesThrottled(caps, root, &buf); err != nil {
+		t.Fatalf("second sweepLateMergesThrottled: %v", err)
+	}
+	if counter.calls != swept {
+		t.Fatalf("second sweep made %d PRState call(s), want 0", counter.calls-swept)
 	}
 }
 
@@ -868,5 +915,36 @@ func TestRecordLateMerges_PRLessForgeIsNoOp(t *testing.T) {
 	}
 	if _, err := os.Stat(hostpaths.DispatchRecordsDB(root)); err == nil {
 		t.Error("dispatch-record store was opened for a PR-less forge")
+	}
+}
+
+// The daemon execs the late-merge sweep as a hidden verb that the verb table
+// does not list; it must dispatch rather than fall to "unknown subcommand", and
+// a failing read context must fail the run (issue #7342).
+func TestMainRun_LateMergeSweepVerbDispatchesAndFailsOnBadConfig(t *testing.T) {
+	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
+	t.Chdir(t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	code := mainRunT(t, []string{"--issue-tracker", "no-such-tracker", daemon.LateMergeSweepVerb}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("mainRun code = %d, want 1; stderr=%s", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "unknown subcommand") {
+		t.Errorf("stderr = %q, want the hidden verb dispatched", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "no-such-tracker") {
+		t.Errorf("stderr = %q, want the bad tracker named", stderr.String())
+	}
+}
+
+func TestInPoolChild(t *testing.T) {
+	t.Setenv(daemon.PoolChildEnv, "")
+	if daemon.InPoolChild() {
+		t.Error("InPoolChild() = true with the marker empty")
+	}
+	t.Setenv(daemon.PoolChildEnv, "1")
+	if !daemon.InPoolChild() {
+		t.Error("InPoolChild() = false with the marker set")
 	}
 }

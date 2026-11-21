@@ -758,8 +758,9 @@ func TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument(t *testing.T) {
 }
 
 // The verb dispatch table is the single source of truth for which
-// subcommands exist (issue #1574). The hidden __complete-issues completion
-// verb dispatches before the table lookup, so it must not appear here.
+// subcommands exist (issue #1574). The hidden __complete-issues and
+// daemon.LateMergeSweepVerb verbs dispatch before the table lookup, so neither
+// may appear here.
 func TestVerbHandlers_CoversExactlyElevenRealVerbs(t *testing.T) {
 	want := []string{"build", "butler", "dispatch", "doctor", "preview", "reconcile", "recover", "registry", "research", "shadow-replay", "stats"}
 

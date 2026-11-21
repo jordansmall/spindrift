@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/reconcile"
@@ -82,6 +83,22 @@ func reconcileIssues(c config, it forge.IssueTracker, cf forge.CodeForge, lp rec
 	return surfaceAfterDispatch(c, lw, caps, pwd, w, res.Stuck)
 }
 
+// sweepLateMergesThrottled is the one throttled late-merge sweep, shared by
+// reconcileAfterDispatch (outside the daemon) and the hidden daemon-run
+// __late-merge-sweep verb: it claims the sweep for this
+// settle.LateMergeSweepInterval across processes sharing pwd and records
+// late merges only when the claim is won.
+func sweepLateMergesThrottled(caps forge.Capabilities, pwd string, w io.Writer) error {
+	if caps.PRForge == nil {
+		return nil
+	}
+	ok, err := settle.ClaimLateMergeSweep(pwd, time.Now())
+	if ok {
+		err = recordLateMerges(caps, pwd, w)
+	}
+	return err
+}
+
 // reconcileAfterDispatch runs the sweep at the end of a dispatch run (ADR
 // 0029). Unlike the standalone `spindrift reconcile` verb, it stays silent for
 // any other tracker unless a late merge was recorded, since a routine
@@ -89,14 +106,13 @@ func reconcileIssues(c config, it forge.IssueTracker, cf forge.CodeForge, lp rec
 // best-effort on every tracker: a stats bookkeeping failure only warns, never
 // failing the dispatch run nor skipping the issue bookkeeping. The sweep is
 // throttled to one per settle.LateMergeSweepInterval across processes sharing
-// pwd, since every daemon pool child ends here; the verb is not.
+// pwd; the verb is not. A daemon pool child (daemon.PoolChildEnv) skips it
+// entirely: the daemon runs the sweep itself outside the pool's slots, so a
+// child never spends its slot on forge reads (issue #7342). The local-tracker
+// issue bookkeeping still runs for it.
 func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, caps forge.Capabilities, pwd string, w io.Writer) error {
-	if caps.PRForge != nil {
-		ok, err := settle.ClaimLateMergeSweep(pwd, time.Now())
-		if ok {
-			err = recordLateMerges(caps, pwd, w)
-		}
-		if err != nil {
+	if !daemon.InPoolChild() {
+		if err := sweepLateMergesThrottled(caps, pwd, w); err != nil {
 			fmt.Fprintf(w, "    ?? late merges: %v\n", err)
 		}
 	}
@@ -123,7 +139,20 @@ func surfaceAfterDispatch(c config, lw *localloop.Wired, caps forge.Capabilities
 // factory, or settle wiring, so it builds its seams through newReadContext
 // rather than bootstrap (issue #2941).
 func cmdReconcile(stdout, stderr io.Writer) int {
-	// reconcile never dispatches, so it carries no dispatch kind (issue #2944).
+	return withRepoReadContext(stderr, func(rc readContext, pwd string) error {
+		lp, err := rc.reconcileLivenessProbe(pwd)
+		if err != nil {
+			return err
+		}
+		return runReconcile(rc.config, rc.issueTracker, rc.codeForge, lp, rc.capabilities, pwd, stdout)
+	})
+}
+
+// withRepoReadContext runs a read-only command body against the read context
+// and the working directory, owning the setup and the 0/1 exit mapping the
+// reconcile commands share.
+func withRepoReadContext(stderr io.Writer, run func(rc readContext, pwd string) error) int {
+	// These commands never dispatch, so they carry no dispatch kind (issue #2944).
 	rc, err := newReadContext(nil, false)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
@@ -136,15 +165,19 @@ func cmdReconcile(stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
-
-	lp, err := rc.reconcileLivenessProbe(pwd)
-	if err != nil {
-		fmt.Fprintf(stderr, "%s\n", err)
-		return 1
-	}
-	if err := runReconcile(rc.config, rc.issueTracker, rc.codeForge, lp, rc.capabilities, pwd, stdout); err != nil {
+	if err := run(rc, pwd); err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
 	return 0
+}
+
+// cmdLateMergeSweep is the hidden daemon.LateMergeSweepVerb the daemon execs
+// for the late-merge sweep, which pool children skip (issue #7342). Like
+// cmdReconcile it needs only the read context; it shares the throttle with
+// reconcileAfterDispatch, so a stray extra invocation is cheap.
+func cmdLateMergeSweep(stdout, stderr io.Writer) int {
+	return withRepoReadContext(stderr, func(rc readContext, pwd string) error {
+		return sweepLateMergesThrottled(rc.capabilities, pwd, stdout)
+	})
 }

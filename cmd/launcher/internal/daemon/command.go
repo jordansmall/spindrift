@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"os"
 	"path"
 	"strings"
 )
@@ -16,6 +17,22 @@ const ReportFD = 3
 // reportFDEnv is the environment variable name that carries ReportFD to a
 // child; not exported, since only ChildCommand ever sets it.
 const reportFDEnv = "SPINDRIFT_REPORT_FD"
+
+// PoolChildEnv marks a daemon pool child's environment (issue #7342). The
+// child's reconcileAfterDispatch skips the late-merge sweep when it is set,
+// because the daemon runs that sweep itself (LateMergeSweepVerb) outside the
+// pool's slots. Launcher-internal like SPINDRIFT_REPORT_FD, not a knob: the
+// launcher rejects knob names in its environment, so a marker cannot reuse one.
+const PoolChildEnv = "SPINDRIFT_DAEMON_POOL_CHILD"
+
+// InPoolChild reads the PoolChildEnv marker here, not inline at callers, so the
+// launcher spells the marker key in one place.
+func InPoolChild() bool { return os.Getenv(PoolChildEnv) != "" }
+
+// LateMergeSweepVerb is the hidden launcher verb the daemon execs for the
+// late-merge sweep, spelled once here for main.go's dispatch and the daemon's
+// command builder.
+const LateMergeSweepVerb = "__late-merge-sweep"
 
 // ChildSpec is everything one pinned child invocation needs.
 type ChildSpec struct {
@@ -116,12 +133,13 @@ func ChildCommand(s ChildSpec) (Command, error) {
 
 	return Command{
 		Argv: argv,
-		// SPINDRIFT_REPORT_FD is appended after stripping the knobs and then
-		// re-run through withoutKeys with just that one key, so an ambient
-		// SPINDRIFT_REPORT_FD already in the daemon's own environment (a
-		// nested daemon, an operator's stray export) cannot survive
-		// alongside the value set here — the child must see exactly one.
-		Env: append(withoutKeys(withoutKeys(env, s.Knobs), []string{reportFDEnv}), fmt.Sprintf("%s=%d", reportFDEnv, ReportFD)),
+		// The markers are appended after stripping the knobs and then
+		// re-run through withoutKeys with just their own keys, so an ambient
+		// SPINDRIFT_REPORT_FD or PoolChildEnv already in the daemon's own
+		// environment (a nested daemon, an operator's stray export) cannot
+		// survive alongside the value set here — the child must see exactly one.
+		Env: append(withoutKeys(withoutKeys(env, s.Knobs), []string{reportFDEnv, PoolChildEnv}),
+			fmt.Sprintf("%s=%d", reportFDEnv, ReportFD), PoolChildEnv+"=1"),
 	}, nil
 }
 
@@ -318,7 +336,9 @@ type DoctorSpec struct {
 // preflight emits no records, so it must see no report fd at all, not even
 // an ambient one surviving from the daemon's own environment (a stray
 // operator export, a nested daemon) — issue #3627's review finding.
-// BOX_SIGNAL_CARRIER is lifted onto argv exactly as ChildCommand does.
+// PoolChildEnv is stripped the same way: the preflight is no pool child
+// (issue #7342). BOX_SIGNAL_CARRIER is lifted onto argv exactly as ChildCommand
+// does.
 func DoctorCommand(s DoctorSpec) (Command, error) {
 	flakeref, err := appFlakeref(s.RepoPath, s.AppAttr, s.Revision, "a preflight must always be pinned")
 	if err != nil {
@@ -328,5 +348,5 @@ func DoctorCommand(s DoctorSpec) (Command, error) {
 	argv = append(argv, s.Flags...)
 	argv = appendFeatureBranch(argv, s.FeatureBranch)
 	argv, env := liftSignalCarrier(argv, s.Env)
-	return Command{Argv: argv, Env: withoutKeys(withoutKeys(env, s.Knobs), []string{reportFDEnv})}, nil
+	return Command{Argv: argv, Env: withoutKeys(withoutKeys(env, s.Knobs), []string{reportFDEnv, PoolChildEnv})}, nil
 }

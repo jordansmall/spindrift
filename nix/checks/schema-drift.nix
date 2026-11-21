@@ -1211,6 +1211,7 @@ checkedMerge {
         "SPINDRIFT_REPORT_FD" # report FD handed to a child
         "SPINDRIFT_DAEMON_PROGRAM" # daemon wrapper's own program path
         "SPINDRIFT_DRIVER_WARNED" # daemon-set marker on children (issue #5050)
+        "SPINDRIFT_DAEMON_POOL_CHILD" # daemon-set marker on pool children: the daemon owns the late-merge sweep (issue #7342)
         "SPINDRIFT_BWRAP_NETNS_PROBE" # set on the launcher's own re-exec under pasta by the bwrap probe (issue #5983)
         "SPINDRIFT_SEAM_FIXTURES_DIR" # test-only override read by internal/seamtest (issue #4280)
         "SPINDRIFT_CONNECTOR_FIXTURES_DIR" # test-only override read by internal/fixturebuild (issue #6794)
