@@ -2273,14 +2273,15 @@ A Connector (ADR 0073) is a subflake that adds backend or Driver rows from
 outside core. This section covers the Nix shape and, under [Driver rows on a
 Connector](#driver-rows-on-a-connector) and [Backend rows on a
 Connector](#backend-rows-on-a-connector), how a row reaches the binaries. The
-root flake registers five Connectors, `connectors/claude`,
+root flake registers six Connectors, `connectors/claude`,
 `connectors/github` (see [The github Connector](#the-github-connector)),
 `connectors/jira` (see [The jira Connector](#the-jira-connector)),
-`connectors/forgejo` (see [The forgejo Connector](#the-forgejo-connector)) and
+`connectors/forgejo` (see [The forgejo Connector](#the-forgejo-connector)),
 `connectors/opencode`, the opencode Driver's host half, whose row is neither
 `primary` nor `shadow` by default (the native Strategy stays authoritative; a
-Consumer opts in); what the other registered facts mean at runtime is issue
-#6751. The worked example is the fixture Connector in
+Consumer opts in), and `connectors/pi`, the pi Driver's host half, whose native
+Strategy stays authoritative until cut-over; what the other registered facts
+mean at runtime is issue #6751. The worked example is the fixture Connector in
 [`nix/fixtures/connector/`](../nix/fixtures/connector/).
 
 - **Entry point.** `default.nix` is a plain-Nix file that exports
