@@ -128,3 +128,22 @@ func TestIssueRoute_QueueListsOnlyRoutedIssues(t *testing.T) {
 		})
 	}
 }
+
+// The Box gets only the presence of a route (ADR 0075, issue #7338), never
+// the route itself.
+func TestIssueRoute_DispatchConfigIssueRouted(t *testing.T) {
+	useDoc(t, nil)
+	for _, tc := range []struct {
+		route string
+		want  bool
+	}{{"", false}, {"label=orders-api", true}} {
+		c := minimalValidConfig()
+		c.IssueTracker = "local"
+		c.IssueRoute = tc.route
+		it := forge.NewFake()
+		cfg := dispatchConfig(c, "", it, testWired(it), forge.NewFake(), forge.Capabilities{})
+		if cfg.IssueRouted != tc.want {
+			t.Errorf("route %q: IssueRouted = %v, want %v", tc.route, cfg.IssueRouted, tc.want)
+		}
+	}
+}
