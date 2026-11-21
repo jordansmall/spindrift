@@ -9,15 +9,38 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
-## Unreleased
+## 0.33.0 — 2026-11-21
 
-Read-write Box access is gone: every Box now returns its work to the launcher,
-which does all the forge and tracker writes.
+Connectors take over: github, forgejo, jira and claude now run only through
+their Connectors, every Box hands its work to the launcher, and the Console is
+gone.
 
-**⚠ Breaking changes** this release: `BOX_FORGE_AND_ISSUE_ACCESS=read-write`
-is rejected, the prompt gates, Box env vars and push retries that only served
-it are removed, and `CONNECTOR_SANDBOX` is removed.
+**⚠ Breaking changes** this release: the built-in github, forgejo, jira and
+claude code is deleted, read-write Box access and the Box token knobs are
+removed, the Connector sandbox is always on, and `spindrift console` is gone.
 
+- **⚠ Breaking: github runs only through its Connector.** Every run whose
+  `CODE_FORGE` or `ISSUE_TRACKER` is `github` needs a write-capable
+  `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`, and `MERGE_METHOD` must be `rebase` or
+  unset, since the Connector merges by rebase only. Drop `primary` from the
+  github row (it now fails evaluation) and `shadow` (a shadow row now fails
+  every call). GitHub Enterprise, a `GH_HOST` other than `github.com`, isn't
+  served for now. The launcher no longer puts `gh` on PATH, so a host-side
+  hook or `SECRET_CMD` that calls `gh` needs its own. `MIGRATING.md` covers
+  the edge cases.
+- **⚠ Breaking: forgejo, jira and claude run only through their
+  Connectors.** forgejo needs `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN` beside
+  `FORGEJO_TOKEN`, an https `FORGEJO_BASE_URL`, and `MERGE_METHOD` set to
+  `rebase` or unset; drop `primary` and `shadow` from its row. A custom
+  `forgejo/<name>.md` fragment override is now ignored without a warning, so
+  fork the Connector's fragments instead. Jira needs the `connectors/jira`
+  flake module, a bare https `JIRA_BASE_URL`, and
+  `SPINDRIFT_JIRA_CONNECTOR_TOKEN` plus `SPINDRIFT_JIRA_CONNECTOR_EMAIL`;
+  drop `primary`, and leave `JIRA_TOKEN` set since startup still checks it.
+  claude can no longer be shadowed or set primary, a claude Connector that
+  fails to load fails the run, and claude fix passes start from a cold
+  context instead of resuming. The Connectors ship as claude 0.3.0, github
+  0.3.0, forgejo 0.2.0, jira 0.2.0 and opencode 0.1.1.
 - **⚠ Breaking: `read-write` Box access is removed.** Setting
   `BOX_FORGE_AND_ISSUE_ACCESS` (`forge.boxAccess`, `--box-access`) to
   `read-write` now fails the build, the launch, the daemon start and
@@ -33,8 +56,14 @@ it are removed, and `CONNECTOR_SANDBOX` is removed.
   A prompt override that references a removed `*_READ_WRITE_*` or `*_DIRECT_*`
   variable, `RESEARCH_VERDICT_STEP`, or a `BOX_ACCESS_READ_WRITE`-style gate
   fails to render; `MIGRATING.md` has the full list.
-- **`BOX_GH_TOKEN` and `BOX_FORGEJO_TOKEN` have no reader left.** Delete them
-  from `harness.env`.
+- **⚠ Breaking: the Box token knobs are rejected, and the Box has no forge
+  CLI.** Setting `BOX_GH_TOKEN`, `BOX_FORGEJO_TOKEN` or `BOX_FORGE_CREDENTIAL`
+  (`forge.boxForgeCredential`, `--box-forge-credential`) now fails the build,
+  the launch and `spindrift doctor`, even when set to empty; delete them. The
+  image no longer ships `gh` or `fj`, so a custom prompt or skill that runs
+  either in the Box fails with command-not-found. Move that step to a
+  host-mediated intent, or add the CLI through `infra.image.packages` (it
+  gets no credential).
 - **⚠ Breaking: the Connector sandbox is always on.** Every Connector the
   launcher hosts now runs in the locked-down sandbox (container or bwrap jail),
   on every runner, with no setting to turn it off. `CONNECTOR_SANDBOX` (flake
@@ -45,6 +74,19 @@ it are removed, and `CONNECTOR_SANDBOX` is removed.
   audit and finish-line check now say they are deferred to `spindrift doctor`.
   The read shadow summary and the github totals line no longer carry
   `in_process_loads`.
+- **⚠ Breaking: the Console is removed.** `spindrift console` now fails with
+  `unknown subcommand: console`. Triage with tracker labels, launch one issue
+  with `spindrift dispatch N` (or `ISSUE_NUMBER`), keep a pool filled with
+  the daemon, and watch it with the Dashboard (`nix run .#dashboard`).
+- **Safer landing.** The launcher now rebases a PR only when its head is the
+  agent's own branch, so it can't force-push some other branch. Closing
+  keywords for other issues in a PR body (cross-repo and URL references
+  included) are defused, so merging a PR closes only its own issue, and a PR
+  no longer gets `Closes #N` when the tracker's issue numbers aren't the
+  forge's. A conflict the launcher can't rebase away now leaves the PR ready
+  for review instead of a draft marked complete. Daemon slots also free up
+  as soon as their run settles, instead of sometimes sitting through the
+  late-merge sweep.
 
 ---
 
