@@ -95,6 +95,13 @@ func buildTrackerSources(doc *inputdoc.Document, probed []*dispatchkind.Descript
 	// The branch prefix is left blank: it only names agent branches, which
 	// counting never touches.
 	shared := backendkit.Shared{RepoSlug: childKnob(doc, "REPO_SLUG", os.Getenv("REPO_SLUG"))}
+	// A route the child would refuse must not leave the daemon counting the
+	// tracker's whole scope.
+	route, err := forge.ResolveRoute(childKnob(doc, "ISSUE_ROUTE", os.Getenv("ISSUE_ROUTE")), name, strat.RouteKinds)
+	if err != nil {
+		return nil, allMissing(probed, err.Error())
+	}
+	shared.Route = route
 	// Validation runs without a Tracker, so it sees the raw mapping and a
 	// malformed one is rejected even when only the research kind (which ignores
 	// it) is probed.

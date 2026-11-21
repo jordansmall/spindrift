@@ -7,6 +7,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/butler"
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/launcherchecks"
 	"spindrift.dev/launcher/internal/ledger"
@@ -76,12 +77,35 @@ func backendShared(c config) backendkit.Shared {
 		GitUserName:   c.GitUserName,
 		GitUserEmail:  c.GitUserEmail,
 		Labels:        dispatchLabels(c),
+		Route:         issueRoute(c),
 		VerdictLabels: researchVerdictLabels(c),
 		MergeMode:     c.MergeMode,
 		MergeMethod:   c.MergeMethod,
 		SyncMethod:    c.SyncMethod,
 		Tracker:       c.kind().Tracker,
 	}
+}
+
+// issueRoute is ISSUE_ROUTE parsed, nil when unset. A malformed value also
+// yields nil: validateIssueRoute rejects it before anything dispatches, and
+// backendShared also serves doctor checks, which must report that rejection
+// rather than panic.
+func issueRoute(c config) forge.Route {
+	r, _ := forge.ParseRoute(c.IssueRoute)
+	return r
+}
+
+// validateIssueRoute is the Go mirror of the Nix eval-time assert (ADR 0075).
+// An unregistered tracker is left to the ISSUE_TRACKER checks, so only the
+// route's syntax is checked then.
+func validateIssueRoute(c config) error {
+	s, ok := backendkit.ByName(c.IssueTracker)
+	if !ok {
+		_, err := forge.ParseIssueRoute(c.IssueRoute)
+		return err
+	}
+	_, err := forge.ResolveRoute(c.IssueRoute, c.IssueTracker, s.RouteKinds)
+	return err
 }
 
 // knobLookup serves the row-owned knobs (backend, runner, and chore) from the

@@ -2,6 +2,7 @@ package forge
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -38,7 +39,8 @@ func TestRoute_LabelsMatchStamp(t *testing.T) {
 	if got := r.Labels(); !reflect.DeepEqual(got, []string{"a", "b"}) {
 		t.Errorf("Labels() = %v, want [a b]", got)
 	}
-	if !r.MatchesLabels([]string{"b", "a", "z"}) || r.MatchesLabels([]string{"a"}) {
+	lr := Route{{"label", "a"}, {"label", "b"}}
+	if !lr.MatchesLabels([]string{"b", "a", "z"}) || lr.MatchesLabels([]string{"a"}) {
 		t.Error("MatchesLabels must require every label selector")
 	}
 	if !Route(nil).MatchesLabels(nil) {
@@ -85,5 +87,60 @@ func TestFake_Route_NarrowsListAndCountAndStampsPostIssue(t *testing.T) {
 	}
 	if got := f.PostIssueCalls[1].Labels; !reflect.DeepEqual(got, []string{"x", "orders"}) {
 		t.Errorf("routed PostIssue labels = %v, want [x orders]", got)
+	}
+}
+
+func TestRouteCheckKinds(t *testing.T) {
+	r := Route{{"label", "a"}}
+	if err := r.CheckKinds("local", []string{"label"}); err != nil {
+		t.Errorf("declared kind: CheckKinds = %v, want nil", err)
+	}
+	if err := Route(nil).CheckKinds("github", nil); err != nil {
+		t.Errorf("nil route: CheckKinds = %v, want nil", err)
+	}
+	err := r.CheckKinds("github", nil)
+	if err == nil || !strings.Contains(err.Error(), `"label"`) || !strings.Contains(err.Error(), "ISSUE_TRACKER=github") {
+		t.Errorf("undeclared kind: CheckKinds = %v, want an error naming the kind and tracker", err)
+	}
+}
+
+func TestRoute_MatchesLabelsFailsClosedOnOtherKinds(t *testing.T) {
+	r := Route{{"label", "a"}, {"team", "x"}}
+	if r.MatchesLabels([]string{"a", "x"}) {
+		t.Error("a selector kind MatchesLabels cannot evaluate must not match")
+	}
+}
+
+func TestResolveRoute(t *testing.T) {
+	got, err := ResolveRoute("label=a", "local", []string{"label"})
+	if err != nil || !reflect.DeepEqual(got, Route{{"label", "a"}}) {
+		t.Errorf("ResolveRoute ok = %v, %v", got, err)
+	}
+	if got, err := ResolveRoute("", "github", nil); err != nil || got != nil {
+		t.Errorf("ResolveRoute(unset) = %v, %v, want nil, nil", got, err)
+	}
+	for name, tt := range map[string]struct {
+		raw   string
+		kinds []string
+		want  string
+	}{
+		"malformed":  {"orders", []string{"label"}, "ISSUE_ROUTE: issue route"},
+		"undeclared": {"team=x", []string{"label"}, "ISSUE_ROUTE: route kind \"team\""},
+		"no kinds":   {"label=a", nil, "ISSUE_ROUTE: route kind \"label\""},
+	} {
+		if _, err := ResolveRoute(tt.raw, "t", tt.kinds); err == nil || !strings.HasPrefix(err.Error(), tt.want) {
+			t.Errorf("%s: err = %v, want prefix %q", name, err, tt.want)
+		}
+	}
+}
+
+// A selector kind a label tracker cannot evaluate fails closed, like local.
+func TestFake_Route_FailsClosedOnUnhandledKind(t *testing.T) {
+	fc := NewFake(DispatchLabels{Dispatchable: "ready"})
+	fc.Route = Route{{"team", "x"}}
+	fc.SetIssue(Issue{Number: "1", Labels: []string{"ready", "x"}})
+	issues, err := fc.ListIssues(Dispatchable)
+	if err != nil || len(issues) != 0 {
+		t.Errorf("ListIssues = %v, %v; want empty, nil", issues, err)
 	}
 }

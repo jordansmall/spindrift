@@ -429,7 +429,7 @@ func validate(c config) error {
 	if _, err := forge.ParseResearchVerdicts(c.ResearchVerdicts); err != nil {
 		return err
 	}
-	return nil
+	return validateIssueRoute(c)
 }
 
 // validateConfig runs the configuration-correctness checks validate gates
@@ -467,6 +467,9 @@ func validateConfigChecks(c config, checks []doctor.Check) error {
 	}
 	errs = append(errs, validateChoiceKnobsErrors(c, rows)...)
 	if _, err := forge.ParseResearchVerdicts(c.ResearchVerdicts); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validateIssueRoute(c); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
