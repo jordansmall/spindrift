@@ -503,22 +503,14 @@ func assertNotListed(t *testing.T, tr forge.IssueTracker, state forge.DispatchSt
 
 // TestForgejoIntegration_DispatchLifecycle boots a throwaway Forgejo from its
 // OCI image and drives claim, work, PR, merge, complete through the forgejo
-// adapters, so a green run exercises the real REST wire format rather than the
-// httptest fake TestForgejoClient_TrackerContract runs against. It runs twice:
-// "native tracker" builds the Code Forge from the forgejo Connector beside the
-// native tracker (a plain row), "primary" builds both from the Connector under
-// a primary row. It is opt-in behind the "integration" tag and self-skips
-// where no daemon is reachable.
+// Connector's tracker and Code Forge, so a green run exercises the real REST
+// wire format rather than the httptest fake the contract tests run against. It
+// is opt-in behind the "integration" tag and self-skips where no daemon is
+// reachable.
 func TestForgejoIntegration_DispatchLifecycle(t *testing.T) {
 	cli := requireForgejoRuntime(t)
-	t.Run("native tracker", func(t *testing.T) {
-		declaredRoutes(t) // skip before booting a container when no Connector was built
-		runDispatchLifecycle(t, cli, connectorBackend(false))
-	})
-	t.Run("primary", func(t *testing.T) {
-		declaredRoutes(t) // skip before booting a container when no Connector was built
-		runDispatchLifecycle(t, cli, connectorBackend(true))
-	})
+	declaredRoutes(t) // skip before booting a container when no Connector was built
+	runDispatchLifecycle(t, cli, connectorBackend())
 }
 
 // backendBuilder builds the issue tracker and Code Forge under test for a
@@ -531,13 +523,12 @@ type backendBuilder func(t *testing.T, baseURL, token, repo string) (forge.Issue
 const forgejoDefaultRootURL = "http://localhost:3000"
 
 // connectorBackend builds the issue tracker and Code Forge through the
-// production constructors under a forgejo row, primary or not: the Code Forge
-// always comes from the Connector, the tracker only under primary. The
+// production constructors under a forgejo row, both from the Connector. The
 // Connector and its row refuse a base URL that is not https, which the harness
 // Forgejo is not, so a TLS reverse proxy fronts it. Forgejo's own links name
 // its ROOT_URL, so the proxy rewrites them to the proxy's address, as Forgejo
 // behind a real TLS front end would emit.
-func connectorBackend(primary bool) backendBuilder {
+func connectorBackend() backendBuilder {
 	return func(t *testing.T, baseURL, token, repo string) (forge.IssueTracker, forge.CodeForge, func(string) string) {
 		t.Helper()
 		backend, err := url.Parse(baseURL)
@@ -571,7 +562,7 @@ func connectorBackend(primary bool) backendBuilder {
 		t.Cleanup(front.Close)
 		rewrite = strings.NewReplacer(forgejoDefaultRootURL, front.URL, baseURL, front.URL)
 
-		useForgejoRow(t, front.URL, func(r *backendrows.Row) { r.Primary = primary })
+		useForgejoRow(t, front.URL, func(*backendrows.Row) {})
 		t.Setenv(connectorCredentialEnv, token)
 		t.Setenv("GIT_SSL_NO_VERIFY", "true") // the proxy's certificate is self-signed
 		t.Cleanup(forgejo.SetConnectorClient(front.Client()))
@@ -580,13 +571,7 @@ func connectorBackend(primary bool) backendBuilder {
 		l := mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: front.URL, forgejo.ForgejoTokenEnv: token})
 		s := backendkit.Shared{RepoSlug: repo, BaseBranch: "main", GitUserName: "Harness", GitUserEmail: "harness@harness.local", MergeMethod: "rebase",
 			Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels()}
-		// The native tracker dials the default transport, which does not trust the
-		// proxy, so under a plain row it talks to Forgejo directly.
-		tl := l
-		if !primary {
-			tl = mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: baseURL, forgejo.ForgejoTokenEnv: token})
-		}
-		tr, err := forgejo.Strategy.NewIssueTracker(s, tl)
+		tr, err := forgejo.Strategy.NewIssueTracker(s, l)
 		if err != nil {
 			t.Fatalf("issue tracker: %v", err)
 		}

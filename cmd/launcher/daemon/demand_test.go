@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -394,40 +392,28 @@ func TestBuildDemandSources_UnsetKnobsResolveToSchemaDefaults(t *testing.T) {
 	})
 }
 
-func TestBuildDemandSources_ForgejoPerKindSourceWithProbeInterval(t *testing.T) {
+// forgejo's tracker is its Connector, so with no forgejo row loaded no kind
+// gets a source and each is told why, never a native fallback.
+func TestBuildDemandSources_ForgejoWithoutAConnectorRowHasNoSource(t *testing.T) {
 	clearKnobEnvT(t)
-	src, _ := buildDemandSources(demandDocT(map[string]string{
+	t.Cleanup(backendrows.Snapshot())
+	if err := backendrows.Use(nil, func(string) string { return "" }); err != nil {
+		t.Fatal(err)
+	}
+	src, missing := buildDemandSources(demandDocT(map[string]string{
 		"ISSUE_TRACKER": "forgejo",
 		"REPO_SLUG":     "owner/repo",
 		"FORGEJO_TOKEN": "tok",
 		"LABEL":         "ready-for-agent",
 	}), allDemandKinds)
 
-	if _, ok := src[daemon.KindOf(dispatchkind.Butler)]; ok {
-		t.Error("butler (DemandChildReported) got a tracker demand source")
+	if len(src) != 0 {
+		t.Fatalf("sources = %v, want none", src)
 	}
-	for _, kind := range []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)} {
-		c, ok := src[kind]
-		if !ok {
-			t.Fatalf("no demand source for %s", kind)
+	for _, d := range []*dispatchkind.Descriptor{dispatchkind.Work, dispatchkind.Research} {
+		if got := missing[daemon.KindOf(d)]; !strings.Contains(got, "forgejo runs only through its Connector") {
+			t.Errorf("%s missing reason = %q, want it to name the Connector", d.Name, got)
 		}
-		if got := c.ProbeInterval(); got != 3*time.Minute {
-			t.Errorf("%s ProbeInterval() = %v, want 3m", kind, got)
-		}
-	}
-}
-
-// The token and slug fall back to the ambient env when the document lacks
-// them, as the child inherits them.
-func TestBuildDemandSources_ForgejoAmbientKnobsHonoured(t *testing.T) {
-	clearKnobEnvT(t)
-	t.Setenv("REPO_SLUG", "owner/repo")
-	t.Setenv("FORGEJO_TOKEN", "tok")
-	src, _ := buildDemandSources(demandDocT(map[string]string{
-		"ISSUE_TRACKER": "forgejo", "LABEL": "ready-for-agent",
-	}), allDemandKinds)
-	if _, ok := src[daemon.KindOf(dispatchkind.Work)]; !ok {
-		t.Error("work source missing")
 	}
 }
 
@@ -548,11 +534,6 @@ func TestBuildDemandSources_EmptyDocumentValueFallsBackToAmbient(t *testing.T) {
 			},
 		},
 		{
-			name:    "forgejo REPO_SLUG and FORGEJO_BASE_URL",
-			doc:     map[string]string{"ISSUE_TRACKER": "forgejo", "REPO_SLUG": "", "FORGEJO_BASE_URL": ""},
-			ambient: map[string]string{"REPO_SLUG": "o/r", "FORGEJO_BASE_URL": "http://forgejo.example", "FORGEJO_TOKEN": "tok"},
-		},
-		{
 			name:    "local LOCAL_ISSUES_DIR",
 			doc:     map[string]string{"ISSUE_TRACKER": "local", "LOCAL_ISSUES_DIR": ""},
 			ambient: map[string]string{"LOCAL_ISSUES_DIR": localDir},
@@ -578,35 +559,26 @@ func TestBuildDemandSources_EmptyDocumentValueFallsBackToAmbient(t *testing.T) {
 	}
 }
 
-// A probed work kind whose repo slug is supplied at runtime (an empty document
-// value over an ambient one) is drawn by the loop: a child starts once Demand
-// rises from 0 mid-run.
-func TestLoop_ProbedWorkKindWithRuntimeSlugStartsWhenDemandRises(t *testing.T) {
-	clearKnobEnvT(t)
-	var probes atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/repos/o/r/issues" {
-			http.NotFound(w, r)
-			return
-		}
-		total := "0"
-		if probes.Add(1) > 2 {
-			total = "1"
-		}
-		w.Header().Set("X-Total-Count", total)
-		_, _ = w.Write([]byte(`[]`))
-	}))
-	defer srv.Close()
-	t.Setenv("REPO_SLUG", "o/r")
-	t.Setenv("FORGEJO_TOKEN", "tok")
+// risingDemand counts zero for its first two probes and one after.
+type risingDemand struct{ probes atomic.Int32 }
 
-	work := daemon.KindOf(dispatchkind.Work)
-	src, _ := buildDemandSources(demandDocT(map[string]string{
-		"ISSUE_TRACKER": "forgejo", "REPO_SLUG": "", "FORGEJO_BASE_URL": srv.URL, "LABEL": "ready-for-agent",
-	}), []daemon.Kind{work})
-	if _, ok := src[work]; !ok {
-		t.Fatal("no demand source for work")
+func (d *risingDemand) CountReady(bool) (int, error) {
+	if d.probes.Add(1) > 2 {
+		return 1, nil
 	}
+	return 0, nil
+}
+
+func (*risingDemand) ProbeInterval() time.Duration { return time.Millisecond }
+
+// A probed work kind is drawn by the loop: a child starts once Demand rises
+// from 0 mid-run.
+func TestLoop_ProbedWorkKindStartsWhenDemandRises(t *testing.T) {
+	clearKnobEnvT(t)
+	probed := &risingDemand{}
+	probes := &probed.probes
+	work := daemon.KindOf(dispatchkind.Work)
+	src := demandSources{work: probed}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -928,5 +900,38 @@ func TestRepoURL_GitHubEnterpriseHost(t *testing.T) {
 	doc := demandDocT(map[string]string{"ISSUE_TRACKER": "github", "REPO_SLUG": "o/r"})
 	if got, want := repoURL(doc), "https://ghe.corp.example/o/r"; got != want {
 		t.Errorf("repoURL = %q, want %q", got, want)
+	}
+}
+
+// With a forgejo Connector row loaded, the tracker is the Connector and each
+// probed kind gets a source at the Connector probe cadence. CountReady is never
+// called: it would reach the network.
+func TestBuildDemandSources_ForgejoConnectorRowBuildsProbeSource(t *testing.T) {
+	clearKnobEnvT(t)
+	t.Cleanup(backendrows.Snapshot())
+	module := os.Getenv("SPINDRIFT_FORGEJO_CONNECTOR_WASM")
+	if module == "" {
+		t.Skip("SPINDRIFT_FORGEJO_CONNECTOR_WASM unset: no compiled forgejo Connector to test")
+	}
+	raw := `[{"name":"forgejo","module":"` + module + `","credentialEnv":"SPINDRIFT_FORGEJO_CONNECTOR_TOKEN",
+"baseEnv":"FORGEJO_BASE_URL","routes":[{"method":"GET","host":"{base}","path":"/api/v1/repos/{repo}/issues"}]}]`
+	if err := backendrows.Use([]byte(raw), func(k string) string {
+		if k == "FORGEJO_BASE_URL" {
+			return "https://forgejo.example"
+		}
+		return ""
+	}); err != nil {
+		t.Fatal(err)
+	}
+	src, missing := buildDemandSources(demandDocT(map[string]string{
+		"ISSUE_TRACKER": "forgejo", "REPO_SLUG": "owner/repo", "FORGEJO_TOKEN": "tok", "LABEL": "ready-for-agent",
+	}), allDemandKinds)
+	if len(src) != 2 {
+		t.Fatalf("sources = %v (missing %v), want work and research", src, missing)
+	}
+	for kind, c := range src {
+		if got := c.ProbeInterval(); got != 3*time.Minute {
+			t.Errorf("%s ProbeInterval() = %v, want 3m", kind, got)
+		}
 	}
 }

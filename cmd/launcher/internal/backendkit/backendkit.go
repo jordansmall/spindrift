@@ -72,9 +72,6 @@ type Strategy struct {
 	// backend row's Connector. Without it a non-shadow row stays registered
 	// but unused.
 	ConnectorRouted bool
-	// ForgeConnectorRouted is ConnectorRouted for the Code Forge alone: the
-	// tracker stays native unless the row is primary.
-	ForgeConnectorRouted bool
 	// LandedBanner is the clause the all-delivered banner puts after "==> all
 	// agents finished — ", for a backend that is a Code Forge. Nil on a
 	// tracker-only backend.
@@ -269,14 +266,13 @@ func ReplaceRegistryForTest(ss []Strategy) (restore func()) {
 
 // ForgeReadsThroughConnector reports whether the Code Forge of the backend row
 // named name is built from its Connector: the row is primary, or the adapter
-// routes a non-shadow row itself (ConnectorRouted, or ForgeConnectorRouted for
-// the Code Forge alone). The launcher gates credential resolution on it. It
-// takes the row's fields, not a backendrows.Row, so backendkit stays out of the
-// Connector sandbox's import closure.
+// routes a non-shadow row itself (ConnectorRouted). The launcher gates
+// credential resolution on it. It takes the row's fields, not a backendrows.Row,
+// so backendkit stays out of the Connector sandbox's import closure.
 func ForgeReadsThroughConnector(name string, primary bool) bool {
 	// An unknown row name yields the zero Strategy: not routed.
 	strat, _ := ByName(name)
-	return primary || strat.ConnectorRouted || strat.ForgeConnectorRouted
+	return primary || strat.ConnectorRouted
 }
 
 // TrackerReadsThroughConnector reports whether the issue tracker of the

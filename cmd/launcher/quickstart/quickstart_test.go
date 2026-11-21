@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -20,7 +19,6 @@ import (
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/forge/rest"
 	"spindrift.dev/launcher/internal/gitremote"
 )
 
@@ -3237,11 +3235,11 @@ func TestQuickstartStrategies_ExcludeBlocklessBackends(t *testing.T) {
 	}
 }
 
-// Covers the six ways forgejo.acquireToken's single, no-retry prompt can fail,
+// Covers the four ways forgejo.acquireToken's single, no-retry prompt can fail,
 // each asserting its own guidance wording: a token the API rejects; a non-auth
 // probe failure (Probe cannot tell an unreachable host from a wrong repo slug,
-// so both share one message); a genuine 404, which must not fall into the
-// unmapped-status branch; an unmapped status; a decode failure; an empty token.
+// so both share one message); a genuine 404, which must still name the repo slug;
+// an empty token.
 func TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidance(t *testing.T) {
 	cases := []struct {
 		name                 string
@@ -3274,43 +3272,17 @@ func TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidan
 			},
 		},
 		{
-			// A wrong repo slug on a reachable host: the API answers 404, which
-			// forgejoStatusMap maps to forge.ErrNotFound alongside
-			// rest.StatusError{404}. It must NOT fall into the generic
-			// "instance responded with HTTP status" branch, which sends the
-			// operator to the logs instead of the wrong-slug hypothesis.
+			// A wrong repo slug on a reachable host: the Connector reports the
+			// 404 as forge.ErrNotFound, which must read as the wrong-slug
+			// hypothesis, not send the operator to the instance logs.
 			name:  "NotFoundProbeFailure",
 			token: "some-token",
 			probeErr: fmt.Errorf("%w: %w", forge.ErrRepoNotFound,
-				fmt.Errorf("%w: %w", forge.ErrNotFound, rest.StatusError{Status: 404})),
+				forge.ErrNotFound),
 			wantSubstrings: []string{quickstartRerunCmd, "repo slug"},
 			wantAbsentSubstrings: []string{
 				"FORGEJO_TOKEN", "FORGEJO_BASE_URL",
 				"HTTP status", "health/logs",
-			},
-		},
-		{
-			name:           "ServerErrorProbeFailure",
-			token:          "some-token",
-			probeErr:       fmt.Errorf("%w: %w", forge.ErrRepoNotFound, rest.StatusError{Status: 503}),
-			wantSubstrings: []string{quickstartRerunCmd, "503"},
-			wantAbsentSubstrings: []string{
-				"FORGEJO_TOKEN", "FORGEJO_BASE_URL",
-				// A real (non-2xx) status response is not the "unreachable
-				// or wrong repo slug" ambiguity: the instance answered.
-				"repo slug is wrong", "instance is unreachable",
-			},
-		},
-		{
-			name:           "DecodeFailureProbeFailure",
-			token:          "some-token",
-			probeErr:       fmt.Errorf("%w: %w", forge.ErrRepoNotFound, rest.DecodeError{Err: errors.New("invalid character 'x' looking for beginning of value")}),
-			wantSubstrings: []string{quickstartRerunCmd, "parsed"},
-			wantAbsentSubstrings: []string{
-				"FORGEJO_TOKEN", "FORGEJO_BASE_URL",
-				// A parse/decode failure means the instance responded, so it
-				// is not the "unreachable or wrong repo slug" ambiguity.
-				"repo slug is wrong", "instance is unreachable",
 			},
 		},
 		{
@@ -3826,9 +3798,9 @@ func TestRunQuickstart_FinishLine_NoConnectorSandboxDefersDoctor(t *testing.T) {
 // wizard must not even call the forge builder, let alone fail on it.
 func TestRunQuickstart_FinishLine_NoConnectorSandboxDefersForgejoWithoutBuildingForge(t *testing.T) {
 	defer connectorsandbox.Use(nil)()
-	// The token probe builds the tracker alone, over http.DefaultClient.
+	// The wizard defers the token check rather than pinging the instance.
 	prev := http.DefaultTransport
-	http.DefaultTransport = repoProbeTransport{}
+	http.DefaultTransport = noRequestTransport{t}
 	defer func() { http.DefaultTransport = prev }()
 	dir := t.TempDir()
 	var out bytes.Buffer
@@ -3854,6 +3826,9 @@ func TestRunQuickstart_FinishLine_NoConnectorSandboxDefersForgejoWithoutBuilding
 	if err := runQuickstart(dir, env, runner, builder, &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
+	if !strings.Contains(out.String(), "the token check needs the Connector sandbox") {
+		t.Errorf("transcript missing the token-check deferral:\n%s", out.String())
+	}
 	if !strings.Contains(out.String(), "finish-line checks need the Connector sandbox") {
 		t.Errorf("transcript missing the deferral notice:\n%s", out.String())
 	}
@@ -3865,14 +3840,10 @@ func TestRunQuickstart_FinishLine_NoConnectorSandboxDefersForgejoWithoutBuilding
 	}
 }
 
-// repoProbeTransport answers every request with a Forgejo repository body.
-type repoProbeTransport struct{}
+// noRequestTransport fails the test on any request.
+type noRequestTransport struct{ t *testing.T }
 
-func (repoProbeTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	return &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": {"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(`{"full_name":"team/proj"}`)),
-		Request:    r,
-	}, nil
+func (n noRequestTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	n.t.Errorf("unexpected HTTP request to %s", r.URL)
+	return nil, errors.New("no requests expected")
 }

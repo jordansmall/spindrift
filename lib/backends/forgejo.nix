@@ -7,6 +7,7 @@
   displayName = "Forgejo";
   validAsTracker = true;
   validAsCodeForge = true;
+  connectorOnly = true;
   tokenEnvVar = "FORGEJO_TOKEN";
   doctorTokenHint = "FORGEJO_TOKEN";
   doctorSlugHint = "FORGEJO_BASE_URL";

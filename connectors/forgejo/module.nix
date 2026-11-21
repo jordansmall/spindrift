@@ -1,8 +1,7 @@
 # The forgejo Connector's flake-parts module: the Forgejo forge and tracker.
-# The Connector is always the Code Forge. The native forgejo adapter still
-# builds the issue tracker until #7122, unless a Consumer sets the row's
-# `primary`, which builds the tracker from the Connector too. The backend row
-# below declares the Connector and its Route table.
+# The Connector is always the Code Forge and, since the native forgejo tracker
+# was deleted (#7122), the issue tracker too; `primary` is refused on the row.
+# The backend row below declares the Connector and its Route table.
 { core }:
 { ... }:
 let
@@ -25,7 +24,7 @@ in
     env = "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN";
     group = "dispatch";
     secret = true;
-    doc = "bearer token the forgejo Connector's backend row authorizes its calls with (needs read access to the repository, its pull requests, commit statuses and branches, and write access to open, edit, merge and comment on pull requests and to delete branches); host-only, never reaches the Box; needed on every run whose CODE_FORGE is forgejo, and on an ISSUE_TRACKER=forgejo run only when the row sets primary";
+    doc = "bearer token the forgejo Connector's backend row authorizes its calls with (needs read access to the repository, its pull requests, commit statuses and branches, and write access to open, edit, merge and comment on pull requests and to delete branches); host-only, never reaches the Box; needed on every run whose CODE_FORGE is forgejo, and on every run whose ISSUE_TRACKER is forgejo";
     flakeOption = false;
     boxEnv = false;
   };

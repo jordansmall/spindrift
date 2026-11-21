@@ -130,7 +130,7 @@ let
       acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).github;
     };
     # Registered but not primary: the Connector is the Code Forge whatever
-    # `primary` says, and the native tracker stays authoritative, so
+    # `primary` says; `primary` is refused on it (no native tracker remains), so
     # nix/dogfood-primary.nix omits it.
     backendRows.forgejo = {
       module = p: "${forgejoConnector.package p}/forgejo.wasm";

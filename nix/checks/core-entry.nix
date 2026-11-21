@@ -100,10 +100,7 @@ in
     module = forgejoConnectorModule;
     connector = "forgejo";
     credentialKnob = "forgejoConnectorToken";
-    modes = [
-      "shadow"
-      "primary"
-    ];
+    modes = [ "shadow" ];
   };
 
   core-entry-root-and-connector-module-dedup = rootAndConnectorModuleDedup {

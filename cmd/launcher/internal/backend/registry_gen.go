@@ -63,6 +63,7 @@ var Forgejo = Descriptor{
 	DisplayName:        "Forgejo",
 	ValidAsTracker:     true,
 	ValidAsCodeForge:   true,
+	ConnectorOnly:      true,
 	TokenEnvVar:        "FORGEJO_TOKEN",
 	DoctorTokenHint:    "FORGEJO_TOKEN",
 	DoctorSlugHint:     "FORGEJO_BASE_URL",

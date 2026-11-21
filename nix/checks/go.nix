@@ -1084,6 +1084,8 @@ driverGoTests
         # the compiled github Connector (cmd/launcher/quickstart/connector_row.go).
         export SPINDRIFT_BACKEND_CONNECTOR_WASM=${(connectorFor ../../connectors/github).package pkgs}/github.wasm
         export SPINDRIFT_BACKEND_CONNECTOR_ROUTES=${pkgs.lib.escapeShellArg (builtins.toJSON (connectorFor ../../connectors/github).routes)}
+        # daemon's demand test builds a forgejo tracker from its Connector row.
+        export SPINDRIFT_FORGEJO_CONNECTOR_WASM=${(connectorFor ../../connectors/forgejo).package pkgs}/forgejo.wasm
         go vet ${binaryPkgs}
         go test ${binaryPkgs}
         guard() {

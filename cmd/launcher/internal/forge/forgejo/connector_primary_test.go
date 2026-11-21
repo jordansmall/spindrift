@@ -154,33 +154,35 @@ func TestConnectorForge_RefusesAMergeMethodTheConnectorCannotHonour(t *testing.T
 	}
 }
 
-// primary governs only the tracker: a plain row still builds the Connector
-// forge, beside the native tracker.
-func TestPlainRow_BuildsTheConnectorForgeAndTheNativeTracker(t *testing.T) {
+// primary governs nothing: a plain row builds both halves from the Connector.
+func TestPlainRow_BuildsTheConnectorForgeAndTracker(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
 	t.Setenv(connectorCredentialEnv, connectorToken)
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	t.Chdir(t.TempDir())
 
-	_, err := buildForge(srv, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tr, err := buildTracker(srv)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := reflect.TypeOf(tr).String(); !strings.Contains(got, "forgejoClient") {
-		t.Errorf("built %s, want the native forgejo tracker", got)
+	for name, primary := range map[string]bool{"plain": false, "primary": true} {
+		t.Run(name, func(t *testing.T) {
+			useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Primary = primary })
+			if _, err := buildForge(srv, ""); err != nil {
+				t.Fatal(err)
+			}
+			tr, err := buildTracker(srv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := reflect.TypeOf(tr).String(); !strings.Contains(got, "connectortracker") {
+				t.Errorf("built %s, want the Connector tracker", got)
+			}
+		})
 	}
 }
 
-// Forgejo's Code Forge runs only through its Connector: without a row, or
-// with a shadow row (which only observes), construction fails and never
-// degrades to the native forge. The tracker stays native.
-func TestNoConnectorRow_RefusesTheCodeForge(t *testing.T) {
+// Forgejo runs only through its Connector: without a row, or with a shadow row
+// (which only observes), neither the Code Forge nor the tracker is built, and
+// neither degrades to a native adapter.
+func TestNoConnectorRow_RefusesTheCodeForgeAndTheTracker(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
 	t.Cleanup(forgejo.SetLoadRowConnector(func(context.Context, backendrows.Row, backendrows.Options) (*connectorhost.Connector, error) {
@@ -200,11 +202,8 @@ func TestNoConnectorRow_RefusesTheCodeForge(t *testing.T) {
 				t.Errorf("buildForge = (%v, %v), want (nil, ErrNoConnectorRow)", cf, err)
 			}
 			tr, err := buildTracker(srv)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := reflect.TypeOf(tr).String(); !strings.Contains(got, "forgejoClient") {
-				t.Errorf("built %s, want the native forgejo tracker", got)
+			if !errors.Is(err, forgejo.ErrNoConnectorRow) || tr != nil {
+				t.Errorf("buildTracker = (%v, %v), want (nil, ErrNoConnectorRow)", tr, err)
 			}
 		})
 	}
@@ -223,6 +222,10 @@ func TestPlainRow_PlaintextBaseNamesTheBase(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "must be an https URL") || !strings.Contains(err.Error(), forgejo.ForgejoBaseURLEnv) {
 		t.Errorf("err = %q, want it to say %s must be an https URL", err, forgejo.ForgejoBaseURLEnv)
+	}
+	tr, err := buildTracker(srv)
+	if !errors.Is(err, forgejo.ErrNoConnectorRow) || tr != nil || !strings.Contains(err.Error(), "must be an https URL") {
+		t.Errorf("buildTracker = (%v, %v), want (nil, ErrNoConnectorRow naming the base)", tr, err)
 	}
 }
 
@@ -273,10 +276,10 @@ func buildTracker(srv *httptest.Server) (forge.IssueTracker, error) {
 
 // A Connector that fails to load fails the tracker's construction with its
 // error and builds no tracker, native or otherwise.
-func TestPrimaryRow_TrackerLoadFailureFailsConstruction(t *testing.T) {
+func TestConnectorTracker_LoadFailureFailsConstruction(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Primary, r.Module = true, filepath.Join(t.TempDir(), "absent.wasm") })
+	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Module = filepath.Join(t.TempDir(), "absent.wasm") })
 	t.Chdir(t.TempDir())
 
 	tr, err := buildTracker(srv)
@@ -286,11 +289,11 @@ func TestPrimaryRow_TrackerLoadFailureFailsConstruction(t *testing.T) {
 	}
 }
 
-func TestPrimaryRow_TrackerLoadErrorIsReturnedAsIs(t *testing.T) {
+func TestConnectorTracker_LoadErrorIsReturnedAsIs(t *testing.T) {
 	boom := errors.New("connector would not load")
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Primary = true })
+	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
 	t.Cleanup(forgejo.SetLoadRowConnector(func(context.Context, backendrows.Row, backendrows.Options) (*connectorhost.Connector, error) {
 		return nil, boom
 	}))
@@ -304,10 +307,10 @@ func TestPrimaryRow_TrackerLoadErrorIsReturnedAsIs(t *testing.T) {
 // A Connector whose handshake omits a capability the native tracker serves
 // would leave that operation with nothing behind it, so loading it fails by
 // name and closes it.
-func TestPrimaryRow_TrackerRefusesAConnectorMissingACapability(t *testing.T) {
+func TestConnectorTracker_RefusesAConnectorMissingACapability(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Primary = true })
+	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
 	var loaded *connectorhost.Connector
 	t.Cleanup(forgejo.SetLoadRowConnector(func(ctx context.Context, row backendrows.Row, o backendrows.Options) (*connectorhost.Connector, error) {
 		c, err := backendrows.Load(ctx, row, o)
@@ -335,12 +338,11 @@ func TestPrimaryRow_TrackerRefusesAConnectorMissingACapability(t *testing.T) {
 
 // A request outside the row's Routes is refused by the host: the tracker
 // operation fails with that refusal, and nothing native answers in its place.
-func TestPrimaryRow_TrackerRefusedRouteFailsTheOperation(t *testing.T) {
+func TestConnectorTracker_RefusedRouteFailsTheOperation(t *testing.T) {
 	var requests atomic.Int32
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests.Add(1) }))
 	t.Cleanup(srv.Close)
 	useForgejoRow(t, srv.URL, func(r *backendrows.Row) {
-		r.Primary = true
 		r.Routes = append(slicesDeleteMethod(r.Routes, "GET"), connectorhost.Route{Method: "GET", Host: backendrows.BaseHost, Path: "/unrelated"})
 	})
 	t.Setenv(connectorCredentialEnv, connectorToken)
@@ -363,7 +365,7 @@ func TestPrimaryRow_TrackerRefusedRouteFailsTheOperation(t *testing.T) {
 
 // The Connector-only tracker exposes every optional capability the native
 // forgejo tracker does, so no caller's forge.As lookup silently misses.
-func TestPrimaryRow_TrackerExposesTheNativeCapabilitySet(t *testing.T) {
+func TestConnectorTracker_ExposesTheNativeCapabilitySet(t *testing.T) {
 	w := newTrackerHarness(t)
 	for name, ok := range map[string]bool{
 		"NativeDepsReader":     asOK[forge.NativeDepsReader](w.tr),
@@ -385,11 +387,33 @@ func TestPrimaryRow_TrackerExposesTheNativeCapabilitySet(t *testing.T) {
 	}
 	// Unlike the native tracker's true: the Connector's list is one capped page.
 	if fp, _ := forge.As[forge.FullyPaginated](w.tr); fp == nil || fp.WalksAllPages() {
-		t.Error("FullyPaginated.WalksAllPages = true, want false under primary")
+		t.Error("FullyPaginated.WalksAllPages = true, want false")
 	}
 }
 
 func asOK[T any](it forge.IssueTracker) bool {
 	_, ok := forge.As[T](it)
 	return ok
+}
+
+// The tracker's Connector authorizes with FORGEJO_TOKEN as the knob lookup
+// holds it, as the forge's does, so a token only the quickstart wizard set
+// still reaches it.
+func TestConnectorTracker_ResolvesTheCredentialFromTheLookup(t *testing.T) {
+	srv := httptest.NewTLSServer(nil)
+	t.Cleanup(srv.Close)
+	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.CredentialEnv = forgejo.ForgejoTokenEnv })
+	t.Setenv(forgejo.ForgejoTokenEnv, "")
+	var got string
+	t.Cleanup(forgejo.SetLoadRowConnector(func(_ context.Context, _ backendrows.Row, o backendrows.Options) (*connectorhost.Connector, error) {
+		got = o.Getenv(forgejo.ForgejoTokenEnv)
+		return nil, errors.New("stop here")
+	}))
+	t.Chdir(t.TempDir())
+
+	_, _ = buildTracker(srv)
+
+	if got != gitSecret {
+		t.Errorf("Connector credential = %q, want the lookup's token %q", got, gitSecret)
+	}
 }

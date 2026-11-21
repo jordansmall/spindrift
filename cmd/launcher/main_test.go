@@ -39,6 +39,7 @@ import (
 	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/freshness"
@@ -1064,28 +1065,18 @@ func TestNewIssueTracker_JiraNeedsTheConnectorRow(t *testing.T) {
 	}
 }
 
-// ISSUE_TRACKER=forgejo selects a tracker backed by the Forgejo/Gitea REST
-// API instead of the GitHub gh-exec adapter.
-func TestNewIssueTracker_Forgejo(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"full_name":"owner/repo"}`))
-	}))
-	defer srv.Close()
-
+// ISSUE_TRACKER=forgejo runs only through its Connector: with no forgejo
+// backend row the build fails and never falls back to a native REST adapter.
+func TestNewIssueTracker_ForgejoNeedsAConnectorRow(t *testing.T) {
 	c := minimalValidConfig()
 	c.IssueTracker = "forgejo"
-	c.setRowKnob("FORGEJO_BASE_URL", srv.URL)
+	c.setRowKnob("FORGEJO_BASE_URL", "https://forgejo.example")
 	c.setRowKnob("FORGEJO_TOKEN", "tok")
 	c.RepoSlug = "owner/repo"
 
-	it := mustBuild(newIssueTracker(c))
-	slug, err := it.Probe()
-	if err != nil {
-		t.Fatalf("Probe: %v", err)
-	}
-	if slug != "owner/repo" {
-		t.Errorf("Probe() = %q, want the Forgejo adapter (owner/repo)", slug)
+	it, err := newIssueTracker(c)
+	if !errors.Is(err, forgejo.ErrNoConnectorRow) || it != nil {
+		t.Fatalf("newIssueTracker = (%v, %v), want (nil, ErrNoConnectorRow)", it, err)
 	}
 }
 

@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
-	"spindrift.dev/launcher/internal/forge/rest"
 )
 
 const rerun = "nix run example#quickstart"
@@ -40,6 +40,20 @@ func TestAcquireToken_ValidTokenIsProbed(t *testing.T) {
 	}
 }
 
+// Quickstart installs no Connector sandbox, so the live check cannot run: the
+// token is accepted and the check is deferred to doctor.
+func TestAcquireToken_NoConnectorSandboxDefersToDoctor(t *testing.T) {
+	token, out, err := acquire("tok", func(string) error {
+		return fmt.Errorf("build tracker: %w", connectorsandbox.ErrNoConnectorSandbox)
+	})
+	if err != nil || token != "tok" {
+		t.Fatalf("got %q, %v; want the token accepted", token, err)
+	}
+	if !strings.Contains(out, "spindrift doctor") || strings.Contains(out, "validated via live API ping") {
+		t.Errorf("output = %q, want a deferral to doctor", out)
+	}
+}
+
 func TestAcquireToken_Failures(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -50,11 +64,8 @@ func TestAcquireToken_Failures(t *testing.T) {
 	}{
 		{"blank", "", nil, []string{"no Forgejo token provided", rerun}, nil},
 		{"auth", "t", forge.ErrAuthFailure, []string{"rejected by the API at https://forge.example", "git remote set-url", rerun}, forge.ErrAuthFailure},
-		{"status", "t", rest.StatusError{Status: 503}, []string{"HTTP status 503", "check the Forgejo instance's health/logs", `repo slug "o/r"`, rerun}, nil},
-		{"decode", "t", rest.DecodeError{}, []string{"could not be parsed", "version/API compatibility", rerun}, nil},
 		{"not found", "t", forge.ErrNotFound, []string{"unreachable or the repo slug is wrong", "check both", rerun}, forge.ErrNotFound},
 		{"other", "t", errors.New("dial tcp"), []string{"unreachable or the repo slug is wrong", rerun}, nil},
-		{"not found wrapping status", "t", fmt.Errorf("w: %w: %w", forge.ErrNotFound, rest.StatusError{Status: 404}), []string{"unreachable or the repo slug is wrong"}, forge.ErrNotFound},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

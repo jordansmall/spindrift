@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
-	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/gitremote"
@@ -14,10 +13,10 @@ import (
 
 // Strategy is the forgejo backend's Go half (ADR 0068).
 var Strategy = backendkit.Strategy{
-	Descriptor:           backend.Forgejo,
-	ForgeConnectorRouted: true,
-	ValidateTracker:      validateTracker,
-	ValidateCodeForge:    validate("CODE_FORGE"),
+	Descriptor:        backend.Forgejo,
+	ConnectorRouted:   true,
+	ValidateTracker:   validateTracker,
+	ValidateCodeForge: validate("CODE_FORGE"),
 	LandedBanner: func(s backendkit.Shared) string {
 		return "branches pushed on " + s.RepoSlug
 	},
@@ -30,28 +29,20 @@ var Strategy = backendkit.Strategy{
 		if err != nil {
 			return nil, err
 		}
-		if row, ok := primaryRow(); ok {
-			return newConnectorTracker(row, s, k)
+		row, err := connectorRow()
+		if err != nil {
+			return nil, err
 		}
-		return NewForgejoClient(ForgejoConfig{
-			BaseURL:       k.ForgejoBaseURL,
-			Repo:          s.RepoSlug,
-			Token:         k.ForgejoToken,
-			Labels:        s.Labels,
-			VerdictLabels: s.VerdictLabels,
-		}), nil
+		return newConnectorTracker(row, s, k)
 	},
 	NewCodeForge: func(s backendkit.Shared, l backendkit.Lookup, _ forge.SanitizedParent, _ forge.IssueTracker) (forge.CodeForge, error) {
 		k, err := ReadKnobs(l)
 		if err != nil {
 			return nil, err
 		}
-		row, ok := forgeRow()
-		if !ok {
-			if baseErr := backendrows.BaseError(backend.Forgejo.Name); baseErr != nil {
-				return nil, fmt.Errorf("%w: %w", ErrNoConnectorRow, baseErr)
-			}
-			return nil, ErrNoConnectorRow
+		row, err := connectorRow()
+		if err != nil {
+			return nil, err
 		}
 		return newConnectorCodeForge(row, s, k)
 	},
