@@ -289,7 +289,6 @@ let
       "forge/bundlerelay"
       "forge/forgetest"
       "forge/gitplumbing"
-      "forge/rest"
       "gitexec"
       "gitremote"
       "golden"

@@ -3,15 +3,10 @@ package forgejo
 import (
 	"context"
 	"net/http"
-	"time"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorhost"
-	"spindrift.dev/launcher/internal/forge"
 )
-
-// SetNow swaps the clock behind the undefined-label verdict's expiry.
-func SetNow(t forge.IssueTracker, now func() time.Time) { t.(*forgejoClient).now = now }
 
 // SetLoadRowConnector swaps the Connector load behind a forgejo row and
 // returns a restore func.

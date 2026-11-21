@@ -124,16 +124,6 @@ func (f *fakeForgejo) scriptOrgStatus(status int) {
 	f.trk.orgStatus = status
 }
 
-func (f *fakeForgejo) issueState(num string) (state string, labels []string, ok bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	iss := f.trk.issues[atoi(num)]
-	if iss == nil {
-		return "", nil, false
-	}
-	return iss.state, slices.Clone(iss.labels), true
-}
-
 // atoi panics on a malformed number: the fake has no t, and a silent 0 would
 // surface as a misleading 404.
 func atoi(s string) int {

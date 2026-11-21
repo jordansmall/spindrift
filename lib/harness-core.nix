@@ -72,7 +72,6 @@ let
     "forge/gitplumbing"
     "forge/jira"
     "forge/local"
-    "forge/rest"
     "gitexec"
     "gitremote"
     "hostpaths"
