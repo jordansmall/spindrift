@@ -496,7 +496,7 @@ func TestLabeled(t *testing.T) {
 			{"number":7,"title":"done","body":null,"state":"closed","state_reason":"completed","closed_at":"2026-01-01T00:00:00Z","labels":[]},
 			{"number":6,"title":"odd","state":"closed","closed_at":null,"labels":[]}]`),
 	})
-	issues, next, err := labeledPage(tgt, "a b", "closed", "", 100)
+	issues, next, err := labeledPage(tgt, "a b", "closed", "", 100, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -518,7 +518,7 @@ func TestLabeledOpenCarriesNoCloseFields(t *testing.T) {
 		"https://api.github.com/repos/o/r/issues?state=open&labels=x&sort=created&direction=desc&per_page=100&page=1": ok(`[
 			{"number":5,"title":"t","state":"open","state_reason":"reopened","closed_at":"2026-01-01T00:00:00Z","labels":[]}]`),
 	})
-	issues, _, err := labeledPage(tgt, "x", "open", "", 100)
+	issues, _, err := labeledPage(tgt, "x", "open", "", 100, nil)
 	want := []tracker.Issue{{Number: "5", Title: "t", State: "open", Labels: []string{}}}
 	if err != nil || !reflect.DeepEqual(issues, want) {
 		t.Fatalf("issues = %#v, err = %v", issues, err)
@@ -531,11 +531,11 @@ func TestLabeledPageCursorIsTheRESTPageNumber(t *testing.T) {
 		base + "1": ok(items(1000, 100, false)),
 		base + "2": ok(items(2000, 3, false)),
 	})
-	issues, next, err := labeledPage(tgt, "x", "open", "", 500)
+	issues, next, err := labeledPage(tgt, "x", "open", "", 500, nil)
 	if err != nil || len(issues) != 100 || next != "2" {
 		t.Fatalf("page 1: len = %d, next = %q, err = %v", len(issues), next, err)
 	}
-	issues, next, err = labeledPage(tgt, "x", "open", next, 500)
+	issues, next, err = labeledPage(tgt, "x", "open", next, 500, nil)
 	if err != nil || len(issues) != 3 || next != "" {
 		t.Fatalf("page 2: len = %d, next = %q, err = %v", len(issues), next, err)
 	}
@@ -550,11 +550,11 @@ func TestLabeledPageBoundsPerPageByLimit(t *testing.T) {
 		base + "1": ok(items(1, 10, false)),
 		base + "2": ok(items(100, 4, false)),
 	})
-	issues, next, err := labeledPage(tgt, "x", "open", "", 10)
+	issues, next, err := labeledPage(tgt, "x", "open", "", 10, nil)
 	if err != nil || len(issues) != 10 || next != "2" {
 		t.Fatalf("page 1: len = %d, next = %q, err = %v", len(issues), next, err)
 	}
-	issues, next, err = labeledPage(tgt, "x", "open", next, 10)
+	issues, next, err = labeledPage(tgt, "x", "open", next, 10, nil)
 	if err != nil || len(issues) != 4 || next != "" || len(*got) != 2 {
 		t.Fatalf("page 2: len = %d, next = %q, err = %v, requests = %d", len(issues), next, err, len(*got))
 	}
@@ -564,7 +564,7 @@ func TestLabeledPageKeepsGoingPastASkippedPRPage(t *testing.T) {
 	stub(t, map[string]connector.Response{
 		"https://api.github.com/repos/o/r/issues?state=open&labels=x&sort=created&direction=desc&per_page=100&page=1": ok(items(1, 100, true)),
 	})
-	issues, next, err := labeledPage(tgt, "x", "open", "", 500)
+	issues, next, err := labeledPage(tgt, "x", "open", "", 500, nil)
 	if err != nil || len(issues) != 0 || next != "2" {
 		t.Fatalf("len = %d, next = %q, err = %v", len(issues), next, err)
 	}
@@ -573,7 +573,7 @@ func TestLabeledPageKeepsGoingPastASkippedPRPage(t *testing.T) {
 func TestLabeledPageRefusesBadCursorWithoutRequest(t *testing.T) {
 	got := stub(t, nil)
 	for _, c := range []string{"x", "0", "-1", "1.5", " 2"} {
-		if _, _, err := labeledPage(tgt, "x", "open", c, 5); err == nil || !strings.Contains(err.Error(), "list labeled issues: malformed cursor") {
+		if _, _, err := labeledPage(tgt, "x", "open", c, 5, nil); err == nil || !strings.Contains(err.Error(), "list labeled issues: malformed cursor") {
 			t.Errorf("cursor %q: err = %v, want a malformed-cursor error", c, err)
 		}
 	}
@@ -588,11 +588,103 @@ func TestLabeledRefusesBadInputWithoutRequest(t *testing.T) {
 		state string
 		limit int
 	}{{"all", 5}, {"open", 0}} {
-		if _, _, err := labeledPage(tgt, "x", c.state, "", c.limit); err == nil {
-			t.Errorf("labeledPage(%+v): no error", c)
+		if _, _, err := labeledPage(tgt, "x", c.state, "", c.limit, nil); err == nil {
+			t.Errorf("labeledPage(%+v, nil): no error", c)
 		}
 	}
 	if len(*got) != 0 {
 		t.Errorf("sent %d requests", len(*got))
+	}
+}
+
+var routeOrders = []tracker.Selector{{Kind: "label", Value: "orders-api"}}
+
+// A route's labels join the native labels filter, ANDed with the query label,
+// on every list path; no route leaves the URL as it was.
+func TestRouteLabelsAreAndedIntoEveryListRequest(t *testing.T) {
+	resetCountCache(t)
+	q := tracker.Query{Label: "ready", Route: routeOrders}
+	got := stub(t, map[string]connector.Response{
+		listBase + "&labels=ready,orders-api&page=1":  ok(items(1, 1, false)),
+		countBase + "&labels=ready,orders-api&page=1": ok(items(1, 2, false)),
+		"https://api.github.com/repos/o/r/issues?state=open&labels=x+y,orders-api&sort=created&direction=desc&per_page=100&page=1": ok(items(1, 1, false)),
+	})
+	if l, err := listIssues(tgt, q, 10); err != nil || len(l) != 1 {
+		t.Fatalf("listIssues = %v, %v; want 1 routed issue", l, err)
+	}
+	if n, err := count(tgt, q, 10, false); err != nil || n != 2 {
+		t.Fatalf("count = %d, %v; want 2", n, err)
+	}
+	if l, _, err := labeledPage(tgt, "x y", "open", "", 100, routeOrders); err != nil || len(l) != 1 {
+		t.Fatalf("labeledPage = %v, %v; want 1 routed issue", l, err)
+	}
+	if len(*got) != 3 {
+		t.Fatalf("requests = %d, want 3", len(*got))
+	}
+
+	// With no query label the route alone is the filter.
+	got = stub(t, map[string]connector.Response{listBase + "&labels=orders-api&page=1": ok(items(1, 1, false))})
+	if _, err := listIssues(tgt, tracker.Query{Route: routeOrders}, 10); err != nil || len(*got) != 1 {
+		t.Fatalf("route-only listIssues: %d requests, %v", len(*got), err)
+	}
+}
+
+// A routed count and an unrouted one are different requests, so they never
+// share a cached validator.
+func TestRoutedCountKeepsItsOwnCacheEntry(t *testing.T) {
+	resetCountCache(t)
+	stubETag(t, `"e"`)
+	stub(t, map[string]connector.Response{
+		countBase + "&labels=ready&page=1":            ok(items(1, 3, false)),
+		countBase + "&labels=ready,orders-api&page=1": ok(items(1, 1, false)),
+	})
+	plain, routed := tracker.Query{Label: "ready"}, tracker.Query{Label: "ready", Route: routeOrders}
+	for _, c := range []struct {
+		q    tracker.Query
+		want int
+	}{{plain, 3}, {routed, 1}} {
+		if n, err := count(tgt, c.q, 10, false); err != nil || n != c.want {
+			t.Fatalf("count(%+v) = %d, %v; want %d", c.q, n, err, c.want)
+		}
+	}
+	if len(countCache) != 2 {
+		t.Errorf("countCache holds %d entries, want one per request", len(countCache))
+	}
+}
+
+// A selector the Connector cannot express as a native filter fails the read
+// before any request: ignoring it would list the whole scope.
+func TestRouteThatGitHubCannotFilterByFailsClosed(t *testing.T) {
+	for name, route := range map[string][]tracker.Selector{
+		"non-label kind": {{Kind: "project", Value: "orders"}},
+		"comma in value": {{Kind: "label", Value: "a,b"}},
+		"empty value":    {{Kind: "label", Value: ""}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resetCountCache(t)
+			got := stub(t, nil)
+			q := tracker.Query{Label: "ready", Route: route}
+			if _, err := listIssues(tgt, q, 10); err == nil {
+				t.Error("listIssues: no error")
+			}
+			if _, err := count(tgt, q, 10, false); err == nil {
+				t.Error("count: no error")
+			}
+			if _, _, err := labeledPage(tgt, "ready", "open", "", 100, route); err == nil {
+				t.Error("labeledPage: no error")
+			}
+			if len(*got) != 0 {
+				t.Errorf("sent %d requests, want none", len(*got))
+			}
+		})
+	}
+}
+
+func TestRouteRefusesACommaInTheQueryLabel(t *testing.T) {
+	if _, err := labelsFilter("a,b", routeOrders); err == nil {
+		t.Fatal("want an error")
+	}
+	if got, err := labelsFilter("a,b", nil); err != nil || got != "&labels=a%2Cb" {
+		t.Fatalf("unrouted = %q, %v; want the label passed as before", got, err)
 	}
 }

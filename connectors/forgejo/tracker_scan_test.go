@@ -3,6 +3,7 @@ package main
 import (
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 
 	"spindrift.dev/sdk/connector"
@@ -111,7 +112,7 @@ func TestLabeledPageClosedFieldsAndRecheck(t *testing.T) {
 			{"number":8,"title":"dropped","state":"closed","labels":[{"name":"other"}]}]`),
 	})
 	withHeaders(t, nil)
-	got, next, err := labeledPage(ttgt, "finding", "closed", "", 20)
+	got, next, err := labeledPage(ttgt, "finding", "closed", "", 20, nil)
 	want := []tracker.Issue{{Number: "9", Title: "nine", State: "closed", Labels: []string{"finding"}, ClosedAt: "2026-01-02T03:04:05Z"}}
 	if err != nil || next != "" || !reflect.DeepEqual(got, want) {
 		t.Fatalf("labeledPage = %#v, %q, %v", got, next, err)
@@ -123,12 +124,12 @@ func TestLabeledPagePagesByLinkHeader(t *testing.T) {
 		labeledURL("open", 20, 2): ok(`[{"number":4,"state":"open","labels":[{"name":"finding"}]}]`),
 	})
 	withHeaders(t, map[string]string{"Link": `<https://forge.test/x?page=3>; rel="next", <https://forge.test/x?page=9>; rel="last"`})
-	got, next, err := labeledPage(ttgt, "finding", "open", "2", 20)
+	got, next, err := labeledPage(ttgt, "finding", "open", "2", 20, nil)
 	if err != nil || next != "3" || len(got) != 1 || got[0].ClosedAt != "" {
 		t.Fatalf("labeledPage = %#v, %q, %v", got, next, err)
 	}
 	withHeaders(t, map[string]string{"Link": `<https://forge.test/x?page=1>; rel="first"`})
-	if _, next, err = labeledPage(ttgt, "finding", "open", "2", 20); err != nil || next != "" {
+	if _, next, err = labeledPage(ttgt, "finding", "open", "2", 20, nil); err != nil || next != "" {
 		t.Fatalf("last page: next = %q, %v", next, err)
 	}
 }
@@ -138,14 +139,14 @@ func TestLabeledPageFullPageFallback(t *testing.T) {
 		labeledURL("open", 1, 1): ok(`[{"number":4,"state":"open","labels":[{"name":"finding"}]}]`),
 	})
 	withHeaders(t, nil)
-	if _, next, err := labeledPage(ttgt, "finding", "open", "", 1); err != nil || next != "2" {
+	if _, next, err := labeledPage(ttgt, "finding", "open", "", 1, nil); err != nil || next != "2" {
 		t.Fatalf("next = %q, %v", next, err)
 	}
 }
 
 func TestLabeledPageUndefinedLabelIsEmpty(t *testing.T) {
 	got := labelStub(t, `[]`, ok(`[]`), nil)
-	out, next, err := labeledPage(ttgt, "finding", "open", "", 20)
+	out, next, err := labeledPage(ttgt, "finding", "open", "", 20, nil)
 	if err != nil || next != "" || out == nil || len(out) != 0 {
 		t.Fatalf("labeledPage = %#v, %q, %v", out, next, err)
 	}
@@ -162,7 +163,7 @@ func TestLabeledPageRefusesBadInput(t *testing.T) {
 		state, cursor string
 		limit         int
 	}{{"all", "", 5}, {"open", "x", 5}, {"open", "0", 5}, {"open", "", 0}} {
-		if _, _, err := labeledPage(ttgt, "finding", c.state, c.cursor, c.limit); err == nil {
+		if _, _, err := labeledPage(ttgt, "finding", c.state, c.cursor, c.limit, nil); err == nil {
 			t.Errorf("%+v accepted", c)
 		}
 	}
@@ -240,7 +241,7 @@ func TestUnreadableLabelRegistryQueriesAnyway(t *testing.T) {
 		labelStub(t, `[]`, status(500), map[string]connector.Response{
 			labeledURL("open", 20, 1): ok(`[{"number":2,"labels":[{"name":"finding"}]},{"number":3,"labels":[{"name":"other"}]}]`),
 		})
-		out, _, err := labeledPage(ttgt, "finding", "open", "", 20)
+		out, _, err := labeledPage(ttgt, "finding", "open", "", 20, nil)
 		if err != nil || len(out) != 1 || out[0].Number != "2" {
 			t.Fatalf("labeledPage = %#v, %v", out, err)
 		}
@@ -264,4 +265,79 @@ func TestUnreadableLabelRegistryQueriesAnyway(t *testing.T) {
 			t.Fatalf("count = %d, %v", n, err)
 		}
 	})
+}
+
+func TestCountRouteIsAndedAndRechecked(t *testing.T) {
+	const routed = repoAPI + "/issues?labels=ready%2Corders-api&limit=1&page=1&state=open&type=issues"
+	for _, tc := range []struct {
+		name string
+		page string
+		want int
+	}{
+		{"carries both", `[{"number":3,"labels":[{"name":"ready"},{"name":"orders-api"}]}]`, 12},
+		{"filter dropped by Forgejo", `[{"number":3,"labels":[{"name":"ready"}]}]`, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			labelStub(t, `[{"id":1,"name":"ready"},{"id":2,"name":"orders-api"}]`, status(404), map[string]connector.Response{routed: ok(tc.page)})
+			withHeaders(t, map[string]string{"X-Total-Count": "12"})
+			got, err := count(ttgt, tracker.Query{Label: "ready", Route: orders}, 0, false)
+			if err != nil || got != tc.want {
+				t.Fatalf("count = %d, %v, want %d", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestCountUndefinedRouteLabelAsksNoIssues(t *testing.T) {
+	got := labelStub(t, `[{"id":1,"name":"ready"}]`, ok(`[]`), nil)
+	withHeaders(t, map[string]string{"X-Total-Count": "40"})
+	n, err := count(ttgt, tracker.Query{Label: "ready", Route: orders}, 0, false)
+	if err != nil || n != 0 {
+		t.Fatalf("count = %d, %v; want 0, not the whole scope", n, err)
+	}
+	for _, r := range *got {
+		if strings.Contains(r.URL, "/issues?") {
+			t.Fatalf("issue query sent for an undefined route label: %v", r.URL)
+		}
+	}
+}
+
+func TestCountRefusesANonLabelRoute(t *testing.T) {
+	got := stub(t, nil)
+	if _, err := count(ttgt, tracker.Query{Label: "ready", Route: []tracker.Selector{{Kind: "project", Value: "x"}}}, 0, false); err == nil {
+		t.Fatal("want an error")
+	}
+	if len(*got) != 0 {
+		t.Fatalf("requests = %v, want none", *got)
+	}
+}
+
+func TestLabeledPageRouteIsAndedAndRechecked(t *testing.T) {
+	const routed = repoAPI + "/issues?labels=finding%2Corders-api&limit=20&page=1&state=open&type=issues"
+	labelStub(t, `[{"id":1,"name":"finding"},{"id":2,"name":"orders-api"}]`, status(404), map[string]connector.Response{routed: ok(`[
+		{"number":4,"state":"open","labels":[{"name":"finding"},{"name":"orders-api"}]},
+		{"number":5,"state":"open","labels":[{"name":"finding"}]}]`)})
+	got, _, err := labeledPage(ttgt, "finding", "open", "", 20, orders)
+	if err != nil || len(got) != 1 || got[0].Number != "4" {
+		t.Fatalf("labeledPage = %#v, %v; want only issue 4", got, err)
+	}
+}
+
+func TestLabeledPageUndefinedRouteLabelIsEmpty(t *testing.T) {
+	got := labelStub(t, `[{"id":1,"name":"finding"}]`, ok(`[]`), nil)
+	issues, next, err := labeledPage(ttgt, "finding", "open", "", 20, orders)
+	if err != nil || len(issues) != 0 || next != "" {
+		t.Fatalf("labeledPage = %#v, %q, %v; want empty", issues, next, err)
+	}
+	for _, r := range *got {
+		if strings.Contains(r.URL, "/issues?") {
+			t.Fatalf("issue query sent for an undefined route label: %v", r.URL)
+		}
+	}
+}
+
+func TestLabeledPageRefusesANonLabelRoute(t *testing.T) {
+	if _, _, err := labeledPage(ttgt, "finding", "open", "", 20, []tracker.Selector{{Kind: "project", Value: "x"}}); err == nil {
+		t.Fatal("want an error")
+	}
 }

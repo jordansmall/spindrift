@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"strconv"
 	"time"
 
@@ -47,12 +46,13 @@ var countCache = map[string]countEntry{}
 // The update sort is load-bearing: relabelling an old issue bumps its
 // updated_at and so changes page 1, whereas a created-order page 1 would not
 // and a 304 would hide the newly labelled issue.
-func countQuery(q tracker.Query) string {
+func countQuery(q tracker.Query) (string, error) {
 	s := "?state=open&sort=updated&direction=desc&per_page=" + strconv.Itoa(pageSize)
-	if q.Label != "" {
-		s += "&labels=" + url.QueryEscape(q.Label)
+	f, err := labelsFilter(q.Label, q.Route)
+	if err != nil {
+		return "", err
 	}
-	return s
+	return s + f, nil
 }
 
 // count sizes the open issues q names, pull requests excluded. Page 1 is
@@ -62,7 +62,11 @@ func countQuery(q tracker.Query) string {
 // result is clamped to limit. Page 1's ETag does not cover the deeper pages,
 // so a cached count can lag them.
 func count(t tracker.Target, q tracker.Query, limit int, fresh bool) (int, error) {
-	path := repoPath(t) + countQuery(q)
+	query, err := countQuery(q)
+	if err != nil {
+		return 0, err
+	}
+	path := repoPath(t) + query
 	key := t.API + path
 	cached, haveCache := countCache[key]
 	n, etag := 0, ""

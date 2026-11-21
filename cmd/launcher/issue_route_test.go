@@ -25,7 +25,7 @@ func TestIssueRoute_ValidateRejectsMalformed(t *testing.T) {
 // so a kind the tracker's descriptor does not declare fails loud.
 func TestIssueRoute_ValidateRejectsUndeclaredKind(t *testing.T) {
 	cases := []struct{ tracker, route string }{
-		{"github", "label=x"},
+		{"github", "component=x"},
 		{"local", "project=x"},
 	}
 	for _, tc := range cases {

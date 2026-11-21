@@ -500,7 +500,7 @@ func (b *restBackend) list(w http.ResponseWriter, r *http.Request) {
 	var out []any
 	for _, n := range nums {
 		i := b.issues[n]
-		if want := q.Get("labels"); want != "" && !hasLabel(i.labels, want) || state != "all" && (state == "closed") != i.closed {
+		if want := q.Get("labels"); want != "" && !hasLabels(i.labels, want) || state != "all" && (state == "closed") != i.closed {
 			continue
 		}
 		out = append(out, wireIssue(i))
@@ -522,6 +522,17 @@ func (b *restBackend) list(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(body)
+}
+
+// hasLabels is GitHub's labels filter: a comma list the issue must carry every
+// member of.
+func hasLabels(labels []string, want string) bool {
+	for _, w := range strings.Split(want, ",") {
+		if !hasLabel(labels, w) {
+			return false
+		}
+	}
+	return true
 }
 
 func hasLabel(labels []string, want string) bool {

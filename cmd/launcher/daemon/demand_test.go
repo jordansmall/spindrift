@@ -971,7 +971,7 @@ func TestBuildDemandSources_IssueRouteNarrowsCount(t *testing.T) {
 func TestBuildDemandSources_BadIssueRouteHasNoSource(t *testing.T) {
 	cases := map[string]map[string]string{
 		"malformed":       {"ISSUE_TRACKER": "local", "LOCAL_ISSUES_DIR": "", "ISSUE_ROUTE": "orders-api"},
-		"undeclared kind": {"ISSUE_TRACKER": "github", "REPO_SLUG": "o/r", "ISSUE_ROUTE": "label=x"},
+		"undeclared kind": {"ISSUE_TRACKER": "github", "REPO_SLUG": "o/r", "ISSUE_ROUTE": "component=x"},
 	}
 	for name, settings := range cases {
 		t.Run(name, func(t *testing.T) {

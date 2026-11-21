@@ -30,7 +30,7 @@ var Strategy = backendkit.Strategy{
 	// ErrNoRoute (routeRow, #6811): a build that failed here would take down
 	// every launch path that merely constructs one.
 	NewIssueTracker: func(s backendkit.Shared, _ backendkit.Lookup) (forge.IssueTracker, error) {
-		return NewExecClient(s.RepoSlug, s.Labels, WithVerdictLabels(s.VerdictLabels)), nil
+		return NewExecClient(s.RepoSlug, s.Labels, WithVerdictLabels(s.VerdictLabels), WithRoute(s.Route)), nil
 	},
 	NewCodeForge: func(s backendkit.Shared, _ backendkit.Lookup, _ forge.SanitizedParent, _ forge.IssueTracker) (forge.CodeForge, error) {
 		// Refuse an unhonourable MERGE_METHOD at launch, as the forgejo row

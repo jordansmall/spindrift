@@ -694,3 +694,111 @@ func TestSpeaksV02(t *testing.T) {
 		}
 	}
 }
+
+var testRoute = forge.Route{{Kind: forge.RouteKindLabel, Value: "orders-api"}, {Kind: forge.RouteKindLabel, Value: "team-a"}}
+
+func wantRoute() []any {
+	return []any{
+		map[string]any{"kind": "label", "value": "orders-api"},
+		map[string]any{"kind": "label", "value": "team-a"},
+	}
+}
+
+func TestTrackerRoutedListIssuesSendsRoute(t *testing.T) {
+	call, calls := stubGuest(t, map[string]string{"tracker.listIssues": `{"issues":[]}`})
+	lc := Lifecycle{Labels: testLabels, Route: testRoute}
+	tr := mustTracker(t, call, &forge.IssueTrackerFake{}, lc, testTarget, nil, true)
+	if _, err := tr.ListIssues(forge.Dispatchable); err != nil {
+		t.Fatal(err)
+	}
+	want := recordedCall{"tracker.listIssues", map[string]any{
+		"target": map[string]any{"api": "https://api.example", "repo": "o/r", "dialect": ""},
+		"label":  "ready-for-agent", "status": "", "limit": float64(forge.ResultPageLimit),
+		"route": wantRoute(),
+	}}
+	if !reflect.DeepEqual((*calls)[0], want) {
+		t.Errorf("call = %+v, want %+v", (*calls)[0], want)
+	}
+}
+
+// Readiness reads the whole scope, as the local tracker's does.
+func TestTrackerRoutedListOpenIssuesSendsNoRoute(t *testing.T) {
+	call, calls := stubGuest(t, map[string]string{"tracker.listIssues": `{"issues":[]}`})
+	lc := Lifecycle{Labels: testLabels, Route: testRoute}
+	tr := mustTracker(t, call, &forge.IssueTrackerFake{}, lc, testTarget, nil, true)
+	if _, err := tr.ListOpenIssues(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := (*calls)[0].params["route"]; ok {
+		t.Errorf("params = %v; ListOpenIssues must not carry a route", (*calls)[0].params)
+	}
+}
+
+func TestCountLayerRoutedSendsRoute(t *testing.T) {
+	call, calls := stubGuest(t, map[string]string{"tracker.countInterval": `{"seconds":90}`, "tracker.count": `{"count":1}`})
+	lc := Lifecycle{Labels: testLabels, Route: testRoute}
+	tr := mustTracker(t, call, newNative(), lc, testTarget, []string{CapCount}, true)
+	dc, _ := forge.As[forge.DemandCounter](tr)
+	if _, err := dc.CountReady(false); err != nil {
+		t.Fatal(err)
+	}
+	if got := (*calls)[1].params["route"]; !reflect.DeepEqual(got, wantRoute()) {
+		t.Errorf("count route = %v, want %v", got, wantRoute())
+	}
+}
+
+func TestCountLayerUnroutedSendsNoRoute(t *testing.T) {
+	call, calls := stubGuest(t, map[string]string{"tracker.countInterval": `{"seconds":90}`, "tracker.count": `{"count":1}`})
+	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapCount}, true)
+	dc, _ := forge.As[forge.DemandCounter](tr)
+	if _, err := dc.CountReady(false); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := (*calls)[1].params["route"]; ok {
+		t.Errorf("params = %v; an unrouted count must not carry a route", (*calls)[1].params)
+	}
+}
+
+func TestLabeledLayerRoutedSendsRouteOnEveryPage(t *testing.T) {
+	call, calls := stubGuest(t, map[string]string{CapLabeled: `{"issues":[]}`})
+	lc := Lifecycle{Labels: testLabels, Route: testRoute}
+	tr := mustTracker(t, call, newNative(), lc, testTarget, []string{CapLabeled}, true)
+	l, _ := forge.As[forge.LabeledBacklogLister](tr)
+	if _, err := l.ListIssuesWithLabels(forge.IssueOpen, []string{"a", "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != 2 {
+		t.Fatalf("calls = %v", *calls)
+	}
+	for _, c := range *calls {
+		if !reflect.DeepEqual(c.params["route"], wantRoute()) {
+			t.Errorf("labeled route = %v, want %v", c.params["route"], wantRoute())
+		}
+	}
+}
+
+func TestLabeledLayerUnroutedSendsNoRoute(t *testing.T) {
+	call, calls := stubGuest(t, map[string]string{CapLabeled: `{"issues":[]}`})
+	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapLabeled}, true)
+	l, _ := forge.As[forge.LabeledBacklogLister](tr)
+	if _, err := l.ListIssuesWithLabels(forge.IssueOpen, []string{"a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := (*calls)[0].params["route"]; ok {
+		t.Errorf("params = %v; an unrouted labeled read must not carry a route", (*calls)[0].params)
+	}
+}
+
+func TestPostIssueStampsRouteLabelsWithoutDuplicating(t *testing.T) {
+	g := &writeGuest{fileURL: `{"url":"u"}`}
+	lc := lifecycle(false)
+	lc.Route = testRoute
+	tr := writeTracker(t, g, lc, newNative(), postCaps(CapFileIssue))
+	filer, _ := forge.As[forge.HostPostedIssueFiler](tr)
+	if _, err := filer.PostIssue("t", "b", []string{"l1", "team-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strs(g.last().params["labels"]); !reflect.DeepEqual(got, []string{"l1", "team-a", "orders-api"}) {
+		t.Errorf("labels = %v, want l1, team-a, orders-api once each", got)
+	}
+}
