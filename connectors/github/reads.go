@@ -392,7 +392,12 @@ func commentsOf(t tracker.Target, number string) ([]tracker.Comment, error) {
 // ("" is page 1), so a walk must keep limit constant. next is set while the
 // raw page was full, so one call is one request; a page may hold fewer issues
 // because pull requests are skipped. Unlike the list reads, the body stays.
-func labeledPage(t tracker.Target, label, state, cursor string, limit int) ([]tracker.Issue, string, error) {
+func labeledPage(t tracker.Target, label string, route []tracker.Selector, state, cursor string, limit int) ([]tracker.Issue, string, error) {
+	if len(route) > 0 {
+		// No route kind is declared for this tracker; narrowing nothing would
+		// hand back the whole scope as one route's findings.
+		return nil, "", fmt.Errorf("list labeled issues: cannot narrow by route")
+	}
 	if limit < 1 {
 		return nil, "", fmt.Errorf("list labeled issues: limit %d < 1", limit)
 	}

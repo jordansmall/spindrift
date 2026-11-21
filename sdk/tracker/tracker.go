@@ -13,6 +13,7 @@ package tracker
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -196,8 +197,10 @@ type Reader struct {
 	// starting at cursor ("" for the first page) and next, the opaque cursor
 	// of the following page, or "" at the end. Core repeats the call with
 	// next as cursor until next is "". Setting it advertises
-	// "tracker.labeled" and takes precedence over Labeled.
-	LabeledPage func(t Target, label, state, cursor string, limit int) (issues []Issue, next string, err error)
+	// "tracker.labeled" and takes precedence over Labeled. route narrows like
+	// Query.Route: an issue must match every selector, and an empty route
+	// narrows nothing.
+	LabeledPage func(t Target, label string, route []Selector, state, cursor string, limit int) (issues []Issue, next string, err error)
 }
 
 type method = func(json.RawMessage) (any, error)
@@ -437,23 +440,29 @@ func handlers(r Reader) ([]string, map[string]method) {
 		caps = append(caps, "tracker.labeled")
 		m["tracker.labeled"] = func(params json.RawMessage) (any, error) {
 			var p struct {
-				Target Target `json:"target"`
-				Label  string `json:"label"`
-				State  string `json:"state"`
-				Limit  int    `json:"limit"`
-				Cursor string `json:"cursor"`
+				Target Target     `json:"target"`
+				Label  string     `json:"label"`
+				State  string     `json:"state"`
+				Limit  int        `json:"limit"`
+				Cursor string     `json:"cursor"`
+				Route  []Selector `json:"route"`
 			}
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
 			}
 			if r.LabeledPage == nil {
+				// Labeled cannot narrow: failing closed beats listing the
+				// whole scope as one route's backlog.
+				if len(p.Route) > 0 {
+					return nil, errors.New("tracker.labeled: Labeled cannot narrow by route; set LabeledPage")
+				}
 				issues, err := r.Labeled(p.Target, p.Label, p.State, p.Limit)
 				if err != nil {
 					return nil, err
 				}
 				return issueList(issues), nil
 			}
-			issues, next, err := r.LabeledPage(p.Target, p.Label, p.State, p.Cursor, p.Limit)
+			issues, next, err := r.LabeledPage(p.Target, p.Label, p.Route, p.State, p.Cursor, p.Limit)
 			if err != nil {
 				return nil, err
 			}
