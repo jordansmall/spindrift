@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/jordansmall/spindrift/compare/claude-v0.3.0...claude-v0.3.1) (2026-11-21)
+
+
+### Documentation
+
+* **go:** trim and correct comments in Go sources ([b5ea3c7](https://github.com/jordansmall/spindrift/commit/b5ea3c7b4ded1ce6d19cd14b0d02c1749b1530ab))
+
 ## [0.3.0](https://github.com/jordansmall/spindrift/compare/claude-v0.2.0...claude-v0.3.0) (2026-11-21)
 
 
