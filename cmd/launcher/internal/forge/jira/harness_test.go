@@ -89,6 +89,9 @@ type jiraHarness struct {
 
 	// myselfStatus is the status GET /myself answers with; 0 means 200.
 	myselfStatus int
+	// searchReject, when set, is the message every search and count answers 400
+	// with, in Jira's errorMessages shape (an unknown Component in JQL).
+	searchReject string
 
 	cloud bool // serves Cloud's search/jql + approximate-count; rejects v2 /search (410)
 	srv   *httptest.Server
@@ -211,6 +214,12 @@ func (h *jiraHarness) payload(key string, rec *jiraIssueRecord, wantProps string
 func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	if h.searchReject != "" && strings.Contains(r.URL.Path, "/search") {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{"errorMessages": []string{h.searchReject}, "errors": map[string]string{}})
+		return
+	}
 
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/search":
