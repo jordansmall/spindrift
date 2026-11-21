@@ -11,9 +11,10 @@ type execClient struct {
 	repo          string // owner/repo slug
 	labels        forge.DispatchLabels
 	verdictLabels forge.VerdictLabels
-	mergeMethod   string // "" or "rebase"; the Connector merges by rebase only (checkRoutedMergeMethod)
-	syncMethod    string // "", "rebase", or "merge"; "" behaves as "rebase"
-	userName      string // committer identity Rebase sets on its clone; empty keeps ambient git config
+	route         forge.Route // ISSUE_ROUTE; tracker reads and filing only, never the Code Forge
+	mergeMethod   string      // "" or "rebase"; the Connector merges by rebase only (checkRoutedMergeMethod)
+	syncMethod    string      // "", "rebase", or "merge"; "" behaves as "rebase"
+	userName      string      // committer identity Rebase sets on its clone; empty keeps ambient git config
 	userEmail     string
 	baseBranch    string // core's BASE_BRANCH; the base a routed row's Rebase syncs onto
 }
@@ -26,6 +27,13 @@ type ExecOption func(*execClient)
 // Complete transition. Work-kind call sites omit it.
 func WithVerdictLabels(vl forge.VerdictLabels) ExecOption {
 	return func(e *execClient) { e.verdictLabels = vl }
+}
+
+// WithRoute narrows the tracker to the issues the Issue route selects. Only
+// NewIssueTracker sets it: the Code Forge may pair with another tracker, whose
+// route is not a GitHub label filter.
+func WithRoute(r forge.Route) ExecOption {
+	return func(e *execClient) { e.route = r }
 }
 
 // WithMergeMethod sets the MERGE_METHOD the Connector must honour: only
