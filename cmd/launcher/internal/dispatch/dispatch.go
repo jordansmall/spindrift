@@ -195,6 +195,7 @@ type Config struct {
 	TrackerAxisFiler  string
 	ForgeBackend      string
 	FilerEnabled      bool
+	IssueRouted       bool
 	WorkerProvisioned bool
 	ScoutProvisioned  bool
 
@@ -398,6 +399,9 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 	// absent rather than "0" when false (issue #2533).
 	if cfg.FilerEnabled {
 		env["BOX_FILER_ENABLED"] = "1"
+	}
+	if cfg.IssueRouted {
+		env["BOX_ISSUE_ROUTED"] = "1"
 	}
 	// The prompt offers each issue verb only where the socket serves it
 	// (issue #6924); the log carrier has no socket.
