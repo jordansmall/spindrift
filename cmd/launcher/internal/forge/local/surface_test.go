@@ -104,8 +104,7 @@ func TestSurfaceIntegrationBranch_UnchangedReRunIsNoOp(t *testing.T) {
 
 // Fetching into the branch pwd currently has checked out would clobber the
 // operator's working tree, so SurfaceIntegrationBranch reports the reason
-// through skipped instead (issue #1730 AC1 safety clause, mirroring
-// console_freshness.go's checkCheckoutSafe).
+// through skipped instead (issue #1730 AC1 safety clause).
 func TestSurfaceIntegrationBranch_RefusesWhenTargetBranchCheckedOut(t *testing.T) {
 	setGitIdentityEnv(t)
 	parent := ResolveParent("1700", "")

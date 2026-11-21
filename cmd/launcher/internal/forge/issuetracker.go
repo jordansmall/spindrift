@@ -68,7 +68,7 @@ type IssueTracker interface {
 	ListIssues(state DispatchState) ([]Issue, error)
 	// ListOpenIssues returns every open issue in canonical order whatever
 	// its dispatch state, including issues the operator has not yet
-	// triaged. This is the full backlog the Console browses.
+	// triaged: the full backlog reconcile and the finding dedup fallback read.
 	ListOpenIssues() ([]Issue, error)
 	// Issue returns full details (body, labels, state) for the given number.
 	Issue(num string) (Issue, error)
@@ -109,11 +109,11 @@ type BlockersLister interface {
 // reads both open AND closed finding issues, since a closed finding is a
 // durable triage decision the host must not refile. Unlike ListOpenIssues,
 // whose GitHub implementation omits body and truncates to the *oldest*
-// ResultPageLimit issues (fine for the Console's untriaged browse, useless
-// for dedup), ListIssuesWithLabels returns every issue in the given state
-// carrying at least one of labels, with Body populated, newest first -- so a
-// truncated page drops the oldest already-covered findings rather than the
-// newest ones a later run is most likely to re-file. Every real adapter
+// ResultPageLimit issues (useless for dedup), ListIssuesWithLabels returns
+// every issue in the given state carrying at least one of labels, with Body
+// populated, newest first -- so a truncated page drops the oldest
+// already-covered findings rather than the newest ones a later run is most
+// likely to re-file. Every real adapter
 // (github, forgejo, jira, local) implements it; the fallback to
 // ListOpenIssues -- open-only dedup with no closed-finding suppression --
 // exists only for a tracker that lacks it. An implementation may return the

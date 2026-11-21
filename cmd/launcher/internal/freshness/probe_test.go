@@ -626,9 +626,8 @@ func TestImageRepo_DerivesRepoFromLastColon(t *testing.T) {
 	}
 }
 
-// The Console's in-session rebuild (issue #652) needs the rev itself, not
-// just the tag comparison, to recognize that it already rebuilt this exact
-// tip without re-parsing Message.
+// The background realize needs the rev itself, not just the tag comparison,
+// to name the tip it builds without re-parsing Message.
 func TestProbe_Rev_MatchesFetchedTip(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	advancedSha, err := gitAdvanceOrigin(t, pwd, "main")
@@ -705,8 +704,8 @@ func TestProbe_FetchFailureFailsClosed(t *testing.T) {
 
 // A pwd outside any git repository is not-applicable, distinct from a
 // transient fetch failure inside a real repo
-// (TestProbe_FetchFailureFailsClosed), so the console does not hold launches
-// or offer a [b] rebuild that would fail the same way.
+// (TestProbe_FetchFailureFailsClosed), so the launcher does not hold launches
+// on a rebuild that would fail the same way.
 func TestProbe_NotAGitRepo(t *testing.T) {
 	pwd := t.TempDir()
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}

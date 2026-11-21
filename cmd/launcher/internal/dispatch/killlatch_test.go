@@ -96,7 +96,7 @@ func TestKill_DuringBackoff_InterruptsWaitAndStopsRedispatch(t *testing.T) {
 	}
 }
 
-// Kill is legitimately called twice for one issue (a Console Terminate, then a
+// Kill is legitimately called twice for one issue (a Reclaim, then a
 // signalled abort), so closing the latch must be idempotent (issue #3521).
 func TestKill_TwiceDoesNotPanic(t *testing.T) {
 	fr := runner.NewFake()
@@ -117,7 +117,7 @@ func TestKill_TwiceDoesNotPanic(t *testing.T) {
 
 // The negative cases: a Dispatch whose own latch was never closed launches
 // normally, whether the Factory killed a different issue or an earlier claim
-// on this one — a re-pick after a Console Terminate (issue #649) must still
+// on this one — a re-pick after a Reclaim (issue #649) must still
 // dispatch.
 func TestKill_LeavesUnkilledClaimsRunnable(t *testing.T) {
 	tests := []struct {

@@ -158,7 +158,7 @@ type imageSpec struct {
 	flakeAttr string // flake attr the container-build fallback builds
 	// sandbox marks the Connector sandbox image, which is realized mid-run
 	// while stdout carries the dispatch's own output, and outside the
-	// pre-dispatch "building image" state of the Console.
+	// pre-dispatch image_build state the daemon shows in slot status.
 	sandbox bool
 }
 
@@ -180,8 +180,8 @@ func (s imageSpec) out() io.Writer {
 	return os.Stdout
 }
 
-// reportBuild reports whether the cold build is marked in the Console
-// (report.ImageBuild); only the Box is.
+// reportBuild reports whether the cold build is reported to the daemon (as
+// image_build_since in slot status) via report.ImageBuild; only the Box is.
 func (s imageSpec) reportBuild() bool { return !s.sandbox }
 
 // EnsureReady checks that the OCI image is present and builds it if not. The
@@ -242,7 +242,7 @@ func (a *ociAdapter) realizeImage(img imageSpec) error {
 	}
 
 	// Reachable only from `build`, which skips main.go's validate(); the
-	// bootstrap commands (console, recover, dispatch, research, butler) call
+	// bootstrap commands (recover, dispatch, research, butler) call
 	// validate() first, which guarantees the runtime, so the container
 	// fallback above would have succeeded.
 	fmt.Fprintf(os.Stderr, `==> cannot build the %s.
@@ -586,7 +586,7 @@ func (a *ociAdapter) buildSandboxArgs(name string) []string {
 
 // ensureSandboxImage loads the Connector sandbox image exactly as EnsureReady
 // loads the Box image (realizeImage: lock, host build or container-build
-// fallback, load, re-tag), minus the Console's image-build report.
+// fallback, load, re-tag), minus the image_build report.
 func (a *ociAdapter) ensureSandboxImage() error {
 	if a.sandboxImg.tag == "" {
 		return errors.New("no Connector sandbox image in the input document")

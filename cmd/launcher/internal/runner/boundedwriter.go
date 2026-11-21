@@ -2,10 +2,9 @@ package runner
 
 import "sync"
 
-// BoundedWriter retains only the last rebuildOutputCap bytes written (#1130).
-// RunNixBuild's capture backs Launcher.rebuildOutput and stays in memory until
-// the next rebuild, so an uncapped verbose build pins a multi-MB transcript for
-// a whole Console session. It keeps the tail because failures print at the end.
+// BoundedWriter retains only the last rebuildOutputCap bytes written (#1130),
+// so an uncapped verbose nix build cannot pin a multi-MB transcript in memory.
+// It keeps the tail because failures print at the end.
 // It is safe for concurrent use: a Connector sandbox's stderr is written by the
 // exec copier while a caller reads it.
 type BoundedWriter struct {

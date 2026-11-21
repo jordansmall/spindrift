@@ -251,8 +251,7 @@ func freshnessMessage(loaded, baseBranch, rev string, launcherConfigured, imageF
 
 // fetchBaseTip fetches baseBranch from origin at pwd with no checkout, pull, or
 // working-copy mutation. It returns the full-length sha: no --short/--abbrev is
-// passed, so the format matches the launcher's own headRev, which the Console's
-// res.Rev == builtRev comparison relies on.
+// passed, so the format matches the launcher's own revision strings.
 func fetchBaseTip(pwd, baseBranch string) (string, error) {
 	fetch := exec.Command("git", "-C", pwd, "fetch", "origin", baseBranch)
 	var stderr bytes.Buffer

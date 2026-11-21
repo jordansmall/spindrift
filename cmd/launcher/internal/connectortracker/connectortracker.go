@@ -794,7 +794,7 @@ func newFrom(c *connectorhost.Connector, call guestCall, writes forge.IssueTrack
 }
 
 // NewReloading is New for a tracker that lives as long as its process. A
-// Connector closes itself on a failed call, so a daemon or Console holding one
+// Connector closes itself on a failed call, so a daemon holding one
 // tracker would fail every later operation; here a call finding the Connector
 // dead reloads it first. Capabilities come from the first handshake. A load
 // error on the first load is returned as is. A non-nil note sees every later

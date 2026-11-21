@@ -61,7 +61,7 @@ func rulesOf(it IssueTracker) grammarRules {
 // the body.
 //
 // It looks up NativeDepsReader and BodyGrammarer on the bare tracker rather than
-// reading Capabilities: its callers (waves, console) hold no Capabilities.
+// reading Capabilities: its callers (waves) hold no Capabilities.
 func DepsOf(it IssueTracker, num string) ([]Dependency, error) {
 	rules := rulesOf(it)
 	if nr, ok := As[NativeDepsReader](it); ok {

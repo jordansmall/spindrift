@@ -57,9 +57,9 @@ func ResolveParent(it forge.IssueTracker, num string) local.SanitizedParent {
 }
 
 // SeedScopeOf resolves num to the opaque forge.SeedScope its blocker gate is
-// checked against under CODE_FORGE=local (issue #2150). The dispatch command
-// path and the Console both consume this seam, so they cannot disagree about
-// which blocker landing gates a dependent.
+// checked against under CODE_FORGE=local (issue #2150). The dispatch paths
+// (through SeedScopeResolver) and reconcile (through Wired) both consume this
+// seam, so they cannot disagree about which blocker landing gates a dependent.
 func SeedScopeOf(it forge.IssueTracker, num string) forge.SeedScope {
 	return seedScopeFor(ResolveParent(it, num))
 }

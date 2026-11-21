@@ -151,9 +151,8 @@ func TestReadMalformedJSONReturnsError(t *testing.T) {
 
 // Read bounds how much of the Box-authored manifest it buffers (issue #2983
 // DoS finding): a runaway or prompt-injected Box can write any size it likes
-// to the 0o777 outbox mount, and the host calls Read on every console
-// refresh tick. Past maxManifestBytes Read returns (nil, err), never the
-// reserved (nil, nil) that means "no manifest was ever written".
+// to the 0o777 outbox mount. Past maxManifestBytes Read returns (nil, err),
+// never the reserved (nil, nil) that means "no manifest was ever written".
 func TestReadOversizedFileReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.json")
@@ -176,9 +175,9 @@ func TestReadOversizedFileReturnsError(t *testing.T) {
 
 // A Box with shell access can mkfifo the manifest path (issue #2983 review
 // finding), and opening a writerless FIFO read-only blocks forever, freezing
-// the operator console that calls Read on every refresh tick. Read opens
-// with O_NONBLOCK and stats the descriptor. The 2s deadline keeps a
-// regression from hanging the whole test binary.
+// the launcher on every Read. Read opens with O_NONBLOCK and stats the
+// descriptor. The 2s deadline keeps a regression from hanging the whole test
+// binary.
 func TestReadFIFODoesNotHang(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.json")

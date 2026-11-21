@@ -50,10 +50,10 @@ type Driver interface {
 	// baselines after this log, to seed the next one.
 	ExtractUsageAfter(logPath string, base driverkit.SessionBaselines) (usage.Report, driverkit.SessionBaselines, error)
 
-	// RenderTranscript renders the box log's assistant turns and tool calls
-	// for a Console drill-in (#648). opts.TopLevelRole is the role attributed
-	// to top-level (empty parent_tool_use_id) messages; an empty value means
-	// the implementor's own default (issue #2092).
+	// RenderTranscript renders the box log's assistant turns and tool calls.
+	// opts.TopLevelRole is the role attributed to top-level (empty
+	// parent_tool_use_id) messages; an empty value means the implementor's
+	// own default (issue #2092).
 	RenderTranscript(logPath string, opts driverkit.RenderOptions) (string, error)
 
 	// ResolveExit returns the exit code the launcher should treat as

@@ -303,8 +303,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 				// Query only when Recoverable resolves to a real label. GitHub
 				// and Forgejo ignore an empty label filter instead of erroring,
 				// so an unconditional call would match every open issue on a
-				// tracker that leaves Recoverable unmapped. console/adapter.go's
-				// countRecoverable guards the same way.
+				// tracker that leaves Recoverable unmapped.
 				recoverableCount := 0
 				if caps.LabeledTracker == nil || caps.LabeledTracker.StateLabels().Label(forge.Recoverable) != "" {
 					recoverable, err := it.ListIssues(forge.Recoverable)

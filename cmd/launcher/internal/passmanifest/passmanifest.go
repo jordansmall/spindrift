@@ -23,9 +23,8 @@ const FileName = "manifest.json"
 
 // maxManifestBytes bounds how much of a manifest file Read buffers into memory
 // (issue #2983 DoS finding). A sandboxed, potentially prompt-injected Box
-// writes manifest.json through a 0o777 outbox mount, and Read runs on every
-// console refresh tick. A file past this cap is corrupt or hostile evidence,
-// not a legitimate manifest.
+// writes manifest.json through a 0o777 outbox mount. A file past this cap is
+// corrupt or hostile evidence, not a legitimate manifest.
 const maxManifestBytes = 4 * 1024 * 1024
 
 // Entry is one pass's summary (issue #2983). It is Box-authored evidence: the
@@ -99,7 +98,7 @@ func Read(path string) ([]Entry, error) {
 	// path is Box-authored, so an Lstat before the open leaves a TOCTOU window
 	// for the Box to swap the object at path. O_NOFOLLOW fails the open on a
 	// symlink rather than redirecting the read to a host file; O_NONBLOCK
-	// returns immediately on a FIFO instead of freezing the console or wedging
+	// returns immediately on a FIFO instead of freezing the launcher or wedging
 	// settle. Stat on the descriptor reports the object that was opened.
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {

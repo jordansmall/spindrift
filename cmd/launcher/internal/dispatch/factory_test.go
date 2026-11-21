@@ -279,9 +279,9 @@ func issueTextFactory(t *testing.T, fr runner.Runner, resolve func(string) (stri
 	return f
 }
 
-// One Factory outlives many dispatches in the Console and the continuous
-// loop, so a fresh Dispatch for the same issue number must re-resolve rather
-// than serve text cached by an earlier dispatch (issue #4160).
+// One Factory outlives many dispatches in the continuous loop, so a fresh
+// Dispatch for the same issue number must re-resolve rather than serve text
+// cached by an earlier dispatch (issue #4160).
 func TestFactory_New_ResolvesIssueTextFreshPerDispatch(t *testing.T) {
 	fr := runner.NewFake()
 	text := "first body"

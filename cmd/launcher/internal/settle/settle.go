@@ -110,7 +110,7 @@ type Config struct {
 }
 
 // Settler is the "settle a dispatch result" interface every generic caller
-// depends on: the waves engine and the Console's launcher.
+// depends on: the waves engine and the launcher's selective list dispatch.
 type Settler interface {
 	// Settle interprets result and drives num to its terminal label. gen is the
 	// terminate.Registry generation (issue #743) this call's own dispatch was
