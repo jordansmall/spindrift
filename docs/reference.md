@@ -27,7 +27,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`, or land a parked relay) |
 | `spindrift recover`              | with no issue, land one `agent-failed` issue whose outbox holds a `seam.bundle` from a run that self-reported `status=ready` (from its land pass, if it ran a review loop), has no open PR, has a free host claim, and is outside its backoff and under `MAX_RECOVER_ATTEMPTS` for that bundle; exits 2 when none qualifies, 7 on an operator stop; `github`/`forgejo` only, refused on `local` (ADR 0039) |
 | `spindrift doctor`               | run the preflight checks a dispatch depends on — see [`spindrift doctor` checks](#spindrift-doctor-checks) |
-| `spindrift reconcile`            | bookkeeping sweep: on any PR-capable Code Forge, record a late merge for each Dispatch Record whose PR was left open at settle and has merged since (see [Stats](#stats)); on a local tracker, also close issues whose recorded `landing` PR merged and reset an orphaned `InProgress` issue to `Dispatchable` (ADR 0029). Also auto-invoked at the end of a `dispatch` run that names no issues — see [`reconcile`: late merges and closing a local issue](#reconcile-late-merges-and-closing-a-local-issue) |
+| `spindrift reconcile`            | bookkeeping sweep: on any PR-capable Code Forge, record a late merge for each Dispatch Record whose PR was left open at settle and has merged since (see [Stats](#stats)); on a local tracker, also close issues whose recorded `landing` PR merged and reset an orphaned `InProgress` issue to `Dispatchable` (ADR 0029). Also auto-invoked at the end of a `dispatch` run that names no issues (under the daemon, the daemon sweeps instead) — see [`reconcile`: late merges and closing a local issue](#reconcile-late-merges-and-closing-a-local-issue) |
 | `spindrift stats [--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>[,<dimension>...]]` | per-role Dispatch cost summary read from the logs under `.spindrift` (notional API-equivalent USD), optionally grouped by revision, model, driver, agent (subagent), prompt hash, or knob; `--json` emits one Record per line — see [Stats](#stats) |
 | `spindrift shadow-replay --driver <name> [--connector <driver.wasm>] [<log-dir>]` | replay archived Pass logs through one Driver's Connector beside its native Strategy, writing each log's comparison to a `.shadow-replay.jsonl` sidecar — see [Replaying archived Pass logs](#replaying-archived-pass-logs) |
 | `spindrift registry discover <repo-dir> <routes-file>` | write a registry routes file (ADR 0045) by scanning the Target repo's own committed registry config, setup-time only, by the operator — see [Registry route discovery](#registry-route-discovery) |
@@ -7576,12 +7576,15 @@ no issues on the command line (one-shot, continuous, or a single
 `ISSUE_NUMBER`) records late merges as its final step too, silently unless
 it recorded one, and only warns if that fails. Such a run sweeps at most once
 per 15 minutes per working directory, gated by the lock-and-stamp file
-`.spindrift/late-merge-sweep.lock`, so the daemon's pool children (each a
-`dispatch` naming no issues) share one sweep instead of each asking the Code
-Forge about every candidate Record in the 14-day window; `spindrift
-reconcile` always sweeps. On GitHub, a rate-limited Code Forge ends the sweep
-at the first rate-limit error: the `reconcile` verb then exits non-zero, a
-`dispatch` run only warns.
+`.spindrift/late-merge-sweep.lock`; `spindrift reconcile` always sweeps.
+Under the [daemon](#daemon) the pool's children (each a `dispatch` naming no
+issues) skip the sweep, though they still run the local-tracker issue
+bookkeeping: the daemon sweeps itself, beside its pool and holding no slot,
+under the same lock, so one sweep covers the whole pool instead of each child
+asking the Code Forge about every candidate Record in the 14-day window. A
+daemon sweep failure, rate limit included, only warns in the daemon's log. On
+GitHub, a rate-limited Code Forge ends the sweep at the first rate-limit error:
+the `reconcile` verb then exits non-zero, a `dispatch` run only warns.
 `spindrift dispatch <n>...`, `recover`, and research or butler runs do not,
 so run `spindrift reconcile` after those.
 
@@ -10754,6 +10757,26 @@ daemon-side bookkeeping of who's working what would only be a second copy
 of that state to keep in sync. A non-positive `MAX_PARALLEL` fails daemon
 startup rather than being clamped to some default — a pool that runs
 nothing while looking healthy is worse than a daemon that refuses to start.
+
+**Late-merge sweep.** The daemon runs the
+[late-merge sweep](#reconcile-late-merges-and-closing-a-local-issue) itself
+rather than leaving it to its pool children, which skip it
+(`SPINDRIFT_DAEMON_POOL_CHILD`, set by `ChildCommand`). A background sweeper
+beside the pool (`cmd/launcher/internal/daemon/latemergesweep.go`) runs it as
+soon as a slot first resolves a revision, then every 15 minutes, pinned to the
+newest revision a slot resolved. The persistent stamp in
+`.spindrift/late-merge-sweep.lock`, not the sweeper's timer, keeps sweeps at
+least 15 minutes apart, so a daemon restart never sweeps twice; the restart
+does reset the timer, so one gap can stretch to nearly 30 minutes. A pool halt
+(Ctrl-C included, since the sweep runs in its own process group) starts no new
+sweep but lets a running one finish, as it lets a child drain; a hard abort
+kills it, and so does an in-place restart, which waits for it to exit before
+exec'ing its successor. A sweep killed after claiming the stamp loses that
+interval. Children the restart adopts from an older image predate the
+pool-child marker, so they may still sweep at the end of their dispatch; the
+shared stamp keeps that to at most one sweep per interval. The sweep holds no
+slot and does not count against `MAX_PARALLEL`; a failure, rate limit included,
+only warns in the daemon's log and never halts the pool or backs off a kind.
 
 **Discovery baton.** The coordination-free design in **Pool** above holds
 only once nothing else is discovering: two children that list the queue in
