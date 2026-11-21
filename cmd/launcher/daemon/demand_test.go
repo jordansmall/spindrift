@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -989,5 +990,73 @@ func TestBuildDemandSources_BadIssueRouteHasNoSource(t *testing.T) {
 				t.Errorf("missing[work] = %q, want it to name ISSUE_ROUTE", missing[work])
 			}
 		})
+	}
+}
+
+// ADR 0075: a routed daemon runs the composed ready query once before its pool
+// exists, so a tracker that rejects it halts startup naming the route.
+func TestProbeRoute_TrackerRejectionNamesRoute(t *testing.T) {
+	tf := forge.NewFake().IssueTrackerFake
+	tf.ListIssuesErr = errors.New("HTTP 422: bad search query")
+	work := daemon.KindOf(dispatchkind.Work)
+	var stderr strings.Builder
+
+	err := probeRoute(demandSources{work: tf}, []daemon.Kind{work}, "label=orders-api", &stderr)
+
+	if err == nil {
+		t.Fatal("probeRoute = nil, want the tracker's rejection")
+	}
+	for _, want := range []string{"ISSUE_ROUTE", `"label=orders-api"`, "bad search query"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err, want)
+		}
+	}
+	if !errors.Is(err, tf.ListIssuesErr) {
+		t.Errorf("error %v does not wrap the tracker error", err)
+	}
+}
+
+func TestProbeRoute_LogsMatchCountIncludingZero(t *testing.T) {
+	labels := forge.DispatchLabels{Dispatchable: "ready-for-agent"}
+	tf := forge.NewFake(labels).IssueTrackerFake
+	work := daemon.KindOf(dispatchkind.Work)
+	probe := func() string {
+		t.Helper()
+		var stderr strings.Builder
+		if err := probeRoute(demandSources{work: tf}, []daemon.Kind{work}, "label=orders-api", &stderr); err != nil {
+			t.Fatal(err)
+		}
+		return stderr.String()
+	}
+
+	const prefix = `daemon: dispatch: ISSUE_ROUTE "label=orders-api" matches `
+	if got, want := probe(), prefix+"0 ready issue(s)\n"; got != want {
+		t.Errorf("empty route log = %q, want %q", got, want)
+	}
+	tf.SetIssue(forge.Issue{Number: "1", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
+	if got, want := probe(), prefix+"1 ready issue(s)\n"; got != want {
+		t.Errorf("one-match log = %q, want %q", got, want)
+	}
+}
+
+// Unrouted, and the outbox-backed butler under a route, run no probe.
+func TestProbeRoute_SilentWithoutRouteOrTrackerProbe(t *testing.T) {
+	tf := forge.NewFake().IssueTrackerFake
+	tf.ListIssuesErr = errors.New("must not be called")
+	work := daemon.KindOf(dispatchkind.Work)
+	butler := daemon.KindOf(dispatchkind.Butler)
+	var stderr strings.Builder
+
+	if err := probeRoute(demandSources{work: tf}, []daemon.Kind{work}, "  ", &stderr); err != nil {
+		t.Errorf("unrouted probeRoute = %v, want nil", err)
+	}
+	if err := probeRoute(demandSources{butler: tf}, []daemon.Kind{butler}, "label=x", &stderr); err != nil {
+		t.Errorf("butler probeRoute = %v, want nil", err)
+	}
+	if err := probeRoute(demandSources{}, []daemon.Kind{work}, "label=x", &stderr); err != nil {
+		t.Errorf("sourceless probeRoute = %v, want nil", err)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want empty", stderr.String())
 	}
 }
