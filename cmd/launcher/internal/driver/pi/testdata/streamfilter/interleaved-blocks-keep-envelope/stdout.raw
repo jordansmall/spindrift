@@ -1,0 +1,5 @@
+{"type":"message_start","message":{"role":"assistant"}}
+{"type":"message_update","usage":{"input":1},"assistantMessageEvent":{"type":"thinking_delta","contentIndex":0,"delta":"a"}}
+{"type":"message_update","usage":{"input":2},"assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"X"}}
+{"type":"message_update","usage":{"input":3},"assistantMessageEvent":{"type":"thinking_delta","contentIndex":0,"delta":"b"}}
+{"type":"message_update","usage":{"input":4},"assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"Y"}}

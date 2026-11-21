@@ -1,0 +1,4 @@
+{"type":"message_start","message":{"role":"assistant"}}
+{"assistantMessageEvent":{"contentIndex":0,"delta":"lost","type":"text_delta"},"type":"message_update"}
+{"type":"message_start","message":{"role":"assistant"}}
+{"type":"message_end","message":{"role":"assistant"}}
